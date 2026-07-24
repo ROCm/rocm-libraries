@@ -442,6 +442,67 @@ def make_bquant_kernel_name(
 
 
 # ============================================================================
+# ABQuant kernel name construction
+# ============================================================================
+
+
+def make_abquant_kernel_name(
+    variant_key: str,
+    layout: str,
+    pipeline: str,
+    epilogue: str,  # ignored — actual epilogue is computed from tile params via bquant_effective_epilogue
+    scheduler: str,
+    tile_m: int, tile_n: int, tile_k: int,
+    warp_m: int, warp_n: int, warp_k: int,
+    warp_tile_m: int, warp_tile_n: int, warp_tile_k: int,
+    aquant_group_k: int,
+    bquant_group_n: int,
+    bquant_group_k: int,
+    preshuffle_b: bool = False,
+    preshuffle_bquant: bool = False,
+    eight_waves: bool = False,
+) -> str:
+    """Return the canonical ABQuant kernel name used as KERNEL_NAME in generated headers.
+
+    ABQuant kernels quantize BOTH A and B with independent group shapes:
+      AQuantGroupSize is always 1x1x{aquant_group_k} (row/K quant on A)
+      BQuantGroupSize is 1x{bquant_group_n}x{bquant_group_k}
+
+    Both unified_gemm_abquant_codegen.py (BQuantKernelSpec analogue) and
+    gemm_abquant_utils.py's ABQuantKernelConfig delegate here so the two sides
+    stay byte-exact.
+
+    The epilogue segment reflects the epilogue actually emitted. For ABQuant the
+    PermuteN epilogue is disabled whenever BQuantGroupSize::kN > 1 (mirrors
+    ``TiledPermuteN`` in run_gemm_quant_example.inc), so we pass bquant_group_n
+    into bquant_effective_epilogue via its quant_group_n slot.
+    """
+    effective_epilogue = bquant_effective_epilogue(
+        tile_n, warp_n, warp_tile_n, bquant_group_n
+    )
+    parts = [
+        "gemm_abquant",
+        variant_key,
+        layout,
+        pipeline,
+        effective_epilogue,
+        scheduler,
+        f"{tile_m}x{tile_n}x{tile_k}",
+        f"{warp_m}x{warp_n}x{warp_k}",
+        f"{warp_tile_m}x{warp_tile_n}x{warp_tile_k}",
+        f"aqg1x1x{aquant_group_k}",
+        f"bqg1x{bquant_group_n}x{bquant_group_k}",
+    ]
+    if preshuffle_b:
+        parts.append("preshuffleb")
+    if preshuffle_bquant:
+        parts.append("preshufflebq")
+    if eight_waves:
+        parts.append("eightwaves")
+    return "_".join(parts)
+
+
+# ============================================================================
 # BQuant-specific Type Mappings
 # ============================================================================
 
