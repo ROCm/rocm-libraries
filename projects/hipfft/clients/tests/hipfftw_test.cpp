@@ -890,10 +890,12 @@ namespace
                 switch(attributes.type)
                 {
                 case hipMemoryType::hipMemoryTypeHost:
-                    EXPECT_NE(params.alloc_kind & hipfftw_alloc_memkind::pinned_host, static_cast<unsigned int>(0));
+                    EXPECT_NE(params.alloc_kind & hipfftw_alloc_memkind::pinned_host,
+                              static_cast<unsigned int>(0));
                     break;
                 case hipMemoryType::hipMemoryTypeUnregistered:
-                    EXPECT_NE(params.alloc_kind & hipfftw_alloc_memkind::pageable_host, static_cast<unsigned int>(0));
+                    EXPECT_NE(params.alloc_kind & hipfftw_alloc_memkind::pageable_host,
+                              static_cast<unsigned int>(0));
                     break;
                 default:
                     GTEST_FAIL() << "Unexpected kind of memory created: attributes.type = "
