@@ -109,6 +109,7 @@ rocm_install(TARGETS rocsparse-unit-test COMPONENT tests)
 set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   rocsparse_unit_test_main.cpp
   unit_test_device_level1.cpp
+  unit_test_host_level1.cpp
 )
 
 add_executable(rocsparse-unit-test-device ${ROCSPARSE_UNIT_TEST_DEVICE_SOURCES})
