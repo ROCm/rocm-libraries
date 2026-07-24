@@ -45,7 +45,7 @@
 #include <mutex>
 
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_AI_FDEEP_USE_SINGLE_THREAD_PREDICT)
-MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_LGBM_PICK)
+MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_ENABLE_LGBM_SELECTOR)
 
 // 3D AI heuristics - now declared properly in header
 // No need for local forward declarations since we include the header
@@ -885,55 +885,31 @@ std::vector<uint64_t> PredictSolver(const conv::ProblemDescription& problem,
         auto cached_result = GetCachedPrediction(problem, device, is3d);
         if(!cached_result.empty())
         {
-            // A cache hit short-circuits BEFORE the lgbm block, so this run shows
-            // no lgbm log lines even though lgbm may have produced the cached
-            // entry on an earlier call for this problem+device.
+            // A cache hit short-circuits BEFORE the TunaNet/lgbm blocks, so this
+            // run shows no model log lines even though either could have produced
+            // the cached entry on an earlier call for this problem+device.
             MIOPEN_LOG_I2("AI predict: cache hit for " << device << " (" << cached_result.size()
-                                                       << " solvers); lgbm/TunaNet not re-run");
+                                                       << " solvers); TunaNet/lgbm not re-run");
             return cached_result;
         }
     }
 
-    // LGBM-based short-circuit: cross-arch dispatcher trained on perf-DB data.
-    // Preempts the ND TunaNet model. Returns the full solver vocabulary ranked
-    // by predicted speed; the caller (GetSolutionsFallback) walks this list and
-    // applies IsApplicable lazily, exactly like the TunaNet path -- so no
-    // applicability check is done here.
-    // (No #if guard needed: PredictSolver is already inside the file-level
-    // MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK block.)
-    if(!env::disabled(MIOPEN_DEBUG_LGBM_PICK))
-    {
-        const auto ranked = ai::lgbm::PickSolverRanked(problem, ctx.GetStream());
-        if(!ranked.empty())
-        {
-            MIOPEN_LOG_I2("lgbm: returning " << ranked.size() << " ranked solvers");
-            std::vector<std::any> any_sol(ranked.begin(), ranked.end());
-            StorePredictionCache(problem, device, any_sol);
-            return ranked;
-        }
-        MIOPEN_LOG_I2("lgbm: abstained, falling through to TunaNet for " << device);
-    }
-    else
-    {
-        // Explains a "zero lgbm activity" run: the picker was compiled in but
-        // disabled by env, so selection goes straight to TunaNet/WTI.
-        MIOPEN_LOG_I2("lgbm: disabled via MIOPEN_DEBUG_LGBM_PICK=0; using TunaNet/WTI for "
-                      << device);
-    }
+    // Selection order: TunaNet -> LGBM -> WTI.
+    // TunaNet (the mature per-arch fdeep models) is preferred where it has a model
+    // that supports the problem. The cross-arch LGBM selector is the fallback: it
+    // covers architectures/problems TunaNet cannot serve (no per-arch model, or the
+    // problem is outside the model's supported set). Only if neither produces a
+    // prediction do we fall back to the non-AI WTI heuristic.
 
-    // Strategy:
-    // 1. Try ND model first (for gfx942/gfx950, supports both 2D and 3D)
-    // 2. Fall back to legacy model (for gfx908/gfx90a, 2D only)
-    // 3. Return empty vector to trigger WTI fallback for unsupported architectures
-    //
+    // 1. TunaNet.
     // Any failure inside this block (including a model that fdeep cannot load -- e.g. a
     // model exported in an incompatible format, which throws a non-miopen std::exception)
-    // is swallowed and turned into an empty result, so the caller degrades to the non-AI
-    // heuristic instead of failing the convolution. This is the predictor's contract: it
-    // returns a prediction or nothing, but never throws.
+    // is swallowed so we fall through to the LGBM selector instead of failing the
+    // convolution. This is the predictor's contract: it returns a prediction or nothing,
+    // but never throws.
     try
     {
-        // Try ND model first (preferred for gfx942/gfx950)
+        // ND model (for gfx942/gfx950, supports both 2D and 3D).
         if((is2d || is3d) && HasNDTunaNetSupport(device))
         {
             int dim                        = is3d ? 3 : 2;
@@ -946,13 +922,11 @@ std::vector<uint64_t> PredictSolver(const conv::ProblemDescription& problem,
                 return ProcessAndCachePredictions(
                     problem, device, true, predictions, model->GetSolverMap());
             }
-            // If ND model failed for this architecture, don't try legacy - go to WTI
-            MIOPEN_LOG_I2("ND TunaNet not applicable for this problem on " << device);
-            return {};
+            MIOPEN_LOG_I2("ND TunaNet not applicable for this problem on " << device
+                                                                           << "; trying LGBM");
         }
-
-        // Fall back to legacy 2D model (for gfx908/gfx90a only)
-        if(is2d && HasLegacyTunaNetSupport(device))
+        // Legacy 2D model (for gfx908/gfx90a only).
+        else if(is2d && HasLegacyTunaNetSupport(device))
         {
             std::unique_ptr<Model> model = GetModel(device);
 
@@ -963,20 +937,41 @@ std::vector<uint64_t> PredictSolver(const conv::ProblemDescription& problem,
                 return ProcessAndCachePredictions(
                     problem, device, false, predictions, model->metadata.solver_map);
             }
-            MIOPEN_LOG_I2("Legacy TunaNet not applicable for this problem on " << device);
-            return {};
+            MIOPEN_LOG_I2("Legacy TunaNet not applicable for this problem on " << device
+                                                                               << "; trying LGBM");
         }
     }
     catch(const std::exception& e)
     {
-        MIOPEN_LOG_W("TunaNet prediction failed (" << e.what()
-                                                   << "); falling back to non-AI heuristic");
-        return {};
+        MIOPEN_LOG_W("TunaNet prediction failed (" << e.what() << "); trying LGBM selector");
     }
 
-    // No TunaNet model available for this device/problem combination
-    // Return empty vector to trigger WTI fallback
-    MIOPEN_LOG_I2("No TunaNet model available for " << device << ", falling back to WTI");
+    // 2. LGBM selector fallback: cross-arch dispatcher trained on perf-DB data.
+    // Returns the full solver vocabulary ranked by predicted speed; the caller
+    // (GetSolutionsFallback) walks this list and applies IsApplicable lazily, exactly
+    // like the TunaNet path -- so no applicability check is done here. Enabled by
+    // default (active for all architectures the model covers); set
+    // MIOPEN_ENABLE_LGBM_SELECTOR=0 to force selection straight to WTI.
+    if(!env::disabled(MIOPEN_ENABLE_LGBM_SELECTOR))
+    {
+        const auto ranked = ai::lgbm::PickSolverRanked(problem, ctx.GetStream());
+        if(!ranked.empty())
+        {
+            MIOPEN_LOG_I2("lgbm: returning " << ranked.size() << " ranked solvers");
+            std::vector<std::any> any_sol(ranked.begin(), ranked.end());
+            StorePredictionCache(problem, device, any_sol);
+            return ranked;
+        }
+        MIOPEN_LOG_I2("lgbm: abstained for " << device << ", falling back to WTI");
+    }
+    else
+    {
+        MIOPEN_LOG_I2("lgbm: disabled via MIOPEN_ENABLE_LGBM_SELECTOR=0 for " << device
+                                                                              << ", using WTI");
+    }
+
+    // 3. WTI last: no AI prediction available, trigger the non-AI heuristic fallback.
+    MIOPEN_LOG_I2("No AI prediction for " << device << ", falling back to WTI");
     return {};
 }
 

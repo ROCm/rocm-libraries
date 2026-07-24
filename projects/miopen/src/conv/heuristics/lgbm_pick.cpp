@@ -294,19 +294,6 @@ std::vector<uint64_t> PickSolverRanked(const conv::ProblemDescription& problem,
     // :sramecc+:xnack- suffix).
     const std::string gfx_id = handle.GetDeviceName();
 
-    // Architecture exclusion: gfx908/gfx90a (legacy CDNA) and gfx942/gfx950
-    // (all SKUs in each range) have well-tuned existing heuristics -- the mature
-    // per-arch TunaNet models and perf-db -- that outperform the cross-arch LGBM
-    // picker, so defer to them. GetDeviceName() strips the SKU suffix, so a bare
-    // prefix match covers every SKU (gfx942-mi300x, gfx950-mi355x, ...). The LGBM
-    // picker is thus scoped to the Navi/RDNA archs it was added for.
-    if(gfx_id.starts_with("gfx908") || gfx_id.starts_with("gfx90a") ||
-       gfx_id.starts_with("gfx942") || gfx_id.starts_with("gfx950"))
-    {
-        MIOPEN_LOG_I2("lgbm: abstain (arch " << gfx_id << " excluded; using existing heuristics)");
-        return {};
-    }
-
     // Architecture gating: only run on gfx_ids the model was trained on;
     // otherwise fall through to TunaNet.
     const int gfx_code = meta.CategoricalCode("gfx_id", gfx_id);
