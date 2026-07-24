@@ -12,14 +12,14 @@ class Pass;
 
 /// Creates a pass that prepends the gfx1250 hardware-entrypoint prologue:
 ///
-///     global_wb SCOPE:SCOPE_CU
+///     global_prefetch_b8 v0, [s0, s1] scope:SCOPE_SE th:TH_LOAD_RT
 ///     v_nop
 ///
 /// Both instructions are required at a gfx1250 kernel entry:
-///   - global_wb SCOPE:SCOPE_CU makes the kernel's first VMEM instruction one
-///     that is not in a clause. global_wb is a VMEM operation that ignores the
-///     EXEC mask, so making it the first VMEM op guarantees a non-clause first
-///     VMEM instruction. SCOPE:SCOPE_CU is a cheap, safe scope.
+///   - global_prefetch_b8 makes the kernel's first VMEM instruction one that
+///     is not in a clause. global_prefetch_b8 is a VMEM operation that ignores
+///     the EXEC mask, so making it the first VMEM op guarantees a non-clause
+///     first VMEM instruction.
 ///   - v_nop provides a safe first VALU instruction for the wave.
 ///
 /// The pass inserts the two instructions before the first "real" (non-pseudo)
