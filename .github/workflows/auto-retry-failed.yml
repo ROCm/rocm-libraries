@@ -27,6 +27,7 @@ on:
   workflow_run:
     workflows:
       - "TheRock CI Nightly"
+      - "TheRock Multi-Arch Nightly CI"
     types:
       - completed
 
