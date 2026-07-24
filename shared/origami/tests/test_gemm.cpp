@@ -28,7 +28,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
 #include "common.hpp"
-#include "origami/cms_kernel_efficiencies.hpp"
 
 using Catch::Approx;
 
@@ -1473,42 +1472,7 @@ TEST_CASE("Heuristics: Optimized kernel efficiency lookup", "[heuristics]") {
 
   auto params = db.lookup(problem, hardware, config);
 
-  REQUIRE(params.main_loop_efficiency ==
-          Approx(origami::cms_efficiency(origami::cms_speedup::X115)).epsilon(1e-6));
-}
-
-TEST_CASE("Heuristics: CMS kernel table lookup", "[heuristics]") {
-  auto& db = origami::heuristics_database_t::get_instance();
-
-  REQUIRE(origami::cms_tables::entry_count() == 38);
-
-  size_t entry_index = 0;
-  for (const auto& table : origami::cms_tables::all) {
-    for (const auto* entry = table.begin; entry != table.end; ++entry, ++entry_index) {
-      INFO("CMS entry index " << entry_index << ": "
-                              << origami::datatype_to_string(entry->mi_dtype) << " "
-                              << (entry->trans_a == origami::transpose_t::T ? "T" : "N")
-                              << (entry->trans_b == origami::transpose_t::T ? "T" : "N") << " "
-                              << entry->m << "x" << entry->n << "x" << entry->k);
-
-      const double expected = origami::cms_efficiency(entry->speedup_x100);
-      const double actual   = lookup_cms_main_loop_efficiency(entry->mi_dtype,
-                                                            entry->trans_a,
-                                                            entry->trans_b,
-                                                            entry->m,
-                                                            entry->n,
-                                                            entry->k);
-
-      REQUIRE(actual == Approx(expected).epsilon(1e-6));
-      REQUIRE(db.has_hand_optimized_entry(table.arch,
-                                          entry->mi_dtype,
-                                          entry->trans_a,
-                                          entry->trans_b,
-                                          entry->m,
-                                          entry->n,
-                                          entry->k));
-    }
-  }
+  REQUIRE(params.main_loop_efficiency == Approx(100.0 / 115.0).epsilon(1e-6));
 }
 
 TEST_CASE("Heuristics: CMS macrotile differentiation", "[heuristics]") {
@@ -1534,12 +1498,9 @@ TEST_CASE("Heuristics: CMS macrotile differentiation", "[heuristics]") {
                                         256,
                                         64);
 
-  REQUIRE(bf16_nt_160 ==
-          Approx(origami::cms_efficiency(origami::cms_speedup::X120)).epsilon(1e-6));
-  REQUIRE(bf16_nt_192 ==
-          Approx(origami::cms_efficiency(origami::cms_speedup::X110)).epsilon(1e-6));
-  REQUIRE(bf16_nt_256 ==
-          Approx(origami::cms_efficiency(origami::cms_speedup::X115)).epsilon(1e-6));
+  REQUIRE(bf16_nt_160 == Approx(100.0 / 120.0).epsilon(1e-6));
+  REQUIRE(bf16_nt_192 == Approx(100.0 / 110.0).epsilon(1e-6));
+  REQUIRE(bf16_nt_256 == Approx(100.0 / 115.0).epsilon(1e-6));
   REQUIRE(bf16_nt_160 != Approx(bf16_nt_192));
   REQUIRE(bf16_nt_192 != Approx(bf16_nt_256));
 
@@ -1558,10 +1519,8 @@ TEST_CASE("Heuristics: CMS macrotile differentiation", "[heuristics]") {
                                         256,
                                         32);
 
-  REQUIRE(tf32_tn_128 ==
-          Approx(origami::cms_efficiency(origami::cms_speedup::X126)).epsilon(1e-6));
-  REQUIRE(tf32_tn_192 ==
-          Approx(origami::cms_efficiency(origami::cms_speedup::X123)).epsilon(1e-6));
+  REQUIRE(tf32_tn_128 == Approx(100.0 / 126.0).epsilon(1e-6));
+  REQUIRE(tf32_tn_192 == Approx(100.0 / 123.0).epsilon(1e-6));
   REQUIRE(tf32_tn_128 != Approx(tf32_tn_192));
 }
 
@@ -1580,8 +1539,7 @@ TEST_CASE("Heuristics: CMS dtype differentiation", "[heuristics]") {
                                                                256,
                                                                64);
 
-  REQUIRE(bf16_nt_160 ==
-          Approx(origami::cms_efficiency(origami::cms_speedup::X120)).epsilon(1e-6));
+  REQUIRE(bf16_nt_160 == Approx(100.0 / 120.0).epsilon(1e-6));
   REQUIRE(fp16_nt_160 == Approx(1.0).epsilon(1e-6));
   REQUIRE(bf16_nt_160 != Approx(fp16_nt_160));
 
@@ -1600,8 +1558,7 @@ TEST_CASE("Heuristics: CMS dtype differentiation", "[heuristics]") {
                                         320,
                                         64);
 
-  REQUIRE(fp16_nt_unique ==
-          Approx(origami::cms_efficiency(origami::cms_speedup::X110)).epsilon(1e-6));
+  REQUIRE(fp16_nt_unique == Approx(100.0 / 110.0).epsilon(1e-6));
   REQUIRE(bf16_nt_missing == Approx(1.0).epsilon(1e-6));
   REQUIRE(fp16_nt_unique != Approx(bf16_nt_missing));
 
@@ -1620,10 +1577,8 @@ TEST_CASE("Heuristics: CMS dtype differentiation", "[heuristics]") {
                                         256,
                                         64);
 
-  REQUIRE(tf32_tn ==
-          Approx(origami::cms_efficiency(origami::cms_speedup::X126)).epsilon(1e-6));
-  REQUIRE(bf16_tn ==
-          Approx(origami::cms_efficiency(origami::cms_speedup::X105)).epsilon(1e-6));
+  REQUIRE(tf32_tn == Approx(100.0 / 126.0).epsilon(1e-6));
+  REQUIRE(bf16_tn == Approx(100.0 / 105.0).epsilon(1e-6));
   REQUIRE(tf32_tn != Approx(bf16_tn));
 }
 
@@ -1765,8 +1720,7 @@ TEST_CASE("Heuristics: get_heuristic_params integration", "[heuristics]") {
   // Test the main entry point function
   auto params = origami::get_heuristic_params(problem, hardware, config);
 
-  REQUIRE(params.main_loop_efficiency ==
-          Approx(origami::cms_efficiency(origami::cms_speedup::X115)).epsilon(1e-6));
+  REQUIRE(params.main_loop_efficiency == Approx(100.0 / 115.0).epsilon(1e-6));
 }
 
 TEST_CASE("Heuristics: Database add_entry and lookup", "[heuristics]") {

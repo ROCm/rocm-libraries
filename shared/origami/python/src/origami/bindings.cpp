@@ -283,13 +283,9 @@ NB_MODULE(origami, m) {
       .def_rw("pci_chip_id", &hardware_t::pci_chip_id);
 
   m.def("get_hardware_for_device",
-        [](int device_id, std::optional<int> pci_chip_id) {
-          return hardware_t::get_hardware_for_device(device_id, pci_chip_id);
-        },
+        static_cast<hardware_t (*)(int)>(&hardware_t::get_hardware_for_device),
         nanobind::arg("device_id"),
-        nanobind::arg("pci_chip_id") = nanobind::none(),
-        "This gets a hardware object for a device. Optional pci_chip_id (e.g. 0x75a8) "
-        "selects gfx950 memory-constant row; when omitted, defaults to id75a0 (no HIP PCI query).");
+        "This gets a hardware object for a device.");
 
   // Needs named arguments; optional pci_chip_id for gfx950 memory model row (e.g. 0x75a8)
   m.def(

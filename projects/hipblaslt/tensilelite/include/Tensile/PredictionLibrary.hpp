@@ -198,6 +198,8 @@ namespace TensileLite
                 origami::problem_t origami_problem = {
                     .size        = {m, n, k},
                     .batch       = batch,
+                    // CU budget hint; 0 = use all CUs.
+                    .num_cus     = static_cast<size_t>(problem.getParams().smCountTarget()),
                     .a_transpose = problem.transA() ? origami::transpose_t::T : origami::transpose_t::N,
                     .b_transpose = problem.transB() ? origami::transpose_t::T : origami::transpose_t::N,
                     .a_dtype     = datatypeToAnalyticalDatatype(problem.a().dataType()),

@@ -1307,17 +1307,17 @@ TEST_CASE("gfx950 pci_chip_id id75a0 vs id75a8", "[hardware]") {
   REQUIRE(g942_v2.mem1_perf_ratio == g942_def.mem1_perf_ratio);
 
   const auto hw_def = hardware_t::get_hardware_for_arch(hardware_t::architecture_t::gfx950,
-                                                        256,
-                                                        65536,
-                                                        32 * 1024 * 1024,
-                                                        512 * 1024,
-                                                        2'100'000,
-                                                        std::nullopt);
+                                                        256,               // N_CU
+                                                        65536,             // lds_capacity
+                                                        512 * 1024,        // rf_capacity
+                                                        4 * 1024 * 1024,   // L2_capacity
+                                                        2'100'000,         // compute_clock_khz
+                                                        std::nullopt);     // pci_chip_id
   const auto hw_v2 = hardware_t::get_hardware_for_arch(hardware_t::architecture_t::gfx950,
                                                        128,
                                                        65536,
-                                                       32 * 1024 * 1024,
                                                        512 * 1024,
+                                                       4 * 1024 * 1024,
                                                        2'100'000,
                                                        std::make_optional(0x75a8));
   REQUIRE(hw_def.mem1_perf_ratio != hw_v2.mem1_perf_ratio);

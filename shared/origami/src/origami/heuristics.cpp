@@ -2,15 +2,150 @@
 // SPDX-License-Identifier:  MIT
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <cstdint>
 #include <iostream>
 
-#include "origami/cms_kernel_efficiencies.hpp"
 #include "origami/gemm.hpp"
 #include "origami/hardware.hpp"
 #include "origami/heuristics.hpp"
 #include "origami/logger.hpp"
 #include "origami/types.hpp"
+
+namespace {
+
+namespace cms_speedup {
+constexpr uint8_t X100 = 100;
+constexpr uint8_t X105 = 105;
+constexpr uint8_t X110 = 110;
+constexpr uint8_t X115 = 115;
+constexpr uint8_t X120 = 120;
+constexpr uint8_t X123 = 123;
+constexpr uint8_t X126 = 126;
+}  // namespace cms_speedup
+
+constexpr double cms_efficiency(uint8_t speedup_x100) {
+  return 100.0 / static_cast<double>(speedup_x100);
+}
+
+struct cms_kernel_entry_t {
+  origami::data_type_t mi_dtype;
+  origami::transpose_t trans_a;
+  origami::transpose_t trans_b;
+  uint16_t m;
+  uint16_t n;
+  uint16_t k;
+  uint8_t speedup_x100;
+};
+
+// Register new architectures by adding a table here.
+constexpr std::array<cms_kernel_entry_t, 38> gfx950_cms_kernels = {{
+    // BF16 NT
+    {origami::data_type_t::BFloat16, origami::transpose_t::N, origami::transpose_t::T, 160, 256, 64,
+     cms_speedup::X120},
+    {origami::data_type_t::BFloat16, origami::transpose_t::N, origami::transpose_t::T, 192, 256, 64,
+     cms_speedup::X110},
+    {origami::data_type_t::BFloat16, origami::transpose_t::N, origami::transpose_t::T, 208, 256, 64,
+     cms_speedup::X120},
+    {origami::data_type_t::BFloat16, origami::transpose_t::N, origami::transpose_t::T, 256, 160, 64,
+     cms_speedup::X120},
+    {origami::data_type_t::BFloat16, origami::transpose_t::N, origami::transpose_t::T, 256, 192, 64,
+     cms_speedup::X120},
+    {origami::data_type_t::BFloat16, origami::transpose_t::N, origami::transpose_t::T, 256, 256, 64,
+     cms_speedup::X115},
+    // BF16 NN
+    {origami::data_type_t::BFloat16, origami::transpose_t::N, origami::transpose_t::N, 160, 256, 64,
+     cms_speedup::X110},
+    {origami::data_type_t::BFloat16, origami::transpose_t::N, origami::transpose_t::N, 208, 256, 64,
+     cms_speedup::X110},
+    {origami::data_type_t::BFloat16, origami::transpose_t::N, origami::transpose_t::N, 256, 192, 64,
+     cms_speedup::X100},
+    {origami::data_type_t::BFloat16, origami::transpose_t::N, origami::transpose_t::N, 256, 256, 64,
+     cms_speedup::X105},
+    // BF16 TN
+    {origami::data_type_t::BFloat16, origami::transpose_t::T, origami::transpose_t::N, 160, 256, 64,
+     cms_speedup::X110},
+    {origami::data_type_t::BFloat16, origami::transpose_t::T, origami::transpose_t::N, 192, 256, 64,
+     cms_speedup::X105},
+    {origami::data_type_t::BFloat16, origami::transpose_t::T, origami::transpose_t::N, 256, 96, 64,
+     cms_speedup::X110},
+    {origami::data_type_t::BFloat16, origami::transpose_t::T, origami::transpose_t::N, 256, 192, 64,
+     cms_speedup::X110},
+    {origami::data_type_t::BFloat16, origami::transpose_t::T, origami::transpose_t::N, 256, 224, 64,
+     cms_speedup::X105},
+    {origami::data_type_t::BFloat16, origami::transpose_t::T, origami::transpose_t::N, 256, 256, 64,
+     cms_speedup::X105},
+    // BF16 TT
+    {origami::data_type_t::BFloat16, origami::transpose_t::T, origami::transpose_t::T, 256, 256, 64,
+     cms_speedup::X110},
+    // FP16 NT
+    {origami::data_type_t::Half, origami::transpose_t::N, origami::transpose_t::T, 192, 320, 64,
+     cms_speedup::X110},
+    {origami::data_type_t::Half, origami::transpose_t::N, origami::transpose_t::T, 208, 256, 64,
+     cms_speedup::X120},
+    {origami::data_type_t::Half, origami::transpose_t::N, origami::transpose_t::T, 224, 128, 64,
+     cms_speedup::X120},
+    {origami::data_type_t::Half, origami::transpose_t::N, origami::transpose_t::T, 256, 192, 64,
+     cms_speedup::X120},
+    {origami::data_type_t::Half, origami::transpose_t::N, origami::transpose_t::T, 256, 256, 64,
+     cms_speedup::X115},
+    // FP16 NN
+    {origami::data_type_t::Half, origami::transpose_t::N, origami::transpose_t::N, 128, 256, 64,
+     cms_speedup::X110},
+    {origami::data_type_t::Half, origami::transpose_t::N, origami::transpose_t::N, 160, 256, 64,
+     cms_speedup::X110},
+    {origami::data_type_t::Half, origami::transpose_t::N, origami::transpose_t::N, 256, 160, 64,
+     cms_speedup::X110},
+    {origami::data_type_t::Half, origami::transpose_t::N, origami::transpose_t::N, 192, 256, 64,
+     cms_speedup::X110},
+    {origami::data_type_t::Half, origami::transpose_t::N, origami::transpose_t::N, 256, 192, 64,
+     cms_speedup::X100},
+    {origami::data_type_t::Half, origami::transpose_t::N, origami::transpose_t::N, 256, 256, 64,
+     cms_speedup::X105},
+    // FP16 TN
+    {origami::data_type_t::Half, origami::transpose_t::T, origami::transpose_t::N, 160, 256, 64,
+     cms_speedup::X110},
+    {origami::data_type_t::Half, origami::transpose_t::T, origami::transpose_t::N, 192, 256, 64,
+     cms_speedup::X105},
+    {origami::data_type_t::Half, origami::transpose_t::T, origami::transpose_t::N, 256, 96, 64,
+     cms_speedup::X110},
+    {origami::data_type_t::Half, origami::transpose_t::T, origami::transpose_t::N, 256, 192, 64,
+     cms_speedup::X110},
+    {origami::data_type_t::Half, origami::transpose_t::T, origami::transpose_t::N, 256, 224, 64,
+     cms_speedup::X105},
+    {origami::data_type_t::Half, origami::transpose_t::T, origami::transpose_t::N, 256, 256, 64,
+     cms_speedup::X105},
+    // FP16 TT
+    {origami::data_type_t::Half, origami::transpose_t::T, origami::transpose_t::T, 256, 256, 64,
+     cms_speedup::X110},
+    // TF32 NN
+    {origami::data_type_t::XFloat32, origami::transpose_t::N, origami::transpose_t::N, 192, 256, 32,
+     cms_speedup::X123},
+    // TF32 TN
+    {origami::data_type_t::XFloat32, origami::transpose_t::T, origami::transpose_t::N, 128, 256, 32,
+     cms_speedup::X126},
+    {origami::data_type_t::XFloat32, origami::transpose_t::T, origami::transpose_t::N, 192, 256, 32,
+     cms_speedup::X123},
+}};
+
+constexpr size_t cms_kernel_entry_count() { return gfx950_cms_kernels.size(); }
+
+void register_cms_kernels(origami::heuristics_database_t& db) {
+  for (const auto& entry : gfx950_cms_kernels) {
+    db.add_hand_optimized_efficiency(
+        origami::hand_optimized_kernel_key_t{origami::hardware_t::architecture_t::gfx950,
+                                           entry.mi_dtype,
+                                           entry.trans_a,
+                                           entry.trans_b,
+                                           entry.m,
+                                           entry.n,
+                                           entry.k},
+        cms_efficiency(entry.speedup_x100));
+  }
+}
+
+}  // namespace
 
 namespace origami {
 
@@ -128,7 +263,7 @@ size_t heuristic_key_t::specificity() const {
 // ============================================================================
 
 heuristics_database_t::heuristics_database_t() {
-  hand_optimized_map_.reserve(cms_tables::entry_count());
+  hand_optimized_map_.reserve(cms_kernel_entry_count());
   initialize_defaults();
 }
 
@@ -288,21 +423,6 @@ bool heuristics_database_t::has_hand_optimized_entry(hardware_t::architecture_t 
                                                      size_t mt_k) const {
   hand_optimized_kernel_key_t key{arch, mi_dtype, transA, transB, mt_m, mt_n, mt_k};
   return hand_optimized_map_.find(key) != hand_optimized_map_.end();
-}
-
-static void register_cms_kernels(heuristics_database_t& db) {
-  for (const auto& table : cms_tables::all) {
-    for (const auto* entry = table.begin; entry != table.end; ++entry) {
-      db.add_hand_optimized_efficiency(hand_optimized_kernel_key_t{table.arch,
-                                                                   entry->mi_dtype,
-                                                                   entry->trans_a,
-                                                                   entry->trans_b,
-                                                                   entry->m,
-                                                                   entry->n,
-                                                                   entry->k},
-                                       cms_efficiency(entry->speedup_x100));
-    }
-  }
 }
 
 void heuristics_database_t::initialize_defaults() {

@@ -156,17 +156,25 @@ hardware_t hardware_t::get_hardware_for_device(int deviceId,
       && queried_xccs > 0) {
     num_xcds = static_cast<size_t>(queried_xccs);
   }
+
+  auto arch_name = get_before_first_colon(prop.gcnArchName);
+  auto arch_enum = arch_name_to_enum(arch_name);
+  if (arch_enum == architecture_t::gfx950 && !pci_chip_id.has_value()) {
+      int queried_id = 0;
+      if (hipDeviceGetAttribute(&queried_id, hipDeviceAttributePciChipId, deviceId) == hipSuccess)
+        pci_chip_id = std::make_optional(queried_id);
+  }
 #endif
 
   return get_hardware_for_properties(prop, num_xcds, pci_chip_id);
 }
 
-hardware_t hardware_t::get_hardware_for_device(int deviceId, std::optional<int> pci_chip_id) {
+hardware_t hardware_t::get_hardware_for_device(int deviceId) {
   hipDeviceProp_t prop;
   hipError_t e = hipGetDeviceProperties(&prop, deviceId);
   if (e) { throw std::runtime_error(hipGetErrorString(e)); }
 
-  return get_hardware_for_device(deviceId, prop, pci_chip_id);
+  return get_hardware_for_device(deviceId, prop);
 }
 
 hardware_t hardware_t::get_hardware_for_arch(architecture_t arch,

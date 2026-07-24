@@ -731,11 +731,9 @@ class ORIGAMI_EXPORT hardware_t {
    * with the appropriate architecture and parameters.
    *
    * @param deviceId HIP device ID
-   * @param pci_chip_id Optional PCI chip ID; @c std::nullopt uses gfx950 profile @ref id75a0.
    * @return hardware_t Configured hardware instance for the device
    */
-  static hardware_t get_hardware_for_device(
-      int deviceId, std::optional<int> pci_chip_id = std::nullopt);
+  static hardware_t get_hardware_for_device(int deviceId);
 
   /**
    * @brief Create hardware_t instance for a specific HIP device using
@@ -750,20 +748,13 @@ class ORIGAMI_EXPORT hardware_t {
    * preserved. The runtime XCC query
    * (`hipDeviceAttributeNumberOfXccs` on HIP 7+) is still performed
    * against `deviceId`.
-   *
-   * @warning `prop` must describe the same physical device as `deviceId`,
-   *          aside from intentional field-level overrides the caller has
-   *          applied (e.g. swapping `multiProcessorCount` for the
-   *          physical MP count). Passing a `prop` from one device together
-   *          with a `deviceId` for a different device produces an
-   *          internally-inconsistent `hardware_t` — the XCC count will
-   *          come from `deviceId` while CU count, clocks, LDS/L2 capacity,
-   *          and architecture all come from `prop`. This is not checked.
+   * Accepts a caller-supplied PCI chip ID (e.g. from
+   * `hipDeviceAttributePciChipId` upstream). When @p pci_chip_id is
+   * `std::nullopt`, PCI chip ID is queried at runtime on HIP 7+ for gfx950.
    *
    * @param deviceId HIP device ID used to query the XCC count
-   * @param prop     Caller-owned device properties to model from; must
-   *                 correspond to `deviceId`
-   * @param pci_chip_id Optional PCI chip ID; @c std::nullopt uses gfx950 profile @ref id75a0.
+   * @param prop     Caller-owned device properties to model from
+   * @param pci_chip_id Optional PCI chip ID for gfx950 memory-constant selection
    * @return hardware_t Configured hardware instance for the device
    */
   static hardware_t get_hardware_for_device(
@@ -780,7 +771,7 @@ class ORIGAMI_EXPORT hardware_t {
    * @param arch Architecture enum value
    * @param N_CU Number of compute units
    * @param lds_capacity LDS capacity in bytes
-   * @param rf_capacity LDS capacity in bytes
+   * @param rf_capacity rf capacity in bytes
    * @param L2_capacity L2 cache capacity in bytes
    * @param compute_clock_khz Compute clock in KHz
    * @param pci_chip_id Optional PCI chip ID for gfx950 memory-constant selection; see
