@@ -68,7 +68,7 @@ For detailed guidance on benchmarking LATRD/SYTRD across all execution paths (mu
 fused canonical, fused software sync, fused software barrier), including all environment
 variables, block-count tuning, and result interpretation, see:
 
-**`docs/latrd_sytrd_benchmarking_guide.md`**
+**`docs/latrd_sytrd_syevd_benchmarking_guide.md`**
 
 ## Code Formatting
 
