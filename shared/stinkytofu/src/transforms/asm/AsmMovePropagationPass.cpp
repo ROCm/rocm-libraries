@@ -20,7 +20,6 @@ bool isSupportedMov(const StinkyInstruction& inst) {
 
 bool isEligibleMov(const StinkyInstruction& inst) {
     if (!isSupportedMov(inst)) return false;
-    if (mustPreserveInstruction(inst)) return false;
     if (inst.getDestRegs().size() != 1 || inst.getSrcRegs().size() != 1) return false;
 
     const StinkyRegister& dst = inst.getDestReg(0);
