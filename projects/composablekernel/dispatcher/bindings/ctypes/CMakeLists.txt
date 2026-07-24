@@ -277,6 +277,50 @@ else()
 endif()
 
 # =============================================================================
+# AQuant (A-only quantized) GEMM ctypes Library
+# =============================================================================
+
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/gemm_aquant_ctypes_lib.cpp)
+    file(GLOB AQUANT_GEMM_KERNEL_HEADERS "${CMAKE_BINARY_DIR}/generated_kernels/gemm_aquant_*.hpp")
+    if(AQUANT_GEMM_KERNEL_HEADERS)
+        list(SORT AQUANT_GEMM_KERNEL_HEADERS)
+        list(GET AQUANT_GEMM_KERNEL_HEADERS 0 AQUANT_GEMM_KERNEL_HEADER)
+        message(STATUS "Found AQuant GEMM kernel for ctypes lib: ${AQUANT_GEMM_KERNEL_HEADER}")
+
+        add_ctypes_library(dispatcher_gemm_aquant_lib
+            gemm_aquant_ctypes_lib.cpp
+            KERNEL_HEADER ${AQUANT_GEMM_KERNEL_HEADER}
+        )
+        # Resolve a single GFX arch string from CMAKE_HIP_ARCHITECTURES if available,
+        # falling back to the cache variable CK_TILE_AQUANT_GFX_ARCH. Never hardcode a
+        # default arch: if none can be resolved, error out (the ctypes source #errors
+        # on an unset GFX_ARCH too). The Python build path always passes -DGFX_ARCH=...
+        # explicitly via hipcc, so this only affects CMake-driven builds.
+        if(NOT DEFINED CK_TILE_AQUANT_GFX_ARCH OR CK_TILE_AQUANT_GFX_ARCH STREQUAL "")
+            if(CMAKE_HIP_ARCHITECTURES)
+                list(GET CMAKE_HIP_ARCHITECTURES 0 _aquant_gfx_arch)
+                set(CK_TILE_AQUANT_GFX_ARCH "${_aquant_gfx_arch}" CACHE STRING
+                    "GFX arch for the CMake-built AQuant ctypes .so (from CMAKE_HIP_ARCHITECTURES)")
+            else()
+                message(FATAL_ERROR
+                    "CK_TILE_AQUANT_GFX_ARCH is unset and CMAKE_HIP_ARCHITECTURES is empty. "
+                    "Set -DCK_TILE_AQUANT_GFX_ARCH=gfx942|gfx950 to build dispatcher_gemm_aquant_lib.")
+            endif()
+        endif()
+        message(STATUS "AQuant ctypes lib GFX_ARCH: ${CK_TILE_AQUANT_GFX_ARCH}")
+
+        target_compile_definitions(dispatcher_gemm_aquant_lib PRIVATE
+            CK_TILE_SINGLE_KERNEL_INCLUDE
+            GFX_ARCH="${CK_TILE_AQUANT_GFX_ARCH}"
+        )
+    else()
+        message(STATUS
+            "No AQuant GEMM kernel found for ctypes lib - skipping dispatcher_gemm_aquant_lib "
+            "(built at runtime by the Python bridge once a kernel header exists)")
+    endif()
+endif()
+
+# =============================================================================
 # TileEngine -> Dispatcher Bridge ctypes Libraries (append-only shared block)
 # =============================================================================
 #

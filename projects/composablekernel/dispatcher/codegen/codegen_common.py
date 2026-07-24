@@ -442,6 +442,77 @@ def make_bquant_kernel_name(
 
 
 # ============================================================================
+# AQuant kernel name construction
+# ============================================================================
+
+
+def aquant_effective_epilogue(
+    tile_n: int,
+    warp_n: int,
+    warp_tile_n: int,
+    quant_group_n: int,
+) -> str:
+    """Return the epilogue tag the aquant codegen will actually emit.
+
+    Mirrors the TiledPermuteN logic in run_gemm_quant_example.inc for AQuant:
+      TiledPermuteN = (BQuantGroupSize::kN > 1) ? false : GemmConfig::TiledMMAPermuteN
+    For the AQuant decode configs (GemmConfigQuantDecodeInterwave /
+    GemmConfigPreshuffleQuantDecode) TiledMMAPermuteN is false (it is only set on
+    the PreshuffleB configs, which AQuant does not use — PreshuffleB is rejected
+    for AQuant in run_gemm_example_prec_type). So AQuant always uses the CShuffle
+    epilogue. The parameters are accepted for signature symmetry with the bquant
+    helper and to keep the door open for future permute-N aquant configs.
+    """
+    # AQuant configs never enable TiledMMAPermuteN, so the epilogue is always cshuffle.
+    _ = (tile_n, warp_n, warp_tile_n, quant_group_n)
+    return "cshuffle"
+
+
+def make_aquant_kernel_name(
+    variant_key: str,
+    layout: str,
+    pipeline: str,
+    epilogue: str,  # ignored — actual epilogue computed via aquant_effective_epilogue
+    scheduler: str,
+    tile_m: int, tile_n: int, tile_k: int,
+    warp_m: int, warp_n: int, warp_k: int,
+    warp_tile_m: int, warp_tile_n: int, warp_tile_k: int,
+    quant_group_m: int,
+    quant_group_n: int,
+    quant_group_k: int,
+    preshuffle_aquant: bool = False,
+) -> str:
+    """Return the canonical AQuant kernel name used as KERNEL_NAME in generated headers.
+
+    Both AQuantKernelConfig (utils) and AQuantKernelSpec (codegen) delegate to this
+    function so the two sides stay byte-exact.
+
+    Naming convention:
+        gemm_aquant_{variant}_{layout}_{pipeline}_{epilogue}_{scheduler}_
+        {TileM}x{TileN}x{TileK}_{WarpM}x{WarpN}x{WarpK}_{WtM}x{WtN}x{WtK}_
+        qg{gM}x{gN}x{gK}[_preshufflequant]
+
+    The ``epilogue`` parameter is accepted for call-site compatibility but not used.
+    """
+    effective_epilogue = aquant_effective_epilogue(tile_n, warp_n, warp_tile_n, quant_group_n)
+    parts = [
+        "gemm_aquant",
+        variant_key,
+        layout,
+        pipeline,
+        effective_epilogue,
+        scheduler,
+        f"{tile_m}x{tile_n}x{tile_k}",
+        f"{warp_m}x{warp_n}x{warp_k}",
+        f"{warp_tile_m}x{warp_tile_n}x{warp_tile_k}",
+        f"qg{quant_group_m}x{quant_group_n}x{quant_group_k}",
+    ]
+    if preshuffle_aquant:
+        parts.append("preshufflequant")
+    return "_".join(parts)
+
+
+# ============================================================================
 # BQuant-specific Type Mappings
 # ============================================================================
 
