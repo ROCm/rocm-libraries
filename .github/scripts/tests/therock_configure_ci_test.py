@@ -290,6 +290,23 @@ class ConfigureCITest(unittest.TestCase):
 
         self.assertGreater(len(projects), 0)
         self.assertIn("BLAS", str(projects))
+        self.assertFalse(
+            any(project["run_rocjitsu_race_check"] for project in projects)
+        )
+        self.assertEqual(test_type, "standard")
+
+    @patch("therock_configure_ci.get_modified_paths")
+    def test_retrieve_projects_hipblaslt_label_enables_rocjitsu(
+        self, mock_get_modified
+    ):
+        mock_get_modified.return_value = []
+
+        pr_labels_json = '{"labels": [{"name": "test:hipblaslt"}]}'
+        projects, test_type = therock_configure_ci.retrieve_projects(
+            {"is_pull_request": True, "base_ref": "HEAD^", "pr_labels": pr_labels_json}
+        )
+
+        self.assertTrue(any(project["run_rocjitsu_race_check"] for project in projects))
         self.assertEqual(test_type, "standard")
 
     @patch("therock_configure_ci.get_modified_paths")

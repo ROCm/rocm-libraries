@@ -19,6 +19,25 @@ class TheRockMatrixTest(unittest.TestCase):
             "hipsparselt",
             blas_entry["projects_to_test"].split(","),
         )
+        self.assertTrue(blas_entry["run_rocjitsu_race_check"])
+
+    def test_rocjitsu_race_check_does_not_run_for_rocblas_only(self):
+        project_to_run = therock_matrix.collect_projects_to_run(["projects/rocblas"])
+        self.assertEqual(len(project_to_run), 1)
+        self.assertFalse(project_to_run[0]["run_rocjitsu_race_check"])
+
+    def test_rocjitsu_race_check_follows_hipblaslt_into_merged_row(self):
+        project_to_run = therock_matrix.collect_projects_to_run(
+            ["projects/hipblaslt", "projects/miopen"]
+        )
+        matching_rows = [
+            row for row in project_to_run if row["run_rocjitsu_race_check"]
+        ]
+        self.assertEqual(len(matching_rows), 1)
+        self.assertIn(
+            "tensilelite",
+            matching_rows[0]["projects_to_test"].split(","),
+        )
 
     def test_collect_projects_to_run(self):
         subtrees = ["projects/rocsparse", "projects/hipblaslt"]

@@ -177,10 +177,16 @@ SUBTREE_EXTRA_MATRIX_PROJECTS = {
     "projects/hipblaslt": "sparselt",
 }
 
+ROCJITSU_RACE_CHECK_SUBTREES = {
+    "projects/hipblaslt",
+}
+
 
 def collect_projects_to_run(subtrees):
+    subtrees = list(subtrees)
     platform = os.getenv("PLATFORM")
     projects = set()
+    run_rocjitsu_race_check = bool(ROCJITSU_RACE_CHECK_SUBTREES.intersection(subtrees))
     # Work on per-call deep copies so module-level state stays immutable across calls.
     local_project_map = copy.deepcopy(project_map)
     local_additional_options = copy.deepcopy(additional_options)
@@ -262,6 +268,10 @@ def collect_projects_to_run(subtrees):
             )
             project_map_data["projects_to_test"] = list(
                 set(project_map_data["projects_to_test"])
+            )
+            project_map_data["run_rocjitsu_race_check"] = (
+                run_rocjitsu_race_check
+                and "tensilelite" in project_map_data["projects_to_test"]
             )
 
             cmake_flag_options = " ".join(project_map_data["cmake_options"])

@@ -18,6 +18,8 @@ on:
         type: string
       test_type:
         type: string
+      run_rocjitsu_race_check:
+        type: boolean
       amdgpu_families:
         type: string
       test_runs_on:
@@ -179,13 +181,10 @@ jobs:
   rocjitsu-race-check-linux:
     name: rocjitsu race check (${{ inputs.amdgpu_families }})
     needs: [therock-build-linux]
-    # Run the narrow rocjitsu sidecar only for the hipBLASLt library row and GPU
-    # families that rocjitsu can emulate here. The gate matches the `tensilelite`
-    # test token, which is unique to the hipBLASLt library row, so the sidecar
-    # does not run for other rows whose test set merely contains a component
-    # whose name includes the "hipblaslt" substring (for example hipDNN's
-    # `hipblasltprovider`).
-    if: ${{ inputs.build_runs_on != '' && (startsWith(inputs.amdgpu_families, 'gfx94') || startsWith(inputs.amdgpu_families, 'gfx950') || inputs.amdgpu_families == 'gfx1151') && contains(inputs.projects_to_test, 'tensilelite') }}
+    # The matrix boolean records that projects/hipblaslt selected this row. The
+    # `tensilelite` token confirms that this is the hipBLASLt library row, not a
+    # provider row containing a name such as `hipblasltprovider`.
+    if: ${{ inputs.run_rocjitsu_race_check && inputs.build_runs_on != '' && (startsWith(inputs.amdgpu_families, 'gfx94') || startsWith(inputs.amdgpu_families, 'gfx950') || inputs.amdgpu_families == 'gfx1151') && contains(inputs.projects_to_test, 'tensilelite') }}
     uses: ./.github/workflows/therock-rocjitsu-race-check-linux.yml
     with:
       therock_ref: ${{ inputs.therock_ref }}
