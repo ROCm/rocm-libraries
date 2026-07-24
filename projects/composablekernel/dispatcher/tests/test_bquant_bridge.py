@@ -22,6 +22,8 @@ sys.path.insert(0, str(_DISP / "codegen"))
 from gemm_bquant_utils import (  # noqa: E402
     NAME_PREFIX,
     BQuantGemmProblem,
+    _MX_VARIANTS,
+    _require_mx_arch,
     default_fp8_config,
     default_bf8_config,
     default_fp8i4_config,
@@ -32,6 +34,7 @@ from gemm_bquant_utils import (  # noqa: E402
     default_mx_bf16bf16_config,
     default_mx_bf16bf8_config,
     default_mx_bf16fp4_config,
+    setup_multiple_bquant_dispatchers,
 )
 from codegen_common import make_bquant_kernel_name  # noqa: E402
 
@@ -118,6 +121,46 @@ class TestProblem(unittest.TestCase):
         p = BQuantGemmProblem(M=256, N=256, K=256)
         self.assertEqual(p.k_batch, 1)
         self.assertEqual(p.quant_group_k, 128)
+
+
+class TestArchSafety(unittest.TestCase):
+    """Round-2 arch-safety hardening (get_arch+throw)."""
+
+    def test_mx_requires_gfx950(self):
+        # Every MX variant must reject a non-gfx950 arch with a clear error.
+        for v in sorted(_MX_VARIANTS):
+            with self.assertRaises(ValueError):
+                _require_mx_arch(v, "gfx942")
+        # gfx950 is accepted (no raise).
+        for v in sorted(_MX_VARIANTS):
+            _require_mx_arch(v, "gfx950")
+
+    def test_non_mx_variant_any_arch_ok(self):
+        # Non-MX variants are not restricted by the MX guard.
+        for v in ("fp8", "bf8", "fp8i4", "bf8i4"):
+            _require_mx_arch(v, "gfx942")
+            _require_mx_arch(v, "gfx950")
+
+    def test_setup_rejects_mx_on_non_gfx950(self):
+        # The build entry point must fail early (before hipcc) for MX on gfx942.
+        cfg = default_mx_bf16bf16_config(gfx_arch="gfx942")
+        with self.assertRaises(ValueError):
+            setup_multiple_bquant_dispatchers([cfg], gfx_arch="gfx942")
+
+
+class TestSplitKTrap(unittest.TestCase):
+    """k_batch > 1 must be rejected, never silently passed through."""
+
+    def test_kbatch_gt1_rejected(self):
+        # Exercise the runner's guard without a GPU by stubbing the ctypes lib.
+        import gemm_bquant_utils as gbu
+
+        runner = gbu.BQuantGpuGemmRunner.__new__(gbu.BQuantGpuGemmRunner)
+        runner._lib = None  # guard must fire before any lib access
+
+        prob = BQuantGemmProblem(M=16, N=64, K=256, k_batch=2)
+        with self.assertRaises(ValueError):
+            runner.run(A=None, B=None, BQ=None, problem=prob)
 
 
 if __name__ == "__main__":

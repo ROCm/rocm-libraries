@@ -243,18 +243,24 @@ if(BQUANT_GEMM_KERNEL_HEADERS)
         grouped_gemm_bquant_ctypes_lib.cpp
         KERNEL_HEADER ${BQUANT_GEMM_KERNEL_HEADER}
     )
-    # Resolve a single GFX arch string from CMAKE_HIP_ARCHITECTURES if available,
-    # falling back to the cache variable CK_TILE_BQUANT_GFX_ARCH (default gfx942).
-    # The Python build path always passes -DGFX_ARCH=... explicitly via hipcc, so
-    # this default only affects builds driven through CMake directly.
+    # Resolve a single GFX arch string GENERICALLY from CMAKE_HIP_ARCHITECTURES
+    # or the cache variable CK_TILE_BQUANT_GFX_ARCH. Do NOT silently default to
+    # gfx942: an unresolved arch is a hard configure-time error (get_arch+throw),
+    # since a wrong arch mis-targets the kernel. The Python build path always
+    # passes -DGFX_ARCH=... explicitly via hipcc, so this only affects builds
+    # driven through CMake directly.
     if(NOT DEFINED CK_TILE_BQUANT_GFX_ARCH OR CK_TILE_BQUANT_GFX_ARCH STREQUAL "")
         if(CMAKE_HIP_ARCHITECTURES)
             list(GET CMAKE_HIP_ARCHITECTURES 0 _bquant_gfx_arch)
+            set(CK_TILE_BQUANT_GFX_ARCH "${_bquant_gfx_arch}" CACHE STRING
+                "GFX arch for the CMake-built BQuant ctypes .so (from CMAKE_HIP_ARCHITECTURES)")
         else()
-            set(_bquant_gfx_arch "gfx942")
+            message(FATAL_ERROR
+                "dispatcher_grouped_gemm_bquant_lib: GPU arch is unresolved. "
+                "Refusing to silently default to gfx942 (would mis-target "
+                "non-gfx942 hosts). Configure with -DCK_TILE_BQUANT_GFX_ARCH=<gfx###> "
+                "or set CMAKE_HIP_ARCHITECTURES.")
         endif()
-        set(CK_TILE_BQUANT_GFX_ARCH "${_bquant_gfx_arch}" CACHE STRING
-            "GFX arch for the CMake-built BQuant ctypes .so (default: first CMAKE_HIP_ARCHITECTURES or gfx942)")
     endif()
     message(STATUS "BQuant ctypes lib GFX_ARCH: ${CK_TILE_BQUANT_GFX_ARCH}")
 
@@ -294,16 +300,25 @@ if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/gemm_bquant_ctypes_lib.cpp)
             gemm_bquant_ctypes_lib.cpp
             KERNEL_HEADER ${PLAIN_BQUANT_GEMM_KERNEL_HEADER}
         )
-        # Reuse the CK_TILE_BQUANT_GFX_ARCH cache var resolved by the grouped
-        # target above; fall back to the first CMAKE_HIP_ARCHITECTURES or gfx942.
+        # Resolve the GFX arch GENERICALLY -- do NOT silently default to gfx942.
+        # Non-MX gemm_bquant kernels are not protected by the source-side #error
+        # guard, so an unresolved arch would silently build for gfx942 and
+        # mis-target on other hosts. Per get_arch+throw, an unresolved arch is a
+        # hard configure-time error: pass -DCK_TILE_BQUANT_GFX_ARCH=<gfx###> or set
+        # CMAKE_HIP_ARCHITECTURES. (The Python build path passes -DGFX_ARCH=...
+        # explicitly via hipcc, so this only affects direct CMake-driven builds.)
         if(NOT DEFINED CK_TILE_BQUANT_GFX_ARCH OR CK_TILE_BQUANT_GFX_ARCH STREQUAL "")
             if(CMAKE_HIP_ARCHITECTURES)
                 list(GET CMAKE_HIP_ARCHITECTURES 0 _plain_bquant_gfx_arch)
+                set(CK_TILE_BQUANT_GFX_ARCH "${_plain_bquant_gfx_arch}" CACHE STRING
+                    "GFX arch for the CMake-built BQuant ctypes .so (from CMAKE_HIP_ARCHITECTURES)")
             else()
-                set(_plain_bquant_gfx_arch "gfx942")
+                message(FATAL_ERROR
+                    "dispatcher_gemm_bquant_lib: GPU arch is unresolved. Refusing "
+                    "to silently default to gfx942 (would mis-target non-gfx942 "
+                    "hosts). Configure with -DCK_TILE_BQUANT_GFX_ARCH=<gfx###> or "
+                    "set CMAKE_HIP_ARCHITECTURES.")
             endif()
-            set(CK_TILE_BQUANT_GFX_ARCH "${_plain_bquant_gfx_arch}" CACHE STRING
-                "GFX arch for the CMake-built BQuant ctypes .so (default: first CMAKE_HIP_ARCHITECTURES or gfx942)")
         endif()
         message(STATUS "gemm_bquant ctypes lib GFX_ARCH: ${CK_TILE_BQUANT_GFX_ARCH}")
 
