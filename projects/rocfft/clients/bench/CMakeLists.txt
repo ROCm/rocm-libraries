@@ -86,7 +86,7 @@ foreach( bench ${bench_list})
   # specified a build time.
   # TODO: amdgcnspirv is not compatible with ASAN.
   get_target_property(bench_opts ${bench} COMPILE_OPTIONS)
-  if( NOT WIN32 AND NOT bench_opts MATCHES "-fsanitize=address" )
+  if( NOT WIN32 AND NOT bench_opts MATCHES "-fsanitize=address" AND NOT CMAKE_CXX_FLAGS MATCHES "-fsanitize=address" )
     target_compile_options( ${bench} PRIVATE --offload-arch=amdgcnspirv )
     target_link_options( ${bench} PRIVATE --offload-arch=amdgcnspirv )
   endif()

@@ -404,7 +404,7 @@ set_target_properties(rocfft-test
 # specified a build time
 # TODO: amdgcnspirv is not compatible with ASAN.
 get_target_property(test_opts rocfft-test COMPILE_OPTIONS)
-if( NOT WIN32 AND NOT test_opts MATCHES "-fsanitize=address" )
+if( NOT WIN32 AND NOT test_opts MATCHES "-fsanitize=address" AND NOT CMAKE_CXX_FLAGS MATCHES "-fsanitize=address" )
   target_compile_options( rocfft-test PRIVATE --offload-arch=amdgcnspirv )
   target_link_options( rocfft-test PRIVATE --offload-arch=amdgcnspirv )
 endif()
@@ -541,7 +541,7 @@ if( ROCFFT_MPI_ENABLE )
     # specified a build time
     # TODO: amdgcnspirv is not compatible with ASAN.
     get_target_property(worker_opts ${worker} COMPILE_OPTIONS)
-    if( NOT WIN32 AND NOT worker_opts MATCHES "-fsanitize=address" )
+    if( NOT WIN32 AND NOT worker_opts MATCHES "-fsanitize=address" AND NOT CMAKE_CXX_FLAGS MATCHES "-fsanitize=address" )
       target_compile_options( ${worker} PRIVATE --offload-arch=amdgcnspirv )
       target_link_options( ${worker} PRIVATE --offload-arch=amdgcnspirv )
     endif()
