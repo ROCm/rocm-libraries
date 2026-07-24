@@ -518,6 +518,16 @@ void rocke_cshuffle_epilogue_store(rocke_ir_builder_t* b,
     (void)rocke_b_const_i32(b, 0);
     (void)rocke_b_const_i32(b, 0);
 
+    /* ---- step 0: reuse barrier. ----
+     * The common-LDS packer aliases this C staging tile onto the A/B staging
+     * bytes (non-interfering in program order). Double-buffered / prefetched
+     * (compv4 / async_dma) mainloops end with the tail-tile MFMA reading A/B
+     * from LDS *after* their last drain barrier and emit no trailing barrier, so
+     * without a barrier here a fast wave's first C ds_write would clobber A/B
+     * bytes a slow wave is still reading for its tail MFMA -- a cross-wave WAR on
+     * the aliased pool. Mirrors the Python CShuffleEpilogue.store. */
+    rocke_b_sync(b);
+
     for(mi = 0; mi < mfmas_m; ++mi)
     {
         for(ni = 0; ni < mfmas_n; ++ni)

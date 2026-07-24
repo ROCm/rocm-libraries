@@ -2457,6 +2457,19 @@ def _emit_epilogue_cshuffle(
     # LDS staging tile: tile_m x tile_n of output storage dtype.
     Cs = b.smem_alloc(storage_dtype, [t.tile_m, t.tile_n], name_hint="C_smem")
 
+    # ---- step 0: reuse barrier. ----
+    # The common-LDS packer aliases this C staging tile onto the A/B
+    # staging bytes (they are non-interfering in program order, so the
+    # liveness packer places C at the A/B pool offset). The double-buffered
+    # and prefetched mainloops (``_emit_kloop_db`` / ``_emit_kloop_prefetch``)
+    # end with the tail-tile MFMA reading A/B from LDS *after* their last
+    # drain barrier and emit no trailing barrier, so without a barrier here a
+    # fast wave's first C ``ds_write`` would clobber A/B bytes a slow wave is
+    # still reading for its tail MFMA -- a cross-wave WAR on the aliased pool.
+    # (The single-buffer ``_emit_kloop_simple`` already has a trailing in-loop
+    # barrier, which makes this one redundant-but-harmless there.)
+    b.sync()
+
     warp_m_off = b.mul(warp_m_idx, b.const_i32(mfmas_m * t.warp_tile_m))
     warp_n_off = b.mul(warp_n_idx, b.const_i32(mfmas_n * t.warp_tile_n))
 

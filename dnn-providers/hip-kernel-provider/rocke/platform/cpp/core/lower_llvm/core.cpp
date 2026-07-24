@@ -1067,11 +1067,25 @@ static void
         /* Recurse into sub-regions. scf.for gets a conservative loop_end: the
          * last preorder index of the loop subtree (idx + size - 1), not the
          * for-op's own (earlier) index, so allocations defined inside the loop
-         * are extended across the whole loop and interfere as they must. */
+         * are extended across the whole loop and interfere as they must.
+         *
+         * For a nested loop, an allocation used only in the inner loop can be
+         * re-read on a later outer iteration, so its live range must reach the
+         * enclosing loop's end too -- take the max with any enclosing loop_end
+         * (loop_end < 0 means "no enclosing loop", i.e. Python's None). */
         for(int r = 0; r < op->num_regions; r++)
         {
-            int child_loop_end
-                = (op->opcode == ROCKE_OP_SCF_FOR) ? (idx + ll_subtree_size(op) - 1) : loop_end;
+            int child_loop_end;
+            if(op->opcode == ROCKE_OP_SCF_FOR)
+            {
+                int own_last = idx + ll_subtree_size(op) - 1;
+                child_loop_end
+                    = (loop_end < 0) ? own_last : (own_last > loop_end ? own_last : loop_end);
+            }
+            else
+            {
+                child_loop_end = loop_end;
+            }
             ll_liveness_walk(ctx, op->regions[r], child_loop_end);
         }
     }
@@ -1216,6 +1230,27 @@ void rocke_ll_compute_smem_layout(rocke_lower_t* L)
             if(slots[k].last_seq >= first_seq)
                 continue; /* still live, interference */
             int aligned_off = (slots[k].offset + aln - 1) & ~(aln - 1);
+            /* Reusing slot k places this allocation at [aligned_off,
+             * aligned_off+seg). Because it may be larger than slot k's original
+             * footprint, that range can spill upward into a DIFFERENT slot that
+             * is still live while this allocation is live -- which would alias
+             * two simultaneously-live allocations and corrupt data. Reject any
+             * candidate whose placed range overlaps a still-live slot; slots
+             * already dead before first_seq are safe to overlap. */
+            int placed_end = aligned_off + seg;
+            int conflict = 0;
+            for(int j = 0; j < num_slots; j++)
+            {
+                if(j == k || slots[j].last_seq < first_seq)
+                    continue;
+                if(aligned_off < slots[j].offset + slots[j].size && slots[j].offset < placed_end)
+                {
+                    conflict = 1;
+                    break;
+                }
+            }
+            if(conflict)
+                continue;
             if(best < 0 || aligned_off < best_aligned)
             {
                 best = k;

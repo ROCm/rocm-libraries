@@ -732,6 +732,16 @@ void rocke_gemm_emit_epilogue_cshuffle(rocke_ir_builder_t* b,
         Cs = rocke_b_smem_alloc(b, storage_dtype, shape, 2, "C_smem");
     }
 
+    /* ---- step 0: reuse barrier. ----
+     * The common-LDS packer aliases this C staging tile onto the A/B staging
+     * bytes (non-interfering in program order). The double-buffered / prefetched
+     * mainloops end with the tail-tile MFMA reading A/B from LDS *after* their
+     * last drain barrier and emit no trailing barrier, so without a barrier here
+     * a fast wave's first C ds_write would clobber A/B bytes a slow wave is still
+     * reading for its tail MFMA -- a cross-wave WAR on the aliased pool. Mirrors
+     * the Python _emit_epilogue_cshuffle. */
+    rocke_b_sync(b);
+
     warp_m_off = rocke_b_mul(b, warp_m_idx, rocke_b_const_i32(b, mfmas_m * t->warp_tile_m));
     warp_n_off = rocke_b_mul(b, warp_n_idx, rocke_b_const_i32(b, mfmas_n * t->warp_tile_n));
 

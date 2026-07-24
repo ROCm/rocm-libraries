@@ -1037,7 +1037,17 @@ class _Lowerer:
                         # uses to that last index (not the for-op's own, earlier
                         # index, which would under-extend allocations defined
                         # inside the loop and let them wrongly share LDS).
-                        loop_last = idx + _subtree_size(op) - 1
+                        #
+                        # For a nested loop, an allocation used only in the inner
+                        # loop can still be re-read on a later *outer* iteration,
+                        # so its live range must reach the enclosing loop's end
+                        # too -- take the max with any enclosing ``loop_end``,
+                        # otherwise the inner alloc could wrongly share LDS with
+                        # an allocation used later in the outer body.
+                        own_last = idx + _subtree_size(op) - 1
+                        loop_last = (
+                            own_last if loop_end is None else max(own_last, loop_end)
+                        )
                         walk(r.ops, loop_end=loop_last)
                     else:
                         walk(r.ops, loop_end=loop_end)
@@ -1133,21 +1143,41 @@ class _Lowerer:
             # Among free slots, prefer the one with the smallest aligned start
             # (lowest address, cache-friendly, minimises pool fragmentation).
             best: Optional[int] = None  # index into slots[]
+            best_aligned = 0
             for i, (s_off, s_size, s_last) in enumerate(slots):
                 if s_last >= first_seq:
                     # Still live when we start – interference, skip.
                     continue
                 aligned_off = (s_off + aln - 1) & ~(aln - 1)
-                if best is None or aligned_off < (slots[best][0] + aln - 1) & ~(
-                    aln - 1
-                ):
+                # Reusing slot i places this allocation at [aligned_off,
+                # aligned_off + seg). Because it may be larger than slot i's
+                # original footprint, that range can spill upward into a
+                # DIFFERENT slot that is still live while this allocation is
+                # live -- which would alias two simultaneously-live allocations
+                # and corrupt data. Reject any candidate whose placed range
+                # overlaps a still-live slot; slots already dead before
+                # first_seq are safe to overlap.
+                placed_end = aligned_off + seg
+                conflict = False
+                for j, (o2, sz2, last2) in enumerate(slots):
+                    if j == i or last2 < first_seq:
+                        continue
+                    if aligned_off < o2 + sz2 and o2 < placed_end:
+                        conflict = True
+                        break
+                if conflict:
+                    continue
+                if best is None or aligned_off < best_aligned:
                     best = i
+                    best_aligned = aligned_off
 
             if best is not None:
                 s_off, s_size, _ = slots[best]
-                aligned_off = (s_off + aln - 1) & ~(aln - 1)
+                aligned_off = best_aligned
                 self._smem_offsets[gname] = aligned_off
                 # Expand the slot to cover the new allocation if it overflows.
+                # The guard above proved the placed range does not overlap any
+                # live slot, so the expansion is safe.
                 new_size = max(s_size, aligned_off - s_off + seg)
                 slots[best] = (s_off, new_size, last_seq)
             else:
