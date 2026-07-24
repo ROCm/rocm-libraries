@@ -64,6 +64,10 @@ add_executable(rpp_tests
     src/tests/image/geometric/crop_and_patch_test.cpp
     src/tests/image/morphological/erode_test.cpp
     src/tests/image/morphological/dilate_test.cpp
+    src/tests/image/filter/box_filter_test.cpp
+    src/tests/image/filter/gaussian_filter_test.cpp
+    src/tests/image/filter/median_filter_test.cpp
+    src/tests/image/filter/sobel_filter_test.cpp
     src/tests/image/statistical/tensor_sum_test.cpp
     src/tests/image/statistical/threshold_test.cpp
     src/tests/image/statistical/tensor_min_test.cpp
