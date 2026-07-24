@@ -212,9 +212,10 @@ jobs:
       fail-fast: false
       matrix:
         projects: ${{ fromJSON(needs.setup.outputs.coverage_projects) }}
-        target_bundle:
-          - amdgpu_family: gfx94X-dcgpu
-            test_machine: gfx942-dcgpu
+        target_bundle: ${{ fromJSON(needs.setup.outputs.linux_package_targets) }}
+        exclude:
+          - target_bundle:
+              amdgpu_family: gfx950
     uses: ./.github/workflows/therock-ci-coverage.yml
     secrets: inherit
     with:
