@@ -54,6 +54,9 @@ constexpr int kCdna5DsReadDrainLatency = 72;
 constexpr int kCdna5DsReadPerWmma = 3;
 constexpr int kCdna5GlobalReadPerWmma = 1;
 
+// mode2 WAR gate: min WMMAs between a WMMA reg-read and a ds_load overwriting it
+constexpr int kMode2WarGateWmmas = 7;
+
 // -------------------------------------------------------------------------
 // Prefix / loop analysis (free functions; no CDNA5ReadyQueue state)
 // -------------------------------------------------------------------------
@@ -317,6 +320,12 @@ class CDNA5ReadyQueue : public ReadyQueue {
     std::map<int, int> regLastTouch_;
     int clock_ = 0;
 
+    // (C) mode2 WAR: BB-wide WMMA index each reg was last WMMA-src-read; persists cross-region.
+    std::map<int, int> regLastWmmaRead_;
+    // Monotonic BB-wide WMMA counter (not per-region) so cross-region WAR distances stay
+    // meaningful.
+    int wmmaIssuedCountThisBB_ = 0;
+
     WMMAIssueConfig wmmaIssueConfig;
 
     bool hasWMMAInRegion_ = false;
@@ -358,6 +367,7 @@ class CDNA5ReadyQueue : public ReadyQueue {
     void touchOperands(const StinkyInstruction& inst);
     int getMaxSrcDataWait(DAGNode* node) const;
     bool destOverlapsActiveWmmaSrc(DAGNode* node) const;
+    bool warTooCloseToWmmaRead(DAGNode* node) const;
     int nodeElapseKey(DAGNode* node) const;
     DAGNode* pickFreeBest(const ReadySetByDAGid& queue, int* outWait = nullptr,
                           bool allowHiddenStall = false) const;
@@ -550,6 +560,21 @@ bool CDNA5ReadyQueue::destOverlapsActiveWmmaSrc(DAGNode* node) const {
     return false;
 }
 
+// (C) mode2 WAR gate: true if this ds_load's dest reg was WMMA-read < kMode2WarGateWmmas ago.
+bool CDNA5ReadyQueue::warTooCloseToWmmaRead(DAGNode* node) const {
+    if (node == nullptr) return false;
+    for (const StinkyRegister& dstReg : node->inst->getDestRegs()) {
+        if (!dstReg.isRegister() || isPseudoReg(dstReg)) continue;
+        for (unsigned off = 0; off < dstReg.reg.num; ++off) {
+            auto it = regLastWmmaRead_.find(regDepKey(dstReg.reg.type, dstReg.reg.idx + off));
+            if (it != regLastWmmaRead_.end() &&
+                (wmmaIssuedCountThisBB_ - it->second) < kMode2WarGateWmmas)
+                return true;
+        }
+    }
+    return false;
+}
+
 // (B) elapse key: min over the node's operand regs (dst + src) of (clock_ - lastTouch).
 // The most-recently-touched operand binds (smallest elapse), so a node reusing a
 // just-touched reg ranks low and is deferred. Regs never touched => INT_MAX (very old).
@@ -656,6 +681,13 @@ DAGNode* CDNA5ReadyQueue::pickOneFromWMMA(DAGNode* pick) {
     // (B) elapse: record the timeline touch for all its operands.
     stampDataReady(*node->inst);
     touchOperands(*node->inst);
+    // (C) mode2 WAR: stamp each WMMA src reg with this BB-wide WMMA index.
+    ++wmmaIssuedCountThisBB_;
+    for (const StinkyRegister& src : node->inst->getSrcRegs()) {
+        if (!src.isRegister() || isPseudoReg(src)) continue;
+        for (unsigned off = 0; off < src.reg.num; ++off)
+            regLastWmmaRead_[regDepKey(src.reg.type, src.reg.idx + off)] = wmmaIssuedCountThisBB_;
+    }
     return node;
 }
 
@@ -701,8 +733,10 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
     // is applied only while a WMMA is pending. Otherwise ds_loads drain freely,
     // bounded only by the real hardware limiter dsReadQueueFull().
     const bool dsCapReached = !wmmaQueue.empty() && dsInsertedSinceLastWmma_ >= maxDsPerWmmaWindow_;
-    bool dsWindowOk =
-        pickedDS && !dsCapReached && !dsReadQueueFull() && !destOverlapsActiveWmmaSrc(pickedDS);
+    // mode2 WAR gate: hold back a ds_load too close after its WMMA reader (while WMMAs remain).
+    const bool warTooClose = !wmmaQueue.empty() && warTooCloseToWmmaRead(pickedDS);
+    bool dsWindowOk = pickedDS && !dsCapReached && !warTooClose && !dsReadQueueFull() &&
+                      !destOverlapsActiveWmmaSrc(pickedDS);
 
     if (!globalReadQueue.empty() && !globalReadQueueFull() &&
         (globalReadCounter < globalReadPerWMMA || otherQueue.empty())) {
@@ -1295,6 +1329,16 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
         return rememberPick(barrier);
     }
 
+    // Phase F2 — mode2 WAR: if the only fill left is a too-close ds_load, issue a WMMA instead.
+    if (!wmmaQueue.empty() && warTooCloseToWmmaRead(pickedDS)) {
+        auto [bestWMMA, bestLatency] = findMostReadyWMMA();
+        (void)bestLatency;
+        DAGNode* node = pickOneFromWMMA(bestWMMA);
+        PASS_DEBUG(std::cerr << "[CDNA5 pickOne] Phase F2 WAR-forced WMMA dagId=" << node->id
+                             << "\n");
+        return rememberPick(node);
+    }
+
     // Phase G — final safety net: force-pick the oldest DAG node to guarantee progress.
     DAGNode* fallback = nullptr;
     int fallbackKind = -1;
@@ -1357,6 +1401,10 @@ bool CDNA5ReadyQueue::empty() const {
 void CDNA5ReadyQueue::onInit(IRList::iterator regionStart, IRList::iterator regionEnd) {
     deferFirstHeadWmmaActive_ = false;
     deferHeadBalanceThisRegion_ = false;
+
+    // (C) mode2 WAR: per-BB reset (not per-region — persists across s_wait_dscnt splits).
+    regLastWmmaRead_.clear();
+    wmmaIssuedCountThisBB_ = 0;
 
     activeCoIssueWindow_ = 0;
     coIssueCyclePos_ = 0;
@@ -1445,6 +1493,7 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
     // (B) elapse ordering state is per-region: reset the touch map and clock so a new
     // region starts with all regs "very old" (no spurious deferrals from a prior region).
     regLastTouch_.clear();
+    // regLastWmmaRead_ NOT cleared here — persists across regions (cleared per-BB).
     clock_ = 0;
     // Clear per-region node ptr; it dangles into the previous region's freed DAGNodeList.
     activeWmmaNode_ = nullptr;
