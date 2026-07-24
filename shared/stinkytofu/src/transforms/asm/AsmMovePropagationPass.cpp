@@ -66,6 +66,24 @@ class AsmMovePropagationPassImpl : public Pass {
     }
 
    private:
+    // Algorithm (currently only basic-block-local):
+    // Phase A - propagation:
+    //   Build a per-basic-block map incrementally:
+    //     - start with an empty map
+    //     - when an eligible mov is seen, record/update {dst -> src}
+    //       (src is the rewritten source at that point)
+    //     - erase entries when current defs overlap either mapped dst or src (break the chain)
+    //   Then walk instructions in order using that evolving map.
+    //   For each instruction:
+    //     1) rewrite each register source via the current map
+    //     2) invalidate map entries touched by current defs (key/value overlap)
+    //     3) if instruction is an eligible mov, add/update {dst -> src}
+    //
+    // Phase B - mov cleanup:
+    //   Re-scan mov instructions and erase only when safe:
+    //     - dst is redefined before any later use in the same block.
+    //     - identity mov (mov x, x)
+    //   Otherwise keep the mov conservatively (it may be live-out).
     void runOnBasicBlock(BasicBlock& bb) {
         std::vector<StinkyInstruction*> instructions;
         for (IRBase& node : bb) {
