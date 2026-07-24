@@ -442,6 +442,45 @@ def make_bquant_kernel_name(
 
 
 # ============================================================================
+# RowColQuant kernel name construction
+# ============================================================================
+
+
+def make_rowcolquant_kernel_name(
+    variant_key: str,
+    layout: str,
+    pipeline: str,
+    epilogue: str,
+    scheduler: str,
+    tile_m: int, tile_n: int, tile_k: int,
+    warp_m: int, warp_n: int, warp_k: int,
+    warp_tile_m: int, warp_tile_n: int, warp_tile_k: int,
+) -> str:
+    """Return the canonical RowColQuant kernel name used as KERNEL_NAME in headers.
+
+    Both RowColQuantKernelConfig (utils) and RowColQuantKernelSpec (codegen)
+    delegate to this function so the two sides are guaranteed to stay byte-exact.
+
+    RowColQuant has no quant-group segment (scales are global per-row / per-col
+    vectors), and GemmConfigRowColQuant fixes TiledMMAPermuteN=false so the
+    epilogue is always CShuffle.  The ``epilogue`` argument is therefore accepted
+    for call-site symmetry with the BQuant helper but always emitted verbatim.
+    """
+    parts = [
+        "gemm_rowcolquant",
+        variant_key,
+        layout,
+        pipeline,
+        epilogue,
+        scheduler,
+        f"{tile_m}x{tile_n}x{tile_k}",
+        f"{warp_m}x{warp_n}x{warp_k}",
+        f"{warp_tile_m}x{warp_tile_n}x{warp_tile_k}",
+    ]
+    return "_".join(parts)
+
+
+# ============================================================================
 # BQuant-specific Type Mappings
 # ============================================================================
 

@@ -277,6 +277,52 @@ else()
 endif()
 
 # =============================================================================
+# Gemm RowColQuant ctypes Library
+# =============================================================================
+
+file(GLOB ROWCOLQUANT_GEMM_KERNEL_HEADERS "${CMAKE_BINARY_DIR}/generated_kernels/gemm_rowcolquant_*.hpp")
+if(ROWCOLQUANT_GEMM_KERNEL_HEADERS)
+    list(GET ROWCOLQUANT_GEMM_KERNEL_HEADERS 0 ROWCOLQUANT_GEMM_KERNEL_HEADER)
+    message(STATUS "Found RowColQuant GEMM kernel for ctypes lib: ${ROWCOLQUANT_GEMM_KERNEL_HEADER}")
+
+    add_ctypes_library(dispatcher_gemm_rowcolquant_lib
+        gemm_rowcolquant_ctypes_lib.cpp
+        KERNEL_HEADER ${ROWCOLQUANT_GEMM_KERNEL_HEADER}
+    )
+    # Resolve a single GFX arch string from CMAKE_HIP_ARCHITECTURES if available,
+    # falling back to the cache variable CK_TILE_ROWCOLQUANT_GFX_ARCH (default gfx942).
+    # The Python build path always passes -DGFX_ARCH=... explicitly via hipcc, so
+    # this default only affects builds driven through CMake directly.
+    if(NOT DEFINED CK_TILE_ROWCOLQUANT_GFX_ARCH OR CK_TILE_ROWCOLQUANT_GFX_ARCH STREQUAL "")
+        if(CMAKE_HIP_ARCHITECTURES)
+            list(GET CMAKE_HIP_ARCHITECTURES 0 _rowcolquant_gfx_arch)
+        else()
+            set(_rowcolquant_gfx_arch "gfx942")
+        endif()
+        set(CK_TILE_ROWCOLQUANT_GFX_ARCH "${_rowcolquant_gfx_arch}" CACHE STRING
+            "GFX arch for the CMake-built RowColQuant ctypes .so (default: first CMAKE_HIP_ARCHITECTURES or gfx942)")
+    endif()
+    message(STATUS "RowColQuant ctypes lib GFX_ARCH: ${CK_TILE_ROWCOLQUANT_GFX_ARCH}")
+
+    target_compile_definitions(dispatcher_gemm_rowcolquant_lib PRIVATE
+        CK_TILE_SINGLE_KERNEL_INCLUDE
+        GFX_ARCH="${CK_TILE_ROWCOLQUANT_GFX_ARCH}"
+    )
+else()
+    message(STATUS "No RowColQuant GEMM kernel found for ctypes lib - building without kernel")
+    add_library(dispatcher_gemm_rowcolquant_lib SHARED gemm_rowcolquant_ctypes_lib.cpp)
+    target_include_directories(dispatcher_gemm_rowcolquant_lib PRIVATE
+        ${PROJECT_SOURCE_DIR}/include
+        ${PROJECT_SOURCE_DIR}/dispatcher/include
+    )
+    target_link_libraries(dispatcher_gemm_rowcolquant_lib PRIVATE hip::device)
+    set_target_properties(dispatcher_gemm_rowcolquant_lib PROPERTIES
+        POSITION_INDEPENDENT_CODE ON
+        CXX_STANDARD 17
+    )
+endif()
+
+# =============================================================================
 # TileEngine -> Dispatcher Bridge ctypes Libraries (append-only shared block)
 # =============================================================================
 #
