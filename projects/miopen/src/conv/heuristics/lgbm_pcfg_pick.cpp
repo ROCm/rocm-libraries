@@ -240,20 +240,9 @@ std::vector<std::string> PickConfig(const std::string& solver_name,
 
     const std::string gfx_id = handle.GetDeviceName();
 
-    // Architecture exclusion: gfx908/gfx90a (legacy CDNA) and gfx942/gfx950 (all
-    // SKUs in each range) defer to the existing perf-db/default heuristics, which
-    // outperform the learned perf-config picker there. GetDeviceName() strips the
-    // SKU suffix, so a bare prefix match covers every SKU (gfx942-mi300x,
-    // gfx950-mi355x, ...). Matches the same exclusion in the layer-1 solver picker
-    // (lgbm_pick.cpp).
-    if(gfx_id.starts_with("gfx908") || gfx_id.starts_with("gfx90a") ||
-       gfx_id.starts_with("gfx942") || gfx_id.starts_with("gfx950"))
-    {
-        MIOPEN_LOG_I2("lgbm_pcfg: abstain (arch " << gfx_id
-                                                  << " excluded; using existing heuristics)");
-        return {};
-    }
-
+    // The perf-config picker runs on every architecture its per-solver models
+    // cover; a bucket lookup below naturally abstains (empty result) for any
+    // gfx_id/direction/dtype the models were not trained on.
     const std::string key = gfx_id + "|" +
                             std::to_string(DirectionPerfDbCode(problem.GetDirection())) + "|" +
                             DataTypeName(problem.GetInDataType());
