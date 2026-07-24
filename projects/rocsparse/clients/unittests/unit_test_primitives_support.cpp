@@ -88,3 +88,19 @@ namespace rocsparse
 
     void error_message(rocsparse_status, const char*, const char*, const char*, int) {}
 }
+
+//
+// Compile-in seam for the segmented radix sort primitives.
+//
+// unit_test_primitives.cpp exercises rocsparse::primitives::segmented_radix_sort_keys
+// and segmented_radix_sort_pairs, but their translation units are not listed in
+// ROCSPARSE_UNIT_TEST_PRIMITIVE_SOURCES (CMakeLists.txt) and their explicit
+// instantiations are hidden in librocsparse. Rather than modify the build, we
+// pull those two .cpp files in here directly -- the same "compile the library
+// .cpp into the test target" technique already used for the other primitives via
+// the CMake source list. Their only extra dependencies (rocprim, the static
+// inline rocsparse::clz, and the plain-hip rocsparse_hipMemcpyAsync macro in a
+// non-debug/non-memstat build) resolve without any additional library object.
+//
+#include "../../library/src/primitives/rocsparse_segmented_radix_sort_keys.cpp"
+#include "../../library/src/primitives/rocsparse_segmented_radix_sort_pairs.cpp"

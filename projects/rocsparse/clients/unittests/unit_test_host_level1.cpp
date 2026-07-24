@@ -166,6 +166,81 @@ namespace
         EXPECT_ROC(rocsparse_rot(handle, &c, &s, vp.x, vp.y), rocsparse_status_success);
         EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
     }
+
+    // Drive rocsparse_spvv end-to-end for one (T, I) combination and index base:
+    // the buffer-size query, then the compute with BOTH rocsparse_operation_none
+    // and rocsparse_operation_conjugate_transpose. For complex T the conjugate
+    // path selects rocsparse::dotci_template (the previously untested branch in
+    // spvv_template_complex); for real T both operations hit the doti path.
+    template <typename T, typename I>
+    void spvv_run(rocsparse_handle handle, rocsparse_indextype it, rocsparse_index_base base)
+    {
+        const I              off = (base == rocsparse_index_base_one) ? 1 : 0;
+        const std::vector<I> ind{
+            static_cast<I>(0 + off), static_cast<I>(2 + off), static_cast<I>(4 + off)};
+        const std::vector<T> xval{scalar<T>(1), scalar<T>(2), scalar<T>(3)};
+        const std::vector<T> yv(5, scalar<T>(1));
+
+        I* d_ind  = nullptr;
+        T* d_xval = nullptr;
+        T* d_y    = nullptr;
+        ASSERT_EQ(hipMalloc(&d_ind, ind.size() * sizeof(I)), hipSuccess);
+        ASSERT_EQ(hipMalloc(&d_xval, xval.size() * sizeof(T)), hipSuccess);
+        ASSERT_EQ(hipMalloc(&d_y, yv.size() * sizeof(T)), hipSuccess);
+        (void)hipMemcpy(d_ind, ind.data(), ind.size() * sizeof(I), hipMemcpyHostToDevice);
+        (void)hipMemcpy(d_xval, xval.data(), xval.size() * sizeof(T), hipMemcpyHostToDevice);
+        (void)hipMemcpy(d_y, yv.data(), yv.size() * sizeof(T), hipMemcpyHostToDevice);
+
+        rocsparse_spvec_descr x = nullptr;
+        rocsparse_dnvec_descr y = nullptr;
+        ASSERT_EQ(rocsparse_create_spvec_descr(&x, 5, 3, d_ind, d_xval, it, base, dt_of<T>()),
+                  rocsparse_status_success);
+        ASSERT_EQ(rocsparse_create_dnvec_descr(&y, 5, d_y, dt_of<T>()), rocsparse_status_success);
+
+        // Default handle pointer mode is host -> result lives on the host.
+        T      result      = scalar<T>(0);
+        size_t buffer_size = 0;
+
+        // buffer-size query (temp_buffer == nullptr).
+        EXPECT_ROC(rocsparse_spvv(handle,
+                                  rocsparse_operation_none,
+                                  x,
+                                  y,
+                                  &result,
+                                  dt_of<T>(),
+                                  &buffer_size,
+                                  nullptr),
+                   rocsparse_status_success);
+
+        void* temp = nullptr;
+        ASSERT_EQ(hipMalloc(&temp, buffer_size ? buffer_size : 4), hipSuccess);
+
+        // Non-transpose (plain dot) path.
+        EXPECT_ROC(
+            rocsparse_spvv(
+                handle, rocsparse_operation_none, x, y, &result, dt_of<T>(), &buffer_size, temp),
+            rocsparse_status_success);
+        EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
+
+        // Conjugate-transpose path (conjugated dot for complex, plain for real).
+        EXPECT_ROC(rocsparse_spvv(handle,
+                                  rocsparse_operation_conjugate_transpose,
+                                  x,
+                                  y,
+                                  &result,
+                                  dt_of<T>(),
+                                  &buffer_size,
+                                  temp),
+                   rocsparse_status_success);
+        EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
+
+        (void)rocsparse_destroy_spvec_descr(x);
+        (void)rocsparse_destroy_dnvec_descr(y);
+        (void)hipFree(d_ind);
+        (void)hipFree(d_xval);
+        (void)hipFree(d_y);
+        (void)hipFree(temp);
+    }
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -255,4 +330,144 @@ TEST_F(HostLevel1, axpby_ok_and_quick_return)
         EXPECT_ROC(rocsparse_axpby(handle, &alpha, vp.x, &beta, vp.y), rocsparse_status_success);
         EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
     }
+}
+
+// ---------------------------------------------------------------------------
+// rocsparse_spvv: exercise the full compute path for all 4 datatypes, both
+// index types, both index bases, and BOTH operations. For complex types the
+// conjugate_transpose operation selects the previously-untested
+// rocsparse::dotci_template branch inside spvv_template_complex; the none
+// operation selects the doti branch. For real types both operations funnel
+// through spvv_template_real's doti path.
+// ---------------------------------------------------------------------------
+TEST_F(HostLevel1, spvv_dispatch_i32_base_zero)
+{
+    spvv_run<float, int32_t>(handle, rocsparse_indextype_i32, rocsparse_index_base_zero);
+    spvv_run<double, int32_t>(handle, rocsparse_indextype_i32, rocsparse_index_base_zero);
+    spvv_run<rocsparse_float_complex, int32_t>(
+        handle, rocsparse_indextype_i32, rocsparse_index_base_zero);
+    spvv_run<rocsparse_double_complex, int32_t>(
+        handle, rocsparse_indextype_i32, rocsparse_index_base_zero);
+}
+
+TEST_F(HostLevel1, spvv_dispatch_i32_base_one)
+{
+    spvv_run<float, int32_t>(handle, rocsparse_indextype_i32, rocsparse_index_base_one);
+    spvv_run<double, int32_t>(handle, rocsparse_indextype_i32, rocsparse_index_base_one);
+    spvv_run<rocsparse_float_complex, int32_t>(
+        handle, rocsparse_indextype_i32, rocsparse_index_base_one);
+    spvv_run<rocsparse_double_complex, int32_t>(
+        handle, rocsparse_indextype_i32, rocsparse_index_base_one);
+}
+
+TEST_F(HostLevel1, spvv_dispatch_i64_base_zero)
+{
+    spvv_run<float, int64_t>(handle, rocsparse_indextype_i64, rocsparse_index_base_zero);
+    spvv_run<double, int64_t>(handle, rocsparse_indextype_i64, rocsparse_index_base_zero);
+    spvv_run<rocsparse_float_complex, int64_t>(
+        handle, rocsparse_indextype_i64, rocsparse_index_base_zero);
+    spvv_run<rocsparse_double_complex, int64_t>(
+        handle, rocsparse_indextype_i64, rocsparse_index_base_zero);
+}
+
+TEST_F(HostLevel1, spvv_dispatch_i64_base_one)
+{
+    spvv_run<float, int64_t>(handle, rocsparse_indextype_i64, rocsparse_index_base_one);
+    spvv_run<double, int64_t>(handle, rocsparse_indextype_i64, rocsparse_index_base_one);
+    spvv_run<rocsparse_float_complex, int64_t>(
+        handle, rocsparse_indextype_i64, rocsparse_index_base_one);
+    spvv_run<rocsparse_double_complex, int64_t>(
+        handle, rocsparse_indextype_i64, rocsparse_index_base_one);
+}
+
+// ---------------------------------------------------------------------------
+// rocsparse_spvv argument-checking branches (the ROCSPARSE_CHECKARG_* guards in
+// the C wrapper). Each deliberately-invalid call must return the matching
+// status without touching the compute path.
+// ---------------------------------------------------------------------------
+TEST_F(HostLevel1, spvv_invalid_args)
+{
+    VecPair<float, int32_t> vp;
+    ASSERT_TRUE(
+        vp.create(rocsparse_indextype_i32, rocsparse_datatype_f32_r, rocsparse_datatype_f32_r));
+
+    float  result      = 0;
+    size_t buffer_size = 0;
+
+    // Invalid handle.
+    EXPECT_ROC(rocsparse_spvv(nullptr,
+                              rocsparse_operation_none,
+                              vp.x,
+                              vp.y,
+                              &result,
+                              rocsparse_datatype_f32_r,
+                              &buffer_size,
+                              nullptr),
+               rocsparse_status_invalid_handle);
+
+    // Invalid operation enum.
+    EXPECT_ROC(rocsparse_spvv(handle,
+                              static_cast<rocsparse_operation>(0x7FFFFFFF),
+                              vp.x,
+                              vp.y,
+                              &result,
+                              rocsparse_datatype_f32_r,
+                              &buffer_size,
+                              nullptr),
+               rocsparse_status_invalid_value);
+
+    // Invalid compute type enum.
+    EXPECT_ROC(rocsparse_spvv(handle,
+                              rocsparse_operation_none,
+                              vp.x,
+                              vp.y,
+                              &result,
+                              static_cast<rocsparse_datatype>(0x7FFFFFFF),
+                              &buffer_size,
+                              nullptr),
+               rocsparse_status_invalid_value);
+
+    // Null sparse descriptor.
+    EXPECT_ROC(rocsparse_spvv(handle,
+                              rocsparse_operation_none,
+                              nullptr,
+                              vp.y,
+                              &result,
+                              rocsparse_datatype_f32_r,
+                              &buffer_size,
+                              nullptr),
+               rocsparse_status_invalid_pointer);
+
+    // Null dense descriptor.
+    EXPECT_ROC(rocsparse_spvv(handle,
+                              rocsparse_operation_none,
+                              vp.x,
+                              nullptr,
+                              &result,
+                              rocsparse_datatype_f32_r,
+                              &buffer_size,
+                              nullptr),
+               rocsparse_status_invalid_pointer);
+
+    // Null result pointer.
+    EXPECT_ROC(rocsparse_spvv(handle,
+                              rocsparse_operation_none,
+                              vp.x,
+                              vp.y,
+                              nullptr,
+                              rocsparse_datatype_f32_r,
+                              &buffer_size,
+                              nullptr),
+               rocsparse_status_invalid_pointer);
+
+    // Null buffer_size when temp_buffer is also null.
+    EXPECT_ROC(rocsparse_spvv(handle,
+                              rocsparse_operation_none,
+                              vp.x,
+                              vp.y,
+                              &result,
+                              rocsparse_datatype_f32_r,
+                              nullptr,
+                              nullptr),
+               rocsparse_status_invalid_pointer);
 }
