@@ -1440,3 +1440,901 @@ TEST_F(PrecondCsritilu0, bad_args)
                                               &buffer_size),
               rocsparse_status_invalid_value);
 }
+
+// ======================================================================
+// gtsv : algorithm-selection coverage. The buffer_size/solve dispatch in
+// rocsparse_gtsv.cpp selects an internal block_dim / gridsize (spike solver
+// template instantiation) from the system size m, and a right-hand-side
+// kernel variant from n (n%8, n%4, n%2, else). Drive a range of m and n on
+// tiny diagonally-dominant tridiagonal systems (d=4, dl=du=1) so the solve
+// stays well-conditioned across every branch.
+// ======================================================================
+template <typename T>
+static void run_gtsv_solve(rocsparse_handle handle,
+                           rocsparse_int    m,
+                           rocsparse_int    n,
+                           rocsparse_int    ldb)
+{
+    std::vector<T> hdl((size_t)m), hd((size_t)m), hdu((size_t)m);
+    for(rocsparse_int i = 0; i < m; ++i)
+    {
+        hdl[i] = scalar<T>(i == 0 ? 0.0f : 1.0f);
+        hd[i]  = scalar<T>(4.0f);
+        hdu[i] = scalar<T>(i == m - 1 ? 0.0f : 1.0f);
+    }
+    std::vector<T>   hB((size_t)ldb * (size_t)n, scalar<T>(1.0f));
+    device_vector<T> dl{hdl}, d{hd}, du{hdu}, B{hB};
+    ASSERT_TRUE(dl.ptr && d.ptr && du.ptr && B.ptr);
+
+    size_t           buffer_size = 0;
+    rocsparse_status st;
+    if constexpr(std::is_same_v<T, float>)
+        st = rocsparse_sgtsv_buffer_size(handle, m, n, dl, d, du, B, ldb, &buffer_size);
+    else
+        st = rocsparse_dgtsv_buffer_size(handle, m, n, dl, d, du, B, ldb, &buffer_size);
+
+    if(st == rocsparse_status_not_implemented)
+        return;
+    ASSERT_EQ(st, rocsparse_status_success);
+    EXPECT_GT(buffer_size, 0u);
+
+    device_vector<char> buffer{buffer_size};
+    ASSERT_TRUE(buffer.ptr);
+
+    if constexpr(std::is_same_v<T, float>)
+        st = rocsparse_sgtsv(handle, m, n, dl, d, du, B, ldb, buffer.ptr);
+    else
+        st = rocsparse_dgtsv(handle, m, n, dl, d, du, B, ldb, buffer.ptr);
+    EXPECT_EQ(st, rocsparse_status_success);
+    ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+}
+
+// m >= 513 forces the padded grid to gridsize == 2 (spike grid-level<2>).
+TEST_F(PrecondGtsv, alg_gridsize2_float)
+{
+    run_gtsv_solve<float>(handle, 513, 1, 513);
+}
+TEST_F(PrecondGtsv, alg_gridsize2_double)
+{
+    run_gtsv_solve<double>(handle, 513, 1, 513);
+}
+// m >= 1537 forces gridsize == 4 (spike grid-level<4>).
+TEST_F(PrecondGtsv, alg_gridsize4_double)
+{
+    run_gtsv_solve<double>(handle, 1600, 1, 1600);
+}
+// Right-hand-side kernel variants selected by n % 8 / 4 / 2 / else.
+TEST_F(PrecondGtsv, alg_rhs_n8)
+{
+    run_gtsv_solve<float>(handle, 16, 8, 16);
+}
+TEST_F(PrecondGtsv, alg_rhs_n4)
+{
+    run_gtsv_solve<float>(handle, 16, 4, 16);
+}
+TEST_F(PrecondGtsv, alg_rhs_n2)
+{
+    run_gtsv_solve<double>(handle, 16, 2, 16);
+}
+TEST_F(PrecondGtsv, alg_rhs_n3)
+{
+    run_gtsv_solve<double>(handle, 16, 3, 16);
+}
+// A larger ldb than m exercises the strided right-hand-side copy path.
+TEST_F(PrecondGtsv, alg_large_ldb)
+{
+    run_gtsv_solve<float>(handle, 32, 2, 40);
+}
+
+// n == 0 quick-return branch (buffer_size==0, solve is a no-op success).
+TEST_F(PrecondGtsv, quick_return_n0)
+{
+    const rocsparse_int  m = 4, n = 0, ldb = 4;
+    device_vector<float> dl{std::vector<float>{0, 1, 1, 1}};
+    device_vector<float> d{std::vector<float>{4, 4, 4, 4}};
+    device_vector<float> du{std::vector<float>{1, 1, 1, 0}};
+    device_vector<float> B{std::vector<float>{1, 2, 3, 4}};
+    ASSERT_TRUE(dl.ptr && d.ptr && du.ptr && B.ptr);
+
+    size_t buffer_size = 1;
+    ASSERT_EQ(rocsparse_sgtsv_buffer_size(handle, m, n, dl, d, du, B, ldb, &buffer_size),
+              rocsparse_status_success);
+    EXPECT_EQ(buffer_size, 0u);
+    EXPECT_EQ(rocsparse_sgtsv(handle, m, n, dl, d, du, B, ldb, nullptr),
+              rocsparse_status_success);
+}
+
+// Additional size/pointer guards not covered by PrecondGtsv.bad_args.
+TEST_F(PrecondGtsv, more_bad_args)
+{
+    const rocsparse_int  m = 4, n = 1, ldb = 4;
+    device_vector<float> dl{std::vector<float>{0, 1, 1, 1}};
+    device_vector<float> d{std::vector<float>{4, 4, 4, 4}};
+    device_vector<float> du{std::vector<float>{1, 1, 1, 0}};
+    device_vector<float> B{std::vector<float>{1, 2, 3, 4}};
+    ASSERT_TRUE(dl.ptr && d.ptr && du.ptr && B.ptr);
+
+    size_t buffer_size = 0;
+    // m <= 1 is rejected as an invalid size by gtsv.
+    EXPECT_EQ(rocsparse_sgtsv_buffer_size(handle, 1, n, dl, d, du, B, ldb, &buffer_size),
+              rocsparse_status_invalid_size);
+    // ldb < max(1, m) is an invalid size.
+    EXPECT_EQ(rocsparse_sgtsv_buffer_size(handle, m, n, dl, d, du, B, 2, &buffer_size),
+              rocsparse_status_invalid_size);
+    // null buffer_size pointer.
+    EXPECT_EQ(rocsparse_sgtsv_buffer_size(handle, m, n, dl, d, du, B, ldb, nullptr),
+              rocsparse_status_invalid_pointer);
+
+    // Solve-side guards.
+    device_vector<char> buffer{size_t(1)};
+    ASSERT_TRUE(buffer.ptr);
+    EXPECT_EQ(rocsparse_sgtsv(nullptr, m, n, dl, d, du, B, ldb, buffer.ptr),
+              rocsparse_status_invalid_handle);
+    EXPECT_EQ(rocsparse_sgtsv(handle, 1, n, dl, d, du, B, ldb, buffer.ptr),
+              rocsparse_status_invalid_size);
+    EXPECT_EQ(rocsparse_sgtsv(handle, m, n, dl, d, du, B, 2, buffer.ptr),
+              rocsparse_status_invalid_size);
+    EXPECT_EQ(rocsparse_sgtsv(handle, m, n, nullptr, d, du, B, ldb, buffer.ptr),
+              rocsparse_status_invalid_pointer);
+    EXPECT_EQ(rocsparse_sgtsv(handle, m, n, dl, d, du, B, ldb, nullptr),
+              rocsparse_status_invalid_pointer);
+}
+
+// ======================================================================
+// csrilu0 : additional analysis-policy, numeric-boost, descriptor and
+// kernel-launch coverage on top of Precond.csrilu0_full_pipeline.
+//   * analysis run with force then reuse (both the build and the reuse
+//     branch of the shared csrsv analysis).
+//   * numeric boost enabled (boost path in the compute kernel launch).
+//   * not_implemented / requires_sorted_storage descriptor guards.
+//   * a matrix with a wide row (>= 512 nnz) selects the binary-search
+//     kernel launch instead of the hash launch.
+// ======================================================================
+class PrecondCsrilu0 : public HandleTest
+{
+};
+
+TEST_F(PrecondCsrilu0, analysis_force_then_reuse)
+{
+    const rocsparse_int          m = 3, nnz = 3;
+    device_vector<rocsparse_int> row_ptr{std::vector<rocsparse_int>{0, 1, 2, 3}};
+    device_vector<rocsparse_int> col_ind{std::vector<rocsparse_int>{0, 1, 2}};
+    device_vector<float>         val{std::vector<float>{2, 3, 4}};
+    ASSERT_TRUE(row_ptr.ptr && col_ind.ptr && val.ptr);
+
+    rocsparse_mat_descr descr = nullptr;
+    ASSERT_EQ(rocsparse_create_mat_descr(&descr), rocsparse_status_success);
+    rocsparse_mat_info info = nullptr;
+    ASSERT_EQ(rocsparse_create_mat_info(&info), rocsparse_status_success);
+
+    size_t buffer_size = 0;
+    ASSERT_EQ(rocsparse_scsrilu0_buffer_size(
+                  handle, m, nnz, descr, val, row_ptr, col_ind, info, &buffer_size),
+              rocsparse_status_success);
+    device_vector<char> buffer{buffer_size};
+    ASSERT_TRUE(buffer.ptr);
+
+    // First analysis with the force policy builds the meta data.
+    ASSERT_EQ(rocsparse_scsrilu0_analysis(handle,
+                                          m,
+                                          nnz,
+                                          descr,
+                                          val,
+                                          row_ptr,
+                                          col_ind,
+                                          info,
+                                          rocsparse_analysis_policy_force,
+                                          rocsparse_solve_policy_auto,
+                                          buffer.ptr),
+              rocsparse_status_success);
+    ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+    // Second analysis with reuse hits the "already analyzed" branch.
+    ASSERT_EQ(rocsparse_scsrilu0_analysis(handle,
+                                          m,
+                                          nnz,
+                                          descr,
+                                          val,
+                                          row_ptr,
+                                          col_ind,
+                                          info,
+                                          rocsparse_analysis_policy_reuse,
+                                          rocsparse_solve_policy_auto,
+                                          buffer.ptr),
+              rocsparse_status_success);
+    ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+
+    EXPECT_EQ(rocsparse_scsrilu0(handle,
+                                 m,
+                                 nnz,
+                                 descr,
+                                 val,
+                                 row_ptr,
+                                 col_ind,
+                                 info,
+                                 rocsparse_solve_policy_auto,
+                                 buffer.ptr),
+              rocsparse_status_success);
+    ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+
+    rocsparse_int position = -2;
+    EXPECT_EQ(rocsparse_csrilu0_zero_pivot(handle, info, &position), rocsparse_status_success);
+    EXPECT_EQ(position, -1);
+
+    EXPECT_EQ(rocsparse_csrilu0_clear(handle, info), rocsparse_status_success);
+    EXPECT_EQ(rocsparse_destroy_mat_info(info), rocsparse_status_success);
+    EXPECT_EQ(rocsparse_destroy_mat_descr(descr), rocsparse_status_success);
+}
+
+TEST_F(PrecondCsrilu0, numeric_boost_enabled)
+{
+    const rocsparse_int          m = 3, nnz = 3;
+    device_vector<rocsparse_int> row_ptr{std::vector<rocsparse_int>{0, 1, 2, 3}};
+    device_vector<rocsparse_int> col_ind{std::vector<rocsparse_int>{0, 1, 2}};
+    device_vector<double>        val{std::vector<double>{2, 3, 4}};
+    ASSERT_TRUE(row_ptr.ptr && col_ind.ptr && val.ptr);
+
+    rocsparse_mat_descr descr = nullptr;
+    ASSERT_EQ(rocsparse_create_mat_descr(&descr), rocsparse_status_success);
+    rocsparse_mat_info info = nullptr;
+    ASSERT_EQ(rocsparse_create_mat_info(&info), rocsparse_status_success);
+
+    // Enable numeric boost (host pointers). A well-conditioned diagonal never
+    // triggers the actual replacement, but the boost-enabled code path runs.
+    const double boost_tol = 1.0e-12, boost_val = 1.0;
+    EXPECT_EQ(rocsparse_dcsrilu0_numeric_boost(handle, info, 1, &boost_tol, &boost_val),
+              rocsparse_status_success);
+
+    size_t buffer_size = 0;
+    ASSERT_EQ(rocsparse_dcsrilu0_buffer_size(
+                  handle, m, nnz, descr, val, row_ptr, col_ind, info, &buffer_size),
+              rocsparse_status_success);
+    device_vector<char> buffer{buffer_size};
+    ASSERT_TRUE(buffer.ptr);
+
+    ASSERT_EQ(rocsparse_dcsrilu0_analysis(handle,
+                                          m,
+                                          nnz,
+                                          descr,
+                                          val,
+                                          row_ptr,
+                                          col_ind,
+                                          info,
+                                          rocsparse_analysis_policy_reuse,
+                                          rocsparse_solve_policy_auto,
+                                          buffer.ptr),
+              rocsparse_status_success);
+    ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+
+    EXPECT_EQ(rocsparse_dcsrilu0(handle,
+                                 m,
+                                 nnz,
+                                 descr,
+                                 val,
+                                 row_ptr,
+                                 col_ind,
+                                 info,
+                                 rocsparse_solve_policy_auto,
+                                 buffer.ptr),
+              rocsparse_status_success);
+    ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+
+    EXPECT_EQ(rocsparse_csrilu0_clear(handle, info), rocsparse_status_success);
+    EXPECT_EQ(rocsparse_destroy_mat_info(info), rocsparse_status_success);
+    EXPECT_EQ(rocsparse_destroy_mat_descr(descr), rocsparse_status_success);
+}
+
+TEST_F(PrecondCsrilu0, descr_not_implemented_and_unsorted)
+{
+    const rocsparse_int          m = 3, nnz = 3;
+    device_vector<rocsparse_int> row_ptr{std::vector<rocsparse_int>{0, 1, 2, 3}};
+    device_vector<rocsparse_int> col_ind{std::vector<rocsparse_int>{0, 1, 2}};
+    device_vector<float>         val{std::vector<float>{2, 3, 4}};
+    ASSERT_TRUE(row_ptr.ptr && col_ind.ptr && val.ptr);
+
+    rocsparse_mat_descr descr = nullptr;
+    ASSERT_EQ(rocsparse_create_mat_descr(&descr), rocsparse_status_success);
+    rocsparse_mat_info info = nullptr;
+    ASSERT_EQ(rocsparse_create_mat_info(&info), rocsparse_status_success);
+
+    size_t buffer_size = 0;
+
+    // Non-general matrix type -> not_implemented.
+    ASSERT_EQ(rocsparse_set_mat_type(descr, rocsparse_matrix_type_symmetric),
+              rocsparse_status_success);
+    EXPECT_EQ(rocsparse_scsrilu0_buffer_size(
+                  handle, m, nnz, descr, val, row_ptr, col_ind, info, &buffer_size),
+              rocsparse_status_not_implemented);
+    ASSERT_EQ(rocsparse_set_mat_type(descr, rocsparse_matrix_type_general),
+              rocsparse_status_success);
+
+    // Unsorted storage -> requires_sorted_storage.
+    ASSERT_EQ(rocsparse_set_mat_storage_mode(descr, rocsparse_storage_mode_unsorted),
+              rocsparse_status_success);
+    EXPECT_EQ(rocsparse_scsrilu0_buffer_size(
+                  handle, m, nnz, descr, val, row_ptr, col_ind, info, &buffer_size),
+              rocsparse_status_requires_sorted_storage);
+
+    EXPECT_EQ(rocsparse_destroy_mat_info(info), rocsparse_status_success);
+    EXPECT_EQ(rocsparse_destroy_mat_descr(descr), rocsparse_status_success);
+}
+
+// Wide first row (>= 512 nnz) makes max_nnz-per-row >= 512, selecting the
+// binary-search kernel launch (rocsparse_csrilu0_kernel_launch.cpp) instead of
+// the hash launch that the tiny diagonal pipelines exercise. The matrix is
+// upper triangular with a strongly dominant diagonal, so ILU0 has no fill and
+// no zero pivot.
+TEST_F(PrecondCsrilu0, wide_row_binsearch_launch)
+{
+    const rocsparse_int wide = 512;
+    const rocsparse_int m    = wide;
+    const rocsparse_int nnz  = wide + (m - 1); // row 0 dense + diagonal of the rest
+
+    std::vector<rocsparse_int> hptr(m + 1, 0);
+    std::vector<rocsparse_int> hcol;
+    std::vector<float>         hval;
+    hcol.reserve(nnz);
+    hval.reserve(nnz);
+    // Row 0: columns 0..wide-1.
+    for(rocsparse_int j = 0; j < wide; ++j)
+    {
+        hcol.push_back(j);
+        hval.push_back(j == 0 ? 1000.0f : 1.0f);
+    }
+    hptr[1] = wide;
+    // Rows 1..m-1: single diagonal entry.
+    for(rocsparse_int i = 1; i < m; ++i)
+    {
+        hcol.push_back(i);
+        hval.push_back(4.0f);
+        hptr[i + 1] = hptr[i] + 1;
+    }
+    ASSERT_EQ((rocsparse_int)hcol.size(), nnz);
+
+    device_vector<rocsparse_int> row_ptr{hptr};
+    device_vector<rocsparse_int> col_ind{hcol};
+    device_vector<float>         val{hval};
+    ASSERT_TRUE(row_ptr.ptr && col_ind.ptr && val.ptr);
+
+    rocsparse_mat_descr descr = nullptr;
+    ASSERT_EQ(rocsparse_create_mat_descr(&descr), rocsparse_status_success);
+    rocsparse_mat_info info = nullptr;
+    ASSERT_EQ(rocsparse_create_mat_info(&info), rocsparse_status_success);
+
+    size_t buffer_size = 0;
+    ASSERT_EQ(rocsparse_scsrilu0_buffer_size(
+                  handle, m, nnz, descr, val, row_ptr, col_ind, info, &buffer_size),
+              rocsparse_status_success);
+    device_vector<char> buffer{buffer_size};
+    ASSERT_TRUE(buffer.ptr);
+
+    ASSERT_EQ(rocsparse_scsrilu0_analysis(handle,
+                                          m,
+                                          nnz,
+                                          descr,
+                                          val,
+                                          row_ptr,
+                                          col_ind,
+                                          info,
+                                          rocsparse_analysis_policy_force,
+                                          rocsparse_solve_policy_auto,
+                                          buffer.ptr),
+              rocsparse_status_success);
+    ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+
+    EXPECT_EQ(rocsparse_scsrilu0(handle,
+                                 m,
+                                 nnz,
+                                 descr,
+                                 val,
+                                 row_ptr,
+                                 col_ind,
+                                 info,
+                                 rocsparse_solve_policy_auto,
+                                 buffer.ptr),
+              rocsparse_status_success);
+    ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+
+    rocsparse_int position = -2;
+    EXPECT_EQ(rocsparse_csrilu0_zero_pivot(handle, info, &position), rocsparse_status_success);
+    EXPECT_EQ(position, -1);
+
+    EXPECT_EQ(rocsparse_csrilu0_clear(handle, info), rocsparse_status_success);
+    EXPECT_EQ(rocsparse_destroy_mat_info(info), rocsparse_status_success);
+    EXPECT_EQ(rocsparse_destroy_mat_descr(descr), rocsparse_status_success);
+}
+
+// ======================================================================
+// csric0 analysis coverage (rocsparse_xcsric0_analysis.cpp):
+//   * force then reuse analysis policy.
+//   * descriptor / enum / pointer guards (not_implemented,
+//     requires_sorted_storage, invalid analysis/solve enum, null info/buffer).
+// ======================================================================
+TEST_F(PrecondCsric0, analysis_force_then_reuse)
+{
+    const rocsparse_int          m = 3, nnz = 3;
+    device_vector<rocsparse_int> row_ptr{std::vector<rocsparse_int>{0, 1, 2, 3}};
+    device_vector<rocsparse_int> col_ind{std::vector<rocsparse_int>{0, 1, 2}};
+    device_vector<double>        val{std::vector<double>{2, 3, 4}};
+    ASSERT_TRUE(row_ptr.ptr && col_ind.ptr && val.ptr);
+
+    rocsparse_mat_descr descr = nullptr;
+    ASSERT_EQ(rocsparse_create_mat_descr(&descr), rocsparse_status_success);
+    rocsparse_mat_info info = nullptr;
+    ASSERT_EQ(rocsparse_create_mat_info(&info), rocsparse_status_success);
+
+    size_t buffer_size = 0;
+    ASSERT_EQ(rocsparse_dcsric0_buffer_size(
+                  handle, m, nnz, descr, val, row_ptr, col_ind, info, &buffer_size),
+              rocsparse_status_success);
+    device_vector<char> buffer{buffer_size};
+    ASSERT_TRUE(buffer.ptr);
+
+    for(auto policy : {rocsparse_analysis_policy_force, rocsparse_analysis_policy_reuse})
+    {
+        ASSERT_EQ(rocsparse_dcsric0_analysis(handle,
+                                             m,
+                                             nnz,
+                                             descr,
+                                             val,
+                                             row_ptr,
+                                             col_ind,
+                                             info,
+                                             policy,
+                                             rocsparse_solve_policy_auto,
+                                             buffer.ptr),
+                  rocsparse_status_success);
+        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+    }
+
+    EXPECT_EQ(rocsparse_dcsric0(handle,
+                                m,
+                                nnz,
+                                descr,
+                                val,
+                                row_ptr,
+                                col_ind,
+                                info,
+                                rocsparse_solve_policy_auto,
+                                buffer.ptr),
+              rocsparse_status_success);
+    ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+
+    EXPECT_EQ(rocsparse_csric0_clear(handle, info), rocsparse_status_success);
+    EXPECT_EQ(rocsparse_destroy_mat_info(info), rocsparse_status_success);
+    EXPECT_EQ(rocsparse_destroy_mat_descr(descr), rocsparse_status_success);
+}
+
+TEST_F(PrecondCsric0, analysis_bad_args)
+{
+    const rocsparse_int          m = 3, nnz = 3;
+    device_vector<rocsparse_int> row_ptr{std::vector<rocsparse_int>{0, 1, 2, 3}};
+    device_vector<rocsparse_int> col_ind{std::vector<rocsparse_int>{0, 1, 2}};
+    device_vector<float>         val{std::vector<float>{2, 3, 4}};
+    device_vector<char>          buffer{size_t(256)};
+    ASSERT_TRUE(row_ptr.ptr && col_ind.ptr && val.ptr && buffer.ptr);
+
+    rocsparse_mat_descr descr = nullptr;
+    ASSERT_EQ(rocsparse_create_mat_descr(&descr), rocsparse_status_success);
+    rocsparse_mat_info info = nullptr;
+    ASSERT_EQ(rocsparse_create_mat_info(&info), rocsparse_status_success);
+
+    // Invalid handle.
+    EXPECT_EQ(rocsparse_scsric0_analysis(nullptr,
+                                         m,
+                                         nnz,
+                                         descr,
+                                         val,
+                                         row_ptr,
+                                         col_ind,
+                                         info,
+                                         rocsparse_analysis_policy_reuse,
+                                         rocsparse_solve_policy_auto,
+                                         buffer.ptr),
+              rocsparse_status_invalid_handle);
+
+    // Non-general matrix type -> not_implemented.
+    ASSERT_EQ(rocsparse_set_mat_type(descr, rocsparse_matrix_type_triangular),
+              rocsparse_status_success);
+    EXPECT_EQ(rocsparse_scsric0_analysis(handle,
+                                         m,
+                                         nnz,
+                                         descr,
+                                         val,
+                                         row_ptr,
+                                         col_ind,
+                                         info,
+                                         rocsparse_analysis_policy_reuse,
+                                         rocsparse_solve_policy_auto,
+                                         buffer.ptr),
+              rocsparse_status_not_implemented);
+    ASSERT_EQ(rocsparse_set_mat_type(descr, rocsparse_matrix_type_general),
+              rocsparse_status_success);
+
+    // Unsorted storage -> requires_sorted_storage.
+    ASSERT_EQ(rocsparse_set_mat_storage_mode(descr, rocsparse_storage_mode_unsorted),
+              rocsparse_status_success);
+    EXPECT_EQ(rocsparse_scsric0_analysis(handle,
+                                         m,
+                                         nnz,
+                                         descr,
+                                         val,
+                                         row_ptr,
+                                         col_ind,
+                                         info,
+                                         rocsparse_analysis_policy_reuse,
+                                         rocsparse_solve_policy_auto,
+                                         buffer.ptr),
+              rocsparse_status_requires_sorted_storage);
+    ASSERT_EQ(rocsparse_set_mat_storage_mode(descr, rocsparse_storage_mode_sorted),
+              rocsparse_status_success);
+
+    // Invalid analysis-policy enum.
+    EXPECT_EQ(rocsparse_scsric0_analysis(handle,
+                                         m,
+                                         nnz,
+                                         descr,
+                                         val,
+                                         row_ptr,
+                                         col_ind,
+                                         info,
+                                         (rocsparse_analysis_policy)-1,
+                                         rocsparse_solve_policy_auto,
+                                         buffer.ptr),
+              rocsparse_status_invalid_value);
+
+    // Invalid solve-policy enum.
+    EXPECT_EQ(rocsparse_scsric0_analysis(handle,
+                                         m,
+                                         nnz,
+                                         descr,
+                                         val,
+                                         row_ptr,
+                                         col_ind,
+                                         info,
+                                         rocsparse_analysis_policy_reuse,
+                                         (rocsparse_solve_policy)-1,
+                                         buffer.ptr),
+              rocsparse_status_invalid_value);
+
+    // Null info pointer.
+    EXPECT_EQ(rocsparse_scsric0_analysis(handle,
+                                         m,
+                                         nnz,
+                                         descr,
+                                         val,
+                                         row_ptr,
+                                         col_ind,
+                                         nullptr,
+                                         rocsparse_analysis_policy_reuse,
+                                         rocsparse_solve_policy_auto,
+                                         buffer.ptr),
+              rocsparse_status_invalid_pointer);
+
+    // Null temp buffer.
+    EXPECT_EQ(rocsparse_scsric0_analysis(handle,
+                                         m,
+                                         nnz,
+                                         descr,
+                                         val,
+                                         row_ptr,
+                                         col_ind,
+                                         info,
+                                         rocsparse_analysis_policy_reuse,
+                                         rocsparse_solve_policy_auto,
+                                         nullptr),
+              rocsparse_status_invalid_pointer);
+
+    EXPECT_EQ(rocsparse_destroy_mat_info(info), rocsparse_status_success);
+    EXPECT_EQ(rocsparse_destroy_mat_descr(descr), rocsparse_status_success);
+}
+
+// ======================================================================
+// bsrilu0 : numeric-boost-enabled compute pipeline. The tiny diagonal
+// pipelines only exercise numeric boost disabled, so enable it here to run
+// the boost branch of the general kernel launch. block_dim=2, SPD blocks.
+// ======================================================================
+TEST_F(PrecondBsrilu0, numeric_boost_enabled_pipeline)
+{
+    const rocsparse_direction    dir = rocsparse_direction_row;
+    const rocsparse_int          mb = 2, nnzb = 2, block_dim = 2;
+    device_vector<rocsparse_int> row_ptr{std::vector<rocsparse_int>{0, 1, 2}};
+    device_vector<rocsparse_int> col_ind{std::vector<rocsparse_int>{0, 1}};
+    device_vector<double>        val{std::vector<double>{4, 1, 1, 4, 4, 1, 1, 4}};
+    ASSERT_TRUE(row_ptr.ptr && col_ind.ptr && val.ptr);
+
+    rocsparse_mat_descr descr = nullptr;
+    ASSERT_EQ(rocsparse_create_mat_descr(&descr), rocsparse_status_success);
+    rocsparse_mat_info info = nullptr;
+    ASSERT_EQ(rocsparse_create_mat_info(&info), rocsparse_status_success);
+
+    const double boost_tol = 1.0e-12, boost_val = 1.0;
+    EXPECT_EQ(rocsparse_dbsrilu0_numeric_boost(handle, info, 1, &boost_tol, &boost_val),
+              rocsparse_status_success);
+
+    size_t buffer_size = 0;
+    ASSERT_EQ(rocsparse_dbsrilu0_buffer_size(handle,
+                                             dir,
+                                             mb,
+                                             nnzb,
+                                             descr,
+                                             val,
+                                             row_ptr,
+                                             col_ind,
+                                             block_dim,
+                                             info,
+                                             &buffer_size),
+              rocsparse_status_success);
+    device_vector<char> buffer{buffer_size};
+    ASSERT_TRUE(buffer.ptr);
+
+    ASSERT_EQ(rocsparse_dbsrilu0_analysis(handle,
+                                          dir,
+                                          mb,
+                                          nnzb,
+                                          descr,
+                                          val,
+                                          row_ptr,
+                                          col_ind,
+                                          block_dim,
+                                          info,
+                                          rocsparse_analysis_policy_force,
+                                          rocsparse_solve_policy_auto,
+                                          buffer.ptr),
+              rocsparse_status_success);
+    ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+
+    EXPECT_EQ(rocsparse_dbsrilu0(handle,
+                                 dir,
+                                 mb,
+                                 nnzb,
+                                 descr,
+                                 val,
+                                 row_ptr,
+                                 col_ind,
+                                 block_dim,
+                                 info,
+                                 rocsparse_solve_policy_auto,
+                                 buffer.ptr),
+              rocsparse_status_success);
+    ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+
+    rocsparse_int position = -2;
+    EXPECT_EQ(rocsparse_bsrilu0_zero_pivot(handle, info, &position), rocsparse_status_success);
+    EXPECT_EQ(position, -1);
+
+    EXPECT_EQ(rocsparse_bsrilu0_clear(handle, info), rocsparse_status_success);
+    EXPECT_EQ(rocsparse_destroy_mat_info(info), rocsparse_status_success);
+    EXPECT_EQ(rocsparse_destroy_mat_descr(descr), rocsparse_status_success);
+}
+
+// ======================================================================
+// csritilu0 : algorithm / option / index-base coverage of the preprocess
+// dispatch (rocsparse_csritilu0_preprocess.cpp) and the compute_ex driver.
+// The default diagonal system diag(2,3,4) converges immediately for every
+// algorithm and option combination.
+// ======================================================================
+// When run_compute is false the pipeline stops after preprocess. The preprocess
+// dispatch (rocsparse_csritilu0_preprocess.cpp) branches purely on the algorithm
+// enum, so buffer_size + preprocess is enough to cover every algorithm case;
+// the split-storage device compute paths are only driven for the default /
+// in-place algorithm that the existing pipelines already validate.
+template <typename T>
+static void run_csritilu0_ex(rocsparse_handle     handle,
+                             rocsparse_itilu0_alg alg,
+                             rocsparse_int        option,
+                             rocsparse_index_base base,
+                             bool                 run_compute)
+{
+    const rocsparse_int m = 3, nnz = 3;
+    rocsparse_int       nmaxiter = 20;
+
+    const rocsparse_int b = (base == rocsparse_index_base_one) ? 1 : 0;
+    device_vector<rocsparse_int> row_ptr{
+        std::vector<rocsparse_int>{0 + b, 1 + b, 2 + b, 3 + b}};
+    device_vector<rocsparse_int> col_ind{std::vector<rocsparse_int>{0 + b, 1 + b, 2 + b}};
+    device_vector<T>             val{std::vector<T>{scalar<T>(2), scalar<T>(3), scalar<T>(4)}};
+    device_vector<T>             ilu0{(size_t)nnz};
+    ASSERT_TRUE(row_ptr.ptr && col_ind.ptr && val.ptr && ilu0.ptr);
+
+    size_t           buffer_size = 0;
+    rocsparse_status st          = rocsparse_csritilu0_buffer_size(
+        handle, alg, option, nmaxiter, m, nnz, row_ptr, col_ind, base, dt_of<T>(), &buffer_size);
+    if(st == rocsparse_status_not_implemented)
+        return;
+    ASSERT_EQ(st, rocsparse_status_success);
+    EXPECT_GT(buffer_size, 0u);
+
+    device_vector<char> buffer{buffer_size};
+    ASSERT_TRUE(buffer.ptr);
+
+    st = rocsparse_csritilu0_preprocess(handle,
+                                        alg,
+                                        option,
+                                        nmaxiter,
+                                        m,
+                                        nnz,
+                                        row_ptr,
+                                        col_ind,
+                                        base,
+                                        dt_of<T>(),
+                                        buffer_size,
+                                        buffer.ptr);
+    if(st == rocsparse_status_not_implemented)
+        return;
+    ASSERT_EQ(st, rocsparse_status_success);
+    ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+
+    if(!run_compute)
+        return;
+
+    if constexpr(std::is_same_v<T, float>)
+        st = rocsparse_scsritilu0_compute_ex(handle,
+                                             alg,
+                                             option,
+                                             &nmaxiter,
+                                             0,
+                                             1.0e-6f,
+                                             m,
+                                             nnz,
+                                             row_ptr,
+                                             col_ind,
+                                             val,
+                                             ilu0,
+                                             base,
+                                             buffer_size,
+                                             buffer.ptr);
+    else
+        st = rocsparse_dcsritilu0_compute_ex(handle,
+                                             alg,
+                                             option,
+                                             &nmaxiter,
+                                             0,
+                                             1.0e-10,
+                                             m,
+                                             nnz,
+                                             row_ptr,
+                                             col_ind,
+                                             val,
+                                             ilu0,
+                                             base,
+                                             buffer_size,
+                                             buffer.ptr);
+    if(st == rocsparse_status_not_implemented)
+        return;
+    EXPECT_EQ(st, rocsparse_status_success);
+    ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+}
+
+TEST_F(PrecondCsritilu0, alg_async_inplace_compute)
+{
+    run_csritilu0_ex<double>(
+        handle, rocsparse_itilu0_alg_async_inplace, 0, rocsparse_index_base_zero, true);
+}
+TEST_F(PrecondCsritilu0, alg_async_split_preprocess)
+{
+    run_csritilu0_ex<double>(
+        handle, rocsparse_itilu0_alg_async_split, 0, rocsparse_index_base_zero, false);
+}
+TEST_F(PrecondCsritilu0, alg_sync_split_preprocess)
+{
+    run_csritilu0_ex<double>(
+        handle, rocsparse_itilu0_alg_sync_split, 0, rocsparse_index_base_zero, false);
+}
+TEST_F(PrecondCsritilu0, alg_sync_split_fusion_preprocess)
+{
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    run_csritilu0_ex<float>(
+        handle, rocsparse_itilu0_alg_sync_split_fusion, 0, rocsparse_index_base_zero, false);
+#pragma clang diagnostic pop
+}
+TEST_F(PrecondCsritilu0, option_bitmask_default_alg)
+{
+    const rocsparse_int option = rocsparse_itilu0_option_stopping_criteria
+                                 | rocsparse_itilu0_option_compute_nrm_residual
+                                 | rocsparse_itilu0_option_convergence_history;
+    run_csritilu0_ex<double>(
+        handle, rocsparse_itilu0_alg_default, option, rocsparse_index_base_zero, true);
+}
+TEST_F(PrecondCsritilu0, index_base_one_compute)
+{
+    run_csritilu0_ex<double>(
+        handle, rocsparse_itilu0_alg_default, 0, rocsparse_index_base_one, true);
+}
+
+// preprocess-specific guards (rocsparse_csritilu0_preprocess.cpp).
+TEST_F(PrecondCsritilu0, preprocess_guards)
+{
+    const rocsparse_itilu0_alg   alg = rocsparse_itilu0_alg_default;
+    const rocsparse_int          m = 3, nnz = 3, nmaxiter = 10;
+    const rocsparse_index_base   base = rocsparse_index_base_zero;
+    device_vector<rocsparse_int> row_ptr{std::vector<rocsparse_int>{0, 1, 2, 3}};
+    device_vector<rocsparse_int> col_ind{std::vector<rocsparse_int>{0, 1, 2}};
+    device_vector<char>          buffer{size_t(256)};
+    ASSERT_TRUE(row_ptr.ptr && col_ind.ptr && buffer.ptr);
+
+    // Invalid handle.
+    EXPECT_EQ(rocsparse_csritilu0_preprocess(nullptr,
+                                             alg,
+                                             0,
+                                             nmaxiter,
+                                             m,
+                                             nnz,
+                                             row_ptr,
+                                             col_ind,
+                                             base,
+                                             rocsparse_datatype_f32_r,
+                                             256,
+                                             buffer.ptr),
+              rocsparse_status_invalid_handle);
+    // Invalid algorithm enum.
+    EXPECT_EQ(rocsparse_csritilu0_preprocess(handle,
+                                             (rocsparse_itilu0_alg)-1,
+                                             0,
+                                             nmaxiter,
+                                             m,
+                                             nnz,
+                                             row_ptr,
+                                             col_ind,
+                                             base,
+                                             rocsparse_datatype_f32_r,
+                                             256,
+                                             buffer.ptr),
+              rocsparse_status_invalid_value);
+    // Negative option.
+    EXPECT_EQ(rocsparse_csritilu0_preprocess(handle,
+                                             alg,
+                                             -1,
+                                             nmaxiter,
+                                             m,
+                                             nnz,
+                                             row_ptr,
+                                             col_ind,
+                                             base,
+                                             rocsparse_datatype_f32_r,
+                                             256,
+                                             buffer.ptr),
+              rocsparse_status_invalid_value);
+    // Negative nmaxiter.
+    EXPECT_EQ(rocsparse_csritilu0_preprocess(handle,
+                                             alg,
+                                             0,
+                                             -1,
+                                             m,
+                                             nnz,
+                                             row_ptr,
+                                             col_ind,
+                                             base,
+                                             rocsparse_datatype_f32_r,
+                                             256,
+                                             buffer.ptr),
+              rocsparse_status_invalid_value);
+    // m == 0 is a quick-return success.
+    EXPECT_EQ(rocsparse_csritilu0_preprocess(handle,
+                                             alg,
+                                             0,
+                                             nmaxiter,
+                                             0,
+                                             0,
+                                             nullptr,
+                                             nullptr,
+                                             base,
+                                             rocsparse_datatype_f32_r,
+                                             256,
+                                             buffer.ptr),
+              rocsparse_status_success);
+    // nnz == 0 with m > 0 reports a zero pivot.
+    EXPECT_EQ(rocsparse_csritilu0_preprocess(handle,
+                                             alg,
+                                             0,
+                                             nmaxiter,
+                                             m,
+                                             0,
+                                             row_ptr,
+                                             nullptr,
+                                             base,
+                                             rocsparse_datatype_f32_r,
+                                             256,
+                                             buffer.ptr),
+              rocsparse_status_zero_pivot);
+}
