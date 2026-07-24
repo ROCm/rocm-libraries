@@ -56,7 +56,8 @@ def _report_xcc_failure(filepath: Path, solution: dict, detail: str) -> None:
 def _cu_count_from_path(filepath: Path) -> int:
     """Extract CU count from any path component matching *_Ncu (e.g. gfx942_38cu -> 38)."""
     for part in filepath.parts:
-        match = re.search(r"_(\d+)cu$", part, re.IGNORECASE)
+        # Suffix-literal case mutations are equivalent while IGNORECASE is active.
+        match = re.search(r"_(\d+)cu$", part, re.IGNORECASE)  # pragma: no mutate
         if match:
             return int(match.group(1))
     return 0
@@ -76,10 +77,11 @@ def _validateWorkGroupMappingXCC(solution: dict, filepath: Path, report: bool = 
         if cu_count <= 0:
             return True  # Not a CU-variant directory; skip this check
 
-        xcc = solution.get("WorkGroupMappingXCC", -1)
-        if xcc == -1:
+        xcc_minus_one = "WorkGroupMappingXCC" not in solution or solution["WorkGroupMappingXCC"] == -1
+        if xcc_minus_one:
             return True
 
+        xcc = solution["WorkGroupMappingXCC"]
         if xcc <= 0:
             if report:
                 _report_xcc_failure(filepath, solution, f"WorkGroupMappingXCC must be -1 or positive (WorkGroupMappingXCC={xcc})")

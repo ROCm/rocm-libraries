@@ -1406,6 +1406,7 @@
     'InnerUnroll',
     'InterleaveAlpha',
     'KernelLanguage',
+    'LDSSegmentInterleave',
     'LDSTrInst',
     'LdsBlockSizePerPadA',
     'LdsBlockSizePerPadB',
@@ -1438,6 +1439,7 @@
     'NonTemporalC',
     'NonTemporalD',
     'NonTemporalE',
+    'NonTemporalGate',
     'NonTemporalMXSA',
     'NonTemporalMXSB',
     'NonTemporalMetadata',
@@ -1614,7 +1616,7 @@
         2,
         4,
       ]),
-      'len': 8,
+      'len': 9,
       'type': 'list',
     }),
     'BufferLoad': dict({
@@ -1937,6 +1939,15 @@
       'len': 1,
       'type': 'list',
     }),
+    'LDSSegmentInterleave': dict({
+      'head': list([
+        -1,
+        0,
+        1,
+      ]),
+      'len': 3,
+      'type': 'list',
+    }),
     'LDSTrInst': dict({
       'head': list([
         False,
@@ -2218,6 +2229,15 @@
       'type': 'list',
     }),
     'NonTemporalE': dict({
+      'head': list([
+        0,
+        1,
+        2,
+      ]),
+      'len': 8,
+      'type': 'list',
+    }),
+    'NonTemporalGate': dict({
       'head': list([
         0,
         1,

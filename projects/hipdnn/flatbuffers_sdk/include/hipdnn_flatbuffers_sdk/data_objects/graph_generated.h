@@ -43,12 +43,16 @@ struct Node;
 struct NodeBuilder;
 struct NodeT;
 
+struct EngineApiVersion;
+
 struct Graph;
 struct GraphBuilder;
 struct GraphT;
 
 bool operator==(const NodeT &lhs, const NodeT &rhs);
 bool operator!=(const NodeT &lhs, const NodeT &rhs);
+bool operator==(const EngineApiVersion &lhs, const EngineApiVersion &rhs);
+bool operator!=(const EngineApiVersion &lhs, const EngineApiVersion &rhs);
 bool operator==(const GraphT &lhs, const GraphT &rhs);
 bool operator!=(const GraphT &lhs, const GraphT &rhs);
 
@@ -599,6 +603,56 @@ inline bool operator!=(const NodeAttributesUnion &lhs, const NodeAttributesUnion
 bool VerifyNodeAttributes(::flatbuffers::Verifier &verifier, const void *obj, NodeAttributes type);
 bool VerifyNodeAttributesVector(::flatbuffers::Verifier &verifier, const ::flatbuffers::Vector<::flatbuffers::Offset<void>> *values, const ::flatbuffers::Vector<NodeAttributes> *types);
 
+FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(4) EngineApiVersion FLATBUFFERS_FINAL_CLASS {
+ private:
+  uint32_t major_;
+  uint32_t minor_;
+  uint32_t patch_;
+
+ public:
+  EngineApiVersion()
+      : major_(0),
+        minor_(0),
+        patch_(0) {
+  }
+  EngineApiVersion(uint32_t _major, uint32_t _minor, uint32_t _patch)
+      : major_(::flatbuffers::EndianScalar(_major)),
+        minor_(::flatbuffers::EndianScalar(_minor)),
+        patch_(::flatbuffers::EndianScalar(_patch)) {
+  }
+  uint32_t major() const {
+    return ::flatbuffers::EndianScalar(major_);
+  }
+  void mutate_major(uint32_t _major) {
+    ::flatbuffers::WriteScalar(&major_, _major);
+  }
+  uint32_t minor() const {
+    return ::flatbuffers::EndianScalar(minor_);
+  }
+  void mutate_minor(uint32_t _minor) {
+    ::flatbuffers::WriteScalar(&minor_, _minor);
+  }
+  uint32_t patch() const {
+    return ::flatbuffers::EndianScalar(patch_);
+  }
+  void mutate_patch(uint32_t _patch) {
+    ::flatbuffers::WriteScalar(&patch_, _patch);
+  }
+};
+FLATBUFFERS_STRUCT_END(EngineApiVersion, 12);
+
+inline bool operator==(const EngineApiVersion &lhs, const EngineApiVersion &rhs) {
+  return
+      (lhs.major() == rhs.major()) &&
+      (lhs.minor() == rhs.minor()) &&
+      (lhs.patch() == rhs.patch());
+}
+
+inline bool operator!=(const EngineApiVersion &lhs, const EngineApiVersion &rhs) {
+    return !(lhs == rhs);
+}
+
+
 struct NodeT : public ::flatbuffers::NativeTable {
   typedef Node TableType;
   std::string name{};
@@ -860,6 +914,7 @@ struct GraphT : public ::flatbuffers::NativeTable {
   std::vector<std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::NodeT>> nodes{};
   ::flatbuffers::Optional<int64_t> preferred_engine_id = ::flatbuffers::nullopt;
   bool is_override_shape_enabled = false;
+  std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::EngineApiVersion> min_required_engine_api_version{};
   GraphT() = default;
   GraphT(const GraphT &o);
   GraphT(GraphT&&) FLATBUFFERS_NOEXCEPT = default;
@@ -877,7 +932,8 @@ struct Graph FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
     VT_TENSORS = 12,
     VT_NODES = 14,
     VT_PREFERRED_ENGINE_ID = 16,
-    VT_IS_OVERRIDE_SHAPE_ENABLED = 18
+    VT_IS_OVERRIDE_SHAPE_ENABLED = 18,
+    VT_MIN_REQUIRED_ENGINE_API_VERSION = 20
   };
   const ::flatbuffers::String *name() const {
     return GetPointer<const ::flatbuffers::String *>(VT_NAME);
@@ -927,6 +983,12 @@ struct Graph FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   bool mutate_is_override_shape_enabled(bool _is_override_shape_enabled = 0) {
     return SetField<uint8_t>(VT_IS_OVERRIDE_SHAPE_ENABLED, static_cast<uint8_t>(_is_override_shape_enabled), 0);
   }
+  const hipdnn_flatbuffers_sdk::data_objects::EngineApiVersion *min_required_engine_api_version() const {
+    return GetStruct<const hipdnn_flatbuffers_sdk::data_objects::EngineApiVersion *>(VT_MIN_REQUIRED_ENGINE_API_VERSION);
+  }
+  hipdnn_flatbuffers_sdk::data_objects::EngineApiVersion *mutable_min_required_engine_api_version() {
+    return GetStruct<hipdnn_flatbuffers_sdk::data_objects::EngineApiVersion *>(VT_MIN_REQUIRED_ENGINE_API_VERSION);
+  }
   bool Verify(::flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
            VerifyOffset(verifier, VT_NAME) &&
@@ -942,6 +1004,7 @@ struct Graph FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
            verifier.VerifyVectorOfTables(nodes()) &&
            VerifyField<int64_t>(verifier, VT_PREFERRED_ENGINE_ID, 8) &&
            VerifyField<uint8_t>(verifier, VT_IS_OVERRIDE_SHAPE_ENABLED, 1) &&
+           VerifyField<hipdnn_flatbuffers_sdk::data_objects::EngineApiVersion>(verifier, VT_MIN_REQUIRED_ENGINE_API_VERSION, 4) &&
            verifier.EndTable();
   }
   GraphT *UnPack(const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
@@ -977,6 +1040,9 @@ struct GraphBuilder {
   void add_is_override_shape_enabled(bool is_override_shape_enabled) {
     fbb_.AddElement<uint8_t>(Graph::VT_IS_OVERRIDE_SHAPE_ENABLED, static_cast<uint8_t>(is_override_shape_enabled), 0);
   }
+  void add_min_required_engine_api_version(const hipdnn_flatbuffers_sdk::data_objects::EngineApiVersion *min_required_engine_api_version) {
+    fbb_.AddStruct(Graph::VT_MIN_REQUIRED_ENGINE_API_VERSION, min_required_engine_api_version);
+  }
   explicit GraphBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
@@ -997,9 +1063,11 @@ inline ::flatbuffers::Offset<Graph> CreateGraph(
     ::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>> tensors = 0,
     ::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>>> nodes = 0,
     ::flatbuffers::Optional<int64_t> preferred_engine_id = ::flatbuffers::nullopt,
-    bool is_override_shape_enabled = false) {
+    bool is_override_shape_enabled = false,
+    const hipdnn_flatbuffers_sdk::data_objects::EngineApiVersion *min_required_engine_api_version = nullptr) {
   GraphBuilder builder_(_fbb);
   if(preferred_engine_id) { builder_.add_preferred_engine_id(*preferred_engine_id); }
+  builder_.add_min_required_engine_api_version(min_required_engine_api_version);
   builder_.add_nodes(nodes);
   builder_.add_tensors(tensors);
   builder_.add_name(name);
@@ -1019,7 +1087,8 @@ inline ::flatbuffers::Offset<Graph> CreateGraphDirect(
     const std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>> *tensors = nullptr,
     const std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> *nodes = nullptr,
     ::flatbuffers::Optional<int64_t> preferred_engine_id = ::flatbuffers::nullopt,
-    bool is_override_shape_enabled = false) {
+    bool is_override_shape_enabled = false,
+    const hipdnn_flatbuffers_sdk::data_objects::EngineApiVersion *min_required_engine_api_version = nullptr) {
   auto name__ = name ? _fbb.CreateString(name) : 0;
   auto tensors__ = tensors ? _fbb.CreateVector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>(*tensors) : 0;
   auto nodes__ = nodes ? _fbb.CreateVector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>>(*nodes) : 0;
@@ -1032,7 +1101,8 @@ inline ::flatbuffers::Offset<Graph> CreateGraphDirect(
       tensors__,
       nodes__,
       preferred_engine_id,
-      is_override_shape_enabled);
+      is_override_shape_enabled,
+      min_required_engine_api_version);
 }
 
 ::flatbuffers::Offset<Graph> CreateGraph(::flatbuffers::FlatBufferBuilder &_fbb, const GraphT *_o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
@@ -1095,7 +1165,8 @@ inline bool operator==(const GraphT &lhs, const GraphT &rhs) {
       (lhs.tensors.size() == rhs.tensors.size() && std::equal(lhs.tensors.cbegin(), lhs.tensors.cend(), rhs.tensors.cbegin(), [](std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> const &a, std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> const &b) { return (a == b) || (a && b && *a == *b); })) &&
       (lhs.nodes.size() == rhs.nodes.size() && std::equal(lhs.nodes.cbegin(), lhs.nodes.cend(), rhs.nodes.cbegin(), [](std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::NodeT> const &a, std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::NodeT> const &b) { return (a == b) || (a && b && *a == *b); })) &&
       (lhs.preferred_engine_id == rhs.preferred_engine_id) &&
-      (lhs.is_override_shape_enabled == rhs.is_override_shape_enabled);
+      (lhs.is_override_shape_enabled == rhs.is_override_shape_enabled) &&
+      ((lhs.min_required_engine_api_version == rhs.min_required_engine_api_version) || (lhs.min_required_engine_api_version && rhs.min_required_engine_api_version && *lhs.min_required_engine_api_version == *rhs.min_required_engine_api_version));
 }
 
 inline bool operator!=(const GraphT &lhs, const GraphT &rhs) {
@@ -1109,7 +1180,8 @@ inline GraphT::GraphT(const GraphT &o)
         intermediate_data_type(o.intermediate_data_type),
         io_data_type(o.io_data_type),
         preferred_engine_id(o.preferred_engine_id),
-        is_override_shape_enabled(o.is_override_shape_enabled) {
+        is_override_shape_enabled(o.is_override_shape_enabled),
+        min_required_engine_api_version((o.min_required_engine_api_version) ? new hipdnn_flatbuffers_sdk::data_objects::EngineApiVersion(*o.min_required_engine_api_version) : nullptr) {
   tensors.reserve(o.tensors.size());
   for (const auto &tensors_ : o.tensors) { tensors.emplace_back((tensors_) ? new hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT(*tensors_) : nullptr); }
   nodes.reserve(o.nodes.size());
@@ -1125,6 +1197,7 @@ inline GraphT &GraphT::operator=(GraphT o) FLATBUFFERS_NOEXCEPT {
   std::swap(nodes, o.nodes);
   std::swap(preferred_engine_id, o.preferred_engine_id);
   std::swap(is_override_shape_enabled, o.is_override_shape_enabled);
+  std::swap(min_required_engine_api_version, o.min_required_engine_api_version);
   return *this;
 }
 
@@ -1145,6 +1218,7 @@ inline void Graph::UnPackTo(GraphT *_o, const ::flatbuffers::resolver_function_t
   { auto _e = nodes(); if (_e) { _o->nodes.resize(_e->size()); for (::flatbuffers::uoffset_t _i = 0; _i < _e->size(); _i++) { if(_o->nodes[_i]) { _e->Get(_i)->UnPackTo(_o->nodes[_i].get(), _resolver); } else { _o->nodes[_i] = std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::NodeT>(_e->Get(_i)->UnPack(_resolver)); } } } else { _o->nodes.resize(0); } }
   { auto _e = preferred_engine_id(); _o->preferred_engine_id = _e; }
   { auto _e = is_override_shape_enabled(); _o->is_override_shape_enabled = _e; }
+  { auto _e = min_required_engine_api_version(); if (_e) _o->min_required_engine_api_version = std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::EngineApiVersion>(new hipdnn_flatbuffers_sdk::data_objects::EngineApiVersion(*_e)); }
 }
 
 inline ::flatbuffers::Offset<Graph> Graph::Pack(::flatbuffers::FlatBufferBuilder &_fbb, const GraphT* _o, const ::flatbuffers::rehasher_function_t *_rehasher) {
@@ -1163,6 +1237,7 @@ inline ::flatbuffers::Offset<Graph> CreateGraph(::flatbuffers::FlatBufferBuilder
   auto _nodes = _o->nodes.size() ? _fbb.CreateVector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> (_o->nodes.size(), [](size_t i, _VectorArgs *__va) { return CreateNode(*__va->__fbb, __va->__o->nodes[i].get(), __va->__rehasher); }, &_va ) : 0;
   auto _preferred_engine_id = _o->preferred_engine_id;
   auto _is_override_shape_enabled = _o->is_override_shape_enabled;
+  auto _min_required_engine_api_version = _o->min_required_engine_api_version ? _o->min_required_engine_api_version.get() : nullptr;
   return hipdnn_flatbuffers_sdk::data_objects::CreateGraph(
       _fbb,
       _name,
@@ -1172,7 +1247,8 @@ inline ::flatbuffers::Offset<Graph> CreateGraph(::flatbuffers::FlatBufferBuilder
       _tensors,
       _nodes,
       _preferred_engine_id,
-      _is_override_shape_enabled);
+      _is_override_shape_enabled,
+      _min_required_engine_api_version);
 }
 
 inline bool VerifyNodeAttributes(::flatbuffers::Verifier &verifier, const void *obj, NodeAttributes type) {

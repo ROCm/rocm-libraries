@@ -98,6 +98,13 @@ add_test_plugin(${HIPDNN_TEST_MALFORMED_VERSION_PLUGIN_TARGET} TestMalformedVers
 # Version-zero fake reports a parseable but too-low API version.
 add_test_plugin(${HIPDNN_TEST_VERSION_ZERO_PLUGIN_TARGET} TestVersionZeroPlugin.cpp)
 
+# Runtime pass-by-value fake: reports K_PASS_BY_VALUE_MIN_API_VERSION ("1.2.0").
+add_test_plugin(${HIPDNN_TEST_PASS_BY_VALUE_PLUGIN_TARGET} TestPassByValuePlugin.cpp)
+
+# Runtime pass-by-value RECORDER fake: records the scalar it resolves from
+# device_buffers at execute, for host-scalar delivery verification.
+add_test_plugin(${HIPDNN_TEST_PASS_BY_VALUE_RECORDER_PLUGIN_TARGET} TestPassByValueRecorderPlugin.cpp)
+
 # test_autotune_plugin supports the autotune workflow with global.benchmarking and test knobs
 add_test_plugin(${TEST_AUTOTUNE_PLUGIN_NAME} TestAutotunePlugin.cpp)
 
