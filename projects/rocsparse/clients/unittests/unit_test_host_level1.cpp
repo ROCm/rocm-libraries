@@ -471,3 +471,63 @@ TEST_F(HostLevel1, spvv_invalid_args)
                               nullptr),
                rocsparse_status_invalid_pointer);
 }
+
+// ---------------------------------------------------------------------------
+// rocsparse_spvv not-implemented branch inside spvv_template_complex: a
+// complex config is selected, temp_buffer is non-null (so we get past the
+// buffer-size early return), and the operation is rocsparse_operation_transpose
+// -- neither the plain-dot (none) nor conjugated-dot (conjugate_transpose)
+// branch is taken, so the function falls through to the not_implemented guard.
+// Covers rocsparse_spvv.cpp L127.
+// ---------------------------------------------------------------------------
+TEST_F(HostLevel1, spvv_transpose_complex_not_implemented)
+{
+    VecPair<rocsparse_float_complex, int32_t> vp;
+    ASSERT_TRUE(
+        vp.create(rocsparse_indextype_i32, rocsparse_datatype_f32_c, rocsparse_datatype_f32_c));
+
+    rocsparse_float_complex result      = scalar<rocsparse_float_complex>(0);
+    size_t                  buffer_size = 0;
+
+    void* temp = nullptr;
+    ASSERT_EQ(hipMalloc(&temp, 4), hipSuccess);
+
+    EXPECT_ROC(rocsparse_spvv(handle,
+                              rocsparse_operation_transpose,
+                              vp.x,
+                              vp.y,
+                              &result,
+                              rocsparse_datatype_f32_c,
+                              &buffer_size,
+                              temp),
+               rocsparse_status_not_implemented);
+
+    (void)hipFree(temp);
+}
+
+// ---------------------------------------------------------------------------
+// rocsparse_spvv invalid precision configuration branch in spvv_find: the
+// (compute_type, index_type, x_type, y_type) tuple is not present in the
+// dispatch map (here x is f32_r but y is f64_r, a combination the map does not
+// contain), so spvv_find takes the else branch, builds the error message and
+// returns rocsparse_status_invalid_value. Covers rocsparse_spvv.cpp L244-279.
+// ---------------------------------------------------------------------------
+TEST_F(HostLevel1, spvv_invalid_precision_config)
+{
+    VecPair<float, int32_t> vp;
+    ASSERT_TRUE(
+        vp.create(rocsparse_indextype_i32, rocsparse_datatype_f32_r, rocsparse_datatype_f64_r));
+
+    float  result      = 0;
+    size_t buffer_size = 0;
+
+    EXPECT_ROC(rocsparse_spvv(handle,
+                              rocsparse_operation_none,
+                              vp.x,
+                              vp.y,
+                              &result,
+                              rocsparse_datatype_f32_r,
+                              &buffer_size,
+                              nullptr),
+               rocsparse_status_invalid_value);
+}
