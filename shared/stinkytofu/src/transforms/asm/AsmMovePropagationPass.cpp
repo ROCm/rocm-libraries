@@ -118,6 +118,7 @@ class AsmMovePropagationPassImpl : public Pass {
             }
         };
 
+        // Phase A - forward propagation loop.
         // 1) rewrite current instruction sources using mappings from earlier instructions
         // 2) invalidate mappings killed by current instruction defs
         // 3) if current instruction is an eligible mov, add its new mapping
@@ -142,6 +143,7 @@ class AsmMovePropagationPassImpl : public Pass {
             if (dst != src) moveMap[dst] = src;
         }
 
+        // Phase B - mov cleanup loop.
         std::vector<StinkyInstruction*> toErase;
         for (size_t i = 0; i < instructions.size(); ++i) {
             StinkyInstruction* inst = instructions[i];
