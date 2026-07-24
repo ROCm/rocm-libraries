@@ -5260,6 +5260,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
       module.add(kernelEndLabel)
       if kernel["ProblemType"]["OutputAmaxD"]:
         module.add(self.insertAmaxD(kernel))
+      # Mirror functionEnd's StreamK kernelEnd on the deferred-blocks epilogue.
+      # Single-hop next-neighbor work stealing self-resets its per-queue counters via the
+      # atomic_inc auto-reset bounds, so kernelEnd emits no explicit reset.
+      skComponent = Component.StreamK.find(self)
+      module.add(skComponent.kernelEnd(self, kernel))
       module.add(SEndpgm(comment="Kernel End"))
     else:
       # If activation was deferred but no other deferred blocks exist, emit it before functionEnd
@@ -9487,6 +9492,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
         "StreamKLocalStart",
         "StreamKLocalEnd",
       ]
+      # Work stealing: per-WG sticky-empty flag. Persists across the persistent
+      # loop back-edge (added to nonPostLoopSgpr below) so each WG only touches
+      # its home counter for its valid dispenses + exactly one empty fetch.
+      if kernel["StreamKWorkStealing"]:
+        requiredUnalignedSgprVar.append("StreamKStickyEmpty")
       if kernel["StreamKAtomic"] == 0:
         requiredAligned4SgprVar.append("SrdWS")
     elif kernel["StreamK"] == 5:
@@ -9508,6 +9518,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
         "StreamKLocalEnd",
         "StreamKHybridMode",
       ]
+      # Work stealing: per-WG sticky-empty flag (see SK4 note above). Only the
+      # SK4 sub-path uses it, but it must persist for the whole persistent loop.
+      if kernel["StreamKWorkStealing"]:
+        requiredUnalignedSgprVar.append("StreamKStickyEmpty")
       if len(kernel["SpaceFillingAlgo"]):
         requiredUnalignedSgprVar.append("StreamKTileID")
       if kernel["StreamKAtomic"] == 0:
