@@ -23,6 +23,7 @@ NB_MODULE(origami, m) {
       .value("gfx90a", hardware_t::architecture_t::gfx90a)
       .value("gfx942", hardware_t::architecture_t::gfx942)
       .value("gfx950", hardware_t::architecture_t::gfx950)
+      .value("gfx1200", hardware_t::architecture_t::gfx1200)
       .value("gfx1201", hardware_t::architecture_t::gfx1201)
       .value("gfx1100", hardware_t::architecture_t::gfx1100)
       .value("gfx1150", hardware_t::architecture_t::gfx1150)
@@ -212,6 +213,7 @@ NB_MODULE(origami, m) {
       .def(nanobind::init<>())
       .def_rw("size", &origami::problem_t::size)
       .def_rw("batch", &origami::problem_t::batch)
+      .def_rw("num_cus", &origami::problem_t::num_cus)
       .def_rw("q_heads", &origami::problem_t::q_heads)
       .def_rw("a_transpose", &origami::problem_t::a_transpose)
       .def_rw("b_transpose", &origami::problem_t::b_transpose)
@@ -374,20 +376,13 @@ NB_MODULE(origami, m) {
   m.def("compute_timestep_latency",
         &origami::gemm::compute_timestep_latency,
         "Compute latency per K-complete MT wave");
-  m.def("compute_total_latency", &origami::gemm::compute_total_latency, "Compute total latency");
   m.def("compute_total_latency",
-        static_cast<double (*)(const origami::problem_t&,
-                               const origami::hardware_t&,
-                               const origami::config_t&,
-                               size_t max_cus)>(&origami::gemm::compute_total_latency),
+        &origami::gemm::compute_total_latency,
         "Compute total latency (uses Formocast when config.prediction_mode == simulation)");
 
   // Attention functions
   m.def("att_compute_total_latency",
-        static_cast<double (*)(const origami::problem_t&,
-                               const origami::hardware_t&,
-                               const origami::config_t&,
-                               size_t max_cus)>(&origami::attention::compute_total_latency),
+        &origami::attention::compute_total_latency,
         "Compute total latency for Flash Attention");
   m.def("att_compute_number_matrix_instructions",
         &origami::attention::compute_number_matrix_instructions,

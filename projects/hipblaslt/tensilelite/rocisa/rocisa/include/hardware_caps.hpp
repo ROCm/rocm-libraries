@@ -303,6 +303,10 @@ inline std::map<std::string, int>
     rv["v_fma_f32"]
         = tryAssembler(isaVersion, assemblerPath, "v_fma_f32 v20, v21, v22, v23", isDebug);
     rv["v_fmac_f32"] = tryAssembler(isaVersion, assemblerPath, "v_fmac_f32 v20, v21, v22", isDebug);
+    // VOPD dual-issue FMA (RDNA3/3.5/4 only); used to gate UseDualFMAC. VOPD is wave32-only,
+    // so probe with isWave32=true (tryAssembler otherwise adds -mwavefrontsize64 for gfx10+).
+    rv["v_dual_fmac_f32"] = tryAssembler(
+        isaVersion, assemblerPath, "v_dual_fmac_f32 v0, v1, v2 :: v_dual_fmac_f32 v3, v4, v5", isDebug, true);
 
     rv["v_fma_f64"] = tryAssembler(
         isaVersion, assemblerPath, "v_fma_f64 v[20:21], v[22:23], v[24:25], v[20:21]", isDebug);
@@ -558,7 +562,12 @@ inline std::map<std::string, int> initArchCaps(const IsaVersion& isaVersion)
     rv["HasAccCD"]           = checkInList(isaVersion, {{9, 0, 10}, {9, 4, 2}, {9, 5, 0}});
     rv["ArchAccUnifiedRegs"] = checkInList(isaVersion, {{9, 0, 10}, {9, 4, 2}, {9, 5, 0}});
     // Max concurrent waves per SIMD: 8 for ArchAccUnifiedRegs (gfx90a/gfx942/gfx950), 10 otherwise.
-    rv["MaxWavesPerSimd"]    = rv["ArchAccUnifiedRegs"] ? 8 : 10;
+    if(rv["ArchAccUnifiedRegs"])
+        rv["MaxWavesPerSimd"] = 8;
+    else if(isaVersion[0] == 11 || (isaVersion[0] == 12 && isaVersion[1] != 5))
+        rv["MaxWavesPerSimd"] = 16;
+    else
+        rv["MaxWavesPerSimd"] = 10;
     rv["CrosslaneWait"]      = checkInList(isaVersion, {{9, 4, 2}, {9, 5, 0}});
     rv["TransOpWait"]        = checkInList(isaVersion, {{9, 4, 2}, {9, 5, 0}, {12, 5, 0}});
     rv["SDWAWait"]           = checkInList(isaVersion, {{9, 4, 2}, {9, 5, 0}, {12, 5, 0}});
@@ -607,7 +616,7 @@ inline std::map<std::string, int> initRegisterCaps(const IsaVersion&           i
     // 1024 vgpr
     rv["MaxVgpr"] = isaVersion[0] == 12 && isaVersion[1] == 5? 1024 : 256;
     // max allowed is 112 out of 112 , 6 is used by hardware 4 SGPRs are wasted
-    rv["MaxSgpr"] = 102;
+    rv["MaxSgpr"] = isaVersion[0] == 12 && isaVersion[1] == 5? 106 : 102;
     rv["PhysicalMaxVgpr"] = isaVersion[0] == 12 && isaVersion[1] == 5? 1024 : 512;
     rv["PhysicalMaxSgpr"]   = 800;
     rv["maxLDSConstOffset"] = 65536;
@@ -630,7 +639,7 @@ inline std::map<std::string, int> initRegisterCaps(const IsaVersion&           i
         else if(isaVersion[2] == 2)
             rv["PhysicalMaxVgprCU"] = 1024 * 32;
         else
-            rv["PhysicalMaxVgprCU"] = 1536 * 32;
+            rv["PhysicalMaxVgprCU"] = 2 * 1536 * 32;
     else if(isaVersion[0] == 12)
         rv["PhysicalMaxVgprCU"] = isaVersion[1] == 5? 4096 * 32 : 1536 * 32;
     else if(isaVersion[0] == 9)

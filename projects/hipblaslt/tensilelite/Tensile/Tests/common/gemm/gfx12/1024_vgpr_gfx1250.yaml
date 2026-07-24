@@ -5,7 +5,6 @@ GlobalParameters:
   SyncsPerBenchmark: 0
   NumElementsToValidate: -1
   Architecture: gfx1250
-  DeviceLDS: 327680
   PrintSolutionRejectionReason: True
 
 BenchmarkProblems:
@@ -287,10 +286,10 @@ BenchmarkProblems:
         - WaveSeparateGlobalReadA: [0]
         - WaveSeparateGlobalReadB: [0]
         - 1LDSBuffer: [0]
-        - GlobalReadPerMfma: [1]
+        - GlobalReadPerMfma: [1.0]
         - LocalWritePerMfma: [-1]
         - StoreVectorWidth: [-1]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - WavefrontSize: [32]
       BenchmarkForkParameters:
       JoinParameters:
@@ -341,7 +340,7 @@ BenchmarkProblems:
         - GlobalReadVectorWidthA: [1] #
         - GlobalReadVectorWidthB: [1] #
         - 1LDSBuffer: [-1]
-        - DirectToVgprSparseMetadata: [0]
+        - DirectToVgprSparseMetadata: [false]
         - WorkGroupMapping: [1]
         - StoreVectorWidth: [-1]
         - DirectToVgprA: [False]
