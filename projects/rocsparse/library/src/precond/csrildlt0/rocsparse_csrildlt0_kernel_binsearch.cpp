@@ -33,16 +33,17 @@ namespace rocsparse
 {
     // ILDLT(0) binary-search based device kernel.
     //
-    // Computes A ≈ L D L^H where L is unit lower triangular and D is real diagonal.
+    // Computes A ≈ L D L^H (Hermitian; L D L^T for real types), L unit lower triangular, D real.
+    // For row i:
+    //   D_i    = real(A_{ii}) - sum_{k<i} |L_{ik}|^2 * D_k
+    //   L_{ij} = (A_{ij} - sum_{k<j} L_{ik} * D_k * conj(L_{jk})) / D_j   (j < i)
     //
-    // For row i (Hermitian LDL^H):
-    //   D_i = real(A_{ii}) - sum_{k<i} |L_{ik}|^2 * D_k        (no sqrt, D always real)
-    //   L_{ij} = (A_{ij} - sum_{k<j} L_{ik} * D_k * conj(L_{jk})) / D_j
+    // D is real (floating_data_t<T>), stored on the otherwise-unused diagonal slot of L (its unit
+    // diagonal is implicit); csr_val holds the strictly lower-triangular entries of L. Copying D
+    // out to an optional user vector is a separate step (see csrildlt0_copy_diag).
     //
-    // D is stored in-place on the diagonal of csr_val (the unit diagonal of L is implicit,
-    // so that slot is free to hold the real scalar D_i). csr_val stores the strictly
-    // lower-triangular entries of L. Copying D out to an optional user vector is a separate
-    // step performed once the factorization is complete (see csrildlt0_copy_diag).
+    // A is assumed Hermitian: only its lower triangle is read and the imaginary part of the
+    // diagonal is ignored (D is taken as real(A_ii)). Non-Hermitian input is not detected.
     template <bool SLEEP, uint32_t BLOCKSIZE, uint32_t WF_SIZE, typename T, typename I, typename J>
     ROCSPARSE_DEVICE_ILF void csrildlt0_device_binsearch(J m,
                                                          const I* __restrict__ csr_row_ptr,
@@ -82,7 +83,7 @@ namespace rocsparse
         const I row_begin = csr_row_ptr[row] - idx_base;
         const I row_end   = csr_row_ptr[row + 1] - idx_base;
 
-        // Accumulate: sum_{k<i} |L_{ik}|^2 * D_k  (used for D_i update)
+        // Diagonal accumulator: sum_{k<i} |L_{ik}|^2 * D_k (real)
         floating_data_t<T> diag_sum = static_cast<floating_data_t<T>>(0);
 
         // Loop over strictly lower-triangular columns of current row
@@ -90,11 +91,10 @@ namespace rocsparse
         {
             const J local_col = csr_col_ind[j] - idx_base;
 
-            // Current L value (will be updated)
+            // Corresponding L value (updated below)
             T local_val = csr_val[j];
 
-            const I local_begin = csr_row_ptr[local_col] - idx_base;
-            // Global position of the diagonal of row local_col (holds D_{local_col} once done).
+            const I local_begin    = csr_row_ptr[local_col] - idx_base;
             const I local_diag_pos = csr_diag_ind[local_col];
             I       local_diag     = local_diag_pos;
 
@@ -110,8 +110,7 @@ namespace rocsparse
 
             __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "agent");
 
-            // Load D_{local_col} from the diagonal of L (real scalar). A missing diagonal
-            // entry means a zero pivot, handled below.
+            // Load D_{local_col} (real scalar); a missing diagonal entry means a zero pivot.
             floating_data_t<T> d_j = (local_diag_pos >= 0)
                                          ? rocsparse::real(csr_val[local_diag_pos])
                                          : static_cast<floating_data_t<T>>(0);
@@ -163,7 +162,7 @@ namespace rocsparse
 
                 if(col_j == col_k)
                 {
-                    // L_{row,k} * D_k * conj(L_{local_col,k}); D_k lives on the diagonal of L.
+                    // Update: L_{row,k} * D_k * conj(L_{local_col,k})
                     const I            dk_pos = csr_diag_ind[col_k - idx_base];
                     floating_data_t<T> d_k    = (dk_pos >= 0) ? rocsparse::real(csr_val[dk_pos])
                                                               : static_cast<floating_data_t<T>>(0);
@@ -177,10 +176,9 @@ namespace rocsparse
 
             if(lid == WF_SIZE - 1)
             {
-                // L_{row, local_col} = (A_{row,local_col} - sum) / D_{local_col}
                 local_val  = (local_val - local_sum) * inv_d_j;
                 csr_val[j] = local_val;
-                // Accumulate for diagonal: |L_{row,j}|^2 * D_j = (re^2 + im^2) * D_j
+                // |L_{row,j}|^2 * D_j accumulated into the (real) diagonal update
                 const floating_data_t<T> re_l = rocsparse::real(local_val);
                 const floating_data_t<T> im_l = rocsparse::imag(local_val);
                 diag_sum = rocsparse::fma(rocsparse::fma(re_l, re_l, im_l * im_l), d_j, diag_sum);
@@ -191,7 +189,7 @@ namespace rocsparse
         {
             if(row_diag >= 0)
             {
-                // D_i = real(A_{ii}) - sum_{k<i} |L_{ik}|^2 * D_k
+                // D_i = real(A_{ii}) - diag_sum; A is Hermitian so the diagonal is taken real.
                 floating_data_t<T> d_i = rocsparse::real(csr_val[row_diag]) - diag_sum;
 
                 if(rocsparse::abs(d_i) <= tol)
@@ -204,8 +202,7 @@ namespace rocsparse
                     d_i = boost_val;
                 }
 
-                // Store D_i on the diagonal of L (its unit diagonal is implicit). This must
-                // happen before the done[] release store below so other rows can read it back.
+                // Publish D_i before the done[] release store below so dependent rows can read it.
                 csr_val[row_diag] = static_cast<T>(d_i);
 
                 if(d_i == static_cast<floating_data_t<T>>(0))

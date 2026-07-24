@@ -27,6 +27,12 @@
 #include "rocsparse_enum.hpp"
 #include "testing.hpp"
 
+// rocsparse_spildlt0_input_diag is deprecated but still exercised here (to check it keeps
+// working). Referencing the [[deprecated]] enumerator directly would raise
+// -Wdeprecated-declarations under -Wall, so use its integer value instead (mirrors
+// deprecated_rocsparse_indextype_u16 in the library).
+#define deprecated_rocsparse_spildlt0_input_diag static_cast<rocsparse_spildlt0_input>(7)
+
 // Host reference for ILDLt factorization (templated on index types I, J)
 template <typename T, typename I, typename J>
 static void host_csrildlt0_ref(J M,
@@ -260,7 +266,7 @@ void testing_spildlt0_set_input_bad_arg(const Arguments& arg)
                   rocsparse_spildlt0_input_boost_tolerance,
                   rocsparse_spildlt0_input_boost_value,
                   rocsparse_spildlt0_input_singularity_tolerance,
-                  rocsparse_spildlt0_input_diag})
+                  deprecated_rocsparse_spildlt0_input_diag})
     {
         switch(e)
         {
@@ -271,7 +277,7 @@ void testing_spildlt0_set_input_bad_arg(const Arguments& arg)
         case rocsparse_spildlt0_input_boost_tolerance:
         case rocsparse_spildlt0_input_boost_value:
         case rocsparse_spildlt0_input_singularity_tolerance:
-        case rocsparse_spildlt0_input_diag:
+        case deprecated_rocsparse_spildlt0_input_diag:
         {
             EXPECT_ROCSPARSE_STATUS(
                 rocsparse_spildlt0_set_input(handle, spildlt0_descr, e, data, 0, p_error),
@@ -422,7 +428,7 @@ void testing_spildlt0_bad_arg(const Arguments& arg)
         void* d_diag_ptr = (void*)d_diag;
         CHECK_ROCSPARSE_ERROR(rocsparse_spildlt0_set_input(handle,
                                                            spildlt0_descr,
-                                                           rocsparse_spildlt0_input_diag,
+                                                           deprecated_rocsparse_spildlt0_input_diag,
                                                            &d_diag_ptr,
                                                            sizeof(d_diag_ptr),
                                                            p_error));
@@ -473,7 +479,7 @@ void testing_spildlt0_bad_arg(const Arguments& arg)
                               rocsparse_spildlt0_input_boost_tolerance,
                               rocsparse_spildlt0_input_boost_value,
                               rocsparse_spildlt0_input_singularity_tolerance,
-                              rocsparse_spildlt0_input_diag})
+                              deprecated_rocsparse_spildlt0_input_diag})
             {
                 switch(input)
                 {
@@ -517,7 +523,7 @@ void testing_spildlt0_bad_arg(const Arguments& arg)
                 case rocsparse_spildlt0_input_boost_enable:
                 case rocsparse_spildlt0_input_boost_tolerance:
                 case rocsparse_spildlt0_input_boost_value:
-                case rocsparse_spildlt0_input_diag:
+                case deprecated_rocsparse_spildlt0_input_diag:
                 {
                     break;
                 }
@@ -899,7 +905,7 @@ void testing_spildlt0(const Arguments& arg)
                         CHECK_ROCSPARSE_ERROR(
                             rocsparse_spildlt0_set_input(handle,
                                                          spildlt0_descr,
-                                                         rocsparse_spildlt0_input_diag,
+                                                         deprecated_rocsparse_spildlt0_input_diag,
                                                          &d_diag_ptr,
                                                          sizeof(d_diag_ptr),
                                                          p_error));

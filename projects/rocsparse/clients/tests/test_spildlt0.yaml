@@ -87,9 +87,6 @@ Tests:
   indextype: *i32
   batch_count: [1, 2]
 
-# Multi-batch coverage for D stored in-place on the diagonal of the L factor:
-# exercises reading D back from the diagonal across several batches and the
-# per-batch offset (b * m) of the optional diagonal output vector.
 - name: spildlt0
   category: quick
   function: spildlt0

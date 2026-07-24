@@ -232,12 +232,6 @@ set(ROCSPARSE_CLIENTS_TESTINGS
 
 if(BUILD_WITH_ILDLT0)
   list(APPEND ROCSPARSE_BENCHMARK_SOURCES ../testings/testing_spildlt0.cpp)
-  # testing_spildlt0.cpp references the deprecated rocsparse_spildlt0_input_diag
-  # enumerator on purpose (to test it still returns rocsparse_status_invalid_value).
-  # -Wno-deprecated does not cover -Wdeprecated-declarations, so suppress it for this TU.
-  set_source_files_properties(
-    ../testings/testing_spildlt0.cpp
-    PROPERTIES COMPILE_OPTIONS "-Wno-deprecated-declarations")
 endif()
 
 add_executable(rocsparse-bench ${ROCSPARSE_BENCHMARK_SOURCES} ${ROCSPARSE_CLIENTS_COMMON} ${ROCSPARSE_CLIENTS_TESTINGS})

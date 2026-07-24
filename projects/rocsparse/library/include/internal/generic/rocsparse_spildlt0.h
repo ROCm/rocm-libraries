@@ -105,9 +105,9 @@ rocsparse_status rocsparse_spildlt0_buffer_size(rocsparse_handle            hand
  *  Performing the above operation requires two stages, the stage \ref rocsparse_spildlt0_stage_analysis and the stage \ref rocsparse_spildlt0_stage_compute.
  *  The stage \ref rocsparse_spildlt0_stage_analysis is required to perform the stage \ref rocsparse_spildlt0_stage_compute and only needs to be called once for a given sparse matrix \f$A\f$, while the stage \ref rocsparse_spildlt0_stage_compute can be repeatedly used with different matrices \f$A\f$ that have the same sparsity pattern.
  *
- *  The factorization is performed in-place: the values array of \p P stores the strictly
- *  lower-triangular entries of \f$L\f$, and the diagonal of \f$D\f$ is stored in-place on the
- *  otherwise-unused diagonal slot of \f$L\f$ (whose unit diagonal is implicit).
+ *  The factorization overwrites the values array of \p P with \f$L + D - I\f$: the strict
+ *  lower-triangular entries hold \f$L\f$ (its unit diagonal is implicit), and the diagonal
+ *  entries hold the real diagonal \f$D\f$.
  *
  *  \p rocsparse_spildlt0 supports the following
  *  data types for \p A : \ref rocsparse_datatype_f32_r, \ref rocsparse_datatype_f64_r, \ref rocsparse_datatype_f32_c, and \ref rocsparse_datatype_f64_c.
