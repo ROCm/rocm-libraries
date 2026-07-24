@@ -21,9 +21,12 @@
  *
  * AQuant vs BQuant: here the *A* matrix is the quantized operand.  The scale
  * tensor AQ has shape [M, QK_A] (QK_A = ceil(K/gK)), aq_ptr is set and bq_ptr is
- * nullptr.  For pk_int4 A the raw values are permuted via permute_vectors_i4x4_b
- * before the device copy (mirrors run_gemm_quant_example.inc), and APreshuffleQuant
- * kernels shuffle AQ via shuffle_aq.
+ * nullptr.  Its leading dimension follows AQLayout: row-major (rcr/rrr/crr) uses
+ * stride_AQ=QK_A, while the ccr layout is column-major and uses stride_AQ=M
+ * (see run_gemm_quant_example.inc get_default_stride, ~line 528).  For pk_int4 A the
+ * raw values are permuted via permute_vectors_i4x4_b before the device copy (mirrors
+ * run_gemm_quant_example.inc), and APreshuffleQuant kernels shuffle AQ via shuffle_aq
+ * (row-major only -- ccr is excluded from the preshufflequant path by Old-TE).
  */
 
 #include <hip/hip_runtime.h>
@@ -98,7 +101,7 @@ int dispatcher_initialize()
  *   A, AQ, B, C  - host data pointers
  *   M, N, K      - matrix dimensions
  *   stride_A     - leading dimension of A (row-major: K; col-major: M)
- *   stride_AQ    - leading dimension of AQ (row-major: QK_A)
+ *   stride_AQ    - leading dimension of AQ (row-major: QK_A; col-major/ccr: M)
  *   stride_B     - leading dimension of B (col-major: K; row-major: N)
  *   stride_C     - leading dimension of C (row-major: N)
  *   QK_A         - number of K-groups = ceil(K / quant_group_k)
@@ -174,17 +177,22 @@ int dispatcher_run_aquant_gemm(const void* A,
     }
 
     // This implementation only supports packed (contiguous) layouts.  The expected
-    // leading dimensions depend on the compile-time A/B layouts baked into the kernel.
-    //   A (ALayout): row-major -> stride_A=K ; col-major -> stride_A=M
-    //   B (BLayout): row-major -> stride_B=N ; col-major -> stride_B=K
-    //   AQ: row-major [M, QK_A]  -> stride_AQ=QK_A
-    //   C : row-major [M, N]     -> stride_C=N (CLayout is always RowMajor)
+    // leading dimensions depend on the compile-time A/B/AQ layouts baked into the kernel.
+    //   A  (ALayout) : row-major -> stride_A=K ; col-major -> stride_A=M
+    //   B  (BLayout) : row-major -> stride_B=N ; col-major -> stride_B=K
+    //   AQ (AQLayout): scale tensor [M, QK_A]. row-major -> stride_AQ=QK_A ;
+    //                  col-major (ccr) -> stride_AQ=M.  Mirrors Old-TE
+    //                  get_default_stride(M, QK_A, 0, is_row_major(aq_layout)) in
+    //                  run_gemm_quant_example.inc (~line 528): the column-major branch
+    //                  returns the row count M, not the K-group count QK_A.
+    //   C  (CLayout) : row-major [M, N] -> stride_C=N (CLayout is always RowMajor)
     {
-        constexpr bool a_row = std::is_same_v<ALayout, ck_tile::tensor_layout::gemm::RowMajor>;
-        constexpr bool b_row = std::is_same_v<BLayout, ck_tile::tensor_layout::gemm::RowMajor>;
+        constexpr bool a_row  = std::is_same_v<ALayout, ck_tile::tensor_layout::gemm::RowMajor>;
+        constexpr bool b_row  = std::is_same_v<BLayout, ck_tile::tensor_layout::gemm::RowMajor>;
+        constexpr bool aq_row = std::is_same_v<AQLayout, ck_tile::tensor_layout::gemm::RowMajor>;
         const int64_t exp_stride_A  = a_row ? K : M;
         const int64_t exp_stride_B  = b_row ? N : K;
-        const int64_t exp_stride_AQ = QK_A;
+        const int64_t exp_stride_AQ = aq_row ? QK_A : M;
         const int64_t exp_stride_C  = N;
         if(stride_A != exp_stride_A || stride_B != exp_stride_B || stride_AQ != exp_stride_AQ ||
            stride_C != exp_stride_C)
@@ -278,6 +286,15 @@ int dispatcher_run_aquant_gemm(const void* A,
     // so the kernel finds the scale values in the interleaved layout it expects.
     if constexpr(SelectedKernel::APreshuffleQuant)
     {
+        // shuffle_aq assumes a row-major AQ descriptor.  This holds because Old-TE
+        // rejects the ccr (column-major AQ) layout for the preshufflequant path, so
+        // every APreshuffleQuant kernel this .so can host has AQLayout == RowMajor.
+        // The assert is gated on APreshuffleQuant so it is only evaluated for kernels
+        // that actually take this branch (decode-path ccr kernels are unaffected).
+        static_assert(!SelectedKernel::APreshuffleQuant ||
+                          std::is_same_v<AQLayout, ck_tile::tensor_layout::gemm::RowMajor>,
+                      "APreshuffleQuant requires a row-major AQ layout (ccr is excluded "
+                      "from the preshufflequant path); shuffle_aq below assumes row-major");
         constexpr int block_aq_k =
             static_cast<int>(SelectedKernel::TileK) / static_cast<int>(QuantGroupSize::kK);
         ck_tile::HostTensor<QDataType> aq_h(

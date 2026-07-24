@@ -287,9 +287,25 @@ if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/gemm_aquant_ctypes_lib.cpp)
         list(GET AQUANT_GEMM_KERNEL_HEADERS 0 AQUANT_GEMM_KERNEL_HEADER)
         message(STATUS "Found AQuant GEMM kernel for ctypes lib: ${AQUANT_GEMM_KERNEL_HEADER}")
 
-        add_ctypes_library(dispatcher_gemm_aquant_lib
-            gemm_aquant_ctypes_lib.cpp
-            KERNEL_HEADER ${AQUANT_GEMM_KERNEL_HEADER}
+        # NOTE: unlike the other ctypes targets, this one does NOT use
+        # add_ctypes_library(), because that helper adds ${PROJECT_SOURCE_DIR}/dispatcher/include
+        # to the include path. That directory pulls in generated_tile_backend.hpp, which
+        # instantiates SelectedKernel::run(GemmHostArgs&) and conflicts with the AQuant
+        # kernel's launch(QuantGemmHostArgs&) signature. The Python build path
+        # (gemm_aquant_utils.py:_compile_aquant_kernel) deliberately excludes
+        # dispatcher/include for the same reason. Build the target by hand with a
+        # MAIN-include-only include set so the CMake path matches the Python path.
+        add_library(dispatcher_gemm_aquant_lib SHARED gemm_aquant_ctypes_lib.cpp)
+        target_include_directories(dispatcher_gemm_aquant_lib PRIVATE
+            ${PROJECT_SOURCE_DIR}/include
+        )
+        target_link_libraries(dispatcher_gemm_aquant_lib PRIVATE hip::device)
+        target_compile_options(dispatcher_gemm_aquant_lib PRIVATE
+            -include ${AQUANT_GEMM_KERNEL_HEADER}
+        )
+        set_target_properties(dispatcher_gemm_aquant_lib PROPERTIES
+            POSITION_INDEPENDENT_CODE ON
+            CXX_STANDARD 17
         )
         # Resolve a single GFX arch string from CMAKE_HIP_ARCHITECTURES if available,
         # falling back to the cache variable CK_TILE_AQUANT_GFX_ARCH. Never hardcode a

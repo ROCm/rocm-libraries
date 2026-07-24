@@ -416,6 +416,9 @@ using QuantGroupSize = {ns}::QuantGroupSize;
 using ALayout = {ns}::ALayout;
 using BLayout = {ns}::BLayout;
 using CLayout = {ns}::CLayout;
+// AQ scale-tensor layout: RowMajor for rcr/rrr/crr, ColumnMajor for ccr.
+// The ctypes lib derives stride_AQ from this (RowMajor -> QK_A, ColumnMajor -> M).
+using AQLayout = {ns}::AQLayout;
 constexpr ck_tile::index_t GroupSizeK = {ns}::{struct}::GroupSizeK;
 #endif // CK_TILE_SINGLE_KERNEL_INCLUDE
 """

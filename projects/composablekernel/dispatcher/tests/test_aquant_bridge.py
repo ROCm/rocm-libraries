@@ -21,6 +21,13 @@ sys.path.insert(0, str(_DISP / "codegen"))
 
 from gemm_aquant_utils import (  # noqa: E402
     AQuantGemmProblem,
+    _aq_stride,
+    _validate_arch,
+    _LAYOUTS_DECODE,
+    _LAYOUTS_PRESHUFFLEQUANT,
+    _LAYOUTS_AQ_COLMAJOR,
+    _SUPPORTED_ARCHS,
+    _VARIANT_META,
     default_fp8_config,
     default_bf8_config,
     default_fp8i4_config,
@@ -109,6 +116,58 @@ class TestProblem(unittest.TestCase):
     def test_problem_constructs(self):
         p = AQuantGemmProblem(M=128, N=256, K=512)
         self.assertEqual((p.M, p.N, p.K), (128, 256, 512))
+
+
+class TestAQStride(unittest.TestCase):
+    """ccr must carry the column-major AQ stride (M), all others row-major (QK_A)."""
+
+    M, QK_A = 96, 4
+
+    def test_ccr_is_column_major(self):
+        # ccr: A=C B=C -> AQ column-major, leading dim = M (row count), not QK_A.
+        self.assertIn("ccr", _LAYOUTS_AQ_COLMAJOR)
+        self.assertEqual(_aq_stride("ccr", self.M, self.QK_A), self.M)
+
+    def test_row_major_layouts_use_qk_a(self):
+        for layout in ("rcr", "rrr", "crr"):
+            self.assertNotIn(layout, _LAYOUTS_AQ_COLMAJOR)
+            self.assertEqual(_aq_stride(layout, self.M, self.QK_A), self.QK_A)
+
+    def test_ccr_stride_differs_from_row_major(self):
+        # Guards against the round-1 bug where stride_AQ was always QK_A.
+        self.assertNotEqual(
+            _aq_stride("ccr", self.M, self.QK_A),
+            _aq_stride("rcr", self.M, self.QK_A),
+        )
+
+
+class TestLayoutScope(unittest.TestCase):
+    """Lock the layout scope and the 28-kernel (4 variant x 7 layout) count."""
+
+    def test_decode_layouts(self):
+        self.assertEqual(_LAYOUTS_DECODE, ("rcr", "rrr", "crr", "ccr"))
+
+    def test_preshufflequant_excludes_ccr(self):
+        self.assertEqual(_LAYOUTS_PRESHUFFLEQUANT, ("rcr", "rrr", "crr"))
+        self.assertNotIn("ccr", _LAYOUTS_PRESHUFFLEQUANT)
+
+    def test_full_kernel_count_is_28(self):
+        # 4 variants x (4 decode layouts + 3 preshufflequant layouts) = 28.
+        variants = len(_VARIANT_META)
+        total = variants * (len(_LAYOUTS_DECODE) + len(_LAYOUTS_PRESHUFFLEQUANT))
+        self.assertEqual(variants, 4)
+        self.assertEqual(total, 28)
+
+
+class TestSupportedArchs(unittest.TestCase):
+    def test_gfx90a_supported_and_validated(self):
+        self.assertIn("gfx90a", _SUPPORTED_ARCHS)
+        self.assertEqual(_validate_arch("gfx90a"), "gfx90a")
+        self.assertEqual(_validate_arch("gfx90a:sramecc+:xnack-"), "gfx90a:sramecc+:xnack-")
+
+    def test_unsupported_arch_raises(self):
+        with self.assertRaises(ValueError):
+            _validate_arch("gfx1030")
 
 
 if __name__ == "__main__":
