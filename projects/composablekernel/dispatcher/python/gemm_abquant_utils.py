@@ -20,6 +20,13 @@ ABQuant quantizes BOTH A and B:
   AQuantGroupSize is always 1x1x{aquant_group_k} (K-wise scale on A)
   BQuantGroupSize is 1x{bquant_group_n}x{bquant_group_k}
 
+Parity target arch: gfx950 (MI350) is the default. The default-config generators
+are ARCH-AWARE (a single config set cannot be byte-identical to Old-TE for both
+gfx942 and gfx950): warp_tile_k is arch-derived from get_k_warp_tile<PrecType,16>()
+(fp8/bf8 -> 128 on gfx950, 32 on gfx942; fp4 -> 32 everywhere), and the gfx950
+eight_waves fast path (GemmConfig/GemmConfigPrefill aliases under CK_USE_GFX950)
+is selected for exactly the 6 fp8/bf8 kernels that route through those aliases.
+
 Usage (end-to-end):
   configs = [default_fp8_config()]
   so_paths = setup_multiple_abquant_dispatchers(configs, output_dir=Path("/tmp/abq"))
@@ -783,14 +790,96 @@ def expand_abquant_sweep(
 # =============================================================================
 # Default configs -- one per Old-TE gemm_abquant_quantgrouped*.cpp entry
 #
-# All non-preshuffle/preshufflequant variants use GemmConfigABQuantPrefill
-# (= GemmConfigQuantPrefill + kPadK=false): tile 128x128x128, warp 1x4x1,
-# warp_tile 16x16x{K_warp}.  K_warp from get_k_warp_tile<PrecType, 16>() on
-# gfx950: fp8/bf8 -> 32, pk_fp4 -> 32.
+# ARCH-AWARE (see finding #1/#2/#3): one config set CANNOT be byte-identical to
+# Old-TE for both gfx942 and gfx950, because the compiled kernel shape differs:
 #
-# preshuffleb variants use GemmConfigPreshuffleB_ABQuant_Prefill: warp 2x2x1,
-# preshuffle_b + double_smem, kBlockPerCu=2, kPadK=false.
+#   * warp_tile_k = get_k_warp_tile<PrecType, 16>()  (tile_gemm_shape.hpp:104-136)
+#       gfx950: fp8/bf8 -> 128, fp4 (pk_fp4) -> 32
+#       gfx942: all             -> 32
+#
+#   * eight_waves fast path (gemm_abquant_quantgrouped.h:8-18): under CK_USE_GFX950
+#       GemmConfig<T>        aliases GemmConfigEightWaves<T>            (non-preshuffleb)
+#       GemmConfigPrefill<T> aliases GemmConfigPreshuffleBEightWaves<T> (preshuffleb)
+#     and run_gemm_quant_example.inc enables eight_waves iff
+#       IS_FP8BLOCKSCALE && M_Warp*N_Warp*K_Warp==8 && K_Warp_Tile==128.
+#     With get_k_warp_tile<fp8/bf8,16>()==128 and the EightWaves 4x2x1 warps this
+#     is TRUE on gfx950 for exactly the 6 fp8/bf8 kernels that go through those
+#     two aliases (non-preshuffleb non-pq 1x128x128, and preshuffleb {1,128}).
+#     On gfx942 (or fp4, or the hardcoded GemmConfigABQuantPrefill entries)
+#     eight_waves is FALSE.
+#
+#   EightWaves shape (GemmConfigEightWaves / GemmConfigPreshuffleBEightWaves):
+#       M_Warp=4, N_Warp=2, K_Warp=1 ; M_Tile=192, N_Tile=256,
+#       K_Tile=128/sizeof(PrecType)=128 (fp8/bf8) ; warp_tile 16x16x128 ;
+#       kBlockPerCu=1 ; TransposeC defaults true.
+#
+# Non-eight_waves prefill variants use GemmConfigABQuantPrefill
+# (= GemmConfigQuantPrefill + kPadK=false): tile 128x128x128, warp 1x4x1,
+# warp_tile 16x16x{K_warp}.
+# preshuffleb (non-eight_waves) uses GemmConfigPreshuffleB_ABQuant_Prefill:
+# warp 2x2x1, preshuffle_b + double_smem, kBlockPerCu=2, kPadK=false.
 # =============================================================================
+
+
+def _warp_tile_k_for(variant_key: str, gfx_arch: str) -> int:
+    """Arch-derived K warp-tile, mirroring ck_tile::get_k_warp_tile<PrecType, 16>().
+
+    (tile_gemm_shape.hpp:104-136, M_Warp_Tile=16, non-WMMA path)
+      gfx950 (CK_GFX950_SUPPORT): fp8/bf8 -> 128, non-8bit-float (fp4) -> 32
+      gfx942/other              : all                               -> 32
+    """
+    is_8bit_float = variant_key in ("fp8", "bf8")
+    if "gfx950" in gfx_arch and is_8bit_float:
+        return 128
+    return 32
+
+
+def _uses_eight_waves(variant_key: str, gfx_arch: str) -> bool:
+    """Whether this fp8/bf8-blockscale family resolves to the eight_waves fast path.
+
+    Only gfx950 aliases GemmConfig/GemmConfigPrefill to the EightWaves configs
+    (gemm_abquant_quantgrouped.h), and only fp8/bf8 have K_Warp_Tile==128, so the
+    IS_FP8BLOCKSCALE && warps==8 && K_Warp_Tile==128 predicate is TRUE only here.
+    """
+    return "gfx950" in gfx_arch and variant_key in ("fp8", "bf8")
+
+
+def _abquant_eight_waves_config(
+    variant_key: str,
+    pipeline: str,           # "compv3" (non-preshuffleb) | "preshuffleb"
+    preshuffle_b: bool,
+    bquant_group_n: int,
+    gfx_arch: str,
+) -> ABQuantKernelConfig:
+    """gfx950 EightWaves prefill (GemmConfig[Prefill] = *EightWaves under CK_USE_GFX950).
+
+    M_Warp=4, N_Warp=2, K_Warp=1 ; M_Tile=192, N_Tile=256, K_Tile=128 ;
+    warp_tile 16x16x128 ; TransposeC=true (alias default) ; kBlockPerCu=1 ; kPadK=false.
+    The eight_waves flag routes codegen to ABQuantGemmPipelineAgBgCrEightWaves and
+    kernel_attr<true>; pipeline "eightwaves" overrides the preshuffleb pipeline
+    selection exactly as run_gemm_quant_example.inc does.
+    """
+    return ABQuantKernelConfig(
+        variant_key=variant_key,
+        layout="rcr",
+        pipeline="eightwaves",
+        epilogue="cshuffle",
+        scheduler="intrawave",
+        tile_m=192, tile_n=256, tile_k=128,
+        warp_m=4, warp_n=2, warp_k=1,
+        warp_tile_m=16, warp_tile_n=16, warp_tile_k=128,
+        aquant_group_k=128,
+        bquant_group_n=bquant_group_n,
+        bquant_group_k=128,
+        preshuffle_b=preshuffle_b,
+        preshuffle_bquant=False,
+        double_smem_buffer=preshuffle_b,   # GemmConfigPreshuffleBEightWaves sets it
+        eight_waves=True,
+        transpose_c=True,
+        pad_k=False,
+        k_block_per_cu=1,
+        gfx_arch=gfx_arch,
+    )
 
 
 def _abquant_prefill_config(
@@ -820,21 +909,35 @@ def _abquant_prefill_config(
 
 
 def default_fp8_config(bquant_group_n: int = 1, gfx_arch: str = "gfx950") -> ABQuantKernelConfig:
-    """fp8 ABQuant, non-preshuffle. bquant_group_n=1 -> GemmConfigABQuantPrefill<fp8,false>."""
-    return _abquant_prefill_config("fp8", warp_tile_k=32, bquant_group_n=bquant_group_n,
+    """fp8 ABQuant, non-preshuffle.
+
+    Old-TE (gemm_abquant_quantgrouped_fp8.cpp):
+      bquant_group_n=1  -> GemmConfigABQuantPrefill<fp8,false>  (hardcoded, NOT eight_waves)
+      bquant_group_n=128-> GemmConfig<fp8>  = EightWaves on gfx950
+    """
+    if bquant_group_n > 1 and _uses_eight_waves("fp8", gfx_arch):
+        return _abquant_eight_waves_config("fp8", pipeline="compv3", preshuffle_b=False,
+                                           bquant_group_n=bquant_group_n, gfx_arch=gfx_arch)
+    return _abquant_prefill_config("fp8", warp_tile_k=_warp_tile_k_for("fp8", gfx_arch),
+                                   bquant_group_n=bquant_group_n,
                                    transpose_c=(bquant_group_n > 1), gfx_arch=gfx_arch)
 
 
 def default_bf8_config(bquant_group_n: int = 1, gfx_arch: str = "gfx950") -> ABQuantKernelConfig:
-    """bf8 ABQuant, non-preshuffle."""
-    return _abquant_prefill_config("bf8", warp_tile_k=32, bquant_group_n=bquant_group_n,
+    """bf8 ABQuant, non-preshuffle (same alias split as fp8)."""
+    if bquant_group_n > 1 and _uses_eight_waves("bf8", gfx_arch):
+        return _abquant_eight_waves_config("bf8", pipeline="compv3", preshuffle_b=False,
+                                           bquant_group_n=bquant_group_n, gfx_arch=gfx_arch)
+    return _abquant_prefill_config("bf8", warp_tile_k=_warp_tile_k_for("bf8", gfx_arch),
+                                   bquant_group_n=bquant_group_n,
                                    transpose_c=(bquant_group_n > 1), gfx_arch=gfx_arch)
 
 
 def default_fp4_config(gfx_arch: str = "gfx950") -> ABQuantKernelConfig:
-    """fp4 ABQuant, non-preshuffle (only bquant_group_n=128 exists in Old-TE)."""
-    return _abquant_prefill_config("fp4", warp_tile_k=32, bquant_group_n=128,
-                                   transpose_c=False, gfx_arch=gfx_arch)
+    """fp4 ABQuant, non-preshuffle (only bquant_group_n=128; hardcoded
+    GemmConfigABQuantPrefill<pk_fp4_raw_t>, never eight_waves, warp_tile_k=32)."""
+    return _abquant_prefill_config("fp4", warp_tile_k=_warp_tile_k_for("fp4", gfx_arch),
+                                   bquant_group_n=128, transpose_c=False, gfx_arch=gfx_arch)
 
 
 def default_fp8_preshufflequant_config(
@@ -842,8 +945,9 @@ def default_fp8_preshufflequant_config(
 ) -> ABQuantKernelConfig:
     """fp8 ABQuant + preshufflequant (GemmConfigPreshuffleBQuantPrefill<fp8>).
 
-    BPreshuffleQuant/APreshuffleQuant=true; base is GemmConfigQuantPrefill so
-    TransposeC defaults false and kPadK=true (QuantPrefill, not ABQuantPrefill).
+    BPreshuffleQuant=true, APreshuffleQuant stays false; base is GemmConfigQuantPrefill
+    so TransposeC defaults false and kPadK=true. NOT eight_waves (uses the explicit
+    GemmConfigPreshuffleBQuantPrefill, not the GemmConfig alias). warp_tile_k arch-derived.
     """
     return ABQuantKernelConfig(
         variant_key="fp8",
@@ -853,7 +957,7 @@ def default_fp8_preshufflequant_config(
         scheduler="intrawave",
         tile_m=128, tile_n=128, tile_k=128,
         warp_m=1, warp_n=4, warp_k=1,
-        warp_tile_m=16, warp_tile_n=16, warp_tile_k=32,
+        warp_tile_m=16, warp_tile_n=16, warp_tile_k=_warp_tile_k_for("fp8", gfx_arch),
         aquant_group_k=128,
         bquant_group_n=bquant_group_n,
         bquant_group_k=128,
@@ -900,22 +1004,37 @@ def _abquant_preshuffleb_config(
 def default_fp8_preshuffleb_config(
     bquant_group_n: int = 1, gfx_arch: str = "gfx950"
 ) -> ABQuantKernelConfig:
-    """fp8 ABQuant + preshuffleb (GemmConfigPreshuffleB_ABQuant_Prefill<fp8,true>)."""
-    return _abquant_preshuffleb_config("fp8", warp_tile_k=32, bquant_group_n=bquant_group_n,
+    """fp8 ABQuant + preshuffleb.
+
+    Old-TE (_preshuffleb_fp8.cpp) uses GemmConfigPrefill<fp8> for BOTH n, which on
+    gfx950 aliases GemmConfigPreshuffleBEightWaves<fp8> -> eight_waves. On gfx942 it
+    is GemmConfigPreshuffleB_ABQuant_Prefill<fp8,true> (warp 2x2x1, warp_tile_k=32).
+    """
+    if _uses_eight_waves("fp8", gfx_arch):
+        return _abquant_eight_waves_config("fp8", pipeline="preshuffleb", preshuffle_b=True,
+                                           bquant_group_n=bquant_group_n, gfx_arch=gfx_arch)
+    return _abquant_preshuffleb_config("fp8", warp_tile_k=_warp_tile_k_for("fp8", gfx_arch),
+                                       bquant_group_n=bquant_group_n,
                                        preshuffle_bquant=False, transpose_c=True, gfx_arch=gfx_arch)
 
 
 def default_bf8_preshuffleb_config(
     bquant_group_n: int = 1, gfx_arch: str = "gfx950"
 ) -> ABQuantKernelConfig:
-    """bf8 ABQuant + preshuffleb."""
-    return _abquant_preshuffleb_config("bf8", warp_tile_k=32, bquant_group_n=bquant_group_n,
+    """bf8 ABQuant + preshuffleb (same GemmConfigPrefill alias split as fp8)."""
+    if _uses_eight_waves("bf8", gfx_arch):
+        return _abquant_eight_waves_config("bf8", pipeline="preshuffleb", preshuffle_b=True,
+                                           bquant_group_n=bquant_group_n, gfx_arch=gfx_arch)
+    return _abquant_preshuffleb_config("bf8", warp_tile_k=_warp_tile_k_for("bf8", gfx_arch),
+                                       bquant_group_n=bquant_group_n,
                                        preshuffle_bquant=False, transpose_c=True, gfx_arch=gfx_arch)
 
 
 def default_fp4_preshuffleb_config(gfx_arch: str = "gfx950") -> ABQuantKernelConfig:
-    """fp4 ABQuant + preshuffleb (only bquant_group_n=128 in Old-TE)."""
-    return _abquant_preshuffleb_config("fp4", warp_tile_k=32, bquant_group_n=128,
+    """fp4 ABQuant + preshuffleb (only bquant_group_n=128; explicit
+    GemmConfigPreshuffleB_ABQuant_Prefill<pk_fp4_raw_t>, never eight_waves)."""
+    return _abquant_preshuffleb_config("fp4", warp_tile_k=_warp_tile_k_for("fp4", gfx_arch),
+                                       bquant_group_n=128,
                                        preshuffle_bquant=False, transpose_c=True, gfx_arch=gfx_arch)
 
 
@@ -925,10 +1044,12 @@ def default_fp8_preshuffleb_preshufflequant_config(
     """fp8 ABQuant + preshuffleb + preshufflequant
     (GemmConfigPreshuffleB_ABQuant_PreshuffleBQuant_Prefill<fp8, TransposeC>).
 
+    Uses the EXPLICIT *_PreshuffleBQuant_Prefill config (not the GemmConfigPrefill
+    alias), so it is NOT eight_waves on either arch. warp_tile_k arch-derived.
     TransposeC=false for 1x1x128, true for 1x128x128 (mirrors the Old-TE lut).
     """
     return _abquant_preshuffleb_config(
-        "fp8", warp_tile_k=32, bquant_group_n=bquant_group_n,
+        "fp8", warp_tile_k=_warp_tile_k_for("fp8", gfx_arch), bquant_group_n=bquant_group_n,
         preshuffle_bquant=True, transpose_c=(bquant_group_n > 1), gfx_arch=gfx_arch)
 
 

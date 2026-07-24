@@ -240,9 +240,15 @@ class ABQuantKernelHeaderGenerator:
         is_fp8_blockscale = spec.variant_key in _FP8_BLOCKSCALE_VARIANTS
         a_compute = ck_a if is_fp8_blockscale else "void"
 
-        # Determine effective epilogue. TiledPermuteN is disabled when
-        # BQuantGroupSize::kN > 1 (mirrors run_gemm_quant_example.inc:208-209).
-        use_permute_n_epilogue = (
+        # Determine effective epilogue. GemmConfig::TiledMMAPermuteN is a per-config
+        # property: ONLY the preshuffleB configs (GemmConfigPreshuffleB_*_Prefill)
+        # override it to (N_Repeat % 2 == 0). The compv3 (GemmConfigABQuantPrefill /
+        # GemmConfigPreshuffleBQuantPrefill) and eight_waves (GemmConfig*EightWaves)
+        # configs inherit TiledMMAPermuteN=false from GemmConfigBase, so they always
+        # use CShuffle. PermuteN is further disabled when BQuantGroupSize::kN > 1
+        # (mirrors run_gemm_quant_example.inc:208-209). Keep this in lockstep with
+        # make_abquant_kernel_name so the emitted name matches the emitted epilogue.
+        use_permute_n_epilogue = (spec.preshuffle_b and not spec.eight_waves) and (
             bquant_effective_epilogue(
                 t.tile_n, t.warp_n, t.warp_tile_n, spec.bquant_group_n
             )

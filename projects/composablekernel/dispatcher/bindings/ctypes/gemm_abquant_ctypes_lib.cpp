@@ -19,8 +19,10 @@
  * the dispatcher's registry backend.
  *
  * ABQuant quantizes BOTH A and B: aq_ptr AND bq_ptr are non-null. AQ is stored
- * RowMajor [M, QK_A] with QK_A = ceil(K / AGroupSizeK); BQ is stored RowMajor
- * [QK_B, QN_B] with QK_B = ceil(K / BGroupSizeK), QN_B = ceil(N / BGroupSizeN).
+ * RowMajor [M, QK_A] with QK_A = ceil(K / AGroupSizeK); BQ is stored ColumnMajor
+ * [QK_B, QN_B] with QK_B = ceil(K / BGroupSizeK), QN_B = ceil(N / BGroupSizeN)
+ * (BQLayout==ColumnMajor is enforced by a static_assert in gemm_quant_kernel.hpp;
+ * see the stride handling at lines ~194-196 below).
  *
  * Memory model: host-pointer (this library owns hipMalloc/hipMemcpy/hipFree).
  */

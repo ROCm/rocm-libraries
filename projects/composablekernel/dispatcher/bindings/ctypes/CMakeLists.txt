@@ -311,9 +311,14 @@ if(ABQUANT_GEMM_KERNEL_HEADERS)
 else()
     message(STATUS "No ABQuant GEMM kernel found for ctypes lib - building without kernel")
     add_library(dispatcher_gemm_abquant_lib SHARED gemm_abquant_ctypes_lib.cpp)
+    # main include ONLY -- deliberately do NOT add dispatcher/include here. That path
+    # pulls in generated_tile_backend.hpp, whose SelectedKernel::run(GemmHostArgs&)
+    # conflicts with the ABQuant kernel's launch(QuantGemmHostArgs&) (same rationale
+    # as the Python build path, gemm_abquant_utils.py:566-569). This stub branch
+    # won't fully link anyway (SelectedKernel/KERNEL_NAME undefined without the
+    # force-included header) and exists only so CMake configure/compile succeeds.
     target_include_directories(dispatcher_gemm_abquant_lib PRIVATE
         ${PROJECT_SOURCE_DIR}/include
-        ${PROJECT_SOURCE_DIR}/dispatcher/include
     )
     target_link_libraries(dispatcher_gemm_abquant_lib PRIVATE hip::device)
     set_target_properties(dispatcher_gemm_abquant_lib PROPERTIES

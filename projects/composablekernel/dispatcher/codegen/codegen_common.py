@@ -477,9 +477,19 @@ def make_abquant_kernel_name(
     ``TiledPermuteN`` in run_gemm_quant_example.inc), so we pass bquant_group_n
     into bquant_effective_epilogue via its quant_group_n slot.
     """
-    effective_epilogue = bquant_effective_epilogue(
-        tile_n, warp_n, warp_tile_n, bquant_group_n
-    )
+    # The PermuteN epilogue is selected iff GemmConfig::TiledMMAPermuteN is true
+    # (run_gemm_quant_example.inc: TiledPermuteN = kN>1 ? false : TiledMMAPermuteN).
+    # TiledMMAPermuteN is a per-config-struct property, NOT pure tile geometry:
+    # ONLY the preshuffleB configs (GemmConfigPreshuffleB_*_Prefill) override it to
+    # (N_Repeat % 2 == 0). The compv3 (GemmConfigABQuantPrefill /
+    # GemmConfigPreshuffleBQuantPrefill) and eight_waves (GemmConfig*EightWaves)
+    # configs inherit TiledMMAPermuteN=false from GemmConfigBase -> always CShuffle.
+    if preshuffle_b and not eight_waves:
+        effective_epilogue = bquant_effective_epilogue(
+            tile_n, warp_n, warp_tile_n, bquant_group_n
+        )
+    else:
+        effective_epilogue = "cshuffle"
     parts = [
         "gemm_abquant",
         variant_key,
