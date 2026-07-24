@@ -38,6 +38,7 @@
 #endif
 #include <miopen/solver/implicitgemm_ck_util.hpp>
 #include <miopen/solver/implicitgemm_util.hpp>
+#include <miopen/solver/ck_grouped_conv_narrow.hpp>
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_CONV_IMPLICIT_GEMM_HIP_GROUP_BWD_XDLOPS)
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_GROUP_CONV_IMPLICIT_GEMM_HIP_BWD_XDLOPS_AI_HEUR)
 
@@ -131,22 +132,54 @@ struct CKArgs
     {
         (void)alpha;
         (void)beta;
+        // Large-tensor (>INT_MAX element stride) instances expose CK's int64
+        // long_index_t MakeArgumentPointer overload; bind it with the int64
+        // member arrays directly (they outlive the returned arg_ptr).
+        if(IsLargeTensorCKInstance(conv_ptr))
+        {
+            return conv_ptr->MakeArgumentPointer(out,
+                                                 w,
+                                                 {},
+                                                 in,
+                                                 output,
+                                                 out_strides,
+                                                 weight,
+                                                 wei_strides,
+                                                 {},
+                                                 {},
+                                                 input,
+                                                 in_strides,
+                                                 strides,
+                                                 dilation,
+                                                 lPadding,
+                                                 rPadding,
+                                                 {},
+                                                 {},
+                                                 {},
+                                                 split_k);
+        }
+        // Sub-INT_MAX shapes: narrow to int32 at the boundary. The narrowed
+        // bundle is a mutable member of CKArgs (populated by
+        // GetNarrowedArrays) so its arrays outlive any arg_ptr referencing
+        // them -- CK's MakeArgumentPointer captures references into the
+        // bundle.
+        const auto& a = GetNarrowedArrays();
         return conv_ptr->MakeArgumentPointer(out,
                                              w,
                                              {},
                                              in,
-                                             output,
-                                             out_strides,
-                                             weight,
-                                             wei_strides,
+                                             a.out_l,
+                                             a.out_s,
+                                             a.wei_l,
+                                             a.wei_s,
                                              {},
                                              {},
-                                             input,
-                                             in_strides,
-                                             strides,
-                                             dilation,
-                                             lPadding,
-                                             rPadding,
+                                             a.in_l,
+                                             a.in_s,
+                                             a.filter_strides,
+                                             a.filter_dilations,
+                                             a.lPadding,
+                                             a.rPadding,
                                              {},
                                              {},
                                              {},
@@ -184,30 +217,60 @@ struct CKArgs
         return conv_ptr->IsSupportedArgument(arg_ptr.get());
     }
 
-    int G;
-    int N;
-    int K;
-    int C;
-    int C1;
-    int K1;
-    int Hi;
-    int Wi;
-    int Ho;
-    int Wo;
-    int Y;
-    int X;
+    // Dim members are int64 (and length/stride arrays use ck::long_index_t)
+    // so the NCHW stride builder above (e.g. Hi*Wi*G*C) does not silently
+    // overflow on tensors whose contiguous stride exceeds INT_MAX. Argument
+    // construction then binds to CK's long_index_t MakeArgumentPointer
+    // overload, which is safe only when paired with a large-tensor instance
+    // (see implicitgemm_ck_util.hpp::RequiresLargeTensorCKInstance).
+    int64_t G;
+    int64_t N;
+    int64_t K;
+    int64_t C;
+    int64_t C1;
+    int64_t K1;
+    int64_t Hi;
+    int64_t Wi;
+    int64_t Ho;
+    int64_t Wo;
+    int64_t Y;
+    int64_t X;
     miopenDataType_t data_type;
     miopenAlphaBetaCase_t alpha_beta_case;
-    std::array<ck::index_t, 5> input;
-    std::array<ck::index_t, 5> in_strides;
-    std::array<ck::index_t, 5> output;
-    std::array<ck::index_t, 5> out_strides;
-    std::array<ck::index_t, 5> weight;
-    std::array<ck::index_t, 5> wei_strides;
-    std::array<ck::index_t, 2> strides;
-    std::array<ck::index_t, 2> dilation;
-    std::array<ck::index_t, 2> lPadding;
-    std::array<ck::index_t, 2> rPadding;
+    std::array<ck::long_index_t, 5> input;
+    std::array<ck::long_index_t, 5> in_strides;
+    std::array<ck::long_index_t, 5> output;
+    std::array<ck::long_index_t, 5> out_strides;
+    std::array<ck::long_index_t, 5> weight;
+    std::array<ck::long_index_t, 5> wei_strides;
+    std::array<ck::long_index_t, 2> strides;
+    std::array<ck::long_index_t, 2> dilation;
+    std::array<ck::long_index_t, 2> lPadding;
+    std::array<ck::long_index_t, 2> rPadding;
+
+    // Populate-and-return the narrowed bundle. Lazy so narrowing only runs
+    // for kernels that survived the RequiresLargeTensorCKInstance filter --
+    // CKArgs is constructed unconditionally in FillValidKernelsIDs before
+    // filtering, so narrowing in the constructor would assert on >INT_MAX
+    // shapes even though no kernel is ultimately selected.
+    const NarrowedCKArrays2D& GetNarrowedArrays() const
+    {
+        narrowed = MakeNarrowedCKArrays<NarrowedCKArrays2D>(input,
+                                                            in_strides,
+                                                            output,
+                                                            out_strides,
+                                                            weight,
+                                                            wei_strides,
+                                                            strides,
+                                                            dilation,
+                                                            lPadding,
+                                                            rPadding);
+        return narrowed;
+    }
+
+    // mutable: populated lazily by GetNarrowedArrays() (const) so MakeArgPtr
+    // (also const) can hand CK references that outlive the call.
+    mutable NarrowedCKArrays2D narrowed;
 };
 } // namespace
 
@@ -217,7 +280,11 @@ void PerformanceConfigHipImplicitGemmGroupBwdXdlops::Init(const ProblemDescripti
     valid_kernels = FillValidKernelsIDs<DeviceOpGBwdPtrs<DataType>, CKArgs>(problem);
     index         = 0;
     split_k       = 1;
-    kernel_id     = valid_kernels[index] + "+" + std::to_string(split_k);
+    // valid_kernels can legitimately be empty here (e.g. no matching large-tensor CK
+    // instance for this problem); leave kernel_id empty so downstream applicability
+    // checks (IsCKArgsSupported) correctly report "unsupported" instead of indexing OOB.
+    if(!valid_kernels.empty())
+        kernel_id = valid_kernels[index] + "+" + std::to_string(split_k);
 }
 
 template <typename DataType>
@@ -549,8 +616,6 @@ bool ConvHipImplicitGemmGroupBwdXdlops::IsApplicable(
     if(env::enabled(MIOPEN_DEBUG_CONV_IMPLICIT_GEMM_HIP_GROUP_BWD_XDLOPS))
         return false;
     if(problem.HasMixedDataTypes())
-        return false;
-    if(!problem.AllTensorsDimsFitIntoInt())
         return false;
     if(problem.IsTensorsCasted())
         return false;

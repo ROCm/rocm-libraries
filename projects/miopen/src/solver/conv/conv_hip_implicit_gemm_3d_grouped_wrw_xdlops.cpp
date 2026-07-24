@@ -36,6 +36,7 @@
 #include <miopen/solver/ck_utility_common.hpp>
 #endif
 #include <miopen/solver/implicitgemm_ck_util.hpp>
+#include <miopen/solver/ck_grouped_conv_narrow.hpp>
 #include <miopen/solver/implicitgemm_util.hpp>
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_WRW_XDLOPS)
 
@@ -153,6 +154,29 @@ struct CKArgs
             return MakeDefaultArgPtr(conv_ptr, x, dw, dy, split_k);
         }
     }
+    // Sub-INT_MAX narrowing path: the int32 CK MakeArgumentPointer overload
+    // accepts ck::index_t arrays only. Lazy-populate so narrowing runs only
+    // for kernels that survived the RequiresLargeTensorCKInstance filter. The
+    // bundle is a mutable member so its arrays outlive any arg_ptr that
+    // captures references to them. Large-tensor (>INT_MAX) shapes never
+    // reach here: MakeDefaultArgPtr binds CK's int64 long_index_t overload
+    // directly for those instances, and the Bilinear/Scale MultipleD ops are
+    // int32-only and filtered out upstream.
+    const NarrowedCKArrays3D& NarrowedArrays() const
+    {
+        narrowed = MakeNarrowedCKArrays<NarrowedCKArrays3D>(in_lengths,
+                                                            in_strides,
+                                                            out_lengths,
+                                                            out_strides,
+                                                            wei_lengths,
+                                                            wei_strides,
+                                                            filter_strides,
+                                                            filter_dilations,
+                                                            lPadding,
+                                                            rPadding);
+        return narrowed;
+    }
+
     template <typename ConvPtr>
     auto MakeBilinearArgPtr(const ConvPtr& conv_ptr,
                             ConstData_t x,
@@ -162,22 +186,23 @@ struct CKArgs
                             float beta,
                             int split_k) const
     {
+        const auto& a = NarrowedArrays();
         return conv_ptr->MakeArgumentPointer(x,
                                              dw,
                                              dy,
                                              {dw},
-                                             in_lengths,
-                                             in_strides,
-                                             wei_lengths,
-                                             wei_strides,
-                                             out_lengths,
-                                             out_strides,
-                                             {wei_lengths},
-                                             {wei_strides},
-                                             filter_strides,
-                                             filter_dilations,
-                                             lPadding,
-                                             rPadding,
+                                             a.in_l,
+                                             a.in_s,
+                                             a.wei_l,
+                                             a.wei_s,
+                                             a.out_l,
+                                             a.out_s,
+                                             {a.wei_l},
+                                             {a.wei_s},
+                                             a.filter_strides,
+                                             a.filter_dilations,
+                                             a.lPadding,
+                                             a.rPadding,
                                              PassThrough{},
                                              Bilinear{alpha, beta},
                                              PassThrough{},
@@ -192,22 +217,23 @@ struct CKArgs
                          float alpha,
                          int split_k) const
     {
+        const auto& a = NarrowedArrays();
         return conv_ptr->MakeArgumentPointer(x,
                                              dw,
                                              dy,
                                              {},
-                                             in_lengths,
-                                             in_strides,
-                                             wei_lengths,
-                                             wei_strides,
-                                             out_lengths,
-                                             out_strides,
+                                             a.in_l,
+                                             a.in_s,
+                                             a.wei_l,
+                                             a.wei_s,
+                                             a.out_l,
+                                             a.out_s,
                                              {},
                                              {},
-                                             filter_strides,
-                                             filter_dilations,
-                                             lPadding,
-                                             rPadding,
+                                             a.filter_strides,
+                                             a.filter_dilations,
+                                             a.lPadding,
+                                             a.rPadding,
                                              PassThrough{},
                                              Scale{alpha},
                                              PassThrough{},
@@ -218,19 +244,46 @@ struct CKArgs
     auto MakeDefaultArgPtr(
         const ConvPtr& conv_ptr, ConstData_t x, Data_t dw, ConstData_t dy, int split_k) const
     {
+        // Large-tensor (>INT_MAX element stride) instances expose CK's int64
+        // long_index_t MakeArgumentPointer overload; bind it with the int64
+        // member arrays directly (they outlive the returned arg_ptr). Only
+        // the single-D Default device op exposes the int64 overload; the
+        // Bilinear/Scale MultipleD ops are int32-only and unreachable on
+        // overflow shapes (RequiresLargeTensorCKInstance).
+        if(IsLargeTensorCKInstance(conv_ptr))
+        {
+            return conv_ptr->MakeArgumentPointer(x,
+                                                 dw,
+                                                 dy,
+                                                 in_lengths,
+                                                 in_strides,
+                                                 wei_lengths,
+                                                 wei_strides,
+                                                 out_lengths,
+                                                 out_strides,
+                                                 filter_strides,
+                                                 filter_dilations,
+                                                 lPadding,
+                                                 rPadding,
+                                                 PassThrough{},
+                                                 PassThrough{},
+                                                 PassThrough{},
+                                                 split_k);
+        }
+        const auto& a = NarrowedArrays();
         return conv_ptr->MakeArgumentPointer(x,
                                              dw,
                                              dy,
-                                             in_lengths,
-                                             in_strides,
-                                             wei_lengths,
-                                             wei_strides,
-                                             out_lengths,
-                                             out_strides,
-                                             filter_strides,
-                                             filter_dilations,
-                                             lPadding,
-                                             rPadding,
+                                             a.in_l,
+                                             a.in_s,
+                                             a.wei_l,
+                                             a.wei_s,
+                                             a.out_l,
+                                             a.out_s,
+                                             a.filter_strides,
+                                             a.filter_dilations,
+                                             a.lPadding,
+                                             a.rPadding,
                                              PassThrough{},
                                              PassThrough{},
                                              PassThrough{},
@@ -273,33 +326,42 @@ struct CKArgs
         return conv_ptr->IsSupportedArgument(arg_ptr.get());
     }
 
-    int G;
-    int N;
-    int K;
-    int C;
-    int C1;
-    int K1;
-    int Hi;
-    int Wi;
-    int Di;
-    int Ho;
-    int Wo;
-    int Do;
-    int Y;
-    int X;
-    int Z;
+    // Dim members are int64 (and length/stride arrays use ck::long_index_t)
+    // so the NCHW stride builder above (e.g. Di*Hi*Wi*G*C) does not silently
+    // overflow on tensors whose contiguous stride exceeds INT_MAX. Argument
+    // construction then binds to CK's long_index_t MakeArgumentPointer
+    // overload, which is safe only when paired with a large-tensor instance
+    // (see implicitgemm_ck_util.hpp::RequiresLargeTensorCKInstance).
+    int64_t G;
+    int64_t N;
+    int64_t K;
+    int64_t C;
+    int64_t C1;
+    int64_t K1;
+    int64_t Hi;
+    int64_t Wi;
+    int64_t Di;
+    int64_t Ho;
+    int64_t Wo;
+    int64_t Do;
+    int64_t Y;
+    int64_t X;
+    int64_t Z;
     miopenAlphaBetaCase_t alpha_beta_case;
     miopenDataType_t data_type;
-    std::array<ck::index_t, 6> in_lengths;
-    std::array<ck::index_t, 6> in_strides;
-    std::array<ck::index_t, 6> out_lengths;
-    std::array<ck::index_t, 6> out_strides;
-    std::array<ck::index_t, 6> wei_lengths;
-    std::array<ck::index_t, 6> wei_strides;
-    std::array<ck::index_t, 3> filter_strides;
-    std::array<ck::index_t, 3> filter_dilations;
-    std::array<ck::index_t, 3> lPadding;
-    std::array<ck::index_t, 3> rPadding;
+    std::array<ck::long_index_t, 6> in_lengths;
+    std::array<ck::long_index_t, 6> in_strides;
+    std::array<ck::long_index_t, 6> out_lengths;
+    std::array<ck::long_index_t, 6> out_strides;
+    std::array<ck::long_index_t, 6> wei_lengths;
+    std::array<ck::long_index_t, 6> wei_strides;
+    std::array<ck::long_index_t, 3> filter_strides;
+    std::array<ck::long_index_t, 3> filter_dilations;
+    std::array<ck::long_index_t, 3> lPadding;
+    std::array<ck::long_index_t, 3> rPadding;
+    // mutable: populated lazily by NarrowedArrays() (const) so MakeArgPtr
+    // (also const) can hand CK references that outlive the call.
+    mutable NarrowedCKArrays3D narrowed;
 };
 } // namespace
 
@@ -322,9 +384,13 @@ void PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::Init(const ProblemDescrip
             FillValidKernelsIDs<DeviceOpGBwdWeightDefaultPtrs<DataType>, CKArgs<DataType>>(problem);
         break;
     }
-    index     = 0;
-    split_k   = 1;
-    kernel_id = valid_kernels[index] + "+" + std::to_string(split_k);
+    index   = 0;
+    split_k = 1;
+    // valid_kernels can legitimately be empty here (e.g. no matching large-tensor CK
+    // instance for this problem); leave kernel_id empty so downstream applicability
+    // checks (IsCKArgsSupported) correctly report "unsupported" instead of indexing OOB.
+    if(!valid_kernels.empty())
+        kernel_id = valid_kernels[index] + "+" + std::to_string(split_k);
 }
 
 template <typename DataType>
@@ -488,8 +554,6 @@ bool ConvHipImplicitGemm3DGroupWrwXdlops::IsApplicable(
     if(env::disabled(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_WRW_XDLOPS))
         return false;
     if(problem.GetConv().attribute.deterministic)
-        return false;
-    if(!problem.AllTensorsDimsFitIntoInt())
         return false;
     if(problem.HasMixedDataTypes())
         return false;

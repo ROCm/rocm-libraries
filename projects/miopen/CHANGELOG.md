@@ -13,6 +13,7 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 * Changed to using median value with outliers removed when deciding on the best solution to run
 * [Conv] Enabled CK wrw solver on gfx950 for bf16 datatype
 * [Conv] Updated igemm asm solver
+* [Conv] Enabled grouped Composable Kernel (CK) xdlops convolution (2D and 3D; forward, backward-data, and weight) for tensors whose element strides exceed the int32 range, dispatching to CK's Large_Tensor int64-indexed instances.
 
 ### Optimized
 * [BatchNorm] Optimized NHWC OpenCL kernels and improved heuristics

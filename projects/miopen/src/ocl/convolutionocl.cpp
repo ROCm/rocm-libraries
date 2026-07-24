@@ -91,7 +91,15 @@ static Invoker PrepareInvoker(ExecutionContext ctx,
     const auto solver = solver_id.GetSolver();
     auto db           = MakeConvDbGetter(ctx);
     auto solution     = solver.FindSolution(ctx, problem, db, {}); // auto tune is not expected here
-    auto& handle      = ctx.GetStream();
+    // A solver can report IsApplicable() == true (a coarse "some instance might work" check)
+    // yet still fail to produce a usable solution for the exact problem (e.g. no CK instance
+    // ultimately matches an extreme large-tensor shape). Without this check, dereferencing an
+    // unset invoker_factory below is undefined behavior and crashes instead of failing cleanly.
+    if(!solution.Succeeded() || !solution.invoker_factory)
+        MIOPEN_THROW(miopenStatusInvalidValue,
+                     "conv solver " + solver_id.ToString() +
+                         " failed to produce a solution for this problem");
+    auto& handle = ctx.GetStream();
     auto invoker = handle.PrepareInvoker(*solution.invoker_factory, solution.construction_params);
     const auto algo = AlgorithmName{solver_id.GetAlgo(problem.GetDirection())};
 
@@ -116,6 +124,16 @@ CompileSolution(solver::Id solver_id, ExecutionContext ctx, const conv::ProblemD
 {
     if(!solver_id.IsValid())
         MIOPEN_THROW(miopenStatusBadParm, "solver_id = " + solver_id.ToString());
+
+    // Some solvers (e.g. the CK-backed grouped xdlops solvers) can determine, only once given
+    // the concrete problem, that they have no compilable kernel for it (for instance, no
+    // matching CK instance for an extreme large-tensor shape). Unlike the normal Find() path,
+    // this explicit-solver-ID compile path does not otherwise check applicability, so without
+    // this guard LoadOrPrepareInvoker() would be handed an empty/invalid kernel selection and
+    // crash instead of failing cleanly.
+    if(!solver_id.GetSolver().IsApplicable(ctx, problem))
+        MIOPEN_THROW(miopenStatusBadParm,
+                     "solver_id = " + solver_id.ToString() + " is not applicable to this problem");
 
     ctx.disable_search_enforce = true;
     LoadOrPrepareInvoker(ctx, problem, solver_id);
