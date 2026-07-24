@@ -8,6 +8,15 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 
 * Introduced a new API: hipBLASLt-ext::isSolutionSupported(). This API is used by new hipBLASLt integration from rocBLAS to check if a given solution is supported for a certain GPU and Problem Type. 
 
+### Fixed
+
+* StreamK dynamic tile scheduling (SK4 and dynamic SK5) sized the partials
+  workspace by the StreamK grid instead of the tile-split slot count
+  (`SKTiles*SKSplit`) that the kernel indexes, causing an out-of-bounds device
+  write when `SKTiles*SKSplit` exceeded the grid. The partials region is now
+  sized for `max(SKTiles*SKSplit, skGrid)` and allocated whenever the schedule
+  is dynamic, including the case where tiles divide evenly into the grid.
+
 ## hipBLASLt 1.4.0
 
 ### Added

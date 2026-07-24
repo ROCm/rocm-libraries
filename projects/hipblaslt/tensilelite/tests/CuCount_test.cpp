@@ -804,3 +804,122 @@ TEST(Sk3Sk5OffPartition512Test, NativeSk3MatchesSk5OffHostPack)
         EXPECT_NE(sk3Pack.grid, sk5OnPack.grid)
             << "512^3 static path oversubscribes; dynamic path should not match";
 }
+
+// ===========================================================================
+// StreamK dynamic partials workspace sizing
+//
+// SK4 (and SK5-dynamic) index the reduction partials workspace by tile-split
+// slot: partialIdx = (StreamKTileIdx - #FullTiles) * skSplit + localSplit, up
+// to skTiles*skSplit - 1, with buffer bounds checks disabled. The host must
+// size that region for skTiles*skSplit slots. The legacy sizing used skGrid
+// (the static SK3 index range [0, skGrid)), which under-provisions when
+// skTiles*skSplit > skGrid and, because it was gated on tiles % skGrid != 0,
+// skipped the region entirely when tiles divided evenly into the grid.
+// skTiles/skSplit are driven here via the AMDGPU skTiles/skSplit overrides,
+// exactly as dynamicPartialsSlots()/makeArgs read them. Host-only: mock AMDGPU
+// device, no GPU required.
+// ===========================================================================
+
+namespace
+{
+    void initStreamKPartialsSolution(ContractionSolution& solution, int streamK)
+    {
+        solution.sizeMapping.streamK               = streamK;
+        solution.sizeMapping.streamKAtomic         = 0;
+        solution.sizeMapping.streamKForceDPOnly    = 0;
+        solution.sizeMapping.macroTile             = TensileLite::dim3(128, 128, 1);
+        solution.sizeMapping.depthU                = 64;
+        solution.sizeMapping.matrixInstruction     = {16, 16, 32, 1};
+        solution.sizeMapping.CUOccupancy           = 1;
+        solution.sizeMapping.workspaceSizePerElemC = 4;
+    }
+
+    // Mirror the skSplit re-derivation in dynamicPartialsSlots() / makeArgs so
+    // the expected slot count tracks the exact splitting factor the kernel uses.
+    size_t expectedDynamicSlots(size_t itersPerTile, uint32_t skTiles, uint32_t skSplit)
+    {
+        auto ceilDiv = [](uint32_t a, uint32_t b) -> uint32_t { return (a + b - 1) / b; };
+        uint32_t iters        = static_cast<uint32_t>(std::max<size_t>(1, itersPerTile));
+        uint32_t skItersPerWI = ceilDiv(iters, skSplit);
+        uint32_t effSplit     = ceilDiv(iters, skItersPerWI);
+        return static_cast<size_t>(skTiles) * static_cast<size_t>(effSplit);
+    }
+} // namespace
+
+TEST(StreamKDynamicPartialsWorkspaceTest, DynamicSizedByTileSplitSlots)
+{
+    ContractionSolution solution;
+    initStreamKPartialsSolution(solution, 4); // SK4 is unconditionally dynamic
+
+    // 4096x4096, macroTile 128x128 -> tiles = 32*32 = 1024.
+    // skDynamicGrid=0 keeps the grid off the analytical origami path, so the
+    // grid is exactly cuCount (64) and tiles % grid == 0. That divisibility is
+    // what previously gated (and skipped) the partials region entirely.
+    auto problem = makeGemmProblem(4096, 4096, 512);
+    problem.setWorkspaceSize(std::numeric_limits<size_t>::max());
+
+    auto device          = makeDevice(_MI350_CHIP_ID, _CPX_CU, "mi350cpx");
+    device.skDynamicGrid = 0;
+    device.skTiles       = 256; // override: number of split stream-k tiles
+    device.skSplit       = 4;   // override: k-split factor per tile
+
+    size_t tiles = problem.getNumTiles(solution.sizeMapping, 1);
+    auto   red   = solution.getSKReduction(problem, device);
+    size_t grid  = solution.getSKGrid(problem, device, tiles, red);
+    ASSERT_EQ(tiles % grid, 0u)
+        << "Scenario must have tiles divisible by grid to exercise the gate; "
+        << "tiles=" << tiles << " grid=" << grid;
+
+    size_t itersPerTile = problem.getItersPerTile(solution.sizeMapping);
+    size_t slots        = expectedDynamicSlots(itersPerTile, 256, 4);
+    ASSERT_GT(slots, grid)
+        << "Test requires skTiles*skSplit > grid to expose the under-provision; "
+        << "slots=" << slots << " grid=" << grid;
+
+    size_t ws = solution.requiredWorkspaceSize(problem, device);
+
+    // The partials region must be large enough to hold skTiles*skSplit
+    // macro-tile slots (>= tileSize * skTiles*skSplit). Pre-fix this was 0
+    // (region skipped: tiles % grid == 0) or, in the divisible case, sized by
+    // grid -- either way it under-provisions the kernel's device write.
+    EXPECT_GE(ws, solution.partialTileSize(slots))
+        << "Dynamic partials workspace must cover skTiles*skSplit slots ("
+        << slots << "); ws=" << ws << " grid=" << grid << " tiles=" << tiles;
+
+    // It must also exceed the legacy skGrid-based sizing that caused the OOB.
+    EXPECT_GT(ws, solution.partialTileSize(grid))
+        << "Dynamic sizing must exceed the legacy partialTileSize(grid)=" 
+        << solution.partialTileSize(grid);
+}
+
+TEST(StreamKDynamicPartialsWorkspaceTest, StaticPathUnchangedBySplitOverrides)
+{
+    ContractionSolution solution;
+    initStreamKPartialsSolution(solution, 3); // SK3 is static, grid-indexed
+
+    // 4096x4224 -> tiles = 32*33 = 1056; grid = cuCount = 64; 1056 % 64 == 32
+    // (!= 0) so the static partials region is allocated and sized by grid.
+    auto problem = makeGemmProblem(4096, 4224, 512);
+    problem.setWorkspaceSize(std::numeric_limits<size_t>::max());
+
+    auto device          = makeDevice(_MI350_CHIP_ID, _CPX_CU, "mi350cpx");
+    device.skDynamicGrid = 0;
+    // Same overrides as the dynamic test; the static (grid-indexed) path must
+    // ignore them -- the fix only ever grows the dynamic allocation.
+    device.skTiles       = 256;
+    device.skSplit       = 4;
+
+    size_t tiles = problem.getNumTiles(solution.sizeMapping, 1);
+    auto   red   = solution.getSKReduction(problem, device);
+    size_t grid  = solution.getSKGrid(problem, device, tiles, red);
+    ASSERT_NE(tiles % grid, 0u)
+        << "Static test needs partial tiles; tiles=" << tiles << " grid=" << grid;
+
+    size_t ws = solution.requiredWorkspaceSize(problem, device);
+
+    // Static SK3 sizes exactly by grid, unaffected by the skTiles/skSplit
+    // overrides and without the SK4/SK5-dynamic per-XCD queue region.
+    EXPECT_EQ(ws, solution.partialTileSize(grid))
+        << "Static SK3 workspace must equal partialTileSize(grid) regardless of "
+        << "skTiles/skSplit overrides; ws=" << ws;
+}
