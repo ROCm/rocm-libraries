@@ -27,7 +27,7 @@ from rocisa.container import vgpr, sgpr, mgpr, SMEMModifiers, MUBUFModifiers, GL
 from rocisa.instruction import GlobalInv, GlobalWb, SAddCU32, SAddU32, SAndB32, SBarrier, \
     SBranch, SCBranchSCC0, SCBranchSCC1, SCMovB32, SCSelectB32, SCmpEQU32, SCmpEQU64, \
     SCmpGtU32, SCmpLeU32, SCmpLtU32, SLShiftLeftB32, SLShiftLeftB64, SLShiftRightB32, VLShiftLeftB32, SLoadB32, \
-    SMaxI32, SMinU32, SMovB32, SMovB64, SMulI32, SNop, SOrB32, SSleep, SStoreB32, SSubU32, \
+    SMaxI32, SMinU32, SMovB32, SMovB64, SMulHIU32, SMulI32, SNop, SOrB32, SSleep, SStoreB32, SSubU32, \
     SWaitCnt, SWaitXCnt, VAddF32, VAddF64, VAddPKF16, VAddU32, VSubU32, VLShiftRightB32, VMovB32, \
     VReadfirstlaneB32, VCmpXEqU32, VCvtBF16toFP32, GlobalAtomicIncU32Saddr, BufferLoadB32, BufferStoreB32, \
     SAtomicInc, DSLoadB32, DSStoreB32, SLongBranch, SLongBranchPositive
@@ -1010,7 +1010,7 @@ class StreamK(Component):
                 # their partials to the workspace), then reads the peer partials
                 # with the unchanged fixupStep loop; no per-peer flag
                 # read/spin/reset runs.
-                clusterFast = self._streamKClusterReductionEnabled(writer, kernel)
+                clusterFast = self._streamKClusterBarrierFastEnabled(writer, kernel)
                 sClusterFast = None
                 skClusterSkipFlag = None
                 if clusterFast:
@@ -1045,7 +1045,19 @@ class StreamK(Component):
                 if kernel["DebugStreamK"] & 2 == 0:
                     module.add(SCmpEQU32(src0=sgpr(tmpSgpr+2), src1=1, comment="check if ready"))
                     module.add(SCBranchSCC0(labelName=skFixupLabel.getLabelName(), comment="if flag not set, wait and check again"))
-                    module.add(memOrder.acquireFence(writer))
+                    # Cluster-reduction kernels publish peer partials with a
+                    # SCOPE_SYS release (see partialsWriteProcedure). On gfx1250's
+                    # partitioned L2 the owner must pair that with a SCOPE_SYS
+                    # acquire so a peer partial written back on a different L2
+                    # partition is re-fetched (not read stale) before it is
+                    # summed. The C>=4 cluster reduction falls back to THIS
+                    # global-flag handshake (the split-barrier fast path is
+                    # C<=2 only), so this acquire is what provides its cross-peer
+                    # visibility. Non-cluster StreamK keeps the SCOPE_DEV default.
+                    acqScope = (CacheScope.SCOPE_SYS
+                                if self._streamKClusterReductionEnabled(writer, kernel)
+                                else None)
+                    module.add(memOrder.acquireFence(writer, scope=acqScope))
 
                 # TODO Barrier here to sync all threads in workgroup, but maybe better to have separate flag for each wavefront (to be tested)
                 module.add(SBarrier(comment="wait for all workgroups before resetting flag"))
@@ -1210,9 +1222,20 @@ class StreamK(Component):
 
         assert kernel["BufferStore"]
         module.addSpaceLine()
-        module.add(SMulI32(dst=sgpr(tmpSgpr), src0=hex(kernel["MacroTile0"]*kernel["MacroTile1"]*writer.states.bpeCinternal), src1=sPartialIdx, comment="Offset to correct partials tile"))
+        # 64-bit slot byte offset. The per-tile workspace stride
+        # MacroTile0*MacroTile1*bpe times the StreamK partial index can exceed
+        # 2^32 for large SK grids (grows with C: C>=4/C>=8 on big tiles), so a
+        # 32-bit SMulI32 product silently wraps and the peer write / owner read
+        # SRD then aliases the wrong workspace slot. Compute the high word with
+        # SMulHIU32 and fold it (plus the lo-add carry) into SrdWS+1 instead of
+        # adding only the carry.
+        offBytes = hex(kernel["MacroTile0"]*kernel["MacroTile1"]*writer.states.bpeCinternal)
+        tmpHi = writer.sgprPool.checkOut(1, "SKSlotOffsetHi")
+        module.add(SMulI32(dst=sgpr(tmpSgpr), src0=offBytes, src1=sPartialIdx, comment="Offset to correct partials tile (low word)"))
+        module.add(SMulHIU32(dst=sgpr(tmpHi), src0=offBytes, src1=sPartialIdx, comment="partials tile offset (high word) for 64-bit SRD"))
         module.add(SAddU32(dst=sgpr("SrdWS+0"), src0=sgpr("SrdWS+0"), src1=sgpr(tmpSgpr), comment="add lo to SRD"))
-        module.add(SAddCU32(dst=sgpr("SrdWS+1"), src0=sgpr("SrdWS+1"), src1=0, comment="add hi to SRD"))
+        module.add(SAddCU32(dst=sgpr("SrdWS+1"), src0=sgpr("SrdWS+1"), src1=sgpr(tmpHi), comment="add hi (offset high word + lo carry) to SRD"))
+        writer.sgprPool.checkIn(tmpHi)
 
         if tmpLocal is not None:
             writer.sgprPool.checkIn(tmpLocal)
@@ -1455,7 +1478,7 @@ class StreamK(Component):
             # evaluates, so a cluster never mixes barrier signalers with flag
             # setters, and this peer signals exactly once on this (its only)
             # epilogue exit before branching to endLabel below.
-            clusterFast = self._streamKClusterReductionEnabled(writer, kernel)
+            clusterFast = self._streamKClusterBarrierFastEnabled(writer, kernel)
             skClusterSignalDone = None
             if clusterFast:
                 skClusterUseFlag = Label(label=writer.labels.getNameInc("SK_ClusterUseFlag"), comment="")
@@ -1597,6 +1620,31 @@ class StreamK(Component):
                 and not kernel["StreamKAtomic"]
                 and not kernel["StreamKForceDPOnly"]
                 and writer.states.asmCaps.get("HasClusterBarrier", False))
+
+    def _streamKClusterBarrierFastEnabled(self, writer, kernel):
+        """Compile-time gate for the intra-cluster SPLIT-BARRIER fast path.
+
+        The single cluster ``s_barrier_signal/wait -3`` only orders the owner
+        against the peers it is HW-cluster-scoped with. On gfx1250 a reduction
+        cluster of C >= 4 peers spans multiple WGPs, so the owner can clear the
+        one cluster barrier before a cross-WGP peer's partial store is globally
+        visible and then sum a stale (missing) peer partial. That produces the
+        observed device ~= (C-1)/C * reference cluster-aligned column stripe
+        (~0.75 for C=4: exactly one peer contribution dropped). A C=2 cluster
+        stays within a single WGP and is validated race-free.
+
+        So keep the barrier fast path for C <= 2 only; for C >= 4 fall back to
+        the proven per-peer global-flag handshake (each peer publishes its
+        partial with a release and raises its own completion flag; the owner
+        spins on each peer flag with an acquire before reading that peer's
+        slot), which does gate on genuine cross-peer visibility. Correctness of
+        the reduction is prioritised over the barrier optimization here. Both
+        the owner wait and the peer signal gate on this identical predicate, so
+        the cluster never mixes barrier signalers with flag setters (the
+        deadlock invariant is preserved). See docs/design/streamk-wg-clusters.md.
+        """
+        _, _, C, _ = streamKClusterFactors(kernel)
+        return self._streamKClusterReductionEnabled(writer, kernel) and C <= 2
 
     def clusterReduceSignal(self, writer, kernel):
         """Wave-0-elected cluster split-barrier arrive (``s_barrier_signal -3``).
