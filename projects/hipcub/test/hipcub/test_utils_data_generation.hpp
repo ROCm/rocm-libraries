@@ -489,7 +489,7 @@ inline std::vector<size_t> get_large_sizes(int seed_value)
     // clang-format on
     const std::vector<size_t> random_sizes
         = test_utils::get_random_data<size_t>(2,
-                                              (size_t{1} << 30) + 1,
+                                              (size_t{1} << (MaxPow2 - 5)) + 1,
                                               (size_t{1} << MaxPow2) - 2,
                                               seed_value);
     sizes.insert(sizes.end(), random_sizes.begin(), random_sizes.end());
