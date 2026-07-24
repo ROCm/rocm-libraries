@@ -72,7 +72,7 @@ struct dispatch;
 
 // sort keys
 template <>
-struct dispatch<::thrust::detail::false_type>
+struct dispatch<THRUST_NS_QUALIFIER::detail::false_type>
 {
   template <class KeysIt, class ItemsIt, class Size, class CompareOp>
   static hipError_t THRUST_HIP_RUNTIME_FUNCTION doit(
@@ -92,7 +92,7 @@ struct dispatch<::thrust::detail::false_type>
 
 // sort pairs
 template <>
-struct dispatch<::thrust::detail::true_type>
+struct dispatch<THRUST_NS_QUALIFIER::detail::true_type>
 {
   template <class KeysIt, class ItemsIt, class Size, class CompareOp>
   static hipError_t THRUST_HIP_RUNTIME_FUNCTION doit(

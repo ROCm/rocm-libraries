@@ -12,7 +12,7 @@
 #ifndef LIBCXX_WRAPPER_STD__ITERATOR_ITERATOR_TRAITS_H
 #define LIBCXX_WRAPPER_STD__ITERATOR_ITERATOR_TRAITS_H
 
-// TODO(libhipcxx): remove this file and replace ::thrust::detail::is* with _THRUST_STD::__is*
+// TODO(libhipcxx): remove this file and replace THRUST_NS_QUALIFIER::detail::is* with _THRUST_STD::__is*
 // once libhipcxx gets ready
 
 #include <thrust/detail/config/libcxx.h>

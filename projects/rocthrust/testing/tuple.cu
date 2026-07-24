@@ -15,6 +15,7 @@
  *  limitations under the License.
  */
 
+#include <thrust/detail/config/namespace.h>
 #include <thrust/generate.h>
 #include <thrust/swap.h>
 #include <thrust/tuple.h>
@@ -495,7 +496,7 @@ void TestTupleSwap()
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
   using _THRUST_STD::swap;
 #else
-  using ::thrust::swap;
+  using THRUST_NS_QUALIFIER::swap;
 #endif
   swap(t1, t2);
 
