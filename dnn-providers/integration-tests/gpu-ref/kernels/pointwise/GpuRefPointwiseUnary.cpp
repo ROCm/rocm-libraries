@@ -178,13 +178,13 @@ extern "C" __global__ void PointwiseUnaryRef(PointwiseUnaryArgs args)
     auto* output = static_cast<OUTPUT_TYPE*>(args.output);
     long long totalSize = args.size;
 
-    constexpr int localSize = LOCAL_SIZE;
+    constexpr long long localSize = LOCAL_SIZE;
     long long lid = threadIdx.x;
     long long gid = blockIdx.x;
 
     long long index = lid + localSize * gid;
 
-    if(index > totalSize)
+    if(index >= totalSize)
     {
         return;
     }

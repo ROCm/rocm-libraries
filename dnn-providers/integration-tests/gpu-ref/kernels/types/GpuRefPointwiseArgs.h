@@ -1,27 +1,33 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-// Shared argument structs for GPU reference convolution kernels.
+// Shared argument structs for GPU reference pointwise kernels.
 // Included by both device code (HipRTC) and host launch code.
 // Only POD types allowed — no host or device includes.
 
 #pragma once
 
-#define POINTWISE_UNARY_OP_IDENTITY 0
-#define POINTWISE_UNARY_OP_ABS 1
-#define POINTWISE_UNARY_OP_NEG 2
-#define POINTWISE_UNARY_OP_RELU_FWD 3
-#define POINTWISE_UNARY_OP_SIGMOID_FWD 4
-#define POINTWISE_UNARY_OP_TANH_FWD 5
-#define POINTWISE_UNARY_OP_GELU_FWD 6
-#define POINTWISE_UNARY_OP_GELU_APPROX_TANH_FWD 7
-#define POINTWISE_UNARY_OP_SWISH_FWD 8
-#define POINTWISE_BINARY_OP_ADD 9
-#define POINTWISE_BINARY_OP_SUB 10
-#define POINTWISE_BINARY_OP_MUL 11
-#define POINTWISE_BINARY_OP_SIGMOID_BWD 12
-#define POINTWISE_BINARY_OP_TANH_BWD 13
-#define POINTWISE_BINARY_OP_RELU_BWD 14
+// We don't use the `hipdnn_flatbuffers_sdk::data_objects::PointwiseMode` enum values directly
+// because that definition isn't visible of device, and if we copied the enum values directly
+// here we'd be at risk of breaking if those values changed as part of a major SDK version bump.
+enum PointwiseOps
+{
+    POINTWISE_UNARY_OP_IDENTITY = 0,
+    POINTWISE_UNARY_OP_ABS = 1,
+    POINTWISE_UNARY_OP_NEG = 2,
+    POINTWISE_UNARY_OP_RELU_FWD = 3,
+    POINTWISE_UNARY_OP_SIGMOID_FWD = 4,
+    POINTWISE_UNARY_OP_TANH_FWD = 5,
+    POINTWISE_UNARY_OP_GELU_FWD = 6,
+    POINTWISE_UNARY_OP_GELU_APPROX_TANH_FWD = 7,
+    POINTWISE_UNARY_OP_SWISH_FWD = 8,
+    POINTWISE_BINARY_OP_ADD = 9,
+    POINTWISE_BINARY_OP_SUB = 10,
+    POINTWISE_BINARY_OP_MUL = 11,
+    POINTWISE_BINARY_OP_SIGMOID_BWD = 12,
+    POINTWISE_BINARY_OP_TANH_BWD = 13,
+    POINTWISE_BINARY_OP_RELU_BWD = 14,
+};
 
 struct PointwiseUnaryArgs
 {

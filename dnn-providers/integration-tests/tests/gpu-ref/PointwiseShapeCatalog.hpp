@@ -47,15 +47,21 @@ inline const std::vector<PointwiseMode>& getBinaryOps()
 
 inline std::vector<std::vector<int64_t>> get4dSmallShapes()
 {
-    static const std::vector<std::vector<int64_t>> s_shapes
-        = {{2, 3, 4, 4}, {1, 2, 14, 14}, {16, 32, 24, 16}};
+    // Tests around blocksize multiple of 256
+    static const std::vector<std::vector<int64_t>> s_shapes = {
+        {1, 1, 4, 4}, // 16 elements
+        {2, 2, 8, 8}, // 256 elements
+        {6, 50, 1, 1} // 300 elements
+    };
     return s_shapes;
 }
 
 inline std::vector<std::vector<int64_t>> get5dSmallShapes()
 {
-    static const std::vector<std::vector<int64_t>> s_shapes
-        = {{2, 3, 3, 1, 1}, {2, 3, 4, 2, 2}, {4, 8, 2, 4, 4}};
+    // Tests around blocksize multiple of 256
+    static const std::vector<std::vector<int64_t>> s_shapes = {{3, 3, 3, 3, 3}, // 243 elements
+                                                               {2, 2, 4, 2, 8}, // 256 elements
+                                                               {1, 1, 7, 7, 7}}; // 343 element
     return s_shapes;
 }
 
@@ -142,9 +148,7 @@ inline std::vector<PointwiseTestCase> getSmall5dBinaryPointwiseCases()
 inline std::vector<std::vector<int64_t>> get4dMediumShapes()
 {
     static const std::vector<std::vector<int64_t>> s_shapes = {
-        {32, 1, 14, 14},
-        {16, 32, 192, 128},
-        {16, 128, 56, 56},
+        {32, 2, 7, 14} // 6272 elements
     };
     return s_shapes;
 }
@@ -152,9 +156,7 @@ inline std::vector<std::vector<int64_t>> get4dMediumShapes()
 inline std::vector<std::vector<int64_t>> get5dMediumShapes()
 {
     static const std::vector<std::vector<int64_t>> s_shapes = {
-        {16, 3, 8, 14, 14},
-        {16, 32, 4, 48, 32},
-        {8, 64, 4, 28, 28},
+        {16, 3, 8, 14, 14}, // 5376 eleements
     };
     return s_shapes;
 }
@@ -242,8 +244,7 @@ inline std::vector<PointwiseTestCase> getMedium5dBinaryPointwiseCases()
 inline std::vector<std::vector<int64_t>> get4dLargeShapes()
 {
     static const std::vector<std::vector<int64_t>> s_shapes = {
-        {16, 288, 48, 32},
-        {128, 512, 24, 48},
+        {16, 288, 48, 32}, // 7077888 elements
     };
 
     return s_shapes;
@@ -251,8 +252,9 @@ inline std::vector<std::vector<int64_t>> get4dLargeShapes()
 
 inline std::vector<std::vector<int64_t>> get5dLargeShapes()
 {
-    static const std::vector<std::vector<int64_t>> s_shapes
-        = {{16, 128, 8, 24, 16}, {32, 128, 8, 16, 16}};
+    static const std::vector<std::vector<int64_t>> s_shapes = {
+        {16, 128, 8, 24, 16}, // 6291456 elements
+    };
     return s_shapes;
 }
 

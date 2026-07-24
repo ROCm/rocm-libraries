@@ -7,8 +7,10 @@
 #include <hipdnn-gpu-ref/detail/GpuRefKernelCompiler.hpp>
 
 #include <cstdint>
+#include <functional>
 #include <hip/hip_runtime.h>
 #include <limits>
+#include <numeric>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -28,12 +30,15 @@ void launchKernel(hipFunction_t function, int64_t numBlocks, void* argsPtr, size
     hipDeviceProp_t deviceProps;
     detail::throwOnHipError(hipGetDeviceProperties(&deviceProps, deviceId),
                             "hipGetDeviceProperties failed");
-    const int64_t maxBlocks = static_cast<int64_t>(deviceProps.maxGridSize[0])
-                              / static_cast<int64_t>(GpuReferencePointwise::BLOCK_SIZE);
-    if(numBlocks > maxBlocks)
+    if(const int64_t maxBlocks = static_cast<int64_t>(deviceProps.maxGridSize[0]);
+       numBlocks > maxBlocks)
     {
         throw std::runtime_error("Grid size exceeds device limit: " + std::to_string(numBlocks)
                                  + " > " + std::to_string(maxBlocks));
+    }
+    if(numBlocks > static_cast<int64_t>(std::numeric_limits<unsigned>::max()))
+    {
+        throw std::runtime_error("Grid size exceeds hipModuleLaunchKernel limit");
     }
 
     // NOLINTNEXTLINE(modernize-avoid-c-arrays)
@@ -127,8 +132,8 @@ void GpuReferencePointwise::launchUnary(
         opCode = POINTWISE_UNARY_OP_SWISH_FWD;
         break;
     default:
-        throw std::runtime_error("Unsupported unary pointwise operation: "
-                                 + std::to_string(static_cast<int>(operation)));
+        throw std::invalid_argument("Unsupported unary pointwise operation: "
+                                    + std::to_string(static_cast<int>(operation)));
     }
     defines.emplace_back(std::string("-DOP=") + std::to_string(opCode));
 
@@ -200,8 +205,8 @@ void GpuReferencePointwise::launchBinary(
         opCode = POINTWISE_BINARY_OP_RELU_BWD;
         break;
     default:
-        throw std::runtime_error("Unsupported unary pointwise operation: "
-                                 + std::to_string(static_cast<int>(operation)));
+        throw std::invalid_argument("Unsupported binary pointwise operation: "
+                                    + std::to_string(static_cast<int>(operation)));
     }
     defines.emplace_back(std::string("-DOP=") + std::to_string(opCode));
     auto& compiler = detail::GpuRefKernelCompiler::instance();

@@ -132,7 +132,7 @@ TEST(TestGpuPointwise1DShapes, Unary)
     Tensor<float> outputGpuTensor({3});
 
     const unsigned int seed = getGlobalTestSeed();
-    inputTensor.fillWithRandomValues(1.0f, 1.0f, seed);
+    inputTensor.fillWithRandomValues(-1.0f, 1.0f, seed);
 
     CpuReferencePointwiseImpl<float>::pointwiseCompute(
         PointwiseMode::ABS, outputCpuTensor, inputTensor);
@@ -153,8 +153,8 @@ TEST(TestGpuPointwise1DShapes, Binary)
     Tensor<float> outputGpuTensor({3});
 
     const unsigned int seed = getGlobalTestSeed();
-    input0Tensor.fillWithRandomValues(1.0f, 1.0f, seed);
-    input1Tensor.fillWithRandomValues(1.0f, 1.0f, seed);
+    input0Tensor.fillWithRandomValues(-1.0f, 1.0f, seed);
+    input1Tensor.fillWithRandomValues(-1.0f, 1.0f, seed);
 
     CpuReferencePointwiseImpl<float>::pointwiseCompute(
         PointwiseMode::ADD, outputCpuTensor, input0Tensor, input1Tensor);
@@ -174,7 +174,7 @@ TEST(TestGpuPointwise2DShapes, Unary)
     Tensor<float> outputGpuTensor({3, 2});
 
     const unsigned int seed = getGlobalTestSeed();
-    inputTensor.fillWithRandomValues(1.0f, 1.0f, seed);
+    inputTensor.fillWithRandomValues(-1.0f, 1.0f, seed);
 
     CpuReferencePointwiseImpl<float>::pointwiseCompute(
         PointwiseMode::ABS, outputCpuTensor, inputTensor);
@@ -195,8 +195,8 @@ TEST(TestGpuPointwise2DShapes, Binary)
     Tensor<float> outputGpuTensor({3, 2});
 
     const unsigned int seed = getGlobalTestSeed();
-    input0Tensor.fillWithRandomValues(1.0f, 1.0f, seed);
-    input1Tensor.fillWithRandomValues(1.0f, 1.0f, seed);
+    input0Tensor.fillWithRandomValues(-1.0f, 1.0f, seed);
+    input1Tensor.fillWithRandomValues(-1.0f, 1.0f, seed);
 
     CpuReferencePointwiseImpl<float>::pointwiseCompute(
         PointwiseMode::ADD, outputCpuTensor, input0Tensor, input1Tensor);
@@ -216,7 +216,7 @@ TEST(TestGpuPointwise3DShapes, Unary)
     Tensor<float> outputGpuTensor({3, 2, 4});
 
     const unsigned int seed = getGlobalTestSeed();
-    inputTensor.fillWithRandomValues(1.0f, 1.0f, seed);
+    inputTensor.fillWithRandomValues(-1.0f, 1.0f, seed);
 
     CpuReferencePointwiseImpl<float>::pointwiseCompute(
         PointwiseMode::ABS, outputCpuTensor, inputTensor);
@@ -237,8 +237,8 @@ TEST(TestGpuPointwise3DShapes, Binary)
     Tensor<float> outputGpuTensor({3, 2, 4});
 
     const unsigned int seed = getGlobalTestSeed();
-    input0Tensor.fillWithRandomValues(1.0f, 1.0f, seed);
-    input1Tensor.fillWithRandomValues(1.0f, 1.0f, seed);
+    input0Tensor.fillWithRandomValues(-1.0f, 1.0f, seed);
+    input1Tensor.fillWithRandomValues(-1.0f, 1.0f, seed);
 
     CpuReferencePointwiseImpl<float>::pointwiseCompute(
         PointwiseMode::ADD, outputCpuTensor, input0Tensor, input1Tensor);
@@ -255,7 +255,7 @@ TEST(TestGpuPointwiseValidation, UnaryNotBroadcastable)
 {
     SKIP_IF_NO_DEVICES();
 
-    // Not broacastable if output tensor has less dimensions than input
+    // Not broadcastable if output tensor has less dimensions than input
     {
         Tensor<float> inputTensor({1, 3, 2, 4});
         Tensor<float> outputTensor({3, 2, 4});
@@ -286,11 +286,38 @@ TEST(TestGpuPointwiseValidation, ExceedsMaxDim)
         std::invalid_argument);
 }
 
+TEST(TestGpuPointwiseValidation, InvalidUnaryOp)
+{
+    SKIP_IF_NO_DEVICES();
+
+    // MUL is a binary operation rather than a unary operation
+    Tensor<float> inputTensor({2, 3, 2, 4});
+    Tensor<float> outputTensor({2, 3, 2, 4});
+    EXPECT_THROW(
+        GpuReferencePointwise::pointwiseCompute(PointwiseMode::MUL, outputTensor, inputTensor),
+        std::invalid_argument);
+}
+
+TEST(TestGpuPointwiseValidation, InvalidBinaryOp)
+{
+    SKIP_IF_NO_DEVICES();
+
+    // ABS is a unary operation rather than a binary operation
+    Tensor<float> input1Tensor({2, 3, 2, 4});
+    Tensor<float> input2Tensor({2, 3, 2, 4});
+    Tensor<float> outputTensor({2, 3, 2, 4});
+    EXPECT_THROW(GpuReferencePointwise::pointwiseCompute(
+                     PointwiseMode::ABS, outputTensor, input1Tensor, input2Tensor),
+                 std::invalid_argument);
+}
+
 // --- Test broadcasting ---
 
 TEST(TestGpuPointwiseBroadcast, 2D)
 {
-    // broadcast [3, 1] + [3,4] -> [3,4]
+    SKIP_IF_NO_DEVICES();
+
+    // broadcast [3, 1] -> [3,4]
     Tensor<float> inputTensor({3, 1});
     Tensor<float> outputGpuTensor({3, 4});
     Tensor<float> outputCpuTensor({3, 4});
@@ -309,6 +336,8 @@ TEST(TestGpuPointwiseBroadcast, 2D)
 
 TEST(TestGpuPointwiseBroadcast, 2DImplicitLeading)
 {
+    SKIP_IF_NO_DEVICES();
+
     // broadcast [4] + [3,4] -> [3,4]
     Tensor<float> input1Tensor({4});
     Tensor<float> input2Tensor({3, 4});
@@ -330,6 +359,8 @@ TEST(TestGpuPointwiseBroadcast, 2DImplicitLeading)
 
 TEST(TestGpuPointwiseBroadcast, 3D)
 {
+    SKIP_IF_NO_DEVICES();
+
     // broadcast [2,3,4] + [1,3,1] -> [2,3,4]
     Tensor<float> input1Tensor({2, 3, 4});
     Tensor<float> input2Tensor({1, 3, 1});
@@ -351,6 +382,8 @@ TEST(TestGpuPointwiseBroadcast, 3D)
 
 TEST(TestGpuPointwiseBroadcast, 3DImplicitLeading)
 {
+    SKIP_IF_NO_DEVICES();
+
     // broadcast [2,3,4] + [3,1] -> [2,3,4]
     Tensor<float> input1Tensor({2, 3, 4});
     Tensor<float> input2Tensor({3, 1});
@@ -372,6 +405,8 @@ TEST(TestGpuPointwiseBroadcast, 3DImplicitLeading)
 
 TEST(TestGpuPointwiseBroadcast, 4D)
 {
+    SKIP_IF_NO_DEVICES();
+
     // broadcast [2,1,3,1] + [1,2,1,4] -> [2,2,3,4]
     Tensor<float> input1Tensor({2, 1, 3, 1});
     Tensor<float> input2Tensor({1, 2, 1, 4});
@@ -393,6 +428,8 @@ TEST(TestGpuPointwiseBroadcast, 4D)
 
 TEST(TestGpuPointwiseBroadcast, 5D)
 {
+    SKIP_IF_NO_DEVICES();
+
     // broadcast [2,3,2,2,2] + [1,3,1,1,1] -> [2,3,2,2,2]
     Tensor<float> input1Tensor({2, 3, 2, 2, 2}, TensorLayout::NDHWC);
     Tensor<float> input2Tensor({1, 3, 1, 1, 1}, TensorLayout::NDHWC);
@@ -458,10 +495,10 @@ TEST(TestGpuPointwiseRefRELuForward, WithVals)
     const float lowerSlope = 0.1f;
 
     CpuReferencePointwiseImpl<float>::pointwiseCompute(
-        PointwiseMode::SWISH_FWD, outputCpuTensor, inputTensor, lowerClip, upperClip, lowerSlope);
+        PointwiseMode::RELU_FWD, outputCpuTensor, inputTensor, lowerClip, upperClip, lowerSlope);
 
     GpuReferencePointwise::pointwiseCompute<float>(
-        PointwiseMode::SWISH_FWD, outputGpuTensor, inputTensor, lowerClip, upperClip, lowerSlope);
+        PointwiseMode::RELU_FWD, outputGpuTensor, inputTensor, lowerClip, upperClip, lowerSlope);
 
     assertAllClose(outputCpuTensor, outputGpuTensor, pointwise::getTolerance<float>());
 }

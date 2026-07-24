@@ -247,12 +247,15 @@ private:
                                         "to be broadcastable to dimensions of output tensor.");
         }
 
-        static_assert(IS_SUPPORTED_DATA_TYPE<InputType>,
-                      "Pointwise supports only float, half, and bfloat16 input data types.");
-        static_assert(IS_SUPPORTED_DATA_TYPE<OutputType>,
-                      "Pointwise supports only float, half, and bfloat16 output data types.");
-        static_assert(IS_SUPPORTED_DATA_TYPE<ComputeType>,
-                      "Pointwise supports only float, half, and bfloat16 compute data types.");
+        static_assert(
+            IS_SUPPORTED_DATA_TYPE<InputType>,
+            "Pointwise supports only double, float, half, and bfloat16 input data types.");
+        static_assert(
+            IS_SUPPORTED_DATA_TYPE<OutputType>,
+            "Pointwise supports only double, float, half, and bfloat16 output data types.");
+        static_assert(
+            IS_SUPPORTED_DATA_TYPE<ComputeType>,
+            "Pointwise supports only double, float, half, and bfloat16 compute data types.");
     }
 
     template <typename OutputType, typename Input0Type, typename Input1Type, typename ComputeType>
@@ -288,7 +291,7 @@ private:
                       "Pointwise supports only float, half, and bfloat16 compute data types.");
     }
 
-    // --- Kernel launchers (defined in GpuFpReferencePointwise.cpp) ---
+    // --- Kernel launchers (defined in GpuReferencePointwise.cpp) ---
 
     static void launchUnary(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode operation,
                             const void* inputPtr,
@@ -301,7 +304,7 @@ private:
                             float lowerClip = 0.f,
                             float upperClip = std::numeric_limits<float>::max(),
                             float lowerSlope = 0.f,
-                            float swishBeta = 0.f);
+                            float swishBeta = 1.f);
 
     static void launchBinary(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode operation,
                              const void* input0Ptr,

@@ -132,12 +132,12 @@ extern "C" __global__ void PointwiseBinaryRef(PointwiseBinaryArgs args)
     auto* output = static_cast<OUTPUT_TYPE*>(args.output);
     long long totalSize = args.size;
 
-    constexpr int localSize = LOCAL_SIZE;
-    int lid = threadIdx.x;
-    int gid = blockIdx.x;
+    constexpr long long localSize = LOCAL_SIZE;
+    long long lid = threadIdx.x;
+    long long gid = blockIdx.x;
 
-    int index = lid + localSize * gid;
-    if(index > totalSize)
+    long long index = lid + localSize * gid;
+    if(index >= totalSize)
     {
         return;
     }
