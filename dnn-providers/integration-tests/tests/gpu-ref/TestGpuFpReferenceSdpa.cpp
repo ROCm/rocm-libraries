@@ -427,10 +427,10 @@ struct SdpaMaskCartesianParams
 template <typename T>
 void runMaskCartesianCase(const SdpaMaskCartesianParams& params)
 {
-    constexpr int64_t batch = 1;
-    constexpr int64_t numHeads = 2;
-    constexpr int64_t headDim = 16;
-    constexpr int64_t seqQ = 8;
+    const int64_t batch = 1;
+    const int64_t numHeads = 2;
+    const int64_t headDim = 16;
+    const int64_t seqQ = 8;
     const int64_t seqKv = params.skvSmaller ? 4 : 16;
 
     Tensor<T> q({batch, numHeads, seqQ, headDim});
