@@ -99,22 +99,25 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                                           testing::Values(miopenConvolutionAlgoDirect),
                                           testing::ValuesIn(GetConvSmokeTestCases(miopenHalf))));
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
-                         GPU_UnitTestConvSolverConvHipConvFwd_BFP16,
-                         testing::Combine(testing::Values(GetTestParams()),
-                                          testing::Values(miopenConvolutionAlgoDirect),
-                                          testing::ValuesIn(GetConvSmokeTestCases(miopenBFloat16))));
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    GPU_UnitTestConvSolverConvHipConvFwd_BFP16,
+    testing::Combine(testing::Values(GetTestParams()),
+                     testing::Values(miopenConvolutionAlgoDirect),
+                     testing::ValuesIn(GetConvSmokeTestCases(miopenBFloat16))));
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
-                         GPU_UnitTestConvSolverConvHipConvBwd_BFP16,
-                         testing::Combine(testing::Values(GetTestParams()),
-                                          testing::Values(miopenConvolutionAlgoDirect),
-                                          testing::ValuesIn(GetConvSmokeTestCases(miopenBFloat16))));
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    GPU_UnitTestConvSolverConvHipConvBwd_BFP16,
+    testing::Combine(testing::Values(GetTestParams()),
+                     testing::Values(miopenConvolutionAlgoDirect),
+                     testing::ValuesIn(GetConvSmokeTestCases(miopenBFloat16))));
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
-                         GPU_UnitTestConvSolverConvHipConvWrw_BFP16,
-                         testing::Combine(testing::Values(GetTestParams()),
-                                          testing::Values(miopenConvolutionAlgoDirect),
-                                          testing::ValuesIn(GetConvSmokeTestCases(miopenBFloat16))));
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    GPU_UnitTestConvSolverConvHipConvWrw_BFP16,
+    testing::Combine(testing::Values(GetTestParams()),
+                     testing::Values(miopenConvolutionAlgoDirect),
+                     testing::ValuesIn(GetConvSmokeTestCases(miopenBFloat16))));
 
 #endif // MIOPEN_USE_HIPCONV

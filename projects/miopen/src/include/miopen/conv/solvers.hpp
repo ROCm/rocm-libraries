@@ -4907,16 +4907,14 @@ private:
     static std::string GetCurrentDeviceName();
 };
 
-struct MIOPEN_INTERNALS_EXPORT ConvHipConv final
-    : ConvTunableSolver<PerformanceConfigConvHipConv>
+struct MIOPEN_INTERNALS_EXPORT ConvHipConv final : ConvTunableSolver<PerformanceConfigConvHipConv>
 {
     const std::string& SolverDbId() const override { return GetSolverDbId<ConvHipConv>(); }
 
     bool IsApplicable(const ExecutionContext&,
                       const miopen::conv::ProblemDescription&) const override;
     bool IsDynamic() const override { return true; }
-    float GetWti(const ExecutionContext&,
-                 const miopen::conv::ProblemDescription&) const override;
+    float GetWti(const ExecutionContext&, const miopen::conv::ProblemDescription&) const override;
     size_t GetWorkspaceSize(const ExecutionContext&,
                             const miopen::conv::ProblemDescription&) const override;
     bool MayNeedWorkspace() const override { return true; }
