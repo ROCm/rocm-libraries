@@ -147,6 +147,7 @@ if (CREATE_TEST_APP_LOCAL_DEPLOY AND WIN32)
     LIST_DIRECTORIES OFF
     CONFIGURE_DEPENDS
     ${HIP_DIR}/bin/amd*.dll
+    ${HIP_DIR}/bin/rocm*.dll
     ${HIP_DIR}/bin/hiprt*.dll
     ${HIP_DIR}/bin/hipinfo.exe
     ${CMAKE_SOURCE_DIR}/rtest.*
