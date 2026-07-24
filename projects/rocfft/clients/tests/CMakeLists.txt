@@ -32,8 +32,6 @@ else( )
     "Install path prefix, prepended onto install directories" )
 endif( )
 
-
-
 # This has to be initialized before the project() command appears
 # Set the default of CMAKE_BUILD_TYPE to be release, unless user
 # specifies with -D.  MSVC_IDE does not use CMAKE_BUILD_TYPE
@@ -66,6 +64,23 @@ endif()
 
 include( ROCMInstallTargets )
 
+# embed rocfft_complex.h so it can be used in hiprtc for callbacks
+find_package (Python3 3.6 COMPONENTS Interpreter REQUIRED)
+set( callback_embed_command ${CMAKE_CURRENT_SOURCE_DIR}/../../shared/embed-to-header-rtc.py )
+# generated source file
+set( callback_embed_cpp ${CMAKE_CURRENT_BINARY_DIR}/callback-embed.cpp )
+# files that need to be embedded into the test, to be able to generate callback code
+set( callback_embed_files
+     ${CMAKE_CURRENT_SOURCE_DIR}/../../shared/rocfft_complex.h
+)
+add_custom_command(
+  OUTPUT ${callback_embed_cpp}
+  COMMAND ${Python3_EXECUTABLE} ${callback_embed_command}
+  --embed ${callback_embed_files} --output ${callback_embed_cpp}
+  DEPENDS ${callback_embed_command} ${callback_embed_files}
+  VERBATIM
+)
+
 set( rocfft-test_source
   gtest_main.cpp
   rocfft_accuracy_test.cpp
@@ -90,6 +105,7 @@ set( rocfft-test_source
   ../../shared/array_validator.cpp
   ../../shared/test_callbacks.cpp
   ../../shared/data_gen_device.cpp
+  ${callback_embed_cpp}
   )
 
 # rocfft_c.c verifies that rocfft/rocfft.h is self-sufficient in plain C.
@@ -115,7 +131,6 @@ else()
 endif()
 
 add_executable( rocfft-test ${rocfft-test_source} ${rocfft-test_includes} )
-add_executable( rtc_helper_crash rtc_helper_crash.cpp )
 
 if( NOT ROCFFT_ENABLE_C_API_COMPILE_TEST )
   target_compile_definitions( rocfft-test PRIVATE SKIP_ROCFFT_C_TEST )
@@ -337,9 +352,11 @@ if( NOT ROCFFT_BUILD_SCOPE )
   set( ROCFFT_SQLITE_LIB SQLite::SQLite3)
 endif()
 
+find_package( hiprtc REQUIRED CONFIG PATHS ${ROCM_PATH} )
 target_link_libraries( rocfft-test
   PRIVATE
   hip::device
+  hiprtc::hiprtc
   roc::rocfft
   ${ROCFFT_SQLITE_LIB}
   ${rocfft-test_link_libs}
@@ -407,13 +424,8 @@ set_target_properties(rocfft-test
                       PROPERTIES 
                       RUNTIME_OUTPUT_DIRECTORY 
                       ${TESTS_OUT_DIR})
-set_target_properties(rtc_helper_crash
-                      PROPERTIES 
-                      RUNTIME_OUTPUT_DIRECTORY 
-                      ${TESTS_OUT_DIR})
 
-
-rocm_install(TARGETS rocfft-test rtc_helper_crash COMPONENT tests)
+rocm_install(TARGETS rocfft-test COMPONENT tests)
 
 #Ctest based Test Filter Standardization using test_categories.yaml
 
@@ -478,7 +490,14 @@ endif()
 if( ROCFFT_MPI_ENABLE )
   # normal and dynamic-loading MPI worker processes
   foreach(worker rocfft_mpi_worker dyna_rocfft_mpi_worker)
-    add_executable( ${worker} rocfft_mpi_worker.cpp ../../shared/test_callbacks.cpp ../../shared/data_gen_device.cpp ../../shared/array_validator.cpp)
+    add_executable(
+      ${worker}
+      rocfft_mpi_worker.cpp
+      ../../shared/test_callbacks.cpp
+      ../../shared/data_gen_device.cpp
+      ../../shared/array_validator.cpp
+      ${callback_embed_cpp}
+      )
 
     if( BUILD_CLIENTS_TESTS_OPENMP )
       set_target_properties( ${worker} PROPERTIES
@@ -505,6 +524,7 @@ if( ROCFFT_MPI_ENABLE )
         ${ROCFFT_OPENMP_LIBRARY}
         hip::hiprand
         hip::device
+        hiprtc::hiprtc
         MPI::MPI_CXX
         ${FFTW_LIBRARIES}
         "mpi_gtl_hsa"
@@ -518,6 +538,7 @@ if( ROCFFT_MPI_ENABLE )
         ${ROCFFT_OPENMP_LIBRARY}
         hip::hiprand
         hip::device
+        hiprtc::hiprtc
         MPI::MPI_CXX
         ${FFTW_LIBRARIES}
       )    

@@ -174,6 +174,7 @@ class StateValues:
   bpeA: float = field(init=False)
   bpeB: float = field(init=False)
   bpeE: int = field(init=False)
+  bpeGate: int = field(init=False, default=0)
   # Cexternal = the "current" kernel output type,
   # - default: the "current" kernel is a non-GSU-kernel,
   #     Cexternal (= DestDataType) and is the final gemm result
@@ -275,6 +276,7 @@ class StateValues:
   d: MatrixInfo                          = field(default_factory=MatrixInfo)
   e: MatrixInfo                          = field(default_factory=MatrixInfo)
   bias: MatrixInfo                       = field(default_factory=MatrixInfo)
+  gate: MatrixInfo                       = field(default_factory=MatrixInfo)
   m: ABMatrixInfo                        = field(default_factory=ABMatrixInfo)       # For Sparse Metadata
   startMXDummyValuVgpr: int              = 0
   totalAgprs: int                        = 0
@@ -327,6 +329,8 @@ class StateValues:
   BiasType: int                          = 0
   BiasStride: int                        = 0
   FactorDim: int                         = 0
+  GateType: int                          = 0
+  GateStride: int                        = 0
   freeSgprVarPool: set                   = field(init=False)
 
   numReadsPerIterA: int                  = 0
@@ -391,8 +395,9 @@ class StateValues:
   # Epilogue states
   preloadScaleA = False
   preloadScaleB = False
-  useBias       = DataDirection.NONE
-  needBiasType  = False
+  useBias          = DataDirection.NONE
+  needBiasType     = False
+  useGateResidual  = False
 
   def __post_init__(self):
     """ How many SGPRs does it take to have one bit per lane? """
@@ -432,6 +437,7 @@ class StateVgprs:
   cinRowPtr: int  = -1
   coutRowPtrBias: int = -1
   coutRowPtrE: int = -1
+  coutRowPtrGate: int = -1
   coutRowPtrD: int = -1
 
   # FlatStore
@@ -7467,6 +7473,13 @@ class KernelWriter(metaclass=abc.ABCMeta):
     self.states.bpeA = self.states.bpr * kernel["ProblemType"]["MacDataTypeA"].numRegisters()
     self.states.bpeB = self.states.bpr * kernel["ProblemType"]["MacDataTypeB"].numRegisters()
     self.states.bpeE = int(self.states.bpr * kernel["ProblemType"]["DataTypeE"].numRegisters())
+    # bpeGate: prolog gate-load default bpe. Multi-dtype dispatcher unconditionally
+    # overrides per-branch (see GlobalWriteBatch FMA dispatcher), so the default only
+    # matters for single-dtype and the fallback path. Pick list[0] when set, else dest.
+    _useGate = kernel["ProblemType"].get("UseGateResidual", False)
+    _gateList = kernel["ProblemType"].get("GateResidualDataTypeList", []) if _useGate else []
+    _bpeGateDtype = _gateList[0] if _gateList else kernel["ProblemType"]["DestDataType"]
+    self.states.bpeGate = max(1, int(self.states.bpr * _bpeGateDtype.numRegisters()))
     self.states.bpeCinternal = int(self.states.bpr * kernel["ProblemType"]["ComputeDataType"].numRegisters())
 
     self.states.bpeCexternalGSU1 = int(self.states.bpr * kernel["ProblemType"]["DestDataType"].numRegisters())
@@ -9124,6 +9137,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     self.states.e.numSgprStrides = kernel["ProblemType"]["NumIndicesC"]
     self.states.d.numSgprStrides = kernel["ProblemType"]["NumIndicesC"]
     self.states.c.numSgprStrides = kernel["ProblemType"]["NumIndicesC"]
+    self.states.gate.numSgprStrides = kernel["ProblemType"]["NumIndicesC"]
     self.states.a.numSgprStrides = len(kernel["ProblemType"]["IndexAssignmentsA"])
     self.states.b.numSgprStrides = len(kernel["ProblemType"]["IndexAssignmentsB"])
     if kernel["ProblemType"]["MXBlockA"]:
@@ -9134,6 +9148,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       self.states.e.numSgprStrides -= 1
       self.states.d.numSgprStrides -= 1
       self.states.c.numSgprStrides -= 1
+      self.states.gate.numSgprStrides -= 1
     if not kernel["ProblemType"]["UseInitialStridesAB"]:
       self.states.a.numSgprStrides -= 1
       self.states.b.numSgprStrides -= 1
@@ -9834,6 +9849,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # Epilogue related
     self.states.useBias = DataDirection.NONE
     self.states.needBiasType = False
+    self.states.useGateResidual = kernel["ProblemType"].get("UseGateResidual", False)
     if kernel["ProblemType"]["UseBias"]:
       if kernel["ProblemType"]["Gradient"]:
         if kernel["ProblemType"]["BiasSrc"] == "D":
@@ -9923,9 +9939,20 @@ class KernelWriter(metaclass=abc.ABCMeta):
         self.states.numStoreSgprNames.append("ActivationType")
         self.states.numStoreSgprNameSizes.append(1)
       storeSgprLoad += self.states.numActivationTypeArgSize + self.states.numactivationArgTotalSize
-    self.states.numStoreSgprToLoad = storeSgprLoad
 
-
+    if self.states.useGateResidual:
+      self.states.numSgprAddressGate = self.states.rpga # 64-bit
+      self.states.numStoreSgprNames.append("AddressGate")
+      self.states.numStoreSgprNameSizes.append(self.states.numSgprAddressGate)
+      self.states.GateType   = 1
+      self.states.GateStride = self.states.gate.numSgprStrides
+      self.states.numStoreSgprNames.append("GateType")
+      self.states.numStoreSgprNameSizes.append(self.states.GateType)
+      self.states.numStoreSgprNames.append("GateStride")
+      self.states.numStoreSgprNameSizes.append(self.states.GateStride)
+      storeSgprLoad += self.states.numSgprAddressGate + self.states.GateType + self.states.GateStride
+  
+    self.states.numStoreSgprToLoad = storeSgprLoad      
     if self.db["InitLds"] : print ("\n***WARNING: InitLds enabled, may impact performance\n")
     if self.db["InitSgpr"] : print ("\n***WARNING: InitSgpr enabled, may impact performance\n")
     if self.db["InitVgpr"] : print ("\n***WARNING: InitVgpr enabled, may impact performance\n")

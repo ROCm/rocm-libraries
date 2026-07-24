@@ -1439,6 +1439,7 @@
     'NonTemporalC',
     'NonTemporalD',
     'NonTemporalE',
+    'NonTemporalGate',
     'NonTemporalMXSA',
     'NonTemporalMXSB',
     'NonTemporalMetadata',
@@ -2229,6 +2230,15 @@
       'type': 'list',
     }),
     'NonTemporalE': dict({
+      'head': list([
+        0,
+        1,
+        2,
+      ]),
+      'len': 8,
+      'type': 'list',
+    }),
+    'NonTemporalGate': dict({
       'head': list([
         0,
         1,
