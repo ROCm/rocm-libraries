@@ -392,3 +392,169 @@ TEST_F(PrimitiveTest, radix_sort_pairs_i32_i32_io)
     EXPECT_EQ(got_keys, (std::vector<K>{1, 2, 5, 8}));
     EXPECT_EQ(got_vals, (std::vector<V>{10, 20, 50, 80}));
 }
+
+// ---------------------------------------------------------------------------
+// segmented_radix_sort_keys : ascending sort of keys WITHIN each segment. The
+// segment boundaries are given by device begin/end offset arrays. Elements are
+// only reordered inside their own [begin,end) range.
+//
+// The two .cpp translation units for the segmented primitives are compiled into
+// this binary via unit_test_primitives_support.cpp (they are not in the CMake
+// primitive source list). Instantiations available: keys<int32_t,int32_t> and
+// pairs<int32_t,int32_t,int32_t>.
+// ---------------------------------------------------------------------------
+TEST_F(PrimitiveTest, segmented_radix_sort_keys_i32_full_range)
+{
+    using K = int32_t;
+    using I = int32_t;
+
+    // Two segments: [0,3) = {4,2,6}, [3,6) = {9,1,5}.
+    const std::vector<K> keys_in{4, 2, 6, 9, 1, 5};
+    const std::vector<I> begin{0, 3};
+    const std::vector<I> end{3, 6};
+    const size_t         length   = keys_in.size();
+    const size_t         segments = begin.size();
+    const uint32_t       startbit = 0;
+    const uint32_t       endbit   = sizeof(K) * 8;
+
+    device_vector<K> d_keys(keys_in);
+    device_vector<K> d_keys_alt(length);
+    device_vector<I> d_begin(begin);
+    device_vector<I> d_end(end);
+    ASSERT_NE(d_keys.ptr, nullptr);
+    ASSERT_NE(d_keys_alt.ptr, nullptr);
+    ASSERT_NE(d_begin.ptr, nullptr);
+    ASSERT_NE(d_end.ptr, nullptr);
+
+    size_t buffer_size = 0;
+    expect_success(prim::segmented_radix_sort_keys_buffer_size<K, I>(
+        handle, length, segments, startbit, endbit, &buffer_size));
+
+    device_vector<char> d_buffer(buffer_size ? buffer_size : 1);
+    ASSERT_NE(d_buffer.ptr, nullptr);
+
+    prim::double_buffer<K> keys(d_keys.ptr, d_keys_alt.ptr);
+    expect_success(prim::segmented_radix_sort_keys<K, I>(handle,
+                                                         keys,
+                                                         length,
+                                                         segments,
+                                                         d_begin.ptr,
+                                                         d_end.ptr,
+                                                         startbit,
+                                                         endbit,
+                                                         buffer_size,
+                                                         d_buffer));
+    UT_CHECK_HIP(hipDeviceSynchronize());
+
+    const std::vector<K> got = to_host(keys.current(), length);
+    EXPECT_EQ(got, (std::vector<K>{2, 4, 6, 1, 5, 9}));
+}
+
+// Restricted bit range: all keys are < 16 so a 4-bit window [0,4) still sorts
+// them fully, exercising the non-default begin_bit/end_bit branch.
+TEST_F(PrimitiveTest, segmented_radix_sort_keys_i32_narrow_range)
+{
+    using K = int32_t;
+    using I = int32_t;
+
+    const std::vector<K> keys_in{7, 3, 5, 2, 8, 1};
+    const std::vector<I> begin{0, 3};
+    const std::vector<I> end{3, 6};
+    const size_t         length   = keys_in.size();
+    const size_t         segments = begin.size();
+    const uint32_t       startbit = 0;
+    const uint32_t       endbit   = 4;
+
+    device_vector<K> d_keys(keys_in);
+    device_vector<K> d_keys_alt(length);
+    device_vector<I> d_begin(begin);
+    device_vector<I> d_end(end);
+    ASSERT_NE(d_keys.ptr, nullptr);
+    ASSERT_NE(d_keys_alt.ptr, nullptr);
+    ASSERT_NE(d_begin.ptr, nullptr);
+    ASSERT_NE(d_end.ptr, nullptr);
+
+    size_t buffer_size = 0;
+    expect_success(prim::segmented_radix_sort_keys_buffer_size<K, I>(
+        handle, length, segments, startbit, endbit, &buffer_size));
+
+    device_vector<char> d_buffer(buffer_size ? buffer_size : 1);
+    ASSERT_NE(d_buffer.ptr, nullptr);
+
+    prim::double_buffer<K> keys(d_keys.ptr, d_keys_alt.ptr);
+    expect_success(prim::segmented_radix_sort_keys<K, I>(handle,
+                                                         keys,
+                                                         length,
+                                                         segments,
+                                                         d_begin.ptr,
+                                                         d_end.ptr,
+                                                         startbit,
+                                                         endbit,
+                                                         buffer_size,
+                                                         d_buffer));
+    UT_CHECK_HIP(hipDeviceSynchronize());
+
+    const std::vector<K> got = to_host(keys.current(), length);
+    EXPECT_EQ(got, (std::vector<K>{3, 5, 7, 1, 2, 8}));
+}
+
+// ---------------------------------------------------------------------------
+// segmented_radix_sort_pairs : segment-local ascending sort of keys, carrying
+// the paired values along.
+// ---------------------------------------------------------------------------
+TEST_F(PrimitiveTest, segmented_radix_sort_pairs_i32_i32)
+{
+    using K = int32_t;
+    using V = int32_t;
+    using I = int32_t;
+
+    // Two segments: [0,3) keys {4,2,6}, [3,6) keys {9,1,5}.
+    const std::vector<K> keys_in{4, 2, 6, 9, 1, 5};
+    const std::vector<V> vals_in{40, 20, 60, 90, 10, 50};
+    const std::vector<I> begin{0, 3};
+    const std::vector<I> end{3, 6};
+    const size_t         length   = keys_in.size();
+    const size_t         segments = begin.size();
+    const uint32_t       startbit = 0;
+    const uint32_t       endbit   = sizeof(K) * 8;
+
+    device_vector<K> d_keys(keys_in);
+    device_vector<K> d_keys_alt(length);
+    device_vector<V> d_vals(vals_in);
+    device_vector<V> d_vals_alt(length);
+    device_vector<I> d_begin(begin);
+    device_vector<I> d_end(end);
+    ASSERT_NE(d_keys.ptr, nullptr);
+    ASSERT_NE(d_keys_alt.ptr, nullptr);
+    ASSERT_NE(d_vals.ptr, nullptr);
+    ASSERT_NE(d_vals_alt.ptr, nullptr);
+    ASSERT_NE(d_begin.ptr, nullptr);
+    ASSERT_NE(d_end.ptr, nullptr);
+
+    size_t buffer_size = 0;
+    expect_success(prim::segmented_radix_sort_pairs_buffer_size<K, V, I>(
+        handle, length, segments, startbit, endbit, &buffer_size));
+
+    device_vector<char> d_buffer(buffer_size ? buffer_size : 1);
+    ASSERT_NE(d_buffer.ptr, nullptr);
+
+    prim::double_buffer<K> keys(d_keys.ptr, d_keys_alt.ptr);
+    prim::double_buffer<V> vals(d_vals.ptr, d_vals_alt.ptr);
+    expect_success(prim::segmented_radix_sort_pairs<K, V, I>(handle,
+                                                             keys,
+                                                             vals,
+                                                             length,
+                                                             segments,
+                                                             d_begin.ptr,
+                                                             d_end.ptr,
+                                                             startbit,
+                                                             endbit,
+                                                             buffer_size,
+                                                             d_buffer));
+    UT_CHECK_HIP(hipDeviceSynchronize());
+
+    const std::vector<K> got_keys = to_host(keys.current(), length);
+    const std::vector<V> got_vals = to_host(vals.current(), length);
+    EXPECT_EQ(got_keys, (std::vector<K>{2, 4, 6, 1, 5, 9}));
+    EXPECT_EQ(got_vals, (std::vector<V>{20, 40, 60, 10, 50, 90}));
+}
