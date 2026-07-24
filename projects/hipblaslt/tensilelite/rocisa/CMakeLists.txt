@@ -10,11 +10,17 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
 
     project(rocisa LANGUAGES CXX)
     set(ROCISA_STANDALONE ON)
-    # Standalone (dev) builds always enable stinkytofu — the editable install
-    # is used exclusively for gfx1250 development.
-    set(ROCISA_ENABLE_STINKYTOFU ON CACHE BOOL "" FORCE)
+    # Standalone (scikit-build-core / tox / editable) builds exist exclusively for
+    # gfx1250 development, so stinkytofu is a hard invariant here, not a user
+    # choice. Force it on as a plain internal variable (no cache option to toggle)
+    # so we don't advertise a switch that cannot actually be flipped. The
+    # integrated (hipblaslt subdirectory) build below exposes the real option.
+    set(ROCISA_ENABLE_STINKYTOFU ON)
 else()
     set(ROCISA_STANDALONE OFF)
+    # Integrated (hipblaslt) build: stinkytofu is genuinely optional and selected
+    # by the parent (e.g. gated on GPU_TARGETS containing gfx1250).
+    option(ROCISA_ENABLE_STINKYTOFU "Enable stinkytofu backend integration (gfx1250+)" OFF)
 endif()
 
 option(ROCISA_USE_STABLE_ABI
@@ -132,17 +138,25 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
         target_link_options(_rocisa PRIVATE -fprofile-instr-generate)
     endif()
 
-    option(ROCISA_ENABLE_STINKYTOFU "Enable stinkytofu backend integration (gfx1250+)" OFF)
+    # ROCISA_ENABLE_STINKYTOFU is defined once at the top of this file: forced on
+    # (internal variable) for standalone/dev builds, and a real user option for the
+    # integrated hipblaslt build.
 
     target_link_libraries(_rocisa PUBLIC roc::origami)
 
     if(ROCISA_ENABLE_STINKYTOFU)
+        # Single source of truth for the monorepo sibling stinkytofu source tree.
+        # Computed once (absolute/normalized) and reused everywhere below, so the
+        # path is never "set under one condition but consumed under another".
+        set(ROCISA_STINKYTOFU_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../../shared/stinkytofu")
+        cmake_path(ABSOLUTE_PATH ROCISA_STINKYTOFU_SRC_DIR NORMALIZE
+            OUTPUT_VARIABLE ROCISA_STINKYTOFU_SRC_DIR)
+
         # Locate stinkytofu: prefer installed package, fall back to monorepo sibling.
         if(NOT TARGET stinkytofu::stinkytofu)
             find_package(stinkytofu QUIET)
             if(NOT stinkytofu_FOUND)
-                set(STINKYTOFU_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../../shared/stinkytofu")
-                if(EXISTS "${STINKYTOFU_DIR}/CMakeLists.txt")
+                if(EXISTS "${ROCISA_STINKYTOFU_SRC_DIR}/CMakeLists.txt")
                     set(BUILD_SHARED_LIBS ON)
                     set(STINKYTOFU_ENABLE_WERROR ON)
 
@@ -152,10 +166,10 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
                         "Build StinkyTofu Python bindings (required by ROCISA_BACKEND=stinkytofu adapter)"
                         FORCE)
 
-                    add_subdirectory("${STINKYTOFU_DIR}" stinkytofu EXCLUDE_FROM_ALL)
+                    add_subdirectory("${ROCISA_STINKYTOFU_SRC_DIR}" stinkytofu EXCLUDE_FROM_ALL)
                     set(_stinkytofu_from_subdirectory TRUE)
                 else()
-                    message(FATAL_ERROR "stinkytofu not found via find_package or sibling directory: ${STINKYTOFU_DIR}")
+                    message(FATAL_ERROR "stinkytofu not found via find_package or sibling directory: ${ROCISA_STINKYTOFU_SRC_DIR}")
                 endif()
             endif()
         endif()
@@ -177,10 +191,9 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
         # define init_stinkytofu), so they compile into _rocisa, not libstinkytofu.
         # rocisa owns them directly here rather than relying on stinkytofu to inject
         # them, so the de-bundled (find_package) build links them too.
-        set(_stinkytofu_src_dir "${CMAKE_CURRENT_SOURCE_DIR}/../../../../shared/stinkytofu")
         target_sources(_rocisa PRIVATE
-            "${_stinkytofu_src_dir}/src/conversion/rocisa/AllHwMappings.cpp"
-            "${_stinkytofu_src_dir}/src/conversion/rocisa/ToStinkyTofuUtils.cpp"
+            "${ROCISA_STINKYTOFU_SRC_DIR}/src/conversion/rocisa/AllHwMappings.cpp"
+            "${ROCISA_STINKYTOFU_SRC_DIR}/src/conversion/rocisa/ToStinkyTofuUtils.cpp"
         )
 
         if(_stinkytofu_from_subdirectory)
@@ -197,6 +210,13 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
     # dev build, where libstinkytofu lives in a temp install prefix off the
     # loader's default search path.
     option(ROCISA_INCLUDE_BUILD_INFO "Install _build_info.py for staleness detection" OFF)
+
+    # ROCISA_INCLUDE_BUILD_INFO is the single source of truth for "this is a
+    # dev/editable build" (tasks.py passes it for `invoke rocisa`). Alias it under
+    # a clearly named signal so the dev-only branches below express intent directly
+    # instead of piggybacking on ROCISA_ENABLE_STINKYTOFU (which is merely forced
+    # on in standalone dev builds and would conflate the two concerns).
+    set(ROCISA_DEV_BUILD ${ROCISA_INCLUDE_BUILD_INFO})
 
     if(ROCISA_ENABLE_STINKYTOFU)
         # Directory containing libstinkytofu, resolved by CMake for the active
@@ -221,7 +241,7 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
                         $<TARGET_FILE_DIR:_rocisa>
                 )
             endif()
-        elseif(ROCISA_INCLUDE_BUILD_INFO)
+        elseif(ROCISA_DEV_BUILD)
             # Dev/editable find_package build: libstinkytofu is installed to a temp
             # prefix off the loader's default search path, so bake its dir into the
             # install RPATH from the link line. Gated on the dev-build signal so
@@ -247,15 +267,17 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
         # which would leave the path empty and make the check scan the CWD. Point it
         # at the real stinkytofu source tree.
         if(NOT STINKYTOFU_ROOT_DIR)
-            set(_stinkytofu_src_dir "${CMAKE_CURRENT_SOURCE_DIR}/../../../../shared/stinkytofu")
-            cmake_path(ABSOLUTE_PATH _stinkytofu_src_dir NORMALIZE OUTPUT_VARIABLE STINKYTOFU_ROOT_DIR)
+            set(STINKYTOFU_ROOT_DIR "${ROCISA_STINKYTOFU_SRC_DIR}")
         endif()
+        # Two independent conditions meet here: generating _build_info.py requires
+        # stinkytofu (its content embeds STINKYTOFU_ROOT_DIR), while installing it
+        # as the staleness sentinel is a dev-build concern (ROCISA_DEV_BUILD).
         configure_file(
             "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/_build_info.py.in"
             "${CMAKE_CURRENT_BINARY_DIR}/rocisa/_build_info.py"
             @ONLY
         )
-        if(ROCISA_INCLUDE_BUILD_INFO)
+        if(ROCISA_DEV_BUILD)
             install(FILES "${CMAKE_CURRENT_BINARY_DIR}/rocisa/_build_info.py" DESTINATION rocisa)
         endif()
     endif()
@@ -286,14 +308,13 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
             INSTALL_RPATH "$ORIGIN"
         )
 
-        set(STINKYTOFU_TOP_DIR "${STINKYTOFU_DIR}")
         configure_file(
-            "${STINKYTOFU_DIR}/python_module/stinkytofu/__init__.py"
+            "${ROCISA_STINKYTOFU_SRC_DIR}/python_module/stinkytofu/__init__.py"
             "${CMAKE_CURRENT_BINARY_DIR}/stinkytofu/__init__.py"
             COPYONLY
         )
         configure_file(
-            "${STINKYTOFU_DIR}/python_module/stinkytofu/_build_info.py.in"
+            "${ROCISA_STINKYTOFU_SRC_DIR}/python_module/stinkytofu/_build_info.py.in"
             "${CMAKE_CURRENT_BINARY_DIR}/stinkytofu/_build_info.py"
             @ONLY
         )
