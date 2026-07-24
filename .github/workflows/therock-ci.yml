@@ -162,6 +162,7 @@ jobs:
       cmake_options: ${{ matrix.projects.cmake_options }}
       projects_to_test: ${{ matrix.projects.projects_to_test }}
       test_type: ${{ needs.setup.outputs.test_type }}
+      run_rocjitsu_race_check: ${{ matrix.projects.run_rocjitsu_race_check }}
       amdgpu_families: ${{ matrix.target_bundle.amdgpu_family }}
       # The rocjitsu race check runs under CPU-only emulation. For gfx1151,
       # avoid scheduling normal package tests on a gfx1151 GPU runner while we
