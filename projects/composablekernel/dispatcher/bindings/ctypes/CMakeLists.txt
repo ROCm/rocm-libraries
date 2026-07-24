@@ -277,6 +277,90 @@ else()
 endif()
 
 # =============================================================================
+# GroupedGemm RowColQuant ctypes Library
+# =============================================================================
+
+file(GLOB ROWCOLQUANT_GEMM_KERNEL_HEADERS "${CMAKE_BINARY_DIR}/generated_kernels/grouped_gemm_rowcolquant_*.hpp")
+if(ROWCOLQUANT_GEMM_KERNEL_HEADERS)
+    list(GET ROWCOLQUANT_GEMM_KERNEL_HEADERS 0 ROWCOLQUANT_GEMM_KERNEL_HEADER)
+    message(STATUS "Found RowColQuant GEMM kernel for ctypes lib: ${ROWCOLQUANT_GEMM_KERNEL_HEADER}")
+
+    add_ctypes_library(dispatcher_grouped_gemm_rowcolquant_lib
+        grouped_gemm_rowcolquant_ctypes_lib.cpp
+        KERNEL_HEADER ${ROWCOLQUANT_GEMM_KERNEL_HEADER}
+    )
+    if(NOT DEFINED CK_TILE_ROWCOLQUANT_GFX_ARCH OR CK_TILE_ROWCOLQUANT_GFX_ARCH STREQUAL "")
+        if(CMAKE_HIP_ARCHITECTURES)
+            list(GET CMAKE_HIP_ARCHITECTURES 0 _rowcolquant_gfx_arch)
+        else()
+            set(_rowcolquant_gfx_arch "gfx942")
+        endif()
+        set(CK_TILE_ROWCOLQUANT_GFX_ARCH "${_rowcolquant_gfx_arch}" CACHE STRING
+            "GFX arch for the CMake-built RowColQuant ctypes .so (default: first CMAKE_HIP_ARCHITECTURES or gfx942)")
+    endif()
+    message(STATUS "RowColQuant ctypes lib GFX_ARCH: ${CK_TILE_ROWCOLQUANT_GFX_ARCH}")
+
+    target_compile_definitions(dispatcher_grouped_gemm_rowcolquant_lib PRIVATE
+        CK_TILE_SINGLE_KERNEL_INCLUDE
+        GFX_ARCH="${CK_TILE_ROWCOLQUANT_GFX_ARCH}"
+    )
+else()
+    message(STATUS "No RowColQuant GEMM kernel found for ctypes lib - building without kernel")
+    add_library(dispatcher_grouped_gemm_rowcolquant_lib SHARED grouped_gemm_rowcolquant_ctypes_lib.cpp)
+    target_include_directories(dispatcher_grouped_gemm_rowcolquant_lib PRIVATE
+        ${PROJECT_SOURCE_DIR}/include
+        ${PROJECT_SOURCE_DIR}/dispatcher/include
+    )
+    target_link_libraries(dispatcher_grouped_gemm_rowcolquant_lib PRIVATE hip::device)
+    set_target_properties(dispatcher_grouped_gemm_rowcolquant_lib PROPERTIES
+        POSITION_INDEPENDENT_CODE ON
+        CXX_STANDARD 17
+    )
+endif()
+
+# =============================================================================
+# GroupedGemm TensorQuant ctypes Library
+# =============================================================================
+
+file(GLOB TENSORQUANT_GEMM_KERNEL_HEADERS "${CMAKE_BINARY_DIR}/generated_kernels/grouped_gemm_tensorquant_*.hpp")
+if(TENSORQUANT_GEMM_KERNEL_HEADERS)
+    list(GET TENSORQUANT_GEMM_KERNEL_HEADERS 0 TENSORQUANT_GEMM_KERNEL_HEADER)
+    message(STATUS "Found TensorQuant GEMM kernel for ctypes lib: ${TENSORQUANT_GEMM_KERNEL_HEADER}")
+
+    add_ctypes_library(dispatcher_grouped_gemm_tensorquant_lib
+        grouped_gemm_tensorquant_ctypes_lib.cpp
+        KERNEL_HEADER ${TENSORQUANT_GEMM_KERNEL_HEADER}
+    )
+    if(NOT DEFINED CK_TILE_TENSORQUANT_GFX_ARCH OR CK_TILE_TENSORQUANT_GFX_ARCH STREQUAL "")
+        if(CMAKE_HIP_ARCHITECTURES)
+            list(GET CMAKE_HIP_ARCHITECTURES 0 _tensorquant_gfx_arch)
+        else()
+            set(_tensorquant_gfx_arch "gfx942")
+        endif()
+        set(CK_TILE_TENSORQUANT_GFX_ARCH "${_tensorquant_gfx_arch}" CACHE STRING
+            "GFX arch for the CMake-built TensorQuant ctypes .so (default: first CMAKE_HIP_ARCHITECTURES or gfx942)")
+    endif()
+    message(STATUS "TensorQuant ctypes lib GFX_ARCH: ${CK_TILE_TENSORQUANT_GFX_ARCH}")
+
+    target_compile_definitions(dispatcher_grouped_gemm_tensorquant_lib PRIVATE
+        CK_TILE_SINGLE_KERNEL_INCLUDE
+        GFX_ARCH="${CK_TILE_TENSORQUANT_GFX_ARCH}"
+    )
+else()
+    message(STATUS "No TensorQuant GEMM kernel found for ctypes lib - building without kernel")
+    add_library(dispatcher_grouped_gemm_tensorquant_lib SHARED grouped_gemm_tensorquant_ctypes_lib.cpp)
+    target_include_directories(dispatcher_grouped_gemm_tensorquant_lib PRIVATE
+        ${PROJECT_SOURCE_DIR}/include
+        ${PROJECT_SOURCE_DIR}/dispatcher/include
+    )
+    target_link_libraries(dispatcher_grouped_gemm_tensorquant_lib PRIVATE hip::device)
+    set_target_properties(dispatcher_grouped_gemm_tensorquant_lib PROPERTIES
+        POSITION_INDEPENDENT_CODE ON
+        CXX_STANDARD 17
+    )
+endif()
+
+# =============================================================================
 # GPU Helper Executable
 # =============================================================================
 
