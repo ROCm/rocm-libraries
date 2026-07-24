@@ -7,6 +7,7 @@
 #include <miopen/config.h>
 #if MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK
 
+#include <miopen/config.hpp>                       // MIOPEN_INTERNALS_EXPORT
 #include <miopen/conv/heuristics/lgbm_predict.hpp> // LgbmEntry
 
 #include <cstddef>
@@ -29,7 +30,7 @@ namespace lgbm {
 // (higher = predicted faster). Feature rows are the same LgbmEntry union the
 // callers already assemble (missing == -1 marks NaN/absent; otherwise the
 // numeric value -- or a categorical code cast to double -- lives in fvalue).
-class LgbmForest
+class MIOPEN_INTERNALS_EXPORT LgbmForest
 {
 public:
     // Parse a LightGBM text model file. On failure, IsReady() is false and
