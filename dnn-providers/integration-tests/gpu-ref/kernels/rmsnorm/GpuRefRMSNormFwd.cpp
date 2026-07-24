@@ -3,7 +3,7 @@
 
 // GPU reference RMSNorm forward kernel.
 // Compiled via HipRTC with -DINPUT_TYPE=<type> -DOUTPUT_TYPE=<type> -DSCALE_TYPE=<type>
-// -DCOMPUTE_TYPE=<type> -DLOCAL_SIZE=<value>.
+// -DCOMPUTE_TYPE=<type> -DLOCAL_SIZE=<value> -DHAS_BIAS=<0|1>.
 // Each thread block computes one normalization group (outerSize) reducing over the
 // innerSize elements in parallel across the threads to compute the RMS statistic
 // and then normalizing the input elements in the group to produce the output elements.
@@ -16,9 +16,9 @@ extern "C" __global__ void RMSNormFwdRef(RMSNormFwdArgs args)
 {
     auto* input = static_cast<const INPUT_TYPE*>(args.input);
     auto* scale = static_cast<const SCALE_TYPE*>(args.scale);
-    auto* bias = static_cast<const SCALE_TYPE*>(args.bias);
     auto* output = static_cast<OUTPUT_TYPE*>(args.output);
     auto* rstd = static_cast<COMPUTE_TYPE*>(args.invRms);
+    [[maybe_unused]] auto* bias = static_cast<const SCALE_TYPE*>(args.bias);
 
     constexpr long long localSize = static_cast<long long>(LOCAL_SIZE);
 
@@ -71,7 +71,7 @@ extern "C" __global__ void RMSNormFwdRef(RMSNormFwdArgs args)
     {
         long long idx = o * innerSize * stride + i * stride + s;
         COMPUTE_TYPE y_val = toAccum(input[idx]) * prstd * toAccum(scale[i]);
-        if(bias != nullptr)
+        if constexpr(HAS_BIAS)
         {
             y_val += toAccum(bias[i]);
         }

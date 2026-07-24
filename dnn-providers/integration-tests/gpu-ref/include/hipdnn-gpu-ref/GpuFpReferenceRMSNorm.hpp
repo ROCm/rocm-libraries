@@ -24,7 +24,7 @@ template <typename InputDataType,
           typename OutputDataType,
           typename ComputeDataType,
           unsigned int localSize>
-inline std::vector<std::string> buildRMSNormFwdDefines()
+inline std::vector<std::string> buildRMSNormFwdDefines(bool hasBias)
 {
     std::vector<std::string> defines;
     defines.emplace_back(std::string("-DINPUT_TYPE=") + HipRtcTypeName<InputDataType>::VALUE);
@@ -32,6 +32,7 @@ inline std::vector<std::string> buildRMSNormFwdDefines()
     defines.emplace_back(std::string("-DOUTPUT_TYPE=") + HipRtcTypeName<OutputDataType>::VALUE);
     defines.emplace_back(std::string("-DCOMPUTE_TYPE=") + HipRtcTypeName<ComputeDataType>::VALUE);
     defines.emplace_back(std::string("-DLOCAL_SIZE=") + std::to_string(localSize));
+    defines.emplace_back(std::string("-DHAS_BIAS=") + std::to_string(hasBias ? 1 : 0));
     return defines;
 }
 
@@ -76,7 +77,7 @@ public:
                                                       ScaleDataType,
                                                       OutputDataType,
                                                       ComputeDataType,
-                                                      BLOCK_SIZE>();
+                                                      BLOCK_SIZE>(bias != nullptr);
 
         launchFprop(input.memory().deviceData(),
                     input.dims(),
