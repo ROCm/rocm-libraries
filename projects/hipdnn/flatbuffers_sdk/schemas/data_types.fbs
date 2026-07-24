@@ -24,3 +24,12 @@ enum DataType : byte {
     FP8_E4M3_FNUZ = 17,
     FP8_E5M2_FNUZ = 18,
 }
+
+// UMD binding annotations (RFC 0018 Appendix B). Declared once here, in the shared
+// include, and applied to each op's attribute-table UID fields. `umd_operand` /
+// `umd_result` mark a tensor-UID edge and `umd_name` gives the name a UMD binds it
+// by; the operand/result flag already fixes that the binding is a tensor, so no
+// separate type attribute is carried. Unannotated fields are scalar attributes.
+attribute "umd_operand";
+attribute "umd_result";
+attribute "umd_name";
