@@ -15,14 +15,16 @@ operation contract
   -> manifest / runtime metadata
 ```
 
-Every shipped kernel instance in `python/rocke/instances/` follows this shape.
-An instance is a complete kernel definition, either shared across targets under
-`instances/common/` or specialized under `instances/<arch>/`. Reusable
-authoring mechanics belong in `python/rocke/helpers/`; foundational IR,
-analysis, and lowering mechanisms belong in `python/rocke/core/`. For example,
-the shared spec scaffolding lives in `python/rocke/helpers/spec.py`
-(`IOSpecRule`, `validate_io`, `SignatureBuilder`, `kernel_name_join`,
-`ceil_div_grid`).
+Every platform-owned kernel instance in `python/rocke/instances/` follows this
+shape. An instance is a complete kernel definition, either shared across
+targets under `instances/common/` or specialized under `instances/<arch>/`.
+Library-owned kernels, including attention, live under `rocke/library/kernels/`
+and follow the same operation-to-runtime progression without belonging to the
+platform instance tree. Reusable authoring mechanics belong in
+`python/rocke/helpers/`; foundational IR, analysis, and lowering mechanisms
+belong in `python/rocke/core/`. For example, the shared spec scaffolding lives
+in `python/rocke/helpers/spec.py` (`IOSpecRule`, `validate_io`,
+`SignatureBuilder`, `kernel_name_join`, `ceil_div_grid`).
 
 ## Kernel Authoring And Optimization Outputs
 
@@ -88,11 +90,13 @@ Before writing IR, write down:
 
 In `rocke`, many performance decisions are encoded in the spec and the helper choices. A vague contract bakes in accidental assumptions.
 
-Concrete contract examples (all in `instances/`):
+Concrete contract examples (platform instances unless noted otherwise):
 
 - `UniversalGemmSpec` — GEMM tile, trait, data, layout, scheduler, epilogue.
 - `ConvProblem` — NHWC/KYXC/NHWK convolution geometry; derives `Ho`, `Wo`, `M_gemm`, `flops`.
-- `UnifiedAttentionProblem` — paged-attention shape; selectors choose 2D vs 3D.
+- `UnifiedAttentionProblem` — library-owned paged-attention shape in
+  `rocke/library/kernels/common/attention_unified.py`; selectors choose 2D vs
+  3D.
 - `Reduce2DSpec`, `LayerNorm2DSpec`, `RMSNorm2DSpec`, `ElementwiseSpec` — small-op contracts.
 
 ## 2. Validate Early
@@ -121,7 +125,7 @@ For GEMM / conv, validation also covers:
 
 - architecture accepted by the owning validator (gfx950 is the default;
   `known_arches()` is the platform catalog, not universal family support);
-- supported MFMA atom shape for the dtype;
+- supported MMA/matrix atom shape for the dtype;
 - `tile_m, tile_n` divisible by `warp_* * warp_tile_*`;
 - `tile_k` divisible by `warp_tile_k`;
 - block size <= hardware/lowering limit;

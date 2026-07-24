@@ -41,9 +41,9 @@ a hammer; it's a saw.**
 
 The columns are:
 
-* **Shape** -- matmul / reduce / elementwise / DMA / mixed.
-* **Primitive** -- MFMA / VALU / `ds_bpermute` (warp reduce) /
-  async DMA / atomic / hybrid.
+* **Shape** -- matmul / reduce / elementwise / data movement / mixed.
+* **Primitive** -- MFMA / WMMA / VALU / cross-lane or LDS reduction /
+  global data movement / atomic / hybrid.
 * **Status** -- whether the row describes the current checked-in body.
 
 ### Matmul-shaped kernels (use a supported matrix path)
@@ -68,8 +68,8 @@ WMMA targets. Wave width is not a user-selectable matrix-family control.
 | `conv_implicit_gemm` | conv = matmul | target-selected MFMA or restricted WMMA | ✓ |
 | `conv_direct_grouped` | conv (small-channel) | MFMA 4x4x4 atom | ✓ |
 | `fused_moe` per-expert | matmul (per-expert) | MFMA or WMMA (via universal) | ✓ |
-| `attention_tiled_2d` | attention (paged) | MFMA QK + PV | ✓ |
-| `attention_tiled_3d` | attention (split-KV) | MFMA QK + PV | ✓ |
+| `attention_tiled_2d` | attention (paged) | architecture-specific MFMA or WMMA QK + PV | ✓ |
+| `attention_tiled_3d` | attention (split-KV) | architecture-specific MFMA or WMMA QK + PV | ✓ |
 | `fmha_mfma` | attention | MFMA QK + PV | ✓ |
 | `fmha_varlen` | attention (varlen) | MFMA QK + PV | ✓ |
 | `fmha_head_grouping` | attention (GQA / MQA) | MFMA QK + PV | ✓ |
@@ -92,34 +92,32 @@ These kernels have **no matmul** in their inner loop; using MFMA
 would require faking a matmul shape that wastes 99% of the
 intrinsic's FLOPs.
 
-| Kernel | Shape | Primitive | Why not MFMA |
+| Kernel | Shape | Primitive | Why not matrix MMA |
 |---|---|---|---|
-| `layernorm2d` | reduce + scale | VALU + `ds_bpermute` warp-sum | reduce, not matmul |
-| `rmsnorm2d` | reduce + scale | VALU + warp-sum | reduce, not matmul |
-| `add_rmsnorm2d_rdquant` | reduce + scale + quant | VALU + warp-sum | reduce + cast |
-| `smoothquant` | row-reduce + per-row cast | VALU + warp-max | row-reduce + cast |
-| `moe_smoothquant` | per-expert smoothquant | VALU + warp-max | row-reduce + cast |
-| `reduce` | reduce (axis sum/max/min/mean) | `ds_bpermute` butterfly | pure reduce |
+| `layernorm2d` | reduce + scale | VALU + Welford LDS reduction | reduce, not matmul |
+| `rmsnorm2d` | reduce + scale | VALU + warp/LDS reduction | reduce, not matmul |
+| `add_rmsnorm2d_rdquant` | reduce + scale + quant | VALU + paired LDS reductions | reduce + cast |
+| `smoothquant` | row-reduce + per-row cast | VALU + LDS block-max | row-reduce + cast |
+| `moe_smoothquant` | per-expert smoothquant | VALU + LDS block-max | row-reduce + cast |
+| `reduce` | reduce (axis sum/max/min/mean/prod) | VALU + warp shuffle + cross-warp LDS | pure reduce |
 | `pooling` | windowed reduce | VALU + tile-window | small-window reduce |
 | `elementwise` | unary / binary / swiglu | VALU SIMD | pure pointwise |
-| `permute_nd` | rank-N transpose | LDS-staged/coalesced data movement | pure data motion |
+| `permute_nd` | rank-N transpose | direct scalar/vector global gather + store | pure data motion |
 | `transpose` | 2D transpose | LDS-staged/coalesced data movement | pure data motion |
 | `batched_transpose` | batched 2D transpose | LDS-staged/coalesced data movement | pure data motion |
 | `img2col` | NHWC → unfold matrix | gather + scatter | data prep (matmul follows in `conv_implicit_gemm`) |
 | `topk_softmax` | tournament reduce over K | VALU + cross-lane shuffle | tournament reduce |
-| `moe_sorting` | histogram + scan + scatter | atomic + scan + scatter | mixed reduce / DMA |
-| `moe_gather` | gather by token-expert id | indexed DMA | pure gather |
+| `moe_sorting` | histogram + scan + scatter | atomic + scan + scatter | mixed reduce / data movement |
+| `moe_gather` | gather by token-expert id | indexed global load + store | pure gather |
 | `moe_silu_mul` | elementwise activation | VALU SIMD | pure pointwise |
 | `moe_topk_weighted_reduce` | weighted sum across experts | VALU + atomic | reduce + scatter |
-| `fmha_appendkv` | scatter into KV cache | DMA scatter | pure data motion |
+| `fmha_appendkv` | cache scatter + optional rotary | global load/store + optional VALU | data motion + pointwise transform |
 
-Trying to MFMA any of these would be a categorical mistake. For
-example: a layer norm reduce over `N=4096` elements has 4096
-adds (one per element); writing it as `[1, 4096] @ [4096, 1] = [1, 1]`
-on the 16×16×16 atom would execute 256 MFMA atoms (each doing
-256 useless MACs at 16-element granularity, then a horizontal
-reduce across the atom output -- which itself isn't a matmul).
-Net throughput would be **lower** than the warp-shuffle reduce.
+Trying to use MFMA or WMMA for any of these would be a categorical mistake. For
+example: expressing a scalar layer-norm reduction as a matrix product would
+execute an MFMA for every K tile while materializing a full output tile to
+obtain one scalar, followed by a horizontal reduction across that tile. The
+extra matrix work and data rearrangement do not match the reduction shape.
 
 ## Choosing a primitive
 
