@@ -143,21 +143,14 @@ becomes data instead of hand-written code.
 | **UHD** (heuristic) | Rank the kernels within one engine and pick one | A ranking model living inside an engine's dispatcher |
 | **KMD** (metadata) | Declare the engine's variant fields, each with a type and optional default | The compile-time template/tuning parameters that distinguish each hand-written kernel variant |
 
-A kernel descriptor carries no logic of its own. Everything but the code comes from above: the KDP's
-shared matcher set decides when the kernel applies and its one dispatch descriptor decides how it
-launches, while the engine the KDP names owns the heuristic that ranks it and the metadata schema it
-fills. So a UKD is just its source details plus the metadata values the heuristic ranks it by. The KDP's
-one UDD holds one or more **Launches**, each a dispatch step, and each Launch is paired at runtime with
-the UKD source that fills it. A simple kernel is a one-Launch UDD; a multi-launch kernel such as SDPA
-backward is a several-Launch UDD run in order ([Section 13](#13-multiple-kernels-and-composition)), still
-one shared UDD per pack. Because the engine (not the KDP) owns the heuristic and metadata schema, many
-KDPs may share one engine while differing in their matchers and dispatch; all of them are ranked by that
-one selector over that one feature space.
-
-Two more terms complete the set: a **KDP (Kernel Descriptor Pack)** is the cohesive unit above (a set of
-matchers, one engine, and one dispatch descriptor over a vector of child kernels, the deployment shape of
-[Section 1](#1-overview)), and a **UCD (Universal Composite Descriptor)** composes stages that each
-resolve to a UKD (future work, [Section 13](#13-multiple-kernels-and-composition)).
+A UKD carries no logic of its own: it is just its source details plus metadata values, and it inherits
+when it applies, how it launches, how it is ranked, and its schema from its KDP and that KDP's engine
+([Section 1](#1-overview)). The KDP's one UDD holds one or more **Launches**, each a dispatch step paired
+at runtime with the UKD source that fills it: a simple kernel is a one-Launch UDD, and a multi-launch
+kernel such as SDPA backward is a several-Launch UDD run in order
+([Section 13](#13-multiple-kernels-and-composition)). The remaining term is the **UCD (Universal
+Composite Descriptor)**, which composes stages that each resolve to a UKD (future work,
+[Section 13](#13-multiple-kernels-and-composition)).
 
 ![How the descriptors relate: an engine owning one heuristic and one metadata schema; a KDP binding a matcher set, that engine, and one UDD over a vector of child kernels](../images/ukd_concepts.svg)
 
@@ -209,8 +202,10 @@ format's follow-up RFC.
 Every descriptor also carries a stable `id`, a GUID, used for cross-references, and a `name` that is
 mandatory for logging and diagnostics; both appear in the examples. GUIDs let any author mint an id
 locally that never collides with another author's, so there is no central allocation authority to
-serialize through. The examples are illustrative, and the `schema`/version plumbing is shown once here
-and elided elsewhere.
+serialize through. The schema and its relations are still centrally defined (the field vocabulary and
+the custom-operation registry are part of the provider's published contract); what a follow-up adds is
+authoring tooling to generate and lint descriptors, mint ids, and drive this from higher-level inputs.
+The examples are illustrative, and the `schema`/version plumbing is shown once here and elided elsewhere.
 
 **UED, an engine with its heuristic, metadata schema, knobs, and notes:**
 
@@ -252,11 +247,10 @@ an optional default. It declares upfront which variants the engine spans; each U
 values. When the engine's KDPs span different axes, the schema is their union and unused fields take
 their defaults.
 
-The KMD is exactly the feature space the engine's heuristic ranks over, which is why the UED owns both
-the KMD and the one UHD. They move together: changing the KMD (adding, removing, or retyping a field)
-changes the features the UHD sees, so it requires retraining the UHD and rebinding it to the new schema.
-That coupling is intentional and is why a KMD change is a deliberate, engine-level act rather than a
-casual per-kernel edit.
+The KMD is the feature space the engine's heuristic ranks over, which is why the UED owns both the KMD
+and the one UHD: changing the KMD changes the features the UHD sees, so it requires retraining and
+rebinding the UHD. The coupling is intentional, and it also means a pack that starts populating a field
+that was previously always default shifts those features and calls for the same retraining.
 
 ```jsonc
 {
@@ -319,11 +313,9 @@ so it names none of them.
 ```
 
 **KDP, a cohesive pack:** one file that binds a shared **matcher set**, **one engine**, and **one dispatch
-descriptor**, over a **vector of child kernels**. Every referenced descriptor is shared by ID across
-packs; only the child kernels are unique to this pack. The engine carries the heuristic and metadata
-schema, so many KDPs may share one engine while differing in their matchers and dispatch. One of each is
-intentional: every kernel in the pack shares that launch ABI, engine, and matcher set, so a kernel that
-differs in any of them belongs in a different pack.
+descriptor**, over a **vector of child kernels** (the deployment shape and its one-of-each rationale are
+in [Section 1](#1-overview)). Every referenced descriptor is shared by ID across packs; only the child
+kernels are unique to this pack.
 
 ```jsonc
 {
@@ -814,7 +806,7 @@ SDPA forward one from [Section 5](#5-matching-and-the-umd) (id
 KDP follow:
 
 ```jsonc
-// --- UMD (a matcher): the SDPA-forward matcher id daef2dc6-647d-4c9e-b0e0-85402d2dc2bd from Section 5, referenced not repeated ---
+// --- UMD (a matcher): the SDPA-forward matcher id daef2dc6-647d-4c9e-b0e0-85402d2dc2bd from Section 5 ---
 
 // --- UDD: how to invoke it (one per KDP, shared by every child kernel) ---
 {
@@ -934,8 +926,8 @@ Three areas are new to UKD:
 - **Launch overhead.** Generic launch and plan-time matching add some overhead; the goal is to keep it
   minimal. As hipDNN's benchmarking and performance testing (`tools/dnn-benchmarking`,
   [RFC 0013](0013_Autotune.md)) matures, UKD's overhead is validated against the hand-written
-  baseline. Only the UEDs and matchers load eagerly at startup; heuristics, kernels with their metadata,
-and dispatch descriptors load lazily and are cached, so that cost is paid once at first use.
+  baseline. Loading is eager for UEDs and matchers and lazy for the rest ([Section 3](#3-how-it-works)),
+  so that cost is paid once at first use.
 
 ### 12.2 Follow-up RFCs
 
