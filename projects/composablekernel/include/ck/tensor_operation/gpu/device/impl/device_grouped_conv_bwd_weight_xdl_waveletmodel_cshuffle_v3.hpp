@@ -396,12 +396,15 @@ struct DeviceGroupedConvBwdWeight_Xdl_WaveletModel_CShuffleV3
         {
             // Query occupancy for the conservative variant (main loop + atomic)
             int max_occupancy = 0;
-            hip_check_error(hipOccupancyMaxActiveBlocksPerMultiprocessor(
+            hipError_t err    = hipOccupancyMaxActiveBlocksPerMultiprocessor(
                 &max_occupancy,
                 SelectKernel<GridwiseGemm, true, InMemoryDataOperationEnum::AtomicAdd>(),
                 LaunchBlockSize,
-                0));
-            return std::max(1, max_occupancy);
+                0);
+            if(err == hipErrorInvalidDeviceFunction)
+                return 0; // kernel not available on this device
+            hip_check_error(err);
+            return max_occupancy;
         }
 
         ActiveWorkgroupsPerCU()
@@ -464,7 +467,8 @@ struct DeviceGroupedConvBwdWeight_Xdl_WaveletModel_CShuffleV3
               input_left_pads_{input_left_pads},
               input_right_pads_{input_right_pads}
         {
-            stride_overflow = stride_overflow_in;
+            stride_overflow       = stride_overflow_in;
+            kernel_not_available_ = false;
             c_space_size_bytes =
                 ck::accumulate_n<long_index_t>(
                     e_g_k_c_xs_lengths.begin(), NDimSpatial + I3, 1, std::multiplies<>()) *
@@ -481,10 +485,15 @@ struct DeviceGroupedConvBwdWeight_Xdl_WaveletModel_CShuffleV3
                       end(a_g_n_k_wos_lengths),
                       begin(output_spatial_lengths_));
 
+            static ActiveWorkgroupsPerCU active_workgroups_per_cu;
+            if(active_workgroups_per_cu.max_occupancy_ == 0)
+            {
+                kernel_not_available_ = true;
+                return;
+            }
+
             if(split_k < 0)
             {
-                static ActiveWorkgroupsPerCU active_workgroups_per_cu;
-
                 ck::index_t gemmM, gemmN, gemmK;
                 std::tie(gemmM, gemmN, gemmK) =
                     get_bwd_weight_gemm_sizes<NDimSpatial>(a_g_n_k_wos_lengths, e_g_k_c_xs_lengths);
@@ -619,6 +628,7 @@ struct DeviceGroupedConvBwdWeight_Xdl_WaveletModel_CShuffleV3
         long_index_t split_k_stride_a_ = 0;
         long_index_t split_k_stride_b_ = 0;
         bool stride_overflow;
+        bool kernel_not_available_;
     };
 
     // Dispatch helper: selects the kernel instantiation for a given
@@ -783,6 +793,9 @@ struct DeviceGroupedConvBwdWeight_Xdl_WaveletModel_CShuffleV3
 
     static bool IsSupportedArgument(const Argument& arg)
     {
+        if(arg.kernel_not_available_)
+            return false;
+
         if(arg.stride_overflow)
             return false;
 

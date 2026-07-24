@@ -56,6 +56,7 @@ static auto GetDirectSolvers()
                                            miopen::solver::conv::ConvAsm5x10u2v2b1,
                                            miopen::solver::conv::ConvHipDirectFwd11x11,
                                            miopen::solver::conv::ConvHipDirectFwd,
+                                           miopen::solver::conv::ConvHipConv,
                                            miopen::solver::conv::ConvDirectNaiveConvFwd,
                                            miopen::solver::conv::ConvDirectNaiveConvBwd,
                                            miopen::solver::conv::ConvDirectNaiveConvWrw,
@@ -204,7 +205,8 @@ static auto GetBwdWrW2DSolvers()
                                            miopen::solver::conv::ConvHipBwdWrW53,
                                            miopen::solver::conv::ConvDirectNaiveConvFwd,
                                            miopen::solver::conv::ConvDirectNaiveConvBwd,
-                                           miopen::solver::conv::ConvDirectNaiveConvWrw>{};
+                                           miopen::solver::conv::ConvDirectNaiveConvWrw,
+                                           miopen::solver::conv::ConvHipConv>{};
 }
 
 static auto GetFFTSolvers() { return miopen::solver::SolverContainer<miopen::solver::conv::fft>{}; }

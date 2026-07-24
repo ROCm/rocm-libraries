@@ -814,6 +814,7 @@ enable_cppcheck(
         *:*src/sqlite/*.cpp
         *:*.cl
         *:*src/kernels/*.h
+        *:*src/hipconv/*
         # These are HIP kernel files compiled at runtime with -D defines; cppcheck
         # evaluates undefined macros as 0, causing false array-size errors and
         # division/modulo-by-zero in #if preprocessor conditions.

@@ -207,8 +207,16 @@ std::vector<std::string> FillValidKernelsIDs(const ProblemDescriptionType& probl
     {
         if(require_large_tensor && !IsLargeTensorCKInstance(conv_ptrs[idx]))
             continue;
-        if(args.IsSupportedBy(conv_ptrs[idx]))
-            valid_kernels.emplace_back(std::move(conv_ptrs[idx]->GetTypeString()));
+        try
+        {
+            if(args.IsSupportedBy(conv_ptrs[idx]))
+                valid_kernels.emplace_back(std::move(conv_ptrs[idx]->GetTypeString()));
+        }
+        catch(const std::exception& e)
+        {
+            MIOPEN_LOG_I2("CK instance " << conv_ptrs[idx]->GetTypeString()
+                                         << " threw during IsSupportedBy: " << e.what());
+        }
     }
     // When require_large_tensor is true and no large-tensor instances are
     // registered for this DeviceOp, returning an empty list is the intended
@@ -471,16 +479,34 @@ bool IsCKArgsSupported(const ProblemDescriptionType& problem, const std::string&
             }
 
             auto ptr_iter = FindConvPtrByID(conv_ptrs, kernel_id.substr(0, pos));
-            return (ptr_iter != conv_ptrs.end()) &&
-                   (!require_large_tensor || IsLargeTensorCKInstance(*ptr_iter)) &&
-                   CKArgsType{problem}.IsSupportedBySplitK(*ptr_iter, split_k);
+            if(ptr_iter == conv_ptrs.end())
+                return false;
+            if(require_large_tensor && !IsLargeTensorCKInstance(*ptr_iter))
+                return false;
+            try
+            {
+                return CKArgsType{problem}.IsSupportedBySplitK(*ptr_iter, split_k);
+            }
+            catch(const std::exception&)
+            {
+                return false;
+            }
         }
         else
         {
             auto ptr_iter = FindConvPtrByID(conv_ptrs, kernel_id);
-            return (ptr_iter != conv_ptrs.end()) &&
-                   (!require_large_tensor || IsLargeTensorCKInstance(*ptr_iter)) &&
-                   CKArgsType{problem}.IsSupportedBy(*ptr_iter);
+            if(ptr_iter == conv_ptrs.end())
+                return false;
+            if(require_large_tensor && !IsLargeTensorCKInstance(*ptr_iter))
+                return false;
+            try
+            {
+                return CKArgsType{problem}.IsSupportedBy(*ptr_iter);
+            }
+            catch(const std::exception&)
+            {
+                return false;
+            }
         }
     }
 #else
@@ -502,7 +528,16 @@ bool IsCKApplicable(const ProblemDescriptionType& problem)
     return std::any_of(ptrs.begin(), ptrs.end(), [&](auto& ptr) {
         if(require_large_tensor && !IsLargeTensorCKInstance(ptr))
             return false;
-        return args.IsSupportedBy(ptr);
+        try
+        {
+            return args.IsSupportedBy(ptr);
+        }
+        catch(const std::exception& e)
+        {
+            MIOPEN_LOG_I2("CK instance " << ptr->GetTypeString()
+                                         << " threw during IsSupportedBy: " << e.what());
+            return false;
+        }
     });
 }
 
@@ -548,7 +583,14 @@ bool IsCKSplitKSupported(const ProblemDescriptionType& problem,
         return false;
 
     const auto args = CKArgsType{problem};
-    return args.IsSupportedBySplitK(*ptr_iter, split_k);
+    try
+    {
+        return args.IsSupportedBySplitK(*ptr_iter, split_k);
+    }
+    catch(const std::exception&)
+    {
+        return false;
+    }
 #else
     (void)problem;
     (void)kernel_id;
@@ -633,11 +675,18 @@ size_t GetCKSplitkMaxWorkspaceSize(const ProblemDescriptionType& problem)
         auto split_k = 1;
         do
         {
-            if(args.IsSupportedBySplitK(ptr, split_k))
+            try
             {
-                auto workspace_size = args.GetCKSplitkWorkspaceSize(ptr, split_k);
-                if(workspace_size > max_workspace_size)
-                    max_workspace_size = workspace_size;
+                if(args.IsSupportedBySplitK(ptr, split_k))
+                {
+                    auto workspace_size = args.GetCKSplitkWorkspaceSize(ptr, split_k);
+                    if(workspace_size > max_workspace_size)
+                        max_workspace_size = workspace_size;
+                }
+            }
+            catch(const std::exception&)
+            {
+                break;
             }
         } while(!NextCKSplitkValue<1, 128>(split_k));
     }

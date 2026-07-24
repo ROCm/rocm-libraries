@@ -509,10 +509,11 @@ struct DeviceGroupedConvBwdWeight_Xdl_CShuffleV3
             constexpr index_t minimum_occupancy =
                 BlkGemmPipeSched == BlockGemmPipelineScheduler::Intrawave ? 1 : 2;
             int max_occupancy = 0;
+            hipError_t err    = hipSuccess;
 
             if constexpr(BlkGemmPipelineVer == BlockGemmPipelineVersion::v4)
             {
-                hip_check_error(hipOccupancyMaxActiveBlocksPerMultiprocessor(
+                err = hipOccupancyMaxActiveBlocksPerMultiprocessor(
                     &max_occupancy,
                     kernel_grouped_conv_bwd_weight_xdl_cshuffle_v3_2lds<
                         GridwiseGemm,
@@ -524,11 +525,11 @@ struct DeviceGroupedConvBwdWeight_Xdl_CShuffleV3
                         InMemoryDataOperationEnum::AtomicAdd,
                         minimum_occupancy>,
                     BlockSize,
-                    dynamic_smem_size));
+                    dynamic_smem_size);
             }
             else
             {
-                hip_check_error(hipOccupancyMaxActiveBlocksPerMultiprocessor(
+                err = hipOccupancyMaxActiveBlocksPerMultiprocessor(
                     &max_occupancy,
                     kernel_grouped_conv_bwd_weight_xdl_cshuffle_v3<
                         GridwiseGemm,
@@ -540,9 +541,12 @@ struct DeviceGroupedConvBwdWeight_Xdl_CShuffleV3
                         InMemoryDataOperationEnum::AtomicAdd,
                         minimum_occupancy>,
                     BlockSize,
-                    dynamic_smem_size));
+                    dynamic_smem_size);
             }
-            return std::max(1, max_occupancy);
+            if(err == hipErrorInvalidDeviceFunction)
+                return 0; // kernel not available on this device
+            hip_check_error(err);
+            return max_occupancy;
         }
 
         ActiveWorkgroupsPerCU()
@@ -615,9 +619,15 @@ struct DeviceGroupedConvBwdWeight_Xdl_CShuffleV3
               a_g_n_k_wos_lengths_{a_g_n_k_wos_lengths},
               a_g_n_k_wos_strides_{a_g_n_k_wos_strides}
         {
-            stride_overflow = stride_overflow_in;
+            stride_overflow       = stride_overflow_in;
+            kernel_not_available_ = false;
 
             static ActiveWorkgroupsPerCU active_workgroups_per_cu;
+            if(active_workgroups_per_cu.max_occupancy_ == 0)
+            {
+                kernel_not_available_ = true;
+                return;
+            }
 
             c_space_size_bytes =
                 ck::accumulate_n<long_index_t>(
@@ -797,6 +807,7 @@ struct DeviceGroupedConvBwdWeight_Xdl_CShuffleV3
         bool split_k_offset_hack_;
         long_index_t split_k_stride_a_, split_k_stride_b_;
         bool stride_overflow;
+        bool kernel_not_available_;
     };
 
     // Invoker
@@ -1437,6 +1448,9 @@ struct DeviceGroupedConvBwdWeight_Xdl_CShuffleV3
 
     static bool IsSupportedArgument(const Argument& arg)
     {
+        if(arg.kernel_not_available_)
+            return false;
+
         if constexpr(!LargeTensors)
         {
             if(arg.stride_overflow)

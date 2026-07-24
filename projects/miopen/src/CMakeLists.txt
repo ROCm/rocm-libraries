@@ -8,6 +8,8 @@ if(MIOPEN_ENABLE_SQLITE)
     add_subdirectory(sqlite)
 endif()
 
+add_subdirectory(hipconv)
+
 # Truncation rounding or (default) rounding to nearest even (RNE) is enabled.
 # This switch controls two related but different aspects of MIOpen behavior
 # 1.  How host code performs conversions of float to bfloat16, important only
@@ -202,6 +204,7 @@ set( MIOpen_Source
     solver/conv/conv_bin_wino3x3U.cpp
     solver/conv/conv_bin_winoRxS.cpp
     solver/conv/conv_ck_igemm_fwd_v6r1_dlops_nchw.cpp
+    solver/conv/conv_hipconv.cpp
     solver/conv/conv_direct_naive_conv.cpp
     solver/conv/conv_direct_naive_conv_bwd.cpp
     solver/conv/conv_direct_naive_conv_fwd.cpp
@@ -924,6 +927,7 @@ target_include_directories(MIOpen SYSTEM PUBLIC $<BUILD_INTERFACE:${HALF_INCLUDE
 # Workaround : change in rocm-cmake was causing linking error so had to add ${CMAKE_DL_LIBS}
 #               We can remove ${CMAKE_DL_LIBS} once root cause is identified.
 target_link_libraries(MIOpen PRIVATE ${CMAKE_DL_LIBS} Threads::Threads BZip2::BZip2)
+target_link_libraries(MIOpen PRIVATE hipconv)
 miopen_generate_export_header(MIOpen)
 
 if(WIN32)

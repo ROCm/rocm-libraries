@@ -583,7 +583,7 @@ struct DeviceGroupedConvBwdWeightMultipleD_Xdl_CShuffle
         {
             constexpr int dynamic_smem_size = 0;
             int max_occupancy               = 0;
-            hip_check_error(hipOccupancyMaxActiveBlocksPerMultiprocessor(
+            hipError_t err                  = hipOccupancyMaxActiveBlocksPerMultiprocessor(
                 &max_occupancy,
                 kernel_batched_gemm_xdlops_bwd_weight_multiple_d<
                     GridwiseGemm,
@@ -600,8 +600,11 @@ struct DeviceGroupedConvBwdWeightMultipleD_Xdl_CShuffle
                     ComputePtrOffsetOfStridedBatch<I1, I1, NumDTensor>,
                     true>,
                 BlockSize,
-                dynamic_smem_size));
-            return std::max(1, max_occupancy);
+                dynamic_smem_size);
+            if(err == hipErrorInvalidDeviceFunction)
+                return 0; // kernel not available on this device
+            hip_check_error(err);
+            return max_occupancy;
         }
 
         ActiveWorkgroupsPerCU()
@@ -675,7 +678,13 @@ struct DeviceGroupedConvBwdWeightMultipleD_Xdl_CShuffle
               input_left_pads_{input_left_pads},
               input_right_pads_{input_right_pads}
         {
+            kernel_not_available_ = false;
             static ActiveWorkgroupsPerCU active_workgroups_per_cu;
+            if(active_workgroups_per_cu.max_occupancy_ == 0)
+            {
+                kernel_not_available_ = true;
+                return;
+            }
 
             c_space_size_bytes =
                 ck::accumulate_n<long_index_t>(
@@ -805,6 +814,7 @@ struct DeviceGroupedConvBwdWeightMultipleD_Xdl_CShuffle
         const std::array<ck::index_t, NDimSpatial>& input_left_pads_;
         const std::array<ck::index_t, NDimSpatial>& input_right_pads_;
         long_index_t c_space_size_bytes;
+        bool kernel_not_available_;
     };
 
     // Invoker
@@ -965,6 +975,9 @@ struct DeviceGroupedConvBwdWeightMultipleD_Xdl_CShuffle
 
     static bool IsSupportedArgument(const Argument& arg)
     {
+        if(arg.kernel_not_available_)
+            return false;
+
         if(!ck::is_xdl_wmma_supported<ComputeTypeA,
                                       ComputeTypeB,
                                       MPerXDL,

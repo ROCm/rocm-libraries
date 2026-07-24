@@ -5,16 +5,15 @@
 namespace ck {
 
 // buffer resourse flags
-/*#if defined(CK_AMD_GPU_GFX803) || defined(CK_AMD_GPU_GFX900) || defined(CK_AMD_GPU_GFX906) || \
-    defined(CK_AMD_GPU_GFX942) || defined(CK_AMD_GPU_GFX908) || defined(CK_AMD_GPU_GFX90A) || \
-    defined(CK_AMD_GPU_GFX950)*/
-#define CK_BUFFER_RESOURCE_3RD_DWORD 0x00020000
-/*#elif defined(CK_AMD_GPU_GFX1030) || defined(CK_AMD_GPU_GFX1031) || defined(CK_AMD_GPU_GFX1100) ||
-\
-    defined(CK_AMD_GPU_GFX1101) || defined(CK_AMD_GPU_GFX1102) || defined(CK_AMD_GPU_GFX1200) ||   \
-    defined(CK_AMD_GPU_GFX1201)
+#if defined(__gfx1250__)
+#define CK_BUFFER_RESOURCE_3RD_DWORD 0
+#elif defined(__gfx1100__) || defined(__gfx1101__) || defined(__gfx1102__) || \
+    defined(__gfx1103__) || defined(__gfx1150__) || defined(__gfx1151__) ||   \
+    defined(__gfx1200__) || defined(__gfx1201__)
 #define CK_BUFFER_RESOURCE_3RD_DWORD 0x31014000
-#endif*/
+#else
+#define CK_BUFFER_RESOURCE_3RD_DWORD 0x00020000
+#endif
 
 template <typename T>
 __device__ buffer_resourse_t
@@ -27,6 +26,16 @@ make_raw_buffer_resourse(const T* p_src_block, short stride, int num, int flags)
         const_cast<void*>(static_cast<const void*>(p_src_block)), stride, num, flags);
 #else
     RawBufferAddressConfig<T> src_block_config_wrap;
+#if defined(__gfx1250__)
+    // gfx1250: address is 57-bit, num_records is 45-bit split across
+    // dword1[31:25] (low 7 bits) and dword2[31:0] (upper 38 bits)
+    src_block_config_wrap.address[0] = const_cast<T*>(p_src_block);
+    uint64_t num_records = static_cast<uint64_t>(num);
+    src_block_config_wrap.range[1] &= (1 << 25) - 1;
+    src_block_config_wrap.range[1] |= static_cast<int32_t>((num_records & 0x7f) << 25);
+    src_block_config_wrap.range[2] = static_cast<int32_t>(num_records >> 7);
+    src_block_config_wrap.range[3] = flags;
+#else
     // 0-48 address
     // 48-64 stride and swizzle;
     src_block_config_wrap.address[0] = const_cast<T*>(p_src_block);
@@ -35,7 +44,8 @@ make_raw_buffer_resourse(const T* p_src_block, short stride, int num, int flags)
     // 64-96 records num
     src_block_config_wrap.range[2] = num;
     // 96-128
-    src_block_config_wrap.range[3]     = flags;
+    src_block_config_wrap.range[3] = flags;
+#endif
     buffer_resourse_t src_block_config = src_block_config_wrap.data;
 
 #endif

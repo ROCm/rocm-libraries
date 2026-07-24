@@ -27,8 +27,16 @@ __device__ int32x4_t make_wave_buffer_resource(T* p_wave, index_t element_space_
 
     // wavewise base address (64 bit)
     wave_buffer_resource.address(Number<0>{}) = const_cast<remove_cv_t<T>*>(p_wave);
+#if defined(__gfx125__)
+    // gfx1250: num_records is 45-bit, split across dword1[31:25] (low 7 bits)
+    // and dword2[31:0] (upper 38 bits); byte count goes in num_records
+    const uint64_t num_bytes = static_cast<uint64_t>(element_space_size) * sizeof(T);
+    wave_buffer_resource.range(Number<1>{}) |= static_cast<int32_t>((num_bytes & 0x7f) << 25);
+    wave_buffer_resource.range(Number<2>{}) = static_cast<int32_t>(num_bytes >> 7);
+#else
     // wavewise range (32 bit)
     wave_buffer_resource.range(Number<2>{}) = element_space_size * sizeof(T);
+#endif
     // wavewise setting (32 bit)
     wave_buffer_resource.config(Number<3>{}) = CK_BUFFER_RESOURCE_3RD_DWORD;
 
@@ -42,8 +50,14 @@ __device__ int32x4_t make_wave_buffer_resource_with_default_range(T* p_wave)
 
     // wavewise base address (64 bit)
     wave_buffer_resource.address(Number<0>{}) = const_cast<remove_cv_t<T>*>(p_wave);
+#if defined(__gfx125__)
+    // gfx1250: max range — all 45 bits set; low 7 in dword1[31:25], upper 38 in dword2
+    wave_buffer_resource.range(Number<1>{}) |= static_cast<int32_t>(0x7f << 25);
+    wave_buffer_resource.range(Number<2>{})  = static_cast<int32_t>(0xffffffffu); // upper 38 bits all-ones
+#else
     // wavewise range (32 bit)
     wave_buffer_resource.range(Number<2>{}) = 0xffffffff; // max possible range
+#endif
     // wavewise setting (32 bit)
     wave_buffer_resource.config(Number<3>{}) = CK_BUFFER_RESOURCE_3RD_DWORD;
 

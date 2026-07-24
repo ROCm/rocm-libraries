@@ -554,7 +554,7 @@ struct DeviceGroupedConvBwdWeight_Xdl_CShuffle
         {
             constexpr int dynamic_smem_size = 0;
             int max_occupancy               = 0;
-            hip_check_error(hipOccupancyMaxActiveBlocksPerMultiprocessor(
+            hipError_t err                  = hipOccupancyMaxActiveBlocksPerMultiprocessor(
                 &max_occupancy,
                 kernel_batched_gemm_xdlops_bwd_weight<
                     GridwiseGemm,
@@ -571,8 +571,11 @@ struct DeviceGroupedConvBwdWeight_Xdl_CShuffle
                     ComputePtrOffsetOfStridedBatch<>,
                     false>, // HasMainKBlockLoop - both true/false give the same occupancy
                 BlockSize,
-                dynamic_smem_size));
-            return std::max(1, max_occupancy);
+                dynamic_smem_size);
+            if(err == hipErrorInvalidDeviceFunction)
+                return 0; // kernel not available on this device
+            hip_check_error(err);
+            return max_occupancy;
         }
         ActiveWorkgroupsPerCU()
         {
@@ -641,8 +644,14 @@ struct DeviceGroupedConvBwdWeight_Xdl_CShuffle
               input_left_pads_{input_left_pads},
               input_right_pads_{input_right_pads}
         {
-            stride_overflow = stride_overflow_in;
+            stride_overflow        = stride_overflow_in;
+            kernel_not_available_  = false;
             static ActiveWorkgroupsPerCU active_workgroups_per_cu;
+            if(active_workgroups_per_cu.max_occupancy_ == 0)
+            {
+                kernel_not_available_ = true;
+                return;
+            }
 
             c_space_size_bytes =
                 ck::accumulate_n<long_index_t>(
@@ -892,6 +901,7 @@ struct DeviceGroupedConvBwdWeight_Xdl_CShuffle
         bool split_k_offset_hack_;
         long_index_t split_k_stride_a_, split_k_stride_b_;
         bool stride_overflow;
+        bool kernel_not_available_;
     };
 
     // Invoker
@@ -1133,6 +1143,9 @@ struct DeviceGroupedConvBwdWeight_Xdl_CShuffle
 
     static bool IsSupportedArgument(const Argument& arg)
     {
+        if(arg.kernel_not_available_)
+            return false;
+
         if(arg.stride_overflow)
             return false;
 

@@ -269,6 +269,7 @@ struct DeviceOperationInstanceFactory<ck::tensor_operation::device::DeviceGroupe
             if constexpr(is_same_v<InDataType, float> && is_same_v<WeiDataType, float> &&
                          is_same_v<OutDataType, float>)
             {
+#ifdef CK_USE_XDL
 #ifdef CK_ENABLE_TF32
                 if constexpr(is_same_v<ComputeType, TF32>)
                 {
@@ -283,6 +284,7 @@ struct DeviceOperationInstanceFactory<ck::tensor_operation::device::DeviceGroupe
                         op_ptrs);
                 }
 #endif
+#endif // CK_USE_XDL
             }
 #ifdef CK_ENABLE_FP16
             if constexpr(is_same_v<InDataType, half_t> && is_same_v<WeiDataType, half_t> &&
