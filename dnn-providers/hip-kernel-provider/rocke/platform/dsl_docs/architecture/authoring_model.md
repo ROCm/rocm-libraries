@@ -15,29 +15,43 @@ operation contract
   -> manifest / runtime metadata
 ```
 
-Every shipped instance in `instances/` follows this exact shape. The shared scaffolding lives in `helpers/spec.py` (`IOSpecRule`, `validate_io`, `SignatureBuilder`, `kernel_name_join`, `ceil_div_grid`).
+Every shipped kernel instance in `python/rocke/instances/` follows this shape.
+An instance is a complete kernel definition, either shared across targets under
+`instances/common/` or specialized under `instances/<arch>/`. Reusable
+authoring mechanics belong in `python/rocke/helpers/`; foundational IR,
+analysis, and lowering mechanisms belong in `python/rocke/core/`. For example,
+the shared spec scaffolding lives in `python/rocke/helpers/spec.py`
+(`IOSpecRule`, `validate_io`, `SignatureBuilder`, `kernel_name_join`,
+`ceil_div_grid`).
 
 ## Kernel Authoring And Optimization Outputs
 
-New kernel authoring means producing a reusable builder, not just a one-off
-script. The durable output should live under `python/rocke/instances/<arch>/` or
-`python/rocke/instances/common/` as a spec-driven kernel builder, with any
-matching C++ mirror planned if it affects emitted IR.
+New kernel authoring means producing a spec-driven kernel instance, not just a
+one-off script. Put target-neutral instances under
+`python/rocke/instances/common/` and target-specific instances under
+`python/rocke/instances/<arch>/`. When multiple instances need the same
+mechanism, promote that mechanism to `helpers/` or `core/` according to the
+ownership boundary above instead of treating `instances/` as a reusable-code
+layer. Any platform change that affects emitted IR must include its matching
+C++ mirror and byte-identity coverage in the same change.
 
 Kernel optimization means a reproducible recipe plus a chosen implementation. If
 an AI-assisted session finds a better tile, schedule, prefetch, split,
 vectorization, or other lever, capture both the final code path and the evidence
 that justified it.
 
-Put workload-specific experiments in the example folder for that builder. Keep
-benchmark scripts, traces, shape files, summarized logs, and case-study analysis
-close to the workload, for example under
-`python/rocke/examples/<arch>/<kernel_or_workload>/`.
+Put platform experiments in the example folder for the instance being studied.
+Keep benchmark scripts, shape files, qualitative mechanism notes, and
+case-study methods close to the workload, for example under
+`python/rocke/examples/<arch>/<kernel_or_workload>/`. Keep measured values,
+generated traces, and large logs outside the source tree in an AMD-approved,
+access-controlled record with the revision, toolchain, gfx target, shape set,
+and replay command.
 
-Document every accepted optimization as a case study. Add a markdown file in
-that example folder describing the workload shapes, baseline, candidate levers,
-commands used, measured results, winning choice, rejected alternatives, and any
-architecture constraints.
+Document every accepted optimization as a public qualitative case study. Describe
+the workload shape class, candidate levers, commands, selected mechanism, rejected
+mechanisms, and target constraints without publishing measured values or comparative
+performance claims.
 
 Promote reusable optimization knowledge into `dsl_docs/optimization/`. If the
 work discovers a general tactic, decision rule, debugging skill, or reusable
@@ -105,7 +119,8 @@ allowed_vecs        = (2, 4, 8)
 
 For GEMM / conv, validation also covers:
 
-- supported architecture (gfx950 is the default target; gfx942 and the RDNA WMMA targets gfx1151 / gfx1201 are also supported);
+- architecture accepted by the owning validator (gfx950 is the default;
+  `known_arches()` is the platform catalog, not universal family support);
 - supported MFMA atom shape for the dtype;
 - `tile_m, tile_n` divisible by `warp_* * warp_tile_*`;
 - `tile_k` divisible by `warp_tile_k`;
@@ -327,4 +342,5 @@ Before considering a new builder done:
 - correctness is checked against a reference (`run_manifest --verify`, or a torch / numpy oracle in a parity harness);
 - benchmark reports median + spread, not a single lucky run (`benchmark_manifest(..., attempts=5, discard_first=True)`);
 - generated LLVM / ISA / resource summaries are inspected for the intended primitive (`analyze_llvm_ir`, `analyze_hsaco`);
-- the new path is added to one of the test suites (`tests/test_rocke.py` or `test_rocke_examples.py`).
+- the new path is added to an owning focused test and, when appropriate, the
+  curated `python/rocke/examples/run_all.py` registry.

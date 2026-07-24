@@ -1,21 +1,20 @@
 # Kernel taxonomy: which primitive does each kernel use, and why
 
-> Every matmul-shaped op uses MFMA. Non-matmul ops use the right
-> hardware primitive for their shape -- VALU for elementwise,
-> `ds_bpermute` for cross-lane reductions, async DMA for pure
-> scatter / gather. The whole point of GPUs is using the right
-> SIMD primitive for the work.
+> Matmul-shaped kernels use MFMA or WMMA where their current builder supports
+> it. Some attention variants still use a warp-distributed scalar body.
+> Non-matmul ops use VALU, cross-lane reductions, atomics, or data movement
+> according to their actual computation.
 
-This file is the **source of truth** for which kernel uses which
-primitive, and why. The gremlin auditor walks this list whenever
-the question "shouldn't this be MFMA?" comes up.
+This page is an index grounded in the current builders. The owning validator
+and builder remain the source of truth when a spec can select more than one
+body.
 
 ## What MFMA is for
 
-CDNA3's `mfma_f32_16x16x16_f16` (and siblings) computes a 16×16×16
-matrix multiply-accumulate **in one instruction**: 4 cycles, 256
-MAC operations, 64 FLOPs/cycle/lane. The intrinsic family covers
-f16 / bf16 / fp8e4m3 / bf8e5m2 inputs and f32 accumulator output.
+The wave64 `mfma_f32_16x16x16_f16` instruction and related atoms compute a tiled matrix
+multiply-accumulate in one instruction. The checked-in catalogs cover the
+supported f16, bf16, fp8e4m3, and bf8e5m2 input families with f32
+accumulation; exact availability is target-specific.
 
 MFMA is a **matmul primitive**. It accelerates:
 * GEMM (`C += A @ B`)
@@ -45,9 +44,13 @@ The columns are:
 * **Shape** -- matmul / reduce / elementwise / DMA / mixed.
 * **Primitive** -- MFMA / VALU / `ds_bpermute` (warp reduce) /
   async DMA / atomic / hybrid.
-* **Status** -- on the right primitive (`✓`) or follow-on (`→`).
+* **Status** -- whether the row describes the current checked-in body.
 
-### Matmul-shaped kernels (must use MFMA)
+### Matmul-shaped kernels (use a supported matrix path)
+
+The exact primitive is target- and builder-specific: supported common builders
+select MFMA or WMMA through the target catalog, while MFMA-only families reject
+WMMA targets. Wave width is not a user-selectable matrix-family control.
 
 | Kernel | Shape | Primitive | Status |
 |---|---|---|---|
@@ -59,8 +62,8 @@ The columns are:
 | `gemm_multi_abd` | matmul (multi-A/B) | MFMA (via universal) | ✓ |
 | `mfma_gemm` | matmul (16x16 atom) | MFMA direct | ✓ |
 | `streamk_gemm` | matmul (atomic split-K) | MFMA + atomic f32 | ✓ |
-| `block_scale_gemm` | matmul (fp8 + scale) | MFMA fp8 + per-group scale | ✓ |
-| `mx_gemm` | matmul (MX shared exp) | MFMA fp8 + E8M0 decode | ✓ |
+| `block_scale_gemm` | matmul (FP8/BF8 + scale) | MFMA + explicit per-group scale | ✓ (`abquant` subset) |
+| `mx_gemm` | matmul (MX shared exponent) | MFMA + E8M0 decode/scale | ✓ (FP8/BF8 subset) |
 | `batched_contraction` | matmul (N-D) | MFMA (via universal) | ✓ |
 | `conv_implicit_gemm` | conv = matmul | MFMA (via universal) | ✓ |
 | `conv_direct_grouped` | conv (small-channel) | MFMA 4x4x4 atom | ✓ |
@@ -68,23 +71,20 @@ The columns are:
 | `attention_tiled_2d` | attention (paged) | MFMA QK + PV | ✓ |
 | `attention_tiled_3d` | attention (split-KV) | MFMA QK + PV | ✓ |
 | `fmha_mfma` | attention | MFMA QK + PV | ✓ |
-| `fmha_varlen` | attention (varlen) | warp-scalar (MFMA pending) | → |
-| `fmha_head_grouping` | attention (GQA / MQA) | warp-scalar (MFMA pending) | → |
-| `fmha_paged_prefill` | attention (paged) | warp-scalar (MFMA pending) | → |
-| `fmha_splitkv_decode` | attention (split-KV) | warp-scalar (MFMA pending) | → |
-| `fmha_fwd_fp8` | attention (fp8 K/V) | warp-scalar (MFMA pending) | → |
-| `fmha_bwd` | 3 matmuls (dQ/dK/dV) | warp-scalar (MFMA pending) | → |
-| `sage_attention` | attention + per-block scale | warp-scalar (MFMA pending) | → |
-| `jenga_sparse_attention` | attention (block-sparse) | warp-scalar (MFMA pending) | → |
-| `vsa_sparse_attention` | attention (LUT-sparse) | warp-scalar (MFMA pending) | → |
+| `fmha_varlen` | attention (varlen) | MFMA QK + PV | ✓ |
+| `fmha_head_grouping` | attention (GQA / MQA) | MFMA QK + PV | ✓ |
+| `fmha_paged_prefill` | attention (paged) | spec-selectable MFMA or warp-distributed body | ✓ |
+| `fmha_splitkv_decode` | attention (split-KV) | warp-distributed scalar segment + reduction | ✓ |
+| `fmha_fwd_fp8` | attention (fp8 K/V) | dequant + f16 MFMA QK/PV | ✓ (f16 activation/output contract) |
+| `fmha_bwd` | dQ/dK/dV attention backward | warp-distributed scalar + global atomics | ✓ |
+| `sage_attention` | attention + per-block scale | MFMA for aligned fp16/fp8 modes; warp fallback otherwise | ✓ |
+| `jenga_sparse_attention` | attention (block-sparse) | MFMA + LDS-staged mask predicate | ✓ |
+| `vsa_sparse_attention` | attention (LUT-sparse) | MFMA + LDS-staged LUT bitmap | ✓ |
 
-The `→` entries are matmul-shaped but currently use the warp-
-distributed scalar inner body. The MFMA hoist drops in via the
-shared `helpers/mfma_attention.py::mfma_attention_fwd_inner_body`
-helper -- the variant kernels keep their I/O layer (cu_seqlens,
-block_table, segment range, fp8 dequant, codebook lookup, mask
-predicate) and swap the inner body. This work is staged after the
-`fmha_mfma` reference path proved out the helper.
+The shared MFMA forward body is
+`python/rocke/helpers/mfma_attention.py::mfma_attention_fwd_inner_body`; the
+warp fallback is `rocke/library/kernels/common/_fmha_warp_body.py`. Each family
+validator decides which body its current spec can select.
 
 ### Non-matmul kernels (correctly NOT MFMA)
 
@@ -102,9 +102,9 @@ intrinsic's FLOPs.
 | `reduce` | reduce (axis sum/max/min/mean) | `ds_bpermute` butterfly | pure reduce |
 | `pooling` | windowed reduce | VALU + tile-window | small-window reduce |
 | `elementwise` | unary / binary / swiglu | VALU SIMD | pure pointwise |
-| `permute_nd` | rank-N transpose | LDS-coalesced DMA | pure data motion |
-| `transpose` | 2D transpose | LDS-coalesced DMA | pure data motion |
-| `batched_transpose` | batched 2D transpose | LDS-coalesced DMA | pure data motion |
+| `permute_nd` | rank-N transpose | LDS-staged/coalesced data movement | pure data motion |
+| `transpose` | 2D transpose | LDS-staged/coalesced data movement | pure data motion |
+| `batched_transpose` | batched 2D transpose | LDS-staged/coalesced data movement | pure data motion |
 | `img2col` | NHWC → unfold matrix | gather + scatter | data prep (matmul follows in `conv_implicit_gemm`) |
 | `topk_softmax` | tournament reduce over K | VALU + cross-lane shuffle | tournament reduce |
 | `moe_sorting` | histogram + scan + scatter | atomic + scan + scatter | mixed reduce / DMA |
@@ -121,27 +121,27 @@ on the 16×16×16 atom would execute 256 MFMA atoms (each doing
 reduce across the atom output -- which itself isn't a matmul).
 Net throughput would be **lower** than the warp-shuffle reduce.
 
-## Where MFMA improvements still apply (and where they don't)
+## Choosing a primitive
 
-The remaining MFMA work in the codebase is the FMHA variant
-migration listed above. Every other kernel either:
+Do not infer the active primitive from the family name alone. Paged prefill and
+Sage attention select between matrix and warp-distributed bodies, while
+split-KV decode and backward currently use warp-distributed scalar bodies.
+Read the owning validator and build function, then confirm the emitted IR/ISA.
 
-* Already uses MFMA via the shared helpers, or
-* Uses the primitive matched to its shape (reduce / DMA / VALU).
-
-If a new kernel lands and someone wants to know "should this be
-MFMA?", the rule is:
+If a new kernel lands and someone wants to know "should this use a matrix
+instruction?", the rule is:
 
 1. Does the inner loop compute `C[i, j] += sum_k A[i, k] * B[k, j]`?
-   * If yes → MFMA via `mfma_gemm_inner.mfma_k_loop` (or
-     `mfma_attention_fwd_inner_body` for the attention case).
+   * If yes → the target-supported MFMA/WMMA path via the relevant catalog and
+     builder (`mfma_gemm_inner.mfma_k_loop` or
+     `mfma_attention_fwd_inner_body` for current MFMA-oriented families).
 2. Is the inner loop a reduction `acc = op(acc, x[i])`?
    * If yes → `helpers/attention.warp_xor_reduce_*` family.
 3. Is the inner loop a pure pointwise transform?
    * If yes → straight VALU; no extra helper needed.
 4. Is the inner loop a scatter / gather with no compute?
-   * If yes → `buffer_load` / `buffer_store` async DMA;
+   * If yes → the appropriate global/buffer load and store operations;
      `helpers/persistent.py` if the work is irregular.
 
-Anything else is a custom kernel; consult `dsl_docs/optimization/
-optimization_runbook.md` (the lever catalog is §12.1).
+Anything else is a custom kernel; consult
+[`../optimization/optimization_runbook.md`](../optimization/optimization_runbook.md).

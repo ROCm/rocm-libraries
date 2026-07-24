@@ -1,6 +1,12 @@
-# CK DSL Documentation
+# rocKE Platform Documentation
 
-This folder is a deep, code-adjacent guide to `rocke`, the Python authoring layer for CK Tile-style GPU kernels on AMDGPU. The package README is the quick tour. These notes are the field manual: how kernels are described, how the Python SSA IR works, how the lowering stack maps DSL operations to AMDGPU LLVM IR and HSACO, what each primitive means, how the shipped instances execute step by step, what limits matter, and how to validate changes.
+This folder is a deep, code-adjacent guide to the rocKE platform: the Python
+authoring engine and its peer C++ lowering engine for CK Tile-style GPU kernels
+on AMDGPU. The package README is the quick tour. These notes are the field
+manual: how kernels are described, how the SSA IR works, how the lowering stack
+maps operations to AMDGPU LLVM IR and HSACO, what each primitive means, how the
+shipped instances execute step by step, what limits matter, and how to validate
+changes.
 
 > **Getting started / prerequisites.** New to the DSL? Start with
 > [`development/setup_guide.md`](./development/setup_guide.md) — recommended stack
@@ -42,7 +48,7 @@ python/rocke/
 ├── helpers/ # CK Tile-like authoring helpers and the high-level compile entrypoint
 ├── analysis/ # LLVM IR + HSACO/ISA + resource inspection
 ├── benchmark/ # repeated-run benchmark summaries (median, spread)
-├── instances/ # spec-driven kernel builders (gemm, conv, attention, small ops)
+├── instances/ # kernel instances (GEMM, conv, small ops, MoE)
 ├── examples/ # Python-owned example generators and parity harnesses
 ├── transforms.py # coordinate-transform DAG (pad/embed/unmerge/merge/indirect)
 ├── run_manifest.py # python -m rocke.run_manifest (HSACO + manifest runner)
@@ -73,25 +79,26 @@ New to the DSL? Read in this order:
 16. `runtime/manifest_schema.md`
 17. `runtime/comgr_and_hipmodule.md`
 18. `runtime/limitations.md`
-19. `optimization/optimization_runbook.md` — long-form, section-by-section (includes the iteration loop, knob catalog, case studies, probe workflow, arch reference)
-20. `optimization/runbook_mapping.md`
-21. `optimization/measured_results.md`
-22. `fusion/overview.md`
-23. `autotune/overview.md`
-24. `development/testing.md`
-25. `development/extending.md`
-26. `development/setup_guide.md` — prerequisites (ROCm 7.2 / PyTorch 2.12), venv setup, building the C++ engine, env-variable reference; Linux & Windows
-27. `development/onboarding.md` — guided learning path for kernel authors
-28. `development/engine_contributing.md` — the dual-backend contract; required reading before editing engine internals
-29. `development/engine_parity.md` — the Python⇄C++ parity rule: every optimization needs both engines (for humans and AI agents)
-30. `development/invariants.md` — non-obvious rules (the landmines) for engine contributors
-31. `development/troubleshooting.md` — engine/build failure catalog (stale-artifact class, gate failures)
-32. `reference/file_index.md`
-33. `reference/api_index.md`
-34. `reference/env_flags.md` — every environment variable (core, provider, tooling, diagnostic)
-35. `reference/op_vocabulary.md`
-36. `reference/mfma_atom_catalog.md`
-37. `reference/glossary.md`
+19. `optimization/optimization_runbook.md` — current evidence-first optimization workflow
+20. `optimization/runbook_compliance.md` — code and test anchors for each workflow stage
+21. `optimization/runbook_mapping.md` — compatibility pointer to the compliance map
+22. `optimization/measured_results.md` — measurement retention policy and scoped evidence index
+23. `fusion/overview.md`
+24. `autotune/overview.md`
+25. `development/testing.md`
+26. `development/extending.md`
+27. `development/setup_guide.md` — prerequisites (ROCm 7.2 / PyTorch 2.12), venv setup, building the C++ engine, env-variable reference; Linux & Windows
+28. `development/onboarding.md` — guided learning path for kernel authors
+29. `development/engine_contributing.md` — the dual-backend contract; required reading before editing engine internals
+30. `development/engine_parity.md` — the Python⇄C++ parity rule: every optimization needs both engines (for humans and AI agents)
+31. `development/invariants.md` — non-obvious rules (the landmines) for engine contributors
+32. `development/troubleshooting.md` — engine/build failure catalog (stale-artifact class, gate failures)
+33. `reference/file_index.md`
+34. `reference/api_index.md`
+35. `reference/env_flags.md` — every environment variable (core, provider, tooling, diagnostic)
+36. `reference/op_vocabulary.md`
+37. `reference/mfma_atom_catalog.md`
+38. `reference/glossary.md`
 
 ## One-Screen Summary
 
@@ -115,8 +122,14 @@ Hard facts:
 - The production compile path is **LLVM IR text -> libamd_comgr -> HSACO -> hipModule**. There is no MLIR pipeline at runtime. `print_ir()` emits MLIR-style text for humans only.
 - `core/lower_hip.py` (`lower_kernel_to_hip`) is a debugging/inspection backend that emits readable HIP C++. It is not the production runtime path. Op coverage is narrower than LLVM lowering.
 - `core/lower_cktile.py` emits CK Tile C++ from selected high-level specs (`UniversalGemmSpec`, `ImplicitGemmConvSpec`). It does not consume `KernelDef`. It exists for parity/reference.
-- Default target ISA is `amdgcn-amd-amdhsa--gfx950` (CDNA3+). The DSL also runs on `gfx940/gfx942` where the chosen MFMA atoms and waitcnt encoding are valid. The datalayout in `core/lower_llvm.py::_DATALAYOUT` is the clang-emitted gfx950 string.
-- Wave size is fixed at 64 in current MFMA lane mappings and helpers.
+- Default target ISA is `amdgcn-amd-amdhsa--gfx950`. Supported target facts
+  come from `core/arch/target.py::ArchTarget`; instruction selection comes from
+  `core/isa/backend.py`. `core/lower_llvm.py` selects a clang-derived data
+  layout by LLVM flavor (`_DATALAYOUT_LLVM20` or `_DATALAYOUT_LLVM22`) rather
+  than by architecture.
+- Wave size is fixed by `ArchTarget` and is not a per-kernel runtime switch.
+  Matrix-atom availability is a separate target fact from the selected
+  `MmaCatalog`; do not infer legal atoms from wave width alone.
 - Kernel authors usually compose helpers (`TensorDescriptor`, `TensorView`, `TileWindow`, `MfmaAtom`, `WarpGrid`, `CoalescedTileLoader`, `AsyncTileLoader`, `SchedulePolicy`, `SoftwarePipeline`, `DirectEpilogue`, `CShuffleEpilogue`, `block_lds_reduce`, `sweep_row_chunks`).
 - Non-bijective addressing (convolution, paged attention, indirection) is expressed with the transform DAG in `transforms.py`.
 - Runtime is persistent: `KernelLauncher` loads HSACO once and is called repeatedly. `PipelineLauncher` chains stages on one stream. `WorkspacePool` keeps long-lived torch workspaces alive across launches. `time_launches` is the canonical HIP-event timer.
@@ -140,7 +153,8 @@ python -m rocke.run_manifest "$OUT_DIR"/*.hsaco "$OUT_DIR"/manifest.json --verif
 ```
 
 See `development/testing.md` for the full procedure and
-`optimization/measured_results.md` for one recorded validation pass.
+`optimization/measured_results.md` for the evidence-retention policy and index
+of properly scoped experiment records.
 
 ## Source Material
 
@@ -160,7 +174,7 @@ Conventional anchors:
 - Kernel arg packing: `python/rocke/runtime/packing.py`.
 - High-level compile: `python/rocke/helpers/compile.py`.
 - Manifest schema: `python/rocke/helpers/manifest.py`.
-- Optimization runbook: `gpu-op-optimization-runbook` Cursor skill.
+- Optimization runbook: `dsl_docs/optimization/optimization_runbook.md`.
 - DSL runbook compliance table: `dsl_docs/optimization/runbook_compliance.md`.
-- Coordinate-transform DAG walkthrough: `python/rocke/TRANSFORM_DAG.md`.
+- Coordinate-transform DAG walkthrough: `dsl_docs/architecture/transform_dag.md`.
 - Helpers reference: `python/rocke/helpers/README.md`.
