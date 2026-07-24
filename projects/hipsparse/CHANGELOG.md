@@ -9,6 +9,8 @@ Documentation for hipSPARSE is available at
 ### Added
 * Added Blocked ELL format support to the `hipsparseDenseToSparse` routine, along with the new `hipsparseBlockedEllSetPointers` function.
 * Added the `HIPSPARSE_SPMV_CSR_ALG3` algorithm to `hipsparseSpMV`, which exposes the rocSPARSE CSR nnz split algorithm (`rocsparse_spmv_alg_csr_nnzsplit`).
+* Added CSC format support to `hipsparseSpSV`.
+* Added CSC format support to `hipsparseSpSM`.
 
 ## hipSPARSE 4.6.0 for ROCm 7.14
 

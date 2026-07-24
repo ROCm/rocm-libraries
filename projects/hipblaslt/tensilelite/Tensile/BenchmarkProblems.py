@@ -460,6 +460,7 @@ def writeBenchmarkFiles(
         srcToolchain: SourceToolchain,
         sourcePath: Path,
         debugConfig: DebugConfig,
+        gateTypeArgs,
         deviceId: int,
         gfxName: str,
         isaInfoMap: Dict[IsaVersion, IsaInfo],
@@ -574,13 +575,13 @@ def writeBenchmarkFiles(
                 writeClientConfig(True, solutions, idealProblemSizes, biasTypeArgs, \
                                   factorDimArgs, activationArgs, icacheFlushArgs, stepName, stepBaseDir, \
                                   newLibrary, codeObjectFiles, True, deviceId, gfxName, \
-                                  libraryFile=newLibraryFileFull, probSolMap=probSolMap,
+                                  libraryFile=newLibraryFileFull, gateTypeArgs=gateTypeArgs, probSolMap=probSolMap,
                                   sourceDir=str(sourcePath))
             else:
                 writeClientConfig(True, solutions, problemSizes, biasTypeArgs, \
                                   factorDimArgs, activationArgs, icacheFlushArgs, stepName, stepBaseDir, \
                                   newLibrary, codeObjectFiles, False, deviceId, gfxName, \
-                                  libraryFile=newLibraryFileFull, probSolMap=probSolMap,
+                                  libraryFile=newLibraryFileFull, gateTypeArgs=gateTypeArgs, probSolMap=probSolMap,
                                   sourceDir=str(sourcePath))
 
     if len(solutions) == 0:
@@ -739,7 +740,7 @@ def _benchmarkProblemType(backendConfig, problemTypeConfig, problemSizeGroupConf
                             benchmarkStep.problemSizes, benchmarkStep.biasTypeArgs, \
                             benchmarkStep.factorDimArgs, benchmarkStep.activationArgs, \
                             benchmarkStep.icacheFlushArgs, shortName, [], asmToolchain, srcToolchain, \
-                            sourcePath, debugConfig, deviceId, gfxName, isaInfoMap, probSolMap)
+                            sourcePath, debugConfig, getattr(benchmarkStep, "gateTypeArgs", None), deviceId, gfxName, isaInfoMap, probSolMap)
                 # ^ this mutates solutions
 
                 # write cache data
@@ -789,14 +790,14 @@ def _benchmarkProblemType(backendConfig, problemTypeConfig, problemSizeGroupConf
                                     benchmarkStep.factorDimArgs, benchmarkStep.activationArgs,
                                     benchmarkStep.icacheFlushArgs, conProblemType,
                                     sourcePath, codeObjectFiles, resultsFileName,
-                                    outFile, deviceId, gfxName, libraryFile=cachedLibraryFile, 
-                                    probSolMap=probSolMap)
+                                    outFile, deviceId, gfxName, libraryFile=cachedLibraryFile,
+                                    gateTypeArgs=getattr(benchmarkStep, "gateTypeArgs", None), probSolMap=probSolMap)
 
             # I think the size portion of this yaml could be removed,
             # but for now it's needed, so we update it even in the cache case
             with timing_context("python_write_solutions"):
                 LibraryIO.writeSolutions(solutionsFileName, benchmarkStep.problemSizes, benchmarkStep.biasTypeArgs,
-                    benchmarkStep.activationArgs, solutions, isCached)
+                    benchmarkStep.activationArgs, solutions, gateTypeArgs=getattr(benchmarkStep, "gateTypeArgs", None), cache=isCached)
 
             returncode = 0
             # run benchmarking client

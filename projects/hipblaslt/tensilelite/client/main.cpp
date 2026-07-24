@@ -243,6 +243,7 @@ namespace TensileLite
                 ("init-c",                   po::value<InitMode>()->default_value(InitMode::Random), "Initialization for C")
                 ("init-d",                   po::value<InitMode>()->default_value(InitMode::Zero), "Initialization for D")
                 ("init-e",                   po::value<InitMode>()->default_value(InitMode::Zero), "Initialization for E")
+                ("init-gate",                po::value<InitMode>()->default_value(InitMode::Random),  "Initialization for gate residual")
                 ("init-alpha",               po::value<InitMode>()->default_value(InitMode::Two), "Initialization for alpha")
                 ("init-beta",                po::value<InitMode>()->default_value(InitMode::Two), "Initialization for beta")
                 ("init-bias",                po::value<InitMode>()->default_value(InitMode::One), "Initialization for bias")
@@ -276,6 +277,7 @@ namespace TensileLite
                 ("print-tensor-d",                  po::value<bool>()->default_value(false), "Print tensor D.")
                 ("print-tensor-ref",                po::value<bool>()->default_value(false), "Print reference tensor D.")
                 ("print-tensor-bias",               po::value<bool>()->default_value(false), "Print tensor Bias.")
+                ("print-tensor-gate",               po::value<bool>()->default_value(false), "Print tensor GateResidual.")
                 ("print-tensor-scale-alpha-vec",    po::value<bool>()->default_value(false), "Print tensor ScaleAlphaVec.")
                 ("print-tensor-amaxd",              po::value<bool>()->default_value(false), "Print tensor AmaxD value from both CPU and GPU.")
 
@@ -339,6 +341,10 @@ namespace TensileLite
                                                                                   "(prev_dim_stride*prev_dim_size)"
                                                                                   "specifying once applies to all problem sizes, "
                                                                                   "otherwise specify once per problem size.")
+                ("gate-strides",             vector_default_empty<std::string>(), "Unspecified means default stride "
+                                                                                  "(prev_dim_stride*prev_dim_size)"
+                                                                                  "specifying once applies to all problem sizes, "
+                                                                                  "otherwise specify once per problem size.")
                 ("problem-start-idx",        po::value<int>()->default_value(0),  "First problem to run")
                 ("num-problems",             po::value<int>()->default_value(-1), "Number of problems to run")
 
@@ -381,6 +387,8 @@ namespace TensileLite
                 ("use-scaleCD",               po::value<bool>()->default_value(false), "Use scaleCD.")
                 ("use-scaleAlphaVec",         po::value<int>()->default_value(0), "Use scaleAlphaVec.")
                 ("bias-type-args",            po::value<std::vector<rocisa::DataType>>()->default_value(std::vector<rocisa::DataType>(1, rocisa::DataType::None), "[]"), "Bias data type args.")
+                ("use-gate-residual",         po::value<bool>()->default_value(false), "Use gate residual.")
+                ("gate-type-args",            po::value<std::vector<rocisa::DataType>>()->default_value(std::vector<rocisa::DataType>(1, rocisa::DataType::None), "[]"), "Gate residual data type args.")
                 ("factor-dim-args",           po::value<std::vector<int>>()->default_value(std::vector<int>(1, 0), "[]"), "factor dimensions args.")
                 ("icache-flush-args",         po::value<std::vector<bool>>()->default_value(std::vector<bool>(1, false), "[]"), "ICache flush args.")
                 ("icache-rotate-copies",      po::value<int>()->default_value(0),
@@ -539,6 +547,7 @@ namespace TensileLite
             DUMP_OPT("init-c", InitMode);
             DUMP_OPT("init-d", InitMode);
             DUMP_OPT("init-e", InitMode);
+            DUMP_OPT("init-gate", InitMode);
             DUMP_OPT("init-alpha", InitMode);
             DUMP_OPT("init-beta", InitMode);
             DUMP_OPT("init-bias", InitMode);
@@ -593,6 +602,7 @@ namespace TensileLite
             DUMP_VECVEC("d-strides");
             DUMP_VECVEC("e-strides");
             DUMP_VECVEC("bias-strides");
+            DUMP_VECVEC("gate-strides");
             DUMP_OPT("problem-start-idx", int);
             DUMP_OPT("num-problems", int);
             DUMP_OPT("solution-start-idx", int);
@@ -638,6 +648,8 @@ namespace TensileLite
             DUMP_OPT("use-scaleCD", bool);
             DUMP_OPT("use-scaleAlphaVec", int);
             DUMP_VEC("bias-type-args", rocisa::DataType);
+            DUMP_OPT("use-gate-residual", bool);
+            DUMP_VEC("gate-type-args", rocisa::DataType);
             DUMP_VEC("factor-dim-args", int);
             DUMP_VEC("icache-flush-args", bool);
             DUMP_OPT("use-e", bool);
@@ -888,6 +900,8 @@ namespace TensileLite
             parse_arg_ints(args, "e-strides");
             parse_arg_ints(args, "bias-strides");
             parse_bias_type_args(args, "bias-type-args");
+            parse_arg_ints(args, "gate-strides");
+            parse_bias_type_args(args, "gate-type-args");
             parse_activation_int(args, "activation-type");
             parse_activation_enum_args(args, "activation-enum-args");
             parse_arg_double(args, "activation-additional-args");
