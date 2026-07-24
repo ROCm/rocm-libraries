@@ -18,8 +18,8 @@ the VGPR accumulator form of MFMA instructions.
   kernel attribute.
 - `python/rocke/helpers/compile.py::_is_zero_agpr_alloc` adds the matching LLVM
   option for `(0, 0)`.
-- `cpp/core/lower_llvm/core.cpp::rocke_ll_format_agpr_alloc` implements the same
-  validation and emission in the C++ engine.
+- `cpp/core/lower_llvm/core.cpp::rocke_ll_format_agpr_alloc` formats and emits
+  the corresponding attribute in the C++ engine.
 - `tests/test_rocke.py` covers attribute emission and the zero-AGPR compile
   option.
 
@@ -27,6 +27,10 @@ The Python authoring surface currently sets this through
 `kernel.attrs["agpr_alloc"]`; there is not yet a general high-level spec policy
 that enables it across attention, GEMM, and MoE families. Individual C++
 attention specs expose narrower `use_agpr_alloc_zero` controls.
+
+The C++ formatter also accepts a scalar integer and uses a looser string parser
+than the Python formatter. Input-validation parity is therefore not currently
+guaranteed even though both engines emit the same LLVM attribute spelling.
 
 ## Tradeoff
 

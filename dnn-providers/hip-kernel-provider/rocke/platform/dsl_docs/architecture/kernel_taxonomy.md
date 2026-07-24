@@ -59,15 +59,15 @@ WMMA targets. Wave width is not a user-selectable matrix-family control.
 | `grouped_gemm` | matmul (per-group) | MFMA or WMMA (via universal) | ✓ |
 | `flatmm` | matmul (small-decode) | MFMA or WMMA (via universal) | ✓ |
 | `gemm_multi_d` | matmul + variadic D | MFMA or WMMA (via universal) | ✓ |
-| `gemm_multi_abd` | matmul (multi-A/B) | MFMA or WMMA (via universal) | ✓ |
+| `gemm_multi_abd` | matmul (one A and one B + optional D; multi-A/B planned) | MFMA or WMMA (via universal) | ✓ (v1 subset) |
 | `mfma_gemm` | matmul (16x16 atom) | MFMA direct | ✓ |
 | `streamk_gemm` | matmul (atomic split-K) | MFMA + atomic f32 | ✓ |
 | `block_scale_gemm` | matmul (FP8/BF8 + scale) | MFMA + explicit per-group scale | ✓ (`abquant` subset) |
 | `mx_gemm` | matmul (MX shared exponent) | MFMA + E8M0 decode/scale | ✓ (FP8/BF8 subset) |
-| `batched_contraction` | matmul (N-D) | MFMA (via universal) | ✓ |
-| `conv_implicit_gemm` | conv = matmul | MFMA (via universal) | ✓ |
+| `batched_contraction` | matmul (N-D) | MFMA or WMMA (via universal) | ✓ |
+| `conv_implicit_gemm` | conv = matmul | target-selected MFMA or restricted WMMA | ✓ |
 | `conv_direct_grouped` | conv (small-channel) | MFMA 4x4x4 atom | ✓ |
-| `fused_moe` per-expert | matmul (per-expert) | MFMA (via universal) | ✓ |
+| `fused_moe` per-expert | matmul (per-expert) | MFMA or WMMA (via universal) | ✓ |
 | `attention_tiled_2d` | attention (paged) | MFMA QK + PV | ✓ |
 | `attention_tiled_3d` | attention (split-KV) | MFMA QK + PV | ✓ |
 | `fmha_mfma` | attention | MFMA QK + PV | ✓ |

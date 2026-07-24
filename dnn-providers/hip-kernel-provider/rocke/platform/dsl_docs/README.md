@@ -134,12 +134,13 @@ Hard facts:
 - Non-bijective addressing (convolution, paged attention, indirection) is expressed with the transform DAG in `transforms.py`.
 - Runtime is persistent: `KernelLauncher` loads HSACO once and is called repeatedly. `PipelineLauncher` chains stages on one stream. `WorkspacePool` keeps long-lived torch workspaces alive across launches. `time_launches` is the canonical HIP-event timer.
 - Buffer-resource descriptor DW3 is selected by the exact gfx ISA backend, not
-  by a broad accelerator-family label. gfx9/gfx950 use `0x00027000`, while
-  gfx1151/gfx1201 use `0x31014000`. The CDNA5 gfx1250 backend currently inherits
-  `0x31014000` as a bring-up placeholder; its 57-bit SRD model still requires
-  target validation. These bounds-checked descriptors make OOB lanes return
-  zero on load and drop stores, which is the tail-safe primitive used by conv
-  and attention.
+  by a broad accelerator-family label. gfx90a/gfx942/gfx950 use `0x00027000`,
+  while gfx11-generic/gfx1151/gfx1201 use `0x31014000`. The CDNA5 gfx1250
+  backend currently inherits `0x31014000` as a bring-up placeholder; its 57-bit
+  SRD model still requires target validation. On the established gfx9 and RDNA
+  mappings, bounds-checked descriptors make OOB lanes return zero on load and
+  drop stores, which is the tail-safe primitive used by conv and attention.
+  The same tail-safety behavior is not yet claimed for gfx1250.
 - `AsyncTileLoader.choose_dwords` selects `{4, 3, 1}` only (the AMDGPU `raw_ptr_buffer_load_lds` intrinsic on this target does not accept 2 dwords).
 - `Value.__bool__` raises by design. SSA values cannot drive Python branches; use `IRBuilder.static_if(...)` for Python booleans and `IRBuilder.scf_if(...)` for runtime predicates.
 
