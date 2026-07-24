@@ -33,6 +33,7 @@
 #include <limits>
 #include <optional>
 #include <stdexcept>
+#include <string>
 #include <type_traits>
 #include <vector>
 
@@ -400,22 +401,43 @@ TYPED_TEST(TestGpuSdpaFwdPlain, CausalTopLeft)
 }
 
 // ============================================================================
-// Causal bottom-right with seqKv < seqQ.
-// diagonal offset = seqKv - seqQ < 0, exercising the max(..., 0) clamp on the
-// start of the masked region for early query rows.
+// Skv != Sq mask coverage — the cartesian product requested in review:
+//   topLeftAlignment  x  (Skv smaller / larger than Sq)  x  (causal / sliding).
+// Causal is leftBound=-1, rightBound=0; the sliding window uses leftBound=2,
+// rightBound=1. All eight cells use Skv != Sq (Sq=8 with Skv=4 or Skv=16).
+//
+// Uses the output-only comparator: several cells (bottom-right + smaller Skv,
+// tight sliding windows) intentionally fully mask some query rows, which both
+// references collapse to a zero output row. The LSE comparator would reject
+// those rows (LSE = -inf), so it is deliberately not used here.
 // ============================================================================
 
-TYPED_TEST(TestGpuSdpaFwdPlain, CausalBottomRightSmallerSkv)
+namespace
 {
-    SKIP_IF_NO_DEVICES();
-    using T = TypeParam;
 
-    // Sq=8, Skv=4 -> offset = -4 -> early query rows are fully masked.
-    Tensor<T> q({1, 2, 8, 16});
-    Tensor<T> k({1, 2, 4, 16});
-    Tensor<T> v({1, 2, 4, 16});
-    Tensor<T> oCpu({1, 2, 8, 16});
-    Tensor<T> oGpu({1, 2, 8, 16});
+struct SdpaMaskCartesianParams
+{
+    bool topLeftAlignment;
+    bool skvSmaller; // Skv < Sq when true, Skv > Sq when false.
+    int64_t leftBound;
+    int64_t rightBound;
+    const char* name;
+};
+
+template <typename T>
+void runMaskCartesianCase(const SdpaMaskCartesianParams& params)
+{
+    constexpr int64_t batch    = 1;
+    constexpr int64_t numHeads = 2;
+    constexpr int64_t headDim  = 16;
+    constexpr int64_t seqQ     = 8;
+    const int64_t seqKv        = params.skvSmaller ? 4 : 16;
+
+    Tensor<T> q({batch, numHeads, seqQ, headDim});
+    Tensor<T> k({batch, numHeads, seqKv, headDim});
+    Tensor<T> v({batch, numHeads, seqKv, headDim});
+    Tensor<T> oCpu({batch, numHeads, seqQ, headDim});
+    Tensor<T> oGpu({batch, numHeads, seqQ, headDim});
 
     compareGpuVsCpuSdpaFwd<T, T, T, T>(q,
                                        k,
@@ -425,10 +447,74 @@ TYPED_TEST(TestGpuSdpaFwdPlain, CausalBottomRightSmallerSkv)
                                        gpuRefFwdTolerance<T>(),
                                        std::nullopt,
                                        /*attnMask=*/nullptr,
-                                       /*leftBound=*/-1,
-                                       /*rightBound=*/0,
-                                       /*topLeftAlignment=*/false);
+                                       params.leftBound,
+                                       params.rightBound,
+                                       params.topLeftAlignment);
 }
+
+const std::vector<SdpaMaskCartesianParams>& maskCartesianCases()
+{
+    static const std::vector<SdpaMaskCartesianParams> cases = {
+        {/*topLeft=*/true, /*skvSmaller=*/true, -1, 0, "CausalTopLeftSmallerSkv"},
+        {/*topLeft=*/true, /*skvSmaller=*/false, -1, 0, "CausalTopLeftLargerSkv"},
+        {/*topLeft=*/false, /*skvSmaller=*/true, -1, 0, "CausalBottomRightSmallerSkv"},
+        {/*topLeft=*/false, /*skvSmaller=*/false, -1, 0, "CausalBottomRightLargerSkv"},
+        {/*topLeft=*/true, /*skvSmaller=*/true, 2, 1, "SlidingTopLeftSmallerSkv"},
+        {/*topLeft=*/true, /*skvSmaller=*/false, 2, 1, "SlidingTopLeftLargerSkv"},
+        {/*topLeft=*/false, /*skvSmaller=*/true, 2, 1, "SlidingBottomRightSmallerSkv"},
+        {/*topLeft=*/false, /*skvSmaller=*/false, 2, 1, "SlidingBottomRightLargerSkv"},
+    };
+    return cases;
+}
+
+std::string maskCartesianName(const ::testing::TestParamInfo<SdpaMaskCartesianParams>& info)
+{
+    return info.param.name;
+}
+
+} // namespace
+
+template <typename T>
+class TestGpuSdpaFwdMaskCartesianBase : public ::testing::TestWithParam<SdpaMaskCartesianParams>
+{
+};
+
+// Explicit per-dtype aliases with their own TEST_P/INSTANTIATE (project style:
+// prefer aliases over TYPED_TEST_P macros for readable gtest names + failures).
+using TestGpuSdpaFwdMaskCartesianFp32  = TestGpuSdpaFwdMaskCartesianBase<float>;
+using TestGpuSdpaFwdMaskCartesianFp16  = TestGpuSdpaFwdMaskCartesianBase<half>;
+using TestGpuSdpaFwdMaskCartesianBfp16 = TestGpuSdpaFwdMaskCartesianBase<bfloat16>;
+
+TEST_P(TestGpuSdpaFwdMaskCartesianFp32, SkvNotEqualSq)
+{
+    SKIP_IF_NO_DEVICES();
+    runMaskCartesianCase<float>(GetParam());
+}
+
+TEST_P(TestGpuSdpaFwdMaskCartesianFp16, SkvNotEqualSq)
+{
+    SKIP_IF_NO_DEVICES();
+    runMaskCartesianCase<half>(GetParam());
+}
+
+TEST_P(TestGpuSdpaFwdMaskCartesianBfp16, SkvNotEqualSq)
+{
+    SKIP_IF_NO_DEVICES();
+    runMaskCartesianCase<bfloat16>(GetParam());
+}
+
+INSTANTIATE_TEST_SUITE_P(MaskCombos,
+                         TestGpuSdpaFwdMaskCartesianFp32,
+                         ::testing::ValuesIn(maskCartesianCases()),
+                         maskCartesianName);
+INSTANTIATE_TEST_SUITE_P(MaskCombos,
+                         TestGpuSdpaFwdMaskCartesianFp16,
+                         ::testing::ValuesIn(maskCartesianCases()),
+                         maskCartesianName);
+INSTANTIATE_TEST_SUITE_P(MaskCombos,
+                         TestGpuSdpaFwdMaskCartesianBfp16,
+                         ::testing::ValuesIn(maskCartesianCases()),
+                         maskCartesianName);
 
 // ============================================================================
 // Generic sliding window with BOTH leftBound>=0 and rightBound>=0.
