@@ -318,6 +318,8 @@ Auxiliary functions
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_create_const_dnvec_descr`       |
 +-----------------------------------------------------+
+|:cpp:func:`rocsparse_create_dnvec_descr_scalar`      |
++-----------------------------------------------------+
 |:cpp:func:`rocsparse_destroy_dnvec_descr`            |
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_dnvec_get`                      |
@@ -651,9 +653,7 @@ documentation for details about the supported data types and compute types.
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_spgeam()`                       |
 +-----------------------------------------------------+
-|:cpp:func:`rocsparse_spscale_buffer_size()`          |
-+-----------------------------------------------------+
-|:cpp:func:`rocsparse_spscale()`                      |
+|:cpp:func:`rocsparse_spmat_scale()`                  |
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_sddmm_buffer_size()`            |
 +-----------------------------------------------------+

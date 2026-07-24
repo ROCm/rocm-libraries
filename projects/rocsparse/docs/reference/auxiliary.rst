@@ -613,6 +613,11 @@ rocsparse_create_const_dnvec_descr
 
 .. doxygenfunction:: rocsparse_create_const_dnvec_descr
 
+rocsparse_create_dnvec_descr_scalar
+-----------------------------------
+
+.. doxygenfunction:: rocsparse_create_dnvec_descr_scalar
+
 rocsparse_destroy_dnvec_descr
 -----------------------------
 

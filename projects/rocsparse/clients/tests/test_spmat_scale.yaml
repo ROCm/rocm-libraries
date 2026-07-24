@@ -38,9 +38,9 @@ Tests:
 # C = alpha * A
 
 # Quick - all supported formats (COO, COO AoS, CSR, CSC, BSR, ELL, SELL, BELL).
-- name: spscale
+- name: spmat_scale
   category: quick
-  function: spscale
+  function: spmat_scale
   indextype: *i32i32_i64i32_i64i64
   precision: *single_double_precisions_complex_real
   M: [300, 512]
@@ -60,9 +60,9 @@ Tests:
   matrix: [rocsparse_matrix_random]
 
 # Quick - Blocked-ELL across a couple of block sizes.
-- name: spscale
+- name: spmat_scale
   category: quick
-  function: spscale
+  function: spmat_scale
   indextype: *i32i32_i64i32_i64i64
   precision: *single_double_precisions_complex_real
   M: [300, 512]
@@ -74,9 +74,9 @@ Tests:
   formatA: [rocsparse_format_bell]
   matrix: [rocsparse_matrix_random]
 
-- name: spscale_file
+- name: spmat_scale_file
   category: quick
-  function: spscale
+  function: spmat_scale
   indextype: *i32i32_i64i32_i64i64
   precision: *single_double_precisions
   M: 1
@@ -95,15 +95,15 @@ Tests:
              nos7]
 
 # Pre-checkin
-- name: spscale_bad_arg
+- name: spmat_scale_bad_arg
   category: pre_checkin
-  function: spscale_bad_arg
+  function: spmat_scale_bad_arg
   indextype: *i32i32_i64i32_i64i64
   precision: *single_double_precisions_complex_real
 
-- name: spscale
+- name: spmat_scale
   category: pre_checkin
-  function: spscale
+  function: spmat_scale
   indextype: *i32i32_i64i32_i64i64
   precision: *single_double_precisions_complex_real
   M: [2000]
@@ -122,9 +122,9 @@ Tests:
             rocsparse_format_sell]
   matrix: [rocsparse_matrix_random]
 
-- name: spscale
+- name: spmat_scale
   category: pre_checkin
-  function: spscale
+  function: spmat_scale
   indextype: *i32i32_i64i32_i64i64
   precision: *single_double_precisions_complex_real
   M: [2000]
@@ -136,9 +136,9 @@ Tests:
   formatA: [rocsparse_format_bell]
   matrix: [rocsparse_matrix_random]
 
-- name: spscale
+- name: spmat_scale
   category: pre_checkin
-  function: spscale
+  function: spmat_scale
   indextype: *i32i32_i64i32_i64i64
   precision: *single_double_precisions_complex_real
   M: [850]
@@ -157,9 +157,9 @@ Tests:
             rocsparse_format_sell]
   matrix: [rocsparse_matrix_random]
 
-- name: spscale
+- name: spmat_scale
   category: pre_checkin
-  function: spscale
+  function: spmat_scale
   indextype: *i32i32_i64i32_i64i64
   precision: *single_double_precisions_complex_real
   M: [850]
@@ -171,9 +171,9 @@ Tests:
   formatA: [rocsparse_format_bell]
   matrix: [rocsparse_matrix_random]
 
-- name: spscale_file
+- name: spmat_scale_file
   category: pre_checkin
-  function: spscale
+  function: spmat_scale
   indextype: *i32i32_i64i32_i64i64
   precision: *single_double_precisions
   M: 1

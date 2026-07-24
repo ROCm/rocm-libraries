@@ -147,15 +147,10 @@ rocsparse_spgeam()
 
 .. doxygenfunction:: rocsparse_spgeam
 
-rocsparse_spscale_buffer_size()
--------------------------------
+rocsparse_spmat_scale()
+-----------------------
 
-.. doxygenfunction:: rocsparse_spscale_buffer_size
-
-rocsparse_spscale()
--------------------
-
-.. doxygenfunction:: rocsparse_spscale
+.. doxygenfunction:: rocsparse_spmat_scale
 
 rocsparse_sddmm_buffer_size()
 -----------------------------

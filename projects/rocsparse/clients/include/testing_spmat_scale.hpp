@@ -26,7 +26,7 @@
 #include "rocsparse_arguments.hpp"
 
 template <typename I, typename J, typename T>
-void testing_spscale_bad_arg(const Arguments& arg);
-void testing_spscale_extra(const Arguments& arg);
+void testing_spmat_scale_bad_arg(const Arguments& arg);
+void testing_spmat_scale_extra(const Arguments& arg);
 template <typename I, typename J, typename T>
-void testing_spscale(const Arguments& arg);
+void testing_spmat_scale(const Arguments& arg);

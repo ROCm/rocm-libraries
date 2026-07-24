@@ -24,7 +24,7 @@
 #include "testing.hpp"
 
 template <typename I, typename J, typename T>
-void testing_spscale_bad_arg(const Arguments& arg)
+void testing_spmat_scale_bad_arg(const Arguments& arg)
 {
     static const size_t safe_size = 100;
 
@@ -36,8 +36,7 @@ void testing_spscale_bad_arg(const Arguments& arg)
     J                n      = safe_size;
     I                nnz    = safe_size;
 
-    const T     local_alpha = static_cast<T>(1);
-    const void* alpha       = (const void*)&local_alpha;
+    T local_alpha = static_cast<T>(1);
 
     void* csr_row_ptr_A = (void*)0x4;
     void* csr_col_ind_A = (void*)0x4;
@@ -53,83 +52,59 @@ void testing_spscale_bad_arg(const Arguments& arg)
     rocsparse_indextype jtype = get_indextype<J>();
     rocsparse_datatype  ttype = get_datatype<T>();
 
-    // SpScale structures
+    // Sparse matrix descriptors: source (A) and target (C).
     rocsparse_local_spmat local_A(
         m, n, nnz, csr_row_ptr_A, csr_col_ind_A, csr_val_A, itype, jtype, base, ttype);
     rocsparse_local_spmat local_C(
         m, n, nnz, csr_row_ptr_C, csr_col_ind_C, csr_val_C, itype, jtype, base, ttype);
 
-    rocsparse_spmat_descr mat_A = local_A;
-    rocsparse_spmat_descr mat_C = local_C;
+    rocsparse_const_spmat_descr source = local_A;
+    rocsparse_spmat_descr       target = local_C;
 
-    size_t  local_buffer_size    = 0;
-    size_t* buffer_size_in_bytes = &local_buffer_size;
-    void*   temp_buffer          = (void*)0x4;
+    // alpha is a self-describing size-one scalar dense vector descriptor.
+    rocsparse_local_dnvec       alpha_scalar(static_cast<int64_t>(1), &local_alpha, ttype);
+    rocsparse_const_dnvec_descr alpha = alpha_scalar;
 
     // p_error is an optional output error descriptor and may be null.
     rocsparse_error p_error[1] = {nullptr};
 
-    // Buffer size: p_error (arg 4) is optional and not checked.
+    // Signature: rocsparse_spmat_scale(handle, alpha, target, source, p_error). p_error (arg 4)
+    // is optional and not checked.
     {
         static const int nex   = 1;
         static const int ex[1] = {4};
-        select_bad_arg_analysis(rocsparse_spscale_buffer_size,
-                                nex,
-                                ex,
-                                handle,
-                                mat_A,
-                                mat_C,
-                                buffer_size_in_bytes,
-                                p_error);
+        select_bad_arg_analysis(
+            rocsparse_spmat_scale, nex, ex, handle, alpha, target, source, p_error);
     }
 
-    // Compute: buffer_size_in_bytes (arg 4), temp_buffer (arg 5) and p_error (arg 6) are not checked.
+    // Consistency checks between source and target that the generic bad-arg harness does not
+    // exercise.
     {
-        static const int nex   = 3;
-        static const int ex[3] = {4, 5, 6};
-        select_bad_arg_analysis(rocsparse_spscale,
-                                nex,
-                                ex,
-                                handle,
-                                alpha,
-                                mat_A,
-                                mat_C,
-                                local_buffer_size,
-                                temp_buffer,
-                                p_error);
-    }
-
-    // Consistency checks between A and C that the generic bad-arg harness does not exercise.
-    // These go through rocsparse_spscale_buffer_size, which runs the same argument checks.
-    {
-        // Format mismatch: A is CSR, C is COO.
+        // Format mismatch: source is CSR, target is COO.
         rocsparse_local_spmat local_C_coo(
             m, n, nnz, csr_row_ptr_C, csr_col_ind_C, csr_val_C, itype, base, ttype);
-        rocsparse_spmat_descr mat_C_coo = local_C_coo;
-        EXPECT_ROCSPARSE_STATUS(
-            rocsparse_spscale_buffer_size(handle, mat_A, mat_C_coo, buffer_size_in_bytes, p_error),
-            rocsparse_status_not_implemented);
+        rocsparse_spmat_descr target_coo = local_C_coo;
+        EXPECT_ROCSPARSE_STATUS(rocsparse_spmat_scale(handle, alpha, target_coo, source, p_error),
+                                rocsparse_status_not_implemented);
 
-        // Dimension mismatch: C has a different number of rows.
+        // Dimension mismatch: target has a different number of rows.
         rocsparse_local_spmat local_C_rows(
             m + 1, n, nnz, csr_row_ptr_C, csr_col_ind_C, csr_val_C, itype, jtype, base, ttype);
-        rocsparse_spmat_descr mat_C_rows = local_C_rows;
-        EXPECT_ROCSPARSE_STATUS(
-            rocsparse_spscale_buffer_size(handle, mat_A, mat_C_rows, buffer_size_in_bytes, p_error),
-            rocsparse_status_invalid_size);
+        rocsparse_spmat_descr target_rows = local_C_rows;
+        EXPECT_ROCSPARSE_STATUS(rocsparse_spmat_scale(handle, alpha, target_rows, source, p_error),
+                                rocsparse_status_invalid_size);
 
-        // Data-type mismatch between A and C.
+        // Data-type mismatch between source and target.
         const rocsparse_datatype other_ttype = (ttype == rocsparse_datatype_f32_r)
                                                    ? rocsparse_datatype_f64_r
                                                    : rocsparse_datatype_f32_r;
         rocsparse_local_spmat    local_C_dtype(
             m, n, nnz, csr_row_ptr_C, csr_col_ind_C, csr_val_C, itype, jtype, base, other_ttype);
-        rocsparse_spmat_descr mat_C_dtype = local_C_dtype;
-        EXPECT_ROCSPARSE_STATUS(rocsparse_spscale_buffer_size(
-                                    handle, mat_A, mat_C_dtype, buffer_size_in_bytes, p_error),
+        rocsparse_spmat_descr target_dtype = local_C_dtype;
+        EXPECT_ROCSPARSE_STATUS(rocsparse_spmat_scale(handle, alpha, target_dtype, source, p_error),
                                 rocsparse_status_type_mismatch);
 
-        // Index-base mismatch: differing base between A and C is not supported yet.
+        // Index-base mismatch: differing base between source and target is not supported yet.
         rocsparse_local_spmat local_C_base(m,
                                            n,
                                            nnz,
@@ -140,46 +115,48 @@ void testing_spscale_bad_arg(const Arguments& arg)
                                            jtype,
                                            rocsparse_index_base_one,
                                            ttype);
-        rocsparse_spmat_descr mat_C_base = local_C_base;
-        EXPECT_ROCSPARSE_STATUS(
-            rocsparse_spscale_buffer_size(handle, mat_A, mat_C_base, buffer_size_in_bytes, p_error),
-            rocsparse_status_not_implemented);
+        rocsparse_spmat_descr target_base = local_C_base;
+        EXPECT_ROCSPARSE_STATUS(rocsparse_spmat_scale(handle, alpha, target_base, source, p_error),
+                                rocsparse_status_not_implemented);
+
+        // Data-type mismatch between alpha and the matrices.
+        rocsparse_local_dnvec       alpha_other(static_cast<int64_t>(1), &local_alpha, other_ttype);
+        rocsparse_const_dnvec_descr alpha_bad = alpha_other;
+        EXPECT_ROCSPARSE_STATUS(rocsparse_spmat_scale(handle, alpha_bad, target, source, p_error),
+                                rocsparse_status_type_mismatch);
     }
 }
 
 // Generic driver shared by every format. It takes an already-initialized host matrix \p hA,
-// allocates C with the same layout, runs rocsparse_spscale in host and device pointer mode and
-// validates the result against a host reference C = alpha * A.
+// allocates C with the same layout, runs rocsparse_spmat_scale with host and device scalar alpha
+// (and in place) and validates the result against a host reference C = alpha * A.
 template <typename T, typename HostMatrix, typename DeviceMatrix>
-static void testing_spscale_dispatch(const Arguments& arg, HostMatrix& hA)
+static void testing_spmat_scale_dispatch(const Arguments& arg, HostMatrix& hA)
 {
-    T  h_alpha     = arg.get_alpha<T>();
-    T* h_alpha_ptr = &h_alpha;
+    T h_alpha = arg.get_alpha<T>();
 
     device_vector<T> d_alpha(1);
     CHECK_HIP_ERROR(hipMemcpy(d_alpha, &h_alpha, sizeof(T), hipMemcpyHostToDevice));
-    T* d_alpha_ptr = d_alpha;
 
     // Create rocsparse handle
     rocsparse_local_handle handle;
 
-    // Declare device matrix A.
+    // alpha as a self-describing scalar descriptor, in host and device memory.
+    rocsparse_dnvec_descr alpha_host;
+    CHECK_ROCSPARSE_ERROR(rocsparse_create_dnvec_descr_scalar(
+        &alpha_host, &h_alpha, get_datatype<T>(), rocsparse_pointer_mode_host));
+    rocsparse_dnvec_descr alpha_device;
+    CHECK_ROCSPARSE_ERROR(rocsparse_create_dnvec_descr_scalar(
+        &alpha_device, (void*)(T*)d_alpha, get_datatype<T>(), rocsparse_pointer_mode_device));
+
+    // Declare device matrix A (the source).
     DeviceMatrix dA(hA);
 
     // Declare and set up C with the same layout as A but without copying its content: the
-    // structure and the scaled values are produced by rocsparse_spscale itself.
+    // structure and the scaled values are produced by rocsparse_spmat_scale itself.
     DeviceMatrix dC(dA, false);
 
-    // Declare local spmat.
     rocsparse_local_spmat mat_A(dA), mat_C(dC);
-
-    // Query buffer size and allocate.
-    size_t buffer_size_in_bytes;
-    void*  buffer;
-    CHECK_ROCSPARSE_ERROR(
-        rocsparse_spscale_buffer_size(handle, mat_A, mat_C, &buffer_size_in_bytes, nullptr));
-
-    CHECK_HIP_ERROR(rocsparse_hipMalloc(&buffer, buffer_size_in_bytes));
 
     if(arg.unit_check)
     {
@@ -191,23 +168,27 @@ static void testing_spscale_dispatch(const Arguments& arg, HostMatrix& hA)
             hC.val[i] = h_alpha * hA.val[i];
         }
 
-        // Compute C on device multiple times (host pointer mode).
-        CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
+        // Out-of-place, host scalar alpha (needed by the hipSPARSE SpGEAM use case).
         for(int32_t i = 0; i < 2; i++)
         {
-            CHECK_ROCSPARSE_ERROR(rocsparse_spscale(
-                handle, h_alpha_ptr, mat_A, mat_C, buffer_size_in_bytes, buffer, nullptr));
+            CHECK_ROCSPARSE_ERROR(rocsparse_spmat_scale(handle, alpha_host, mat_C, mat_A, nullptr));
             hC.near_check(dC);
         }
 
-        // Compute C on device multiple times (device pointer mode).
-        CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_device));
+        // Out-of-place, device scalar alpha.
         for(int32_t i = 0; i < 2; i++)
         {
-            CHECK_ROCSPARSE_ERROR(rocsparse_spscale(
-                handle, d_alpha_ptr, mat_A, mat_C, buffer_size_in_bytes, buffer, nullptr));
+            CHECK_ROCSPARSE_ERROR(
+                rocsparse_spmat_scale(handle, alpha_device, mat_C, mat_A, nullptr));
             hC.near_check(dC);
         }
+
+        // In-place scaling: target == source. Use a fresh copy of A so the reference still holds.
+        DeviceMatrix          dInplace(dA);
+        rocsparse_local_spmat mat_inplace(dInplace);
+        CHECK_ROCSPARSE_ERROR(
+            rocsparse_spmat_scale(handle, alpha_host, mat_inplace, mat_inplace, nullptr));
+        hC.near_check(dInplace);
     }
 
     if(arg.timing)
@@ -215,13 +196,10 @@ static void testing_spscale_dispatch(const Arguments& arg, HostMatrix& hA)
         int32_t number_cold_calls = 2;
         int32_t number_hot_calls  = arg.iters;
 
-        CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
-
         // Warm up
         for(int32_t iter = 0; iter < number_cold_calls; ++iter)
         {
-            CHECK_ROCSPARSE_ERROR(rocsparse_spscale(
-                handle, h_alpha_ptr, mat_A, mat_C, buffer_size_in_bytes, buffer, nullptr));
+            CHECK_ROCSPARSE_ERROR(rocsparse_spmat_scale(handle, alpha_host, mat_C, mat_A, nullptr));
         }
 
         double gpu_solve_time_used = get_time_us();
@@ -229,8 +207,7 @@ static void testing_spscale_dispatch(const Arguments& arg, HostMatrix& hA)
         // Performance run
         for(int32_t iter = 0; iter < number_hot_calls; ++iter)
         {
-            CHECK_ROCSPARSE_ERROR(rocsparse_spscale(
-                handle, h_alpha_ptr, mat_A, mat_C, buffer_size_in_bytes, buffer, nullptr));
+            CHECK_ROCSPARSE_ERROR(rocsparse_spmat_scale(handle, alpha_host, mat_C, mat_A, nullptr));
         }
 
         gpu_solve_time_used = (get_time_us() - gpu_solve_time_used) / number_hot_calls;
@@ -253,11 +230,12 @@ static void testing_spscale_dispatch(const Arguments& arg, HostMatrix& hA)
                             get_gpu_time_msec(gpu_solve_time_used));
     }
 
-    CHECK_HIP_ERROR(rocsparse_hipFree(buffer));
+    CHECK_ROCSPARSE_ERROR(rocsparse_destroy_dnvec_descr(alpha_host));
+    CHECK_ROCSPARSE_ERROR(rocsparse_destroy_dnvec_descr(alpha_device));
 }
 
 template <typename I, typename J, typename T>
-void testing_spscale(const Arguments& arg)
+void testing_spmat_scale(const Arguments& arg)
 {
     rocsparse_index_base base = arg.baseA;
 
@@ -272,7 +250,7 @@ void testing_spscale(const Arguments& arg)
         rocsparse_matrix_factory<T, I, I> matrix_factory(arg, to_int, full_rank);
         host_coo_matrix<T, I>             hA;
         matrix_factory.init_coo(hA, m, n, base);
-        testing_spscale_dispatch<T, host_coo_matrix<T, I>, device_coo_matrix<T, I>>(arg, hA);
+        testing_spmat_scale_dispatch<T, host_coo_matrix<T, I>, device_coo_matrix<T, I>>(arg, hA);
         break;
     }
     case rocsparse_format_coo_aos:
@@ -281,8 +259,8 @@ void testing_spscale(const Arguments& arg)
         rocsparse_matrix_factory<T, I, I> matrix_factory(arg, to_int, full_rank);
         host_coo_aos_matrix<T, I>         hA;
         matrix_factory.init_coo_aos(hA, m, n, base);
-        testing_spscale_dispatch<T, host_coo_aos_matrix<T, I>, device_coo_aos_matrix<T, I>>(arg,
-                                                                                            hA);
+        testing_spmat_scale_dispatch<T, host_coo_aos_matrix<T, I>, device_coo_aos_matrix<T, I>>(arg,
+                                                                                                hA);
         break;
     }
     case rocsparse_format_csr:
@@ -291,7 +269,8 @@ void testing_spscale(const Arguments& arg)
         rocsparse_matrix_factory<T, I, J> matrix_factory(arg, to_int, full_rank);
         host_csr_matrix<T, I, J>          hA;
         matrix_factory.init_csr(hA, m, n, base);
-        testing_spscale_dispatch<T, host_csr_matrix<T, I, J>, device_csr_matrix<T, I, J>>(arg, hA);
+        testing_spmat_scale_dispatch<T, host_csr_matrix<T, I, J>, device_csr_matrix<T, I, J>>(arg,
+                                                                                              hA);
         break;
     }
     case rocsparse_format_csc:
@@ -300,7 +279,8 @@ void testing_spscale(const Arguments& arg)
         rocsparse_matrix_factory<T, I, J> matrix_factory(arg, to_int, full_rank);
         host_csc_matrix<T, I, J>          hA;
         matrix_factory.init_csc(hA, m, n, base);
-        testing_spscale_dispatch<T, host_csc_matrix<T, I, J>, device_csc_matrix<T, I, J>>(arg, hA);
+        testing_spmat_scale_dispatch<T, host_csc_matrix<T, I, J>, device_csc_matrix<T, I, J>>(arg,
+                                                                                              hA);
         break;
     }
     case rocsparse_format_bsr:
@@ -311,8 +291,8 @@ void testing_spscale(const Arguments& arg)
         J                                 mb        = (arg.M + block_dim - 1) / block_dim;
         J                                 nb        = (arg.N + block_dim - 1) / block_dim;
         matrix_factory.init_gebsr(hA, mb, nb, block_dim, block_dim, base);
-        testing_spscale_dispatch<T, host_gebsr_matrix<T, I, J>, device_gebsr_matrix<T, I, J>>(arg,
-                                                                                              hA);
+        testing_spmat_scale_dispatch<T, host_gebsr_matrix<T, I, J>, device_gebsr_matrix<T, I, J>>(
+            arg, hA);
         break;
     }
     case rocsparse_format_ell:
@@ -321,7 +301,7 @@ void testing_spscale(const Arguments& arg)
         rocsparse_matrix_factory<T, I, I> matrix_factory(arg, to_int, full_rank);
         host_ell_matrix<T, I>             hA;
         matrix_factory.init_ell(hA, m, n, base);
-        testing_spscale_dispatch<T, host_ell_matrix<T, I>, device_ell_matrix<T, I>>(arg, hA);
+        testing_spmat_scale_dispatch<T, host_ell_matrix<T, I>, device_ell_matrix<T, I>>(arg, hA);
         break;
     }
     case rocsparse_format_sell:
@@ -331,8 +311,8 @@ void testing_spscale(const Arguments& arg)
         rocsparse_matrix_factory<T, I, I> matrix_factory(arg, to_int, full_rank);
         host_sell_matrix<T, I, I>         hA;
         matrix_factory.init_sell(hA, m, n, arg.sell_slice_size, base);
-        testing_spscale_dispatch<T, host_sell_matrix<T, I, I>, device_sell_matrix<T, I, I>>(arg,
-                                                                                            hA);
+        testing_spmat_scale_dispatch<T, host_sell_matrix<T, I, I>, device_sell_matrix<T, I, I>>(arg,
+                                                                                                hA);
         break;
     }
     case rocsparse_format_bell:
@@ -343,17 +323,17 @@ void testing_spscale(const Arguments& arg)
         rocsparse_matrix_factory<T, I, I> matrix_factory(arg, to_int, full_rank);
         host_bell_matrix<T, I>            hA;
         matrix_factory.init_bell(hA, m, n, block_dim, base);
-        testing_spscale_dispatch<T, host_bell_matrix<T, I>, device_bell_matrix<T, I>>(arg, hA);
+        testing_spmat_scale_dispatch<T, host_bell_matrix<T, I>, device_bell_matrix<T, I>>(arg, hA);
         break;
     }
     }
 }
 
-void testing_spscale_extra(const Arguments& arg) {}
+void testing_spmat_scale_extra(const Arguments& arg) {}
 
-#define INSTANTIATE(ITYPE, JTYPE, TTYPE)                                              \
-    template void testing_spscale_bad_arg<ITYPE, JTYPE, TTYPE>(const Arguments& arg); \
-    template void testing_spscale<ITYPE, JTYPE, TTYPE>(const Arguments& arg)
+#define INSTANTIATE(ITYPE, JTYPE, TTYPE)                                                  \
+    template void testing_spmat_scale_bad_arg<ITYPE, JTYPE, TTYPE>(const Arguments& arg); \
+    template void testing_spmat_scale<ITYPE, JTYPE, TTYPE>(const Arguments& arg)
 
 INSTANTIATE(int32_t, int32_t, float);
 INSTANTIATE(int32_t, int32_t, double);

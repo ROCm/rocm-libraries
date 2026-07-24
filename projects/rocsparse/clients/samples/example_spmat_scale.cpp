@@ -147,19 +147,13 @@ int main(int argc, char* argv[])
     ROCSPARSE_CHECK(rocsparse_create_csr_descr(
         &C, m, n, nnz_C, dcsr_row_ptr_C, dcsr_col_ind_C, dcsr_val_C, itype, jtype, base, ttype));
 
-    // Query buffer size (zero for the CSR format) and allocate.
-    size_t buffer_size_in_bytes;
-    void*  buffer = nullptr;
-    ROCSPARSE_CHECK(rocsparse_spscale_buffer_size(handle, A, C, &buffer_size_in_bytes, nullptr));
+    // Wrap the host scalar alpha in a self-describing size-one dense vector descriptor.
+    rocsparse_dnvec_descr alpha_descr;
+    ROCSPARSE_CHECK(rocsparse_create_dnvec_descr_scalar(
+        &alpha_descr, &alpha, ttype, rocsparse_pointer_mode_host));
 
-    if(buffer_size_in_bytes > 0)
-    {
-        HIP_CHECK(hipMalloc(&buffer, buffer_size_in_bytes));
-    }
-
-    // Compute C = alpha * A.
-    ROCSPARSE_CHECK(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
-    ROCSPARSE_CHECK(rocsparse_spscale(handle, &alpha, A, C, buffer_size_in_bytes, buffer, nullptr));
+    // Compute C = alpha * A. No temporary storage buffer is required.
+    ROCSPARSE_CHECK(rocsparse_spmat_scale(handle, alpha_descr, C, A, nullptr));
 
     HIP_CHECK(hipStreamSynchronize(stream));
 
@@ -214,23 +208,20 @@ int main(int argc, char* argv[])
 
     if(errors == 0)
     {
-        std::cout << "spscale validation: PASSED" << std::endl;
+        std::cout << "spmat_scale validation: PASSED" << std::endl;
     }
     else
     {
-        std::cout << "spscale validation: FAILED with " << errors << " errors" << std::endl;
+        std::cout << "spmat_scale validation: FAILED with " << errors << " errors" << std::endl;
     }
 
     // Clear rocSPARSE
+    ROCSPARSE_CHECK(rocsparse_destroy_dnvec_descr(alpha_descr));
     ROCSPARSE_CHECK(rocsparse_destroy_spmat_descr(A));
     ROCSPARSE_CHECK(rocsparse_destroy_spmat_descr(C));
     ROCSPARSE_CHECK(rocsparse_destroy_handle(handle));
 
     // Clear device memory
-    if(buffer != nullptr)
-    {
-        HIP_CHECK(hipFree(buffer));
-    }
     HIP_CHECK(hipFree(dcsr_row_ptr_A));
     HIP_CHECK(hipFree(dcsr_col_ind_A));
     HIP_CHECK(hipFree(dcsr_val_A));

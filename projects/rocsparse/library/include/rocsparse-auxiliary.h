@@ -3130,6 +3130,36 @@ rocsparse_status rocsparse_create_const_dnvec_descr(rocsparse_const_dnvec_descr*
 /**@}*/
 
 /*! \ingroup aux_module
+ *  \brief Create a dense vector descriptor for a single scalar.
+ *  \details
+ *  \p rocsparse_create_dnvec_descr_scalar creates a size-one dense vector descriptor that
+ *  records whether its value lives in host or device memory. It is a convenience wrapper for
+ *  passing a self-describing scalar argument (for example the scaling factor consumed by
+ *  \ref rocsparse_spmat_scale) without relying on the handle pointer mode. It should be destroyed
+ *  at the end using rocsparse_destroy_dnvec_descr().
+ *
+ *  @param[out]
+ *  descr   the pointer to the dense vector descriptor.
+ *  @param[in]
+ *  values   pointer to the scalar value. The memory space is given by \p pointer_mode.
+ *  @param[in]
+ *  data_type   \ref rocsparse_datatype_f32_r, \ref rocsparse_datatype_f64_r,
+ *              \ref rocsparse_datatype_f32_c, or \ref rocsparse_datatype_f64_c.
+ *  @param[in]
+ *  pointer_mode   \ref rocsparse_pointer_mode_host if \p values points to host memory,
+ *                 \ref rocsparse_pointer_mode_device if it points to device memory.
+ *
+ *  \retval rocsparse_status_success the operation completed successfully.
+ *  \retval rocsparse_status_invalid_pointer if \p descr or \p values is invalid.
+ *  \retval rocsparse_status_invalid_value if \p data_type or \p pointer_mode is invalid.
+ */
+ROCSPARSE_EXPORT
+rocsparse_status rocsparse_create_dnvec_descr_scalar(rocsparse_dnvec_descr* descr,
+                                                     void*                  values,
+                                                     rocsparse_datatype     data_type,
+                                                     rocsparse_pointer_mode pointer_mode);
+
+/*! \ingroup aux_module
  *  \brief Destroy a dense vector descriptor.
  *
  *  \details

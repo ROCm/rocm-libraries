@@ -24,9 +24,9 @@
 
 #include "test.hpp"
 
-#include "testing_spscale.hpp"
+#include "testing_spmat_scale.hpp"
 
-TEST_ROUTINE_WITH_CONFIG(spscale,
+TEST_ROUTINE_WITH_CONFIG(spmat_scale,
                          extra,
                          rocsparse_test_config_ijt,
                          arg.M,
