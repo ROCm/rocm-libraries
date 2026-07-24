@@ -1,2 +1,2 @@
--r https://raw.githubusercontent.com/ROCm/rocm-docs-env/main/sphinx/requirements.txt
+-r https://raw.githubusercontent.com/ROCm/ROCm/develop/docs/sphinx/requirements.txt
 
