@@ -101,6 +101,11 @@ struct CompiledUmd
     jlogic::Expression<BindingContext> criteria;
     std::set<std::string> boundSymbols;
 
+    // True when the criteria expression references any `$kernel.<field>`. Set
+    // once by UmdCompiler::run() and immutable thereafter; the matcher reads it
+    // to route between the metadata and non-metadata match overloads.
+    bool referencesKernelMetadata = false;
+
     const TensorVarSpec* findTvar(const std::string& tvar) const
     {
         for(const auto& t : tvars)
@@ -149,7 +154,13 @@ public:
 
 private:
     // Static type domain for A.10 §9. Numeric unifies Int and Float; ARRAY
-    // carries its element kind for `in` / IntArray equality.
+    // carries its element kind for `in` / IntArray equality. DYNAMIC is a
+    // runtime-resolved scalar wildcard: `$kernel.<field>` values come from a
+    // UKD's KMD, unavailable at UMD-compile time (RFC 0018 §4/§10), so they are
+    // not statically type-checked here. A referenced kernel field is assumed
+    // validated against the engine's KMD schema at load (a typo'd field is
+    // caught there, not here); the metadata supplied to match() is fully
+    // resolved, so every referenced field is present at match time.
     enum class Kind
     {
         INT,
@@ -159,6 +170,7 @@ private:
         ARRAY,
         TENSOR,
         JSON_NULL,
+        DYNAMIC,
         UNKNOWN
     };
     struct TypeInfo
@@ -185,7 +197,7 @@ private:
 
         nlohmann::json const lowered = lowerCriteria(d.at("criteria"), out);
         const TypeInfo t = inferType(lowered, &out);
-        if(t.kind != Kind::BOOL)
+        if(t.kind != Kind::BOOL && t.kind != Kind::DYNAMIC)
         {
             throw UmdCompileError("criteria must have static type Bool (A.10 §10)");
         }
@@ -197,6 +209,7 @@ private:
             varTypeOf(sym, out);
             out.boundSymbols.insert(sym);
         }
+        out.referencesKernelMetadata = jlogic::referencesVariableRoot(out.criteria, "kernel");
         return out;
     }
 
@@ -782,6 +795,17 @@ private:
 
     static bool sameDomain(Kind a, Kind b)
     {
+        // DYNAMIC (a runtime-resolved $kernel field) is a scalar wildcard: it
+        // unifies with any scalar domain, but not with ARRAY or TENSOR. Its
+        // concrete scalar type is unknown until match time.
+        if(a == Kind::DYNAMIC)
+        {
+            return b != Kind::ARRAY && b != Kind::TENSOR;
+        }
+        if(b == Kind::DYNAMIC)
+        {
+            return a != Kind::ARRAY && a != Kind::TENSOR;
+        }
         if(isNumeric(a) && isNumeric(b))
         {
             return true;
@@ -815,13 +839,13 @@ private:
             }
         };
         const auto requireBool = [&](const TypeInfo& t) {
-            if(t.kind != Kind::BOOL)
+            if(t.kind != Kind::BOOL && t.kind != Kind::DYNAMIC)
             {
                 throw UmdCompileError("operator '" + op + "' requires Bool arguments (A.7)");
             }
         };
         const auto requireNumeric = [&](const TypeInfo& t) {
-            if(!isNumeric(t.kind))
+            if(!isNumeric(t.kind) && t.kind != Kind::DYNAMIC)
             {
                 throw UmdCompileError("operator '" + op + "' requires numeric arguments (A.7)");
             }
@@ -956,7 +980,8 @@ private:
         bool haveResult = false;
         for(std::size_t i = 0; i + 1 < args.size(); i += 2)
         {
-            if(inferTypeImpl(args.at(i)).kind != Kind::BOOL)
+            const Kind cond = inferTypeImpl(args.at(i)).kind;
+            if(cond != Kind::BOOL && cond != Kind::DYNAMIC)
             {
                 throw UmdCompileError("'if' condition must be Bool (A.7)");
             }
@@ -1008,6 +1033,18 @@ private:
                 throw UmdCompileError("device reference needs a field");
             }
             return {Kind::INT, Kind::UNKNOWN}; // device scalars are numeric
+        }
+        if(root == "kernel")
+        {
+            if(rest.empty())
+            {
+                throw UmdCompileError("kernel reference needs a field");
+            }
+            // Kernel field types come from a UKD's KMD, unavailable at
+            // UMD-compile time; resolve their domain at match time (DYNAMIC).
+            // Field existence is validated against the engine's KMD schema at
+            // load, so an undeclared field is rejected before match runs.
+            return {Kind::DYNAMIC, Kind::UNKNOWN};
         }
         const NodeSpec* node = out.findNode(root);
         if(node != nullptr)

@@ -23,8 +23,10 @@
 //               `$q.packed`, `$q.virtual`, `$q.present`
 //   - Graph     `$graph.node_count`
 //   - Attributes `$<node_id>.<attr>`, `$<node_id>.<attr>.present`
+//   - Kernel    `$kernel.<field>` (from caller-supplied, fully-resolved KMD
+//               metadata; an unbound document is a defensive fallback that
+//               reads every field as null)
 //   - Device    `$device.<field>`
-//   (Kernel namespace omitted: SDPA-forward criteria references none.)
 //
 // The two resolvers (RFC 0018 §4, "binding architecture"): edge (name->UID->
 // tensor) and scalar-attribute reads use the Phase 0 *generated* typed
@@ -38,6 +40,7 @@
 // absent optional operand -- resolves to null, which makes the enclosing
 // criterion false, declining the match rather than matching on a wrong value.
 
+#include "hip_kernel_provider_common/JsonDataSource.hpp"
 #include "hip_kernel_provider_common/JsonLogic.hpp"
 #include "hip_kernel_provider_common/umd/UmdPathParse.hpp"
 
@@ -109,6 +112,16 @@ public:
         _tensors[tvar] = BoundTensor{tensor, optional, dimNames};
     }
 
+    // Bind the kernel metadata the criteria's `$kernel.<field>` references
+    // resolve against (RFC 0018 §4). The document is a UKD's fully-resolved KMD
+    // values (optional fields already filled with schema defaults, so every
+    // field a referenced criterion needs is present). An unset or empty
+    // document is a defensive fallback in which every kernel field reads null.
+    void bindKernelMetadata(nlohmann::json metadata)
+    {
+        _kernel = jlogic::JsonDataSource(std::move(metadata));
+    }
+
     // JsonLogic data-source contract: resolve a sigil-stripped variable path
     // (`q.head_size`, `graph.node_count`, `sdpa_fwd.dropout_probability.present`)
     // to a Value. Unresolved -> null (fail closed).
@@ -125,6 +138,10 @@ public:
         if(root == "device")
         {
             return resolveDevice(rest);
+        }
+        if(root == "kernel")
+        {
+            return _kernel.getData(rest);
         }
         const auto nit = _nodes.find(root);
         if(nit != _nodes.end())
@@ -336,6 +353,7 @@ private:
     std::unordered_map<std::string, jlogic::Value> _device;
     std::unordered_map<std::string, BoundNode> _nodes;
     std::unordered_map<std::string, BoundTensor> _tensors;
+    jlogic::JsonDataSource _kernel; // empty until bindKernelMetadata()
 };
 
 } // namespace hip_kernel_provider_common::umd

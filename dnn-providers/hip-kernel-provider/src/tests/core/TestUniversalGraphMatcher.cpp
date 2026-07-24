@@ -579,3 +579,138 @@ TEST(UniversalGraphMatcher, PerNodeAttributesAreDistinct)
     fbu::GraphWrapper const g(builder.GetBufferPointer(), builder.GetSize());
     EXPECT_FALSE(m.match(K_DEVICE, g).matched);
 }
+
+// ---- Kernel metadata ($kernel) -------------------------------------------
+
+namespace
+{
+
+// The SDPA descriptor with one `$kernel.<field>` criterion added. Compiles only
+// because the compiler resolves `$kernel.*` as a runtime-DYNAMIC scalar.
+json sdpaKernelDescriptor()
+{
+    json d = sdpaDescriptor();
+    d["criteria"]["and"].push_back(json::parse(R"({"==": ["$kernel.head_dim", "$q.head_size"]})"));
+    return d;
+}
+
+} // namespace
+
+TEST(UmdCompiler, AcceptsKernelReference)
+{
+    // A criterion over a $kernel field compiles (DYNAMIC wildcard) and the
+    // descriptor is flagged as referencing kernel metadata.
+    umd::CompiledUmd c;
+    ASSERT_NO_THROW(c = umd::UmdCompiler::compile(sdpaKernelDescriptor()));
+    EXPECT_TRUE(c.referencesKernelMetadata);
+    EXPECT_TRUE(c.boundSymbols.count("kernel.head_dim") == 1);
+}
+
+TEST(UmdCompiler, StockDescriptorDoesNotReferenceKernel)
+{
+    const umd::CompiledUmd c = umd::UmdCompiler::compile(sdpaDescriptor());
+    EXPECT_FALSE(c.referencesKernelMetadata);
+}
+
+TEST(UmdCompiler, KernelFieldUnifiesWithAnyScalarDomain)
+{
+    // A $kernel field is DYNAMIC: it compiles against an int, a dtype string,
+    // and a bool alike -- none is a static type error.
+    for(const char* crit : {R"({"==": ["$kernel.head_dim", 128]})",
+                            R"({"==": ["$kernel.target_dtype", "BFLOAT16"]})",
+                            R"({"<": ["$kernel.tile_m", "$q.head_size"]})",
+                            R"({"!": "$kernel.causal"})"})
+    {
+        json d = sdpaDescriptor();
+        d["criteria"]["and"].push_back(json::parse(crit));
+        EXPECT_NO_THROW(umd::UmdCompiler::compile(d)) << crit;
+    }
+}
+
+TEST(UmdCompiler, KernelReferenceNeedsAField)
+{
+    json d = sdpaDescriptor();
+    d["criteria"]["and"].push_back(json::parse(R"({"==": ["$kernel", 1]})"));
+    EXPECT_THROW(umd::UmdCompiler::compile(d), umd::UmdCompileError);
+}
+
+TEST(UmdCompiler, KernelFieldAsIfCondition)
+{
+    // A DYNAMIC $kernel field is accepted in an `if` condition, consistent with
+    // its acceptance in and/or/! boolean positions.
+    json d = sdpaDescriptor();
+    d["criteria"]["and"].push_back(json::parse(R"({"==": [{"if": ["$kernel.causal", 1, 0]}, 0]})"));
+    EXPECT_NO_THROW(umd::UmdCompiler::compile(d));
+}
+
+TEST(UmdCompiler, KernelFieldDoesNotUnifyWithArray)
+{
+    // DYNAMIC is a scalar wildcard: comparing a $kernel field to an array
+    // literal is a static type error, not a runtime-deferred check.
+    json d = sdpaDescriptor();
+    d["criteria"]["and"].push_back(json::parse(R"({"==": ["$kernel.tiles", [1, 2, 3]]})"));
+    EXPECT_THROW(umd::UmdCompiler::compile(d), umd::UmdCompileError);
+}
+
+TEST(UmdCompiler, KernelIsReservedAsPatternVariable)
+{
+    json d = sdpaDescriptor();
+    d["nodes"][0]["operands"]["q"] = "$kernel"; // bind a tensor var to the reserved root
+    EXPECT_THROW(umd::UmdCompiler::compile(d), umd::UmdCompileError);
+}
+
+TEST(UmdCompiler, KernelIsReservedAsNodeId)
+{
+    json d = sdpaDescriptor();
+    d["nodes"][0]["id"] = "kernel";
+    EXPECT_THROW(umd::UmdCompiler::compile(d), umd::UmdCompileError);
+}
+
+TEST(UniversalGraphMatcher, ReportsKernelMetadataReference)
+{
+    const umd::UniversalGraphMatcher mk(sdpaKernelDescriptor());
+    EXPECT_TRUE(mk.referencesKernelMetadata());
+    const umd::UniversalGraphMatcher m = makeSdpaMatcher();
+    EXPECT_FALSE(m.referencesKernelMetadata());
+}
+
+TEST(UniversalGraphMatcher, TwoArgMatchThrowsWhenDescriptorNeedsKernel)
+{
+    const umd::UniversalGraphMatcher m(sdpaKernelDescriptor());
+    auto builder = buildSdpaGraph({2, 8, 16, 128}, data::DataType::BFLOAT16);
+    fbu::GraphWrapper const g(builder.GetBufferPointer(), builder.GetSize());
+    // Wrong overload for a kernel-referencing UMD -> programming error.
+    EXPECT_THROW(m.match(K_DEVICE, g), std::logic_error);
+}
+
+TEST(UniversalGraphMatcher, MatchesWithSuppliedKernelMetadata)
+{
+    const umd::UniversalGraphMatcher m(sdpaKernelDescriptor());
+    auto builder = buildSdpaGraph({2, 8, 16, 128}, data::DataType::BFLOAT16);
+    fbu::GraphWrapper const g(builder.GetBufferPointer(), builder.GetSize());
+
+    // head_dim matches $q.head_size (128) -> match; the value is queryable.
+    const umd::MatchResult r = m.match(K_DEVICE, g, json{{"head_dim", 128}});
+    ASSERT_TRUE(r.matched);
+    EXPECT_EQ(r.bindings.get("$kernel.head_dim").asInt(), 128);
+}
+
+TEST(UniversalGraphMatcher, DeclinesWhenKernelMetadataMismatches)
+{
+    const umd::UniversalGraphMatcher m(sdpaKernelDescriptor());
+    auto builder = buildSdpaGraph({2, 8, 16, 128}, data::DataType::BFLOAT16);
+    fbu::GraphWrapper const g(builder.GetBufferPointer(), builder.GetSize());
+    // head_dim != $q.head_size (128) -> criterion false -> decline.
+    EXPECT_FALSE(m.match(K_DEVICE, g, json{{"head_dim", 64}}).matched);
+}
+
+TEST(UniversalGraphMatcher, EmptyKernelMetadataDeclinesComparison)
+{
+    // Defensive edge case: production metadata is fully resolved so every
+    // referenced field is present, but an unbound/empty document must not
+    // throw -- $kernel.head_dim reads null -> comparison false -> decline.
+    const umd::UniversalGraphMatcher m(sdpaKernelDescriptor());
+    auto builder = buildSdpaGraph({2, 8, 16, 128}, data::DataType::BFLOAT16);
+    fbu::GraphWrapper const g(builder.GetBufferPointer(), builder.GetSize());
+    EXPECT_NO_THROW({ EXPECT_FALSE(m.match(K_DEVICE, g, json::object()).matched); });
+}

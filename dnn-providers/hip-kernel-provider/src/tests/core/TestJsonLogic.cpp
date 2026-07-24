@@ -11,6 +11,7 @@
 #include <ostream>
 #include <set>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "hip_kernel_provider_common/JsonDataSource.hpp"
@@ -240,6 +241,26 @@ TEST(JsonLogic, VariablesCollectsReferencedPaths)
     // literal-only expressions reference nothing
     EXPECT_EQ(vars(json({{"+", json::array({1, 2})}})), (S{}));
     EXPECT_TRUE(vars(json(42)).empty());
+}
+
+TEST(JsonLogic, ReferencesVariableRootMatchesFirstToken)
+{
+    const auto refs = [](const json& rule, std::string_view root) {
+        const auto expr = jlogic::compile<jlogic::JsonDataSource>(rule);
+        return jlogic::referencesVariableRoot(expr, root);
+    };
+    // matches on the first path token, before any '.' or '[' separator
+    EXPECT_TRUE(refs(json({{"<", json::array({"$kernel.tile_m", "$device.lds_size"})}}), "kernel"));
+    EXPECT_TRUE(refs(json({{"<", json::array({"$kernel.tile_m", "$device.lds_size"})}}), "device"));
+    EXPECT_TRUE(refs(json({{"==", json::array({"$kernel.vec[0]", 1})}}), "kernel"));
+    // a bare root (no field) still matches its own token
+    EXPECT_TRUE(refs(json("$kernel"), "kernel"));
+    // no variable has that root
+    EXPECT_FALSE(refs(json({{"==", json::array({"$q.head_size", 128})}}), "kernel"));
+    // a root is a whole-token match, not a prefix
+    EXPECT_FALSE(refs(json("$kernelish.x"), "kernel"));
+    // literal-only expression references nothing
+    EXPECT_FALSE(refs(json({{"+", json::array({1, 2})}}), "kernel"));
 }
 
 TEST(JsonLogic, VariablesRangeIsLazyAndKeepsDuplicates)

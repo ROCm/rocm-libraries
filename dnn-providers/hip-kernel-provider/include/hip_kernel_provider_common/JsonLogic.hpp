@@ -55,6 +55,7 @@
 #include <ostream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <type_traits>
 #include <utility>
 #include <variant>
@@ -1102,6 +1103,25 @@ template <class DataT>
 Value evaluate(const nlohmann::json& rule, const DataT& data, char varSigil = '$')
 {
     return compile<DataT>(rule, varSigil)(data);
+}
+
+/// True when any variable referenced by `expr` has `root` as its first path
+/// token (the segment before the first '.'/'[' separator). The paths yielded by
+/// Expression::variables() are already sigil-stripped, so `root` is given
+/// without the sigil (e.g. "kernel"). Short-circuits on the first match.
+template <class DataT>
+bool referencesVariableRoot(const Expression<DataT>& expr, std::string_view root)
+{
+    for(const std::string& path : expr.variables())
+    {
+        const std::size_t end = path.find_first_of(".[");
+        const std::string_view first(path.data(), end == std::string::npos ? path.size() : end);
+        if(first == root)
+        {
+            return true;
+        }
+    }
+    return false;
 }
 
 } // namespace hip_kernel_provider_common::jsonlogic

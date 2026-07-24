@@ -31,10 +31,12 @@
 #include "hip_kernel_provider_common/umd/UmdCompiler.hpp"
 
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <nlohmann/json.hpp>
 
 #include <algorithm>
 #include <cstdint>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -90,8 +92,46 @@ public:
         return *_umd;
     }
 
+    // True when this matcher's descriptor references `$kernel.<field>`. Such a
+    // descriptor must be matched with the kernel-metadata overload of match();
+    // the two-argument overload throws for it.
+    bool referencesKernelMetadata() const
+    {
+        return _umd->referencesKernelMetadata;
+    }
+
     // Match a graph against this matcher's single descriptor.
+    //
+    // Throws std::logic_error if the descriptor references `$kernel.<field>`:
+    // resolving those needs kernel metadata, so the caller must use the
+    // three-argument overload. Use referencesKernelMetadata() to route.
     MatchResult match(const DeviceProperties& device, const IGraph& graph) const
+    {
+        if(_umd->referencesKernelMetadata)
+        {
+            throw std::logic_error(
+                "UMD '" + _umd->id
+                + "' references $kernel metadata; call the kernel-metadata match overload");
+        }
+        return matchImpl(device, graph, nullptr);
+    }
+
+    // Match a graph against this matcher's single descriptor, resolving
+    // `$kernel.<field>` references against the supplied kernel metadata (a UKD's
+    // KMD values). An unresolved kernel field reads null (fail closed).
+    MatchResult match(const DeviceProperties& device,
+                      const IGraph& graph,
+                      const nlohmann::json& kernelMetadata) const
+    {
+        return matchImpl(device, graph, &kernelMetadata);
+    }
+
+private:
+    using INodeWrapper = hipdnn_flatbuffers_sdk::flatbuffer_utilities::INodeWrapper;
+
+    MatchResult matchImpl(const DeviceProperties& device,
+                          const IGraph& graph,
+                          const nlohmann::json* kernel) const
     {
         // Fail closed on an invalid or nodeless graph. nodeCount() tolerates a
         // null `nodes` field; nodeWrappers() would throw on it, so this guard
@@ -104,16 +144,14 @@ public:
         deviceMap.emplace("lds_size", jlogic::Value(device.ldsSize));
         deviceMap.emplace("warp_size", jlogic::Value(device.warpSize));
 
-        return tryMatch(*_umd, graph, graph.nodeWrappers(), deviceMap);
+        return tryMatch(*_umd, graph, graph.nodeWrappers(), deviceMap, kernel);
     }
-
-private:
-    using INodeWrapper = hipdnn_flatbuffers_sdk::flatbuffer_utilities::INodeWrapper;
 
     MatchResult tryMatch(const CompiledUmd& umd,
                          const IGraph& graph,
                          const std::vector<std::unique_ptr<INodeWrapper>>& wrappers,
-                         const std::unordered_map<std::string, jlogic::Value>& deviceMap) const
+                         const std::unordered_map<std::string, jlogic::Value>& deviceMap,
+                         const nlohmann::json* kernel) const
     {
         // allow_override_shape gate (RFC 0018 §3): decline override-shape graphs
         // unless the descriptor opts in.
@@ -149,7 +187,8 @@ private:
         std::vector<const INodeWrapper*> used;
         std::size_t steps = 0;
         MatchResult result;
-        if(assignNode(umd, graph, deviceMap, candidates, 0, assignment, used, steps, result))
+        if(assignNode(
+               umd, graph, deviceMap, kernel, candidates, 0, assignment, used, steps, result))
         {
             return result;
         }
@@ -163,6 +202,7 @@ private:
     bool assignNode(const CompiledUmd& umd,
                     const IGraph& graph,
                     const std::unordered_map<std::string, jlogic::Value>& deviceMap,
+                    const nlohmann::json* kernel,
                     const std::vector<std::vector<const INodeWrapper*>>& candidates,
                     std::size_t index,
                     std::vector<const INodeWrapper*>& assignment,
@@ -172,7 +212,7 @@ private:
     {
         if(index == umd.nodes.size())
         {
-            return finalize(umd, graph, deviceMap, assignment, result);
+            return finalize(umd, graph, deviceMap, kernel, assignment, result);
         }
         for(const INodeWrapper* cand : candidates[index])
         {
@@ -186,8 +226,16 @@ private:
             }
             assignment[index] = cand;
             used.push_back(cand);
-            if(assignNode(
-                   umd, graph, deviceMap, candidates, index + 1, assignment, used, steps, result))
+            if(assignNode(umd,
+                          graph,
+                          deviceMap,
+                          kernel,
+                          candidates,
+                          index + 1,
+                          assignment,
+                          used,
+                          steps,
+                          result))
             {
                 return true;
             }
@@ -203,6 +251,7 @@ private:
     static bool finalize(const CompiledUmd& umd,
                          const IGraph& graph,
                          const std::unordered_map<std::string, jlogic::Value>& deviceMap,
+                         const nlohmann::json* kernel,
                          const std::vector<const INodeWrapper*>& assignment,
                          MatchResult& result)
     {
@@ -250,6 +299,10 @@ private:
         }
 
         BindingContext ctx(&graph, deviceMap);
+        if(kernel != nullptr)
+        {
+            ctx.bindKernelMetadata(*kernel);
+        }
         for(std::size_t i = 0; i < umd.nodes.size(); ++i)
         {
             ctx.bindNode(umd.nodes[i].id, umd.nodes[i].opSchema, assignment[i]->attributes());
