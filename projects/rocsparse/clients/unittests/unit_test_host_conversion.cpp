@@ -1899,3 +1899,221 @@ TEST_F(ConversionSparseToSparse, invalid_args)
     EXPECT_EQ(rocsparse_destroy_spmat_descr(csr), rocsparse_status_success);
     EXPECT_EQ(rocsparse_destroy_spmat_descr(coo), rocsparse_status_success);
 }
+
+// ===========================================================================
+// SECOND COVERAGE WAVE
+//
+// Extra tests aimed at conversion lines still uncovered after the first wave.
+//
+// Notes on lines that are NOT reachable on this configuration (documented here
+// rather than chased with impossible tests):
+//   * rocsparse_dense2csx.hpp WF_SIZE==64 kernel-launch `else` blocks
+//     (dense2csr_kernel / dense2csc_kernel) are selected only when
+//     handle->wavefront_size != 32. gfx1201 is a wave32 part, so only the
+//     WF_SIZE==32 branch executes; the else is dead on this GPU (independent of
+//     data type -- the type only changes the compile-time NROWS_PER_BLOCK).
+//   * rocsparse_dense2csx.hpp trailing `return rocsparse_status_invalid_value`
+//     is wrapped in LCOV_EXCL and is unreachable (switch over row/column only).
+//   * rocsparse_dense2csx_impl.hpp fallback rocprim allocation branch
+//     (buffer_size < temp_storage_bytes) does not trigger: the handle buffer is
+//     >= 1 MiB and the inclusive-scan scratch never exceeds it for testable
+//     sizes. The symbolic guard (csx_val && csx_col both null with nnz != 0) is
+//     rejected earlier by the CHECKARG_ARRAY guards, so it is defensive only.
+//   * rocsparse_sparse_to_sparse.cpp enum_utils::to_string(alg/stage) overloads
+//     have no callers anywhere in the library (CHECKARG_ENUM uses is_invalid),
+//     and are wrapped in LCOV_EXCL; the checkarg/impl quick-return blocks are
+//     dead because sparse_to_sparse_quickreturn always returns _continue.
+// ===========================================================================
+
+namespace
+{
+    // Parametrized dense_to_sparse over a diagonal matrix (nnz = min(m,n)).
+    // Used to drive dense2csr / dense2csc kernels for f64 and complex types at
+    // sizes large enough (>= 32) to launch multiple blocks, in both memory
+    // orders.
+    template <typename T>
+    static void check_dense_to_sparse_sized(rocsparse_handle     handle,
+                                            rocsparse_order      order,
+                                            rocsparse_format     format,
+                                            rocsparse_int        m,
+                                            rocsparse_int        n,
+                                            rocsparse_index_base base)
+    {
+        const int64_t ld  = (order == rocsparse_order_column) ? (int64_t)m : (int64_t)n;
+        const size_t  sz  = (order == rocsparse_order_column) ? (size_t)ld * n : (size_t)ld * m;
+        const rocsparse_int diag = (m < n) ? m : n;
+
+        std::vector<T> hA(sz, rocsparse_ut::scalar<T>(0.0f));
+        for(rocsparse_int i = 0; i < diag; ++i)
+        {
+            const size_t idx = (order == rocsparse_order_column)
+                                   ? (size_t)i + (size_t)i * (size_t)ld
+                                   : (size_t)i * (size_t)ld + (size_t)i;
+            hA[idx]          = rocsparse_ut::scalar<T>(1.0f);
+        }
+        device_vector<T> A{hA};
+        ASSERT_TRUE(A.ptr);
+
+        rocsparse_dnmat_descr dn = nullptr;
+        ASSERT_EQ(rocsparse_create_dnmat_descr(&dn, m, n, ld, A.ptr, dt_of<T>(), order),
+                  rocsparse_status_success);
+
+        device_vector<rocsparse_int> offsets{(size_t)((m > n ? m : n) + 1)};
+        ASSERT_TRUE(offsets.ptr);
+
+        rocsparse_spmat_descr sp = nullptr;
+        if(format == rocsparse_format_csr)
+        {
+            ASSERT_EQ(rocsparse_create_csr_descr(&sp, m, n, 0, offsets.ptr, nullptr, nullptr,
+                                                 it_of<int32_t>(), it_of<int32_t>(), base,
+                                                 dt_of<T>()),
+                      rocsparse_status_success);
+        }
+        else
+        {
+            ASSERT_EQ(rocsparse_create_csc_descr(&sp, m, n, 0, offsets.ptr, nullptr, nullptr,
+                                                 it_of<int32_t>(), it_of<int32_t>(), base,
+                                                 dt_of<T>()),
+                      rocsparse_status_success);
+        }
+
+        size_t buffer_size = 0;
+        ASSERT_EQ(rocsparse_dense_to_sparse(handle, dn, sp, rocsparse_dense_to_sparse_alg_default,
+                                            &buffer_size, nullptr),
+                  rocsparse_status_success);
+        device_vector<char> buffer{buffer_size ? buffer_size : size_t(1)};
+        ASSERT_TRUE(buffer.ptr);
+
+        ASSERT_EQ(rocsparse_dense_to_sparse(handle, dn, sp, rocsparse_dense_to_sparse_alg_default,
+                                            nullptr, buffer.ptr),
+                  rocsparse_status_success);
+
+        int64_t rows = 0, cols = 0, nnz = 0;
+        ASSERT_EQ(rocsparse_spmat_get_size(sp, &rows, &cols, &nnz), rocsparse_status_success);
+        EXPECT_EQ(nnz, diag);
+
+        device_vector<rocsparse_int> ind{(size_t)nnz};
+        device_vector<T>             val{(size_t)nnz};
+        ASSERT_TRUE(ind.ptr && val.ptr);
+        if(format == rocsparse_format_csr)
+        {
+            ASSERT_EQ(rocsparse_csr_set_pointers(sp, offsets.ptr, ind.ptr, val.ptr),
+                      rocsparse_status_success);
+        }
+        else
+        {
+            ASSERT_EQ(rocsparse_csc_set_pointers(sp, offsets.ptr, ind.ptr, val.ptr),
+                      rocsparse_status_success);
+        }
+
+        ASSERT_EQ(rocsparse_dense_to_sparse(handle, dn, sp, rocsparse_dense_to_sparse_alg_default,
+                                            &buffer_size, buffer.ptr),
+                  rocsparse_status_success);
+        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+
+        EXPECT_EQ(rocsparse_destroy_spmat_descr(sp), rocsparse_status_success);
+        EXPECT_EQ(rocsparse_destroy_dnmat_descr(dn), rocsparse_status_success);
+    }
+
+    template <typename T>
+    static void check_dense2coo_quickreturn(rocsparse_handle handle)
+    {
+        rocsparse_mat_descr descr = nullptr;
+        ASSERT_EQ(rocsparse_create_mat_descr(&descr), rocsparse_status_success);
+
+        // m == 0 quick return (dense2coo_checkarg returns success -> the typed C
+        // wrapper takes its `status != continue` success path and returns).
+        EXPECT_EQ(ut_dense2coo<T>(handle, 0, 4, descr, (const T*)nullptr, 0, nullptr, nullptr,
+                                  nullptr, nullptr),
+                  rocsparse_status_success);
+        // n == 0 quick return (ld >= m required by the earlier ld check).
+        EXPECT_EQ(ut_dense2coo<T>(handle, 3, 0, descr, (const T*)nullptr, 3, nullptr, nullptr,
+                                  nullptr, nullptr),
+                  rocsparse_status_success);
+
+        EXPECT_EQ(rocsparse_destroy_mat_descr(descr), rocsparse_status_success);
+    }
+} // namespace
+
+// Larger f64 / complex conversions in both memory orders. Drives the
+// dense2csr (direction_row) and dense2csc (direction_column) kernels through
+// the generic dense_to_sparse path at sizes that launch multiple blocks. (The
+// WF_SIZE==64 else branch remains wave64-only; see note above.)
+TEST_F(ConversionDense2csxOrder, generic_large_f64_complex)
+{
+    const rocsparse_int m = 48, n = 40;
+    for(rocsparse_order order : {rocsparse_order_column, rocsparse_order_row})
+    {
+        for(rocsparse_format fmt : {rocsparse_format_csr, rocsparse_format_csc})
+        {
+            check_dense_to_sparse_sized<double>(handle, order, fmt, m, n,
+                                                rocsparse_index_base_zero);
+            check_dense_to_sparse_sized<rocsparse_float_complex>(handle, order, fmt, m, n,
+                                                                 rocsparse_index_base_one);
+            check_dense_to_sparse_sized<rocsparse_double_complex>(handle, order, fmt, m, n,
+                                                                  rocsparse_index_base_zero);
+        }
+    }
+}
+
+// dense2coo quick-return guard (m == 0 / n == 0) for every precision, hitting
+// the checkarg early-out and each typed wrapper's success return.
+TEST_F(ConversionDense2csxOrder, dense2coo_quickreturn_all_types)
+{
+    check_dense2coo_quickreturn<float>(handle);
+    check_dense2coo_quickreturn<double>(handle);
+    check_dense2coo_quickreturn<rocsparse_float_complex>(handle);
+    check_dense2coo_quickreturn<rocsparse_double_complex>(handle);
+}
+
+// Batched source descriptor handling in rocsparse_create_sparse_to_sparse_descr:
+// a batched source is accepted (batched flag set) when both batch strides are
+// zero, and rejected with not_implemented when either stride is positive.
+TEST_F(ConversionSparseToSparse, batched_source_create)
+{
+    device_vector<rocsparse_int> row_ptr{std::vector<rocsparse_int>{0, 1, 2, 3}};
+    device_vector<rocsparse_int> col_ind{std::vector<rocsparse_int>{0, 1, 2}};
+    device_vector<float>         csr_val{std::vector<float>(3, 1.0f)};
+    device_vector<rocsparse_int> coo_row{(size_t)3};
+    device_vector<rocsparse_int> coo_col{(size_t)3};
+    device_vector<float>         coo_val{(size_t)3};
+    ASSERT_TRUE(row_ptr.ptr && col_ind.ptr && csr_val.ptr && coo_row.ptr && coo_col.ptr
+                && coo_val.ptr);
+
+    rocsparse_spmat_descr csr = nullptr, coo = nullptr;
+    ASSERT_EQ(ut_make_csr(&csr, row_ptr, col_ind, csr_val), rocsparse_status_success);
+    ASSERT_EQ(rocsparse_create_coo_descr(&coo, 3, 3, 3, coo_row.ptr, coo_col.ptr, coo_val.ptr,
+                                         rocsparse_indextype_i32, rocsparse_index_base_zero,
+                                         rocsparse_datatype_f32_r),
+              rocsparse_status_success);
+
+    // Accepted: batched source with zero strides.
+    ASSERT_EQ(rocsparse_csr_set_strided_batch(csr, 2, 0, 0), rocsparse_status_success);
+    rocsparse_sparse_to_sparse_descr s2s = nullptr;
+    EXPECT_EQ(rocsparse_create_sparse_to_sparse_descr(&s2s, csr, coo,
+                                                      rocsparse_sparse_to_sparse_alg_default),
+              rocsparse_status_success);
+    ASSERT_NE(s2s, nullptr);
+    EXPECT_EQ(rocsparse_destroy_sparse_to_sparse_descr(s2s), rocsparse_status_success);
+
+    // Rejected: positive offsets batch stride -> not_implemented.
+    ASSERT_EQ(rocsparse_csr_set_strided_batch(csr, 2, 8, 0), rocsparse_status_success);
+    s2s = nullptr;
+    EXPECT_EQ(rocsparse_create_sparse_to_sparse_descr(&s2s, csr, coo,
+                                                      rocsparse_sparse_to_sparse_alg_default),
+              rocsparse_status_not_implemented);
+    if(s2s != nullptr)
+        EXPECT_EQ(rocsparse_destroy_sparse_to_sparse_descr(s2s), rocsparse_status_success);
+
+    // Rejected: positive columns/values batch stride -> not_implemented.
+    ASSERT_EQ(rocsparse_csr_set_strided_batch(csr, 2, 0, 8), rocsparse_status_success);
+    s2s = nullptr;
+    EXPECT_EQ(rocsparse_create_sparse_to_sparse_descr(&s2s, csr, coo,
+                                                      rocsparse_sparse_to_sparse_alg_default),
+              rocsparse_status_not_implemented);
+    if(s2s != nullptr)
+        EXPECT_EQ(rocsparse_destroy_sparse_to_sparse_descr(s2s), rocsparse_status_success);
+
+    EXPECT_EQ(rocsparse_destroy_spmat_descr(csr), rocsparse_status_success);
+    EXPECT_EQ(rocsparse_destroy_spmat_descr(coo), rocsparse_status_success);
+}
