@@ -543,7 +543,7 @@ static rocke_tensor_descriptor_t* wgrad_make_dw_descriptor(rocke_ir_builder_t* b
     {
         /* naive coords: first dim "m" = K (output channels), rest are spatial */
         int lengths[5] = {p->K, p->Z, p->Y, p->X, p->C};
-        const char* coords[5] = {"m", "z", "y", "x", "c"};
+        const char* coords[5] = {"k_out", "z", "y", "x", "c"};
         rocke_tensor_descriptor_t* desc
             = rocke_tensor_descriptor_naive(b, "dW_kzyxc", lengths, 5, NULL, coords, 5);
         if(desc == NULL)
@@ -552,8 +552,7 @@ static rocke_tensor_descriptor_t* wgrad_make_dw_descriptor(rocke_ir_builder_t* b
         int dims[4] = {p->Z, p->Y, p->X, p->C};
         const rocke_transform_t* xforms[4];
         int n_x = 0;
-        /* unmerge "k_out" (= n_wg, filter+channel N dimension) into spatial dims */
-        xforms[n_x] = rocke_unmerge_magic(b, "k_out", into, 4, dims);
+        xforms[n_x] = rocke_unmerge_magic(b, "n_wg", into, 4, dims);
         if(xforms[n_x] == NULL)
             return NULL;
         n_x++;
@@ -572,9 +571,9 @@ static rocke_tensor_descriptor_t* wgrad_make_dw_descriptor(rocke_ir_builder_t* b
         return rocke_tensor_descriptor_transform(b, desc, xforms, n_x);
     }
 
-    /* 2-D: naive("dW_kyxc", [K,Y,X,C], coords=["m","y","x","c"]) */
+    /* 2-D: naive("dW_kyxc", [K,Y,X,C], coords=["k_out","y","x","c"]) */
     int lengths[4] = {p->K, p->Y, p->X, p->C};
-    const char* coords[4] = {"m", "y", "x", "c"};
+    const char* coords[4] = {"k_out", "y", "x", "c"};
     rocke_tensor_descriptor_t* desc
         = rocke_tensor_descriptor_naive(b, "dW_kyxc", lengths, 4, NULL, coords, 4);
     if(desc == NULL)
@@ -583,7 +582,7 @@ static rocke_tensor_descriptor_t* wgrad_make_dw_descriptor(rocke_ir_builder_t* b
     int dims[3] = {p->Y, p->X, p->C};
     const rocke_transform_t* xforms[4];
     int n_x = 0;
-    xforms[n_x] = rocke_unmerge_magic(b, "k_out", into, 3, dims);
+    xforms[n_x] = rocke_unmerge_magic(b, "n_wg", into, 3, dims);
     if(xforms[n_x] == NULL)
         return NULL;
     n_x++;
@@ -620,97 +619,694 @@ struct rocke_tensor_descriptor* rocke_wgrad_make_dw_descriptor(rocke_ir_builder_
     return wgrad_make_dw_descriptor(b, p);
 }
 
-// (No custom closures needed: rocke_conv_a_descriptor and rocke_conv_b_descriptor
-//  read ctx->A_desc / ctx->B_desc with coords ("m","k") and ("k_out","k_gemm")
-//  respectively, which our wgrad descriptors are built to satisfy.)
+// Wgrad A-descriptor (dY): mirrors Python dy_descriptor closure order.
+//
+// Python wgrad dy_descriptor (build_implicit_gemm_conv_wgrad.py):
+//     k_out   = b_.add(block_m_off_v, row)   ← m_val computed FIRST
+//     k_wg_red = b_.add(k_off_capture[0], col) ← k_val computed SECOND
+//     return dY_desc.offset(b_, k_wg=k_wg_red, k_out=k_out)
+//
+// The forward rocke_conv_a_descriptor computes k_val first then m_val, which
+// matches the forward Python a_descriptor.  Wgrad is opposite — m_val first —
+// so we need a wgrad-specific closure rather than reusing the forward one.
+static rocke_value_t* wgrad_dy_descriptor(rocke_ir_builder_t* b,
+                                          rocke_value_t* row,
+                                          rocke_value_t* col,
+                                          rocke_value_t** out_valid,
+                                          void* ctx_user)
+{
+    rocke_conv_build_ctx_t* ctx = (rocke_conv_build_ctx_t*)ctx_user;
+    /* k_out = block_m_off + row (= output channel, m_val) — computed FIRST */
+    rocke_value_t* m_val = rocke_b_add(b, ctx->block_m_off_v, row);
+    /* k_wg_red = k_off + col (= output position, k_val) — computed SECOND */
+    rocke_value_t* k_val = rocke_b_add(b, ctx->k_off_capture, col);
+    const char* names[2] = {"m", "k"};
+    rocke_value_t* vals[2] = {m_val, k_val};
+    rocke_value_t* off = NULL;
+    rocke_value_t* valid = NULL;
+    rocke_transforms_descriptor_offset(b, ctx->A_desc, names, vals, 2, &off, &valid);
+    if(out_valid)
+        *out_valid = valid;
+    return off;
+}
+
+// Wgrad a_load_override: calls the sync coalesced loader with wgrad_dy_descriptor
+// instead of the shared rocke_conv_a_descriptor, preserving Python's
+// m_val-first / k_val-second SSA emission order inside the dy_descriptor closure.
+static void wgrad_a_load_override(rocke_ir_builder_t* b,
+                                  const rocke_implicit_gemm_conv_spec_t* /*spec*/,
+                                  rocke_value_t* /*k_off*/, /* already in ctx->k_off_capture */
+                                  rocke_value_t* A_dst,
+                                  struct rocke_warp_grid* /*grid*/,
+                                  void* /*input_cache_context*/,
+                                  void* user)
+{
+    rocke_conv_build_ctx_t* ctx = (rocke_conv_build_ctx_t*)user;
+    rocke_coalesced_tile_loader_load(
+        b, &ctx->a_sync_loader, ctx->tid, A_dst, wgrad_dy_descriptor, ctx, ctx->a_rsrc, NULL);
+}
 
 // ---------------------------------------------------------------------------
-// Build helper: build a forward-conv compatible spec from wgrad spec
+// Additional includes for split-K epilogue and ctx init helpers
+// ---------------------------------------------------------------------------
+#include "rocke/arena.h"
+#include "rocke/helper_rocke.helpers.atoms.h"
+#include "rocke/helper_rocke.helpers.distribution.h"
+#include "rocke/helper_rocke.helpers.epilogues.h"
+#include "rocke/helper_rocke.helpers.grid.h"
+#include "rocke/helper_rocke.helpers.schedule.h"
+
+// ---------------------------------------------------------------------------
+// Split-K atomic epilogue for wgrad (fp32 only for now)
 // ---------------------------------------------------------------------------
 
 /*
- * Map wgrad spec fields onto a forward ImplicitGemmConvSpec so we can call
- * rocke_conv_build_ctx_init.  The problem is adapted:
- *   - M_fwd  = wg_M (= K, output channels)  -> set as N*Ho*Wo by using N=wg_M, Ho=Wo=1
- *   - N_fwd  = wg_N (= Y*X*C)               -> set via K and a 1-kernel problem
- *   - K_gemm = wg_K (= N*Ho*Wo)             -> set via Y=wg_K/C, X=C, C=1... tricky
+ * Emit per-lane atomic-adds into dW for split_k > 1.
+ * Mirrors Python _emit_wgrad_split_k_epilogue for fp32, bf16, and fp16 outputs.
  *
- * Actually: the ctx_init uses tile_m/tile_n/tile_k, block_size, mfmas_m/n for
- * geometry, and the GEMM loop bounds come from ctx->c_K_gemm which is
- * p->K_gemm.  We need to supply a problem where K_gemm == wg_K.
- *
- * Simplest adapter: set the problem so that Y*X*C == wg_K and K == wg_N and
- * N*Ho*Wo == wg_M.  We override the descriptors afterwards so the actual
- * address logic doesn't matter — only the loop bound c_K_gemm is used from p.
- *
- * Because we override A_desc / B_desc after ctx_init, the only field the
- * k-loop drivers use from p is K_gemm (via c_K_gemm = const_i32(p.K_gemm)).
- * We also need wg_M and wg_N for bounds in the epilogue; we stash those in
- * the adapted problem as K (= N_gemm in the forward sense, used for epilogue
- * bounds) and M (used for epilogue bounds).
- *
- * Forward conv: epilogue bounds = (p.M, p.N_gemm) = (N*Ho*Wo, K).
- * Wgrad:        epilogue bounds = (wg_M, wg_N) = (K, Y*X*C).
- *
- * So we set: adapter_problem.K = wg_N, and adapter_problem.N*Ho*Wo = wg_M,
- * and Y*X*C (K_gemm) = wg_K.  Easy way: Y=wg_K, X=1, C=1, K=wg_N, N=wg_M, Hi=Wi=1.
- *
- * Then M = N*1*1 = wg_M, N_gemm = K = wg_N, K_gemm = Y*1*1 = wg_K.  Perfect.
+ * fp32: scalar global_atomic_add per slot (monotonic).
+ * fp16/bf16: _emit_single_packed_atomic per slot — packs into <2 x dtype> with
+ *   the correct even/odd column placement, then global_atomic_add_pk_f16/bf16.
  */
-static rocke_conv_problem_t make_adapter_problem(const rocke_implicit_gemm_conv_wgrad_spec_t* s)
+static void wgrad_emit_split_k_epilogue_f32(rocke_ir_builder_t* b,
+                                            const rocke_conv_build_ctx_t* ctx,
+                                            const rocke_implicit_gemm_conv_wgrad_spec_t* spec,
+                                            rocke_value_t* dw_ptr,
+                                            int wg_M,
+                                            int wg_N)
 {
-    int wg_M = rocke_wgrad_conv_spec_wg_M(s);
-    int wg_N = rocke_wgrad_conv_spec_wg_N(s);
-    int wg_K = rocke_wgrad_conv_spec_wg_K(s);
-    /* N=wg_M, Hi=1, Wi=1, C=1, K=wg_N, Y=wg_K, X=1 */
-    return rocke_conv_problem_default(wg_M, 1, 1, 1, wg_N, wg_K, 1);
+    const rocke_mfma_atom_t* atom = ctx->atom;
+    int mfmas_m = ctx->mfmas_m;
+    int mfmas_n = ctx->mfmas_n;
+    int c_per_lane = ctx->c_per_lane;
+    const char* dtype_d = spec->dtype_d ? spec->dtype_d : "fp16";
+    bool is_fp32 = (strcmp(dtype_d, "fp32") == 0);
+    bool is_bf16 = (strcmp(dtype_d, "bf16") == 0);
+    (void)is_bf16; /* used conditionally below */
+
+    /* Python emission order: warp offsets first, then c_warp_params / c_dist. */
+    rocke_value_t* warp_m_off_v
+        = rocke_b_mul(b, ctx->warp_m_idx, rocke_b_const_i32(b, mfmas_m * spec->warp_tile_m));
+    rocke_value_t* warp_n_off_v
+        = rocke_b_mul(b, ctx->warp_n_idx, rocke_b_const_i32(b, mfmas_n * spec->warp_tile_n));
+    rocke_value_t* block_warp_m_off = rocke_b_add(b, ctx->block_m_off_v, warp_m_off_v);
+    rocke_value_t* block_warp_n_off = rocke_b_add(b, ctx->block_n_off_v, warp_n_off_v);
+
+    int m0, m_lane, m1, n_lane;
+    if(rocke_b_c_warp_params(b, atom, &m0, &m_lane, &m1, &n_lane) != ROCKE_OK)
+        return;
+
+    rocke_tile_distribution_encoding_t* enc = rocke_make_c_warp_dstr_encoding(b, atom);
+    if(enc == NULL)
+        return;
+    rocke_tile_distribution_t* c_dist = rocke_make_static_tile_distribution(b, enc);
+    if(c_dist == NULL)
+        return;
+
+    rocke_value_t* c_nlane_v = rocke_b_const_i32(b, n_lane);
+    rocke_value_t* n_in_atom = rocke_b_mod(b, ctx->lane, c_nlane_v);
+    rocke_value_t* m_blk = rocke_b_div(b, ctx->lane, c_nlane_v);
+    rocke_value_t* p_lane_subs[2] = {m_blk, n_in_atom};
+    rocke_value_t* const* p_arr[1] = {p_lane_subs};
+    int p_counts[1] = {2};
+
+    /* Pre-compute per-slot (row, col) within the atom.
+     * Python creates wg_M_v / wg_N_v AFTER this decode loop, so defer them.
+     * Python: kc_m1 = c_warp_params(atom)[2] = m1 (index 2, not m0=index 0).
+     * ys = [i // kc_m1, i % kc_m1] -> [i // m1, i % m1]. */
+    rocke_value_t* slot_rows[ROCKE_CONV_MAX_ACCS * 4]; /* generous */
+    rocke_value_t* slot_cols[ROCKE_CONV_MAX_ACCS * 4];
+    for(int i = 0; i < c_per_lane; ++i)
+    {
+        rocke_value_t* y0 = rocke_b_const_i32(b, i / m1); /* i // kc_m1 */
+        rocke_value_t* y1 = rocke_b_const_i32(b, i % m1); /* i % kc_m1 */
+        rocke_value_t* ys[2] = {y0, y1};
+        rocke_value_t* out_x[2] = {NULL, NULL};
+        rocke_tile_distribution_calculate_x(b, c_dist, ys, 2, p_arr, p_counts, 1, out_x, 2);
+        slot_rows[i] = out_x[0];
+        slot_cols[i] = out_x[1];
+    }
+
+    /* Python creates wg_M_v / wg_N_v after the slot decode loop. */
+    rocke_value_t* wg_M_v = rocke_b_const_i32(b, wg_M);
+    rocke_value_t* wg_N_v = rocke_b_const_i32(b, wg_N);
+
+    int flat = 0;
+    for(int mi = 0; mi < mfmas_m; ++mi)
+    {
+        /* atom_m_base = add(block_warp_m_off, mi * warp_tile_m) */
+        rocke_value_t* atom_m_base
+            = rocke_b_add(b, block_warp_m_off, rocke_b_const_i32(b, mi * spec->warp_tile_m));
+        for(int ni = 0; ni < mfmas_n; ++ni)
+        {
+            rocke_value_t* acc = ctx->final_accs[flat++];
+            rocke_value_t* atom_n_base
+                = rocke_b_add(b, block_warp_n_off, rocke_b_const_i32(b, ni * spec->warp_tile_n));
+
+            for(int i = 0; i < c_per_lane; ++i)
+            {
+                rocke_value_t* c_m = rocke_b_add(b, atom_m_base, slot_rows[i]);
+                rocke_value_t* c_n = rocke_b_add(b, atom_n_base, slot_cols[i]);
+                /* Python: val = vec_extract evaluated before _emit_scalar_atomic body */
+                rocke_value_t* val_f32 = rocke_b_vec_extract(b, acc, i);
+
+                if(is_fp32)
+                {
+                    /* _emit_scalar_atomic fp32 path:
+                     *   c_off = add(mul(c_m, wg_N_v), c_n)
+                     *   ok    = land(cmp_lt(c_m, wg_M_v), cmp_lt(c_n, wg_N_v))
+                     *   scf_if(ok): global_atomic_add(ptr, c_off, val) */
+                    rocke_value_t* c_off = rocke_b_add(b, rocke_b_mul(b, c_m, wg_N_v), c_n);
+                    rocke_value_t* m_ok = rocke_b_cmp_lt(b, c_m, wg_M_v);
+                    rocke_value_t* n_ok = rocke_b_cmp_lt(b, c_n, wg_N_v);
+                    rocke_value_t* ok = rocke_b_land(b, m_ok, n_ok);
+                    rocke_if_t if_op = rocke_b_scf_if(b, ok);
+                    rocke_b_region_enter(b, if_op.then_region);
+                    rocke_b_global_atomic_add(b, dw_ptr, c_off, val_f32, NULL);
+                    rocke_b_region_leave(b);
+                }
+                else
+                {
+                    /* _emit_single_packed_atomic for fp16/bf16:
+                     *   zero = trunc_f32_to_dtype(const_f32(0.0))
+                     *   val  = trunc_f32_to_dtype(val_f32)
+                     *   m_ok = cmp_lt(c_m, wg_M_v); n_ok = cmp_lt(c_n, wg_N_v)
+                     *   scf_if(land(m_ok, n_ok)):
+                     *     c_n_is_odd = mod(c_n, 2)
+                     *     is_odd = cmp_ne(c_n_is_odd, 0)
+                     *     c_n_even  = sub(c_n, c_n_is_odd)
+                     *     c_off_even = add(mul(c_m, wg_N_v), c_n_even)
+                     *     v_even = select(is_odd, zero, val)
+                     *     v_odd  = select(is_odd, val, zero)
+                     *     vec    = vec_pack([v_even, v_odd])
+                     *     global_atomic_add_pk_f16/bf16(ptr, c_off_even, vec) */
+                    rocke_value_t* zero
+                        = (is_bf16) ? rocke_b_trunc_f32_to_bf16(b, rocke_b_const_f32(b, 0.0))
+                                    : rocke_b_trunc_f32_to_f16(b, rocke_b_const_f32(b, 0.0));
+                    rocke_value_t* val = (is_bf16) ? rocke_b_trunc_f32_to_bf16(b, val_f32)
+                                                   : rocke_b_trunc_f32_to_f16(b, val_f32);
+                    rocke_value_t* m_ok = rocke_b_cmp_lt(b, c_m, wg_M_v);
+                    rocke_value_t* n_ok = rocke_b_cmp_lt(b, c_n, wg_N_v);
+                    rocke_value_t* ok = rocke_b_land(b, m_ok, n_ok);
+                    rocke_if_t if_op = rocke_b_scf_if(b, ok);
+                    rocke_b_region_enter(b, if_op.then_region);
+                    {
+                        rocke_value_t* c2 = rocke_b_const_i32(b, 2);
+                        rocke_value_t* c_n_is_odd = rocke_b_mod(b, c_n, c2);
+                        rocke_value_t* is_odd
+                            = rocke_b_cmp_ne(b, c_n_is_odd, rocke_b_const_i32(b, 0));
+                        rocke_value_t* c_n_even = rocke_b_sub(b, c_n, c_n_is_odd);
+                        rocke_value_t* c_off_even
+                            = rocke_b_add(b, rocke_b_mul(b, c_m, wg_N_v), c_n_even);
+                        rocke_value_t* v_even = rocke_b_select(b, is_odd, zero, val);
+                        rocke_value_t* v_odd = rocke_b_select(b, is_odd, val, zero);
+                        rocke_value_t* elems[2] = {v_even, v_odd};
+                        rocke_value_t* vec = rocke_b_vec_pack(b, elems, 2, val->type);
+                        if(is_bf16)
+                            rocke_b_global_atomic_add_pk_bf16(b, dw_ptr, c_off_even, vec, NULL);
+                        else
+                            rocke_b_global_atomic_add_pk_f16(b, dw_ptr, c_off_even, vec, NULL);
+                    }
+                    rocke_b_region_leave(b);
+                }
+            }
+        }
+    }
 }
 
-static rocke_implicit_gemm_conv_spec_t
-    make_adapter_fwd_spec(const rocke_implicit_gemm_conv_wgrad_spec_t* s,
-                          const rocke_conv_problem_t* adapter_p)
+// ---------------------------------------------------------------------------
+// Wgrad direct epilogue (split_k == 1, default path)
+// Mirrors Python _emit_wgrad_direct_epilogue:
+//   DirectEpilogue(atom, grid, out_dtype).store(b, accs, addr_fn=dw_addr,
+//       d_rsrc=dw_rsrc, bounds=(wg_M, wg_N))
+// where dw_addr queries dW_desc with ("k_out"=m_val, "n_wg"=n_val).
+// ---------------------------------------------------------------------------
+
+struct WgradDwAddrCtx
 {
-    rocke_implicit_gemm_conv_spec_t fwd = rocke_implicit_gemm_conv_spec_default();
-    fwd.problem = *adapter_p;
-    fwd.name = s->name ? s->name : "conv_igemm_wgrad";
-    fwd.tile_m = s->tile_m;
-    fwd.tile_n = s->tile_n;
-    fwd.tile_k = s->tile_k;
-    fwd.warp_m = s->warp_m;
-    fwd.warp_n = s->warp_n;
-    fwd.warp_tile_m = s->warp_tile_m;
-    fwd.warp_tile_n = s->warp_tile_n;
-    fwd.warp_tile_k = s->warp_tile_k;
-    fwd.wave_size = s->wave_size;
-    fwd.pipeline = s->pipeline;
-    fwd.epilogue = s->epilogue;
-    fwd.async_dma = s->async_dma;
-    fwd.unroll_k = s->unroll_k;
-    fwd.dtype_a = s->dtype_a;
-    fwd.dtype_b = s->dtype_b;
-    fwd.dtype_d = s->dtype_d;
-    fwd.dtype_acc = s->dtype_acc;
-    /* lds_k_pad */
-    fwd.has_lds_k_pad = s->has_lds_k_pad;
-    fwd.lds_k_pad = s->lds_k_pad;
+    rocke_tensor_descriptor_t* dW_desc;
+};
+
+static rocke_value_t* wgrad_dw_addr(rocke_ir_builder_t* b,
+                                    rocke_value_t* m_global,
+                                    rocke_value_t* n_global,
+                                    rocke_value_t** out_valid,
+                                    void* user)
+{
+    WgradDwAddrCtx* wc = static_cast<WgradDwAddrCtx*>(user);
+    /* Python: dW_desc.offset(b_, k_out=m_val, n_wg=n_val)
+     * dW_desc top-level coords: ("k_out" = output channel, "n_wg" = filter+chan).
+     * The epilogue calls addr_fn(m_global=output_channel, n_global=filter+channel). */
+    const char* names[2] = {"k_out", "n_wg"};
+    rocke_value_t* vals[2] = {m_global, n_global};
+    rocke_value_t* off = NULL;
+    rocke_value_t* valid = NULL;
+    rocke_transforms_descriptor_offset(b, wc->dW_desc, names, vals, 2, &off, &valid);
+    if(out_valid)
+        *out_valid = valid;
+    return off;
+}
+
+static void wgrad_emit_direct_epilogue(rocke_ir_builder_t* b,
+                                       const rocke_conv_build_ctx_t* ctx,
+                                       const rocke_implicit_gemm_conv_wgrad_spec_t* spec,
+                                       rocke_tensor_descriptor_t* dW_desc,
+                                       rocke_value_t* dw_rsrc,
+                                       int wg_M,
+                                       int wg_N)
+{
+    const char* dtype_d = spec->dtype_d ? spec->dtype_d : "fp16";
+
+    if(!ctx->is_wmma)
+    {
+        /* MFMA path: use DirectEpilogue.store with wgrad addr fn */
+        WgradDwAddrCtx addr_ctx;
+        addr_ctx.dW_desc = dW_desc;
+
+        rocke_direct_epilogue_t epi;
+        epi.atom = ctx->atom;
+        epi.grid = ctx->grid;
+        epi.out_dtype = dtype_d;
+
+        rocke_value_t* bound_m = rocke_b_const_i32(b, wg_M);
+        rocke_value_t* bound_n = rocke_b_const_i32(b, wg_N);
+
+        rocke_direct_epilogue_store(b,
+                                    &epi,
+                                    ctx->final_accs,
+                                    ctx->num_final_accs,
+                                    wgrad_dw_addr,
+                                    &addr_ctx,
+                                    dw_rsrc,
+                                    bound_m,
+                                    bound_n,
+                                    /*vec_in_acc=*/false);
+        return;
+    }
+
+    /* WMMA path: mirrors Python _emit_wgrad_direct_epilogue_wmma.
+     * op.c_layout().coord(b, lane, i) gives per-slot (row_off, col_off);
+     * dW_desc.offset(k_out=m_val, n_wg=n_val) gives the byte offset. */
+    const rocke_mmaop_t* op = ctx->op;
+    int mfmas_m = ctx->mfmas_m;
+    int mfmas_n = ctx->mfmas_n;
+
+    rocke_value_t* warp_m_off
+        = rocke_b_mul(b, ctx->warp_m_idx, rocke_b_const_i32(b, mfmas_m * spec->warp_tile_m));
+    rocke_value_t* warp_n_off
+        = rocke_b_mul(b, ctx->warp_n_idx, rocke_b_const_i32(b, mfmas_n * spec->warp_tile_n));
+
+    rocke_value_t* c_M = rocke_b_const_i32(b, wg_M);
+    rocke_value_t* c_N = rocke_b_const_i32(b, wg_N);
+
+    bool _fp32_out = (strcmp(dtype_d, "fp32") == 0);
+    bool _bf16_out = (strcmp(dtype_d, "bf16") == 0);
+    int elem_bytes = _fp32_out ? 4 : 2;
+
+    const rocke_arch_layout_map_t* c_map = rocke_mmaop_c_layout(op, b);
+    rocke_value_t* c0 = ctx->c0;
+
+    int flat = 0;
+    for(int mi = 0; mi < mfmas_m; ++mi)
+    {
+        for(int ni = 0; ni < mfmas_n; ++ni)
+        {
+            rocke_value_t* acc = ctx->final_accs[flat++];
+
+            rocke_value_t* m_inner = rocke_b_add(b, ctx->block_m_off_v, warp_m_off);
+            rocke_value_t* m_const = rocke_b_const_i32(b, mi * spec->warp_tile_m);
+            rocke_value_t* atom_m_off = rocke_b_add(b, m_inner, m_const);
+
+            rocke_value_t* n_inner = rocke_b_add(b, ctx->block_n_off_v, warp_n_off);
+            rocke_value_t* n_const = rocke_b_const_i32(b, ni * spec->warp_tile_n);
+            rocke_value_t* atom_n_off = rocke_b_add(b, n_inner, n_const);
+
+            for(int i = 0; i < op->c_frag_len; ++i)
+            {
+                rocke_value_t* row_off = NULL;
+                rocke_value_t* col_off = NULL;
+                rocke_arch_layout_map_coord(c_map, b, ctx->lane, i, &row_off, &col_off);
+
+                rocke_value_t* m_val = rocke_b_add(b, atom_m_off, row_off);
+                rocke_value_t* n_val = rocke_b_add(b, atom_n_off, col_off);
+                rocke_value_t* m_ok = rocke_b_cmp_lt(b, m_val, c_M);
+                rocke_value_t* n_ok = rocke_b_cmp_lt(b, n_val, c_N);
+                rocke_value_t* ok = rocke_b_land(b, m_ok, n_ok);
+                rocke_value_t* v_f32 = rocke_b_vec_extract(b, acc, i);
+
+                /* dW_desc.offset(k_out=m_val, n_wg=n_val) */
+                rocke_value_t* d_off_elems = NULL;
+                {
+                    const char* names[2] = {"k_out", "n_wg"};
+                    rocke_value_t* vals[2] = {m_val, n_val};
+                    rocke_value_t* valid = NULL;
+                    rocke_transforms_descriptor_offset(
+                        b, dW_desc, names, vals, 2, &d_off_elems, &valid);
+                }
+                rocke_value_t* d_off_bytes
+                    = rocke_b_mul(b, d_off_elems, rocke_b_const_i32(b, elem_bytes));
+                rocke_value_t* safe_off = rocke_b_select(
+                    b, ok, d_off_bytes, rocke_b_const_i32(b, (int64_t)((1u << 31) - 1u)));
+                if(_fp32_out)
+                    rocke_b_buffer_store_f32(b, dw_rsrc, safe_off, c0, v_f32);
+                else if(_bf16_out)
+                    rocke_b_buffer_store_bf16(
+                        b, dw_rsrc, safe_off, c0, rocke_b_trunc_f32_to_bf16(b, v_f32));
+                else
+                    rocke_b_buffer_store_f16(
+                        b, dw_rsrc, safe_off, c0, rocke_b_trunc_f32_to_f16(b, v_f32));
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Wgrad ctx init — mirrors rocke_conv_build_ctx_init but uses wgrad param names
+// and sets the wg_K K-loop bound (not K_gemm from an adapter problem).
+// ---------------------------------------------------------------------------
+
+static bool wgrad_build_ctx_init(rocke_conv_build_ctx_t* ctx,
+                                 rocke_ir_builder_t* b,
+                                 const rocke_implicit_gemm_conv_wgrad_spec_t* spec,
+                                 const char* arch,
+                                 int wg_K, /* rocke_wgrad_conv_spec_wg_K(spec) */
+                                 int split_k) /* resolved (>= 1) */
+{
+    if(ctx == NULL || b == NULL || spec == NULL)
+        return false;
+
+    memset(ctx, 0, sizeof(*ctx));
+    ctx->b = b;
+    ctx->arch = arch;
+
+    /* Set up wgrad-specific overrides.  The only override needed is
+     * a_load_override, which calls the sync loader with wgrad_dy_descriptor
+     * (m_val-first SSA order) instead of the shared rocke_conv_a_descriptor
+     * (k_val-first).  The async path goes through rocke_conv_emit_load_phase
+     * which calls rocke_conv_a_descriptor directly for the async slot; wgrad
+     * does not yet support async_dma, so that path is unreachable. */
+    {
+        rocke_conv_build_overrides_t* ov_ptr = (rocke_conv_build_overrides_t*)rocke_arena_alloc(
+            &b->arena, sizeof(rocke_conv_build_overrides_t));
+        if(!ov_ptr)
+        {
+            rocke_i_set_err(b, ROCKE_ERR_VALUE, "wgrad: arena alloc for overrides failed");
+            return false;
+        }
+        memset(ov_ptr, 0, sizeof(*ov_ptr));
+        ov_ptr->a_load_override = wgrad_a_load_override;
+        ov_ptr->user = ctx; /* ctx pointer re-used as user; populated after this block */
+        ctx->ov = ov_ptr;
+    }
+
+    /* Arena-allocate the stub problem so it lives for the builder's lifetime.
+     *
+     * The stub is queried by the epilogue phase for bounds and D descriptor:
+     *   p.M        = N*Ho*Wo  -> must equal wg_M
+     *   p.N_gemm   = K        -> must equal wg_N
+     *   p.K_gemm   = Y*X*C    -> must equal wg_K  (used by kloop_unroll only)
+     *
+     * Use N=wg_M, Hi=Wi=1 (so Ho=Wo=1), C=wg_K, K=wg_N, Y=X=1:
+     *   K_gemm = 1*1*wg_K = wg_K  ✓   M = wg_M*1*1 = wg_M  ✓   N_gemm = wg_N  ✓
+     *   Ho = (1 + 0 - 1*(1-1) - 1)/1 + 1 = 1  ✓  (not negative!) */
+    rocke_conv_problem_t* stub_p
+        = (rocke_conv_problem_t*)rocke_arena_alloc(&b->arena, sizeof(rocke_conv_problem_t));
+    if(!stub_p)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "wgrad: arena alloc failed");
+        return false;
+    }
+    {
+        int wg_M_val = spec->problem.K; /* groups==1 */
+        int wg_N_val = rocke_wgrad_conv_spec_wg_N(spec);
+        /* N=wg_M, Hi=1, Wi=1, C=wg_K, K=wg_N, Y=1, X=1 -> Ho=Wo=1, all positive */
+        *stub_p = rocke_conv_problem_default(wg_M_val, 1, 1, wg_K, wg_N_val, 1, 1);
+    }
+    ctx->p = stub_p;
+
     /* waves_per_eu */
-    fwd.has_waves_per_eu = s->has_waves_per_eu;
-    fwd.waves_per_eu = s->waves_per_eu;
-    /* chiplet swizzle */
-    fwd.chiplet_swizzle = s->chiplet_swizzle;
-    fwd.chiplet_wgm = s->chiplet_wgm;
-    fwd.chiplet_num_xcds = s->chiplet_num_xcds;
-    fwd.chiplet_chunk_size = s->chiplet_chunk_size;
-    /* vector sizes: wgrad always uses vec=1 for A and B */
-    fwd.has_vector_size_a = true;
-    fwd.vector_size_a = 1;
-    fwd.has_vector_size_b = true;
-    fwd.vector_size_b = 1;
-    /* vector_size_c (store width) from wgrad spec if set */
-    fwd.has_vector_size_c = s->has_vector_size_c;
-    fwd.vector_size_c = s->vector_size_c;
-    /* acc_epilogue: wgrad struct omits it, forward defaults to identity */
-    return fwd;
+    if(spec->has_waves_per_eu && b->kernel != NULL)
+        rocke_attr_set_int(b, &b->kernel->attrs, "waves_per_eu", spec->waves_per_eu);
+
+    /* Resolve op + atom */
+    {
+        /* Build a dummy forward conv spec to route through rocke_conv_resolve_op. */
+        rocke_implicit_gemm_conv_spec_t fwd = rocke_implicit_gemm_conv_spec_default();
+        fwd.problem = *ctx->p;
+        fwd.tile_m = spec->tile_m;
+        fwd.tile_n = spec->tile_n;
+        fwd.tile_k = spec->tile_k;
+        fwd.warp_m = spec->warp_m;
+        fwd.warp_n = spec->warp_n;
+        fwd.warp_tile_m = spec->warp_tile_m;
+        fwd.warp_tile_n = spec->warp_tile_n;
+        fwd.warp_tile_k = spec->warp_tile_k;
+        fwd.wave_size = spec->wave_size;
+        fwd.pipeline = spec->pipeline;
+        fwd.epilogue = spec->epilogue;
+        fwd.dtype_a = spec->dtype_a;
+        fwd.dtype_b = spec->dtype_b;
+        fwd.dtype_d = spec->dtype_d;
+        /* A temporary spec we keep alive for the duration; store pointer */
+        rocke_implicit_gemm_conv_spec_t* tmp_fwd_spec
+            = (rocke_implicit_gemm_conv_spec_t*)rocke_arena_alloc(
+                &b->arena, sizeof(rocke_implicit_gemm_conv_spec_t));
+        if(!tmp_fwd_spec)
+        {
+            rocke_i_set_err(b, ROCKE_ERR_VALUE, "wgrad: arena alloc");
+            return false;
+        }
+        *tmp_fwd_spec = fwd;
+        ctx->spec = tmp_fwd_spec;
+        ctx->op = rocke_conv_resolve_op(b, tmp_fwd_spec, arch);
+        if(ctx->op == NULL)
+            return false;
+        ctx->is_wmma = (ctx->op->family != NULL && strcmp(ctx->op->family, "wmma") == 0);
+        ctx->atom
+            = ctx->is_wmma
+                  ? NULL
+                  : rocke_mfma_atom("f16", spec->warp_tile_m, spec->warp_tile_n, spec->warp_tile_k);
+    }
+    ctx->a_per_lane = ctx->op->a_frag_len;
+    ctx->b_per_lane = ctx->op->b_frag_len;
+    ctx->c_per_lane = ctx->op->c_frag_len;
+
+    /* Block tile dims */
+    ctx->block_m = spec->tile_m;
+    ctx->block_n = spec->tile_n;
+    ctx->block_k = spec->tile_k;
+
+    /* WarpGrid.bind — emit the same SSA in the same order as the forward conv */
+    ctx->grid.tile_m = ctx->block_m;
+    ctx->grid.tile_n = ctx->block_n;
+    ctx->grid.tile_k = ctx->block_k;
+    ctx->grid.warp_m = spec->warp_m;
+    ctx->grid.warp_n = spec->warp_n;
+    ctx->grid.warp_k = 1;
+    ctx->grid.warp_tile_m = spec->warp_tile_m;
+    ctx->grid.warp_tile_n = spec->warp_tile_n;
+    ctx->grid.warp_tile_k = spec->warp_tile_k;
+    ctx->grid.wave_size = spec->wave_size;
+
+    if(b->kernel != NULL)
+        rocke_attr_set_int(
+            b, &b->kernel->attrs, "max_workgroup_size", rocke_warp_grid_block_size(&ctx->grid));
+
+    rocke_value_t* wave = rocke_b_const_i32(b, spec->wave_size);
+    rocke_value_t* c_warps_n = rocke_b_const_i32(b, spec->warp_n);
+    rocke_value_t* c_warps_nm = rocke_b_const_i32(b, spec->warp_n * spec->warp_m);
+    rocke_value_t* c_tile_m = rocke_b_const_i32(b, ctx->block_m);
+    rocke_value_t* c_tile_n = rocke_b_const_i32(b, ctx->block_n);
+    rocke_value_t* c_tile_k = rocke_b_const_i32(b, ctx->block_k);
+    (void)c_warps_nm;
+    (void)c_tile_k;
+
+    rocke_value_t* tid_v = rocke_b_thread_id_x(b);
+    rocke_value_t* lane_v = rocke_b_mod(b, tid_v, wave);
+    rocke_value_t* warp_id_v = rocke_b_div(b, tid_v, wave);
+    rocke_value_t* warp_m_v = rocke_b_div(b, warp_id_v, c_warps_n);
+    rocke_value_t* warp_n_v = rocke_b_mod(b, warp_id_v, c_warps_n);
+    rocke_value_t* warp_k_v = rocke_b_const_i32(b, 0);
+    rocke_value_t* bm_off = rocke_b_mul(b, rocke_b_block_id_y(b), c_tile_m);
+    rocke_value_t* bn_off = rocke_b_mul(b, rocke_b_block_id_x(b), c_tile_n);
+    rocke_value_t* bk_off = rocke_b_const_i32(b, 0);
+
+    ctx->grid.tid = tid_v;
+    ctx->grid.lane = lane_v;
+    ctx->grid.warp_id = warp_id_v;
+    ctx->grid.warp_m_idx = warp_m_v;
+    ctx->grid.warp_n_idx = warp_n_v;
+    ctx->grid.warp_k_idx = warp_k_v;
+    ctx->grid.block_m_off = bm_off;
+    ctx->grid.block_n_off = bn_off;
+    ctx->grid.block_k_off = bk_off;
+    ctx->tid = tid_v;
+    ctx->lane = lane_v;
+    ctx->warp_id = warp_id_v;
+    ctx->warp_m_idx = warp_m_v;
+    ctx->warp_n_idx = warp_n_v;
+
+    /* Geometry constants — K-loop bound is wg_K (or split-K slice size).
+     *
+     * Creation order must mirror Python (build_implicit_gemm_conv_wgrad, after bind):
+     *   c0        = b.const_i32(0)         -- always (split_k=1: k_lo; split_k>1: unused 0)
+     *   c_block_k = b.const_i32(block_k)   -- always
+     *   c_wg_K    = b.const_i32(wg_K)      -- always (used as loop bound when split_k=1)
+     *   [split_k>1 only] c_ks, k_lo=to_sgpr(mul(block_id_z,c_ks)), k_hi=to_sgpr(add(k_lo,c_ks))
+     */
+    int wg_K_padded_val = rocke_wgrad_conv_spec_wg_K_padded(spec);
+
+    /* c0: always const(0). For split_k=1 this is also k_lo. */
+    rocke_value_t* c0_node = rocke_b_const_i32(b, 0);
+    /* c_block_k: always created here (matches Python ordering). */
+    ctx->c_block_k = rocke_b_const_i32(b, ctx->block_k);
+    /* c_wg_K: always created (occupies SSA slot even for split_k>1). */
+    rocke_value_t* c_wg_K = rocke_b_const_i32(b, wg_K);
+
+    rocke_value_t* k_lo;
+    rocke_value_t* k_hi_v; /* NULL => loop runs to c_wg_K */
+    if(split_k > 1)
+    {
+        int ks = wg_K_padded_val / split_k;
+        rocke_value_t* c_ks = rocke_b_const_i32(b, ks);
+        k_lo = rocke_b_to_sgpr_u32(b, rocke_b_mul(b, rocke_b_block_id_z(b), c_ks));
+        k_hi_v = rocke_b_to_sgpr_u32(b, rocke_b_add(b, k_lo, c_ks));
+    }
+    else
+    {
+        k_lo = c0_node;
+        k_hi_v = NULL;
+    }
+    ctx->c0 = k_lo;
+    ctx->c_K_gemm = (k_hi_v != NULL) ? k_hi_v : c_wg_K;
+
+    /* Chiplet swizzle */
+    if(spec->chiplet_swizzle)
+    {
+        int wg_M_val = spec->problem.K;
+        int wg_N_val = rocke_wgrad_conv_spec_wg_N(spec);
+        int npm = (wg_M_val + ctx->block_m - 1) / ctx->block_m;
+        int npn = (wg_N_val + ctx->block_n - 1) / ctx->block_n;
+        rocke_value_t* c_npn = rocke_b_const_i32(b, npn);
+        rocke_value_t* bid_y = rocke_b_block_id_y(b);
+        rocke_value_t* mul_y = rocke_b_mul(b, bid_y, c_npn);
+        rocke_value_t* bid_x = rocke_b_block_id_x(b);
+        rocke_value_t* wgflat = rocke_b_add(b, mul_y, bid_x);
+        rocke_super_tile_swizzle_result_t swz
+            = rocke_chiplet_aware_super_tile(b,
+                                             wgflat,
+                                             npm,
+                                             npn,
+                                             spec->chiplet_wgm,
+                                             spec->chiplet_num_xcds,
+                                             spec->chiplet_chunk_size);
+        ctx->block_m_off_v = rocke_b_mul(b, swz.row, rocke_b_const_i32(b, ctx->block_m));
+        ctx->block_n_off_v = rocke_b_mul(b, swz.col, rocke_b_const_i32(b, ctx->block_n));
+        ctx->grid.block_m_off = ctx->block_m_off_v;
+        ctx->grid.block_n_off = ctx->block_n_off_v;
+    }
+    else
+    {
+        ctx->block_m_off_v = ctx->grid.block_m_off;
+        ctx->block_n_off_v = ctx->grid.block_n_off;
+    }
+
+    /* LDS layout — reuse the forward accessor (same logic) */
+    {
+        rocke_implicit_gemm_conv_spec_t lds_fwd = *ctx->spec;
+        char lds_reason[256];
+        if(!rocke_implicit_gemm_conv_spec_effective_lds_layout(
+               &lds_fwd, &ctx->lds_layout, lds_reason, sizeof(lds_reason)))
+        {
+            rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s", lds_reason);
+            return false;
+        }
+    }
+
+    /* smem_alloc A_smem / B_smem */
+    {
+        int a_sh[2] = {ctx->block_m, ctx->lds_layout.row_stride};
+        int b_sh[2] = {ctx->block_n, ctx->lds_layout.row_stride};
+        ctx->A_smem = rocke_b_smem_alloc(b, rocke_f16(), a_sh, 2, "A_smem");
+        ctx->B_smem = rocke_b_smem_alloc(b, rocke_f16(), b_sh, 2, "B_smem");
+        ctx->double_buffer = (spec->pipeline && strcmp(spec->pipeline, "compv4") == 0)
+                             || spec->async_dma || spec->unroll_k;
+        if(ctx->double_buffer)
+        {
+            ctx->A_smem2 = rocke_b_smem_alloc(b, rocke_f16(), a_sh, 2, "A_smem2");
+            ctx->B_smem2 = rocke_b_smem_alloc(b, rocke_f16(), b_sh, 2, "B_smem2");
+        }
+        else
+        {
+            ctx->A_smem2 = ctx->A_smem;
+            ctx->B_smem2 = ctx->B_smem;
+        }
+    }
+
+    /* Per-warp MFMA tile counts */
+    ctx->mfmas_m = spec->tile_m / (spec->warp_m * spec->warp_tile_m);
+    ctx->mfmas_n = spec->tile_n / (spec->warp_n * spec->warp_tile_n);
+    ctx->k_atoms = spec->tile_k / spec->warp_tile_k;
+
+    /* Accumulators */
+    ctx->acc_init = rocke_b_zero_vec_f32(b, ctx->c_per_lane);
+    ctx->num_accs = ctx->mfmas_m * ctx->mfmas_n;
+    if(ctx->num_accs <= 0 || ctx->num_accs > ROCKE_CONV_MAX_ACCS)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "wgrad: too many accumulators (%d)", ctx->num_accs);
+        return false;
+    }
+    for(int i = 0, mi = 0; mi < ctx->mfmas_m; ++mi)
+        for(int ni = 0; ni < ctx->mfmas_n; ++ni, ++i)
+        {
+            char tmp[32];
+            snprintf(tmp, sizeof(tmp), "acc_m%d_n%d", mi, ni);
+            ctx->acc_names[i] = rocke_arena_strdup(&b->arena, tmp);
+            ctx->acc_inits[i] = ctx->acc_init;
+        }
+
+    /* Load plan — wgrad always uses vec=1 */
+    ctx->threads = spec->warp_m * spec->warp_n * spec->wave_size;
+    ctx->load_vec = 1;
+
+    /* Loaders */
+    ctx->async_dma = spec->async_dma;
+    if(ctx->async_dma)
+    {
+        rocke_status_t sa = rocke_async_tile_loader_from_tile(
+            ctx->block_m, ctx->block_k, ctx->threads, spec->wave_size, 4, &ctx->a_loader);
+        rocke_status_t sb = rocke_async_tile_loader_from_tile(
+            ctx->block_n, ctx->block_k, ctx->threads, spec->wave_size, 4, &ctx->b_loader);
+        if(sa != ROCKE_OK || sb != ROCKE_OK)
+        {
+            rocke_i_set_err(b, ROCKE_ERR_VALUE, "wgrad: async tile loader init failed");
+            return false;
+        }
+        ctx->have_async_loaders = true;
+        ctx->have_sync_loaders = false;
+    }
+    else
+    {
+        rocke_status_t sa = rocke_coalesced_tile_loader_from_tile(
+            ctx->block_m, ctx->block_k, ctx->threads, /*max_vec=*/1, true, &ctx->a_sync_loader);
+        rocke_status_t sb = rocke_coalesced_tile_loader_from_tile(
+            ctx->block_n, ctx->block_k, ctx->threads, /*max_vec=*/1, true, &ctx->b_sync_loader);
+        if(sa != ROCKE_OK || sb != ROCKE_OK)
+        {
+            rocke_i_set_err(b, ROCKE_ERR_VALUE, "wgrad: coalesced tile loader init failed");
+            return false;
+        }
+        ctx->have_sync_loaders = true;
+        ctx->have_async_loaders = false;
+    }
+
+    /* Schedule — only compute the policy here; the caller emits the prologue
+     * AFTER the buffer resources so the SSA order matches Python:
+     *   buffer_rsrc(dY/X/dW) → schedule.emit_prologue(b) → k-loop. */
+    ctx->schedule
+        = rocke_schedule_policy_for_pipeline(b, ctx->async_dma ? "async_dma" : spec->pipeline);
+
+    return rocke_ir_builder_ok(b);
 }
 
 // ---------------------------------------------------------------------------
@@ -733,58 +1329,124 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv_wgrad(
         return NULL;
     }
 
-    /* Resolve split_k=-1 (auto): treat as split_k=1 for now (simple path). */
+    /* Resolve split_k=-1 (auto) to split_k=1 */
     int split_k = spec->split_k;
     if(split_k == -1)
         split_k = 1;
-    if(split_k > 1)
+    bool is_split_k = (split_k > 1);
+
+    /* split_k > 1 supported for fp32, fp16, bf16 output dtypes */
+    if(is_split_k)
     {
-        /* split_k > 1 (atomic-add) is not yet implemented in this C port.
-         * Return NULL so the parity gate sees both C and Python reject, OR
-         * accept whichever configs have split_k=1. */
-        rocke_i_set_err(b,
-                        ROCKE_ERR_VALUE,
-                        "wgrad: split_k > 1 not implemented in C port (split_k=%d)",
-                        split_k);
-        return NULL;
+        const char* dt = spec->dtype_d ? spec->dtype_d : "fp16";
+        if(strcmp(dt, "fp32") != 0 && strcmp(dt, "fp16") != 0 && strcmp(dt, "bf16") != 0)
+        {
+            rocke_i_set_err(
+                b, ROCKE_ERR_VALUE, "wgrad: split_k > 1 requires dtype_d in fp32/fp16/bf16");
+            return NULL;
+        }
     }
 
-    /* --- build an adapter forward-conv spec + problem --- */
-    rocke_conv_problem_t adapter_p = make_adapter_problem(spec);
-    rocke_implicit_gemm_conv_spec_t fwd_spec = make_adapter_fwd_spec(spec, &adapter_p);
+    int wg_K = rocke_wgrad_conv_spec_wg_K(spec);
+    int wg_M = rocke_wgrad_conv_spec_wg_M(spec);
+    int wg_N = rocke_wgrad_conv_spec_wg_N(spec);
 
-    /* --- init the shared build context --- */
-    rocke_conv_build_ctx_t ctx;
-    memset(&ctx, 0, sizeof(ctx));
-    if(!rocke_conv_build_ctx_init(&ctx, b, &fwd_spec, arch, /*overrides=*/NULL))
-        return NULL; /* builder error already set */
-
-    /* --- substitute wgrad-specific descriptors --- */
     const rocke_conv_problem_t* p = &spec->problem;
+    const rocke_type_t* f16_glob = rocke_ptr_type(b, rocke_f16(), "global");
 
+    /* --- kernel params with wgrad names (Python: dY, X, dW, *_bytes) --- */
+    rocke_param_opts_t ro_opts;
+    memset(&ro_opts, 0, sizeof(ro_opts));
+    ro_opts.noalias = true;
+    ro_opts.noalias_set = true;
+    ro_opts.readonly = true;
+    ro_opts.readonly_set = true;
+    ro_opts.align = 16;
+    ro_opts.align_set = true;
+
+    rocke_param_opts_t d_opts;
+    memset(&d_opts, 0, sizeof(d_opts));
+    d_opts.noalias = true;
+    d_opts.noalias_set = true;
+    /* split_k>1: dW is read+write (atomic); split_k=1: writeonly */
+    d_opts.writeonly = !is_split_k;
+    d_opts.writeonly_set = true;
+    d_opts.align = 16;
+    d_opts.align_set = true;
+
+    /* dtype for dW: use dtype_d field */
+    bool is_fp32_d = (spec->dtype_d && strcmp(spec->dtype_d, "fp32") == 0);
+    const rocke_type_t* dw_glob = is_fp32_d ? rocke_ptr_type(b, rocke_f32(), "global") : f16_glob;
+
+    rocke_value_t* dY = rocke_b_param(b, "dY", f16_glob, &ro_opts);
+    rocke_value_t* X = rocke_b_param(b, "X", f16_glob, &ro_opts);
+    rocke_value_t* dW = rocke_b_param(b, "dW", dw_glob, &d_opts);
+    rocke_value_t* dY_bytes = rocke_b_param(b, "dY_bytes", rocke_i32(), NULL);
+    rocke_value_t* X_bytes = rocke_b_param(b, "X_bytes", rocke_i32(), NULL);
+    rocke_value_t* dW_bytes = rocke_b_param(b, "dW_bytes", rocke_i32(), NULL);
+
+    /* --- build wgrad ctx (with correct param names) --- */
+    rocke_conv_build_ctx_t ctx;
+    if(!wgrad_build_ctx_init(&ctx, b, spec, arch, wg_K, split_k))
+        return NULL;
+
+    /* Wire the params we declared into the ctx slots the phases read */
+    ctx.A = dY;
+    ctx.Bp = X;
+    ctx.D = dW;
+    ctx.A_bytes = dY_bytes;
+    ctx.B_bytes = X_bytes;
+    ctx.D_bytes = dW_bytes;
+
+    /* Buffer resources */
+    rocke_conv_buffer_resource_t a_rsrc, b_rsrc, d_rsrc;
+    {
+        a_rsrc.ptr = dY;
+        a_rsrc.num_bytes = dY_bytes;
+        a_rsrc.rsrc = rocke_b_buffer_rsrc(b, dY, dY_bytes);
+        a_rsrc.soffset = rocke_b_const_i32(b, 0);
+        b_rsrc.ptr = X;
+        b_rsrc.num_bytes = X_bytes;
+        b_rsrc.rsrc = rocke_b_buffer_rsrc(b, X, X_bytes);
+        b_rsrc.soffset = rocke_b_const_i32(b, 0);
+        d_rsrc.ptr = dW;
+        d_rsrc.num_bytes = dW_bytes;
+        d_rsrc.rsrc = rocke_b_buffer_rsrc(b, dW, dW_bytes);
+        d_rsrc.soffset = rocke_b_const_i32(b, 0);
+    }
+    ctx.a_buf_rsrc = a_rsrc;
+    ctx.b_buf_rsrc = b_rsrc;
+    ctx.d_buf_rsrc = d_rsrc;
+    ctx.a_rsrc = a_rsrc.rsrc;
+    ctx.b_rsrc = b_rsrc.rsrc;
+    ctx.d_rsrc = d_rsrc.rsrc;
+
+    /* Emit schedule prologue AFTER buffer resources — mirrors Python ordering:
+     *   make_buffer_resource(dY/X/dW) then schedule.emit_prologue(b). */
+    rocke_schedule_policy_emit_prologue(&ctx.schedule, b);
+
+    /* --- wgrad-specific descriptors --- */
     rocke_tensor_descriptor_t* dY_desc = wgrad_make_dy_descriptor(b, p);
     rocke_tensor_descriptor_t* X_desc = wgrad_make_x_descriptor(b, p);
     rocke_tensor_descriptor_t* dW_desc = wgrad_make_dw_descriptor(b, p);
-
     if(dY_desc == NULL || X_desc == NULL || dW_desc == NULL)
     {
         rocke_i_set_err(b, ROCKE_ERR_VALUE, "wgrad: descriptor build failed");
         return NULL;
     }
+    /* The forward phase functions query A_desc with ("m","k") and B_desc with
+     * ("k_out","k_gemm") — our descriptors are built with exactly those names. */
+    ctx.A_desc = dY_desc;
+    ctx.B_desc = X_desc;
+    ctx.D_desc = dW_desc;
 
-    /* Override the descriptors in the ctx.  The forward K-loop drivers call
-     * rocke_conv_a_descriptor (reads ctx->A_desc with coords "m","k") and
-     * rocke_conv_b_descriptor (reads ctx->B_desc with coords "k_out","k_gemm").
-     * Our wgrad descriptors are built with exactly those coord names so no
-     * additional closure patching is needed. */
-    ctx.A_desc = dY_desc; /* A: dY NHWK, top-level coords ("m"=k_out, "k"=k_wg_red) */
-    ctx.B_desc = X_desc; /* B: X  NHWC, top-level coords ("k_out"=n_wg, "k_gemm"=k_wg_red) */
-    ctx.D_desc = dW_desc; /* D: dW KYXC, top-level coords ("m"=k_out, "k_out"=n_wg) */
+    if(!rocke_ir_builder_ok(b))
+        return NULL;
 
-    /* --- K-loop (same drivers as forward conv) --- */
-    if(fwd_spec.unroll_k)
+    /* --- K-loop --- */
+    if(spec->unroll_k)
         rocke_conv_emit_kloop_unroll(&ctx);
-    else if(!fwd_spec.async_dma)
+    else if(!spec->async_dma)
         rocke_conv_emit_kloop_simple(&ctx);
     else
         rocke_conv_emit_kloop_async(&ctx);
@@ -792,12 +1454,83 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv_wgrad(
     if(!rocke_ir_builder_ok(b))
         return NULL;
 
-    /* --- epilogue ---
-     * The forward epilogue writes to D using ctx.D_desc which we set to dW_desc.
-     * The epilogue bounds use (p.M, p.N_gemm) from the adapter problem, which
-     * equal (wg_M, wg_N) by construction.  So rocke_conv_emit_epilogue works
-     * without modification. */
-    rocke_conv_emit_epilogue(&ctx);
+    /* --- epilogue --- */
+    if(is_split_k)
+    {
+        /* Apply identity acc epilogue (wgrad spec has no acc_epilogue field). */
+        rocke_conv_acc_epilogue_t identity = rocke_conv_acc_epilogue_default();
+        rocke_value_t* post_accs[ROCKE_CONV_MAX_ACCS];
+        rocke_conv_apply_accumulator_epilogue(
+            b, &identity, ctx.final_accs, ctx.num_final_accs, post_accs);
+        /* Overwrite final_accs with the post-epilogue values */
+        for(int i = 0; i < ctx.num_final_accs; ++i)
+            ctx.final_accs[i] = post_accs[i];
+
+        wgrad_emit_split_k_epilogue_f32(b, &ctx, spec, dW, wg_M, wg_N);
+    }
+    else
+    {
+        /* Apply identity acc epilogue (wgrad spec has no acc_epilogue field). */
+        rocke_conv_acc_epilogue_t identity = rocke_conv_acc_epilogue_default();
+        rocke_value_t* post_accs[ROCKE_CONV_MAX_ACCS];
+        rocke_conv_apply_accumulator_epilogue(
+            b, &identity, ctx.final_accs, ctx.num_final_accs, post_accs);
+        for(int i = 0; i < ctx.num_final_accs; ++i)
+            ctx.final_accs[i] = post_accs[i];
+
+        WgradDwAddrCtx dw_addr_ctx;
+        dw_addr_ctx.dW_desc = dW_desc;
+
+        if(spec->epilogue && strcmp(spec->epilogue, "cshuffle") == 0)
+        {
+            /* _emit_wgrad_cshuffle_epilogue: CShuffleEpilogue.from_grid(...).store(...)
+             * vec_c = WgradConvSpec.default_vector_sizes(C, K, dtype_d, split_k=1)[2]
+             * For split_k=1: vec_c = _vec(C) where _vec picks largest of [8,4,2,1]
+             * that divides C for fp16/bf16, or [4,2,1] for fp32. */
+            const char* dtype_d = spec->dtype_d ? spec->dtype_d : "fp16";
+            bool is_fp32_vec = (strcmp(dtype_d, "fp32") == 0);
+            int C = p->C;
+            int vec_c;
+            if(is_fp32_vec)
+            {
+                if(C % 4 == 0)
+                    vec_c = 4;
+                else if(C % 2 == 0)
+                    vec_c = 2;
+                else
+                    vec_c = 1;
+            }
+            else
+            {
+                if(C % 8 == 0)
+                    vec_c = 8;
+                else if(C % 4 == 0)
+                    vec_c = 4;
+                else if(C % 2 == 0)
+                    vec_c = 2;
+                else
+                    vec_c = 1;
+            }
+            rocke_cshuffle_epilogue_t cepi
+                = rocke_cshuffle_epilogue_from_grid(ctx.atom, &ctx.grid, vec_c);
+            cepi.out_dtype = dtype_d;
+            rocke_cshuffle_epilogue_store(b,
+                                          &cepi,
+                                          post_accs,
+                                          ctx.num_final_accs,
+                                          wgrad_dw_addr,
+                                          &dw_addr_ctx,
+                                          ctx.d_rsrc,
+                                          rocke_b_const_i32(b, wg_M),
+                                          rocke_b_const_i32(b, wg_N));
+        }
+        else
+        {
+            /* Use wgrad-specific direct epilogue. Mirrors Python _emit_wgrad_direct_epilogue
+             * for MFMA, _emit_wgrad_direct_epilogue_wmma for WMMA. */
+            wgrad_emit_direct_epilogue(b, &ctx, spec, dW_desc, ctx.d_rsrc, wg_M, wg_N);
+        }
+    }
 
     if(!rocke_ir_builder_ok(b))
         return NULL;
