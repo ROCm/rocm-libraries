@@ -26,7 +26,7 @@ Source RFC: `projects/hipdnn/docs/rfcs/0018_UniversalMatchDescriptor.md`.
   **Gap: no `shape` short-hand (lowered by the UMD compiler, Phase 1). The custom-operation
   (native-predicate) hook is out of scope for this PoC — see Scope decisions.**
 - **UMD annotations already in the schema** — the table-level `umd_opcode` shorthand (e.g.
-  `SdpaAttributes (umd_opcode: "sdpa_fwd")`) and the field-level `umd_operand` / `umd_result` /
+  `SdpaAttributes (umd_opcode: "sdpa_fwd")`) and the field-level `umd_input_tensor` / `umd_output_tensor` /
   `umd_name` are declared once (`flatbuffers_sdk/schemas/data_types.fbs`) and applied on the SDPA
   table + its UID fields (`flatbuffers_sdk/schemas/sdpa_attributes.fbs`). But flatc runs `--cpp` only
   (`cmake/flatc_flags.txt`); no `.bfbs` is emitted, so the annotations are invisible at
@@ -73,7 +73,7 @@ UID reader) and scalar attributes (name, optionality, typed reader).
    reflection (`flatbuffers/reflection.h`). Loads `graph.bfbs`, enumerates `NodeAttributes` union
    members (opcode→table); reads the table's `umd_opcode` shorthand and applies B.3 classification
    per field:
-   - `umd_operand` + `umd_name` → operand role; `umd_result` + `umd_name` → result role
+   - `umd_input_tensor` + `umd_name` → operand role; `umd_output_tensor` + `umd_name` → result role
      (type MUST be `long`, `umd_name` non-empty).
    - neither flag → scalar attribute, bind-named by field name.
    - optionality derived from `= null` default (not re-annotated).

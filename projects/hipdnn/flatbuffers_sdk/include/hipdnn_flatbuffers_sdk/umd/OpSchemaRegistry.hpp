@@ -12,7 +12,7 @@
 // consumer.
 //
 // The registry reconstructs a UID-centric graph's edges and auto-binds symbols:
-// each op entry lists its operand and result roles (each with a typed UID
+// each op entry lists its input-tensor and output-tensor roles (each with a typed
 // reader) and its scalar attributes (each with a typed value reader). Readers
 // use the generated FlatBuffers accessors directly -- no runtime reflection.
 
@@ -60,14 +60,14 @@ using UidReader = bool (*)(const void* attributes, std::int64_t& out);
 // Reads a scalar attribute value out of a concrete attribute table.
 using ScalarReader = ScalarValue (*)(const void* attributes);
 
-struct OperandBinding
+struct InputTensorBinding
 {
     std::string_view role;
     bool optional = false;
     UidReader read = nullptr;
 };
 
-struct ResultBinding
+struct OutputTensorBinding
 {
     std::string_view role;
     bool optional = false;
@@ -87,17 +87,17 @@ struct AttrBinding
 // when the attribute is absent), the `tableName` (the NodeAttributes union member,
 // e.g. "SdpaAttributes", for diagnostics), and the integer `attributesType` (the
 // value of the NodeAttributes enum, for O(1) lookup against
-// Node::attributes_type()), plus its operand, result, and scalar-attribute
+// Node::attributes_type()), plus its input-tensor, output-tensor, and scalar
 // bindings.
 struct OpSchemaEntry
 {
     std::string_view opcode;
     std::string_view tableName;
     int attributesType = 0;
-    const OperandBinding* operands = nullptr;
-    std::size_t operandCount = 0;
-    const ResultBinding* results = nullptr;
-    std::size_t resultCount = 0;
+    const InputTensorBinding* inputTensors = nullptr;
+    std::size_t inputTensorCount = 0;
+    const OutputTensorBinding* outputTensors = nullptr;
+    std::size_t outputTensorCount = 0;
     const AttrBinding* attributes = nullptr;
     std::size_t attributeCount = 0;
 };

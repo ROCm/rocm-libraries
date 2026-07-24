@@ -151,7 +151,7 @@ endfunction()
 
 # Generate a FlatBuffers binary reflection schema (.bfbs) from one .fbs schema.
 # Unlike the C++ header path (flatc --cpp), the reflection schema retains custom
-# field attributes (umd_operand / umd_result / umd_name), which the
+# field attributes (umd_input_tensor / umd_output_tensor / umd_name), which the
 # umd_registry_gen tool reads via the FlatBuffers reflection API to emit the UMD
 # op-schema registry (RFC 0018 Appendix B). flatc writes <schema-name>.bfbs into
 # the -o directory; OUTPUT MUST name that file.

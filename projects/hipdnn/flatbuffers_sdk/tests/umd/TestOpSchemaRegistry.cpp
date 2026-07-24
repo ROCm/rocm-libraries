@@ -27,19 +27,19 @@ namespace data = hipdnn_flatbuffers_sdk::data_objects;
 namespace
 {
 
-const umd::OperandBinding* findOperand(const umd::OpSchemaEntry* e, std::string_view role)
+const umd::InputTensorBinding* findInputTensor(const umd::OpSchemaEntry* e, std::string_view role)
 {
-    for(std::size_t i = 0; i < e->operandCount; ++i)
-        if(e->operands[i].role == role)
-            return &e->operands[i];
+    for(std::size_t i = 0; i < e->inputTensorCount; ++i)
+        if(e->inputTensors[i].role == role)
+            return &e->inputTensors[i];
     return nullptr;
 }
 
-const umd::ResultBinding* findResult(const umd::OpSchemaEntry* e, std::string_view role)
+const umd::OutputTensorBinding* findOutputTensor(const umd::OpSchemaEntry* e, std::string_view role)
 {
-    for(std::size_t i = 0; i < e->resultCount; ++i)
-        if(e->results[i].role == role)
-            return &e->results[i];
+    for(std::size_t i = 0; i < e->outputTensorCount; ++i)
+        if(e->outputTensors[i].role == role)
+            return &e->outputTensors[i];
     return nullptr;
 }
 
@@ -95,11 +95,11 @@ TEST(UmdOpSchemaRegistry, SdpaRequiredOperandsAndResult)
     ASSERT_NE(e, nullptr);
     for(std::string_view role : {"q", "k", "v"})
     {
-        const auto* op = findOperand(e, role);
+        const auto* op = findInputTensor(e, role);
         ASSERT_NE(op, nullptr) << role;
         EXPECT_FALSE(op->optional) << role;
     }
-    const auto* o = findResult(e, "o");
+    const auto* o = findOutputTensor(e, "o");
     ASSERT_NE(o, nullptr);
     EXPECT_FALSE(o->optional);
 }
@@ -110,14 +110,14 @@ TEST(UmdOpSchemaRegistry, SdpaOptionalOperandsClassifiedOptional)
     ASSERT_NE(e, nullptr);
     for(std::string_view role : {"attn_mask", "page_table_k", "page_table_v", "scale", "seed"})
     {
-        const auto* op = findOperand(e, role);
+        const auto* op = findInputTensor(e, role);
         ASSERT_NE(op, nullptr) << role;
         EXPECT_TRUE(op->optional) << role;
     }
     // Optional results too.
     for(std::string_view role : {"stats", "amax_s", "amax_o"})
     {
-        const auto* r = findResult(e, role);
+        const auto* r = findOutputTensor(e, role);
         ASSERT_NE(r, nullptr) << role;
         EXPECT_TRUE(r->optional) << role;
     }
@@ -173,13 +173,13 @@ TEST(UmdOpSchemaRegistry, AccessorRoundTripReadsLiveValues)
     const void* a = attrs;
 
     std::int64_t uid = 0;
-    ASSERT_TRUE(findOperand(e, "q")->read(a, uid));
+    ASSERT_TRUE(findInputTensor(e, "q")->read(a, uid));
     EXPECT_EQ(uid, 101);
-    ASSERT_TRUE(findOperand(e, "k")->read(a, uid));
+    ASSERT_TRUE(findInputTensor(e, "k")->read(a, uid));
     EXPECT_EQ(uid, 102);
-    ASSERT_TRUE(findOperand(e, "v")->read(a, uid));
+    ASSERT_TRUE(findInputTensor(e, "v")->read(a, uid));
     EXPECT_EQ(uid, 103);
-    ASSERT_TRUE(findResult(e, "o")->read(a, uid));
+    ASSERT_TRUE(findOutputTensor(e, "o")->read(a, uid));
     EXPECT_EQ(uid, 201);
 }
 
@@ -192,8 +192,8 @@ TEST(UmdOpSchemaRegistry, AbsentOptionalOperandReadsFalse)
     const void* a = attrs;
 
     std::int64_t uid = -1;
-    EXPECT_FALSE(findOperand(e, "attn_mask")->read(a, uid));
-    EXPECT_FALSE(findOperand(e, "page_table_k")->read(a, uid));
+    EXPECT_FALSE(findInputTensor(e, "attn_mask")->read(a, uid));
+    EXPECT_FALSE(findInputTensor(e, "page_table_k")->read(a, uid));
 }
 
 TEST(UmdOpSchemaRegistry, ScalarReadersReflectPresenceAndValue)

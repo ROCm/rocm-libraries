@@ -29,11 +29,11 @@ enum DataType : byte {
 // include, and applied to each op's attribute table. `umd_opcode` is a table-level
 // attribute giving the op's UMD-facing shorthand (e.g. "sdpa_fwd"); a UMD file's
 // node `op` names it, and the registry keys on it (falling back to the table type
-// name when absent). `umd_operand` / `umd_result` mark a tensor-UID edge and
-// `umd_name` gives the name a UMD binds it by; the operand/result flag already
-// fixes that the binding is a tensor, so no separate type attribute is carried.
-// Unannotated fields are scalar attributes.
+// name when absent). `umd_input_tensor` / `umd_output_tensor` mark a tensor-UID
+// edge and `umd_name` gives the name a UMD binds it by; the input/output flag
+// already fixes that the binding is a tensor, so no separate type attribute is
+// carried. Unannotated fields are scalar attributes.
 attribute "umd_opcode";
-attribute "umd_operand";
-attribute "umd_result";
+attribute "umd_input_tensor";
+attribute "umd_output_tensor";
 attribute "umd_name";

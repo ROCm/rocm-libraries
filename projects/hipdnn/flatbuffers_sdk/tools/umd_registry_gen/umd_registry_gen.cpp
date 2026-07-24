@@ -10,8 +10,8 @@
 // FlatBuffers accessors directly -- no runtime reflection (RFC 0018 B.4).
 //
 // Field classification (B.3):
-//   * umd_operand + umd_name  -> operand edge  (field MUST be a `long` UID)
-//   * umd_result  + umd_name  -> result  edge  (field MUST be a `long` UID)
+//   * umd_input_tensor  + umd_name  -> input-tensor edge  (field MUST be a `long` UID)
+//   * umd_output_tensor + umd_name  -> output-tensor edge (field MUST be a `long` UID)
 //   * neither flag, scalar    -> scalar attribute, bind-named by field name
 //   * neither flag, non-scalar-> skipped (a vector/table/union is not a UMD
 //                                scalar; the RFC's attribute tables are UID +
@@ -118,15 +118,15 @@ constexpr const char* kNs = "::hipdnn_flatbuffers_sdk::data_objects";
 
 struct Emitted
 {
-    std::string operands; // OperandBinding initializers
-    std::string results; // ResultBinding initializers
+    std::string inputTensors; // InputTensorBinding initializers
+    std::string outputTensors; // OutputTensorBinding initializers
     std::string attributes; // AttrBinding initializers
-    std::size_t operandCount = 0;
-    std::size_t resultCount = 0;
+    std::size_t inputTensorCount = 0;
+    std::size_t outputTensorCount = 0;
     std::size_t attributeCount = 0;
 };
 
-// Emit the reader lambda + binding line for one operand/result UID field.
+// Emit the reader lambda + binding line for one input/output tensor UID field.
 std::string emitUidBinding(const std::string& table,
                            const std::string& role,
                            const std::string& acc,
@@ -227,24 +227,25 @@ Emitted classifyTable(const reflection::Schema* schema, const reflection::Object
     for(const auto* fld : *obj->fields())
     {
         const std::string name = fld->name()->str();
-        const auto* opFlag = attr(fld, "umd_operand");
-        const auto* resFlag = attr(fld, "umd_result");
+        const auto* inputTensorFlag = attr(fld, "umd_input_tensor");
+        const auto* outputTensorFlag = attr(fld, "umd_output_tensor");
         const auto* nameAttr = attr(fld, "umd_name");
         const auto base = fld->type()->base_type();
 
-        if(opFlag && resFlag)
-            fail(table + "." + name + ": has both umd_operand and umd_result");
+        if(inputTensorFlag && outputTensorFlag)
+            fail(table + "." + name + ": has both umd_input_tensor and umd_output_tensor");
 
-        const bool isEdge = opFlag || resFlag;
+        const bool isEdge = inputTensorFlag || outputTensorFlag;
         if(isEdge)
         {
             if(!nameAttr)
-                fail(table + "." + name + ": umd_operand/umd_result requires umd_name");
+                fail(table + "." + name + ": umd_input_tensor/umd_output_tensor requires umd_name");
             const std::string role = nameAttr->value() ? nameAttr->value()->str() : "";
             if(role.empty())
                 fail(table + "." + name + ": umd_name must be non-empty");
             if(base != reflection::Long)
-                fail(table + "." + name + ": umd_operand/umd_result field must be `long` (a UID)");
+                fail(table + "." + name
+                     + ": umd_input_tensor/umd_output_tensor field must be `long` (a UID)");
             if(isReservedRoot(role))
                 fail(table + "." + name + ": role name '" + role
                      + "' collides with a reserved root (graph/kernel/device)");
@@ -253,21 +254,21 @@ Emitted classifyTable(const reflection::Schema* schema, const reflection::Object
 
             const std::string acc = accessorName(name);
             const bool optl = fld->optional();
-            if(opFlag)
+            if(inputTensorFlag)
             {
-                out.operands += emitUidBinding(table, role, acc, optl);
-                ++out.operandCount;
+                out.inputTensors += emitUidBinding(table, role, acc, optl);
+                ++out.inputTensorCount;
             }
             else
             {
-                out.results += emitUidBinding(table, role, acc, optl);
-                ++out.resultCount;
+                out.outputTensors += emitUidBinding(table, role, acc, optl);
+                ++out.outputTensorCount;
             }
             continue;
         }
 
         if(nameAttr)
-            fail(table + "." + name + ": umd_name without umd_operand/umd_result");
+            fail(table + "." + name + ": umd_name without umd_input_tensor/umd_output_tensor");
 
         // Unannotated: a scalar attribute (if a scalar base type). Non-scalar
         // fields (vector/table/union/string) are not UMD scalars -- skip.
@@ -330,21 +331,23 @@ int main(int argc, char** argv)
         const Emitted em = classifyTable(schema, obj);
 
         const std::string tag = "op" + std::to_string(opCount);
-        std::string operandsRef = "nullptr";
-        std::string resultsRef = "nullptr";
+        std::string inputTensorsRef = "nullptr";
+        std::string outputTensorsRef = "nullptr";
         std::string attrsRef = "nullptr";
-        const bool anyTable = em.operandCount || em.resultCount || em.attributeCount;
+        const bool anyTable = em.inputTensorCount || em.outputTensorCount || em.attributeCount;
         if(anyTable)
             body << "namespace " << tag << " {\n";
-        if(em.operandCount)
+        if(em.inputTensorCount)
         {
-            body << "inline const OperandBinding operands[] = {\n" << em.operands << "};\n";
-            operandsRef = tag + "::operands";
+            body << "inline const InputTensorBinding inputTensors[] = {\n"
+                 << em.inputTensors << "};\n";
+            inputTensorsRef = tag + "::inputTensors";
         }
-        if(em.resultCount)
+        if(em.outputTensorCount)
         {
-            body << "inline const ResultBinding results[] = {\n" << em.results << "};\n";
-            resultsRef = tag + "::results";
+            body << "inline const OutputTensorBinding outputTensors[] = {\n"
+                 << em.outputTensors << "};\n";
+            outputTensorsRef = tag + "::outputTensors";
         }
         if(em.attributeCount)
         {
@@ -355,9 +358,9 @@ int main(int argc, char** argv)
             body << "} // namespace " << tag << "\n\n";
 
         entries << "    {\"" << opcode << "\", \"" << member << "\", static_cast<int>(" << kNs
-                << "::NodeAttributes::" << member << "), " << operandsRef << ", " << em.operandCount
-                << "u, " << resultsRef << ", " << em.resultCount << "u, " << attrsRef << ", "
-                << em.attributeCount << "u},\n";
+                << "::NodeAttributes::" << member << "), " << inputTensorsRef << ", "
+                << em.inputTensorCount << "u, " << outputTensorsRef << ", " << em.outputTensorCount
+                << "u, " << attrsRef << ", " << em.attributeCount << "u},\n";
         ++opCount;
     }
 

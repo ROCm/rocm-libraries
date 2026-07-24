@@ -146,7 +146,7 @@ inline const AttrBinding attributes[] = {
 } // namespace op10
 
 namespace op11 {
-inline const OperandBinding operands[] = {
+inline const InputTensorBinding inputTensors[] = {
     {"attn_mask", true, +[](const void* a, std::int64_t& out) -> bool { auto v = static_cast<const ::hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes*>(a)->attn_mask_tensor_uid(); if(!v) return false; out = *v; return true; }},
     {"block_mask", true, +[](const void* a, std::int64_t& out) -> bool { auto v = static_cast<const ::hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes*>(a)->block_mask_tensor_uid(); if(!v) return false; out = *v; return true; }},
     {"descale_k", true, +[](const void* a, std::int64_t& out) -> bool { auto v = static_cast<const ::hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes*>(a)->descale_k_tensor_uid(); if(!v) return false; out = *v; return true; }},
@@ -169,7 +169,7 @@ inline const OperandBinding operands[] = {
     {"sink_token", true, +[](const void* a, std::int64_t& out) -> bool { auto v = static_cast<const ::hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes*>(a)->sink_token_tensor_uid(); if(!v) return false; out = *v; return true; }},
     {"v", false, +[](const void* a, std::int64_t& out) -> bool { out = static_cast<const ::hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes*>(a)->v_tensor_uid(); return true; }},
 };
-inline const ResultBinding results[] = {
+inline const OutputTensorBinding outputTensors[] = {
     {"amax_o", true, +[](const void* a, std::int64_t& out) -> bool { auto v = static_cast<const ::hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes*>(a)->amax_o_tensor_uid(); if(!v) return false; out = *v; return true; }},
     {"amax_s", true, +[](const void* a, std::int64_t& out) -> bool { auto v = static_cast<const ::hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes*>(a)->amax_s_tensor_uid(); if(!v) return false; out = *v; return true; }},
     {"max", true, +[](const void* a, std::int64_t& out) -> bool { auto v = static_cast<const ::hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes*>(a)->max_tensor_uid(); if(!v) return false; out = *v; return true; }},
@@ -307,7 +307,7 @@ inline const OpSchemaEntry entries[] = {
     {"MatmulAttributes", "MatmulAttributes", static_cast<int>(::hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::MatmulAttributes), nullptr, 0u, nullptr, 0u, op8::attributes, 3u},
     {"RMSNormAttributes", "RMSNormAttributes", static_cast<int>(::hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::RMSNormAttributes), nullptr, 0u, nullptr, 0u, op9::attributes, 7u},
     {"LayernormAttributes", "LayernormAttributes", static_cast<int>(::hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::LayernormAttributes), nullptr, 0u, nullptr, 0u, op10::attributes, 9u},
-    {"sdpa_fwd", "SdpaAttributes", static_cast<int>(::hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::SdpaAttributes), op11::operands, 21u, op11::results, 7u, op11::attributes, 13u},
+    {"sdpa_fwd", "SdpaAttributes", static_cast<int>(::hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::SdpaAttributes), op11::inputTensors, 21u, op11::outputTensors, 7u, op11::attributes, 13u},
     {"BlockScaleDequantizeAttributes", "BlockScaleDequantizeAttributes", static_cast<int>(::hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::BlockScaleDequantizeAttributes), nullptr, 0u, nullptr, 0u, op12::attributes, 4u},
     {"BlockScaleQuantizeAttributes", "BlockScaleQuantizeAttributes", static_cast<int>(::hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::BlockScaleQuantizeAttributes), nullptr, 0u, nullptr, 0u, op13::attributes, 6u},
     {"SdpaBackwardAttributes", "SdpaBackwardAttributes", static_cast<int>(::hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::SdpaBackwardAttributes), nullptr, 0u, nullptr, 0u, op14::attributes, 28u},
