@@ -485,11 +485,29 @@ def is_valid_spec_for_problem(
     Extends :func:`is_valid_spec` with problem-aware checks — e.g. tile
     divisibility against the actual M / N_gemm / K_gemm dimensions,
     minimum occupancy constraints, or problem-specific LDS pressure.
-
-    Currently delegates entirely to :func:`is_valid_spec`; problem-aware
-    filters will be added here as they are identified.
     """
-    return is_valid_spec(spec, arch)
+    ok, reason = is_valid_spec(spec, arch)
+    if not ok:
+        return False, reason
+
+    # AMD hardware caps gridDim.y (and .x/.z) at 65535. The M-tile axis maps
+    # to gridDim.y so reject specs whose grid would silently truncate and
+    # leave output tiles unwritten.
+    _AMD_MAX_GRID_DIM = 65535
+    _grid_m = (problem.M + spec.tile_m - 1) // spec.tile_m
+    _grid_n = (problem.N_gemm + spec.tile_n - 1) // spec.tile_n
+    if _grid_m > _AMD_MAX_GRID_DIM:
+        return False, (
+            f"grid_m {_grid_m} > {_AMD_MAX_GRID_DIM} (hardware gridDim.y cap): "
+            f"M={problem.M} tile_m={spec.tile_m}"
+        )
+    if _grid_n > _AMD_MAX_GRID_DIM:
+        return False, (
+            f"grid_n {_grid_n} > {_AMD_MAX_GRID_DIM} (hardware gridDim.x cap): "
+            f"N_gemm={problem.N_gemm} tile_n={spec.tile_n}"
+        )
+
+    return True, "ok"
 
 
 def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[bool, str]:
@@ -589,15 +607,18 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
     # are gated off until ported.
     if family == "wmma":
         if atom not in ((16, 16, 4), (16, 16, 16), (16, 16, 32)):
-            return False, f"WMMA conv supports only 16x16x4, 16x16x16, or 16x16x32 (got {atom}) on {arch}"
+            return (
+                False,
+                f"WMMA conv supports only 16x16x4, 16x16x16, or 16x16x32 (got {atom}) on {arch}",
+            )
         if spec.pipeline != "mem":
             return False, (
                 f"WMMA conv supports only the 'mem' pipeline "
                 f"(got {spec.pipeline!r}) on {arch}"
             )
-        if spec.epilogue != "default":
+        if spec.epilogue not in ("default", "cshuffle"):
             return False, (
-                f"WMMA conv supports only the 'default' epilogue "
+                f"WMMA conv supports only 'default' or 'cshuffle' epilogue "
                 f"(got {spec.epilogue!r}) on {arch}"
             )
         for flag, label in (
@@ -1649,7 +1670,7 @@ def build_implicit_gemm_conv(
     if epilogue_override is not None:
         epilogue_override(b, spec, final_accs, grid, d_rsrc, extra_context)
     elif spec.epilogue == "cshuffle":
-        _emit_cshuffle_epilogue(b, spec, final_accs, grid, d_rsrc)
+        _emit_cshuffle_epilogue(b, spec, final_accs, grid, d_rsrc, op=op)
     elif op.family == "wmma":
         # WMMA (RDNA) direct epilogue still uses the explicit per-warp/lane
         # decomposition (it predates the helper-based path); pass the bound
@@ -1786,6 +1807,8 @@ def _emit_cshuffle_epilogue(
     accs: Sequence[Value],
     grid: WarpGrid,
     d_rsrc: Value,
+    *,
+    op=None,
 ) -> None:
     """LDS-staged cshuffle epilogue — the runbook §9.3 lever.
 
@@ -1795,7 +1818,7 @@ def _emit_cshuffle_epilogue(
 
       1. Each lane converts its `<c_per_lane x f32>` accumulator to
          `<c_per_lane x dtype_d>` (f16/bf16/f32) and stores them into an
-         `[tile_m x tile_n]` LDS region at the MFMA *output* layout.
+         `[tile_m x tile_n]` LDS region at the MMA *output* layout.
       2. ``block_sync_lds`` (s_barrier).
       3. A flat distribution of `block_size` threads reads
          `<store_vec x dtype_d>` from LDS at consecutive row-major
@@ -1808,6 +1831,10 @@ def _emit_cshuffle_epilogue(
     The conv-specific bit is the ``addr_fn``: the D descriptor maps
     ``(m, k_out) -> NHWK linear element offset`` via the
     coordinate-transform DAG.
+
+    ``op`` is the resolved :class:`~rocke.core.arch.MmaOp`; when it is a
+    WMMA op (``op.family == "wmma"``) the LDS scatter uses
+    ``op.c_layout().coord()`` instead of the MFMA ``atom.lane_to_output``.
     """
     p = spec.problem
     D_desc = make_d_descriptor(p, dtype=spec.data.dtype_d)
@@ -1818,7 +1845,11 @@ def _emit_cshuffle_epilogue(
     _cshuffle_kwargs: dict = {"out_dtype": spec.data.dtype_d}
     if spec.vector_size_c is not None:
         _cshuffle_kwargs["max_store_vec"] = spec.vector_size_c
-    CShuffleEpilogue.from_grid(atom=spec.atom, grid=grid, **_cshuffle_kwargs).store(
+    if op is not None and op.family == "wmma":
+        _epi = CShuffleEpilogue.from_grid_op(op=op, grid=grid, **_cshuffle_kwargs)
+    else:
+        _epi = CShuffleEpilogue.from_grid(atom=spec.atom, grid=grid, **_cshuffle_kwargs)
+    _epi.store(
         b,
         accs=accs,
         addr_fn=d_addr,

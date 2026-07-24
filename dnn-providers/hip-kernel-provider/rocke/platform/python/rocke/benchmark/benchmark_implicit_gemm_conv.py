@@ -42,8 +42,10 @@ os.environ.setdefault("ROCKE_CPP_QUIET_FALLBACK", "1")
 # ---------------------------------------------------------------------------
 
 _TILE_MN = (16, 32, 64, 128, 256)
+_TILE_MN_GFX1250 = (16, 32, 64, 128, 256, 512)
 _TILE_K = (16, 32, 64, 128)
 _WARP_MN = (1, 2, 4, 8)
+_WARP_MN_GFX1250 = (1, 2, 4, 8, 16)
 _WARP_TILE_MN = (16, 32)
 _PIPELINES = ("mem", "compv3", "compv4")
 _EPILOGUES = ("default", "cshuffle")
@@ -440,7 +442,7 @@ def _run_sweep(
     bytes_xfer = float(A_t.nbytes + B_t.nbytes + D_t.nbytes)
     flop = float(p.flops)
 
-    vec_a, vec_b, vec_c = _get_vector_sizes(args.C, args.K, dtype)
+    vec_a, vec_b, vec_c = _get_vector_sizes(p.C, p.K, dtype)
     sig = conv_args_signature(dtype)
 
     _mma_family = "wmma" if target.wave_size == 32 else "mma"
@@ -449,14 +451,17 @@ def _run_sweep(
     # A wave32/WMMA target may lack an atom for a given dtype (e.g. a future
     # target without fp32 WMMA), so bail with a clear message rather than
     # silently sweeping everything and reporting "No valid configurations".
-    if target.mma.select_largest_k(
-        family=_mma_family,
-        a_dtype=dtype,
-        b_dtype=dtype,
-        c_dtype="fp32",
-        m=16,
-        n=16,
-    ) is None:
+    if (
+        target.mma.select_largest_k(
+            family=_mma_family,
+            a_dtype=dtype,
+            b_dtype=dtype,
+            c_dtype="fp32",
+            m=16,
+            n=16,
+        )
+        is None
+    ):
         print(
             f"error: {arch} has no {dtype} MMA atom — "
             f"{dtype} convolution is not supported on this target.",
@@ -464,13 +469,15 @@ def _run_sweep(
         )
         return 2
 
+    _tile_mn = _TILE_MN_GFX1250 if arch == "gfx1250" else _TILE_MN
+    _warp_mn = _WARP_MN_GFX1250 if arch == "gfx1250" else _WARP_MN
     combos = list(
         itertools.product(
-            _TILE_MN,
-            _TILE_MN,
+            _tile_mn,
+            _tile_mn,
             _TILE_K,
-            _WARP_MN,
-            _WARP_MN,
+            _warp_mn,
+            _warp_mn,
             _WARP_TILE_MN,
             _PIPELINES,
             _EPILOGUES,
@@ -498,12 +505,24 @@ def _run_sweep(
     # Compute reference output once before the sweep (only when --verify).
     ref_out: torch.Tensor | None = None
     if args.verify:
-        from rocke.benchmark.conv_reference import conv_reference
-
-        ref_out = conv_reference(_A_f32, _B_f32, p)
-        print(
-            f"Reference computed ({tuple(ref_out.shape)}, {ref_out.dtype}).", flush=True
+        from rocke.benchmark.conv_reference import (
+            conv_reference,
+            conv_reference_gfx1250,
         )
+
+        if arch == "gfx1250" and not p.is_3d:
+            ref_out = conv_reference_gfx1250(_A_f32, _B_f32, p).cuda()
+            print(
+                f"Reference computed via gfx1250 hand-written conv "
+                f"({tuple(ref_out.shape)}, {ref_out.dtype}).",
+                flush=True,
+            )
+        else:
+            ref_out = conv_reference(_A_f32, _B_f32, p)
+            print(
+                f"Reference computed via torch ({tuple(ref_out.shape)}, {ref_out.dtype}).",
+                flush=True,
+            )
 
     for (
         tile_m,
@@ -588,7 +607,10 @@ def _run_sweep(
             launcher(values, config=LaunchConfig(grid=grid, block=block, fence=True))
             D_out = torch.empty_like(D_t)
             rt.memcpy_d2h(_u8(D_out), D_dev, D_t.nbytes)
-            err = float(D_out.float().cuda().sub(ref_out).abs().max())
+            if arch == "gfx1250":
+                err = float(D_out.float().cpu().sub(ref_out.cpu()).abs().max())
+            else:
+                err = float(D_out.float().cuda().sub(ref_out).abs().max())
             status = "PASS" if err < 1e-2 else f"FAIL(err={err:.2e})"
             print(f"  verify {artifact.kernel_name}: {status}", flush=True)
             rt.memset(D_dev, 0, D_t.nbytes)
