@@ -410,6 +410,7 @@ def make_bquant_kernel_name(
     quant_group_k: int,
     preshuffle_b: bool = False,
     preshuffle_bquant: bool = False,
+    name_prefix: str = "grouped_gemm_bquant",
 ) -> str:
     """Return the canonical BQuant kernel name used as KERNEL_NAME in generated headers.
 
@@ -420,10 +421,15 @@ def make_bquant_kernel_name(
     (computed via bquant_effective_epilogue from tile params) rather than the
     user-specified epilogue string, so the name always matches the compiled kernel.
     The ``epilogue`` parameter is accepted for call-site compatibility but not used.
+
+    ``name_prefix`` selects the operator family. It defaults to
+    ``"grouped_gemm_bquant"`` for backward compatibility with the quant-grouped
+    (single-problem) BQuant bridge already in tree; the plain non-grouped
+    ``gemm_bquant`` bridge under 38_block_scale_gemm passes ``"gemm_bquant"``.
     """
     effective_epilogue = bquant_effective_epilogue(tile_n, warp_n, warp_tile_n, quant_group_n)
     parts = [
-        "grouped_gemm_bquant",
+        name_prefix,
         variant_key,
         layout,
         pipeline,

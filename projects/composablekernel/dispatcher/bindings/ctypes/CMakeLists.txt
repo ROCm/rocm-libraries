@@ -277,6 +277,56 @@ else()
 endif()
 
 # =============================================================================
+# Gemm BQuant ctypes Library (non-grouped, block-scale GEMM)
+# =============================================================================
+# Plain (single-problem) B-only quantized block-scale GEMM from
+# 38_block_scale_gemm. Distinct from the grouped_gemm_bquant target above.
+# Doubly guarded (on the generated header glob and on the source file) so the
+# target is skipped cleanly if neither is present.
+
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/gemm_bquant_ctypes_lib.cpp)
+    file(GLOB PLAIN_BQUANT_GEMM_KERNEL_HEADERS "${CMAKE_BINARY_DIR}/generated_kernels/gemm_bquant_*.hpp")
+    if(PLAIN_BQUANT_GEMM_KERNEL_HEADERS)
+        list(GET PLAIN_BQUANT_GEMM_KERNEL_HEADERS 0 PLAIN_BQUANT_GEMM_KERNEL_HEADER)
+        message(STATUS "Found gemm_bquant kernel for ctypes lib: ${PLAIN_BQUANT_GEMM_KERNEL_HEADER}")
+
+        add_ctypes_library(dispatcher_gemm_bquant_lib
+            gemm_bquant_ctypes_lib.cpp
+            KERNEL_HEADER ${PLAIN_BQUANT_GEMM_KERNEL_HEADER}
+        )
+        # Reuse the CK_TILE_BQUANT_GFX_ARCH cache var resolved by the grouped
+        # target above; fall back to the first CMAKE_HIP_ARCHITECTURES or gfx942.
+        if(NOT DEFINED CK_TILE_BQUANT_GFX_ARCH OR CK_TILE_BQUANT_GFX_ARCH STREQUAL "")
+            if(CMAKE_HIP_ARCHITECTURES)
+                list(GET CMAKE_HIP_ARCHITECTURES 0 _plain_bquant_gfx_arch)
+            else()
+                set(_plain_bquant_gfx_arch "gfx942")
+            endif()
+            set(CK_TILE_BQUANT_GFX_ARCH "${_plain_bquant_gfx_arch}" CACHE STRING
+                "GFX arch for the CMake-built BQuant ctypes .so (default: first CMAKE_HIP_ARCHITECTURES or gfx942)")
+        endif()
+        message(STATUS "gemm_bquant ctypes lib GFX_ARCH: ${CK_TILE_BQUANT_GFX_ARCH}")
+
+        target_compile_definitions(dispatcher_gemm_bquant_lib PRIVATE
+            CK_TILE_SINGLE_KERNEL_INCLUDE
+            GFX_ARCH="${CK_TILE_BQUANT_GFX_ARCH}"
+        )
+    else()
+        message(STATUS "No gemm_bquant kernel found for ctypes lib - building without kernel")
+        add_library(dispatcher_gemm_bquant_lib SHARED gemm_bquant_ctypes_lib.cpp)
+        target_include_directories(dispatcher_gemm_bquant_lib PRIVATE
+            ${PROJECT_SOURCE_DIR}/include
+            ${PROJECT_SOURCE_DIR}/dispatcher/include
+        )
+        target_link_libraries(dispatcher_gemm_bquant_lib PRIVATE hip::device)
+        set_target_properties(dispatcher_gemm_bquant_lib PROPERTIES
+            POSITION_INDEPENDENT_CODE ON
+            CXX_STANDARD 17
+        )
+    endif()
+endif()
+
+# =============================================================================
 # TileEngine -> Dispatcher Bridge ctypes Libraries (append-only shared block)
 # =============================================================================
 #
