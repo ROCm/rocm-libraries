@@ -341,20 +341,29 @@ struct hipfft_field
         if(is_real(dft_type) && (is_fwd(dft_type) == (field_io_label == fft_io::fft_io_out)))
             global_field_spans.back() = (global_field_spans.back() / 2) + 1;
 
-        global_field = hipfft_brick(std::vector<size_t>(global_field_spans.size(), 0),
+        global_field            = hipfft_brick(std::vector<size_t>(global_field_spans.size(), 0),
                                     global_field_spans,
                                     global_inbuffer_strides,
                                     rocfft_scoped_device::current_device());
-
-        for(size_t device_idx = 0; device_idx < device_contexts.size(); ++device_idx)
+        const size_t num_bricks = batch_sz == 1 ? ngpus : std::min(batch_sz, ngpus);
+        if(global_field_spans[split_dim] < num_bricks)
+        {
+            // e.g. more devices than the length of the split dimension
+            // This is not supported by hipFFT, so throw HIPFFT_NOT_SUPPORTED.
+            // Note: cuFFT uses hard cutoffs of 32 for minimum lengths and
+            // maximum 16 devices.
+            throw HIPFFT_NOT_SUPPORTED;
+        }
+        for(size_t brick_idx = 0; brick_idx < num_bricks; ++brick_idx)
         {
             std::vector<size_t> brick_lower(global_field_spans.size(), 0);
             std::vector<size_t> brick_upper(global_field_spans);
-            brick_lower[split_dim] = device_idx * (global_field_spans[split_dim] / ngpus)
-                                     + std::min(device_idx, global_field_spans[split_dim] % ngpus);
+            brick_lower[split_dim]
+                = brick_idx * (global_field_spans[split_dim] / num_bricks)
+                  + std::min(brick_idx, global_field_spans[split_dim] % num_bricks);
             brick_upper[split_dim]
-                = (device_idx + 1) * (global_field_spans[split_dim] / ngpus)
-                  + std::min((device_idx + 1), global_field_spans[split_dim] % ngpus);
+                = (brick_idx + 1) * (global_field_spans[split_dim] / num_bricks)
+                  + std::min((brick_idx + 1), global_field_spans[split_dim] % num_bricks);
             std::vector<size_t> brick_strides(global_field_spans.size());
             for(size_t dim = brick_strides.size(); dim-- > 0;)
             {
@@ -377,7 +386,7 @@ struct hipfft_field
             bricks.emplace_back(std::move(brick_lower),
                                 std::move(brick_upper),
                                 std::move(brick_strides),
-                                device_contexts[device_idx].device_id);
+                                device_contexts[brick_idx].device_id);
         }
     }
 
@@ -1365,14 +1374,6 @@ try
     hipfftIOType iotype;
     HIPFFT_EXPECT_SUCCESS(iotype.init(type));
 
-    // Creating a plan with multiple devices is not supported if the batch size is
-    // smaller than the number of devices: investigations are required to match
-    // source-of-truth behavior (cufft) for this case
-    if(!plan)
-        return HIPFFT_INVALID_PLAN;
-    if(plan->device_contexts.size() > 1 && static_cast<int>(plan->device_contexts.size()) > batch)
-        return HIPFFT_NOT_IMPLEMENTED;
-
     return hipfftMakePlan_internal(plan,
                                    lengths,
                                    iotype,
@@ -1480,14 +1481,6 @@ static hipfftResult hipfftMakePlanMany_internal(hipfftHandle plan,
 
     if(batch <= 0)
         return HIPFFT_INVALID_SIZE;
-
-    // Creating a plan with multiple devices is not supported if the batch size is
-    // smaller than the number of devices: investigations are required to match
-    // source-of-truth behavior (cufft) for this case
-    if(!plan)
-        return HIPFFT_INVALID_PLAN;
-    if(plan->device_contexts.size() > 1 && static_cast<int>(plan->device_contexts.size()) > batch)
-        return HIPFFT_NOT_IMPLEMENTED;
 
     std::vector<size_t>       lengths(n, n + rank);
     hipfft_ionembed_t<size_t> user_ionembed(rank, istride, inembed, ostride, onembed);
@@ -2328,37 +2321,37 @@ try
     auto xt_desc     = lib_desc->descriptor;
     xt_desc->version = 0;
     xt_desc->nGPUs   = static_cast<decltype(xt_desc->nGPUs)>(plan->device_contexts.size());
-    for(size_t dev_idx = 0; dev_idx < MAX_HIP_DESCRIPTOR_GPUS; ++dev_idx)
+    for(size_t brick_idx = 0; brick_idx < MAX_HIP_DESCRIPTOR_GPUS; ++brick_idx)
     {
         // do not allow possible misinterpretation of "0" as a valid device
-        if(dev_idx >= plan->device_contexts.size())
+        if(brick_idx >= plan->device_contexts.size())
         {
-            xt_desc->GPUs[dev_idx] = hipInvalidDeviceId;
+            xt_desc->GPUs[brick_idx] = hipInvalidDeviceId;
             continue;
         }
-        xt_desc->GPUs[dev_idx] = plan->device_contexts[dev_idx].device_id;
-        xt_desc->size[dev_idx] = 0;
+        xt_desc->GPUs[brick_idx] = plan->device_contexts[brick_idx].device_id;
+        xt_desc->size[brick_idx] = 0;
         for(const auto& [key, _] : plan->exec_plans)
         {
             if(!hipfftHandle_t::key_matches_format(key, format, desc_io_label))
                 continue; // requested format not compatible with this item
             for(auto io : field_io_labels_to_fit)
             {
-                const auto& field      = io == fft_io::fft_io_in ? plan->input_fields.at(key)
-                                                                 : plan->output_fields.at(key);
-                xt_desc->size[dev_idx] = std::max(
-                    xt_desc->size[dev_idx],
-                    field.get_brick(dev_idx).data_byte_size(plan->io_type.get_hip_data_type(io)));
+                const auto& field = io == fft_io::fft_io_in ? plan->input_fields.at(key)
+                                                            : plan->output_fields.at(key);
+                if(brick_idx >= field.brick_count())
+                    continue;
+                xt_desc->size[brick_idx] = std::max(
+                    xt_desc->size[brick_idx],
+                    field.get_brick(brick_idx).data_byte_size(plan->io_type.get_hip_data_type(io)));
             }
         }
-        if(xt_desc->size[dev_idx] == 0)
+        if(xt_desc->size[brick_idx] > 0)
         {
-            // TODO: how should we handle the case where some devices don't have data?
-            return HIPFFT_NOT_IMPLEMENTED;
+            rocfft_scoped_device dev(plan->device_contexts[brick_idx].device_id);
+            if(hipMalloc(&(xt_desc->data[brick_idx]), xt_desc->size[brick_idx]) != hipSuccess)
+                return HIPFFT_ALLOC_FAILED;
         }
-        rocfft_scoped_device dev(plan->device_contexts[dev_idx].device_id);
-        if(hipMalloc(&(xt_desc->data[dev_idx]), xt_desc->size[dev_idx]) != hipSuccess)
-            return HIPFFT_ALLOC_FAILED;
     }
     *desc = lib_desc.release();
     return HIPFFT_SUCCESS;
