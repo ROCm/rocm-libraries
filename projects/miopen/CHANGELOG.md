@@ -21,9 +21,11 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 * [Conv] Eliminated redundant clearing of output buffers
 * [RNN] Updated selection heuristics
 * Updated tuning for MI300
+* [Conv] Improved Composable Kernel (CK) kernel selection during tuning for grouped bwd/wrw solvers
 
 ### Resolved issues
 * Fixed a segmentation fault when user specifies workspace smaller than what is required
+* [Conv] Fixed wrong results in grouped CK xdlops bwd/wrw solvers when a tuned split_k configuration required a reduction workspace that was not allocated
 * Fixed a layout calculation logic error that returned incorrect results and enabled less restrictive layout selection
 * Fixed memory access faults in misa kernels due to out-of-bounds memory usage
 * Fixed performance drop on gfx950 due to transpose kernel use
