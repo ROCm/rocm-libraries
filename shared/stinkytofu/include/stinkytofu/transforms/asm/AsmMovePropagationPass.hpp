@@ -9,15 +9,29 @@
 namespace stinkytofu {
 class Pass;
 
-/// Move propagation for asm-level mov instructions.
+/// Creates a basic-block-local move propagation pass.
 ///
-/// This pass performs conservative, basic-block-local propagation for simple
-/// register moves (e.g. v_mov_b32 / s_mov_b32):
-///   dst = mov src
-/// Later uses of dst are rewritten to src while the mapping remains valid.
+/// "Move propagation" in this pass means:
+/// - detect an eligible mov (`v_mov_b32` / `s_mov_b32`) with one src and one dst
+/// - record a mapping `dst -> src`
+/// - rewrite later uses of `dst` to use `src` in the same basic block
 ///
-/// After propagation, a mov is erased only when it is guaranteed dead inside
-/// the same block (its destination is redefined before any remaining use).
+/// Example:
+/// ```
+/// Before:
+///   v0 = v_mov_b32 v1
+///   v2 = v_add_f32 v0, v3
+///
+/// After:
+///   v2 = v_add_f32 v1, v3
+/// ```
+///
+/// Rules:
+/// - Scope is one basic block only (no cross-block propagation)
+/// - A mapping is dropped when an overlapping register is redefined
+/// - A mov is erased only if it is:
+///   - identity (`mov x, x`), or
+///   - provably dead in the block (dst is redefined before any later use)
 STINKYTOFU_EXPORT std::unique_ptr<Pass> createAsmMovePropagationPass();
 
 }  // namespace stinkytofu

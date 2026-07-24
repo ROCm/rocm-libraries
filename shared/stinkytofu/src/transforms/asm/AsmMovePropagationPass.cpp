@@ -100,6 +100,9 @@ class AsmMovePropagationPassImpl : public Pass {
             }
         };
 
+        // 1) rewrite current instruction sources using mappings from earlier instructions
+        // 2) invalidate mappings killed by current instruction defs
+        // 3) if current instruction is an eligible mov, add its new mapping
         for (StinkyInstruction* inst : instructions) {
             for (size_t i = 0; i < inst->getNumSrcRegs(); ++i) {
                 const StinkyRegister& oldSrc = inst->getSrcReg(i);
@@ -147,6 +150,8 @@ class AsmMovePropagationPassImpl : public Pass {
                 }
             }
 
+            // Erase mov only when dst is redefined before any later use in this BB.
+            // Otherwise keep it conservatively (it may still be live-out).
             if (redefined) {
                 toErase.push_back(inst);
             }
