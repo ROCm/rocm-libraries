@@ -50,6 +50,7 @@
 #include "stinkytofu/transforms/asm/RedundantMovEliminationPass.hpp"
 #include "stinkytofu/transforms/asm/RegionClonePass.hpp"
 #include "stinkytofu/transforms/asm/RemoveDelayAluPass.hpp"
+#include "stinkytofu/transforms/asm/RemoveDscntPass.hpp"
 #include "stinkytofu/transforms/asm/RemoveInstructionPass.hpp"
 #include "stinkytofu/transforms/asm/RemoveWaitAluPass.hpp"
 #include "stinkytofu/transforms/asm/SetMatrixReusePass.hpp"
@@ -98,6 +99,7 @@ const std::vector<PassInfo> availablePasses = {
      [](const auto&) { return createStinkyBuildImplicitDependencyPass(); }},
     {"StinkyRemoveWaitCntPass", [](const auto&) { return createStinkyRemoveWaitCntPass(); }},
     {"StinkyRemoveNopPass", [](const auto&) { return createStinkyRemoveNopPass(); }},
+    {"RemoveDscntPass", [](const auto&) { return createRemoveDscntPass(); }},
     {"StinkyWaitCntInsertionPass",
      [](const std::vector<std::string>& args) {
          WaitCntInsertionOptions options;
