@@ -148,3 +148,58 @@ function(hipdnn_generate_flatbuffer_headers)
 
     add_dependencies(${ARG_TARGET} ${_gen_target_name})
 endfunction()
+
+# Generate a FlatBuffers binary reflection schema (.bfbs) from one .fbs schema.
+# Unlike the C++ header path (flatc --cpp), the reflection schema retains custom
+# field attributes (umd_operand / umd_result / umd_name), which the
+# umd_registry_gen tool reads via the FlatBuffers reflection API to emit the UMD
+# op-schema registry (RFC 0018 Appendix B). flatc writes <schema-name>.bfbs into
+# the -o directory; OUTPUT MUST name that file.
+# Usage:
+#   hipdnn_generate_bfbs(
+#       SCHEMA      schemas/graph.fbs
+#       SCHEMAS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/schemas
+#       OUTPUT      ${CMAKE_CURRENT_BINARY_DIR}/umd/graph.bfbs
+#   )
+function(hipdnn_generate_bfbs)
+    set(_one_value_args SCHEMA SCHEMAS_DIR OUTPUT)
+    cmake_parse_arguments(ARG "" "${_one_value_args}" "" ${ARGN})
+
+    foreach(_required SCHEMA SCHEMAS_DIR OUTPUT)
+        if(NOT ARG_${_required})
+            message(FATAL_ERROR "hipdnn_generate_bfbs: missing required argument ${_required}")
+        endif()
+    endforeach()
+
+    if(IS_ABSOLUTE "${ARG_SCHEMA}")
+        set(_schema_path "${ARG_SCHEMA}")
+    else()
+        set(_schema_path "${CMAKE_CURRENT_SOURCE_DIR}/${ARG_SCHEMA}")
+    endif()
+
+    get_filename_component(_out_dir "${ARG_OUTPUT}" DIRECTORY)
+
+    _hipdnn_resolve_flatc_command(_flatc_command _flatc_dependency)
+
+    # graph.fbs pulls in the other schemas via `include`; flatc reads them all, so
+    # the .bfbs must regenerate when ANY schema in the include dir changes (a
+    # DEPENDS on graph.fbs alone would miss edits to included tables/attributes).
+    # CONFIGURE_DEPENDS re-runs the glob when a schema is added or removed.
+    file(GLOB _schema_deps CONFIGURE_DEPENDS "${ARG_SCHEMAS_DIR}/*.fbs")
+    set(_depends "${_schema_path}" ${_schema_deps})
+    if(_flatc_dependency)
+        list(PREPEND _depends ${_flatc_dependency})
+    endif()
+
+    add_custom_command(
+        OUTPUT "${ARG_OUTPUT}"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${_out_dir}"
+        COMMAND "${_flatc_command}" -b --schema
+                -o "${_out_dir}"
+                -I "${ARG_SCHEMAS_DIR}"
+                "${_schema_path}"
+        DEPENDS ${_depends}
+        COMMENT "Generating reflection schema ${ARG_OUTPUT}"
+        VERBATIM
+    )
+endfunction()

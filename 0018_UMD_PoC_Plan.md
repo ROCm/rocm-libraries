@@ -25,9 +25,10 @@ Source RFC: `projects/hipdnn/docs/rfcs/0018_UniversalMatchDescriptor.md`.
   Tests already include a `Umd0018ConstraintShapes` case (`src/tests/core/TestJsonLogic.cpp`).
   **Gap: no `shape` short-hand (lowered by the UMD compiler, Phase 1). The custom-operation
   (native-predicate) hook is out of scope for this PoC — see Scope decisions.**
-- **UMD annotations already in the schema** — `umd_operand` / `umd_result` / `umd_name` are
-  declared once (`flatbuffers_sdk/schemas/data_types.fbs:33-35`) and applied on every SDPA UID
-  field (`flatbuffers_sdk/schemas/sdpa_attributes.fbs`). But flatc runs `--cpp` only
+- **UMD annotations already in the schema** — the table-level `umd_opcode` shorthand (e.g.
+  `SdpaAttributes (umd_opcode: "sdpa_fwd")`) and the field-level `umd_operand` / `umd_result` /
+  `umd_name` are declared once (`flatbuffers_sdk/schemas/data_types.fbs`) and applied on the SDPA
+  table + its UID fields (`flatbuffers_sdk/schemas/sdpa_attributes.fbs`). But flatc runs `--cpp` only
   (`cmake/flatc_flags.txt`); no `.bfbs` is emitted, so the annotations are invisible at
   build/runtime. **Gap: no `.bfbs` emit, no reflection-driven registry generator.**
 - **Graph model** — `IGraph` / `GraphWrapper`
@@ -56,38 +57,54 @@ the provider consumes. Matcher is exercised directly by tests — not registered
 
 ## Phase 0 — Op-schema registry codegen (RFC Appendix B)
 
-Goal: generate, from the `umd_*` annotations, a C++ registry keyed by opcode listing operand/result
-roles (name, optionality, UID reader) and scalar attributes (name, optionality, typed reader).
+Goal: generate, from the `umd_*` annotations, a C++ registry keyed by opcode — the table's
+`umd_opcode` shorthand (e.g. `sdpa_fwd`), falling back to the `NodeAttributes` union member name when
+absent. Each entry also carries the table name (diagnostics) and the integer `NodeAttributes` value
+(O(1) lookup against `Node::attributes_type()`), and lists operand/result roles (name, optionality,
+UID reader) and scalar attributes (name, optionality, typed reader).
 
 1. **Emit `graph.bfbs`.** Add a dedicated flatc invocation (NOT via `flatc_flags.txt`, which is
    `--cpp`-only) in `projects/hipdnn/cmake/FlatBuffersGenerate.cmake` — a sibling function
    `hipdnn_generate_bfbs(graph.fbs)` running
-   `flatc -b --schema --bfbs-comments -I <schemas> -o <out> graph.fbs`. `graph.fbs` transitively
-   covers every attribute table + the `umd_*` declarations. Wire into `flatbuffers_sdk/CMakeLists.txt`.
+   `flatc -b --schema -I <schemas> -o <out> graph.fbs`; the custom `umd_*` attributes are retained in
+   the `.bfbs` with no extra flag. `graph.fbs` transitively covers every attribute table + the `umd_*`
+   declarations. Wire into `flatbuffers_sdk/CMakeLists.txt`.
 2. **Generator tool.** Small standalone C++ executable `umd_registry_gen` linking flatbuffers
    reflection (`flatbuffers/reflection.h`). Loads `graph.bfbs`, enumerates `NodeAttributes` union
-   members (opcode→table), applies B.3 classification per field:
+   members (opcode→table); reads the table's `umd_opcode` shorthand and applies B.3 classification
+   per field:
    - `umd_operand` + `umd_name` → operand role; `umd_result` + `umd_name` → result role
      (type MUST be `long`, `umd_name` non-empty).
    - neither flag → scalar attribute, bind-named by field name.
    - optionality derived from `= null` default (not re-annotated).
    - **Fail the build** on B.3 violations (both flags on one field, `umd_name` without a flag,
-     flag on a non-integer field, duplicate `umd_name` within an op, role name colliding with a
-     reserved token `graph`/`kernel`/`device`).
-3. **Emit `op_schema_registry_generated.{h,cpp}`** into the `flatbuffers_sdk` generated include dir.
+     flag on a non-integer field, duplicate `umd_name` within an op, a role name colliding with a
+     reserved token `graph`/`kernel`/`device`, or a duplicate `umd_opcode` across ops).
+3. **Emit `op_schema_registry_generated.hpp`** (header-only: inline per-op tables + inline lookup
+   functions, so `flatbuffers_sdk` stays INTERFACE-only) into the committed `flatbuffers_sdk` include
+   dir (`include/hipdnn_flatbuffers_sdk/umd/`). The neutral types live in a hand-written
+   `umd/OpSchemaRegistry.hpp`.
    Neutral (jlogic-agnostic) shape so `flatbuffers_sdk` needn't depend on the provider: per opcode,
    arrays of `{role, optional, UID-reader int64_t(const void*)}` and
    `{attr-name, optional, AttrType, reader→neutral ScalarValue}`. Readers use the generated typed
    accessors (`&SdpaAttributes::q_tensor_uid`, …) — **no runtime reflection** (RFC B.4). The
-   generator is general; SDPA is the only annotated op today, so the registry meaningfully contains
-   the `sdpa_fwd` entry (this is what proves the codegen).
+   generator is general (it emits an entry for every `NodeAttributes` member); SDPA is the only
+   annotated op today, so the `SdpaAttributes` entry is the one carrying edges — that entry proves the
+   codegen. Each entry carries its `umd_opcode` shorthand (fallback: table name), the table name, and
+   the integer `NodeAttributes` value, so the matcher resolves it by `Node::attributes_type()` (O(1)),
+   and the UMD compiler resolves a node `op: "sdpa_fwd"` by the shorthand.
+   - Enum-typed scalar attributes surface as `AttrType::Dtype` carrying the enum-value name string
+     (via the generated `EnumName…`). Unannotated non-scalar fields (vectors/sub-tables) are not UMD
+     scalars and are skipped; SDPA's attribute table is all UID + scalar, so it is fully covered.
    - Each attr entry's `AttrType` maps to a jlogic `ValueKind` (Int/Float/Bool/Dtype), consumed by the
      Phase 1 compiler for compile-time criteria type-checking (A.10 §9). This carries strong typing
      from the schema through to expression validation and is the payoff that makes the codegen worth
      more than a hand-written table.
-4. Wire `umd_registry_gen` as an `add_custom_command`/target; make it a dependency of the provider.
+4. Wire `umd_registry_gen` as an `add_custom_command`/target; make it a dependency of
+   `hipdnn_flatbuffers_sdk` (the provider consumes the header transitively), gated on
+   `HIPDNN_GENERATE_SDK_HEADERS` (default ON) like the existing flatc header generation.
 
-**Verify:** registry unit test — `sdpa_fwd` entry lists Q/K/V (required operands), O (required
+**Verify:** registry unit test — `SdpaAttributes` entry lists Q/K/V (required operands), O (required
 result), `attn_mask`/`page_table_k`/`page_table_v` (optional operands), and scalar attrs
 (`dropout_probability` optional, `alibi_mask`/`padding_mask`/`causal_mask` with correct optionality).
 A B.3-violation fixture fails generation.

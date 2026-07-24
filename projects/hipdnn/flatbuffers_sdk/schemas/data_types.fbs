@@ -26,10 +26,14 @@ enum DataType : byte {
 }
 
 // UMD binding annotations (RFC 0018 Appendix B). Declared once here, in the shared
-// include, and applied to each op's attribute-table UID fields. `umd_operand` /
-// `umd_result` mark a tensor-UID edge and `umd_name` gives the name a UMD binds it
-// by; the operand/result flag already fixes that the binding is a tensor, so no
-// separate type attribute is carried. Unannotated fields are scalar attributes.
+// include, and applied to each op's attribute table. `umd_opcode` is a table-level
+// attribute giving the op's UMD-facing shorthand (e.g. "sdpa_fwd"); a UMD file's
+// node `op` names it, and the registry keys on it (falling back to the table type
+// name when absent). `umd_operand` / `umd_result` mark a tensor-UID edge and
+// `umd_name` gives the name a UMD binds it by; the operand/result flag already
+// fixes that the binding is a tensor, so no separate type attribute is carried.
+// Unannotated fields are scalar attributes.
+attribute "umd_opcode";
 attribute "umd_operand";
 attribute "umd_result";
 attribute "umd_name";

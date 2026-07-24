@@ -148,6 +148,37 @@ if(HIPDNN_GENERATE_SDK_HEADERS)
         GENERATED_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include/hipdnn_flatbuffers_sdk/data_objects"
         OUTPUT_NAMESPACE hipdnn_flatbuffers_sdk
     )
+
+    # --- RFC 0018 UMD op-schema registry generation (Appendix B) ---
+    # 1. Emit graph.bfbs (reflection schema; retains the umd_* attributes the
+    #    C++ headers drop). 2. Build the host tool umd_registry_gen. 3. Run it to
+    #    emit the strongly-typed op-schema registry header into the committed
+    #    include tree, in lockstep with the schema.
+    set(_umd_bfbs "${CMAKE_CURRENT_BINARY_DIR}/umd/graph.bfbs")
+    hipdnn_generate_bfbs(
+        SCHEMA schemas/graph.fbs
+        SCHEMAS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/schemas"
+        OUTPUT "${_umd_bfbs}"
+    )
+
+    add_executable(umd_registry_gen tools/umd_registry_gen/umd_registry_gen.cpp)
+    target_compile_features(umd_registry_gen PRIVATE cxx_std_17)
+    target_link_libraries(umd_registry_gen PRIVATE flatbuffers::flatbuffers)
+
+    set(_umd_registry_hpp
+        "${CMAKE_CURRENT_SOURCE_DIR}/include/hipdnn_flatbuffers_sdk/umd/op_schema_registry_generated.hpp")
+    add_custom_command(
+        OUTPUT "${_umd_registry_hpp}"
+        COMMAND umd_registry_gen "${_umd_bfbs}" "${_umd_registry_hpp}"
+        DEPENDS umd_registry_gen "${_umd_bfbs}"
+        COMMENT "Generating UMD op-schema registry (RFC 0018 Appendix B)"
+        VERBATIM
+    )
+    add_custom_target(generate_umd_registry
+        DEPENDS "${_umd_registry_hpp}"
+        COMMENT "UMD op-schema registry generated"
+    )
+    add_dependencies(hipdnn_flatbuffers_sdk generate_umd_registry)
 endif()
 
 # --- Export and install ---

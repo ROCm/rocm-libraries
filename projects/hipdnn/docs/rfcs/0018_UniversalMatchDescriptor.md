@@ -101,13 +101,18 @@ names of the op's scalar attributes. This registry is what lets a UMD name opera
 role (`Q`, `K`, `V`, `O`) and what powers the auto-binding formula of
 [§4](#4-symbol-binding-and-the-auto-binding-formula).
 
-**The registry is generated from schema annotations, not name conventions.** Field-level FlatBuffers
-attributes on each op's attribute table declare the binding contract next to the field it governs:
-`umd_operand` / `umd_result` mark a UID field and `umd_name` names it, so SDPA's operand Q is
-`q_tensor_uid: long (umd_operand, umd_name: "Q")` and its result O is `o_tensor_uid: long (umd_result,
-umd_name: "O")`. Optionality is not re-annotated: a UID field's `= null` default already encodes it
-(`attn_mask_tensor_uid: long = null`), and the `NodeAttributes` union already maps each opcode to its
-table, so every unannotated field is a scalar attribute by elimination. A build step emits the binary
+**The registry is generated from schema annotations, not name conventions.** A table-level FlatBuffers
+attribute names the op, and field-level attributes on each op's attribute table declare the binding
+contract next to the field they govern. `umd_opcode` on the attribute table gives the op's UMD-facing
+opcode (`SdpaAttributes (umd_opcode: "sdpa_fwd")`); a UMD node's `op` names it, and the registry keys
+on it (falling back to the table type name when the attribute is absent), so the schema is the single
+source of truth for the opcode rather than an ad-hoc string. `umd_operand` / `umd_result` mark a UID
+field and `umd_name` names it, so SDPA's operand Q is `q_tensor_uid: long (umd_operand, umd_name: "Q")`
+and its result O is `o_tensor_uid: long (umd_result, umd_name: "O")`. Optionality is not re-annotated:
+a UID field's `= null` default already encodes it (`attn_mask_tensor_uid: long = null`), and the
+`NodeAttributes` union already maps each opcode to its table, so every unannotated *scalar* field is a
+scalar attribute by elimination (unannotated non-scalar fields — vectors, sub-tables — are not
+bindable scalars and are skipped). A build step emits the binary
 reflection schema (`graph.bfbs`, which transitively covers every attribute table; custom attributes
 surface only through reflection, not the generated headers) and a generator reads each field's
 attributes to emit the registry, so it stays in lockstep with the graph definitions rather than being
@@ -159,8 +164,10 @@ variables (`$q`, `$conv_out`).
 - **Node identity.** Each node has a pattern-local `id` (`sdpa_fwd`, `conv`, `add`) used to read the
   node's attributes (`$<id>.<attr>`, [§4](#4-symbol-binding-and-the-auto-binding-formula)) and in
   diagnostics. It is distinct from the descriptor's global `id`.
-- **Opcode.** `op` names one opcode, or `{"one_of": [...]}` for a small fixed set, or `"any"` for a
-  wildcard node (used only inside a bounded fused pattern).
+- **Opcode.** `op` names one opcode — the op's `umd_opcode` shorthand from the schema
+  ([§2](#2-the-matchers-input-hipdnns-graph-model), [Appendix B](#appendix-b-op-schema-registry-generation)),
+  e.g. `sdpa_fwd` — or `{"one_of": [...]}` for a small fixed set, or `"any"` for a wildcard node (used
+  only inside a bounded fused pattern).
 - **Roles.** Keys in `operands` and `results` are op-schema role names; values are pattern variables.
   A role the schema marks optional is bound with a `?` suffix (`"attn_mask": "$attn_mask?"`), bound only
   when the graph supplies it, and read with a default via `value_or_default`
@@ -747,8 +754,9 @@ and argument formulas reference ([RFC 0017 §6](0017_UniversalKernelDescriptor.m
 
 - **Op-schema registry coupling.** Auto-binding depends on a registry generated from the flatbuffer op
   schema ([§2](#2-the-matchers-input-hipdnns-graph-model)). If it drifts from the graph definitions,
-  bindings are wrong. Mitigation: generate it from the schema's own `umd_operand` / `umd_result` /
-  `umd_name` field annotations (never from field-name conventions), so a new or renamed operand carries
+  bindings are wrong. Mitigation: generate it from the schema's own `umd_opcode` table attribute and
+  `umd_operand` / `umd_result` / `umd_name` field annotations (never from field-name conventions), so a
+  new or renamed operand carries
   its binding contract in the same edit ([§2](#2-the-matchers-input-hipdnns-graph-model)), and fail
   closed on an unknown op or role rather than binding a wrong field.
 - **Expression language sharing.** JsonLogic is shared with the UDD ([§6](#6-the-shared-expression-language)).
@@ -1067,20 +1075,23 @@ never inferred from field-name conventions, so the binding contract for an opera
 
 ### B.1 Attribute declarations
 
-Three custom attributes are declared once in the graph schema. FlatBuffers requires an `attribute`
-declaration before an attribute may be used, and declared attributes are retained in the binary
-reflection schema (`.bfbs`), which is what the generator reads.
+Four custom attributes are declared once in the graph schema. FlatBuffers requires an `attribute`
+declaration before an attribute may be used, and declared attributes — on a table or on a field — are
+retained in the binary reflection schema (`.bfbs`), which is what the generator reads.
 
 ```fbs
-attribute "umd_operand";        // flag: this field is an operand tensor UID
-attribute "umd_result";         // flag: this field is a result tensor UID
-attribute "umd_name";           // string: the name the UMD binds it by (e.g. "Q", "O")
+attribute "umd_opcode";         // table: the op's UMD-facing opcode (e.g. "sdpa_fwd")
+attribute "umd_operand";        // field flag: this field is an operand tensor UID
+attribute "umd_result";         // field flag: this field is a result tensor UID
+attribute "umd_name";           // field string: the name the UMD binds it by (e.g. "Q", "O")
 ```
 
-No separate type attribute is needed: an operand or result always binds a `Tensor` — a tensor UID is
-the only edge kind in a UID-centric graph ([§2](#2-the-matchers-input-hipdnns-graph-model)) — and every
-scalar attribute is precisely an unannotated field (B.3). The `long` UID field type and the
-`umd_operand`/`umd_result` flag together already fix what the binding is.
+`umd_opcode` is a **table-level** attribute (applied in parentheses after the table name); the other
+three are field-level. No separate operand/result type attribute is needed: an operand or result always
+binds a `Tensor` — a tensor UID is the only edge kind in a UID-centric graph
+([§2](#2-the-matchers-input-hipdnns-graph-model)) — and every scalar attribute is precisely an
+unannotated scalar field (B.3). The `long` UID field type and the `umd_operand`/`umd_result` flag
+together already fix what the binding is.
 
 ### B.2 Annotated schema
 
@@ -1089,7 +1100,7 @@ re-annotated: a UID field's `= null` default (an optional field) already encodes
 derives required-vs-optional from the field's presence semantics rather than a fourth attribute.
 
 ```fbs
-table SdpaAttributes {
+table SdpaAttributes (umd_opcode: "sdpa_fwd") {              // table-level opcode shorthand
   q_tensor_uid:long (umd_operand, umd_name: "Q");          // required operand
   k_tensor_uid:long (umd_operand, umd_name: "K");
   v_tensor_uid:long (umd_operand, umd_name: "V");
@@ -1105,14 +1116,16 @@ table SdpaAttributes {
 ### B.3 Field classification (normative)
 
 For every table reachable from the `NodeAttributes` union (which already maps each opcode to its
-attribute table), the generator classifies each field by these rules; a violation **fails the build**
-rather than emitting a wrong registry:
+attribute table), the generator reads the table's `umd_opcode` (the entry's opcode key; when absent it
+falls back to the table type name) and classifies each field by these rules; a violation **fails the
+build** rather than emitting a wrong registry:
 
 | Field carries | Classified as | Requirements |
 |---|---|---|
 | `umd_operand` + `umd_name` | operand edge for that name | field type MUST be an integer UID (`long`); `umd_name` MUST be non-empty |
 | `umd_result` + `umd_name` | result edge for that name | field type MUST be an integer UID (`long`); `umd_name` MUST be non-empty |
-| neither `umd_operand` nor `umd_result` | scalar attribute, named by the field name | — |
+| neither flag, a **scalar** field | scalar attribute, named by the field name | — |
+| neither flag, a **non-scalar** field (vector, sub-table, union, string) | skipped (not a UMD scalar) | — |
 
 - **Optionality** is derived, not annotated: a field with a `= null` default (an optional UID or an
   optional scalar) is optional; it supplies the `?`-binding of [Appendix A.2](#a2-node-object-and-opcode-selector)
@@ -1120,7 +1133,13 @@ rather than emitting a wrong registry:
 - **Build errors (fail closed):** `umd_operand` and `umd_result` on the same field; `umd_name` without
   either flag; `umd_operand`/`umd_result` on a non-integer field; a duplicate `umd_name` within one op;
   an operand/result whose role name collides with a reserved token
-  ([Appendix A.4](#a4-variable-references-and-the-five-namespaces)).
+  ([Appendix A.4](#a4-variable-references-and-the-five-namespaces)); or a duplicate `umd_opcode` across
+  ops.
+- **Scalar attribute value kind.** A scalar attribute carries its value kind for compile-time type
+  checking ([Appendix A.10](#a10-compile-time-validation-normative)): integer fields bind as `Int`,
+  float/double as `Float`, `bool` as `Bool`, and an **enum-typed** field as `Dtype`, carrying the
+  enum-value name string (e.g. `diagonal_alignment` → `"TOP_LEFT"`). This mirrors the tensor `dtype`
+  representation and lets a criterion compare an enum attribute against a literal enum name.
 - **No name-suffix inference.** `PointwiseAttributes::axis_tensor_uid` is a plain axis index, not a
   tensor UID; because it carries no `umd_operand`/`umd_result` it is classified a scalar attribute,
   exactly as intended — nothing keys off the `_tensor_uid` suffix.
@@ -1144,10 +1163,16 @@ rather than emitting a wrong registry:
    transitively covers every attribute table and carries the declared `umd_*` attributes (custom
    attributes surface through reflection, not through the generated C++ headers).
 2. A build-time generator loads `graph.bfbs` through the FlatBuffers reflection API, enumerates the
-   `NodeAttributes` union members (opcode → table), and applies the B.3 rules to each table's fields.
-3. The generator emits the op-schema registry as C++ compiled into the provider: a table keyed by
-   opcode, each entry listing its operands and results (role name, optionality, and the typed accessor
-   for the UID field) and its scalar attributes (name, optionality, typed accessor).
+   `NodeAttributes` union members (opcode → table), reads each table's `umd_opcode`, and applies the
+   B.3 rules to each table's fields. Because `graph.fbs` pulls the per-op tables in via `include`, the
+   `.bfbs` (and thus the registry) must regenerate when **any** included schema changes, not only when
+   the top-level schema does.
+3. The generator emits the op-schema registry as generated C++ the provider compiles (a header-only
+   registry emitted into the schema-owning SDK, so it needs no dependency on the provider): a table
+   keyed by the `umd_opcode` shorthand, each entry also carrying its attribute-table name and the
+   integer `NodeAttributes` value, and listing its operands and results (role name, optionality, and
+   the typed accessor for the UID field) and its scalar attributes (name, optionality, value kind, and
+   typed accessor).
 
 Reflection is used **only at build time**; the generated registry holds typed accessors, so the runtime
 match path reads UID and attribute fields via `attributesAs<T>()`
@@ -1159,8 +1184,8 @@ The emitted entry for one opcode is, conceptually:
 
 ```jsonc
 // generated; illustrative shape, not a wire format
-"sdpa_fwd": {
-  "attributes_type": "SdpaAttributes",
+"sdpa_fwd": {                          // key: the table's umd_opcode (fallback: table name)
+  "attributes_type": "SdpaAttributes", // NodeAttributes union member; matched via Node::attributes_type()
   "operands": [
     {"role": "Q", "uid": "&SdpaAttributes::q_tensor_uid",         "optional": false},
     {"role": "K", "uid": "&SdpaAttributes::k_tensor_uid",         "optional": false},

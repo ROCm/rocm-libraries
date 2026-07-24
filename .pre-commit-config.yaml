@@ -44,8 +44,10 @@ exclude: |
     \.github/workflows/.*\.lock\.yml$|
     # Binary files
     projects/hipdnn/.*\.bin$|
-    # Generated hipDNN FlatBuffers headers
+    # Generated hipDNN FlatBuffers headers (flatc output)
     projects/hipdnn/flatbuffers_sdk/include/hipdnn_flatbuffers_sdk/data_objects/.*_generated\.h|
+    # umd_registry_gen-derived op-schema registry (keep OpSchemaRegistry.hpp formatted)
+    projects/hipdnn/flatbuffers_sdk/include/hipdnn_flatbuffers_sdk/umd/.*_generated\.hpp|
     # Reference data (auto-generated)
     dnn-providers/integration-tests/integration-test-bundles/.*|
     # Generated files (see rocrand/tools/ _generator.cpp files)

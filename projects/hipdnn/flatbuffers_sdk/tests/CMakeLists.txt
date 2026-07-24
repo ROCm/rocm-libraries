@@ -30,6 +30,7 @@ add_executable(
     utilities/TestJson.cpp
     utilities/TestPointwiseValidation.cpp
     utilities/TestUuid.cpp
+    umd/TestOpSchemaRegistry.cpp
 )
 
 target_compile_options(hipdnn_flatbuffers_sdk_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS} ${HIPDNN_NO_RTTI_OPTIONS})
@@ -75,3 +76,27 @@ if(ENABLE_CLANG_TIDY AND _fb_include_dirs)
 endif()
 
 add_hipdnn_test(hipdnn_flatbuffers_sdk_tests ${CMAKE_CURRENT_BINARY_DIR})
+
+# RFC 0018 B.3: registry generation must fail closed on an annotation violation
+# rather than emit a wrong binding. flatc accepts the fixture (it is valid
+# FlatBuffers); umd_registry_gen must reject it (non-zero exit). Gated on the
+# generator target, which exists only when HIPDNN_GENERATE_SDK_HEADERS is ON.
+if(TARGET umd_registry_gen)
+    set(_umd_bad_bfbs "${CMAKE_CURRENT_BINARY_DIR}/umd/bad_nonlong.bfbs")
+    hipdnn_generate_bfbs(
+        SCHEMA "${CMAKE_CURRENT_SOURCE_DIR}/umd/fixtures/bad_nonlong.fbs"
+        SCHEMAS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/umd/fixtures"
+        OUTPUT "${_umd_bad_bfbs}"
+    )
+    add_custom_target(generate_umd_bad_bfbs
+        DEPENDS "${_umd_bad_bfbs}"
+        COMMENT "UMD B.3 negative fixture schema generated"
+    )
+    add_dependencies(hipdnn_flatbuffers_sdk_tests generate_umd_bad_bfbs umd_registry_gen)
+    add_test(
+        NAME umd_registry_gen_rejects_bad_schema
+        COMMAND $<TARGET_FILE:umd_registry_gen> "${_umd_bad_bfbs}"
+                "${CMAKE_CURRENT_BINARY_DIR}/umd/bad_nonlong_out.hpp"
+    )
+    set_tests_properties(umd_registry_gen_rejects_bad_schema PROPERTIES WILL_FAIL TRUE)
+endif()

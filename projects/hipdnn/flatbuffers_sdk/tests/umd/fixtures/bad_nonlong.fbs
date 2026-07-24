@@ -1,0 +1,22 @@
+// RFC 0018 B.3 negative fixture: a umd_operand on a non-`long` field must fail
+// registry generation (fail closed), not emit a wrong binding. Consumed by the
+// umd_registry_gen_rejects_bad_schema CTest, which expects a non-zero exit.
+namespace hipdnn_flatbuffers_sdk.data_objects;
+
+attribute "umd_operand";
+attribute "umd_result";
+attribute "umd_name";
+
+table BadAttributes {
+  x: int (umd_operand, umd_name: "X"); // violation: operand UID must be `long`
+}
+
+union NodeAttributes {
+  BadAttributes
+}
+
+table Node {
+  attributes: NodeAttributes;
+}
+
+root_type Node;
