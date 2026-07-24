@@ -51,7 +51,6 @@ set(UNIT_ASM_TEST_FILES
     unit/asm/InsertPhiTest.cpp
     unit/asm/EstimateAsmCyclesTest.cpp
     unit/asm/RedundantMovEliminationPassTest.cpp
-    unit/asm/AsmMovePropagationPassTest.cpp
     unit/asm/OptimizationPipelineTest.cpp
     unit/asm/ScopeAdaptorTest.cpp
     unit/asm/ModuleAdaptorsTest.cpp
