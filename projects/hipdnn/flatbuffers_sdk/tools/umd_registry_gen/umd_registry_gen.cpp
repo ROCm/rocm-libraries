@@ -21,7 +21,7 @@
 //
 // Build errors (fail closed, non-zero exit): both flags on one field; umd_name
 // without a flag; a flag on a non-integer field; a duplicate umd_name within an
-// op; a role name colliding with a reserved root (graph/kernel/device).
+// op; a binding name colliding with a reserved root (graph/kernel/device).
 
 #include <cstdio>
 #include <cstdlib>
@@ -128,12 +128,12 @@ struct Emitted
 
 // Emit the reader lambda + binding line for one input/output tensor UID field.
 std::string emitUidBinding(const std::string& table,
-                           const std::string& role,
+                           const std::string& name,
                            const std::string& acc,
                            bool optional)
 {
     std::ostringstream o;
-    o << "    {\"" << role << "\", " << (optional ? "true" : "false") << ", "
+    o << "    {\"" << name << "\", " << (optional ? "true" : "false") << ", "
       << "+[](const void* a, std::int64_t& out) -> bool { ";
     if(optional)
         o << "auto v = static_cast<const " << kNs << "::" << table << "*>(a)->" << acc
@@ -222,7 +222,7 @@ Emitted classifyTable(const reflection::Schema* schema, const reflection::Object
 {
     const std::string table = shortName(obj->name()->str());
     Emitted out;
-    std::set<std::string> seenRoles;
+    std::set<std::string> seenNames;
 
     for(const auto* fld : *obj->fields())
     {
@@ -240,28 +240,28 @@ Emitted classifyTable(const reflection::Schema* schema, const reflection::Object
         {
             if(!nameAttr)
                 fail(table + "." + name + ": umd_input_tensor/umd_output_tensor requires umd_name");
-            const std::string role = nameAttr->value() ? nameAttr->value()->str() : "";
-            if(role.empty())
+            const std::string bindName = nameAttr->value() ? nameAttr->value()->str() : "";
+            if(bindName.empty())
                 fail(table + "." + name + ": umd_name must be non-empty");
             if(base != reflection::Long)
                 fail(table + "." + name
                      + ": umd_input_tensor/umd_output_tensor field must be `long` (a UID)");
-            if(isReservedRoot(role))
-                fail(table + "." + name + ": role name '" + role
+            if(isReservedRoot(bindName))
+                fail(table + "." + name + ": umd_name '" + bindName
                      + "' collides with a reserved root (graph/kernel/device)");
-            if(!seenRoles.insert(role).second)
-                fail(table + ": duplicate umd_name '" + role + "'");
+            if(!seenNames.insert(bindName).second)
+                fail(table + ": duplicate umd_name '" + bindName + "'");
 
             const std::string acc = accessorName(name);
             const bool optl = fld->optional();
             if(inputTensorFlag)
             {
-                out.inputTensors += emitUidBinding(table, role, acc, optl);
+                out.inputTensors += emitUidBinding(table, bindName, acc, optl);
                 ++out.inputTensorCount;
             }
             else
             {
-                out.outputTensors += emitUidBinding(table, role, acc, optl);
+                out.outputTensors += emitUidBinding(table, bindName, acc, optl);
                 ++out.outputTensorCount;
             }
             continue;

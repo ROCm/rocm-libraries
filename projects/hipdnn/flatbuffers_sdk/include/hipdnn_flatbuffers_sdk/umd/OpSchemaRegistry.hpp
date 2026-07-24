@@ -12,7 +12,7 @@
 // consumer.
 //
 // The registry reconstructs a UID-centric graph's edges and auto-binds symbols:
-// each op entry lists its input-tensor and output-tensor roles (each with a typed
+// each op entry lists its input-tensor and output-tensor names (each with a typed
 // reader) and its scalar attributes (each with a typed value reader). Readers
 // use the generated FlatBuffers accessors directly -- no runtime reflection.
 
@@ -51,10 +51,10 @@ struct ScalarValue
     const char* dtype = nullptr;
 };
 
-// Reads a role's tensor UID out of a concrete attribute table (passed as a
-// `const void*` to keep this header type-erased). Returns false when the role
+// Reads a bound tensor's UID out of a concrete attribute table (passed as a
+// `const void*` to keep this header type-erased). Returns false when the tensor
 // is optional and absent from the graph; returns true and writes `out`
-// otherwise. A required role always returns true.
+// otherwise. A required tensor always returns true.
 using UidReader = bool (*)(const void* attributes, std::int64_t& out);
 
 // Reads a scalar attribute value out of a concrete attribute table.
@@ -62,14 +62,14 @@ using ScalarReader = ScalarValue (*)(const void* attributes);
 
 struct InputTensorBinding
 {
-    std::string_view role;
+    std::string_view name;
     bool optional = false;
     UidReader read = nullptr;
 };
 
 struct OutputTensorBinding
 {
-    std::string_view role;
+    std::string_view name;
     bool optional = false;
     UidReader read = nullptr;
 };

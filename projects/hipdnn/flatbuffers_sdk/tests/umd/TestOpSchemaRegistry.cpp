@@ -2,8 +2,8 @@
 // SPDX-License-Identifier:  MIT
 //
 // RFC 0018 Phase 0: proves the generated op-schema registry. Two claims:
-//   1. Shape + optionality parity -- the registry lists SDPA's operand/result
-//      roles and scalar attributes with the optionality the schema `= null`
+//   1. Shape + optionality parity -- the registry lists SDPA's input/output tensor
+//      names and scalar attributes with the optionality the schema `= null`
 //      defaults imply (matching the generated header's Optional<T> fields).
 //   2. Accessor value round-trip -- the generated typed readers, driven off a
 //      live SdpaAttributes flatbuffer, return the exact stored values. Registry
@@ -27,18 +27,18 @@ namespace data = hipdnn_flatbuffers_sdk::data_objects;
 namespace
 {
 
-const umd::InputTensorBinding* findInputTensor(const umd::OpSchemaEntry* e, std::string_view role)
+const umd::InputTensorBinding* findInputTensor(const umd::OpSchemaEntry* e, std::string_view name)
 {
     for(std::size_t i = 0; i < e->inputTensorCount; ++i)
-        if(e->inputTensors[i].role == role)
+        if(e->inputTensors[i].name == name)
             return &e->inputTensors[i];
     return nullptr;
 }
 
-const umd::OutputTensorBinding* findOutputTensor(const umd::OpSchemaEntry* e, std::string_view role)
+const umd::OutputTensorBinding* findOutputTensor(const umd::OpSchemaEntry* e, std::string_view name)
 {
     for(std::size_t i = 0; i < e->outputTensorCount; ++i)
-        if(e->outputTensors[i].role == role)
+        if(e->outputTensors[i].name == name)
             return &e->outputTensors[i];
     return nullptr;
 }
@@ -93,11 +93,11 @@ TEST(UmdOpSchemaRegistry, SdpaRequiredOperandsAndResult)
 {
     const auto* e = sdpaEntry();
     ASSERT_NE(e, nullptr);
-    for(std::string_view role : {"q", "k", "v"})
+    for(std::string_view name : {"q", "k", "v"})
     {
-        const auto* op = findInputTensor(e, role);
-        ASSERT_NE(op, nullptr) << role;
-        EXPECT_FALSE(op->optional) << role;
+        const auto* op = findInputTensor(e, name);
+        ASSERT_NE(op, nullptr) << name;
+        EXPECT_FALSE(op->optional) << name;
     }
     const auto* o = findOutputTensor(e, "o");
     ASSERT_NE(o, nullptr);
@@ -108,18 +108,18 @@ TEST(UmdOpSchemaRegistry, SdpaOptionalOperandsClassifiedOptional)
 {
     const auto* e = sdpaEntry();
     ASSERT_NE(e, nullptr);
-    for(std::string_view role : {"attn_mask", "page_table_k", "page_table_v", "scale", "seed"})
+    for(std::string_view name : {"attn_mask", "page_table_k", "page_table_v", "scale", "seed"})
     {
-        const auto* op = findInputTensor(e, role);
-        ASSERT_NE(op, nullptr) << role;
-        EXPECT_TRUE(op->optional) << role;
+        const auto* op = findInputTensor(e, name);
+        ASSERT_NE(op, nullptr) << name;
+        EXPECT_TRUE(op->optional) << name;
     }
     // Optional results too.
-    for(std::string_view role : {"stats", "amax_s", "amax_o"})
+    for(std::string_view name : {"stats", "amax_s", "amax_o"})
     {
-        const auto* r = findOutputTensor(e, role);
-        ASSERT_NE(r, nullptr) << role;
-        EXPECT_TRUE(r->optional) << role;
+        const auto* r = findOutputTensor(e, name);
+        ASSERT_NE(r, nullptr) << name;
+        EXPECT_TRUE(r->optional) << name;
     }
 }
 
