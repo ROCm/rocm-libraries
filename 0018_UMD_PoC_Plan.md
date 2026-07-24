@@ -6,7 +6,7 @@ of the op-schema registry from the `umd_*` annotations. **SDPA forward only.** D
 gtest suite (graphs built in code or from JSON→flatbuffer). Not plumbed as a provider engine.
 
 Proving out **the bindings** — the schema-generated, strongly-typed path→value layer that turns a
-UMD variable reference (`$q.head_size`, `$sdpa_fwd.dropout_probability`, role→tensor) into a concrete
+UMD variable reference (`$q.head_size`, `$sdpa_fwd.dropout_probability`, name→tensor) into a concrete
 value read off the flatbuffer graph — is a first-class deliverable of this PoC, not a side effect of
 matching. The phases below generate that layer at build time and prove it end-to-end.
 
@@ -60,7 +60,7 @@ the provider consumes. Matcher is exercised directly by tests — not registered
 Goal: generate, from the `umd_*` annotations, a C++ registry keyed by opcode — the table's
 `umd_opcode` shorthand (e.g. `sdpa_fwd`), falling back to the `NodeAttributes` union member name when
 absent. Each entry also carries the table name (diagnostics) and the integer `NodeAttributes` value
-(O(1) lookup against `Node::attributes_type()`), and lists operand/result roles (name, optionality,
+(O(1) lookup against `Node::attributes_type()`), and lists input/output tensors (name, optionality,
 UID reader) and scalar attributes (name, optionality, typed reader).
 
 1. **Emit `graph.bfbs`.** Add a dedicated flatc invocation (NOT via `flatc_flags.txt`, which is
@@ -73,19 +73,19 @@ UID reader) and scalar attributes (name, optionality, typed reader).
    reflection (`flatbuffers/reflection.h`). Loads `graph.bfbs`, enumerates `NodeAttributes` union
    members (opcode→table); reads the table's `umd_opcode` shorthand and applies B.3 classification
    per field:
-   - `umd_input_tensor` + `umd_name` → operand role; `umd_output_tensor` + `umd_name` → result role
+   - `umd_input_tensor` + `umd_name` → input tensor name; `umd_output_tensor` + `umd_name` → output tensor name
      (type MUST be `long`, `umd_name` non-empty).
    - neither flag → scalar attribute, bind-named by field name.
    - optionality derived from `= null` default (not re-annotated).
    - **Fail the build** on B.3 violations (both flags on one field, `umd_name` without a flag,
-     flag on a non-integer field, duplicate `umd_name` within an op, a role name colliding with a
+     flag on a non-integer field, duplicate `umd_name` within an op, a name colliding with a
      reserved token `graph`/`kernel`/`device`, or a duplicate `umd_opcode` across ops).
 3. **Emit `op_schema_registry_generated.hpp`** (header-only: inline per-op tables + inline lookup
    functions, so `flatbuffers_sdk` stays INTERFACE-only) into the committed `flatbuffers_sdk` include
    dir (`include/hipdnn_flatbuffers_sdk/umd/`). The neutral types live in a hand-written
    `umd/OpSchemaRegistry.hpp`.
    Neutral (jlogic-agnostic) shape so `flatbuffers_sdk` needn't depend on the provider: per opcode,
-   arrays of `{role, optional, UID-reader int64_t(const void*)}` and
+   arrays of `{name, optional, UID-reader int64_t(const void*)}` and
    `{attr-name, optional, AttrType, reader→neutral ScalarValue}`. Readers use the generated typed
    accessors (`&SdpaAttributes::q_tensor_uid`, …) — **no runtime reflection** (RFC B.4). The
    generator is general (it emits an entry for every `NodeAttributes` member); SDPA is the only
@@ -110,7 +110,7 @@ result), `attn_mask`/`page_table_k`/`page_table_v` (optional operands), and scal
 A B.3-violation fixture fails generation.
 - **Accessor value round-trip (proves the bindings, not just the shape):** build an `SdpaAttributes`
   with known UIDs and scalars; assert every generated UID reader and every scalar reader returns the
-  exact value. Registry *shape* (roles listed) is necessary but not sufficient — this proves the
+  exact value. Registry *shape* (names listed) is necessary but not sufficient — this proves the
   generated accessors actually read the right field.
 - **Optionality parity with the header:** the generator's `= null`-derived optionality matches the
   generated header's `Optional<T>` fields (an absent optional scalar reports not-present, a required
@@ -133,13 +133,13 @@ A B.3-violation fixture fails generation.
    - **Device**: `$device.<field>` from `Handle` (`lds_size`, `warp_size`, …).
      (Kernel namespace omitted — SDPA fwd criteria references none.)
    - **Binding architecture (the two resolvers).** Edge and scalar-attr resolution use the Phase 0
-     *generated* typed accessors — role→UID→tensor via `getTensorMap()`, and `$<node>.<attr>` via the
+     *generated* typed accessors — name→UID→tensor via `getTensorMap()`, and `$<node>.<attr>` via the
      typed reader. The Tensor-namespace path resolver (`dims[i]`/`strides[i]`/`rank`/`stride_order`/
      `packed`/`virtual`/`uid`) is hand-written **once** over the single `TensorAttributes` shape, since
      there is exactly one tensor table. jlogic `Value` is the sole type-erasure boundary: strong typing
      lives inside each accessor and is erased exactly once, at its return.
 2. **UMD compiler.** Parse `{schema,id,name,allow_override_shape,nodes,criteria}`; validate the A.10
-   subset (schema exact, single key per op-object, roles resolve in registry, `?` ↔ registry
+   subset (schema exact, single key per op-object, names resolve in registry, `?` ↔ registry
    optionality, node-id/tvar disjoint from reserved roots, single-producer per variable).
    JSON→JSON lowering pass:
    - Expand layout aliases (`"nhwc"`→`[0,2,3,1]`, …, A.8).
@@ -155,7 +155,7 @@ A B.3-violation fixture fails generation.
      decline. This is where the generated strong typing pays off in the compiler.
 3. **`UniversalGraphMatcher`.** Root-opcode index (opcode→compiled UMDs). `match(handle, graph)`:
    - structural: locate node(s) by opcode (SDPA: the single node), build per-graph
-     uid→producer/consumer index, bind roles (decline on missing required role/tensor), honor
+     uid→producer/consumer index, bind names (decline on missing required tensor), honor
      `allow_override_shape` gate.
    - construct `BindingContext`, evaluate criteria `Expression` → bool.
    - return `MatchResult{ matched, bindings (BindingContext), umd_id }`. Bindings queryable
@@ -190,13 +190,13 @@ nlohmann_json + plan_utils; add dep on the generated registry).
     `$q.head_size` (named), `$q.strides[i]`, `$q.stride_order`, `$q.packed`, `$q.virtual`,
     `$attn_mask.present`==false, `$sdpa_fwd.dropout_probability` + `.present`, `$graph.node_count`,
     `$device.lds_size` — each resolves to the expected typed value.
-  - *Generated-accessor correctness through a live graph:* role→UID→`TensorAttributes`→field returns
+  - *Generated-accessor correctness through a live graph:* name→UID→`TensorAttributes`→field returns
     the graph's actual values, tying the Phase 0 accessors to the Phase 2 resolver on real data.
   - *Bad-path fail-closed:* out-of-range `dims[i]`, unknown dim-name, absent-optional field read →
     decline, never a wrong value.
 - **Fail-closed:** unknown symbol, absent-optional field access, `node_count`≠1 → decline (never
   match by default).
-- **Compiler validation:** bad schema version, `?` on a required role, unknown role → compile error /
+- **Compiler validation:** bad schema version, `?` on a required name, unknown name → compile error /
   quarantine.
 
 ---

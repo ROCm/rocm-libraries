@@ -353,10 +353,10 @@ inline const OpSchemaEntry* lookupOpByName(std::string_view opcode)
     return nullptr;
 }
 
-inline const OpSchemaEntry* lookupOpByType(int attributesType)
+inline const OpSchemaEntry* lookupOpByType(::hipdnn_flatbuffers_sdk::data_objects::NodeAttributes attributesType)
 {
     for(const auto& e : generated::entries)
-        if(e.attributesType == attributesType)
+        if(e.attributesType == static_cast<int>(attributesType))
             return &e;
     return nullptr;
 }

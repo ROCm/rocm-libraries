@@ -78,8 +78,7 @@ fb::FlatBufferBuilder buildSdpa()
 TEST(UmdOpSchemaRegistry, SdpaEntryResolvesByNameAndType)
 {
     const auto* byName = umd::lookupOpByName("sdpa_fwd"); // the umd_opcode shorthand
-    const auto* byType
-        = umd::lookupOpByType(static_cast<int>(data::NodeAttributes::SdpaAttributes));
+    const auto* byType = umd::lookupOpByType(data::NodeAttributes::SdpaAttributes);
     ASSERT_NE(byName, nullptr);
     ASSERT_NE(byType, nullptr);
     EXPECT_EQ(byName, byType);

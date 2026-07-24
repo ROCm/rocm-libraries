@@ -380,9 +380,11 @@ int main(int argc, char** argv)
         << "inline const OpSchemaEntry* lookupOpByName(std::string_view opcode)\n{\n"
         << "    for(const auto& e : generated::entries)\n        if(e.opcode == opcode)\n"
         << "            return &e;\n    return nullptr;\n}\n\n"
-        << "inline const OpSchemaEntry* lookupOpByType(int attributesType)\n{\n"
+        << "inline const OpSchemaEntry* "
+           "lookupOpByType(::hipdnn_flatbuffers_sdk::data_objects::NodeAttributes "
+           "attributesType)\n{\n"
         << "    for(const auto& e : generated::entries)\n        if(e.attributesType == "
-           "attributesType)\n"
+           "static_cast<int>(attributesType))\n"
         << "            return &e;\n    return nullptr;\n}\n\n"
         << "} // namespace hipdnn_flatbuffers_sdk::umd\n";
 

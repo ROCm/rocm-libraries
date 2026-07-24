@@ -93,12 +93,12 @@ lists. A node's operands and results are UID fields inside its concrete attribut
 `SdpaAttributes::q_tensor_uid()`, `k_tensor_uid()`, `o_tensor_uid()` (`sdpa_attributes_generated.h`).
 Connectivity between nodes is implicit: two nodes are connected when a result UID of one appears as an
 operand UID of the other. To resolve a node's edges, the matcher must know the op type, cast via
-`attributesAs<T>()`, and read the per-role UID fields.
+`attributesAs<T>()`, and read the named UID fields.
 
 **Consequence: the matcher needs an op-schema registry.** For each op type, the registry declares which
 attribute fields are operand UIDs, which are result UIDs, whether each is required or optional, and the
-names of the op's scalar attributes. This registry is what lets a UMD name operands and results by
-role (`Q`, `K`, `V`, `O`) and what powers the auto-binding formula of
+names of the op's scalar attributes. This registry is what lets a UMD reference operands and results
+by name (`q`, `k`, `v`, `o`) and what powers the auto-binding formula of
 [§4](#4-symbol-binding-and-the-auto-binding-formula).
 
 **The registry is generated from schema annotations, not name conventions.** A table-level FlatBuffers
@@ -117,7 +117,7 @@ bindable scalars and are skipped). A build step emits the binary
 reflection schema (`graph.bfbs`, which transitively covers every attribute table; custom attributes
 surface only through reflection, not the generated headers) and a generator reads each field's
 attributes to emit the registry, so it stays in lockstep with the graph definitions rather than being
-hand-maintained ([Appendix B](#appendix-b-op-schema-registry-generation) specifies the annotation contract, the field-classification rules, and the generation pipeline). Roles are never inferred from the `_tensor_uid` name suffix, which would misclassify
+hand-maintained ([Appendix B](#appendix-b-op-schema-registry-generation) specifies the annotation contract, the field-classification rules, and the generation pipeline). Names are never inferred from the `_tensor_uid` name suffix, which would misclassify
 non-UID fields such as `PointwiseAttributes::axis_tensor_uid` (a plain axis index, not a tensor UID).
 
 **Tensors expose dims, strides, dtype, and a virtual flag, but no layout enum and no rank field.**
@@ -146,7 +146,7 @@ since no adjacency query is provided; fusion legality reads each intermediate's 
 ## 3. Structural Pattern
 
 The pattern is a set of op nodes and the named edges between them and the graph's tensors. Each node
-declares its opcode and maps operand and result **roles** (from the op-schema registry) to pattern
+declares its opcode and maps operand and result **names** (from the op-schema registry) to pattern
 variables (`$q`, `$conv_out`).
 
 ```jsonc
@@ -169,10 +169,10 @@ variables (`$q`, `$conv_out`).
   ([§2](#2-the-matchers-input-hipdnns-graph-model), [Appendix B](#appendix-b-op-schema-registry-generation)),
   e.g. `sdpa_fwd` — or `{"one_of": [...]}` for a small fixed set, or `"any"` for a wildcard node (used
   only inside a bounded fused pattern).
-- **Roles.** Keys in `operands` and `results` are op-schema role names; values are pattern variables.
-  A role the schema marks optional is bound with a `?` suffix (`"attn_mask": "$attn_mask?"`), bound only
+- **Names.** Keys in `operands` and `results` are op-schema tensor names; values are pattern variables.
+  A name the schema marks optional is bound with a `?` suffix (`"attn_mask": "$attn_mask?"`), bound only
   when the graph supplies it, and read with a default via `value_or_default`
-  ([§4](#4-symbol-binding-and-the-auto-binding-formula)). Roles not named are ignored for matching but
+  ([§4](#4-symbol-binding-and-the-auto-binding-formula)). Names not listed are ignored for matching but
   still auto-bound.
 - **Edges are implicit through shared variables.** Two nodes are connected when the same variable
   appears as a result of one and an operand of another. In the fused example below, `$conv_out` is
@@ -482,7 +482,7 @@ chains remain deferred to the JIT follow-up, as in RFC 0017 §5.
 ## 10. The Matcher: Compilation, Indexing, and Caching
 
 A UMD is authored as text and **compiled once** into an in-memory matcher structure at provider load
-(or, for the drop-in path, when the bundle is scanned). Compilation resolves op-schema roles, expands
+(or, for the drop-in path, when the bundle is scanned). Compilation resolves op-schema names, expands
 layout aliases, parses the criteria expression to an AST, and validates that every referenced symbol
 is bound. The compiled form, not the text, is what runs against live graphs.
 
@@ -759,7 +759,7 @@ and argument formulas reference ([RFC 0017 §6](0017_UniversalKernelDescriptor.m
   `umd_input_tensor` / `umd_output_tensor` / `umd_name` field annotations (never from field-name conventions), so a
   new or renamed operand carries
   its binding contract in the same edit ([§2](#2-the-matchers-input-hipdnns-graph-model)), and fail
-  closed on an unknown op or role rather than binding a wrong field.
+  closed on an unknown op or name rather than binding a wrong field.
 - **Expression language sharing.** JsonLogic is shared with the UDD ([§6](#6-the-shared-expression-language)).
   A change made for one subsystem can affect the other. Mitigation: one parser/validator/interpreter,
   a shared conformance suite, and a clear split (criteria are boolean JsonLogic, dispatch formulas
@@ -872,30 +872,30 @@ No other top-level keys are permitted; an unknown key is refused.
 node        = "{" , '"kind"' , ":" , '"op"' , ","
                   , '"id"'   , ":" , string , ","
                   , '"op"'   , ":" , op-selector
-                  , [ "," , '"operands"' , ":" , role-map ]
-                  , [ "," , '"results"'  , ":" , role-map ] , "}" ;
+                  , [ "," , '"operands"' , ":" , name-map ]
+                  , [ "," , '"results"'  , ":" , name-map ] , "}" ;
 op-selector = opcode | one-of | '"any"' ;
 one-of      = "{" , '"one_of"' , ":" , "[" , opcode , { "," , opcode } , "]" , "}" ;
 opcode      = string ;                 (* MUST resolve in the op-schema registry *)
-role-map    = "{" , [ role-bind , { "," , role-bind } ] , "}" ;
-role-bind   = string , ":" , bind ;    (* key is an op-schema role name *)
+name-map    = "{" , [ name-bind , { "," , name-bind } ] , "}" ;
+name-bind   = string , ":" , bind ;    (* key is an op-schema tensor name *)
 bind        = '"$' , ident , [ "?" ] , '"' ;
 ident       = letter , { letter | digit | "_" } ;
 ```
 
 - `kind` MUST be `"op"` (the only kind in `v1`).
 - Node `id` values MUST be unique within `nodes` and disjoint from every pattern-variable name (A.4).
-- Every `opcode` and every role key MUST resolve in the op-schema registry for that opcode; an unknown
-  opcode or role is refused ([§2](#2-the-matchers-input-hipdnns-graph-model)).
+- Every `opcode` and every name key MUST resolve in the op-schema registry for that opcode; an unknown
+  opcode or name is refused ([§2](#2-the-matchers-input-hipdnns-graph-model)).
 - `"any"` is legal only inside a fused pattern (a descriptor whose match pins `node_count > 1`); it
   MUST NOT be the sole or root node.
-- A `?` suffix marks an optional binding and is legal only for a role the registry marks optional. A
-  `?` on a required role, or an optional role bound without `?`, is refused.
-- Roles not named in `operands`/`results` are ignored for matching but still auto-bound (A.4).
+- A `?` suffix marks an optional binding and is legal only for a name the registry marks optional. A
+  `?` on a required name, or an optional name bound without `?`, is refused.
+- Names not listed in `operands`/`results` are ignored for matching but still auto-bound (A.4).
 
-### A.3 Roles and edges
+### A.3 Names and edges
 
-Role keys are drawn from the op-schema registry (`Q`, `K`, `V`, `O`, …). An edge is implicit: two nodes
+Name keys are drawn from the op-schema registry (`q`, `k`, `v`, `o`, …). An edge is implicit: two nodes
 are connected when the same pattern variable is a `results` value of one and an `operands` value of
 another ([§3](#3-structural-pattern)). A pattern variable MUST appear as a `results` value at most once
 (single producer).
@@ -1051,8 +1051,8 @@ quarantines) the descriptor with a diagnostic ([§10](#10-the-matcher-compilatio
 
 1. `schema == "hipdnn.umd/v1"`, and `id` is a well-formed UUID.
 2. Only the keys of A.1 at the top level; only the keys of A.2 on each node.
-3. Every `opcode` and every role key resolves in the op-schema registry.
-4. Every `?` suffix matches the registry's optionality for that role.
+3. Every `opcode` and every name key resolves in the op-schema registry.
+4. Every `?` suffix matches the registry's optionality for that name.
 5. Node `id`s are unique and disjoint from every pattern-variable name; reserved roots
    (`graph`, `kernel`, `device`) are unused as a `tvar` or node `id`.
 6. Each pattern variable is a `results` value at most once (single producer, A.3).
@@ -1133,7 +1133,7 @@ build** rather than emitting a wrong registry:
   and the `.present` field of [Appendix A.4](#a4-variable-references-and-the-five-namespaces).
 - **Build errors (fail closed):** `umd_input_tensor` and `umd_output_tensor` on the same field; `umd_name` without
   either flag; `umd_input_tensor`/`umd_output_tensor` on a non-integer field; a duplicate `umd_name` within one op;
-  an operand/result whose role name collides with a reserved token
+  an input/output tensor whose name collides with a reserved token
   ([Appendix A.4](#a4-variable-references-and-the-five-namespaces)); or a duplicate `umd_opcode` across
   ops.
 - **Scalar attribute value kind.** A scalar attribute carries its value kind for compile-time type
@@ -1147,7 +1147,7 @@ build** rather than emitting a wrong registry:
 - **Scalar attributes need no annotation, and are still fully bound.** An annotation carries the two
   facts that cannot be inferred for an *edge*: that a `long` field is a tensor UID rather than a plain
   integer (`q_tensor_uid` and `left_bound` are the same type, distinguishable only by the flag), and a
-  role name distinct from the field name (`"Q"` vs `q_tensor_uid`). A scalar needs neither: it is a
+  bind name distinct from the field name (`"q"` vs `q_tensor_uid`). A scalar needs neither: it is a
   non-edge by elimination, and its bind name *is* its field name, which reflection already reports. So
   every unannotated field is auto-bound in the Attributes namespace as `$<node_id>.<field_name>`
   ([Appendix A.4](#a4-variable-references-and-the-five-namespaces)) with its reflected type and its
@@ -1171,7 +1171,7 @@ build** rather than emitting a wrong registry:
 3. The generator emits the op-schema registry as generated C++ the provider compiles (a header-only
    registry emitted into the schema-owning SDK, so it needs no dependency on the provider): a table
    keyed by the `umd_opcode` shorthand, each entry also carrying its attribute-table name and the
-   integer `NodeAttributes` value, and listing its operands and results (role name, optionality, and
+   integer `NodeAttributes` value, and listing its input and output tensors (name, optionality, and
    the typed accessor for the UID field) and its scalar attributes (name, optionality, value kind, and
    typed accessor).
 
@@ -1188,12 +1188,12 @@ The emitted entry for one opcode is, conceptually:
 "sdpa_fwd": {                          // key: the table's umd_opcode (fallback: table name)
   "attributes_type": "SdpaAttributes", // NodeAttributes union member; matched via Node::attributes_type()
   "operands": [
-    {"role": "Q", "uid": "&SdpaAttributes::q_tensor_uid",         "optional": false},
-    {"role": "K", "uid": "&SdpaAttributes::k_tensor_uid",         "optional": false},
-    {"role": "V", "uid": "&SdpaAttributes::v_tensor_uid",         "optional": false},
-    {"role": "attn_mask", "uid": "&SdpaAttributes::attn_mask_tensor_uid", "optional": true}
+    {"name": "q", "uid": "&SdpaAttributes::q_tensor_uid",         "optional": false},
+    {"name": "k", "uid": "&SdpaAttributes::k_tensor_uid",         "optional": false},
+    {"name": "v", "uid": "&SdpaAttributes::v_tensor_uid",         "optional": false},
+    {"name": "attn_mask", "uid": "&SdpaAttributes::attn_mask_tensor_uid", "optional": true}
   ],
-  "results":  [{"role": "O", "uid": "&SdpaAttributes::o_tensor_uid", "optional": false}],
+  "results":  [{"name": "o", "uid": "&SdpaAttributes::o_tensor_uid", "optional": false}],
   "attributes": [
     {"name": "dropout_probability", "get": "&SdpaAttributes::dropout_probability", "optional": true},
     {"name": "alibi_mask",          "get": "&SdpaAttributes::alibi_mask",          "optional": false}
@@ -1202,7 +1202,7 @@ The emitted entry for one opcode is, conceptually:
 ```
 
 At compile ([§10](#10-the-matcher-compilation-indexing-and-caching)) the matcher resolves each pattern
-role against this entry. At match time, for a node of that opcode it reads each role's UID via the typed
+name against this entry. At match time, for a node of that opcode it reads each name's UID via the typed
 accessor, resolves the UID against the per-graph UID→producer/consumer index
 ([§2](#2-the-matchers-input-hipdnns-graph-model)) to bind the tensor, and auto-binds the tensor's fields
 and the node's scalar attributes into the five namespaces
@@ -1213,10 +1213,10 @@ graph binds `.present = false` and is read only through a guarded reference or `
 
 - **Lockstep.** Adding or renaming an operand is one `.fbs` edit that carries its `umd_input_tensor` /
   `umd_name` with it; the next build regenerates the registry, so a UMD naming that name resolves and a
-  UMD naming a role that no longer exists fails compile
+  UMD referencing a name that no longer exists fails compile
   ([Appendix A.10](#a10-compile-time-validation-normative)).
-- **Unknown op or role at match compile.** The matcher fails closed: a pattern node whose opcode or
-  role is absent from the registry is refused, never bound to a guessed field
+- **Unknown op or name at match compile.** The matcher fails closed: a pattern node whose opcode or
+  name is absent from the registry is refused, never bound to a guessed field
   ([§19 Op-schema registry coupling](#19-risks)).
 - **Generation is deterministic and diffable.** The generated registry is a build artifact; a schema
   change that alters bindings shows up as a registry diff, which is the review surface for a binding

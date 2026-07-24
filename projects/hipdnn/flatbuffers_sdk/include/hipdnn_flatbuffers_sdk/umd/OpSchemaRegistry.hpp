@@ -105,6 +105,6 @@ struct OpSchemaEntry
 // Defined (inline) in the generated header.
 //   const OpSchemaEntry* opSchemaEntries(std::size_t& count);
 //   const OpSchemaEntry* lookupOpByName(std::string_view opcode);
-//   const OpSchemaEntry* lookupOpByType(int attributesType);
+//   const OpSchemaEntry* lookupOpByType(data_objects::NodeAttributes attributesType);
 
 } // namespace hipdnn_flatbuffers_sdk::umd
