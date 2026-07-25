@@ -20,12 +20,13 @@ Matrix MMA operations compute tiled multiply-accumulates. For example, the
 gfx942/gfx950 catalogs provide `mfma_f32_16x16x16_f16`, while the gfx1250
 catalog provides its own WMMA operations. The checked-in catalogs cover
 supported f16, bf16, fp8e4m3, and bf8e5m2 input combinations with f32
-accumulation; operation shape, fragment layout, and availability are exact-gfx
-facts. Wave32 versus wave64 is a separate compile-time execution-mode choice;
-it must agree with the selected operation's layout but does not select MFMA
-versus WMMA. The current `ArchTarget` catalog records one admitted wave size per
-exact gfx target; another compiler wave mode would need its own explicit
-backend, layout, and validator support.
+accumulation; operation shape, layout, and availability are exact-gfx facts.
+Wavefront mode is a separate compile-time target capability: gfx942/gfx950 admit
+wave64 only; gfx1250 admits wave32 only; and gfx1151, gfx11-generic, and gfx1201
+default to wave32 while permitting wave64. `ArchTarget` records one validated mode
+per exact target. Another rocKE mode needs matching backend, operation-layout,
+geometry, and validator support. Wave mode must agree with the operation layout but
+does not select MFMA versus WMMA.
 
 MFMA and WMMA are **matmul primitives**. They implement:
 * GEMM (`C += A @ B`)
@@ -99,9 +100,8 @@ The shared target-aware forward body is
 the warp fallback is
 `<library_root>/kernels/common/_fmha_warp_body.py`. Each owning validator
 decides which body and target-catalog operation its current spec can select.
-Separately, the current `fmha_varlen`, `fmha_head_grouping`, and paged-prefill
-MFMA build paths compile their block/lane geometry for wave64. That is an
-execution-mode constraint in those builders, not the reason they use MFMA.
+The current `fmha_varlen`, `fmha_head_grouping`, and paged-prefill gfx9 MFMA paths
+compile for required wave64 geometry; that constraint is not why they use MFMA.
 
 ### Non-matmul kernels (correctly NOT MFMA)
 
@@ -142,9 +142,9 @@ Sage attention select between matrix and warp-distributed bodies, while
 split-KV decode and backward currently use warp-distributed scalar bodies.
 Read the owning validator and build function, then confirm the emitted IR/ISA.
 Resolve `ArchTarget` for the exact gfx target and select through its
-`MmaCatalog`. Configure wave width separately at compile time, then validate it
-against the selected operation's layout; wave width does not choose the matrix
-instruction family or establish target support.
+`MmaCatalog`. Resolve a target-supported wavefront mode and validate it against the
+operation layout. Do not offer wave32 on gfx942/gfx950 or wave64 on gfx1250; wave
+width does not choose the matrix instruction family or establish target support.
 
 If a new kernel lands and someone wants to know "should this use a matrix
 instruction?", the rule is:

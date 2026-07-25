@@ -26,26 +26,26 @@ Path notation in this page is relative to three explicitly named roots:
 These placeholders describe source locations; Python import names are called
 out separately where they differ.
 
-Matrix-operation choices start from the exact gfx target, not from an
-accelerator-family label or a requested wave width. Resolve
-`ArchTarget.from_gfx(...)` and select an `MmaOp` from that target's
-`MmaCatalog`. Separately, choose the execution wave size at compile time and
-validate it against the selected operation's layout contract. Wave size
-constrains lane geometry; it does not determine whether the gfx target provides
-MFMA or WMMA, nor does it identify a legal atom.
+Matrix-operation choices start from the exact gfx target, not from an accelerator-family
+label or a requested wave width. Resolve `ArchTarget.from_gfx(...)` and select an
+`MmaOp` from that target's `MmaCatalog`. Separately, resolve the target's supported
+wavefront modes and select one only where the target permits a choice. The selected
+mode must agree with the operation's layout contract. Wave size constrains lane
+geometry; it does not by itself select MFMA or WMMA or identify a legal atom.
 
-The two independent fields currently recorded by the target catalog are:
+The compiler capability and the mode currently admitted by rocKE are distinct:
 
-| Exact gfx target | Matrix operations in `MmaCatalog` | Current `ArchTarget.wave_size` |
-|---|---|---:|
-| `gfx90a`, `gfx942`, `gfx950` | MFMA | 64 |
-| `gfx1151`, `gfx1201`, `gfx11-generic` | WMMA | 32 |
-| `gfx1250` | WMMA | 32 |
+| Exact gfx target | Matrix operations in `MmaCatalog` | Compiler wavefront modes | Current `ArchTarget.wave_size` |
+|---|---|---|---:|
+| `gfx90a`, `gfx942`, `gfx950` | MFMA | wave64 only | 64 |
+| `gfx1151`, `gfx11-generic` | WMMA | wave32 default; wave64 selectable | 32 |
+| `gfx1201` | WMMA | wave32 default; wave64 selectable | 32 |
+| `gfx1250` | WMMA | wave32 only; no native wave64 mode | 32 |
 
-Wave width is selected when the kernel is compiled. The current rocKE catalog
-admits the value shown above for each target; adding an alternative compiler
-wave mode requires explicit target, backend, layout, and validator support. It
-must not be inferred from the matrix-operation column, or vice versa.
+For targets with both modes, adding the alternative mode to rocKE requires explicit
+backend, operation-layout, geometry, and validator support. The listed gfx9 targets
+cannot select wave32, and gfx1250 cannot select wave64. Wave mode must not be inferred
+from the matrix-operation column, or vice versa.
 
 Every platform-owned kernel instance in
 `<platform_root>/python/rocke/instances/` follows this
@@ -162,8 +162,9 @@ allowed_vecs        = (2, 4, 8)
 
 For GEMM / conv, validation also covers:
 
-- architecture accepted by the owning validator (gfx950 is the default;
-  `known_arches()` is the platform catalog, not universal family support);
+- architecture accepted by the owning validator (common multi-architecture GEMM/conv
+  validators default to gfx950 for compatibility, while target-specific validators
+  default to their target; `known_arches()` is a catalog, not universal support);
 - selected `MmaOp` exists in the exact gfx target's catalog for the dtype and
   tile shape;
 - `tile_m, tile_n` divisible by `warp_* * warp_tile_*`;
@@ -221,10 +222,11 @@ block_y = b.block_id_y()
 block_z = b.block_id_z()
 ```
 
-The literal `64` is a compile-time execution-mode assumption, not a per-kernel
-runtime choice and not an MFMA selector. Current target-polymorphic builders
-validate their configured wave size against `ArchTarget.wave_size` and the
-selected `MmaOp.wave_size`, then use that value for lane and warp decomposition.
+The literal `64` is required for this gfx9 example, not a runtime choice or MFMA
+selector. Target-polymorphic builders validate their wave size against
+`ArchTarget.wave_size` and `MmaOp.wave_size`, then use it for lane and warp
+decomposition. gfx942/gfx950 cannot substitute wave32; a target with two modes
+still needs matching rocKE layout and validator support for its alternative mode.
 `helpers/geometry.py::WarpGrid` packages this for matrix kernels. Its
 `from_atom` constructor can use the selected operation's required wave size as
 a convenience default; that does not choose the operation or its MFMA/WMMA
@@ -303,8 +305,8 @@ Async constraints:
 
 Do not generalize this `compv4` loader recipe to every target. The current WMMA
 universal path admits the `mem` and `wmma_v1` pipelines with the default direct
-epilogue, not `compv4`. gfx1250 also has target-specific GFX12 async
-global-to-LDS operations; those are distinct from the gfx942/gfx950
+epilogue, not `compv4`. gfx1250 also has target-specific async global-to-LDS
+operations; those are distinct from the gfx942/gfx950
 `AsyncTileLoader` contract and must be selected through the owning target-aware
 builder. The pipeline choice follows gfx capabilities, not the independently
 configured wave width.
@@ -315,9 +317,8 @@ For row-wise small ops, use `helpers/sweep.py::sweep_row_chunks` and the `helper
 
 MFMA matrix kernels commonly follow the structure below.
 
-Execution-mode assumption for this example: the builder is compiled with
-wave64 geometry. That assumption is independent of selecting MFMA from the gfx
-target's catalog.
+This gfx9 example requires wave64 geometry independently of selecting MFMA from
+the gfx target's catalog.
 
 ```text
 allocate f32 accumulators (one vector per warp tile MFMA fragment)
@@ -344,10 +345,8 @@ block_lds_reduce
 thread 0 or pass-2 writes output
 ```
 
-The gfx942 and gfx950 tiled-attention kernels select MFMA from their target
-catalogs and share this structure:
-
-Their current, separate execution-mode choice is wave64 at compile time.
+The gfx942 and gfx950 tiled-attention kernels select MFMA from their target catalogs
+and share this structure. They separately require wave64 and do not admit wave32.
 
 ```text
 stage Q to LDS
@@ -366,13 +365,11 @@ gfx942 uses the narrow `16x16x16` atoms and ordinary strided LDS reads that
 reproduce the required V operand layout; it must not inherit gfx950's transpose
 read recipe.
 
-The gfx1250 tiled-attention kernels select WMMA from the gfx1250 catalog. Their
-current, separate execution-mode choice is wave32 at compile time. They live
-under `<library_root>/kernels/gfx1250/`. Their selected `MmaOp` layout maps,
-compile-time wave geometry, target-specific data movement, and supported
-epilogue path are the source of truth; do not transplant the example's wave64
-lane arithmetic or the gfx950 LDS recipe into that path. The WMMA choice comes
-from gfx1250 capabilities, not from choosing wave32.
+The gfx1250 tiled-attention kernels select WMMA from its catalog and require wave32;
+gfx1250 has no native wave64 mode. They live under `<library_root>/kernels/gfx1250/`.
+Their `MmaOp` layouts, compile-time geometry, data movement, and epilogue are the
+source of truth; do not transplant wave64 arithmetic or the gfx950 LDS recipe.
+The WMMA choice comes from gfx1250 capabilities, not from choosing wave32.
 
 ## 8. Emit Epilogue
 
@@ -406,10 +403,8 @@ kernel = build_universal_gemm(spec)
 art    = compile_kernel(kernel)
 ```
 
-For examples and benchmarkable flows, emit a manifest. This is a default-target
-gfx950 MFMA example whose builder is independently configured for wave64.
-Resolve the operation from that exact target using the same shape and dtypes
-used to build `art`:
+For examples and benchmarkable flows, emit a manifest. This gfx950 MFMA example
+requires wave64; resolve its operation using the shape and dtypes used for `art`:
 
 ```python
 target = ArchTarget.from_gfx("gfx950")

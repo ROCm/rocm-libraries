@@ -48,7 +48,7 @@ python/rocke/
 ├── helpers/ # CK Tile-like authoring helpers and the high-level compile entrypoint
 ├── analysis/ # LLVM IR + HSACO/ISA + resource inspection
 ├── benchmark/ # repeated-run benchmark summaries (median, spread)
-├── instances/ # kernel instances (GEMM, conv, small ops, MoE)
+├── instances/ # platform-owned instances (GEMM, conv, small ops, MoE); attention is library-owned
 ├── examples/ # Python-owned example generators and parity harnesses
 ├── transforms.py # coordinate-transform DAG (pad/embed/unmerge/merge/indirect)
 ├── run_manifest.py # python -m rocke.run_manifest (HSACO + manifest runner)
@@ -127,16 +127,18 @@ Hard facts:
   `core/isa/backend.py`. `core/lower_llvm.py` selects a clang-derived data
   layout by LLVM flavor (`_DATALAYOUT_LLVM20` or `_DATALAYOUT_LLVM22`) rather
   than by architecture.
-- Wave size is fixed by `ArchTarget` and is not a per-kernel runtime switch.
-  Matrix-atom availability is a separate target fact from the selected
-  `MmaCatalog`; do not infer legal atoms from wave width alone.
+- Wavefront mode is a compile-time capability of the exact gfx target, not a runtime switch.
+  gfx942/gfx950 admit wave64 only; gfx1250 admits wave32 only. gfx1151,
+  gfx11-generic, and gfx1201 default to wave32 and can select wave64, but rocKE
+  records one validated mode per target in `ArchTarget`. Matrix-atom availability
+  is a separate `MmaCatalog` fact; do not infer legal atoms from wave width alone.
 - Kernel authors usually compose helpers (`TensorDescriptor`, `TensorView`, `TileWindow`, `MfmaAtom`, `WarpGrid`, `CoalescedTileLoader`, `AsyncTileLoader`, `SchedulePolicy`, `SoftwarePipeline`, `DirectEpilogue`, `CShuffleEpilogue`, `block_lds_reduce`, `sweep_row_chunks`).
 - Non-bijective addressing (convolution, paged attention, indirection) is expressed with the transform DAG in `transforms.py`.
 - Runtime is persistent: `KernelLauncher` loads HSACO once and is called repeatedly. `PipelineLauncher` chains stages on one stream. `WorkspacePool` keeps long-lived torch workspaces alive across launches. `time_launches` is the canonical HIP-event timer.
 - Buffer-resource descriptor DW3 is selected by the exact gfx ISA backend, not
   by a broad accelerator-family label. gfx90a/gfx942/gfx950 use `0x00027000`,
-  while gfx11-generic/gfx1151/gfx1201 use `0x31014000`. The CDNA5 gfx1250
-  backend currently inherits `0x31014000` as a bring-up placeholder; its 57-bit
+  while gfx11-generic/gfx1151/gfx1201 use `0x31014000`. The gfx1250 backend
+  currently inherits `0x31014000` as a bring-up placeholder; its 57-bit
   SRD model still requires target validation. On the established gfx9 and RDNA
   mappings, bounds-checked descriptors make OOB lanes return zero on load and
   drop stores, which is the tail-safe primitive used by conv and attention.
