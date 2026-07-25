@@ -418,8 +418,30 @@ struct {struct} {{
 
             const dim3 grids  = Kernel::GridSize(args.M, args.N, args.k_batch);
             const dim3 blocks = Kernel::BlockSize();
+
+            // Launch through the SAME kernel_attr<...> / kentry overload Old-TE
+            // uses (run_gemm_quant_example.inc), NOT the plain make_kernel path.
+            // Old-TE computes:
+            //   eight_waves = IS_FP8BLOCKSCALE && (M_Warp*N_Warp*K_Warp == 8) &&
+            //                 K_Warp_Tile == 128;   // under CK_GFX950_SUPPORT
+            // For TensorQuant IS_FP8BLOCKSCALE is false, so eight_waves is always
+            // false here -- but we mirror the full expression so the emitted
+            // kentry<Attr, MinBlockPerCu, ...> specialization is byte-for-byte the
+            // same instantiation Old-TE compiles (this is what makes the resulting
+            // kernel identical: VGPR 132 to match Old-TE, vs 136 for the plain
+            // make_kernel<kBlockPerCu> / kentry<MinBlockPerCu, ...> overload).
+            constexpr bool eight_waves =
+#ifdef CK_GFX950_SUPPORT
+                false /* IS_FP8BLOCKSCALE=false for TensorQuant */ &&
+                (WarpM * WarpN * WarpK == 8) && (WarpTileK == 128);
+#else
+                false;
+#endif
+            using k_attr_t = ck_tile::kernel_attr<eight_waves>;
             return ck_tile::launch_kernel(
-                s, ck_tile::make_kernel<kBlockPerCu>(Kernel{{}}, grids, blocks, 0, kargs));
+                s,
+                ck_tile::make_kernel<kBlockPerCu, k_attr_t>(
+                    Kernel{{}}, grids, blocks, 0, kargs));
         }};
 
         return BaseGemmPipeline::TailHandler(Run, has_hot_loop, tail_num);
