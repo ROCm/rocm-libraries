@@ -221,8 +221,7 @@ the shipped `BLOCK_M=128` `use_q_direct_reg` body is already occupancy-clean;
 > single-buffer/small-tile levers remain in the tree but are not the
 > production lever.
 
-Production 142-shape trace cohort geomean Triton/CK DSL ~1.11 (105/142 win).
-Full per-lever detail:
+The reusable qualitative lever and decision record is in the
 [attention 2D experiment summary](../examples/attention_2d_gfx950_experiment_summary.md).
 
 ## Build Timings

@@ -1,79 +1,91 @@
 # rocKE Unified Attention 2D — gfx950 experiment method
 
-This page preserves the reusable engineering method and code-grounded lessons from
-the gfx950 tiled-attention experiments. Measured performance values and comparisons
-are intentionally omitted from the public repository. Store numeric results only in
-an AMD-approved, access-controlled system.
+This page preserves the reusable engineering method, qualitative decision record,
+and code-grounded lessons from the gfx950 tiled-attention experiments. In accordance
+with the repository [compliance rules](../../AGENTS.md), achieved performance values
+and product/software comparisons are intentionally omitted from this public case
+study. Record numeric results only in the approved access-controlled system.
 
 ## Current implementation anchors
 
 Paths are relative to `rocke/platform/`.
 
 - `../library/kernels/gfx950/attention_tiled_2d.py` owns the gfx950 tiled-2D
-  builder and spec.
-- `../library/kernels/gfx950/attention_tiled_2d_fastkv_regp.py` owns the
-  fast-paged-KV/register-P experimental variant.
-- `../library/kernels/common/attention_unified.py` owns routing, selector, cache-key,
-  launch-geometry, and LDS-budget policy.
+  builder, spec, validators, and schedule flags.
+- `../library/kernels/gfx950/attention_tiled_2d_fastkv_regp.py` owns the isolated
+  fast-paged-KV/register-P experiment.
+- `../library/kernels/common/attention_unified.py` owns routing, selector policy,
+  cache identity, launch geometry, and LDS-budget checks.
 - `../library/benchmarks/gfx950/attention/prefill/` owns workload-specific rerun
-  drivers. Do not copy their measured output into this repository.
+  drivers. Do not copy their measured output into the repository.
+- [`../development/testing.md`](../development/testing.md) describes the supported
+  CPU and GPU validation lanes.
 
-The source files above are authoritative. This page explains how to evaluate their
-levers without treating an old experiment record as current behavior.
+The current source and tests are authoritative. Historical configurations establish
+questions to re-test; they do not establish current selector behavior.
 
 ## Experiment contract
 
-1. Start from a current, validated selector output for the exact dtype, head size,
-   sequence geometry, masking mode, and paged-KV configuration.
-2. Change one independently attributable lever at a time.
-3. Run correctness before collecting performance evidence.
+1. Reproduce the current selector output for the exact workload before changing the
+   kernel.
+2. Separate selector changes from kernel-body changes so each result has one cause.
+3. Require correctness before collecting performance evidence.
 4. Verify that the intended builder, cache key, launch geometry, and generated ISA
    actually changed.
-5. Record the revision, toolchain, command, workload, warmup, sample count, statistic,
-   spread, and correctness tolerance with the numeric results in the approved
+5. Record revision, toolchain, command, workload, warmup, sample count, statistic,
+   spread, counters, and correctness tolerance with numeric results in the approved
    access-controlled record.
-6. Keep only the qualitative mechanism and reproducible command shape in this public
-   page.
+6. Keep only the qualitative mechanism, decision, and replay method in this page.
 
-## Code-grounded lever map
+## Code-grounded lever and decision map
 
-| Lever | Current source anchor | Qualitative purpose |
+| Lever | Source anchor | Current qualitative status |
 |---|---|---|
-| Wide/transposed matrix path | `use_mfma_32x32`, `use_transposed_qk_32x32` | Changes score/PV fragment layout and the softmax dataflow. |
-| Direct Q register path | `use_q_direct_reg` | Avoids a redundant Q staging path when the selected layout permits it. |
-| Softmax/MFMA interleave | `use_softmax_mfma_interleave` | Adds an explicit scheduling hint for the supported cohort. |
-| Early V schedule | `_enable_early_v_schedule()` | Moves V work earlier only for the selector cohort whose dependencies permit overlap. |
-| Sliding-window tile policy | `_select_2d_tile_size()` | Chooses geometry using the active window and workload constraints. |
-| Fast paged-KV/register-P variant | `make_fastkv_register_p_spec()` and `supports_fastkv_register_p_2d()` | Specializes address generation and removes the P LDS round trip for its guarded cohort. |
-| K single buffering | `use_k_single_buffer` plus LDS-budget helpers | Trades buffering depth for LDS capacity; legality depends on the selected geometry. |
-| Launch geometry | `_select_2d_num_warps()`, `_select_2d_block_m_per_warp()` | Keeps spec construction, cache identity, and launch configuration coherent. |
+| Wide/transposed matrix path | `use_mfma_32x32`, `use_transposed_qk_32x32` | Selector-controlled foundation for the matching score, softmax, and PV layouts; the two flags are not independent. |
+| Transposed softmax stack | `use_transposed_scalar_state`, `use_transposed_mask_once`, `use_transposed_mask_limit` | Removes repeated state or mask work only when the validator admits the complete transposed combination. |
+| Half-local PV | `use_transposed_half_local_pv` | Keeps each wave half on the P rows it owns and requires the matching V/P ordering. |
+| Legacy-Q gather removal | `use_mfma32_skip_legacy_qreg` | Drops work unused by the wide path; it is invalid without that path. |
+| Direct Q register path | `use_q_direct_reg` | Avoids Q staging when the selected transposed layout permits it and is mutually exclusive with Q reread. |
+| Softmax/MFMA interleave | `use_softmax_mfma_interleave` | Adds a compile-time scheduling hint for a narrowly selected cohort; verify its effect in emitted ISA. |
+| Early or prefetched V | `use_early_v_schedule`, `use_v_double_buffer` | Alternative schedules with different dependency and LDS requirements; do not compose them by assumption. |
+| Single-buffer K | `use_k_single_buffer` | Reduces K LDS residency but moves the safe refill point and rejects incompatible schedules. |
+| Sliding-window tile policy | `_select_2d_tile_size()` | Chooses geometry using active-window work rather than reusing the non-windowed choice. |
+| Fast paged-KV descriptor | `use_fast_paged_kv_desc` | Validator-restricted address-generation specialization, not a general paged-KV default. |
+| FastKV/register-P wrapper | `make_fastkv_register_p_spec()`, `supports_fastkv_register_p_2d()` | Isolated experimental wrapper; it reuses the main math body and does not establish default support. |
+| Register-P narrow path | `use_register_pv` | Belongs to the existing narrow matrix path and must not be combined with the wide-path residency mechanism. |
+| Grouped-KV softmax and AGPR controls | `use_grouped_kv2_softmax`, `use_agpr_alloc_zero` | Guarded probes whose presence in the spec is not evidence of selector use or broad support. |
+| Launch geometry | `_select_2d_num_warps()`, `_select_2d_block_m_per_warp()` | Must agree across spec construction, cache identity, LDS accounting, and launch metadata. |
 
-These flags are not independent in every combination. Use the validators and selector
-predicates instead of copying a historical configuration.
+## Retained experiment decisions
 
-## Retained qualitative lessons
-
-- A flag is not evidence that a path is selected. Confirm the selector result and
-  emitted kernel.
-- Launch geometry is part of correctness and cache identity, not merely a tuning
-  parameter.
-- A register-residency change can move pressure elsewhere; inspect ISA resources and
-  the full dataflow before keeping it.
-- Sliding-window and non-windowed workloads need separate selector reasoning because
-  they execute different effective KV work.
-- Scheduling hints must be justified by emitted ISA and a controlled same-session
-  experiment; never infer their effect from the flag name.
-- An experimental builder remains experimental even when it shares most of the
-  production spec.
+- Keep related layout flags as one validated dataflow. Changing score orientation
+  without the matching softmax and PV interpretation is a correctness bug, not an
+  independent tuning choice.
+- Keep selector experiments separate from kernel-body experiments. A flag that builds
+  successfully does not prove that the default dispatcher selects it.
+- Treat sliding-window and non-windowed workloads separately because they execute
+  different effective KV work and can require different tile and schedule choices.
+- Treat the fastKV/register-P module as an isolated resource experiment. Its proxy
+  deliberately reuses the primary kernel body so a second full implementation cannot
+  drift.
+- Do not generalize grouped-KV, register-residency, AGPR, or prefetch probes beyond
+  their validators. The validators encode unsupported dtype, masking, storage, and
+  schedule combinations.
+- A scheduling builtin is a compiler constraint, not necessarily a runtime instruction.
+  Verify a scheduling change by diffing the main-loop ISA; an absent runtime opcode is
+  not sufficient evidence that the hint was ignored.
+- Resource and occupancy readings are backend-sensitive. Regenerate them with the
+  current toolchain before using them to choose between an LDS, register, or schedule
+  hypothesis.
 
 ## Revalidation checklist
 
 - [ ] Source anchors and selector names still exist.
-- [ ] The candidate passes its current validator.
-- [ ] Cache-key fields cover every launch- or codegen-relevant lever.
-- [ ] Numeric correctness passes against the maintained reference.
+- [ ] The selected spec passes the current target validator.
+- [ ] Selector, spec, cache-key, LDS, and launch decisions agree.
+- [ ] Numeric correctness passes for every affected dtype and masking mode.
 - [ ] Generated ISA and resource use support the proposed mechanism.
-- [ ] Numeric performance evidence is stored only in the approved access-controlled
-      record.
+- [ ] Each comparison changes one independently attributable lever.
+- [ ] Numeric performance evidence remains in the approved access-controlled record.
 - [ ] Public documentation contains no achieved performance values or comparative
       product/software claims.
