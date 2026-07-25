@@ -1,79 +1,70 @@
 # rocKE Unified Attention 2D — gfx942 experiment method
 
-This page preserves the reusable engineering method and code-grounded lessons from
-the gfx942 tiled-attention work. Measured performance values and comparisons are
-intentionally omitted from the public repository. Store numeric results only in an
-AMD-approved, access-controlled system.
+This page preserves the reusable engineering method, qualitative decision record,
+and code-grounded lessons from the gfx942 tiled-attention work. In accordance with
+the repository [compliance rules](../../AGENTS.md), achieved performance values and
+product/software comparisons are omitted. Record numeric evidence only in the
+approved access-controlled system.
 
 ## Current implementation anchors
 
 Paths are relative to `rocke/platform/`.
 
-- `../library/kernels/gfx942/attention_tiled_2d.py` owns the gfx942 tiled-2D
-  builder, layouts, loaders, and guarded experimental paths.
+- `../library/kernels/gfx942/attention_tiled_2d.py` owns the builder, layouts,
+  loaders, validators, and guarded experiments.
 - `../library/kernels/common/attention_unified.py` owns routing, selector policy,
   cache identity, launch geometry, and LDS-budget checks.
-- [`../development/testing.md`](../development/testing.md) describes the supported
-  CPU and GPU validation lanes.
-- [`../optimization/optimization_runbook.md`](../optimization/optimization_runbook.md)
-  describes the public measurement method.
+- [`../development/testing.md`](../development/testing.md) and
+  [`../optimization/optimization_runbook.md`](../optimization/optimization_runbook.md)
+  define the supported validation and measurement methods.
 
-The current source and tests are authoritative. Historical provider branches,
-temporary worktrees, and private profiling artifacts are not documentation
-dependencies.
+The current source and tests are authoritative. Historical configurations identify
+questions to re-test; they do not establish current selector behavior.
 
-## Experiment contract
+## Code-grounded lever and decision map
 
-1. Reproduce the current selector output for the exact workload before changing the
-   kernel.
-2. Separate selector changes from kernel-body changes so each result has one cause.
-3. Require correctness before collecting performance evidence.
-4. Inspect generated ISA and resource usage to verify the proposed mechanism.
-5. Keep the revision, toolchain, command, workload, warmup, sample count, statistic,
-   spread, counters, and correctness tolerance with numeric results in the approved
-   access-controlled record.
-6. Keep only the qualitative mechanism and reproducible command shape in this public
-   page.
-
-## Code-grounded lever map
-
-| Lever | Current source anchor | Qualitative purpose |
+| Lever | Source anchor | Current qualitative status |
 |---|---|---|
-| Wide fp16 path | `use_mfma_32x32x8` | Selects the guarded gfx942 wide matrix path and its matching layouts. |
-| Transposed QK/PV flow | `use_transposed_qk_32x32` and the transposed helpers in `attention_tiled_2d.py` | Changes score orientation and keeps the matching softmax/PV layout coherent. |
-| K single buffering | `use_k_single_buffer` | Reduces K LDS allocation when the selected block geometry fits the single slot. |
-| V layout padding | the gfx942 V-LDS layout in `attention_tiled_2d.py` | Changes bank mapping while preserving the consumer's logical coordinates. |
-| Early V schedule | `_enable_early_v_schedule()` | Moves V work earlier only for the selector cohort whose dependencies permit overlap. |
-| Launch geometry | gfx942 branches in `_select_2d_num_warps()`, `_select_2d_tile_size()`, and `_select_2d_block_m_per_warp()` | Keeps spec, cache key, LDS model, and launch configuration aligned. |
-| BF16 wide policy | `_gfx942_bf16_wide_tile_size()` and related selector helpers | Applies the dtype-specific legal geometry encoded by current validators. |
-| Experimental transposed-V store path | guarded `cfvst` helpers in `attention_tiled_2d.py` | Provides an isolated layout experiment; its presence does not imply production support. |
+| Wide matrix path | `use_mfma_32x32x8` | Guarded gfx942 path whose operand layouts and validators must move together. |
+| Transposed QK/PV | `use_transposed_qk_32x32` | Changes score orientation and requires the matching softmax and PV interpretation. |
+| K residency | `use_k_single_buffer`, sliced-K helpers | Alternative staging schedules with distinct overwrite, wait, and LDS rules. |
+| V layout | natural V-LDS layout and padding helpers | Producer and consumer coordinates must stay paired; padding alone does not prove conflict avoidance. |
+| Early V | `_enable_early_v_schedule()` | Selector-controlled overlap schedule, not a generally composable flag. |
+| Direct Q and mask limits | gfx942 selector helpers | Dependent parts of a selected path rather than independent support claims. |
+| Launch geometry | `_select_2d_num_warps()`, `_select_2d_tile_size()`, `_select_2d_block_m_per_warp()` | Must agree across spec, cache key, LDS accounting, and launch. |
+| BF16 wide policy | `_gfx942_bf16_wide_tile_size()` and related helpers | Dtype-specific geometry owned by the current selector and validators. |
+| Transposed-V read experiment | `use_conflict_free_v` | Guarded read-side experiment; mutually exclusive with the store-side vehicle. |
+| Transposed-V store experiment | `use_conflict_free_v_store` and `cfvst` helpers | Diagnostic path only; do not treat its presence as production support. |
 
-Do not infer legality from wave width or from another gfx target. The selected target's
-matrix catalog, validators, loader constraints, and backend rules are the source of
-truth.
+## Retained experiment decisions
 
-## Retained qualitative lessons
+- Do not copy gfx950 matrix, transpose-read, or scheduling assumptions. Query the
+  exact target catalog and gfx942 validators.
+- Keep selector experiments separate from kernel-body experiments. A buildable flag
+  is not evidence that default dispatch selects or supports it.
+- Treat K buffering, V layout, waits, and launch geometry as one dependency system.
+  A local LDS reduction can move the bottleneck or create an overwrite hazard.
+- A transposed V layout requires a matching producer and consumer. The in-register
+  `perm_b32` vehicle is local to a thread; any cross-lane distribution still needs an
+  explicit proof from the generated dataflow.
+- Keep the store-side transposed-V path experimental until all affected correctness
+  modes pass. Its diagnostic sub-flags are cache/signature inputs, not support claims.
+- Loop-roll whole-tile reshapes and keep only the small native-vector operation
+  unrolled; otherwise emitted IR can grow with the tile instead of the micro-operation.
+- Regenerate ISA and resource evidence with the active backend. Historical resource
+  interpretations are hypotheses, not current architecture facts.
 
-- Selector and kernel-body experiments answer different questions; keep them isolated.
-- A wider matrix instruction does not by itself establish a useful end-to-end path.
-  Operand layout, LDS traffic, waits, and launch geometry remain part of the proof.
-- Removing one LDS round trip can add register or permutation work elsewhere. Inspect
-  the complete generated dataflow before accepting the change.
-- Launch geometry must be represented consistently in spec construction, cache keys,
-  LDS accounting, and the actual launch.
-- Counter interpretation needs a causal ISA explanation. A single utilization counter
-  is not enough to identify a bound.
-- An experimental environment flag or helper is not a support claim. The dispatcher,
-  validators, tests, and default path must agree.
+## Experiment and revalidation contract
 
-## Revalidation checklist
+1. Reproduce the current selector output for the exact workload.
+2. Change one selector or kernel-body cause at a time and run correctness first.
+3. Verify spec, cache key, LDS model, launch geometry, and emitted ISA agree.
+4. Record commands, toolchain, workload, sampling method, counters, and numeric results
+   only in the approved access-controlled record.
+5. Keep the qualitative mechanism, decision, and replay method in this page.
 
-- [ ] Source anchors and selector names still exist.
-- [ ] The selected spec passes current target validation.
-- [ ] Cache-key fields cover every launch- or codegen-relevant lever.
-- [ ] Numeric correctness passes for every affected dtype and masking mode.
-- [ ] Generated ISA and resource use support the proposed mechanism.
-- [ ] Numeric performance and profiler evidence is stored only in the approved
-      access-controlled record.
+- [ ] Current source anchors and validator names resolve.
+- [ ] Every affected dtype and masking mode passes numeric correctness.
+- [ ] Experimental flags remain off unless their complete gate is validated.
 - [ ] Public documentation contains no achieved performance values or comparative
       product/software claims.
