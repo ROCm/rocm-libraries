@@ -52,7 +52,7 @@ def _reference(A, B, AQ, BQ):
     return acc
 
 
-def _run_one(so_path, variant_key, M, N, K, verify):
+def _run_one(so_path, variant_key, M, N, K, verify, gfx_arch=None):
     import numpy as np
 
     runner = u.RowColQuantGpuGemmRunner(so_path)
@@ -76,12 +76,14 @@ def _run_one(so_path, variant_key, M, N, K, verify):
     if can_verify:
         # Feed the kernel REAL 1-byte-per-element fp8/bf8 bytes (the ctypes lib
         # reads A/B as const fp8_t*/bf8_t*). Encoding to uint8 preserves shape
-        # and the exact bit pattern the device dequantizes.
-        A = u.encode_fp8_bytes(A_f, variant_key)
-        B = u.encode_fp8_bytes(B_f, variant_key)
+        # and the exact bit pattern the device dequantizes. The fp8 flavour
+        # (OCP on gfx950, FNUZ on gfx942) MUST match the kernel's arch or the
+        # reference silently NaNs.
+        A = u.encode_fp8_bytes(A_f, variant_key, gfx_arch)
+        B = u.encode_fp8_bytes(B_f, variant_key, gfx_arch)
         # Round the reference inputs through the SAME quantization.
-        A_ref = u.quantize_dequantize_fp8(A_f, variant_key)
-        B_ref = u.quantize_dequantize_fp8(B_f, variant_key)
+        A_ref = u.quantize_dequantize_fp8(A_f, variant_key, gfx_arch)
+        B_ref = u.quantize_dequantize_fp8(B_f, variant_key, gfx_arch)
     else:
         # SMOKE-ONLY: pass float32 so the kernel launches; we make no numeric
         # claim in this path (the buffer is not a valid fp8 encoding).
@@ -119,13 +121,22 @@ def main() -> int:
     p.add_argument("--output-dir", type=Path, default=None)
     args = p.parse_args()
 
-    configs = [u.default_fp8_config(), u.default_bf8_config()]
+    # Resolve the target arch ONCE so the configs, the tile selection
+    # (warp_tile_k), and the fp8 encoding flavour (OCP vs FNUZ) all agree. If
+    # --arch was not given, autodetect the local GPU (raises if none), because
+    # both the tile shape and the fp8 encoding are arch-specific: building the
+    # gfx950 16x16x128 tile on gfx942 outputs all-zeros, and OCP-vs-FNUZ
+    # mismatch NaNs the reference.
+    arch = args.arch or u._detect_gpu_arch()
+    log.info("Target arch: %s", arch)
+
+    configs = [u.default_fp8_config(arch), u.default_bf8_config(arch)]
     log.info("Configs: %s", [c.name for c in configs])
 
     so_paths = u.setup_multiple_rowcolquant_dispatchers(
         configs,
         output_dir=args.output_dir,
-        gfx_arch=args.arch,
+        gfx_arch=arch,
     )
 
     ok = True
@@ -145,7 +156,7 @@ def main() -> int:
     for cfg, so in zip(configs, so_paths):
         try:
             if not _run_one(so, cfg.variant_key, args.m, args.n, args.k,
-                            verify=not args.no_verify):
+                            verify=not args.no_verify, gfx_arch=arch):
                 ok = False
         except Exception as e:
             log.error("RUN FAILED for %s: %s", so, e)

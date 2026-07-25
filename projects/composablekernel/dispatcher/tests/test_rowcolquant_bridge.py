@@ -27,6 +27,8 @@ from gemm_rowcolquant_utils import (  # noqa: E402
     quantize_dequantize_fp8,
     fp8_encoding_available,
     _warp_tile_k_for,
+    _ml_fp8_dtype,
+    _uses_ocp_fp8,
 )
 from codegen_common import make_rowcolquant_kernel_name  # noqa: E402
 
@@ -123,6 +125,85 @@ class TestArchWarpTileK(unittest.TestCase):
     def test_name_reflects_arch_warp_tile_k(self):
         self.assertIn("16x16x32", default_fp8_config("gfx942").name)
         self.assertIn("16x16x128", default_fp8_config("gfx950").name)
+
+
+class TestArchThreadedIntoConfig(unittest.TestCase):
+    """The self-test must thread the SELECTED arch into the default configs.
+
+    Round-3 GPU-tester finding: main() built gfx950 tiles even under
+    --arch gfx942 (all-zeros). Guard that the arch reaches warp_tile_k and the
+    encoded kernel name, so a regression that drops the arch is caught here.
+    """
+
+    def test_gfx942_config_differs_from_gfx950(self):
+        c942 = default_fp8_config("gfx942")
+        c950 = default_fp8_config("gfx950")
+        self.assertEqual(c942.gfx_arch, "gfx942")
+        self.assertEqual(c950.gfx_arch, "gfx950")
+        self.assertEqual(c942.warp_tile_k, 32)
+        self.assertEqual(c950.warp_tile_k, 128)
+        self.assertNotEqual(c942.name, c950.name)
+
+    def test_selftest_main_passes_arch(self):
+        # The self-test main() must construct configs WITH the arch. Mirror its
+        # call site and assert the arch propagated (guards the Round-3 bug where
+        # default_fp8_config() was called with no arg).
+        for arch, expected_k in (("gfx942", 32), ("gfx950", 128)):
+            for cfg in (default_fp8_config(arch), default_bf8_config(arch)):
+                self.assertEqual(cfg.gfx_arch, arch)
+                self.assertEqual(cfg.warp_tile_k, expected_k)
+
+
+class TestFp8EncodingFlavourByArch(unittest.TestCase):
+    """Encoding flavour must follow CK_USE_OCP_FP8: gfx942 -> FNUZ, gfx950 -> OCP.
+
+    Round-3 GPU-tester finding: the reference silently NaN'd on gfx942 because
+    the encoder hardcoded OCP e4m3/e5m2. FNUZ is required on gfx942.
+    """
+
+    def test_uses_ocp_switch(self):
+        self.assertTrue(_uses_ocp_fp8("gfx950"))
+        self.assertTrue(_uses_ocp_fp8("gfx1200"))
+        self.assertFalse(_uses_ocp_fp8("gfx942"))
+        self.assertFalse(_uses_ocp_fp8("gfx90a"))
+        # Unknown arch defaults to OCP (historical gfx950 self-test default).
+        self.assertTrue(_uses_ocp_fp8(None))
+
+    @unittest.skipUnless(fp8_encoding_available(), "ml_dtypes fp8 not installed")
+    def test_dtype_names_by_arch(self):
+        import ml_dtypes
+
+        # gfx950 -> OCP e4m3/e5m2
+        self.assertIs(_ml_fp8_dtype("fp8", "gfx950"), ml_dtypes.float8_e4m3)
+        self.assertIs(_ml_fp8_dtype("bf8", "gfx950"), ml_dtypes.float8_e5m2)
+        # gfx942 -> FNUZ e4m3fnuz/e5m2fnuz
+        self.assertIs(_ml_fp8_dtype("fp8", "gfx942"), ml_dtypes.float8_e4m3fnuz)
+        self.assertIs(_ml_fp8_dtype("bf8", "gfx942"), ml_dtypes.float8_e5m2fnuz)
+
+    @unittest.skipUnless(fp8_encoding_available(), "ml_dtypes fp8 not installed")
+    def test_encode_flavour_bits_differ(self):
+        import numpy as np
+
+        # A value whose OCP and FNUZ bit patterns differ (FNUZ has a 1-bit
+        # exponent-bias shift) -- proves the arch actually selects the codec.
+        a = np.array([0.5], dtype=np.float32)
+        ocp = encode_fp8_bytes(a, "fp8", "gfx950")
+        fnuz = encode_fp8_bytes(a, "fp8", "gfx942")
+        self.assertEqual(ocp.nbytes, 1)
+        self.assertEqual(fnuz.nbytes, 1)
+        self.assertNotEqual(int(ocp[0]), int(fnuz[0]))
+
+    @unittest.skipUnless(fp8_encoding_available(), "ml_dtypes fp8 not installed")
+    def test_fnuz_reference_is_finite_on_gfx942(self):
+        import numpy as np
+
+        # The Round-3 bug surfaced as NaN in the reference. Confirm the FNUZ
+        # round-trip stays finite over the self-test's input range on gfx942.
+        rng = np.random.default_rng(0)
+        a = rng.uniform(-2.0, 2.0, size=(64, 64)).astype(np.float32)
+        for variant in ("fp8", "bf8"):
+            qd = quantize_dequantize_fp8(a, variant, "gfx942")
+            self.assertTrue(np.all(np.isfinite(qd)))
 
 
 @unittest.skipUnless(fp8_encoding_available(), "ml_dtypes fp8 not installed")

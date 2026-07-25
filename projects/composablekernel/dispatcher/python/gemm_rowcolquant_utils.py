@@ -358,41 +358,65 @@ class RowColQuantGpuGemmRunner:
 # fp8 / bf8 host-side encode helpers (for genuine numeric self-tests)
 # =============================================================================
 #
-# The kernel's ADataType/BDataType are 1-byte OCP fp8 (e4m3) / bf8 (e5m2) on
-# gfx950. The ctypes lib reinterprets the raw A/B pointers as const fp8_t*, so
-# the host MUST hand it actual 1-byte-per-element encoded buffers -- NOT float32
-# arrays (that would make it read a quarter of the buffer as garbage). These
-# helpers encode float32 -> fp8/bf8 bytes and decode back, so a self-test can
-# both feed real bytes to the kernel and round its numpy reference identically.
+# The kernel's ADataType/BDataType are 1-byte fp8 / bf8. The *encoding* is
+# arch-dependent (mirrors CK_USE_OCP_FP8): gfx950 uses OCP fp8 (e4m3) / bf8
+# (e5m2), while gfx942 uses FNUZ fp8 (e4m3fnuz) / bf8 (e5m2fnuz). Getting the
+# encoding wrong makes the numpy reference silently NaN on gfx942 (OCP e4m3 has
+# no inf/nan-free NUZ layout, so many gfx942-valid bit patterns decode to NaN).
+# The ctypes lib reinterprets the raw A/B pointers as const fp8_t*, so the host
+# MUST hand it actual 1-byte-per-element encoded buffers -- NOT float32 arrays
+# (that would make it read a quarter of the buffer as garbage). These helpers
+# encode float32 -> fp8/bf8 bytes and decode back, so a self-test can both feed
+# real bytes to the kernel and round its numpy reference identically.
 
 
-# Map our variant_key -> the ml_dtypes fp8 dtype that matches the kernel's
-# OCP encoding on gfx950 (fp8 = e4m3, bf8 = e5m2).
-_ML_DTYPE_FOR_VARIANT = {"fp8": "float8_e4m3", "bf8": "float8_e5m2"}
+# Map (variant_key, encoding) -> the ml_dtypes fp8 dtype name that matches the
+# kernel's on-device encoding. OCP is used on gfx950 (fp8 = e4m3, bf8 = e5m2);
+# FNUZ is used on gfx942/other (fp8 = e4m3fnuz, bf8 = e5m2fnuz), mirroring the
+# CK_USE_OCP_FP8 compile-time switch.
+_ML_DTYPE_FOR_VARIANT_OCP  = {"fp8": "float8_e4m3", "bf8": "float8_e5m2"}
+_ML_DTYPE_FOR_VARIANT_FNUZ = {"fp8": "float8_e4m3fnuz", "bf8": "float8_e5m2fnuz"}
 
 
-def _ml_fp8_dtype(variant_key: str):
-    """Return the numpy fp8 dtype (via ml_dtypes) for a variant, or None."""
+def _uses_ocp_fp8(gfx_arch: Optional[str]) -> bool:
+    """True if the arch uses OCP fp8/bf8 (gfx950/gfx12); False -> FNUZ (gfx942).
+
+    Mirrors the CK_USE_OCP_FP8 compile-time switch. Defaults to OCP when the
+    arch is unknown (None) to preserve the historical gfx950 self-test default.
+    """
+    if not gfx_arch:
+        return True
+    return "gfx950" in gfx_arch or "gfx12" in gfx_arch
+
+
+def _ml_fp8_dtype(variant_key: str, gfx_arch: Optional[str] = None):
+    """Return the numpy fp8 dtype (via ml_dtypes) for a variant+arch, or None.
+
+    The dtype flavour (OCP vs FNUZ) is chosen from ``gfx_arch`` to match the
+    kernel's on-device encoding; passing None keeps the OCP default.
+    """
     try:
         import ml_dtypes  # noqa: F401
     except Exception:
         return None
-    name = _ML_DTYPE_FOR_VARIANT.get(variant_key)
+    table = _ML_DTYPE_FOR_VARIANT_OCP if _uses_ocp_fp8(gfx_arch) else _ML_DTYPE_FOR_VARIANT_FNUZ
+    name = table.get(variant_key)
     if name is None:
         return None
     return getattr(__import__("ml_dtypes"), name, None)
 
 
-def encode_fp8_bytes(arr, variant_key: str):
+def encode_fp8_bytes(arr, variant_key: str, gfx_arch: Optional[str] = None):
     """Encode a float32/float array to packed 1-byte-per-element fp8/bf8.
 
     Returns a C-contiguous uint8 numpy array with the same shape as ``arr``
     whose raw bytes are exactly what the kernel expects to read as fp8_t*/bf8_t*.
+    The fp8 flavour (OCP on gfx950, FNUZ on gfx942) is selected from ``gfx_arch``.
     Requires ml_dtypes; raises RuntimeError if unavailable.
     """
     import numpy as np
 
-    dt = _ml_fp8_dtype(variant_key)
+    dt = _ml_fp8_dtype(variant_key, gfx_arch)
     if dt is None:
         raise RuntimeError(
             f"ml_dtypes fp8 dtype unavailable for variant {variant_key!r}; "
@@ -403,16 +427,17 @@ def encode_fp8_bytes(arr, variant_key: str):
     return np.ascontiguousarray(enc).view(np.uint8)
 
 
-def quantize_dequantize_fp8(arr, variant_key: str):
+def quantize_dequantize_fp8(arr, variant_key: str, gfx_arch: Optional[str] = None):
     """Round a float array through fp8/bf8 and back to float32.
 
     This is the reference-side counterpart to encode_fp8_bytes: it applies the
-    exact same fp8 rounding the kernel sees, so a numpy reference computed on
-    the result is a fair comparison. Requires ml_dtypes.
+    exact same fp8 rounding the kernel sees (OCP on gfx950, FNUZ on gfx942), so
+    a numpy reference computed on the result is a fair comparison. Requires
+    ml_dtypes.
     """
     import numpy as np
 
-    dt = _ml_fp8_dtype(variant_key)
+    dt = _ml_fp8_dtype(variant_key, gfx_arch)
     if dt is None:
         raise RuntimeError(
             f"ml_dtypes fp8 dtype unavailable for variant {variant_key!r}."
