@@ -241,6 +241,62 @@ class TestPreshuffleBMatrixShuffle(unittest.TestCase):
             self.assertFalse(_static_bool(_header_text(cfg), "PreshuffleB"), cfg.name)
 
 
+class TestBqPermuteNForPermuteNKernels(unittest.TestCase):
+    """Round-4 BUG: the permute_n kernel (PreshuffleB && TiledMMAPermuteN &&
+    BGroupSizeN==1, e.g. fp8 preshuffleb+pq n=1) riffles the N columns in its
+    B-epilogue, so the BQ scale tensor must ALSO be permuted with bq_permuteN,
+    IN ADDITION to shuffle_b_permuteN on B (Old-TE run_gemm_quant_example.inc:
+    799-814). Without it col 0 is exact but every other N column is scrambled.
+    The ctypes lib previously applied only shuffle_bq (never bq_permuteN) to BQ."""
+
+    def test_ctypes_lib_applies_bq_permuteN(self):
+        # bq_permuteN must be invoked on the BQ scale tensor, using the same
+        # BShuffleConfig that shuffle_b_permuteN uses.
+        self.assertIn(
+            "bq_permuteN<typename SelectedKernel::BShuffleConfig>", _CTYPES_SRC
+        )
+
+    def test_bq_permute_n_gated_on_permute_n_predicate(self):
+        # The BQ permute must be gated by exactly PreshuffleB && TiledMMAPermuteN
+        # && BGroupSizeN==1 (the permute_n kernel), matching the B-matrix path.
+        self.assertIn("SelectedKernel::PreshuffleB && SelectedKernel::TiledMMAPermuteN",
+                      _CTYPES_SRC)
+        self.assertIn("bq_use_permute_n", _CTYPES_SRC)
+
+    def test_bq_permute_n_then_shuffle_bq_when_preshufflequant(self):
+        # For permute_n + BPreshuffleQuant kernels, bq_permuteN is applied FIRST,
+        # then shuffle_bq -- exactly Old-TE inc:805-810. Both calls must appear.
+        self.assertIn("bq_permuteN", _CTYPES_SRC)
+        self.assertIn("shuffle_bq", _CTYPES_SRC)
+
+    def test_permute_n_config_has_permute_n_name_and_bgroup1(self):
+        # The fp8 preshuffleb+pq n=1 config is the permute_n kernel.
+        cfg = default_fp8_preshuffleb_preshufflequant_config(bquant_group_n=1,
+                                                             gfx_arch="gfx950")
+        self.assertEqual(cfg.bquant_group_n, 1, cfg.name)
+        self.assertTrue(cfg.preshuffle_b and cfg.preshuffle_bquant, cfg.name)
+        self.assertIn("permute_n", cfg.name, cfg.name)
+
+
+class TestFp4PreshuffleBReject(unittest.TestCase):
+    """Round-4 SHOULD-FIX: fp4 + PreshuffleB is unsupported. Old-TE THROWS
+    ("Preshuffling weight matrix is not supported for ... bf16_fp4_gemm",
+    run_gemm_quant_example.inc:994-1001); the bridge previously malloc-aborted.
+    The ctypes lib now returns error code -3 BEFORE any device alloc, and the
+    Python runner raises a clear RuntimeError instead of crashing."""
+
+    def test_ctypes_lib_rejects_fp4_preshuffleb(self):
+        # Compile-time guard: fp4 (pk_fp4_t) + PreshuffleB returns -3 early.
+        self.assertIn("std::is_same_v<BDataType, ck_tile::pk_fp4_t>", _CTYPES_SRC)
+        self.assertIn("return -3;", _CTYPES_SRC)
+        self.assertIn("SelectedKernel::PreshuffleB &&", _CTYPES_SRC)
+
+    def test_python_runner_maps_rc_minus3_to_clear_error(self):
+        runner_src = (_DISP / "python" / "gemm_abquant_utils.py").read_text()
+        self.assertIn("rc == -3", runner_src)
+        self.assertIn("not supported for bf16_fp4_gemm", runner_src)
+
+
 class TestEightWavesColumnMajorAQ(unittest.TestCase):
     """Round-3 BUG #2: the n=128 EightWaves kernels must use AQLayout=ColumnMajor
     (StrideAQ=M), matching Old-TE (run_gemm_quant_example.inc:1013-1021). The n=1

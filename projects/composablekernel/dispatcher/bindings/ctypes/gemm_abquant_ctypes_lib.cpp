@@ -146,6 +146,21 @@ int dispatcher_run_abquant_gemm(const void* A,
         return -1;
     }
 
+    // Graceful reject: PreshuffleB is not supported for fp4 (BDataType==pk_fp4_t),
+    // exactly as Old-TE THROWS in run_gemm_quant_example.inc:994-1001
+    //   "Preshuffling weight matrix is not supported for AQuant, RowColQuant or
+    //    bf16_fp4_gemm".
+    // The fp4 preshuffle host path would otherwise allocate/copy a mis-sized B
+    // buffer and heap-corrupt (malloc abort). Return an error code instead so the
+    // Python runner raises rather than crashing the process. This is a compile-time
+    // branch: it can only ever fire in an fp4 PreshuffleB .so.
+    if constexpr(SelectedKernel::PreshuffleB && std::is_same_v<BDataType, ck_tile::pk_fp4_t>)
+    {
+        std::cerr << "dispatcher_run_abquant_gemm: Preshuffling weight matrix is not "
+                     "supported for bf16_fp4_gemm (matches Old-TE reject)\n";
+        return -3;
+    }
+
     // Derive the GPU architecture from the running device (do not assume one at
     // compile time) and reject unsupported archs, per review feedback.
     {
@@ -351,9 +366,51 @@ int dispatcher_run_abquant_gemm(const void* A,
         }
     }
 
-    // Apply BQ preshuffle when required -- mirrors gemm_bquant_profiler.hpp.
-    // BPreshuffleQuant reorders BQ in host memory before the device copy.
-    if constexpr(SelectedKernel::BPreshuffleQuant)
+    // Apply the BQ scale-tensor preshuffle when required. This mirrors Old-TE's
+    // three-way branch in run_gemm_quant_example.inc:799-825 exactly:
+    //   1. PreshuffleB && TiledMMAPermuteN && kN==1 (the "permute_n" kernel):
+    //        bq_permuteN<BShuffleConfig>(BQ, kN) FIRST, then shuffle_bq if
+    //        BPreshuffleQuant. The permute_n B-epilogue riffles the N columns, so
+    //        the BQ scales MUST be permuted the same way or every column except the
+    //        first is read with the wrong scale (max_rel ~large, col 0 exact).
+    //   2. else if BPreshuffleQuant: shuffle_bq only.
+    //   3. else: no shuffle.
+    // BQ arrives ColumnMajor [QK_B, QN_B]: BQ[k,n] at offset n*QK_B + k.
+    constexpr bool bq_use_permute_n =
+        SelectedKernel::PreshuffleB && SelectedKernel::TiledMMAPermuteN && (BGroupSizeN == 1);
+    if constexpr(bq_use_permute_n)
+    {
+        ck_tile::HostTensor<QDataType> bq_h(
+            ck_tile::host_tensor_descriptor(static_cast<int>(QK_B),
+                                            static_cast<int>(QN_B),
+                                            static_cast<int>(QK_B),
+                                            ck_tile::bool_constant<false>{} /*col-major*/));
+        std::copy(BQ_host, BQ_host + QK_B * QN_B, bq_h.begin());
+        // Old-TE: bq_permuteN<GemmConfig>(*bq_tensor_ptr, BQuantGroupSize::kN).
+        auto bq_permuted = ck_tile::bq_permuteN<typename SelectedKernel::BShuffleConfig>(
+            bq_h, static_cast<ck_tile::index_t>(BGroupSizeN));
+        auto bq_final = [&]() {
+            if constexpr(SelectedKernel::BPreshuffleQuant)
+            {
+                constexpr int block_bq_k =
+                    static_cast<int>(SelectedKernel::TileK) / static_cast<int>(BQuantGroupSize::kK);
+                return ck_tile::shuffle_bq(&bq_permuted, block_bq_k);
+            }
+            else
+            {
+                return bq_permuted;
+            }
+        }();
+        if(hipMemcpy(BQ_dev,
+                     bq_final.data(),
+                     elements_to_bytes<QDataType>(QK_B * QN_B),
+                     hipMemcpyHostToDevice) != hipSuccess)
+        {
+            cleanup();
+            return -1;
+        }
+    }
+    else if constexpr(SelectedKernel::BPreshuffleQuant)
     {
         constexpr int block_bq_k =
             static_cast<int>(SelectedKernel::TileK) / static_cast<int>(BQuantGroupSize::kK);

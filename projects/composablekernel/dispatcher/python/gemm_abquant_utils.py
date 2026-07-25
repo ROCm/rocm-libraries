@@ -458,6 +458,16 @@ class ABQuantGpuGemmRunner:
         )
 
         if rc != 0:
+            # rc == -3 is the graceful "fp4 + PreshuffleB is unsupported" reject,
+            # mirroring Old-TE's throw ("Preshuffling weight matrix is not supported
+            # for ... bf16_fp4_gemm", run_gemm_quant_example.inc:994-1001). The ctypes
+            # lib returns before any device alloc so there is no heap corruption --
+            # surface it as a clear, catchable error instead of a malloc abort.
+            if rc == -3:
+                raise RuntimeError(
+                    "Preshuffling weight matrix is not supported for bf16_fp4_gemm "
+                    f"(kernel {self.kernel_name}); matches Old-TE reject"
+                )
             raise RuntimeError(
                 f"dispatcher_run_abquant_gemm failed with code {rc} "
                 f"for kernel {self.kernel_name}"
@@ -842,6 +852,16 @@ def expand_abquant_sweep(
 # warp_tile 16x16x{K_warp}.
 # preshuffleb (non-eight_waves) uses GemmConfigPreshuffleB_ABQuant_Prefill:
 # warp 2x2x1, preshuffle_b + double_smem, kBlockPerCu=2, kPadK=false.
+#
+# SCOPE NOTE -- fp8/bf8 preshuffleb n=1 (non-pq) is a PRE-EXISTING Old-TE bug, NOT
+# a bridge defect. The fp8/bf8 preshuffleb + bquant_group_n=1 (non-preshufflequant)
+# kernels "fail" ~71% of shapes on gfx950 -- but this reproduces Old-TE 1:1: Old-TE's
+# own example (-v=1 verification) also fails these for group_size 1x1x128. The bridge
+# faithfully mirrors Old-TE's shuffle_b / bq_permuteN / shuffle_bq host path, so
+# matching Old-TE's (buggy) output IS parity. Do NOT "fix" beyond Old-TE. The
+# preshuffleb + preshufflequant n=1 (permute_n) family and the {1,128} eight_waves
+# families are correct/at-parity; only the non-pq n=1 group-size-1x1x128 case carries
+# the upstream defect.
 # =============================================================================
 
 
