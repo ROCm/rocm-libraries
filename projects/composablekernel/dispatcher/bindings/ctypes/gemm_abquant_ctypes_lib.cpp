@@ -192,17 +192,22 @@ int dispatcher_run_abquant_gemm(const void* A,
     // Device buffers are allocated and copied as M*K, K*N, M*QK_A, QK_B*QN_B, M*N
     // packed arrays.  Non-packed strides would cause the kernel to index into a
     // differently-sized buffer, producing incorrect results or OOB accesses.
-    // AQ is RowMajor [M, QK_A]        -> leading dim = QK_A.
+    // AQ leading dim depends on AQLayout: RowMajor [M, QK_A] -> QK_A; the n=128
+    //   EightWaves fast path uses ColumnMajor [M, QK_A] -> M (StrideAQ=M, matching
+    //   Old-TE run_gemm_quant_example.inc:1013-1021 + get_default_stride).
     // BQ is ColumnMajor [QK_B, QN_B]  -> leading dim = QK_B (ABQuant kernel
     //                                    requires ColumnMajor BQ; see static_assert
     //                                    in gemm_quant_kernel.hpp).
-    if(stride_A != K || stride_B != K || stride_AQ != QK_A || stride_BQ != QK_B || stride_C != N)
+    const int64_t expected_stride_AQ = SelectedKernel::AQIsColumnMajor ? M : QK_A;
+    if(stride_A != K || stride_B != K || stride_AQ != expected_stride_AQ || stride_BQ != QK_B ||
+       stride_C != N)
     {
         std::cerr << "dispatcher_run_abquant_gemm: non-packed strides are not supported. "
-                  << "Expected stride_A=" << K << " stride_B=" << K << " stride_AQ=" << QK_A
-                  << " stride_BQ=" << QK_B << " stride_C=" << N << ", got stride_A=" << stride_A
-                  << " stride_B=" << stride_B << " stride_AQ=" << stride_AQ
-                  << " stride_BQ=" << stride_BQ << " stride_C=" << stride_C << "\n";
+                  << "Expected stride_A=" << K << " stride_B=" << K
+                  << " stride_AQ=" << expected_stride_AQ << " stride_BQ=" << QK_B
+                  << " stride_C=" << N << ", got stride_A=" << stride_A << " stride_B=" << stride_B
+                  << " stride_AQ=" << stride_AQ << " stride_BQ=" << stride_BQ
+                  << " stride_C=" << stride_C << "\n";
         return -1;
     }
 
@@ -260,18 +265,56 @@ int dispatcher_run_abquant_gemm(const void* A,
         return -1;
     }
 
-    // Copy A / B inputs to device.
+    // Copy A input to device.
     if(hipMemcpy(A_dev, A_host, elements_to_bytes<ADataType>(M * K), hipMemcpyHostToDevice) !=
        hipSuccess)
     {
         cleanup();
         return -1;
     }
-    if(hipMemcpy(B_dev, B_host, elements_to_bytes<BDataType>(K * N), hipMemcpyHostToDevice) !=
-       hipSuccess)
+
+    // Copy the B weight matrix to device. For PreshuffleB kernels the B matrix
+    // must be pre-shuffled on host FIRST, exactly as Old-TE does before its device
+    // copy (run_gemm_quant_example.inc:770-789):
+    //   * shuffle_b_permuteN<GemmConfig>(B) when TiledMMAPermuteN && kN == 1
+    //   * shuffle_b<GemmConfig>(B)          otherwise
+    // The kernel reads B in this interleaved layout; without the shuffle the
+    // PreshuffleB kernels produce garbage (max_rel ~50-78 on gfx950).
+    if constexpr(SelectedKernel::PreshuffleB)
     {
-        cleanup();
-        return -1;
+        // B is supplied ColumnMajor [K, N]; shuffle_b indexes it as [K rows, N cols].
+        ck_tile::HostTensor<BDataType> b_k_n(
+            ck_tile::host_tensor_descriptor(static_cast<int>(K),
+                                            static_cast<int>(N),
+                                            static_cast<int>(K),
+                                            ck_tile::bool_constant<false>{} /*col-major*/));
+        std::copy(B_host, B_host + K * N, b_k_n.begin());
+
+        constexpr bool use_permute_n = SelectedKernel::TiledMMAPermuteN && (BGroupSizeN == 1);
+        auto b_shuffled              = [&]() {
+            if constexpr(use_permute_n)
+                return ck_tile::shuffle_b_permuteN<typename SelectedKernel::BShuffleConfig>(b_k_n);
+            else
+                return ck_tile::shuffle_b<typename SelectedKernel::BShuffleConfig>(b_k_n);
+        }();
+
+        if(hipMemcpy(B_dev,
+                     b_shuffled.data(),
+                     elements_to_bytes<BDataType>(K * N),
+                     hipMemcpyHostToDevice) != hipSuccess)
+        {
+            cleanup();
+            return -1;
+        }
+    }
+    else
+    {
+        if(hipMemcpy(B_dev, B_host, elements_to_bytes<BDataType>(K * N), hipMemcpyHostToDevice) !=
+           hipSuccess)
+        {
+            cleanup();
+            return -1;
+        }
     }
 
     // Apply AQ preshuffle when required -- mirrors the profiler's shuffle_aq path.

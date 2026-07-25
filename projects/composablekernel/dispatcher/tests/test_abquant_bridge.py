@@ -10,7 +10,9 @@ codegen-JSON projection, and the fp8/bf8/fp4 x rcr scope with the preshuffleB /
 preshuffleQuant families that Old-TE gemm_abquant_quantgrouped*.cpp register. No GPU / hipcc.
 """
 
+import re
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -19,6 +21,7 @@ sys.path.insert(0, str(_DISP / "python"))
 sys.path.insert(0, str(_DISP / "codegen"))
 
 from gemm_abquant_utils import (  # noqa: E402
+    ABQuantDispatcherLib,
     default_fp8_config,
     default_bf8_config,
     default_fp4_config,
@@ -27,8 +30,12 @@ from gemm_abquant_utils import (  # noqa: E402
     default_bf8_preshuffleb_config,
     default_fp4_preshuffleb_config,
     default_fp8_preshuffleb_preshufflequant_config,
+    _generate_abquant_kernel,
 )
 from codegen_common import make_abquant_kernel_name  # noqa: E402
+
+# The ctypes lib source (checked for the B-matrix shuffle step, no GPU needed).
+_CTYPES_SRC = (_DISP / "bindings" / "ctypes" / "gemm_abquant_ctypes_lib.cpp").read_text()
 
 _ALL = [
     default_fp8_config,
@@ -172,6 +179,124 @@ class TestGfx950EightWaves(unittest.TestCase):
         for cfg in not_ew:
             self.assertFalse(cfg.eight_waves, cfg.name)
             self.assertNotIn("eightwaves", cfg.name, cfg.name)
+
+
+def _header_text(cfg):
+    """Codegen the header for a config and return its text (no hipcc)."""
+    tmp = Path(tempfile.mkdtemp(prefix="abq_test_"))
+    hpp = _generate_abquant_kernel(cfg, tmp)
+    assert hpp is not None, f"codegen failed for {cfg.name}"
+    return hpp.read_text()
+
+
+def _static_bool(text, field):
+    m = re.search(rf"bool\s+{field}\s*=\s*(\w+)", text)
+    assert m, f"{field} not found in generated header"
+    return m.group(1) == "true"
+
+
+class TestPreshuffleBMatrixShuffle(unittest.TestCase):
+    """Round-3 BUG #1: PreshuffleB kernels must pre-shuffle the B WEIGHT matrix
+    (Old-TE shuffle_b / shuffle_b_permuteN, run_gemm_quant_example.inc:770-789).
+    Previously only the AQ/BQ scale tensors were shuffled, so all 6 preshuffleb
+    families failed on gfx950 (max_rel ~50-78)."""
+
+    def test_ctypes_lib_has_b_matrix_shuffle_step(self):
+        # The ctypes lib must call shuffle_b / shuffle_b_permuteN on B for
+        # PreshuffleB kernels, gated by SelectedKernel::PreshuffleB.
+        self.assertIn("SelectedKernel::PreshuffleB", _CTYPES_SRC)
+        self.assertIn("shuffle_b<typename SelectedKernel::BShuffleConfig>", _CTYPES_SRC)
+        self.assertIn(
+            "shuffle_b_permuteN<typename SelectedKernel::BShuffleConfig>", _CTYPES_SRC
+        )
+        # permute_n variant is selected exactly when TiledMMAPermuteN && kN==1.
+        self.assertIn("SelectedKernel::TiledMMAPermuteN", _CTYPES_SRC)
+        self.assertIn("BGroupSizeN == 1", _CTYPES_SRC)
+
+    def test_preshuffleb_headers_expose_bshuffle_config(self):
+        preshuffleb_ctors = [
+            lambda: default_fp8_preshuffleb_config(bquant_group_n=1),
+            lambda: default_fp8_preshuffleb_config(bquant_group_n=128),
+            lambda: default_bf8_preshuffleb_config(bquant_group_n=1),
+            lambda: default_bf8_preshuffleb_config(bquant_group_n=128),
+            lambda: default_fp4_preshuffleb_config(),
+            lambda: default_fp8_preshuffleb_preshufflequant_config(bquant_group_n=1),
+        ]
+        for ctor in preshuffleb_ctors:
+            cfg = ctor()
+            self.assertTrue(cfg.preshuffle_b, cfg.name)
+            text = _header_text(cfg)
+            self.assertTrue(_static_bool(text, "PreshuffleB"), cfg.name)
+            self.assertIn("struct BShuffleConfig", text, cfg.name)
+            # BShuffleConfig must expose the member names shuffle_b expects.
+            for member in ("N_Tile", "N_Warp", "N_Warp_Tile", "K_Warp_Tile"):
+                self.assertIn(member, text, f"{member} missing in {cfg.name}")
+
+    def test_non_preshuffleb_kernels_still_no_b_shuffle(self):
+        # Non-preshuffleB kernels must NOT pre-shuffle B (PreshuffleB=false).
+        for ctor in (default_fp8_config, default_bf8_config, default_fp4_config,
+                     default_fp8_preshufflequant_config):
+            cfg = ctor()
+            self.assertFalse(cfg.preshuffle_b, cfg.name)
+            self.assertFalse(_static_bool(_header_text(cfg), "PreshuffleB"), cfg.name)
+
+
+class TestEightWavesColumnMajorAQ(unittest.TestCase):
+    """Round-3 BUG #2: the n=128 EightWaves kernels must use AQLayout=ColumnMajor
+    (StrideAQ=M), matching Old-TE (run_gemm_quant_example.inc:1013-1021). The n=1
+    EightWaves kernels stay RowMajor. Wrong AQ layout builds a slower kernel
+    (fp8/bf8 EightWaves n=128 were +9..25% on gfx950)."""
+
+    def test_n128_eightwaves_use_column_major_aq(self):
+        for ctor in (default_fp8_config, default_bf8_config):
+            cfg = ctor(bquant_group_n=128, gfx_arch="gfx950")
+            self.assertTrue(cfg.eight_waves, cfg.name)
+            text = _header_text(cfg)
+            self.assertTrue(_static_bool(text, "AQIsColumnMajor"), cfg.name)
+            self.assertIn(
+                "using AQLayout = ck_tile::tensor_layout::gemm::ColumnMajor", text, cfg.name
+            )
+            # Python side must agree so it supplies StrideAQ=M / col-major AQ.
+            self.assertTrue(ABQuantDispatcherLib.kernel_uses_column_major_aq(cfg.name), cfg.name)
+
+        # preshuffleb EightWaves n=128 is also ColumnMajor AQ.
+        for ctor in (default_fp8_preshuffleb_config, default_bf8_preshuffleb_config):
+            cfg = ctor(bquant_group_n=128, gfx_arch="gfx950")
+            self.assertTrue(cfg.eight_waves, cfg.name)
+            self.assertTrue(_static_bool(_header_text(cfg), "AQIsColumnMajor"), cfg.name)
+            self.assertTrue(ABQuantDispatcherLib.kernel_uses_column_major_aq(cfg.name), cfg.name)
+
+    def test_n1_eightwaves_stay_row_major_aq(self):
+        for ctor in (default_fp8_preshuffleb_config, default_bf8_preshuffleb_config):
+            cfg = ctor(bquant_group_n=1, gfx_arch="gfx950")
+            self.assertTrue(cfg.eight_waves, cfg.name)
+            text = _header_text(cfg)
+            self.assertFalse(_static_bool(text, "AQIsColumnMajor"), cfg.name)
+            self.assertIn(
+                "using AQLayout = ck_tile::tensor_layout::gemm::RowMajor", text, cfg.name
+            )
+            self.assertFalse(ABQuantDispatcherLib.kernel_uses_column_major_aq(cfg.name), cfg.name)
+
+    def test_non_eightwaves_stay_row_major_aq(self):
+        # All non-EightWaves kernels (fp8 n=1, fp4, all preshufflequant) use
+        # RowMajor AQ regardless of arch.
+        non_ew = [
+            default_fp8_config(bquant_group_n=1, gfx_arch="gfx950"),
+            default_fp4_config(gfx_arch="gfx950"),
+            default_fp4_preshuffleb_config(gfx_arch="gfx950"),
+            default_fp8_preshufflequant_config(bquant_group_n=1, gfx_arch="gfx950"),
+            default_fp8_preshufflequant_config(bquant_group_n=128, gfx_arch="gfx950"),
+            default_fp8_preshuffleb_preshufflequant_config(bquant_group_n=1, gfx_arch="gfx950"),
+            default_fp8_preshuffleb_preshufflequant_config(bquant_group_n=128, gfx_arch="gfx950"),
+        ]
+        for cfg in non_ew:
+            self.assertFalse(cfg.eight_waves, cfg.name)
+            self.assertFalse(_static_bool(_header_text(cfg), "AQIsColumnMajor"), cfg.name)
+            self.assertFalse(ABQuantDispatcherLib.kernel_uses_column_major_aq(cfg.name), cfg.name)
+
+    def test_ctypes_lib_derives_column_major_aq_stride(self):
+        # The ctypes stride check must use M for ColumnMajor AQ, QK_A otherwise.
+        self.assertIn("SelectedKernel::AQIsColumnMajor ? M : QK_A", _CTYPES_SRC)
 
 
 class TestCodegenProjection(unittest.TestCase):

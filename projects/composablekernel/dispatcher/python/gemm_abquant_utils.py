@@ -306,6 +306,7 @@ class ABQuantDispatcherLib:
         QK_B: int,
         QN_B: int,
         k_batch: int = 1,
+        aq_column_major: bool = False,
     ) -> Tuple[int, float]:
         """
         Call dispatcher_run_abquant_gemm with ctypes-wrapped pointers.
@@ -313,6 +314,8 @@ class ABQuantDispatcherLib:
         A, B, AQ, BQ, C must be numpy arrays (C-contiguous, packed).
         B should be a packed (K, N) array supplied column-major (stride_B=K).
         C must be the array that will receive output.
+        aq_column_major supplies AQ as column-major bytes (leading dim = M) for
+        the n=128 EightWaves fast path; otherwise AQ is row-major (leading dim=QK_A).
         Returns (status, time_ms).
         """
         import numpy as np
@@ -322,7 +325,12 @@ class ABQuantDispatcherLib:
         # Supply column-major bytes for 2-D B; ascontiguousarray would force
         # row-major and silently transpose. Packed 1-D B (fp4) stays as-is.
         B  = np.asfortranarray(B) if B.ndim == 2 else np.ascontiguousarray(B)
-        AQ = np.ascontiguousarray(AQ)
+        # AQLayout is ColumnMajor for the n=128 EightWaves fast path (StrideAQ=M):
+        # supply Fortran-order [M, QK_A] bytes so AQ[m,qk] lives at qk*M+m.
+        if aq_column_major and AQ.ndim == 2:
+            AQ = np.asfortranarray(AQ)
+        else:
+            AQ = np.ascontiguousarray(AQ)
         # BQLayout is ColumnMajor [QK_B, QN_B]: BQ[k,n] at offset n*QK_B+k.
         BQ = np.asfortranarray(BQ) if BQ.ndim == 2 else np.ascontiguousarray(BQ)
         C  = np.ascontiguousarray(C)
@@ -350,6 +358,17 @@ class ABQuantDispatcherLib:
             ctypes.byref(time_ms),
         )
         return rc, time_ms.value
+
+    @staticmethod
+    def kernel_uses_column_major_aq(kernel_name: str) -> bool:
+        """Whether a kernel name resolves to the ColumnMajor-AQ EightWaves path.
+
+        Mirrors the codegen AQLayout rule (run_gemm_quant_example.inc:1013-1021):
+        BQuantGroupSize::kN == 128 && M_Warp*N_Warp*K_Warp == 8. Since warps==8
+        occurs only for the 4x2x1 EightWaves configs, we detect 'eightwaves' plus
+        the 'bqg1x128x' N-group segment in the byte-exact kernel name.
+        """
+        return "eightwaves" in kernel_name and "bqg1x128x" in kernel_name
 
     def get_kernel_name(self) -> str:
         raw = self._lib.dispatcher_get_kernel_name()
@@ -412,12 +431,16 @@ class ABQuantGpuGemmRunner:
         # Output buffer -- dtype must match the compiled kernel's CDataType.
         C = np.zeros((M, N), dtype=c_dtype)
 
-        # Strides (in elements). A / AQ / C are row-major; B / BQ are col-major.
-        stride_A  = K      # A is row-major [M, K]
-        stride_B  = K      # B is col-major [K, N] -> leading dim = K
-        stride_AQ = QK_A   # AQ is row-major [M, QK_A]
-        stride_BQ = QK_B   # BQ is col-major [QK_B, QN_B] -> leading dim = QK_B
-        stride_C  = N      # C is row-major [M, N]
+        # AQLayout is ColumnMajor for the n=128 EightWaves fast path (StrideAQ=M);
+        # RowMajor (StrideAQ=QK_A) everywhere else.
+        aq_column_major = ABQuantDispatcherLib.kernel_uses_column_major_aq(self.kernel_name)
+
+        # Strides (in elements). A / C are row-major; B / BQ are col-major.
+        stride_A  = K                    # A is row-major [M, K]
+        stride_B  = K                    # B is col-major [K, N] -> leading dim = K
+        stride_AQ = M if aq_column_major else QK_A  # AQ leading dim per AQLayout
+        stride_BQ = QK_B                 # BQ is col-major [QK_B, QN_B] -> leading dim = QK_B
+        stride_C  = N                    # C is row-major [M, N]
 
         rc, time_ms = self._lib.run(
             A=A, B=B, AQ=AQ, BQ=BQ, C=C,
@@ -431,6 +454,7 @@ class ABQuantGpuGemmRunner:
             QK_B=QK_B,
             QN_B=QN_B,
             k_batch=problem.k_batch,
+            aq_column_major=aq_column_major,
         )
 
         if rc != 0:

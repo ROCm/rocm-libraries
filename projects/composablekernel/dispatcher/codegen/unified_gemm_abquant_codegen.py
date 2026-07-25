@@ -216,10 +216,20 @@ class ABQuantKernelHeaderGenerator:
         layout_b_ck = ABQUANT_LAYOUT_TO_CK[spec.layout[1]]
         layout_c_ck = ABQUANT_LAYOUT_TO_CK[spec.layout[2]]
         # ABQuant kernel constraint (static_assert in gemm_quant_kernel.hpp):
-        #   AQ layout MUST be RowMajor, BQ layout MUST be ColumnMajor.
-        # This matches the run_gemm_example_prec_type R/C dispatch, which passes
-        # (a=Row, aq=Row, b=Col, bq=Col, c=Row) for the general ABQuant path.
-        layout_aq_ck = ABQUANT_LAYOUT_TO_CK["r"]
+        #   BQ layout MUST be ColumnMajor.
+        # AQ layout is RowMajor for all configs EXCEPT the n=128 EightWaves fast
+        # path, which Old-TE compiles with AQLayout=ColumnMajor (StrideAQ=M); see
+        # run_gemm_quant_example.inc:1013-1021:
+        #   ABQuantGrouped && !APreshuffleQuant && BQuantGroupSize::kN==128 &&
+        #   (M_Warp*N_Warp*K_Warp==8)  ->  Row,Col,Col,Col,Row  (else all RowMajor AQ).
+        # APreshuffleQuant is always false in this codegen, so the predicate reduces
+        # to kN==128 && warps==8 (true only for the 4x2x1 EightWaves configs).
+        # A RowMajor-AQ kernel here builds a different, slower kernel (+9..25%), so
+        # emit ColumnMajor to match Old-TE exactly.
+        aq_column_major = (
+            spec.bquant_group_n == 128 and (t.warp_m * t.warp_n * t.warp_k == 8)
+        )
+        layout_aq_ck = ABQUANT_LAYOUT_TO_CK["c" if aq_column_major else "r"]
         layout_bq_ck = ABQUANT_LAYOUT_TO_CK["c"]
 
         pipeline_ck = ABQUANT_PIPELINE_MAP[spec.pipeline]
@@ -254,6 +264,19 @@ class ABQuantKernelHeaderGenerator:
             )
             == "permute_n"
         )
+
+        # GemmConfig::TiledMMAPermuteN drives whether the B weight matrix is
+        # pre-shuffled via shuffle_b_permuteN (permute_n) or plain shuffle_b.
+        # Only the non-eight_waves preshuffleB configs override it to (N_Repeat % 2
+        # == 0); every other config inherits false from GemmConfigBase. Mirror the
+        # same rule the example uses (run_gemm_quant_example.inc:773 selects
+        # shuffle_b_permuteN when TiledMMAPermuteN && BQuantGroupSize::kN == 1).
+        n_repeat = t.tile_n // (t.warp_n * t.warp_tile_n) if (t.warp_n * t.warp_tile_n) else 0
+        tiled_mma_permute_n = (
+            spec.preshuffle_b and not spec.eight_waves and (n_repeat % 2 == 0)
+        )
+        tiled_mma_permute_n_str = str(tiled_mma_permute_n).lower()
+        aq_column_major_str = str(aq_column_major).lower()
 
         if use_permute_n_epilogue:
             epilogue_block = f"""\
@@ -364,6 +387,11 @@ struct {struct} {{
     static constexpr bool PreshuffleB      = {preshuffle_b};
     static constexpr bool TransposeC       = {transpose_c};
     static constexpr bool DoubleSmemBuffer = {double_smem_buffer};
+    // TiledMMAPermuteN: selects shuffle_b_permuteN vs plain shuffle_b for the B
+    // weight matrix (see gemm_abquant_ctypes_lib.cpp). Mirrors GemmConfig struct.
+    static constexpr bool TiledMMAPermuteN = {tiled_mma_permute_n_str};
+    // AQIsColumnMajor: true only for the n=128 EightWaves fast path (StrideAQ=M).
+    static constexpr bool AQIsColumnMajor  = {aq_column_major_str};
 
     using TileShape = ck_tile::TileGemmShape<
         ck_tile::sequence<TileM, TileN, TileK>,
@@ -371,6 +399,17 @@ struct {struct} {{
         ck_tile::sequence<WarpTileM, WarpTileN, WarpTileK>>;
 
     using TilePartitioner = ck_tile::GemmTile1DPartitioner<TileShape>;
+
+    // Config exposing the member names ck_tile::shuffle_b / shuffle_b_permuteN
+    // expect (N_Warp, N_Warp_Tile, K_Warp_Tile, N_Tile). Used by the ctypes lib
+    // to pre-shuffle the B weight matrix for PreshuffleB kernels, matching
+    // Old-TE's host-side shuffle in run_gemm_quant_example.inc:770-789.
+    struct BShuffleConfig {{
+        static constexpr ck_tile::index_t N_Tile      = TileN;
+        static constexpr ck_tile::index_t N_Warp      = WarpN;
+        static constexpr ck_tile::index_t N_Warp_Tile = WarpTileN;
+        static constexpr ck_tile::index_t K_Warp_Tile = WarpTileK;
+    }};
 
     using GemmTraits = ck_tile::TileGemmQuantTraits<
         kPadM, kPadN, kPadK,
