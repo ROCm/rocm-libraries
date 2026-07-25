@@ -431,7 +431,78 @@ TEST(TestGpuReferenceGraphExecutor, IsNotApplicableForRuntimePassByValueGraph)
 
 TEST(TestGpuReferenceGraphExecutor, IsApplicableForBakedScalarGraph)
 {
-    auto builder = createSimplePointwiseGraph(1, 2, {4}, {1});
+    const std::vector<int64_t> xDims{1, 1, 3, 3};
+    const std::vector<int64_t> wDims{1, 1, 1, 1};
+    const std::vector<int64_t> yDims{1, 1, 3, 3};
+    auto builder = createConvFwdGraph(1,
+                                      2,
+                                      3,
+                                      xDims,
+                                      wDims,
+                                      yDims,
+                                      generateStrides(xDims),
+                                      generateStrides(wDims),
+                                      generateStrides(yDims),
+                                      {0, 0},
+                                      {1, 1},
+                                      {1, 1},
+                                      DataType::FLOAT,
+                                      DataType::FLOAT);
+    GpuReferenceGraphExecutor executor;
+    EXPECT_TRUE(executor.isApplicable(builder.GetBufferPointer(), builder.GetSize()));
+}
+
+TEST(TestGpuReferenceGraphExecutor, IsApplicableWhenRuntimePassByValueTensorIsNotConsumed)
+{
+    const std::vector<int64_t> xDims{1, 1, 3, 3};
+    const std::vector<int64_t> wDims{1, 1, 1, 1};
+    const std::vector<int64_t> yDims{1, 1, 3, 3};
+    const auto xStrides = generateStrides(xDims);
+    const auto wStrides = generateStrides(wDims);
+    const auto yStrides = generateStrides(yDims);
+
+    flatbuffers::FlatBufferBuilder builder;
+
+    std::vector<flatbuffers::Offset<TensorAttributes>> tensors;
+    tensors.push_back(
+        CreateTensorAttributesDirect(builder, 1, "x", DataType::FLOAT, &xStrides, &xDims));
+    tensors.push_back(
+        CreateTensorAttributesDirect(builder, 2, "w", DataType::FLOAT, &wStrides, &wDims));
+    tensors.push_back(
+        CreateTensorAttributesDirect(builder, 3, "y", DataType::FLOAT, &yStrides, &yDims));
+    tensors.push_back(CreateTensorAttributesDirect(builder,
+                                                   999,
+                                                   "unconsumed_pbv",
+                                                   DataType::FLOAT,
+                                                   &xStrides,
+                                                   &xDims,
+                                                   /*virtual_=*/false,
+                                                   TensorValue::NONE,
+                                                   /*value=*/0,
+                                                   /*is_runtime_pass_by_value=*/true));
+
+    const std::vector<int64_t> padding{0, 0};
+    const std::vector<int64_t> convStride{1, 1};
+    const std::vector<int64_t> dilation{1, 1};
+    auto convAttrs = CreateConvolutionFwdAttributesDirect(
+        builder, 1, 2, 3, &padding, &padding, &convStride, &dilation, ConvMode::CROSS_CORRELATION);
+
+    std::vector<flatbuffers::Offset<Node>> nodes;
+    nodes.push_back(CreateNodeDirect(builder,
+                                     "conv_fwd_node",
+                                     DataType::FLOAT,
+                                     NodeAttributes::ConvolutionFwdAttributes,
+                                     convAttrs.Union()));
+
+    auto graph = CreateGraphDirect(builder,
+                                   "ConvFwdWithUnconsumedPbv",
+                                   DataType::FLOAT,
+                                   DataType::FLOAT,
+                                   DataType::FLOAT,
+                                   &tensors,
+                                   &nodes);
+    builder.Finish(graph);
+
     GpuReferenceGraphExecutor executor;
     EXPECT_TRUE(executor.isApplicable(builder.GetBufferPointer(), builder.GetSize()));
 }
@@ -457,22 +528,6 @@ TEST(TestGpuReferenceGraphExecutor, IsNotApplicableWhenSupportedOpOutputIsRuntim
                                               /*outputIsRuntimePassByValue=*/true);
     GpuReferenceGraphExecutor executor;
     EXPECT_FALSE(executor.isApplicable(builder.GetBufferPointer(), builder.GetSize()));
-}
-
-TEST(TestGpuReferenceGraphExecutor, IsApplicableWhenRuntimePassByValueTensorIsNotConsumed)
-{
-    // A runtime-PBV tensor that no node consumes must NOT reject the graph:
-    // rejection is per node (only operands an op actually consumes), not a
-    // blanket graph-wide scan. The Pointwise node's own operands are PBV-free.
-    auto builder = createSimplePointwiseGraph(1,
-                                              2,
-                                              {4},
-                                              {1},
-                                              /*inputIsRuntimePassByValue=*/false,
-                                              /*outputIsRuntimePassByValue=*/false,
-                                              /*addUnconsumedPbvTensor=*/true);
-    GpuReferenceGraphExecutor executor;
-    EXPECT_TRUE(executor.isApplicable(builder.GetBufferPointer(), builder.GetSize()));
 }
 
 TEST(TestGpuReferenceGraphExecutor, IsNotApplicableWhenConvInputIsRuntimePassByValue)
