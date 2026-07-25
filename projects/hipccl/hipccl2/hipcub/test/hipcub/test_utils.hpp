@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -21,17 +21,28 @@
 #ifndef HIPCUB_TEST_TEST_UTILS_HPP_
 #define HIPCUB_TEST_TEST_UTILS_HPP_
 
-#ifndef TEST_UTILS_INCLUDE_GAURD
+#ifndef TEST_UTILS_INCLUDE_GUARD
     #error test_utils.hpp must ONLY be included by common_test_header.hpp. Please include common_test_header.hpp instead.
 #endif
 
 // hipCUB API
 #ifdef __HIP_PLATFORM_AMD__
-    #include <hipcub/backend/rocprim/util_ptx.hpp>
+    #include <hipcub/hipcub.hpp>
+    #include <rocprim/iterator/constant_iterator.hpp>
+    #include <rocprim/iterator/counting_iterator.hpp>
+    #include <rocprim/iterator/discard_iterator.hpp>
+    #include <rocprim/iterator/transform_iterator.hpp>
 #elif defined(__HIP_PLATFORM_NVIDIA__)
+    #include <cub/block/block_load.cuh>
+    #include <cub/block/block_store.cuh>
+    #include <cub/cub.cuh>
     #include <cub/util_ptx.cuh>
-    #include <hipcub/config.hpp>
+    #include <cuda/std/array>
+    #include <cuda/std/mdspan>
+    #include <hipcub/hipcub.hpp>
 #endif
+
+#include <hipcub/util_type.hpp>
 
 #include "test_utils_assertions.hpp"
 #include "test_utils_bfloat16.hpp"
@@ -45,6 +56,8 @@
 // Seed values
 #include "test_seed.hpp"
 
+#include <array>
+#include <cstddef>
 #include <type_traits>
 
 namespace test_utils
@@ -167,7 +180,7 @@ OutputIt host_inclusive_scan_impl(
 template<class InputIt, class OutputIt, class BinaryOperation>
 OutputIt host_inclusive_scan(InputIt first, InputIt last, OutputIt d_first, BinaryOperation op)
 {
-    using acc_type = typename std::iterator_traits<InputIt>::value_type;
+    using acc_type = ::hipcub::detail::it_value_t<InputIt>;
     return host_inclusive_scan_impl(first, last, d_first, op, acc_type{});
 }
 
@@ -178,35 +191,31 @@ OutputIt host_inclusive_scan_init(
     return host_inclusive_scan_impl<true>(first, last, d_first, op, init_value);
 }
 
-template<class InputIt,
-         class OutputIt,
-         class T,
-         std::enable_if_t<
-             std::is_same<typename std::iterator_traits<InputIt>::value_type,
-                          test_utils::bfloat16>::value
-                 || std::is_same<typename std::iterator_traits<InputIt>::value_type,
-                                 test_utils::half>::value
-                 || std::is_same<typename std::iterator_traits<InputIt>::value_type, float>::value,
-             bool>
-         = true>
+template<
+    class InputIt,
+    class OutputIt,
+    class T,
+    std::enable_if_t<std::is_same_v<hipcub::detail::it_value_t<InputIt>, test_utils::bfloat16>
+                         || std::is_same_v<hipcub::detail::it_value_t<InputIt>, test_utils::half>
+                         || std::is_same_v<hipcub::detail::it_value_t<InputIt>, float>,
+                     bool>
+    = true>
 OutputIt host_inclusive_scan(InputIt first, InputIt last, OutputIt d_first, test_utils::plus)
 {
     using acc_type = double;
     return host_inclusive_scan_impl(first, last, d_first, test_utils::plus(), acc_type{});
 }
 
-template<class InputIt,
-         class OutputIt,
-         class InitType,
-         class T,
-         std::enable_if_t<
-             std::is_same<typename std::iterator_traits<InputIt>::value_type,
-                          test_utils::bfloat16>::value
-                 || std::is_same<typename std::iterator_traits<InputIt>::value_type,
-                                 test_utils::half>::value
-                 || std::is_same<typename std::iterator_traits<InputIt>::value_type, float>::value,
-             bool>
-         = true>
+template<
+    class InputIt,
+    class OutputIt,
+    class InitType,
+    class T,
+    std::enable_if_t<std::is_same_v<::hipcub::detail::it_value_t<InputIt>, test_utils::bfloat16>
+                         || std::is_same_v<::hipcub::detail::it_value_t<InputIt>, test_utils::half>
+                         || std::is_same_v<::hipcub::detail::it_value_t<InputIt>, float>,
+                     bool>
+    = true>
 OutputIt host_inclusive_scan_init(
     InputIt first, InputIt last, OutputIt d_first, InitType init_value, test_utils::plus)
 {
@@ -242,22 +251,20 @@ template<class InputIt, class T, class OutputIt, class BinaryOperation>
 OutputIt host_exclusive_scan(
     InputIt first, InputIt last, T initial_value, OutputIt d_first, BinaryOperation op)
 {
-    using acc_type = typename std::iterator_traits<InputIt>::value_type;
+    using acc_type = ::hipcub::detail::it_value_t<InputIt>;
     return host_exclusive_scan_impl(first, last, initial_value, d_first, op, acc_type{});
 }
 
-template<class InputIt,
-         class T,
-         class OutputIt,
-         class U,
-         std::enable_if_t<
-             std::is_same<typename std::iterator_traits<InputIt>::value_type,
-                          test_utils::bfloat16>::value
-                 || std::is_same<typename std::iterator_traits<InputIt>::value_type,
-                                 test_utils::half>::value
-                 || std::is_same<typename std::iterator_traits<InputIt>::value_type, float>::value,
-             bool>
-         = true>
+template<
+    class InputIt,
+    class T,
+    class OutputIt,
+    class U,
+    std::enable_if_t<std::is_same_v<::hipcub::detail::it_value_t<InputIt>, test_utils::bfloat16>
+                         || std::is_same_v<::hipcub::detail::it_value_t<InputIt>, test_utils::half>
+                         || std::is_same_v<::hipcub::detail::it_value_t<InputIt>, float>,
+                     bool>
+    = true>
 OutputIt host_exclusive_scan(
     InputIt first, InputIt last, T initial_value, OutputIt d_first, test_utils::plus)
 {
@@ -321,7 +328,7 @@ OutputIt host_exclusive_scan_by_key(InputIt         first,
                                     BinaryOperation op,
                                     KeyCompare      key_compare_op)
 {
-    using acc_type = typename std::iterator_traits<InputIt>::value_type;
+    using acc_type = ::hipcub::detail::it_value_t<InputIt>;
     return host_exclusive_scan_by_key_impl(first,
                                            last,
                                            k_first,
@@ -332,20 +339,18 @@ OutputIt host_exclusive_scan_by_key(InputIt         first,
                                            acc_type{});
 }
 
-template<class InputIt,
-         class KeyIt,
-         class T,
-         class OutputIt,
-         class U,
-         class KeyCompare,
-         std::enable_if_t<
-             std::is_same<typename std::iterator_traits<InputIt>::value_type,
-                          test_utils::bfloat16>::value
-                 || std::is_same<typename std::iterator_traits<InputIt>::value_type,
-                                 test_utils::half>::value
-                 || std::is_same<typename std::iterator_traits<InputIt>::value_type, float>::value,
-             bool>
-         = true>
+template<
+    class InputIt,
+    class KeyIt,
+    class T,
+    class OutputIt,
+    class U,
+    class KeyCompare,
+    std::enable_if_t<std::is_same_v<::hipcub::detail::it_value_t<InputIt>, test_utils::bfloat16>
+                         || std::is_same_v<::hipcub::detail::it_value_t<InputIt>, test_utils::half>
+                         || std::is_same_v<::hipcub::detail::it_value_t<InputIt>, float>,
+                     bool>
+    = true>
 OutputIt host_exclusive_scan_by_key(InputIt  first,
                                     InputIt  last,
                                     KeyIt    k_first,
@@ -407,7 +412,7 @@ OutputIt host_inclusive_scan_by_key(InputIt         first,
                                     BinaryOperation op,
                                     KeyCompare      key_compare_op)
 {
-    using acc_type = typename std::iterator_traits<InputIt>::value_type;
+    using acc_type = ::hipcub::detail::it_value_t<InputIt>;
     return host_inclusive_scan_by_key_impl(first,
                                            last,
                                            k_first,
@@ -417,19 +422,17 @@ OutputIt host_inclusive_scan_by_key(InputIt         first,
                                            acc_type{});
 }
 
-template<class InputIt,
-         class KeyIt,
-         class OutputIt,
-         class U,
-         class KeyCompare,
-         std::enable_if_t<
-             std::is_same<typename std::iterator_traits<InputIt>::value_type,
-                          test_utils::bfloat16>::value
-                 || std::is_same<typename std::iterator_traits<InputIt>::value_type,
-                                 test_utils::half>::value
-                 || std::is_same<typename std::iterator_traits<InputIt>::value_type, float>::value,
-             bool>
-         = true>
+template<
+    class InputIt,
+    class KeyIt,
+    class OutputIt,
+    class U,
+    class KeyCompare,
+    std::enable_if_t<std::is_same_v<::hipcub::detail::it_value_t<InputIt>, test_utils::bfloat16>
+                         || std::is_same_v<::hipcub::detail::it_value_t<InputIt>, test_utils::half>
+                         || std::is_same_v<::hipcub::detail::it_value_t<InputIt>, float>,
+                     bool>
+    = true>
 OutputIt host_inclusive_scan_by_key(InputIt  first,
                                     InputIt  last,
                                     KeyIt    k_first,
@@ -619,8 +622,8 @@ constexpr T get_min_warp_size(const T block_size, const T max_warp_size)
 }
 
 template<unsigned int LogicalWarpSize>
-__device__ constexpr bool device_test_enabled_for_warp_size_v
-    = HIPCUB_DEVICE_WARP_THREADS >= LogicalWarpSize;
+constexpr bool device_test_enabled_for_warp_size_v
+    = (HIPCUB_DEVICE_WARP_THREADS >= LogicalWarpSize);
 
 template<typename T,
          typename U,
@@ -629,6 +632,85 @@ inline constexpr auto ceiling_div(const T a, const U b)
 {
     return a / b + (a % b > 0 ? 1 : 0);
 }
+
+#if defined(__HIP_PLATFORM_AMD__)
+
+template<typename IndexType, std::size_t... Dims>
+using extents = ::hipcub::extents<IndexType, Dims...>;
+
+template<typename Extents>
+struct extents_size;
+
+template<typename IndexType, std::size_t... Dims>
+struct extents_size<extents<IndexType, Dims...>>
+{
+    static constexpr std::size_t value = (Dims * ... * 1);
+};
+
+template<typename T, typename Difference = std::ptrdiff_t>
+using constant_iterator = ::rocprim::constant_iterator<T, Difference>;
+
+template<typename T>
+using counting_iterator = ::rocprim::counting_iterator<T>;
+
+template<typename It, typename UnaryOp, typename ValueType = ::hipcub::detail::it_value_t<It>>
+using transform_iterator = ::rocprim::transform_iterator<It, UnaryOp, ValueType>;
+
+struct discard_iterator : public ::rocprim::discard_iterator
+{
+    using base_type         = ::rocprim::discard_iterator;
+    using value_type        = void;
+    using difference_type   = std::ptrdiff_t;
+    using iterator_category = std::random_access_iterator_tag;
+
+    using base_type::base_type;
+
+    discard_iterator(const ::rocprim::discard_iterator& other) : base_type(other) {}
+};
+
+using discard_output_iterator = discard_iterator;
+
+inline auto make_discard_iterator() -> discard_iterator
+{
+    return discard_iterator(::rocprim::make_discard_iterator());
+}
+
+#elif defined(__HIP_PLATFORM_NVIDIA__)
+
+template<typename IndexType, std::size_t... Dims>
+using extents = ::cuda::std::extents<IndexType, Dims...>;
+
+template<typename Extents>
+struct extents_size;
+
+template<typename IndexType, std::size_t... Dims>
+struct extents_size<extents<IndexType, Dims...>>
+{
+    static constexpr std::size_t value = (Dims * ... * 1);
+};
+
+template<typename T, typename Difference = std::ptrdiff_t>
+using constant_iterator = ::cub::ConstantInputIterator<T, Difference>;
+
+template<typename T>
+using counting_iterator = ::cub::CountingInputIterator<T>;
+
+template<typename It, typename UnaryOp, typename ValueType = ::hipcub::detail::it_value_t<It>>
+using transform_iterator = ::cub::TransformInputIterator<ValueType, UnaryOp, It>;
+
+template<typename T = void>
+using discard_iterator = ::cub::DiscardOutputIterator<T>;
+
+template<typename T = void>
+using discard_output_iterator = ::cub::DiscardOutputIterator<T>;
+
+template<typename T = std::size_t>
+inline auto make_discard_iterator() -> ::cub::DiscardOutputIterator<T>
+{
+    return ::cub::DiscardOutputIterator<T>();
+}
+
+#endif
 
 } // namespace test_utils
 
@@ -644,17 +726,17 @@ namespace std
 
         static constexpr inline T max()
         {
-            return std::numeric_limits<typename T::value_type>::max();
+            return _HIPCUB_STD::numeric_limits<typename T::value_type>::max();
         }
 
         static constexpr inline T min()
         {
-            return std::numeric_limits<typename T::value_type>::min();
+            return _HIPCUB_STD::numeric_limits<typename T::value_type>::min();
         }
 
         static constexpr inline T lowest()
         {
-            return std::numeric_limits<typename T::value_type>::lowest();
+            return _HIPCUB_STD::numeric_limits<typename T::value_type>::lowest();
         }
     };
 
@@ -667,17 +749,17 @@ namespace std
 
         static constexpr inline T max()
         {
-            return std::numeric_limits<typename T::value_type>::max();
+            return _HIPCUB_STD::numeric_limits<typename T::value_type>::max();
         }
 
         static constexpr inline T min()
         {
-            return std::numeric_limits<typename T::value_type>::min();
+            return _HIPCUB_STD::numeric_limits<typename T::value_type>::min();
         }
 
         static constexpr inline T lowest()
         {
-            return std::numeric_limits<typename T::value_type>::lowest();
+            return _HIPCUB_STD::numeric_limits<typename T::value_type>::lowest();
         }
     };
 }

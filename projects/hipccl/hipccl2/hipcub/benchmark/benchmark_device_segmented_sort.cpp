@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -46,8 +46,8 @@ void run_sort_keys_benchmark(benchmark::State& state,
                                      size_t&,
                                      const key_type*,
                                      key_type*,
-                                     int,
-                                     int,
+                                     int64_t,
+                                     int64_t,
                                      offset_type*,
                                      offset_type*,
                                      hipStream_t);
@@ -181,8 +181,8 @@ void run_sort_pairs_benchmark(benchmark::State& state,
                                      key_type*,
                                      const value_type*,
                                      value_type*,
-                                     int,
-                                     int,
+                                     int64_t,
+                                     int64_t,
                                      offset_type*,
                                      offset_type*,
                                      hipStream_t);

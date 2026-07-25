@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2020 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -24,7 +24,6 @@
 
 // HIP API
 #include <hipcub/block/block_reduce.hpp>
-#include <hipcub/thread/thread_operators.hpp>
 
 #ifndef DEFAULT_N
 const size_t DEFAULT_N = 1024 * 1024 * 32;
@@ -58,10 +57,10 @@ struct reduce
         using breduce_t = hipcub::BlockReduce<T, BlockSize, algorithm>;
         __shared__ typename breduce_t::TempStorage storage;
 
-#pragma nounroll
+        _CCCL_PRAGMA_NOUNROLL()
         for(unsigned int trial = 0; trial < Trials; trial++)
         {
-            reduced_value = breduce_t(storage).Reduce(values, hipcub::Sum());
+            reduced_value = breduce_t(storage).Reduce(values, benchmark_utils::plus{});
             values[0]     = reduced_value;
         }
 

@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -22,11 +22,9 @@
 
 #include <algorithm>
 #include <chrono>
-#include <cmath>
 #include <cstdlib>
 #include <functional>
 #include <iostream>
-#include <limits>
 #include <numeric>
 #include <random>
 #include <tuple>
@@ -42,6 +40,11 @@
 
 // HIP API
 #include <hip/hip_runtime.h>
+
+#include <hipcub/libcxx.hpp>
+
+#include _HIPCUB_LIBCXX_INCLUDE(cmath)
+#include _HIPCUB_STD_INCLUDE(limits)
 
 // benchmark_utils.hpp should only be included by this header.
 // The following definition is used as guard in benchmark_utils.hpp
