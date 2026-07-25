@@ -35,6 +35,7 @@
 #include <vector>
 
 #include "ck_tile/host/tensor_shuffle_utils.hpp"
+#include "ck_tile/host/permute_pk_int4.hpp"
 
 // Kernel header force-included via -include compiler flag.
 // Defines: ADataType, BDataType, CDataType, QDataType, AccDataType,
@@ -245,42 +246,105 @@ int dispatcher_run_bquant_gemm(const void* A,
         cleanup();
         return -1;
     }
-    if(hipMemcpy(B_dev, B_host, elements_to_bytes<BDataType>(K * N), hipMemcpyHostToDevice) !=
-       hipSuccess)
+    // Copy the B weight matrix to device. This mirrors Old-TE's host-side B prep
+    // in run_gemm_quant_example.inc:770-789 exactly:
+    //   1. For PreshuffleB kernels, pre-shuffle B into the interleaved layout the
+    //      WPQuantB pipeline reads:
+    //        * shuffle_b_permuteN<BShuffleConfig>(B) when TiledMMAPermuteN && kN==1
+    //        * shuffle_b<BShuffleConfig>(B)          otherwise
+    //      Without this the PreshuffleB kernels return garbage (max_rel ~67-69 for
+    //      fp8/bf8 preshuffleb on gfx950).
+    //   2. For pk_int4 B (fp8i4/bf8i4), permute_vectors_i4x4_b is applied
+    //      UNCONDITIONALLY (run_gemm_quant_example.inc:784-787) so the device
+    //      i4->fp8/bf8 conversion sees data in 0x75316420 order. Skipping it made
+    //      all fp8i4/bf8i4 phases wrong (NaN on random, zeros on constant).
     {
-        cleanup();
-        return -1;
-    }
-    // Apply BQ preshuffle when required -- mirrors run_gemm_quant_example.inc:816-820.
-    // BPreshuffleQuant reorders BQ in host memory before the device copy so the kernel
-    // finds the scale values in the interleaved layout it expects.
-    if constexpr(SelectedKernel::BPreshuffleQuant)
-    {
-        constexpr int block_bq_k =
-            static_cast<int>(SelectedKernel::TileK) / static_cast<int>(QuantGroupSize::kK);
-        // BQ is ColumnMajor [QK_B, QN_B] (leading dim QK_B) -- build the host
-        // tensor col-major so shuffle_bq sees the same layout the kernel expects.
-        ck_tile::HostTensor<QDataType> bq_h(
-            ck_tile::host_tensor_descriptor(static_cast<int>(QK_B),
-                                            static_cast<int>(QN_B),
-                                            static_cast<int>(QK_B),
+        // B is supplied ColumnMajor [K, N]; the shuffle/permute helpers index it
+        // as [K rows, N cols].
+        ck_tile::HostTensor<BDataType> b_k_n(
+            ck_tile::host_tensor_descriptor(static_cast<int>(K),
+                                            static_cast<int>(N),
+                                            static_cast<int>(K),
                                             ck_tile::bool_constant<false>{} /*col-major*/));
-        std::copy(BQ_host, BQ_host + QK_B * QN_B, bq_h.begin());
-        auto bq_shuffled = ck_tile::shuffle_bq(&bq_h, block_bq_k);
-        if(hipMemcpy(BQ_dev,
-                     bq_shuffled.data(),
-                     elements_to_bytes<QDataType>(QK_B * QN_B),
+        std::copy(B_host, B_host + K * N, b_k_n.begin());
+
+        ck_tile::HostTensor<BDataType> b_k_n_dev = b_k_n;
+        if constexpr(SelectedKernel::PreshuffleB)
+        {
+            constexpr bool use_permute_n =
+                SelectedKernel::TiledMMAPermuteN && (QuantGroupSize::kN == 1);
+            if constexpr(use_permute_n)
+                b_k_n_dev =
+                    ck_tile::shuffle_b_permuteN<typename SelectedKernel::BShuffleConfig>(b_k_n);
+            else
+                b_k_n_dev = ck_tile::shuffle_b<typename SelectedKernel::BShuffleConfig>(b_k_n);
+        }
+        // pk_int4 B is always permuted (Old-TE run_gemm_quant_example.inc:784-787).
+        if constexpr(std::is_same_v<BDataType, ck_tile::pk_int4_t>)
+        {
+            ck_tile::permute_vectors_i4x4_b(b_k_n_dev);
+        }
+
+        if(hipMemcpy(B_dev,
+                     b_k_n_dev.data(),
+                     elements_to_bytes<BDataType>(K * N),
                      hipMemcpyHostToDevice) != hipSuccess)
         {
             cleanup();
             return -1;
         }
     }
-    else
+    // Apply BQ preshuffle when required -- mirrors run_gemm_quant_example.inc:794-825
+    // exactly. There are three cases:
+    //   (a) PreshuffleB && TiledMMAPermuteN && kN==1: bq_permuteN the BQ scales
+    //       first, then shuffle_bq if BPreshuffleQuant (else use the permuted BQ).
+    //   (b) BPreshuffleQuant (no permuteN): shuffle_bq only.
+    //   (c) neither: plain copy.
+    // BQ is ColumnMajor [QK_B, QN_B] (leading dim QK_B) -- build every host tensor
+    // col-major so the shuffle/permute helpers see the layout the kernel expects.
     {
-        if(hipMemcpy(
-               BQ_dev, BQ_host, elements_to_bytes<QDataType>(QK_B * QN_B), hipMemcpyHostToDevice) !=
-           hipSuccess)
+        constexpr int block_bq_k =
+            static_cast<int>(SelectedKernel::TileK) / static_cast<int>(QuantGroupSize::kK);
+        constexpr bool use_permute_n = SelectedKernel::PreshuffleB &&
+                                       SelectedKernel::TiledMMAPermuteN &&
+                                       (QuantGroupSize::kN == 1);
+
+        ck_tile::HostTensor<QDataType> bq_h(
+            ck_tile::host_tensor_descriptor(static_cast<int>(QK_B),
+                                            static_cast<int>(QN_B),
+                                            static_cast<int>(QK_B),
+                                            ck_tile::bool_constant<false>{} /*col-major*/));
+        std::copy(BQ_host, BQ_host + QK_B * QN_B, bq_h.begin());
+
+        // HostTensor has a deleted default constructor, so each branch owns its
+        // result and copies within scope (mirrors Old-TE's per-branch ToDevice).
+        const std::size_t bq_bytes = elements_to_bytes<QDataType>(QK_B * QN_B);
+        hipError_t copy_rc         = hipSuccess;
+        if constexpr(use_permute_n)
+        {
+            auto bq_permuted = ck_tile::bq_permuteN<typename SelectedKernel::BShuffleConfig>(
+                bq_h, static_cast<ck_tile::index_t>(QuantGroupSize::kN));
+            if constexpr(SelectedKernel::BPreshuffleQuant)
+            {
+                auto bq_shuffled = ck_tile::shuffle_bq(&bq_permuted, block_bq_k);
+                copy_rc = hipMemcpy(BQ_dev, bq_shuffled.data(), bq_bytes, hipMemcpyHostToDevice);
+            }
+            else
+            {
+                copy_rc = hipMemcpy(BQ_dev, bq_permuted.data(), bq_bytes, hipMemcpyHostToDevice);
+            }
+        }
+        else if constexpr(SelectedKernel::BPreshuffleQuant)
+        {
+            auto bq_shuffled = ck_tile::shuffle_bq(&bq_h, block_bq_k);
+            copy_rc = hipMemcpy(BQ_dev, bq_shuffled.data(), bq_bytes, hipMemcpyHostToDevice);
+        }
+        else
+        {
+            copy_rc = hipMemcpy(BQ_dev, bq_h.data(), bq_bytes, hipMemcpyHostToDevice);
+        }
+
+        if(copy_rc != hipSuccess)
         {
             cleanup();
             return -1;

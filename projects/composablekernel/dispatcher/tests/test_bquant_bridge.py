@@ -11,7 +11,9 @@ fp8/bf8/fp8i4/bf8i4 + MX(bf16bf16/bf16bf8/bf16fp4) scope with preshuffleB / pres
 families that Old-TE gemm_bquant_quantgrouped*.cpp register. No GPU / hipcc.
 """
 
+import re
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -24,11 +26,15 @@ from gemm_bquant_utils import (  # noqa: E402
     BQuantGemmProblem,
     _MX_VARIANTS,
     _require_mx_arch,
+    _generate_bquant_kernel,
     default_fp8_config,
     default_bf8_config,
     default_fp8i4_config,
     default_bf8i4_config,
     default_fp8_preshuffleb_config,
+    default_bf8_preshuffleb_config,
+    default_fp8i4_preshuffleb_config,
+    default_bf8i4_preshuffleb_config,
     default_fp8_preshufflequant_config,
     default_fp8_preshuffleb_bquant_config,
     default_mx_bf16bf16_config,
@@ -37,6 +43,26 @@ from gemm_bquant_utils import (  # noqa: E402
     setup_multiple_bquant_dispatchers,
 )
 from codegen_common import make_bquant_kernel_name  # noqa: E402
+
+# The ctypes lib source (checked for the B-matrix shuffle / pk_int4 permute steps,
+# no GPU needed).
+_CTYPES_SRC = (
+    _DISP / "bindings" / "ctypes" / "gemm_bquant_ctypes_lib.cpp"
+).read_text()
+
+
+def _header_text(cfg):
+    """Codegen the header for a config and return its text (no hipcc)."""
+    tmp = Path(tempfile.mkdtemp(prefix="bq_test_"))
+    hpp = _generate_bquant_kernel(cfg, tmp)
+    assert hpp is not None, f"codegen failed for {cfg.name}"
+    return hpp.read_text()
+
+
+def _static_bool(text, field):
+    m = re.search(rf"bool\s+{field}\s*=\s*(\w+)", text)
+    assert m, f"{field} not found in generated header"
+    return m.group(1) == "true"
 
 _BASE = [default_fp8_config, default_bf8_config, default_fp8i4_config, default_bf8i4_config]
 _MX = [default_mx_bf16bf16_config, default_mx_bf16bf8_config, default_mx_bf16fp4_config]
@@ -161,6 +187,106 @@ class TestSplitKTrap(unittest.TestCase):
         prob = BQuantGemmProblem(M=16, N=64, K=256, k_batch=2)
         with self.assertRaises(ValueError):
             runner.run(A=None, B=None, BQ=None, problem=prob)
+
+
+class TestPreshuffleBMatrixShuffle(unittest.TestCase):
+    """Round-3 BUG #1: PreshuffleB kernels must pre-shuffle the B WEIGHT matrix
+    (Old-TE shuffle_b / shuffle_b_permuteN, run_gemm_quant_example.inc:770-789).
+    Previously the ctypes lib only plain-copied B, so fp8/bf8 preshuffleb (+pq)
+    returned garbage (max_rel ~67-69 on gfx950). The bq_permuteN path for the BQ
+    scales (inc:799-815) must be applied too."""
+
+    def test_ctypes_lib_has_b_matrix_shuffle_step(self):
+        # The ctypes lib must call shuffle_b / shuffle_b_permuteN on B for
+        # PreshuffleB kernels, gated by SelectedKernel::PreshuffleB.
+        self.assertIn("SelectedKernel::PreshuffleB", _CTYPES_SRC)
+        self.assertIn("shuffle_b<typename SelectedKernel::BShuffleConfig>", _CTYPES_SRC)
+        self.assertIn(
+            "shuffle_b_permuteN<typename SelectedKernel::BShuffleConfig>", _CTYPES_SRC
+        )
+        # permute_n variant is selected exactly when TiledMMAPermuteN && kN==1.
+        self.assertIn("SelectedKernel::TiledMMAPermuteN", _CTYPES_SRC)
+        self.assertIn("QuantGroupSize::kN == 1", _CTYPES_SRC)
+        # The BQ scales must also be bq_permuteN'd for the permuteN case.
+        self.assertIn("bq_permuteN<typename SelectedKernel::BShuffleConfig>", _CTYPES_SRC)
+
+    def test_preshuffleb_headers_expose_bshuffle_config(self):
+        preshuffleb_ctors = [
+            default_fp8_preshuffleb_config,
+            default_bf8_preshuffleb_config,
+            default_fp8i4_preshuffleb_config,
+            default_bf8i4_preshuffleb_config,
+            default_fp8_preshuffleb_bquant_config,
+        ]
+        for ctor in preshuffleb_ctors:
+            cfg = ctor()
+            self.assertTrue(cfg.preshuffle_b, cfg.name)
+            text = _header_text(cfg)
+            self.assertTrue(_static_bool(text, "PreshuffleB"), cfg.name)
+            self.assertIn("struct BShuffleConfig", text, cfg.name)
+            # BShuffleConfig must expose the member names shuffle_b expects.
+            for member in ("N_Tile", "N_Warp", "N_Warp_Tile", "K_Warp_Tile"):
+                self.assertIn(member, text, f"{member} missing in {cfg.name}")
+            # preshuffleb default (tile_n=128, warp_n=4, warp_tile_n=16):
+            # N_Repeat = 128/16/4 = 2 -> TiledMMAPermuteN true.
+            self.assertTrue(_static_bool(text, "TiledMMAPermuteN"), cfg.name)
+
+    def test_non_preshuffleb_kernels_have_no_b_shuffle(self):
+        # Non-preshuffleB kernels must NOT pre-shuffle B (PreshuffleB=false,
+        # TiledMMAPermuteN=false).
+        for ctor in (default_fp8_config, default_bf8_config, default_fp8i4_config,
+                     default_bf8i4_config, default_fp8_preshufflequant_config,
+                     default_mx_bf16bf16_config):
+            cfg = ctor()
+            self.assertFalse(cfg.preshuffle_b, cfg.name)
+            text = _header_text(cfg)
+            self.assertFalse(_static_bool(text, "PreshuffleB"), cfg.name)
+            self.assertFalse(_static_bool(text, "TiledMMAPermuteN"), cfg.name)
+
+
+class TestPkInt4Permute(unittest.TestCase):
+    """Round-3 BUG #2: pk_int4 B (fp8i4 / bf8i4) must be permuted with
+    permute_vectors_i4x4_b UNCONDITIONALLY before the device copy, exactly as
+    Old-TE does (run_gemm_quant_example.inc:784-787). Without it fp8i4/bf8i4 were
+    broken in all phases (NaN on random, all-zeros on constant)."""
+
+    def test_ctypes_lib_permutes_pk_int4_b(self):
+        self.assertIn("permute_vectors_i4x4_b", _CTYPES_SRC)
+        # Applied for pk_int4 B specifically.
+        self.assertIn("std::is_same_v<BDataType, ck_tile::pk_int4_t>", _CTYPES_SRC)
+        # The permute helper header must be included.
+        self.assertIn("ck_tile/host/permute_pk_int4.hpp", _CTYPES_SRC)
+
+    def test_i4_variants_use_pk_int4_bdatatype(self):
+        for ctor in (default_fp8i4_config, default_bf8i4_config,
+                     default_fp8i4_preshuffleb_config, default_bf8i4_preshuffleb_config):
+            cfg = ctor()
+            text = _header_text(cfg)
+            self.assertIn("using BDataType   = ck_tile::pk_int4_t", text, cfg.name)
+
+
+class TestBCastPolicy(unittest.TestCase):
+    """Round-3 BUG #3: mx_bf16bf16 (and every A==B kernel) must compile the same
+    pipeline Old-TE uses. Old-TE (run_gemm_quant_example.inc:117-120) sets
+    b_cast_policy = (A==B) ? BeforeLDSWrite : AfterLDSRead. The bridge previously
+    left the GemmBQuantPipelineProblem BCastPolicy_ arg at its AfterLDSRead default
+    for every kernel, so mx_bf16bf16 built a slower pipeline (~43% off on gfx950)."""
+
+    def test_same_dtype_kernels_use_before_lds_write(self):
+        # A == B: fp8/fp8, bf8/bf8, mx bf16/bf16.
+        for ctor in (default_fp8_config, default_bf8_config, default_mx_bf16bf16_config):
+            text = _header_text(ctor())
+            self.assertIn("ck_tile::CastPolicy::BeforeLDSWrite", text, ctor().name)
+            self.assertNotIn("ck_tile::CastPolicy::AfterLDSRead", text, ctor().name)
+
+    def test_mixed_dtype_kernels_use_after_lds_read(self):
+        # A != B: fp8i4 (fp8/pk_int4), bf8i4, mx_bf16bf8 (bf16/bf8),
+        # mx_bf16fp4 (bf16/pk_fp4).
+        for ctor in (default_fp8i4_config, default_bf8i4_config,
+                     default_mx_bf16bf8_config, default_mx_bf16fp4_config):
+            text = _header_text(ctor())
+            self.assertIn("ck_tile::CastPolicy::AfterLDSRead", text, ctor().name)
+            self.assertNotIn("ck_tile::CastPolicy::BeforeLDSWrite", text, ctor().name)
 
 
 if __name__ == "__main__":

@@ -294,6 +294,33 @@ class BQuantKernelHeaderGenerator:
         preshuffle_bquant = str(spec.preshuffle_bquant).lower()
         double_smem_buffer = str(spec.double_smem_buffer).lower()
 
+        # GemmConfig::TiledMMAPermuteN drives whether the B weight matrix is
+        # pre-shuffled via shuffle_b_permuteN (permute_n) or plain shuffle_b, and
+        # whether the BQ scale tensor is bq_permuteN'd. Only the PreshuffleB configs
+        # override the GemmConfigBase default (false) to (N_Repeat % 2 == 0); every
+        # other config inherits false. Mirrors GemmConfigPreshuffleB_BQuant_Prefill
+        # (gemm_utils.hpp:214-215) and run_gemm_quant_example.inc:773,799-800 (which
+        # select the permuteN path when TiledMMAPermuteN && BQuantGroupSize::kN == 1).
+        n_repeat = (
+            t.tile_n // (t.warp_n * t.warp_tile_n) if (t.warp_n * t.warp_tile_n) else 0
+        )
+        tiled_mma_permute_n = spec.preshuffle_b and (n_repeat % 2 == 0)
+        tiled_mma_permute_n_str = str(tiled_mma_permute_n).lower()
+
+        # BCastPolicy: Old-TE (run_gemm_quant_example.inc:117-120) selects
+        #   b_cast_policy = (ADataType == BDataType) ? BeforeLDSWrite : AfterLDSRead
+        # The GemmBQuantPipelineProblem BCastPolicy_ template arg defaults to
+        # AfterLDSRead, so kernels where A and B share a dtype (fp8/fp8, bf8/bf8,
+        # mx bf16/bf16) MUST override to BeforeLDSWrite -- otherwise the bridge
+        # compiles a different, slower pipeline than Old-TE (mx_bf16bf16 was ~43%
+        # off on gfx950). fp8i4/bf8i4/mx_bf16bf8/mx_bf16fp4 (A != B) keep AfterLDSRead.
+        b_cast_before_lds = ck_a == ck_b
+        b_cast_policy_ck = (
+            "ck_tile::CastPolicy::BeforeLDSWrite"
+            if b_cast_before_lds
+            else "ck_tile::CastPolicy::AfterLDSRead"
+        )
+
         # Determine which epilogue the kernel will use, mirroring run_gemm_quant_example.inc.
         # Delegates to bquant_effective_epilogue (same logic used by make_bquant_kernel_name)
         # so the generated C++ and the kernel name always agree.
@@ -401,6 +428,10 @@ struct {struct} {{
     static constexpr bool PreshuffleB     = {preshuffle_b};
     static constexpr bool TransposeC      = false;
     static constexpr bool DoubleSmemBuffer = {double_smem_buffer};
+    // TiledMMAPermuteN: selects shuffle_b_permuteN + bq_permuteN vs plain shuffle_b
+    // for the B weight matrix / BQ scale tensor (see gemm_bquant_ctypes_lib.cpp).
+    // Mirrors GemmConfigPreshuffleB_BQuant_Prefill (gemm_utils.hpp:214-215).
+    static constexpr bool TiledMMAPermuteN = {tiled_mma_permute_n_str};
 
     using TileShape = ck_tile::TileGemmShape<
         ck_tile::sequence<TileM, TileN, TileK>,
@@ -408,6 +439,18 @@ struct {struct} {{
         ck_tile::sequence<WarpTileM, WarpTileN, WarpTileK>>;
 
     using TilePartitioner = ck_tile::GemmTile1DPartitioner<TileShape>;
+
+    // Config exposing the member names ck_tile::shuffle_b / shuffle_b_permuteN /
+    // bq_permuteN expect (N_Tile, N_Warp, N_Warp_Tile, K_Warp_Tile). Used by the
+    // ctypes lib to pre-shuffle the B weight matrix and BQ scales for PreshuffleB
+    // kernels, matching Old-TE's host-side shuffle in
+    // run_gemm_quant_example.inc:770-789 and the bq_permuteN at :799-815.
+    struct BShuffleConfig {{
+        static constexpr ck_tile::index_t N_Tile      = TileN;
+        static constexpr ck_tile::index_t N_Warp      = WarpN;
+        static constexpr ck_tile::index_t N_Warp_Tile = WarpTileN;
+        static constexpr ck_tile::index_t K_Warp_Tile = WarpTileK;
+    }};
 
     using GemmTraits = ck_tile::TileGemmQuantTraits<
         kPadM, kPadN, kPadK,
@@ -447,7 +490,8 @@ struct {struct} {{
                 ADataType,        // ComputeDataType
                 {scheduler_ck},
                 has_hot_loop_.value,
-                tail_number_.value>;
+                tail_number_.value,
+                {b_cast_policy_ck}>;  // BCastPolicy -- Old-TE: A==B ? BeforeLDSWrite : AfterLDSRead
 
             using GemmPipeline = {pipeline_ck}<PipelineProblem>;
 
