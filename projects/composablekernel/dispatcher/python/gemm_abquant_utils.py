@@ -473,21 +473,13 @@ class ABQuantGpuGemmRunner:
                 f"for kernel {self.kernel_name}"
             )
 
-        # permute_n epilogue writes C with N-columns riffled into r groups
-        # (r = tile_n / warp_tile_n / warp_n). Undo it so the caller gets logical C.
-        _name = self.kernel_name
-        if 'permute_n' in _name:
-            import re as _re
-            _m = _re.search(r'_(\d+)x(\d+)x(\d+)_(\d+)x(\d+)x(\d+)_(\d+)x(\d+)x(\d+)_', _name)
-            if _m:
-                _tile_n = int(_m.group(2)); _warp_n = int(_m.group(5)); _wt_n = int(_m.group(8))
-                _r = _tile_n // _wt_n // _warp_n
-                if _r > 1 and (N % _r) == 0:
-                    _half = N // _r
-                    _logical = [(c % _r) * _half + (c // _r) for c in range(N)]
-                    _Cp = np.empty_like(C)
-                    _Cp[:, _logical] = C
-                    C = _Cp
+        # NOTE: no post-hoc permute_n de-permute here. Round-4's bq_permuteN fix
+        # makes the kernel/ctypes epilogue write C directly in correct logical
+        # column order for permute_n kernels, so the ctypes output is already
+        # right. The former wrapper-side de-permute (undoing an r-group riffle)
+        # was a workaround for the pre-fix scrambled output; applying it now
+        # would double-correct and scramble C. Pass the ctypes output through
+        # unchanged for every kernel (permute_n and non-permute_n alike).
         return ABQuantGemmResult(C=C, time_ms=time_ms, kernel_name=self.kernel_name)
 
 

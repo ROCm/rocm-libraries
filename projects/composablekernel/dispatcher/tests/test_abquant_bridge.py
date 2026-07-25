@@ -278,6 +278,38 @@ class TestBqPermuteNForPermuteNKernels(unittest.TestCase):
         self.assertIn("permute_n", cfg.name, cfg.name)
 
 
+class TestRunnerNoPostHocPermuteN(unittest.TestCase):
+    """Round-5 FIX: now that round-4's bq_permuteN makes the kernel/ctypes
+    epilogue write C in correct logical column order for permute_n kernels,
+    ABQuantGpuGemmRunner.run() must NOT apply an extra post-hoc permute_n
+    de-permute on C. The old wrapper-side r-group riffle undo double-corrected
+    the (already-correct) ctypes output and scrambled 4/256 columns for
+    permute_n kernels. run() must now pass the ctypes output through unchanged."""
+
+    def test_runner_has_no_post_hoc_c_permute(self):
+        runner_src = (_DISP / "python" / "gemm_abquant_utils.py").read_text()
+        # The obsolete de-permute built a reindexed copy of C via an r-group
+        # riffle; none of that machinery may remain in the runner.
+        self.assertNotIn("_Cp[:, _logical] = C", runner_src)
+        self.assertNotIn("np.empty_like(C)", runner_src)
+        self.assertNotIn("_logical", runner_src)
+        self.assertNotIn("(c % _r) * _half", runner_src)
+
+    def test_runner_returns_ctypes_c_unchanged(self):
+        # run() must return the same C object it handed to the ctypes lib --
+        # no reassignment of C between the ctypes call and the return.
+        import inspect
+        from gemm_abquant_utils import ABQuantGpuGemmRunner
+
+        src = inspect.getsource(ABQuantGpuGemmRunner.run)
+        # Grab the tail from the ctypes self._lib.run(...) call to the return.
+        after = src[src.index("self._lib.run("):]
+        # No re-binding of C (e.g. "C = _Cp" / "C = np...") after the kernel runs.
+        self.assertNotRegex(after, r"\n\s*C\s*=\s")
+        # And it still returns C in the result.
+        self.assertIn("ABQuantGemmResult(C=C", after)
+
+
 class TestFp4PreshuffleBReject(unittest.TestCase):
     """Round-4 SHOULD-FIX: fp4 + PreshuffleB is unsupported. Old-TE THROWS
     ("Preshuffling weight matrix is not supported for ... bf16_fp4_gemm",
