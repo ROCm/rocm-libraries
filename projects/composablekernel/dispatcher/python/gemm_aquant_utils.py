@@ -741,10 +741,34 @@ def expand_aquant_sweep(
 # Convenience: default configs (match GemmConfigQuantDecodeInterwave tile defaults)
 #
 # tile = 16x64x256, warp = 1x4x1, warp_tile = 16x16x{K_warp}
-#   fp8/bf8 : get_k_warp_tile<PrecType, 16>() on gfx950 = 128 -> warp_tile_k=128
-#   fp8i4/bf8i4: PrecType is the 8-bit float weight -> warp_tile_k=128 as well
-#                (A being pk_int4 does not change the weight-driven K warp tile)
+# warp_tile_k is ARCH-DERIVED (never hardcoded); see _warp_tile_k_for below.
 # =============================================================================
+
+
+def _warp_tile_k_for(gfx_arch: str, preshuffle_aquant: bool = False) -> int:
+    """Arch-derived K warp-tile, mirroring ck_tile::get_k_warp_tile<PrecType, 16, IsFlatMM>().
+
+    (tile_gemm_shape.hpp:104-136, M_Warp_Tile=16, non-WMMA path.)  For AQuant every
+    variant -- fp8, bf8, fp8i4, bf8i4 -- instantiates the GEMM config with an 8-bit
+    float PrecType (fp8_t or bf8_t; the pk_int4 A operand does not drive the K warp
+    tile -- see gemm_aquant_quantgrouped{,_preshufflequant}.cpp GemmConfig<fp8/bf8_t>).
+    So is_8bit_float is always True and warp_tile_k depends only on the arch and the
+    pipeline (decode = IsFlatMM false, preshufflequant = IsFlatMM true):
+
+      gfx950 (CK_GFX950_SUPPORT): 128   (both decode and preshufflequant)
+      gfx942/other, decode  (IsFlatMM=false): 32
+      gfx942/other, preshuf (IsFlatMM=true) : 64
+
+    This is a BLOCKING correctness constraint, not just a naming detail: a
+    warp_tile_k=128 fp8/bf8 kernel *compiles* on gfx942 but silently produces
+    all-zeros output (GPU-confirmed on gfx942 MI300X for this bridge, and earlier
+    on the sibling tensor_quant/rowcolquant bridges).  Old-TE uses 16x16x32 on
+    gfx942 for decode and is bit-exact there with warp_tile_k=32.
+    """
+    if "gfx950" in gfx_arch:
+        return 128
+    # gfx942 / gfx90a / other: 8-bit-float PrecType, M_Warp_Tile=16 non-WMMA path.
+    return 64 if preshuffle_aquant else 32
 
 
 def _decode_config(
@@ -772,29 +796,52 @@ def _decode_config(
 
 def default_fp8_config(quant_group_k: int = 128, quant_group_n: int = 1,
                        layout: str = "rcr", gfx_arch: str = "gfx950",
-                       warp_tile_k: int = 128) -> AQuantKernelConfig:
-    """Default fp8 AQuant decode config (GemmConfigQuantDecodeInterwave<fp8_t>)."""
+                       warp_tile_k: Optional[int] = None) -> AQuantKernelConfig:
+    """Default fp8 AQuant decode config (GemmConfigQuantDecodeInterwave<fp8_t>).
+
+    warp_tile_k is arch-derived (get_k_warp_tile<fp8_t, 16>()): 128 on gfx950,
+    32 on gfx942 (128 silently outputs all-zeros on gfx942).
+    """
+    if warp_tile_k is None:
+        warp_tile_k = _warp_tile_k_for(gfx_arch, preshuffle_aquant=False)
     return _decode_config("fp8", warp_tile_k, quant_group_k, quant_group_n, layout, gfx_arch)
 
 
 def default_bf8_config(quant_group_k: int = 128, quant_group_n: int = 1,
                        layout: str = "rcr", gfx_arch: str = "gfx950",
-                       warp_tile_k: int = 128) -> AQuantKernelConfig:
-    """Default bf8 AQuant decode config (GemmConfigQuantDecodeInterwave<bf8_t>)."""
+                       warp_tile_k: Optional[int] = None) -> AQuantKernelConfig:
+    """Default bf8 AQuant decode config (GemmConfigQuantDecodeInterwave<bf8_t>).
+
+    warp_tile_k is arch-derived: 128 on gfx950, 32 on gfx942.
+    """
+    if warp_tile_k is None:
+        warp_tile_k = _warp_tile_k_for(gfx_arch, preshuffle_aquant=False)
     return _decode_config("bf8", warp_tile_k, quant_group_k, quant_group_n, layout, gfx_arch)
 
 
 def default_fp8i4_config(quant_group_k: int = 128, quant_group_n: int = 1,
                          layout: str = "rcr", gfx_arch: str = "gfx950",
-                         warp_tile_k: int = 128) -> AQuantKernelConfig:
-    """Default fp8i4 AQuant decode config (A=pk_int4, B=fp8, Q=fp8)."""
+                         warp_tile_k: Optional[int] = None) -> AQuantKernelConfig:
+    """Default fp8i4 AQuant decode config (A=pk_int4, B=fp8, Q=fp8).
+
+    PrecType is fp8_t (GemmConfig<fp8_t>), so warp_tile_k is arch-derived like fp8:
+    128 on gfx950, 32 on gfx942.
+    """
+    if warp_tile_k is None:
+        warp_tile_k = _warp_tile_k_for(gfx_arch, preshuffle_aquant=False)
     return _decode_config("fp8i4", warp_tile_k, quant_group_k, quant_group_n, layout, gfx_arch)
 
 
 def default_bf8i4_config(quant_group_k: int = 128, quant_group_n: int = 1,
                          layout: str = "rcr", gfx_arch: str = "gfx950",
-                         warp_tile_k: int = 128) -> AQuantKernelConfig:
-    """Default bf8i4 AQuant decode config (A=pk_int4, B=bf8, Q=bf8)."""
+                         warp_tile_k: Optional[int] = None) -> AQuantKernelConfig:
+    """Default bf8i4 AQuant decode config (A=pk_int4, B=bf8, Q=bf8).
+
+    PrecType is bf8_t (GemmConfig<bf8_t>), so warp_tile_k is arch-derived like bf8:
+    128 on gfx950, 32 on gfx942.
+    """
+    if warp_tile_k is None:
+        warp_tile_k = _warp_tile_k_for(gfx_arch, preshuffle_aquant=False)
     return _decode_config("bf8i4", warp_tile_k, quant_group_k, quant_group_n, layout, gfx_arch)
 
 
@@ -824,8 +871,14 @@ def _preshufflequant_config(
 def default_fp8_preshufflequant_config(quant_group_k: int = 128, quant_group_n: int = 1,
                                        layout: str = "rcr",
                                        gfx_arch: str = "gfx950",
-                                       warp_tile_k: int = 128) -> AQuantKernelConfig:
-    """fp8 AQuant preshufflequant config (GemmConfigPreshuffleQuantDecode<fp8_t>)."""
+                                       warp_tile_k: Optional[int] = None) -> AQuantKernelConfig:
+    """fp8 AQuant preshufflequant config (GemmConfigPreshuffleQuantDecode<fp8_t>).
+
+    warp_tile_k is arch-derived (get_k_warp_tile<fp8_t, 16, IsFlatMM=true>()):
+    128 on gfx950, 64 on gfx942.
+    """
+    if warp_tile_k is None:
+        warp_tile_k = _warp_tile_k_for(gfx_arch, preshuffle_aquant=True)
     return _preshufflequant_config("fp8", warp_tile_k, quant_group_k, quant_group_n,
                                    layout, gfx_arch)
 
@@ -833,8 +886,13 @@ def default_fp8_preshufflequant_config(quant_group_k: int = 128, quant_group_n: 
 def default_bf8_preshufflequant_config(quant_group_k: int = 128, quant_group_n: int = 1,
                                        layout: str = "rcr",
                                        gfx_arch: str = "gfx950",
-                                       warp_tile_k: int = 128) -> AQuantKernelConfig:
-    """bf8 AQuant preshufflequant config (GemmConfigPreshuffleQuantDecode<bf8_t>)."""
+                                       warp_tile_k: Optional[int] = None) -> AQuantKernelConfig:
+    """bf8 AQuant preshufflequant config (GemmConfigPreshuffleQuantDecode<bf8_t>).
+
+    warp_tile_k is arch-derived: 128 on gfx950, 64 on gfx942.
+    """
+    if warp_tile_k is None:
+        warp_tile_k = _warp_tile_k_for(gfx_arch, preshuffle_aquant=True)
     return _preshufflequant_config("bf8", warp_tile_k, quant_group_k, quant_group_n,
                                    layout, gfx_arch)
 
@@ -842,8 +900,13 @@ def default_bf8_preshufflequant_config(quant_group_k: int = 128, quant_group_n: 
 def default_fp8i4_preshufflequant_config(quant_group_k: int = 128, quant_group_n: int = 1,
                                          layout: str = "rcr",
                                          gfx_arch: str = "gfx950",
-                                         warp_tile_k: int = 128) -> AQuantKernelConfig:
-    """fp8i4 AQuant preshufflequant config (A=pk_int4, B=fp8, Q=fp8)."""
+                                         warp_tile_k: Optional[int] = None) -> AQuantKernelConfig:
+    """fp8i4 AQuant preshufflequant config (A=pk_int4, B=fp8, Q=fp8).
+
+    PrecType is fp8_t, so warp_tile_k is arch-derived: 128 on gfx950, 64 on gfx942.
+    """
+    if warp_tile_k is None:
+        warp_tile_k = _warp_tile_k_for(gfx_arch, preshuffle_aquant=True)
     return _preshufflequant_config("fp8i4", warp_tile_k, quant_group_k, quant_group_n,
                                    layout, gfx_arch)
 
@@ -851,7 +914,12 @@ def default_fp8i4_preshufflequant_config(quant_group_k: int = 128, quant_group_n
 def default_bf8i4_preshufflequant_config(quant_group_k: int = 128, quant_group_n: int = 1,
                                          layout: str = "rcr",
                                          gfx_arch: str = "gfx950",
-                                         warp_tile_k: int = 128) -> AQuantKernelConfig:
-    """bf8i4 AQuant preshufflequant config (A=pk_int4, B=bf8, Q=bf8)."""
+                                         warp_tile_k: Optional[int] = None) -> AQuantKernelConfig:
+    """bf8i4 AQuant preshufflequant config (A=pk_int4, B=bf8, Q=bf8).
+
+    PrecType is bf8_t, so warp_tile_k is arch-derived: 128 on gfx950, 64 on gfx942.
+    """
+    if warp_tile_k is None:
+        warp_tile_k = _warp_tile_k_for(gfx_arch, preshuffle_aquant=True)
     return _preshufflequant_config("bf8i4", warp_tile_k, quant_group_k, quant_group_n,
                                    layout, gfx_arch)

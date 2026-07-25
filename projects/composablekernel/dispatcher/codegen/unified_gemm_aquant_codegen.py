@@ -438,10 +438,31 @@ def _k_tile_for(variant_key: str) -> int:
     return 256 // AQUANT_VARIANTS[variant_key]["prec_bytes"]
 
 
-def _default_config() -> dict:
+def _warp_tile_k_for_arch(gfx_arch: str, preshuffle_aquant: bool = False) -> int:
+    """Arch-derived WarpTileK for AQuant with M_Warp_Tile=16.
+
+    Every AQuant variant (fp8, bf8, fp8i4, bf8i4) instantiates the GEMM config with
+    an 8-bit float PrecType (fp8_t/bf8_t; the pk_int4 A operand does not drive the K
+    warp tile -- see gemm_aquant_quantgrouped{,_preshufflequant}.cpp GemmConfig<fp8/bf8_t>).
+    Mirrors ck_tile::get_k_warp_tile<fp8_t/bf8_t, M_Warp_Tile=16, IsFlatMM>()
+    (include/ck_tile/ops/gemm/pipeline/tile_gemm_shape.hpp):
+      gfx950                         -> 128 (decode and preshufflequant)
+      gfx942/other, decode           ->  32
+      gfx942/other, preshufflequant  ->  64
+    Using 128 on gfx942 compiles but produces all-zeros output (no valid 16x16x128
+    fp8/bf8 warp-gemm on gfx942).
+    """
+    if "gfx950" in gfx_arch:
+        return 128
+    return 64 if preshuffle_aquant else 32
+
+
+def _default_config(gfx_arch: str = "gfx950") -> dict:
     """Default sweep config matching GemmConfigQuantDecodeInterwave tile defaults.
 
     Non-preshufflequant decode kernels for every dtype x layout Old-TE supports.
+    WarpTileK is arch-derived (get_k_warp_tile<fp8/bf8_t, 16>() = 128 on gfx950,
+    32 on gfx942 for the decode path).
     """
     return {
         "variant_keys": ["fp8", "bf8", "fp8i4", "bf8i4"],
@@ -449,10 +470,10 @@ def _default_config() -> dict:
         "scheduler": "interwave",
         "tile_configs": [
             # GemmConfigQuantDecodeInterwave: M=16, N=64, K=256/sizeof(PrecType)=256
-            # WarpTileK=128: get_k_warp_tile<fp8_t, M_Warp_Tile=16>() on gfx950 = 128
             {"tile_m": 16, "tile_n": 64, "tile_k": 256,
              "warp_m": 1, "warp_n": 4, "warp_k": 1,
-             "warp_tile_m": 16, "warp_tile_n": 16, "warp_tile_k": 128},
+             "warp_tile_m": 16, "warp_tile_n": 16,
+             "warp_tile_k": _warp_tile_k_for_arch(gfx_arch, preshuffle_aquant=False)},
         ],
         "quant_groups": [
             {"quant_group_m": 1, "quant_group_n": 1, "quant_group_k": 128},
@@ -604,6 +625,10 @@ def main() -> int:
                         help="Inline JSON config string")
     parser.add_argument("--no-parallel", action="store_true",
                         help="Disable parallel generation")
+    parser.add_argument("--gfx-arch", type=str, default="gfx950",
+                        help="Target GPU arch for the built-in default sweep's "
+                             "arch-derived WarpTileK (128 on gfx950, 32/64 on gfx942). "
+                             "Ignored when --config/--config-json is given.")
     parser.add_argument("--list-names", action="store_true",
                         help="Print kernel names that would be generated and exit")
     args = parser.parse_args()
@@ -620,7 +645,7 @@ def main() -> int:
             cfg = json.load(f)
 
     if args.list_names:
-        specs = _build_specs(cfg or _default_config())
+        specs = _build_specs(cfg or _default_config(args.gfx_arch))
         for s in specs:
             print(s.name)
         return 0
