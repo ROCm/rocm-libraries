@@ -41,6 +41,35 @@ ROCSOLVER_BEGIN_NAMESPACE
 
 static bool constexpr use_sygs2_hegs2_alt = true;
 
+static inline int get_max_blocks()
+{
+    int const max_blocks_default = 64;
+
+    int deviceId = 0;
+    {
+        auto const istat = hipGetDevice(&deviceId);
+        if(istat != hipSuccess)
+        {
+            return (max_blocks_default);
+        }
+    }
+
+    hipDeviceProp_t prop;
+    {
+        auto const istat = hipGetDeviceProperties(&prop, deviceId);
+        if(istat != hipSuccess)
+        {
+            return (max_blocks_default);
+        }
+    }
+
+    auto const totalCUs = prop.multiProcessorCount;
+
+    auto const max_blocks = 4 * totalCUs;
+
+    return (max_blocks);
+}
+
 // ----------------------------------------------------------
 // kernel to symmetrize matrix and
 // copy the strictly lower or strictly upper triangular part
@@ -147,7 +176,7 @@ static void copy_symm_tri(rocblas_handle handle,
 
     I const nx = 64;
     I const ny = 4;
-    I const max_blocks = 1024;
+    I const max_blocks = get_max_blocks();
     I const nbx = std::min(max_blocks, ceildiv(n, nx));
     I const nby = std::min(max_blocks, ceildiv(n, ny));
     I const nbz = std::min(max_blocks, batch_count);
@@ -291,7 +320,9 @@ void rocsolver_sygst_hegst_getMemorySize(const rocblas_fill uplo,
         // NOTE: assume xxGST_BLOCKSIZE is a power of 2
         // to maintain alignment
         // ----------------------------------------
-        size_t const size_Asave = (sizeof(T) * nn * (nn - 1) / 2) * batch_count;
+        I const max_blocks = get_max_blocks();
+        I const lbatch_count = std::min(max_blocks, batch_count);
+        size_t const size_Asave = (sizeof(T) * nn * (nn - 1) / 2) * lbatch_count;
         *size_work_x_temp += size_Asave;
     }
 }
@@ -555,7 +586,9 @@ rocblas_status rocsolver_sygst_hegst_template(rocblas_handle handle,
                   // ------------------------------------------
                   // note use nb to maintain alignment in temp1
                   // ------------------------------------------
-                  size_t const len_Asave = size_t(batch_count) * nb * (nb - 1) / 2;
+                  I const max_blocks = get_max_blocks();
+                  I const lbatch_count = std::min(max_blocks, batch_count);
+                  size_t const len_Asave = size_t(nb * (nb - 1) / 2) * lbatch_count;
                   T* const Asave = static_cast<T*>(work_x_temp);
 
                   // ------------------------
