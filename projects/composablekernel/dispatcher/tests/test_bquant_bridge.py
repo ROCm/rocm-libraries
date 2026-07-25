@@ -26,6 +26,7 @@ from gemm_bquant_utils import (  # noqa: E402
     BQuantGemmProblem,
     _MX_VARIANTS,
     _require_mx_arch,
+    _warp_tile_k_for,
     _generate_bquant_kernel,
     default_fp8_config,
     default_bf8_config,
@@ -172,6 +173,69 @@ class TestArchSafety(unittest.TestCase):
         cfg = default_mx_bf16bf16_config(gfx_arch="gfx942")
         with self.assertRaises(ValueError):
             setup_multiple_bquant_dispatchers([cfg], gfx_arch="gfx942")
+
+
+class TestArchAwareWarpTileK(unittest.TestCase):
+    """Round-4: warp_tile_k must be arch-derived, mirroring get_k_warp_tile.
+
+    The fp8/bf8 (and i4, which instantiate an 8-bit-float PrecType) default
+    configs previously hardcoded warp_tile_k=128, which is a gfx950-only value.
+    On gfx942 a warp_tile_k=128 fp8/bf8 kernel *compiles* but silently outputs
+    ALL-ZEROS (there is no valid 16x16x128 fp8/bf8 warp-gemm on gfx942) -- the
+    same trap already GPU-confirmed on the sibling tensor_quant/rowcolquant/
+    aquant/abquant bridges.  So warp_tile_k MUST be 32 (decode) / 64 (preshuffle_b)
+    on gfx942 and 128 on gfx950, and that value must flow into the byte-exact .name.
+    """
+
+    def test_helper_decode(self):
+        # IsFlatMM=false (decode / preshufflequant): 128 gfx950, 32 gfx942.
+        self.assertEqual(_warp_tile_k_for("gfx942"), 32)
+        self.assertEqual(_warp_tile_k_for("gfx950"), 128)
+        # Arch strings with feature suffixes must still resolve.
+        self.assertEqual(_warp_tile_k_for("gfx942:sramecc+:xnack-"), 32)
+        self.assertEqual(_warp_tile_k_for("gfx950:sramecc+:xnack-"), 128)
+
+    def test_helper_preshuffleb_flatmm(self):
+        # IsFlatMM=true (preshuffle_b): 128 gfx950, 64 gfx942.
+        self.assertEqual(_warp_tile_k_for("gfx942", is_flatmm=True), 64)
+        self.assertEqual(_warp_tile_k_for("gfx950", is_flatmm=True), 128)
+
+    def test_decode_configs_arch_aware(self):
+        # fp8/bf8 AND fp8i4/bf8i4 decode: 32 on gfx942, 128 on gfx950.
+        for ctor in (default_fp8_config, default_bf8_config,
+                     default_fp8i4_config, default_bf8i4_config):
+            self.assertEqual(ctor(gfx_arch="gfx942").warp_tile_k, 32, ctor.__name__)
+            self.assertEqual(ctor(gfx_arch="gfx950").warp_tile_k, 128, ctor.__name__)
+
+    def test_preshufflequant_configs_arch_aware(self):
+        # preshuffle_bquant (IsFlatMM=false): 32 gfx942, 128 gfx950.
+        for ctor in (default_fp8_preshufflequant_config,):
+            self.assertEqual(ctor(gfx_arch="gfx942").warp_tile_k, 32, ctor.__name__)
+            self.assertEqual(ctor(gfx_arch="gfx950").warp_tile_k, 128, ctor.__name__)
+
+    def test_preshuffleb_configs_arch_aware(self):
+        # preshuffle_b (IsFlatMM=true): 64 gfx942, 128 gfx950 (fp8 + i4).
+        for ctor in (default_fp8_preshuffleb_config,
+                     default_fp8i4_preshuffleb_config,
+                     default_bf8i4_preshuffleb_config,
+                     default_fp8_preshuffleb_bquant_config):
+            self.assertEqual(ctor(gfx_arch="gfx942").warp_tile_k, 64, ctor.__name__)
+            self.assertEqual(ctor(gfx_arch="gfx950").warp_tile_k, 128, ctor.__name__)
+
+    def test_warp_tile_k_flows_into_name(self):
+        # The chosen warp_tile_k must appear byte-exact in the kernel .name.
+        n942 = default_fp8_config(gfx_arch="gfx942").name
+        n950 = default_fp8_config(gfx_arch="gfx950").name
+        self.assertIn("16x16x32", n942)
+        self.assertIn("16x16x128", n950)
+        self.assertNotEqual(n942, n950)
+
+    def test_mx_gfx950_values(self):
+        # MX is gfx950-only; verified against Old-TE get_k_warp_tile<bf16,16>()
+        # (=32 for bf16bf16/bf16fp4) and GemmConfigMixedPrecision (=64 for bf16bf8).
+        self.assertEqual(default_mx_bf16bf16_config(gfx_arch="gfx950").warp_tile_k, 32)
+        self.assertEqual(default_mx_bf16fp4_config(gfx_arch="gfx950").warp_tile_k, 32)
+        self.assertEqual(default_mx_bf16bf8_config(gfx_arch="gfx950").warp_tile_k, 64)
 
 
 class TestSplitKTrap(unittest.TestCase):

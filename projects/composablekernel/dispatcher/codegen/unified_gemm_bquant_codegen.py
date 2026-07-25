@@ -548,7 +548,11 @@ def _default_config() -> dict:
         "scheduler": "intrawave",
         "tile_configs": [
             # GemmConfigQuantDecode<fp8_t>: M=16, N=64, K=256
-            # WarpTileK=128: get_k_warp_tile<fp8_t, M_Warp_Tile=16>() on gfx950 = 128
+            # WarpTileK=128: get_k_warp_tile<fp8_t, M_Warp_Tile=16>() on gfx950 = 128.
+            # NOTE: this built-in header-enumeration sweep is gfx950-only. Arch-correct
+            # warp_tile_k (gfx942 fp8/bf8 -> 32) is produced by the bridge via
+            # gemm_bquant_utils._warp_tile_k_for(); a gfx942 sweep must pass a config
+            # with warp_tile_k=32 (128 silently outputs all-zeros on gfx942).
             {"tile_m": 16, "tile_n": 64, "tile_k": 256,
              "warp_m": 1, "warp_n": 4, "warp_k": 1,
              "warp_tile_m": 16, "warp_tile_n": 16, "warp_tile_k": 128},
