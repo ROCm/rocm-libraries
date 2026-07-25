@@ -819,7 +819,8 @@ struct buffer_view<address_space_enum::global,
             std::is_same_v<remove_cvref_t<scalar_t>, int32_t> ||
             std::is_same_v<remove_cvref_t<scalar_t>, float> ||
             (std::is_same_v<remove_cvref_t<scalar_t>, half_t> && scalar_per_x_vector % 2 == 0)
-#if defined(__gfx942__) || defined(__gfx950__) // only gfx942 and gfx950 support atomic_pk_add_bf16
+#if defined(__gfx942__) || defined(__gfx950__) || \
+    defined(__gfx125__)
             ||
             (std::is_same_v<remove_cvref_t<scalar_t>, bfloat16_t> && scalar_per_x_vector % 2 == 0)
 #endif
@@ -831,7 +832,8 @@ struct buffer_view<address_space_enum::global,
         bool constexpr use_amd_buffer_addressing =
             std::is_same_v<remove_cvref_t<scalar_t>, float> ||
             (std::is_same_v<remove_cvref_t<scalar_t>, half_t> && scalar_per_x_vector % 2 == 0)
-#if defined(__gfx942__) || defined(__gfx950__) // only gfx942 and gfx950 support atomic_pk_add_bf16
+#if defined(__gfx942__) || defined(__gfx950__) || \
+    defined(__gfx125__)
             ||
             (std::is_same_v<remove_cvref_t<scalar_t>, bfloat16_t> && scalar_per_x_vector % 2 == 0)
 #endif
