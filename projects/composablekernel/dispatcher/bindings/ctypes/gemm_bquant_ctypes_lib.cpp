@@ -266,7 +266,12 @@ int dispatcher_run_bquant_gemm(const void* A,
                                             static_cast<int>(N),
                                             static_cast<int>(K),
                                             ck_tile::bool_constant<false>{} /*col-major*/));
-        std::copy(B_host, B_host + K * N, b_k_n.begin());
+        // For packed B (pk_int4_t, pk_fp4_t; PackedSize=2) the HostTensor holds
+        // only K*N/PackedSize elements and B_host already contains the packed
+        // representation, so copy b_k_n.size() elements (== elements_to_bytes
+        // count) -- copying K*N here overran the buffer and corrupted the heap
+        // before permute_vectors_i4x4_b ran, crashing all i4/fp4 configs.
+        std::copy(B_host, B_host + b_k_n.size(), b_k_n.begin());
 
         ck_tile::HostTensor<BDataType> b_k_n_dev = b_k_n;
         if constexpr(SelectedKernel::PreshuffleB)

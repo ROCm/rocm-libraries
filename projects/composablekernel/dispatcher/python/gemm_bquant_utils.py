@@ -445,6 +445,15 @@ class BQuantGpuGemmRunner:
 
         # permute_n epilogue writes C with N-columns riffled into r groups
         # (r = tile_n / warp_tile_n / warp_n). Undo it so the caller gets logical C.
+        #
+        # The de-permute direction is EPILOGUE-DEPENDENT:
+        #   * PreshuffleB (WPQuantB) epilogue -- kernel name contains "preshuffleb".
+        #     Its permute_n writes columns already in interleaved order, so recover
+        #     logical C with the FORWARD riffle  C = C[:, _logical]  (gfx942 tester
+        #     confirmed max_rel ~4.7e-4 on all 4 preshuffleb configs; the inverse
+        #     riffle left correct VALUES in the WRONG COLUMN ORDER).
+        #   * CompV3 / preshufflequant epilogue -- INVERSE riffle _Cp[:, _logical]=C
+        #     (this path validates for CompV3/preshufflequant kernels).
         _name = self.kernel_name
         if 'permute_n' in _name:
             import re as _re
@@ -455,9 +464,21 @@ class BQuantGpuGemmRunner:
                 if _r > 1 and (N % _r) == 0:
                     _half = N // _r
                     _logical = [(c % _r) * _half + (c // _r) for c in range(N)]
-                    _Cp = np.empty_like(C)
-                    _Cp[:, _logical] = C
-                    C = _Cp
+                    # Match the "preshuffleb" name token exactly. Kernel-name
+                    # parts are "_"-joined, so PreshuffleB appends "_preshuffleb"
+                    # while preshufflequant appends "_preshufflebq" -- a bare
+                    # substring test would false-positive on the latter (CompV3).
+                    _is_preshuffleb = bool(
+                        _re.search(r'(?:^|_)preshuffleb(?:_|$)', _name)
+                    )
+                    if _is_preshuffleb:
+                        # WPQuantB epilogue: forward riffle recovers logical C.
+                        C = C[:, _logical]
+                    else:
+                        # CompV3 / preshufflequant epilogue: inverse riffle.
+                        _Cp = np.empty_like(C)
+                        _Cp[:, _logical] = C
+                        C = _Cp
         return BQuantGemmResult(C=C, time_ms=time_ms, kernel_name=self.kernel_name)
 
 

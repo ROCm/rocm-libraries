@@ -51,6 +51,9 @@ _CTYPES_SRC = (
     _DISP / "bindings" / "ctypes" / "gemm_bquant_ctypes_lib.cpp"
 ).read_text()
 
+# The Python runner source (checked for the epilogue-dependent C de-permute).
+_UTILS_SRC = (_DISP / "python" / "gemm_bquant_utils.py").read_text()
+
 
 def _header_text(cfg):
     """Codegen the header for a config and return its text (no hipcc)."""
@@ -351,6 +354,79 @@ class TestBCastPolicy(unittest.TestCase):
             text = _header_text(ctor())
             self.assertIn("ck_tile::CastPolicy::AfterLDSRead", text, ctor().name)
             self.assertNotIn("ck_tile::CastPolicy::BeforeLDSWrite", text, ctor().name)
+
+
+class TestPackedBCopyCount(unittest.TestCase):
+    """Round-5 BUG #1: for packed B (pk_int4_t / pk_fp4_t; PackedSize=2) the
+    host copy into b_k_n must copy the DESTINATION element count, not K*N.
+    HostTensor<T>::get_element_space_size() divides by PackedSize, so the tensor
+    holds only K*N/2 elements; copying K*N overran the buffer and corrupted the
+    heap BEFORE permute_vectors_i4x4_b ran, crashing all i4 (fp8i4/bf8i4) and
+    mx_bf16fp4 configs."""
+
+    def test_packed_b_copy_uses_destination_size(self):
+        # The overflowing copy (B_host + K * N into b_k_n) must be gone.
+        self.assertNotIn("B_host + K * N", _CTYPES_SRC)
+        # The copy must be bounded by the destination tensor's own size.
+        self.assertIn("std::copy(B_host, B_host + b_k_n.size(), b_k_n.begin())",
+                      _CTYPES_SRC)
+
+    def test_packed_pk_int4_permute_still_runs(self):
+        # The pk_int4 permute must still be present (it only runs once the copy
+        # no longer corrupts the heap).
+        self.assertIn("permute_vectors_i4x4_b", _CTYPES_SRC)
+        self.assertIn("std::is_same_v<BDataType, ck_tile::pk_int4_t>", _CTYPES_SRC)
+
+
+class TestEpilogueDependentCDepermute(unittest.TestCase):
+    """Round-5 BUG #2: the permute_n C de-permute is EPILOGUE-DEPENDENT.
+    PreshuffleB (WPQuantB) kernels need the FORWARD riffle C = C[:, _logical]
+    (gfx942 tester: max_rel ~4.7e-4 on all 4 preshuffleb configs); CompV3 /
+    preshufflequant kernels keep the INVERSE riffle _Cp[:, _logical] = C."""
+
+    def test_utils_selects_direction_by_epilogue(self):
+        # The runner must branch on whether the kernel name is a preshuffleb one,
+        # using a delimiter-aware token match (not a bare substring, which would
+        # false-positive on the "preshufflebq" preshufflequant token).
+        self.assertIn(r"(?:^|_)preshuffleb(?:_|$)", _UTILS_SRC)
+        # Forward riffle for PreshuffleB.
+        self.assertIn("C = C[:, _logical]", _UTILS_SRC)
+        # Inverse riffle retained for CompV3 / preshufflequant.
+        self.assertIn("_Cp[:, _logical] = C", _UTILS_SRC)
+
+    def test_preshuffleb_token_match_excludes_preshufflequant(self):
+        # The token regex must fire for PreshuffleB names and NOT for the
+        # preshufflequant ("preshufflebq") CompV3 name.
+        import re as _re
+        tok = re.compile(r'(?:^|_)preshuffleb(?:_|$)')
+        # preshuffleb and preshuffleb+bquant -> forward riffle.
+        self.assertTrue(tok.search(default_fp8_preshuffleb_config().name))
+        self.assertTrue(tok.search(default_fp8_preshuffleb_bquant_config().name))
+        # preshufflequant (preshufflebq only) -> inverse riffle.
+        self.assertIsNone(tok.search(default_fp8_preshufflequant_config().name))
+
+    def test_depermute_forward_then_inverse_are_true_inverses(self):
+        # Sanity-check the two riffles: applying the inverse to a forward-riffled
+        # array recovers the original, so the two epilogues use mirror ops.
+        import numpy as np
+        N, r = 8, 2
+        half = N // r
+        logical = [(c % r) * half + (c // r) for c in range(N)]
+        col = np.arange(N).reshape(1, N)
+        forward = col[:, logical]              # PreshuffleB path
+        inverse = np.empty_like(col)
+        inverse[:, logical] = forward          # CompV3 path applied to forward
+        self.assertTrue(np.array_equal(inverse, col))
+
+    def test_preshuffleb_kernel_names_are_detected(self):
+        # The preshuffleb configs must produce names whose "preshuffleb" token
+        # fires the forward-riffle branch; non-preshuffleb ones must not.
+        tok = re.compile(r'(?:^|_)preshuffleb(?:_|$)')
+        for ctor in (default_fp8_preshuffleb_config,
+                     default_fp8_preshuffleb_bquant_config):
+            self.assertTrue(tok.search(ctor().name), ctor().name)
+        for ctor in (default_fp8_config, default_fp8_preshufflequant_config):
+            self.assertIsNone(tok.search(ctor().name), ctor().name)
 
 
 if __name__ == "__main__":
