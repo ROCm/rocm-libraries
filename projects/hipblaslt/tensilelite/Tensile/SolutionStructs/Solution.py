@@ -1302,7 +1302,16 @@ class Solution(collections.abc.Mapping):
       cs = state["ClusterDim"][0]
       ck = state["ClusterDim"][1]
       state["StreamKMulticast"] = 1 if cs > 1 else 0
-      state["StreamKClusterReduction"] = 1 if ck > 1 else 0
+      # ForceDPOnly 2-D DUAL-multicast probe (Phase-0): a genuine 2-D cluster
+      # [Cs,Ck] (both > 1) where the Ck (Y) axis maps to N-ADJACENT output tiles
+      # for A-reuse, NOT a K-split reduction. Ck>1 must therefore NOT derive
+      # StreamKClusterReduction here (that would launch the K-split schedule and
+      # be rejected by _validateStreamKClusterReduction for ForceDPOnly). Cs>1
+      # still derives StreamKMulticast so the B-multicast + cluster-barrier
+      # plumbing (which A-multicast reuses) turns on. See streamKForceDP2DMulticast
+      # and docs/design/streamk-wg-clusters.md.
+      forceDP2D = state.get("StreamKForceDPOnly", 0) and cs > 1 and ck > 1
+      state["StreamKClusterReduction"] = 1 if (ck > 1 and not forceDP2D) else 0
     # Multicast tri-state (see ValidParameters): -1 auto (legacy), 0 off, 1 on.
     # Default -1 reproduces the historic ClusterDim-coupled derivation, so YAML
     # that omits Multicast is byte-identical.

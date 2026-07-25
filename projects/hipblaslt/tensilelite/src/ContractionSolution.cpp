@@ -1796,7 +1796,23 @@ namespace TensileLite
 
         if(sizeMapping.streamK != 0)
         {
-            if(sizeMapping.clusterDim.y > 1)
+            if(sizeMapping.streamKForceDPOnly != 0 && sizeMapping.clusterDim.y > 1)
+            {
+                // ForceDPOnly 2-D DUAL-multicast probe (Phase-0): a genuine 2-D HW
+                // cluster ClusterDim=[Cs,Ck] where Cs (x) B-multicast peers are
+                // M-adjacent tiles and Ck (y) A-multicast peers are N-ADJACENT tiles.
+                // Launch a grid that spans the FULL M x N tile space -- gridX = nWG0
+                // (M-tiles), gridY = nWG1 (N-tiles) -- so Y-neighbors are N-adjacent
+                // output tiles (unlike the K-split factored launch [skGrid/Ck, Ck, 1]).
+                // The kernel folds StreamKIdx = batch*(nWG0*nWG1) + WorkGroup1*nWG0 +
+                // WorkGroup0 (StreamK.preLoop) so each WG owns one tile. ClusterDimCheck
+                // guarantees nWG0 % Cs == 0 and nWG1 % Ck == 0, so gridDimX % Cs == 0
+                // and gridDimY % Ck == 0 (legal cluster launch) and every HW cluster is
+                // a full 2-D tile block. sk.grid == tiles == nWG0*nWG1 here (getSKGrid).
+                rv.numWorkGroups.x = problemNumGroupTiles.x; // nWG0 (M-tiles)
+                // rv.numWorkGroups.y already = nWG1 * gsu (N-tiles); z stays batch.
+            }
+            else if(sizeMapping.clusterDim.y > 1)
             {
                 // 2-D StreamK cluster PROBE (Scheme A): a genuine 2-D HW cluster
                 // ClusterDim=[Cs,Ck] with Ck=clusterDim.y. Launch a 2-D grid so the
@@ -4155,10 +4171,25 @@ namespace TensileLite
                    * static_cast<size_t>(self.sizeMapping.clusterDim.y))
                       > 1)
             {
-                size_t c = static_cast<size_t>(self.sizeMapping.clusterDim.x)
-                           * static_cast<size_t>(self.sizeMapping.clusterDim.y);
-                size_t ck = static_cast<size_t>(self.sizeMapping.clusterDim.y);
-                skGrid = ((ck * tiles + c - 1) / c) * c;
+                if(self.sizeMapping.streamKForceDPOnly)
+                {
+                    // ForceDPOnly 2-D DUAL-multicast probe (Phase-0): the 2-D cluster
+                    // [Cs,Ck] tiles the FULL M x N tile space with one WG per output
+                    // tile (Cs peers M-adjacent -> share B, Ck peers N-adjacent ->
+                    // share A). This is NOT a K-split, so the grid is exactly `tiles`
+                    // (already a multiple of C=Cs*Ck since nWG0 % Cs == 0 and
+                    // nWG1 % Ck == 0 via ClusterDimCheck). The 2-D launch splits this
+                    // into [nWG0, nWG1, 1] (generateSingleCall). See
+                    // docs/design/streamk-wg-clusters.md.
+                    skGrid = tiles;
+                }
+                else
+                {
+                    size_t c = static_cast<size_t>(self.sizeMapping.clusterDim.x)
+                               * static_cast<size_t>(self.sizeMapping.clusterDim.y);
+                    size_t ck = static_cast<size_t>(self.sizeMapping.clusterDim.y);
+                    skGrid = ((ck * tiles + c - 1) / c) * c;
+                }
             }
 
             return skGrid;

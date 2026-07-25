@@ -596,12 +596,18 @@ class ProblemPredicate(Properties.Predicate):
         # predicate requires nWG_x % Cs == 0. Pure reduction [1,C]: Cs=1 (no M
         # constraint). The factoring is the ClusterDim shape (no StreamKClusterKSplit).
         valuepredicates.append(state["ClusterDim"][0])
-        # value[4] is the N-tile divisor. For a genuine 2-D StreamK cluster
-        # (Ck = ClusterDim[1] > 1, i.e. pure reduction [1,C] or factored [Cs,Ck]) the
-        # Y-extent is the K-split / index-generation axis, NOT an N-tiling axis, so it
-        # must NOT constrain the N-tile grid -> pin to 1. 1-D StreamK ([C,1]) and
-        # dense (non-StreamK) clusters keep ClusterDim[1] (byte-identical).
-        if state.get("StreamK", 0) == 3 and state["ClusterDim"][1] > 1:
+        # value[4] is the N-tile divisor. For a K-split StreamK cluster
+        # (Ck = ClusterDim[1] > 1 as a REDUCTION axis, i.e. pure reduction [1,C] or
+        # factored [Cs,Ck]) the Y-extent is the K-split / index-generation axis, NOT
+        # an N-tiling axis, so it must NOT constrain the N-tile grid -> pin to 1.
+        # EXCEPTION -- the ForceDPOnly 2-D DUAL-multicast probe: there Ck IS an
+        # N-tiling axis (Y-peers map to N-adjacent output tiles for A-reuse), so it
+        # MUST constrain the N-tile grid (nWG_y % Ck == 0) -> keep ClusterDim[1],
+        # exactly like the dense/1-D path. 1-D StreamK ([C,1]) and dense (non-StreamK)
+        # clusters keep ClusterDim[1] (byte-identical).
+        _forceDP2D = (state.get("StreamKForceDPOnly", 0)
+                      and state["ClusterDim"][0] > 1 and state["ClusterDim"][1] > 1)
+        if state.get("StreamK", 0) == 3 and state["ClusterDim"][1] > 1 and not _forceDP2D:
             valuepredicates.append(1)
         else:
             valuepredicates.append(state["ClusterDim"][1])

@@ -36,7 +36,7 @@ from rocisa.functions import scalarStaticDivideAndRemainder, sMagicDiv2, \
 
 from .Subtile.SubtileLREmit import localReadResetOffsetsSubtile
 
-from ..Common import print2, ceilDivide, log2, clusterEnabled, streamKClusterFactors
+from ..Common import print2, ceilDivide, log2, clusterEnabled, streamKClusterFactors, streamKForceDP2DMulticast
 from ..Component import Component
 from ..AsmStoreState import StoreState, VectorDataTypes
 from ..AsmAddressCalculation import AddrCalculation
@@ -2896,6 +2896,16 @@ class StreamKTwoTileDPFirst(StreamK):
         module = Module("StreamK multicast mask predicate")
         if not kernel.get("StreamKMulticast", 0):
             return module
+        if streamKForceDP2DMulticast(kernel):
+            # ForceDPOnly 2-D DUAL-multicast probe: the dense 2-D masks emitted at
+            # kernel init (ClusterLoad.computeMasks, aPeers=Ck) are already correct
+            # for BOTH operands (A along Ck/Y N-adjacent peers, B along Cs/X
+            # M-adjacent peers) using the raw HW wg_x/wg_y within-cluster ranks.
+            # ClusterDimCheck guarantees full/aligned clusters (nWG0%Cs==0 &&
+            # nWG1%Ck==0), so there is no partial-cluster tail and no preLoop
+            # overwrite or self-mask fallback is required.
+            module.addComment0("StreamKForceDP2DMulticast: keep dense 2-D masks (A & B); no preLoop overwrite")
+            return module
         c = kernel["ClusterDim"][0]
         _, _, _, is2d = streamKClusterFactors(kernel)
         if is2d:
@@ -3069,7 +3079,35 @@ class StreamKTwoTileDPFirst(StreamK):
         # WorkGroup0 so the existing SMov/VMov below (unchanged) still copies the
         # final index -> the 1-D Ck==1 path is byte-identical.
         cs2d, ck2d, C2d, is2d = streamKClusterFactors(kernel)
-        if is2d:
+        forceDP2D = streamKForceDP2DMulticast(kernel)
+        if forceDP2D:
+            # ForceDPOnly 2-D DUAL-multicast probe (Phase-0): fold the genuine 2-D
+            # (+batch) HW workgroup coords into the linear DP tile index the
+            # ForceDPOnly decode expects. After the cluster remap (defineAndResources)
+            # WorkGroup0 = global M-tile (x; Cs B-peers are M-adjacent), WorkGroup1 =
+            # global N-tile (y; Ck A-peers are N-adjacent), WorkGroup2 = batch. The
+            # tileID (M-fastest, matching skIndexToWG) is
+            #   StreamKIdx = WorkGroup2*(nWG0*nWG1) + WorkGroup1*nWG0 + WorkGroup0
+            # so skIndexToWG inverts it EXACTLY -> X-peers land on M-adjacent tiles
+            # (reuse B) and Y-peers land on N-adjacent tiles (reuse A). ClusterDimCheck
+            # guarantees nWG0 % Cs == 0 and nWG1 % Ck == 0, so every HW cluster is a
+            # full 2-D tile block and no runtime mask fallback is needed. This
+            # REPLACES the factored "k fastest" fold below (which is a K-split, not a
+            # spatial N-tile axis). See docs/design/streamk-wg-clusters.md.
+            with writer.allocTmpSgpr(2, tag="ForceDP2DFold") as tRes:
+                t0 = tRes.idx
+                t1 = tRes.idx + 1
+                module.add(SMulI32(dst=sgpr(t0), src0=sgpr("WorkGroup1"), src1=sgpr("NumWorkGroups0"),
+                                   comment="2-D DP: WorkGroup1 * nWG0 (N-tile row)"))
+                module.add(SMulI32(dst=sgpr(t1), src0=sgpr("NumWorkGroups0"), src1=sgpr("NumWorkGroups1"),
+                                   comment="2-D DP: nWG0 * nWG1 (tiles per batch)"))
+                module.add(SMulI32(dst=sgpr(t1), src0=sgpr(t1), src1=sgpr("WorkGroup2"),
+                                   comment="2-D DP: batch * (nWG0*nWG1)"))
+                module.add(SAddU32(dst=sgpr("WorkGroup0"), src0=sgpr("WorkGroup0"), src1=sgpr(t0),
+                                   comment="2-D DP: + WorkGroup1*nWG0"))
+                module.add(SAddU32(dst=sgpr("WorkGroup0"), src0=sgpr("WorkGroup0"), src1=sgpr(t1),
+                                   comment="2-D DP: StreamKIdx = batch*(nWG0*nWG1) + N*nWG0 + M"))
+        elif is2d:
             module.add(SMulI32(dst=sgpr("WorkGroup0"), src0=sgpr("WorkGroup0"), src1=hex(ck2d),
                                comment="2-D cluster: WorkGroup0 * Ck"))
             module.add(SAddU32(dst=sgpr("WorkGroup0"), src0=sgpr("WorkGroup0"), src1=sgpr("WorkGroup1"),

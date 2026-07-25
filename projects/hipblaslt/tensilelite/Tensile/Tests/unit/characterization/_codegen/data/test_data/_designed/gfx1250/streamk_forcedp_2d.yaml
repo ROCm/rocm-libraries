@@ -1,0 +1,97 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+################################################################################
+# Phase-0 ForceDPOnly 2-D DUAL-multicast probe (gfx1250).
+#
+# A genuine 2-D HW cluster ClusterDim = [Cs, Ck] = [2, 2] on a StreamK==3
+# StreamKForceDPOnly (dense data-parallel, NO K-split reduction) kernel where
+# BOTH operands are TDM-multicast:
+#   * Cs = ClusterDim[0] = 2 : X-peers on M-ADJACENT output tiles reuse B
+#     (exactly as the shipped 1-D [C,1] ForceDPOnly multicast);
+#   * Ck = ClusterDim[1] = 2 : Y-peers on N-ADJACENT output tiles reuse A.
+# Ck here is an N-tiling / A-multicast axis, NOT a K-split reduction axis, so
+# StreamKClusterReduction is deliberately NOT derived (see Solution.py collapse).
+# The dense ClusterLoad 2-D masks (aPeers=Ck) are reused verbatim for A and B,
+# and the ForceDPOnly DP tile decode is folded to
+#   StreamKIdx = batch*(nWG0*nWG1) + WorkGroup1*nWG0 + WorkGroup0
+# so X-peers land M-adjacent and Y-peers land N-adjacent (StreamK.preLoop).
+#
+# CPU-only characterization: no GPU required. This validates codegen (masks +
+# 2-D tile decode + balanced cluster barrier); the definitive correctness check
+# is the user's HW run of Tests/common/streamk/gfx1250/core/sk_mxf4_force_dp_only_cluster_2d_multicast.yaml.
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: 128
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  Device: 0
+
+BenchmarkProblems:
+  -
+    -
+      OperationType: GEMM
+      DataType: F4
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      MXBlockA: 32
+      MXBlockB: 32
+    -
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [True]
+        - MatrixInstruction:
+          - [16, 16, 128, 1, 1, 1, 1, 2, 2]
+        - DepthU: [256]
+        - ClusterLocalRead: [0]
+        - TransposeLDS: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LdsPadMXSA: [-1]
+        - LdsPadMXSB: [-1]
+        - LdsBlockSizePerPadMXSA: [-1]
+        - LdsBlockSizePerPadMXSB: [-1]
+        - LdsPadMetadata: [0]
+        - LDSTrInst: [False]
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [4]
+        - SourceSwap: [False]
+        - StoreRemapVectorWidth: [0]
+        - GlobalSplitU: [0]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - ExpandPointerSwap: [False]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - LocalReadVectorWidth: [-1]
+        - StoreVectorWidth: [-1]
+        - StreamK: [3]
+        - StreamKForceDPOnly: [1]
+        - StreamKAtomic: [0]
+        - StreamKXCCMapping: [0]
+        # ForceDPOnly 2-D DUAL-multicast probe: Cs=2 (B, M-adjacent) x Ck=2
+        # (A, N-adjacent). Ck is an N-tiling axis, NOT a K-split.
+        - ClusterDim: [[2, 2]]
+        - StaggerU: [0]
+        - DirectToVgprA: [False]
+        - DirectToVgprB: [False]
+        - WavefrontSize: [32]
+        - WorkGroupMapping: [1]
+        - TDMInst: [3]
+        - MXLoadInst: ["TDM"]
+        - MXScaleFormat: ["InMemorySwizzle"]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 256]
