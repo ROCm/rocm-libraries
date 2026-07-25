@@ -228,7 +228,7 @@ class SpinnyThing:
         self.index = 0
 
     def increment(self, value=1):
-        sys.stdout.write("\b" + self.chars[self.index])  # pragma: no mutate
+        sys.stdout.write("\b" + self.chars[self.index])
         sys.stdout.flush()
         self.index = (self.index + value) % len(self.chars)
 
@@ -423,12 +423,12 @@ def ceilDivide(numerator, denominator):
         if numerator < 0 or denominator < 0:
             raise ValueError
     except ValueError:
-        print("ERROR: Can't have a negative register value")  # pragma: no mutate
+        print("ERROR: Can't have a negative register value")
         return 0
     try:
         div = int((numerator+denominator-1) // denominator)
     except ZeroDivisionError:
-        print("ERROR: Divide by 0")  # pragma: no mutate
+        print("ERROR: Divide by 0")
         return 0
     return div
 
