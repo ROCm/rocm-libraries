@@ -60,14 +60,43 @@ static __global__ void copy_symm_tri_kernel(bool const is_lower,
                                             I const batch_count,
                                             bool const is_restore)
 {
+#if(0)
     // ---------------------------------------
     // linear mapping from strictly upper/lower
     // part to array of size n*(n-1)/2
     // ---------------------------------------
-    auto idxU = [](auto i, auto j) { return (j * (j - 1) / 2 + i); };
-    auto idxL = [idxU](auto i, auto j) { return (idxU(j, i)); };
+    auto idxU = [=](auto i, auto j) {
+        assert(i < j);
+        auto const k = (j * (j - 1) / 2 + i);
+        assert((0 <= k) && (k < n * (n - 1) / 2));
+        return (k);
+    };
+    auto idxL = [=](auto i, auto j) {
+        assert(i > j);
+        auto const k = (idxU(j, i));
+        assert((0 <= k) && (k < n * (n - 1) / 2));
+        return (k);
+    };
+#endif
 
-    auto idx2D = [](auto i, auto j, auto ld) { return (i + j * ld); };
+    // ---------------------------------------
+    // linear mapping from strictly upper/lower
+    // part to array of size n*(n-1)/2
+    // ---------------------------------------
+    auto idxU = [=](auto i, auto j) {
+        assert(i < j);
+        auto const k = ((i * n - i * (i + 1) / 2) + (j - (i + 1)));
+        assert((0 <= k) && (k < n * (n - 1) / 2));
+        return (k);
+    };
+    auto idxL = [=](auto i, auto j) {
+        assert(i > j);
+        auto const k = idxU(j, i);
+        assert((0 <= k) && (k < n * (n - 1) / 2));
+        return (k);
+    };
+
+    auto idx2D = [=](auto i, auto j, auto ld) { return (i + j * ld); };
 
     I const bid_start = blockIdx.z;
     I const bid_inc = gridDim.z;
@@ -236,7 +265,7 @@ void rocsolver_sygst_hegst_getMemorySize(const rocblas_fill uplo,
         // extra requirements for calling TRSM
         // -----------------------------------
 
-        I const nn = std::min(I(xxGST_BLOCKSIZE), I(n));
+        I const nn = xxGST_BLOCKSIZE;
         size_t temp1{}, temp2{}, temp3{}, temp4{}, temp5{}, temp6{}, temp7{}, temp8{};
 
         if(itype == rocblas_eform_ax)
@@ -277,6 +306,9 @@ void rocsolver_sygst_hegst_getMemorySize(const rocblas_fill uplo,
         // storage to save strictly triangular part
         //
         // expand storage for work_x_temp
+        //
+        // NOTE: assume xxGST_BLOCKSIZE is a power of 2
+        // to maintain alignment
         // ----------------------------------------
         size_t const size_Asave = (sizeof(T) * nn * (nn - 1) / 2) * batch_count;
         *size_work_x_temp += size_Asave;
@@ -328,13 +360,13 @@ rocblas_status rocsolver_sygst_hegst_template(rocblas_handle handle,
     auto hegs2_alt
         = [](rocblas_handle handle, rocblas_eform const itype, rocblas_fill const uplo, I const n,
 
-             auto A, auto shiftA, auto lda, auto strideA,
+             auto A, rocblas_stride const shiftA, I const lda, rocblas_stride const strideA,
 
-             auto B, auto shiftB, auto ldb, auto strideB,
+             auto B, rocblas_stride const shiftB, I const ldb, rocblas_stride const strideB,
 
-             auto batch_count, auto Asave,
+             I const batch_count, T* const Asave,
 
-             bool optim_mem, auto temp1, auto temp2, auto temp3, auto temp4) -> rocblas_status {
+             bool const optim_mem, auto temp1, auto temp2, auto temp3, auto temp4) -> rocblas_status {
         // ------------------------------------------------------------------
         // Let B = R * R',   B = L * L', => R = L,   or B = U' * U => R = U'
         //
@@ -351,8 +383,16 @@ rocblas_status rocsolver_sygst_hegst_template(rocblas_handle handle,
         // ------------------------------------------------------------------
 
         bool const is_upper = (uplo == rocblas_fill_upper);
-        bool const is_lower = !is_upper;
-        T t_one = T{1};
+        bool const is_lower = (uplo == rocblas_fill_lower);
+        {
+            bool const is_valid_uplo = (is_upper || is_lower);
+            if(!is_valid_uplo)
+            {
+                return rocblas_status_invalid_value;
+            }
+        }
+
+        T t_one = 1;
 
         rocblas_stride const strideAsave = n * (n - 1) / 2;
 
@@ -514,14 +554,17 @@ rocblas_status rocsolver_sygst_hegst_template(rocblas_handle handle,
         }
 
         return (rocblas_status_success);
-    };
+    }; // end hegs2_alt
 
     // if the matrix is too small, use the unblocked variant of the algorithm
     if(n <= nb)
     {
         if(use_hegs2_alt)
         {
-            size_t const len_Asave = size_t(batch_count) * n * (n - 1) / 2;
+            // ------------------------------------------
+            // note use nb to maintain alignment in temp1
+            // ------------------------------------------
+            size_t const len_Asave = size_t(batch_count) * nb * (nb - 1) / 2;
             T* const Asave = static_cast<T*>(work_x_temp);
 
             // ------------------------
@@ -566,7 +609,10 @@ rocblas_status rocsolver_sygst_hegst_template(rocblas_handle handle,
 
                 if(use_hegs2_alt)
                 {
-                    size_t const len_Asave = size_t(batch_count) * (kb * (kb - 1) / 2);
+                    // ------------------------------------------
+                    // note use nb to maintain alignment in temp1
+                    // ------------------------------------------
+                    size_t const len_Asave = size_t(batch_count) * (nb * (nb - 1) / 2);
                     T* const Asave = static_cast<T*>(work_x_temp);
 
                     // ------------------------
@@ -652,7 +698,10 @@ rocblas_status rocsolver_sygst_hegst_template(rocblas_handle handle,
 
                 if(use_hegs2_alt)
                 {
-                    size_t const len_Asave = size_t(batch_count) * (kb * (kb - 1) / 2);
+                    // ------------------------------------------
+                    // note use nb to maintain alignment in temp1
+                    // ------------------------------------------
+                    size_t const len_Asave = size_t(batch_count) * (nb * (nb - 1) / 2);
                     T* const Asave = static_cast<T*>(work_x_temp);
 
                     // ------------------------
@@ -767,7 +816,10 @@ rocblas_status rocsolver_sygst_hegst_template(rocblas_handle handle,
 
                 if(use_hegs2_alt)
                 {
-                    size_t const len_Asave = size_t(batch_count) * (kb * (kb - 1) / 2);
+                    // ------------------------------------------
+                    // note use nb to maintain alignment in temp1
+                    // ------------------------------------------
+                    size_t const len_Asave = size_t(batch_count) * (nb * (nb - 1) / 2);
                     T* const Asave = static_cast<T*>(work_x_temp);
 
                     // ------------------------
@@ -843,7 +895,10 @@ rocblas_status rocsolver_sygst_hegst_template(rocblas_handle handle,
 
                 if(use_hegs2_alt)
                 {
-                    size_t const len_Asave = size_t(batch_count) * (kb * (kb - 1) / 2);
+                    // ------------------------------------------
+                    // note use nb to maintain alignment in temp1
+                    // ------------------------------------------
+                    size_t const len_Asave = size_t(batch_count) * (nb * (nb - 1) / 2);
                     T* const Asave = static_cast<T*>(work_x_temp);
 
                     // ------------------------
