@@ -27,7 +27,7 @@ from rocisa.container import vgpr, sgpr, mgpr, SMEMModifiers, MUBUFModifiers, GL
 from rocisa.instruction import GlobalInv, GlobalWb, SAddCU32, SAddU32, SAndB32, SBarrier, \
     SBranch, SCBranchSCC0, SCBranchSCC1, SCMovB32, SCSelectB32, SCmpEQU32, SCmpEQU64, \
     SCmpGtU32, SCmpLeU32, SCmpLtU32, SLShiftLeftB32, SLShiftLeftB64, SLShiftRightB32, VLShiftLeftB32, SLoadB32, \
-    SMaxI32, SMinU32, SMovB32, SMovB64, SMulI32, SNop, SOrB32, SSleep, SStoreB32, SSubU32, \
+    SMaxI32, SMinU32, SMovB32, SMovB64, SMulHIU32, SMulI32, SNop, SOrB32, SSleep, SStoreB32, SSubU32, \
     SWaitCnt, SWaitXCnt, VAddF32, VAddF64, VAddPKF16, VAddU32, VSubU32, VLShiftRightB32, VMovB32, \
     VReadfirstlaneB32, VCmpXEqU32, VCvtBF16toFP32, GlobalAtomicIncU32Saddr, BufferLoadB32, BufferStoreB32, \
     SAtomicInc, DSLoadB32, DSStoreB32, SLongBranch, SLongBranchPositive
@@ -1121,9 +1121,31 @@ class StreamK(Component):
 
         assert kernel["BufferStore"]
         module.addSpaceLine()
-        module.add(SMulI32(dst=sgpr(tmpSgpr), src0=hex(kernel["MacroTile0"]*kernel["MacroTile1"]*writer.states.bpeCinternal), src1=sPartialIdx, comment="Offset to correct partials tile"))
+        # 64-bit slot byte offset. The per-tile workspace stride
+        # MacroTile0*MacroTile1*bpe times the StreamK partial index can exceed
+        # 2^32 for large SK grids (grows with C: C>=4/C>=8 on big tiles), so a
+        # 32-bit SMulI32 product silently wraps and the peer write / owner read
+        # SRD then aliases the wrong workspace slot. Compute the high word with
+        # SMulHIU32 and fold it (plus the lo-add carry) into SrdWS+1 instead of
+        # adding only the carry.
+        #
+        # Applied universally to every StreamK path that addresses the partials
+        # workspace (multicast [C,1], cluster reduction, factored, and
+        # non-cluster StreamK). The overflow depends only on the per-slot tile
+        # stride and the StreamK slot count -- the partials workspace is
+        # partialTileSize == tileSize * skGrid regardless of cluster mode -- so
+        # the multicast path can overflow on large problems just like the
+        # reduction/factored paths. Emitting the 64-bit offset everywhere costs
+        # one extra SGPR and one s_mul_hi_u32; it intentionally changes the
+        # multicast codegen (byte-identity with the prior 32-bit path is
+        # deliberately dropped now that the fix is universal).
+        offBytes = hex(kernel["MacroTile0"]*kernel["MacroTile1"]*writer.states.bpeCinternal)
+        tmpHi = writer.sgprPool.checkOut(1, "SKSlotOffsetHi")
+        module.add(SMulI32(dst=sgpr(tmpSgpr), src0=offBytes, src1=sPartialIdx, comment="Offset to correct partials tile (low word)"))
+        module.add(SMulHIU32(dst=sgpr(tmpHi), src0=offBytes, src1=sPartialIdx, comment="partials tile offset (high word) for 64-bit SRD"))
         module.add(SAddU32(dst=sgpr("SrdWS+0"), src0=sgpr("SrdWS+0"), src1=sgpr(tmpSgpr), comment="add lo to SRD"))
-        module.add(SAddCU32(dst=sgpr("SrdWS+1"), src0=sgpr("SrdWS+1"), src1=0, comment="add hi to SRD"))
+        module.add(SAddCU32(dst=sgpr("SrdWS+1"), src0=sgpr("SrdWS+1"), src1=sgpr(tmpHi), comment="add hi (offset high word + lo carry) to SRD"))
+        writer.sgprPool.checkIn(tmpHi)
 
         if tmpLocal is not None:
             writer.sgprPool.checkIn(tmpLocal)
