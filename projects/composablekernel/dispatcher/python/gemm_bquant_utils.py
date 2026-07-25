@@ -424,13 +424,44 @@ def _encode_e8m0(arr) -> "object":
     return out
 
 
-def _encode_fp8_bytes(arr, dtype: str) -> "object":
-    """float32 -> fp8/bf8 raw bytes (uint8).  OCP e4m3fn (fp8) / e5m2 (bf8)."""
+def _uses_ocp_fp8(gfx_arch: Optional[str]) -> bool:
+    """True when the kernel is compiled with OCP fp8 (not FNUZ) for ``gfx_arch``.
+
+    Mirrors the C++ arch defines in ``_compile_bquant_kernel``: gfx950 and gfx12*
+    build with -DCK_TILE_USE_OCP_FP8 so ``ck_tile::fp8_t`` is OCP e4m3 / e5m2.
+    Every other arch (notably gfx942 / gfx90a) has no OCP define, so ck_tile
+    falls back to the FNUZ encodings e4m3fnuz / e5m2fnuz.  Encoding host bytes
+    in the wrong format makes gfx942 read NaN / mismatched values.  When the
+    arch is unknown (None) assume OCP to preserve the historical gfx950 default.
+    """
+    if not gfx_arch:
+        return True
+    return ("gfx950" in gfx_arch) or ("gfx12" in gfx_arch)
+
+
+def _ml_fp8_dtype(dtype: str, gfx_arch: Optional[str]):
+    """Return the ml_dtypes fp8 type matching the kernel's ck_tile::fp8_t/bf8_t.
+
+    fp8 -> e4m3 (OCP) or e4m3fnuz (gfx942); bf8 -> e5m2 (OCP) or e5m2fnuz.
+    """
+    import ml_dtypes
+    if _uses_ocp_fp8(gfx_arch):
+        return ml_dtypes.float8_e4m3fn if dtype == "fp8" else ml_dtypes.float8_e5m2
+    return ml_dtypes.float8_e4m3fnuz if dtype == "fp8" else ml_dtypes.float8_e5m2fnuz
+
+
+def _encode_fp8_bytes(arr, dtype: str, gfx_arch: Optional[str] = None) -> "object":
+    """float32 -> fp8/bf8 raw bytes (uint8), ARCH-AWARE.
+
+    gfx950 / gfx12* -> OCP e4m3fn (fp8) / e5m2 (bf8).
+    gfx942 / gfx90a -> FNUZ e4m3fnuz (fp8) / e5m2fnuz (bf8).
+    Hardcoding OCP produced NaN / mismatches on gfx942, whose ck_tile::fp8_t is
+    FNUZ (no CK_TILE_USE_OCP_FP8 define).
+    """
     import numpy as np
     a = np.asarray(arr, dtype=np.float32)
     try:
-        import ml_dtypes
-        ml_t = ml_dtypes.float8_e4m3fn if dtype == "fp8" else ml_dtypes.float8_e5m2
+        ml_t = _ml_fp8_dtype(dtype, gfx_arch)
         return a.astype(ml_t).view(np.uint8)
     except ImportError:
         # Deterministic fallback matching the GPU-test encoder so CPU unit tests
@@ -438,11 +469,12 @@ def _encode_fp8_bytes(arr, dtype: str) -> "object":
         return (np.clip(a, -2.0, 2.0) * 64).astype(np.int8).view(np.uint8)
 
 
-def _encode_bq_for_variant(BQ, variant_key: Optional[str]) -> "object":
+def _encode_bq_for_variant(BQ, variant_key: Optional[str],
+                           gfx_arch: Optional[str] = None) -> "object":
     """Return BQ in the kernel's QDataType bytes for ``variant_key``.
 
     * fp8 / bf8  -> float32 (unchanged).
-    * fp8i4      -> fp8 bytes; bf8i4 -> bf8 bytes.
+    * fp8i4      -> fp8 bytes; bf8i4 -> bf8 bytes.  ARCH-AWARE (FNUZ on gfx942).
     * mx_*       -> e8m0 uint8.
 
     If BQ is already the target dtype (e.g. a caller pre-encoded MX scales to
@@ -462,7 +494,7 @@ def _encode_bq_for_variant(BQ, variant_key: Optional[str]) -> "object":
     if tag == "e8m0":
         return _encode_e8m0(arr)
     if tag in ("fp8", "bf8"):
-        return _encode_fp8_bytes(arr, tag)
+        return _encode_fp8_bytes(arr, tag, gfx_arch=gfx_arch)
     return arr
 
 
@@ -480,6 +512,17 @@ class BQuantGpuGemmRunner:
 
     def __init__(self, so_path: Path):
         self._lib = BQuantDispatcherLib(so_path)
+        # Derive the compiled-for arch from the .so filename ("lib{name}_{arch}.so")
+        # so the runner can encode fp8/bf8 BQ bytes in the matching format
+        # (OCP on gfx950/gfx12*, FNUZ on gfx942/gfx90a).  None if not encoded.
+        self._gfx_arch = self._arch_from_so_path(Path(so_path))
+
+    @staticmethod
+    def _arch_from_so_path(so_path: Path) -> Optional[str]:
+        stem = so_path.stem  # e.g. "libgemm_bquant_fp8i4_..._gfx942"
+        import re as _re
+        m = _re.search(r"_(gfx[0-9a-fA-F]+)$", stem)
+        return m.group(1) if m else None
 
     @property
     def kernel_name(self) -> str:
@@ -521,7 +564,9 @@ class BQuantGpuGemmRunner:
         # kernel's compile-time QDataType.  fp8/bf8 want float32; fp8i4/bf8i4 want
         # fp8/bf8 bytes; MX wants e8m0 uint8.  Encode float32 scales to the right
         # width here (i4 previously read 4-byte float32 as 1-byte fp8 -> NaN).
-        BQ = _encode_bq_for_variant(BQ, _variant_from_kernel_name(self.kernel_name))
+        BQ = _encode_bq_for_variant(
+            BQ, _variant_from_kernel_name(self.kernel_name),
+            gfx_arch=getattr(self, "_gfx_arch", None))
 
         # Output buffer -- dtype must match the compiled kernel's CDataType.
         C = np.zeros((M, N), dtype=c_dtype)

@@ -55,33 +55,46 @@ TOLERANCE = 0.05  # 5% max relative error — fp8/bf8 precision floor
 # Dtype helpers
 # ---------------------------------------------------------------------------
 
-def _encode_fp8(arr: np.ndarray, dtype: str) -> np.ndarray:
-    """Encode float32 → fp8 bytes (uint8 view). Uses ml_dtypes when available."""
+def _uses_ocp_fp8(gfx_arch: str) -> bool:
+    """True when ck_tile::fp8_t is OCP (not FNUZ) for ``gfx_arch``.
+
+    Mirrors the C++ arch defines in gemm_bquant_utils._compile_bquant_kernel:
+    gfx950 / gfx12* build with -DCK_TILE_USE_OCP_FP8 (OCP e4m3/e5m2), everything
+    else (gfx942 / gfx90a) uses FNUZ e4m3fnuz / e5m2fnuz.  Hardcoding OCP made
+    gfx942 read NaN / mismatched fp8 values.
+    """
+    return ("gfx950" in gfx_arch) or ("gfx12" in gfx_arch)
+
+
+def _ml_fp8_dtype(dtype: str, gfx_arch: str):
+    import ml_dtypes
+    if _uses_ocp_fp8(gfx_arch):
+        return ml_dtypes.float8_e4m3fn if dtype == "fp8" else ml_dtypes.float8_e5m2
+    return ml_dtypes.float8_e4m3fnuz if dtype == "fp8" else ml_dtypes.float8_e5m2fnuz
+
+
+def _encode_fp8(arr: np.ndarray, dtype: str, gfx_arch: str = "gfx950") -> np.ndarray:
+    """Encode float32 → fp8 bytes (uint8 view), ARCH-AWARE (FNUZ on gfx942)."""
     try:
-        import ml_dtypes
-        # fp8 = OCP e4m3fn (bias=7); bf8 = OCP e5m2.
-        # CK kernels on gfx950 are compiled with -DCK_TILE_USE_OCP_FP8 so they
-        # use the same OCP format — bit patterns are compatible.
-        ml_t = ml_dtypes.float8_e4m3fn if dtype == "fp8" else ml_dtypes.float8_e5m2
+        ml_t = _ml_fp8_dtype(dtype, gfx_arch)
         return arr.astype(ml_t).view(np.uint8)
     except ImportError:
         return (np.clip(arr, -2.0, 2.0) * 64).astype(np.int8).view(np.uint8)
 
 
-def _decode_fp8(arr: np.ndarray, dtype: str) -> np.ndarray:
+def _decode_fp8(arr: np.ndarray, dtype: str, gfx_arch: str = "gfx950") -> np.ndarray:
     try:
-        import ml_dtypes
-        ml_t = ml_dtypes.float8_e4m3fn if dtype == "fp8" else ml_dtypes.float8_e5m2
+        ml_t = _ml_fp8_dtype(dtype, gfx_arch)
         return arr.view(ml_t).astype(np.float32)
     except ImportError:
         return arr.view(np.int8).astype(np.float32) / 64.0
 
 
-def _encode_bf8(arr: np.ndarray) -> np.ndarray:
-    return _encode_fp8(arr, "bf8")
+def _encode_bf8(arr: np.ndarray, gfx_arch: str = "gfx950") -> np.ndarray:
+    return _encode_fp8(arr, "bf8", gfx_arch)
 
-def _decode_bf8(arr: np.ndarray) -> np.ndarray:
-    return _decode_fp8(arr, "bf8")
+def _decode_bf8(arr: np.ndarray, gfx_arch: str = "gfx950") -> np.ndarray:
+    return _decode_fp8(arr, "bf8", gfx_arch)
 
 
 def _encode_e8m0(arr: np.ndarray) -> np.ndarray:
@@ -255,17 +268,17 @@ def _run_one(label: str, config, M: int, N: int, K: int,
 # Individual test cases
 # ---------------------------------------------------------------------------
 
-def _make_fp8_inputs(M, N, K, gK, gN, dtype="fp8", seed=42):
+def _make_fp8_inputs(M, N, K, gK, gN, dtype="fp8", seed=42, gfx_arch="gfx950"):
     rng = np.random.default_rng(seed)
     QK_B = math.ceil(K / gK)
     QN_B = math.ceil(N / gN)
     A_f32 = rng.uniform(-2.0, 2.0, (M, K)).astype(np.float32)
     B_f32 = rng.uniform(-2.0, 2.0, (K, N)).astype(np.float32)
     BQ    = rng.uniform(0.5, 2.0, (QK_B, QN_B)).astype(np.float32)
-    A_raw = _encode_fp8(A_f32, dtype)
-    B_raw = _encode_fp8(B_f32, dtype)
-    A_dec = _decode_fp8(A_raw, dtype)
-    B_dec = _decode_fp8(B_raw, dtype)
+    A_raw = _encode_fp8(A_f32, dtype, gfx_arch)
+    B_raw = _encode_fp8(B_f32, dtype, gfx_arch)
+    A_dec = _decode_fp8(A_raw, dtype, gfx_arch)
+    B_dec = _decode_fp8(B_raw, dtype, gfx_arch)
     return A_raw, A_dec, B_raw, B_dec, BQ
 
 
@@ -310,7 +323,8 @@ def test_c4_fp8(out_dir: Path, gfx_arch: str) -> tuple[str, str]:
     M, K, gK, gN = 16, 768, 128, 1
     cfg = default_fp8_config(quant_group_k=gK, quant_group_n=gN, gfx_arch=gfx_arch)
     for N in _N_SWEEP:
-        A_raw, A_dec, B_raw, B_dec, BQ = _make_fp8_inputs(M, N, K, gK, gN, "fp8")
+        A_raw, A_dec, B_raw, B_dec, BQ = _make_fp8_inputs(M, N, K, gK, gN, "fp8",
+                                                          gfx_arch=gfx_arch)
         status, detail = _run_one(f"C4/fp8/N{N}", cfg, M, N, K,
                                   A_raw, A_dec, B_raw, B_dec, BQ,
                                   out_dir, c_dtype=np.float16, gfx_arch=gfx_arch)
@@ -324,7 +338,8 @@ def test_c4_bf8(out_dir: Path, gfx_arch: str) -> tuple[str, str]:
     M, K, gK, gN = 16, 768, 128, 1
     cfg = default_bf8_config(quant_group_k=gK, quant_group_n=gN, gfx_arch=gfx_arch)
     for N in _N_SWEEP:
-        A_raw, A_dec, B_raw, B_dec, BQ = _make_fp8_inputs(M, N, K, gK, gN, "bf8")
+        A_raw, A_dec, B_raw, B_dec, BQ = _make_fp8_inputs(M, N, K, gK, gN, "bf8",
+                                                          gfx_arch=gfx_arch)
         status, detail = _run_one(f"C4/bf8/N{N}", cfg, M, N, K,
                                   A_raw, A_dec, B_raw, B_dec, BQ,
                                   out_dir, c_dtype=np.float16, gfx_arch=gfx_arch)
@@ -357,8 +372,8 @@ def test_h3_mx_bf16bf8(out_dir: Path, gfx_arch: str) -> tuple[str, str]:
         A_raw, A_dec, _, _, BQ_e8m0, BQ_f32 = _make_bf16_inputs(M, N, K, gK, gN)
         # B is bf8: encode K*N float32 values as bf8 bytes
         B_f32 = np.random.default_rng(43).uniform(-1.0, 1.0, (K, N)).astype(np.float32)
-        B_raw_bf8 = _encode_fp8(B_f32, "bf8")
-        B_dec_bf8 = _decode_fp8(B_raw_bf8, "bf8")
+        B_raw_bf8 = _encode_fp8(B_f32, "bf8", gfx_arch)
+        B_dec_bf8 = _decode_fp8(B_raw_bf8, "bf8", gfx_arch)
         status, detail = _run_one(f"H3/mx_bf16bf8/N{N}", cfg, M, N, K,
                                   A_raw, A_dec, B_raw_bf8, B_dec_bf8, BQ_e8m0,
                                   out_dir, c_dtype=np.uint16, c_decode_fn=_bf16_raw_to_f32,
@@ -406,24 +421,39 @@ def test_c_i4(out_dir: Path, gfx_arch: str) -> tuple[str, str]:
         for N in _N_SWEEP:
             rng = np.random.default_rng(45)
             A_f32 = rng.uniform(-2.0, 2.0, (M, K)).astype(np.float32)
-            A_raw = _encode_fp8(A_f32, dtype)
-            A_dec = _decode_fp8(A_raw, dtype)
-            # B pk_int4 codes, col-major packed (2 K-elements per byte).
-            codes = rng.integers(0, 16, size=(K, N), dtype=np.uint8)
-            # pk_int4 signed 4-bit: codes 8..15 map to -8..-1.
-            B_dec = np.where(codes < 8, codes.astype(np.float32),
-                             codes.astype(np.float32) - 16.0)
-            _flat = codes.flatten(order='F').astype(np.uint8)
-            _lo = _flat[0::2] & 0x0F
-            _hi = _flat[1::2] & 0x0F
-            B_raw = (_lo | (_hi << 4)).astype(np.uint8)
+            A_raw = _encode_fp8(A_f32, dtype, gfx_arch)
+            A_dec = _decode_fp8(A_raw, dtype, gfx_arch)
+            # B is pk_int4: 2 K-elements per byte, packed COLUMN-MAJOR (rcr).
+            #
+            # Ground-truth nibble convention (Old-TE reference_gemm_quant +
+            # pk_int4.hpp with CK_TILE_USE_PK4_LAYOUT_SHUFFLE=1):
+            #   * value(code) = code - 8   (code in 0..15 -> value in [-8, +7]),
+            #     NOT the two's-complement (codes<8?codes:codes-16) round-5 used.
+            #   * pk_int4_t_to_fp32x2_t returns {x_h, x_l} (SHUFFLE swap), and
+            #     load_b picks (k&1) ? .hi : .lo, so for the byte covering
+            #     (k even, k odd) of a fixed n:
+            #         k even -> HIGH nibble;  k odd -> LOW nibble.
+            #   The device conversion consumes the same bytes after the
+            #   UNCONDITIONAL permute_vectors_i4x4_b in the ctypes lib, so the
+            #   host byte layout must match this reference exactly.
+            codes = rng.integers(0, 16, size=(K, N), dtype=np.uint8)  # 0..15
+            B_dec = codes.astype(np.float32) - 8.0                    # value = code-8
+            _flat = codes.flatten(order='F').astype(np.uint8)  # col-major idx=n*K+k
+            _even = _flat[0::2] & 0x0F   # k even -> HIGH nibble
+            _odd = _flat[1::2] & 0x0F    # k odd  -> LOW nibble
+            B_raw = (_odd | (_even << 4)).astype(np.uint8)
             QK_B = math.ceil(K / gK)
             QN_B = math.ceil(N / gN)
-            # BQ supplied as float32 -> the runner encodes it to fp8/bf8 (QDataType).
+            # BQ supplied as float32 -> the runner encodes it to fp8/bf8 (QDataType,
+            # arch-aware).  The kernel therefore sees the fp8/bf8-rounded scale, so
+            # the CPU reference must use the same round-tripped value to stay fair.
             BQ = rng.uniform(0.5, 2.0, (QK_B, QN_B)).astype(np.float32)
+            BQ_ref = _decode_fp8(_encode_fp8(BQ, dtype, gfx_arch), dtype, gfx_arch)
+            BQ_ref = BQ_ref.reshape(QK_B, QN_B).astype(np.float32)
             status, detail = _run_one(f"C/{variant}/N{N}", cfg, M, N, K,
                                       A_raw, A_dec, B_raw, B_dec, BQ,
-                                      out_dir, c_dtype=np.float16, gfx_arch=gfx_arch)
+                                      out_dir, c_dtype=np.float16,
+                                      BQ_ref=BQ_ref, gfx_arch=gfx_arch)
             if status != PASS:
                 return status, detail
         results.append(variant)
