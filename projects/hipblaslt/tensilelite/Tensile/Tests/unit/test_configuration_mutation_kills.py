@@ -604,3 +604,22 @@ class TestReadWriteTransformDictFlatten:
         c = deepcopy({"a": d, "b": None})
         assert c["b"] is None
         assert c["a"].readNoTransform("x") == 1
+
+
+class TestReadWriteTransformDictDeepCopyMemo:
+    """__deepcopy__ memo-protocol contract.
+
+    Kills the ``memo[id(self)] = result -> memo[id(self)] = None`` mutant. That
+    mutation is masked under ``copy.deepcopy`` (the outer machinery re-records
+    ``memo[id(self)]`` after ``__deepcopy__`` returns, even under aliasing), so a
+    direct ``__deepcopy__(memo)`` call is the only observation that distinguishes
+    it. Adversarial audit of the slice-4 residuals surfaced this; the original
+    certificate wrongly labelled the mutant unkillable by any test.
+    """
+
+    def test_deepcopy_records_result_in_memo(self):
+        d = ReadWriteTransformDict()
+        d.writeNoTransform("a", 1)
+        memo = {}
+        result = d.__deepcopy__(memo)
+        assert memo[id(d)] is result
