@@ -39,7 +39,7 @@
 
 ROCSOLVER_BEGIN_NAMESPACE
 
-static bool constexpr use_hegs2_alt = true;
+static bool constexpr use_sygs2_hegs2_alt = true;
 
 // ----------------------------------------------------------
 // kernel to symmetrize matrix and
@@ -259,7 +259,7 @@ void rocsolver_sygst_hegst_getMemorySize(const rocblas_fill uplo,
             *optim_mem = true;
     }
 
-    if(use_hegs2_alt)
+    if(use_sygs2_hegs2_alt)
     {
         // -----------------------------------
         // extra requirements for calling TRSM
@@ -357,7 +357,7 @@ rocblas_status rocsolver_sygst_hegst_template(rocblas_handle handle,
     T t_minone = -1;
     T t_minhalf = -0.5;
 
-    auto hegs2_alt
+    auto sygs2_hegs2_alt
         = [](rocblas_handle handle, rocblas_eform const itype, rocblas_fill const uplo, I const n,
 
              auto A, rocblas_stride const shiftA, I const lda, rocblas_stride const strideA,
@@ -554,12 +554,74 @@ rocblas_status rocsolver_sygst_hegst_template(rocblas_handle handle,
         }
 
         return (rocblas_status_success);
-    }; // end hegs2_alt
+    }; // end sygs2_hegs2_alt
+
+    auto call_sygs2_hegs2
+        = [sygs2_hegs2_alt, nb, optim_mem, scalars, work_x_temp, workArr_temp_arr, store_wcs_invA,
+           invA_arr](
+
+              rocblas_handle handle, rocblas_eform const itype, rocblas_fill const uplo,
+
+              I const n,
+
+              auto A, rocblas_stride const shiftA, I const lda, rocblas_stride const strideA,
+
+              auto B, rocblas_stride const shiftB, I const ldb, rocblas_stride const strideB,
+
+              I const batch_count) {
+              if(use_sygs2_hegs2_alt)
+              {
+                  // ------------------------------------------
+                  // note use nb to maintain alignment in temp1
+                  // ------------------------------------------
+                  size_t const len_Asave = size_t(batch_count) * nb * (nb - 1) / 2;
+                  T* const Asave = static_cast<T*>(work_x_temp);
+
+                  // ------------------------
+                  // scratch storage for TRSM
+                  // ------------------------
+                  auto const temp1 = Asave + len_Asave;
+                  auto const temp2 = workArr_temp_arr;
+                  auto const temp3 = store_wcs_invA;
+                  auto const temp4 = invA_arr;
+
+                  auto istat = sygs2_hegs2_alt(handle, itype, uplo, n,
+
+                                               A, shiftA, lda, strideA,
+
+                                               B, shiftB, ldb, strideB, batch_count,
+
+                                               Asave, optim_mem, temp1, temp2, temp3, temp4);
+                  if(istat != rocblas_status_success)
+                  {
+                      return (istat);
+                  }
+              }
+              else
+              {
+                  auto istat = rocsolver_sygs2_hegs2_template<BATCHED, T>(
+                      handle, itype, uplo, n,
+
+                      A, shiftA, lda, strideA,
+
+                      B, shiftB, ldb, strideB,
+
+                      batch_count,
+
+                      scalars, work_x_temp, store_wcs_invA, (T**)workArr_temp_arr);
+                  if(istat != rocblas_status_success)
+                  {
+                      return (istat);
+                  }
+              }
+              return (rocblas_status_success);
+          }; // end call_sygs2_hegs2
 
     // if the matrix is too small, use the unblocked variant of the algorithm
     if(n <= nb)
     {
-        if(use_hegs2_alt)
+#if(0)
+        if(use_sygs2_hegs2_alt)
         {
             // ------------------------------------------
             // note use nb to maintain alignment in temp1
@@ -575,13 +637,13 @@ rocblas_status rocsolver_sygst_hegst_template(rocblas_handle handle,
             auto const temp3 = store_wcs_invA;
             auto const temp4 = invA_arr;
 
-            return hegs2_alt(handle, itype, uplo, n,
+            return sygs2_hegs2_alt(handle, itype, uplo, n,
 
-                             A, shiftA, lda, strideA,
+                                   A, shiftA, lda, strideA,
 
-                             B, shiftB, ldb, strideB, batch_count,
+                                   B, shiftB, ldb, strideB, batch_count,
 
-                             Asave, optim_mem, temp1, temp2, temp3, temp4);
+                                   Asave, optim_mem, temp1, temp2, temp3, temp4);
         }
         else
         {
@@ -596,6 +658,15 @@ rocblas_status rocsolver_sygst_hegst_template(rocblas_handle handle,
                                                               scalars, work_x_temp, store_wcs_invA,
                                                               (T**)workArr_temp_arr);
         }
+#else
+        return call_sygs2_hegs2(handle, itype, uplo, n,
+
+                                A, shiftA, lda, strideA,
+
+                                B, shiftB, ldb, strideB,
+
+                                batch_count);
+#endif
     }
 
     if(itype == rocblas_eform_ax)
@@ -606,8 +677,8 @@ rocblas_status rocsolver_sygst_hegst_template(rocblas_handle handle,
             for(I k = 0; k < n; k += nb)
             {
                 I kb = std::min(n - k, nb);
-
-                if(use_hegs2_alt)
+#if(0)
+                if(use_sygs2_hegs2_alt)
                 {
                     // ------------------------------------------
                     // note use nb to maintain alignment in temp1
@@ -623,15 +694,15 @@ rocblas_status rocsolver_sygst_hegst_template(rocblas_handle handle,
                     auto const temp3 = store_wcs_invA;
                     auto const temp4 = invA_arr;
 
-                    auto const istat = hegs2_alt(handle, itype, uplo, kb,
+                    auto const istat = sygs2_hegs2_alt(handle, itype, uplo, kb,
 
-                                                 A, shiftA + idx2D(k, k, lda), lda, strideA,
+                                                       A, shiftA + idx2D(k, k, lda), lda, strideA,
 
-                                                 B, shiftB + idx2D(k, k, ldb), ldb, strideB,
+                                                       B, shiftB + idx2D(k, k, ldb), ldb, strideB,
 
-                                                 batch_count,
+                                                       batch_count,
 
-                                                 Asave, optim_mem, temp1, temp2, temp3, temp4);
+                                                       Asave, optim_mem, temp1, temp2, temp3, temp4);
 
                     if(istat != rocblas_status_success)
                     {
@@ -656,6 +727,21 @@ rocblas_status rocsolver_sygst_hegst_template(rocblas_handle handle,
                         return (istat);
                     }
                 }
+#else
+                {
+                    auto const istat = call_sygs2_hegs2(handle, itype, uplo, kb,
+
+                                                        A, shiftA + idx2D(k, k, lda), lda, strideA,
+
+                                                        B, shiftB + idx2D(k, k, ldb), ldb, strideB,
+
+                                                        batch_count);
+                    if(istat != rocblas_status_success)
+                    {
+                        return (istat);
+                    }
+                }
+#endif
 
                 if(k + kb < n)
                 {
@@ -696,7 +782,8 @@ rocblas_status rocsolver_sygst_hegst_template(rocblas_handle handle,
             {
                 I kb = std::min(n - k, nb);
 
-                if(use_hegs2_alt)
+#if(0)
+                if(use_sygs2_hegs2_alt)
                 {
                     // ------------------------------------------
                     // note use nb to maintain alignment in temp1
@@ -712,15 +799,15 @@ rocblas_status rocsolver_sygst_hegst_template(rocblas_handle handle,
                     auto const temp3 = store_wcs_invA;
                     auto const temp4 = invA_arr;
 
-                    auto istat = hegs2_alt(handle, itype, uplo, kb,
+                    auto istat = sygs2_hegs2_alt(handle, itype, uplo, kb,
 
-                                           A, shiftA + idx2D(k, k, lda), lda, strideA,
+                                                 A, shiftA + idx2D(k, k, lda), lda, strideA,
 
-                                           B, shiftB + idx2D(k, k, ldb), ldb, strideB,
+                                                 B, shiftB + idx2D(k, k, ldb), ldb, strideB,
 
-                                           batch_count,
+                                                 batch_count,
 
-                                           Asave, optim_mem, temp1, temp2, temp3, temp4);
+                                                 Asave, optim_mem, temp1, temp2, temp3, temp4);
 
                     if(istat != rocblas_status_success)
                     {
@@ -745,6 +832,21 @@ rocblas_status rocsolver_sygst_hegst_template(rocblas_handle handle,
                         return (istat);
                     }
                 }
+#else
+                {
+                    auto istat = call_sygs2_hegs2(handle, itype, uplo, kb,
+
+                                                  A, shiftA + idx2D(k, k, lda), lda, strideA,
+
+                                                  B, shiftB + idx2D(k, k, ldb), ldb, strideB,
+
+                                                  batch_count);
+                    if(istat != rocblas_status_success)
+                    {
+                        return (istat);
+                    };
+                }
+#endif
 
                 if(k + kb < n)
                 {
@@ -814,7 +916,8 @@ rocblas_status rocsolver_sygst_hegst_template(rocblas_handle handle,
                                  shiftA + idx2D(0, k, lda), lda, strideA, batch_count,
                                  (T**)workArr_temp_arr);
 
-                if(use_hegs2_alt)
+#if(0)
+                if(use_sygs2_hegs2_alt)
                 {
                     // ------------------------------------------
                     // note use nb to maintain alignment in temp1
@@ -830,15 +933,15 @@ rocblas_status rocsolver_sygst_hegst_template(rocblas_handle handle,
                     auto const temp3 = store_wcs_invA;
                     auto const temp4 = invA_arr;
 
-                    auto istat = hegs2_alt(handle, itype, uplo, kb,
+                    auto istat = sygs2_hegs2_alt(handle, itype, uplo, kb,
 
-                                           A, shiftA + idx2D(k, k, lda), lda, strideA,
+                                                 A, shiftA + idx2D(k, k, lda), lda, strideA,
 
-                                           B, shiftB + idx2D(k, k, ldb), ldb, strideB,
+                                                 B, shiftB + idx2D(k, k, ldb), ldb, strideB,
 
-                                           batch_count,
+                                                 batch_count,
 
-                                           Asave, optim_mem, temp1, temp2, temp3, temp4);
+                                                 Asave, optim_mem, temp1, temp2, temp3, temp4);
 
                     if(istat != rocblas_status_success)
                     {
@@ -858,6 +961,20 @@ rocblas_status rocsolver_sygst_hegst_template(rocblas_handle handle,
 
                         scalars, work_x_temp, store_wcs_invA, (T**)workArr_temp_arr);
                 }
+#else
+                {
+                    auto istat = call_sygs2_hegs2(handle, itype, uplo, kb, A,
+                                                  shiftA + idx2D(k, k, lda), lda, strideA,
+
+                                                  B, shiftB + idx2D(k, k, ldb), ldb, strideB,
+
+                                                  batch_count);
+                    if(istat != rocblas_status_success)
+                    {
+                        return (istat);
+                    }
+                }
+#endif
             }
         }
         else
@@ -893,7 +1010,8 @@ rocblas_status rocsolver_sygst_hegst_template(rocblas_handle handle,
                                  shiftA + idx2D(k, 0, lda), lda, strideA, batch_count,
                                  (T**)workArr_temp_arr);
 
-                if(use_hegs2_alt)
+#if(0)
+                if(use_sygs2_hegs2_alt)
                 {
                     // ------------------------------------------
                     // note use nb to maintain alignment in temp1
@@ -909,15 +1027,15 @@ rocblas_status rocsolver_sygst_hegst_template(rocblas_handle handle,
                     auto const temp3 = store_wcs_invA;
                     auto const temp4 = invA_arr;
 
-                    auto istat = hegs2_alt(handle, itype, uplo, kb,
+                    auto istat = sygs2_hegs2_alt(handle, itype, uplo, kb,
 
-                                           A, shiftA + idx2D(k, k, lda), lda, strideA,
+                                                 A, shiftA + idx2D(k, k, lda), lda, strideA,
 
-                                           B, shiftB + idx2D(k, k, ldb), ldb, strideB,
+                                                 B, shiftB + idx2D(k, k, ldb), ldb, strideB,
 
-                                           batch_count,
+                                                 batch_count,
 
-                                           Asave, optim_mem, temp1, temp2, temp3, temp4);
+                                                 Asave, optim_mem, temp1, temp2, temp3, temp4);
 
                     if(istat != rocblas_status_success)
                     {
@@ -937,6 +1055,21 @@ rocblas_status rocsolver_sygst_hegst_template(rocblas_handle handle,
 
                         scalars, work_x_temp, store_wcs_invA, (T**)workArr_temp_arr);
                 }
+#else
+                {
+                    auto istat = call_sygs2_hegs2(handle, itype, uplo, kb,
+
+                                                  A, shiftA + idx2D(k, k, lda), lda, strideA,
+
+                                                  B, shiftB + idx2D(k, k, ldb), ldb, strideB,
+
+                                                  batch_count);
+                    if(istat != rocblas_status_success)
+                    {
+                        return (istat);
+                    }
+                }
+#endif
             }
         }
     }
