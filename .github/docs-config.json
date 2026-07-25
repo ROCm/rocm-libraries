@@ -109,6 +109,11 @@
         "folder":  "tensile",
         "rtd_slug": "advanced-micro-devices-tensile",
         "rtd_alias": "Tensile"
+    },
+    {
+        "folder":  "rocalution",
+        "rtd_slug": "advanced-micro-devices-rocalution",
+        "rtd_alias": "rocALUTION"
     }
     ]
 }
