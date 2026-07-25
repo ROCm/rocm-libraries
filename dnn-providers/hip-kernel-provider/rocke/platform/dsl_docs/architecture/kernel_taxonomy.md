@@ -1,7 +1,8 @@
 # Kernel taxonomy: which primitive does each kernel use, and why
 
-> Matmul-shaped kernels use MFMA or WMMA where their current builder supports
-> it. Some attention variants still use a warp-distributed scalar body.
+> Matmul-shaped kernels use the exact gfx target's MFMA or WMMA operation where
+> their current builder supports it. Some attention variants still use a
+> warp-distributed scalar body.
 > Non-matmul ops use VALU, cross-lane reductions, atomics, or data movement
 > according to their actual computation.
 
@@ -9,14 +10,24 @@ This page is an index grounded in the current builders. The owning validator
 and builder remain the source of truth when a spec can select more than one
 body.
 
-## What MFMA is for
+Path notation in this page uses `<project_root>` for the rocKE component root,
+`<platform_root>` for `<project_root>/platform`, and `<library_root>` for
+`<project_root>/library`.
 
-The wave64 `mfma_f32_16x16x16_f16` instruction and related atoms compute a tiled matrix
-multiply-accumulate in one instruction. The checked-in catalogs cover the
-supported f16, bf16, fp8e4m3, and bf8e5m2 input families with f32
-accumulation; exact availability is target-specific.
+## What matrix MMA is for
 
-MFMA is a **matmul primitive**. It accelerates:
+Matrix MMA operations compute tiled multiply-accumulates. For example, the
+gfx942/gfx950 catalogs provide `mfma_f32_16x16x16_f16`, while the gfx1250
+catalog provides its own WMMA operations. The checked-in catalogs cover
+supported f16, bf16, fp8e4m3, and bf8e5m2 input combinations with f32
+accumulation; operation shape, fragment layout, and availability are exact-gfx
+facts. Wave32 versus wave64 is a separate compile-time execution-mode choice;
+it must agree with the selected operation's layout but does not select MFMA
+versus WMMA. The current `ArchTarget` catalog records one admitted wave size per
+exact gfx target; another compiler wave mode would need its own explicit
+backend, layout, and validator support.
+
+MFMA and WMMA are **matmul primitives**. They implement:
 * GEMM (`C += A @ B`)
 * Convolution (rewritten as implicit-GEMM)
 * Attention (`scores = Q @ K^T`, `out = P @ V`)
@@ -32,10 +43,10 @@ It does **not** accelerate:
 * Histogram / scan / sort
 * Quantization (cast + saturate)
 
-Trying to "fake" non-matmul work as a matmul (e.g. reduce as
-`[1, N] @ [N, 1]`) wastes 99% of the MFMA FLOPs and is slower
-than the natural VALU + cross-lane reduction path. **MFMA is not
-a hammer; it's a saw.**
+Representing non-matmul work as a matrix product (for example, a reduction as
+`[1, N] @ [N, 1]`) materializes matrix-shaped work and output ownership that
+the scalar result does not need. Use the primitive that matches the operation's
+actual shape.
 
 ## Kernel-by-kernel taxonomy
 
@@ -49,8 +60,10 @@ The columns are:
 ### Matmul-shaped kernels (use a supported matrix path)
 
 The exact primitive is target- and builder-specific: supported common builders
-select MFMA or WMMA through the target catalog, while MFMA-only families reject
-WMMA targets. Wave width is not a user-selectable matrix-family control.
+select MFMA or WMMA through the exact gfx target's catalog, while MFMA-only
+families reject targets that do not provide the required MFMA operation. Wave
+width is configured separately at compile time and is not a matrix-family
+control.
 
 | Kernel | Shape | Primitive | Status |
 |---|---|---|---|
@@ -68,11 +81,11 @@ WMMA targets. Wave width is not a user-selectable matrix-family control.
 | `conv_implicit_gemm` | conv = matmul | target-selected MFMA or restricted WMMA | ✓ |
 | `conv_direct_grouped` | conv (small-channel) | MFMA 4x4x4 atom | ✓ |
 | `fused_moe` per-expert | matmul (per-expert) | MFMA or WMMA (via universal) | ✓ |
-| `attention_tiled_2d` | attention (paged) | architecture-specific MFMA or WMMA QK + PV | ✓ |
-| `attention_tiled_3d` | attention (split-KV) | architecture-specific MFMA or WMMA QK + PV | ✓ |
-| `fmha_mfma` | attention | MFMA QK + PV | ✓ |
-| `fmha_varlen` | attention (varlen) | MFMA QK + PV | ✓ |
-| `fmha_head_grouping` | attention (GQA / MQA) | MFMA QK + PV | ✓ |
+| `attention_tiled_2d` | attention (paged) | gfx942/gfx950 MFMA or gfx1250 WMMA QK + PV | ✓ |
+| `attention_tiled_3d` | attention (split-KV) | gfx942/gfx950 MFMA or gfx1250 WMMA QK + PV | ✓ |
+| `fmha_mfma` | attention | target-selected MFMA or WMMA QK + PV (historical family name) | ✓ |
+| `fmha_varlen` | attention (varlen) | current MFMA QK + PV body | ✓ |
+| `fmha_head_grouping` | attention (GQA / MQA) | current MFMA QK + PV body | ✓ |
 | `fmha_paged_prefill` | attention (paged) | spec-selectable MFMA or warp-distributed body | ✓ |
 | `fmha_splitkv_decode` | attention (split-KV) | warp-distributed scalar segment + reduction | ✓ |
 | `fmha_fwd_fp8` | attention (fp8 K/V) | dequant + f16 MFMA QK/PV | ✓ (f16 activation/output contract) |
@@ -81,16 +94,19 @@ WMMA targets. Wave width is not a user-selectable matrix-family control.
 | `jenga_sparse_attention` | attention (block-sparse) | MFMA + LDS-staged mask predicate | ✓ |
 | `vsa_sparse_attention` | attention (LUT-sparse) | MFMA + LDS-staged LUT bitmap | ✓ |
 
-The shared MFMA forward body is
-`python/rocke/helpers/mfma_attention.py::mfma_attention_fwd_inner_body`; the
-warp fallback is `rocke/library/kernels/common/_fmha_warp_body.py`. Each family
-validator decides which body its current spec can select.
+The shared target-aware forward body is
+`<platform_root>/python/rocke/helpers/mfma_attention.py::mfma_attention_fwd_inner_body`;
+the warp fallback is
+`<library_root>/kernels/common/_fmha_warp_body.py`. Each owning validator
+decides which body and target-catalog operation its current spec can select.
+Separately, the current `fmha_varlen`, `fmha_head_grouping`, and paged-prefill
+MFMA build paths compile their block/lane geometry for wave64. That is an
+execution-mode constraint in those builders, not the reason they use MFMA.
 
 ### Non-matmul kernels (correctly NOT MFMA)
 
-These kernels have **no matmul** in their inner loop; using MFMA
-would require faking a matmul shape that wastes 99% of the
-intrinsic's FLOPs.
+These kernels have **no matmul** in their inner loop; using matrix MMA would
+require adding matrix-shaped work that the operation does not need.
 
 | Kernel | Shape | Primitive | Why not matrix MMA |
 |---|---|---|---|
@@ -99,22 +115,22 @@ intrinsic's FLOPs.
 | `add_rmsnorm2d_rdquant` | reduce + scale + quant | VALU + paired LDS reductions | reduce + cast |
 | `smoothquant` | row-reduce + per-row cast | VALU + LDS block-max | row-reduce + cast |
 | `moe_smoothquant` | per-expert smoothquant | VALU + LDS block-max | row-reduce + cast |
-| `reduce` | reduce (axis sum/max/min/mean/prod) | VALU + warp shuffle + cross-warp LDS | pure reduce |
-| `pooling` | windowed reduce | VALU + tile-window | small-window reduce |
+| `reduce` | reduce (axis sum/max/min/mean/prod) | VALU + target-wave shuffle and cross-wave LDS, with full-LDS fallback | pure reduce |
+| `pooling` | windowed reduce | VALU + descriptor-driven buffer loads | small-window reduce |
 | `elementwise` | unary / binary / swiglu | VALU SIMD | pure pointwise |
-| `permute_nd` | rank-N transpose | direct scalar/vector global gather + store | pure data motion |
+| `permute_nd` | rank-N transpose | descriptor-driven scalar/vector global load + store | pure data motion |
 | `transpose` | 2D transpose | LDS-staged/coalesced data movement | pure data motion |
 | `batched_transpose` | batched 2D transpose | LDS-staged/coalesced data movement | pure data motion |
-| `img2col` | NHWC → unfold matrix | gather + scatter | data prep (matmul follows in `conv_implicit_gemm`) |
-| `topk_softmax` | tournament reduce over K | VALU + cross-lane shuffle | tournament reduce |
-| `moe_sorting` | histogram + scan + scatter | atomic + scan + scatter | mixed reduce / data movement |
+| `img2col` | NHWC → unfold matrix | descriptor-driven vector load or scalar gather + global store | data prep (matmul follows in `conv_implicit_gemm`) |
+| `topk_softmax` | tournament reduce over K | VALU + wave-XOR argmax when the block fits one target wave; LDS reduction otherwise | tournament reduce |
+| `moe_sorting` | histogram + scan + scatter | LDS/global atomics + wave Kogge-Stone or LDS Hillis-Steele scan + scatter | mixed reduce / data movement |
 | `moe_gather` | gather by token-expert id | indexed global load + store | pure gather |
 | `moe_silu_mul` | elementwise activation | VALU SIMD | pure pointwise |
 | `moe_topk_weighted_reduce` | weighted sum across experts | VALU + atomic | reduce + scatter |
 | `fmha_appendkv` | cache scatter + optional rotary | global load/store + optional VALU | data motion + pointwise transform |
 
-Trying to use MFMA or WMMA for any of these would be a categorical mistake. For
-example: expressing a scalar layer-norm reduction as a matrix product would
+Using MFMA or WMMA for the current inner loops would not match their operation
+shape. For example, expressing a scalar layer-norm reduction as a matrix product would
 execute an MFMA for every K tile while materializing a full output tile to
 obtain one scalar, followed by a horizontal reduction across that tile. The
 extra matrix work and data rearrangement do not match the reduction shape.
@@ -125,16 +141,25 @@ Do not infer the active primitive from the family name alone. Paged prefill and
 Sage attention select between matrix and warp-distributed bodies, while
 split-KV decode and backward currently use warp-distributed scalar bodies.
 Read the owning validator and build function, then confirm the emitted IR/ISA.
+Resolve `ArchTarget` for the exact gfx target and select through its
+`MmaCatalog`. Configure wave width separately at compile time, then validate it
+against the selected operation's layout; wave width does not choose the matrix
+instruction family or establish target support.
 
 If a new kernel lands and someone wants to know "should this use a matrix
 instruction?", the rule is:
 
 1. Does the inner loop compute `C[i, j] += sum_k A[i, k] * B[k, j]`?
-   * If yes → the target-supported MFMA/WMMA path via the relevant catalog and
-     builder (`mfma_gemm_inner.mfma_k_loop` or
-     `mfma_attention_fwd_inner_body` for current MFMA-oriented families).
+   * If yes → select a matching `MmaOp` from the exact gfx target's catalog and
+     use its layout maps through the owning builder
+     (`mfma_gemm_inner.mfma_k_loop` or `mfma_attention_fwd_inner_body` for
+     current matrix-oriented families).
 2. Is the inner loop a reduction `acc = op(acc, x[i])`?
-   * If yes → `helpers/attention.warp_xor_reduce_*` family.
+   * If yes → choose by reduction scope and combiner: a wave-local shuffle,
+     an LDS block reduction from `helpers/reduction.py`, or a hybrid wave/LDS
+     reduction. Welford and paired reductions require their matching combiners;
+     `helpers/attention.warp_xor_reduce_*` is one wave-local implementation,
+     not the universal reduction path.
 3. Is the inner loop a pure pointwise transform?
    * If yes → straight VALU; no extra helper needed.
 4. Is the inner loop a scatter / gather with no compute?
