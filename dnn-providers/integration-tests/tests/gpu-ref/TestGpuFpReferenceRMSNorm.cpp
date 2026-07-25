@@ -669,6 +669,13 @@ namespace
 
 int64_t getMaxOuterSizeForCurrentDevice()
 {
+    int deviceCount = 0;
+    if(hipGetDeviceCount(&deviceCount) != hipSuccess || deviceCount == 0)
+    {
+        // No devices available, return a default value to skip the tests.
+        return 1;
+    }
+
     int deviceId = 0;
     EXPECT_EQ(hipGetDevice(&deviceId), hipSuccess);
 
