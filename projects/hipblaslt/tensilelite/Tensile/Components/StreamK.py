@@ -1005,11 +1005,13 @@ class StreamK(Component):
                 # tile evaluate the SAME uniform intra-cluster predicate
                 # (clusterReduceIntraCheck), so the whole cluster commits to
                 # either the barrier path or the global-flag path together --
-                # never a mix. On the fast path the owner arrives once and waits
-                # once for all C cluster members (peers signal after publishing
-                # their partials to the workspace), then reads the peer partials
-                # with the unchanged fixupStep loop; no per-peer flag
-                # read/spin/reset runs.
+                # never a mix. On the fast path the owner ARRIVES and WAITS on
+                # the SYMMETRIC cluster barrier; every peer likewise arrives AND
+                # waits after publishing its partial (see partialsWriteProcedure),
+                # so the barrier is a genuine cluster rendezvous. The owner's
+                # paired SCOPE_SYS acquire then observes the peers' published
+                # partials and it reads them with the unchanged fixupStep loop;
+                # no per-peer flag read/spin/reset runs, for any C.
                 clusterFast = self._streamKClusterBarrierFastEnabled(writer, kernel)
                 sClusterFast = None
                 skClusterSkipFlag = None
@@ -1050,10 +1052,11 @@ class StreamK(Component):
                     # partitioned L2 the owner must pair that with a SCOPE_SYS
                     # acquire so a peer partial written back on a different L2
                     # partition is re-fetched (not read stale) before it is
-                    # summed. The C>=4 cluster reduction falls back to THIS
-                    # global-flag handshake (the split-barrier fast path is
-                    # C<=2 only), so this acquire is what provides its cross-peer
-                    # visibility. Non-cluster StreamK keeps the SCOPE_DEV default.
+                    # summed. This global-flag handshake only runs for a cluster
+                    # that straddles the SK grid boundary (not intra-cluster);
+                    # fully-populated clusters of any C take the symmetric
+                    # barrier path above. Non-cluster StreamK keeps the SCOPE_DEV
+                    # default.
                     acqScope = (CacheScope.SCOPE_SYS
                                 if self._streamKClusterReductionEnabled(writer, kernel)
                                 else None)
@@ -1472,12 +1475,21 @@ class StreamK(Component):
             module.add(SBarrier(comment="store all data before setting flag"))
 
             # Non-owner peer fast path: after publishing the partial and the
-            # release fence, arrive at the cluster split barrier INSTEAD OF
-            # raising the global completion flag. Deadlock invariant: the
-            # intra-cluster predicate is the identical uniform check the owner
-            # evaluates, so a cluster never mixes barrier signalers with flag
-            # setters, and this peer signals exactly once on this (its only)
-            # epilogue exit before branching to endLabel below.
+            # SCOPE_SYS release fence, participate in the SYMMETRIC cluster
+            # barrier INSTEAD OF raising the global completion flag. The peer
+            # both ARRIVES (s_barrier_signal -3) and WAITS (s_barrier_wait -3),
+            # exactly like the owner and like the HW-validated multicast
+            # handshake -- it does NOT signal-and-exit. The peer's wait keeps it
+            # parked at the cluster rendezvous until every member (owner
+            # included) has arrived, giving the owner's paired acquire a real
+            # cross-cluster order to observe the just-published partial. Without
+            # the peer wait the barrier was not a genuine sync point and the
+            # owner could sum a stale slot for C >= 4 (grid-tail column stripe).
+            # Deadlock invariant: the intra-cluster predicate is the identical
+            # uniform check the owner evaluates, so a cluster never mixes barrier
+            # participants with flag setters, and this peer runs the symmetric
+            # arrive+wait exactly once on this (its only) epilogue exit before
+            # branching to endLabel below.
             clusterFast = self._streamKClusterBarrierFastEnabled(writer, kernel)
             skClusterSignalDone = None
             if clusterFast:
@@ -1485,8 +1497,9 @@ class StreamK(Component):
                 skClusterSignalDone = Label(label=writer.labels.getNameInc("SK_ClusterSignalDone"), comment="")
                 module.add(self.clusterReduceIntraCheck(writer, kernel))
                 module.add(SCBranchSCC0(labelName=skClusterUseFlag.getLabelName(), comment="not intra-cluster: fall back to global flag"))
-                module.add(self.clusterReduceSignal(writer, kernel))
-                module.add(SBranch(labelName=skClusterSignalDone.getLabelName(), comment="peer arrived at cluster barrier: skip global-flag store"))
+                module.add(self.clusterReduceSignal(writer, kernel))   # peer arrives at the cluster barrier
+                module.add(self.clusterReduceWait(writer, kernel))     # symmetric: peer also waits (do not exit before the whole cluster rendezvous)
+                module.add(SBranch(labelName=skClusterSignalDone.getLabelName(), comment="peer completed symmetric cluster barrier: skip global-flag store"))
                 module.add(skClusterUseFlag)
 
             if kernel["StreamK"] == 4:
@@ -1624,27 +1637,36 @@ class StreamK(Component):
     def _streamKClusterBarrierFastEnabled(self, writer, kernel):
         """Compile-time gate for the intra-cluster SPLIT-BARRIER fast path.
 
-        The single cluster ``s_barrier_signal/wait -3`` only orders the owner
-        against the peers it is HW-cluster-scoped with. On gfx1250 a reduction
-        cluster of C >= 4 peers spans multiple WGPs, so the owner can clear the
-        one cluster barrier before a cross-WGP peer's partial store is globally
-        visible and then sum a stale (missing) peer partial. That produces the
-        observed device ~= (C-1)/C * reference cluster-aligned column stripe
-        (~0.75 for C=4: exactly one peer contribution dropped). A C=2 cluster
-        stays within a single WGP and is validated race-free.
+        The cluster ``s_barrier_signal/wait -3`` orders EXECUTION across all C
+        co-resident peers; peer->owner memory VISIBILITY rides on the paired
+        SCOPE_SYS release (peer, before it arrives) / acquire (owner, after it
+        waits) fences. The earlier ASYMMETRIC form -- peers only
+        ``s_barrier_signal -3`` (arrive) and then branch away / exit while only
+        the owner ``s_barrier_wait -3`` -- was not a genuine cluster
+        synchronisation point on gfx1250: for a C >= 4 reduction cluster the
+        owner could observe the barrier satisfied and sum a peer slot before
+        that cross-WGP peer's partial was globally visible, dropping exactly one
+        contribution (device ~= (C-1)/C * reference, a cluster-aligned column
+        stripe confined to the grid tail). Adding more fences did not help
+        because the defect was structural, not a missing drain.
 
-        So keep the barrier fast path for C <= 2 only; for C >= 4 fall back to
-        the proven per-peer global-flag handshake (each peer publishes its
-        partial with a release and raises its own completion flag; the owner
-        spins on each peer flag with an acquire before reading that peer's
-        slot), which does gate on genuine cross-peer visibility. Correctness of
-        the reduction is prioritised over the barrier optimization here. Both
-        the owner wait and the peer signal gate on this identical predicate, so
-        the cluster never mixes barrier signalers with flag setters (the
-        deadlock invariant is preserved). See docs/design/streamk-wg-clusters.md.
+        The fix mirrors the HW-validated multicast handshake: make the barrier
+        SYMMETRIC -- every cluster member (owner AND every peer) both arrives
+        (``s_barrier_signal -3``) AND waits (``s_barrier_wait -3``) on the same
+        barrier, so no peer proceeds/exits until the whole cluster has rendezvoused
+        and the owner's acquire has a real cross-cluster order to observe. With
+        the symmetric barrier the fast path is correct for ALL C (validated
+        C = 2, 4, 8), so it is enabled whenever the cluster reduction is active;
+        there is NO per-peer global-flag fallback on the C >= 4 correctness path.
+
+        The per-tile global-flag handshake still exists, but only for a cluster
+        that straddles the SK grid boundary (``clusterReduceIntraCheck`` == SCC0,
+        i.e. not fully populated). Both the owner wait and the peer arrive/wait
+        gate on that identical uniform predicate, so a cluster never mixes
+        barrier participants with flag setters (deadlock invariant preserved).
+        See docs/design/streamk-wg-clusters.md.
         """
-        _, _, C, _ = streamKClusterFactors(kernel)
-        return self._streamKClusterReductionEnabled(writer, kernel) and C <= 2
+        return self._streamKClusterReductionEnabled(writer, kernel)
 
     def clusterReduceSignal(self, writer, kernel):
         """Wave-0-elected cluster split-barrier arrive (``s_barrier_signal -3``).
