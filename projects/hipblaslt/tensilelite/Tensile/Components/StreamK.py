@@ -1233,26 +1233,23 @@ class StreamK(Component):
         # SMulHIU32 and fold it (plus the lo-add carry) into SrdWS+1 instead of
         # adding only the carry.
         #
-        # Scoped to the cluster-reduction / factored path via
-        # _streamKClusterReductionEnabled (derived Ck>1): that path is what
-        # drives the large SK grids the 64-bit offset guards against, and it is
-        # the only path the fix targets. The pure-multicast ([C,1], Ck==1) and
-        # non-cluster StreamK paths take the else branch and keep the original
-        # 32-bit offset codegen byte-for-byte (no extra SGPR checkout, no
-        # schedule perturbation), so the multicast kernel remains byte-identical
-        # to the shipped baseline.
+        # Applied universally to every StreamK path that addresses the partials
+        # workspace (pure-multicast [C,1]/Ck==1, cluster reduction, factored
+        # [Cs,Ck], and non-cluster StreamK). The overflow depends only on the
+        # per-slot tile stride and the StreamK slot count -- the partials
+        # workspace is partialTileSize == tileSize * skGrid regardless of
+        # cluster mode -- so the multicast path can overflow on large problems
+        # just like the reduction/factored paths. Emitting the 64-bit offset
+        # everywhere costs one extra SGPR and one s_mul_hi_u32; it intentionally
+        # changes the multicast codegen (byte-identity with the prior 32-bit
+        # path is deliberately dropped now that the fix is universal).
         offBytes = hex(kernel["MacroTile0"]*kernel["MacroTile1"]*writer.states.bpeCinternal)
-        if self._streamKClusterReductionEnabled(writer, kernel):
-            tmpHi = writer.sgprPool.checkOut(1, "SKSlotOffsetHi")
-            module.add(SMulI32(dst=sgpr(tmpSgpr), src0=offBytes, src1=sPartialIdx, comment="Offset to correct partials tile (low word)"))
-            module.add(SMulHIU32(dst=sgpr(tmpHi), src0=offBytes, src1=sPartialIdx, comment="partials tile offset (high word) for 64-bit SRD"))
-            module.add(SAddU32(dst=sgpr("SrdWS+0"), src0=sgpr("SrdWS+0"), src1=sgpr(tmpSgpr), comment="add lo to SRD"))
-            module.add(SAddCU32(dst=sgpr("SrdWS+1"), src0=sgpr("SrdWS+1"), src1=sgpr(tmpHi), comment="add hi (offset high word + lo carry) to SRD"))
-            writer.sgprPool.checkIn(tmpHi)
-        else:
-            module.add(SMulI32(dst=sgpr(tmpSgpr), src0=offBytes, src1=sPartialIdx, comment="Offset to correct partials tile"))
-            module.add(SAddU32(dst=sgpr("SrdWS+0"), src0=sgpr("SrdWS+0"), src1=sgpr(tmpSgpr), comment="add lo to SRD"))
-            module.add(SAddCU32(dst=sgpr("SrdWS+1"), src0=sgpr("SrdWS+1"), src1=0, comment="add hi to SRD"))
+        tmpHi = writer.sgprPool.checkOut(1, "SKSlotOffsetHi")
+        module.add(SMulI32(dst=sgpr(tmpSgpr), src0=offBytes, src1=sPartialIdx, comment="Offset to correct partials tile (low word)"))
+        module.add(SMulHIU32(dst=sgpr(tmpHi), src0=offBytes, src1=sPartialIdx, comment="partials tile offset (high word) for 64-bit SRD"))
+        module.add(SAddU32(dst=sgpr("SrdWS+0"), src0=sgpr("SrdWS+0"), src1=sgpr(tmpSgpr), comment="add lo to SRD"))
+        module.add(SAddCU32(dst=sgpr("SrdWS+1"), src0=sgpr("SrdWS+1"), src1=sgpr(tmpHi), comment="add hi (offset high word + lo carry) to SRD"))
+        writer.sgprPool.checkIn(tmpHi)
 
         if tmpLocal is not None:
             writer.sgprPool.checkIn(tmpLocal)
