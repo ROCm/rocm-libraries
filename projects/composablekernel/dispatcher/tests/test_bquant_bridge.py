@@ -379,54 +379,248 @@ class TestPackedBCopyCount(unittest.TestCase):
 
 
 class TestEpilogueDependentCDepermute(unittest.TestCase):
-    """Round-5 BUG #2: the permute_n C de-permute is EPILOGUE-DEPENDENT.
-    PreshuffleB (WPQuantB) kernels need the FORWARD riffle C = C[:, _logical]
-    (gfx942 tester: max_rel ~4.7e-4 on all 4 preshuffleb configs); CompV3 /
-    preshufflequant kernels keep the INVERSE riffle _Cp[:, _logical] = C."""
+    """Round-6 BUG #1: the permute_n C de-permute is EPILOGUE-DEPENDENT *and*
+    N-TILE-AWARE.  The round-5 code used a GLOBAL riffle (width N // r), correct
+    only at N == TileN; at N >= 2*TileN it scrambled columns (gfx942/gfx950
+    tester: MX max_rel 50-74 at N=256/512).  Round-6:
+      * PreshuffleB (WPQuantB) kernels -> IDENTITY (no de-permute); the host-side
+        shuffle_b_permuteN / bq_permuteN already put C in logical order (gfx942
+        tester: any C riffle scrambled, max_rel 57-58; identity is exact).
+      * CompV3 / preshufflequant / MX (microscale) -> per-TileN INVERSE riffle.
+    """
 
-    def test_utils_selects_direction_by_epilogue(self):
-        # The runner must branch on whether the kernel name is a preshuffleb one,
-        # using a delimiter-aware token match (not a bare substring, which would
-        # false-positive on the "preshufflebq" preshufflequant token).
+    def test_utils_applies_per_tile_riffle(self):
+        # The runner must scope the riffle to a TileN-wide block, iterating over N
+        # in TileN steps (NOT a single global N // r split).
+        self.assertIn("range(0, N, _tile_n)", _UTILS_SRC)
+        # Inverse riffle (scatter) is retained for CompV3 / preshufflequant / MX.
+        self.assertIn("_dst[:, _logical] = _src", _UTILS_SRC)
+        # PreshuffleB must be IDENTITY now: the branch skips the riffle entirely.
+        self.assertIn("if not _is_preshuffleb:", _UTILS_SRC)
+        # The delimiter-aware token match distinguishes preshuffleb from the
+        # "preshufflebq" preshufflequant token.
         self.assertIn(r"(?:^|_)preshuffleb(?:_|$)", _UTILS_SRC)
-        # Forward riffle for PreshuffleB.
-        self.assertIn("C = C[:, _logical]", _UTILS_SRC)
-        # Inverse riffle retained for CompV3 / preshufflequant.
-        self.assertIn("_Cp[:, _logical] = C", _UTILS_SRC)
+        # The round-5 global-width formula must be gone.
+        self.assertNotIn("_half = N // _r", _UTILS_SRC)
 
     def test_preshuffleb_token_match_excludes_preshufflequant(self):
         # The token regex must fire for PreshuffleB names and NOT for the
         # preshufflequant ("preshufflebq") CompV3 name.
-        import re as _re
         tok = re.compile(r'(?:^|_)preshuffleb(?:_|$)')
-        # preshuffleb and preshuffleb+bquant -> forward riffle.
         self.assertTrue(tok.search(default_fp8_preshuffleb_config().name))
         self.assertTrue(tok.search(default_fp8_preshuffleb_bquant_config().name))
-        # preshufflequant (preshufflebq only) -> inverse riffle.
         self.assertIsNone(tok.search(default_fp8_preshufflequant_config().name))
 
-    def test_depermute_forward_then_inverse_are_true_inverses(self):
-        # Sanity-check the two riffles: applying the inverse to a forward-riffled
-        # array recovers the original, so the two epilogues use mirror ops.
+    def _global_depermute(self, C, tile_n, warp_n, wt_n):
+        """Reimplementation of the ROUND-5 (buggy) global inverse riffle."""
         import numpy as np
-        N, r = 8, 2
+        N = C.shape[1]
+        r = tile_n // wt_n // warp_n
         half = N // r
         logical = [(c % r) * half + (c // r) for c in range(N)]
-        col = np.arange(N).reshape(1, N)
-        forward = col[:, logical]              # PreshuffleB path
-        inverse = np.empty_like(col)
-        inverse[:, logical] = forward          # CompV3 path applied to forward
-        self.assertTrue(np.array_equal(inverse, col))
+        out = np.empty_like(C)
+        out[:, logical] = C
+        return out
 
-    def test_preshuffleb_kernel_names_are_detected(self):
-        # The preshuffleb configs must produce names whose "preshuffleb" token
-        # fires the forward-riffle branch; non-preshuffleb ones must not.
-        tok = re.compile(r'(?:^|_)preshuffleb(?:_|$)')
-        for ctor in (default_fp8_preshuffleb_config,
-                     default_fp8_preshuffleb_bquant_config):
-            self.assertTrue(tok.search(ctor().name), ctor().name)
-        for ctor in (default_fp8_config, default_fp8_preshufflequant_config):
-            self.assertIsNone(tok.search(ctor().name), ctor().name)
+    def _per_tile_depermute(self, C, tile_n, warp_n, wt_n):
+        """Reference of the ROUND-6 per-TileN inverse riffle (mirrors the runner)."""
+        import numpy as np
+        N = C.shape[1]
+        r = tile_n // wt_n // warp_n
+        within = tile_n // r
+        logical = [(c % r) * within + (c // r) for c in range(tile_n)]
+        out = np.empty_like(C)
+        for n0 in range(0, N, tile_n):
+            w = min(tile_n, N - n0)
+            src = C[:, n0:n0 + w]
+            if w == tile_n:
+                dst = np.empty_like(src)
+                dst[:, logical] = src
+                out[:, n0:n0 + tile_n] = dst
+            else:
+                out[:, n0:n0 + w] = src
+        return out
+
+    def test_single_ntile_matches_round5(self):
+        # At N == TileN the per-tile riffle and the old global riffle coincide
+        # (that is why N=128 passed before) -- guards against a regression on the
+        # single-N-tile case that was already validated.
+        import numpy as np
+        tile_n, warp_n, wt_n = 128, 4, 16   # NRepeat = 2
+        C = np.arange(2 * tile_n).reshape(2, tile_n)
+        g = self._global_depermute(C, tile_n, warp_n, wt_n)
+        p = self._per_tile_depermute(C, tile_n, warp_n, wt_n)
+        self.assertTrue(np.array_equal(g, p))
+
+    def test_multi_ntile_differs_from_round5(self):
+        # At N = 2*TileN and 4*TileN the two MUST differ -- this is exactly the
+        # bug the round-5 global riffle had (it mixed columns across N-tiles).
+        import numpy as np
+        tile_n, warp_n, wt_n = 128, 4, 16
+        for N in (256, 512):
+            C = np.arange(2 * N).reshape(2, N)
+            g = self._global_depermute(C, tile_n, warp_n, wt_n)
+            p = self._per_tile_depermute(C, tile_n, warp_n, wt_n)
+            self.assertFalse(np.array_equal(g, p), f"N={N}")
+
+    def test_per_tile_is_block_diagonal(self):
+        # The per-tile de-permute must never move a column out of its TileN block:
+        # each output column's source must lie in the same TileN-wide slice.
+        import numpy as np
+        tile_n, warp_n, wt_n = 128, 4, 16
+        N = 512
+        # Encode each column with its tile index; after de-permute the tile index
+        # of column j must still be j // tile_n.
+        tile_id = (np.arange(N) // tile_n).reshape(1, N)
+        out = self._per_tile_depermute(tile_id, tile_n, warp_n, wt_n)
+        expected = (np.arange(N) // tile_n).reshape(1, N)
+        self.assertTrue(np.array_equal(out, expected))
+
+    def test_runner_depermute_end_to_end_multi_tile(self):
+        # Drive the real runner code path (stubbed lib) with a known permuted C at
+        # N=256 and confirm it recovers the logical identity per tile.
+        import numpy as np
+        import gemm_bquant_utils as gbu
+
+        tile_n, warp_n, wt_n = 128, 4, 16
+        r = tile_n // wt_n // warp_n
+        within = tile_n // r
+        N = 256
+        M = 3
+        # Forward-riffle a logical C the way the epilogue would (per tile), then
+        # verify the runner inverts it back to logical.
+        logical = [(c % r) * within + (c // r) for c in range(tile_n)]
+        C_logical = np.arange(M * N).reshape(M, N).astype(np.float16)
+        C_permuted = np.empty_like(C_logical)
+        for n0 in range(0, N, tile_n):
+            blk = C_logical[:, n0:n0 + tile_n]
+            C_permuted[:, n0:n0 + tile_n] = blk[:, logical]
+
+        runner = gbu.BQuantGpuGemmRunner.__new__(gbu.BQuantGpuGemmRunner)
+
+        class _StubLib:
+            # CompV3 permute_n kernel name (NOT preshuffleb) at tile 128x*x*.
+            _name = ("gemm_bquant_fp8_rcr_compv3_permute_n_intrawave_"
+                     f"16x{tile_n}x256_1x{warp_n}x1_16x{wt_n}x128_qg1x1x128")
+
+            def __init__(self, C_ret):
+                self._C_ret = C_ret
+
+            def run(self, A, B, BQ, C, **kw):
+                C[...] = self._C_ret
+                return 0, 1.0
+
+            def get_kernel_name(self):
+                return self._name
+
+        runner._lib = _StubLib(C_permuted)
+        prob = BQuantGemmProblem(M=M, N=N, K=256)
+        res = runner.run(A=np.zeros((M, 256)), B=np.zeros((256, N)),
+                         BQ=np.ones((2, N)), problem=prob)
+        self.assertTrue(np.array_equal(res.C.astype(np.float32),
+                                       C_logical.astype(np.float32)))
+
+    def test_runner_preshuffleb_is_identity(self):
+        # PreshuffleB kernels must NOT de-permute: the runner returns C untouched.
+        import numpy as np
+        import gemm_bquant_utils as gbu
+
+        N, M = 256, 2
+        C_dev = np.arange(M * N).reshape(M, N).astype(np.float16)
+
+        runner = gbu.BQuantGpuGemmRunner.__new__(gbu.BQuantGpuGemmRunner)
+
+        class _StubLib:
+            _name = ("gemm_bquant_fp8_rcr_preshuffleb_permute_n_intrawave_"
+                     "128x128x128_1x4x1_16x16x128_qg1x1x128_preshuffleb")
+
+            def __init__(self, C_ret):
+                self._C_ret = C_ret
+
+            def run(self, A, B, BQ, C, **kw):
+                C[...] = self._C_ret
+                return 0, 1.0
+
+            def get_kernel_name(self):
+                return self._name
+
+        runner._lib = _StubLib(C_dev)
+        prob = BQuantGemmProblem(M=M, N=N, K=256)
+        res = runner.run(A=np.zeros((M, 256)), B=np.zeros((256, N)),
+                         BQ=np.ones((2, N)), problem=prob)
+        self.assertTrue(np.array_equal(res.C.astype(np.float32),
+                                       C_dev.astype(np.float32)))
+
+
+class TestQDataTypeAwareBQEncoding(unittest.TestCase):
+    """Round-6 BUG #2: BQ must be encoded to the kernel's QDataType.
+    fp8/bf8 -> float32; fp8i4 -> fp8; bf8i4 -> bf8; mx_* -> e8m0.  The round-5
+    runner passed BQ as float32 for every variant, so i4 kernels reinterpreted a
+    4-byte float32 as a 1-byte fp8/bf8 -> NaN in all 8 i4 configs."""
+
+    def test_variant_extracted_from_name(self):
+        import gemm_bquant_utils as gbu
+        cases = {
+            default_fp8_config: "fp8",
+            default_bf8_config: "bf8",
+            default_fp8i4_config: "fp8i4",
+            default_bf8i4_config: "bf8i4",
+            default_mx_bf16bf16_config: "mx_bf16bf16",
+            default_mx_bf16bf8_config: "mx_bf16bf8",
+            default_mx_bf16fp4_config: "mx_bf16fp4",
+        }
+        for ctor, expected in cases.items():
+            self.assertEqual(
+                gbu._variant_from_kernel_name(ctor().name), expected, ctor.__name__)
+
+    def test_fp8_bf8_bq_stays_float32(self):
+        import numpy as np
+        import gemm_bquant_utils as gbu
+        bq = np.array([[0.5, 1.0], [1.5, 2.0]], dtype=np.float32)
+        for v in ("fp8", "bf8"):
+            out = gbu._encode_bq_for_variant(bq, v)
+            self.assertEqual(out.dtype, np.float32, v)
+
+    def test_i4_bq_encoded_to_single_byte(self):
+        import numpy as np
+        import gemm_bquant_utils as gbu
+        bq = np.array([[0.5, 1.0], [1.5, 2.0]], dtype=np.float32)
+        # fp8i4 -> fp8 bytes; bf8i4 -> bf8 bytes; both must be 1 byte per scale.
+        for v in ("fp8i4", "bf8i4"):
+            out = gbu._encode_bq_for_variant(bq, v)
+            self.assertEqual(out.dtype, np.uint8, v)
+            self.assertEqual(out.shape, bq.shape, v)
+            self.assertEqual(out.itemsize, 1, v)
+
+    def test_mx_bq_encoded_to_e8m0(self):
+        import numpy as np
+        import gemm_bquant_utils as gbu
+        bq = np.array([[1.0, 2.0], [4.0, 0.5]], dtype=np.float32)
+        for v in ("mx_bf16bf16", "mx_bf16bf8", "mx_bf16fp4"):
+            out = gbu._encode_bq_for_variant(bq, v)
+            self.assertEqual(out.dtype, np.uint8, v)
+            # e8m0: byte == floor(log2(s)) + 127.
+            self.assertEqual(int(out[0, 0]), 127, v)   # 2^0
+            self.assertEqual(int(out[0, 1]), 128, v)   # 2^1
+            self.assertEqual(int(out[1, 0]), 129, v)   # 2^2
+            self.assertEqual(int(out[1, 1]), 126, v)   # 2^-1
+
+    def test_prencoded_bytes_pass_through(self):
+        # A caller that already handed uint8 bytes (e.g. pre-encoded MX/i4) must
+        # not be double-encoded.
+        import numpy as np
+        import gemm_bquant_utils as gbu
+        raw = np.array([[127, 128]], dtype=np.uint8)
+        for v in ("mx_bf16bf16", "fp8i4", "bf8i4"):
+            out = gbu._encode_bq_for_variant(raw, v)
+            self.assertTrue(np.array_equal(out, raw), v)
+
+    def test_unknown_variant_passthrough(self):
+        import numpy as np
+        import gemm_bquant_utils as gbu
+        bq = np.array([1.0, 2.0], dtype=np.float32)
+        out = gbu._encode_bq_for_variant(bq, None)
+        self.assertTrue(np.array_equal(out, bq))
 
 
 if __name__ == "__main__":

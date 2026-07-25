@@ -366,6 +366,107 @@ class BQuantDispatcherLib:
 
 
 # =============================================================================
+# QDataType-aware BQ encoding
+#
+# The ctypes lib reinterprets the BQ bytes as the kernel's compile-time QDataType
+# (unified_gemm_bquant_codegen.BQUANT_VARIANTS[*]["ck_q"]):
+#   fp8 / bf8               -> QDataType = float      (float32, 4 bytes)
+#   fp8i4                   -> QDataType = fp8_t       (1 byte, OCP e4m3)
+#   bf8i4                   -> QDataType = bf8_t       (1 byte, OCP e5m2)
+#   mx_bf16bf16/bf8/fp4     -> QDataType = e8m0_t      (1 byte, block-scale exp)
+#
+# The runner must therefore hand the .so bytes in the kernel's QDataType, NOT
+# always float32.  The round-5 runner passed BQ straight through as float32 for
+# every variant, so for the i4 variants the kernel read 4-byte float32 patterns
+# as 1-byte fp8/bf8 -> every value became NaN (all 8 fp8i4/bf8i4 configs failed).
+# =============================================================================
+
+# variant_key -> the numpy encoder that produces the kernel's QDataType bytes.
+# "float32" means "no re-encode" (fp8/bf8 plain).  The value is a tag consumed
+# by _encode_bq_for_variant so callers never need to know the QDataType.
+_BQ_QDTYPE_BY_VARIANT: Dict[str, str] = {
+    "fp8":         "float32",
+    "bf8":         "float32",
+    "fp8i4":       "fp8",
+    "bf8i4":       "bf8",
+    "mx_bf16bf16": "e8m0",
+    "mx_bf16bf8":  "e8m0",
+    "mx_bf16fp4":  "e8m0",
+}
+
+
+def _variant_from_kernel_name(name: str) -> Optional[str]:
+    """Extract the variant_key (fp8/bf8/fp8i4/bf8i4/mx_*) from a KERNEL_NAME.
+
+    KERNEL_NAME is "{NAME_PREFIX}_{variant}_{layout}_...", where NAME_PREFIX is
+    "gemm_bquant".  The MX variants embed underscores (mx_bf16bf16), so match the
+    longest known variant token rather than splitting on "_".
+    """
+    if not name.startswith(NAME_PREFIX + "_"):
+        return None
+    rest = name[len(NAME_PREFIX) + 1:]
+    # Longest-first so "mx_bf16bf16" is matched before any shorter prefix.
+    for v in sorted(_BQ_QDTYPE_BY_VARIANT, key=len, reverse=True):
+        if rest.startswith(v + "_"):
+            return v
+    return None
+
+
+def _encode_e8m0(arr) -> "object":
+    """float32 scale -> e8m0 uint8 (block-scale exponent; byte b == 2^(b-127))."""
+    import numpy as np
+    a = np.asarray(arr, dtype=np.float32)
+    a = np.clip(a, 0.0, np.float32(2.0 ** 127))
+    nonzero = a > 0.0
+    out = np.zeros(a.shape, dtype=np.uint8)
+    exp = np.floor(np.log2(a[nonzero])).astype(np.int32) + 127
+    out[nonzero] = np.clip(exp, 0, 254).astype(np.uint8)
+    return out
+
+
+def _encode_fp8_bytes(arr, dtype: str) -> "object":
+    """float32 -> fp8/bf8 raw bytes (uint8).  OCP e4m3fn (fp8) / e5m2 (bf8)."""
+    import numpy as np
+    a = np.asarray(arr, dtype=np.float32)
+    try:
+        import ml_dtypes
+        ml_t = ml_dtypes.float8_e4m3fn if dtype == "fp8" else ml_dtypes.float8_e5m2
+        return a.astype(ml_t).view(np.uint8)
+    except ImportError:
+        # Deterministic fallback matching the GPU-test encoder so CPU unit tests
+        # (which do not have ml_dtypes) still exercise the byte-width contract.
+        return (np.clip(a, -2.0, 2.0) * 64).astype(np.int8).view(np.uint8)
+
+
+def _encode_bq_for_variant(BQ, variant_key: Optional[str]) -> "object":
+    """Return BQ in the kernel's QDataType bytes for ``variant_key``.
+
+    * fp8 / bf8  -> float32 (unchanged).
+    * fp8i4      -> fp8 bytes; bf8i4 -> bf8 bytes.
+    * mx_*       -> e8m0 uint8.
+
+    If BQ is already the target dtype (e.g. a caller pre-encoded MX scales to
+    uint8, as the GPU test does), it is passed through untouched so we never
+    double-encode.  A None/unknown variant is passed through unchanged.
+    """
+    import numpy as np
+    if variant_key is None:
+        return BQ
+    tag = _BQ_QDTYPE_BY_VARIANT.get(variant_key, "float32")
+    arr = np.asarray(BQ)
+    if tag == "float32":
+        return arr.astype(np.float32) if arr.dtype != np.float32 else arr
+    # 1-byte QDataTypes: only re-encode when the caller handed us float32 scales.
+    if arr.dtype == np.uint8 or arr.dtype == np.int8:
+        return arr  # already encoded bytes
+    if tag == "e8m0":
+        return _encode_e8m0(arr)
+    if tag in ("fp8", "bf8"):
+        return _encode_fp8_bytes(arr, tag)
+    return arr
+
+
+# =============================================================================
 # BQuantGpuGemmRunner -- high-level runner
 # =============================================================================
 
@@ -416,6 +517,12 @@ class BQuantGpuGemmRunner:
         if c_dtype is None:
             c_dtype = np.float16
 
+        # QDataType-aware BQ encoding: the .so reinterprets BQ bytes as the
+        # kernel's compile-time QDataType.  fp8/bf8 want float32; fp8i4/bf8i4 want
+        # fp8/bf8 bytes; MX wants e8m0 uint8.  Encode float32 scales to the right
+        # width here (i4 previously read 4-byte float32 as 1-byte fp8 -> NaN).
+        BQ = _encode_bq_for_variant(BQ, _variant_from_kernel_name(self.kernel_name))
+
         # Output buffer -- dtype must match the compiled kernel's CDataType.
         C = np.zeros((M, N), dtype=c_dtype)
 
@@ -443,41 +550,67 @@ class BQuantGpuGemmRunner:
                 f"for kernel {self.kernel_name}"
             )
 
-        # permute_n epilogue writes C with N-columns riffled into r groups
-        # (r = tile_n / warp_tile_n / warp_n). Undo it so the caller gets logical C.
+        # PermuteNEpilogue writes C with N-columns riffled WITHIN EACH N-TILE.
+        # The riffle is scoped to one TileN-wide block (kNPerBlock == TileN in the
+        # epilogue), NOT the full N dimension: per M-repeat the epilogue permutes
+        # r = NRepeat = TileN / (WarpN * WarpTileN) column-groups of width TileN/r,
+        # then advances to the next N-tile.  Undoing it therefore has to be applied
+        # independently per TileN-wide slice.  The round-5 code used a GLOBAL riffle
+        # with _half = N // r, which is correct only when N == TileN (single N-tile)
+        # -- at N >= 2*TileN it scrambled columns (gfx942/gfx950 tester: max_rel
+        # 50-74 for MX at N=256/512).  The fix here tiles the de-riffle across N.
         #
-        # The de-permute direction is EPILOGUE-DEPENDENT:
-        #   * PreshuffleB (WPQuantB) epilogue -- kernel name contains "preshuffleb".
-        #     Its permute_n writes columns already in interleaved order, so recover
-        #     logical C with the FORWARD riffle  C = C[:, _logical]  (gfx942 tester
-        #     confirmed max_rel ~4.7e-4 on all 4 preshuffleb configs; the inverse
-        #     riffle left correct VALUES in the WRONG COLUMN ORDER).
-        #   * CompV3 / preshufflequant epilogue -- INVERSE riffle _Cp[:, _logical]=C
-        #     (this path validates for CompV3/preshufflequant kernels).
+        # The de-permute action is EPILOGUE-DEPENDENT:
+        #   * PreshuffleB (WPQuantB) kernels -- name token "preshuffleb".  Their
+        #     column order already comes out LOGICAL (the B-weight preshuffle
+        #     shuffle_b_permuteN + bq_permuteN on the host inputs already accounts
+        #     for the epilogue riffle), so the correct action is IDENTITY -- no
+        #     de-permute.  The gfx942 tester confirmed any C-side riffle here
+        #     (forward OR inverse) SCRAMBLES columns (max_rel 57-58); identity is
+        #     exact.
+        #   * CompV3 / preshufflequant / MX (microscale) kernels -- the epilogue
+        #     riffle is visible in device C, so apply the per-tile INVERSE riffle
+        #     to recover logical column order.
         _name = self.kernel_name
         if 'permute_n' in _name:
             import re as _re
-            _m = _re.search(r'_(\d+)x(\d+)x(\d+)_(\d+)x(\d+)x(\d+)_(\d+)x(\d+)x(\d+)_', _name)
-            if _m:
-                _tile_n = int(_m.group(2)); _warp_n = int(_m.group(5)); _wt_n = int(_m.group(8))
-                _r = _tile_n // _wt_n // _warp_n
-                if _r > 1 and (N % _r) == 0:
-                    _half = N // _r
-                    _logical = [(c % _r) * _half + (c // _r) for c in range(N)]
-                    # Match the "preshuffleb" name token exactly. Kernel-name
-                    # parts are "_"-joined, so PreshuffleB appends "_preshuffleb"
-                    # while preshufflequant appends "_preshufflebq" -- a bare
-                    # substring test would false-positive on the latter (CompV3).
-                    _is_preshuffleb = bool(
-                        _re.search(r'(?:^|_)preshuffleb(?:_|$)', _name)
-                    )
-                    if _is_preshuffleb:
-                        # WPQuantB epilogue: forward riffle recovers logical C.
-                        C = C[:, _logical]
-                    else:
-                        # CompV3 / preshufflequant epilogue: inverse riffle.
+            _is_preshuffleb = bool(_re.search(r'(?:^|_)preshuffleb(?:_|$)', _name))
+            if not _is_preshuffleb:
+                _m = _re.search(
+                    r'_(\d+)x(\d+)x(\d+)_(\d+)x(\d+)x(\d+)_(\d+)x(\d+)x(\d+)_', _name)
+                if _m:
+                    _tile_n = int(_m.group(2))
+                    _warp_n = int(_m.group(5))
+                    _wt_n = int(_m.group(8))
+                    _r = _tile_n // _wt_n // _warp_n
+                    # Only the last (partial) N-tile may be narrower than TileN.
+                    # The riffle is only defined on a FULL TileN-wide block whose
+                    # width divides evenly by r; skip any ragged tail rather than
+                    # mis-riffle it.
+                    if _r > 1 and (_tile_n % _r) == 0:
+                        _within = _tile_n // _r
+                        # Per-tile INVERSE riffle: within each TileN-wide block the
+                        # index list _logical is the same one round-5 used globally,
+                        # but scoped to TileN columns.  Applying it as a SCATTER
+                        # (_dst[:, _logical] = _src) is the inverse of the epilogue's
+                        # forward riffle -- identical direction to the validated
+                        # single-N-tile (N == TileN) round-5 CompV3 path.
+                        _logical = [
+                            (c % _r) * _within + (c // _r) for c in range(_tile_n)
+                        ]
                         _Cp = np.empty_like(C)
-                        _Cp[:, _logical] = C
+                        for _n0 in range(0, N, _tile_n):
+                            _w = min(_tile_n, N - _n0)
+                            _src = C[:, _n0:_n0 + _w]
+                            if _w == _tile_n:
+                                _dst = np.empty_like(_src)
+                                _dst[:, _logical] = _src
+                                _Cp[:, _n0:_n0 + _tile_n] = _dst
+                            else:
+                                # Ragged tail (N not a multiple of TileN): the
+                                # epilogue still riffles a full TileN internally but
+                                # only the first _w columns are stored; copy as-is.
+                                _Cp[:, _n0:_n0 + _w] = _src
                         C = _Cp
         return BQuantGemmResult(C=C, time_ms=time_ms, kernel_name=self.kernel_name)
 
