@@ -5502,6 +5502,11 @@ public:
         {
             attributes.set_name("SdpaFwd_" + std::to_string(_sub_nodes.size()));
         }
+        if(attributes.unfuse_fma_hint)
+        {
+            HIPDNN_FE_LOG_WARN("Ignoring SDPA unfuse-FMA hint on node '"
+                               << attributes.get_name() << "'; hipDNN selects fusion internally");
+        }
         if(q->get_name().empty())
         {
             q->set_name(attributes.get_name() + "::Q");
@@ -5636,7 +5641,7 @@ public:
      *         - [0] y: Resampled output tensor
      *         - [1] index: Max-pool indices when requested; nullptr otherwise
      *
-     * @see hipdnn_frontend::graph::ResampleFwdAttributes
+      * @see hipdnn_frontend::graph::ResampleFwdAttributes
      */
     // NOLINTBEGIN(readability-identifier-naming)
     std::array<std::shared_ptr<TensorAttributes>, 2> resample(std::shared_ptr<TensorAttributes> x,
@@ -5658,7 +5663,7 @@ public:
         if(generateIndex && attributes.get_resample_mode() == ResampleMode::MAXPOOL)
         {
             index = outputTensor(attributes.get_name() + "::Index");
-            // Index tensor needs to be a integer data type, default to int32
+            // Index tensor needs to be an integer data type, default to int32.
             index->set_data_type(DataType::INT32);
             attributes.set_index(index);
         }
@@ -5690,7 +5695,7 @@ public:
      * @param x Input activation tensor (batch, channels, spatial dimensions)
      * @param attributes Resample parameters: mode, padding mode, pre/post padding, stride,
      *        window size. Optional max-pool index generation parameter is ignored.
-     * @return  y: Resampled output tensor
+     * @return y Resampled output tensor
      *
      * @see hipdnn_frontend::graph::ResampleFwdAttributes
      */
@@ -5710,6 +5715,7 @@ public:
 
         auto y = outputTensor(attributes.get_name() + "::Y");
 
+        attributes.set_generate_index(false);
         attributes.set_x(std::move(x));
         attributes.set_y(y);
 

@@ -730,11 +730,12 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
         }
         CHECK_SOLUTION_FOUND(returnedAlgoCount);
         CHECK_RETURNED_WORKSPACE_SIZE(workspaceSize, max_workspace_size);
-        if(workspaceSize > 0)
+        auto gsu_malloc = prob.handle->gsu_malloc_by_size(workspaceSize);
+        if(!gsu_malloc)
         {
-            THROW_IF_HIP_ERROR(
-                hipMallocAsync(&workspace, workspaceSize, prob.handle->get_stream()));
+            throw rocblas_status_memory_error;
         }
+        workspace = prob.handle->gsu_workspace;
         hipblaslt_alpha_beta_type<Tc> alpha, beta;
         if(prob.alpha != nullptr)
         {
@@ -873,8 +874,6 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
         HANDLE_HIP_ERROR(hipFreeAsync(devicePtrArray_B, prob.handle->get_stream()), status);
     if(devicePtrArray_A)
         HANDLE_HIP_ERROR(hipFreeAsync(devicePtrArray_A, prob.handle->get_stream()), status);
-    if(workspaceSize > 0)
-        HANDLE_HIP_ERROR(hipFreeAsync(workspace, prob.handle->get_stream()), status);
     if(pref)
         HANDLE_HIPBLASLT_ERROR(hipblasLtMatmulPreferenceDestroy(pref), status);
     if(matmulDesc)
