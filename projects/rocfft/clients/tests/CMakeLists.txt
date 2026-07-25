@@ -578,10 +578,11 @@ if(BUILD_CODE_COVERAGE)
 
   add_custom_target(
     code_cov_tests
-    DEPENDS rocfft-test rocfft_rtc_helper
+    DEPENDS rocfft-test rocfft_rtc_helper rocfft-internal-test
     COMMAND ${CMAKE_COMMAND} -E rm -rf ./coverage-report
     COMMAND ${CMAKE_COMMAND} -E make_directory ./coverage-report/profraw
     COMMAND ${CMAKE_COMMAND} -E env LLVM_PROFILE_FILE="./coverage-report/profraw/rocfft-coverage_%p.profraw" GTEST_LISTENER=NO_PASS_LINE_IN_LOG $<TARGET_FILE:rocfft-test> --precompile=rocfft-test-precompile.db ${COVERAGE_TEST_OPTIONS}
+    COMMAND ${CMAKE_COMMAND} -E env LLVM_PROFILE_FILE="./coverage-report/profraw/rocfft-internal-coverage_%p.profraw" $<TARGET_FILE:rocfft-internal-test>
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
   )
 
@@ -604,10 +605,10 @@ if(BUILD_CODE_COVERAGE)
   add_custom_target(
     coverage
     DEPENDS code_cov_tests
-    COMMAND ${LLVM_PROFDATA} merge -sparse ./coverage-report/profraw/rocfft-coverage_*.profraw -o ./coverage-report/rocfft.profdata
-    COMMAND ${LLVM_COV} report -object ./library/src/librocfft.so -instr-profile=./coverage-report/rocfft.profdata
-    COMMAND ${LLVM_COV} show -object ./library/src/librocfft.so -instr-profile=./coverage-report/rocfft.profdata -format=html -output-dir=coverage-report
-    COMMAND ${LLVM_COV} export -object ./library/src/librocfft.so -instr-profile=./coverage-report/rocfft.profdata -format=lcov > ./coverage-report/coverage.info
+    COMMAND ${LLVM_PROFDATA} merge -sparse ./coverage-report/profraw/*.profraw -o ./coverage-report/rocfft.profdata
+    COMMAND ${LLVM_COV} report -object ./library/src/librocfft.so -object $<TARGET_FILE:rocfft-internal-test> -instr-profile=./coverage-report/rocfft.profdata
+    COMMAND ${LLVM_COV} show -object ./library/src/librocfft.so -object $<TARGET_FILE:rocfft-internal-test> -instr-profile=./coverage-report/rocfft.profdata -format=html -output-dir=coverage-report
+    COMMAND ${LLVM_COV} export -object ./library/src/librocfft.so -object $<TARGET_FILE:rocfft-internal-test> -instr-profile=./coverage-report/rocfft.profdata -format=lcov > ./coverage-report/coverage.info
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
   )
 

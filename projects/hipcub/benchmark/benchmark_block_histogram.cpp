@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2020 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -64,13 +64,13 @@ struct histogram
         __shared__ T                                  histogram[BinSize];
         __shared__ typename bhistogram_t::TempStorage storage;
 
-#pragma nounroll
+        _CCCL_PRAGMA_NOUNROLL()
         for(unsigned int trial = 0; trial < Trials; trial++)
         {
             bhistogram_t(storage).Histogram(values, histogram);
         }
 
-#pragma unroll
+        _CCCL_PRAGMA_UNROLL_FULL()
         for(unsigned int offset = 0; offset < BinSize; offset += BlockSize)
         {
             if(offset + hipThreadIdx_x < BinSize)
