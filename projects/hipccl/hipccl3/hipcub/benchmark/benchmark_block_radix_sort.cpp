@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2020-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -134,7 +134,7 @@ __global__ __launch_bounds__(BlockSize) void sort_keys_kernel(const T* input, T*
     T keys[ItemsPerThread];
     Helper::template load<BlockSize>(lid, input + block_offset, keys);
 
-#pragma nounroll
+    _CCCL_PRAGMA_NOUNROLL()
     for(unsigned int trial = 0; trial < Trials; trial++)
     {
         Helper::template sort<BlockSize>(keys);
@@ -162,7 +162,7 @@ __global__ __launch_bounds__(BlockSize) void sort_pairs_kernel(const T* input, T
         values[i] = keys[i] + T(1);
     }
 
-#pragma nounroll
+    _CCCL_PRAGMA_NOUNROLL()
     for(unsigned int trial = 0; trial < Trials; trial++)
     {
         Helper::template sort<BlockSize>(keys, values);

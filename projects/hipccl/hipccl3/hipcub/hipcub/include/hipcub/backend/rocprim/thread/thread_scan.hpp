@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2021, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2021-2026, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -61,7 +61,7 @@ HIPCUB_FORCEINLINE
                           ScanOp scan_op, ///< [in] Binary scan operator
                           detail::int_constant_t<LENGTH> /*length*/)
 {
-#pragma unroll
+    _CCCL_PRAGMA_UNROLL_FULL()
     for(int i = 0; i < LENGTH; ++i)
     {
         inclusive = scan_op(exclusive, input[i]);
@@ -144,7 +144,7 @@ HIPCUB_FORCEINLINE
                           ScanOp scan_op, ///< [in] Binary scan operator
                           detail::int_constant_t<LENGTH> /*length*/)
 {
-#pragma unroll
+    _CCCL_PRAGMA_UNROLL_FULL()
     for(int i = 0; i < LENGTH; ++i)
     {
         inclusive = scan_op(inclusive, input[i]);
