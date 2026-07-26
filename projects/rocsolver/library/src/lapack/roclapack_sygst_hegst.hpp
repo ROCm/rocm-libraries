@@ -69,20 +69,20 @@ static __global__ void copy_symm_tri_kernel(bool const is_lower,
     // linear mapping from strictly upper/lower
     // part to array of size n*(n-1)/2
     // ---------------------------------------
-    auto idxU = [=](auto i, auto j) {
+    auto idxU = [](auto i, auto j, auto n) {
         assert(i < j);
         auto const k = ((i * n - i * (i + 1) / 2) + (j - (i + 1)));
         assert((0 <= k) && (k < n * (n - 1) / 2));
         return (k);
     };
-    auto idxL = [=](auto i, auto j) {
+    auto idxL = [](auto i, auto j, auto n) {
         assert(i > j);
-        auto const k = idxU(j, i);
+        auto const k = i * (i - 1) / 2 + j;
         assert((0 <= k) && (k < n * (n - 1) / 2));
         return (k);
     };
 
-    auto idx2D = [=](auto i, auto j, auto ld) { return (i + j * ld); };
+    auto idx2D = [](auto i, auto j, auto ld) { return (i + j * ld); };
 
     I const bid_start = blockIdx.z;
     I const bid_inc = gridDim.z;
@@ -106,7 +106,7 @@ static __global__ void copy_symm_tri_kernel(bool const is_lower,
 
             for(I i = row_start + i_start; i < row_end; i += i_inc)
             {
-                auto const ij_B = (is_lower) ? idxU(j, i) : idxL(j, i);
+                auto const ij_B = (is_lower) ? idxU(j, i, n) : idxL(j, i, n);
 
                 if(is_restore)
                 {
@@ -258,28 +258,53 @@ void rocsolver_sygst_hegst_getMemorySize(const rocblas_fill uplo,
         {
             if(uplo == rocblas_fill_upper)
             {
+                I const ldb_estimate = nn;
+                I const lda_estimate = nn;
+
                 // -------------------------
                 // Compute A <- inv(U')*A*inv(U)
                 // -------------------------
-                rocsolver_trsm_mem<BATCHED, STRIDED, T>(
-                    rocblas_side_left, rocblas_operation_conjugate_transpose, nn, nn, batch_count,
-                    &temp1, &temp2, &temp3, &temp4, optim_mem);
 
-                rocsolver_trsm_mem<BATCHED, STRIDED, T>(rocblas_side_right, rocblas_operation_none,
-                                                        nn, nn, batch_count, &temp5, &temp6, &temp7,
-                                                        &temp8, optim_mem);
+                rocblasCall_trsm_mem<BATCHED, T>(rocblas_side_left,
+                                                 rocblas_operation_conjugate_transpose, nn, nn,
+
+                                                 lda_estimate, ldb_estimate,
+
+                                                 batch_count,
+
+                                                 &temp1, &temp2, &temp3, &temp4);
+
+                rocblasCall_trsm_mem<BATCHED, T>(rocblas_side_right, rocblas_operation_none, nn, nn,
+
+                                                 lda_estimate, ldb_estimate,
+
+                                                 batch_count,
+
+                                                 &temp5, &temp6, &temp7, &temp8);
             }
             else
             {
+                I const ldb_estimate = nn;
+                I const lda_estimate = nn;
                 // -------------------------
                 // Compute A <- inv(L)*A*inv(L')
                 // -------------------------
-                rocsolver_trsm_mem<BATCHED, STRIDED, T>(rocblas_side_left, rocblas_operation_none,
-                                                        nn, nn, batch_count, &temp1, &temp2, &temp3,
-                                                        &temp4, optim_mem);
-                rocsolver_trsm_mem<BATCHED, STRIDED, T>(
-                    rocblas_side_right, rocblas_operation_conjugate_transpose, nn, nn, batch_count,
-                    &temp5, &temp6, &temp7, &temp8, optim_mem);
+                rocblasCall_trsm_mem<BATCHED, T>(rocblas_side_left, rocblas_operation_none, nn, nn,
+
+                                                 lda_estimate, ldb_estimate,
+
+                                                 batch_count,
+
+                                                 &temp1, &temp2, &temp3, &temp4);
+
+                rocblasCall_trsm_mem<BATCHED, T>(rocblas_side_right,
+                                                 rocblas_operation_conjugate_transpose, nn, nn,
+
+                                                 lda_estimate, ldb_estimate,
+
+                                                 batch_count,
+
+                                                 &temp5, &temp6, &temp7, &temp8);
             }
 
             *size_work_x_temp = std::max(*size_work_x_temp, std::max(temp1, temp5));
@@ -380,7 +405,8 @@ rocblas_status rocsolver_sygst_hegst_template(rocblas_handle handle,
 
         T t_one = 1;
 
-        rocblas_stride const strideAsave = n * (n - 1) / 2;
+        auto const nb = xxGST_BLOCKSIZE;
+        rocblas_stride const strideAsave = rocblas_stride(nb) * (nb - 1) / 2;
 
         // ---------------------------------------------------
         // symmetrize matrix and save strictly triangular part
@@ -543,7 +569,7 @@ rocblas_status rocsolver_sygst_hegst_template(rocblas_handle handle,
     }; // end sygs2_hegs2_alt
 
     auto call_sygs2_hegs2
-        = [sygs2_hegs2_alt, nb, optim_mem, scalars, work_x_temp, workArr_temp_arr, store_wcs_invA,
+        = [sygs2_hegs2_alt, optim_mem, scalars, work_x_temp, workArr_temp_arr, store_wcs_invA,
            invA_arr](
 
               rocblas_handle handle, rocblas_eform const itype, rocblas_fill const uplo,
@@ -560,6 +586,7 @@ rocblas_status rocsolver_sygst_hegst_template(rocblas_handle handle,
                   // ------------------------------------------
                   // note use nb to maintain alignment in temp1
                   // ------------------------------------------
+                  auto const nb = xxGST_BLOCKSIZE;
                   size_t const len_Asave = size_t(nb * (nb - 1) / 2) * batch_count;
                   T* const Asave = static_cast<T*>(work_x_temp);
 
