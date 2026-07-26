@@ -97,7 +97,7 @@ static __global__ void copy_symm_tri_kernel(bool const is_lower,
     for(I bid = bid_start; bid < batch_count; bid += bid_inc)
     {
         T* const A = load_ptr_batch<T>(AA, bid, shiftA, strideA);
-        T* const B = load_ptr_batch<T>(BB, bid_start, shiftB, strideB);
+        T* const B = load_ptr_batch<T>(BB, bid, shiftB, strideB);
 
         for(I j = 0 + j_start; j < n; j += j_inc)
         {
