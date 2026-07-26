@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2011-2023, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2024-2025, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2024-2026, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -30,6 +30,7 @@
 #include "../../bench_utils/bench_utils.hpp"
 
 // rocThrust
+#include <thrust/detail/config/namespace.h>
 #include <thrust/device_vector.h>
 #include <thrust/execution_policy.h>
 #include <thrust/unique.h>
@@ -85,7 +86,7 @@ void run_benchmark(
     in_vals  = thrust::device_vector<ValueT>(elements);
     out_vals = thrust::device_vector<ValueT>(elements);
   }
-  catch (const ::thrust::system::detail::bad_alloc& e)
+  catch (const THRUST_NS_QUALIFIER::system::detail::bad_alloc& e)
   {
     (void) hipGetLastError();
     state.SkipWithError(("thrust::system::detail::bad_alloc: " + std::string(e.what())).c_str());
@@ -167,10 +168,9 @@ void run_benchmark(
 #endif
 
 template <class Benchmark>
-void add_benchmarks(
-  const std::string& name, std::vector<benchmark::internal::Benchmark*>& benchmarks, const std::string seed_type)
+void add_benchmarks(const std::string& name, std::vector<benchmark::Benchmark*>& benchmarks, const std::string seed_type)
 {
-  std::vector<benchmark::internal::Benchmark*> bs;
+  std::vector<benchmark::Benchmark*> bs;
   BENCHMARK_KEY_TYPE(int8_t)
   BENCHMARK_KEY_TYPE(int16_t)
   BENCHMARK_KEY_TYPE(int32_t)
@@ -198,7 +198,7 @@ int main(int argc, char* argv[])
   benchmark::AddCustomContext("seed", seed_type);
 
   // Add benchmark
-  std::vector<benchmark::internal::Benchmark*> benchmarks;
+  std::vector<benchmark::Benchmark*> benchmarks;
   add_benchmarks<by_key>("by_key", benchmarks, seed_type);
 
   // Use manual timing

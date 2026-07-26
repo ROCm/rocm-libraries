@@ -17,9 +17,17 @@
 #pragma once
 
 #include <thrust/detail/config.h>
+
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+#include <thrust/detail/internal_functional.h>
 #include <thrust/system/detail/generic/count.h>
 #include <thrust/transform_reduce.h>
-#include <thrust/detail/internal_functional.h>
 
 THRUST_NAMESPACE_BEGIN
 namespace system
@@ -29,53 +37,54 @@ namespace detail
 namespace generic
 {
 
-
 template <typename InputType, typename Predicate, typename CountType>
 struct count_if_transform
 {
-  THRUST_HOST_DEVICE
-  count_if_transform(Predicate _pred) : pred(_pred){}
+  THRUST_HOST_DEVICE count_if_transform(Predicate _pred)
+      : pred(_pred)
+  {}
 
   THRUST_EXEC_CHECK_DISABLE
-  THRUST_HOST_DEVICE
-  CountType operator()(const InputType& val)
+  THRUST_HOST_DEVICE CountType operator()(const InputType& val)
   {
-    if(pred(val))
+    if (pred(val))
+    {
       return 1;
+    }
     else
+    {
       return 0;
+    }
   } // end operator()
 
   Predicate pred;
 }; // end count_if_transform
 
-
 template <typename DerivedPolicy, typename InputIterator, typename EqualityComparable>
-THRUST_HOST_DEVICE
-typename thrust::iterator_traits<InputIterator>::difference_type
-count(thrust::execution_policy<DerivedPolicy> &exec, InputIterator first, InputIterator last, const EqualityComparable& value)
+THRUST_HOST_DEVICE thrust::detail::it_difference_t<InputIterator>
+count(thrust::execution_policy<DerivedPolicy>& exec,
+      InputIterator first,
+      InputIterator last,
+      const EqualityComparable& value)
 {
   using thrust::placeholders::_1;
 
   return thrust::count_if(exec, first, last, _1 == value);
 } // end count()
 
-
 template <typename DerivedPolicy, typename InputIterator, typename Predicate>
-THRUST_HOST_DEVICE
-typename thrust::iterator_traits<InputIterator>::difference_type
-count_if(thrust::execution_policy<DerivedPolicy> &exec, InputIterator first, InputIterator last, Predicate pred)
+THRUST_HOST_DEVICE thrust::detail::it_difference_t<InputIterator>
+count_if(thrust::execution_policy<DerivedPolicy>& exec, InputIterator first, InputIterator last, Predicate pred)
 {
-  using InputType = typename thrust::iterator_traits<InputIterator>::value_type;
-  using CountType = typename thrust::iterator_traits<InputIterator>::difference_type;
+  using InputType = thrust::detail::it_value_t<InputIterator>;
+  using CountType = thrust::detail::it_difference_t<InputIterator>;
 
   thrust::system::detail::generic::count_if_transform<InputType, Predicate, CountType> unary_op(pred);
   thrust::plus<CountType> binary_op;
   return thrust::transform_reduce(exec, first, last, unary_op, CountType(0), binary_op);
 } // end count_if()
 
-
-} // end generic
-} // end detail
-} // end system
+} // namespace generic
+} // namespace detail
+} // namespace system
 THRUST_NAMESPACE_END
