@@ -121,7 +121,7 @@ static __global__ void copy_symm_tri_kernel(bool const is_lower,
     for(I bid = bid_start; bid < batch_count; bid += bid_inc)
     {
         T* const A = load_ptr_batch<T>(AA, bid, shiftA, strideA);
-        T* const B = load_ptr_batch<T>(BB, bid, shiftB, strideB);
+        T* const B = load_ptr_batch<T>(BB, bid_start, shiftB, strideB);
 
         for(I j = 0 + j_start; j < n; j += j_inc)
         {
@@ -320,9 +320,7 @@ void rocsolver_sygst_hegst_getMemorySize(const rocblas_fill uplo,
         // NOTE: assume xxGST_BLOCKSIZE is a power of 2
         // to maintain alignment
         // ----------------------------------------
-        I const max_blocks = get_max_blocks();
-        I const lbatch_count = std::min(max_blocks, batch_count);
-        size_t const size_Asave = (sizeof(T) * nn * (nn - 1) / 2) * lbatch_count;
+        size_t const size_Asave = (sizeof(T) * nn * (nn - 1) / 2) * batch_count;
         *size_work_x_temp += size_Asave;
     }
 }
@@ -586,9 +584,7 @@ rocblas_status rocsolver_sygst_hegst_template(rocblas_handle handle,
                   // ------------------------------------------
                   // note use nb to maintain alignment in temp1
                   // ------------------------------------------
-                  I const max_blocks = get_max_blocks();
-                  I const lbatch_count = std::min(max_blocks, batch_count);
-                  size_t const len_Asave = size_t(nb * (nb - 1) / 2) * lbatch_count;
+                  size_t const len_Asave = size_t(nb * (nb - 1) / 2) * batch_count;
                   T* const Asave = static_cast<T*>(work_x_temp);
 
                   // ------------------------
