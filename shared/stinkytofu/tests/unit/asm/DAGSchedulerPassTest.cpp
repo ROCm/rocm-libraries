@@ -502,14 +502,14 @@ TEST_F(DAGSchedulerPassTest, IndependentWMMAFirst_ThenDsThenVALU) {
 // source register the WMMA is still reading.
 //
 // Setup: WMMA #0 reads v[50:58); the ds_load writes v[52:56) (overlap). Four
-// more independent WMMAs (disjoint registers) are available. While WMMA #0 is
-// in flight the ds_load is held back by the hazard gate, so the scheduler
-// issues the next independent WMMA (D#100) first and only then the ds_load,
-// once a WMMA whose sources it does not touch is the active one:
+// more independent WMMAs (disjoint registers) are available. The mode2 WAR gate
+// holds the ds_load back until kMode2WarGateWmmas WMMAs have issued since v52 was
+// last WMMA-src-read (by WMMA D#12). Only 5 WMMAs exist here, fewer than the gate
+// distance, so the ds_load never clears the gate mid-stream and drains last:
 //
-//   wmma D#12  ->  wmma D#100  ->  ds_load D#52  ->  wmma D#108/116/124
+//   wmma D#12  ->  wmma D#100/108/116/124  ->  ds_load D#52
 //
-// Without the hazard gate the ds_load would issue right after WMMA #0
+// Without the gate the ds_load would issue right after WMMA #0
 // (wmma D#12 -> ds_load -> wmma D#100 -> ...), clobbering v[52:56) mid-read.
 // ---------------------------------------------------------------------------
 TEST_F(DAGSchedulerPassTest, WmmaSrcOverlap_HazardDsLoadDeferredPastWindow) {
@@ -548,11 +548,12 @@ TEST_F(DAGSchedulerPassTest, WmmaSrcOverlap_HazardDsLoadDeferredPastWindow) {
     }
 
     const std::vector<std::pair<std::string, int>> expected = {
-        {"wmma", 12}, {"wmma", 100}, {"ds", 52}, {"wmma", 108}, {"wmma", 116}, {"wmma", 124},
+        {"wmma", 12}, {"wmma", 100}, {"wmma", 108}, {"wmma", 116}, {"wmma", 124}, {"ds", 52},
     };
     EXPECT_EQ(seq, expected)
-        << "hazardous ds_load must be deferred until an independent WMMA (D#100) has "
-           "issued; it must not co-issue inside WMMA D#12's latency window";
+        << "hazardous ds_load must be deferred by the mode2 WAR gate; it must not "
+           "co-issue inside any WMMA's latency window while its WMMA reader is still "
+           "within the gate distance";
 }
 
 // ---------------------------------------------------------------------------
