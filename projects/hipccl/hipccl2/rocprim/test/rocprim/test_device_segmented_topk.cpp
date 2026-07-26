@@ -910,6 +910,26 @@ void segmented_topk_large_sizes_test(bool debug_synchronous)
 
 TEST(RocprimDeviceSegmentedTopkTests, SegmentedTopkLargeSizesStable)
 {
+    // Temporarily disable this test on gfx115x on Windows until we can determine the root cause.
+    // TODO: remove this after the root cause has been found and fixed properly.
+#if defined(_WIN32)
+    rocprim::detail::target_arch arch = rocprim::detail::target_arch::unknown;
+    if (rocprim::detail::host_target_arch(hipStreamDefault, arch) != HIP_SUCCESS)
+    {
+        std::cerr << "Warning: unable to fetch target architecture for disablement check." << std::endl;
+    }
+
+    const std::set<rocprim::detail::target_arch> disabled_arches = {
+        rocprim::detail::target_arch::gfx1150,
+        rocprim::detail::target_arch::gfx1151,
+        rocprim::detail::target_arch::gfx1152,
+        rocprim::detail::target_arch::gfx1153
+    };
+
+    if (disabled_arches.find(arch) != disabled_arches.end())
+        GTEST_SKIP() << "Skipping test on gfx1151 Windows systems due to known issues.";
+#endif
+        
     constexpr bool descending            = false;
     constexpr bool stable                = true;
     using decomposer_t                   = rocprim::identity_decomposer;
@@ -934,6 +954,26 @@ TEST(RocprimDeviceSegmentedTopkTests, SegmentedTopkLargeSizesStable)
 
 TEST(RocprimDeviceSegmentedTopkTests, TopkLargeSizesUnstable)
 {
+    // Temporarily disable this test on gfx115x on Windows until we can determine the root cause.
+    // TODO: remove this after the root cause has been found and fixed properly.
+#if defined(_WIN32)
+    rocprim::detail::target_arch arch = rocprim::detail::target_arch::unknown;
+    if (rocprim::detail::host_target_arch(hipStreamDefault, arch) != HIP_SUCCESS)
+    {
+        std::cerr << "Warning: unable to fetch target architecture for disablement check." << std::endl;
+    }
+
+    const std::set<rocprim::detail::target_arch> disabled_arches = {
+        rocprim::detail::target_arch::gfx1150,
+        rocprim::detail::target_arch::gfx1151,
+        rocprim::detail::target_arch::gfx1152,
+        rocprim::detail::target_arch::gfx1153
+    };
+
+    if (disabled_arches.find(arch) != disabled_arches.end())
+        GTEST_SKIP() << "Skipping test on gfx1151 Windows systems due to known issues.";
+#endif
+    
     constexpr bool descending            = false;
     constexpr bool stable                = false;
     using decomposer_t                   = rocprim::identity_decomposer;

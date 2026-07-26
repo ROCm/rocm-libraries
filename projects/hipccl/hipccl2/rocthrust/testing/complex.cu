@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2024 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -68,11 +68,11 @@ struct TestComplexSizeAndAlignment
 {
   void operator()()
   {
-    THRUST_STATIC_ASSERT(sizeof(thrust::complex<T>) == sizeof(T) * 2);
-    THRUST_STATIC_ASSERT(alignof(thrust::complex<T>) == alignof(T) * 2);
+    static_assert(sizeof(thrust::complex<T>) == sizeof(T) * 2);
+    static_assert(alignof(thrust::complex<T>) == alignof(T) * 2);
 
-    THRUST_STATIC_ASSERT(sizeof(thrust::complex<T const>) == sizeof(T) * 2);
-    THRUST_STATIC_ASSERT(alignof(thrust::complex<T const>) == alignof(T) * 2);
+    static_assert(sizeof(thrust::complex<T const>) == sizeof(T) * 2);
+    static_assert(alignof(thrust::complex<T const>) == alignof(T) * 2);
   }
 };
 SimpleUnitTest<TestComplexSizeAndAlignment, FloatingPointTypes> TestComplexSizeAndAlignmentInstance;

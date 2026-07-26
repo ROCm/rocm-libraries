@@ -18,6 +18,14 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
 #include <new>
 #include <string>
 
@@ -40,9 +48,9 @@ public:
     m_what += w;
   } // end bad_alloc()
 
-  inline virtual ~bad_alloc(void) noexcept {};
+  inline virtual ~bad_alloc() noexcept {};
 
-  inline virtual const char* what(void) const noexcept
+  inline virtual const char* what() const noexcept
   {
     return m_what.c_str();
   } // end what()

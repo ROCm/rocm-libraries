@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019-2025, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2019-2026, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -41,7 +41,6 @@
 #include <thrust/system/hip/config.h>
 
 #include <thrust/detail/allocator_aware_execution_policy.h>
-#include <thrust/detail/dependencies_aware_execution_policy.h>
 #include <thrust/detail/execution_policy.h>
 #include <thrust/iterator/detail/any_system_tag.h>
 #include <thrust/version.h>
@@ -62,13 +61,10 @@ struct execution_policy<tag> : thrust::execution_policy<tag>
   using tag_type = tag;
 };
 
-THRUST_SUPPRESS_DEPRECATED_PUSH
 struct tag
     : execution_policy<tag>
-    , thrust::detail::allocator_aware_execution_policy<hip_rocprim::execution_policy>
-    , thrust::detail::dependencies_aware_execution_policy<hip_rocprim::execution_policy>
+    , detail::allocator_aware_execution_policy<hip_rocprim::execution_policy>
 {};
-THRUST_SUPPRESS_DEPRECATED_POP
 
 template <class Derived>
 struct execution_policy : thrust::execution_policy<Derived>
