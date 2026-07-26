@@ -391,7 +391,7 @@ TEST_F(IntegrationSdpaBwdDescriptorLowering, SdpaBwdWithAllOptionalTensorsAndSca
     sdpaAttrs.set_padding_mask(true);
     sdpaAttrs.set_causal_mask(true);
     sdpaAttrs.set_causal_mask_bottom_right(true);
-    sdpaAttrs.set_attn_scale_value(0.125f);
+    sdpaAttrs.set_attn_scale(0.125f);
     sdpaAttrs.set_diagonal_band_left_bound(0);
     sdpaAttrs.set_diagonal_band_right_bound(128);
     sdpaAttrs.set_diagonal_alignment(DiagonalAlignment::BOTTOM_RIGHT);
