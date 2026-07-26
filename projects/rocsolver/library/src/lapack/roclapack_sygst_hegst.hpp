@@ -43,31 +43,7 @@ static bool constexpr use_sygs2_hegs2_alt = true;
 
 static inline int get_max_blocks()
 {
-    int const max_blocks_default = 64;
-
-    int deviceId = 0;
-    {
-        auto const istat = hipGetDevice(&deviceId);
-        if(istat != hipSuccess)
-        {
-            return (max_blocks_default);
-        }
-    }
-
-    hipDeviceProp_t prop;
-    {
-        auto const istat = hipGetDeviceProperties(&prop, deviceId);
-        if(istat != hipSuccess)
-        {
-            return (max_blocks_default);
-        }
-    }
-
-    auto const totalCUs = prop.multiProcessorCount;
-
-    auto const max_blocks = 4 * totalCUs;
-
-    return (max_blocks);
+    return (1024);
 }
 
 // ----------------------------------------------------------
