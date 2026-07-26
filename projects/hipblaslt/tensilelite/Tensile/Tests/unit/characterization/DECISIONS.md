@@ -380,7 +380,16 @@ paths): DataType → `Tensile/Common/DataType.py`; CommonTypes →
 ## D16 — BufferLoad/BufferStore promoted to Required Parameters
 **Context** kernel basename hash changes across all archs; assembly verified unchanged/correct; no err or kernel-count changes."
 
-## D17 — LibraryIO dict-format raw logic snapshot addition
+## D17 — StreamKWorkStealing added to the required (min-naming) parameter set
+**Decision:** Promote `StreamKWorkStealing` to the required (min-naming) parameter set in
+`Common/RequiredParameters.py` and accept the regenerated `_codegen` / SolutionClass /
+ValidParameters goldens.
+**Why:** without it, two solutions differing only in `StreamKWorkStealing` would collide on the
+same kernel identity name/hash.
+**Verification:** only `basename` hashes + the `SKWS0` name token + the roster/valid-values entry
+change (`num_keys` 334→335); no `err`, instruction-count, or emitted-assembly changes.
+
+## D18 — LibraryIO dict-format raw logic snapshot addition
 **Context:** `rawLibraryLogic` historically unpacked only list-format logic. A
 dict-format input path was added to preserve the legacy tuple contract used by
 older call sites (`versionString`, `scheduleName`, `architectureName`,
@@ -402,7 +411,7 @@ cannot silently break backward compatibility.
 - Update all snapshots wholesale — rejected by governance; only the single new
   node was generated.
 
-## D18 — test_create_library_logic_dict_arch golden changed from list-shape to dict-shape
+## D19 — test_create_library_logic_dict_arch golden changed from list-shape to dict-shape
 **Context:** Diff vs `develop` shows the snapshot node
 `test_create_library_logic_dict_arch` in
 `LibraryIO/__snapshots__/test_logiccontract_char.ambr` moved from a legacy
