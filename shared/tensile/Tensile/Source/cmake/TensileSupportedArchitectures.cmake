@@ -64,6 +64,8 @@ if(NOT BUILD_ADDRESS_SANITIZER)
     list(APPEND SUPPORTED_ARCHITECTURES
         "gfx906:xnack+"
         "gfx906:xnack-"
+        "gfx90c:xnack+"
+        "gfx90c:xnack-"
         "gfx908:xnack+"
         "gfx908:xnack-"
         "gfx90a:xnack+"

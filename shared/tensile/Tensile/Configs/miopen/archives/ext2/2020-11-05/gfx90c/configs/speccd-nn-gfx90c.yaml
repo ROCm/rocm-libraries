@@ -1,0 +1,65 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+GlobalParameters: {EnqueuesPerSync: 100, NumElementsToValidate: -1, KernelTime: true,
+  SleepPercent: 0, DataInitTypeBeta: 1, DataInitTypeAB: 0, PrintSolutionRejectionReason: 1,
+  PrintWinnersOnly: 1, NewClient: 2, CEqualD: 0}
+BenchmarkProblems:
+- - OperationType: TensorContraction
+    DataType: s
+    TransposeA: false
+    TransposeB: false
+    UseBeta: true
+    Batched: true
+    NumIndicesC: 3
+    IndexAssignmentsA: [0, 3, 2]
+    IndexAssignmentsB: [3, 1, 2]
+    UseInitialStridesCD: true
+  - InitialSolutionParameters: null
+    BenchmarkCommonParameters:
+    - KernelLanguage: [Assembly]
+    - EdgeType: [ShiftPtr]
+    ForkParameters:
+    - LdcEqualsLdd: [0]
+    - ThreadTile:
+      - [4, 4]
+      - [8, 8]
+    - WorkGroup:
+      - [8, 8, 1]
+      - [16, 16, 1]
+    - StaggerU: [32]
+    - StaggerUMapping: [1]
+    - DepthU: [16]
+    - VectorWidth: [-1]
+    - GlobalReadVectorWidth: [-1]
+    - FractionalLoad: [1]
+    - AssertStrideCEqual:
+      - {0: 0}
+    - AssertStrideDEqual:
+      - {0: 1}
+    BenchmarkForkParameters: null
+    BenchmarkJoinParameters: null
+    BenchmarkFinalParameters:
+    - ProblemSizes:
+      - Exact:
+          sizes: [480, 512, 1, 512]
+          stridesC: [0]
+      - Exact:
+          sizes: [512, 512, 1, 512]
+          stridesC: [0]
+      - Exact:
+          sizes: [960, 1024, 1, 1024]
+          stridesC: [0]
+      - Exact:
+          sizes: [1024, 1024, 1, 1024]
+          stridesC: [0]
+      - Exact:
+          sizes: [1920, 2048, 1, 2048]
+          stridesC: [0]
+      - Exact:
+          sizes: [2048, 2048, 1, 2048]
+          stridesC: [0]
+LibraryLogic:
+  ScheduleName: cezanne
+  DeviceNames: [Device 1638, Cezanne, Radeon Graphics]
+  ArchitectureName: gfx90c
