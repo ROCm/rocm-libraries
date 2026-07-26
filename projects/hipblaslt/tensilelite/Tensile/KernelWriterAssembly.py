@@ -2347,7 +2347,7 @@ class KernelWriterAssembly(KernelWriter):
       module.add(padNoExitLabel)
     return module
 
-  def computeMulticastMaskReduction(self, kernel, module, sgprWgX, sgprWgY, sgprNWgX):
+  def computeMulticastMaskReduction(self, kernel, module, sgprWgX, sgprWgY, maskColSgpr, maskRowSgpr):
     """Emit the per-cluster reduced broadcast-bit masks for the padded edge-size path.
 
     A boundary cluster (grid rounded up to ClusterDim) contains padded WGs that
@@ -2357,27 +2357,18 @@ class KernelWriterAssembly(KernelWriter):
     sharers of a row/column). GSU only scales the Y (WorkGroup1) extent to
     tilesN*GSU.
 
-    Returns (reduceMaskTmp, maskColSgpr, maskRowSgpr, wgX, wgY, nwgX). The caller
-    MUST use the returned wg_x/y/nwg_x for the emit (they are snapshots; the
-    originals get clobbered) and check in reduceMaskTmp when it is not None.
+    Writes the reduced-bit masks into maskColSgpr/maskRowSgpr and returns True;
+    returns False (no write) for Stream-K or non-cluster, where the caller falls
+    back to the full mask.
     """
     cx = kernel["ClusterDim"][0]
     cy = kernel["ClusterDim"][1]
     # Stream-K's 1-D grid is not padded and WorkGroup0/1 are not M/N tile indices,
     # so the reduction (like the padded early-exit) does not apply.
     if not ((cx > 1 or cy > 1) and kernel["StreamK"] == 0):
-      return None, None, None, sgprWgX, sgprWgY, sgprNWgX
+      return False
 
-    reduceMaskTmp = self.sgprPool.checkOut(5, tag="reduceMulticastMask")
-    snapWgX  = reduceMaskTmp + 0
-    snapWgY  = reduceMaskTmp + 1
-    snapNWgX = reduceMaskTmp + 2
-    maskColSgpr = reduceMaskTmp + 3  # runtime (1<<(validY*cx))-1 to AND with maskA
-    maskRowSgpr = reduceMaskTmp + 4  # runtime (1<<validX)-1       to AND with maskB
     module.addComment0("reduce multicast mask to real WGs in cluster")
-    module.add(SMovB32(dst=sgpr(snapWgX),  src=sgpr(sgprWgX),  comment="snapshot wg_x"))
-    module.add(SMovB32(dst=sgpr(snapWgY),  src=sgpr(sgprWgY),  comment="snapshot wg_y"))
-    module.add(SMovB32(dst=sgpr(snapNWgX), src=sgpr(sgprNWgX), comment="snapshot nwg_x"))
     # Reuse the NumWorkGroups0/1 named SGPRs here: at this point they are uninitialized.
     # Note: the grouped-gemm path also borrows NumWorkGroups0/1 as temps later, but
     # grouped-gemm + Multicast is not a supported combination today; if that changes,
@@ -2389,7 +2380,7 @@ class KernelWriterAssembly(KernelWriter):
       regStateRes = ContinuousRegister(idx=rmScratch.idx, size=2)
       # validX = clamp(tilesM - (WorkGroup0 - wg_x), 0..cx)
       module.add(scalarStaticCeilDivide(qReg=sgpr(tiles), dReg=sgpr("SizeI"), divisor=kernel["MacroTile0"], tmpSgprRes=regStateRes))
-      module.add(SSubU32(dst=sgpr(maskColSgpr), src0=sgpr("WorkGroup0"), src1=sgpr(snapWgX), comment="clusterBaseX"))
+      module.add(SSubU32(dst=sgpr(maskColSgpr), src0=sgpr("WorkGroup0"), src1=sgpr(sgprWgX), comment="clusterBaseX"))
       module.add(SSubU32(dst=sgpr(tiles), src0=sgpr(tiles), src1=sgpr(maskColSgpr), comment="tilesM - clusterBaseX"))
       module.add(SMinU32(dst=sgpr(tiles), src0=sgpr(tiles), src1=cx, comment="validX = min(.., cx)"))
       module.add(SBfmB32(dst=sgpr(maskRowSgpr), src0=sgpr(tiles), src1=0, comment="maskRow bits = (1<<validX)-1"))
@@ -2400,12 +2391,12 @@ class KernelWriterAssembly(KernelWriter):
       if kernel["GlobalSplitU"] != 0:
         module.add(SAndB32(dst=sgpr(gsuTmp), src0=sgpr("GSU"), src1=self.gsuMaskHex(kernel), comment="Restore GSU"))
         module.add(SMulI32(dst=sgpr(tiles), src0=sgpr(tiles), src1=sgpr(gsuTmp), comment="tilesN * GSU (raw y extent)"))
-      module.add(SSubU32(dst=sgpr(maskColSgpr), src0=sgpr("WorkGroup1"), src1=sgpr(snapWgY), comment="clusterBaseY"))
+      module.add(SSubU32(dst=sgpr(maskColSgpr), src0=sgpr("WorkGroup1"), src1=sgpr(sgprWgY), comment="clusterBaseY"))
       module.add(SSubU32(dst=sgpr(tiles), src0=sgpr(tiles), src1=sgpr(maskColSgpr), comment="tilesN*GSU - clusterBaseY"))
       module.add(SMinU32(dst=sgpr(tiles), src0=sgpr(tiles), src1=cy, comment="validY = min(.., cy)"))
       module.add(SMulI32(dst=sgpr(tiles), src0=sgpr(tiles), src1=cx, comment="validY*cx"))
       module.add(SBfmB32(dst=sgpr(maskColSgpr), src0=sgpr(tiles), src1=0, comment="maskCol bits = (1<<(validY*cx))-1"))
-    return reduceMaskTmp, maskColSgpr, maskRowSgpr, snapWgX, snapWgY, snapNWgX
+    return True
 
   def remapWgSerial(self, kernel, earlyStop=True):
     module = Module("RemapWgSerial")
@@ -2743,73 +2734,74 @@ class KernelWriterAssembly(KernelWriter):
                                comment="WorkGroup2 = (cluster_z * nwg_z) + wg_z"))
             moduleRegInit.add(label_calculate_workgroup_done)
 
-        if kernel["Multicast"]:
-          moduleRegInit.addComment0("Calculate multicast mask")
-          sgprWgX = sTmp+1
-          sgprWgY = sTmp+2
-          sgprNWgX = sTmp+3
+            if kernel["Multicast"]:
+              moduleRegInit.addComment0("Calculate multicast mask")
+              sgprWgX  = sTmp+1
+              sgprWgY  = sTmp+2
+              sgprNWgX = sTmp+3
+              maskColSgpr = sTmp+0  # runtime (1<<(validY*cx))-1 to AND with maskA
+              maskRowSgpr = sTmp+4  # runtime (1<<validX)-1       to AND with maskB
 
-          maskA = 1
-          for idx in range(kernel["ClusterDim"][1]):
-            maskA |= (1 << (idx * kernel["ClusterDim"][0]))
+              maskA = 1
+              for idx in range(kernel["ClusterDim"][1]):
+                maskA |= (1 << (idx * kernel["ClusterDim"][0]))
 
-          maskB = (1 << kernel["ClusterDim"][0]) - 1
+              maskB = (1 << kernel["ClusterDim"][0]) - 1
 
-          # Reduce the broadcast mask to the WGs actually present in a padded
-          # boundary cluster. Returns snapshots of wg_x/y/nwg_x that must be used
-          # for the emit below (the compute checks out regs that overlap the freed
-          # originals). No-op (None masks) for Stream-K or non-cluster.
-          reduceMaskTmp, maskColSgpr, maskRowSgpr, sgprWgX, sgprWgY, sgprNWgX = \
-              self.computeMulticastMaskReduction(kernel, moduleRegInit, sgprWgX, sgprWgY, sgprNWgX)
+              # Reduce the broadcast mask to the WGs actually present in a padded
+              # boundary cluster. Writes maskColSgpr/maskRowSgpr and returns True; for
+              # Stream-K or non-cluster it returns False and we fall back to the full mask.
+              reduced = self.computeMulticastMaskReduction(kernel, moduleRegInit, sgprWgX, sgprWgY, maskColSgpr, maskRowSgpr)
+              if not reduced:
+                maskColSgpr = None
+                maskRowSgpr = None
 
-          # Emit dst = (maskConst [& reducedBits]) << shiftReg. When a reduced-bits
-          # sgpr is present the constant is ANDed to the WGs that really exist in
-          # this cluster before the shift; otherwise it degenerates to the original
-          # single shift of the immediate.
-          def setMask(dst, maskConst, shiftReg, reducedBits, comment):
-            if reducedBits is not None:
-              moduleRegInit.add(SMovB32(dst=sgpr(dst), src=hex(maskConst), comment=comment))
-              moduleRegInit.add(SAndB32(dst=sgpr(dst), src0=sgpr(dst), src1=sgpr(reducedBits), comment="reduce to real WGs"))
-              moduleRegInit.add(SLShiftLeftB32(dst=sgpr(dst), shiftHex=sgpr(shiftReg), src=sgpr(dst), comment=comment))
-            else:
-              moduleRegInit.add(SLShiftLeftB32(dst=sgpr(dst), shiftHex=sgpr(shiftReg), src=hex(maskConst), comment=comment))
+              # Emit dst = (maskConst [& reducedBits]) << shiftReg. When a reduced-bits
+              # sgpr is present the constant is ANDed to the WGs that really exist in
+              # this cluster before the shift; otherwise it degenerates to the original
+              # single shift of the immediate.
+              def setMask(dst, maskConst, shiftReg, reducedBits, comment):
+                if reducedBits is not None:
+                  moduleRegInit.add(SMovB32(dst=sgpr(dst), src=hex(maskConst), comment=comment))
+                  moduleRegInit.add(SAndB32(dst=sgpr(dst), src0=sgpr(dst), src1=sgpr(reducedBits), comment="reduce to real WGs"))
+                  moduleRegInit.add(SLShiftLeftB32(dst=sgpr(dst), shiftHex=sgpr(shiftReg), src=sgpr(dst), comment=comment))
+                else:
+                  moduleRegInit.add(SLShiftLeftB32(dst=sgpr(dst), shiftHex=sgpr(shiftReg), src=hex(maskConst), comment=comment))
 
-          if kernel["enableTDMMetadata"]:
-            if kernel["ProblemType"]["Sparse"] == 1:
-              setMask("MulticastMaskMetadata", maskA, sgprWgX, maskColSgpr,
-                      "Setting metadata mask (follows sparse A)")
-            elif kernel["ProblemType"]["Sparse"] == 2:
-              moduleRegInit.add(SMulI32(dst=sgpr(sTmp+4), src0=sgpr(sgprWgY), src1=sgpr(sgprNWgX),\
-                                        comment="Shift factor: wg_y * nwg_x (metadata)"))
-              setMask("MulticastMaskMetadata", maskB, sTmp+4, maskRowSgpr,
-                      "Setting metadata mask (follows sparse B)")
+              if kernel["enableTDMMetadata"]:
+                if kernel["ProblemType"]["Sparse"] == 1:
+                  setMask("MulticastMaskMetadata", maskA, sgprWgX, maskColSgpr,
+                          "Setting metadata mask (follows sparse A)")
+                elif kernel["ProblemType"]["Sparse"] == 2:
+                  with self.allocTmpSgpr(1, tag="multicastMetadataShift") as shiftTmp:
+                    moduleRegInit.add(SMulI32(dst=sgpr(shiftTmp.idx), src0=sgpr(sgprWgY), src1=sgpr(sgprNWgX),\
+                                              comment="Shift factor: wg_y * nwg_x (metadata)"))
+                    setMask("MulticastMaskMetadata", maskB, shiftTmp.idx, maskRowSgpr,
+                            "Setting metadata mask (follows sparse B)")
 
-          if tdmA and tdmB and kernel["NumWaves"] > 1 and not kernel.get("UseSubtileImpl"):
-            setMulticastMaskLblOdd = Label(f"setMulticastMask_OddWave", "")
-            setMulticastMaskLblEven = Label(f"setMulticastMask_EvenWave", "")
-            setMulticastMaskLblEnd = Label(f"setMulticastMaskEnd", "")
+              if tdmA and tdmB and kernel["NumWaves"] > 1 and not kernel.get("UseSubtileImpl"):
+                setMulticastMaskLblOdd = Label(f"setMulticastMask_OddWave", "")
+                setMulticastMaskLblEven = Label(f"setMulticastMask_EvenWave", "")
+                setMulticastMaskLblEnd = Label(f"setMulticastMaskEnd", "")
 
-            moduleRegInit.add(SBitcmp1B32(sgpr("WaveIdx"), 0, "Check parity of wId"))
-            moduleRegInit.add(SCBranchSCC1(setMulticastMaskLblOdd.getLabelName(), "Jump if wId is odd"))
+                moduleRegInit.add(SBitcmp1B32(sgpr("WaveIdx"), 0, "Check parity of wId"))
+                moduleRegInit.add(SCBranchSCC1(setMulticastMaskLblOdd.getLabelName(), "Jump if wId is odd"))
 
-            moduleRegInit.add(setMulticastMaskLblEven)
-            setMask("MulticastMask", maskA, sgprWgX, maskColSgpr, "Setting maskA for even wave")
-            moduleRegInit.add(SBranch(setMulticastMaskLblEnd.getLabelName()))
-            moduleRegInit.add(setMulticastMaskLblOdd)
-            moduleRegInit.add(SMulI32(dst=sgpr(sgprWgY), src0=sgpr(sgprWgY), src1=sgpr(sgprNWgX),\
-                                      comment="Shift factor: wg_y * nwg_x"))
-            setMask("MulticastMask", maskB, sgprWgY, maskRowSgpr, "Setting maskB for odd wave")
-            moduleRegInit.add(setMulticastMaskLblEnd)
+                moduleRegInit.add(setMulticastMaskLblEven)
+                setMask("MulticastMask", maskA, sgprWgX, maskColSgpr, "Setting maskA for even wave")
+                moduleRegInit.add(SBranch(setMulticastMaskLblEnd.getLabelName()))
+                moduleRegInit.add(setMulticastMaskLblOdd)
+                moduleRegInit.add(SMulI32(dst=sgpr(sgprWgY), src0=sgpr(sgprWgY), src1=sgpr(sgprNWgX),\
+                                          comment="Shift factor: wg_y * nwg_x"))
+                setMask("MulticastMask", maskB, sgprWgY, maskRowSgpr, "Setting maskB for odd wave")
+                moduleRegInit.add(setMulticastMaskLblEnd)
 
-          else:
-            setMask("MulticastMaskA", maskA, sgprWgX, maskColSgpr, "Setting maskA")
+              else:
+                setMask("MulticastMaskA", maskA, sgprWgX, maskColSgpr, "Setting maskA")
 
-            moduleRegInit.add(SMulI32(dst=sgpr(sgprWgY), src0=sgpr(sgprWgY), src1=sgpr(sgprNWgX),\
-                                      comment="Shift factor: wg_y * nwg_x"))
-            setMask("MulticastMaskB", maskB, sgprWgY, maskRowSgpr, "Setting maskB")
-
-          if reduceMaskTmp is not None:
-            self.sgprPool.checkIn(reduceMaskTmp)
+                moduleRegInit.add(SMulI32(dst=sgpr(sgprWgY), src0=sgpr(sgprWgY), src1=sgpr(sgprNWgX),\
+                                          comment="Shift factor: wg_y * nwg_x"))
+                setMask("MulticastMaskB", maskB, sgprWgY, maskRowSgpr, "Setting maskB")
       # SrdD can be used as temp sgprs for a bit
       if self.states.doShadowInit and kernel["BufferStore"]:
         self.addSgprVarToPool("SrdD")
