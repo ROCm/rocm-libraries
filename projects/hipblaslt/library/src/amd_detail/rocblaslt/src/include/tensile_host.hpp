@@ -277,6 +277,8 @@ inline rocisa::DataType rocComputeType_to_tensile_type(rocblaslt_compute_type ty
     case rocblaslt_compute_f32_fast_f8bf8:
     case rocblaslt_compute_f32_fast_bf8f8:
         return rocisa::DataType::Float;
+    case rocblaslt_compute_f16_pedantic:
+        return rocisa::DataType::Half;
     case rocblaslt_compute_f64:
         return rocisa::DataType::Double;
     case rocblaslt_compute_i32:

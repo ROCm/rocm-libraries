@@ -159,6 +159,54 @@ namespace rocisa
         }
     };
 
+    /*
+    An unstructured assembly instruction used by legacy code generators.
+    */
+    struct RawInstruction : public TextBlock
+    {
+        std::string instruction;
+        std::string comment;
+
+        RawInstruction(const std::string& instruction, const std::string& comment = "")
+            : TextBlock(instruction)
+            , instruction(instruction)
+            , comment(comment)
+        {
+            text = instruction;
+            if(!comment.empty())
+            {
+                if(text.size() < 50)
+                    text.append(50 - text.size(), ' ');
+                text += " // " + comment;
+            }
+            text += "\n";
+        }
+
+        RawInstruction(const RawInstruction& other)
+            : TextBlock(other)
+            , instruction(other.instruction)
+            , comment(other.comment)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<RawInstruction>(*this);
+        }
+
+        std::string toString() const override
+        {
+            std::string result = instruction;
+            if(!comment.empty() && !rocIsa::getInstance().getOutputOptions().outputNoComment)
+            {
+                if(result.size() < 50)
+                    result.append(50 - result.size(), ' ');
+                result += " // " + comment;
+            }
+            return result + "\n";
+        }
+    };
+
     std::vector<std::shared_ptr<Item>>
         cloneItemList(const std::vector<std::shared_ptr<Item>>& itemList);
 

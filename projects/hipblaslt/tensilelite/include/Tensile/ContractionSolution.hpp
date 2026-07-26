@@ -538,7 +538,7 @@ namespace TensileLite
                                       KA&                      args,
                                       StreamKSettings const&   sk,
                                       uint32_t                 autoGsuVal,
-                                      uint32_t                 additionalPaddingPerBatchGeneralBatch=0) const;                                      
+                                      uint32_t                 additionalPaddingPerBatchGeneralBatch=0) const;
 
         template <typename KA>
         inline void calculateConversionCallWorkGroupItems(
@@ -548,6 +548,13 @@ namespace TensileLite
             TensileLite::dim3&                               numWorkGroups,
             TensileLite::dim3&                               numWorkItems,
             KA&                                              args) const;
+
+        /**
+         * Sub-dword compute values currently use scalar post-GSU helpers.  The
+         * vector helpers operate in dword lanes and cannot preserve multiple
+         * packed FP16/BF16 elements per lane.
+         */
+        static bool outputConversionSupportsVectorizedLoads(rocisa::DataType computeType);
 
         template <bool T_Debug>
         KernelInvocation generateOutputConversionCall(Problem const&           problem,
@@ -729,4 +736,3 @@ namespace TensileLite
                              ContractionSolution::ProjectedPerformance const& spm);
     TENSILELITEHOST_EXPORT std::ostream& operator<<(std::ostream& stream, BufferLoadCheckPacket const& st);
 } // namespace TensileLite
-

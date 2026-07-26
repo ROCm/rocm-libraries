@@ -4185,7 +4185,7 @@ namespace rocisa
             else if(getAsmCaps()["v_fma_f32"])
             {
                 addDstToSrc = true;
-                setInst("v_fmac_f32");
+                setInst("v_fma_f32");
             }
             else if(getAsmCaps()["v_mac_f32"])
             {

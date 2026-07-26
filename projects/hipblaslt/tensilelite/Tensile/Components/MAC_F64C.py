@@ -32,7 +32,7 @@ class FMA_F64C_Plain(MAC):
     kernel = {"ProblemType": {"MacDataTypeA": DataType(DataTypeEnum.ComplexDouble),
                               "MacDataTypeB": DataType(DataTypeEnum.ComplexDouble)}}
 
-    def __call__(self, writer, m, innerUnroll):
+    def __call__(self, writer, tPA, tPB, m, innerUnroll):
         kernel = writer.states.kernel
         module = Module("FMA_F64C_Plain")
         module.addComment(self.commentHeader())

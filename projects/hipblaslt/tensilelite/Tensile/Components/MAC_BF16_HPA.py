@@ -37,7 +37,7 @@ class FMA_BF16_HPA(MAC):
               "UseDotInstruction": False,
               }
 
-    def __call__(self, writer, m, innerUnroll):
+    def __call__(self, writer, tPA, tPB, m, innerUnroll):
         kernel = writer.states.kernel
         module = Module("FMA_BF16_HPA")
         module.addComment(self.commentHeader())
@@ -74,8 +74,8 @@ class FMA_BF16_HPA(MAC):
                     for iui in range(0, innerUnroll):
                         vars["iui"] = iui
 
-                        vars["blockA"] = block0 if writer.tPB["tile01Idx"] else block1
-                        vars["blockB"] = block1 if writer.tPB["tile01Idx"] else block0
+                        vars["blockA"] = block0 if tPB["tile01Idx"] else block1
+                        vars["blockB"] = block1 if tPB["tile01Idx"] else block0
 
                         aStr0 = "v[vgprValuA_X{m}_I{iui}+{blockA}*2+0]".format_map(vars)
                         aStr1 = "v[vgprValuA_X{m}_I{iui}+{blockA}*2+1]".format_map(vars)
@@ -88,14 +88,14 @@ class FMA_BF16_HPA(MAC):
 
                         module.add(priority(writer, 1, "Raise priority while processing macs"))
 
-                        aStr = aStr1 if writer.tPB["tile01Idx"] else aStr0
-                        bStr = bStr0 if writer.tPB["tile01Idx"] else bStr1
+                        aStr = aStr1 if tPB["tile01Idx"] else aStr0
+                        bStr = bStr0 if tPB["tile01Idx"] else bStr1
                         cidx = block0*2 + block1*kernel["ThreadTile0"]*2 + 1
                         cStr = "v[vgprValuC+{block0}*2+{block1}*{ThreadTile0}*2+0*2+1]".format_map(vars) # *2 b/c of fp32
                         module.addInst("v_fma_f32", cStr, aStr, bStr, cStr, "ValuC[%u]" % cidx)
 
-                        aStr = aStr0 if writer.tPB["tile01Idx"] else aStr1
-                        bStr = bStr1 if writer.tPB["tile01Idx"] else bStr0
+                        aStr = aStr0 if tPB["tile01Idx"] else aStr1
+                        bStr = bStr1 if tPB["tile01Idx"] else bStr0
                         cidx = block0*2 + block1*kernel["ThreadTile0"]*2 + kernel["ThreadTile0"] + 0
                         cStr = "v[vgprValuC+{block0}*2+{block1}*{ThreadTile0}*2+{ThreadTile0Half}*2+0]".format_map(vars)
                         module.addInst("v_fma_f32", cStr, aStr, bStr, cStr, "ValuC[%u]" % cidx)

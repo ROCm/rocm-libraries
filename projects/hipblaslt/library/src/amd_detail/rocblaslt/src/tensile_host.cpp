@@ -466,7 +466,7 @@ namespace
         case HIP_C_32F:
             return rocisa::DataType::ComplexFloat;
         case HIP_C_64F:
-            return rocisa::DataType::ComplexDouble;    
+            return rocisa::DataType::ComplexDouble;
         case HIP_R_6F_E2M3:
             return rocisa::DataType::Float6;
         case HIP_R_6F_E3M2:
@@ -506,7 +506,7 @@ namespace
         case rocisa::DataType::ComplexFloat:
             return HIP_C_32F;
         case rocisa::DataType::ComplexDouble:
-            return HIP_C_64F;    
+            return HIP_C_64F;
         case rocisa::DataType::Float6:
             return static_cast<hipDataType>(HIP_R_6F_E2M3);
         case rocisa::DataType::BFloat6:
@@ -575,8 +575,10 @@ namespace
     {
         switch(type)
         {
-        case rocblaslt_compute_f16: // setting compute_type to f16_r will fallback to f32_r
+        case rocblaslt_compute_f16: // FP16 input/output with FP32 accumulation
             return fallback ? rocisa::DataType::Float : rocisa::DataType::Half;
+        case rocblaslt_compute_f16_pedantic:
+            return rocisa::DataType::Half;
         case rocblaslt_compute_f32:
         case rocblaslt_compute_f32_fast_xf32:
         case rocblaslt_compute_f32_fast_f16:
@@ -649,14 +651,14 @@ namespace
         }
 
         if(typeA == rocisa::DataType::Float8 || typeA == rocisa::DataType::BFloat8 || typeA == rocisa::DataType::Float8_fnuz || typeA == rocisa::DataType::BFloat8_fnuz || typeA == rocisa::DataType::Float6 || typeA == rocisa::DataType::BFloat6 || typeA == rocisa::DataType::Float4) return typeA;
-        
+
 
         return TensileLite::DataTypeInfo::Get(typeA).elementSize
                        <= TensileLite::DataTypeInfo::Get(typeB).elementSize
                    ? typeA
                    : typeB;
     }
-	
+
 	inline const rocisa::DataType
         roc2TensileComputeInputTypeB(const rocisa::DataType&       typeA,
                                      const rocisa::DataType&       typeB,
@@ -706,7 +708,7 @@ namespace
         }
 
         if(typeB == rocisa::DataType::Float8 || typeB == rocisa::DataType::BFloat8 || typeB == rocisa::DataType::Float8_fnuz || typeB == rocisa::DataType::BFloat8_fnuz ||typeB == rocisa::DataType::Float6 || typeB == rocisa::DataType::BFloat6 || typeB == rocisa::DataType::Float4) return typeB;
-        
+
 
         return TensileLite::DataTypeInfo::Get(typeA).elementSize
                        <= TensileLite::DataTypeInfo::Get(typeB).elementSize
@@ -794,6 +796,8 @@ namespace
     {
         switch(typeCompute)
         {
+        case rocisa::DataType::Half:
+            return "f16_pedantic_r";
         case rocisa::DataType::Float:
             break;
         case rocisa::DataType::Double:
@@ -807,7 +811,7 @@ namespace
             break;
         case rocisa::DataType::ComplexDouble:
             return "f64_r";
-            break;       
+            break;
         default:
             throw std::runtime_error("Unsupported type.");
         }
@@ -858,7 +862,7 @@ namespace
             break;
         case rocisa::DataType::ComplexDouble:
             return "c_f64_r";
-            break;    
+            break;
         default:
             throw std::runtime_error("Unsupported type.");
         }
@@ -913,7 +917,7 @@ namespace
 
     inline std::string getAlphaRealAsString(const TensileLite::ContractionInputs& inputs, bool isComplex)
     {
-        return isComplex 
+        return isComplex
             ?  (std::holds_alternative<hipblaslt_complex_float>(inputs.alpha)
                 ?  std::to_string(std::get<hipblaslt_complex_float>(inputs.alpha).real())
                 : std::to_string(std::get<hipblaslt_complex_double>(inputs.alpha).real()))
@@ -1213,7 +1217,7 @@ namespace
     {
         bool isComplexInput = (problem.a().dataType() == rocisa::DataType::ComplexFloat
                                || problem.a().dataType() == rocisa::DataType::ComplexDouble);
-                               
+
         log_profile("matmul",
                     "M",
                     problem.c().sizes()[0],
@@ -1811,14 +1815,13 @@ namespace
         assignAlphaBeta(compute_type, a_type, prob.alpha, prob.beta, &alpha, &beta);
         auto k = prob.k && alpha ? prob.k : 0;
 
-        // fallback to f32 for f16 compute type after alpha/beta assignment
+        // Ordinary FP16 uses FP16 input/output with FP32 accumulation (HHS_BH).
         if(prob.compute_type == rocblaslt_compute_f16)
         {
-            compute_type = roc2TensileType(prob.compute_type);
+            compute_type = roc2TensileType(prob.compute_type, true);
         }
 
         // clang-format off
-
         // If A is transposed, swap the free and bound dimensions and their ranks
         if(prob.trans_a != HIPBLAS_OP_N)
         {
@@ -1929,7 +1932,7 @@ namespace
 
         // set batch mode
         tensileProblem.setStridedBatched(prob.strided_batch);
-        tensileProblem.setBatchMode(static_cast<TensileLite::ContractionProblemGemm::BATCHMODE>(static_cast<int>(prob.batchMode)));        
+        tensileProblem.setBatchMode(static_cast<TensileLite::ContractionProblemGemm::BATCHMODE>(static_cast<int>(prob.batchMode)));
         tensileProblem.setGroupedGemm(prob.grouped_gemm);
         if(prob.grouped_gemm)
             tensileProblem.setUseDeviceUserArguments(true);
@@ -2086,6 +2089,15 @@ namespace
     void updateTensileProblem(const RocblasltContractionProblem&   prob,
                               TensileLite::ContractionProblemGemm& tensileProblem)
     {
+        // The cached default problem is created before matrix dimensions are known.
+        // Reconstruct true packed-half problems so derived leading-free sizes are
+        // normalized from the real descriptors before solution predicates run.
+        if(prob.compute_type == rocblaslt_compute_f16_pedantic)
+        {
+            tensileProblem = ConstructTensileProblem(prob);
+            return;
+        }
+
         auto a_type       = hipDataType_to_tensile_type(prob.a_type);
         auto b_type       = hipDataType_to_tensile_type(prob.b_type);
         auto c_type       = hipDataType_to_tensile_type(prob.c_type);
@@ -2174,10 +2186,10 @@ namespace
         double alpha = 0, beta = 0;
         assignAlphaBeta(compute_type, a_type, prob.alpha, prob.beta, &alpha, &beta);
 
-        // fallback to f32 for f16 compute type after alpha/beta assignment
+        // Keep the update path consistent with createTensileProblem above.
         if(prob.compute_type == rocblaslt_compute_f16)
         {
-            compute_type = roc2TensileType(prob.compute_type);
+            compute_type = roc2TensileType(prob.compute_type, true);
         }
 
         tensileProblem.updateProblem(freeIndex, batchIndex, boundIndex, beta, prob.workspaceSize);
@@ -2349,12 +2361,14 @@ namespace
         tensileProblem.setSwizzleTensorA(prob.swizzleA);
         tensileProblem.setSwizzleTensorB(prob.swizzleB);
 
-	if(prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0 or
-   	   prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT)
-	    tensileProblem.setMXScaleA(rocisa::DataType::E8, 32, {}, padMXScaleTensorFreeDim);
-	if(prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0 or
-   	   prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT)
-	    tensileProblem.setMXScaleB(rocisa::DataType::E8, 32, {}, padMXScaleTensorFreeDim);
+        if(prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0
+           or prob.scaleAType
+                  == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT)
+            tensileProblem.setMXScaleA(rocisa::DataType::E8, 32, {}, padMXScaleTensorFreeDim);
+        if(prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0
+           or prob.scaleBType
+                  == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT)
+            tensileProblem.setMXScaleB(rocisa::DataType::E8, 32, {}, padMXScaleTensorFreeDim);
     }
 
     rocisa::DataType computeTypeToRocisaDataType(rocblaslt_compute_type compute_type)
@@ -2362,6 +2376,7 @@ namespace
         switch(compute_type)
         {
         case rocblaslt_compute_f16:
+        case rocblaslt_compute_f16_pedantic:
             return rocisa::DataType::Half;
 
         case rocblaslt_compute_f32:
@@ -2558,7 +2573,7 @@ namespace
                 it->second);
         }
 
-        // convert alpha and beta to float if compute type is half
+        // The f16 API request is canonicalized to float alpha/beta for HPA kernels.
         if(prob.compute_type == rocblaslt_compute_f16)
         {
             inputs.activationArgs = {prob.act0, prob.act1};
@@ -2584,6 +2599,10 @@ namespace
         else if(deviceString.find("gfx900") != std::string::npos)
         {
             return TensileLite::LazyLoadingInit::gfx900;
+        }
+        else if(deviceString.find("gfx90c") != std::string::npos)
+        {
+            return TensileLite::LazyLoadingInit::gfx90c;
         }
         else if(deviceString.find("gfx906") != std::string::npos)
         {
@@ -4015,18 +4034,14 @@ rocblaslt_status getDeviceUserArgumentsValuesFromContractionProblem(rocblaslt_ha
         {
             std::shared_ptr<TensileDataGroupedGemm> data
                 = std::static_pointer_cast<TensileDataGroupedGemm>(gemmData);
-            auto  solution = library->getSolutionByIndex(*hardware, data->algoIndex);
-            auto& problem  = data->problem.gemms[0];
-            if(problem.activationComputeType() == rocisa::DataType::Float)
-            {
-                setDeviceUserArgs(data->problem.gemms,
-                                  data->inputs,
-                                  (TensileLite::DeviceUserArguments<float>*)hostDeviceUserArgs);
-            }
-            else
-            {
-                throw std::runtime_error("Currently only supports DeviceUserArguments<float>");
-            }
+            // The public hipblaslt_ext::UserArguments ABI stores act0/act1 as
+            // float regardless of the GEMM compute type.  Use the matching
+            // DeviceUserArguments<float> layout for all supported problems;
+            // restricting this to float activation-compute kernels left valid
+            // FP16 user-argument buffers uninitialized.
+            setDeviceUserArgs(data->problem.gemms,
+                              data->inputs,
+                              (TensileLite::DeviceUserArguments<float>*)hostDeviceUserArgs);
         }
         else
         {
@@ -4284,6 +4299,19 @@ inline auto getSolutions(
     const int&                                    requestedAlgoCount)
 {
     auto solutions = library->findTopSolutions(tensile_prob, *hardware, requestedAlgoCount);
+    if constexpr(std::is_same_v<T, RocblasltContractionProblem>)
+    {
+        if(inputs.compute_type == rocblaslt_compute_f16_pedantic
+           && (inputs.trans_a != HIPBLAS_OP_N || inputs.trans_b != HIPBLAS_OP_N))
+        {
+            const char* experimentalHB = getenv("HIPBLASLT_ENABLE_EXPERIMENTAL_HB");
+            if(hardware->description().find("gfx90c") != std::string::npos
+               && experimentalHB != nullptr && std::string(experimentalHB) == "1")
+            {
+                throw rocblaslt_status_not_implemented;
+            }
+        }
+    }
     return solutions;
 }
 
@@ -4867,6 +4895,8 @@ rocblaslt_status dispatchByComputeType(rocisa::DataType dt, F&& f)
     {
     case rocisa::DataType::Float:
         return f(static_cast<float*>(nullptr));
+    case rocisa::DataType::Half:
+        return f(static_cast<hipblasLtHalf*>(nullptr));
     case rocisa::DataType::Double:
         return f(static_cast<double*>(nullptr));
     // Extend as needed:
@@ -5183,7 +5213,7 @@ std::string getKernelNameFromAlgoIndex(rocblaslt_handle handle, const rocblaslt_
 std::string getSolutionNameFromAlgoIndex(rocblaslt_handle handle, const rocblaslt_matmul_algo& algo)
 {
     int* solutionIndex = (int*)algo.data;
- 
+
 #ifdef HIPBLASLT_USE_ROCROLLER
     if(*solutionIndex < 0)
     {

@@ -44,11 +44,21 @@ function(hipblaslt_create_device_library)
 
     file(MAKE_DIRECTORY "${_cdl_OUTPUT_DIR}/library")
 
-    list(JOIN _cdl_ARCHES "$<SEMICOLON>" _arches_semi)
-    set(_opts_list "--architecture=${_arches_semi}" "--cxx-compiler=${_cdl_CXX_COMPILER}")
-    if(_cdl_OFFLOAD_BUNDLER)
-        list(APPEND _opts_list "--offload-bundler=${_cdl_OFFLOAD_BUNDLER}")
+    get_filename_component(_compiler_dir "${_cdl_CXX_COMPILER}" DIRECTORY)
+    if(NOT _cdl_OFFLOAD_BUNDLER)
+        find_program(_cdl_OFFLOAD_BUNDLER
+            NAMES clang-offload-bundler
+            HINTS "${_compiler_dir}"
+            REQUIRED)
     endif()
+
+    list(JOIN _cdl_ARCHES "$<SEMICOLON>" _arches_semi)
+    set(_opts_list
+        "--architecture=${_arches_semi}"
+        "--cxx-compiler=${_cdl_CXX_COMPILER}"
+        "--c-compiler=${CMAKE_C_COMPILER}"
+        "--assembler=${_cdl_CXX_COMPILER}"
+        "--offload-bundler=${_cdl_OFFLOAD_BUNDLER}")
     if(_cdl_ASAN)
         list(APPEND _opts_list "--address-sanitizer")
     endif()
@@ -81,6 +91,9 @@ function(hipblaslt_create_device_library)
     endif()
 
     set(_known_bugs "${_codegen_dir}/Tensile/TensileLogic/known_bugs.yaml")
+    file(GLOB_RECURSE _logic_files CONFIGURE_DEPENDS
+        "${_cdl_LOGIC_PATH}/*.yaml"
+        "${_cdl_LOGIC_PATH}/*.json")
     set(_logic_stamp "${CMAKE_CURRENT_BINARY_DIR}/${_cdl_TARGET}-TensileLogic.stamp")
     add_custom_command(
         OUTPUT "${_logic_stamp}"
@@ -91,8 +104,10 @@ function(hipblaslt_create_device_library)
             --known-bugs
             "${_known_bugs}"
             --check-all
+            --cxx-compiler
+            "${_cdl_CXX_COMPILER}"
         COMMAND ${CMAKE_COMMAND} -E touch "${_logic_stamp}"
-        DEPENDS ${HIPBLASLT_PYTHON_DEPS} "${_known_bugs}"
+        DEPENDS ${HIPBLASLT_PYTHON_DEPS} ${_logic_files} "${_known_bugs}"
         VERBATIM
         USES_TERMINAL
     )

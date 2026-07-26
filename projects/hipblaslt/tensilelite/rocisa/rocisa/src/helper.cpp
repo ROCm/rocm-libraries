@@ -235,37 +235,55 @@ std::string demangle(const char* name)
 
 std::pair<int, std::string> run(const std::vector<char*>& cmd, const std::string& input, bool debug)
 {
-    int   p[2];
+    int p_in[2];
+    int p_out[2];
     pid_t pid;
-    if(pipe(p) == -1)
+    if(pipe(p_in) == -1)
     {
-        throw std::runtime_error("cmd failed!");
+        throw std::runtime_error("cmd failed! pipe in");
+    }
+    if(pipe(p_out) == -1)
+    {
+        throw std::runtime_error("cmd failed! pipe out");
     }
 
     pid = fork();
     if(pid == 0)
     {
-        close(p[1]);
-        dup2(p[0], STDIN_FILENO);
+        close(p_in[1]);
+        dup2(p_in[0], STDIN_FILENO);
+        close(p_in[0]);
+
+        close(p_out[0]);
         if(!debug)
         {
-            dup2(p[0], STDERR_FILENO);
-            dup2(p[0], STDOUT_FILENO);
+            dup2(p_out[1], STDERR_FILENO);
+            dup2(p_out[1], STDOUT_FILENO);
         }
-        close(p[0]);
+        close(p_out[1]);
+
         execvp(cmd[0], cmd.data());
         perror("execvp");
         exit(1);
     }
     else
     {
-        close(p[0]);
-        write(p[1], input.c_str(), input.size());
-        close(p[1]);
+        close(p_in[0]);
+        close(p_out[1]);
+
+        if (!input.empty()) {
+            write(p_in[1], input.c_str(), input.size());
+        }
+        close(p_in[1]);
+
         char        buf[128] = {0};
         std::string result;
-        read(p[0], buf, 128);
-        result += buf;
+        ssize_t n;
+        while ((n = read(p_out[0], buf, sizeof(buf))) > 0) {
+            result.append(buf, n);
+        }
+        close(p_out[0]);
+
         int rcode;
         waitpid(pid, &rcode, 0);
         if(WIFEXITED(rcode))
@@ -274,8 +292,6 @@ std::pair<int, std::string> run(const std::vector<char*>& cmd, const std::string
         }
         return {rcode, result};
     }
-    // Should not go here.
-    return {0, "0"};
 }
 
 std::string demangle(const char* name)

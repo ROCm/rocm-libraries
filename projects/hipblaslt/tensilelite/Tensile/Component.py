@@ -58,7 +58,7 @@ Components are found by calling `Component.<subtype>.find(writer)` where `writer
 ```python
     component = Component.MAC.find(self)
     if component:
-      return component(self, m, innerUnroll)
+      return component(self, tPA, tPB, m, innerUnroll)
 
     # No component was found, fall back to existing code...
 ```

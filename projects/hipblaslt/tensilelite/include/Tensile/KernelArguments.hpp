@@ -245,30 +245,20 @@ namespace TensileLite
     {
         if(name == "alpha" || name == "beta")
         {
-            // If type is NOT one of the standard 32/64-bit or Complex types, 
-            // it must be a small type (Half, BF16, Int8, Float8, BF8, etc.) 
-            // that causes misalignment. We promote these to 32-bit.
-            bool isStandardType = (type == rocisa::DataType::Float || 
-                                   type == rocisa::DataType::Double ||
-                                   type == rocisa::DataType::Int32 ||
-                                   type == rocisa::DataType::ComplexFloat ||
-                                   type == rocisa::DataType::ComplexDouble);
+            bool isStandardType = (type == rocisa::DataType::Float
+                                   || type == rocisa::DataType::Double
+                                   || type == rocisa::DataType::Int32
+                                   || type == rocisa::DataType::ComplexFloat
+                                   || type == rocisa::DataType::ComplexDouble);
 
-            if (!isStandardType) 
+            if(!isStandardType)
             {
                 if(type == rocisa::DataType::Int8)
-                {
-                    // Promote 8-bit int to 32-bit Int
                     return append(name, value, rocisa::DataType::Int32);
-                }
-                else
-                {
-                    // Promote all small floats (Half, BF16, FP8, BF8, etc.) to 32-bit Float
+                if(type != rocisa::DataType::Half)
                     return append(name, value, rocisa::DataType::Float);
-                }
             }
         }
-        // =================================================================================
 
         switch(type)
         {
@@ -314,21 +304,28 @@ namespace TensileLite
         }
         case rocisa::DataType::Half:
         {
+            Half packedValue;
             if(auto* val = std::get_if<Half>(&value))
-                return append<Half>(name, *val, true);
-            if(auto* val = std::get_if<float>(&value))
-                return append<Half>(name, static_cast<Half>(*val), true);
-            if(auto* val = std::get_if<double>(&value))
-                return append<Half>(name, static_cast<Half>(*val), true);
+                packedValue = *val;
+            else if(auto* val = std::get_if<float>(&value))
+                packedValue = static_cast<Half>(*val);
+            else if(auto* val = std::get_if<double>(&value))
+                packedValue = static_cast<Half>(*val);
+            else if(auto* val = std::get_if<std::complex<float>>(&value))
+                packedValue = static_cast<Half>(val->real());
+            else if(auto* val = std::get_if<std::complex<double>>(&value))
+                packedValue = static_cast<Half>(val->real());
+            else
+                throw std::runtime_error(
+                    "Type mismatch: variant expected Half but holds unsupported type.");
 
-            // Complex -> Real
-            if(auto* val = std::get_if<std::complex<float>>(&value))
-                return append<Half>(name, static_cast<Half>(val->real()), true);
-            if(auto* val = std::get_if<std::complex<double>>(&value))
-                return append<Half>(name, static_cast<Half>(val->real()), true);
-
-            throw std::runtime_error(
-                "Type mismatch: variant expected Half but holds unsupported type.");
+            if(name == "alpha" || name == "beta")
+            {
+                uint16_t bits;
+                std::memcpy(&bits, &packedValue, sizeof(bits));
+                return append<uint32_t>(name, uint32_t(bits) | (uint32_t(bits) << 16), true);
+            }
+            return append<Half>(name, packedValue, true);
         }
         case rocisa::DataType::Int32:
         {
@@ -624,22 +621,18 @@ namespace TensileLite
         {
             if(name == "alpha" || name == "beta")
             {
-                bool isStandardType = (type == rocisa::DataType::Float || 
-                                       type == rocisa::DataType::Double ||
-                                       type == rocisa::DataType::Int32 ||
-                                       type == rocisa::DataType::ComplexFloat ||
-                                       type == rocisa::DataType::ComplexDouble);
+                bool isStandardType = (type == rocisa::DataType::Float
+                                       || type == rocisa::DataType::Double
+                                       || type == rocisa::DataType::Int32
+                                       || type == rocisa::DataType::ComplexFloat
+                                       || type == rocisa::DataType::ComplexDouble);
 
-                if (!isStandardType)
+                if(!isStandardType)
                 {
                     if(type == rocisa::DataType::Int8)
-                    {
                         return append(name, value, rocisa::DataType::Int32);
-                    }
-                    else
-                    {
+                    if(type != rocisa::DataType::Half)
                         return append(name, value, rocisa::DataType::Float);
-                    }
                 }
             }
 
@@ -662,6 +655,7 @@ namespace TensileLite
                 return;
 
             case rocisa::DataType::Half:
+                if(name == "alpha" || name == "beta") return append<uint32_t>(name, 0);
                 if(auto* v = std::get_if<Half>(&value)) return append<Half>(name, *v);
                 if(auto* v = std::get_if<float>(&value)) return append<Half>(name, static_cast<Half>(*v));
                 return;
@@ -693,22 +687,18 @@ namespace TensileLite
         {
             if(name == "alpha" || name == "beta")
             {
-                bool isStandardType = (type == rocisa::DataType::Float || 
-                                       type == rocisa::DataType::Double ||
-                                       type == rocisa::DataType::Int32 ||
-                                       type == rocisa::DataType::ComplexFloat ||
-                                       type == rocisa::DataType::ComplexDouble);
+                bool isStandardType = (type == rocisa::DataType::Float
+                                       || type == rocisa::DataType::Double
+                                       || type == rocisa::DataType::Int32
+                                       || type == rocisa::DataType::ComplexFloat
+                                       || type == rocisa::DataType::ComplexDouble);
 
-                if (!isStandardType)
+                if(!isStandardType)
                 {
                     if(type == rocisa::DataType::Int8)
-                    {
                         return append<int32_t>(name, static_cast<int32_t>(value));
-                    }
-                    else
-                    {
+                    if(type != rocisa::DataType::Half)
                         return append<float>(name, value);
-                    }
                 }
             }
 
@@ -719,6 +709,7 @@ namespace TensileLite
             case rocisa::DataType::Double:
                 return append<double>(name, (double const)value);
             case rocisa::DataType::Half:
+                if(name == "alpha" || name == "beta") return append<uint32_t>(name, 0);
                 return append<Half>(name, (Half const)value);
             case rocisa::DataType::Int32:
                 return append<int32_t>(name, (int32_t const)value);

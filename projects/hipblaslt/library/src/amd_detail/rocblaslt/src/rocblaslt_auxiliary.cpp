@@ -110,7 +110,8 @@ inline void assignAlphaBeta1(const rocblaslt_compute_type& compute_type,
             _set_value(alpha, (int32_t)1);
             _set_value(beta,  (int32_t)1);
         }
-        else if(compute_type == rocblaslt_compute_f16)
+        else if(compute_type == rocblaslt_compute_f16
+                || compute_type == rocblaslt_compute_f16_pedantic)
         {
             _set_value(alpha, (hipblasLtHalf)1.0f);
             _set_value(beta,  (hipblasLtHalf)1.0f);
@@ -935,9 +936,21 @@ rocblaslt_status rocblaslt_matmul_desc_create(rocblaslt_matmul_desc* matmulDesc,
         // Allocate
         try
         {
+            if(computeType == rocblaslt_compute_f16_pedantic)
+            {
+                const char* enabled = std::getenv("HIPBLASLT_ENABLE_EXPERIMENTAL_HB");
+                if(enabled == nullptr || std::string(enabled) != "1")
+                {
+                    log_error(__func__,
+                              "experimental exact/packed FP16 accumulation is disabled");
+                    throw rocblaslt_status_not_implemented;
+                }
+            }
+
             switch(computeType)
             {
             case rocblaslt_compute_f16:
+            case rocblaslt_compute_f16_pedantic:
             case rocblaslt_compute_f32:
             case rocblaslt_compute_f32_fast_xf32:
             case rocblaslt_compute_f64:
@@ -977,6 +990,9 @@ rocblaslt_status rocblaslt_matmul_desc_create(rocblaslt_matmul_desc* matmulDesc,
                 dataType = HIP_R_64F;
             else if(computeType == rocblaslt_compute_i32)
                 dataType = HIP_R_32I;
+            else if(computeType == rocblaslt_compute_f16
+                    || computeType == rocblaslt_compute_f16_pedantic)
+                dataType = HIP_R_16F;
 
             initTensileGemmData(nullptr,
                                 rocblaslt::RocGemmType::ROCBLASLT_GEMM,

@@ -73,6 +73,11 @@ from typing import Dict, List, NamedTuple, Optional,Tuple, Type
 from math import ceil, prod
 import itertools
 
+
+def _registerCount(value):
+  """Normalize integral register arithmetic for native register-pool APIs."""
+  return int(value)
+
 # TODO: DEBUG ONLY, remove later
 from pprint import pprint
 
@@ -7782,7 +7787,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
           self.states.a.numVgprValuPerBlock = int(kernel["ThreadTileA"] * tensorParametersA["bpe"] // self.states.bpr)
           self.states.b.numVgprValuPerBlock = int(kernel["ThreadTileB"] * tensorParametersB["bpe"] // self.states.bpr)
 
-        self.states.c.numVgprValu = kernel["ThreadTile0"] * kernel["ThreadTile1"] * kernel["ProblemType"]["ComputeDataType"].numRegisters()
+        self.states.c.numVgprValu = _registerCount(kernel["ThreadTile0"] * kernel["ThreadTile1"] * kernel["ProblemType"]["ComputeDataType"].numRegisters())
         self.states.a.numVgprValu = self.states.a.numVgprValuPerBlock * valuBlocksA
         self.states.b.numVgprValu = self.states.b.numVgprValuPerBlock * valuBlocksB
 
@@ -8601,7 +8606,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       vgprIdx += self.states.a.numVgprValu
 
       numVgprValuPackA = 0
-      if tensorParametersA["bpe"] < 4 and not kernel["UnrollMajorLDSA"] and not kernel["enableLDSTrA"]:
+      if kernel["EnableMatrixInstruction"] and tensorParametersA["bpe"] < 4 and not kernel["UnrollMajorLDSA"] and not kernel["enableLDSTrA"]:
         self.states.a.startVgprValuPack = vgprIdx
         if self.states.lrvwTileA > 1:
           numVgprValuPackA = ceil(kernel["VectorWidthA"] * tensorParametersA["bpe"] / self.states.bpr) * kernel["MIWaveTileA"] // kernel["VectorWidthA"] * kernel["InnerUnroll"] * self.states.numVgprBuffer * kernel["MIInputPerThreadA"]
@@ -8641,7 +8646,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       self.states.b.startVgprValu = vgprIdx
       vgprIdx += self.states.b.numVgprValu
       numVgprValuPackB = 0
-      if tensorParametersB["bpe"] < 4 and not kernel["UnrollMajorLDSB"] and not kernel["enableLDSTrB"]:
+      if kernel["EnableMatrixInstruction"] and tensorParametersB["bpe"] < 4 and not kernel["UnrollMajorLDSB"] and not kernel["enableLDSTrB"]:
         self.states.b.startVgprValuPack = vgprIdx
         if self.states.lrvwTileB > 1:
           numVgprValuPackB = ceil(kernel["VectorWidthB"] * tensorParametersB["bpe"] / self.states.bpr) * kernel["MIWaveTileB"] // kernel["VectorWidthB"] * kernel["InnerUnroll"] * self.states.numVgprBuffer * kernel["MIInputPerThreadB"]
@@ -9058,7 +9063,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       self.states.startVgprSerial = vgprIdx
       vgprIdx += 1 # for vgpr serial id
 
-      self.states.totalVgprs = max(vgprIdx, self.states.c.numVgprValu)
+      self.states.totalVgprs = _registerCount(max(vgprIdx, self.states.c.numVgprValu))
       if self.states.totalVgprs < 0 or self.states.totalVgprs > self.states.regCaps["MaxVgpr"]:
         raise RuntimeError("Generating asm kernel error: total vgpr: %u not in [0, %u].\n" % (self.states.totalVgprs, self.states.regCaps["MaxVgpr"]))
 
@@ -9108,7 +9113,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
           self.states.m.startVgprGL2PrefetchAddr = vgprIdx
           vgprIdx += tPM["gl2nl"] * self.states.rpga
 
-      self.states.totalVgprs = vgprIdx
+      self.states.totalVgprs = _registerCount(vgprIdx)
 
       return
 

@@ -75,7 +75,7 @@ from Tensile.SolutionStructs.Solution import (
     resetTypeMismatchCollector,
 )
 from Tensile.verify_stinky_comment_vs_elf_text import verify_stinky_paths
-from Tensile.Toolchain.Assembly import makeAssemblyToolchain, buildAssemblyCodeObjectFiles
+from Tensile.Toolchain.Assembly import makeAssemblyToolchain, buildAssemblyCodeObjectFiles, replaceAssemblyTarget, targetArchForIsa
 from Tensile.Toolchain.Source import makeSourceToolchain, buildSourceCodeObjectFiles
 from Tensile.Toolchain.Validators import (
     ToolchainDefaults,
@@ -217,7 +217,7 @@ def memCompress(obj):
 def memDecompress(byt):
     return pickle.loads(zlib.decompress(byt))
 
-def processKernelSource(kernelWriterAssembly, data, outOptions, splitGSU, kernel, compress = False) -> KernelCodeGenResult:
+def processKernelSource(kernelWriterAssembly, data, outOptions, splitGSU, kernel, compress=False, requestedArchs=()) -> KernelCodeGenResult:
     """
     Generate source for a single kernel.
     Returns (error, source, header, kernelName).
@@ -226,6 +226,9 @@ def processKernelSource(kernelWriterAssembly, data, outOptions, splitGSU, kernel
     kernelWriter.setRocIsa(data, outOptions)
     asmFilename = getKernelFileBase(splitGSU, kernel)
     err, src = kernelWriter.getSourceFileString(kernel)
+    if requestedArchs:
+        isa = tuple(kernel["ISA"])
+        src = replaceAssemblyTarget(src, isa, targetArchForIsa(isa, requestedArchs))
     if compress:
         src = memCompress(src)
     header = kernelWriter.getHeaderFileString(kernel)
@@ -487,7 +490,16 @@ def writeSolutionsAndKernels(
         )
         memcompress = numAsmKernels > 10000
     with timing_context("python_kernel_codegen"):
-        asmResults = ParallelMap2(functools.partial(processKernelSource, compress=memcompress), asmIter, "Generating assembly kernels", return_as="list")
+        asmResults = ParallelMap2(
+            functools.partial(
+                processKernelSource,
+                compress=memcompress,
+                requestedArchs=cmdlineArchs,
+            ),
+            asmIter,
+            "Generating assembly kernels",
+            return_as="list",
+        )
     with timing_context("python_kernel_validate"):
         removeInvalidSolutionsAndKernels(
             asmResults, asmKernels, solutions, errorTolerant, getVerbosity(), splitGSU
@@ -500,7 +512,7 @@ def writeSolutionsAndKernels(
         p, isa, wavefrontsize, _ = ret
         o_path = p.with_suffix(".o")
         try:
-            asmToolchain.assembler(isaToGfx(isa), wavefrontsize, str(p), str(o_path))
+            asmToolchain.assembler(targetArchForIsa(isa, cmdlineArchs), wavefrontsize, str(p), str(o_path))
         except RuntimeError as e:
             printWarning(f"Failed to assemble {p}: {e}")
             return
@@ -549,6 +561,7 @@ def writeSolutionsAndKernels(
                 [k for k in asmKernels if not k.duplicate],
                 destRoot,
                 assemblyTmpPath,
+                cmdlineArchs,
                 compress,
             )
 
@@ -617,7 +630,7 @@ def writeSolutionsAndKernelsTCL(
     def assemble(ret, removeTemporaries: bool):
         asmPath, isa, wavefrontsize, result = ret
         o_path = asmPath.with_suffix(".o")
-        asmToolchain.assembler(isaToGfx(isa), wavefrontsize, str(asmPath), str(o_path))
+        asmToolchain.assembler(targetArchForIsa(isa, cmdlineArchs), wavefrontsize, str(asmPath), str(o_path))
         if _stinky_asm_verify_wanted(isa):
             _verify_stinky_asm_comment_vs_elf_text(asmPath, o_path, asmPath.stem)
         if removeTemporaries:
@@ -637,6 +650,7 @@ def writeSolutionsAndKernelsTCL(
         outOptions,
         splitGSU,
         compress = memcompress,
+        requestedArchs = cmdlineArchs,
     )
 
     unaryWriteAssembly = functools.partial(writeAssembly, assemblyTmpPath)
@@ -662,6 +676,7 @@ def writeSolutionsAndKernelsTCL(
         asmKernels,
         destRoot,
         assemblyTmpPath,
+        cmdlineArchs,
         compress,
     )
 

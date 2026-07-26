@@ -284,7 +284,7 @@ class AddrCalculation:
         packedBits = self.coord0Vgpr # start with coord0, will move to temp below
         rowPtr = self.getRowPtr(kw, storeChar)
         addrVgpr = self.getAddrVgpr(kw, storeChar)
-        bpe = kw.states.bpeCinternal if (tc == 'Bias') else (kw.states.bpeE if (tc == 'E') else kw.states.bpeCexternal)
+        bpe = kw.states.bpeCinternal if (storeChar == 'Bias') else (kw.states.bpeE if (storeChar == 'E') else kw.states.bpeCexternal)
 
         for i,idx in enumerate(packedIndices[:-1]):
             # vgprTmp assignments:

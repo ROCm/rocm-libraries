@@ -89,7 +89,7 @@ hipblasStatus_t RocBlasLtStatusToHIPStatus(rocblaslt_status_ status)
     case rocblaslt_status_invalid_handle:
         return HIPBLAS_STATUS_NOT_INITIALIZED;
     case rocblaslt_status_not_implemented:
-        return HIPBLAS_STATUS_INTERNAL_ERROR;
+        return HIPBLAS_STATUS_NOT_SUPPORTED;
     case rocblaslt_status_invalid_pointer:
         return HIPBLAS_STATUS_INVALID_VALUE;
     case rocblaslt_status_invalid_size:

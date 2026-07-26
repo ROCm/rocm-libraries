@@ -163,6 +163,7 @@ HIPBLASLT_EXPORT
 constexpr const char* hipblas_computetype_to_string(hipblasComputeType_t type)
 {
     return type == HIPBLAS_COMPUTE_16F             ? "f16_r"
+           : type == HIPBLAS_COMPUTE_16F_PEDANTIC  ? "f16_pedantic_r"
            : type == HIPBLAS_COMPUTE_32F           ? "f32_r"
            : type == HIPBLAS_COMPUTE_32F_FAST_TF32 ? "xf32_r"
            : type == HIPBLAS_COMPUTE_64F           ? "f64_r"
@@ -231,6 +232,8 @@ HIPBLASLT_EXPORT
 constexpr hipblasComputeType_t string_to_hipblas_computetype(const std::string& value)
 {
     return
+        value == "f16_r" || value == "h" ? HIPBLAS_COMPUTE_16F :
+        value == "f16_pedantic_r" || value == "hp" ? HIPBLAS_COMPUTE_16F_PEDANTIC :
         value == "f32_r" || value == "s" || value == "c" || value == "f32_c" ?  HIPBLAS_COMPUTE_32F  :
         value == "xf32_r" || value == "x" ? HIPBLAS_COMPUTE_32F_FAST_TF32 :
         value == "f64_r" || value == "d" || value == "z" || value == "f64_c" ? HIPBLAS_COMPUTE_64F :
@@ -246,7 +249,7 @@ constexpr hipblasComputeType_t string_to_hipblas_computetype_assert(const std::s
     auto computetytpe = string_to_hipblas_computetype(value);
     if(computetytpe == HIPBLASLT_COMPUTE_TYPE_INVALID)
     {
-        std::cout << "The supported types are f32_r, xf32_r, f64_r, i32_r, f32_f16_r." << std::endl;
+        std::cout << "The supported types are f16_r, f32_r, xf32_r, f64_r, i32_r, f32_f16_r." << std::endl;
         exit(1);
     }
     return computetytpe;

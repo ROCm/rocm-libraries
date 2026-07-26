@@ -38,6 +38,9 @@ architectureMap = {
     "gfx000": "none",
     "gfx803": "r9nano",
     "gfx900": "vega10",
+    "gfx90c": "vega10",
+    "gfx90c:xnack+": "vega10",
+    "gfx90c:xnack-": "vega10",
     "gfx906": "vega20",
     "gfx906:xnack+": "vega20",
     "gfx906:xnack-": "vega20",
@@ -71,6 +74,7 @@ architectureMap = {
 }
 
 gfxVariantMap = {
+    "gfx90c": ["gfx90c:xnack+", "gfx90c:xnack-"],
     "gfx906": ["gfx906:xnack+", "gfx906:xnack-"],
     "gfx908": ["gfx908:xnack+", "gfx908:xnack-"],
     "gfx90a": ["gfx90a:xnack+", "gfx90a:xnack-"],
@@ -84,6 +88,7 @@ SUPPORTED_ISA = [
     IsaVersion(9, 0, 6),
     IsaVersion(9, 0, 8),
     IsaVersion(9, 0, 10),
+    IsaVersion(9, 0, 12),
     IsaVersion(9, 4, 2),
     IsaVersion(9, 5, 0),
     IsaVersion(10, 1, 0),

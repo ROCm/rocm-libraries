@@ -23,6 +23,7 @@
 ################################################################################
 
 from ..Component import Component
+from rocisa.code import Module
 from rocisa.instruction import SSetPrior
 
 class Priority(Component):
@@ -43,7 +44,7 @@ class AggressivePriority(Priority):
 
     def __call__(self, writer, prio, message=""):
         if prio == self.currentPrio:
-            return ""
+            return Module("Unchanged priority")
 
         self.currentPrio = prio
 

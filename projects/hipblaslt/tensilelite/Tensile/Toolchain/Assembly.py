@@ -28,10 +28,10 @@ import shutil
 import subprocess
 
 from pathlib import Path
-from typing import List, Union, NamedTuple
+from typing import Collection, List, Union, NamedTuple
 
 from Tensile.Common import ensurePath, print2
-from Tensile.Common.Architectures import isaToGfx
+from Tensile.Common.Architectures import gfxToIsa, isaToGfx
 from ..SolutionStructs import Solution
 
 from .Component import Assembler, Linker, Bundler
@@ -40,6 +40,41 @@ class AssemblyToolchain(NamedTuple):
    assembler: Assembler
    linker: Linker
    bundler: Bundler
+
+
+def targetArchForIsa(isa, requestedArchs: Collection[str]) -> str:
+    """Return the requested target ID corresponding to an ISA.
+
+    A solution records only its numeric ISA, so converting it back with
+    ``isaToGfx`` loses target features such as ``xnack+``. Preserve the full
+    command-line target when there is one match. The assembly pipeline emits
+    one object per ISA and cannot represent two feature variants of the same
+    ISA in one invocation, so retain the established bare-target behavior when
+    multiple variants are requested.
+    """
+    matches = sorted({arch for arch in requestedArchs if gfxToIsa(arch) == isa})
+    if not matches:
+        return isaToGfx(isa)
+    if len(matches) > 1:
+        return isaToGfx(isa)
+    return matches[0]
+
+
+def replaceAssemblyTarget(source: str, isa, targetArch: str) -> str:
+    """Make the generated ``.amdgcn_target`` match the assembler target ID."""
+    bareArch = isaToGfx(isa)
+    if targetArch == bareArch:
+        return source
+    bareDirective = f'.amdgcn_target "amdgcn-amd-amdhsa--{bareArch}"'
+    if source.count(bareDirective) != 1:
+        raise RuntimeError(
+            f"Expected one {bareArch} .amdgcn_target directive, found "
+            f"{source.count(bareDirective)}"
+        )
+    return source.replace(
+        bareDirective,
+        f'.amdgcn_target "amdgcn-amd-amdhsa--{targetArch}"',
+    )
 
 
 def makeAssemblyToolchain(assembler_path, bundler_path, co_version, build_id_kind="sha1", debug=False):
@@ -55,6 +90,7 @@ def buildAssemblyCodeObjectFiles(
       kernels: List[Solution],
       destRoot: Union[Path, str],
       asmDir: Union[Path, str],
+      requestedArchs: Collection[str]=(),
       compress: bool=True,
     ):
     """Builds code object files from assembly files.
@@ -85,6 +121,7 @@ def buildAssemblyCodeObjectFiles(
         continue
 
       gfx = isaToGfx(arch)
+      targetArch = targetArchForIsa(arch, requestedArchs)
       destDir = Path(ensurePath(destRoot / gfx))
 
       objectFiles = [str(asmDir / (k["BaseName"] + extObj)) for k in archKernels if 'codeObjectFile' not in k]
@@ -100,7 +137,7 @@ def buildAssemblyCodeObjectFiles(
         linker(objFiles, str(coFileRaw))
         coFile = destDir / coFileRaw.name.replace(extCoRaw, extCo)
         if compress:
-          bundler.compress(str(coFileRaw), str(coFile), gfx)
+          bundler.compress(str(coFileRaw), str(coFile), targetArch)
         else:
           shutil.move(coFileRaw, coFile)
         coFiles.append(coFile)

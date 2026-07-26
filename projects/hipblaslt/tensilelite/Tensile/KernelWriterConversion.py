@@ -89,6 +89,43 @@ class KernelWriterConversion(KernelWriterBase):
         self.gsuKernels.append(pgrgsu)
         pgrgsu = int(pgrgsu / 2)
 
+  @staticmethod
+  def _loadWidth(num_elements, data_type):
+    load_bytes = num_elements * data_type.numBytes()
+    return max(1, int(load_bytes / 4)), load_bytes < 4
+
+  def _loadType(self, default_type):
+    if self.state["ProblemType"]["DataType"].isComplex():
+      return "%s%s" % (self.datatype, "" if self.num_dword_load == 1 else self.num_dword_load)
+    if self.is_sub_dword_load:
+      return self.datatype
+    return "%s%s" % (default_type, "" if self.num_dword_load == 1 else self.num_dword_load)
+
+  def _initialStrideDefines(self):
+    problem_type = self.state["ProblemType"]
+    index_char = self.indexChars[0]
+    comment = "/* supplied initial strides */"
+    if not problem_type["UseInitialStridesCD"]:
+      comment = "/* hard-coded initial strides */"
+
+    result = comment + self.endLine
+    for tensor in self._initialStrideTensors():
+      source = "arg.stride%s%s" % (tensor, index_char) if problem_type["UseInitialStridesCD"] else "1"
+      result += "#define stride%s%s %s%s" % (tensor, index_char, source, self.endLine)
+    return result
+
+  def _initialStrideTensors(self):
+    tensors = ["D", "W", "C"]
+    if self.state["ProblemType"]["UseE"]:
+      tensors.insert(0, "E")
+    return tensors
+
+  def _initialStrideUndefines(self):
+    index_char = self.indexChars[0]
+    return "".join(
+      "#undef stride%s%s%s" % (tensor, index_char, self.endLine)
+      for tensor in self._initialStrideTensors())
+
   def functionArgument(self):
     kStr = ""
 
@@ -143,9 +180,13 @@ class KernelWriterConversion(KernelWriterBase):
       gatePtrStr = self.state["ProblemType"]["GateResidualDataTypeList"][0].toDevice(self.language)
       kStr += "  " + gatePtrStr + " * " + "Gate;" + self.endLine
 
-    # alpha & beta
-    kStr += "  %s alpha;%s" % (self.state["ProblemType"]["ComputeDataType"].toDevice(self.language), self.endLine)
-    kStr += "  %s beta;%s" % (self.state["ProblemType"]["ComputeDataType"].toDevice(self.language), self.endLine)
+    # KernelArguments packs FP16 alpha/beta as duplicated half2 values so the
+    # ABI remains dword-aligned for assembly kernels.  Match that four-byte
+    # layout in source helpers and select the low lane in kernelBody().
+    computeDataType = self.state["ProblemType"]["ComputeDataType"]
+    scalarArgType = "tensile_half2" if computeDataType.isHalf() else computeDataType.toDevice(self.language)
+    kStr += "  %s alpha;%s" % (scalarArgType, self.endLine)
+    kStr += "  %s beta;%s" % (scalarArgType, self.endLine)
 
     # activation
     activationCDataType = self.state["ProblemType"]["ActivationComputeDataType"]
@@ -226,27 +267,7 @@ class KernelWriterConversion(KernelWriterBase):
 
     ########################################
     # defined initial strides
-    firstStride = 0
-    if problemType["UseInitialStridesCD"]:
-      # no strides #defined
-      lastStrideC = 0
-      assert 0  # need to fix beta-clear routine to pass initial stride parms
-    else:
-      # #define initial stride
-      kStr += "/* hard-coded initial strides */%s" % self.endLine
-      lastStrideC = 1
-    if self.state["ProblemType"]["UseE"]:
-      for i in range(firstStride, lastStrideC):
-        kStr += "#define strideE" + self.indexChars[i] + " 1" + self.endLine
-    for i in range(firstStride, lastStrideC):
-      kStr += "#define strideD" + self.indexChars[i] + " 1" + self.endLine
-    for i in range(firstStride, lastStrideC):
-      kStr += "#define strideW" + self.indexChars[i] + " 1" + self.endLine
-    for i in range(firstStride, lastStrideC):
-      kStr += "#define strideC" + self.indexChars[i] + " 1" + self.endLine
-    if self.state["ProblemType"]["UseGateResidual"]:
-      for i in range(firstStride, lastStrideC):
-        kStr += "#define strideGate" + self.indexChars[i] + " 1" + self.endLine
+    kStr += self._initialStrideDefines()
 
     ########################################
     # GLOBAL_E()
@@ -319,7 +340,8 @@ class KernelWriterConversion(KernelWriterBase):
       kStr += " + (IDX%s)*arg.strideBias" % (indexChar)
       kStr += " ))" + self.endLine
 
-    self.num_dword_load = int(self.num_elements_load * self.state["ProblemType"]["ComputeDataType"].numBytes() / 4)
+    self.num_dword_load, self.is_sub_dword_load = self._loadWidth(
+      self.num_elements_load, self.state["ProblemType"]["ComputeDataType"])
     self.num_dword_store = int(self.num_elements_load * self.state["ProblemType"]["DestDataType"].numBytes() / 4)
     if self.num_dword_store == 0:
       self.num_dword_store = self.num_elements_load * self.state["ProblemType"]["DestDataType"].numBytes() / 4
@@ -367,6 +389,11 @@ class KernelWriterConversion(KernelWriterBase):
       kStr += "    s_buffer_load<float2, sizeof(float2)>(*((float2*) &arg + loadsInBytes/8), argsPtr+left-1, loadsInBytes);" + self.endLine
       kStr += "  for(; loadsInBytes + 4 <= sizeof(argument_%s); loadsInBytes += 4)" % ( self.kernelName ) + self.endLine
       kStr += "    s_buffer_load<float1, sizeof(float1)>(*((float1*) &arg + loadsInBytes/4), argsPtr+left-1, loadsInBytes);" + self.endLine
+
+    computeTypeStr = self.state["ProblemType"]["ComputeDataType"].toDevice(self.language)
+    scalarLane = "[0]" if self.state["ProblemType"]["ComputeDataType"].isHalf() else ""
+    kStr += "  %s alpha = arg.alpha%s;%s" % (computeTypeStr, scalarLane, self.endLine)
+    kStr += "  %s beta = arg.beta%s;%s" % (computeTypeStr, scalarLane, self.endLine)
 
     ########################################
     # kernel start
@@ -431,7 +458,7 @@ class KernelWriterConversion(KernelWriterBase):
       kStr += "  " + ptrStr + " * arg.D = arg.BatchD[wg];" + self.endLine
       ptrStr = self.state["ProblemType"]["DestDataType"].toDevice(self.language)
       zeroStr = self.state["ProblemType"]["ComputeDataType"].zeroString(self.language, 1)
-      kStr += "  " + ptrStr + f" const* arg.C = (arg.beta == {zeroStr}) ? nullptr : arg.BatchC[wg];" + self.endLine
+      kStr += "  " + ptrStr + f" const* arg.C = (beta == {zeroStr}) ? nullptr : arg.BatchC[wg];" + self.endLine
 
     ########################################
     # D index
@@ -550,11 +577,10 @@ class KernelWriterConversion(KernelWriterBase):
 
     typeStr = "int" if self.state["ProblemType"]["DataType"].isInt8() or self.state["ProblemType"]["DataType"].isInt32() else ("double" if self.state["ProblemType"]["DataType"].isDouble() else "float")
     typeStr2 = "int16_t" if self.state["ProblemType"]["DestDataType"].isInt8() else ("tensile_half" if self.state["ProblemType"]["DestDataType"].isAnyFloat8() else "tensile_bfloat16")
+    loadTypeStr = self._loadType(typeStr)
     if self.state["ProblemType"]["DataType"].isComplex():
-      loadTypeStr = "%s%s" % (self.datatype, "" if self.num_dword_load == 1 else self.num_dword_load)
       storeTypeStr = "%s%s" % (self.datatype, "" if self.num_dword_store == 1 else self.num_dword_store)
     else:
-      loadTypeStr = "%s%s" % (typeStr, "" if self.num_dword_load == 1 else self.num_dword_load)
       storeTypeStr = "%s%s" % (typeStr, self.num_dword_store) if self.num_dword_store >= 1 else typeStr2 if self.num_dword_store == 0.5 else destTypeStr
 
     #Bias A/B
@@ -705,7 +731,7 @@ class KernelWriterConversion(KernelWriterBase):
 
     #scaleAB
     if self.state["ProblemType"]["UseScaleAB"] == "Scalar":
-      kStr += "  arg.alpha = arg.alpha*scaleA_data*scaleB_data;%s" % (self.endLine)
+      kStr += "  alpha = alpha*scaleA_data*scaleB_data;%s" % (self.endLine)
       kStr += self.endLine
     elif self.state["ProblemType"]["UseScaleAB"] == "Vector":
       kStr += "  if(arg.ScaleA != nullptr) {" + self.endLine
@@ -720,7 +746,7 @@ class KernelWriterConversion(KernelWriterBase):
 
     #alpha
     for vIdx in range(self.num_dword_load):
-      kStr += "  %s[%d] *= (%s)arg.alpha;%s" % (accumStr, vIdx, intermediateDataType, self.endLine)
+      kStr += "  %s[%d] *= (%s)alpha;%s" % (accumStr, vIdx, intermediateDataType, self.endLine)
     kStr += self.endLine
 
     if self.state["ProblemType"]["UseScaleAlphaVec"]:
@@ -748,23 +774,23 @@ class KernelWriterConversion(KernelWriterBase):
 
     #scaleC
     if self.state["ProblemType"]["UseScaleCD"]:
-      kStr += "  arg.beta = arg.beta*scaleC_data;%s" % (self.endLine)
+      kStr += "  beta = beta*scaleC_data;%s" % (self.endLine)
     kStr += self.endLine
 
     #Beta
-    kStr += "  if(arg.beta != (%s)0){%s" % (self.state["ProblemType"]["ComputeDataType"].toDevice(self.language), self.endLine)
+    kStr += "  if(beta != (%s)0){%s" % (self.state["ProblemType"]["ComputeDataType"].toDevice(self.language), self.endLine)
     if not self.state["ProblemType"]["GroupedGemm"]:
       kStr += "  if(batch_mode == 0)" + self.endLine
       kStr += "  {" + self.endLine
     for vIdx in range(self.num_dword_load):
-      kStr += "    %s[%d] += arg.beta * (%s)arg.C[idxC+%d];%s" % (accumStr, vIdx, intermediateDataType, vIdx, self.endLine)
+      kStr += "    %s[%d] += beta * (%s)arg.C[idxC+%d];%s" % (accumStr, vIdx, intermediateDataType, vIdx, self.endLine)
     if not self.state["ProblemType"]["GroupedGemm"]:
       kStr += "  }" + self.endLine
       kStr += "  else" + self.endLine
       kStr += "  {" + self.endLine
       kStr += "    %s *ptr = *(reinterpret_cast<%s **>(((char *)arg.C) + (8*id2)));" % (destTypeStr, destTypeStr) + self.endLine
       for vIdx in range(self.num_dword_load):
-        kStr += "    %s[%d] += arg.beta * (%s)ptr[idxC+%d];%s" % (accumStr, vIdx, intermediateDataType, vIdx, self.endLine)
+        kStr += "    %s[%d] += beta * (%s)ptr[idxC+%d];%s" % (accumStr, vIdx, intermediateDataType, vIdx, self.endLine)
       kStr += "  }" + self.endLine
     kStr += "  }" + self.endLine
     kStr += self.endLine
@@ -878,15 +904,7 @@ class KernelWriterConversion(KernelWriterBase):
     kStr += "}%s" % self.endLine
     kStr += "#undef NUM_GSU" + self.endLine
     kStr += "#undef NUM_ELEMENT_LOAD" + self.endLine
-    for i in range(firstStride, lastStrideC):
-      kStr += "#undef strideD" + self.indexChars[i] + self.endLine
-    for i in range(firstStride, lastStrideC):
-      kStr += "#undef strideW" + self.indexChars[i] + self.endLine
-    for i in range(firstStride, lastStrideC):
-      kStr += "#undef strideC" + self.indexChars[i] + self.endLine
-    if self.state["ProblemType"]["UseGateResidual"]:
-      for i in range(firstStride, lastStrideC):
-        kStr += "#undef strideGate" + self.indexChars[i] + self.endLine
+    kStr += self._initialStrideUndefines()
     kStr += "#undef GLOBAL_D%s" % (self.endLine)
     kStr += "#undef GLOBAL_W%s" % (self.endLine)
     kStr += "#undef GLOBAL_C%s" % (self.endLine)

@@ -182,8 +182,9 @@ class ShiftVectorComponentsVALU(ShiftVectorComponents):
 
                     # end shift reset mask and jump out
                     all1mask = "0xFFFFFFFF" if (kernel["WavefrontSize"] == 32) else "0xFFFFFFFFFFFFFFFF"
+                    SMovBX = SMovB64 if kernel["WavefrontSize"] == 64 else SMovB32
                     SOrSaveExecBX = SOrSaveExecB64 if kernel["WavefrontSize"] == 64 else SOrSaveExecB32
-                    module.add(SMovB32(sgpr(tmpSgpr, writer.states.laneSGPRCount), all1mask, "to restore all threads active"))
+                    module.add(SMovBX(sgpr(tmpSgpr, writer.states.laneSGPRCount), all1mask, "to restore all threads active"))
                     module.add(SOrSaveExecBX(dst=VCC(), src=sgpr(tmpSgpr, writer.states.laneSGPRCount), comment="all threads active"))
                     module.add(SBranch(labelName=svrLabels[glvw-1].getLabelName(), comment="done shifting" ))
             module.add(svrLabels[glvw-1])

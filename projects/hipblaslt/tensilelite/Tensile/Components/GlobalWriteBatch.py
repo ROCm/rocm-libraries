@@ -818,15 +818,7 @@ class GlobalWriteBatchWriter:
     if not self.kernel["InterleaveAlpha"] and self.applyAlpha and self.parentWriter.alphaBeforeLoadC:
       module.addComment1("rC *= alpha batchElements=%s"%self.batchElements)
       if self.codeMulAlpha is None:
-        elementIdx = 0
-        while elementIdx < len(self.batchElements):
-          isEnd = (elementIdx == len(self.batchElements) - 1)
-          if not isEnd and (self.ss.elementSumIdx[elementIdx] + 1 == self.ss.elementSumIdx[elementIdx + 1]) and (self.ss.elementSumIdx[elementIdx] % 2 == 0):
-            module.add(self._applyAlpha(self.kernel, self.gwvw, self.ss.elementSumIdx, elementIdx, self.tmpS01, usePK=True))
-            elementIdx += 2
-          else:
-            module.add(self._applyAlpha(self.kernel, self.gwvw, self.ss.elementSumIdx, elementIdx, self.tmpS01))
-            elementIdx += 1
+        module.add(self._applyAlphaBatch(self.kernel, self.gwvw, self.ss.elementSumIdx, self.tmpS01))
       else:
           regsPerScalar = self.parentWriter.states.bpeCinternal // self.parentWriter.states.bpr # register per scalar
           for elementIdx in range(len(self.batchElements)):
@@ -935,7 +927,13 @@ class GlobalWriteBatchWriter:
         tmpInrSgpr = self._epilogScratchSgpr(1)
         module.add(addrCalc.emitLdChange(self.kernel, self.ss, 'C', self.edge, self.beta, mask, bufferOOB, (elementIdx == 0), self.tmpVgpr, tmpInrSgpr, addrCVgpr, self.addrC, 0))
         self._epilogScratchFree(tmpInrSgpr)
-        if dataBeta not in self.loadedDataBeta:
+        edgePackedHalfLane = (
+          self.edge
+          and self.kernel["ProblemType"]["DestDataType"].isHalf()
+          and not self.kernel["ProblemType"]["HighPrecisionAccumulate"]
+          and vc0 % 2 == 1
+        )
+        if dataBeta not in self.loadedDataBeta or edgePackedHalfLane:
           # In the UseSubtileImpl NonEdge path the workgroup-level edge check is relaxed
           # (subtile-aligned remainder is allowed into NonEdge), so individual waves may
           # own rows/columns beyond the valid output region.  Gate each C load by writing
@@ -981,7 +979,9 @@ class GlobalWriteBatchWriter:
                                                   overrideAfterPrimerRows=_emitOverrideRows))
           self.loadedDataBeta[dataBeta] = ceil(self.kernel["ProblemType"]["DestDataType"].numBytes() * self.ss.cfg.gwvw / 16)
           self.loadsBetaIssued += ceil(self.kernel["ProblemType"]["DestDataType"].numBytes() * self.gwvw / 16)
-      self.betaLoadIssued.append(len(self.loadedDataBeta) * ceil(self.kernel["ProblemType"]["DestDataType"].numBytes() * self.ss.cfg.gwvw / 16))
+          if edgePackedHalfLane and elementIdx > 0 and self.ss.elementData[elementIdx - 1] == dataBeta:
+            self.betaLoadIssued[elementIdx - 1] = self.loadsBetaIssued
+      self.betaLoadIssued.append(self.loadsBetaIssued)
 
       if (self.kernel["ProblemType"]["UseE"] and self.kernel["ProblemType"]["Gradient"] and self.kernel["ProblemType"]["ActivationType"] != 'none') and ((self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1) or self.kernel["StreamK"] > 0):
         tmpInrSgpr = self._epilogScratchSgpr(1)
@@ -1256,15 +1256,7 @@ class GlobalWriteBatchWriter:
     if not self.kernel["InterleaveAlpha"] and self.applyAlpha and not self.parentWriter.alphaBeforeLoadC:
       module.addComment1("rC *= alpha batchElements=%s"%self.batchElements)
       if self.codeMulAlpha is None:
-        elementIdx = 0
-        while elementIdx < len(self.batchElements):
-          isEnd = (elementIdx == len(self.batchElements) - 1)
-          if not isEnd and (self.ss.elementSumIdx[elementIdx] + 1 == self.ss.elementSumIdx[elementIdx + 1]) and (self.ss.elementSumIdx[elementIdx] % 2 == 0):
-            module.add(self._applyAlpha(self.kernel, self.gwvw, self.ss.elementSumIdx, elementIdx, self.tmpS01, usePK=True))
-            elementIdx += 2
-          else:
-            module.add(self._applyAlpha(self.kernel, self.gwvw, self.ss.elementSumIdx, elementIdx, self.tmpS01))
-            elementIdx += 1
+        module.add(self._applyAlphaBatch(self.kernel, self.gwvw, self.ss.elementSumIdx, self.tmpS01))
       else:
           regsPerScalar = self.parentWriter.states.bpeCinternal // self.parentWriter.states.bpr # register per scalar
           for elementIdx in range(len(self.batchElements)):
@@ -3185,8 +3177,9 @@ class GlobalWriteBatchWriter:
 
         if kernel["ProblemType"]["ComputeDataType"].isHalf() and not kernel["ProblemType"]["HighPrecisionAccumulate"]:
           # (h,h,h,h,h,h), internal alpha is f16 (2-16bits)
-          if sumIdxV%2:
-            newSumIdx = sumIdxV // 2 - self.parentWriter.states.c.startVgprValu
+          relativeSumIdx = sumIdxV - self.parentWriter.states.c.startVgprValu
+          if relativeSumIdx%2:
+            newSumIdx = relativeSumIdx // 2
             module.add(VMulPKF16(dst=vgpr("ValuC+%u"%(newSumIdx)), src0=sgpr("Alpha"), src1=vgpr("ValuC+%u"%(newSumIdx)), comment="*= alpha sumIdx=%u vi=%u"%(elementSumIdx[elementIdx], vi)))
 
         # Int8 (TODO- Int8x4 not checked, but should be OK)
@@ -3282,6 +3275,32 @@ class GlobalWriteBatchWriter:
           self.parentWriter.vgprPool.checkIn(vtmp2)
     return module
 
+  def _applyAlphaBatch(self, kernel, gwvw, elementSumIdx, tmpS01):
+    """Apply alpha once per accumulator, independent of store-element order."""
+    if kernel["ProblemType"]["ComputeDataType"].isHalf() and not kernel["ProblemType"]["HighPrecisionAccumulate"]:
+      module = Module("applyAlphaBatchPackedHalf")
+      packedIndices = {
+        (elementSumIdx[elementIdx] + vi - self.parentWriter.states.c.startVgprValu) // 2
+        for elementIdx in range(len(elementSumIdx))
+        for vi in range(gwvw)
+      }
+      for packedIdx in sorted(packedIndices):
+        module.add(VMulPKF16(dst=vgpr("ValuC+%u"%packedIdx), src0=sgpr("Alpha"), \
+            src1=vgpr("ValuC+%u"%packedIdx), comment="*= alpha packed accumulator"))
+      return module
+
+    module = Module("applyAlphaBatch")
+    elementIdx = 0
+    while elementIdx < len(elementSumIdx):
+      isEnd = (elementIdx == len(elementSumIdx) - 1)
+      if not isEnd and (elementSumIdx[elementIdx] + 1 == elementSumIdx[elementIdx + 1]) and (elementSumIdx[elementIdx] % 2 == 0):
+        module.add(self._applyAlpha(kernel, gwvw, elementSumIdx, elementIdx, tmpS01, usePK=True))
+        elementIdx += 2
+      else:
+        module.add(self._applyAlpha(kernel, gwvw, elementSumIdx, elementIdx, tmpS01))
+        elementIdx += 1
+    return module
+
   def _addSumAlphaWithCBeta(self, kernel, ss, gwvw, elementIdx, vc0, tmpVgpr, cvtVgprStruct):
     module = Module("addSumAlphaWithCBeta #elementIdx%u, vc0 %u"%(elementIdx, vc0))
     for vi in range(0, gwvw):
@@ -3300,16 +3319,18 @@ class GlobalWriteBatchWriter:
             # dataV+0 = new c = old c*beta + rC
             module.add(VAddPKF16(dst=vgpr("ValuC+%u"%(sumIdxV)), src0=vgpr(dataV), src1=vgpr("ValuC+%u"%(sumIdxV)), \
                 comment="sum*alpha + C*beta"))
-          elif sumIdxV%2==0 or (not ss.cfg.halfDataRegPerVI and gwvw==1):
-            newSumIdxV = sumIdxV // 2 - self.parentWriter.states.c.startVgprValu
-            # dataV+0 = new c = old c*beta
-            module.add(VMulPKF16(dst=vgpr(dataV), src0=sgpr("Beta"), src1=vgpr(dataV+0), \
-                comment="%s = C*beta ei=%u vi=%u"%(vgpr(dataV),elementIdx, vi)))
-            # dataV+0 = new c = old c*beta + rC
-            module.add(VAddPKF16(dst=vgpr("ValuC+%u"%(newSumIdxV)), src0=vgpr(dataV), src1=vgpr("ValuC+%u"%(newSumIdxV)), \
-                comment="sum*alpha + C*beta"))
           else:
-            pass # add will have been done previously
+            relativeSumIdx = sumIdxV - self.parentWriter.states.c.startVgprValu
+            if relativeSumIdx%2==0 or (not ss.cfg.halfDataRegPerVI and gwvw==1):
+              newSumIdxV = relativeSumIdx // 2
+              # dataV+0 = new c = old c*beta
+              module.add(VMulPKF16(dst=vgpr(dataV), src0=sgpr("Beta"), src1=vgpr(dataV+0), \
+                  comment="%s = C*beta ei=%u vi=%u"%(vgpr(dataV),elementIdx, vi)))
+              # dataV+0 = new c = old c*beta + rC
+              module.add(VAddPKF16(dst=vgpr("ValuC+%u"%(newSumIdxV)), src0=vgpr(dataV), src1=vgpr("ValuC+%u"%(newSumIdxV)), \
+                  comment="sum*alpha + C*beta"))
+            else:
+              pass # add will have been done previously
         else: # HPA
           newSumIdxV = sumIdxV - self.parentWriter.states.c.startVgprValu
           # dataV+0 = new c = old c*beta + rC

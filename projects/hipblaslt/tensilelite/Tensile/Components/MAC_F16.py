@@ -39,7 +39,7 @@ class MAC_F16_Plain(MAC):
                               "MacDataTypeB": DataType(DataTypeEnum.Half),
                               "HighPrecisionAccumulate": False}}
 
-    def __call__(self, writer, m, innerUnroll):
+    def __call__(self, writer, tPA, tPB, m, innerUnroll):
         kernel = writer.states.kernel
 
         module = Module("MAC_F16_Plain")
@@ -85,7 +85,7 @@ class FMA_F16_NonPacked(MAC):
                               "MacDataTypeB": DataType(DataTypeEnum.Half),
                               "HighPrecisionAccumulate": False}}
 
-    def __call__(self, writer, m, innerUnroll):
+    def __call__(self, writer, tPA, tPB, m, innerUnroll):
         kernel = writer.states.kernel
 
         module = Module("FMA_F16_NonPacked")
@@ -137,7 +137,7 @@ class FMA_F16_Packed(MAC):
                               "MacDataTypeB": DataType(DataTypeEnum.Half),
                               "HighPrecisionAccumulate": False}}
 
-    def __call__(self, writer, m, innerUnroll):
+    def __call__(self, writer, tPA, tPB, m, innerUnroll):
         kernel = writer.states.kernel
 
         module = Module("FMA_F16_Packed")
@@ -175,9 +175,7 @@ class FMA_F16_Packed(MAC):
                     module.add(priority(writer, 1, "Raise priority while processing macs"))
 
                     cIdxExpr = "{blockA} + {blockB}*{ThreadTile0} + {Half_ThreadTile0}".format_map(vars)
-                    cIdxVal  = eval(vars["cIdxExpr"])
-
-                    cStr = "v[vgprValuC + {cIdxExpr}]".format_map(vars)
+                    cStr = "v[vgprValuC + {}]".format(eval(cIdxExpr))
 
                     module.addInst("v_pk_fma_f16", cStr, aStr, bStr, cStr, "op_sel:[0,1,0]", "op_sel_hi:[1,1,1]", cIdxExpr)
 

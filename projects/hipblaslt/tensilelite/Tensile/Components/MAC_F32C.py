@@ -31,7 +31,7 @@ class MAC_F32C_Plain(MAC):
     kernel = {"ProblemType": {"MacDataTypeA": DataType(DataTypeEnum.ComplexFloat),
                               "MacDataTypeB": DataType(DataTypeEnum.ComplexFloat)}}
 
-    def __call__(self, writer, m, innerUnroll):
+    def __call__(self, writer, tPA, tPB, m, innerUnroll):
         kernel = writer.states.kernel
         module = Module("MAC_F32C_Plain")
         module.addComment(self.commentHeader())

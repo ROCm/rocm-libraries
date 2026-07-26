@@ -1086,6 +1086,15 @@ class KernelWriterAssembly(KernelWriter):
     ########################################
     def macroAndSetImplClassic():
 
+      gfx90cFp16PrefetchSafe = (
+          self.states.version == (9, 0, 12)
+          and kernel["ProblemType"]["MacDataTypeA"].isHalf()
+          and kernel["ProblemType"]["MacDataTypeB"].isHalf()
+      )
+      # Keep the X0/X1 local-read destinations distinct on gfx90c HPA. Four
+      # mixed-MADs consume different halves of each packed operand while the
+      # scheduler may overlap a prefetched iteration with the current one.
+
       module.addComment2("VGPR Assignments for MX")
       module.add(RegSet("v", "vgprMXSBase", 0))
 
@@ -1249,10 +1258,12 @@ class KernelWriterAssembly(KernelWriter):
             for iui in range(0, kernel["InnerUnroll"]):
               moduleVgprMacroValuA.add(RegSet("v", "vgprValuA_X%u_I%u"%(bi,iui), "vgprValuA_X0_I0_BASE", ri))
               ri += self.states.a.numVgprValuPerBlock
-            if tPA["bpe"] < 4 and not kernel["UnrollMajorLDSA"] and not (kernel["UsePLRPack"] and self.states.numItersPLR):
+            if (tPA["bpe"] < 4 and not kernel["UnrollMajorLDSA"]
+                and not (kernel["UsePLRPack"] and self.states.numItersPLR)
+                and not gfx90cFp16PrefetchSafe):
               ri = 0
           ri = 0
-          if tPA["bpe"] < 4 and not kernel["UnrollMajorLDSA"] and not kernel["enableLDSTrA"]:
+          if kernel["EnableMatrixInstruction"] and tPA["bpe"] < 4 and not kernel["UnrollMajorLDSA"] and not kernel["enableLDSTrA"]:
             moduleVgprMacro.add(RegSet("v", "vgprValuA_X0_I0_D0_PACK", "vgprBase", self.states.a.startVgprValuPack - self.states.startVgpr))
             for bi in range(0,numBiFactor): # buffer indices
               for iui in range(0, kernel["InnerUnroll"]):
@@ -1273,7 +1284,7 @@ class KernelWriterAssembly(KernelWriter):
                 moduleVgprMacroValuA.add(RegSet("v", "vgprValuA_G%u"%(bi), "vgprValuA_X0_I0_BASE", ri))
                 ri += self.states.a.numVgprValuPerBlock // 2
           ri = 0
-          if tPA["bpe"] < 4 and not kernel["UnrollMajorLDSA"] and not kernel["enableLDSTrA"]:
+          if kernel["EnableMatrixInstruction"] and tPA["bpe"] < 4 and not kernel["UnrollMajorLDSA"] and not kernel["enableLDSTrA"]:
             moduleVgprMacro.add(RegSet("v", "vgprValuA_X0_I0_D0_PACK", "vgprBase", self.states.a.startVgprValuPack - self.states.startVgpr))
             for data in range(1,int(self.states.bpr/tPA["bpeDS"])):
               for bi in range(0,numBiFactor): # buffer indices
@@ -1295,10 +1306,12 @@ class KernelWriterAssembly(KernelWriter):
             for iui in range(0, kernel["InnerUnroll"]):
               moduleVgprMacroValuB.add(RegSet("v", "vgprValuB_X%u_I%u"%(bi,iui), "vgprValuB_X0_I0_BASE", ri))
               ri += self.states.b.numVgprValuPerBlock
-            if (tPB["bpe"] < 4 and not kernel["UnrollMajorLDSB"]) and not (kernel["UsePLRPack"] and self.states.numItersPLR):
+            if ((tPB["bpe"] < 4 and not kernel["UnrollMajorLDSB"])
+                and not (kernel["UsePLRPack"] and self.states.numItersPLR)
+                and not gfx90cFp16PrefetchSafe):
               ri = 0
           ri = 0
-          if tPB["bpe"] < 4 and not kernel["UnrollMajorLDSB"] and not kernel["enableLDSTrB"]:
+          if kernel["EnableMatrixInstruction"] and tPB["bpe"] < 4 and not kernel["UnrollMajorLDSB"] and not kernel["enableLDSTrB"]:
             moduleVgprMacro.add(RegSet("v", "vgprValuB_X0_I0_D0_PACK", "vgprBase", self.states.b.startVgprValuPack - self.states.startVgpr))
             for bi in range(0,numBiFactor): # buffer indices
               for iui in range(0, kernel["InnerUnroll"]):
@@ -1319,7 +1332,7 @@ class KernelWriterAssembly(KernelWriter):
                 moduleVgprMacroValuB.add(RegSet("v", "vgprValuB_G%u"%(bi), "vgprValuB_X0_I0_BASE", ri))
                 ri += self.states.b.numVgprValuPerBlock // 2
           ri = 0
-          if tPB["bpe"] < 4 and not kernel["UnrollMajorLDSB"] and not kernel["enableLDSTrB"]:
+          if kernel["EnableMatrixInstruction"] and tPB["bpe"] < 4 and not kernel["UnrollMajorLDSB"] and not kernel["enableLDSTrB"]:
             moduleVgprMacro.add(RegSet("v", "vgprValuB_X0_I0_D0_PACK", "vgprBase", self.states.b.startVgprValuPack - self.states.startVgpr))
             for data in range(1,int(self.states.bpr/tPB["bpeDS"])):
               for bi in range(0,numBiFactor): # buffer indices
@@ -6530,7 +6543,7 @@ class KernelWriterAssembly(KernelWriter):
     valuVgprAlignment = 8 if self.states.asmCaps["HasVgprMSB"] else 2
     if self.states.a.numVgprValu > 0 and not kernel["DirectToVgprA"]:
       numValuA = self.states.a.numVgprValu
-      if tensorParametersA["bpe"] < 4 and not kernel["UnrollMajorLDSA"] and not kernel["enableLDSTrA"]:
+      if kernel["EnableMatrixInstruction"] and tensorParametersA["bpe"] < 4 and not kernel["UnrollMajorLDSA"] and not kernel["enableLDSTrA"]:
         if self.states.lrvwTileA > 1:
           numVgprValuPackA = ceil(kernel["VectorWidthA"] * tensorParametersA["bpe"] / self.states.bpr) * kernel["MIWaveTileA"] // kernel["VectorWidthA"] * kernel["InnerUnroll"] * self.states.numVgprBuffer * kernel["MIInputPerThreadA"]
           if self.states.packDTVA:
@@ -6554,7 +6567,7 @@ class KernelWriterAssembly(KernelWriter):
     numVgprValuPackB = 0
     if self.states.b.numVgprValu > 0 and not kernel["DirectToVgprB"]:
       numValuB = self.states.b.numVgprValu
-      if tensorParametersB["bpe"] < 4 and not kernel["UnrollMajorLDSB"] and not kernel["enableLDSTrB"]:
+      if kernel["EnableMatrixInstruction"] and tensorParametersB["bpe"] < 4 and not kernel["UnrollMajorLDSB"] and not kernel["enableLDSTrB"]:
         if self.states.lrvwTileB > 1:
           numVgprValuPackB = ceil(kernel["VectorWidthB"] * tensorParametersB["bpe"] / self.states.bpr) * kernel["MIWaveTileB"] // kernel["VectorWidthB"] * kernel["InnerUnroll"] * self.states.numVgprBuffer * kernel["MIInputPerThreadB"]
           if self.states.packDTVB:
@@ -6720,7 +6733,7 @@ class KernelWriterAssembly(KernelWriter):
       if self.states.packDTVA or self.states.convDTVA:
         numValuA = self.states.a.numVgprValu
         numVgprValuPackA = 0
-        if tensorParametersA["bpe"] < 4 and not kernel["UnrollMajorLDSA"]:
+        if kernel["EnableMatrixInstruction"] and tensorParametersA["bpe"] < 4 and not kernel["UnrollMajorLDSA"]:
           if self.states.lrvwTileA > 1:
             numVgprValuPackA = ceil(kernel["VectorWidthA"] * tensorParametersA["bpe"] / self.states.bpr) * kernel["MIWaveTileA"] // kernel["VectorWidthA"] * kernel["InnerUnroll"] * self.states.numVgprBuffer * kernel["MIInputPerThreadA"]
             if self.states.packDTVA:
@@ -6758,7 +6771,7 @@ class KernelWriterAssembly(KernelWriter):
       if self.states.packDTVB or self.states.convDTVB:
         numValuB = self.states.b.numVgprValu
         numVgprValuPackB = 0
-        if tensorParametersB["bpe"] < 4 and not kernel["UnrollMajorLDSB"]:
+        if kernel["EnableMatrixInstruction"] and tensorParametersB["bpe"] < 4 and not kernel["UnrollMajorLDSB"]:
           if self.states.lrvwTileB > 1:
             numVgprValuPackB = ceil(kernel["VectorWidthB"] * tensorParametersB["bpe"] / self.states.bpr) * kernel["MIWaveTileB"] // kernel["VectorWidthB"] * kernel["InnerUnroll"] * self.states.numVgprBuffer * kernel["MIInputPerThreadB"]
             if self.states.packDTVB:
@@ -8622,7 +8635,18 @@ class KernelWriterAssembly(KernelWriter):
 
     if self.do["MAC"]:
       imod.add(shiftK)
-      if self.states.asmCaps["HasVgprMSB"]:
+      # Packed FP16 MAC instructions are already typed rocisa instructions.
+      # Keeping them behind the legacy no-argument MAC macro caused the rocisa
+      # macro pipeline to remove both the macro calls and their bodies on
+      # gfx90c. Emit this component directly, as the HasVgprMSB path does, so
+      # scheduling and later passes retain the compute loop.
+      directPackedF16 = (
+        kernel["ProblemType"]["MacDataTypeA"].isHalf()
+        and kernel["ProblemType"]["MacDataTypeB"].isHalf()
+        and not kernel["ProblemType"]["HighPrecisionAccumulate"]
+        and self.states.asmCaps["v_pk_fma_f16"]
+      )
+      if self.states.asmCaps["HasVgprMSB"] or directPackedF16:
         component = Component.MAC.find(self)
         if not component:
           printExit("Assembly doesn't support datatype %s" % kernel["ProblemType"]["DataType"])
@@ -10047,7 +10071,7 @@ class KernelWriterAssembly(KernelWriter):
       else:
         imod.add(SCMovB32(sgpr("SrdMetadata+2"), sgpr("ShadowLimitMetadata+0"), "Move shadow to real if we are within 2^32"))
     else:
-      imod.addInst(SSubU32(sgpr("SrdMetadata+2"), \
+      imod.add(SSubU32(sgpr("SrdMetadata+2"), \
                            sgpr("SrdMetadata+2"), \
                            incSparseLower, \
                            "limit -= inc)" ))
@@ -16014,7 +16038,11 @@ class KernelWriterAssembly(KernelWriter):
           if numElementsPerBatch >= miwt0:
             numElementsPerBatch = (numElementsPerBatch // miwt0) * miwt0
       # dot2: no this constraint
-      elif not kernel["EnableMatrixInstruction"] and not kernel["UseDotInstruction"]:
+      # A scalar buffer_store_short has an independent 16-bit destination and
+      # is valid for a one-element batch.  Only flat VALU stores retain the
+      # historical paired-half requirement.
+      elif (not kernel["BufferStore"] and not kernel["EnableMatrixInstruction"]
+            and not kernel["UseDotInstruction"]):
         # The globalWriteBatch routine below can't handle odd elements per batch
         # and 0 elements per batch is illegal.
         # so if we don't have *GPR resources to handle a larger batch then need

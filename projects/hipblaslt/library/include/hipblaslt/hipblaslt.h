@@ -69,8 +69,7 @@
 // clang-format off
 
 #define HIPBLASLT_DATATYPE_INVALID static_cast<hipDataType>(255)
-// TODO: Replace static_cast<hipblasComputeType_t>(0) with the appropriate value since 0 represents f16_r
-#define HIPBLASLT_COMPUTE_TYPE_INVALID static_cast<hipblasComputeType_t>(0)
+#define HIPBLASLT_COMPUTE_TYPE_INVALID static_cast<hipblasComputeType_t>(127)
 #define HIPBLASLT_OPERATION_INVALID static_cast<hipblasOperation_t>(0)
 #define ROCBLASLT_COMPUTE_TYPE_INVALID static_cast<rocblaslt_compute_type>(255)
 

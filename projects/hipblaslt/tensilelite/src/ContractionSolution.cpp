@@ -168,37 +168,84 @@ namespace TensileLite
         case rocisa::DataType::Float:
         {
             float* f_buffer = (float*)buffer;
-            *f_buffer       = *std::get_if<float>(&value);
+            if(auto* val = std::get_if<float>(&value))
+                *f_buffer = *val;
+            else if(auto* val = std::get_if<double>(&value))
+                *f_buffer = static_cast<float>(*val);
+            else if(auto* val = std::get_if<Half>(&value))
+                *f_buffer = static_cast<float>(*val);
+            else if(auto* val = std::get_if<BFloat16>(&value))
+                *f_buffer = static_cast<float>(*val);
+            else if(auto* val = std::get_if<int32_t>(&value))
+                *f_buffer = static_cast<float>(*val);
+            else if(auto* val = std::get_if<std::complex<float>>(&value))
+                *f_buffer = val->real();
+            else if(auto* val = std::get_if<std::complex<double>>(&value))
+                *f_buffer = static_cast<float>(val->real());
+            else
+                throw std::runtime_error("Unsupported ConstantVariant append type for Float.");
         }
         break;
         case rocisa::DataType::Double:
         {
             double* d_buffer = (double*)buffer;
-            *d_buffer        = *std::get_if<double>(&value);
+            if(auto* val = std::get_if<double>(&value))
+                *d_buffer = *val;
+            else if(auto* val = std::get_if<float>(&value))
+                *d_buffer = static_cast<double>(*val);
+            else
+                throw std::runtime_error("Unsupported ConstantVariant append type for Double.");
         }
         break;
         case rocisa::DataType::Half:
         {
-            Half* fp16_buffer = (Half*)buffer;
-            *fp16_buffer      = *std::get_if<Half>(&value);
+            Half packedValue;
+            if(auto* val = std::get_if<Half>(&value))
+                packedValue = *val;
+            else if(auto* val = std::get_if<float>(&value))
+                packedValue = static_cast<Half>(*val);
+            else
+                throw std::runtime_error("Unsupported ConstantVariant append type for Half.");
+            auto* fp16_buffer = static_cast<Half*>(buffer);
+            fp16_buffer[0]    = packedValue;
+            // Packed-HB kernels consume both scalar lanes. DeviceUserArguments
+            // reserves 16 bytes for the scalar, so preserve the direct ABI's
+            // duplicated binary16 encoding in its first dword.
+            if(bufferLength >= 2 * sizeof(Half))
+                fp16_buffer[1] = packedValue;
         }
         break;
         case rocisa::DataType::Int32:
         {
             int32_t* i32_buffer = (int32_t*)buffer;
-            *i32_buffer         = *std::get_if<int32_t>(&value);
+            if(auto* val = std::get_if<int32_t>(&value))
+                *i32_buffer = *val;
+            else if(auto* val = std::get_if<float>(&value))
+                *i32_buffer = static_cast<int32_t>(*val);
+            else
+                throw std::runtime_error("Unsupported ConstantVariant append type for Int32.");
         }
         break;
         case rocisa::DataType::BFloat16:
         {
             BFloat16* bf16_buffer = (BFloat16*)buffer;
-            *bf16_buffer          = *std::get_if<BFloat16>(&value);
+            if(auto* val = std::get_if<BFloat16>(&value))
+                *bf16_buffer = *val;
+            else if(auto* val = std::get_if<float>(&value))
+                *bf16_buffer = static_cast<BFloat16>(*val);
+            else
+                throw std::runtime_error("Unsupported ConstantVariant append type for BFloat16.");
         }
         break;
         case rocisa::DataType::Int8:
         {
             int8_t* i8_buffer = (int8_t*)buffer;
-            *i8_buffer        = *std::get_if<int8_t>(&value);
+            if(auto* val = std::get_if<int8_t>(&value))
+                *i8_buffer = *val;
+            else if(auto* val = std::get_if<int32_t>(&value))
+                *i8_buffer = static_cast<int8_t>(*val);
+            else
+                throw std::runtime_error("Unsupported ConstantVariant append type for Int8.");
         }
         break;
         default:
@@ -359,8 +406,30 @@ namespace TensileLite
                 arg.strideE1 = 0;
                 arg.strideE2 = 0;
             }
-            arg.act0           = (*std::get_if<TAct>(&inputs.grouped[i].activationArgs[0]));
-            arg.act1           = (*std::get_if<TAct>(&inputs.grouped[i].activationArgs[1]));
+            if(inputs.grouped[i].activationArgs.size() > 0)
+            {
+                if(auto* val = std::get_if<TAct>(&inputs.grouped[i].activationArgs[0]))
+                    arg.act0 = *val;
+                else
+                    arg.act0 = 0;
+            }
+            else
+            {
+                arg.act0 = 0;
+            }
+
+            if(inputs.grouped[i].activationArgs.size() > 1)
+            {
+                if(auto* val = std::get_if<TAct>(&inputs.grouped[i].activationArgs[1]))
+                    arg.act1 = *val;
+                else
+                    arg.act1 = 0;
+            }
+            else
+            {
+                arg.act1 = 0;
+            }
+
             arg.activationType = (uint32_t)problems[i].getParams().activationEnum();
         }
 
@@ -824,15 +893,9 @@ namespace TensileLite
 
         args.append("alpha", inputs.alpha, problem.alphaType());
 
-        if(problem.alphaType() == rocisa::DataType::Half)
-            args.append("alpha_2", inputs.alpha, problem.alphaType());
-
         if(problemType.useBeta)
         {
             args.append("beta", inputs.beta, problem.betaType());
-            
-            if(problem.betaType() == rocisa::DataType::Half)
-                args.append("beta_2", inputs.beta, problem.betaType());
         }
 
         if(sizeMapping.expertSchedulingMode > 0)
@@ -1959,8 +2022,8 @@ namespace TensileLite
             rv.args.append<void const*>("dstD", inputs.d);
             // MBSK: synchronizer address, MB: null address
             rv.args.append<void const*>("Synchronizer",
-                                        gsuSettings.globalAccumulation == 3 
-                                        ? inputs.Synchronizer 
+                                        gsuSettings.globalAccumulation == 3
+                                        ? inputs.Synchronizer
                                         : NULL);
             rv.args.append<uint32_t>("GSUSync", 0);
         }
@@ -2410,7 +2473,7 @@ namespace TensileLite
                                                        KA&                    args,
                                                        StreamKSettings const& sk,
                                                        uint32_t               autoGsuVal,
-                                                       uint32_t               additionalPaddingPerBatchGeneralBatch) const                                                       
+                                                       uint32_t               additionalPaddingPerBatchGeneralBatch) const
     {
         TensorDescriptor const& c = problem.c();
         TensorDescriptor const& d = problem.d();
@@ -2596,13 +2659,13 @@ namespace TensileLite
         {
             args.template append<uint32_t>("factorDim", (uint32_t)problem.getParams().factorDim());
         }
-        // Adding the batchmode kernel argument for post GSU kernel to determine 
+        // Adding the batchmode kernel argument for post GSU kernel to determine
         // how to index the batch dimension in Strided Batch versus General Batched.
         if(problemType.groupedGemm == false)
         {
             ContractionProblemGemm::BATCHMODE batchMode = problem.batchMode();
             args.template append<uint32_t>("batchMode", static_cast<uint32_t>(batchMode));
-            args.template append<uint32_t>("additionalPaddingPerBatch", additionalPaddingPerBatchGeneralBatch);        
+            args.template append<uint32_t>("additionalPaddingPerBatch", additionalPaddingPerBatchGeneralBatch);
         }
 
     }
@@ -2635,7 +2698,8 @@ namespace TensileLite
             wiZ *= problem.batchSize(i);
 
         size_t vw = 1;
-        if(wiX * wiY * wiZ > 2048)
+        if(wiX * wiY * wiZ > 2048
+           && outputConversionSupportsVectorizedLoads(problemType.computeType))
         {
             //reach threashhold to trigger wider load
             if(problem.freeSizeA(0) % 4 == 0
@@ -2694,6 +2758,13 @@ namespace TensileLite
         return rv;
     }
 
+    bool ContractionSolution::outputConversionSupportsVectorizedLoads(
+        rocisa::DataType computeType)
+    {
+        return DataTypeInfo::Get(computeType).elementSize
+               >= DataTypeInfo::Get(rocisa::DataType::Float).elementSize;
+    }
+
     template <typename KA>
     void ContractionSolution::calculateConversionCallWorkGroupItems(
         std::vector<ContractionSolution::Problem> const& problems,
@@ -2724,7 +2795,8 @@ namespace TensileLite
             }
 
             //reach threashhold to trigger wider load
-            if(wi_count > 2048)
+            if(wi_count > 2048
+               && outputConversionSupportsVectorizedLoads(problemType.computeType))
             {
                 bool not4 = false;
                 bool not2 = false;

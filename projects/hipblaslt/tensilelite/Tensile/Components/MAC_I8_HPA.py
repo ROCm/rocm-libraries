@@ -38,7 +38,7 @@ class FMA_I8_HPA(MAC):
                         "HighPrecisionAccumulate": True},
     }
 
-    def __call__(self, writer, m, innerUnroll):
+    def __call__(self, writer, tPA, tPB, m, innerUnroll):
         kernel      = writer.states.kernel
         priority    = Component.Priority.find(writer)
         spacePerReg = writer.states.bpr
@@ -53,9 +53,9 @@ class FMA_I8_HPA(MAC):
                 idx  = a %  elemPerReg
                 sStr = f'v[vgprValuA_X{m}_I{iui}+{src}]'
                 tStr = f'v[vgprValuA_X{m}_I{iui}+{a}]'
-                module.addInst("v_lshlrev_b32", tStr, {(spacePerReg-idx-1)*8}, sStr, "")
+                module.addInst("v_lshlrev_b32", tStr, (spacePerReg-idx-1)*8, sStr, "")
                 module.add(priority(writer, 1, "Raise priority while processing macs"))
-                module.addInst("v_ashrrev_i32", tStr, {(spacePerReg    -1)*8}, tStr, "")
+                module.addInst("v_ashrrev_i32", tStr, (spacePerReg    -1)*8, tStr, "")
 
         for b in range(kernel["ThreadTile1"]-1, -1, -1):
             for iui in range(0, innerUnroll):
@@ -63,9 +63,9 @@ class FMA_I8_HPA(MAC):
                 idx  = b %  elemPerReg
                 sStr = f'v[vgprValuB_X{m}_I{iui}+{src}]'
                 tStr = f'v[vgprValuB_X{m}_I{iui}+{b}]'
-                module.addInst("v_lshlrev_b32", tStr, {(spacePerReg-idx-1)*8}, sStr, "")
+                module.addInst("v_lshlrev_b32", tStr, (spacePerReg-idx-1)*8, sStr, "")
                 module.add(priority(writer, 1, "Raise priority while processing macs"))
-                module.addInst("v_ashrrev_i32", tStr, {(spacePerReg    -1)*8}, tStr, "")
+                module.addInst("v_ashrrev_i32", tStr, (spacePerReg    -1)*8, tStr, "")
 
         ThreadTile0 = kernel["ThreadTile0"]
         for b in range(0, kernel["ThreadTile1"]):

@@ -477,11 +477,37 @@ class ProblemPredicate(Properties.Predicate):
     @classmethod
     def FromOriginalKeyPair(cls, pair):
         (key, value) = pair
+        if key == "AssertStrideAEqual":
+            return extractDimPredicate(cls, key, value, "StrideAEqual")
+        if key == "AssertStrideBEqual":
+            return extractDimPredicate(cls, key, value, "StrideBEqual")
+        if key == "AssertStrideCEqual":
+            return extractDimPredicate(cls, key, value, "StrideCEqual")
+        if key == "AssertStrideDEqual":
+            return extractDimPredicate(cls, key, value, "StrideDEqual")
+
+        if key == "AssertSizeEqual":
+            return extractDimPredicate(cls, key, value, "SizeEqual")
+        if key == "AssertSizeGreaterThan":
+            return extractDimPredicate(cls, key, value, "SizeGreaterThan")
+        if key == "AssertSizeLessThan":
+            return extractDimPredicate(cls, key, value, "SizeLessThan")
+        if key == "AssertSizeMultiple":
+            return extractDimPredicate(cls, key, value, "SizeMultiple")
+
         # Arithmetic intensity assertions
         if key == "AssertAIGreaterThanEqual":
             return cls("AIGreaterThanEqual", value=value) if value > 0 else None
         if key == "AssertAILessThanEqual":
             return cls("AILessThanEqual", value=value) if value > 0 else None
+
+        if key == "AssertAlphaValue":
+            return cls("AlphaValue", value=str(value)) if value is not False else None
+        if key == "AssertBetaValue":
+            return cls("BetaValue", value=str(value)) if value is not False else None
+
+        if key == "AssertCEqualsD":
+            return cls("CEqualsD") if value is not False else None
 
         if key.endswith('Multiple'):
             if value == 1:

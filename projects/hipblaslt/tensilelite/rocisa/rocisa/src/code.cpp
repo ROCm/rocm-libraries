@@ -165,6 +165,32 @@ void init_code(nb::module_ m)
         .def("setInlineAsmPrintMode", &rocisa::Module::setInlineAsmPrintMode)
         .def("addSpaceLine", &rocisa::Module::addSpaceLine)
         .def("add", &rocisa::Module::add, nb::arg("item"), nb::arg("pos") = -1)
+        .def("addInst",
+             [](rocisa::Module& self, nb::args args) {
+                 if(args.size() == 0)
+                     throw nb::type_error("addInst requires an instruction name");
+
+                 size_t      parameterCount = args.size();
+                 std::string comment;
+                 if(parameterCount > 1 && nb::isinstance<nb::str>(args[parameterCount - 1]))
+                 {
+                     comment = nb::cast<std::string>(args[parameterCount - 1]);
+                     --parameterCount;
+                 }
+
+                 auto stringify = [](nb::handle value) {
+                     return std::string(nb::str(value).c_str());
+                 };
+                 std::string instruction = stringify(args[0]);
+                 if(parameterCount > 1)
+                 {
+                     instruction += " " + stringify(args[1]);
+                     for(size_t i = 2; i < parameterCount; ++i)
+                         instruction += ", " + stringify(args[i]);
+                 }
+
+                 return self.add(std::make_shared<rocisa::RawInstruction>(instruction, comment));
+             })
         // nanobind cannot reliably bind the same method signatures that differ
         // only by const-ness, so indirectly bind via a lambda. This manifests
         // as a mangled name clash on Windows.
