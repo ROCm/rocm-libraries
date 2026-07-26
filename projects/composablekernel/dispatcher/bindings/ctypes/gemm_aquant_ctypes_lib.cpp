@@ -261,7 +261,13 @@ int dispatcher_run_aquant_gemm(const void* A,
                                             static_cast<int>(K),
                                             static_cast<int>(stride_A),
                                             ck_tile::bool_constant<a_is_row>{}));
-        std::copy(A_host, A_host + M * K, a_h.begin());
+        // For packed A (pk_int4_t; PackedSize=2) the HostTensor holds only
+        // M*K/PackedSize elements and A_host already contains the packed
+        // representation, so copy a_h.size() elements (== elements_to_bytes
+        // count) -- copying M*K here overran the buffer and corrupted the heap
+        // before permute_vectors_i4x4_b ran, crashing all fp8i4/bf8i4 configs.
+        // Mirrors the B path in gemm_bquant_ctypes_lib.cpp.
+        std::copy(A_host, A_host + a_h.size(), a_h.begin());
         ck_tile::permute_vectors_i4x4_b(a_h);
         if(hipMemcpy(
                A_dev, a_h.data(), elements_to_bytes<ADataType>(M * K), hipMemcpyHostToDevice) !=
