@@ -5319,6 +5319,39 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if isinstance(nameOrIdx, int):
       self.sgprPool.checkIn(nameOrIdx)
 
+  def skUsesRawQueueRank(self, kernel):
+    """True when the per-XCD work-queue index must come from the RAW pre-wgmXCC
+    launch WG rank, captured once into the dedicated persistent ``StreamKQueue``
+    SGPR (KernelWriterAssembly prologue) and read back in StreamK.graWorkGroup.
+
+    The auto-reset wrap bound (tiles_q + W_q) assumes each queue's home-workgroup
+    count equals distribute(skGrid, q), i.e. that the value feeding % numQueues
+    densely covers [0, skGrid). After wgmXCC, WorkGroup0 is the CU-count-remapped
+    id whose % numQueues is NOT count-preserving when the grid does not block
+    evenly, so it skews the per-queue count and the counter drifts off 0. We
+    therefore snapshot the raw launch id BEFORE wgmXCC.
+
+    A dedicated SGPR (not a reserved VGPR) is used because these SK4/SK5 kernels
+    routinely sit at the 256-VGPR ceiling: a reserved VGPR pushes the tmp-pool
+    peak over MaxVgpr on the heaviest MTs (error code 1, "too many vgprs"),
+    whereas the SGPR file has ample headroom for one persistent scalar.
+
+    Scoped to the dynamic auto-WGM path (WorkGroupMappingXCC == -1), where the
+    host picks WGMXCC = NUM_XCD > 1 at runtime and the chiplet remap skews the
+    per-queue count -- this is exactly the path the residual dynamic-queue shapes
+    take. Fixed WGMXCC solutions (== 1 no-op, or a tuned power-of-two > 1) are
+    deliberately excluded: the == 1 case needs no fix (StreamKIdx already equals
+    the raw rank), and the tuned fixed-WGMXCC kernels are the DirectToLds
+    max-tile solutions that already sit at the SGPR/VGPR ceiling, so spending one
+    more persistent scalar on them overflows the register file (they are not the
+    residual dynamic-queue shapes). Single-XCD arches are trivially balanced;
+    gfx12 (WorkGroupIdFromTTM) re-reads the raw id from ttmp9. Kept in sync with
+    StreamK.usesRawQueueRank."""
+    return (kernel["StreamK"] in (4, 5)
+            and self.states.archCaps["NumXCD"] > 1
+            and not self.states.archCaps["WorkGroupIdFromTTM"]
+            and kernel["WorkGroupMappingXCC"] == -1)
+
   ##############################################################################
   # Move StreamK Constants to VGPRs
   ##############################################################################
@@ -9471,6 +9504,13 @@ class KernelWriter(metaclass=abc.ABCMeta):
     requiredUnalignedSgprVar = []
     requiredAligned4SgprVar = []
 
+    # Per-XCD work-queue index comes from the RAW pre-wgmXCC launch WG rank
+    # (see skUsesRawQueueRank). It is snapshotted once, before wgmXCC rewrites
+    # WorkGroup0, into the dedicated persistent StreamKQueue SGPR and read back
+    # in StreamK.graWorkGroup. An SGPR (not a reserved VGPR) is used because
+    # these SK4/SK5 kernels routinely sit at the 256-VGPR ceiling. Placed in the
+    # unaligned pool so the interleaving loop below still keeps SrdWS/SrdD
+    # 4-aligned. Only allocated when wgmXCC actually remaps.
     if kernel["StreamK"] == 4:
       requiredUnalignedSgprVar += [
         "StreamKIdx",
@@ -9479,6 +9519,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
         "StreamKLocalStart",
         "StreamKLocalEnd",
       ]
+      if self.skUsesRawQueueRank(kernel):
+        requiredUnalignedSgprVar.append("StreamKQueue")
       # Work stealing: per-WG sticky-empty flag. Persists across the persistent
       # loop back-edge (added to nonPostLoopSgpr below) so each WG only touches
       # its home counter for its valid dispenses + exactly one empty fetch.
@@ -9505,6 +9547,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
         "StreamKLocalEnd",
         "StreamKHybridMode",
       ]
+      # SK5 keeps StreamKHybridMode holding ONLY the mode bit (its SCmpEQU32==0
+      # dispatch must stay a plain compare). The per-XCD queue index gets its own
+      # dedicated persistent StreamKQueue SGPR (raw pre-wgmXCC launch WG id),
+      # placed in the unaligned pool so SrdWS/SrdD 4-alignment is undisturbed.
+      if self.skUsesRawQueueRank(kernel):
+        requiredUnalignedSgprVar.append("StreamKQueue")
       # Work stealing: per-WG sticky-empty flag (see SK4 note above). Only the
       # SK4 sub-path uses it, but it must persist for the whole persistent loop.
       if kernel["StreamKWorkStealing"]:
