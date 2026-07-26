@@ -108,3 +108,9 @@ class TestMemoryGfxSplitBufferOffset:
     def test_overloads_call_splitBufferOffset(self):
         """Each uint64_t overload must call splitBufferOffset to split the offset."""
         assert self.header.count("splitBufferOffset(base_ptr, voffset, voffset_lo)") >= 5
+
+    def test_gfx90c_uses_gfx9_buffer_resource_descriptor(self):
+        """gfx90c helper kernels must not fall through to the invalid descriptor."""
+        gfx9_branch = self.header.split("#elif defined(__gfx1030__)", 1)[0]
+        assert "defined(__gfx90c__)" in gfx9_branch
+        assert "#define BUFFER_RESOURCE_3RD_DWORD 0x00020000" in gfx9_branch

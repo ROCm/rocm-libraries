@@ -28,8 +28,10 @@
 #include "hipblaslt_vector.hpp"
 #include "utility.hpp"
 #include <bitset>
+#include <cstring>
 #include <iostream>
 #include <omp.h>
+#include <stdexcept>
 
 CBLAS_TRANSPOSE HIPOperationToCBLASTanspose(hipblasOperation_t trans)
 {
@@ -1386,6 +1388,93 @@ void small_gemm(hipblasOperation_t transA,
     }
 }
 
+namespace
+{
+// gfx90c's packed-f16 path runs with f16 input/output denormals flushed.  Inspecting
+// the encoding (rather than comparing floats) also preserves signed zero.
+inline hipblasLtHalf gfx90c_f16_ftz(hipblasLtHalf value)
+{
+    uint16_t bits;
+    static_assert(sizeof(bits) == sizeof(value), "binary16 storage expected");
+    std::memcpy(&bits, &value, sizeof(bits));
+    if((bits & 0x7c00u) == 0 && (bits & 0x03ffu) != 0)
+    {
+        bits &= 0x8000u;
+        std::memcpy(&value, &bits, sizeof(bits));
+    }
+    return value;
+}
+
+// A binary16 product has at most 22 significant bits.  Adding it to a binary16
+// accumulator is exact in double before this conversion, so the host conversion
+// performs the one required IEEE round-to-nearest-even operation (independent of
+// contraction or excess precision).
+inline hipblasLtHalf gfx90c_fma16(hipblasLtHalf a,
+                                  hipblasLtHalf b,
+                                  hipblasLtHalf accumulator)
+{
+    a           = gfx90c_f16_ftz(a);
+    b           = gfx90c_f16_ftz(b);
+    accumulator = gfx90c_f16_ftz(accumulator);
+    const double exact = static_cast<double>(a) * static_cast<double>(b)
+                         + static_cast<double>(accumulator);
+    return gfx90c_f16_ftz(static_cast<hipblasLtHalf>(exact));
+}
+} // namespace
+
+template <typename Tc>
+void cblas_gemm_native_fma16(hipblasOperation_t transA,
+                             hipblasOperation_t transB,
+                             int64_t            m,
+                             int64_t            n,
+                             int64_t            k,
+                             Tc                 alpha,
+                             const void*        A_ptr,
+                             int64_t            lda,
+                             const void*        B_ptr,
+                             int64_t            ldb,
+                             Tc                 beta,
+                             void*              C_ptr,
+                             int64_t            ldc,
+                             const int64_t*     mac_schedule,
+                             int64_t            mac_schedule_size)
+{
+    static_assert(std::is_same<Tc, hipblasLtHalf>::value,
+                  "native fma16 reference only accepts binary16");
+    const auto* A = static_cast<const hipblasLtHalf*>(A_ptr);
+    const auto* B = static_cast<const hipblasLtHalf*>(B_ptr);
+    auto*       C = static_cast<hipblasLtHalf*>(C_ptr);
+
+    if(mac_schedule && mac_schedule_size != k)
+        throw std::invalid_argument("native fma16 schedule must contain exactly k entries");
+
+    for(int64_t column = 0; column < n; ++column)
+    {
+        for(int64_t row = 0; row < m; ++row)
+        {
+            hipblasLtHalf accumulator = static_cast<hipblasLtHalf>(0.0);
+            for(int64_t step = 0; step < k; ++step)
+            {
+                const int64_t inner = mac_schedule ? mac_schedule[step] : step;
+                if(inner < 0 || inner >= k)
+                    throw std::out_of_range("native fma16 schedule K index is out of range");
+                const int64_t ai = transA == HIPBLAS_OP_N ? row + inner * lda
+                                                          : inner + row * lda;
+                const int64_t bi = transB == HIPBLAS_OP_N ? inner + column * ldb
+                                                          : column + inner * ldb;
+                accumulator = gfx90c_fma16(A[ai], B[bi], accumulator);
+            }
+
+            // Model the packed-HB epilogue as the same step-rounded operations.
+            const int64_t ci     = row + column * ldc;
+            const auto    scaled = gfx90c_fma16(gfx90c_f16_ftz(alpha),
+                                             accumulator,
+                                             static_cast<hipblasLtHalf>(0.0));
+            C[ci] = gfx90c_fma16(gfx90c_f16_ftz(beta), C[ci], scaled);
+        }
+    }
+}
+
 template <typename Tc>
 void cblas_gemm(hipblasOperation_t       transA,
                 hipblasOperation_t       transB,
@@ -1414,8 +1503,21 @@ void cblas_gemm(hipblasOperation_t       transA,
                 hipDataType              TciB,
                 bool                     alt,
                 bool                     isScaleAMXFormat,
-                bool                     isScaleBMXFormat)
+                bool                     isScaleBMXFormat,
+                bool                     exactFp16Accumulation)
 {
+    if constexpr(std::is_same_v<Tc, hipblasLtHalf>)
+    {
+        if(exactFp16Accumulation && Tc_enum == HIP_R_16F && TiA == HIP_R_16F
+           && TiB == HIP_R_16F && To == HIP_R_16F
+           && !AlphaVec && !scaleAVec && !scaleBVec && !isScaleAMXFormat && !isScaleBMXFormat)
+        {
+            cblas_gemm_native_fma16<Tc>(
+                transA, transB, m, n, k, alpha, A, lda, B, ldb, beta, C, ldc);
+            return;
+        }
+    }
+
     using IntTcCast = std::conditional_t<std::is_same<Tc, int32_t>::value, double, Tc>;
     // cblas does not support hipblasLtHalf, so convert to higher precision float
     // This will give more precise result which is acceptable for testing
@@ -1639,7 +1741,8 @@ void cblas_gemm(hipblasOperation_t       transA,
                                  hipDataType              TciB,             \
                                  bool                     alt,              \
                                  bool                     isScaleAMXFormat, \
-                                 bool                     isScaleBMXFormat);
+                                 bool                     isScaleBMXFormat, \
+                                 bool                     exactFp16Accumulation);
 
 CREATEFUNCTION(hipblasLtHalf)
 CREATEFUNCTION(float)
@@ -1647,3 +1750,19 @@ CREATEFUNCTION(double)
 CREATEFUNCTION(int32_t)
 CREATEFUNCTION(std::complex<float>)
 CREATEFUNCTION(std::complex<double>)
+
+template void cblas_gemm_native_fma16<hipblasLtHalf>(hipblasOperation_t,
+                                                      hipblasOperation_t,
+                                                      int64_t,
+                                                      int64_t,
+                                                      int64_t,
+                                                      hipblasLtHalf,
+                                                      const void*,
+                                                      int64_t,
+                                                      const void*,
+                                                      int64_t,
+                                                      hipblasLtHalf,
+                                                      void*,
+                                                      int64_t,
+                                                      const int64_t*,
+                                                      int64_t);

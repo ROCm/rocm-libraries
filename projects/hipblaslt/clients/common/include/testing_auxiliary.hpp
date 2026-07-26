@@ -1943,6 +1943,8 @@ inline void testing_aux_auxiliary_func(const Arguments& arg)
     // Test hipblas_computetype_to_string
     hipblas_computetype_to_string(HIPBLAS_COMPUTE_16F);
     ASSERT_TRUE(hipblas_computetype_to_string(HIPBLAS_COMPUTE_16F) == "f16_r");
+    ASSERT_TRUE(hipblas_computetype_to_string(HIPBLAS_COMPUTE_16F_PEDANTIC)
+                == "f16_pedantic_r");
     ASSERT_TRUE(hipblas_computetype_to_string(HIPBLAS_COMPUTE_32F) == "f32_r");
     ASSERT_TRUE(hipblas_computetype_to_string(HIPBLAS_COMPUTE_32F_FAST_TF32) == "xf32_r");
     ASSERT_TRUE(hipblas_computetype_to_string(HIPBLAS_COMPUTE_64F) == "f64_r");
@@ -1972,6 +1974,10 @@ inline void testing_aux_auxiliary_func(const Arguments& arg)
     string_to_hip_datatype_assert("f8_fnuz_r");
 
     // Test string_to_hipblas_computetype
+    ASSERT_TRUE(string_to_hipblas_computetype("f16_r") == HIPBLAS_COMPUTE_16F);
+    ASSERT_TRUE(string_to_hipblas_computetype("h") == HIPBLAS_COMPUTE_16F);
+    ASSERT_TRUE(string_to_hipblas_computetype("f16_pedantic_r")
+                == HIPBLAS_COMPUTE_16F_PEDANTIC);
     ASSERT_TRUE(string_to_hipblas_computetype("f32_r") == HIPBLAS_COMPUTE_32F);
     ASSERT_TRUE(string_to_hipblas_computetype("xf32_r") == HIPBLAS_COMPUTE_32F_FAST_TF32);
     ASSERT_TRUE(string_to_hipblas_computetype("f64_r") == HIPBLAS_COMPUTE_64F);
@@ -3137,7 +3143,7 @@ inline void testing_aux_hipblaslt_func(const Arguments& arg)
     ASSERT_TRUE(RocBlasLtStatusToHIPStatus(rocblaslt_status_invalid_handle)
                 == HIPBLAS_STATUS_NOT_INITIALIZED);
     ASSERT_TRUE(RocBlasLtStatusToHIPStatus(rocblaslt_status_not_implemented)
-                == HIPBLAS_STATUS_INTERNAL_ERROR);
+                == HIPBLAS_STATUS_NOT_SUPPORTED);
     ASSERT_TRUE(RocBlasLtStatusToHIPStatus(rocblaslt_status_invalid_pointer)
                 == HIPBLAS_STATUS_INVALID_VALUE);
     ASSERT_TRUE(RocBlasLtStatusToHIPStatus(rocblaslt_status_invalid_size)
@@ -3324,6 +3330,8 @@ inline void testing_aux_tensile_host_func(const Arguments& arg)
     ASSERT_TRUE(rocComputeType_to_tensile_type(rocblaslt_compute_f32_fast_bf16)
                 == rocisa::DataType::Float);
     ASSERT_TRUE(rocComputeType_to_tensile_type(rocblaslt_compute_f16) == rocisa::DataType::Float);
+    ASSERT_TRUE(rocComputeType_to_tensile_type(rocblaslt_compute_f16_pedantic)
+                == rocisa::DataType::Half);
     ASSERT_TRUE(rocComputeType_to_tensile_type(rocblaslt_compute_f32) == rocisa::DataType::Float);
     ASSERT_TRUE(rocComputeType_to_tensile_type(rocblaslt_compute_f32_fast_f8_fnuz)
                 == rocisa::DataType::Float);

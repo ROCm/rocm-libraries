@@ -52,6 +52,15 @@ def test_r2_shiftvector_emits_assembly():
         assert ".amdgcn_target" in src, f"Expected AMDGCN target in {base}"
         assert "gfx942" in src, f"Expected gfx942 arch in {base}"
         assert base.startswith("Cijk_"), f"Expected Cijk_ prefix in {base}"
+        restore_mask = [
+            line for line in src.splitlines()
+            if "to restore all threads active" in line
+        ]
+        assert restore_mask, f"Expected execution-mask restoration in {base}"
+        assert all("s_mov_b64" in line for line in restore_mask), (
+            f"Wave64 execution-mask restoration must use s_mov_b64 in {base}: "
+            + str(restore_mask)
+        )
 
 
 def test_r2_shiftvector_golden(snapshot):

@@ -302,3 +302,21 @@ def test_verifyPredicate_invalid_predicate():
         _verifyPredicate("invalid=value", "gfx950")
     assert "only device ID and CU count-based predicates" in str(exc_info.value)
 
+
+def test_gfx90c_architecture_map():
+    from Tensile.Common.Architectures import architectureMap
+    assert architectureMap["gfx90c"] == "vega10"
+    assert architectureMap["gfx90c:xnack+"] == "vega10"
+    assert architectureMap["gfx90c:xnack-"] == "vega10"
+
+
+def test_gfx90c_supported_isa():
+    from Tensile.Common.Architectures import SUPPORTED_ISA
+    from Tensile.Common.Types import IsaVersion
+    assert IsaVersion(9, 0, 12) in SUPPORTED_ISA
+
+
+def test_gfx90c_variants():
+    from Tensile.Common.Architectures import gfxVariantMap
+    assert gfxVariantMap["gfx90c"] == ["gfx90c:xnack+", "gfx90c:xnack-"]
+

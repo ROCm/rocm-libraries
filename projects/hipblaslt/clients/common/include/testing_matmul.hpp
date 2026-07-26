@@ -61,6 +61,7 @@
 #include <omp.h>
 #include <optional>
 #include <set>
+#include <string_view>
 
 extern "C" __global__ void flush_icache()
 {
@@ -114,6 +115,18 @@ bool MXUseRocroller()
 #else
     return false;
 #endif
+}
+
+inline bool isGfx90cDevice()
+{
+    int             deviceId;
+    hipDeviceProp_t deviceProperties;
+    if(hipGetDevice(&deviceId) != hipSuccess
+       || hipGetDeviceProperties(&deviceProperties, deviceId) != hipSuccess)
+        return false;
+
+    const std::string_view arch{deviceProperties.gcnArchName};
+    return arch == "gfx90c" || arch.rfind("gfx90c:", 0) == 0;
 }
 
 hipblasLtOrder_t orderForDatatype(hipDataType datatype)
@@ -1908,7 +1921,9 @@ void testing_matmul_with_bias(const Arguments& arg,
 {
     double gpu_time_used, cpu_time_used, gpu_mem_gbytes;
     gpu_time_used = cpu_time_used = gpu_mem_gbytes = 0.0;
-    bool                   HMM                     = arg.HMM;
+    const bool exactFp16Reference
+        = arg.compute_type == HIPBLAS_COMPUTE_16F_PEDANTIC && isGfx90cDevice();
+    bool                   HMM = arg.HMM;
     hipblaslt_local_handle handle{arg};
     hipStream_t            stream;
     CHECK_HIP_ERROR(hipStreamCreate(&stream));
@@ -4954,7 +4969,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                         isScaleBMXFormat ? HIP_R_32F : TciB,
                         false,
                         isBlockScaling(arg.scaleA),
-                        isBlockScaling(arg.scaleB));
+                        isBlockScaling(arg.scaleB),
+                        exactFp16Reference);
 
                     auto                        pos    = stride_d[gemmIdx] * batchIdx;
                     std::vector<HipHostBuffer>* hEInst = arg.gradient ? &hE : &hE_gold;
@@ -5170,7 +5186,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                                isScaleBMXFormat ? HIP_R_32F : TciB,
                                false,
                                isBlockScaling(arg.scaleA),
-                               isBlockScaling(arg.scaleB));
+                               isBlockScaling(arg.scaleB),
+                               exactFp16Reference);
                 }
                 else
                 {
@@ -5213,7 +5230,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                         isScaleBMXFormat ? HIP_R_32F : TciB,
                         false,
                         isBlockScaling(arg.scaleA),
-                        isBlockScaling(arg.scaleB));
+                        isBlockScaling(arg.scaleB),
+                        exactFp16Reference);
                 }
             }
         }

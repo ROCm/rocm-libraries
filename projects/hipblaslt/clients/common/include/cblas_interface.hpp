@@ -66,7 +66,28 @@ void cblas_gemm(hipblasOperation_t       transA,
                 hipDataType              tciB,
                 bool                     alt              = false,
                 bool                     isScaleAMXFormat = false,
-                bool                     isScaleBMXFormat = false);
+                bool                     isScaleBMXFormat = false,
+                bool                     exactFp16Accumulation = false);
+
+template <typename Tc>
+void cblas_gemm_native_fma16(hipblasOperation_t transA,
+                             hipblasOperation_t transB,
+                             int64_t            m,
+                             int64_t            n,
+                             int64_t            k,
+                             Tc                 alpha,
+                             const void*        A_ptr,
+                             int64_t            lda,
+                             const void*        B_ptr,
+                             int64_t            ldb,
+                             Tc                 beta,
+                             void*              C_ptr,
+                             int64_t            ldc,
+                             // Optional generated-kernel MAC order.  Each entry is a K
+                             // index; when null the reference uses 0..k-1.  Every FMA is
+                             // rounded to binary16 before the following entry.
+                             const int64_t*      mac_schedule      = nullptr,
+                             int64_t             mac_schedule_size = 0);
 
 inline void cblas_gemm(hipblasOperation_t       transA,
                        hipblasOperation_t       transB,
@@ -95,7 +116,8 @@ inline void cblas_gemm(hipblasOperation_t       transA,
                        hipDataType              tciB,
                        bool                     alt              = false,
                        bool                     isScaleAMXFormat = false,
-                       bool                     isScaleBMXFormat = false)
+                       bool                     isScaleBMXFormat = false,
+                       bool                     exactFp16Accumulation = false)
 {
 
     if(tiA == HIP_C_32F || tiA == HIP_C_64F)
@@ -167,7 +189,7 @@ inline void cblas_gemm(hipblasOperation_t       transA,
     {
         switch(tc)
         {
-        case HIP_R_16F: // setting compute_type to f16_r will fallback to f32_r
+        case HIP_R_16F: // FP16 input/output with FP32 accumulation
             cblas_gemm<hipblasLtHalf>(transA,
                                       transB,
                                       m,
@@ -193,7 +215,10 @@ inline void cblas_gemm(hipblasOperation_t       transA,
                                       tc,
                                       tciA,
                                       tciB,
-                                      alt);
+                                      alt,
+                                      false,
+                                      false,
+                                      exactFp16Accumulation);
             return;
         case HIP_R_32F:
             cblas_gemm<float>(transA,

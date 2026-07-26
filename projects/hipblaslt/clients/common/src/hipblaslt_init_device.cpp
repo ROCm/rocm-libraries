@@ -1017,9 +1017,8 @@ void hipblaslt_init_device(ABC_dims                 abc,
             {
                 if(abc == ABC_dims::A)
                 {
-                    const float fmax = 65504.f - 4.f;
-                    fill_batch(A, M, N, lda, stride, batch_count, [fmax] __host__ __device__ (size_t) -> T {
-                        return T(hipblasLtHalf(fmax));
+                    fill_batch(A, M, N, lda, stride, batch_count, [] __host__ __device__ (size_t) -> T {
+                        return T(hipblasLtHalf(1.f));
                     });
                 }
                 else if(abc == ABC_dims::B)
@@ -1033,10 +1032,11 @@ void hipblaslt_init_device(ABC_dims                 abc,
                         auto n        = in_batch / lda;
                         auto k        = in_batch - n * lda;
                         (void)n;
-                        const float f2 = 2.f;
-                        if((k % 2) == 0)
-                            return T(hipblasLtHalf(f2));
-                        return T(hipblasLtHalf(-f2));
+                        // For K=256, FP32 accumulation computes 2048+255=2303
+                        // (stored as FP16 2304). Sequential FP16 accumulation
+                        // stays at 2048 because every +1 is a halfway tie.
+                        // This is order-insensitive and a no-op kernel cannot pass.
+                        return T(hipblasLtHalf(k == 0 ? 2048.f : 1.f));
                     });
                 }
                 else

@@ -67,3 +67,8 @@ def test_paths():
     assert Common.globalParameters["WorkingPath"] == expectedSet1WorkingPath
     Common.popWorkingPath()
     assert Common.globalParameters["WorkingPath"] == expectedWorkingPath
+
+
+def test_architectureMap():
+    assert Common.architectureMap["gfx90c"] == "vega10"
+    assert Common.architectureMap["gfx90c:xnack+"] == "vega10"

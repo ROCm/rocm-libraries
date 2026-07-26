@@ -179,7 +179,10 @@ def _prepare_kernel(kernel, splitGSU=False):
     return base
 
 
-def emit_kernels_from_logic(logic_path, splitGSU=False, canonical=True, limit=None):
+def emit_kernels_from_logic(
+    logic_path, splitGSU=False, canonical=True, limit=None, solution_names=None,
+    solution_indices=None,
+):
     """Emit assembly for every unique kernel produced by ``logic_path``.
 
     Returns a list of ``(basename, source, err)`` tuples, sorted by basename for
@@ -187,7 +190,9 @@ def emit_kernels_from_logic(logic_path, splitGSU=False, canonical=True, limit=No
     ``canonical`` is True (the default). ``err`` is the emitter return code
     (0 == ok); a nonzero ``err`` is itself real covered behavior worth pinning.
 
-    ``limit`` caps the number of kernels emitted (after a stable sort by kernel
+    ``solution_names`` and ``solution_indices`` select solutions before kernel
+    generation. Unknown or non-unique selections fail closed. ``limit`` caps the
+    number of kernels emitted (after a stable sort by kernel
     name) — used to draw a few representative kernels from very large tuned
     logic files (e.g. the StreamK corpus) without emitting thousands.
     """
@@ -218,6 +223,25 @@ def emit_kernels_from_logic(logic_path, splitGSU=False, canonical=True, limit=No
     results = []
     with _isolated_globals():
         sols = _solutions_from_logic_unguarded(logic_path)
+        if solution_names is not None or solution_indices is not None:
+            requested = set(solution_names or ())
+            requested_indices = set(solution_indices or ())
+            selected = [
+                solution for solution in sols
+                if (not requested or solution.get("SolutionNameMin") in requested)
+                and (not requested_indices or solution.get("SolutionIndex") in requested_indices)
+            ]
+            found = [solution["SolutionNameMin"] for solution in selected]
+            found_indices = [solution["SolutionIndex"] for solution in selected]
+            missing = sorted(requested - set(found))
+            missing_indices = sorted(requested_indices - set(found_indices))
+            if missing or missing_indices or len(selected) != 1:
+                raise ValueError(
+                    "solution selection must match exactly once: "
+                    f"missing={missing}, missing_indices={missing_indices}, "
+                    f"matches={list(zip(found_indices, found))}"
+                )
+            sols = selected
         kernels = generateKernelObjectsFromSolutions(sols)
         if limit is not None:
             # stable subset by kernel name so the cap is deterministic
