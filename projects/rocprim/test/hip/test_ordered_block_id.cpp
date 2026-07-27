@@ -93,7 +93,8 @@ TEST(OrderedBlockId, Deadlock)
     SUCCEED();
 }
 
-using namespace rocprim::detail;
+using rocprim::detail::ordered_block_id;
+using rocprim::detail::temp_storage;
 
 __global__
 void test_kernel(ordered_block_id<> ordered_bid, uint32_t* device_output_ids)
