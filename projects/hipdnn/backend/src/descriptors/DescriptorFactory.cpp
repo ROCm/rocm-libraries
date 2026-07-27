@@ -24,6 +24,7 @@
 #include "LayernormBackwardOperationDescriptor.hpp"
 #include "LayernormOperationDescriptor.hpp"
 #include "MatmulOperationDescriptor.hpp"
+#include "MoeGroupedMatmulOperationDescriptor.hpp"
 #include "PointwiseOperationDescriptor.hpp"
 #include "ProfilingControlDescriptor.hpp"
 #include "RMSNormBackwardOperationDescriptor.hpp"
@@ -109,6 +110,9 @@ void DescriptorFactory::create(hipdnnBackendDescriptorType_t descriptorType,
         break;
     case HIPDNN_BACKEND_OPERATION_MATMUL_DESCRIPTOR:
         privateDesc = std::make_shared<MatmulOperationDescriptor>();
+        break;
+    case HIPDNN_BACKEND_OPERATION_MOE_GROUPED_MATMUL_DESCRIPTOR:
+        privateDesc = std::make_shared<MoeGroupedMatmulOperationDescriptor>();
         break;
     case HIPDNN_BACKEND_OPERATION_RMSNORM_DESCRIPTOR_EXT:
         privateDesc = std::make_shared<RMSNormOperationDescriptor>();

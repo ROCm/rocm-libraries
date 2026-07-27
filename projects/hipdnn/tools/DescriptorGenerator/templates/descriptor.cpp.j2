@@ -373,32 +373,22 @@ void {{ op.class_name }}::getTensorArrayDesc(hipdnnBackendAttributeName_t attrib
 std::vector<std::shared_ptr<TensorDescriptor>>
     {{ op.class_name }}::getTensorDescriptors() const
 {
-{% if op.has_tensor_array_fields %}
-    std::vector<std::shared_ptr<TensorDescriptor>> result = {{ '{' }}{% for tf in op.required_tensor_fields %}{{ tf.member_name }}{% if not loop.last %}, {% endif %}{% endfor %}{{ '}' }};
-{% for tf in op.optional_tensor_fields %}
+    std::vector<std::shared_ptr<TensorDescriptor>> result;
+    result.reserve({{ op.tensor_fields | length }});
+{% for tf in op.tensor_fields %}
+{% if tf.required %}
+    result.push_back({{ tf.member_name }});
+{% else %}
     if({{ tf.member_name }})
     {
         result.push_back({{ tf.member_name }});
     }
+{% endif %}
 {% endfor %}
 {% for taf in op.tensor_array_fields %}
     result.insert(result.end(), _{{ taf.camel_name }}Descs.begin(), _{{ taf.camel_name }}Descs.end());
 {% endfor %}
     return result;
-{% else %}
-{% if op.optional_tensor_fields %}
-    std::vector<std::shared_ptr<TensorDescriptor>> result = {{ '{' }}{% for tf in op.required_tensor_fields %}{{ tf.member_name }}{% if not loop.last %}, {% endif %}{% endfor %}{{ '}' }};
-{% for tf in op.optional_tensor_fields %}
-    if({{ tf.member_name }})
-    {
-        result.push_back({{ tf.member_name }});
-    }
-{% endfor %}
-    return result;
-{% else %}
-    return {{ '{' }}{% for tf in op.tensor_fields %}{{ tf.member_name }}{% if not loop.last %}, {% endif %}{% endfor %}{{ '}' }};
-{% endif %}
-{% endif %}
 }
 
 std::unique_ptr<{{ op.fbs_namespace }}::NodeT>
