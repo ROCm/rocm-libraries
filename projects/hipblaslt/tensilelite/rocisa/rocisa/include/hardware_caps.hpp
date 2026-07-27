@@ -562,7 +562,12 @@ inline std::map<std::string, int> initArchCaps(const IsaVersion& isaVersion)
     rv["HasAccCD"]           = checkInList(isaVersion, {{9, 0, 10}, {9, 4, 2}, {9, 5, 0}});
     rv["ArchAccUnifiedRegs"] = checkInList(isaVersion, {{9, 0, 10}, {9, 4, 2}, {9, 5, 0}});
     // Max concurrent waves per SIMD: 8 for ArchAccUnifiedRegs (gfx90a/gfx942/gfx950), 10 otherwise.
-    rv["MaxWavesPerSimd"]    = rv["ArchAccUnifiedRegs"] ? 8 : 10;
+    if(rv["ArchAccUnifiedRegs"])
+        rv["MaxWavesPerSimd"] = 8;
+    else if(isaVersion[0] == 11 || (isaVersion[0] == 12 && isaVersion[1] != 5))
+        rv["MaxWavesPerSimd"] = 16;
+    else
+        rv["MaxWavesPerSimd"] = 10;
     rv["CrosslaneWait"]      = checkInList(isaVersion, {{9, 4, 2}, {9, 5, 0}});
     rv["TransOpWait"]        = checkInList(isaVersion, {{9, 4, 2}, {9, 5, 0}, {12, 5, 0}});
     rv["SDWAWait"]           = checkInList(isaVersion, {{9, 4, 2}, {9, 5, 0}, {12, 5, 0}});
@@ -601,6 +606,18 @@ inline std::map<std::string, int> initArchCaps(const IsaVersion& isaVersion)
     rv["LDSBankCount"] = 64;
     rv["LDSBankWidth"] = 4; // bytes per bank
 
+    // Per-XCD work-queue count baked into StreamK dynamic-queue kernels. Single
+    // codegen-side mirror of origami get_default_num_xcds(): gfx942/gfx950 bake
+    // 8 (the MI300X value), every other arch 1. gfx942 covers BOTH MI300X (8
+    // XCDs) and MI300A (6 XCDs), which codegen cannot tell apart, so it always
+    // bakes 8; the host guard rejects a device whose runtime NUM_XCD != this
+    // baked value (so MI300A's 6 is excluded at runtime). Power-of-two keeps the
+    // StreamK queue masking (AND/shift) valid.
+    rv["NumXCD"] = checkInList(isaVersion, {{9, 4, 2}, {9, 5, 0}}) ? 8 : 1;
+
+    // Per-queue counter stride = L2 cache-line size (uniform 128B on supported archs).
+    rv["CacheLineBytes"] = 128;
+
     return rv;
 }
 
@@ -611,7 +628,7 @@ inline std::map<std::string, int> initRegisterCaps(const IsaVersion&           i
     // 1024 vgpr
     rv["MaxVgpr"] = isaVersion[0] == 12 && isaVersion[1] == 5? 1024 : 256;
     // max allowed is 112 out of 112 , 6 is used by hardware 4 SGPRs are wasted
-    rv["MaxSgpr"] = 102;
+    rv["MaxSgpr"] = isaVersion[0] == 12 && isaVersion[1] == 5? 106 : 102;
     rv["PhysicalMaxVgpr"] = isaVersion[0] == 12 && isaVersion[1] == 5? 1024 : 512;
     rv["PhysicalMaxSgpr"]   = 800;
     rv["maxLDSConstOffset"] = 65536;
@@ -634,9 +651,9 @@ inline std::map<std::string, int> initRegisterCaps(const IsaVersion&           i
         else if(isaVersion[2] == 2)
             rv["PhysicalMaxVgprCU"] = 1024 * 32;
         else
-            rv["PhysicalMaxVgprCU"] = 1536 * 32;
+            rv["PhysicalMaxVgprCU"] = 2 * 1536 * 32;
     else if(isaVersion[0] == 12)
-        rv["PhysicalMaxVgprCU"] = isaVersion[1] == 5? 4096 * 32 : 1536 * 32;
+        rv["PhysicalMaxVgprCU"] = isaVersion[1] == 5? 4096 * 32 : 2 * 1536 * 32;
     else if(isaVersion[0] == 9)
         if(archCaps["ArchAccUnifiedRegs"])
             rv["PhysicalMaxVgprCU"] = 2048 * 64;

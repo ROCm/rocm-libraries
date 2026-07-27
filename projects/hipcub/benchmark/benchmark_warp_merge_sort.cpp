@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2021-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2021-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -149,7 +149,7 @@ __global__
 template<typename T>
 struct max_value
 {
-    static constexpr T value = std::numeric_limits<T>::max();
+    static constexpr T value = _HIPCUB_STD::numeric_limits<T>::max();
 };
 
 template<unsigned int BlockSize,

@@ -787,23 +787,18 @@ rocblas_status rocsolver_sb2st_hb2st_template(rocblas_handle handle,
 
     // Set V = 0.
     // Ideally, set each Vk = I, but need to iterate over Vk.
-    // todo: Strided batch laset, with stride = kd*ldv?
     I nt = ceildiv(n - 1, kd);
     I nv_blocks = nt * (nt + 1) / 2;
     I nv = nv_blocks * kd;
-    rocblas_stride shiftV = 0;
-    HIP_CHECK(hipMemsetAsync(V + shiftV, 0, sizeof(T) * ldv * nv, stream));
+    laset(handle, 'g', ldv, nv, zero, zero, V, rocblas_stride(0), ldv, strideV, batch_count);
 
-    int device;
-    HIP_CHECK(hipGetDevice(&device));
-    hipDeviceProp_t props;
-    HIP_CHECK(hipGetDeviceProperties(&props, device));
+    const hipDeviceProp_t* props = rocblas_internal_get_device_prop(handle);
 
     size_t s_mem_size_housev = sizeof(T) * kd;
     size_t s_mem_size_reduct = sizeof(T) * DIMY;
     size_t s_mem_size = s_mem_size_housev + s_mem_size_reduct;
 
-    if(s_mem_size > props.sharedMemPerBlock)
+    if(s_mem_size > props->sharedMemPerBlock)
     {
         return rocblas_status_internal_error;
     }
