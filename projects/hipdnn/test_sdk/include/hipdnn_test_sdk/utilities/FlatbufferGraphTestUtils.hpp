@@ -2231,7 +2231,9 @@ inline flatbuffers::FlatBufferBuilder
                             bool alibiMask = false,
                             bool paddingMask = false,
                             bool causalMask = false,
-                            bool overrideShapeEnabled = false)
+                            bool overrideShapeEnabled = false,
+                            hipdnn_flatbuffers_sdk::data_objects::DataType mmaCoreMode
+                            = hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET)
 {
     flatbuffers::FlatBufferBuilder builder;
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
@@ -2340,7 +2342,15 @@ inline flatbuffers::FlatBufferBuilder
         flatbuffers::nullopt,
         alibiMask,
         paddingMask,
-        causalMask);
+        causalMask,
+        false, // causal_mask_bottom_right
+        flatbuffers::nullopt, // dropout_probability
+        flatbuffers::nullopt, // attn_scale_value
+        flatbuffers::nullopt, // left_bound
+        flatbuffers::nullopt, // right_bound
+        flatbuffers::nullopt, // max_seq_len_kv
+        hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment::TOP_LEFT,
+        mmaCoreMode);
 
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> nodes;
     nodes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
@@ -2382,7 +2392,9 @@ inline flatbuffers::FlatBufferBuilder
                             bool alibiMask = false,
                             bool paddingMask = false,
                             bool causalMask = false,
-                            bool overrideShapeEnabled = false)
+                            bool overrideShapeEnabled = false,
+                            hipdnn_flatbuffers_sdk::data_objects::DataType mmaCoreMode
+                            = hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET)
 {
     return createValidSdpaFwdGraph(qDims,
                                    qStrides,
@@ -2400,7 +2412,8 @@ inline flatbuffers::FlatBufferBuilder
                                    alibiMask,
                                    paddingMask,
                                    causalMask,
-                                   overrideShapeEnabled);
+                                   overrideShapeEnabled,
+                                   mmaCoreMode);
 }
 
 inline flatbuffers::FlatBufferBuilder createValidBlockScaleQuantizeGraph(

@@ -58,7 +58,9 @@ auto createSdpaFwdGraph(const std::vector<int64_t>& qDims = {4, 8, 256, 128},
                         bool alibiMask = false,
                         bool paddingMask = false,
                         bool causalMask = false,
-                        bool overrideShapeEnabled = false)
+                        bool overrideShapeEnabled = false,
+                        hipdnn_flatbuffers_sdk::data_objects::DataType mmaCoreMode
+                        = hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET)
 {
     if(qDims.size() != 4 || vDims.size() != 4)
     {
@@ -84,7 +86,8 @@ auto createSdpaFwdGraph(const std::vector<int64_t>& qDims = {4, 8, 256, 128},
         alibiMask,
         paddingMask,
         causalMask,
-        overrideShapeEnabled);
+        overrideShapeEnabled,
+        mmaCoreMode);
 }
 
 TEST_F(TestSdpaFwdPlanBuilder, IsApplicableReturnsFalseForOverrideShapeEnabledGraph)
@@ -194,6 +197,34 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableSdpaVariations)
                                       false,
                                       true),
                    "compute_data_type != FLOAT"},
+         false},
+        {GraphTest{createSdpaFwdGraph({4, 8, 256, 128},
+                                      {4, 8, 256, 128},
+                                      DataType::BFLOAT16,
+                                      DataType::FLOAT,
+                                      false,
+                                      false,
+                                      false,
+                                      false,
+                                      false,
+                                      false,
+                                      false,
+                                      DataType::HALF),
+                   "mma_core_mode = HALF"},
+         false},
+        {GraphTest{createSdpaFwdGraph({4, 8, 256, 128},
+                                      {4, 8, 256, 128},
+                                      DataType::BFLOAT16,
+                                      DataType::FLOAT,
+                                      false,
+                                      false,
+                                      false,
+                                      false,
+                                      false,
+                                      false,
+                                      false,
+                                      DataType::FLOAT),
+                   "mma_core_mode = FLOAT"},
          false}};
 
     for(const auto& [test, applicability] : applicabilityTests)
