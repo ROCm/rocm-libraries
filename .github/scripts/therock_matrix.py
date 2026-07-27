@@ -186,6 +186,9 @@ def collect_projects_to_run(subtrees):
     subtrees = list(subtrees)
     platform = os.getenv("PLATFORM")
     projects = set()
+    # Record why the BLAS row was selected before dependency folding loses the
+    # original subtree identity. Workflows consume this marker after the matrix
+    # is assembled to attach instrumentation to the final merged product row.
     run_rocjitsu_race_check = bool(ROCJITSU_RACE_CHECK_SUBTREES.intersection(subtrees))
     # Work on per-call deep copies so module-level state stays immutable across calls.
     local_project_map = copy.deepcopy(project_map)
