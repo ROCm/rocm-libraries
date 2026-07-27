@@ -1,4 +1,4 @@
-// Copyright ?? Advanced Micro Devices, Inc., or its affiliates.
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 //
 // HipFlash2FwdPlan: IPlan implementation that executes Flash-Attention 2 V7.
