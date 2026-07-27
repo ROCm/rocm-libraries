@@ -27,6 +27,7 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
+#include <limits>
 #include "common.hpp"
 
 using Catch::Approx;
@@ -107,11 +108,11 @@ TEST_CASE("Origami: compute_perf_gflops", "[origami]") {
       auto config = make_config(128, 128, 64, 32, 32, 8);
 
       auto latency_config_slow =
-          origami::gemm::compute_total_latency(problem, hardware_slow, config, hardware_slow.N_CU);
+          origami::gemm::compute_total_latency(problem, hardware_slow, config);
       auto flops_slow = origami::compute_perf_gflops(hardware_slow, problem, latency_config_slow);
 
       auto latency_config_fast =
-          origami::gemm::compute_total_latency(problem, hardware_fast, config, hardware_fast.N_CU);
+          origami::gemm::compute_total_latency(problem, hardware_fast, config);
       auto flops_fast = origami::compute_perf_gflops(hardware_fast, problem, latency_config_fast);
 
       REQUIRE(flops_fast > flops_slow);
@@ -155,7 +156,7 @@ TEST_CASE("Origami: best_grid_size", "[origami]") {
       auto config   = make_config(256, 256, 64, 32, 32, 8, false, 1);
 
       auto grid_size = origami::streamk::select_grid_size(
-          problem, hardware, config, origami::grid_selection_t::k_split_aware, hardware.N_CU);
+          problem, hardware, config, origami::grid_selection_t::k_split_aware);
 
       REQUIRE(grid_size >= 16);
     }
@@ -421,8 +422,51 @@ TEST_CASE("Origami: rank_configs unit test", "[origami]") {
         invalid_configs.push_back(make_config(256, 256, 512, 32, 32, 8, false, 1, 6, 0, 0));
       }
 
-      REQUIRE_THROWS_WITH(origami::rank_configs(problem, hardware, invalid_configs),
-                          "No valid configs found.");
+      if (!invalid_configs.empty()) {
+        auto fallback_results = origami::rank_configs(problem, hardware, invalid_configs);
+        REQUIRE(fallback_results.size() == invalid_configs.size());
+        for (const auto& result : fallback_results) {
+          REQUIRE(result.latency == std::numeric_limits<double>::max());
+        }
+      }
+
+      // Test 2b: Valid configs win over LDS- and heuristic-rejected configs
+      if (gpu_arch == 950) {
+        auto small_k_problem = make_problem(1024, 1024, 256);
+        std::vector<origami::config_t> mixed_configs;
+        mixed_configs.push_back(make_config(64, 64, 64, 32, 32, 8, false, 1, 6, 0, 0));
+
+        auto lds_invalid = make_config(512, 512, 256, 32, 32, 8, false, 1, 6, 0, 0);
+        mixed_configs.push_back(lds_invalid);
+
+        auto heuristic_rejected = make_config(128, 128, 64, 32, 32, 8, false, 1, 6, 0, 0);
+        heuristic_rejected.subtile = true;
+        mixed_configs.push_back(heuristic_rejected);
+
+        auto mixed_results = origami::rank_configs(small_k_problem, hardware, mixed_configs);
+        REQUIRE(mixed_results.size() == 1);
+        REQUIRE(mixed_results.front().latency < std::numeric_limits<double>::max());
+        REQUIRE(mixed_results.front().config.mt.m == 64);
+      }
+
+      // Test 2c: Catastrophic fallback when every path rejects (LDS + heuristic)
+      if (gpu_arch == 950) {
+        auto small_k_problem = make_problem(1024, 1024, 256);
+        std::vector<origami::config_t> all_rejected_configs;
+        all_rejected_configs.push_back(
+            make_config(512, 512, 256, 32, 32, 8, false, 1, 6, 0, 0));
+
+        auto heuristic_rejected = make_config(128, 128, 64, 32, 32, 8, false, 1, 6, 0, 0);
+        heuristic_rejected.subtile = true;
+        all_rejected_configs.push_back(heuristic_rejected);
+
+        auto fallback_results =
+            origami::rank_configs(small_k_problem, hardware, all_rejected_configs);
+        REQUIRE(fallback_results.size() == all_rejected_configs.size());
+        for (const auto& result : fallback_results) {
+          REQUIRE(result.latency == std::numeric_limits<double>::max());
+        }
+      }
 
       // Test 3: Test tie-breaking with arithmetic intensity (TODO: Find the pair which has same
       // latency but different AI)
@@ -581,7 +625,7 @@ TEST_CASE("Origami: simulation mode basic", "[origami][formocast]") {
       config.tensile().wave_group_n = 2;
       config.tensile().prefetch_global_read = 2;
       
-      double latency = origami::gemm::compute_total_latency(problem, hardware, config, hardware.N_CU);
+      double latency = origami::gemm::compute_total_latency(problem, hardware, config);
       
       REQUIRE(latency > 0);
     }
@@ -613,9 +657,9 @@ TEST_CASE("Origami: simulation mode via compute_total_latency", "[origami][formo
       config_simulation.tensile().prefetch_global_read = 2;
       
       double latency_estimation = origami::gemm::compute_total_latency(
-          problem, hardware, config_estimation, hardware.N_CU);
+          problem, hardware, config_estimation);
       double latency_simulation = origami::gemm::compute_total_latency(
-          problem, hardware, config_simulation, hardware.N_CU);
+          problem, hardware, config_simulation);
       
       // Both should be positive
       REQUIRE(latency_estimation > 0);
@@ -655,7 +699,7 @@ TEST_CASE("Origami: Formocast with various problem sizes", "[origami][formocast]
         config.tensile().wave_group_m = 2;
         config.tensile().wave_group_n = 2;
         
-        double latency = origami::gemm::compute_total_latency(problem, hardware, config, hardware.N_CU);
+        double latency = origami::gemm::compute_total_latency(problem, hardware, config);
         
         INFO("Problem size: " << m << "x" << n << "x" << k);
         REQUIRE(latency > 0);
@@ -691,7 +735,7 @@ TEST_CASE("Origami: Formocast with different tile sizes", "[origami][formocast]"
         config.tensile().wave_group_m = 2;
         config.tensile().wave_group_n = 2;
         
-        double latency = origami::gemm::compute_total_latency(problem, hardware, config, hardware.N_CU);
+        double latency = origami::gemm::compute_total_latency(problem, hardware, config);
         
         INFO("Tile size: " << mt_m << "x" << mt_n << "x" << mt_k);
         REQUIRE(latency > 0);
@@ -1088,4 +1132,198 @@ TEST_CASE("Origami: tensile_params_t hash function", "[origami]") {
     params_wgm_xcc.workgroup_mapping_xcc     = 8;
     REQUIRE(base_params.hash() != params_wgm_xcc.hash());
   }
+}
+
+TEST_CASE("Origami: resolve_num_cus", "[origami]") {
+  // 0 means "use all CUs": falls back to the physical count.
+  REQUIRE(origami::resolve_num_cus(0, 256) == 256);
+  // A non-zero request below the physical count caps the budget.
+  REQUIRE(origami::resolve_num_cus(64, 256) == 64);
+  // A request equal to the physical count is unchanged.
+  REQUIRE(origami::resolve_num_cus(256, 256) == 256);
+  // A request above the physical count clamps to the physical count.
+  REQUIRE(origami::resolve_num_cus(512, 256) == 256);
+  // A negative request (invalid input) means "use all CUs".
+  REQUIRE(origami::resolve_num_cus(-4, 256) == 256);
+}
+
+TEST_CASE("Origami: num_cus adjusts solution selection", "[origami]") {
+  for (int gpu_arch : test_architectures) {
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - CU budget affects ranked latency") {
+      auto       hardware = make_hardware(gpu_arch);
+      const auto mi = hardware.get_recommended_matrix_instruction(origami::data_type_t::BFloat16);
+
+      // CU-bound problem: far more output tiles than CUs, so the usable CU
+      // count directly drives the number of timesteps (and thus latency).
+      auto make_p = [&](size_t num_cus) {
+        auto p    = make_problem(8192, 8192, 4096);
+        p.num_cus = num_cus;
+        return p;
+      };
+
+      std::vector<origami::config_t> configs;
+      configs.push_back(make_config(256, 256, 64, mi.m, mi.n, mi.k, false, 1, 4));
+
+      const auto full   = origami::rank_configs(make_p(0), hardware, configs);
+      const auto equal  = origami::rank_configs(make_p(hardware.N_CU), hardware, configs);
+      const auto capped = origami::rank_configs(make_p(hardware.N_CU / 4), hardware, configs);
+
+      // num_cus == 0 and num_cus == N_CU both mean "use all CUs": identical.
+      REQUIRE(equal[0].latency == Approx(full[0].latency));
+
+      // Restricting to fewer CUs cannot make a CU-bound GEMM faster; here it is
+      // strictly slower because timesteps scale with 1 / usable_cus.
+      REQUIRE(capped[0].latency > full[0].latency);
+    }
+  }
+}
+
+TEST_CASE("Origami: num_cus in mapping selectors", "[origami]") {
+  for (int gpu_arch : test_architectures) {
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - mapping honors CU budget") {
+      auto         hardware = make_hardware(gpu_arch);
+      auto         config   = make_config(256, 256, 64);
+      const size_t skGrid   = 2048;
+
+      auto problem_full    = make_problem(8192, 8192, 8192);
+      problem_full.num_cus = 0;
+      auto problem_equal    = problem_full;
+      problem_equal.num_cus = hardware.N_CU;  // equivalent to "use all CUs"
+
+      const auto wgm_full  = origami::select_workgroup_mapping(problem_full, hardware, config, skGrid);
+      const auto wgm_equal = origami::select_workgroup_mapping(problem_equal, hardware, config, skGrid);
+
+      // num_cus == N_CU must behave exactly like num_cus == 0.
+      REQUIRE(wgm_full.wgm == wgm_equal.wgm);
+      REQUIRE(wgm_full.wgmxcc == wgm_equal.wgmxcc);
+      REQUIRE(wgm_full.wgmxccchunk == wgm_equal.wgmxccchunk);
+
+      const auto su_full  = origami::select_staggerU(problem_full, hardware, config, skGrid, wgm_full.wgm);
+      const auto su_equal = origami::select_staggerU(problem_equal, hardware, config, skGrid, wgm_equal.wgm);
+      REQUIRE(su_full.staggerU == su_equal.staggerU);
+      REQUIRE(su_full.staggerUMapping == su_equal.staggerUMapping);
+      REQUIRE(su_full.staggerUStrideShift == su_equal.staggerUStrideShift);
+
+      // A real cap must actually change the mapping for a CU-sensitive problem:
+      // many square tiles (numMTs >> CUs) so the per-XCD WGM search space
+      // (numWGsPerXCD / wgm_cap_size) shrinks with the usable CU count.
+      const size_t MT       = 128;
+      auto         cuConfig = make_config(MT, MT, 64);
+      const size_t numMTs   = (8192 / MT) * (8192 / MT);
+      const size_t skGridDP = numMTs;  // data-parallel: split_factor == 1
+
+      auto problem_cu_full    = make_problem(8192, 8192, 8192);
+      problem_cu_full.num_cus = 0;
+      auto problem_cu_capped    = problem_cu_full;
+      problem_cu_capped.num_cus = hardware.N_CU / 4;  // genuine cap
+
+      const auto wgm_cu_full =
+          origami::select_workgroup_mapping(problem_cu_full, hardware, cuConfig, skGridDP);
+      const auto wgm_cu_capped =
+          origami::select_workgroup_mapping(problem_cu_capped, hardware, cuConfig, skGridDP);
+
+      const bool mapping_changed = wgm_cu_full.wgm != wgm_cu_capped.wgm
+                                   || wgm_cu_full.wgmxcc != wgm_cu_capped.wgmxcc
+                                   || wgm_cu_full.wgmxccchunk != wgm_cu_capped.wgmxccchunk;
+      INFO("full wgm=" << wgm_cu_full.wgm << " capped wgm=" << wgm_cu_capped.wgm);
+      REQUIRE(mapping_changed);
+    }
+  }
+}
+
+TEST_CASE("Origami: num_cus changes selected config", "[origami]") {
+  // The CU budget does not just scale latency magnitude — it can change *which*
+  // config Origami ranks first. Two candidates with comparable per-tile
+  // efficiency but different tile counts trade places: the tile that produces
+  // more output tiles wins when all CUs are available (higher compute/memory
+  // efficiency), while the tile that produces fewer output tiles wins under a
+  // tight CU budget, because num_timesteps ~= ceil(numMTs / usable_cus) and
+  // fewer tiles means fewer timesteps once work no longer fits in one wave.
+  //
+  // For an 8192x8192 output:
+  //   256x128 -> ceil(8192/256) * ceil(8192/128) = 32 * 64 = 2048 tiles
+  //   192x192 -> ceil(8192/192) * ceil(8192/192) = 43 * 43 = 1849 tiles
+  // 256x128 (more, more efficient tiles) wins with all CUs; 192x192 (fewer
+  // tiles -> fewer timesteps) wins when the budget is squeezed to N_CU / 8.
+  // Verified to hold on every architecture in test_architectures.
+  for (int gpu_arch : test_architectures) {
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - CU budget flips ranked winner") {
+      auto       hardware = make_hardware(gpu_arch);
+      const auto mi = hardware.get_recommended_matrix_instruction(origami::data_type_t::BFloat16);
+
+      std::vector<origami::config_t> configs;
+      configs.push_back(make_config(192, 192, 64, mi.m, mi.n, mi.k, false, 1, 4));  // fewer tiles
+      configs.push_back(make_config(256, 128, 64, mi.m, mi.n, mi.k, false, 1, 4));  // more tiles
+
+      auto make_p = [&](size_t num_cus) {
+        auto p    = make_problem(8192, 8192, 4096);
+        p.num_cus = num_cus;
+        return p;
+      };
+
+      const size_t capped_cus = hardware.N_CU / 8;  // tight budget
+
+      const auto full   = origami::rank_configs(make_p(0), hardware, configs);
+      const auto capped = origami::rank_configs(make_p(capped_cus), hardware, configs);
+
+      const auto full_mt   = full[0].config.mt;
+      const auto capped_mt = capped[0].config.mt;
+
+      INFO("gfx" << gpu_arch << " N_CU=" << hardware.N_CU << " capped_cus=" << capped_cus
+                 << " | all-CUs winner=" << full_mt.m << "x" << full_mt.n << "x" << full_mt.k
+                 << " (lat " << full[0].latency << ")"
+                 << " | capped winner=" << capped_mt.m << "x" << capped_mt.n << "x" << capped_mt.k
+                 << " (lat " << capped[0].latency << ")");
+
+      // The identity of the winning config must change with the CU budget,
+      // not merely the latency magnitude.
+      const bool winner_flipped =
+          full_mt.m != capped_mt.m || full_mt.n != capped_mt.n || full_mt.k != capped_mt.k;
+      REQUIRE(winner_flipped);
+
+      // Pin the concrete expected winners so the intent is unambiguous.
+      REQUIRE(full_mt.m == 256);
+      REQUIRE(full_mt.n == 128);
+      REQUIRE(capped_mt.m == 192);
+      REQUIRE(capped_mt.n == 192);
+    }
+  }
+}
+
+TEST_CASE("gfx950 pci_chip_id id75a0 vs id75a8", "[hardware]") {
+  using origami::hardware_t;
+  const auto c_def = hardware_t::get_gfx950_arch_constants(std::nullopt);
+  const auto c_v2 = hardware_t::get_gfx950_arch_constants(std::make_optional(0x75a8));
+  REQUIRE(c_def.mem1_perf_ratio != c_v2.mem1_perf_ratio);
+  REQUIRE(c_def.mem2_perf_ratio != c_v2.mem2_perf_ratio);
+  REQUIRE(c_def.mem3_perf_ratio != c_v2.mem3_perf_ratio);
+  REQUIRE(c_def.mem_bw_per_wg_coefficients != c_v2.mem_bw_per_wg_coefficients);
+  REQUIRE(c_def.parallel_mi_cu == c_v2.parallel_mi_cu);
+
+  const auto g942_v2 = hardware_t::get_arch_constants(
+      hardware_t::architecture_t::gfx942, std::make_optional(0x75a8));
+  const auto g942_def =
+      hardware_t::get_arch_constants(hardware_t::architecture_t::gfx942);
+  REQUIRE(g942_v2.mem1_perf_ratio == g942_def.mem1_perf_ratio);
+
+  const auto hw_def = hardware_t::get_hardware_for_arch(hardware_t::architecture_t::gfx950,
+                                                        256,               // N_CU
+                                                        65536,             // lds_capacity
+                                                        512 * 1024,        // rf_capacity
+                                                        4 * 1024 * 1024,   // L2_capacity
+                                                        2'100'000,         // compute_clock_khz
+                                                        std::nullopt);     // pci_chip_id
+  const auto hw_v2 = hardware_t::get_hardware_for_arch(hardware_t::architecture_t::gfx950,
+                                                       128,
+                                                       65536,
+                                                       512 * 1024,
+                                                       4 * 1024 * 1024,
+                                                       2'100'000,
+                                                       std::make_optional(0x75a8));
+  REQUIRE(hw_def.mem1_perf_ratio != hw_v2.mem1_perf_ratio);
+  REQUIRE(hw_def.mem_bw_per_wg_coefficients == c_def.mem_bw_per_wg_coefficients);
+  REQUIRE(hw_v2.mem_bw_per_wg_coefficients == c_v2.mem_bw_per_wg_coefficients);
+  REQUIRE_FALSE(hw_def.pci_chip_id.has_value());
+  REQUIRE(hw_v2.pci_chip_id.has_value());
+  REQUIRE(hw_v2.pci_chip_id.value() == 0x75a8);
 }
