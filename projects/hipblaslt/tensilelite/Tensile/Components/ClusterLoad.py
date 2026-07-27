@@ -54,11 +54,6 @@ class ClusterLoadTDM(ClusterLoad):
         string = tc.removeprefix("MXS") if tc.startswith("MXS") else tc
         return f"MulticastMask{string}"
 
-    def cooperativeThreadPartition(self, kernel: Mapping, tc: str) -> int:
-        """Cooperating-workgroup count for ``tc``: ClusterDim[1] (A) / [0] (B)."""
-        subTc: str = tc[-1]
-        return kernel["ClusterDim"][1] if subTc == "A" else kernel["ClusterDim"][0]
-
     # -- SGPR declare / undeclare -------------------------------------------
 
     def declareSgprs(self, writer: "KernelWriter", kernel: Mapping) -> None:

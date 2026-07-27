@@ -42,7 +42,7 @@ from .SubtileScaleEmit import emitScaleGRLDSSwap
 
 from math import ceil, log, log2, prod
 from rocisa.code import Label
-from ...Common import INDEX_CHARS, clusterEnabled
+from ...Common import INDEX_CHARS
 from ...Common.DataType import DataType
 
 
