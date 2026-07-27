@@ -74,14 +74,16 @@ this static check needs no Python, ROCm, or GPU environment. From `platform`,
 run:
 
 ```bash
-go run tools/mdlinklint/main.go --root dsl_docs
+go run tools/mdlinklint/main.go --root dsl_docs --link-root ..
 go test tools/mdlinklint/main.go tools/mdlinklint/main_test.go
 ```
 
 It emits deterministic `file:line:column: error: ...` diagnostics and exits
 nonzero for unresolved local targets (files or directories) or Markdown heading
-fragments. It deliberately skips external URLs, mail links, and non-Markdown
-fragments.
+fragments. `--link-root ..` allows links throughout the rocKE tree while rejecting
+lexical and symbolic-link escapes outside it. Fragment targets must be regular
+Markdown files no larger than 4 MiB. The linter deliberately skips external URLs,
+mail links, and non-Markdown fragments.
 
 ## Byte-identity gate (cross-engine)
 

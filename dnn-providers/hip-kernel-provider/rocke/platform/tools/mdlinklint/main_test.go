@@ -36,7 +36,7 @@ func TestLinterResolvesPathsAndFragments(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	l := linter{root: root, anchorCache: make(map[string]map[string]struct{})}
+	l := testLinter(root, root)
 	if diagnostics := l.lintFile(filepath.Join(root, "index.md")); len(diagnostics) != 0 {
 		t.Fatalf("unexpected diagnostics: %#v", diagnostics)
 	}
@@ -50,7 +50,7 @@ func TestLinterReportsUnresolvedPathAndFragment(t *testing.T) {
 	writeFile(t, filepath.Join(root, "index.md"), "[missing](missing.md)\n[fragment](guide.md#missing)\n")
 	writeFile(t, filepath.Join(root, "guide.md"), "# Present\n")
 
-	l := linter{root: root, anchorCache: make(map[string]map[string]struct{})}
+	l := testLinter(root, root)
 	diagnostics := l.lintFile(filepath.Join(root, "index.md"))
 	if len(diagnostics) != 2 {
 		t.Fatalf("found %d diagnostics, want 2: %#v", len(diagnostics), diagnostics)
@@ -60,6 +60,74 @@ func TestLinterReportsUnresolvedPathAndFragment(t *testing.T) {
 	}
 	if !strings.Contains(diagnostics[1].message, "unresolved fragment") {
 		t.Fatalf("unexpected fragment diagnostic: %q", diagnostics[1].message)
+	}
+}
+
+func TestLinterEnforcesLinkRoot(t *testing.T) {
+	workspace := t.TempDir()
+	docs := filepath.Join(workspace, "docs")
+	if err := os.Mkdir(docs, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(workspace, "guide.md"), "# Guide\n")
+	writeFile(t, filepath.Join(docs, "index.md"), "[guide](../guide.md#guide)\n")
+
+	t.Run("rejects target outside boundary", func(t *testing.T) {
+		l := testLinter(docs, docs)
+		diagnostics := l.lintFile(filepath.Join(docs, "index.md"))
+		if len(diagnostics) != 1 || !strings.Contains(diagnostics[0].message, "escapes link root") {
+			t.Fatalf("unexpected diagnostics: %#v", diagnostics)
+		}
+	})
+
+	t.Run("allows target outside scan root within boundary", func(t *testing.T) {
+		l := testLinter(docs, workspace)
+		if diagnostics := l.lintFile(filepath.Join(docs, "index.md")); len(diagnostics) != 0 {
+			t.Fatalf("unexpected diagnostics: %#v", diagnostics)
+		}
+	})
+}
+
+func TestLinterRejectsSymlinkEscape(t *testing.T) {
+	workspace := t.TempDir()
+	docs := filepath.Join(workspace, "docs")
+	if err := os.Mkdir(docs, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(workspace, "outside.md"), "# Outside\n")
+	if err := os.Symlink(filepath.Join(workspace, "outside.md"), filepath.Join(docs, "escape.md")); err != nil {
+		t.Skipf("cannot create symlink: %v", err)
+	}
+	writeFile(t, filepath.Join(docs, "index.md"), "[escape](escape.md#outside)\n")
+
+	l := testLinter(docs, docs)
+	diagnostics := l.lintFile(filepath.Join(docs, "index.md"))
+	if len(diagnostics) != 1 || !strings.Contains(diagnostics[0].message, "through a symbolic link") {
+		t.Fatalf("unexpected diagnostics: %#v", diagnostics)
+	}
+}
+
+func TestLinterRejectsOversizedMarkdown(t *testing.T) {
+	root := t.TempDir()
+	large := filepath.Join(root, "large.md")
+	writeFile(t, large, "")
+	if err := os.Truncate(large, maxMarkdownBytes+1); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(root, "index.md"), "[large](large.md#heading)\n")
+
+	l := testLinter(root, root)
+	diagnostics := l.lintFile(filepath.Join(root, "index.md"))
+	if len(diagnostics) != 1 || !strings.Contains(diagnostics[0].message, "limit is") {
+		t.Fatalf("unexpected diagnostics: %#v", diagnostics)
+	}
+}
+
+func testLinter(root, linkRoot string) linter {
+	return linter{
+		root:        root,
+		linkRoot:    linkRoot,
+		anchorCache: make(map[string]map[string]struct{}),
 	}
 }
 
