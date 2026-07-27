@@ -883,6 +883,54 @@ TEST_F(DAGSchedulerPassTest, GlobalReadThrottle_Disabled_PreservesAll) {
     EXPECT_EQ(countStinkyInstructions(*body), beforeCount);
 }
 
+// SGPR->tensor_load hazard: a SALU that writes an SGPR a tensor_load reads must be
+// separated from that tensor_load by the fixed hardware gap (kCdna5HazardRules'
+// SaluSgprToMemAddr entry, 8 cycles). Mirrors the real case (wmma/ds fill around the
+// SALU): the scheduler hoists the SALU and/or holds the tensor_load so >= 8 cycles of
+// work sit between them. We assert the cycle invariant, not an exact order. A WMMA
+// counts as its latencyCycles (the co-issue window it opens, 8 here), other ops as
+// issueCycles.
+TEST_F(DAGSchedulerPassTest, SgprToTensorLoadHazard_AtLeast8CycleGap) {
+    BasicBlock* body = bb;
+    body->addSuccessor(body);
+
+    // Movable ds_loads (LDS token -> stay in one region, no side-effect boundary) as the
+    // fill work, a SALU writing s0, and a tensor_load reading s[0:4) so s0 is the hazard
+    // register. Enough ds fill (>= hazard) so the gap is filled by real work, observable
+    // in the emitted order rather than an invisible stall.
+    for (int i = 0; i < 12; i++)
+        createMovableDsLoad(/*destReg=*/8 + i * 4, /*addrReg=*/60, /*ldsToken=*/i + 2);
+
+    AsmIRBuilder builder(*body, arch);
+    StinkyInstruction* salu = builder.create(getMCIDByUOp(GFX::s_mov_b32, arch));
+    salu->addDestReg(StinkyRegister("s", 0, 1));
+    salu->addSrcReg(StinkyRegister(0));
+
+    createMovableTensorLoad(body, /*s0=*/0, /*s1=*/4, /*ldsToken=*/1);
+
+    runPassWithGlobalReadThrottle(/*depth=*/4, /*drainLatency=*/8);
+
+    // Locate the SALU and the tensor_load in the scheduled order, and total the cycles
+    // of the work between them (WMMA -> latency window, else issue cycles).
+    int saluPos = -1, tensorPos = -1, idx = 0;
+    std::vector<int> cyclesAt;
+    for (const IRBase& ir : *body) {
+        if (ir.getType() != IRBase::IRType::StinkyTofu) continue;
+        const auto* inst = cast<StinkyInstruction>(&ir);
+        cyclesAt.push_back(isMatrixInstruction(*inst) ? inst->latencyCycles : inst->issueCycles);
+        if (inst == salu) saluPos = idx;
+        if (isTensorLoad(*inst)) tensorPos = idx;
+        idx++;
+    }
+    ASSERT_GE(saluPos, 0);
+    ASSERT_GE(tensorPos, 0);
+    ASSERT_LT(saluPos, tensorPos) << "SALU must be scheduled before the tensor_load it feeds";
+
+    int gap = 0;
+    for (int i = saluPos + 1; i < tensorPos; i++) gap += cyclesAt[i];
+    EXPECT_GE(gap, 8) << "tensor_load must be >= 8 cycles after the SALU writing its SGPR";
+}
+
 // ---------------------------------------------------------------------------
 // dsReadQueueDepth / dsReadDrainLatency / dsReadPerWmma: same in-flight
 // credit-pool mechanism as globalReadQueueDepth/globalReadDrainLatency, but
