@@ -144,12 +144,8 @@ template <typename AType,
           WGAttrNumAccessEnum AttrNumAccessA = WGAttrNumAccessEnum::Single,
           WGAttrNumAccessEnum AttrNumAccessB = AttrNumAccessA,
           bool IsScale16                     = false,
-<<<<<<< HEAD
-          bool UsePackedNumAccess            = false>
-=======
-          bool UsePackedNumAccess = false,
-          bool UseMxScale         = false>
->>>>>>> 4488e238e41 (UseMxScale to avoid ambiguity in dispatch)
+          bool UsePackedNumAccess            = false,
+          bool UseMxScale                    = false>
 struct UnificationDispatcher
 {
     static_assert(!IsScale16); // TODO: We can't deal with scale16 yet.
