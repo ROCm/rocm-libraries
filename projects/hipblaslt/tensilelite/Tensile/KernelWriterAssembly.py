@@ -355,14 +355,15 @@ class KernelWriterAssembly(KernelWriter):
     return kernel["enableTDMA"] and kernel["enableTDMB"] and kernel["NumWaves"] > 1
 
   def isTdmWaveIdxLive(self, kernel) -> bool:
-    """True when sgpr("WaveIdx") is still defined past setupNewTile, so wave parity
-    can be read from it instead of recomputed from vgpr("Serial"). Mirrors the
-    undefineSgpr("WaveIdx") guard in KernelWriter.setupNewTile."""
     if not (kernel["enableTDMA"] or kernel["enableTDMB"]):
       return False
     if kernel.get("UseSubtileImpl"):
       return False
-    return bool(kernel["ClusterBarrier"])
+    if kernel["ClusterBarrier"]:
+      return True
+    if self.states.waveIdxReleasedAfterStagger:
+      return False
+    return bool(self.states.staggerUCode) and self.isTdmWaveSeparated(kernel)
 
   ########################################
   def strideRef(self, tc, dim):
@@ -6428,7 +6429,25 @@ class KernelWriterAssembly(KernelWriter):
       imod.add(labelRemoveSUEnd)
     # Wave-separated TDM: stagger setup/remove still use GlobalReadIncs*; release here.
     imod.add(self.releaseGlobalReadIncsSgprsAfterTdmWaveSep(kernel))
+    imod.add(self.releaseWaveIdxAfterStagger(kernel))
     return imod
+
+  def releaseWaveIdxAfterStagger(self, kernel):
+    module = Module("ReleaseWaveIdxAfterStagger")
+    # The cluster barrier handshake reads WaveIdx for the whole kernel.
+    if kernel["ClusterBarrier"]:
+      return module
+    if not (self.states.staggerUCode and self.isTdmWaveSeparated(kernel)):
+      return module
+    # Idempotent: removeStaggerAB has two mutually exclusive call sites.
+    # Double undefineSgpr is a compiler error; double pool check-in corrupts the pool.
+    if "WaveIdx" not in self.sgprs:
+      return module
+    if self.states.waveIdxReleasedAfterStagger:
+      return module
+    self.states.waveIdxReleasedAfterStagger = True
+    module.add(self.undefineSgpr("WaveIdx"))
+    return module
 
   def removeStagger(self, kernel, tP):
     imod = Module("removeStagger")
@@ -18907,11 +18926,9 @@ class KernelWriterAssembly(KernelWriter):
   def _emitTdmWaveParitySCC(self, module: Module, kernel: Mapping, dstTmpIdx: Optional[int] = None,
                             comment: str = "wave parity"):
     """Leave this wave's parity (bit0 of WaveId) in SCC.
-
-    When sgpr("WaveIdx") is still live (isTdmWaveIdxLive) read bit0 straight out of
-    it: WaveIdx was initialized to readfirstlane(Serial) >> log2(WavefrontSize) and
-    Serial never changes within a wave, so bit0 is identical. Otherwise recompute it
-    from Serial, which clobbers sgpr(dstTmpIdx)."""
+    When sgpr("WaveIdx") is still live, read bit0 directly.
+    Otherwise recompute it from vgpr("Serial"), which
+    clobbers sgpr(dstTmpIdx)."""
     if self.isTdmWaveIdxLive(kernel):
       module.add(SBitcmp1B32(src0=sgpr("WaveIdx"), src1=0, comment=comment))
       return
