@@ -11,6 +11,7 @@
 #include <hipdnn_frontend/detail/DescriptorHelpers.hpp>
 #include <hipdnn_frontend/detail/DescriptorUnpackHelpers.hpp>
 #include <hipdnn_frontend/detail/KnobPacker.hpp>
+#include <hipdnn_frontend/detail/TensorConstants.hpp>
 #include <hipdnn_frontend/knob/KnobSetting.hpp>
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
 #include <map>
@@ -92,6 +93,9 @@ protected:
     {
         _mockBackend = std::make_shared<Mock_hipdnn_backend>();
         IHipdnnBackend::setInstance(_mockBackend);
+        // Error-path tests format backend failures via getLastErrorString; allow
+        // it everywhere so those calls are not flagged as uninteresting.
+        EXPECT_CALL(*_mockBackend, getLastErrorString(_, _)).Times(AnyNumber());
     }
     void TearDown() override
     {
@@ -117,12 +121,14 @@ protected:
     }
 
     // Sets up EXPECT_CALL expectations for a single tensor via createOrFindTensorDesc.
-    // The 6 setAttribute calls are: uid, name, data_type, dims, strides, is_virtual.
+    // The 7 setAttribute calls are: uid, name, data_type, dims, strides, is_virtual,
+    // byte alignment.
     void expectTensorSetAttributes(int64_t uid,
                                    const std::string& name,
                                    const std::vector<int64_t>& dims,
                                    const std::vector<int64_t>& strides,
-                                   bool isRuntime = false)
+                                   bool isRuntime = false,
+                                   int64_t alignment = DEFAULT_TENSOR_ALIGNMENT)
     {
         EXPECT_CALL(*_mockBackend,
                     backendSetAttribute(_,
@@ -163,6 +169,19 @@ protected:
                                         1,
                                         pointsToScalar<bool>(false)))
             .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+        // Lowering only sends the byte-alignment attribute for a non-default
+        // alignment (see createOrFindTensorDesc), so the expectation is gated on
+        // the same default.
+        if(alignment != DEFAULT_TENSOR_ALIGNMENT)
+        {
+            EXPECT_CALL(*_mockBackend,
+                        backendSetAttribute(_,
+                                            HIPDNN_ATTR_TENSOR_BYTE_ALIGNMENT,
+                                            HIPDNN_TYPE_INT64,
+                                            1,
+                                            pointsToScalar<int64_t>(alignment)))
+                .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+        }
         // Lowering only sends the runtime pass-by-value extension attribute when
         // the flag is set (see createOrFindTensorDesc); a non-pass-by-value
         // tensor never touches it, keeping graphs compatible with a pre-1.2.0
@@ -209,6 +228,49 @@ TEST_F(TestDescriptorHelpers, EnsureTensorDescCreatesNewDescriptor)
     EXPECT_TRUE(tensorDescs.find(K_DEFAULT_TENSOR_UID) != tensorDescs.end());
 }
 
+TEST_F(TestDescriptorHelpers, EnsureTensorDescPropagatesCustomAlignment)
+{
+    constexpr int64_t K_ALIGNMENT = 256;
+
+    expectCreateAndDestroyDescriptor();
+    expectTensorSetAttributes(K_DEFAULT_TENSOR_UID,
+                              "tensor_42",
+                              toVec(K_DEFAULT_TENSOR_DIMS),
+                              toVec(K_DEFAULT_TENSOR_STRIDES),
+                              false,
+                              K_ALIGNMENT);
+    EXPECT_CALL(*_mockBackend, backendFinalize(_)).WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+
+    std::unordered_map<int64_t, ScopedHipdnnBackendDescriptor> tensorDescs;
+    auto tensor = makeTensor(K_DEFAULT_TENSOR_UID);
+    tensor->set_alignment(K_ALIGNMENT);
+
+    auto err = createOrFindTensorDesc(tensorDescs, tensor);
+    EXPECT_TRUE(err.is_good());
+}
+
+// A tensor at the default alignment must never send HIPDNN_ATTR_TENSOR_BYTE_ALIGNMENT
+// during lowering, so an ordinary graph imposes no pre-1.3.0 backend version floor.
+// Times(0) makes the omission an assertion rather than relying on strict-mock matching.
+TEST_F(TestDescriptorHelpers, EnsureTensorDescOmitsByteAlignmentForDefaultAlignment)
+{
+    expectCreateAndDestroyDescriptor();
+    expectTensorSetAttributes(K_DEFAULT_TENSOR_UID,
+                              "tensor_42",
+                              toVec(K_DEFAULT_TENSOR_DIMS),
+                              toVec(K_DEFAULT_TENSOR_STRIDES));
+    EXPECT_CALL(*_mockBackend, backendSetAttribute(_, HIPDNN_ATTR_TENSOR_BYTE_ALIGNMENT, _, _, _))
+        .Times(0);
+    EXPECT_CALL(*_mockBackend, backendFinalize(_)).WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+
+    std::unordered_map<int64_t, ScopedHipdnnBackendDescriptor> tensorDescs;
+    auto tensor = makeTensor(K_DEFAULT_TENSOR_UID);
+    ASSERT_EQ(tensor->get_alignment(), DEFAULT_TENSOR_ALIGNMENT);
+
+    auto err = createOrFindTensorDesc(tensorDescs, tensor);
+    EXPECT_TRUE(err.is_good()) << err.err_msg;
+}
+
 TEST_F(TestDescriptorHelpers, EnsureTensorDescDeduplicatesByUid)
 {
     expectCreateAndDestroyDescriptor();
@@ -236,7 +298,6 @@ TEST_F(TestDescriptorHelpers, EnsureTensorDescFailsOnCreateError)
 {
     EXPECT_CALL(*_mockBackend, backendCreateDescriptor(_, _))
         .WillOnce(Return(HIPDNN_STATUS_INTERNAL_ERROR));
-    EXPECT_CALL(*_mockBackend, getLastErrorString(_, _)).Times(AnyNumber());
 
     std::unordered_map<int64_t, ScopedHipdnnBackendDescriptor> tensorDescs;
     auto tensor = makeTensor(K_DEFAULT_TENSOR_UID);
@@ -464,7 +525,6 @@ TEST_F(TestDescriptorHelpers, EnsureAndSetTensorRefPropagatesCreateError)
 {
     EXPECT_CALL(*_mockBackend, backendCreateDescriptor(_, _))
         .WillOnce(Return(HIPDNN_STATUS_INTERNAL_ERROR));
-    EXPECT_CALL(*_mockBackend, getLastErrorString(_, _)).Times(AnyNumber());
 
     std::unordered_map<int64_t, ScopedHipdnnBackendDescriptor> tensorDescs;
     auto tensor = makeTensor(K_DEFAULT_TENSOR_UID);
@@ -714,7 +774,6 @@ TEST_F(TestDescriptorHelpers, CreateKnobSettingDescriptorFailsOnCreate)
 {
     EXPECT_CALL(*_mockBackend, backendCreateDescriptor(_, _))
         .WillOnce(Return(HIPDNN_STATUS_INTERNAL_ERROR));
-    EXPECT_CALL(*_mockBackend, getLastErrorString(_, _)).Times(AnyNumber());
 
     const hipdnn_frontend::KnobSetting setting("test_knob", int64_t{42});
     ScopedHipdnnBackendDescriptor desc;

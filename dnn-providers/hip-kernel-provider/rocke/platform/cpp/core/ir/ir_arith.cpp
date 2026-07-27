@@ -422,6 +422,11 @@ rocke_value_t* rocke_b_exp2(rocke_ir_builder_t* b, rocke_value_t* a)
     return rocke_i_unop(b, ROCKE_OP_MATH_EXP2, a, "exp2");
 }
 
+rocke_value_t* rocke_b_exp2_fast(rocke_ir_builder_t* b, rocke_value_t* a)
+{
+    return rocke_i_unop(b, ROCKE_OP_MATH_EXP2_FAST, a, "exp2f");
+}
+
 rocke_value_t* rocke_b_log2(rocke_ir_builder_t* b, rocke_value_t* a)
 {
     return rocke_i_unop(b, ROCKE_OP_MATH_LOG2, a, "log2");

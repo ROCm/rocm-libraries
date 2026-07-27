@@ -15,6 +15,12 @@ dnn_provider_setup_version(hip_kernel_provider ${CMAKE_CURRENT_LIST_DIR})
 
 project(hip-kernel-provider VERSION ${HIP_KERNEL_PROVIDER_VERSION} LANGUAGES CXX)
 
+# shared/ctest is only present in a full rocm-libraries checkout; guard the check at the
+# point of use so standalone / sparse checkouts that lack shared/ctest still build.
+if(NOT DEFINED ROCM_LIBRARIES_ROOT)
+    set(ROCM_LIBRARIES_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
+endif()
+
 if(NOT WIN32 AND DEFINED ROCM_PATH)
     # Only set if not already specified by user
     if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
@@ -143,18 +149,13 @@ file(MAKE_DIRECTORY ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR})
 if(HIPKERNELPROVIDER_ENABLE_ROCKE)
     message(STATUS "rocKE features enabled")
 
-    # rocke/ = library (api / provider plugin) + platform (engine). The engine's
-    # installed CTest entries stage into
-    # EXTERNAL_TEST_INSTALL_STAGING_hip_kernel_provider, so add_subdirectory(rocke)
-    # must precede src/ below, which emits bin/hip_kernel_provider/CTestTestfile.cmake.
+    # rocke/ = platform (engine + build-time Python). The engine's installed
+    # CTest entries stage into EXTERNAL_TEST_INSTALL_STAGING_hip_kernel_provider,
+    # so add_subdirectory(rocke) must precede src/ below, which emits
+    # bin/hip_kernel_provider/CTestTestfile.cmake.
     set(ROCKE_INSTALL_PROVIDER_CTEST_SUBDIR "hip_kernel_provider")
     set(ROCKE_INSTALL_STANDALONE_CTEST OFF)
 
-    # Route rocke-client test targets into hip-kernel-provider's test bucket so
-    # they appear in install_provider_ctest_files("hip_kernel_provider") output.
-    # Without this, _add_test_target_internal uses rocke-client's own PROJECT_NAME
-    # and the targets are never picked up by the parent's finalize_test_targets.
-    set(ROCKE_CLIENT_PARENT_PROJECT "${PROJECT_NAME}")
     add_subdirectory(rocke)
 else()
     message(STATUS "rocKE features disabled")
