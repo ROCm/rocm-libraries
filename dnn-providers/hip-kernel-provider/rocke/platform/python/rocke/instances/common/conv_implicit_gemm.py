@@ -490,7 +490,7 @@ def is_valid_spec_for_problem(
     if not ok:
         return False, reason
 
-    # AMD hardware caps gridDim.y (and .x/.z) at 65535. The M-tile axis maps
+    # caps gridDim.y (and .x/.z) at 65535. The M-tile axis maps
     # to gridDim.y so reject specs whose grid would silently truncate and
     # leave output tiles unwritten.
     _AMD_MAX_GRID_DIM = 65535
