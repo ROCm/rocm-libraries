@@ -405,6 +405,8 @@ rocblas_status rocsolver_sygst_hegst_template(rocblas_handle handle,
 
         T t_one = 1;
 
+        rocblas_status istat = rocblas_status_success;
+
         auto const nb = xxGST_BLOCKSIZE;
         rocblas_stride const strideAsave = rocblas_stride(nb) * (nb - 1) / 2;
 
@@ -438,26 +440,23 @@ rocblas_status rocsolver_sygst_hegst_template(rocblas_handle handle,
                 // ----------------
                 rocblas_operation trans
                     = (is_lower) ? rocblas_operation_none : rocblas_operation_conjugate_transpose;
-                auto const istat = rocblasCall_trsm(handle, rocblas_side_left, uplo, trans,
-                                                    rocblas_diagonal_non_unit,
+                istat = rocblasCall_trsm(handle, rocblas_side_left, uplo, trans,
+                                         rocblas_diagonal_non_unit,
 
-                                                    n, n,
+                                         n, n,
 
-                                                    &t_one,
+                                         &t_one,
 
-                                                    B, shiftB, ldb, strideB,
+                                         B, shiftB, ldb, strideB,
 
-                                                    A, shiftA, lda, strideA,
+                                         A, shiftA, lda, strideA,
 
-                                                    batch_count,
+                                         batch_count,
 
-                                                    optim_mem, temp1, temp2, temp3, temp4);
-                if(istat != rocblas_status_success)
-                {
-                    return (istat);
-                };
+                                         optim_mem, temp1, temp2, temp3, temp4);
             }
 
+            if(istat == rocblas_status_success)
             {
                 // ----------------
                 // A <- A * inv(L')
@@ -467,25 +466,20 @@ rocblas_status rocsolver_sygst_hegst_template(rocblas_handle handle,
 
                 rocblas_operation const trans
                     = (is_lower) ? rocblas_operation_conjugate_transpose : rocblas_operation_none;
-                auto const istat = rocblasCall_trsm(handle, rocblas_side_right, uplo, trans,
-                                                    rocblas_diagonal_non_unit,
+                istat = rocblasCall_trsm(handle, rocblas_side_right, uplo, trans,
+                                         rocblas_diagonal_non_unit,
 
-                                                    n, n,
+                                         n, n,
 
-                                                    &t_one,
+                                         &t_one,
 
-                                                    B, shiftB, ldb, strideB,
+                                         B, shiftB, ldb, strideB,
 
-                                                    A, shiftA, lda, strideA,
+                                         A, shiftA, lda, strideA,
 
-                                                    batch_count,
+                                         batch_count,
 
-                                                    optim_mem, temp1, temp2, temp3, temp4);
-
-                if(istat != rocblas_status_success)
-                {
-                    return (istat);
-                };
+                                         optim_mem, temp1, temp2, temp3, temp4);
             }
         }
         else
@@ -506,22 +500,19 @@ rocblas_status rocsolver_sygst_hegst_template(rocblas_handle handle,
                 rocblas_operation const trans
                     = (is_lower) ? rocblas_operation_conjugate_transpose : rocblas_operation_none;
 
-                auto const istat = rocblasCall_trmm(handle, rocblas_side_left, uplo, trans,
-                                                    rocblas_diagonal_non_unit,
+                istat = rocblasCall_trmm(handle, rocblas_side_left, uplo, trans,
+                                         rocblas_diagonal_non_unit,
 
-                                                    n, n, &t_one, stride_alpha,
+                                         n, n, &t_one, stride_alpha,
 
-                                                    B, shiftB, ldb, strideB,
+                                         B, shiftB, ldb, strideB,
 
-                                                    A, shiftA, lda, strideA,
+                                         A, shiftA, lda, strideA,
 
-                                                    batch_count, (T**)temp4);
-                if(istat != rocblas_status_success)
-                {
-                    return (istat);
-                }
+                                         batch_count, (T**)temp4);
             }
 
+            if(istat == rocblas_status_success)
             {
                 // ----------
                 // A <- A * L
@@ -532,20 +523,16 @@ rocblas_status rocsolver_sygst_hegst_template(rocblas_handle handle,
                 rocblas_operation const trans
                     = (is_lower) ? rocblas_operation_none : rocblas_operation_conjugate_transpose;
 
-                auto const istat = rocblasCall_trmm(handle, rocblas_side_right, uplo, trans,
-                                                    rocblas_diagonal_non_unit,
+                istat = rocblasCall_trmm(handle, rocblas_side_right, uplo, trans,
+                                         rocblas_diagonal_non_unit,
 
-                                                    n, n, &t_one, stride_alpha,
+                                         n, n, &t_one, stride_alpha,
 
-                                                    B, shiftB, ldb, strideB,
+                                         B, shiftB, ldb, strideB,
 
-                                                    A, shiftA, lda, strideA,
+                                         A, shiftA, lda, strideA,
 
-                                                    batch_count, (T**)temp4);
-                if(istat != rocblas_status_success)
-                {
-                    return (istat);
-                }
+                                         batch_count, (T**)temp4);
             }
         }
 
@@ -565,7 +552,7 @@ rocblas_status rocsolver_sygst_hegst_template(rocblas_handle handle,
                           is_restore);
         }
 
-        return (rocblas_status_success);
+        return (istat);
     }; // end sygs2_hegs2_alt
 
     auto call_sygs2_hegs2
