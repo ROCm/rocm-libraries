@@ -6,9 +6,10 @@
 - Related: [RFC 0007 Engine Selection and Heuristics Framework](0007_EngineSelectionHeuristicsFramework.md)
 
 > **Draft note.** This is a first pass to frame the design and drive discussion, not a finished
-> spec. Sections marked **OPEN** carry decisions we still need to make. It is grounded in the LGBM
-> prototype on branch `users/jascampb/fmha-gen-sweep` and rocKE's current selection path, both
-> summarized in [Section 3](#3-prior-art-what-we-already-have).
+> spec. Sections marked **OPEN** carry decisions we still need to make. It is grounded in the existing
+> heuristic-generation tooling — a training-and-export pipeline any package author can run to produce a
+> heuristic for their own kernels — and rocKE's current selection path, both summarized in
+> [Section 3](#3-prior-art-what-we-already-have).
 
 ## Table of Contents
 
@@ -109,36 +110,39 @@ matcher and launch machinery ([RFC 0017 §5–6](0017_UniversalKernelDescriptor.
 
 ## 3. Prior Art: What We Already Have
 
-Two concrete systems anchor this design. The UHD is largely a **generalization of the LGBM prototype**
-onto the descriptor model.
+Two concrete systems anchor this design: the existing **heuristic-generation tooling** and rocKE's
+selection path. The UHD generalizes what that tooling already produces onto the descriptor model, so
+that **any package author can generate a heuristic for their own pack** with the same tools rather than
+hand-writing selection code.
 
-### 3.1 The LGBM prototype (`users/jascampb/fmha-gen-sweep`)
+### 3.1 The heuristic-generation tooling
 
-An end-to-end LightGBM kernel-selection pipeline for SDPA/FMHA forward already exists on that branch.
-Its shape informs almost every decision below:
+An end-to-end pipeline for turning benchmarks into a LightGBM kernel-selection model already exists as
+**reusable tooling** (training scripts, exporters, and a dispatcher path), first exercised on
+SDPA/FMHA forward. It is not a one-off: the same tools are meant to be run by any package author to
+produce a heuristic for their kernels. Its shape informs almost every decision below:
 
-- **Offline training** (Python, under `rocke/platform/python/rocke/heuristics/` and sibling gen
-  tools): `gen_sweep_data.py` produces a training parquet (problem × kernel × measured TFLOPS);
-  `train.py` fits a LightGBM regressor on `log1p(tflops)` with grouped CV.
-- **Inference is AOT-compiled to plain C**, not runtime-loaded. `lgbm_to_c.py` lowers a trained
-  booster to a dependency-free C function `rocke_score_<op>_<dtype>_<arch>_tflops(const double* f)`
-  that returns the (log-space, monotonic) score. There is **no runtime `liblightgbm` dependency** —
-  the model is statically linked into the provider.
-- **Model registry** keyed by `(op, arch, dtype)`: `gen_model_registry.py` emits
-  `rocke_model_registry.{c,h}` with `rocke_lookup_model(op, arch, dtype) -> RockeModelEntry*`.
-- **Feature contract is code-generated for bit-parity.** A 69-feature vector for FMHA
-  (batch, seqlen_q/k, head counts, head dims, tile sizes, warp count, hardware props). The featurizer
-  is generated (`gen_fmha_featurizer.py` → `FmhaFeatures.hpp` / `FmhaFeaturizer.hpp`) from a
-  `feature_spec.json` so the Python training features and the C++ inference features are identical; a
-  round-trip test gates drift.
-- **Selection** (`RockeClientDispatcher.cpp`, `selectForFmhaDispatch`): featurize the problem, look up
-  the model by `(op, arch, dtype)`, **score every satisfying candidate, argmax**, stable-order
-  tie-break, and **fall back to first-match** if there is no model or the feature count disagrees.
+- **Offline training.** A sweep step produces a training parquet (problem × kernel × measured TFLOPS);
+  a training step fits a LightGBM regressor on `log1p(tflops)` with grouped cross-validation.
+- **Inference was originally AOT-compiled to plain C** (an exporter lowers a trained booster to a
+  dependency-free C scoring function, statically linked into the provider). This gave zero runtime
+  dependency but is **not drop-in** — adding a model meant recompiling. This RFC replaces that shipping
+  path with model-as-data ([Section 8](#8-model-formats-and-the-adapter-seam)); the exporter survives
+  only as an optional build-time optimization.
+- **Model registry** keyed by `(op, arch, dtype)`, generated from the trained models, mapping a problem
+  to its scoring function.
+- **Feature contract is generated for bit-parity.** A fixed feature vector (problem dims, dtypes, tile
+  and warp constants, hardware props) is generated from one feature specification so the Python
+  training features and the C++ inference features are identical; a round-trip test gates drift.
+- **Selection** in the dispatcher: featurize the problem, look up the model, **score every satisfying
+  candidate, argmax**, stable-order tie-break, and **fall back to first-match** if there is no model or
+  the feature count disagrees.
 
-Two lessons carry directly into the UHD design: **(a)** a compiled-to-C model gives near-zero
-inference cost and zero runtime dependency, but is *not* drop-in (adding a model means recompiling);
-**(b)** the feature vector is the fragile contract, and code-generating it from one spec is what keeps
-training and inference honest.
+Two lessons carry directly into the UHD design: **(a)** shipping the model as data (not linked into the
+provider) is what makes a heuristic drop-in — the compiled-C path gave zero dependency but forced a
+recompile per model; **(b)** the feature vector is the fragile contract, and generating it from one
+specification is what keeps training and inference honest. The pipeline that produces all this is
+described in [Section 13](#13-model-generation-pipeline).
 
 ### 3.2 rocKE selection today
 
@@ -222,7 +226,7 @@ dependencies in [Section 8](#8-model-formats-and-the-adapter-seam)):
 | **`custom_library`** | A registry-resolved native scorer behind a small C API (escape hatch) | Whatever the library returns | `.so` with engine |
 
 `static_order` is the trivial baseline (and a safe default when no model ships). `tree_data` is the
-prototype's model generalized to ship-as-data. Adding a new ranker (a static list, ONNX, a new model
+tooling's model generalized to ship-as-data. Adding a new ranker (a static list, ONNX, a new model
 family) is **one more `adapter` value** — the single discriminant is what makes that additive.
 `custom_library` is the escape hatch, mirroring the native-predicate / custom-plan escape hatches in
 [RFC 0017](0017_UniversalKernelDescriptor.md#5-matching-and-the-umd): the descriptor carries only a
@@ -235,7 +239,7 @@ model is **per-engine** (owned by the UED), so there is no `(arch,dtype)→artif
 model entry — the single arch-aware model serves every pack that joins the engine. This is a change from
 the earlier per-arch / pack-supplied-entry draft, forced by the UED now owning the UHD.
 
-**OPEN — regressor vs. ranker.** The prototype trains a *regressor* on TFLOPS and argmaxes. A
+**OPEN — regressor vs. ranker.** The tooling trains a *regressor* on TFLOPS and argmaxes. A
 learning-to-rank objective (LambdaRank/NDCG) optimizes ordering directly and may pick better without
 needing calibrated absolute values. But a calibrated TFLOPS *regressor* is what makes
 [Section 11](#11-engine-selection-interplay-and-estimated-tflops) (surfacing estimated TFLOPS to
@@ -266,7 +270,7 @@ selection then:
    [RFC 0017 §5](0017_UniversalKernelDescriptor.md#5-matching-and-the-umd) already defines. Declaration
    order is never used.
 6. **Fail open to a safe default.** If no model loads, the feature contract mismatches, or the scorer
-   errors, selection degrades to `static_order` (priority + id). This mirrors the prototype's
+   errors, selection degrades to `static_order` (priority + id). This mirrors the tooling's
    first-match fallback and keeps a bad/absent model from breaking execution.
 
 The winner is a single UKD, which then dispatches through the pack's one UDD
@@ -368,12 +372,12 @@ real drift bug ([Section 13.2](#132-the-principle-one-source-of-truth-translate-
 ### 6.2 Derived features the heuristic needs
 
 Beyond the raw build-config fields, the model needs **derived features** — computed from
-`{problem dims, UKD metadata, device props}`, not stored anywhere. From the prototype's feature engine,
+`{problem dims, UKD metadata, device props}`, not stored anywhere. From the tooling's feature engine,
 the load-bearing ones are:
 
 - **Arithmetic / algorithmic intensity** (FLOPs ÷ bytes) — the single most important derived feature.
 - **Tile/wave quantization** — `num_tiles_*`, `total_output_tiles`, `tile_efficiency`
-  (problem-vs-grid remainder waste). In the GEMM prototype this family is as predictive as intensity.
+  (problem-vs-grid remainder waste). In the GEMM sweep this family is as predictive as intensity.
 - **Aspect ratios** — `M/N`, `M/K`, `N/K` (shape skew).
 - **Occupancy proxy** — `lds_usage_ratio` (and register pressure if available) → waves/CU.
 - **Padding-fit** — `needs_padding_*` / `has_padding_when_needed_*` (problem × kernel padding
@@ -403,7 +407,7 @@ variants. Enumerate the final set against real per-op sweeps before freezing
   data with the engine's descriptor set ([Section 4](#4-uhd-schema)). This *reverses* the earlier
   per-arch, pack-supplied-entry draft (and the "no table because the pack pins the arch" reasoning):
   with the UHD owned by the UED, there is one arch-aware model, not one per arch. **OPEN — scope of the
-  arch-aware model:** the prototype trained per-`(op, arch, dtype)`; consolidating to one model per
+  arch-aware model:** the tooling trained per-`(op, arch, dtype)`; consolidating to one model per
   engine assumes device features capture the cross-arch differences well enough. If they don't, an
   engine can be scoped more narrowly (a UED per arch/dtype) so its single UHD stays within one arch —
   decide against real cross-arch accuracy ([Section 13](#13-model-generation-pipeline)).
@@ -439,7 +443,7 @@ launch, *and* selection share one binding:
 ### 7.2 The `features_signature`
 
 The feature contract is the UHD's inline **`features_signature`** ([RFC 0017 §4](0017_UniversalKernelDescriptor.md#4-descriptor-formats),
-[Section 4](#4-uhd-schema)) — the prototype's `feature_spec.json` folded into the descriptor. It is an
+[Section 4](#4-uhd-schema)) — the tooling's `feature_spec.json` folded into the descriptor. It is an
 **ordered list of model inputs**, bound the same way a UDD's `args_signature` binds kernel arguments:
 each entry is either a **direct field** (a bare `$`-prefixed reference) or a **derived expression** over
 those fields, using the reworked [RFC 0017 §5–6](0017_UniversalKernelDescriptor.md#5-matching-and-the-umd)
@@ -474,7 +478,7 @@ need a few arithmetic ops the criteria interpreter does not yet include:
 
 | Op | Needed for |
 |---|---|
-| `log2` / `log` | log-scale sizes (`log2_M/N/K`) — the prototype's core scale-invariance features |
+| `log2` / `log` | log-scale sizes (`log2_M/N/K`) — the tooling's core scale-invariance features |
 | `/` (true division) | aspect ratios, intensity, efficiency ratios |
 | `min` / `max` | efficiency clamps, last-wave/tail quantization, roofline ridge comparisons |
 | `-` (subtraction) | remainders / padding-fit terms |
@@ -488,7 +492,7 @@ hatch ([Section 8](#8-model-formats-and-the-adapter-seam)) rather than growing t
 
 ### 7.3 Bit-parity between training and inference
 
-The prototype **code-generates** the C++ featurizer to guarantee the training and inference vectors are
+The tooling **code-generates** the C++ featurizer to guarantee the training and inference vectors are
 identical, and gates it with a round-trip test. We keep that principle but make the UHD's
 `features_signature` the single source of truth for **both** sides:
 
@@ -498,7 +502,7 @@ identical, and gates it with a round-trip test. We keep that principle but make 
 - **Training:** the same signature drives the Python featurizer, so the parquet columns match the
   runtime row by construction. A parity test (signature → both sides → assert identical on fixtures) stays.
 
-**A three-part, model-agnostic contract check** replaces the prototype's bare feature-count guard, and
+**A three-part, model-agnostic contract check** replaces the tooling's bare feature-count guard, and
 it generalizes to any ranker (LightGBM, ONNX, a custom scorer):
 
 0. **Signature → KMD** (schema-level, adapter-agnostic). Every `$kernel.*` field the `features_signature`
@@ -513,7 +517,7 @@ it generalizes to any ranker (LightGBM, ONNX, a custom scorer):
    every model adapter, because it fingerprints the *input contract*, not the model internals.
 2. **Feature-vector → model input** (adapter-specific). Each model adapter additionally verifies its
    artifact accepts the resolved vector: `tree_data` checks the tree table's feature count (the
-   prototype's guard), `onnx` checks the graph's input arity/shape equals `|features_signature|`, and so on.
+   tooling's guard), `onnx` checks the graph's input arity/shape equals `|features_signature|`, and so on.
 
 `features_hash` is **optional for feature-less adapters** (`static_order` has no vector to hash) and
 **advisory for a `custom_library` that self-features** (ignores the standard vector). For every adapter
@@ -543,7 +547,7 @@ already-shipped provider**, exactly like the packs' `hsaco`/`kpack` code objects
 **statically linking the model into the provider** as the *shipping* mechanism — the model must be
 loadable data the running provider reads, not a symbol compiled into the provider binary. (This core
 decision is unchanged by the UED now owning the UHD; only the *unit* the model ships with moved from the
-pack to the engine.) The reframe from the prototype: the problem was never "compiled," it was "linked
+pack to the engine.) The reframe: the problem was never "compiled," it was "linked
 into the provider." A model can still be *compiled* — it just has to ship as a loadable artifact, not
 bake in.
 
@@ -555,7 +559,7 @@ bake in.
 | **`liblightgbm` at runtime** | `lightgbm_native` | build-and-runtime | `liblightgbm` | Yes, if dep present (opt-in) |
 | **CSV / lookup table** | `table` | build-and-runtime | none | Yes |
 | **Static precedence** | `static_order` | built-in | none | Yes (always available) |
-| **LightGBM → C linked into provider** | `lgbm_to_c` (prototype) | **build-only** | none (static-linked) | **No** — not a shipping path |
+| **LightGBM → C linked into provider** | `lgbm_to_c` (original exporter) | **build-only** | none (static-linked) | **No** — not a shipping path |
 
 The two-tier resolution (mirrors [RFC 0017](0017_UniversalKernelDescriptor.md)'s data → escape-hatch →
 native ladder):
@@ -563,7 +567,7 @@ native ladder):
 - **Default — model as data (`tree_data`).** The provider ships one small, generic **GBDT tree-walker**;
   the engine ships the model as a **data artifact** (tree table: feature indices, thresholds, leaf
   values) that the walker reads, referenced by the UHD's `model.artifact`. GBDT trees (LightGBM/XGBoost)
-  are trivial to evaluate (~few hundred lines) and the prototype already dumps the model to a walkable
+  are trivial to evaluate (~few hundred lines) and the tooling already dumps the model to a walkable
   structure. Zero runtime dependency, fully standalone, verifier-gated. This is the hsaco-equivalent for
   heuristics. Limit: the provider must already support the model *family* (a new family = a provider change).
 - **Escape hatch — compiled scorer `.so` (`custom_library`).** For a model the in-tree walker does not
@@ -632,7 +636,7 @@ need. Three requirements:
   actually reaches kernel selection for that engine, not at provider startup or descriptor discovery
   (the UED itself loads eagerly per [RFC 0017 §3](0017_UniversalKernelDescriptor.md#3-how-it-works), but
   its model artifact stays lazy). A provider that never hits FMHA never parses the FMHA tree table. (The
-  prototype sidestepped this by compiling in; a data/`.so` adapter must be explicitly lazy —
+  compiled-in path sidestepped this; a data/`.so` adapter must be explicitly lazy —
   parse-on-first-use.)
 - **Cache the loaded model.** After first load, the parsed model / tree table / native handle is
   cached for the process (or per `hipdnnHandle`, matching the session-handle lifetime of
@@ -647,10 +651,10 @@ need. Three requirements:
 - **Minimize init overhead.** Feature extraction is a fixed walk over the spec; inference is a handful
   of tree evaluations per candidate. Keep the feature row and any scratch preallocated per session, as
   [RFC 0017 §6](0017_UniversalKernelDescriptor.md#6-dispatch-and-workspace) does for launch. Overhead
-  is validated against the compiled-C baseline (the prototype) in
+  is validated against the compiled-C baseline in
   [RFC 0017 §12.1](0017_UniversalKernelDescriptor.md#121-testing-and-performance).
 
-The compiled-C prototype is the **performance floor** for measurement (near-zero inference cost). The
+The compiled-C path is the **performance floor** for measurement (near-zero inference cost). The
 `tree_data` walker is expected to be close — a flat tree table over a preallocated feature row is a few
 hundred comparisons per candidate — but it is measured against that floor. If the gap is ever material
 for a hot in-tree op, that op may *additionally* be built via the `lgbm_to_c` optimization; but the
@@ -697,7 +701,7 @@ follow-up's problem statement now and reference it, but not block UHD v1 on it.
 
 **OPEN:** should v1 mandate calibrated TFLOPS (so the follow-up is pure plumbing), or allow
 monotonic-only scores initially (simpler models, but a later recalibration to enable engine-level
-comparison)? Recommend mandating calibrated regression targets from the start — the prototype already
+comparison)? Recommend mandating calibrated regression targets from the start — the tooling already
 trains on TFLOPS, so this is cheap insurance.
 
 ---
@@ -713,7 +717,7 @@ Because selection is data-driven, it must be inspectable, consistent with
 - **Model provenance:** which UHD and which model artifact (id, version, training provenance) served
   the decision, and whether it loaded or fell back to `static_order`.
 - **Feature-contract diagnostics:** a clear, single failure when the runtime feature count/spec
-  disagrees with the model (the prototype's num-features guard), naming the mismatch rather than
+  disagrees with the model (the tooling's num-features guard), naming the mismatch rather than
   silently mis-scoring.
 
 ---
@@ -739,7 +743,7 @@ A Prefect service already runs the stages we need:
 - **Stage C — evaluate**, **Stage D — commit** (DVC + git).
 
 Two gaps: it stops at model + metadata (**no UHD/KDP emitted**), and featurization is Python-only
-(`feature_engine.py`), so the runtime C++ side is a separate reimplementation — the drift the prototype
+(`feature_engine.py`), so the runtime C++ side is a separate reimplementation — the drift the tooling
 papered over with code-gen.
 
 ### 13.2 The principle: one source of truth, translate once
@@ -802,7 +806,7 @@ authoritative indefinitely? Recommend rocKE-authoritative until there's a reason
 
 ## 14. Phased Delivery
 
-Each phase is independently shippable and validated against the SDPA path and the prototype, using the
+Each phase is independently shippable and validated against the SDPA path and the reference tooling, using the
 parity and overhead checks of [RFC 0017 §12.1](0017_UniversalKernelDescriptor.md#121-testing-and-performance).
 The estimated-TFLOPS item (phase 7) is a co-owned [RFC 0007](0007_EngineSelectionHeuristicsFramework.md)
 follow-up.
@@ -811,7 +815,7 @@ follow-up.
    Every pack gets a working, model-free selector. Proves the KDP→UHD→child-UKD wiring end to end.
 2. **`features_signature` + generic extractor.** The UHD's inline signature and the single generic extractor
    over the shared field namespaces ([Section 7](#7-feature-extraction-and-binding)), with the
-   Python↔runtime parity test lifted from the prototype, plus the expression-op extension
+   Python↔runtime parity test lifted from the tooling, plus the expression-op extension
    ([Section 7.2](#72-the-features_signature)).
 3. **`tree_data` model-as-data + in-tree walker.** The default shipping path: LightGBM booster → the
    FlatBuffer tree table, evaluated by the in-tree GBDT walker; lands the real FMHA-fwd model as a
@@ -833,7 +837,7 @@ land only when a concrete need appears.
 
 ## 15. Risks
 
-- **Feature-contract drift.** The single largest risk, and the prototype's hardest-won lesson. One
+- **Feature-contract drift.** The single largest risk, and the tooling's hardest-won lesson. One
   versioned `features_signature` driving both sides via one generic extractor
   ([Section 13.2](#132-the-principle-one-source-of-truth-translate-once)), a parity test, and the
   three-part load-time check — signature⊆KMD, `features_hash` (signature → vector), and the adapter's
@@ -941,9 +945,9 @@ land only when a concrete need appears.
 - **`custom_library`:** the escape hatch — a compiled scorer `.so` (e.g. Treelite output) shipped with
   the engine, `dlopen`'d through a tiny C ABI; standalone, any model family, prebuilt-trust
   ([Section 8](#8-model-formats-and-the-adapter-seam)).
-- **`lgbm_to_c`:** the prototype's build-only path that lowers a LightGBM booster to C linked **into the
+- **`lgbm_to_c`:** the tooling's build-only path that lowers a LightGBM booster to C linked **into the
   provider**. Kept only as an in-tree AOT perf optimization — **not** a drop-in shipping mechanism
-  ([Section 3.1](#31-the-lgbm-prototype-usersjascampbfmha-gen-sweep)).
+  ([Section 3.1](#31-the-heuristic-generation-tooling)).
 - **Stage P (package):** the pipeline stage that emits the engine descriptor set (UED/UHD/KMD +
   tree-table) and its KDP(s) from the same sweep that trained the model, enforcing the feature and
   kernel-identity contracts
