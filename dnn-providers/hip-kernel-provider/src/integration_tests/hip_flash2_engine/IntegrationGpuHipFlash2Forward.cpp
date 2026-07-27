@@ -1,4 +1,4 @@
-// Copyright ?? Advanced Micro Devices, Inc., or its affiliates.
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 //
 // Integration tests for HipFlash2Engine -- FP16 Flash-Attention 2 SDPA.
