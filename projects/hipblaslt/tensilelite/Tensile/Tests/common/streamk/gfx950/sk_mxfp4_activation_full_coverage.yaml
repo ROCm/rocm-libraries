@@ -62,7 +62,7 @@ BenchmarkProblems:
         - ScheduleIterAlg: [3]
         - SourceSwap: [false]
         - DirectToLds: [1]
-        - StreamK: [1, 2, 3]
+        - StreamK: [3, 4, 5]
         - StaggerU: [0]
         - WavefrontSize: [64]
         - WorkGroupMapping: [1]

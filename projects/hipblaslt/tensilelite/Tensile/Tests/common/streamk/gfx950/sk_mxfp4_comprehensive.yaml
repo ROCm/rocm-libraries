@@ -58,7 +58,7 @@ BenchmarkProblems:
         - ScheduleIterAlg: [3]
         - SourceSwap: [false]
         - DirectToLds: [1]
-        - StreamK: [2, 3]
+        - StreamK: [3, 4, 5]
         - StreamKAtomic: [0, 1]
         - StreamKFixupTreeReduction: [0, 1]
         - StreamKXCCMapping: [0, 4]
