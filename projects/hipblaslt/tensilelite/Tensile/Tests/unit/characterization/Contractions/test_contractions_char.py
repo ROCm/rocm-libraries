@@ -118,11 +118,13 @@ def _cluster_iter_pred(preds):
 
 
 def test_cluster_reduction_iter_check_emitted(problem_type, solution_state):
+    # Reduction is the Ck = ClusterDim[1] > 1 axis, so a pure-reduction [1, C]
+    # cluster (Ck=4) is what emits the guard; [4, 1] (Ck=1) does not.
     preds = _preds_for(solution_state, problem_type,
-                       StreamKClusterReduction=1, ClusterDim=[4, 1], DepthU=256)
+                       StreamKClusterReduction=1, ClusterDim=[1, 4], DepthU=256)
     p = _cluster_iter_pred(preds)
     assert p is not None, "cluster-reduction solution must emit ClusterReductionIterCheck"
-    # value = [DepthU, C] so the host can compute itersPerTile % C.
+    # value = [DepthU, Ck] so the host can compute itersPerTile % Ck.
     assert p.value == [256, 4]
 
 
