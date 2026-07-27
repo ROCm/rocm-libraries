@@ -458,3 +458,223 @@ BQUANT_DTYPE_MAP = {
     "float":   "float",
     "e8m0":    "ck_tile::e8m0_t",
 }
+
+
+# ============================================================================
+# BQuant (block_scale_gemm) kernel naming
+# Distinct from make_bquant_kernel_name above (which uses "grouped_gemm_bquant" prefix).
+# This produces "gemm_bquant_*" names matching the block_scale_gemm tile engine operator.
+# ============================================================================
+
+def make_gemm_bquant_kernel_name(
+    variant_key: str,
+    layout: str,
+    pipeline: str,
+    epilogue: str,
+    scheduler: str,
+    tile_m: int, tile_n: int, tile_k: int,
+    warp_m: int, warp_n: int, warp_k: int,
+    warp_tile_m: int, warp_tile_n: int, warp_tile_k: int,
+    preshuffle_bquant: bool = False,
+) -> str:
+    """Return the canonical gemm_bquant kernel name (block_scale_gemm operator).
+
+    Format mirrors the base gemm_instance_builder's _format_kernel_name for gemm_bquant:
+      gemm_bquant_{dtype}_{layout}_{pipeline}_{epilogue}_{scheduler}_
+      {PadM}_{PadN}_{PadK}_{BPreshuffleQuant}_{tile}
+
+    The 7th trait slot for gemm_bquant is b_preshuffle_quant.
+    Default pad values: PadM=False, PadN=False, PadK=True (from GemmConfigBase).
+    No qg suffix — gemm_bquant uses the base _format_kernel_name which does not include it.
+    """
+    parts = [
+        "gemm_bquant",
+        variant_key,
+        layout,
+        pipeline,
+        epilogue,
+        scheduler,
+        "False",     # PadM default
+        "False",     # PadN default
+        "True",      # PadK default
+        str(preshuffle_bquant).capitalize(),   # b_preshuffle_quant (7th slot)
+        f"{tile_m}x{tile_n}x{tile_k}",
+        f"{warp_m}x{warp_n}x{warp_k}",
+        f"{warp_tile_m}x{warp_tile_n}x{warp_tile_k}",
+    ]
+    return "_".join(parts)
+
+
+# ============================================================================
+# AQuant kernel naming
+# ============================================================================
+
+def aquant_effective_epilogue(
+    tile_n: int,
+    warp_n: int,
+    warp_tile_n: int,
+) -> str:
+    """Return "cshuffle" — AQuant kernels always use CShuffleEpilogue.
+
+    GemmConfigQuantDecode has TiledMMAPermuteN=false (from GemmConfigBase),
+    so run_gemm_quant_example.inc always selects CShuffleEpilogue for AQuant.
+    This helper exists for symmetry with bquant_effective_epilogue.
+    """
+    return "cshuffle"
+
+
+def make_aquant_kernel_name(
+    variant_key: str,
+    layout: str,
+    pipeline: str,
+    epilogue: str,  # ignored — AQuant always uses cshuffle
+    scheduler: str,
+    tile_m: int, tile_n: int, tile_k: int,
+    warp_m: int, warp_n: int, warp_k: int,
+    warp_tile_m: int, warp_tile_n: int, warp_tile_k: int,
+    quant_group_k: int = 128,
+    preshuffle_quant: bool = False,
+) -> str:
+    """Return the canonical AQuant kernel name used as KERNEL_NAME in generated headers.
+
+    Format mirrors the base gemm_instance_builder's _format_kernel_name for gemm_aquant:
+      gemm_aquant_{dtype}_{layout}_{pipeline}_{epilogue}_{scheduler}_
+      {PadM}_{PadN}_{PadK}_{APreshuffle}_{tile}
+
+    Default pad values: PadM=False, PadN=False, PadK=True (from GemmConfigBase).
+    APreshuffle = preshuffle_quant (the 7th trait slot).
+    """
+    parts = [
+        "gemm_aquant",
+        variant_key,
+        layout,
+        pipeline,
+        "cshuffle",  # always cshuffle for aquant
+        scheduler,
+        "False",     # PadM default
+        "False",     # PadN default
+        "True",      # PadK default
+        str(preshuffle_quant).capitalize(),
+        f"{tile_m}x{tile_n}x{tile_k}",
+        f"{warp_m}x{warp_n}x{warp_k}",
+        f"{warp_tile_m}x{warp_tile_n}x{warp_tile_k}",
+    ]
+    return "_".join(parts)
+
+
+# ============================================================================
+# ABQuant kernel naming
+# ============================================================================
+
+def make_abquant_kernel_name(
+    variant_key: str,
+    layout: str,
+    pipeline: str,
+    epilogue: str,
+    scheduler: str,
+    tile_m: int, tile_n: int, tile_k: int,
+    warp_m: int, warp_n: int, warp_k: int,
+    warp_tile_m: int, warp_tile_n: int, warp_tile_k: int,
+    quant_group_k: int = 128,
+    quant_group_n: int = 1,
+    preshuffle_b: bool = False,
+    preshuffle_quant: bool = False,
+) -> str:
+    """Return the canonical ABQuant kernel name used as KERNEL_NAME in generated headers.
+
+    Format mirrors the tile engine's gemm_abquant_instance_builder kernel naming.
+    """
+    parts = [
+        "gemm_abquant",
+        variant_key,
+        layout,
+        pipeline,
+        "cshuffle",
+        scheduler,
+        "False",     # PadM default
+        "False",     # PadN default
+        "True",      # PadK default
+        str(preshuffle_b).capitalize(),
+        str(preshuffle_quant).capitalize(),
+        f"gsn{quant_group_n}",  # always included, even for gsn1
+        f"{tile_m}x{tile_n}x{tile_k}",
+        f"{warp_m}x{warp_n}x{warp_k}",
+        f"{warp_tile_m}x{warp_tile_n}x{warp_tile_k}",
+    ]
+    return "_".join(parts)
+
+
+# ============================================================================
+# RowColQuant kernel naming
+# ============================================================================
+
+def make_rowcolquant_kernel_name(
+    variant_key: str,
+    layout: str,
+    pipeline: str,
+    epilogue: str,  # ignored — always cshuffle
+    scheduler: str,
+    tile_m: int, tile_n: int, tile_k: int,
+    warp_m: int, warp_n: int, warp_k: int,
+    warp_tile_m: int, warp_tile_n: int, warp_tile_k: int,
+    persistent: bool = False,
+) -> str:
+    """Return the canonical RowColQuant kernel name.
+
+    Format mirrors gemm_instance_builder for gemm_rowcolquant (persistent slot but
+    gemm_rowcolquant forces it False via _generate_trait_combinations).
+    """
+    parts = [
+        "gemm_rowcolquant",
+        variant_key,
+        layout,
+        pipeline,
+        "cshuffle",
+        scheduler,
+        "False",   # PadM
+        "False",   # PadN
+        "True",    # PadK
+        str(persistent).capitalize(),
+        f"{tile_m}x{tile_n}x{tile_k}",
+        f"{warp_m}x{warp_n}x{warp_k}",
+        f"{warp_tile_m}x{warp_tile_n}x{warp_tile_k}",
+    ]
+    return "_".join(parts)
+
+
+# ============================================================================
+# TensorQuant kernel naming
+# ============================================================================
+
+def make_tensorquant_kernel_name(
+    variant_key: str,
+    layout: str,
+    pipeline: str,
+    epilogue: str,  # ignored — always cshuffle
+    scheduler: str,
+    tile_m: int, tile_n: int, tile_k: int,
+    warp_m: int, warp_n: int, warp_k: int,
+    warp_tile_m: int, warp_tile_n: int, warp_tile_k: int,
+) -> str:
+    """Return the canonical TensorQuant kernel name.
+
+    Format mirrors gemm_instance_builder for gemm_tensor_quant. The persistent slot
+    is always False — tensorquant_instance_builder raises ValueError for persistent=True,
+    but the base _uses_persistent_trait() still includes it in the name.
+    """
+    parts = [
+        "gemm_tensor_quant",
+        variant_key,
+        layout,
+        pipeline,
+        "cshuffle",
+        scheduler,
+        "False",   # PadM
+        "False",   # PadN
+        "True",    # PadK
+        "False",   # persistent (always False for tensorquant)
+        f"{tile_m}x{tile_n}x{tile_k}",
+        f"{warp_m}x{warp_n}x{warp_k}",
+        f"{warp_tile_m}x{warp_tile_n}x{warp_tile_k}",
+    ]
+    return "_".join(parts)
