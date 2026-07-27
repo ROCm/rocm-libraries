@@ -173,7 +173,7 @@ jobs:
     needs: [therock-build-linux]
     # TODO(TheRock#3288): Re-enable gfx950-dcgpu runners once we get more capacity
     # TODO(mi450-pool): Remove gfx125X exclusion once mi450 test runners are provisioned
-    if: ${{ inputs.test_runs_on != '' && inputs.amdgpu_families != 'gfx950-dcgpu' && inputs.amdgpu_families != 'gfx125X' }}
+    if: ${{ inputs.amdgpu_families != 'gfx950-dcgpu' && inputs.amdgpu_families != 'gfx125X' }}
     uses: ./.github/workflows/therock-test-packages.yml
     with:
       therock_ref: ${{ inputs.therock_ref }}
@@ -192,7 +192,7 @@ jobs:
     # The matrix boolean records that projects/hipblaslt selected this row. The
     # `tensilelite` token confirms that this is the hipBLASLt library row, not a
     # provider row containing a name such as `hipblasltprovider`.
-    if: ${{ inputs.run_rocjitsu_race_check && inputs.build_runs_on != '' && (startsWith(inputs.amdgpu_families, 'gfx94') || startsWith(inputs.amdgpu_families, 'gfx950') || inputs.amdgpu_families == 'gfx1151') && contains(inputs.projects_to_test, 'tensilelite') }}
+    if: ${{ inputs.run_rocjitsu_race_check && inputs.build_runs_on != '' && (startsWith(inputs.amdgpu_families, 'gfx94') || startsWith(inputs.amdgpu_families, 'gfx950')) && contains(inputs.projects_to_test, 'tensilelite') }}
     uses: ./.github/workflows/therock-rocjitsu-race-check-linux.yml
     with:
       therock_ref: ${{ inputs.therock_ref }}

@@ -126,7 +126,7 @@ jobs:
       - name: Fetch Linux targets for build and test
         env:
           THEROCK_PACKAGE_PLATFORM: "linux"
-          AMDGPU_FAMILIES: ${{ inputs.linux_amdgpu_families || 'gfx94X, gfx950, gfx1151, gfx125X' }}
+          AMDGPU_FAMILIES: ${{ inputs.linux_amdgpu_families || 'gfx94X, gfx950, gfx125X' }}
           CI_CONFIG_PATH: ci-config
         id: configure_linux
         run: python ./TheRock/build_tools/github_actions/fetch_package_targets.py
@@ -164,11 +164,7 @@ jobs:
       test_type: ${{ needs.setup.outputs.test_type }}
       run_rocjitsu_race_check: ${{ matrix.projects.run_rocjitsu_race_check }}
       amdgpu_families: ${{ matrix.target_bundle.amdgpu_family }}
-      # Default presubmit runs build gfx1151 artifacts for the CPU-emulated
-      # rocjitsu sidecar without consuming a gfx1151 package-test runner.
-      # A workflow dispatch that explicitly names target families keeps normal
-      # package testing enabled, including when gfx1151 was requested.
-      test_runs_on: ${{ (inputs.linux_amdgpu_families != '' || matrix.target_bundle.amdgpu_family != 'gfx1151') && matrix.target_bundle.test_machine || '' }}
+      test_runs_on: ${{ matrix.target_bundle.test_machine }}
       build_runs_on: ${{ needs.setup.outputs.linux_build_runs_on }}
 
   therock-ci-windows:
