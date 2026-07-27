@@ -47,7 +47,7 @@ macro(_hipdnn_restore_rocm_toolchain_checks)
 endmacro()
 
 # Dependencies where the local version should be used, if available
-set(_hipdnn_all_local_deps GTest flatbuffers spdlog nlohmann_json nanobind tsl-robin-map)
+set(_hipdnn_all_local_deps GTest flatbuffers spdlog nlohmann_json)
 # Dependencies where we never look for a local version
 set(_hipdnn_all_remote_deps)
 
@@ -205,6 +205,7 @@ function(_fetch_flatbuffers VERSION HASH)
         flatbuffers
         GIT_REPOSITORY https://github.com/google/flatbuffers.git
         GIT_TAG ${GIT_TAG}
+        GIT_SHALLOW TRUE
         DOWNLOAD_EXTRACT_TIMESTAMP
         TRUE
     )
@@ -229,6 +230,7 @@ function(_fetch_spdlog VERSION HASH)
         spdlog
         GIT_REPOSITORY https://github.com/gabime/spdlog.git
         GIT_TAG ${GIT_TAG}
+        GIT_SHALLOW TRUE
         DOWNLOAD_EXTRACT_TIMESTAMP
         TRUE
     )
@@ -264,37 +266,6 @@ function(_fetch_nlohmann_json VERSION HASH)
 
 endfunction()
 
-# Fetches tsl-robin-map
-function(_fetch_tsl-robin-map VERSION HASH)
-    fetchcontent_declare(
-        tsl-robin-map
-        GIT_REPOSITORY https://github.com/Tessil/robin-map.git
-        GIT_TAG v${VERSION}
-        DOWNLOAD_EXTRACT_TIMESTAMP TRUE
-    )
-
-    fetchcontent_makeavailable(tsl-robin-map)
-
-    _exclude_from_all(${tsl-robin-map_SOURCE_DIR})
-    _mark_targets_as_system(${tsl-robin-map_SOURCE_DIR})
-endfunction()
-
-# Fetches nanobind
-function(_fetch_nanobind VERSION HASH)
-    set(NB_USE_SUBMODULE_DEPS OFF)
-
-    fetchcontent_declare(
-        nanobind
-        GIT_REPOSITORY https://github.com/wjakob/nanobind.git
-        GIT_TAG v${VERSION}
-        DOWNLOAD_EXTRACT_TIMESTAMP TRUE
-    )
-
-    fetchcontent_makeavailable(nanobind)
-
-    _exclude_from_all(${nanobind_SOURCE_DIR})
-    _mark_targets_as_system(${nanobind_SOURCE_DIR})
-endfunction()
 
 # Utility functions, pulled from rocroller repo
 #

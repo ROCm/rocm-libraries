@@ -55,6 +55,10 @@ size_t             random_seed;
 std::random_device default_seed_dev;
 // Overall probability of running conventional tests
 double test_prob;
+// Probability of running tests from the emulation/simulation suite
+double emulation_prob;
+// Probability of running unit tests
+double unittest_prob;
 // Modifier for probability of running tests with complex interleaved data
 double complex_interleaved_prob_factor;
 // Modifier for probability of running tests with real data
@@ -329,6 +333,20 @@ int main(int argc, char* argv[])
                    "Probability of running individual tests (excluding non-minimal hipfftw tests)")
         ->default_val(1.0)
         ->check(CLI::Range(0.0, 1.0));
+    app.add_option("--unittest_prob", unittest_prob, "Probability of running individual unit tests")
+        ->default_val(1.0)
+        ->check(CLI::Range(0.0, 1.0));
+    app.add_option("--R", ramgb_limit, "RAM limit in GiB for tests")
+        ->default_val(system_memory::singleton().get_total_gbytes());
+    app.add_option("--V", vramgb_limit, "VRAM limit in GiB for tests (per device)")
+        ->default_val(DivRoundingUp(
+            device_memory_accountant::singleton().get_max_total_mem_on_devices(), ONE_GiB));
+    app.add_option("--emulation_prob,--simulation_prob",
+                   emulation_prob,
+                   "Probability of running individual emulation/simulation tests (disabled by "
+                   "default to alleviate redundancy with rocfft-test)")
+        ->default_val(0.0)
+        ->check(CLI::Range(0.0, 1.0));
     app.add_option("--real_prob",
                    real_prob_factor,
                    "Probability multiplier for running individual real/complex transforms")
@@ -350,6 +368,59 @@ int main(int argc, char* argv[])
                    "Probability multiplier for running individual callback transforms")
         ->default_val(0.0)
         ->check(CLI::NonNegativeNumber);
+    constexpr auto emulation_quick      = "quick";
+    constexpr auto emulation_smoke      = "smoke";
+    constexpr auto emulation_regression = "regression";
+    constexpr auto emulation_extended   = "extended";
+    app.add_option("--emulation,--simulation",
+                   "Run emulation/simulation tests only (targeted scopes)")
+        ->check(CLI::IsMember(
+            {emulation_quick, emulation_smoke, emulation_regression, emulation_extended}))
+        ->expected(1)
+        ->excludes("--test_prob", "--emulation_prob", "--unittest_prob", "--callback_prob", "--R")
+        ->each([&](const std::string& emulationtype) {
+            // Emulation test suites focus on well-established software paths.
+
+            // Run all of the emulation tests:
+            emulation_prob = 1.0;
+
+            // Callbacks are not an emulation test target.
+            callback_prob_factor = 0;
+
+            if(emulationtype == emulation_quick)
+            {
+                // Configuration specific for "quick simulation test" category, the whole test run
+                // should complete under 2 hours in the simulation environment (configuration parameters
+                // based on observations)
+                vramgb_limit   = 2;
+                emulation_prob = 0.002;
+                test_prob      = 0;
+                unittest_prob  = 0;
+            }
+            else if(emulationtype == emulation_smoke)
+            {
+                vramgb_limit   = 2;
+                emulation_prob = 0.005;
+                test_prob      = 0;
+                unittest_prob  = 0;
+            }
+            else if(emulationtype == emulation_regression)
+            {
+                vramgb_limit   = 16;
+                emulation_prob = 1;
+                test_prob      = 0.01;
+                unittest_prob  = 0.01;
+            }
+            else
+            {
+                // emulationtype == emulation_extended given CLI11's check above
+                assert((emulationtype == emulation_extended));
+                emulation_prob = 1;
+                test_prob      = 0.02;
+                unittest_prob  = 0.02;
+            }
+        });
+
     app.add_option("--max_hipfftw_test_len",
                    max_length_for_hipfftw_test,
                    "Maximum length to be considered in hipfftw tests")
@@ -422,10 +493,9 @@ int main(int argc, char* argv[])
     auto* non_token = app.add_option_group("Token Conflict", "Options excluded by --token");
     non_token->excludes(opt_token);
     // Declare the supported options. Some option pointers are declared to track passed opts.
-    non_token
-        ->add_flag(
-            "--callback", manual_params.run_callbacks, "Inject load/store callbacks: none, funcptr")
-        ->default_val("none");
+    non_token->add_option("--callback", manual_params.run_callbacks, "Inject load/store callbacks.")
+        ->default_val("none")
+        ->check(CLI::IsMember({"none", "funcptr", "jit"}));
     non_token
         ->add_option("--auto_allocation",
                      manual_params.auto_allocate,
@@ -486,11 +556,6 @@ int main(int argc, char* argv[])
     const auto* opt_version = app.add_flag(
         "--version",
         "Print queryable version information from the hipfft library's backend (and return)");
-    app.add_option("--R", ramgb_limit, "RAM limit in GiB for tests")
-        ->default_val(system_memory::singleton().get_total_gbytes());
-    app.add_option("--V", vramgb_limit, "VRAM limit in GiB for tests (per device)")
-        ->default_val(DivRoundingUp(
-            device_memory_accountant::singleton().get_max_total_mem_on_devices(), ONE_GiB));
     app.add_option("--half_epsilon", half_epsilon)->default_val(9.77e-4);
     app.add_option("--single_epsilon", single_epsilon)->default_val(3.75e-5);
     app.add_option("--double_epsilon", double_epsilon)->default_val(1e-15);

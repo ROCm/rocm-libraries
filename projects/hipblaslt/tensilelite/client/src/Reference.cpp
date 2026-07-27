@@ -35,6 +35,7 @@
 #include <cstddef>
 #include <iostream>
 #include <omp.h>
+#include <type_traits>
 
 #define MAX_OMP_THREADS 64
 #if defined(_MSC_VER)
@@ -49,15 +50,16 @@ namespace TensileLite
     namespace
     {
 
-        // Helper to load data from various source types into a float buffer.
-        template <typename SrcType>
-        std::vector<float> loadToFloat(void const* src, size_t N)
+        // Helper to load data from various source types into an AccumT buffer.
+        // Sub-float types go through float first since they lack operator AccumT().
+        template <typename AccumT, typename SrcType>
+        std::vector<AccumT> loadTo(void const* src, size_t N)
         {
-            std::vector<float> buffer(N);
-            const SrcType*     sPtr = static_cast<const SrcType*>(src);
+            std::vector<AccumT> buffer(N);
+            const SrcType*      sPtr = static_cast<const SrcType*>(src);
             for(size_t i = 0; i < N; ++i)
             {
-                buffer[i] = static_cast<float>(sPtr[i]);
+                buffer[i] = static_cast<AccumT>(static_cast<float>(sPtr[i]));
             }
             return buffer;
         }
@@ -69,14 +71,15 @@ namespace TensileLite
             return (elementCount + packing - 1) / packing;
         }
 
-        std::vector<float> loadPackedFloat4ToFloat(void const* src, size_t elementCount)
+        template <typename AccumT>
+        std::vector<AccumT> loadPackedFloat4To(void const* src, size_t elementCount)
         {
             constexpr size_t packing = TypeInfo<Float4x2>::Packing;
             static_assert(packing == 2, "FP4 fast reference expects Float4x2 storage.");
 
-            std::vector<float> buffer(elementCount);
-            auto const*        words     = static_cast<Float4x2 const*>(src);
-            const size_t       wordCount = float4x2WordCount(elementCount);
+            std::vector<AccumT> buffer(elementCount);
+            auto const*         words     = static_cast<Float4x2 const*>(src);
+            const size_t        wordCount = float4x2WordCount(elementCount);
 
             for(size_t word = 0; word < wordCount; ++word)
             {
@@ -84,17 +87,16 @@ namespace TensileLite
                 auto         v    = __amd_cvt_fp4x2_to_floatx2_scale(
                     words[word].data, __AMD_OCP_E2M1, 0);
 
-                buffer[elem] = v.x;
+                buffer[elem] = static_cast<AccumT>(v.x);
                 if(elem + 1 < elementCount)
-                    buffer[elem + 1] = v.y;
+                    buffer[elem + 1] = static_cast<AccumT>(v.y);
             }
             return buffer;
         }
 #endif
 
-        // Helper to store data from a float buffer into various destination types.
-        template <typename DstType>
-        void storeFromFloat(void* dst, const std::vector<float>& buffer, size_t N)
+        template <typename AccumT, typename DstType>
+        void storeFrom(void* dst, const std::vector<AccumT>& buffer, size_t N)
         {
             DstType* dPtr = static_cast<DstType*>(dst);
             for(size_t i = 0; i < N; ++i)
@@ -138,31 +140,37 @@ namespace TensileLite
         // Half storage, F8 MFMA input). Without this, the fast path keeps
         // full storage precision and disagrees with both the slow path and
         // the GPU kernel.
-        inline void quantizeThroughComputeInputType(std::vector<float>& buf,
-                                                    rocisa::DataType    computeInputType)
+        template <typename AccumT>
+        inline void quantizeThroughComputeInputType(std::vector<AccumT>& buf,
+                                                    rocisa::DataType     computeInputType)
         {
+            auto roundThrough = [&](auto narrowTag) {
+                using NarrowT = decltype(narrowTag);
+                for(auto& v : buf)
+                    v = static_cast<AccumT>(static_cast<NarrowT>(v));
+            };
             switch(computeInputType)
             {
             case rocisa::DataType::Float:
                 return;
             case rocisa::DataType::Half:
-                for(auto& v : buf) v = static_cast<float>(static_cast<TensileLite::Half>(v));
+                roundThrough(TensileLite::Half{});
                 return;
             case rocisa::DataType::BFloat16:
-                for(auto& v : buf) v = static_cast<float>(static_cast<TensileLite::BFloat16>(v));
+                roundThrough(TensileLite::BFloat16{});
                 return;
 #ifdef TENSILE_USE_FP8_BF8
             case rocisa::DataType::Float8:
-                for(auto& v : buf) v = static_cast<float>(static_cast<TensileLite::Float8>(v));
+                roundThrough(TensileLite::Float8{});
                 return;
             case rocisa::DataType::BFloat8:
-                for(auto& v : buf) v = static_cast<float>(static_cast<TensileLite::BFloat8>(v));
+                roundThrough(TensileLite::BFloat8{});
                 return;
             case rocisa::DataType::Float8_fnuz:
-                for(auto& v : buf) v = static_cast<float>(static_cast<TensileLite::Float8_fnuz>(v));
+                roundThrough(TensileLite::Float8_fnuz{});
                 return;
             case rocisa::DataType::BFloat8_fnuz:
-                for(auto& v : buf) v = static_cast<float>(static_cast<TensileLite::BFloat8_fnuz>(v));
+                roundThrough(TensileLite::BFloat8_fnuz{});
                 return;
 #endif
             default:
@@ -171,17 +179,18 @@ namespace TensileLite
             }
         }
 
-        // Helper class that wraps a shadow copy of input buffers in float format.
+        // Helper class that wraps a shadow copy of input buffers in AccumT format.
         // It quietly manages the indirection between directly using the input pointer
-        // (for float) and a shadow copy (for half / bfloat16).
+        // (when the source type matches AccumT) and a shadow copy (for other types).
         //
         // When `computeInputType` is set and is narrower than `type`, each element
         // is additionally rounded through `computeInputType` to mirror what the
         // GPU MFMA / slow-path validator do (see quantizeThroughComputeInputType).
+        template <typename AccumT = float>
         class ShadowBuffer
         {
-            std::vector<float> m_storage;
-            const float*       m_ptr = nullptr;
+            std::vector<AccumT> m_storage;
+            const AccumT*       m_ptr = nullptr;
 
         public:
             ShadowBuffer() = default;
@@ -196,44 +205,60 @@ namespace TensileLite
                 }
                 else if(type == rocisa::DataType::Float)
                 {
-                    m_ptr = static_cast<const float*>(ptr);
+                    if constexpr(std::is_same_v<AccumT, float>)
+                        m_ptr = static_cast<const float*>(ptr);
+                    else
+                    {
+                        m_storage = loadTo<AccumT, float>(ptr, N);
+                        m_ptr     = m_storage.data();
+                    }
+                }
+                else if(type == rocisa::DataType::Double)
+                {
+                    if constexpr(std::is_same_v<AccumT, double>)
+                        m_ptr = static_cast<const double*>(ptr);
+                    else
+                    {
+                        m_storage = loadTo<AccumT, double>(ptr, N);
+                        m_ptr     = m_storage.data();
+                    }
                 }
                 else if(type == rocisa::DataType::Half)
                 {
-                    m_storage = loadToFloat<TensileLite::Half>(ptr, N);
+                    m_storage = loadTo<AccumT, TensileLite::Half>(ptr, N);
                     m_ptr     = m_storage.data();
                 }
                 else if(type == rocisa::DataType::BFloat16)
                 {
-                    m_storage = loadToFloat<TensileLite::BFloat16>(ptr, N);
+                    m_storage = loadTo<AccumT, TensileLite::BFloat16>(ptr, N);
                     m_ptr     = m_storage.data();
                 }
 #ifdef TENSILE_USE_FP8_BF8
                 else if(type == rocisa::DataType::Float8)
                 {
-                    m_storage = loadToFloat<TensileLite::Float8>(ptr, N);
+                    m_storage = loadTo<AccumT, TensileLite::Float8>(ptr, N);
                     m_ptr     = m_storage.data();
                 }
                 else if(type == rocisa::DataType::BFloat8)
                 {
-                    m_storage = loadToFloat<TensileLite::BFloat8>(ptr, N);
+                    m_storage = loadTo<AccumT, TensileLite::BFloat8>(ptr, N);
                     m_ptr     = m_storage.data();
                 }
                 else if(type == rocisa::DataType::Float8_fnuz)
                 {
-                    m_storage = loadToFloat<TensileLite::Float8_fnuz>(ptr, N);
+                    m_storage = loadTo<AccumT, TensileLite::Float8_fnuz>(ptr, N);
                     m_ptr     = m_storage.data();
                 }
                 else if(type == rocisa::DataType::BFloat8_fnuz)
                 {
-                    m_storage = loadToFloat<TensileLite::BFloat8_fnuz>(ptr, N);
+                    m_storage = loadTo<AccumT, TensileLite::BFloat8_fnuz>(ptr, N);
                     m_ptr     = m_storage.data();
                 }
 #endif
 #ifndef _WIN32
                 else if(type == rocisa::DataType::Float4)
                 {
-                    m_storage = loadPackedFloat4ToFloat(ptr, N);
+                    m_storage = loadPackedFloat4To<AccumT>(ptr, N);
                     m_ptr     = m_storage.data();
                 }
 #endif
@@ -256,7 +281,7 @@ namespace TensileLite
                 }
             }
 
-            const float* data() const
+            const AccumT* data() const
             {
                 return m_ptr;
             }
@@ -267,7 +292,7 @@ namespace TensileLite
             }
 
             // Array access convenience
-            float operator[](size_t idx) const
+            AccumT operator[](size_t idx) const
             {
                 return m_ptr[idx];
             }
@@ -1129,10 +1154,6 @@ namespace TensileLite
         bool isFastPathEligible(ContractionProblemGemm const& problem)
         {
 
-            // For more precise numerical correctness with XFloat32, skip this fast path.
-            // If we knew at this point that the data was initialized as whole number floats,
-            // we could continue down this fast path, because there would be no rounding
-            // errors incurred by f32 accumulation. But we do not.
             auto rejectFast = [](const char* reason) {
                 if (false) {  // Re-enable when testing to find reason.
                     std::clog << "FAST_PATH_REJECT: " << reason << std::endl;
@@ -1140,14 +1161,9 @@ namespace TensileLite
                 return false;
             };
 
-            if(problem.f32XdlMathOp() == rocisa::DataType::XFloat32)
-            {
-                return rejectFast("XFloat32");
-            }
-
             auto isSupportedOutputType = [](rocisa::DataType t) {
-                return t == rocisa::DataType::Float || t == rocisa::DataType::Half
-                       || t == rocisa::DataType::BFloat16;
+                return t == rocisa::DataType::Float || t == rocisa::DataType::Double
+                       || t == rocisa::DataType::Half || t == rocisa::DataType::BFloat16;
             };
 
             auto isSupportedInputType = [&](rocisa::DataType t) {
@@ -1207,6 +1223,16 @@ namespace TensileLite
                     return rejectFast("K_not_multiple_of_mxBlockA");
                 if(mxBlockB > 0 && sizeK % mxBlockB != 0)
                     return rejectFast("K_not_multiple_of_mxBlockB");
+
+                // The fast path reinterprets the scale tensors as E8 (UE8M0)
+                // unconditionally (see solveGemmMXFastPath). Non-E8 scale
+                // formats (E5M3 / Float8-E4M3) would be misdecoded as e8m0
+                // exponents (e.g. byte 0xFF -> NaN), so defer to the slow path,
+                // which decodes each scale via mxScaleElementAsFloat().
+                if(mxBlockA > 0 && problem.mxsa().dataType() != rocisa::DataType::E8)
+                    return rejectFast("mxScaleA_not_E8");
+                if(mxBlockB > 0 && problem.mxsb().dataType() != rocisa::DataType::E8)
+                    return rejectFast("mxScaleB_not_E8");
             }
 
             if(problem.boundIndices().size() >= 1)
@@ -1270,15 +1296,15 @@ namespace TensileLite
             return true;
         }
 
-        template <size_t BLOCK_M, size_t BLOCK_K>
-        TENSILELITE_CPU_REF_FORCE_INLINE void loadFastPathATile(const float* curBatchA,
-                                                                float*       aReg,
-                                                                size_t       m0,
-                                                                size_t       k0,
-                                                                size_t       sizeM,
-                                                                size_t       sizeK,
-                                                                size_t       strideMA,
-                                                                size_t       strideKA)
+        template <size_t BLOCK_M, size_t BLOCK_K, typename AccumT>
+        TENSILELITE_CPU_REF_FORCE_INLINE void loadFastPathATile(const AccumT* curBatchA,
+                                                                AccumT*       aReg,
+                                                                size_t        m0,
+                                                                size_t        k0,
+                                                                size_t        sizeM,
+                                                                size_t        sizeK,
+                                                                size_t        strideMA,
+                                                                size_t        strideKA)
         {
             for(size_t km = 0; km < BLOCK_K; ++km)
             {
@@ -1293,21 +1319,21 @@ namespace TensileLite
                     }
                     else
                     {
-                        aReg[km * BLOCK_M + mm] = 0.0f;
+                        aReg[km * BLOCK_M + mm] = AccumT(0);
                     }
                 }
             }
         }
 
-        template <size_t BLOCK_K, size_t BLOCK_N>
-        TENSILELITE_CPU_REF_FORCE_INLINE void loadFastPathBTile(const float* curBatchB,
-                                                                float*       bReg,
-                                                                size_t       n0,
-                                                                size_t       k0,
-                                                                size_t       sizeN,
-                                                                size_t       sizeK,
-                                                                size_t       strideNB,
-                                                                size_t       strideKB)
+        template <size_t BLOCK_K, size_t BLOCK_N, typename AccumT>
+        TENSILELITE_CPU_REF_FORCE_INLINE void loadFastPathBTile(const AccumT* curBatchB,
+                                                                AccumT*       bReg,
+                                                                size_t        n0,
+                                                                size_t        k0,
+                                                                size_t        sizeN,
+                                                                size_t        sizeK,
+                                                                size_t        strideNB,
+                                                                size_t        strideKB)
         {
             for(size_t kn = 0; kn < BLOCK_K; ++kn)
             {
@@ -1322,16 +1348,20 @@ namespace TensileLite
                     }
                     else
                     {
-                        bReg[kn * BLOCK_N + nn] = 0.0f;
+                        bReg[kn * BLOCK_N + nn] = AccumT(0);
                     }
                 }
             }
         }
 
-        template <size_t BLOCK_M, size_t BLOCK_N, size_t BLOCK_K>
-        TENSILELITE_CPU_REF_FORCE_INLINE void innerFastPathReduction(const float* A,
-                                                                     const float* B,
-                                                                     float*       C)
+        template <size_t BLOCK_M,
+                  size_t BLOCK_N,
+                  size_t BLOCK_K,
+                  typename OperandMathOpT,
+                  typename AccumT>
+        TENSILELITE_CPU_REF_FORCE_INLINE void innerFastPathReduction(const AccumT* A,
+                                                                     const AccumT* B,
+                                                                     AccumT*       C)
         {
             for(size_t k_i = 0; k_i < BLOCK_K; ++k_i)
             {
@@ -1342,18 +1372,20 @@ namespace TensileLite
                         auto  b_index = k_i * BLOCK_N + n_i;
                         auto  a_index = k_i * BLOCK_M + m_i;
                         auto  c_index = m_i * BLOCK_N + n_i;
-                        float valB    = B[b_index];
-                        float valA    = A[a_index];
-                        C[c_index] += valA * valB;
+                        AccumT valB   = B[b_index];
+                        AccumT valA   = A[a_index];
+                        C[c_index]
+                            += static_cast<AccumT>(static_cast<OperandMathOpT>(valA))
+                               * static_cast<AccumT>(static_cast<OperandMathOpT>(valB));
                     }
                 }
             }
         }
 
-        template <size_t BLOCK_M, size_t BLOCK_N>
+        template <size_t BLOCK_M, size_t BLOCK_N, typename AccumT>
         TENSILELITE_CPU_REF_FORCE_INLINE void accumulateMXScaledTile(
-            float*       cReg,
-            const float* tilePartial,
+            AccumT*       cReg,
+            const AccumT* tilePartial,
             size_t       m0,
             size_t       n0,
             size_t       sizeM,
@@ -1375,10 +1407,10 @@ namespace TensileLite
                 if(global_m >= sizeM)
                     continue;
 
-                float sa = (mxBlockA > 0 && mxsaBatch)
-                    ? static_cast<float>(mxsaBatch[global_m * strideMxsaM
-                                                   + mxsaI * strideMxsaBlk])
-                    : 1.0f;
+                AccumT sa = (mxBlockA > 0 && mxsaBatch)
+                    ? static_cast<AccumT>(static_cast<float>(
+                          mxsaBatch[global_m * strideMxsaM + mxsaI * strideMxsaBlk]))
+                    : AccumT(1);
 
                 for(size_t nn = 0; nn < BLOCK_N; ++nn)
                 {
@@ -1386,10 +1418,10 @@ namespace TensileLite
                     if(global_n >= sizeN)
                         continue;
 
-                    float sb = (mxBlockB > 0 && mxsbBatch)
-                        ? static_cast<float>(mxsbBatch[global_n * strideMxsbN
-                                                       + mxsbI * strideMxsbBlk])
-                        : 1.0f;
+                    AccumT sb = (mxBlockB > 0 && mxsbBatch)
+                        ? static_cast<AccumT>(static_cast<float>(
+                              mxsbBatch[global_n * strideMxsbN + mxsbI * strideMxsbBlk]))
+                        : AccumT(1);
 
                     cReg[mm * BLOCK_N + nn]
                         += tilePartial[mm * BLOCK_N + nn] * sa * sb;
@@ -1397,27 +1429,32 @@ namespace TensileLite
             }
         }
 
-        // Solve combinations of f16, bf16, f32 gemm problems using efficient CPU code.
+        // Solve GEMM problems using efficient tiled CPU code.
         // This function assumes the problem is eligible for the fast path — callers
         // must check isFastPathEligible() first.
-        void solveCPUFastInF32(ContractionProblemGemm const& problem,
-                               ContractionInputs const&      inputs)
+        // AccumT: accumulation precision (float or double).
+        // OperandMathOpT: per-operand math type used immediately before multiply.
+        // XFloat32, for example, truncates float operands to a 10-bit mantissa.
+        // Default matches AccumT, making the operand cast a no-op.
+        template <typename AccumT = float, typename OperandMathOpT = AccumT>
+        void solveCPUFast(ContractionProblemGemm const& problem,
+                          ContractionInputs const&      inputs)
         {
             if(!isFastPathEligible(problem))
             {
                 throw std::runtime_error(
-                    "solveCPUFastInF32 called on an ineligible problem. "
+                    "solveCPUFast called on an ineligible problem. "
                     "Callers must check isFastPathEligible() first.");
             }
 
-            bool               doActivation = false;
-            std::vector<float> actArgs;
+            bool                doActivation = false;
+            std::vector<AccumT> actArgs;
             if(problem.activationType() != ActivationType::None)
             {
                 doActivation = true;
                 for(int i = 0; i < inputs.activationArgs.size(); i++)
                 {
-                    actArgs.push_back(constVariantCast<float>(inputs.activationArgs[i]));
+                    actArgs.push_back(constVariantCast<AccumT>(inputs.activationArgs[i]));
                 }
             }
 
@@ -1441,28 +1478,34 @@ namespace TensileLite
             size_t strideBatchC = problem.c().strides()[problem.batchIndices()[0].d];
             size_t strideBatchD = problem.d().strides()[problem.batchIndices()[0].d];
 
-            // 4. Shadow copies in f32.
+            // 4. Shadow copies in AccumT.
             //
             // For A and B, also pass the compute-input type so the shadow is
             // pre-quantized to mirror the GPU MFMA / slow-path semantics when
             // storage is wider than the MAC input (e.g. Half storage with F8
             // compute-input). C/D never have a separate MAC-input type.
-            ShadowBuffer shadowA(inputs.a,
-                                 problem.a().dataType(),
-                                 problem.a().totalAllocatedElements(),
-                                 problem.computeInputTypeA());
-            ShadowBuffer shadowB(inputs.b,
-                                 problem.b().dataType(),
-                                 problem.b().totalAllocatedElements(),
-                                 problem.computeInputTypeB());
-            ShadowBuffer shadowC(
+            ShadowBuffer<AccumT> shadowA(inputs.a,
+                                         problem.a().dataType(),
+                                         problem.a().totalAllocatedElements(),
+                                         problem.computeInputTypeA());
+            ShadowBuffer<AccumT> shadowB(inputs.b,
+                                         problem.b().dataType(),
+                                         problem.b().totalAllocatedElements(),
+                                         problem.computeInputTypeB());
+            ShadowBuffer<AccumT> shadowC(
                 inputs.c, problem.c().dataType(), problem.c().totalAllocatedElements());
 
-            std::vector<float> shadowD;
-            float*             ptrD = nullptr;
-            if(problem.d().dataType() == rocisa::DataType::Float)
+            std::vector<AccumT> shadowD;
+            AccumT*             ptrD = nullptr;
+            if(problem.d().dataType() == rocisa::DataType::Float
+               && std::is_same_v<AccumT, float>)
             {
-                ptrD = static_cast<float*>(inputs.d);
+                ptrD = static_cast<AccumT*>(inputs.d);
+            }
+            else if(problem.d().dataType() == rocisa::DataType::Double
+                    && std::is_same_v<AccumT, double>)
+            {
+                ptrD = static_cast<AccumT*>(inputs.d);
             }
             else
             {
@@ -1473,11 +1516,11 @@ namespace TensileLite
             bool useScaleAlphaVec = problem.useScaleAlphaVec();
             int  factorDim        = problem.getParams().factorDim(); // 0 = Row(M), 1 = Col(N)
 
-            ShadowBuffer shadowAlphaVec;
+            ShadowBuffer<AccumT> shadowAlphaVec;
             if(problem.useScaleAlphaVec())
             {
                 size_t vecLen  = (factorDim == 0) ? problem.freeSizeA(0) : problem.freeSizeB(0);
-                shadowAlphaVec = ShadowBuffer(inputs.scaleAlphaVec, problem.alphaType(), vecLen);
+                shadowAlphaVec = ShadowBuffer<AccumT>(inputs.scaleAlphaVec, problem.alphaType(), vecLen);
             }
 
             size_t sizeBatch = problem.batchSize(0);
@@ -1486,22 +1529,22 @@ namespace TensileLite
             size_t sizeN     = problem.freeSizeB(0);
 
             enum class ScaleABMode { None, Scalar, Vector };
-            ScaleABMode  scaleABMode = ScaleABMode::None;
-            ShadowBuffer shadowScaleA, shadowScaleB;
-            float        scaleABScalar = 1.0f; // pre-multiplied scalar for Scalar mode
+            ScaleABMode          scaleABMode = ScaleABMode::None;
+            ShadowBuffer<AccumT> shadowScaleA, shadowScaleB;
+            AccumT               scaleABScalar = AccumT(1); // pre-multiplied scalar for Scalar mode
             {
                 std::string useScaleAB = problem.useScaleAB();
                 if(useScaleAB == "Vector")
                 {
                     scaleABMode  = ScaleABMode::Vector;
-                    shadowScaleA = ShadowBuffer(inputs.scaleA, problem.alphaType(), sizeM);
-                    shadowScaleB = ShadowBuffer(inputs.scaleB, problem.alphaType(), sizeN);
+                    shadowScaleA = ShadowBuffer<AccumT>(inputs.scaleA, problem.alphaType(), sizeM);
+                    shadowScaleB = ShadowBuffer<AccumT>(inputs.scaleB, problem.alphaType(), sizeN);
                 }
                 else if(useScaleAB == "Scalar")
                 {
                     scaleABMode = ScaleABMode::Scalar;
-                    ShadowBuffer tmpA(inputs.scaleA, problem.alphaType(), 1);
-                    ShadowBuffer tmpB(inputs.scaleB, problem.alphaType(), 1);
+                    ShadowBuffer<AccumT> tmpA(inputs.scaleA, problem.alphaType(), 1);
+                    ShadowBuffer<AccumT> tmpB(inputs.scaleB, problem.alphaType(), 1);
                     scaleABScalar = tmpA[0] * tmpB[0];
                 }
             }
@@ -1549,10 +1592,10 @@ namespace TensileLite
 #pragma omp parallel for collapse(3)
             for(size_t b = 0; b < sizeBatch; ++b)
             {
-                const float* curBatchA = shadowA.data() + (b * strideBatchA);
-                const float* curBatchB = shadowB.data() + (b * strideBatchB);
-                const float* curBatchC = shadowC.data() + (b * strideBatchC);
-                float*       curBatchD = ptrD + (b * strideBatchD);
+                const AccumT* curBatchA = shadowA.data() + (b * strideBatchA);
+                const AccumT* curBatchB = shadowB.data() + (b * strideBatchB);
+                const AccumT* curBatchC = shadowC.data() + (b * strideBatchC);
+                AccumT*       curBatchD = ptrD + (b * strideBatchD);
 
                 const E8* mxsaBatch
                     = mxsaPtr ? mxsaPtr + b * strideBatchMxsa : nullptr;
@@ -1566,9 +1609,9 @@ namespace TensileLite
                     {
                         auto n0 = n * BLOCK_N;
 
-                        std::array<float, BLOCK_M * BLOCK_K> aReg = {0};
-                        std::array<float, BLOCK_K * BLOCK_N> bReg = {0};
-                        std::array<float, BLOCK_M * BLOCK_N> cReg = {0};
+                        std::array<AccumT, BLOCK_M * BLOCK_K> aReg = {0};
+                        std::array<AccumT, BLOCK_K * BLOCK_N> bReg = {0};
+                        std::array<AccumT, BLOCK_M * BLOCK_N> cReg = {0};
 
                         if(hasMX)
                         {
@@ -1595,8 +1638,8 @@ namespace TensileLite
                                                                     strideNB,
                                                                     strideKB);
 
-                                std::array<float, BLOCK_M * BLOCK_N> tilePartial = {0};
-                                innerFastPathReduction<BLOCK_M, BLOCK_N, BLOCK_K>(
+                                std::array<AccumT, BLOCK_M * BLOCK_N> tilePartial = {0};
+                                innerFastPathReduction<BLOCK_M, BLOCK_N, BLOCK_K, OperandMathOpT>(
                                     aReg.data(), bReg.data(), tilePartial.data());
 
                                 size_t mxsaI
@@ -1643,7 +1686,7 @@ namespace TensileLite
                                                                     sizeK,
                                                                     strideNB,
                                                                     strideKB);
-                                innerFastPathReduction<BLOCK_M, BLOCK_N, BLOCK_K>(
+                                innerFastPathReduction<BLOCK_M, BLOCK_N, BLOCK_K, OperandMathOpT>(
                                     aReg.data(), bReg.data(), cReg.data());
                             }
                         }
@@ -1664,8 +1707,8 @@ namespace TensileLite
                         }
 
                         // Perform all the post-reduction stuff.
-                        const float originalAlpha = std::get<float>(inputs.alpha);
-                        const float beta          = std::get<float>(inputs.beta);
+                        const AccumT originalAlpha = constVariantCast<AccumT>(inputs.alpha);
+                        const AccumT beta          = constVariantCast<AccumT>(inputs.beta);
                         for(size_t nn = 0; nn < BLOCK_N; ++nn)
                         {
                             for(size_t mm = 0; mm < BLOCK_M; ++mm)
@@ -1678,7 +1721,7 @@ namespace TensileLite
                                     size_t idxC      = global_m + (global_n * strideNC);
                                     auto   startingC = curBatchC[idxC];
                                     auto   current   = curBatchD[idxD];
-                                    float  alpha     = originalAlpha;
+                                    AccumT alpha     = originalAlpha;
                                     if(scaleABMode == ScaleABMode::Vector)
                                     {
                                         alpha *= shadowScaleA[global_m];
@@ -1699,7 +1742,7 @@ namespace TensileLite
                                             alpha *= shadowAlphaVec[global_m];
                                         }
                                     }
-                                    if(beta != 0.0f)
+                                    if(beta != AccumT(0))
                                     {
                                         current = (alpha * current) + (beta * startingC);
                                     }
@@ -1708,21 +1751,21 @@ namespace TensileLite
                                         current = (alpha * current);
                                     }
 
+                                    bool                 aConjugate = false;
+                                    size_t               dNum
+                                        = global_m + (global_n * sizeM) + (b * sizeM * sizeN);
+                                    auto const&          d = problem.d();
+                                    std::vector<int64_t> dCoord(d.dimensions());
+                                    CoordNumbered(dNum,
+                                                  dCoord.begin(),
+                                                  dCoord.end(),
+                                                  d.sizes().begin(),
+                                                  d.sizes().end());
+
                                     if(problem.useBias() && inputs.bias)
                                     {
-
                                         assert(!problem.useGradient()
                                                && "Bias gradient not supported on this path.");
-
-                                        size_t dNum
-                                            = global_m + (global_n * sizeM) + (b * sizeM * sizeN);
-                                        auto const&          d = problem.d();
-                                        std::vector<int64_t> dCoord(d.dimensions());
-                                        CoordNumbered(dNum,
-                                                      dCoord.begin(),
-                                                      dCoord.end(),
-                                                      d.sizes().begin(),
-                                                      d.sizes().end());
 
                                         auto const&          bias = problem.bias();
                                         std::vector<int64_t> biasCoord(bias.dimensions());
@@ -1745,13 +1788,11 @@ namespace TensileLite
                                         else
                                             pos = int(dNum % problem.d().sizes()[0]) + biasIndex;
 
-                                        bool aConjugate   = false;
-                                        using Accumulator = float;
-                                        Accumulator biasVal
-                                            = GetValue<Accumulator>(problem.bias().dataType(),
-                                                                    inputs.bias,
-                                                                    pos,
-                                                                    aConjugate);
+                                        AccumT biasVal
+                                            = GetValue<AccumT>(problem.bias().dataType(),
+                                                               inputs.bias,
+                                                               pos,
+                                                               aConjugate);
 
                                         current += biasVal;
                                     }
@@ -1764,6 +1805,17 @@ namespace TensileLite
                                                              actArgs);
                                     }
 
+                                    if(problem.useGateResidual() && inputs.gateResidual)
+                                    {
+                                        auto        gateIndex = problem.gateResidual().index(dCoord);
+                                        AccumT gateVal
+                                            = GetValue<AccumT>(
+                                                problem.gateResidual().dataType(),
+                                                inputs.gateResidual,
+                                                gateIndex,
+                                                aConjugate);
+                                        current = gateVal * current + gateVal;
+                                    }
                                     curBatchD[idxD] = current;
                                 }
                             }
@@ -1775,12 +1827,12 @@ namespace TensileLite
             // 6. Write Back
             if(problem.d().dataType() == rocisa::DataType::Half)
             {
-                storeFromFloat<TensileLite::Half>(
+                storeFrom<AccumT, TensileLite::Half>(
                     inputs.d, shadowD, problem.d().totalAllocatedElements());
             }
             else if(problem.d().dataType() == rocisa::DataType::BFloat16)
             {
-                storeFromFloat<TensileLite::BFloat16>(
+                storeFrom<AccumT, TensileLite::BFloat16>(
                     inputs.d, shadowD, problem.d().totalAllocatedElements());
             }
 
@@ -2190,6 +2242,19 @@ namespace TensileLite
                 {
                     ws[dIndex] = resultD;
                 }
+
+                // gate residual: D[i,j] = gate[i,j] * resultD[i,j] + gate[i,j]
+                if(problem.useGateResidual() && inputs.gateResidual)
+                {
+                    auto gateIndex = problem.gateResidual().index(dCoord);
+                    Accumulator gateVal
+                        = GetValue<Accumulator>(problem.gateResidual().dataType(),
+                                               inputs.gateResidual,
+                                               gateIndex,
+                                               aConjugate);
+                    resultD = gateVal * resultD + gateVal;
+                }
+
                 dPtr[dIndex] = SaturateCast<typename Inputs::DType>(resultD);
             }
 
@@ -3103,7 +3168,13 @@ namespace TensileLite
             if(tryFastPath && isDenseEnoughForFastPath && isFastPathEligible(problem))
             {
                 ScopedTimer timer("solve_cpu_fast");
-                solveCPUFastInF32(problem, inputs);
+                bool isDouble = (problem.d().dataType() == rocisa::DataType::Double);
+                if(isDouble)
+                    solveCPUFast<double>(problem, inputs);
+                else if(problem.f32XdlMathOp() == rocisa::DataType::XFloat32)
+                    solveCPUFast<float, XFloat32>(problem, inputs);
+                else
+                    solveCPUFast<float>(problem, inputs);
                 return;
             }
 
