@@ -268,7 +268,7 @@ void rocsolver_gesdd_getMemorySize(rocblas_handle handle,
             rocsolver_syevd_heevd_getMemorySize<BATCHED, T, SS>(
                 handle, rocblas_evect_original, rocblas_fill_upper, n, batch_count, &a1, &b1, &c1,
                 &d1, &e1, &f1, &g1, &h1, size_workArr2, &i1, &i2, &i3, &i4);
-            *size_workArr2 = std::max(*size_workArr2, i1 + i2 + i3 + i4);
+            *size_workArr2 += i1 + i2 + i3 + i4;
         }
 
         // Requirements for QR factorization
@@ -290,7 +290,7 @@ void rocsolver_gesdd_getMemorySize(rocblas_handle handle,
             rocsolver_syevd_heevd_getMemorySize<BATCHED, T, SS>(
                 handle, rocblas_evect_original, rocblas_fill_upper, m, batch_count, &a1, &b1, &c1,
                 &d1, &e1, &f1, &g1, &h1, size_workArr2, &i1, &i2, &i3, &i4);
-            *size_workArr2 = std::max(*size_workArr2, i1 + i2 + i3 + i4);
+            *size_workArr2 += i1 + i2 + i3 + i4;
         }
 
         // Requirements for LQ factorization
