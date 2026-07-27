@@ -1,4 +1,4 @@
-// Copyright ?? Advanced Micro Devices, Inc., or its affiliates.
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 //
 // Kernel loading and launch utilities for the Flash-Attention 2 V7 engine.
