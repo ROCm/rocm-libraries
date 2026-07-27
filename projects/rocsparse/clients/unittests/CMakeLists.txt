@@ -181,3 +181,19 @@ add_test(NAME rocsparse-unit-test-device COMMAND rocsparse-unit-test-device)
 set_tests_properties(rocsparse-unit-test-device PROPERTIES LABELS "gpu")
 
 rocm_install(TARGETS rocsparse-unit-test-device COMPONENT tests)
+
+# ---------------------------------------------------------------------------
+# Code coverage: instrument the unit-test binaries so the library sources that
+# are compiled directly into them (primitives, level-1 device kernels,
+# indextype/datatype utils) emit LLVM profile data. Without this the binaries
+# run under `make coverage` but produce no .profraw and contribute nothing.
+# Matches the flags applied to the rocsparse library target.
+# ---------------------------------------------------------------------------
+if(BUILD_CODE_COVERAGE)
+  foreach(_cov_tgt rocsparse-unit-test rocsparse-unit-test-device)
+    if(TARGET ${_cov_tgt})
+      target_compile_options(${_cov_tgt} PRIVATE -fprofile-instr-generate -fcoverage-mapping)
+      target_link_libraries(${_cov_tgt} PRIVATE -fprofile-instr-generate)
+    endif()
+  endforeach()
+endif()

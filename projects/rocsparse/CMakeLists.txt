@@ -420,6 +420,20 @@ if(BUILD_CODE_COVERAGE)
     PATHS /opt/rocm/llvm/bin
   )
 
+  # Objects to attribute coverage to: the shared library plus any unit-test
+  # binaries. The unit tests compile private library sources in-tree (those
+  # symbols are hidden in librocsparse and cannot be linked), so their coverage
+  # is only visible when their binaries are passed to llvm-cov as objects. The
+  # non-library (clients/) sources they also pull in are dropped later by the
+  # exclusion filter so the report stays library-only.
+  set(COVERAGE_OBJECTS -object ./library/librocsparse.so)
+  if(TARGET rocsparse-unit-test)
+    list(APPEND COVERAGE_OBJECTS -object ./clients/staging/rocsparse-unit-test)
+  endif()
+  if(TARGET rocsparse-unit-test-device)
+    list(APPEND COVERAGE_OBJECTS -object ./clients/staging/rocsparse-unit-test-device)
+  endif()
+
   # Python script to filter coverage exclusion markers (LCOV_EXCL_START/LCOV_EXCL_STOP)
   # Note: lcov and gcovr don't work for LLVM coverage since they can't re-read sources
   # when processing lcov format files. This script reads source files and filters excluded lines.
@@ -449,7 +463,7 @@ if(BUILD_CODE_COVERAGE)
   else()
     message(STATUS "genhtml not found - using llvm-cov show (exclusion markers not reflected in HTML)")
     set(COVERAGE_HTML_COMMAND
-      COMMAND ${LLVM_COV} show -object ./library/librocsparse.so -instr-profile=./coverage-report/rocsparse.profdata -format=html -output-dir=coverage-report
+      COMMAND ${LLVM_COV} show ${COVERAGE_OBJECTS} -instr-profile=./coverage-report/rocsparse.profdata -format=html -output-dir=coverage-report
     )
   endif()
 
@@ -457,8 +471,8 @@ if(BUILD_CODE_COVERAGE)
     coverage
     DEPENDS coverage_analysis
     COMMAND ${LLVM_PROFDATA} merge -sparse ./coverage-report/profraw/rocsparse-coverage_*.profraw -o ./coverage-report/rocsparse.profdata
-    COMMAND ${LLVM_COV} report -object ./library/librocsparse.so -instr-profile=./coverage-report/rocsparse.profdata
-    COMMAND ${LLVM_COV} export -object ./library/librocsparse.so -instr-profile=./coverage-report/rocsparse.profdata -format=lcov > ./coverage-report/coverage-raw.info
+    COMMAND ${LLVM_COV} report ${COVERAGE_OBJECTS} -instr-profile=./coverage-report/rocsparse.profdata
+    COMMAND ${LLVM_COV} export ${COVERAGE_OBJECTS} -instr-profile=./coverage-report/rocsparse.profdata -format=lcov > ./coverage-report/coverage-raw.info
     ${COVERAGE_FILTER_COMMAND}
     ${COVERAGE_HTML_COMMAND}
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
