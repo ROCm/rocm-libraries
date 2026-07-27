@@ -5426,9 +5426,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
     error = self.states.overflowedResources
     print2(f"  found error code {error} with overflowed resources set to {self.states.overflowedResources}")
 
-    passResult = self._runRocIsaPassOnKernelBody(kernel, moduleKernelBody)
-    kernel["MathClocksUnrolledLoop"] = passResult.cycles
-    self.updateOccupancyFromMaxVgpr(kernel, moduleKernelBody, passResult.maxVgpr)
+    # rocIsaPass is intentionally disabled for subtile kernels: analyzeBankConflicts
+    # requires a "Local Read Addresses" module that the subtile codegen path does not
+    # emit (see cycle.cpp). Classic kernelBody() still runs rocIsaPass below.
 
     overrides = self._subtileStinkyTofuOverrides()
     st_asm = self._runStinkyTofuPipeline(
