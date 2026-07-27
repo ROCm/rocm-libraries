@@ -14,15 +14,15 @@ using namespace rpptest;
 namespace {
 
 template <typename T>
-void run_tensor_xor_tensor(const NdConfig& cfg) {
-    const NdDims dims1 = nd_operand_dims(cfg, 1);
-    const NdDims dims2 = nd_operand_dims(cfg, 2);
+void run_tensor_xor_tensor(const NdConfig& cfg, Broadcast broadcast) {
+    const NdDims dims1 = nd_operand_dims(cfg.nDim, broadcast, 1);
+    const NdDims dims2 = nd_operand_dims(cfg.nDim, broadcast, 2);
     const NdDims outDims = nd_broadcast_dims(dims1, dims2);
 
     // Descriptors are device-addressable for HIP: the ND kernels read dims/strides on device.
-    GenericDescriptor desc1(cfg.backend, dims1, cfg.dtype);
-    GenericDescriptor desc2(cfg.backend, dims2, cfg.dtype);
-    GenericDescriptor descOut(cfg.backend, outDims, cfg.dtype);
+    GenericDescriptor desc1(cfg.backend, dims1, cfg.dtypeIn);
+    GenericDescriptor desc2(cfg.backend, dims2, cfg.dtypeIn);
+    GenericDescriptor descOut(cfg.backend, outDims, cfg.dtypeIn);
 
     const std::size_t count1 = generic_element_count(*desc1);
     const std::size_t count2 = generic_element_count(*desc2);
@@ -31,8 +31,8 @@ void run_tensor_xor_tensor(const NdConfig& cfg) {
     // (1) Host golden model. Two distinct fills (different salts) so the XOR is exercised on
     // differing bit patterns. The op writes every output element, so golden needs no pre-seeding.
     std::vector<T> input1(count1), input2(count2), golden(countOut), actual(countOut);
-    fill_input<T>(input1.data(), count1, cfg.dtype, 0);
-    fill_input<T>(input2.data(), count2, cfg.dtype, 1);
+    fill_input<T>(input1.data(), count1, cfg.dtypeIn, 0);
+    fill_input<T>(input2.data(), count2, cfg.dtypeIn, 1);
     bitwise_tensor_reference<T>(input1.data(), input2.data(), golden.data(), *descOut, *desc1, *desc2,
                                 BitwiseTensorOp::Xor);
 
@@ -45,9 +45,9 @@ void run_tensor_xor_tensor(const NdConfig& cfg) {
     for (std::size_t i = 0; i < roiVec2.size(); ++i) roi2[i] = roiVec2[i];
 
     // (3) Run RPP on the configured backend.
-    const std::size_t bytes1 = generic_byte_size(*desc1, cfg.dtype);
-    const std::size_t bytes2 = generic_byte_size(*desc2, cfg.dtype);
-    const std::size_t bytesOut = generic_byte_size(*descOut, cfg.dtype);
+    const std::size_t bytes1 = generic_byte_size(*desc1, cfg.dtypeIn);
+    const std::size_t bytes2 = generic_byte_size(*desc2, cfg.dtypeIn);
+    const std::size_t bytesOut = generic_byte_size(*descOut, cfg.dtypeIn);
     DeviceTensor src1(cfg.backend, bytes1), src2(cfg.backend, bytes2),
         dst(cfg.backend, bytesOut);
     src1.write(input1.data(), bytes1);
@@ -55,7 +55,7 @@ void run_tensor_xor_tensor(const NdConfig& cfg) {
 
     RppHandle handle(cfg.backend, outDims[0]);
     ASSERT_EQ(rppt_tensor_xor_tensor(src1.ptr(), src2.ptr(), desc1.get(), desc2.get(), dst.ptr(), descOut.get(),
-                                     to_rpp_broadcast(cfg.broadcast), roi1.data(), roi2.data(),
+                                     to_rpp_broadcast(broadcast), roi1.data(), roi2.data(),
                                      handle.get(), cfg.backend),
               RPP_SUCCESS);
 
@@ -70,16 +70,17 @@ void run_tensor_xor_tensor(const NdConfig& cfg) {
 }  // namespace
 
 // Full name: Misc_Bitwise/TensorXorTensorTest.Correctness/<Backend>_<DType>to<DType>_<Rank>_<Broadcast>_<Shape>
-class TensorXorTensorTest : public ::testing::TestWithParam<NdConfig> {};
+class TensorXorTensorTest : public ::testing::TestWithParam<NdWithParams<BroadcastParams>> {};
 
 TEST_P(TensorXorTensorTest, Correctness) {
-    const NdConfig cfg = GetParam();
-    switch (cfg.dtype) {
+    const NdConfig cfg = GetParam().cfg;
+    const Broadcast broadcast = GetParam().op.mode;
+    switch (cfg.dtypeIn) {
         case DType::U8:
-            run_tensor_xor_tensor<Rpp8u>(cfg);
+            run_tensor_xor_tensor<Rpp8u>(cfg, broadcast);
             break;
         case DType::I8:
-            run_tensor_xor_tensor<Rpp8s>(cfg);
+            run_tensor_xor_tensor<Rpp8s>(cfg, broadcast);
             break;
         default:
             FAIL() << "unsupported dtype for tensor_xor_tensor";
@@ -94,7 +95,7 @@ TEST_P(TensorXorTensorTest, Correctness) {
 // the device. Undocumented and rank-dependent -- see
 // .notes/issues/nd-non-broadcast-host-descriptor-pointers-to-hip-kernel.md.
 INSTANTIATE_TEST_SUITE_P(Misc_Bitwise, TensorXorTensorTest,
-                         ::testing::ValuesIn(make_nd_configs({DType::U8, DType::I8}, {2, 3, 4},
-                                                             {Broadcast::None, Broadcast::Src1,
-                                                              Broadcast::Src2})),
-                         nd_config_param_name);
+                         ::testing::ValuesIn(nd_with_params<BroadcastParams>(
+                             make_nd_configs({DType::U8, DType::I8}, {2, 3, 4}),
+                             {{Broadcast::None}, {Broadcast::Src1}, {Broadcast::Src2}})),
+                         nd_op_config_name<BroadcastParams>);

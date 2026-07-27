@@ -48,14 +48,23 @@ using NdDims = std::vector<Rpp32u>;
 
 inline Rpp32u nd_rank(const NdDims& dims) { return static_cast<Rpp32u>(dims.size()) - 1; }
 
-// A single point in the ND test grid. The label maps onto the same four structural slots
-// as the image grammar (framework/TAXONOMY.md): the rank token takes the Layout slot and
-// the broadcast variant takes the Roi slot.
+// An input->output dtype pair. Most ND ops keep the dtype (in == out); normalize documents
+// genuine conversions (u8->f32, i8->f32), which is why this is an explicit axis.
+struct DTypeConv {
+    DType in, out;
+};
+
+// A single point in the ND test grid: the universal axes only. Op-specific axes (bitwise's
+// broadcast mode, normalize's axisMask / compute mode) ride alongside via NdWithParams<P>,
+// mirroring the image domain's TestConfig + WithParams<P> split.
+//
+// The label maps onto the same four structural slots as the image grammar
+// (framework/TAXONOMY.md): the rank token takes the Layout slot and the op-param token takes
+// the Roi slot.
 struct NdConfig {
     RppBackend backend;
-    DType dtype;
+    DType dtypeIn, dtypeOut;
     Rpp32u nDim;  // per-sample rank: 2, 3 or 4
-    Broadcast broadcast;
 };
 
 inline std::string rank_name(Rpp32u nDim) { return std::to_string(nDim) + "D"; }
@@ -74,10 +83,10 @@ inline NdDims nd_extents(Rpp32u nDim) {
 
 // The shape of one operand: the base extents, with the trailing axis collapsed to 1 when
 // this operand is the broadcast one.
-inline NdDims nd_operand_dims(const NdConfig& c, int operand) {
-    NdDims dims = nd_extents(c.nDim);
-    const bool collapse = (c.broadcast == Broadcast::Src1 && operand == 1) ||
-                          (c.broadcast == Broadcast::Src2 && operand == 2);
+inline NdDims nd_operand_dims(Rpp32u nDim, Broadcast broadcast, int operand) {
+    NdDims dims = nd_extents(nDim);
+    const bool collapse = (broadcast == Broadcast::Src1 && operand == 1) ||
+                          (broadcast == Broadcast::Src2 && operand == 2);
     if (collapse) dims.back() = 1;
     return dims;
 }
@@ -96,28 +105,64 @@ inline std::string nd_shape_name(const NdDims& dims) {
     return s;
 }
 
-// Produces the value-parameter label, e.g. "HIP_U8toU8_3D_BroadcastSrc2_2x5x12x16".
-inline std::string nd_config_name(const NdConfig& c) {
-    return backend_name(c.backend) + "_" + dtype_name(c.dtype) + "to" + dtype_name(c.dtype) + "_" +
-           rank_name(c.nDim) + "_" + broadcast_name(c.broadcast) + "_" +
-           nd_shape_name(nd_extents(c.nDim));
+// ---- op-specific parameters -----------------------------------------------
+
+template <typename P>
+struct NdWithParams {
+    NdConfig cfg;
+    P op;
+};
+
+// Attaches each op-param set to every base config (op params as an extra grid axis).
+template <typename P>
+inline std::vector<NdWithParams<P>> nd_with_params(const std::vector<NdConfig>& base,
+                                                   const std::vector<P>& params) {
+    std::vector<NdWithParams<P>> out;
+    out.reserve(base.size() * params.size());
+    for (const auto& c : base)
+        for (const auto& p : params) out.push_back({c, p});
+    return out;
 }
 
-inline std::string nd_config_param_name(const ::testing::TestParamInfo<NdConfig>& info) {
+// Produces the value-parameter label, e.g. "HIP_U8toU8_3D_BroadcastSrc2_2x5x12x16".
+// The op-param token sits in the Roi slot, between the rank and the shape.
+// P must provide std::string name() const.
+template <typename P>
+inline std::string nd_config_name(const NdWithParams<P>& p) {
+    return backend_name(p.cfg.backend) + "_" + dtype_name(p.cfg.dtypeIn) + "to" +
+           dtype_name(p.cfg.dtypeOut) + "_" + rank_name(p.cfg.nDim) + "_" + p.op.name() + "_" +
+           nd_shape_name(nd_extents(p.cfg.nDim));
+}
+
+template <typename P>
+inline std::string nd_op_config_name(const ::testing::TestParamInfo<NdWithParams<P>>& info) {
     return nd_config_name(info.param);
 }
 
-// Cartesian product of the ND axes with every available backend (HIP only when the suite
-// was built with the HIP backend -- see available_backends()).
-inline std::vector<NdConfig> make_nd_configs(const std::vector<DType>& dtypes,
-                                             const std::vector<Rpp32u>& ranks,
-                                             const std::vector<Broadcast>& broadcasts) {
+// The broadcast mode as an op param, for the binary ND ops.
+struct BroadcastParams {
+    Broadcast mode;
+    std::string name() const { return broadcast_name(mode); }
+};
+
+// Cartesian product of the universal ND axes with every available backend (HIP only when
+// the suite was built with the HIP backend -- see available_backends()).
+inline std::vector<NdConfig> make_nd_configs(const std::vector<DTypeConv>& convs,
+                                             const std::vector<Rpp32u>& ranks) {
     std::vector<NdConfig> configs;
     for (RppBackend backend : available_backends())
-        for (DType dtype : dtypes)
-            for (Rpp32u nDim : ranks)
-                for (Broadcast b : broadcasts) configs.push_back({backend, dtype, nDim, b});
+        for (DTypeConv conv : convs)
+            for (Rpp32u nDim : ranks) configs.push_back({backend, conv.in, conv.out, nDim});
     return configs;
+}
+
+// Convenience for the ops that keep the dtype (in == out).
+inline std::vector<NdConfig> make_nd_configs(const std::vector<DType>& dtypes,
+                                             const std::vector<Rpp32u>& ranks) {
+    std::vector<DTypeConv> convs;
+    convs.reserve(dtypes.size());
+    for (DType d : dtypes) convs.push_back({d, d});
+    return make_nd_configs(convs, ranks);
 }
 
 // ---- descriptor / roiTensor construction ----------------------------------
@@ -238,15 +283,21 @@ void for_each_nd_element(const RpptGenericDesc& out, const RpptGenericDesc& s1,
 
 // Element-wise tolerance comparison over the whole (densely packed) output tensor,
 // naming the first offending element by its full ND coordinate.
+//
+// The bound is absTolerance + relTolerance * |reference|. Ops whose output magnitude varies
+// with the input scale (normalize, whose values depend on the supplied mean/stddev) need the
+// relative term; bit-exact ops pass 0 for both.
 template <typename T>
 ::testing::AssertionResult compare_nd(const T* actual, const T* reference,
-                                      const RpptGenericDesc& d, double tolerance) {
+                                      const RpptGenericDesc& d, double absTolerance,
+                                      double relTolerance = 0.0) {
     const std::size_t total = generic_element_count(d);
     const std::size_t rank = d.numDims;
     for (std::size_t linear = 0; linear < total; ++linear) {
         const double a = to_double(actual[linear]);
         const double r = to_double(reference[linear]);
         const double diff = std::fabs(a - r);
+        const double tolerance = absTolerance + relTolerance * std::fabs(r);
         if (diff > tolerance) {
             std::string coords;
             std::size_t rem = linear;

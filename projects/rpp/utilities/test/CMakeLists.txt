@@ -83,6 +83,7 @@ add_executable(rpp_tests
     src/tests/misc/bitwise/tensor_and_tensor_test.cpp
     src/tests/misc/bitwise/tensor_or_tensor_test.cpp
     src/tests/misc/bitwise/tensor_xor_tensor_test.cpp
+    src/tests/misc/statistical/normalize_test.cpp
 )
 target_include_directories(rpp_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 if(rpp_INCLUDE_DIR)
