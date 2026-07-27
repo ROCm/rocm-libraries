@@ -481,7 +481,9 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
     // TODO: Scale the matrix
 
     // 2-stage path: he2hb + hb2st + unmtr_hb2st + ormqr
-    const bool use_2stage = batch_count == 1
+    // Requires !BATCHED: the ormqr back-transform stage reads Householder vectors
+    // from A, which is T* const* when BATCHED=true and incompatible with ormqr_unmqr_template.
+    const bool use_2stage = !BATCHED
         && (hetrd_mode == rocsolver_alg_mode_2stage
             || (hetrd_mode == rocsolver_alg_mode_auto && n >= SYEVD_2STAGE_SWITCHSIZE));
     if(use_2stage)
@@ -493,10 +495,10 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
         const rocblas_int nt = ceildiv(n - 1, kd);
         const rocblas_int nv = kd * nt * (nt + 1) / 2;
 
-        // Strides for band and V arrays (non-batched strides = 0 for the first template overload)
-        const rocblas_stride strideAband = 0;
-        const rocblas_stride strideV_hb2st = 0;
-        const rocblas_stride strideTau_hb2st = 0;
+        // Strides for band and V arrays (zero for non-strided, non-zero for strided batched)
+        const rocblas_stride strideAband = STRIDED ? (rocblas_stride)ldab * n : 0;
+        const rocblas_stride strideV_hb2st = STRIDED ? (rocblas_stride)ldv_hb2st * nv : 0;
+        const rocblas_stride strideTau_hb2st = STRIDED ? (rocblas_stride)nv : 0;
 
         // Partition he2hb_work into sub-workspaces
         size_t size_D, size_V, size_W, size_X, size_Z, size_work, size_workArr_he2hb;
@@ -580,9 +582,9 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
 
                 // Apply Q_he2hb on the left to W[kd:n, 0:n]:
                 //   V is in A[kd:n, 0:n-kd], Q is (n-kd) x (n-kd)
-                // 2-stage is only reached when batch_count == 1, so BATCHED is always false
-                // here at runtime; the if constexpr prevents instantiation for BATCHED=true
-                // where A would be T* const* (incompatible with the T* A overload).
+                // use_2stage requires !BATCHED, so BATCHED is always false here at runtime;
+                // the if constexpr prevents instantiation for BATCHED=true where A would be
+                // T* const* (incompatible with the T* A overload of ormqr_unmqr_template).
                 if constexpr(!BATCHED)
                 {
                     ROCBLAS_CHECK(rocsolver_ormqr_unmqr_template<BATCHED, STRIDED, T>(
@@ -751,7 +753,9 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
     // TODO: Scale the matrix
 
     // 2-stage path: he2hb + hb2st + unmtr_hb2st + ormqr
-    const bool use_2stage = batch_count == 1
+    // Requires !BATCHED: the ormqr back-transform stage reads Householder vectors
+    // from A, which is T* const* when BATCHED=true and incompatible with ormqr_unmqr_template.
+    const bool use_2stage = !BATCHED
         && (hetrd_mode == rocsolver_alg_mode_2stage
             || (hetrd_mode == rocsolver_alg_mode_auto && n >= SYEVD_2STAGE_SWITCHSIZE));
     if(use_2stage)
@@ -763,10 +767,10 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
         const rocblas_int nt = ceildiv(n - 1, kd);
         const rocblas_int nv = kd * nt * (nt + 1) / 2;
 
-        // Strides for band and V arrays
-        const rocblas_stride strideAband = (rocblas_stride)ldab * n;
-        const rocblas_stride strideV_hb2st = (rocblas_stride)ldv_hb2st * nv;
-        const rocblas_stride strideTau_hb2st = nv;
+        // Strides for band and V arrays (zero for non-strided, non-zero for strided batched)
+        const rocblas_stride strideAband = STRIDED ? (rocblas_stride)ldab * n : 0;
+        const rocblas_stride strideV_hb2st = STRIDED ? (rocblas_stride)ldv_hb2st * nv : 0;
+        const rocblas_stride strideTau_hb2st = STRIDED ? (rocblas_stride)nv : 0;
 
         // Partition he2hb_work into sub-workspaces
         size_t size_D, size_V, size_W, size_X, size_Z, size_work, size_workArr_he2hb;
@@ -850,9 +854,9 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
 
                 // Apply Q_he2hb on the left to W[kd:n, 0:n]:
                 //   V is in A[kd:n, 0:n-kd], Q is (n-kd) x (n-kd)
-                // 2-stage is only reached when batch_count == 1, so BATCHED is always false
-                // here at runtime; the if constexpr prevents instantiation for BATCHED=true
-                // where A would be T* const* (incompatible with the T* A overload).
+                // use_2stage requires !BATCHED, so BATCHED is always false here at runtime;
+                // the if constexpr prevents instantiation for BATCHED=true where A would be
+                // T* const* (incompatible with the T* A overload of ormqr_unmqr_template).
                 if constexpr(!BATCHED)
                 {
                     ROCBLAS_CHECK(rocsolver_ormqr_unmqr_template<BATCHED, STRIDED, T>(
