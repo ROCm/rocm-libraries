@@ -59,37 +59,35 @@ namespace rocsparse
         return rocsparse_status_success;
     }
 
-#define LAUNCH_COOMMNN_SEGMENTED_MAIN_KERNEL(COOMMNN_DIM, WF_SIZE, LOOPS, TRANSB)        \
-    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                                  \
-        (rocsparse::coommnn_segmented_main_kernel<COOMMNN_DIM, WF_SIZE, LOOPS, TRANSB>), \
-        dim3(nblocks,                                                                    \
-             (main - 1) / WF_SIZE + 1,                                                   \
-             (batch_count_C > 65536) ? 65536 : batch_count_C),                           \
-        dim3(COOMMNN_DIM),                                                               \
-        0,                                                                               \
-        stream,                                                                          \
-        conj_A,                                                                          \
-        conj_B,                                                                          \
-        m,                                                                               \
-        n,                                                                               \
-        k,                                                                               \
-        nnz,                                                                             \
-        batch_count_C,                                                                   \
-        batch_stride_A,                                                                  \
-        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),                    \
-        row_block_red,                                                                   \
-        val_block_red,                                                                   \
-        coo_row_ind,                                                                     \
-        coo_col_ind,                                                                     \
-        coo_val,                                                                         \
-        dense_B,                                                                         \
-        ldb,                                                                             \
-        batch_stride_B,                                                                  \
-        dense_C,                                                                         \
-        ldc,                                                                             \
-        batch_stride_C,                                                                  \
-        order_C,                                                                         \
-        descr->base,                                                                     \
+#define LAUNCH_COOMMNN_SEGMENTED_MAIN_KERNEL(COOMMNN_DIM, WF_SIZE, LOOPS, TRANSB)                 \
+    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                                           \
+        (rocsparse::coommnn_segmented_main_kernel<COOMMNN_DIM, WF_SIZE, LOOPS, TRANSB>),          \
+        dim3(nblocks, (main - 1) / WF_SIZE + 1, (batch_count_C > 65536) ? 65536 : batch_count_C), \
+        dim3(COOMMNN_DIM),                                                                        \
+        0,                                                                                        \
+        stream,                                                                                   \
+        conj_A,                                                                                   \
+        conj_B,                                                                                   \
+        m,                                                                                        \
+        n,                                                                                        \
+        k,                                                                                        \
+        nnz,                                                                                      \
+        batch_count_C,                                                                            \
+        batch_stride_A,                                                                           \
+        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),                             \
+        row_block_red,                                                                            \
+        val_block_red,                                                                            \
+        coo_row_ind,                                                                              \
+        coo_col_ind,                                                                              \
+        coo_val,                                                                                  \
+        dense_B,                                                                                  \
+        ldb,                                                                                      \
+        batch_stride_B,                                                                           \
+        dense_C,                                                                                  \
+        ldc,                                                                                      \
+        batch_stride_C,                                                                           \
+        order_C,                                                                                  \
+        descr->base,                                                                              \
         handle->pointer_mode == rocsparse_pointer_mode_host)
 
 #define LAUNCH_COOMMNN_SEGMENTED_REMAINDER_KERNEL(COOMMNN_DIM, WF_SIZE, LOOPS, TRANSB)        \
