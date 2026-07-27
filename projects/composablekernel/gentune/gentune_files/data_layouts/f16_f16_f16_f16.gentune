@@ -1,0 +1,13 @@
+# generic templates for all instances using bf16_bf16_bf16_bf16 data types
+
+
+PARAMS:
+DataType GEN 
+half_t 
+CONDITION 
+is_same_v<ADataType, half_t> && 
+is_same_v<BDataType, half_t> &&
+is_same_v<CDataType, half_t>
+PREPROCESSOR CK_ENABLE_FP16
+
+PROFILER_DATATYPE_ID: 1

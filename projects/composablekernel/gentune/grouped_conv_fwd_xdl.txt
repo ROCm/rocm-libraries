@@ -1,0 +1,80 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2025, Advanced Micro Devices, Inc. All rights reserved.
+
+#include "../example/09_convnd_fwd/convnd_fwd_common.hpp"
+
+#include "ck/tensor_operation/gpu/device/impl/device_grouped_conv_fwd_multiple_abd_xdl_cshuffle.hpp"
+
+using InDataType       = ck::bhalf_t;
+using WeiDataType      = ck::bhalf_t;
+using AccDataType      = float;
+using CShuffleDataType = ck::bhalf_t;
+using OutDataType      = ck::bhalf_t;
+using AComputeDataType = InDataType;
+using BComputeDataType = AComputeDataType;
+
+template <ck::index_t... Is>
+using S = ck::Sequence<Is...>;
+
+using InElementOp  = ck::tensor_operation::element_wise::PassThrough;
+using WeiElementOp = ck::tensor_operation::element_wise::PassThrough;
+using OutElementOp = ck::tensor_operation::element_wise::PassThrough;
+
+static constexpr auto conv_fwd_spec = ck::tensor_operation::device::ConvolutionForwardSpecialization::Default;
+
+static constexpr auto GemmSpec = ck::tensor_operation::device::GemmSpecialization::MNKPadding;
+
+template <ck::index_t NDimSpatial, typename InLayout, typename WeiLayout, typename OutLayout>
+using DeviceGroupedConvNDFwdInstance = ck::tensor_operation::device::DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle<
+    NDimSpatial,
+    InLayout,
+    WeiLayout,
+    ck::Tuple<>,
+    OutLayout,
+    InDataType,
+    WeiDataType,
+    AccDataType,
+    CShuffleDataType,
+    ck::Tuple<>,
+    OutDataType,
+    InElementOp,
+    WeiElementOp,
+    OutElementOp,
+    conv_fwd_spec,
+    GemmSpec,
+    1,
+    BlockSize,
+    MPerBlock,
+    NPerBlock_,
+    KPerBlock,
+    AK1_,
+    BK1_,
+    MPerXDL_,
+    NPerXDL_,
+    MXdlPerWave_,
+    NXdlPerWave_,
+    S<A0_0, A0_1, 1>,
+    S<1, 0, 2>,
+    S<1, 0, 2>,
+    ABlockTransferSrcVectorDim,
+    ABlockTransferSrcScalarPerVector,
+    ABlockTransferDstScalarPerVector_AK1,
+    ABlockLdsExtraM,
+    S<B0_0, B0_1, 1>,
+    S<1, 0, 2>,
+    S<1, 0, 2>,
+    BBlockTransferSrcVectorDim,
+    BBlockTransferSrcScalarPerVector,
+    BBlockTransferDstScalarPerVector_BK1,
+    BBlockLdsExtraN,
+    CShuffleMXdlPerWavePerShuffle,
+    CShuffleNXdlPerWavePerShuffle,
+    S<1, C0, 1, C1>,
+    CDEBlockTransferScalarPerVector_NPerBlock>;
+
+#include "../example/09_convnd_fwd/run_convnd_fwd_example.inc"
+
+int main(int argc, char* argv[])
+{
+    return run_convnd_fwd_example(argc, argv) ? 0 : 1;
+}
