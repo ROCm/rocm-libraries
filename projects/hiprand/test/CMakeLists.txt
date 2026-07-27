@@ -161,6 +161,10 @@ foreach(test_src ${hipRAND_TEST_SRCS})
         PROPERTIES
             RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test"
     )
+    if(HIPRAND_ENABLE_COVERAGE)
+        # Match the offload driver used by libhiprand to avoid kernel image incompatibility
+        target_link_options(${test_name} PRIVATE --offload-new-driver)
+    endif()
     add_relative_test(${test_name} ${test_name})
     if(HIPRAND_ENABLE_COVERAGE)
         set_tests_properties(${test_name} PROPERTIES
