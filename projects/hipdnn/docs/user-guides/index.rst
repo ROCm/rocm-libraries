@@ -44,6 +44,7 @@ The public repository for hipDNN is located at `https://github.com/ROCm/rocm-lib
     * :doc:`Get and set engine knob configurations <how-to/get-set-engine-knob>`
     * :doc:`Migrate a cuDNN project to hipDNN <how-to/migrate-cudnn>`
     * :doc:`Develop plugins <how-to/develop-plugins>`
+    * :doc:`Use pass-by-value scalars <how-to/pass-by-value-scalars>`
 
   .. grid-item-card:: Reference
 

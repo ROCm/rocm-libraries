@@ -27,7 +27,8 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     auto intermediateType = getDataTypeEnumFromType<IntermediateType>();
 
     std::cout << "Running batch normalization training + ReLU activation graph " << inputType
-              << " [" << layout << "]" << (config.cpuValidation ? " (with CPU validation)" : "");
+              << " [" << layout << "]" << (config.cpuValidation ? " (with CPU validation)" : "")
+              << (config.useRuntimeScalars ? " [runtime-scalars]" : "");
 
     if(config.useRunningStats)
     {
@@ -39,7 +40,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     }
 
     // Input dimensions
-    const int64_t n = config.dims.size() > 0 ? config.dims[0] : 16; // BATCH SIZE
+    const int64_t n = !config.dims.empty() ? config.dims[0] : 16; // BATCH SIZE
     const int64_t c = config.dims.size() > 1 ? config.dims[1] : 16; // CHANNELS (FEATURES)
     const int64_t h = config.dims.size() > 2 ? config.dims[2] : 16; // HEIGHT (SPATIAL DIMENSION)
     const int64_t w = config.dims.size() > 3 ? config.dims[3] : 16; // WIDTH (SPATIAL DIMENSION)
@@ -55,9 +56,19 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     auto scale = createTensor({1, c, 1, 1}, intermediateType);
     auto bias = createTensor({1, c, 1, 1}, intermediateType);
 
-    // Epsilon is a pass-by-value scalar, not a buffer
+    // Epsilon is a pass-by-value scalar, not a device buffer.
+    // Compile-time constant: value is baked into the op-graph at build() and requires no
+    // variant-pack entry at execute(). Works with any plugin version.
+    // Runtime pass-by-value (--runtime-scalars): value is supplied as a host pointer in the
+    // variant pack at execute(), allowing it to vary across executions without rebuilding the
+    // graph. Requires plugin SDK >= 1.2.0.
+    constexpr auto EPSILON = static_cast<float>(utilities::BATCHNORM_DEFAULT_EPSILON);
     auto epsilon = std::make_shared<graph::TensorAttributes>();
-    epsilon->set_value(utilities::BATCHNORM_DEFAULT_EPSILON);
+    epsilon->set_value(EPSILON);
+    if(config.useRuntimeScalars)
+    {
+        epsilon->set_as_runtime_parameter();
+    }
 
     auto bnAttributes = graph::BatchnormAttributes();
     bnAttributes.set_name("bn_training_node");
@@ -66,8 +77,9 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     // Declare running statistics tensors at broader scope
     std::shared_ptr<graph::TensorAttributes> prevRunningMean;
     std::shared_ptr<graph::TensorAttributes> prevRunningVar;
+    std::shared_ptr<graph::TensorAttributes> momentum;
 
-    const double momentumVal = 0.1;
+    constexpr float MOMENTUM = 0.1f;
 
     // Conditionally setup running statistics inputs
     if(config.useRunningStats)
@@ -75,9 +87,13 @@ bool SampleRunner::operator()(const TensorLayout& layout)
         prevRunningMean = createTensor({1, c, 1, 1}, intermediateType);
         prevRunningVar = createTensor({1, c, 1, 1}, intermediateType);
 
-        // Momentum: use pass-by-value with double (matches MIOpen API)
-        auto momentum = std::make_shared<graph::TensorAttributes>();
-        momentum->set_value(momentumVal);
+        // Momentum follows the same compile-time vs. runtime pattern as epsilon.
+        momentum = std::make_shared<graph::TensorAttributes>();
+        momentum->set_value(MOMENTUM);
+        if(config.useRuntimeScalars)
+        {
+            momentum->set_as_runtime_parameter();
+        }
 
         bnAttributes.set_previous_running_stats(prevRunningMean, prevRunningVar, momentum);
     }
@@ -142,7 +158,9 @@ bool SampleRunner::operator()(const TensorLayout& layout)
                                            static_cast<IntermediateType>(1.0f));
     }
 
-    // Build variant pack
+    // Build variant pack.
+    // Runtime scalars are supplied as host pointers in the variant pack.
+    // Compile-time constants are baked at build() and must NOT appear here.
     std::unordered_map<int64_t, void*> variantPack;
     variantPack[x->get_uid()] = xTensor.memory().deviceData();
     variantPack[scale->get_uid()] = scaleTensor.memory().deviceData();
@@ -151,12 +169,26 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     variantPack[savedMean->get_uid()] = savedMeanTensor.memory().deviceData();
     variantPack[savedInvVariance->get_uid()] = savedInvVarTensor.memory().deviceData();
 
+    // Using the same default here keeps output numerically identical to the compile-time path,
+    // so CPU validation passes regardless of which mode is active. In a real application this
+    // value could differ per execution without rebuilding the graph.
+    float epsilonVal = EPSILON;
+    float momentumVal = MOMENTUM;
+    if(config.useRuntimeScalars)
+    {
+        variantPack[epsilon->get_uid()] = &epsilonVal;
+    }
+
     if(config.useRunningStats)
     {
         variantPack[prevRunningMean->get_uid()] = prevMeanTensor.memory().deviceData();
         variantPack[prevRunningVar->get_uid()] = prevVarTensor.memory().deviceData();
         variantPack[nextRunningMean->get_uid()] = nextMeanTensor.memory().deviceData();
         variantPack[nextRunningVariance->get_uid()] = nextVarTensor.memory().deviceData();
+        if(config.useRuntimeScalars)
+        {
+            variantPack[momentum->get_uid()] = &momentumVal;
+        }
     }
 
     int64_t workspaceSize = 0;
@@ -312,6 +344,26 @@ bool SampleRunner::operator()(const TensorLayout& layout)
         {
             std::cout << static_cast<float>(nextVarHostPtr[i]) << " ";
         }
+    }
+
+    // Demonstrate that the graph can be re-executed with different scalar values without
+    // rebuilding. The variant pack already holds pointers to epsilonVal (and momentumVal),
+    // so updating their values in-place is all that is needed.
+    if(config.useRuntimeScalars)
+    {
+        std::cout << "Re-executing with epsilon = 1.0, momentum = 0.9 (no rebuild required)...\n";
+        epsilonVal = 1.0f;
+        momentumVal = 0.9f;
+        HIPDNN_FE_CHECK(graph->execute(handle, variantPack, workspace.get()));
+        activatedYTensor.memory().markDeviceModified();
+        activatedYHostPtr = activatedYTensor.memory().hostData();
+
+        std::cout << "First 10 activated_y values (epsilon = 1.0, momentum = 0.9): ";
+        for(int i = 0; i < 10; ++i)
+        {
+            std::cout << static_cast<float>(activatedYHostPtr[i]) << " ";
+        }
+        std::cout << '\n';
     }
 
     std::cout << "\nBatch normalization training + activation graph execution complete for "
