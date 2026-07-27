@@ -1853,7 +1853,8 @@ class GlobalWriteBatchWriter:
           gwvw>1 packs 2 elements/op (v_pk_add_f32 + v_pk_fma_f32). s is broadcast from its sgpr
           via op_sel_hi."""
           fmaMod = Module("GateFMA")
-          tmpPk = self.parentWriter.vgprPool.checkOutAligned(2, 2, "GateFMA tmp pair") if self.gwvw > 1 else self.tmpVgpr
+          assert self.tmpVgprSize >= 2, "gate packed FMA needs a 2-vgpr store-tmps scratch"
+          tmpPk = self.tmpVgpr
           for vi in range(0, self.gwvw):
             sumIdxV = self.ss.elementSumIdx[elementIdx] + vi
             vgprIdx = sumIdxV - self.parentWriter.states.c.startVgprValu
@@ -1874,8 +1875,6 @@ class GlobalWriteBatchWriter:
               fmaMod.add(VFmaPKF32(dst=vgpr("ValuC+%d"%vgprIdx, 2), src0=vgpr(tmpPk, 2),
                 src1=vgpr("ValuC+%d"%vgprIdx, 2), src2=vgpr(dataGate + vi, 2),
                 comment="GateResidual identity packed: acc = (gate+s)*acc + gate (vi=%d,%d)"%(vi, vi+1)))
-          if self.gwvw > 1:
-            self.parentWriter.vgprPool.checkIn(tmpPk)
           return fmaMod
 
         if len(gateList) == 1:
