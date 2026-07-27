@@ -1263,7 +1263,6 @@ struct GridwiseGemmMultiD_xdl_cshuffle_v3
             }
         }
 
-
         const auto availableVgprCount = []() {
             if(ck::is_gfx125_supported())
             {
