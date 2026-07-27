@@ -29,7 +29,7 @@
 
 RTCKernel::RTCGenerator RTCKernelTranspose::generate_from_node(const LeafNode&    node,
                                                                const std::string& gpu_arch,
-                                                               bool               enable_callbacks)
+                                                               CallbackType       cbtype)
 {
     const auto& length = node.length;
 
@@ -100,7 +100,7 @@ RTCKernel::RTCGenerator RTCKernelTranspose::generate_from_node(const LeafNode&  
                          node.direction,
                          diagonal,
                          tileAligned,
-                         node.GetCallbackType(enable_callbacks),
+                         cbtype,
                          node.loadOps,
                          node.storeOps,
                          grid3D};

@@ -439,6 +439,14 @@ try
     try
     {
         rocfft_execution_info_internal info_internal(info, *plan);
+
+        // disallow combining JIT callbacks and legacy callbacks
+        if((plan->desc.loadOps.has_spirv() || plan->desc.storeOps.has_spirv())
+           && (info_internal.get_load_cb_fns() || info_internal.get_store_cb_fns()))
+        {
+            return rocfft_status_invalid_arg_value;
+        }
+
         plan->Execute(in_buffer, out_buffer, info_internal);
     }
     catch(std::exception& e)
@@ -517,7 +525,8 @@ void ExecPlan::ExecuteAsync(const rocfft_plan                       plan,
 
     try
     {
-        TransformPowX(*this,
+        TransformPowX(*plan,
+                      *this,
                       in_transform_ptrs,
                       (rootPlan->placement == rocfft_placement_inplace) ? in_transform_ptrs
                                                                         : out_transform_ptrs,

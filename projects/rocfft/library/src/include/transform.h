@@ -24,7 +24,10 @@
 #include "callback_map.h"
 #include "exec_info.h"
 
-void TransformPowX(const ExecPlan&                         execPlan,
+struct rocfft_plan_t;
+
+void TransformPowX(const rocfft_plan_t&                    plan,
+                   const ExecPlan&                         execPlan,
                    void*                                   in_buffer[],
                    void*                                   out_buffer[],
                    const rocfft_execution_info_internal&   info,

@@ -591,7 +591,7 @@ static std::vector<char> cached_compile_impl(const std::string&                k
     // about to compile (i.e. after acquiring any locks)
     std::chrono::time_point<std::chrono::steady_clock> compile_begin;
 
-    RTCProcessType process_type = get_rtc_process_type();
+    const RTCProcessType process_type = get_rtc_process_type();
     switch(process_type)
     {
     case RTCProcessType::FORCE_OUT_PROCESS:

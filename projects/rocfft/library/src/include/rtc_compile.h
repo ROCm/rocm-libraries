@@ -24,6 +24,8 @@
 #include <string>
 #include <vector>
 
+static const char* ARCH_SPIRV = "amdgcnspirv";
+
 // compile source to a code object, in the current process.
 std::vector<char> compile_inprocess(const std::string& kernel_src, const std::string& gpu_arch);
 
