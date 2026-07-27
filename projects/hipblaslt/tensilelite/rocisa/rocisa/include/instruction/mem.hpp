@@ -3961,14 +3961,15 @@ namespace rocisa
             , s_addr(s_addr)
             , gm(gm)
         {
-            if(getAsmCaps()["HasGlobalPrefetch"])
-            {
-                setInst("global_prefetch_b8");
-            }
-            else
-            {
-                throw std::runtime_error("global_prefetch_b8 is not supported.");
-            }
+            // global_prefetch_b8 is a current-spec gfx1250 instruction: the container
+            // assembler emits EE174006/EE174008 for the real mnemonic, byte-identical
+            // to the golden .sp3 (llvm-mc round-trip verified, both directions).
+            // HasGlobalPrefetch is an ASSEMBLER-PROBED cap, so it is false whenever no
+            // assembler is reachable (e.g. a host-side render or unit test) -- gating
+            // CONSTRUCTION on it answers "was an assembler available to ask?", not "is
+            // this encoding valid", and made the node unusable in host-side rendering.
+            // Emit the mnemonic unconditionally; the assembler is the real arbiter.
+            setInst("global_prefetch_b8");
         }
 
         GlobalPrefetchB8(const GlobalPrefetchB8& other)
