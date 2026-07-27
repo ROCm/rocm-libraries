@@ -493,17 +493,17 @@ def is_valid_spec_for_problem(
     # caps gridDim.y (and .x/.z) at 65535. The M-tile axis maps
     # to gridDim.y so reject specs whose grid would silently truncate and
     # leave output tiles unwritten.
-    _AMD_MAX_GRID_DIM = 65535
+    _MAX_GRID_DIM = 65535
     _grid_m = (problem.M + spec.tile_m - 1) // spec.tile_m
     _grid_n = (problem.N_gemm + spec.tile_n - 1) // spec.tile_n
-    if _grid_m > _AMD_MAX_GRID_DIM:
+    if _grid_m > _MAX_GRID_DIM:
         return False, (
-            f"grid_m {_grid_m} > {_AMD_MAX_GRID_DIM} (hardware gridDim.y cap): "
+            f"grid_m {_grid_m} > {_MAX_GRID_DIM} (hardware gridDim.y cap): "
             f"M={problem.M} tile_m={spec.tile_m}"
         )
-    if _grid_n > _AMD_MAX_GRID_DIM:
+    if _grid_n > _MAX_GRID_DIM:
         return False, (
-            f"grid_n {_grid_n} > {_AMD_MAX_GRID_DIM} (hardware gridDim.x cap): "
+            f"grid_n {_grid_n} > {_MAX_GRID_DIM} (hardware gridDim.x cap): "
             f"N_gemm={problem.N_gemm} tile_n={spec.tile_n}"
         )
 
