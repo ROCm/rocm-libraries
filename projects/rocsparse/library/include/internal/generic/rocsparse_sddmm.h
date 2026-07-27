@@ -277,7 +277,7 @@ rocsparse_status rocsparse_sddmm_preprocess(rocsparse_handle            handle,
 *  batch \f$i\f$ is obtained from the base pointer by adding
 *  \p i * (2 * \p batch_stride), while the value buffer of batch \f$i\f$ is
 *  obtained by adding \p i * \p batch_stride. The stride must be at least the
-*  per-batch nnz of \f$C\f$, and may be larger to allow padding.
+*  per-batch nnz of \f$C\f$, and can be larger to allow padding.
 *
 *  For ELL, \ref rocsparse_ell_set_strided_batch sets a single per-batch stride
 *  that applies to both the column-index and value buffers; i.e. the column-index
