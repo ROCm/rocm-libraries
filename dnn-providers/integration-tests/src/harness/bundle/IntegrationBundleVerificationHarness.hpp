@@ -23,7 +23,7 @@
 #include "harness/TestConfig.hpp"
 #include "harness/TomlGuards.hpp"
 #include "harness/bundle/IntegrationTestBundle.hpp"
-#include "harness/input_init/SynthesisConfig.hpp"
+#include "harness/input-init/SynthesisConfig.hpp"
 
 namespace hipdnn_integration_tests::bundle
 {
@@ -34,6 +34,18 @@ namespace hipdnn_integration_tests::bundle
 // the same buffers.
 using OutputTensors
     = std::unordered_map<int64_t, std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>>;
+
+namespace detail
+{
+std::unordered_map<int64_t, void*> buildVariantPack(
+    TensorMap& inputs,
+    OutputTensors& outputs,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+        tensorAttributes,
+    const std::vector<int64_t>& outputTensorUids,
+    bool useDevice);
+}
 
 // Verifies a bundle's engine output against an expected source chosen by the
 // verification mode (RFC 0010 §4.4):
