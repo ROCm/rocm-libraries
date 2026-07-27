@@ -251,16 +251,6 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
             snprintf(reason, reason_cap, "block_size %d > 1024", block_size);
         return false;
     }
-    /* groups > 1 is not supported: wg_M and wg_N assume groups == 1. */
-    if(s->problem.groups > 1)
-    {
-        if(reason && reason_cap)
-            snprintf(reason,
-                     reason_cap,
-                     "groups > 1 is not supported for wgrad (got %d)",
-                     s->problem.groups);
-        return false;
-    }
 
     int sk = s->split_k;
     if(sk < -1 || sk == 0)
