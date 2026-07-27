@@ -142,7 +142,7 @@ void rocsolver_syevd_heevd_getMemorySize(rocblas_handle handle,
         *size_workArr = std::max(*size_workArr, 2 * sizeof(T*) * batch_count);
 
     // requirements for 2-stage path (he2hb does not support batch_count > 1)
-    const bool use_2stage = batch_count == 1
+    const bool use_2stage = !BATCHED
         && (hetrd_mode == rocsolver_alg_mode_2stage
             || (hetrd_mode == rocsolver_alg_mode_auto && n >= SYEVD_2STAGE_SWITCHSIZE));
     if(use_2stage)
@@ -327,7 +327,7 @@ void rocsolver_syevd_heevd_getMemorySize(rocblas_handle handle,
         *size_workArr = std::max(*size_workArr, 2 * sizeof(T*) * batch_count);
 
     // requirements for 2-stage path (he2hb does not support batch_count > 1)
-    const bool use_2stage = batch_count == 1
+    const bool use_2stage = !BATCHED
         && (hetrd_mode == rocsolver_alg_mode_2stage
             || (hetrd_mode == rocsolver_alg_mode_auto && n >= SYEVD_2STAGE_SWITCHSIZE));
     if(use_2stage)
