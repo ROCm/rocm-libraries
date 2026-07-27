@@ -159,7 +159,7 @@ rocblas_status rocsolver_sy2sb_he2hb_template(rocblas_handle handle,
 
     // gemm implementation is faster than her2k/hemm,
     // which are provided for comparison.
-    bool const use_her2k = false;
+    bool constexpr use_her2k = false;
 
     // quick return
     if(n == 0 || batch_count == 0)

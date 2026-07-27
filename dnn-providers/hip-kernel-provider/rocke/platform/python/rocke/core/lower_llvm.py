@@ -130,7 +130,7 @@ def _torch_hip_version() -> Optional[Tuple[int, int]]:
     bundle their own ``libamd_comgr.so`` whose LLVM version follows the
     wheel's ROCm release, not the system ``/opt/rocm`` one. When rocke
     is paired with a torch-bundled comgr (see
-    :func:`runtime.hip_module._torch_bundled_lib`), the flavor must
+    :func:`runtime.runtime_coexistence._torch_bundled_lib`), the flavor must
     match torch's ROCm vintage or comgr will reject the IR or
     silently auto-upgrade declares the lowerer didn't intend.
     """
@@ -273,6 +273,7 @@ _INTRINSIC_DECLS: Dict[str, str] = {
         "ptr addrspace(1) nocapture, ptr addrspace(3) nocapture, i32 immarg, i32 immarg)"
     ),
     "exp2.f32": "declare float @llvm.exp2.f32(float)",
+    "amdgcn.exp2.f32": "declare float @llvm.amdgcn.exp2.f32(float)",
     "log2.f32": "declare float @llvm.log2.f32(float)",
     "sqrt.f32": "declare float @llvm.sqrt.f32(float)",
     "rsqrt.f32": "declare float @llvm.amdgcn.rsq.f32(float)",
@@ -1644,6 +1645,17 @@ class _Lowerer:
         self._need("exp2.f32")
         self._current().emit(
             f"  {op.result.name} = call float @llvm.exp2.f32(float {self._operand(v)})"
+        )
+
+    def _op_math_exp2_fast(self, op: Op) -> None:
+        (v,) = op.operands
+        if v.type.name != "f32":
+            raise NotImplementedError("math.exp2_fast currently supports f32")
+        # Native single-instruction exp2 (v_exp_f32), no overflow guard.
+        self._need("amdgcn.exp2.f32")
+        self._current().emit(
+            f"  {op.result.name} = call float "
+            f"@llvm.amdgcn.exp2.f32(float {self._operand(v)})"
         )
 
     def _op_math_log2(self, op: Op) -> None:

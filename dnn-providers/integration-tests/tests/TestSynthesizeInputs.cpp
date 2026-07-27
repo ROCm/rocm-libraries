@@ -5,19 +5,20 @@
 
 #include <cstdint>
 #include <memory>
-#include <random>
 #include <set>
 #include <vector>
 
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 
-#include "harness/golden/input_init/SynthesizeInputs.hpp"
+#include "harness/input-init/SynthesizeInputs.hpp"
+#include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
+#include <hipdnn_test_sdk/utilities/detail/FlatbufferTensorAttributesUtils.hpp>
 
 // NOLINTBEGIN(readability-identifier-naming)
 
 using namespace hipdnn_flatbuffers_sdk::data_objects;
-using namespace hipdnn_integration_tests::golden;
+using namespace hipdnn_integration_tests;
 
 namespace
 {
@@ -188,6 +189,45 @@ GraphResult buildConvBiasReluGraph()
     return r;
 }
 
+// ── Batchnorm training with runtime PBV scalars ─────────────────────────────
+// uids: x=1, y=2, scale=3, bias=4, epsilon=5, prev_mean=8, prev_variance=9, momentum=10
+GraphResult buildBatchnormTrainingRuntimePbvGraph()
+{
+    GraphResult result;
+    result.builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph(
+        kStrides,
+        kDims,
+        /*withMeanVariance=*/false,
+        /*overrideShapeEnabled=*/false,
+        /*runtimeEpsilon=*/true,
+        /*withRunningStatsAndMomentum=*/true,
+        /*runtimeMomentum=*/true);
+    result.graph = GetGraph(result.builder.GetBufferPointer());
+    return result;
+}
+
+InputTensorMap makeTensorsFromGraph(const GraphResult& gr, const std::vector<int64_t>& uids)
+{
+    std::unordered_map<int64_t, const TensorAttributes*> attributes;
+    for(const auto* tensor : *gr.graph->tensors())
+    {
+        attributes.emplace(tensor->uid(), tensor);
+    }
+
+    InputTensorMap inputs;
+    for(const int64_t uid : uids)
+    {
+        inputs.emplace(uid,
+                       hipdnn_test_sdk::detail::createTensorFromAttribute(*attributes.at(uid)));
+    }
+    return inputs;
+}
+
+float scalarValue(const InputTensorMap& inputs, int64_t uid)
+{
+    return *static_cast<const float*>(inputs.at(uid)->rawHostData());
+}
+
 // ── SDPA forward (no structured optionals) ──────────────────────────────────
 
 GraphResult buildSdpaFwdGraph()
@@ -353,19 +393,24 @@ SynthesisResult runSynthesis(const GraphResult& gr, const std::set<int64_t>& out
 {
     const auto leafUids = gr.leafInputUids(outputUids);
     auto inputs = makeTensors(leafUids);
-    std::mt19937 rng(42);
+    SynthesisConfig config;
 
-    SynthesisTracker tracker(leafUids, inputs);
-    for(uint32_t i = 0; i < gr.graph->nodes()->size(); ++i)
+    synthesizeInputs(*gr.graph, inputs, leafUids, config);
+
+    auto missing = config.unfilled(leafUids);
+    if(!missing.empty())
     {
-        const SynthesisResult nodeResult
-            = synthesizeNodeInputs(*gr.graph->nodes()->Get(i), tracker, rng);
-        if(!nodeResult.filled)
+        std::string msg = "cannot synthesize:";
+        for(const int64_t uid : missing)
         {
-            return nodeResult;
+            const auto init = config.fill(uid);
+            const char* kind = init.kind == FillSpec::Kind::STRUCTURED ? "structured" : "derived";
+            msg += " uid=" + std::to_string(uid) + " (" + kind + ")";
         }
+        return SynthesisResult::unsupported(msg);
     }
-    return tracker.finish("test");
+
+    return SynthesisResult::ok();
 }
 
 } // namespace
@@ -396,6 +441,30 @@ TEST(TestSynthesizeInputs, ConvPlusBiasPlusReluFused)
     EXPECT_TRUE(result.filled) << result.reason;
 }
 
+// Unit seam: verify the synthesis policy itself. Epsilon is the fixed-value
+// path; momentum is the seeded random path and must reproduce across runs.
+TEST(TestSynthesizeInputs, RuntimePbvScalarsUseFixedAndDeterministicRandomFills)
+{
+    const auto graph = buildBatchnormTrainingRuntimePbvGraph();
+    const std::vector<int64_t> leafUids = {1, 3, 4, 5, 8, 9, 10};
+
+    auto firstInputs = makeTensorsFromGraph(graph, leafUids);
+    SynthesisConfig firstConfig;
+    const auto firstResult = synthesizeInputs(*graph.graph, firstInputs, leafUids, firstConfig);
+    ASSERT_TRUE(firstResult.filled) << firstResult.reason;
+
+    EXPECT_FLOAT_EQ(scalarValue(firstInputs, 5), 1e-5f);
+    const float firstMomentum = scalarValue(firstInputs, 10);
+    EXPECT_GE(firstMomentum, 0.0f);
+    EXPECT_LE(firstMomentum, 1.0f);
+
+    auto secondInputs = makeTensorsFromGraph(graph, leafUids);
+    SynthesisConfig secondConfig;
+    const auto secondResult = synthesizeInputs(*graph.graph, secondInputs, leafUids, secondConfig);
+    ASSERT_TRUE(secondResult.filled) << secondResult.reason;
+    EXPECT_FLOAT_EQ(scalarValue(secondInputs, 10), firstMomentum);
+}
+
 TEST(TestSynthesizeInputs, SdpaFwdNoStructuredOptionals)
 {
     const auto gr = buildSdpaFwdGraph();
@@ -410,7 +479,7 @@ TEST(TestSynthesizeInputs, SdpaFwdWithStructuredInputRefuses)
     const auto result = runSynthesis(gr, {4});
 
     EXPECT_FALSE(result.filled);
-    EXPECT_NE(result.reason.find("seq_len_q"), std::string::npos);
+    EXPECT_NE(result.reason.find("uid=5"), std::string::npos);
     EXPECT_NE(result.reason.find("structured"), std::string::npos);
 }
 

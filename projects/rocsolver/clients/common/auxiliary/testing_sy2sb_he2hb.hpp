@@ -277,7 +277,6 @@ void sy2sb_he2hb_getPerfData(const rocblas_handle handle,
                              const bool perf)
 {
     rocsolver_timer timer;
-    double start, time;
     hipStream_t stream;
     CHECK_ROCBLAS_ERROR(rocblas_get_stream(handle, &stream));
 
@@ -327,7 +326,7 @@ void sy2sb_he2hb_getPerfData(const rocblas_handle handle,
                               dA.data(), lda, // A
                               dAband.data(), ldab, // Aband
                               dTau.data()); // tau
-        time = timer.end(stream);
+        timer.end(stream);
     }
     *gpu_time_used = timer.get_combined();
 }
