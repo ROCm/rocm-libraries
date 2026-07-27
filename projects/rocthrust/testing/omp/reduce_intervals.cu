@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -25,7 +25,7 @@
 template <typename InputIterator, typename OutputIterator, typename BinaryFunction, typename Decomposition>
 void reduce_intervals(InputIterator input, OutputIterator output, BinaryFunction binary_op, Decomposition decomp)
 {
-  using OutputType = typename thrust::iterator_value<OutputIterator>::type;
+  using OutputType = thrust::detail::it_value_t<OutputIterator>;
   using index_type = typename Decomposition::index_type;
 
   // wrap binary_op
@@ -53,7 +53,7 @@ void reduce_intervals(InputIterator input, OutputIterator output, BinaryFunction
   }
 }
 
-void TestOmpReduceIntervalsSimple(void)
+void TestOmpReduceIntervalsSimple()
 {
   using T      = int;
   using Vector = thrust::device_vector<T>;

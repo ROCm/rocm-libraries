@@ -117,6 +117,101 @@ TEST_F(TestLayernormBpropPlan, ExecutePlan)
                                         planTensorBundle.getTensor(attributes.dbias_tensor_uid())));
 }
 
+TEST_F(TestLayernormBpropPlan, ExecutePlanWithRuntimeEpsilonFromPack)
+{
+    auto tolerance = layernorm::getTolerance<float>();
+    const std::vector<int64_t> dims = {6, 3, 32, 32};
+    const int64_t normalizedDimCount = 3;
+    const unsigned int seed = getGlobalTestSeed();
+
+    // Pure runtime pass-by-value epsilon delivered through the variant pack.
+    auto runtimeGraph = buildLayernormBpropGraph(DataType::FLOAT,
+                                                 DataType::FLOAT,
+                                                 DataType::FLOAT,
+                                                 DataType::FLOAT,
+                                                 dims,
+                                                 normalizedDimCount,
+                                                 TensorLayout::NHWC,
+                                                 /*meanInvVar=*/true,
+                                                 /*onePadded=*/false,
+                                                 /*runtimeEpsilon=*/true);
+    auto [runtimeSerialized, runtimeSerErr] = runtimeGraph->to_binary();
+    ASSERT_TRUE(runtimeSerErr.is_good()) << runtimeSerErr.get_message();
+    const GraphWrapper runtimeWrapper(runtimeSerialized.data(), runtimeSerialized.size());
+    const INodeWrapper& runtimeNode = runtimeWrapper.getNodeWrapper(0);
+    LayernormBpropTensorBundle runtimeBundle(runtimeNode, runtimeWrapper.getTensorMap(), seed);
+
+    const auto& runtimeAttrs
+        = runtimeNode
+              .attributesAs<hipdnn_flatbuffers_sdk::data_objects::LayernormBackwardAttributes>();
+    ASSERT_TRUE(runtimeAttrs.epsilon_tensor_uid().has_value());
+    const auto epsilonHostValue = static_cast<float>(LAYERNORM_DEFAULT_EPSILON);
+    *static_cast<float*>(
+        runtimeBundle.tensors[runtimeAttrs.epsilon_tensor_uid().value()]->rawHostData())
+        = epsilonHostValue;
+
+    const auto& runtimeTensorMap = runtimeWrapper.getTensorMap();
+    LayernormBpropParams runtimeParams(
+        *runtimeTensorMap.at(runtimeAttrs.dy_tensor_uid()),
+        *runtimeTensorMap.at(runtimeAttrs.x_tensor_uid()),
+        *runtimeTensorMap.at(runtimeAttrs.scale_tensor_uid()),
+        *runtimeTensorMap.at(runtimeAttrs.dx_tensor_uid()),
+        *runtimeTensorMap.at(runtimeAttrs.dscale_tensor_uid()),
+        *runtimeTensorMap.at(runtimeAttrs.dbias_tensor_uid()),
+        normalizedDimCount,
+        runtimeTensorMap.at(runtimeAttrs.mean_tensor_uid().value()),
+        runtimeTensorMap.at(runtimeAttrs.inv_variance_tensor_uid().value()),
+        runtimeTensorMap.at(runtimeAttrs.epsilon_tensor_uid().value()));
+    const std::unordered_map<int64_t, void*> runtimeVariantPack = runtimeBundle.toHostVariantPack();
+    LayernormBpropPlan<float, float, float, float, float> runtimePlan(std::move(runtimeParams));
+    runtimePlan.execute(runtimeVariantPack);
+
+    // Baked-epsilon reference graph with the same seed and equal epsilon value.
+    auto bakedGraph = buildLayernormBpropGraph(DataType::FLOAT,
+                                               DataType::FLOAT,
+                                               DataType::FLOAT,
+                                               DataType::FLOAT,
+                                               dims,
+                                               normalizedDimCount,
+                                               TensorLayout::NHWC,
+                                               /*meanInvVar=*/true);
+    auto [bakedSerialized, bakedSerErr] = bakedGraph->to_binary();
+    ASSERT_TRUE(bakedSerErr.is_good()) << bakedSerErr.get_message();
+    const GraphWrapper bakedWrapper(bakedSerialized.data(), bakedSerialized.size());
+    const INodeWrapper& bakedNode = bakedWrapper.getNodeWrapper(0);
+    LayernormBpropTensorBundle bakedBundle(bakedNode, bakedWrapper.getTensorMap(), seed);
+
+    const auto& bakedAttrs
+        = bakedNode
+              .attributesAs<hipdnn_flatbuffers_sdk::data_objects::LayernormBackwardAttributes>();
+    const auto& bakedTensorMap = bakedWrapper.getTensorMap();
+    LayernormBpropParams bakedParams(
+        *bakedTensorMap.at(bakedAttrs.dy_tensor_uid()),
+        *bakedTensorMap.at(bakedAttrs.x_tensor_uid()),
+        *bakedTensorMap.at(bakedAttrs.scale_tensor_uid()),
+        *bakedTensorMap.at(bakedAttrs.dx_tensor_uid()),
+        *bakedTensorMap.at(bakedAttrs.dscale_tensor_uid()),
+        *bakedTensorMap.at(bakedAttrs.dbias_tensor_uid()),
+        normalizedDimCount,
+        bakedTensorMap.at(bakedAttrs.mean_tensor_uid().value()),
+        bakedTensorMap.at(bakedAttrs.inv_variance_tensor_uid().value()),
+        bakedTensorMap.at(bakedAttrs.epsilon_tensor_uid().value()));
+    const std::unordered_map<int64_t, void*> bakedVariantPack = bakedBundle.toHostVariantPack();
+    LayernormBpropPlan<float, float, float, float, float> bakedPlan(std::move(bakedParams));
+    bakedPlan.execute(bakedVariantPack);
+
+    const CpuFpReferenceValidation<float> cpuRefOutputValidation(tolerance, tolerance);
+    EXPECT_TRUE(
+        cpuRefOutputValidation.allClose(bakedBundle.getTensor(bakedAttrs.dx_tensor_uid()),
+                                        runtimeBundle.getTensor(runtimeAttrs.dx_tensor_uid())));
+    EXPECT_TRUE(
+        cpuRefOutputValidation.allClose(bakedBundle.getTensor(bakedAttrs.dscale_tensor_uid()),
+                                        runtimeBundle.getTensor(runtimeAttrs.dscale_tensor_uid())));
+    EXPECT_TRUE(
+        cpuRefOutputValidation.allClose(bakedBundle.getTensor(bakedAttrs.dbias_tensor_uid()),
+                                        runtimeBundle.getTensor(runtimeAttrs.dbias_tensor_uid())));
+}
+
 TEST_F(TestLayernormBpropPlan, ExecutePlanWithoutOptionals)
 {
     auto tolerance = layernorm::getTolerance<float>();

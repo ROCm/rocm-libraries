@@ -696,6 +696,7 @@ inline SolverRegistrar::SolverRegistrar(IdRegistryData& registry)
     Register(registry, ++id, Primitive::Normalization, layernorm::LayernormBackward().SolverDbId());
 
     RegisterWithSolver(registry, ++id, conv::ConvDepthwiseFwd2D{}, miopenConvolutionAlgoDirect);
+    RegisterWithSolver(registry, ++id, conv::ConvDepthwiseBwdData2D{}, miopenConvolutionAlgoDirect);
 
     // Transposed Winograd solvers for NHWC layout support
     RegisterWithSolver(
@@ -707,9 +708,8 @@ inline SolverRegistrar::SolverRegistrar(IdRegistryData& registry)
     // Transposed non-tunable Winograd solvers
     RegisterWithSolver(
         registry, ++id, conv::TransposedConvWinoFuryRxS<2, 3>{}, miopenConvolutionAlgoWinograd);
-    ++id; // RegisterWithSolver(
-          //     registry, ++id, conv::TransposedConvWinoRageRxS<2, 3>{},
-          //     miopenConvolutionAlgoWinograd);
+    RegisterWithSolver(
+        registry, ++id, conv::TransposedConvWinoRageRxS<2, 3>{}, miopenConvolutionAlgoWinograd);
     RegisterWithSolver(registry,
                        ++id,
                        conv::TransposedConvMPBidirectWinograd<2, 3>{},

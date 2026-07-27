@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2022-2025 Advanced Micro Devices, Inc.
+ * Copyright (c) 2022-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -220,6 +220,8 @@ typedef enum {
                                                             - When the input datatype is ``BF16``, the Bias type can be ``BF16`` or ``FP32``. (default ``BF16``)
                                                             - In other cases, the Bias type is ``FP32``.*/
    HIPSPARSELT_MATMUL_SPARSE_MAT_POINTER = 17,         /**< Pointer to the pruned sparse matrix. */
+   HIPSPARSELT_MATMUL_GATE_RESIDUAL_MAT_POINTER = 18,  /**< Pointer to the gate residual matrix. */
+   HIPSPARSELT_MATMUL_GATE_RESIDUAL_DESC = 19,         /**< Pointer to the gate residual matrix.descriptor */
 } hipsparseLtMatmulDescAttribute_t;
 
 /*! \ingroup types_module
@@ -381,7 +383,7 @@ hipsparseStatus_t hipsparseLtDestroy(const hipsparseLtHandle_t* handle);
  *  @param[in]
  *  alignment  memory alignment in bytes (not used by the HIP backend).
  *  @param[in]
- *  valueType  data type of the matrix. See \ref hipDataType.
+ *  valueType  data type of the matrix. Data type: hipDataType.
  *  @param[in]
  *  order      memory layout: \p HIPSPARSE_ORDER_COL or \p HIPSPARSE_ORDER_ROW.
  *
@@ -418,7 +420,7 @@ hipsparseStatus_t hipsparseLtDenseDescriptorInit(const hipsparseLtHandle_t*  han
  *  @param[in]
  *  alignment  memory alignment in bytes (not used by the HIP backend).
  *  @param[in]
- *  valueType  data type of the matrix. See \ref hipDataType.
+ *  valueType  data type of the matrix. Data type: hipDataType.
  *  @param[in]
  *  order      memory layout: \p HIPSPARSE_ORDER_COL or \p HIPSPARSE_ORDER_ROW.
 

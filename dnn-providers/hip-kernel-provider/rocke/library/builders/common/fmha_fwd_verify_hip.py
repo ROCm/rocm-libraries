@@ -43,29 +43,8 @@ from kernels.common.fmha_mfma import (
     fmha_fwd_mfma_grid,
     is_valid_spec,
 )
+from rocke.numeric.references import dense_attention_reference
 from rocke.runtime.hip_module import Runtime
-
-
-def _ref_attention(Q, K, V, *, causal: bool):
-    """Dense attention reference, Q/K/V shape ``(seqlen, heads, head_size)``.
-
-    Mirrors ``examples.gfx1151.wmma_fmha_fwd_verify._ref_attention`` (fp32
-    math, fp16 out) so the two harnesses share an oracle.
-    """
-    import numpy as np
-
-    d = Q.shape[-1]
-    scores = np.einsum("ihd,jhd->ihj", Q.astype(np.float32), K.astype(np.float32))
-    scores /= math.sqrt(d)
-    if causal:
-        q_pos = np.arange(Q.shape[0])[:, None, None]
-        k_pos = np.arange(K.shape[0])[None, None, :]
-        scores = np.where(k_pos <= q_pos, scores, -1e30)
-    scores -= scores.max(axis=-1, keepdims=True)
-    probs = np.exp(scores)
-    probs /= probs.sum(axis=-1, keepdims=True)
-    out = np.einsum("ihj,jhd->ihd", probs, V.astype(np.float32))
-    return out.astype(np.float16)
 
 
 def main() -> int:
@@ -221,7 +200,9 @@ def main() -> int:
             Vb = np.repeat(V[bi], rep, axis=1)
         else:
             Kb, Vb = K[bi], V[bi]
-        ref[bi] = _ref_attention(Q[bi], Kb, Vb, causal=args.causal)
+        ref[bi] = dense_attention_reference(
+            Q[bi], Kb, Vb, causal=args.causal, out_dtype=np.float16
+        )
 
     diff = np.abs(Out.astype(np.float32) - ref.astype(np.float32))
     max_abs = float(diff.max())

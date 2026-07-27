@@ -11,6 +11,22 @@
 
 namespace origami {
 
+// Resolve the number of CUs to model against.
+//   requested_num_cus: caller's CU budget. Signed so non-positive values are
+//                      handled without a caller-side clamp: 0 means "use all
+//                      CUs" and a negative (invalid) value is treated the same.
+//                      A positive value caps the budget.
+//   hardware_num_cus:  physical CU count (hardware_t::N_CU), the upper bound.
+// Returns the requested budget when it is positive and below the physical
+// count; otherwise the full physical count.
+std::size_t resolve_num_cus(std::int64_t requested_num_cus, std::size_t hardware_num_cus) {
+  if (requested_num_cus > 0
+      && static_cast<std::size_t>(requested_num_cus) < hardware_num_cus) {
+    return static_cast<std::size_t>(requested_num_cus);
+  }
+  return hardware_num_cus;
+}
+
 hardware_t::hardware_t(architecture_t arch,
                        size_t N_CU,
                        size_t lds_capacity,
@@ -195,6 +211,11 @@ size_t hardware_t::get_default_num_xcds(architecture_t arch) {
           std::string(arch_enum_to_name(arch)) +
           ". Use get_hardware_for_device() with a live GPU to query at runtime.");
   }
+}
+
+size_t hardware_t::get_default_cache_line_bytes(architecture_t /*arch*/) {
+  // Per-arch L2 cache-line size, currently uniform 128 B across supported archs.
+  return 128;
 }
 
 void hardware_t::print() const {
