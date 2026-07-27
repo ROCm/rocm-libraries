@@ -90,8 +90,8 @@ try
     if(rocblas_is_device_memory_size_query(handle))
         return rocblas_set_optimal_device_memory_size(
             handle, size_scalars, size_work1, size_work2, size_work3, size_work4, size_tmpz,
-            size_splits, size_tau, size_pivots_workArr, size_iinfo, size_Aband, size_he2hb_work,
-            size_V_hb2st, size_tau_hb2st);
+            size_splits, size_tau, size_pivots_workArr, size_Aband, size_he2hb_work,
+            size_V_hb2st, size_tau_hb2st, size_iinfo);
 
     // memory workspace allocation
     void *scalars, *work1, *work2, *work3, *work4, *tmpz, *splits, *tau, *pivots_workArr, *iinfo;
@@ -112,11 +112,11 @@ try
     splits = mem[6];
     tau = mem[7];
     pivots_workArr = mem[8];
-    iinfo = mem[9];
-    Aband = mem[10];
-    he2hb_work = mem[11];
-    V_hb2st = mem[12];
-    tau_hb2st = mem[13];
+    Aband = mem[9];
+    he2hb_work = mem[10];
+    V_hb2st = mem[11];
+    tau_hb2st = mem[12];
+    iinfo = mem[13];
     if(size_scalars > 0)
         init_scalars(handle, (T*)scalars);
 
