@@ -54,6 +54,7 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
+        - MaxOccupancy: [40]
       ForkParameters:
         - MatrixInstruction:
           - [16, 16, 128, 1, 1, 1, 1, 1, 1]

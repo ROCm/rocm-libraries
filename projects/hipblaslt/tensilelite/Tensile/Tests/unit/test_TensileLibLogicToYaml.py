@@ -418,6 +418,7 @@ BenchmarkProblems:
     - LdsPadB: [16]
     - LocalReadVectorWidth: [8]
     - MaxLDS: [163840]
+    - MaxOccupancy: [40]
     - MbskPrefetchMethod: [0]
     - NonTemporalA: [2]
     - NonTemporalB: [7]

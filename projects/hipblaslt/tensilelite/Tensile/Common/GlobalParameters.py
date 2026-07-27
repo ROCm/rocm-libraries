@@ -464,7 +464,7 @@ defaultBenchmarkCommonParameters = [
     {"LdsBlockSizePerPadMetadata": [0]},
     {"TransposeLDS": [-1]},
     {"TransposeLDSMetadata": [-1]},
-    {"MaxOccupancy": [40]},
+    {"MaxOccupancy": [64]},
     {"MaxLDS": [-1]},
     {"VectorWidthA": [-1]},
     {"VectorWidthB": [-1]},
