@@ -36,7 +36,7 @@ from rocisa.functions import scalarStaticDivideAndRemainder, sMagicDiv2, \
 
 from .Subtile.SubtileLREmit import localReadResetOffsetsSubtile
 
-from ..Common import print2, ceilDivide, log2, clusterEnabled, streamKClusterFactors, streamKForceDP2DMulticast, streamKDual2DMulticast
+from ..Common import print2, ceilDivide, log2, clusterEnabled, streamKClusterFactors, streamKDual2DMulticast
 from ..Component import Component
 from ..AsmStoreState import StoreState, VectorDataTypes
 from ..AsmAddressCalculation import AddrCalculation
@@ -44,30 +44,14 @@ import abc
 
 from copy import deepcopy
 
-# ======================================================================
-# 2-D StreamK factored cluster -- within-cluster lane-order layout
-# ======================================================================
+# 2-D StreamK factored cluster -- within-cluster lane-order layout.
 # The physical within-cluster lane linearization of a genuine 2-D HW cluster
-# ClusterDim = [Cs, Ck] governs the factored B-multicast mask. HW-validated on
-# gfx1250 as X-fastest (STREAMK_2D_LANE_X_FASTEST = True); the flag is retained
-# as a single, easily-flippable compile-time fallback should a future part order
-# the lanes differently.
-#
-#   STREAMK_2D_LANE_X_FASTEST = True  (HW-validated on gfx1250):
-#     lane index = wg_x + wg_y*Cs  (X fastest). Under this ordering the Cs
-#     spatial B-multicast peers sharing a given K/Y rank k = wg_y are a
-#     CONTIGUOUS run, so the B-multicast mask is
-#         maskB = ((1 << Cs) - 1) << (k * Cs).
-#
-#   STREAMK_2D_LANE_X_FASTEST = False (fallback if a future part disproves it):
-#     lane index = wg_y + wg_x*Ck  (Y/K fastest), so
-#         maskB = (OR_{s' in [0,Cs)} 1 << (s'*Ck)) << k.
-#
-# If a [Cs,Ck] factored cluster miscomputes on new HW, flip this ONE flag to
-# False and rebuild -- no other edit is needed to switch the mask layout. This
-# flag is consumed ONLY by streamKFactoredMaskCompute below and has NO effect on
-# the pure-multicast [C,1] path (Ck==1 never reaches the 2-D branch).
-STREAMK_2D_LANE_X_FASTEST = True
+# ClusterDim = [Cs, Ck] is X-fastest (HW-validated on gfx1250):
+#     lane index = wg_x + wg_y*Cs. Under this ordering the Cs spatial
+#     B-multicast peers sharing a given K/Y rank k = wg_y are a CONTIGUOUS run,
+#     so the factored B-multicast mask is maskB = ((1 << Cs) - 1) << (k * Cs).
+# Consumed only by streamKFactoredMaskCompute below; the pure-multicast [C,1]
+# path (Ck==1) never reaches the 2-D branch.
 
 class XCCMapping(Component):
     """
@@ -1679,26 +1663,41 @@ class StreamK(Component):
         """
         return self._streamKClusterReductionEnabled(writer, kernel)
 
-    def clusterReduceSignal(self, writer, kernel):
-        """Wave-0-elected cluster split-barrier arrive (``s_barrier_signal -3``).
+    def _clusterElectArriveSignal(self, writer, module, labelBase, electTag, wait=False):
+        """Shared wave-0-elected cluster split-barrier arrive (+ optional wait).
 
-        One wave per workgroup arrives at the cluster-scope split barrier; the
-        remaining waves branch over the signal. Wave election reuses the
-        Serial/readfirstlane idiom the StreamK flag path already uses (rather
-        than sgpr("WaveIdx"), which may be undefined in the epilogue), so the
-        helper is self-contained.
+        One wave per workgroup (Serial readfirstlane == 0) arrives at the
+        cluster-scope split barrier (``s_barrier_signal -3``); the remaining waves
+        branch over it to ``labelBase``. When ``wait`` is set an all-waves
+        ``s_barrier_wait -3`` is appended after the skip label. Each caller passes
+        its own getNameInc label base + sgpr pool tag so emitted labels/counters
+        stay byte-identical. Wave election uses the Serial/readfirstlane idiom the
+        StreamK flag path already uses (rather than sgpr("WaveIdx"), which may be
+        undefined in the epilogue), so it is self-contained.
         """
-        assert writer.states.asmCaps.get("HasClusterBarrier", False), \
-            "StreamK cluster reduction requires the HasClusterBarrier asm capability"
-        module = Module("StreamK cluster reduce signal")
-        skipSignal = Label(label=writer.labels.getNameInc("SK_ClusterSkipSignal"), comment="")
-        elect = writer.sgprPool.checkOut(1, "SKClusterElect")
+        skipSignal = Label(label=writer.labels.getNameInc(labelBase), comment="")
+        elect = writer.sgprPool.checkOut(1, electTag)
         module.add(VReadfirstlaneB32(dst=sgpr(elect), src=vgpr("Serial"), comment="wave 0 signals the cluster"))
         module.add(SCmpEQU32(src0=sgpr(elect), src1=0, comment="Check for wave 0"))
         module.add(SCBranchSCC0(labelName=skipSignal.getLabelName(), comment="only wave 0 signals the cluster"))
         module.add(SBarrier(True, False, True, comment="cluster_barrier signal (arrive)"))
         module.add(skipSignal)
+        if wait:
+            module.add(SBarrier(True, True, True, comment="cluster_barrier wait"))
         writer.sgprPool.checkIn(elect)
+        return module
+
+    def clusterReduceSignal(self, writer, kernel):
+        """Wave-0-elected cluster split-barrier arrive (``s_barrier_signal -3``).
+
+        One wave per workgroup arrives at the cluster-scope split barrier; the
+        remaining waves branch over the signal. Delegates to the shared
+        _clusterElectArriveSignal helper.
+        """
+        assert writer.states.asmCaps.get("HasClusterBarrier", False), \
+            "StreamK cluster reduction requires the HasClusterBarrier asm capability"
+        module = Module("StreamK cluster reduce signal")
+        self._clusterElectArriveSignal(writer, module, "SK_ClusterSkipSignal", "SKClusterElect")
         return module
 
     def clusterReduceWait(self, writer, kernel):
@@ -2776,14 +2775,14 @@ class StreamKTwoTileDPFirst(StreamK):
         BOTH axes > 1: C = Cs*Ck, Cs = ClusterDim[0] spatial B-multicast peers,
         Ck = ClusterDim[1] K-split reduction peers. After the 2-D index fold
         (StreamKIdx = WorkGroup0*Ck + WorkGroup1, see preLoop) a workgroup's
-        within-cluster rank wg_x = StreamKIdx & (C-1) decodes "k fastest" to
-        (s, k):  k = StreamKIdx & (Ck-1)  (K-reduction axis rank),
-        s = wg_x >> log2(Ck)  (spatial axis rank). B is shared only by the Cs
-        peers with the SAME k (same K-slice) -- within-cluster ranks
-        {k, k+Ck, ..., k+(Cs-1)Ck} -- so the correct B mask is
+        within-cluster rank wg_x = StreamKIdx & (C-1) decodes to (s, k):
+        k = StreamKIdx & (Ck-1)  (K-reduction axis rank). B is shared only by the
+        Cs peers with the SAME k (same K-slice). In the X-fastest physical lane
+        order (lane = wg_x + wg_y*Cs, HW-validated on gfx1250) those Cs peers are a
+        CONTIGUOUS run starting at lane k*Cs, so the correct B mask is
 
-            maskB_base = OR over s' in [0,Cs) of (1 << (s'*Ck))   # Cs bits, stride Ck
-            MulticastMaskB = maskB_base << k
+            maskB_base = (1 << Cs) - 1        # Cs contiguous bits
+            MulticastMaskB = maskB_base << (k * Cs)
 
         A stays per-workgroup (MulticastMaskA = 1<<wg_x, set at kernel init).
         The kernel-init computeMasks set MulticastMaskB = (1<<C)-1 (the whole-
@@ -2799,31 +2798,21 @@ class StreamKTwoTileDPFirst(StreamK):
         B is loaded per-workgroup (correct for all sizes, never leaving a masked
         target without a matching load). See
         docs/design/streamk-wg-clusters.md.
+
+        Reached only for a genuine factored cluster (sole caller
+        streamKMulticastMaskPredicate, under StreamKMulticast + is2d), so Cs>1 and
+        Ck>1 always hold.
         """
         module = Module("StreamK factored multicast mask compute")
-        if not kernel.get("StreamKMulticast", 0):
-            return module
         # Factored cluster factoring: Cs=ClusterDim[0], Ck=ClusterDim[1], C=Cs*Ck.
-        cs, ck, C, is2d = streamKClusterFactors(kernel)
-        # --- B-multicast mask layout (see STREAMK_2D_LANE_X_FASTEST flip point) ---
-        # The Cs spatial peers sharing this WG's K/Y rank k must be selected in the
-        # PHYSICAL within-cluster lane order. 1-D and the 2-D y-fastest fallback use
-        # the stride-Ck layout (maskB_base<<k); the 2-D x-fastest hypothesis uses a
-        # contiguous Cs-bit run shifted by k*Cs. shiftScaleLog2 scales k -> k*Cs.
-        xFastest = is2d and STREAMK_2D_LANE_X_FASTEST
-        if xFastest:
-            maskBBase = (1 << cs) - 1
-            shiftScaleLog2 = log2(cs) if cs > 1 else 0
-            module.addComment0(
-                "StreamK2D(x-fastest): B-multicast across Cs=%d contiguous peers, maskB_base=0x%x, shift=k*Cs" % (cs, maskBBase))
-        else:
-            # maskB_base: Cs bits at stride Ck (compile-time constant).
-            maskBBase = 0
-            for sPrime in range(cs):
-                maskBBase |= (1 << (sPrime * ck))
-            shiftScaleLog2 = 0
-            module.addComment0(
-                "StreamKFactored: B-multicast along Cs=%d peers (stride Ck=%d), maskB_base=0x%x" % (cs, ck, maskBBase))
+        cs, ck, C, _ = streamKClusterFactors(kernel)
+        # B-multicast mask layout (X-fastest, HW-validated on gfx1250): the Cs
+        # spatial peers sharing this WG's K/Y rank k are a CONTIGUOUS Cs-bit run
+        # shifted by k*Cs. shiftScaleLog2 scales k -> k*Cs (Cs>1 -> always >0).
+        maskBBase = (1 << cs) - 1
+        shiftScaleLog2 = log2(cs)
+        module.addComment0(
+            "StreamK2D(x-fastest): B-multicast across Cs=%d contiguous peers, maskB_base=0x%x, shift=k*Cs" % (cs, maskBBase))
         skConstsInVgprs = writer.isStreamKConstantsToVgprEnabled(kernel)
         mcInvalid = Label(writer.labels.getNameInc("SKFC_Invalid"), "")
         mcEnd = Label(writer.labels.getNameInc("SKFC_End"), "")
@@ -2838,10 +2827,9 @@ class StreamKTwoTileDPFirst(StreamK):
                 module.add(VReadfirstlaneB32(dst=sgpr(sIdx), src=vgpr(writer.states.skConstVgprs["StreamKIdx"])))
             module.add(SAndB32(dst=sgpr(tk), src0=sgpr(sIdx), src1=hex(ck - 1),
                                comment="k = StreamKIdx & (Ck-1) (K-slice rank)"))
-            if shiftScaleLog2:
-                # x-fastest: the Cs contiguous peers sharing k start at lane k*Cs.
-                module.add(SLShiftLeftB32(dst=sgpr(tk), shiftHex=shiftScaleLog2, src=sgpr(tk),
-                                          comment="x-fastest: shift = k*Cs"))
+            # x-fastest: the Cs contiguous peers sharing k start at lane k*Cs.
+            module.add(SLShiftLeftB32(dst=sgpr(tk), shiftHex=shiftScaleLog2, src=sgpr(tk),
+                                      comment="x-fastest: shift = k*Cs"))
             # cond1: nWG0 % Cs == 0 (Cs is a power of two)
             module.add(SAndB32(dst=sgpr(t0), src0=sgpr("NumWorkGroups0"), src1=hex(cs - 1),
                                comment="nWG0 %% Cs (Cs power of two)"))
@@ -3015,14 +3003,7 @@ class StreamKTwoTileDPFirst(StreamK):
         assert writer.states.asmCaps.get("HasClusterBarrier", False), \
             "StreamKMulticast requires the HasClusterBarrier asm capability"
         module.addComment0("StreamKMulticast: elect wave 0 to signal the cluster barrier (pairs first-load wait)")
-        skipSignal = Label(label=writer.labels.getNameInc("SKMC_SkipSignal"), comment="")
-        elect = writer.sgprPool.checkOut(1, "SKMulticastElect")
-        module.add(VReadfirstlaneB32(dst=sgpr(elect), src=vgpr("Serial"), comment="wave 0 signals the cluster"))
-        module.add(SCmpEQU32(src0=sgpr(elect), src1=0, comment="Check for wave 0"))
-        module.add(SCBranchSCC0(labelName=skipSignal.getLabelName(), comment="only wave 0 signals the cluster"))
-        module.add(SBarrier(True, False, True, comment="cluster_barrier signal (arrive)"))
-        module.add(skipSignal)
-        writer.sgprPool.checkIn(elect)
+        self._clusterElectArriveSignal(writer, module, "SKMC_SkipSignal", "SKMulticastElect")
         return module
 
     def streamKMulticastProloguePrefetchHandshake(self, writer, kernel):
@@ -3042,15 +3023,7 @@ class StreamKTwoTileDPFirst(StreamK):
         assert writer.states.asmCaps.get("HasClusterBarrier", False), \
             "StreamKMulticast requires the HasClusterBarrier asm capability"
         module.addComment0("StreamKMulticast: bracket prologue double-buffer prefetch load with cluster handshake")
-        skipSignal = Label(label=writer.labels.getNameInc("SKMC_SkipPrefetchSignal"), comment="")
-        elect = writer.sgprPool.checkOut(1, "SKMulticastPrefetchElect")
-        module.add(VReadfirstlaneB32(dst=sgpr(elect), src=vgpr("Serial"), comment="wave 0 signals the cluster"))
-        module.add(SCmpEQU32(src0=sgpr(elect), src1=0, comment="Check for wave 0"))
-        module.add(SCBranchSCC0(labelName=skipSignal.getLabelName(), comment="only wave 0 signals the cluster"))
-        module.add(SBarrier(True, False, True, comment="cluster_barrier signal (arrive)"))
-        module.add(skipSignal)
-        module.add(SBarrier(True, True, True, comment="cluster_barrier wait"))
-        writer.sgprPool.checkIn(elect)
+        self._clusterElectArriveSignal(writer, module, "SKMC_SkipPrefetchSignal", "SKMulticastPrefetchElect", wait=True)
         return module
 
     def streamKMulticastZeroIterClusterWait(self, writer, kernel):

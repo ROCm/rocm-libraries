@@ -216,3 +216,11 @@ class TestMasks:
         assert (maskA & maskB) == 0x1
         assert bin(maskA).count("1") == 2  # Ck A-peers
         assert bin(maskB).count("1") == 2  # Cs B-peers
+
+    def test_1d_forcedp_multicast_keeps_a_self_only(self):
+        """Migrated from the removed forcedp_2d_probe test: the shipped 1-D [C,1]
+        ForceDPOnly multicast (Ck==1) yields a self-only A mask -- the dual-2D
+        A-multicast is strictly the Ck>1 addition."""
+        maskA, maskB = _dense_masks(cs=8, ck=1)
+        assert maskA == 0x1              # self only
+        assert maskB == (1 << 8) - 1     # B across all 8 X-peers

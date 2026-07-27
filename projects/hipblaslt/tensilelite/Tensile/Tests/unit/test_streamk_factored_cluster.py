@@ -34,7 +34,6 @@
 
 import copy
 import os
-import re
 import sys
 
 import pytest
@@ -86,29 +85,6 @@ def _derive_states(cfg_path):
     from config_harness import solutions_from_config
     sols = solutions_from_config(cfg_path, arch=_ARCH, limit_solutions=8)
     return [s._state if hasattr(s, "_state") else s for s in sols]
-
-
-# The stinkytofu InsertClusterBarrierPass names its wave-0-election skip label
-# with a per-EMIT random suffix (verified: re-emitting the SAME config yields a
-# different suffix), so raw byte comparison of two emits of the same kernel
-# already differs on exactly these labels. Canonicalize that known
-# nondeterminism away before asserting byte-identity -- it is orthogonal to the
-# factored-mode change under test.
-_CB_LABEL_RE = re.compile(r"skipCBPreSignal_[A-Za-z0-9]+")
-
-
-def _norm(src):
-    return _CB_LABEL_RE.sub("skipCBPreSignal_X", src)
-
-
-def _emit_map(cfg_path):
-    """basename -> canonicalized assembly source for a config's kernels."""
-    from config_harness import emit_kernels_from_config
-    results = emit_kernels_from_config(cfg_path, limit=8, arch=_ARCH)
-    assert results, f"no kernels emitted for {cfg_path}"
-    assert all(e == 0 for _b, _s, e in results), \
-        f"non-zero err in {cfg_path}: {[(b, e) for b, _s, e in results if e]}"
-    return {b: _norm(s) for b, s, _e in results}
 
 
 def _compound_preds(state):
@@ -184,21 +160,8 @@ class TestFactoring:
             assert st["StreamKClusterReduction"] == 1
 
 
-# --- validation matrix -----------------------------------------------------
-
-class TestValidation:
-    def test_accept_pure_multicast(self, tmp_path):
-        cfg = _write_variant(tmp_path, _MULTICAST, "ok_mc.yaml",
-                             fork_overrides={"ClusterDim": [[4, 1]]})
-        assert _derive_states(cfg), "[C,1] pure multicast must be accepted"
-
-    def test_accept_pure_reduction(self, tmp_path):
-        cfg = _write_variant(tmp_path, _REDUCTION, "ok_red.yaml",
-                             fork_overrides={"ClusterDim": [[1, 4]]})
-        assert _derive_states(cfg), "[1,C] pure reduction must be accepted"
-
-    def test_accept_factored(self):
-        assert _derive_states(_FACTORED), "[Cs,Ck] factored must be accepted"
+# NB: the accept-only "derives >=1 solution" cases ([C,1] / [1,C] / [Cs,Ck]) are
+# covered by TestFactoring (which asserts the full derivation for each shape).
 
 
 # --- selection predicates --------------------------------------------------
@@ -249,20 +212,9 @@ class TestClusterShapeValidation:
         return _validateStreamKClusterShape(
             {"ClusterDim": list(clusterDim), "StreamK": 3}, False)
 
-    # accepted shapes
-    def test_accept_pure_multicast(self):
-        assert self._shape(8, 1) is True
-        assert self._validate([8, 1]) is True
-
-    def test_accept_pure_reduction(self):
-        assert self._shape(1, 8) is True
-        assert self._validate([1, 8]) is True
-
-    def test_accept_factored(self):
-        for cs, ck in [(2, 2), (2, 4), (4, 2), (2, 8), (8, 2)]:
-            assert self._shape(cs, ck) is True, (cs, ck)
-            assert self._validate([cs, ck]) is True, (cs, ck)
-
+    # accepted shapes are covered end-to-end by TestFactoring (which derives
+    # [C,1] / [1,C] / [Cs,Ck] successfully); only the reject/noop branches --
+    # unreachable through the ClusterDim valid-parameter enum -- are driven here.
     def test_noop_when_not_cluster(self):
         assert self._validate([1, 1]) is True
 
@@ -289,13 +241,6 @@ class TestClusterShapeValidation:
         assert self._shape(8, 4) is False
         assert self._validate([8, 4]) is False
 
-
-# --- emission --------------------------------------------------------------
-
-class TestFactoredEmission:
-    def test_factored_emits_clean(self):
-        """The genuine 2-D factored [2,2] path emits assembly with err==0 for
-        every kernel (the 2-D StreamKIdx fold + composed multicast/reduction do
-        not break codegen)."""
-        emitted = _emit_map(_FACTORED)
-        assert emitted, "expected >=1 factored kernel emitted"
+# NB: clean emission of the genuine 2-D factored [2,2] path (err==0 for every
+# kernel) is covered by
+# characterization/_codegen/test_streamk_factored_cluster_gfx1250_char.py.

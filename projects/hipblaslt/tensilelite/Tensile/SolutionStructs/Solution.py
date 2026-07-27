@@ -396,27 +396,17 @@ def _validateStreamKMulticast(state, printRejectionReason, isaInfoMap):
            "StreamKMulticast requires StreamKXCCMapping=0 (WGM/XCC remap is bypassed under clustering)")
     return False
 
-  # 1-D cluster [C, 1] with C a power of two in [2, 16]. ClusterDim[1] == 1
-  # because the StreamK grid is effectively 1-D along x and consecutive-WG
-  # clustering is what produces M-adjacent (shared-B) DP tiles.
-  #
-  # 2-D StreamK cluster PROBE (Scheme A): ClusterDim = [Cs, Ck] with Ck > 1 is a
-  # genuine 2-D cluster; Cs = ClusterDim[0] is the spatial B-multicast axis and
-  # the Cs M-adjacent tiles still share B. Validate the 2-D shape instead of
-  # forcing [C, 1].
+  # Cluster shape: 1-D pure multicast [C, 1] (Cs=C, Ck=1) OR a genuine 2-D
+  # cluster [Cs, Ck] (Cs = ClusterDim[0] spatial B-multicast axis). Both are
+  # validated by the shared shape helper (Cs, Ck each a power of two with
+  # C = Cs*Ck in [2, 16]); _validateStreamK2DClusterShape(C, 1) reduces exactly
+  # to the historic 1-D pow2/range check. Mirrors _validateStreamKClusterReduction.
   clusterDim = state["ClusterDim"]
-  c = clusterDim[0]
-  if clusterDim[1] != 1:
-    cs, ck = clusterDim[0], clusterDim[1]
-    if not _validateStreamK2DClusterShape(cs, ck):
-      reject(state, printRejectionReason,
-             "StreamKMulticast 2-D cluster requires Cs=ClusterDim[0] and "
-             "Ck=ClusterDim[1] each a power of two with C=Cs*Ck in [2, 16] (got %s)"
-             % clusterDim)
-      return False
-  elif c < 2 or c > 16 or (c & (c - 1)) != 0:
+  cs, ck = clusterDim[0], clusterDim[1]
+  if not _validateStreamK2DClusterShape(cs, ck):
     reject(state, printRejectionReason,
-           "StreamKMulticast requires ClusterDim[0] a power of two in [2, 16] (got %d)" % c)
+           "StreamKMulticast requires Cs=ClusterDim[0] and Ck=ClusterDim[1] each a "
+           "power of two with C=Cs*Ck in [2, 16] (got %s)" % clusterDim)
     return False
 
   # gfx1250 with TDM multicast loads (multicast is a TDM feature).

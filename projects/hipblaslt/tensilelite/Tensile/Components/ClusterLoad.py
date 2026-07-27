@@ -12,7 +12,7 @@ caller already holds rather than re-allocating. Capability-selected
 """
 
 from ..Component import ClusterLoad
-from ..Common import clusterEnabled, streamKForceDP2DMulticast, streamKDual2DMulticast
+from ..Common import clusterEnabled, streamKDual2DMulticast
 from typing import Mapping
 from rocisa.code import Module, Label
 from rocisa.container import sgpr

@@ -156,27 +156,9 @@ class TestValidation:
             assert st["StreamKClusterReduction"] == 1, st.get("StreamKClusterReduction")
             assert st["Multicast"] == 0, st["Multicast"]
 
-    def test_factored_composes_multicast_and_reduction(self, tmp_path):
-        """Relaxed mutual exclusion (factored 2-D cluster mode): the historic
-        multicast/reduction xor is CONVERTED, not removed. A genuine 2-D cluster
-        ClusterDim=[Cs,Ck] with both axes > 1 (here [2,2] => Cs=2, Ck=2) makes the
-        two features ORTHOGONAL and co-existent: the collapse derives BOTH
-        StreamKMulticast=1 (Cs>1) and StreamKClusterReduction=1 (Ck>1), and the
-        validators accept the combination instead of rejecting it. The factoring
-        is the ClusterDim shape itself (no StreamKClusterKSplit knob). See
-        docs/design/streamk-wg-clusters.md."""
-        cfg = _write_variant(tmp_path, "factored.yaml",
-                             fork_overrides={"ClusterDim": [[2, 2]]})
-        states = _derive_states(cfg)
-        assert states, "expected >=1 derived solution for the factored config"
-        for st in states:
-            assert st["ClusterDim"] == [2, 2], st["ClusterDim"]
-            # Both orthogonal axes derived on (Cs=2 spatial multicast, Ck=2 K-split).
-            assert st["StreamKMulticast"] == 1, st.get("StreamKMulticast")
-            assert st["StreamKClusterReduction"] == 1, st.get("StreamKClusterReduction")
-            assert st["Multicast"] == 1, st.get("Multicast")
-            # Mainloop lockstep barrier for the co-issued multicast loads.
-            assert st["ClusterBarrier"] is True, st.get("ClusterBarrier")
+    # NB: the factored [2,2] derivation (both StreamKMulticast and
+    # StreamKClusterReduction on) is covered by
+    # test_streamk_factored_cluster.py::TestFactoring::test_factored_both_axes.
 
     def test_reject_multicast_force_off(self, tmp_path):
         """StreamKMulticast auto-enabled by ClusterDim on SK3 is incompatible with
@@ -255,20 +237,9 @@ class TestValidation:
             assert st["StreamKMulticast"] == 1
             assert st["StreamKXCCMapping"] == 0, st["StreamKXCCMapping"]
 
-    def test_accept_2d_cluster_probe(self, tmp_path):
-        # 2-D StreamK cluster PROBE (Scheme A): ClusterDim = [2, 2] is now a
-        # SUPPORTED genuine 2-D cluster (Cs=2 spatial B-multicast x Ck=2 K-split
-        # reduction), no longer the pre-probe [C,1]-only reject. It derives valid
-        # solutions with StreamKMulticast (Cs>1) and StreamKClusterReduction (Ck>1)
-        # both auto-enabled.
-        cfg = _write_variant(tmp_path, "cd22.yaml",
-                             fork_overrides={"ClusterDim": [[2, 2]]})
-        states = _derive_states(cfg)
-        assert states, "expected >=1 derived solution for the 2-D cluster probe"
-        for st in states:
-            assert st["ClusterDim"] == [2, 2]
-            assert st["StreamKMulticast"] == 1, st.get("StreamKMulticast")
-            assert st["StreamKClusterReduction"] == 1, st.get("StreamKClusterReduction")
+    # NB: the 2-D [2,2] cluster accept path (StreamKMulticast + StreamKClusterReduction
+    # both auto-enabled) is covered by
+    # test_streamk_factored_cluster.py::TestFactoring::test_factored_both_axes.
 
     def test_reject_non_pow2_cluster(self, tmp_path):
         cfg = _write_variant(tmp_path, "cd3.yaml",

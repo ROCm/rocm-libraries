@@ -27,7 +27,7 @@ from typing import Dict
 from .Activation import ActivationType
 from . import Hardware
 from . import Properties
-from Tensile.Common import state, state_key_ordering, IsaInfo
+from Tensile.Common import state, state_key_ordering, IsaInfo, streamKDual2DMulticast
 from Tensile.Common.Architectures import gfxToIsa
 from Tensile.Common.DataType import DataType
 from Tensile.Common.GlobalParameters import internalParameters
@@ -606,9 +606,8 @@ class ProblemPredicate(Properties.Predicate):
         # N-tile grid (nWG_y % Ck == 0) -> keep ClusterDim[1], exactly like the
         # dense/1-D path. 1-D StreamK ([C,1]) and dense (non-StreamK) clusters keep
         # ClusterDim[1] (byte-identical).
-        _dual2D = ((state.get("StreamKForceDPOnly", 0) or state.get("StreamKDualMulticast", 0))
-                   and state["ClusterDim"][0] > 1 and state["ClusterDim"][1] > 1)
-        if state.get("StreamK", 0) == 3 and state["ClusterDim"][1] > 1 and not _dual2D:
+        if state.get("StreamK", 0) == 3 and state["ClusterDim"][1] > 1 \
+           and not streamKDual2DMulticast(state):
             valuepredicates.append(1)
         else:
             valuepredicates.append(state["ClusterDim"][1])
