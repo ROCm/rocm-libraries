@@ -84,7 +84,9 @@ class TestPriorityRankerDefault(unittest.TestCase):
         # Guard the premise: the ranker test is only meaningful if >1 candidate
         # supports the request.
         with _Gfx942Arch():
-            supported = {c.name for c in ATTENTION_REGISTRY.supported(_gfx942_fp16_mha())}
+            supported = {
+                c.name for c in ATTENTION_REGISTRY.supported(_gfx942_fp16_mha())
+            }
         self.assertIn("attention_gfx942_dense_pipe", supported)
         self.assertIn("attention_unified_2d", supported)
 
@@ -98,9 +100,7 @@ class TestPriorityRankerDefault(unittest.TestCase):
         with _Gfx942Arch():
             supported = ATTENTION_REGISTRY.supported(_gfx942_fp16_mha())
             ranked = priority_ranker(_gfx942_fp16_mha(), supported)
-        self.assertEqual(
-            [c.name for c in ranked], [c.name for c in supported]
-        )
+        self.assertEqual([c.name for c in ranked], [c.name for c in supported])
 
     def test_explicit_default_matches_implicit(self):
         with _Gfx942Arch():
@@ -113,9 +113,7 @@ class TestRankerOverride(unittest.TestCase):
     def test_ranker_can_override_priority(self):
         # Float unified_2d (priority 10) ahead of dense_pipe (priority 5).
         def prefer_unified_2d(_request, candidates):
-            return sorted(
-                candidates, key=lambda c: c.spec_id != "unified_2d"
-            )
+            return sorted(candidates, key=lambda c: c.spec_id != "unified_2d")
 
         with _Gfx942Arch():
             r = dispatch_attention(_gfx942_fp16_mha(), ranker=prefer_unified_2d)

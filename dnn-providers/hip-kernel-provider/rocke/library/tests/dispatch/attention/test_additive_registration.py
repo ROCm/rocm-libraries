@@ -213,9 +213,7 @@ class TestAdditiveRegistration(unittest.TestCase):
                     ok, _ = c.admits(req)
                     if not ok:
                         continue
-                    other = next(
-                        x for x in withx.candidates() if x.name == c.name
-                    )
+                    other = next(x for x in withx.candidates() if x.name == c.name)
                     self.assertEqual(
                         c.select_spec(req),
                         other.select_spec(req),

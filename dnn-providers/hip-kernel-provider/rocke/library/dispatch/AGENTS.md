@@ -115,6 +115,80 @@ Follow the `_make_d256_decode_candidate()` pattern in `generic.py`:
 
 6. **No C++ changes needed.** The dispatcher is Python-only.
 
+## Engine-level selection: the ranker seam
+
+`dispatch_attention(req, *, ranker=None)` chooses among the candidates that
+support `req` in two stages:
+
+1. `CandidateRegistry.supported(req)` filters to eligible candidates, already
+   sorted ascending by `(priority, name)`.
+2. A **ranker** — `Callable[(request, supported) -> reordered]` — reorders them
+   best-first; `dispatch_attention` takes `ranked[0]`.
+
+When no ranker is supplied, the named default `priority_ranker` (in
+`attention.py`) is used: it is an identity pass, so the registered priority order
+wins (behavior-preserving). A heuristic ranker is a **drop-in replacement** that
+scores candidates against problem metadata (or offline benchmark data) and sorts
+by score — no change to the registry or candidates. Safety invariant enforced by
+the registry: a ranker may reorder or drop candidates but **cannot introduce one
+the request does not support** (raises `ValueError`).
+
+This is the **engine-level** half of the intended hierarchical design. The
+**per-engine** half is each candidate's `select_spec` (today thin: it records
+`(path, head_size, block_size, …)` and defers geometry). A future phase can move
+the `_select_*` / `_enable_*` heuristics from
+`builders/common/attention_spec_builder.py` into per-engine `select_spec`s so an
+engine owns both "am I eligible?" and "how do I tune myself."
+
+Coverage: `tests/dispatch/attention/test_ranker.py`.
+
+## Additive registration (open/closed)
+
+Adding a candidate must not change any existing candidate's `supports()` verdict
+or `select_spec()` output. This is an executable invariant in
+`tests/dispatch/attention/test_additive_registration.py`: it seeds a **fresh**
+`CandidateRegistry` from `attention_candidates()`, registers a throwaway example
+engine into that copy (never the shipped singleton), and asserts every
+pre-existing candidate's behavior is byte-identical with and without it.
+
+## Multi-engine benchmarking: `attention_sweep_space`
+
+`attention_sweep_space(req)` returns the deduped `select_spec` of every candidate
+that supports `req` — the "evaluate multiple engines for one problem" primitive.
+The prefill benches (`benchmarks/gfx{942,950}/attention/prefill/
+benchmark_prefill2d_live.py`) consume it via the opt-in `--variants sweep` lane
+(`_run_sweep`), which times each launched path the registry offers and records
+which engine names mapped to it. Contract tests:
+`tests/dispatch/attention/test_sweep_space.py`.
+
+Framework-phase caveat: because geometry is deferred (see below), engines that
+route to the same launched path collapse to one timed entry. The decode benches
+(`benchmark_decode_live.py`) do **not** yet have a sweep lane — they lack a
+variant-loop; adding one is a mechanical follow-up reusing the same `_run_sweep`
+pattern.
+
+## DEFERRED — production wiring + heuristic selection
+
+The registry is currently **not load-bearing for GPU execution**. Production runs
+through `run_unified_attention_torch` (`kernels/common/attention_unified.py`),
+which calls `problem.select_path()` + `_tiled_spec_from_problem()` **directly**,
+bypassing `dispatch_attention` / `ATTENTION_REGISTRY`. The dispatcher is exercised
+only by these CPU tests and the benches' `prod` / `sweep` lanes.
+
+Two later increments make it load-bearing:
+
+- **Thin routing (low risk):** route `run_unified_attention_torch`'s path choice
+  through the registry. The 2d-vs-3d decision is already the same pure
+  `select_path()` both sides use, so this is byte-identical by construction;
+  geometry still comes from `_tiled_spec_from_problem`.
+- **Full engine-owned geometry (larger):** each engine's `select_spec` produces the
+  tuned spec, absorbing the relevant `_select_*` branches. If C++ selection parity
+  is required, geometry parity is the "separate, larger effort" noted in the
+  `attention.py` module docstring ("DEFERRED — arch-tuned block geometry").
+
+Heuristic-driven selection (a real scoring ranker) is independent of the above and
+is a drop-in via the ranker seam once a scoring signal exists.
+
 ## How to tune `num_segments` for a new cohort
 
 See the worked example:
