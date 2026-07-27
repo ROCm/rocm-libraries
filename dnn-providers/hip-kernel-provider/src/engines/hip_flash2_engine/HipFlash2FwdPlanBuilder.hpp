@@ -1,4 +1,4 @@
-// Copyright ?? Advanced Micro Devices, Inc., or its affiliates.
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 //
 // HipFlash2FwdPlanBuilder: IPlanBuilder for Flash-Attention 2 V7 forward pass.
