@@ -83,7 +83,8 @@ std::vector<fft_params> param_generator_multi_gpu(const std::optional<SplitType>
 
     // function pointer callbacks need -fgpu-rdc, but that causes build
     // nondeterminism in kpack
-    auto multi_device_callbacks = {fft_callback_type_none, /*fft_callback_type_funcptr, */};
+    auto multi_device_callbacks
+        = {fft_callback_type_none, /*fft_callback_type_funcptr, */ fft_callback_type_jit};
 
     {
         auto params = param_generator_complex(test_prob,

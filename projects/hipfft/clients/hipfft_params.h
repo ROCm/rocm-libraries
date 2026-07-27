@@ -1384,8 +1384,6 @@ private:
         {
             return HIPFFT_SUCCESS;
         }
-        throw unimplemented_exception("jit callbacks not implemented");
-#if 0
         hipfftResult_t       ret{HIPFFT_INVALID_PLAN};
         hipfftXtCallbackType cbtype = HIPFFT_CB_UNDEFINED;
         switch(itype)
@@ -1490,7 +1488,6 @@ private:
                                          ? nullptr
                                          : store_jit_cb_state->get_raw_data_ptrs().data());
         return ret;
-#endif
     }
 
     // call hipfftCreate + hipfftMake* functions, inserting calls to

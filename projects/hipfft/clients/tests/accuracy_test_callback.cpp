@@ -104,7 +104,7 @@ const static std::vector<std::vector<size_t>> ooffset_range = {{0, 0}, {1, 1}};
 auto transform_types = {fft_transform_type_complex_forward, fft_transform_type_real_forward};
 
 #ifdef __HIP__
-INSTANTIATE_TEST_SUITE_P(DISABLED_callback_no_offset,
+INSTANTIATE_TEST_SUITE_P(callback_no_offset,
                          accuracy_test,
                          ::testing::ValuesIn(param_generator_base(test_prob,
                                                                   transform_types,

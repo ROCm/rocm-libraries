@@ -187,6 +187,7 @@ Callbacks
 .. doxygenfunction:: hipfftXtSetCallback
 .. doxygenfunction:: hipfftXtClearCallback
 .. doxygenfunction:: hipfftXtSetCallbackSharedSize
+.. doxygenfunction:: hipfftXtSetJITCallback
 
 
 Single-process multi-GPU transforms

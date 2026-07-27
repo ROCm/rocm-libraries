@@ -109,22 +109,22 @@ std::vector<fft_params> param_generator_multi_gpu(const SplitType type, const in
 
     // gather cases to test as single-device params, then distribute
     // to multiple GPUs
-    std::vector<fft_params> params_single
-        = param_generator_base(test_prob,
-                               trans_type_range_full,
-                               multi_gpu_sizes,
-                               precision_range_sp_dp,
-                               multi_gpu_batch_range,
-                               generate_types,
-                               stride_generator(stride_range),
-                               stride_generator(stride_range),
-                               ioffset_range_zero,
-                               ooffset_range_zero,
-                               place_range,
-                               false,
-                               // function pointer callbacks need -fgpu-rdc, but that causes build
-                               // nondeterminism in kpack
-                               {fft_callback_type_none, /*fft_callback_type_funcptr,*/});
+    std::vector<fft_params> params_single = param_generator_base(
+        test_prob,
+        trans_type_range_full,
+        multi_gpu_sizes,
+        precision_range_sp_dp,
+        multi_gpu_batch_range,
+        generate_types,
+        stride_generator(stride_range),
+        stride_generator(stride_range),
+        ioffset_range_zero,
+        ooffset_range_zero,
+        place_range,
+        false,
+        // function pointer callbacks need -fgpu-rdc, but that causes build
+        // nondeterminism in kpack
+        {fft_callback_type_none, /*fft_callback_type_funcptr,*/ fft_callback_type_jit});
 
     std::vector<fft_params> all_params;
 
