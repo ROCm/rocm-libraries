@@ -166,6 +166,19 @@ typedef struct rocke_ll_smem_name
     const char* gname;
 } rocke_ll_smem_name_t;
 
+/* One cached smem base pointer: the byte-level GEP SSA name computed for
+ * `gname` inside basic block `block`. Reused for later accesses of the same
+ * allocation in the same block (which the GEP dominates), so a non-zero-offset
+ * allocation accessed many times emits just one base GEP. Python
+ * _smem_base_cache keyed by (block label, gname); here we key on the block
+ * pointer -- one distinct arena object per block -- which groups identically. */
+typedef struct rocke_ll_smem_base_cache
+{
+    const rocke_ll_block_t* block;
+    const char* gname;
+    const char* base;
+} rocke_ll_smem_base_cache_t;
+
 /* A "needed intrinsic" record: the decl key plus the resolved decl text. The
  * decl text is captured at _need() time so dynamically-built decls (Python
  * self._decls[intrin] = ... for vector smax) are preserved in emit order. */
@@ -202,6 +215,13 @@ typedef struct rocke_lower
     /* smem pre-pass */
     ROCKE_VEC(rocke_ll_smem_global_t) smem_globals;
     ROCKE_VEC(rocke_ll_smem_name_t) smem_names;
+
+    /* smem pool: one unified addrspace(3) buffer; per-allocation byte offsets.
+     * Populated by rocke_ll_compute_smem_layout() after _collect_smem. */
+    ROCKE_VEC(int) smem_offsets; /* parallel to smem_globals: byte offset per alloc */
+    int smem_pool_size; /* total pool size in bytes (rounded to 16) */
+    const char* smem_pool_name; /* "@smem_pool.<kernel>" */
+    ROCKE_VEC(rocke_ll_smem_base_cache_t) smem_base_cache; /* per-(block,alloc) base ptr */
 
     /* scf.for yield recording stack (Python _yield_stack: list of list[str]).
      * Each frame is a vector of operand strings. */
@@ -325,6 +345,20 @@ void rocke_ll_collect_smem(rocke_lower_t* L, const rocke_region_t* region);
 const char* rocke_ll_smem_global_name(rocke_lower_t* L,
                                       const rocke_value_t* smem,
                                       const rocke_type_t** out_stype);
+
+/* Compute byte offsets for all smem allocations in a single pool, using
+ * live-interval analysis to allow non-interfering allocations to share space
+ * (Python _compute_smem_layout). Must be called after rocke_ll_collect_smem
+ * and before rocke_ll_lower_region. Populates L->smem_offsets,
+ * L->smem_pool_size, and L->smem_pool_name. */
+void rocke_ll_compute_smem_layout(rocke_lower_t* L);
+
+/* Emit a byte-level GEP to the start of the smem segment for `gname` inside
+ * the unified pool. Returns the pool name directly when offset == 0;
+ * otherwise emits one GEP and returns a fresh SSA name (Python
+ * _emit_smem_base_ptr). */
+const char*
+    rocke_ll_emit_smem_base_ptr(rocke_lower_t* L, const char* gname, const rocke_type_t* stype);
 
 /* ====================================================================== */
 /* yield-stack helpers (Python _yield_stack manipulation)                 */

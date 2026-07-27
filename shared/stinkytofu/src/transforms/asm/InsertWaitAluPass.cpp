@@ -71,36 +71,6 @@ enum WaitEventType : uint8_t {
     EV_NUM,
 };
 
-// Compact bitset over WaitEventType; twoOrMore() flags "out-of-order" completion
-// (more than one event class pending on a single counter ⇒ force wait(0)).
-struct WaitEventSet {
-    uint32_t mask = 0;
-    void insert(WaitEventType e) {
-        mask |= 1u << e;
-    }
-    bool contains(WaitEventType e) const {
-        return mask & (1u << e);
-    }
-    bool containsAll(WaitEventSet o) const {
-        return (mask & o.mask) == o.mask;
-    }
-    bool twoOrMore() const {
-        return (mask & (mask - 1)) != 0;
-    }
-    WaitEventSet operator|(WaitEventSet o) const {
-        return {mask | o.mask};
-    }
-    WaitEventSet operator&(WaitEventSet o) const {
-        return {mask & o.mask};
-    }
-    WaitEventSet operator~() const {
-        return {~mask};
-    }
-    bool operator==(WaitEventSet o) const {
-        return mask == o.mask;
-    }
-};
-
 inline CounterType counterFromEvent(WaitEventType e) {
     switch (e) {
         case EV_VGPR_CSMACC_WRITE:
@@ -111,6 +81,56 @@ inline CounterType counterFromEvent(WaitEventType e) {
         default:
             return CT_VM_VSRC;
     }
+}
+
+// The VALU pipes the single VA_VDST counter aggregates.
+enum VaPipe : uint8_t {
+    PIPE_CSMACC = 0,
+    PIPE_DPMACC = 1,
+    PIPE_TRANS = 2,
+    PIPE_XDL = 3,
+    NUM_VA_PIPE = 4,
+};
+
+// Guard the shared ordinals vaPipeOfEvent's cast relies on.
+static_assert(static_cast<int>(EV_VGPR_CSMACC_WRITE) == PIPE_CSMACC);
+static_assert(static_cast<int>(EV_VGPR_DPMACC_WRITE) == PIPE_DPMACC);
+static_assert(static_cast<int>(EV_VGPR_TRANS_WRITE) == PIPE_TRANS);
+static_assert(static_cast<int>(EV_VGPR_XDL_WRITE) == PIPE_XDL);
+
+// Valid only for VA_VDST events.
+inline VaPipe vaPipeOfEvent(WaitEventType e) {
+    return static_cast<VaPipe>(e);
+}
+
+// The two VM_VSRC ordering FIFOs; flat_* enqueues into both.
+enum VmFifo : uint8_t {
+    FIFO_LDS = 0,
+    FIFO_TEX = 1,
+    NUM_VM_FIFOS = 2,
+};
+
+inline bool enqueuesFifoLds(WaitEventType e) {
+    return e == EV_VGPR_LDS_READ || e == EV_VGPR_FLAT_READ;
+}
+inline bool enqueuesFifoTex(WaitEventType e) {
+    return e == EV_VGPR_VMEM_READ || e == EV_VGPR_FLAT_READ;
+}
+
+inline const char* vaPipeName(VaPipe p) {
+    switch (p) {
+        case PIPE_CSMACC:
+            return "CSMACC";
+        case PIPE_DPMACC:
+            return "DPMACC";
+        case PIPE_TRANS:
+            return "TRANS";
+        case PIPE_XDL:
+            return "XDL";
+        case NUM_VA_PIPE:
+            break;
+    }
+    return "?";
 }
 
 inline const char* counterName(CounterType c) {
@@ -136,36 +156,6 @@ inline const char* eventName(WaitEventType e) {
         default:
             return "?";
     }
-}
-
-inline WaitEventSet eventsForCounter(CounterType c) {
-    WaitEventSet s;
-    if (c == CT_VA_VDST) {
-        s.insert(EV_VGPR_CSMACC_WRITE);
-        s.insert(EV_VGPR_DPMACC_WRITE);
-        s.insert(EV_VGPR_TRANS_WRITE);
-        s.insert(EV_VGPR_XDL_WRITE);
-    } else {
-        s.insert(EV_VGPR_LDS_READ);
-        s.insert(EV_VGPR_FLAT_READ);
-        s.insert(EV_VGPR_VMEM_READ);
-    }
-    return s;
-}
-
-// Comma-separated list of pending event names in `ev`, e.g. "XDL_WRITE,CSMACC_WRITE".
-// Used by the wait-hit debug print when ooo=1 fires, to make it clear *which*
-// event classes are causing the conservative full-drain.
-inline std::string pendingEventsStr(WaitEventSet ev) {
-    std::string out;
-    for (int i = 0; i < EV_NUM; ++i) {
-        auto e = static_cast<WaitEventType>(i);
-        if (ev.contains(e)) {
-            if (!out.empty()) out += ",";
-            out += eventName(e);
-        }
-    }
-    return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -295,190 +285,346 @@ inline unsigned maxEmittableWait(CounterType c) {
 }
 
 // ---------------------------------------------------------------------------
-// WaitcntBrackets — UB/LB scoreboard with per-VGPR per-counter scores
+// WaitcntBrackets — per-pipe/per-FIFO scoreboard with per-VGPR stamps
 // ---------------------------------------------------------------------------
 
-using PerCounterScores = std::array<unsigned, NUM_COUNTERS>;
+struct VgprStamp {
+    std::array<unsigned, NUM_VA_PIPE> vaOrd = {};
+    unsigned vmOrdLds = 0;
+    unsigned vmOrdTex = 0;
+    // Both vm ordinals from one flat_*.
+    bool pairedFlat = false;
+};
 
 class WaitcntBrackets {
    public:
+    // Aggregate views.
     unsigned getScoreLB(CounterType c) const {
-        return scoreLB[c];
+        return c == CT_VA_VDST ? vaPipeSum(vaPipeLB) : vmLB;
     }
     unsigned getScoreUB(CounterType c) const {
-        return scoreUB[c];
+        return c == CT_VA_VDST ? vaPipeSum(vaPipeUB) : vmUB;
     }
     unsigned getScoreRange(CounterType c) const {
-        return scoreUB[c] - scoreLB[c];
+        return getScoreUB(c) - getScoreLB(c);
     }
     size_t scoresSize() const {
         return scores.size();
     }
 
-    unsigned getVGPRScore(RegKey k, CounterType c) const {
-        auto it = scores.find(k);
-        return it == scores.end() ? 0u : it->second[c];
-    }
-
-    // Stamp scoreboard after instruction `inst` issues with event `ev`.
-    // VA_VDST stamps each VGPR def, VM_VSRC stamps each VGPR src.
+    // Stamp the scoreboard for producer `inst`.
     void onProducer(WaitEventType ev, const StinkyInstruction& inst, const VGPRHalfKeyer& keyer) {
         CounterType ct = counterFromEvent(ev);
-        unsigned inc = (ct == CT_VA_VDST && hasMatrixScalePair(inst)) ? 2u : 1u;
-        unsigned curr = scoreUB[ct] + inc;
-        scoreUB[ct] = curr;
-        pendingEvents.insert(ev);
-
-        PASS_DEBUG(std::cerr << "[InsertWaitAlu]   stamp " << counterName(ct)
-                             << " event=" << eventName(ev) << " inc=" << inc << " new_ub=" << curr
-                             << " (mnemonic=" << inst.getHwInstDesc()->mnemonic << ")\n");
 
         const True16Modifiers* true16Mod = inst.getModifier<True16Modifiers>();
 
-        auto stamp = [&](unsigned idx, HighBitSel half, CounterType c) {
-            RegKey k = keyer.producerKey(idx, half);
-            scores[k][c] = curr;
-            PASS_DEBUG(std::cerr << "[InsertWaitAlu]     score=" << curr << " on v" << k.idx << "("
-                                 << halfName(k.half) << ") " << eventName(ev) << "\n");
-        };
-
         if (ct == CT_VA_VDST) {
+            VaPipe pipe = vaPipeOfEvent(ev);
+            unsigned inc = hasMatrixScalePair(inst) ? 2u : 1u;
+            vaPipeUB[pipe] += inc;
+            unsigned ord = vaPipeUB[pipe];
+
+            PASS_DEBUG(std::cerr << "[InsertWaitAlu]   stamp event=" << eventName(ev) << " inc="
+                                 << inc << " [pipe=" << vaPipeName(pipe) << " ord=" << ord
+                                 << " ub=" << vaPipeUB[pipe] << " lb=" << vaPipeLB[pipe] << "]"
+                                 << " (mnemonic=" << inst.getHwInstDesc()->mnemonic << ")\n");
+
+            auto stampVA = [&](unsigned idx, HighBitSel half) {
+                RegKey k = keyer.producerKey(idx, half);
+                VgprStamp& s = scores[k];
+                // Set only this pipe.
+                s.vaOrd[pipe] = ord;
+                PASS_DEBUG(std::cerr << "[InsertWaitAlu]     stamp va v" << k.idx << "("
+                                     << halfName(k.half) << ") [pipe=" << vaPipeName(pipe)
+                                     << " ord=" << ord << "]\n");
+            };
             forEachVGPR(
                 inst.getSrcRegs(), [&](size_t i) { return srcHalfSel(true16Mod, i); },
-                [&](unsigned idx, HighBitSel half) { stamp(idx, half, CT_VA_VDST); });
+                [&](unsigned idx, HighBitSel half) { stampVA(idx, half); });
             forEachVGPR(
                 inst.getDestRegs(), [&](size_t i) { return destHalfSel(true16Mod, i); },
-                [&](unsigned idx, HighBitSel half) { stamp(idx, half, CT_VA_VDST); });
-        } else {
-            // VM_VSRC tracks in-flight VMEM reads, which are always full DWORD.
-            forEachVGPR(
-                inst.getSrcRegs(), [](size_t) { return HighBitSel::NONE; },
-                [&](unsigned idx, HighBitSel half) { stamp(idx, half, CT_VM_VSRC); });
+                [&](unsigned idx, HighBitSel half) { stampVA(idx, half); });
+            return;
         }
+
+        // VM_VSRC. flat_* bumps both FIFOs.
+        ++vmUB;
+        unsigned ordLds = 0, ordTex = 0;
+        if (enqueuesFifoLds(ev)) ordLds = ++vmFifoUB[FIFO_LDS];
+        if (enqueuesFifoTex(ev)) ordTex = ++vmFifoUB[FIFO_TEX];
+
+        PASS_DEBUG(std::cerr << "[InsertWaitAlu]   stamp vm event=" << eventName(ev)
+                             << " [vm ub=" << vmUB << " lb=" << vmLB << "]"
+                             << " [LDS ord=" << ordLds << " ub=" << vmFifoUB[FIFO_LDS]
+                             << " lb=" << vmFifoLB[FIFO_LDS] << "]" << " [TEX ord=" << ordTex
+                             << " ub=" << vmFifoUB[FIFO_TEX] << " lb=" << vmFifoLB[FIFO_TEX] << "]"
+                             << " (mnemonic=" << inst.getHwInstDesc()->mnemonic << ")\n");
+
+        auto stampVM = [&](unsigned idx, HighBitSel half) {
+            RegKey k = keyer.producerKey(idx, half);
+            VgprStamp& s = scores[k];
+            // Set only the FIFO(s) this op enqueues into.
+            if (enqueuesFifoLds(ev)) s.vmOrdLds = ordLds;
+            if (enqueuesFifoTex(ev)) s.vmOrdTex = ordTex;
+            // Paired when both ordinals came from this one flat_*.
+            s.pairedFlat = enqueuesFifoLds(ev) && enqueuesFifoTex(ev);
+            PASS_DEBUG(std::cerr << "[InsertWaitAlu]     stamp vm v" << k.idx << "("
+                                 << halfName(k.half) << ") [LDS ord=" << s.vmOrdLds << "]"
+                                 << " [TEX ord=" << s.vmOrdTex << " paired=" << s.pairedFlat
+                                 << "]\n");
+        };
+        // VM_VSRC tracks in-flight VMEM reads, which are always full DWORD.
+        forEachVGPR(
+            inst.getSrcRegs(), [](size_t) { return HighBitSel::NONE; },
+            [&](unsigned idx, HighBitSel half) { stampVM(idx, half); });
     }
 
-    // For each VGPR src (RAW on VA_VDST) and each VGPR dst (WAW on VA_VDST,
-    // WAR on VM_VSRC), probe the score map and accumulate the worst-case wait.
+    // Probe each VGPR operand for hazards and accumulate the wait.
     void onConsumer(const StinkyInstruction& inst, const VGPRHalfKeyer& keyer, Wait& wait) const {
         const True16Modifiers* true16Mod = inst.getModifier<True16Modifiers>();
 
         forEachVGPR(
             inst.getSrcRegs(), [&](size_t i) { return srcHalfSel(true16Mod, i); },
             [&](unsigned idx, HighBitSel half) {
-                keyer.forEachConsumerKey(idx, half, [&](RegKey k) {
-                    determineWaitForScore(CT_VA_VDST, getVGPRScore(k, CT_VA_VDST), wait, k,
-                                          "src(RAW)");
-                });
+                keyer.forEachConsumerKey(
+                    idx, half, [&](RegKey k) { determineWait(CT_VA_VDST, k, wait, "src(RAW)"); });
             });
 
         forEachVGPR(
             inst.getDestRegs(), [&](size_t i) { return destHalfSel(true16Mod, i); },
             [&](unsigned idx, HighBitSel half) {
-                keyer.forEachConsumerKey(idx, half, [&](RegKey k) {
-                    determineWaitForScore(CT_VA_VDST, getVGPRScore(k, CT_VA_VDST), wait, k,
-                                          "dst(WAW)");
-                });
+                keyer.forEachConsumerKey(
+                    idx, half, [&](RegKey k) { determineWait(CT_VA_VDST, k, wait, "dst(WAW)"); });
                 // WAR on VM_VSRC: writer-vs-in-flight-VMEM-read uses full DWORD.
                 RegKey full{RegType::V, idx, RegHalf::NONE};
-                determineWaitForScore(CT_VM_VSRC, getVGPRScore(full, CT_VM_VSRC), wait, full,
-                                      "dst(WAR)");
+                determineWait(CT_VM_VSRC, full, wait, "dst(WAR)");
             });
     }
 
-    void determineWaitForScore(CounterType c, unsigned score, Wait& wait, const RegKey& k,
-                               const char* role) const {
-        unsigned lb = scoreLB[c];
-        unsigned ub = scoreUB[c];
-        if (ub >= score && score > lb) {
-            unsigned chosen;
-            bool ooo = counterOutOfOrder(c);
-            if (ooo) {
-                chosen = 0;
-                addWait(wait, c, 0);
-            } else {
-                chosen = std::min(ub - score, maxEmittableWait(c));
-                addWait(wait, c, chosen);
+    // Wait needed for this reg's VM readers.
+    unsigned vmFollowers(const VgprStamp& s) const {
+        bool liveLds = s.vmOrdLds && s.vmOrdLds > vmFifoLB[FIFO_LDS];
+        bool liveTex = s.vmOrdTex && s.vmOrdTex > vmFifoLB[FIFO_TEX];
+        unsigned fLds = liveLds ? vmFifoUB[FIFO_LDS] - s.vmOrdLds : 0u;
+        unsigned fTex = liveTex ? vmFifoUB[FIFO_TEX] - s.vmOrdTex : 0u;
+        // One flat_* retires from both FIFOs at once, so either proves it done.
+        if (s.pairedFlat && liveLds && liveTex) return std::max(fLds, fTex);
+        // Two distinct producers: must wait for both.
+        unsigned f = ~0u;
+        if (liveLds) f = std::min(f, fLds);
+        if (liveTex) f = std::min(f, fTex);
+        return f;
+    }
+
+    // Wait needed for this reg's VA producers.
+    unsigned vaFollowers(const VgprStamp& s) const {
+        unsigned f = ~0u;
+        for (int p = 0; p < NUM_VA_PIPE; ++p) {
+            if (s.vaOrd[p] && s.vaOrd[p] > vaPipeLB[p]) f = std::min(f, vaPipeUB[p] - s.vaOrd[p]);
+        }
+        return f;
+    }
+
+    // Accumulate the wait for the hazard on VGPR `k` against counter `c`.
+    void determineWait(CounterType c, const RegKey& k, Wait& wait, const char* role) const {
+        auto it = scores.find(k);
+        if (it == scores.end()) {
+            PASS_DEBUG(std::cerr << "[InsertWaitAlu]     no-wait " << counterName(c) << " on v"
+                                 << k.idx << "(" << halfName(k.half) << "," << role
+                                 << ") [no stamp]\n");
+            return;
+        }
+        const VgprStamp& s = it->second;
+
+        if (c == CT_VM_VSRC) {
+            // Wait for live FIFO producers.
+            bool liveLds = s.vmOrdLds && s.vmOrdLds > vmFifoLB[FIFO_LDS];
+            bool liveTex = s.vmOrdTex && s.vmOrdTex > vmFifoLB[FIFO_TEX];
+            if (!liveLds && !liveTex) {
+                PASS_DEBUG(std::cerr << "[InsertWaitAlu]     no-wait vm_vsrc on v" << k.idx << "("
+                                     << halfName(k.half) << "," << role << ")" << vmStateStr(&s)
+                                     << " → drained (no wait)\n");
+                return;
             }
-            // Include the consumer VGPR identity and the role (src/dst hazard
-            // class) so the user can trace which operand triggered the wait
-            // without re-reading the source IR by hand. When ooo=1 also dump
-            // the pending event set that forced the full drain.
-            PASS_DEBUG(
-                std::cerr << "[InsertWaitAlu]     wait hit " << counterName(c) << " on v" << k.idx
-                          << "(" << halfName(k.half) << "," << role << ")" << " score=" << score
-                          << " lb=" << lb << " ub=" << ub << " ooo=" << ooo
-                          << (ooo ? " events={" +
-                                        pendingEventsStr(pendingEvents & eventsForCounter(c)) + "}"
-                                  : std::string())
-                          << " → wait=" << chosen << "\n");
+            unsigned f = vmFollowers(s);
+            unsigned chosen = (f > 0) ? std::min(f, maxEmittableWait(c)) : 0u;
+            addWait(wait, c, chosen);
+            PASS_DEBUG(std::cerr << "[InsertWaitAlu]     wait hit vm_vsrc on v" << k.idx << "("
+                                 << halfName(k.half) << "," << role << ")" << vmStateStr(&s)
+                                 << " f=" << f << " → wait=" << chosen << "\n");
+            return;
+        }
+
+        // Wait for live pipe producers.
+        unsigned f = vaFollowers(s);
+        if (f == ~0u) {  // no live producer in any pipe
+            PASS_DEBUG(std::cerr << "[InsertWaitAlu]     no-wait va_vdst on v" << k.idx << "("
+                                 << halfName(k.half) << "," << role << ")" << vaStateStr(&s)
+                                 << " → no live producer\n");
+            return;
+        }
+        unsigned chosen = std::min(f, maxEmittableWait(c));
+        addWait(wait, c, chosen);
+
+        PASS_DEBUG(std::cerr << "[InsertWaitAlu]     wait hit " << counterName(c) << " on v"
+                             << k.idx << "(" << halfName(k.half) << "," << role << ")"
+                             << vaStateStr(&s) << " f=" << f << " → wait=" << chosen << "\n");
+    }
+
+    void applyWaitcnt(CounterType c, unsigned count) {
+        if (count == kNoWait) return;
+        if (c == CT_VA_VDST) {
+            // count bounds every pipe.
+            for (int P = 0; P < NUM_VA_PIPE; ++P) {
+                unsigned oldLB = vaPipeLB[P];
+                unsigned newLB = vaPipeUB[P] >= count ? vaPipeUB[P] - count : 0u;
+                if (newLB > vaPipeLB[P]) vaPipeLB[P] = newLB;
+                PASS_DEBUG(std::cerr << "[InsertWaitAlu]     apply va_vdst(" << count << ") [pipe="
+                                     << vaPipeName(static_cast<VaPipe>(P)) << " lb " << oldLB << "→"
+                                     << vaPipeLB[P] << " ub=" << vaPipeUB[P] << "]\n");
+            }
+        } else {
+            // count bounds the aggregate and each FIFO.
+            unsigned newVmLB = vmUB >= count ? vmUB - count : 0u;
+            if (newVmLB > vmLB) vmLB = newVmLB;
+            for (int g = 0; g < NUM_VM_FIFOS; ++g) {
+                unsigned newLB = vmFifoUB[g] >= count ? vmFifoUB[g] - count : 0u;
+                if (newLB > vmFifoLB[g]) vmFifoLB[g] = newLB;
+            }
+            PASS_DEBUG(std::cerr << "[InsertWaitAlu]     apply vm_vsrc(" << count << ") [vm lb→"
+                                 << vmLB << " ub=" << vmUB << "]" << " [LDS lb="
+                                 << vmFifoLB[FIFO_LDS] << " ub=" << vmFifoUB[FIFO_LDS] << "]"
+                                 << " [TEX lb=" << vmFifoLB[FIFO_TEX]
+                                 << " ub=" << vmFifoUB[FIFO_TEX] << "]\n");
         }
     }
 
-    bool counterOutOfOrder(CounterType c) const {
-        WaitEventSet ev = pendingEvents & eventsForCounter(c);
-        return ev.twoOrMore();
-    }
-
-    // Advance LB after a wait is inserted. count==0 fully drains the counter
-    // — clear its event bits so counterOutOfOrder() no longer flags it.
-    void applyWaitcnt(CounterType c, unsigned count) {
-        if (count == kNoWait) return;
-        unsigned ub = scoreUB[c];
-        unsigned oldLB = scoreLB[c];
-        unsigned newLB = ub - std::min(count, ub - oldLB);
-        if (newLB > scoreLB[c]) scoreLB[c] = newLB;
-        if (count == 0) pendingEvents = pendingEvents & ~eventsForCounter(c);
-        PASS_DEBUG(std::cerr << "[InsertWaitAlu]     apply " << counterName(c) << "(" << count
-                             << ") LB " << oldLB << "→" << scoreLB[c] << " UB=" << ub
-                             << (count == 0 ? " [drain events]" : "") << "\n");
-    }
-
     // Widen this entry state with a predecessor's exit. Returns true (strictDom)
-    // when the other side contributed a tighter score or new event type.
+    // when the other side contributed a tighter score.
     bool merge(const WaitcntBrackets& other) {
         bool strictDom = false;
-        struct MergeInfo {
-            unsigned oldLB, otherLB, myShift, otherShift;
-        };
-        std::array<MergeInfo, NUM_COUNTERS> mi{};
+        std::array<unsigned, NUM_VA_PIPE> myShift{}, otherShift{}, myOldFloor{}, otherOldFloor{};
 
-        for (int t = 0; t < NUM_COUNTERS; ++t) {
-            CounterType ct = static_cast<CounterType>(t);
-            unsigned myPending = scoreUB[ct] - scoreLB[ct];
-            unsigned otherPending = other.scoreUB[ct] - other.scoreLB[ct];
-            unsigned newUB = scoreLB[ct] + std::max(myPending, otherPending);
+        for (int P = 0; P < NUM_VA_PIPE; ++P) {
+            unsigned mineIF = vaPipeUB[P] - vaPipeLB[P];
+            unsigned otherIF = other.vaPipeUB[P] - other.vaPipeLB[P];
+            unsigned newUB = vaPipeLB[P] + std::max(mineIF, otherIF);
+            myOldFloor[P] = vaPipeLB[P];
+            otherOldFloor[P] = other.vaPipeLB[P];
+            myShift[P] = newUB - vaPipeUB[P];
+            otherShift[P] = newUB - other.vaPipeUB[P];
+            vaPipeUB[P] = newUB;
+        }
 
-            mi[t].oldLB = scoreLB[ct];
-            mi[t].otherLB = other.scoreLB[ct];
-            mi[t].myShift = newUB - scoreUB[ct];
-            mi[t].otherShift = newUB - other.scoreUB[ct];
+        {
+            unsigned mineIF = vmUB - vmLB;
+            unsigned otherIF = other.vmUB - other.vmLB;
+            vmUB = vmLB + std::max(mineIF, otherIF);
+        }
 
-            scoreUB[ct] = newUB;
+        std::array<unsigned, NUM_VM_FIFOS> fMyShift{}, fOtherShift{}, fMyOldFloor{},
+            fOtherOldFloor{};
+        for (int g = 0; g < NUM_VM_FIFOS; ++g) {
+            unsigned mineIF = vmFifoUB[g] - vmFifoLB[g];
+            unsigned otherIF = other.vmFifoUB[g] - other.vmFifoLB[g];
+            unsigned newUB = vmFifoLB[g] + std::max(mineIF, otherIF);
+            fMyOldFloor[g] = vmFifoLB[g];
+            fOtherOldFloor[g] = other.vmFifoLB[g];
+            fMyShift[g] = newUB - vmFifoUB[g];
+            fOtherShift[g] = newUB - other.vmFifoUB[g];
+            vmFifoUB[g] = newUB;
         }
 
         for (const auto& [k, _] : other.scores) scores.try_emplace(k);
 
-        for (auto& [k, mySc] : scores) {
+        for (auto& [k, s] : scores) {
             auto it = other.scores.find(k);
-            for (int t = 0; t < NUM_COUNTERS; ++t) {
-                unsigned otherVal = (it != other.scores.end()) ? it->second[t] : 0;
-                unsigned myS = mySc[t] <= mi[t].oldLB ? 0 : mySc[t] + mi[t].myShift;
-                unsigned otherS = otherVal <= mi[t].otherLB ? 0 : otherVal + mi[t].otherShift;
-                if (otherS > myS) strictDom = true;
-                mySc[t] = std::max(myS, otherS);
+            const VgprStamp* o = (it != other.scores.end()) ? &it->second : nullptr;
+            // Merge each pipe's ordinal independently.
+            for (int p = 0; p < NUM_VA_PIPE; ++p) {
+                mergeSlotOrd(s.vaOrd[p], o ? o->vaOrd[p] : 0, myShift[p], otherShift[p],
+                             myOldFloor[p], otherOldFloor[p], strictDom);
             }
+            mergeSlotOrd(s.vmOrdLds, o ? o->vmOrdLds : 0, fMyShift[FIFO_LDS], fOtherShift[FIFO_LDS],
+                         fMyOldFloor[FIFO_LDS], fOtherOldFloor[FIFO_LDS], strictDom);
+            mergeSlotOrd(s.vmOrdTex, o ? o->vmOrdTex : 0, fMyShift[FIFO_TEX], fOtherShift[FIFO_TEX],
+                         fMyOldFloor[FIFO_TEX], fOtherOldFloor[FIFO_TEX], strictDom);
+            // Paired survives the join only if both paths agree.
+            s.pairedFlat = s.pairedFlat && o && o->pairedFlat;
         }
 
-        if (!pendingEvents.containsAll(other.pendingEvents)) strictDom = true;
-        pendingEvents = pendingEvents | other.pendingEvents;
         return strictDom;
     }
 
+   public:
+    // Debug-only VA snapshot.
+    std::string vaStateStr(const VgprStamp* s) const {
+        std::string out;
+        for (int p = 0; p < NUM_VA_PIPE; ++p) {
+            out += " [";
+            out += vaPipeName(static_cast<VaPipe>(p));
+            out += " ub=" + std::to_string(vaPipeUB[p]) + " lb=" + std::to_string(vaPipeLB[p]);
+            if (s) {
+                unsigned ord = s->vaOrd[p];
+                bool live = ord && ord > vaPipeLB[p];
+                out += " ord=" + std::to_string(ord) + " live=" + std::to_string(live);
+                if (live) out += " f=" + std::to_string(vaPipeUB[p] - ord);
+            }
+            out += "]";
+        }
+        return out;
+    }
+
+    // Debug-only VM snapshot.
+    std::string vmStateStr(const VgprStamp* s) const {
+        std::string out = " [vm ub=" + std::to_string(vmUB) + " lb=" + std::to_string(vmLB) + "]";
+        static const char* fifoName[NUM_VM_FIFOS] = {"LDS", "TEX"};
+        for (int g = 0; g < NUM_VM_FIFOS; ++g) {
+            out += " [";
+            out += fifoName[g];
+            out += " ub=" + std::to_string(vmFifoUB[g]) + " lb=" + std::to_string(vmFifoLB[g]);
+            if (s) {
+                unsigned ord = (g == FIFO_LDS) ? s->vmOrdLds : s->vmOrdTex;
+                bool live = ord && ord > vmFifoLB[g];
+                out += " ord=" + std::to_string(ord) + " live=" + std::to_string(live);
+                if (live) out += " f=" + std::to_string(vmFifoUB[g] - ord);
+            }
+            out += "]";
+        }
+        if (s) out += " paired=" + std::to_string(s->pairedFlat);
+        return out;
+    }
+
    private:
-    std::array<unsigned, NUM_COUNTERS> scoreLB = {0, 0};
-    std::array<unsigned, NUM_COUNTERS> scoreUB = {0, 0};
-    WaitEventSet pendingEvents;
-    std::unordered_map<RegKey, PerCounterScores, RegKeyHash> scores;
+    static unsigned vaPipeSum(const std::array<unsigned, NUM_VA_PIPE>& a) {
+        unsigned n = 0;
+        for (int P = 0; P < NUM_VA_PIPE; ++P) n += a[P];
+        return n;
+    }
+
+    // Shift both into the widened frame, keep the later.
+    static void mergeSlotOrd(unsigned& myOrd, unsigned oOrd, unsigned myShift, unsigned otherShift,
+                             unsigned myOldFloor, unsigned otherOldFloor, bool& strictDom) {
+        unsigned myS = (myOrd && myOrd > myOldFloor) ? myOrd + myShift : 0;
+        unsigned oS = (oOrd && oOrd > otherOldFloor) ? oOrd + otherShift : 0;
+        if (oS > myS) {
+            myOrd = oS;
+            strictDom = true;
+        } else {
+            myOrd = myS;
+        }
+    }
+
+    // VA_VDST per-pipe UB/LB.
+    std::array<unsigned, NUM_VA_PIPE> vaPipeUB = {};
+    std::array<unsigned, NUM_VA_PIPE> vaPipeLB = {};
+    // VM_VSRC aggregate UB/LB.
+    unsigned vmUB = 0;
+    unsigned vmLB = 0;
+    // VM_VSRC per-FIFO UB/LB.
+    std::array<unsigned, NUM_VM_FIFOS> vmFifoUB = {};
+    std::array<unsigned, NUM_VM_FIFOS> vmFifoLB = {};
+    std::unordered_map<RegKey, VgprStamp, RegKeyHash> scores;
 };
 
 // ---------------------------------------------------------------------------
@@ -569,11 +715,8 @@ class InsertWaitAluPassImpl : public Pass {
         WaitcntBrackets sb = blockEntryState[&bb];
 
         PASS_DEBUG(std::cerr << "[InsertWaitAlu] " << (emit ? "emit" : "analyze") << " bb=\""
-                             << bb.getLabel()
-                             << "\" entry=[va_vdst LB=" << sb.getScoreLB(CT_VA_VDST)
-                             << " UB=" << sb.getScoreUB(CT_VA_VDST) << " sz=" << sb.scoresSize()
-                             << "; vm_vsrc LB=" << sb.getScoreLB(CT_VM_VSRC)
-                             << " UB=" << sb.getScoreUB(CT_VM_VSRC) << "]\n");
+                             << bb.getLabel() << "\" entry sz=" << sb.scoresSize() << " va:"
+                             << sb.vaStateStr(nullptr) << " vm:" << sb.vmStateStr(nullptr) << "\n");
 
         for (auto it = bb.begin(); it != bb.end();) {
             auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
@@ -668,10 +811,8 @@ class InsertWaitAluPassImpl : public Pass {
         }
 
         PASS_DEBUG(std::cerr << "[InsertWaitAlu] end-of-bb \"" << bb.getLabel()
-                             << "\" sb=[va_vdst LB=" << sb.getScoreLB(CT_VA_VDST)
-                             << " UB=" << sb.getScoreUB(CT_VA_VDST) << " sz=" << sb.scoresSize()
-                             << "; vm_vsrc LB=" << sb.getScoreLB(CT_VM_VSRC)
-                             << " UB=" << sb.getScoreUB(CT_VM_VSRC) << "]\n");
+                             << "\" sz=" << sb.scoresSize() << " va:" << sb.vaStateStr(nullptr)
+                             << " vm:" << sb.vmStateStr(nullptr) << "\n");
         return sb;
     }
 
