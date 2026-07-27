@@ -45,7 +45,7 @@ When opening a pull request, add your meaningful changes to the appropriate sect
 Initial early-access technology preview of hipThreads — a C++-style concurrency library that brings `std::thread`-like primitives to AMD GPUs.
 This first release establishes the core library and its supporting infrastructure:
 
-* `std::thread`-style concurrency primitives that run inside GPU kernels: `hip::thread`, `hip::mutex`, `hip::lock_guard`, `hip::condition_variable`, and the cooperative `pseudo_*` variants.
+* `std::thread`-style concurrency primitives that run inside GPU kernels: `hip::wthread`, `hip::mutex`, `hip::lock_guard`, `hip::condition_variable`, and the cooperative `pseudo_*` variants.
 * Persistent scheduler kernel with host- and device-side work submission, and multi-fiber (SIMD `width`) execution support.
 * CMake build (native HIP language support), a `lit`-based test suite, and a CI/CD workflow.
 * Example projects demonstrating incremental CPU to GPU ports (saxpy, InOneWeekend Raytracer, sparse matrix multiplication, and llama3.c).
