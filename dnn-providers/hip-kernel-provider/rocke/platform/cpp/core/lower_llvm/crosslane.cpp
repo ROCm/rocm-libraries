@@ -428,19 +428,22 @@ static void ll_ds_read_tr16(rocke_lower_t* L,
         return;
     }
     agg_ty = rocke_ll_smem_storage_type(L, stype);
-    base = rocke_ll_fresh(L, base_hint);
-
-    /* getelementptr inbounds <agg>, ptr addrspace(3) <g>, i32 0, i32 <idx>... */
-    if(rocke_strbuf_init(&gep, 64) != 0)
     {
-        rocke_ll_fail(L, ROCKE_ERR_OOM, "ds_read_tr16: strbuf OOM");
+        const char* pool_ptr = rocke_ll_emit_smem_base_ptr(L, gname, stype);
+        base = rocke_ll_fresh(L, base_hint);
+
+        /* getelementptr inbounds <agg>, ptr addrspace(3) <pool>, i32 0, i32 <idx>... */
+        if(rocke_strbuf_init(&gep, 64) != 0)
+        {
+            rocke_ll_fail(L, ROCKE_ERR_OOM, "ds_read_tr16: strbuf OOM");
+        }
+        rocke_strbuf_appendf(&gep,
+                             "  %s = getelementptr inbounds %s, ptr addrspace(3) %s, "
+                             "i32 0",
+                             base,
+                             agg_ty,
+                             pool_ptr);
     }
-    rocke_strbuf_appendf(&gep,
-                         "  %s = getelementptr inbounds %s, ptr addrspace(3) %s, "
-                         "i32 0",
-                         base,
-                         agg_ty,
-                         gname);
     for(i = 1; i < op->num_operands; ++i)
     {
         rocke_strbuf_appendf(&gep, ", i32 %s", rocke_ll_operand(L, op->operands[i]));
@@ -497,18 +500,21 @@ static void _op_tile_ds_read_tr_b8(rocke_lower_t* L, const rocke_op_t* op)
         return;
     }
     agg_ty = rocke_ll_smem_storage_type(L, stype);
-    base = rocke_ll_fresh(L, "tr8.base");
-
-    if(rocke_strbuf_init(&gep, 64) != 0)
     {
-        rocke_ll_fail(L, ROCKE_ERR_OOM, "ds_read_tr_b8: strbuf OOM");
+        const char* pool_ptr = rocke_ll_emit_smem_base_ptr(L, gname, stype);
+        base = rocke_ll_fresh(L, "tr8.base");
+
+        if(rocke_strbuf_init(&gep, 64) != 0)
+        {
+            rocke_ll_fail(L, ROCKE_ERR_OOM, "ds_read_tr_b8: strbuf OOM");
+        }
+        rocke_strbuf_appendf(&gep,
+                             "  %s = getelementptr inbounds %s, ptr addrspace(3) %s, "
+                             "i32 0",
+                             base,
+                             agg_ty,
+                             pool_ptr);
     }
-    rocke_strbuf_appendf(&gep,
-                         "  %s = getelementptr inbounds %s, ptr addrspace(3) %s, "
-                         "i32 0",
-                         base,
-                         agg_ty,
-                         gname);
     for(i = 1; i < op->num_operands; ++i)
     {
         rocke_strbuf_appendf(&gep, ", i32 %s", rocke_ll_operand(L, op->operands[i]));
