@@ -792,16 +792,13 @@ rocblas_status rocsolver_sb2st_hb2st_template(rocblas_handle handle,
     I nv = nv_blocks * kd;
     laset(handle, 'g', ldv, nv, zero, zero, V, rocblas_stride(0), ldv, strideV, batch_count);
 
-    int device;
-    HIP_CHECK(hipGetDevice(&device));
-    hipDeviceProp_t props;
-    HIP_CHECK(hipGetDeviceProperties(&props, device));
+    const hipDeviceProp_t* props = rocblas_internal_get_device_prop(handle);
 
     size_t s_mem_size_housev = sizeof(T) * kd;
     size_t s_mem_size_reduct = sizeof(T) * DIMY;
     size_t s_mem_size = s_mem_size_housev + s_mem_size_reduct;
 
-    if(s_mem_size > props.sharedMemPerBlock)
+    if(s_mem_size > props->sharedMemPerBlock)
     {
         return rocblas_status_internal_error;
     }
