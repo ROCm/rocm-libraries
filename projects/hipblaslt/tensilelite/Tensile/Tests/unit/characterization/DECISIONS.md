@@ -380,7 +380,16 @@ paths): DataType → `Tensile/Common/DataType.py`; CommonTypes →
 ## D16 — BufferLoad/BufferStore promoted to Required Parameters
 **Context** kernel basename hash changes across all archs; assembly verified unchanged/correct; no err or kernel-count changes."
 
-## D17 — CustomKernels: re-target at `_readEmbeddedYaml` after Gemm-From-Anywhere removed `getCustomKernelConfigAndAssembly`
+## D17 — StreamKWorkStealing added to the required (min-naming) parameter set
+**Decision:** Promote `StreamKWorkStealing` to the required (min-naming) parameter set in
+`Common/RequiredParameters.py` and accept the regenerated `_codegen` / SolutionClass /
+ValidParameters goldens.
+**Why:** without it, two solutions differing only in `StreamKWorkStealing` would collide on the
+same kernel identity name/hash.
+**Verification:** only `basename` hashes + the `SKWS0` name token + the roster/valid-values entry
+change (`num_keys` 334→335); no `err`, instruction-count, or emitted-assembly changes.
+
+## D18 — CustomKernels: re-target at `_readEmbeddedYaml` after Gemm-From-Anywhere removed `getCustomKernelConfigAndAssembly`
 
 **ADR:** [`adr/0002-custom-kernels-embedded-yaml-parsing.md`](adr/0002-custom-kernels-embedded-yaml-parsing.md).
 
@@ -424,9 +433,9 @@ directly).
 surfaced 12 pre-existing failures unrelated to this file. Triaged and closed
 in D18 below.
 
-## D18 — Triage of the 12 failures D17 unblocked: 2 real regressions fixed, 10 stale-fixture goldens/asserts updated
+## D19 — Triage of the 12 failures D18 unblocked: 2 real regressions fixed, 10 stale-fixture goldens/asserts updated
 
-**Context:** D17 fixed a pytest *collection* error that had aborted the entire
+**Context:** D18 fixed a pytest *collection* error that had aborted the entire
 `-m unit` run before any test executed, on this branch's diff, since it
 diverged from `develop`. With collection fixed, the suite ran for the first
 time and surfaced 12 failures across 6 files, all in code this branch itself

@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019-2025, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2019-2026, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -36,9 +36,13 @@
 #elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
 #  pragma system_header
 #endif // no system header
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 
+#if THRUST_HAS_HIP_COMPILER()
+
+#  include <rocprim/rocprim.hpp>
 #  include <thrust/system/hip/config.h>
+
+#  include <rocprim/config.hpp>
 
 #  include <thrust/advance.h>
 #  include <thrust/detail/alignment.h>
@@ -51,9 +55,6 @@
 #  include <thrust/system/hip/detail/general/temp_storage.h>
 #  include <thrust/system/hip/detail/par_to_seq.h>
 #  include <thrust/system/hip/detail/util.h>
-
-// rocPRIM includes
-#  include <rocprim/rocprim.hpp>
 
 #  include <cstdint>
 
@@ -106,12 +107,12 @@ ROCPRIM_KERNEL void copy_if_kernel(InputIt first, BoolIt flagsFirst, IntIt posFi
 }
 
 template <typename Derived, typename InputIt, typename OutputIt, typename Predicate>
-THRUST_RUNTIME_FUNCTION auto
+THRUST_HIP_RUNTIME_FUNCTION auto
 copy_if(execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt output, Predicate predicate)
   -> std::enable_if_t<sizeof(typename std::iterator_traits<InputIt>::value_type) < 512, OutputIt>
 {
   using namespace thrust::system::hip_rocprim::temp_storage;
-  using size_type = typename iterator_traits<InputIt>::difference_type;
+  using size_type = thrust::detail::it_difference_t<InputIt>;
 
   size_type num_items       = thrust::distance(first, last);
   size_t temp_storage_bytes = 0;
@@ -166,12 +167,12 @@ copy_if(execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt
 }
 
 template <typename Derived, typename InputIt, typename OutputIt, typename Predicate>
-THRUST_RUNTIME_FUNCTION auto
+THRUST_HIP_RUNTIME_FUNCTION auto
 copy_if(execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt output, Predicate predicate)
   -> std::enable_if_t<!(sizeof(typename std::iterator_traits<InputIt>::value_type) < 512), OutputIt>
 {
   using namespace thrust::system::hip_rocprim::temp_storage;
-  using size_type = typename iterator_traits<InputIt>::difference_type;
+  using size_type = thrust::detail::it_difference_t<InputIt>;
 
   size_type num_items = thrust::distance(first, last);
   hipStream_t stream  = hip_rocprim::stream(policy);
@@ -206,7 +207,7 @@ copy_if(execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt
 }
 
 template <typename Derived, typename InputIt, typename StencilIt, typename OutputIt, typename Predicate>
-THRUST_RUNTIME_FUNCTION OutputIt copy_if(
+THRUST_HIP_RUNTIME_FUNCTION OutputIt copy_if(
   execution_policy<Derived>& policy,
   InputIt first,
   InputIt last,
@@ -215,7 +216,7 @@ THRUST_RUNTIME_FUNCTION OutputIt copy_if(
   Predicate predicate)
 {
   using namespace thrust::system::hip_rocprim::temp_storage;
-  using size_type = typename iterator_traits<InputIt>::difference_type;
+  using size_type = thrust::detail::it_difference_t<InputIt>;
 
   size_type num_items       = static_cast<size_type>(thrust::distance(first, last));
   size_t temp_storage_bytes = 0;
@@ -280,7 +281,7 @@ OutputIterator THRUST_HOST_DEVICE copy_if(
     {
       return __copy_if::copy_if(policy, first, last, result, pred);
     }
-#  if !__THRUST_HAS_HIPRT__
+#  if defined(__HIP_DEVICE_COMPILE__)
     THRUST_DEVICE static OutputIterator seq(
       execution_policy<Derived>& policy, InputIterator first, InputIterator last, OutputIterator result, Predicate pred)
     {
@@ -289,7 +290,7 @@ OutputIterator THRUST_HOST_DEVICE copy_if(
 #  endif
   };
 
-#  if __THRUST_HAS_HIPRT__
+#  if !defined(__HIP_DEVICE_COMPILE__)
   return workaround::par(policy, first, last, result, pred);
 #  else
   return workaround::seq(policy, first, last, result, pred);
@@ -319,7 +320,7 @@ OutputIterator THRUST_HOST_DEVICE copy_if(
     {
       return __copy_if::copy_if(policy, first, last, stencil, result, pred);
     }
-#  if !__THRUST_HAS_HIPRT__
+#  if defined(__HIP_DEVICE_COMPILE__)
     THRUST_DEVICE static OutputIterator
     seq(execution_policy<Derived>& policy,
         InputIterator first,
@@ -333,7 +334,7 @@ OutputIterator THRUST_HOST_DEVICE copy_if(
 #  endif
   };
 
-#  if __THRUST_HAS_HIPRT__
+#  if !defined(__HIP_DEVICE_COMPILE__)
   return workaround::par(policy, first, last, stencil, result, pred);
 #  else
   return workaround::seq(policy, first, last, stencil, result, pred);
