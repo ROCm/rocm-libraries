@@ -150,21 +150,33 @@ def analyze_domain(domain):
     }
 
 
+# Width of the label column in the full report; secondary one-liners pad their
+# description to the same width so every ':' lines up in a single column.
+LABEL_WIDTH = 42
+
+
+def _rline(label, value):
+    return f"{label:<{LABEL_WIDTH}} : {value}"
+
+
 def print_full_report(r):
-    print(f"========== Dapper Gtest Sharded Analysis: {r['name']} ==============")
-    print(f"Total Test Time                            : {r['total_time']:.3f}s")
-    print(f"Dapper Time                                : {r['dapper_time']:.3f}s")
+    print("========== Dapper Gtest Sharded Analysis ========================")
+    print(_rline("Total Test Time", f"{r['total_time']:.3f}s"))
+    print(_rline("Dapper Time", f"{r['dapper_time']:.3f}s"))
     print(
-        f"Time Dapper would have saved               : {r['dapper_time_savings']:.3f}s ({r['dapper_time_savings_pct']:.3f}%)"
+        _rline(
+            "Time Dapper would have saved",
+            f"{r['dapper_time_savings']:.3f}s ({r['dapper_time_savings_pct']:.3f}%)",
+        )
     )
-    print(f"Dapper fixtures not in category filter     : {r['missing_in_union']}")
-    print(f"Dapper fixtures negated by category filter : {r['negated_in_union']}")
-    print(f"Covered dapper fixture (forward|reverse)   : {r['forward']}|{r['reverse']}")
-    print(f"Dapper Compliance                          : {r['compliance']}")
+    print(_rline("Dapper fixtures not in category filter", r["missing_in_union"]))
+    print(_rline("Dapper fixtures negated by category filter", r["negated_in_union"]))
     print(
-        f"Validation Result                          : {'VALID' if r['validation_ok'] else 'FAIL'}"
+        _rline("Covered dapper fixture (forward|reverse)", f"{r['forward']}|{r['reverse']}")
     )
-    print(f"Test Result                                : {r['test_result']}")
+    print(_rline("Dapper Compliance", r["compliance"]))
+    print(_rline("Validation Result", "VALID" if r["validation_ok"] else "FAIL"))
+    print(_rline("Test Result", r["test_result"]))
 
 
 def main():
@@ -190,12 +202,12 @@ def main():
 
     secondaries = [r for r in reports if r["type"] == "secondary"]
     if secondaries:
-        name_w = max(len(r["name"]) for r in secondaries)
+        # Pad the description to LABEL_WIDTH so the ':' aligns with the primary report's
+        # column; pad the result so 'test:' aligns across multiple secondaries.
         res_w = max(len(r["compliance"]) for r in secondaries)
-        print("---------- Dapper secondary domains ----------")
         for r in secondaries:
             print(
-                f"{r['name']:<{name_w}} : {r['compliance']:<{res_w}}  test: {r['test_result']}"
+                f"{r['name']:<{LABEL_WIDTH}} : {r['compliance']:<{res_w}}  test: {r['test_result']}"
             )
 
     with open("dapper_results.json", "w") as out_f:
