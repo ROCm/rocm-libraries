@@ -86,7 +86,7 @@ try
     rocsolver_sygvd_hegvd_getMemorySize<false, false, T, S>(
         handle, itype, evect, uplo, n, batch_count, &size_scalars, &size_work1, &size_work2,
         &size_work3, &size_work4, &size_tmpz, &size_splits, &size_tau, &size_pivots_workArr,
-        &size_iinfo, &size_Aband, &size_he2hb_work, &size_V_hb2st, &size_tau_hb2st, &optim_mem);
+        &size_Aband, &size_he2hb_work, &size_V_hb2st, &size_tau_hb2st, &size_iinfo, &optim_mem);
 
     if(rocblas_is_device_memory_size_query(handle))
         return rocblas_set_optimal_device_memory_size(
