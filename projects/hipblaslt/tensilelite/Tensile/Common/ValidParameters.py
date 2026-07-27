@@ -323,6 +323,23 @@ validParameters = { # we need to make sure this matches develop
     #    SIA3: 1LDSBuffer works only when PGR=True
     # TODO: optimize scheduling to support more cases.
     "1LDSBuffer": [-1, 0, 1],
+    # gfx1250 LDS segment interleave: raises LDS read bandwidth by putting operand A's
+    # two halves in different 64KiB LDS segments so its two MFMA read ports stop conflicting.
+    # Supported: TDMInst=3 (TDM load for A and B), gfx1250, MIWaveGroup [2,2], dtype bf16 / fp16 /
+    # fp8 (incl. MXFP8). Not applied for 1LDSBuffer, subtile, sparse, or TDMSplit kernels.
+    # Mechanism: reorder LDS from the baseline [A0][A1][B0][B1] to [A0][B0][A1][B1]. Only operand A
+    # is helped -- B's halves move too, but both ports can still hit the same B segment.
+    # Two cases:
+    #   tight   (one A-half + one B-half >= 64KiB): [A0][B0] fills a segment, so [A1][B1] land in
+    #            the next one -- no extra LDS.
+    #   aligned (< 64KiB): pad [A0][B0] up to the segment boundary to push [A1][B1] over -- uses
+    #            more LDS, and needs PrefetchGlobalRead=2.
+    # Values:
+    #   -1 = auto: apply "tight" only (skip "aligned").
+    #    0 = off (default): baseline layout.
+    #    1 = force on: apply both "tight" and "aligned" wherever valid.
+    # Recommended: set [0, 1] when tuning, so both baseline and interleaved kernels are benchmarked.
+    "LDSSegmentInterleave": [-1, 0, 1],
     # StreamK persistent loop: use the current tile's no-load-loop window to
     # issue the first global-read group for the next persistent tile. The
     # generated code keeps that first-PGR data durable and restores borrowed
@@ -811,6 +828,14 @@ validParameters = { # we need to make sure this matches develop
     # 0: uses workspace to store partial tiles, accumulate in deterministic fix-up step
     # 1: uses atomics to accumulate partial tiles
     "StreamKAtomic": [0, 1],
+    # Codegen-time toggle for single-hop next-neighbor work stealing in the
+    # dynamic-queue StreamK fetch (SK4 / SK5-dynamic). Queue count =
+    # archCaps['NumXCD'] (8 on gfx942/gfx950). When a workgroup's home queue
+    # empties, it makes one atomic attempt on its next-neighbor per-XCD queue.
+    # Valid only for StreamK in (4, 5).
+    #  0: off
+    #  1: on
+    "StreamKWorkStealing": [0, 1],
     # Enables XCC-based remapping of workgroups, set the value to the number of XCCs
     # for the device/configuration being used
     #  0: uses default workgroup assignment
@@ -926,6 +951,7 @@ validParameters = { # we need to make sure this matches develop
     # For gfx942, sets sc0/sc1/nt bits
     # 0: none, 1: sc0, 2: sc1, 3: sc0 sc1, 4: nt, 5: nt sc0, 6: nt sc1, 7: nt sc0 sc1
     "NonTemporalE": list(range(0, 8)),
+    "NonTemporalGate": list(range(0, 8)),
     "NonTemporalD": list(range(0, 8)),
     "NonTemporalC": list(range(0, 8)),
     "NonTemporalA": list(range(0, 8)),

@@ -758,6 +758,17 @@ class ORIGAMI_EXPORT hardware_t {
   static size_t get_default_num_xcds(architecture_t arch);
 
   /**
+   * @brief Get the default L2 cache-line size (in bytes) for an architecture.
+   *
+   * Returns the per-arch L2 cache-line size used for the StreamK per-queue
+   * counter stride (currently uniform 128 B across supported archs).
+   *
+   * @param arch Architecture enum value
+   * @return L2 cache-line size in bytes
+   */
+  static size_t get_default_cache_line_bytes(architecture_t arch);
+
+  /**
    * @brief Check if the hardware described by properties is supported.
    *
    * Determines whether the GPU architecture represented by the device

@@ -585,6 +585,78 @@ def _enable_k_single_buffer(problem: UnifiedAttentionProblem) -> bool:
     return _enable_d128_small_tile(problem) and problem.block_size >= 32
 
 
+def _d256_gfx950_cohort(problem: "UnifiedAttentionProblem") -> bool:
+    """Arch-agnostic cohort for the gfx950 bf16 D256 prefill fast path.
+
+    The arch gate is applied by callers (``_d256_gfx950_fast`` uses the resolved
+    device arch; the ``dispatch.attention`` candidate uses the request arch), so
+    this stays CPU-pure and is the single source of truth for the cohort shape.
+    """
+    return (
+        problem.head_size == 256
+        and problem.dtype == "bf16"
+        and not problem.use_fp8
+        and problem.sliding_window == 0
+        and problem.softcap == 0
+        and not problem.use_sinks
+        and not problem.use_alibi
+        and not problem.use_qq_bias
+        and problem.max_seqlen_q > 1
+    )
+
+
+def _d256_gfx950_fast(problem: "UnifiedAttentionProblem") -> bool:
+    """Route the D256 gfx950 bf16 prefill cohort to the 32x32
+    transposed fast path + FA3-style softmax<->MFMA interleave.
+
+    Gates the three launch-critical geometry selectors (num_warps / tile_size /
+    block_m_per_warp) so the builder spec, ``_tiled_cache_key`` and
+    ``_get_2d_launch_meta`` all agree; the remaining codegen flags (32x32 MFMA,
+    transposed stack, register_pv off, K single-buffer, interleave mode2/g4) are
+    applied by the spec override in ``_tiled_spec_from_problem``. Narrow +
+    arch/feature-guarded: every other shape is byte-identical.
+
+    Perf (MI355X, direct-launch sweep, fp32-ref max_abs=1.5625e-02): +interleave
+    mode2 g4 gives +9.1% @ Sq4096 and +10.1% @ Sq8192 over the 32x32 base.
+    """
+    return _resolve_attention_arch() == "gfx950" and _d256_gfx950_cohort(problem)
+
+
+def _d256_gfx950_spec_overrides() -> dict:
+    """Single source of truth for the D256 gfx950 bf16 prefill knob constellation.
+
+    The 32x32 transposed + FA3-style softmax<->MFMA-interleave (mode2/g4) +
+    slab-padded K_lds codegen pins. Consumed by BOTH the builder override in
+    ``builders.common.attention_spec_builder._tiled_spec_from_problem`` (the
+    production path) and the ``dispatch.attention`` gfx950 D256 candidate, so the
+    dispatched spec and the built kernel cannot drift.
+    """
+    return dict(
+        use_mfma_32x32=True,
+        use_transposed_qk_32x32=True,
+        use_q_direct_reg=True,
+        use_transposed_half_local_pv=True,
+        use_transposed_scalar_state=True,
+        use_transposed_mask_once=True,
+        use_transposed_mask_limit=True,
+        use_mask_phase_split=True,
+        use_register_pv=False,
+        use_k_single_buffer=True,
+        use_v_double_buffer=False,
+        use_early_v_schedule=False,
+        use_sched_barrier=False,
+        use_softmax_mfma_interleave=True,
+        softmax_interleave_mode=2,
+        softmax_interleave_groups=4,
+        use_fast_paged_kv_desc=False,
+        use_mfma32_skip_legacy_qreg=False,
+        # Slab-granularity K_lds pad (16 halves): breaks the row-aliased bank
+        # conflict on the QK K read for a ~25% Sq8192 latency win.
+        use_kq_lds_pad=True,
+        kq_lds_pad_halves=16,
+    )
+
+
 def _enable_softmax_mfma_interleave(problem: UnifiedAttentionProblem) -> bool:
     """gfx950 single-batch d128 prefill: interleave the softmax VALU into the
     MFMA window via ``iglp_opt(1)`` and widen to num_warps=4.
@@ -687,6 +759,8 @@ def _select_2d_tile_size(problem: UnifiedAttentionProblem) -> int:
     ``T = block_size`` (single block per iter, 32 tokens) — measured
     1.15-1.30× win on every FP8 SW long-prefill shape.
     """
+    if _d256_gfx950_fast(problem):
+        return 64
     if _resolve_attention_arch() == "gfx1250":
         # gfx1250 v1 consumes exactly one 32-token paged-KV block per WMMA
         # iteration; wider T needs separate multi-block block-table handling.
@@ -738,6 +812,17 @@ def _select_2d_tile_size(problem: UnifiedAttentionProblem) -> int:
     #     GQA-8 d64 S2048 (1.19-2.68x over prod).
     if _enable_single_batch_combo(problem):
         if problem.head_size == 64:
+            # fast_paged_kv_desc (needs T=64) is a ~1.3-1.4x win for the bf16
+            # h64kv8 no-SW family -> beats the T=128 early-V path (measured on
+            # MI355X). Force T=64 there so the combo's fast_paged enablement is
+            # valid; other d64 single-batch shapes keep the wider T=128 tile.
+            if (
+                problem.dtype == "bf16"
+                and problem.num_query_heads == 64
+                and problem.num_kv_heads == 8
+                and problem.sliding_window == 0
+            ):
+                return 64
             return 128
         # d128 occupancy lever (supersedes the small-tile pick for the
         # LONG-context holdout): at num_warps=2 the d128 combo is LDS-bound
@@ -829,6 +914,8 @@ def _select_2d_num_warps(problem: UnifiedAttentionProblem) -> int:
       - an LDS-budget check (``<= 96 KiB`` so we keep >= 1 CTA/CU on
         MI355X comfortably).
     """
+    if _d256_gfx950_fast(problem):
+        return 2
     if _resolve_attention_arch() == "gfx1250":
         # A gfx1250 workgroup is one wave32 in the v1 WMMA tiled path.
         return 1
@@ -1077,6 +1164,13 @@ def _tiled_cache_key(problem: UnifiedAttentionProblem) -> Tuple:
         _select_2d_tile_size(problem),
         _select_2d_waves_per_eu(problem),
         _select_2d_block_m_per_warp(problem),
+        # Layer-2 override marker: flips the key exactly when the D256 gfx950
+        # codegen override applies in `_tiled_spec_from_problem`, so the key stays
+        # faithful to the built kernel (key === built kernel) without duplicating
+        # the override's flags here. The override is a hand-pinned exception that
+        # deliberately lives ABOVE the autotuner-regenerable `_enable_*` helpers
+        # below; keying on the predicate (not the flags) keeps that layering.
+        _d256_gfx950_fast(problem),
         _enable_mfma_32x32(problem),
         _enable_transposed_qk_32x32(problem),
         _enable_transposed_half_local_pv(problem),
@@ -1763,18 +1857,24 @@ def _enable_gfx942_flash_mask_limit(problem: UnifiedAttentionProblem) -> bool:
 
 
 def _enable_gfx942_flash_k_sliced_ring(problem: UnifiedAttentionProblem) -> bool:
-    # The sliced-K ring (32-wide K slices -> k_groups = HD/32) wins on BOTH head
-    # sizes: D128 (k_groups=4) and D64 (k_groups=2). Measured T=64+ring+cfvst+
-    # mask-limit (nw4) vs the prior per-head bests: D64 13-17% faster (beats Torch
-    # at S2048, ~parity elsewhere); D128 beats Torch S2048/S4096. So D64 and D128
-    # prefill now share the ring path.
-    # bf16 D128 now shares the ring path: the earlier exclusion attached the ring
-    # to the non-ring bf16-WIDE geometry (nw=2, no cfvst), which the ring cannot
-    # use -- the ring requires the conflict-free-V store (cfvst) and the wide nw=4
-    # flash geometry. The spec builder's ring branch instead uses the fp16-flash
-    # geometry (nw=4, tile=64, cfvst) -- verified numerically correct on gfx942
-    # (max_abs 0.00049, no NaN/Inf, GQA + MHA) on both the Python and C++ engines,
-    # with the byte-identity gate GREEN. So D64 and D128 bf16 prefill share the ring.
+    # The sliced-K ring (32-wide K slices -> k_groups = HD/32) is correctness-
+    # verified only for D64 (k_groups=2): measured T=64+ring+cfvst+mask-limit (nw4)
+    # is 13-17% faster than the prior D64 best (beats Torch at S2048, ~parity
+    # elsewhere).
+    #
+    # D128 (k_groups=4) is EXCLUDED for BOTH dtypes. The k_groups=4 ring produces
+    # numerically wrong results at realistic input magnitude -- max_abs ~0.5-1.3
+    # vs the fp32 oracle (bf16 AND fp16, GQA), even at S512 when the ring is forced
+    # -- while the non-ring D128 path (nw2/nw4, T=64, no ring) passes at max_abs
+    # ~0.0156 (bf16) / ~0.002 (fp16) on every S. #9198's "max_abs 0.00049 verified"
+    # claim was measured against a uniform_(-0.1,0.1) oracle whose near-uniform
+    # softmax never exercises the online-softmax running-max rescale across the four
+    # K slices, so the defect was masked; it reproduces immediately with randn
+    # (unit-variance) inputs (study s34_..._ring_correctness_regression). Until the
+    # k_groups=4 sliced-K accumulation is fixed in attention_tiled_2d.py, D128 stays
+    # on the non-ring flash geometry (correct-but-slower).
+    if _resolve_attention_arch() == "gfx942" and problem.head_size == 128:
+        return False
     if not (
         (_enable_gfx942_fp16_flash(problem) or _enable_gfx942_bf16_flash(problem))
         and problem.head_size in (64, 128)
@@ -2150,12 +2250,16 @@ def _resolve_lds_budget(spec):
 
 def _tiled_spec_from_problem(
     problem: UnifiedAttentionProblem,
+    *,
+    overrides=None,
 ):
     from builders.common.attention_spec_builder import (
         _tiled_spec_from_problem as _impl,
     )
 
     _spec = _impl(problem)
+    if overrides is not None:
+        _spec = replace(_spec, **overrides)
     return _resolve_lds_budget(_spec)
 
 
@@ -2200,6 +2304,8 @@ def _select_2d_block_m_per_warp(problem: UnifiedAttentionProblem) -> int:
     Gate: ``max_seqlen_q > 256 and num_seqs >= 2``. Below this, mw=16
     is consistently within noise of mw=32 in the per-shape sweep.
     """
+    if _d256_gfx950_fast(problem):
+        return 32
     if _resolve_attention_arch() == "gfx1250":
         return 16
     # mw=32 (BLOCK_M = 32 * num_warps) only pays off when a path actually
