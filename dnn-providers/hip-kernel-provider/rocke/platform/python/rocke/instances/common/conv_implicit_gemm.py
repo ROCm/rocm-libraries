@@ -386,6 +386,12 @@ class ImplicitGemmConvSpec:
     # It composes simple fp32 VALU transforms directly on MFMA accumulator
     # fragments before the existing direct/cshuffle store path.
     acc_epilogue: ConvAccumulatorEpilogue = ConvAccumulatorEpilogue()
+    # cshuffle epilogue LDS aliasing (same knob as UniversalGemmSpec.trait).
+    # False (default): the smem-pool packer aliases the cshuffle C tile onto the
+    # A/B staging bytes (pool = max(ab, c)) with a step-0 reuse barrier. True:
+    # C gets its own LDS bytes (pool = ab + c) and the barrier is elided ->
+    # lower small-tile latency, more LDS. Only affects epilogue == "cshuffle".
+    cshuffle_no_alias: bool = False
 
     @property
     def block_size(self) -> int:
@@ -421,7 +427,7 @@ class ImplicitGemmConvSpec:
             f"a{self.warp_tile_m}x{self.warp_tile_n}x{self.warp_tile_k}",
             f"{self.pipeline}_{self.epilogue}",
             self.acc_epilogue.tag(),
-            flags={"async": self.async_dma},
+            flags={"async": self.async_dma, "noalc": self.cshuffle_no_alias},
         )
 
     def validate(self) -> None:
@@ -591,7 +597,11 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
     _c_lds = (
         spec.tile_m * spec.tile_n * _c_dtype_bytes if spec.epilogue == "cshuffle" else 0
     )
-    _total_lds = _ab_lds + _c_lds
+    # cshuffle_no_alias decides whether the cshuffle C tile shares the A/B pool
+    # bytes, so the LDS budget must be computed per case:
+    #   OFF (default, aliased): C reuses the A/B bytes   -> pool = max(ab, c)
+    #   ON  (exclusive):        C gets its own LDS bytes -> pool = ab + c
+    _total_lds = (_ab_lds + _c_lds) if spec.cshuffle_no_alias else max(_ab_lds, _c_lds)
     if not target.fits_lds(_total_lds):
         return False, (
             f"LDS budget {_total_lds} bytes "
@@ -1842,7 +1852,10 @@ def _emit_cshuffle_epilogue(
     def d_addr(b_: IRBuilder, m_val: Value, n_val: Value):
         return D_desc.offset(b_, m=m_val, k_out=n_val)
 
-    _cshuffle_kwargs: dict = {"out_dtype": spec.data.dtype_d}
+    _cshuffle_kwargs: dict = {
+        "out_dtype": spec.data.dtype_d,
+        "no_alias": spec.cshuffle_no_alias,
+    }
     if spec.vector_size_c is not None:
         _cshuffle_kwargs["max_store_vec"] = spec.vector_size_c
     if op is not None and op.family == "wmma":
