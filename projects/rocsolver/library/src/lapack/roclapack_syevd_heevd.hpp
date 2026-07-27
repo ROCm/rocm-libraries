@@ -348,7 +348,7 @@ void rocsolver_syevd_heevd_getMemorySize(rocblas_handle handle,
 
         // V and tau for hb2st and unmtr_hb2st:
         // nt = ceildiv(n - 1, kd); nv = kd * nt * (nt + 1) / 2
-        const rocblas_int nt = (n - 2) / kd + 1;
+        const rocblas_int nt = ceildiv(n - 1, kd);
         const rocblas_int nv = kd * nt * (nt + 1) / 2;
         const rocblas_int ldv = 2 * kd - 1;
         *size_V_hb2st = sizeof(T) * ldv * nv * batch_count;
@@ -490,7 +490,7 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
         const rocblas_int nb = SYEVD_2STAGE_NB;
         const rocblas_int ldab = 3 * kd - 1;
         const rocblas_int ldv_hb2st = 2 * kd - 1;
-        const rocblas_int nt = (n - 2) / kd + 1;
+        const rocblas_int nt = ceildiv(n - 1, kd);
         const rocblas_int nv = kd * nt * (nt + 1) / 2;
 
         // Strides for band and V arrays (non-batched strides = 0 for the first template overload)
@@ -760,7 +760,7 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
         const rocblas_int nb = SYEVD_2STAGE_NB;
         const rocblas_int ldab = 3 * kd - 1;
         const rocblas_int ldv_hb2st = 2 * kd - 1;
-        const rocblas_int nt = (n - 2) / kd + 1;
+        const rocblas_int nt = ceildiv(n - 1, kd);
         const rocblas_int nv = kd * nt * (nt + 1) / 2;
 
         // Strides for band and V arrays
