@@ -371,8 +371,8 @@ TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsWrongNodeCount4)
     EXPECT_FALSE(_builder.isApplicable(_handle, mockGraph));
 }
 
-// Non-FP8 input types
-TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsNonFp8Input)
+// Non-MX input types
+TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsNonMxInputHalf)
 {
     auto fb = createValidMxMatmulGraph({32, 128},
                                        {1, 32},
@@ -388,7 +388,7 @@ TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsNonFp8Input)
     EXPECT_FALSE(_builder.isApplicable(_handle, graph));
 }
 
-TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsNonFp8InputFloat)
+TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsNonMxInputFloat)
 {
     auto fb = createValidMxMatmulGraph({32, 128},
                                        {1, 32},
