@@ -14,6 +14,7 @@
 
 #include "origami/hardware.hpp"
 #include "origami/heuristics.hpp"
+#include "origami/targets/triton/heuristics.hpp"
 #include "origami/logger.hpp"
 #include "origami/math.hpp"
 #include "origami/types.hpp"
@@ -49,8 +50,15 @@ context_t::context_t(const problem_t& problem, const hardware_t& hardware, const
   const size_t MT_M = config.mt.m;
   const size_t MT_N = config.mt.n;
 
-  // Heuristic parameters
+  // Heuristic parameters. The base lookup hits the unified database (Tensile
+  // entries) and is identical for every target. For Triton kernels, overlay
+  // any Triton-specific tuning on top via the default-aware overlay_with so
+  // only fields the Triton DB actually opines on are changed; everything else
+  // inherits from the base lookup. The Tensile/hipBLASLt path never reaches
+  // this branch, so its heuristic is exactly the base lookup result.
   heuristic = get_heuristic_params(problem, hardware, config);
+  if (config.target == target_t::triton)
+    heuristic.overlay_with(triton::get_heuristic_params(problem, hardware, config));
 
   // Element sizes
   a_bytes = data_type_to_bytes(problem.a_dtype);
@@ -388,16 +396,41 @@ std::tuple<reduction_t, size_t, size_t, size_t, size_t> compute_launch_parameter
       reduction_strategy, num_wgs, num_active_cus, num_timesteps, splitting_factor);
 }
 
+// Estimate LDS bytes for a macro tile (no-padding model).
+// See gemm.hpp for the formula and assumptions.
+size_t estimate_lds_bytes(const problem_t& problem, const config_t& config) {
+  // Compute in bits then ceil-divide to bytes so sub-byte dtypes (F4/F6) do
+  // not truncate to zero. data_type_to_bytes() returns a double (e.g. 0.5 for
+  // F4); a direct cast to size_t would silently floor that to 0 and make any
+  // capacity check unconditionally pass.
+  const size_t bits_a = static_cast<size_t>(datatype_to_bits(problem.a_dtype));
+  const size_t bits_b = static_cast<size_t>(datatype_to_bits(problem.b_dtype));
+
+  const size_t a_tile = math::safe_ceil_div(config.mt.mk() * bits_a, static_cast<size_t>(8));
+  const size_t b_tile = math::safe_ceil_div(config.mt.nk() * bits_b, static_cast<size_t>(8));
+
+  if (config.target == target_t::triton && config.has_triton_params()) {
+    const int num_stages = config.triton().num_stages;
+    if (num_stages <= 1)
+    {
+      const size_t max_tile = std::max(a_tile, b_tile);
+      return max_tile;
+    }
+    else
+    {
+      const size_t total_tile = static_cast<size_t>(num_stages - 1) * (a_tile + b_tile);
+      return total_tile;
+    }
+  }
+
+  return a_tile + b_tile;
+}
+
 // Check if MT fits in LDS
 bool check_lds_capacity(const hardware_t& hardware,
-                        const dim3_t& mt,
-                        const data_type_t& a_dtype,
-                        const data_type_t& b_dtype) {
-  const auto a_loads_in_bytes = mt.mk() * data_type_to_bytes(a_dtype);
-  const auto b_loads_in_bytes = mt.nk() * data_type_to_bytes(b_dtype);
-  const auto LDS_usage        = a_loads_in_bytes + b_loads_in_bytes;
-
-  return LDS_usage <= hardware.lds_capacity;
+                        const problem_t& problem,
+                        const config_t& config) {
+  return estimate_lds_bytes(problem, config) <= hardware.lds_capacity;
 }
 
 // Compute limited achievable memory bandwidth based on active CUs
@@ -1744,7 +1777,10 @@ double compute_tile_latency(const problem_t& problem,
   L_tile_total += heuristic.weight_wg_setup * L_WG_setup;
   L_tile_total += heuristic.weight_loop_overhead * static_cast<double>(num_iter);
 
-  // Apply final tile total weight
+  // Apply final tile total weight. For Triton kernels the heuristic returned
+  // by context_t already has the Triton overlay merged in (see
+  // context_t::context_t), so this single multiply covers both base and
+  // target-specific weights.
   L_tile_total *= heuristic.weight_tile_total;
 
   if (debug) {
@@ -1886,6 +1922,7 @@ double compute_total_latency(const problem_t& problem,
   // 0) Short-circuit
   // We don't need to compute latency for all MTs. With this, we can shortcut.
   bool shortCircuit = true;
+
   if (shortCircuit) {
     // When problem dimensions are small enough that we can fit them in one tile, we should do
     // so. This short circuit condition also decreases selection latency when problems are very
@@ -1894,27 +1931,29 @@ double compute_total_latency(const problem_t& problem,
     if (M <= 256 && N <= 256 && K < 1024 && batch != 1 && (MT_M < M || MT_N < N))
       return std::numeric_limits<double>::max();
 
-    // Use Dot2 only for M < 3
-    if (MI_M == 1 && MI_N == 1 && MI_K == 64 && M > 2) return std::numeric_limits<double>::max();
-
-    size_t K_mod_128bytes    = K * a_bits % 1024;
-    size_t MT_K_mod_128bytes = MT_K * a_bits % 1024;
-    if (K_mod_128bytes == 0 && MT_K_mod_128bytes == 0) {
-      // avoid division by 0 if K == 0
-      if (M <= MT_M * 2 && !b_trans && ((N * b_bits) / (M * a_bits) > 5)) {
-        // Use nontemporal B
-        if (!(config.cache_hints_b == 4)) { return std::numeric_limits<double>::max(); }
-      } else if (N <= MT_N * 2 && a_trans && ((M * a_bits) / (N * b_bits) > 5)) {
-        // Use Non Temporal A
-        if (!(config.cache_hints_a == 4)) { return std::numeric_limits<double>::max(); }
-      } else {
-        // Never use Non Temporal
-        if (config.cache_hints_a || config.cache_hints_b) {
-          return std::numeric_limits<double>::max();
-        }
-      }
-    } else if (config.cache_hints_a || config.cache_hints_b) {
+    if (MI_M == 1 && MI_N == 1 && MI_K == 64 && M > 2)
       return std::numeric_limits<double>::max();
+
+    {
+      size_t K_mod_128bytes    = K * a_bits % 1024;
+      size_t MT_K_mod_128bytes = MT_K * a_bits % 1024;
+      if (K_mod_128bytes == 0 && MT_K_mod_128bytes == 0) {
+        // avoid division by 0 if K == 0
+        if (M <= MT_M * 2 && !b_trans && ((N * b_bits) / (M * a_bits) > 5)) {
+          // Use nontemporal B
+          if (!(config.cache_hints_b == 4)) { return std::numeric_limits<double>::max(); }
+        } else if (N <= MT_N * 2 && a_trans && ((M * a_bits) / (N * b_bits) > 5)) {
+          // Use Non Temporal A
+          if (!(config.cache_hints_a == 4)) { return std::numeric_limits<double>::max(); }
+        } else {
+          // Never use Non Temporal
+          if (config.cache_hints_a || config.cache_hints_b) {
+            return std::numeric_limits<double>::max();
+          }
+        }
+      } else if (config.cache_hints_a || config.cache_hints_b) {
+        return std::numeric_limits<double>::max();
+      }
     }
   }
 

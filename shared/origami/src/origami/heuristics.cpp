@@ -13,10 +13,12 @@
 
 namespace origami {
 
-// ============================================================================
-// heuristic_params_t Implementation
-// ============================================================================
-
+// heuristic_params_t implementation.
+// heuristic_params_t::merge_with -- overwrite-everything composition used by
+// the hierarchical DB lookup (origami::heuristics_database_t::lookup). Kept
+// identical to the Tensile/hipBLASLt path semantics: each more-specific entry
+// fully replaces the accumulator. For the Triton delta-overlay semantics that
+// only touch explicitly-set fields, see overlay_with below.
 void heuristic_params_t::merge_with(const heuristic_params_t& other) {
   // Latency component weights
   weight_mem_l2        = other.weight_mem_l2;
@@ -67,10 +69,77 @@ void heuristic_params_t::merge_with(const heuristic_params_t& other) {
   reject = other.reject;
 }
 
-// ============================================================================
-// heuristic_key_t Implementation
-// ============================================================================
+void heuristic_params_t::overlay_with(const heuristic_params_t& other) {
+  // Default-aware overlay: only fields that have been changed away from the
+  // default-constructed value in `other` override `*this`. Fields that `other`
+  // left at the default are treated as "no opinion" and leave `*this`
+  // unchanged. This is what makes hierarchical lookup compose: a more-specific
+  // entry that touches one knob no longer wipes out tuning that a broader
+  // entry contributed to other knobs, and a target-specific overlay (e.g.
+  // Triton) can be merged onto a tuned base without clobbering anything.
+  //
+  // The exact `!=` comparisons are intentional: defaults flow through
+  // copy-initialization from `static constexpr` constants, so an untouched
+  // field in `other` is bitwise-identical to the corresponding field in
+  // `defaults`. This is "is this value still the constructor default?", not
+  // approximate equality, so an epsilon is wrong here.
+  //
+  // Caveat: a field whose default is exactly 0.0/0 cannot currently be set
+  // back to 0 by an overlay. No such field exists today; if one is added,
+  // either pick a sentinel default or extend this struct with explicit
+  // "is_set" bookkeeping.
+  const heuristic_params_t defaults{};
 
+  // Latency component weights
+  if (other.weight_mem_l2        != defaults.weight_mem_l2)        weight_mem_l2        = other.weight_mem_l2;
+  if (other.weight_mem_mall      != defaults.weight_mem_mall)      weight_mem_mall      = other.weight_mem_mall;
+  if (other.weight_mem_dram      != defaults.weight_mem_dram)      weight_mem_dram      = other.weight_mem_dram;
+  if (other.weight_compute       != defaults.weight_compute)       weight_compute       = other.weight_compute;
+  if (other.weight_memory        != defaults.weight_memory)        weight_memory        = other.weight_memory;
+  if (other.weight_wg_setup      != defaults.weight_wg_setup)      weight_wg_setup      = other.weight_wg_setup;
+  if (other.weight_prologue      != defaults.weight_prologue)      weight_prologue      = other.weight_prologue;
+  if (other.weight_epilogue      != defaults.weight_epilogue)      weight_epilogue      = other.weight_epilogue;
+  if (other.weight_loop_overhead != defaults.weight_loop_overhead) weight_loop_overhead = other.weight_loop_overhead;
+  if (other.weight_tile_total    != defaults.weight_tile_total)    weight_tile_total    = other.weight_tile_total;
+
+  // Empirical constants
+  if (other.main_memory_load_latency         != defaults.main_memory_load_latency)         main_memory_load_latency         = other.main_memory_load_latency;
+  if (other.occupancy_decay_base             != defaults.occupancy_decay_base)             occupancy_decay_base             = other.occupancy_decay_base;
+  if (other.mall_depth_sq                    != defaults.mall_depth_sq)                    mall_depth_sq                    = other.mall_depth_sq;
+  if (other.mall_cold_floor                  != defaults.mall_cold_floor)                  mall_cold_floor                  = other.mall_cold_floor;
+  if (other.l2_depth_sq                      != defaults.l2_depth_sq)                      l2_depth_sq                      = other.l2_depth_sq;
+  if (other.l2_cold_floor                    != defaults.l2_cold_floor)                    l2_cold_floor                    = other.l2_cold_floor;
+  if (other.l2_pollution_penalty             != defaults.l2_pollution_penalty)             l2_pollution_penalty             = other.l2_pollution_penalty;
+  if (other.l2_amp_ceiling_batched           != defaults.l2_amp_ceiling_batched)           l2_amp_ceiling_batched           = other.l2_amp_ceiling_batched;
+  if (other.l2_amp_ceiling_k_split           != defaults.l2_amp_ceiling_k_split)           l2_amp_ceiling_k_split           = other.l2_amp_ceiling_k_split;
+  if (other.l2_amp_ceiling_skinny            != defaults.l2_amp_ceiling_skinny)            l2_amp_ceiling_skinny            = other.l2_amp_ceiling_skinny;
+  if (other.l2_depth_penalty                 != defaults.l2_depth_penalty)                 l2_depth_penalty                 = other.l2_depth_penalty;
+  if (other.l1_hit_rate_ceiling_skinny       != defaults.l1_hit_rate_ceiling_skinny)       l1_hit_rate_ceiling_skinny       = other.l1_hit_rate_ceiling_skinny;
+  if (other.epilogue_cycles_per_acc_read     != defaults.epilogue_cycles_per_acc_read)     epilogue_cycles_per_acc_read     = other.epilogue_cycles_per_acc_read;
+  if (other.epilogue_acc_read_parallelism    != defaults.epilogue_acc_read_parallelism)    epilogue_acc_read_parallelism    = other.epilogue_acc_read_parallelism;
+  if (other.epilogue_cycles_per_bounds_check != defaults.epilogue_cycles_per_bounds_check) epilogue_cycles_per_bounds_check = other.epilogue_cycles_per_bounds_check;
+  if (other.epilogue_scalar_store_penalty    != defaults.epilogue_scalar_store_penalty)    epilogue_scalar_store_penalty    = other.epilogue_scalar_store_penalty;
+  if (other.epilogue_threads_per_wave        != defaults.epilogue_threads_per_wave)        epilogue_threads_per_wave        = other.epilogue_threads_per_wave;
+  if (other.epilogue_bytes_per_vectorized_store != defaults.epilogue_bytes_per_vectorized_store) epilogue_bytes_per_vectorized_store = other.epilogue_bytes_per_vectorized_store;
+  if (other.epilogue_cache_line_bytes        != defaults.epilogue_cache_line_bytes)        epilogue_cache_line_bytes        = other.epilogue_cache_line_bytes;
+  if (other.epilogue_workspace_bytes_per_elem != defaults.epilogue_workspace_bytes_per_elem) epilogue_workspace_bytes_per_elem = other.epilogue_workspace_bytes_per_elem;
+  if (other.epilogue_salu_overhead           != defaults.epilogue_salu_overhead)           epilogue_salu_overhead           = other.epilogue_salu_overhead;
+  if (other.epilogue_l_barrier               != defaults.epilogue_l_barrier)               epilogue_l_barrier               = other.epilogue_l_barrier;
+  if (other.epilogue_l_smem                  != defaults.epilogue_l_smem)                  epilogue_l_smem                  = other.epilogue_l_smem;
+  if (other.epilogue_k_padding_penalty       != defaults.epilogue_k_padding_penalty)       epilogue_k_padding_penalty       = other.epilogue_k_padding_penalty;
+  if (other.postgsu_compute_bytes            != defaults.postgsu_compute_bytes)            postgsu_compute_bytes            = other.postgsu_compute_bytes;
+  if (other.postgsu_kernel_launch_overhead   != defaults.postgsu_kernel_launch_overhead)   postgsu_kernel_launch_overhead   = other.postgsu_kernel_launch_overhead;
+  if (other.postgsu_threads_per_wg           != defaults.postgsu_threads_per_wg)           postgsu_threads_per_wg           = other.postgsu_threads_per_wg;
+  if (other.postgsu_wavefront_size           != defaults.postgsu_wavefront_size)           postgsu_wavefront_size           = other.postgsu_wavefront_size;
+
+  // Main loop efficiency
+  if (other.main_loop_efficiency != defaults.main_loop_efficiency) main_loop_efficiency = other.main_loop_efficiency;
+
+  // Kernel rejection
+  if (other.reject != defaults.reject) reject = other.reject;
+}
+
+// heuristic_key_t implementation.
 bool heuristic_key_t::matches(const problem_t& problem,
                               const hardware_t& hardware,
                               const config_t& config) const {
@@ -122,10 +191,7 @@ size_t heuristic_key_t::specificity() const {
   return count;
 }
 
-// ============================================================================
-// heuristics_database_t Implementation
-// ============================================================================
-
+// heuristics_database_t implementation.
 heuristics_database_t::heuristics_database_t() { initialize_defaults(); }
 
 heuristics_database_t& heuristics_database_t::get_instance() {
@@ -448,10 +514,7 @@ void heuristics_database_t::initialize_defaults() {
   }
 }
 
-// ============================================================================
-// Helper Functions
-// ============================================================================
-
+// Helpers.
 heuristic_key_t make_hand_optimized_kernel_key(hardware_t::architecture_t arch,
                                                data_type_t mi_dtype,
                                                transpose_t transA,

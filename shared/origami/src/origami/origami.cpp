@@ -14,6 +14,7 @@
 #include "origami/math.hpp"
 #include "origami/origami.hpp"
 #include "origami/streamk.hpp"
+#include "origami/targets/triton/gemm.hpp"
 #include "origami/types.hpp"
 
 namespace origami {
@@ -581,7 +582,9 @@ double compute_ranked_latency(const problem_t& problem,
     return attention::compute_total_latency(problem, hardware, config);
   }
 
-  if (!gemm::check_lds_capacity(hardware, config.mt, problem.a_dtype, problem.b_dtype)) {
+  // Unified LDS check; Triton's pipeline-buffer multiplier comes from
+  // config.triton().num_stages when target is triton (see estimate_lds_bytes).
+  if (!gemm::check_lds_capacity(hardware, problem, config)) {
     log_config_rejection(config, "LDS capacity exceeded");
     return kRejectedLatency;
   }

@@ -13,6 +13,7 @@
 #include "origami/hardware.hpp"
 #include "origami/origami.hpp"
 #include "origami/streamk.hpp"
+#include "origami/targets/triton/gemm.hpp"
 #include "origami/types.hpp"
 
 using hardware_t = origami::hardware_t;
@@ -92,6 +93,14 @@ NB_MODULE(origami, m) {
       .value("simulation", origami::prediction_modes_t::simulation)
       .export_values();
 
+  nanobind::enum_<origami::target_t>(m, "target_t")
+      .value("generic", origami::target_t::generic)
+      .value("tensilelite", origami::target_t::tensilelite)
+      .value("rocroller", origami::target_t::rocroller)
+      .value("triton", origami::target_t::triton)
+      .value("composable_kernel", origami::target_t::composable_kernel)
+      .export_values();
+
   nanobind::enum_<origami::model_t>(m, "model_t")
       .value("gemm", origami::model_t::gemm)
       .value("attention", origami::model_t::attention)
@@ -145,6 +154,11 @@ NB_MODULE(origami, m) {
       .def_rw("global_split_u_wgm_round_robin",
               &origami::tensile_params_t::global_split_u_wgm_round_robin);
 
+  // Triton-specific parameters (currently only software pipeline depth)
+  nanobind::class_<origami::triton_params_t>(m, "triton_params_t")
+      .def(nanobind::init<>())
+      .def_rw("num_stages", &origami::triton_params_t::num_stages);
+
   nanobind::class_<origami::config_t>(m, "config_t")
       .def(nanobind::init<>())
       .def_rw("mt", &origami::config_t::mt)
@@ -160,6 +174,7 @@ NB_MODULE(origami, m) {
       .def_rw("reduction_strategy", &origami::config_t::reduction_strategy)
       .def_rw("grid_selection", &origami::config_t::grid_selection)
       .def_rw("prediction_mode", &origami::config_t::prediction_mode)
+      .def_rw("target", &origami::config_t::target)
       .def_rw("grvw_a", &origami::config_t::grvw_a)
       .def_rw("grvw_b", &origami::config_t::grvw_b)
       .def_rw("gwvw_d", &origami::config_t::gwvw_d)
@@ -177,7 +192,20 @@ NB_MODULE(origami, m) {
       .def(
           "set_tensile_params",
           [](origami::config_t& c, const origami::tensile_params_t& p) { c.backend = p; },
-          "Set Tensile params from a tensile_params_t object");
+          "Set Tensile params from a tensile_params_t object")
+      // Triton-specific parameters accessed via variant backend
+      .def("triton",
+           static_cast<origami::triton_params_t& (origami::config_t::*)()>(
+               &origami::config_t::triton),
+           nanobind::rv_policy::reference_internal,
+           "Get mutable reference to Triton params (initializes if not set)")
+      .def("has_triton_params",
+           &origami::config_t::has_triton_params,
+           "Check if Triton params are currently set")
+      .def(
+          "set_triton_params",
+          [](origami::config_t& c, const origami::triton_params_t& p) { c.backend = p; },
+          "Set Triton params from a triton_params_t object");
 
   nanobind::class_<origami::workgroup_mapping_t>(m, "workgroup_mapping_t")
       .def(nanobind::init<>())
@@ -251,6 +279,7 @@ NB_MODULE(origami, m) {
       .def("get_recommended_matrix_instruction",
            &hardware_t::get_recommended_matrix_instruction,
            "Get recommended matrix instruction dimension (highest throughput) for a given datatype")
+      .def_rw("arch", &hardware_t::arch)
       .def_rw("N_CU", &hardware_t::N_CU)
       .def_rw("lds_capacity", &hardware_t::lds_capacity)
       .def_rw("rf_capacity", &hardware_t::rf_capacity)
@@ -328,7 +357,37 @@ NB_MODULE(origami, m) {
   m.def("compute_launch_parameters",
         &origami::gemm::compute_launch_parameters,
         "Compute launch parameters for the kernel");
-  m.def("check_lds_capacity", &origami::gemm::check_lds_capacity, "Check if MT fits in LDS");
+  m.def("estimate_lds_bytes",
+        &origami::gemm::estimate_lds_bytes,
+        nanobind::arg("problem"),
+        nanobind::arg("config"),
+        "Estimate LDS bytes for a config's macro tile (Triton-aware via "
+        "config.triton().num_stages when target is triton).");
+  m.def("check_lds_capacity",
+        &origami::gemm::check_lds_capacity,
+        nanobind::arg("hardware"),
+        nanobind::arg("problem"),
+        nanobind::arg("config"),
+        "Check if a config's macro tile fits in LDS.");
+
+  // Triton-target heuristics: exposed under the `origami.triton` sub-module to
+  // mirror the C++ `origami::triton` namespace. Reach them via:
+  //   origami.triton.compute_sk_grid(problem, config, hardware)
+  //   origami.triton.get_default_configs(problem, hardware)
+  auto triton_sub = m.def_submodule(
+      "triton", "Triton-target heuristics (matches C++ namespace origami::triton)");
+  triton_sub.def("compute_sk_grid",
+                 &origami::triton::compute_sk_grid,
+                 nanobind::arg("problem"),
+                 nanobind::arg("config"),
+                 nanobind::arg("hardware"),
+                 "Compute the StreamK grid size for a Triton kernel.");
+  triton_sub.def("get_default_configs",
+                 &origami::triton::get_default_configs,
+                 nanobind::arg("problem"),
+                 nanobind::arg("hardware"),
+                 "Default tile candidate configs for a Triton kernel on this hardware. "
+                 "Only `mt` is populated; the caller must set `mi` per its selection policy.");
   m.def("compute_mem_bw_from_occupancy",
         &origami::gemm::compute_mem_bw_from_occupancy,
         "Compute limited achievable memory bandwidth based on active CUs");

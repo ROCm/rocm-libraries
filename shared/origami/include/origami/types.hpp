@@ -482,9 +482,31 @@ struct tensile_params_t {
   }
 };
 
+/**
+ * @brief Triton-specific parameters.
+ *
+ * Holds tuning state needed by Triton-targeted heuristics that doesn't fit
+ * cleanly in the target-agnostic config_t fields. Currently only the software
+ * pipeline stage count, which drives the LDS buffer multiplier in
+ * estimate_lds_bytes(). Additional Triton-specific knobs (work-stealing
+ * counters, hierarchical split, etc.) can be added here as call sites need
+ * them.
+ */
+struct triton_params_t {
+  /// Software pipeline stages. Triton allocates (num_stages - 1) LDS buffers
+  /// of size (A_tile + B_tile) for stages >= 2; max(A_tile, B_tile) at stages == 1.
+  int num_stages = 2;
+
+  constexpr bool operator==(const triton_params_t& o) const noexcept {
+    return num_stages == o.num_stages;
+  }
+
+  std::size_t hash() const { return math::hash_combine(num_stages); }
+};
+
 /// Variant holding backend-specific parameters.
 /// std::monostate represents no backend-specific params (default).
-using backend_params_t = std::variant<std::monostate, tensile_params_t>;
+using backend_params_t = std::variant<std::monostate, tensile_params_t, triton_params_t>;
 
 /**
  * @brief Full kernel configuration (tile shape + execution parameters).
@@ -564,6 +586,20 @@ struct config_t {
   /// Check if Tensile params are currently set.
   bool has_tensile_params() const noexcept {
     return std::holds_alternative<tensile_params_t>(backend);
+  }
+
+  /// Get mutable reference to Triton params. Initializes if not already set.
+  triton_params_t& triton() {
+    if (!std::holds_alternative<triton_params_t>(backend)) { backend = triton_params_t{}; }
+    return std::get<triton_params_t>(backend);
+  }
+
+  /// Get const reference to Triton params. Throws if not set.
+  const triton_params_t& triton() const { return std::get<triton_params_t>(backend); }
+
+  /// Check if Triton params are currently set.
+  bool has_triton_params() const noexcept {
+    return std::holds_alternative<triton_params_t>(backend);
   }
 
   bool operator==(const config_t& o) const noexcept {

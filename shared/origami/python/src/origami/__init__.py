@@ -17,11 +17,13 @@ try:
         grid_selection_t,
         reduction_t,
         prediction_modes_t,
+        target_t,
         model_t,
         # Data structures
         dim3_t,
         dim4_t,
         tensile_params_t,
+        triton_params_t,
         config_t,
         prediction_result_t,
         workgroup_mapping_t,
@@ -48,6 +50,7 @@ try:
         compute_number_matrix_instructions,
         compute_mt_compute_latency,
         # Memory functions
+        estimate_lds_bytes,
         check_lds_capacity,
         estimate_l2_hit,
         estimate_mall_hit,
@@ -67,6 +70,9 @@ try:
         select_reduction,
         select_workgroup_mapping,
         compute_number_of_output_tiles,
+        # Triton-target heuristics sub-module (origami.triton.*).
+        # Provides: triton.compute_sk_grid, triton.get_default_configs.
+        triton,
         # Reduction functions
         int_to_reduction_t,
         # Attention functions
@@ -106,11 +112,13 @@ __all__ = [
     "grid_selection_t",
     "reduction_t",
     "prediction_modes_t",
+    "target_t",
     "model_t",
     # Data structures
     "dim3_t",
     "dim4_t",
     "tensile_params_t",
+    "triton_params_t",
     "config_t",
     "prediction_result_t",
     "workgroup_mapping_t",
@@ -142,6 +150,7 @@ __all__ = [
     "count_unique_tiles",
     "count_unique_tiles_timestep",
     "estimate_cache_hit_rates",
+    "estimate_lds_bytes",
     "check_lds_capacity",
     "estimate_l2_hit",
     "estimate_mall_hit",
@@ -154,6 +163,8 @@ __all__ = [
     "select_reduction",
     "select_workgroup_mapping",
     "compute_number_of_output_tiles",
+    # Triton-target heuristics sub-module
+    "triton",
     # Reduction functions
     "int_to_reduction_t",
     # Attention functions

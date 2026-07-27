@@ -24,10 +24,13 @@
  *
  *******************************************************************************/
 
+#include <set>
+
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
 #include "common.hpp"
+#include "origami/targets/triton/gemm.hpp"
 
 using Catch::Approx;
 
@@ -195,10 +198,10 @@ TEST_CASE("GEMM: check_lds_capacity", "[gemm]") {
   for (int gpu_arch : test_architectures) {
     DYNAMIC_SECTION("gfx" << gpu_arch << " - 256x256x64 tile fits in LDS") {
       auto hardware = make_hardware(gpu_arch);
-      origami::dim3_t mt{256, 256, 64};
+      auto problem  = make_problem(4096, 4096, 1024);  // dtypes default to BFloat16
+      auto config   = make_config(256, 256, 64, 32, 32, 8, false, 1);
 
-      auto fits = origami::gemm::check_lds_capacity(
-          hardware, mt, origami::data_type_t::BFloat16, origami::data_type_t::BFloat16);
+      auto fits = origami::gemm::check_lds_capacity(hardware, problem, config);
 
       REQUIRE(fits == true);
     }
@@ -898,124 +901,425 @@ TEST_CASE("GEMM: arithmetic_intensity and emulated_tf32_arithmetic_intensity uni
 }
 
 TEST_CASE("GEMM: check_lds_capacity unit test", "[gemm]") {
+  // Local helper: build a (problem, config) pair carrying an MT and dtype pair.
+  // Tensile-style call (no triton_params), so estimate_lds_bytes returns A+B.
+  auto check_lds = [](const origami::hardware_t& hw,
+                      origami::dim3_t mt,
+                      origami::data_type_t a_dtype,
+                      origami::data_type_t b_dtype) {
+    origami::problem_t problem;
+    problem.a_dtype = a_dtype;
+    problem.b_dtype = b_dtype;
+    origami::config_t config;
+    config.mt        = mt;
+    config.mi        = {16, 16, 16};
+    config.occupancy = 1;
+    return origami::gemm::check_lds_capacity(hw, problem, config);
+  };
+
   for (int gpu_arch : test_architectures) {
     DYNAMIC_SECTION("gfx" << gpu_arch << " - check_lds_capacity unit test") {
       auto hardware = make_hardware(gpu_arch);
 
       if (gpu_arch == 942) {
         // Test 1: Test with tiles that exceed LDS capacity
-        auto result_tiles_exceed_LDS_capacity =
-            origami::gemm::check_lds_capacity(hardware,
-                                        {256, 256, 256},
-                                        origami::data_type_t::BFloat16,
-                                        origami::data_type_t::BFloat16);
-        REQUIRE(result_tiles_exceed_LDS_capacity == false);
-
-        result_tiles_exceed_LDS_capacity =
-            origami::gemm::check_lds_capacity(hardware,
-                                        {128, 128, 256},
-                                        origami::data_type_t::BFloat16,
-                                        origami::data_type_t::BFloat16);
-        REQUIRE(result_tiles_exceed_LDS_capacity == false);
-
-        result_tiles_exceed_LDS_capacity =
-            origami::gemm::check_lds_capacity(hardware,
-                                        {64, 128, 256},
-                                        origami::data_type_t::BFloat16,
-                                        origami::data_type_t::BFloat16);
-        REQUIRE(result_tiles_exceed_LDS_capacity == false);
+        REQUIRE(check_lds(hardware,
+                          {256, 256, 256},
+                          origami::data_type_t::BFloat16,
+                          origami::data_type_t::BFloat16) == false);
+        REQUIRE(check_lds(hardware,
+                          {128, 128, 256},
+                          origami::data_type_t::BFloat16,
+                          origami::data_type_t::BFloat16) == false);
+        REQUIRE(check_lds(hardware,
+                          {64, 128, 256},
+                          origami::data_type_t::BFloat16,
+                          origami::data_type_t::BFloat16) == false);
 
         // Test 2: Test with different data type combinations
-        auto result_different_data_type = origami::gemm::check_lds_capacity(
-            hardware, {64, 64, 256}, origami::data_type_t::Half, origami::data_type_t::Half);
-        REQUIRE(result_different_data_type == true);
-
-        result_different_data_type = origami::gemm::check_lds_capacity(
-            hardware, {256, 256, 512}, origami::data_type_t::Double, origami::data_type_t::Double);
-        REQUIRE(result_different_data_type == false);
-
-        result_different_data_type = origami::gemm::check_lds_capacity(
-            hardware, {128, 128, 64}, origami::data_type_t::Int8, origami::data_type_t::Int8);
-        REQUIRE(result_different_data_type == true);
-
-        result_different_data_type = origami::gemm::check_lds_capacity(
-            hardware, {128, 128, 32}, origami::data_type_t::Int64, origami::data_type_t::Int64);
-        REQUIRE(result_different_data_type == true);
+        REQUIRE(check_lds(hardware,
+                          {64, 64, 256},
+                          origami::data_type_t::Half,
+                          origami::data_type_t::Half) == true);
+        REQUIRE(check_lds(hardware,
+                          {256, 256, 512},
+                          origami::data_type_t::Double,
+                          origami::data_type_t::Double) == false);
+        REQUIRE(check_lds(hardware,
+                          {128, 128, 64},
+                          origami::data_type_t::Int8,
+                          origami::data_type_t::Int8) == true);
+        REQUIRE(check_lds(hardware,
+                          {128, 128, 32},
+                          origami::data_type_t::Int64,
+                          origami::data_type_t::Int64) == true);
 
         // Test 3: Test with Float (element_size = 16) (TODO: Need more clarification)
 
         // Test 4: Test edge cases (exactly at capacity, just over)
-        auto result_exactly_at_capacity =
-            origami::gemm::check_lds_capacity(hardware,
-                                        {256, 256, 64},
-                                        origami::data_type_t::BFloat16,
-                                        origami::data_type_t::Float8);  // exactly at capacity
-        REQUIRE(result_exactly_at_capacity == true);
-
-        result_exactly_at_capacity =
-            origami::gemm::check_lds_capacity(hardware,
-                                        {192, 96, 128},
-                                        origami::data_type_t::BFloat16,
-                                        origami::data_type_t::BFloat16);  // just over
-        REQUIRE(result_exactly_at_capacity == false);
+        REQUIRE(check_lds(hardware,
+                          {256, 256, 64},
+                          origami::data_type_t::BFloat16,
+                          origami::data_type_t::Float8) == true);  // exactly at capacity
+        REQUIRE(check_lds(hardware,
+                          {192, 96, 128},
+                          origami::data_type_t::BFloat16,
+                          origami::data_type_t::BFloat16) == false);  // just over
       } else if (gpu_arch == 950) {
         // Test 1: Test with tiles that exceed LDS capacity
-        auto result_tiles_exceed_LDS_capacity =
-            origami::gemm::check_lds_capacity(hardware,
-                                        {512, 512, 256},
-                                        origami::data_type_t::BFloat16,
-                                        origami::data_type_t::BFloat16);
-        REQUIRE(result_tiles_exceed_LDS_capacity == false);
-
-        result_tiles_exceed_LDS_capacity =
-            origami::gemm::check_lds_capacity(hardware,
-                                        {256, 256, 512},
-                                        origami::data_type_t::BFloat16,
-                                        origami::data_type_t::BFloat16);
-        REQUIRE(result_tiles_exceed_LDS_capacity == false);
-
-        result_tiles_exceed_LDS_capacity =
-            origami::gemm::check_lds_capacity(hardware,
-                                        {512, 128, 256},
-                                        origami::data_type_t::BFloat16,
-                                        origami::data_type_t::BFloat16);
-        REQUIRE(result_tiles_exceed_LDS_capacity == false);
+        REQUIRE(check_lds(hardware,
+                          {512, 512, 256},
+                          origami::data_type_t::BFloat16,
+                          origami::data_type_t::BFloat16) == false);
+        REQUIRE(check_lds(hardware,
+                          {256, 256, 512},
+                          origami::data_type_t::BFloat16,
+                          origami::data_type_t::BFloat16) == false);
+        REQUIRE(check_lds(hardware,
+                          {512, 128, 256},
+                          origami::data_type_t::BFloat16,
+                          origami::data_type_t::BFloat16) == false);
 
         // Test 2: Test with different data type combinations
-        auto result_different_data_type = origami::gemm::check_lds_capacity(
-            hardware, {64, 64, 256}, origami::data_type_t::Half, origami::data_type_t::Half);
-        REQUIRE(result_different_data_type == true);
-
-        result_different_data_type = origami::gemm::check_lds_capacity(
-            hardware, {256, 256, 512}, origami::data_type_t::Double, origami::data_type_t::Double);
-        REQUIRE(result_different_data_type == false);
-
-        result_different_data_type = origami::gemm::check_lds_capacity(
-            hardware, {256, 256, 64}, origami::data_type_t::Int8, origami::data_type_t::Int8);
-        REQUIRE(result_different_data_type == true);
-
-        result_different_data_type = origami::gemm::check_lds_capacity(
-            hardware, {256, 256, 32}, origami::data_type_t::Int64, origami::data_type_t::Int64);
-        REQUIRE(result_different_data_type == true);
+        REQUIRE(check_lds(hardware,
+                          {64, 64, 256},
+                          origami::data_type_t::Half,
+                          origami::data_type_t::Half) == true);
+        REQUIRE(check_lds(hardware,
+                          {256, 256, 512},
+                          origami::data_type_t::Double,
+                          origami::data_type_t::Double) == false);
+        REQUIRE(check_lds(hardware,
+                          {256, 256, 64},
+                          origami::data_type_t::Int8,
+                          origami::data_type_t::Int8) == true);
+        REQUIRE(check_lds(hardware,
+                          {256, 256, 32},
+                          origami::data_type_t::Int64,
+                          origami::data_type_t::Int64) == true);
 
         // Test 3: Test with Float (element_size = 16) (TODO: Need more clarification)
 
         // Test 4: Test edge cases (exactly at capacity, just over)
-        auto result_exactly_at_capacity =
-            origami::gemm::check_lds_capacity(hardware,
-                                        {512, 128, 256},
-                                        origami::data_type_t::Float8,
-                                        origami::data_type_t::Float8);  // exactly at capacity
-        REQUIRE(result_exactly_at_capacity == true);
-
-        result_exactly_at_capacity =
-            origami::gemm::check_lds_capacity(hardware,
-                                        {512, 192, 256},
-                                        origami::data_type_t::BFloat16,
-                                        origami::data_type_t::BFloat16);  // just over
-        REQUIRE(result_exactly_at_capacity == false);
+        REQUIRE(check_lds(hardware,
+                          {512, 128, 256},
+                          origami::data_type_t::Float8,
+                          origami::data_type_t::Float8) == true);  // exactly at capacity
+        REQUIRE(check_lds(hardware,
+                          {512, 192, 256},
+                          origami::data_type_t::BFloat16,
+                          origami::data_type_t::BFloat16) == false);  // just over
       }
     }
+  }
+}
+
+TEST_CASE("GEMM: estimate_lds_bytes pipeline-stage scaling", "[gemm]") {
+  // Verifies the Triton-aware buffer multiplier when triton_params_t is set.
+  // Tensile (no triton_params): always 1 * (A + B).
+  // Triton ns=1: max(A, B).
+  // Triton ns=2: 1 * (A + B).
+  // Triton ns=3: 2 * (A + B).
+  origami::problem_t problem;
+  problem.a_dtype = origami::data_type_t::Half;  // 2 bytes
+  problem.b_dtype = origami::data_type_t::Half;
+
+  origami::config_t config;
+  config.mt        = {128, 128, 32};
+  config.mi        = {16, 16, 16};
+  config.occupancy = 1;
+
+  const size_t a_tile = 128 * 32 * 2;
+  const size_t b_tile = 32 * 128 * 2;
+
+  // Tensile path (no triton_params)
+  REQUIRE(origami::gemm::estimate_lds_bytes(problem, config) == a_tile + b_tile);
+
+  // Triton path: must set target AND backend variant
+  config.target               = origami::target_t::triton;
+  config.triton().num_stages  = 1;
+  REQUIRE(origami::gemm::estimate_lds_bytes(problem, config) == std::max(a_tile, b_tile));
+
+  config.triton().num_stages = 2;
+  REQUIRE(origami::gemm::estimate_lds_bytes(problem, config) == 1 * (a_tile + b_tile));
+
+  config.triton().num_stages = 3;
+  REQUIRE(origami::gemm::estimate_lds_bytes(problem, config) == 2 * (a_tile + b_tile));
+}
+
+TEST_CASE("GEMM: estimate_lds_bytes sub-byte dtypes", "[gemm]") {
+  // Sub-byte dtypes (F4) must not truncate to zero via double-cast floor.
+  origami::problem_t problem;
+  problem.a_dtype = origami::data_type_t::Float4;
+  problem.b_dtype = origami::data_type_t::Float4;
+
+  origami::config_t config;
+  config.mt        = {128, 128, 64};
+  config.mi        = {16, 16, 16};
+  config.occupancy = 1;
+  config.target    = origami::target_t::triton;
+  config.triton().num_stages = 2;
+
+  // 128*64 elements * 4 bits / 8 = 4096 bytes per tile; 2 tiles = 8192.
+  const size_t expected = 1 * (4096 + 4096);
+  REQUIRE(origami::gemm::estimate_lds_bytes(problem, config) == expected);
+}
+
+TEST_CASE("StreamK: pick_fractional_grid", "[streamk]") {
+  // Reproduces the inner loop that both Tensile (grid_k_split_aware) and
+  // Triton (triton::compute_sk_grid) use when tiles > cu_count. Verifies that
+  // the shared helper returns the first fractional candidate that fits the
+  // workspace budget and is <= cu_count.
+  const std::vector<double> kFracs = {0.0, 0.5, 0.125, 0.2, 0.25, 1.0 / 3.0};
+
+  // tiles >> cu_count, no workspace pressure -> first fraction (0.0) wins,
+  // i.e. round(tiles / (tiles/cu_count)) == cu_count.
+  REQUIRE(origami::streamk::pick_fractional_grid(
+              /*tiles=*/16384, /*cu_count=*/256, /*tile_size=*/0,
+              /*workspace_limit=*/0, kFracs) == 256);
+
+  // Workspace gate: when tile_size * cand exceeds the limit AND cand does not
+  // divide tiles evenly, that fraction is skipped.
+  const size_t big_tile  = 128ull * 1024 * 1024;  // 128 MiB per tile (absurd)
+  const size_t tight_lim = 1ull * 1024 * 1024;
+  REQUIRE(origami::streamk::pick_fractional_grid(
+              /*tiles=*/300, /*cu_count=*/256, big_tile, tight_lim, kFracs) ==
+          0);
+
+  // Empty inputs -> 0.
+  REQUIRE(origami::streamk::pick_fractional_grid(0, 256, 0, 0, kFracs) == 0);
+  REQUIRE(origami::streamk::pick_fractional_grid(1024, 0, 0, 0, kFracs) == 0);
+}
+
+TEST_CASE("StreamK: pick_k_split", "[streamk]") {
+  // tiles < cu_count branch. Returns tiles*factor for the largest factor
+  // that fits both cu_count and the iters_per_cu floor.
+  const std::vector<size_t> kFactors = {16, 12, 8, 6, 4, 3, 2, 1};
+
+  // tiles=32, plenty of K iters -> 32*8 fits cu_count, factor 8 wins.
+  REQUIRE(origami::streamk::pick_k_split(
+              /*tiles=*/32, /*cu_count=*/256, /*iters_per_tile=*/256,
+              kFactors, /*min_iters_per_cu=*/8) == 32 * 8);
+
+  // tiles=32, but only 8 K iters -> can't split (8/8=1 < 8 floor).
+  // Falls back to factor=1 trivially (32*1=32 fits, 8/1=8 >= 8).
+  REQUIRE(origami::streamk::pick_k_split(32, 256, 8, kFactors, 8) == 32);
+
+  // No factor satisfies -> returns 0.
+  REQUIRE(origami::streamk::pick_k_split(
+              /*tiles=*/300, /*cu_count=*/256, /*iters_per_tile=*/4,
+              kFactors, /*min_iters_per_cu=*/8) == 0);
+
+  // Empty inputs.
+  REQUIRE(origami::streamk::pick_k_split(0, 256, 256, kFactors, 8) == 0);
+  REQUIRE(origami::streamk::pick_k_split(32, 0, 256, kFactors, 8) == 0);
+}
+
+TEST_CASE("triton::compute_sk_grid - basic + last-wave", "[triton]") {
+  // Basic sanity: data-parallel-sized problem returns a positive grid.
+  auto hardware = make_hardware(950);
+
+  origami::problem_t problem;
+  problem.size    = {16384, 16384, 4096};
+  problem.batch   = 1;
+  problem.a_dtype = origami::data_type_t::Half;
+  problem.b_dtype = origami::data_type_t::Half;
+  problem.c_dtype = origami::data_type_t::Half;
+  problem.d_dtype = origami::data_type_t::Half;
+
+  origami::config_t config;
+  config.mt     = {128, 128, 64};
+  config.mi     = {16, 16, 16};
+  config.target = origami::target_t::triton;
+
+  REQUIRE(origami::triton::compute_sk_grid(problem, config, hardware) > 0);
+
+  // Last-wave compensation: when tiles > n_cu and the remainder is < 128
+  // tiles, the helper falls back to prev_pow2(n_cu). gfx950 N_CU = 256 is
+  // already a power of two, so this branch is a no-op there. Construct a
+  // problem that lands in the last-wave window on a non-pow2 CU count.
+  auto hw_nonpow2 = hardware;
+  hw_nonpow2.N_CU = 304;
+  // 256x256 tile, problem ~ 304 tiles total, remainder 0 vs 304 first.
+  // Choose tiles = 305 so remainder = 1 (< 128) -> sk_grid = prev_pow2(304) = 256.
+  origami::problem_t p_lw;
+  p_lw.size    = {305 * 128, 128, 1024};
+  p_lw.batch   = 1;
+  p_lw.a_dtype = origami::data_type_t::Half;
+  p_lw.b_dtype = origami::data_type_t::Half;
+  p_lw.c_dtype = origami::data_type_t::Half;
+
+  origami::config_t c_lw = config;
+  c_lw.mt                = {128, 128, 64};
+
+  const size_t grid_lw = origami::triton::compute_sk_grid(p_lw, c_lw, hw_nonpow2);
+  REQUIRE(grid_lw == origami::math::prev_pow2(304));
+}
+
+TEST_CASE("triton::compute_sk_grid - batch-aware tile count", "[triton]") {
+  // A batched problem must produce a different grid than the same per-batch
+  // shape with batch=1, because the unified path now goes through
+  // streamk::compute_number_of_output_tiles (batch-aware). Previously the
+  // primitive-arg helper silently dropped the batch dimension.
+  //
+  // Pick per-batch dims that yield few tiles (so the batched and unbatched
+  // versions land in distinct regimes against the gfx950 N_CU=256). With
+  // mt = 128x128x64 and a 2048x128 per-batch slice, tiles_per_batch = 16.
+  //   batch=1 -> 16 tiles  -> sk_grid = 16
+  //   batch=8 -> 128 tiles -> sk_grid = 128
+  // Identical results would prove the batch dimension is being silently
+  // dropped (the previous primitive-arg behavior).
+  auto hardware = make_hardware(950);
+
+  origami::problem_t base;
+  base.size    = {2048, 128, 1024};
+  base.a_dtype = origami::data_type_t::Half;
+  base.b_dtype = origami::data_type_t::Half;
+  base.c_dtype = origami::data_type_t::Half;
+
+  origami::config_t config;
+  config.mt     = {128, 128, 64};
+  config.mi     = {16, 16, 16};
+  config.target = origami::target_t::triton;
+
+  origami::problem_t single = base;
+  single.batch              = 1;
+  origami::problem_t batched = base;
+  batched.batch              = 8;
+
+  const size_t g_single  = origami::triton::compute_sk_grid(single, config, hardware);
+  const size_t g_batched = origami::triton::compute_sk_grid(batched, config, hardware);
+  REQUIRE(g_single > 0);
+  REQUIRE(g_batched > 0);
+  REQUIRE(g_batched != g_single);
+}
+
+TEST_CASE("triton::compute_sk_grid - sub-byte C dtype", "[triton]") {
+  // F4 output dtype must not collapse the per-tile workspace to zero. The
+  // previous primitive-arg helper used out_dtype_bits / 8, which truncated
+  // 4-bit dtypes to 0 bytes per element and disabled the workspace gate
+  // entirely.
+  auto hardware = make_hardware(950);
+
+  origami::problem_t problem;
+  problem.size    = {8192, 8192, 1024};
+  problem.batch   = 1;
+  problem.a_dtype = origami::data_type_t::Float4;
+  problem.b_dtype = origami::data_type_t::Float4;
+  problem.c_dtype = origami::data_type_t::Float4;
+
+  origami::config_t config;
+  config.mt     = {128, 128, 64};
+  config.mi     = {16, 16, 16};
+  config.target = origami::target_t::triton;
+
+  REQUIRE(origami::triton::compute_sk_grid(problem, config, hardware) > 0);
+}
+
+TEST_CASE("triton::get_default_configs - default range BF16", "[triton]") {
+  // BF16 is a >8-bit dtype, so the default range applies on every arch:
+  //   MN in {16, 32, 64, 128, 256}, K in {16, 32, 64, 128, 256, 512}
+  //   |configs| = 5 * 5 * 6 = 150
+  auto hardware = make_hardware(942);
+
+  origami::problem_t problem;
+  problem.a_dtype = origami::data_type_t::BFloat16;
+  problem.b_dtype = origami::data_type_t::BFloat16;
+
+  const auto configs = origami::triton::get_default_configs(problem, hardware);
+  REQUIRE(configs.size() == 5u * 5u * 6u);
+
+  std::set<size_t> ms, ns, ks;
+  for (const auto& c : configs) {
+    ms.insert(c.mt.m);
+    ns.insert(c.mt.n);
+    ks.insert(c.mt.k);
+  }
+  REQUIRE(ms == std::set<size_t>{16, 32, 64, 128, 256});
+  REQUIRE(ns == std::set<size_t>{16, 32, 64, 128, 256});
+  REQUIRE(ks == std::set<size_t>{16, 32, 64, 128, 256, 512});
+}
+
+TEST_CASE("triton::get_default_configs - gfx950 F8 excludes 16 MN", "[triton]") {
+  // gfx950 with <=8-bit narrow input restricts MN to {32, 64, 128, 256}
+  // (no 16-MN MFMA support for those dtypes). |configs| = 4 * 4 * 6 = 96.
+  auto hardware = make_hardware(950);
+
+  origami::problem_t problem;
+  problem.a_dtype = origami::data_type_t::Float8;
+  problem.b_dtype = origami::data_type_t::Float8;
+
+  const auto configs = origami::triton::get_default_configs(problem, hardware);
+  REQUIRE(configs.size() == 4u * 4u * 6u);
+
+  for (const auto& c : configs) {
+    REQUIRE(c.mt.m != 16);
+    REQUIRE(c.mt.n != 16);
+  }
+}
+
+TEST_CASE("triton::get_default_configs - gfx942 F8 includes 512 MN", "[triton]") {
+  // gfx942 with 8-bit narrow input adds the 512 MN entry on top of the
+  // default range. |configs| = 6 * 6 * 6 = 216.
+  auto hardware = make_hardware(942);
+
+  origami::problem_t problem;
+  problem.a_dtype = origami::data_type_t::Float8;
+  problem.b_dtype = origami::data_type_t::Float8;
+
+  const auto configs = origami::triton::get_default_configs(problem, hardware);
+  REQUIRE(configs.size() == 6u * 6u * 6u);
+
+  bool has_m512 = false, has_n512 = false, has_m16 = false, has_n16 = false;
+  for (const auto& c : configs) {
+    if (c.mt.m == 512) has_m512 = true;
+    if (c.mt.n == 512) has_n512 = true;
+    if (c.mt.m == 16)  has_m16  = true;
+    if (c.mt.n == 16)  has_n16  = true;
+  }
+  REQUIRE(has_m512);
+  REQUIRE(has_n512);
+  // Default 16-MN entries are still present on gfx942 F8 (only additive).
+  REQUIRE(has_m16);
+  REQUIRE(has_n16);
+}
+
+TEST_CASE("triton::get_default_configs - asymmetric dtypes use narrower",
+          "[triton]") {
+  // Mixed precision: A=BF16 (16 bits), B=F8 (8 bits). The narrower (8 bits)
+  // drives gating, so on gfx942 the 512 MN extension must kick in.
+  auto hardware = make_hardware(942);
+
+  origami::problem_t problem;
+  problem.a_dtype = origami::data_type_t::BFloat16;
+  problem.b_dtype = origami::data_type_t::Float8;
+
+  const auto configs = origami::triton::get_default_configs(problem, hardware);
+  bool has_512 = false;
+  for (const auto& c : configs) {
+    if (c.mt.m == 512 || c.mt.n == 512) {
+      has_512 = true;
+      break;
+    }
+  }
+  REQUIRE(has_512);
+}
+
+TEST_CASE("triton::get_default_configs - mt only, mi left default", "[triton]") {
+  // Only mt.{m,n,k} is populated; mi is intentionally left at its
+  // default-constructed value. Callers must set mi per their selection policy.
+  auto hardware = make_hardware(942);
+
+  origami::problem_t problem;
+  problem.a_dtype = origami::data_type_t::Half;
+  problem.b_dtype = origami::data_type_t::Half;
+
+  const origami::config_t default_cfg;
+  const auto              configs = origami::triton::get_default_configs(problem, hardware);
+  REQUIRE(!configs.empty());
+  for (const auto& c : configs) {
+    REQUIRE(c.mt.mnk() > 0);
+    REQUIRE(c.mi == default_cfg.mi);
   }
 }
 
@@ -1303,6 +1607,123 @@ TEST_CASE("Heuristics: Parameter merging", "[heuristics]") {
   REQUIRE(base.weight_mem_l2 == origami::heuristic_defaults_t::WEIGHT_MEM_L2);
   REQUIRE(base.weight_prologue == origami::heuristic_defaults_t::WEIGHT_PROLOGUE);
   REQUIRE(base.weight_epilogue == origami::heuristic_defaults_t::WEIGHT_EPILOGUE);
+}
+
+TEST_CASE("Heuristics: overlay_with preserves base when overlay leaves a field at default",
+          "[heuristics]") {
+  // Regression guard: an overlay that does not touch a field (i.e. leaves it
+  // at the default-constructed value) must NOT clobber a non-default value
+  // already in `base`. This is what makes the Triton delta overlay compose.
+  origami::heuristic_params_t base;
+  base.weight_prologue = 2.5;  // base has been tuned away from default 1.5
+  base.epilogue_l_smem = 800.0;  // base has been tuned away from default 900.0
+
+  origami::heuristic_params_t overlay;          // all defaults
+  overlay.weight_tile_total = 0.95;             // overlay only opinions on this one field
+
+  base.overlay_with(overlay);
+
+  REQUIRE(base.weight_tile_total == 0.95);  // overlay applied
+  REQUIRE(base.weight_prologue == 2.5);     // base preserved
+  REQUIRE(base.epilogue_l_smem == 800.0);   // base preserved
+}
+
+TEST_CASE("Heuristics: overlay_with treats overlay value equal to default as no-op",
+          "[heuristics]") {
+  // Even if an overlay explicitly stores the default value into a field,
+  // overlay_with cannot distinguish it from "not set" and therefore must leave
+  // `base` unchanged. This is the documented limitation of the default-aware
+  // overlay; encoding this as a test pins the behaviour.
+  origami::heuristic_params_t base;
+  base.weight_prologue = 2.5;
+
+  origami::heuristic_params_t overlay;
+  overlay.weight_prologue = origami::heuristic_defaults_t::WEIGHT_PROLOGUE;  // explicit default
+
+  base.overlay_with(overlay);
+
+  REQUIRE(base.weight_prologue == 2.5);  // base value preserved, overlay is a no-op here
+}
+
+TEST_CASE("Heuristics: overlay_with composes broad then narrow overlays", "[heuristics]") {
+  // Two-layer overlay: a broad overlay opinions on a couple of fields, a
+  // narrower overlay opinions on a subset of those. After both overlays, the
+  // narrow overlay should win on its own field while the broad overlay's
+  // contribution survives on fields the narrow one did not touch.
+  origami::heuristic_params_t base;     // all defaults
+  origami::heuristic_params_t broad;
+  broad.weight_compute  = 2.0;
+  broad.weight_prologue = 3.0;
+  origami::heuristic_params_t narrow;
+  narrow.weight_compute = 5.0;          // touches only one field that broad also touched
+
+  base.overlay_with(broad);
+  base.overlay_with(narrow);
+
+  REQUIRE(base.weight_compute  == 5.0);  // narrow wins on its field
+  REQUIRE(base.weight_prologue == 3.0);  // broad's tuning survives the narrow overlay
+  REQUIRE(base.weight_memory   == origami::heuristic_defaults_t::WEIGHT_MEMORY);  // untouched
+}
+
+TEST_CASE("Heuristics: merge_with overwrites every field (Tensile/hipBLASLt path)",
+          "[heuristics]") {
+  // Pins the overwrite-everything semantics that origami::heuristics_database_t
+  // ::lookup relies on. Unlike overlay_with, merge_with copies *all* fields
+  // from `other`, including the ones `other` left at default, so the
+  // most-specific entry in a hierarchical lookup wins outright. This is the
+  // long-standing Tensile/hipBLASLt selection behavior and must not regress.
+  origami::heuristic_params_t base;
+  base.weight_prologue = 2.5;  // tuned away from default
+
+  origami::heuristic_params_t other;  // all defaults
+  other.weight_compute = 7.0;         // opinions on a single field
+
+  base.merge_with(other);
+
+  REQUIRE(base.weight_compute  == 7.0);  // copied from other
+  // other left weight_prologue at default, and overwrite-everything copies that
+  // default over base's tuned value.
+  REQUIRE(base.weight_prologue == origami::heuristic_defaults_t::WEIGHT_PROLOGUE);
+}
+
+TEST_CASE("Triton overlay: applied at context_t construction, no per-call patching",
+          "[heuristics][triton]") {
+  // End-to-end check that the Triton-target overlay set up in
+  // triton::heuristics_database_t (currently a 0.95 weight_tile_total for
+  // the 256x256x64 tile) is actually merged into context_t::heuristic at
+  // construction time. Previously this lived as a manual `if (target ==
+  // triton) L_tile_total *= triton_h.weight_tile_total;` patch inside
+  // compute_tile_latency, which (a) ran on every latency call and (b) only
+  // worked because the manual patch reproduced what the overlay would have
+  // done. After the unification, a single `overlay_with` at construction is
+  // the only thing required to make the Triton tuning take effect.
+  auto hardware = make_hardware(950);
+  auto problem  = make_problem(4096, 4096, 1024,
+                               origami::transpose_t::T, origami::transpose_t::N);
+
+  // Triton config that matches the 256x256x64 overlay entry.
+  auto triton_cfg   = make_config(256, 256, 64);
+  triton_cfg.target = origami::target_t::triton;
+
+  // Identical config but with the default (Tensile) target.
+  auto tensile_cfg   = make_config(256, 256, 64);
+  tensile_cfg.target = origami::target_t::tensilelite;
+
+  origami::gemm::context_t triton_ctx (problem, hardware, triton_cfg);
+  origami::gemm::context_t tensile_ctx(problem, hardware, tensile_cfg);
+
+  // The Triton overlay opinions on weight_tile_total only -> Triton context
+  // sees 0.95, Tensile context sees the default 1.0. All other fields stay
+  // identical, which proves the overlay didn't clobber the rest of the
+  // heuristic.
+  REQUIRE(triton_ctx.heuristic.weight_tile_total == 0.95);
+  REQUIRE(tensile_ctx.heuristic.weight_tile_total
+          == origami::heuristic_defaults_t::WEIGHT_TILE_TOTAL);
+  REQUIRE(triton_ctx.heuristic.weight_prologue == tensile_ctx.heuristic.weight_prologue);
+  REQUIRE(triton_ctx.heuristic.weight_epilogue == tensile_ctx.heuristic.weight_epilogue);
+  REQUIRE(triton_ctx.heuristic.epilogue_l_smem == tensile_ctx.heuristic.epilogue_l_smem);
+  REQUIRE(triton_ctx.heuristic.main_loop_efficiency
+          == tensile_ctx.heuristic.main_loop_efficiency);
 }
 
 TEST_CASE("Heuristics: Key matching - exact match", "[heuristics]") {

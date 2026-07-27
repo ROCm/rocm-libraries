@@ -166,9 +166,36 @@ struct ORIGAMI_EXPORT heuristic_params_t {
 
   /**
    * @brief Merge this parameter set with another (for hierarchical lookup).
-   * Only non-default values from 'other' override values in 'this'.
+   *
+   * Overwrite-everything composition: every field of `*this` is replaced by
+   * the corresponding field of `other`, regardless of whether `other` left it
+   * at the default. Used by origami::heuristics_database_t::lookup to fold the
+   * matching entries together in increasing-specificity order, so the
+   * most-specific matching entry wins outright. This is the established
+   * Tensile/hipBLASLt selection behavior and must stay byte-for-byte stable.
+   *
+   * For delta-style overlays that should only touch the fields the overlay
+   * explicitly opines on (e.g. the Triton tuning), use overlay_with instead.
    */
   void merge_with(const heuristic_params_t& other);
+
+  /**
+   * @brief Overlay another parameter set on top of this one (default-aware).
+   *
+   * A field in `other` overrides the corresponding field in `*this` only if it
+   * has been changed away from the default-constructed value. Fields that
+   * `other` left at default are treated as "no opinion" and leave `*this`
+   * unchanged. This lets a target-specific overlay (e.g. Triton) be applied on
+   * top of a base heuristic without clobbering the fields it does not touch,
+   * and is used to compose the Triton heuristics database without disturbing
+   * the Tensile/hipBLASLt path (which uses merge_with).
+   *
+   * @note Caveat: a field whose default is exactly 0 cannot currently be
+   * driven back to 0 by an overlay. None exist today; if one is added, pick
+   * a sentinel default or extend this struct with explicit "is_set"
+   * bookkeeping.
+   */
+  void overlay_with(const heuristic_params_t& other);
 };
 
 /**

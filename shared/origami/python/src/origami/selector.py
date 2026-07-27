@@ -151,7 +151,8 @@ class OrigamiMatmulSelector:
         # Create list of Origami config_t objects based on generator.
         self._configs = self._generate_configs(config_gen)
 
-        # Run Origami solution selection
+        # Run Origami solution selection (arch-specific filtering is handled
+        # internally by select_config in C++)
         self._result = origami.select_config(self._problem,
                                              self._hardware,
                                              self._configs,
@@ -339,6 +340,11 @@ class OrigamiMatmulSelector:
             new_config.mt        = mt
             new_config.mi        = mi
             new_config.occupancy = config.kwargs['waves_per_eu']
+            new_config.target    = origami.target_t.triton
+            # Carry num_stages so estimate_lds_bytes takes the Triton
+            # pipeline-buffer path during rank_configs (num_stages>=3 would
+            # otherwise underestimate LDS via the Tensile single-buffer path).
+            new_config.triton().num_stages = config.kwargs.get("num_stages", 2)
 
             configs_list.append(new_config)
 

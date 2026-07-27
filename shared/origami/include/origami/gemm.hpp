@@ -164,18 +164,47 @@ ORIGAMI_EXPORT std::tuple<reduction_t, size_t, size_t, size_t, size_t> compute_l
     grid_selection_t grid_selection);
 
 /**
- * @brief Check if MT fits in LDS
+ * @brief Estimate LDS bytes required for a macro tile.
+ *
+ * Models the no-padding LDS footprint. Works for both Tensile (single buffer)
+ * and Triton's pipelined kernels (buffers = num_stages - 1).
+ *
+ * Reads tile shape from @p config.mt and dtypes from @p problem. When
+ * @p config.target is target_t::triton and Triton params are set, uses
+ * config.triton().num_stages to compute the buffer multiplier; otherwise
+ * uses a single buffer.
+ *
+ * Formula:
+ *   - Tensile / non-triton:        1 * (A_tile + B_tile)
+ *   - Triton, num_stages == 1:     max(A_tile, B_tile)        (A & B share LDS)
+ *   - Triton, num_stages >= 2:     (num_stages - 1) * (A_tile + B_tile)
+ *
+ * Sub-byte dtypes (F4/F6) are handled via bit-level math + ceil-div so the
+ * estimate doesn't truncate to zero. Validated against Triton 3.6.0 metadata.shared.
+ *
+ * NOTE: No swizzle/padding modeling. If a future target needs LDS padding
+ * (e.g. Tensile LdsPadA/B) or compiler-side swizzle bytes, branch on
+ * config.target here.
+ *
+ * @param problem Problem characteristics (provides A/B dtypes)
+ * @param config  Kernel configuration (provides macro tile + target/backend params)
+ * @return size_t Estimated LDS usage in bytes.
+ */
+ORIGAMI_EXPORT size_t estimate_lds_bytes(const problem_t& problem, const config_t& config);
+
+/**
+ * @brief Check if a config's macro tile fits in LDS.
+ *
+ * Thin wrapper around estimate_lds_bytes(). See its docstring for the model.
  *
  * @param hardware Hardware characteristics (@see origami::hardware_t)
- * @param mt Macro tile dimensions
- * @param a_dtype Data type of operand A
- * @param b_dtype Data type of operand B
- * @return bool True if MT fits in LDS, false otherwise
+ * @param problem  Problem characteristics
+ * @param config   Kernel configuration
+ * @return bool True if estimated LDS usage fits within hardware LDS capacity.
  */
 ORIGAMI_EXPORT bool check_lds_capacity(const hardware_t& hardware,
-                        const dim3_t& mt,
-                        const data_type_t& a_dtype,
-                        const data_type_t& b_dtype);
+                                       const problem_t& problem,
+                                       const config_t& config);
 
 /**
  * @brief Compute limited achievable memory bandwidth based on active CUs
