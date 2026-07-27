@@ -354,6 +354,16 @@ class KernelWriterAssembly(KernelWriter):
   def isTdmWaveSeparated(self, kernel) -> bool:
     return kernel["enableTDMA"] and kernel["enableTDMB"] and kernel["NumWaves"] > 1
 
+  def isTdmWaveIdxLive(self, kernel) -> bool:
+    """True when sgpr("WaveIdx") is still defined past setupNewTile, so wave parity
+    can be read from it instead of recomputed from vgpr("Serial"). Mirrors the
+    undefineSgpr("WaveIdx") guard in KernelWriter.setupNewTile."""
+    if not (kernel["enableTDMA"] or kernel["enableTDMB"]):
+      return False
+    if kernel.get("UseSubtileImpl"):
+      return False
+    return bool(kernel["ClusterBarrier"])
+
   ########################################
   def strideRef(self, tc, dim):
     """
@@ -6351,13 +6361,13 @@ class KernelWriterAssembly(KernelWriter):
 
     skipLabel = None
     if useParityGate:
-      wavelen = kernel["WavefrontSize"]
       skipLabel = Label(label=f"{labelName}{tc}", comment="")
 
-      with self.allocTmpSgpr(1, tag="_applyStaggerTDM_waveIdTmp") as waveIdTmp:
-        imod.add(VReadfirstlaneB32(dst=sgpr(waveIdTmp.idx), src=vgpr("Serial"), comment="get tId"))
-        imod.add(SLShiftRightB32(dst=sgpr(waveIdTmp.idx), shiftHex=ceil(log2(wavelen)), src=sgpr(waveIdTmp.idx), comment="waveId"))
-        imod.add(SBitcmp1B32(src0=sgpr(waveIdTmp.idx), src1=0, comment="check wave parity"))
+      if self.isTdmWaveIdxLive(kernel):
+        self._emitTdmWaveParitySCC(imod, kernel, comment="check wave parity")
+      else:
+        with self.allocTmpSgpr(1, tag="_applyStaggerTDM_waveIdTmp") as waveIdTmp:
+          self._emitTdmWaveParitySCC(imod, kernel, waveIdTmp.idx, "check wave parity")
 
       if "A" in tc:
         imod.add(SCBranchSCC1(labelName=skipLabel.getLabelName(), comment="skip: odd waves handle B"))
@@ -11260,8 +11270,11 @@ class KernelWriterAssembly(KernelWriter):
             if halfRowsA == halfRowsB:
               imod.middle.add(SMovB32(sgpr(hr), halfRowsA, "halfRows"))
             else:
-              with self.allocTmpSgpr(1, tag="tdmSplitDim1Parity") as waveIdTmp:
-                self._emitTdmWaveParitySCC(imod.middle, kernel, waveIdTmp.idx)
+              if self.isTdmWaveIdxLive(kernel):
+                self._emitTdmWaveParitySCC(imod.middle, kernel)
+              else:
+                with self.allocTmpSgpr(1, tag="tdmSplitDim1Parity") as waveIdTmp:
+                  self._emitTdmWaveParitySCC(imod.middle, kernel, waveIdTmp.idx)
               imod.middle.add(SCSelectB32(sgpr(hr), halfRowsB, halfRowsA, "halfRows = parity ? B : A"))
             imod.middle.add(SLShiftRightB32(sgpr(h0), hex(16), sgpr(f"{group1}+2"), "H0 = dim1 lo"))
             imod.middle.add(SLShiftLeftB32(sgpr(h1), hex(16), sgpr(f"{group1}+3"), "H0 hi << 16"))
@@ -18891,10 +18904,17 @@ class KernelWriterAssembly(KernelWriter):
                       f"TDM iter_count = rows_per_il({rows_per_il}) / tile_dim1({tile_dim1}) - 1"))
       mod.add(comp.setIterations(descSgprName(2), sIter))
 
-  def _emitTdmWaveParitySCC(self, module: Module, kernel: Mapping, dstTmpIdx: int,
+  def _emitTdmWaveParitySCC(self, module: Module, kernel: Mapping, dstTmpIdx: Optional[int] = None,
                             comment: str = "wave parity"):
-    """Leave this wave's parity (bit0 of WaveId) in SCC. WaveIdx is not live inside
-    the loop, so recompute it from Serial. Clobbers sgpr(dstTmpIdx)."""
+    """Leave this wave's parity (bit0 of WaveId) in SCC.
+
+    When sgpr("WaveIdx") is still live (isTdmWaveIdxLive) read bit0 straight out of
+    it: WaveIdx was initialized to readfirstlane(Serial) >> log2(WavefrontSize) and
+    Serial never changes within a wave, so bit0 is identical. Otherwise recompute it
+    from Serial, which clobbers sgpr(dstTmpIdx)."""
+    if self.isTdmWaveIdxLive(kernel):
+      module.add(SBitcmp1B32(src0=sgpr("WaveIdx"), src1=0, comment=comment))
+      return
     wavelen: int = kernel["WavefrontSize"]
     module.add(VReadfirstlaneB32(dst=sgpr(dstTmpIdx), src=vgpr("Serial"), comment="get tId"))
     module.add(SLShiftRightB32(dst=sgpr(dstTmpIdx), shiftHex=ceil(log2(wavelen)),
@@ -18951,8 +18971,11 @@ class KernelWriterAssembly(KernelWriter):
         "TDMSplit multi-wave split stride must be a live SGPR, not a constStride symbol"
     strideArgA = strideRefA
     strideArgB = strideRefB
-    with self.allocTmpSgpr(1, tag="tdmSplitParity") as waveIdTmp:
-      self._emitTdmWaveParitySCC(module, kernel, waveIdTmp.idx, "wave parity (A=even/B=odd)")
+    if self.isTdmWaveIdxLive(kernel):
+      self._emitTdmWaveParitySCC(module, kernel, comment="wave parity (A=even/B=odd)")
+    else:
+      with self.allocTmpSgpr(1, tag="tdmSplitParity") as waveIdTmp:
+        self._emitTdmWaveParitySCC(module, kernel, waveIdTmp.idx, "wave parity (A=even/B=odd)")
 
     def selectByParity(dstIdx: int, valB: int, valA: int, comment: str):
       # dst = SCC ? valB : valA. SALU allows only one literal operand per
@@ -19730,8 +19753,11 @@ class KernelWriterAssembly(KernelWriter):
         wrapTmpLo = tmpSgprInfo.idx + 2
         wrapTmpHi = tmpSgprInfo.idx + 3
 
-        with self.allocTmpSgpr(1, tag="tdmIncrementABWaveSperated_tmpSgprInfo2") as waveIdTmp:
-          self._emitTdmWaveParitySCC(mod, kernel, waveIdTmp.idx, "check wave parity")
+        if self.isTdmWaveIdxLive(kernel):
+          self._emitTdmWaveParitySCC(mod, kernel, comment="check wave parity")
+        else:
+          with self.allocTmpSgpr(1, tag="tdmIncrementABWaveSperated_tmpSgprInfo2") as waveIdTmp:
+            self._emitTdmWaveParitySCC(mod, kernel, waveIdTmp.idx, "check wave parity")
         mod.add(SCSelectB32(dst=sgpr(wrapTmpLo), src0=sgpr(f"WrapU{tcB}+0"), src1=sgpr(f"WrapU{tcA}+0"), \
                 comment="select WrapU based on wave parity (lo)"))
         mod.add(SCSelectB32(dst=sgpr(wrapTmpHi), src0=sgpr(f"WrapU{tcB}+1"), src1=sgpr(f"WrapU{tcA}+1"), \
