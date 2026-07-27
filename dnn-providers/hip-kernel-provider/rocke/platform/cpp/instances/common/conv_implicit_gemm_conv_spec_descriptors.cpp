@@ -742,7 +742,9 @@ bool rocke_implicit_gemm_conv_is_valid_spec(const rocke_implicit_gemm_conv_spec_
      *   _ab_bytes = (a_rows*a_cols + b_rows*b_cols) * _ab_dtype_bytes
      *   _ab_lds   = _ab_bytes * (2 if double_buffer else 1)
      *   _c_lds    = tile_m * tile_n * _c_dtype_bytes  (if epilogue == "cshuffle")
-     *   _total_lds = max(_ab_lds, _c_lds)             (not sum -- they can overlap in pool) */
+     *   _total_lds = (ab_lds + c_lds) if cshuffle_no_alias else max(ab_lds, c_lds)
+     *               (aliased default overlaps C onto A/B -> max; no-alias gives C
+     *                its own bytes -> sum). Mirrors Python is_valid_spec. */
     {
         rocke_conv_lds_layout_t lds_layout;
         char lds_reason[256];
@@ -776,7 +778,7 @@ bool rocke_implicit_gemm_conv_is_valid_spec(const rocke_implicit_gemm_conv_spec_
             int c_dtype_bytes = (s->dtype_d && strcmp(s->dtype_d, "fp32") == 0) ? 4 : 2;
             c_lds = is_cshuffle ? (s->tile_m * s->tile_n * c_dtype_bytes) : 0;
         }
-        total_lds = (ab_lds > c_lds) ? ab_lds : c_lds;
+        total_lds = s->cshuffle_no_alias ? (ab_lds + c_lds) : ((ab_lds > c_lds) ? ab_lds : c_lds);
 
         if(!rocke_archtarget_fits_lds(target, (long)total_lds))
         {

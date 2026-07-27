@@ -125,6 +125,101 @@ def test_conv_cshuffle_has_reuse_barrier():
     _assert_barrier_before_first_c_store(build_implicit_gemm_conv(spec, arch="gfx950"))
 
 
+def test_gemm_cshuffle_no_alias_elides_barrier_and_marks_exclusive():
+    """With ``cshuffle_no_alias=True`` the C tile gets its own exclusive LDS
+    bytes, so the step-0 reuse barrier is elided: there is NO barrier between the
+    C_smem allocation and the first C store (the small-tile latency win)."""
+    from rocke.instances.common.gemm_universal import (
+        TileSpec,
+        TraitSpec,
+        UniversalGemmSpec,
+        build_universal_gemm,
+    )
+
+    spec = UniversalGemmSpec(
+        name="vg",
+        tile=TileSpec(
+            tile_m=128,
+            tile_n=128,
+            tile_k=32,
+            warp_m=2,
+            warp_n=2,
+            warp_tile_m=32,
+            warp_tile_n=32,
+            warp_tile_k=16,
+        ),
+        trait=TraitSpec(
+            pipeline="compv4",
+            scheduler="intrawave",
+            epilogue="cshuffle",
+            cshuffle_no_alias=True,
+        ),
+    )
+    ops = _flatten(build_universal_gemm(spec).body, [])
+    c_allocs = [
+        i
+        for i, o in enumerate(ops)
+        if o.name == "tile.smem_alloc" and "C_smem" in o.results[0].name
+    ]
+    assert c_allocs, "expected a C_smem allocation"
+    c_idx = c_allocs[0]
+    assert (
+        ops[c_idx].results[0].type.exclusive
+    ), "no_alias C tile must be an exclusive smem allocation"
+    later_stores = [
+        i
+        for i, o in enumerate(ops)
+        if o.name.startswith("tile.smem_store") and i > c_idx
+    ]
+    assert later_stores, "expected at least one store into the C staging tile"
+    barriers = [
+        i for i in range(c_idx + 1, later_stores[0]) if ops[i].name in _BARRIERS
+    ]
+    assert not barriers, (
+        "cshuffle_no_alias must elide the step-0 reuse barrier (C has its own "
+        "LDS bytes, so there is no A/B WAR hazard to guard)"
+    )
+
+
+def test_conv_cshuffle_no_alias_lds_budget_is_per_case():
+    """is_valid_spec must size the LDS budget per ``cshuffle_no_alias``: aliased
+    uses max(ab, c); no-alias uses ab + c. A spec whose max(ab, c) fits gfx950's
+    LDS but whose ab + c overflows it must be accepted aliased and rejected
+    no-alias (regression for yraparti's PR #8844 review comment)."""
+    from rocke.instances.common.conv_implicit_gemm import (
+        ConvProblem,
+        ImplicitGemmConvSpec,
+        is_valid_spec,
+    )
+
+    def _mk(no_alias):
+        return ImplicitGemmConvSpec(
+            problem=ConvProblem(N=4, Hi=28, Wi=28, C=64, K=64, Y=3, X=3),
+            tile_m=256,
+            tile_n=256,
+            tile_k=32,
+            warp_m=2,
+            warp_n=2,
+            warp_tile_m=32,
+            warp_tile_n=32,
+            warp_tile_k=16,
+            pipeline="mem",
+            epilogue="cshuffle",
+            wave_size=64,
+            cshuffle_no_alias=no_alias,
+        )
+
+    ok_alias, _ = is_valid_spec(_mk(False), "gfx950")
+    ok_noalias, why = is_valid_spec(_mk(True), "gfx950")
+    assert ok_alias, "aliased cshuffle (pool = max(ab, c)) should fit gfx950 LDS"
+    assert not ok_noalias, (
+        "no-alias cshuffle (pool = ab + c) should exceed gfx950 LDS and be "
+        "rejected; sizing it as max(ab, c) would silently accept an over-budget "
+        "kernel"
+    )
+    assert "LDS budget" in why
+
+
 if __name__ == "__main__":  # pragma: no cover
     import sys
 

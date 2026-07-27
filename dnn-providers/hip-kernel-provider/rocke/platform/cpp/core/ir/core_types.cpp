@@ -147,6 +147,9 @@ const rocke_type_t* rocke_smem_type(
     if(!elem)
         return (const rocke_type_t*)rocke_i_set_err(
             b, ROCKE_ERR_VALUE, "smem_type: NULL element type");
+    if(exclusive != 0 && exclusive != 1)
+        return (const rocke_type_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "smem_type: exclusive must be 0 or 1, got %d", exclusive);
     if(rank < 0)
         rank = 0;
 
@@ -167,7 +170,7 @@ const rocke_type_t* rocke_smem_type(
     t->elem = elem;
     t->shape = shape_copy;
     t->rank = rank;
-    t->smem_exclusive = exclusive ? 1 : 0;
+    t->smem_exclusive = exclusive; /* guarded to 0/1 above */
 
     /* Build the "[d0xd1x...]" body, then the full canonical name. The Python
      * form is f"smem<{elem.name}, [{'x'.join(...)}]>". */

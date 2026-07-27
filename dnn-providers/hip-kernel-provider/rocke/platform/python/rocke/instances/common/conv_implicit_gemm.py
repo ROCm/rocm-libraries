@@ -579,7 +579,11 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
     _c_lds = (
         spec.tile_m * spec.tile_n * _c_dtype_bytes if spec.epilogue == "cshuffle" else 0
     )
-    _total_lds = max(_ab_lds, _c_lds)
+    # cshuffle_no_alias decides whether the cshuffle C tile shares the A/B pool
+    # bytes, so the LDS budget must be computed per case:
+    #   OFF (default, aliased): C reuses the A/B bytes   -> pool = max(ab, c)
+    #   ON  (exclusive):        C gets its own LDS bytes -> pool = ab + c
+    _total_lds = (_ab_lds + _c_lds) if spec.cshuffle_no_alias else max(_ab_lds, _c_lds)
     if not target.fits_lds(_total_lds):
         return False, (
             f"LDS budget {_total_lds} bytes "
