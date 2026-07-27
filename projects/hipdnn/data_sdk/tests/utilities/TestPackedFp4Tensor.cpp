@@ -55,6 +55,13 @@ TEST(TestPackedFp4Tensor, NonDenseStridesThrow)
     EXPECT_THROW(PackedFp4Tensor({2, 2}, {4, 1}), std::invalid_argument);
 }
 
+TEST(TestPackedFp4Tensor, NonPositiveDimsAndStridesThrow)
+{
+    EXPECT_THROW(PackedFp4Tensor({-1}, {1}), std::invalid_argument);
+    EXPECT_THROW(PackedFp4Tensor({0, 16}, {16, 1}), std::invalid_argument);
+    EXPECT_THROW(PackedFp4Tensor({2, 16}, {16, -1}), std::invalid_argument);
+}
+
 TEST(TestPackedFp4Tensor, FillWithValueSetsBothNibbles)
 {
     PackedFp4Tensor tensor({4}, {1});

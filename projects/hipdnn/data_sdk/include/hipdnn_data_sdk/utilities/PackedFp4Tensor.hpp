@@ -43,6 +43,8 @@ public:
         {
             throw std::invalid_argument("PackedFp4Tensor: dims and strides size mismatch");
         }
+        validateAllPositive(dims, "dimension");
+        validateAllPositive(strides, "stride");
         if(!isDensePacked(dims, strides))
         {
             throw std::invalid_argument(
@@ -197,6 +199,18 @@ private:
     static uint8_t nibbleFromFloat(float value)
     {
         return static_cast<uint8_t>(types::fp4_e2m1(value).data & 0x0F);
+    }
+
+    static void validateAllPositive(const std::vector<int64_t>& values, const char* valueName)
+    {
+        for(const auto value : values)
+        {
+            if(value <= 0)
+            {
+                throw std::invalid_argument(std::string("PackedFp4Tensor: ") + valueName
+                                            + " must be positive");
+            }
+        }
     }
 
     static size_t computeElementCount(const std::vector<int64_t>& dims)
