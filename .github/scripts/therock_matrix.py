@@ -137,6 +137,7 @@ additional_options = {
     "hipblaslt-provider": {
         "cmake_options": [
             "-DTHEROCK_ENABLE_HIPBLASLTPROVIDER=ON",
+            "-DTHEROCK_FLAG_HIPBLASLTPROVIDER_ENABLE_MX_GEMM=ON",
         ],
         "projects_to_test": ["hipblasltprovider"],
         "project_to_add": "blas",

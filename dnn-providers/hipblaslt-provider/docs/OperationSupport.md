@@ -26,9 +26,9 @@ This is a hipDNN graph of two `BlockScaleDequantize` nodes feeding a `Matmul` no
 Supported MX input element types are **FP8 OCP** (`FP8_E4M3` / `FP8_E5M2`) and **OCP MX FP4** (`FP4_E2M1`), including **mixed pairs** (e.g. FP8 × FP4).
 
 > **Build-time feature flag.** This path is gated behind the CMake option
-> `HIPDNN_HIPBLASLT_PROVIDER_ENABLE_MX_GEMM`, which defaults to **OFF**; when OFF the plugin
+> `HIPBLASLTPROVIDER_ENABLE_MX_GEMM`, which defaults to **OFF**; when OFF the plugin
 > reports these graphs as unsupported. Build with
-> `-DHIPDNN_HIPBLASLT_PROVIDER_ENABLE_MX_GEMM=ON` to enable it.
+> `-DHIPBLASLTPROVIDER_ENABLE_MX_GEMM=ON` to enable it.
 
 **Graph topology:**
 ```

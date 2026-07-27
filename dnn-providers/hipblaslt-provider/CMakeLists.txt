@@ -26,12 +26,12 @@ project(hipblaslt-provider VERSION ${HIPBLASLT_PROVIDER_VERSION} LANGUAGES CXX)
 # (typically OFF) and the injected value is silently ignored, leaving the
 # feature compiled out despite the flag being set.
 # ----------------------------------------------------------------------------
-option(HIPDNN_HIPBLASLT_PROVIDER_ENABLE_MX_GEMM
+option(HIPBLASLTPROVIDER_ENABLE_MX_GEMM
     "Enable MX (microscaling) data-type support for GEMM" OFF
 )
-if(HIPDNN_HIPBLASLT_PROVIDER_ENABLE_MX_GEMM)
+if(HIPBLASLTPROVIDER_ENABLE_MX_GEMM)
     message(STATUS "hipblaslt-provider: MX GEMM support enabled")
-    add_compile_definitions(HIPDNN_HIPBLASLT_PROVIDER_ENABLE_MX_GEMM)
+    add_compile_definitions(HIPBLASLTPROVIDER_ENABLE_MX_GEMM)
 else()
     message(STATUS "hipblaslt-provider: MX GEMM support disabled")
 endif()
@@ -175,8 +175,8 @@ add_library(
     HipblasltUtils.cpp
     engines/plans/HipblasltMatmulPlan.cpp
     engines/plans/HipblasltMatmulPlanBuilder.cpp
-    $<$<BOOL:${HIPDNN_HIPBLASLT_PROVIDER_ENABLE_MX_GEMM}>:engines/plans/HipblasltMxMatmulPlan.cpp>
-    $<$<BOOL:${HIPDNN_HIPBLASLT_PROVIDER_ENABLE_MX_GEMM}>:engines/plans/HipblasltMxMatmulPlanBuilder.cpp>
+    $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_MX_GEMM}>:engines/plans/HipblasltMxMatmulPlan.cpp>
+    $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_MX_GEMM}>:engines/plans/HipblasltMxMatmulPlanBuilder.cpp>
     HipblasltMatmulDesc.cpp
     HipblasltMatrixLayout.cpp
     HipblasltMatrixTransformDesc.cpp
