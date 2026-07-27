@@ -772,7 +772,7 @@ bool rocke_implicit_gemm_conv_is_valid_spec(const rocke_implicit_gemm_conv_spec_
     if(strcmp(family, "wmma") == 0)
     {
         /* gfx11/gfx12 use 16x16x16; gfx1250 uses 16x16x32 (fp16/bf16) or 16x16x4 (fp32) */
-        int is_16x16x4  = (s->warp_tile_m == 16 && s->warp_tile_n == 16 && s->warp_tile_k == 4);
+        int is_16x16x4 = (s->warp_tile_m == 16 && s->warp_tile_n == 16 && s->warp_tile_k == 4);
         int is_16x16x16 = (s->warp_tile_m == 16 && s->warp_tile_n == 16 && s->warp_tile_k == 16);
         int is_16x16x32 = (s->warp_tile_m == 16 && s->warp_tile_n == 16 && s->warp_tile_k == 32);
         if(!is_16x16x4 && !is_16x16x16 && !is_16x16x32)
@@ -883,10 +883,8 @@ const rocke_mmaop_t* rocke_conv_resolve_op(rocke_ir_builder_t* b,
      *                              m=warp_tile_m, n=warp_tile_n, k=warp_tile_k) */
     {
         char a_scratch[32], b_scratch[32];
-        const char* a_norm
-            = rocke_normalize_dtype(spec->dtype_a, a_scratch, sizeof(a_scratch));
-        const char* b_norm
-            = rocke_normalize_dtype(spec->dtype_b, b_scratch, sizeof(b_scratch));
+        const char* a_norm = rocke_normalize_dtype(spec->dtype_a, a_scratch, sizeof(a_scratch));
+        const char* b_norm = rocke_normalize_dtype(spec->dtype_b, b_scratch, sizeof(b_scratch));
         op = rocke_archtarget_op_for_shape(target,
                                            rocke_conv_mma_family(arch),
                                            a_norm,

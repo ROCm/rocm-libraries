@@ -835,10 +835,10 @@ static const rocke_layout_map_t lm_wmma_gfx12_c
  * row = lane / 2  (M index 0..15);  K = (lane % 2) * 2 + slot  (slot in {0,1}).
  * Mirrors _wmma_gfx1250_a_16x16x4_f32 in target.py. */
 static void _wmma_gfx1250_a_16x16x4_f32(rocke_ir_builder_t* b,
-                                         rocke_value_t* lane,
-                                         int slot,
-                                         rocke_value_t** out0,
-                                         rocke_value_t** out1)
+                                        rocke_value_t* lane,
+                                        int slot,
+                                        rocke_value_t** out0,
+                                        rocke_value_t** out1)
 {
     rocke_value_t *c2, *row, *k_lane, *k;
     ROCKE_ATI_COORD_GUARD(b, out0, out1);
@@ -854,10 +854,10 @@ static void _wmma_gfx1250_a_16x16x4_f32(rocke_ir_builder_t* b,
 
 /* gfx1250 WMMA 16x16x4 fp32 B operand (wave32): col = lane / 2, K = (lane % 2) * 2 + slot. */
 static void _wmma_gfx1250_b_16x16x4_f32(rocke_ir_builder_t* b,
-                                         rocke_value_t* lane,
-                                         int slot,
-                                         rocke_value_t** out0,
-                                         rocke_value_t** out1)
+                                        rocke_value_t* lane,
+                                        int slot,
+                                        rocke_value_t** out0,
+                                        rocke_value_t** out1)
 {
     rocke_value_t *c2, *col, *k_lane, *k;
     ROCKE_ATI_COORD_GUARD(b, out0, out1);

@@ -687,7 +687,13 @@ _MMA_FRAGMENT_INFO: Dict[str, _FragInfo] = {
     # Intrinsic: __builtin_amdgcn_wmma_f32_16x16x4_f32 (verified in CK Tile
     # wmma_gfx12.hpp lines 355-373; amdgcn_mma_base kABKPerLane=2, kCMPerLane=8).
     "wmma_gfx1250_f32_16x16x4_f32": _FragInfo(
-        2, 2, 8, 32, _wmma_gfx1250_a_16x16x4_f32, _wmma_gfx1250_b_16x16x4_f32, _wmma_gfx12_acc_16x16
+        2,
+        2,
+        8,
+        32,
+        _wmma_gfx1250_a_16x16x4_f32,
+        _wmma_gfx1250_b_16x16x4_f32,
+        _wmma_gfx12_acc_16x16,
     ),
     # --- WMMA f16 / bf16 (wave32, gfx1250, CDNA) ----------------------
     # K=32 atom: A/B are <16 x half> per lane (K split across lane-halves, 16
