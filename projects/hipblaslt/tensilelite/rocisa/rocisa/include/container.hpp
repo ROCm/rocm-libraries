@@ -641,43 +641,6 @@ namespace rocisa
         }
     };
 
-    struct True16Modifiers : public Container
-    {
-        True16Modifiers(HighBitSel high_bit = HighBitSel::NONE)
-            : Container()
-            , high_bit(high_bit)
-        {
-        }
-
-        True16Modifiers(const int high_bit = -1)
-            : Container()
-            , high_bit(static_cast<HighBitSel>(high_bit))
-        {
-        }
-
-        True16Modifiers(const True16Modifiers& other)
-            : Container()
-            , high_bit(other.high_bit)
-        {
-        }
-
-        std::shared_ptr<Container> clone() const override
-        {
-            return std::make_shared<True16Modifiers>(*this);
-        }
-
-        std::string toString() const override
-        {
-            if(high_bit == HighBitSel::NONE)
-            {
-                return "";
-            }
-            return high_bit == HighBitSel::HIGH ? ".h" : ".l";
-        }
-
-        const HighBitSel high_bit;
-    };
-
     struct EXEC : public Container
     {
         EXEC(bool setHi = false)
@@ -928,6 +891,8 @@ namespace rocisa
         bool                   isAbs;
         bool                   isMacro;
         bool                   isOff;
+        // true16 half-word select (".l"/".h") for 16-bit VGPR operands.
+        std::optional<HighBitSel> halfSelect;
 
         RegisterContainer(const std::string&            regType,
                           const std::optional<RegName>& regName,
@@ -944,6 +909,7 @@ namespace rocisa
             , isAbs(false)
             , isMacro(false)
             , isOff(false)
+            , halfSelect(std::nullopt)
         {
         }
 
@@ -965,6 +931,7 @@ namespace rocisa
             , isAbs(isAbs)
             , isMacro(isMacro)
             , isOff(isOff)
+            , halfSelect(std::nullopt)
         {
         }
 
@@ -980,6 +947,7 @@ namespace rocisa
             , isAbs(other.isAbs)
             , isMacro(other.isMacro)
             , isOff(other.isOff)
+            , halfSelect(other.halfSelect)
         {
         }
 
@@ -1005,6 +973,7 @@ namespace rocisa
             , isAbs(other.isAbs)
             , isMacro(other.isMacro)
             , isOff(other.isOff)
+            , halfSelect(other.halfSelect)
         {
         }
 
@@ -1022,6 +991,7 @@ namespace rocisa
                 isAbs       = other.isAbs;
                 isMacro     = other.isMacro;
                 isOff       = other.isOff;
+                halfSelect  = other.halfSelect;
             }
             return *this;
         }
@@ -1040,6 +1010,7 @@ namespace rocisa
                 isAbs       = other.isAbs;
                 isMacro     = other.isMacro;
                 isOff       = other.isOff;
+                halfSelect  = other.halfSelect;
             }
             return *this;
         }
@@ -1063,6 +1034,25 @@ namespace rocisa
         {
             RegisterContainer c = *this;
             c.setMinus(true);
+            return c;
+        }
+
+        void setHalfSelect(HighBitSel sel)
+        {
+            this->halfSelect = sel;
+        }
+
+        RegisterContainer lo() const
+        {
+            RegisterContainer c = *this;
+            c.halfSelect        = HighBitSel::LOW;
+            return c;
+        }
+
+        RegisterContainer hi() const
+        {
+            RegisterContainer c = *this;
+            c.halfSelect        = HighBitSel::HIGH;
             return c;
         }
 
@@ -1176,6 +1166,11 @@ namespace rocisa
             std::string minusStr = isMinus ? "-" : "";
             minusStr             = isAbs ? "abs(" + minusStr : minusStr;
             auto absStr          = isAbs ? ")" : "";
+            std::string halfStr = "";
+            if(halfSelect.has_value() && *halfSelect != HighBitSel::NONE)
+            {
+                halfStr = (*halfSelect == HighBitSel::HIGH) ? ".h" : ".l";
+            }
             std::string msbStr = "";
             if(rocIsa::getInstance().getAsmCaps()["HasVgprMSB"] && regType == "v")
             {
@@ -1193,7 +1188,7 @@ namespace rocisa
                 if(regNum == 1)
                 {
                     return minusStr + regType + "[" + macroSlash + regType + "gpr"
-                           + regName->toString() + msbStr + "]" + absStr;
+                           + regName->toString() + msbStr + "]" + halfStr + absStr;
                 }
                 else
                 {
@@ -1207,8 +1202,8 @@ namespace rocisa
                 if(regNum == 1)
                 {
                     if(msb > 0)
-                        return minusStr + regType + "["  + std::to_string(regIdx) + msbStr + "]" + absStr;
-                    return minusStr + regType + std::to_string(regIdx) + absStr;
+                        return minusStr + regType + "["  + std::to_string(regIdx) + msbStr + "]" + halfStr + absStr;
+                    return minusStr + regType + std::to_string(regIdx) + halfStr + absStr;
                 }
                 else
                 {
@@ -1357,11 +1352,13 @@ namespace rocisa
 
         RegisterContainer getCopiedRC() const
         {
-            if(holderType == 0)
-            {
-                return RegisterContainer{regType, std::nullopt, regIdx, (float)regNum};
-            }
-            return RegisterContainer{regType, regName, regIdx, (float)regNum};
+            RegisterContainer rc = (holderType == 0)
+                                       ? RegisterContainer{regType, std::nullopt, regIdx, (float)regNum}
+                                       : RegisterContainer{regType, regName, regIdx, (float)regNum};
+            // Preserve the true16 half-select when a Holder lowers to its register,
+            // else the .l/.h suffix is lost and the operand is invalid on NoSDWA.
+            rc.halfSelect = halfSelect;
+            return rc;
         }
 
         std::pair<std::shared_ptr<HolderContainer>, std::shared_ptr<HolderContainer>>
