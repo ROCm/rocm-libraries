@@ -28,6 +28,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <iosfwd>
 #include <limits>
 #include <memory>
 #include <string>
@@ -214,6 +215,74 @@ namespace TensileLite
     {
         size_t globalAccumulation = 0;
     };
+
+    // Observational snapshot of the StreamK launch-parameter DECISIONS made for
+    // one (solution, problem, hardware) triple. Populated by
+    // ContractionSolution::computeStreamKDecisions(), which is the single source
+    // of truth that solve() itself consumes to fill StreamKSettings -- so the
+    // diagnostic launch summary can never drift from the real launch. Purely
+    // observational: computing this changes no launch behaviour. See
+    // Debug::printStreamKLaunchSummary() (TENSILE_DB bit 0x200000).
+    struct StreamKDecisions
+    {
+        // --- Mode ---
+        int  streamKMode      = 0; // sizeMapping.streamK (0 = not StreamK, else 3/4/5)
+        bool effectiveDynamic = false; // SK5 resolved to the dynamic (SK4) sub-path
+        bool isDynamic        = false; // SK4, or SK5 resolved dynamic (work-queue path)
+
+        // --- Reduction ---
+        origami::reduction_t reduction = origami::reduction_t::tree; // final (post-fallback)
+
+        // --- Grid / tiles / split ---
+        size_t tiles            = 0; // problem.getNumTiles()
+        // Grid selected by getSKGridImpl's config/CU/override logic BEFORE any of
+        // the "reset to tiles" fallbacks (tree-fixup bounds / workspace-DP) fire.
+        // This is the grid StreamK actually WANTED for this launch.
+        size_t selectedGrid       = 0;
+        // Grid returned by getSKGridImpl -- i.e. AFTER the tree-fixup-bounds
+        // fallback (which may reset it to tiles) but BEFORE the workspace-DP
+        // fallback in solve(). Kept as a diagnostic intermediate.
+        size_t skGridPreFallback  = 0;
+        // FINAL effective grid actually used at launch, after ALL fallbacks
+        // (fixed-grid override, tree-fixup-bounds, workspace-insufficient DP).
+        // Wired directly from solve()'s StreamKSettings::grid so it can never
+        // drift from the real launch.
+        size_t finalGrid          = 0;
+        // Backward-compatible alias of finalGrid (the grid solve() launches with).
+        size_t skGrid             = 0;
+        size_t skTiles          = 0; // number of stream-k (partial) tiles packed by makeArgs
+        size_t skSplit          = 0; // k-split factor (>=1)
+        size_t totalItems       = 0; // (tiles - skTiles) + skTiles*skSplit
+
+        // --- DP-only ---
+        // These three flags DISTINGUISH the source of a data-parallel-only launch:
+        //   forceDPOnly  -> sizeMapping.streamKForceDPOnly compile-time param
+        //   streamKDP    -> TENSILE_STREAMK_DATA_PARALLEL debug override
+        //   workspaceDPFallbackFired (below) -> runtime workspace-insufficient
+        bool dpOnly      = false; // any of the three above fired
+        bool forceDPOnly = false; // sizeMapping.streamKForceDPOnly (param)
+        bool streamKDP   = false; // TENSILE_STREAMK_DATA_PARALLEL debug override
+
+        // --- Workspace / partials ---
+        bool   partialsPresent        = false; // skTiles > 0
+        bool   workspaceAllocated     = false; // the partials/queue block is taken and fits
+        size_t requiredWorkspaceBytes = 0; // SK partials(+queue) bytes actually reserved (0 if none)
+        size_t idealWorkspaceBytes    = 0; // partials(+queue) bytes the launch wanted (pre fit check)
+        size_t givenWorkspaceBytes    = 0; // problem.workspaceSize()
+        // Informational skTiles*skSplit slot count for the dynamic path, computed
+        // LOCALLY here for reporting only. NOTE: on this (#10008) base the actual
+        // partials-workspace sizing/allocation is driven by tiles%grid (see
+        // computeStreamKDecisions / solve), NOT by this value; it is reported so
+        // the invariant gap ("dynamic should reserve iff dynamicSlots>0") is
+        // observable without pulling in #9415's allocation behaviour change.
+        size_t dynamicPartialsSlots   = 0;
+        size_t numQueues              = 0; // baked per-XCD work-queue count (NUM_XCD), 0 if unknown
+
+        // --- Fallbacks that fired (each can change selectedGrid -> finalGrid) ---
+        bool workspaceDPFallbackFired = false; // idealWorkspace > given -> tree + grid=tiles
+        bool treeBoundsFallbackFired  = false; // 24-bit tree-fixup bounds -> grid=tiles
+        bool fixedGridUsed            = false; // AMDGPU skFixedGrid override applied
+    };
     /**
      * Represents a single kernel or set of kernels that can perform a single
      * tensor contraction.
@@ -394,6 +463,25 @@ namespace TensileLite
         bool                 streamKDynamicQueueSupported(Problem const&  problem,
                                                           Hardware const& hardware) const;
         size_t               partialTileSize(size_t skGrid) const;
+
+        // Compute the StreamK launch-parameter DECISIONS for this solution on the
+        // given problem/hardware. This is the single source of truth for the
+        // reduction strategy, grid, and workspace/DP fallbacks that solve()
+        // consumes to populate StreamKSettings, and it is directly callable from
+        // unit tests. It reuses the existing helpers (streamK5EffectiveDynamic,
+        // getSKReduction, getSKGrid, partialTileSize) so the returned snapshot
+        // reflects the real launch, not a re-derivation. Purely observational --
+        // calling it changes no launch behaviour. Returns an all-default snapshot
+        // (streamKMode==0) for non-StreamK solutions.
+        StreamKDecisions computeStreamKDecisions(Problem const&  problem,
+                                                 Hardware const& hardware) const;
+
+        // Print a one-line StreamK launch summary of the given decisions. Called
+        // from solve() only when Debug::printStreamKLaunchSummary() is set;
+        // exposed for tests.
+        void printStreamKLaunchSummary(std::ostream&           os,
+                                       Problem const&          problem,
+                                       StreamKDecisions const& decisions) const;
 
         static float computeGranularity(float x);
 

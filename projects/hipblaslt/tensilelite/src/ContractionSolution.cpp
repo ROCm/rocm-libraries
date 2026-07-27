@@ -43,6 +43,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdlib>
+#include <iomanip>
 #include <mutex>
 #include <random>
 
@@ -3217,7 +3218,10 @@ namespace TensileLite
                              Hardware const&               hardware,
                              size_t                        tiles,
                              origami::reduction_t          reductionStrat,
-                             bool const*                   sk5EffectiveDynamic);
+                             bool const*                   sk5EffectiveDynamic,
+                             bool*                         outFixedGridUsed      = nullptr,
+                             bool*                         outTreeBoundsFallback = nullptr,
+                             size_t*                       outSelectedGrid       = nullptr);
     }
 
     std::vector<KernelInvocation>
@@ -3306,13 +3310,20 @@ namespace TensileLite
                 rv.push_back(generateBetaOnlyCall<false>(problem, inputs));
         }
 
-        StreamKSettings sk;
+        StreamKSettings  sk;
+        StreamKDecisions skDecisions;
         if(sizeMapping.streamK > 0)
         {
             auto tiles = problem.getNumTiles(sizeMapping, 1);
-            const bool effectiveDynamic = (sizeMapping.streamK == 5)
-                                              ? streamK5EffectiveDynamic(problem, hardware)
-                                              : false;
+            // Single source of truth: compute the StreamK launch decisions once
+            // (also consumed by the diagnostic launch summary and unit tests) and
+            // consume them here. computeStreamKDecisions() reproduces exactly the
+            // reduction / grid / workspace-DP-fallback logic that previously lived
+            // inline, reusing the same helpers, so launch behaviour is unchanged.
+            // It has no side effects, so computing it before the dynamic-queue
+            // guard below cannot change observable behaviour (the guard still
+            // throws before any kernel-arg packing / kernel launch).
+            skDecisions = computeStreamKDecisions(problem, hardware);
             // Defensive: dynamic-queue / work-stealing StreamK solutions are
             // excluded from selection on devices whose runtime XCD count is not
             // a power of two or does not equal the baked per-XCD queue count
@@ -3324,9 +3335,7 @@ namespace TensileLite
             // reject EXPLICITLY rather than silently running the fixed-mask
             // kernel with a mismatched queue count (which would corrupt
             // results).
-            const bool dynamicQueuePath
-                = (sizeMapping.streamK == 4)
-                  || (sizeMapping.streamK == 5 && effectiveDynamic);
+            const bool dynamicQueuePath = skDecisions.isDynamic;
             if(dynamicQueuePath && streamKDynamicQueueUnsupported(hardware))
             {
                 warnStreamKDynamicQueueUnsupportedOnce(hardware);
@@ -3347,55 +3356,28 @@ namespace TensileLite
                     "per-XCD queue count; this kernel is unsupported here. "
                     "Select a non-work-stealing solution instead.");
             }
-            if(sizeMapping.streamK == 4)
-                sk.reduction = origami::reduction_t::tree;
-            else if(sizeMapping.streamK == 5)
-                sk.reduction = effectiveDynamic ? origami::reduction_t::tree
-                                                : getSKReduction(problem, hardware);
-            else
-                sk.reduction = getSKReduction(problem, hardware);
+            // Consume the reduction / grid decided above. These are exactly the
+            // values the (pre-#9415) inline block computed -- computeStreamKDecisions
+            // mirrors that logic (including the workspace-insufficient DP fallback),
+            // reusing the same helpers, so launch behaviour is unchanged.
+            sk.reduction                 = skDecisions.reduction;
+            sk.grid                      = skDecisions.skGrid;
             sk.streamKTileSchedulingMode = problem.getParams().streamKTileSchedulingMode();
-            sk.smCountTarget         = problem.getParams().smCountTarget();
-            sk.grid = getSKGridImpl(*this,
-                                    problem,
-                                    hardware,
-                                    tiles,
-                                    sk.reduction,
-                                    sizeMapping.streamK == 5 ? &effectiveDynamic : nullptr);
-            const bool streamKDP = Debug::Instance().useStreamKDataParrallel();
-            const bool forceDPOnly = sizeMapping.streamKForceDPOnly != 0;
-            if(sk.grid > 0
-               && (sk.reduction == origami::reduction_t::parallel
-                   || (tiles % sk.grid != 0 && !streamKDP && !forceDPOnly)))
-            {
-                size_t idealWorkspace = partialTileSize(sk.grid);
-                // SK4 and SK5-dynamic need the per-XCD work-queue region; SK5-static
-                // sizes like standalone SK3. The region is sized as (per-queue
-                // stride) * (baked per-XCD queue count), both sourced from origami:
-                // the stride is the L2 cache-line size (get_default_cache_line_bytes,
-                // 128 B for gfx942/gfx950) so each counter owns its line (no false
-                // sharing), and the queue count is the per-arch XCD count. The
-                // acceptance guard requires runtime NUM_XCD == baked, so this equals
-                // cacheLineBytes * NUM_XCD for every device that reaches here.
-                if(dynamicQueuePath)
-                    idealWorkspace
-                        += streamKPerQueueStrideBytes(hardware) * streamKBakedQueueCount(hardware);
-                // If given workspace is less than ideal, we can fall back to DP mode
-                // Performance will likely be lower, but the kernel can run if workspace is unavailable.
-                // (The non-power-of-two XCD case is handled earlier by explicit
-                // rejection, not by a silent fall back to tree reduction.)
-                if(idealWorkspace > problem.workspaceSize())
-                {
-                    sk.reduction = origami::reduction_t::tree;
-                    sk.grid      = tiles;
-                }
-            }
+            sk.smCountTarget             = problem.getParams().smCountTarget();
 
             if(sk.reduction == origami::reduction_t::parallel && sk.grid / tiles < 2)
             {
                 throw std::runtime_error("hipblasLT Error: Cannot use Parallel reduction with "
                                          "StreamK kernel with splitting factor < 2\n");
             }
+
+            // Wire the FINAL launch grid from the value solve() actually launches
+            // with (post all fallbacks), so the diagnostic summary can never drift
+            // from the real launch.
+            skDecisions.finalGrid = sk.grid;
+            skDecisions.skGrid    = sk.grid;
+            if(Debug::Instance().printStreamKLaunchSummary())
+                printStreamKLaunchSummary(std::cerr, problem, skDecisions);
         }
 
         GSUSettings gsuSettings;
@@ -4158,8 +4140,15 @@ namespace TensileLite
                              Hardware const&               hardware,
                              size_t                        tiles,
                              origami::reduction_t          reductionStrat,
-                             bool const*                   sk5EffectiveDynamic)
+                             bool const*                   sk5EffectiveDynamic,
+                             bool*                         outFixedGridUsed,
+                             bool*                         outTreeBoundsFallback,
+                             size_t*                       outSelectedGrid)
         {
+            if(outFixedGridUsed)
+                *outFixedGridUsed = false;
+            if(outTreeBoundsFallback)
+                *outTreeBoundsFallback = false;
             size_t     skGrid    = tiles; // Fallback
             const bool streamKDP = Debug::Instance().useStreamKDataParrallel();
             if(streamKDP)
@@ -4183,6 +4172,8 @@ namespace TensileLite
             if(pAMDGPU->skFixedGrid > 0)
             {
                 skGrid = pAMDGPU->skFixedGrid;
+                if(outFixedGridUsed)
+                    *outFixedGridUsed = true;
             }
             else if(pAMDGPU->skDynamicGrid > 0)
             {
@@ -4303,6 +4294,11 @@ namespace TensileLite
                 skGrid = cuCount;
             }
 
+            // Grid selected by the config/CU/override logic, captured before the
+            // "reset to tiles" tree-fixup-bounds fallback below.
+            if(outSelectedGrid)
+                *outSelectedGrid = skGrid;
+
             // Tree-fixup uses scalarUInt24DivideAndRemainder (dividend < 2^24, divisor < 2^16).
             // If we exceed those bounds, fall back to DP.
             if(reductionStrat == origami::reduction_t::tree)
@@ -4314,6 +4310,8 @@ namespace TensileLite
                    || (tiles * itersPerTile) >= 16777216)
                 {
                     skGrid = tiles;
+                    if(outTreeBoundsFallback)
+                        *outTreeBoundsFallback = true;
                 }
             }
 
@@ -4340,6 +4338,310 @@ namespace TensileLite
         // TODO round up for alignment?
 
         return size;
+    }
+
+    // Single source of truth for the StreamK launch decisions. This mirrors --
+    // and is consumed by -- the sizing block in solve(): the reduction, grid, and
+    // workspace/DP fallbacks below are exactly what solve() applies to the
+    // StreamKSettings it launches with, and the skTiles/skSplit/totalItems fields
+    // mirror the kernel-arg packing in makeArgs(). It reuses the existing helpers
+    // rather than re-deriving, so the summary cannot drift from the real launch.
+    //
+    // NOTE (this branch = #10008, WITHOUT #9415): the partials-workspace guard and
+    // sizing below intentionally reproduce the PRE-#9415 behaviour -- reserve iff
+    // (reduction==parallel || tiles%grid!=0), sized as partialTileSize(grid) (+ the
+    // per-XCD work-queue region for the dynamic path). It does NOT use #9415's
+    // dynamicPartialsSlots-driven sizing. The dynamicPartialsSlots FIELD is still
+    // populated (skTiles*skSplit, computed locally) purely for reporting so the
+    // "dynamic should reserve iff dynamicSlots>0" invariant gap is observable.
+    StreamKDecisions
+        ContractionSolution::computeStreamKDecisions(Problem const&  problem,
+                                                     Hardware const& hardware) const
+    {
+        StreamKDecisions d;
+        d.streamKMode = sizeMapping.streamK;
+        if(sizeMapping.streamK <= 0)
+            return d;
+
+        const size_t tiles = problem.getNumTiles(sizeMapping, 1);
+        d.tiles            = tiles;
+
+        const bool effectiveDynamic
+            = (sizeMapping.streamK == 5) ? streamK5EffectiveDynamic(problem, hardware) : false;
+        d.effectiveDynamic = effectiveDynamic;
+
+        // Reduction strategy -- mirrors solve().
+        origami::reduction_t reduction;
+        if(sizeMapping.streamK == 4)
+            reduction = origami::reduction_t::tree;
+        else if(sizeMapping.streamK == 5)
+            reduction = effectiveDynamic ? origami::reduction_t::tree
+                                         : getSKReduction(problem, hardware);
+        else
+            reduction = getSKReduction(problem, hardware);
+
+        // Grid -- reuses getSKGridImpl (same call solve() makes), and captures the
+        // fixed-grid / tree-bounds fallbacks plus the pre-tree-bounds "selected"
+        // grid via the optional out-params.
+        bool         fixedGridUsed = false;
+        bool         treeBounds    = false;
+        size_t       selectedGrid  = 0;
+        const size_t gridInitial   = getSKGridImpl(*this,
+                                                 problem,
+                                                 hardware,
+                                                 tiles,
+                                                 reduction,
+                                                 sizeMapping.streamK == 5 ? &effectiveDynamic
+                                                                          : nullptr,
+                                                 &fixedGridUsed,
+                                                 &treeBounds,
+                                                 &selectedGrid);
+        d.selectedGrid            = selectedGrid;
+        d.skGridPreFallback       = gridInitial;
+        d.fixedGridUsed           = fixedGridUsed;
+        d.treeBoundsFallbackFired = treeBounds;
+
+        size_t     grid        = gridInitial;
+        const bool streamKDP   = Debug::Instance().useStreamKDataParrallel();
+        const bool forceDPOnly = sizeMapping.streamKForceDPOnly != 0;
+        d.streamKDP            = streamKDP;
+        d.forceDPOnly          = forceDPOnly;
+
+        const bool isDynamic
+            = (sizeMapping.streamK == 4) || (sizeMapping.streamK == 5 && effectiveDynamic);
+        d.isDynamic = isDynamic;
+
+        d.numQueues           = streamKBakedQueueCount(hardware);
+        d.givenWorkspaceBytes = problem.workspaceSize();
+
+        // Workspace / DP fallback -- mirrors the PRE-#9415 guard in solve():
+        // reserve iff (reduction==parallel || tiles%grid!=0), sized by grid (not by
+        // dynamicSlots). No #9415 behaviour is pulled in here.
+        size_t idealWorkspace = 0;
+        bool   needPartials   = false;
+        if(grid > 0
+           && (reduction == origami::reduction_t::parallel
+               || (tiles % grid != 0 && !streamKDP && !forceDPOnly)))
+        {
+            needPartials   = true;
+            idealWorkspace = partialTileSize(grid);
+            if(isDynamic)
+                idealWorkspace
+                    += streamKPerQueueStrideBytes(hardware) * streamKBakedQueueCount(hardware);
+            if(idealWorkspace > problem.workspaceSize())
+            {
+                reduction                  = origami::reduction_t::tree;
+                grid                       = tiles;
+                d.workspaceDPFallbackFired = true;
+            }
+        }
+
+        d.reduction              = reduction;
+        d.skGrid                 = grid;
+        d.finalGrid              = grid;
+        d.idealWorkspaceBytes    = idealWorkspace;
+        d.requiredWorkspaceBytes = (needPartials && !d.workspaceDPFallbackFired) ? idealWorkspace : 0;
+        d.workspaceAllocated     = d.requiredWorkspaceBytes > 0;
+        d.dpOnly                 = streamKDP || forceDPOnly || d.workspaceDPFallbackFired;
+
+        // skTiles / skSplit / totalItems -- mirror the kernel-arg packing in
+        // makeArgs, using the FINAL (post-fallback) grid and reduction.
+        const size_t itersPerTile = std::max(size_t{1}, problem.getItersPerTile(sizeMapping));
+        if(isDynamic)
+        {
+            AMDGPU const* pAMDGPU   = dynamic_cast<AMDGPU const*>(&hardware);
+            int           overrideT = pAMDGPU ? pAMDGPU->skTiles : -1;
+            int           overrideS = pAMDGPU ? pAMDGPU->skSplit : -1;
+            uint32_t      skTiles   = 0;
+            uint32_t      skSplit   = 2;
+            if(overrideT > -1)
+                skTiles = static_cast<uint32_t>(overrideT);
+            if(overrideS > -1)
+                skSplit = static_cast<uint32_t>(overrideS);
+            uint32_t skItersPerWI = CeilDivide(static_cast<uint32_t>(itersPerTile), skSplit);
+            skSplit               = CeilDivide(static_cast<uint32_t>(itersPerTile), skItersPerWI);
+            d.skTiles             = skTiles;
+            d.skSplit             = skSplit;
+            d.totalItems          = (tiles - skTiles) + static_cast<size_t>(skTiles) * skSplit;
+        }
+        else if(reduction == origami::reduction_t::parallel && tiles > 0)
+        {
+            uint32_t skSplit = static_cast<uint32_t>(grid / tiles);
+            d.skSplit        = skSplit;
+            d.skTiles        = skSplit; // parallel path packs skTiles = skSplit
+            d.totalItems     = tiles;
+        }
+        else
+        {
+            AMDGPU const* pAMDGPU   = dynamic_cast<AMDGPU const*>(&hardware);
+            int           fullTiles = pAMDGPU ? pAMDGPU->skFullTiles : 0;
+            bool          bigEnough = tiles > grid;
+            uint32_t      skTiles   = forceDPOnly ? 0u : static_cast<uint32_t>(grid);
+            if(!forceDPOnly && grid != 0 && tiles % grid != 0)
+            {
+                skTiles = bigEnough ? static_cast<uint32_t>(grid * fullTiles + tiles % grid)
+                                    : static_cast<uint32_t>(tiles);
+                skTiles = std::min(skTiles, static_cast<uint32_t>(tiles));
+            }
+            d.skTiles    = skTiles;
+            d.skSplit    = 1;
+            d.totalItems = tiles;
+        }
+
+        // Informational only (see field doc): skTiles*skSplit slot count for the
+        // dynamic path, computed LOCALLY here. It does NOT feed the allocation
+        // guard above, so no #9415 sizing behaviour is introduced.
+        d.dynamicPartialsSlots = isDynamic ? static_cast<size_t>(d.skTiles) * d.skSplit : 0;
+
+        d.partialsPresent = d.skTiles > 0;
+        return d;
+    }
+
+    void ContractionSolution::printStreamKLaunchSummary(std::ostream&           os,
+                                                        Problem const&          problem,
+                                                        StreamKDecisions const& d) const
+    {
+        (void)problem; // reserved for future per-problem detail; keeps the API stable
+        auto reductionStr = [](origami::reduction_t r) {
+            return r == origami::reduction_t::parallel ? "parallel(DP)" : "tree";
+        };
+        const char* modeStr = "?";
+        switch(d.streamKMode)
+        {
+        case 0: modeStr = "none"; break;
+        case 3: modeStr = "SK3(static)"; break;
+        case 4: modeStr = "SK4(dynamic)"; break;
+        case 5:
+            modeStr = d.effectiveDynamic ? "SK5->dynamic(SK4)" : "SK5->static(SK3)";
+            break;
+        default: modeStr = "SK?"; break;
+        }
+
+        // Which fallback (if any) turned the initially-selected grid into the
+        // final launch grid. Reported alongside selectedGrid vs finalGrid.
+        const char* gridChangedBy = "none";
+        if(d.workspaceDPFallbackFired)
+            gridChangedBy = "workspaceDP";
+        else if(d.treeBoundsFallbackFired)
+            gridChangedBy = "treeBounds";
+        else if(d.fixedGridUsed)
+            gridChangedBy = "fixedGrid";
+
+        // Which mechanism (if any) makes this launch data-parallel-only.
+        const char* dpOnlySource = "none";
+        if(d.forceDPOnly)
+            dpOnlySource = "forceDPOnly(param)";
+        else if(d.streamKDP)
+            dpOnlySource = "streamKDP(debug)";
+        else if(d.workspaceDPFallbackFired)
+            dpOnlySource = "workspaceDP(runtime)";
+
+        // Human-readable byte annotation, e.g. "1245184 (1.19 MiB)". SIZE_MAX is
+        // reported as "unbounded" (the sentinel bench passes for "no cap").
+        auto humanUnit = [](size_t bytes) -> std::string {
+            static const char* units[] = {"B", "KiB", "MiB", "GiB", "TiB"};
+            double              v      = static_cast<double>(bytes);
+            int                 u      = 0;
+            while(v >= 1024.0 && u < 4)
+            {
+                v /= 1024.0;
+                ++u;
+            }
+            std::ostringstream o;
+            if(u == 0)
+                o << bytes << " B";
+            else
+            {
+                o.setf(std::ios::fixed);
+                o.precision(2);
+                o << v << " " << units[u];
+            }
+            return o.str();
+        };
+        auto fmtBytes = [&](size_t bytes) -> std::string {
+            std::ostringstream o;
+            o << bytes << " (" << humanUnit(bytes) << ")";
+            return o.str();
+        };
+        auto fmtGiven = [&](size_t bytes) -> std::string {
+            if(bytes == std::numeric_limits<size_t>::max())
+                return "unbounded";
+            return fmtBytes(bytes);
+        };
+
+        // Deeply-indented, multi-line labeled block. The leading token
+        // "TensileLite::StreamK LAUNCH SUMMARY" is preserved verbatim (with the
+        // kernel name on the same first line) so existing log scrapers / test
+        // substring matches keep working. Each section header sits on its own
+        // line and its fields are indented beneath it as aligned "key = value"
+        // pairs, one field per line. This is a pure LAYOUT change: no field,
+        // value, label, or the NA-when-!isDynamic behaviour is altered, and no
+        // launch behaviour is affected.
+        //
+        // 'field' prints one indented, '='-aligned pair. 'width' is the per-section
+        // key column width chosen so every '=' in that section lines up.
+        auto field = [&os](int width, const char* key, std::string const& value) {
+            os << "    " << std::left << std::setw(width) << key << " = " << value << "\n";
+        };
+        auto yn = [](bool b) -> std::string { return b ? "yes" : "no"; };
+
+        os << "TensileLite::StreamK LAUNCH SUMMARY  kernel='" << this->kernelName << "'\n";
+
+        os << "  mode:\n";
+        field(9, "mode", modeStr);
+        field(9, "streamK", std::to_string(d.streamKMode));
+        field(9, "reduction", reductionStr(d.reduction));
+        field(9, "isDynamic", yn(d.isDynamic));
+
+        os << "  grid:\n";
+        field(11, "selected", std::to_string(d.selectedGrid));
+        field(11, "final", std::to_string(d.finalGrid));
+        field(11, "changedBy", gridChangedBy);
+        // preFallback is only interesting when the tree-bounds fixup already moved
+        // the grid away from what was selected (before the workspace-DP fallback).
+        if(d.skGridPreFallback != d.selectedGrid)
+            field(11, "preFallback", std::to_string(d.skGridPreFallback));
+
+        os << "  tiles:\n";
+        field(10, "tiles", std::to_string(d.tiles));
+        field(10, "skTiles", std::to_string(d.skTiles));
+        field(10, "skSplit", std::to_string(d.skSplit));
+        field(10, "totalItems", std::to_string(d.totalItems));
+        field(10, "partials", yn(d.partialsPresent));
+
+        os << "  workspace:\n";
+        field(9, "allocated", yn(d.workspaceAllocated));
+        field(9, "required", fmtBytes(d.requiredWorkspaceBytes));
+        field(9, "ideal", fmtBytes(d.idealWorkspaceBytes));
+        field(9, "given", fmtGiven(d.givenWorkspaceBytes));
+
+        os << "  dp-only:\n";
+        field(11, "dpOnly", yn(d.dpOnly));
+        field(11, "source", dpOnlySource);
+        field(11, "forceDPOnly", yn(d.forceDPOnly));
+        field(11, "streamKDP", yn(d.streamKDP));
+
+        // Work-queue fields describe the per-XCD dynamic work-queue synchronizer,
+        // which only exists on the dynamic path (SK4, or SK5 resolved dynamic).
+        // On non-dynamic paths (SK3 / SK5-static / parallel-DP / dp-only) these
+        // values are meaningless, so they are printed as NA rather than a
+        // misleading number. Gated on the SAME isDynamic predicate solve() uses;
+        // the struct still holds the raw counts.
+        os << "  work-queue:\n";
+        if(d.isDynamic)
+        {
+            field(20, "numQueues(NUM_XCD)", std::to_string(d.numQueues));
+            field(20, "dynamicPartialsSlots", std::to_string(d.dynamicPartialsSlots));
+        }
+        else
+        {
+            os << "    NA (work-queues not used)\n";
+        }
+
+        os << "  fallbacks:\n";
+        field(19, "fixedGrid", yn(d.fixedGridUsed));
+        field(19, "workspaceDPFallback", yn(d.workspaceDPFallbackFired));
+        field(19, "treeBoundsFallback", yn(d.treeBoundsFallbackFired));
     }
 
     float ContractionSolution::computeGranularity(float x)
