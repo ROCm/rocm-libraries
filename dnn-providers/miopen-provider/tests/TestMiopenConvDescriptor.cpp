@@ -3,11 +3,11 @@
 
 #include <limits>
 
+#include "MiopenApi.hpp"
 #include <gtest/gtest.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
-#include <miopen/miopen.h>
 
 #include "MiopenConvDescriptor.hpp"
 

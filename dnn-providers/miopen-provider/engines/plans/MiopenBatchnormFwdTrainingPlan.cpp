@@ -366,7 +366,7 @@ void BatchnormFwdTrainingPlan::execute(const HipdnnMiopenHandle& handle,
 
         if(_trainingParams.hasRunningStats())
         {
-            THROW_ON_MIOPEN_FAILURE(miopenBatchNormForwardTrainingActivation_V2(
+            THROW_ON_MIOPEN_FAILURE(miopenBatchNormForwardTrainingActivation_V2_impl(
                 handle.miopenHandle,
                 MIOPEN_BATCHNORM_MODE_TRAINING,
                 &alpha,
@@ -425,7 +425,7 @@ void BatchnormFwdTrainingPlan::execute(const HipdnnMiopenHandle& handle,
 
         if(_trainingParams.hasRunningStats())
         {
-            THROW_ON_MIOPEN_FAILURE(miopenBatchNormalizationForwardTraining_V3(
+            THROW_ON_MIOPEN_FAILURE(miopenBatchNormalizationForwardTraining_V3_impl(
                 handle.miopenHandle,
                 MIOPEN_BATCHNORM_MODE_TRAINING,
                 &alpha,

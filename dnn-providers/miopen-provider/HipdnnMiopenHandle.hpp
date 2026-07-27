@@ -3,9 +3,9 @@
 
 #pragma once
 
+#include "MiopenApi.hpp"
 #include <flatbuffers/flatbuffers.h>
 #include <memory>
-#include <miopen/miopen.h>
 #include <unordered_map>
 
 #include <hipdnn_plugin_sdk/EngineManager.hpp>
