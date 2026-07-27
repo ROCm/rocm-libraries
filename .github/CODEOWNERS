@@ -43,7 +43,6 @@
 /shared/stinkytofu/                                 @ROCm/stinkytofu-reviewers
 /projects/hipthreads/                               @ROCm/hipthreads-reviewers
 
-
 # Next CMake-specific ownership
 /projects/hipblas-common/**/*.cmake                 @ROCm/rocm-math-lib-build-infra
 /projects/hipblas-common/**/CMakeLists.txt          @ROCm/rocm-math-lib-build-infra
