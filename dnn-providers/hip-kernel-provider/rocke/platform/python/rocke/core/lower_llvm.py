@@ -1122,11 +1122,22 @@ class _Lowerer:
         # Each "slot" is (offset, size, last_seq) – the byte range it occupies
         # and the latest sequence index at which it is still live.
         slots: List[Tuple[int, int, int]] = []  # (offset, size, last_seq)
+        # Sentinel "never dies" last_seq for exclusive (no-alias) allocations,
+        # so the reuse test ``s_last >= first_seq`` is always true for their
+        # slots and nothing else packs onto them. Larger than any real preorder
+        # index. (Mirrored as ROCKE_LL_EXCL_LAST_SEQ in the C++ engine.)
+        _EXCL_LAST_SEQ = 1 << 30
 
         for gname, stype in sorted_allocs:
             seg = _seg_size(stype)
             aln = _align(stype)
             first_seq, last_seq = live.get(gname, (0, 0))
+            # Exclusive (cshuffle no-alias) allocations must not reuse another
+            # allocation's slot, and must never be reused by later allocations,
+            # so they occupy their own byte range. Skipping the free-slot search
+            # forces a fresh slot; recording it with a sentinel last_seq below
+            # keeps it permanently "live" so nothing else packs onto it.
+            excl = getattr(stype, "exclusive", False)
 
             # Try to reuse any slot that is free before this allocation starts.
             # A "free" slot (s_last < first_seq) provides a candidate base
@@ -1144,7 +1155,7 @@ class _Lowerer:
             # (lowest address, cache-friendly, minimises pool fragmentation).
             best: Optional[int] = None  # index into slots[]
             best_aligned = 0
-            for i, (s_off, s_size, s_last) in enumerate(slots):
+            for i, (s_off, s_size, s_last) in enumerate([] if excl else slots):
                 if s_last >= first_seq:
                     # Still live when we start – interference, skip.
                     continue
@@ -1187,7 +1198,9 @@ class _Lowerer:
                 )
                 aligned_off = (current_end + aln - 1) & ~(aln - 1)
                 self._smem_offsets[gname] = aligned_off
-                slots.append((aligned_off, seg, last_seq))
+                # Exclusive allocs stay permanently live (sentinel last_seq) so
+                # no later allocation reuses their bytes.
+                slots.append((aligned_off, seg, _EXCL_LAST_SEQ if excl else last_seq))
 
         pool_size = max(s_off + s_size for s_off, s_size, _ in slots)
         self._smem_pool_size = (pool_size + 15) & ~15

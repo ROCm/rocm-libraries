@@ -386,6 +386,12 @@ class ImplicitGemmConvSpec:
     # It composes simple fp32 VALU transforms directly on MFMA accumulator
     # fragments before the existing direct/cshuffle store path.
     acc_epilogue: ConvAccumulatorEpilogue = ConvAccumulatorEpilogue()
+    # cshuffle epilogue LDS aliasing (same knob as UniversalGemmSpec.trait).
+    # False (default): the smem-pool packer aliases the cshuffle C tile onto the
+    # A/B staging bytes (pool = max(ab, c)) with a step-0 reuse barrier. True:
+    # C gets its own LDS bytes (pool = ab + c) and the barrier is elided ->
+    # lower small-tile latency, more LDS. Only affects epilogue == "cshuffle".
+    cshuffle_no_alias: bool = False
 
     @property
     def block_size(self) -> int:
@@ -421,7 +427,7 @@ class ImplicitGemmConvSpec:
             f"a{self.warp_tile_m}x{self.warp_tile_n}x{self.warp_tile_k}",
             f"{self.pipeline}_{self.epilogue}",
             self.acc_epilogue.tag(),
-            flags={"async": self.async_dma},
+            flags={"async": self.async_dma, "noalc": self.cshuffle_no_alias},
         )
 
     def validate(self) -> None:
@@ -1814,7 +1820,10 @@ def _emit_cshuffle_epilogue(
     def d_addr(b_: IRBuilder, m_val: Value, n_val: Value):
         return D_desc.offset(b_, m=m_val, k_out=n_val)
 
-    _cshuffle_kwargs: dict = {"out_dtype": spec.data.dtype_d}
+    _cshuffle_kwargs: dict = {
+        "out_dtype": spec.data.dtype_d,
+        "no_alias": spec.cshuffle_no_alias,
+    }
     if spec.vector_size_c is not None:
         _cshuffle_kwargs["max_store_vec"] = spec.vector_size_c
     CShuffleEpilogue.from_grid(atom=spec.atom, grid=grid, **_cshuffle_kwargs).store(

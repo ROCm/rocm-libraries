@@ -315,6 +315,7 @@ rocke_implicit_gemm_conv_spec_t rocke_implicit_gemm_conv_spec_default(void)
     s.dtype_acc = "fp32";
 
     s.acc_epilogue = rocke_conv_acc_epilogue_default();
+    s.cshuffle_no_alias = false; /* default: alias cshuffle C onto A/B */
     return s;
 }
 
@@ -376,8 +377,8 @@ rocke_status_t rocke_implicit_gemm_conv_spec_kernel_name(const rocke_implicit_ge
     char pe_buf[64];
     char tag_buf[256];
     const char* parts[6];
-    const char* flag_names[1];
-    int flag_on[1];
+    const char* flag_names[2];
+    int flag_on[2];
     rocke_status_t st;
 
     if(s == NULL || out == NULL)
@@ -414,8 +415,10 @@ rocke_status_t rocke_implicit_gemm_conv_spec_kernel_name(const rocke_implicit_ge
 
     flag_names[0] = "async";
     flag_on[0] = s->async_dma ? 1 : 0;
+    flag_names[1] = "noalc";
+    flag_on[1] = s->cshuffle_no_alias ? 1 : 0;
 
-    return rocke_kernel_name_join(s->name, parts, 6, flag_names, flag_on, 1, out, out_cap, NULL);
+    return rocke_kernel_name_join(s->name, parts, 6, flag_names, flag_on, 2, out, out_cap, NULL);
 }
 
 /* ===================================================================== *

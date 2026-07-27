@@ -365,6 +365,11 @@ class CShuffleEpilogue:
     # 1-byte stores via ``global_store_vN`` (no buffer-store fp8
     # intrinsic exists today on the AMDGPU LLVM target).
     out_dtype: str = "f16"
+    # cshuffle "no-alias" mode: when True the C staging tile gets its own
+    # exclusive LDS bytes (not aliased onto the A/B pool) and the step-0 reuse
+    # barrier is elided -> lower small-tile latency, more LDS. Default False
+    # keeps the aliased/low-LDS behavior (byte-identical).
+    no_alias: bool = False
 
     @classmethod
     def from_grid(
@@ -374,6 +379,7 @@ class CShuffleEpilogue:
         grid: WarpGrid,
         max_store_vec: int = 8,
         out_dtype: str = "f16",
+        no_alias: bool = False,
     ) -> "CShuffleEpilogue":
         """Pick the widest `store_vec` that distributes the tile evenly.
 
@@ -394,7 +400,9 @@ class CShuffleEpilogue:
             if ok:
                 break
             v //= 2
-        return cls(atom=atom, grid=grid, store_vec=v, out_dtype=out_dtype)
+        return cls(
+            atom=atom, grid=grid, store_vec=v, out_dtype=out_dtype, no_alias=no_alias
+        )
 
     def store(
         self,
@@ -444,6 +452,7 @@ class CShuffleEpilogue:
             dtype=_lds_dtype,
             shape=lds_layout.storage_shape(grid.tile_m),
             name_hint=self.smem_name_hint,
+            exclusive=self.no_alias,
         )
         c_smem = c_view.base
         # A full-extent LDS window; per-(mi, ni) origins move within it.
@@ -468,7 +477,12 @@ class CShuffleEpilogue:
         # trailing barrier, so without a barrier here a fast wave's first C
         # ``ds_write`` would clobber A/B bytes a slow wave is still reading for
         # its tail MFMA -- a cross-wave WAR on the aliased pool region.
-        b.sync()
+        #
+        # With ``no_alias`` the C tile has its own exclusive LDS bytes that never
+        # overlap A/B, so this WAR cannot occur and the barrier is elided. The
+        # step-2 C-write->C-read barrier below is a genuine RAW and always stays.
+        if not self.no_alias:
+            b.sync()
 
         for mi in range(mfmas_m):
             for ni in range(mfmas_n):

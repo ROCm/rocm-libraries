@@ -1221,11 +1221,18 @@ void rocke_ll_compute_smem_layout(rocke_lower_t* L)
         int aln = ll_smem_align(stype);
         int first_seq = intervals[gi].first_seq;
         int last_seq = intervals[gi].last_seq;
+        /* Exclusive (cshuffle no-alias) allocations must not reuse another
+         * allocation's slot and must never be reused, so they occupy their own
+         * byte range. Skipping the reuse search forces a fresh slot; recording
+         * it with the sentinel last_seq below keeps it permanently "live" so
+         * nothing else packs onto it. (Mirrors Python's _EXCL_LAST_SEQ.) */
+        int excl = stype ? stype->smem_exclusive : 0;
+        const int ROCKE_LL_EXCL_LAST_SEQ = 1 << 30;
 
         /* Find the best (lowest aligned-offset) free slot. */
         int best = -1;
         int best_aligned = -1;
-        for(int k = 0; k < num_slots; k++)
+        for(int k = 0; excl ? 0 : (k < num_slots); k++)
         {
             if(slots[k].last_seq >= first_seq)
                 continue; /* still live, interference */
@@ -1283,7 +1290,7 @@ void rocke_ll_compute_smem_layout(rocke_lower_t* L)
             offsets[gi] = aligned_off;
             slots[num_slots].offset = aligned_off;
             slots[num_slots].size = seg;
-            slots[num_slots].last_seq = last_seq;
+            slots[num_slots].last_seq = excl ? ROCKE_LL_EXCL_LAST_SEQ : last_seq;
             num_slots++;
         }
     }

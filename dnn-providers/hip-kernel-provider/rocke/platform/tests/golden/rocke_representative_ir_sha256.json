@@ -242,6 +242,14 @@
           "sha256": "91a908b70eb7559bb17c45ed2bad51d55f9319c4235c48eb06d28ff5e36b56e4",
           "status": "ok"
         },
+        "gemm/gfx950/t128x128x32/cshuffle_no_alias": {
+          "arch": "gfx950",
+          "bytes": 90008,
+          "family": "gemm",
+          "kernel_name": "irhash_gemm_950_a_noalc_fp16_t128x128x32_w2x2x1_wt32x32x16_compv4_intrawave_cshuffle_pad_noalc",
+          "sha256": "f44a4d73475a7b371519e965930412329d1861295e712cdec80a78b5b75a9d18",
+          "status": "ok"
+        },
         "gemm/gfx950/t64x128x32": {
           "arch": "gfx950",
           "bytes": 44732,
@@ -308,16 +316,16 @@
           "gfx1250": 2,
           "gfx90a": 3,
           "gfx942": 4,
-          "gfx950": 14
+          "gfx950": 15
         },
         "expected_failures": 0,
         "families": {
           "conv": 7,
           "deep_fused_conv": 9,
-          "gemm": 12,
+          "gemm": 13,
           "moe": 9
         },
-        "ok_cases": 37
+        "ok_cases": 38
       }
     },
     "llvm22": {
@@ -562,6 +570,14 @@
           "sha256": "e636915286c0c66a1925274dfcecb3775620b817bd247b762fdc4c7584c42baf",
           "status": "ok"
         },
+        "gemm/gfx950/t128x128x32/cshuffle_no_alias": {
+          "arch": "gfx950",
+          "bytes": 90019,
+          "family": "gemm",
+          "kernel_name": "irhash_gemm_950_a_noalc_fp16_t128x128x32_w2x2x1_wt32x32x16_compv4_intrawave_cshuffle_pad_noalc",
+          "sha256": "5ef0e672c62be29dfc55c156c111eade24002744a9ae6ff38cec0f4f079f6abb",
+          "status": "ok"
+        },
         "gemm/gfx950/t64x128x32": {
           "arch": "gfx950",
           "bytes": 44743,
@@ -628,16 +644,16 @@
           "gfx1250": 2,
           "gfx90a": 3,
           "gfx942": 4,
-          "gfx950": 14
+          "gfx950": 15
         },
         "expected_failures": 0,
         "families": {
           "conv": 7,
           "deep_fused_conv": 9,
-          "gemm": 12,
+          "gemm": 13,
           "moe": 9
         },
-        "ok_cases": 37
+        "ok_cases": 38
       }
     }
   },

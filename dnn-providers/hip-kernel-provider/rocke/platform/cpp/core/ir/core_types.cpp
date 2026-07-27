@@ -131,9 +131,10 @@ const rocke_type_t*
     return t;
 }
 
-/* SmemType(elem, shape) -> "smem<{elem}, [{d0}x{d1}...]>" */
-const rocke_type_t*
-    rocke_smem_type(rocke_ir_builder_t* b, const rocke_type_t* elem, const int* shape, int rank)
+/* SmemType(elem, shape) -> "smem<{elem}, [{d0}x{d1}...]>"
+ * `exclusive` is kept OUT of the name (default 0 stays byte-identical). */
+const rocke_type_t* rocke_smem_type(
+    rocke_ir_builder_t* b, const rocke_type_t* elem, const int* shape, int rank, int exclusive)
 {
     rocke_type_t* t;
     int* shape_copy = NULL;
@@ -166,6 +167,7 @@ const rocke_type_t*
     t->elem = elem;
     t->shape = shape_copy;
     t->rank = rank;
+    t->smem_exclusive = exclusive ? 1 : 0;
 
     /* Build the "[d0xd1x...]" body, then the full canonical name. The Python
      * form is f"smem<{elem.name}, [{'x'.join(...)}]>". */
