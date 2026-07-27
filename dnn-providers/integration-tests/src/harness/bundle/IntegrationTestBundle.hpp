@@ -633,7 +633,7 @@ inline void applyTensorPatches(nlohmann::json& expandedGraph, const nlohmann::js
             throw std::runtime_error(
                 "tensor uid " + std::to_string(uid)
                 + " has is_runtime_pass_by_value=true but still carries value_type or value;"
-                " remove them from the tensor_patches 'remove' list or the template");
+                  " remove them from the tensor_patches 'remove' list or the template");
         }
     }
 }
