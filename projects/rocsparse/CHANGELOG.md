@@ -7,10 +7,7 @@ Documentation for rocSPARSE is available at
 
 ### Added
 * Added Blocked ELL format support to the `rocsparse_dense_to_sparse` routine, including the new `rocsparse_bell_set_pointers` function to set the Blocked ELL array pointers.
-* Added `rocsparse_sddmm` batched support to ELL format.
-* Added `rocsparse_sddmm` batched support to COO format.
-* Added `rocsparse_sddmm` batched support to COO AoS format.
-* Added `rocsparse_sddmm` batched support to CSR format.
+* Added `rocsparse_sddmm` batched support to CSR, CSC, COO, COO AoS, and ELL formats.
 
 ### Resolved issues
 * Fixed an issue with `rocsparse_spmm`, which produced incorrect results for the Blocked ELL sparse format.
