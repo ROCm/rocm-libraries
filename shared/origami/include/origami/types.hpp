@@ -641,6 +641,14 @@ struct problem_t {
   /// Batch size.
   std::size_t batch = 1;
 
+  /// Number of compute units the caller intends to use for this GEMM.
+  /// 0 (default) means "use all CUs" and preserves the legacy behaviour of
+  /// modelling against the full hardware CU count. When set to a non-zero
+  /// value, solution selection models the problem as if only this many CUs
+  /// were available (e.g. CU masking / partitioned execution), which changes
+  /// grid launch, timesteps, occupancy, and the ranked config.
+  std::size_t num_cus = 0;
+
   /// Number of query heads (for attention workloads).
   std::size_t q_heads = 32;
 

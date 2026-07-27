@@ -378,9 +378,9 @@ VALID_CONFIG_FILE_CONTENT = """GlobalParameters:
   DataInitTypeB: 13
   DataInitTypeC: 12
   DataInitTypeD: 12
-  PreciseKernelTime: 0
+  PreciseKernelTime: false
   Device: 0
-  SkipSlowSolutionRatio: 0
+  SkipSlowSolutionRatio: 0.0
   KeepBuildTmp: false
 BenchmarkProblems:
 - - OperationType: GEMM

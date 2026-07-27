@@ -188,10 +188,8 @@ struct MIOPEN_EXPORT Handle : miopenHandle
     void ReadTo(void* data, const Allocator::ManageDataPtr& ddata, std::size_t sz) const;
     void ReadTo(void* data, ConstData_t ddata, std::size_t sz) const;
     shared<Data_t> CreateSubBuffer(Data_t data, std::size_t offset, std::size_t size) const;
-#if MIOPEN_BACKEND_HIP
     shared<ConstData_t>
     CreateSubBuffer(ConstData_t data, std::size_t offset, std::size_t size) const;
-#endif
 
     template <class T>
     Allocator::ManageDataPtr Create(std::size_t sz) const
@@ -241,7 +239,15 @@ struct MIOPEN_EXPORT Handle : miopenHandle
 
     std::string GetDbBasename() const
     {
-        return GetDbBasename(GetTargetProperties(), GetMaxComputeUnits());
+        const auto& target = GetTargetProperties();
+        const auto db_id   = target.DbId();
+        if(db_id == "gfx1100" || db_id == "gfx1102" || db_id == "gfx1201")
+        {
+            std::ostringstream ss;
+            ss << db_id << std::hex << GetMaxHardwareComputeUnits();
+            return ss.str();
+        }
+        return GetDbBasename(target, GetMaxComputeUnits());
     }
 
     std::unique_ptr<HandleImpl> impl;

@@ -342,5 +342,49 @@ characterization assertion can distinguish mutant from original:
   message string.
 - `:367` — `print("ERROR: Divide by 0")`, a diagnostic message string.
 
-No other equivalent mutants are accepted yet; widening rounds append their
-accepted equivalents/pragmas here, each with its one-line reason.
+**M2 — accepted `# pragma: no mutate` (expanded mutation run).** These
+equivalent source forms are fenced so mutmut does not keep reporting them:
+- `Tensile.Common.ValidParameters.checkSpaceFillAlgoIsValid` — the
+  `range(0, maxOrderID + 1)` membership check carries `# pragma: no mutate`
+  because `range(0, n)` and `range(n)` produce the same values; the explicit
+  lower bound documents the valid OrderID interval.
+- `Tensile.Common.ValidParameters.checkSpaceFillAlgoWGMIsValid` — the
+  `range(0, 256)` membership check carries `# pragma: no mutate` because
+  `range(0, n)` and `range(n)` produce the same values; the explicit lower bound
+  documents the half-open GridDim interval `[0, 256)`.
+
+**M3 — accepted equivalent mutants (expanded mutation run).** These survivors
+are behaviorally equivalent on the specific public surface under test:
+- `Tensile.TensileLogic.ValidWorkGroupMappingXCC.x__cu_count_from_path__mutmut_9` —
+  changing `cu` to `CU` inside the regex literal is equivalent because the search
+  uses `re.IGNORECASE`.
+
+Two former survivors are intentionally no longer accepted equivalents:
+`Tensile.TensileLogic.ValidWorkGroupMappingXCC.x__validateWorkGroupMappingXCC__mutmut_14`
+is avoided by making the missing-key / `-1` sentinel branch explicit before
+reading the fixed `WorkGroupMappingXCC` value, and
+`Tensile.Common.Utilities.xǁSpinnyThingǁincrement__mutmut_1` is killable because
+`SpinnyThing.increment` now uses its `value` parameter to advance by caller
+selected steps.
+
+**M4 — widened mutation slice.** The `only_mutate` set in `[tool.mutmut]` was
+extended past the original five files to add `Common/DataType.py`,
+`Common/Types.py`, and `Common/ValidParameters.py`, with the matching
+characterization directories (`DataType`, `CommonTypes`, `ValidParameters`)
+added to `pytest_add_cli_args_test_selection`. Source-path mapping for the
+widened slice (recorded here because the shorthand names differ from the file
+paths): DataType → `Tensile/Common/DataType.py`; CommonTypes →
+`Tensile/Common/Types.py`; ValidParameters → `Tensile/Common/ValidParameters.py`
+(there is no `Tensile/SolutionStructs/ValidParameters.py`).
+
+## D16 — BufferLoad/BufferStore promoted to Required Parameters
+**Context** kernel basename hash changes across all archs; assembly verified unchanged/correct; no err or kernel-count changes."
+
+## D17 — StreamKWorkStealing added to the required (min-naming) parameter set
+**Decision:** Promote `StreamKWorkStealing` to the required (min-naming) parameter set in
+`Common/RequiredParameters.py` and accept the regenerated `_codegen` / SolutionClass /
+ValidParameters goldens.
+**Why:** without it, two solutions differing only in `StreamKWorkStealing` would collide on the
+same kernel identity name/hash.
+**Verification:** only `basename` hashes + the `SKWS0` name token + the roster/valid-values entry
+change (`num_keys` 334→335); no `err`, instruction-count, or emitted-assembly changes.

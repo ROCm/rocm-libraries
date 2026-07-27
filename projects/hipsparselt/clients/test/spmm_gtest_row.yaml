@@ -87,6 +87,23 @@ Tests:
   orderC: [R]
   orderD: [R]
 
+- name: spmm_small
+  category: quick
+  function:
+    spmm: *hpa_half_precision
+  matrix_size: *small_matrix_size_range
+  transA_transB: *transA_transB_range
+  alpha_beta: *alpha_beta_range
+  bias_vector: [true, false]
+  sparse_b: [ true, false]
+  alpha_vector_scaling: [true, false]
+  gate_residual: [true]  
+  orderA: [R]
+  orderB: [R]
+  orderC: [R]
+  orderD: [R]
+  gpu_arch: '942'
+
 - name: spmm_medium
   category: pre_checkin
   function:

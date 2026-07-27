@@ -24,6 +24,7 @@
 
 import math
 from functools import lru_cache
+from typing import Any, Union
 
 from .Architectures import SUPPORTED_ISA
 from .Types import IsaVersion
@@ -294,13 +295,7 @@ validParameters = { # we need to make sure this matches develop
     # 0: disable
     # 1: prefetch one load tile (MTxDepthU) ahead of PrefetchGlobalRead
     # 2: prefetch two load tiles (MTxDepthU) ahead of PrefetchGlobalRead
-    # Currently we have many power of 2 assumptions for prefetchGL2 address calculation, including:
-    #   NumThreads must be power of 2
-    #   ClusterDim must be power of 2 and not [1,1]
-    #   DepthU must be power of 2
-    #   MacroTile must be power of 2
-    #   DataTypeA and DataTypeB must not be 6-bit float
-    # Also does not support GSU, StreamK and general batch yet. May remove these limitations in the future.
+    # Currently we do not support GSU, StaggerU, StreamK and general batch. May remove these limitations in the future.
     "PrefetchGL2": [0, 1, 2],
     # MatrixInstruction Only
     # If set ClusterLocalRead, each iteration dedicated vgprBuffer for localRead
@@ -328,6 +323,23 @@ validParameters = { # we need to make sure this matches develop
     #    SIA3: 1LDSBuffer works only when PGR=True
     # TODO: optimize scheduling to support more cases.
     "1LDSBuffer": [-1, 0, 1],
+    # gfx1250 LDS segment interleave: raises LDS read bandwidth by putting operand A's
+    # two halves in different 64KiB LDS segments so its two MFMA read ports stop conflicting.
+    # Supported: TDMInst=3 (TDM load for A and B), gfx1250, MIWaveGroup [2,2], dtype bf16 / fp16 /
+    # fp8 (incl. MXFP8). Not applied for 1LDSBuffer, subtile, sparse, or TDMSplit kernels.
+    # Mechanism: reorder LDS from the baseline [A0][A1][B0][B1] to [A0][B0][A1][B1]. Only operand A
+    # is helped -- B's halves move too, but both ports can still hit the same B segment.
+    # Two cases:
+    #   tight   (one A-half + one B-half >= 64KiB): [A0][B0] fills a segment, so [A1][B1] land in
+    #            the next one -- no extra LDS.
+    #   aligned (< 64KiB): pad [A0][B0] up to the segment boundary to push [A1][B1] over -- uses
+    #            more LDS, and needs PrefetchGlobalRead=2.
+    # Values:
+    #   -1 = auto: apply "tight" only (skip "aligned").
+    #    0 = off (default): baseline layout.
+    #    1 = force on: apply both "tight" and "aligned" wherever valid.
+    # Recommended: set [0, 1] when tuning, so both baseline and interleaved kernels are benchmarked.
+    "LDSSegmentInterleave": [-1, 0, 1],
     # StreamK persistent loop: use the current tile's no-load-loop window to
     # issue the first global-read group for the next persistent tile. The
     # generated code keeps that first-PGR data durable and restores borrowed
@@ -514,7 +526,7 @@ validParameters = { # we need to make sure this matches develop
     #  - Tail loop can be unrolled up to InnerUnroll amount if AssertSummationElementMultiple%InnerUnroll==0
     #
     # 1 indicates no assertion (since all sizes are multiples of 1)
-    "AssertSummationElementMultiple": [1, 2, 4, 8, 16, 32, 64, 128],
+    "AssertSummationElementMultiple": [1, 2, 4, 8, 16, 32, 64, 128, 256],
     # Kernel generator will assume that the FreeIndex[0] size is some multiple of the element size
     # and uses this to optimize the kernel.
     # FreeIndex[0] is usually letter "I"
@@ -730,6 +742,10 @@ validParameters = { # we need to make sure this matches develop
     "StoreRemapVectorWidth": [-1, 0, 1, 2, 4, 8],
     # SourceSwap: Optimizes MatrixInstruction store pattern by swapping mfma input order.
     "SourceSwap": [False, True],
+    # UseDualFMAC: emit RDNA3/3.5/4 VOPD v_dual_fmac_f32 pairs in the f32 source/MAC inner
+    # loop (2x FMA issue rate). Source (non-MFMA) f32 kernels on gfx11/gfx12 only; auto-
+    # disabled elsewhere (see SolutionStructs.Solution.assignProblemIndependentDerivedParameters).
+    "UseDualFMAC": [False, True],
     # Following parameters are designed for store scheduling.
     # (store stands for load from C (with beta) and store to C/D)
     #
@@ -773,8 +789,6 @@ validParameters = { # we need to make sure this matches develop
     # Total work units are calculated as (#MTs x #LoopIters) and divided among workgroups.
     # In most cases each workgroup will calculate a partial tile that are accumulated in a fixup step in the same kernel
     # 0 : Standard data-parallel kernel
-    # 1 : Basic StreamK
-    # 2 : Two-Tile StreamK (each WG completes an even number of sk iterations, followed by an even number of dp tiles)
     # 3 : Two-Tile StreamK with DP before SK tiles
     # 4 : Dynamic StreamK using per-XCD work queues
     # 5 : Hybrid SK3 + SK4 in one kernel; mode bit 30 of MagicShiftItersPerTile
@@ -803,7 +817,7 @@ validParameters = { # we need to make sure this matches develop
     #   1 = 1 WG per CU (default), for example. 2 will launch WGs = 2 x CU count.
     # The priority of these environment variables is defined as follows:
     # TENSILE_STREAMK_FIXED_GRID > TENSILE_STREAMK_DYNAMIC_GRID > TENSILE_STREAMK_MAX_CUS > TENSILE_STREAMK_GRID_MULTIPLIER
-    "StreamK": [0, 1, 2, 3, 4, 5],
+    "StreamK": [0, 3, 4, 5],
     # Force StreamK=3 to run all output tiles through the persistent DP path.
     # When enabled, dispatch uses the single-kernel StreamK path, sets skTiles=0
     # to skip the SK region, and keeps the normal StreamK grid selection policy.
@@ -814,6 +828,14 @@ validParameters = { # we need to make sure this matches develop
     # 0: uses workspace to store partial tiles, accumulate in deterministic fix-up step
     # 1: uses atomics to accumulate partial tiles
     "StreamKAtomic": [0, 1],
+    # Codegen-time toggle for single-hop next-neighbor work stealing in the
+    # dynamic-queue StreamK fetch (SK4 / SK5-dynamic). Queue count =
+    # archCaps['NumXCD'] (8 on gfx942/gfx950). When a workgroup's home queue
+    # empties, it makes one atomic attempt on its next-neighbor per-XCD queue.
+    # Valid only for StreamK in (4, 5).
+    #  0: off
+    #  1: on
+    "StreamKWorkStealing": [0, 1],
     # Enables XCC-based remapping of workgroups, set the value to the number of XCCs
     # for the device/configuration being used
     #  0: uses default workgroup assignment
@@ -834,7 +856,7 @@ validParameters = { # we need to make sure this matches develop
     "DebugStreamK": [0, 1, 2, 3],
     # Persistent-kernel debug: when True, the persistent loop never exits.
     # Used as a co-tenant load kernel for contended-perf benchmarking.
-    # Termination is via process death. Requires StreamK = 1, 2, or 3.
+    # Termination is via process death. Requires StreamK = 3.
     "DebugPersistentKernelLoopForever": [False, True],
     # Controls desired width (#elements) for loads from global memory -> LDS.
     # and eliminates the pointer unshift logic
@@ -929,6 +951,7 @@ validParameters = { # we need to make sure this matches develop
     # For gfx942, sets sc0/sc1/nt bits
     # 0: none, 1: sc0, 2: sc1, 3: sc0 sc1, 4: nt, 5: nt sc0, 6: nt sc1, 7: nt sc0 sc1
     "NonTemporalE": list(range(0, 8)),
+    "NonTemporalGate": list(range(0, 8)),
     "NonTemporalD": list(range(0, 8)),
     "NonTemporalC": list(range(0, 8)),
     "NonTemporalA": list(range(0, 8)),
@@ -1156,7 +1179,7 @@ newMIValidParameters = {
 # Solution.py and imported back by ValidParameters extensions) would have
 # introduced a Common -> Solution reverse import.
 
-def _getExpectedTypes(validParams):
+def _getExpectedTypes(validParams: dict[str, Union[int, list[Any], Any]]) -> dict[str, set[type]]:
     """Build a map from parameter name to the set of allowed Python types.
 
     Uses the validParameters registry as the source of truth.  For each
@@ -1171,10 +1194,15 @@ def _getExpectedTypes(validParams):
     """
     typeMap = {}
     for name, allowedValues in validParams.items():
-        if allowedValues == -1:
+        if isinstance(allowedValues, list):
+            if len(allowedValues) == 0:
+                raise ValueError(f"Invalid parameter value: {name} = {allowedValues}")
+        else:  # Sentinel value -1 is allowed for all parameters
+            if allowedValues != -1:
+                raise ValueError(f"Invalid parameter value: {name} = {allowedValues}")
             continue
-        if isinstance(allowedValues, list) and len(allowedValues) > 0:
-            typeMap[name] = set(type(v) for v in allowedValues)
+
+        typeMap[name] = set(type(v) for v in allowedValues)
     return typeMap
 
 # Pre-compute once at import time so the per-Solution cost is a dict lookup.
@@ -1206,7 +1234,7 @@ def checkSpaceFillAlgoIsValid(name, value):
     else:
         maxOrderID = 5
         for orderId in value:
-            if orderId not in range(0,maxOrderID + 1):
+            if orderId not in range(0,maxOrderID + 1):  # pragma: no mutate
                 msgBase = "Invalid parameter value: {} = {}\nOrderID out of range"
                 raise Exception(msgBase.format(name, value))
 
@@ -1223,7 +1251,7 @@ def checkSpaceFillAlgoWGMIsValid(name, value):
                 msgBase = "Invalid parameter value: {} = {}\nMust be exactly 2 values per level"
                 raise Exception(msgBase.format(name, value))
             for dim in pair:
-                if dim not in range(0,256):
+                if dim not in range(0,256):  # pragma: no mutate
                     msgBase = "Invalid parameter value: {} = {}\nGridDim {} out of range [0,256)"
                     raise Exception(msgBase.format(name, value, dim))
 
@@ -1340,5 +1368,3 @@ def validateInternalSupportParams(
         expectedTypes = {type(default)}
         if type(value) not in expectedTypes:
             raise ConfigTypeError(formatMismatch(srcFile, f"{keyPathPrefix}.{key}", value, expectedTypes))
-
-

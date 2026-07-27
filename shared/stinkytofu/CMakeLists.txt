@@ -3,7 +3,7 @@
 
 cmake_minimum_required(VERSION 3.16)
 
-if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR AND NOT DEFINED CMAKE_TOOLCHAIN_FILE)
     include(${CMAKE_CURRENT_LIST_DIR}/../../cmake/modules/default_amdclang.cmake)
 endif()
 
@@ -348,6 +348,15 @@ install(FILES
     ${CMAKE_CURRENT_BINARY_DIR}/stinkytofuConfigVersion.cmake
     DESTINATION lib/cmake/stinkytofu
 )
+
+# --------------------------------------------------------------------------- #
+# Documentation (Doxygen + Sphinx, published to Read the Docs)
+# --------------------------------------------------------------------------- #
+if(ROCmCMakeBuildTools_FOUND)
+    add_subdirectory(docs)
+else()
+    message(STATUS "ROCmCMakeBuildTools not found — skipping docs target.")
+endif()
 
 # --------------------------------------------------------------------------- #
 # clang-tidy
