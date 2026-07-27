@@ -6,6 +6,7 @@ Full documentation for hipCUB is available at [https://rocm.docs.amd.com/project
 
 ### Added
 
+* Feature parity with CCCL/CUB 3.0.0.
 * Added `::hip::std` support.
 
 ### Changed
@@ -18,6 +19,7 @@ Full documentation for hipCUB is available at [https://rocm.docs.amd.com/project
 
 ### Removed
 
+* hipCUB compatibility with PyTorch v2.9 and v2.10 has been removed in this release.  Please use PyTorch v2.11 and newer.
 * Removed `hipcub::BaseTraits::CATEGORY`, `hipcub::BaseTraits::nullptr_TYPE` and `hipcub::BaseTraits::PRIMITIVE`.
 * Removed  `ConstantInputIterator`, `CountingInputIterator`, `DiscardOutputIterator` and `TransformInputIterator` which were deprecated in hipCUB-4.1.0.
 * Removed `DeviceSpmv`, which was removed from CUB after CCCL's 2.8.0 release. Use `hipSPARSE` or `rocSPARSE` libraries instead.
