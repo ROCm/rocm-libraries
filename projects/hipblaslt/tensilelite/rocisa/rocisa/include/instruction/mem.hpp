@@ -3765,6 +3765,16 @@ namespace rocisa
                     throw std::invalid_argument("TensorLoadToLds only supports sgpr as operands only");
                 }
             }
+            else if(!group0 || !group1)
+            {
+                // Enforce the requirement stated above: toString() dereferences
+                // group0/group1 to derive word2, so a null here is an interpreter
+                // SEGFAULT at render time (the bindings accept None). Fail fast
+                // with a diagnosable error instead.
+                throw std::invalid_argument(
+                    "TensorLoadToLds FFM_COMPAT requires non-null group0/group1 (word2 is derived "
+                    "from their register indices)");
+            }
 
             setInst("tensor_load_to_lds");
         }
