@@ -1480,8 +1480,7 @@
     'StoreVectorWidth',
     'StreamK',
     'StreamKAtomic',
-    'StreamKClusterKSplit',
-    'StreamKClusterReduction',
+    'StreamKDualMulticast',
     'StreamKFixupTreeReduction',
     'StreamKForceDPOnly',
     'StreamKXCCMapping',
@@ -2582,16 +2581,7 @@
       'len': 2,
       'type': 'list',
     }),
-    'StreamKClusterKSplit': dict({
-      'head': list([
-        1,
-        2,
-        4,
-      ]),
-      'len': 5,
-      'type': 'list',
-    }),
-    'StreamKClusterReduction': dict({
+    'StreamKDualMulticast': dict({
       'head': list([
         0,
         1,
