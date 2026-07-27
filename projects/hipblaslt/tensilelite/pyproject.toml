@@ -150,6 +150,8 @@ only_mutate = [
     "Tensile/Common/Utilities.py",
     "Tensile/Common/Types.py",
     "Tensile/Common/ValidParameters.py",
+    "Tensile/SolutionStructs/Naming.py",
+    "Tensile/SolutionStructs/Utilities.py",
     "Tensile/TensileLogic/ValidChipId.py",
     "Tensile/TensileLogic/ValidMatrixInstruction.py",
     "Tensile/TensileLogic/ValidWorkGroup.py",
@@ -165,6 +167,8 @@ pytest_add_cli_args_test_selection = [
     "Tensile/Tests/unit/characterization/CommonTypes",
     "Tensile/Tests/unit/characterization/CommonUtilities",
     "Tensile/Tests/unit/characterization/DataType",
+    "Tensile/Tests/unit/characterization/Naming",
+    "Tensile/Tests/unit/characterization/SolutionStructsUtils",
     "Tensile/Tests/unit/characterization/TensileLogic",
     "Tensile/Tests/unit/characterization/ValidParameters"
 ]
