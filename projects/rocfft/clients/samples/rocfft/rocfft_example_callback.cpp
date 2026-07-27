@@ -22,12 +22,12 @@
 
 #ifndef __SPIRV__
 
-#include <iostream>
-#ifndef _WIN32
 #include "rocfft/rocfft.h"
 #include <hip/hip_complex.h>
 #include <hip/hip_runtime.h>
 #include <hip/hip_vector_types.h>
+#include <hip/hiprtc.h>
+#include <iostream>
 #include <math.h>
 #include <stdexcept>
 #include <vector>
@@ -40,6 +40,15 @@ struct load_cbdata
     double   scale;
 };
 
+const char* callback_src{
+    R"_CALLBACK_SRC_(
+struct load_cbdata
+{
+    double2* filter;
+    double   scale;
+};
+
+extern "C"
 __device__ double2 load_callback(double2* input, size_t offset, void* cbdata, void* sharedMem)
 {
     auto data = static_cast<load_cbdata*>(cbdata);
@@ -48,16 +57,36 @@ __device__ double2 load_callback(double2* input, size_t offset, void* cbdata, vo
     return hipCmul(hipCmul(input[offset], data->filter[offset]),
                    make_hipDoubleComplex(data->scale, data->scale));
 }
-__device__ auto load_callback_dev = load_callback;
-#endif
+)_CALLBACK_SRC_"};
+
+// compile the callback with hiprtc
+std::vector<char> compile_callback()
+{
+    hiprtcProgram prog;
+    if(hiprtcCreateProgram(&prog, callback_src, "callback.hip", 0, nullptr, nullptr)
+       != HIPRTC_SUCCESS)
+        throw std::runtime_error("unable to create program");
+
+    std::vector<const char*> options;
+    options.push_back("--offload-arch=amdgcnspirv");
+    options.push_back("-c");
+
+    if(hiprtcCompileProgram(prog, options.size(), options.data()) != HIPRTC_SUCCESS)
+        throw std::runtime_error("failed to compile program");
+
+    size_t codeSize;
+    if(hiprtcGetBitcodeSize(prog, &codeSize) != HIPRTC_SUCCESS)
+        throw std::runtime_error("failed to get code size");
+
+    std::vector<char> code(codeSize);
+    if(hiprtcGetBitcode(prog, code.data()) != HIPRTC_SUCCESS)
+        throw std::runtime_error("failed to get code");
+    hiprtcDestroyProgram(&prog);
+    return code;
+}
 
 int main()
 {
-#ifdef _WIN32
-    std::cout << "This sample is temporarily disabled on Windows" << std::endl;
-    return EXIT_SUCCESS;
-#else
-
     const size_t N = 8;
 
     std::vector<double2> cx(N), filter(N);
@@ -98,6 +127,39 @@ int main()
     if(hip_status != hipSuccess)
         throw std::runtime_error("hipMemcpy failed.");
 
+    // Prepare callback
+    load_cbdata cbdata_host;
+    cbdata_host.filter = filter_dev;
+    cbdata_host.scale  = 1.0 / static_cast<double>(N);
+
+    void* cbdata_dev;
+    if(hipMalloc(&cbdata_dev, sizeof(load_cbdata)) != hipSuccess)
+        throw std::runtime_error("hipMalloc failed.");
+
+    hip_status = hipMemcpy(cbdata_dev, &cbdata_host, sizeof(load_cbdata), hipMemcpyHostToDevice);
+    if(hip_status != hipSuccess)
+        throw std::runtime_error("hipMemcpy failed.");
+
+    int current_device = hipInvalidDeviceId;
+    int device_count   = 0;
+    if(hipGetDevice(&current_device) != hipSuccess)
+        throw std::runtime_error("hipGetDevice failed");
+    if(hipGetDeviceCount(&device_count) != hipSuccess)
+        throw std::runtime_error("hipGetDeviceCount failed");
+    std::vector<void*> cbdatas(device_count);
+    cbdatas[current_device] = cbdata_dev;
+
+    // Add callback to plan description
+    auto                    code = compile_callback();
+    rocfft_plan_description desc = nullptr;
+    if(rocfft_plan_description_create(&desc) != rocfft_status_success)
+        throw std::runtime_error("failed to create plan description");
+
+    if(rocfft_plan_description_set_load_callback(
+           desc, "load_callback", code.data(), code.size(), cbdatas.data(), 0)
+       != rocfft_status_success)
+        throw std::runtime_error("failed to set load callback");
+
     // Create plan
     rocfft_plan plan   = nullptr;
     size_t      length = N;
@@ -108,7 +170,7 @@ int main()
                           1,
                           &length,
                           1,
-                          nullptr)
+                          desc)
        != rocfft_status_success)
         throw std::runtime_error("rocfft_plan_create failed.");
 
@@ -129,31 +191,6 @@ int main()
            != rocfft_status_success)
             throw std::runtime_error("rocfft_execution_info_set_work_buffer failed.");
     }
-
-    // Prepare callback
-    load_cbdata cbdata_host;
-    cbdata_host.filter = filter_dev;
-    cbdata_host.scale  = 1.0 / static_cast<double>(N);
-
-    void* cbdata_dev;
-    if(hipMalloc(&cbdata_dev, sizeof(load_cbdata)) != hipSuccess)
-        throw std::runtime_error("hipMalloc failed.");
-
-    hip_status = hipMemcpy(cbdata_dev, &cbdata_host, sizeof(load_cbdata), hipMemcpyHostToDevice);
-    if(hip_status != hipSuccess)
-        throw std::runtime_error("hipMemcpy failed.");
-
-    // Get a properly-typed host pointer to the device function, as
-    // rocfft_execution_info_set_load_callback expects void*.
-    void* cbptr_host = nullptr;
-    hip_status = hipMemcpyFromSymbol(&cbptr_host, HIP_SYMBOL(load_callback_dev), sizeof(void*));
-    if(hip_status != hipSuccess)
-        throw std::runtime_error("hipMemcpyFromSymbol failed.");
-
-    // set callback
-    if(rocfft_execution_info_set_load_callback(info, &cbptr_host, &cbdata_dev, 0)
-       != rocfft_status_success)
-        throw std::runtime_error("rocfft_execution_info_set_load_callback failed.");
 
     // Execute plan
     if(rocfft_execute(plan, (void**)&x, nullptr, info) != rocfft_status_success)
@@ -199,7 +236,6 @@ int main()
         throw std::runtime_error("rocfft_cleanup failed.");
 
     return 0;
-#endif
 }
 
 #endif

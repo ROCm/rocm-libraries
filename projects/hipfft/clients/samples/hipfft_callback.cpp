@@ -20,20 +20,29 @@
 // THE SOFTWARE.
 
 #include <iostream>
-#ifndef _WIN32
 #include <vector>
 
 #include <hip/hip_runtime.h>
+#include <hip/hiprtc.h>
 #include <hipfft/hipfft.h>
 #include <hipfft/hipfftXt.h>
 
 struct load_cbdata
 {
-    hipfftDoubleComplex* filter;
+    hipDoubleComplex* filter;
+    double            scale;
+};
+
+const char* callback_src{
+    R"_CALLBACK_SRC_(
+struct load_cbdata
+{
+    hipDoubleComplex* filter;
     double               scale;
 };
 
-__device__ hipfftDoubleComplex load_callback(hipfftDoubleComplex* input,
+extern "C"
+__device__ hipDoubleComplex load_callback(hipDoubleComplex* input,
                                              size_t               offset,
                                              void*                cbdata,
                                              void*                sharedMem)
@@ -45,17 +54,56 @@ __device__ hipfftDoubleComplex load_callback(hipfftDoubleComplex* input,
     return hipCmul(hipCmul(input[offset], data->filter[offset]),
                    make_hipDoubleComplex(data->scale, 0));
 }
+)_CALLBACK_SRC_"};
 
-__device__ auto load_callback_dev = load_callback;
+// compile the callback with hiprtc
+std::vector<char> compile_callback()
+{
+    hiprtcProgram prog;
+    if(hiprtcCreateProgram(&prog, callback_src, "callback.hip", 0, nullptr, nullptr)
+       != HIPRTC_SUCCESS)
+        throw std::runtime_error("unable to create program");
+
+    std::vector<const char*> options;
+    options.push_back("--offload-arch=amdgcnspirv");
+    options.push_back("-c");
+
+    if(hiprtcCompileProgram(prog, options.size(), options.data()) != HIPRTC_SUCCESS)
+    {
+        size_t logSize = 0;
+        hiprtcGetProgramLogSize(prog, &logSize);
+
+        if(logSize)
+        {
+            std::vector<char> log(logSize, '\0');
+            if(hiprtcGetProgramLog(prog, log.data()) == HIPRTC_SUCCESS)
+                throw std::runtime_error(std::string(log.begin(), log.end()));
+        }
+        throw std::runtime_error("compile failed without log");
+    }
+
+    size_t codeSize;
+#ifdef __HIP_PLATFORM_AMD__
+    if(hiprtcGetBitcodeSize(prog, &codeSize) != HIPRTC_SUCCESS)
+        throw std::runtime_error("failed to get bitcode size");
+
+    std::vector<char> code(codeSize);
+    if(hiprtcGetBitcode(prog, code.data()) != HIPRTC_SUCCESS)
+        throw std::runtime_error("failed to get bitcode");
+#else
+    if(nvrtcGetLTOIRSize(prog, &codeSize) != NVRTC_SUCCESS)
+        throw std::runtime_error("failed to get bitcode size");
+
+    std::vector<char> code(codeSize);
+    if(nvrtcGetLTOIR(prog, code.data()) != NVRTC_SUCCESS)
+        throw std::runtime_error("failed to get bitcode");
 #endif
+    hiprtcDestroyProgram(&prog);
+    return code;
+}
 
 int main()
 {
-#ifdef _WIN32
-    std::cout << "This sample is temporarily disabled on Windows" << std::endl;
-    return EXIT_SUCCESS;
-#else
-
     std::cout << "hipfft 1D double-precision complex-to-complex transform with callback\n";
 
     const int Nx        = 8;
@@ -95,20 +143,11 @@ int main()
     }
     std::cout << std::endl;
 
-    // Create the plan (hipfftPlan1d internally allocates the handle)
-    hipfftHandle plan{};
-    hipfftResult hipfft_rt
-        = hipfftPlan1d(&plan, // plan handle
-                       Nx, // transform length
-                       HIPFFT_Z2Z, // transform type (HIPFFT_C2C for single-precision)
-                       1); // number of transforms
-    if(hipfft_rt != HIPFFT_SUCCESS)
-        throw std::runtime_error("hipfftPlan1d failed");
-
     // prepare callback
     load_cbdata cbdata_host;
     cbdata_host.filter = filter_dev;
     cbdata_host.scale  = 1.0 / static_cast<double>(Nx);
+
     void* cbdata_dev;
     hip_rt = hipMalloc(&cbdata_dev, sizeof(load_cbdata));
     if(hip_rt != hipSuccess)
@@ -117,15 +156,44 @@ int main()
     if(hip_rt != hipSuccess)
         throw std::runtime_error("hipMemcpy failed");
 
-    void* cbptr_host = nullptr;
-    hip_rt = hipMemcpyFromSymbol(&cbptr_host, HIP_SYMBOL(load_callback_dev), sizeof(void*));
-    if(hip_rt != hipSuccess)
-        throw std::runtime_error("hipMemcpyFromSymbol failed");
+    int current_device = hipInvalidDeviceId;
+    int device_count   = 0;
+    if(hipGetDevice(&current_device) != hipSuccess)
+        throw std::runtime_error("hipGetDevice failed");
+    if(hipGetDeviceCount(&device_count) != hipSuccess)
+        throw std::runtime_error("hipGetDeviceCount failed");
+    std::vector<void*> cbdatas(device_count);
+    cbdatas[current_device] = cbdata_dev;
 
-    // set callback
-    hipfft_rt = hipfftXtSetCallback(plan, &cbptr_host, HIPFFT_CB_LD_COMPLEX_DOUBLE, &cbdata_dev);
+    auto code = compile_callback();
+
+    // Allocate a plan
+    hipfftHandle plan{};
+    hipfftResult hipfft_rt = hipfftCreate(&plan);
     if(hipfft_rt != HIPFFT_SUCCESS)
-        throw std::runtime_error("hipfftXtSetCallback failed");
+        throw std::runtime_error("failed to create plan");
+
+    hipfft_rt = hipfftSetAutoAllocation(plan, 1);
+    if(hipfft_rt != HIPFFT_SUCCESS)
+        throw std::runtime_error("failed to set auto-allocation policy");
+
+    // Set callback on the plan before setting plan details
+    hipfft_rt = hipfftXtSetJITCallback(plan,
+                                       "load_callback",
+                                       code.data(),
+                                       code.size(),
+                                       HIPFFT_CB_LD_COMPLEX_DOUBLE,
+                                       cbdatas.data());
+    if(hipfft_rt != HIPFFT_SUCCESS)
+        throw std::runtime_error("hipfftXtSetJITCallback failed");
+
+    hipfft_rt = hipfftMakePlan1d(plan, // plan handle
+                                 Nx, // transform length
+                                 HIPFFT_Z2Z, // transform type (HIPFFT_C2C for single-precision)
+                                 1,
+                                 nullptr); // number of transforms
+    if(hipfft_rt != HIPFFT_SUCCESS)
+        throw std::runtime_error("hipfftPlan1d failed");
 
     // Execute plan:
     // hipfftExecZ2Z: double precision, hipfftExecC2C: for single-precision
@@ -159,5 +227,4 @@ int main()
         throw std::runtime_error("hipFree failed");
 
     return 0;
-#endif
 }
