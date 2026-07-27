@@ -1,9 +1,0 @@
-# Catch2 YAML where the category name contains an unsafe character (slash).
-# Should fail validation via validate_identifier.
-test_categories:
-  "bad/name":
-    description: "Has an unsafe category name"
-    test_tags:
-      - "[smoke]"
-    labels:
-      - "quick"

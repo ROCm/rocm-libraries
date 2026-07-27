@@ -1,9 +1,0 @@
-# GTest YAML that exercises the identifier validator: a label contains a
-# forbidden character (space) which must fail validation.
-test_categories:
-  quick:
-    description: "Has an unsafe label"
-    test_patterns:
-      - "Smoke.*"
-    labels:
-      - "bad label"

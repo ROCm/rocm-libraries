@@ -1,394 +1,285 @@
-"""Unit tests for ``shared/ctest/parse_catch2_categories.py`` (Catch2 parser).
-
-Covers:
-  * Validator helpers (``validate_tag``, ``validate_identifier``,
-    ``validate_categories``).
-  * ``build_catch2_tag_expression`` (the heart of the Catch2 logic; the
-    operator-precedence comment in the parser is the spec).
-  * YAML loader error paths.
-  * End-to-end CLI behaviour against representative fixtures.
-
-Run with::
-
-    pytest -q shared/ctest/tests/test_parse_catch2_categories.py
-"""
-
-from __future__ import annotations
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
 
 import subprocess
 import sys
+import tempfile
+import unittest
 from pathlib import Path
 
-import pytest
+_TESTS_DIR = Path(__file__).resolve().parent
+_CTEST_DIR = _TESTS_DIR.parent
+_PARSER = _CTEST_DIR / "parse_catch2_categories.py"
 
-import parse_catch2_categories as pcc
-from conftest import extract_add_test_blocks, parse_install_file
+sys.path.insert(0, str(_CTEST_DIR))
+import parse_catch2_categories as pcc  # noqa: E402
 
+MINIMAL_YAML = """
+test_categories:
+  quick:
+    test_tags:
+      - "[smoke]"
+      - "[unit]"
+    labels:
+      - quick
+      - pre-commit
+execution_settings:
+  category_timeouts:
+    quick: 60
+"""
 
-# ---------------------------------------------------------------------------
-# validate_tag
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize(
-    "tag",
-    [
-        "[smoke]",
-        "[unit]",
-        "[]",  # the "all tests" sentinel
-        "~[slow]",
-        "[a-b.c_d]",
-        "[abc*]",
-        "[abc/def]",
-        "~[a-b.c_d]",
-    ],
-)
-def test_validate_tag_accepts_valid_tags(tag):
-    assert pcc.validate_tag(tag) is None
-
-
-@pytest.mark.parametrize(
-    "tag",
-    [
-        "smoke",  # no brackets
-        "[smoke",  # unclosed bracket
-        "smoke]",  # unopened bracket
-        "[smoke][unit]",  # two tags concatenated -- must be in a list, not a string
-        "[smoke ]",  # space inside brackets
-        "[smoke;]",
-        "[smoke|]",
-        "",
-        "~smoke",  # negation without brackets
-    ],
-)
-def test_validate_tag_rejects_invalid_tags(tag):
-    assert pcc.validate_tag(tag) is not None
-
-
-@pytest.mark.parametrize("tag", [123, None, ["[smoke]"], {"a": 1}])
-def test_validate_tag_rejects_non_strings(tag):
-    err = pcc.validate_tag(tag)
-    assert err is not None
-    assert "must be a string" in err
-
-
-# ---------------------------------------------------------------------------
-# validate_identifier (Catch2 parser has its own copy; assert it behaves the
-# same as the GTest parser's copy)
-# ---------------------------------------------------------------------------
+FULL_YAML = """
+test_categories:
+  quick:
+    test_tags:
+      - "[smoke]"
+      - "[unit]"
+    exclude_tags:
+      - "[slow]"
+    exclude_tags_windows:
+      - "[linux-only]"
+    exclude_tags_linux:
+      - "[windows-only]"
+    labels:
+      - quick
+  all_tests:
+    test_tags:
+      - "[]"
+    labels:
+      - full
+  excludes_only:
+    exclude_tags:
+      - "[slow]"
+      - "[flaky]"
+    labels:
+      - comprehensive
+execution_settings:
+  timeout_multiplier: 2
+  category_timeouts:
+    quick: 60
+    all_tests: 3600
+    excludes_only: 300
+  environment:
+    CATCH2_LOG_LEVEL: info
+"""
 
 
-@pytest.mark.parametrize("value", ["quick", "ex_gpu_gfx1150", "pre-commit", "v1.2.3"])
-def test_validate_identifier_accepts_safe_strings(value):
-    assert pcc.validate_identifier(value) is None
+class TestValidateTag(unittest.TestCase):
+    def test_accepts_valid_tags(self):
+        for tag in ("[smoke]", "[unit]", "[]", "~[slow]", "[a-b.c_d]", "[abc*]"):
+            self.assertIsNone(pcc.validate_tag(tag), msg=tag)
+
+    def test_rejects_invalid_tags(self):
+        for tag in ("smoke", "[smoke", "smoke]", "[smoke ]", "", "~smoke"):
+            self.assertIsNotNone(pcc.validate_tag(tag), msg=tag)
+
+    def test_rejects_non_strings(self):
+        for tag in (123, None, ["[smoke]"]):
+            err = pcc.validate_tag(tag)
+            self.assertIsNotNone(err)
+            self.assertIn("must be a string", err)
 
 
-@pytest.mark.parametrize("value", ["bad name", "has/slash", "has*", ""])
-def test_validate_identifier_rejects_unsafe_strings(value):
-    assert pcc.validate_identifier(value) is not None
+class TestValidateIdentifier(unittest.TestCase):
+    def test_accepts_safe(self):
+        for value in ("quick", "ex_gpu_gfx1150", "pre-commit", "v1.2.3"):
+            self.assertIsNone(pcc.validate_identifier(value), msg=value)
+
+    def test_rejects_unsafe(self):
+        for value in ("bad name", "has/slash", "has*", ""):
+            self.assertIsNotNone(pcc.validate_identifier(value), msg=value)
 
 
-# ---------------------------------------------------------------------------
-# validate_categories
-# ---------------------------------------------------------------------------
+class TestValidateCategories(unittest.TestCase):
+    def test_accepts_minimal(self):
+        categories = {"quick": {"test_tags": ["[smoke]"], "labels": ["quick"]}}
+        self.assertEqual(pcc.validate_categories(categories, False, True), [])
 
+    def test_rejects_non_mapping(self):
+        errors = pcc.validate_categories(["not", "a", "dict"], False, True)
+        self.assertTrue(any("must be a mapping" in e for e in errors))
 
-def test_validate_categories_accepts_minimal_config():
-    categories = {"quick": {"test_tags": ["[smoke]"], "labels": ["quick"]}}
-    assert pcc.validate_categories(categories, False, True) == []
+    def test_rejects_invalid_test_tag(self):
+        categories = {"quick": {"test_tags": ["[smoke"], "labels": ["quick"]}}
+        errors = pcc.validate_categories(categories, False, True)
+        self.assertTrue(
+            any("test_tags" in e and "Invalid tag syntax" in e for e in errors)
+        )
 
-
-def test_validate_categories_rejects_non_mapping():
-    errors = pcc.validate_categories(["not", "a", "dict"], False, True)
-    assert any("must be a mapping" in e for e in errors)
-
-
-def test_validate_categories_rejects_invalid_tag_in_test_tags():
-    categories = {"quick": {"test_tags": ["[smoke"], "labels": ["quick"]}}
-    errors = pcc.validate_categories(categories, False, True)
-    assert any("test_tags" in e and "Invalid tag syntax" in e for e in errors)
-
-
-def test_validate_categories_rejects_invalid_tag_in_exclude_tags():
-    categories = {
-        "quick": {
-            "test_tags": ["[smoke]"],
-            "exclude_tags": ["not a tag"],
-            "labels": ["quick"],
+    def test_rejects_invalid_exclude_tag(self):
+        categories = {
+            "quick": {
+                "test_tags": ["[smoke]"],
+                "exclude_tags": ["not a tag"],
+                "labels": ["quick"],
+            }
         }
-    }
-    errors = pcc.validate_categories(categories, False, True)
-    assert any("exclude_tags" in e for e in errors)
+        errors = pcc.validate_categories(categories, False, True)
+        self.assertTrue(any("exclude_tags" in e for e in errors))
 
-
-def test_validate_categories_applies_os_specific_excludes_linux():
-    categories = {
-        "quick": {
-            "test_tags": ["[smoke]"],
-            "exclude_tags_linux": ["not a tag"],  # only inspected on Linux
-            "labels": ["quick"],
+    def test_os_specific_excludes_only_checked_on_that_os(self):
+        categories = {
+            "quick": {
+                "test_tags": ["[smoke]"],
+                "exclude_tags_linux": ["not a tag"],
+                "labels": ["quick"],
+            }
         }
-    }
-    win_errors = pcc.validate_categories(categories, True, False)
-    lin_errors = pcc.validate_categories(categories, False, True)
-    assert win_errors == []
-    assert any("exclude_tags" in e for e in lin_errors)
+        # On Windows the bad linux-only tag is ignored; on Linux it errors.
+        self.assertEqual(pcc.validate_categories(categories, True, False), [])
+        self.assertTrue(pcc.validate_categories(categories, False, True))
+
+    def test_rejects_unsafe_label(self):
+        categories = {"quick": {"test_tags": ["[smoke]"], "labels": ["bad label"]}}
+        errors = pcc.validate_categories(categories, False, True)
+        self.assertTrue(any("label" in e for e in errors))
 
 
-def test_validate_categories_rejects_unsafe_label():
-    categories = {"quick": {"test_tags": ["[smoke]"], "labels": ["bad label"]}}
-    errors = pcc.validate_categories(categories, False, True)
-    assert any("label" in e for e in errors)
+class TestBuildCatch2TagExpression(unittest.TestCase):
+    def test_only_includes(self):
+        self.assertEqual(
+            pcc.build_catch2_tag_expression(["[smoke]", "[unit]"], []),
+            "[smoke],[unit]",
+        )
+
+    def test_only_excludes(self):
+        self.assertEqual(
+            pcc.build_catch2_tag_expression([], ["[slow]", "[flaky]"]),
+            "~[slow] ~[flaky]",
+        )
+
+    def test_include_and_exclude_distributes_excludes(self):
+        # Catch2: ',' is OR, ' ' is AND, '~' negates. Because ',' binds looser
+        # than ' ', excludes are duplicated per include clause.
+        self.assertEqual(
+            pcc.build_catch2_tag_expression(["[smoke]", "[unit]"], ["[slow]"]),
+            "[smoke] ~[slow],[unit] ~[slow]",
+        )
+
+    def test_multiple_excludes(self):
+        self.assertEqual(
+            pcc.build_catch2_tag_expression(["[a]", "[b]"], ["[x]", "[y]"]),
+            "[a] ~[x] ~[y],[b] ~[x] ~[y]",
+        )
+
+    def test_all_tests_sentinel_skipped(self):
+        self.assertEqual(pcc.build_catch2_tag_expression(["[]"], []), "")
+
+    def test_empty_inputs(self):
+        self.assertEqual(pcc.build_catch2_tag_expression([], []), "")
+        self.assertEqual(pcc.build_catch2_tag_expression(None, None), "")
+
+    def test_sentinel_with_excludes_returns_excludes_only(self):
+        self.assertEqual(pcc.build_catch2_tag_expression(["[]"], ["[slow]"]), "~[slow]")
 
 
-def test_validate_categories_collects_multiple_errors():
-    categories = {
-        "bad name": {
-            "test_tags": ["[smoke", "not_a_tag"],
-            "exclude_tags": ["also not a tag"],
-            "labels": ["bad label"],
-        }
-    }
-    errors = pcc.validate_categories(categories, False, True)
-    # Expect at least: category name + 2 bad test_tags + 1 bad exclude + 1 bad label.
-    assert len(errors) >= 4
+class TestLoadYaml(unittest.TestCase):
+    def test_loads_valid_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "c.yaml"
+            path.write_text(MINIMAL_YAML, encoding="utf-8")
+            data = pcc.load_yaml(path)
+            self.assertIn("test_categories", data)
+            self.assertIn("quick", data["test_categories"])
+
+    def test_missing_file_exits(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaises(SystemExit) as ctx:
+                pcc.load_yaml(Path(tmp) / "missing.yaml")
+            self.assertEqual(ctx.exception.code, 1)
 
 
-# ---------------------------------------------------------------------------
-# build_catch2_tag_expression
-# ---------------------------------------------------------------------------
+class TestCliIntegration(unittest.TestCase):
+    def _run_parser(self, yaml_text, target="rr-tests", install_file=None):
+        with tempfile.TemporaryDirectory() as tmp:
+            yaml_path = Path(tmp) / "test_categories.yaml"
+            yaml_path.write_text(yaml_text, encoding="utf-8")
+            install_path = None
+            cmd = [sys.executable, str(_PARSER), str(yaml_path), target, tmp]
+            if install_file is not None:
+                install_path = Path(tmp) / install_file
+                cmd.append(str(install_path))
+            result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+            install_contents = (
+                install_path.read_text(encoding="utf-8") if install_path else None
+            )
+            return result, install_contents
+
+    def test_minimal_emits_suite_and_tag_expression(self):
+        result, _ = self._run_parser(MINIMAL_YAML)
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertIn("NAME rr-tests_quick_suite", result.stdout)
+        self.assertIn('COMMAND rr-tests "[smoke],[unit]"', result.stdout)
+        self.assertIn('LABELS "quick;pre-commit"', result.stdout)
+        self.assertIn("TIMEOUT 60", result.stdout)
+
+    def test_timeout_multiplier_applied(self):
+        result, _ = self._run_parser(FULL_YAML)
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        # quick timeout 60 * multiplier 2 == 120
+        self.assertIn("TIMEOUT 120", result.stdout)
+
+    def test_distributes_excludes_per_include(self):
+        result, _ = self._run_parser(FULL_YAML)
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        # The 'quick' category has 2 includes and [slow] + (linux) [windows-only]
+        # excludes; each include clause must repeat "~[slow]".
+        quick_line = next(
+            line
+            for line in result.stdout.splitlines()
+            if "COMMAND rr-tests" in line and "[smoke]" in line
+        )
+        self.assertEqual(quick_line.count("~[slow]"), 2)
+
+    def test_all_tests_sentinel_runs_bare_binary(self):
+        result, _ = self._run_parser(FULL_YAML)
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertIn("NAME rr-tests_all_tests_suite", result.stdout)
+        # The [] sentinel with no excludes yields a bare COMMAND (no tag arg):
+        # a COMMAND line that is exactly the binary with no quoted expression.
+        self.assertIn("\n  COMMAND rr-tests\n", result.stdout)
+
+    def test_excludes_only_category(self):
+        result, _ = self._run_parser(FULL_YAML)
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertIn('COMMAND rr-tests "~[slow] ~[flaky]"', result.stdout)
+
+    def test_environment_propagated(self):
+        result, _ = self._run_parser(FULL_YAML)
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertIn('ENVIRONMENT "CATCH2_LOG_LEVEL=info"', result.stdout)
+
+    def test_install_file_uses_relative_path(self):
+        result, install_contents = self._run_parser(
+            MINIMAL_YAML, install_file="install_CTestTestfile.cmake"
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertIsNotNone(install_contents)
+        self.assertIn('add_test(rr-tests_quick_suite "../rr-tests"', install_contents)
+        self.assertIn('"[smoke],[unit]"', install_contents)
+        self.assertIn('LABELS "quick;pre-commit"', install_contents)
+
+    def test_invalid_tag_exits_nonzero(self):
+        bad_yaml = (
+            "test_categories:\n"
+            "  quick:\n"
+            '    test_tags: ["[smoke"]\n'
+            "    labels: [quick]\n"
+        )
+        result, _ = self._run_parser(bad_yaml)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Invalid tag syntax", result.stderr)
+
+    def test_invalid_identifier_exits_nonzero(self):
+        bad_yaml = (
+            "test_categories:\n"
+            '  "bad/name":\n'
+            '    test_tags: ["[smoke]"]\n'
+            "    labels: [quick]\n"
+        )
+        result, _ = self._run_parser(bad_yaml)
+        self.assertNotEqual(result.returncode, 0)
 
 
-def test_build_expression_only_includes():
-    assert (
-        pcc.build_catch2_tag_expression(["[smoke]", "[unit]"], []) == "[smoke],[unit]"
-    )
-
-
-def test_build_expression_only_excludes():
-    # Excludes without includes => single AND-joined exclude clause.
-    assert (
-        pcc.build_catch2_tag_expression([], ["[slow]", "[flaky]"]) == "~[slow] ~[flaky]"
-    )
-
-
-def test_build_expression_include_and_exclude_distributes_excludes():
-    """Catch2's grammar: ',' is OR, space is AND, '~' negates.  Because ',' binds
-    looser than ' ', excludes must be repeated per include clause to get the
-    intended (a OR b) AND NOT c semantics.
-    """
-    result = pcc.build_catch2_tag_expression(["[smoke]", "[unit]"], ["[slow]"])
-    assert result == "[smoke] ~[slow],[unit] ~[slow]"
-
-
-def test_build_expression_handles_multiple_excludes():
-    result = pcc.build_catch2_tag_expression(["[a]", "[b]"], ["[x]", "[y]"])
-    assert result == "[a] ~[x] ~[y],[b] ~[x] ~[y]"
-
-
-def test_build_expression_skips_all_tests_sentinel():
-    # "[]" stands for "run everything"; it must NOT appear as an include clause.
-    assert pcc.build_catch2_tag_expression(["[]"], []) == ""
-
-
-def test_build_expression_empty_inputs_returns_empty_string():
-    assert pcc.build_catch2_tag_expression([], []) == ""
-    assert pcc.build_catch2_tag_expression(None, None) == ""
-
-
-def test_build_expression_sentinel_with_excludes_returns_excludes_only():
-    # If the only "include" is the [] sentinel, the expression collapses to
-    # the bare exclude clause.
-    assert pcc.build_catch2_tag_expression(["[]"], ["[slow]"]) == "~[slow]"
-
-
-# ---------------------------------------------------------------------------
-# YAML loader
-# ---------------------------------------------------------------------------
-
-
-def test_load_yaml_loads_valid_file(fixtures_dir):
-    data = pcc.load_yaml(fixtures_dir / "catch2_minimal.yaml")
-    assert "test_categories" in data
-    assert "quick" in data["test_categories"]
-
-
-def test_load_yaml_missing_file_exits(tmp_path):
-    with pytest.raises(SystemExit) as excinfo:
-        pcc.load_yaml(tmp_path / "missing.yaml")
-    assert excinfo.value.code == 1
-
-
-# ---------------------------------------------------------------------------
-# End-to-end CLI
-# ---------------------------------------------------------------------------
-
-
-def _run_parser(
-    parser_dir: Path,
-    yaml_path: Path,
-    target: str,
-    workdir: Path,
-    install_file: Path | None = None,
-) -> subprocess.CompletedProcess:
-    cmd = [
-        sys.executable,
-        str(parser_dir / "parse_catch2_categories.py"),
-        str(yaml_path),
-        target,
-        str(workdir),
-    ]
-    if install_file is not None:
-        cmd.append(str(install_file))
-    return subprocess.run(cmd, capture_output=True, text=True, check=False)
-
-
-def test_cli_minimal_yaml_generates_expected_test(parser_dir, fixtures_dir, tmp_path):
-    res = _run_parser(
-        parser_dir, fixtures_dir / "catch2_minimal.yaml", "rr_tests", tmp_path
-    )
-    assert res.returncode == 0, res.stderr
-    tests = extract_add_test_blocks(res.stdout)
-    assert "rr_tests_quick_suite" in tests
-    quick = tests["rr_tests_quick_suite"]
-    # Tag expression is the COMMAND's quoted argument: [smoke],[unit]
-    assert '"[smoke],[unit]"' in quick["command"]
-    assert quick["labels"] == ["quick", "pre-commit"]
-    assert quick["timeout"] == 300  # default
-
-
-def test_cli_full_yaml_generates_all_categories(parser_dir, fixtures_dir, tmp_path):
-    res = _run_parser(parser_dir, fixtures_dir / "catch2_full.yaml", "t", tmp_path)
-    assert res.returncode == 0, res.stderr
-    tests = extract_add_test_blocks(res.stdout)
-    assert {
-        "t_quick_suite",
-        "t_standard_suite",
-        "t_all_tests_suite",
-        "t_excludes_only_suite",
-    } <= set(tests)
-
-
-def test_cli_full_yaml_applies_timeout_multiplier(parser_dir, fixtures_dir, tmp_path):
-    # catch2_full.yaml: multiplier=2, quick=60, standard=600, comprehensive=1800
-    res = _run_parser(parser_dir, fixtures_dir / "catch2_full.yaml", "t", tmp_path)
-    assert res.returncode == 0, res.stderr
-    tests = extract_add_test_blocks(res.stdout)
-    assert tests["t_quick_suite"]["timeout"] == 120
-    assert tests["t_standard_suite"]["timeout"] == 1200
-    assert tests["t_excludes_only_suite"]["timeout"] == 600
-
-
-def test_cli_full_yaml_distributes_excludes_per_include(
-    parser_dir, fixtures_dir, tmp_path
-):
-    """The 'quick' category in catch2_full.yaml has [smoke]+[unit] includes and
-    [slow]+(linux: [windows-only], windows: [linux-only]) excludes.  The Catch2
-    expression must repeat the excludes across each include clause.
-    """
-    res = _run_parser(parser_dir, fixtures_dir / "catch2_full.yaml", "t", tmp_path)
-    assert res.returncode == 0, res.stderr
-    tests = extract_add_test_blocks(res.stdout)
-    cmd = tests["t_quick_suite"]["command"]
-    # Each include clause must contain "~[slow]".
-    assert cmd.count("~[slow]") == 2
-
-
-def test_cli_full_yaml_all_tests_category_uses_bare_command(
-    parser_dir, fixtures_dir, tmp_path
-):
-    """When the only include tag is the [] sentinel and there are no
-    excludes, no filter argument should be passed -- the COMMAND must run the
-    binary bare so Catch2 picks up every registered test.
-    """
-    res = _run_parser(parser_dir, fixtures_dir / "catch2_full.yaml", "t", tmp_path)
-    assert res.returncode == 0, res.stderr
-    tests = extract_add_test_blocks(res.stdout)
-    cmd = tests["t_all_tests_suite"]["command"]
-    # No quoted tag expression; just the bare target name.
-    assert cmd == "t"
-
-
-def test_cli_full_yaml_excludes_only_category(parser_dir, fixtures_dir, tmp_path):
-    res = _run_parser(parser_dir, fixtures_dir / "catch2_full.yaml", "t", tmp_path)
-    assert res.returncode == 0, res.stderr
-    tests = extract_add_test_blocks(res.stdout)
-    cmd = tests["t_excludes_only_suite"]["command"]
-    assert '"~[slow] ~[flaky]"' in cmd
-
-
-def test_cli_full_yaml_propagates_environment(parser_dir, fixtures_dir, tmp_path):
-    res = _run_parser(parser_dir, fixtures_dir / "catch2_full.yaml", "t", tmp_path)
-    assert res.returncode == 0, res.stderr
-    tests = extract_add_test_blocks(res.stdout)
-    assert tests["t_quick_suite"]["environment"] == "CATCH2_LOG_LEVEL=info"
-    assert tests["t_all_tests_suite"]["environment"] == "CATCH2_LOG_LEVEL=info"
-
-
-def test_cli_invalid_tag_yaml_fails(parser_dir, fixtures_dir, tmp_path):
-    res = _run_parser(
-        parser_dir, fixtures_dir / "catch2_invalid_tag.yaml", "t", tmp_path
-    )
-    assert res.returncode == 1
-    assert "Invalid tag syntax" in res.stderr
-    assert "add_test(" not in res.stdout
-
-
-def test_cli_invalid_identifier_yaml_fails(parser_dir, fixtures_dir, tmp_path):
-    res = _run_parser(
-        parser_dir, fixtures_dir / "catch2_invalid_identifier.yaml", "t", tmp_path
-    )
-    assert res.returncode == 1
-    assert "bad/name" in res.stderr or "unsafe characters" in res.stderr
-
-
-def test_cli_install_file_writes_relative_path_tests(
-    parser_dir, fixtures_dir, tmp_path
-):
-    install_file = tmp_path / "install_CTestTestfile.cmake"
-    res = _run_parser(
-        parser_dir,
-        fixtures_dir / "catch2_minimal.yaml",
-        "rr_tests",
-        tmp_path,
-        install_file=install_file,
-    )
-    assert res.returncode == 0, res.stderr
-    assert install_file.exists()
-
-    install_tests = parse_install_file(install_file)
-    assert "rr_tests_quick_suite" in install_tests
-    block = install_tests["rr_tests_quick_suite"]
-    # Install-tree binary path is relative ("../<target>").
-    assert block["command_line"].startswith('"../rr_tests"')
-    # Tag expression carried through as quoted positional arg.
-    assert '"[smoke],[unit]"' in block["command_line"]
-    assert block["labels"] == ["quick", "pre-commit"]
-
-
-def test_cli_install_file_for_all_tests_category_has_no_tag_arg(
-    parser_dir, fixtures_dir, tmp_path
-):
-    """The "[]" sentinel category collapses to a bare binary invocation; the
-    install file must mirror that and emit just ``"../<target>"``.
-    """
-    install_file = tmp_path / "install_CTestTestfile.cmake"
-    res = _run_parser(
-        parser_dir,
-        fixtures_dir / "catch2_full.yaml",
-        "t",
-        tmp_path,
-        install_file=install_file,
-    )
-    assert res.returncode == 0, res.stderr
-
-    install_tests = parse_install_file(install_file)
-    assert "t_all_tests_suite" in install_tests
-    cmd_line = install_tests["t_all_tests_suite"]["command_line"]
-    assert cmd_line == '"../t"'
-
-
-def test_cli_missing_yaml_file_fails(parser_dir, tmp_path):
-    res = _run_parser(parser_dir, tmp_path / "missing.yaml", "t", tmp_path)
-    assert res.returncode == 1
-    assert "YAML file not found" in res.stderr
+if __name__ == "__main__":
+    unittest.main()

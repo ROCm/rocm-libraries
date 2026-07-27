@@ -21,4 +21,20 @@ if(Python3_FOUND)
             -s "${CMAKE_CURRENT_LIST_DIR}"
             -p "test_parse_test_categories.py"
     )
+
+    add_test(
+        NAME shared_ctest_parse_catch2_categories_unit
+        COMMAND
+            ${Python3_EXECUTABLE} -m unittest discover -v
+            -s "${CMAKE_CURRENT_LIST_DIR}"
+            -p "test_parse_catch2_categories.py"
+    )
+
+    add_test(
+        NAME shared_ctest_parse_ctest_categories_unit
+        COMMAND
+            ${Python3_EXECUTABLE} -m unittest discover -v
+            -s "${CMAKE_CURRENT_LIST_DIR}"
+            -p "test_parse_ctest_categories.py"
+    )
 endif()
