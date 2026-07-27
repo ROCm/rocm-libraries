@@ -3,7 +3,7 @@
 - Contributors: (draft — jascampb)
 - Status: First draft, for discussion
 - Parent: [RFC 0017 Universal Kernel Descriptor](0017_UniversalKernelDescriptor.md) (this is the "UHD + kernel selection" follow-up named in [RFC 0017 §12.2](0017_UniversalKernelDescriptor.md#122-follow-up-rfcs))
-- Related: [RFC 0007 Engine Selection and Heuristics Framework](0007_EngineSelectionHeuristicsFramework.md)
+- Related: [RFC 0007 Engine Selection and Heuristics Framework](0007_EngineSelectionHeuristicsFramework.md), [RFC 0013 Autotune](0013_Autotune.md) (the benchmarking substrate for heuristic generation, [Section 13](#13-model-generation-pipeline))
 
 > **Draft note.** This is a first pass to frame the design and drive discussion, not a finished
 > spec. Sections marked **OPEN** carry decisions we still need to make. It is grounded in the existing
@@ -122,7 +122,7 @@ An end-to-end pipeline for turning benchmarks into a LightGBM kernel-selection m
 SDPA/FMHA forward. It is not a one-off: the same tools are meant to be run by any package author to
 produce a heuristic for their kernels. Its shape informs almost every decision below:
 
-- **Offline training.** A sweep step produces a training parquet (problem × kernel × measured TFLOPS);
+- **Offline training.** A sweep step produces a training dataset (problem × kernel × measured TFLOPS);
   a training step fits a LightGBM regressor on `log1p(tflops)` with grouped cross-validation.
 - **Inference was originally AOT-compiled to plain C** (an exporter lowers a trained booster to a
   dependency-free C scoring function, statically linked into the provider). This gave zero runtime
@@ -499,7 +499,7 @@ identical, and gates it with a round-trip test. We keep that principle but make 
 - **Inference:** a *generic* feature extractor walks the signature against the bound-variable table and
   device facts, producing the row in declared order. (Generic beats code-gen here because the sources
   are declarative and finite — no per-op C++.) Code-gen remains an option for a hot path.
-- **Training:** the same signature drives the Python featurizer, so the parquet columns match the
+- **Training:** the same signature drives the offline featurizer, so the dataset columns match the
   runtime row by construction. A parity test (signature → both sides → assert identical on fixtures) stays.
 
 **A three-part, model-agnostic contract check** replaces the tooling's bare feature-count guard, and
@@ -724,83 +724,103 @@ Because selection is data-driven, it must be inspectable, consistent with
 
 ## 13. Model Generation Pipeline
 
-The UHD is only useful if producing one is automated. An existing pipeline already does most of this;
-this section states how it extends to emit the UHD and its pack, and the principle that makes the
-result correct by construction.
+The UHD is only useful if producing one is automated — by **tooling any package author can run**, not a
+provider-specific service. The workflow is two-stage:
 
-### 13.1 What exists (`mlse-tools-internal/performance/rocKE/pipeline-server`)
+1. **Ship a working pack with a trivial heuristic.** The pack's UED names a **`static_order` UHD**
+   (rank by `priority`/`id` — effectively "run the first applicable kernel"). The pack is fully
+   functional and model-free from day one; no benchmarking or training is needed to use it.
+2. **Generate a real heuristic from on-hardware timings.** A standalone generation tool loads the pack,
+   times its kernels across a corpus of problem shapes, trains a model, and **emits an updated UED/UHD**
+   — same descriptor kind, now `adapter: tree_data` pointing at an exported `model.txt`
+   ([Section 8](#8-model-formats-and-the-adapter-seam)). Dropping that updated engine descriptor set
+   back in upgrades the pack from trivial ordering to a trained heuristic **in place** — no hipDNN
+   recompile, no provider-internal changes.
 
-A Prefect service already runs the stages we need:
+Because the shipped and generated heuristics are the *same descriptor kind* differing only in `adapter`
+and fields, the tool only rewrites data; it never introduces a new interface. Critically, the tool runs
+**over hipDNN's public API** — it adds no code to hipDNN and touches no provider internals — so it works
+for any provider's pack, which is what makes it usable by anyone.
 
-- **Stage A — gen-sweep-data (GPU/Slurm).** This *is* the "run every combination without heuristics"
-  benchmark. rocKE enumerates the `variants × shapes` space (its `OpAdapter.enumerate_specs`), builds
-  and benchmarks each, and writes a **parquet** whose columns are `{problem shape} + {build-config
-  columns (→ KMD fields / UKD metadata): tile_m/n/k, warp_*, pipeline, scheduler, epilogue, pad_*,
-  persistent, split_k} + measured_tflops`,
-  with `is_valid=False` for combos that don't build. rocKE is the authority on which combos are legal.
-- **Stage B — train.** LightGBM regressor on `log1p(tflops)`, grouped CV; emits `model.lgbm`,
-  `feature_spec.json`, and manifests.
-- **Stage C — evaluate**, **Stage D — commit** (DVC + git).
+### 13.1 Benchmarking via hipDNN autotune (RFC 0013)
 
-Two gaps: it stops at model + metadata (**no UHD/KDP emitted**), and featurization is Python-only
-(`feature_engine.py`), so the runtime C++ side is a separate reimplementation — the drift the tooling
-papered over with code-gen.
+The timing substrate is hipDNN's own **autotune** ([RFC 0013](0013_Autotune.md)), not a bespoke sweep.
+Autotune is **provider-agnostic**: it times whatever engine/kernel actually runs (through a backend
+profiling descriptor and `backendExecute`), so it exercises a rocKE pack exactly as it would any other
+engine. The generation tool drives it through the public frontend Graph API:
+
+- **`get_engine_configs()`** — enumerate the applicable candidates for a graph (the pack's child UKDs);
+- **`add_engine_variants()` / `add_engine_sweep()`** — enroll *every* candidate (and any runtime-knob
+  combinations) as plan specs, not just the heuristic-picked one;
+- **`autotune(mode = EXHAUSTIVE, strategy = RUN_UNTIL_STABLE)`** — compile and time each candidate
+  (HIP-event timing, warmup + timed iterations, workspace filtering);
+- **`AutotuneResult[]`** — per-candidate `engineId`/config, `minTimeMs`/`avgTimeMs`, `workspaceSize`,
+  knobs, and rank, persisted to JSON. **That JSON is the training dataset** — no separate benchmarking
+  format to define. `samples/autotune/AutotuneSample.cpp` is a reference driver.
+
+Because the pack already contains its variant kernels as UKDs, the tool times the **shipped** kernels —
+it does not re-enumerate or re-build a variant grid. The pack (its build step) is the authority on which
+variants exist; autotune is the authority on how fast each one runs. The tool's own job is only to drive
+autotune across the **shape corpus** ([Section 13.4](#134-sweep-space-grid-vs-constraint)); the per-point
+timing is autotune's.
 
 ### 13.2 The principle: one source of truth, translate once
 
-The pipeline should be the thing that guarantees the runtime contract matches what was benchmarked.
-Rather than hand-author descriptors that restate rocKE's build-config space, **let rocKE stay the enumeration +
-build authority and have the pipeline *generate* the pack's descriptors from the same sweep it
-benchmarks** (generate-then-freeze). This makes descriptor ⟷ parquet ⟷ runtime consistent by
-construction, and avoids encoding rocKE's buildability rules into a hand-written UED (not every
-tile×warp combo is legal).
+The tool must guarantee the runtime contract matches what was benchmarked. It emits the pack's
+descriptors (updated UED/UHD, and the KMD/`features_signature` if not already present) from the same run
+that produced the timings — **generate-then-freeze** — so descriptor ⟷ dataset ⟷ runtime are consistent
+by construction.
 
-"Translate once" is really **two contracts** the pipeline freezes and emits:
+"Translate once" is really **two contracts** the tool freezes and emits:
 
 1. **Feature contract.** Emit the UHD's `features_signature` ([Section 7.2](#72-the-features_signature))
    from the same feature definition training used (expressions over `$q.* / $kernel.* / $device.*`).
-   Then **one generic extractor runs it on both sides** — Python for train/eval, the in-tree evaluator
+   Then **one generic extractor runs it on both sides** — offline for training, the in-tree evaluator
    for inference — both reading the *same* signature. No reimplementation, so no drift. (Caveat: the
    expression op set must cover the derived features — [Section 7.2](#72-the-features_signature)'s
    `log2`/`/`/`min`/`max` extension. Anything gnarlier needs the `custom_library` featurizer escape
    hatch.)
-2. **Kernel-identity contract.** The variant tuple / `kernel_name` in each parquet row must **equal the
-   child UKD's identity** (its `metadata`) in the emitted pack, so the model's argmax over parquet rows
-   maps 1:1 to argmax over UKDs at runtime. This is the quieter drift risk and is stated explicitly.
+2. **Kernel-identity contract.** The candidate autotune timed (its `engineId`/config, i.e. a specific
+   UKD) must map 1:1 to the **child UKD's identity** (its `metadata`) in the emitted pack, so the
+   model's argmax over timed candidates maps exactly to argmax over UKDs at runtime. Autotune already
+   reports the config per result, so the tool keys the dataset on the UKD it enrolled — the quieter
+   drift risk, made explicit.
 
 ### 13.3 New stage: package (Stage P)
 
-After A (the variant set is known and benchmarked) and B (model + feature signature exist), a **package
-stage** emits the engine's descriptor set **and** its pack(s):
+After timing (§13.1) and training, a **package stage** emits (or updates) the engine's descriptor set:
 
-- the **KMD** — the compilation-knob schema (`fields`: `tile_m`, `warp_n`, `split_k`, `dtype`, …, each
-  with type/default) derived directly from the swept build-config columns
-  ([Section 6.1](#61-two-distinct-knob-concepts-ued-runtime-knobs-vs-kmd-compilation-knobs)). This is
-  the natural home for "all the compilation knobs, explicitly identified" — **one KMD per engine, owned
-  by the UED**;
-- the **UED** — the engine identity referencing its one KMD and one UHD, plus its **user runtime knobs**
-  (`split_k`/`use_atomics`, if any), which are *distinct* from the KMD compilation knobs and **not**
-  derived from the swept columns;
-- the **UHD** — `adapter: tree_data`, the `features_signature` (referencing `$kernel.*` KMD fields +
-  `$device.*` for arch-awareness), `features_hash`, `objective`/`score`, and `model.artifact`
-  ([Section 4](#4-uhd-schema)); one per engine, arch-aware, so no artifact table;
-- the **model as data** — the LightGBM booster converted to the `tree_data` FlatBuffer tree table at the
-  UHD's `model.artifact` ([Section 8](#8-model-formats-and-the-adapter-seam)), embedding the
-  `features_hash` it was trained against; shipped with the engine descriptors, *not* compiled into the
-  provider;
-- the **KDP(s)** — one child UKD per benchmarked (valid) variant, each with `metadata` filling the KMD's
-  fields (the swept variant point); the pack references the engine (UED), a matcher set, and a UDD.
+- the **UHD** — rewritten from the shipped `static_order` to `adapter: tree_data`, carrying the
+  `features_signature` (referencing `$kernel.*` KMD fields + `$device.*` for arch-awareness),
+  `features_hash`, `objective`/`score`, and `model.artifact` ([Section 4](#4-uhd-schema)); one per
+  engine, arch-aware, so no artifact table;
+- the **model as data** — the trained booster exported to the `tree_data` model file at the UHD's
+  `model.artifact` ([Section 8](#8-model-formats-and-the-adapter-seam)), embedding the `features_hash`
+  it was trained against; shipped with the engine descriptors, *not* compiled into the provider;
+- the **KMD** — the compilation-knob schema (`fields`: `tile_m`, `warp_n`, `split_k`, `dtype`, …), if
+  the pack does not already carry one; its fields are exactly the `$kernel.*` metadata the UKDs already
+  fill ([Section 6.1](#61-two-distinct-knob-concepts-ued-runtime-knobs-vs-kmd-compilation-knobs)) —
+  **one KMD per engine, owned by the UED**;
+- the **UED** unchanged except for the swapped `heuristic` reference; its user runtime `knobs` are
+  distinct from the KMD compilation knobs and untouched by generation.
+
+The UMDs, UDD, and the child UKDs (kernels) are **not** regenerated — only the heuristic side changes.
+That is the whole point of the two-stage design: the expensive artifacts (compiled kernels) ship once;
+the heuristic is layered on afterward as data.
 
 ### 13.4 Sweep space: grid vs. constraint
 
-The sweep is over the **compile-time build/variant space** (the `tile_m × warp_* × pipeline × …`
-product that becomes UKD `metadata`), *not* over the UED's user runtime knobs. One subtlety if a
-descriptor is ever to *drive* that sweep: a validity *constraint* (`min:1, max:8`) expresses which
-values are **legal**, not which to **sample**, so it would need an explicit `sweep_values` / grid hint,
-not an inferred range. For now rocKE's `enumerate_specs` is the grid authority and the pipeline reads
-it; the emitted UKD `metadata` records the resulting points. **OPEN**: do we ever want a descriptor to
-be the grid source (closing the loop so the sweep is descriptor-driven), or does rocKE stay
-authoritative indefinitely? Recommend rocKE-authoritative until there's a reason to invert it.
+The generation tool sweeps two things: the **problem-shape corpus** (batch, seqlen, heads, … — supplied
+by the author as representative shapes, or a per-op default) and optionally the **UED runtime knobs**
+(via `add_engine_variants` knob settings). The **variant space itself is fixed** — it is the pack's
+existing child UKDs, so the tool does not enumerate or build variants; it enrolls the shipped ones and
+times them ([Section 13.1](#131-benchmarking-via-hipdnn-autotune-rfc-0013)).
+
+One subtlety for anything that *drives* a sweep from a descriptor: a validity *constraint*
+(`min:1, max:8`) expresses which values are **legal**, not which to **sample**, so a swept axis needs an
+explicit `sweep_values` / grid hint, not an inferred range. **OPEN**: standardize where the shape corpus
+and any runtime-knob grid live (a tool-side config vs. a descriptor field), so a heuristic can be
+regenerated reproducibly without out-of-band inputs.
 
 ---
 
@@ -811,20 +831,24 @@ parity and overhead checks of [RFC 0017 §12.1](0017_UniversalKernelDescriptor.m
 The estimated-TFLOPS item (phase 7) is a co-owned [RFC 0007](0007_EngineSelectionHeuristicsFramework.md)
 follow-up.
 
-1. **`static_order` baseline.** UHD schema + KDP membership + deterministic ranking (priority/id).
-   Every pack gets a working, model-free selector. Proves the KDP→UHD→child-UKD wiring end to end.
+1. **`static_order` baseline (the shippable trivial heuristic).** UHD schema + KDP membership +
+   deterministic ranking (priority/id). Every pack gets a working, model-free selector — the first
+   stage of the two-stage workflow ([Section 13](#13-model-generation-pipeline)). Proves the
+   UED→UHD→child-UKD wiring end to end.
 2. **`features_signature` + generic extractor.** The UHD's inline signature and the single generic extractor
-   over the shared field namespaces ([Section 7](#7-feature-extraction-and-binding)), with the
-   Python↔runtime parity test lifted from the tooling, plus the expression-op extension
+   over the shared field namespaces ([Section 7](#7-feature-extraction-and-binding)), with a
+   training↔runtime parity test, plus the expression-op extension
    ([Section 7.2](#72-the-features_signature)).
-3. **`tree_data` model-as-data + in-tree walker.** The default shipping path: LightGBM booster → the
-   FlatBuffer tree table, evaluated by the in-tree GBDT walker; lands the real FMHA-fwd model as a
-   standalone drop-in in the pack. Adds lazy load + model cache
+3. **`tree_data` model-as-data + in-tree walker.** The default shipping path: a LightGBM model exported
+   to data, evaluated by the in-tree GBDT walker (reusing MIOpen's `LgbmForest`-style parser); lands the
+   real FMHA-fwd model as a standalone drop-in. Adds lazy load + model cache
    ([Section 10](#10-performance-loading-caching-lazy-evaluation)).
-4. **Pipeline: Stage P (package).** Extend the existing pipeline to emit the KDP/UED/UHD + tree-table
-   from the same sweep, enforcing the two contracts ([Section 13](#13-model-generation-pipeline)).
+4. **Generation tool over hipDNN autotune.** The standalone tool that drives `autotune` (RFC 0013)
+   across a shape corpus, trains a model, and emits the updated UED/UHD — the second stage that turns a
+   `static_order` pack into a `tree_data` one, enforcing the two contracts
+   ([Section 13](#13-model-generation-pipeline)).
 5. **`table` / CSV.** Cheap bucketed heuristics for ops that don't warrant a model.
-6. **`custom_library` escape hatch.** Per-pack scorer `.so` (e.g. Treelite) for models the in-tree
+6. **`custom_library` escape hatch.** Compiled scorer `.so` (e.g. Treelite) for models the in-tree
    walker doesn't cover; dependency + trust audit gated ([Section 9](#9-dependencies)).
 7. **Estimated-TFLOPS follow-up (co-owned with [RFC 0007](0007_EngineSelectionHeuristicsFramework.md)).**
    Score-only mode, the plugin-query surface, and the engine-selection policy that consumes it
@@ -843,8 +867,9 @@ land only when a concrete need appears.
   three-part load-time check — signature⊆KMD, `features_hash` (signature → vector), and the adapter's
   own arity check (vector → model input) — failing closed on any
   ([Section 7.3](#73-bit-parity-between-training-and-inference)).
-- **Kernel-identity drift.** The parquet's variant identity must equal the emitted UKD `metadata`, or
-  the model's argmax maps to the wrong kernel ([Section 13.2](#132-the-principle-one-source-of-truth-translate-once)).
+- **Kernel-identity drift.** The candidate autotune timed (its `engineId`/config) must equal the emitted
+  UKD `metadata`, or the model's argmax maps to the wrong kernel
+  ([Section 13.2](#132-the-principle-one-source-of-truth-translate-once)).
 - **KMD↔UHD coupling.** Because the UED co-owns the KMD and UHD, changing the KMD (adding/altering a
   compilation knob) invalidates the trained model — a new field is not selected against until the model
   learns it. Dropping in a KDP with kernels whose variants the engine's model never saw silently
@@ -894,9 +919,10 @@ land only when a concrete need appears.
 7. **Caching scope** — per-plan only vs. persistent cross-run, and its interaction with a future
    [RFC 0007](0007_EngineSelectionHeuristicsFramework.md) cache policy
    ([Section 10](#10-performance-loading-caching-lazy-evaluation)).
-8. **Descriptor-driven sweep** — does the descriptor ever become the grid source, or does rocKE stay
-   the enumeration authority indefinitely? (Recommend rocKE-authoritative —
-   [Section 13.4](#134-sweep-space-grid-vs-constraint).)
+8. **Where the sweep inputs live** — the variant space is fixed (the pack's UKDs, timed via autotune),
+   but the **shape corpus** and any **runtime-knob grid** need a home: a tool-side config vs. a
+   descriptor field, so a heuristic regenerates reproducibly without out-of-band inputs
+   ([Section 13.4](#134-sweep-space-grid-vs-constraint)).
 9. **Where estimated-TFLOPS wiring lives** — confirm it is a co-owned
    [RFC 0007](0007_EngineSelectionHeuristicsFramework.md) follow-up, and draft that problem statement
    ([Section 11](#11-engine-selection-interplay-and-estimated-tflops)).
