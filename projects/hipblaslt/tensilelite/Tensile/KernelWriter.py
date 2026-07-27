@@ -3222,14 +3222,15 @@ class KernelWriter(metaclass=abc.ABCMeta):
       if not self.states.staggerUCode:
         return []
 
-      state = [("StaggerUIter", 1), ("WrapUA", 2), ("WrapUB", 2)]
+      # Name-driven so wave-separated TDM's per-wave pairs are carried instead of the
+      # per-tensor ones. Defensive only: usesCanonicalSrd is False for the TDM side,
+      # so papPrefetchUsesStagger is False and this is unreachable for TDM kernels.
+      state = [("StaggerUIter", 1)]
+      state += [(n, 2) for n in self.staggerWrapUSgprNames(kernel, ("A", "B"))]
       isDTVAorB = kernel["DirectToVgprA"] != kernel["DirectToVgprB"]
       if kernel["PrefetchGlobalRead"] >= 2 and isDTVAorB:
         state.append(("StaggerUIterDTV", 1))
-      if kernel["ProblemType"]["MXBlockA"]:
-        state.append(("WrapUMXSA", 2))
-      if kernel["ProblemType"]["MXBlockB"]:
-        state.append(("WrapUMXSB", 2))
+      state += [(n, 2) for n in self.staggerWrapUSgprNames(kernel, ("MXSA", "MXSB"))]
       if kernel["ProblemType"]["Sparse"]:
         state.append(("WrapUMetadata", 2))
       return state

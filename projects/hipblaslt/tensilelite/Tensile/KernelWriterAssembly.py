@@ -354,6 +354,39 @@ class KernelWriterAssembly(KernelWriter):
   def isTdmWaveSeparated(self, kernel) -> bool:
     return kernel["enableTDMA"] and kernel["enableTDMB"] and kernel["NumWaves"] > 1
 
+  def tdmWaveSepWrapUName(self, kernel, tc: str):
+    """Per-wave WrapU pair for the wave-separated TDM AB path, or None.
+
+    In wave-separated mode the A and B TDM descriptors are aliased, so a wave holds
+    exactly one tensor's descriptor and needs exactly one wrap value. The pair is
+    named tdm{tcA}{tcB}WrapU to match tdm{tcA}{tcB}Incs: A/B -> tdmABWrapU. Keeping
+    the families under distinct names is what makes the MX double-call in
+    globalReadIncrementAB safe -- one shared pair would feed the A/B wrap byte count
+    to the MX scale descriptor on the wrap iteration.
+
+    Metadata is absent on purpose: TDM metadata is wave-uniform.
+    """
+    if not (self.isTdmWaveSeparated(kernel) and self.states.staggerUCode):
+      return None
+    if tc in ("A", "B"):
+      return "tdmABWrapU"
+    return None
+
+  def wrapUSgprName(self, kernel, tc: str) -> str:
+    return self.tdmWaveSepWrapUName(kernel, tc) or f"WrapU{tc}"
+
+  def staggerWrapUSgprNames(self, kernel, tcs=("A", "B", "MXSA", "MXSB")):
+    """Ordered, de-duplicated wrap pairs for the given tensors (metadata excluded)."""
+    names, seen = [], set()
+    for tc in tcs:
+      if tc in ("MXSA", "MXSB") and not kernel["ProblemType"][f"MXBlock{tc[-1]}"]:
+        continue
+      n = self.wrapUSgprName(kernel, tc)
+      if n not in seen:
+        seen.add(n)
+        names.append(n)
+    return names
+
   def isTdmWaveIdxLive(self, kernel) -> bool:
     """True when sgpr("WaveIdx") is still defined past setupNewTile, so wave parity
     can be read from it instead of recomputed from vgpr("Serial"). Mirrors the
@@ -680,12 +713,8 @@ class KernelWriterAssembly(KernelWriter):
       if kernel["ProblemType"]["MXBlockB"]:
         self.removeSgprVarFromPool("ShadowLimitMXSB")
 
-    self.removeSgprVarFromPool("WrapUA")
-    self.removeSgprVarFromPool("WrapUB")
-    if kernel["ProblemType"]["MXBlockA"]:
-      self.removeSgprVarFromPool("WrapUMXSA")
-    if kernel["ProblemType"]["MXBlockB"]:
-      self.removeSgprVarFromPool("WrapUMXSB")
+    for n in self.staggerWrapUSgprNames(kernel):
+      self.removeSgprVarFromPool(n)
 
     return module
 
@@ -795,17 +824,17 @@ class KernelWriterAssembly(KernelWriter):
         # PGR2 + DTVA or B (only 1 side), need separate StaggerUIter for DTV load
         module.add(self.defineSgpr("StaggerUIterDTV", 1))  # stagger loop iterations, used for various iter counts in the code
       wrapAlignment = 2 if self.states.asmCaps["s_sub_u64"] and self.states.asmCaps["HasWMMA_V3"] else 1
-      module.add(self.defineSgpr("WrapUA", 2, wrapAlignment))  # Bytes to add to SrdA to reset address from N-1 iter to AddressA
-      module.add(self.defineSgpr("WrapUB", 2, wrapAlignment))  # Bytes to add to SrdB to reset address from N-1 iter to AddressB
-      if kernel["ProblemType"]["MXBlockA"]:
-        module.add(self.defineSgpr("WrapUMXSA", 2, wrapAlignment))  # Bytes to add to SrdA to reset address from N-1 iter to AddressMXSA
-      if kernel["ProblemType"]["MXBlockB"]:
-        module.add(self.defineSgpr("WrapUMXSB", 2, wrapAlignment))  # Bytes to add to SrdA to reset address from N-1 iter to AddressMXSB
+      # Wave-separated TDM collapses each aliased family to one per-wave pair
+      # (tdmWaveSepWrapUName); every other path keeps the per-tensor pairs.
+      abWrapNames = self.staggerWrapUSgprNames(kernel, ("A", "B"))
+      mxWrapNames = self.staggerWrapUSgprNames(kernel, ("MXSA", "MXSB"))
+      for n in abWrapNames + mxWrapNames:
+        module.add(self.defineSgpr(n, 2, wrapAlignment))  # Bytes to add to reset address from N-1 iter to the tensor base
       if kernel["ProblemType"]["Sparse"]:
         module.add(self.defineSgpr("WrapUMetadata", 2, wrapAlignment))  # Bytes to add to SrdMetadata to reset address from N-1 iter to AddressMetadata
 
-      self.addSgprVarToPool("WrapUA")
-      self.addSgprVarToPool("WrapUB")
+      for n in abWrapNames:
+        self.addSgprVarToPool(n)
 
     if self.states.a.numSgprGlobalReadIncs > 0:
       module.add(self.defineSgpr("GlobalReadIncsA", self.states.a.numSgprGlobalReadIncs))
@@ -6228,6 +6257,35 @@ class KernelWriterAssembly(KernelWriter):
       return kernel.get("enableTDMB", False)
     return False
 
+  def _staggerWrapUMod(self, kernel, tc: str, wrapName: str) -> Module:
+    """Bytes to add to get back to start, written into wrapName.
+
+    On the loop iteration matching StaggerUIter this value is added instead of
+    GlobalReadInc.
+    """
+    mod = Module("calculateStaggerWrapU")
+    incName = "GlobalReadIncs%s+%u" % (tc, self.states.unrollIdx)
+    mod.addModuleAsFlatItems(self.s_mul_i64_i32(sgpr("%s+0"%wrapName), sgpr("%s+1"%wrapName), \
+              self.loopCounter(kernel, self.states.unrollIdx), sgpr(incName), \
+              "Number of bytes accessed by the unroll loop"))
+
+    # TODO: put this asmCaps into rocisa SSubU64
+    if self.states.asmCaps["s_sub_u64"] and self.states.asmCaps["HasWMMA_V3"]:
+      with self.allocTmpSgpr(2, 2, tag="calculateStagger_stmp") as stmp:
+        mod.add(SMovB32(sgpr(stmp.idx), sgpr(incName)))
+        mod.add(SMovB32(sgpr(stmp.idx+1), 0))
+        mod.add(SSubU64(dst=sgpr(wrapName, 2), src0=sgpr(stmp.idx, stmp.size), src1=sgpr(wrapName, 2), comment="increment-WrapU"))
+    else:
+      mod.add(SSubU32(dst=sgpr("%s+0"%wrapName),  \
+                src0=sgpr(incName), \
+                src1=sgpr("%s+0"%wrapName), \
+                comment="remove one iteration"))
+      mod.add(SSubBU32(dst=sgpr("%s+1"%wrapName), \
+                src0=0, \
+                src1=sgpr("%s+1"%wrapName), \
+                comment="remove one iteration"))
+    return mod
+
   def calculateStagger(self, kernel, tP):
     imod = Module("calculateStagger")
     tc = tP["tensorChar"]
@@ -6249,32 +6307,21 @@ class KernelWriterAssembly(KernelWriter):
                 sgpr("StaggerUIter"), sgpr("GlobalReadIncs%s+%u"%(tc, self.states.unrollIdx)), \
                 " stagger byte offset"))
 
+      wrapName = self.wrapUSgprName(kernel, tc)
+      # A per-wave wrap pair is only valid for the wave that owns the aliased
+      # descriptor, so its computation has to run inside the parity gate that
+      # _applyStaggerTDM already emits. Everything else stays wave-uniform and is
+      # emitted right here, exactly where it always was.
+      gateWrap = self.tdmWaveSepWrapUName(kernel, tc) is not None
+
       # Apply TDM stagger now while staggerTmp still holds StaggerUIter * GlobalReadIncs.
       # The Sparse and PGR>=3 paths below both reuse staggerTmp for other computations.
       if isTDM:
-        self._applyStaggerTDM(imod, kernel, tP, staggerTmp)
+        self._applyStaggerTDM(imod, kernel, tP, staggerTmp,
+                              gatedTail=self._staggerWrapUMod(kernel, tc, wrapName) if gateWrap else None)
 
-      # Amount of bytes to add to get back to start.
-      # on the llop iteration which matches StaggerUIter, this offset added instead of GlobalReadInc
-      imod.addModuleAsFlatItems(self.s_mul_i64_i32(sgpr("WrapU%s+0"%tc), sgpr("WrapU%s+1"%tc), \
-                self.loopCounter(kernel, self.states.unrollIdx), sgpr("GlobalReadIncs%s+%u"%(tc,self.states.unrollIdx)), \
-                "Number of bytes accessed by the unroll loop"))
-
-      # TODO: put this asmCaps into rocisa SSubU64
-      if self.states.asmCaps["s_sub_u64"] and self.states.asmCaps["HasWMMA_V3"]:
-        with self.allocTmpSgpr(2, 2, tag="calculateStagger_stmp") as stmp:
-          imod.add(SMovB32(sgpr(stmp.idx), sgpr("GlobalReadIncs%s+%u"%(tc,self.states.unrollIdx))))
-          imod.add(SMovB32(sgpr(stmp.idx+1), 0))
-          imod.add(SSubU64(dst=sgpr("WrapU%s"%tc, 2), src0=sgpr(stmp.idx, stmp.size), src1=sgpr("WrapU%s"%tc, 2), comment="increment-WrapU"))
-      else:
-        imod.add(SSubU32(dst=sgpr("WrapU%s+0"%tc),  \
-                  src0=sgpr("GlobalReadIncs%s+%u"%(tc,self.states.unrollIdx)), \
-                  src1=sgpr("WrapU%s+0"%tc), \
-                  comment="remove one iteration"))
-        imod.add(SSubBU32(dst=sgpr("WrapU%s+1"%tc), \
-                  src0=0, \
-                  src1=sgpr("WrapU%s+1"%tc), \
-                  comment="remove one iteration"))
+      if not gateWrap:
+        imod.add(self._staggerWrapUMod(kernel, tc, wrapName))
 
       # Apply stagger offset to A/B SRD (TDM A/B is handled separately above)
       if not isTDM:
@@ -6350,7 +6397,7 @@ class KernelWriterAssembly(KernelWriter):
   # Non-wave-separated (numWaves == 1): A and B have independent descriptors,
   #   all waves apply unconditionally.
   ##############################################################################
-  def _applyStaggerTDM(self, imod, kernel, tP, offsetSgpr, labelName="SkipStagger", commentTag="stagger", tdmGroupName=None):
+  def _applyStaggerTDM(self, imod, kernel, tP, offsetSgpr, labelName="SkipStagger", commentTag="stagger", tdmGroupName=None, gatedTail=None):
     # tdmGroupName=None: derive SRD from tP and wave-parity-gate the add. In wave-separated
     #   mode A and B share tdm{tc}Group0 SGPR but hold different per-wave values; the parity
     #   gate ensures only the owning waves update.
@@ -6365,6 +6412,11 @@ class KernelWriterAssembly(KernelWriter):
       tc = "Metadata"
       tdmGroup0 = tdmGroupName
       useParityGate = False
+
+    # gatedTail rides the parity gate below, so it only makes sense when there is
+    # one. Metadata (wave-uniform) and NumWaves==1 must never pass a tail.
+    assert gatedTail is None or useParityGate, \
+        "gatedTail requires the wave-parity gate"
 
     skipLabel = None
     if useParityGate:
@@ -6385,6 +6437,9 @@ class KernelWriterAssembly(KernelWriter):
               src1=sgpr(offsetSgpr), comment=f"TDM addr += {commentTag} offset (lo)"))
     imod.add(SAddCU32(dst=sgpr(f"{tdmGroup0}+3"), src0=sgpr(f"{tdmGroup0}+3"), \
               src1=sgpr(offsetSgpr+1), comment=f"TDM addr += {commentTag} offset (hi)"))
+
+    if gatedTail is not None:
+      imod.add(gatedTail)
 
     if skipLabel is not None:
       imod.add(skipLabel)
@@ -6484,11 +6539,12 @@ class KernelWriterAssembly(KernelWriter):
                   sgpr(tmp), sgpr("GlobalReadIncs%s+%u"%(tc,self.states.unrollIdx)), \
                   "start offset S in bytes"))
       # TODO: put this asmCaps into rocisa SSubU64
+      wrapName = self.wrapUSgprName(kernel, tc)
       if self.states.asmCaps["s_sub_u64"] and self.states.asmCaps["HasWMMA_V3"]:
-        imod.add(SSubU64(dst=sgpr(tmp, 2), src0=sgpr(tmp, 2), src1=sgpr("WrapU%s"%(tc), 2), comment="S - WrapU"))
+        imod.add(SSubU64(dst=sgpr(tmp, 2), src0=sgpr(tmp, 2), src1=sgpr(wrapName, 2), comment="S - WrapU"))
       else:
-        imod.add(SSubU32(dst=sgpr(tmp), src0=sgpr(tmp), src1=sgpr("WrapU%s"%tc), comment="S - WrapU"))
-        imod.add(SSubBU32(dst=sgpr(tmp+1), src0=sgpr(tmp+1), src1=sgpr("WrapU%s+1"%(tc)), comment="S - WrapU"))
+        imod.add(SSubU32(dst=sgpr(tmp), src0=sgpr(tmp), src1=sgpr(wrapName), comment="S - WrapU"))
+        imod.add(SSubBU32(dst=sgpr(tmp+1), src0=sgpr(tmp+1), src1=sgpr("%s+1"%wrapName), comment="S - WrapU"))
 
       # Apply remove-stagger offset to A/B (TDM goes through _applyStaggerTDM)
       if isTDM:
@@ -6869,6 +6925,7 @@ class KernelWriterAssembly(KernelWriter):
     tagList = ["AddressA", "AddressB", "WrapUA", "WrapUB", "StaggerU", "WGM", \
                "StaggerUIter", "GlobalReadIncsA", "GlobalReadIncsB", \
                "StridesA", "StridesB", "ShadowLimitA", "ShadowLimitB"]
+    tagList += self.staggerWrapUSgprNames(kernel)
     if kernel["ProblemType"]["MXBlockA"]:
       tagList += ["GlobalReadIncsMXSA", "ShadowLimitMXSA"]
     if kernel["ProblemType"]["MXBlockB"]:
@@ -19782,22 +19839,36 @@ class KernelWriterAssembly(KernelWriter):
     tdmGroup0 = f"tdm{tcA}Group0"
     incSgprName = f"tdm{tcA}{tcB}Incs"
 
+    # A per-wave pair already holds this wave's wrap value, so neither the parity
+    # read nor the WrapU select is needed. The name must belong to this call's
+    # tensor family, otherwise the A/B wrap byte count would reach the MX
+    # descriptor on the wrap iteration.
+    wrapName = self.tdmWaveSepWrapUName(kernel, tcA)
+    assert wrapName is None or wrapName == f"tdm{tcA}{tcB}WrapU", \
+        f"per-wave wrap pair {wrapName} does not match the tdm{tcA}{tcB}Incs family"
+
     if loopIdx is not None and loopIdx == self.states.unrollIdx and self.states.staggerUCode:
-      with self.allocTmpSgpr(4, tag="tdmIncrementABWaveSperated_tmpSgprInfo") as tmpSgprInfo:
+      with self.allocTmpSgpr(2 if wrapName else 4, tag="tdmIncrementABWaveSperated_tmpSgprInfo") as tmpSgprInfo:
         incTmpLo = tmpSgprInfo.idx
         incTmpHi = tmpSgprInfo.idx + 1
-        wrapTmpLo = tmpSgprInfo.idx + 2
-        wrapTmpHi = tmpSgprInfo.idx + 3
 
-        if self.isTdmWaveIdxLive(kernel):
-          self._emitTdmWaveParitySCC(mod, kernel, comment="check wave parity")
+        if wrapName:
+          wrapSrcLo = sgpr(f"{wrapName}+0")
+          wrapSrcHi = sgpr(f"{wrapName}+1")
         else:
-          with self.allocTmpSgpr(1, tag="tdmIncrementABWaveSperated_tmpSgprInfo2") as waveIdTmp:
-            self._emitTdmWaveParitySCC(mod, kernel, waveIdTmp.idx, "check wave parity")
-        mod.add(SCSelectB32(dst=sgpr(wrapTmpLo), src0=sgpr(f"WrapU{tcB}+0"), src1=sgpr(f"WrapU{tcA}+0"), \
-                comment="select WrapU based on wave parity (lo)"))
-        mod.add(SCSelectB32(dst=sgpr(wrapTmpHi), src0=sgpr(f"WrapU{tcB}+1"), src1=sgpr(f"WrapU{tcA}+1"), \
-                comment="select WrapU based on wave parity (hi)"))
+          wrapTmpLo = tmpSgprInfo.idx + 2
+          wrapTmpHi = tmpSgprInfo.idx + 3
+          if self.isTdmWaveIdxLive(kernel):
+            self._emitTdmWaveParitySCC(mod, kernel, comment="check wave parity")
+          else:
+            with self.allocTmpSgpr(1, tag="tdmIncrementABWaveSperated_tmpSgprInfo2") as waveIdTmp:
+              self._emitTdmWaveParitySCC(mod, kernel, waveIdTmp.idx, "check wave parity")
+          mod.add(SCSelectB32(dst=sgpr(wrapTmpLo), src0=sgpr(f"WrapU{tcB}+0"), src1=sgpr(f"WrapU{tcA}+0"), \
+                  comment="select WrapU based on wave parity (lo)"))
+          mod.add(SCSelectB32(dst=sgpr(wrapTmpHi), src0=sgpr(f"WrapU{tcB}+1"), src1=sgpr(f"WrapU{tcA}+1"), \
+                  comment="select WrapU based on wave parity (hi)"))
+          wrapSrcLo = sgpr(wrapTmpLo)
+          wrapSrcHi = sgpr(wrapTmpHi)
 
         if prefetchIndex:
           mod.add(SAddU32(dst=sgpr(incTmpLo), src0=self.loopCounter(kernel, self.states.unrollIdx), \
@@ -19806,9 +19877,9 @@ class KernelWriterAssembly(KernelWriter):
         else:
           mod.add(SCmpEQU32(src0=self.loopCounter(kernel, self.states.unrollIdx), \
                     src1=sgpr("StaggerUIter"), comment="Is this the wrapIter?"))
-        mod.add(SCSelectB32(dst=sgpr(incTmpLo), src0=sgpr(wrapTmpLo), src1=sgpr(incSgprName), \
+        mod.add(SCSelectB32(dst=sgpr(incTmpLo), src0=wrapSrcLo, src1=sgpr(incSgprName), \
                 comment="select WrapU or normal inc (lo)"))
-        mod.add(SCSelectB32(dst=sgpr(incTmpHi), src0=sgpr(wrapTmpHi), src1=0, \
+        mod.add(SCSelectB32(dst=sgpr(incTmpHi), src0=wrapSrcHi, src1=0, \
                 comment="select WrapU or normal inc (hi)"))
 
         mod.add(SAddU64(dst=sgpr(f"{tdmGroup0}+2", 2), src0=sgpr(f"{tdmGroup0}+2", 2), \
