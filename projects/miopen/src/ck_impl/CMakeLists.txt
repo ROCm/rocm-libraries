@@ -31,7 +31,7 @@ set(_CK_SUPPORTED_ARCHS
     gfx908 gfx90a gfx942 gfx950
     gfx1100 gfx1101 gfx1102
     gfx1150 gfx1151 gfx1152 gfx1153
-    gfx1200 gfx1201
+    gfx1200 gfx1201 gfx1250
 )
 
 # Filter GPU_TARGETS to only those with MIOpen CK grouped conv support.
@@ -64,6 +64,7 @@ set(CK_IMPL_SOURCES
     ck_fused_grp_activ_impl.cpp
     ck_fused_grp_bias_activ_impl.cpp
     ck_depthwise_fwd_impl.cpp
+    ck_depthwise_bwd_data_impl.cpp
 )
 
 # Collect plugin target names for the MIOpen_with_plugins proxy (see src/CMakeLists.txt).
@@ -107,13 +108,10 @@ foreach(gpu_target IN LISTS _CK_FILTERED_TARGETS)
     # Mark as building the DLL for dllexport on Windows
     target_compile_definitions(${lib_name} PRIVATE CK_IMPL_BUILDING_DLL)
 
-    # Per-target compile definitions
-    if(gpu_target MATCHES "gfx942" OR gpu_target MATCHES "gfx950")
-        target_compile_definitions(${lib_name} PRIVATE CK_ENABLE_TF32)
-    endif()
-    if(gpu_target MATCHES "gfx950")
-        target_compile_definitions(${lib_name} PRIVATE CK_USE_GFX95)
-    endif()
+    # Per-target CK compile definitions. Use the shared helper (passing this
+    # plugin's single GPU arch) so the plugin's CK macro set stays in sync with
+    # the main MIOpen target and with how CK itself was built.
+    miopen_apply_ck_compile_definitions(${lib_name} ${gpu_target})
 
     # Choose CK linkage mode:
     #   - Per-arch unbundled archive

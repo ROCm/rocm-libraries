@@ -137,8 +137,9 @@ Instructions are categorized using flags defined in `IsaFlag.def` (using X-macro
 | `IF_DSAtomic` | LDS atomic operation |
 | `IF_Barrier` | Synchronization barrier |
 | `IF_Branch` | Control flow branch |
+| `IF_Call` | Call-like control transfer (e.g. `s_swappc_b64`); not a CFG branch edge |
 | `IF_WaitCnt` | Wait counter instruction |
-| `IF_HasSideEffect` | Instruction with side effects (excluding memory stores, ds writes, branches, barriers, and waitcnts) |
+| `IF_HasSideEffect` | Instruction with side effects (excluding memory stores, ds writes, branches, calls, barriers, and waitcnts) |
 | `IF_MFMA` | Matrix multiply-accumulate |
 | `IF_SMFMA` | Sparse matrix multiply-accumulate |
 
