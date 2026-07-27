@@ -22,6 +22,13 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/device_ptr.h>
 
 #include <cstddef> // for std::size_t
@@ -46,11 +53,11 @@ THRUST_NAMESPACE_BEGIN
  *  #include <thrust/device_malloc.h>
  *  #include <thrust/device_free.h>
  *  ...
- *  // allocate some integers with device_malloc
+ *  // allocate some memory with device_malloc
  *  const int N = 100;
  *  thrust::device_ptr<void> void_ptr = thrust::device_malloc(N);
  *
- *  // manipulate integers
+ *  // manipulate memory
  *  ...
  *
  *  // deallocate with device_free
@@ -76,11 +83,11 @@ inline thrust::device_ptr<void> device_malloc(const std::size_t n);
  *  #include <thrust/device_malloc.h>
  *  #include <thrust/device_free.h>
  *  ...
- *  // allocate some memory with device_malloc
+ *  // allocate some integers with device_malloc
  *  const int N = 100;
  *  thrust::device_ptr<int> int_array = thrust::device_malloc<int>(N);
  *
- *  // manipulate memory
+ *  // manipulate integers
  *  ...
  *
  *  // deallocate with device_free
