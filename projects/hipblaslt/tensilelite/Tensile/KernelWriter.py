@@ -3047,6 +3047,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
           module.add(self.calculateStagger(kernel,tPM))
         # Calculate stagger B(MXSB)
         module.add(self.calculateStagger(kernel, tensorParametersB))
+        # Hoist the loop-invariant wave-parity WrapU selection out of the K-loop:
+        # parity (from Serial) and the resulting WrapUB-vs-WrapUA choice never change
+        # across iterations, so compute the selected WrapU once here into WrapUSel and
+        # read it in the loop instead of recomputing parity + selecting every iteration.
+        module.add(self.hoistWaveParityWrapUSel(kernel, tensorParametersA, tensorParametersB))
       # LRO and LWA as assigned
       # init lds read pointers before each unrolled loop
       module.addComment0("local read addresses: init pointers a")
@@ -10909,6 +10914,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
     assert False, "Should be overrided"
 
   def tdmIncrementABWaveSperated(self, kernel, tPA, tPB, loopIdx=None, prefetchIndex=0) -> Module:
+    assert False, "Should be overrided"
+
+  def hoistWaveParityWrapUSel(self, kernel, tPA, tPB) -> Module:
     assert False, "Should be overrided"
 
   def tdmSetupIncrementWaveSeparated(self, kernel, tPA, tPB) -> Module:
