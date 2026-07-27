@@ -269,7 +269,9 @@ class BQuantKernelHeaderGenerator:
         # Delegates to bquant_effective_epilogue (same logic used by make_bquant_kernel_name)
         # so the generated C++ and the kernel name always agree.
         use_permute_n_epilogue = (
-            bquant_effective_epilogue(t.tile_n, t.warp_n, t.warp_tile_n, spec.quant_group_n)
+            bquant_effective_epilogue(
+                t.tile_n, t.warp_n, t.warp_tile_n, spec.quant_group_n, spec.preshuffle_b
+            )
             == "permute_n"
         )
 
