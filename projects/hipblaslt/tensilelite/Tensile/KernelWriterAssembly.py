@@ -359,10 +359,11 @@ class KernelWriterAssembly(KernelWriter):
 
     In wave-separated mode the A and B TDM descriptors are aliased, so a wave holds
     exactly one tensor's descriptor and needs exactly one wrap value. The pair is
-    named tdm{tcA}{tcB}WrapU to match tdm{tcA}{tcB}Incs: A/B -> tdmABWrapU. Keeping
-    the families under distinct names is what makes the MX double-call in
-    globalReadIncrementAB safe -- one shared pair would feed the A/B wrap byte count
-    to the MX scale descriptor on the wrap iteration.
+    named tdm{tcA}{tcB}WrapU to match tdm{tcA}{tcB}Incs: A/B -> tdmABWrapU,
+    MXSA/MXSB -> tdmMXSAMXSBWrapU. Keeping the two families under distinct names is
+    what makes the MX double-call in globalReadIncrementAB safe -- one shared pair
+    would feed the A/B wrap byte count to the MX scale descriptor on the wrap
+    iteration.
 
     Metadata is absent on purpose: TDM metadata is wave-uniform.
     """
@@ -370,6 +371,10 @@ class KernelWriterAssembly(KernelWriter):
       return None
     if tc in ("A", "B"):
       return "tdmABWrapU"
+    # Both MX sides must be present: the aliasing that justifies one pair only holds
+    # when MXSA and MXSB share a descriptor. Asymmetric MX keeps the per-tensor pairs.
+    if tc in ("MXSA", "MXSB") and kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockB"]:
+      return "tdmMXSAMXSBWrapU"
     return None
 
   def wrapUSgprName(self, kernel, tc: str) -> str:
