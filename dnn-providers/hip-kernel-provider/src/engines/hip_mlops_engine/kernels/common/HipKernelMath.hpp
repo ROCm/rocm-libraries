@@ -328,316 +328,95 @@ __forceinline__ __device__ double fma(double a, double b, double c)
 // 4-element vector overloads
 //=============================================================================
 
-template <typename FpVecType>
-__forceinline__ __device__ FpVecType exp(FpVecType x)
-{
-    constexpr auto VecSize = mapped_vector_info<FpVecType>::size;
-    if constexpr(VecSize == 4)
-    {
-        FpVecType out;
-        out.x = detail::exp(x.x);
-        out.y = detail::exp(x.y);
-        out.z = detail::exp(x.z);
-        out.w = detail::exp(x.w);
-        return out;
+#define SINGLE_OPERAND_VEC_MATH(BASE)                                     \
+    template <typename FpVecType>                                         \
+    __forceinline__ __device__ FpVecType BASE(FpVecType x)                \
+    {                                                                     \
+        constexpr auto VecSize = mapped_vector_info<FpVecType>::size;     \
+        if constexpr(VecSize == 4)                                        \
+        {                                                                 \
+            FpVecType out;                                                \
+            out.x = detail::BASE(x.x);                                    \
+            out.y = detail::BASE(x.y);                                    \
+            out.z = detail::BASE(x.z);                                    \
+            out.w = detail::BASE(x.w);                                    \
+            return out;                                                   \
+        }                                                                 \
+        else if constexpr(VecSize == 2)                                   \
+        {                                                                 \
+            FpVecType out;                                                \
+            out.x = detail::BASE(x.x);                                    \
+            out.y = detail::BASE(x.y);                                    \
+            return out;                                                   \
+        }                                                                 \
+        else if constexpr(VecSize == 1)                                   \
+        {                                                                 \
+            return detail::BASE(x);                                       \
+        }                                                                 \
+        else                                                              \
+        {                                                                 \
+            static_assert(false, "Unsupported miopen vector operation."); \
+        }                                                                 \
     }
-    else if constexpr(VecSize == 2)
-    {
-        FpVecType out;
-        out.x = detail::exp(x.x);
-        out.y = detail::exp(x.y);
-        return out;
-    }
-    else if constexpr(VecSize == 1)
-    {
-        return detail::exp(x);
-    }
-    else
-    {
-        static_assert(false, "Unsupported hip kernel provider vector operation.");
-    }
-}
 
-template <typename FpVecType>
-__forceinline__ __device__ FpVecType log(FpVecType x)
-{
-    constexpr auto VecSize = mapped_vector_info<FpVecType>::size;
-    if constexpr(VecSize == 4)
-    {
-        FpVecType out;
-        out.x = detail::log(x.x);
-        out.y = detail::log(x.y);
-        out.z = detail::log(x.z);
-        out.w = detail::log(x.w);
-        return out;
-    }
-    else if constexpr(VecSize == 2)
-    {
-        FpVecType out;
-        out.x = detail::log(x.x);
-        out.y = detail::log(x.y);
-        return out;
-    }
-    else if constexpr(VecSize == 1)
-    {
-        return detail::log(x);
-    }
-    else
-    {
-        static_assert(false, "Unsupported hip kernel provider vector operation.");
-    }
-}
+SINGLE_OPERAND_VEC_MATH(exp);
+SINGLE_OPERAND_VEC_MATH(log);
+SINGLE_OPERAND_VEC_MATH(sqrt);
+SINGLE_OPERAND_VEC_MATH(rsqrt);
+SINGLE_OPERAND_VEC_MATH(tanh);
+SINGLE_OPERAND_VEC_MATH(fabs);
 
-template <typename FpVecType>
-__forceinline__ __device__ FpVecType sqrt(FpVecType x)
-{
-    constexpr auto VecSize = mapped_vector_info<FpVecType>::size;
-    if constexpr(VecSize == 4)
-    {
-        FpVecType out;
-        out.x = detail::sqrt(x.x);
-        out.y = detail::sqrt(x.y);
-        out.z = detail::sqrt(x.z);
-        out.w = detail::sqrt(x.w);
-        return out;
-    }
-    else if constexpr(VecSize == 2)
-    {
-        FpVecType out;
-        out.x = detail::sqrt(x.x);
-        out.y = detail::sqrt(x.y);
-        return out;
-    }
-    else if constexpr(VecSize == 1)
-    {
-        return detail::sqrt(x);
-    }
-    else
-    {
-        static_assert(false, "Unsupported hip kernel provider vector operation.");
-    }
-}
+#undef SINGLE_OPERAND_VEC_MATH
 
-template <typename FpVecType>
-__forceinline__ __device__ FpVecType rsqrt(FpVecType x)
-{
-    constexpr auto VecSize = mapped_vector_info<FpVecType>::size;
-    if constexpr(VecSize == 4)
-    {
-        FpVecType out;
-        out.x = detail::rsqrt(x.x);
-        out.y = detail::rsqrt(x.y);
-        out.z = detail::rsqrt(x.z);
-        out.w = detail::rsqrt(x.w);
-        return out;
+#define DUAL_OPERAND_VEC_MATH(BASE)                                       \
+    template <typename FpVecType>                                         \
+    __forceinline__ __device__ FpVecType BASE(FpVecType x, FpVecType y)   \
+    {                                                                     \
+        constexpr auto VecSize = mapped_vector_info<FpVecType>::size;     \
+        if constexpr(VecSize == 4)                                        \
+        {                                                                 \
+            FpVecType out;                                                \
+            out.x = detail::BASE(x.x, y.x);                               \
+            out.y = detail::BASE(x.y, y.y);                               \
+            out.z = detail::BASE(x.z, y.z);                               \
+            out.w = detail::BASE(x.w, y.w);                               \
+            return out;                                                   \
+        }                                                                 \
+        else if constexpr(VecSize == 2)                                   \
+        {                                                                 \
+            FpVecType out;                                                \
+            out.x = detail::BASE(x.x, y.x);                               \
+            out.y = detail::BASE(x.y, y.y);                               \
+            return out;                                                   \
+        }                                                                 \
+        else if constexpr(VecSize == 1)                                   \
+        {                                                                 \
+            return detail::BASE(x, y);                                    \
+        }                                                                 \
+        else                                                              \
+        {                                                                 \
+            static_assert(false, "Unsupported miopen vector operation."); \
+        }                                                                 \
     }
-    else if constexpr(VecSize == 2)
-    {
-        FpVecType out;
-        out.x = detail::rsqrt(x.x);
-        out.y = detail::rsqrt(x.y);
-        return out;
-    }
-    else if constexpr(VecSize == 1)
-    {
-        return detail::rsqrt(x);
-    }
-    else
-    {
-        static_assert(false, "Unsupported hip kernel provider vector operation.");
-    }
-}
 
-template <typename FpVecType>
-__forceinline__ __device__ FpVecType fma(FpVecType a, FpVecType b, FpVecType c)
-{
-    constexpr auto VecSize = mapped_vector_info<FpVecType>::size;
-    if constexpr(VecSize == 4)
-    {
-        FpVecType out;
-        out.x = detail::fma(a.x, b.x, c.x);
-        out.y = detail::fma(a.y, b.y, c.y);
-        out.z = detail::fma(a.z, b.z, c.z);
-        out.w = detail::fma(a.w, b.w, c.w);
-        return out;
-    }
-    else if constexpr(VecSize == 2)
-    {
-        FpVecType out;
-        out.x = detail::fma(a.x, b.x, c.x);
-        out.y = detail::fma(a.y, b.y, c.y);
-        return out;
-    }
-    else if constexpr(VecSize == 1)
-    {
-        return detail::fma(a, b, c);
-    }
-    else
-    {
-        static_assert(false, "Unsupported hip kernel provider vector operation.");
-    }
-}
+DUAL_OPERAND_VEC_MATH(fmin);
+DUAL_OPERAND_VEC_MATH(fmax);
+DUAL_OPERAND_VEC_MATH(pow);
 
-template <typename FpVecType>
-__forceinline__ __device__ FpVecType fmax(FpVecType x, FpVecType y)
-{
-    constexpr auto VecSize = mapped_vector_info<FpVecType>::size;
-    if constexpr(VecSize == 4)
-    {
-        FpVecType out;
-        out.x = detail::fmax(x.x, y.x);
-        out.y = detail::fmax(x.y, y.y);
-        out.z = detail::fmax(x.z, y.z);
-        out.w = detail::fmax(x.w, y.w);
-        return out;
-    }
-    else if constexpr(VecSize == 2)
-    {
-        FpVecType out;
-        out.x = detail::fmax(x.x, y.x);
-        out.y = detail::fmax(x.y, y.y);
-        return out;
-    }
-    else if constexpr(VecSize == 1)
-    {
-        return detail::fmax(x, y);
-    }
-    else
-    {
-        static_assert(false, "Unsupported hip kernel provider vector operation.");
-    }
-}
-
-template <typename FpVecType>
-__forceinline__ __device__ FpVecType fmin(FpVecType x, FpVecType y)
-{
-    constexpr auto VecSize = mapped_vector_info<FpVecType>::size;
-    if constexpr(VecSize == 4)
-    {
-        FpVecType out;
-        out.x = detail::fmin(x.x, y.x);
-        out.y = detail::fmin(x.y, y.y);
-        out.z = detail::fmin(x.z, y.z);
-        out.w = detail::fmin(x.w, y.w);
-        return out;
-    }
-    else if constexpr(VecSize == 2)
-    {
-        FpVecType out;
-        out.x = detail::fmin(x.x, y.x);
-        out.y = detail::fmin(x.y, y.y);
-        return out;
-    }
-    else if constexpr(VecSize == 1)
-    {
-        return detail::fmin(x, y);
-    }
-    else
-    {
-        static_assert(false, "Unsupported hip kernel provider vector operation.");
-    }
-}
-
+// Forward calls from hip_kernel_provider::min() to fmin
 template <typename FpVecType>
 __forceinline__ __device__ FpVecType min(FpVecType x, FpVecType y)
 {
     return fmin(x, y);
 }
 
+// Forward calls from hip_kernel_provider::max() to fmax
 template <typename FpVecType>
 __forceinline__ __device__ FpVecType max(FpVecType x, FpVecType y)
 {
     return fmax(x, y);
 }
 
-template <typename FpVecType>
-__forceinline__ __device__ FpVecType tanh(FpVecType x)
-{
-    constexpr auto VecSize = mapped_vector_info<FpVecType>::size;
-    if constexpr(VecSize == 4)
-    {
-        FpVecType out;
-        out.x = detail::tanh(x.x);
-        out.y = detail::tanh(x.y);
-        out.z = detail::tanh(x.z);
-        out.w = detail::tanh(x.w);
-        return out;
-    }
-    else if constexpr(VecSize == 2)
-    {
-        FpVecType out;
-        out.x = detail::tanh(x.x);
-        out.y = detail::tanh(x.y);
-        return out;
-    }
-    else if constexpr(VecSize == 1)
-    {
-        return detail::tanh(x);
-    }
-    else
-    {
-        static_assert(false, "Unsupported hip kernel provider vector operation.");
-    }
-}
-
-template <typename FpVecType>
-__forceinline__ __device__ FpVecType pow(FpVecType x, FpVecType y)
-{
-    constexpr auto VecSize = mapped_vector_info<FpVecType>::size;
-    if constexpr(VecSize == 4)
-    {
-        FpVecType out;
-        out.x = detail::pow(x.x, y.x);
-        out.y = detail::pow(x.y, y.y);
-        out.z = detail::pow(x.z, y.z);
-        out.w = detail::pow(x.w, y.w);
-        return out;
-    }
-    else if constexpr(VecSize == 2)
-    {
-        FpVecType out;
-        out.x = detail::pow(x.x, y.x);
-        out.y = detail::pow(x.y, y.y);
-        return out;
-    }
-    else if constexpr(VecSize == 1)
-    {
-        return detail::pow(x, y);
-    }
-    else
-    {
-        static_assert(false, "Unsupported hip kernel provider vector operation.");
-    }
-}
-
-template <typename FpVecType>
-__forceinline__ __device__ FpVecType fabs(FpVecType x)
-{
-    constexpr auto VecSize = mapped_vector_info<FpVecType>::size;
-    if constexpr(VecSize == 4)
-    {
-        FpVecType out;
-        out.x = detail::fabs(x.x);
-        out.y = detail::fabs(x.y);
-        out.z = detail::fabs(x.z);
-        out.w = detail::fabs(x.w);
-        return out;
-    }
-    else if constexpr(VecSize == 2)
-    {
-        FpVecType out;
-        out.x = detail::fabs(x.x);
-        out.y = detail::fabs(x.y);
-        return out;
-    }
-    else if constexpr(VecSize == 1)
-    {
-        return detail::fabs(x);
-    }
-    else
-    {
-        static_assert(false, "Unsupported hip kernel provider vector operation.");
-    }
-}
+#undef DUAL_OPERAND_VEC_MATH
 
 } // namespace hip_kernel_provider
