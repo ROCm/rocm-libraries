@@ -612,7 +612,7 @@ DAGNode* CDNA5ReadyQueue::pickOneFromWMMA(DAGNode* pick) {
     // consume the time that is not used by the WMMA
     if (coIssueCyclePos_ < activeWmmaLatency_) advanceTime(activeWmmaLatency_ - coIssueCyclePos_);
 
-    activeCoIssueWindow_ = node->inst->hwInstDesc->coIssueWindow;
+    activeCoIssueWindow_ = node->inst->coIssueWindow;
     coIssueCyclePos_ = 0;
     activeWmmaLatency_ = node->inst->latencyCycles;
     activeWmmaNode_ = node;
