@@ -186,9 +186,23 @@ inline rocblas_status rocblas_call_tensile(rocblas_handle     handle,
             = (max_stride > 0 && max_stride * bytes_per_element > 0)
                   ? std::max(int64_t(1), overflow_limit_2_to_31 / (max_stride * bytes_per_element))
                   : int64_t(k);
-        // Only chunk if needed (when k would overflow)
+
+        static const bool disable_k_chunking_env = [] {
+            const char* env = getenv("ROCBLAS_DISABLE_K_CHUNKING");
+            return env && env[0] != '0';
+        }();
+        bool disable_k_chunking = false;
+#ifdef BUILD_WITH_HIPBLASLT
+        if(disable_k_chunking_env)
+        {
+            disable_k_chunking = handle->tryHipBLASLt(/*batched=*/false);
+        }
+#endif
+
+        // Only chunk if needed (when k would overflow) and not explicitly disabled
         // Ensure k_chunk >= 1 to avoid infinite loop when k=0
-        int64_t k_chunk = (safe_k >= k) ? std::max(int64_t(k), int64_t(1)) : safe_k;
+        int64_t k_chunk = (disable_k_chunking || safe_k >= k) ? std::max(int64_t(k), int64_t(1))
+                                                              : safe_k;
 
         Tc beta_val = *beta;
         Tc one_val  = static_cast<Tc>(1);
