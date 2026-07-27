@@ -1,4 +1,4 @@
-// Copyright ?? Advanced Micro Devices, Inc., or its affiliates.
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 //
 // Unit tests for HipFlash2Engine following the asm_sdpa_engine pattern.
