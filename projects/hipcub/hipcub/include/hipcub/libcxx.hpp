@@ -85,18 +85,27 @@
     #endif
 #endif
 
-// If 'libcudacxx' or 'libhipcxx' is not found, use fallback.
+// If 'libcudacxx' or 'libhipcxx' is not found:
 #ifndef _HIPCUB_HAS_DEVICE_SYSTEM_STD
-    #define _HIPCUB_LIBCXX_INCLUDE(LIB) _HIPCUB_STRINGIFY(LIB)
-    #define _HIPCUB_STD_INCLUDE(LIB) _HIPCUB_STRINGIFY(LIB)
-    #define _HIPCUB_LIBCXX
-    #define _HIPCUB_STD ::std
-    #define _HIPCUB_HAS_DEVICE_SYSTEM_STD 0
-    #define _HIPCUB_STD_NAMESPACE_BEGIN \
-        namespace std                   \
-        {
-    #define _HIPCUB_STD_NAMESPACE_END }
-#endif
+    #if defined(__CUDACC__) || defined(_NVHPC_CUDA)
+        #error "libcudacxx could not be found"
+    #else
+        // libhipcxx does not support Windows, use fallback
+        #ifdef _WIN32
+            #define _HIPCUB_LIBCXX_INCLUDE(LIB) _HIPCUB_STRINGIFY(LIB)
+            #define _HIPCUB_STD_INCLUDE(LIB) _HIPCUB_STRINGIFY(LIB)
+            #define _HIPCUB_LIBCXX
+            #define _HIPCUB_STD ::std
+            #define _HIPCUB_HAS_DEVICE_SYSTEM_STD 0
+            #define _HIPCUB_STD_NAMESPACE_BEGIN \
+                namespace std                   \
+                {
+            #define _HIPCUB_STD_NAMESPACE_END }
+        #else
+            #error "libhipcxx could not be found"
+        #endif // _WIN32
+    #endif  // defined(__CUDACC__) || defined(_NVHPC_CUDA)
+#endif // _HIPCUB_HAS_DEVICE_SYSTEM_STD
 
 #if _HIPCUB_HAS_DEVICE_SYSTEM_STD
 
