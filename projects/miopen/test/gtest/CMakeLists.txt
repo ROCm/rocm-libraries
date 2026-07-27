@@ -108,6 +108,15 @@ function(add_gtest TEST_NAME TEST_CPP)
     target_compile_definitions(${TEST_NAME} PRIVATE MIOPEN_ENABLE_HIPDNN_WRAPPER)
   endif()
 
+  # When the public/private split is enabled, MIOpen's implementation library
+  # exports the internal C API under _impl names. Tests that call an entry point
+  # absent from public miopen.h (e.g. conv_workspace_size_range) key off this macro
+  # to select the correct spelling; harmless for tests that ignore it. With the
+  # split OFF the macro is undefined and those tests build exactly as before.
+  if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
+    target_compile_definitions(${TEST_NAME} PRIVATE MIOPEN_ENABLE_HIPDNN_WRAPPER)
+  endif()
+
   add_dependencies(miopen-tests ${TEST_NAME})
   add_dependencies(miopen-check ${TEST_NAME})
 

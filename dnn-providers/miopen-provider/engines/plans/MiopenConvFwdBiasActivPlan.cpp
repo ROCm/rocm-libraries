@@ -240,15 +240,15 @@ void ConvFwdBiasActivPlan::execute(const HipdnnMiopenHandle& handle,
     auto yBuffer
         = hipdnn_plugin_sdk::findDeviceBuffer(_params.y().uid(), deviceBuffers, numDeviceBuffers);
 
-    THROW_ON_MIOPEN_FAILURE(miopenExecuteFusionPlan_v2(handle.miopenHandle,
-                                                       _fusePlanDesc.get(),
-                                                       _params.x().tensorDescriptor(),
-                                                       xBuffer.ptr,
-                                                       _params.y().tensorDescriptor(),
-                                                       yBuffer.ptr,
-                                                       fusionArgs,
-                                                       workspace,
-                                                       workspaceSize));
+    THROW_ON_MIOPEN_FAILURE(miopenExecuteFusionPlan_v2_impl(handle.miopenHandle,
+                                                            _fusePlanDesc.get(),
+                                                            _params.x().tensorDescriptor(),
+                                                            xBuffer.ptr,
+                                                            _params.y().tensorDescriptor(),
+                                                            yBuffer.ptr,
+                                                            fusionArgs,
+                                                            workspace,
+                                                            workspaceSize));
 }
 
 } // namespace miopen_plugin

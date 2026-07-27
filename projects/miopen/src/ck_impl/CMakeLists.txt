@@ -150,8 +150,15 @@ foreach(gpu_target IN LISTS _CK_FILTERED_TARGETS)
     # HIP runtime (hip::device required for compiling CK device code)
     target_link_libraries(${lib_name} PRIVATE hip::device)
 
-    # Link against MIOpen for shared types (ConvSolution, InvokerFactory, etc.)
-    target_link_libraries(${lib_name} PRIVATE MIOpen)
+    # Link against the MIOpen implementation library for shared internal C++ types
+    # (ConvSolution, InvokerFactory, ProblemDescription, etc.). With the public/private
+    # split enabled (MIOPEN_ENABLE_HIPDNN_WRAPPER=ON) these live only in
+    # libMIOpen_private.so — the public MIOpen wrapper exports only the public C API
+    # (RFC 0001 §4.10 item 1) — and _MIOPEN_IMPL_TARGET resolves to MIOpen_private.
+    # With the split OFF (default) it resolves to the single MIOpen library, exactly
+    # as before the split. Unlike the hipDNN provider, these plugins consume MIOpen's
+    # internal C++ symbols directly, not the C API.
+    target_link_libraries(${lib_name} PRIVATE ${_MIOPEN_IMPL_TARGET})
 
     # Install alongside MIOpen
     set_target_properties(${lib_name} PROPERTIES INSTALL_RPATH "$ORIGIN")
