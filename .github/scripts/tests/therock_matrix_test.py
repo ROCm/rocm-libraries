@@ -26,6 +26,25 @@ class TheRockMatrixTest(unittest.TestCase):
         self.assertEqual(len(project_to_run), 1)
         self.assertFalse(project_to_run[0]["run_rocjitsu_race_check"])
 
+    def test_rocjitsu_race_check_does_not_run_for_provider_rows(self):
+        # These rows exercise the names that motivated the explicit selection
+        # marker. In particular, `hipblasltprovider` must not match merely
+        # because it contains the `hipblaslt` substring.
+        provider_subtrees = [
+            "dnn-providers/hipblaslt-provider",
+            "dnn-providers/hip-kernel-provider",
+        ]
+
+        for subtree in provider_subtrees:
+            with self.subTest(subtree=subtree):
+                project_to_run = therock_matrix.collect_projects_to_run([subtree])
+                self.assertGreater(len(project_to_run), 0)
+                self.assertFalse(
+                    any(
+                        project["run_rocjitsu_race_check"] for project in project_to_run
+                    )
+                )
+
     def test_rocjitsu_race_check_follows_hipblaslt_into_merged_row(self):
         project_to_run = therock_matrix.collect_projects_to_run(
             ["projects/hipblaslt", "projects/miopen"]
