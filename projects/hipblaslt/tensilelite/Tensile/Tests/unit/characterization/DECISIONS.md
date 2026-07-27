@@ -379,3 +379,12 @@ paths): DataType → `Tensile/Common/DataType.py`; CommonTypes →
 
 ## D16 — BufferLoad/BufferStore promoted to Required Parameters
 **Context** kernel basename hash changes across all archs; assembly verified unchanged/correct; no err or kernel-count changes."
+
+## D17 — StreamKWorkStealing added to the required (min-naming) parameter set
+**Decision:** Promote `StreamKWorkStealing` to the required (min-naming) parameter set in
+`Common/RequiredParameters.py` and accept the regenerated `_codegen` / SolutionClass /
+ValidParameters goldens.
+**Why:** without it, two solutions differing only in `StreamKWorkStealing` would collide on the
+same kernel identity name/hash.
+**Verification:** only `basename` hashes + the `SKWS0` name token + the roster/valid-values entry
+change (`num_keys` 334→335); no `err`, instruction-count, or emitted-assembly changes.
