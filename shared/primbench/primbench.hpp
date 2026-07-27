@@ -2612,6 +2612,14 @@ public:
 #endif
     }
 
+    /**
+     * \brief Returns the bytes per second of the last ran benchmark.
+     */
+    double get_last_bytes_per_second()
+    {
+        return m_last_bytes_per_second;
+    }
+
     // Public fields accessed directly by benchmarks.
     const stream_t stream; ///< Stream used by benchmarks for kernel launches.
     const size_t   size; ///< Input size processed per iteration.
