@@ -6,7 +6,7 @@
 // It intentionally has no external dependencies so documentation checks can run
 // in a minimal CI image:
 //
-//	go run tools/mdlinklint/main.go --root dsl_docs
+//	go run tools/mdlinklint/main.go --root dsl_docs --link-root ..
 package main
 
 import (
@@ -23,6 +23,8 @@ import (
 	"unicode/utf8"
 )
 
+const maxMarkdownBytes int64 = 4 << 20
+
 type link struct {
 	target string
 	line   int
@@ -38,37 +40,46 @@ type diagnostic struct {
 
 type linter struct {
 	root         string
+	linkRoot     string
 	anchorCache  map[string]map[string]struct{}
 	checkedLinks int
 }
 
 func main() {
 	root := flag.String("root", ".", "directory containing Markdown files to lint")
+	linkRoot := flag.String("link-root", "", "boundary for resolved local links (defaults to root)")
 	quiet := flag.Bool("quiet", false, "do not print a success summary")
 	flag.Parse()
 
 	if flag.NArg() != 0 {
-		fmt.Fprintln(os.Stderr, "usage: mdlinklint [--root directory] [--quiet]")
+		fmt.Fprintln(os.Stderr, "usage: mdlinklint [--root directory] [--link-root directory] [--quiet]")
 		os.Exit(2)
 	}
 
-	absRoot, err := filepath.Abs(*root)
+	canonicalRoot, err := canonicalDirectory(*root)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "mdlinklint: resolve root: %v\n", err)
+		fmt.Fprintf(os.Stderr, "mdlinklint: invalid root: %v\n", err)
 		os.Exit(2)
 	}
-	info, err := os.Stat(absRoot)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "mdlinklint: %v\n", err)
-		os.Exit(2)
+	canonicalLinkRoot := canonicalRoot
+	if *linkRoot != "" {
+		canonicalLinkRoot, err = canonicalDirectory(*linkRoot)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "mdlinklint: invalid link root: %v\n", err)
+			os.Exit(2)
+		}
 	}
-	if !info.IsDir() {
-		fmt.Fprintf(os.Stderr, "mdlinklint: root is not a directory: %s\n", *root)
+	if !pathWithin(canonicalLinkRoot, canonicalRoot) {
+		fmt.Fprintf(os.Stderr, "mdlinklint: root %s is outside link root %s\n", canonicalRoot, canonicalLinkRoot)
 		os.Exit(2)
 	}
 
-	l := linter{root: absRoot, anchorCache: make(map[string]map[string]struct{})}
-	files, err := markdownFiles(absRoot)
+	l := linter{
+		root:        canonicalRoot,
+		linkRoot:    canonicalLinkRoot,
+		anchorCache: make(map[string]map[string]struct{}),
+	}
+	files, err := markdownFiles(canonicalRoot)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "mdlinklint: walk %s: %v\n", *root, err)
 		os.Exit(2)
@@ -104,6 +115,33 @@ func main() {
 	}
 }
 
+func canonicalDirectory(path string) (string, error) {
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	canonical, err := filepath.EvalSymlinks(absolute)
+	if err != nil {
+		return "", err
+	}
+	info, err := os.Stat(canonical)
+	if err != nil {
+		return "", err
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("not a directory: %s", path)
+	}
+	return filepath.Clean(canonical), nil
+}
+
+func pathWithin(root, path string) bool {
+	relative, err := filepath.Rel(root, path)
+	if err != nil {
+		return false
+	}
+	return relative != ".." && !strings.HasPrefix(relative, ".."+string(os.PathSeparator))
+}
+
 func markdownFiles(root string) ([]string, error) {
 	var files []string
 	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
@@ -114,6 +152,9 @@ func markdownFiles(root string) ([]string, error) {
 			return nil
 		}
 		if strings.EqualFold(filepath.Ext(entry.Name()), ".md") {
+			if entry.Type()&fs.ModeSymlink != 0 {
+				return fmt.Errorf("refusing symlinked Markdown source: %s", path)
+			}
 			files = append(files, path)
 		}
 		return nil
@@ -122,7 +163,7 @@ func markdownFiles(root string) ([]string, error) {
 }
 
 func (l *linter) lintFile(file string) []diagnostic {
-	contents, err := os.ReadFile(file)
+	contents, err := readMarkdown(file)
 	if err != nil {
 		return []diagnostic{l.diagnostic(file, 1, 1, fmt.Sprintf("cannot read file: %v", err))}
 	}
@@ -174,11 +215,22 @@ func (l *linter) checkLink(source, target string) string {
 	if decodedPath != "" {
 		resolved = filepath.Clean(filepath.Join(filepath.Dir(source), filepath.FromSlash(decodedPath)))
 	}
-	if _, err := os.Stat(resolved); err != nil {
+	if !pathWithin(l.linkRoot, resolved) {
+		return fmt.Sprintf("local link %q escapes link root %s", target, displayPath(l.root, l.linkRoot))
+	}
+	canonical, err := filepath.EvalSymlinks(resolved)
+	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return fmt.Sprintf("unresolved local link %q (resolved to %s)", target, displayPath(l.root, resolved))
 		}
 		return fmt.Sprintf("cannot resolve local link %q: %v", target, err)
+	}
+	if !pathWithin(l.linkRoot, canonical) {
+		return fmt.Sprintf("local link %q escapes link root through a symbolic link", target)
+	}
+	info, err := os.Stat(canonical)
+	if err != nil {
+		return fmt.Sprintf("cannot inspect local link %q: %v", target, err)
 	}
 
 	if hasFragment && fragment != "" && strings.EqualFold(filepath.Ext(resolved), ".md") {
@@ -186,7 +238,10 @@ func (l *linter) checkLink(source, target string) string {
 		if err != nil {
 			return fmt.Sprintf("invalid percent-encoding in fragment %q", target)
 		}
-		anchors, err := l.anchors(resolved)
+		if !info.Mode().IsRegular() {
+			return fmt.Sprintf("Markdown fragment target %q is not a regular file", target)
+		}
+		anchors, err := l.anchors(canonical)
 		if err != nil {
 			return fmt.Sprintf("cannot read link target %q: %v", target, err)
 		}
@@ -209,7 +264,7 @@ func (l *linter) anchors(file string) (map[string]struct{}, error) {
 	if anchors, ok := l.anchorCache[file]; ok {
 		return anchors, nil
 	}
-	contents, err := os.ReadFile(file)
+	contents, err := readMarkdown(file)
 	if err != nil {
 		return nil, err
 	}
@@ -234,6 +289,20 @@ func (l *linter) anchors(file string) (map[string]struct{}, error) {
 	}
 	l.anchorCache[file] = anchors
 	return anchors, nil
+}
+
+func readMarkdown(file string) ([]byte, error) {
+	info, err := os.Stat(file)
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("not a regular file")
+	}
+	if info.Size() > maxMarkdownBytes {
+		return nil, fmt.Errorf("file is %d bytes; limit is %d", info.Size(), maxMarkdownBytes)
+	}
+	return os.ReadFile(file)
 }
 
 func isExternal(target string) bool {
