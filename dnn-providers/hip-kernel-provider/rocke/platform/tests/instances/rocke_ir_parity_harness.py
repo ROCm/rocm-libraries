@@ -64,6 +64,7 @@ def gemm_spec(
     pipeline,
     epilogue,
     wave_size,
+    cshuffle_no_alias=False,
 ):
     from rocke.instances.common.gemm_universal import (
         DataSpec,
@@ -92,17 +93,18 @@ def gemm_spec(
             pad_m=True,
             pad_n=True,
             pad_k=True,
+            cshuffle_no_alias=cshuffle_no_alias,
         ),
         data=DataSpec(dtype_a="fp16", dtype_b="fp16", dtype_c="fp16"),
         wave_size=wave_size,
     )
 
 
-def build_gemm(name, arch, *args):
+def build_gemm(name, arch, *args, **kwargs):
     def _build():
         from rocke.instances.common.gemm_universal import build_universal_gemm
 
-        return build_universal_gemm(gemm_spec(name, arch, *args), arch=arch)
+        return build_universal_gemm(gemm_spec(name, arch, *args, **kwargs), arch=arch)
 
     return _build
 
@@ -350,6 +352,27 @@ def cases():
             "compv4",
             "cshuffle",
             64,
+        ),
+    )
+    add(
+        "gemm",
+        "gemm/gfx950/t128x128x32/cshuffle_no_alias",
+        "gfx950",
+        build_gemm(
+            "irhash_gemm_950_a_noalc",
+            "gfx950",
+            128,
+            128,
+            32,
+            2,
+            2,
+            32,
+            32,
+            16,
+            "compv4",
+            "cshuffle",
+            64,
+            cshuffle_no_alias=True,
         ),
     )
     add(

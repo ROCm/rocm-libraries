@@ -30,7 +30,7 @@ AttributeMacros: [
                   'THRUST_HOST',
                   'THRUST_NODISCARD',
                   'THRUST_DEPRECATED',
-                  'THRUST_INLINE_CONSTANT',
+                  'THRUST_GLOBAL_CONSTANT',
                   # thrust
                   '_CCCL_ALIGNAS_TYPE',
                   '_CCCL_ALIGNAS',

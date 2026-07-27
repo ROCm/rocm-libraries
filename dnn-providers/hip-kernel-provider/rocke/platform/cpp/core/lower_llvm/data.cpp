@@ -77,6 +77,7 @@ const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS[] = {
     {"workgroup.z", "declare i32 @llvm.amdgcn.workgroup.id.z()"},
     {"s.barrier", "declare void @llvm.amdgcn.s.barrier()"},
     {"exp2.f32", "declare float @llvm.exp2.f32(float)"},
+    {"amdgcn.exp2.f32", "declare float @llvm.amdgcn.exp2.f32(float)"},
     {"log2.f32", "declare float @llvm.log2.f32(float)"},
     {"sqrt.f32", "declare float @llvm.sqrt.f32(float)"},
     {"rsqrt.f32", "declare float @llvm.amdgcn.rsq.f32(float)"},
