@@ -27,6 +27,7 @@ Usage (end-to-end):
 
 import ctypes
 import json
+import functools
 import logging
 import os
 import subprocess
@@ -93,6 +94,59 @@ _HIPCC_BASE_FLAGS = [
     "-DCK_TILE_SINGLE_KERNEL_INCLUDE",
     "-w",  # suppress warnings during generated-code compilation
 ]
+
+
+# --- TE backend codegen flags -------------------------------------------------
+# For a FAIR bridge-vs-Old-TE comparison the bridge .so must be built with the
+# SAME -mllvm backend flags that CK's CMake injects into the tile_engine example
+# TU (run_gemm_quant_example).  Omitting them made the bridge kernel codegen
+# materially worse -- e.g. mx_bf16bf8 4096^3 measured ~+24% slower than Old-TE
+# even though BOTH sides select the identical AgBgCrCompV3 CShuffle kernel; with
+# these flags the two builds are backend-identical and the gap collapses.
+#
+# The list mirrors mx_gemm_utils._MX_CODEGEN_FLAGS byte-for-byte.  The coerce
+# flag is probe-gated: CK's CMake only adds it when check_cxx_compiler_flag
+# passes, and ROCm 7.2's clang REJECTS -amdgpu-coerce-illegal-types=1, so the
+# probe drops it on that toolchain -- keeping BOTH sides codegen-identical.
+_BQUANT_CODEGEN_FLAGS = (
+    "-mllvm", "-amdgpu-early-inline-all=true",
+    "-mllvm", "-amdgpu-function-calls=false",
+    "-mllvm", "--lsr-drop-solution=1",
+    "-mllvm", "-enable-post-misched=0",
+    "-fno-offload-uniform-block",
+    "--offload-compress",
+)
+_BQUANT_PROBED_CODEGEN_FLAGS = (
+    ("-mllvm", "-amdgpu-coerce-illegal-types=1"),
+)
+
+
+@functools.lru_cache(maxsize=None)
+def _hipcc_accepts(flag_tuple: "Tuple[str, ...]", hipcc: str = _DEFAULT_HIPCC) -> bool:
+    """Mirror CMake check_cxx_compiler_flag: does hipcc compile a trivial TU with
+    these flags?  Cached so the probe runs at most once per distinct flag set."""
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            src = Path(d) / "probe.cpp"
+            src.write_text("int main(){}\n")
+            r = subprocess.run(
+                [hipcc, *flag_tuple, "-c", str(src), "-o", str(Path(d) / "probe.o")],
+                capture_output=True, timeout=120,
+            )
+            return r.returncode == 0
+    except Exception:
+        return False
+
+
+@functools.lru_cache(maxsize=None)
+def _bquant_codegen_flags(hipcc: str = _DEFAULT_HIPCC) -> "Tuple[str, ...]":
+    """Old-TE's gemm_quant codegen flags plus any probe-gated flags the compiler
+    accepts -- the exact backend flag set the TE benchmark TU is built with."""
+    flags = list(_BQUANT_CODEGEN_FLAGS)
+    for pair in _BQUANT_PROBED_CODEGEN_FLAGS:
+        if _hipcc_accepts(pair, hipcc):
+            flags = list(pair) + flags
+    return tuple(flags)
 
 
 # =============================================================================
@@ -498,6 +552,80 @@ def _encode_bq_for_variant(BQ, variant_key: Optional[str],
     return arr
 
 
+# variant_key -> the numpy element size (bytes) of the kernel's compile-time
+# ADataType (unified_gemm_bquant_codegen.BQUANT_VARIANTS[*]["ck_a"]):
+#   fp8 / bf8 / fp8i4 / bf8i4  -> ADataType = fp8_t / bf8_t   (1 byte)
+#   mx_bf16bf16/bf8/fp4        -> ADataType = bf16_t          (2 bytes)
+# The ctypes lib reads elements_to_bytes<ADataType>(M*K) bytes from the host A
+# pointer.  If a caller hands a uint8 A (1 byte/elem) for an MX kernel whose
+# ADataType is bf16 (2 bytes/elem), the .so over-reads M*K bytes past the numpy
+# allocation.  At small M*K the over-read lands in slack and only corrupts the
+# result; at large M*K (e.g. M=K=2048) it walks off the mapping and the HIP DMA
+# fails to pin the host source ("DmaBlitManager::getBuffer failed to pin a
+# resource!") -> SEGFAULT.  _ADTYPE_ELEMSIZE_BY_VARIANT lets the runner coerce A
+# to the kernel's element width before the ctypes call so the copy is always
+# in-bounds.
+_ADTYPE_ELEMSIZE_BY_VARIANT: Dict[str, int] = {
+    "fp8":         1,
+    "bf8":         1,
+    "fp8i4":       1,
+    "bf8i4":       1,
+    "mx_bf16bf16": 2,
+    "mx_bf16bf8":  2,
+    "mx_bf16fp4":  2,
+}
+
+
+def _coerce_a_for_variant(A, variant_key: Optional[str]) -> "object":
+    """Return A whose element byte-width matches the kernel's ADataType.
+
+    The ctypes lib copies ``M*K * sizeof(ADataType)`` bytes from the host A
+    pointer, so A MUST be that many bytes or the copy reads out of bounds.  MX
+    kernels have ADataType == bf16 (2 bytes); every other bquant variant has a
+    1-byte ADataType.  When the supplied array's element size does not match the
+    kernel's, coerce it:
+
+      * 1-byte kernel, A already 1 byte  -> unchanged.
+      * 2-byte MX kernel, A given as float/bf16 (2 bytes) -> cast to bf16.
+      * 2-byte MX kernel, A given as 1-byte (uint8/int8)  -> reinterpret the
+        bytes as bf16 element values (contiguous view), matching how the .so
+        would have read them had A been laid out as bf16.
+
+    This guard makes an out-of-bounds device copy impossible regardless of the
+    dtype the caller chose for A.
+    """
+    import numpy as np
+    if variant_key is None:
+        return A
+    want = _ADTYPE_ELEMSIZE_BY_VARIANT.get(variant_key)
+    if want is None:
+        return A
+    arr = np.ascontiguousarray(A)
+    have = arr.dtype.itemsize
+    if have == want:
+        return arr
+    if want == 2:
+        # MX kernel expects a 2-byte (bf16) A.
+        try:
+            import ml_dtypes
+            bf16 = ml_dtypes.bfloat16
+        except Exception:  # pragma: no cover - ml_dtypes always present on nodes
+            bf16 = None
+        if have == 1:
+            # 1-byte payload -> promote to bf16 element values so the buffer is
+            # M*K*2 bytes and the .so copy stays in bounds.  Cast the integer
+            # byte values into bf16 (finite, small) rather than a raw bit-view,
+            # which could produce NaN/Inf bit patterns.
+            vals = arr.astype(np.float32)
+            return vals.astype(bf16) if bf16 is not None else vals.astype(np.float16)
+        # >2-byte float (e.g. float32/float64) -> narrow to the kernel width.
+        return arr.astype(bf16) if bf16 is not None else arr.astype(np.float16)
+    # want == 1: MX-free variants; A must be a single byte per element.
+    if have != 1:
+        return arr.astype(np.uint8)
+    return arr
+
+
 # =============================================================================
 # BQuantGpuGemmRunner -- high-level runner
 # =============================================================================
@@ -564,9 +692,18 @@ class BQuantGpuGemmRunner:
         # kernel's compile-time QDataType.  fp8/bf8 want float32; fp8i4/bf8i4 want
         # fp8/bf8 bytes; MX wants e8m0 uint8.  Encode float32 scales to the right
         # width here (i4 previously read 4-byte float32 as 1-byte fp8 -> NaN).
+        _variant = _variant_from_kernel_name(self.kernel_name)
         BQ = _encode_bq_for_variant(
-            BQ, _variant_from_kernel_name(self.kernel_name),
+            BQ, _variant,
             gfx_arch=getattr(self, "_gfx_arch", None))
+
+        # ADataType-aware A guard: the .so copies M*K * sizeof(ADataType) bytes
+        # from the host A pointer.  MX kernels have ADataType == bf16 (2 bytes);
+        # a caller passing a 1-byte A (e.g. uint8) would make the .so over-read
+        # M*K bytes past the numpy allocation -- harmless slack at small M*K but a
+        # host-pin failure -> SEGFAULT at large M*K (e.g. M=K=2048).  Coerce A to
+        # the kernel's element width so the device copy is always in bounds.
+        A = _coerce_a_for_variant(A, _variant)
 
         # Output buffer -- dtype must match the compiled kernel's CDataType.
         C = np.zeros((M, N), dtype=c_dtype)
@@ -788,11 +925,18 @@ def _compile_bquant_kernel(
     if "gfx950" in gfx_arch:
         arch_defines += ["-DCK_USE_NATIVE_MX_SUPPORT", "-DCK_GFX950_SUPPORT"]
 
+    # TE backend codegen flags: mirror the -mllvm set CK's CMake injects into the
+    # tile_engine gemm_quant example so the bridge .so is backend-identical to
+    # Old-TE.  Probe-gated (drops -amdgpu-coerce-illegal-types=1 on toolchains
+    # that reject it, e.g. ROCm 7.2) so the build stays portable and fair.
+    codegen_flags = list(_bquant_codegen_flags(hipcc))
+
     compile_cmd = [hipcc, "-c", "-fPIC", "-O3", "-std=c++17",
                    "-DCK_TILE_SINGLE_KERNEL_INCLUDE", "-w",
                    f"--offload-arch={gfx_arch}",
                    f"-DGFX_ARCH=\"{gfx_arch}\"",
                    *arch_defines,
+                   *codegen_flags,
                    "-include", str(hpp_path),
                    str(_CTYPES_LIB_SRC),
                    "-o", str(obj_path)]

@@ -623,5 +623,142 @@ class TestQDataTypeAwareBQEncoding(unittest.TestCase):
         self.assertTrue(np.array_equal(out, bq))
 
 
+class TestEpilogueGating(unittest.TestCase):
+    """PermuteNEpilogue must be gated on PreshuffleB, mirroring Old-TE.
+
+    run_gemm_quant_example.inc:208-252 selects the epilogue via
+        TiledMMAPermuteN = PreshuffleB && (N_Repeat % 2 == 0)   (GemmConfig)
+        TiledPermuteN    = (kN > 1) ? false : TiledMMAPermuteN
+        GemmEpilogue     = TiledPermuteN ? PermuteN : CShuffle
+    TiledMMAPermuteN is false in GemmConfigBase and only overridden by the
+    PreshuffleB configs, so every non-PreshuffleB kernel (compv3, preshufflequant,
+    MX microscale) must use CShuffleEpilogue. A prior bug omitted the PreshuffleB
+    gate, making even-N_Repeat MX kernels (e.g. mx_bf16bf8 128-tile, N_Repeat=2)
+    emit a PermuteNEpilogue -- a different, ~16-17% slower kernel than Old-TE.
+    """
+
+    def _emits_permute_n(self, cfg):
+        txt = _header_text(cfg)
+        has_permute = "PermuteNEpilogue<" in txt
+        has_cshuffle = "CShuffleEpilogue<" in txt
+        # Exactly one epilogue must be emitted.
+        self.assertNotEqual(has_permute, has_cshuffle,
+                            f"{cfg.name}: ambiguous epilogue in header")
+        return has_permute
+
+    def test_mx_configs_use_cshuffle(self):
+        # MX microscale kernels are PreshuffleB=false -> CShuffle (never PermuteN).
+        for ctor in _MX:
+            cfg = ctor()
+            self.assertFalse(cfg.preshuffle_b, cfg.name)
+            self.assertFalse(self._emits_permute_n(cfg),
+                             f"{cfg.name} must emit CShuffleEpilogue, not PermuteN")
+            self.assertIn("_cshuffle_", cfg.name)
+
+    def test_preshufflequant_uses_cshuffle(self):
+        # preshuffle_bquant (not preshuffle_b) is still CShuffle in Old-TE.
+        cfg = default_fp8_preshufflequant_config()
+        self.assertFalse(cfg.preshuffle_b, cfg.name)
+        self.assertFalse(self._emits_permute_n(cfg),
+                         f"{cfg.name} must emit CShuffleEpilogue, not PermuteN")
+        self.assertIn("_cshuffle_", cfg.name)
+
+    def test_compv3_decode_uses_cshuffle(self):
+        # Plain decode-tile fp8/bf8 (PreshuffleB=false) -> CShuffle.
+        for ctor in _BASE:
+            cfg = ctor()
+            self.assertFalse(self._emits_permute_n(cfg),
+                             f"{cfg.name} must emit CShuffleEpilogue, not PermuteN")
+
+    def test_preshuffleb_uses_permute_n(self):
+        # PreshuffleB with even N_Repeat -> PermuteNEpilogue (the ONE permute case).
+        cfg = default_fp8_preshuffleb_config()
+        self.assertTrue(cfg.preshuffle_b, cfg.name)
+        self.assertTrue(self._emits_permute_n(cfg),
+                        f"{cfg.name} must emit PermuteNEpilogue")
+        self.assertIn("_permute_n_", cfg.name)
+
+
+class TestADataTypeGuard(unittest.TestCase):
+    """A must be coerced to the kernel's ADataType byte-width before the copy.
+
+    The ctypes lib reads ``M*K * sizeof(ADataType)`` bytes from the host A
+    pointer.  MX kernels have ADataType == bf16 (2 bytes); all other bquant
+    variants have a 1-byte ADataType.  A caller that hands a 1-byte (uint8) A to
+    an MX kernel used to make the .so over-read M*K bytes past the numpy
+    allocation -- harmless slack at small M*K, but a host-pin failure -> SEGFAULT
+    at large M*K (M=K=2048).  _coerce_a_for_variant closes that gap so the device
+    copy is always in bounds regardless of the caller's A dtype.
+    """
+
+    def test_mx_promotes_1byte_a_to_2byte(self):
+        import numpy as np
+        import gemm_bquant_utils as gbu
+        M, K = 16, 32
+        a = np.arange(M * K, dtype=np.uint8).reshape(M, K)
+        for v in ("mx_bf16bf16", "mx_bf16bf8", "mx_bf16fp4"):
+            out = np.asarray(gbu._coerce_a_for_variant(a, v))
+            self.assertEqual(out.dtype.itemsize, 2,
+                             f"{v}: A must be 2 bytes/elem (bf16), got {out.dtype}")
+            self.assertEqual(out.shape, (M, K))
+            # Values preserved (integer byte values are exactly representable in bf16).
+            self.assertTrue(np.allclose(out.astype(np.float32),
+                                        a.astype(np.float32), rtol=0, atol=0))
+
+    def test_mx_narrows_float32_a_to_2byte(self):
+        import numpy as np
+        import gemm_bquant_utils as gbu
+        a = (np.arange(64, dtype=np.float32).reshape(8, 8) / 8.0)
+        out = np.asarray(gbu._coerce_a_for_variant(a, "mx_bf16bf8"))
+        self.assertEqual(out.dtype.itemsize, 2)
+
+    def test_mx_passthrough_when_already_2byte(self):
+        import numpy as np
+        import gemm_bquant_utils as gbu
+        try:
+            import ml_dtypes
+            a = np.ones((4, 4), dtype=ml_dtypes.bfloat16)
+        except Exception:
+            a = np.ones((4, 4), dtype=np.float16)
+        out = np.asarray(gbu._coerce_a_for_variant(a, "mx_bf16bf8"))
+        self.assertEqual(out.dtype.itemsize, 2)
+
+    def test_non_mx_keeps_1byte_a(self):
+        import numpy as np
+        import gemm_bquant_utils as gbu
+        a = np.arange(16, dtype=np.uint8).reshape(4, 4)
+        for v in ("fp8", "bf8", "fp8i4", "bf8i4"):
+            out = np.asarray(gbu._coerce_a_for_variant(a, v))
+            self.assertEqual(out.dtype.itemsize, 1, f"{v}: A must stay 1 byte/elem")
+
+    def test_unknown_variant_passthrough(self):
+        import numpy as np
+        import gemm_bquant_utils as gbu
+        a = np.arange(16, dtype=np.uint8).reshape(4, 4)
+        self.assertIs(gbu._coerce_a_for_variant(a, None), a)
+
+
+class TestFairCodegenFlags(unittest.TestCase):
+    """The bridge .so must build with the same -mllvm TE backend flags Old-TE
+    uses, or the kernel codegen differs and the A/B comparison is unfair (mx
+    4096^3 measured ~+24% vs Old-TE without them, ~+8% with them)."""
+
+    def test_te_flags_present_and_coerce_probe_gated(self):
+        import gemm_bquant_utils as gbu
+        # The unconditional TE flag set must match Old-TE (mx_gemm_utils) exactly.
+        for pair in ("-amdgpu-early-inline-all=true",
+                     "-amdgpu-function-calls=false",
+                     "--lsr-drop-solution=1",
+                     "-enable-post-misched=0"):
+            self.assertIn(pair, gbu._BQUANT_CODEGEN_FLAGS)
+        self.assertIn("-fno-offload-uniform-block", gbu._BQUANT_CODEGEN_FLAGS)
+        self.assertIn("--offload-compress", gbu._BQUANT_CODEGEN_FLAGS)
+        # coerce-illegal-types is probe-gated (not unconditional) so the build
+        # stays portable to toolchains that reject it (ROCm 7.2).
+        self.assertNotIn("-amdgpu-coerce-illegal-types=1", gbu._BQUANT_CODEGEN_FLAGS)
+        self.assertEqual(gbu._BQUANT_PROBED_CODEGEN_FLAGS,
+                         (("-mllvm", "-amdgpu-coerce-illegal-types=1"),))
+
+
 if __name__ == "__main__":
     unittest.main()
