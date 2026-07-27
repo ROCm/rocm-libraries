@@ -4,10 +4,10 @@
 #include <limits>
 #include <string>
 
+#include "MiopenApi.hpp"
 #include <hipdnn_plugin_sdk/GlobalKnobDefines.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
-#include <miopen/miopen_impl.h>
 
 #include "MiopenConvDescriptor.hpp"
 #include "MiopenConvPlanBuilder.hpp"
@@ -16,9 +16,10 @@
 #include "engines/plans/MiopenConvFwdPlan.hpp"
 #include "engines/plans/MiopenConvWrwPlan.hpp"
 
-// The miopenConvolution*GetWorkSpaceSizeRange entry points are declared under
-// their _impl names in <miopen/miopen_impl.h> (ALMIOPEN-2246), reached via the
-// provider's direct MIOpen_private linkage — no local prototype needed.
+// The miopenConvolution*GetWorkSpaceSizeRange entry points are declared via
+// <MiopenApi.hpp> (ALMIOPEN-2246) — under their _impl names when linking the
+// private implementation library, otherwise their public names — so no local
+// prototype is needed here.
 
 namespace miopen_plugin
 {
@@ -49,12 +50,12 @@ bool isApplicableFwd(const HipdnnMiopenHandle& handle,
             return false;
         }
 
-        auto status = miopenConvolutionForwardGetSolutionCount_impl(handle.miopenHandle,
-                                                                    params.w().tensorDescriptor(),
-                                                                    params.x().tensorDescriptor(),
-                                                                    params.conv().convDescriptor(),
-                                                                    params.y().tensorDescriptor(),
-                                                                    &solutionCount);
+        auto status = miopenConvolutionForwardGetSolutionCount(handle.miopenHandle,
+                                                               params.w().tensorDescriptor(),
+                                                               params.x().tensorDescriptor(),
+                                                               params.conv().convDescriptor(),
+                                                               params.y().tensorDescriptor(),
+                                                               &solutionCount);
         if(status != miopenStatusSuccess)
         {
             return false;
@@ -87,13 +88,12 @@ bool isApplicableBwd(const HipdnnMiopenHandle& handle,
             return false;
         }
 
-        auto status
-            = miopenConvolutionBackwardDataGetSolutionCount_impl(handle.miopenHandle,
-                                                                 params.dy().tensorDescriptor(),
-                                                                 params.w().tensorDescriptor(),
-                                                                 params.conv().convDescriptor(),
-                                                                 params.dx().tensorDescriptor(),
-                                                                 &solutionCount);
+        auto status = miopenConvolutionBackwardDataGetSolutionCount(handle.miopenHandle,
+                                                                    params.dy().tensorDescriptor(),
+                                                                    params.w().tensorDescriptor(),
+                                                                    params.conv().convDescriptor(),
+                                                                    params.dx().tensorDescriptor(),
+                                                                    &solutionCount);
         if(status != miopenStatusSuccess)
         {
             return false;
@@ -127,12 +127,12 @@ bool isApplicableWrw(const HipdnnMiopenHandle& handle,
         }
 
         auto status
-            = miopenConvolutionBackwardWeightsGetSolutionCount_impl(handle.miopenHandle,
-                                                                    params.dy().tensorDescriptor(),
-                                                                    params.x().tensorDescriptor(),
-                                                                    params.conv().convDescriptor(),
-                                                                    params.dw().tensorDescriptor(),
-                                                                    &solutionCount);
+            = miopenConvolutionBackwardWeightsGetSolutionCount(handle.miopenHandle,
+                                                               params.dy().tensorDescriptor(),
+                                                               params.x().tensorDescriptor(),
+                                                               params.conv().convDescriptor(),
+                                                               params.dw().tensorDescriptor(),
+                                                               &solutionCount);
         if(status != miopenStatusSuccess)
         {
             return false;
@@ -160,13 +160,13 @@ MiopenConvPlanBuilder::WorkspaceSizeRange
     size_t minWorkspace = 0;
     size_t maxWorkspace = 0;
     THROW_ON_MIOPEN_FAILURE(
-        miopenConvolutionForwardGetWorkSpaceSizeRange_impl(handle.miopenHandle,
-                                                           params.w().tensorDescriptor(),
-                                                           params.x().tensorDescriptor(),
-                                                           params.conv().convDescriptor(),
-                                                           params.y().tensorDescriptor(),
-                                                           &minWorkspace,
-                                                           &maxWorkspace));
+        miopenConvolutionForwardGetWorkSpaceSizeRange(handle.miopenHandle,
+                                                      params.w().tensorDescriptor(),
+                                                      params.x().tensorDescriptor(),
+                                                      params.conv().convDescriptor(),
+                                                      params.y().tensorDescriptor(),
+                                                      &minWorkspace,
+                                                      &maxWorkspace));
 
     HIPDNN_PLUGIN_LOG_INFO("Convolution Fwd: Workspace range: min=" << minWorkspace
                                                                     << ", max=" << maxWorkspace);
@@ -187,13 +187,13 @@ MiopenConvPlanBuilder::WorkspaceSizeRange
     size_t minWorkspace = 0;
     size_t maxWorkspace = 0;
     THROW_ON_MIOPEN_FAILURE(
-        miopenConvolutionBackwardDataGetWorkSpaceSizeRange_impl(handle.miopenHandle,
-                                                                params.dy().tensorDescriptor(),
-                                                                params.w().tensorDescriptor(),
-                                                                params.conv().convDescriptor(),
-                                                                params.dx().tensorDescriptor(),
-                                                                &minWorkspace,
-                                                                &maxWorkspace));
+        miopenConvolutionBackwardDataGetWorkSpaceSizeRange(handle.miopenHandle,
+                                                           params.dy().tensorDescriptor(),
+                                                           params.w().tensorDescriptor(),
+                                                           params.conv().convDescriptor(),
+                                                           params.dx().tensorDescriptor(),
+                                                           &minWorkspace,
+                                                           &maxWorkspace));
 
     HIPDNN_PLUGIN_LOG_INFO("Convolution Bwd: Workspace range: min=" << minWorkspace
                                                                     << ", max=" << maxWorkspace);
@@ -214,13 +214,13 @@ MiopenConvPlanBuilder::WorkspaceSizeRange
     size_t minWorkspace = 0;
     size_t maxWorkspace = 0;
     THROW_ON_MIOPEN_FAILURE(
-        miopenConvolutionBackwardWeightsGetWorkSpaceSizeRange_impl(handle.miopenHandle,
-                                                                   params.dy().tensorDescriptor(),
-                                                                   params.x().tensorDescriptor(),
-                                                                   params.conv().convDescriptor(),
-                                                                   params.dw().tensorDescriptor(),
-                                                                   &minWorkspace,
-                                                                   &maxWorkspace));
+        miopenConvolutionBackwardWeightsGetWorkSpaceSizeRange(handle.miopenHandle,
+                                                              params.dy().tensorDescriptor(),
+                                                              params.x().tensorDescriptor(),
+                                                              params.conv().convDescriptor(),
+                                                              params.dw().tensorDescriptor(),
+                                                              &minWorkspace,
+                                                              &maxWorkspace));
 
     HIPDNN_PLUGIN_LOG_INFO("Convolution Wrw: Workspace range: min=" << minWorkspace
                                                                     << ", max=" << maxWorkspace);
@@ -242,12 +242,12 @@ size_t getMaxWorkspaceSizeFwd(const HipdnnMiopenHandle& handle,
                   .attributesAs<hipdnn_flatbuffers_sdk::data_objects::ConvolutionFwdAttributes>();
         const ConvFwdParams params(attr, opGraph.getTensorMap(), deterministicEnabled);
         THROW_ON_MIOPEN_FAILURE(
-            miopenConvolutionForwardGetWorkSpaceSize_impl(handle.miopenHandle,
-                                                          params.w().tensorDescriptor(),
-                                                          params.x().tensorDescriptor(),
-                                                          params.conv().convDescriptor(),
-                                                          params.y().tensorDescriptor(),
-                                                          &workSpaceSize));
+            miopenConvolutionForwardGetWorkSpaceSize(handle.miopenHandle,
+                                                     params.w().tensorDescriptor(),
+                                                     params.x().tensorDescriptor(),
+                                                     params.conv().convDescriptor(),
+                                                     params.y().tensorDescriptor(),
+                                                     &workSpaceSize));
     }
 
     return workSpaceSize;
@@ -268,12 +268,12 @@ size_t getMaxWorkspaceSizeBwd(const HipdnnMiopenHandle& handle,
         const ConvBwdParams params(attr, opGraph.getTensorMap(), deterministicEnabled);
 
         THROW_ON_MIOPEN_FAILURE(
-            miopenConvolutionBackwardDataGetWorkSpaceSize_impl(handle.miopenHandle,
-                                                               params.dy().tensorDescriptor(),
-                                                               params.w().tensorDescriptor(),
-                                                               params.conv().convDescriptor(),
-                                                               params.dx().tensorDescriptor(),
-                                                               &workSpaceSize));
+            miopenConvolutionBackwardDataGetWorkSpaceSize(handle.miopenHandle,
+                                                          params.dy().tensorDescriptor(),
+                                                          params.w().tensorDescriptor(),
+                                                          params.conv().convDescriptor(),
+                                                          params.dx().tensorDescriptor(),
+                                                          &workSpaceSize));
     }
 
     return workSpaceSize;
@@ -294,12 +294,12 @@ size_t getMaxWorkspaceSizeWrw(const HipdnnMiopenHandle& handle,
         const ConvWrwParams params(attr, opGraph.getTensorMap(), deterministicEnabled);
 
         THROW_ON_MIOPEN_FAILURE(
-            miopenConvolutionBackwardWeightsGetWorkSpaceSize_impl(handle.miopenHandle,
-                                                                  params.dy().tensorDescriptor(),
-                                                                  params.x().tensorDescriptor(),
-                                                                  params.conv().convDescriptor(),
-                                                                  params.dw().tensorDescriptor(),
-                                                                  &workSpaceSize));
+            miopenConvolutionBackwardWeightsGetWorkSpaceSize(handle.miopenHandle,
+                                                             params.dy().tensorDescriptor(),
+                                                             params.x().tensorDescriptor(),
+                                                             params.conv().convDescriptor(),
+                                                             params.dw().tensorDescriptor(),
+                                                             &workSpaceSize));
     }
 
     return workSpaceSize;

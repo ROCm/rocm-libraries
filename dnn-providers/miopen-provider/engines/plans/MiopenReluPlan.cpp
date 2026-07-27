@@ -38,14 +38,14 @@ void MiopenReluPlan::execute(const HipdnnMiopenHandle& handle,
     float alpha = 1.0f;
     float beta = 0.0f;
 
-    THROW_ON_MIOPEN_FAILURE(miopenActivationForward_impl(handle.miopenHandle,
-                                                         _activation.activationDescriptor(),
-                                                         &alpha,
-                                                         _input.tensorDescriptor(),
-                                                         inputBuffer.ptr,
-                                                         &beta,
-                                                         _output.tensorDescriptor(),
-                                                         outputBuffer.ptr));
+    THROW_ON_MIOPEN_FAILURE(miopenActivationForward(handle.miopenHandle,
+                                                    _activation.activationDescriptor(),
+                                                    &alpha,
+                                                    _input.tensorDescriptor(),
+                                                    inputBuffer.ptr,
+                                                    &beta,
+                                                    _output.tensorDescriptor(),
+                                                    outputBuffer.ptr));
 }
 
 } // namespace miopen_plugin

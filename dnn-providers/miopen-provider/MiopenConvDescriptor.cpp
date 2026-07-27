@@ -102,7 +102,7 @@ MiopenConvDescriptor& MiopenConvDescriptor::operator=(MiopenConvDescriptor&& oth
     {
         if(_descriptor != nullptr)
         {
-            LOG_ON_MIOPEN_FAILURE(miopenDestroyConvolutionDescriptor_impl(_descriptor));
+            LOG_ON_MIOPEN_FAILURE(miopenDestroyConvolutionDescriptor(_descriptor));
         }
 
         _descriptor = other._descriptor;
@@ -115,7 +115,7 @@ MiopenConvDescriptor::~MiopenConvDescriptor()
 {
     if(_descriptor != nullptr)
     {
-        LOG_ON_MIOPEN_FAILURE(miopenDestroyConvolutionDescriptor_impl(_descriptor));
+        LOG_ON_MIOPEN_FAILURE(miopenDestroyConvolutionDescriptor(_descriptor));
     }
 }
 
@@ -221,28 +221,27 @@ void MiopenConvDescriptor::createDescriptorInternal(
             "MiopenConvDescriptor: dilation values must be positive");
     }
 
-    THROW_ON_MIOPEN_FAILURE(miopenCreateConvolutionDescriptor_impl(&_descriptor));
+    THROW_ON_MIOPEN_FAILURE(miopenCreateConvolutionDescriptor(&_descriptor));
 
     try
     {
-        THROW_ON_MIOPEN_FAILURE(
-            miopenInitConvolutionNdDescriptor_impl(_descriptor,
-                                                   static_cast<int>(spatialDimCount),
-                                                   padding.data(),
-                                                   stride.data(),
-                                                   dilation.data(),
-                                                   miopenConvolution));
-        THROW_ON_MIOPEN_FAILURE(miopenSetConvolutionGroupCount_impl(_descriptor, groupCount));
+        THROW_ON_MIOPEN_FAILURE(miopenInitConvolutionNdDescriptor(_descriptor,
+                                                                  static_cast<int>(spatialDimCount),
+                                                                  padding.data(),
+                                                                  stride.data(),
+                                                                  dilation.data(),
+                                                                  miopenConvolution));
+        THROW_ON_MIOPEN_FAILURE(miopenSetConvolutionGroupCount(_descriptor, groupCount));
 
         if(deterministicEnabled)
         {
-            THROW_ON_MIOPEN_FAILURE(miopenSetConvolutionAttribute_impl(
+            THROW_ON_MIOPEN_FAILURE(miopenSetConvolutionAttribute(
                 _descriptor, MIOPEN_CONVOLUTION_ATTRIB_DETERMINISTIC, 1));
         }
     }
     catch(...)
     {
-        LOG_ON_MIOPEN_FAILURE(miopenDestroyConvolutionDescriptor_impl(_descriptor));
+        LOG_ON_MIOPEN_FAILURE(miopenDestroyConvolutionDescriptor(_descriptor));
         _descriptor = nullptr;
         throw;
     }

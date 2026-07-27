@@ -192,7 +192,7 @@ void BatchnormBwdPlan::execute(const HipdnnMiopenHandle& handle,
         activationDescriptor = _params.optActivation().value().activationDescriptor();
     }
 
-    THROW_ON_MIOPEN_FAILURE(miopenBatchNormBackwardActivation_impl(
+    THROW_ON_MIOPEN_FAILURE(miopenBatchNormBackwardActivation(
         handle.miopenHandle,
         MIOPEN_BATCHNORM_MODE,
         &alphaDataDiff,

@@ -121,13 +121,13 @@ TEST(TestMiopenUtils, CreateBatchnormTensor4dPassthrough)
 
     // Verify tensor is unchanged (4D with exact dims/strides)
     int numDims = 0;
-    miopenGetTensorDescriptorSize_impl(result.tensorDescriptor(), &numDims);
+    miopenGetTensorDescriptorSize(result.tensorDescriptor(), &numDims);
     ASSERT_EQ(numDims, 4);
 
     std::vector<int> resultDims(4);
     std::vector<int> resultStrides(4);
     miopenDataType_t dataType;
-    miopenGetTensorDescriptor_impl(
+    miopenGetTensorDescriptor(
         result.tensorDescriptor(), &dataType, resultDims.data(), resultStrides.data());
 
     EXPECT_EQ(resultDims[0], 2);
@@ -166,13 +166,13 @@ TEST(TestMiopenUtils, CreateBatchnormTensor5dPassthrough)
 
     // Verify tensor is unchanged (5D with exact dims/strides)
     int numDims = 0;
-    miopenGetTensorDescriptorSize_impl(result.tensorDescriptor(), &numDims);
+    miopenGetTensorDescriptorSize(result.tensorDescriptor(), &numDims);
     ASSERT_EQ(numDims, 5);
 
     std::vector<int> resultDims(5);
     std::vector<int> resultStrides(5);
     miopenDataType_t dataType;
-    miopenGetTensorDescriptor_impl(
+    miopenGetTensorDescriptor(
         result.tensorDescriptor(), &dataType, resultDims.data(), resultStrides.data());
 
     EXPECT_EQ(resultDims[0], 2);
@@ -212,13 +212,13 @@ TEST(TestMiopenUtils, CreateBatchnormTensor3dNclPadsToNchw)
 
     // Should be padded to 4D with W=1 and stride[3]=1 for NCHW
     int numDims = 0;
-    miopenGetTensorDescriptorSize_impl(result.tensorDescriptor(), &numDims);
+    miopenGetTensorDescriptorSize(result.tensorDescriptor(), &numDims);
     ASSERT_EQ(numDims, 4);
 
     std::vector<int> resultDims(4);
     std::vector<int> resultStrides(4);
     miopenDataType_t dataType;
-    miopenGetTensorDescriptor_impl(
+    miopenGetTensorDescriptor(
         result.tensorDescriptor(), &dataType, resultDims.data(), resultStrides.data());
 
     EXPECT_EQ(resultDims[0], 1);
@@ -253,13 +253,13 @@ TEST(TestMiopenUtils, CreateBatchnormTensor3dNlcPadsToNhwc)
 
     // Should be padded to 4D with W=1 and stride[3]=C for NHWC
     int numDims = 0;
-    miopenGetTensorDescriptorSize_impl(result.tensorDescriptor(), &numDims);
+    miopenGetTensorDescriptorSize(result.tensorDescriptor(), &numDims);
     ASSERT_EQ(numDims, 4);
 
     std::vector<int> resultDims(4);
     std::vector<int> resultStrides(4);
     miopenDataType_t dataType;
-    miopenGetTensorDescriptor_impl(
+    miopenGetTensorDescriptor(
         result.tensorDescriptor(), &dataType, resultDims.data(), resultStrides.data());
 
     EXPECT_EQ(resultDims[0], 1);
@@ -585,7 +585,7 @@ TEST_F(TestGpuScopedTuningPolicy, SetsSearchPolicyWhenBenchmarkingEnabled)
         const ScopedTuningPolicy guard(_miopenHandle, true);
 
         miopenTuningPolicy_t currentPolicy;
-        auto status = miopenGetTuningPolicy_impl(_miopenHandle, &currentPolicy);
+        auto status = miopenGetTuningPolicy(_miopenHandle, &currentPolicy);
         ASSERT_EQ(status, miopenStatusSuccess);
         EXPECT_EQ(currentPolicy, miopenTuningPolicySearch);
     }
@@ -597,7 +597,7 @@ TEST_F(TestGpuScopedTuningPolicy, SetsNonePolicyWhenBenchmarkingDisabled)
         const ScopedTuningPolicy guard(_miopenHandle, false);
 
         miopenTuningPolicy_t currentPolicy;
-        auto status = miopenGetTuningPolicy_impl(_miopenHandle, &currentPolicy);
+        auto status = miopenGetTuningPolicy(_miopenHandle, &currentPolicy);
         ASSERT_EQ(status, miopenStatusSuccess);
         EXPECT_EQ(currentPolicy, miopenTuningPolicyNone);
     }
@@ -606,7 +606,7 @@ TEST_F(TestGpuScopedTuningPolicy, SetsNonePolicyWhenBenchmarkingDisabled)
 TEST_F(TestGpuScopedTuningPolicy, RestoresOriginalPolicyOnDestruction)
 {
     // Set a non-default policy first
-    auto preSetStatus = miopenSetTuningPolicy_impl(_miopenHandle, miopenTuningPolicyDbUpdate);
+    auto preSetStatus = miopenSetTuningPolicy(_miopenHandle, miopenTuningPolicyDbUpdate);
     ASSERT_EQ(preSetStatus, miopenStatusSuccess);
 
     {
@@ -614,13 +614,13 @@ TEST_F(TestGpuScopedTuningPolicy, RestoresOriginalPolicyOnDestruction)
 
         // Verify it was changed during scope
         miopenTuningPolicy_t duringPolicy;
-        miopenGetTuningPolicy_impl(_miopenHandle, &duringPolicy);
+        miopenGetTuningPolicy(_miopenHandle, &duringPolicy);
         EXPECT_EQ(duringPolicy, miopenTuningPolicySearch);
     }
 
     // Verify it was restored to original
     miopenTuningPolicy_t afterPolicy;
-    auto status = miopenGetTuningPolicy_impl(_miopenHandle, &afterPolicy);
+    auto status = miopenGetTuningPolicy(_miopenHandle, &afterPolicy);
     ASSERT_EQ(status, miopenStatusSuccess);
     EXPECT_EQ(afterPolicy, miopenTuningPolicyDbUpdate);
 }
@@ -628,45 +628,45 @@ TEST_F(TestGpuScopedTuningPolicy, RestoresOriginalPolicyOnDestruction)
 TEST_F(TestGpuScopedTuningPolicy, RestoresToNoneWhenOriginalWasNone)
 {
     // Ensure policy starts as None
-    miopenSetTuningPolicy_impl(_miopenHandle, miopenTuningPolicyNone);
+    miopenSetTuningPolicy(_miopenHandle, miopenTuningPolicyNone);
 
     {
         const ScopedTuningPolicy guard(_miopenHandle, true);
     }
 
     miopenTuningPolicy_t afterPolicy;
-    auto status = miopenGetTuningPolicy_impl(_miopenHandle, &afterPolicy);
+    auto status = miopenGetTuningPolicy(_miopenHandle, &afterPolicy);
     ASSERT_EQ(status, miopenStatusSuccess);
     EXPECT_EQ(afterPolicy, miopenTuningPolicyNone);
 }
 
 TEST_F(TestGpuScopedTuningPolicy, NestedScopesRestoreCorrectly)
 {
-    miopenSetTuningPolicy_impl(_miopenHandle, miopenTuningPolicyNone);
+    miopenSetTuningPolicy(_miopenHandle, miopenTuningPolicyNone);
 
     {
         const ScopedTuningPolicy outerGuard(_miopenHandle, true);
 
         miopenTuningPolicy_t afterOuterSet;
-        miopenGetTuningPolicy_impl(_miopenHandle, &afterOuterSet);
+        miopenGetTuningPolicy(_miopenHandle, &afterOuterSet);
         EXPECT_EQ(afterOuterSet, miopenTuningPolicySearch);
 
         {
             const ScopedTuningPolicy innerGuard(_miopenHandle, false);
 
             miopenTuningPolicy_t afterInnerSet;
-            miopenGetTuningPolicy_impl(_miopenHandle, &afterInnerSet);
+            miopenGetTuningPolicy(_miopenHandle, &afterInnerSet);
             EXPECT_EQ(afterInnerSet, miopenTuningPolicyNone);
         }
 
         // After inner scope, should restore to Search (what outer set)
         miopenTuningPolicy_t afterInnerDestroy;
-        miopenGetTuningPolicy_impl(_miopenHandle, &afterInnerDestroy);
+        miopenGetTuningPolicy(_miopenHandle, &afterInnerDestroy);
         EXPECT_EQ(afterInnerDestroy, miopenTuningPolicySearch);
     }
 
     // After outer scope, should restore to None (original)
     miopenTuningPolicy_t finalPolicy;
-    miopenGetTuningPolicy_impl(_miopenHandle, &finalPolicy);
+    miopenGetTuningPolicy(_miopenHandle, &finalPolicy);
     EXPECT_EQ(finalPolicy, miopenTuningPolicyNone);
 }

@@ -952,18 +952,6 @@ target_include_directories(${_MIOPEN_IMPL_TARGET} PUBLIC
     $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src/include>
 )
 
-# Expose the parallel _impl-form public header <miopen/miopen_impl.h> to consumers
-# that link MIOpen_private directly (the hipDNN MIOpen provider plugin). The header
-# is installed under a dedicated private include root
-# (<prefix>/include/miopen_private/miopen/miopen_impl.h, see the install() below)
-# so the #include <miopen/miopen_impl.h> spelling resolves only for MIOpen_private
-# linkers and never lands on the public MIOpen wrapper's public include path
-# (RFC 0001 §4.6). At build time the header resolves via src/include already added
-# above; the INSTALL_INTERFACE entry points installed consumers at the private root.
-target_include_directories(${_MIOPEN_IMPL_TARGET} INTERFACE
-    $<INSTALL_INTERFACE:include/miopen_private>
-)
-
 if(MIOPEN_USE_COMPOSABLEKERNEL)
     if(MIOPEN_BUILD_CK)
         if(MIOPEN_CK_BUILDER_EXPERIMENTAL)
@@ -1123,13 +1111,6 @@ rocm_install_targets(
     ${PROJECT_BINARY_DIR}/include
     ${MIOPEN_CXX_HEADER_PATH}
 )
-
-# Install the parallel _impl-form public header under a dedicated private include
-# root, matched by MIOpen_private's INSTALL_INTERFACE include dir above. Kept out
-# of the public include/miopen/ tree so it is invisible to public MIOpen consumers
-# (RFC 0001 §4.6 invariant; enforced by the header-leakage CI check).
-install(FILES ${PROJECT_SOURCE_DIR}/src/include/miopen/miopen_impl.h
-        DESTINATION include/miopen_private/miopen)
 
 rocm_export_targets(
   TARGETS ${_MIOPEN_INSTALL_TARGETS}

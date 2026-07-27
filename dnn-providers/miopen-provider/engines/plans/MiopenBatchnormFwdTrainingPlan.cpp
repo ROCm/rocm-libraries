@@ -345,11 +345,11 @@ void BatchnormFwdTrainingPlan::execute(const HipdnnMiopenHandle& handle,
 
         // Create activation descriptor
         miopenActivationDescriptor_t activationDesc;
-        THROW_ON_MIOPEN_FAILURE(miopenCreateActivationDescriptor_impl(&activationDesc));
+        THROW_ON_MIOPEN_FAILURE(miopenCreateActivationDescriptor(&activationDesc));
         auto activationDescRes
             = hipdnn_data_sdk::utilities::ScopedResource<miopenActivationDescriptor_t>(
                 activationDesc, [](miopenActivationDescriptor_t desc) {
-                    auto status = miopenDestroyActivationDescriptor_impl(desc);
+                    auto status = miopenDestroyActivationDescriptor(desc);
                     if(status != miopenStatusSuccess)
                     {
                         HIPDNN_PLUGIN_LOG_ERROR("miopenDestroyActivationDescriptor failed in "
@@ -358,11 +358,11 @@ void BatchnormFwdTrainingPlan::execute(const HipdnnMiopenHandle& handle,
                 });
 
         const auto& activParams = *optActivation;
-        THROW_ON_MIOPEN_FAILURE(miopenSetActivationDescriptor_impl(activationDesc,
-                                                                   activParams.mode,
-                                                                   activParams.alpha,
-                                                                   activParams.beta,
-                                                                   activParams.gamma));
+        THROW_ON_MIOPEN_FAILURE(miopenSetActivationDescriptor(activationDesc,
+                                                              activParams.mode,
+                                                              activParams.alpha,
+                                                              activParams.beta,
+                                                              activParams.gamma));
 
         if(_trainingParams.hasRunningStats())
         {
@@ -393,7 +393,7 @@ void BatchnormFwdTrainingPlan::execute(const HipdnnMiopenHandle& handle,
         }
         else
         {
-            THROW_ON_MIOPEN_FAILURE(miopenBatchNormForwardTrainingActivation_impl(
+            THROW_ON_MIOPEN_FAILURE(miopenBatchNormForwardTrainingActivation(
                 handle.miopenHandle,
                 MIOPEN_BATCHNORM_MODE_TRAINING,
                 &alpha,
@@ -451,7 +451,7 @@ void BatchnormFwdTrainingPlan::execute(const HipdnnMiopenHandle& handle,
         }
         else
         {
-            THROW_ON_MIOPEN_FAILURE(miopenBatchNormalizationForwardTraining_impl(
+            THROW_ON_MIOPEN_FAILURE(miopenBatchNormalizationForwardTraining(
                 handle.miopenHandle,
                 MIOPEN_BATCHNORM_MODE_TRAINING,
                 &alpha,

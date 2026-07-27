@@ -482,13 +482,13 @@ miopenConvolutionForwardGetWorkSpaceSize(miopenHandle_t handle,
 }
 
 MIOPEN_EXPORT extern "C" miopenStatus_t
-miopenConvolutionForwardGetWorkSpaceSizeRange_impl(miopenHandle_t handle,
-                                                   const miopenTensorDescriptor_t wDesc,
-                                                   const miopenTensorDescriptor_t xDesc,
-                                                   const miopenConvolutionDescriptor_t convDesc,
-                                                   const miopenTensorDescriptor_t yDesc,
-                                                   size_t* minWorkspaceSize,
-                                                   size_t* maxWorkspaceSize)
+miopenConvolutionForwardGetWorkSpaceSizeRange(miopenHandle_t handle,
+                                              const miopenTensorDescriptor_t wDesc,
+                                              const miopenTensorDescriptor_t xDesc,
+                                              const miopenConvolutionDescriptor_t convDesc,
+                                              const miopenTensorDescriptor_t yDesc,
+                                              size_t* minWorkspaceSize,
+                                              size_t* maxWorkspaceSize)
 {
     if(minWorkspaceSize == nullptr || maxWorkspaceSize == nullptr)
         return miopenStatusBadParm;
@@ -1343,14 +1343,14 @@ miopenConvolutionBackwardDataGetWorkSpaceSize(miopenHandle_t handle,
     });
 }
 
-MIOPEN_EXPORT extern "C" miopenStatus_t miopenConvolutionBackwardDataGetWorkSpaceSizeRange_impl(
-    miopenHandle_t handle,
-    const miopenTensorDescriptor_t dyDesc,
-    const miopenTensorDescriptor_t wDesc,
-    const miopenConvolutionDescriptor_t convDesc,
-    const miopenTensorDescriptor_t dxDesc,
-    size_t* minWorkspaceSize,
-    size_t* maxWorkspaceSize)
+MIOPEN_EXPORT extern "C" miopenStatus_t
+miopenConvolutionBackwardDataGetWorkSpaceSizeRange(miopenHandle_t handle,
+                                                   const miopenTensorDescriptor_t dyDesc,
+                                                   const miopenTensorDescriptor_t wDesc,
+                                                   const miopenConvolutionDescriptor_t convDesc,
+                                                   const miopenTensorDescriptor_t dxDesc,
+                                                   size_t* minWorkspaceSize,
+                                                   size_t* maxWorkspaceSize)
 {
     if(minWorkspaceSize == nullptr || maxWorkspaceSize == nullptr)
         return miopenStatusBadParm;
@@ -1381,14 +1381,14 @@ miopenConvolutionBackwardWeightsGetWorkSpaceSize(miopenHandle_t handle,
     });
 }
 
-MIOPEN_EXPORT extern "C" miopenStatus_t miopenConvolutionBackwardWeightsGetWorkSpaceSizeRange_impl(
-    miopenHandle_t handle,
-    const miopenTensorDescriptor_t dyDesc,
-    const miopenTensorDescriptor_t xDesc,
-    const miopenConvolutionDescriptor_t convDesc,
-    const miopenTensorDescriptor_t dwDesc,
-    size_t* minWorkspaceSize,
-    size_t* maxWorkspaceSize)
+MIOPEN_EXPORT extern "C" miopenStatus_t
+miopenConvolutionBackwardWeightsGetWorkSpaceSizeRange(miopenHandle_t handle,
+                                                      const miopenTensorDescriptor_t dyDesc,
+                                                      const miopenTensorDescriptor_t xDesc,
+                                                      const miopenConvolutionDescriptor_t convDesc,
+                                                      const miopenTensorDescriptor_t dwDesc,
+                                                      size_t* minWorkspaceSize,
+                                                      size_t* maxWorkspaceSize)
 {
     if(minWorkspaceSize == nullptr || maxWorkspaceSize == nullptr)
         return miopenStatusBadParm;
