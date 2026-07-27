@@ -1,0 +1,32 @@
+#CACHE_BEST_RESULTS
+
+PROFILER_LAYOUT_ID: 3
+
+PARAMS:
+ALayout_ GEN Col
+CONDITION
+is_same_v<ALayout, Col>
+
+BLayout_ GEN Col
+CONDITION
+is_same_v<BLayout, Col>
+
+CLayout_ GEN Row
+CONDITION
+is_same_v<CLayout, Row>
+
+ABlockTransferScrVecDim TUNE 1
+ABlockTransferScrScalarPerVector TUNE 1; 2
+PerfVector_AK1 TUNE 4; 8 CONSTRAINT ABlockTransferScrScalarPerVector * PerfVector_AK1 == 8
+
+BBlockTransferScrVecDim TUNE 2
+BBlockTransferScrScalarPerVector TUNE 8
+PerfVector_BK1 TUNE 8
+
+
+ATransferLengths_3 TUNE 1; 2; 4; 8; 16; 32; 64; 128; 256
+ATransferLengths_2 TUNE 256; 128; 64; 32; 16; 8; 4; 2; 1 CONSTRAINT ATransferLengths_2 * ATransferLengths_3 == BlockSize
+BTransferLengths_3 TUNE 2; 4; 8; 16; 32; 64; 128; 256
+BTransferLengths_2 TUNE 256; 128; 64; 32; 16; 8; 4; 2; 1 CONSTRAINT BTransferLengths_2 * BTransferLengths_3 == BlockSize
+CShuffleBlockTransferClusterLengths_2 TUNE 8; 16; 32; 64; 128
+CShuffleBlockTransferClusterLengths_4 TUNE 2; 4; 8; 16 CONSTRAINT CShuffleBlockTransferClusterLengths_2 * CShuffleBlockTransferClusterLengths_4 == BlockSize

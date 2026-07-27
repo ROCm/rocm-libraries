@@ -1,0 +1,4 @@
+#INCLUDE layouts/km_kn_mn_gemm_cshuffle_v3.gentune
+#INCLUDE layouts/km_nk_mn_gemm_cshuffle_v3.gentune
+#INCLUDE layouts/mk_kn_mn_gemm_cshuffle_v3.gentune
+#INCLUDE layouts/mk_nk_mn_gemm_cshuffle_v3.gentune

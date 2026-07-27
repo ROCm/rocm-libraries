@@ -1,0 +1,18 @@
+# generic templates for all instances using f16_f16_f16_f16 data types
+
+#CACHE_BEST_RESULTS
+
+
+PARAMS:
+ADataType_; BDataType_; CDataType_; CShuffleDataType_ GEN 
+half_t 
+CONDITION 
+is_same_v<ADataType, half_t> && 
+is_same_v<BDataType, half_t> &&
+is_same_v<CDataType, half_t>
+PREPROCESSOR CK_ENABLE_FP16
+
+ComputeTypeA GEN half_t
+ComputeTypeB GEN half_t
+
+PROFILER_DATATYPE_ID: 1

@@ -1,0 +1,72 @@
+
+#IMPORT_STRUCTURE
+"util/generic.gentune" *
+(
+
+"layouts/all_layouts_gemm_cshuffle_v3.gentune" *
+(
+    "data_formats/bf16_bf16_bf16_bf16.gentune"
+) 
+
+
++
+(
+    "layouts/mk_nk_mn_gemm_cshuffle_v3.gentune" +
+    "layouts/km_nk_mn_gemm_cshuffle_v3.gentune"
+) *
+(
+    "data_formats/bf16_i4_bf16_bf16.gentune"
+)
+
+
++
+(
+    "layouts/mk_kn_mn_gemm_cshuffle_v3.gentune" +
+    "layouts/mk_nk_mn_gemm_cshuffle_v3.gentune"
+) *
+(
+    "data_formats/f16_f16_f16_f16.gentune" +
+    "data_formats/f16_f8_f16_f16.gentune"  +
+    "data_formats/f8_f16_f16_f16.gentune"  +
+    "data_formats/f8_f8_bf16_bf16.gentune"
+)
+
++
+(
+"layouts/mk_nk_mn_gemm_cshuffle_v3.gentune"
+) *
+(
+    "data_formats/f16_i4_f16_f16.gentune"
+) 
+
+)
+#END_IMPORT_STRUCTURE
+
+OUTPUT_HPP_TEMPLATE_PATH: gentune_files/generation/gemm_universal_hpp_template.txt
+OUTPUT_HPP_TEMPLATE_CODE_LINE: DeviceGemm_Wmma_CShuffleV3< ALayout, BLayout, CLayout, DataType,  DataType,  DataType,     F32,     DataType, PassThrough, PassThrough, PassThrough, GemmSpec_,   BlockSize,   MPerBlock,   NPerBlock,    KPerBlock,   8,   8,   16,   16,       MRepeat,       NRepeat,       S<ATransferLengths_3, ATransferLengths_2, 1>,     S<1, 0, 2>,     S<1, 0, 2>,              2,              8,              8,         ExtraM,       S<BTransferLengths_3, BTransferLengths_2, 1>,     S<1, 0, 2>,     S<1, 0, 2>,              2,              8,              8,         ExtraN,          1,          1,        S<1, CShuffleBlockTransferClusterLengths_2, 1, CShuffleBlockTransferClusterLengths_4>,                     8,  InterIntra, PipelineVersion>
+
+
+
+TEST_INSTANCE_TEMPLATE_PATH: gentune_files/generation/gemm_universal_instance_template.txt
+
+PARAMS:
+GemmSpec_ TUNE 
+GemmSpecialization::Default; GemmSpecialization::KPadding; GemmSpecialization::MNPadding; GemmSpecialization::MNKPadding
+
+
+BENCH_ARGS:
+0 0 1 64 64 64 -1 -1 -1 
+0 0 1 128 128 128 -1 -1 -1 
+0 0 1 1024 1024 1024 -1 -1 -1 
+0 0 1 8192 8192 8192 -1 -1 -1 
+
+VERIFY_ARGS:
+2 2 1 64 64 64 -1 -1 -1 
+2 2 1 128 128 128 -1 -1 -1 
+2 2 1 1024 1024 1024 -1 -1 -1 
+2 2 1 8192 8192 8192 -1 -1 -1 
+
+TEST_INSTANCE_DIR: test_instances/
+
+COMPILE_CMD:# fill in your COMPILE_CMD here
+
