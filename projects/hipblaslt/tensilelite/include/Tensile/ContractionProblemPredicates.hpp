@@ -3090,13 +3090,15 @@ namespace TensileLite
             };
 
             // StreamK cluster-reduction (gfx1250) split-barrier safety. The
-            // C = ClusterDim[0] peers split a tile's itersPerTile = ceil(K/DepthU)
-            // K-iterations and hand off through an intra-cluster split barrier; if
-            // itersPerTile % C != 0 (incl. C > itersPerTile) the arrival counts
-            // mismatch and the barrier over-signals -> hang. itersPerTile depends
-            // on runtime K, so this is a per-problem HARD REJECT (surfaced via
-            // debugEval; not build-time, not a silent fallback). Only the K-split
-            // reduction path emits it. value[0] = DepthU, value[1] = C.
+            // Ck = ClusterDim[1] reduction peers split a tile's itersPerTile =
+            // ceil(K/DepthU) K-iterations and hand off through an intra-cluster
+            // split barrier; if itersPerTile % Ck != 0 (incl. Ck > itersPerTile)
+            // the arrival counts mismatch and the barrier over-signals -> hang.
+            // itersPerTile depends on runtime K, so this is a per-problem HARD
+            // REJECT (surfaced via debugEval; not build-time, not a silent
+            // fallback). Only the K-split reduction path emits it (value[1] is
+            // the reduction axis Ck = ClusterDim[1], not ClusterDim[0]).
+            // value[0] = DepthU, value[1] = Ck.
             struct ClusterReductionIterCheck
                 : public Predicate_CRTP<ClusterReductionIterCheck, ContractionProblemGemm>
             {
@@ -3131,25 +3133,25 @@ namespace TensileLite
 
                 virtual bool operator()(ContractionProblemGemm const& problem) const override
                 {
-                    int c = value[1];
-                    if(c <= 1)
+                    int ck = value[1];
+                    if(ck <= 1)
                         return true;
-                    return (itersPerTile(problem, value[0]) % static_cast<size_t>(c)) == 0;
+                    return (itersPerTile(problem, value[0]) % static_cast<size_t>(ck)) == 0;
                 }
 
                 virtual bool debugEval(ContractionProblemGemm const& problem,
                                        std::ostream&                 stream) const override
                 {
-                    int    c   = value[1];
+                    int    ck  = value[1];
                     size_t ipt = itersPerTile(problem, value[0]);
                     return debugEvalCmp(
                         problem,
                         stream,
                         "StreamK cluster reduction requires iterations-per-tile ceil(K/DepthU)",
                         ipt,
-                        "to be a multiple of ClusterDim[0]",
-                        "C",
-                        c);
+                        "to be a multiple of ClusterDim[1]",
+                        "Ck",
+                        ck);
                 }
             };
         } // namespace Contraction
