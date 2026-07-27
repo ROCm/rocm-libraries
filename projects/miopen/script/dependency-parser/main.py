@@ -273,15 +273,15 @@ def write_shas_file(context, shas_file, base_ref="origin/develop", source_dir=".
     feature_sha = resolve_feature_sha(source_dir)
     base_sha = resolve_base_sha(source_dir, base_ref, feature_sha or "HEAD")
     with open(shas_file, "w") as file:
-        file.write(f"{base_sha}\n")
-        file.write(f"{feature_sha}\n")
+        json.dump({"merge-base": base_sha, "feature": feature_sha}, file, indent=2)
     print(f"{context}: {base_sha} <- {feature_sha}")
 
 
 def read_shas_file(context, shas_file):
     with open(shas_file, "r") as file:
-        base_sha = file.readline().strip()
-        feature_sha = file.readline().strip()
+        data = json.load(file)
+    base_sha = data["merge-base"]
+    feature_sha = data["feature"]
     print(f"{context}: {base_sha} <- {feature_sha}")
     return (base_sha, feature_sha)
 
