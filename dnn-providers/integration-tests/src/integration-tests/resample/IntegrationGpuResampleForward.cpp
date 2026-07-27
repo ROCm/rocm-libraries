@@ -10,15 +10,13 @@
 
 #include <type_traits>
 
-#include "../../IntegrationGraphVerificationHarness.hpp"
+#include "harness/IntegrationGraphVerificationHarness.hpp"
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
 using namespace hipdnn_data_sdk::utilities;
-using namespace hip_kernel_provider::test_utilities;
-
-namespace hip_kernel_provider::resample::test
-{
+using namespace hipdnn_test_sdk::utilities;
+using namespace hipdnn_integration_tests;
 
 namespace
 {
@@ -155,7 +153,7 @@ template <typename XDataType, typename YDataType, typename ComputeDataType>
 class ResampleForward : public IntegrationGraphVerificationHarness<XDataType, ResampleFwdTestCase>
 {
 protected:
-    void runGraphTest()
+    void runGraphTest() override
     {
         const auto& testCase = this->GetParam();
 
@@ -202,13 +200,29 @@ protected:
             EXPECT_EQ(indexTensorAttr, nullptr);
         }
 
-        this->verifyGraph(graphObj, hipdnn_test_sdk::utilities::getGlobalTestSeed());
+        auto validateResult = graphObj.validate();
+        if(validateResult.is_bad())
+        {
+            throw std::runtime_error("Failed to validate graph: " + validateResult.get_message());
+        }
+
+        auto buildResult = graphObj.build_operation_graph(getSharedHandle());
+        if(buildResult.is_bad())
+        {
+            throw std::runtime_error("Failed to build operation graph: "
+                                     + buildResult.get_message());
+        }
+
+        this->synthesis().setGlobalSeed(getGlobalTestSeed());
+        this->verifyGraph(graphObj);
     }
 };
 
 using IntegrationGpuResampleForwardFp32 = ResampleForward<float, float, float>;
 using IntegrationGpuResampleForwardFp16 = ResampleForward<half, half, float>;
 using IntegrationGpuResampleForwardBfp16 = ResampleForward<bfloat16, bfloat16, float>;
+
+} // namespace
 
 TEST_P(IntegrationGpuResampleForwardFp32, Correctness)
 {
@@ -236,7 +250,3 @@ TEST_P(IntegrationGpuResampleForwardBfp16, Correctness)
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          IntegrationGpuResampleForwardBfp16,
                          testing::ValuesIn(getResampleFwdTestCases()));
-
-} // namespace
-
-} // namespace hip_kernel_provider::resample::test

@@ -64,7 +64,6 @@ endif()
 if(ENABLE_HIP_MLOPS_ENGINE)
     target_sources(hip_kernel_provider_integration_tests PRIVATE
         hip_mlops_engine/IntegrationGpuPassByValue.cpp
-        hip_mlops_engine/Resample/IntegrationGpuResampleForward.cpp
     )
 endif()
 clang_tidy_check(hip_kernel_provider_integration_tests)
