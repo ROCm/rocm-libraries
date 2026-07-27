@@ -6699,6 +6699,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
                                "EnableWaitCntInsertion": True if stinky_opt_level != 0 else not globalParameters.get("DisableSTWaitCnt", True),
                                # True: expert scheduling mode2; False: mode 0. Independent of ScheduleIterAlg/OptLevel.
                                "EnableESM2": kernel["EnableStinkyTofuESM2"],
+                               "EnableESM2TrackValuVsrc": kernel["EnableESM2TrackValuVsrc"],
                                "TileA0": kernel["ThreadTile0"],
                                "TileB0": kernel["ThreadTile1"],
                                "TileM0": kernel["MacroTile0"],
