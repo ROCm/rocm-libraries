@@ -39,6 +39,7 @@
 #include <vector>
 
 #include "InFlightQueue.hpp"
+#include "MemWaitCntModel.hpp"
 #include "ReadyQueue.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/ir/asm/StinkyModifiers.hpp"
@@ -300,6 +301,11 @@ class CDNA5ReadyQueue : public ReadyQueue {
 
     InFlightQueue dsReadInflight_;
 
+    // Models the s_wait_<c>cnt slots StinkyWaitCntInsertionPass adds after scheduling,
+    // so a wait landing inside a WMMA co-issue window reserves its issue cycle instead
+    // of silently stealing a VALU slot (a per-iteration bubble). Reserved set {CK_DS}.
+    MemWaitCntModel memWaitModel_;
+
     int globalReadQueueDepth() const {
         return getPassContext().getPassFeatureConfig().dagFeatures.globalReadQueueDepth;
     }
@@ -549,6 +555,10 @@ DAGNode* CDNA5ReadyQueue::popNonWmma(DAGNode* node, int pickKind) {
         assert(pickKind == kValu);
         valuQueue.erase(node);
     }
+    // Reserve the issue slot(s) for any s_wait_<c>cnt this consumer will need before
+    // it issues (drains the awaited memory op + all older on that counter). Must run
+    // BEFORE addProducer below so a memory op does not drain on its own issue.
+    if (int waitCycles = memWaitModel_.applyWait(*node->inst)) advanceTime(waitCycles);
     // (A) RAW: stamp this producer's dest data-ready latency (e.g. ds_load).
     // (B) elapse: record the timeline touch for all operands (dst + src).
     touchOperands(*node->inst);
@@ -567,6 +577,8 @@ DAGNode* CDNA5ReadyQueue::popNonWmma(DAGNode* node, int pickKind) {
                                [node](const HazardHoistCandidate& hc) { return hc.node == node; });
         if (it != hazardHoistCandidates_.end()) hazardHoistCandidates_.erase(it);
     }
+    // Record this node as an outstanding memory producer (no-op for non-memory ops).
+    memWaitModel_.addProducer(*node->inst);
     if (deferHeadBalanceThisRegion_) deferFirstHeadWmmaActive_ = false;
     return node;
 }
@@ -742,6 +754,17 @@ DAGNode* CDNA5ReadyQueue::pickOneFromWMMA(DAGNode* pick) {
     } else {
         node = wmmaQueue.top();
         wmmaQueue.pop();
+    }
+
+    // Reserve the issue slot for any s_wait_dscnt this WMMA will need (ds_read -> wmma).
+    // Done before consuming the leftover window so a wait with slack hides under the
+    // current latency shadow, while a wait on a full window pushes the next WMMA out
+    // (the bubble the pass would otherwise introduce silently).
+    if (int waitCycles = memWaitModel_.applyWait(*node->inst)) {
+        PASS_DEBUG(std::cerr << "[CDNA5 memWait] WMMA dagId=" << node->id << " reserves "
+                             << waitCycles << " dscnt cycle(s) (coPos=" << coIssueCyclePos_ << "/"
+                             << activeWmmaLatency_ << ")\n");
+        advanceTime(waitCycles);
     }
 
     // consume the time that is not used by the WMMA
@@ -1524,6 +1547,7 @@ void CDNA5ReadyQueue::onInit(IRList::iterator regionStart, IRList::iterator regi
     activeWmmaNode_ = nullptr;
     globalReadInflight_ = InFlightQueue(globalReadQueueDepth());
     dsReadInflight_ = InFlightQueue(dsReadQueueDepth());
+    memWaitModel_.reset();
 
     currentBB_ = (regionStart != regionEnd) ? regionStart->getParent() : nullptr;
 
@@ -1622,6 +1646,22 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
                                   regionStart != blockBegin;
 
     seedWmmaDsLatencyFromPrefix(blockBegin, regionStart, regDataReadyCounters, crossBBDsResiduals_);
+
+    // Seed the memory-wait model with producers still outstanding at region start, so the
+    // first consumer in the region (e.g. a loop-header WMMA reading a ds_read issued in the
+    // previous iteration) reserves its wait slot. Reset + rebuild each region, mirroring
+    // seedWmmaDsLatencyFromPrefix. crossBBDsResiduals_ shares CDNA5's regDepKey encoding with
+    // the model's regKey, so its keys drop in directly; they are strictly older than the
+    // in-BB prefix, so seed them first. (First cut: residuals are treated as CK_DS — they are
+    // dominated by the persistent long-latency ds_load producer.)
+    memWaitModel_.reset();
+    for (const auto& [key, rem] : crossBBDsResiduals_) {
+        if (rem > 0) memWaitModel_.recordProducer(waitcnt::CK_DS, {key});
+    }
+    for (IRList::iterator it = blockBegin; it != regionStart; ++it) {
+        if (auto* instPtr = dyn_cast<StinkyInstruction>(it.getNodePtr()))
+            memWaitModel_.addProducer(*instPtr);
+    }
 
     wmmaIssueConfig.issuedCount = 0;
     hasWMMAInRegion_ = false;

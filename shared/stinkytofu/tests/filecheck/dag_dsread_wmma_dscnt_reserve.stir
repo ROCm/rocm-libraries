@@ -1,0 +1,30 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyDAGSchedulerPass --print-output
+#
+# ds_read -> wmma dscnt reservation (MemWaitCntModel). Each WMMA consumes a distinct
+# ds_load result, so the scheduler must model the s_wait_dscnt that will later be
+# inserted before each WMMA (one issue slot). The ds_loads still sink ahead of the
+# WMMAs (56-cycle latency gate), and the independent VALU adds fill the co-issue
+# window; the dscnt reservation keeps the second WMMA's window honest instead of
+# reporting it as a free back-to-back issue.
+#
+# This is a regression guard that the model leaves scheduling valid and ordered; the
+# reservation's numeric effect on the co-issue timeline is covered by the
+# MemWaitCntModel unit tests.
+#
+# CHECK: ds_load_b128
+# CHECK: ds_load_b128
+# CHECK: ds_load_b128
+# CHECK: v_wmma_f32_16x16x16_bf16{{.*}}v[8:15]
+# CHECK: v_wmma_f32_16x16x16_bf16{{.*}}v[16:19]
+# CHECK-NOT: ds_load_b128
+
+st.func @test() {
+^entry:
+  v[8:11] = "st.ds_load_b128"(v24) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[12:15] = "st.ds_load_b128"(v24) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 32, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[16:19] = "st.ds_load_b128"(v24) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 64, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[0:7] = "st.v_wmma_f32_16x16x16_bf16"(v[8:15], v[8:15], v[0:7]) { issueCycles = 1, latencyCycles = 16, mod.mfma = { reuseA = false, reuseB = false } }
+  v[0:7] = "st.v_wmma_f32_16x16x16_bf16"(v[16:19], v[16:19], v[0:7]) { issueCycles = 1, latencyCycles = 16, mod.mfma = { reuseA = false, reuseB = false } }
+  v50 = "st.v_add_f32"(v51, v52) { issueCycles = 1, latencyCycles = 1 }
+  v53 = "st.v_add_f32"(v54, v55) { issueCycles = 1, latencyCycles = 1 }
+}
