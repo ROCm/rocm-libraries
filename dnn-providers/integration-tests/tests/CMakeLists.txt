@@ -57,6 +57,7 @@ add_executable(hipdnn_gpu_ref_tests
     gpu-ref/main.cpp
     gpu-ref/TestGpuFpReferenceConvolution.cpp
     gpu-ref/TestGpuFpReferenceSdpa.cpp
+    gpu-ref/TestGpuFpReferenceRMSNorm.cpp
     gpu-ref/TestGpuFpReferenceDgrad.cpp
     gpu-ref/TestGpuFpReferenceWgrad.cpp
     gpu-ref/TestGpuFpReferenceValidation.cpp

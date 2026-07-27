@@ -32,6 +32,7 @@ add_library(
     hipdnn_gpu_ref STATIC
     src/GpuFpReferenceConvolution.cpp
     src/GpuFpReferenceSdpa.cpp
+    src/GpuFpReferenceRMSNorm.cpp
     src/GpuFpReferenceValidation.cpp
     src/GpuIntReferenceValidation.cpp
     src/GpuReferenceValidationFactory.cpp
