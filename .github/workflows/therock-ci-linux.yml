@@ -36,7 +36,6 @@ jobs:
       id-token: write
     container:
       image: ${{ inputs.docker_image }}
-      options: -v /runner/config:/home/awsconfig/
     strategy:
       fail-fast: true
     env:
@@ -44,7 +43,6 @@ jobs:
       CCACHE_CONFIGPATH: ${{ github.workspace }}/.ccache/ccache.conf
       AMDGPU_FAMILIES: ${{ inputs.amdgpu_families }}
       TEATIME_FORCE_INTERACTIVE: 0
-      AWS_SHARED_CREDENTIALS_FILE: /home/awsconfig/credentials.ini
     steps:
       - name: "Checking out repository for rocm-libraries"
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
