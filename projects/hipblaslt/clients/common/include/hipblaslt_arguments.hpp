@@ -174,7 +174,7 @@ struct Arguments
     int8_t unit_check;
     int8_t ulp_check;
     int8_t timing;
-    int8_t check_ref; // correctness reference: 0=cpu, 1=gpu, 2=both (see hipblaslt_check_ref)
+    int8_t check_ref;
 
     char transA;
     char transB;

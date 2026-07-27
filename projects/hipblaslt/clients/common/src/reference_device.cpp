@@ -87,17 +87,19 @@ namespace
         const Tc*     Cb     = C + b * strideC;
         To*           Db     = D + b * strideD;
 
+        // BLAS leaves A/B unreferenced when alpha==0, so skip the loads entirely
+        // (also avoids faulting on a null A/B in that case).
         float acc = 0.0f;
-        for(int64_t l = 0; l < K; ++l)
-        {
-            const int64_t aIdx = transA_is_n ? (i + l * lda) : (l + i * lda);
-            const int64_t bIdx = transB_is_n ? (l + j * ldb) : (j + l * ldb);
-            acc += load_input_f32(A, aBatch + aIdx, tA) * load_input_f32(B, bBatch + bIdx, tB);
-        }
+        if(alpha != 0.0f)
+            for(int64_t l = 0; l < K; ++l)
+            {
+                const int64_t aIdx = transA_is_n ? (i + l * lda) : (l + i * lda);
+                const int64_t bIdx = transB_is_n ? (l + j * ldb) : (j + l * ldb);
+                acc += load_input_f32(A, aBatch + aIdx, tA) * load_input_f32(B, bBatch + bIdx, tB);
+            }
 
-        // alpha==0 drops the A*B product entirely (BLAS convention), so 0*inf
-        // does not become nan; beta==0 ignores C even if it holds inf/nan.
-        float out = (alpha == 0.0f) ? 0.0f : alpha * acc;
+        // beta==0 leaves C unread even if it holds inf/nan.
+        float out = alpha * acc;
         if(beta != 0.0f)
             out += beta * static_cast<float>(Cb[i + j * ldc]);
 
@@ -173,6 +175,10 @@ bool gpu_ref_supported(const Arguments& arg, std::string& reason)
         return fail("grouped GEMM");
     if(arg.batch_mode != 0)
         return fail("pointer-array (general) batch mode");
+    // Batch maps onto a grid dimension (grid.z in the reference launch, grid.y in
+    // the compare launch), both capped at 65535.
+    if(arg.batch_count > 65535)
+        return fail("batch count above the 65535 grid-dimension limit");
     if(arg.a_type != arg.b_type || !is_supported_type(arg.a_type))
         return fail("A/B type other than matching f32/f16/bf16");
     if(!is_supported_type(arg.c_type) || !is_supported_type(arg.d_type))

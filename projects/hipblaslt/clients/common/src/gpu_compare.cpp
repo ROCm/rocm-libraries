@@ -48,12 +48,6 @@ namespace
         return dist <= 4u;
     }
 
-    // 4-ULP compare in float (narrow outputs promote to float before compare).
-    __device__ inline bool almost_equals(float a, float b)
-    {
-        return float_almost_equals(a, b);
-    }
-
     // Per-element error in ULP of the output type, matching ulp_distance() in ulp.hpp.
     __device__ inline double ulp_distance(double exact, double approx, int mant_bits)
     {
@@ -120,7 +114,7 @@ namespace
     __device__ inline void atomicMaxDouble(double* addr, double val)
     {
         auto*              as_ull  = reinterpret_cast<unsigned long long*>(addr);
-        unsigned long long old     = *as_ull;
+        unsigned long long old     = atomicAdd(as_ull, 0ull); // atomic initial load
         unsigned long long assumed = old;
         do
         {
@@ -219,7 +213,7 @@ namespace
             }
 
             const double d = fabs(g - r);
-            if(!almost_equals(gv, rv))
+            if(!float_almost_equals(gv, rv))
                 ++l_unit_fail;
             l_max = fmax(l_max, d);
             l_sref += r * r;

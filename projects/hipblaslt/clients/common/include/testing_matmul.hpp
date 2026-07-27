@@ -1541,9 +1541,13 @@ inline void gpu_reference_report(hipStream_t                   stream,
 
         if(arg.allclose_check && report)
         {
-            // Reproduce allclose_check_general()'s ascending atol-outer/rtol-inner
-            // search over the shared candidate grid; res.allclose_g[k] is the
-            // smallest atol admissible for rtol = GPU_REF_TOL_GRID[k].
+            // Ascending atol-outer/rtol-inner search over the shared candidate
+            // grid; res.allclose_g[k] is the smallest atol admissible for
+            // rtol = GPU_REF_TOL_GRID[k]. allclose_g is aggregated as a global max
+            // over all batches, so the reported (atol, rtol) is the tightest pair
+            // that satisfies every batch at once (single-matrix matches
+            // allclose_check_general; the strided CPU overload instead reports the
+            // last batch's pair).
             double foundAtol = 1.0, foundRtol = 1.0;
             if(res.num_nan_mismatch == 0)
             {
@@ -5020,8 +5024,9 @@ void testing_matmul_with_bias(const Arguments& arg,
     // the device inputs; reused by every solution's check below.
     if(use_gpu_ref)
     {
+        double ref_time_start = 0.0;
         if(arg.timing)
-            cpu_time_used = get_time_us_no_sync();
+            ref_time_start = get_time_us_no_sync();
 
         for(int gemmIdx = 0; gemmIdx < gemm_count; gemmIdx++)
         {
@@ -5067,16 +5072,18 @@ void testing_matmul_with_bias(const Arguments& arg,
         }
         CHECK_HIP_ERROR(hipStreamSynchronize(stream));
 
+        // Accumulate so 'both' mode reports CPU+GPU reference time in one column.
         if(arg.timing)
-            cpu_time_used = get_time_us_no_sync() - cpu_time_used;
+            cpu_time_used += get_time_us_no_sync() - ref_time_start;
     }
 
     // CPU reference (--check_ref cpu|both): compute hD_gold via cblas_gemm.
     if(use_cpu_ref)
     {
+        double ref_time_start = 0.0;
         if(arg.timing)
         {
-            cpu_time_used = get_time_us_no_sync();
+            ref_time_start = get_time_us_no_sync();
         }
 
 #define epilogue_param                                                                      \
@@ -5424,7 +5431,7 @@ void testing_matmul_with_bias(const Arguments& arg,
 
         if(arg.timing)
         {
-            cpu_time_used = get_time_us_no_sync() - cpu_time_used;
+            cpu_time_used += get_time_us_no_sync() - ref_time_start;
         }
     }
     void* alpha_ptr = nullptr;

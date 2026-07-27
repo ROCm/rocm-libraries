@@ -482,8 +482,7 @@ try
 
         ("check_ref",
          value<std::string>(&check_ref)->default_value(""),
-         "Where to compute the correctness reference: 'cpu' (default), 'gpu' (faster; plain "
-         "f32/f16/bf16 GEMMs with the default epilogue only, else error), or 'both' (cross-check "
+         "Where to compute the correctness reference: 'cpu' (default), 'gpu', or 'both' (cross-check "
          "against both). Passing any value implies --verify.")
 
         ("iters,i",

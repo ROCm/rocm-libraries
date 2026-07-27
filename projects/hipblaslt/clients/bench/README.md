@@ -95,7 +95,7 @@ cd hipBLASLt; cd build/release
 Run fp32 GEMM with validation
 ```
 ./clients/hipblaslt-bench --precision f32_r -v
-[0]:transA,transB,grouped_gemm,batch_count,m,n,k,alpha,lda,stride_a,beta,ldb,stride_b,ldc,stride_c,ldd,stride_d,a_type,b_type,c_type,d_type,compute_type,scaleA,scaleB,scaleC,scaleD,amaxD,activation_type,bias_vector,bias_type,hipblaslt-Gflops,hipblaslt-GB/s,us,CPU-Gflops,CPU-us,norm_error,atol,rtol
+[0]:transA,transB,grouped_gemm,batch_count,m,n,k,alpha,lda,stride_a,beta,ldb,stride_b,ldc,stride_c,ldd,stride_d,a_type,b_type,c_type,d_type,compute_type,scaleA,scaleB,scaleC,scaleD,amaxD,activation_type,bias_vector,bias_type,hipblaslt-Gflops,hipblaslt-GB/s,us,ref-Gflops,ref-us,norm_error,atol,rtol
     N,N,0,1,128,128,128,1,128,16384,0,128,16384,128,16384,128,16384,f32_r,f32_r,f32_r,f32_r,f32_r,0,0,0,0,0,none,0,non-supported type,403.298,17.6063,10.4,0.0960059,43688,2.44879e-07,1e-05,1e-05
 ```
 Show the frequency with environment variable

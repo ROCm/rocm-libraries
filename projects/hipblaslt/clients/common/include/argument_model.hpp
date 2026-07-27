@@ -112,12 +112,12 @@ public:
             {
                 if(gflops != ArgumentLogging::NA_value)
                 {
-                    double cblas_gflops = gflops * batch_count / cpu_us * 1e6;
-                    name_line << ",CPU-Gflops";
-                    val_line << "," << cblas_gflops;
+                    double ref_gflops = gflops * batch_count / cpu_us * 1e6;
+                    name_line << ",ref-Gflops";
+                    val_line << "," << ref_gflops;
                 }
 
-                name_line << ",CPU-us";
+                name_line << ",ref-us";
                 val_line << "," << cpu_us;
             }
             if(arg.norm_check)

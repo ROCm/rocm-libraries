@@ -3335,11 +3335,15 @@ Tests:
 # matching f32/f16/bf16 A/B and f32/f16/bf16 C/D on compute 32F, default
 # epilogue, strided batch, no scaling. integer_exact init keeps the serial
 # reference bit-exact against the library reduction at small K, so the GPU leg's
-# exact 4-ULP unit_check holds. Scoped to gfx950, where these entries run.
+# exact 4-ULP unit_check holds. All four checks are enabled together: check_ref 1
+# (gpu) drives the GPU leg's own error/atol/rtol/ULP reporting (report=true),
+# while check_ref 2 (both) exercises the CPU/GPU cross-check. Scoped to gfx950,
+# where these entries run.
 ###############################################################################
 
 # Plain GEMM across f32/f16/bf16 and all four transpose combinations, gpu and
-# both references.
+# both references. allclose_check/ulp_check on check_ref 1 cover the GPU leg's
+# allclose-grid search and ULP averaging.
 - name: matmul_check_ref
   category: pre_checkin
   function:
@@ -3356,11 +3360,14 @@ Tests:
   initialization: integer_exact
   unit_check: 1
   norm_check: 1
+  allclose_check: 1
+  ulp_check: 1
   check_ref: [1, 2]
   gpu_arch: '950'
 
-# Strided batched (batch_count > 1) exercises the per-batch norm path with both
-# references cross-checking the GPU output.
+# Strided batched (batch_count > 1) exercises the per-batch norm path and, on
+# check_ref 1 (report=true), the batch-aggregated allclose grid and ULP average;
+# check_ref 2 cross-checks the GPU output against the CPU reference.
 - name: matmul_check_ref_batched
   category: pre_checkin
   function:
@@ -3377,7 +3384,9 @@ Tests:
   initialization: integer_exact
   unit_check: 1
   norm_check: 1
-  check_ref: 2
+  allclose_check: 1
+  ulp_check: 1
+  check_ref: [1, 2]
   gpu_arch: '950'
 
 ...
