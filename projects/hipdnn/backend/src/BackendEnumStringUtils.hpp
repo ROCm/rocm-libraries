@@ -459,6 +459,10 @@ inline const char* hipdnnGetAttributeNameString(hipdnnBackendAttributeName_t att
         return "HIPDNN_ATTR_TENSOR_IS_BY_VALUE";
     case HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE_EXT:
         return "HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE";
+    case HIPDNN_ATTR_TENSOR_BYTE_ALIGNMENT:
+        return "HIPDNN_ATTR_TENSOR_BYTE_ALIGNMENT";
+    case HIPDNN_ATTR_TENSOR_RAGGED_OFFSET_DESC:
+        return "HIPDNN_ATTR_TENSOR_RAGGED_OFFSET_DESC";
 
     // Convolution forward operation attributes
     case HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_W:

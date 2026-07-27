@@ -70,6 +70,9 @@ namespace rocalution
   *   \right)
   * \f]
   *
+  * \note To adjust the damping parameter :math:`\omega`, use
+  * FixedPoint::SetRelaxation().
+  *
   * \tparam OperatorType - can be LocalMatrix or GlobalMatrix
   * \tparam VectorType - can be LocalVector or GlobalVector
   * \tparam ValueType - can be float, double, std::complex<float> or std::complex<double>
@@ -118,6 +121,9 @@ namespace rocalution
   * \f]
   * with \f$\omega \in (0,2)\f$.
   *
+  * \note To adjust the relaxation parameter :math:`\omega`, use
+  * FixedPoint::SetRelaxation().
+  *
   * \tparam OperatorType - can be LocalMatrix
   * \tparam VectorType - can be LocalVector
   * \tparam ValueType - can be float, double, std::complex<float> or std::complex<double>
@@ -157,6 +163,9 @@ namespace rocalution
   * \details
   * The Symmetric Gauss-Seidel / SSOR method is for solving system of linear equations
   * \f$Ax=b\f$. It approximates the solution iteratively.
+  *
+  * \note To adjust the relaxation parameter :math:`\omega`, use
+  * FixedPoint::SetRelaxation().
   *
   * \tparam OperatorType - can be LocalMatrix
   * \tparam VectorType - can be LocalVector

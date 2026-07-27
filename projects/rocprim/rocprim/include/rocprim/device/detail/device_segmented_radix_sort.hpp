@@ -36,8 +36,8 @@
 #include "../../block/block_scan.hpp"
 #include "../../block/block_store.hpp"
 
-#include "../../warp/detail/warp_sort_stable.hpp"
 #include "../../warp/warp_load.hpp"
+#include "../../warp/warp_sort_stable.hpp"
 #include "../../warp/warp_store.hpp"
 
 #include "../device_segmented_radix_sort_config.hpp"
@@ -566,8 +566,8 @@ class segmented_warp_sort_helper<
     template<bool UseRadixMask>
     using radix_comparator_type
         = ::rocprim::detail::radix_merge_compare<Descending, UseRadixMask, Key>;
-    using sort_type = ::rocprim::detail::
-        warp_sort_stable<Key, BlockSize, logical_warp_size, items_per_thread, Value>;
+    using sort_type
+        = ::rocprim::warp_sort_stable<Key, BlockSize, logical_warp_size, items_per_thread, Value>;
 
     static constexpr bool with_values = !std::is_same<Value, ::rocprim::empty_type>::value;
 
