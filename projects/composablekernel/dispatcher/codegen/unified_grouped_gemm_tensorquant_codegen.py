@@ -27,7 +27,7 @@ import argparse
 import itertools
 import json
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -188,7 +188,7 @@ class TensorQuantKernelHeaderGenerator:
         layout_a_ck  = TENSORQUANT_LAYOUT_TO_CK[spec.layout[0]]
         layout_b_ck  = TENSORQUANT_LAYOUT_TO_CK[spec.layout[1]]
         layout_c_ck  = TENSORQUANT_LAYOUT_TO_CK[spec.layout[2]]
-        # AQ and BQ layouts are RowMajor for TensorQuant (single scalar, layout is nominal)
+        # AQ layout is RowMajor, BQ layout is ColumnMajor (follows B convention; nominal for single-scalar quant)
         layout_aq_ck = TENSORQUANT_LAYOUT_TO_CK["r"]
         layout_bq_ck = TENSORQUANT_LAYOUT_TO_CK["c"]
 

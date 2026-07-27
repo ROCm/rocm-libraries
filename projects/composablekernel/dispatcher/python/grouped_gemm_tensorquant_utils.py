@@ -27,7 +27,7 @@ import os
 import subprocess
 import sys
 import tempfile
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 import concurrent.futures
@@ -48,15 +48,6 @@ from unified_grouped_gemm_tensorquant_codegen import make_tensorquant_kernel_nam
 
 _DEFAULT_HIPCC    = "hipcc"
 _DEFAULT_GFX_ARCH = "gfx950"
-
-_HIPCC_BASE_FLAGS = [
-    "-std=c++17",
-    "-O3",
-    "-fPIC",
-    "-shared",
-    "-DCK_TILE_SINGLE_KERNEL_INCLUDE",
-    "-w",
-]
 
 
 # =============================================================================
@@ -185,6 +176,7 @@ class TensorQuantDispatcherLib:
 
     def __init__(self, so_path: Path):
         self.so_path = Path(so_path)
+        self._cleaned_up = False
         if not self.so_path.exists():
             raise FileNotFoundError(f"TensorQuant .so not found: {self.so_path}")
         self._lib = ctypes.CDLL(str(self.so_path))
@@ -271,11 +263,13 @@ class TensorQuantDispatcherLib:
         return self._lib.dispatcher_get_kernel_count()
 
     def cleanup(self):
-        self._lib.dispatcher_cleanup()
+        if not self._cleaned_up:
+            self._lib.dispatcher_cleanup()
+            self._cleaned_up = True
 
     def __del__(self):
         try:
-            self._lib.dispatcher_cleanup()
+            self.cleanup()
         except Exception:
             pass
 
@@ -313,6 +307,15 @@ class TensorQuantGpuGemmRunner:
         import numpy as np
 
         M, N, K = problem.M, problem.N, problem.K
+
+        if A.ndim != 2 or A.shape != (M, K):
+            raise ValueError(f"A shape mismatch: expected ({M}, {K}), got {A.shape}")
+        if B.ndim != 2 or B.shape != (K, N):
+            raise ValueError(f"B shape mismatch: expected ({K}, {N}), got {B.shape}")
+        if AQ.ndim != 1 or AQ.shape[0] != 1:
+            raise ValueError(f"AQ shape mismatch: expected (1,), got {AQ.shape}")
+        if BQ.ndim != 1 or BQ.shape[0] != 1:
+            raise ValueError(f"BQ shape mismatch: expected (1,), got {BQ.shape}")
 
         if c_dtype is None:
             c_dtype = np.float16

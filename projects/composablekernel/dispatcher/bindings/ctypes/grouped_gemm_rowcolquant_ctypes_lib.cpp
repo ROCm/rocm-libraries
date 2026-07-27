@@ -44,16 +44,6 @@ static constexpr std::size_t elements_to_bytes(std::size_t n)
 
 static bool g_initialized = false;
 
-#define HIP_CHECK(call)                                                                        \
-    {                                                                                          \
-        hipError_t _err = (call);                                                              \
-        if(_err != hipSuccess)                                                                 \
-        {                                                                                      \
-            std::cerr << "HIP error: " << hipGetErrorString(_err) << " at " << __FILE__ << ":" \
-                      << __LINE__ << "\n";                                                     \
-            return -1;                                                                         \
-        }                                                                                      \
-    }
 
 extern "C" {
 

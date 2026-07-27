@@ -45,16 +45,6 @@ static constexpr std::size_t elements_to_bytes(std::size_t n)
 
 static bool g_initialized = false;
 
-#define HIP_CHECK(call)                                                                        \
-    {                                                                                          \
-        hipError_t _err = (call);                                                              \
-        if(_err != hipSuccess)                                                                 \
-        {                                                                                      \
-            std::cerr << "HIP error: " << hipGetErrorString(_err) << " at " << __FILE__ << ":" \
-                      << __LINE__ << "\n";                                                     \
-            return -1;                                                                         \
-        }                                                                                      \
-    }
 
 extern "C" {
 
@@ -147,6 +137,15 @@ int dispatcher_run_tensorquant_gemm(const void* A,
                   << "Expected stride_A=" << K << " stride_B=" << K << " stride_C=" << N
                   << ", got stride_A=" << stride_A << " stride_B=" << stride_B
                   << " stride_C=" << stride_C << "\n";
+        return -1;
+    }
+
+    // TensorQuant uses a single scalar scale per tensor; strides must be 1.
+    if(stride_AQ != 1 || stride_BQ != 1)
+    {
+        std::cerr << "dispatcher_run_tensorquant_gemm: TensorQuant requires stride_AQ=1 and "
+                  << "stride_BQ=1, got stride_AQ=" << stride_AQ << " stride_BQ=" << stride_BQ
+                  << "\n";
         return -1;
     }
 
