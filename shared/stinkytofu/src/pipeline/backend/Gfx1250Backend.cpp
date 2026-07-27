@@ -179,7 +179,7 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBu
 
     // Whole-kernel expert SCHED_MODE=2: wait-alu insertion + mode2 enable.
     if (moduleOptions.EnableESM2) {
-        pm.addPass(createInsertWaitAluPass(module));
+        pm.addPass(createInsertWaitAluPass(module, moduleOptions.EnableESM2TrackValuVsrc));
     }
 
     pm.addPass(createMemTokenConsistencyCheckPass());
