@@ -14,6 +14,18 @@ set(SOURCES
 )
 
 add_executable(tablegen "${SOURCES}")
+
+# GenLogicalIR.cpp #includes LogicalInstructionDefs.inc (not listed in other DEPENDS).
+# Declare it explicitly so Ninja reruns tablegen / rebuilds this TU when the .inc
+# changes even if implicit depfiles or caching miss the edge (avoids stale
+# _stinkytofu.so vs source-tree .inc mtime in stinkytofu/__init__.py).
+get_filename_component(LOGICAL_INSTRUCTION_DEFS
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../src/ir/logical/LogicalInstructionDefs.inc"
+    ABSOLUTE)
+set_source_files_properties(
+    "${CMAKE_CURRENT_SOURCE_DIR}/GenLogicalIR.cpp"
+    PROPERTIES OBJECT_DEPENDS "${LOGICAL_INSTRUCTION_DEFS}")
+
 target_link_libraries(tablegen PRIVATE stinkytofu-warnings)
 # tablegen compiles IRLexer/PatternParser directly (not via libstinkytofu),
 # so it needs stinkytofu_EXPORTS to get dllexport instead of dllimport.
@@ -125,7 +137,7 @@ add_custom_command(
     COMMAND ${CMAKE_COMMAND} -E make_directory "${TABLEGEN_OUTPUT_DIR}/stinkytofu/ir/logical"
     COMMAND ${CMAKE_COMMAND} -E make_directory "${TABLEGEN_OUTPUT_DIR}/stinkytofu/ir/rocisa"
     COMMAND $<TARGET_FILE:tablegen> "${TABLEGEN_OUTPUT_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}/../../hardware"
-    DEPENDS tablegen instruction_generated ${HARDWARE_SOURCE_FILES} ${PATTERN_FILE} ${HLIR_PATTERN_FILE}
+    DEPENDS tablegen instruction_generated ${HARDWARE_SOURCE_FILES} ${PATTERN_FILE} ${HLIR_PATTERN_FILE} "${LOGICAL_INSTRUCTION_DEFS}"
     COMMENT "Generating ISA definitions, IR classes, and pattern matchers with tablegen..."
     VERBATIM
 )
