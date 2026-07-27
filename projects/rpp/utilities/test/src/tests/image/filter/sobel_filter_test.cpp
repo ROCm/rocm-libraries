@@ -89,10 +89,9 @@ void run_sobel_filter(const TestConfig& cfg, const SobelFilterParams& op) {
     dst.read(actual.data(), imageBytes);
 
     // (4) Compare over the ROI. gradX/gradY match the kernel for U8/F16/F32 (golden Gx/Gy correct).
-    // Known reds kept red by design: sobelType 2 (XY) diverges from the Euclidean gradient magnitude
-    // on both backends (.notes/issues/sobel-xy-gradient-not-euclidean.md); I8 gradX/gradY (both
-    // backends) and HIP F16 gradX/gradY are not clamped/quantized to the dtype range
-    // (.notes/issues/sobel-gradient-output-range-i8-f16.md). All are real kernel defects.
+    // Known reds kept red by design: sobelType 2 (XY) diverges from the Euclidean gradient
+    // magnitude on both backends; I8 gradX/gradY (both backends) and HIP F16 gradX/gradY are not
+    // clamped/quantized to the dtype range. All are real kernel defects.
     EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), dstDesc, roi.data(), XYWH,
                                sobel_filter_tolerance(cfg.dtype)));
 }

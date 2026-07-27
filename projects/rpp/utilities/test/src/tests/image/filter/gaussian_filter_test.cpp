@@ -93,9 +93,8 @@ void run_gaussian_filter(const TestConfig& cfg, const GaussianFilterParams& op) 
     dst.read(actual.data(), imageBytes);
 
     // (4) Compare within tolerance over the ROI. The golden matches HIP across the whole grid, so it
-    // is correct; known HOST-only reds kept red by design: PKD3 k3 diverges at the row edge
-    // (.notes/issues/gaussian-filter-host-pkd3-edge.md), and PLN PartialRoi k5 bleeds out-of-ROI
-    // neighbors (.notes/issues/morphology-host-partial-roi-neighbor-bleed.md). Both are kernel defects.
+    // is correct; known HOST-only reds kept red by design: PKD3 k3 diverges at the row edge, and
+    // PLN PartialRoi k5 bleeds out-of-ROI neighbors. Both are real kernel defects.
     EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), dstDesc, roi.data(), XYWH,
                                gaussian_filter_tolerance(cfg.dtype)));
 }

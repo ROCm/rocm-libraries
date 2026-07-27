@@ -95,8 +95,7 @@ TEST_P(TensorOrTensorTest, Correctness) {
 //
 // Full grid passes on both backends. Note the HIP descriptors must be device-addressable
 // (GenericDescriptor handles this): at rank >= 4 the non-broadcast kernel reads dims/strides on
-// the device. Undocumented and rank-dependent -- see
-// .notes/issues/nd-non-broadcast-host-descriptor-pointers-to-hip-kernel.md.
+// the device. Undocumented and rank-dependent.
 INSTANTIATE_TEST_SUITE_P(Misc_Bitwise, TensorOrTensorTest,
                          ::testing::ValuesIn(nd_with_params<BroadcastParams>(
                              make_nd_configs({DType::U8, DType::I8}, {2, 3, 4}),

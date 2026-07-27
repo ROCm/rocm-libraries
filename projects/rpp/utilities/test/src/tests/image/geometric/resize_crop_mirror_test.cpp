@@ -34,8 +34,7 @@ struct ResizeCropMirrorParams {
 
 // Tolerances are set from legitimate numeric error only; they are NOT loosened to hide kernel bugs.
 // NN copies a texel verbatim (bit-exact); bilinear blends in float. Same sampling as resize, so the
-// bilinear last-column/row-short kernel defect surfaces here too (see
-// issues/geometric-bilinear-last-texel-short.md).
+// bilinear last-column/row-short kernel defect surfaces here too.
 double resize_crop_mirror_tolerance(DType dt, RpptInterpolationType interp) {
     if (interp == NEAREST_NEIGHBOR) return 0.0;
     switch (dt) {
@@ -105,10 +104,9 @@ void run_resize_crop_mirror(const TestConfig& cfg, const ResizeCropMirrorParams&
 //
 // Every case is currently red against this (correct) golden, documenting two kernel defects:
 //  - NEAREST_NEIGHBOR returns RPP_ERROR_NOT_IMPLEMENTED (both backends) -- the ASSERT on the return
-//    value fails. See issues/resize-crop-mirror-nn-not-implemented.md.
+//    value fails.
 //  - BILINEAR runs but samples the trailing edge one texel short (interior matches the golden
-//    exactly); the same bilinear defect as resize et al. See
-//    issues/geometric-bilinear-last-texel-short.md.
+//    exactly); the same bilinear defect as resize et al.
 class ResizeCropMirrorTest : public ::testing::TestWithParam<WithParams<ResizeCropMirrorParams>> {};
 
 TEST_P(ResizeCropMirrorTest, Correctness) {

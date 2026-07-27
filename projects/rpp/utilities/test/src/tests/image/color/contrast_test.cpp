@@ -24,8 +24,7 @@ double contrast_tolerance(DType dt) {
         case DType::U8:
             return 1.0;
         // I8 kept sub-LSB to surface the systemic kernel bug: RPP truncates the I8 result instead
-        // of rounding (HOST scalar remainder + all of HIP), biasing it low by 1 vs U8. See
-        // section 13 / 13.A of the test-suite-revamp plan.
+        // of rounding (HOST scalar remainder + all of HIP), biasing it low by 1 vs U8.
         case DType::I8:
             return 0.5;
         case DType::F32:

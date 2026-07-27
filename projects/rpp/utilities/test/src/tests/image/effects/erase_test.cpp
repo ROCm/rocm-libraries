@@ -108,9 +108,8 @@ void run_erase(const TestConfig& cfg) {
 //
 // FullRoi passes the full grid on both backends (validates the box erase + per-channel color + I8
 // semantics). Every PartialRoi case is a documented kernel red: HOST copies correctly but does not
-// apply the boxes (issues/dropout-partial-roi-boxes-not-applied.md); HIP leaves the whole ROI region
-// unwritten (issues/hip-partial-roi-region-unwritten.md). The golden holds to absolute-frame box
-// semantics -- do not weaken it to force green.
+// apply the boxes; HIP leaves the whole ROI region unwritten. The golden holds to absolute-frame
+// box semantics -- do not weaken it to force green.
 class EraseTest : public ::testing::TestWithParam<TestConfig> {};
 
 TEST_P(EraseTest, Correctness) {

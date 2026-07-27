@@ -30,7 +30,7 @@ struct WarpAffineParams {
 };
 
 // Tolerances are set from legitimate numeric error only; they are deliberately NOT loosened to
-// hide the real warp_affine kernel defects this test surfaces (see section 13, findings #15-#17):
+// hide the real warp_affine kernel defects this test surfaces:
 //   #15 HOST bilinear reads the last column/row one texel short (all HOST_*_BILINEAR red)
 //   #16 I8 out-of-bounds fill is 0, not black -128 (I8 shift/halfshift red on both backends)
 //   #17 HIP partial-ROI placement diverges from HOST (all HIP_*_PartialRoi red)

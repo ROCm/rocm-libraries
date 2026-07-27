@@ -30,7 +30,7 @@ double color_cast_tolerance(DType dt) {
         case DType::U8:
             return 1.0;
         // I8 kept sub-LSB to surface the systemic I8 round-vs-truncate defect (RPP truncates the
-        // I8 result instead of rounding). See section 13 of the test-suite-revamp plan.
+        // I8 result instead of rounding).
         case DType::I8:
             return 0.5;
         case DType::F32:
@@ -114,7 +114,7 @@ TEST_P(ColorCastTest, Correctness) {
 
 // Restricted to the 3-channel layouts: color_cast applies distinct R/G/B constants, and the
 // kernel rejects 1-channel input with an error despite the header documenting c = 1/3 (a
-// doc/kernel discrepancy noted in section 13 of the test-suite-revamp plan).
+// doc/kernel discrepancy).
 INSTANTIATE_TEST_SUITE_P(
     Image_Color, ColorCastTest,
     ::testing::ValuesIn(with_params<ColorCastParams>(

@@ -117,7 +117,7 @@ TEST_P(ColorTwistTest, Correctness) {
 
 // Restricted to the 3-channel layouts. The API doc claims c = 1/3, but rppt_color_twist rejects
 // 1-channel (PLN1) input with RPP_ERROR_INVALID_CHANNELS (-19) on both backends -- a real
-// doc/kernel discrepancy logged in section 13 of the test-suite-revamp plan; hue/saturation are
+// doc/kernel discrepancy; hue/saturation are
 // undefined on greyscale, so 3-channel is the op's genuine support.
 INSTANTIATE_TEST_SUITE_P(
     Image_Color, ColorTwistTest,

@@ -144,14 +144,14 @@ TEST_P(NormalizeTest, Correctness) {
 //
 // 223 of these 288 cases are red against four documented kernel defects, all deterministic
 // (identical failure set across repeated runs). The goldens and tolerances are deliberately
-// left correct (see .notes/issues/):
+// left correct:
 //   - 144: U8toF32 / I8toF32 rejected with RPP_ERROR_INVALID_SRC_OR_DST_DATATYPE, though the
-//     header documents them -> normalize-rejects-documented-u8-i8-to-f32.md
+//     header documents them.
 //   -  36: cms0 (both statistics supplied) applies sample 0's mean/stddev to every sample,
-//     both backends -> normalize-external-mean-stddev-not-strided-per-sample.md
+//     both backends.
 //   -  18: cms1 on HOST multiplies by the supplied stddev instead of by scale/stddev; HIP is
-//     correct -> normalize-host-treats-supplied-stddev-as-multiplier.md
+//     correct.
 //   -  25: cms2/cms3 on HOST at rank >= 3 (all zeros at 3D), plus F16 partial masks at 2D; HIP
-//     matches the golden at every rank -> normalize-host-wrong-for-rank-3-and-above.md
+//     matches the golden at every rank.
 INSTANTIATE_TEST_SUITE_P(Misc_Statistical, NormalizeTest, ::testing::ValuesIn(normalize_grid()),
                          nd_op_config_name<NormalizeParams>);

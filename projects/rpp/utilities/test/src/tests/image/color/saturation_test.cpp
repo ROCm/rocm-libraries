@@ -29,7 +29,7 @@ double saturation_tolerance(DType dt) {
             return 1.0;
         // I8 stays at 1.0 (not 0.5): the HSV round trip legitimately differs by 1 LSB on many
         // pixels. This still surfaces a real kernel bug -- HIP I8 PKD3/PLN3 diverges by up to 85 on
-        // some pixels (same systemic HIP I8 HSV defect as hue; see section 13 of the plan) -- which
+        // some pixels (the same systemic HIP I8 HSV defect as hue) -- which
         // 1.0 catches.
         case DType::I8:
             return 1.0;

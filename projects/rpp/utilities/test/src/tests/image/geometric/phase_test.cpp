@@ -19,7 +19,7 @@ double phase_tolerance(DType dt) {
             return 1.0;
         // I8 kept sub-LSB to surface the systemic I8 round-vs-truncate defect: HIP truncates all I8
         // (actual = ref - 1), HOST truncates the partial-ROI scalar tail (here actual = ref + 1 as
-        // phase's negative I8 output truncates toward zero). See issues/i8-round-vs-truncate.md.
+        // phase's negative I8 output truncates toward zero).
         case DType::I8:
             return 0.5;
         case DType::F32:

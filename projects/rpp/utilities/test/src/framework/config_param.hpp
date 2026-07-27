@@ -13,9 +13,12 @@ namespace rpptest {
 
 // The cross-cutting configuration axes each op is tested over. These map onto the
 // {Backend}_{DTypeConv}_{Layout}_{Roi} tokens of the value-parameter label so every
-// axis is independently greppable via --gtest_filter (see framework/TAXONOMY.md).
+// axis is independently greppable via --gtest_filter.
 
-enum class DType { U8, F16, F32, I8 };
+// I16 is only reachable through the ND (Misc) grid -- rppt_log1p documents i16->f32 as its
+// only conversion. The image-domain helpers (to_unit / from_unit / quantize_stored) do not
+// model it.
+enum class DType { U8, F16, F32, I8, I16 };
 enum class Layout { PKD3, PLN3, PLN1 };  // PKD3/PLN3 => 3 channels, PLN1 => 1 channel
 enum class Roi { Full, Partial };
 
@@ -31,6 +34,7 @@ inline std::string dtype_name(DType d) {
         case DType::F16: return "F16";
         case DType::F32: return "F32";
         case DType::I8: return "I8";
+        case DType::I16: return "I16";
     }
     return "UNK";
 }

@@ -34,7 +34,7 @@ struct WarpPerspectiveParams {
 };
 
 // Tolerances are set from legitimate numeric error only; they are NOT loosened to hide the real
-// warp_perspective kernel defects this test surfaces (shared with warp_affine, see section 13
+// warp_perspective kernel defects this test surfaces (shared with warp_affine
 // findings #15-#17): HOST bilinear last col/row off-by-one, I8 out-of-bounds fill = 0 (not -128),
 // and HIP partial-ROI placement divergence.
 double warp_perspective_tolerance(DType dt, RpptInterpolationType interp) {

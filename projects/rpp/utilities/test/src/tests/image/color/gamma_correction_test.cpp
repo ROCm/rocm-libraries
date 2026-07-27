@@ -24,7 +24,7 @@ double gamma_correction_tolerance(DType dt) {
         case DType::U8:
             return 1.0;
         // I8 kept sub-LSB to surface the systemic I8 round-vs-truncate defect (RPP truncates the
-        // I8 result instead of rounding). See section 13 of the test-suite-revamp plan.
+        // I8 result instead of rounding).
         case DType::I8:
             return 0.5;
         case DType::F32:

@@ -86,8 +86,8 @@ void run_box_filter(const TestConfig& cfg, const BoxFilterParams& op) {
     dst.read(actual.data(), imageBytes);
 
     // (4) Compare within tolerance over the ROI. Known red kept red by design: HOST F16/F32 PLN
-    // PartialRoi k5 bleeds neighbors from outside the ROI -- a real kernel defect (golden clamps to
-    // the ROI edge). See .notes/issues/morphology-host-partial-roi-neighbor-bleed.md.
+    // PartialRoi k5 bleeds neighbors from outside the ROI -- a real kernel defect (golden clamps
+    // to the ROI edge).
     EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), dstDesc, roi.data(), XYWH,
                                box_filter_tolerance(cfg.dtype)));
 }

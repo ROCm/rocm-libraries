@@ -32,7 +32,7 @@ struct ResizeParams {
 };
 
 // Tolerances are set from legitimate numeric error only; they are NOT loosened to hide the real
-// kernel defect this test surfaces (see section 13, finding #19): bilinear samples the last
+// kernel defect this test surfaces: bilinear samples the last
 // column/row one texel short (same root cause as #15). All 96 NN cases and every HOST F16/I8
 // bilinear case pass at these tolerances, validating the golden; the red cases are the kernel bug.
 double resize_tolerance(DType dt, RpptInterpolationType interp) {

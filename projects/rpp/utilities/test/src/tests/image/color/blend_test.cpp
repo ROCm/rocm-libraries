@@ -24,8 +24,7 @@ double blend_tolerance(DType dt) {
         case DType::U8:
             return 1.0;
         // I8 kept sub-LSB to surface a real kernel bug: RPP truncates the I8 result instead of
-        // rounding (HOST scalar remainder + all of HIP), biasing it toward zero. See section 13 of
-        // the test-suite-revamp plan.
+        // rounding (HOST scalar remainder + all of HIP), biasing it toward zero.
         case DType::I8:
             return 0.5;
         case DType::F32:

@@ -19,6 +19,7 @@ inline RpptDataType to_rpp_dtype(DType d) {
         case DType::F16: return F16;
         case DType::F32: return F32;
         case DType::I8: return I8;
+        case DType::I16: return I16;
     }
     return U8;
 }
@@ -27,7 +28,8 @@ inline std::size_t dtype_size(DType d) {
     switch (d) {
         case DType::U8:
         case DType::I8: return 1;
-        case DType::F16: return 2;
+        case DType::F16:
+        case DType::I16: return 2;
         case DType::F32: return 4;
     }
     return 1;
@@ -68,8 +70,8 @@ inline double clampd(double v, double lo, double hi) {
 // Normalized [0,1] "unit intensity" conversions, shared by the reference models that compute
 // in unit space (hue, saturation, color_twist, gamma_correction). to_unit maps a stored pixel
 // into [0,1]; from_unit quantizes a [0,1] result back to the stored dtype, rounding integers to
-// nearest (the intended round-to-nearest behavior the golden models hold to -- see the systemic
-// I8 round-vs-truncate finding in section 13 of the plan). I8 pixels are the same intensities
+// nearest (the intended round-to-nearest behavior the golden models hold to, which several
+// kernels do not). I8 pixels are the same intensities
 // shifted by -128.
 inline double to_unit(double v, DType dt) {
     return (dt == DType::U8) ? v / 255.0 : (dt == DType::I8) ? (v + 128.0) / 255.0 : v;
@@ -88,8 +90,8 @@ inline double dtype_black(DType dt) { return dt == DType::I8 ? -128.0 : 0.0; }
 
 // Quantizes a value already expressed in stored units back into the dtype's storable range:
 // integers round to nearest and clamp, floats clamp to [0,1]. Round-to-nearest is the intended
-// integer behavior the golden models hold to (see the systemic I8 round-vs-truncate finding in
-// section 13 of the plan). Distinct from from_unit(), which additionally maps [0,1] -> stored.
+// integer behavior the golden models hold to, which several kernels do not (they truncate I8).
+// Distinct from from_unit(), which additionally maps [0,1] -> stored.
 inline double quantize_stored(double v, DType dt) {
     switch (dt) {
         case DType::U8: return clampd(std::nearbyint(v), 0.0, 255.0);
@@ -228,8 +230,8 @@ void for_each_roi_pixel(const RpptDesc& d, const RpptROI* roi, RpptRoiType type,
 }
 
 // Deterministic input fill within each dtype's valid range:
-// U8 [0,255], I8 [-128,127], F16/F32 [0,1]. salt shifts the pattern so a second
-// operand (for two-source ops) differs from the first.
+// U8 [0,255], I8 [-128,127], I16 [-32768,32512], F16/F32 [0,1]. salt shifts the pattern so a
+// second operand (for two-source ops) differs from the first.
 template <typename T>
 void fill_input(T* buf, std::size_t count, DType dt, unsigned salt = 0) {
     for (std::size_t i = 0; i < count; ++i) {
@@ -237,6 +239,7 @@ void fill_input(T* buf, std::size_t count, DType dt, unsigned salt = 0) {
         switch (dt) {
             case DType::U8: buf[i] = static_cast<T>(v); break;
             case DType::I8: buf[i] = static_cast<T>(static_cast<int>(v) - 128); break;
+            case DType::I16: buf[i] = static_cast<T>((static_cast<int>(v) - 128) * 256); break;
             case DType::F16:
             case DType::F32: buf[i] = from_double<T>(static_cast<double>(v) / 255.0); break;
         }

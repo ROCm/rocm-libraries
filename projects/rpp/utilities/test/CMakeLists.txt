@@ -80,6 +80,12 @@ add_executable(rpp_tests
     src/tests/image/statistical/tensor_max_test.cpp
     src/tests/image/statistical/tensor_mean_test.cpp
     src/tests/image/statistical/tensor_stddev_test.cpp
+    src/tests/misc/arithmetic/tensor_add_tensor_test.cpp
+    src/tests/misc/arithmetic/tensor_subtract_tensor_test.cpp
+    src/tests/misc/arithmetic/tensor_multiply_tensor_test.cpp
+    src/tests/misc/arithmetic/tensor_divide_tensor_test.cpp
+    src/tests/misc/arithmetic/log_test.cpp
+    src/tests/misc/arithmetic/log1p_test.cpp
     src/tests/misc/bitwise/tensor_and_tensor_test.cpp
     src/tests/misc/bitwise/tensor_or_tensor_test.cpp
     src/tests/misc/bitwise/tensor_xor_tensor_test.cpp

@@ -21,7 +21,7 @@ std::string interp_token(RpptInterpolationType i) {
 // A rotation angle (degrees, positive = anticlockwise) plus the interpolation. Angles are restricted
 // to the cardinal set {0,90,180,270}: those map every output pixel to an integer source coordinate,
 // so the golden is bit-exact and independent of the double-vs-float coordinate pipeline. General
-// angles are deferred (see section 13 finding #18) -- with fractional coords the golden's double
+// angles are deferred -- with fractional coords the golden's double
 // maths diverges from the kernel's float pipeline at texel boundaries, producing diffs that cannot
 // be cleanly attributed to a kernel defect. The shared bilinear 4-tap blend is already validated by
 // warp_affine's halfshift case.
@@ -32,7 +32,7 @@ struct RotateParams {
 };
 
 // Tolerances are set from legitimate numeric error only; they are NOT loosened to hide the real warp
-// kernel defects this test surfaces (shared machinery, see section 13 findings #15-#17): HOST
+// kernel defects this test surfaces (shared machinery): HOST
 // bilinear last col/row off-by-one, I8 out-of-bounds fill = 0 (not -128), and HIP partial-ROI
 // placement divergence.
 double rotate_tolerance(DType dt, RpptInterpolationType interp) {

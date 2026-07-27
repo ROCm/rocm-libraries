@@ -69,8 +69,8 @@ void run_channel_permute(const TestConfig& cfg, const ChannelPermuteParams& op) 
     // (4) Compare over the frame. channel_permute only reorders channels (no arithmetic), so it is
     // bit-exact -- tolerance 0. NOTE: HOST_I8toI8_PKD3 fails here because the HOST I8 packed kernel
     // reads uninitialized/out-of-bounds memory for a few elements (heap/order-dependent, values
-    // typically I8-black -128); a real kernel bug, not a reference/tolerance issue. See section 13
-    // of the test-suite-revamp plan. Do not loosen the tolerance to hide it.
+    // typically I8-black -128); a real kernel bug, not a reference/tolerance issue. Do not loosen
+    // the tolerance to hide it.
     EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), desc, roi.data(), XYWH, 0.0));
 }
 

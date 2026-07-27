@@ -23,7 +23,7 @@ double color_temperature_tolerance(DType dt) {
     switch (dt) {
         case DType::U8:
         // Pure integer additive offset: no rounding, so I8 is bit-exact too (the systemic
-        // I8 round-vs-truncate defect in section 13 does not apply to an integer add).
+        // I8 round-vs-truncate defect does not apply to an integer add).
         case DType::I8:
             return 0.0;
         case DType::F32:

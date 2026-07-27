@@ -25,7 +25,7 @@ double non_linear_blend_tolerance(DType dt) {
         case DType::U8:
             return 1.0;
         // I8 kept sub-LSB to surface the systemic I8 round-vs-truncate defect (HIP all I8, HOST
-        // partial-ROI scalar tail). See issues/i8-round-vs-truncate.md.
+        // partial-ROI scalar tail).
         case DType::I8:
             return 0.5;
         case DType::F32:

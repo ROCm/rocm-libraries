@@ -18,7 +18,7 @@ double magnitude_tolerance(DType dt) {
         case DType::U8:
             return 1.0;
         // I8 kept sub-LSB to surface a real kernel bug: the HIP I8 kernel truncates instead of
-        // rounding (HOST rounds correctly). See section 13 of the test-suite-revamp plan.
+        // rounding (HOST rounds correctly).
         case DType::I8:
             return 0.5;
         case DType::F32:

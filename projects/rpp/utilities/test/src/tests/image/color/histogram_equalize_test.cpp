@@ -57,7 +57,7 @@ void run_histogram_equalize(const TestConfig& cfg) {
 //
 // HOST is green on the full grid. The two HIP 3-channel PartialRoi cases (PKD3, PLN3) are documented
 // reds: the HIP 3-channel partial-ROI path is broken (grayscale-partial and 3-channel-full pass).
-// The golden matches HOST and stays correct -- see issues/histogram-equalize-hip-3ch-partial-roi.md.
+// The golden matches HOST and stays correct.
 class HistogramEqualizeTest : public ::testing::TestWithParam<TestConfig> {};
 
 TEST_P(HistogramEqualizeTest, Correctness) {

@@ -58,9 +58,8 @@ struct DTypeConv {
 // broadcast mode, normalize's axisMask / compute mode) ride alongside via NdWithParams<P>,
 // mirroring the image domain's TestConfig + WithParams<P> split.
 //
-// The label maps onto the same four structural slots as the image grammar
-// (framework/TAXONOMY.md): the rank token takes the Layout slot and the op-param token takes
-// the Roi slot.
+// The label maps onto the same four structural slots as the image grammar: the rank token takes
+// the Layout slot and the op-param token takes the Roi slot.
 struct NdConfig {
     RppBackend backend;
     DType dtypeIn, dtypeOut;
@@ -103,6 +102,18 @@ inline std::string nd_shape_name(const NdDims& dims) {
     std::string s = std::to_string(dims[0]);
     for (std::size_t i = 1; i < dims.size(); ++i) s += "x" + std::to_string(dims[i]);
     return s;
+}
+
+// Produces the value-parameter label for an ND op with no op params, e.g.
+// "HOST_U8toF32_3D_2x5x12x16" -- the Roi slot is simply absent, mirroring the image domain's
+// config_param_name.
+inline std::string nd_config_name(const NdConfig& c) {
+    return backend_name(c.backend) + "_" + dtype_name(c.dtypeIn) + "to" + dtype_name(c.dtypeOut) +
+           "_" + rank_name(c.nDim) + "_" + nd_shape_name(nd_extents(c.nDim));
+}
+
+inline std::string nd_config_param_name(const ::testing::TestParamInfo<NdConfig>& info) {
+    return nd_config_name(info.param);
 }
 
 // ---- op-specific parameters -----------------------------------------------
@@ -192,8 +203,7 @@ inline RpptGenericDesc make_generic_descriptor(const NdDims& dims, DType dt) {
 // struct is fine -- the HIP path of the ND ops reads the descriptor's dims/strides *on the
 // device* at rank >= 4, so the struct itself must be device-addressable. The legacy HIP
 // misc driver does the same (hipHostMalloc of RpptGenericDesc); the requirement is not in
-// the API docs and does not apply at rank <= 3, which is tracked in
-// .notes/issues/nd-non-broadcast-host-descriptor-pointers-to-hip-kernel.md.
+// the API docs and does not apply at rank <= 3.
 class GenericDescriptor {
    public:
     GenericDescriptor(RppBackend backend, const NdDims& dims, DType dt) : backend_(backend) {

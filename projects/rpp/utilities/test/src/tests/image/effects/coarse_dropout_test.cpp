@@ -127,8 +127,8 @@ TEST_P(CoarseDropoutTest, Correctness) {
 // FullRoi (both backends) and HOST PartialRoi pass the full grid -- this end-to-end validates the
 // shared packed-origin + absolute-frame box + I8-black golden model (the same model cutout/grid use).
 // The 12 HIP PartialRoi cases are red as a documented kernel finding
-// (.notes/issues/hip-partial-roi-region-unwritten.md): HIP leaves the erased region unwritten under
-// a non-full ROI (same class as the warp/rotate/remap HIP partial-ROI placement bug). Do not weaken
+// HIP leaves the erased region unwritten under a non-full ROI (same class as the warp/rotate/remap
+// HIP partial-ROI placement bug). Do not weaken
 // the golden to force green.
 INSTANTIATE_TEST_SUITE_P(
     Image_Effects, CoarseDropoutTest,

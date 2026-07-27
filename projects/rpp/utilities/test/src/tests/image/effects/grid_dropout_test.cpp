@@ -117,8 +117,7 @@ TEST_P(GridDropoutTest, Correctness) {
 
 // FullRoi passes the full grid on both backends (validates the hole-erase + I8 black semantics).
 // Every PartialRoi case is red (both backends) as a documented kernel finding
-// (.notes/issues/dropout-partial-roi-boxes-not-applied.md): under a non-full ROI the kernel
-// produces the correct packed-origin copy but does NOT erase
+// under a non-full ROI: the kernel produces the correct packed-origin copy but does NOT erase
 // the holes. The golden holds to the absolute-frame hole semantics (validated by coarse_dropout's
 // passing HOST PartialRoi) -- do not weaken it to force green.
 INSTANTIATE_TEST_SUITE_P(
