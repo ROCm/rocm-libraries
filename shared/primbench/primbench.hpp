@@ -3211,28 +3211,27 @@ public:
         std::map<std::string, settings::custom_arg_value> custom_args;
 
         // Skip built-in arguments that are already in settings.
-        static const std::unordered_set<std::string> builtin_args
-            = {"help",
-               "size",
-               "hot",
-               "seed",
-               "json-out",
-               "csv-out",
-               "filter",
-               "dry",
-               "min-gpu-ms-per-batch",
-               "min-secs",
-               "noise-timeout-secs",
-               "batch-window-size",
-               "noise-tolerance-percent",
-               "min-gpu-temp",
-               "max-gpu-temp",
-               "max-warming-secs",
-               "max-cooling-secs",
-               "output-batches",
-               "spaces-per-indent",
-               "stream-blocking-timeout-secs",
-               "skip-header"};
+        static const std::unordered_set<std::string> builtin_args = {"help",
+                                                                     "size",
+                                                                     "hot",
+                                                                     "seed",
+                                                                     "json-out",
+                                                                     "csv-out",
+                                                                     "filter",
+                                                                     "dry",
+                                                                     "min-gpu-ms-per-batch",
+                                                                     "min-secs",
+                                                                     "noise-timeout-secs",
+                                                                     "batch-window-size",
+                                                                     "noise-tolerance-percent",
+                                                                     "min-gpu-temp",
+                                                                     "max-gpu-temp",
+                                                                     "max-warming-secs",
+                                                                     "max-cooling-secs",
+                                                                     "output-batches",
+                                                                     "spaces-per-indent",
+                                                                     "stream-blocking-timeout-secs",
+                                                                     "skip-header"};
 
         auto parse_value = [](const std::string& value) -> settings::custom_arg_value
         {
