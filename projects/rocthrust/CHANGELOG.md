@@ -3,7 +3,13 @@
 Documentation for rocThrust available at
 [https://rocm.docs.amd.com/projects/rocThrust/en/latest/](https://rocm.docs.amd.com/projects/rocThrust/en/latest/).
 
-## rocThrust 4.6.0 for ROCm 10.0
+## rocThrust x.x.x for ROCm 10.1.0
+
+### Changed
+
+* rocThrust now searches for an existing SQLite3 system library first by default.  SQLITE_USE_SYSTEM_PACKAGE can be set to OFF to force a local download of SQLite3.  The minimum required version of SQLite3 is 3.51.3.
+
+## rocThrust 4.6.0 for ROCm 10.0.0
  
 ### Added
  
@@ -24,14 +30,6 @@ Documentation for rocThrust available at
 
 * gfx1250 support
 * For hipstdpar algorithms running on GPUs that support xnack, and __HIPSTDPAR_INTERPOSE_ALLOC__ or __HIPSTDPAR_INTERPOSE_ALLOC_V1__ are not enabled, emit a runtime warning once if xnack is off.
-
-### Changed
-
-* rocThrust now searches for an existing SQLite3 system library first by default.  SQLITE_USE_SYSTEM_PACKAGE can be set to OFF to force a local download of SQLite3.  The minimum required version of SQLite3 is 3.51.3.
-
-### Upcoming changes
-
-* CCCL 2.8.x compatibility is deprecated. hipCUB and rocThrust will be brought forward to CCCL 3.0.x compatibility in an upcoming version.
 
 ## Since last release ROCm 7.12
 
