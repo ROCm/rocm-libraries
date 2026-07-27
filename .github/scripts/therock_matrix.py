@@ -97,6 +97,7 @@ additional_options = {
     "hipdnn": {
         "cmake_options": [
             "-DTHEROCK_ENABLE_HIPBLASLTPROVIDER=ON",
+            "-DTHEROCK_FLAG_HIPBLASLTPROVIDER_ENABLE_MX_GEMM=ON",
             "-DTHEROCK_ENABLE_HIPKERNELPROVIDER=ON",
             "-DHIP_KERNEL_PROVIDER_ENABLE=ON",
             "-DTHEROCK_ENABLE_MIOPENPROVIDER=ON",
@@ -138,6 +139,7 @@ additional_options = {
         "cmake_options": [
             "-DTHEROCK_ENABLE_HIPBLASLTPROVIDER=ON",
             "-DTHEROCK_FLAG_HIPBLASLTPROVIDER_ENABLE_MX_GEMM=ON",
+            "-DTHEROCK_ENABLE_HIPDNN_INTEGRATION_TESTS=ON",
         ],
         "projects_to_test": ["hipblasltprovider"],
         "project_to_add": "blas",
