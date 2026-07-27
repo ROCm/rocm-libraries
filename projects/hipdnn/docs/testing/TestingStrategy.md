@@ -19,9 +19,9 @@ White box tests focus on internal implementation details of hipDNN components.
 | **Data SDK** | `data_sdk/tests/` | Test internal implementation of Data SDK | Minimal/None | Windows & Linux |
 | **Plugin SDK** | `plugin_sdk/tests/` | Test internal implementation of Plugin SDK | Minimal/None | Windows & Linux |
 | **Test SDK** | `test_sdk/tests/` | Test internal implementation of Test SDK | Minimal/None | Windows & Linux |
-| **Plugin** | `plugins/<name>/tests/` | Test internal implementation of specific plugin | Minimal & fast | Windows & Linux |
+| **Provider** | `dnn-providers/<name>/tests/` | Test internal implementation of a specific provider | Minimal & fast | Windows & Linux |
 
-Note: If a test depends on the GPU then it needs to be marked with `SKIP_IF_NO_DEVICE()` so tests run and pass correctly on CPU only machines.
+Note: If a test depends on the GPU then it needs to be marked with `SKIP_IF_NO_DEVICES()` so tests run and pass correctly on CPU only machines.
 ---
 
 ### Test Categories by Component
@@ -62,7 +62,7 @@ Note: If a test depends on the GPU then it needs to be marked with `SKIP_IF_NO_D
 - **Mocking**: Use GMOCK for mocking dependencies
 - **Execution**: Fast execution required (Time limits enabled in TheRock CI)
 - **Isolation**: Use stubbed/mocked implementations for dependencies
-- **GPU Operations**: Must be marked with `SKIP_IF_NO_DEVICE()`
+- **GPU Operations**: Must be marked with `SKIP_IF_NO_DEVICES()`
 - **Coverage**: Each component should maintain >80% code coverage
 
 ---
@@ -79,7 +79,7 @@ Black box tests validate the public API without knowledge of internal implementa
 |-----------|---------|
 | **Location** | `tests/backend/` |
 | **Purpose** | Validate API of hipDNN backend works as expected |
-| **Requirements** | • Test only public interfaces from `backend/include/`<br>• Use stubbed plugins for controlled testing<br>• Fast running<br>• GPU operations marked with `SKIP_IF_NO_DEVICE()` |
+| **Requirements** | • Test only public interfaces from `backend/include/`<br>• Use stubbed plugins for controlled testing<br>• Fast running<br>• GPU operations marked with `SKIP_IF_NO_DEVICES()` |
 | **Environments** | Windows & supported Linux distros |
 | **Frequency** | Run on each PR |
 
@@ -107,8 +107,8 @@ Integration tests validate end-to-end functionality across components.
 
 | Test Type | Location | Purpose | GPU Required | Test Speed | Environments |
 |-----------|----------|---------|--------------|------------|--------------|
-| **Frontend-Backend** | `tests/frontend/` | Validate end-to-end hipDNN functionality | No - mark GPU ops with `SKIP_IF_NO_DEVICE()` | Fast | Windows & Linux |
-| **Plugin Integration** | `plugins/<name>/integration_tests/` | Validate end-to-end graph support for plugin | Yes - required for validation | Can be slower | Windows & Linux |
+| **Frontend-Backend** | `tests/frontend/` | Validate end-to-end hipDNN functionality | No - mark GPU ops with `SKIP_IF_NO_DEVICES()` | Fast | Windows & Linux |
+| **Provider Integration** | `dnn-providers/<name>/integration_tests/` | Validate end-to-end graph support for a provider | Yes - required for validation | Can be slower | Windows & Linux |
 
 #### Test Requirements by Type
 
@@ -119,10 +119,10 @@ Integration tests validate end-to-end functionality across components.
 - Test backend descriptor creation from frontend
 - Test execution flow validation
 
-##### Plugin Integration
+##### Provider Integration
 - Validate correctness and graph support
-- Each plugin maintains its own test suite
-- Test on all ASICs supported by the plugin
+- Each provider maintains its own test suite
+- Test on all ASICs supported by the provider
 - Tests are divided into two categories described by the prefix argument passed to INSTANTIATE_TEST_SUITE_P
   - **Smoke** - These tests are designed to test features using the smallest possible shape and run quickly (combined smoke test run time must be under 5 mins)
   - **Full** - These tests can contain regression shapes, large shapes, or slow shapes
@@ -145,14 +145,15 @@ Tests must work in the following environments:
 
 | Environment Type | Supported Methods |
 |-----------------|-------------------|
-| **CLI Build Environment** | `ninja check`, `ninja check-verbose` |
+| **CLI Build Environment** | `ninja hipdnn-check`, `ninja hipdnn-check-verbose` (standalone also has the unprefixed `check`) |
 | **IDE** | Visual Studio Code and extensions like TestMate |
 | **Artifacts** | • Installed testing artifacts<br>• Running built test executables |
 | **Operating System** | • Windows<br>• Supported Linux distros |
 
 > [!TIP]
-> `ninja unit-check` runs fast, isolated unit and API tests (also: `unit-check-verbose`).<br>
-> `ninja integration-check` runs slower, end-to-end integration tests (also: `integration-check-verbose`).
+> `ninja hipdnn-unit-check` runs fast, isolated unit and API tests (also: `hipdnn-unit-check-verbose`).<br>
+> `ninja hipdnn-integration-check` runs slower, end-to-end integration tests (also: `hipdnn-integration-check-verbose`).<br>
+> In a standalone `projects/hipdnn` build the unprefixed aliases (`check`, `unit-check`, `integration-check`, ...) also exist. See [Testing](../Testing.md#ctest-vs-check-targets) for the full ctest/check-target mapping.
 
 ### GPU Requirements
 - **Without GPU**: All GPU tests must be skippable (warnings, not errors)
