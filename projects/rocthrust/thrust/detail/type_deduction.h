@@ -19,8 +19,10 @@
 
 #include <thrust/detail/preprocessor.h>
 
-#include _THRUST_STD_INCLUDE(type_traits)
 #include _THRUST_STD_INCLUDE(utility)
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+#  include _THRUST_STD_INCLUDE(type_traits)
+#endif
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -28,22 +30,6 @@
 /// \brief Performs universal forwarding of a universal reference.
 ///
 #define THRUST_FWD(x) _THRUST_STD::forward<decltype(x)>(x)
-
-/// \def THRUST_MVCAP(x)
-/// \brief Capture `x` into a lambda by moving.
-/// deprecated [Since 2.8]
-#define THRUST_MVCAP(x) x = _THRUST_STD::move(x)
-
-/// \def THRUST_RETOF(invocable, ...)
-/// \brief Expands to the type returned by invoking an instance of the invocable
-///        type \a invocable with parameters of type \c __VA_ARGS__. Must
-///        be called with 1 or fewer parameters to the invocable.
-/// deprecated [Since 2.8]
-#define THRUST_RETOF(...) THRUST_PP_DISPATCH(THRUST_RETOF, __VA_ARGS__)
-/// deprecated [Since 2.8]
-#define THRUST_RETOF1(C) decltype(_THRUST_STD::declval<C>()())
-/// deprecated [Since 2.8]
-#define THRUST_RETOF2(C, V) decltype(_THRUST_STD::declval<C>()(_THRUST_STD::declval<V>()))
 
 /// \def THRUST_RETURNS(...)
 /// \brief Expands to a function definition that returns the expression
@@ -76,28 +62,3 @@
     }                                                      \
     /**/
 #endif
-
-/// \def THRUST_DECLTYPE_RETURNS_WITH_SFINAE_CONDITION(condition, ...)
-/// \brief Expands to a function definition, including a trailing returning
-///        type, that returns the expression \c __VA_ARGS__. It shall only
-///        participate in overload resolution if \c condition is \c true.
-///
-// Trailing return types seem to confuse Doxygen, and cause it to interpret
-// parts of the function's body as new function signatures.
-#if defined(THRUST_DOXYGEN_INVOKED)
-#  define THRUST_DECLTYPE_RETURNS(...) \
-    {                                  \
-      return (__VA_ARGS__);            \
-    }                                  \
-    /**/
-#else
-/// deprecated [Since 2.8]
-#  define THRUST_DECLTYPE_RETURNS_WITH_SFINAE_CONDITION(condition, ...)                                      \
-    noexcept(noexcept(__VA_ARGS__))->typename _THRUST_STD::enable_if<condition, decltype(__VA_ARGS__)>::type \
-    {                                                                                                        \
-      return (__VA_ARGS__);                                                                                  \
-    }                                                                                                        \
-    /**/
-#endif
-
-///////////////////////////////////////////////////////////////////////////////
