@@ -4265,6 +4265,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
         self.codes.gl2PrefetchIncrement.add(SCMovB32(sgpr("GL2PrefetchIncMXSA"), 0))
       if kernel["ProblemType"]["MXBlockB"]:
         self.codes.gl2PrefetchIncrement.add(SCMovB32(sgpr("GL2PrefetchIncMXSB"), 0))
+      if kernel["enableTDMMetadata"]:
+        self.codes.gl2PrefetchIncrement.add(SCMovB32(sgpr("GL2PrefetchIncMetadata"), 0))
       self.codes.gl2PrefetchIncrement.add(self.gl2PrefetchIncrementAddr(kernel, tensorParametersA, tensorParametersB))
       self.codes.gl2Prefetch = Module()
       self.codes.gl2Prefetch.add(self.gl2PrefetchIssueLoad(kernel, tensorParametersA, tensorParametersB))
@@ -9050,6 +9052,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
         if kernel["ProblemType"]["MXBlockB"]:
           self.states.mxsb.startVgprGL2PrefetchAddr = vgprIdx
           vgprIdx += tensorParametersB["MX"]["gl2nl"] * self.states.rpga      
+        if kernel["enableTDMMetadata"]:
+          tPM = tensorParametersA["tpsMetadata"] if tensorParametersA["is_sparse"] else tensorParametersB["tpsMetadata"]
+          self.states.m.startVgprGL2PrefetchAddr = vgprIdx
+          vgprIdx += tPM["gl2nl"] * self.states.rpga
 
       # TODO: Serial is always the first/last register in the pool so the store
       # code doesn't have to deal with fragmentation
@@ -9101,6 +9107,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
         if kernel["ProblemType"]["MXBlockB"]:
           self.states.mxsb.startVgprGL2PrefetchAddr = vgprIdx
           vgprIdx += tensorParametersB["MX"]["gl2nl"] * self.states.rpga
+        if kernel["enableTDMMetadata"]:
+          tPM = tensorParametersA["tpsMetadata"] if tensorParametersA["is_sparse"] else tensorParametersB["tpsMetadata"]
+          self.states.m.startVgprGL2PrefetchAddr = vgprIdx
+          vgprIdx += tPM["gl2nl"] * self.states.rpga
 
       self.states.totalVgprs = vgprIdx
 
