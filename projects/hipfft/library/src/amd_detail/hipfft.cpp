@@ -829,12 +829,19 @@ struct hipfftHandle_t
     rocfft_execution_info_wrapper_t info;
     std::vector<device_context_t>   device_contexts;
 
-    void** load_callback_ptrs       = nullptr;
-    void** load_callback_data       = nullptr;
-    size_t load_callback_lds_bytes  = 0;
-    void** store_callback_ptrs      = nullptr;
-    void** store_callback_data      = nullptr;
-    size_t store_callback_lds_bytes = 0;
+    void**             load_callback_ptrs        = nullptr;
+    const char*        load_callback_symbol      = nullptr;
+    const void*        load_callback_bitcode     = nullptr;
+    size_t             load_callback_bitcode_len = 0;
+    std::vector<void*> load_callback_data;
+    size_t             load_callback_lds_bytes = 0;
+
+    void**             store_callback_ptrs        = nullptr;
+    const char*        store_callback_symbol      = nullptr;
+    const void*        store_callback_bitcode     = nullptr;
+    size_t             store_callback_bitcode_len = 0;
+    std::vector<void*> store_callback_data;
+    size_t             store_callback_lds_bytes = 0;
 
     // Multi-processing communicator
     rocfft_comm_type comm_type   = rocfft_comm_none;
@@ -991,6 +998,28 @@ struct hipfftHandle_t
             }
         }
         return ret;
+    }
+
+    // Helpers to set/get callback data, since we can be passed a
+    // void** but need to copy the right number of pointers.  When
+    // passing callback data to library APIs, we also want to pass
+    // nullptr if we were never given any callback data.
+    static std::vector<void*> callback_data_from_ptrs(void** ptrs)
+    {
+        std::vector<void*> cbdata_vec;
+        if(ptrs)
+        {
+            // Copy one pointer per device
+            std::copy(
+                ptrs, ptrs + rocfft_scoped_device::device_count(), std::back_inserter(cbdata_vec));
+        }
+        return cbdata_vec;
+    }
+    static void** callback_data_to_ptrs(std::vector<void*>& callback_data)
+    {
+        if(callback_data.empty())
+            return nullptr;
+        return callback_data.data();
     }
 };
 
@@ -1215,6 +1244,30 @@ static hipfftResult hipfftMakePlan_internal(hipfftHandle               plan,
         if(plan->comm_type != rocfft_comm_none)
             ROCFFT_EXPECT_SUCCESS(
                 rocfft_plan_description_set_comm(desc, plan->comm_type, plan->comm_handle));
+
+        // set JIT callbacks if specified
+        if(plan->load_callback_symbol && plan->load_callback_bitcode
+           && plan->load_callback_bitcode_len)
+        {
+            ROCFFT_EXPECT_SUCCESS(rocfft_plan_description_set_load_callback(
+                desc,
+                plan->load_callback_symbol,
+                plan->load_callback_bitcode,
+                plan->load_callback_bitcode_len,
+                hipfftHandle_t::callback_data_to_ptrs(plan->load_callback_data),
+                plan->load_callback_lds_bytes));
+        }
+        if(plan->store_callback_symbol && plan->store_callback_bitcode
+           && plan->store_callback_bitcode_len)
+        {
+            ROCFFT_EXPECT_SUCCESS(rocfft_plan_description_set_store_callback(
+                desc,
+                plan->store_callback_symbol,
+                plan->store_callback_bitcode,
+                plan->store_callback_bitcode_len,
+                hipfftHandle_t::callback_data_to_ptrs(plan->store_callback_data),
+                plan->store_callback_lds_bytes));
+        }
 
         if(plan->device_contexts.size() > 1)
         {
@@ -2024,7 +2077,7 @@ try
            || plan->io_type.is_real_to_complex())
             return HIPFFT_INVALID_VALUE;
         plan->load_callback_ptrs      = callbacks;
-        plan->load_callback_data      = callbackData;
+        plan->load_callback_data      = hipfftHandle_t::callback_data_from_ptrs(callbackData);
         plan->load_callback_lds_bytes = 0;
         break;
     case HIPFFT_CB_LD_COMPLEX_DOUBLE:
@@ -2032,7 +2085,7 @@ try
            || plan->io_type.is_real_to_complex())
             return HIPFFT_INVALID_VALUE;
         plan->load_callback_ptrs      = callbacks;
-        plan->load_callback_data      = callbackData;
+        plan->load_callback_data      = hipfftHandle_t::callback_data_from_ptrs(callbackData);
         plan->load_callback_lds_bytes = 0;
         break;
     case HIPFFT_CB_LD_REAL:
@@ -2040,7 +2093,7 @@ try
            || !plan->io_type.is_real_to_complex())
             return HIPFFT_INVALID_VALUE;
         plan->load_callback_ptrs      = callbacks;
-        plan->load_callback_data      = callbackData;
+        plan->load_callback_data      = hipfftHandle_t::callback_data_from_ptrs(callbackData);
         plan->load_callback_lds_bytes = 0;
         break;
     case HIPFFT_CB_LD_REAL_DOUBLE:
@@ -2048,7 +2101,7 @@ try
            || !plan->io_type.is_real_to_complex())
             return HIPFFT_INVALID_VALUE;
         plan->load_callback_ptrs      = callbacks;
-        plan->load_callback_data      = callbackData;
+        plan->load_callback_data      = hipfftHandle_t::callback_data_from_ptrs(callbackData);
         plan->load_callback_lds_bytes = 0;
         break;
     case HIPFFT_CB_ST_COMPLEX:
@@ -2056,7 +2109,7 @@ try
            || plan->io_type.is_complex_to_real())
             return HIPFFT_INVALID_VALUE;
         plan->store_callback_ptrs      = callbacks;
-        plan->store_callback_data      = callbackData;
+        plan->store_callback_data      = hipfftHandle_t::callback_data_from_ptrs(callbackData);
         plan->store_callback_lds_bytes = 0;
         break;
     case HIPFFT_CB_ST_COMPLEX_DOUBLE:
@@ -2064,7 +2117,7 @@ try
            || plan->io_type.is_complex_to_real())
             return HIPFFT_INVALID_VALUE;
         plan->store_callback_ptrs      = callbacks;
-        plan->store_callback_data      = callbackData;
+        plan->store_callback_data      = hipfftHandle_t::callback_data_from_ptrs(callbackData);
         plan->store_callback_lds_bytes = 0;
         break;
     case HIPFFT_CB_ST_REAL:
@@ -2072,7 +2125,7 @@ try
            || !plan->io_type.is_complex_to_real())
             return HIPFFT_INVALID_VALUE;
         plan->store_callback_ptrs      = callbacks;
-        plan->store_callback_data      = callbackData;
+        plan->store_callback_data      = hipfftHandle_t::callback_data_from_ptrs(callbackData);
         plan->store_callback_lds_bytes = 0;
         break;
     case HIPFFT_CB_ST_REAL_DOUBLE:
@@ -2080,7 +2133,7 @@ try
            || !plan->io_type.is_complex_to_real())
             return HIPFFT_INVALID_VALUE;
         plan->store_callback_ptrs      = callbacks;
-        plan->store_callback_data      = callbackData;
+        plan->store_callback_data      = hipfftHandle_t::callback_data_from_ptrs(callbackData);
         plan->store_callback_lds_bytes = 0;
         break;
     case HIPFFT_CB_UNDEFINED:
@@ -2088,16 +2141,18 @@ try
     }
 
     rocfft_status res;
-    res = rocfft_execution_info_set_load_callback(plan->info,
-                                                  plan->load_callback_ptrs,
-                                                  plan->load_callback_data,
-                                                  plan->load_callback_lds_bytes);
+    res = rocfft_execution_info_set_load_callback(
+        plan->info,
+        plan->load_callback_ptrs,
+        hipfftHandle_t::callback_data_to_ptrs(plan->load_callback_data),
+        plan->load_callback_lds_bytes);
     if(res != rocfft_status_success)
         return HIPFFT_INVALID_VALUE;
-    res = rocfft_execution_info_set_store_callback(plan->info,
-                                                   plan->store_callback_ptrs,
-                                                   plan->store_callback_data,
-                                                   plan->store_callback_lds_bytes);
+    res = rocfft_execution_info_set_store_callback(
+        plan->info,
+        plan->store_callback_ptrs,
+        hipfftHandle_t::callback_data_to_ptrs(plan->store_callback_data),
+        plan->store_callback_lds_bytes);
     if(res != rocfft_status_success)
         return HIPFFT_INVALID_VALUE;
     return HIPFFT_SUCCESS;
@@ -2143,18 +2198,65 @@ try
     }
 
     rocfft_status res;
-    res = rocfft_execution_info_set_load_callback(plan->info,
-                                                  plan->load_callback_ptrs,
-                                                  plan->load_callback_data,
-                                                  plan->load_callback_lds_bytes);
+    res = rocfft_execution_info_set_load_callback(
+        plan->info,
+        plan->load_callback_ptrs,
+        hipfftHandle_t::callback_data_to_ptrs(plan->load_callback_data),
+        plan->load_callback_lds_bytes);
     if(res != rocfft_status_success)
         return HIPFFT_INVALID_VALUE;
-    res = rocfft_execution_info_set_store_callback(plan->info,
-                                                   plan->store_callback_ptrs,
-                                                   plan->store_callback_data,
-                                                   plan->store_callback_lds_bytes);
+    res = rocfft_execution_info_set_store_callback(
+        plan->info,
+        plan->store_callback_ptrs,
+        hipfftHandle_t::callback_data_to_ptrs(plan->store_callback_data),
+        plan->store_callback_lds_bytes);
     if(res != rocfft_status_success)
         return HIPFFT_INVALID_VALUE;
+    return HIPFFT_SUCCESS;
+}
+catch(...)
+{
+    return handle_exception();
+}
+
+hipfftResult hipfftXtSetJITCallback(hipfftHandle         plan,
+                                    const char*          symbol_name,
+                                    const void*          bitcode_data,
+                                    size_t               bitcode_len_bytes,
+                                    hipfftXtCallbackType cbtype,
+                                    void**               cbdata)
+try
+{
+    if(!plan)
+        return HIPFFT_INVALID_PLAN;
+
+    switch(cbtype)
+    {
+    case HIPFFT_CB_LD_COMPLEX:
+    case HIPFFT_CB_LD_COMPLEX_DOUBLE:
+    case HIPFFT_CB_LD_REAL:
+    case HIPFFT_CB_LD_REAL_DOUBLE:
+    {
+        plan->load_callback_symbol      = symbol_name;
+        plan->load_callback_bitcode     = bitcode_data;
+        plan->load_callback_bitcode_len = bitcode_len_bytes;
+        plan->load_callback_data        = hipfftHandle_t::callback_data_from_ptrs(cbdata);
+        break;
+    }
+    case HIPFFT_CB_ST_COMPLEX:
+    case HIPFFT_CB_ST_COMPLEX_DOUBLE:
+    case HIPFFT_CB_ST_REAL:
+    case HIPFFT_CB_ST_REAL_DOUBLE:
+    {
+        plan->store_callback_symbol      = symbol_name;
+        plan->store_callback_bitcode     = bitcode_data;
+        plan->store_callback_bitcode_len = bitcode_len_bytes;
+        plan->store_callback_data        = hipfftHandle_t::callback_data_from_ptrs(cbdata);
+        break;
+    }
+    case HIPFFT_CB_UNDEFINED:
+        return HIPFFT_INVALID_VALUE;
+    }
     return HIPFFT_SUCCESS;
 }
 catch(...)

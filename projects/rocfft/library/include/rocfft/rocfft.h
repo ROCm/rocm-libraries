@@ -349,6 +349,120 @@ ROCFFT_EXPORT rocfft_status rocfft_plan_description_set_comm(rocfft_plan_descrip
                                                              rocfft_comm_type        comm_type,
                                                              void*                   comm_handle);
 
+/*! @brief Set a JIT-compiled load callback function on a plan description.
+ *
+ *  @details Set a Just-In-Time (JIT) compiled load callback on a
+ *  plan description.  The callback function is provided as a named
+ *  symbol in SPIR-V bitcode.
+ *
+ *  Load callbacks have the following signature:
+ *
+ *  @code
+ *  Tdata load_cb(Tdata* data, size_t offset, void* cbdata, void* sharedMem);
+ *  @endcode
+ *
+ *  'Tdata' is the type of a single element of the input buffer.  It is
+ *  the caller's responsibility to ensure that the function type is
+ *  appropriate for the plan (for example, a single-precision
+ *  real-to-complex transform would load single-precision real
+ *  elements).
+ *
+ *  If either of 'symbol_name' or 'bitcode_data' is null, or if
+ *  'bitcode_len_bytes' is 0, any previously registered load callback
+ *  is cleared.
+ *
+ *  Symbol names must only contain alphabetic characters (A-Z, a-z),
+ *  underscores, and digits (0-9).  Additionally, they may not begin
+ *  with digits.
+ *
+ *  'cb_datas' is an optional array of pointers of data that is
+ *  passed to the callback function, one per visible HIP device.
+ *  rocFFT may execute the callback function on any device used by an
+ *  input or output brick (as specified via ::rocfft_brick_create),
+ *  and also the current HIP device.  The corresponding pointer for a
+ *  device in the array will be passed to the callback function's
+ *  `cbdata` parameter when it is executed on that device.
+ *
+ *  'cb_datas' may be nullptr, which means all callbacks will be
+ *  passed nullptr for `cbdata` when they are executed.
+ *
+ *  Currently, 'shared_mem_bytes' must be 0.  Callbacks are not
+ *  supported on transforms that use planar formats for either input
+ *  or output.
+ *
+ *  @param[in] description description handle
+ *  @param[in] symbol_name name of the symbol in the bitcode
+ *  @param[in] bitcode_data pointer to bitcode data
+ *  @param[in] bitcode_len_bytes length of bitcode data, in bytes
+ *  @param[in] cb_datas function data, passed to the callback function when it is called
+ *  @param[in] shared_mem_bytes amount of shared memory to allocate for the callback function to use
+ * 
+ */
+ROCFFT_EXPORT rocfft_status
+    rocfft_plan_description_set_load_callback(rocfft_plan_description description,
+                                              const char*             symbol_name,
+                                              const void*             bitcode_data,
+                                              size_t                  bitcode_len_bytes,
+                                              void**                  cb_datas,
+                                              size_t                  shared_mem_bytes);
+
+/*! @brief Set a JIT store callback function on a plan description.
+ *
+ *  @details Set a Just-In-Time (JIT) store callback on a plan
+ *  description.  The callback function is provided as a named symbol
+ *  in SPIR-V bitcode.
+ *
+ *  Store callbacks have the following signature:
+ *
+ *  @code
+ *  Tdata store_cb(Tdata* data, size_t offset, void* cbdata, void* sharedMem);
+ *  @endcode
+ *
+ *  'Tdata' is the type of a single element of the output buffer.  It is
+ *  the caller's responsibility to ensure that the function type is
+ *  appropriate for the plan (for example, a single-precision
+ *  real-to-complex transform would store single-precision complex
+ *  elements).
+ *
+ *  If either of 'symbol_name' or 'bitcode_data' is null, or if
+ *  'bitcode_len_bytes' is 0, any previously registered store callback
+ *  is cleared.
+ *
+ *  Symbol names must only contain alphabetic characters (A-Z, a-z),
+ *  underscores, and digits (0-9).  Additionally, they may not begin
+ *  with digits.
+ *
+ *  'cb_datas' is an optional array of pointers of data that is
+ *  passed to the callback function, one per visible HIP device.
+ *  rocFFT may execute the callback function on any device used by an
+ *  input or output brick (as specified via ::rocfft_brick_create),
+ *  and also the current HIP device.  The corresponding pointer for a
+ *  device in the array will be passed to the callback function's
+ *  `cbdata` parameter when it is executed on that device.
+ *
+ *  'cb_datas' may be nullptr, which means all callbacks will be
+ *  passed nullptr for `cbdata` when they are executed.
+ *
+ *  Currently, 'shared_mem_bytes' must be 0.  Callbacks are not
+ *  supported on transforms that use planar formats for either input
+ *  or output.
+ *
+ *  @param[in] description description handle
+ *  @param[in] symbol_name name of the symbol in the bitcode
+ *  @param[in] bitcode_data pointer to bitcode data
+ *  @param[in] bitcode_len_bytes length of bitcode data, in bytes
+ *  @param[in] cb_datas function data, passed to the callback function when it is called
+ *  @param[in] shared_mem_bytes amount of shared memory to allocate for the callback function to use
+ * 
+ */
+ROCFFT_EXPORT rocfft_status
+    rocfft_plan_description_set_store_callback(rocfft_plan_description description,
+                                               const char*             symbol_name,
+                                               const void*             bitcode_data,
+                                               size_t                  bitcode_len_bytes,
+                                               void**                  cb_datas,
+                                               size_t                  shared_mem_bytes);
+
 /*! @brief Define a brick as part of a decomposition of a field.
  *
  * Fields can contain a full-dimensional data distribution.  The
@@ -549,10 +663,11 @@ ROCFFT_EXPORT rocfft_status rocfft_execution_info_set_mode( rocfft_execution_inf
 ROCFFT_EXPORT rocfft_status rocfft_execution_info_set_stream(rocfft_execution_info info,
                                                              void*                 stream);
 
-/*! @brief Set a load callback for a plan execution (experimental)
+/*! @brief Set a function pointer load callback for a plan execution (deprecated)
  *  @details This function specifies a user-defined callback function
  *  that is run to load input from global memory at the start of the
- *  transform.  Callbacks are an experimental feature in rocFFT.
+ *  transform.  Function pointer callbacks are a deprecated feature
+ *  in rocFFT, and users should use JIT callbacks instead.
  *
  *  Callback function pointers/data are given as arrays, with one
  *  function/data pointer per brick in the input field of the plan.
@@ -599,10 +714,11 @@ ROCFFT_EXPORT rocfft_status rocfft_execution_info_set_load_callback(rocfft_execu
                                                                     void** cb_data,
                                                                     size_t shared_mem_bytes);
 
-/*! @brief Set a store callback for a plan execution (experimental)
+/*! @brief Set a legacy store callback for a plan execution (deprecated)
  *  @details This function specifies a user-defined callback function
  *  that is run to store output to global memory at the end of the
- *  transform.  Callbacks are an experimental feature in rocFFT.
+ *  transform.  Legacy callbacks are a deprecated feature in rocFFT,
+ *  and users should use JIT callbacks instead.
  *
  *  Callback function pointers/data are given as arrays, with one
  *  function/data pointer per brick in the output field of the plan.
