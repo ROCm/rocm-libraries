@@ -77,7 +77,10 @@ fi
 if [ -n "$command" ]; then
     echo "Executing: ${command}"
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    docker exec "${CONTAINER_NAME}" bash -c "${command}"
+    # Source common.sh inside the container (when the project is mounted) so that
+    # ck_smi_* and other shell helper functions are available to the command.
+    common_sh="/workspace/script/tools/common.sh"
+    docker exec "${CONTAINER_NAME}" bash -c "if [ -f ${common_sh} ]; then source ${common_sh}; fi;${command}"
 else
     echo "Opening shell in '${CONTAINER_NAME}' (type 'exit' to leave)..."
     docker exec -it "${CONTAINER_NAME}" bash

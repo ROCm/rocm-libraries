@@ -104,6 +104,11 @@ for arg in "${command_args[@]}"; do
     cmd_string="${cmd_string} $(printf '%q' "$arg")"
 done
 
+# Source common.sh inside the container (when the project is mounted) so that
+# ck_smi_* and other shell helper functions are available to the command.
+common_sh="/workspace/script/tools/common.sh"
+cmd_string="if [ -f ${common_sh} ]; then source ${common_sh}; fi;${cmd_string}"
+
 # Auto-detect Python commands and enable unbuffered output for live streaming
 env_flags=""
 for arg in "${command_args[@]}"; do
