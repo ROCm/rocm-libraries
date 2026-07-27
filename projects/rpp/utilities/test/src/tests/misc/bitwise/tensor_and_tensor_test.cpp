@@ -1,0 +1,100 @@
+#include <gtest/gtest.h>
+#include <rpp/rpp.h>
+
+#include <vector>
+
+#include "framework/backend_memory.hpp"
+#include "framework/config_param.hpp"
+#include "framework/generic_tensor_setup.hpp"
+#include "framework/tensor_setup.hpp"
+#include "reference/bitwise_tensor_ref.hpp"
+
+using namespace rpptest;
+
+namespace {
+
+template <typename T>
+void run_tensor_and_tensor(const NdConfig& cfg) {
+    const NdDims dims1 = nd_operand_dims(cfg, 1);
+    const NdDims dims2 = nd_operand_dims(cfg, 2);
+    const NdDims outDims = nd_broadcast_dims(dims1, dims2);
+
+    // Descriptors are device-addressable for HIP: the ND kernels read dims/strides on device.
+    GenericDescriptor desc1(cfg.backend, dims1, cfg.dtype);
+    GenericDescriptor desc2(cfg.backend, dims2, cfg.dtype);
+    GenericDescriptor descOut(cfg.backend, outDims, cfg.dtype);
+
+    const std::size_t count1 = generic_element_count(*desc1);
+    const std::size_t count2 = generic_element_count(*desc2);
+    const std::size_t countOut = generic_element_count(*descOut);
+
+    // (1) Host golden model. Two distinct fills (different salts) so the AND is exercised on
+    // differing bit patterns. The op writes every output element, so golden needs no pre-seeding.
+    std::vector<T> input1(count1), input2(count2), golden(countOut), actual(countOut);
+    fill_input<T>(input1.data(), count1, cfg.dtype, 0);
+    fill_input<T>(input2.data(), count2, cfg.dtype, 1);
+    bitwise_tensor_reference<T>(input1.data(), input2.data(), golden.data(), *descOut, *desc1, *desc2,
+                                BitwiseTensorOp::And);
+
+    // (2) roiTensors live in host-accessible (pinned for HIP) memory.
+    const std::vector<Rpp32u> roiVec1 = make_nd_roi_tensor(dims1);
+    const std::vector<Rpp32u> roiVec2 = make_nd_roi_tensor(dims2);
+    PinnedArray<Rpp32u> roi1(cfg.backend, roiVec1.size());
+    PinnedArray<Rpp32u> roi2(cfg.backend, roiVec2.size());
+    for (std::size_t i = 0; i < roiVec1.size(); ++i) roi1[i] = roiVec1[i];
+    for (std::size_t i = 0; i < roiVec2.size(); ++i) roi2[i] = roiVec2[i];
+
+    // (3) Run RPP on the configured backend.
+    const std::size_t bytes1 = generic_byte_size(*desc1, cfg.dtype);
+    const std::size_t bytes2 = generic_byte_size(*desc2, cfg.dtype);
+    const std::size_t bytesOut = generic_byte_size(*descOut, cfg.dtype);
+    DeviceTensor src1(cfg.backend, bytes1), src2(cfg.backend, bytes2),
+        dst(cfg.backend, bytesOut);
+    src1.write(input1.data(), bytes1);
+    src2.write(input2.data(), bytes2);
+
+    RppHandle handle(cfg.backend, outDims[0]);
+    ASSERT_EQ(rppt_tensor_and_tensor(src1.ptr(), src2.ptr(), desc1.get(), desc2.get(), dst.ptr(), descOut.get(),
+                                     to_rpp_broadcast(cfg.broadcast), roi1.data(), roi2.data(),
+                                     handle.get(), cfg.backend),
+              RPP_SUCCESS);
+
+    handle.sync();  // drain the op's stream before copying results back
+    dst.read(actual.data(), bytesOut);
+
+    // (4) Compare the whole output tensor. A bitwise AND is bit-exact for every dtype, so the
+    // tolerance is zero -- do not loosen it.
+    EXPECT_TRUE(compare_nd<T>(actual.data(), golden.data(), *descOut, 0.0));
+}
+
+}  // namespace
+
+// Full name: Misc_Bitwise/TensorAndTensorTest.Correctness/<Backend>_<DType>to<DType>_<Rank>_<Broadcast>_<Shape>
+class TensorAndTensorTest : public ::testing::TestWithParam<NdConfig> {};
+
+TEST_P(TensorAndTensorTest, Correctness) {
+    const NdConfig cfg = GetParam();
+    switch (cfg.dtype) {
+        case DType::U8:
+            run_tensor_and_tensor<Rpp8u>(cfg);
+            break;
+        case DType::I8:
+            run_tensor_and_tensor<Rpp8s>(cfg);
+            break;
+        default:
+            FAIL() << "unsupported dtype for tensor_and_tensor";
+    }
+}
+
+// Restricted to the integer dtypes (U8/I8): the op also accepts the 16/32-bit integer types, but
+// the framework's DType enum does not carry them yet.
+//
+// Full grid passes on both backends. Note the HIP descriptors must be device-addressable
+// (GenericDescriptor handles this): at rank >= 4 the non-broadcast kernel reads dims/strides on
+// the device. Undocumented and rank-dependent -- see
+// .notes/issues/nd-non-broadcast-host-descriptor-pointers-to-hip-kernel.md.
+INSTANTIATE_TEST_SUITE_P(Misc_Bitwise, TensorAndTensorTest,
+                         ::testing::ValuesIn(make_nd_configs({DType::U8, DType::I8}, {2, 3, 4},
+                                                             {Broadcast::None, Broadcast::Src1,
+                                                              Broadcast::Src2})),
+                         nd_config_param_name);
