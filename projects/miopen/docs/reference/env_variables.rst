@@ -104,12 +104,26 @@ and :doc:`Performance database <../conceptual/perfdb>`.
       - | 1: Enable
         | 0 or unset: Disable
 
-    * - | ``MIOPEN_NAIVE_DISABLE_IF_ALT``
-        | Skips naive convolution solvers during find when at least one
-        | non-naive solver succeeds across any algorithm. Naive solvers
-        | are still used as a fallback when no non-naive solver succeeds.
+    * - | ``MIOPEN_NAIVE_TIMEOUT``
+        | When enabled and a non-naive solver has already succeeded,
+        | naive solver evaluation is launched on a separate HIP stream
+        | with a wall-clock budget of ``MIOPEN_NAIVE_TIMEOUT_FACTOR``
+        | percent of the best non-naive time. If the naive kernel does
+        | not complete within the budget, it is skipped and the stream
+        | is returned to an async pool for later reclamation. Naive
+        | solvers are still used as a fallback when no non-naive solver
+        | succeeds.
       - | 1 or unset: Enable (default)
         | 0: Disable
+
+    * - | ``MIOPEN_NAIVE_TIMEOUT_FACTOR``
+        | Sets the wall-clock budget for naive solver evaluation as a
+        | percentage of the best non-naive solver time. Only takes
+        | effect when ``MIOPEN_NAIVE_TIMEOUT`` is enabled and a
+        | non-naive solver has already succeeded. For example, the
+        | default value of 300 gives naive a budget of 3× the best
+        | non-naive time.
+      - | Integer percentage (default: 300)
 
     * - | ``MIOPEN_DEBUG_DISABLE_FIND_DB``
         | Disables FindDb functionality.
