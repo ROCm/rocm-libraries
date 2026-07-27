@@ -4226,15 +4226,19 @@ namespace TensileLite
                     // nWG0*nWG1, so a reshaped-row grid is dense only per batch slice).
                     // See docs/design/streamk-wg-clusters.md.
                     size_t ck = static_cast<size_t>(self.sizeMapping.clusterDim.y);
-                    size_t mFree = 1, nFree = 1;
-                    for(size_t i = 0; i < problem.freeIndicesA().size(); i++)
-                        mFree *= problem.freeSizeA(i);
-                    for(size_t i = 0; i < problem.freeIndicesB().size(); i++)
-                        nFree *= problem.freeSizeB(i);
-                    size_t mt0  = static_cast<size_t>(self.sizeMapping.macroTile.x);
-                    size_t mt1  = static_cast<size_t>(self.sizeMapping.macroTile.y);
-                    size_t nwg0 = (mFree + mt0 - 1) / mt0;
-                    size_t nwg1 = (nFree + mt1 - 1) / mt1;
+                    // Derive nWG0/nWG1 with the SAME routine the launch uses
+                    // (calculateGrid), rather than re-deriving from freeIndicesA/B
+                    // alone. The hand-rolled loop skipped packBatchDims folding and
+                    // the transposeC01() swap, so for transposed-C or batch-packed
+                    // problems the reshaped grid could disagree with the launched
+                    // grid. calculateGrid folds packBatchDims into nWG0/nWG1, applies
+                    // transposeC01(), and CeilDivides by the macroTile -- for the
+                    // currently-tested [2,2]/batch=1 case it yields the identical
+                    // nwg0 = ceil(mFree/mt0), nwg1 = ceil(nFree/mt1).
+                    dim3 wgSizeTmp, nWGTmp;
+                    self.calculateGrid(wgSizeTmp, nWGTmp, problem);
+                    size_t nwg0 = static_cast<size_t>(nWGTmp.x);
+                    size_t nwg1 = static_cast<size_t>(nWGTmp.y);
                     size_t nwg1Ck = (nwg1 / ck) * ck; // largest multiple of Ck <= nWG1
                     if(nwg1Ck < ck)
                         nwg1Ck = ck; // at least one full cluster row
