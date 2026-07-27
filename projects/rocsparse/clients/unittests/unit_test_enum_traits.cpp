@@ -45,9 +45,9 @@ static_assert(
 static_assert(
     std::is_same<rocsparse::indextype_traits<rocsparse_indextype_i64>::type_t, int64_t>::value,
     "indextype_traits<i64> must map to int64_t");
-static_assert(
-    std::is_same<rocsparse::indextype_traits<rocsparse_indextype_u16>::type_t, uint16_t>::value,
-    "indextype_traits<u16> must map to uint16_t");
+static_assert(std::is_same<rocsparse::indextype_traits<deprecated_rocsparse_indextype_u16>::type_t,
+                           uint16_t>::value,
+              "indextype_traits<u16> must map to uint16_t");
 
 // ---------------------------------------------------------------------------
 // datatype_traits<v>::type_t
