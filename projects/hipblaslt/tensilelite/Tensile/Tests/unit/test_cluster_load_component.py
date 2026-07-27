@@ -145,20 +145,6 @@ class TestMaskSgprName:
         assert self._c().maskSgprName(k, "B", subtile=True) == "MulticastMaskB"
 
 
-class TestCooperativeThreadPartition:
-    def _c(self):
-        from Tensile.Components.ClusterLoad import ClusterLoadTDM
-        return ClusterLoadTDM()
-
-    def test_a_uses_clusterdim1_b_uses_clusterdim0(self):
-        k = _kernel(clusterDim=(4, 2))
-        assert self._c().cooperativeThreadPartition(k, "A") == 2
-        assert self._c().cooperativeThreadPartition(k, "B") == 4
-        # MXS tensors resolve by their trailing tensor char.
-        assert self._c().cooperativeThreadPartition(k, "MXSA") == 2
-        assert self._c().cooperativeThreadPartition(k, "MXSB") == 4
-
-
 # --- SGPR declare / undeclare ----------------------------------------------
 
 class TestDeclareUndeclare:

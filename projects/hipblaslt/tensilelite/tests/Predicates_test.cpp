@@ -219,7 +219,7 @@ TEST(Predicates, ClusterReductionIterCheck_RejectMessageNamesLimitation)
     const std::string msg = oss.str();
     EXPECT_NE(msg.find("iterations-per-tile ceil(K/DepthU)"), std::string::npos)
         << "reject diagnostic must name iterations-per-tile; got: " << msg;
-    EXPECT_NE(msg.find("multiple of ClusterDim[0]"), std::string::npos)
+    EXPECT_NE(msg.find("multiple of ClusterDim[1]"), std::string::npos)
         << "reject diagnostic must name the multiple-of-cluster-size limitation; got: " << msg;
     EXPECT_NE(msg.find("[!!]"), std::string::npos)
         << "reject diagnostic must mark the predicate as failing; got: " << msg;

@@ -816,10 +816,6 @@ class Solution(collections.abc.Mapping):
     )
     self._name = config["CustomKernelName"] if "CustomKernelName" in config and config["CustomKernelName"] else None
 
-    # Note: derivation now emits an int Multicast (0/1) on all paths, so no
-    # post-derivation coercion is needed. The pre-load coerceLegacyMulticastType
-    # above still guards shipped library YAMLs that serialize a bool Multicast.
-
     # Only merge and report mismatches if there were no pre-existing mismatches
     # To avoid duplicates and noise from cascading issues.
     if not pre_records:
