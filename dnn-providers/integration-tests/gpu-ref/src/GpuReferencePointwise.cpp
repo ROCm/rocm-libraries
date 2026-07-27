@@ -30,7 +30,7 @@ void launchKernel(hipFunction_t function, int64_t numBlocks, void* argsPtr, size
     hipDeviceProp_t deviceProps;
     detail::throwOnHipError(hipGetDeviceProperties(&deviceProps, deviceId),
                             "hipGetDeviceProperties failed");
-    if(const int64_t maxBlocks = static_cast<int64_t>(deviceProps.maxGridSize[0]);
+    if(const auto maxBlocks = static_cast<int64_t>(deviceProps.maxGridSize[0]);
        numBlocks > maxBlocks)
     {
         throw std::runtime_error("Grid size exceeds device limit: " + std::to_string(numBlocks)
@@ -143,7 +143,7 @@ void GpuReferencePointwise::launchUnary(
 
     // Use output dims to calculate launch grid dimensions due to broadcasting rules
     const int64_t numElements
-        = std::accumulate(outputDims.begin(), outputDims.end(), 1, std::multiplies<int64_t>());
+        = std::accumulate(outputDims.begin(), outputDims.end(), 1, std::multiplies<>());
     int64_t numBlocks = numElements / GpuReferencePointwise::BLOCK_SIZE;
     numBlocks += (numElements % GpuReferencePointwise::BLOCK_SIZE == 0) ? 0 : 1;
 
@@ -215,7 +215,7 @@ void GpuReferencePointwise::launchBinary(
 
     // Use output dims to calculate launch grid dimensions due to broadcasting rules
     const int64_t numElements
-        = std::accumulate(outputDims.begin(), outputDims.end(), 1, std::multiplies<int64_t>());
+        = std::accumulate(outputDims.begin(), outputDims.end(), 1, std::multiplies<>());
     int64_t numBlocks = numElements / GpuReferencePointwise::BLOCK_SIZE;
     numBlocks += (numElements % GpuReferencePointwise::BLOCK_SIZE == 0) ? 0 : 1;
 

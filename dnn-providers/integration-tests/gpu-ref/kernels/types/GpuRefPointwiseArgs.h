@@ -40,9 +40,11 @@ struct PointwiseUnaryArgs
 
     // Broadcasting metadata, max 5 dimensions supported
     int nDim;
+    // NOLINTBEGIN(modernize-avoid-c-arrays)
     long long outputDims[5];
     long long inputStrides[5];
     long long outputStrides[5];
+    // NOLINTEND(modernize-avoid-c-arrays)
 
     // Activation operation parameters
     float lowerClip;
@@ -63,10 +65,12 @@ struct PointwiseBinaryArgs
 
     // Broadcasting metadata, max 5 dimensions supported
     int nDim;
+    // NOLINTBEGIN(modernize-avoid-c-arrays)
     long long outputDims[5];
     long long input0Strides[5];
     long long input1Strides[5];
     long long outputStrides[5];
+    // NOLINTEND(modernize-avoid-c-arrays)
 
     // Activation operation parameters
     float lowerClip;
