@@ -787,12 +787,10 @@ rocblas_status rocsolver_sb2st_hb2st_template(rocblas_handle handle,
 
     // Set V = 0.
     // Ideally, set each Vk = I, but need to iterate over Vk.
-    // todo: Strided batch laset, with stride = kd*ldv?
     I nt = ceildiv(n - 1, kd);
     I nv_blocks = nt * (nt + 1) / 2;
     I nv = nv_blocks * kd;
-    rocblas_stride shiftV = 0;
-    HIP_CHECK(hipMemsetAsync(V + shiftV, 0, sizeof(T) * ldv * nv, stream));
+    laset(handle, 'g', ldv, nv, zero, zero, V, rocblas_stride(0), ldv, strideV, batch_count);
 
     int device;
     HIP_CHECK(hipGetDevice(&device));
