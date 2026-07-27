@@ -2553,9 +2553,9 @@ namespace rocisa
 
         SPrefetchInst(const SPrefetchInst& other)
             : Instruction(other)
-            , sbase(other.sbase)
+            , sbase(other.sbase ? other.sbase->clone() : nullptr)
             , immOffset(other.immOffset)
-            , soffset(other.soffset)
+            , soffset(other.soffset ? other.soffset->clone() : nullptr)
             , nt(other.nt)
         {
         }
@@ -3501,7 +3501,7 @@ namespace rocisa
         int sa_sdst;
     };
 
-    // GFX12: s_wait_idle — no-operand SOPP, golden bytes BF8A0000 (SOPP base 0xBF80_0000, op=0x0A, simm16=0).
+    // GFX12: s_wait_idle -- no-operand SOPP, golden bytes BF8A0000 (SOPP base 0xBF80_0000, op=0x0A, simm16=0).
     struct SWaitIdle : public Instruction
     {
         SWaitIdle(const std::string& comment = "")
@@ -4440,6 +4440,26 @@ namespace rocisa
         std::optional<VOP3PModifiers> vop3;
     };
 
+    // VOP3/VOP3P src field value: VGPR n -> 256 + n, SGPR n -> n. Shared by the
+    // packed-math classes below that hand-emit a raw .long encoding.
+    inline int pkSrcField(const InstructionInput& in)
+    {
+        auto reg = std::get<std::shared_ptr<Container>>(in);
+        auto rc  = std::dynamic_pointer_cast<RegisterContainer>(reg);
+        return rc->regType == "v" ? 256 + rc->regIdx : rc->regIdx;
+    }
+
+    inline bool pkIsSgpr(const InstructionInput& in)
+    {
+        if(!std::holds_alternative<std::shared_ptr<Container>>(in))
+        {
+            return false;
+        }
+        auto rc = std::dynamic_pointer_cast<RegisterContainer>(
+            std::get<std::shared_ptr<Container>>(in));
+        return rc && rc->regType == "s";
+    }
+
     // v_pk_fma_f32 (VOP3P, op 0x1f). The FMHA kernel needs this with an SGPR src1
     // (the softmax scale s[102:103]), a form amdclang REFUSES to assemble from
     // mnemonic text ("invalid op_sel operand") even though the raw encoding is valid
@@ -4472,36 +4492,17 @@ namespace rocisa
             return std::make_shared<VPkFmaF32>(*this);
         }
 
-        // VOP3/VOP3P src field value: VGPR n -> 256 + n, SGPR n -> n.
-        static int srcField(const InstructionInput& in)
-        {
-            auto reg = std::get<std::shared_ptr<Container>>(in);
-            auto rc  = std::dynamic_pointer_cast<RegisterContainer>(reg);
-            return rc->regType == "v" ? 256 + rc->regIdx : rc->regIdx;
-        }
-
-        static bool isSgpr(const InstructionInput& in)
-        {
-            if(!std::holds_alternative<std::shared_ptr<Container>>(in))
-            {
-                return false;
-            }
-            auto rc = std::dynamic_pointer_cast<RegisterContainer>(
-                std::get<std::shared_ptr<Container>>(in));
-            return rc && rc->regType == "s";
-        }
-
         std::string toString() const override
         {
             // SGPR src1 packed fma is not assemblable from mnemonic text; emit the raw
             // two-word encoding directly (byte-identical to the golden .long the POC uses).
-            if(srcs.size() == 3 && isSgpr(srcs[1]))
+            if(srcs.size() == 3 && pkIsSgpr(srcs[1]))
             {
                 auto dstRc = std::dynamic_pointer_cast<RegisterContainer>(dst);
                 uint32_t d  = static_cast<uint32_t>(dstRc->regIdx);
-                uint32_t s0 = static_cast<uint32_t>(srcField(srcs[0]));
-                uint32_t s1 = static_cast<uint32_t>(srcField(srcs[1]));
-                uint32_t s2 = static_cast<uint32_t>(srcField(srcs[2]));
+                uint32_t s0 = static_cast<uint32_t>(pkSrcField(srcs[0]));
+                uint32_t s1 = static_cast<uint32_t>(pkSrcField(srcs[1]));
+                uint32_t s2 = static_cast<uint32_t>(pkSrcField(srcs[2]));
                 uint32_t word0 = 0xCC1F0000u | 0x4400u | d;
                 uint32_t word1 = 0x9C000000u | s0 | (s1 << 9) | (s2 << 18);
                 char buf[64];
@@ -4548,32 +4549,13 @@ namespace rocisa
             return std::make_shared<VPkMulF32>(*this);
         }
 
-        // VOP3/VOP3P src field value: VGPR n -> 256 + n, SGPR n -> n.
-        static int srcField(const InstructionInput& in)
-        {
-            auto reg = std::get<std::shared_ptr<Container>>(in);
-            auto rc  = std::dynamic_pointer_cast<RegisterContainer>(reg);
-            return rc->regType == "v" ? 256 + rc->regIdx : rc->regIdx;
-        }
-
-        static bool isSgpr(const InstructionInput& in)
-        {
-            if(!std::holds_alternative<std::shared_ptr<Container>>(in))
-            {
-                return false;
-            }
-            auto rc = std::dynamic_pointer_cast<RegisterContainer>(
-                std::get<std::shared_ptr<Container>>(in));
-            return rc && rc->regType == "s";
-        }
-
         bool wantsRawOpSelHi011() const
         {
             if(srcs.size() != 2)
             {
                 return false;
             }
-            if(isSgpr(srcs[1]))
+            if(pkIsSgpr(srcs[1]))
             {
                 return true;   // SGPR src1 packed is only ever the [0,1,1] form here
             }
@@ -4588,8 +4570,8 @@ namespace rocisa
             {
                 auto dstRc = std::dynamic_pointer_cast<RegisterContainer>(dst);
                 uint32_t d  = static_cast<uint32_t>(dstRc->regIdx);
-                uint32_t s0 = static_cast<uint32_t>(srcField(srcs[0]));
-                uint32_t s1 = static_cast<uint32_t>(srcField(srcs[1]));
+                uint32_t s0 = static_cast<uint32_t>(pkSrcField(srcs[0]));
+                uint32_t s1 = static_cast<uint32_t>(pkSrcField(srcs[1]));
                 uint32_t word0 = 0xCC280000u | d;
                 uint32_t word1 = 0x18000000u | s0 | (s1 << 9);
                 char buf[64];
