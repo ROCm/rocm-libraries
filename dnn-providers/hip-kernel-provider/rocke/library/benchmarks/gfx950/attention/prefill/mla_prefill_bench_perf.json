@@ -1,0 +1,254 @@
+[
+  {
+    "label": "ds_r1_prefill_s2048",
+    "model": "DeepSeek-R1",
+    "num_query_heads": 128,
+    "seqlen_q": 2048,
+    "seqlen_k": 2048,
+    "block_size": 16,
+    "dtype": "bf16",
+    "arch": "gfx950",
+    "aiter_ms": 5.4115240927785635,
+    "variants": {
+      "prod": {
+        "ms": 49.24953125,
+        "max_abs": 0.02899169921875,
+        "ok": true,
+        "speedup_vs_aiter": 0.10987970759170554
+      },
+      "mfma": {
+        "ms": 16.335452880859375,
+        "max_abs": 0.000244140625,
+        "ok": true,
+        "speedup_vs_aiter": 0.33127481265728304
+      }
+    },
+    "best_variant": "mfma",
+    "best_ms": 16.335452880859375,
+    "tflops": 21.066710369274794
+  },
+  {
+    "label": "ds_r1_prefill_s4096",
+    "model": "DeepSeek-R1",
+    "num_query_heads": 128,
+    "seqlen_q": 4096,
+    "seqlen_k": 4096,
+    "block_size": 16,
+    "dtype": "bf16",
+    "arch": "gfx950",
+    "aiter_ms": 21.379726007580757,
+    "variants": {
+      "prod": {
+        "ms": 197.07294921875,
+        "max_abs": 0.0303955078125,
+        "ok": true,
+        "speedup_vs_aiter": 0.10848635539446545
+      },
+      "mfma": {
+        "ms": 64.2072509765625,
+        "max_abs": 0.000244140625,
+        "ok": true,
+        "speedup_vs_aiter": 0.33297993112000657
+      }
+    },
+    "best_variant": "mfma",
+    "best_ms": 64.2072509765625,
+    "tflops": 21.42224212411903
+  },
+  {
+    "label": "ds_r1_prefill_s8192",
+    "model": "DeepSeek-R1",
+    "num_query_heads": 128,
+    "seqlen_q": 8192,
+    "seqlen_k": 8192,
+    "block_size": 16,
+    "dtype": "bf16",
+    "arch": "gfx950",
+    "aiter_ms": null,
+    "variants": {
+      "prod": {
+        "ms": null,
+        "max_abs": null,
+        "ok": false,
+        "speedup_vs_aiter": null
+      },
+      "mfma": {
+        "ms": 254.78591796875,
+        "max_abs": 0.000244140625,
+        "ok": true,
+        "speedup_vs_aiter": null
+      }
+    },
+    "best_variant": "mfma",
+    "best_ms": 254.78591796875,
+    "tflops": 21.585594943290978
+  },
+  {
+    "label": "glm5_prefill_s2048",
+    "model": "GLM-5",
+    "num_query_heads": 128,
+    "seqlen_q": 2048,
+    "seqlen_k": 2048,
+    "block_size": 16,
+    "dtype": "bf16",
+    "arch": "gfx950",
+    "aiter_ms": 5.413766950368881,
+    "variants": {
+      "prod": {
+        "ms": 49.7370458984375,
+        "max_abs": 0.02899169921875,
+        "ok": true,
+        "speedup_vs_aiter": 0.10884777840291789
+      },
+      "mfma": {
+        "ms": 16.361871337890626,
+        "max_abs": 0.000244140625,
+        "ok": true,
+        "speedup_vs_aiter": 0.33087700291541494
+      }
+    },
+    "best_variant": "mfma",
+    "best_ms": 16.361871337890626,
+    "tflops": 21.032695312488983
+  },
+  {
+    "label": "glm5_prefill_s4096",
+    "model": "GLM-5",
+    "num_query_heads": 128,
+    "seqlen_q": 4096,
+    "seqlen_k": 4096,
+    "block_size": 16,
+    "dtype": "bf16",
+    "arch": "gfx950",
+    "aiter_ms": 21.437881980091333,
+    "variants": {
+      "prod": {
+        "ms": 198.74609375,
+        "max_abs": 0.0303955078125,
+        "ok": true,
+        "speedup_vs_aiter": 0.10786567713405101
+      },
+      "mfma": {
+        "ms": 64.19888671875,
+        "max_abs": 0.000244140625,
+        "ok": true,
+        "speedup_vs_aiter": 0.3339291859375836
+      }
+    },
+    "best_variant": "mfma",
+    "best_ms": 64.19888671875,
+    "tflops": 21.42503315625691
+  },
+  {
+    "label": "glm5_prefill_s8192",
+    "model": "GLM-5",
+    "num_query_heads": 128,
+    "seqlen_q": 8192,
+    "seqlen_k": 8192,
+    "block_size": 16,
+    "dtype": "bf16",
+    "arch": "gfx950",
+    "aiter_ms": null,
+    "variants": {
+      "prod": {
+        "ms": null,
+        "max_abs": null,
+        "ok": false,
+        "speedup_vs_aiter": null
+      },
+      "mfma": {
+        "ms": 255.5930078125,
+        "max_abs": 0.000244140625,
+        "ok": true,
+        "speedup_vs_aiter": null
+      }
+    },
+    "best_variant": "mfma",
+    "best_ms": 255.5930078125,
+    "tflops": 21.51743378896546
+  },
+  {
+    "label": "kimi_k2_prefill_s2048",
+    "model": "Kimi-K2",
+    "num_query_heads": 64,
+    "seqlen_q": 2048,
+    "seqlen_k": 2048,
+    "block_size": 16,
+    "dtype": "bf16",
+    "arch": "gfx950",
+    "aiter_ms": 2.9051199089735746,
+    "variants": {
+      "prod": {
+        "ms": 24.97158935546875,
+        "max_abs": 0.022308349609375,
+        "ok": true,
+        "speedup_vs_aiter": 0.11633700473043204
+      },
+      "mfma": {
+        "ms": 8.140193481445312,
+        "max_abs": 0.000244140625,
+        "ok": true,
+        "speedup_vs_aiter": 0.35688585481358404
+      }
+    },
+    "best_variant": "mfma",
+    "best_ms": 8.140193481445312,
+    "tflops": 21.170941838768357
+  },
+  {
+    "label": "kimi_k2_prefill_s4096",
+    "model": "Kimi-K2",
+    "num_query_heads": 64,
+    "seqlen_q": 4096,
+    "seqlen_k": 4096,
+    "block_size": 16,
+    "dtype": "bf16",
+    "arch": "gfx950",
+    "aiter_ms": 10.823997901752591,
+    "variants": {
+      "prod": {
+        "ms": 100.15076171875,
+        "max_abs": 0.02001953125,
+        "ok": true,
+        "speedup_vs_aiter": 0.10807704021412497
+      },
+      "mfma": {
+        "ms": 31.91025146484375,
+        "max_abs": 0.000244140625,
+        "ok": true,
+        "speedup_vs_aiter": 0.3392012724712507
+      }
+    },
+    "best_variant": "mfma",
+    "best_ms": 31.91025146484375,
+    "tflops": 21.568883903728587
+  },
+  {
+    "label": "kimi_k2_prefill_s8192",
+    "model": "Kimi-K2",
+    "num_query_heads": 64,
+    "seqlen_q": 8192,
+    "seqlen_k": 8192,
+    "block_size": 16,
+    "dtype": "bf16",
+    "arch": "gfx950",
+    "aiter_ms": 44.83670089393854,
+    "variants": {
+      "prod": {
+        "ms": 436.061484375,
+        "max_abs": 0.019287109375,
+        "ok": true,
+        "speedup_vs_aiter": 0.10282197006736853
+      },
+      "mfma": {
+        "ms": 125.73275390625,
+        "max_abs": 0.000244140625,
+        "ok": true,
+        "speedup_vs_aiter": 0.3566031881189057
+      }
+    },
+    "best_variant": "mfma",
+    "best_ms": 125.73275390625,
+    "tflops": 21.879156127759444
+  }
+]
