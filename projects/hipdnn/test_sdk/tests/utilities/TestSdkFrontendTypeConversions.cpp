@@ -191,6 +191,23 @@ TEST(TestSdkFrontendTypeConversions, PackSubByteElementsIgnoredForNonSubByteType
     EXPECT_EQ(tensor->elementSize(), sizeof(float));
 }
 
+TEST(TestSdkFrontendTypeConversions, PackSubByteElementsThrowsForUnimplementedSubByteTypes)
+{
+    const std::vector<int64_t> dims = {2, 2};
+    const std::vector<int64_t> strides = {2, 1};
+
+    EXPECT_THROW(createTensor(fe::DataType::INT4, dims, strides, /*packSubByteElements=*/true),
+                 std::runtime_error);
+    EXPECT_THROW(createTensor(fe::DataType::FP6_E2M3, dims, strides, /*packSubByteElements=*/true),
+                 std::runtime_error);
+    EXPECT_THROW(createTensor(fe::DataType::FP6_E3M2, dims, strides, /*packSubByteElements=*/true),
+                 std::runtime_error);
+
+    EXPECT_NO_THROW(createTensor(fe::DataType::INT4, dims, strides));
+    EXPECT_NO_THROW(createTensor(fe::DataType::FP6_E2M3, dims, strides));
+    EXPECT_NO_THROW(createTensor(fe::DataType::FP6_E3M2, dims, strides));
+}
+
 // ============================================================================
 // PointwiseMode exhaustive round-trip tests
 // ============================================================================
