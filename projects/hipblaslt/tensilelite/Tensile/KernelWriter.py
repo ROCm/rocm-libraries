@@ -9199,7 +9199,14 @@ class KernelWriter(metaclass=abc.ABCMeta):
       # - no staggerUCode
       # - TLUA false for A, TLUB false for B
       # - numSgprGlobalReadIncs is 1
-      if kernel["StreamK"] and (not self.states.staggerUCode):
+      # The non-subtile wave-separated TDM path is excluded: graIncrements writes
+      # GlobalReadIncs* and tdmSetupIncrementWaveSeparated selects between them by
+      # wave parity, neither of which consults useConstSgprGlobalReadIncs, so the
+      # SGPRs must be real. Subtile drives the descriptors from its own operands and
+      # never reads them, so it keeps the const form.
+      needsRealGlobalReadIncs = self.isTdmWaveSeparated(kernel) and not kernel["UseSubtileImpl"]
+      if kernel["StreamK"] and (not self.states.staggerUCode) \
+         and not needsRealGlobalReadIncs:
         if kernel["ProblemType"]["TLUA"] == False:
           if self.states.a.numSgprGlobalReadIncs == 1:
             # use const GR Inc
