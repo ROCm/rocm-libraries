@@ -1,3 +1,6 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
 // bench_hipdnn_sdpa.cpp
 // Standalone benchmark comparing our Flash2 V7 kernel against hipDNN's ASM SDPA engine.
 // Compiles WITHOUT the full hipDNN build -- uses our kernel directly.
