@@ -315,7 +315,7 @@ flatbuffers::FlatBufferBuilder createSdpaFwdGraphWithMask(
     std::vector<flatbuffers::Offset<Node>> nodes;
     nodes.push_back(CreateNodeDirect(builder,
                                      "sdpa_fwd",
-                                     DataType::BFLOAT16,
+                                     DataType::FLOAT,
                                      NodeAttributes::SdpaAttributes,
                                      sdpaAttributes.Union()));
 
@@ -574,10 +574,11 @@ auto createSdpaFwdGraphWithStrides(const std::vector<int64_t>& dims,
         vStrides,
         oDims,
         oStrides,
-        hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16);
+        hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
 }
 
-TEST_F(TestSdpaFwdPlanBuilder, IsApplicable_RejectsOversizedByteStrides)
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRejectsOversizedByteStrides)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -622,7 +623,7 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicable_RejectsOversizedByteStrides)
 // buildPlan failure paths
 // =============================================================================
 
-TEST_F(TestSdpaFwdPlanBuilder, BuildPlan_ThrowsOnEmptyKernelKey)
+TEST_F(TestSdpaFwdPlanBuilder, BuildPlanThrowsOnEmptyKernelKey)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -651,7 +652,7 @@ TEST_F(TestSdpaFwdPlanBuilder, BuildPlan_ThrowsOnEmptyKernelKey)
 // initializeExecutionSettings
 // =============================================================================
 
-TEST_F(TestSdpaFwdPlanBuilder, InitializeExecutionSettings_IsNoOp)
+TEST_F(TestSdpaFwdPlanBuilder, InitializeExecutionSettingsIsNoOp)
 {
     auto builder = createSdpaFwdGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper gw(builder.GetBufferPointer(),
