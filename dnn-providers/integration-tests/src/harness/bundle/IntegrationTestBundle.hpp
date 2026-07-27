@@ -558,6 +558,86 @@ inline nlohmann::json expandTemplateGraph(const nlohmann::json& templateJson,
     return expanded;
 }
 
+// Applies structural tensor patches declared in a sweep case's "tensor_patches" array.
+// Each patch targets a tensor by uid and supports "set" (upsert fields) and "remove" (erase
+// fields). Called after expandTemplateGraph so placeholders are already resolved, and before
+// buildGraphBuffer so the flatbuffer has not yet been sealed.
+inline void applyTensorPatches(nlohmann::json& expandedGraph, const nlohmann::json& caseJson)
+{
+    if(!caseJson.contains("tensor_patches") || !caseJson.at("tensor_patches").is_array())
+    {
+        return;
+    }
+
+    if(!expandedGraph.contains("tensors") || !expandedGraph.at("tensors").is_array())
+    {
+        return;
+    }
+
+    for(const auto& patch : caseJson.at("tensor_patches"))
+    {
+        if(!patch.is_object() || !patch.contains("uid") || !patch.at("uid").is_number_integer())
+        {
+            throw std::runtime_error("tensor_patch entry is missing an integer uid");
+        }
+
+        const auto targetUid = patch.at("uid").get<int64_t>();
+        bool found = false;
+
+        for(auto& tensor : expandedGraph.at("tensors"))
+        {
+            if(!tensor.contains("uid") || tensor.at("uid").get<int64_t>() != targetUid)
+            {
+                continue;
+            }
+
+            if(patch.contains("set") && patch.at("set").is_object())
+            {
+                for(const auto& [key, val] : patch.at("set").items())
+                {
+                    tensor[key] = val;
+                }
+            }
+
+            if(patch.contains("remove") && patch.at("remove").is_array())
+            {
+                for(const auto& key : patch.at("remove"))
+                {
+                    if(key.is_string())
+                    {
+                        tensor.erase(key.get<std::string>());
+                    }
+                }
+            }
+
+            found = true;
+            break;
+        }
+
+        if(!found)
+        {
+            throw std::runtime_error("tensor_patch uid " + std::to_string(targetUid)
+                                     + " not found in expanded graph");
+        }
+    }
+
+    // Invariant: a tensor with is_runtime_pass_by_value=true must not also carry a baked
+    // value_type or value — if it does, both the CPU reference and the provider silently
+    // short-circuit to the baked value and the runtime path is never exercised.
+    for(const auto& tensor : expandedGraph.at("tensors"))
+    {
+        if(tensor.value("is_runtime_pass_by_value", false)
+           && (tensor.contains("value_type") || tensor.contains("value")))
+        {
+            const auto uid = tensor.value("uid", int64_t{-1});
+            throw std::runtime_error(
+                "tensor uid " + std::to_string(uid)
+                + " has is_runtime_pass_by_value=true but still carries value_type or value;"
+                " remove them from the tensor_patches 'remove' list or the template");
+        }
+    }
+}
+
 inline const nlohmann::json* findSweepCase(const nlohmann::json& sweepJson,
                                            const std::string& caseId)
 {
@@ -707,6 +787,7 @@ inline LoadResult loadIntegrationTestBundle(const DiscoveredBundle& discovered)
     {
         expandedGraph = detail::expandTemplateGraph(*templateJson, *caseJson, discovered);
         goldenDirectory = detail::resolveSweepGoldenDirectory(discovered.jsonPath, *caseJson);
+        detail::applyTensorPatches(expandedGraph, *caseJson);
     }
     catch(const std::exception&)
     {

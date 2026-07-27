@@ -137,9 +137,7 @@
             ],
             "data_type": "float",
             "virtual": false,
-            "is_runtime_pass_by_value": true,
-            "value_type": "Float32Value",
-            "value": 2.0
+            "is_runtime_pass_by_value": true
         },
         {
             "uid": 5,
@@ -169,5 +167,5 @@
     "io_data_type": "bfloat16",
     "compute_data_type": "float",
     "intermediate_data_type": "float",
-    "name": ""
+    "name": "SdpaFwdRuntimeScale_bhsd_bf16_hd128_causal_group_Small"
 }
