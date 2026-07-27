@@ -240,11 +240,12 @@ model entry — the single arch-aware model serves every pack that joins the eng
 the earlier per-arch / pack-supplied-entry draft, forced by the UED now owning the UHD.
 
 **OPEN — regressor vs. ranker.** The tooling trains a *regressor* on TFLOPS and argmaxes. A
-learning-to-rank objective (LambdaRank/NDCG) optimizes ordering directly and may pick better without
-needing calibrated absolute values. But a calibrated TFLOPS *regressor* is what makes
-[Section 11](#11-engine-selection-interplay-and-estimated-tflops) (surfacing estimated TFLOPS to
-engine selection) possible. We likely want the regressor to preserve that option. Decide per-UHD via
-`objective` / `score`, or standardize.
+learning-to-rank objective (LambdaRank/NDCG) optimizes ordering directly and may pick better *within*
+an engine without needing calibrated absolute values. But a calibrated TFLOPS *regressor* is what makes
+the **absolute, cross-comparable metric** of [Section 11](#11-engine-selection-interplay-and-estimated-tflops)
+possible; a pure ranker forecloses that and leaves only the rank-ordering path. We likely want the
+regressor to preserve the absolute option, keeping ranking as the fallback rather than the only mode.
+Decide per-UHD via `objective` / `score`, or standardize.
 
 ---
 
@@ -672,11 +673,31 @@ UHD is not a [RFC 0007](0007_EngineSelectionHeuristicsFramework.md) policy and d
 the outer loop. Today rocKE's applicability (`isApplicable`) is a yes/no gate; the engine-selection
 heuristic then orders engines by a static policy that does not know rocKE's *predicted performance*.
 
-**The idea.** If a UHD is a calibrated TFLOPS regressor, its best-candidate score is a **predicted
-figure of merit for what rocKE would actually run**. Surfacing that number to engine selection lets
-hipDNN compare engines by predicted performance instead of a fixed order — "rocKE predicts 310 TFLOPS
-for its best FMHA kernel; MIOpen's estimate is 240" → pick rocKE. This is genuinely valuable and the
-UHD is where the number naturally exists.
+**The idea: an absolute, cross-comparable figure of merit.** The ambition is to score candidates
+**cardinally** — an absolute metric (calibrated TFLOPS) rather than a within-group rank. If a UHD is a
+calibrated TFLOPS regressor, its best-candidate score is a **predicted figure of merit for what the
+engine would actually run**, expressed on a scale that means the same thing across engines. That is what
+lets each engine **run its own heuristic per package, independently, and still have those results be
+meaningfully comparable to every other package and engine**: hipDNN compares engines by predicted
+performance instead of a fixed order — "rocKE predicts 310 TFLOPS for its best FMHA kernel; MIOpen's
+estimate is 240" → pick rocKE. The value is precisely that local, per-package scoring composes into a
+global comparison without a central ranker; the UHD is where the number naturally exists.
+
+**Why absolute is harder than rank — and the safety valve.** A per-package model only needs to be
+*monotonic* to pick correctly among its own candidates (argmax is scale-free). Making it *calibrated* —
+accurate in absolute TFLOPS so cross-engine comparison is honest — is a strictly harder modeling
+problem, and a *miscalibrated* absolute score is worse than an honest rank, because it yields
+confident-but-wrong cross-engine picks. So the absolute method is pursued as the goal, but it needs a
+fallback for exactly the failure mode it introduces.
+
+**Fallback if the absolute method underperforms.** One fallback is to **degrade to classic
+rank-ordering at the engine-policy level** — engine selection reverts to the existing
+[RFC 0007](0007_EngineSelectionHeuristicsFramework.md) static/rank ordering, and each UHD keeps ranking
+*within* its engine (where only monotonicity is needed) without claiming a comparable absolute score.
+This is one option, not the only one: if the absolute approach proves unreliable we may pursue other
+cross-engine schemes in the future (for example a normalized/relative score, or a calibration layer
+applied at the policy level). The point is that the design does not bet everything on calibration
+succeeding — rank-ordering is the defined safe backstop, with room to explore alternatives.
 
 **Why it's a coordinated follow-up, not committed here.** Delivering it requires changes *outside* the
 UHD:
@@ -689,20 +710,26 @@ UHD:
    [RFC 0007](0007_EngineSelectionHeuristicsFramework.md)'s territory.
 3. **Cross-engine calibration.** Comparing estimates across engines only works if the units are
    comparable and each engine's model is calibrated to real TFLOPS (not just monotonic for argmax).
-   This is a real modeling requirement, not just plumbing.
+   This is a real modeling requirement, not just plumbing — and the one most likely to force the
+   rank-ordering fallback above if it does not hold up.
 
 **What this RFC commits to** so the door stays open: the UHD schema declares `score`
 (`units`/`calibrated`/`transform`, [Section 4](#4-uhd-schema)) so a consumer can invert the training
 transform and recover real TFLOPS, and supports a **score-only evaluation mode** (rank/return best
 score without selecting-for-launch). The estimate-to-engine-selection wiring — the plugin query, the
 [RFC 0007](0007_EngineSelectionHeuristicsFramework.md) policy, and calibration — is a **dedicated
-follow-up co-owned with [RFC 0007](0007_EngineSelectionHeuristicsFramework.md)**. We should write that
-follow-up's problem statement now and reference it, but not block UHD v1 on it.
+follow-up co-owned with [RFC 0007](0007_EngineSelectionHeuristicsFramework.md)**, as is the
+rank-ordering fallback (it lives at the engine-policy level, which is that RFC's territory). We should
+write that follow-up's problem statement now and reference it, but not block UHD v1 on it.
 
-**OPEN:** should v1 mandate calibrated TFLOPS (so the follow-up is pure plumbing), or allow
-monotonic-only scores initially (simpler models, but a later recalibration to enable engine-level
-comparison)? Recommend mandating calibrated regression targets from the start — the tooling already
-trains on TFLOPS, so this is cheap insurance.
+**OPEN — how hard to commit to the absolute metric.** The ambition is a calibrated, cross-comparable
+score. Training on real TFLOPS from the start is cheap insurance (the tooling already does), so v1
+should train calibratable targets even while cross-engine comparison is validated separately. What is
+*not* committed is that cross-engine comparison must succeed: if calibration proves unreliable, engine
+selection falls back to classic rank-ordering at the [RFC 0007](0007_EngineSelectionHeuristicsFramework.md)
+policy level (with other cross-engine schemes left open for the future). So the open decision is the
+*degree of commitment* — build the absolute path and the rank-ordering backstop together, rather than
+mandating that the absolute path be the only outcome.
 
 ---
 
@@ -879,9 +906,11 @@ land only when a concrete need appears.
   default ([Section 9](#9-dependencies)); a runtime native dep stays opt-in.
 - **Bad/stale model regresses selection.** A model can pick worse than first-match. Mitigations:
   fail-open to `static_order`; a generic-vs-baseline parity gate; model provenance in the trace.
-- **Calibration for engine-level comparison.** Monotonic-only scores block the
-  [Section 11](#11-engine-selection-interplay-and-estimated-tflops) idea later; mandating calibrated
-  TFLOPS up front is cheap insurance.
+- **Calibration for engine-level comparison.** The absolute cross-engine metric may not pan out — a
+  *miscalibrated* score is worse than an honest rank. Mitigation is designed in, not hoped for: train
+  calibratable TFLOPS from the start (cheap insurance, keeps the option open) and keep classic
+  rank-ordering at the RFC-0007 policy level as the defined fallback, with other cross-engine schemes
+  open for the future ([Section 11](#11-engine-selection-interplay-and-estimated-tflops)).
 - **Cache correctness.** A result cache keyed on an incomplete fingerprint returns a wrong kernel.
   Fingerprint must include everything the feature row depends on (problem + candidate set + device).
 - **Drop-in trust.** A runtime model artifact is author-controlled input; the loader/evaluator must be
@@ -892,8 +921,10 @@ land only when a concrete need appears.
 
 ## 16. Open Questions
 
-1. **Regressor vs. ranker**, and whether to mandate calibrated TFLOPS units
-   ([Section 4](#4-uhd-schema), [Section 11](#11-engine-selection-interplay-and-estimated-tflops)).
+1. **Regressor vs. ranker, and degree of commitment to the absolute metric.** Train calibratable
+   TFLOPS (keeps the cross-comparable option open) vs. a pure within-engine ranker; and how hard to
+   commit to cross-engine cardinal comparison vs. keeping rank-ordering at the RFC-0007 policy level as
+   the defined fallback ([Section 4](#4-uhd-schema), [Section 11](#11-engine-selection-interplay-and-estimated-tflops)).
 2. **Per-engine arch-aware model vs. narrower engine scope.** The UHD is one per engine (owned by the
    UED), and the engine spans arches, so the model is arch-aware via `$device.*` — one model, no
    `(arch,dtype)→artifact` table. Open: does a single arch-aware model match per-arch accuracy, or should
