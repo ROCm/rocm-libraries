@@ -114,11 +114,11 @@ try
     splits = mem[6];
     tau = mem[7];
     pivots_workArr = mem[8];
-    iinfo = mem[9];
-    Aband = mem[10];
-    he2hb_work = mem[11];
-    V_hb2st = mem[12];
-    tau_hb2st = mem[13];
+    Aband = mem[9];
+    he2hb_work = mem[10];
+    V_hb2st = mem[11];
+    tau_hb2st = mem[12];
+    iinfo = mem[13];
     if(size_scalars > 0)
         init_scalars(handle, (T*)scalars);
 
