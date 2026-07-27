@@ -27,6 +27,9 @@ on:
     branches:
       - 'develop'
 
+permissions:
+  contents: read
+
 concurrency:
   group: pr-merge-sync-patch-${{ github.sha }}
   cancel-in-progress: false
