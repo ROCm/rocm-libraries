@@ -155,8 +155,7 @@ TEST(TestSdkFrontendTypeConversions, CreateTensorFp4UnpackedByDefault)
     const std::vector<int64_t> dims = {2, 4};
     const std::vector<int64_t> strides = {4, 1};
 
-    auto tensor
-        = createTensor(fe::DataType::FP4_E2M1, dims, strides, /*packSubByteElements=*/false);
+    auto tensor = createTensor(fe::DataType::FP4_E2M1, dims, strides);
 
     ASSERT_NE(tensor, nullptr);
     EXPECT_EQ(tensor->dims(), dims);
