@@ -27,6 +27,10 @@ on:
         type: string
         description: "Optional explicit TheRock ref (branch/tag/SHA) to build against. Empty resolves the live tip of ROCm/TheRock@main."
         default: ""
+      enable_windows_gfx1101_azure:
+        type: boolean
+        description: "Also build/test the gfx110x Windows suite on the azure gfx1101 runners (manual only; never runs on the nightly schedule)."
+        default: false
 
 permissions:
   contents: read
@@ -40,13 +44,45 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Compose the toggle-dependent setup inputs. The azure gfx1101 bringup is
+  # manual-only: `enable_windows_gfx1101_azure` is unset on the nightly schedule
+  # (the `inputs` context is null for schedule events), so this defaults off and
+  # the azure fleet stays idle unless a human dispatches the workflow with the
+  # box checked. When enabled, gfx110x is added to the Windows families and its
+  # test-runs-on is pinned to the healthy azure fleet label via family_overrides
+  # (consumed by TheRock's setup_multi_arch -> configure_multi_arch_ci).
+  prepare:
+    name: Prepare setup inputs
+    runs-on: ubuntu-24.04
+    outputs:
+      windows_amdgpu_families: ${{ steps.compose.outputs.windows_amdgpu_families }}
+      external_repo: ${{ steps.compose.outputs.external_repo }}
+    steps:
+      - name: Compose windows families and external_repo
+        id: compose
+        env:
+          ENABLE_AZURE: ${{ inputs.enable_windows_gfx1101_azure }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          if [ "${ENABLE_AZURE}" = "true" ]; then
+            echo "windows_amdgpu_families=gfx1151,gfx110x" >> "$GITHUB_OUTPUT"
+            echo "external_repo={\"repository\":\"${REPO}\",\"ref\":\"${SHA}\",\"family_overrides\":{\"gfx110x\":{\"windows\":{\"test-runs-on\":\"windows-gfx1101-gpu-rocm\"}}}}" >> "$GITHUB_OUTPUT"
+          else
+            echo "windows_amdgpu_families=gfx1151" >> "$GITHUB_OUTPUT"
+            echo "external_repo={\"repository\":\"${REPO}\",\"ref\":\"${SHA}\"}" >> "$GITHUB_OUTPUT"
+          fi
+
   setup:
+    needs: [prepare]
     uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@main
     with:
       build_variant: "release"
-      # Limit GPU families for nightly CI: gfx94X, gfx950 (Linux) and gfx1151 (Windows)
+      # Limit GPU families for nightly CI: gfx94X, gfx950 (Linux) and gfx1151
+      # (Windows). The Windows list is composed by the prepare job so the manual
+      # enable_windows_gfx1101_azure toggle can append gfx110x.
       linux_amdgpu_families: 'gfx94X,gfx950'
-      windows_amdgpu_families: 'gfx1151'
+      windows_amdgpu_families: ${{ needs.prepare.outputs.windows_amdgpu_families }}
       linux_test_labels: ''
       windows_test_labels: ''
       prebuilt_stages: ''
@@ -56,7 +92,9 @@ jobs:
       # pin an explicit ref via therock_ref_override. setup resolves this to one
       # concrete SHA (needs.setup.outputs.ref) for every downstream job.
       ref: ${{ inputs.therock_ref_override || 'main' }}
-      external_repo: '{"repository":"${{ github.repository }}","ref":"${{ github.sha }}"}'
+      # Composed by the prepare job; carries family_overrides for the azure
+      # gfx1101 fleet only when the manual toggle is enabled.
+      external_repo: ${{ needs.prepare.outputs.external_repo }}
 
   log_therock_ref:
     name: Locked TheRock ref
