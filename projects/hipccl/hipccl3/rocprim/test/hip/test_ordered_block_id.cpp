@@ -93,14 +93,12 @@ TEST(OrderedBlockId, Deadlock)
     SUCCEED();
 }
 
-using rocprim::detail::ordered_block_id;
-using rocprim::detail::temp_storage;
+using namespace rocprim::detail;
 
 __global__
 void test_kernel(ordered_block_id<> ordered_bid, uint32_t* device_output_ids)
 {
-    __shared__
-    ordered_block_id<>::storage_type ordered_bid_storage;
+    __shared__ ordered_block_id<>::storage_type ordered_bid_storage;
 
     const auto gid      = (blockIdx.x * blockDim.x) + threadIdx.x;
     const auto tid      = threadIdx.x;
@@ -148,22 +146,23 @@ TEST(OrderedBlockID, Unique)
         const auto base = block * block_dim;
         uint32_t   id   = h_output_ids[base];
 
-        // Check that it's different from all the other blocks
-        for(uint32_t block2 = 0; block2 < grid_dim; block2++)
-        {
-            if(block == block2)
-            {
-                continue;
-            }
-
-            const auto id2 = h_output_ids[block2 * block_dim];
-            ASSERT_NE(id, id2);
-        }
-
         // All threads within the block must have the same ID
         for(uint32_t thread = 0; thread < block_dim; thread++)
         {
             ASSERT_EQ(h_output_ids[base + thread], id);
         }
+    }
+
+    // Check that the assigned block IDs form the complete ordered sequence [0, grid_dim)
+    std::vector<uint32_t> block_ids(grid_dim);
+    for(uint32_t block = 0; block < grid_dim; block++)
+    {
+        block_ids[block] = h_output_ids[block * block_dim];
+    }
+    std::sort(block_ids.begin(), block_ids.end());
+
+    for(uint32_t i = 0; i < grid_dim; i++)
+    {
+        ASSERT_EQ(block_ids[i], i);
     }
 }
