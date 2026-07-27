@@ -314,6 +314,7 @@ struct Modifier {
         CALL_TARGETS,
         EXEC_GROUP,
         PSEUDO_CLUSTER_BARRIER,
+        STICK_CHAIN,
     };
 
     Modifier(Type type) : type(type) {}
@@ -1121,6 +1122,26 @@ struct PseudoClusterBarrierData : public TypedModifier<PseudoClusterBarrierData>
 
     explicit PseudoClusterBarrierData(Kind kind = Kind::SignalWait)
         : TypedModifier<PseudoClusterBarrierData>(), kind(kind) {}
+};
+
+/// Marks an instruction as a member of a scheduling "stick chain": a set of
+/// instructions that must be issued back-to-back (nothing scheduled between
+/// them) WITHOUT being wrapped in an EXEC_GROUP, so each member keeps its own
+/// src/dest tokens, latency and forced-barrier threshold. The CDNA5 scheduler's
+/// StickChain promotion rule (decidePromote) forces members[index+1] the moment
+/// members[index] is picked. Members must form a linear dependency
+/// members[0] -> members[1] -> ... -> members[count-1] so that the next member
+/// becomes DAG-ready the instant the previous one issues (the scheduler adds
+/// these edges from StickChainData when building the region DAG).
+struct StickChainData : public TypedModifier<StickChainData> {
+    static constexpr Modifier::Type Type = Modifier::Type::STICK_CHAIN;
+
+    uint32_t chainId;  ///< shared by all members of one chain
+    uint32_t index;    ///< 0-based position of this member within the chain
+    uint32_t count;    ///< total number of members in the chain
+
+    StickChainData(uint32_t chainId, uint32_t index, uint32_t count)
+        : TypedModifier<StickChainData>(), chainId(chainId), index(index), count(count) {}
 };
 
 }  // namespace stinkytofu

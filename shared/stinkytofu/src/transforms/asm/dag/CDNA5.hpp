@@ -45,6 +45,40 @@
 namespace {
 using namespace stinkytofu;
 
+// Scheduling-only barrier predicate. Identical to the global isBarrier() for real
+// instructions, but ALSO treats an EXEC_MASK_GROUP as a barrier when it wraps a
+// barrier child (e.g. a workgroup `s_barrier_signal/-wait -1` fused with a
+// cluster-barrier placeholder). Without this the group node lands in otherQueue
+// and its barrier latency is never modeled. Kept local to CDNA5 so the global
+// predicate (used by many other passes) is untouched.
+inline bool isBarrierForSchedule(const StinkyInstruction& inst) {
+    if (isBarrier(inst)) return true;
+    if (isExecMaskGroup(inst)) {
+        if (const auto* gd = inst.getModifier<ExecGroupData>()) {
+            for (const StinkyInstruction* child : gd->children)
+                if (child != nullptr && isBarrier(*child)) return true;
+        }
+    }
+    return false;
+}
+
+// True if \p inst is (or is an EXEC_MASK_GROUP wrapping) a PSEUDO_CLUSTER_BARRIER.
+// Such a group's SignalOnly expansion emits a WaveIdx-gated `s_cmp` that clobbers
+// SCC, but the group carries no SCC operand, so the scheduler must not place it
+// inside a live SCC def->use range. The SCC self-contained gate defers it while
+// SCC is live; deferring both the signal and wait group keeps any SCC used
+// between them self-produced-and-consumed.
+inline bool isClusterBarrierGroup(const StinkyInstruction& inst) {
+    if (isPseudoClusterBarrier(inst)) return true;
+    if (isExecMaskGroup(inst)) {
+        if (const auto* gd = inst.getModifier<ExecGroupData>()) {
+            for (const StinkyInstruction* child : gd->children)
+                if (child != nullptr && isPseudoClusterBarrier(*child)) return true;
+        }
+    }
+    return false;
+}
+
 enum NonWmmaKind { kGlobalRead = 0, kLocalRead, kOther, kValu };
 
 // CDNA5 (Gfx1250) scheduling defaults. Used when dagFeatures still hold the
@@ -179,7 +213,7 @@ static std::vector<BarrierTokenEntry> collectBarrierTokens(IRList::iterator regi
     std::vector<BarrierTokenEntry> barriers;
     for (IRList::iterator it = regionStart; it != regionEnd; ++it) {
         StinkyInstruction& inst = getStinkyInst(it);
-        if (!isBarrier(inst) || inst.getDestRegs().empty()) continue;
+        if (!isBarrierForSchedule(inst) || inst.getDestRegs().empty()) continue;
         BarrierTokenEntry entry;
         entry.barrier = &inst;
         entry.it = it;
@@ -203,13 +237,22 @@ struct BarrierTokenGroup {
 
 // Merge consecutive same-token barriers into groups of up to two (a signal/wait pair).
 // Two barriers only pair when they carry identical tokens and are adjacent in the IR.
+// Exception: a pseudo-cluster-barrier group never pairs. Its SignalOnly/WaitOnly halves
+// wrap the workgroup signal/wait, so pairing them would tie both to one threshold and
+// collapse the workgroup signal->wait latency window. Keeping each as a singleton lets
+// them keep independent before/after thresholds and reopens that window. Regular
+// signal/wait pairs (no pseudo-cluster child) are unaffected.
 static std::vector<BarrierTokenGroup> groupBarrierTokens(
     const std::vector<BarrierTokenEntry>& entries) {
     std::vector<BarrierTokenGroup> groups;
     for (const BarrierTokenEntry& be : entries) {
+        const bool entryIsCluster = isClusterBarrierGroup(*be.barrier);
+        const bool lastIsCluster =
+            !groups.empty() && isClusterBarrierGroup(*groups.back().barriers.back());
         const bool canPairWithLast = !groups.empty() && groups.back().tokens == be.tokens &&
                                      groups.back().barriers.size() < 2 &&
-                                     std::next(groups.back().lastIt) == be.it;
+                                     std::next(groups.back().lastIt) == be.it &&
+                                     !entryIsCluster && !lastIsCluster;
         if (canPairWithLast) {
             groups.back().barriers.push_back(be.barrier);
             groups.back().lastIt = be.it;
@@ -245,7 +288,7 @@ class CDNA5ReadyQueue : public ReadyQueue {
     // Which phase, if any, decidePromote() forces this pick (None = normal selection).
     // Values name the gateable phases of pickOne(); isPromote(p) is true when nothing
     // is promoted (every phase runs) or when p is the promoted phase (only it runs).
-    enum class PromotePhase { None, Wmma, NonWmmaFill, ForcedWmma, Barrier };
+    enum class PromotePhase { None, Wmma, NonWmmaFill, ForcedWmma, Barrier, StickChain };
 
     // --- Priority buckets (DAG ids compare smaller = earlier in source) ---
     ReadySetByDAGid wmmaQueue;
@@ -327,6 +370,14 @@ class CDNA5ReadyQueue : public ReadyQueue {
 
     // Per-barrier forced-issue threshold: maps StinkyInstruction* -> N.
     std::unordered_map<StinkyInstruction*, int> barrierWmmaThresholds_;
+    // Pseudo-cluster window: maps a cluster-hosting workgroup SIGNAL barrier -> the number
+    // of WMMAs its stick chain should fire EARLIER than the shared group threshold. This
+    // opens a latency-hiding window between s_barrier_signal -1 and its paired
+    // s_barrier_wait -1 (which keeps the group threshold). Correct pair ordering is
+    // guaranteed independently by the pseudo-placeholder serialization edges, so pulling
+    // the signal earlier cannot reorder consecutive signal/wait pairs. Auto-derived from
+    // the same latencyWmmaBudget the after-threshold formula already computes.
+    std::unordered_map<StinkyInstruction*, int> barrierSignalWindow_;
     // Per-barrier matching ds_load count collected in computeBarrierBeforeThresholds.
     std::unordered_map<StinkyInstruction*, int> barrierDsLoadCounts_;
     struct BarrierBeforeOutput {
@@ -348,6 +399,20 @@ class CDNA5ReadyQueue : public ReadyQueue {
     // and the exact node that phase will issue. Read via isPromote() to gate the phases.
     PromotePhase promotedPhase_ = PromotePhase::None;
     DAGNode* promotedNode_ = nullptr;
+
+    // StickChain state: instructions tagged with StickChainData must issue back-to-back
+    // (see StickChainData). While a chain is mid-flight, activeChainId_ names it and
+    // activeChainNext_ is the index that must be forced next; decidePromote() promotes
+    // that member so nothing else can be scheduled between chain members. kNoChain means
+    // no chain is currently locked.
+    static constexpr uint32_t kNoChain = UINT32_MAX;
+    uint32_t activeChainId_ = kNoChain;
+    uint32_t activeChainNext_ = 0;
+
+    // Per-region stick chains: chainId -> the chain's workgroup-barrier member (the one
+    // carrying the forced-barrier threshold). decidePromote() triggers a chain from its
+    // member 0 when this barrier's threshold is met. Rebuilt each onInitRegion().
+    std::vector<std::pair<uint32_t, StinkyInstruction*>> chains_;
 
     std::map<int, int> crossBBDsResiduals_;
 
@@ -382,6 +447,12 @@ class CDNA5ReadyQueue : public ReadyQueue {
         return promotedPhase_ == PromotePhase::None || promotedPhase_ == phase;
     }
     DAGNode* extractForcedBarrier();
+    // StickChain helpers: find the ready chain member (chainId, index) across all queues,
+    // and remove an arbitrary ready node from whichever bucket holds it (applying that
+    // bucket's normal counter updates), so a promoted chain member can issue regardless
+    // of its instruction type.
+    DAGNode* findReadyChainMember(uint32_t chainId, uint32_t index) const;
+    DAGNode* popAnyQueue(DAGNode* node);
     std::unordered_map<StinkyInstruction*, BarrierAfterOutput> computeBarrierAfterThresholds(
         IRList::iterator regionStart, IRList::iterator regionEnd);
     std::unordered_map<StinkyInstruction*, BarrierBeforeOutput> computeBarrierBeforeThresholds(
@@ -449,7 +520,7 @@ int CDNA5ReadyQueue::computeValuAdvanceCycles(int issueCycles) const {
 // (latencyCycles); VALU/transcendentals use co-issue-aware issue progress; others use issueCycles.
 void CDNA5ReadyQueue::updateWMMAStatus(DAGNode* node) {
     int elapsedCycles = node->inst->issueCycles;
-    if (isBarrier(*node->inst))
+    if (isBarrierForSchedule(*node->inst))
         elapsedCycles = node->inst->latencyCycles;
     else if (isVectorALU(*node->inst) || isTranscendental(*node->inst))
         elapsedCycles = computeValuAdvanceCycles(node->inst->issueCycles);
@@ -583,6 +654,13 @@ DAGNode* CDNA5ReadyQueue::pickFreeBest(const ReadySetByDAGid& queue, int* outWai
     int bestElapse = INT_MIN;
     int bestWait = 0;
     for (DAGNode* n : queue) {  // iterates smallest-id first, so ties keep the oldest id
+        // A pseudo-cluster placeholder is the head of a stick chain (SignalOnly sits
+        // BEFORE its workgroup signal). It must never be picked eagerly here, or it would
+        // float free and drag its workgroup barrier out of forced-barrier threshold order
+        // (breaking signal/wait pairing). It is issued only via the StickChain promotion
+        // (triggered by its workgroup barrier's threshold), or, as a last resort, the
+        // Phase G drain (which scans queue tops directly, not this helper).
+        if (isPseudoClusterBarrier(*n->inst)) continue;
         const int wait = getMaxSrcDataWait(n);
         // Tolerate a src RAW hazard only if its wait fits the WMMA latency shadow
         // and the dest does not clobber a live WMMA src (then the stall is free).
@@ -765,16 +843,86 @@ void CDNA5ReadyQueue::decidePromote() {
     promotedPhase_ = PromotePhase::None;
     promotedNode_ = nullptr;
 
+    // StickChain rule (highest priority): once a chain's head has been picked, its
+    // remaining members must issue immediately and consecutively. Promoting the next
+    // member gates every normal phase off (isPromote() is false for them), so nothing
+    // else can be scheduled between chain members — the "glue" that replaces EXEC_GROUP.
+    // The linear StickChainData dependency edges guarantee the next member is ready the
+    // pick after its predecessor issues.
+    if (activeChainId_ != kNoChain) {
+        if (DAGNode* next = findReadyChainMember(activeChainId_, activeChainNext_)) {
+            promotedPhase_ = PromotePhase::StickChain;
+            promotedNode_ = next;
+            return;
+        }
+        // Next member not ready yet (should not happen given the chain edges); keep the
+        // chain locked and fall through — no other node should be issuable either.
+    }
+
+    // Forced barrier / stick-chain trigger: choose the lowest program-order unit whose
+    // WMMA-issued threshold is met. A plain barrier is promoted directly. A stick chain
+    // (whose pseudo-cluster placeholder must stay glued to its workgroup barrier) is
+    // instead started from member 0, so the whole chain issues back-to-back in the
+    // required order: for a SignalOnly chain [placeholder, s_barrier_signal -1] the
+    // placeholder issues first; for a WaitOnly chain [s_barrier_wait -1, placeholder]
+    // the workgroup wait issues first. Ordering by the head's program id (chains and
+    // plain barriers share the region DAG id space) preserves signal/wait pairing.
+    DAGNode* bestBarrier = nullptr;
+    DAGNode* bestChainHead = nullptr;
+    unsigned bestKey = UINT_MAX;
+
     if (!barrierQueue.empty() && !barrierWmmaThresholds_.empty()) {
         for (DAGNode* node : barrierQueue) {
+            // Chain-member barriers are issued via their chain (below), never directly.
+            if (node->inst->getModifier<StickChainData>()) continue;
+            // SCC self-contained gate (HW-specific, pseudo-cluster only): never
+            // force a pseudo-cluster barrier group while an SCC def->use range is
+            // live, so no live SCC straddles it.
+            if (sccLiveForGate() && isClusterBarrierGroup(*node->inst)) continue;
             auto thIt = barrierWmmaThresholds_.find(node->inst);
             if (thIt != barrierWmmaThresholds_.end() &&
                 wmmaIssuedCountThisRegion_ >= thIt->second) {
-                promotedPhase_ = PromotePhase::Barrier;
-                promotedNode_ = node;
-                return;
+                if (node->id < bestKey) {
+                    bestKey = node->id;
+                    bestBarrier = node;
+                }
+                break;  // barrierQueue is id-ordered; first match is the lowest id
             }
         }
+    }
+
+    for (const auto& [chainId, barrierInst] : chains_) {
+        // Every chain carries a pseudo-cluster placeholder whose expansion clobbers SCC;
+        // keep the whole chain out of a live SCC def->use range (self-contained gate).
+        if (sccLiveForGate()) continue;
+        auto thIt = barrierWmmaThresholds_.find(barrierInst);
+        if (thIt == barrierWmmaThresholds_.end()) continue;
+        // A cluster-hosting SIGNAL chain fires `barrierSignalWindow_` WMMAs earlier than the
+        // shared group threshold, opening the latency window before the paired wait. WAIT
+        // chains (and any barrier without a window entry) fire exactly at their threshold.
+        int effectiveThreshold = thIt->second;
+        auto wIt = barrierSignalWindow_.find(barrierInst);
+        if (wIt != barrierSignalWindow_.end())
+            effectiveThreshold = std::max(0, effectiveThreshold - wIt->second);
+        if (wmmaIssuedCountThisRegion_ < effectiveThreshold) continue;
+        DAGNode* head = findReadyChainMember(chainId, 0);
+        if (head == nullptr) continue;  // member 0 not ready yet (e.g. gated by a prior pair)
+        if (head->id < bestKey) {
+            bestKey = head->id;
+            bestChainHead = head;
+            bestBarrier = nullptr;
+        }
+    }
+
+    if (bestChainHead != nullptr) {
+        promotedPhase_ = PromotePhase::StickChain;
+        promotedNode_ = bestChainHead;
+        return;
+    }
+    if (bestBarrier != nullptr) {
+        promotedPhase_ = PromotePhase::Barrier;
+        promotedNode_ = bestBarrier;
+        return;
     }
 }
 
@@ -785,6 +933,12 @@ DAGNode* CDNA5ReadyQueue::extractForcedBarrier() {
 
     DAGNode* forced = nullptr;
     for (DAGNode* node : barrierQueue) {
+        // Chain-member barriers are issued via their stick chain, not the forced-barrier
+        // path; skip them so this extracts exactly the plain barrier decidePromote() chose.
+        if (node->inst->getModifier<StickChainData>()) continue;
+        // Match decidePromote()'s SCC self-contained gate so the forced node is
+        // exactly the one decidePromote() chose (never a gated pseudo-cluster group).
+        if (sccLiveForGate() && isClusterBarrierGroup(*node->inst)) continue;
         auto thIt = barrierWmmaThresholds_.find(node->inst);
         if (thIt != barrierWmmaThresholds_.end() && wmmaIssuedCountThisRegion_ >= thIt->second) {
             forced = node;
@@ -793,6 +947,40 @@ DAGNode* CDNA5ReadyQueue::extractForcedBarrier() {
     }
     if (forced) barrierQueue.erase(forced);
     return forced;
+}
+
+// Find the ready DAGNode that is member `index` of stick chain `chainId`, scanning every
+// bucket (a chain member can be any instruction type). Returns nullptr if not ready yet.
+DAGNode* CDNA5ReadyQueue::findReadyChainMember(uint32_t chainId, uint32_t index) const {
+    auto matches = [&](DAGNode* n) {
+        const auto* d = n->inst->getModifier<StickChainData>();
+        return d != nullptr && d->chainId == chainId && d->index == index;
+    };
+    const ReadySetByDAGid* queues[] = {&wmmaQueue,  &globalReadQueue, &localReadQueue,
+                                       &valuQueue,  &barrierQueue,    &otherQueue};
+    for (const ReadySetByDAGid* q : queues)
+        for (DAGNode* n : *q)
+            if (matches(n)) return n;
+    return nullptr;
+}
+
+// Remove `node` from whichever ready bucket holds it and apply that bucket's normal
+// counter updates, mirroring push()'s bucket assignment. Used to issue a promoted
+// stick-chain member regardless of its instruction type.
+DAGNode* CDNA5ReadyQueue::popAnyQueue(DAGNode* node) {
+    const StinkyInstruction& inst = *node->inst;
+    if (isMatrixInstruction(inst)) return pickOneFromWMMA(node);
+    if (getPassContext().getPassFeatureConfig().dagFeatures.distributeGlobalRead &&
+        isTensorLoad(inst))
+        return popNonWmma(node, kGlobalRead);
+    if (isDSRead(inst)) return popNonWmma(node, kLocalRead);
+    if (isVectorALU(inst) || isTranscendental(inst)) return popNonWmma(node, kValu);
+    if (isBarrierForSchedule(inst)) {
+        barrierQueue.erase(node);
+        updateWMMAStatus(node);
+        return node;
+    }
+    return popNonWmma(node, kOther);
 }
 
 // WMMA windows needed to issue dsLoadCount ds_reads given the per-window DS cap. When the
@@ -824,6 +1012,7 @@ std::unordered_map<StinkyInstruction*, CDNA5ReadyQueue::BarrierAfterOutput>
 CDNA5ReadyQueue::computeBarrierAfterThresholds(IRList::iterator regionStart,
                                                IRList::iterator regionEnd) {
     std::unordered_map<StinkyInstruction*, BarrierAfterOutput> result;
+    barrierSignalWindow_.clear();
     struct BarrierAfterSummary {
         StinkyInstruction* barrierKey;
         std::vector<StinkyInstruction*> barriers;
@@ -888,9 +1077,18 @@ CDNA5ReadyQueue::computeBarrierAfterThresholds(IRList::iterator regionStart,
         const int wmmaWindowsNeeded = computeWmmaWindowsNeeded(matchingDsLoadCount);
         const int overlapOrWindowBase = std::max(lastOverlap, wmmaWindowsNeeded);
         int afterThreshold = overlapOrWindowBase + latencyWmmaBudget;
+        // Pseudo-cluster window: if this signal/wait pair hosts stick-chain (pseudo-cluster)
+        // placeholders, record how many WMMAs earlier the SIGNAL half should fire than the
+        // shared group threshold, so a latency window opens before the WAIT. Auto window =
+        // latencyWmmaBudget. The WAIT keeps the group threshold.
+        bool clusterHosting = false;
+        for (StinkyInstruction* barrier : group.barriers)
+            if (barrier->getModifier<StickChainData>() != nullptr) { clusterHosting = true; break; }
         for (StinkyInstruction* barrier : group.barriers) {
             barrierWmmaThresholds_[barrier] = afterThreshold;
             result[barrier] = {afterThreshold, wmmaWindowsNeeded};
+            if (clusterHosting && isBarrierSignal(*barrier) && latencyWmmaBudget > 0)
+                barrierSignalWindow_[barrier] = latencyWmmaBudget;
         }
         overlapChecks.push_back(
             {groupBarrier, group.barriers, afterThreshold, lastOverlap, wmmaWindowsNeeded});
@@ -1179,6 +1377,12 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
                   << "\n");
     auto rememberPick = [this](DAGNode* node) {
         lastPickedNode_ = node;
+        // Track stick-chain progress: picking a member locks the chain until its last
+        // member is issued, so decidePromote() forces the remaining members next.
+        if (const auto* d = node->inst->getModifier<StickChainData>()) {
+            activeChainId_ = (d->index + 1 < d->count) ? d->chainId : kNoChain;
+            activeChainNext_ = d->index + 1;
+        }
         return node;
     };
 
@@ -1187,6 +1391,13 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
     // the promoted node issues through its own phase — one entry point, no side effects
     // here.
     decidePromote();
+
+    // StickChain issue point: when a chain member is promoted, every normal phase is
+    // gated off, so issue exactly that node here — nothing gets scheduled between chain
+    // members (the EXEC_GROUP-free "glue").
+    if (promotedPhase_ == PromotePhase::StickChain && promotedNode_ != nullptr) {
+        return rememberPick(popAnyQueue(promotedNode_));
+    }
 
     // Pre-compute the best DS read by dsReadPriority once for all phases.
     DAGNode* pickedDS = nullptr;
@@ -1281,18 +1492,30 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
     // that exact node (formerly the forced-barrier phase ahead of WMMA). Otherwise this
     // is the drain case: issue the lowest-id barrier once all compute has been picked.
     if (isPromote(PromotePhase::Barrier) && !barrierQueue.empty()) {
-        DAGNode* barrier;
+        DAGNode* barrier = nullptr;
         if (promotedPhase_ == PromotePhase::Barrier) {
-            barrier = extractForcedBarrier();  // removes the promoted (threshold-met) node
+            barrier = extractForcedBarrier();  // gate-aware; removes the promoted node
         } else {
-            barrier = barrierQueue.top();
-            barrierQueue.pop();
+            // Drain: lowest-id barrier, but skip a pseudo-cluster group while an SCC
+            // def->use range is live (SCC self-contained gate). barrierQueue iterates
+            // in id order.
+            for (DAGNode* node : barrierQueue) {
+                if (sccLiveForGate() && isClusterBarrierGroup(*node->inst)) continue;
+                barrier = node;
+                break;
+            }
+            if (barrier != nullptr) barrierQueue.erase(barrier);
         }
-        updateWMMAStatus(barrier);
-        PASS_DEBUG(std::cerr << "[DAG CDNA5 pickOne] barrier dagId=" << barrier->id
-                             << " promoted=" << (promotedPhase_ == PromotePhase::Barrier) << "\n";
-                   barrier->inst->dump(std::cerr); std::cerr << "\n");
-        return rememberPick(barrier);
+        if (barrier != nullptr) {
+            updateWMMAStatus(barrier);
+            PASS_DEBUG(std::cerr << "[DAG CDNA5 pickOne] barrier dagId=" << barrier->id
+                                 << " promoted=" << (promotedPhase_ == PromotePhase::Barrier)
+                                 << "\n";
+                       barrier->inst->dump(std::cerr); std::cerr << "\n");
+            return rememberPick(barrier);
+        }
+        // All ready barriers are gated by the SCC self-contained rule; fall through
+        // to Phase G so the SCC reader that closes the live range can be issued.
     }
 
     // Phase G — final safety net: force-pick the oldest DAG node to guarantee progress.
@@ -1339,7 +1562,7 @@ void CDNA5ReadyQueue::push(DAGNode* node) {
         return;
     }
 
-    if (isBarrier(*node->inst)) {
+    if (isBarrierForSchedule(*node->inst)) {
         barrierQueue.push(node);
         return;
     }
@@ -1442,6 +1665,21 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
     wmmaIssuedCountThisRegion_ = 0;
     dsInsertedSinceLastWmma_ = 0;
     lastPickedNode_ = nullptr;
+    activeChainId_ = kNoChain;
+    activeChainNext_ = 0;
+    chains_.clear();
+    {
+        // Record each stick chain's workgroup-barrier member (isBarrier). Its threshold is
+        // the chain's trigger; the pseudo-cluster placeholder member is dragged along.
+        std::unordered_map<uint32_t, StinkyInstruction*> chainBarrier;
+        for (IRList::iterator it = regionStart; it != regionEnd; ++it) {
+            auto* instPtr = dyn_cast<StinkyInstruction>(it.getNodePtr());
+            if (instPtr == nullptr) continue;
+            const auto* d = instPtr->getModifier<StickChainData>();
+            if (d != nullptr && isBarrier(*instPtr)) chainBarrier[d->chainId] = instPtr;
+        }
+        chains_.assign(chainBarrier.begin(), chainBarrier.end());
+    }
     // (B) elapse ordering state is per-region: reset the touch map and clock so a new
     // region starts with all regs "very old" (no spurious deferrals from a prior region).
     regLastTouch_.clear();
@@ -1490,12 +1728,16 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
         // Compare ranges and report overlap.
         for (const auto& [afterBarrier, afterOutput] : afterThresholds) {
             if (beforeThresholds.find(afterBarrier) != beforeThresholds.end()) continue;
+            // Same exception as groupBarrierTokens: never couple a pseudo-cluster group's
+            // threshold to its counterpart, so the workgroup signal->wait window stays open.
+            if (isClusterBarrierGroup(*afterBarrier)) continue;
             const int afterWindow = std::max(0, afterOutput.overlapWmmaWindow);
             const int afterEnd = afterOutput.afterThreshold;
             const int afterBegin = std::max(0, afterEnd - afterWindow);
             for (const auto& [beforeBarrier, beforeOutput] : beforeThresholds) {
                 if (afterBarrier == beforeBarrier) continue;
                 if (afterThresholds.find(beforeBarrier) != afterThresholds.end()) continue;
+                if (isClusterBarrierGroup(*beforeBarrier)) continue;
                 const int beforeBegin = beforeOutput.beforeThreshold;
                 const int beforeWindow = std::max(0, beforeOutput.wmmaWindowsNeeded);
                 const int beforeEnd = beforeBegin + beforeWindow;

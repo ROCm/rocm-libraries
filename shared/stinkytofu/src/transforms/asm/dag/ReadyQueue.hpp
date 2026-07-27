@@ -155,10 +155,25 @@ class ReadyQueue {
         return loop_;
     }
 
+    // SCC self-contained gate. The scheduling loop sets this before each pickOne()
+    // to report whether an SCC def->use range is currently live (a scheduled SCC
+    // writer still has unscheduled readers). A derived queue that may reorder
+    // barriers uses it to avoid issuing a pseudo-cluster barrier group — whose
+    // SignalOnly expansion clobbers SCC but carries no SCC operand — inside that
+    // live range.
+    void setSccLiveForGate(bool live) {
+        sccLiveForGate_ = live;
+    }
+
+    bool sccLiveForGate() const {
+        return sccLiveForGate_;
+    }
+
    private:
     const PassContext& passCtx_;
     const Loop* loop_ = nullptr;
     ScheduleAnalysisCache* analysisCache_ = nullptr;
+    bool sccLiveForGate_ = false;
 };
 
 using DAGidPriorityQueue = std::priority_queue<DAGNode*, std::vector<DAGNode*>, CompareByDAGid>;

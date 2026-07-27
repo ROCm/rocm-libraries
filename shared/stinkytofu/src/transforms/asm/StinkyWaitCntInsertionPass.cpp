@@ -127,7 +127,14 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
                 if (inst == nullptr) continue;
                 auto it = plan.anchorWaits.find(inst);
                 if (it == plan.anchorWaits.end()) continue;
-                emitOneSpec(builder, arch, inst, it->second);
+                // Pseudo-cluster: if this workgroup signal is immediately preceded by its
+                // SignalOnly placeholder (kept adjacent by the scheduling stick chain),
+                // emit the wait AHEAD of the placeholder so the lowered cluster signal (-3)
+                // and the workgroup signal (-1) stay adjacent, with the DS drain moved
+                // before both. Waiting earlier is conservative-safe for the original anchor.
+                StinkyInstruction* anchor = inst;
+                if (StinkyInstruction* p = clusterSignalPlaceholderBefore(inst)) anchor = p;
+                emitOneSpec(builder, arch, anchor, it->second);
             }
         }
 
@@ -143,6 +150,21 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
                 (termInst != nullptr && isBranch(*termInst)) ? termInst : nullptr;
             emitOneSpec(builder, arch, anchor, drain.spec);
         }
+    }
+
+    // If `signal` is a workgroup signal immediately preceded by a SignalOnly pseudo-cluster
+    // placeholder (adjacent via the scheduling stick chain), return that placeholder so a
+    // wait can be emitted ahead of it; otherwise nullptr.
+    static StinkyInstruction* clusterSignalPlaceholderBefore(StinkyInstruction* signal) {
+        if (signal == nullptr || !isBarrierSignal(*signal)) return nullptr;
+        BasicBlock* bb = signal->getParent();
+        if (bb == nullptr) return nullptr;
+        auto it = BasicBlock::iterator(signal);
+        if (it == bb->begin()) return nullptr;
+        --it;
+        auto* prev = dyn_cast<StinkyInstruction>(it.getNodePtr());
+        if (prev != nullptr && isPseudoClusterBarrier(*prev)) return prev;
+        return nullptr;
     }
 
     void emitOneSpec(AsmIRBuilder& builder, GfxArchID arch, StinkyInstruction* anchor,

@@ -23,6 +23,9 @@
 #include "stinkytofu/transforms/asm/StinkyDAGSchedulerPass.hpp"
 
 #include <climits>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
 
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/analysis/BBIndexAnalysis.hpp"
@@ -33,6 +36,7 @@
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/support/CFGTraversal.hpp"
 #include "stinkytofu/support/LoopDetection.hpp"
+#include "stinkytofu/ir/asm/StinkyModifiers.hpp"
 #include "stinkytofu/transforms/asm/BuildDefUseChain.hpp"
 #include "stinkytofu/transforms/asm/ExecMaskGrouping.hpp"
 
@@ -165,6 +169,44 @@ static void scheduleRegionWithMovableSideEffects(
         }
     }
 
+    // Stick-chain edges: for each StickChainData chain, add member[k] -> member[k+1] so a
+    // member becomes DAG-ready only after its predecessor issues. Combined with the CDNA5
+    // scheduler's StickChain promotion rule, this keeps chain members back-to-back without
+    // wrapping them in an EXEC_GROUP (each keeps its own tokens/latency/threshold).
+    {
+        std::unordered_map<uint32_t, std::vector<DAGNode*>> chains;
+        for (unsigned i = 0; i < regionSize; ++i)
+            if (const auto* d = dagNodes[i].inst->getModifier<StickChainData>())
+                chains[d->chainId].push_back(&dagNodes[i]);
+        for (auto& [chainId, members] : chains) {
+            std::sort(members.begin(), members.end(), [](DAGNode* a, DAGNode* b) {
+                return a->inst->getModifier<StickChainData>()->index <
+                       b->inst->getModifier<StickChainData>()->index;
+            });
+            for (size_t k = 0; k + 1 < members.size(); ++k)
+                addEdgeById(members[k], members[k + 1], dagGraph);
+        }
+    }
+
+    // Cross-pair serialization for pseudo-cluster placeholders only. Once the workgroup
+    // signal/wait thresholds are decoupled to open a latency window (SignalOnly chains fire
+    // earlier than their paired wait), consecutive signal/wait pairs could otherwise
+    // interleave (signalB slipping before waitA) and desynchronize the cluster barrier
+    // count. Chaining the placeholders in program order (pseudo[i] -> pseudo[i+1]) keeps
+    // each pair after the previous one: every SignalOnly placeholder becomes DAG-ready only
+    // after the preceding WaitOnly placeholder issues, and via each placeholder's own stick
+    // chain this transitively orders the workgroup barriers too. All edges point forward in
+    // program order, so no cycle is introduced, and only pseudo-cluster nodes are touched —
+    // plain barriers keep their normal (merged-threshold) scheduling.
+    {
+        DAGNode* prevPseudo = nullptr;
+        for (unsigned i = 0; i < regionSize; ++i) {
+            if (!isPseudoClusterBarrier(*dagNodes[i].inst)) continue;
+            if (prevPseudo != nullptr) addEdgeById(prevPseudo, &dagNodes[i], dagGraph);
+            prevPseudo = &dagNodes[i];
+        }
+    }
+
     // Pre-scan: assign dsReadPriority to each ds_read based on WMMA affinity
     // and DsReadOrder config. Lower priority = pick first.
     {
@@ -287,6 +329,41 @@ static void scheduleRegionWithMovableSideEffects(
 
     readyQueue.onInitRegion(regionStart, regionEnd, blockBegin);
 
+    // --- SCC self-contained gate for pseudo-cluster barrier groups ------------
+    // A cluster-barrier group's SignalOnly expansion clobbers SCC, but the group
+    // carries no SCC operand, so the DAG has no edge keeping it out of a live SCC
+    // def->use range. Track SCC liveness during scheduling and hand it to the ready
+    // queue before each pick so CDNA5 can defer the pseudo-cluster group while SCC
+    // is live. Deferring both the signal and the wait group keeps any SCC used
+    // between them self-produced-and-consumed (no live SCC straddles either group).
+    auto readsScc = [](const StinkyInstruction& i) {
+        for (const StinkyRegister& r : i.getSrcRegs())
+            if (r.isRegister() && r.reg.type == RegType::SCC) return true;
+        return false;
+    };
+    auto writesScc = [](const StinkyInstruction& i) {
+        for (const StinkyRegister& r : i.getDestRegs())
+            if (r.isRegister() && r.reg.type == RegType::SCC) return true;
+        return false;
+    };
+    // Program-order pass: map each in-region SCC def to the readers it feeds.
+    // Readers before any in-region def read an SCC value live into the region.
+    std::unordered_map<unsigned, std::vector<unsigned>> sccReadersOfDef;
+    std::unordered_set<unsigned> sccLiveReaders;
+    {
+        int lastWriter = -1;
+        for (unsigned i = 0; i < regionSize; ++i) {
+            const StinkyInstruction& inst = *dagNodes[i].inst;
+            if (readsScc(inst)) {
+                if (lastWriter < 0)
+                    sccLiveReaders.insert(i);  // live-in reader
+                else
+                    sccReadersOfDef[(unsigned)lastWriter].push_back(i);
+            }
+            if (writesScc(inst)) lastWriter = (int)i;
+        }
+    }
+
     // Kahn's algorithm with stable pick (by original order)
 
     assert(readyQueue.empty() && "Ready queue must be empty before scheduling a region");
@@ -301,9 +378,28 @@ static void scheduleRegionWithMovableSideEffects(
     // Process the ready queue until it's empty.
     unsigned orderInRegion = 0;
     while (!readyQueue.empty()) {
+        // Tell the queue whether an SCC def->use range is live so it can defer a
+        // pseudo-cluster barrier group (SCC self-contained gate).
+        readyQueue.setSccLiveForGate(!sccLiveReaders.empty());
+
         // Pop the last instruction from the ready queue.
         DAGNode* currentNode = readyQueue.pickOne();
         ++orderInRegion;
+
+        // Update SCC liveness with the node just scheduled. Process the read first
+        // (consumes the currently-open def) then the write (opens a new def whose
+        // readers become the live set). A node that neither reads nor writes SCC —
+        // including the gated group itself — leaves the live set untouched.
+        {
+            const StinkyInstruction& ni = *currentNode->inst;
+            if (readsScc(ni)) sccLiveReaders.erase(currentNode->id);
+            if (writesScc(ni)) {
+                sccLiveReaders.clear();
+                auto rit = sccReadersOfDef.find(currentNode->id);
+                if (rit != sccReadersOfDef.end())
+                    sccLiveReaders.insert(rit->second.begin(), rit->second.end());
+            }
+        }
 
         if (isBarrier(*currentNode->inst)) {
             PASS_DEBUG(std::cerr << "[DAG schedule] bb=\"" << regionBbLabel << "\" orderInRegion="
@@ -475,7 +571,11 @@ class StinkyDAGSchedulerPass : public StinkyInstPass {
         auto scheduleBlock = [&](BasicBlock* bb, ReadyQueue& rq) {
             AsmIRBuilder builder(*bb, archId);
             collapseExecMaskedRegions(*bb, builder, wavefrontSize);
-            collapseClusterBarrierPairs(*bb, builder);
+            // Cluster-barrier placeholders are kept adjacent to their workgroup barrier via
+            // a scheduling-time stick chain (StickChainData), not an EXEC_GROUP, so the
+            // workgroup signal/wait keep their own thresholds and can float. Tag them here;
+            // the CDNA5 StickChain promotion rule enforces adjacency during scheduleInDAG.
+            tagClusterBarrierChains(*bb);
             scheduleInDAG(*bb, rq, wmmaIndex);
             expandExecMaskedGroups(*bb);
         };

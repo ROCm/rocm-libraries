@@ -37,10 +37,12 @@ namespace {
 
 /// Cluster-scope split-barrier literal id (`s_barrier_signal/wait -3`).
 constexpr int kClusterBarrierId = -3;
-/// Symbolic SGPR holding the wave index; only wave 0 issues the cluster signal.
+/// Symbolic SGPR holding the wave index; only wave 0 issues the cluster handshake.
 constexpr const char* kWaveIdxSymbol = "sgprWaveIdx";
-/// Prefix for the WaveIdx-gated skip label (mirrors the legacy pass).
-constexpr const char* kSkipLabelPrefix = "label_skipCBPreSignal_";
+/// Prefixes for the WaveIdx-gated skip labels. Signal and wait use distinct prefixes so a
+/// SignalWait placeholder can emit two independently-guarded blocks with unique labels.
+constexpr const char* kSkipSignalLabelPrefix = "label_skipCBPreSignal_";
+constexpr const char* kSkipWaitLabelPrefix = "label_skipCBPreWait_";
 
 /// Single-dword symbolic SGPR reference, emitted as `s[<name>]`.
 StinkyRegister makeSymbolicSgpr(const std::string& name) {
@@ -57,8 +59,6 @@ void expandPseudoClusterBarrier(StinkyInstruction* pseudo, AsmIRBuilder& irBuild
     const PseudoClusterBarrierData::Kind kind =
         data ? data->kind : PseudoClusterBarrierData::Kind::SignalWait;
 
-    const std::string labelName = std::string(kSkipLabelPrefix) + std::to_string(gen);
-
     const HwInstDesc* cmpDesc = getMCIDByUOp(GFX::s_cmp_eq_u32, archId);
     const HwInstDesc* brDesc = getMCIDByUOp(GFX::s_cbranch_scc0, archId);
     const HwInstDesc* signalDesc = getMCIDByUOp(GFX::s_barrier_signal, archId);
@@ -66,40 +66,49 @@ void expandPseudoClusterBarrier(StinkyInstruction* pseudo, AsmIRBuilder& irBuild
     assert(cmpDesc && brDesc && signalDesc && waitDesc &&
            "Cluster-barrier opcodes are not supported on this architecture");
 
-    const bool emitSignal = kind != PseudoClusterBarrierData::Kind::WaitOnly;
-    const bool emitWait = kind != PseudoClusterBarrierData::Kind::SignalOnly;
+    static const HwInstDesc labelMCID{
+        GFX::LABEL, GFX::LABEL, 0, 0, 0, "LABEL", makeFlagSet({InstFlag::IF_HasSideEffect})};
 
-    if (emitSignal) {
-        // s_cmp_eq_u32 s[sgprWaveIdx], 0   -- SCC = (WaveIdx == 0)
+    // Emit one WaveIdx-gated cluster handshake block (signal or wait). Only wave 0 issues
+    // the cluster-scope barrier, so both halves carry the same guard:
+    //   s_cmp_eq_u32 s[sgprWaveIdx], 0   -- SCC = (WaveIdx == 0), clobbers SCC
+    //   s_cbranch_scc0 <label>           -- non-zero waves skip, reads SCC
+    //   s_barrier_signal/wait -3
+    //   <label>:
+    // The cmp/cbranch make the block a self-contained SCC def->use; the scheduler's SCC
+    // self-contained gate keeps any other live SCC range from straddling either block.
+    auto emitGuardedBarrier = [&](const HwInstDesc* barrierDesc, const std::string& labelName,
+                                  const char* barrierComment, const char* branchComment) {
         StinkyInstruction* cmpInst = irBuilder.create(cmpDesc, pseudo);
         cmpInst->addSrcReg(makeSymbolicSgpr(kWaveIdxSymbol));
         cmpInst->addSrcReg(StinkyRegister(0));
         cmpInst->addModifier<CommentData>(CommentData{"Check for waveID 0"});
 
-        // s_cbranch_scc0 label_skipCBPreSignal_<gen>  -- non-zero waves skip signal
         StinkyInstruction* brInst = irBuilder.create(brDesc, pseudo);
         brInst->addSrcReg(StinkyRegister(labelName));
         brInst->addModifier<LabelData>(LabelData{labelName});
-        brInst->addModifier<CommentData>(
-            CommentData{"Execute cluster barrier signal for waveID 0"});
+        brInst->addModifier<CommentData>(CommentData{branchComment});
 
-        // s_barrier_signal -3
-        StinkyInstruction* signalInst = irBuilder.create(signalDesc, pseudo);
-        signalInst->addSrcReg(StinkyRegister(kClusterBarrierId));
-        signalInst->addModifier<CommentData>(CommentData{"cluster_barrier signal"});
+        StinkyInstruction* barInst = irBuilder.create(barrierDesc, pseudo);
+        barInst->addSrcReg(StinkyRegister(kClusterBarrierId));
+        barInst->addModifier<CommentData>(CommentData{barrierComment});
 
-        // label_skipCBPreSignal_<gen>:
-        static const HwInstDesc labelMCID{
-            GFX::LABEL, GFX::LABEL, 0, 0, 0, "LABEL", makeFlagSet({InstFlag::IF_HasSideEffect})};
         StinkyInstruction* lblInst = irBuilder.create(&labelMCID, pseudo);
         lblInst->addModifier<LabelData>(LabelData{labelName, /*alignment=*/1});
+    };
+
+    const bool emitSignal = kind != PseudoClusterBarrierData::Kind::WaitOnly;
+    const bool emitWait = kind != PseudoClusterBarrierData::Kind::SignalOnly;
+
+    if (emitSignal) {
+        emitGuardedBarrier(signalDesc, std::string(kSkipSignalLabelPrefix) + std::to_string(gen),
+                           "cluster_barrier signal",
+                           "Execute cluster barrier signal for waveID 0");
     }
 
     if (emitWait) {
-        // s_barrier_wait -3
-        StinkyInstruction* waitInst = irBuilder.create(waitDesc, pseudo);
-        waitInst->addSrcReg(StinkyRegister(kClusterBarrierId));
-        waitInst->addModifier<CommentData>(CommentData{"cluster barrier wait"});
+        emitGuardedBarrier(waitDesc, std::string(kSkipWaitLabelPrefix) + std::to_string(gen),
+                           "cluster barrier wait", "Execute cluster barrier wait for waveID 0");
     }
 }
 

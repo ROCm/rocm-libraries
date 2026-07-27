@@ -41,6 +41,11 @@ bool isWorkgroupBarrierWait(const StinkyInstruction& inst) {
     return isBarrierWait(inst) && isSplitBarrierAllWave(inst);
 }
 
+/// True if `inst` is a workgroup-scope barrier arrival: `s_barrier_signal -1`.
+bool isWorkgroupBarrierSignal(const StinkyInstruction& inst) {
+    return isBarrierSignal(inst) && isSplitBarrierAllWave(inst);
+}
+
 /// A segment boundary is either a label (control-flow entry point) or a branch
 /// (control-flow exit point). This pass runs at kernel scope, where Tensile has
 /// lowered the whole kernel into a single flat entry basic block with inline
@@ -69,9 +74,63 @@ StinkyInstruction* findPrecedingWorkgroupBarrierWaitInSegment(BasicBlock::iterat
     return nullptr;
 }
 
-/// True if the instruction immediately following \p wait is already a
-/// PSEUDO_CLUSTER_BARRIER (idempotency guard for pipeline re-runs).
-bool isAlreadyGated(StinkyInstruction* wait, BasicBlock& bb) {
+/// Walk backward from \p wait (exclusive) to find the nearest preceding
+/// workgroup `s_barrier_signal -1` that pairs with it. Stops at a segment
+/// boundary so the signal always lives in the same CFG segment as its wait.
+StinkyInstruction* findMatchingWorkgroupBarrierSignal(StinkyInstruction* wait) {
+    BasicBlock* parent = wait->getParent();
+    if (parent == nullptr) return nullptr;
+    auto it = BasicBlock::iterator(wait);
+    while (it != parent->begin()) {
+        --it;
+        auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+        if (inst == nullptr) continue;
+        if (isSegmentBoundary(*inst)) return nullptr;
+        if (isWorkgroupBarrierSignal(*inst)) return inst;
+    }
+    return nullptr;
+}
+
+/// True if a PSEUDO_CLUSTER_BARRIER already sits immediately before \p signal
+/// (idempotency guard for pipeline re-runs).
+bool signalAlreadyGated(StinkyInstruction* signal) {
+    BasicBlock* parent = signal->getParent();
+    if (parent == nullptr) return false;
+    auto it = BasicBlock::iterator(signal);
+    if (it == parent->begin()) return false;
+    --it;
+    auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+    return inst != nullptr && isPseudoClusterBarrier(*inst);
+}
+
+/// Find the loop-counter SGPR actually used in \p bb and return it as a bare
+/// single-dword register (real physical idx). The pseudo-cluster handshake reads the
+/// loop counter, but the placeholder carries no operands, so nothing in the DAG keeps it
+/// ordered against the loop-tail `dec counterL`. Attaching this register as a placeholder
+/// src lets the reg-dependency builder add the RAW edge (read the right definition) and
+/// the WAR edge (the decrement must stay after the pseudo). The DAG keys registers by
+/// (type, idx) — not by symbolic name — so we must reuse the loop body's real register,
+/// not a fresh idx-0 symbolic one. Returns false when no loop counter is present.
+bool findLoopCounterReg(BasicBlock& bb, StinkyRegister& out) {
+    auto match = [&](const StinkyRegister& r) -> bool {
+        if (!r.isRegister() || r.reg.type != RegType::S) return false;
+        if (r.getSymbolicName().find("LoopCounterL") == std::string::npos) return false;
+        out = StinkyRegister(RegType::S, r.reg.idx, /*regNum=*/1u);
+        out.setSymbolicName(r.getSymbolicName());
+        return true;
+    };
+    for (IRBase& ir : bb) {
+        auto* inst = dyn_cast<StinkyInstruction>(&ir);
+        if (inst == nullptr) continue;
+        for (const StinkyRegister& r : inst->getDestRegs()) if (match(r)) return true;
+        for (const StinkyRegister& r : inst->getSrcRegs()) if (match(r)) return true;
+    }
+    return false;
+}
+
+/// True if a PSEUDO_CLUSTER_BARRIER already sits immediately after \p wait
+/// (idempotency guard for pipeline re-runs).
+bool waitAlreadyGated(StinkyInstruction* wait, BasicBlock& bb) {
     auto next = BasicBlock::iterator(wait);
     ++next;
     if (next == bb.end()) return false;
@@ -120,25 +179,53 @@ class InsertPseudoClusterBarrierPassImpl : public Pass {
             }
 
             AsmIRBuilder irBuilder(bb, archId);
+            StinkyRegister loopCounterReg;
+            const bool hasLoopCounter = findLoopCounterReg(bb, loopCounterReg);
             for (StinkyInstruction* wait : anchors) {
-                if (isAlreadyGated(wait, bb)) continue;
+                // Plant two placeholders sandwiching the workgroup barrier pair, in the
+                // required program order:
+                //
+                //   pseudo(SignalOnly)     <- cluster signal, BEFORE the workgroup signal
+                //   s_barrier_signal -1
+                //   ...                       (latency-hiding window)
+                //   s_barrier_wait -1
+                //   pseudo(WaitOnly)       <- cluster wait, AFTER the workgroup wait
+                //
+                // A scheduling stick chain (StickChainData) keeps each placeholder glued
+                // to its workgroup barrier without an EXEC_GROUP, so the barrier keeps its
+                // own forced-barrier threshold. The chain is triggered by the workgroup
+                // barrier's threshold and issues from member 0, so the SignalOnly chain
+                // [placeholder, signal] emits the placeholder just before the signal, and
+                // the WaitOnly chain [wait, placeholder] emits the placeholder just after
+                // the wait. Each placeholder copies its barrier's MemTokenData to stay
+                // ordered next to it.
 
-                // Insert immediately after the workgroup wait: the placeholder
-                // goes before whatever currently follows the wait.
-                auto after = BasicBlock::iterator(wait);
-                ++after;
-                IRBase* insertBefore = (after != bb.end()) ? after.getNodePtr() : nullptr;
+                // WaitOnly right after the anchor wait.
+                if (!waitAlreadyGated(wait, bb)) {
+                    auto after = BasicBlock::iterator(wait);
+                    ++after;
+                    IRBase* insertBefore = (after != bb.end()) ? after.getNodePtr() : nullptr;
+                    StinkyInstruction* waitPseudo = irBuilder.createPseudoClusterBarrier(
+                        PseudoClusterBarrierData::Kind::WaitOnly, insertBefore);
+                    if (const auto* mt = wait->getModifier<MemTokenData>()) {
+                        waitPseudo->addModifier<MemTokenData>(MemTokenData{mt->tokens});
+                    }
+                    // Model the loop-counter read so the DAG keeps the placeholder ordered
+                    // against the loop-tail decrement (WAR).
+                    if (hasLoopCounter) waitPseudo->addSrcReg(loopCounterReg);
+                }
 
-                // Insert the movable placeholder right after the anchor wait.
-                // It models the future SCC clobber (IF_ImplicitWriteSCC) so the
-                // scheduler never splits an SCC def->use pair across it, and we
-                // copy the anchor wait's MemTokenData onto it so the DAG orders it
-                // immediately after that wait (adjacency) via matching LDS
-                // pseudo-regs materialized by BuildImplicitDependency.
-                StinkyInstruction* pseudo = irBuilder.createPseudoClusterBarrier(
-                    PseudoClusterBarrierData::Kind::SignalWait, insertBefore);
-                if (const auto* mt = wait->getModifier<MemTokenData>()) {
-                    pseudo->addModifier<MemTokenData>(MemTokenData{mt->tokens});
+                // SignalOnly right before the matching workgroup signal.
+                StinkyInstruction* signal = findMatchingWorkgroupBarrierSignal(wait);
+                if (signal != nullptr && !signalAlreadyGated(signal)) {
+                    StinkyInstruction* signalPseudo = irBuilder.createPseudoClusterBarrier(
+                        PseudoClusterBarrierData::Kind::SignalOnly, /*insertBefore=*/signal);
+                    if (const auto* mt = signal->getModifier<MemTokenData>()) {
+                        signalPseudo->addModifier<MemTokenData>(MemTokenData{mt->tokens});
+                    }
+                    // Model the loop-counter read so the DAG keeps the placeholder ordered
+                    // against the loop-tail decrement (WAR).
+                    if (hasLoopCounter) signalPseudo->addSrcReg(loopCounterReg);
                 }
             }
         }

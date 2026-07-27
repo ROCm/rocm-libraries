@@ -36,14 +36,19 @@ class AsmIRBuilder;
 STINKYTOFU_EXPORT void collapseExecMaskedRegions(BasicBlock& bb, AsmIRBuilder& builder,
                                                  uint32_t wavefrontSize);
 
-/// Collapse each `s_barrier_wait -1` + immediately-following
-/// PSEUDO_CLUSTER_BARRIER placeholder pair into a single opaque ExecMaskGroup
-/// pseudo-instruction, so the DAG scheduler moves the pair as one atomic unit
-/// and can never interleave any instruction between the wait and the
-/// placeholder. The pair still moves freely (the group inherits no side effect
-/// from its children) subject to the union of their LDS-token / SCC deps.
-/// Undone by expandExecMaskedGroups() (shared with the exec-mask groups).
-STINKYTOFU_EXPORT void collapseClusterBarrierPairs(BasicBlock& bb, AsmIRBuilder& builder);
+/// Tag each PSEUDO_CLUSTER_BARRIER placeholder together with its adjacent workgroup
+/// barrier as a two-member StickChainData chain, WITHOUT wrapping them in an
+/// ExecMaskGroup. The CDNA5 scheduler's StickChain promotion rule then keeps the pair
+/// back-to-back (nothing scheduled between them) while each instruction keeps its own
+/// tokens/latency/forced-barrier threshold — so, unlike the EXEC_GROUP fusion, the
+/// workgroup signal/wait keeps its own threshold. Chain order matches program order:
+///   - SignalOnly: [placeholder (member 0), s_barrier_signal -1 (member 1)]
+///   - WaitOnly / SignalWait: [s_barrier_wait -1 (member 0), placeholder (member 1)]
+/// so member 0 always precedes member 1 in the IR (the DAG chain edge stays acyclic).
+/// The scheduler triggers the chain from the workgroup barrier's forced-barrier threshold
+/// and issues member 0 first, keeping the placeholder glued adjacent to its barrier in
+/// the required order. Idempotent: a placeholder already carrying StickChainData is skipped.
+STINKYTOFU_EXPORT void tagClusterBarrierChains(BasicBlock& bb);
 
 /// Inverse of collapseExecMaskedRegions (also restores collapseClusterBarrierPairs).
 STINKYTOFU_EXPORT void expandExecMaskedGroups(BasicBlock& bb);

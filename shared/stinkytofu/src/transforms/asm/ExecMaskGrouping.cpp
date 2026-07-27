@@ -138,56 +138,49 @@ void collapseExecMaskedRegions(BasicBlock& bb, AsmIRBuilder& builder, uint32_t w
     }
 }
 
-void collapseClusterBarrierPairs(BasicBlock& bb, AsmIRBuilder& builder) {
-    for (auto it = bb.begin(); it != bb.end();) {
+void tagClusterBarrierChains(BasicBlock& bb) {
+    uint32_t nextChainId = 0;
+    for (auto it = bb.begin(); it != bb.end(); ++it) {
         auto* pseudo = dyn_cast<StinkyInstruction>(it.getNodePtr());
-        if (!pseudo || !isPseudoClusterBarrier(*pseudo)) {
-            ++it;
-            continue;
+        if (!pseudo || !isPseudoClusterBarrier(*pseudo)) continue;
+        if (pseudo->getModifier<StickChainData>()) continue;  // idempotent (pipeline re-runs)
+
+        const auto* data = pseudo->getModifier<PseudoClusterBarrierData>();
+        const PseudoClusterBarrierData::Kind kind =
+            data ? data->kind : PseudoClusterBarrierData::Kind::SignalWait;
+
+        // Build the chain in the required program order:
+        //   - SignalOnly: [placeholder (member 0), s_barrier_signal -1 (member 1)]
+        //     (placeholder sits BEFORE the signal, so it is member 0)
+        //   - WaitOnly / SignalWait: [s_barrier_wait -1 (member 0), placeholder (member 1)]
+        //     (placeholder sits AFTER the wait, so the wait is member 0)
+        // In both cases member 0 precedes member 1 in program order, so the DAG chain edge
+        // member0 -> member1 stays acyclic. The scheduler triggers the chain from the
+        // workgroup barrier's forced-barrier threshold and issues member 0 first.
+        StinkyInstruction* member0 = nullptr;
+        StinkyInstruction* member1 = nullptr;
+        if (kind == PseudoClusterBarrierData::Kind::SignalOnly) {
+            auto nextIt = std::next(BasicBlock::iterator(pseudo));
+            StinkyInstruction* signal =
+                (nextIt != bb.end()) ? dyn_cast<StinkyInstruction>(nextIt.getNodePtr()) : nullptr;
+            if (signal == nullptr || !isBarrierSignal(*signal)) continue;  // leave standalone
+            member0 = pseudo;
+            member1 = signal;
+        } else {
+            auto prevIt = BasicBlock::iterator(pseudo);
+            StinkyInstruction* wait = nullptr;
+            if (prevIt != bb.begin()) {
+                --prevIt;
+                wait = dyn_cast<StinkyInstruction>(prevIt.getNodePtr());
+            }
+            if (wait == nullptr || !isBarrierWait(*wait)) continue;  // leave standalone
+            member0 = wait;
+            member1 = pseudo;
         }
 
-        // The insert pass plants the placeholder immediately after its anchor
-        // `s_barrier_wait -1`. Recover that anchor as the placeholder's previous
-        // sibling and fold the two into one atomic group.
-        StinkyInstruction* anchor = nullptr;
-        auto prevIt = BasicBlock::iterator(pseudo);
-        if (prevIt != bb.begin()) {
-            --prevIt;
-            anchor = dyn_cast<StinkyInstruction>(prevIt.getNodePtr());
-        }
-        if (anchor == nullptr || !isBarrierWait(*anchor)) {
-            // Invariant broken (e.g. the anchor was already absorbed into an
-            // exec-mask group). Leave the placeholder standalone; it still
-            // orders after the wait via its copied MemTokenData.
-            PASS_DEBUG(std::cerr << "[collapseClusterBarrierPairs] no adjacent barrier wait "
-                                    "before placeholder; leaving ungrouped\n");
-            ++it;
-            continue;
-        }
-
-        std::vector<StinkyInstruction*> children{anchor, pseudo};
-        std::vector<StinkyRegister> unionSrc, unionDest;
-        int totalIssue = 0, totalLatency = 0;
-        for (StinkyInstruction* child : children) {
-            unionSrc.insert(unionSrc.end(), child->getSrcRegs().begin(), child->getSrcRegs().end());
-            unionDest.insert(unionDest.end(), child->getDestRegs().begin(),
-                             child->getDestRegs().end());
-            totalIssue += child->issueCycles;
-            totalLatency += child->latencyCycles;
-        }
-
-        auto afterPseudo = std::next(BasicBlock::iterator(pseudo));
-        IRBase* insertBefore = (afterPseudo != bb.end()) ? afterPseudo.getNodePtr() : nullptr;
-        StinkyInstruction* group = builder.createExecMaskGroup(insertBefore);
-        group->setSrcRegs(unionSrc);
-        group->setDestRegs(unionDest);
-        group->issueCycles = totalIssue;
-        group->latencyCycles = totalLatency;
-        group->addModifier<ExecGroupData>(ExecGroupData{children});
-
-        auto groupIt = IRList::iterator(group);
-        for (StinkyInstruction* child : children) bb.removeIR(child);
-        it = std::next(groupIt);
+        const uint32_t id = nextChainId++;
+        member0->addModifier<StickChainData>(StickChainData{id, /*index=*/0u, /*count=*/2u});
+        member1->addModifier<StickChainData>(StickChainData{id, /*index=*/1u, /*count=*/2u});
     }
 }
 
