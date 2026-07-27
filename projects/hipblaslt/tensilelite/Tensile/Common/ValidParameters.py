@@ -778,7 +778,7 @@ validParameters = { # we need to make sure this matches develop
     #  - Level2 grid dim 1x16 (if enabled, otherwise last 16 bit values are ignored)
     "SFCWGM" : -1,
     "MaxOccupancy": list(
-        range(1, 40 + 1)
+        range(1, 64 + 1)
     ),  # wg / CU; if cache thrashing is hurting performance, this allocates extra lds to artificially limit occupancy
     "MaxLDS": [-1, 65536, 163840, 327680],
     "WorkGroup": makeValidWorkGroups(),  # ( wg0 x wg1 x LocalSplitU ) dimensions of the workgroup which will operate on a tile and share lds
