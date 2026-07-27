@@ -6947,14 +6947,24 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # MX PAP on the canonical buffer-load path cannot afford the borrowed
     # stagger-state checkpoint. Current MX PAP configs use StaggerU=0 here.
     disableStaggerForMxPap = kernel["PrefetchAcrossPersistent"] and hasMx and not (usesTDM or usesDTL)
+    # This kernel can stagger only if StaggerU is baked in or a runtime override can
+    # turn it on later. Same predicate as removeGROffsetsVariableSgprsFromPool.
+    # Restricted to TDM: elsewhere the stagger code is folded into the global-read
+    # increments, and UseCustomMainLoopSchedule asserts on their exact instruction
+    # count (Components/CustomSchedule.py), so dropping it changes non-TDM kernels.
+    isp = kernel.get("InternalSupportParams", {})
+    needsStaggerSgprs = kernel["StaggerU"] > 0 or isp.get("SupportCustomStaggerU", False)
+    tdmCannotStagger = usesTDM and not needsStaggerSgprs
     # remove staggerU code for the following cases
     # - tailloopInNll (cannot support staggerU)
     # - StreamK + MX (not enough sgpr. gfx950 only for now)
     # - BufferLoad=0 (stagger uses SRD increment which only exists in buffer mode)
     # - MX PAP without TDM/DTL (not enough sgpr)
+    # - TDM that cannot stagger at all (StaggerU==0 and no runtime override)
     self.states.staggerUCode = True
     if self.states.tailloopInNll or \
        not kernel["BufferLoad"] or \
+       tdmCannotStagger or \
        (kernel["StreamK"] and \
         hasMx and isgfx950) or \
        disableStaggerForMxPap or \
