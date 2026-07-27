@@ -14,7 +14,7 @@ Documentation for rocThrust available at
 
 ### Removed
 
-* rocThrust compatibility with PyTorch v2.9 and v2.10 has been removed in this release.  Please use PyTorch v2.11 and newer.
+* rocThrust compatibility with PyTorch v2.9 and v2.10 has been removed in this release.  Please use PyTorch v2.11 or later.
 
 ## rocThrust 4.5.0 for ROCm 7.14
 
