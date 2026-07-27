@@ -14,11 +14,12 @@ GlobalParameters:
   PruneSparseMode: 0
 
 BenchmarkProblems:
+
   -
     - # ProblemType SPB NN
       OperationType: GEMM
-      DataType: H
-      DestDataType: H
+      DataType: B
+      DestDataType: B
       ComputeDataType: s
       HighPrecisionAccumulate: True
       TransposeA: False
@@ -26,7 +27,7 @@ BenchmarkProblems:
       UseBeta: True
       Sparse: 2
       UseGateResidual: True
-      GateResidualDataTypeList: ['h']
+      GateResidualDataTypeList: ['b']
       Batched: True
       Activation: True
       ActivationType: all
@@ -77,8 +78,8 @@ BenchmarkProblems:
           - Exact: [264, 264, 1, 32] # partial tile (256+8): full + edge tiles in one launch
           - Exact: [264, 264, 1, 64] # partial tile (256+8): full + edge tiles in one launch
           - Exact: [264, 264, 1, 72] # partial tile (256+8): full + edge tiles in one launch
-        - BiasTypeArgs: ['h']
-        - GateTypeArgs: ['h']
+        - BiasTypeArgs: ['b']
+        - GateTypeArgs: ['b']
         - FactorDimArgs: [0]
         - ActivationArgs:
           - [Enum: none]
@@ -86,8 +87,8 @@ BenchmarkProblems:
   -
     - # ProblemType SPB NT
       OperationType: GEMM
-      DataType: H
-      DestDataType: H
+      DataType: B
+      DestDataType: B
       ComputeDataType: s
       HighPrecisionAccumulate: True
       TransposeA: False
@@ -95,7 +96,7 @@ BenchmarkProblems:
       UseBeta: True
       Sparse: 2
       UseGateResidual: True
-      GateResidualDataTypeList: ['h']
+      GateResidualDataTypeList: ['b']
       Batched: True
       Activation: True
       ActivationType: all
@@ -146,8 +147,8 @@ BenchmarkProblems:
           - Exact: [264, 264, 1, 32] # partial tile (256+8): full + edge tiles in one launch
           - Exact: [264, 264, 1, 64] # partial tile (256+8): full + edge tiles in one launch
           - Exact: [264, 264, 1, 72] # partial tile (256+8): full + edge tiles in one launch
-        - BiasTypeArgs: ['h']
-        - GateTypeArgs: ['h']
+        - BiasTypeArgs: ['b']
+        - GateTypeArgs: ['b']
         - FactorDimArgs: [0]
         - ActivationArgs:
           - [Enum: none]
@@ -155,8 +156,8 @@ BenchmarkProblems:
   -
     - # ProblemType SPA NN
       OperationType: GEMM
-      DataType: H
-      DestDataType: H
+      DataType: B
+      DestDataType: B
       ComputeDataType: s
       HighPrecisionAccumulate: True
       TransposeA: False
@@ -164,7 +165,7 @@ BenchmarkProblems:
       UseBeta: True
       Sparse: 1
       UseGateResidual: True
-      GateResidualDataTypeList: ['h']
+      GateResidualDataTypeList: ['b']
       Batched: True
       Activation: True
       ActivationType: all
@@ -215,8 +216,8 @@ BenchmarkProblems:
           - Exact: [264, 264, 1, 32] # partial tile (256+8): full + edge tiles in one launch
           - Exact: [264, 264, 1, 64] # partial tile (256+8): full + edge tiles in one launch
           - Exact: [264, 264, 1, 72] # partial tile (256+8): full + edge tiles in one launch
-        - BiasTypeArgs: ['h']
-        - GateTypeArgs: ['h']
+        - BiasTypeArgs: ['b']
+        - GateTypeArgs: ['b']
         - FactorDimArgs: [0]
         - ActivationArgs:
           - [Enum: none]
@@ -224,8 +225,8 @@ BenchmarkProblems:
   -
     - # ProblemType SPA NT
       OperationType: GEMM
-      DataType: H
-      DestDataType: H
+      DataType: B
+      DestDataType: B
       ComputeDataType: s
       HighPrecisionAccumulate: True
       TransposeA: False
@@ -233,7 +234,7 @@ BenchmarkProblems:
       UseBeta: True
       Sparse: 1
       UseGateResidual: True
-      GateResidualDataTypeList: ['h']
+      GateResidualDataTypeList: ['b']
       Batched: True
       Activation: True
       ActivationType: all
@@ -284,8 +285,8 @@ BenchmarkProblems:
           - Exact: [264, 264, 1, 32] # partial tile (256+8): full + edge tiles in one launch
           - Exact: [264, 264, 1, 64] # partial tile (256+8): full + edge tiles in one launch
           - Exact: [264, 264, 1, 72] # partial tile (256+8): full + edge tiles in one launch
-        - BiasTypeArgs: ['h']
-        - GateTypeArgs: ['h']
+        - BiasTypeArgs: ['b']
+        - GateTypeArgs: ['b']
         - FactorDimArgs: [0]
         - ActivationArgs:
           - [Enum: none]
