@@ -28,7 +28,9 @@
 
 #include <cstddef>
 #include <hip/hip_runtime.h>
+#include <map>
 #include <memory>
+#include <mutex>
 #include <set>
 #include <stdexcept>
 #include <vector>
@@ -76,7 +78,7 @@ public:
     rocfft_rccl_comm_t(rocfft_rccl_comm_t&&)                 = default;
     rocfft_rccl_comm_t& operator=(rocfft_rccl_comm_t&&) = default;
 
-    // true iff this handle refers to an initialized RCCL communicator.
+    // true if this handle refers to an initialized RCCL communicator
     explicit operator bool() const
     {
         return static_cast<bool>(pimpl);
@@ -150,6 +152,13 @@ public:
 
 private:
     struct Impl;
+
+    // cache keyed by device set, held via weak_ptr so a communicator lives
+    // only while a plan references it.  reusing a stale (plan-outliving)
+    // communicator fails on the next execution, so we rebuild once released
+    static std::map<std::set<int>, std::weak_ptr<Impl>> comm_cache;
+    static std::mutex                                   comm_cache_mutex;
+
     // shared so copies of the handle refer to the same RCCL state; the
     // Impl destructor (running exactly once when the last handle dies)
     // calls ncclCommFinalize/Destroy on the owned communicators.

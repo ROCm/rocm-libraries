@@ -31,12 +31,6 @@
 #include <mutex>
 #include <stdexcept>
 
-// process-wide cache of communicators keyed by device set.
-// different plans may use different GPU subsets, so each distinct
-// set gets its own RCCL communicator.
-static std::map<std::set<int>, rocfft_rccl_comm_t> comm_cache;
-static std::mutex                                  comm_cache_mutex;
-
 // map a rocFFT precision to the corresponding NCCL datatype.
 // rocFFT half/float/double map to ncclFloat16/32/64.
 //
@@ -82,6 +76,10 @@ struct rocfft_rccl_comm_t::Impl
     }
 };
 
+// static cache definitions; placed after Impl so weak_ptr<Impl> is complete
+std::map<std::set<int>, std::weak_ptr<rocfft_rccl_comm_t::Impl>> rocfft_rccl_comm_t::comm_cache;
+std::mutex                                                       rocfft_rccl_comm_t::comm_cache_mutex;
+
 rocfft_rccl_comm_t rocfft_rccl_comm_t::create(const std::set<int>& devices)
 {
     // need at least 2 devices for a meaningful communicator
@@ -98,7 +96,15 @@ rocfft_rccl_comm_t rocfft_rccl_comm_t::create(const std::set<int>& devices)
     auto it = comm_cache.find(devices);
     if(it != comm_cache.end())
     {
-        return it->second;
+        // reuse only if a plan still holds it alive (concurrent plans share)
+        if(std::shared_ptr<Impl> impl = it->second.lock())
+        {
+            rocfft_rccl_comm_t cached;
+            cached.pimpl = std::move(impl);
+            return cached;
+        }
+        // stale entry: drop it and rebuild a fresh communicator below
+        comm_cache.erase(it);
     }
 
     const int ndevices = static_cast<int>(devices.size());
@@ -149,9 +155,10 @@ rocfft_rccl_comm_t rocfft_rccl_comm_t::create(const std::set<int>& devices)
         return {};
     }
 
-    comm_cache[devices] = std::move(new_comm);
+    // store a weak ref; the returned handle and copies keep it alive
+    comm_cache[devices] = new_comm.pimpl;
 
-    return comm_cache[devices];
+    return new_comm;
 }
 
 void rocfft_rccl_comm_t::reset_all()
