@@ -31,7 +31,9 @@ Asserts (see ``_designed/gfx1250/streamk_forcedp_2d.yaml``):
   * the factored K-split decode/shift are ABSENT (this is a spatial N-axis).
 
 CPU-only: no GPU required. The DEFINITIVE correctness check is the user's HW run
-of ``Tests/common/streamk/gfx1250/core/sk_mxf4_force_dp_only_cluster_2d_multicast.yaml`` (functional-sim
+of the ``[2, 2]`` ClusterDim entry in
+``Tests/common/streamk/gfx1250/core/sk_mxf4_force_dp_only_cluster_multicast.yaml``
+(the 1-D and 2-D ForceDPOnly multicast sweeps now share one config; functional-sim
 is a regression check only).
 """
 
