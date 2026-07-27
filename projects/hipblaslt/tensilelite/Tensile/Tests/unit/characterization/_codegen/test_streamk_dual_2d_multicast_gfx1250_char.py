@@ -125,6 +125,22 @@ def test_streamk_dual_2d_multicast_gfx1250_emits_assembly():
             f"Kernel {base!r} missing the prologue cluster arrive"
         )
 
+        # --- (f) SK-round deadlock fix: the cluster prologue arrive is emitted
+        # PER PERSISTENT PASS (INSIDE the persistent loop), not once before it.
+        # The multicast split barrier is 1 arrive + 1 first-load wait PER PASS; the
+        # SK partial round re-enters the persistent loop, so a single pre-loop arrive
+        # would leave the SK pass's wait unpaired -> cluster -3 barrier deadlock
+        # (HW-observed hang). The arrive must sit after label_PersistentLoopStart so
+        # every DP and SK pass balances its own first-load/zero-iter wait.
+        loop_top = src.find("label_PersistentLoopStart:")
+        assert loop_top != -1, f"Kernel {base!r} has no persistent loop"
+        arrive_pos = src.find("cluster_barrier signal (arrive)")
+        assert arrive_pos > loop_top, (
+            f"Kernel {base!r} emits the cluster prologue arrive BEFORE the persistent "
+            f"loop (once) -- the SK partial round's first-load wait would be unpaired "
+            f"(the [2,2] SK-round deadlock). It must be per-pass (inside the loop)."
+        )
+
         # --- factored K-split decode/shift MUST be ABSENT (Ck is a spatial axis) ---
         assert "k = StreamKIdx & (Ck-1)" not in src, (
             f"Kernel {base!r} wrongly emitted the factored K-slice decode"

@@ -3160,7 +3160,18 @@ class StreamKTwoTileDPFirst(StreamK):
         # barrier here in the prologue, before the first tensor_load_to_lds, so
         # it pairs the cluster-barrier pass's first-load wait. No-op unless
         # StreamKMulticast is enabled.
-        module.add(self.streamKMulticastPrologueSignal(writer, kernel))
+        #
+        # EXCEPTION -- standard dual-2D (Target A, StreamKForceDPOnly==0 +
+        # StreamKDualMulticast): the SK partial round RE-ENTERS the persistent loop,
+        # so the main-loop first-load `s_barrier_wait -3` executes ONCE PER PASS while
+        # this pre-loop arrive fires only ONCE -> arrivals(1) < waits(N) -> the SK
+        # round's cluster barrier deadlocks (HW-observed hang). For that path the
+        # arrive is instead emitted PER PERSISTENT PASS in graWorkGroup (after the
+        # alpha/start-tile gate, on the same main-loop path as the wait) so every
+        # pass is balanced. ForceDPOnly-2D (single pass, no SK round) and 1-D
+        # multicast keep the pre-loop arrive -> byte-identical.
+        if not (streamKDual2DMulticast(kernel) and not kernel["StreamKForceDPOnly"]):
+            module.add(self.streamKMulticastPrologueSignal(writer, kernel))
 
         if kernel["StreamKForceDPOnly"]:
             sIdx = writer.acquireStreamKConstSgpr(kernel, "StreamKIdx")
@@ -3499,6 +3510,20 @@ class StreamKTwoTileDPFirst(StreamK):
         module.add(SMovB32(dst=sgpr("StreamKLocalEnd"), src=sgpr(sIpt), comment="Skip iterations"))
         writer.releaseStreamKConstSgpr(sIpt)
         module.add(alphaLabel)
+
+        # Standard dual-2D (Target A, StreamKForceDPOnly==0 + StreamKDualMulticast):
+        # emit the cluster prologue arrive PER PERSISTENT PASS here, on the main-loop
+        # path (past the alpha / start-tile gate that reaches alphaLabel), so it pairs
+        # THIS pass's first-load `s_barrier_wait -3`. The pre-loop arrive is skipped
+        # for this path (see preLoop), so every DP and SK pass has exactly one arrive
+        # + one wait -> the split cluster barrier stays balanced when the SK partial
+        # round re-enters the persistent loop (fixes the [2,2] SK-round deadlock). The
+        # SK reduction/fixup itself uses the global-flag/workspace handshake, not the
+        # cluster -3 barrier. Assumes cluster peers make matching passes (uniform DP+SK
+        # share, true for the [2,2] probe with alpha!=0); non-uniform/zero-share
+        # divergence is Phase-2. No-op for every other path.
+        if streamKDual2DMulticast(kernel) and not kernel["StreamKForceDPOnly"]:
+            module.add(self.streamKMulticastPrologueSignal(writer, kernel))
 
         writer.sgprPool.checkIn(sTmp)
 
