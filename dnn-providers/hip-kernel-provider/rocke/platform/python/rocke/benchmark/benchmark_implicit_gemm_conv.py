@@ -164,11 +164,18 @@ def _verify_kernel(
     rt.memcpy_d2h(u8(out_cpu), out_dev, out_t.nbytes)
 
     out_f32 = out_cpu.float().cuda()
-    err = float(out_f32.sub(ref_out).abs().max())
-    status = "PASS" if err < 1e-2 else f"FAIL(err={err:.2e})"
+    abs_diff = out_f32.sub(ref_out).abs()
+    ref_scale = ref_out.abs().max().clamp(min=1.0)
+    rel_err = float(abs_diff.max() / ref_scale)
+    # Use a relative tolerance scaled to the output dtype.
+    # fp16/bf16 wgrad reductions over N*Ho*Wo positions can accumulate
+    # significant error; a relative threshold avoids false FAILs.
+    tol = 5e-2 if out_t.dtype in (torch.float16, torch.bfloat16) else 1e-3
+    err = rel_err
+    status = "PASS" if err < tol else f"FAIL(rel_err={err:.2e})"
     print(f"  verify {kernel_name}: {status}", flush=True)
 
-    if err >= 1e-2 and dump_fail:
+    if err >= tol and dump_fail:
         import pathlib
         import numpy as np
 

@@ -10,13 +10,13 @@
  *   Forward (conv_implicit_gemm.py):
  *     M     = N*Ho*Wo    (output spatial positions)
  *     N_fwd = K          (output channels)
- *     K_fwd = Y*X*C      (filter × input channel)
+ *     K_fwd = Y*X*C      (filter x input channel)
  *     A: NHWC, B: KYXC, D: NHWK
  *
  *   Wgrad (this file):
- *     M     = K          (output channels — weight rows)
- *     N_wg  = Y*X*C      (filter spatial × input channel — weight cols)
- *     K_wg  = N*Ho*Wo    (output spatial positions — reduction)
+ *     M     = K          (output channels -- weight rows)
+ *     N_wg  = Y*X*C      (filter spatial x input channel -- weight cols)
+ *     K_wg  = N*Ho*Wo    (output spatial positions -- reduction)
  *     A: dY (NHWK), B: X (NHWC), D: dW (KYXC)
  *
  * The C99 port mirrors the Python WgradConvSpec dataclass and the
@@ -151,7 +151,7 @@ int rocke_wgrad_conv_spec_mfmas_per_warp_n(const rocke_implicit_gemm_conv_wgrad_
 /* spec.wg_M: output channels per group (p.K / p.groups). */
 int rocke_wgrad_conv_spec_wg_M(const rocke_implicit_gemm_conv_wgrad_spec_t* s);
 
-/* spec.wg_N: filter spatial × input channels per group (Z * Y * X * C/groups). */
+/* spec.wg_N: filter spatial x input channels per group (Z * Y * X * C/groups). */
 int rocke_wgrad_conv_spec_wg_N(const rocke_implicit_gemm_conv_wgrad_spec_t* s);
 
 /* spec.wg_K: output spatial positions (N * Ho * Wo [* Do]). */

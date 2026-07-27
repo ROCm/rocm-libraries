@@ -5,14 +5,14 @@
  * (rocke/instances/common/conv_implicit_gemm_wgrad.py).
  *
  * GEMM orientation (wgrad):
- *   M     = K          (output channels — weight rows)
- *   N_wg  = Y*X*C      (filter spatial × input channel — weight cols)
- *   K_wg  = N*Ho*Wo    (output spatial positions — reduction)
+ *   M     = K          (output channels -- weight rows)
+ *   N_wg  = Y*X*C      (filter spatial x input channel -- weight cols)
+ *   K_wg  = N*Ho*Wo    (output spatial positions -- reduction)
  *
  * Operand roles:
- *   A  = dY  (NHWK, output gradient)  — the M-row / K_wg-reduction operand
- *   B  = X   (NHWC, input activations) — reuses the forward make_a_descriptor
- *   D  = dW  (KYXC, weight gradient)  — written at the end
+ *   A  = dY  (NHWK, output gradient)  -- the M-row / K_wg-reduction operand
+ *   B  = X   (NHWC, input activations) -- reuses the forward make_a_descriptor
+ *   D  = dW  (KYXC, weight gradient)  -- written at the end
  *
  * Implementation strategy: reuse the forward-conv phase infrastructure
  * (rocke_conv_build_ctx_t, all K-loop drivers, MFMA/WMMA phases, epilogue) by
@@ -95,7 +95,7 @@ int rocke_wgrad_conv_spec_wg_M(const rocke_implicit_gemm_conv_wgrad_spec_t* s)
     return s->problem.K;
 }
 
-/* wg_N = Z*Y*X*C  (filter spatial × input channel) */
+/* wg_N = Z*Y*X*C  (filter spatial x input channel) */
 int rocke_wgrad_conv_spec_wg_N(const rocke_implicit_gemm_conv_wgrad_spec_t* s)
 {
     const rocke_conv_problem_t* p = &s->problem;
@@ -172,7 +172,7 @@ rocke_status_t rocke_wgrad_conv_spec_kernel_name(const rocke_implicit_gemm_conv_
     /* acc_epilogue.tag() is always "" in this port (field omitted from struct). */
     const char* parts[5] = {short_buf, t_buf, w_buf, a_buf, pe_buf};
 
-    /* flags: async, spk{N}, spkauto  — Python boolean flags */
+    /* flags: async, spk{N}, spkauto  -- Python boolean flags */
     char spk_flag[32] = {0};
     const char* flag_names[3];
     int flag_on[3];
@@ -210,7 +210,7 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
                                                   size_t reason_cap)
 {
     /*
-     * Mirror Python is_valid_wgrad_spec — geometry + block size + MMA atom +
+     * Mirror Python is_valid_wgrad_spec -- geometry + block size + MMA atom +
      * LDS + WMMA narrow subset + split_k + vec_c gates.
      * Build an equivalent ImplicitGemmConvSpec and delegate to the forward-conv
      * validator (rocke_implicit_gemm_conv_is_valid_spec) which implements the
@@ -251,12 +251,57 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
             snprintf(reason, reason_cap, "block_size %d > 1024", block_size);
         return false;
     }
+    /* groups > 1 is not supported: wg_M and wg_N assume groups == 1. */
+    if(s->problem.groups > 1)
+    {
+        if(reason && reason_cap)
+            snprintf(reason,
+                     reason_cap,
+                     "groups > 1 is not supported for wgrad (got %d)",
+                     s->problem.groups);
+        return false;
+    }
+
     int sk = s->split_k;
     if(sk < -1 || sk == 0)
     {
         if(reason && reason_cap)
             snprintf(reason, reason_cap, "split_k must be -1 (auto), 1, or >1 (got %d)", sk);
         return false;
+    }
+
+    /* split_k > 1 requires a CDNA arch (ctx->atom != NULL at build time).
+     * On RDNA the op family is "wmma" and atom is NULL, so the split-K
+     * epilogue would dereference a null pointer. */
+    if(sk > 1)
+    {
+        /* Quick arch check: gfx11xx / gfx12xx are RDNA. */
+        if(arch && (strncmp(arch, "gfx11", 5) == 0 || strncmp(arch, "gfx12", 5) == 0))
+        {
+            if(reason && reason_cap)
+                snprintf(reason, reason_cap, "split_k > 1 is only supported on CDNA targets");
+            return false;
+        }
+
+        /* For fp16/bf16 output the packed atomic writes pairs of elements via
+         * c_off_even and c_off_even+1 through the raw dW pointer.  An odd
+         * Y*X*C means the last output channel would write one element past the
+         * buffer end.  Require Y*X*C (== wg_N) to be even. */
+        const char* dt = s->dtype_d ? s->dtype_d : "fp16";
+        if(strcmp(dt, "fp16") == 0 || strcmp(dt, "bf16") == 0)
+        {
+            int wg_N_val = rocke_wgrad_conv_spec_wg_N(s);
+            if(wg_N_val % 2 != 0)
+            {
+                if(reason && reason_cap)
+                    snprintf(reason,
+                             reason_cap,
+                             "split_k > 1 with %s output requires Y*X*C (%d) to be even",
+                             dt,
+                             wg_N_val);
+                return false;
+            }
+        }
     }
 
     /* Delegate the MMA-atom + LDS + WMMA gates to the forward validator via an
@@ -526,15 +571,14 @@ static rocke_tensor_descriptor_t* wgrad_make_x_descriptor(rocke_ir_builder_t* b,
 /*
  * wgrad_make_dw_descriptor:
  *   dW stored KYXC (2-D) / KZYXC (3-D).
- *   The epilogue queries D_desc with coord names ("m", "k_out") where:
- *     "m"     = output channel index (= K dimension of dW, wg_M = K)
- *     "k_out" = filter+channel index (= Y*X*C dimension, wg_N)
+ *   The epilogue queries D_desc with coord names ("k_out", "n_wg") where:
+ *     "k_out" = output channel index (= K dimension of dW, wg_M = K)
+ *     "n_wg"  = filter+channel index (= Y*X*C dimension, wg_N)
  *
- * Python original uses ("k_out", "n_wg") but we must use ("m", "k_out") to
- * match the forward epilogue's D_desc.offset(m=m_val, k_out=n_val) call.
+ * Matches Python original: dW_desc.offset(b_, k_out=m_val, n_wg=n_val).
  *
- * Layout: naive("dW_kyxc", [K,Y,X,C], coords=["m","y","x","c"]).transform(
- *           unmerge_magic("k_out" -> [y,x,c], [Y,X,C]), pad('y'), pad('x'))
+ * Layout: naive("dW_kyxc", [K,Y,X,C], coords=["k_out","y","x","c"]).transform(
+ *           unmerge_magic("n_wg" -> [y,x,c], [Y,X,C]), pad('y'), pad('x'))
  */
 static rocke_tensor_descriptor_t* wgrad_make_dw_descriptor(rocke_ir_builder_t* b,
                                                            const rocke_conv_problem_t* p)
@@ -622,12 +666,12 @@ struct rocke_tensor_descriptor* rocke_wgrad_make_dw_descriptor(rocke_ir_builder_
 // Wgrad A-descriptor (dY): mirrors Python dy_descriptor closure order.
 //
 // Python wgrad dy_descriptor (build_implicit_gemm_conv_wgrad.py):
-//     k_out   = b_.add(block_m_off_v, row)   ← m_val computed FIRST
-//     k_wg_red = b_.add(k_off_capture[0], col) ← k_val computed SECOND
+//     k_out   = b_.add(block_m_off_v, row)   <- m_val computed FIRST
+//     k_wg_red = b_.add(k_off_capture[0], col) <- k_val computed SECOND
 //     return dY_desc.offset(b_, k_wg=k_wg_red, k_out=k_out)
 //
 // The forward rocke_conv_a_descriptor computes k_val first then m_val, which
-// matches the forward Python a_descriptor.  Wgrad is opposite — m_val first —
+// matches the forward Python a_descriptor.  Wgrad is opposite -- m_val first --
 // so we need a wgrad-specific closure rather than reusing the forward one.
 static rocke_value_t* wgrad_dy_descriptor(rocke_ir_builder_t* b,
                                           rocke_value_t* row,
@@ -636,9 +680,9 @@ static rocke_value_t* wgrad_dy_descriptor(rocke_ir_builder_t* b,
                                           void* ctx_user)
 {
     rocke_conv_build_ctx_t* ctx = (rocke_conv_build_ctx_t*)ctx_user;
-    /* k_out = block_m_off + row (= output channel, m_val) — computed FIRST */
+    /* k_out = block_m_off + row (= output channel, m_val) -- computed FIRST */
     rocke_value_t* m_val = rocke_b_add(b, ctx->block_m_off_v, row);
-    /* k_wg_red = k_off + col (= output position, k_val) — computed SECOND */
+    /* k_wg_red = k_off + col (= output position, k_val) -- computed SECOND */
     rocke_value_t* k_val = rocke_b_add(b, ctx->k_off_capture, col);
     const char* names[2] = {"m", "k"};
     rocke_value_t* vals[2] = {m_val, k_val};
@@ -677,16 +721,19 @@ static void wgrad_a_load_override(rocke_ir_builder_t* b,
 #include "rocke/helper_rocke.helpers.schedule.h"
 
 // ---------------------------------------------------------------------------
-// Split-K atomic epilogue for wgrad (fp32 only for now)
+// Split-K atomic epilogue for wgrad
 // ---------------------------------------------------------------------------
 
 /*
  * Emit per-lane atomic-adds into dW for split_k > 1.
  * Mirrors Python _emit_wgrad_split_k_epilogue for fp32, bf16, and fp16 outputs.
  *
- * fp32: scalar global_atomic_add per slot (monotonic).
- * fp16/bf16: _emit_single_packed_atomic per slot — packs into <2 x dtype> with
+ * fp32: scalar global_atomic_add per slot (exact, monotonic).
+ * fp16/bf16: _emit_single_packed_atomic per slot -- packs into <2 x dtype> with
  *   the correct even/odd column placement, then global_atomic_add_pk_f16/bf16.
+ *   Note: each CTA rounds its partial to output precision before the atomic add,
+ *   so accumulation error grows with split_k.  For large split_k consider using
+ *   an fp32 workspace and downcasting after the kernel completes.
  */
 static void wgrad_emit_split_k_epilogue_f32(rocke_ir_builder_t* b,
                                             const rocke_conv_build_ctx_t* ctx,
@@ -981,7 +1028,7 @@ static void wgrad_emit_direct_epilogue(rocke_ir_builder_t* b,
 }
 
 // ---------------------------------------------------------------------------
-// Wgrad ctx init — mirrors rocke_conv_build_ctx_init but uses wgrad param names
+// Wgrad ctx init -- mirrors rocke_conv_build_ctx_init but uses wgrad param names
 // and sets the wg_K K-loop bound (not K_gemm from an adapter problem).
 // ---------------------------------------------------------------------------
 
@@ -1027,8 +1074,8 @@ static bool wgrad_build_ctx_init(rocke_conv_build_ctx_t* ctx,
      *   p.K_gemm   = Y*X*C    -> must equal wg_K  (used by kloop_unroll only)
      *
      * Use N=wg_M, Hi=Wi=1 (so Ho=Wo=1), C=wg_K, K=wg_N, Y=X=1:
-     *   K_gemm = 1*1*wg_K = wg_K  ✓   M = wg_M*1*1 = wg_M  ✓   N_gemm = wg_N  ✓
-     *   Ho = (1 + 0 - 1*(1-1) - 1)/1 + 1 = 1  ✓  (not negative!) */
+     *   K_gemm = 1*1*wg_K = wg_K  (ok)   M = wg_M*1*1 = wg_M  (ok)   N_gemm = wg_N  (ok)
+     *   Ho = (1 + 0 - 1*(1-1) - 1)/1 + 1 = 1  (ok)  (not negative!) */
     rocke_conv_problem_t* stub_p
         = (rocke_conv_problem_t*)rocke_arena_alloc(&b->arena, sizeof(rocke_conv_problem_t));
     if(!stub_p)
@@ -1096,7 +1143,7 @@ static bool wgrad_build_ctx_init(rocke_conv_build_ctx_t* ctx,
     ctx->block_n = spec->tile_n;
     ctx->block_k = spec->tile_k;
 
-    /* WarpGrid.bind — emit the same SSA in the same order as the forward conv */
+    /* WarpGrid.bind -- emit the same SSA in the same order as the forward conv */
     ctx->grid.tile_m = ctx->block_m;
     ctx->grid.tile_n = ctx->block_n;
     ctx->grid.tile_k = ctx->block_k;
@@ -1146,7 +1193,7 @@ static bool wgrad_build_ctx_init(rocke_conv_build_ctx_t* ctx,
     ctx->warp_m_idx = warp_m_v;
     ctx->warp_n_idx = warp_n_v;
 
-    /* Geometry constants — K-loop bound is wg_K (or split-K slice size).
+    /* Geometry constants -- K-loop bound is wg_K (or split-K slice size).
      *
      * Creation order must mirror Python (build_implicit_gemm_conv_wgrad, after bind):
      *   c0        = b.const_i32(0)         -- always (split_k=1: k_lo; split_k>1: unused 0)
@@ -1211,7 +1258,7 @@ static bool wgrad_build_ctx_init(rocke_conv_build_ctx_t* ctx,
         ctx->block_n_off_v = ctx->grid.block_n_off;
     }
 
-    /* LDS layout — reuse the forward accessor (same logic) */
+    /* LDS layout -- reuse the forward accessor (same logic) */
     {
         rocke_implicit_gemm_conv_spec_t lds_fwd = *ctx->spec;
         char lds_reason[256];
@@ -1265,7 +1312,7 @@ static bool wgrad_build_ctx_init(rocke_conv_build_ctx_t* ctx,
             ctx->acc_inits[i] = ctx->acc_init;
         }
 
-    /* Load plan — wgrad always uses vec=1 */
+    /* Load plan -- wgrad always uses vec=1 */
     ctx->threads = spec->warp_m * spec->warp_n * spec->wave_size;
     ctx->load_vec = 1;
 
@@ -1300,9 +1347,9 @@ static bool wgrad_build_ctx_init(rocke_conv_build_ctx_t* ctx,
         ctx->have_async_loaders = false;
     }
 
-    /* Schedule — only compute the policy here; the caller emits the prologue
+    /* Schedule -- only compute the policy here; the caller emits the prologue
      * AFTER the buffer resources so the SSA order matches Python:
-     *   buffer_rsrc(dY/X/dW) → schedule.emit_prologue(b) → k-loop. */
+     *   buffer_rsrc(dY/X/dW) -> schedule.emit_prologue(b) -> k-loop. */
     ctx->schedule
         = rocke_schedule_policy_for_pipeline(b, ctx->async_dma ? "async_dma" : spec->pipeline);
 
@@ -1329,10 +1376,21 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv_wgrad(
         return NULL;
     }
 
-    /* Resolve split_k=-1 (auto) to split_k=1 */
+    /* split_k=-1 (auto) is not supported in this port: Python resolves it via
+     * select_split_k_wgrad which picks a degree > 1 for most shapes.  Silently
+     * collapsing to 1 would mismatch the Python source of truth (wrong kernel
+     * name, wrong grid) and could cause races if the host launches with the
+     * degree Python's formula implies.  Callers must resolve -1 before calling
+     * this function or pass an explicit degree. */
     int split_k = spec->split_k;
     if(split_k == -1)
-        split_k = 1;
+    {
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "wgrad: split_k=-1 (auto) is not supported in the C port; "
+                        "resolve via select_split_k_wgrad and pass the explicit degree");
+        return NULL;
+    }
     bool is_split_k = (split_k > 1);
 
     /* split_k > 1 supported for fp32, fp16, bf16 output dtypes */
@@ -1421,7 +1479,7 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv_wgrad(
     ctx.b_rsrc = b_rsrc.rsrc;
     ctx.d_rsrc = d_rsrc.rsrc;
 
-    /* Emit schedule prologue AFTER buffer resources — mirrors Python ordering:
+    /* Emit schedule prologue AFTER buffer resources -- mirrors Python ordering:
      *   make_buffer_resource(dY/X/dW) then schedule.emit_prologue(b). */
     rocke_schedule_policy_emit_prologue(&ctx.schedule, b);
 
@@ -1435,7 +1493,7 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv_wgrad(
         return NULL;
     }
     /* The forward phase functions query A_desc with ("m","k") and B_desc with
-     * ("k_out","k_gemm") — our descriptors are built with exactly those names. */
+     * ("k_out","k_gemm") -- our descriptors are built with exactly those names. */
     ctx.A_desc = dY_desc;
     ctx.B_desc = X_desc;
     ctx.D_desc = dW_desc;

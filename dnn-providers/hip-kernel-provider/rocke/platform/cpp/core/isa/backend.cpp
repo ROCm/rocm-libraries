@@ -19,9 +19,8 @@
  * then this is the single C-side source. */
 static const char ROCKE_TRIPLE[] = "amdgcn-amd-amdhsa";
 /* The AMDGPU datalayout is FLAVOR-KEYED (Python _DATALAYOUT_LLVM20 /
- * _DATALAYOUT_LLVM22): two fields drift between LLVM 20 (ROCm 7.0/7.1) and
- * LLVM 22 (ROCm >= 7.2) -- the ELF mangling spec (m:e, added under LLVM 21+:
- * buffer-fat-pointer address space p8
+ * _DATALAYOUT_LLVM22): one field drifts between LLVM 20 (ROCm 7.0/7.1) and
+ * LLVM 22 (ROCm >= 7.2) -- the buffer-fat-pointer address space p8 alignment
  * (...-p8:128:128-... -> ...-p8:128:128:128:48-...). The triple is unchanged
  * across flavors. Must stay byte-identical with the Python constants. */
 static const char ROCKE_DATALAYOUT_LLVM20[]

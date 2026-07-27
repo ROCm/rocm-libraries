@@ -72,7 +72,10 @@ The ``dW`` pointer type and the kernel ABI are identical between
 split_k=1 and split_k>1 — no extra parameters.
 
 Caller contract (``split_k > 1``):
-  1. Zero-initialise the ``dW`` buffer (f32) before launch.
+  1. **Zero-initialise the ``dW`` buffer before every launch.**  The kernel only
+     issues atomic-adds, never a direct store, so any non-zero initial content
+     accumulates into the result.  Forgetting this step produces silently wrong
+     gradients with no runtime error.
   2. Launch with grid ``(ceil(wg_N/tile_n), ceil(wg_M/tile_m), split_k)``.
 
 When ``split_k == 1`` the kernel writes ``dW`` normally (no atomics).
