@@ -5095,10 +5095,9 @@ class Solution(collections.abc.Mapping):
       ldsNumBytesReduction = state["MaxLDS"]
 
     # lds max occupancy
-    # MaxOccupancy is workgroups per CU; the per-workgroup LDS floor is DeviceLDS//MaxOccupancy
-    # on both CDNA and RDNA (an RDNA WGP has 2x the LDS but also holds 2x the workgroups for the
-    # same wg/CU, so the per-workgroup budget is unchanged).
-    ldsSizeOccupancy = isaInfoMap[isa].archCaps["DeviceLDS"] // state["MaxOccupancy"]
+    # gfx11 shares one 128 KB LDS pool per WGP (2x DeviceLDS).
+    ldsPoolOccupancy = (2 if isa[0] == 11 else 1) * isaInfoMap[isa].archCaps["DeviceLDS"]
+    ldsSizeOccupancy = ldsPoolOccupancy // state["MaxOccupancy"]
     ldsNumBytesOccupancy = ldsSizeOccupancy
 
 
