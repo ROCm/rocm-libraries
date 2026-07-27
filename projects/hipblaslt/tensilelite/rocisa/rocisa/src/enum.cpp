@@ -186,6 +186,11 @@ void init_enum(nb::module_ m)
         .value("NV", rocisa::NonVolatile::NV)
         .export_values();
 
+    nb::enum_<rocisa::TensorLdsEncoding>(m_enum, "TensorLdsEncoding")
+        .value("SPEC", rocisa::TensorLdsEncoding::SPEC)
+        .value("FFM_COMPAT", rocisa::TensorLdsEncoding::FFM_COMPAT)
+        .export_values();
+
     nb::enum_<rocisa::CvtType>(m_enum, "CvtType")
         .value("CVT_F16_to_F32", rocisa::CvtType::CVT_F16_to_F32)
         .value("CVT_F32_to_F16", rocisa::CvtType::CVT_F32_to_F16)

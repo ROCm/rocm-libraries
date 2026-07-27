@@ -24,6 +24,8 @@
 #include "instruction/instruction.hpp"
 
 #include <algorithm>
+#include <cstdint>
+#include <cstdio>
 #include <iostream>
 #include <memory>
 #include <sstream>
@@ -3734,20 +3736,20 @@ namespace rocisa
                         const RegContainerPtr& group1,
                         const RegContainerPtr& group2,
                         const RegContainerPtr& group3,
-                        bool                   rawStale = false,
-                        const std::string&     comment  = std::string())
+                        TensorLdsEncoding      mode    = TensorLdsEncoding::SPEC,
+                        const std::string&     comment = std::string())
             : Instruction(InstType::INST_TDM, comment)
             , group0(group0)
             , group1(group1)
             , group2(group2)
             , group3(group3)
-            , rawStale(rawStale)
+            , mode(mode)
         {
-            // In rawStale mode the render is the fixed golden encoding, independent
-            // of operands, so group0/group1 may be null (frontier size-defer loads
-            // that carry no specific descriptor). The live mnemonic path still
-            // requires sgpr operands.
-            if(!rawStale)
+            // In FFM_COMPAT mode the render is the stale golden encoding; word2 is
+            // derived from g0/g1, so those two must be non-null (group2/group3 may
+            // be null -- frontier size-defer loads that carry no specific
+            // descriptor). The SPEC mnemonic path still requires sgpr operands.
+            if(mode == TensorLdsEncoding::SPEC)
             {
                 using std::begin;
                 using std::end;
@@ -3773,7 +3775,7 @@ namespace rocisa
             , group1(other.group1)
             , group2(other.group2)
             , group3(other.group3)
-            , rawStale(other.rawStale)
+            , mode(other.mode)
         {
         }
 
@@ -3827,46 +3829,62 @@ namespace rocisa
             // encoding (d0710001), which the FFM correctness model EXECUTES as a
             // real TDM load -> the descriptor SGPR walks out of range at long
             // sequences. The golden .sp3 toolchain emits the STALE d0310000
-            // encoding, which FFM treats as inert. rawStale reproduces that
-            // FFM-safe encoding as two typed .long words (word2 stays a separate
-            // node), so the emitter authors a typed instruction (no bare RawNode)
-            // while keeping the exact golden disasm + O+LSE. Same conditional-raw
-            // toString() precedent as VPkFmaF32.
-            if(rawStale)
+            // encoding, which FFM treats as inert. FFM_COMPAT reproduces that
+            // FFM-safe encoding as three typed .long words (this node self-emits
+            // word2, no separate companion node), so the emitter authors a typed
+            // instruction (no bare RawNode) while keeping the exact golden disasm
+            // + O+LSE. Same conditional-raw toString() precedent as VPkFmaF32.
+            if(mode == TensorLdsEncoding::FFM_COMPAT)
             {
-                return formatWithComment("    .long 0xd0310000\n    .long 0x00000000");
+                // word2 is derived from the group REGISTER INDICES -- regIdx is the
+                // base sgpr number, NOT regNum (the register count). Using regNum
+                // here would silently emit the wrong descriptor field.
+                // word2 = 0x7c7c0000 | g0 | ((g1 >> 1) << 9). Verified by hand:
+                // K(56,60)->0x7c7c3c38, V(68,72)->0x7c7c4844.
+                uint32_t word2 = 0x7c7c0000u | static_cast<uint32_t>(group0->regIdx)
+                                 | (static_cast<uint32_t>(group1->regIdx >> 1) << 9);
+                char buf[96];
+                std::snprintf(buf,
+                              sizeof(buf),
+                              "    .long 0xd0310000\n    .long 0x00000000\n    .long 0x%08x",
+                              word2);
+                return formatWithComment(std::string(buf));
             }
             auto kStr = preStr() + " " + getArgStr();
             return formatWithComment(kStr);
         }
 
     private:
-        RegContainerPtr group0;
-        RegContainerPtr group1;
-        RegContainerPtr group2;
-        RegContainerPtr group3;
-        bool            rawStale = false;
+        RegContainerPtr   group0;
+        RegContainerPtr   group1;
+        RegContainerPtr   group2;
+        RegContainerPtr   group3;
+        TensorLdsEncoding mode = TensorLdsEncoding::SPEC;
     };
 
     // tensor_store_from_lds (VIMAGE_TENSOR, op 0xc5). Mirrors TensorLoadToLds but
     // for the epilogue D/LSE stores. The golden .sp3 toolchain emits the stale
     // encoding word0 = 0xd0314000 (DMASK bit differs from the load's d0310000),
-    // word1 = 0. As with the load, the live mnemonic would make FFM execute a real
-    // TDM store; rawStale reproduces the FFM-safe stale word0/word1 as typed .long
-    // (word2 stays a separate VCmpGEU16 node). Same conditional-raw precedent.
+    // word1 = 0, word2 derived from g0/g1. As with the load, the live mnemonic
+    // would make FFM execute a real TDM store; FFM_COMPAT reproduces the FFM-safe
+    // stale word0/word1/word2 as three typed .long words self-emitted by this node
+    // (no separate companion node). Same conditional-raw precedent.
     struct TensorStoreFromLds : public Instruction
     {
         using ContainerPtr    = std::shared_ptr<Container>;
         using RegContainerPtr = std::shared_ptr<RegisterContainer>;
         TensorStoreFromLds(const RegContainerPtr& group0,
                            const RegContainerPtr& group1,
-                           bool                   rawStale = false,
-                           const std::string&     comment  = std::string())
+                           TensorLdsEncoding      mode    = TensorLdsEncoding::SPEC,
+                           const std::string&     comment = std::string())
             : Instruction(InstType::INST_TDM, comment)
             , group0(group0)
             , group1(group1)
-            , rawStale(rawStale)
+            , mode(mode)
         {
+            // store g0/g1 are never optional (all call sites pass real sgpr, and
+            // FFM_COMPAT word2 derives from them); the type check is unconditional
+            // in both modes, unlike the load whose group2/group3 may be null (R1).
             if(group0->regType != "s" || group1->regType != "s")
             {
                 throw std::invalid_argument("TensorStoreFromLds requires sgpr for group0/group1");
@@ -3878,7 +3896,7 @@ namespace rocisa
             : Instruction(other)
             , group0(other.group0)
             , group1(other.group1)
-            , rawStale(other.rawStale)
+            , mode(other.mode)
         {
         }
 
@@ -3904,9 +3922,21 @@ namespace rocisa
 
         std::string toString() const override
         {
-            if(rawStale)
+            if(mode == TensorLdsEncoding::FFM_COMPAT)
             {
-                return formatWithComment("    .long 0xd0314000\n    .long 0x00000000");
+                // word2 is derived from the group REGISTER INDICES -- regIdx is the
+                // base sgpr number, NOT regNum (the register count). Using regNum
+                // here would silently emit the wrong descriptor field.
+                // word2 = 0x7c7c0000 | g0 | ((g1 >> 1) << 9). Verified by hand:
+                // K(56,60)->0x7c7c3c38, V(68,72)->0x7c7c4844.
+                uint32_t word2 = 0x7c7c0000u | static_cast<uint32_t>(group0->regIdx)
+                                 | (static_cast<uint32_t>(group1->regIdx >> 1) << 9);
+                char buf[96];
+                std::snprintf(buf,
+                              sizeof(buf),
+                              "    .long 0xd0314000\n    .long 0x00000000\n    .long 0x%08x",
+                              word2);
+                return formatWithComment(std::string(buf));
             }
             std::stringstream ss;
             ss << preStr() << " " << std::get<ContainerPtr>(getParams().at(0))->toString() << ", "
@@ -3915,9 +3945,9 @@ namespace rocisa
         }
 
     private:
-        RegContainerPtr group0;
-        RegContainerPtr group1;
-        bool            rawStale = false;
+        RegContainerPtr   group0;
+        RegContainerPtr   group1;
+        TensorLdsEncoding mode = TensorLdsEncoding::SPEC;
     };
 
     struct GlobalPrefetchB8 : public Instruction

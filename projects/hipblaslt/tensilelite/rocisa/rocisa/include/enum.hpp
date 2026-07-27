@@ -313,6 +313,17 @@ namespace rocisa
         NV      = 1,
     };
 
+    // Tensor-load/store-to-LDS encoding mode (gfx1250 tensor_load_to_lds /
+    // tensor_store_from_lds). SPEC is the real amdclang mnemonic (0xC4/0xC5,
+    // d0710001/d0714001), forward-correct on real MI450 silicon. FFM_COMPAT is
+    // the pre-production stale encoding (d0310000/d0314000) the frozen FFM
+    // correctness emulator requires; word2 is derived from g0/g1.
+    enum class TensorLdsEncoding : int
+    {
+        SPEC       = 0,
+        FFM_COMPAT = 1,
+    };
+
     enum class HighBitSel : int
     {
         NONE = -1,

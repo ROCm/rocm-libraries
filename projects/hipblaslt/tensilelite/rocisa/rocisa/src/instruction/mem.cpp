@@ -1907,14 +1907,14 @@ void mem_inst(nb::module_ m_mem)
                       const std::shared_ptr<rocisa::RegisterContainer>&,
                       const std::shared_ptr<rocisa::RegisterContainer>&,
                       const std::shared_ptr<rocisa::RegisterContainer>&,
-                      bool,
+                      rocisa::TensorLdsEncoding,
                       const std::string&>(),
              nb::arg("group0").none(),
              nb::arg("group1").none(),
              nb::arg("group2").none(),
              nb::arg("group3").none(),
-             nb::arg("raw_stale") = false,
-             nb::arg("comment")   = "")
+             nb::arg("mode")    = rocisa::TensorLdsEncoding::SPEC,
+             nb::arg("comment") = "")
         .def("__deepcopy__", [](const rocisa::TensorLoadToLds& self, nb::dict&) {
             return new rocisa::TensorLoadToLds(self);
         });
@@ -1922,12 +1922,12 @@ void mem_inst(nb::module_ m_mem)
     nb::class_<rocisa::TensorStoreFromLds, rocisa::Instruction>(m_mem, "TensorStoreFromLds")
         .def(nb::init<const std::shared_ptr<rocisa::RegisterContainer>&,
                       const std::shared_ptr<rocisa::RegisterContainer>&,
-                      bool,
+                      rocisa::TensorLdsEncoding,
                       const std::string&>(),
              nb::arg("group0"),
              nb::arg("group1"),
-             nb::arg("raw_stale") = false,
-             nb::arg("comment")   = "")
+             nb::arg("mode")    = rocisa::TensorLdsEncoding::SPEC,
+             nb::arg("comment") = "")
         .def("__deepcopy__", [](const rocisa::TensorStoreFromLds& self, nb::dict&) {
             return new rocisa::TensorStoreFromLds(self);
         });
