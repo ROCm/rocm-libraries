@@ -213,6 +213,11 @@ size_t hardware_t::get_default_num_xcds(architecture_t arch) {
   }
 }
 
+size_t hardware_t::get_default_cache_line_bytes(architecture_t /*arch*/) {
+  // Per-arch L2 cache-line size, currently uniform 128 B across supported archs.
+  return 128;
+}
+
 void hardware_t::print() const {
   std::cout << "================== Hardware Configuration ==================\n";
   std::cout << "Number of CUs (N_CU)      : " << N_CU << "\n";

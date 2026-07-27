@@ -221,6 +221,11 @@ if( ROCFFT_RUN_INTERNAL_TESTS AND NOT ROCFFT_BUILD_INTERNAL_TESTS )
   message( FATAL_ERROR
     "ROCFFT_RUN_INTERNAL_TESTS=ON requires ROCFFT_BUILD_INTERNAL_TESTS=ON." )
 endif()
+# Coverage needs the internal tests built too.
+if( BUILD_CODE_COVERAGE )
+  set( ROCFFT_BUILD_INTERNAL_TESTS ON CACHE BOOL
+    "Build internal (library-side) unit tests" FORCE )
+endif()
 if( ROCFFT_BUILD_INTERNAL_TESTS )
   enable_testing()
 endif()
