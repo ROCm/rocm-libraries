@@ -426,34 +426,41 @@ class StreamK(Component):
 
     @staticmethod
     def usesRawQueueRank(writer, kernel):
-        """True when the per-XCD queue index is taken from the raw pre-wgmXCC
-        launch rank snapshotted in the dedicated persistent ``StreamKQueue`` SGPR.
+        """True when the per-XCD queue index is taken from the raw pre-remap
+        launch rank snapshotted into the reused, in-window-dead persistent
+        ``StreamKTileIdx`` carrier (zero extra SGPR -- see the prologue snapshot
+        in KernelWriterAssembly and KernelWriter.skUsesRawQueueRank).
 
         The auto-reset wrap bound (tiles_q + W_q [+ W_p]) assumes each queue's
         home-workgroup count equals ``distribute(skGrid, q)`` -- i.e. that the
         set of workgroup ids mapped to queue q is ``{i in [0,skGrid) : i %%
         numQueues == q}``.  That holds only if the value feeding ``% numQueues``
-        densely covers ``[0, skGrid)``.  ``StreamKIdx`` is the *wgmXCC-remapped*
-        id, and wgmXCC's CU-count remap is NOT a ``% numQueues``-count-preserving
-        permutation when the grid does not block evenly (CU_Count %% WGMXCC != 0),
-        so ``StreamKIdx %% numQueues`` skews the per-queue count away from W_q and
-        the counter no longer wraps back to 0 each launch.  Using the raw launch
-        rank (a dense bijection onto ``[0, skGrid)``) restores the invariant.
+        densely covers ``[0, skGrid)``.  ``StreamKIdx`` is the *remapped* id
+        (wgmXCC CU-count remap and/or the StreamKXCCMapping chiplet remap), and
+        neither remap is a ``% numQueues``-count-preserving permutation when the
+        grid does not block evenly, so ``StreamKIdx %% numQueues`` skews the
+        per-queue count away from W_q and the counter no longer wraps back to 0
+        each launch.  Using the raw launch rank (a dense bijection onto
+        ``[0, skGrid)`` == physical XCD rank) restores the invariant.
 
-        Scoped to the dynamic auto-WGM path (WorkGroupMappingXCC == -1) -- the
-        path the residual dynamic-queue shapes take, where the host picks
-        WGMXCC = NUM_XCD > 1 and the chiplet remap skews the per-queue count.
-        Fixed WGMXCC solutions are excluded: == 1 needs no fix (StreamKIdx is
-        already the raw rank) and the tuned fixed-WGMXCC > 1 kernels are the
-        register-ceiling DirectToLds max-tile solutions where one extra
-        persistent SGPR overflows the file (and they are not the residual
-        shapes).  On WorkGroupIdFromTTM targets (gfx12) StreamKIdx is re-read from
+        Two disjoint remap regimes need the raw rank:
+          * WorkGroupMappingXCC == -1 (dynamic auto-WGM) -- host picks
+            WGMXCC = NUM_XCD > 1 and the wgmXCC remap skews the count.
+          * StreamKXCCMapping != 0 with WorkGroupMappingXCC > 1 (SKXCC) -- the
+            SKXCC chiplet remap (plus fixed WGMXCC > 1) skews the count.  SKXCC
+            with WGMXCC == 1 is already count-preserving and stays on the cheap
+            ``StreamKIdx %% numQueues`` else-branch; WGMXCC == -1 is mutually
+            exclusive with SKXCC so the disjuncts never overlap.
+
+        Fixed non-SKXCC WGMXCC == 1 needs no fix (StreamKIdx is already the raw
+        rank).  On WorkGroupIdFromTTM targets (gfx12) StreamKIdx is re-read from
         the raw hardware id (ttmp9); single-queue arches (NumXCD <= 1) are
-        trivially balanced.  Kept in sync with KernelWriter.skUsesRawQueueRank
-        (which defines the StreamKQueue SGPR)."""
+        trivially balanced.  Kept in sync with KernelWriter.skUsesRawQueueRank."""
         return (writer.states.archCaps["NumXCD"] > 1
                 and not writer.states.archCaps["WorkGroupIdFromTTM"]
-                and kernel["WorkGroupMappingXCC"] == -1)
+                and (kernel["WorkGroupMappingXCC"] == -1
+                     or (kernel["StreamKXCCMapping"] != 0
+                         and kernel["WorkGroupMappingXCC"] > 1)))
 
     def _emitQueueIndex(self, writer, kernel, sQueueIdx, wsLog2Queues) -> Module:
         """Compute the per-XCD work-queue index into ``sQueueIdx``.
@@ -462,8 +469,9 @@ class StreamK(Component):
         round-robin launch rank so its ``% numQueues`` count equals the
         ``distribute(skGrid, q)`` the auto-reset bound assumes (see
         ``usesRawQueueRank``).  On gfx9 that raw rank is snapshotted once, before
-        wgmXCC rewrites WorkGroup0, into the dedicated persistent ``StreamKQueue``
-        SGPR (KernelWriterAssembly prologue); here it is read back and reduced
+        wgmXCC / the SKXCC XCCMapping remap rewrites WorkGroup0, into the reused,
+        in-window-dead persistent ``StreamKTileIdx`` carrier (KernelWriterAssembly
+        prologue -- zero extra SGPR); here it is read back and reduced
         ``% numQueues``.  Otherwise (WGMXCC no-op, or gfx12) ``StreamKIdx``
         already holds the raw id, so fall back to ``StreamKIdx %% numQueues``.
         """
@@ -476,9 +484,11 @@ class StreamK(Component):
             # assumes -- and the atomic counter self-resets to 0 every launch.
             # (StreamKIdx is the wgmXCC CU-count-remapped id, whose % numQueues is
             # NOT count-preserving and skews the per-queue count.) Uniform for SK4
-            # and SK5 -- the snapshot lives in the persistent StreamKQueue SGPR.
+            # and SK5 -- the snapshot lives in the reused, in-window-dead
+            # persistent StreamKTileIdx carrier (zero extra SGPR; see
+            # KernelWriterAssembly prologue and usesRawQueueRank).
             _, numQueuesMask, _, _ = self._wsQueueConstants(writer, kernel)
-            module.add(SAndB32(dst=sgpr(sQueueIdx), src0=sgpr("StreamKQueue"), src1=hex(numQueuesMask),
+            module.add(SAndB32(dst=sgpr(sQueueIdx), src0=sgpr("StreamKTileIdx"), src1=hex(numQueuesMask),
                                comment="queue = rawWG %% numQueues (dense round-robin => home-WG count == distribute(skGrid,q))"))
         else:
             module.add(SLShiftRightB32(dst=sgpr(sQueueIdx), src=sgpr("StreamKIdx"), shiftHex=wsLog2Queues))
