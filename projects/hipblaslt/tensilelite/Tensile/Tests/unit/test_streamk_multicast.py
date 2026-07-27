@@ -120,26 +120,10 @@ class TestValidation:
             # cluster-scope barrier handshake, so ClusterBarrier is derived on.
             assert st["ClusterBarrier"] is True, st.get("ClusterBarrier")
 
-    def test_auto_enable_from_bare_cluster(self, tmp_path):
-        """Collapse: a StreamK=3 + ClusterDim config that does NOT explicitly set
-        StreamKMulticast now auto-derives the cooperative-load path
-        (StreamKMulticast=1, Multicast=True). The bare index-only StreamK cluster
-        state has been removed."""
-        from Tensile import LibraryIO
-        import yaml
-        cfg = copy.deepcopy(LibraryIO.read(_STREAMK_CLUSTER_BARE))
-        fork = cfg["BenchmarkProblems"][0][1]["ForkParameters"]
-        # Guard the premise: the base bare-cluster config is opt-in-free.
-        assert not any("StreamKMulticast" in e for e in fork), \
-            "base config unexpectedly sets StreamKMulticast"
-        out = tmp_path / "bare_cluster.yaml"
-        with open(out, "w") as f:
-            yaml.safe_dump(cfg, f, default_flow_style=None)
-        states = _derive_states(str(out))
-        assert states, "expected the bare SK3 cluster config to derive solutions"
-        for st in states:
-            assert st["StreamKMulticast"] == 1, st.get("StreamKMulticast")
-            assert st["Multicast"] == 1, st["Multicast"]
+    # NB: test_auto_enable_from_bare_cluster was removed as a strict subset of
+    # test_multicast_tristate.py::TestDerivation::test_streamk_cluster_auto_multicast,
+    # which derives the same bare SK3 + ClusterDim config and asserts the same
+    # StreamKMulticast==1 / Multicast==1 (plus ClusterBarrier is True).
 
     def test_reject_multicast_force_off(self, tmp_path):
         """StreamKMulticast auto-enabled by ClusterDim on SK3 is incompatible with
@@ -150,17 +134,11 @@ class TestValidation:
                              fork_overrides={"Multicast": [0]})
         assert _derive_states(cfg) == []
 
-    def test_control_multicast_auto_enabled(self, tmp_path):
-        """Control for test_reject_multicast_force_off: the same SK3 [C,1] cluster
-        config with Multicast=-1 (auto, the default) auto-enables StreamKMulticast
-        and derives valid solutions."""
-        cfg = _write_variant(tmp_path, "mc_auto.yaml",
-                             fork_overrides={"Multicast": [-1]})
-        states = _derive_states(cfg)
-        assert states, "expected the Multicast=-1 control config to derive solutions"
-        for st in states:
-            assert st["StreamKMulticast"] == 1
-            assert st["Multicast"] == 1, st["Multicast"]
+    # NB: test_control_multicast_auto_enabled was removed as a subset of
+    # test_accepted_baseline above, which derives the same SK3 [4,1] cluster
+    # config with the default Multicast=-1 (auto) and already asserts
+    # StreamKMulticast==1 / Multicast==1 (plus ClusterDim/ClusterBarrier). The
+    # negative-path partner test_reject_multicast_force_off is retained.
 
     def test_reject_atomic(self, tmp_path):
         cfg = _write_variant(tmp_path, "atomic.yaml",
@@ -325,34 +303,17 @@ class TestTDMInstValidation:
 # --- emitted assembly ------------------------------------------------------
 
 class TestEmit:
+    # NB: the byte-exact emitted assembly is pinned by the characterization
+    # golden test_streamk_cluster_multicast_gfx1250_char.py (+ its .ambr /
+    # cmpasm snapshot). The former positive string assertions here (emits
+    # assembly, split-mask bindings, clusterMulticastValid predicate, cluster
+    # barrier handshake, DP->SK boundary clear) duplicated that golden and were
+    # removed. Only the two checks the golden does NOT express as a single
+    # readable assertion are kept: the C=4 mask arithmetic and the negative
+    # combined-mask-leak scan.
     def _emit(self, cfg=_STREAMK_MULTICAST):
         from config_harness import emit_kernels_from_config
         return emit_kernels_from_config(cfg, limit=8, arch=_ARCH)
-
-    def test_emits_assembly(self):
-        results = self._emit()
-        assert len(results) >= 1, "Expected >=1 kernel, got 0"
-        assert all(err == 0 for (_b, _s, err) in results), (
-            [(b, e) for b, _s, e in results if e != 0])
-        for base, src, _err in results:
-            assert ".amdgcn_target" in src and "gfx1250" in src
-            assert base.startswith("Cijk_")
-
-    def test_split_mask_bindings(self):
-        """A descriptors bind MulticastMaskA (self), B descriptors bind
-        MulticastMaskB (broadcast) -- the split topology, not the combined
-        MulticastMask (which would be an undeclared SGPR on this path)."""
-        _b, src, _e = self._emit()[0]
-        assert "s[sgprtdmBGroup1], s[sgprtdmBGroup1], s[sgprMulticastMaskB]" in src, \
-            "B descriptor must OR the B-broadcast mask (MulticastMaskB)"
-        assert "s[sgprtdmAGroup1], s[sgprtdmAGroup1], s[sgprMulticastMaskA]" in src, \
-            "A descriptor must OR the self-only mask (MulticastMaskA)"
-        # The combined single-parity name must not appear as a bare SGPR: only
-        # the split MaskA/MaskB (and optional Metadata) forms are declared.
-        for line in src.splitlines():
-            if "sgprMulticastMask," in line:
-                pytest.fail("combined MulticastMask SGPR leaked into split path: "
-                            + line.strip())
 
     def test_broadcast_mask_value(self):
         """maskB = (1<<C)-1 = 0xf for C=4; maskA = self bit (shift of 0x1)."""
@@ -362,35 +323,15 @@ class TestEmit:
         assert "s[sgprMulticastMaskA], 0x1," in src, \
             "A self mask must be a shift of 0x1"
 
-    def test_cluster_multicast_valid_predicate(self):
-        """The runtime clusterMulticastValid predicate gates the broadcast:
-        nWG0 % C alignment + fully-populated cluster, else B loads normally.
-
-        (Block ``addComment0`` banners are dropped by the canonicalizer, so we
-        assert on the surviving inline instruction comments.)"""
+    def test_no_combined_mask_leak(self):
+        """Negative guard: the combined single-parity MulticastMask SGPR must
+        never appear as a bare SGPR on the split MaskA/MaskB path (only the split
+        MaskA/MaskB, and optional Metadata, forms are declared there)."""
         _b, src, _e = self._emit()[0]
-        assert "nWG0 aligned to C?" in src, "M-alignment check missing"
-        assert "cluster fully populated?" in src, "population check missing"
-        assert "invalid cluster -> B loaded normally" in src, \
-            "predicate fallback (self-only B) missing"
-
-    def test_cluster_barrier_handshake(self):
-        """The multicast B-broadcast masks are paired with the cluster-scope
-        barrier handshake (s_barrier_signal/wait -3) around the multicast
-        tensor_load_to_lds, so ClusterBarrier is on and both barrier opcodes are
-        emitted."""
-        _b, src, _e = self._emit()[0]
-        assert "s_barrier_signal -3" in src, \
-            "missing cluster-scope barrier signal (-3) on the multicast path"
-        assert "s_barrier_wait -3" in src, \
-            "missing cluster-scope barrier wait (-3) on the multicast path"
-
-    def test_dp_to_sk_boundary_clear(self):
-        """At the DP->SK boundary the B broadcast is dropped to self-only so SK
-        partial-tile loads are normal per-WG loads."""
-        _b, src, _e = self._emit()[0]
-        assert "DP->SK: drop B broadcast -> self-only" in src, \
-            "boundary-clear rewrite of MulticastMaskB missing"
+        for line in src.splitlines():
+            if "sgprMulticastMask," in line:
+                pytest.fail("combined MulticastMask SGPR leaked into split path: "
+                            + line.strip())
 
 
 if __name__ == "__main__":

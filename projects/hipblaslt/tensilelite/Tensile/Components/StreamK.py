@@ -2591,6 +2591,31 @@ class StreamKTwoTileDPFirst(StreamK):
                            comment="DP->SK: drop B broadcast -> self-only (normal B load)"))
         return module
 
+    def _clusterElectArriveSignal(self, writer, module, *, labelBase, electTag, wait=False):
+        """Emit the wave-0-elected cluster split-barrier arrive shared by the
+        StreamKMulticast prologue signal and prologue prefetch handshake.
+
+        Wave election reuses the Serial/readfirstlane idiom the StreamK flag path
+        already uses (rather than sgpr("WaveIdx"), which may be undefined in the
+        epilogue): one wave per workgroup arrives (``s_barrier_signal -3``) while
+        the remaining waves branch over it via ``labelBase``. When ``wait`` is set
+        an all-waves cluster wait (``s_barrier_wait -3``) follows the arrive.
+        ``labelBase``/``electTag`` are supplied per call site so the emitted label
+        and pool tag -- and hence the assembly -- stay byte-identical to the
+        pre-extraction inline copies. Instructions are appended to ``module``.
+        """
+        skipSignal = Label(label=writer.labels.getNameInc(labelBase), comment="")
+        elect = writer.sgprPool.checkOut(1, electTag)
+        module.add(VReadfirstlaneB32(dst=sgpr(elect), src=vgpr("Serial"), comment="wave 0 signals the cluster"))
+        module.add(SCmpEQU32(src0=sgpr(elect), src1=0, comment="Check for wave 0"))
+        module.add(SCBranchSCC0(labelName=skipSignal.getLabelName(), comment="only wave 0 signals the cluster"))
+        module.add(SBarrier(True, False, True, comment="cluster_barrier signal (arrive)"))
+        module.add(skipSignal)
+        if wait:
+            module.add(SBarrier(True, True, True, comment="cluster_barrier wait"))
+        writer.sgprPool.checkIn(elect)
+        return module
+
     def streamKMulticastPrologueSignal(self, writer, kernel):
         """Elect wave 0 to arrive at the cluster split barrier once per workgroup.
 
@@ -2607,14 +2632,8 @@ class StreamKTwoTileDPFirst(StreamK):
         assert writer.states.asmCaps.get("HasClusterBarrier", False), \
             "StreamKMulticast requires the HasClusterBarrier asm capability"
         module.addComment0("StreamKMulticast: elect wave 0 to signal the cluster barrier (pairs first-load wait)")
-        skipSignal = Label(label=writer.labels.getNameInc("SKMC_SkipSignal"), comment="")
-        elect = writer.sgprPool.checkOut(1, "SKMulticastElect")
-        module.add(VReadfirstlaneB32(dst=sgpr(elect), src=vgpr("Serial"), comment="wave 0 signals the cluster"))
-        module.add(SCmpEQU32(src0=sgpr(elect), src1=0, comment="Check for wave 0"))
-        module.add(SCBranchSCC0(labelName=skipSignal.getLabelName(), comment="only wave 0 signals the cluster"))
-        module.add(SBarrier(True, False, True, comment="cluster_barrier signal (arrive)"))
-        module.add(skipSignal)
-        writer.sgprPool.checkIn(elect)
+        self._clusterElectArriveSignal(
+            writer, module, labelBase="SKMC_SkipSignal", electTag="SKMulticastElect")
         return module
 
     def streamKMulticastProloguePrefetchHandshake(self, writer, kernel):
@@ -2634,15 +2653,8 @@ class StreamKTwoTileDPFirst(StreamK):
         assert writer.states.asmCaps.get("HasClusterBarrier", False), \
             "StreamKMulticast requires the HasClusterBarrier asm capability"
         module.addComment0("StreamKMulticast: bracket prologue double-buffer prefetch load with cluster handshake")
-        skipSignal = Label(label=writer.labels.getNameInc("SKMC_SkipPrefetchSignal"), comment="")
-        elect = writer.sgprPool.checkOut(1, "SKMulticastPrefetchElect")
-        module.add(VReadfirstlaneB32(dst=sgpr(elect), src=vgpr("Serial"), comment="wave 0 signals the cluster"))
-        module.add(SCmpEQU32(src0=sgpr(elect), src1=0, comment="Check for wave 0"))
-        module.add(SCBranchSCC0(labelName=skipSignal.getLabelName(), comment="only wave 0 signals the cluster"))
-        module.add(SBarrier(True, False, True, comment="cluster_barrier signal (arrive)"))
-        module.add(skipSignal)
-        module.add(SBarrier(True, True, True, comment="cluster_barrier wait"))
-        writer.sgprPool.checkIn(elect)
+        self._clusterElectArriveSignal(
+            writer, module, labelBase="SKMC_SkipPrefetchSignal", electTag="SKMulticastPrefetchElect", wait=True)
         return module
 
     def streamKMulticastZeroIterClusterWait(self, writer, kernel):
