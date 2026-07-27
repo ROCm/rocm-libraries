@@ -343,7 +343,7 @@ write_tensilelite_check_yaml() {
     # gfx1151 f32 does not support the WMMA instruction shape used by the
     # gfx94x/gfx950 smoke below. Use a small VALU assembly config.
     #
-    # The workflow builds rocjitsu from rocm-systems develop, which includes
+    # The workflow's pinned rocm-systems revision includes
     # ROCm/rocm-systems#8628. That fix prevents the D16 destination-merge
     # bookkeeping from false-firing, so this path can execute and validate the
     # generated client workload instead of stopping after client startup.
