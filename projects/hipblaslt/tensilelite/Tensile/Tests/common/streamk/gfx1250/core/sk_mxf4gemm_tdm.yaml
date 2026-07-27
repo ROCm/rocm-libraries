@@ -81,7 +81,12 @@ BenchmarkProblems:
         - DirectToVgprSparseMetadata: [false]
         - StoreVectorWidth: [-1]
         - StreamK: [3]
-        - StaggerU: [0]
+        # Stream-K + MX + StaggerU > 0: exercises the wave-parity WrapU selection in
+        # tdmIncrementABWaveSperated, which runs twice per increment for MX kernels
+        # (once for A/B, once for MXSA/MXSB). Non-PAP on purpose: TDM + PAP forces
+        # StaggerU to 0 (SolutionStructs/Solution.py _disableUnsupportedRuntimeStaggerU).
+        - StaggerU: [0, 4, 16]
+        - StaggerUMapping: [0, 1]
         - DirectToVgprA: [False]
         - DirectToVgprB: [False]
         - WavefrontSize: [32]
