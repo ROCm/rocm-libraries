@@ -66,6 +66,23 @@ Expected runtime: ~2 seconds. The validation pass for this doc tree had `245 tes
 
 These tests do not require a GPU. They prove IR builds, LLVM text shape, and helpers' static contracts.
 
+## Documentation Link Lint
+
+`tools/mdlinklint` catches navigation drift caused by moved files, directories,
+or headings. The code-level tests above do not traverse Markdown links, while
+this static check needs no Python, ROCm, or GPU environment. From `platform`,
+run:
+
+```bash
+go run tools/mdlinklint/main.go --root dsl_docs
+go test tools/mdlinklint/main.go tools/mdlinklint/main_test.go
+```
+
+It emits deterministic `file:line:column: error: ...` diagnostics and exits
+nonzero for unresolved local targets (files or directories) or Markdown heading
+fragments. It deliberately skips external URLs, mail links, and non-Markdown
+fragments.
+
 ## Byte-identity gate (cross-engine)
 
 The rocKE-native cross-engine test is the byte-identity gate: it builds the C++
