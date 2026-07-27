@@ -362,7 +362,14 @@ class KernelWriterAssembly(KernelWriter):
       return False
     if kernel.get("UseSubtileImpl"):
       return False
-    return bool(kernel["ClusterBarrier"])
+    if kernel["ClusterBarrier"]:
+      return True
+    # TDM StaggerU keeps WaveIdx past setupNewTile, but only until
+    # releaseWaveIdxAfterStagger hands it back after the last stagger consumer;
+    # anything emitted after that (tail loop) must recompute from Serial again.
+    if self.states.waveIdxReleasedAfterStagger:
+      return False
+    return bool(self.states.staggerUCode) and self.isTdmWaveSeparated(kernel)
 
   ########################################
   def strideRef(self, tc, dim):
@@ -6428,7 +6435,36 @@ class KernelWriterAssembly(KernelWriter):
       imod.add(labelRemoveSUEnd)
     # Wave-separated TDM: stagger setup/remove still use GlobalReadIncs*; release here.
     imod.add(self.releaseGlobalReadIncsSgprsAfterTdmWaveSep(kernel))
+    imod.add(self.releaseWaveIdxAfterStagger(kernel))
     return imod
+
+  def releaseWaveIdxAfterStagger(self, kernel):
+    """Return sgpr("WaveIdx") to the pool after the last TDM stagger consumer.
+
+    setupNewTile keeps WaveIdx live past its usual release point for TDM StaggerU
+    kernels, and WaveIdx sits in nonPostLoopSgpr, so neither the tailLoopGlobalRead
+    release list nor the endSummation sweep can reclaim it. Releasing here keeps it
+    out of the post-loop store phase. On today's kernels the SGPR high-water is
+    already set before the store phase, so this does not lower the reported count;
+    it bounds the cost for kernels where the store phase is the peak.
+
+    Must be idempotent: removeStaggerAB has two mutually exclusive call sites and
+    may not run at all, and undefining a sgpr twice is a compiler error while a
+    second sgprPool check-in would corrupt the pool.
+    """
+    module = Module("ReleaseWaveIdxAfterStagger")
+    # The cluster barrier handshake reads WaveIdx for the whole kernel.
+    if kernel["ClusterBarrier"]:
+      return module
+    if not (self.states.staggerUCode and self.isTdmWaveSeparated(kernel)):
+      return module
+    if "WaveIdx" not in self.sgprs:
+      return module
+    if self.states.waveIdxReleasedAfterStagger:
+      return module
+    self.states.waveIdxReleasedAfterStagger = True
+    module.add(self.undefineSgpr("WaveIdx"))
+    return module
 
   def removeStagger(self, kernel, tP):
     imod = Module("removeStagger")

@@ -382,6 +382,7 @@ class StateValues:
   tailloopInNll: bool                    = False
   tailloopInNllmaxUnit: int              = 0
   staggerUCode: bool                     = 0
+  waveIdxReleasedAfterStagger: bool      = False
   scheduleGROverBarrier: bool            = False
   numLDSBlk: int                         = 0
   IncLdsBufSwitch: bool                  = False
@@ -2995,8 +2996,13 @@ class KernelWriter(metaclass=abc.ABCMeta):
           module.add(self.releaseGlobalReadIncsSgprsAfterTdmWaveSep(kernel))
 
       # WaveIdx already freed for subtile (before graWorkGroup above)
+      # TDM StaggerU also reads wave parity from WaveIdx -- in calculateStagger and
+      # removeStagger, and once per unroll-loop iteration in
+      # tdmIncrementABWaveSperated -- so it has to outlive setupNewTile there.
+      # releaseWaveIdxAfterStagger returns it to the pool after the last consumer.
       if (kernel["enableTDMA"] or kernel["enableTDMB"]) and not kernel["ClusterBarrier"] \
-          and not kernel.get("UseSubtileImpl"):
+          and not kernel.get("UseSubtileImpl") \
+          and not (self.states.staggerUCode and self.isTdmWaveSeparated(kernel)):
         module.add(self.undefineSgpr("WaveIdx"))
 
       ###########################################################################
