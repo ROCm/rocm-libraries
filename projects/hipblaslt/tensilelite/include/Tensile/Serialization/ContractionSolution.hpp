@@ -108,6 +108,7 @@ namespace TensileLite
                 iot::mapOptional(io, "streamKAtomic", s.streamKAtomic);
                 iot::mapOptional(io, "streamKClusterReduction", s.streamKClusterReduction);
                 iot::mapOptional(io, "streamKMulticast", s.streamKMulticast);
+                iot::mapOptional(io, "streamKDualMulticast", s.streamKDualMulticast);
                 iot::mapOptional(io, "prefetchAcrossPersistent", s.prefetchAcrossPersistent);
                 iot::mapOptional(io, "persistentKernel", s.persistentKernel);
                 iot::mapOptional(io, "persistentKernelAlongBatch", s.persistentKernelAlongBatch);

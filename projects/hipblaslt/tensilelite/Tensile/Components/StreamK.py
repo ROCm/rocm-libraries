@@ -36,7 +36,7 @@ from rocisa.functions import scalarStaticDivideAndRemainder, sMagicDiv2, \
 
 from .Subtile.SubtileLREmit import localReadResetOffsetsSubtile
 
-from ..Common import print2, ceilDivide, log2, clusterEnabled, streamKClusterFactors, streamKForceDP2DMulticast
+from ..Common import print2, ceilDivide, log2, clusterEnabled, streamKClusterFactors, streamKForceDP2DMulticast, streamKDual2DMulticast
 from ..Component import Component
 from ..AsmStoreState import StoreState, VectorDataTypes
 from ..AsmAddressCalculation import AddrCalculation
@@ -2896,15 +2896,17 @@ class StreamKTwoTileDPFirst(StreamK):
         module = Module("StreamK multicast mask predicate")
         if not kernel.get("StreamKMulticast", 0):
             return module
-        if streamKForceDP2DMulticast(kernel):
-            # ForceDPOnly 2-D DUAL-multicast probe: the dense 2-D masks emitted at
-            # kernel init (ClusterLoad.computeMasks, aPeers=Ck) are already correct
-            # for BOTH operands (A along Ck/Y N-adjacent peers, B along Cs/X
-            # M-adjacent peers) using the raw HW wg_x/wg_y within-cluster ranks.
-            # ClusterDimCheck guarantees full/aligned clusters (nWG0%Cs==0 &&
-            # nWG1%Ck==0), so there is no partial-cluster tail and no preLoop
-            # overwrite or self-mask fallback is required.
-            module.addComment0("StreamKForceDP2DMulticast: keep dense 2-D masks (A & B); no preLoop overwrite")
+        if streamKDual2DMulticast(kernel):
+            # 2-D DUAL-multicast (ForceDPOnly-2D probe AND the standard Target-A
+            # StreamKDualMulticast path): the dense 2-D masks emitted at kernel init
+            # (ClusterLoad.computeMasks, aPeers=Ck) are already correct for BOTH
+            # operands (A along Ck/Y N-adjacent peers, B along Cs/X M-adjacent peers)
+            # using the raw HW wg_x/wg_y within-cluster ranks. ClusterDimCheck
+            # guarantees full/aligned DP clusters (nWG0%Cs==0 && gridDimY%Ck==0), so
+            # the DP round needs no preLoop overwrite or self-mask fallback. (On the
+            # standard path the masks are later dropped to self-only at the DP->SK
+            # boundary -- see streamKMulticastBoundaryClear.)
+            module.addComment0("StreamKDual2DMulticast: keep dense 2-D masks (A & B); no preLoop overwrite")
             return module
         c = kernel["ClusterDim"][0]
         _, _, _, is2d = streamKClusterFactors(kernel)
@@ -2969,6 +2971,28 @@ class StreamKTwoTileDPFirst(StreamK):
         """
         module = Module("StreamK multicast DP->SK boundary clear")
         if not kernel.get("StreamKMulticast", 0):
+            return module
+        if streamKDual2DMulticast(kernel):
+            # 2-D DUAL multicast (Target A, standard StreamKForceDPOnly=0 path): the
+            # DP round multicasts BOTH operands via the dense kernel-init masks (A
+            # along the Ck/Y peers, B along the Cs/X peers). At the DP->SK boundary
+            # the SK partial-tile peers no longer co-issue the identical full-K load
+            # for EITHER operand, so BOTH masks must drop to self-only (unlike the
+            # 1-D path, where only B was ever broadcast). The single self bit is
+            # (MulticastMaskA & MulticastMaskB): in a 2-D cluster the A-peer set
+            # (same X, all Y) and the B-peer set (same Y, all X) intersect at
+            # exactly this WG's own lane. Set both masks to it so each operand loads
+            # per-workgroup for the remaining SK iterations. (ForceDPOnly-2D never
+            # reaches here -- it has no SK round.)
+            # NOTE: the marker phrase lives on the instruction comment (not a
+            # standalone addComment0) because this region is later run through the
+            # s_delay_alu scheduler, which drops pure-comment items but preserves
+            # per-instruction comments.
+            module.addComment0("StreamKDual2DMulticast: clear BOTH A & B broadcast masks at DP->SK boundary")
+            module.add(SAndB32(dst=sgpr("MulticastMaskA"), src0=sgpr("MulticastMaskA"), src1=sgpr("MulticastMaskB"),
+                               comment="StreamKDual2DMulticast: clear BOTH A & B broadcast masks at DP->SK boundary: self = maskA & maskB (2-D cluster A/B peer sets meet at self)"))
+            module.add(SMovB32(dst=sgpr("MulticastMaskB"), src=sgpr("MulticastMaskA"),
+                               comment="DP->SK: drop A & B broadcast -> self-only (normal loads)"))
             return module
         module.addComment0("StreamKMulticast: clear B-broadcast mask at DP->SK boundary")
         module.add(SMovB32(dst=sgpr("MulticastMaskB"), src=sgpr("MulticastMaskA"),
@@ -3079,11 +3103,18 @@ class StreamKTwoTileDPFirst(StreamK):
         # WorkGroup0 so the existing SMov/VMov below (unchanged) still copies the
         # final index -> the 1-D Ck==1 path is byte-identical.
         cs2d, ck2d, C2d, is2d = streamKClusterFactors(kernel)
-        forceDP2D = streamKForceDP2DMulticast(kernel)
+        forceDP2D = streamKDual2DMulticast(kernel)
         if forceDP2D:
-            # ForceDPOnly 2-D DUAL-multicast probe (Phase-0): fold the genuine 2-D
-            # (+batch) HW workgroup coords into the linear DP tile index the
-            # ForceDPOnly decode expects. After the cluster remap (defineAndResources)
+            # 2-D DUAL-multicast (ForceDPOnly-2D probe AND the standard Target-A
+            # StreamKDualMulticast path): fold the genuine 2-D (+batch) HW workgroup
+            # coords into the linear DP tile index the DP decode expects. For the
+            # standard path the launch is [nWG0, gridDimY, batch] with gridDimY a
+            # multiple of Ck and (for batch==1) StreamKIdx = WorkGroup1*nWG0 +
+            # WorkGroup0 is DENSE in [0, skGrid) so the two-tile DP grid-stride and
+            # the SK partial-tile decode both re-linearize correctly; the DP round's
+            # X-peers stay M-adjacent (share B) and Y-peers N-adjacent (share A)
+            # because gridDimX == nWG0.
+            # After the cluster remap (defineAndResources)
             # WorkGroup0 = global M-tile (x; Cs B-peers are M-adjacent), WorkGroup1 =
             # global N-tile (y; Ck A-peers are N-adjacent), WorkGroup2 = batch. The
             # tileID (M-fastest, matching skIndexToWG) is

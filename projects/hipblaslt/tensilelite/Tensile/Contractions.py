@@ -600,14 +600,15 @@ class ProblemPredicate(Properties.Predicate):
         # (Ck = ClusterDim[1] > 1 as a REDUCTION axis, i.e. pure reduction [1,C] or
         # factored [Cs,Ck]) the Y-extent is the K-split / index-generation axis, NOT
         # an N-tiling axis, so it must NOT constrain the N-tile grid -> pin to 1.
-        # EXCEPTION -- the ForceDPOnly 2-D DUAL-multicast probe: there Ck IS an
-        # N-tiling axis (Y-peers map to N-adjacent output tiles for A-reuse), so it
-        # MUST constrain the N-tile grid (nWG_y % Ck == 0) -> keep ClusterDim[1],
-        # exactly like the dense/1-D path. 1-D StreamK ([C,1]) and dense (non-StreamK)
-        # clusters keep ClusterDim[1] (byte-identical).
-        _forceDP2D = (state.get("StreamKForceDPOnly", 0)
-                      and state["ClusterDim"][0] > 1 and state["ClusterDim"][1] > 1)
-        if state.get("StreamK", 0) == 3 and state["ClusterDim"][1] > 1 and not _forceDP2D:
+        # EXCEPTION -- 2-D DUAL-multicast (ForceDPOnly-2D probe AND the standard
+        # Target-A StreamKDualMulticast path): there Ck IS an N-tiling axis (Y-peers
+        # map to N-adjacent output tiles for A-reuse), so it MUST constrain the
+        # N-tile grid (nWG_y % Ck == 0) -> keep ClusterDim[1], exactly like the
+        # dense/1-D path. 1-D StreamK ([C,1]) and dense (non-StreamK) clusters keep
+        # ClusterDim[1] (byte-identical).
+        _dual2D = ((state.get("StreamKForceDPOnly", 0) or state.get("StreamKDualMulticast", 0))
+                   and state["ClusterDim"][0] > 1 and state["ClusterDim"][1] > 1)
+        if state.get("StreamK", 0) == 3 and state["ClusterDim"][1] > 1 and not _dual2D:
             valuepredicates.append(1)
         else:
             valuepredicates.append(state["ClusterDim"][1])
@@ -662,6 +663,7 @@ class SizeMapping:
                  'streamKAtomic',
                  'streamKClusterReduction',
                  'streamKMulticast',
+                 'streamKDualMulticast',
                  'prefetchAcrossPersistent',
                  'sourceKernel',
                  'globalAccumulation',
@@ -758,6 +760,7 @@ class SizeMapping:
                    streamKAtomic            = d['StreamKAtomic'] if 'StreamKAtomic' in d else 0,
                    streamKClusterReduction  = d.get('StreamKClusterReduction', 0),
                    streamKMulticast         = d.get('StreamKMulticast', 0),
+                   streamKDualMulticast     = d.get('StreamKDualMulticast', 0),
                    prefetchAcrossPersistent = d.get('PrefetchAcrossPersistent', 0),
                    magicDivAlg              = d.get('MagicDivAlg', 1),
                    sourceKernel             = d['KernelLanguage'] == 'Source',

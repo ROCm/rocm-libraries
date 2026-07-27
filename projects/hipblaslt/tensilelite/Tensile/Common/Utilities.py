@@ -409,6 +409,36 @@ def streamKForceDP2DMulticast(d):
     return bool(d.get("StreamKForceDPOnly", 0)) \
         and d["ClusterDim"][0] > 1 and d["ClusterDim"][1] > 1
 
+def streamKDual2DMulticast(d):
+    """True for a 2-D DUAL-operand multicast cluster (generalized detector).
+
+    This GENERALIZES ``streamKForceDP2DMulticast`` to cover BOTH:
+
+      * the ForceDPOnly single-round probe (``StreamKForceDPOnly`` + 2-D cluster);
+        and
+      * the STANDARD two-tile StreamK path (``StreamKForceDPOnly == 0``) opted in
+        via ``StreamKDualMulticast`` -- "Target A". Here the DP (full-tile) round
+        does the same 2-D dual multicast (Cs/X peers share B on M-adjacent tiles,
+        Ck/Y peers share A on N-adjacent tiles) while the SK (partial-tile) round
+        reduces 1-D via the workspace exactly as today. It is temporal reuse of
+        ONE physical cluster: a 2-D mask grouping during DP, a 1-D reduction
+        grouping during SK.
+
+    Both cases require a GENUINE 2-D cluster ClusterDim = [Cs, Ck] (both axes > 1)
+    where Ck (Y) is an N-tiling / A-multicast axis, NOT a K-split reduction axis.
+    It is therefore kept DISTINCT from the factored [Cs,Ck] path (where Ck IS the
+    K-reduction axis and ``StreamKClusterReduction`` is derived): a factored config
+    sets neither ``StreamKForceDPOnly`` nor ``StreamKDualMulticast``, so this
+    returns False for it. The opt-in (``StreamKDualMulticast``) is what a
+    StreamKForceDPOnly=0 [Cs,Ck] config uses to select dual-2D multicast INSTEAD
+    of the factored K-reduction interpretation (mutual exclusion; see the
+    Solution.py collapse). ``d`` may be a kernel or a solution ``state`` dict.
+    See docs/design/streamk-wg-clusters.md.
+    """
+    if not (d["ClusterDim"][0] > 1 and d["ClusterDim"][1] > 1):
+        return False
+    return bool(d.get("StreamKForceDPOnly", 0)) or bool(d.get("StreamKDualMulticast", 0))
+
 def log2(x):
     return int(log(x, 2) + 0.5)
 

@@ -12,7 +12,7 @@ caller already holds rather than re-allocating. Capability-selected
 """
 
 from ..Component import ClusterLoad
-from ..Common import clusterEnabled, streamKForceDP2DMulticast
+from ..Common import clusterEnabled, streamKForceDP2DMulticast, streamKDual2DMulticast
 from typing import Mapping
 from rocisa.code import Module, Label
 from rocisa.container import sgpr
@@ -118,12 +118,15 @@ class ClusterLoadTDM(ClusterLoad):
         # NOT an A-multicast axis, so force self-only there too. (StreamK's B mask
         # is recomputed in preLoop regardless; only maskA must stay self-only.)
         #
-        # EXCEPTION -- the ForceDPOnly 2-D DUAL-multicast probe: here the Ck (Y)
-        # axis maps to N-ADJACENT output tiles, so A IS multicast across the Ck
-        # peers exactly like a dense cluster. Use the dense peer count so the
-        # kernel-init maskA/maskB below is byte-correct for BOTH operands, and no
-        # preLoop overwrite is needed (see StreamK.preLoop / streamKMulticastMaskPredicate).
-        if kernel.get("StreamKMulticast", 0) and not streamKForceDP2DMulticast(kernel):
+        # EXCEPTION -- 2-D DUAL-multicast (ForceDPOnly-2D probe AND the standard
+        # Target-A StreamKDualMulticast path): here the Ck (Y) axis maps to
+        # N-ADJACENT output tiles, so A IS multicast across the Ck peers exactly
+        # like a dense cluster. Use the dense peer count so the kernel-init
+        # maskA/maskB below is byte-correct for BOTH operands on the DP round, and
+        # no preLoop overwrite is needed (see StreamK.preLoop /
+        # streamKMulticastMaskPredicate). On the standard path the masks are later
+        # dropped to self-only at the DP->SK boundary (streamKMulticastBoundaryClear).
+        if kernel.get("StreamKMulticast", 0) and not streamKDual2DMulticast(kernel):
             aPeers = 1
         else:
             aPeers = kernel["ClusterDim"][1]

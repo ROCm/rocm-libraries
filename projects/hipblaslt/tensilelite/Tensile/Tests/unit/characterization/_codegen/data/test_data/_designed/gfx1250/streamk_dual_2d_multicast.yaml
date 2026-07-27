@@ -1,0 +1,105 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+################################################################################
+# Target A: STANDARD StreamK (StreamKForceDPOnly=0) 2-D DUAL-multicast (gfx1250).
+#
+# A genuine 2-D HW cluster ClusterDim = [Cs, Ck] = [2, 2] on a StreamK==3
+# TWO-TILE (DP-first) kernel -- i.e. StreamKForceDPOnly=0, so there is a real SK
+# partial-tile round in addition to the DP full-tile round. The DP round does the
+# 2-D dual multicast (BOTH operands TDM-multicast):
+#   * Cs = ClusterDim[0] = 2 : X-peers on M-ADJACENT output tiles reuse B;
+#   * Ck = ClusterDim[1] = 2 : Y-peers on N-ADJACENT output tiles reuse A.
+# The SK (partial-tile) round reduces 1-D via the workspace exactly as today; at
+# the DP->SK boundary BOTH masks drop to self-only (streamKMulticastBoundaryClear).
+# This is temporal reuse of ONE physical cluster: 2-D mask grouping in DP, 1-D
+# reduction grouping in SK. It is selected via StreamKDualMulticast=1 (mutually
+# exclusive with the factored [Cs,Ck] K-reduction path, which leaves the flag 0).
+#
+# CPU-only characterization: no GPU required. This validates codegen (dense dual
+# masks on the DP round + 2-D tile fold + DP->SK dual-mask clear + intact SK
+# partial-tile workspace addressing + balanced cluster barrier). The definitive
+# correctness check is the user's HW run of
+# Tests/common/streamk/gfx1250/core/sk_mxf4_2d_multicast_probe.yaml.
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: 128
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  Device: 0
+
+BenchmarkProblems:
+  -
+    -
+      OperationType: GEMM
+      DataType: F4
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      MXBlockA: 32
+      MXBlockB: 32
+    -
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [True]
+        - MatrixInstruction:
+          - [16, 16, 128, 1, 1, 1, 1, 2, 2]
+        - DepthU: [256]
+        - ClusterLocalRead: [0]
+        - TransposeLDS: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LdsPadMXSA: [-1]
+        - LdsPadMXSB: [-1]
+        - LdsBlockSizePerPadMXSA: [-1]
+        - LdsBlockSizePerPadMXSB: [-1]
+        - LdsPadMetadata: [0]
+        - LDSTrInst: [False]
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [4]
+        - SourceSwap: [False]
+        - StoreRemapVectorWidth: [0]
+        - GlobalSplitU: [0]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - ExpandPointerSwap: [False]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - LocalReadVectorWidth: [-1]
+        - StoreVectorWidth: [-1]
+        - StreamK: [3]
+        # Target A: STANDARD two-tile schedule (NOT ForceDPOnly) + dual-2D opt-in.
+        - StreamKForceDPOnly: [0]
+        - StreamKDualMulticast: [1]
+        - StreamKAtomic: [0]
+        - StreamKXCCMapping: [0]
+        # Cs=2 (B, M-adjacent) x Ck=2 (A, N-adjacent). Ck is an N-tiling axis,
+        # NOT a K-split reduction axis (StreamKClusterReduction NOT derived).
+        - ClusterDim: [[2, 2]]
+        - StaggerU: [0]
+        - DirectToVgprA: [False]
+        - DirectToVgprB: [False]
+        - WavefrontSize: [32]
+        - WorkGroupMapping: [1]
+        - TDMInst: [3]
+        - MXLoadInst: ["TDM"]
+        - MXScaleFormat: ["InMemorySwizzle"]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          # M=256 -> nWG0=8 (8 % Cs=2 == 0); N=192 -> nWG1=6 (6 % Ck=2 == 0).
+          # getSKGridImpl picks gridY=4 (largest mult of Ck < nWG1) -> skGrid=32,
+          # tiles=48, tiles % skGrid = 16 != 0 -> a genuine SK partial round of
+          # 16 tiles split 2-way (48/16), each SK WG itersPerTile/2 iters. K=1024
+          # -> itersPerTile=4 (even) so the SK round has extraIters==0 (balanced).
+          - Exact: [256, 192, 1, 1024]

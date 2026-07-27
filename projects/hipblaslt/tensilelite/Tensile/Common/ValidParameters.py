@@ -828,6 +828,19 @@ validParameters = { # we need to make sure this matches develop
     # 0: uses workspace to store partial tiles, accumulate in deterministic fix-up step
     # 1: uses atomics to accumulate partial tiles
     "StreamKAtomic": [0, 1],
+    # Target-A opt-in: 2-D DUAL-operand multicast on the STANDARD two-tile StreamK
+    # path (StreamKForceDPOnly=0). On a genuine 2-D cluster ClusterDim=[Cs,Ck]
+    # (both > 1) a StreamKForceDPOnly=0 config is FACTORED by default (Ck is the
+    # K-split reduction axis -> StreamKClusterReduction). Setting this flag selects
+    # the dual-2D multicast interpretation INSTEAD: the DP (full-tile) round does
+    # 2-D dual multicast (Cs/X peers share B on M-adjacent tiles, Ck/Y peers share
+    # A on N-adjacent tiles) and the SK (partial-tile) round reduces 1-D via the
+    # workspace as today -- so StreamKClusterReduction is NOT derived and Ck is an
+    # N-tiling / A-multicast axis. Mutually exclusive with the factored path by
+    # construction (a factored config leaves this 0). ForceDPOnly-2D does not need
+    # it (that shape is unambiguous). Phase-1 [2,2] probe only. See
+    # streamKDual2DMulticast and docs/design/streamk-wg-clusters.md.
+    "StreamKDualMulticast": [0, 1],
     # Enables XCC-based remapping of workgroups, set the value to the number of XCCs
     # for the device/configuration being used
     #  0: uses default workgroup assignment

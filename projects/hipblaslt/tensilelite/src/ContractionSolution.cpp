@@ -1812,6 +1812,23 @@ namespace TensileLite
                 rv.numWorkGroups.x = problemNumGroupTiles.x; // nWG0 (M-tiles)
                 // rv.numWorkGroups.y already = nWG1 * gsu (N-tiles); z stays batch.
             }
+            else if(sizeMapping.streamKDualMulticast != 0 && sizeMapping.clusterDim.y > 1)
+            {
+                // Target A: STANDARD two-tile StreamK 2-D DUAL-multicast. Launch a
+                // PERSISTENT 2-D cluster grid [nWG0, gridY, batch] (NOT the full M x N
+                // ForceDPOnly grid): gridX is PINNED to nWG0 so the kernel's dense DP
+                // fold StreamKIdx = WorkGroup1*nWG0 + WorkGroup0 (StreamK.preLoop) is
+                // dense in [0, skGrid) and its Cs X-peers are M-ADJACENT (share B) /
+                // Ck Y-peers are N-ADJACENT (share A). gridY = sk.grid / nWG0 is a
+                // multiple of Ck (getSKGridImpl), so gridDimY % Ck == 0 and
+                // gridDimX (== nWG0) % Cs == 0 (ClusterDimCheck) -- a legal cluster
+                // launch. When gridY < nWG1 the leftover tiles form the SK partial
+                // round (standard two-tile accounting). See
+                // docs/design/streamk-wg-clusters.md.
+                rv.numWorkGroups.x = problemNumGroupTiles.x;           // nWG0
+                rv.numWorkGroups.y = sk.grid / problemNumGroupTiles.x; // gridY (mult of Ck)
+                // rv.numWorkGroups.z stays batch.
+            }
             else if(sizeMapping.clusterDim.y > 1)
             {
                 // 2-D StreamK cluster PROBE (Scheme A): a genuine 2-D HW cluster
@@ -4182,6 +4199,52 @@ namespace TensileLite
                     // into [nWG0, nWG1, 1] (generateSingleCall). See
                     // docs/design/streamk-wg-clusters.md.
                     skGrid = tiles;
+                }
+                else if(self.sizeMapping.streamKDualMulticast)
+                {
+                    // Target A: STANDARD two-tile StreamK (streamKForceDPOnly==0)
+                    // 2-D DUAL-multicast. UNLIKE ForceDPOnly (skGrid==tiles, no SK
+                    // round), the standard schedule keeps a real DP + SK split, so
+                    // we RESHAPE the base DP grid (skGrid computed above from the CU
+                    // budget / origami) into a 2-D cluster grid [nWG0, gridY]:
+                    //   * gridX is PINNED to nWG0 so the kernel's dense DP fold
+                    //     StreamKIdx = WorkGroup1*nWG0 + WorkGroup0 (StreamK.preLoop)
+                    //     is dense in [0, skGrid) AND its Cs X-peers land on
+                    //     M-ADJACENT tiles (share B) while its Ck Y-peers land on
+                    //     N-ADJACENT tiles (share A) -- the 2-D dual multicast.
+                    //   * gridY = round(baseSkGrid / nWG0) up to a multiple of Ck,
+                    //     clamped to the full N-extent floor(nWG1/Ck)*Ck.
+                    // skGrid = nWG0 * gridY is a multiple of C = Cs*Ck (nWG0 % Cs == 0
+                    // via ClusterDimCheck, gridY % Ck == 0 by construction), so every
+                    // launched HW cluster is full. A genuine SK partial round runs
+                    // whenever nWG1 % gridY != 0 (tiles % skGrid != 0), driving the
+                    // standard SK3 two-tile accounting (skTiles/SKItersPerWG) below;
+                    // at the DP->SK boundary the kernel drops BOTH masks to self-only
+                    // (streamKMulticastBoundaryClear). This is temporal reuse of ONE
+                    // physical cluster: 2-D mask grouping in DP, 1-D reduction in SK.
+                    // NOTE: batch==1 only for Phase-1 (the fold's batch stride is
+                    // nWG0*nWG1, so a reshaped-row grid is dense only per batch slice).
+                    // See docs/design/streamk-wg-clusters.md.
+                    size_t ck = static_cast<size_t>(self.sizeMapping.clusterDim.y);
+                    size_t mFree = 1, nFree = 1;
+                    for(size_t i = 0; i < problem.freeIndicesA().size(); i++)
+                        mFree *= problem.freeSizeA(i);
+                    for(size_t i = 0; i < problem.freeIndicesB().size(); i++)
+                        nFree *= problem.freeSizeB(i);
+                    size_t mt0  = static_cast<size_t>(self.sizeMapping.macroTile.x);
+                    size_t mt1  = static_cast<size_t>(self.sizeMapping.macroTile.y);
+                    size_t nwg0 = (mFree + mt0 - 1) / mt0;
+                    size_t nwg1 = (nFree + mt1 - 1) / mt1;
+                    size_t nwg1Ck = (nwg1 / ck) * ck; // largest multiple of Ck <= nWG1
+                    if(nwg1Ck < ck)
+                        nwg1Ck = ck; // at least one full cluster row
+                    size_t gridY = nwg0 > 0 ? (skGrid + nwg0 - 1) / nwg0 : ck; // base rows
+                    gridY = ((gridY + ck - 1) / ck) * ck; // round up to a multiple of Ck
+                    if(gridY < ck)
+                        gridY = ck;
+                    if(gridY > nwg1Ck)
+                        gridY = nwg1Ck; // clamp to full N-extent
+                    skGrid = nwg0 * gridY;
                 }
                 else
                 {
