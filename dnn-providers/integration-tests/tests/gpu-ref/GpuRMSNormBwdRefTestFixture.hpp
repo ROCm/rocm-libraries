@@ -28,7 +28,7 @@ using namespace gpu_rmsnorm_ref_test;
 
 template <typename GradOutputDataType,
           typename InputDataType = GradOutputDataType,
-          typename ScaleDataType = GradOutputDataType,
+          typename ScaleDataType = float,
           typename GradInputDataType = GradOutputDataType,
           typename ComputeDataType = double>
 void runGpuVsCpuRMSNormBwd(const std::vector<int64_t>& ioDims,
@@ -64,8 +64,8 @@ void runGpuVsCpuRMSNormBwd(const std::vector<int64_t>& ioDims,
         }
     }
     auto invRmsTensor = Tensor<ComputeDataType>(invRmsDims, layout);
-    invRmsTensor.fillWithRandomValues(static_cast<ComputeDataType>(0.1),
-                                      static_cast<ComputeDataType>(1.0),
+    invRmsTensor.fillWithRandomValues(static_cast<ComputeDataType>(1.0e-05f),
+                                      static_cast<ComputeDataType>(std::fabs(fillRange)),
                                       seed + 3); // Ensure invRms is always positive!
 
     auto dbiasCpu
