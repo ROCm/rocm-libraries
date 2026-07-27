@@ -20,10 +20,29 @@ from Tensile.SolutionStructs.KernelNameDecoder import (
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="TensileDecodeKernelName",
-        description=(
-            "Decode a Tensile/hipBLASLt kernel or solution name using the "
-            "naming definitions from this Tensile installation."
-        ),
+        description="""\
+Expand the abbreviated parameters in a Tensile or hipBLASLt kernel or solution
+name and write the complete decode to standard output. The decoder uses the
+naming and valid-parameter definitions from this Tensile installation; it does
+not require a network connection, database, or web service.
+""",
+        epilog="""\
+examples:
+  TensileDecodeKernelName \\
+    'Cijk_Alik_Bljk_BBS_BH_UserArgs_MT128x128x64_MI16x16x1_SN_AFC1_GSUAMB_ISA950_MIWT2_2_WG32_8_1'
+  TensileDecodeKernelName --format json '<kernel-name>'
+  printf '%s\\n' '<kernel-name>' | TensileDecodeKernelName --format json
+
+source-checkout entry points:
+  Tensile/bin/TensileDecodeKernelName '<kernel-name>'
+  python3 -m Tensile.TensileDecodeKernelName '<kernel-name>'
+
+Unknown or historical components are retained and reported as warnings. Use
+--strict to return a nonzero status for unknown or ambiguous components, or
+when an irreversible filename-shortening hash prevents a complete decode.
+Compatibility aliases cover legacy names present in shipped hipBLASLt logic.
+""",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
         "kernel_name",

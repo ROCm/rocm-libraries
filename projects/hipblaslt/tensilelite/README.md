@@ -1,41 +1,5 @@
 # Tensilelite
 
-## Decode kernel names
-
-`TensileDecodeKernelName` expands the abbreviated parameters in a Tensile or
-hipBLASLt kernel name and writes the complete decode to standard output. The
-decoder uses the naming and valid-parameter definitions from the installed
-Tensile package, so it does not require a network connection, database, or web
-service.
-
-From an installed Tensile package:
-
-```bash
-TensileDecodeKernelName \
-  'Cijk_Alik_Bljk_BBS_BH_UserArgs_MT128x128x64_MI16x16x1_SN_AFC1_GSUAMB_ISA950_MIWT2_2_WG32_8_1'
-```
-
-From a source checkout, use either entry point:
-
-```bash
-Tensile/bin/TensileDecodeKernelName '<kernel-name>'
-python3 -m Tensile.TensileDecodeKernelName '<kernel-name>'
-```
-
-Use JSON when another tool will consume the result, or pipe one kernel name on
-standard input:
-
-```bash
-TensileDecodeKernelName --format json '<kernel-name>'
-printf '%s\n' '<kernel-name>' | TensileDecodeKernelName --format json
-```
-
-By default, unknown or historical components are retained and reported as
-warnings. Add `--strict` to return a nonzero exit status when a name contains an
-unknown or ambiguous component, or when an irreversible filename-shortening
-hash prevents a complete decode. Explicit compatibility aliases cover legacy
-names that are still present in the shipped hipBLASLt logic files.
-
 ## Building and Running Tests
 
 While full test suites can be run with a single `tox` command, developers may wish to
