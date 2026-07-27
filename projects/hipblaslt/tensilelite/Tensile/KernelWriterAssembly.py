@@ -13706,12 +13706,12 @@ class KernelWriterAssembly(KernelWriter):
     module.add(SAddU32(dst=sgpr(tmpspgr2+0), src0=sgpr(tmpspgr2+0), src1=sgpr("AddressTD+0"), comment="Offsetting to the location [Lower half of address]"))
     module.add(SAddCU32(dst=sgpr(tmpspgr2+1), src0=sgpr("AddressTD+1"), src1=0, comment="Offsetting to the location [Higher half of address]"))
     module.add(SLoadB64(dst=sgpr("SrdTD", 2), base=sgpr(tmpspgr2, 2), soffset=0, comment="Load the Matrix Address in the Pointer Array"))
-    #module.add(SWaitCnt(kmcnt=0, comment="Wait for the Matrix Address Load from the Pointer Array"))
     # Load and apply batch offset for General Batched GEMM (dstD) as necessary.
     if not kernel["ProblemType"]["GroupedGemm"]:
       # Add explicit wait for gfx12 as a workaround
       if kernel["ExpertSchedulingMode"] > 0:
-        module.add(SWaitCnt(kmcnt=0, comment="Wait for the Matrix Address Load from the Pointer Array"))
+        module.add(SWaitAlu(va_ssrc=0, comment="Wait for reads to complete"))  ## test 1
+        #module.add(SWaitCnt(kmcnt=0, comment="Wait for the Matrix Address Load from the Pointer Array"))
       module.add(SLoadB64(dst=sgpr(tmpspgr2, 2), base=sgpr("KernArgAddress", 2), soffset=hex(self.states.batchOffsetDKernArgOffset), comment="Load batchOffsetD from kernel args"))
       module.add(SWaitCnt(kmcnt=0, comment="Wait for the Matrix Address and batchOffsetD Load"))
       module.add(SAddU32(dst=sgpr("SrdTD+0"), src0=sgpr("SrdTD+0"), src1=sgpr(tmpspgr2+0), comment="Apply batchOffsetD to SrdTD (low)"))
