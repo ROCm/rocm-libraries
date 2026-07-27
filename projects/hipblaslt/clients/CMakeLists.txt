@@ -65,6 +65,10 @@ target_link_libraries(hipblaslt-bench
         OpenMP::OpenMP_CXX
 )
 
+if(ORIGAMI_ENABLE_NN AND ORIGAMI_NN_COLOCATE_TARGETS)
+    add_dependencies(hipblaslt-bench ${ORIGAMI_NN_COLOCATE_TARGETS})
+endif()
+
 target_include_directories(hipblaslt-bench PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/bench/include")
 
 if(HIPBLASLT_ENABLE_OPENMP)

@@ -324,8 +324,8 @@ TEST_CASE("NN: gemm_embedding_similarity feature dimensions", "[nn][embedding_si
   hw.dtype_size = 2.0f;
 
   std::vector<float> features(info->features.query_dim);
-  origami::nn::features::gemm_embedding_similarity::build_query(
-      problem, hw, false, features.data(), features.size());
+  REQUIRE(origami::nn::features::gemm_embedding_similarity::build_query(
+      problem, hw, false, features.data(), features.size()));
   for (float v : features) {
     REQUIRE(std::isfinite(v));
   }

@@ -138,6 +138,7 @@ if(ORIGAMI_ENABLE_NN)
                 "${CMAKE_CURRENT_SOURCE_DIR}/src/nn/esrec/esrec_loader.cpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/src/nn/esrec/fallback.cpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/src/nn/esrec/rank.cpp"
+                "${CMAKE_CURRENT_SOURCE_DIR}/src/nn/esrec/weights_hash.cpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/src/nn/twrec/b64_decode.cpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/src/nn/twrec/load_validate.cpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/src/nn/twrec/twrec_loader.cpp"

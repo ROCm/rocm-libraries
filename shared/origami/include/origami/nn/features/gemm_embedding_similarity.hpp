@@ -15,7 +15,8 @@ constexpr const char* catalog_id         = "gemm_embedding_similarity";
 constexpr const char* feature_names_hash = "embedding_similarity_v1";
 
 /// Build raw GEMM feature vector before StandardScaler (TN: 141, NT: 192).
-void ORIGAMI_EXPORT build_query(const problem_t& problem,
+/// Returns false when the feature vector length does not match @p out_dim.
+bool ORIGAMI_EXPORT build_query(const problem_t& problem,
                                 const esrec::detail::HardwareConstants& hw,
                                 bool is_nt,
                                 float* out,

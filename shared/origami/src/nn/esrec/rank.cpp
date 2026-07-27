@@ -43,16 +43,19 @@ std::vector<rank_entry_t> rank_configs(const detail::LoadedModel& model,
   const float n = static_cast<float>(problem.size.n);
   const float k = static_cast<float>(problem.size.k);
 
+  int gemm_category = -1;
   if (!model.fallback.empty()) {
-    const int category = detail::classify_gemm(m, n, k, static_cast<float>(problem.batch));
-    if (model.fallback.matches_pre_model(m, n, k, category)) {
+    gemm_category = detail::classify_gemm(m, n, k, static_cast<float>(problem.batch));
+    if (model.fallback.matches_pre_model(m, n, k, gemm_category)) {
       return empty;
     }
   }
 
   std::vector<float> raw_features(model.input_dim);
-  features::gemm_embedding_similarity::build_query(
-      problem, model.hw, model.is_nt, raw_features.data(), raw_features.size());
+  if (!features::gemm_embedding_similarity::build_query(
+          problem, model.hw, model.is_nt, raw_features.data(), raw_features.size())) {
+    return empty;
+  }
 
   const std::vector<float> query_embedding = encode_query(model.encoder, raw_features);
 
@@ -79,9 +82,8 @@ std::vector<rank_entry_t> rank_configs(const detail::LoadedModel& model,
     return a.score > b.score;
   });
 
-  if (!model.fallback.empty()) {
-    const int category = detail::classify_gemm(m, n, k, static_cast<float>(problem.batch));
-    if (model.fallback.matches_post_model(m, n, k, category, scored.front().score)) {
+  if (gemm_category != -1 && !model.fallback.empty()) {
+    if (model.fallback.matches_post_model(m, n, k, gemm_category, scored.front().score)) {
       return empty;
     }
   }

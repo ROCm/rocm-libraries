@@ -656,7 +656,7 @@ void build_features(const problem_t& problem,
   }
 }
 
-void build_query(const problem_t& problem,
+bool build_query(const problem_t& problem,
                  const esrec::detail::HardwareConstants& hw,
                  bool is_nt,
                  float* out,
@@ -665,10 +665,10 @@ void build_query(const problem_t& problem,
   features.reserve(400);
   build_features(problem, hw, is_nt, features);
   if (features.size() != out_dim) {
-    if (out_dim > 0) std::fill(out, out + out_dim, 0.0f);
-    return;
+    return false;
   }
   std::copy(features.begin(), features.end(), out);
+  return true;
 }
 
 }  // namespace origami::nn::features::gemm_embedding_similarity
