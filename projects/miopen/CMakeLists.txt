@@ -144,6 +144,24 @@ option(MIOPEN_ENABLE_FIN_INTERFACE "Enable internal interface for the fin" ${MIO
 option(MIOPEN_STRIP_SYMBOLS "Strip symbols in release mode" ON)
 option(MIOPEN_CK_BUILDER_EXPERIMENTAL "Enable experimental support for CK Builder" OFF)
 
+# Gate for the MIOpen public/private library split (RFC 0001). When ON, libMIOpen.so
+# is built as a thin public wrapper forwarding to a private implementation library
+# (libMIOpen_private.so); when OFF (the default), a single libMIOpen.so is produced
+# that is byte-equivalent to the pre-wrapper baseline. All of the split machinery is
+# compiled only when this flag is ON.
+option(MIOPEN_ENABLE_HIPDNN_WRAPPER
+    "Build MIOpen as a public wrapper over a private implementation, with optional forwarding to hipDNN."
+    OFF)
+if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
+    message(STATUS
+        "MIOPEN_ENABLE_HIPDNN_WRAPPER: ENABLED — split built; runtime default "
+        "pass-through; forwarding via MIOPEN_HIPDNN_FORWARDING")
+else()
+    message(STATUS
+        "MIOPEN_ENABLE_HIPDNN_WRAPPER: DISABLED — single-library build, "
+        "byte-equivalent to baseline")
+endif()
+
 option(MIOPEN_INCBIN "Include kernels using incbin" OFF)
 if(MIOPEN_INCBIN)
     enable_language(ASM)
@@ -155,7 +173,7 @@ if(MIOPEN_STRIP_SYMBOLS AND NOT WIN32 AND NOT APPLE)
     set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -s")
 endif()
 
-rocm_setup_version(VERSION 3.5.2)
+rocm_setup_version(VERSION 3.6.0)
 
 include(TargetFlags)
 
@@ -726,7 +744,7 @@ endfunction()
 # The default behaviour when no list of AMDGPU targets is supplied should be to
 # install for all targets; this was the behaviour before MIOPEN_INSTALL_GPU_DATABASES
 # was added.
-set(ALL_GPU_DATABASES gfx803 gfx900 gfx906 gfx908 gfx90a gfx942 gfx950 gfx1030)
+set(ALL_GPU_DATABASES gfx803 gfx900 gfx906 gfx908 gfx90a gfx942 gfx950 gfx1030 gfx1100 gfx1102 gfx1201)
 set(MIOPEN_INSTALL_GPU_DATABASES "${ALL_GPU_DATABASES}" CACHE LIST "List of AMDGPU targets for which to install databases")
 
 # This list should be updated when a new KDB file is added to the project

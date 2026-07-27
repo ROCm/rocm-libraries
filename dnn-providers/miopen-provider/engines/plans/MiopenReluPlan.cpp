@@ -31,9 +31,9 @@ void MiopenReluPlan::execute(const HipdnnMiopenHandle& handle,
                              [[maybe_unused]] void* workspace) const
 {
     const auto inputBuffer
-        = miopen_utils::findDeviceBuffer(_input.uid(), deviceBuffers, numDeviceBuffers);
+        = hipdnn_plugin_sdk::findDeviceBuffer(_input.uid(), deviceBuffers, numDeviceBuffers);
     const auto outputBuffer
-        = miopen_utils::findDeviceBuffer(_output.uid(), deviceBuffers, numDeviceBuffers);
+        = hipdnn_plugin_sdk::findDeviceBuffer(_output.uid(), deviceBuffers, numDeviceBuffers);
 
     float alpha = 1.0f;
     float beta = 0.0f;

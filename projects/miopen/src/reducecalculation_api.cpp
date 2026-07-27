@@ -25,7 +25,6 @@
  *******************************************************************************/
 
 #include <miopen/reducecalculation.hpp>
-#include <miopen/miopen_impl.h>
 #include <miopen/errors.hpp>
 #include <miopen/handle.hpp>
 #include <miopen/logger.hpp>
@@ -74,12 +73,12 @@ static void LogCmdReduceCalculation(const miopenTensorDescriptor_t xDesc,
 }
 
 extern "C" miopenStatus_t
-miopenGetReduceCalculationWorkspaceSize_impl(miopenHandle_t handle,
-                                             const miopenTensorDescriptor_t xDesc,
-                                             const int32_t dim,
-                                             const miopenReduceCalculationOp_t reduceCalculationOp,
-                                             const miopenTensorDescriptor_t reduceDesc,
-                                             size_t* sizeInBytes)
+miopenGetReduceCalculationWorkspaceSize(miopenHandle_t handle,
+                                        const miopenTensorDescriptor_t xDesc,
+                                        const int32_t dim,
+                                        const miopenReduceCalculationOp_t reduceCalculationOp,
+                                        const miopenTensorDescriptor_t reduceDesc,
+                                        size_t* sizeInBytes)
 {
 
     MIOPEN_LOG_FUNCTION(handle, xDesc, dim, reduceDesc);
@@ -95,16 +94,16 @@ miopenGetReduceCalculationWorkspaceSize_impl(miopenHandle_t handle,
 };
 
 extern "C" miopenStatus_t
-miopenReduceCalculationForward_impl(miopenHandle_t handle,
-                                    miopenReduceCalculationNanPropagation_t nanPropagation,
-                                    void* workspace,
-                                    size_t workspaceSizeInBytes,
-                                    const miopenTensorDescriptor_t xDesc,
-                                    const void* x,
-                                    const int32_t dim,
-                                    const miopenReduceCalculationOp_t reduceCalculationOp,
-                                    const miopenTensorDescriptor_t reduceDesc,
-                                    void* y)
+miopenReduceCalculationForward(miopenHandle_t handle,
+                               miopenReduceCalculationNanPropagation_t nanPropagation,
+                               void* workspace,
+                               size_t workspaceSizeInBytes,
+                               const miopenTensorDescriptor_t xDesc,
+                               const void* x,
+                               const int32_t dim,
+                               const miopenReduceCalculationOp_t reduceCalculationOp,
+                               const miopenTensorDescriptor_t reduceDesc,
+                               void* y)
 {
     MIOPEN_LOG_FUNCTION(
         handle, nanPropagation, workspace, workspaceSizeInBytes, xDesc, x, dim, reduceDesc, y);

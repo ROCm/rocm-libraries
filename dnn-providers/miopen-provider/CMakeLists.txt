@@ -230,7 +230,7 @@ set_target_properties(miopen_plugin_impl PROPERTIES
 # reports an unsupported version), which lacks ROCm's device-library bitcode
 # and errors with "cannot find ROCm device library". The objects are host-only
 # (no kernels, no embedded device code), so tell tidy to skip the device path.
-list(APPEND CLANG_TIDY_EXTRA_ARGS --extra-arg=-nogpulib)
+list(APPEND CLANG_TIDY_EXTRA_ARGS -extra-arg=-nogpulib)
 clang_tidy_check(miopen_plugin_impl)
 
 # Static library for unit tests to link against (provides access to internal implementation)

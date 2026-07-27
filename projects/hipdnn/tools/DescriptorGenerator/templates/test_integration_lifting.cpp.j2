@@ -142,6 +142,8 @@ TEST_F(Integration{{ op.frontend.attributes_filename or op.name }}DescriptorLift
     EXPECT_EQ(tensorMap[{{ op.tensor_const_prefix }}TENSOR_{{ tf_upper }}_UID]->get_stride(), toVec({{ op.tensor_const_prefix }}TENSOR_{{ tf_upper }}_STRIDES));
 {% endif %}
     EXPECT_EQ(tensorMap[{{ op.tensor_const_prefix }}TENSOR_{{ tf_upper }}_UID]->get_data_type(), DataType::FLOAT);
+{% set ft = op.tensor_field_frontend_map.get(tf.name) %}
+    EXPECT_EQ(tensorMap[{{ op.tensor_const_prefix }}TENSOR_{{ tf_upper }}_UID]->get_name(), "{{ ft.name if ft else tf.name }}");
 
 {% endfor %}
     // Verify sub-node count and type
@@ -253,6 +255,8 @@ TEST_F(Integration{{ op.frontend.attributes_filename or op.name }}DescriptorLift
     EXPECT_EQ(tensorMap[{{ op.tensor_const_prefix }}TENSOR_{{ tf_upper }}_UID]->get_dim(), toVec({{ op.tensor_const_prefix }}TENSOR_{{ tf_upper }}_DIMS));
     EXPECT_EQ(tensorMap[{{ op.tensor_const_prefix }}TENSOR_{{ tf_upper }}_UID]->get_stride(), toVec({{ op.tensor_const_prefix }}TENSOR_{{ tf_upper }}_STRIDES));
 {% endif %}
+{% set ft = op.tensor_field_frontend_map.get(tf.name) %}
+    EXPECT_EQ(tensorMap[{{ op.tensor_const_prefix }}TENSOR_{{ tf_upper }}_UID]->get_name(), "{{ ft.name if ft else tf.name }}");
 {% endfor %}
 }
 
@@ -451,6 +455,7 @@ TEST_F(Integration{{ op.frontend.attributes_filename or op.name }}DescriptorLift
 {% if ft and tc %}
     EXPECT_EQ(opNode->attributes.{{ ft.effective_getter_name }}()->get_dim(), toVec({{ op.tensor_const_prefix }}TENSOR_{{ tf.name | upper }}_DIMS));
     EXPECT_EQ(opNode->attributes.{{ ft.effective_getter_name }}()->get_stride(), toVec({{ op.tensor_const_prefix }}TENSOR_{{ tf.name | upper }}_STRIDES));
+    EXPECT_EQ(opNode->attributes.{{ ft.effective_getter_name }}()->get_name(), "{{ ft.name }}");
 {% endif %}
 {% endfor %}
 }

@@ -17,6 +17,7 @@
 #include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
+
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceMiopenRmsValidation.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
@@ -35,8 +36,8 @@
 #include "harness/SupportMatrixCollector.hpp"
 #include "harness/TestConfig.hpp"
 #include "harness/TomlGuards.hpp"
-#include "harness/input_init/SynthesisConfig.hpp"
-#include "harness/input_init/SynthesizeInputs.hpp"
+#include "harness/input-init/SynthesisConfig.hpp"
+#include "harness/input-init/SynthesizeInputs.hpp"
 #include "harness/tolerance/ToleranceResolver.hpp"
 
 namespace hipdnn_integration_tests
@@ -44,6 +45,73 @@ namespace hipdnn_integration_tests
 
 using namespace hipdnn_data_sdk;
 using namespace hipdnn_frontend;
+
+// Checks whether any (or the pinned --test-engine) engine supports the
+// graph, skipping — or failing under --fail-on-unsupported — if not.
+// build_operation_graph() must already have been called. Records
+// support-matrix data (when testCaseNote/testCaseLayout are supplied) and
+// pins the preferred engine when --test-engine is set. Callers that don't
+// immediately return afterward must check
+// ::testing::Test::IsSkipped()/HasFatalFailure() themselves.
+//
+// Free function (not a IntegrationGraphVerificationHarness member) so plain
+// ::testing::Test fixtures that build ad hoc graphs outside the
+// tiered-test-case harness (e.g. IntegrationIsSupportedExtPerformance) can
+// reuse the same skip semantics instead of hard-asserting support.
+inline void checkEngineSupportOrSkip(hipdnn_frontend::graph::Graph& graph,
+                                     const std::string& testCaseNote = "",
+                                     const std::string& testCaseLayout = "")
+{
+    std::vector<int64_t> engineIds;
+    auto status = graph.get_ranked_engine_ids(engineIds);
+
+    // Record support information for the support matrix output
+    if(SupportMatrixCollector::get().isEnabled())
+    {
+        std::string testName;
+        auto* testInfo = ::testing::UnitTest::GetInstance()->current_test_info();
+        if(testInfo != nullptr)
+        {
+            testName = std::string(testInfo->test_suite_name()) + "." + testInfo->name();
+        }
+        SupportMatrixCollector::get().recordGraphSupport(graph.graph_attributes.get_name(),
+                                                         describeGraph(graph),
+                                                         testName,
+                                                         status.is_good() ? engineIds
+                                                                          : std::vector<int64_t>{},
+                                                         testCaseNote,
+                                                         testCaseLayout);
+    }
+
+    if(TestConfig::get().hasEngineName())
+    {
+        int64_t targetEngineId = TestConfig::get().getEngineId();
+        if(status.is_bad()
+           || std::find(engineIds.begin(), engineIds.end(), targetEngineId) == engineIds.end())
+        {
+            if(TestConfig::get().failOnUnsupported())
+            {
+                FAIL() << "Engine " << TestConfig::get().getEngineName()
+                       << " does not support this graph";
+            }
+            GTEST_SKIP() << "Engine " << TestConfig::get().getEngineName()
+                         << " does not support this graph";
+        }
+        // Preferred engine must be set before create_execution_plans.
+        graph.set_preferred_engine_id_ext(targetEngineId);
+    }
+    else
+    {
+        if(status.is_bad() || engineIds.empty())
+        {
+            if(TestConfig::get().failOnUnsupported())
+            {
+                FAIL() << "No engine supports this graph";
+            }
+            GTEST_SKIP() << "No engine supports this graph";
+        }
+    }
+}
 
 // NOLINTBEGIN (portability-template-virtual-member-function)
 template <typename DataType, typename TestCaseType>
@@ -128,6 +196,13 @@ protected:
         // getTolerance's single-float contract predates split atol/rtol; under the
         // current resolver the two are equal (same default, same override).
         return atol;
+    }
+
+    // Delegates to the free hipdnn_integration_tests::checkEngineSupportOrSkip(),
+    // forwarding this test case's note/layout for support-matrix recording.
+    void checkEngineSupportOrSkip(hipdnn_frontend::graph::Graph& graph)
+    {
+        hipdnn_integration_tests::checkEngineSupportOrSkip(graph, _testCaseNote, _testCaseLayout);
     }
 
     void verifyGraph(hipdnn_frontend::graph::Graph& graph)
@@ -269,63 +344,19 @@ protected:
         return synthesizeGraphInputs(*fb, bundle);
     }
 
-private:
+    // Ranks engines for `graph` and either pins TestConfig's --test-engine as the
+    // preferred engine (leaving the graph ready for create_execution_plans()/
+    // build_plans(), or for Graph::build()) or GTEST_SKIP()s/FAILs the current
+    // test when no suitable engine is available. GTEST_SKIP()/FAIL() only unwind
+    // this function, not the caller's - callers MUST check
+    // ::testing::Test::IsSkipped() (and, if they don't already ASSERT/FAIL
+    // through to a return, HasFatalFailure()) and return immediately afterward.
+    // Protected (rather than private) so callers that build/serialize a plan
+    // manually instead of going through verifyGraph() (e.g. conv serialize
+    // round-trip) can check engine support themselves first.
     void ensureEngineSupport(hipdnn_frontend::graph::Graph& graph)
     {
-        std::vector<int64_t> engineIds;
-        auto status = graph.get_ranked_engine_ids(engineIds);
-
-        recordSupportMatrix(graph, status.is_good() ? engineIds : std::vector<int64_t>{});
-
-        if(TestConfig::get().hasEngineName())
-        {
-            int64_t targetEngineId = TestConfig::get().getEngineId();
-            if(status.is_bad()
-               || std::find(engineIds.begin(), engineIds.end(), targetEngineId) == engineIds.end())
-            {
-                if(TestConfig::get().failOnUnsupported())
-                {
-                    FAIL() << "Engine " << TestConfig::get().getEngineName()
-                           << " does not support this graph";
-                }
-                GTEST_SKIP() << "Engine " << TestConfig::get().getEngineName()
-                             << " does not support this graph";
-            }
-            graph.set_preferred_engine_id_ext(targetEngineId);
-        }
-        else
-        {
-            if(status.is_bad() || engineIds.empty())
-            {
-                if(TestConfig::get().failOnUnsupported())
-                {
-                    FAIL() << "No engine supports this graph";
-                }
-                GTEST_SKIP() << "No engine supports this graph";
-            }
-        }
-    }
-
-    void recordSupportMatrix(hipdnn_frontend::graph::Graph& graph,
-                             const std::vector<int64_t>& engineIds)
-    {
-        if(!SupportMatrixCollector::get().isEnabled())
-        {
-            return;
-        }
-
-        std::string testName;
-        auto* testInfo = ::testing::UnitTest::GetInstance()->current_test_info();
-        if(testInfo != nullptr)
-        {
-            testName = std::string(testInfo->test_suite_name()) + "." + testInfo->name();
-        }
-        SupportMatrixCollector::get().recordGraphSupport(graph.graph_attributes.get_name(),
-                                                         describeGraph(graph),
-                                                         testName,
-                                                         engineIds,
-                                                         _testCaseNote,
-                                                         _testCaseLayout);
+        checkEngineSupportOrSkip(graph);
     }
 
     void buildExecutionPlans(hipdnn_frontend::graph::Graph& graph)
@@ -373,7 +404,7 @@ private:
             }
 
             bool valid = _tensorIdToValidatorMap.at(tensorId)->allClose(*refTensor, *gpuTensor);
-            ASSERT_TRUE(valid) << "Mismatch found in tensor with id: " << tensorId
+            EXPECT_TRUE(valid) << "Mismatch found in tensor with id: " << tensorId
                                << ", name: " << _tensorIdToNameMap.at(tensorId);
         }
     }
@@ -548,10 +579,10 @@ public:
             return false;
         }
 
-        refBundle.tensors.insert(
-            {tensorId, hipdnn_test_sdk::utilities::createTensorFromAttribute(*tensorAttr)});
-        gpuBundle.tensors.insert(
-            {tensorId, hipdnn_test_sdk::utilities::createTensorFromAttribute(*tensorAttr)});
+        refBundle.addTensor(*tensorAttr,
+                            hipdnn_test_sdk::utilities::createTensorFromAttribute(*tensorAttr));
+        gpuBundle.addTensor(*tensorAttr,
+                            hipdnn_test_sdk::utilities::createTensorFromAttribute(*tensorAttr));
         _tensorIdToNameMap.insert({tensorId, tensorAttr->get_name()});
 
         return true;

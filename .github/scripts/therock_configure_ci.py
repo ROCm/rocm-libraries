@@ -193,6 +193,7 @@ def retrieve_projects(args):
     # Variables to track if labels override defaults
     label_projects = []
     label_test_type = None
+    pr_labels = []
 
     # Check if CI should be skipped based on modified paths
     # (only for push and pull_request events, not workflow_dispatch or nightly)
@@ -259,7 +260,7 @@ def retrieve_projects(args):
         subtrees = list(subtree_to_project_map.keys())
         test_type = "comprehensive"
 
-    project_to_run = collect_projects_to_run(subtrees)
+    project_to_run = collect_projects_to_run(subtrees, pr_labels)
 
     return project_to_run, test_type
 

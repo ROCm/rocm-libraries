@@ -24,7 +24,6 @@
  *
  *******************************************************************************/
 #include <miopen/reducetensor.hpp>
-#include <miopen/miopen_impl.h>
 #include <miopen/errors.hpp>
 #include <miopen/handle.hpp>
 #include <miopen/logger.hpp>
@@ -87,7 +86,7 @@ static void LogCmdRedux(const miopen::ReduceTensorDescriptor reduceTensorDesc,
 }
 
 extern "C" miopenStatus_t
-miopenCreateReduceTensorDescriptor_impl(miopenReduceTensorDescriptor_t* reduceTensorDesc)
+miopenCreateReduceTensorDescriptor(miopenReduceTensorDescriptor_t* reduceTensorDesc)
 {
     MIOPEN_LOG_FUNCTION(reduceTensorDesc);
     return miopen::try_([&] {
@@ -97,19 +96,19 @@ miopenCreateReduceTensorDescriptor_impl(miopenReduceTensorDescriptor_t* reduceTe
 };
 
 extern "C" miopenStatus_t
-miopenDestroyReduceTensorDescriptor_impl(miopenReduceTensorDescriptor_t reduceTensorDesc)
+miopenDestroyReduceTensorDescriptor(miopenReduceTensorDescriptor_t reduceTensorDesc)
 {
     MIOPEN_LOG_FUNCTION(reduceTensorDesc);
     return miopen::try_([&] { miopen_destroy_object(reduceTensorDesc); });
 };
 
 extern "C" miopenStatus_t
-miopenSetReduceTensorDescriptor_impl(miopenReduceTensorDescriptor_t reduceTensorDesc,
-                                     miopenReduceTensorOp_t reduceTensorOp,
-                                     miopenDataType_t reduceTensorCompType,
-                                     miopenNanPropagation_t reduceTensorNanOpt,
-                                     miopenReduceTensorIndices_t reduceTensorIndices,
-                                     miopenIndicesType_t reduceTensorIndicesType)
+miopenSetReduceTensorDescriptor(miopenReduceTensorDescriptor_t reduceTensorDesc,
+                                miopenReduceTensorOp_t reduceTensorOp,
+                                miopenDataType_t reduceTensorCompType,
+                                miopenNanPropagation_t reduceTensorNanOpt,
+                                miopenReduceTensorIndices_t reduceTensorIndices,
+                                miopenIndicesType_t reduceTensorIndicesType)
 {
     MIOPEN_LOG_FUNCTION(reduceTensorDesc,
                         reduceTensorOp,
@@ -127,12 +126,12 @@ miopenSetReduceTensorDescriptor_impl(miopenReduceTensorDescriptor_t reduceTensor
 };
 
 extern "C" miopenStatus_t
-miopenGetReduceTensorDescriptor_impl(const miopenReduceTensorDescriptor_t reduceTensorDesc,
-                                     miopenReduceTensorOp_t* reduceTensorOp,
-                                     miopenDataType_t* reduceTensorCompType,
-                                     miopenNanPropagation_t* reduceTensorNanOpt,
-                                     miopenReduceTensorIndices_t* reduceTensorIndices,
-                                     miopenIndicesType_t* reduceTensorIndicesType)
+miopenGetReduceTensorDescriptor(const miopenReduceTensorDescriptor_t reduceTensorDesc,
+                                miopenReduceTensorOp_t* reduceTensorOp,
+                                miopenDataType_t* reduceTensorCompType,
+                                miopenNanPropagation_t* reduceTensorNanOpt,
+                                miopenReduceTensorIndices_t* reduceTensorIndices,
+                                miopenIndicesType_t* reduceTensorIndicesType)
 {
     MIOPEN_LOG_FUNCTION(reduceTensorDesc);
     return miopen::try_([&] {
@@ -146,11 +145,11 @@ miopenGetReduceTensorDescriptor_impl(const miopenReduceTensorDescriptor_t reduce
 };
 
 extern "C" miopenStatus_t
-miopenGetReductionIndicesSize_impl(miopenHandle_t handle,
-                                   const miopenReduceTensorDescriptor_t reduceTensorDesc,
-                                   const miopenTensorDescriptor_t aDesc,
-                                   const miopenTensorDescriptor_t cDesc,
-                                   size_t* sizeInBytes)
+miopenGetReductionIndicesSize(miopenHandle_t handle,
+                              const miopenReduceTensorDescriptor_t reduceTensorDesc,
+                              const miopenTensorDescriptor_t aDesc,
+                              const miopenTensorDescriptor_t cDesc,
+                              size_t* sizeInBytes)
 {
     MIOPEN_LOG_FUNCTION(handle, reduceTensorDesc, aDesc, cDesc);
 
@@ -162,11 +161,11 @@ miopenGetReductionIndicesSize_impl(miopenHandle_t handle,
 };
 
 extern "C" miopenStatus_t
-miopenGetReductionWorkspaceSize_impl(miopenHandle_t handle,
-                                     const miopenReduceTensorDescriptor_t reduceTensorDesc,
-                                     const miopenTensorDescriptor_t aDesc,
-                                     const miopenTensorDescriptor_t cDesc,
-                                     size_t* sizeInBytes)
+miopenGetReductionWorkspaceSize(miopenHandle_t handle,
+                                const miopenReduceTensorDescriptor_t reduceTensorDesc,
+                                const miopenTensorDescriptor_t aDesc,
+                                const miopenTensorDescriptor_t cDesc,
+                                size_t* sizeInBytes)
 {
 
     MIOPEN_LOG_FUNCTION(handle, reduceTensorDesc, aDesc, cDesc);
@@ -179,19 +178,18 @@ miopenGetReductionWorkspaceSize_impl(miopenHandle_t handle,
     });
 };
 
-extern "C" miopenStatus_t
-miopenReduceTensor_impl(miopenHandle_t handle,
-                        const miopenReduceTensorDescriptor_t reduceTensorDesc,
-                        void* indices,
-                        size_t indicesSizeInBytes,
-                        void* workspace,
-                        size_t workspaceSizeInBytes,
-                        const void* alpha,
-                        const miopenTensorDescriptor_t aDesc,
-                        const void* A,
-                        const void* beta,
-                        const miopenTensorDescriptor_t cDesc,
-                        void* C)
+extern "C" miopenStatus_t miopenReduceTensor(miopenHandle_t handle,
+                                             const miopenReduceTensorDescriptor_t reduceTensorDesc,
+                                             void* indices,
+                                             size_t indicesSizeInBytes,
+                                             void* workspace,
+                                             size_t workspaceSizeInBytes,
+                                             const void* alpha,
+                                             const miopenTensorDescriptor_t aDesc,
+                                             const void* A,
+                                             const void* beta,
+                                             const miopenTensorDescriptor_t cDesc,
+                                             void* C)
 {
     MIOPEN_LOG_FUNCTION(handle,
                         reduceTensorDesc,

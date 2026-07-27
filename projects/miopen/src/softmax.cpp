@@ -1,7 +1,6 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 #include "miopen/execution_context.hpp"
-#include <miopen/miopen_impl.h>
 #include "miopen/softmax/problem_description.hpp"
 #include <miopen/kernel_cache.hpp>
 #include <miopen/softmax.hpp>
@@ -26,7 +25,7 @@ miopen::PerformanceDb GetDb(const miopen::ExecutionContext& context,
 }
 } // namespace softmax
 
-extern "C" miopenStatus_t miopenCreateSoftmaxDescriptor_impl(miopenSoftmaxDescriptor_t* softmaxDesc)
+extern "C" miopenStatus_t miopenCreateSoftmaxDescriptor(miopenSoftmaxDescriptor_t* softmaxDesc)
 {
     MIOPEN_LOG_FUNCTION(softmaxDesc);
     return miopen::try_([&] {
@@ -35,11 +34,11 @@ extern "C" miopenStatus_t miopenCreateSoftmaxDescriptor_impl(miopenSoftmaxDescri
     });
 }
 
-extern "C" miopenStatus_t miopenSetSoftmaxDescriptor_impl(miopenSoftmaxDescriptor_t softmaxDesc,
-                                                          float alpha,
-                                                          float beta,
-                                                          miopenSoftmaxAlgorithm_t algorithm,
-                                                          miopenSoftmaxMode_t mode)
+extern "C" miopenStatus_t miopenSetSoftmaxDescriptor(miopenSoftmaxDescriptor_t softmaxDesc,
+                                                     float alpha,
+                                                     float beta,
+                                                     miopenSoftmaxAlgorithm_t algorithm,
+                                                     miopenSoftmaxMode_t mode)
 {
 
     MIOPEN_LOG_FUNCTION(softmaxDesc, alpha, beta, algorithm, mode);
@@ -47,12 +46,11 @@ extern "C" miopenStatus_t miopenSetSoftmaxDescriptor_impl(miopenSoftmaxDescripto
         [&] { miopen::deref(softmaxDesc).SetParams(alpha, beta, algorithm, mode); });
 }
 
-extern "C" miopenStatus_t
-miopenGetSoftmaxDescriptor_impl(const miopenSoftmaxDescriptor_t softmaxDesc,
-                                float* alpha,
-                                float* beta,
-                                miopenSoftmaxAlgorithm_t* algorithm,
-                                miopenSoftmaxMode_t* mode)
+extern "C" miopenStatus_t miopenGetSoftmaxDescriptor(const miopenSoftmaxDescriptor_t softmaxDesc,
+                                                     float* alpha,
+                                                     float* beta,
+                                                     miopenSoftmaxAlgorithm_t* algorithm,
+                                                     miopenSoftmaxMode_t* mode)
 {
     MIOPEN_LOG_FUNCTION(softmaxDesc);
     return miopen::try_([&] {
