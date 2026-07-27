@@ -29,7 +29,7 @@
 
 RTCKernel::RTCGenerator RTCKernelBluesteinSingle::generate_from_node(const LeafNode&    node,
                                                                      const std::string& gpu_arch,
-                                                                     bool enable_callbacks)
+                                                                     CallbackType       cbtype)
 {
     RTCGenerator generator;
 
@@ -64,7 +64,7 @@ RTCKernel::RTCGenerator RTCKernelBluesteinSingle::generate_from_node(const LeafN
                                node.placement,
                                node.inArrayType,
                                node.outArrayType,
-                               node.GetCallbackType(enable_callbacks),
+                               cbtype,
                                node.loadOps,
                                node.storeOps};
 
@@ -120,7 +120,7 @@ RTCKernelArgs RTCKernelBluesteinSingle::get_launch_args(DeviceCallIn& data)
 
 RTCKernel::RTCGenerator RTCKernelBluesteinMulti::generate_from_node(const LeafNode&    node,
                                                                     const std::string& gpu_arch,
-                                                                    bool enable_callbacks)
+                                                                    CallbackType       cbtype)
 {
     RTCGenerator generator;
 
@@ -170,7 +170,7 @@ RTCKernel::RTCGenerator RTCKernelBluesteinMulti::generate_from_node(const LeafNo
                               node.precision,
                               node.inArrayType,
                               node.outArrayType,
-                              node.GetCallbackType(enable_callbacks),
+                              cbtype,
                               node.loadOps,
                               node.storeOps};
 

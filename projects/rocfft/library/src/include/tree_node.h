@@ -950,7 +950,7 @@ public:
     // Assuming callbacks need to run on this node, return the
     // specific CallbackType for this node - takes into account
     // whether the node is treating real data as complex
-    CallbackType GetCallbackType(bool enable_callbacks) const;
+    CallbackType GetCallbackType() const;
 
 protected:
     virtual void BuildTree_internal(SchemeTreeVec& child_scheme_trees = EmptySchemeTreeVec) = 0;

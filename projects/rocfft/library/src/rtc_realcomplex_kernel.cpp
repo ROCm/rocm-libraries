@@ -29,7 +29,7 @@
 
 RTCKernel::RTCGenerator RTCKernelRealComplex::generate_from_node(const LeafNode&    node,
                                                                  const std::string& gpu_arch,
-                                                                 bool enable_callbacks)
+                                                                 CallbackType       cbtype)
 {
     RTCGenerator generator;
 
@@ -58,7 +58,7 @@ RTCKernel::RTCGenerator RTCKernelRealComplex::generate_from_node(const LeafNode&
                            node.precision,
                            node.inArrayType,
                            node.outArrayType,
-                           node.GetCallbackType(enable_callbacks),
+                           cbtype,
                            node.loadOps,
                            node.storeOps};
 
@@ -132,7 +132,7 @@ RTCKernelArgs RTCKernelRealComplex::get_launch_args(DeviceCallIn& data)
 
 RTCKernel::RTCGenerator RTCKernelRealComplexEven::generate_from_node(const LeafNode&    node,
                                                                      const std::string& gpu_arch,
-                                                                     bool enable_callbacks)
+                                                                     CallbackType       cbtype)
 {
     RTCGenerator generator;
 
@@ -171,7 +171,7 @@ RTCKernel::RTCGenerator RTCKernelRealComplexEven::generate_from_node(const LeafN
                                 node.precision,
                                 node.inArrayType,
                                 node.outArrayType,
-                                node.GetCallbackType(enable_callbacks),
+                                cbtype,
                                 node.loadOps,
                                 node.storeOps},
                                Ndiv4};
@@ -225,7 +225,7 @@ RTCKernelArgs RTCKernelRealComplexEven::get_launch_args(DeviceCallIn& data)
 }
 
 RTCKernel::RTCGenerator RTCKernelRealComplexEvenTranspose::generate_from_node(
-    const LeafNode& node, const std::string& gpu_arch, bool enable_callbacks)
+    const LeafNode& node, const std::string& gpu_arch, CallbackType cbtype)
 {
     RTCGenerator generator;
     if(node.scheme != CS_KERNEL_R_TO_CMPLX_TRANSPOSE
@@ -296,7 +296,7 @@ RTCKernel::RTCGenerator RTCKernelRealComplexEvenTranspose::generate_from_node(
                                          node.precision,
                                          node.inArrayType,
                                          node.outArrayType,
-                                         node.GetCallbackType(enable_callbacks),
+                                         cbtype,
                                          node.loadOps,
                                          node.storeOps,
                                          grid3D}};

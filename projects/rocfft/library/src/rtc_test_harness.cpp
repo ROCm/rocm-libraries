@@ -328,6 +328,7 @@ void write_standalone_test_harness(const Function& f, const std::string& src)
     main_file << device_properties_h;
     main_file << gpubuf_h;
     main_file << hip_object_wrapper_h;
+    main_file << callback_h;
     main_file << rtc_kernel_h;
     main_file << rtc_kernel_cpp;
     main_file << rtc_test_harness_helper_cpp;

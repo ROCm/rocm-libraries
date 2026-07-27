@@ -58,11 +58,8 @@ static const TreeNode* FindLastLeaf(const TreeNode* node, OperatingBuffer buf)
     return node->obOut == buf ? node : nullptr;
 }
 
-CallbackType TreeNode::GetCallbackType(bool enable_callbacks) const
+CallbackType TreeNode::GetCallbackType() const
 {
-    if(!enable_callbacks)
-        return CallbackType::NONE;
-
     // We only treat real data as complex for even-length real-complex.
     // That is, we must be:
     //

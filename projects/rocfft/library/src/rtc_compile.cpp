@@ -45,7 +45,7 @@ std::vector<char> compile_inprocess(const std::string& kernel_src, const std::st
         throw std::runtime_error("unable to create program");
     }
 
-    std::string gpu_arch_arg = "--gpu-architecture=" + gpu_arch;
+    std::string gpu_arch_arg = "--offload-arch=" + gpu_arch;
 
     std::vector<const char*> options;
     options.push_back("-O3");
@@ -71,12 +71,26 @@ std::vector<char> compile_inprocess(const std::string& kernel_src, const std::st
         throw std::runtime_error("compile failed without log");
     }
 
-    size_t codeSize;
-    if(hiprtcGetCodeSize(state.prog, &codeSize) != HIPRTC_SUCCESS)
-        throw std::runtime_error("failed to get code size");
+    size_t            codeSize;
+    std::vector<char> code;
+    // SPIR-V is returned as bitcode, not a finished code object
+    if(gpu_arch == ARCH_SPIRV)
+    {
+        if(hiprtcGetBitcodeSize(state.prog, &codeSize) != HIPRTC_SUCCESS)
+            throw std::runtime_error("failed to get bitcode size");
 
-    std::vector<char> code(codeSize);
-    if(hiprtcGetCode(state.prog, code.data()) != HIPRTC_SUCCESS)
-        throw std::runtime_error("failed to get code");
+        code.resize(codeSize);
+        if(hiprtcGetBitcode(state.prog, code.data()) != HIPRTC_SUCCESS)
+            throw std::runtime_error("failed to get bitcode");
+    }
+    else
+    {
+        if(hiprtcGetCodeSize(state.prog, &codeSize) != HIPRTC_SUCCESS)
+            throw std::runtime_error("failed to get code size");
+
+        code.resize(codeSize);
+        if(hiprtcGetCode(state.prog, code.data()) != HIPRTC_SUCCESS)
+            throw std::runtime_error("failed to get code");
+    }
     return code;
 }

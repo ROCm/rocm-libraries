@@ -37,5 +37,5 @@ std::shared_future<std::unique_ptr<RTCKernel>> RTCKernelChirp::generate(const st
     };
 
     std::string kernel_name;
-    return runtime_compile(generator, gpu_arch, kernel_name);
+    return runtime_compile(generator, gpu_arch, kernel_name, {}, {});
 }

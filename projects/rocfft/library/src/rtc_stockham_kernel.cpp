@@ -32,7 +32,7 @@
 
 RTCKernel::RTCGenerator RTCKernelStockham::generate_from_node(const LeafNode&    node,
                                                               const std::string& gpu_arch,
-                                                              bool               enable_callbacks)
+                                                              CallbackType       cbtype)
 {
     RTCStockhamGenerator generator;
 
@@ -195,7 +195,7 @@ RTCKernel::RTCGenerator RTCKernelStockham::generate_from_node(const LeafNode&   
                                         node.dir2regMode,
                                         node.intrinsicMode,
                                         node.sbrcTranstype,
-                                        node.GetCallbackType(enable_callbacks),
+                                        cbtype,
                                         node.fuseBlue,
                                         ppType,
                                         pp_params,
@@ -222,7 +222,7 @@ RTCKernel::RTCGenerator RTCKernelStockham::generate_from_node(const LeafNode&   
                             node.dir2regMode,
                             node.intrinsicMode,
                             node.sbrcTranstype,
-                            node.GetCallbackType(enable_callbacks),
+                            cbtype,
                             node.fuseBlue,
                             ppType,
                             node.loadOps,

@@ -305,6 +305,7 @@ add_library( rocfft-rtc-gen OBJECT
   rtc_chirp_gen.cpp
   rtc_test_harness.cpp
   load_store_ops_gen.cpp
+  ${CMAKE_SOURCE_DIR}/shared/sha256.c
 )
 # caching of generation/compilation
 add_library( rocfft-rtc-cache OBJECT

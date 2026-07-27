@@ -86,11 +86,9 @@ std::string transpose_rtc(const std::string& kernel_name, const TransposeSpecs& 
     src += rocfft_complex_h;
     src += common_h;
     src += device_enum_h;
-    src += callback_h;
-
     src += rtc_precision_type_decl(specs.precision, array_type_is_complex(specs.inArrayType));
-
-    src += rtc_const_cbtype_decl(specs.cbtype);
+    src += load_store_decls(specs.loadOps, specs.storeOps, specs.cbtype);
+    src += callback_h;
 
     // twiddle code assumes scalar type is named T
     src += "typedef scalar_type T;\n";
@@ -262,8 +260,8 @@ std::string transpose_rtc(const std::string& kernel_name, const TransposeSpecs& 
     func.body += CommentLines{"remaining is now the batch"};
     func.body += AddAssign(offset_in, remaining * idist_var);
     func.body += AddAssign(offset_out, remaining * odist_var);
-    func.body += CallbackLoadDeclaration("scalar_type", "cbtype");
-    func.body += CallbackStoreDeclaration("scalar_type", "cbtype");
+    func.body += CallbackLoadDeclaration{};
+    func.body += CallbackStoreDeclaration{};
 
     // loop variables for reading/writing
     Variable i{"i", "unsigned int"};
@@ -373,7 +371,13 @@ std::string transpose_rtc(const std::string& kernel_name, const TransposeSpecs& 
     if(array_type_is_planar(specs.outArrayType))
         func = make_planar(func, "output");
 
-    func = make_callback_realcomplex(func, specs.cbtype);
+    func = make_callback_realcomplex(
+        func,
+        specs.cbtype,
+        (specs.loadOps && specs.loadOps->has_spirv()) ? specs.loadOps->spirv_cb.symbol_name
+                                                      : nullptr,
+        (specs.storeOps && specs.storeOps->has_spirv()) ? specs.storeOps->spirv_cb.symbol_name
+                                                        : nullptr);
 
     src += func.render();
 

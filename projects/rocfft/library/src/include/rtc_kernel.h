@@ -21,6 +21,7 @@
 #ifndef ROCFFT_RTC_H
 #define ROCFFT_RTC_H
 
+#include "load_store_ops.h"
 #include "rocfft/rocfft.h"
 #include <hip/hip_runtime_api.h>
 
@@ -119,7 +120,7 @@ struct RTCKernel
         runtime_compile(const LeafNode&    node,
                         const std::string& gpu_arch,
                         std::string&       kernel_name,
-                        bool               enable_callbacks = false);
+                        CallbackType       cbtype = CallbackType::NONE);
 
     // take already-compiled code object and prepare to launch the
     // named kernel
@@ -218,8 +219,12 @@ protected:
 
     // runtime compile a kernel, given a generator struct that
     // indicates how to generate code for it
-    static std::shared_future<std::unique_ptr<RTCKernel>> runtime_compile(
-        const RTCGenerator& generator, const std::string& gpu_arch, std::string& kernel_name);
+    static std::shared_future<std::unique_ptr<RTCKernel>>
+        runtime_compile(const RTCGenerator&            generator,
+                        const std::string&             gpu_arch,
+                        std::string&                   kernel_name,
+                        const std::optional<LoadOps>&  loadOps,
+                        const std::optional<StoreOps>& storeOps);
 
     // Keep track of modules that have been requested, so that if two
     // identical kernel requests come at the same time, we only
@@ -322,23 +327,6 @@ static const char* rtc_cbtype_name(CallbackType cbtype)
         return "_CBr2c";
     case CallbackType::USER_LOAD_STORE_C2R:
         return "_CBc2r";
-    }
-}
-
-// realDataAsComplex is true if we're treating real data as complex
-// (in an even-length real-complex FFT)
-static const std::string rtc_const_cbtype_decl(CallbackType cbtype)
-{
-    switch(cbtype)
-    {
-    case CallbackType::NONE:
-        return "static const CallbackType cbtype = CallbackType::NONE;\n";
-    case CallbackType::USER_LOAD_STORE:
-        return "static const CallbackType cbtype = CallbackType::USER_LOAD_STORE;\n";
-    case CallbackType::USER_LOAD_STORE_R2C:
-        return "static const CallbackType cbtype = CallbackType::USER_LOAD_STORE_R2C;\n";
-    case CallbackType::USER_LOAD_STORE_C2R:
-        return "static const CallbackType cbtype = CallbackType::USER_LOAD_STORE_C2R;\n";
     }
 }
 #endif

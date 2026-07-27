@@ -263,8 +263,8 @@ struct StockhamKernelFused2D : public StockhamKernelRR
         body += Declaration{lds_linear, "true"};
         body += Declaration{direct_load_to_reg, "false"};
         body += Declaration{direct_store_from_reg, "false"};
-        body += CallbackLoadDeclaration{scalar_type.name, callback_type.name};
-        body += CallbackStoreDeclaration{scalar_type.name, callback_type.name};
+        body += CallbackLoadDeclaration{};
+        body += CallbackStoreDeclaration{};
         body += Declaration{SB_1ST, "SB_UNIT"};
         body += Declaration{SB_2ND, "SB_NONUNIT"};
 
