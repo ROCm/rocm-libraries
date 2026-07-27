@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019-2025, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2019-2026, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -37,7 +37,7 @@
 #  pragma system_header
 #endif // no system header
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
+#if THRUST_HAS_HIP_COMPILER()
 #  include <thrust/detail/internal_functional.h>
 #  include <thrust/system/hip/detail/transform.h>
 
@@ -128,7 +128,7 @@ OutputIt THRUST_HOST_DEVICE replace_copy_if(
   Predicate predicate,
   T const& new_value)
 {
-  using output_type    = typename iterator_traits<OutputIt>::value_type;
+  using output_type    = thrust::detail::it_value_t<OutputIt>;
   using new_value_if_t = __replace::new_value_if_f<Predicate, T, output_type>;
   return hip_rocprim::transform(policy, first, last, result, new_value_if_t(predicate, new_value));
 }
@@ -143,7 +143,7 @@ OutputIt THRUST_HOST_DEVICE replace_copy_if(
   Predicate predicate,
   T const& new_value)
 {
-  using output_type    = typename iterator_traits<OutputIt>::value_type;
+  using output_type    = thrust::detail::it_value_t<OutputIt>;
   using new_value_if_t = __replace::new_value_if_f<Predicate, T, output_type>;
   return hip_rocprim::transform(policy, first, last, stencil, result, new_value_if_t(predicate, new_value));
 }
