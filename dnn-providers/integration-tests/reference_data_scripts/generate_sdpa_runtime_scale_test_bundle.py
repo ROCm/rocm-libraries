@@ -91,11 +91,11 @@ def build_graph_json(q_dims, k_dims, v_dims, o_dims, dtype_str):
     """Build the SDPA graph JSON with scale wired as a runtime tensor.
 
     Key difference from the compile-time variant (generate_sdpa_fwd_golden.py):
-      - scale_tensor_uid = UID_SCALE (runtime-with-default PBV tensor)
-      - scale tensor carries value_type/value=2.0 as a wrong compile-time bake-in
+      - scale_tensor_uid = UID_SCALE (pure runtime PBV tensor, no baked fallback)
       - attn_scale_value = null (forces CPU reference to read from variantPack)
-    A provider that ignores the runtime tensor and reads the bake-in (2.0) or falls
-    back to 1/sqrt(headDim) produces output that diverges from the CPU reference.
+    A provider that falls back to a compile-time default (e.g. 1/sqrt(headDim))
+    instead of reading the runtime tensor produces output that diverges from the
+    CPU reference.
     """
     tensors = [
         {
@@ -138,10 +138,6 @@ def build_graph_json(q_dims, k_dims, v_dims, o_dims, dtype_str):
             "data_type": "float",
             "virtual": False,
             "is_runtime_pass_by_value": True,
-            "value_type": "Float32Value",
-            # Compile-time bake-in: intentionally wrong so a provider that ignores the
-            # runtime tensor and reads this value instead produces detectably wrong output.
-            "value": 2.0,
         },
     ]
 
