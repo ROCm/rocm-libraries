@@ -896,6 +896,8 @@ class KernelWriterAssembly(KernelWriter):
         module.add(self.defineSgpr("GL2PrefetchIncMXSA", self.states.rpgo))
       if kernel["ProblemType"]["MXBlockB"]:
         module.add(self.defineSgpr("GL2PrefetchIncMXSB", self.states.rpgo))
+      if kernel["enableTDMMetadata"]:
+        module.add(self.defineSgpr("GL2PrefetchIncMetadata", self.states.rpgo))
 
     if self.sgprPool.size() > self.states.regCaps["MaxSgpr"]:
       print ("warning: Number of defined SGPRS (%d) overflowed max SGPRS (%d)." \
@@ -1063,6 +1065,11 @@ class KernelWriterAssembly(KernelWriter):
         for i in range(mx["gl2nl"]):
           module.add(RegSet("v", f"vgprGL2PrefetchAddr{label}_{i}",
               stateObj.startVgprGL2PrefetchAddr + i * self.states.rpga))
+    if kernel["enableTDMMetadata"]:
+      tPM = tPA["tpsMetadata"] if tPA["is_sparse"] else tPB["tpsMetadata"]
+      for i in range(tPM["gl2nl"]):
+        module.add(RegSet("v", f"vgprGL2PrefetchAddrMetadata_{i}",
+            self.states.m.startVgprGL2PrefetchAddr + i * self.states.rpga))
 
   def macroAndSet(self, kernel, tPA, tPB) -> Module:
     module = Module("MacroNSet")
@@ -19896,6 +19903,8 @@ class KernelWriterAssembly(KernelWriter):
       comp.init(self, kernel, tPA["MX"])
     if kernel["ProblemType"]["MXBlockB"]:
       comp.init(self, kernel, tPB["MX"])
+    if kernel["enableTDMMetadata"]:
+      comp.init(self, kernel, tPA["tpsMetadata"] if tPA["is_sparse"] else tPB["tpsMetadata"])
   
   def gl2PrefetchCalcAddr(self, kernel, tPA, tPB) -> Module:
     mod = Module("GL2 Prefetch Addresses Calculation")
@@ -19905,6 +19914,8 @@ class KernelWriterAssembly(KernelWriter):
       tpList.append(tPA["MX"])
     if kernel["ProblemType"]["MXBlockB"]:
       tpList.append(tPB["MX"])
+    if kernel["enableTDMMetadata"]:
+      tpList.append(tPA["tpsMetadata"] if tPA["is_sparse"] else tPB["tpsMetadata"])
 
     for tp in tpList:
       mod.add(comp.setIncrement(self, kernel, tp))
@@ -19921,6 +19932,8 @@ class KernelWriterAssembly(KernelWriter):
       mod.add(comp.issueLoad(self, kernel, tPA["MX"]))
     if kernel["ProblemType"]["MXBlockB"]:
       mod.add(comp.issueLoad(self, kernel, tPB["MX"]))
+    if kernel["enableTDMMetadata"]:
+      mod.add(comp.issueLoad(self, kernel, tPA["tpsMetadata"] if tPA["is_sparse"] else tPB["tpsMetadata"]))
     return mod
   
   def gl2PrefetchIncrementAddr(self, kernel, tPA, tPB) -> Module:
@@ -19933,6 +19946,8 @@ class KernelWriterAssembly(KernelWriter):
       mod.add(comp.incrementAddr(self, kernel, tPA["MX"]))
     if kernel["ProblemType"]["MXBlockB"]:
       mod.add(comp.incrementAddr(self, kernel, tPB["MX"]))
+    if kernel["enableTDMMetadata"]:
+      mod.add(comp.incrementAddr(self, kernel, tPA["tpsMetadata"] if tPA["is_sparse"] else tPB["tpsMetadata"]))
     return mod
 
   def getHalfPLRGroups(self, kernel, lc, u):

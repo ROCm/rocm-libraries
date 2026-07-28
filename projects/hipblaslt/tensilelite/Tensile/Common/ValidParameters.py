@@ -828,6 +828,14 @@ validParameters = { # we need to make sure this matches develop
     # 0: uses workspace to store partial tiles, accumulate in deterministic fix-up step
     # 1: uses atomics to accumulate partial tiles
     "StreamKAtomic": [0, 1],
+    # Codegen-time toggle for single-hop next-neighbor work stealing in the
+    # dynamic-queue StreamK fetch (SK4 / SK5-dynamic). Queue count =
+    # archCaps['NumXCD'] (8 on gfx942/gfx950). When a workgroup's home queue
+    # empties, it makes one atomic attempt on its next-neighbor per-XCD queue.
+    # Valid only for StreamK in (4, 5).
+    #  0: off
+    #  1: on
+    "StreamKWorkStealing": [0, 1],
     # Enables XCC-based remapping of workgroups, set the value to the number of XCCs
     # for the device/configuration being used
     #  0: uses default workgroup assignment
