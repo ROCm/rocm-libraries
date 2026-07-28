@@ -364,9 +364,13 @@ something other than a graph running and matching a reference:
 - **Determinism / repeated-run invariants** (`IntegrationGpuDeterministic`).
 
 If a proposed C++ test is really just "build graph X, run it, compare to a
-reference," it belongs in a bundle instead. Use `--capture-bundles` and the
-migration scripts to convert an existing C++ graph test into a bundle rather
-than adding another parameterized instantiation.
+reference," it belongs in a bundle instead. Convert it with
+[`migration-scripts/`](migration-scripts/README.md): `--capture-bundles`
+dumps the test's graph(s) as JSON, then `import_graph.py` merges each one
+into the bundle tree — see ["Quick path: convert one existing C++
+test"](migration-scripts/README.md#quick-path-convert-one-existing-c-test-no-full-pipeline-needed)
+for the exact two-step commands. Don't add another parameterized
+instantiation to the C++ test instead.
 
 ## Adding a New Reference-Executor Operation
 

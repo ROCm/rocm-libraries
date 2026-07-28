@@ -40,6 +40,44 @@ VERIFIED at behavior level — every C++ PASS has a bundle that also PASSes
 graph can round-trip perfectly on disk yet fail to run — Hop D is what makes
 "turn off the C++ tests, lose nothing" a checked fact rather than a hope.
 
+### Quick path: convert one existing C++ test (no full pipeline needed)
+
+Hops B–D (`place_bundles.py`, `verify_migration.py`, `diff_coverage.py`) exist
+to migrate a whole suite in bulk with a byte- and behavior-level proof. For
+**one** test, skip them and go straight from capture to import — two steps:
+
+```bash
+# Step 1: Capture — dump the graph(s) for just this test
+./build/bin/integration_tests --capture-bundles /tmp/captured \
+    --gtest_filter='Full/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness/*'
+
+# Step 2: Import — merge each captured graph into the bundle tree
+for graph in /tmp/captured/*/*/*.json; do
+    [[ "$graph" == *.meta.json ]] && continue
+    python3 migration-scripts/import_graph.py \
+        --graph "$graph" \
+        --bundle-dir dnn-providers/integration-tests/integration_test_bundles \
+        --meta reference_source="c++ integration suite: $(basename "$(dirname "$graph")")"
+done
+```
+
+`import_graph.py` is idempotent and dedup-aware (see Step 5 below): it
+appends a new sweep case if a matching topology already exists, creates a
+new template+sweep if not, and reports `DUPLICATE` if the exact case is
+already bundled. Verify each printed `--gtest_filter` line runs and passes
+as a bundle case, then delete the C++ `TEST_P`/`INSTANTIATE_TEST_SUITE_P`
+registration for that case.
+
+**Note:** `import_graph.py` does not read the `.meta.json` sidecar that
+`--capture-bundles` writes next to each graph — pass `--seed` and
+`--meta inputs=<json>` explicitly (copy the values out of the `.meta.json`)
+if you need the imported case's seed/input-range metadata to match the
+original C++ test exactly.
+
+Use the full pipeline below instead when migrating many tests/suites at
+once and you want the Hop C/D byte- and behavior-level proof that nothing
+was lost.
+
 ## How to Run
 
 ### Prerequisites
