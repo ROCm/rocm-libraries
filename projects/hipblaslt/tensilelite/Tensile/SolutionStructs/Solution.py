@@ -1145,8 +1145,8 @@ class Solution(collections.abc.Mapping):
     # below is the ONLY place it is turned on.
     state["StreamKMulticast"] = 0
     # Collapse the bare StreamK cluster state: on StreamK=3 a non-[1,1] ClusterDim
-    # AUTO-ENABLES the DP cooperative B-multicast path. A StreamK cluster with no
-    # cooperative loads no longer exists -- "ClusterDim without cluster loads" is
+    # AUTO-ENABLES the DP cooperative B-multicast path. A StreamK cluster always
+    # carries a cooperative role -- "ClusterDim without cluster loads" is
     # not a supported state. StreamKMulticast is derived-only (no user/YAML
     # opt-in): this collapse is its sole enable site.
     #
@@ -1165,8 +1165,8 @@ class Solution(collections.abc.Mapping):
     if state["ClusterDim"] != [1, 1] and state.get("StreamK", 0) == 3:
       state["StreamKMulticast"] = 1
     # Multicast tri-state (see ValidParameters): -1 auto (legacy), 0 off, 1 on.
-    # Default -1 reproduces the historic ClusterDim-coupled derivation, so YAML
-    # that omits Multicast is byte-identical.
+    # Default -1 reproduces the ClusterDim-coupled derivation, so YAML
+    # that omits Multicast is unchanged.
     mc = state.get("Multicast", -1)
     if mc == 1:
       # Force-on requires a matching ClusterLoadTDM (TDMInst==3 on gfx1250 with

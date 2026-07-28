@@ -120,11 +120,6 @@ class TestValidation:
             # cluster-scope barrier handshake, so ClusterBarrier is derived on.
             assert st["ClusterBarrier"] is True, st.get("ClusterBarrier")
 
-    # NB: test_auto_enable_from_bare_cluster was removed as a strict subset of
-    # test_multicast_tristate.py::TestDerivation::test_streamk_cluster_auto_multicast,
-    # which derives the same bare SK3 + ClusterDim config and asserts the same
-    # StreamKMulticast==1 / Multicast==1 (plus ClusterBarrier is True).
-
     def test_reject_multicast_force_off(self, tmp_path):
         """StreamKMulticast auto-enabled by ClusterDim on SK3 is incompatible with
         an explicit Multicast=0 (force off): the mask SGPRs are gated on Multicast
@@ -133,12 +128,6 @@ class TestValidation:
         cfg = _write_variant(tmp_path, "mc_off.yaml",
                              fork_overrides={"Multicast": [0]})
         assert _derive_states(cfg) == []
-
-    # NB: test_control_multicast_auto_enabled was removed as a subset of
-    # test_accepted_baseline above, which derives the same SK3 [4,1] cluster
-    # config with the default Multicast=-1 (auto) and already asserts
-    # StreamKMulticast==1 / Multicast==1 (plus ClusterDim/ClusterBarrier). The
-    # negative-path partner test_reject_multicast_force_off is retained.
 
     def test_reject_atomic(self, tmp_path):
         cfg = _write_variant(tmp_path, "atomic.yaml",

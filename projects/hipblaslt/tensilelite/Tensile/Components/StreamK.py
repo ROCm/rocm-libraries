@@ -2601,8 +2601,8 @@ class StreamKTwoTileDPFirst(StreamK):
         the remaining waves branch over it via ``labelBase``. When ``wait`` is set
         an all-waves cluster wait (``s_barrier_wait -3``) follows the arrive.
         ``labelBase``/``electTag`` are supplied per call site so the emitted label
-        and pool tag -- and hence the assembly -- stay byte-identical to the
-        pre-extraction inline copies. Instructions are appended to ``module``.
+        and pool tag stay distinct per call site. Instructions are appended to
+        ``module``.
         """
         skipSignal = Label(label=writer.labels.getNameInc(labelBase), comment="")
         elect = writer.sgprPool.checkOut(1, electTag)
