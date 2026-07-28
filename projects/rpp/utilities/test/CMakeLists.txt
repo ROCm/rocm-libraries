@@ -82,6 +82,7 @@ add_executable(rpp_tests
     src/tests/image/filter/gaussian_filter_test.cpp
     src/tests/image/filter/median_filter_test.cpp
     src/tests/image/filter/sobel_filter_test.cpp
+    src/tests/image/filter/emboss_test.cpp
     src/tests/image/statistical/tensor_sum_test.cpp
     src/tests/image/statistical/threshold_test.cpp
     src/tests/image/statistical/tensor_min_test.cpp
