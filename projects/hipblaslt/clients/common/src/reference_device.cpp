@@ -161,9 +161,6 @@ namespace
     }
 } // namespace
 
-// Serial-float K accumulation diverges from the library reduction order by more
-// than 4 ULP at large K (~71 ULP at K=16384 f32), so the exact (tol==0) unit_check
-// is only meaningful at small K. See also the note in gpu_compare.hpp.
 bool gpu_ref_supported(const Arguments& arg, std::string& reason)
 {
     auto fail = [&](const char* r) {
@@ -247,35 +244,28 @@ bool run_reference_gemm_device(bool        transA_is_n,
     if(M <= 0 || N <= 0 || batchCount <= 0)
         return true;
 
-    // Float accumulate. A/B input types are runtime args to the loader, so only
-    // (C type, D type) are dispatched here (a 3x3 over f32/bf16/f16).
-#define GPU_REF_F32_ARGS                                                          \
-    transA_is_n, transB_is_n, M, N, K, alpha, beta, dA, tA, lda, strideA, dB, tB, \
-        ldb, strideB, dC, ldc, strideC, dDgold, ldd, strideD, batchCount, stream
-
-#define GPU_REF_LAUNCH_F32(TC, TO) launch_reference_gemm_f32<TC, TO>(GPU_REF_F32_ARGS)
-
-#define GPU_REF_DISPATCH_TO(TC)                    \
-    do                                             \
-    {                                              \
-        if(tD == HIP_R_32F)                        \
-            GPU_REF_LAUNCH_F32(TC, float);         \
-        else if(tD == HIP_R_16BF)                  \
-            GPU_REF_LAUNCH_F32(TC, hip_bfloat16);  \
-        else                                       \
-            GPU_REF_LAUNCH_F32(TC, hipblasLtHalf); \
-    } while(0)
-
+    // Float accumulate. A/B input types are decoded at runtime by the loader, so
+    // only (C type, D type) are dispatched here -- a 3x3 over f32/bf16/f16 formed
+    // by two nested type picks. `launch` names the long argument list once.
+    auto launch = [&](auto tc_tag, auto to_tag) {
+        launch_reference_gemm_f32<decltype(tc_tag), decltype(to_tag)>(
+            transA_is_n, transB_is_n, M, N, K, alpha, beta, dA, tA, lda, strideA, dB, tB,
+            ldb, strideB, dC, ldc, strideC, dDgold, ldd, strideD, batchCount, stream);
+    };
+    auto pick_d = [&](auto tc_tag) {
+        if(tD == HIP_R_32F)
+            launch(tc_tag, float{});
+        else if(tD == HIP_R_16BF)
+            launch(tc_tag, hip_bfloat16{});
+        else // HIP_R_16F
+            launch(tc_tag, hipblasLtHalf{});
+    };
     if(tC == HIP_R_32F)
-        GPU_REF_DISPATCH_TO(float);
+        pick_d(float{});
     else if(tC == HIP_R_16BF)
-        GPU_REF_DISPATCH_TO(hip_bfloat16);
-    else
-        GPU_REF_DISPATCH_TO(hipblasLtHalf);
-
-#undef GPU_REF_DISPATCH_TO
-#undef GPU_REF_LAUNCH_F32
-#undef GPU_REF_F32_ARGS
+        pick_d(hip_bfloat16{});
+    else // HIP_R_16F
+        pick_d(hipblasLtHalf{});
 
     return gpu_ref_hip_check(hipGetLastError(), "reference GEMM launch");
 }
