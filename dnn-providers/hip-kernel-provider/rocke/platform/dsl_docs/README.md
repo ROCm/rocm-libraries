@@ -61,44 +61,44 @@ python/rocke/
 
 New to the DSL? Read in this order:
 
-1. `architecture/mental_model.md`
-2. `architecture/authoring_model.md`
-3. `ir_lowering/ir_model.md`
-4. `ir_lowering/lowering_pipeline.md`
-5. `ir_lowering/backend_details.md`
-6. `primitives/intrinsics_and_primitives.md`
-7. `primitives/memory_layout_and_transforms.md`
-8. `primitives/wave_and_cross_lane.md`
-9. `primitives/quantization.md`
-10. `instances/index.md`
-11. `instances/gemm.md`
-12. `instances/convolution.md`
-13. `instances/attention.md`
-14. `instances/small_ops.md`
-15. `runtime/compile_launch_and_manifest.md`
-16. `runtime/manifest_schema.md`
-17. `runtime/comgr_and_hipmodule.md`
-18. `runtime/limitations.md`
-19. `optimization/optimization_runbook.md` — current evidence-first optimization workflow
-20. `optimization/runbook_compliance.md` — code and test anchors for each workflow stage
-21. `optimization/runbook_mapping.md` — compatibility pointer to the compliance map
-22. `optimization/measured_results.md` — measurement retention policy and scoped evidence index
-23. `fusion/overview.md`
-24. `autotune/overview.md`
-25. `development/testing.md`
-26. `development/extending.md`
-27. `development/setup_guide.md` — prerequisites (ROCm 7.2 / PyTorch 2.12), venv setup, building the C++ engine, env-variable reference; Linux & Windows
-28. `development/onboarding.md` — guided learning path for kernel authors
-29. `development/engine_contributing.md` — the dual-backend contract; required reading before editing engine internals
-30. `development/engine_parity.md` — the Python⇄C++ parity rule: every optimization needs both engines (for humans and AI agents)
-31. `development/invariants.md` — non-obvious rules (the landmines) for engine contributors
-32. `development/troubleshooting.md` — engine/build failure catalog (stale-artifact class, gate failures)
-33. `reference/file_index.md`
-34. `reference/api_index.md`
-35. `reference/env_flags.md` — every environment variable (core, provider, tooling, diagnostic)
-36. `reference/op_vocabulary.md`
-37. `reference/mfma_atom_catalog.md`
-38. `reference/glossary.md`
+1. [`architecture/mental_model.md`](./architecture/mental_model.md)
+2. [`architecture/authoring_model.md`](./architecture/authoring_model.md)
+3. [`ir_lowering/ir_model.md`](./ir_lowering/ir_model.md)
+4. [`ir_lowering/lowering_pipeline.md`](./ir_lowering/lowering_pipeline.md)
+5. [`ir_lowering/backend_details.md`](./ir_lowering/backend_details.md)
+6. [`primitives/intrinsics_and_primitives.md`](./primitives/intrinsics_and_primitives.md)
+7. [`primitives/memory_layout_and_transforms.md`](./primitives/memory_layout_and_transforms.md)
+8. [`primitives/wave_and_cross_lane.md`](./primitives/wave_and_cross_lane.md)
+9. [`primitives/quantization.md`](./primitives/quantization.md)
+10. [`instances/index.md`](./instances/index.md)
+11. [`instances/gemm.md`](./instances/gemm.md)
+12. [`instances/convolution.md`](./instances/convolution.md)
+13. [`instances/attention.md`](./instances/attention.md)
+14. [`instances/small_ops.md`](./instances/small_ops.md)
+15. [`runtime/compile_launch_and_manifest.md`](./runtime/compile_launch_and_manifest.md)
+16. [`runtime/manifest_schema.md`](./runtime/manifest_schema.md)
+17. [`runtime/comgr_and_hipmodule.md`](./runtime/comgr_and_hipmodule.md)
+18. [`runtime/limitations.md`](./runtime/limitations.md)
+19. [`optimization/optimization_runbook.md`](./optimization/optimization_runbook.md) — current evidence-first optimization workflow
+20. [`optimization/runbook_compliance.md`](./optimization/runbook_compliance.md) — code and test anchors for each workflow stage
+21. [`optimization/runbook_mapping.md`](./optimization/runbook_mapping.md) — compatibility pointer to the compliance map
+22. [`optimization/measured_results.md`](./optimization/measured_results.md) — measurement retention policy and scoped evidence index
+23. [`fusion/overview.md`](./fusion/overview.md)
+24. [`autotune/overview.md`](./autotune/overview.md)
+25. [`development/testing.md`](./development/testing.md)
+26. [`development/extending.md`](./development/extending.md)
+27. [`development/setup_guide.md`](./development/setup_guide.md) — prerequisites (ROCm 7.2 / PyTorch 2.12), venv setup, building the C++ engine, env-variable reference; Linux & Windows
+28. [`development/onboarding.md`](./development/onboarding.md) — guided learning path for kernel authors
+29. [`development/engine_contributing.md`](./development/engine_contributing.md) — the dual-backend contract; required reading before editing engine internals
+30. [`development/engine_parity.md`](./development/engine_parity.md) — the Python⇄C++ parity rule: every optimization needs both engines (for humans and AI agents)
+31. [`development/invariants.md`](./development/invariants.md) — non-obvious rules (the landmines) for engine contributors
+32. [`development/troubleshooting.md`](./development/troubleshooting.md) — engine/build failure catalog (stale-artifact class, gate failures)
+33. [`reference/file_index.md`](./reference/file_index.md)
+34. [`reference/api_index.md`](./reference/api_index.md)
+35. [`reference/env_flags.md`](./reference/env_flags.md) — every environment variable (core, provider, tooling, diagnostic)
+36. [`reference/op_vocabulary.md`](./reference/op_vocabulary.md)
+37. [`reference/mfma_atom_catalog.md`](./reference/mfma_atom_catalog.md)
+38. [`reference/glossary.md`](./reference/glossary.md)
 
 ## One-Screen Summary
 
