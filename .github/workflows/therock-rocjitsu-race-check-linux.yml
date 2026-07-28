@@ -114,6 +114,15 @@ jobs:
         timeout-minutes: 75
         run: bash rocm-libraries/.github/scripts/run_rocjitsu_hipblaslt_race_check.sh
 
+      # Test-only proof for ROCm/rocm-libraries#9969. This step deliberately
+      # fails after the real race check succeeds so the draft PR can demonstrate
+      # whether a sidecar failure remains visible without failing the required
+      # TheRock CI Summary. Remove this step; this branch is not for merge.
+      - name: Force advisory failure (test only)
+        run: |
+          echo "::error::Intentional rocjitsu advisory-failure proof"
+          exit 42
+
       # Upload even on failure. The report directory contains the per-workload
       # stdout logs, rocjitsu sink files, race.log files, generated reduced
       # TensileLite input/output, and timing.tsv; without this artifact a failed
