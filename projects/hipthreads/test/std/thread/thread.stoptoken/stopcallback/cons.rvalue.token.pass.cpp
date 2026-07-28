@@ -92,7 +92,7 @@ int main(int, char**) {
     int calledTimes = 0;
     ::std::stop_callback sc(ss.get_token(), [&] { ++calledTimes; });
 
-    ::std::vector<hip::thread> threads;
+    ::std::vector<hip::wthread> threads;
     for (auto i = 0; i < 10; ++i) {
       threads.emplace_back(support::make_test_thread([&] { ss.request_stop(); }));
     }
@@ -134,7 +134,7 @@ int main(int, char**) {
   {
     ::std::stop_source ss;
 
-    ::std::vector<hip::thread> threads;
+    ::std::vector<hip::wthread> threads;
     ::std::atomic<int> callbackCalledTimes = 0;
     ::std::atomic<bool> done               = false;
     for (auto i = 0; i < 10; ++i) {

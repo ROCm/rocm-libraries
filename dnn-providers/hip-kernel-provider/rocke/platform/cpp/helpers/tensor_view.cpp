@@ -749,6 +749,37 @@ rocke_status_t rocke_make_naive_tensor_view_packed(rocke_tensor_view_t* out,
     return rocke_make_global_view(out, base, shape, rank, dtype, NULL);
 }
 
+rocke_status_t rocke_make_lds_view_ex(rocke_ir_builder_t* b,
+                                      rocke_tensor_view_t* out,
+                                      const rocke_type_t* dtype,
+                                      const int* shape,
+                                      int rank,
+                                      const char* name_hint,
+                                      const rocke_stride_t* strides /* NULL => packed */,
+                                      int exclusive)
+{
+    /* Python make_lds_view (with the ``exclusive`` passthrough):
+     *   smem = b.smem_alloc(dtype, list(shape), name_hint=name_hint,
+     *                       exclusive=exclusive)
+     *   desc = packed(shape, dtype) if strides is None else with_strides(...)
+     *   return TensorView(base=smem, desc=desc, addr_space="lds")
+     */
+    rocke_status_t st;
+    rocke_value_t* smem;
+    if(b == NULL || out == NULL)
+        return ROCKE_ERR_VALUE;
+    smem = rocke_b_smem_alloc_ex(b, dtype, shape, rank, name_hint, exclusive);
+    if(strides == NULL)
+        st = rocke_tensor_descriptor_packed(&out->desc, shape, rank, dtype);
+    else
+        st = rocke_tensor_descriptor_with_strides(&out->desc, shape, strides, rank, dtype);
+    if(st != ROCKE_OK)
+        return st;
+    out->base = smem;
+    out->addr_space = ROCKE_ADDR_LDS;
+    return ROCKE_OK;
+}
+
 rocke_status_t rocke_make_lds_view(rocke_ir_builder_t* b,
                                    rocke_tensor_view_t* out,
                                    const rocke_type_t* dtype,
