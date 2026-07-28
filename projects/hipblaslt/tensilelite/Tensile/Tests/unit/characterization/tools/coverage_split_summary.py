@@ -157,9 +157,12 @@ def build_markdown(
         rows += [
             "### Line-level contribution (share of all measurable statements)",
             "",
-            'Every statement falls into exactly one row below, so the shares sum '
-            'to 100%. "No test coverage" is the untested surface; its share is '
-            "100% minus the combined coverage above.",
+            "These rows count statements (lines), not branches, so they sum to "
+            '100% of the project. "Covered by any suite" is the share reached by '
+            'at least one suite; "No test coverage" is the rest (100% minus '
+            '"Covered by any suite"). This line-level number runs a little higher '
+            "than the whole-project percentage at the top, which is lower because "
+            "it also penalizes untaken branches.",
             "",
             *_aligned_table(
                 ["Reached by", "Statements", "Share of all"],
