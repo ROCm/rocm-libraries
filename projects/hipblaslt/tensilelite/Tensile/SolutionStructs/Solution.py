@@ -1070,8 +1070,8 @@ class Solution(collections.abc.Mapping):
 
     state["ClusterBarrier"] = False
     # Multicast tri-state (see ValidParameters): -1 auto (legacy), 0 off, 1 on.
-    # Default -1 reproduces the historic ClusterDim-coupled derivation, so YAML
-    # that omits Multicast is byte-identical.
+    # Default -1 reproduces the ClusterDim-coupled derivation, so YAML
+    # that omits Multicast is unchanged.
     mc = state.get("Multicast", -1)
     if mc == 1:
       state["Multicast"] = 1

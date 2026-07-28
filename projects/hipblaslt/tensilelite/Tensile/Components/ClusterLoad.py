@@ -2,13 +2,11 @@
 # SPDX-License-Identifier: MIT
 """Cluster (multicast) TDM load component.
 
-Centralizes the multicast ("cluster load") mask machinery (value compute,
-``MulticastMask*`` SGPR declare/undeclare, combined-vs-split topology decision,
-and per-load-site descriptor attach) that was previously duplicated across
-``KernelWriter``/``KernelWriterAssembly``/``SubtileGREmit``. Behavior-preserving:
-every method emits byte-identical assembly, receiving the SGPR operands the
-caller already holds rather than re-allocating. Capability-selected
-(``HasTDM`` + ``TDMInst == 3``), like ``TensorDataMoverLoad``.
+Owns the multicast ("cluster load") mask machinery: mask value compute, the
+``MulticastMask*`` SGPR declare/undeclare, the combined-vs-split topology
+decision, and the per-load-site descriptor attach. Each method receives the
+SGPR operands the caller already holds rather than re-allocating them.
+Capability-selected (``HasTDM`` + ``TDMInst == 3``), like ``TensorDataMoverLoad``.
 """
 
 from ..Component import ClusterLoad
@@ -57,7 +55,7 @@ class ClusterLoadTDM(ClusterLoad):
     # -- SGPR declare / undeclare -------------------------------------------
 
     def declareSgprs(self, writer: "KernelWriter", kernel: Mapping) -> None:
-        """Allocate the ``MulticastMask*`` SGPRs (lift of KernelWriter)."""
+        """Allocate the ``MulticastMask*`` SGPRs."""
         if not kernel["Multicast"]:
             return
         tdmM: bool = kernel["enableTDMMetadata"]
@@ -70,7 +68,7 @@ class ClusterLoadTDM(ClusterLoad):
             writer.defineSgpr("MulticastMaskMetadata", 1)
 
     def undeclareSgprs(self, writer: "KernelWriter", kernel: Mapping) -> Module:
-        """Free the ``MulticastMask*`` SGPRs (lift of KernelWriter)."""
+        """Free the ``MulticastMask*`` SGPRs."""
         mod = Module()
         if not (kernel["Multicast"] and kernel["TDMInst"] != 0):
             return mod
@@ -90,9 +88,8 @@ class ClusterLoadTDM(ClusterLoad):
                      sgprWgX: int, sgprWgY: int, sgprNWgX: int, sTmp: int) -> Module:
         """Compute the multicast mask value(s) into the ``MulticastMask*`` SGPRs.
 
-        Verbatim lift of the ``defineAndResources`` mask compute; the caller
-        passes the operands it already holds (``sgprWgX``/``sgprWgY``/``sgprNWgX``
-        and ``sTmp`` whose ``+4`` slot is scratch) so the output is byte-identical.
+        The caller passes the operands it already holds (``sgprWgX``/``sgprWgY``/
+        ``sgprNWgX`` and ``sTmp`` whose ``+4`` slot is scratch).
         """
         mod = Module()
         if not kernel["Multicast"]:
