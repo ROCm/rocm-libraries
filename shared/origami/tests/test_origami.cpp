@@ -1006,17 +1006,24 @@ TEST_CASE("Origami: select_workgroup_mapping unit test", "[Origami]") {
       else if (gpu_arch == 1250)
         REQUIRE(out_wgm.wgm == 8);
 
+      // K-coherent split-K needs a grid that splits K within one wave of
+      // workgroups, so these cases use fewer tiles than the machine has CUs.
+      // bf16 with MT_K=64 gives 128 bytes per k-iter, one full cache line.
+      auto split_problem     = make_problem(2048, 2048, 65536);
+      size_t numMTs_split    = (2048 / 256) * (2048 / 256);  // 64 tiles
+      size_t skGrid_one_wave = 256;                          // <= N_CU on every test arch
+      REQUIRE(skGrid_one_wave <= hardware.N_CU);
+
       // Test 8: K-coherent split-K mapping is selected when split-K workgroups
       // cover cache-line-aligned K chunks and the split factor is useful across XCDs.
       {
         auto split_config = config;
-        split_config.mt.k = 64;  // bf16: 64 * 2 bytes == one 128B cache line
-        auto skGrid_split = 2 * numMT_M * numMT_N;
+        split_config.mt.k = 64;
 
-        auto out_wgm_splitk =
-            origami::select_workgroup_mapping(problem, hardware, split_config, skGrid_split);
-        REQUIRE(out_wgm_splitk.wgmxccsplitk == 2);
-        REQUIRE(out_wgm_splitk.wgmxccchunk == skGrid_split / hardware.NUM_XCD);
+        auto out_wgm_splitk = origami::select_workgroup_mapping(
+            split_problem, hardware, split_config, skGrid_one_wave);
+        REQUIRE(out_wgm_splitk.wgmxccsplitk == skGrid_one_wave / numMTs_split);
+        REQUIRE(out_wgm_splitk.wgmxccchunk == skGrid_one_wave / hardware.NUM_XCD);
         REQUIRE(out_wgm_splitk.wgmxcc == hardware.NUM_XCD);
       }
 
@@ -1025,13 +1032,42 @@ TEST_CASE("Origami: select_workgroup_mapping unit test", "[Origami]") {
       {
         auto split_config = config;
         split_config.mt.k = 64;
-        auto skGrid_with_tail = 3 * numMT_M * numMT_N + 1;
+        auto skGrid_with_tail = skGrid_one_wave - 1;
 
-        auto out_wgm_splitk_tail =
-            origami::select_workgroup_mapping(problem, hardware, split_config, skGrid_with_tail);
-        REQUIRE(out_wgm_splitk_tail.wgmxccsplitk == 3);
+        auto out_wgm_splitk_tail = origami::select_workgroup_mapping(
+            split_problem, hardware, split_config, skGrid_with_tail);
+        REQUIRE(out_wgm_splitk_tail.wgmxccsplitk == skGrid_with_tail / numMTs_split);
         REQUIRE(out_wgm_splitk_tail.wgmxccchunk == skGrid_with_tail / hardware.NUM_XCD);
         REQUIRE(out_wgm_splitk_tail.wgmxcc == hardware.NUM_XCD);
+      }
+
+      // A grid larger than the CU budget spans more than one wave of workgroups,
+      // so there are no k-levels to group and the mapping stays disabled. This
+      // also keeps the chunk inside the 8-bit field of the kernel argument.
+      {
+        auto split_config = config;
+        split_config.mt.k = 64;
+
+        for (size_t skGrid_multi_wave :
+             {hardware.N_CU + 1, 2 * hardware.N_CU, 3 * hardware.N_CU}) {
+          INFO("skGrid=" << skGrid_multi_wave << " N_CU=" << hardware.N_CU);
+          auto out_wgm_multi_wave = origami::select_workgroup_mapping(
+              split_problem, hardware, split_config, skGrid_multi_wave);
+          REQUIRE(out_wgm_multi_wave.wgmxccsplitk == 0);
+        }
+      }
+
+      // A CU budget below the physical count tightens the gate: the same grid
+      // that fits a full machine spans more than one wave of the budget.
+      {
+        auto split_config      = config;
+        split_config.mt.k      = 64;
+        auto capped_problem    = split_problem;
+        capped_problem.num_cus = skGrid_one_wave / 2;
+
+        auto out_wgm_capped = origami::select_workgroup_mapping(
+            capped_problem, hardware, split_config, skGrid_one_wave);
+        REQUIRE(out_wgm_capped.wgmxccsplitk == 0);
       }
 
       // If the split factor is already XCD-aligned, hardware round-robin dispatch

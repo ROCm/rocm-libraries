@@ -164,6 +164,12 @@ workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
   //   - split_factor > 1 (StreamK actually splits K)
   //   - MT_K * elem_bytes >= 128: each DU chunk covers at least one full cache
   //     line, so split boundaries are cache-line aligned even when extraIters > 0.
+  //   - skGrid <= numCUs: the reorder only groups k-levels within a single wave
+  //     of workgroups, so beyond one wave there is nothing to gain.  numCUs is
+  //     the resolved budget, so a CU cap tightens this too.  It also keeps the
+  //     chunk at or below skGrid/numXCD <= numCUsPerXCD, well inside the 8-bit
+  //     chunk field of the kernel argument (ContractionSolution internalArg1,
+  //     bits 21:14), which would otherwise wrap.
   // The codegen handles non-multiple skGrid via tail identity-mapping, so we no
   // longer require skGrid % numMTs == 0 here.
   size_t out_wgmxccsplitk = defaultWGMXCCSPLITK;
@@ -173,7 +179,8 @@ workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
                                 data_type_to_bytes(problem.b_dtype));
     size_t bytesPerKIter = static_cast<size_t>(MT_K * elemBytes);
 
-    if (split_factor > 1 && bytesPerKIter >= cacheLineBytes && !sk_has_partial_tiles) {
+    if (split_factor > 1 && bytesPerKIter >= cacheLineBytes && !sk_has_partial_tiles
+        && skGrid <= numCUs) {
       // Use floor division: K * MN <= skGrid.  Tail WGs are identity-mapped.
       out_wgmxccsplitk = numMTs > 0 ? skGrid / numMTs : 0;
     }
