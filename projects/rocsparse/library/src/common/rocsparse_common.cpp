@@ -126,11 +126,16 @@ namespace rocsparse
     }
 
     template <uint32_t BLOCKSIZE, typename I, typename A, typename T>
-    ROCSPARSE_DEVICE_ILF void scale_2d_device(
-        I m, I n, int64_t ld, int64_t stride, T value, A* __restrict__ array, rocsparse_order order)
+    ROCSPARSE_DEVICE_ILF void scale_2d_device(I               m,
+                                              I               n,
+                                              int64_t         ld,
+                                              int64_t         stride,
+                                              int64_t         batch,
+                                              T               value,
+                                              A* __restrict__ array,
+                                              rocsparse_order order)
     {
-        I gid   = hipBlockIdx_x * BLOCKSIZE + hipThreadIdx_x;
-        I batch = hipBlockIdx_y;
+        I gid = hipBlockIdx_x * BLOCKSIZE + hipThreadIdx_x;
 
         if(gid >= m * n)
         {
@@ -208,6 +213,7 @@ namespace rocsparse
                          I       n,
                          int64_t ld,
                          int64_t stride,
+                         int64_t batch_count,
                          ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, scalar),
                          A* __restrict__ array,
                          rocsparse_order order,
@@ -217,7 +223,10 @@ namespace rocsparse
 
         if(scalar != static_cast<T>(1))
         {
-            rocsparse::scale_2d_device<BLOCKSIZE>(m, n, ld, stride, scalar, array, order);
+            for(int64_t batch = hipBlockIdx_y; batch < batch_count; batch += hipGridDim_y)
+            {
+                rocsparse::scale_2d_device<BLOCKSIZE>(m, n, ld, stride, batch, scalar, array, order);
+            }
         }
     }
 
@@ -321,7 +330,7 @@ rocsparse_status rocsparse::scale_2d_array(rocsparse_handle handle,
     {
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
             (rocsparse::scale_2d_kernel<256>),
-            dim3((int64_t(m) * n - 1) / 256 + 1, batch_count),
+            dim3((int64_t(m) * n - 1) / 256 + 1, (batch_count > 65536) ? 65536 : batch_count),
             dim3(256),
             0,
             handle->stream,
@@ -329,6 +338,7 @@ rocsparse_status rocsparse::scale_2d_array(rocsparse_handle handle,
             n,
             ld,
             stride,
+            batch_count,
             ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, scalar_device_host),
             array,
             order,
