@@ -262,18 +262,30 @@ There is one family of descriptor formats, one generic engine, and two ways desc
 - **Build-time (AOT).** Descriptors and kernel sources in the source tree are compiled and packed
   per GPU architecture, then installed beside the provider.
 - **Runtime drop-in.** Descriptors backed by a prebuilt code object (or JIT source) are placed in a
-  folder and loaded when the provider starts, with no build step.
+  folder and picked up on demand, with no build step and no restart.
 
 Both paths produce the same thing the generic engine consumes, so everything downstream (matching,
 selection, launch) is identical regardless of how a kernel arrived.
 
 ![Two ingestion paths converging on one generic engine and launcher](../images/ukd_flows.svg)
 
-At provider load, the generic engine discovers all available descriptors and wires up the engines. Two
-kinds load eagerly, because every graph needs them to decide applicability: every UED, so the set of
-engines and their identities exist, and every matcher. The heavier content, each engine's heuristic
-model, the kernels and their metadata, and the dispatch descriptors, loads lazily the first time a graph
-needs it and is cached thereafter. Each UED becomes an engine that names its heuristic (UHD) and metadata
+Loading is on demand. Nothing is parsed until a graph needs it, and what is read is cached and reused
+by later graphs. The first applicability query resolves only what the check requires: the UEDs, to know
+which engines exist, then, per surviving engine, that engine's matchers, then its kernels and their
+metadata, and only for a selected engine its heuristic (UHD) and dispatch descriptor. An engine whose
+matchers reject a graph never pays for the rest, and a heuristic model is never read for an engine that
+is never chosen. What the provider establishes up front is only the descriptor inventory, the ids,
+kinds, and locations that say what exists, so the first query does not scan the filesystem mid-call.
+
+Because the drop-in location is a directory an operator writes to, the provider revalidates that
+inventory rather than trusting a snapshot. A cheap staleness check on the drop-in location, on the
+order of a directory mtime, lets it notice packs added or removed since the last query and reconcile:
+a new pack is picked up on the next query without a restart, and a removed one is dropped along with
+anything cached from it. Reconciliation happens between queries, never underneath one, so a plan
+already built keeps the descriptors it resolved. The exact trigger and its cost are left to the
+delivery follow-up.
+
+Each UED becomes an engine that names its heuristic (UHD) and metadata
 schema (KMD); the KDPs that name it contribute their matchers, dispatch, and kernels, and each child
 kernel becomes a data-backed plan builder inside that engine. Deciding which kernels apply to a graph is
 then a cheap, shared-matcher pass ([Section 5](#5-matching-and-the-umd)): shared checks run once for the
@@ -955,15 +967,15 @@ behind `IEngine` and `IPlanBuilder`, the contracts a hand-written engine already
 1. **Applicability is requested from hipDNN.** The host asks every loaded engine plugin whether it
    can serve this graph, through `IEngine::isApplicable(handle, opGraph)`. For a UKD-backed engine,
    answering that one call is the rest of this section.
-2. **UEDs load, from disk or from the provider's own cache.** Every UED loads eagerly at provider
-   start ([Section 3](#3-how-it-works)), so the set of engines this provider offers, and each one's
-   declared heuristic (UHD) and metadata schema (KMD), already exists before any graph arrives. A
-   later graph reuses what is already loaded instead of reloading it.
+2. **UEDs resolve, from disk or from the provider's own cache.** The provider needs the set of engines
+   it offers, and each one's declared heuristic (UHD) and metadata schema (KMD), before it can answer
+   for any of them. These load on first use and are cached, so a later graph reuses them
+   ([Section 3](#3-how-it-works)). Before serving from cache the provider revalidates its drop-in
+   inventory, so a pack added or removed since the last query is reflected in this one.
 3. **KDPs supply the matcher set to run.** For this engine, the provider takes the KDPs that name it
    and, from them, the set of matcher ids ([Section 4](#4-descriptor-formats)) its kernels could
-   possibly need for this graph. Matchers load eagerly at provider start alongside the UEDs
-   ([Section 3](#3-how-it-works)), so this step selects from already-loaded state rather than
-   reading from disk per graph.
+   possibly need for this graph. Those matchers load on first use and are cached with the engine, so
+   the cost is paid once, and only for engines a graph actually reaches.
 4. **Each engine runs a priority-ordered check loop.** Having loaded all of an engine's matchers, the
    provider evaluates them for this graph in priority order: the most commonly used matchers first,
    kernel-level matchers, the ones that read `$kernel.*` tokens, last. This is the same
@@ -1033,7 +1045,7 @@ sequenceDiagram
     Note over FE,ERM: Steps 1-5: applicability, asked of every loaded engine
     FE->>ERM: create_execution_plans() -> getApplicableEngineIds
     ERM->>Eng: isApplicable(handle, opGraph)
-    Eng->>Eng: load UEDs (step 2, eager/cached) + KDPs (step 3)
+    Eng->>Eng: revalidate inventory; resolve UEDs (step 2) + KDPs/matchers (step 3), on demand and cached
     Eng->>Eng: priority-ordered UMD check loop: graph-level first, $kernel-level last (step 4)
     Eng->>Cache: cache per-engine catalog + bound token state, keyed on graph-bytes hash + device identity (steps 5, 8)
     Eng-->>ERM: bool (true only if the catalog is non-empty)
@@ -1066,7 +1078,9 @@ provider computes over the serialized graph bytes **before deserializing them**,
 against the cached bytes on a hash hit to confirm the graph is byte-for-byte identical rather than
 merely hash-equal. The key also carries a device identity, because the bound token state resolves
 `$device.*` and a handle can be rebound to a stream on another device; a graph-only key would serve a
-catalog and geometry computed for the wrong device. Hashing raw bytes ahead of deserialization keeps
+catalog and geometry computed for the wrong device. A cached catalog is also discarded when the
+descriptor inventory changes ([Section 3](#3-how-it-works)), since a pack dropped in or removed since
+the last query changes which kernels are candidates. Hashing raw bytes ahead of deserialization keeps
 the lookup cheap: the expensive
 work, deserializing the graph and running the matchers, happens only on a miss, and a hit skips
 straight to the cached catalog and token state. The provider already holds other per-session state on
@@ -1199,10 +1213,12 @@ The provider surfaces:
 - **Load and compile diagnostics**: which descriptors were discovered, which were quarantined and
   why, and the timing of descriptor discovery and any JIT compilation. Descriptor load and compile
   wall-time is reported explicitly, using the same wall-time instrumentation the provider already
-  applies elsewhere, so an operator on a machine where a large number of kernels have been dropped
-  in can see where startup time went.
-- **Load-time validation**: each descriptor is checked when it loads (eagerly for UEDs and matchers, at
-  first use for the lazily loaded rest), and a failure names the descriptor, the field, and the reason.
+  applies elsewhere. Because loading is on demand ([Section 3](#3-how-it-works)), that cost lands on
+  the queries that first touch a descriptor rather than at startup, so an operator on a machine where
+  a large number of kernels have been dropped in can see which query paid for what, and what an
+  inventory revalidation cost.
+- **Load-time validation**: each descriptor is checked when it is first loaded, and a failure names the
+  descriptor, the field, and the reason.
   The checks include expression syntax (balanced tree, known operators, right arity); token references
   that resolve (every `$`-field is declared in the schema, and every `$kernel.*` a matcher or dispatch
   formula reads exists in the engine's KMD); cross-descriptor references that resolve (a KDP's `engine`,
@@ -1286,8 +1302,10 @@ The two ingestion paths differ only in where a kernel's code comes from:
   install them beside the provider. The manifest records provenance (architecture, toolchain,
   build id) so incompatible bundles are rejected before load.
 - **Runtime drop-in.** The path is opt-in and off by default. When enabled, the provider scans a
-  dedicated drop-in location for custom bundles at startup, compiles each descriptor to a matcher once,
-  and registers it exactly as an installed one; a single package may declare many descriptors, and a
+  dedicated drop-in location for custom bundles, compiles each descriptor to a matcher once on first
+  use, and registers it exactly as an installed one; the location is revalidated between queries, so a
+  bundle added or removed while the process runs is picked up or dropped without a restart
+  ([Section 3](#3-how-it-works)). A single package may declare many descriptors, and a
   bad descriptor is quarantined on load without failing the rest. JIT kernels compile on first use and
   cache their result. (The concrete enablement and location mechanism is left to the delivery
   follow-up RFC.)
@@ -1693,8 +1711,8 @@ Three areas are new to UKD:
 - **Launch overhead.** Generic launch and plan-time matching add some overhead; the goal is to keep it
   minimal. As hipDNN's benchmarking and performance testing (`tools/dnn-benchmarking`,
   [RFC 0013](0013_Autotune.md)) matures, UKD's overhead is validated against the hand-written
-  baseline. Loading is eager for UEDs and matchers and lazy for the rest ([Section 3](#3-how-it-works)),
-  so that cost is paid once at first use.
+  baseline. Loading is on demand and cached ([Section 3](#3-how-it-works)), so that cost is paid once,
+  at first use, and only for descriptors a graph actually reaches.
 
 ### 14.2 Follow-up RFCs
 
@@ -2020,11 +2038,13 @@ follow-up RFCs rather than solved now.
   cross-reference validation ([Section 10](#10-observability-and-diagnostics)), which quarantines the
   orphaned pack and names the missing id, in CI and at runtime alike.
 
-  Two removal cases are deliberately not specified here. A serialized plan that has baked in a removed
-  id is a future concern: plan serialization for the generic ingestor does not exist yet, and how it
-  captures a selected kernel is undecided, so there is nothing yet to keep consistent. A dropped-in
-  pack is not hipDNN's to remove: a drop-in KDP is expected to be self-contained, and its lifecycle
-  belongs to whoever dropped it in.
+  Removing a dropped-in pack is deleting its file: the provider notices the inventory change and drops
+  it, along with anything cached from it, on the next query ([Section 3](#3-how-it-works)). What that
+  pack contained is still not hipDNN's to manage, since a drop-in KDP is expected to be self-contained
+  and its lifecycle belongs to whoever dropped it in. One removal case is deliberately not specified
+  here: a serialized plan that has baked in a removed id. Plan serialization for the generic ingestor
+  does not exist yet, and how it captures a selected kernel is undecided, so there is nothing yet to
+  keep consistent.
 
   Author-time signalling closes the loop: the validation tooling ([Section 11](#11-tooling)) flags a
   KMD change as a retraining event at author time, against the classification above, rather than
