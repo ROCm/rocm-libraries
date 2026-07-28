@@ -72,7 +72,7 @@ class TestGfx950ConvSmoke(unittest.TestCase):
             "3",
             "--iters",
             "5",
-            # "--verify",
+            "--verify",
         ]
         if direction == "wgrad":
             cmd += ["--split-k", "-1"]
@@ -90,10 +90,9 @@ class TestGfx950ConvSmoke(unittest.TestCase):
     def _verify_and_sweep(self, dtype: str, baseline_key: str, direction: str = "fwd"):
         out = self._run_benchmark(dtype, direction=direction)
 
-        # TODO: Reenable
-        # self.assertNotIn(
-        #     "FAIL", out, f"conv {dtype} correctness failure:\n{out[-3500:]}"
-        # )
+        self.assertNotIn(
+            "FAIL", out, f"conv {dtype} correctness failure:\n{out[-3500:]}"
+        )
 
         match = re.search(r"^\s*1\s+([\d.]+)", out, re.MULTILINE)
         self.assertIsNotNone(match, f"no results in benchmark output:\n{out[-2000:]}")
