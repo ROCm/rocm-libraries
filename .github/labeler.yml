@@ -34,6 +34,7 @@
 "rocke: platform":
 - changed-files:
   - any-glob-to-any-file: 'dnn-providers/hip-kernel-provider/rocke/platform/**'
+  - any-glob-to-any-file: 'dnn-providers/hip-kernel-provider/rocke/style/**'
 
 "project: hipdnn-integration-tests":
 - changed-files:
