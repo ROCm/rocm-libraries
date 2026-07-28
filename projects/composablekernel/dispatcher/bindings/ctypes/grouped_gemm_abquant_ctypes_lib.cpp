@@ -267,13 +267,15 @@ int dispatcher_run_abquant_gemm(const void* A,
         cleanup();
         return -1;
     }
-    if(hipMemcpy(AQ_dev, AQ_host, elements_to_bytes<QDataType>(QM_A * QK_A), hipMemcpyHostToDevice) !=
+    if(hipMemcpy(
+           AQ_dev, AQ_host, elements_to_bytes<QDataType>(QM_A * QK_A), hipMemcpyHostToDevice) !=
        hipSuccess)
     {
         cleanup();
         return -1;
     }
-    if(hipMemcpy(BQ_dev, BQ_host, elements_to_bytes<QDataType>(QK_B * QN_B), hipMemcpyHostToDevice) !=
+    if(hipMemcpy(
+           BQ_dev, BQ_host, elements_to_bytes<QDataType>(QK_B * QN_B), hipMemcpyHostToDevice) !=
        hipSuccess)
     {
         cleanup();

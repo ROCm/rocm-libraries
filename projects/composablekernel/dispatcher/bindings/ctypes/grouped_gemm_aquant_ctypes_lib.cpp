@@ -235,7 +235,8 @@ int dispatcher_run_aquant_gemm(const void* A,
         cleanup();
         return -1;
     }
-    if(hipMemcpy(AQ_dev, AQ_host, elements_to_bytes<QDataType>(QM_A * QK_A), hipMemcpyHostToDevice) !=
+    if(hipMemcpy(
+           AQ_dev, AQ_host, elements_to_bytes<QDataType>(QM_A * QK_A), hipMemcpyHostToDevice) !=
        hipSuccess)
     {
         cleanup();
