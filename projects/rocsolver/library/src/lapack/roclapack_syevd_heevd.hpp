@@ -189,8 +189,12 @@ void rocsolver_syevd_heevd_getMemorySize(rocblas_handle handle,
                 rocblas_side_left, n_kd, n, n_kd, batch_count, &size_scalars2, &size_AbyxORwork,
                 &size_diagORtmptr, &size_trfact, &size_workArr3);
             *size_scalars = std::max(*size_scalars, size_scalars2);
-            *size_he2hb_work = std::max(
-                *size_he2hb_work, size_AbyxORwork + size_diagORtmptr + size_trfact + size_workArr3);
+            // workArr2 is needed by the adapter overload when BATCHED=true to build a pointer
+            // array for the strided C matrix (tmptau_W); sizeof(T*) * batch_count bytes.
+            const size_t size_workArr2_ormqr = BATCHED ? sizeof(T*) * batch_count : 0;
+            *size_he2hb_work = std::max(*size_he2hb_work,
+                                        size_AbyxORwork + size_diagORtmptr + size_trfact
+                                            + size_workArr3 + size_workArr2_ormqr);
         }
     }
 }
@@ -375,8 +379,12 @@ void rocsolver_syevd_heevd_getMemorySize(rocblas_handle handle,
                 rocblas_side_left, n_kd, n, n_kd, batch_count, &size_scalars2, &size_AbyxORwork,
                 &size_diagORtmptr, &size_trfact, &size_workArr3);
             *size_scalars = std::max(*size_scalars, size_scalars2);
-            *size_he2hb_work = std::max(
-                *size_he2hb_work, size_AbyxORwork + size_diagORtmptr + size_trfact + size_workArr3);
+            // workArr2 is needed by the adapter overload when BATCHED=true to build a pointer
+            // array for the strided C matrix (tmptau_W); sizeof(T*) * batch_count bytes.
+            const size_t size_workArr2_ormqr = BATCHED ? sizeof(T*) * batch_count : 0;
+            *size_he2hb_work = std::max(*size_he2hb_work,
+                                        size_AbyxORwork + size_diagORtmptr + size_trfact
+                                            + size_workArr3 + size_workArr2_ormqr);
         }
     }
 }
@@ -485,11 +493,10 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
     // TODO: Scale the matrix
 
     // 2-stage path: he2hb + hb2st + unmtr_hb2st + ormqr
-    // Requires !BATCHED: the ormqr back-transform stage reads Householder vectors
-    // from A, which is T* const* when BATCHED=true and incompatible with ormqr_unmqr_template.
-    const bool use_2stage = !BATCHED
-        && (hetrd_mode == rocsolver_alg_mode_2stage
-            || (hetrd_mode == rocsolver_alg_mode_auto && n >= SYEVD_2STAGE_SWITCHSIZE));
+    // When BATCHED=true, A is T* const*; the adapter overload of ormqr_unmqr_template handles
+    // the type mismatch between A (batched pointer array) and C (strided tmptau_W).
+    const bool use_2stage = (hetrd_mode == rocsolver_alg_mode_2stage
+                             || (hetrd_mode == rocsolver_alg_mode_auto && n >= SYEVD_2STAGE_SWITCHSIZE));
     if(use_2stage)
     {
         const I kd = SYEVD_2STAGE_KD;
@@ -583,13 +590,22 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
                 T* ormqr_diagORtmptr = ormqr_AbyxORwork + size_AbyxORwork / sizeof(T);
                 T* ormqr_trfact = ormqr_diagORtmptr + size_diagORtmptr / sizeof(T);
                 T** ormqr_workArr = (T**)(ormqr_trfact + size_trfact / sizeof(T));
+                T** ormqr_workArr2 = ormqr_workArr + size_workArr3 / sizeof(T*);
 
                 // Apply Q_he2hb on the left to W[kd:n, 0:n]:
                 //   V is in A[kd:n, 0:n-kd], Q is (n-kd) x (n-kd)
-                // use_2stage requires !BATCHED, so BATCHED is always false here at runtime;
-                // the if constexpr prevents instantiation for BATCHED=true where A would be
-                // T* const* (incompatible with the T* A overload of ormqr_unmqr_template).
-                if constexpr(!BATCHED)
+                // When BATCHED=true, A is T* const* and tmptau_W is T*; use the adapter overload
+                // which builds a pointer array for C in ormqr_workArr2 before dispatching.
+                // When BATCHED=false, both are T* and we call the strided overload directly.
+                if constexpr(BATCHED)
+                {
+                    rocsolver_ormqr_unmqr_template<BATCHED, STRIDED, T>(
+                        handle, rocblas_side_left, rocblas_operation_none, n_kd, n, n_kd, A,
+                        shiftA + idx2D(kd, 0, lda), lda, strideA, tau, n, tmptau_W,
+                        idx2D(kd, 0, ldw), ldw, strideW, batch_count, scalars, ormqr_AbyxORwork,
+                        ormqr_diagORtmptr, ormqr_trfact, ormqr_workArr, ormqr_workArr2);
+                }
+                else
                 {
                     ROCBLAS_CHECK(rocsolver_ormqr_unmqr_template<BATCHED, STRIDED, T>(
                         handle, rocblas_side_left, rocblas_operation_none, n_kd, n, n_kd, A,
@@ -759,11 +775,10 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
     // TODO: Scale the matrix
 
     // 2-stage path: he2hb + hb2st + unmtr_hb2st + ormqr
-    // Requires !BATCHED: the ormqr back-transform stage reads Householder vectors
-    // from A, which is T* const* when BATCHED=true and incompatible with ormqr_unmqr_template.
-    const bool use_2stage = !BATCHED
-        && (hetrd_mode == rocsolver_alg_mode_2stage
-            || (hetrd_mode == rocsolver_alg_mode_auto && n >= SYEVD_2STAGE_SWITCHSIZE));
+    // When BATCHED=true, A is T* const*; the adapter overload of ormqr_unmqr_template handles
+    // the type mismatch between A (batched pointer array) and C (strided tmptau_W).
+    const bool use_2stage = (hetrd_mode == rocsolver_alg_mode_2stage
+                             || (hetrd_mode == rocsolver_alg_mode_auto && n >= SYEVD_2STAGE_SWITCHSIZE));
     if(use_2stage)
     {
         const I kd = SYEVD_2STAGE_KD;
@@ -857,13 +872,22 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
                 T* ormqr_diagORtmptr = ormqr_AbyxORwork + size_AbyxORwork / sizeof(T);
                 T* ormqr_trfact = ormqr_diagORtmptr + size_diagORtmptr / sizeof(T);
                 T** ormqr_workArr = (T**)(ormqr_trfact + size_trfact / sizeof(T));
+                T** ormqr_workArr2 = ormqr_workArr + size_workArr3 / sizeof(T*);
 
                 // Apply Q_he2hb on the left to W[kd:n, 0:n]:
                 //   V is in A[kd:n, 0:n-kd], Q is (n-kd) x (n-kd)
-                // use_2stage requires !BATCHED, so BATCHED is always false here at runtime;
-                // the if constexpr prevents instantiation for BATCHED=true where A would be
-                // T* const* (incompatible with the T* A overload of ormqr_unmqr_template).
-                if constexpr(!BATCHED)
+                // When BATCHED=true, A is T* const* and tmptau_W is T*; use the adapter overload
+                // which builds a pointer array for C in ormqr_workArr2 before dispatching.
+                // When BATCHED=false, both are T* and we call the strided overload directly.
+                if constexpr(BATCHED)
+                {
+                    rocsolver_ormqr_unmqr_template<BATCHED, STRIDED, T>(
+                        handle, rocblas_side_left, rocblas_operation_none, n_kd, n, n_kd, A,
+                        shiftA + idx2D(kd, 0, lda), lda, strideA, tau, n, tmptau_W,
+                        idx2D(kd, 0, ldw), ldw, strideW, batch_count, scalars, ormqr_AbyxORwork,
+                        ormqr_diagORtmptr, ormqr_trfact, ormqr_workArr, ormqr_workArr2);
+                }
+                else
                 {
                     ROCBLAS_CHECK(rocsolver_ormqr_unmqr_template<BATCHED, STRIDED, T>(
                         handle, rocblas_side_left, rocblas_operation_none, n_kd, n, n_kd, A,
