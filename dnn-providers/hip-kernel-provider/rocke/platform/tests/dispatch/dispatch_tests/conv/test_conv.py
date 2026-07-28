@@ -22,11 +22,35 @@ def _conv(arch, **kw):
 class TestConvDispatch(unittest.TestCase):
     def test_rejects_unsupported_dtype(self):
         with self.assertRaises(ValueError):
-            dispatch_conv(_conv("gfx950", dtype="bf16"))
+            dispatch_conv(_conv("gfx950", dtype="fp32"))
 
-    def test_rejects_groups(self):
+    def test_bf16_supported(self):
+        # AICK-1752: bf16 is a required dtype (performance-gated).
+        r = dispatch_conv(_conv("gfx950", dtype="bf16"))
+        self.assertEqual(r.spec.data.dtype_a, "bf16")
+        self.assertEqual(r.spec.data.dtype_d, "bf16")
+
+    def test_rejects_indivisible_groups(self):
+        # C/K not divisible by G is rejected before codegen.
         with self.assertRaises(ValueError):
-            dispatch_conv(_conv("gfx950", G=2))
+            dispatch_conv(_conv("gfx950", G=3))
+
+    def test_grouped_selected_and_grid_has_group_z(self):
+        # AICK-1752: regular grouped conv (g4, cpg=kpg=16) dispatches; the grid
+        # gains z = groups (CK-style grid-per-group).
+        r = dispatch_conv(_conv("gfx950", G=4))
+        self.assertEqual(r.spec.problem.groups, 4)
+        self.assertEqual(r.grid[2], 4)
+
+    def test_cardinality_grouped_g32_cpg8(self):
+        # Hero case g32/cpg8: kpg=8 < tile_n so N_gemm doesn't tile-align, but the
+        # kernel is tail-safe, so the request is supported and grid.z == 32.
+        r = dispatch_conv(
+            _conv("gfx950", N=2, C=256, K=256, Hi=8, Wi=8, G=32, dtype="bf16")
+        )
+        self.assertEqual(r.spec.problem.groups, 32)
+        self.assertEqual(r.spec.problem.cpg, 8)
+        self.assertEqual(r.grid[2], 32)
 
     def test_rejects_unknown_arch(self):
         with self.assertRaises(ValueError):
@@ -60,6 +84,31 @@ class TestConvDispatch(unittest.TestCase):
         for c in conv_candidates():
             if c.spec_id == "cdna_cshuffle_64x64":
                 ok, why = c.supports(_conv("gfx942"))
+                self.assertFalse(ok)
+
+    def test_gfx1250_selects_wmma_16x16x32(self):
+        # gfx1250: wave32 WMMA with the 16x16x32 atom (K=32).
+        r = dispatch_conv(_conv("gfx1250", C=64, K=64, Hi=16, Wi=16, N=2, dtype="bf16"))
+        self.assertEqual(r.candidate.spec_id, "gfx1250_wmma_64x64")
+        self.assertEqual(
+            (r.spec.warp_tile_m, r.spec.warp_tile_n, r.spec.warp_tile_k), (16, 16, 32)
+        )
+        self.assertEqual(r.spec.wave_size, 32)
+
+    def test_gfx1250_grouped_selects_wmma(self):
+        r = dispatch_conv(
+            _conv("gfx1250", N=2, C=256, K=256, Hi=8, Wi=8, G=32, dtype="bf16")
+        )
+        self.assertEqual(r.candidate.spec_id, "gfx1250_wmma_64x64")
+        self.assertEqual(r.spec.problem.groups, 32)
+        self.assertEqual(r.grid[2], 32)
+
+    def test_wave64_cdna_candidates_unsupported_on_gfx1250(self):
+        # The wave64 cshuffle/mem specs must not be selectable on wave32 gfx1250.
+        req = _conv("gfx1250", C=64, K=64, Hi=16, Wi=16, N=2, dtype="bf16")
+        for c in conv_candidates():
+            if c.spec_id in ("cdna_cshuffle_64x64", "cdna_mem_64x64"):
+                ok, _why = c.supports(req)
                 self.assertFalse(ok)
 
     def test_rdna_arch_selects_wmma(self):

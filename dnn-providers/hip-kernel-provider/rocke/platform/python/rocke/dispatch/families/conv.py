@@ -35,8 +35,10 @@ from typing import Callable, Sequence, Tuple
 
 from ...core.arch import ArchTarget
 from ...instances.common.conv_implicit_gemm import (
+    ConvDataSpec,
     ConvProblem,
     ImplicitGemmConvSpec,
+    implicit_gemm_conv_grid,
     is_valid_spec as _conv_is_valid_spec,
 )
 from ..core import (
@@ -108,7 +110,18 @@ def _problem(req: ConvRequest) -> ConvProblem:
         pW=int(req.pad_w),
         dH=int(req.dilation_h),
         dW=int(req.dilation_w),
+        groups=int(req.G),
     )
+
+
+def _data(req: ConvRequest) -> ConvDataSpec:
+    """Element/accumulator dtypes for the instance spec, from the request dtype.
+
+    fp16 (``"f16"``) and bf16 are both supported (AICK-1752 requires bf16 as the
+    performance-gated dtype and fp16 for build+GPU-correctness non-regression).
+    """
+    dt = _conv_dtype(req.dtype)
+    return ConvDataSpec(dtype_a=dt, dtype_b=dt, dtype_d=dt)
 
 
 def _request_errors(req: OperatorRequest) -> list[str]:
@@ -120,10 +133,15 @@ def _request_errors(req: OperatorRequest) -> list[str]:
     for field in ("N", "C", "K", "Hi", "Wi", "Y", "X"):
         if int(getattr(req, field)) <= 0:
             errors.append(f"{field} must be positive")
-    if int(req.G) != 1:
-        errors.append("only groups=1 (G=1) forward conv is implemented")
-    if _conv_dtype(req.dtype) != "f16":
-        errors.append(f"unsupported dtype {req.dtype!r}; f16 only")
+    if int(req.G) < 1:
+        errors.append(f"groups (G) must be >= 1, got {req.G}")
+    elif int(req.C) % int(req.G) != 0 or int(req.K) % int(req.G) != 0:
+        errors.append(
+            f"grouped conv requires C ({req.C}) and K ({req.K}) divisible by "
+            f"G ({req.G})"
+        )
+    if _conv_dtype(req.dtype) not in ("f16", "bf16"):
+        errors.append(f"unsupported dtype {req.dtype!r}; f16 or bf16 only")
     if req.layout.upper() != "NHWC":
         errors.append(f"unsupported layout {req.layout!r}; NHWC only")
     try:
@@ -167,6 +185,7 @@ def _selector_matches(req: ConvRequest, candidate: KernelCandidate) -> Tuple[boo
 def _spec_cdna_cshuffle(req: ConvRequest, name: str) -> ImplicitGemmConvSpec:
     return ImplicitGemmConvSpec(
         problem=_problem(req),
+        data=_data(req),
         name=name,
         tile_m=64,
         tile_n=64,
@@ -185,6 +204,7 @@ def _spec_cdna_cshuffle(req: ConvRequest, name: str) -> ImplicitGemmConvSpec:
 def _spec_cdna_mem(req: ConvRequest, name: str) -> ImplicitGemmConvSpec:
     return ImplicitGemmConvSpec(
         problem=_problem(req),
+        data=_data(req),
         name=name,
         tile_m=64,
         tile_n=64,
@@ -203,6 +223,7 @@ def _spec_cdna_mem(req: ConvRequest, name: str) -> ImplicitGemmConvSpec:
 def _spec_rdna_wmma(req: ConvRequest, name: str) -> ImplicitGemmConvSpec:
     return ImplicitGemmConvSpec(
         problem=_problem(req),
+        data=_data(req),
         name=name,
         tile_m=32,
         tile_n=32,
@@ -212,6 +233,31 @@ def _spec_rdna_wmma(req: ConvRequest, name: str) -> ImplicitGemmConvSpec:
         warp_tile_m=16,
         warp_tile_n=16,
         warp_tile_k=16,
+        wave_size=ArchTarget.from_gfx(req.arch).wave_size,
+        pipeline="mem",
+        epilogue="default",
+    )
+
+
+def _spec_gfx1250_wmma(req: ConvRequest, name: str) -> ImplicitGemmConvSpec:
+    """gfx1250 WMMA spec: wave32 + the 16x16x32 (K=32) f16/bf16 op.
+
+    gfx1250 reports ``family == "cdna"`` but ``wave_size == 32``, so the conv
+    MMA-family selector resolves to WMMA. Its hero matrix op is 16x16x32 (K=32),
+    distinct from the RDNA 16x16x16; ``tile_k`` is therefore 32.
+    """
+    return ImplicitGemmConvSpec(
+        problem=_problem(req),
+        data=_data(req),
+        name=name,
+        tile_m=64,
+        tile_n=64,
+        tile_k=32,
+        warp_m=2,
+        warp_n=2,
+        warp_tile_m=16,
+        warp_tile_n=16,
+        warp_tile_k=32,
         wave_size=ArchTarget.from_gfx(req.arch).wave_size,
         pipeline="mem",
         epilogue="default",
@@ -231,6 +277,15 @@ def _gemm_dims_divide(req: ConvRequest, spec: ImplicitGemmConvSpec) -> Tuple[boo
         ("N", p.N_gemm, spec.tile_n),
         ("K", p.K_gemm, spec.tile_k),
     )
+    # Grouped conv (esp. cardinality-grouped g32/cpg8) has tiny per-group
+    # N_gemm = kpg and K_gemm = Y*X*cpg that rarely tile-align. The kernel is
+    # tail-safe on N (epilogue bound check) and K (pad transforms on y/x), so the
+    # no-pad divisibility gate is relaxed to M only for grouped requests. M
+    # (= N*Ho*Wo) is likewise epilogue-masked; it is kept here as a conservative
+    # perf guard for the groups==1 path only. (Verified: grouped shapes with
+    # N_gemm % tile_n != 0 and K_gemm % tile_k != 0 are numerically correct.)
+    if p.groups > 1:
+        checks = (("M", p.M, spec.tile_m),)
     for dim_name, dim, tile in checks:
         if dim % tile:
             return False, (
@@ -246,6 +301,7 @@ def _make_candidate(
     priority: int,
     spec_fn: Callable[[ConvRequest, str], ImplicitGemmConvSpec],
     arch_family: str,
+    require_wave: int | None = None,
 ) -> KernelCandidate:
     def support(req: OperatorRequest) -> Tuple[bool, str]:
         errors = _request_errors(req)
@@ -255,6 +311,16 @@ def _make_candidate(
         ok, why = _arch_family_supported(req, arch_family)
         if not ok:
             return False, why
+        # Some candidates share an arch *family* but differ by wave size (gfx1250
+        # is family "cdna" but wave32; its 16x16x32 op is also a valid wave64
+        # gfx950 MFMA, so without this guard the gfx1250 spec would compete on
+        # gfx950). Pin the candidate to a specific wave size when needed.
+        if require_wave is not None:
+            wave = ArchTarget.from_gfx(req.arch).wave_size
+            if wave != require_wave:
+                return False, (
+                    f"candidate requires wave{require_wave}; {req.arch} is wave{wave}"
+                )
         ok, why = _selector_matches(req, candidate)
         if not ok:
             return False, why
@@ -289,11 +355,10 @@ def _make_candidate(
 
 
 def _grid(spec: ImplicitGemmConvSpec, req: OperatorRequest) -> Tuple[int, int, int]:
-    p = spec.problem
-    gm = (p.M + spec.tile_m - 1) // spec.tile_m
-    gn = (p.N_gemm + spec.tile_n - 1) // spec.tile_n
-    # grid_order "NM": x=n-tiles, y=m-tiles (matches the shipped conv manifest).
-    return (gn, gm, 1)
+    # x = n-tiles over per-group N_gemm (= kpg), y = m-tiles, z = group
+    # (CK-style grid-per-group; z == 1 for groups == 1). Shared with the instance
+    # so the launch grid matches the kernel's blockIdx.z group indexing.
+    return implicit_gemm_conv_grid(spec)
 
 
 CONV_REGISTRY = CandidateRegistry(_FAMILY)
@@ -319,6 +384,18 @@ CONV_REGISTRY.extend(
             priority=10,
             spec_fn=_spec_rdna_wmma,
             arch_family="rdna",
+        ),
+        # gfx1250 reports family "cdna" but is wave32/WMMA with the
+        # 16x16x32 atom; is_valid_spec rejects it on wave64 CDNA (gfx942/gfx950)
+        # and rejects the wave64 cshuffle/mem specs on gfx1250, so the arch split
+        # is by wave_size + atom, not just family.
+        _make_candidate(
+            name="conv_igemm_gfx1250_wmma",
+            spec_id="gfx1250_wmma_64x64",
+            priority=10,
+            spec_fn=_spec_gfx1250_wmma,
+            arch_family="cdna",
+            require_wave=32,
         ),
     )
 )
