@@ -321,10 +321,10 @@ operation and layouts from the exact target catalog.
 ```text
 stage Q to LDS
 iterate K/V pages or segments through paged-KV descriptor
-compute QK with MFMA
+compute QK with the selected matrix operation
 apply masks (causal, sliding, ALiBi, QQ-bias, softcap)
 online softmax update (warp_xor_reduce_max/sum)
-compute PV with MFMA using the target-specific V-to-operand mapping
+compute PV with the selected matrix operation and the path's V operand layout
 write final output (or segment workspace for 3D)
 ```
 
