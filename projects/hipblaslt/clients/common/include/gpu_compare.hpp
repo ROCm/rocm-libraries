@@ -21,9 +21,7 @@
 //  (b) Matching non-finite values (matching same-signed inf, and both-nan pairs) count
 //      as agreement uniformly across the unit/near/norm paths, matching the CPU
 //      unit_check and near_check. This differs from CPU norm_check only, whose
-//      inf-inf / nan arithmetic yields nan and fails on matching inf/nan -- an
-//      intentional, more lenient but correct choice, since both references agreeing on
-//      a non-finite value is genuine agreement.
+//      inf-inf / nan arithmetic yields nan and fails on matching inf/nan.
 inline constexpr int    GPU_REF_TOL_GRID_N = 6;
 inline constexpr double GPU_REF_TOL_GRID[GPU_REF_TOL_GRID_N]
     = {1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1};
