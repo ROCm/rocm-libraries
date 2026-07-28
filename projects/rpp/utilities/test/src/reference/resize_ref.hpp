@@ -48,10 +48,8 @@ void resize_reference(const T* src, const RpptDesc& sd, T* dst, const RpptDesc& 
         const double scaleX = static_cast<double>(b.w) / dstW;
         const double scaleY = static_cast<double>(b.h) / dstH;
         for (Rpp32u c = 0; c < sd.c; ++c) {
-            const std::size_t srcBase = static_cast<std::size_t>(n) * sd.strides.nStride +
-                                        static_cast<std::size_t>(c) * sd.strides.cStride;
-            const std::size_t dstBase = static_cast<std::size_t>(n) * dd.strides.nStride +
-                                        static_cast<std::size_t>(c) * dd.strides.cStride;
+            const std::size_t srcBase = plane_base(sd, n, c);
+            const std::size_t dstBase = plane_base(dd, n, c);
             for (Rpp32u j = 0; j < dstH; ++j)
                 for (Rpp32u i = 0; i < dstW; ++i) {
                     double sx = rx0 + (i + 0.5) * scaleX - 0.5;
@@ -61,10 +59,7 @@ void resize_reference(const T* src, const RpptDesc& sd, T* dst, const RpptDesc& 
                     sy = clampd(sy, ry0, ry1 - 1);
                     const double v =
                         sample(src, sd, srcBase, sx, sy, rx0, ry0, rx1, ry1, interp, border);
-                    const std::size_t dstIdx = dstBase +
-                                               static_cast<std::size_t>(j) * dd.strides.hStride +
-                                               static_cast<std::size_t>(i) * dd.strides.wStride;
-                    dst[dstIdx] = from_double<T>(quantize_stored(v, dt));
+                    dst[plane_index(dd, dstBase, j, i)] = from_double<T>(quantize_stored(v, dt));
                 }
         }
     }

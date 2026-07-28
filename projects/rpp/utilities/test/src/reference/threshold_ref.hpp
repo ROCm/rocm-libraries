@@ -43,7 +43,7 @@ void threshold_reference(const T* src, T* dst, const RpptDesc& d, DType dt, cons
                        [&](Rpp32u n, Rpp32u, Rpp32u, std::size_t srcPix, std::size_t dstPix) {
         bool inRange = true;
         for (Rpp32u c = 0; c < d.c; ++c) {
-            const double v = to_double(src[srcPix + c * d.strides.cStride]);
+            const double v = to_double(src[channel_index(d, srcPix, c)]);
             const double lo = minTensor[n * d.c + c];
             const double hi = maxTensor[n * d.c + c];
             if (v < lo || v > hi) {
@@ -53,7 +53,7 @@ void threshold_reference(const T* src, T* dst, const RpptDesc& d, DType dt, cons
         }
         const double out = inRange ? white : black;
         for (Rpp32u c = 0; c < d.c; ++c)
-            dst[dstPix + c * d.strides.cStride] = from_double<T>(out);
+            dst[channel_index(d, dstPix, c)] = from_double<T>(out);
     });
 }
 

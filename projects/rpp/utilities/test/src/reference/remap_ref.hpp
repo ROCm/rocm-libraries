@@ -35,30 +35,21 @@ void remap_reference(const T* src, T* dst, const RpptDesc& d, DType dt,
                      const Rpp32f* rowRemapTable, const Rpp32f* colRemapTable, const RpptDesc& td,
                      const RpptROI* roi, RpptRoiType roiType, RpptInterpolationType interp) {
     const double border = dtype_black(dt);
-    for (Rpp32u n = 0; n < d.n; ++n) {
-        const RoiBounds b = roi_bounds(roi[n], roiType);
+    for_each_roi_plane(d, roi, roiType, [&](Rpp32u n, const RoiBounds& b, Rpp32u,
+                                            std::size_t imgBase) {
         const int rx0 = static_cast<int>(b.x0), ry0 = static_cast<int>(b.y0);
         const int rx1 = rx0 + static_cast<int>(b.w), ry1 = ry0 + static_cast<int>(b.h);
-        const std::size_t tblBase = static_cast<std::size_t>(n) * td.strides.nStride;
-        for (Rpp32u c = 0; c < d.c; ++c) {
-            const std::size_t imgBase = static_cast<std::size_t>(n) * d.strides.nStride +
-                                        static_cast<std::size_t>(c) * d.strides.cStride;
-            for (Rpp32u j = 0; j < b.h; ++j)
-                for (Rpp32u i = 0; i < b.w; ++i) {
-                    const std::size_t tblIdx = tblBase +
-                                               static_cast<std::size_t>(j) * td.strides.hStride +
-                                               static_cast<std::size_t>(i) * td.strides.wStride;
-                    const double sx = colRemapTable[tblIdx];
-                    const double sy = rowRemapTable[tblIdx];
-                    const double v =
-                        sample(src, d, imgBase, sx, sy, rx0, ry0, rx1, ry1, interp, border);
-                    const std::size_t dstIdx = imgBase +
-                                               static_cast<std::size_t>(j) * d.strides.hStride +
-                                               static_cast<std::size_t>(i) * d.strides.wStride;
-                    dst[dstIdx] = from_double<T>(quantize_stored(v, dt));
-                }
-        }
-    }
+        const std::size_t tblBase = plane_base(td, n, 0);
+        for (Rpp32u j = 0; j < b.h; ++j)
+            for (Rpp32u i = 0; i < b.w; ++i) {
+                const std::size_t tblIdx = plane_index(td, tblBase, j, i);
+                const double sx = colRemapTable[tblIdx];
+                const double sy = rowRemapTable[tblIdx];
+                const double v =
+                    sample(src, d, imgBase, sx, sy, rx0, ry0, rx1, ry1, interp, border);
+                dst[plane_index(d, imgBase, j, i)] = from_double<T>(quantize_stored(v, dt));
+            }
+    });
 }
 
 }  // namespace rpptest

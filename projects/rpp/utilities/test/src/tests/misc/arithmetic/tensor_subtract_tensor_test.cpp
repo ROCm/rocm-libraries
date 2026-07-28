@@ -50,8 +50,8 @@ void run_tensor_subtract_tensor(const NdConfig& cfg, Broadcast broadcast) {
     // and signed. The op writes every output element, so golden needs no pre-seeding. Operand
     // order matters here: src1 - src2, in the order the API declares them.
     std::vector<T> input1(count1), input2(count2), golden(countOut), actual(countOut);
-    fill_input<T>(input1.data(), count1, cfg.dtypeIn, 0);
-    fill_input<T>(input2.data(), count2, cfg.dtypeIn, 1);
+    fill_input_nd<T>(input1.data(), *desc1, cfg.dtypeIn, 0);
+    fill_input_nd<T>(input2.data(), *desc2, cfg.dtypeIn, 1);
     arithmetic_tensor_reference<T>(input1.data(), input2.data(), golden.data(), *descOut, *desc1,
                                    *desc2, ArithmeticTensorOp::Subtract);
 

@@ -24,12 +24,9 @@ namespace rpptest {
 // convention-dependent (varying coefficient conventions). Both are deferred here; this model
 // covers grayscale-in/grayscale-out with the universally-defined 3x3 Sobel operator.
 //
-// Per output-local pixel (j,i) the 3x3 window samples ROI-local neighbours (j+dy, i+dx) for
-// dy,dx in [-r, r] (r = kernelSize/2), each neighbour clamped to the ROI bounds (REPLICATE),
-// via gather_roi_window (reference/filter_common.hpp). Sobel needs the raw gx/gy before
-// quantization (for the magnitude case), so this writes its own loop instead of using
-// convolve_reference. The source/destination element mapping mirrors for_each_roi_io: source
-// read at the ROI offset, output written packed at the destination origin.
+// The window comes from filter_reference (reference/filter_common.hpp), which owns the REPLICATE
+// border and the placement; sobel supplies only the reduction, since it needs the raw gx/gy before
+// quantization (for the magnitude case) rather than a single convolution.
 //
 // Kernels (row-major, dy=-1..1 outer, dx=-1..1 inner):
 //   Gx = [-1,0,1, -2,0,2, -1,0,1]      Gy = [-1,-2,-1, 0,0,0, 1,2,1]
@@ -43,31 +40,16 @@ void sobel_filter_reference(const T* src, T* dst, const RpptDesc& d, DType dt, c
                             RpptRoiType type, Rpp32u sobelType, Rpp32u kernelSize) {
     static const double Gx[9] = {-1, 0, 1, -2, 0, 2, -1, 0, 1};
     static const double Gy[9] = {-1, -2, -1, 0, 0, 0, 1, 2, 1};
-    const int r = static_cast<int>(kernelSize / 2);
-    double window[9];
-    for (Rpp32u n = 0; n < d.n; ++n) {
-        const RoiBounds b = roi_bounds(roi[n], type);
-        for (Rpp32u c = 0; c < d.c; ++c) {
-            const std::size_t base = static_cast<std::size_t>(n) * d.strides.nStride +
-                                     static_cast<std::size_t>(c) * d.strides.cStride;
-            for (int j = 0; j < static_cast<int>(b.h); ++j)
-                for (int i = 0; i < static_cast<int>(b.w); ++i) {
-                    gather_roi_window(src, d, b, base, j, i, r, window);
-                    double gx = 0.0, gy = 0.0;
-                    for (int k = 0; k < 9; ++k) {
-                        gx += Gx[k] * window[k];
-                        gy += Gy[k] * window[k];
-                    }
-                    const double result = sobelType == 0   ? gx
-                                          : sobelType == 1 ? gy
-                                                           : std::sqrt(gx * gx + gy * gy);
-                    const std::size_t dstIdx =
-                        base + static_cast<std::size_t>(j) * d.strides.hStride +
-                        static_cast<std::size_t>(i) * d.strides.wStride;
-                    dst[dstIdx] = from_double<T>(quantize_stored(result, dt));
-                }
+    filter_reference<T>(src, dst, d, roi, type, kernelSize, [&](const double* w, int kk) {
+        double gx = 0.0, gy = 0.0;
+        for (int k = 0; k < kk; ++k) {
+            gx += Gx[k] * w[k];
+            gy += Gy[k] * w[k];
         }
-    }
+        const double result =
+            sobelType == 0 ? gx : sobelType == 1 ? gy : std::sqrt(gx * gx + gy * gy);
+        return quantize_stored(result, dt);
+    });
 }
 
 }  // namespace rpptest

@@ -35,11 +35,13 @@ double rel_tolerance(DType out) { return out == DType::F16 ? 2e-3 : 1e-6; }
 // float fill hits exactly 0.0 -- so every zero is replaced by the smallest magnitude the dtype's
 // own fill already uses (1 for U8/I8, 1/255 for F16/F32).
 template <typename Tin>
-void fill_input_nonzero(Tin* buf, std::size_t count, DType dt) {
-    fill_input<Tin>(buf, count, dt);
+void fill_input_nonzero(Tin* buf, const RpptGenericDesc& d, DType dt) {
+    fill_input_nd<Tin>(buf, d, dt);
     const double replacement = (dt == DType::U8 || dt == DType::I8) ? 1.0 : 1.0 / 255.0;
-    for (std::size_t i = 0; i < count; ++i)
-        if (to_double(buf[i]) == 0.0) buf[i] = from_double<Tin>(replacement);
+    for_each_nd_coord(d, [&](const NdDims& coord) {
+        Tin& v = buf[nd_offset(d, coord)];
+        if (to_double(v) == 0.0) v = from_double<Tin>(replacement);
+    });
 }
 
 template <typename Tin, typename Tout>
@@ -57,7 +59,7 @@ void run_log(const NdConfig& cfg) {
     // (1) Host golden model. The op writes every output element, so golden needs no pre-seeding.
     std::vector<Tin> input(count);
     std::vector<Tout> golden(count), actual(count);
-    fill_input_nonzero<Tin>(input.data(), count, cfg.dtypeIn);
+    fill_input_nonzero<Tin>(input.data(), *srcDesc, cfg.dtypeIn);
     log_reference<Tin, Tout>(input.data(), golden.data(), *srcDesc, *dstDesc);
 
     // (2) The roiTensor lives in host-accessible (pinned for HIP) memory.

@@ -22,14 +22,14 @@ namespace {
 //   I8 -> [-14,14] (products -196..196; a few percent saturate at each of -128 and 127)
 // F16/F32 fills are already in [0,1], so their products stay in range and are left alone.
 template <typename T>
-void fill_multiply_operand(T* buf, std::size_t count, DType dt, unsigned salt) {
-    fill_input<T>(buf, count, dt, salt);
-    if (dt == DType::U8)
-        for (std::size_t i = 0; i < count; ++i)
-            buf[i] = static_cast<T>(static_cast<int>(buf[i]) % 19);
-    else if (dt == DType::I8)
-        for (std::size_t i = 0; i < count; ++i)
-            buf[i] = static_cast<T>(static_cast<int>(buf[i]) % 15);
+void fill_multiply_operand(T* buf, const RpptGenericDesc& d, DType dt, unsigned salt) {
+    fill_input_nd<T>(buf, d, dt, salt);
+    const int modulus = dt == DType::U8 ? 19 : dt == DType::I8 ? 15 : 0;
+    if (modulus == 0) return;  // F16/F32 fills are already in range
+    for_each_nd_coord(d, [&](const NdDims& coord) {
+        T& v = buf[nd_offset(d, coord)];
+        v = static_cast<T>(static_cast<int>(v) % modulus);
+    });
 }
 
 // Integer multiplication is exact (only saturation is involved), so U8/I8 are bit-exact. The
@@ -65,8 +65,8 @@ void run_tensor_multiply_tensor(const NdConfig& cfg, Broadcast broadcast) {
     // carry the same value at the same coordinate. The op writes every output element, so
     // golden needs no pre-seeding.
     std::vector<T> input1(count1), input2(count2), golden(countOut), actual(countOut);
-    fill_multiply_operand<T>(input1.data(), count1, cfg.dtypeIn, 0);
-    fill_multiply_operand<T>(input2.data(), count2, cfg.dtypeIn, 1);
+    fill_multiply_operand<T>(input1.data(), *desc1, cfg.dtypeIn, 0);
+    fill_multiply_operand<T>(input2.data(), *desc2, cfg.dtypeIn, 1);
     arithmetic_tensor_reference<T>(input1.data(), input2.data(), golden.data(), *descOut, *desc1,
                                    *desc2, ArithmeticTensorOp::Multiply);
 

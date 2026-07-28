@@ -36,7 +36,7 @@ inline double log_scalar(double v) { return std::log(std::fabs(v)); }
 template <typename Tin, typename Tout>
 void log_reference(const Tin* src, Tout* dst, const RpptGenericDesc& srcDesc,
                    const RpptGenericDesc& dstDesc) {
-    for_each_nd_coord(dstDesc, [&](const std::vector<Rpp32u>& coord) {
+    for_each_nd_coord(dstDesc, [&](const NdDims& coord) {
         dst[nd_offset(dstDesc, coord)] =
             from_double<Tout>(log_scalar(to_double(src[nd_offset(srcDesc, coord)])));
     });

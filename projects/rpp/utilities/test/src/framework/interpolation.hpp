@@ -24,8 +24,8 @@ template <typename T>
 inline double src_texel(const T* src, const RpptDesc& d, std::size_t base, int x, int y, int x0,
                         int y0, int x1, int y1, double border) {
     if (x < x0 || y < y0 || x >= x1 || y >= y1) return border;
-    return to_double(src[base + static_cast<std::size_t>(y) * d.strides.hStride +
-                         static_cast<std::size_t>(x) * d.strides.wStride]);
+    return to_double(src[plane_index(d, base, static_cast<std::size_t>(y),
+                                     static_cast<std::size_t>(x))]);
 }
 
 // Samples the plane at fractional (x,y) (texel centers at integer coords) using `interp`.

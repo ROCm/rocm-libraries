@@ -58,7 +58,7 @@ void run_transpose(const NdConfig& cfg, const TransposeParams& p) {
 
     // (1) Host golden model. The op writes every output element, so golden needs no pre-seeding.
     std::vector<T> input(count), golden(count), actual(count);
-    fill_input<T>(input.data(), count, cfg.dtypeIn);
+    fill_input_nd<T>(input.data(), *srcDesc, cfg.dtypeIn);
     transpose_reference<T>(input.data(), golden.data(), *srcDesc, *dstDesc, perm.data());
 
     // (2) permTensor and roiTensor live in host-accessible (pinned for HIP) memory. permTensor

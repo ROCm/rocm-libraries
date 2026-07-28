@@ -78,8 +78,8 @@ void run_concat(const NdConfig& cfg, AxisKind kind) {
     // (1) Host golden model. Two distinct fills (different salts) so the two halves of the output
     // are distinguishable. The op writes every output element, so golden needs no pre-seeding.
     std::vector<T> input1(count1), input2(count2), golden(countOut), actual(countOut);
-    fill_input<T>(input1.data(), count1, cfg.dtypeIn, 0);
-    fill_input<T>(input2.data(), count2, cfg.dtypeIn, 1);
+    fill_input_nd<T>(input1.data(), *desc1, cfg.dtypeIn, 0);
+    fill_input_nd<T>(input2.data(), *desc2, cfg.dtypeIn, 1);
     concat_reference<T>(input1.data(), input2.data(), golden.data(), *descOut, *desc1, *desc2,
                         axis);
 

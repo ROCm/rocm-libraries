@@ -33,52 +33,39 @@ namespace rpptest {
 //     is the same value under every interpretation, so the golden only needs the scalar.
 //
 // The walk covers shape[] per sample, which is exactly the destination extents the caller builds
-// (dstDims = {batch, shape...}), so every destination element is written.
+// (dstDims = {batch, shape...}), so every destination element is written. Both tensors are
+// addressed by logical coordinate through their own strides (nd_offset), so either may be dense or
+// padded -- slice's own convention is padded (see the test).
 template <typename T>
 void slice_reference(const T* src, T* dst, const RpptGenericDesc& srcDesc,
                      const RpptGenericDesc& dstDesc, const Rpp32s* anchorTensor,
                      const Rpp32s* shapeTensor, const Rpp32u* roiTensor, double fillValue) {
     const Rpp32u batch = srcDesc.dims[0];
     const Rpp32u nDim = static_cast<Rpp32u>(srcDesc.numDims) - 1;
-    std::vector<Rpp32u> coord(nDim, 0);
+    NdDims srcCoord(nDim + 1), dstCoord(nDim + 1);
 
     for (Rpp32u n = 0; n < batch; ++n) {
         const Rpp32s* anchor = anchorTensor + static_cast<std::size_t>(n) * nDim;
         const Rpp32s* shape = shapeTensor + static_cast<std::size_t>(n) * nDim;
         const Rpp32u* roi = roiTensor + static_cast<std::size_t>(n) * 2 * nDim;
+        srcCoord[0] = dstCoord[0] = n;
 
-        std::size_t sliceCount = 1;
-        for (Rpp32u a = 0; a < nDim; ++a) sliceCount *= static_cast<std::size_t>(shape[a]);
-
-        for (std::size_t linear = 0; linear < sliceCount; ++linear) {
-            // The slice's own row-major coordinates (trailing axis fastest).
-            std::size_t rem = linear;
-            for (Rpp32u a = nDim; a-- > 0;) {
-                coord[a] = static_cast<Rpp32u>(rem % static_cast<std::size_t>(shape[a]));
-                rem /= static_cast<std::size_t>(shape[a]);
-            }
-
-            std::size_t dstIdx = static_cast<std::size_t>(n) * dstDesc.strides[0];
-            for (Rpp32u a = 0; a < nDim; ++a)
-                dstIdx += static_cast<std::size_t>(coord[a]) * dstDesc.strides[a + 1];
-
-            // The source index is only formed once every axis is known to be inside the ROI:
-            // an out-of-ROI coordinate can be negative and has no address to speak of.
+        const NdDims sliceExtents(shape, shape + nDim);
+        for_each_coord(sliceExtents, [&](const NdDims& coord) {
+            // srcCoord only means anything once every axis is known to be inside the ROI: an
+            // out-of-ROI coordinate can be negative, so it is floored at 0 and the element takes
+            // fillValue instead of being read.
             bool inRoi = true;
-            std::size_t srcIdx = static_cast<std::size_t>(n) * srcDesc.strides[0];
             for (Rpp32u a = 0; a < nDim; ++a) {
+                dstCoord[a + 1] = coord[a];
                 const Rpp32s s = anchor[a] + static_cast<Rpp32s>(coord[a]);
                 const Rpp32s lo = static_cast<Rpp32s>(roi[a]);
-                const Rpp32s hi = lo + static_cast<Rpp32s>(roi[nDim + a]);
-                if (s < lo || s >= hi) {
-                    inRoi = false;
-                    break;
-                }
-                srcIdx += static_cast<std::size_t>(s) * srcDesc.strides[a + 1];
+                if (s < lo || s >= lo + static_cast<Rpp32s>(roi[nDim + a])) inRoi = false;
+                srcCoord[a + 1] = static_cast<Rpp32u>(s < 0 ? 0 : s);
             }
-
-            dst[dstIdx] = inRoi ? src[srcIdx] : from_double<T>(fillValue);
-        }
+            dst[nd_offset(dstDesc, dstCoord)] =
+                inRoi ? src[nd_offset(srcDesc, srcCoord)] : from_double<T>(fillValue);
+        });
     }
 }
 

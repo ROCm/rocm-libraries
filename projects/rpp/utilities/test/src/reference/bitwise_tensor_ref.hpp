@@ -45,7 +45,7 @@ void bitwise_tensor_reference(const T* src1, const T* src2, T* dst, const RpptGe
                               BitwiseTensorOp op) {
     for_each_nd_element(out, s1, s2,
                         [&](std::size_t outIdx, std::size_t idx1, std::size_t idx2,
-                            const std::vector<Rpp32u>&) {
+                            const NdDims&) {
                             dst[outIdx] = bitwise_tensor_scalar<T>(src1[idx1], src2[idx2], op);
                         });
 }

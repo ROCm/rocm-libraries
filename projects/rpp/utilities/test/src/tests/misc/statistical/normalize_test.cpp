@@ -68,8 +68,8 @@ void run_normalize(const NdConfig& cfg, const NormalizeParams& p) {
     // (1) Host golden model.
     std::vector<Tin> input(count);
     std::vector<Tout> golden(count), actual(count);
-    fill_input<Tin>(input.data(), count, cfg.dtypeIn);
-    normalize_reference<Tin, Tout>(input.data(), golden.data(), *srcDesc, *dstDesc, dims, p.axisMask,
+    fill_input_nd<Tin>(input.data(), *srcDesc, cfg.dtypeIn);
+    normalize_reference<Tin, Tout>(input.data(), golden.data(), *srcDesc, *dstDesc, p.axisMask,
                                    mean.data(), stdDev.data(), p.computeMode, kScale, kShift);
 
     // (2) Run RPP on the configured backend.

@@ -38,7 +38,7 @@ void log1p_reference(const Tin* src, Tout* dst, const RpptGenericDesc& srcDesc,
                      const RpptGenericDesc& dstDesc) {
     // Same logical shape, differing dtype and possibly stride padding: address each through its
     // own descriptor rather than walking either buffer flat.
-    for_each_nd_coord(dstDesc, [&](const std::vector<Rpp32u>& coord) {
+    for_each_nd_coord(dstDesc, [&](const NdDims& coord) {
         dst[nd_offset(dstDesc, coord)] =
             from_double<Tout>(log1p_scalar(to_double(src[nd_offset(srcDesc, coord)])));
     });

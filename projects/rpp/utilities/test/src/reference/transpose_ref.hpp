@@ -28,7 +28,6 @@ namespace rpptest {
 // difference from the kernel is a real defect, never a rounding artifact.
 
 // The destination extents implied by a source shape and a permutation, batch axis first.
-// Both tensors are densely packed, so this plus make_generic_descriptor fixes the layout.
 inline NdDims transpose_dst_dims(const NdDims& srcDims, const std::vector<Rpp32u>& perm) {
     NdDims dstDims(srcDims.size());
     dstDims[0] = srcDims[0];
@@ -36,19 +35,18 @@ inline NdDims transpose_dst_dims(const NdDims& srcDims, const std::vector<Rpp32u
     return dstDims;
 }
 
-// Both tensors are addressed through their own strides, so either may be dense or padded.
+// Both tensors are addressed by logical coordinate through their own strides (nd_offset), so
+// either may be dense or padded.
 template <typename T>
 void transpose_reference(const T* src, T* dst, const RpptGenericDesc& srcDesc,
                          const RpptGenericDesc& dstDesc, const Rpp32u* perm) {
     const std::size_t rank = dstDesc.numDims;  // counts the batch axis
-    for_each_nd_coord(dstDesc, [&](const std::vector<Rpp32u>& coord) {
+    NdDims srcCoord(rank);
+    for_each_nd_coord(dstDesc, [&](const NdDims& coord) {
         // Destination axis a > 0 reads source axis perm[a-1] + 1; axis 0 (batch) maps to itself.
-        std::size_t srcIdx = 0;
-        for (std::size_t a = 0; a < rank; ++a) {
-            const std::size_t srcAxis = (a == 0) ? 0 : static_cast<std::size_t>(perm[a - 1]) + 1;
-            srcIdx += static_cast<std::size_t>(coord[a]) * srcDesc.strides[srcAxis];
-        }
-        dst[nd_offset(dstDesc, coord)] = src[srcIdx];
+        srcCoord[0] = coord[0];
+        for (std::size_t a = 1; a < rank; ++a) srcCoord[perm[a - 1] + 1] = coord[a];
+        dst[nd_offset(dstDesc, coord)] = src[nd_offset(srcDesc, srcCoord)];
     });
 }
 

@@ -24,7 +24,7 @@ void channel_permute_reference(const T* src, T* dst, const RpptDesc& d, const Rp
         d, roi, roiType, [&](Rpp32u n, Rpp32u, Rpp32u, std::size_t srcPix, std::size_t dstPix) {
             for (Rpp32u c = 0; c < d.c; ++c) {
                 const Rpp32u srcC = perm[n * 3 + c];
-                dst[dstPix + c * d.strides.cStride] = src[srcPix + srcC * d.strides.cStride];
+                dst[channel_index(d, dstPix, c)] = src[channel_index(d, srcPix, srcC)];
             }
         });
 }

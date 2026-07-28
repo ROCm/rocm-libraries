@@ -51,17 +51,15 @@ void ricap_reference(const T* src, T* dst, const RpptDesc& d, const Rpp32u* perm
         for (int k = 0; k < 4; ++k) {
             const Rpp32u p = permutation[n * 4 + k];
             for (Rpp32u c = 0; c < d.c; ++c) {
-                const std::size_t dstBase = static_cast<std::size_t>(n) * d.strides.nStride +
-                                            static_cast<std::size_t>(c) * d.strides.cStride;
-                const std::size_t srcBase = static_cast<std::size_t>(p) * d.strides.nStride +
-                                            static_cast<std::size_t>(c) * d.strides.cStride;
+                const std::size_t dstBase = plane_base(d, n, c);
+                const std::size_t srcBase = plane_base(d, p, c);
                 for (Rpp32u j = 0; j < crop[k].h; ++j)
                     for (Rpp32u i = 0; i < crop[k].w; ++i) {
                         const Rpp32u dy = originY[k] + j, dx = originX[k] + i;
                         const Rpp32u sy = crop[k].y0 + j, sx = crop[k].x0 + i;
                         if (dy >= d.h || dx >= d.w || sy >= d.h || sx >= d.w) continue;
-                        dst[dstBase + dy * d.strides.hStride + dx * d.strides.wStride] =
-                            src[srcBase + sy * d.strides.hStride + sx * d.strides.wStride];
+                        dst[plane_index(d, dstBase, dy, dx)] =
+                            src[plane_index(d, srcBase, sy, sx)];
                     }
             }
         }

@@ -51,27 +51,19 @@ void geometric_reference(const T* src, T* dst, const RpptDesc& d, DType dt, cons
                          RpptRoiType roiType, const std::vector<OutSize>& outSize,
                          RpptInterpolationType interp, InvMap invMap) {
     const double border = dtype_black(dt);
-    for (Rpp32u n = 0; n < d.n; ++n) {
-        const RoiBounds b = roi_bounds(roi[n], roiType);
+    for_each_roi_plane(d, roi, roiType, [&](Rpp32u n, const RoiBounds& b, Rpp32u,
+                                            std::size_t base) {
         const int rx0 = static_cast<int>(b.x0), ry0 = static_cast<int>(b.y0);
         const int rx1 = rx0 + static_cast<int>(b.w), ry1 = ry0 + static_cast<int>(b.h);
         const OutSize os = outSize[n];
-        for (Rpp32u c = 0; c < d.c; ++c) {
-            const std::size_t imgBase = static_cast<std::size_t>(n) * d.strides.nStride +
-                                        static_cast<std::size_t>(c) * d.strides.cStride;
-            for (Rpp32u j = 0; j < os.h; ++j)
-                for (Rpp32u i = 0; i < os.w; ++i) {
-                    double sx, sy;
-                    invMap(n, static_cast<double>(i), static_cast<double>(j), sx, sy);
-                    const double v =
-                        sample(src, d, imgBase, sx, sy, rx0, ry0, rx1, ry1, interp, border);
-                    const std::size_t dstIdx = imgBase +
-                                               static_cast<std::size_t>(j) * d.strides.hStride +
-                                               static_cast<std::size_t>(i) * d.strides.wStride;
-                    dst[dstIdx] = from_double<T>(quantize_stored(v, dt));
-                }
-        }
-    }
+        for (Rpp32u j = 0; j < os.h; ++j)
+            for (Rpp32u i = 0; i < os.w; ++i) {
+                double sx, sy;
+                invMap(n, static_cast<double>(i), static_cast<double>(j), sx, sy);
+                const double v = sample(src, d, base, sx, sy, rx0, ry0, rx1, ry1, interp, border);
+                dst[plane_index(d, base, j, i)] = from_double<T>(quantize_stored(v, dt));
+            }
+    });
 }
 
 }  // namespace rpptest

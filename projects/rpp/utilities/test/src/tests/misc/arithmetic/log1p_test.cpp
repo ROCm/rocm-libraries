@@ -41,7 +41,7 @@ void run_log1p(const NdConfig& cfg) {
     // fill (which spans zero and both signs) needs no special casing.
     std::vector<Tin> input(count);
     std::vector<Tout> golden(count), actual(count);
-    fill_input<Tin>(input.data(), count, cfg.dtypeIn);
+    fill_input_nd<Tin>(input.data(), *srcDesc, cfg.dtypeIn);
     log1p_reference<Tin, Tout>(input.data(), golden.data(), *srcDesc, *dstDesc);
 
     // (2) The roiTensor lives in host-accessible (pinned for HIP) memory.

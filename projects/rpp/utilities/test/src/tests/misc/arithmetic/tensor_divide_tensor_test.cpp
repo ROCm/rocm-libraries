@@ -38,11 +38,13 @@ double rel_tolerance(DType dt) {
 // is the smallest magnitude the dtype represents in the fill's own units (1 for U8/I8, 1/255 for
 // F16/F32), so the divisor distribution is otherwise untouched.
 template <typename T>
-void fill_divisor(T* buf, std::size_t count, DType dt, unsigned salt) {
-    fill_input<T>(buf, count, dt, salt);
+void fill_divisor(T* buf, const RpptGenericDesc& d, DType dt, unsigned salt) {
+    fill_input_nd<T>(buf, d, dt, salt);
     const double replacement = (dt == DType::U8 || dt == DType::I8) ? 1.0 : 1.0 / 255.0;
-    for (std::size_t i = 0; i < count; ++i)
-        if (to_double(buf[i]) == 0.0) buf[i] = from_double<T>(replacement);
+    for_each_nd_coord(d, [&](const NdDims& coord) {
+        T& v = buf[nd_offset(d, coord)];
+        if (to_double(v) == 0.0) v = from_double<T>(replacement);
+    });
 }
 
 template <typename T>
@@ -65,8 +67,8 @@ void run_tensor_divide_tensor(const NdConfig& cfg, Broadcast broadcast) {
     // every output element, so golden needs no pre-seeding. Operand order matters here: src1 / src2,
     // in the order the API declares them -- src2 is the divisor.
     std::vector<T> input1(count1), input2(count2), golden(countOut), actual(countOut);
-    fill_input<T>(input1.data(), count1, cfg.dtypeIn, 0);
-    fill_divisor<T>(input2.data(), count2, cfg.dtypeIn, 1);
+    fill_input_nd<T>(input1.data(), *desc1, cfg.dtypeIn, 0);
+    fill_divisor<T>(input2.data(), *desc2, cfg.dtypeIn, 1);
     arithmetic_tensor_reference<T>(input1.data(), input2.data(), golden.data(), *descOut, *desc1,
                                    *desc2, ArithmeticTensorOp::Divide);
 

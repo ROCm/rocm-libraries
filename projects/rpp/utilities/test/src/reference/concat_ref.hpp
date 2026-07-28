@@ -26,24 +26,22 @@ namespace rpptest {
 // the stored value verbatim (no double round-trip, which would perturb F16) and the comparison
 // is bit-exact for every dtype.
 
-// Every tensor is addressed through its own strides, so operands and output may be dense or
-// padded independently -- the descriptor, not the buffer layout, defines where a coordinate lives.
+// Every tensor is addressed by logical coordinate through its own strides (nd_offset), so operands
+// and output may be dense or padded independently -- the descriptor, not the buffer layout, defines
+// where a coordinate lives.
 template <typename T>
 void concat_reference(const T* src1, const T* src2, T* dst, const RpptGenericDesc& out,
                       const RpptGenericDesc& s1, const RpptGenericDesc& s2, Rpp32u axis) {
-    const std::size_t rank = out.numDims;   // includes the batch axis
-    const std::size_t descAxis = axis + 1;  // concat axis in descriptor coordinates
+    const std::size_t descAxis = axis + 1;   // concat axis in descriptor coordinates
     const Rpp32u split = s1.dims[descAxis];  // where src1's slab ends along the axis
 
-    for_each_nd_coord(out, [&](const std::vector<Rpp32u>& coord) {
+    NdDims srcCoord(out.numDims);
+    for_each_nd_coord(out, [&](const NdDims& coord) {
+        srcCoord = coord;
         const bool fromFirst = coord[descAxis] < split;
-        const RpptGenericDesc& src = fromFirst ? s1 : s2;
-        std::size_t idx = 0;
-        for (std::size_t a = 0; a < rank; ++a) {
-            const Rpp32u c = (a == descAxis && !fromFirst) ? coord[a] - split : coord[a];
-            idx += static_cast<std::size_t>(c) * src.strides[a];
-        }
-        dst[nd_offset(out, coord)] = fromFirst ? src1[idx] : src2[idx];
+        if (!fromFirst) srcCoord[descAxis] -= split;
+        dst[nd_offset(out, coord)] =
+            fromFirst ? src1[nd_offset(s1, srcCoord)] : src2[nd_offset(s2, srcCoord)];
     });
 }
 

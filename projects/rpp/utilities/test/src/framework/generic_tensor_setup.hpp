@@ -113,6 +113,11 @@ inline std::vector<Rpp32u> make_nd_roi_tensor(const NdDims& dims) {
 // the buffer flat, so a dense and a padded descriptor give the same logical answer and operands may
 // differ in convention. src/tests/core/golden_layout_test.cpp guards that property.
 
+// The descriptor's logical extents, batch axis first.
+inline NdDims nd_dims(const RpptGenericDesc& d) {
+    return NdDims(d.dims, d.dims + d.numDims);
+}
+
 inline std::size_t generic_logical_count(const RpptGenericDesc& d) {
     std::size_t n = 1;
     for (std::size_t a = 0; a < d.numDims; ++a) n *= d.dims[a];
@@ -128,19 +133,29 @@ inline std::size_t nd_offset(const RpptGenericDesc& d, const NdDims& coord) {
     return index;
 }
 
-// Visits every logical coordinate, row-major with the innermost axis fastest.
+// Visits every coordinate of an arbitrary extent list, row-major with the innermost axis fastest.
+// The one coordinate walk: a golden whose iteration space is not a whole descriptor (slice's
+// per-sample shape, normalize's per-sample sub-tensor) drives it from here rather than
+// re-deriving the row-major order.
 template <typename Fn>
-void for_each_nd_coord(const RpptGenericDesc& d, Fn fn) {
-    const std::size_t rank = d.numDims;
-    const std::size_t total = generic_logical_count(d);
+void for_each_coord(const NdDims& extents, Fn fn) {
+    const std::size_t rank = extents.size();
+    std::size_t total = 1;
+    for (Rpp32u e : extents) total *= e;
     NdDims coord(rank, 0);
     for (std::size_t n = 0; n < total; ++n) {
         fn(static_cast<const NdDims&>(coord));
         for (std::size_t a = rank; a-- > 0;) {
-            if (++coord[a] < d.dims[a]) break;
+            if (++coord[a] < extents[a]) break;
             coord[a] = 0;
         }
     }
+}
+
+// Visits every logical coordinate of the descriptor.
+template <typename Fn>
+void for_each_nd_coord(const RpptGenericDesc& d, Fn fn) {
+    for_each_coord(nd_dims(d), fn);
 }
 
 // fn(outIdx, idx1, idx2, coord) over every element of the (broadcast) output.

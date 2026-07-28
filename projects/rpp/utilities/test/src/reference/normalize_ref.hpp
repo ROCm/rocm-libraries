@@ -62,11 +62,13 @@ inline Rpp32u normalize_param_size(const std::vector<Rpp32u>& paramDims) {
 
 template <typename Tin, typename Tout>
 void normalize_reference(const Tin* src, Tout* dst, const RpptGenericDesc& srcDesc,
-                         const RpptGenericDesc& dstDesc, const NdDims& dims, Rpp32u axisMask,
+                         const RpptGenericDesc& dstDesc, Rpp32u axisMask,
                          const Rpp32f* meanTensor, const Rpp32f* stdDevTensor,
                          Rpp8u computeMeanStddev, Rpp32f scale, Rpp32f shift) {
+    const NdDims dims = nd_dims(srcDesc);
     const Rpp32u nDim = nd_rank(dims);
     const Rpp32u batch = dims[0];
+    const NdDims sampleExtents(dims.begin() + 1, dims.end());
 
     const std::vector<Rpp32u> paramDims = normalize_param_dims(dims, axisMask);
     const std::vector<Rpp32u> paramStrides = normalize_param_strides(paramDims);
@@ -84,30 +86,17 @@ void normalize_reference(const Tin* src, Tout* dst, const RpptGenericDesc& srcDe
     // reduces into. Addressing by coordinate rather than walking the sample flat matters twice
     // over for a reduction op: padding slack must not enter the mean/stddev, and it must not be
     // mistaken for a coordinate.
-    const std::size_t perSampleLogical = [&] {
-        std::size_t t = 1;
-        for (Rpp32u a = 0; a < nDim; ++a) t *= dims[a + 1];
-        return t;
-    }();
-
+    NdDims coord(nDim + 1);
     auto for_each_element = [&](Rpp32u n, auto fn) {
-        const std::size_t srcBase = static_cast<std::size_t>(n) * srcDesc.strides[0];
-        const std::size_t dstBase = static_cast<std::size_t>(n) * dstDesc.strides[0];
-        std::vector<Rpp32u> coord(nDim, 0);
-        for (std::size_t k = 0; k < perSampleLogical; ++k) {
-            std::size_t srcIdx = srcBase, dstIdx = dstBase;
+        coord[0] = n;
+        for_each_coord(sampleExtents, [&](const NdDims& c) {
             Rpp32u p = 0;
             for (Rpp32u a = 0; a < nDim; ++a) {
-                srcIdx += static_cast<std::size_t>(coord[a]) * srcDesc.strides[a + 1];
-                dstIdx += static_cast<std::size_t>(coord[a]) * dstDesc.strides[a + 1];
-                if (!((axisMask >> a) & 1u)) p += coord[a] * paramStrides[a];
+                coord[a + 1] = c[a];
+                if (!((axisMask >> a) & 1u)) p += c[a] * paramStrides[a];
             }
-            fn(srcIdx, dstIdx, p);
-            for (Rpp32u a = nDim; a-- > 0;) {
-                if (++coord[a] < dims[a + 1]) break;
-                coord[a] = 0;
-            }
-        }
+            fn(nd_offset(srcDesc, coord), nd_offset(dstDesc, coord), p);
+        });
     };
 
     for (Rpp32u n = 0; n < batch; ++n) {

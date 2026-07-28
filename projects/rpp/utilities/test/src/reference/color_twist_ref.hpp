@@ -38,12 +38,12 @@ void color_twist_reference(const T* src, T* dst, const RpptDesc& d, DType dt, co
         if (d.c == 3) {
             double rgb[3];
             for (int c = 0; c < 3; ++c)
-                rgb[c] = to_unit(to_double(src[srcPix + c * d.strides.cStride]), dt);
+                rgb[c] = to_unit(to_double(src[channel_index(d, srcPix, c)]), dt);
             hue_rotate_rgb(rgb[0], rgb[1], rgb[2], hueDeg);                    // Stage 1
             saturation_scale_rgb(rgb[0], rgb[1], rgb[2], satFactor);           // Stage 2
             for (int c = 0; c < 3; ++c) rgb[c] = brightness * rgb[c] + beta;  // Stage 3
             for (int c = 0; c < 3; ++c)
-                dst[dstPix + c * d.strides.cStride] = from_double<T>(from_unit(rgb[c], dt));
+                dst[channel_index(d, dstPix, c)] = from_double<T>(from_unit(rgb[c], dt));
         } else {  // 1-channel: only the Stage 3 affine (hue/saturation are no-ops)
             const double x = brightness * to_unit(to_double(src[srcPix]), dt) + beta;
             dst[dstPix] = from_double<T>(from_unit(x, dt));

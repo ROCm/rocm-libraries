@@ -69,7 +69,6 @@ template <typename T>
 void histogram_equalize_reference(const T* src, T* dst, const RpptDesc& d, const RpptROI* roi,
                                   RpptRoiType type) {
     const bool rgb = d.c == 3;
-    const std::size_t cStride = d.strides.cStride;
     const std::vector<std::size_t> N = roi_pixel_counts(d, roi, type);
 
     // Pass 1: per-image histogram of the equalization channel (Y for RGB).
@@ -78,8 +77,8 @@ void histogram_equalize_reference(const T* src, T* dst, const RpptDesc& d, const
     for_each_roi_pixel(d, roi, type, [&](Rpp32u n, Rpp32u, Rpp32u, std::size_t s, std::size_t) {
         int y;
         if (rgb) {
-            const double r = to_double(src[s]), g = to_double(src[s + cStride]),
-                         b = to_double(src[s + 2 * cStride]);
+            const double r = to_double(src[s]), g = to_double(src[channel_index(d, s, 1)]),
+                         b = to_double(src[channel_index(d, s, 2)]);
             y = static_cast<int>(clampd(std::nearbyint(he_luma_y(r, g, b)), 0.0, 255.0));
         } else {
             y = static_cast<int>(to_double(src[s]));
@@ -93,8 +92,8 @@ void histogram_equalize_reference(const T* src, T* dst, const RpptDesc& d, const
     // Pass 2: apply the per-image LUT (equalizing only Y for RGB, preserving Cb/Cr).
     for_each_roi_pixel(d, roi, type, [&](Rpp32u n, Rpp32u, Rpp32u, std::size_t s, std::size_t o) {
         if (rgb) {
-            const double r = to_double(src[s]), g = to_double(src[s + cStride]),
-                         b = to_double(src[s + 2 * cStride]);
+            const double r = to_double(src[s]), g = to_double(src[channel_index(d, s, 1)]),
+                         b = to_double(src[channel_index(d, s, 2)]);
             const int y = static_cast<int>(clampd(std::nearbyint(he_luma_y(r, g, b)), 0.0, 255.0));
             const double cb = clampd(std::nearbyint(he_cb(r, g, b)), 0.0, 255.0);
             const double cr = clampd(std::nearbyint(he_cr(r, g, b)), 0.0, 255.0);
@@ -103,8 +102,8 @@ void histogram_equalize_reference(const T* src, T* dst, const RpptDesc& d, const
             const double gg = yp - 0.344136 * (cb - 128.0) - 0.714136 * (cr - 128.0);
             const double bb = yp + 1.772 * (cb - 128.0);
             dst[o] = from_double<T>(clampd(std::nearbyint(rr), 0.0, 255.0));
-            dst[o + cStride] = from_double<T>(clampd(std::nearbyint(gg), 0.0, 255.0));
-            dst[o + 2 * cStride] = from_double<T>(clampd(std::nearbyint(bb), 0.0, 255.0));
+            dst[channel_index(d, o, 1)] = from_double<T>(clampd(std::nearbyint(gg), 0.0, 255.0));
+            dst[channel_index(d, o, 2)] = from_double<T>(clampd(std::nearbyint(bb), 0.0, 255.0));
         } else {
             dst[o] = from_double<T>(static_cast<double>(lut[n][static_cast<int>(to_double(src[s]))]));
         }

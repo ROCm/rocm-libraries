@@ -34,8 +34,8 @@ void run_tensor_or_tensor(const NdConfig& cfg, Broadcast broadcast) {
     // the OR is not trivially equal to either input. Every output element is written by the
     // op, so golden needs no pre-seeding.
     std::vector<T> input1(count1), input2(count2), golden(countOut), actual(countOut);
-    fill_input<T>(input1.data(), count1, cfg.dtypeIn, 0);
-    fill_input<T>(input2.data(), count2, cfg.dtypeIn, 1);
+    fill_input_nd<T>(input1.data(), *desc1, cfg.dtypeIn, 0);
+    fill_input_nd<T>(input2.data(), *desc2, cfg.dtypeIn, 1);
     bitwise_tensor_reference<T>(input1.data(), input2.data(), golden.data(), *descOut, *desc1, *desc2,
                                 BitwiseTensorOp::Or);
 

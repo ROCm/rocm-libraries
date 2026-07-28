@@ -153,13 +153,13 @@ void snow_reference(const T* src, T* dst, const RpptDesc& d, DType dt, const Rpp
     if (d.c == 3) {
         for_each_roi_pixel(
             d, roi, roiType, [&](Rpp32u, Rpp32u, Rpp32u, std::size_t srcPix, std::size_t dstPix) {
-                float r = snow_detail::load_norm(to_double(src[srcPix + 0 * d.strides.cStride]), dt);
-                float g = snow_detail::load_norm(to_double(src[srcPix + 1 * d.strides.cStride]), dt);
-                float b = snow_detail::load_norm(to_double(src[srcPix + 2 * d.strides.cStride]), dt);
-                snow_detail::snow_rgb(r, g, b, bc, snowCoefficient, darkMode);
-                dst[dstPix + 0 * d.strides.cStride] = from_double<T>(snow_detail::store_denorm(r, dt));
-                dst[dstPix + 1 * d.strides.cStride] = from_double<T>(snow_detail::store_denorm(g, dt));
-                dst[dstPix + 2 * d.strides.cStride] = from_double<T>(snow_detail::store_denorm(b, dt));
+                float rgb[3];
+                for (Rpp32u c = 0; c < 3; ++c)
+                    rgb[c] = snow_detail::load_norm(to_double(src[channel_index(d, srcPix, c)]), dt);
+                snow_detail::snow_rgb(rgb[0], rgb[1], rgb[2], bc, snowCoefficient, darkMode);
+                for (Rpp32u c = 0; c < 3; ++c)
+                    dst[channel_index(d, dstPix, c)] =
+                        from_double<T>(snow_detail::store_denorm(rgb[c], dt));
             });
     } else {  // PLN1
         for_each_roi_io(

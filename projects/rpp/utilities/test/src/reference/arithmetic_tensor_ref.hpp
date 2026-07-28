@@ -71,7 +71,7 @@ void arithmetic_tensor_reference(const T* src1, const T* src2, T* dst, const Rpp
                                  ArithmeticTensorOp op) {
     for_each_nd_element(out, s1, s2,
                         [&](std::size_t outIdx, std::size_t idx1, std::size_t idx2,
-                            const std::vector<Rpp32u>&) {
+                            const NdDims&) {
                             const double v = arithmetic_tensor_scalar(
                                 to_double(src1[idx1]), to_double(src2[idx2]), op);
                             dst[outIdx] = ArithmeticTensorStore<T>::apply(v);

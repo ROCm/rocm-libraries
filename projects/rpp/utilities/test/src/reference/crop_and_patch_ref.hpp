@@ -26,11 +26,10 @@ void crop_and_patch_reference(const T* src1, const T* src2, T* dst, const RpptDe
     // (1) Output is a copy of the 2nd image over the whole frame.
     for (Rpp32u n = 0; n < d.n; ++n)
         for (Rpp32u c = 0; c < d.c; ++c) {
-            const std::size_t base = static_cast<std::size_t>(n) * d.strides.nStride +
-                                     static_cast<std::size_t>(c) * d.strides.cStride;
+            const std::size_t base = plane_base(d, n, c);
             for (Rpp32u y = 0; y < d.h; ++y)
                 for (Rpp32u x = 0; x < d.w; ++x) {
-                    const std::size_t idx = base + y * d.strides.hStride + x * d.strides.wStride;
+                    const std::size_t idx = plane_index(d, base, y, x);
                     dst[idx] = src2[idx];
                 }
         }
@@ -45,11 +44,8 @@ void crop_and_patch_reference(const T* src1, const T* src2, T* dst, const RpptDe
                 const Rpp32u dy = pb.y0 + r, dx = pb.x0 + col;
                 if (sy >= d.h || sx >= d.w || dy >= d.h || dx >= d.w) continue;
                 for (Rpp32u c = 0; c < d.c; ++c) {
-                    const std::size_t base = static_cast<std::size_t>(n) * d.strides.nStride +
-                                             static_cast<std::size_t>(c) * d.strides.cStride;
-                    const std::size_t srcIdx = base + sy * d.strides.hStride + sx * d.strides.wStride;
-                    const std::size_t dstIdx = base + dy * d.strides.hStride + dx * d.strides.wStride;
-                    dst[dstIdx] = src1[srcIdx];
+                    const std::size_t base = plane_base(d, n, c);
+                    dst[plane_index(d, base, dy, dx)] = src1[plane_index(d, base, sy, sx)];
                 }
             }
     }
