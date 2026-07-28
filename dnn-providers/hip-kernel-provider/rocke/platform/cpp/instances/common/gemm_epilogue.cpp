@@ -729,7 +729,28 @@ void rocke_gemm_emit_epilogue_cshuffle(rocke_ir_builder_t* b,
         int shape[2];
         shape[0] = t->tile_m;
         shape[1] = t->tile_n;
-        Cs = rocke_b_smem_alloc(b, storage_dtype, shape, 2, "C_smem");
+        /* cshuffle_no_alias marks it exclusive so the smem-pool packer gives it
+         * its own byte range instead of aliasing the A/B staging bytes. */
+        Cs = rocke_b_smem_alloc_ex(
+            b, storage_dtype, shape, 2, "C_smem", spec->trait.cshuffle_no_alias ? 1 : 0);
+    }
+
+    /* ---- step 0: reuse barrier. ----
+     * The common-LDS packer aliases this C staging tile onto the A/B staging
+     * bytes (non-interfering in program order). The double-buffered / prefetched
+     * mainloops end with the tail-tile MFMA reading A/B from LDS *after* their
+     * last drain barrier and emit no trailing barrier, so without a barrier here
+     * a fast wave's first C ds_write would clobber A/B bytes a slow wave is still
+     * reading for its tail MFMA -- a cross-wave WAR on the aliased pool. Mirrors
+     * the Python _emit_epilogue_cshuffle.
+     *
+     * With cshuffle_no_alias the C tile has its own exclusive LDS bytes that
+     * never overlap A/B, so this cross-wave WAR cannot occur and the barrier is
+     * elided. The step-3 C-write->C-read barrier below is a genuine RAW and
+     * always stays. */
+    if(!spec->trait.cshuffle_no_alias)
+    {
+        rocke_b_sync(b);
     }
 
     warp_m_off = rocke_b_mul(b, warp_m_idx, rocke_b_const_i32(b, mfmas_m * t->warp_tile_m));
