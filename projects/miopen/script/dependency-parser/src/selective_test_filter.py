@@ -331,7 +331,6 @@ def main():
     path_to_folder = ""
     fixturemap_json = ""
     shardsfile = ""
-    gtest_shards = []
 
     if "--test-prefix" in sys.argv:
         filter_mode = "test_prefix"
@@ -388,8 +387,6 @@ def main():
     else:
         tests = select_tests(file_to_executables, changed_files, filter_mode)
         gtest_filter = create_gtest_filter(tests, fixturemap)
-        if shardsfile:
-            gtest_shards = load_shards(shardsfile)
         if fixturemap:
             fallback_mode = classify_fallback(
                 changed_files,
@@ -409,7 +406,6 @@ def main():
                 "dapper_filter": gtest_filter,
                 "fallback_mode": fallback_mode,
                 "changed_files": sorted(changed_files) if changed_files else [],
-                "gtest_shards": gtest_shards,
             },
             f,
             indent=2,

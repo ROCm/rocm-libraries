@@ -10,7 +10,20 @@ from pathlib import Path
 
 # The pure union math (pattern splitting/overlap + subtractive intersection) is shared
 # with the TheRock runner; dapper_union.py is the single source of truth for it.
-from dapper_union import compute_union_filter
+from dapper_union import (
+    compute_union_filter,
+    split_gtest_filter_includes,
+    patterns_overlap,
+)
+
+# Secondary domains: independent gtest invocations that run outside the primary shards
+# (e.g. HipGraphExist runs serially because it OOMs when shards share a GPU). Each is
+# analyzed as its own Dapper "domain" -- own shard file(s), own filters, its own result.
+# 'name' is the label used in the shard-file grouping, the shard filenames, and the
+# one-line report; 'filter' is the gtest filter that invocation runs.
+SECONDARY_DOMAINS = [
+    {"name": "HipGraphExist", "filter": "*HipGraphExist*"},
+]
 
 
 def abort_missing_shards(missing, total):
@@ -44,33 +57,25 @@ def abort_missing_shards(missing, total):
     sys.exit(1)
 
 
-def _convert_xml_shards(json_data):
-    """Convert XML shard paths to JSON, preferring an existing .json over the .xml source.
-
-    If any shard has neither output, ALL missing shards are reported and the run is
-    aborted (see abort_missing_shards) -- no partial analysis.
-    """
+def _convert_shards(shards):
+    """Convert a domain's XML shard paths to JSON, preferring an existing .json over the
+    .xml source. If any shard has neither output, ALL missing shards are reported and the
+    run is aborted (see abort_missing_shards) -- no partial analysis. Returns the converted
+    list (json paths where conversion happened, originals otherwise)."""
     from selective_test_filter import _xml_to_gtest_json
 
-    shards = json_data.get("gtest_shards", [])
     converted = []
     missing = []
-    changed = False
     for shard in shards:
         p = Path(shard)
         if p.suffix.lower() == ".xml":
             json_path = p.with_suffix(".json")
             if json_path.exists():
-                print(
-                    f"Using existing JSON shard {json_path} (skipping XML conversion)."
-                )
                 converted.append(str(json_path))
-                changed = True
             elif p.exists():
                 data = _xml_to_gtest_json(p)
                 json_path.write_text(json.dumps(data, indent=2))
                 converted.append(str(json_path))
-                changed = True
             else:
                 missing.append(shard)
                 converted.append(shard)
@@ -78,37 +83,113 @@ def _convert_xml_shards(json_data):
             converted.append(shard)
     if missing:
         abort_missing_shards(missing, len(shards))
-    if changed:
-        json_data["gtest_shards"] = converted
+    return converted
+
+
+def _join_filter(positives, negatives):
+    result = ":".join(positives)
+    if negatives:
+        result = result + "-" + ":".join(negatives)
+    return result
+
+
+def _domain_filter(own_filter, other_positive_filters):
+    """Return own_filter with every other domain's positives added to its negative side,
+    making domains mutually exclusive. The primary is the catch-all: its positives are the
+    ones NOT passed here to secondaries."""
+    pos, neg = split_gtest_filter_includes(own_filter)
+    neg = list(neg)
+    for other in other_positive_filters:
+        for p in split_gtest_filter_includes(other)[0]:
+            if p not in neg:
+                neg.append(p)
+    return _join_filter(pos, neg)
+
+
+def _classify_impact(dapper_positives):
+    """Assign each global-impact positive to a domain: the first secondary whose positive
+    it overlaps, else 'primary' (the catch-all). Returns {domain_name: [positives]}."""
+    assigned = {"primary": []}
+    sec_positives = {}
+    for sec in SECONDARY_DOMAINS:
+        assigned[sec["name"]] = []
+        sec_positives[sec["name"]] = split_gtest_filter_includes(sec["filter"])[0]
+    for p in dapper_positives:
+        placed = "primary"
+        for sec in SECONDARY_DOMAINS:
+            if any(patterns_overlap(p, sp) for sp in sec_positives[sec["name"]]):
+                placed = sec["name"]
+                break
+        assigned[placed].append(p)
+    return assigned
+
+
+def build_domains(json_data, shard_groups, category_filter):
+    """Build the per-domain analysis records from the global impact + the shard grouping.
+
+    Each domain is completely independent: its own shard files, its own dapper_filter
+    (the slice of the global impact assigned to it) and union_filter. 'primary' is the
+    single catch-all domain (its positives are never subtracted from secondaries);
+    secondaries are the out-of-shard invocations declared in SECONDARY_DOMAINS.
+    """
+    dapper_positives = split_gtest_filter_includes(json_data.get("dapper_filter", ""))[0]
+    assigned = _classify_impact(dapper_positives)
+    sec_filter_by_name = {s["name"]: s["filter"] for s in SECONDARY_DOMAINS}
+    all_sec_filters = [s["filter"] for s in SECONDARY_DOMAINS]
+
+    domains = []
+    primary_union = ""
+    for group in shard_groups:
+        name = group["name"]
+        if name == "primary":
+            dtype = "primary"
+            # primary = catch-all: exclude every secondary's positives, keep nothing else.
+            dfilter = _domain_filter(category_filter, all_sec_filters)
+        else:
+            dtype = "secondary"
+            own = sec_filter_by_name.get(name, name)
+            others = [f for n, f in sec_filter_by_name.items() if n != name]
+            dfilter = _domain_filter(own, others)
+        domain_dapper = ":".join(assigned.get(name, []))
+        union = compute_union_filter(domain_dapper, dfilter)
+        domains.append(
+            {
+                "type": dtype,
+                "name": name,
+                "dapper_filter": domain_dapper,
+                "union_filter": union,
+                "shards": _convert_shards(group.get("shards", [])),
+            }
+        )
+        if dtype == "primary":
+            primary_union = union
+    return domains, primary_union
 
 
 def calc_union_filter(gtest_filter_json: str, category_name: str, category_filter: str):
-    """Native (validate-mode) union: convert the shard XML, compute the subtractive
-    union via the shared dapper_union helper, and record it back into the shards JSON.
-
-    The union math itself lives in dapper_union.compute_union_filter (shared with the
-    TheRock runner); here we only own the shard-JSON I/O and the annotations that
-    dapper_diff reads back.
-    """
+    """Native (validate-mode) domain assembly: read the impact + the shard grouping
+    (miopen_gtest_shards.txt, one entry per domain), slice the impact per domain, compute
+    each domain's subtractive union, convert its shard XML, and record domains[] back into
+    the tests JSON for dapper_diff to analyze. Returns the primary domain's union filter
+    (for the standalone run_gtest path)."""
     with open(gtest_filter_json, "r") as f:
         json_data = json.load(f)
-    _convert_xml_shards(json_data)
-    dapper_filter = json_data.get("dapper_filter", "")
+
+    shards_path = os.path.join(
+        os.path.dirname(os.path.abspath(gtest_filter_json)), "miopen_gtest_shards.txt"
+    )
+    with open(shards_path, "r") as f:
+        shard_groups = json.load(f)
 
     json_data["category_name"] = category_name
-    category_filter_name = (
-        f"category_{category_name}_filter" if category_name else "category_filter"
-    )
-    json_data[category_filter_name] = category_filter
-
-    union_filter = compute_union_filter(dapper_filter, category_filter)
-    json_data["union_filter"] = union_filter
+    domains, primary_union = build_domains(json_data, shard_groups, category_filter)
+    json_data["domains"] = domains
 
     with open(gtest_filter_json, "w") as f:
         json.dump(json_data, f, indent=2)
 
-    print(f"================= calc_union_filter: union_filter={union_filter}")
-    return union_filter
+    print(f"================= calc_union_filter: built {len(domains)} domain(s)")
+    return primary_union
 
 
 def run_gtest(gtest_executable: str, gtest_filter: str):

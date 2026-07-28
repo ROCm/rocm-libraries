@@ -221,8 +221,8 @@ macro(dapper_add_sharded_test)
     # fully processed before this subdirectory is added (add_subdirectory(gtest) is its last
     # statement), so the parent's TESTS directory property is complete and safe to read here.
     # Also depend on the tests registered in THIS directory so far (the shards and the
-    # separately-registered ${TEST_NAME}_hip_graph_serial), not just the parent directory --
-    # otherwise hip_graph_serial can run after the dapper analysis and bury its summary.
+    # separately-registered ${TEST_NAME}_HipGraphExist), not just the parent directory --
+    # otherwise HipGraphExist can run after the dapper analysis and bury its summary.
     # (TheRock-only category suites are added later by apply_test_category_labels and do not
     # run in MICI, so they are intentionally not required here.)
     get_property(_dapper_parent_tests DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/.. PROPERTY TESTS)
