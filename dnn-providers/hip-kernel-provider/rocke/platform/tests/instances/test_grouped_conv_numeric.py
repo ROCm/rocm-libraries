@@ -2,8 +2,9 @@
 # SPDX-License-Identifier: MIT
 """GPU numeric-correctness tests for grouped forward implicit-GEMM conv.
 
-Covers the AICK-1752 grouped Conv2d forward path on the MFMA (CDNA) arches
-(gfx942 / gfx950): each group is a per-group GEMM placed on ``blockIdx.z``
+Covers grouped Conv2d forward path on the MFMA (CDNA) arches
+(gfx90a / gfx942 / gfx950 -- see ``_IS_CDNA``): each group is a per-group GEMM
+placed on ``blockIdx.z``
 (CK-style grid-per-group). The oracle is the shared grouped NumPy fp32-accum
 reference in ``rocke.instances.common.manifest_runner.conv`` (per-group einsum),
 so this test exercises the real descriptor + kernel path end to end and compares

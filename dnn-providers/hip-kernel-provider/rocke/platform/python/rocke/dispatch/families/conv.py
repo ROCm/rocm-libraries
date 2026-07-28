@@ -279,10 +279,11 @@ def _gemm_dims_divide(req: ConvRequest, spec: ImplicitGemmConvSpec) -> Tuple[boo
     )
     # Grouped conv (esp. cardinality-grouped g32/cpg8) has tiny per-group
     # N_gemm = kpg and K_gemm = Y*X*cpg that rarely tile-align. The kernel is
-    # tail-safe on N (epilogue bound check) and K (pad transforms on y/x), so the
-    # no-pad divisibility gate is relaxed to M only for grouped requests. M
-    # (= N*Ho*Wo) is likewise epilogue-masked; it is kept here as a conservative
-    # perf guard for the groups==1 path only. (Verified: grouped shapes with
+    # tail-safe on N (epilogue bound check) and K (pad transforms on y/x), so for
+    # grouped requests the no-pad divisibility gate is relaxed to check M only
+    # (N and K are dropped). The groups==1 path still checks all three (M, N, K)
+    # as before. M (= N*Ho*Wo) is likewise epilogue-masked, but is kept in both
+    # paths as a conservative perf guard. (Verified: grouped shapes with
     # N_gemm % tile_n != 0 and K_gemm % tile_k != 0 are numerically correct.)
     if p.groups > 1:
         checks = (("M", p.M, spec.tile_m),)
