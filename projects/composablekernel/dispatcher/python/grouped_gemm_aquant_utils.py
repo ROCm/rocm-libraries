@@ -497,9 +497,8 @@ def _compile_aquant_kernel(
     if ck_include:
         cmd += [f"-I{ck_include}"]
 
-    dispatcher_include = _CTYPES_LIB_SRC.parent.parent.parent / "dispatcher" / "include"
-    if dispatcher_include.is_dir():
-        cmd += [f"-I{dispatcher_include}"]
+    # NOTE: dispatcher/include is intentionally excluded here — the aquant ctypes lib
+    # calls SelectedKernel::launch() directly and does not use any dispatcher headers.
 
     if extra_include_dirs:
         for d in extra_include_dirs:
