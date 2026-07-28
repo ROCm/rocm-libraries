@@ -37,6 +37,7 @@ html_theme = "rocm_docs_theme"
 html_theme_options = {"flavor": "rocm"}
 
 external_projects_current_project = "hipthreads"
+external_project_remote_repository = ""
 
 # hipThreads is class-heavy (wthread, mutex, condition_variable, ...). By default
 # Breathe shows only the class summary, not its members. Expand documented public

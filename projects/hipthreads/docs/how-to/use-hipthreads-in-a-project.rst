@@ -8,17 +8,17 @@
 How to use hipThreads in a CMake project
 *******************************************
 
-After :doc:`installing hipThreads <../install/source-build>`, add the following lines to your ``CMakeLists.txt`` to find, include, and link the library:
+After :doc:`installing hipThreads <../install/install>`, add the following lines to your ``CMakeLists.txt`` to find, include, and link the library:
 
 .. code-block:: cmake
 
-   find_package(hipthreads REQUIRED)
+    find_package(hipthreads REQUIRED)
 
-   # ...
+    # ...
 
-   target_link_libraries(<your_target> hipthreads::hipthreads)
+    target_link_libraries(my_target hipthreads::hipthreads)
 
-The ``hipthreads::hipthreads`` target carries the public include directories, so the headers are available without any extra ``target_include_directories`` call.
+The ``hipthreads::hipthreads`` target carries the public include directories, so the headers are available without any extra ``target_include_directories()`` call.
 Include the umbrella headers you need from your sources:
 
 .. code-block:: cpp
@@ -27,7 +27,10 @@ Include the umbrella headers you need from your sources:
    #include <hip/mutex>
    #include <hip/condition_variable>
 
-If hipThreads is not installed under ``$ROCM_PATH``, point CMake at it by adding ``-DCMAKE_PREFIX_PATH=/path/to/hipthreads`` to your configure command.
+If hipThreads isn't installed under ``$ROCM_PATH``, point CMake at it by adding ``-DCMAKE_PREFIX_PATH=hipthreads_install_prefix`` to your configure command.
 
-The ``examples/`` directory in the repository contains complete, standalone CMake projects (SAXPY, a ray tracer, sparse matrix multiply, and a llama3.c port).
-Each example uses ``find_package(hipthreads)`` exactly as shown above and is a good starting point for a new project.
+The ``examples/`` directory in the repository contains complete, standalone CMake projects.
+These include SAXPY, a ray tracer, sparse matrix multiply, and a llama3.c port.
+Each example is split into ``stepN-*`` directories that port the code from CPU ``std::thread`` to hipThreads.
+The hipThreads steps use ``find_package(hipthreads)`` as in the preceding ``CMakeLists.txt`` snippet, so they're a good starting point for a new project.
+The earlier baseline steps are CPU-only and link ``Threads::Threads`` instead.

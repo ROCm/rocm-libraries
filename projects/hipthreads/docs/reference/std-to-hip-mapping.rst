@@ -10,12 +10,14 @@ Mapping ``std::`` to ``hip::``
 
 hipThreads mirrors the C++ Concurrency Support Library.
 In most cases, porting CPU code means replacing the ``std::`` qualifier with ``hip::`` and adding ``__device__`` or ``__host__ __device__`` to the callables that run on the GPU.
-The tables below list the supported primitives and how they correspond to the standard library.
+The following tables list the supported primitives and how they correspond to the standard library.
 
 For behavioral differences that have no standard-library analogue, see :ref:`limitations`.
 
 Threads
 =======
+
+The following table maps thread types and ``this_thread`` helpers.
 
 .. list-table::
   :header-rows: 1
@@ -25,26 +27,28 @@ Threads
     - hipThreads
     - Header
   * - ``std::thread``
-    - ``hip::wthread``
+    - ``hip::wthread`` (``hip::thread`` is a deprecated alias)
     - ``<hip/thread>``
   * - ``std::thread::id``
     - ``hip::wthread::id``
     - ``<hip/thread>``
-  * - ``std::this_thread::get_id``
-    - ``hip::this_thread::get_id``
+  * - ``std::this_thread::get_id()``
+    - ``hip::this_thread::get_id()``, device only. On the host, use ``hip::wthread::get_id()``
     - ``<hip/thread>``
-  * - ``std::this_thread::yield``
-    - ``hip::this_thread::pseudo_yield``
+  * - ``std::this_thread::yield()``
+    - ``hip::this_thread::pseudo_yield()``
     - ``<hip/thread>``
-  * - ``std::this_thread::sleep_for``
-    - ``hip::this_thread::sleep_for``
+  * - ``std::this_thread::sleep_for()``
+    - ``hip::this_thread::sleep_for()``
     - ``<hip/thread>``
-  * - *(no equivalent)*
-    - ``hip::this_thread::get_fiber_id``
+  * - no equivalent
+    - ``hip::this_thread::get_fiber_id()``
     - ``<hip/thread>``
 
 Mutexes and locks
 =================
+
+The following table maps mutex types and lock helpers.
 
 .. list-table::
   :header-rows: 1
@@ -54,7 +58,7 @@ Mutexes and locks
     - hipThreads
     - Header
   * - ``std::mutex``
-    - ``hip::spin_mutex`` (also ``hip::pseudo_mutex``)
+    - ``hip::spin_mutex``, also ``hip::pseudo_mutex``
     - ``<hip/mutex>``, ``<hip/pseudo_mutex>``
   * - ``std::lock_guard``
     - ``hip::lock_guard``
@@ -62,9 +66,17 @@ Mutexes and locks
   * - ``std::unique_lock``
     - ``hip::unique_lock``
     - ``<hip/mutex>``
+  * - ``std::lock()``
+    - ``hip::lock()``, device only
+    - ``<hip/mutex>``
+  * - ``std::try_lock()``
+    - ``hip::try_lock()``, device only
+    - ``<hip/mutex>``
 
 Condition variables
 ===================
+
+The following table maps condition-variable types.
 
 .. list-table::
   :header-rows: 1
@@ -74,12 +86,13 @@ Condition variables
     - hipThreads
     - Header
   * - ``std::condition_variable_any``
-    - ``hip::condition_variable_any`` (also
-      ``hip::spin_condition_variable``, ``hip::pseudo_condition_variable``)
+    - ``hip::condition_variable_any``, also
+      ``hip::spin_condition_variable`` and ``hip::pseudo_condition_variable``
     - ``<hip/condition_variable>``, ``<hip/pseudo_condition_variable>``
 
 .. note::
 
   The ``spin_`` variants busy-wait.
-  The ``pseudo_`` variants busy-wait but periodically call ``pseudo_yield`` to let other GPU work progress.
-  Choose a ``pseudo_`` primitive only when you can guarantee no yield-loops occur; see :ref:`limitations`.
+  The ``pseudo_`` variants busy-wait but periodically call ``pseudo_yield()`` to let other GPU work progress.
+  Choose a ``pseudo_`` primitive only when you can guarantee no yield-loops occur.
+  See :ref:`limitations`.
