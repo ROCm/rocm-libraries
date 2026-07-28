@@ -130,24 +130,94 @@ kernel scope when `moduleOptions.ClusterBarrier == true`.
 
 ## Rule 4 -- Cluster handshake before loop loads
 
-A cluster handshake after each workgroup-scope wait that precedes a
+A cluster handshake around the workgroup barrier that precedes a
 `tensor_load_to_lds`. For every load in a label-/branch-delimited segment, the
-pass walks backward to the nearest preceding `s_barrier_wait -1`; triggers are
-deduplicated by identity so multiple loads sharing the same anchor wait yield
-exactly one handshake.
+pass walks backward to the nearest preceding workgroup `s_barrier_signal -1` --
+this signal is the **trigger**. Triggers are deduplicated by identity so multiple
+loads sharing the same barrier yield exactly one handshake. If no workgroup
+signal is found in the segment, Rule 4 does not apply to that load (there is no
+barrier pair to anchor the cluster wait before).
+
+The handshake is split into two independently-anchored halves:
+
+- **Rule 4(a)** -- the SIGNAL half (`insertRule4ClusterBarrierSignal`).
+- **Rule 4(b)** -- the WAIT half (`insertRule4ClusterBarrierWait`).
+
+They are passed as separate `signalAnchor` / `waitAnchor` arguments to
+`insertClusterBarrierHandshakeBefore`, resolved in this order:
+
+1. The **WAIT anchor** (Rule 4(b)) is the trigger workgroup `s_barrier_signal
+   -1` itself. The cluster `s_barrier_wait -3` is inserted immediately **before**
+   it, so it precedes the whole workgroup barrier pair -- and hence the tensor
+   load.
+2. The **SIGNAL anchor** (Rule 4(a)) is derived by walking backward **from the
+   WAIT anchor** by a configurable cycle lead (see below). Measuring the lead
+   from the wait guarantees the signal lands at or before it.
+
+Rule 3/5 still resolve their own anchors via the workgroup-WAIT finders; their
+conflict guards bridge each wait to its paired signal
+(`findPrecedingWorkgroupBarrierSignalInSegment`) so the identity comparison
+against Rule 4's signal triggers still detects overlap.
+
+Resulting shape around the trigger:
+
+```asm
+    s_barrier_wait -3        // Rule 4(b) cluster wait (before the workgroup pair)
+    s_barrier_signal -1      // trigger workgroup signal (WAIT anchor)
+    s_barrier_wait -1        // workgroup wait
+    ...
+    tensor_load_to_lds
+```
+
+### Signal cycle-lead placement (`kRule4SignalLeadCycles`)
+
+By default the SIGNAL (Rule 4(a)) is planted `kRule4SignalLeadCycles` (default
+**500**) *estimated cycles* earlier than its paired WAIT, so the cluster
+producer starts as early as possible. `findRule4SignalAnchorByCycleLead` walks
+backward **from the WAIT anchor**, consulting a per-instruction cycle map, until
+the estimated cumulative cycle drops at least that far below the wait anchor's
+cycle, and anchors the signal there. The walk is **bounded by the segment**
+(`segBegin`, i.e. the first instruction after the previous label/branch/call): it
+never crosses a control-flow boundary, so the SIGNAL stays on the same path as
+its WAIT and the `signal -3` / `wait -3` pairing stays balanced. If the segment is
+shorter than the requested lead, the signal clamps to the segment start.
+
+The cycle map comes from `computeEstimatedCyclesPerInstruction` (a
+non-annotating query form of `EstimateAsmCyclesPass`). It is only populated for
+the modeled `label_LoopBeginL` unrolled-loop region on Gfx1250; when a trigger
+has no estimate (other arch, outside the loop region, or `kRule4SignalLeadCycles
+<= 0`) Rule 4(a) **falls back** to co-locating the signal with the wait.
 
 The emission is selected by the `kRule4ForceUngatedSignalMode` master switch in
 the `.cpp` (default **on** = mode (c)):
 
 **(c) always-ungated mode** (active) -- for every trigger emit a `WaveIdx`-gated
-`s_barrier_signal -3` **then** a bare `s_barrier_wait -3`; the cluster signal is
-**never** wrapped in an LCL skip branch. `findLiveLoopCounterLCmpUpstream` is
-still consulted: if SIA hoisted a live loop-exit `s_cmp_eq LCL, imm` whose SCC a
-downstream `s_cbranch_scc0 LoopBeginL` consumes, a clone of it is re-emitted
-**after** the bare wait (which has no SCC side effect) to restore that SCC.
+`s_barrier_signal -3` (Rule 4(a)) ahead of a bare `s_barrier_wait -3` (Rule
+4(b)); the cluster signal is **never** wrapped in an LCL skip branch.
+The SCC restore is decided at scan time and **always rides with Rule 4(a)**,
+right after the signal block, so the SCC clobbered by its `WaveIdx s_cmp_eq_u32`
+is rebuilt locally before any downstream consumer (even when the signal leads the
+wait by many cycles). The decision (`anySccWriterInRange` +
+`findLiveRestorableSccCmpUpstream`):
+
+- If **any** instruction in `[signalAnchor, waitAnchor)` already writes SCC, that
+  write masks the clobber before a consumer sees it -- **no restore**.
+- Otherwise scan backward **from the SIGNAL anchor** for a live, safely-clonable
+  SCC producer whose SCC a downstream `s_cbranch_scc*` consumes; if found, a clone
+  of it is re-emitted after the signal block to restore SCC. A producer qualifies
+  only when it (1) writes SCC, (2) is a pure comparator -- **no allocatable (GPR)
+  destination**. Note an SOPC compare (`s_cmp_*`) models its SCC result as an
+  explicit SCC-typed destination, so the test is "no GPR dest", **not** "no dest";
+  arithmetic/logic SCC writers like `s_sub_u32` additionally write a real GPR and
+  are excluded, and
+  (3) has **no source register overwritten** between it and the signal anchor
+  (checked via physical-register overlap), so the clone recomputes the identical
+  SCC. The loop-exit `s_cmp_eq LCL, imm` remains the dominant match.
+
+Rule 4(b) always emits a bare, SCC-neutral wait.
 
 When the switch is **off**, two fallback modes are selected by
-`findLiveLoopCounterLCmpUpstream`:
+`findLiveRestorableSccCmpUpstream`:
 
 **(a) inherited-SCC mode** -- when SIA (typically `ScheduleIterAlg=4`) hoists the
 loop-exit `s_cmp_eq_{u32,i32} LCL, imm` above the anchor, a downstream `cbranch`
@@ -157,13 +227,16 @@ inherited SCC; a clone of the upstream cmp is re-emitted between the inner and
 outer skip labels to rebuild SCC for that downstream cbranch).
 
 **(b) drain-gated mode** -- when no such upstream cmp is live, gate the handshake
-with ASYMMETRIC LCL thresholds: skip the WAIT at `LCL <= pgrValue` and the SIGNAL
-one stage earlier at `LCL <= pgrValue+1` (both lowered by any hoisted LCL
-pre-decrement). The drain iterations -- where the paired `tensor_load_to_lds` is
-disabled -- drop the handshake while keeping `signal -3` / `wait -3` balanced.
+with ASYMMETRIC LCL thresholds: skip the WAIT (Rule 4(b)) at `LCL <= pgrValue`
+and the SIGNAL (Rule 4(a)) one stage earlier at `LCL <= pgrValue+1` (both lowered
+by any hoisted LCL pre-decrement). Mode (b) naturally maps its WAIT gate to
+`waitAnchor` and its SIGNAL gate to `signalAnchor`. The drain iterations -- where
+the paired `tensor_load_to_lds` is disabled -- drop the handshake while keeping
+`signal -3` / `wait -3` balanced.
 
-Shape (mode (c); the `<clone of upstream LCL cmp>` line is emitted only when a
-live upstream cmp exists):
+Shape (mode (c), **co-located** anchors, i.e. the fallback when no cycle lead is
+applied; the `<clone of upstream LCL cmp>` line is emitted only when a live
+upstream cmp exists):
 
 ```asm
     s_cmp_eq_u32 s[sgprWaveIdx], 0                               // inner wave gate
@@ -172,6 +245,19 @@ live upstream cmp exists):
   label_skipCBPreSignal_<HASH_INNER>:
     s_barrier_wait -3                                            // bare cluster wait
     <clone of upstream LCL cmp>                                  // restore SCC (if any)
+```
+
+Shape (mode (c), **separated** anchors, the default when `kRule4SignalLeadCycles`
+places the signal ~N cycles ahead of the wait):
+
+```asm
+    s_cmp_eq_u32 s[sgprWaveIdx], 0                               // inner wave gate  (Rule 4(a))
+    s_cbranch_scc0 label_skipCBPreSignal_<HASH_INNER>
+    s_barrier_signal -3
+  label_skipCBPreSignal_<HASH_INNER>:
+    <clone of upstream LCL cmp>                                  // restore SCC (if any)
+    ...                                                          // ~N cycles of intervening code
+    s_barrier_wait -3                                            // bare cluster wait (Rule 4(b))
 ```
 
 ---
