@@ -147,7 +147,7 @@ installed separately from both hipDNN and TheRock, because of the Python ABI and
 dependency it carries. A provider that embeds an interpreter is not a drop-in kernel source in the sense
 this RFC targets.
 
-This is not a new rule; this codebase has already drawn the line both ways. rocKE's own authoring
+This codebase has already drawn the line both ways. rocKE's own authoring
 toolchain is a Python environment used only at build time, never installed with the shipped kernel, so
 it is absorbed as a build-only adapter inside the HIP kernel provider
 ([Section 9.1](#91-kernel-source-adapters)) rather than shipping as its own provider. A separate,
@@ -165,8 +165,8 @@ hipDNN and TheRock is left to the delivery follow-up RFC ([Section 12](#12-packa
 RFC states the boundary, not the mechanism.
 
 The graded ladder ([Section 5](#5-matching-and-the-umd)) ends at "a full provider" without saying what a
-provider must minimally supply. The floor is the same one hipDNN's existing plugin contract already
-enforces at load time, not a new bar this RFC invents:
+provider must minimally supply, the same floor hipDNN's existing plugin contract already enforces at
+load time:
 
 - **MUST** export the identity and lifecycle entry points every plugin needs: name, version, error
   reporting, and a logging callback.
@@ -186,14 +186,6 @@ enforces at load time, not a new bar this RFC invents:
 Nothing beyond this surface is required. hipDNN does not mandate any particular internal architecture,
 an engine object, a plan builder, or plan classes, inside the provider; the only true requirement is the
 exported contract above.
-
-Out-of-box kernel selection is the UHD's job: given a catalog, it picks one kernel. There is no UKD
-equivalent of MIOpen's Find modes (enumerate every applicable kernel, benchmark it, and pick by measured
-time); that distinction lives one level up, in hipDNN's out-of-box versus tuning paths, not inside the
-descriptor system. A tuning run may ignore the heuristic's suggestion entirely and benchmark every kernel
-in the catalog, or use the suggestion to tune faster by starting from its ranking across engines
-([RFC 0013](0013_Autotune.md)). Exactly how hipDNN uses heuristic output in each path is left to the UHD
-follow-up RFC.
 
 ---
 
@@ -241,14 +233,25 @@ heuristic is what makes dropping in a family of kernels useful, because it ranks
 as an ordered-policy loop: a resolved sequence of heuristic-policy plugins runs in order, and the first
 policy that succeeds wins, supplying the ranked engine list. The order resolves from an environment
 override, then a descriptor attribute, then a built-in default. If every policy declines, the query
-fails outright instead of silently falling back to some hidden order. This is not first-claim-wins by
-registration order, and it is unchanged by this proposal.
+fails outright instead of silently falling back to some hidden order. The top-level mechanism is
+therefore not first-claim-wins by registration order, though the built-in fallback policy does order a
+curated set of named engines first and stable-sort the rest, so two UKD-backed engines that policy
+does not name are left in registration order unless a configuration rule or a custom policy separates
+them. It is unchanged by this proposal.
 
 Choosing between engines is therefore hipDNN's job, not a KDP's or a UHD's, and hipDNN already has
 three mechanisms for it: engine-selection policies, explicit user selection, and auto-tuning. Two
 kernels in different engines are arbitrated by those, whatever their UHDs scored them at internally.
 This proposal does not change the engine-selection problem; it only makes it more visible, because
 more engines become cheap to add.
+
+Out-of-box kernel selection is the UHD's job: given a catalog, it picks one kernel. There is no UKD
+equivalent of MIOpen's Find modes (enumerate every applicable kernel, benchmark it, and pick by
+measured time); that distinction lives one level up, in hipDNN's out-of-box versus tuning paths, not
+inside the descriptor system. A tuning run may ignore the heuristic's suggestion entirely and
+benchmark every kernel in the catalog, or use the suggestion to tune faster
+([RFC 0013](0013_Autotune.md)). Exactly how hipDNN uses heuristic output in each path is left to the
+UHD follow-up RFC.
 
 ---
 
@@ -362,11 +365,11 @@ field's theoretical range; they are whatever the surviving kernels actually have
 field exists in the KMD but every kernel that matched this graph declares `tile_size: 4`, the
 presented "choice" is `[4, 4]`, not a selectable range: one value is not a choice.
 
-Because a knob's value can affect which kernels apply, the catalog is built first, and legal knob
-values are derived from the kernels that survive it, never the other way around. A knob the user
-then sets filters that same catalog before the UHD ranks it: setting `split_k = 4` narrows the
-catalog to kernels whose KMD `split_k` field equals 4, and the rest are never evaluated or ranked
-([Section 10](#10-observability-and-diagnostics) shows where this filtering is visible at runtime).
+Because a knob's value can affect which kernels apply, the catalog is built first and legal knob
+values are derived from the kernels that survive it, never the other way around. A user-set knob then
+restricts that catalog: setting `split_k = 4` keeps only kernels whose KMD `split_k` field equals 4,
+and the UHD's ranking decides among those
+([Section 10](#10-observability-and-diagnostics) shows where this is visible at runtime).
 
 This fits hipDNN's existing knob-discovery shape rather than requiring a new one: today's
 per-engine knob query already takes the operation graph, not just the engine id, and one existing
@@ -375,13 +378,16 @@ workspace-size-limit knob's bounds from the actual convolution problem it is giv
 knob's legal *value set* from a pre-built kernel catalog is the same shape one step further:
 graph-scoped input, narrower output.
 
-**Ordering works on today's API.** Because the catalog is derived from graph details alone, it is
-already built by the time the engine answers applicability, so a knob's legal values are known up
-front and are reported through the existing graph-parameterized knob query. That the user's knob
-values are consumed later, after an engine id is chosen, costs nothing: the UHD ranks the whole
-catalog, and the knob settings then narrow that ranked list to the best-scoring kernel that matches
-the user's choices. Ranking and filtering are independent, so their order does not change the
-result. No new front-end entry point and no change to the existing call order is required.
+**Ordering works on today's API.** The catalog derives from graph details alone, so it exists by the
+time the engine answers applicability and a knob's legal values are known then, reported through the
+existing graph-parameterized knob query. That the user's values are consumed later, after an engine id
+is chosen, costs nothing. A UHD scores each kernel on its own metadata and the problem, independently
+of which other kernels are in the catalog, so restricting the catalog and ranking it commute: the
+highest-scoring kernel that satisfies the knobs is the same either way. An implementation restricts
+first, to avoid scoring candidates it would discard. That independence is a requirement on a UHD, not
+an assumption about one: a scorer that normalized across the catalog or broke ties on the surviving
+set would make selection depend on filtering order, and is out of contract. No new front-end entry
+point and no change to the existing call order is required.
 
 **Autotune.** Because a sweep's values are validated against the same per-graph knob lookup used
 for a manually-set knob, a catalog-filtered value set is inherited by autotune automatically. A
@@ -435,9 +441,9 @@ is not selected against until the model learns it. [Section 16](#16-risks) has t
 and what else counts as breaking.
 
 The KMD is not limited to the fields the UHD ranks on. All per-kernel fields the UHD needs must be in
-the KMD, but the KMD may also carry fields the UHD never reads: values a UDD formula consumes to compute
-per-kernel dispatch detail, such as launch geometry ([Section 6](#6-dispatch-and-workspace)). Carrying
-this detail in the KMD is a legitimate, intended use, not a workaround.
+the KMD, but the KMD may also carry fields the UHD never reads: values a UDD formula consumes to
+compute per-kernel dispatch detail, such as launch geometry
+([Section 6](#6-dispatch-and-workspace)).
 
 ```jsonc
 {
@@ -494,7 +500,7 @@ so it names none of them.
 Because applicability and ranking both key on these `$kernel.*` values, a kernel's identity for matching
 and dispatch purposes is exactly its KMD field values: two kernels with identical metadata and the same
 ABI cannot diverge in applicability or ranking, since nothing distinguishes them to a matcher or the UHD.
-This is a design boundary, not an oversight: if two kernels must behave differently, add a KMD field
+This is a design boundary: if two kernels must behave differently, add a KMD field
 that distinguishes them; a kernel vector should never carry two entries keyed to the same metadata.
 
 ```jsonc
@@ -688,8 +694,14 @@ distinct from variadic *operands*; exact `shape` syntax is in the UMD follow-up.
 a native predicate resolved from the provider's registry (for example a probe into a backing library's
 own support query, whose logic lives in vendor code and cannot be reduced to schema fields), carried as a
 symbol name and typed arguments, never inline code. It is a deliberate last resort, not a routine tool:
-the validated catalog of MIOpen CK convolution and rocKE SDPA applicability was fully expressible with
-the built-ins and needed no custom operation. A file that names a predicate the provider does not ship
+the validated catalog of MIOpen CK convolution and rocKE SDPA applicability needed no custom
+operation. It did rely on a third mechanism between the built-ins and the escape hatch:
+**precomputed fields**, values the schema layer derives once and exposes as ordinary tokens, so a
+matcher compares them instead of re-deriving them. `$q.packed`, `$q.stride_order`, and the classified
+`$sdpa_fwd.mask_mode` ([Section 13.3](#133-encoding-classifymaskmode)) are the examples in this
+document. A precomputed field is declared in the hipDNN schema like any other field and versioned with
+it, so adding one is an additive schema change, not a per-pack extension point. A file that names a
+predicate the provider does not ship
 fails to resolve, so the registry is part of its published contract. The dispatch layer has an analogous
 custom plan ([Section 6](#6-dispatch-and-workspace)); together they form a graded ladder from declarative
 data, to a named escape hatch for a step that needs real C++, to a full provider.
@@ -828,11 +840,9 @@ argument buffer keep this close to hand-written launch cost (see [Section 14.1](
 
 ![The generic dispatch dataflow: a bound symbol table feeds the UDD's formula evaluator and argument resolver](../images/ukd_dispatch_flow.svg)
 
-**Per-kernel dispatch detail via `$kernel.*`.** A UDD is shared by every child kernel in a pack
-([Section 4](#4-descriptor-formats)), so any launch quantity that varies per kernel, not per graph, is
-expressed through `$kernel.*`: the KMD may carry fields the UHD never ranks on for exactly this reason,
-and using them to drive dispatch is a legitimate, intended use of the KMD
-([Section 4](#4-descriptor-formats)).
+**Per-kernel dispatch detail via `$kernel.*`.** A UDD is shared by every child kernel in a pack, so any
+launch quantity that varies per kernel rather than per graph is expressed through `$kernel.*`, reading
+the metadata values that kernel supplies ([Section 4](#4-descriptor-formats)).
 
 rocKE's CTA-geometry heuristics are a concrete instance of the case this answers. Today `num_warps`,
 `block_m_per_warp`, and `tile_size` are the output of measured-threshold branching over the problem
@@ -841,24 +851,25 @@ sweep, not a formula over graph dimensions. That branch tree is exactly what a U
 measured cohort becomes one distinct UKD whose geometry is fixed KMD metadata, and the engine's UHD,
 trained on the same sweep data, replaces the hand-written thresholds. Ranking the catalog picks the
 cohort; the winning UKD's KMD values then carry its geometry into the shared UDD's formulas. Fixed
-per-instance metadata that is not formula-derivable from the graph is exactly what `$kernel.*` is for,
-not a gap the UDD needs another mechanism to reach around. rocKE's own dispatcher already draws this
-line: its `CompileSpec` tile fields are explicitly commented as kernel-internal and excluded from
-selection, and the matcher that selects a kernel never compares them.
+per-instance metadata that is not formula-derivable from the graph is exactly what `$kernel.*` is for.
+rocKE's own dispatcher already treats tiling this way at its own layer: the block-size fields in its
+`CompileSpec` are commented as kernel-internal and excluded from selection, and the matcher that
+selects a kernel never compares them.
 
 One UDD per pack holds within one kernel family, where the argument list is single-sourced across every
 shape and dtype variant that family builds. It does not hold across FMHA families: paged-KV, split-KV
 decode, varlen, and unified-attention builders genuinely differ in tensor count (roughly two to five)
 and in argument shape (extra stride scalars, workspace pointers, presence or absence of Q or O). This is
-a clarification of the existing pack boundary, not a new constraint: a kernel whose ABI differs from its
+a clarification of the existing pack boundary: a kernel whose ABI differs from its
 siblings already belongs in a different pack, with its own UDD.
 
 **One UDD per KDP is the rule.** A pack generalizes its dispatch once and expresses anything
-kernel-specific through per-kernel metadata and expressions over it. Between `$kernel.*` metadata and
-the expression language, there is no dispatch detail a per-UKD UDD would reach that a generalized UDD
-cannot, so a per-UKD UDD reference and a layered UKD-overrides-UDD-default precedence are both
-deliberately excluded. A kernel that genuinely cannot share its pack's dispatch has a different ABI,
-and a differing ABI already means a different pack.
+kernel-specific through per-kernel metadata and expressions over it, so a per-UKD UDD reference and a
+layered UKD-overrides-UDD-default precedence are both deliberately excluded. Every launch quantity
+that varies per kernel, geometry included, is a KMD field a formula reads. The boundary is argument
+*presence*, not argument *value*: an `args_signature` entry can resolve its value conditionally, but
+the entry list itself is fixed for the pack, so a kernel that adds or drops a whole argument slot has
+a different ABI and belongs in a different pack. That is the existing pack rule, not a new limit.
 
 ```jsonc
 {  // one UDD shared by a two-kernel pack; per-kernel geometry comes from $kernel.* metadata
@@ -936,7 +947,7 @@ which sources arrive.
 ## 8. End-to-End Flow
 
 [Sections 2](#2-the-descriptors) through [7](#7-kernel-source) define the descriptors; this section
-walks the path a graph actually takes through them, in the author's own nine-step sequencing, named
+walks the path a graph actually takes through them, named
 against hipDNN's real, already-shipped provider interfaces. As with the rest of this design, no new
 host or plugin-ABI interface is introduced ([Section 3](#3-how-it-works)): everything below happens
 behind `IEngine` and `IPlanBuilder`, the contracts a hand-written engine already implements.
@@ -948,9 +959,11 @@ behind `IEngine` and `IPlanBuilder`, the contracts a hand-written engine already
    start ([Section 3](#3-how-it-works)), so the set of engines this provider offers, and each one's
    declared heuristic (UHD) and metadata schema (KMD), already exists before any graph arrives. A
    later graph reuses what is already loaded instead of reloading it.
-3. **KDPs load to find which matchers must run.** For this engine, the provider loads the KDPs that
-   name it and, from them, the set of matcher ids ([Section 4](#4-descriptor-formats)) its kernels
-   could possibly need for this graph.
+3. **KDPs supply the matcher set to run.** For this engine, the provider takes the KDPs that name it
+   and, from them, the set of matcher ids ([Section 4](#4-descriptor-formats)) its kernels could
+   possibly need for this graph. Matchers load eagerly at provider start alongside the UEDs
+   ([Section 3](#3-how-it-works)), so this step selects from already-loaded state rather than
+   reading from disk per graph.
 4. **Each engine runs a priority-ordered check loop.** Having loaded all of an engine's matchers, the
    provider evaluates them for this graph in priority order: the most commonly used matchers first,
    kernel-level matchers, the ones that read `$kernel.*` tokens, last. This is the same
@@ -989,7 +1002,10 @@ behind `IEngine` and `IPlanBuilder`, the contracts a hand-written engine already
 
 Workspace sizing is queried the same way a hand-written engine is queried,
 `IEngine::getMaxWorkspaceSize(handle, opGraph, engineConfig)`, evaluating the UDD's `workspace_bytes`
-formula over the same bound token state, at any point after step 7 and before execute.
+formula over the bound token state cached at steps 5 and 8. It does not depend on plan build: the call
+carries no execution context, and autotune queries it for every candidate engine, most of which are
+never selected and so never reach step 7 ([RFC 0013](0013_Autotune.md)). An engine that reached step 5
+can answer it.
 
 | Step | Descriptor consumed | hipDNN interface |
 |---|---|---|
@@ -1019,7 +1035,7 @@ sequenceDiagram
     ERM->>Eng: isApplicable(handle, opGraph)
     Eng->>Eng: load UEDs (step 2, eager/cached) + KDPs (step 3)
     Eng->>Eng: priority-ordered UMD check loop: graph-level first, $kernel-level last (step 4)
-    Eng->>Cache: cache per-engine catalog + bound token state, keyed on a provider-computed graph hash (steps 5, 8)
+    Eng->>Cache: cache per-engine catalog + bound token state, keyed on graph-bytes hash + device identity (steps 5, 8)
     Eng-->>ERM: bool (true only if the catalog is non-empty)
     ERM-->>FE: candidate engine ids
 
@@ -1048,7 +1064,10 @@ serialized bytes, which the provider receives on every call. That is enough. The
 and the bound token state from step 8 are cached on the provider's handle, keyed by a hash the
 provider computes over the serialized graph bytes **before deserializing them**, with a `memcmp`
 against the cached bytes on a hash hit to confirm the graph is byte-for-byte identical rather than
-merely hash-equal. Hashing raw bytes ahead of deserialization keeps the lookup cheap: the expensive
+merely hash-equal. The key also carries a device identity, because the bound token state resolves
+`$device.*` and a handle can be rebound to a stream on another device; a graph-only key would serve a
+catalog and geometry computed for the wrong device. Hashing raw bytes ahead of deserialization keeps
+the lookup cheap: the expensive
 work, deserializing the graph and running the matchers, happens only on a miss, and a hit skips
 straight to the cached catalog and token state. The provider already holds other per-session state on
 its handle the same way. No hipDNN interface change is required, and no correlation id or
@@ -1212,21 +1231,12 @@ The provider surfaces:
   smaller catalog. Disabled descriptors of all three kinds are reported in the load diagnostics
   like any other exclusion.
 
-- **Knob-flow visibility**: a knob's path from input to effect is itself observable, since static
-  ownership ([`ukd_concepts.svg`](../images/ukd_concepts.svg)) does not show configuration flow.
-  The load and why-not diagnostics above surface each step in it:
-
-  | Step | What happens | What sees it |
-  |---|---|---|
-  | KMD field declared | The engine's KMD declares a typed field (for example `split_k`) | Every UKD in the engine; matchers and the UHD via `$kernel.split_k` |
-  | Catalog built | Matching narrows to the kernels that pass this graph ([Section 5](#5-matching-and-the-umd)) | The engine's per-graph catalog |
-  | Knob value derived | The field's legal values become whatever the surviving kernels actually declare | Reported to the caller as the knob's current constraint |
-  | User sets knob | A user-set value filters the catalog to kernels whose field matches it | Non-matching kernels are dropped before the UHD ranks anything |
-  | UHD ranks | The UHD scores the filtered catalog against the bound token state (`$kernel`, `$graph`, `$device`, node and tensor attributes) | The ranked list and its top choice |
-  | UDD binds | The chosen UKD's field values are read by the UDD's dispatch expressions as `$kernel.*` | The generic launch |
-
-  This reuses the same load-time and why-not tooling described above; it is not a separate
-  mechanism layered on top.
+- **Knob-flow visibility**: a knob's path from input to effect is observable at every step, since
+  static ownership ([`ukd_concepts.svg`](../images/ukd_concepts.svg)) does not show configuration
+  flow. The load and why-not diagnostics report which KMD field a knob came from, which catalog
+  entries its value filtered out, and what the UHD then ranked
+  ([Section 4](#4-descriptor-formats) defines the rule,
+  [Section 8](#8-end-to-end-flow) places it in the flow).
 
 These make a descriptor-backed kernel as debuggable as hand-written C++, and are what let an operator
 trust a system whose behavior lives in data. The tooling that authors and operators use to work with
@@ -1319,7 +1329,7 @@ attribute values) followed by `select()` (does any prebuilt kernel in the catalo
 UKDs whose declared metadata actually matches, expresses part of `select()`. A graph can clear every
 matcher criterion and still have no applicable kernel, because nothing in the pack's kernel vector
 declares the shape it produced. That is not a bug in the matcher; it is the catalog carrying its share
-of the contract, and the example below (§12.4, case C) shows it happening.
+of the contract, and the example below (§13.4, case C) shows it happening.
 
 ### 13.2 The Matcher: the Real Gate Set
 
@@ -1333,7 +1343,8 @@ of the contract, and the example below (§12.4, case C) shows it happening.
      "operands": {
        "Q": "$q", "K": "$k", "V": "$v",
        // representative subset of 23 optional operands the real dispatcher rejects on presence;
-       // one per category, full 23-name list is r1-sdpa-conditions.md §2
+       // one per category; the full 23 are the fields swept by usesUnsupportedTensor
+       // in SdpaGraphAdapter.cpp
        "AttnMask":  "$attn_mask?",   // additive attention bias
        "SeqLenQ":   "$seq_len_q?",   // varlen
        "DropSeed":  "$drop_seed?",   // dropout machinery
@@ -1396,8 +1407,8 @@ of the contract, and the example below (§12.4, case C) shows it happening.
     //     attribute and a tensor-uid reference); both unset accepts, either set declines ---
     {"none_of": ["$sdpa_fwd.attn_scale_value", "$sdpa_fwd.scale_tensor_uid"]},
 
-    // --- gate #21: the mask-mode classifier's legal outputs, see §12.3. "sliding_window" is a
-    //     LEGAL value here; the matcher does not know no catalog kernel declares it, see §12.4 ---
+    // --- gate #21: the mask-mode classifier's legal outputs, see §13.3. "sliding_window" is a
+    //     LEGAL value here; the matcher does not know no catalog kernel declares it, see §13.4 ---
     {"in": ["$sdpa_fwd.mask_mode", ["none", "causal_top_left", "causal_bottom_right", "sliding_window"]]}
   ]}
 }
@@ -1410,7 +1421,7 @@ each `and`ed in as `{"!": [{"value_or_default": ["$sdpa_fwd.generate_stats", fal
 `{"<=": [{"value_or_default": ["$sdpa_fwd.dropout_probability", 0.0]}, 0.0]}`; `max_seq_len_kv` (gate
 #6) is a third `none_of` singleton, `{"none_of": ["$sdpa_fwd.max_seq_len_kv"]}`. All 21 gates land in
 one of the shapes already written out above: presence (`none_of`), equality/membership (`==`, `in`),
-capture reuse (`shape`), or the mask-mode classifier (§12.3). None needed a custom operation.
+capture reuse (`shape`), or the mask-mode classifier (§13.3). None needed a custom operation.
 
 ### 13.3 Encoding `classifyMaskMode`
 
@@ -1462,7 +1473,7 @@ named modes is a value derivation the pure-boolean criteria language does not ha
 adding one (`cond` above) is one option. The better fit, and the one this RFC recommends, is the same
 resolution D1 already commits to for layout: `mask_mode` becomes a **precomputed field**, `$sdpa_fwd.mask_mode`,
 computed once by the schema layer exactly the way `stride_order` and `packed` are, so every matcher
-compares it (`==`, `in`, as in §12.2) instead of re-deriving it. Either path keeps this out of the
+compares it (`==`, `in`, as in §13.2) instead of re-deriving it. Either path keeps this out of the
 registry-resolved custom-operation escape hatch ([Section 5](#5-matching-and-the-umd)); the honest
 finding is that the criteria language's built-ins fully cover *deciding*, and a small, generically
 useful addition (a precomputed derived field, the same shape D1 already asked for) covers *producing
@@ -1476,20 +1487,20 @@ BHSD, `batch=2`, `num_heads=num_kv_heads=16`, `head_size=128`, `seqlen_q=seqlen_
 alibi/padding, dropout and scale unset. They differ only in the field named in each case.
 
 **Case A: accept.** `causal_mask=true` (all other mask fields unset). `classifyMaskMode` returns
-`causal_top_left`; every §12.2 criterion passes; `translate()` builds a problem with
-`mask_mode="causal_top_left"`. `select()` then finds a catalog entry (§12.6's first sibling UKD)
+`causal_top_left`; every §13.2 criterion passes; `translate()` builds a problem with
+`mask_mode="causal_top_left"`. `select()` then finds a catalog entry (§13.6's first sibling UKD)
 whose declared `head_size=128`, `dtype="bf16"`, `mask_mode="causal_top_left"` match exactly.
 `isApplicable` returns true.
 
 **Case B: matcher-stage decline.** Same graph, but the caller also supplies an additive attention bias
-(`attn_mask_tensor_uid` set, i.e. `$attn_mask` bound). `none_of` in §12.2's gate #4 fails the instant
+(`attn_mask_tensor_uid` set, i.e. `$attn_mask` bound). `none_of` in §13.2's gate #4 fails the instant
 that operand is present, before mask mode, dtype, or layout are even considered; `translate()` returns
 nullopt. `select()` never runs. This is one instance of the "none of a large optional set" shape
-(§12.2); binding any other one of the 23 (varlen seqlens, dropout seed, paged-KV tables, a block mask,
+(§13.2); binding any other one of the 23 (varlen seqlens, dropout seed, paged-KV tables, a block mask,
 a sink token, FP8 descale/scale, a stats/LSE/max/sum_exp output, an RNG dump, an FP8 amax output)
 declines the same way, at the same gate.
 
-The graph-level flag (`$graph.override_shape`, §12.2's gate #1) declines the identical way: if the
+The graph-level flag (`$graph.override_shape`, §13.2's gate #1) declines the identical way: if the
 caller enables execute-time override shapes, `translate()` declines before any tensor is even bound,
 because a prebuilt kernel serves one fixed compile-time shape and an override shape can diverge from it.
 This is the third decline shape distinct from a tensor-presence or a tri-state check: a plain fact about
@@ -1497,15 +1508,15 @@ the graph itself, outside both the tensor and attribute namespaces, proving `$gr
 topology counts.
 
 **Case C: catalog-stage decline.** Same graph, but instead of `causal_mask`, the caller sets
-`left_bound=64, right_bound=64` (a finite window on both sides). Every §12.2 criterion still passes:
-this is not a contradiction, and `left==-1 && right==0` does not hold, so per §12.3's branch 6,
+`left_bound=64, right_bound=64` (a finite window on both sides). Every §13.2 criterion still passes:
+this is not a contradiction, and `left==-1 && right==0` does not hold, so per §13.3's branch 6,
 `classifyMaskMode` returns `"sliding_window"`, a legal member of the `in` list at gate #21.
 `translate()` **accepts**, building a problem with `mask_mode="sliding_window"`. `select()` then filters
-the pack's catalog for a kernel declaring `mask_mode="sliding_window"`: neither sibling UKD in §12.6
+the pack's catalog for a kernel declaring `mask_mode="sliding_window"`: neither sibling UKD in §13.6
 declares it (both declare `causal_top_left`), and no other kernel in this KDP does either. `select()`
 returns nullopt for want of a matching catalog entry, not because any criterion failed. `isApplicable`
 is false, and the reason lives entirely in the kernel vector's declared metadata, invisible to anyone
-reading only the matcher. This is why §12.1 calls the catalog part of the contract: a KDP author who
+reading only the matcher. This is why §13.1 calls the catalog part of the contract: a KDP author who
 adds a `sliding_window`-capable kernel later needs no matcher change at all, only a new entry in
 `kernelDescriptors`.
 
@@ -1513,9 +1524,11 @@ adds a `sliding_window`-capable kernel later needs no matcher change at all, onl
 
 The launch geometry rocKE actually uses is not a formula over graph dims; it is the output of
 measured-threshold branching over the problem shape (`_select_2d_num_warps`,
-`kernels/common/attention_unified.py:719-1003`), fixed per kernel once built, and the dispatcher already
-treats it as **not part of selection** (`AotInstance.hpp:70-73`: "kernel-internal tiling, NOT part of
-selection"). That is exactly KMD territory, not a UDD formula to derive: each measured cohort becomes
+`kernels/common/attention_unified.py:719-948`), fixed per kernel once built. Its dispatcher already draws
+the same line for the tiling it does carry, marking its `CompileSpec` block-size fields
+"kernel-internal tiling and are NOT part of selection" (`AotInstance.hpp:65-67`); `num_warps` and
+`tile_size` are the analogous quantities one layer up, in the kernel build spec. That is exactly KMD
+territory, not a UDD formula to derive: each measured cohort becomes
 its own UKD, carrying its own `num_warps`, `block_m_per_warp`, `tile_size` as ordinary metadata, and the
 UDD's grid/block formulas read those values through `$kernel.*` instead of hard-coding a thread count:
 
@@ -1559,7 +1572,7 @@ UDD's grid/block formulas read those values through `$kernel.*` instead of hard-
 already describes for `$kernel.*` in a UDD. What is **not** a formula, and is not meant to be, is which
 `(num_warps, block_m_per_warp, tile_size)` triple a given problem shape should use; that selection stays
 UHD territory, trained on the same sweeps rocKE's threshold branches were tuned against. One UDD, shared
-by the whole pack, now expresses geometry for every kernel whose metadata differs; §12.6 shows two such
+by the whole pack, now expresses geometry for every kernel whose metadata differs; §13.6 shows two such
 kernels sharing it.
 
 ### 13.6 The Engine, Metadata, and Kernel Vector
@@ -1579,9 +1592,9 @@ kernels sharing it.
 {
   "schema": "hipdnn.kdp/v1",
   "arch":      ["gfx942"],
-  "matchers":  ["244cbb5c-b831-462f-b1ac-0c649f27dc45"],   // §12.2's matcher
+  "matchers":  ["244cbb5c-b831-462f-b1ac-0c649f27dc45"],   // §13.2's matcher
   "engine":    "1bd3d4c3-84bc-4b9b-a375-e8e14ebd4659",
-  "dispatch":  "03739ce1-c971-492b-a403-5872b11f3c18",     // §12.5's UDD, shared by both kernels below
+  "dispatch":  "03739ce1-c971-492b-a403-5872b11f3c18",     // §13.5's UDD, shared by both kernels below
   "kernelDescriptors": [
     {
       "schema": "hipdnn.ukd/v1",
@@ -1604,9 +1617,9 @@ kernels sharing it.
       "priority":  100
     }
     // both kernels share every matcher, the engine, and the UDD above; they differ only in
-    // kernel_source.symbol and the four measured-cohort metadata values, matching §12.5's point
+    // kernel_source.symbol and the four measured-cohort metadata values, matching §13.5's point
     // that geometry is per-kernel data, not per-kernel dispatch code. A "sliding_window" kernel
-    // belongs in this same vector, as a third entry, with no matcher change (§12.4, case C).
+    // belongs in this same vector, as a third entry, with no matcher change (§13.4, case C).
   ]
 }
 ```
@@ -1615,20 +1628,20 @@ kernels sharing it.
 
 | Hand-written today | Becomes | In this example |
 |---|---|---|
-| `isApplicable` = allowlist + catalog lookup | UMD `criteria` (§12.2) then KDP `kernelDescriptors` (catalog) | two stages, §12.1 |
-| 23-tensor `usesUnsupportedTensor` sweep | `none_of` over the optional operand set | gate #4, §12.2 |
-| graph-level `is_override_shape_enabled` | `$graph.override_shape` | gate #1, §12.4 |
-| tri-state UNSET-declines (`compute_data_type`) | `==` against the one accepted value | gate #10, §12.2 |
-| tri-state UNSET-accepts (`mma_core_mode`) | `==` against `UNSET` | gate #11, §12.2 |
-| no-UNSET-enumerator (`implementation`) | `in` over the accepted values | gate #12, §12.2 |
-| `classifyMaskMode`'s contradiction check | `!(and(...))` over the two deprecated bools | gate #21, §12.3 |
-| `classifyMaskMode`'s 5-way classification | a precomputed `$sdpa_fwd.mask_mode` field | §12.3 verdict |
-| `inferLayout` + cross-tensor layout equality | `$q.packed`/`$q.stride_order` convenience fields | gate #17, §12.2 |
-| cross-tensor dim equality (gates #13-#16) | reused capture names in `shape` | §12.2 |
-| catalog existence + `satisfies()` match | the KDP's `kernelDescriptors` metadata | §12.6, case C |
-| measured-threshold `num_warps`/`block_m_per_warp`/`tile_size` | per-kernel KMD metadata | §12.5, §12.6 |
-| grid-symbol table + hard-coded thread count | UDD `grid`/`block` formulas over `$kernel.*` | §12.5 |
-| argument wiring | UDD `args_signature[].source` | §12.5 |
+| `isApplicable` = allowlist + catalog lookup | UMD `criteria` (§13.2) then KDP `kernelDescriptors` (catalog) | two stages, §13.1 |
+| 23-tensor `usesUnsupportedTensor` sweep | `none_of` over the optional operand set | gate #4, §13.2 |
+| graph-level `is_override_shape_enabled` | `$graph.override_shape` | gate #1, §13.4 |
+| tri-state UNSET-declines (`compute_data_type`) | `==` against the one accepted value | gate #10, §13.2 |
+| tri-state UNSET-accepts (`mma_core_mode`) | `==` against `UNSET` | gate #11, §13.2 |
+| no-UNSET-enumerator (`implementation`) | `in` over the accepted values | gate #12, §13.2 |
+| `classifyMaskMode`'s contradiction check | `!(and(...))` over the two deprecated bools | gate #21, §13.3 |
+| `classifyMaskMode`'s 5-way classification | a precomputed `$sdpa_fwd.mask_mode` field | §13.3 verdict |
+| `inferLayout` + cross-tensor layout equality | `$q.packed`/`$q.stride_order` convenience fields | gate #17, §13.2 |
+| cross-tensor dim equality (gates #13-#16) | reused capture names in `shape` | §13.2 |
+| catalog existence + `satisfies()` match | the KDP's `kernelDescriptors` metadata | §13.6, case C |
+| measured-threshold `num_warps`/`block_m_per_warp`/`tile_size` | per-kernel KMD metadata | §13.5, §13.6 |
+| grid-symbol table + hard-coded thread count | UDD `grid`/`block` formulas over `$kernel.*` | §13.5 |
+| argument wiring | UDD `args_signature[].source` | §13.5 |
 | module load and launch | the generic launcher | `kernel_source: kpack` paired with the UDD |
 
 The generic launcher runs either sibling kernel with no SDPA-specific code, decline is handled the same
@@ -1638,7 +1651,6 @@ This descriptor set is what the phased delivery ([Section 14](#14-phased-deliver
 pieces land and are used to implement SDPA for rocKE as the first real target, and the existing
 hand-written engine is replaced by its descriptor-backed equivalent over time.
 
----
 ---
 
 ## 14. Phased Delivery
@@ -1822,8 +1834,11 @@ two ways:
   the same contract every other selection in this design uses. A bare UKD id could not fulfil it
   anyway, since a UKD carries no matcher and no dispatch of its own.
 
-Either way the stage resolves to an engine, whose own heuristic then ranks that engine's applicable
-kernels and picks one, exactly as a single UKD is chosen within an engine on the base path. Because a
+Either way the stage resolves to one engine, whose own heuristic then ranks that engine's applicable
+kernels and picks one, exactly as a single UKD is chosen within an engine on the base path. When a
+stage's `criteria` or `candidates` leave more than one engine qualifying, that is ordinary
+cross-engine arbitration and is resolved the same way as anywhere else in hipDNN
+([Section 2](#2-the-descriptors)); a composite introduces no stage-level ranking of its own. Because a
 resolved stage may itself be a multi-step program
 ([Section 15.1](#151-several-kernels-for-one-operation)), the composite's plan is the concatenation of
 its stages' programs, with each stage's intermediates remapped into the composite's buffer set.
@@ -2001,9 +2016,9 @@ follow-up RFCs rather than solved now.
   selection. The real risk is that the matcher a removed UKD relied on may no longer be correct once
   the kernel is gone, but that is a general risk of any change, not specific to removal; over-claiming
   support is always a bug. You should not remove a shared descriptor another pack still references,
-  and if you do, it is caught rather than silent: the orphan fails tests at several layers and shows
-  up at load as an error in the diagnostics
-  ([Section 10](#10-observability-and-diagnostics)), in CI and at runtime alike.
+  and if you do, it is caught rather than silent: the dangling reference fails the load-time
+  cross-reference validation ([Section 10](#10-observability-and-diagnostics)), which quarantines the
+  orphaned pack and names the missing id, in CI and at runtime alike.
 
   Two removal cases are deliberately not specified here. A serialized plan that has baked in a removed
   id is a future concern: plan serialization for the generic ingestor does not exist yet, and how it
@@ -2114,6 +2129,12 @@ choices; none is a dependency.
   Launch and read by later ones; workspace size is the sum of a program's regions.
 - **Engine:** a named group of kernels with a stable identity; hipDNN selects among engines, then a
   UHD selects a kernel within the chosen engine.
+- **Catalog:** the set of an engine's kernels that pass every matcher for one graph, built during the
+  applicability query and cached for that graph. The UHD ranks it, knobs restrict it, and it is what
+  "applicable" means: a non-empty catalog ([Section 8](#8-end-to-end-flow)).
+- **Bound token state:** the field values the match sequence binds for one graph (`$kernel`, `$graph`,
+  `$device`, node attributes, tensor fields), cached alongside the catalog so matching, ranking, and
+  dispatch all read them without recomputing ([Section 8](#8-end-to-end-flow)).
 - **knobs:** author-exposed, user-controllable tuning parameters a UED declares (name, type, default,
   constraint).
 - **Behavior / numerical notes:** hipDNN's existing per-engine annotations that a UED carries; behavior
