@@ -37,6 +37,9 @@ concurrency:
 jobs:
   patch:
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: read
     outputs:
       pr_number: ${{ steps.pr-check.outputs.pr }}
     steps:
