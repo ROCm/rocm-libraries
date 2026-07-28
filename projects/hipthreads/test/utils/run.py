@@ -66,7 +66,7 @@ def main():
 
     # Run the command line with the given environment in the execution directory.
     #
-    # A hipThreads test can hang (e.g. a hip::thread whose persistent scheduler
+    # A hipThreads test can hang (e.g. a hip::wthread whose persistent scheduler
     # never reaches the state join() waits for). Without a timeout, one hung test
     # would block the whole lit run until the CI job's global timeout, cancelling
     # every later test. So we run the child in its own process group and kill the

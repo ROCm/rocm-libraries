@@ -23,7 +23,7 @@ int main(int, char**)
 {
   ::std::counting_semaphore<> s(2);
 
-  hip::thread t = support::make_test_thread([&](){
+  hip::wthread t = support::make_test_thread([&](){
     s.acquire();
   });
   t.join();

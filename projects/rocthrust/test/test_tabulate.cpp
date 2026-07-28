@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
  *  limitations under the License.
  */
 
+#include <thrust/detail/libcxx_wrapper/std/__functional/identity.h>
 #include <thrust/functional.h>
 #include <thrust/iterator/discard_iterator.h>
 #include <thrust/iterator/retag.h>
@@ -103,34 +104,6 @@ TYPED_TEST(TabulateVectorTests, TestTabulateSimple)
   ASSERT_EQ(v, ref);
 }
 
-template <class OutputType>
-struct nonconst_op
-{
-  THRUST_HIP_FUNCTION
-  OutputType operator()(size_t idx)
-  {
-    return (OutputType) (idx >= 3);
-  }
-};
-
-TYPED_TEST(TabulateTests, TestTabulateSimpleNonConstOP)
-{
-  using Vector = typename TestFixture::input_type;
-  using T      = typename Vector::value_type;
-
-  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
-
-  Vector v(5);
-
-  thrust::tabulate(v.begin(), v.end(), nonconst_op<T>());
-
-  ASSERT_EQ(v[0], T(0));
-  ASSERT_EQ(v[1], T(0));
-  ASSERT_EQ(v[2], T(0));
-  ASSERT_EQ(v[3], T(1));
-  ASSERT_EQ(v[4], T(1));
-}
-
 TYPED_TEST(TabulatePrimitiveTests, TestTabulate)
 {
   using T = typename TestFixture::input_type;
@@ -171,4 +144,32 @@ TEST(TabulateTests, TestTabulateToDiscardIterator)
   }
 
   // nothing to check -- just make sure it compiles
+}
+
+template <typename OutputType>
+struct nonconst_op
+{
+  THRUST_HIP_FUNCTION
+  OutputType operator()(size_t idx)
+  {
+    return (OutputType) (idx >= 3);
+  }
+};
+
+TYPED_TEST(TabulateTests, TestTabulateSimpleNonConstOP)
+{
+  using Vector = typename TestFixture::input_type;
+  using T      = typename Vector::value_type;
+
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  Vector v(5);
+
+  thrust::tabulate(v.begin(), v.end(), nonconst_op<T>());
+
+  ASSERT_EQ(v[0], 0);
+  ASSERT_EQ(v[1], 0);
+  ASSERT_EQ(v[2], 0);
+  ASSERT_EQ(v[3], 1);
+  ASSERT_EQ(v[4], 1);
 }

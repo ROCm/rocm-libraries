@@ -75,7 +75,7 @@ void f()
 int main(int, char**)
 {
     m.lock();
-    ::std::vector<hip::thread> v;
+    ::std::vector<hip::wthread> v;
     for (int i = 0; i < 5; ++i)
         v.push_back(support::make_test_thread(f));
     hip::this_thread::sleep_for(ms(250));
