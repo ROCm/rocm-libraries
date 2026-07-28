@@ -1926,6 +1926,10 @@ def _select_gfx942_flash_ring_depth(problem: UnifiedAttentionProblem) -> int:
 def _enable_gfx942_flash_k_sliced_ldsseq(problem: UnifiedAttentionProblem) -> bool:
     if not _enable_gfx942_flash_k_sliced_ring(problem):
         return False
+    # LdsSeq is a depth-3 slot layout (its maps reference slot 2); it is undefined
+    # for the depth-2 ring (fp16 D128). Don't enable it there even if the env asks.
+    if _select_gfx942_flash_ring_depth(problem) != 3:
+        return False
     env = __import__("os").environ.get("HIPDNN_GFX942_K_LDSSEQ", "").strip().lower()
     return env in ("1", "on", "enable", "enabled", "yes", "true", "ck")
 

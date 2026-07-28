@@ -697,6 +697,13 @@ class UnifiedAttention2DTiledSpec:
                 )
         if self.use_k_sliced_ldsseq and not self.use_k_sliced_ring:
             raise ValueError("use_k_sliced_ldsseq requires use_k_sliced_ring")
+        if self.use_k_sliced_ldsseq and self.ring_depth != 3:
+            # The CK LdsSeq slot maps are 3-slot layouts; they are undefined for
+            # the depth-2 ring (only slots {0, 1} exist).
+            raise ValueError(
+                f"use_k_sliced_ldsseq requires ring_depth == 3 "
+                f"(got {self.ring_depth})"
+            )
         if self.use_q_direct_global:
             if not (self.use_mfma_32x32x8 and self.use_transposed_qk_32x32):
                 raise ValueError("use_q_direct_global currently targets transposed-x8")
@@ -3986,9 +3993,15 @@ def build_unified_attention_2d_tiled(
                     prefetch = RING_DEPTH - 1
 
                     def _kslot(group_idx: int) -> int:
-                        if K_SLICED_LDSSEQ and k_groups == 4:
+                        # The CK LdsSeq maps are 3-slot layouts (they reference
+                        # slot 2), so they are only valid for the depth-3 ring.
+                        # Depth-2 has only slots {0, 1}; returning slot 2 would
+                        # index past the 2-slot K_lds allocation (out-of-bounds LDS
+                        # -> corruption). Depth-2 uses the plain modulo map, which
+                        # respects K_SLICE_SLOTS. (Guarded again in __post_init__.)
+                        if K_SLICED_LDSSEQ and RING_DEPTH == 3 and k_groups == 4:
                             return (1, 2, 0, 1)[group_idx]
-                        if K_SLICED_LDSSEQ and k_groups == 2:
+                        if K_SLICED_LDSSEQ and RING_DEPTH == 3 and k_groups == 2:
                             return (1, 2)[group_idx]
                         return group_idx % K_SLICE_SLOTS
 
