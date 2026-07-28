@@ -454,7 +454,7 @@ void runMaskCartesianCase(const SdpaMaskCartesianParams& params)
 
 const std::vector<SdpaMaskCartesianParams>& maskCartesianCases()
 {
-    static const std::vector<SdpaMaskCartesianParams> cases = {
+    static const std::vector<SdpaMaskCartesianParams> s_cases = {
         {/*topLeft=*/true, /*skvSmaller=*/true, -1, 0, "CausalTopLeftSmallerSkv"},
         {/*topLeft=*/true, /*skvSmaller=*/false, -1, 0, "CausalTopLeftLargerSkv"},
         {/*topLeft=*/false, /*skvSmaller=*/true, -1, 0, "CausalBottomRightSmallerSkv"},
@@ -464,7 +464,7 @@ const std::vector<SdpaMaskCartesianParams>& maskCartesianCases()
         {/*topLeft=*/false, /*skvSmaller=*/true, 2, 1, "SlidingBottomRightSmallerSkv"},
         {/*topLeft=*/false, /*skvSmaller=*/false, 2, 1, "SlidingBottomRightLargerSkv"},
     };
-    return cases;
+    return s_cases;
 }
 
 std::string maskCartesianName(const ::testing::TestParamInfo<SdpaMaskCartesianParams>& info)
