@@ -67,11 +67,12 @@ This RFC covers three things and calls out a fourth:
    knobs, the KMD variant fields, UKD metadata, and the KDP collection relate
    ([Section 6](#6-selection-group-membership-ued-kmd-ukd-and-kdp)).
 4. **The engine-selection relationship** — how kernel-level selection fits under hipDNN's existing
-   engine-selection heuristic ([RFC 0007](0007_EngineSelectionHeuristicsFramework.md)), and the idea
-   of surfacing a predicted figure of merit (estimated TFLOPS) up to that level
-   ([Section 11](#11-engine-selection-interplay-and-estimated-tflops)). We propose keeping the ABI
-   changes for that in a coordinated follow-up, but sketch it here so the UHD schema does not
-   foreclose it.
+   engine-selection heuristic ([RFC 0007](0007_EngineSelectionHeuristicsFramework.md)): applicability
+   **bubbles up** before engines are ranked; the tooling produces **two** heuristics (a cheap engine-level
+   performance estimate and the fine-grained config UHD); and **two** policies (quick vs. thorough)
+   consume them, with a rank-ordering fallback ([Section 11](#11-engine-selection-interplay-and-estimated-tflops)).
+   The policy/ABI changes stay a coordinated [RFC 0007](0007_EngineSelectionHeuristicsFramework.md)
+   follow-up; this RFC just supplies the heuristics and keeps the schema from foreclosing them.
 
 It also describes the **automated pipeline** that benchmarks the compile-time build-config (variant)
 space and emits the model plus the pack's descriptors from one source of truth
@@ -91,10 +92,19 @@ levels, and this RFC lives entirely at the lower one. They must not be conflated
 
 A UHD is the **kernel-selection heuristic**. It is part of the generic provider that
 [RFC 0017](0017_UniversalKernelDescriptor.md) introduces; it is **not** a new host interface and
-**not** a policy plugin under [RFC 0007](0007_EngineSelectionHeuristicsFramework.md). Engine selection
-is unchanged by this RFC. The one place the two levels touch is
-[Section 11](#11-engine-selection-interplay-and-estimated-tflops): a UHD's predicted score could be
-lifted to inform engine selection, but that is an additive, separately-gated extension.
+**not** a policy plugin under [RFC 0007](0007_EngineSelectionHeuristicsFramework.md). But the two levels
+are **not** cleanly one-after-the-other, and this is a correction to earlier drafts:
+
+- **Applicability bubbles up first.** Before engine selection can rank anything, it must know which
+  engines even apply. For a descriptor engine, "do I apply?" is the **matcher (UMD) pass** at the
+  descriptor layer; that result **bubbles up** so non-viable engines are ruled out *before* the first
+  plugin-policy layer ranks the survivors. So the descriptor/UHD layer runs (at least for applicability)
+  *ahead of* engine selection, not strictly after it.
+- **The UHD's predictions feed engine selection.** The generation tooling produces a cheap engine-level
+  **expected-performance** estimate and the fine-grained config UHD; engine-selection policies consume
+  those to rank engines *by predicted performance* ([Section 11](#11-engine-selection-interplay-and-estimated-tflops)).
+  The policies themselves remain [RFC 0007](0007_EngineSelectionHeuristicsFramework.md)'s territory; this
+  RFC provides the heuristics they consult.
 
 **In scope:** the UHD schema; ranking semantics over a pack's matched UKDs; selection-group membership
 (the UED owns the UHD and KMD; a KDP joins the engine) and how UED runtime knobs / KMD compilation
@@ -665,13 +675,57 @@ for a hot in-tree op, that op may *additionally* be built via the `lgbm_to_c` op
 
 ## 11. Engine Selection Interplay and Estimated TFLOPS
 
-This is the fourth item from the brief and the one that reaches beyond the kernel level.
+This is the fourth item from the brief and the one that reaches beyond the kernel level. It is also
+where two refinements land: **applicability bubbles up before ranking**, and the tooling produces **two**
+heuristics that engine-selection policies consume in **two** ways.
 
-**The relationship (unchanged).** Kernel selection (UHD) runs *inside* an engine, *after* engine
-selection ([RFC 0007](0007_EngineSelectionHeuristicsFramework.md)) has already chosen that engine. A
-UHD is not a [RFC 0007](0007_EngineSelectionHeuristicsFramework.md) policy and does not participate in
-the outer loop. Today rocKE's applicability (`isApplicable`) is a yes/no gate; the engine-selection
-heuristic then orders engines by a static policy that does not know rocKE's *predicted performance*.
+**Applicability bubbles up first.** Engine selection cannot rank engines it hasn't ruled out. For a
+descriptor engine, applicability is the **matcher (UMD) pass**; that result bubbles up so the engine is
+excluded *before* the first plugin-policy layer ranks the rest. So the descriptor/UHD layer runs (for
+applicability, and optionally for scoring) *ahead of* engine selection — not strictly after it. Today
+rocKE's `isApplicable` is that yes/no gate; what changes is that the same layer can also report a
+*predicted performance*, so the policy can order engines by merit instead of a static list.
+
+### 11.1 Two heuristics the tooling produces
+
+Per engine, the generation tooling ([Section 13](#13-model-generation-pipeline)) emits **two** models,
+both predicting **absolute** performance so they are comparable across engines:
+
+| | Model | Signature | Cost | Role |
+|---|---|---|---|---|
+| **A** | **Engine performance estimate** | `f(graph) → expected performance of the package` | cheap (no config enumeration) | feeds the *quick* policy's engine ranking |
+| **B** | **Config UHD** (this RFC's UHD) | `f(graph) → best config/kernel + its predicted performance` | full per-candidate | picks the kernel *and* gives the accurate cross-engine number |
+
+A is the coarse proxy; B both selects the kernel and yields the better figure of merit. Both live on the
+UED (engine-level). **OPEN:** is A a distinct trained model, or derived from B as the max predicted score
+over its candidates? (Distinct is cheaper for the quick policy since it skips enumeration; derived is one
+fewer model to train.) And what to name A — a working label is the *engine performance estimate*, kept
+distinct from the *UHD* (config selector).
+
+### 11.2 Two engine-selection policies (RFC 0007) that consume them
+
+The policies live in [RFC 0007](0007_EngineSelectionHeuristicsFramework.md); this RFC only supplies what
+they read. Two modes:
+
+- **Quick policy.** Rank applicable engines by **A** (expected performance); pick the winner; if the
+  winner has a config UHD (**B**), run it to pick the kernel. Only the winner drills down, so losers are
+  never scored at the kernel level. Engines with no descriptor layer (e.g. MIOpen) contribute their
+  **high-level** estimate for the ranking and, if they win, use their **own** internal kernel selection —
+  they never touch B.
+- **Thorough policy (longer-running).** Run **B** for every applicable engine that has it (best config +
+  its predicted perf), fall back to **A** for engines that don't, then compare the predicted performance
+  **across** engines and pick the global best (engine + config). More work, more accurate.
+
+Both mix "engines with B" and "engines with only A" — the descriptor/UHD layer is **opt-in per engine**,
+so the framework must compare a full config prediction against a coarser high-level estimate without
+assuming every engine has both.
+
+```
+Quick:     applicable → rank by A → winner → (B? kernel : own selection) → dispatch
+Thorough:  applicable → run B (or A) for every engine → compare perf → best (engine,config) → dispatch
+```
+
+### 11.3 The absolute metric and its fallback
 
 **The idea: an absolute, cross-comparable figure of merit.** The ambition is to score candidates
 **cardinally** — an absolute metric (calibrated TFLOPS) rather than a within-group rank. If a UHD is a
@@ -702,14 +756,16 @@ succeeding — rank-ordering is the defined safe backstop, with room to explore 
 **Why it's a coordinated follow-up, not committed here.** Delivering it requires changes *outside* the
 UHD:
 
-1. **A plugin-query surface** for a per-graph predicted figure of merit. rocKE (an engine plugin)
-   would compute it by running its UHD in a "score only, don't launch" mode and returning the best
-   score. This is an engine-plugin ABI addition, owned by the plugin SDK, not this RFC.
-2. **An engine-selection policy** that consumes it — a [RFC 0007](0007_EngineSelectionHeuristicsFramework.md)
-   `ML`/`cost` policy that ranks engines by their reported estimate. That is squarely
-   [RFC 0007](0007_EngineSelectionHeuristicsFramework.md)'s territory.
+1. **A plugin-query surface** for the per-graph figure of merit — both the cheap **A** (engine
+   performance estimate) and the accurate **B** (config UHD run in a "score only, don't launch" mode).
+   This is an engine-plugin ABI addition, owned by the plugin SDK, not this RFC; it must also let a
+   non-descriptor engine (MIOpen) report an A-level estimate through the same surface, or the policy
+   falls back to today's static ordering for it.
+2. **The two engine-selection policies** that consume it ([Section 11.2](#112-two-engine-selection-policies-rfc-0007-that-consume-them)) —
+   the quick policy (rank by A, drill into the winner's B) and the thorough policy (run every B, compare
+   across engines). Both are squarely [RFC 0007](0007_EngineSelectionHeuristicsFramework.md)'s territory.
 3. **Cross-engine calibration.** Comparing estimates across engines only works if the units are
-   comparable and each engine's model is calibrated to real TFLOPS (not just monotonic for argmax).
+   comparable and each model (A and B) is calibrated to real TFLOPS (not just monotonic for argmax).
    This is a real modeling requirement, not just plumbing — and the one most likely to force the
    rank-ordering fallback above if it does not hold up.
 
@@ -815,25 +871,32 @@ by construction.
 
 ### 13.3 New stage: package (Stage P)
 
-After timing (§13.1) and training, a **package stage** emits (or updates) the engine's descriptor set:
+From one timing run (§13.1) the tool trains **two** models
+([Section 11.1](#111-two-heuristics-the-tooling-produces)): the fine-grained **config UHD (B)** and the
+cheap **engine performance estimate (A)**. A **package stage** then emits (or updates) the engine's
+descriptor set:
 
-- the **UHD** — rewritten from the shipped `static_order` to `adapter: tree_data`, carrying the
-  `features_signature` (referencing `$kernel.*` KMD fields + `$device.*` for arch-awareness),
+- the **config UHD (B)** — rewritten from the shipped `static_order` to `adapter: tree_data`, carrying
+  the `features_signature` (referencing `$kernel.*` KMD fields + `$device.*` for arch-awareness),
   `features_hash`, `objective`/`score`, and `model.artifact` ([Section 4](#4-uhd-schema)); one per
   engine, arch-aware, so no artifact table;
-- the **model as data** — the trained booster exported to the `tree_data` model file at the UHD's
-  `model.artifact` ([Section 8](#8-model-formats-and-the-adapter-seam)), embedding the `features_hash`
-  it was trained against; shipped with the engine descriptors, *not* compiled into the provider;
+- the **engine performance estimate (A)** — the coarse `f(graph) → expected perf` model the quick policy
+  ranks engines by ([Section 11.2](#112-two-engine-selection-policies-rfc-0007-that-consume-them)), also
+  emitted as data on the UED (whether A is its own model or derived from B is the OPEN in
+  [Section 11.1](#111-two-heuristics-the-tooling-produces));
+- the **model files as data** — the trained boosters exported to their model files (the `tree_data`
+  format, read by the in-tree walker; [Section 8](#8-model-formats-and-the-adapter-seam)), each embedding
+  the `features_hash` it was trained against; shipped with the engine descriptors, *not* compiled in;
 - the **KMD** — the compilation-knob schema (`fields`: `tile_m`, `warp_n`, `split_k`, `dtype`, …), if
   the pack does not already carry one; its fields are exactly the `$kernel.*` metadata the UKDs already
   fill ([Section 6.1](#61-two-distinct-knob-concepts-ued-runtime-knobs-vs-kmd-compilation-knobs)) —
   **one KMD per engine, owned by the UED**;
-- the **UED** unchanged except for the swapped `heuristic` reference; its user runtime `knobs` are
-  distinct from the KMD compilation knobs and untouched by generation.
+- the **UED** — updated to reference the new UHD and the A model; its user runtime `knobs` are distinct
+  from the KMD compilation knobs and untouched by generation.
 
 The UMDs, UDD, and the child UKDs (kernels) are **not** regenerated — only the heuristic side changes.
 That is the whole point of the two-stage design: the expensive artifacts (compiled kernels) ship once;
-the heuristic is layered on afterward as data.
+both heuristics are layered on afterward as data.
 
 ### 13.4 Sweep space: grid vs. constraint
 
@@ -957,6 +1020,11 @@ land only when a concrete need appears.
 9. **Where estimated-TFLOPS wiring lives** — confirm it is a co-owned
    [RFC 0007](0007_EngineSelectionHeuristicsFramework.md) follow-up, and draft that problem statement
    ([Section 11](#11-engine-selection-interplay-and-estimated-tflops)).
+10. **The two heuristics (A vs. B).** Is the engine performance estimate (A) a distinct trained model or
+    derived from the config UHD (B, max over candidates)? Where does A live and what is it named
+    ([Section 11.1](#111-two-heuristics-the-tooling-produces))? And how does a non-descriptor engine
+    (MIOpen) report an A-level estimate through the plugin-query surface — vs. the quick policy falling
+    back to static ordering for it ([Section 11.2](#112-two-engine-selection-policies-rfc-0007-that-consume-them))?
 
 ---
 
