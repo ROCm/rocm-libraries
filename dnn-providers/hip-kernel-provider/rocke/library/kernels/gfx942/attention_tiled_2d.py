@@ -690,6 +690,11 @@ class UnifiedAttention2DTiledSpec:
                     "use_k_sliced_ring requires fp16/bf16, head_size in {64,128} "
                     "(HD %% 32 == 0 for the 32-wide K slices), T in {64,128}"
                 )
+            if self.ring_depth not in (2, 3):
+                raise ValueError(
+                    f"ring_depth must be 2 or 3 when use_k_sliced_ring is set "
+                    f"(got {self.ring_depth})"
+                )
         if self.use_k_sliced_ldsseq and not self.use_k_sliced_ring:
             raise ValueError("use_k_sliced_ldsseq requires use_k_sliced_ring")
         if self.use_q_direct_global:
@@ -1596,7 +1601,9 @@ def build_unified_attention_2d_tiled(
     # {kg, kg+1, kg+2} in 3 slots; depth-2 keeps {kg, kg+1} in 2 slots (fewer
     # LDS slots, lower occupancy pressure -- fp16 D128's best). See the spec
     # field docstring and the schedule loop below.
-    RING_DEPTH = spec.ring_depth if spec.ring_depth in (2, 3) else 3
+    # ring_depth is validated to {2, 3} in __post_init__ when the ring is active;
+    # when the ring is inactive it is unused (K_SLICED_ACTIVE gates the schedule).
+    RING_DEPTH = spec.ring_depth
     K_SLICE_SLOTS = RING_DEPTH
     K_SLICED_ACTIVE = K_SLICED_RING and USE_MFMA_32X32X8 and TRANSPOSED_QK_32X32
     # K_BUF_BYTES depends on the K_LDS_DTYPE (1 byte for fp8, 2 for bf16).
