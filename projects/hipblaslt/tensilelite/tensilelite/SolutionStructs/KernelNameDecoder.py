@@ -12,7 +12,7 @@ registries as the encoder, avoiding a second hand-maintained naming table.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from functools import lru_cache
+from functools import cache
 import re
 from typing import Any
 
@@ -149,7 +149,6 @@ def _json_value(value: Any) -> Any:
     return str(value)
 
 
-@lru_cache(maxsize=1)
 def _parameter_specs() -> tuple[_ParameterSpec, ...]:
     # MIWaveTile is added by Naming._getName for matrix-instruction kernels but
     # intentionally lives in newMIValidParameters rather than validParameters.
@@ -202,7 +201,7 @@ def _parameter_specs() -> tuple[_ParameterSpec, ...]:
     return tuple(specs)
 
 
-@lru_cache(maxsize=1)
+@cache
 def _specs_by_initial() -> dict[str, tuple[_ParameterSpec, ...]]:
     by_initial: dict[str, list[_ParameterSpec]] = {}
     for spec in _parameter_specs():
