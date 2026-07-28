@@ -230,7 +230,7 @@ class TensorQuantDispatcherLib:
         """Call dispatcher_run_tensorquant_gemm with ctypes-wrapped pointers."""
         import numpy as np
         A  = np.ascontiguousarray(A)
-        B  = np.asfortranarray(B) if B.ndim == 2 else np.ascontiguousarray(B)
+        B  = np.ascontiguousarray(B)
         AQ = np.ascontiguousarray(AQ)
         BQ = np.ascontiguousarray(BQ)
         C  = np.ascontiguousarray(C)
@@ -316,11 +316,26 @@ class TensorQuantGpuGemmRunner:
             raise ValueError(f"AQ shape mismatch: expected (1,), got {AQ.shape}")
         if BQ.ndim != 1 or BQ.shape[0] != 1:
             raise ValueError(f"BQ shape mismatch: expected (1,), got {BQ.shape}")
+        # fp8/bf8 have no native numpy dtype; both are 1-byte elements.
+        if A.itemsize != 1:
+            raise ValueError(f"A dtype must be a 1-byte fp8/bf8 type, got {A.dtype} (itemsize={A.itemsize})")
+        if B.itemsize != 1:
+            raise ValueError(f"B dtype must be a 1-byte fp8/bf8 type, got {B.dtype} (itemsize={B.itemsize})")
+        if AQ.dtype != np.float32:
+            raise ValueError(f"AQ dtype must be float32, got {AQ.dtype}")
+        if BQ.dtype != np.float32:
+            raise ValueError(f"BQ dtype must be float32, got {BQ.dtype}")
 
         if c_dtype is None:
             c_dtype = np.float16
 
         C = np.zeros((M, N), dtype=c_dtype)
+
+        # B is column-major (rcr layout): the kernel expects leading dim = K (stride_B = K),
+        # which means elements are stored column-first in memory (Fortran order).
+        # Reorder here so the raw pointer passed to C++ matches the stride we declare below.
+        B = np.asfortranarray(B)
+        assert B.flags["F_CONTIGUOUS"], "B must be F-contiguous after asfortranarray"
 
         # TensorQuant: single scalar scale → strides are 1
         stride_A  = K
@@ -460,6 +475,7 @@ def _compile_tensorquant_kernel(
             return False
     except subprocess.TimeoutExpired:
         log.error("Compile timed out for %s", so_path.name)
+        obj_path.unlink(missing_ok=True)
         return False
 
     link_cmd = [hipcc, "-shared", "-fPIC",
@@ -573,6 +589,9 @@ def setup_multiple_tensorquant_dispatchers(
             first_idx = seen.get(cfg.name)
             if first_idx is not None and first_idx != i:
                 results[i] = results[first_idx]
+                if results[i] is None:
+                    log.debug("  dedup: %s (index %d) inherits failed build from index %d",
+                              cfg.name, i, first_idx)
 
     built = sum(1 for r in results if r is not None)
     log.info("Built %d / %d TensorQuant kernels", built, len(configs))

@@ -299,3 +299,32 @@ class TestCodegenHeaderGeneration:
     def test_header_does_not_contain_rowcolquant(self):
         header = self._generate_header()
         assert "RowColQuant" not in header
+
+
+# =============================================================================
+# Default config alignment: utils default vs codegen default
+# =============================================================================
+
+
+class TestDefaultConfigAlignment:
+    """Ensure default_fp8_config/default_bf8_config stay in sync with _default_config()."""
+
+    def _codegen_default_names(self):
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "codegen"))
+        from unified_grouped_gemm_tensorquant_codegen import _default_config, _build_specs
+        specs = _build_specs(_default_config())
+        return {s.name for s in specs}
+
+    def test_default_fp8_config_name_in_codegen_defaults(self):
+        cfg = default_fp8_config()
+        assert cfg.name in self._codegen_default_names(), (
+            f"default_fp8_config().name '{cfg.name}' is not produced by _default_config() "
+            f"in the codegen. The two defaults have drifted — update one to match the other."
+        )
+
+    def test_default_bf8_config_name_in_codegen_defaults(self):
+        cfg = default_bf8_config()
+        assert cfg.name in self._codegen_default_names(), (
+            f"default_bf8_config().name '{cfg.name}' is not produced by _default_config() "
+            f"in the codegen. The two defaults have drifted — update one to match the other."
+        )

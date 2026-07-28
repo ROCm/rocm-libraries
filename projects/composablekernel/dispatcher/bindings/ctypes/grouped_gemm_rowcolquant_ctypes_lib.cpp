@@ -23,6 +23,7 @@
  */
 
 #include <hip/hip_runtime.h>
+#include <atomic>
 #include <cstdint>
 #include <cstring>
 #include <iostream>
@@ -42,7 +43,19 @@ static constexpr std::size_t elements_to_bytes(std::size_t n)
     return n * sizeof(T) / ck_tile::numeric_traits<T>::PackedSize;
 }
 
-static bool g_initialized = false;
+#define HIP_CHECK(call)                                                                         \
+    {                                                                                           \
+        hipError_t _err = (call);                                                               \
+        if(_err != hipSuccess)                                                                  \
+        {                                                                                       \
+            std::cerr << "HIP error: " << hipGetErrorString(_err) << " at " << __FILE__ << ":" \
+                      << __LINE__ << "\n";                                                      \
+            cleanup();                                                                          \
+            return -1;                                                                          \
+        }                                                                                       \
+    }
+
+static std::atomic<bool> g_initialized{false};
 
 
 extern "C" {
@@ -53,9 +66,22 @@ extern "C" {
  */
 int dispatcher_initialize()
 {
-    if(g_initialized)
-        return 0;
-    g_initialized = true;
+    int dev = 0;
+    hipDeviceProp_t props{};
+    if(hipGetDevice(&dev) != hipSuccess || hipGetDeviceProperties(&props, dev) != hipSuccess)
+    {
+        std::cerr << "dispatcher_initialize: could not query device architecture\n";
+        return -1;
+    }
+    const std::string arch(props.gcnArchName);
+    if(arch.rfind("gfx950", 0) != 0 && arch.rfind("gfx942", 0) != 0 &&
+       arch.rfind("gfx90a", 0) != 0)
+    {
+        std::cerr << "dispatcher_initialize: unsupported GPU architecture '" << arch
+                  << "' (supported: gfx90a, gfx942, gfx950)\n";
+        return -1;
+    }
+    g_initialized.store(true, std::memory_order_relaxed);
     return 0;
 }
 
@@ -99,7 +125,7 @@ int dispatcher_run_rowcolquant_gemm(const void* A,
                                     int k_batch,
                                     float* time_ms)
 {
-    if(!g_initialized)
+    if(!g_initialized.load(std::memory_order_relaxed))
     {
         std::cerr << "dispatcher_run_rowcolquant_gemm: not initialized\n";
         return -1;
@@ -113,25 +139,6 @@ int dispatcher_run_rowcolquant_gemm(const void* A,
     {
         std::cerr << "dispatcher_run_rowcolquant_gemm: invalid dimensions\n";
         return -1;
-    }
-
-    // Derive the GPU architecture from the running device and reject unsupported archs.
-    {
-        int dev = 0;
-        hipDeviceProp_t props{};
-        if(hipGetDevice(&dev) != hipSuccess || hipGetDeviceProperties(&props, dev) != hipSuccess)
-        {
-            std::cerr << "dispatcher_run_rowcolquant_gemm: could not query device architecture\n";
-            return -1;
-        }
-        const std::string arch(props.gcnArchName);
-        if(arch.rfind("gfx950", 0) != 0 && arch.rfind("gfx942", 0) != 0 &&
-           arch.rfind("gfx90a", 0) != 0)
-        {
-            std::cerr << "dispatcher_run_rowcolquant_gemm: unsupported GPU architecture '" << arch
-                      << "' (supported: gfx90a, gfx942, gfx950)\n";
-            return -1;
-        }
     }
 
     // Only packed (contiguous) layouts are supported.
@@ -169,34 +176,23 @@ int dispatcher_run_rowcolquant_gemm(const void* A,
     };
 
     // Allocate device buffers.
-    if(hipMalloc(&A_dev, elements_to_bytes<ADataType>(M * K)) != hipSuccess)
-    { cleanup(); return -1; }
-    if(hipMalloc(&B_dev, elements_to_bytes<BDataType>(K * N)) != hipSuccess)
-    { cleanup(); return -1; }
+    HIP_CHECK(hipMalloc(&A_dev, elements_to_bytes<ADataType>(M * K)));
+    HIP_CHECK(hipMalloc(&B_dev, elements_to_bytes<BDataType>(K * N)));
     // AQ: per-row scale [M, 1] — QK_A rows, 1 col
-    if(hipMalloc(&AQ_dev, elements_to_bytes<AQDataType>(QK_A)) != hipSuccess)
-    { cleanup(); return -1; }
+    HIP_CHECK(hipMalloc(&AQ_dev, elements_to_bytes<AQDataType>(QK_A)));
     // BQ: per-col scale [1, N] — 1 row, QK_B cols
-    if(hipMalloc(&BQ_dev, elements_to_bytes<BQDataType>(QK_B)) != hipSuccess)
-    { cleanup(); return -1; }
-    if(hipMalloc(&C_dev, elements_to_bytes<CDataType>(M * N)) != hipSuccess)
-    { cleanup(); return -1; }
+    HIP_CHECK(hipMalloc(&BQ_dev, elements_to_bytes<BQDataType>(QK_B)));
+    HIP_CHECK(hipMalloc(&C_dev, elements_to_bytes<CDataType>(M * N)));
 
     // Allocate kargs device buffer for grouped GEMM kernel args (1 group)
-    if(hipMalloc(&kargs_dev, sizeof(ck_tile::QuantGemmTransKernelArg)) != hipSuccess)
-    { cleanup(); return -1; }
+    HIP_CHECK(hipMalloc(&kargs_dev, sizeof(ck_tile::QuantGemmTransKernelArg)));
 
     // Copy inputs to device
-    if(hipMemcpy(A_dev, A_host, elements_to_bytes<ADataType>(M * K), hipMemcpyHostToDevice) != hipSuccess)
-    { cleanup(); return -1; }
-    if(hipMemcpy(B_dev, B_host, elements_to_bytes<BDataType>(K * N), hipMemcpyHostToDevice) != hipSuccess)
-    { cleanup(); return -1; }
-    if(hipMemcpy(AQ_dev, AQ_host, elements_to_bytes<AQDataType>(QK_A), hipMemcpyHostToDevice) != hipSuccess)
-    { cleanup(); return -1; }
-    if(hipMemcpy(BQ_dev, BQ_host, elements_to_bytes<BQDataType>(QK_B), hipMemcpyHostToDevice) != hipSuccess)
-    { cleanup(); return -1; }
-    if(hipMemset(C_dev, 0, elements_to_bytes<CDataType>(M * N)) != hipSuccess)
-    { cleanup(); return -1; }
+    HIP_CHECK(hipMemcpy(A_dev, A_host, elements_to_bytes<ADataType>(M * K), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(B_dev, B_host, elements_to_bytes<BDataType>(K * N), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(AQ_dev, AQ_host, elements_to_bytes<AQDataType>(QK_A), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(BQ_dev, BQ_host, elements_to_bytes<BQDataType>(QK_B), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemset(C_dev, 0, elements_to_bytes<CDataType>(M * N)));
 
     // Build QuantGroupedGemmHostArgs for single-group launch
     ck_tile::QuantGroupedGemmHostArgs args(
@@ -241,11 +237,7 @@ int dispatcher_run_rowcolquant_gemm(const void* A,
     }
 
     // Copy result back
-    if(hipMemcpy(C_host, C_dev, elements_to_bytes<CDataType>(M * N), hipMemcpyDeviceToHost) != hipSuccess)
-    {
-        cleanup();
-        return -1;
-    }
+    HIP_CHECK(hipMemcpy(C_host, C_dev, elements_to_bytes<CDataType>(M * N), hipMemcpyDeviceToHost));
 
     if(time_ms)
         *time_ms = exec_time;
@@ -260,11 +252,6 @@ int dispatcher_run_rowcolquant_gemm(const void* A,
 const char* dispatcher_get_kernel_name() { return KERNEL_NAME; }
 
 /**
- * Initialize dispatcher (alias kept for consistency).
- */
-int dispatcher_init() { return dispatcher_initialize(); }
-
-/**
  * Number of kernels in this .so (always 1: the force-included SelectedKernel).
  */
 int dispatcher_get_kernel_count() { return 1; }
@@ -272,6 +259,6 @@ int dispatcher_get_kernel_count() { return 1; }
 /**
  * Release resources.
  */
-void dispatcher_cleanup() { g_initialized = false; }
+void dispatcher_cleanup() { g_initialized.store(false, std::memory_order_relaxed); }
 
 } // extern "C"

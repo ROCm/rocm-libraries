@@ -282,6 +282,13 @@ endif()
 
 file(GLOB ROWCOLQUANT_GEMM_KERNEL_HEADERS "${CMAKE_BINARY_DIR}/generated_kernels/grouped_gemm_rowcolquant_*.hpp")
 if(ROWCOLQUANT_GEMM_KERNEL_HEADERS)
+    list(LENGTH ROWCOLQUANT_GEMM_KERNEL_HEADERS _rowcolquant_header_count)
+    if(_rowcolquant_header_count GREATER 1)
+        message(WARNING
+            "Found ${_rowcolquant_header_count} RowColQuant GEMM kernel headers; "
+            "only the first will be compiled into dispatcher_grouped_gemm_rowcolquant_lib. "
+            "Run codegen with a single config or build per-kernel .so files via the Python path.")
+    endif()
     list(GET ROWCOLQUANT_GEMM_KERNEL_HEADERS 0 ROWCOLQUANT_GEMM_KERNEL_HEADER)
     message(STATUS "Found RowColQuant GEMM kernel for ctypes lib: ${ROWCOLQUANT_GEMM_KERNEL_HEADER}")
 
@@ -305,7 +312,11 @@ if(ROWCOLQUANT_GEMM_KERNEL_HEADERS)
         GFX_ARCH="${CK_TILE_ROWCOLQUANT_GFX_ARCH}"
     )
 else()
-    message(STATUS "No RowColQuant GEMM kernel found for ctypes lib - building without kernel")
+    message(WARNING
+        "No RowColQuant GEMM kernel header found in ${CMAKE_BINARY_DIR}/generated_kernels/. "
+        "dispatcher_grouped_gemm_rowcolquant_lib will be built without a kernel and will fail "
+        "at load time. Run unified_grouped_gemm_rowcolquant_codegen.py --output-dir "
+        "${CMAKE_BINARY_DIR}/generated_kernels/ before configuring to fix this.")
     add_library(dispatcher_grouped_gemm_rowcolquant_lib SHARED grouped_gemm_rowcolquant_ctypes_lib.cpp)
     target_include_directories(dispatcher_grouped_gemm_rowcolquant_lib PRIVATE
         ${PROJECT_SOURCE_DIR}/include
@@ -324,6 +335,13 @@ endif()
 
 file(GLOB TENSORQUANT_GEMM_KERNEL_HEADERS "${CMAKE_BINARY_DIR}/generated_kernels/grouped_gemm_tensorquant_*.hpp")
 if(TENSORQUANT_GEMM_KERNEL_HEADERS)
+    list(LENGTH TENSORQUANT_GEMM_KERNEL_HEADERS _tensorquant_header_count)
+    if(_tensorquant_header_count GREATER 1)
+        message(WARNING
+            "Found ${_tensorquant_header_count} TensorQuant GEMM kernel headers; "
+            "only the first will be compiled into dispatcher_grouped_gemm_tensorquant_lib. "
+            "Run codegen with a single config or build per-kernel .so files via the Python path.")
+    endif()
     list(GET TENSORQUANT_GEMM_KERNEL_HEADERS 0 TENSORQUANT_GEMM_KERNEL_HEADER)
     message(STATUS "Found TensorQuant GEMM kernel for ctypes lib: ${TENSORQUANT_GEMM_KERNEL_HEADER}")
 
@@ -347,7 +365,11 @@ if(TENSORQUANT_GEMM_KERNEL_HEADERS)
         GFX_ARCH="${CK_TILE_TENSORQUANT_GFX_ARCH}"
     )
 else()
-    message(STATUS "No TensorQuant GEMM kernel found for ctypes lib - building without kernel")
+    message(WARNING
+        "No TensorQuant GEMM kernel header found in ${CMAKE_BINARY_DIR}/generated_kernels/. "
+        "dispatcher_grouped_gemm_tensorquant_lib will be built without a kernel and will fail "
+        "at load time. Run unified_grouped_gemm_tensorquant_codegen.py --output-dir "
+        "${CMAKE_BINARY_DIR}/generated_kernels/ before configuring to fix this.")
     add_library(dispatcher_grouped_gemm_tensorquant_lib SHARED grouped_gemm_tensorquant_ctypes_lib.cpp)
     target_include_directories(dispatcher_grouped_gemm_tensorquant_lib PRIVATE
         ${PROJECT_SOURCE_DIR}/include
