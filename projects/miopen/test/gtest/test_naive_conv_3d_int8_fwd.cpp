@@ -37,15 +37,21 @@ auto GetConvTestCases()
 {
     using TestCase = miopen::unit_tests::ConvTestCase;
 
-    // Reproducer from ALMIOPEN-2275: 3D int8 forward, both NCDHW and NDHWC layouts.
-    // x: {N, C, D, H, W}, w: {K, C, D, H, W}, pad/stride/dilation are 3-element vectors.
-    // type_x=int8, type_w=int8, type_y=int8 (the previously missing output variant).
+    // Regression for ALMIOPEN-2275: 3D int8 forward, both NCDHW and NDHWC layouts.
+    // x: {N, C, D, H, W}, w: {K, C, D, H, W}, type_y=int8 (the previously missing output variant).
+    // C is kept small (<=64) so the test data generator (conv_tensor_gen.hpp:num_add <
+    // int8_max=127) doesn't overflow during input generation for the int8_t accumulator path.
+    using TDP = miopen::unit_tests::TensorDescriptorParams;
+    using CDP = miopen::unit_tests::ConvolutionDescriptorParams;
     return std::vector{
         // clang-format off
-        // NCDHW layout
-        TestCase{{1, 512, 5, 64, 64}, {16, 512, 1, 1, 1}, {0, 0, 0}, {1, 1, 1}, {1, 1, 1}, miopenInt8, miopenInt8, miopenInt8},
-        // NDHWC layout
-        TestCase{{1, 512, 5, 64, 64}, {16, 512, 1, 1, 1}, {0, 0, 0}, {1, 1, 1}, {1, 1, 1}, miopenInt8, miopenInt8, miopenInt8},
+        // NCDHW layout (default): exercises naive_conv_..._ncdhw_int8_t_int32_t_int8_t_0
+        TestCase{{1, 16, 5, 14, 14}, {8, 16, 1, 1, 1}, {0, 0, 0}, {1, 1, 1}, {1, 1, 1}, miopenInt8, miopenInt8, miopenInt8},
+        // NDHWC layout: exercises naive_conv_..._ndhwc_int8_t_int32_t_int8_t_0
+        TestCase{TDP{miopenInt8, miopenTensorNDHWC, {1, 16, 5, 14, 14}},
+                 TDP{miopenInt8, miopenTensorNDHWC, {8, 16, 1, 1, 1}},
+                 miopenInt8,
+                 CDP{{0, 0, 0}, {1, 1, 1}, {1, 1, 1}}},
         // clang-format on
     };
 }
@@ -62,15 +68,15 @@ const auto& GetTestParams()
 
 } // namespace
 
-using GPU_UnitTestNaiveConv3dInt8Fwd = GPU_UnitTestConvSolverFwd_I8;
+using GPU_UnitTestConvNaiveConv3dFwd_I8 = GPU_UnitTestConvSolverFwd_I8;
 
-TEST_P(GPU_UnitTestNaiveConv3dInt8Fwd, ConvDirectNaiveConvFwd3dInt8)
+TEST_P(GPU_UnitTestConvNaiveConv3dFwd_I8, ConvDirectNaiveConvFwd3dInt8)
 {
     this->RunTest(miopen::solver::conv::ConvDirectNaiveConvFwd{});
 };
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                         GPU_UnitTestNaiveConv3dInt8Fwd,
+                         GPU_UnitTestConvNaiveConv3dFwd_I8,
                          testing::Combine(testing::Values(GetTestParams()),
                                           testing::Values(miopenConvolutionAlgoDirect),
                                           testing::ValuesIn(GetConvTestCases())));
