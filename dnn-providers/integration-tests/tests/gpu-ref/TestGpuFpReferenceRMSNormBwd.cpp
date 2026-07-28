@@ -842,3 +842,197 @@ INSTANTIATE_TEST_SUITE_P(Full, TestGpuRMSNormBwdRef5DBfp16, ::testing::ValuesIn(
                              v.insert(v.end(), l.begin(), l.end());
                              return v;
                          }()));
+
+// ============================================================================
+// Edge case tests with DISABLED_ prefix to avoid running in CI.
+// Run the tests manually with --gtest_also_run_disabled_tests
+// --gtest_filter=*TestGpuRMSNormBwdRefEdgeCaseValidation* flags.
+// ============================================================================
+
+// Dgrad: grid dim = outerSize * stride. Using stride = 1 (NCHW)
+// so outerSize alone determines the grid dim.
+
+TEST(TestGpuRMSNormBwdRefEdgeCaseValidation, DISABLED_DgradOuterSizeAtMaxBlocksMinusOneSucceeds)
+{
+    SKIP_IF_NO_DEVICES();
+    const int64_t outerSize
+        = getMaxGridSizeForCurrentDevice<GpuFpReferenceRMSNorm::BLOCK_SIZE>() - 1;
+
+    Tensor<float> dy({outerSize, 1, 1, 1});
+    Tensor<float> x({outerSize, 1, 1, 1});
+    Tensor<float> scale({1, 1, 1, 1});
+    Tensor<double> invRms({outerSize, 1, 1, 1});
+    Tensor<float> dx({outerSize, 1, 1, 1});
+    Tensor<float> dscale({1, 1, 1, 1});
+
+    EXPECT_NO_THROW(GpuFpReferenceRMSNorm::bprop<float>(dy, x, scale, invRms, dx, dscale));
+}
+
+TEST(TestGpuRMSNormBwdRefEdgeCaseValidation, DISABLED_DgradOuterSizeAtMaxBlocksSucceeds)
+{
+    SKIP_IF_NO_DEVICES();
+    const int64_t outerSize = getMaxGridSizeForCurrentDevice<GpuFpReferenceRMSNorm::BLOCK_SIZE>();
+
+    Tensor<float> dy({outerSize, 1, 1, 1});
+    Tensor<float> x({outerSize, 1, 1, 1});
+    Tensor<float> scale({1, 1, 1, 1});
+    Tensor<double> invRms({outerSize, 1, 1, 1});
+    Tensor<float> dx({outerSize, 1, 1, 1});
+    Tensor<float> dscale({1, 1, 1, 1});
+
+    EXPECT_NO_THROW(GpuFpReferenceRMSNorm::bprop<float>(dy, x, scale, invRms, dx, dscale));
+}
+
+TEST(TestGpuRMSNormBwdRefEdgeCaseValidation, DISABLED_DgradOuterSizeAboveMaxBlocksThrows)
+{
+    SKIP_IF_NO_DEVICES();
+    const int64_t outerSize
+        = getMaxGridSizeForCurrentDevice<GpuFpReferenceRMSNorm::BLOCK_SIZE>() + 1;
+
+    Tensor<float> dy({outerSize, 1, 1, 1});
+    Tensor<float> x({outerSize, 1, 1, 1});
+    Tensor<float> scale({1, 1, 1, 1});
+    Tensor<double> invRms({outerSize, 1, 1, 1});
+    Tensor<float> dx({outerSize, 1, 1, 1});
+    Tensor<float> dscale({1, 1, 1, 1});
+
+    EXPECT_THROW(GpuFpReferenceRMSNorm::bprop<float>(dy, x, scale, invRms, dx, dscale),
+                 std::runtime_error);
+}
+
+// Wgrad: grid dim = ceil(innerSize / BLOCK_SIZE). Picking innerSize
+// such that ceil(innerSize / BLOCK_SIZE) = maxGridSize.
+
+namespace
+{
+
+int64_t getInnerSizeForWgrad(int64_t numBlocks)
+{
+    return numBlocks * static_cast<int64_t>(GpuFpReferenceRMSNorm::BLOCK_SIZE);
+}
+
+} // namespace
+
+TEST(TestGpuRMSNormBwdRefEdgeCaseValidation, DISABLED_WgradInnerSizeAtMaxBlocksMinusOneSucceeds)
+{
+    SKIP_IF_NO_DEVICES();
+    const int64_t numBlocks
+        = getMaxGridSizeForCurrentDevice<GpuFpReferenceRMSNorm::BLOCK_SIZE>() - 1;
+    const int64_t innerSize = getInnerSizeForWgrad(numBlocks);
+
+    Tensor<float> dy({1, 1, 1, innerSize});
+    Tensor<float> x({1, 1, 1, innerSize});
+    Tensor<float> scale({1, 1, 1, innerSize});
+    Tensor<double> invRms({1, 1, 1, 1});
+    Tensor<float> dx({1, 1, 1, innerSize});
+    Tensor<float> dscale({1, 1, 1, innerSize});
+
+    EXPECT_NO_THROW(GpuFpReferenceRMSNorm::bprop<float>(dy, x, scale, invRms, dx, dscale));
+}
+
+TEST(TestGpuRMSNormBwdRefEdgeCaseValidation, DISABLED_WgradInnerSizeAtMaxBlocksSucceeds)
+{
+    SKIP_IF_NO_DEVICES();
+    const int64_t numBlocks = getMaxGridSizeForCurrentDevice<GpuFpReferenceRMSNorm::BLOCK_SIZE>();
+    const int64_t innerSize = getInnerSizeForWgrad(numBlocks);
+
+    Tensor<float> dy({1, 1, 1, innerSize});
+    Tensor<float> x({1, 1, 1, innerSize});
+    Tensor<float> scale({1, 1, 1, innerSize});
+    Tensor<double> invRms({1, 1, 1, 1});
+    Tensor<float> dx({1, 1, 1, innerSize});
+    Tensor<float> dscale({1, 1, 1, innerSize});
+
+    EXPECT_NO_THROW(GpuFpReferenceRMSNorm::bprop<float>(dy, x, scale, invRms, dx, dscale));
+}
+
+TEST(TestGpuRMSNormBwdRefEdgeCaseValidation, DISABLED_WgradInnerSizeAboveMaxBlocksThrows)
+{
+    SKIP_IF_NO_DEVICES();
+    const int64_t numBlocks
+        = getMaxGridSizeForCurrentDevice<GpuFpReferenceRMSNorm::BLOCK_SIZE>() + 1;
+    const int64_t innerSize = getInnerSizeForWgrad(numBlocks);
+
+    Tensor<float> dy({1, 1, 1, innerSize});
+    Tensor<float> x({1, 1, 1, innerSize});
+    Tensor<float> scale({1, 1, 1, innerSize});
+    Tensor<double> invRms({1, 1, 1, 1});
+    Tensor<float> dx({1, 1, 1, innerSize});
+    Tensor<float> dscale({1, 1, 1, innerSize});
+
+    EXPECT_THROW(GpuFpReferenceRMSNorm::bprop<float>(dy, x, scale, invRms, dx, dscale),
+                 std::runtime_error);
+}
+
+TEST(TestGpuRMSNormBwdRefEdgeCaseValidation, DISABLED_BeyondInt32InnerSizeIfMemoryAllows)
+{
+    SKIP_IF_NO_DEVICES();
+
+    size_t freeBytes = 0;
+    size_t totalBytes = 0;
+    ASSERT_EQ(hipMemGetInfo(&freeBytes, &totalBytes), hipSuccess);
+
+    constexpr int64_t OUTER_SIZE = 1;
+    // NOTE: INNER_SIZE in this test should be 2^32+1, but is reduced here due to
+    // slow CPU fill/reference functions. Revisit once rocRAND-based GPU fill and
+    // golden references for large tensors are available.
+    constexpr int64_t INNER_SIZE = 100000000; // 100 million elements
+
+    Tensor<float> dy({OUTER_SIZE, 1, 1, INNER_SIZE});
+    Tensor<float> x({OUTER_SIZE, 1, 1, INNER_SIZE});
+    Tensor<float> scale({1, 1, 1, INNER_SIZE});
+    Tensor<double> invRms({OUTER_SIZE, 1, 1, 1});
+    Tensor<float> dxCpu({OUTER_SIZE, 1, 1, INNER_SIZE});
+    Tensor<float> dxGpu({OUTER_SIZE, 1, 1, INNER_SIZE});
+    Tensor<float> dscaleCpu({1, 1, 1, INNER_SIZE});
+    Tensor<float> dscaleGpu({1, 1, 1, INNER_SIZE});
+
+    const size_t requiredBytes
+        = (dy.elementCount() + x.elementCount() + scale.elementCount() + dxCpu.elementCount()
+           + dxGpu.elementCount() + dscaleCpu.elementCount() + dscaleGpu.elementCount())
+          * sizeof(float);
+    if(requiredBytes > freeBytes)
+    {
+        GTEST_SKIP() << "Insufficient GPU memory for the test. Required: " << requiredBytes
+                     << " bytes, Free: " << freeBytes << " bytes.";
+    }
+
+    const unsigned int seed = getGlobalTestSeed();
+    dy.fillWithRandomValues(-1.0f, 1.0f, seed);
+    x.fillWithRandomValues(-1.0f, 1.0f, seed + 1);
+    scale.fillWithRandomValues(-1.0f, 1.0f, seed + 2);
+    invRms.fillWithRandomValues(1e-5, 1.0, seed + 3);
+
+    CpuFpReferenceRMSNorm::backward<float, float, float, float, double>(
+        dy, x, scale, invRms, dxCpu, dscaleCpu, nullptr);
+    GpuFpReferenceRMSNorm::bprop<float, float, float, float, double>(
+        dy, x, scale, invRms, dxGpu, dscaleGpu, nullptr);
+
+    assertAllClose(dxCpu, dxGpu, getTolerance<float>());
+    assertAllClose(dscaleCpu, dscaleGpu, getTolerance<float>());
+}
+
+using TestGpuRMSNormBwdRefEdgeCaseValidationFp32 = RMSNormBwdShapeSuite<float>;
+
+TEST_P(TestGpuRMSNormBwdRefEdgeCaseValidationFp32, DISABLED_MatchesCpuRef)
+{
+    this->runRMSNormBwdShapeTest();
+}
+
+INSTANTIATE_TEST_SUITE_P(SkinnyModerate,
+                         TestGpuRMSNormBwdRefEdgeCaseValidationFp32,
+                         ::testing::ValuesIn(getRMSnormSkinnyModerateTestCases()));
+
+INSTANTIATE_TEST_SUITE_P(PowerOfTwo,
+                         TestGpuRMSNormBwdRefEdgeCaseValidationFp32,
+                         ::testing::ValuesIn(getRMSnormPowerOfTwoTestCases()));
+
+INSTANTIATE_TEST_SUITE_P(
+    SkinnyInt32Scale, TestGpuRMSNormBwdRefEdgeCaseValidationFp32, ::testing::ValuesIn([]() {
+        return getRMSnormSkinnyInt32ScaleTestCases(
+            getMaxGridSizeForCurrentDevice<GpuFpReferenceRMSNorm::BLOCK_SIZE>());
+    }()));
+
+INSTANTIATE_TEST_SUITE_P(InnerSizeInt32Boundary,
+                         TestGpuRMSNormBwdRefEdgeCaseValidationFp32,
+                         ::testing::ValuesIn(getRMSnormInnerSizeInt32BoundaryTestCases()));
