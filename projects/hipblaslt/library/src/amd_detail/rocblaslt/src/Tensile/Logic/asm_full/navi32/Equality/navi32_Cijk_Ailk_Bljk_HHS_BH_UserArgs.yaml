@@ -64,8 +64,8 @@
   TileAwareSelection: false
   TileB: 1
   TotalIndices: 4
-  TransposeA: False
-  TransposeB: False
+  TransposeA: false
+  TransposeB: false
   UseBeta: true
   UseBias: 0
   UseE: false
@@ -113,8 +113,7 @@
     ISA: [11, 0, 1]
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true,
-      UseUniversalArgs: true}
+    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true, UseUniversalArgs: true}
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Ailk_Bljk_HHS_BH_UserArgs_MT64x16x32_MI16x16x1_SN_LDSB0_GRVWA2_GRVWB4_LBSPPA2048_LBSPPB128_MIWT1_1_NLCA1_SS0_TLDS1_WG64_2_1
     LSCA: 64
@@ -300,8 +299,7 @@
     ISA: [11, 0, 1]
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true,
-      UseUniversalArgs: true}
+    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true, UseUniversalArgs: true}
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Ailk_Bljk_HHS_BH_UserArgs_MT32x32x32_MI16x16x1_SN_LDSB0_GRVWA2_GRVWB8_LBSPPA1024_LBSPPB1024_MIWT1_1_NLCA1_SS0_TLDS0_WG32_4_1
     LSCA: 32
@@ -487,8 +485,7 @@
     ISA: [11, 0, 1]
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true,
-      UseUniversalArgs: true}
+    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true, UseUniversalArgs: true}
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Ailk_Bljk_HHS_BH_UserArgs_MT32x32x32_MI16x16x1_SN_LDSB0_GRVWA2_GRVWB8_LBSPPA1024_LBSPPB128_MIWT1_1_NLCA1_SS0_TLDS1_WG32_4_1
     LSCA: 32
@@ -674,8 +671,7 @@
     ISA: [11, 0, 1]
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true,
-      UseUniversalArgs: true}
+    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true, UseUniversalArgs: true}
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Ailk_Bljk_HHS_BH_UserArgs_MT64x16x32_MI16x16x1_SN_LDSB0_GRVWA8_GRVWB4_LBSPPA2048_LBSPPB128_MIWT1_1_NLCA1_SS1_TLDS1_WG64_2_1
     LSCA: 64
@@ -861,8 +857,7 @@
     ISA: [11, 0, 1]
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true,
-      UseUniversalArgs: true}
+    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true, UseUniversalArgs: true}
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Ailk_Bljk_HHS_BH_UserArgs_MT64x16x32_MI16x16x1_SN_LDSB0_GRVWA8_GRVWB4_LBSPPA2048_LBSPPB128_MIWT1_1_NLCA1_SS1_TLDS1_WG64_2_1
     LSCA: 64
@@ -1048,8 +1043,7 @@
     ISA: [11, 0, 1]
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true,
-      UseUniversalArgs: true}
+    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true, UseUniversalArgs: true}
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Ailk_Bljk_HHS_BH_UserArgs_MT128x16x32_MI16x16x1_SN_LDSB0_GRVWA8_GRVWB4_LBSPPA4096_LBSPPB512_MIWT2_1_NLCA1_SS1_TLDS0_WG64_2_1
     LSCA: 128
@@ -1235,8 +1229,7 @@
     ISA: [11, 0, 1]
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true,
-      UseUniversalArgs: true}
+    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true, UseUniversalArgs: true}
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Ailk_Bljk_HHS_BH_UserArgs_MT128x16x32_MI16x16x1_SN_LDSB0_GRVWA8_GRVWB4_LBSPPA4096_LBSPPB128_MIWT2_1_NLCA1_SS1_TLDS1_WG64_2_1
     LSCA: 128
@@ -1422,8 +1415,7 @@
     ISA: [11, 0, 1]
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true,
-      UseUniversalArgs: true}
+    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true, UseUniversalArgs: true}
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Ailk_Bljk_HHS_BH_UserArgs_MT192x16x32_MI16x16x1_SN_LDSB0_GRVWA8_GRVWB4_LBSPPA6144_LBSPPB128_MIWT3_1_NLCA3_SS1_TLDS1_WG64_2_1
     LSCA: 64
@@ -1609,8 +1601,7 @@
     ISA: [11, 0, 1]
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true,
-      UseUniversalArgs: true}
+    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true, UseUniversalArgs: true}
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Ailk_Bljk_HHS_BH_UserArgs_MT256x16x32_MI16x16x1_SN_LDSB1_GRVWA8_GRVWB4_LBSPPA8192_LBSPPB512_MIWT4_1_NLCA1_SS1_TLDS0_WG64_2_1
     LSCA: 256
@@ -1796,8 +1787,7 @@
     ISA: [11, 0, 1]
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true,
-      UseUniversalArgs: true}
+    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true, UseUniversalArgs: true}
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Ailk_Bljk_HHS_BH_UserArgs_MT256x16x32_MI16x16x1_SN_LDSB1_GRVWA8_GRVWB4_LBSPPA8192_LBSPPB128_MIWT4_1_NLCA1_SS1_TLDS1_WG64_2_1
     LSCA: 256
@@ -1861,7 +1851,7 @@
     MatrixInstM: 16
     MatrixInstN: 16
     MatrixInstruction: [16, 16, 16, 1]
-    MaxOccupancy: 40
+    MaxOccupancy: 6
     NoLdsWriteCode: false
     NoReject: false
     NoTailLoop: false
@@ -1983,8 +1973,7 @@
     ISA: [11, 0, 1]
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true,
-      UseUniversalArgs: true}
+    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true, UseUniversalArgs: true}
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Ailk_Bljk_HHS_BH_UserArgs_MT32x32x32_MI16x16x1_SN_LDSB0_GRVWA8_GRVWB8_LBSPPA1024_LBSPPB128_MIWT1_1_NLCA1_SS1_TLDS1_WG32_4_1
     LSCA: 32
@@ -2170,8 +2159,7 @@
     ISA: [11, 0, 1]
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true,
-      UseUniversalArgs: true}
+    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true, UseUniversalArgs: true}
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Ailk_Bljk_HHS_BH_UserArgs_MT32x32x32_MI16x16x1_SN_LDSB0_GRVWA8_GRVWB8_LBSPPA1024_LBSPPB128_MIWT1_1_NLCA1_SS1_TLDS1_WG32_4_1
     LSCA: 32
@@ -2357,8 +2345,7 @@
     ISA: [11, 0, 1]
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true,
-      UseUniversalArgs: true}
+    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true, UseUniversalArgs: true}
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Ailk_Bljk_HHS_BH_UserArgs_MT64x32x32_MI16x16x1_SN_LDSB0_GRVWA8_GRVWB8_LBSPPA2048_LBSPPB128_MIWT2_1_NLCA1_SS1_TLDS1_WG32_4_1
     LSCA: 64
@@ -2544,8 +2531,7 @@
     ISA: [11, 0, 1]
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true,
-      UseUniversalArgs: true}
+    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true, UseUniversalArgs: true}
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Ailk_Bljk_HHS_BH_UserArgs_MT64x32x32_MI16x16x1_SN_LDSB0_GRVWA8_GRVWB8_LBSPPA2048_LBSPPB128_MIWT2_1_NLCA1_SS1_TLDS1_WG32_4_1
     LSCA: 64
@@ -2731,8 +2717,7 @@
     ISA: [11, 0, 1]
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true,
-      UseUniversalArgs: true}
+    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true, UseUniversalArgs: true}
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Ailk_Bljk_HHS_BH_UserArgs_MT96x32x32_MI16x16x1_SN_LDSB0_GRVWA8_GRVWB8_LBSPPA3072_LBSPPB128_MIWT3_1_NLCA3_SS1_TLDS1_WG32_4_1
     LSCA: 32
@@ -2918,8 +2903,7 @@
     ISA: [11, 0, 1]
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true,
-      UseUniversalArgs: true}
+    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true, UseUniversalArgs: true}
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Ailk_Bljk_HHS_BH_UserArgs_MT96x32x32_MI16x16x1_SN_LDSB0_GRVWA8_GRVWB8_LBSPPA3072_LBSPPB128_MIWT3_1_NLCA3_SS1_TLDS1_WG32_4_1
     LSCA: 32
@@ -3105,8 +3089,7 @@
     ISA: [11, 0, 1]
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true,
-      UseUniversalArgs: true}
+    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true, UseUniversalArgs: true}
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Ailk_Bljk_HHS_BH_UserArgs_MT160x32x32_MI16x16x1_SN_LDSB0_GRVWA8_GRVWB8_LBSPPA5120_LBSPPB128_MIWT5_1_NLCA5_SS1_TLDS1_WG32_4_1
     LSCA: 32
@@ -3292,8 +3275,7 @@
     ISA: [11, 0, 1]
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true,
-      UseUniversalArgs: true}
+    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true, UseUniversalArgs: true}
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Ailk_Bljk_HHS_BH_UserArgs_MT160x32x32_MI16x16x1_SN_LDSB0_GRVWA8_GRVWB8_LBSPPA5120_LBSPPB128_MIWT5_1_NLCA5_SS1_TLDS1_WG32_4_1
     LSCA: 32
@@ -3479,8 +3461,7 @@
     ISA: [11, 0, 1]
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true,
-      UseUniversalArgs: true}
+    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true, UseUniversalArgs: true}
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Ailk_Bljk_HHS_BH_UserArgs_MT64x48x32_MI16x16x1_SN_LDSB0_GRVWA8_GRVWB4_LBSPPA2048_LBSPPB128_MIWT1_3_NLCA1_SS1_TLDS1_WG64_2_1
     LSCA: 64
@@ -3666,8 +3647,7 @@
     ISA: [11, 0, 1]
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true,
-      UseUniversalArgs: true}
+    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true, UseUniversalArgs: true}
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Ailk_Bljk_HHS_BH_UserArgs_MT128x48x32_MI16x16x1_SN_LDSB0_GRVWA8_GRVWB4_LBSPPA4096_LBSPPB128_MIWT2_3_NLCA1_SS1_TLDS1_WG64_2_1
     LSCA: 128
@@ -3853,8 +3833,7 @@
     ISA: [11, 0, 1]
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true,
-      UseUniversalArgs: true}
+    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true, UseUniversalArgs: true}
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Ailk_Bljk_HHS_BH_UserArgs_MT128x48x32_MI16x16x1_SN_LDSB0_GRVWA8_GRVWB4_LBSPPA4096_LBSPPB128_MIWT2_3_NLCA1_SS1_TLDS1_WG64_2_1
     LSCA: 128
@@ -4040,8 +4019,7 @@
     ISA: [11, 0, 1]
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true,
-      UseUniversalArgs: true}
+    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true, UseUniversalArgs: true}
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Ailk_Bljk_HHS_BH_UserArgs_MT16x64x32_MI16x16x1_SN_LDSB0_GRVWA4_GRVWB8_LBSPPA512_LBSPPB2048_MIWT1_1_NLCA1_SS1_TLDS0_WG16_8_1
     LSCA: 16
@@ -4227,8 +4205,7 @@
     ISA: [11, 0, 1]
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true,
-      UseUniversalArgs: true}
+    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true, UseUniversalArgs: true}
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Ailk_Bljk_HHS_BH_UserArgs_MT32x64x32_MI16x16x1_SN_LDSB0_GRVWA8_GRVWB8_LBSPPA1024_LBSPPB2048_MIWT2_1_NLCA1_SS1_TLDS0_WG16_8_1
     LSCA: 32
@@ -4414,8 +4391,7 @@
     ISA: [11, 0, 1]
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true,
-      UseUniversalArgs: true}
+    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true, UseUniversalArgs: true}
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Ailk_Bljk_HHS_BH_UserArgs_MT64x96x32_MI16x16x1_SN_LDSB0_GRVWA8_GRVWB8_LBSPPA2048_LBSPPB128_MIWT2_3_NLCA1_SS1_TLDS1_WG32_4_1
     LSCA: 64
@@ -4601,8 +4577,7 @@
     ISA: [11, 0, 1]
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true,
-      UseUniversalArgs: true}
+    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true, UseUniversalArgs: true}
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Ailk_Bljk_HHS_BH_UserArgs_MT64x96x32_MI16x16x1_SN_LDSB0_GRVWA8_GRVWB8_LBSPPA2048_LBSPPB128_MIWT2_3_NLCA1_SS1_TLDS1_WG32_4_1
     LSCA: 64
@@ -4788,8 +4763,7 @@
     ISA: [11, 0, 1]
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true,
-      UseUniversalArgs: true}
+    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true, UseUniversalArgs: true}
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Ailk_Bljk_HHS_BH_UserArgs_MT64x96x32_MI16x16x1_SN_LDSB0_GRVWA8_GRVWB8_LBSPPA2048_LBSPPB128_MIWT2_3_NLCA1_SS1_TLDS1_WG32_4_1
     LSCA: 64
@@ -4975,8 +4949,7 @@
     ISA: [11, 0, 1]
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true,
-      UseUniversalArgs: true}
+    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true, UseUniversalArgs: true}
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Ailk_Bljk_HHS_BH_UserArgs_MT96x96x32_MI16x16x1_SN_LDSB0_GRVWA8_GRVWB8_LBSPPA3072_LBSPPB128_MIWT3_3_NLCA3_SS1_TLDS1_WG32_4_1
     LSCA: 32
@@ -5162,8 +5135,7 @@
     ISA: [11, 0, 1]
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true,
-      UseUniversalArgs: true}
+    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true, UseUniversalArgs: true}
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Ailk_Bljk_HHS_BH_UserArgs_MT96x96x32_MI16x16x1_SN_LDSB0_GRVWA8_GRVWB8_LBSPPA3072_LBSPPB128_MIWT3_3_NLCA3_SS1_TLDS1_WG32_4_1
     LSCA: 32
@@ -5349,8 +5321,7 @@
     ISA: [11, 0, 1]
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true,
-      UseUniversalArgs: true}
+    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true, UseUniversalArgs: true}
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Ailk_Bljk_HHS_BH_UserArgs_MT96x96x32_MI16x16x1_SN_LDSB0_GRVWA8_GRVWB8_LBSPPA3072_LBSPPB128_MIWT3_3_NLCA3_SS1_TLDS1_WG32_4_1
     LSCA: 32
@@ -5536,8 +5507,7 @@
     ISA: [11, 0, 1]
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true,
-      UseUniversalArgs: true}
+    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true, UseUniversalArgs: true}
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Ailk_Bljk_HHS_BH_UserArgs_MT48x128x32_MI16x16x1_SN_LDSB0_GRVWA4_GRVWB8_LBSPPA1536_LBSPPB4096_MIWT3_2_NLCA3_SS1_TLDS0_WG16_8_1
     LSCA: 16
@@ -5723,8 +5693,7 @@
     ISA: [11, 0, 1]
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true,
-      UseUniversalArgs: true}
+    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true, UseUniversalArgs: true}
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Ailk_Bljk_HHS_BH_UserArgs_MT64x16x64_MI16x16x1_SN_LDSB0_GRVWA8_GRVWB8_LBSPPA2048_LBSPPB128_MIWT1_1_NLCA1_SS1_TLDS1_WG64_2_1
     LSCA: 64
@@ -5910,8 +5879,7 @@
     ISA: [11, 0, 1]
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true,
-      UseUniversalArgs: true}
+    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true, UseUniversalArgs: true}
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Ailk_Bljk_HHS_BH_UserArgs_MT64x16x64_MI16x16x1_SN_LDSB0_GRVWA8_GRVWB8_LBSPPA2048_LBSPPB128_MIWT1_1_NLCA1_SS1_TLDS1_WG64_2_1
     LSCA: 64
@@ -6097,8 +6065,7 @@
     ISA: [11, 0, 1]
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true,
-      UseUniversalArgs: true}
+    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true, UseUniversalArgs: true}
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Ailk_Bljk_HHS_BH_UserArgs_MT64x32x64_MI16x16x1_SN_LDSB0_GRVWA8_GRVWB8_LBSPPA2048_LBSPPB1024_MIWT2_1_NLCA1_SS1_TLDS0_WG32_4_1
     LSCA: 64
@@ -6284,8 +6251,7 @@
     ISA: [11, 0, 1]
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true,
-      UseUniversalArgs: true}
+    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true, UseUniversalArgs: true}
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Ailk_Bljk_HHS_BH_UserArgs_MT64x48x64_MI16x16x1_SN_LDSB0_GRVWA8_GRVWB8_LBSPPA2048_LBSPPB128_MIWT1_3_NLCA1_SS1_TLDS1_WG64_2_1
     LSCA: 64
@@ -6471,8 +6437,7 @@
     ISA: [11, 0, 1]
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true,
-      UseUniversalArgs: true}
+    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true, UseUniversalArgs: true}
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Ailk_Bljk_HHS_BH_UserArgs_MT64x48x64_MI16x16x1_SN_LDSB0_GRVWA8_GRVWB8_LBSPPA2048_LBSPPB128_MIWT1_3_NLCA1_SS1_TLDS1_WG64_2_1
     LSCA: 64

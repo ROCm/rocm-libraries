@@ -64,8 +64,8 @@
   TileAwareSelection: false
   TileB: 1
   TotalIndices: 4
-  TransposeA: False
-  TransposeB: True
+  TransposeA: false
+  TransposeB: true
   UseBeta: true
   UseBias: 0
   UseE: false
@@ -113,8 +113,7 @@
     ISA: [11, 0, 1]
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true,
-      UseUniversalArgs: true}
+    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true, UseUniversalArgs: true}
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Ailk_Bjlk_I8II_BH_UserArgs_MT64x48x32_MI16x16x1_SN_GRVWA16_GRVWB4_LBSPPA1024_LBSPPB768_MIWT1_3_NLCA1_NLCB3_SS1_WG64_2_1
     LSCA: 64
@@ -294,8 +293,7 @@
     ISA: [11, 0, 1]
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true,
-      UseUniversalArgs: true}
+    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true, UseUniversalArgs: true}
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Ailk_Bjlk_I8II_BH_UserArgs_MT48x64x32_MI16x16x1_SN_GRVWA4_GRVWB4_LBSPPA768_LBSPPB1024_MIWT3_1_NLCA3_NLCB1_SS1_WG16_8_1
     LSCA: 16
@@ -353,7 +351,7 @@
     MatrixInstM: 16
     MatrixInstN: 16
     MatrixInstruction: [16, 16, 16, 1]
-    MaxOccupancy: 40
+    MaxOccupancy: 6
     NoLdsWriteCode: false
     NoReject: false
     NoTailLoop: false
@@ -475,8 +473,7 @@
     ISA: [11, 0, 1]
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true,
-      UseUniversalArgs: true}
+    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true, UseUniversalArgs: true}
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Ailk_Bjlk_I8II_BH_UserArgs_MT48x64x32_MI16x16x1_SN_GRVWA4_GRVWB4_LBSPPA768_LBSPPB1024_MIWT3_1_NLCA3_NLCB1_SS1_WG16_8_1
     LSCA: 16
@@ -534,7 +531,7 @@
     MatrixInstM: 16
     MatrixInstN: 16
     MatrixInstruction: [16, 16, 16, 1]
-    MaxOccupancy: 40
+    MaxOccupancy: 6
     NoLdsWriteCode: false
     NoReject: false
     NoTailLoop: false
@@ -656,8 +653,7 @@
     ISA: [11, 0, 1]
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true,
-      UseUniversalArgs: true}
+    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true, UseUniversalArgs: true}
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Ailk_Bjlk_I8II_BH_UserArgs_MT64x32x64_MI16x16x1_SN_GRVWA16_GRVWB4_LBSPPA1024_LBSPPB512_MIWT2_1_NLCA1_NLCB1_SS1_WG32_4_1
     LSCA: 64
@@ -715,7 +711,7 @@
     MatrixInstM: 16
     MatrixInstN: 16
     MatrixInstruction: [16, 16, 16, 1]
-    MaxOccupancy: 40
+    MaxOccupancy: 6
     NoLdsWriteCode: false
     NoReject: false
     NoTailLoop: false
