@@ -11,6 +11,7 @@ verify the reference computations are correct.
 import numpy as np
 import pytest
 
+from dnn_benchmarking.common.exceptions import UnsupportedGraphError
 from dnn_benchmarking.validation import ReferenceProviderRegistry
 
 # Skip all tests if torch is not available
@@ -454,7 +455,7 @@ class TestPyTorchProviderErrors:
 
         graph_json = {"nodes": [{"type": "UnsupportedOperation"}]}
 
-        with pytest.raises(ValueError) as exc_info:
+        with pytest.raises(UnsupportedGraphError) as exc_info:
             provider.compute_reference(graph_json, {})
 
         assert "unsupported" in str(exc_info.value).lower()
@@ -482,7 +483,7 @@ class TestPyTorchProviderErrors:
 
         input_data = {1: np.array([1.0, 2.0, 3.0])}
 
-        with pytest.raises(ValueError) as exc_info:
+        with pytest.raises(UnsupportedGraphError) as exc_info:
             provider.compute_reference(graph_json, input_data)
 
         assert "unsupported" in str(exc_info.value).lower()
@@ -929,7 +930,7 @@ class TestPyTorchProviderNewOps:
             4: np.array([0.0], dtype=np.float32),
         }
 
-        with pytest.raises(ValueError, match="peer statistics"):
+        with pytest.raises(UnsupportedGraphError, match="peer statistics"):
             provider.compute_reference(graph_json, input_data)
 
     def test_sdpa_forward_matches_torch_and_returns_stats(self) -> None:
@@ -1238,7 +1239,7 @@ class TestPyTorchProviderNewOps:
             ]
         }
 
-        with pytest.raises(ValueError, match=optional_output):
+        with pytest.raises(UnsupportedGraphError, match=optional_output):
             provider.compute_reference(graph_json, {1: q, 2: k, 3: v})
 
     @pytest.mark.parametrize(
@@ -1283,7 +1284,7 @@ class TestPyTorchProviderNewOps:
             ],
         }
 
-        with pytest.raises(ValueError, match=optional_input):
+        with pytest.raises(UnsupportedGraphError, match=optional_input):
             provider.compute_reference(
                 graph_json,
                 {1: q, 2: q, 3: q, 5: np.array([1], dtype=np.int32)},
@@ -1316,7 +1317,7 @@ class TestPyTorchProviderNewOps:
             ],
         }
 
-        with pytest.raises(ValueError, match=match):
+        with pytest.raises(UnsupportedGraphError, match=match):
             provider.compute_reference(graph_json, {1: q, 2: q, 3: q})
 
     def test_sdpa_forward_rejects_attn_mask_with_causal_mask(self) -> None:
@@ -1338,7 +1339,9 @@ class TestPyTorchProviderNewOps:
             ],
         }
 
-        with pytest.raises(ValueError, match="both attn_mask and causal_mask"):
+        with pytest.raises(
+            UnsupportedGraphError, match="both attn_mask and causal_mask"
+        ):
             provider.compute_reference(
                 graph_json,
                 {1: q, 2: q, 3: q, 5: np.zeros((1, 1, 2, 2), dtype=np.float32)},
