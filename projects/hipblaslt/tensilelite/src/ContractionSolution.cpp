@@ -43,6 +43,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdlib>
+#include <mutex>
 #include <random>
 
 #include <sstream>
@@ -56,6 +57,100 @@
 
 namespace TensileLite
 {
+    namespace
+    {
+        // The dynamic-queue StreamK kernels (SK4 and the SK4 sub-path of SK5)
+        // bake a fixed power-of-two per-XCD queue count for fast index masking.
+        // Codegen derives it from the arch's XCD count (StreamK.py
+        // _wsQueueConstants / archCaps["NumXCD"], mirroring origami
+        // get_default_num_xcds); the host reads the SAME origami value here so
+        // codegen and the runtime guard stay in lockstep. Returns 0 when the
+        // architecture cannot be determined (guard treats that as unsupported).
+        inline size_t streamKBakedQueueCount(Hardware const& hardware)
+        {
+            auto const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
+            if(hipAMDGPU == nullptr || hipAMDGPU->analyticalHardware == nullptr)
+                return 0;
+            try
+            {
+                return origami::hardware_t::get_default_num_xcds(
+                    hipAMDGPU->analyticalHardware->arch);
+            }
+            catch(std::exception const&)
+            {
+                // origami throws for architectures without a hardcoded default
+                // XCD count; treat that as "cannot determine" (0 == unsupported)
+                // rather than propagating the exception through solution
+                // selection.
+                return 0;
+            }
+        }
+
+        // Per-XCD counter stride (bytes) for the dynamic-queue work-queue
+        // region. Set equal to the hardware L2 cache-line size so each per-XCD
+        // atomic counter occupies its own line (no false sharing). Sourced from
+        // origami (hardware_t::get_default_cache_line_bytes) -- the SAME value
+        // the codegen mirrors via rocisa archCaps["CacheLineBytes"]
+        // (StreamK.py _wsQueueConstants). Host (origami) and codegen (archCaps)
+        // strides are two mirrors of the one origami cache-line size, so the
+        // workspace the host reserves matches the layout the kernel addresses.
+        // Returns 0 when the architecture cannot be determined.
+        inline size_t streamKPerQueueStrideBytes(Hardware const& hardware)
+        {
+            auto const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
+            if(hipAMDGPU == nullptr || hipAMDGPU->analyticalHardware == nullptr)
+                return 0;
+            return origami::hardware_t::get_default_cache_line_bytes(
+                hipAMDGPU->analyticalHardware->arch);
+        }
+
+        // The dynamic-queue fetch / work stealing is only correct when the
+        // device's runtime NUM_XCD is a power of two AND equals the baked
+        // per-XCD queue count. Returns true (UNSUPPORTED) when the hardware is
+        // unknown (not a HipAMDGPU, missing analytical hardware, or no baked
+        // per-XCD queue count), when NUM_XCD is 0, not a power of two, or
+        // NUM_XCD != baked (e.g. MI300A's 6 XCDs, or a 4-XCD partition of an
+        // 8-XCD gfx942). Unknown hardware is treated as UNSUPPORTED: the
+        // dynamic-queue solution is then excluded from selection and a
+        // non-dynamic-queue solution serves the GEMM, rather than staying
+        // selectable while the per-XCD counter workspace is sized with an
+        // unknown (0) queue count (which would under-allocate). Kept isolated
+        // here so it stays trivially unit-testable (see CuCount_test.cpp).
+        inline bool streamKDynamicQueueUnsupported(Hardware const& hardware)
+        {
+            auto const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
+            if(hipAMDGPU == nullptr || hipAMDGPU->analyticalHardware == nullptr)
+                return true;
+            size_t baked  = streamKBakedQueueCount(hardware);
+            size_t numXCD = hipAMDGPU->analyticalHardware->NUM_XCD;
+            return baked == 0 || numXCD == 0 || (numXCD & (numXCD - 1)) != 0
+                   || numXCD != baked;
+        }
+
+        // Emit a single, user-visible warning (not once-per-call spam) when a
+        // StreamK dynamic-queue / work-stealing solution is excluded from
+        // selection because the device's XCD count does not match the compiled
+        // per-XCD queue count. This is what surfaces the reject to the user
+        // instead of silently degrading to tree reduction.
+        void warnStreamKDynamicQueueUnsupportedOnce(Hardware const& hardware)
+        {
+            static std::once_flag warnedFlag;
+            std::call_once(warnedFlag, [&]() {
+                size_t      numXCD    = 0;
+                auto const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
+                if(hipAMDGPU != nullptr && hipAMDGPU->analyticalHardware != nullptr)
+                    numXCD = hipAMDGPU->analyticalHardware->NUM_XCD;
+                size_t baked = streamKBakedQueueCount(hardware);
+                std::cerr << "hipBLASLt Warning: StreamK dynamic-queue (work-stealing) solutions "
+                             "require the device's XCD count to be a power of two and to equal the "
+                             "compiled per-XCD queue count; this device reports NUM_XCD="
+                          << numXCD << " with a compiled per-XCD queue count of " << baked
+                          << ", so those solutions are excluded from selection and a "
+                             "non-work-stealing solution will be used instead.\n";
+            });
+        }
+    }
+
     enum class KERNELARGTYPE
     {
         NORMAL   = 0,
@@ -3218,6 +3313,40 @@ namespace TensileLite
             const bool effectiveDynamic = (sizeMapping.streamK == 5)
                                               ? streamK5EffectiveDynamic(problem, hardware)
                                               : false;
+            // Defensive: dynamic-queue / work-stealing StreamK solutions are
+            // excluded from selection on devices whose runtime XCD count is not
+            // a power of two or does not equal the baked per-XCD queue count
+            // (see streamKDynamicQueueSupported() wired into softwarePredicate).
+            // The normal path therefore never reaches solve() for such a
+            // solution; a different (SK3-static / non-StreamK) solution serves
+            // the GEMM instead. If we DO get here it means the software
+            // predicate was bypassed (e.g. an explicit select-by-index), so
+            // reject EXPLICITLY rather than silently running the fixed-mask
+            // kernel with a mismatched queue count (which would corrupt
+            // results).
+            const bool dynamicQueuePath
+                = (sizeMapping.streamK == 4)
+                  || (sizeMapping.streamK == 5 && effectiveDynamic);
+            if(dynamicQueuePath && streamKDynamicQueueUnsupported(hardware))
+            {
+                warnStreamKDynamicQueueUnsupportedOnce(hardware);
+                // Fail EARLY -- before workspace sizing / kernel-arg packing --
+                // when NUM_XCD is unknown (baked queue count == 0, e.g. missing
+                // analyticalHardware). Sizing the per-XCD counter region with a
+                // 0 queue count would under-allocate the workspace the kernel
+                // writes; reject with an actionable message instead.
+                if(streamKBakedQueueCount(hardware) == 0)
+                    throw std::runtime_error(
+                        "hipBLASLt Error: StreamK dynamic-queue (work-stealing) requires a known "
+                        "NUM_XCD (analyticalHardware unavailable); refusing to size the per-XCD "
+                        "counter workspace with an unknown queue count. "
+                        "Select a non-work-stealing solution instead.");
+                throw std::runtime_error(
+                    "hipBLASLt Error: StreamK dynamic-queue (work-stealing) solution selected on a "
+                    "device whose XCD count is not a power of two or does not equal the compiled "
+                    "per-XCD queue count; this kernel is unsupported here. "
+                    "Select a non-work-stealing solution instead.");
+            }
             if(sizeMapping.streamK == 4)
                 sk.reduction = origami::reduction_t::tree;
             else if(sizeMapping.streamK == 5)
@@ -3241,12 +3370,20 @@ namespace TensileLite
             {
                 size_t idealWorkspace = partialTileSize(sk.grid);
                 // SK4 and SK5-dynamic need the per-XCD work-queue region; SK5-static
-                // sizes like standalone SK3.
-                if(sizeMapping.streamK == 4
-                   || (sizeMapping.streamK == 5 && effectiveDynamic))
-                    idealWorkspace += 256 * 8;
+                // sizes like standalone SK3. The region is sized as (per-queue
+                // stride) * (baked per-XCD queue count), both sourced from origami:
+                // the stride is the L2 cache-line size (get_default_cache_line_bytes,
+                // 128 B for gfx942/gfx950) so each counter owns its line (no false
+                // sharing), and the queue count is the per-arch XCD count. The
+                // acceptance guard requires runtime NUM_XCD == baked, so this equals
+                // cacheLineBytes * NUM_XCD for every device that reaches here.
+                if(dynamicQueuePath)
+                    idealWorkspace
+                        += streamKPerQueueStrideBytes(hardware) * streamKBakedQueueCount(hardware);
                 // If given workspace is less than ideal, we can fall back to DP mode
-                // Performance will likely be lower, but the kernel can run if workspace is unavailable
+                // Performance will likely be lower, but the kernel can run if workspace is unavailable.
+                // (The non-power-of-two XCD case is handled earlier by explicit
+                // rejection, not by a silent fall back to tree reduction.)
                 if(idealWorkspace > problem.workspaceSize())
                 {
                     sk.reduction = origami::reduction_t::tree;
@@ -3672,9 +3809,19 @@ namespace TensileLite
                 else if(skGrid > 0 && (tiles % skGrid != 0 && !streamKDP && !forceDPOnly))
                 {
                     size_t idealWorkspace = partialTileSize(skGrid);
+                    // Reserve the per-XCD work-queue region for the dynamic-queue
+                    // path. Sized as (per-queue stride) * (baked per-XCD queue
+                    // count), both from origami: the stride is the L2 cache-line
+                    // size (get_default_cache_line_bytes, 128 B for gfx942/gfx950)
+                    // so each counter owns its line (no false sharing), and the
+                    // queue count is the per-arch XCD count (e.g. 8 for
+                    // gfx942/gfx950). This may slightly over-report on a device
+                    // that falls back to tree reduction (e.g. MI300A), which is
+                    // safe (never under-sized).
                     if(sizeMapping.streamK == 4
                        || (sizeMapping.streamK == 5 && effectiveDynamic))
-                        idealWorkspace += 256 * 8;
+                        idealWorkspace
+                            += streamKPerQueueStrideBytes(hardware) * streamKBakedQueueCount(hardware);
                     // If given workspace is less than ideal, we can fall back to DP mode
                     // Performance will likely be lower, but the kernel can run if workspace is unavailable
                     if(idealWorkspace <= problem.workspaceSize())
@@ -3965,6 +4112,43 @@ namespace TensileLite
         }
 
         return effectiveDynamic;
+    }
+
+    bool ContractionSolution::streamKDynamicQueueSupported(Problem const&  problem,
+                                                           Hardware const& hardware) const
+    {
+        // Only StreamK solutions can ever take the dynamic-queue / work-stealing
+        // path; everything else (SK3-static, non-StreamK) is always selectable.
+        if(sizeMapping.streamK != 4 && sizeMapping.streamK != 5)
+            return true;
+
+        // Fast/common path: on hardware whose runtime XCD count is a power of
+        // two AND equals the baked per-XCD queue count, the fixed queue masking
+        // is valid, so nothing is excluded. Unknown hardware (missing analytical
+        // info / no baked count) is treated as UNSUPPORTED by the predicate, so
+        // it falls through to the reject-and-continue path below rather than
+        // being kept. Checked before streamK5EffectiveDynamic() so the mainline
+        // gfx942(MI300X)/gfx950 path stays cheap.
+        if(!streamKDynamicQueueUnsupported(hardware))
+            return true;
+
+        // Runtime XCD count is not a power of two or does not equal the baked
+        // per-XCD queue count. Only the dynamic-queue sub-path is affected: an
+        // SK5 solution that resolves to the static (SK3) sub-path for this
+        // problem stays valid and selectable.
+        const bool dynamicQueue
+            = (sizeMapping.streamK == 4)
+              || (sizeMapping.streamK == 5 && streamK5EffectiveDynamic(problem, hardware));
+        if(!dynamicQueue)
+            return true;
+
+        // Reject-and-continue: exclude this dynamic-queue / work-stealing
+        // solution from selection (return false) and warn the user ONCE so they
+        // are informed rather than silently degraded to tree reduction. Because
+        // this is a selection-time predicate, other solutions (SK3-static,
+        // non-StreamK) remain available to serve the GEMM.
+        warnStreamKDynamicQueueUnsupportedOnce(hardware);
+        return false;
     }
 
     namespace

@@ -19,11 +19,6 @@ Known bugs:
   # affected data-center arches so the reproducer can land ahead of the kernel fix.
   # REMOVE this entry once the output-store path is fixed so the case re-activates
   # as an enforced bit-exact regression gate.
-  #
-  # Two-PR known-bug flow (W-KNOWN-BUG): PR1 = this reproducer + quarantine;
-  # PR2 = the output-store fix that deletes this entry. Time-box: tracked by
-  # ROCM-26455; re-evaluate by the next hipBLASLt release if still unfixed.
-  - { name: matmul_size_t_output_overflow_bf16_ROCM26455, function: matmul, known_bug_platforms: "gfx942, gfx950" }
 
   # ROCM-27082: gfx950 MXFP4 subtile scaleAlphaVec TN cases fail the norm/accuracy
   # check on asymmetric (M!=N) tiles. Square tiles (128x128, 192x192) still pass and

@@ -11,7 +11,7 @@
 
 // <thread>
 
-// template<class charT> struct formatter<thread::id, charT>;
+// template<class charT> struct formatter<wthread::id, charT>;
 
 // [format.formatter.spec]/4
 //   If the library provides an explicit or partial specialization of
@@ -36,7 +36,7 @@
 
 #include "test_macros.h"
 
-static_assert(::std::semiregular<::std::formatter<hip::thread::id, char>>);
+static_assert(::std::semiregular<::std::formatter<hip::wthread::id, char>>);
 #ifndef TEST_HAS_NO_WIDE_CHARACTERS
-static_assert(::std::semiregular<::std::formatter<hip::thread::id, wchar_t>>);
+static_assert(::std::semiregular<::std::formatter<hip::wthread::id, wchar_t>>);
 #endif
