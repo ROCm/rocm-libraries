@@ -404,6 +404,7 @@ endif()
 # Test suite
 enable_testing()
 include(CTest)
+add_subdirectory(test)
 add_subdirectory(utilities/test_suite)
 
 # Installation
