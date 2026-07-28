@@ -322,6 +322,32 @@ def _validateStreamKMulticast(state, printRejectionReason, isaInfoMap):
   return True
 
 
+def _deriveStreamKMulticast(state):
+  """Whether the StreamK=3 DP cooperative B-multicast fast path auto-enables.
+
+  Derived-only internal gate (no user/YAML opt-in): on StreamK=3 a non-[1, 1]
+  ClusterDim collapses the bare index-only cluster state into the DP cooperative
+  B-multicast path -- a StreamK cluster always carries a cooperative role, so
+  "ClusterDim without cluster loads" is not a supported state. This is the sole
+  enable site for the internal StreamKMulticast key; keeping it as a named helper
+  keeps the Multicast / ClusterBarrier enable conditions in
+  assignProblemIndependentDerivedParameters readable (reviewer request on #9603).
+
+  If the resulting cooperative-load config cannot be satisfied (e.g. TDMInst != 3
+  or non-gfx1250), _validateStreamKMulticast (called later in
+  assignDerivedParameters) rejects it at build time rather than silently degrading
+  to a no-op cluster.
+
+  Scope note: the TDM B-multicast fast path is StreamK=3-only, so there is nothing
+  to auto-enable for the dynamic (SK4) / hybrid (SK5) queue modes; SK4/SK5 with a
+  non-[1, 1] ClusterDim is rejected later in assignDerivedParameters. ClusterDim is
+  tested first so this never dereferences StreamK for the common non-clustered
+  state, which some partial-state derivation call sites construct without a StreamK
+  key.
+  """
+  return 1 if state["ClusterDim"] != [1, 1] and state.get("StreamK", 0) == 3 else 0
+
+
 # _getExpectedTypes / _expectedParamTypes / _skipTypeCheck were moved into
 # Tensile/Common/ValidParameters.py to keep the registry and its derived
 # type map co-located (and to keep the Common -> Solution import direction).
@@ -1161,30 +1187,11 @@ class Solution(collections.abc.Mapping):
 
     state["ClusterBarrier"] = False
     # StreamKMulticast is a DERIVED-ONLY internal state key (not a valid/benchmark
-    # parameter -- see ValidParameters.py). Seed it off here (mirroring the
-    # ClusterBarrier default above) so it is always present on state; the collapse
-    # below is the ONLY place it is turned on.
-    state["StreamKMulticast"] = 0
-    # Collapse the bare StreamK cluster state: on StreamK=3 a non-[1,1] ClusterDim
-    # AUTO-ENABLES the DP cooperative B-multicast path. A StreamK cluster always
-    # carries a cooperative role -- "ClusterDim without cluster loads" is
-    # not a supported state. StreamKMulticast is derived-only (no user/YAML
-    # opt-in): this collapse is its sole enable site.
-    #
-    # If the resulting cooperative-load config cannot be satisfied (e.g. TDMInst!=3
-    # or non-gfx1250), _validateStreamKMulticast (called later in
-    # assignDerivedParameters) rejects it at build time rather than silently
-    # degrading to a no-op cluster -- an unusable cluster is a hard reject.
-    #
-    # Scope note: the TDM B-multicast fast path is StreamK=3-only, so there is
-    # nothing to auto-enable for the dynamic (SK4) / hybrid (SK5) queue modes.
-    # SK4/SK5 with a non-[1,1] ClusterDim is rejected later in
-    # assignDerivedParameters (no cluster-load impl for those modes).
-    # ClusterDim is tested first so this (like the legacy Multicast auto branch
-    # below) never dereferences StreamK for the common non-clustered state, which
-    # some partial-state derivation call sites construct without a StreamK key.
-    if state["ClusterDim"] != [1, 1] and state.get("StreamK", 0) == 3:
-      state["StreamKMulticast"] = 1
+    # parameter -- see ValidParameters.py). Its derivation (the StreamK=3 +
+    # ClusterDim collapse) lives in the named _deriveStreamKMulticast helper so the
+    # Multicast / ClusterBarrier enable conditions below stay readable; that helper
+    # is the sole enable site.
+    state["StreamKMulticast"] = _deriveStreamKMulticast(state)
     # Multicast tri-state (see ValidParameters): -1 auto (legacy), 0 off, 1 on.
     # Default -1 reproduces the ClusterDim-coupled derivation, so YAML
     # that omits Multicast is unchanged.
@@ -1217,14 +1224,15 @@ class Solution(collections.abc.Mapping):
       state["Multicast"] = int(state["ClusterDim"] != [1, 1]
                                and state["StreamK"] == 0)
     # The cluster-scope barrier handshake (s_barrier_signal/wait -3, inserted by
-    # StinkyTofu's InsertClusterBarrierPass around each multicast tensor_load_to_lds)
-    # keeps the C cluster peers in lockstep on the multicast loads. It applies to
-    # both clustered multicast paths: the legacy/subtile clustered multicast
-    # (StreamK == 0) and the StreamK DP cooperative multicast (StreamKMulticast).
-    # A forced-off Multicast keeps it off.
-    if state["ClusterDim"] != [1, 1] and state["Multicast"] \
-       and state["TDMInst"] != 0 \
-       and (state["StreamK"] == 0 or state.get("StreamKMulticast", 0)) \
+    # StinkyTofu's InsertClusterBarrierPass) keeps the cluster peers in lockstep.
+    # ANY active cluster (ClusterDim != [1, 1]) needs it, independent of Multicast:
+    # every cluster role -- multicast, partial reduction, factored and dual-2D --
+    # relies on its co-resident peers staying synchronized, not just the B-multicast
+    # path. Still gated on TDM being live (TDMInst != 0 -- an active cluster loads
+    # cooperatively via tensor_load_to_lds; without TDM there is nothing to
+    # synchronize) and on the ISA providing the cluster-barrier instruction
+    # (HasClusterBarrier).
+    if state["ClusterDim"] != [1, 1] and state["TDMInst"] != 0 \
        and isaInfoMap[state["ISA"]].asmCaps.get("HasClusterBarrier", False):
       state["ClusterBarrier"] = True
 
