@@ -84,7 +84,7 @@ class AttentionRequest(OperatorRequest):
     spec_id: str = "auto"
     # --- gfx950 attention_dense knobs (only consumed by the opt-in
     #     ``attention_dense`` candidate; ignored by the unified 2D/3D paths).
-    #     Defaults deliver the persistent ~970-TFLOPS prefill path for large Sq:
+    #     Defaults deliver the persistent prefill path for large Sq:
     #     ``dense_persistent="auto"`` turns on the grid-stride variant once there
     #     is enough work to fill the persistent grid, and ``persist_decode="auto"``
     #     picks the L2-locality hkv-major decode where it is balance-safe. ---
@@ -328,7 +328,7 @@ _DENSE_BLOCK_N = 64
 
 def _dense_spec(req: OperatorRequest):
     """Build the ``AttentionDenseSpec`` for a request at its best-performing
-    config. Persistent ("auto") turns on the grid-stride ~970-TFLOPS variant once
+    config. Persistent ("auto") turns on the grid-stride variant once
     there is enough work to fill the persistent grid (``nqb*Hq*B >= num_persistent``
     -- the large-Sq prefill regime); ``persist_decode`` / ``lazy_rescale`` default
     to the L2-locality hkv-major decode and always-on lazy rescale. Non-tile-
@@ -606,7 +606,107 @@ def _make_d256_decode_candidate() -> KernelCandidate:
     return candidate
 
 
+def _make_gfx942_attention_dense_candidate() -> KernelCandidate:
+    """Dense flash-attn prefill on gfx942 (bf16/fp16, causal/full) — AICK-1664.
+
+    OPT-IN ONLY (mirrors the gfx950 sibling): matches solely when the request names
+    ``algorithm="attention_dense"`` / ``spec_id="gfx942_attention_dense"``, so it never
+    auto-overrides the generic unified_2d / dense_pipe paths.
+
+    PERFORMANCE CAVEAT: the P0 body is a CORRECTNESS baseline -- non-pipelined, with
+    an element-wise V read -- and is expected to be slower than the generic
+    ``attention_tiled_2d`` gfx942 kernel until the P1-P3 levers (conflict-free V,
+    exp2_fast, wide workgroups) land. Opt in for correctness or bring-up, not for
+    throughput.
+
+    Scope is delegated entirely to ``supports_attention_dense``, which rejects every
+    spec the builder cannot emit (persistent is P4; varlen / ragged / sliding-window
+    are later follow-ups; plus block_n, LDS-budget and 32-bit-extent limits). That
+    keeps ``support`` and ``build`` in agreement, so an out-of-scope request falls
+    through to another candidate instead of being selected and then failing to build.
+    """
+    spec_id = "gfx942_attention_dense"
+    name = "attention_gfx942_dense"
+
+    def _p0_req(req: "AttentionRequest") -> "AttentionRequest":
+        """Resolve ``dense_persistent='auto'`` to 'off' for the P0 default-grid scope.
+
+        Only 'auto' is resolved. An EXPLICIT ``dense_persistent='on'`` is left intact
+        so ``supports_attention_dense`` rejects it (persistent is P4) rather than this
+        candidate silently launching a non-persistent kernel for a caller who asked
+        for the persistent one.
+        """
+        import dataclasses
+
+        if req.dense_persistent.strip().lower() == "auto":
+            return dataclasses.replace(req, dense_persistent="off")
+        return req
+
+    def support(req: OperatorRequest) -> Tuple[bool, str]:
+        errors = _request_errors(req)
+        if errors:
+            return False, "; ".join(errors)
+        assert isinstance(req, AttentionRequest)
+        if req.algorithm.strip().lower() != "attention_dense" and (
+            req.spec_id.strip().lower() != spec_id
+        ):
+            return False, "attention_dense is opt-in (algorithm='attention_dense')"
+        if req.arch != "gfx942":
+            return False, f"this candidate requires gfx942 (got {req.arch!r})"
+        from kernels.gfx942.attention_dense import supports_attention_dense
+
+        if req.dtype.lower() not in ("bf16", "fp16"):
+            return False, f"attention_dense is bf16/fp16 only (got {req.dtype!r})"
+        if int(req.sliding_window) or bool(req.use_sinks):
+            return False, "attention_dense is dense (no sliding-window / sinks)"
+        try:
+            spec = _dense_spec(_p0_req(req))
+        except ValueError as e:
+            return False, str(e)
+        ok, why = supports_attention_dense(spec, arch=req.arch)
+        if not ok:
+            return False, why
+        return True, "ok"
+
+    def select(req: OperatorRequest) -> AttentionSpec:
+        ok, why = support(req)
+        if not ok:
+            raise ValueError(f"{name} does not support request: {why}")
+        assert isinstance(req, AttentionRequest)
+        from kernels.gfx942.attention_dense import p0_kernel_name
+
+        problem = _problem(req)
+        dense_spec = _dense_spec(_p0_req(req))
+        return AttentionSpec(
+            path="2d",
+            head_size=problem.head_size,
+            block_size=problem.block_size,
+            dtype=problem.dtype,
+            num_query_heads=problem.num_query_heads,
+            num_kv_heads=problem.num_kv_heads,
+            name="rocke_attention_dense_gfx942",
+            # batch-unique: the kernel bakes batch into buffer extents (p0_kernel_name)
+            kernel_name_override=p0_kernel_name(dense_spec),
+        )
+
+    return KernelCandidate(
+        name=name,
+        family=_FAMILY,
+        algorithm="attention_dense",
+        spec_id=spec_id,
+        abi_version=ATTENTION_ABI_VERSION,
+        priority=3,
+        supports=support,
+        select_spec=select,
+        signature=lambda _spec: (),
+        grid=lambda spec, req: (0, 0, 0),
+        block=lambda spec: (0, 0, 0),
+        sweep_space=lambda req: (select(req),) if support(req)[0] else (),
+    )
+
+
 ATTENTION_REGISTRY.register(_make_gfx950_attention_dense_candidate())
+ATTENTION_REGISTRY.register(_make_gfx942_attention_dense_candidate())
 ATTENTION_REGISTRY.register(_make_gfx950_d256_candidate())
 ATTENTION_REGISTRY.register(_make_d256_decode_candidate())
 

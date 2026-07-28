@@ -20,13 +20,20 @@ passed from Python, it does not recompute it.
 
 | priority | candidate | scope |
 |---|---|---|
+| 3 | `attention_gfx950_dense` | gfx950 bf16/fp16 dense prefill — **opt-in only** |
+| 3 | `attention_gfx942_dense` | gfx942 bf16/fp16 dense prefill — **opt-in only** |
+| 5 | `attention_gfx950_d256` | gfx950 bf16 D256 2D prefill |
 | 5 | `attention_gfx942_dense_pipe` | gfx942 fp16 2D prefill flash |
 | 5 | `attention_d256_decode` | gfx942/gfx950 bf16 D256 3D decode |
 | 10 | `attention_unified_2d` | generic 2D prefill fallback |
 | 10 | `attention_unified_3d` | generic 3D decode fallback |
 
-Lower priority number = higher precedence. Generic candidates (10) remain the
-fallback for everything a specialized candidate (5) does not claim.
+Lower priority number = higher precedence. **Tier 3 is reserved for opt-in
+candidates** that match only an explicit `algorithm` / `spec_id`; because they
+outrank every other tier, that opt-in check is the only thing keeping them off the
+default path — a tier-3 candidate whose `support()` forgets it would silently claim
+all traffic for its arch. Generic candidates (10) remain the fallback for everything
+a specialized candidate (3/5) does not claim.
 
 ## How to add a new specialized candidate
 
