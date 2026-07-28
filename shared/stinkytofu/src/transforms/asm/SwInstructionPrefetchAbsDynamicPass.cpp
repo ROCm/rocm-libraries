@@ -169,8 +169,11 @@ class SwInstructionPrefetchAbsDynamicPass : public StinkyInstPass {
     /// Conservative one-shot shift: an UPPER BOUND on the bytes inserted BEFORE the
     /// boundary (cover <=52 + ladder <=~244). Adding it to the pre-insertion boundary offset makes
     /// the computed coverN never under-cover (over-cover <= 1 block), with NO fixed-point
-    /// iteration.
-    static constexpr int64_t kCpCoverInsertUpperBoundBytes = 320;
+    /// iteration. +16 when the XNACK wait is on: up to 4 pre-boundary s_wait_xcnt 0 (1 cover burst
+    /// + 3 ladder arms, all laid out before the CP boundary) x 4 B. Reverts to 320 when off, so
+    /// coverN is bit-identical to before (the +16 stays within the same 4 KiB floor bucket except
+    /// in the rare boundary-straddle case, where the extra block is genuinely needed).
+    static constexpr int64_t kCpCoverInsertUpperBoundBytes = 320 + 4 * kSwPrefetchXnackWaitBytes;
     /// Target label anchored (post-insertion) at the final-layout CP boundary (offset <= P(0)).
     static constexpr const char* kCpBoundaryLabel = "label_SW_PrefetchAbs_CpBoundary";
 
@@ -467,6 +470,8 @@ class SwInstructionPrefetchAbsDynamicPass : public StinkyInstPass {
         const HwInstDesc* dAddU = getMCIDByUOp(GFX::s_add_u32, archId);
         const HwInstDesc* dAddC = getMCIDByUOp(GFX::s_addc_u32, archId);
         const HwInstDesc* dPf = getMCIDByUOp(GFX::s_prefetch_inst, archId);
+        // XNACK safety wait; optional (toggle + arch), so NOT part of the cover/ladder opcode gate.
+        const HwInstDesc* dXcnt = getMCIDByUOp(GFX::s_wait_xcnt, archId);
         const bool coverOpcodesOk = dGetpc && dAddI && dAddU && dAddC && dPf;
         const bool ladderOpcodesOk = coverOpcodesOk && dAnd && dMov && dCmp && dBr0 && dBr;
         const bool emitCover = wantCover && coverOpcodesOk;
@@ -574,6 +579,14 @@ class SwInstructionPrefetchAbsDynamicPass : public StinkyInstPass {
             a2->addDestReg(StinkyRegister("s", hi, 1));
             a2->addSrcReg(StinkyRegister("s", hi, 1));
             a2->addSrcReg(StinkyRegister(0));
+            // XNACK safety: one s_wait_xcnt 0 before this burst's contiguous prefetch group.
+            // emitBurst is shared by the CP cover + all 3 ladder arms + the fallback, so this one
+            // spot gates every group. No-op when the toggle is off or the opcode is unavailable;
+            // the bytes of the pre-boundary waits are bounded by kCpCoverInsertUpperBoundBytes.
+            if (kSwPrefetchEmitXnackWait && dXcnt != nullptr) {
+                StinkyInstruction* w = ins(dXcnt);
+                w->addSrcReg(StinkyRegister(0));  // xcnt = 0
+            }
             for (int k = 0; k < n; ++k) {
                 StinkyInstruction* p = ins(dPf);
                 p->addSrcReg(StinkyRegister("s", lo, 2));

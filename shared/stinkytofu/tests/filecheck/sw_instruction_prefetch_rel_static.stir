@@ -16,11 +16,12 @@ st.func @below_p0() {
   v3 = "st.v_add_f32"(v4, v5) { issueCycles = 1, latencyCycles = 5 }
 }
 
-#--- P(0)=32640: 8 B WMMA anchor [32632,32640) -> prefetch total=32640
+#--- P(0)=32640: 8 B WMMA anchor. XNACK s_wait_xcnt 0 (4 B) precedes the prefetch.
 # CHECK-LABEL: [.align 32632 padding=
-# CHECK: {{.*}}total=32640 bytes{{.*}}s_prefetch_inst_pc_rel{{.*}}(0, null, 31)
-# CHECK: {{.*}}total=32648 bytes{{.*}}v_wmma_f32_16x16x32_bf16
-# CHECK: [AccumulateInstructionSizePass] total size = 32648 bytes
+# CHECK: {{.*}}total=32636 bytes{{.*}}s_wait_xcnt{{.*}}(0)
+# CHECK: {{.*}}total=32644 bytes{{.*}}s_prefetch_inst_pc_rel{{.*}}(0, null, 31)
+# CHECK: {{.*}}total=32652 bytes{{.*}}v_wmma_f32_16x16x32_bf16
+# CHECK: [AccumulateInstructionSizePass] total size = 32652 bytes
 
 st.func @at_p0_k0_wmma() {
 ^entry:
@@ -29,13 +30,14 @@ st.func @at_p0_k0_wmma() {
   a[0:7] = "st.v_wmma_f32_16x16x32_bf16"(v[8:15], v[16:23], a[0:7]) { mod.mfma = { reuseA = false, reuseB = false } }
 }
 
-#--- P(0)=32640: kernel-style v_cmp + 4 B s_set anchor -> prefetch total=32644
-# (matches hipBLASLt: cmp ends 32636, prefetch 32644, set 32648)
+#--- P(0)=32640: kernel-style v_cmp + 4 B s_set anchor. XNACK s_wait_xcnt 0 (4 B) precedes the
+# prefetch (cmp ends 32636, wait 32640, prefetch 32648, set 32652).
 # CHECK-LABEL: [.align 32628 padding=
 # CHECK: {{.*}}total=32636 bytes{{.*}}v_cmp_ge_i32
-# CHECK: {{.*}}total=32644 bytes{{.*}}s_prefetch_inst_pc_rel{{.*}}(0, null, 31)
-# CHECK: {{.*}}total=32648 bytes{{.*}}s_set_vgpr_msb
-# CHECK: [AccumulateInstructionSizePass] total size = 32648 bytes
+# CHECK: {{.*}}total=32640 bytes{{.*}}s_wait_xcnt{{.*}}(0)
+# CHECK: {{.*}}total=32648 bytes{{.*}}s_prefetch_inst_pc_rel{{.*}}(0, null, 31)
+# CHECK: {{.*}}total=32652 bytes{{.*}}s_set_vgpr_msb
+# CHECK: [AccumulateInstructionSizePass] total size = 32652 bytes
 
 st.func @at_p0_k0_cmp_set() {
 ^entry:
@@ -45,11 +47,12 @@ st.func @at_p0_k0_cmp_set() {
   "st.s_set_vgpr_msb"(130) { issueCycles = 1, latencyCycles = 1 }
 }
 
-#--- P(2)=40832: 12 B buffer_store anchor -> prefetch total=40828, store total=40840
+#--- P(2)=40832: 12 B buffer_store anchor. XNACK s_wait_xcnt 0 (4 B) precedes the prefetch.
 # CHECK-LABEL: [.align 40820 padding=
-# CHECK: {{.*}}total=40828 bytes{{.*}}s_prefetch_inst_pc_rel{{.*}}(0, null, 31)
-# CHECK: {{.*}}total=40840 bytes{{.*}}buffer_store_b128
-# CHECK: [AccumulateInstructionSizePass] total size = 40840 bytes
+# CHECK: {{.*}}total=40824 bytes{{.*}}s_wait_xcnt{{.*}}(0)
+# CHECK: {{.*}}total=40832 bytes{{.*}}s_prefetch_inst_pc_rel{{.*}}(0, null, 31)
+# CHECK: {{.*}}total=40844 bytes{{.*}}buffer_store_b128
+# CHECK: [AccumulateInstructionSizePass] total size = 40844 bytes
 
 st.func @at_p2_k2_buffer_store() {
 ^entry:
@@ -58,11 +61,12 @@ st.func @at_p2_k2_buffer_store() {
   "st.buffer_store_b128"(v[624:627], v525, s[16:19], 0) { issueCycles = 1, latencyCycles = 1, mod.mubuf = { offen = true, offset12 = 608, glc = false, slc = false, nt = false, lds = false, scope = "SCOPE_CU" } }
 }
 
-#--- P(4)=49024 inside prefetch span [49020,49028) -> prefetch total=49028
+#--- P(4)=49024. XNACK s_wait_xcnt 0 (4 B) precedes the prefetch.
 # CHECK-LABEL: [.align 49020 padding=
-# CHECK: {{.*}}total=49028 bytes{{.*}}s_prefetch_inst_pc_rel{{.*}}(0, null, 31)
-# CHECK: {{.*}}total=49036 bytes{{.*}}ds_bpermute_b32
-# CHECK: [AccumulateInstructionSizePass] total size = 49040 bytes
+# CHECK: {{.*}}total=49024 bytes{{.*}}s_wait_xcnt{{.*}}(0)
+# CHECK: {{.*}}total=49032 bytes{{.*}}s_prefetch_inst_pc_rel{{.*}}(0, null, 31)
+# CHECK: {{.*}}total=49040 bytes{{.*}}ds_bpermute_b32
+# CHECK: [AccumulateInstructionSizePass] total size = 49044 bytes
 
 st.func @at_p4_k4_ds_bpermute() {
 ^entry:
@@ -72,11 +76,12 @@ st.func @at_p4_k4_ds_bpermute() {
   v40 = "st.v_mov_b32"(v9) { issueCycles = 1, latencyCycles = 5 }
 }
 
-#--- P(11)=77696: 8 B v_add_lshl anchor -> prefetch total=77696, add total=77704
+#--- P(11)=77696: 8 B v_add_lshl anchor. XNACK s_wait_xcnt 0 (4 B) precedes the prefetch.
 # CHECK-LABEL: [.align 77688 padding=
-# CHECK: {{.*}}total=77696 bytes{{.*}}s_prefetch_inst_pc_rel{{.*}}(0, null, 31)
-# CHECK: {{.*}}total=77704 bytes{{.*}}v_add_lshl_u32
-# CHECK: [AccumulateInstructionSizePass] total size = 77704 bytes
+# CHECK: {{.*}}total=77692 bytes{{.*}}s_wait_xcnt{{.*}}(0)
+# CHECK: {{.*}}total=77700 bytes{{.*}}s_prefetch_inst_pc_rel{{.*}}(0, null, 31)
+# CHECK: {{.*}}total=77708 bytes{{.*}}v_add_lshl_u32
+# CHECK: [AccumulateInstructionSizePass] total size = 77708 bytes
 
 st.func @at_p11_k11_add_lshl() {
 ^entry:

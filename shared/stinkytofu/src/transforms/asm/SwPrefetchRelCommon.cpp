@@ -101,17 +101,36 @@ int64_t insertSwPrefetchInstPcRelBefore(
     const HwInstDesc* pfMc = getMCIDByUOp(GFX::s_prefetch_inst_pc_rel, archId);
     if (pfMc == nullptr) return 0;
 
+    // XNACK safety: drain outstanding address translations before the prefetch. Relative hints are
+    // scattered (one per grid point, separated by real code), so a single upstream drain would be
+    // stale by the next hint — hence one s_wait_xcnt 0 per prefetch. Gated by the toggle + opcode
+    // availability (no-op off gfx1250). Its bytes MUST join the walk so downstream P(k) placement
+    // and PC-relative literal/label offsets stay aligned with the emitted layout.
+    StinkyInstruction* xcntInst = nullptr;
+    int xcntB = 0;
+    if (kSwPrefetchEmitXnackWait) {
+        if (const HwInstDesc* xcntMc = getMCIDByUOp(GFX::s_wait_xcnt, archId)) {
+            xcntInst = builder.create(xcntMc);
+            xcntInst->addSrcReg(StinkyRegister(0));  // xcnt = 0
+            const int64_t gXcnt = blockGlobalByteOffset + blockLocalByteOffsetWherePrefetchStarts;
+            xcntB = getEffectiveBaseSizeInBytes(*xcntInst) +
+                    getLiteralExtraBytes(*xcntInst, labelOff, gXcnt, asmSetSymbols);
+        }
+    }
+
     StinkyInstruction* prefetchInst = builder.create(pfMc);
     addSwPrefetchInstPcRelOperands(*prefetchInst);
 
-    const int64_t gPf = blockGlobalByteOffset + blockLocalByteOffsetWherePrefetchStarts;
+    // Prefetch now follows the wait, so its first byte is xcntB further along.
+    const int64_t gPf = blockGlobalByteOffset + blockLocalByteOffsetWherePrefetchStarts + xcntB;
     const int pfB = getEffectiveBaseSizeInBytes(*prefetchInst) +
                     getLiteralExtraBytes(*prefetchInst, labelOff, gPf, asmSetSymbols);
 
-    walkTotalBytes += pfB;
+    walkTotalBytes += xcntB + pfB;
 
-    bb.insertIR(anchorIt, prefetchInst);
-    return static_cast<int64_t>(pfB);
+    if (xcntInst != nullptr) bb.insertIR(anchorIt, xcntInst);  // wait first
+    bb.insertIR(anchorIt, prefetchInst);                       // then prefetch
+    return static_cast<int64_t>(xcntB) + static_cast<int64_t>(pfB);
 }
 
 /// One prefetch before \p anchorIt (`s_getpc_b64`), chaining \p nextPrefetchLocal,
@@ -952,6 +971,19 @@ void appendSwPrefetchInstPcRel(BasicBlock& bb, GfxArchID archId, AsmIRBuilder& b
                                const std::unordered_map<std::string, int64_t>* asmSetSymbols) {
     const HwInstDesc* pfMc = getMCIDByUOp(GFX::s_prefetch_inst_pc_rel, archId);
     if (pfMc == nullptr) return;
+
+    // XNACK safety: one s_wait_xcnt 0 before the tail-flush prefetch (see insert-before variant).
+    if (kSwPrefetchEmitXnackWait) {
+        if (const HwInstDesc* xcntMc = getMCIDByUOp(GFX::s_wait_xcnt, archId)) {
+            StinkyInstruction* xcntInst = builder.create(xcntMc);
+            xcntInst->addSrcReg(StinkyRegister(0));  // xcnt = 0
+            const int64_t gXcnt = blockGlobalByteOffset + totalBytes;
+            const int xcntB = getEffectiveBaseSizeInBytes(*xcntInst) +
+                              getLiteralExtraBytes(*xcntInst, labelOff, gXcnt, asmSetSymbols);
+            totalBytes += xcntB;
+            bb.appendIR(xcntInst);
+        }
+    }
 
     StinkyInstruction* prefetchInst = builder.create(pfMc);
     addSwPrefetchInstPcRelOperands(*prefetchInst);

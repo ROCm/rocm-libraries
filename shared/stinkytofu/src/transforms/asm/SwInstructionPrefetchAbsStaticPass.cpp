@@ -158,13 +158,13 @@ class SwInstructionPrefetchAbsStaticPass : public StinkyInstPass {
 
         // Count N (fixed point). The burst we insert at entry-begin grows the kernel by
         //   I = kBurstFixedBytes (s_getpc_b64=4 + s_add_i32(+label literal)=8 + s_add_u32=4
-        //                         + s_addc_u32=4 = 20)
+        //                         + s_addc_u32=4 = 20, plus the optional XNACK s_wait_xcnt 0 = 4)
         //     + N * kPrefetchInstBytes (each s_prefetch_inst)
         // bytes, shifting the whole body down by I. That can push one extra 4 KiB grid step past
         // the (now larger) tail, so N must be solved against the POST-insertion total. Because
         // I (<= ~hundreds of bytes) is far smaller than the 4 KiB grid step, two iterations
-        // converge.
-        constexpr int64_t kBurstFixedBytes = 20;
+        // converge. When the XNACK wait is off, this reverts to 20 (byte-identical to before).
+        constexpr int64_t kBurstFixedBytes = 20 + kSwPrefetchXnackWaitBytes;
         constexpr int64_t kPrefetchInstBytes = 8;
         const int64_t P0 = kSwPrefetchFirstGlobalByte;
         auto countN = [](int64_t total) {
@@ -275,6 +275,18 @@ class SwInstructionPrefetchAbsStaticPass : public StinkyInstPass {
             addHi->addSrcReg(StinkyRegister("s", baseHi, 1));
             addHi->addSrcReg(StinkyRegister(0));
             entryBB->insertIR(insertAt, addHi);
+
+            // XNACK safety: one s_wait_xcnt 0 before the contiguous prefetch burst (Method 2 — a
+            // single drain covers the whole back-to-back group). No-op when the toggle is off or
+            // the opcode is unavailable. Its 4 bytes are modeled in kBurstFixedBytes above and
+            // absorbed for real by the post-insertion re-accumulate (phase2 below).
+            if (kSwPrefetchEmitXnackWait) {
+                if (const HwInstDesc* xcntDesc = getMCIDByUOp(GFX::s_wait_xcnt, archId)) {
+                    StinkyInstruction* xcnt = builder.create(xcntDesc);
+                    xcnt->addSrcReg(StinkyRegister(0));  // xcnt = 0
+                    entryBB->insertIR(insertAt, xcnt);
+                }
+            }
 
             // N × s_prefetch_inst s[base:base+1], k*kSpacing, null, 0x1f
             //   length = ((slength=null=0) + (klength imm=31)) & 31 + 1 = 32 lines = 4096 B.

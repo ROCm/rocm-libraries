@@ -15,16 +15,19 @@
 # per-BB anchor grid point at 32640 falls inside the getpc window and triggers
 # the redirect.
 
-#--- getpc window redirect: prefetch lands BEFORE s_getpc_b64, chain stays intact
+#--- getpc window redirect: wait + prefetch land BEFORE s_getpc_b64, chain stays intact.
+# The XNACK s_wait_xcnt 0 (4 B) precedes the redirected prefetch, so both sit before s_getpc_b64
+# and the getpc -> add fixup chain remains contiguous.
 # CHECK-LABEL: [.align 32628 padding=
-# CHECK: {{.*}}total=32636 bytes{{.*}}s_prefetch_inst_pc_rel{{.*}}(0, null, 31)
-# CHECK: {{.*}}total=32640 bytes{{.*}}s_getpc_b64
+# CHECK: {{.*}}total=32632 bytes{{.*}}s_wait_xcnt{{.*}}(0)
+# CHECK: {{.*}}total=32640 bytes{{.*}}s_prefetch_inst_pc_rel{{.*}}(0, null, 31)
+# CHECK: {{.*}}total=32644 bytes{{.*}}s_getpc_b64
 # The getpc -> add fixup chain must be contiguous (no prefetch spliced inside it).
 # CHECK-NOT: s_prefetch_inst_pc_rel
-# CHECK: {{.*}}total=32644 bytes{{.*}}s_add_u32
 # CHECK: {{.*}}total=32648 bytes{{.*}}s_add_u32
-# CHECK: {{.*}}total=32652 bytes{{.*}}v_add_f32
-# CHECK: [AccumulateInstructionSizePass] total size = 32652 bytes
+# CHECK: {{.*}}total=32652 bytes{{.*}}s_add_u32
+# CHECK: {{.*}}total=32656 bytes{{.*}}v_add_f32
+# CHECK: [AccumulateInstructionSizePass] total size = 32656 bytes
 
 st.func @getpc_window_redirect() {
 ^entry:
