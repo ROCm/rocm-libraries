@@ -3317,9 +3317,9 @@ namespace TensileLite
             auto tiles = problem.getNumTiles(sizeMapping, 1);
             // Single source of truth: compute the StreamK launch decisions once
             // (also consumed by the diagnostic launch summary and unit tests) and
-            // consume them here. computeStreamKDecisions() reproduces exactly the
-            // reduction / grid / workspace-DP-fallback logic that previously lived
-            // inline, reusing the same helpers, so launch behaviour is unchanged.
+            // consume them here. computeStreamKDecisions() applies exactly the
+            // reduction / grid / workspace-DP-fallback logic used at launch,
+            // reusing the same helpers, so the decisions match what is launched.
             // It has no side effects, so computing it before the dynamic-queue
             // guard below cannot change observable behaviour (the guard still
             // throws before any kernel-arg packing / kernel launch).
@@ -3356,10 +3356,9 @@ namespace TensileLite
                     "per-XCD queue count; this kernel is unsupported here. "
                     "Select a non-work-stealing solution instead.");
             }
-            // Consume the reduction / grid decided above. These are exactly the
-            // values the (pre-#9415) inline block computed -- computeStreamKDecisions
-            // mirrors that logic (including the workspace-insufficient DP fallback),
-            // reusing the same helpers, so launch behaviour is unchanged.
+            // Consume the reduction / grid decided above. computeStreamKDecisions
+            // applies the same logic (including the workspace-insufficient DP
+            // fallback) using the same helpers, so these match what is launched.
             sk.reduction                 = skDecisions.reduction;
             sk.grid                      = skDecisions.skGrid;
             sk.streamKTileSchedulingMode = problem.getParams().streamKTileSchedulingMode();
@@ -4347,13 +4346,11 @@ namespace TensileLite
     // mirror the kernel-arg packing in makeArgs(). It reuses the existing helpers
     // rather than re-deriving, so the summary cannot drift from the real launch.
     //
-    // NOTE (this branch = #10008, WITHOUT #9415): the partials-workspace guard and
-    // sizing below intentionally reproduce the PRE-#9415 behaviour -- reserve iff
+    // The partials-workspace guard and sizing below reserve iff
     // (reduction==parallel || tiles%grid!=0), sized as partialTileSize(grid) (+ the
-    // per-XCD work-queue region for the dynamic path). It does NOT use #9415's
-    // dynamicPartialsSlots-driven sizing. The dynamicPartialsSlots FIELD is still
-    // populated (skTiles*skSplit, computed locally) purely for reporting so the
-    // "dynamic should reserve iff dynamicSlots>0" invariant gap is observable.
+    // per-XCD work-queue region for the dynamic path); the reservation does not
+    // depend on dynamicPartialsSlots. The dynamicPartialsSlots field is still
+    // populated (skTiles*skSplit, computed locally) purely for reporting.
     StreamKDecisions
         ContractionSolution::computeStreamKDecisions(Problem const&  problem,
                                                      Hardware const& hardware) const
@@ -4414,9 +4411,9 @@ namespace TensileLite
         d.numQueues           = streamKBakedQueueCount(hardware);
         d.givenWorkspaceBytes = problem.workspaceSize();
 
-        // Workspace / DP fallback -- mirrors the PRE-#9415 guard in solve():
-        // reserve iff (reduction==parallel || tiles%grid!=0), sized by grid (not by
-        // dynamicSlots). No #9415 behaviour is pulled in here.
+        // Workspace / DP fallback -- mirrors the guard in solve(): reserve iff
+        // (reduction==parallel || tiles%grid!=0), sized by grid (not by
+        // dynamicSlots).
         size_t idealWorkspace = 0;
         bool   needPartials   = false;
         if(grid > 0
@@ -4490,7 +4487,7 @@ namespace TensileLite
 
         // Informational only (see field doc): skTiles*skSplit slot count for the
         // dynamic path, computed LOCALLY here. It does NOT feed the allocation
-        // guard above, so no #9415 sizing behaviour is introduced.
+        // guard above.
         d.dynamicPartialsSlots = isDynamic ? static_cast<size_t>(d.skTiles) * d.skSplit : 0;
 
         d.partialsPresent = d.skTiles > 0;

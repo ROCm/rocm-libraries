@@ -9,13 +9,11 @@
 // launch-parameter path -- without needing a GPU. Host-only: mock AMDGPU and
 // hip::HipAMDGPU devices, no device library required.
 //
-// This file lives on the #10008-only base (StreamK per-XCD work-queue counter
-// self-reset fix), WITHOUT #9415 (dynamic partials-workspace sizing). The
-// partials-workspace behaviour asserted below is therefore the PRE-#9415
-// behaviour: the dynamic (SK4 / SK5-dynamic) path reserves the partials region
-// based on tiles%grid divisibility, NOT on the skTiles*skSplit slot count. The
-// invariant-gap tests near the bottom pin that CURRENT behaviour AND document
-// the DESIRED invariant (reserve iff dynamicSlots>0) that #9415 implements.
+// The partials-workspace behaviour asserted below is that the dynamic (SK4 /
+// SK5-dynamic) path reserves the partials region based on tiles%grid
+// divisibility, NOT on the skTiles*skSplit slot count. The tests near the bottom
+// pin that relationship between dynamicPartialsSlots, tiles%grid divisibility,
+// and whether a partials workspace is reserved.
 
 #include <gtest/gtest.h>
 #include <limits>
@@ -395,22 +393,19 @@ TEST(StreamKLaunchSummaryTest, DpOnlySourceDistinguishesParamVsRuntime)
 }
 
 // ---------------------------------------------------------------------------
-// INVARIANT GAP (#9415 territory) -- pinned on the #10008-only base.
+// Dynamic-path partials-workspace reservation rule.
 //
-// Desired invariant (implemented by PR #9415): a DYNAMIC (SK4 / SK5-dynamic)
-// launch should reserve the partials workspace IFF dynamicPartialsSlots
-// (skTiles*skSplit) > 0, because that path indexes the workspace by tile-split
-// slot, not by grid position.
-//
-// CURRENT behaviour on this #10008 base: the dynamic path reserves the partials
-// workspace based on tiles%grid divisibility (the SK3 rule), independent of
-// dynamicPartialsSlots. The three tests below bracket that gap.
+// The dynamic (SK4 / SK5-dynamic) path reserves the partials workspace based on
+// tiles%grid divisibility (the same rule the static SK3 path uses), independent
+// of dynamicPartialsSlots (skTiles*skSplit). The three tests below pin that
+// behaviour across the combinations of dynamicPartialsSlots (0 vs >0) and
+// tiles%grid (==0 vs !=0).
 // ---------------------------------------------------------------------------
 
 // Case A: dynamicSlots == 0 (no split stream-k tiles) AND tiles % grid != 0.
-// CURRENT: workspace IS reserved (because tiles%grid!=0) even though the dynamic
-// packing produced no partial tiles. DESIRED: it should NOT reserve here.
-TEST(StreamKLaunchSummaryTest, DynamicNoSlotsButIndivisible_ReservesWorkspace_GAP)
+// Workspace IS reserved (because tiles%grid!=0) even though the dynamic packing
+// produced no partial tiles.
+TEST(StreamKLaunchSummaryTest, DynamicNoSlotsButIndivisible_ReservesWorkspace)
 {
     ContractionSolution solution;
     initStreamKSolution(solution, 4); // dynamic
@@ -430,19 +425,15 @@ TEST(StreamKLaunchSummaryTest, DynamicNoSlotsButIndivisible_ReservesWorkspace_GA
     EXPECT_EQ(d.skTiles, 0u) << "no override -> dynamic packing produces no split tiles";
     EXPECT_EQ(d.dynamicPartialsSlots, 0u) << "skTiles*skSplit == 0";
 
-    // CURRENT (#10008) behaviour: reserves anyway because tiles%grid != 0.
+    // Workspace is reserved because tiles%grid != 0, independent of the zero
+    // dynamic slot count.
     EXPECT_TRUE(d.workspaceAllocated);
     EXPECT_GT(d.requiredWorkspaceBytes, 0u);
     EXPECT_EQ(d.requiredWorkspaceBytes, solution.requiredWorkspaceSize(problem, device));
-    // DESIRED invariant (PR #9415): with dynamicPartialsSlots==0 the dynamic path
-    // needs no partials region, so ideally this would be:
-    //     EXPECT_FALSE(d.workspaceAllocated);
-    //     EXPECT_EQ(d.requiredWorkspaceBytes, 0u);
-    // Pinned here as the observed gap until #9415 lands on this base.
 }
 
 // Case B (complement): dynamicSlots == 0 AND tiles % grid == 0.
-// CURRENT and DESIRED agree: no workspace reserved.
+// No workspace reserved.
 TEST(StreamKLaunchSummaryTest, DynamicNoSlotsAndDivisible_NoWorkspace)
 {
     ContractionSolution solution;
@@ -466,10 +457,9 @@ TEST(StreamKLaunchSummaryTest, DynamicNoSlotsAndDivisible_NoWorkspace)
 }
 
 // Case C: dynamicSlots > 0 (skTiles override) BUT tiles % grid == 0.
-// CURRENT (#10008): NO workspace reserved -- this is the OOB-write bug #9415
-// fixes, because the kernel indexes up to skTiles*skSplit slots. DESIRED
-// (PR #9415): reserve partialTileSize(max(dynamicSlots, grid)) + queue region.
-TEST(StreamKLaunchSummaryTest, DynamicSlotsPositiveButDivisible_NoWorkspace_GAP)
+// No workspace is reserved, because tiles%grid==0 gates the partials reservation
+// independent of the positive dynamic slot count.
+TEST(StreamKLaunchSummaryTest, DynamicSlotsPositiveButDivisible_NoWorkspace)
 {
     ContractionSolution solution;
     initStreamKSolution(solution, 4); // dynamic
@@ -495,16 +485,11 @@ TEST(StreamKLaunchSummaryTest, DynamicSlotsPositiveButDivisible_NoWorkspace_GAP)
     // totalItems = (tiles - skTiles) + skTiles*skSplit
     EXPECT_EQ(d.totalItems, (d.tiles - d.skTiles) + d.skTiles * d.skSplit);
 
-    // CURRENT (#10008) behaviour: NO workspace reserved despite dynamicSlots>0,
-    // because tiles%grid==0 gates the SK3-style reservation. requiredWorkspaceSize
-    // agrees (also 0).
+    // No workspace reserved despite dynamicSlots>0, because tiles%grid==0 gates
+    // the partials reservation. requiredWorkspaceSize agrees (also 0).
     EXPECT_FALSE(d.workspaceAllocated);
     EXPECT_EQ(d.requiredWorkspaceBytes, 0u);
     EXPECT_EQ(d.requiredWorkspaceBytes, solution.requiredWorkspaceSize(problem, device));
-    // DESIRED invariant (PR #9415): dynamicPartialsSlots>0 must reserve, i.e.
-    //     EXPECT_TRUE(d.workspaceAllocated);
-    //     EXPECT_GT(d.requiredWorkspaceBytes, 0u);
-    // Pinned here as the observed gap until #9415 lands on this base.
 }
 
 // ---------------------------------------------------------------------------

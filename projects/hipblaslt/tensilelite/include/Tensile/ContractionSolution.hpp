@@ -270,11 +270,10 @@ namespace TensileLite
         size_t idealWorkspaceBytes    = 0; // partials(+queue) bytes the launch wanted (pre fit check)
         size_t givenWorkspaceBytes    = 0; // problem.workspaceSize()
         // Informational skTiles*skSplit slot count for the dynamic path, computed
-        // LOCALLY here for reporting only. NOTE: on this (#10008) base the actual
-        // partials-workspace sizing/allocation is driven by tiles%grid (see
-        // computeStreamKDecisions / solve), NOT by this value; it is reported so
-        // the invariant gap ("dynamic should reserve iff dynamicSlots>0") is
-        // observable without pulling in #9415's allocation behaviour change.
+        // LOCALLY here for reporting only. The actual partials-workspace
+        // sizing/allocation is driven by tiles%grid (see computeStreamKDecisions /
+        // solve), NOT by this value; it is reported so the relationship between
+        // the dynamic slot count and workspace reservation is observable.
         size_t dynamicPartialsSlots   = 0;
         size_t numQueues              = 0; // baked per-XCD work-queue count (NUM_XCD), 0 if unknown
 
