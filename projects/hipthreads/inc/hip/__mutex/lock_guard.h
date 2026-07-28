@@ -77,7 +77,7 @@ private:
 public:
   /**
    * @brief Locks the given mutex.
-   * @param __m Mutex to lock (must not already be locked by this thread).
+   * @param __m Mutex to lock (must not already be locked by this wthread).
    */
   _LIBHIPTHREADS_NODISCARD_EXT __device__ _LIBHIPTHREADS_HIDE_FROM_ABI explicit lock_guard(mutex_type& __m) _LIBHIPTHREADS_THREAD_SAFETY_ANNOTATION(acquire_capability(__m))
       : __m_(__m) {
@@ -86,9 +86,9 @@ public:
 
   /**
    * @brief Adopts ownership of an already-locked mutex.
-   * @param __m Mutex already locked by the calling thread.
+   * @param __m Mutex already locked by the calling wthread.
    * @param (adopt_lock) Tag indicating adoption (no lock attempt made).
-   * @pre The calling thread holds the mutex.
+   * @pre The calling wthread holds the mutex.
    */
   _LIBHIPTHREADS_NODISCARD_EXT __device__ _LIBHIPTHREADS_HIDE_FROM_ABI lock_guard(mutex_type& __m, ::std::adopt_lock_t)
       _LIBHIPTHREADS_THREAD_SAFETY_ANNOTATION(requires_capability(__m))
