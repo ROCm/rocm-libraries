@@ -244,12 +244,11 @@ override, then a descriptor attribute, then a built-in default. If every policy 
 fails outright instead of silently falling back to some hidden order. This is not first-claim-wins by
 registration order, and it is unchanged by this proposal.
 
-**Direction under consideration, not a commitment.** The intent is to let a UHD's estimated throughput
-serve as an absolute, cross-engine-comparable score, so two engines can run independent heuristics over
-their own packs and still be ranked against each other on a common cardinal metric; if that does not
-scale, the fallback is classic rank-ordering at the engine-policy level, as today. This proposal does not
-change the engine-selection problem, it only makes it more visible: resolving it remains one of explicit
-user choice, policy heuristics, or auto-tuning at the engine level, not something a KDP or UHD decides.
+Choosing between engines is therefore hipDNN's job, not a KDP's or a UHD's, and hipDNN already has
+three mechanisms for it: engine-selection policies, explicit user selection, and auto-tuning. Two
+kernels in different engines are arbitrated by those, whatever their UHDs scored them at internally.
+This proposal does not change the engine-selection problem; it only makes it more visible, because
+more engines become cheap to add.
 
 ---
 
@@ -854,9 +853,12 @@ and in argument shape (extra stride scalars, workspace pointers, presence or abs
 a clarification of the existing pack boundary, not a new constraint: a kernel whose ABI differs from its
 siblings already belongs in a different pack, with its own UDD.
 
-*(Whether to additionally allow a per-UKD UDD reference, or a layered UKD-overrides-UDD-default
-precedence, on top of the one-UDD-per-pack default above, remains under consideration; see
-[Section 17](#17-open-questions).)*
+**One UDD per KDP is the rule.** A pack generalizes its dispatch once and expresses anything
+kernel-specific through per-kernel metadata and expressions over it. Between `$kernel.*` metadata and
+the expression language, there is no dispatch detail a per-UKD UDD would reach that a generalized UDD
+cannot, so a per-UKD UDD reference and a layered UKD-overrides-UDD-default precedence are both
+deliberately excluded. A kernel that genuinely cannot share its pack's dispatch has a different ABI,
+and a differing ABI already means a different pack.
 
 ```jsonc
 {  // one UDD shared by a two-kernel pack; per-kernel geometry comes from $kernel.* metadata
@@ -1805,33 +1807,33 @@ level and belongs in its own pack.
 Folding `Transpose -> Work -> Transpose` into one UKD would be wrong, because the transposes are
 reusable, separately-tuned kernels that each deserve their own heuristic. A **composite descriptor
 (UCD)** instead declares an ordered array of stages wired by intermediate tensors. Each stage
-resolves to a concrete UKD at plan time, ranked by that stage's own heuristic.
+resolves to an engine at plan time, and that engine's own heuristic picks the kernel.
 
 A stage does not embed a kernel. It names its input and output tensors (drawn from the composite's
 bound graph tensors and its declared intermediates) and a `select` that references kernels in one of
 two ways:
 
 - `select.criteria`: a graph fragment over the stage's tensors. Any registered KDP whose matchers
-  accept that fragment contributes its kernels as candidates, so packs dropped in later are picked up
+  accept that fragment contributes its engine as a candidate, so packs dropped in later are picked up
   automatically. This is the open, drop-in-friendly form. (A UKD carries no matcher of its own; it is
-  matchable only through its pack, so stage selection resolves against KDPs, not bare UKDs.)
-- `select.candidates`: an explicit array of KDP or UED ids, for when a stage should draw from a fixed
-  set. (A bare UKD id has no back-reference to the KDP that owns its matchers and dispatch, so it cannot
-  alone fulfil the contract a stage needs; naming the KDP, or the UED when the fixed set spans every pack
-  under one engine, does.)
+  matchable only through its pack, so a fragment resolves to packs and their engines, not bare UKDs.)
+- `select.candidates`: an explicit array of UED ids, for when a stage should draw from a fixed set. A
+  stage names engines, not kernels: the named engine's own heuristic then picks the kernel, which is
+  the same contract every other selection in this design uses. A bare UKD id could not fulfil it
+  anyway, since a UKD carries no matcher and no dispatch of its own.
 
-Either way the stage's `heuristic` ranks the resolved candidates and picks one, exactly as a single
-UKD is chosen within an engine. Because a resolved stage may itself be a multi-step program
+Either way the stage resolves to an engine, whose own heuristic then ranks that engine's applicable
+kernels and picks one, exactly as a single UKD is chosen within an engine on the base path. Because a
+resolved stage may itself be a multi-step program
 ([Section 15.1](#151-several-kernels-for-one-operation)), the composite's plan is the concatenation of
 its stages' programs, with each stage's intermediates remapped into the composite's buffer set.
 
-**Pinning a specific UKD.** For the composite-stage case, `select.candidates` lets an author fix a stage
-to a named set of kernels, and a multi-launch UKD that names an exact source per Launch is the existing
-mechanism for pinning an exact kernel within a program; composition itself should be thought of as
-sequential meta-fusion of its stages' parts, not a separate pinning feature. Whether a user can more
-generally pin or prioritize a single UKD outside composition (to override the UHD's choice, reproduce a
-specific kernel, or benchmark candidates individually) is not decided by this RFC and is left open for
-the UHD follow-up ([Section 14.2](#142-follow-up-rfcs)).
+**Composition reuses engine selection; it does not add a pinning mechanism.** A stage resolves to an
+engine and that engine's heuristic picks the kernel, so a composite is a sequential meta-fusion built
+out of the ordinary engine components rather than a way to hand-pick individual kernels. Selecting a
+specific kernel outright is not a composition feature: within one engine that is what the UHD and the
+engine's knobs already do ([Section 4](#4-descriptor-formats)), and across engines it is explicit
+engine selection ([Section 2](#2-the-descriptors)).
 
 ```jsonc
 {
@@ -1847,12 +1849,11 @@ the UHD follow-up ([Section 14.2](#142-follow-up-rfcs)).
   ],
   "stages": [
     {"name": "transpose_in",  "in": "$x",   "out": "$x_t",
-     "select": {"criteria": {"kind": "op", "op": "transpose"}, "heuristic": "2ca990b0-fc9d-4539-8e27-578658857693"}},
+     "select": {"criteria": {"kind": "op", "op": "transpose"}}},
     {"name": "work",          "in": "$x_t", "out": "$y_t",
-     "select": {"criteria": { ... work fragment ... },  "heuristic": "d2bfd686-b613-4c15-b8e2-44dd6d78d336"}},
+     "select": {"criteria": { ... work fragment ... }}},
     {"name": "transpose_out", "in": "$y_t", "out": "$y",
-     "select": {"candidates": ["2dfcc98a-8281-4b58-a286-fb599412a68d", "f9c5c4eb-fb5d-42a3-bfb2-649a8a14d830"],  // KDP ids, not bare UKD ids
-                "heuristic": "2ca990b0-fc9d-4539-8e27-578658857693"}}
+     "select": {"candidates": ["1bd3d4c3-84bc-4b9b-a375-e8e14ebd4659"]}}  // UED ids; that engine's own UHD picks the kernel
   ]
 }
 ```
@@ -1902,12 +1903,12 @@ each Launch bind arguments, evaluate the grid/block/shared formulas, load the co
 launch on the plan stream. Because a resolved program is a fixed launch sequence over fixed offsets,
 it is a natural capture-and-replay target when launch latency matters.
 
-Selection reuses the two levels defined in [Section 2](#2-the-descriptors): a program is one
-kernel descriptor ranked by its heuristic descriptor, competing alternatives are separate engines ranked by the existing engine
-chain, and within a composite each stage resolves in dependency order by its own heuristic. A
-mandatory stage with no candidate fails the composite closed, and engine selection falls through to
-another engine. Comparing whole pipelines against each other never arises, because those alternatives
-are separate engines the existing chain already ranks.
+Selection reuses the two levels defined in [Section 2](#2-the-descriptors): a program is one kernel
+descriptor ranked by its heuristic descriptor, competing alternatives are separate engines ranked by
+the existing engine chain, and within a composite each stage resolves in dependency order to an engine
+whose heuristic picks its kernel. A mandatory stage with no candidate fails the composite closed, and
+engine selection falls through to another engine. Comparing whole pipelines against each other never
+arises, because those alternatives are separate engines the existing chain already ranks.
 
 Cross-step correctness is the new surface, validated at build and load: every read of an intermediate
 is preceded by a write with matching dtype and shape, every region is written before it is read, the
@@ -1953,11 +1954,12 @@ follow-up RFCs rather than solved now.
   the provider. This framing is provisional: it does not yet cover an in-place kernel retune, which
   is legitimately the same id with different compiled bytes, and which the copy-paste rule as stated
   would wrongly drop. Whether UKD ids stay mutable (retune keeps the id) or move to content identity
-  (retune mints a new id) is not decided here; it depends on how plan serialization captures a
-  selected kernel ([RFC 0009](0009_CompiledPlanSerialization.md)). If serialization captures the
-  compiled binary itself, id mutability does not matter to a saved plan. If it captures only which
-  kernel was picked, strict id-immutability rules and much stricter plan versioning become
-  mandatory, since a mutated id could then resolve to different compiled code on replay. Overlapping
+  (retune mints a new id) is not decided here. It cannot be, because it depends on how serialization
+  of a generic-ingestor plan ends up working, and that is a future feature that does not exist yet:
+  it is designed once this system does. If a serialized plan captures the compiled binary itself, id
+  mutability does not matter to a saved plan. If it captures only which kernel was picked, strict
+  id-immutability rules and much stricter plan versioning become mandatory, since a mutated id could
+  then resolve to different compiled code on replay. Overlapping
   matches that are not id collisions are handled by arbitration
   ([Section 5](#5-matching-and-the-umd)).
 - **Compatibility and caching.** Each descriptor file type is versioned independently as
@@ -1994,19 +1996,20 @@ follow-up RFCs rather than solved now.
   testing, and the load diagnostics ([Section 10](#10-observability-and-diagnostics)) report the
   malformed pack while applicability for the affected packs changes accordingly.
 
-  Removal is committed for one case and open for the rest. Removing a UKD is acceptable: the UHD ranks
-  only over the catalog of kernels actually available, so removing one does not itself break UHD
+  Removal is straightforward for the cases that exist today. Removing a UKD is acceptable: the UHD
+  ranks only over the catalog of kernels actually available, so removing one does not itself break UHD
   selection. The real risk is that the matcher a removed UKD relied on may no longer be correct once
   the kernel is gone, but that is a general risk of any change, not specific to removal; over-claiming
-  support is always a bug. The rest of the removal and deprecation lifecycle is an open item, deferred
-  to the packaging follow-up RFC ([Section 14.2](#142-follow-up-rfcs)): removing a UKD once a
-  serialized plan ([RFC 0009](0009_CompiledPlanSerialization.md)) or an id-keyed cache has baked in its
-  id; removing a pack or a shared descriptor without orphaning a matcher, UDD, or engine another pack
-  still references (today's load-time validation is a backstop that catches the orphan, not a rule that
-  prevents it at release time, though a release-time rule has been raised in review and remains under
-  consideration for that follow-up); and removing a drop-in kernel, for which no runtime removal
-  mechanism exists today, since drop-in can only add, so removal today means deleting the file and
-  restarting, with re-scan behavior unspecified.
+  support is always a bug. You should not remove a shared descriptor another pack still references,
+  and if you do, it is caught rather than silent: the orphan fails tests at several layers and shows
+  up at load as an error in the diagnostics
+  ([Section 10](#10-observability-and-diagnostics)), in CI and at runtime alike.
+
+  Two removal cases are deliberately not specified here. A serialized plan that has baked in a removed
+  id is a future concern: plan serialization for the generic ingestor does not exist yet, and how it
+  captures a selected kernel is undecided, so there is nothing yet to keep consistent. A dropped-in
+  pack is not hipDNN's to remove: a drop-in KDP is expected to be self-contained, and its lifecycle
+  belongs to whoever dropped it in.
 
   Author-time signalling closes the loop: the validation tooling ([Section 11](#11-tooling)) flags a
   KMD change as a retraining event at author time, against the classification above, rather than
