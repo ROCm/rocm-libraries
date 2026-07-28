@@ -631,7 +631,12 @@ def default_fp8_config(
     quant_group_m: int = 1,
     gfx_arch: str = _DEFAULT_GFX_ARCH,
 ) -> AQuantKernelConfig:
-    """fp8 AQuant decode config (GemmConfigQuantDecodeInterwave<fp8_t>, Mem pipeline)."""
+    """fp8 AQuant decode config (GemmConfigQuantDecodeInterwave<fp8_t>, Mem pipeline).
+
+    warp_tile_k=32 maps to the MFMA mfma_f32_16x16x32_fp8_fp8 instruction which is
+    valid on gfx9 (gfx942, gfx950). warp_tile_k=16 would select the gfx12-only WMMA
+    instruction and silently returns zeros on gfx9 hardware.
+    """
     return AQuantKernelConfig(
         variant_key="fp8",
         layout="rcr",
@@ -640,7 +645,7 @@ def default_fp8_config(
         scheduler="intrawave",
         tile_m=16, tile_n=64, tile_k=256,
         warp_m=1, warp_n=4, warp_k=1,
-        warp_tile_m=16, warp_tile_n=16, warp_tile_k=16,
+        warp_tile_m=16, warp_tile_n=16, warp_tile_k=32,
         quant_group_m=quant_group_m,
         quant_group_n=1,
         quant_group_k=quant_group_k,
@@ -654,7 +659,12 @@ def default_bf8_config(
     quant_group_m: int = 1,
     gfx_arch: str = _DEFAULT_GFX_ARCH,
 ) -> AQuantKernelConfig:
-    """bf8 AQuant decode config (GemmConfigQuantDecodeInterwave<bf8_t>, Mem pipeline)."""
+    """bf8 AQuant decode config (GemmConfigQuantDecodeInterwave<bf8_t>, Mem pipeline).
+
+    warp_tile_k=32 maps to the MFMA mfma_f32_16x16x32_bf8_bf8 instruction which is
+    valid on gfx9 (gfx942, gfx950). warp_tile_k=16 would select the gfx12-only WMMA
+    instruction and silently returns zeros on gfx9 hardware.
+    """
     return AQuantKernelConfig(
         variant_key="bf8",
         layout="rcr",
@@ -663,7 +673,7 @@ def default_bf8_config(
         scheduler="intrawave",
         tile_m=16, tile_n=64, tile_k=256,
         warp_m=1, warp_n=4, warp_k=1,
-        warp_tile_m=16, warp_tile_n=16, warp_tile_k=16,
+        warp_tile_m=16, warp_tile_n=16, warp_tile_k=32,
         quant_group_m=quant_group_m,
         quant_group_n=1,
         quant_group_k=quant_group_k,
@@ -677,7 +687,10 @@ def default_fp8i4_config(
     quant_group_m: int = 1,
     gfx_arch: str = _DEFAULT_GFX_ARCH,
 ) -> AQuantKernelConfig:
-    """fp8i4 AQuant decode config (A=fp8, B=pk_int4, AQ=fp8; Mem pipeline)."""
+    """fp8i4 AQuant decode config (A=fp8, B=pk_int4, AQ=fp8; Mem pipeline).
+
+    warp_tile_k=32 maps to valid MFMA instructions on gfx9 (gfx942, gfx950).
+    """
     return AQuantKernelConfig(
         variant_key="fp8i4",
         layout="rcr",
@@ -686,7 +699,7 @@ def default_fp8i4_config(
         scheduler="intrawave",
         tile_m=16, tile_n=64, tile_k=256,
         warp_m=1, warp_n=4, warp_k=1,
-        warp_tile_m=16, warp_tile_n=16, warp_tile_k=16,
+        warp_tile_m=16, warp_tile_n=16, warp_tile_k=32,
         quant_group_m=quant_group_m,
         quant_group_n=1,
         quant_group_k=quant_group_k,
@@ -700,7 +713,10 @@ def default_bf8i4_config(
     quant_group_m: int = 1,
     gfx_arch: str = _DEFAULT_GFX_ARCH,
 ) -> AQuantKernelConfig:
-    """bf8i4 AQuant decode config (A=bf8, B=pk_int4, AQ=bf8; Mem pipeline)."""
+    """bf8i4 AQuant decode config (A=bf8, B=pk_int4, AQ=bf8; Mem pipeline).
+
+    warp_tile_k=32 maps to valid MFMA instructions on gfx9 (gfx942, gfx950).
+    """
     return AQuantKernelConfig(
         variant_key="bf8i4",
         layout="rcr",
@@ -709,7 +725,7 @@ def default_bf8i4_config(
         scheduler="intrawave",
         tile_m=16, tile_n=64, tile_k=256,
         warp_m=1, warp_n=4, warp_k=1,
-        warp_tile_m=16, warp_tile_n=16, warp_tile_k=16,
+        warp_tile_m=16, warp_tile_n=16, warp_tile_k=32,
         quant_group_m=quant_group_m,
         quant_group_n=1,
         quant_group_k=quant_group_k,

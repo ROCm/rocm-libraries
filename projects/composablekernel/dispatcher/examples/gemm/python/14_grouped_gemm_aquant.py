@@ -230,6 +230,11 @@ def main():
             log.info("PASSED (max_rel=%.4f, tol=%.4f)", max_rel, tolerance)
         else:
             log.error("FAILED (max_rel=%.4f > tol=%.4f)", max_rel, tolerance)
+            C_gpu_f32 = C_gpu.astype(np.float32)
+            C_ref_f32 = C_ref.astype(np.float32)
+            log.error("C_gpu[:2,:4] = %s", C_gpu_f32[:2, :4])
+            log.error("C_ref[:2,:4] = %s", C_ref_f32[:2, :4])
+            log.error("C_gpu nonzero count: %d / %d", int(np.count_nonzero(C_gpu_f32)), C_gpu_f32.size)
             return 1
     else:
         log.info("Verification skipped (--no-verify)")
