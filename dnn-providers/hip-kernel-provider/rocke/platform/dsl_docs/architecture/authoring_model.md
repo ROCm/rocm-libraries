@@ -273,13 +273,15 @@ Async constraints:
 - consumers must wait on VMEM before reading;
 - swizzles belong in consumer read arithmetic, not in the destination pointer.
 
-Do not generalize this `compv4` loader recipe to every target. The current WMMA
-universal path admits the `mem` and `wmma_v1` pipelines with the default direct
-epilogue, not `compv4`. gfx1250 also has target-specific async global-to-LDS
-operations; those are distinct from the gfx942/gfx950
-`AsyncTileLoader` contract and must be selected through the owning target-aware
-builder. The pipeline choice follows gfx capabilities, not the independently
-configured wave width.
+The gfx1250 universal GEMM path currently uses synchronous WMMA staging. It
+accepts the `mem` or `wmma_v1` pipeline with the default epilogue and does not
+support `compv4`, `direct_to_lds`, or `dtl_prefetch`.
+
+gfx1250 has a separate `global_load_async_to_lds_*` instruction family with a
+dedicated async counter. That path is currently used only for optional V
+prefetching in gfx1250 tiled 3D attention; it is not wired into universal GEMM
+or convolution. The gfx942/gfx950 `AsyncTileLoader` uses different instructions
+and cannot be reused on gfx1250.
 
 For row-wise small ops, use `helpers/sweep.py::sweep_row_chunks` and the `helpers/io.py` dispatchers (`load_vec_as_f32`, `pack_f32_to`) instead of building tile loaders.
 
