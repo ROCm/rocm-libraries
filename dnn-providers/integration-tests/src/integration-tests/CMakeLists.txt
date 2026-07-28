@@ -3,7 +3,7 @@
 
 option(BUILD_CPP_GRAPH_TESTS
     "Build the legacy C++ graph integration tests (OFF when bundles are the CI driver)"
-    OFF)
+    ON)
 
 target_sources(${INTEGRATION_TESTS_EXE}
     PRIVATE
