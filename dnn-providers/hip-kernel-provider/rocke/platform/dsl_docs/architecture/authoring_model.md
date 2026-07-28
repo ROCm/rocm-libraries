@@ -131,13 +131,12 @@ allowed_block_sizes = (64, 128, 256, 512, 1024)
 allowed_vecs        = (2, 4, 8)
 ```
 
-For GEMM / conv, validation also covers:
+For GEMM and convolution, validation also covers:
 
-- architecture accepted by the owning validator (common multi-architecture GEMM/conv
-  validators default to gfx950 for compatibility, while target-specific validators
-  default to their target; `known_arches()` is a catalog, not universal support);
-- selected `MmaOp` exists in the exact gfx target's catalog for the dtype and
-  tile shape;
+- the requested gfx target resolves to an `ArchTarget`;
+- that target's `MmaCatalog` contains an `MmaOp` matching the required
+  MFMA/WMMA family, operand and accumulator dtypes, and warp-tile `(m, n, k)`
+  shape;
 - `tile_m, tile_n` divisible by `warp_* * warp_tile_*`;
 - `tile_k` divisible by `warp_tile_k`;
 - block size <= hardware/lowering limit;
@@ -145,6 +144,10 @@ For GEMM / conv, validation also covers:
 - LDS bytes under the per-block budget;
 - vector load widths divide tile shape;
 - requested epilogue / pipeline / scheduler names recognized.
+
+`known_arches()` lists targets with architecture metadata; actual kernel
+support is determined by each builder's validation checks. If `arch` is
+omitted, the builder applies its own default.
 
 Validation is part of the performance story: many "optimizations" are illegal unless they preserve tile / atom / LDS invariants.
 
