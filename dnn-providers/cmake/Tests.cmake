@@ -322,6 +322,14 @@ function(_add_test_target_internal APPEND_FUNCTION_SUFFIX TARGET WORKING_DIR)
 
     install(TARGETS ${TARGET} RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 
+    # On Windows, stage the shadowed ROCm DLLs (amd_comgr.dll) before this test binary
+    # is built, so a partial build (`cmake --build --target ${TARGET}`) + manual ctest doesn't load
+    # the stale System32 copy. Placed before the YAML early-return so it also covers the
+    # apply_test_category_labels() suites, which invoke this same executable target.
+    if(TARGET stage_shadowed_rocm_dlls)
+        add_dependencies(${TARGET} stage_shadowed_rocm_dlls)
+    endif()
+
     # YAML-driven categorization (currently miopen-provider only) generates
     # its own tiered suites via apply_test_category_labels() after this
     # function returns; registering the raw, unfiltered ${TARGET} test here
@@ -429,6 +437,12 @@ function(add_tiered_test_target TARGET WORKING_DIR)
         INSTALL_RPATH_USE_LINK_PATH TRUE
         BUILD_RPATH_USE_ORIGIN TRUE)
     install(TARGETS ${TARGET} RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+
+    # On Windows, stage the shadowed ROCm DLLs before this test binary is built so a
+    # partial build + manual ctest doesn't load the stale System32 amd_comgr.dll.
+    if(TARGET stage_shadowed_rocm_dlls)
+        add_dependencies(${TARGET} stage_shadowed_rocm_dlls)
+    endif()
 
     # -- Four ctest entries with cumulative labels --
     # Each tier gets a FAIL_REGULAR_EXPRESSION guard.  GTest prints "Running 0

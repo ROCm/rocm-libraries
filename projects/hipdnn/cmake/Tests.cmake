@@ -319,6 +319,12 @@ function(add_hipdnn_test TARGET WORKING_DIR)
     # Install test executables to bin directory
     install(TARGETS ${TARGET} RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 
+    # On Windows, stage the shadowed ROCm DLLs before this test binary is built so a
+    # partial build + manual ctest doesn't load the stale System32 amd_comgr.dll.
+    if(TARGET stage_shadowed_rocm_dlls)
+        add_dependencies(${TARGET} stage_shadowed_rocm_dlls)
+    endif()
+
     add_test(NAME ${TARGET} COMMAND ${TARGET} WORKING_DIRECTORY ${WORKING_DIR})
     _apply_hipdnn_test_category_labels(${TARGET})
     if(DEFINED TEST_ENVIRONMENT)

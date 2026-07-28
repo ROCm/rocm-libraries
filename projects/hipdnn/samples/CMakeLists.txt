@@ -178,6 +178,13 @@ function(add_hipdnn_sample_test TARGET_NAME)
     )
 
     install(TARGETS ${TARGET_NAME} RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+
+    # On Windows, stage the shadowed ROCm DLLs before this sample is built so a partial build
+    # (`cmake --build --target ${TARGET_NAME}`) doesn't load the stale System32 amd_comgr.dll.
+    if(TARGET stage_shadowed_rocm_dlls)
+        add_dependencies(${TARGET_NAME} stage_shadowed_rocm_dlls)
+    endif()
+
     file(APPEND "${INSTALLED_CTEST_FILE}" "add_test(${TARGET_NAME} \"../${TARGET_NAME}\" \"--verify-cpu\")\n")
 endfunction()
 

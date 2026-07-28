@@ -52,35 +52,6 @@ if(BUILD_ADDRESS_SANITIZER)
                 file(TO_CMAKE_PATH "${_rocm_root}/bin" _rocm_bin_dir)
                 list(APPEND TEST_ENVIRONMENT_MODIFICATION
                      "PATH=path_list_prepend:${_rocm_bin_dir}")
-
-                # DLL-shadowing workaround (remove once ROCm fixes this generally on Windows): a
-                # stale ROCm amd_comgr.dll in C:/Windows/System32 shadows the TheRock one and breaks
-                # MIOpen's runtime kernel JIT. A PATH prepend can't fix it (System32 is searched
-                # before PATH), but the exe's own dir is searched first, so stage the correct copy
-                # next to the test exes. May grow as more shadowed DLLs surface.
-                # The GLOBAL-property guard defines the target once across the many
-                # include()s of this file into one build tree.
-                get_property(_dll_shadow_staged GLOBAL
-                    PROPERTY _rocm_dlls_staged_dll_shadow_workaround)
-                if(NOT _dll_shadow_staged)
-                    set_property(GLOBAL PROPERTY _rocm_dlls_staged_dll_shadow_workaround TRUE)
-                    set(_shadowed_dlls amd_comgr.dll)
-                    set(_staged_dlls "")
-                    foreach(_dll_name IN LISTS _shadowed_dlls)
-                        set(_dst "${_build_bin_dir}/${_dll_name}")
-                        add_custom_command(
-                            OUTPUT "${_dst}"
-                            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                                    "${_rocm_root}/bin/${_dll_name}" "${_dst}"
-                            DEPENDS "${_rocm_root}/bin/${_dll_name}"
-                            COMMENT "Staging ${_dll_name} into build bin (DLL-shadowing workaround)"
-                            VERBATIM
-                        )
-                        list(APPEND _staged_dlls "${_dst}")
-                    endforeach()
-                    add_custom_target(stage_shadowed_rocm_dlls ALL DEPENDS ${_staged_dlls}
-                        COMMENT "Staging shadowed ROCm DLLs into build bin")
-                endif()
             endif()
         endblock()
     else()
@@ -106,6 +77,44 @@ if(BUILD_ADDRESS_SANITIZER)
     add_compile_options(${SANITIZER_COMPILE_FLAGS})
     add_link_options(${SANITIZER_LINK_FLAGS})
 
+endif()
+
+# DLL-shadowing workaround (remove once ROCm fixes this on Windows): a stale System32 amd_comgr.dll
+# shadows the TheRock one and breaks MIOpen's kernel JIT. PATH can't fix it (System32 precedes PATH),
+# but the exe's own dir wins, so stage the DLL there for any Windows build that JITs MIOpen kernels.
+# Tests.cmake wires stage_shadowed_rocm_dlls to test targets; the GLOBAL guard defines it once.
+if(WIN32)
+    block(SCOPE_FOR VARIABLES)
+        get_property(_dll_shadow_staged GLOBAL PROPERTY _rocm_dlls_staged_dll_shadow_workaround)
+        if(NOT _dll_shadow_staged)
+            # ROCM_CMAKE_PATH and ROCM_PATH are mutually-exclusive ways to point at the ROCm root
+            # (see ClangToolChain.cmake); prefer the former, fall back to the latter.
+            set(_rocm_root "${ROCM_CMAKE_PATH}")
+            if(NOT _rocm_root)
+                set(_rocm_root "${ROCM_PATH}")
+            endif()
+            if(_rocm_root)
+                set_property(GLOBAL PROPERTY _rocm_dlls_staged_dll_shadow_workaround TRUE)
+                file(TO_CMAKE_PATH "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}" _build_bin_dir)
+                set(_shadowed_dlls amd_comgr.dll)
+                set(_staged_dlls "")
+                foreach(_dll_name IN LISTS _shadowed_dlls)
+                    set(_dst "${_build_bin_dir}/${_dll_name}")
+                    add_custom_command(
+                        OUTPUT "${_dst}"
+                        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                                "${_rocm_root}/bin/${_dll_name}" "${_dst}"
+                        DEPENDS "${_rocm_root}/bin/${_dll_name}"
+                        COMMENT "Staging ${_dll_name} into build bin (DLL-shadowing workaround)"
+                        VERBATIM
+                    )
+                    list(APPEND _staged_dlls "${_dst}")
+                endforeach()
+                add_custom_target(stage_shadowed_rocm_dlls ALL DEPENDS ${_staged_dlls}
+                    COMMENT "Staging shadowed ROCm DLLs into build bin")
+            endif()
+        endif()
+    endblock()
 endif()
 
 # These settings are applied whether building with TheRock or standalone
