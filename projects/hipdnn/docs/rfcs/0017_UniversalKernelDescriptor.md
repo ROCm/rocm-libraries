@@ -269,21 +269,14 @@ selection, launch) is identical regardless of how a kernel arrived.
 
 ![Two ingestion paths converging on one generic engine and launcher](../images/ukd_flows.svg)
 
-Loading is on demand. Nothing is parsed until a graph needs it, and what is read is cached and reused
-by later graphs. The first applicability query resolves only what the check requires: the UEDs, to know
-which engines exist, then, per surviving engine, that engine's matchers, then its kernels and their
-metadata, and only for a selected engine its heuristic (UHD) and dispatch descriptor. An engine whose
-matchers reject a graph never pays for the rest, and a heuristic model is never read for an engine that
-is never chosen. What the provider establishes up front is only the descriptor inventory, the ids,
-kinds, and locations that say what exists, so the first query does not scan the filesystem mid-call.
-
-Because the drop-in location is a directory an operator writes to, the provider revalidates that
-inventory rather than trusting a snapshot. A cheap staleness check on the drop-in location, on the
-order of a directory mtime, lets it notice packs added or removed since the last query and reconcile:
-a new pack is picked up on the next query without a restart, and a removed one is dropped along with
-anything cached from it. Reconciliation happens between queries, never underneath one, so a plan
-already built keeps the descriptors it resolved. The exact trigger and its cost are left to the
-delivery follow-up.
+Loading is on demand and cached. Nothing is parsed until a graph needs it: an engine whose matchers
+reject a graph never pays to load its kernels, and a heuristic model is never read for an engine that
+is never selected. What the provider keeps up front is only the descriptor inventory, the ids, kinds,
+and locations that say what exists. Because the drop-in location is a directory an operator writes to,
+that inventory is rescanned on each applicability call, so a pack added or removed while the process
+runs is picked up or dropped without a restart, and anything cached from a removed pack is discarded.
+[Section 8](#8-end-to-end-flow) gives the exact order, what each step loads, and where the result is
+kept.
 
 Each UED becomes an engine that names its heuristic (UHD) and metadata
 schema (KMD); the KDPs that name it contribute their matchers, dispatch, and kernels, and each child
@@ -958,79 +951,114 @@ which sources arrive.
 
 ## 8. End-to-End Flow
 
-[Sections 2](#2-the-descriptors) through [7](#7-kernel-source) define the descriptors; this section
-walks the path a graph actually takes through them, named
-against hipDNN's real, already-shipped provider interfaces. As with the rest of this design, no new
-host or plugin-ABI interface is introduced ([Section 3](#3-how-it-works)): everything below happens
-behind `IEngine` and `IPlanBuilder`, the contracts a hand-written engine already implements.
+[Sections 2](#2-the-descriptors) through [7](#7-kernel-source) define the descriptors. This section is
+the runtime order: what loads, when, why, and where the result is kept. Everything happens behind
+`IEngine` and `IPlan`, the contracts a hand-written engine already implements, so no new host or
+plugin-ABI interface is introduced.
 
-1. **Applicability is requested from hipDNN.** The host asks every loaded engine plugin whether it
-   can serve this graph, through `IEngine::isApplicable(handle, opGraph)`. For a UKD-backed engine,
-   answering that one call is the rest of this section.
-2. **UEDs resolve, from disk or from the provider's own cache.** The provider needs the set of engines
-   it offers, and each one's declared heuristic (UHD) and metadata schema (KMD), before it can answer
-   for any of them. These load on first use and are cached, so a later graph reuses them
-   ([Section 3](#3-how-it-works)). Before serving from cache the provider revalidates its drop-in
-   inventory, so a pack added or removed since the last query is reflected in this one.
-3. **KDPs supply the matcher set to run.** For this engine, the provider takes the KDPs that name it
-   and, from them, the set of matcher ids ([Section 4](#4-descriptor-formats)) its kernels could
-   possibly need for this graph. Those matchers load on first use and are cached with the engine, so
-   the cost is paid once, and only for engines a graph actually reaches.
-4. **Each engine runs a priority-ordered check loop.** Having loaded all of an engine's matchers, the
-   provider evaluates them for this graph in priority order: the most commonly used matchers first,
-   kernel-level matchers, the ones that read `$kernel.*` tokens, last. This is the same
-   shared-versus-per-kernel matcher pass already described in
-   [Section 5](#5-matching-and-the-umd): a graph-level matcher runs once and prunes hard, so ordering
-   the cheap, broadly shared checks (architecture, dtype, layout) ahead of the `$kernel.*` checks
-   means the expensive per-kernel pass only ever runs over kernels that already survived the cheap
-   pruning.
-5. **The output is a per-engine catalog.** Every UKD whose full matcher set passed becomes a
-   candidate in that engine's catalog for this graph. The catalog is cached and attached to this
-   engine's context for this graph, so a later step (selection, ranking, plan build) reads it once
-   rather than re-running the match sequence.
-6. **Selection happens, then the winning engine's UHD ranks the catalog.** Which engine handles the
-   graph is decided by hipDNN's existing engine-selection heuristic ([Section 2](#2-the-descriptors)),
-   a mechanism this proposal does not change. Only once this engine is the one selected does its
-   `IEngine::initializeExecutionContext` call arrive; that is when its UHD loads (disk or cache) and
-   is handed the catalog from step 5. The UHD scores every candidate and returns a ranked list, its
-   top entry the default selection ([Section 4](#4-descriptor-formats)). Deferring UHD ranking to
-   this point, rather than ranking at applicability time, means the ranking work only ever runs for
-   the engine hipDNN actually picked.
-7. **The winning UKD's UDD loads and generic plan building begins.** The selected UED/UKD pair is now
-   known, so the KDP's one UDD ([Section 6](#6-dispatch-and-workspace)) loads and the provider begins
-   building the generic launch plan for it, the same `initializeExecutionContext` call constructing
-   the plan object the execution context holds.
-8. **The bound token state from matching is cached alongside the catalog.** Step 4's match sequence
-   binds `$kernel`, `$graph`, `$device`, node-attribute (`$conv`, `$sdpa_fwd`), and tensor (`$q`, `$k`)
-   fields as it evaluates each matcher. Both the UHD's ranking (step 6) and the UDD's dispatch
-   formulas (step 7) need this same bound state, so it is computed once, during matching, and cached
-   alongside the catalog rather than recomputed at each later step.
-9. **The UDD builds the generic launcher and executes.** The provider assembles the launcher from the
-   UDD's grid, block, shared-memory, and argument formulas over the bound token state. At execute
-   time, `IPlan::execute(handle, deviceBuffers, numDeviceBuffers, workspace)` binds each named
-   argument from the variant pack: hipDNN hands the plugin ABI a flat array pairing each tensor's uid
-   with a device pointer, built from the caller's variant pack, and the generic launcher resolves each
-   UDD argument against it by uid.
+Two host calls frame the flow. `IEngine::isApplicable` is asked of **every** loaded engine, so steps 1
+to 7 run once per engine per graph and must stay cheap. `IEngine::initializeExecutionContext` arrives
+**only for the engine hipDNN selected**, so steps 9 to 11 run once, for one engine. Everything that is
+per-engine-per-graph is therefore computed in the first phase and cached; the second phase reads that
+cache and never re-matches.
 
-Workspace sizing is queried the same way a hand-written engine is queried,
-`IEngine::getMaxWorkspaceSize(handle, opGraph, engineConfig)`, evaluating the UDD's `workspace_bytes`
-formula over the bound token state cached at steps 5 and 8. It does not depend on plan build: the call
-carries no execution context, and autotune queries it for every candidate engine, most of which are
-never selected and so never reach step 7 ([RFC 0013](0013_Autotune.md)). An engine that reached step 5
-can answer it.
+### 8.1 Applicability, Once Per Engine
 
-| Step | Descriptor consumed | hipDNN interface |
-|---|---|---|
-| 1 | UED (the engine identity being queried) | `IEngine::isApplicable` |
-| 2 | UED (loaded, not yet graph-specific) | provider-internal load backing the same `isApplicable` call |
-| 3 | KDP (its matcher set) | provider-internal, backing the same `isApplicable` call |
-| 4 | UMD, graph-level then `$kernel`-level | same `isApplicable` call, detailed in [Section 5](#5-matching-and-the-umd) |
-| 5 | Catalog (surviving UKDs) | the boolean return of `isApplicable`; cached on the provider's own handle |
-| 6 | UHD | `IEngine::initializeExecutionContext`, after hipDNN's own engine selection has already run |
-| 7 | UDD | same `initializeExecutionContext` call, building the plan the execution context holds |
-| (workspace) | UDD's `workspace_bytes` formula | `IEngine::getMaxWorkspaceSize` |
-| 8 | Bound token state (cached, not a separate call) | read again at steps 6 and 7 |
-| 9 | UKD's `kernel_source`, variant pack | `IPlan::execute` |
+**1. The host asks whether this engine can serve the graph.**
+`IEngine::isApplicable(handle, opGraph)`. The provider receives the graph as serialized bytes and its
+own handle, which is the same instance on every call for this session.
+
+**2. Check the cache.** Hash the serialized graph bytes before deserializing them, and look up
+`(graph hash, device id, inventory generation)` on the handle. On a hit, `memcmp` the stored bytes to
+confirm the graph is byte-identical rather than merely hash-equal, then return the cached verdict.
+Nothing below runs. On a miss, continue.
+*Why this key:* the graph bytes are the problem identity; the device id matters because the bound token
+state resolves `$device.*` and a handle can be rebound to another device; the inventory generation is
+step 3's counter.
+
+**3. Rescan the drop-in location.** Cheap staleness check, on the order of a directory mtime. If it
+changed, bump the inventory generation, drop descriptors that disappeared, and discard every cached
+catalog, since a pack added or removed changes which kernels are candidates. This runs per
+`isApplicable` call, which is why it must stay a stat and not a directory walk.
+*Loads:* nothing yet, only the inventory of ids, kinds, and locations.
+
+**4. Resolve this engine's UED.** Gives the engine identity, its knobs, and the ids of its one
+heuristic (UHD) and one metadata schema (KMD).
+*Why now:* the KMD field names are needed to validate `$kernel.*` references in step 6. The UHD is
+named but **not** loaded; nothing ranks yet.
+*Stored:* parsed UED and KMD, cached on the handle, reused by every later graph.
+
+**5. Resolve the KDPs that name this engine, and their matchers.** Each KDP contributes a matcher set,
+one UDD id, and a kernel vector of UKDs with their metadata values.
+*Why now:* the matchers are the applicability test, and the UKD metadata values are the `$kernel.*`
+inputs those matchers read. The UDD is named but **not** loaded; nothing dispatches yet.
+*Stored:* parsed KDPs, matchers, and kernel metadata, cached on the handle.
+
+**6. Run the matchers in priority order.** Graph-level matchers first, the ones reading only
+`$graph.*`, node-attribute, and tensor fields; `$kernel.*` matchers last
+([Section 5](#5-matching-and-the-umd)). A graph-level failure disqualifies every kernel in every pack
+that lists it, so the broadly shared checks (architecture, dtype, layout) prune before the per-kernel
+pass runs at all.
+*Produces two things, both cached together under step 2's key:*
+- the **catalog**, the UKDs whose full matcher set passed, and
+- the **bound token state**, the `$graph`, `$device`, node-attribute, tensor, and `$kernel` values
+  bound while matching.
+
+**7. Return.** True if and only if the catalog is non-empty.
+
+### 8.2 Selection, By hipDNN
+
+**8. hipDNN picks the engine.** Its existing engine-selection heuristic, unchanged by this proposal
+([Section 2](#2-the-descriptors)). Engines that answered false are not candidates. Engines that
+answered true but are not selected do no further work; their cached catalog stays on the handle in case
+a later graph hashes to it.
+
+### 8.3 Plan Build and Execute, Selected Engine Only
+
+**9. Rank the catalog.** `IEngine::initializeExecutionContext` arrives. Read the cached catalog and
+bound token state, apply any user-set knobs as a filter ([Section 4](#4-descriptor-formats)), then load
+this engine's **UHD** and score the survivors. It returns a ranked list whose top entry is the default
+selection.
+*Why the UHD loads here and not earlier:* ranking is only ever needed for the one engine that won, so a
+heuristic model is never read for an engine hipDNN did not pick.
+
+**10. Build the launcher.** The winning UKD is known, so load its pack's **UDD** and evaluate its grid,
+block, shared-memory, and argument formulas over the bound token state from step 6.
+*Stored:* the resulting plan, held by the execution context. Nothing is re-matched and nothing is
+re-scanned; selection has already happened.
+
+**11. Execute.** `IPlan::execute(handle, deviceBuffers, numDeviceBuffers, workspace)`. hipDNN passes a
+flat array pairing each tensor uid with a device pointer, built from the caller's variant pack, and the
+launcher resolves each UDD argument against it by uid.
+
+**Workspace** is queried by `IEngine::getMaxWorkspaceSize(handle, opGraph, engineConfig)`, evaluating
+the UDD's `workspace_bytes` formula over the cached bound token state. It carries no execution context
+and autotune calls it for every candidate engine, most of which are never selected
+([RFC 0013](0013_Autotune.md)), so any engine that reached step 6 can answer it without a plan.
+
+### 8.4 What Each Step Loads and Keeps
+
+| Step | Loads | Why then | Stored where |
+|---|---|---|---|
+| 2 | nothing | cache probe before any parsing | reads the handle cache |
+| 3 | inventory only | detect drop-in changes per call | inventory generation on the handle |
+| 4 | UED, KMD | engine identity; KMD names the `$kernel.*` fields | handle, reused across graphs |
+| 5 | KDPs, UMDs, UKD metadata | the matchers are the applicability test | handle, reused across graphs |
+| 6 | nothing new | evaluates what 4 and 5 loaded | catalog + bound token state, keyed per graph |
+| 9 | UHD | only the selected engine ranks | execution context |
+| 10 | UDD, UKD `kernel_source` | only the winning kernel dispatches | plan, held by the execution context |
+
+**Base-path invariant: accept implies a non-empty catalog.** Returning true from `isApplicable` means
+at least one UKD passed every matcher in some KDP. Producing no launchable kernel after accepting is a
+bug, not a legal outcome. An empty catalog at step 6, or a UHD that returns nothing at step 9, fails
+closed and hipDNN falls through to the next candidate engine, exactly as if this engine had never
+claimed applicability. [Section 15.4](#154-execution-and-selection) states the same rule for a
+composite's mandatory stage; that is this invariant applied to one stage, not a separate rule.
+
+**The cache is provider-owned.** hipDNN passes no graph identity and no opaque state slot across
+`isApplicable` and `initializeExecutionContext`. It does not need to: the two calls share the
+provider's handle and the graph's serialized bytes, and the bytes are the identity. No hipDNN interface
+change is required.
 
 ```mermaid
 sequenceDiagram
@@ -1038,81 +1066,35 @@ sequenceDiagram
     participant ERM as EnginePluginResourceManager (host)
     participant Eng as IEngine (UKD provider)
     participant Cache as Provider handle cache
-    participant UHD as UHD (selected engine only)
-    participant UDD as UDD (selected engine only)
     participant Plan as IPlan
 
-    Note over FE,ERM: Steps 1-5: applicability, asked of every loaded engine
+    Note over FE,Cache: Steps 1-7: asked of every loaded engine
     FE->>ERM: create_execution_plans() -> getApplicableEngineIds
     ERM->>Eng: isApplicable(handle, opGraph)
-    Eng->>Eng: revalidate inventory; resolve UEDs (step 2) + KDPs/matchers (step 3), on demand and cached
-    Eng->>Eng: priority-ordered UMD check loop: graph-level first, $kernel-level last (step 4)
-    Eng->>Cache: cache per-engine catalog + bound token state, keyed on graph-bytes hash + device identity (steps 5, 8)
-    Eng-->>ERM: bool (true only if the catalog is non-empty)
-    ERM-->>FE: candidate engine ids
+    Eng->>Cache: probe (graph hash, device id, inventory generation)
+    Eng->>Eng: rescan drop-in location; bump generation if changed (3)
+    Eng->>Eng: resolve UED + KMD (4), KDPs + matchers + UKD metadata (5)
+    Eng->>Eng: matchers in priority order, graph-level then $kernel-level (6)
+    Eng->>Cache: store catalog + bound token state
+    Eng-->>ERM: true if catalog non-empty (7)
 
-    Note over FE: Step 6a: hipDNN's own engine-selection heuristic (unchanged, not the UHD)
-    FE->>FE: select engine (existing engine-selection policy loop)
+    Note over FE: Step 8: hipDNN engine selection, unchanged, not the UHD
+    FE->>FE: select engine
 
-    Note over FE,Plan: Steps 6b-9: only for the selected engine
+    Note over FE,Plan: Steps 9-11: selected engine only
     FE->>ERM: build_plans() -> finalizePlanDescriptor
     ERM->>Eng: initializeExecutionContext(handle, opGraph, engineConfig, ctx)
-    Eng->>Cache: fetch cached catalog + bound token state (steps 5, 8)
-    Eng->>UHD: rank(catalog, features bound from $kernel/$device/$graph/node-attrs/tensors)
-    UHD-->>Eng: ranked UKD list, top = default (step 6)
-    Eng->>UDD: build generic launcher over the winning UKD (step 7)
+    Eng->>Cache: read catalog + bound token state
+    Eng->>Eng: apply knob filter, load UHD, rank (9)
+    Eng->>Eng: load UDD, build launcher over bound token state (10)
     Eng->>Plan: ctx.setPlan(...)
     ERM->>Eng: getMaxWorkspaceSize(handle, opGraph, engineConfig)
-    FE->>FE: execute(handle, variantPack, workspace)
-    FE->>ERM: backendExecute
-    ERM->>ERM: bind tensor uid to device pointer into the plugin device-buffer array
-    ERM->>Plan: execute(handle, deviceBuffers, numDeviceBuffers, workspace)  (step 9)
+    FE->>ERM: execute -> backendExecute
+    ERM->>Plan: execute(handle, deviceBuffers, numDeviceBuffers, workspace) (11)
 ```
 
-**The catalog and the bound token state are provider-owned, not hipDNN-owned.** Across a session,
-`IEngine::isApplicable` and `IEngine::initializeExecutionContext` share two things: the provider's own
-handle, the one object guaranteed to be the same instance across both calls, and the graph's
-serialized bytes, which the provider receives on every call. That is enough. The catalog from step 5
-and the bound token state from step 8 are cached on the provider's handle, keyed by a hash the
-provider computes over the serialized graph bytes **before deserializing them**, with a `memcmp`
-against the cached bytes on a hash hit to confirm the graph is byte-for-byte identical rather than
-merely hash-equal. The key also carries a device identity, because the bound token state resolves
-`$device.*` and a handle can be rebound to a stream on another device; a graph-only key would serve a
-catalog and geometry computed for the wrong device. A cached catalog is also discarded when the
-descriptor inventory changes ([Section 3](#3-how-it-works)), since a pack dropped in or removed since
-the last query changes which kernels are candidates. Hashing raw bytes ahead of deserialization keeps
-the lookup cheap: the expensive
-work, deserializing the graph and running the matchers, happens only on a miss, and a hit skips
-straight to the cached catalog and token state. The provider already holds other per-session state on
-its handle the same way. No hipDNN interface change is required, and no correlation id or
-host-provided graph identity is needed, since the graph bytes themselves are the identity.
-
-**Base-path invariant: accept implies a non-empty catalog.** Accepting applicability, returning true
-from `isApplicable`, means a non-empty catalog exists for this graph: at least one UKD passed every
-matcher in some KDP. Producing an empty catalog after accepting applicability is a bug, not a legal
-outcome. If the catalog is empty at the end of step 4, or the UHD legally returns nothing at step 6,
-the engine fails closed there and hipDNN falls through to the next candidate engine, exactly as if
-this engine had never claimed applicability. [Section 15.4](#154-execution-and-selection) already
-states a fall-through rule for a composite's mandatory stage; that is this same base-path invariant,
-applied to one stage of a multi-stage program, not a separate rule.
-
-**Which descriptor sees which data, at which step.** [Section 2](#2-the-descriptors)'s concepts
-diagram shows static ownership, which descriptor belongs to which; this table shows the runtime data
-each one actually reads, and when:
-
-| Descriptor / state | Data it reads | Steps |
-|---|---|---|
-| UED | its own id, heuristic id, and metadata id; no per-graph data | 1, 2 |
-| KMD | the engine's declared metadata field names and types (schema only) | 3, 4 (kernel-level matchers reference the `$kernel.*` fields declared here) |
-| UMD | `$graph.*`, node-attribute (`$conv.*`, `$sdpa_fwd.*`), and tensor (`$q.*`) fields at the graph-level pass; adds `$kernel.*` at the kernel-level pass | 4 |
-| Catalog | the set of UKDs whose matchers all passed, for this graph | produced at 5, read at 6 and 7, retained through 8 |
-| Bound token state | concrete values bound while matching: `$kernel`, `$graph`, `$device`, node-attribute, and tensor fields | produced at 4, cached at 8, read again at 6 (by the UHD) and 7 (by the UDD) |
-| UHD | `$device.*`, `$kernel.*`, and the node-attribute/tensor fields named in its `features_signature`, plus the catalog | 6 |
-| UDD | `$kernel.*`, `$device.*`, `$graph.*`, node-attribute, and tensor fields in its dispatch formulas, plus the bound token state | 7, and again at execute (9) |
-| UKD | its own concrete KMD field values, the `$kernel.*` values the UHD and UDD read | 6, 7 |
-| Variant pack | tensor uid to device pointer, at execute time only | 9 |
-
 ---
+
 
 ## 9. Adapters and Extensibility
 
@@ -1303,9 +1285,9 @@ The two ingestion paths differ only in where a kernel's code comes from:
   build id) so incompatible bundles are rejected before load.
 - **Runtime drop-in.** The path is opt-in and off by default. When enabled, the provider scans a
   dedicated drop-in location for custom bundles, compiles each descriptor to a matcher once on first
-  use, and registers it exactly as an installed one; the location is revalidated between queries, so a
-  bundle added or removed while the process runs is picked up or dropped without a restart
-  ([Section 3](#3-how-it-works)). A single package may declare many descriptors, and a
+  use, and registers it exactly as an installed one. The location is rescanned on each applicability
+  call ([Section 8](#8-end-to-end-flow)), so a bundle added or removed while the process runs is
+  picked up or dropped without a restart. A single package may declare many descriptors, and a
   bad descriptor is quarantined on load without failing the rest. JIT kernels compile on first use and
   cache their result. (The concrete enablement and location mechanism is left to the delivery
   follow-up RFC.)
