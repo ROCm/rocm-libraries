@@ -143,13 +143,22 @@ class PtrType(Type):
 class SmemType(Type):
     elem: Type
     shape: Tuple[int, ...]
+    # When True, the smem-pool packer must give this allocation its own
+    # byte range (never reuse another allocation's slot, and never be reused).
+    # Used by the cshuffle "no-alias" mode so the C tile does not overlap the
+    # A/B staging bytes. Deliberately kept OUT of ``name`` so the LLVM type
+    # text is unchanged for the default (exclusive=False) case -> byte-identical.
+    exclusive: bool = False
 
-    def __init__(self, elem: Type, shape: Sequence[int]) -> None:
+    def __init__(
+        self, elem: Type, shape: Sequence[int], exclusive: bool = False
+    ) -> None:
         shape = tuple(int(x) for x in shape)
         s = "x".join(str(x) for x in shape)
         object.__setattr__(self, "name", f"smem<{elem.name}, [{s}]>")
         object.__setattr__(self, "elem", elem)
         object.__setattr__(self, "shape", shape)
+        object.__setattr__(self, "exclusive", exclusive)
 
 
 # ----------------------------- Values / Ops ------------------------------
@@ -511,6 +520,20 @@ class IRBuilder:
 
     def exp2(self, a: Value) -> Value:
         return self._op("math.exp2", [a], [a.type], result_name_hint="exp2").result
+
+    def exp2_fast(self, a: Value) -> Value:
+        """Native single-instruction base-2 exp: ``llvm.amdgcn.exp2.f32`` -> one
+        ``v_exp_f32``. Unlike ``exp2`` (``llvm.exp2.f32``), it emits NO
+        overflow/underflow guard (the ~5-VALU range-reduction clamp), so the
+        caller must guarantee the argument stays in the hardware's valid range.
+
+        Safe for softmax where the argument is always <= 0 (``s - m_new`` and
+        ``m_i - m_new``): no overflow, and ``v_exp_f32`` already flushes large
+        negatives to 0. Matches FlyDSL's ``rocdl.exp2`` emission. f32 only.
+        """
+        return self._op(
+            "math.exp2_fast", [a], [a.type], result_name_hint="exp2f"
+        ).result
 
     def log2(self, a: Value) -> Value:
         return self._op("math.log2", [a], [a.type], result_name_hint="log2").result
@@ -1027,6 +1050,41 @@ class IRBuilder:
             result_name_hint="atom_bf16",
         ).result
 
+    def global_atomic_add_pk_f16(
+        self,
+        ptr: Value,
+        idx: Value,
+        value: Value,
+        *,
+        ordering: str = "monotonic",
+    ) -> Value:
+        """Packed-fp16 atomic add: two fp16 lanes per transaction.
+
+        Lowers to AMDGPU's ``llvm.amdgcn.global.atomic.fadd.v2f16``
+        intrinsic (gfx940+); returns the pre-add value. ``value``
+        must be a ``<2 x f16>`` vector and the pointer must reach
+        into an fp16 buffer with an even element index.
+        """
+        if ordering not in ("monotonic", "acquire", "release", "acq_rel", "seq_cst"):
+            raise ValueError(f"unknown ordering {ordering!r}")
+        if not isinstance(value.type, VectorType):
+            raise ValueError(
+                f"global_atomic_add_pk_f16 expects <2 x f16> input, "
+                f"got {value.type.name}"
+            )
+        if value.type.elem != F16 or value.type.count != 2:
+            raise ValueError(
+                f"global_atomic_add_pk_f16 expects <2 x f16> input, "
+                f"got {value.type.name}"
+            )
+        return self._op(
+            "memref.global_atomic_add_pk_f16",
+            [ptr, idx, value],
+            [value.type],
+            attrs={"elem_type": "f16", "vec": 2, "ordering": ordering},
+            result_name_hint="atom_f16",
+        ).result
+
     def fp16_zero(self) -> Value:
         return self._op(
             "arith.constant",
@@ -1105,11 +1163,23 @@ class IRBuilder:
     # ----- memory -----
 
     def smem_alloc(
-        self, elem: Type, shape: Sequence[int], name_hint: str = "smem"
+        self,
+        elem: Type,
+        shape: Sequence[int],
+        name_hint: str = "smem",
+        exclusive: bool = False,
     ) -> Value:
-        t = SmemType(elem, shape)
+        t = SmemType(elem, shape, exclusive=exclusive)
+        # The smem type name deliberately omits ``exclusive``; carry it as an op
+        # attr so it round-trips through the ck.dsl.ir/v1 serializer (whose type
+        # reconstruction is name-only). Only emitted when set -> the default
+        # (exclusive=False) serialized form is unchanged / byte-identical.
+        attrs = {"exclusive": True} if exclusive else None
         return self._op(
-            "tile.smem_alloc", result_types=[t], result_name_hint=name_hint
+            "tile.smem_alloc",
+            result_types=[t],
+            attrs=attrs,
+            result_name_hint=name_hint,
         ).result
 
     def global_load(
@@ -3525,6 +3595,7 @@ PURE_OP_NAMES = {
     "arith.sitofp_f32",
     "arith.cvt_fp8_to_f32",
     "math.exp2",
+    "math.exp2_fast",
     "math.log2",
     "math.rcp",
     "math.rcp_fast",

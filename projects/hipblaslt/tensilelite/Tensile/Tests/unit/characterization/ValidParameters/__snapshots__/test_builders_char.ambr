@@ -1440,6 +1440,7 @@
     'NonTemporalC',
     'NonTemporalD',
     'NonTemporalE',
+    'NonTemporalGate',
     'NonTemporalMXSA',
     'NonTemporalMXSB',
     'NonTemporalMetadata',
@@ -1483,6 +1484,7 @@
     'StreamKDualMulticast',
     'StreamKFixupTreeReduction',
     'StreamKForceDPOnly',
+    'StreamKWorkStealing',
     'StreamKXCCMapping',
     'SuppressNoLoadLoop',
     'SwInstructionPrefetch',
@@ -2247,6 +2249,15 @@
       'len': 8,
       'type': 'list',
     }),
+    'NonTemporalGate': dict({
+      'head': list([
+        0,
+        1,
+        2,
+      ]),
+      'len': 8,
+      'type': 'list',
+    }),
     'NonTemporalMXSA': dict({
       'head': list([
         0,
@@ -2598,6 +2609,14 @@
       'type': 'list',
     }),
     'StreamKForceDPOnly': dict({
+      'head': list([
+        0,
+        1,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'StreamKWorkStealing': dict({
       'head': list([
         0,
         1,

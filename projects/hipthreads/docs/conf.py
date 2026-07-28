@@ -38,7 +38,7 @@ html_theme_options = {"flavor": "rocm"}
 
 external_projects_current_project = "hipthreads"
 
-# hipThreads is class-heavy (thread, mutex, condition_variable, ...). By default
+# hipThreads is class-heavy (wthread, mutex, condition_variable, ...). By default
 # Breathe shows only the class summary, not its members. Expand documented public
 # members so the API reference lists join/detach/lock/etc. (A member without a
 # Doxygen comment will not appear; add "undoc-members" here to show those too.)
