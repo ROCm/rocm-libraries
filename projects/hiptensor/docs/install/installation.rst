@@ -126,4 +126,4 @@ and select the Tarball installation method.
 Install a nightly build
 -----------------------
 
-The `TheRock <https://github.com/ROCm/TheRock>`_ build system also publishes nightly builds for ROCm and its components, including hipTensor. See `Nightly <https://github.com/ROCm/TheRock#nightly-release-status>`_release status for details.
+The `TheRock <https://github.com/ROCm/TheRock>`_ build system also publishes nightly builds for ROCm and its components, including hipTensor. See `Nightly <https://github.com/ROCm/TheRock#nightly-release-status>`_ release status for details.
