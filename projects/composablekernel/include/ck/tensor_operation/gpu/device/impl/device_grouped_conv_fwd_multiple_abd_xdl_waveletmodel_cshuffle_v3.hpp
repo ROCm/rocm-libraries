@@ -27,10 +27,6 @@
 #include "ck/host_utility/device_prop.hpp"
 #include "ck/host_utility/kernel_launch.hpp"
 #include "ck/host_utility/io.hpp"
-#ifdef CK_EXPERIMENTAL_BUILDER
-#include "ck_tile/builder/reflect/conv_describe.hpp"
-#include "ck_tile/builder/reflect/instance_traits_device_grouped_conv_fwd_multiple_abd_xdl_cshuffle_v3.hpp"
-#endif
 
 namespace ck {
 namespace tensor_operation {
