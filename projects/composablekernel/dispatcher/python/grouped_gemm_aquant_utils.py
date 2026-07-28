@@ -445,6 +445,15 @@ def _get_ck_include_dir() -> Optional[Path]:
     return None
 
 
+def _get_dispatcher_include_dir() -> Optional[Path]:
+    """Attempt to locate the dispatcher include directory relative to this file."""
+    here = Path(__file__).resolve().parent
+    candidate = here.parent / "include"
+    if (candidate / "ck_tile" / "dispatcher").is_dir():
+        return candidate
+    return None
+
+
 def _generate_aquant_kernel(
     config: AQuantKernelConfig,
     output_dir: Path,
@@ -497,8 +506,9 @@ def _compile_aquant_kernel(
     if ck_include:
         cmd += [f"-I{ck_include}"]
 
-    # NOTE: dispatcher/include is intentionally excluded here — the aquant ctypes lib
-    # calls SelectedKernel::launch() directly and does not use any dispatcher headers.
+    dispatcher_include = _get_dispatcher_include_dir()
+    if dispatcher_include:
+        cmd += [f"-I{dispatcher_include}"]
 
     if extra_include_dirs:
         for d in extra_include_dirs:
