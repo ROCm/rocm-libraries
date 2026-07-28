@@ -19,6 +19,7 @@
 // THE SOFTWARE.
 
 #pragma once
+#include "rocfft/rocfft.h"
 #include "stockham_gen_base.h"
 
 enum class LDSColumnPattern
@@ -46,6 +47,10 @@ struct StockhamPartialPassKernel : public StockhamKernel
         pp_factors_other_prod    = product(factors_pp_other.begin(), factors_pp_other.end());
         threads_per_transform_pp = params.pp_threads_per_transform;
         transforms_per_block_pp  = workgroup_size / threads_per_transform_pp;
+
+        if(!transform_type.has_value())
+            throw std::runtime_error("transform_type is not set");
+        transform_type_pp = static_cast<rocfft_transform_type>(transform_type.value());
     }
     virtual ~StockhamPartialPassKernel(){};
 
@@ -55,6 +60,7 @@ struct StockhamPartialPassKernel : public StockhamKernel
     unsigned int              pp_factors_prod;
     unsigned int              pp_factors_other_prod;
     std::vector<unsigned int> factors_pp_other;
+    rocfft_transform_type     transform_type_pp;
 
     Variable tile_index{"tile_index", "size_t"};
     Variable num_of_tiles{"num_of_tiles", "size_t"};

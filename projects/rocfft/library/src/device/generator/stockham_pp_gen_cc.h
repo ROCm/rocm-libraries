@@ -398,8 +398,10 @@ struct StockhamPartialPassKernelCC : public StockhamPartialPassKernel
         for(unsigned int i = 0; i < length / stripmine_h; ++i)
             tmp_stmts += StoreGlobal{
                 buf,
-                CallExpr{"local_transpose_pp_length" + std::to_string(length) + "_device",
-                         {offset_tile_wbuf(i)}},
+                (transform_type_pp == rocfft_transform_type_real_inverse)
+                    ? Expression{offset_tile_wbuf(i)}
+                    : CallExpr{"local_transpose_pp_length" + std::to_string(length) + "_device",
+                               {offset_tile_wbuf(i)}},
                 lds_complex[offset_tile_rlds(i)]};
 
         stmts += CommentLines{
@@ -698,10 +700,25 @@ struct StockhamPartialPassKernelCC : public StockhamPartialPassKernel
 
     ArgumentList global_arguments() override
     {
-        // insert large twiddles
-        ArgumentList arglist = StockhamKernel::global_arguments();
-        arglist.arguments.insert(arglist.arguments.begin() + 1, large_twiddles);
-        return arglist;
+        if(transform_type_pp != rocfft_transform_type_real_inverse)
+        {
+            // insert large twiddles
+            ArgumentList arglist = StockhamKernel::global_arguments();
+            arglist.arguments.insert(arglist.arguments.begin() + 1, large_twiddles);
+            return arglist;
+        }
+        else
+        {
+            auto arglist = ArgumentList{twiddles_pp, twiddles_off_dim};
+
+            auto arguments_base = StockhamKernel::global_arguments();
+            for(const auto& arg : arguments_base.arguments)
+                arglist.append(arg);
+
+            arglist.arguments.insert(arglist.arguments.begin() + 3, large_twiddles);
+
+            return arglist;
+        }
     }
 
     Function generate_global_function() override
@@ -750,7 +767,8 @@ struct StockhamPartialPassKernelCC : public StockhamPartialPassKernel
 
         body += loadlds;
 
-        body += generate_partial_pass_steps_3_4();
+        if(transform_type_pp != rocfft_transform_type_real_inverse)
+            body += generate_partial_pass_steps_3_4();
 
         body += LineBreak{};
         body += CommentLines{"calc the thread_in_device value once and for all device funcs"};
@@ -802,6 +820,9 @@ struct StockhamPartialPassKernelCC : public StockhamPartialPassKernel
                           pre_post_lds_args};
 
         body += postStore;
+
+        if(transform_type_pp == rocfft_transform_type_real_inverse)
+            body += generate_partial_pass_steps_1_2();
 
         body += LineBreak{};
         StatementList storelds;
