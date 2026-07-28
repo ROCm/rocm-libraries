@@ -1,7 +1,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 ################################################################################
-# Target A: STANDARD StreamK (StreamKForceDPOnly=0) 2-D DUAL-multicast (gfx1250).
+# STANDARD StreamK (StreamKForceDPOnly=0) 2-D DUAL-multicast (gfx1250).
 #
 # A genuine 2-D HW cluster ClusterDim = [Cs, Ck] = [2, 2] on a StreamK==3
 # TWO-TILE (DP-first) kernel -- i.e. StreamKForceDPOnly=0, so there is a real SK
@@ -17,9 +17,9 @@
 #
 # CPU-only characterization: no GPU required. This validates codegen (dense dual
 # masks on the DP round + 2-D tile fold + DP->SK dual-mask clear + intact SK
-# partial-tile workspace addressing + balanced cluster barrier). The definitive
+# partial-tile workspace addressing + balanced cluster barrier). The on-device
 # correctness check is the user's HW run of
-# Tests/common/streamk/gfx1250/core/sk_mxf4_2d_multicast_probe.yaml.
+# Tests/common/streamk/gfx1250/core/sk_mxf4_2d_dual_multicast.yaml.
 GlobalParameters:
   SyncsPerBenchmark: 0
   MinimumRequiredVersion: 5.0.0
@@ -78,7 +78,7 @@ BenchmarkProblems:
         - LocalReadVectorWidth: [-1]
         - StoreVectorWidth: [-1]
         - StreamK: [3]
-        # Target A: STANDARD two-tile schedule (NOT ForceDPOnly) + dual-2D opt-in.
+        # STANDARD two-tile schedule (NOT ForceDPOnly) + dual-2D opt-in.
         - StreamKForceDPOnly: [0]
         - StreamKDualMulticast: [1]
         - StreamKAtomic: [0]

@@ -1,9 +1,9 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 ################################################################################
-"""ForceDPOnly 2-D DUAL-multicast probe -- gfx1250 characterization (CPU-only).
+"""ForceDPOnly 2-D dual-operand multicast -- gfx1250 characterization (CPU-only).
 
-Phase-0 probe: a StreamK==3 ``StreamKForceDPOnly`` (dense data-parallel, NO
+A StreamK==3 ``StreamKForceDPOnly`` (dense data-parallel, NO
 K-split reduction) kernel given a GENUINE 2-D cluster ClusterDim=[Cs,Ck]=[2,2]
 in which BOTH operands are TDM-multicast:
 
@@ -30,7 +30,7 @@ Asserts (see ``_designed/gfx1250/streamk_forcedp_2d.yaml``):
     prologue/epilogue arrive+wait phases co-exist; and
   * the factored K-split decode/shift are ABSENT (this is a spatial N-axis).
 
-CPU-only: no GPU required. The DEFINITIVE correctness check is the user's HW run
+CPU-only: no GPU required. The on-device correctness check is the user's HW run
 of the ``[2, 2]`` ClusterDim entry in
 ``Tests/common/streamk/gfx1250/core/sk_mxf4_force_dp_only_cluster_multicast.yaml``
 (the 1-D and 2-D ForceDPOnly multicast sweeps now share one config; functional-sim
@@ -58,7 +58,7 @@ _CONFIG = os.path.join(
 
 
 def test_streamk_forcedp_2d_gfx1250_emits_assembly():
-    """gfx1250 ForceDPOnly [2,2] probe emits real assembly, err==0, with the
+    """gfx1250 ForceDPOnly [2,2] emits real assembly, err==0, with the
     2-D DP tile decode + DENSE dual-multicast masks (A on Ck/Y, B on Cs/X) and
     NO factored K-split decode."""
     results = emit_kernels_from_config(_CONFIG, limit=8, arch=_ARCH)

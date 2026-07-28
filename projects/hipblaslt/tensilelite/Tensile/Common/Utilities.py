@@ -376,7 +376,7 @@ def streamKClusterFactors(d):
     index folds the cluster Y rank in (StreamKIdx = WorkGroup0*Ck + WorkGroup1).
 
     Config expressions:
-      * [C, 1] -> Cs=C, Ck=1  : pure multicast   (1-D launch, byte-identical)
+      * [C, 1] -> Cs=C, Ck=1  : pure multicast   (1-D launch)
       * [1, C] -> Cs=1, Ck=C  : pure reduction    (2-D launch)
       * [Cs,Ck]-> both > 1     : factored          (2-D launch; B-multicast along Cs
                                                     AND K-split reduction along Ck)
@@ -389,7 +389,7 @@ def streamKClusterFactors(d):
     return cs, ck, cs * ck, (ck > 1)
 
 def streamKForceDP2DMulticast(d):
-    """True for the Phase-0 ForceDPOnly 2-D DUAL-multicast probe.
+    """True for the ForceDPOnly 2-D dual-operand multicast cluster.
 
     This is a StreamK==3 ``StreamKForceDPOnly`` (dense data-parallel, no K-split
     reduction) kernel given a GENUINE 2-D cluster ClusterDim = [Cs, Ck] with BOTH
@@ -414,10 +414,10 @@ def streamKDual2DMulticast(d):
 
     This GENERALIZES ``streamKForceDP2DMulticast`` to cover BOTH:
 
-      * the ForceDPOnly single-round probe (``StreamKForceDPOnly`` + 2-D cluster);
+      * the ForceDPOnly 2-D dual-operand multicast (``StreamKForceDPOnly`` + 2-D cluster);
         and
       * the STANDARD two-tile StreamK path (``StreamKForceDPOnly == 0``) opted in
-        via ``StreamKDualMulticast`` -- "Target A". Here the DP (full-tile) round
+        via ``StreamKDualMulticast``. Here the DP (full-tile) round
         does the same 2-D dual multicast (Cs/X peers share B on M-adjacent tiles,
         Ck/Y peers share A on N-adjacent tiles) while the SK (partial-tile) round
         reduces 1-D via the workspace exactly as today. It is temporal reuse of

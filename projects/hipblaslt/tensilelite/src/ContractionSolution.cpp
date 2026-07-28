@@ -1798,7 +1798,7 @@ namespace TensileLite
         {
             if(sizeMapping.streamKForceDPOnly != 0 && sizeMapping.clusterDim.y > 1)
             {
-                // ForceDPOnly 2-D DUAL-multicast probe (Phase-0): a genuine 2-D HW
+                // ForceDPOnly 2-D dual-operand multicast: a genuine 2-D HW
                 // cluster ClusterDim=[Cs,Ck] where Cs (x) B-multicast peers are
                 // M-adjacent tiles and Ck (y) A-multicast peers are N-ADJACENT tiles.
                 // Launch a grid that spans the FULL M x N tile space -- gridX = nWG0
@@ -1814,7 +1814,7 @@ namespace TensileLite
             }
             else if(sizeMapping.streamKDualMulticast != 0 && sizeMapping.clusterDim.y > 1)
             {
-                // Target A: STANDARD two-tile StreamK 2-D DUAL-multicast. Launch a
+                // STANDARD two-tile StreamK 2-D DUAL-multicast (StreamKDualMulticast). Launch a
                 // PERSISTENT 2-D cluster grid [nWG0, gridY, batch] (NOT the full M x N
                 // ForceDPOnly grid): gridX is PINNED to nWG0 so the kernel's dense DP
                 // fold StreamKIdx = WorkGroup1*nWG0 + WorkGroup0 (StreamK.preLoop) is
@@ -1831,7 +1831,7 @@ namespace TensileLite
             }
             else if(sizeMapping.clusterDim.y > 1)
             {
-                // 2-D StreamK cluster PROBE (Scheme A): a genuine 2-D HW cluster
+                // 2-D StreamK cluster: a genuine 2-D HW cluster
                 // ClusterDim=[Cs,Ck] with Ck=clusterDim.y. Launch a 2-D grid so the
                 // cluster Y-extent is legal (gridDimY % Ck == 0) and every WG gets a
                 // unique index via StreamKIdx = WorkGroup0*Ck + WorkGroup1 (kernel
@@ -3288,7 +3288,7 @@ namespace TensileLite
                    * static_cast<size_t>(sizeMapping.clusterDim.y))
                       > 1)
             {
-                // C = Cs*Ck. 1-D: clusterDim.y==1 so c=clusterDim.x (byte-identical).
+                // C = Cs*Ck. 1-D: clusterDim.y==1 so c=clusterDim.x.
                 size_t c = static_cast<size_t>(sizeMapping.clusterDim.x)
                            * static_cast<size_t>(sizeMapping.clusterDim.y);
                 sk.grid  = ((sk.grid + c - 1) / c) * c;
@@ -4190,7 +4190,7 @@ namespace TensileLite
             {
                 if(self.sizeMapping.streamKForceDPOnly)
                 {
-                    // ForceDPOnly 2-D DUAL-multicast probe (Phase-0): the 2-D cluster
+                    // ForceDPOnly 2-D dual-operand multicast: the 2-D cluster
                     // [Cs,Ck] tiles the FULL M x N tile space with one WG per output
                     // tile (Cs peers M-adjacent -> share B, Ck peers N-adjacent ->
                     // share A). This is NOT a K-split, so the grid is exactly `tiles`
@@ -4202,7 +4202,7 @@ namespace TensileLite
                 }
                 else if(self.sizeMapping.streamKDualMulticast)
                 {
-                    // Target A: STANDARD two-tile StreamK (streamKForceDPOnly==0)
+                    // STANDARD two-tile StreamK (streamKForceDPOnly==0, StreamKDualMulticast)
                     // 2-D DUAL-multicast. UNLIKE ForceDPOnly (skGrid==tiles, no SK
                     // round), the standard schedule keeps a real DP + SK split, so
                     // we RESHAPE the base DP grid (skGrid computed above from the CU
@@ -4222,7 +4222,7 @@ namespace TensileLite
                     // at the DP->SK boundary the kernel drops BOTH masks to self-only
                     // (streamKMulticastBoundaryClear). This is temporal reuse of ONE
                     // physical cluster: 2-D mask grouping in DP, 1-D reduction in SK.
-                    // NOTE: batch==1 only for Phase-1 (the fold's batch stride is
+                    // NOTE: batch==1 only (the fold's batch stride is
                     // nWG0*nWG1, so a reshaped-row grid is dense only per batch slice).
                     // See docs/design/streamk-wg-clusters.md.
                     size_t ck = static_cast<size_t>(self.sizeMapping.clusterDim.y);

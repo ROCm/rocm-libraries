@@ -46,7 +46,7 @@ from copy import deepcopy
 
 # 2-D StreamK factored cluster -- within-cluster lane-order layout.
 # The physical within-cluster lane linearization of a genuine 2-D HW cluster
-# ClusterDim = [Cs, Ck] is X-fastest (HW-validated on gfx1250):
+# ClusterDim = [Cs, Ck] is X-fastest:
 #     lane index = wg_x + wg_y*Cs. Under this ordering the Cs spatial
 #     B-multicast peers sharing a given K/Y rank k = wg_y are a CONTIGUOUS run,
 #     so the factored B-multicast mask is maskB = ((1 << Cs) - 1) << (k * Cs).
@@ -1014,8 +1014,7 @@ class StreamK(Component):
                     # invalidate is not guaranteed to re-fetch a peer partial
                     # written back on a different partition, so escalate the
                     # cluster-reduction acquire (paired with the SCOPE_SYS
-                    # release below) to the system-coherent point. Held fix for
-                    # the PGR1 boundary-cluster race; see red-pgr1-fix notes.
+                    # release below) to the system-coherent point.
                     module.add(memOrder.acquireFence(writer, scope=CacheScope.SCOPE_SYS))  # once: observe peers' published partials
                     module.add(skClusterSetupDone)
 
@@ -1461,8 +1460,7 @@ class StreamK(Component):
             # then arrives at the split barrier; escalate the release writeback
             # to SCOPE_SYS so the partial is globally visible past gfx1250's
             # partitioned L2 before the owner's paired SCOPE_SYS acquire reads
-            # it. Non-cluster StreamK keeps the SCOPE_DEV default. Held fix for
-            # the PGR1 boundary-cluster race; see red-pgr1-fix notes.
+            # it. Non-cluster StreamK keeps the SCOPE_DEV default.
             releaseScope = (CacheScope.SCOPE_SYS
                             if self._streamKClusterReductionEnabled(writer, kernel)
                             else None)
@@ -1473,7 +1471,7 @@ class StreamK(Component):
             # SCOPE_SYS release fence, participate in the SYMMETRIC cluster
             # barrier INSTEAD OF raising the global completion flag. The peer
             # both ARRIVES (s_barrier_signal -3) and WAITS (s_barrier_wait -3),
-            # exactly like the owner and like the HW-validated multicast
+            # exactly like the owner and like the multicast
             # handshake -- it does NOT signal-and-exit. The peer's wait keeps it
             # parked at the cluster rendezvous until every member (owner
             # included) has arrived, giving the owner's paired acquire a real
@@ -1635,24 +1633,15 @@ class StreamK(Component):
         The cluster ``s_barrier_signal/wait -3`` orders EXECUTION across all C
         co-resident peers; peer->owner memory VISIBILITY rides on the paired
         SCOPE_SYS release (peer, before it arrives) / acquire (owner, after it
-        waits) fences. The earlier ASYMMETRIC form -- peers only
-        ``s_barrier_signal -3`` (arrive) and then branch away / exit while only
-        the owner ``s_barrier_wait -3`` -- was not a genuine cluster
-        synchronisation point on gfx1250: for a C >= 4 reduction cluster the
-        owner could observe the barrier satisfied and sum a peer slot before
-        that cross-WGP peer's partial was globally visible, dropping exactly one
-        contribution (device ~= (C-1)/C * reference, a cluster-aligned column
-        stripe confined to the grid tail). Adding more fences did not help
-        because the defect was structural, not a missing drain.
+        waits) fences.
 
-        The fix mirrors the HW-validated multicast handshake: make the barrier
-        SYMMETRIC -- every cluster member (owner AND every peer) both arrives
-        (``s_barrier_signal -3``) AND waits (``s_barrier_wait -3``) on the same
-        barrier, so no peer proceeds/exits until the whole cluster has rendezvoused
-        and the owner's acquire has a real cross-cluster order to observe. With
-        the symmetric barrier the fast path is correct for ALL C (validated
-        C = 2, 4, 8), so it is enabled whenever the cluster reduction is active;
-        there is NO per-peer global-flag fallback on the C >= 4 correctness path.
+        The split barrier must be SYMMETRIC: every cluster member (owner AND
+        every peer) both arrives (``s_barrier_signal -3``) AND waits
+        (``s_barrier_wait -3``) on the same barrier. An arrive-and-exit peer is
+        not a genuine synchronisation point -- the owner could sum a peer slot
+        before that cross-WGP peer's partial is globally visible across the
+        partitioned L2, dropping ~(C-1)/C for C >= 4 (a cluster-aligned column
+        stripe confined to the grid tail).
 
         The per-tile global-flag handshake still exists, but only for a cluster
         that straddles the SK grid boundary (``clusterReduceIntraCheck`` == SCC0,
@@ -1671,7 +1660,7 @@ class StreamK(Component):
         branch over it to ``labelBase``. When ``wait`` is set an all-waves
         ``s_barrier_wait -3`` is appended after the skip label. Each caller passes
         its own getNameInc label base + sgpr pool tag so emitted labels/counters
-        stay byte-identical. Wave election uses the Serial/readfirstlane idiom the
+        stay distinct per call site. Wave election uses the Serial/readfirstlane idiom the
         StreamK flag path already uses (rather than sgpr("WaveIdx"), which may be
         undefined in the epilogue), so it is self-contained.
         """
@@ -1725,8 +1714,8 @@ class StreamK(Component):
         (deadlock-safe). See docs/design/streamk-wg-clusters.md.
         """
         module = Module("StreamK cluster intra-cluster check")
-        # Whole-cluster size C. 1-D path: C = ClusterDim[0] (byte-identical). 2-D
-        # probe: C = Cs*Ck (the split barrier spans every co-resident WG).
+        # Whole-cluster size C. 1-D path: C = ClusterDim[0]. 2-D
+        # cluster: C = Cs*Ck (the split barrier spans every co-resident WG).
         _, _, C, _ = streamKClusterFactors(kernel)
         skConstsInVgprs = writer.isStreamKConstantsToVgprEnabled(kernel)
         sClusterLast = writer.sgprPool.checkOut(1, "SKClusterLast")
@@ -2778,7 +2767,7 @@ class StreamKTwoTileDPFirst(StreamK):
         within-cluster rank wg_x = StreamKIdx & (C-1) decodes to (s, k):
         k = StreamKIdx & (Ck-1)  (K-reduction axis rank). B is shared only by the
         Cs peers with the SAME k (same K-slice). In the X-fastest physical lane
-        order (lane = wg_x + wg_y*Cs, HW-validated on gfx1250) those Cs peers are a
+        order (lane = wg_x + wg_y*Cs) those Cs peers are a
         CONTIGUOUS run starting at lane k*Cs, so the correct B mask is
 
             maskB_base = (1 << Cs) - 1        # Cs contiguous bits
@@ -2806,7 +2795,7 @@ class StreamKTwoTileDPFirst(StreamK):
         module = Module("StreamK factored multicast mask compute")
         # Factored cluster factoring: Cs=ClusterDim[0], Ck=ClusterDim[1], C=Cs*Ck.
         cs, ck, C, _ = streamKClusterFactors(kernel)
-        # B-multicast mask layout (X-fastest, HW-validated on gfx1250): the Cs
+        # B-multicast mask layout (X-fastest): the Cs
         # spatial peers sharing this WG's K/Y rank k are a CONTIGUOUS Cs-bit run
         # shifted by k*Cs. shiftScaleLog2 scales k -> k*Cs (Cs>1 -> always >0).
         maskBBase = (1 << cs) - 1
@@ -2885,7 +2874,7 @@ class StreamKTwoTileDPFirst(StreamK):
         if not kernel.get("StreamKMulticast", 0):
             return module
         if streamKDual2DMulticast(kernel):
-            # 2-D DUAL-multicast (ForceDPOnly-2D probe AND the standard Target-A
+            # 2-D DUAL-multicast (ForceDPOnly 2-D dual multicast AND the standard
             # StreamKDualMulticast path): the dense 2-D masks emitted at kernel init
             # (ClusterLoad.computeMasks, aPeers=Ck) are already correct for BOTH
             # operands (A along Ck/Y N-adjacent peers, B along Cs/X M-adjacent peers)
@@ -2903,7 +2892,7 @@ class StreamKTwoTileDPFirst(StreamK):
             # Cs spatial axis (peers sharing the same K-slice k), not the whole C
             # cluster. Reached only when StreamKMulticast (Cs>1) AND is2d (Ck>1),
             # i.e. a genuine factored cluster. Pure multicast [C,1] (Ck==1) keeps
-            # the whole-cluster pure-multicast path below (byte-identical).
+            # the whole-cluster pure-multicast path below.
             return self.streamKFactoredMaskCompute(writer, kernel)
         module.addComment0("StreamKMulticast: gate B-broadcast on clusterMulticastValid")
         skConstsInVgprs = writer.isStreamKConstantsToVgprEnabled(kernel)
@@ -2961,7 +2950,7 @@ class StreamKTwoTileDPFirst(StreamK):
         if not kernel.get("StreamKMulticast", 0):
             return module
         if streamKDual2DMulticast(kernel):
-            # 2-D DUAL multicast (Target A, standard StreamKForceDPOnly=0 path): the
+            # 2-D DUAL multicast (standard StreamKForceDPOnly=0 path): the
             # DP round multicasts BOTH operands via the dense kernel-init masks (A
             # along the Ck/Y peers, B along the Cs/X peers). At the DP->SK boundary
             # the SK partial-tile peers no longer co-issue the identical full-K load
@@ -3066,7 +3055,7 @@ class StreamKTwoTileDPFirst(StreamK):
             module.add(SAndB32(dst=sgpr("WorkGroup1"), src0=hex(0xFFFF), src1="ttmp7", comment="workaround"))
             module.add(SLShiftRightB32(dst=sgpr("WorkGroup2"), shiftHex=hex(0x10), src="ttmp7", comment="workaround"))
 
-        # 2-D StreamK cluster PROBE (Scheme A): the K-split axis is the genuine HW
+        # 2-D StreamK cluster: the K-split axis is the genuine HW
         # cluster Y rank (WorkGroup1 in [0, Ck)). The launch grid is 2-D
         # [skGrid/Ck, Ck, 1], so fold the Y rank into the linear StreamK index:
         #   StreamKIdx = WorkGroup0*Ck + WorkGroup1   (k = WorkGroup1 fastest)
@@ -3074,11 +3063,11 @@ class StreamKTwoTileDPFirst(StreamK):
         # the 1-D [C,1] scheme (StreamKIdx & (Ck-1) = wg_y = k, StreamKIdx & (C-1)
         # = wg_x*Ck + wg_y = within-cluster rank). The fold is written into
         # WorkGroup0 so the existing SMov/VMov below (unchanged) still copies the
-        # final index -> the 1-D Ck==1 path is byte-identical.
+        # final index; the 1-D Ck==1 path emits no fold.
         cs2d, ck2d, C2d, is2d = streamKClusterFactors(kernel)
         forceDP2D = streamKDual2DMulticast(kernel)
         if forceDP2D:
-            # 2-D DUAL-multicast (ForceDPOnly-2D probe AND the standard Target-A
+            # 2-D DUAL-multicast (ForceDPOnly 2-D dual multicast AND the standard
             # StreamKDualMulticast path): fold the genuine 2-D (+batch) HW workgroup
             # coords into the linear DP tile index the DP decode expects. For the
             # standard path the launch is [nWG0, gridDimY, batch] with gridDimY a
@@ -3134,7 +3123,7 @@ class StreamKTwoTileDPFirst(StreamK):
         # it pairs the cluster-barrier pass's first-load wait. No-op unless
         # StreamKMulticast is enabled.
         #
-        # EXCEPTION -- standard dual-2D (Target A, StreamKForceDPOnly==0 +
+        # EXCEPTION -- standard dual-2D (StreamKForceDPOnly==0 +
         # StreamKDualMulticast): the SK partial round RE-ENTERS the persistent loop,
         # so the main-loop first-load `s_barrier_wait -3` executes ONCE PER PASS while
         # this pre-loop arrive fires only ONCE -> arrivals(1) < waits(N) -> the SK
@@ -3142,7 +3131,7 @@ class StreamKTwoTileDPFirst(StreamK):
         # arrive is instead emitted PER PERSISTENT PASS in graWorkGroup (after the
         # alpha/start-tile gate, on the same main-loop path as the wait) so every
         # pass is balanced. ForceDPOnly-2D (single pass, no SK round) and 1-D
-        # multicast keep the pre-loop arrive -> byte-identical.
+        # multicast keep the pre-loop arrive.
         if not (streamKDual2DMulticast(kernel) and not kernel["StreamKForceDPOnly"]):
             module.add(self.streamKMulticastPrologueSignal(writer, kernel))
 
@@ -3484,7 +3473,7 @@ class StreamKTwoTileDPFirst(StreamK):
         writer.releaseStreamKConstSgpr(sIpt)
         module.add(alphaLabel)
 
-        # Standard dual-2D (Target A, StreamKForceDPOnly==0 + StreamKDualMulticast):
+        # Standard dual-2D (StreamKForceDPOnly==0 + StreamKDualMulticast):
         # emit the cluster prologue arrive PER PERSISTENT PASS here, on the main-loop
         # path (past the alpha / start-tile gate that reaches alphaLabel), so it pairs
         # THIS pass's first-load `s_barrier_wait -3`. The pre-loop arrive is skipped
@@ -3493,8 +3482,8 @@ class StreamKTwoTileDPFirst(StreamK):
         # round re-enters the persistent loop (fixes the [2,2] SK-round deadlock). The
         # SK reduction/fixup itself uses the global-flag/workspace handshake, not the
         # cluster -3 barrier. Assumes cluster peers make matching passes (uniform DP+SK
-        # share, true for the [2,2] probe with alpha!=0); non-uniform/zero-share
-        # divergence is Phase-2. No-op for every other path.
+        # share, true for the [2,2] case with alpha!=0); non-uniform/zero-share
+        # divergence is not handled. No-op for every other path.
         if streamKDual2DMulticast(kernel) and not kernel["StreamKForceDPOnly"]:
             module.add(self.streamKMulticastPrologueSignal(writer, kernel))
 

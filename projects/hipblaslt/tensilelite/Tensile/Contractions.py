@@ -591,8 +591,8 @@ class ProblemPredicate(Properties.Predicate):
         valuepredicates.append(state["MacroTile1"])
         valuepredicates.append(state["GlobalSplitU"])
         # value[3] is the M-adjacency (shared-B) alignment axis Cs = ClusterDim[0]
-        # (the spatial multicast peers). Pure multicast [C,1]: Cs=C (byte-identical
-        # to the historic ClusterDim[0]). Factored [Cs,Ck]: Cs=ClusterDim[0] -> the
+        # (the spatial multicast peers). Pure multicast [C,1]: Cs=C. Factored
+        # [Cs,Ck]: Cs=ClusterDim[0] -> the
         # predicate requires nWG_x % Cs == 0. Pure reduction [1,C]: Cs=1 (no M
         # constraint). The factoring is the ClusterDim shape (no StreamKClusterKSplit).
         valuepredicates.append(state["ClusterDim"][0])
@@ -600,12 +600,12 @@ class ProblemPredicate(Properties.Predicate):
         # (Ck = ClusterDim[1] > 1 as a REDUCTION axis, i.e. pure reduction [1,C] or
         # factored [Cs,Ck]) the Y-extent is the K-split / index-generation axis, NOT
         # an N-tiling axis, so it must NOT constrain the N-tile grid -> pin to 1.
-        # EXCEPTION -- 2-D DUAL-multicast (ForceDPOnly-2D probe AND the standard
-        # Target-A StreamKDualMulticast path): there Ck IS an N-tiling axis (Y-peers
+        # EXCEPTION -- 2-D DUAL-multicast (ForceDPOnly 2-D dual multicast AND the
+        # standard StreamKDualMulticast path): there Ck IS an N-tiling axis (Y-peers
         # map to N-adjacent output tiles for A-reuse), so it MUST constrain the
         # N-tile grid (nWG_y % Ck == 0) -> keep ClusterDim[1], exactly like the
         # dense/1-D path. 1-D StreamK ([C,1]) and dense (non-StreamK) clusters keep
-        # ClusterDim[1] (byte-identical).
+        # ClusterDim[1].
         if state.get("StreamK", 0) == 3 and state["ClusterDim"][1] > 1 \
            and not streamKDual2DMulticast(state):
             valuepredicates.append(1)

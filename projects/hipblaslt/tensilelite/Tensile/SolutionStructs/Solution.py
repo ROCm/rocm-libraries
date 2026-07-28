@@ -236,7 +236,7 @@ def _isPow2(n):
   return n >= 1 and (n & (n - 1)) == 0
 
 def _validateStreamK2DClusterShape(cs, ck):
-  """Shape check for the 2-D StreamK cluster PROBE (Scheme A).
+  """Shape check for the 2-D StreamK cluster.
 
   Cs and Ck must each be powers of two and the total cluster C = Cs*Ck must lie
   in the supported [2, 16] range (matches maxWGsInCluster / the 1-D [C,1] limit).
@@ -1279,7 +1279,7 @@ class Solution(collections.abc.Mapping):
     #            semantics). There is no StreamKClusterKSplit knob -- the factoring
     #            is the ClusterDim shape itself.
     #
-    # A StreamK cluster with no cooperative role no longer exists -- "ClusterDim
+    # A StreamK cluster always carries a cooperative role -- "ClusterDim
     # without cluster loads" is not a supported state. If the resulting config
     # cannot be satisfied (e.g. TDMInst!=3 or non-gfx1250), _validateStreamKMulticast
     # / _validateStreamKClusterReduction reject it at build time rather than silently
@@ -1295,8 +1295,8 @@ class Solution(collections.abc.Mapping):
       # 2-D DUAL-multicast (a genuine 2-D cluster [Cs,Ck], both > 1, where the Ck
       # (Y) axis maps to N-ADJACENT output tiles for A-reuse, NOT a K-split
       # reduction). Two ways in:
-      #   * ForceDPOnly-2D probe (Phase-0): StreamKForceDPOnly + both>1; and
-      #   * Target A -- the STANDARD two-tile path (StreamKForceDPOnly=0) opted in
+      #   * ForceDPOnly 2-D dual-operand multicast: StreamKForceDPOnly + both>1; and
+      #   * the STANDARD two-tile path (StreamKForceDPOnly=0) opted in
       #     via StreamKDualMulticast. Here the DP round does the dual multicast and
       #     the SK round reduces 1-D via the workspace (temporal reuse of one
       #     cluster).
@@ -1304,15 +1304,15 @@ class Solution(collections.abc.Mapping):
       # the K-split schedule): Ck is an N-tiling / A-multicast axis. Cs>1 still
       # derives StreamKMulticast so the B-multicast + cluster-barrier plumbing
       # (which A-multicast reuses) turns on. When NEITHER flag is set, a [Cs,Ck]
-      # both>1 config stays FACTORED (Ck IS the reduction axis) -- byte-identical.
+      # both>1 config stays FACTORED (Ck IS the reduction axis).
       # Mutual exclusion is by construction: a factored config leaves both flags 0.
       # See streamKDual2DMulticast and docs/design/streamk-wg-clusters.md.
       dual2D = (cs > 1 and ck > 1) and (
           state.get("StreamKForceDPOnly", 0) or state.get("StreamKDualMulticast", 0))
       state["StreamKClusterReduction"] = 1 if (ck > 1 and not dual2D) else 0
     # Multicast tri-state (see ValidParameters): -1 auto (legacy), 0 off, 1 on.
-    # Default -1 reproduces the historic ClusterDim-coupled derivation, so YAML
-    # that omits Multicast is byte-identical.
+    # Default -1 reproduces the ClusterDim-coupled derivation, so YAML
+    # that omits Multicast is unchanged.
     mc = state.get("Multicast", -1)
     if mc == 1:
       # Force-on requires a matching ClusterLoadTDM (TDMInst==3 on gfx1250 with

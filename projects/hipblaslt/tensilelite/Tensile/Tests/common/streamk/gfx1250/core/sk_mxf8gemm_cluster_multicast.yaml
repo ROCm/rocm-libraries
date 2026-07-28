@@ -76,7 +76,7 @@ BenchmarkProblems:
         - StreamKAtomic: [0]
         - StreamKXCCMapping: [0]
         # Pure multicast is derived from ClusterDim = [C, 1] (Cs = ClusterDim[0] > 1);
-        # StreamKClusterReduction is no longer a user param (derived Ck==1 -> off).
+        # reduction is derived from the shape (here Ck==1 -> off), not a user param.
         - ClusterDim: [[2, 1], [4, 1], [8, 1]]
         - StaggerU: [0]
         - DirectToVgprA: [False]

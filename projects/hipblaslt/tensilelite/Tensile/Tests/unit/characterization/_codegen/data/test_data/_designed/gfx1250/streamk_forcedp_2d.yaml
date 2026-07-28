@@ -1,7 +1,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 ################################################################################
-# Phase-0 ForceDPOnly 2-D DUAL-multicast probe (gfx1250).
+# ForceDPOnly 2-D dual-operand multicast (gfx1250).
 #
 # A genuine 2-D HW cluster ClusterDim = [Cs, Ck] = [2, 2] on a StreamK==3
 # StreamKForceDPOnly (dense data-parallel, NO K-split reduction) kernel where

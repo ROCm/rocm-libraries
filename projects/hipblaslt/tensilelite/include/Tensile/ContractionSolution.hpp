@@ -145,7 +145,7 @@ namespace TensileLite
         int    streamKAtomic              = 0;
         int    streamKClusterReduction    = 0;
         int    streamKMulticast           = 0;
-        // Target A: STANDARD two-tile StreamK (streamKForceDPOnly==0) opt-in to
+        // STANDARD two-tile StreamK (streamKForceDPOnly==0) opt-in to
         // 2-D dual-operand multicast on the DP round (SK round reduces 1-D). See
         // getSKGridImpl / generateSingleCall dual-2D branches.
         int    streamKDualMulticast       = 0;

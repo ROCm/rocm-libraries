@@ -1,8 +1,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 ################################################################################
-# Target A: STANDARD StreamK (StreamKForceDPOnly=0) 2-D DUAL-multicast probe
-# (gfx1250, HW-runnable).
+# STANDARD StreamK (StreamKForceDPOnly=0) 2-D DUAL-multicast (gfx1250, HW-runnable).
 #
 # A genuine 2-D HW cluster ClusterDim = [Cs, Ck] = [2, 2] on a StreamK==3
 # TWO-TILE (DP-first) kernel -- StreamKForceDPOnly=0, so there is a REAL SK
@@ -19,8 +18,7 @@
 #       (streamKMulticastBoundaryClear).
 #   * SK (partial-tile) round: 1-D workspace reduction exactly as today.
 #
-# This is the DEFINITIVE HW correctness check for Target A Phase-1
-# (functional-sim is a regression check only). Run on a gfx1250 device.
+# Run on a gfx1250 device (functional-sim is a regression check only).
 #
 # Sizes are cluster-aligned. MT = 32x32 (MatrixInstruction [16,16,128,1,1,1,1,2,2]):
 #   M=256 -> nWG0=8 (8 % Cs=2 == 0); N=192 -> nWG1=6 (6 % Ck=2 == 0); tiles=48.
@@ -123,7 +121,7 @@ BenchmarkProblems:
         - DirectToVgprSparseMetadata: [false]
         - StoreVectorWidth: [-1]
         - StreamK: [3]
-        # Target A: STANDARD two-tile schedule (NOT ForceDPOnly) + dual-2D opt-in.
+        # STANDARD two-tile schedule (NOT ForceDPOnly) + dual-2D opt-in.
         - StreamKForceDPOnly: [0]
         - StreamKDualMulticast: [1]
         - StreamKAtomic: [0]

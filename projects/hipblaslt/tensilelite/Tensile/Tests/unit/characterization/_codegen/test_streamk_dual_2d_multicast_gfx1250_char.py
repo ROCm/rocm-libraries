@@ -1,9 +1,9 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 ################################################################################
-"""Target A: STANDARD StreamK 2-D DUAL-multicast -- gfx1250 characterization.
+"""STANDARD StreamK 2-D DUAL-multicast (StreamKDualMulticast) -- gfx1250 characterization.
 
-Phase-1 [2,2] probe on the STANDARD two-tile StreamK path
+A [2,2] cluster on the STANDARD two-tile StreamK path
 (``StreamKForceDPOnly=0``): a genuine 2-D cluster ClusterDim=[Cs,Ck]=[2,2] where
 
   * Cs = ClusterDim[0] = 2 : X-peers on M-ADJACENT tiles reuse B; and
@@ -13,7 +13,7 @@ on the DP (full-tile) round, while the SK (partial-tile) round reduces 1-D via
 the workspace exactly as today. It is opted in via ``StreamKDualMulticast=1``
 (mutually exclusive with the factored [Cs,Ck] K-reduction path).
 
-Unlike the ForceDPOnly-2D probe (``streamk_forcedp_2d``) this kernel HAS a real
+Unlike the ForceDPOnly 2-D dual multicast (``streamk_forcedp_2d``) this kernel HAS a real
 SK round, so it additionally asserts:
   * the DP->SK boundary drops BOTH masks to self-only (not just B); and
   * the SK partial-tile workspace/reduction machinery is intact.
@@ -27,8 +27,8 @@ Asserts (see ``_designed/gfx1250/streamk_dual_2d_multicast.yaml``):
   * the SK partial round + cluster split-barrier arrive/wait are present; and
   * the factored K-split decode/shift are ABSENT (Ck is a spatial N-axis).
 
-CPU-only. The DEFINITIVE correctness check is the user's HW run of
-``Tests/common/streamk/gfx1250/core/sk_mxf4_2d_multicast_probe.yaml``.
+CPU-only. The on-device correctness check is the user's HW run of
+``Tests/common/streamk/gfx1250/core/sk_mxf4_2d_dual_multicast.yaml``.
 """
 
 import os
@@ -52,7 +52,7 @@ _CONFIG = os.path.join(
 
 
 def test_streamk_dual_2d_multicast_gfx1250_emits_assembly():
-    """gfx1250 standard-StreamK [2,2] dual-2D probe emits real assembly, err==0,
+    """gfx1250 standard-StreamK [2,2] dual-2D emits real assembly, err==0,
     with dual DP masks (A on Ck/Y, B on Cs/X), the 2-D DP fold, a DP->SK BOTH-mask
     clear, an intact SK partial round, and NO factored K-split decode."""
     results = emit_kernels_from_config(_CONFIG, limit=8, arch=_ARCH)

@@ -64,10 +64,10 @@ BenchmarkProblems:
         - StreamK: [3]
         - StreamKAtomic: [0]
         - StreamKXCCMapping: [0]
-        # Factored cluster is now the genuine 2-D shape ClusterDim = [Cs, Ck] with
+        # Factored cluster is the genuine 2-D shape ClusterDim = [Cs, Ck] with
         # both axes > 1 (Cs = B-multicast peers, Ck = K-split reduction peers,
-        # C = Cs*Ck). This [2,2] replaces the old [4,1] + StreamKClusterKSplit=2
-        # (C=4, Ck=2, Cs=2); StreamKClusterKSplit is no longer a user param.
+        # C = Cs*Ck). Here [2,2] means C=4, Ck=2, Cs=2; the factoring is derived
+        # from the shape, not a user param.
         - ClusterDim: [[2, 2]]
         - StaggerU: [0]
         - DirectToVgprA: [False]

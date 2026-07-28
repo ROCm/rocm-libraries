@@ -2,8 +2,8 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 ################################################################################
-# Focused unit tests for Target A: STANDARD StreamK (StreamKForceDPOnly=0) 2-D
-# DUAL-operand multicast (gfx1250), Phase-1 [2,2] probe.
+# Focused unit tests for the standard two-tile StreamK (StreamKForceDPOnly=0)
+# path with StreamKDualMulticast=1: 2-D DUAL-operand multicast (gfx1250).
 #
 # On a genuine 2-D cluster ClusterDim = [Cs, Ck] (both > 1) a StreamK==3
 # StreamKForceDPOnly=0 config is FACTORED by default (Ck is the K-split reduction
@@ -128,7 +128,7 @@ class TestDetector:
 
     def test_factored_stays_forcedp_detector_false(self):
         """The ForceDPOnly-specific detector must remain False for the standard
-        opt-in (it is unchanged / byte-identical for existing configs)."""
+        opt-in (it is unchanged for existing configs)."""
         from Tensile.Common import streamKForceDP2DMulticast
         assert streamKForceDP2DMulticast(
             _k(StreamKForceDPOnly=0, StreamKDualMulticast=1, ClusterDim=[2, 2])) is False
@@ -218,9 +218,8 @@ class TestMasks:
         assert bin(maskB).count("1") == 2  # Cs B-peers
 
     def test_1d_forcedp_multicast_keeps_a_self_only(self):
-        """Migrated from the removed forcedp_2d_probe test: the shipped 1-D [C,1]
-        ForceDPOnly multicast (Ck==1) yields a self-only A mask -- the dual-2D
-        A-multicast is strictly the Ck>1 addition."""
+        """The shipped 1-D [C,1] ForceDPOnly multicast (Ck==1) yields a self-only
+        A mask -- the dual-2D A-multicast is strictly the Ck>1 addition."""
         maskA, maskB = _dense_masks(cs=8, ck=1)
         assert maskA == 0x1              # self only
         assert maskB == (1 << 8) - 1     # B across all 8 X-peers

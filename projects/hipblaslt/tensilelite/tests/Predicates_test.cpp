@@ -162,7 +162,7 @@ TEST(Predicates, ClusterReductionIterCheck_EvenSplit_WithKTail_Passes)
 {
     using namespace TensileLite;
     // DepthU=256, C=4, K=1920 -> itersPerTile=ceil(1920/256)=8, 8 % 4 == 0.
-    // K % 256 = 128 (K-tail) but that alone is SAFE (verified on gfx1250 sim).
+    // K % 256 = 128 (K-tail) but that alone is SAFE.
     auto pred = std::make_shared<Predicates::Contraction::ClusterReductionIterCheck>(
         std::array<int, 2>{256, 4});
     EXPECT_TRUE((*pred)(gemmWithK(1920)))
@@ -184,7 +184,7 @@ TEST(Predicates, ClusterReductionIterCheck_UnevenSplit_NoTail_Rejects)
 {
     using namespace TensileLite;
     // DepthU=256, C=4, K=1536 (=6*256, no K-tail) -> itersPerTile=6, 6 % 4 == 2
-    // != 0 -> unsafe even without a K-tail (verified on gfx1250 sim).
+    // != 0 -> unsafe even without a K-tail.
     auto pred = std::make_shared<Predicates::Contraction::ClusterReductionIterCheck>(
         std::array<int, 2>{256, 4});
     EXPECT_FALSE((*pred)(gemmWithK(1536)))

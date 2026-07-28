@@ -4,11 +4,10 @@
 ################################################################################
 # Unit tests for the decoupled tri-state Multicast solution parameter.
 #
-# Multicast used to be a derived-only state var, unconditionally forced on for
-# ClusterDim != [1,1] (except Stream-K). It is now an explicit
-# tri-state control:
-#   -1 = auto (legacy coupling), 0 = force off, 1 = force on.
-# Default -1 reproduces the historic derivation exactly. These tests pin:
+# Multicast is an explicit tri-state control (not a derived-only state var):
+#   -1 = auto (couples to ClusterDim != [1,1], except Stream-K),
+#    0 = force off, 1 = force on.
+# Default -1 reproduces the auto derivation exactly. These tests pin:
 #   * registration (valid values + default), and
 #   * the derivation semantics (-1 legacy == old behavior; 0 off; 1 on),
 #     driven through the real config -> Solution derivation path.
