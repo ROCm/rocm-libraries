@@ -14,7 +14,7 @@ not block evenly).
 Zero-SGPR carrier reuse: the raw rank is snapshotted into the ALREADY-allocated
 persistent ``StreamKTileIdx`` slot -- provably dead in the [prologue, queue-read)
 window -- instead of a dedicated ``StreamKQueue`` SGPR, which overflowed the SGPR
-file on tuned high-register SKXCC kernels.  The fix now covers TWO disjoint remap
+file on tuned high-register SKXCC kernels.  The fix covers TWO disjoint remap
 regimes:
   * WorkGroupMappingXCC == -1 (dynamic auto-WGM), and
   * StreamKXCCMapping != 0 with WorkGroupMappingXCC > 1 (SKXCC).
@@ -24,7 +24,7 @@ inspect emitted modules rather than matching source text, and reason about the
 *real* KernelWriter / KernelWriterAssembly source via the AST so the ordering and
 gating assertions track the actual code.
 
-Invariants pinned (each fails against the pre-fix code -- see per-test notes):
+Invariants pinned (see per-test notes):
   * Both dynamic auto-WGM and SKXCC (WGMXCC>1) queue indices are
     ``StreamKTileIdx & (numQueues-1)`` -- a single mask of the raw-rank carrier,
     never the post-remap StreamKIdx shifts.
@@ -166,10 +166,9 @@ class TestRawRankQueueIndex:
     @pytest.mark.parametrize("streamk", [4, 5])
     @pytest.mark.parametrize("wgmXCC,skxcc", RAW_REGIMES)
     def test_queue_index_masks_raw_rank_carrier(self, streamk, wgmXCC, skxcc):
-        # Pre-fix emitted shr/shl/sub of StreamKIdx and NO SAndB32 -- so both the
-        # "single SAndB32" and "references carrier" assertions fail on it. The
-        # SKXCC regimes additionally fail against #10008 (which scoped the fix to
-        # WGMXCC == -1 only), which is exactly what this extension covers.
+        # For every raw-rank regime (dynamic auto-WGM and SKXCC with WGMXCC > 1),
+        # the queue index must be a single mask of the raw-rank carrier, not the
+        # StreamKIdx shr/shl/sub derivation.
         items = _emit_queue_index(streamk, wgmXCC=wgmXCC, skxcc=skxcc)
         ands = [i for i in items if isinstance(i, SAndB32)]
         assert len(ands) == 1, "raw-rank queue index must be a single mask op"
@@ -182,9 +181,9 @@ class TestRawRankQueueIndex:
     @pytest.mark.parametrize("streamk", [4, 5])
     @pytest.mark.parametrize("wgmXCC,skxcc", RAW_REGIMES)
     def test_queue_index_does_not_use_post_remap_streamkidx(self, streamk, wgmXCC, skxcc):
-        # The whole point of the fix: on a raw-rank path the queue index must NOT
-        # come from the remapped StreamKIdx (StreamKIdx % numQueues). Pre-fix code
-        # emitted exactly the shift/shift/sub of StreamKIdx, so this fails on it.
+        # On a raw-rank path the queue index must NOT come from the remapped
+        # StreamKIdx (StreamKIdx % numQueues), so neither StreamKIdx nor its
+        # shift/shift/sub derivation may appear.
         items = _emit_queue_index(streamk, wgmXCC=wgmXCC, skxcc=skxcc)
         assert not any(_refs_sgpr(i, "StreamKIdx") for i in items), (
             "the raw-rank queue index must not reference the post-remap StreamKIdx"
@@ -196,10 +195,11 @@ class TestRawRankQueueIndex:
     @pytest.mark.parametrize("streamk", [4, 5])
     @pytest.mark.parametrize("wgmXCC,skxcc", RAW_REGIMES)
     def test_queue_index_never_uses_dead_streamkqueue(self, streamk, wgmXCC, skxcc):
-        # StreamKQueue is gone: the raw rank lives in the reused StreamKTileIdx.
+        # The queue index never references a dedicated StreamKQueue SGPR; the raw
+        # rank lives in the reused StreamKTileIdx carrier.
         items = _emit_queue_index(streamk, wgmXCC=wgmXCC, skxcc=skxcc)
         assert not any(_refs_sgpr(i, "StreamKQueue") for i in items), (
-            "StreamKQueue was removed; the carrier is the reused StreamKTileIdx"
+            "no dedicated StreamKQueue SGPR; the carrier is the reused StreamKTileIdx"
         )
 
 
@@ -338,9 +338,8 @@ def _is_sk_raw_rank_guard(test) -> bool:
 
 
 # ===========================================================================
-# 4. Both dynamic graWorkGroup paths route through the shared _emitQueueIndex.
-#    Pre-fix each inlined its own StreamKIdx shift/shift/sub, so the shared
-#    helper call is absent -> this fails against the pre-fix source.
+# 4. Both dynamic graWorkGroup paths route through the shared _emitQueueIndex,
+#    rather than each inlining its own StreamKIdx shift/shift/sub derivation.
 # ===========================================================================
 class TestSharedHelperRouting:
     @pytest.mark.parametrize(
@@ -365,8 +364,8 @@ class TestSnapshotBeforeWgmXcc:
         return _source_of(KernelWriterAssembly.defineAndResources)
 
     def test_snapshot_mov_targets_carrier(self):
-        # Pre-fix there was no snapshot; #10008 targeted StreamKQueue. The carrier
-        # reuse retargets it to the already-allocated StreamKTileIdx slot.
+        # The raw-rank snapshot targets the already-allocated StreamKTileIdx slot,
+        # not a dedicated StreamKQueue SGPR.
         src = self._src()
         assert self._SNAP in src, (
             "the raw pre-remap launch id must be snapshotted into %s" % _CARRIER
