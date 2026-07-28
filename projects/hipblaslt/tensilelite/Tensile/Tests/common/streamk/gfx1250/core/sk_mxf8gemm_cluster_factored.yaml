@@ -45,6 +45,7 @@ BenchmarkProblems:
           - [16, 16, 128, 1, 1, 1, 1, 2, 2]
           - [16, 16, 128, 1, 1, 1, 1, 2, 1]
           - [16, 16, 128, 1, 1, 2, 2, 2, 2]
+          - [16, 16, 128, 1, 1, 4, 4, 2, 2]
         - DepthU: [256]
         - ClusterLocalRead: [0]
         - TransposeLDS: [-1]
@@ -77,7 +78,8 @@ BenchmarkProblems:
         # Factored 2-D cluster: ClusterDim = [Cs, Ck] with Cs>1 (spatial B-multicast)
         # AND Ck>1 (K-split reduction) derives BOTH StreamKMulticast and
         # StreamKClusterReduction from the cluster shape (no user param).
-        - ClusterDim: [[2, 2], [2, 4], [4, 2]]
+        # Shapes up to C = Cs*Ck = 16 (all pow2): Cs in {2,4,8}, Ck in {2,4,8}.
+        - ClusterDim: [[2, 2], [2, 4], [4, 2], [4, 4], [2, 8], [8, 2]]
         - StaggerU: [0]
         - DirectToVgprA: [False]
         - DirectToVgprB: [False]
@@ -90,10 +92,15 @@ BenchmarkProblems:
       JoinParameters:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
+        # Cluster-aligned for EVERY swept (ClusterDim, MacroTile) combo so no
+        # solution is skipped (ClusterDimCheck: ceil(M/MT0) % Cs == 0 and
+        # ceil(N/MT1) % Ck == 0; ClusterReductionIterCheck: ceil(K/DepthU) % Ck
+        # == 0). M=N=1024 => ceil/MT0,MT1 in {8,16,32,64}, each divisible by the
+        # largest Cs=Ck=8; K in {2048,4096} => ceil(K/256) in {8,16}, divisible
+        # by 8. DepthU=256, MT0,MT1 in {16,32,64,128}.
         - ProblemSizes:
-          - Exact: [512, 512, 1, 1024]
-          - Exact: [1024, 512, 1, 2048]
-          - Exact: [512, 512, 1, 2048]
-          - Exact: [512, 1024, 2, 1024]
+          - Exact: [1024, 1024, 1, 2048]
+          - Exact: [1024, 1024, 1, 4096]
+          - Exact: [1024, 1024, 2, 4096]
         - ActivationArgs:
           - [Enum: none]
