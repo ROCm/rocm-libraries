@@ -84,8 +84,8 @@ onto the mask math with `wg_y=0, C0=C, C1=1`: `maskB = (1<<C)-1` (all C workgrou
 `ClusterLoad` is a capability-selected `Component` (`asmCaps = {"HasTDM": True}`,
 `kernel = {"TDMInst": 3}`), found exactly like `TensorDataMoverLoad`: `ClusterLoad.find`
 returns the TDM impl on gfx1250 and `None` (fallback → no multicast) elsewhere. It owns mask
-value + declare/undeclare + topology decision + descriptor attach + cooperative partition; it
-does **not** own descriptor-group SGPRs, LDS offsets, or the `tensor_load_to_lds` itself.
+value + declare/undeclare + topology decision + descriptor attach; it does **not** own
+descriptor-group SGPRs, LDS offsets, or the `tensor_load_to_lds` itself.
 
 | Method | Responsibility |
 |---|---|
@@ -93,8 +93,7 @@ does **not** own descriptor-group SGPRs, LDS offsets, or the `tensor_load_to_lds
 | `maskSgprName(kernel, tc, *, subtile=False, waveSeparated=False)` | Central name resolver (combined `"MulticastMask"` vs split `f"MulticastMask{strip_MXS(tc)}"` vs metadata). |
 | `declareSgprs` / `undeclareSgprs` | Allocate / free the `MulticastMask*` SGPRs. |
 | `computeMasks(writer, kernel, *, sgprWgX, sgprWgY, sgprNWgX, sTmp)` | Compute the mask value(s); the caller passes the SGPR operands it already holds. |
-| `applyToDescriptor(writer, kernel, group1, tc, *, subtile=False)` | Gate + name choice + the `SOrB32`; empty `Module` when `not (kernel["Multicast"] and enableCluster)`. |
-| `cooperativeThreadPartition(kernel, tc)` | `ClusterDim[1]` for A / `ClusterDim[0]` for B. |
+| `applyToDescriptor(writer, kernel, group1, tc, *, subtile=False)` | Gate + name choice + the `SOrB32`; empty `Module` when `not (kernel["Multicast"] and clusterEnabled(ClusterDim))`. |
 
 **SGPR-operand contract:** `computeMasks` does not allocate SGPRs; it receives the operands
 the surrounding code already holds and emits into them, so callers own SGPR lifetime.
