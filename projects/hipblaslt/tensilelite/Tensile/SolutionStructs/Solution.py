@@ -1224,15 +1224,19 @@ class Solution(collections.abc.Mapping):
       state["Multicast"] = int(state["ClusterDim"] != [1, 1]
                                and state["StreamK"] == 0)
     # The cluster-scope barrier handshake (s_barrier_signal/wait -3, inserted by
-    # StinkyTofu's InsertClusterBarrierPass) keeps the cluster peers in lockstep.
-    # ANY active cluster (ClusterDim != [1, 1]) needs it, independent of Multicast:
-    # every cluster role -- multicast, partial reduction, factored and dual-2D --
-    # relies on its co-resident peers staying synchronized, not just the B-multicast
-    # path. Still gated on TDM being live (TDMInst != 0 -- an active cluster loads
-    # cooperatively via tensor_load_to_lds; without TDM there is nothing to
-    # synchronize) and on the ISA providing the cluster-barrier instruction
-    # (HasClusterBarrier).
-    if state["ClusterDim"] != [1, 1] and state["TDMInst"] != 0 \
+    # StinkyTofu's InsertClusterBarrierPass) brackets the cooperative multicast
+    # tensor_load_to_lds groups, keeping the Cs spatial peers in lockstep. It is
+    # meaningful only when there ARE cooperative multicast loads to bracket, i.e.
+    # when Cs = ClusterDim[0] > 1 (spatial multicast peers: [C,1], [C,C], factored,
+    # dual-2D). A pure-reduction cluster ([1, C], Cs=1, StreamKClusterReduction) has
+    # NO cooperative multicast loads and is synchronized entirely by its own StreamK
+    # reduction -3 barriers; enabling the mainloop cluster barrier there emits an
+    # unmatched prologue s_barrier_wait -3 (Member N / Signal 0) that never completes
+    # -> cluster deadlock. So gate on Cs>1, in addition to an active cluster, TDM
+    # live (TDMInst != 0 -- cooperative tensor_load_to_lds), and the ISA providing
+    # the cluster-barrier instruction (HasClusterBarrier).
+    if state["ClusterDim"] != [1, 1] and state["ClusterDim"][0] > 1 \
+       and state["TDMInst"] != 0 \
        and isaInfoMap[state["ISA"]].asmCaps.get("HasClusterBarrier", False):
       state["ClusterBarrier"] = True
 

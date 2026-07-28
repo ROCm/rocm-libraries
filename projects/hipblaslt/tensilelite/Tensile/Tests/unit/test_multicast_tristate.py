@@ -92,10 +92,12 @@ class TestDerivation:
         assert states, "expected >=1 derived solution"
         assert all(st["Multicast"] == 0 for st in states), (
             [st["Multicast"] for st in states])
-        # ClusterBarrier is decoupled from Multicast: any active cluster
-        # (ClusterDim != [1, 1] with TDM live) keeps the cluster-scope barrier even
-        # with the B-multicast forced off -- the [2, 2] cluster peers still load
-        # cooperatively and must stay in lockstep.
+        # ClusterBarrier is gated on Cs = ClusterDim[0] > 1 (spatial multicast peers
+        # with cooperative tensor_load_to_lds to bracket), independent of the
+        # B-multicast tri-state. The [2, 2] cluster here has Cs=2 > 1, so its peers
+        # still load cooperatively and keep the cluster-scope barrier even with the
+        # B-multicast forced off. (A pure-reduction [1, C] cluster has Cs=1 and would
+        # NOT get the barrier -- see test_pure_reduction_cluster_barrier_off.)
         assert all(st["ClusterBarrier"] is True for st in states), (
             [st["ClusterBarrier"] for st in states])
 
@@ -122,6 +124,41 @@ class TestDerivation:
         # The cooperative multicast now pairs the masks with the cluster-scope
         # barrier handshake, so ClusterBarrier is derived on.
         assert all(st["ClusterBarrier"] is True for st in states), (
+            [st["ClusterBarrier"] for st in states])
+
+    def test_pure_reduction_cluster_barrier_off(self, tmp_path):
+        # Pure-reduction cluster: ClusterDim = [1, C] (Cs=1, Ck=C). With Cs=1 there
+        # are NO cooperative multicast loads to bracket, so the mainloop
+        # ClusterBarrier is gated OFF (Cs>1 gate) -- the reduction is synchronized
+        # by its own StreamK reduction -3 barriers. Enabling the mainloop barrier
+        # here would emit an unmatched prologue s_barrier_wait -3 (Member N /
+        # Signal 0) that never completes => cluster deadlock (observed in FFM).
+        from Tensile import LibraryIO
+        import yaml
+        cfg = copy.deepcopy(LibraryIO.read(_STREAMK_CLUSTER))
+        fork = cfg["BenchmarkProblems"][0][1]["ForkParameters"]
+        for entry in fork:
+            if "ClusterDim" in entry:
+                entry["ClusterDim"] = [[1, 4]]
+                break
+        else:
+            fork.append({"ClusterDim": [[1, 4]]})
+        out = tmp_path / "pure_reduction.yaml"
+        with open(out, "w") as f:
+            yaml.safe_dump(cfg, f, default_flow_style=None)
+        states = _derive_states(str(out))
+        if not states:
+            # Branches without the StreamKClusterReduction fast path (e.g. the
+            # multicast-only branch) reject the pure-reduction [1, C] shape, so
+            # there is no Cs=1 active cluster to gate -- the Cs>1 gate is a no-op
+            # there. Nothing to pin on those branches.
+            pytest.skip("branch does not derive [1, C] pure-reduction solutions")
+        assert all(st["Multicast"] == 0 for st in states), (
+            [st["Multicast"] for st in states])
+        assert all(st.get("StreamKClusterReduction", 0) == 1 for st in states), (
+            [st.get("StreamKClusterReduction") for st in states])
+        # Cs=1 => no cooperative loads => cluster barrier stays OFF.
+        assert all(st["ClusterBarrier"] is False for st in states), (
             [st["ClusterBarrier"] for st in states])
 
 
