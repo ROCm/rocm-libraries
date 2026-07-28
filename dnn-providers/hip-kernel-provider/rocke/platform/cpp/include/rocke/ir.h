@@ -131,6 +131,9 @@ typedef struct rocke_type
     /* ROCKE_TYPE_SMEM */
     const int* shape; /* arena-owned array of dim sizes            */
     int rank; /* number of dims in shape                   */
+    int smem_exclusive; /* 1 => smem-pool packer gives this alloc its own
+                         * byte range (cshuffle no-alias mode). Kept OUT of
+                         * `name` so default (0) stays byte-identical.       */
 } rocke_type_t;
 
 /* -------------------------------------------------------------- attr values */
@@ -251,6 +254,7 @@ typedef enum rocke_opcode
 
     /* math.* */
     ROCKE_OP_MATH_EXP2,
+    ROCKE_OP_MATH_EXP2_FAST,
     ROCKE_OP_MATH_LOG2,
     ROCKE_OP_MATH_RCP,
     ROCKE_OP_MATH_RCP_FAST,
@@ -272,6 +276,7 @@ typedef enum rocke_opcode
     ROCKE_OP_MEMREF_GLOBAL_ATOMIC_ADD,
     ROCKE_OP_MEMREF_GLOBAL_ATOMIC_ADD_F32,
     ROCKE_OP_MEMREF_GLOBAL_ATOMIC_ADD_PK_BF16,
+    ROCKE_OP_MEMREF_GLOBAL_ATOMIC_ADD_PK_F16,
     ROCKE_OP_MEMREF_COOPERATIVE_GLOBAL_STORE,
 
     /* vector.* */
@@ -533,8 +538,8 @@ const rocke_type_t* rocke_scalar_by_name(const char* name);
 const rocke_type_t* rocke_vector_type(rocke_ir_builder_t* b, const rocke_type_t* elem, int count);
 const rocke_type_t*
     rocke_ptr_type(rocke_ir_builder_t* b, const rocke_type_t* pointee, const char* space);
-const rocke_type_t*
-    rocke_smem_type(rocke_ir_builder_t* b, const rocke_type_t* elem, const int* shape, int rank);
+const rocke_type_t* rocke_smem_type(
+    rocke_ir_builder_t* b, const rocke_type_t* elem, const int* shape, int rank, int exclusive);
 
 /* Structural type equality (matches Python frozen-dataclass __eq__: compares by
  * canonical name, which encodes kind + components). */
@@ -682,6 +687,7 @@ rocke_value_t*
 
 /* ----- math ----- */
 rocke_value_t* rocke_b_exp2(rocke_ir_builder_t* b, rocke_value_t* a);
+rocke_value_t* rocke_b_exp2_fast(rocke_ir_builder_t* b, rocke_value_t* a);
 rocke_value_t* rocke_b_log2(rocke_ir_builder_t* b, rocke_value_t* a);
 rocke_value_t* rocke_b_rcp(rocke_ir_builder_t* b, rocke_value_t* a);
 rocke_value_t* rocke_b_rcp_fast(rocke_ir_builder_t* b, rocke_value_t* a);
@@ -743,6 +749,11 @@ rocke_value_t* rocke_b_global_atomic_add_pk_bf16(rocke_ir_builder_t* b,
                                                  rocke_value_t* idx,
                                                  rocke_value_t* value,
                                                  const char* ordering);
+rocke_value_t* rocke_b_global_atomic_add_pk_f16(rocke_ir_builder_t* b,
+                                                rocke_value_t* ptr,
+                                                rocke_value_t* idx,
+                                                rocke_value_t* value,
+                                                const char* ordering);
 
 /* ----- gpu ids ----- */
 rocke_value_t* rocke_b_thread_id_x(rocke_ir_builder_t* b);
@@ -756,6 +767,15 @@ rocke_value_t* rocke_b_smem_alloc(rocke_ir_builder_t* b,
                                   const int* shape,
                                   int rank,
                                   const char* name_hint);
+/* Like rocke_b_smem_alloc but marks the allocation `exclusive` (cshuffle
+ * no-alias mode): the smem-pool packer gives it its own byte range. The
+ * plain rocke_b_smem_alloc forwards here with exclusive=0. */
+rocke_value_t* rocke_b_smem_alloc_ex(rocke_ir_builder_t* b,
+                                     const rocke_type_t* elem,
+                                     const int* shape,
+                                     int rank,
+                                     const char* name_hint,
+                                     int exclusive);
 rocke_value_t* rocke_b_global_load(rocke_ir_builder_t* b,
                                    rocke_value_t* ptr,
                                    rocke_value_t* idx,

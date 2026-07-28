@@ -26,10 +26,12 @@ namespace ckc
 
 /* ---------------------------------------------------------------------- */
 /* datalayout / triple (Python _DATALAYOUT_LLVM20 / _DATALAYOUT_LLVM22 /   */
-/* _TRIPLE). The AMDGPU datalayout is FLAVOR-KEYED: only the buffer-fat-    */
-/* pointer address space (p8) drifts between LLVM flavors --                */
-/*   LLVM 20 (ROCm 7.0/7.1):  ...-p8:128:128-...                            */
-/*   LLVM 22 (ROCm >= 7.2):   ...-p8:128:128:128:48-...                     */
+/* _TRIPLE). The AMDGPU datalayout is FLAVOR-KEYED: two fields drift        */
+/* between LLVM flavors -- the buffer-fat-pointer address space (p8):       */
+/*   LLVM 20 (ROCm 7.0/7.1):  e-...-p8:128:128-...                          */
+/*   LLVM 22 (ROCm >= 7.2):   e-...-p8:128:128:128:48-...                   */
+/* Note: the ELF mangling spec (m:e) was present in early LLVM 22 builds    */
+/* but was removed; the current ROCm 7.2 toolchain does not emit it.        */
 /* (Python _DATALAYOUT_LLVM20 / _DATALAYOUT_LLVM22; pick via               */
 /* rocke_ll_datalayout_for_flavor, mirroring _datalayout_for_flavor.)        */
 /* ---------------------------------------------------------------------- */
@@ -76,6 +78,7 @@ const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS[] = {
     {"workgroup.z", "declare i32 @llvm.amdgcn.workgroup.id.z()"},
     {"s.barrier", "declare void @llvm.amdgcn.s.barrier()"},
     {"exp2.f32", "declare float @llvm.exp2.f32(float)"},
+    {"amdgcn.exp2.f32", "declare float @llvm.amdgcn.exp2.f32(float)"},
     {"log2.f32", "declare float @llvm.log2.f32(float)"},
     {"sqrt.f32", "declare float @llvm.sqrt.f32(float)"},
     {"rsqrt.f32", "declare float @llvm.amdgcn.rsq.f32(float)"},
@@ -207,6 +210,9 @@ const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS[] = {
     {"global.atomic.fadd.v2bf16",
      "declare <2 x bfloat> @llvm.amdgcn.global.atomic.fadd.v2bf16.p1("
      "ptr addrspace(1), <2 x bfloat>)"},
+    {"global.atomic.fadd.v2f16",
+     "declare <2 x half> @llvm.amdgcn.global.atomic.fadd.v2f16.p1("
+     "ptr addrspace(1), <2 x half>)"},
     {"mbcnt.lo", "declare i32 @llvm.amdgcn.mbcnt.lo(i32, i32)"},
     {"mbcnt.hi", "declare i32 @llvm.amdgcn.mbcnt.hi(i32, i32)"},
     {"ds.read.tr16.b64", "declare <4 x i16> @llvm.amdgcn.ds.read.tr16.b64(ptr addrspace(3))"},

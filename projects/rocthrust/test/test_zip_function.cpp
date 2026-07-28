@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -17,23 +17,21 @@
 
 #include <thrust/detail/config.h>
 
-#if !defined(THRUST_LEGACY_GCC)
+#include <thrust/device_vector.h>
+#include <thrust/iterator/zip_iterator.h>
+#include <thrust/remove.h>
+#include <thrust/sort.h>
+#include <thrust/transform.h>
+#include <thrust/zip_function.h>
 
-#  include <thrust/device_vector.h>
-#  include <thrust/iterator/zip_iterator.h>
-#  include <thrust/remove.h>
-#  include <thrust/sort.h>
-#  include <thrust/transform.h>
-#  include <thrust/zip_function.h>
+#include <iostream>
 
-#  include <iostream>
+#include "test_param_fixtures.hpp"
+#include "test_utils.hpp"
 
-#  include "test_param_fixtures.hpp"
-#  include "test_utils.hpp"
-
-#  if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#    include <iterator>
-#  endif
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
+#  include <iterator>
+#endif
 
 using IntType = ::testing::Types<Params<int>>;
 
@@ -64,9 +62,9 @@ TYPED_TEST(ZipFunctionIntTests, TestZipFunctionCtor)
 
   ASSERT_EQ(thrust::zip_function<SumThree>()(thrust::make_tuple(1, 2, 3)), SumThree{}(1, 2, 3));
   ASSERT_EQ(thrust::zip_function<SumThree>(SumThree{})(thrust::make_tuple(1, 2, 3)), SumThree{}(1, 2, 3));
-#  ifdef __cpp_deduction_guides
+#ifdef __cpp_deduction_guides
   ASSERT_EQ(thrust::zip_function(SumThree{})(thrust::make_tuple(1, 2, 3)), SumThree{}(1, 2, 3));
-#  endif // __cpp_deduction_guides
+#endif // __cpp_deduction_guides
 }
 
 TYPED_TEST(ZipFunctionThirtyTwoBitTests, TestZipFunctionTransform)
@@ -93,19 +91,20 @@ TYPED_TEST(ZipFunctionThirtyTwoBitTests, TestZipFunctionTransform)
     device_vector<T> d_result_zip(size);
 
     // Tuple base case
-    transform(make_zip_iterator(h_data0.begin(), h_data1.begin(), h_data2.begin()),
-              make_zip_iterator(h_data0.end(), h_data1.end(), h_data2.end()),
-              h_result_tuple.begin(),
-              SumThreeTuple{});
+
+    thrust::transform(make_zip_iterator(h_data0.begin(), h_data1.begin(), h_data2.begin()),
+                      make_zip_iterator(h_data0.end(), h_data1.end(), h_data2.end()),
+                      h_result_tuple.begin(),
+                      SumThreeTuple{});
     // Zip Function
-    transform(make_zip_iterator(h_data0.begin(), h_data1.begin(), h_data2.begin()),
-              make_zip_iterator(h_data0.end(), h_data1.end(), h_data2.end()),
-              h_result_zip.begin(),
-              make_zip_function(SumThree{}));
-    transform(make_zip_iterator(d_data0.begin(), d_data1.begin(), d_data2.begin()),
-              make_zip_iterator(d_data0.end(), d_data1.end(), d_data2.end()),
-              d_result_zip.begin(),
-              make_zip_function(SumThree{}));
+    thrust::transform(make_zip_iterator(h_data0.begin(), h_data1.begin(), h_data2.begin()),
+                      make_zip_iterator(h_data0.end(), h_data1.end(), h_data2.end()),
+                      h_result_zip.begin(),
+                      make_zip_function(SumThree{}));
+    thrust::transform(make_zip_iterator(d_data0.begin(), d_data1.begin(), d_data2.begin()),
+                      make_zip_iterator(d_data0.end(), d_data1.end(), d_data2.end()),
+                      d_result_zip.begin(),
+                      make_zip_function(SumThree{}));
 
     ASSERT_EQ(h_result_tuple, h_result_zip);
     ASSERT_EQ(h_result_tuple, d_result_zip);
@@ -197,4 +196,3 @@ TYPED_TEST(ZipFunctionIntFloatTests, TestNestedZipFunction2)
   auto nestedTupleIt = thrust::make_zip_iterator(tupleIt, _THRUST_STD::begin(C));
   thrust::sort(nestedTupleIt, nestedTupleIt + n, SortPred{});
 }
-#endif // !THRUST_LEGACY_GCC
