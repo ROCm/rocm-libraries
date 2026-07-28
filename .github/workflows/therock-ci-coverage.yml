@@ -110,7 +110,6 @@ jobs:
             -D${{ inputs.project_name }}_ENABLE_COVERAGE=ON
             -DLLVM_TOOLS_SEARCH_PREFIX=${{ github.workspace }}/TheRock/build-coverage/dist/rocm/lib/llvm
             -DCOMPILER_RT_BUILD_PROFILE_ROCM=ON
-            -DCOMPILER_RT_INSTALL_PROFILE_ROCM_LIBS=ON
             -DLLVM_PARALLEL_LINK_JOBS=4
             -DTHEROCK_FLAG_KPACK_SPLIT_ARTIFACTS=OFF
             ${{ inputs.cmake_options }}
