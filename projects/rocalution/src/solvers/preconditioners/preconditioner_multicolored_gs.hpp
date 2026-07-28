@@ -45,6 +45,8 @@ namespace rocalution
   * Details on the Symmetric Gauss-Seidel / SSOR algorithm can be found in the SGS
   * preconditioner.
   *
+  * \note To change the preconditioner matrix format, use MultiColored::SetPrecondMatrixFormat().
+  *
   * \tparam OperatorType - can be LocalMatrix
   * \tparam VectorType - can be LocalVector
   * \tparam ValueType - can be float, double, std::complex<float> or std::complex<double>

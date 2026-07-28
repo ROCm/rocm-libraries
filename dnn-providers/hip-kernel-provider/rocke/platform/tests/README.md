@@ -12,7 +12,7 @@ python tests/run_all.py --only gemm
 python tools/check_byte_identity.py   # build engine fresh + byte-identity gate (llvm20/llvm22)
 ```
 
-`conftest.py` puts `rocKE/Python` on `sys.path` (so `import rocke` works);
+`conftest.py` puts `rocke/platform/python` on `sys.path` (so `import rocke` works);
 `pytest.ini` uses `--import-mode=importlib` so same-named test modules coexist
 across layers without `__init__.py`.
 
@@ -37,7 +37,7 @@ for what is actually exercised vs. manual/diagnostic/demo.
 > has no default-pytest coverage**: the C-engine vs Python-engine equivalence is
 > owned by the byte-identity gate (which builds `rocke_core` and byte-compares the
 > 65 `*_emit.c` outputs to `*_emit.py`), and the binding itself by the
-> consistency proof documented in `Cpp/bindings/README.md`.
+> consistency proof documented in `cpp/bindings/README.md`.
 
 ## Execution categories
 

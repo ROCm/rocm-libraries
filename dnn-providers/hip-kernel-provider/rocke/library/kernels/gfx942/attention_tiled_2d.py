@@ -408,6 +408,17 @@ class UnifiedAttention2DTiledSpec:
     # full [T, HD] K tiles. This is the LDS prerequisite for NumPrefetchK/V=3
     # on MI300X; v1 syncs per slice before adding overlap.
     use_k_sliced_ring: bool = False
+    # Ring pipeline depth: how many K slices are staged/in-flight at once.
+    #   3 (default): depth-3 pipeline (live set {kg, kg+1, kg+2}), 3 LDS slots.
+    #     For k_groups=4 (D128) this map (kg % 3) reuses slot 0 for slice 3, so
+    #     the reusing DMA is fenced by a drain-on-reuse barrier (see the schedule
+    #     in build_unified_attention_2d_tiled). Depth-3 needs cfvst + the wide
+    #     nw=4 geometry.
+    #   2: depth-2 pipeline (live set {kg, kg+1}), 2 LDS slots (kg % 2). Never
+    #     reuses a slot within the k_groups=4 live set, uses less LDS (lower
+    #     register/occupancy pressure), and is the measured best for fp16 D128
+    #     prefill on gfx942 (~0.72-1.05x AOTriton flash, correct at magnitude).
+    ring_depth: int = 3
     # Use CK Tile's explicit LDS buffer sequence for the sliced-K pipeline
     # instead of the conservative round-robin slot map. This is opt-in because
     # the sequence can reuse the previously consumed slot and therefore needs
@@ -679,8 +690,20 @@ class UnifiedAttention2DTiledSpec:
                     "use_k_sliced_ring requires fp16/bf16, head_size in {64,128} "
                     "(HD %% 32 == 0 for the 32-wide K slices), T in {64,128}"
                 )
+            if self.ring_depth not in (2, 3):
+                raise ValueError(
+                    f"ring_depth must be 2 or 3 when use_k_sliced_ring is set "
+                    f"(got {self.ring_depth})"
+                )
         if self.use_k_sliced_ldsseq and not self.use_k_sliced_ring:
             raise ValueError("use_k_sliced_ldsseq requires use_k_sliced_ring")
+        if self.use_k_sliced_ldsseq and self.ring_depth != 3:
+            # The CK LdsSeq slot maps are 3-slot layouts; they are undefined for
+            # the depth-2 ring (only slots {0, 1} exist).
+            raise ValueError(
+                f"use_k_sliced_ldsseq requires ring_depth == 3 "
+                f"(got {self.ring_depth})"
+            )
         if self.use_q_direct_global:
             if not (self.use_mfma_32x32x8 and self.use_transposed_qk_32x32):
                 raise ValueError("use_q_direct_global currently targets transposed-x8")
@@ -938,6 +961,13 @@ class UnifiedAttention2DTiledSpec:
                 else ""
             ),
             "ksring" if self.use_k_sliced_ring else "",
+            # depth-2 ring is a distinct schedule (fp16 D128); tag it so the HSACO
+            # cache key and kernel name differ from the default depth-3 ring.
+            (
+                f"rd{self.ring_depth}"
+                if self.use_k_sliced_ring and self.ring_depth != 3
+                else ""
+            ),
             "ldsseq" if self.use_k_sliced_ldsseq else "",
             "iglp1" if self.use_iglp_opt else "",
             "k1buf" if self.use_k_single_buffer else "",
@@ -1004,12 +1034,15 @@ def supports_tiled_2d(
             False,
             f"tiled 2D kernel needs 1<=num_queries_per_kv<=16 (got {num_queries_per_kv})",
         )
-    block_m = 16 * num_warps
-    if block_m % num_queries_per_kv != 0:
+    if num_warps not in (1, 2, 4, 8):
         return (
             False,
-            f"tiled 2D kernel needs num_queries_per_kv to divide BLOCK_M={block_m} "
-            f"(num_warps={num_warps}, got num_queries_per_kv={num_queries_per_kv})",
+            f"tiled 2D kernel requires num_warps in {{1,2,4,8}} (got {num_warps})",
+        )
+    if block_m_per_warp not in (16, 32):
+        return (
+            False,
+            f"tiled 2D kernel requires block_m_per_warp in {{16,32}} (got {block_m_per_warp})",
         )
     # FP8 K/V cache is supported via ``kv_storage_dtype="fp8e4m3"`` plus
     # ``use_fp8=True`` (the latter is what the upstream selector flips on
@@ -1138,13 +1171,20 @@ def supports_tiled_2d(
                     f"the {arch} {_LDS_CAPACITY_BYTES} B LDS budget",
                 )
             return True, "supported"
-        _out_stripe = 32 if head_size <= 64 else head_size
-        _lds = (
-            2 * _t_eff * head_size * _BPE  # K_lds (double-buffered)
-            + _t_eff * head_size * _BPE  # V_lds
-            + _block_m * (_t_eff + 8) * _BPE  # P_lds
-            + (0 if _block_m <= 2 * _t_eff else _block_m * head_size * _BPE)  # Q_lds
-            + _block_m * _out_stripe * _BPE  # Acc_lds
+        # Default-path footprint via the shared model (single source of truth,
+        # also used by the gfx950 register-PV resolver). Conservative here:
+        # Q_lds/P_lds are staged (the register-PV path drops them).
+        from ..common.attention_unified import _tiled_2d_lds_bytes
+
+        _lds = _tiled_2d_lds_bytes(
+            tile_size=_t_eff,
+            head_size=head_size,
+            block_m=_block_m,
+            kv_elem_bytes=_BPE,
+            k_slots=2,
+            v_slots=1,
+            include_q_lds=True,
+            include_p_lds=True,
         )
         if _lds > _LDS_CAPACITY_BYTES:
             return (
@@ -1225,6 +1265,10 @@ def build_unified_attention_2d_tiled(
     BLOCK_M = spec.block_m
     BLOCK_Q = spec.block_q
     NQK = spec.num_queries_per_kv
+    # Number of rows that map to complete GQA groups.  When BLOCK_M % NQK == 0
+    # this equals BLOCK_M (all rows valid).  Otherwise the last (BLOCK_M % NQK)
+    # rows would duplicate the first tokens of the NEXT CTA and must be masked.
+    VALID_ROWS = BLOCK_Q * NQK
     NUM_KV = spec.num_kv_heads
     NUM_QH = spec.num_query_heads
     SLIDING_WINDOW = spec.sliding_window
@@ -1560,7 +1604,14 @@ def build_unified_attention_2d_tiled(
     P_LDS_DTYPE = FP8E4M3 if FP8_MFMA_PV else dtype
     Q_BYTES = BLOCK_M * HD * 2
     K_SLICE_HD = 32
-    K_SLICE_SLOTS = 3
+    # Ring pipeline depth (spec.ring_depth): depth-3 keeps the live set
+    # {kg, kg+1, kg+2} in 3 slots; depth-2 keeps {kg, kg+1} in 2 slots (fewer
+    # LDS slots, lower occupancy pressure -- fp16 D128's best). See the spec
+    # field docstring and the schedule loop below.
+    # ring_depth is validated to {2, 3} in __post_init__ when the ring is active;
+    # when the ring is inactive it is unused (K_SLICED_ACTIVE gates the schedule).
+    RING_DEPTH = spec.ring_depth
+    K_SLICE_SLOTS = RING_DEPTH
     K_SLICED_ACTIVE = K_SLICED_RING and USE_MFMA_32X32X8 and TRANSPOSED_QK_32X32
     # K_BUF_BYTES depends on the K_LDS_DTYPE (1 byte for fp8, 2 for bf16).
     K_LDS_ELEM_BYTES = 1 if K_LDS_DTYPE == FP8E4M3 else 2
@@ -1990,8 +2041,14 @@ def build_unified_attention_2d_tiled(
             qh_t = b.add(
                 b.mul(kv_head_idx, b.const_i32(NQK)), b.mod(Q_row, b.const_i32(NQK))
             )
-            qmask_t = b.land(
-                b.cmp_lt(q_pos_t, cur_batch_q_len), b.cmp_lt(qh_t, b.const_i32(NUM_QH))
+            _qmask_inner = b.land(
+                b.cmp_lt(q_pos_t, cur_batch_q_len),
+                b.cmp_lt(qh_t, b.const_i32(NUM_QH)),
+            )
+            qmask_t = (
+                b.land(_qmask_inner, b.cmp_lt(Q_row, b.const_i32(VALID_ROWS)))
+                if VALID_ROWS < BLOCK_M
+                else _qmask_inner
             )
             q_pos_safe = b.select(qmask_t, q_pos_t, b.const_i32(0))
             qh_safe = b.select(qmask_t, qh_t, b.const_i32(0))
@@ -3674,8 +3731,14 @@ def build_unified_attention_2d_tiled(
             row = b.add(wave_row_base, _in_warp_row(reg))
         qp_r = b.add(qb_start_pos, b.div(row, b.const_i32(NQK)))
         qh_r = b.add(b.mul(kv_head_idx, b.const_i32(NQK)), b.mod(row, b.const_i32(NQK)))
-        row_ok = b.land(
-            b.cmp_lt(qp_r, cur_batch_q_len), b.cmp_lt(qh_r, b.const_i32(NUM_QH))
+        _row_ok_inner = b.land(
+            b.cmp_lt(qp_r, cur_batch_q_len),
+            b.cmp_lt(qh_r, b.const_i32(NUM_QH)),
+        )
+        row_ok = (
+            b.land(_row_ok_inner, b.cmp_lt(row, b.const_i32(VALID_ROWS)))
+            if VALID_ROWS < BLOCK_M
+            else _row_ok_inner
         )
         causal_lim = b.add(context_len, qp_r)
         hoist_row.append(row)
@@ -3702,8 +3765,14 @@ def build_unified_attention_2d_tiled(
         st_qh = b.add(
             b.mul(kv_head_idx, b.const_i32(NQK)), b.mod(st_q_row, b.const_i32(NQK))
         )
-        st_row_ok = b.land(
-            b.cmp_lt(st_qp, cur_batch_q_len), b.cmp_lt(st_qh, b.const_i32(NUM_QH))
+        _st_row_ok_inner = b.land(
+            b.cmp_lt(st_qp, cur_batch_q_len),
+            b.cmp_lt(st_qh, b.const_i32(NUM_QH)),
+        )
+        st_row_ok = (
+            b.land(_st_row_ok_inner, b.cmp_lt(st_q_row, b.const_i32(VALID_ROWS)))
+            if VALID_ROWS < BLOCK_M
+            else _st_row_ok_inner
         )
         st_causal_lim = b.add(context_len, st_qp)
     else:
@@ -3784,9 +3853,17 @@ def build_unified_attention_2d_tiled(
                 b.mul(kv_head_idx, b.const_i32(NQK)),
                 b.mod(st_q_row_iter, b.const_i32(NQK)),
             )
-            st_row_ok_iter = b.land(
+            _st_row_ok_iter_inner = b.land(
                 b.cmp_lt(st_qp_iter, cur_batch_q_len),
                 b.cmp_lt(st_qh_iter, b.const_i32(NUM_QH)),
+            )
+            st_row_ok_iter = (
+                b.land(
+                    _st_row_ok_iter_inner,
+                    b.cmp_lt(st_q_row_iter, b.const_i32(VALID_ROWS)),
+                )
+                if VALID_ROWS < BLOCK_M
+                else _st_row_ok_iter_inner
             )
             st_causal_lim_iter = b.add(context_len, st_qp_iter)
             if USE_ALIBI:
@@ -3911,32 +3988,46 @@ def build_unified_attention_2d_tiled(
                     k_groups = HD // K_SLICE_HD
                     k_steps_per_group = K_SLICE_HD // QK_K_STEP
 
+                    # Slices ahead of the current kg that are kept in flight:
+                    # depth-3 prefetches kg+2, depth-2 prefetches kg+1.
+                    prefetch = RING_DEPTH - 1
+
                     def _kslot(group_idx: int) -> int:
-                        if K_SLICED_LDSSEQ and k_groups == 4:
+                        # The CK LdsSeq maps are 3-slot layouts (they reference
+                        # slot 2), so they are only valid for the depth-3 ring.
+                        # Depth-2 has only slots {0, 1}; returning slot 2 would
+                        # index past the 2-slot K_lds allocation (out-of-bounds LDS
+                        # -> corruption). Depth-2 uses the plain modulo map, which
+                        # respects K_SLICE_SLOTS. (Guarded again in __post_init__.)
+                        if K_SLICED_LDSSEQ and RING_DEPTH == 3 and k_groups == 4:
                             return (1, 2, 0, 1)[group_idx]
-                        if K_SLICED_LDSSEQ and k_groups == 2:
+                        if K_SLICED_LDSSEQ and RING_DEPTH == 3 and k_groups == 2:
                             return (1, 2)[group_idx]
                         return group_idx % K_SLICE_SLOTS
 
                     _issue_k_slice_load_runtime(kv_tile_iv, 0, _kslot(0))
-                    if k_groups > 1:
+                    if k_groups > 1 and prefetch >= 2:
                         _issue_k_slice_load_runtime(kv_tile_iv, 1, _kslot(1))
                     for kg in range(k_groups):
                         slot = _kslot(kg)
-                        if kg + 2 < k_groups:
-                            next_slot = _kslot(kg + 2)
-                            if (
-                                K_SLICED_LDSSEQ
-                                and kg > 0
-                                and next_slot == _kslot(kg - 1)
-                            ):
-                                # CK's LdsSeq can reuse the slice consumed by the
-                                # previous kg. Drain LDS reads before overwriting
-                                # that slot; the VMEM prefetch still overlaps the
-                                # current slice's compute after the partial wait.
+                        nxt = kg + prefetch
+                        if nxt < k_groups:
+                            next_slot = _kslot(nxt)
+                            # Drain-on-reuse: if the slice we are about to DMA
+                            # reuses the LDS slot that slice(kg-1) was just read
+                            # from, the DMA must wait for those reads to retire or
+                            # it clobbers operands mid-flight. This fires for the
+                            # default kg%3 map at k_groups=4 (D128): at kg=1 the
+                            # depth-3 prefetch targets slice 3 -> slot 0, the slot
+                            # slice 0 used. Without this fence the QK accumulation
+                            # is corrupted (max_abs ~0.5-1.3 at magnitude); D64
+                            # (k_groups=2) never reuses a slot so it is unaffected.
+                            # (CK's LdsSeq map hits the same reuse and always
+                            # relied on this drain; it now applies to every map.)
+                            if kg > 0 and next_slot == _kslot(kg - 1):
                                 b.s_waitcnt(lgkmcnt=0)
                                 b.s_barrier_bare()
-                            _issue_k_slice_load_runtime(kv_tile_iv, kg + 2, next_slot)
+                            _issue_k_slice_load_runtime(kv_tile_iv, nxt, next_slot)
                         # Leave one newer slice's VMEM stream in flight whenever
                         # such a slice exists; fully drain for the final slice.
                         if kg + 1 < k_groups:
@@ -4149,9 +4240,17 @@ def build_unified_attention_2d_tiled(
                                         b.mul(kv_head_idx, b.const_i32(NQK)),
                                         b.mod(q_row_t, b.const_i32(NQK)),
                                     )
-                                    row_ok = b.land(
+                                    _row_ok_inner_t = b.land(
                                         b.cmp_lt(qp_r, cur_batch_q_len),
                                         b.cmp_lt(qh_r, b.const_i32(NUM_QH)),
+                                    )
+                                    row_ok = (
+                                        b.land(
+                                            _row_ok_inner_t,
+                                            b.cmp_lt(q_row_t, b.const_i32(VALID_ROWS)),
+                                        )
+                                        if VALID_ROWS < BLOCK_M
+                                        else _row_ok_inner_t
                                     )
                                 col_abs = b.add(group_tile_off, k_local)
                                 if not (
@@ -5155,9 +5254,14 @@ def build_unified_attention_2d_tiled(
                 b.mul(kv_head_idx, b.const_i32(NQK)),
                 b.mod(q_row_t, b.const_i32(NQK)),
             )
-            op_mask_t = b.land(
+            _op_mask_t_inner = b.land(
                 b.cmp_lt(op_pos_t, cur_batch_q_len),
                 b.cmp_lt(op_qh_t, b.const_i32(NUM_QH)),
+            )
+            op_mask_t = (
+                b.land(_op_mask_t_inner, b.cmp_lt(q_row_t, b.const_i32(VALID_ROWS)))
+                if VALID_ROWS < BLOCK_M
+                else _op_mask_t_inner
             )
             out_base_t, _ = q_desc.offset(
                 b,
@@ -5203,9 +5307,14 @@ def build_unified_attention_2d_tiled(
             b.mul(kv_head_idx, b.const_i32(NQK)),
             b.mod(OUT_ROW_BASE32, b.const_i32(NQK)),
         )
-        op_mask32_base = b.land(
+        _op_mask32_inner = b.land(
             b.cmp_lt(op_pos32_base, cur_batch_q_len),
             b.cmp_lt(op_qh32_base, b.const_i32(NUM_QH)),
+        )
+        op_mask32_base = (
+            b.land(_op_mask32_inner, b.cmp_lt(OUT_ROW_BASE32, b.const_i32(VALID_ROWS)))
+            if VALID_ROWS < BLOCK_M
+            else _op_mask32_inner
         )
         out_base32_base, _ = q_desc.offset(
             b,
@@ -5297,8 +5406,14 @@ def build_unified_attention_2d_tiled(
         b.mul(kv_head_idx, b.const_i32(NQK)),
         b.mod(OUT_ROW_BASE, b.const_i32(NQK)),
     )
-    op_mask = b.land(
-        b.cmp_lt(op_pos, cur_batch_q_len), b.cmp_lt(op_qh, b.const_i32(NUM_QH))
+    _op_mask_inner = b.land(
+        b.cmp_lt(op_pos, cur_batch_q_len),
+        b.cmp_lt(op_qh, b.const_i32(NUM_QH)),
+    )
+    op_mask = (
+        b.land(_op_mask_inner, b.cmp_lt(OUT_ROW_BASE, b.const_i32(VALID_ROWS)))
+        if VALID_ROWS < BLOCK_M
+        else _op_mask_inner
     )
     out_base, _ = q_desc.offset(
         b,

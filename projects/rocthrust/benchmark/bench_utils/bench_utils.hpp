@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -57,7 +57,7 @@
 
 namespace bench_utils
 {
-#if (THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP)
+#if THRUST_HAS_HIP_COMPILER()
 
 #  define HIP_CHECK(condition)                                                     \
     {                                                                              \
@@ -125,9 +125,7 @@ public:
     return elapsed_time / 1000.0;
   }
 };
-#elif (defined(__NVCC__) || defined(_NVHPC_CUDA)                                    \
-       || (defined(__CUDA__) && THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_CLANG) \
-       || THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_NVRTC)
+#elif THRUST_HAS_CUDA_COMPILER()
 
 #  define CUDA_SAFE_CALL_NO_SYNC(call)                                                                              \
     do                                                                                                              \

@@ -166,6 +166,10 @@ namespace rocisa
     {
         std::vector<std::shared_ptr<Item>> itemList;
         std::shared_ptr<Container>         tempVgpr = nullptr;
+        // Metadata-only callable marker for consumers that preserve function
+        // boundaries (for example StinkyTofu). This does not affect toString().
+        bool                               isCallable = false;
+        std::string                        callableName;
         bool                               _isNoOpt;
 
         Module(const std::string& name = "")
@@ -177,6 +181,8 @@ namespace rocisa
         Module(const Module& other)
             : Item(other)
             , tempVgpr(other.tempVgpr ? other.tempVgpr->clone() : nullptr)
+            , isCallable(other.isCallable)
+            , callableName(other.callableName)
             , _isNoOpt(other._isNoOpt)
         {
             itemList = cloneItemList(other.itemList);

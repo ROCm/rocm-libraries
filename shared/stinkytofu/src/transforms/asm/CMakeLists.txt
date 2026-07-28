@@ -13,6 +13,7 @@ target_sources(stinkytofu_objs PRIVATE
     DeadCodeEliminationPass.cpp
     RedundantMovEliminationPass.cpp
     LegalizationUtils.cpp
+    ExecMaskGrouping.cpp
     StinkyDAGSchedulerPass.cpp
     SetMatrixReusePass.cpp
     StinkyWaitCntInsertionPass.cpp
@@ -24,6 +25,7 @@ target_sources(stinkytofu_objs PRIVATE
     RegionClonePass.cpp
     MemTokenConsistencyCheckPass.cpp
     InsertVgprMsbPass.cpp
+    InsertInitialUnclausedVmemPass.cpp
     InsertClusterBarrierPass.cpp
     RaiseVgprMsbPass.cpp
     RemoveDelayAluPass.cpp
@@ -35,4 +37,5 @@ target_sources(stinkytofu_objs PRIVATE
     RederiveExpertScopePass.cpp
     EstimateAsmCyclesPass.cpp
     StinkyWmmaVgprReorderPass.cpp
+    FlattenCalleesPass.cpp
 )
