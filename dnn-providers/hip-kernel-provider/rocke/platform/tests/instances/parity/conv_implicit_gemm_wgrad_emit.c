@@ -11,14 +11,17 @@
  * to stdout so the two outputs can be byte-compared.
  *
  * Config index table (must stay in sync with the Python emitter):
- *   0  N8H56W56C64_K64Y3X3, t64x64x64, w2x2, a32x32x16, mem/default,   gfx950
- *   1  N8H56W56C64_K64Y3X3, t64x64x64, w2x2, a32x32x16, mem/cshuffle,  gfx950
- *   2  N8H56W56C64_K64Y3X3, t64x64x64, w2x2, a32x32x16, mem/default,   gfx950, split_k=4 fp16
- *   3  N8H56W56C64_K64Y1X1, t64x64x64, w2x2, a32x32x16, mem/default,   gfx950
+ *   0  N8H56W56C64_K64Y3X3, t64x64x64, w2x2, a32x32x16, mem/default,      gfx950
+ *   1  N8H56W56C64_K64Y3X3, t64x64x64, w2x2, a32x32x16, mem/cshuffle,     gfx950
+ *   2  N8H56W56C64_K64Y3X3, t64x64x64, w2x2, a32x32x16, mem/default,      gfx950, split_k=4 fp16
+ *   3  N8H56W56C64_K64Y1X1, t64x64x64, w2x2, a32x32x16, mem/default,      gfx950
  *   4  N8H56W56C64_K64Y3X3, t128x128x64, w2x2, a32x32x16, compv4/default, gfx950
- *   5  N8H56W56C64_K64Y3X3, t64x64x64, w2x2, a16x16x16, mem/default,   gfx1151 (WMMA w32)
- *   6  N8H56W56C64_K64Y3X3, t64x64x64, w2x2, a16x16x16, mem/default,   gfx1201 (WMMA w32)
- *   7  N8H56W56C64_K64Y3X3, t64x64x64, w2x2, a32x32x16, mem/default,   gfx950, split_k=4 fp32
+ *   5  N8H56W56C64_K64Y3X3, t64x64x64, w2x2, a16x16x16, mem/default,      gfx1151 (WMMA w32)
+ *   6  N8H56W56C64_K64Y3X3, t64x64x64, w2x2, a16x16x16, mem/default,      gfx1201 (WMMA w32)
+ *   7  N8H56W56C64_K64Y3X3, t64x64x64, w2x2, a32x32x16, mem/default,      gfx950, split_k=4 fp32
+ *   8  3-D conv N4Di14H14W14C32_K32Z3Y3X3, t64x64x64, w2x2, a32x32x16, mem/default, gfx950
+ *   9  N8H56W56C64_K64Y3X3, t64x64x64, w2x2, a32x32x16, mem/default,      gfx950, split_k=4 bf16
+ *  10  N8H56W56C64_K64Y3X3, t64x64x64, w2x2, a32x32x16, mem/default,      gfx950, chiplet_swizzle
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -98,6 +101,28 @@ static int make_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, const 
         spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
         spec->dtype_d = "fp32";
         spec->split_k = 4;
+        *arch = "gfx950";
+        return 0;
+    case 8:
+        /* 3-D convolution: N4 Di14 Hi14 Wi14 C32 K32 Z3 Y3 X3, s=1, p=1, d=1. */
+        spec->problem
+            = rocke_conv_problem_make_3d(4, 14, 14, 14, 32, 32, 3, 3, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1);
+        spec->warp_tile_m = 32;
+        spec->warp_tile_n = 32;
+        spec->warp_tile_k = 16;
+        *arch = "gfx950";
+        return 0;
+    case 9:
+        /* split_k=4, dtype_d="bf16" (packed bf16 atomic path). */
+        spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
+        spec->dtype_d = "bf16";
+        spec->split_k = 4;
+        *arch = "gfx950";
+        return 0;
+    case 10:
+        /* chiplet_swizzle enabled. */
+        spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
+        spec->chiplet_swizzle = true;
         *arch = "gfx950";
         return 0;
     default:

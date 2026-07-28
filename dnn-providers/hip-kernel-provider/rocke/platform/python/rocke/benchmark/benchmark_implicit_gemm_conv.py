@@ -167,9 +167,12 @@ def _verify_kernel(
     abs_diff = out_f32.sub(ref_out).abs()
     ref_scale = ref_out.abs().max().clamp(min=1.0)
     rel_err = float(abs_diff.max() / ref_scale)
-    # Use a relative tolerance scaled to the output dtype.
-    # fp16/bf16 wgrad reductions over N*Ho*Wo positions can accumulate
-    # significant error; a relative threshold avoids false FAILs.
+    # Peak-normalised relative error: max|out-ref| / max|ref|.
+    # Caveat: a large relative error on a small-magnitude weight can be masked
+    # by the global-max denominator, and 5e-2 is fairly loose for bf16
+    # reductions over K_wg ~ 25k.  A mean/L2 relative check or a tighter bf16
+    # bound would catch subtler reduction bugs -- revisit when verify is
+    # re-enabled after the fwd fixes in #9824.
     tol = 5e-2 if out_t.dtype in (torch.float16, torch.bfloat16) else 1e-3
     err = rel_err
     status = "PASS" if err < tol else f"FAIL(rel_err={err:.2e})"

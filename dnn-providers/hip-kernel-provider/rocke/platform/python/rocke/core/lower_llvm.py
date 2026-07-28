@@ -114,10 +114,11 @@ def _flavor_for_rocm(major: int, minor: int) -> str:
 def _datalayout_for_flavor(flavor: str) -> str:
     """Module ``target datalayout`` string for an LLVM flavor.
 
-    Two fields drift between flavors: the ELF mangling spec ``m:e`` (added
-    under LLVM 21+) and the buffer-fat-pointer address space ``p8`` (see
-    :data:`_DATALAYOUT_LLVM20` / :data:`_DATALAYOUT_LLVM22`). LLVM22 is the
-    default for unknown values so a typo'd override degrades to the modern
+    One field drifts between flavors: the buffer-fat-pointer address space
+    ``p8`` gained an index-width field in LLVM 22 (see :data:`_DATALAYOUT_LLVM20`
+    / :data:`_DATALAYOUT_LLVM22`).  The ELF symbol-mangling spec ``m:e`` is
+    omitted by both LLVM 20 and LLVM 22 on the AMDGPU datalayout.  LLVM22 is
+    the default for unknown values so a typo'd override degrades to the modern
     layout rather than the legacy one.
     """
     return _DATALAYOUT_LLVM20 if flavor == LLVM_FLAVOR_LLVM20 else _DATALAYOUT_LLVM22

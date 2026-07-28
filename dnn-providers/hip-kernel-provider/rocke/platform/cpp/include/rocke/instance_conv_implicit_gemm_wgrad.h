@@ -73,6 +73,17 @@ extern "C" {
  *    1 = disabled (default, normal store)
  *   >1 = fixed split-K degree
  *
+ * Caller contract when split_k > 1:
+ *   1. Zero-initialise the dW buffer before EVERY launch:
+ *        hipMemset(dW_ptr, 0, dW_bytes)
+ *      The kernel only issues atomic-adds, never a direct store, so any
+ *      non-zero initial content accumulates into the result, producing
+ *      silently wrong gradients with no runtime error.
+ *   2. Launch with grid (ceil(wg_N/tile_n), ceil(wg_M/tile_m), split_k).
+ *
+ * When split_k == 1 the kernel writes dW normally (no atomics, no pre-zeroing
+ * required).
+ *
  * dtype_a / dtype_b / dtype_d: "fp16" | "bf16" | "fp32" (default all "fp16").
  */
 typedef struct rocke_implicit_gemm_conv_wgrad_spec

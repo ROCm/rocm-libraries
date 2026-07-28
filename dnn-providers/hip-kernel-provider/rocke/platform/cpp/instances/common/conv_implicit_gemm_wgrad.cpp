@@ -225,6 +225,17 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
     if(arch == NULL)
         arch = "gfx950";
 
+    /* groups > 1 is not supported for wgrad (Python validate() raises on it). */
+    if(s->problem.groups != 1)
+    {
+        if(reason && reason_cap)
+            snprintf(reason,
+                     reason_cap,
+                     "grouped convolution (groups=%d > 1) is not supported for wgrad",
+                     s->problem.groups);
+        return false;
+    }
+
     /* geometry */
     if(s->tile_m % (s->warp_m * s->warp_tile_m))
     {
@@ -262,10 +273,17 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
 
     /* split_k > 1 requires a CDNA arch (ctx->atom != NULL at build time).
      * On RDNA the op family is "wmma" and atom is NULL, so the split-K
-     * epilogue would dereference a null pointer. */
+     * epilogue would dereference a null pointer.
+     *
+     * TODO: gate on resolved wave_size == 64 / op->family == "mma" (matching Python
+     * which uses family == "wmma") instead of the arch string, so gfx10* and any
+     * future or unknown arch prefix cannot fall through.  This is not reachable
+     * on today's supported targets but would be more robust. */
     if(sk > 1)
     {
-        /* Quick arch check: gfx11xx / gfx12xx are RDNA. */
+        /* Quick arch check: gfx11xx / gfx12xx are RDNA.
+         * Note: gfx10* and any unknown prefix are not rejected here — they would
+         * reach the split-K epilogue where ctx->atom is NULL (null deref). */
         if(arch && (strncmp(arch, "gfx11", 5) == 0 || strncmp(arch, "gfx12", 5) == 0))
         {
             if(reason && reason_cap)
@@ -274,21 +292,24 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
         }
 
         /* For fp16/bf16 output the packed atomic writes pairs of elements via
-         * c_off_even and c_off_even+1 through the raw dW pointer.  An odd
-         * Y*X*C means the last output channel would write one element past the
-         * buffer end.  Require Y*X*C (== wg_N) to be even. */
+         * global_atomic_add_pk_f16/bf16.  Each pair spans two adjacent C
+         * positions within one (y,x) filter position.  An odd C means the last
+         * element of a row has no partner and the pair straddles a filter-position
+         * boundary, producing a wrong-geometry atomic.
+         * Matches Python is_valid_wgrad_spec: "requires even C". */
         const char* dt = s->dtype_d ? s->dtype_d : "fp16";
         if(strcmp(dt, "fp16") == 0 || strcmp(dt, "bf16") == 0)
         {
-            int wg_N_val = rocke_wgrad_conv_spec_wg_N(s);
-            if(wg_N_val % 2 != 0)
+            if(s->problem.C % 2 != 0)
             {
                 if(reason && reason_cap)
                     snprintf(reason,
                              reason_cap,
-                             "split_k > 1 with %s output requires Y*X*C (%d) to be even",
+                             "split_k > 1 with dtype_d=%s requires even C "
+                             "(packed <2 x dtype> atomic pairs must stay within one filter "
+                             "position); got C=%d",
                              dt,
-                             wg_N_val);
+                             s->problem.C);
                 return false;
             }
         }
@@ -1416,7 +1437,10 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv_wgrad(
     memset(&d_opts, 0, sizeof(d_opts));
     d_opts.noalias = true;
     d_opts.noalias_set = true;
-    /* split_k>1: dW is read+write (atomic); split_k=1: writeonly */
+    /* split_k>1: dW is read+write (atomic); split_k=1: writeonly.
+     * When split_k > 1 the caller MUST zero-init dW before launch
+     * (hipMemset(dW, 0, dW_bytes)) -- the kernel only issues atomic-adds.
+     * See the header contract note for details. */
     d_opts.writeonly = !is_split_k;
     d_opts.writeonly_set = true;
     d_opts.align = 16;
