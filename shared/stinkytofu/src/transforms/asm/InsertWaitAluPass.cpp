@@ -343,9 +343,9 @@ class WaitcntBrackets {
         };
 
         if (ct == CT_VA_VDST) {
-            forEachVGPR(
-                inst.getSrcRegs(), [&](size_t i) { return srcHalfSel(true16Mod, i); },
-                [&](unsigned idx, HighBitSel half) { stamp(idx, half, CT_VA_VDST); });
+            //forEachVGPR(
+            //    inst.getSrcRegs(), [&](size_t i) { return srcHalfSel(true16Mod, i); },
+            //    [&](unsigned idx, HighBitSel half) { stamp(idx, half, CT_VA_VDST); });
             forEachVGPR(
                 inst.getDestRegs(), [&](size_t i) { return destHalfSel(true16Mod, i); },
                 [&](unsigned idx, HighBitSel half) { stamp(idx, half, CT_VA_VDST); });
