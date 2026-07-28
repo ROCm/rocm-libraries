@@ -639,6 +639,45 @@ def cases():
             tile_k=16,
         ),
     )
+    # pipeline=v1: single-buffer global-read/compute overlap on gfx950.
+    add(
+        "conv",
+        "conv/gfx950/n1h8c16k32r3/v1_default",
+        "gfx950",
+        build_conv(
+            "irhash_conv_950_v1_a",
+            "gfx950",
+            conv1,
+            wave_size=64,
+            wtm=32,
+            wtn=32,
+            wtk=16,
+            tile_m=64,
+            tile_n=64,
+            tile_k=32,
+            pipeline="v1",
+            epilogue="default",
+        ),
+    )
+    add(
+        "conv",
+        "conv/gfx950/n1h8c16k32r3/v1_cshuffle",
+        "gfx950",
+        build_conv(
+            "irhash_conv_950_v1_b",
+            "gfx950",
+            conv1,
+            wave_size=64,
+            wtm=32,
+            wtn=32,
+            wtk=16,
+            tile_m=64,
+            tile_n=64,
+            tile_k=32,
+            pipeline="v1",
+            epilogue="cshuffle",
+        ),
+    )
 
     # MoE: sorting phases and fused-MoE streaming phases.
     for arch in ("gfx942", "gfx950", "gfx1151", "gfx1201"):
