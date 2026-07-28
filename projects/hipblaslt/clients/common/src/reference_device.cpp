@@ -27,9 +27,9 @@ namespace
     // `idx` is the logical element index into the (batch-offset) matrix. An
     // unhandled type returns NaN so a mis-gated type fails loud (the NaN
     // propagates to the output and the compare kernel flags it).
-    __device__ inline float load_input_f32(const void* base, int64_t idx, hipDataType t)
+    __device__ inline float load_input_f32(const void* base, int64_t idx, hipDataType type)
     {
-        switch(t)
+        switch(type)
         {
         case HIP_R_32F:
             return static_cast<const float*>(base)[idx];
@@ -43,9 +43,9 @@ namespace
     }
 
     // Input/output types accepted by the reference path: f32/f16/bf16 only.
-    bool is_supported_type(hipDataType t)
+    bool is_supported_type(hipDataType type)
     {
-        return t == HIP_R_32F || t == HIP_R_16F || t == HIP_R_16BF;
+        return type == HIP_R_32F || type == HIP_R_16F || type == HIP_R_16BF;
     }
 
     // float-accumulate reference GEMM with runtime-typed A/B loads. One thread per
@@ -74,18 +74,18 @@ namespace
                                               int64_t     strideD,
                                               int32_t     batchCount)
     {
-        const int64_t i = int64_t(blockIdx.x) * blockDim.x + threadIdx.x;
-        const int64_t j = int64_t(blockIdx.y) * blockDim.y + threadIdx.y;
-        const int64_t b = blockIdx.z;
-        if(i >= M || j >= N || b >= batchCount)
+        const int64_t i     = int64_t(blockIdx.x) * blockDim.x + threadIdx.x;
+        const int64_t j     = int64_t(blockIdx.y) * blockDim.y + threadIdx.y;
+        const int64_t batch = blockIdx.z;
+        if(i >= M || j >= N || batch >= batchCount)
             return;
 
         // Batch offset folded into the element index so the void* A/B advance by
         // the correct per-type element size inside the loader.
-        const int64_t aBatch = b * strideA;
-        const int64_t bBatch = b * strideB;
-        const Tc*     Cb     = C + b * strideC;
-        To*           Db     = D + b * strideD;
+        const int64_t aBatchOffset = batch * strideA;
+        const int64_t bBatchOffset = batch * strideB;
+        const Tc*     cBatch       = C + batch * strideC;
+        To*           dBatch       = D + batch * strideD;
 
         // BLAS leaves A/B unreferenced when alpha==0, so skip the loads entirely
         // (also avoids faulting on a null A/B in that case).
@@ -95,15 +95,16 @@ namespace
             {
                 const int64_t aIdx = transA_is_n ? (i + l * lda) : (l + i * lda);
                 const int64_t bIdx = transB_is_n ? (l + j * ldb) : (j + l * ldb);
-                acc += load_input_f32(A, aBatch + aIdx, tA) * load_input_f32(B, bBatch + bIdx, tB);
+                acc += load_input_f32(A, aBatchOffset + aIdx, tA)
+                       * load_input_f32(B, bBatchOffset + bIdx, tB);
             }
 
         // beta==0 leaves C unread even if it holds inf/nan.
         float out = alpha * acc;
         if(beta != 0.0f)
-            out += beta * static_cast<float>(Cb[i + j * ldc]);
+            out += beta * static_cast<float>(cBatch[i + j * ldc]);
 
-        Db[i + j * ldd] = static_cast<To>(out);
+        dBatch[i + j * ldd] = static_cast<To>(out);
     }
 
     template <typename Tc, typename To>
@@ -163,8 +164,8 @@ namespace
 
 bool gpu_ref_supported(const Arguments& arg, std::string& reason)
 {
-    auto fail = [&](const char* r) {
-        reason = r;
+    auto fail = [&](const char* why) {
+        reason = why;
         return false;
     };
 
