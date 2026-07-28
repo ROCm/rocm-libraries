@@ -1,0 +1,120 @@
+#include <gtest/gtest.h>
+#include <rpp/rpp.h>
+
+#include <string>
+#include <vector>
+
+#include "framework/backend_memory.hpp"
+#include "framework/compare_tensor.hpp"
+#include "framework/config_param.hpp"
+#include "framework/tensor_setup.hpp"
+#include "reference/pixelate_ref.hpp"
+
+using namespace rpptest;
+
+namespace {
+
+// pixelationPercentage in [0, 100]: the fraction of resolution thrown away before the image is
+// scaled back up, so a larger value means coarser blocks. 87.5 is the value the legacy harness
+// exercises; 50 is a second point on the curve, so a block-size disagreement shows a different
+// diff at each rather than one unexplained failure.
+struct PixelateParams {
+    float percentage;
+    std::string name() const { return "p" + num_token(percentage); }
+};
+
+// pixelate is a bilinear downscale followed by a nearest-neighbour upscale. NN copies a texel
+// verbatim, so all the numeric error comes from the single bilinear pass -- these are the resize
+// bilinear tolerances. They are NOT loosened to cover the trailing-edge and partial-ROI defects
+// this test surfaces (.notes/issues/geometric-bilinear-last-texel-short.md,
+// .notes/issues/pixelate-intermediate-roi-offset.md); those cases stay red.
+double pixelate_tolerance(DType dt) {
+    switch (dt) {
+        case DType::U8: return 1.0;
+        case DType::I8: return 1.0;
+        case DType::F32: return 2e-3;
+        case DType::F16: return 5e-3;
+    }
+    return 0.0;
+}
+
+template <typename T>
+void run_pixelate(const TestConfig& cfg, const PixelateParams& op) {
+    const Rpp32u c = static_cast<Rpp32u>(channels_of(cfg.layout));
+    const TensorShape shape{cfg.size.n, c, cfg.size.h, cfg.size.w};
+    RpptDesc desc = make_descriptor(shape, cfg.dtype, cfg.layout);
+    const std::size_t count = element_count(desc);
+    const std::size_t bytes = byte_size(desc, cfg.dtype);
+
+    PinnedArray<RpptROI> roi(cfg.backend, shape.n);
+    const std::vector<RpptROI> roiVec = make_roi(desc, cfg.roi);
+    for (Rpp32u i = 0; i < shape.n; ++i) roi[i] = roiVec[i];
+
+    // (1) Host golden model. The op writes only the ROI-sized region at the destination origin, so
+    // golden and the device buffer start from the same distinct pattern and only that region is
+    // compared.
+    std::vector<T> input(count), dstInit(count), golden(count), actual(count);
+    fill_input<T>(input.data(), count, cfg.dtype);
+    fill_input<T>(dstInit.data(), count, cfg.dtype, /*salt=*/1);
+    golden = dstInit;
+    pixelate_reference<T>(input.data(), golden.data(), desc, cfg.dtype, roi.data(), XYWH,
+                          op.percentage);
+
+    // (2) Run RPP on the configured backend. pixelate needs a caller-provided scratch buffer for
+    // its downscaled intermediate; the header requires n * strides.nStride * sizeof(Rpp32f) bytes.
+    // It is seeded with a poison pattern rather than left uninitialized: the op writes the
+    // intermediate itself before reading it back, so any poison reaching the output means the op
+    // read scratch it never wrote -- a defect, and one whose error surface stays reproducible.
+    const std::size_t scratchBytes =
+        static_cast<std::size_t>(shape.n) * desc.strides.nStride * sizeof(Rpp32f);
+    DeviceTensor src(cfg.backend, bytes), dst(cfg.backend, bytes);
+    DeviceTensor scratch(cfg.backend, scratchBytes);
+    const std::vector<Rpp8u> scratchPoison(scratchBytes, 0xA5);
+    scratch.write(scratchPoison.data(), scratchBytes);
+    src.write(input.data(), bytes);
+    dst.write(dstInit.data(), bytes);
+
+    RppHandle handle(cfg.backend, shape.n);
+    ASSERT_EQ(rppt_pixelate(src.ptr(), &desc, dst.ptr(), &desc, scratch.ptr(), op.percentage,
+                            roi.data(), XYWH, handle.get(), cfg.backend),
+              RPP_SUCCESS);
+
+    handle.sync();
+    dst.read(actual.data(), bytes);
+
+    // (3) Compare the ROI-sized region written at the destination origin.
+    EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), desc, roi.data(), XYWH,
+                               pixelate_tolerance(cfg.dtype)));
+}
+
+}  // namespace
+
+// Full name:
+// Image_Effects/PixelateTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_p<Pct>
+class PixelateTest : public ::testing::TestWithParam<WithParams<PixelateParams>> {};
+
+TEST_P(PixelateTest, Correctness) {
+    const auto& p = GetParam();
+    switch (p.cfg.dtype) {
+        case DType::U8:
+            run_pixelate<Rpp8u>(p.cfg, p.op);
+            break;
+        case DType::F16:
+            run_pixelate<Rpp16f>(p.cfg, p.op);
+            break;
+        case DType::F32:
+            run_pixelate<Rpp32f>(p.cfg, p.op);
+            break;
+        case DType::I8:
+            run_pixelate<Rpp8s>(p.cfg, p.op);
+            break;
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    Image_Effects, PixelateTest,
+    ::testing::ValuesIn(with_params<PixelateParams>(
+        make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
+                     {Layout::PKD3, Layout::PLN3, Layout::PLN1}, {Roi::Full, Roi::Partial}),
+        {PixelateParams{87.5f}, PixelateParams{50.0f}})),
+    op_config_name<PixelateParams>);

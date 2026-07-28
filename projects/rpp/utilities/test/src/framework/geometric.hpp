@@ -32,6 +32,54 @@ inline std::vector<OutSize> roi_out_sizes(const RpptDesc& d, const RpptROI* roi,
     return out;
 }
 
+// Scaling driver shared by the ops that map the source ROI onto a per-image destination size
+// (resize, resize_crop_mirror, resize_mirror_normalize). It owns the one definition of that resize:
+// the drift-free pixel-CENTER inverse map
+//     scaleX = roiWidth / dstW ,  srcX = x0 + (i + 0.5) * scaleX - 0.5
+// edge-clamped into the ROI so the boundary replicates the source edge -- a resize introduces no
+// border, which is what separates it from the warp driver above. An exact-integer scale is then a
+// verbatim copy and scale 1 is the identity.
+//
+// mirror (may be null) flips the destination left-to-right, equivalent to sampling output column
+// (dstW-1-i). store(v, n, c) turns the sampled value into the stored element: resize and
+// resize_crop_mirror use quantizing_store() below, while resize_mirror_normalize folds its
+// normalize in so the pipeline quantizes exactly once (and can keep its own float-range rule).
+template <typename T, typename Store>
+void resize_driver(const T* src, const RpptDesc& sd, T* dst, const RpptDesc& dd, DType dt,
+                   const RpptROI* roi, RpptRoiType roiType, const RpptImagePatch* dstSizes,
+                   const Rpp32u* mirror, RpptInterpolationType interp, Store store) {
+    const double border = dtype_black(dt);  // clamped away below; present only for sample()'s API
+    for (Rpp32u n = 0; n < sd.n; ++n) {
+        const RoiBounds b = roi_bounds(roi[n], roiType);
+        const int rx0 = static_cast<int>(b.x0), ry0 = static_cast<int>(b.y0);
+        const int rx1 = rx0 + static_cast<int>(b.w), ry1 = ry0 + static_cast<int>(b.h);
+        const Rpp32u dstW = dstSizes[n].width, dstH = dstSizes[n].height;
+        const double scaleX = static_cast<double>(b.w) / dstW;
+        const double scaleY = static_cast<double>(b.h) / dstH;
+        const bool mir = mirror != nullptr && mirror[n] != 0;
+        for (Rpp32u c = 0; c < sd.c; ++c) {
+            const std::size_t srcBase = plane_base(sd, n, c);
+            const std::size_t dstBase = plane_base(dd, n, c);
+            for (Rpp32u j = 0; j < dstH; ++j)
+                for (Rpp32u i = 0; i < dstW; ++i) {
+                    const Rpp32u ii = mir ? (dstW - 1 - i) : i;
+                    const double sx = clampd(rx0 + (ii + 0.5) * scaleX - 0.5, rx0, rx1 - 1);
+                    const double sy = clampd(ry0 + (j + 0.5) * scaleY - 0.5, ry0, ry1 - 1);
+                    const double v =
+                        sample(src, sd, srcBase, sx, sy, rx0, ry0, rx1, ry1, interp, border);
+                    dst[plane_index(dd, dstBase, j, i)] = store(v, n, c);
+                }
+        }
+    }
+}
+
+// The plain store: round/clamp the sampled value into the dtype and convert. What an op that only
+// moves pixels around (resize, resize_crop_mirror) needs.
+template <typename T>
+inline auto quantizing_store(DType dt) {
+    return [dt](double v, Rpp32u, Rpp32u) { return from_double<T>(quantize_stored(v, dt)); };
+}
+
 // For each output pixel (i,j) of image n's destination region, invMap yields the source coordinate
 // (srcX,srcY) in the full-image absolute frame (texel (0,0) = image origin); the source is sampled
 // there with `interp`, samples outside the ROI rectangle filled with the dtype's black, and the

@@ -6,7 +6,7 @@
 #include <cstddef>
 
 #include "framework/config_param.hpp"
-#include "framework/interpolation.hpp"
+#include "framework/geometric.hpp"
 #include "framework/tensor_setup.hpp"
 
 namespace rpptest {
@@ -27,9 +27,9 @@ namespace rpptest {
 // which black-fills off-image samples). Sampling (nearest / bilinear) and per-dtype round-to-nearest
 // quantization stay independent of the kernel.
 //
-// Unlike the same-size warps this does not reuse geometric_reference(): resize genuinely has two
-// distinct descriptors (source and destination differ in size and stride), so the walk is written
-// here while the sampler (interpolation.hpp) stays shared.
+// The walk itself is resize_driver() (framework/geometric.hpp), shared with resize_crop_mirror and
+// resize_mirror_normalize, which owns the pixel-center map, the edge clamp and the quantization;
+// resize adds neither a mirror nor a post-transform.
 //
 // NOTE (semantics assumption): the public header documents neither the scale/offset convention nor
 // the boundary handling. The pixel-center map and edge-clamped boundary above are the mathematically
@@ -39,30 +39,8 @@ template <typename T>
 void resize_reference(const T* src, const RpptDesc& sd, T* dst, const RpptDesc& dd, DType dt,
                       const RpptROI* roi, RpptRoiType roiType, const RpptImagePatch* dstSizes,
                       RpptInterpolationType interp) {
-    const double border = dtype_black(dt);  // clamped away below; present only for sample()'s API
-    for (Rpp32u n = 0; n < sd.n; ++n) {
-        const RoiBounds b = roi_bounds(roi[n], roiType);
-        const int rx0 = static_cast<int>(b.x0), ry0 = static_cast<int>(b.y0);
-        const int rx1 = rx0 + static_cast<int>(b.w), ry1 = ry0 + static_cast<int>(b.h);
-        const Rpp32u dstW = dstSizes[n].width, dstH = dstSizes[n].height;
-        const double scaleX = static_cast<double>(b.w) / dstW;
-        const double scaleY = static_cast<double>(b.h) / dstH;
-        for (Rpp32u c = 0; c < sd.c; ++c) {
-            const std::size_t srcBase = plane_base(sd, n, c);
-            const std::size_t dstBase = plane_base(dd, n, c);
-            for (Rpp32u j = 0; j < dstH; ++j)
-                for (Rpp32u i = 0; i < dstW; ++i) {
-                    double sx = rx0 + (i + 0.5) * scaleX - 0.5;
-                    double sy = ry0 + (j + 0.5) * scaleY - 0.5;
-                    // Edge-clamp so the boundary replicates the source edge (resize has no border).
-                    sx = clampd(sx, rx0, rx1 - 1);
-                    sy = clampd(sy, ry0, ry1 - 1);
-                    const double v =
-                        sample(src, sd, srcBase, sx, sy, rx0, ry0, rx1, ry1, interp, border);
-                    dst[plane_index(dd, dstBase, j, i)] = from_double<T>(quantize_stored(v, dt));
-                }
-        }
-    }
+    resize_driver<T>(src, sd, dst, dd, dt, roi, roiType, dstSizes, /*mirror=*/nullptr, interp,
+                     quantizing_store<T>(dt));
 }
 
 }  // namespace rpptest

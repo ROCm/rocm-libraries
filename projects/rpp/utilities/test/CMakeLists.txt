@@ -56,6 +56,7 @@ add_executable(rpp_tests
     src/tests/image/effects/grid_dropout_test.cpp
     src/tests/image/effects/gridmask_test.cpp
     src/tests/image/effects/ricap_test.cpp
+    src/tests/image/effects/pixelate_test.cpp
     src/tests/image/bitwise/bitwise_and_test.cpp
     src/tests/image/bitwise/bitwise_or_test.cpp
     src/tests/image/bitwise/bitwise_xor_test.cpp
@@ -68,6 +69,8 @@ add_executable(rpp_tests
     src/tests/image/geometric/warp_perspective_test.cpp
     src/tests/image/geometric/rotate_test.cpp
     src/tests/image/geometric/remap_test.cpp
+    src/tests/image/geometric/lens_correction_test.cpp
+    src/tests/image/geometric/resize_mirror_normalize_test.cpp
     src/tests/image/geometric/crop_and_patch_test.cpp
     src/tests/image/geometric/phase_test.cpp
     src/tests/image/geometric/resize_crop_mirror_test.cpp

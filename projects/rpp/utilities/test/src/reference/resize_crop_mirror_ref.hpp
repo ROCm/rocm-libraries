@@ -6,7 +6,7 @@
 #include <cstddef>
 
 #include "framework/config_param.hpp"
-#include "framework/interpolation.hpp"
+#include "framework/geometric.hpp"
 #include "framework/tensor_setup.hpp"
 
 namespace rpptest {
@@ -28,37 +28,16 @@ namespace rpptest {
 // the boundary handling; the pixel-center map + edge-clamp above are the principled resize (matching
 // the resize golden), and the mirror is a plain horizontal flip. A kernel using a different
 // convention shows up as a diff -- a finding, not a reference bug.
+//
+// The walk is resize_driver() (framework/geometric.hpp), shared with resize and
+// resize_mirror_normalize; resize_crop_mirror adds the mirror flag and no post-transform.
 template <typename T>
 void resize_crop_mirror_reference(const T* src, const RpptDesc& sd, T* dst, const RpptDesc& dd,
                                   DType dt, const RpptROI* roi, RpptRoiType roiType,
                                   const RpptImagePatch* dstSizes, const Rpp32u* mirror,
                                   RpptInterpolationType interp) {
-    const double border = dtype_black(dt);  // clamped away below; present only for sample()'s API
-    for (Rpp32u n = 0; n < sd.n; ++n) {
-        const RoiBounds b = roi_bounds(roi[n], roiType);
-        const int rx0 = static_cast<int>(b.x0), ry0 = static_cast<int>(b.y0);
-        const int rx1 = rx0 + static_cast<int>(b.w), ry1 = ry0 + static_cast<int>(b.h);
-        const Rpp32u dstW = dstSizes[n].width, dstH = dstSizes[n].height;
-        const double scaleX = static_cast<double>(b.w) / dstW;
-        const double scaleY = static_cast<double>(b.h) / dstH;
-        const bool mir = mirror[n] != 0;
-        for (Rpp32u c = 0; c < sd.c; ++c) {
-            const std::size_t srcBase = plane_base(sd, n, c);
-            const std::size_t dstBase = plane_base(dd, n, c);
-            for (Rpp32u j = 0; j < dstH; ++j)
-                for (Rpp32u i = 0; i < dstW; ++i) {
-                    const Rpp32u ii = mir ? (dstW - 1 - i) : i;
-                    double sx = rx0 + (ii + 0.5) * scaleX - 0.5;
-                    double sy = ry0 + (j + 0.5) * scaleY - 0.5;
-                    // Edge-clamp so the boundary replicates the crop edge (resize has no border).
-                    sx = clampd(sx, rx0, rx1 - 1);
-                    sy = clampd(sy, ry0, ry1 - 1);
-                    const double v =
-                        sample(src, sd, srcBase, sx, sy, rx0, ry0, rx1, ry1, interp, border);
-                    dst[plane_index(dd, dstBase, j, i)] = from_double<T>(quantize_stored(v, dt));
-                }
-        }
-    }
+    resize_driver<T>(src, sd, dst, dd, dt, roi, roiType, dstSizes, mirror, interp,
+                     quantizing_store<T>(dt));
 }
 
 }  // namespace rpptest
