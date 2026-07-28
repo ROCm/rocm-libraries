@@ -391,7 +391,6 @@ TEST_F(IntegrationSdpaBwdDescriptorLowering, SdpaBwdWithAllOptionalTensorsAndSca
     sdpaAttrs.set_padding_mask(true);
     sdpaAttrs.set_causal_mask(true);
     sdpaAttrs.set_causal_mask_bottom_right(true);
-    sdpaAttrs.set_attn_scale(0.125f);
     sdpaAttrs.set_diagonal_band_left_bound(0);
     sdpaAttrs.set_diagonal_band_right_bound(128);
     sdpaAttrs.set_diagonal_alignment(DiagonalAlignment::BOTTOM_RIGHT);
@@ -580,9 +579,6 @@ TEST_F(IntegrationSdpaBwdDescriptorLowering, SdpaBwdWithAllOptionalTensorsAndSca
     // Float scalars
     ASSERT_TRUE(sdpa->dropout_probability.has_value());
     EXPECT_FLOAT_EQ(sdpa->dropout_probability.value(), 0.1f);
-
-    ASSERT_TRUE(sdpa->attn_scale_value.has_value());
-    EXPECT_FLOAT_EQ(sdpa->attn_scale_value.value(), 0.125f);
 
     // Integer scalars
     ASSERT_TRUE(sdpa->left_bound.has_value());

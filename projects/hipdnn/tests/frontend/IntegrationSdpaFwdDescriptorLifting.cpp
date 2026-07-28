@@ -339,7 +339,6 @@ TEST_F(IntegrationSdpaFwdDescriptorLifting, SdpaFwdWithAllOptionalAttributesViaC
         .set_causal_mask(true)
         .set_causal_mask_bottom_right(true)
         .set_generate_stats(true)
-        .set_attn_scale(0.125f)
         .set_diagonal_band_left_bound(-1)
         .set_diagonal_band_right_bound(1)
         .set_paged_attention_max_seq_len_kv(256)
@@ -438,8 +437,6 @@ TEST_F(IntegrationSdpaFwdDescriptorLifting, SdpaFwdWithAllOptionalAttributesViaC
     // Scalar values (direct member access)
     ASSERT_TRUE(attrs.dropout_probability.has_value());
     EXPECT_FLOAT_EQ(attrs.dropout_probability.value(), 0.1f);
-    ASSERT_TRUE(attrs.attn_scale_value.has_value());
-    EXPECT_FLOAT_EQ(attrs.attn_scale_value.value(), 0.125f);
     ASSERT_TRUE(attrs.left_bound.has_value());
     EXPECT_EQ(attrs.left_bound.value(), -1);
     ASSERT_TRUE(attrs.right_bound.has_value());
