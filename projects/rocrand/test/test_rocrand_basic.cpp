@@ -29,7 +29,8 @@
 #include "test_common.hpp"
 #include "test_rocrand_common.hpp"
 
-class rocrand_basic_tests : public ::testing::TestWithParam<rocrand_rng_type> { };
+class rocrand_basic_tests : public ::testing::TestWithParam<rocrand_rng_type>
+{};
 
 TEST(rocrand_basic_tests, rocrand_get_version_test)
 {
