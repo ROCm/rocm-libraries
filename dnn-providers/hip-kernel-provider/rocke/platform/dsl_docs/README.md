@@ -123,10 +123,12 @@ Hard facts:
 - `core/lower_hip.py` (`lower_kernel_to_hip`) is a debugging/inspection backend that emits readable HIP C++. It is not the production runtime path. Op coverage is narrower than LLVM lowering.
 - `core/lower_cktile.py` emits CK Tile C++ from selected high-level specs (`UniversalGemmSpec`, `ImplicitGemmConvSpec`). It does not consume `KernelDef`. It exists for parity/reference.
 - Default target ISA is `amdgcn-amd-amdhsa--gfx950`. Supported target facts
-  come from `core/arch/target.py::ArchTarget`; instruction selection comes from
-  `core/isa/backend.py`. `core/lower_llvm.py` selects a clang-derived data
-  layout by LLVM flavor (`_DATALAYOUT_LLVM20` or `_DATALAYOUT_LLVM22`) rather
-  than by architecture.
+  come from [`core/arch/target.py`](../python/rocke/core/arch/target.py)
+  (`ArchTarget`); instruction selection comes from
+  [`core/isa/backend.py`](../python/rocke/core/isa/backend.py).
+  [`core/lower_llvm.py`](../python/rocke/core/lower_llvm.py) selects a
+  clang-derived data layout by LLVM flavor (`_DATALAYOUT_LLVM20` or
+  `_DATALAYOUT_LLVM22`) rather than by architecture.
 - Wavefront mode is a compile-time capability of the exact gfx target, not a runtime switch.
   gfx942/gfx950 admit wave64 only; gfx1250 admits wave32 only. gfx1151,
   gfx11-generic, and gfx1201 default to wave32 and can select wave64, but rocKE

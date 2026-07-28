@@ -31,14 +31,17 @@ Matrix-operation choices start from the exact gfx target. Resolve
 and validate the operation's wave and layout contract. The exact catalog is
 listed in [`kernel_taxonomy.md`](./kernel_taxonomy.md).
 
-Kernel definitions in `<platform_root>/python/rocke/instances/` and
-`<library_root>/kernels/` follow the same operation-to-runtime progression.
-Reusable authoring mechanics belong in
-`<platform_root>/python/rocke/helpers/`; foundational IR, analysis, and lowering
-mechanisms belong in `<platform_root>/python/rocke/core/`. For example, the
-shared spec scaffolding lives in
-`<platform_root>/python/rocke/helpers/spec.py` (`IOSpecRule`, `validate_io`,
-`SignatureBuilder`, `kernel_name_join`, `ceil_div_grid`).
+Kernel definitions in
+[`<platform_root>/python/rocke/instances/`](../../python/rocke/instances/) and
+[`<library_root>/kernels/`](../../../library/kernels/) follow the same
+operation-to-runtime progression. Reusable authoring mechanics belong in
+[`<platform_root>/python/rocke/helpers/`](../../python/rocke/helpers/);
+foundational IR, analysis, and lowering mechanisms belong in
+[`<platform_root>/python/rocke/core/`](../../python/rocke/core/). For example,
+the shared spec scaffolding lives in
+[`<platform_root>/python/rocke/helpers/spec.py`](../../python/rocke/helpers/spec.py)
+(`IOSpecRule`, `validate_io`, `SignatureBuilder`, `kernel_name_join`,
+`ceil_div_grid`).
 
 ## Kernel Authoring And Optimization Outputs
 
@@ -105,8 +108,8 @@ Concrete contract examples:
 - `UniversalGemmSpec` — GEMM tile, trait, data, layout, scheduler, epilogue.
 - `ConvProblem` — NHWC/KYXC/NHWK convolution geometry; derives `Ho`, `Wo`, `M_gemm`, `flops`.
 - `UnifiedAttentionProblem` — paged-attention shape in
-  `<library_root>/kernels/common/attention_unified.py`; selectors choose 2D vs
-  3D.
+  [`<library_root>/kernels/common/attention_unified.py`](../../../library/kernels/common/attention_unified.py);
+  selectors choose 2D vs 3D.
 - `Reduce2DSpec`, `LayerNorm2DSpec`, `RMSNorm2DSpec`, `ElementwiseSpec` — small-op contracts.
 
 ## 2. Validate Early
@@ -198,9 +201,10 @@ block_y = b.block_id_y()
 block_z = b.block_id_z()
 ```
 
-`helpers/geometry.py::WarpGrid` packages this for matrix kernels. Its
-`from_atom` constructor can obtain the required wave size from the selected
-operation. `WarpGrid` also exposes the historically named
+[`helpers/geometry.py`](../../python/rocke/helpers/geometry.py) (`WarpGrid`)
+packages this for matrix kernels. Its `from_atom` constructor can obtain the
+required wave size from the selected operation. `WarpGrid` also exposes the
+historically named
 `mfmas_per_warp_m / n`, `k_atoms_per_tile_k`, and per-workgroup
 `block_m_off / block_n_off` values for both supported matrix paths.
 
@@ -342,10 +346,11 @@ truth; do not transplant the gfx950 LDS recipe.
 ## 8. Emit Epilogue
 
 For the current gfx942/gfx950 MFMA universal GEMM and convolution paths, use
-`DirectEpilogue` and `CShuffleEpilogue` from `helpers/epilogues.py`. The
-epilogue must agree with `MfmaAtom.lane_to_output`. WMMA universal paths
-instead use the selected target-specific `MmaOp` accumulator layout and the
-default direct epilogue admitted by the owning validator.
+`DirectEpilogue` and `CShuffleEpilogue` from
+[`helpers/epilogues.py`](../../python/rocke/helpers/epilogues.py). The epilogue
+must agree with `MfmaAtom.lane_to_output`. WMMA universal paths instead use the
+selected target-specific `MmaOp` accumulator layout and the default direct
+epilogue admitted by the owning validator.
 
 Direct epilogue when:
 
@@ -410,4 +415,6 @@ Before considering a new builder done:
 - benchmark reports median + spread, not a single lucky run (`benchmark_manifest(..., attempts=5, discard_first=True)`);
 - generated LLVM / ISA / resource summaries are inspected for the intended primitive (`analyze_llvm_ir`, `analyze_hsaco`);
 - the new path is added to an owning focused test and, when appropriate, the
-  curated `<platform_root>/python/rocke/examples/run_all.py` registry.
+  curated
+  [`<platform_root>/python/rocke/examples/run_all.py`](../../python/rocke/examples/run_all.py)
+  registry.

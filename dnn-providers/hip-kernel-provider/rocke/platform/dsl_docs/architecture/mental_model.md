@@ -197,10 +197,11 @@ wave32. Validators accept only catalog atoms, and `backend_for()` selects the IS
 rules. Atom availability is therefore an exact-gfx property, not a result of wave
 width.
 
-`core/lower_llvm.py` selects a clang-derived datalayout and intrinsic signatures
-for the resolved LLVM flavor (`llvm20` or `llvm22`). The choice follows the
-COMGR library vintage rather than the gfx target; see `_detect_llvm_flavor()`
-and the `llvm_flavor=` override.
+[`core/lower_llvm.py`](../../python/rocke/core/lower_llvm.py) selects a
+clang-derived datalayout and intrinsic signatures for the resolved LLVM flavor
+(`llvm20` or `llvm22`). The choice follows the COMGR library vintage rather
+than the gfx target; see `_detect_llvm_flavor()` and the `llvm_flavor=`
+override.
 
 ## The Most Common Failure Modes
 

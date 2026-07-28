@@ -14,14 +14,15 @@ the VGPR accumulator form of MFMA instructions.
 
 ## Current code anchors
 
-- `python/rocke/core/lower_llvm.py::_format_agpr_alloc` validates and emits the
-  kernel attribute.
-- `python/rocke/helpers/compile.py::_is_zero_agpr_alloc` adds the matching LLVM
-  option for `(0, 0)`.
-- `cpp/core/lower_llvm/core.cpp::rocke_ll_format_agpr_alloc` formats and emits
-  the corresponding attribute in the C++ engine.
-- `tests/test_rocke.py` covers attribute emission and the zero-AGPR compile
-  option.
+- [`python/rocke/core/lower_llvm.py`](../../python/rocke/core/lower_llvm.py)
+  (`_format_agpr_alloc`) validates and emits the kernel attribute.
+- [`python/rocke/helpers/compile.py`](../../python/rocke/helpers/compile.py)
+  (`_is_zero_agpr_alloc`) adds the matching LLVM option for `(0, 0)`.
+- [`cpp/core/lower_llvm/core.cpp`](../../cpp/core/lower_llvm/core.cpp)
+  (`rocke_ll_format_agpr_alloc`) formats and emits the corresponding attribute
+  in the C++ engine.
+- [`tests/test_rocke.py`](../../tests/test_rocke.py) covers attribute emission
+  and the zero-AGPR compile option.
 
 The Python authoring surface currently sets this through
 `kernel.attrs["agpr_alloc"]`; there is not yet a general high-level spec policy
