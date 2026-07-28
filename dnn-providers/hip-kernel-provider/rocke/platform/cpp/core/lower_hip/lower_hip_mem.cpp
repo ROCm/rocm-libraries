@@ -692,6 +692,33 @@ static rocke_status_t _op_memref_global_atomic_add_pk_bf16(rocke_h_lowerer_t* lw
     return lw->status;
 }
 
+/* Python _op_memref_global_atomic_add_pk_f16 */
+static rocke_status_t _op_memref_global_atomic_add_pk_f16(rocke_h_lowerer_t* lw,
+                                                          const rocke_op_t* op)
+{
+    rocke_value_t *ptr, *idx, *val;
+    if(!rocke_h_live(lw))
+    {
+        return lw->status;
+    }
+    if(op->num_operands < 3 || op->num_results < 1)
+    {
+        return rocke_h_fail(
+            lw, ROCKE_ERR_VALUE, "memref.global_atomic_add_pk_f16: bad operand/result count");
+    }
+    ptr = op->operands[0];
+    idx = op->operands[1];
+    val = op->operands[2];
+    rocke_h_emitf(lw,
+                  "half2 %s = __builtin_amdgcn_global_atomic_fadd_v2f16("
+                  "%s + %s, %s);",
+                  rocke_h_name(lw, op->results[0]),
+                  rocke_h_name(lw, ptr),
+                  rocke_h_name(lw, idx),
+                  rocke_h_name(lw, val));
+    return lw->status;
+}
+
 /* Python _op_memref_cooperative_global_store (P14 debug shim) */
 static rocke_status_t _op_memref_cooperative_global_store(rocke_h_lowerer_t* lw,
                                                           const rocke_op_t* op)
@@ -1426,6 +1453,7 @@ const rocke_h_handler_entry_t* rocke_h_handlers_mem(void)
            {ROCKE_OP_MEMREF_GLOBAL_ATOMIC_ADD, _op_memref_global_atomic_add},
            {ROCKE_OP_MEMREF_GLOBAL_ATOMIC_ADD_F32, _op_memref_global_atomic_add_f32},
            {ROCKE_OP_MEMREF_GLOBAL_ATOMIC_ADD_PK_BF16, _op_memref_global_atomic_add_pk_bf16},
+           {ROCKE_OP_MEMREF_GLOBAL_ATOMIC_ADD_PK_F16, _op_memref_global_atomic_add_pk_f16},
            {ROCKE_OP_MEMREF_COOPERATIVE_GLOBAL_STORE, _op_memref_cooperative_global_store},
            /* global pointer arithmetic + buffer rsrc */
            {ROCKE_OP_TILE_GLOBAL_PTR_ADD, _op_tile_global_ptr_add},
