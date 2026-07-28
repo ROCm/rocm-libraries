@@ -276,6 +276,7 @@ typedef enum rocke_opcode
     ROCKE_OP_MEMREF_GLOBAL_ATOMIC_ADD,
     ROCKE_OP_MEMREF_GLOBAL_ATOMIC_ADD_F32,
     ROCKE_OP_MEMREF_GLOBAL_ATOMIC_ADD_PK_BF16,
+    ROCKE_OP_MEMREF_GLOBAL_ATOMIC_ADD_PK_F16,
     ROCKE_OP_MEMREF_COOPERATIVE_GLOBAL_STORE,
 
     /* vector.* */
@@ -748,6 +749,11 @@ rocke_value_t* rocke_b_global_atomic_add_pk_bf16(rocke_ir_builder_t* b,
                                                  rocke_value_t* idx,
                                                  rocke_value_t* value,
                                                  const char* ordering);
+rocke_value_t* rocke_b_global_atomic_add_pk_f16(rocke_ir_builder_t* b,
+                                                rocke_value_t* ptr,
+                                                rocke_value_t* idx,
+                                                rocke_value_t* value,
+                                                const char* ordering);
 
 /* ----- gpu ids ----- */
 rocke_value_t* rocke_b_thread_id_x(rocke_ir_builder_t* b);
@@ -795,6 +801,18 @@ rocke_value_t* rocke_b_global_load_bf16(rocke_ir_builder_t* b,
                                         rocke_value_t* ptr,
                                         rocke_value_t* idx,
                                         int align);
+rocke_value_t* rocke_b_global_load_i8(rocke_ir_builder_t* b,
+                                      rocke_value_t* ptr,
+                                      rocke_value_t* idx,
+                                      int align);
+rocke_value_t* rocke_b_global_load_i16(rocke_ir_builder_t* b,
+                                       rocke_value_t* ptr,
+                                       rocke_value_t* idx,
+                                       int align);
+rocke_value_t* rocke_b_global_load_bf8e5m2(rocke_ir_builder_t* b,
+                                           rocke_value_t* ptr,
+                                           rocke_value_t* idx,
+                                           int align);
 rocke_value_t* rocke_b_global_load_fp8e4m3(rocke_ir_builder_t* b,
                                            rocke_value_t* ptr,
                                            rocke_value_t* idx,
