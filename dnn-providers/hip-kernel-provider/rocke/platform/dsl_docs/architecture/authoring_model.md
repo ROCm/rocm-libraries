@@ -45,9 +45,9 @@ the shared spec scaffolding lives in
 
 ## Kernel Authoring And Optimization Outputs
 
-New kernel authoring means producing a spec-driven kernel definition, not just
+Kernel authoring means producing a spec-driven kernel definition, avoid producing
 a one-off script. Kernel definitions compose reusable mechanisms from
-`rocke.helpers` and `rocke.core`; they do not turn an instance directory into a
+`rocke.helpers` and `rocke.core`; the instance directory must not be treated as a
 reusable-code layer. Any change that affects emitted IR must include its
 matching C++ mirror and byte-identity coverage in the same change.
 
@@ -66,7 +66,7 @@ shape set, and replay command.
 
 Document every accepted optimization as a public qualitative case study. Describe
 the workload shape class, candidate levers, commands, selected mechanism, rejected
-mechanisms, and target constraints without publishing measured values or comparative
+mechanisms, and target constraints, *never* publishing measured values or comparative
 performance claims.
 
 Promote reusable optimization knowledge into `dsl_docs/optimization/`. If the

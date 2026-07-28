@@ -53,10 +53,10 @@ Two side paths:
 
 CK Tile is powerful, but several pieces are hard to iterate on in C++:
 
-- large C++ template-instantiation sweeps add host compile overhead;
+- C++ template metaprogramming, used for fine control over device code generation, results in slow compile times; this is exacerbated by large number of kernels needed to be compiled for the kernel parameter tuning;
 - coordinate-transform DAGs are clean as algebra but verbose in C++ templates;
 - non-bijective mappings (convolution padding, paged attention page tables) are not simple layout permutations;
-- debugging a generated kernel is easier when the IR is small and inspectable.
+- debugging a generated kernel is easier when the IR is small, inspectable and fast to generate.
 
 `rocke` keeps the performance levers close to the hardware:
 
