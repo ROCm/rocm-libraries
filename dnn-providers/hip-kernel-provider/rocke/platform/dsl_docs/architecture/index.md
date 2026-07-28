@@ -7,8 +7,8 @@ builders are cataloged separately in [`../instances/index.md`](../instances/inde
 
 - [`mental_model.md`](mental_model.md) — how specs, builders, IR, lowering,
   compilation, and launch fit together.
-- [`authoring_model.md`](authoring_model.md) — authoring boundaries and the
-  kernel-instance, helper, and core ownership split.
+- [`authoring_model.md`](authoring_model.md) — the operation-to-`KernelDef`
+  workflow and the reusable helper/core boundaries.
 - [`kernel_taxonomy.md`](kernel_taxonomy.md) — which primitive families current
   kernels use and why.
 

@@ -48,7 +48,7 @@ python/rocke/
 ├── helpers/ # CK Tile-like authoring helpers and the high-level compile entrypoint
 ├── analysis/ # LLVM IR + HSACO/ISA + resource inspection
 ├── benchmark/ # repeated-run benchmark summaries (median, spread)
-├── instances/ # platform-owned instances (GEMM, conv, small ops, MoE); attention is library-owned
+├── instances/ # current spec-driven kernel definitions
 ├── examples/ # Python-owned example generators and parity harnesses
 ├── transforms.py # coordinate-transform DAG (pad/embed/unmerge/merge/indirect)
 ├── run_manifest.py # python -m rocke.run_manifest (HSACO + manifest runner)

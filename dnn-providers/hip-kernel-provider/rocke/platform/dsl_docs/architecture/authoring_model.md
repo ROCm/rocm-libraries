@@ -26,35 +26,14 @@ Path notation in this page is relative to three explicitly named roots:
 These placeholders describe source locations; Python import names are called
 out separately where they differ.
 
-Matrix-operation choices start from the exact gfx target, not from an accelerator-family
-label or a requested wave width. Resolve `ArchTarget.from_gfx(...)` and select an
-`MmaOp` from that target's `MmaCatalog`. Separately, resolve the target's supported
-wavefront modes and select one only where the target permits a choice. The selected
-mode must agree with the operation's layout contract. Wave size constrains lane
-geometry; it does not by itself select MFMA or WMMA or identify a legal atom.
+Matrix-operation choices start from the exact gfx target. Resolve
+`ArchTarget.from_gfx(...)`, select an `MmaOp` from that target's `MmaCatalog`,
+and validate the operation's wave and layout contract. The exact catalog is
+listed in [`kernel_taxonomy.md`](./kernel_taxonomy.md).
 
-The compiler capability and the mode currently admitted by rocKE are distinct:
-
-| Exact gfx target | Matrix operations in `MmaCatalog` | Compiler wavefront modes | Current `ArchTarget.wave_size` |
-|---|---|---|---:|
-| `gfx90a`, `gfx942`, `gfx950` | MFMA | wave64 only | 64 |
-| `gfx1151`, `gfx11-generic` | WMMA | wave32 default; wave64 selectable | 32 |
-| `gfx1201` | WMMA | wave32 default; wave64 selectable | 32 |
-| `gfx1250` | WMMA | wave32 only; no native wave64 mode | 32 |
-
-For targets with both modes, adding the alternative mode to rocKE requires explicit
-backend, operation-layout, geometry, and validator support. The listed gfx9 targets
-cannot select wave32, and gfx1250 cannot select wave64. Wave mode must not be inferred
-from the matrix-operation column, or vice versa.
-
-Every platform-owned kernel instance in
-`<platform_root>/python/rocke/instances/` follows this
-shape. An instance is a complete kernel definition, either shared across
-targets under `<platform_root>/python/rocke/instances/common/` or specialized
-under `<platform_root>/python/rocke/instances/<arch>/`. Library-owned kernels,
-including attention, live under `<library_root>/kernels/` and follow the same
-operation-to-runtime progression without belonging to the platform instance
-tree. Reusable authoring mechanics belong in
+Kernel definitions in `<platform_root>/python/rocke/instances/` and
+`<library_root>/kernels/` follow the same operation-to-runtime progression.
+Reusable authoring mechanics belong in
 `<platform_root>/python/rocke/helpers/`; foundational IR, analysis, and lowering
 mechanisms belong in `<platform_root>/python/rocke/core/`. For example, the
 shared spec scaffolding lives in
@@ -63,22 +42,18 @@ shared spec scaffolding lives in
 
 ## Kernel Authoring And Optimization Outputs
 
-New platform kernel authoring means producing a spec-driven kernel instance,
-not just a one-off script. Put target-neutral platform instances under
-`<platform_root>/python/rocke/instances/common/` and target-specific platform
-instances under `<platform_root>/python/rocke/instances/<arch>/`. When multiple
-instances need the same mechanism, promote that mechanism to platform
-`helpers/` or `core/` according to the ownership boundary above instead of
-treating `instances/` as a reusable-code layer. Any platform change that
-affects emitted IR must include its matching C++ mirror and byte-identity
-coverage in the same change.
+New kernel authoring means producing a spec-driven kernel definition, not just
+a one-off script. Kernel definitions compose reusable mechanisms from
+`rocke.helpers` and `rocke.core`; they do not turn an instance directory into a
+reusable-code layer. Any change that affects emitted IR must include its
+matching C++ mirror and byte-identity coverage in the same change.
 
 Kernel optimization means a reproducible recipe plus a chosen implementation. If
 an AI-assisted session finds a better tile, schedule, prefetch, split,
 vectorization, or other lever, capture both the final code path and the evidence
 that justified it.
 
-Put platform experiments in the example folder for the instance being studied.
+Put experiments in the example folder for the kernel being studied.
 Keep benchmark scripts, shape files, qualitative mechanism notes, and
 case-study methods close to the workload, for example under
 `<platform_root>/python/rocke/examples/<arch>/<kernel_or_workload>/`. Keep
@@ -96,12 +71,8 @@ work discovers a general tactic, decision rule, debugging skill, or reusable
 performance lever, add or update the relevant optimization skill or runbook docs
 so future kernels can reuse it.
 
-Wire reusable kernels into their owning registry and test path. A reusable
-platform instance should be importable from `rocke.instances` and covered by
-the focused tests under `<platform_root>/tests/`. A library-owned kernel should
-be exported by its owning library package (for example, attention kernels are
-imported from `kernels`) and covered under `<library_root>/tests/`. Include a
-builder in byte-identity coverage if it emits IR through both Python and C++
+Wire reusable kernels into the kernel library's registry and test path. Include
+a builder in byte-identity coverage if it emits IR through both Python and C++
 engines.
 
 Do not wire one-off benchmark scripts into production dispatch by default. First
@@ -129,11 +100,11 @@ Before writing IR, write down:
 
 In `rocke`, many performance decisions are encoded in the spec and the helper choices. A vague contract bakes in accidental assumptions.
 
-Concrete contract examples (platform instances unless noted otherwise):
+Concrete contract examples:
 
 - `UniversalGemmSpec` — GEMM tile, trait, data, layout, scheduler, epilogue.
 - `ConvProblem` — NHWC/KYXC/NHWK convolution geometry; derives `Ho`, `Wo`, `M_gemm`, `flops`.
-- `UnifiedAttentionProblem` — library-owned paged-attention shape in
+- `UnifiedAttentionProblem` — paged-attention shape in
   `<library_root>/kernels/common/attention_unified.py`; selectors choose 2D vs
   3D.
 - `Reduce2DSpec`, `LayerNorm2DSpec`, `RMSNorm2DSpec`, `ElementwiseSpec` — small-op contracts.
@@ -211,26 +182,22 @@ sig = (SignatureBuilder()
 
 ## 4. Compute Grid Coordinates
 
-The following coordinate decomposition is a wave64 compile-time configuration:
+Resolve the wave size during spec validation and use that compile-time value in
+the coordinate decomposition:
 
 ```python
+wave_size = target.wave_size
 tid     = b.thread_id_x()
-lane    = b.lane_id()          # 0..63, wave64
-warp    = b.div(tid, b.const_i32(64))   # if block_size > 64
+lane    = b.lane_id()
+warp    = b.div(tid, b.const_i32(wave_size))
 block_x = b.block_id_x()
 block_y = b.block_id_y()
 block_z = b.block_id_z()
 ```
 
-The literal `64` is required for this gfx9 example, not a runtime choice or MFMA
-selector. Target-polymorphic builders validate their wave size against
-`ArchTarget.wave_size` and `MmaOp.wave_size`, then use it for lane and warp
-decomposition. gfx942/gfx950 cannot substitute wave32; a target with two modes
-still needs matching rocKE layout and validator support for its alternative mode.
 `helpers/geometry.py::WarpGrid` packages this for matrix kernels. Its
-`from_atom` constructor can use the selected operation's required wave size as
-a convenience default; that does not choose the operation or its MFMA/WMMA
-family. `WarpGrid` also exposes the historically named
+`from_atom` constructor can obtain the required wave size from the selected
+operation. `WarpGrid` also exposes the historically named
 `mfmas_per_warp_m / n`, `k_atoms_per_tile_k`, and per-CTA
 `block_m_off / block_n_off` values for both supported matrix paths.
 
@@ -315,10 +282,8 @@ For row-wise small ops, use `helpers/sweep.py::sweep_row_chunks` and the `helper
 
 ## 7. Emit Compute
 
-MFMA matrix kernels commonly follow the structure below.
-
-This gfx9 example requires wave64 geometry independently of selecting MFMA from
-the gfx target's catalog.
+Matrix kernels commonly follow the structure below, using the layouts of the
+selected `MmaOp`:
 
 ```text
 allocate f32 accumulators (one vector per warp tile MFMA fragment)
@@ -345,8 +310,8 @@ block_lds_reduce
 thread 0 or pass-2 writes output
 ```
 
-The gfx942 and gfx950 tiled-attention kernels select MFMA from their target catalogs
-and share this structure. They separately require wave64 and do not admit wave32.
+The tiled-attention kernels share this structure while selecting their matrix
+operation and layouts from the exact target catalog.
 
 ```text
 stage Q to LDS
@@ -365,11 +330,9 @@ gfx942 uses the narrow `16x16x16` atoms and ordinary strided LDS reads that
 reproduce the required V operand layout; it must not inherit gfx950's transpose
 read recipe.
 
-The gfx1250 tiled-attention kernels select WMMA from its catalog and require wave32;
-gfx1250 has no native wave64 mode. They live under `<library_root>/kernels/gfx1250/`.
-Their `MmaOp` layouts, compile-time geometry, data movement, and epilogue are the
-source of truth; do not transplant wave64 arithmetic or the gfx950 LDS recipe.
-The WMMA choice comes from gfx1250 capabilities, not from choosing wave32.
+The gfx1250 tiled-attention kernels select WMMA from its catalog. Their `MmaOp`
+layouts, compile-time geometry, data movement, and epilogue are the source of
+truth; do not transplant the gfx950 LDS recipe.
 
 ## 8. Emit Epilogue
 
@@ -377,8 +340,7 @@ For the current gfx942/gfx950 MFMA universal GEMM and convolution paths, use
 `DirectEpilogue` and `CShuffleEpilogue` from `helpers/epilogues.py`. The
 epilogue must agree with `MfmaAtom.lane_to_output`. WMMA universal paths
 instead use the selected target-specific `MmaOp` accumulator layout and the
-default direct epilogue admitted by the owning validator. Wave-size validation
-is a separate compile-time geometry check in both cases.
+default direct epilogue admitted by the owning validator.
 
 Direct epilogue when:
 
@@ -403,8 +365,8 @@ kernel = build_universal_gemm(spec)
 art    = compile_kernel(kernel)
 ```
 
-For examples and benchmarkable flows, emit a manifest. This gfx950 MFMA example
-requires wave64; resolve its operation using the shape and dtypes used for `art`:
+For examples and benchmarkable flows, emit a manifest. This gfx950 example
+resolves its operation using the shape and dtypes used for `art`:
 
 ```python
 target = ArchTarget.from_gfx("gfx950")
@@ -434,10 +396,8 @@ Before considering a new builder done:
 - every runtime predicate is expressed with `scf_if` or `select`, never a Python `if value:`;
 - padding / tail behavior has an OOB-safe load/store path (buffer-rsrc + sentinel);
 - LDS layout and async constraints are explicit (`LdsLayout`);
-- the compile-time wave size is supported by the target and agrees with the
-  selected `MmaOp` layout contract;
-- the selected `MmaOp` exists in that exact gfx target's catalog, independently
-  of the wave-size choice;
+- the selected `MmaOp` exists in the exact gfx target's catalog and its wave and
+  layout contract agrees with the kernel geometry;
 - for an MFMA path, the MFMA atom and epilogue lane mapping agree;
 - for a WMMA path, the selected `MmaOp` layout maps and supported epilogue agree;
 - manifest signature and grid helper match the kernel ABI;
