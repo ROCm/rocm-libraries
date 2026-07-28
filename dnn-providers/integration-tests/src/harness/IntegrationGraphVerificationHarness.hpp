@@ -579,10 +579,10 @@ public:
             return false;
         }
 
-        refBundle.tensors.insert(
-            {tensorId, hipdnn_test_sdk::utilities::createTensorFromAttribute(*tensorAttr)});
-        gpuBundle.tensors.insert(
-            {tensorId, hipdnn_test_sdk::utilities::createTensorFromAttribute(*tensorAttr)});
+        refBundle.addTensor(*tensorAttr,
+                            hipdnn_test_sdk::utilities::createTensorFromAttribute(*tensorAttr));
+        gpuBundle.addTensor(*tensorAttr,
+                            hipdnn_test_sdk::utilities::createTensorFromAttribute(*tensorAttr));
         _tensorIdToNameMap.insert({tensorId, tensorAttr->get_name()});
 
         return true;
