@@ -22,4 +22,3 @@
     <run name="extended_tests">{EXTENDED_TEST}</run>
   </test>
 </testset>
-
