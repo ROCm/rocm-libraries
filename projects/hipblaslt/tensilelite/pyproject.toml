@@ -83,6 +83,8 @@ dependencies = [
     "setuptools",
     "nanobind",
     "cmake",
+    "invoke",
+    "filelock",
     "numpy",
     "hip-python",
 ]
@@ -142,7 +144,10 @@ members = ["rocisa"]
 [tool.mutmut]
 source_paths = ["Tensile"]
 only_mutate = [
+    "Tensile/Common/DataType.py",
     "Tensile/Common/Utilities.py",
+    "Tensile/Common/Types.py",
+    "Tensile/Common/ValidParameters.py",
     "Tensile/TensileLogic/ValidChipId.py",
     "Tensile/TensileLogic/ValidMatrixInstruction.py",
     "Tensile/TensileLogic/ValidWorkGroup.py",
@@ -155,8 +160,11 @@ do_not_mutate = [
     "*/conftest.py",
 ]
 pytest_add_cli_args_test_selection = [
+    "Tensile/Tests/unit/characterization/CommonTypes",
     "Tensile/Tests/unit/characterization/CommonUtilities",
+    "Tensile/Tests/unit/characterization/DataType",
     "Tensile/Tests/unit/characterization/TensileLogic",
+    "Tensile/Tests/unit/characterization/ValidParameters"
 ]
 also_copy = ["pytest.ini"]
 # mutate_only_covered_lines MUST stay false here: when true, mutmut runs an

@@ -66,6 +66,11 @@ def _occ(kw, *, numThreads, vgprs, accvgprs, sgprs, ldsBytes, doubleVgpr=True):
         ((9, 0, 10), 8),   # gfx90a  – ArchAccUnifiedRegs, capped at 8
         ((9, 4, 2), 8),    # gfx942  – ArchAccUnifiedRegs, capped at 8
         ((9, 5, 0), 8),    # gfx950  – ArchAccUnifiedRegs, capped at 8
+        ((11, 0, 0), 16),  # gfx1100 – 16 wave slots (was wrongly 10)
+        ((11, 5, 1), 16),  # gfx1151 – 16 wave slots
+        ((12, 0, 0), 16),  # gfx1200 – 16 wave slots
+        ((12, 0, 1), 16),  # gfx1201 – 16 wave slots
+        ((12, 5, 0), 10),  # gfx1250 – CDNA-class (isa 12.5.x), stays at 10
     ],
 )
 def test_max_waves_per_simd_from_arch_caps(isa, expected):

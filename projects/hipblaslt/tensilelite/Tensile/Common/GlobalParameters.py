@@ -189,6 +189,7 @@ globalParameters["DataInitTypeE"] = 0
 globalParameters["DataInitTypeAlpha"] = 2
 globalParameters["DataInitTypeBeta"] = 2
 globalParameters["DataInitTypeBias"] = 3
+globalParameters["DataInitTypeGate"] = 3
 globalParameters["DataInitTypeScaleA"] = 2
 globalParameters["DataInitTypeScaleB"] = 2
 globalParameters["DataInitTypeScaleC"] = 2
@@ -244,6 +245,7 @@ globalParameters["PrintTensorRef"] = (
     0  # Print reference tensor.  0x1=after init; 0x2=after copy-back; 0x3=both
 )
 globalParameters["PrintTensorBias"] = 0  # Print TensorBias after initialization
+globalParameters["PrintTensorGate"] = 0
 globalParameters["PrintTensorScaleAlphaVec"] = 0  # Print TensorScaleAlphaVec after initialization
 globalParameters["PrintTensorAmaxD"] = 0  # Print AmaxD after validation
 globalParameters["PrintWinnersOnly"] = False  # Only print the solutions which become the fastest
@@ -481,7 +483,7 @@ defaultBenchmarkCommonParameters = [
     {"ScheduleGlobalRead": [1]},
     {"ScheduleLocalWrite": [1]},
     {"ScheduleIterAlg": [3]},
-    {"GlobalReadPerMfma": [1]},
+    {"GlobalReadPerMfma": [1.0]},
     {"LocalWritePerMfma": [-1]},
     {"InterleaveAlpha": [0]},
     {"OptNoLoadLoop": [1]},
@@ -523,8 +525,10 @@ defaultBenchmarkCommonParameters = [
     {"WavefrontSize": [-1]},
     {"MatrixInstruction": [[]]},
     {"1LDSBuffer": [0]},
+    {"LDSSegmentInterleave": [0]},
     {"DepthU": [-1]},
     {"NonTemporalE": [0]},
+    {"NonTemporalGate": [0]},
     {"NonTemporalD": [0]},
     {"NonTemporalC": [0]},
     {"NonTemporalA": [0]},
@@ -568,6 +572,7 @@ defaultBenchmarkCommonParameters = [
     {"StreamK": [0]},
     {"StreamKForceDPOnly": [0]},
     {"StreamKAtomic": [0]},
+    {"StreamKWorkStealing": [0]},
     {"StreamKXCCMapping": [0]},
     {"StreamKFixupTreeReduction": [0]},
     {"DebugStreamK": [0]},

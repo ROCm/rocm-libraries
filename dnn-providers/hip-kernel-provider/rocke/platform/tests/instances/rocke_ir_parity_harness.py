@@ -64,6 +64,7 @@ def gemm_spec(
     pipeline,
     epilogue,
     wave_size,
+    cshuffle_no_alias=False,
 ):
     from rocke.instances.common.gemm_universal import (
         DataSpec,
@@ -92,17 +93,18 @@ def gemm_spec(
             pad_m=True,
             pad_n=True,
             pad_k=True,
+            cshuffle_no_alias=cshuffle_no_alias,
         ),
         data=DataSpec(dtype_a="fp16", dtype_b="fp16", dtype_c="fp16"),
         wave_size=wave_size,
     )
 
 
-def build_gemm(name, arch, *args):
+def build_gemm(name, arch, *args, **kwargs):
     def _build():
         from rocke.instances.common.gemm_universal import build_universal_gemm
 
-        return build_universal_gemm(gemm_spec(name, arch, *args), arch=arch)
+        return build_universal_gemm(gemm_spec(name, arch, *args, **kwargs), arch=arch)
 
     return _build
 
@@ -148,6 +150,56 @@ def build_conv(
             groups=groups,
         )
         return build_implicit_gemm_conv(spec, arch=arch)
+
+    return _build
+
+
+def build_conv_wgrad(
+    name,
+    arch,
+    problem_args,
+    *,
+    wave_size,
+    wtm,
+    wtn,
+    wtk,
+    tile_m,
+    tile_n,
+    tile_k,
+    pipeline="mem",
+    epilogue="default",
+    split_k=1,
+    dtype_d="fp16",
+):
+    def _build():
+        from rocke.instances.common.conv_implicit_gemm_wgrad import (
+            WgradConvSpec,
+            build_implicit_gemm_conv_wgrad,
+        )
+        from rocke.instances.common._conv_implicit_gemm_common import (
+            ConvDataSpec,
+            ConvProblem,
+        )
+
+        p = ConvProblem(*problem_args)
+        spec = WgradConvSpec(
+            problem=p,
+            name=name,
+            data=ConvDataSpec(dtype_a="fp16", dtype_b="fp16", dtype_d=dtype_d),
+            tile_m=tile_m,
+            tile_n=tile_n,
+            tile_k=tile_k,
+            warp_m=2,
+            warp_n=1 if wave_size == 32 else 2,
+            warp_tile_m=wtm,
+            warp_tile_n=wtn,
+            warp_tile_k=wtk,
+            wave_size=wave_size,
+            pipeline=pipeline,
+            epilogue=epilogue,
+            split_k=split_k,
+        )
+        return build_implicit_gemm_conv_wgrad(spec, arch=arch)
 
     return _build
 
@@ -304,6 +356,27 @@ def cases():
     )
     add(
         "gemm",
+        "gemm/gfx950/t128x128x32/cshuffle_no_alias",
+        "gfx950",
+        build_gemm(
+            "irhash_gemm_950_a_noalc",
+            "gfx950",
+            128,
+            128,
+            32,
+            2,
+            2,
+            32,
+            32,
+            16,
+            "compv4",
+            "cshuffle",
+            64,
+            cshuffle_no_alias=True,
+        ),
+    )
+    add(
+        "gemm",
         "gemm/gfx950/t64x128x32",
         "gfx950",
         build_gemm(
@@ -446,7 +519,7 @@ def cases():
     # gfx1250 is wave32/WMMA like gfx1201, but its fp16 atom is K=32 (16x16x32),
     # so warp_tile_k and tile_k are 32 rather than 16. NOTE: these lower through
     # the Python engine only -- the C++ engine has no gfx1250 ISA backend yet
-    # (rocke_ll_backend_for rejects gfx1250; see Cpp/core/lower_llvm/mma.cpp), so
+    # (rocke_ll_backend_for rejects gfx1250; see cpp/core/lower_llvm/mma.cpp), so
     # they are not part of the C-vs-Python byte-identity gate until that lands.
     add(
         "gemm",
@@ -607,6 +680,135 @@ def cases():
             "irhash_conv_90a_a",
             "gfx90a",
             conv1,
+            wave_size=64,
+            wtm=16,
+            wtn=16,
+            wtk=16,
+            tile_m=64,
+            tile_n=32,
+            tile_k=16,
+        ),
+    )
+
+    # Conv wgrad: implicit-GEMM backward-weight direction (NHWK x NHWC -> KYXC).
+    # wgrad1: small 3x3 conv (N8 H8 W8 C16 K32 Y3 X3, stride/pad=defaults).
+    # wgrad2: 1x1 conv (N2 H16 W16 C32 K32, no filter spatial).
+    wgrad1 = (1, 8, 8, 16, 32, 3, 3, 1, 1, 1, 1, 1, 1)
+    wgrad2 = (2, 16, 16, 32, 32, 1, 1, 1, 1, 0, 0, 1, 1)
+    add(
+        "conv_wgrad",
+        "conv_wgrad/gfx942/n1h8c16k32r3",
+        "gfx942",
+        build_conv_wgrad(
+            "irhash_wgrad_942_a",
+            "gfx942",
+            wgrad1,
+            wave_size=64,
+            wtm=16,
+            wtn=16,
+            wtk=16,
+            tile_m=64,
+            tile_n=32,
+            tile_k=16,
+        ),
+    )
+    add(
+        "conv_wgrad",
+        "conv_wgrad/gfx950/n1h8c16k32r3",
+        "gfx950",
+        build_conv_wgrad(
+            "irhash_wgrad_950_a",
+            "gfx950",
+            wgrad1,
+            wave_size=64,
+            wtm=32,
+            wtn=32,
+            wtk=16,
+            tile_m=64,
+            tile_n=64,
+            tile_k=32,
+            pipeline="mem",
+            epilogue="default",
+        ),
+    )
+    add(
+        "conv_wgrad",
+        "conv_wgrad/gfx950/n2h16c32k32r1",
+        "gfx950",
+        build_conv_wgrad(
+            "irhash_wgrad_950_b",
+            "gfx950",
+            wgrad2,
+            wave_size=64,
+            wtm=16,
+            wtn=16,
+            wtk=16,
+            tile_m=64,
+            tile_n=32,
+            tile_k=16,
+        ),
+    )
+    add(
+        "conv_wgrad",
+        "conv_wgrad/gfx950/n1h8c16k32r3_spk4",
+        "gfx950",
+        build_conv_wgrad(
+            "irhash_wgrad_950_spk4",
+            "gfx950",
+            wgrad1,
+            wave_size=64,
+            wtm=16,
+            wtn=16,
+            wtk=16,
+            tile_m=64,
+            tile_n=32,
+            tile_k=16,
+            split_k=4,
+        ),
+    )
+    add(
+        "conv_wgrad",
+        "conv_wgrad/gfx1151/n1h8c16k32r3",
+        "gfx1151",
+        build_conv_wgrad(
+            "irhash_wgrad_1151_a",
+            "gfx1151",
+            wgrad1,
+            wave_size=32,
+            wtm=16,
+            wtn=16,
+            wtk=16,
+            tile_m=32,
+            tile_n=32,
+            tile_k=16,
+        ),
+    )
+    add(
+        "conv_wgrad",
+        "conv_wgrad/gfx1201/n1h8c16k32r3",
+        "gfx1201",
+        build_conv_wgrad(
+            "irhash_wgrad_1201_a",
+            "gfx1201",
+            wgrad1,
+            wave_size=32,
+            wtm=16,
+            wtn=16,
+            wtk=16,
+            tile_m=32,
+            tile_n=32,
+            tile_k=16,
+        ),
+    )
+    # gfx90a wgrad mirrors the gfx942 MFMA path.
+    add(
+        "conv_wgrad",
+        "conv_wgrad/gfx90a/n1h8c16k32r3",
+        "gfx90a",
+        build_conv_wgrad(
+            "irhash_wgrad_90a_a",
+            "gfx90a",
+            wgrad1,
             wave_size=64,
             wtm=16,
             wtn=16,

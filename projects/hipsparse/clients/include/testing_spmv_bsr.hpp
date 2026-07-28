@@ -346,8 +346,11 @@ void testing_spmv_bsr(Arguments argus)
     CHECK_HIP_ERROR(hipMalloc(&buffer, bufferSize));
 
     // Preprocess (optional)
-    CHECK_HIPSPARSE_ERROR(hipsparseSpMV_preprocess(
-        handle, transA, &h_alpha, matA, x, &h_beta, y1, computeType, alg, buffer));
+    if(argus.call_preprocess)
+    {
+        CHECK_HIPSPARSE_ERROR(hipsparseSpMV_preprocess(
+            handle, transA, &h_alpha, matA, x, &h_beta, y1, computeType, alg, buffer));
+    }
 
     if(argus.unit_check)
     {

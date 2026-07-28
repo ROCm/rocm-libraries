@@ -25,6 +25,8 @@ from __future__ import annotations
 
 import unittest
 
+import pytest
+
 from rocke import lower_kernel_to_llvm
 
 from kernels import (
@@ -38,6 +40,50 @@ from kernels import (
     build_unified_attention_reduce,
     supports_native_unified_attention,
 )
+
+
+def _patch_resolved_arch(arch: str):
+    """Pin the resolved attention arch for a test, on every module that reads it.
+
+    ``_resolve_attention_arch`` is defined in ``kernels.common.attention_unified``
+    but imported *by name* into other modules (e.g.
+    ``builders.common.attention_spec_builder``), so each holds its own binding.
+    Patching only the defining module leaves the spec builder resolving the real
+    device arch -- which silently ignores the test's requested arch on any host
+    whose GPU differs (e.g. an ``arch='gfx950'`` case on a gfx942 box). Patch
+    every by-name importer so the pin actually reaches the builder.
+    """
+    from unittest import mock
+
+    import builders.common.attention_spec_builder as _asb
+    import kernels.common.attention_unified as _au
+
+    targets = [_au]
+    if getattr(_asb, "_resolve_attention_arch", None) is not None:
+        targets.append(_asb)
+    return _MultiPatch(
+        [
+            mock.patch.object(m, "_resolve_attention_arch", return_value=arch)
+            for m in targets
+        ]
+    )
+
+
+class _MultiPatch:
+    """Enter/exit a list of ``mock.patch`` context managers as one."""
+
+    def __init__(self, patches):
+        self._patches = patches
+
+    def __enter__(self):
+        for p in self._patches:
+            p.start()
+        return self
+
+    def __exit__(self, *exc):
+        for p in reversed(self._patches):
+            p.stop()
+        return False
 
 
 # ---------------------------------------------------------------------
@@ -829,9 +875,7 @@ class TestAttentionHelpers(unittest.TestCase):
         ``TypeError`` here (its gate signature lacked the parameter), which
         broke the gfx950 SDPA dispatch path for ``backend in {tiled, auto}``.
         """
-        from unittest import mock
         from kernels import supports_native_unified_attention_tiled
-        import kernels.common.attention_unified as au
 
         p = UnifiedAttentionProblem(
             total_q=128,
@@ -847,7 +891,7 @@ class TestAttentionHelpers(unittest.TestCase):
         # Pin the routed arch so the test is deterministic on any host (the
         # default fallback is gfx950, which is exactly the broken path).
         for arch in ("gfx950", "gfx942"):
-            with mock.patch.object(au, "_resolve_attention_arch", return_value=arch):
+            with _patch_resolved_arch(arch):
                 # Must not raise (the regression was a TypeError on the kwarg).
                 ok, reason = supports_native_unified_attention_tiled(p)
                 self.assertIsInstance(ok, bool)
@@ -883,7 +927,6 @@ class TestAttentionHelpers(unittest.TestCase):
         runtime would not pick) while still failing on a ``TypeError`` (the
         signature-drift class).
         """
-        from unittest import mock
         import kernels.common.attention_unified as au
         from kernels import (
             supports_native_unified_attention,
@@ -898,9 +941,7 @@ class TestAttentionHelpers(unittest.TestCase):
             spec_3d_cls = au._tiled_3d_impl(arch)[0]
             for label, p in matrix:
                 with self.subTest(arch=arch, cfg=label):
-                    with mock.patch.object(
-                        au, "_resolve_attention_arch", return_value=arch
-                    ):
+                    with _patch_resolved_arch(arch):
                         path = p.select_path()
                         self.assertIn(path, ("2d", "3d"))
                         for gate in (
@@ -948,7 +989,6 @@ class TestAttentionHelpers(unittest.TestCase):
         here is a latent wrong-CTA-count trap for any future caller. Pin them
         equal.
         """
-        from unittest import mock
         import kernels.common.attention_unified as au
 
         p = UnifiedAttentionProblem(
@@ -962,7 +1002,7 @@ class TestAttentionHelpers(unittest.TestCase):
             max_seqlen_k=2048,
             dtype="fp16",
         )
-        with mock.patch.object(au, "_resolve_attention_arch", return_value="gfx942"):
+        with _patch_resolved_arch("gfx942"):
             self.assertTrue(
                 au._enable_gfx942_l4(p), "shape must be in the gfx942 L4 flash region"
             )
@@ -981,8 +1021,6 @@ class TestAttentionHelpers(unittest.TestCase):
         missing-field break that took out production decode), mirroring the 2D
         dispatch test one path over.
         """
-        from unittest import mock
-        import kernels.common.attention_unified as au
         from kernels import supports_native_unified_attention_3d_tiled
 
         p = UnifiedAttentionProblem(
@@ -997,7 +1035,7 @@ class TestAttentionHelpers(unittest.TestCase):
             dtype="fp16",
         )
         for arch in ("gfx950", "gfx942"):
-            with mock.patch.object(au, "_resolve_attention_arch", return_value=arch):
+            with _patch_resolved_arch(arch):
                 # Must not raise (the regression was a TypeError on the kwarg).
                 ok, reason = supports_native_unified_attention_3d_tiled(p)
                 self.assertIsInstance(ok, bool)
@@ -1017,7 +1055,6 @@ class TestAttentionHelpers(unittest.TestCase):
         ignored-field contract that lets the shared builder pass those kwargs
         unconditionally.
         """
-        from unittest import mock
         import kernels.common.attention_unified as au
 
         p = UnifiedAttentionProblem(
@@ -1032,11 +1069,11 @@ class TestAttentionHelpers(unittest.TestCase):
             dtype="fp16",
         )
         for arch in ("gfx942", "gfx950"):
-            with mock.patch.object(au, "_resolve_attention_arch", return_value=arch):
+            with _patch_resolved_arch(arch):
                 spec = au._tiled_3d_spec_from_problem(p)
                 self.assertIsInstance(spec, au._tiled_3d_impl(arch)[0])
         # The gfx942-only 3D knobs are inert on gfx950 (ignored-field contract).
-        with mock.patch.object(au, "_resolve_attention_arch", return_value="gfx950"):
+        with _patch_resolved_arch("gfx950"):
             self.assertIsNone(au._gfx942_3d_tile_size_override(p))
             self.assertFalse(au._enable_gfx942_3d_invariant_hoist(p))
             self.assertFalse(au._enable_gfx942_3d_wide_kv_load(p))
@@ -1056,7 +1093,6 @@ class TestAttentionHelpers(unittest.TestCase):
         whichever branch fires on the relevant arch, pinning the largest
         (~25-flag) silent surface.
         """
-        from unittest import mock
         import kernels.common.attention_unified as au
 
         def problem(**kw):
@@ -1109,9 +1145,7 @@ class TestAttentionHelpers(unittest.TestCase):
         for label, p, arches in cases:
             for arch in arches:
                 with self.subTest(cfg=label, arch=arch):
-                    with mock.patch.object(
-                        au, "_resolve_attention_arch", return_value=arch
-                    ):
+                    with _patch_resolved_arch(arch):
                         spec = au._tiled_spec_from_problem(p)
                         self.assertIsInstance(spec, au._tiled_2d_impl(arch)[0])
 
@@ -1180,10 +1214,9 @@ class TestAttentionHelpers(unittest.TestCase):
         global->LDS DMA (``raw.ptr.buffer.load.lds``) -- and that it does NOT emit
         the gfx950 wide 16x16x32 MFMA. Pure codegen, no GPU.
         """
-        from unittest import mock
         import kernels.common.attention_unified as au
 
-        with mock.patch.object(au, "_resolve_attention_arch", return_value="gfx942"):
+        with _patch_resolved_arch("gfx942"):
             (
                 UnifiedAttention3DTiledSpec,
                 UnifiedAttentionReduceTiledSpec,
@@ -1656,8 +1689,13 @@ class TestAttentionHarnessTimers(unittest.TestCase):
         from pathlib import Path
         from unittest import mock
 
-        # Import torch BEFORE patching sys.modules so torch stays in the
+        import pytest
+
+        # The harness's reference implementation imports torch at module scope,
+        # so it cannot be loaded without torch; skip torch-free instead of
+        # erroring. Import torch BEFORE patching sys.modules so it stays in the
         # parent process's module table after ``mock.patch.dict`` exits.
+        pytest.importorskip("torch")
         import torch  # noqa: F401
 
         # The harness moved into the library tree (builders/); resolve it via the

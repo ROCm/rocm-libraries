@@ -85,7 +85,7 @@ struct MIOpenBatchNormFwdTrainSpatialImpl<0, FpType, FpPrecType, FpAccumType>
 
         if(lid < segment)
         {
-            // The original OpenCL kernel unrolled the loop with a hint of 2 when using FP16.
+            // Unroll the loop with a hint of 2 when using FP16.
             // Using this unrollHint and the static_unroll_count struct replicates this.
             constexpr int unrollHint =
                 mio_config::input_type_strategy == type_strategy::fp16 ? 2 : 1;
@@ -132,7 +132,7 @@ struct MIOpenBatchNormFwdTrainSpatialImpl<0, FpType, FpPrecType, FpAccumType>
             FpAccumType inhat = cast<FpAccumType>(0.);
             FpPrecType value;
 
-            // The original OpenCL kernel unrolled the loop with a hint of 2 when using FP16.
+            // Unroll the loop with a hint of 2 when using FP16.
             // Using this unrollHint and the static_unroll_count struct replicates this.
             constexpr int unrollHint =
                 mio_config::input_type_strategy == type_strategy::fp16 ? 2 : 1;
@@ -636,7 +636,7 @@ struct MIOpenBatchNormFwdTrainSpatialImplVar2
                                       ygid * ystride * mio_bn_config::vec_size_y +
                                       xgid * xstride * mio_bn_config::vec_size_x;
 
-            // The original OpenCL kernel unrolled the loop only when this condition was met.
+            // Unroll the loop only when this condition is met.
             // Using this unrollHint and the static_unroll_count struct replicates this.
             constexpr unsigned int unrollHint =
                 mio_bn_config::hw > mio_bn_config::loop_unroll_max_hw ? 1 : 2;
