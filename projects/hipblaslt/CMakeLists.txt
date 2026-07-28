@@ -197,6 +197,13 @@ if(NOT WIN32)
         # Disable a few tsan options to get builds going but these should be addressed
         set(san_opts "LD_PRELOAD=${TSAN_LIB_PATH}" "TSAN_OPTIONS=detect_leaks=0,new_delete_type_mismatch=0")
     endif()
+    # Compensates for TheRock hardcoding `lib/linux` in the resource-dir rpath it
+    # adds; that directory is absent under LLVM_ENABLE_PER_TARGET_RUNTIME_DIR.
+    # Removable once TheRock derives it (e.g. `clang --print-runtime-dir`).
+    foreach(san_lib IN LISTS ASAN_LIB_PATH TSAN_LIB_PATH)
+        get_filename_component(san_lib_dir "${san_lib}" DIRECTORY)
+        list(APPEND CMAKE_BUILD_RPATH "${san_lib_dir}")
+    endforeach()
 endif()
 
 if(HIPBLASLT_BUNDLE_PYTHON_DEPS)
