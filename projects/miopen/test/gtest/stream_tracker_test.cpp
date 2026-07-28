@@ -9,13 +9,39 @@
 
 #include <hip/hip_runtime.h>
 
+#include <condition_variable>
+#include <mutex>
+
 namespace {
+
+struct StreamGate
+{
+    std::mutex mtx;
+    std::condition_variable cv;
+    bool released = false;
+
+    static void callback(void* arg)
+    {
+        auto* self = static_cast<StreamGate*>(arg);
+        std::unique_lock<std::mutex> lk(self->mtx);
+        self->cv.wait(lk, [self] { return self->released; });
+    }
+
+    void open()
+    {
+        {
+            std::lock_guard<std::mutex> lk(mtx);
+            released = true;
+        }
+        cv.notify_one();
+    }
+};
 
 class GPU_StreamTracker_FP32 : public ::testing::Test
 {
 protected:
-    miopen::Handle& handle         = get_handle();
-    miopen::StreamTracker& tracker = handle.GetStreamTracker();
+    miopen::Handle& handle = get_handle();
+    miopen::StreamTracker tracker;
 };
 
 } // namespace
@@ -68,26 +94,23 @@ TEST_F(GPU_StreamTracker_FP32, AbandonStillDraining)
 {
     auto slot = tracker.acquire(handle);
 
-    auto* dev_ptr     = static_cast<char*>(nullptr);
-    size_t large_size = 256 * 1024 * 1024;
-    ASSERT_EQ(hipMalloc(&dev_ptr, large_size), hipSuccess);
-    for(int i = 0; i < 64; ++i)
-        (void)hipMemsetAsync(dev_ptr, 0, large_size, slot.stream);
+    StreamGate gate;
+    ASSERT_EQ(hipLaunchHostFunc(slot.stream, StreamGate::callback, &gate), hipSuccess);
 
     int abandoned_id = slot.pool_id;
     tracker.abandon(slot);
 
     auto next = tracker.acquire(handle);
     EXPECT_NE(next.pool_id, abandoned_id);
-    tracker.release(next);
 
+    gate.open();
     ASSERT_EQ(hipStreamSynchronize(slot.stream), hipSuccess);
 
+    // Don't release `next` yet — keep available_ empty so acquire scans draining
     auto reclaimed = tracker.acquire(handle);
     EXPECT_EQ(reclaimed.pool_id, abandoned_id);
     tracker.release(reclaimed);
-
-    ASSERT_EQ(hipFree(dev_ptr), hipSuccess);
+    tracker.release(next);
 }
 
 TEST_F(GPU_StreamTracker_FP32, CascadeAbandonReclaim)
