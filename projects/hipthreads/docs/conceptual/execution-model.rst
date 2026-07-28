@@ -14,9 +14,9 @@ Understanding the execution model explains both why the API behaves the way it d
 Persistent scheduler kernel
 ===========================
 
-Creating the first ``hip::thread`` launches a long-lived *scheduler kernel* onto a dedicated stream.
-This kernel loops, polling work queues and running submitted callables, until the last ``hip::thread`` is destroyed.
-A ``hip::thread`` is therefore not a kernel launch of its own.
+Creating the first ``hip::wthread`` launches a long-lived *scheduler kernel* onto a dedicated stream.
+This kernel loops, polling work queues and running submitted callables, until the last ``hip::wthread`` is destroyed.
+A ``hip::wthread`` is therefore not a kernel launch of its own.
 It is a work item submitted to an already-running scheduler, which keeps per-thread launch overhead low.
 
 Because the scheduler kernel stays resident while any thread is alive, any host call that waits for *all* GPU work to finish (such as ``hipDeviceSynchronize`` or a synchronous ``hipMemcpy``) will wait for the scheduler too, and deadlock.
@@ -32,6 +32,6 @@ There is no preemption and no hardware blocking, so synchronization primitives s
 Fibers and width
 ================
 
-A single ``hip::thread`` can run as multiple fibers (one per hardware lane) by setting its ``width`` parameter, up to ``thread::max_width()`` (currently the warp size, 32).
-The callable runs on each active lane, which enables cooperative, SIMD-style work partitioning within one thread.
+A single ``hip::wthread`` can run as multiple fibers (one per hardware lane) by setting its ``width`` parameter, up to ``wthread::max_width()`` (currently the warp size, 32).
+The callable runs on each active lane, which enables cooperative, SIMD-style work partitioning within one wthread.
 ``hip::this_thread::get_fiber_id`` returns the current lane index.

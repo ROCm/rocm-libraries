@@ -27,10 +27,11 @@ namespace ckc
 /* ---------------------------------------------------------------------- */
 /* datalayout / triple (Python _DATALAYOUT_LLVM20 / _DATALAYOUT_LLVM22 /   */
 /* _TRIPLE). The AMDGPU datalayout is FLAVOR-KEYED: two fields drift        */
-/* between LLVM flavors -- the ELF mangling spec (m:e, added under LLVM     */
-/* 21+) and the buffer-fat-pointer address space (p8) --                    */
+/* between LLVM flavors -- the buffer-fat-pointer address space (p8):       */
 /*   LLVM 20 (ROCm 7.0/7.1):  e-...-p8:128:128-...                          */
-/*   LLVM 22 (ROCm >= 7.2):   e-m:e-...-p8:128:128:128:48-...               */
+/*   LLVM 22 (ROCm >= 7.2):   e-...-p8:128:128:128:48-...                   */
+/* Note: the ELF mangling spec (m:e) was present in early LLVM 22 builds    */
+/* but was removed; the current ROCm 7.2 toolchain does not emit it.        */
 /* (Python _DATALAYOUT_LLVM20 / _DATALAYOUT_LLVM22; pick via               */
 /* rocke_ll_datalayout_for_flavor, mirroring _datalayout_for_flavor.)        */
 /* ---------------------------------------------------------------------- */
@@ -42,7 +43,7 @@ const char* const ROCKE_LL_DATALAYOUT_LLVM20
       "-n32:64-S32-A5-G1-ni:7:8:9";
 
 const char* const ROCKE_LL_DATALAYOUT_LLVM22
-    = "e-m:e-p:64:64-p1:64:64-p2:32:32-p3:32:32-p4:64:64-p5:32:32-p6:32:32"
+    = "e-p:64:64-p1:64:64-p2:32:32-p3:32:32-p4:64:64-p5:32:32-p6:32:32"
       "-p7:160:256:256:32-p8:128:128:128:48-p9:192:256:256:32-i64:64-v16:16-v24:32"
       "-v32:32-v48:64-v96:128-v192:256-v256:256-v512:512-v1024:1024-v2048:2048"
       "-n32:64-S32-A5-G1-ni:7:8:9";
@@ -209,6 +210,9 @@ const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS[] = {
     {"global.atomic.fadd.v2bf16",
      "declare <2 x bfloat> @llvm.amdgcn.global.atomic.fadd.v2bf16.p1("
      "ptr addrspace(1), <2 x bfloat>)"},
+    {"global.atomic.fadd.v2f16",
+     "declare <2 x half> @llvm.amdgcn.global.atomic.fadd.v2f16.p1("
+     "ptr addrspace(1), <2 x half>)"},
     {"mbcnt.lo", "declare i32 @llvm.amdgcn.mbcnt.lo(i32, i32)"},
     {"mbcnt.hi", "declare i32 @llvm.amdgcn.mbcnt.hi(i32, i32)"},
     {"ds.read.tr16.b64", "declare <4 x i16> @llvm.amdgcn.ds.read.tr16.b64(ptr addrspace(3))"},
