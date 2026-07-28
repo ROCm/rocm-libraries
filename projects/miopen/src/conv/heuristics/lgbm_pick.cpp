@@ -8,6 +8,7 @@
 #include <miopen/conv/heuristics/lgbm_metadata.hpp>
 #include <miopen/conv/heuristics/lgbm_predict.hpp>
 #include <miopen/conv/heuristics/lgbm_forest.hpp>
+#include <miopen/conv/heuristics/lgbm_common.hpp>
 #include <miopen/conv/heuristics/ai_heuristics.hpp> // common::EngineeredConvFeatures, ConvDirection
 
 #include <miopen/conv/problem_description.hpp>
@@ -94,19 +95,9 @@ constexpr int kIdxVramBytes             = 58;
 constexpr int kIdxGfxId                 = 59;
 constexpr int kIdxSolverName            = 60;
 
-// Treelite missing-marker. Generated header sets missing = -1 to indicate
-// "present"; we mirror that in our LgbmEntry union.
-inline void SetNumeric(LgbmEntry& e, double v)
-{
-    if(std::isnan(v))
-        e.missing = -1;
-    else
-    {
-        e.missing = 0;
-        e.fvalue  = v;
-    }
-}
-
+// SetNumeric, DirectionPerfDbCode, DataTypeName are shared with the perf-config
+// picker; see lgbm_common.hpp. SetCategorical is layer-1-only (the solver_name
+// and gfx_id categoricals live only in the rank model's feature row).
 inline void SetCategorical(LgbmEntry& e, int code)
 {
     if(code < 0)
@@ -118,19 +109,6 @@ inline void SetCategorical(LgbmEntry& e, int code)
     }
 }
 
-// Map MIOpen's conv::Direction enum to the perf-DB convention used to train
-// the model: 1=Forward, 2=BackwardData, 4=BackwardWeights.
-int DirectionPerfDbCode(conv::Direction d)
-{
-    switch(d)
-    {
-    case conv::Direction::Forward: return 1;
-    case conv::Direction::BackwardData: return 2;
-    case conv::Direction::BackwardWeights: return 4;
-    }
-    return 1;
-}
-
 common::ConvDirection ToEngineeredDirection(conv::Direction d)
 {
     switch(d)
@@ -140,22 +118,6 @@ common::ConvDirection ToEngineeredDirection(conv::Direction d)
     case conv::Direction::BackwardWeights: return common::ConvDirection::BackwardWeights;
     }
     return common::ConvDirection::Forward;
-}
-
-std::string DataTypeName(miopenDataType_t t)
-{
-    // Only the four dtypes in the model's data_type vocab are named; anything
-    // else returns "" (encoded as the missing category). An if-chain avoids
-    // -Wswitch-enum, which would require listing every miopenDataType_t value.
-    if(t == miopenHalf)
-        return "fp16";
-    if(t == miopenFloat)
-        return "fp32";
-    if(t == miopenBFloat16)
-        return "bf16";
-    if(t == miopenInt8)
-        return "int8";
-    return "";
 }
 
 // Fill the base problem feature block (indices 0..27). The 6 derived workload

@@ -8,6 +8,7 @@
 #include <miopen/conv/heuristics/lgbm_pcfg_hook.hpp>
 #include <miopen/conv/heuristics/lgbm_pcfg_metadata.hpp>
 #include <miopen/conv/heuristics/lgbm_predict.hpp>
+#include <miopen/conv/heuristics/lgbm_common.hpp>
 
 #include <miopen/conv/problem_description.hpp>
 #include <miopen/env.hpp>
@@ -33,42 +34,9 @@ namespace pcfg {
 
 namespace {
 
-inline void SetNumeric(LgbmEntry& e, double v)
-{
-    if(std::isnan(v))
-        e.missing = -1;
-    else
-    {
-        e.missing = 0;
-        e.fvalue  = v;
-    }
-}
-
-int DirectionPerfDbCode(conv::Direction d)
-{
-    switch(d)
-    {
-    case conv::Direction::Forward: return 1;
-    case conv::Direction::BackwardData: return 2;
-    case conv::Direction::BackwardWeights: return 4;
-    }
-    return 1;
-}
-
-// Map MIOpen's data type to the perf-DB string used as the bucket key.
-std::string DataTypeName(miopenDataType_t t)
-{
-    if(t == miopenHalf)
-        return "fp16";
-    if(t == miopenFloat)
-        return "fp32";
-    if(t == miopenBFloat16)
-        return "bf16";
-    if(t == miopenInt8)
-        return "int8";
-    return "";
-}
-
+// SetNumeric, DirectionPerfDbCode, DataTypeName are shared with the layer-1
+// solver picker; see lgbm_common.hpp. DataTypeCode below is pcfg-only (the
+// perf-config feature row uses an integer dtype code, not the vocab string).
 int DataTypeCode(miopenDataType_t t)
 {
     // Matches model_fields.build_X: fp32:0, fp16:1, bf16:2, int8:3.
@@ -83,9 +51,18 @@ int DataTypeCode(miopenDataType_t t)
     return -1;
 }
 
-// Fixed gfx_code vocabulary, matching model_fields.build_X gfx_order. Unknown
-// arch -> -1 (the model's missing-category sentinel). Only used by solvers
-// trained with PCFG_GFXID (SolverModel::has_gfx_code).
+// Fixed gfx_code vocabulary, matching model_fields.build_X gfx_order in the
+// AutoResearchPerfConfig training pipeline. Unknown arch -> -1 (the model's
+// missing-category sentinel). Only used by solvers trained with PCFG_GFXID
+// (SolverModel::has_gfx_code).
+//
+// This is deliberately hardcoded rather than loaded from lgbm_pcfg_model_meta.json
+// because that metadata does not (yet) carry a gfx_code vocab, and the pcfg order
+// (gfx906,gfx90a,gfx942,gfx950,gfx1100,...) differs from the rank model's
+// alphabetical gfx_id vocab -- so the two cannot share a loader. Making this
+// data-driven requires the exporter to emit a gfx_code vocab and a rank retrain to
+// unify the ordering; see AutoResearchPerfConfig/DESIGN_cross_arch_gfx_and_generalization.md
+// (Change 1). Until then this list must stay in sync with model_fields.py by hand.
 int GfxCode(const std::string& gfx_id)
 {
     static const std::array<const char*, 10> kGfxOrder = {"gfx906",

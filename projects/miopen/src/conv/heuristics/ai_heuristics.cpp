@@ -954,15 +954,25 @@ std::vector<uint64_t> PredictSolver(const conv::ProblemDescription& problem,
     // MIOPEN_ENABLE_LGBM_SELECTOR=0 to force selection straight to WTI.
     if(!env::disabled(MIOPEN_ENABLE_LGBM_SELECTOR))
     {
-        const auto ranked = ai::lgbm::PickSolverRanked(problem, ctx.GetStream());
-        if(!ranked.empty())
+        // Same never-throw contract as the TunaNet block: swallow any failure
+        // (model load, filesystem, allocation) and fall through to WTI rather
+        // than propagating out of the predictor.
+        try
         {
-            MIOPEN_LOG_I2("lgbm: returning " << ranked.size() << " ranked solvers");
-            std::vector<std::any> any_sol(ranked.begin(), ranked.end());
-            StorePredictionCache(problem, device, any_sol);
-            return ranked;
+            const auto ranked = ai::lgbm::PickSolverRanked(problem, ctx.GetStream());
+            if(!ranked.empty())
+            {
+                MIOPEN_LOG_I2("lgbm: returning " << ranked.size() << " ranked solvers");
+                std::vector<std::any> any_sol(ranked.begin(), ranked.end());
+                StorePredictionCache(problem, device, any_sol);
+                return ranked;
+            }
+            MIOPEN_LOG_I2("lgbm: abstained for " << device << ", falling back to WTI");
         }
-        MIOPEN_LOG_I2("lgbm: abstained for " << device << ", falling back to WTI");
+        catch(const std::exception& e)
+        {
+            MIOPEN_LOG_W("LGBM prediction failed (" << e.what() << "); falling back to WTI");
+        }
     }
     else
     {

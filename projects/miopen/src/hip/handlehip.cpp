@@ -726,7 +726,7 @@ std::size_t Handle::GetGlobalMemorySize() const
 
 std::size_t Handle::GetL2CacheSize() const
 {
-    int result;
+    int result  = 0;
     auto status = hipDeviceGetAttribute(&result, hipDeviceAttributeL2CacheSize, this->impl->device);
     if(status != hipSuccess)
         MIOPEN_THROW_HIP_STATUS(status);
@@ -736,7 +736,7 @@ std::size_t Handle::GetL2CacheSize() const
 
 std::size_t Handle::GetClockRateKhz() const
 {
-    int result;
+    int result  = 0;
     auto status = hipDeviceGetAttribute(&result, hipDeviceAttributeClockRate, this->impl->device);
     if(status != hipSuccess)
         MIOPEN_THROW_HIP_STATUS(status);
