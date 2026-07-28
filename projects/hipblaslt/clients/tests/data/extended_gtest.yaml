@@ -34,7 +34,7 @@ Tests:
 # ==============================================================================
 
 - name: extended_complex_float
-  gpu_arch_exclude: '90a, gfx1200, gfx1201, gfx1250'
+  gpu_arch_exclude: '90a|12'
   category: pre_checkin
   function: matmul
   a_type: f32_c
@@ -55,7 +55,7 @@ Tests:
   batch_count: [1, 2]
 
 - name: extended_complex_double
-  gpu_arch_exclude: '90a, gfx1200, gfx1201, gfx1250'
+  gpu_arch_exclude: '90a|12'
   category: pre_checkin
   function: matmul
   a_type: f64_c
@@ -76,7 +76,7 @@ Tests:
   batch_count: 1
 
 - name: extended_complex_float_batch
-  gpu_arch_exclude: '90a, gfx1200, gfx1201, gfx1250'
+  gpu_arch_exclude: '90a|12'
   category: pre_checkin
   function: matmul
   a_type: f32_c
