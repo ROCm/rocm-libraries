@@ -62,30 +62,6 @@ using NullType = ::rocprim::empty_type;
     #define _CCCL_HAS_INT128() 0
 #endif
 
-template<bool B, typename T, typename F> struct
-[[deprecated("[Since 1.16] If is deprecated use std::conditional instead.")]] If
-{
-    using Type = typename std::conditional<B, T, F>::type;
-};
-
-template<typename T> struct
-[[deprecated("[Since 1.16] IsPointer is deprecated use std::is_pointer instead.")]] IsPointer
-{
-    static constexpr bool VALUE = std::is_pointer<T>::value;
-};
-
-template<typename T> struct
-[[deprecated("[Since 1.16] IsVolatile is deprecated use std::is_volatile instead.")]] IsVolatile
-{
-    static constexpr bool VALUE = std::is_volatile<T>::value;
-};
-
-template<typename T> struct 
-[[deprecated("[Since 1.16] RemoveQualifiers is deprecated use std::remove_cv instead.")]] RemoveQualifiers
-{
-    using Type = typename std::remove_cv<T>::type;
-};
-
 template<int N>
 struct PowerOfTwo
 {
