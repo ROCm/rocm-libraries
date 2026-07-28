@@ -60,11 +60,13 @@ if (NOT WIN32)
     find_package(amd_smi REQUIRED)
 endif()
 
-target_include_directories(TensileClient PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")# "${rocm_smi_root}/include")
+target_include_directories(TensileClient PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
 
 target_link_libraries(TensileClient PRIVATE TensileHost)
 
-target_link_libraries(TensileClient PRIVATE amd_smi)
+if(NOT WIN32)
+    target_link_libraries(TensileClient PRIVATE amd_smi)
+endif()
 
 if(TENSILE_USE_OPENMP)
     target_link_libraries(TensileClient PRIVATE custom_openmp_cxx)

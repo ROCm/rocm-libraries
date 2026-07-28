@@ -38,7 +38,6 @@ option(TENSILE_ENABLE_DEVICE "Build device libraries" ON)
 option(TENSILE_ENABLE_CLIENT "Build client app" ON)
 option(TENSILE_ENABLE_MSGPACK "Enable MessagePack support" ON)
 option(TENSILE_ENABLE_LLVM "Use llvm yaml library" OFF)
-cmake_dependent_option(TENSILE_ENABLE_AMD_SMI "Use amd-smi." ON "NOT WIN32" OFF)
 set(TENSILE_SOURCE_TREE "${CMAKE_CURRENT_SOURCE_DIR}/../Tensile/Source")
 set(TENSILE_CONFIG_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../HostLibraryTests/configs")
 set(TENSILE_CXX_STANDARD
@@ -126,7 +125,8 @@ if(TENSILE_ENABLE_DEVICE)
   add_subdirectory(device-library)
 endif()
 
-if(TENSILE_ENABLE_AMD_SMI)
+# amd-smi is not available on Windows; it is required everywhere else.
+if(NOT WIN32)
   find_package(amd_smi REQUIRED)
 endif()
 
@@ -137,7 +137,9 @@ if(TENSILE_ENABLE_CLIENT)
     tensile-client-lib PRIVATE tensile-host OpenMP::OpenMP_CXX)
     target_compile_features(tensile-client-lib PUBLIC cxx_std_${TENSILE_CXX_STANDARD})
 
-  target_link_libraries(tensile-client-lib PRIVATE amd_smi)
+  if(NOT WIN32)
+    target_link_libraries(tensile-client-lib PRIVATE amd_smi)
+  endif()
   target_include_directories(
     tensile-client-lib
     PUBLIC $<BUILD_INTERFACE:${TENSILE_SOURCE_TREE}/client/include>)
