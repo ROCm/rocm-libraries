@@ -2135,9 +2135,9 @@ rocsparse_status rocsparse_spildlt0_descr_destroy(rocsparse_handle         handl
  *  -     \ref rocsparse_spildlt0_input_boost_enable is an \p int32_t.
  *  -     \ref rocsparse_spildlt0_input_boost_value is a pointer to a scalar of value type A. Its device mode is determined from the \ref rocsparse_handle.
  *  -     \ref rocsparse_spildlt0_input_boost_tolerance is a double pointer. Its device mode is determined from the \ref rocsparse_handle.
- *  -     \ref rocsparse_spildlt0_input_diag is a device pointer (void*) to the dense array of \p m real-valued diagonal entries of \f$D\f$.
- *        For \p s and \p c variants this is \p float*; for \p d and \p z variants this is \p double*.
- *        It must be set before calling \ref rocsparse_spildlt0 with stage \ref rocsparse_spildlt0_stage_compute.
+ *  -     \ref rocsparse_spildlt0_input_diag is an \b optional device pointer (void*) to a dense array in device memory of \p m * \p batch_count real-valued entries that receives a copy of the diagonal \f$D\f$ (\p m entries per batch, batch \p b at offset \p b * \p m).
+ *        \f$D\f$ is always real, even for complex matrices, so for \p s and \p c variants this is \p float* and for \p d and \p z variants this is \p double*.
+ *        It is optional: \f$D\f$ is always stored in-place on the (implicit unit) diagonal of the \f$L\f$ factor and can be read back from there after \ref rocsparse_spildlt0_stage_compute. If set, it must be set before calling \ref rocsparse_spildlt0 with stage \ref rocsparse_spildlt0_stage_compute.
  *
  *  @param[in]
  *  handle          the pointer to the handle to the rocSPARSE library context.

@@ -35,7 +35,7 @@ int main(int, char**)
     }
   };
 
-  hip::thread t = support::make_test_thread(l);
+  hip::wthread t = support::make_test_thread(l);
   l();
 
   t.join();
