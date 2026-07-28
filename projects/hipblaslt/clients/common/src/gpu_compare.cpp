@@ -349,27 +349,30 @@ GpuRefResult compare_gemm_device(const void* dGpu,
     grid.y = uint32_t(batchCount);
     grid.z = 1;
 
-#define GPU_REF_COMPARE(TO, TCMP)                                            \
-    compare_kernel<TO, TCMP><<<grid, GPU_REF_BLOCK, 0, stream>>>(             \
-        static_cast<const TO*>(dGpu),                                        \
-        static_cast<const TO*>(dRef),                                        \
-        M,                                                                   \
-        N,                                                                   \
-        ldd,                                                                 \
-        strideD,                                                             \
-        batchCount,                                                          \
-        ulpMantBits,                                                         \
-        dAccum,                                                              \
-        dBins)
-
+    // Output type dispatch; the compare type (Tcmp) is the type the kernel promotes
+    // to before comparing -- float for the narrow outputs here. `launch` names the
+    // kernel arguments once.
+    auto launch = [&](auto to_tag, auto tcmp_tag) {
+        using TO   = decltype(to_tag);
+        using TCMP = decltype(tcmp_tag);
+        compare_kernel<TO, TCMP><<<grid, GPU_REF_BLOCK, 0, stream>>>(
+            static_cast<const TO*>(dGpu),
+            static_cast<const TO*>(dRef),
+            M,
+            N,
+            ldd,
+            strideD,
+            batchCount,
+            ulpMantBits,
+            dAccum,
+            dBins);
+    };
     if(tD == HIP_R_32F)
-        GPU_REF_COMPARE(float, float);
+        launch(float{}, float{});
     else if(tD == HIP_R_16BF)
-        GPU_REF_COMPARE(hip_bfloat16, float);
-    else
-        GPU_REF_COMPARE(hipblasLtHalf, float);
-
-#undef GPU_REF_COMPARE
+        launch(hip_bfloat16{}, float{});
+    else // HIP_R_16F
+        launch(hipblasLtHalf{}, float{});
 
     if(!gpu_ref_hip_check(hipGetLastError(), "compare launch"))
     {
