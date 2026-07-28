@@ -12,6 +12,9 @@ rocBLAS documentation is available at
 * Per-batch `alpha` (scalar vector) API support for Level 1 `scal_batched`, `scal_strided_batched`, and their `_ex` forms through `rocblas_set_batch_alpha_stride` when `rocblas_handle` is in `rocblas_pointer_mode_device`.
 * Support custom build with CMake arguments `BUILD_WITH_HIPBLASLT_ONLY=ON` that bypasses legacy Tensile.
 
+### Resolved issues
+* Fix for issue in `rocblas_gemm_batched_ex_get_solutions`. Starting in `rocBLAS 5.5.0` when using `hipBLASLt` backend it could provide sub-optimal solutions.
+
 ### Upcoming changes
 
 * Deprecated the `ROCBLAS_USE_HIPBLASLT_BATCHED` environment variable. It is no longer required to disable only batched use of hipBLASLt due to optimizations. This env control is planned for removal in a future release.
