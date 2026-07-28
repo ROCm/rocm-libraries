@@ -57,6 +57,7 @@
 #include "stinkytofu/transforms/asm/StinkyRemoveNopPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyRemoveWaitCntPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyWaitCntInsertionPass.hpp"
+#include "stinkytofu/transforms/asm/SwInstructionPrefetchRelDynamicPass.hpp"
 #include "stinkytofu/transforms/asm/SwInstructionPrefetchRelStaticPass.hpp"
 
 namespace stinkytofu {
@@ -209,7 +210,8 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBu
     pm.addPass(createInsertInitialUnclausedVmemPass());
 
     if (moduleOptions.EnableSwInstructionPrefetchRelStatic) {
-        pm.addPass(createSwInstructionPrefetchRelStaticPass(module));
+        // pm.addPass(createSwInstructionPrefetchRelStaticPass(module));
+        pm.addPass(createSwInstructionPrefetchRelDynamicPass(module));
     }
 
     // When StinkyTofuCostOutputDir is set, dump pass debug (per-instruction + summary) to

@@ -2,7 +2,7 @@
  * Copyright (C) 2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated software files (the "Software"), to deal
+ * of this software and associated documentation files (the "Software"), to deal
  * in the Software without restriction, including without limitation the rights
  * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
  * copies of the Software, and to permit persons to whom the Software is
@@ -31,23 +31,17 @@ namespace stinkytofu {
 class Pass;
 class StinkyAsmModule;
 
-/// Factory only (same pattern as other *Pass.hpp). Grid walk / insertion live in
-/// SwPrefetchRelCommon.{hpp,cpp}; this pass wires pipeline + accumulate.
+/// CFG-aware PC-rel SW prefetch: Phase 1 accumulate + Phase 2 CFG-gated insert.
+/// Gated at P(0) = 32640. Shares enable with static pass
+/// (`EnableSwInstructionPrefetchRelStatic`).
 ///
-/// Second pipeline pass: same per-instruction byte layout as
-/// AccumulateInstructionSizePass, plus optional dump of proposed SW prefetch
-/// sites. When \p debugOutputPath is non-empty, enables debug and writes to
-/// that file.
-STINKYTOFU_EXPORT std::unique_ptr<Pass> createSwInstructionPrefetchRelStaticPass(
-    const std::string& debugOutputPath);
+/// \p usePerBbAnchorPrefetchGrid When true (default), Phase 2 uses per-BB anchor grid
+/// (`insertSwPrefetchLabelsDynamicPerBbAnchor`, §15). When false, uses global `32640 + k×4096`.
+STINKYTOFU_EXPORT std::unique_ptr<Pass> createSwInstructionPrefetchRelDynamicPass(
+    const std::string& debugOutputPath, bool usePerBbAnchorPrefetchGrid = true);
 
-/// Uses StinkyAsmModule::setOutputDir / setOutputName: when the output
-/// directory is non-empty, enables debug output to
-/// `<outputDir>/<kernel_basename>/sw_prefetch_pass.txt` (same layout as
-/// AccumulateInstructionSizePass / Backend). SW prefetch insertion always runs;
-/// an empty output directory only means no debug dump (same pattern as
-/// createAccumulateInstructionSizePass(module)).
-STINKYTOFU_EXPORT std::unique_ptr<Pass> createSwInstructionPrefetchRelStaticPass(
-    StinkyAsmModule& module);
+/// Debug output: `<outputDir>/<kernel_basename>/sw_inst_prefetch_rel_dynamic_pass.txt`
+STINKYTOFU_EXPORT std::unique_ptr<Pass> createSwInstructionPrefetchRelDynamicPass(
+    StinkyAsmModule& module, bool usePerBbAnchorPrefetchGrid = true);
 
 }  // namespace stinkytofu

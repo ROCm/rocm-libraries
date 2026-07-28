@@ -20,7 +20,7 @@
  * THE SOFTWARE.
  *
  * ************************************************************************ */
-#include "stinkytofu/transforms/asm/SwInstructionPrefetchRelStaticPass.hpp"
+#include "stinkytofu/transforms/asm/SwInstructionPrefetchRelDynamicPass.hpp"
 
 #include <cstdint>
 #include <filesystem>
@@ -42,27 +42,20 @@
 
 namespace stinkytofu {
 
-class SwInstructionPrefetchRelStaticPass : public StinkyInstPass {
+class SwInstructionPrefetchRelDynamicPass : public StinkyInstPass {
    public:
     static char ID;
 
     const char* getName() const override {
-        return "SwInstructionPrefetchRelStaticPass";
+        return "SwInstructionPrefetchRelDynamicPass";
     }
 
     PassID getPassID() const override {
-        return &SwInstructionPrefetchRelStaticPass::ID;
+        return &SwInstructionPrefetchRelDynamicPass::ID;
     }
 
-    /// When true, `insertSwPrefetchLabels` walks each BB as usual but does not
-    /// insert prefetch IR in basic blocks that belong to a natural loop
-    /// (`detectLoops`). Default false.
-    void setSkipSwPrefetchInNaturalLoopBodies(bool skip) {
-        m_skipSwPrefetchInNaturalLoopBodies = skip;
-    }
-
-    bool getSkipSwPrefetchInNaturalLoopBodies() const {
-        return m_skipSwPrefetchInNaturalLoopBodies;
+    const SwPrefetchRelPhase1Accum& getPhase1Accum() const {
+        return m_phase1;
     }
 
     void runOnBasicBlock(BasicBlock& bb, PassContext& passCtx) {
@@ -72,15 +65,35 @@ class SwInstructionPrefetchRelStaticPass : public StinkyInstPass {
                          static_cast<uint32_t>(archArr[2]));
 
         const int64_t blockGlobalStart = m_byteOffsetBase;
+        BasicBlock* bp = &bb;
+        const int64_t bbEntryAccum = m_phase1.accumByte.at(bp);
         const bool allowIns =
             !m_skipSwPrefetchInNaturalLoopBodies || (findLoopForBB(m_loops, &bb) == nullptr);
-        insertSwPrefetchLabels(bb, blockGlobalStart, archId, m_debug ? m_debugStream : nullptr,
-                               &m_asmSetSymbols, allowIns, getName());
+        int inserted = 0;
+        if (m_usePerBbAnchorPrefetchGrid) {
+            // Real first post-CP byte from Phase 1 (honors alignment gaps), shifted from pre-insert
+            // layout into Phase 2's post-insert coordinates (§12.3) so the per-BB grid stays
+            // aligned with this BB's actual emitted offsets.
+            const int64_t firstPostCp = m_phase1.firstPostCpLayoutByte.at(bp);
+            const int64_t anchor =
+                firstPostCp == kSwPrefetchNoPerBbGridAnchor
+                    ? kSwPrefetchNoPerBbGridAnchor
+                    : firstPostCp + (blockGlobalStart - m_phase1.layoutStart.at(bp));
+            inserted = insertSwPrefetchLabelsDynamicPerBbAnchor(
+                bb, blockGlobalStart, bbEntryAccum, anchor, 0, archId,
+                m_debug ? m_debugStream : nullptr, &m_asmSetSymbols, allowIns, getName());
+        } else {
+            inserted = insertSwPrefetchLabelsDynamic(bb, blockGlobalStart, bbEntryAccum, 0, archId,
+                                                     m_debug ? m_debugStream : nullptr,
+                                                     &m_asmSetSymbols, allowIns, getName());
+        }
+        m_totalPrefetchInserted += inserted;
 
         int blockCount = 0;
         int64_t blockBytes = 0;
         if (m_debug) {
-            *m_debugStream << "[" << getName() << "] BasicBlock: " << bb.getLabel() << "\n";
+            *m_debugStream << "[" << getName() << "] Phase 2 BasicBlock: " << bb.getLabel()
+                           << " inserted=" << inserted << "\n";
             *m_debugStream << "[" << getName() << "] IR after SW prefetch label insertion:\n";
             *m_debugStream << "\n";
         }
@@ -96,12 +109,7 @@ class SwInstructionPrefetchRelStaticPass : public StinkyInstPass {
     }
 
     PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& /*AM*/) override {
-        m_totalCycles = 0;
-        m_totalInstructionCount = 0;
-        m_totalBytes = 0;
-        m_labelByteOffset.clear();
-        m_byteOffsetBase = 0;
-        m_loops = detectLoops(func);
+        m_asmSetSymbols.clear();
         collectAsmSetSymbolValues(func, m_asmSetSymbols);
 
         if (m_debug) {
@@ -113,42 +121,45 @@ class SwInstructionPrefetchRelStaticPass : public StinkyInstPass {
             }
         }
 
-        int totalBlocksInFunction = 0;
-        for ([[maybe_unused]] const BasicBlock& bb : func) totalBlocksInFunction++;
+        computeSwPrefetchRelPhase1Accum(func, &m_asmSetSymbols, m_phase1,
+                                        m_debug ? m_debugStream : nullptr, getName(),
+                                        m_usePerBbAnchorPrefetchGrid);
 
-        int blocksProcessed = 0;
-        if (m_debug) {
-            *m_debugStream << "[" << getName()
-                           << "] processAllBlocks=" << (m_processAllBlocks ? "true" : "false")
-                           << ", function has " << totalBlocksInFunction << " basic block(s)\n";
-            dumpAsmSetSymbolMap(*m_debugStream, m_asmSetSymbols);
-            *m_debugStream << "[" << getName() << "] blocks to process:\n";
-        }
-
-        for (BasicBlock& bb : func) {
-            bool processThis = m_processAllBlocks || passCtx.shouldProcessBasicBlock(bb);
+        if (m_phase1.totalLayoutBytes <= kSwPrefetchFirstGlobalByte) {
             if (m_debug) {
-                *m_debugStream << "  - BasicBlock \"" << bb.getLabel() << "\" "
-                               << (processThis ? "[PROCESSING]" : "[SKIPPED by filter]") << "\n";
+                *m_debugStream << "[" << getName() << "] no-op: totalLayoutBytes ("
+                               << m_phase1.totalLayoutBytes
+                               << ") <= first threshold P(0)=" << kSwPrefetchFirstGlobalByte
+                               << " (CP preload only)\n";
             }
-            if (processThis) {
-                runOnBasicBlock(bb, passCtx);
-                blocksProcessed++;
-            }
+            if (m_debugFile.is_open()) m_debugFile.close();
+            return PreservedAnalyses::all();
         }
 
+        m_totalCycles = 0;
+        m_totalInstructionCount = 0;
+        m_totalBytes = 0;
+        m_totalPrefetchInserted = 0;
+        m_labelByteOffset.clear();
+        m_byteOffsetBase = 0;
+        m_loops = detectLoops(func);
+
         if (m_debug) {
-            *m_debugStream << "[" << getName() << "] processed " << blocksProcessed << " / "
-                           << totalBlocksInFunction << " basic block(s)\n";
+            *m_debugStream << "[" << getName() << "] Phase 2 insert (CFG-gated), grid="
+                           << (m_usePerBbAnchorPrefetchGrid ? "per-BB anchor" : "global P(k)")
+                           << ", totalLayoutBytes=" << m_phase1.totalLayoutBytes
+                           << " > P(0)=" << kSwPrefetchFirstGlobalByte << "\n";
+        }
+
+        for (BasicBlock& bb : func) runOnBasicBlock(bb, passCtx);
+
+        if (m_debug) {
+            *m_debugStream << "[" << getName() << "] Phase 2 complete: totalPrefetchInserted="
+                           << m_totalPrefetchInserted << "\n";
             *m_debugStream << "[" << getName()
                            << "] total instruction count = " << m_totalInstructionCount << "\n";
             *m_debugStream << "[" << getName() << "] total cycles = " << m_totalCycles << "\n";
             *m_debugStream << "[" << getName() << "] total size = " << m_totalBytes << " bytes\n";
-            if (!m_labelByteOffset.empty()) {
-                *m_debugStream << "[" << getName() << "] label -> byte offset:\n";
-                for (const auto& kv : m_labelByteOffset)
-                    *m_debugStream << "  \"" << kv.first << "\" -> " << kv.second << " bytes\n";
-            }
             if (m_debugFile.is_open()) m_debugFile.close();
         }
         return PreservedAnalyses::none();
@@ -162,45 +173,59 @@ class SwInstructionPrefetchRelStaticPass : public StinkyInstPass {
         m_debugOutputPath = path;
     }
 
+    /// When true (default), Phase 2 uses `insertSwPrefetchLabelsDynamicPerBbAnchor` and Phase 1
+    /// debug preview matches. When false, uses global `32640 + k×4096` grid
+    /// (`insertSwPrefetchLabelsDynamic`).
+    void setUsePerBbAnchorPrefetchGrid(bool enable) {
+        m_usePerBbAnchorPrefetchGrid = enable;
+    }
+
    private:
+    SwPrefetchRelPhase1Accum m_phase1;
     int64_t m_totalCycles = 0;
     int m_totalInstructionCount = 0;
     int64_t m_totalBytes = 0;
+    int m_totalPrefetchInserted = 0;
     int64_t m_byteOffsetBase = 0;
     std::vector<Loop> m_loops;
     std::unordered_map<std::string, int64_t> m_labelByteOffset;
     std::unordered_map<std::string, int64_t> m_asmSetSymbols;
     bool m_debug = false;
-    /// When set, do not insert SW prefetch in BBs that belong to any
-    /// `detectLoops` body.
     bool m_skipSwPrefetchInNaturalLoopBodies = false;
-    bool m_processAllBlocks = true;
+    /// Default true: `P_bb(localK) = A(bb) + localK×4096` with `A` from phase 1 (§15).
+    bool m_usePerBbAnchorPrefetchGrid = true;
     std::string m_debugOutputPath;
     std::ofstream m_debugFile;
     std::ostream* m_debugStream = &std::cerr;
 };
 
-char SwInstructionPrefetchRelStaticPass::ID = 0;
+char SwInstructionPrefetchRelDynamicPass::ID = 0;
 
-std::unique_ptr<Pass> createSwInstructionPrefetchRelStaticPass(const std::string& debugOutputPath) {
-    auto p = std::make_unique<SwInstructionPrefetchRelStaticPass>();
+std::unique_ptr<Pass> createSwInstructionPrefetchRelDynamicPass(const std::string& debugOutputPath,
+                                                                bool usePerBbAnchorPrefetchGrid) {
+    auto p = std::make_unique<SwInstructionPrefetchRelDynamicPass>();
+    p->setUsePerBbAnchorPrefetchGrid(usePerBbAnchorPrefetchGrid);
     p->setDebugOutputPath(debugOutputPath);
     if (!debugOutputPath.empty()) p->setDebug(true);
     return p;
 }
 
-std::unique_ptr<Pass> createSwInstructionPrefetchRelStaticPass(StinkyAsmModule& module) {
-    auto p = std::make_unique<SwInstructionPrefetchRelStaticPass>();
+std::unique_ptr<Pass> createSwInstructionPrefetchRelDynamicPass(StinkyAsmModule& module,
+                                                                bool usePerBbAnchorPrefetchGrid) {
+    auto p = std::make_unique<SwInstructionPrefetchRelDynamicPass>();
+    p->setUsePerBbAnchorPrefetchGrid(usePerBbAnchorPrefetchGrid);
     if (!module.getOutputDir().empty()) {
         const std::string costBasename =
             module.getOutputName().empty() ? module.getName() : module.getOutputName();
         std::filesystem::path dir = std::filesystem::path(module.getOutputDir()) / costBasename;
         std::filesystem::create_directories(dir);
-        constexpr const char* kSwPrefetchPassDumpLeaf = "sw_prefetch_pass.txt";
-        const std::string path = (dir / kSwPrefetchPassDumpLeaf).string();
+        constexpr const char* kSwPrefetchDynamicPassDumpLeaf =
+            "sw_inst_prefetch_rel_dynamic_pass.txt";
+        const std::string path = (dir / kSwPrefetchDynamicPassDumpLeaf).string();
         p->setDebugOutputPath(path);
         p->setDebug(true);
     }
     return p;
 }
+
 }  // namespace stinkytofu

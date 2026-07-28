@@ -56,6 +56,7 @@
 #include "stinkytofu/transforms/asm/StinkyRemoveNopPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyRemoveWaitCntPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyWaitCntInsertionPass.hpp"
+#include "stinkytofu/transforms/asm/SwInstructionPrefetchRelDynamicPass.hpp"
 #include "stinkytofu/transforms/asm/SwInstructionPrefetchRelStaticPass.hpp"
 
 using namespace stinkytofu;
@@ -85,6 +86,8 @@ const std::vector<PassInfo> availablePasses = {
     {"SetMatrixReusePass", [](const auto&) { return createSetMatrixReusePass(); }},
     {"SwInstructionPrefetchRelStaticPass",
      []() { return createSwInstructionPrefetchRelStaticPass(std::string{}); }},
+    {"SwInstructionPrefetchRelDynamicPass",
+     []() { return createSwInstructionPrefetchRelDynamicPass(std::string{}); }},
     {"AccumulateInstructionSizePass", []() { return createAccumulateInstructionSizePass(""); }},
     {"AccumulateInstructionSizeDebugPass",
      []() { return createAccumulateInstructionSizePassWithDebug(); }},
