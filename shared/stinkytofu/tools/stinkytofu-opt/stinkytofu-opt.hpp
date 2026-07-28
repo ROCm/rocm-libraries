@@ -36,6 +36,7 @@
 #include "stinkytofu/transforms/asm/DeadCodeEliminationPass.hpp"
 #include "stinkytofu/transforms/asm/InsertClusterBarrierPass.hpp"
 #include "stinkytofu/transforms/asm/InsertDelayAluPass.hpp"
+#include "stinkytofu/transforms/asm/InsertInitialUnclausedVmemPass.hpp"
 #include "stinkytofu/transforms/asm/InsertVgprMsbPass.hpp"
 #include "stinkytofu/transforms/asm/InsertWaitAluPass.hpp"
 #include "stinkytofu/transforms/asm/LongBranchLoweringPass.hpp"
@@ -121,6 +122,8 @@ const std::vector<PassInfo> availablePasses = {
      [](const auto&) { return createMemTokenConsistencyCheckPass(); }},
     {"RaiseVgprMsbPass", [](const auto&) { return createRaiseVgprMsbPass(); }},
     {"InsertVgprMsbPass", [](const auto&) { return createInsertVgprMsbPass(); }},
+    {"InsertInitialUnclausedVmemPass",
+     [](const auto&) { return createInsertInitialUnclausedVmemPass(); }},
     {"LongBranchLoweringPass", [](const auto&) { return createLongBranchLoweringPass(); }},
     // InsertClusterBarrierPass accepts:
     //   --InsertClusterBarrierPass=PrefetchGlobalRead=<n>,PrefetchLocalRead=<n>

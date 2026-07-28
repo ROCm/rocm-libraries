@@ -362,6 +362,25 @@ TEST(TestSdpaFwdNode, PreValidateFailsAttnMaskRankTooLarge)
     EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
 }
 
+TEST(TestSdpaFwdNode, PreValidateFailsAttnScaleTensorAndValueBothSet)
+{
+    auto q = makeTensor4D(2, 8, 16, 64);
+    auto k = makeTensor4D(2, 8, 32, 64);
+    auto v = makeTensor4D(2, 8, 32, 64);
+    auto attrs = makeMinimalAttrs(q, k, v);
+
+    // Rule 6: attn_scale tensor and attn_scale_value are mutually exclusive.
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_dim({1}).set_is_pass_by_value(true);
+    attrs.set_attn_scale(scale);
+    attrs.attn_scale_value = 1.0f;
+
+    const GraphAttributes graphAttrs;
+    const SdpaFwdNode node(std::move(attrs), graphAttrs);
+    auto err = node.pre_validate_node();
+    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
+}
+
 TEST(TestSdpaFwdNode, InferPropertiesSetsOutputShape)
 {
     // headDimV=64, so O shape should be [2, 8, 16, 64]

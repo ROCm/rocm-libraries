@@ -172,6 +172,10 @@ typedef struct rocke_cshuffle_epilogue
     int store_vec; /* elements per wide store; default 8 */
     const char* smem_name_hint; /* default "C_smem" */
     const char* out_dtype; /* "f16" (default), "bf16", or "fp32" */
+    /* cshuffle "no-alias" mode: when true the C staging tile gets its own
+     * exclusive LDS bytes (not aliased onto A/B) and the step-0 reuse barrier is
+     * elided. Default false keeps the aliased/low-LDS behavior (byte-identical). */
+    bool no_alias; /* default false */
 } rocke_cshuffle_epilogue_t;
 
 /* Construct with the Python defaults (store_vec=8, smem_name_hint="C_smem",

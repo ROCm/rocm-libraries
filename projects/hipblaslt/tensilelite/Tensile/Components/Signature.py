@@ -1,6 +1,6 @@
 ################################################################################
 #
-# Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -52,6 +52,7 @@ class UserArgumentsInfo:
     scaleAlphaVecSize: int = 0
     biasSize: int = 0
     eSize: int = 0
+    gateSize: int = 0
     activationSize: int = 0
     factorDimSize: int = 0
     # Total argument size
@@ -299,6 +300,14 @@ class SignatureDefault(Signature):
             if kernel["ProblemType"]["ActivationType"] in ['all', 'hipblaslt_all'] :
                 signature.addArg(       "activationType", SVK.SIG_VALUE,               "u32")
 
+        if writer.states.useGateResidual:
+            signature.addArg("gate",     SVK.SIG_GLOBALBUFFER, srcValueTypeB, "generic")
+            signature.addArg("gateType", SVK.SIG_VALUE,        "u32")
+            for i in range(0, writer.states.gate.numSgprStrides):
+                signature.addArg("strideG%u"%i, SVK.SIG_VALUE, "u32")
+        # Gate is not part of the grouped-gemm UserArgs struct (totalSize); it is
+        # delivered via the normal kernarg above, so gate adds nothing to totalSize.
+
         # TODO- combine one workspace
         if (kernel["ProblemType"]["OutputAmaxD"]):
             signature.addArg(    "AddrAmaxOut", SVK.SIG_GLOBALBUFFER, cptValueType, "generic")
@@ -325,7 +334,8 @@ class SignatureDefault(Signature):
                                       userArgumentsInfo.biasSize + \
                                       userArgumentsInfo.factorDimSize + \
                                       userArgumentsInfo.eSize + \
-                                      userArgumentsInfo.activationSize
+                                      userArgumentsInfo.activationSize + \
+                                      userArgumentsInfo.gateSize
 
         writer.states.userArgsInfo = userArgumentsInfo
 
