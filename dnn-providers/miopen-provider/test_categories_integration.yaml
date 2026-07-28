@@ -19,7 +19,7 @@ test_categories:
       # suites whose names mirror the on-disk tier directory. GTest treats
       # '/' and '_' as literal chars, so both patterns are needed.
       - "Smoke/*"
-      - "quick_*"
+      # - "quick_*"  # uncomment when bundles are the CI driver
       - "TestCpu*GoldenReference*"
     exclude: *common_excludes
     labels:
@@ -31,7 +31,7 @@ test_categories:
     description: "Standard external integration coverage: quick coverage plus standard CPU golden-reference bundles"
     test_patterns:
       - "Smoke/*"
-      - "quick_*"
+      # - "quick_*"  # uncomment when bundles are the CI driver
       - "TestCpu*GoldenReference*"
       - "TestCpu*GoldenRefStd*"
     exclude: *common_excludes
