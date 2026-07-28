@@ -495,8 +495,9 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
     // 2-stage path: he2hb + hb2st + unmtr_hb2st + ormqr
     // When BATCHED=true, A is T* const*; the adapter overload of ormqr_unmqr_template handles
     // the type mismatch between A (batched pointer array) and C (strided tmptau_W).
-    const bool use_2stage = (hetrd_mode == rocsolver_alg_mode_2stage
-                             || (hetrd_mode == rocsolver_alg_mode_auto && n >= SYEVD_2STAGE_SWITCHSIZE));
+    const bool use_2stage
+        = (hetrd_mode == rocsolver_alg_mode_2stage
+           || (hetrd_mode == rocsolver_alg_mode_auto && n >= SYEVD_2STAGE_SWITCHSIZE));
     if(use_2stage)
     {
         const I kd = SYEVD_2STAGE_KD;
@@ -527,15 +528,23 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
         // Stage 1: reduce dense Hermitian to band form (he2hb)
         // tau (size n) stores the he2hb Householder scalars; A stores the Householder vectors
         ROCBLAS_CHECK(rocsolver_sy2sb_he2hb_template<BATCHED, STRIDED, T, I>(
-            handle, uplo, n, kd, nb, A, shiftA, lda, strideA, Aband, ldab, strideAband, tau, n,
+            handle, uplo, n, kd, nb, // opts
+            A, shiftA, lda, strideA, // A
+            Aband, ldab, strideAband, // Aband
+            tau, n, // tau
             batch_count, scalars, he2hb_D, he2hb_V, he2hb_W, he2hb_X, he2hb_Z, he2hb_work2,
             he2hb_workArr));
 
         // Stage 2: reduce band to tridiagonal form (hb2st)
         // V_hb2st and tau_hb2st store the hb2st Householder data
         ROCBLAS_CHECK(rocsolver_sb2st_hb2st_template<BATCHED, STRIDED, T, I>(
-            handle, rocblas_fill_lower, n, kd, Aband, 0, ldab, strideAband, D, strideD, E, strideE,
-            V_hb2st, ldv_hb2st, strideV_hb2st, tau_hb2st, strideTau_hb2st, batch_count));
+            handle, rocblas_fill_lower, n, kd, // opts
+            Aband, 0, ldab, strideAband, // A
+            D, strideD, // D
+            E, strideE, // E
+            V_hb2st, ldv_hb2st, strideV_hb2st, // V
+            tau_hb2st, strideTau_hb2st, // tau
+            batch_count));
 
         if(sterf_mode == rocsolver_alg_mode_hybrid && evect != rocblas_evect_original)
         {
@@ -551,7 +560,10 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
             const rocblas_stride strideW = n * n;
 
             rocsolver_stedc_template<false, ISBATCHED, T>(
-                handle, rocblas_evect_tridiagonal, n, D, 0, strideD, E, 0, strideE, tmptau_W, 0, ldw,
+                handle, rocblas_evect_tridiagonal, n, // opts
+                D, 0, strideD, // D
+                E, 0, strideE, // E
+                tmptau_W, 0, ldw, // W
                 strideW, info, batch_count, work3, (S*)work2, (S*)work1, tmpz, splits, (S**)workArr);
 
             // update the eigenvectors (if applicable)
@@ -573,8 +585,10 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
                 // Back-transform stage 2: apply Q_hb2st to eigenvector matrix (unmtr_hb2st)
                 // C = Q_hb2st * tmptau_W (tmptau_W holds the eigenvectors from stedc)
                 ROCBLAS_CHECK(rocsolver_ormtr_unmtr_hb2st_template<BATCHED, STRIDED, T, T*>(
-                    handle, rocblas_side_left, rocblas_operation_none, n, n, kd, V_hb2st, 0,
-                    ldv_hb2st, strideV_hb2st, tau_hb2st, strideTau_hb2st, tmptau_W, 0, ldw, strideW,
+                    handle, rocblas_side_left, rocblas_operation_none, n, n, kd, // opts
+                    V_hb2st, 0, ldv_hb2st, strideV_hb2st, // V
+                    tau_hb2st, strideTau_hb2st, // tau
+                    tmptau_W, 0, ldw, strideW, // W
                     batch_count, max_parallel_2stage, scalars, unmtr_Tr, unmtr_W, unmtr_Z,
                     unmtr_work, unmtr_workArr));
 
@@ -600,25 +614,30 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
                 if constexpr(BATCHED)
                 {
                     rocsolver_ormqr_unmqr_template<BATCHED, STRIDED, T>(
-                        handle, rocblas_side_left, rocblas_operation_none, n_kd, n, n_kd, A,
-                        shiftA + idx2D(kd, 0, lda), lda, strideA, tau, n, tmptau_W,
-                        idx2D(kd, 0, ldw), ldw, strideW, batch_count, scalars, ormqr_AbyxORwork,
-                        ormqr_diagORtmptr, ormqr_trfact, ormqr_workArr, ormqr_workArr2);
+                        handle, rocblas_side_left, rocblas_operation_none, n_kd, n, n_kd, // opts
+                        A, shiftA + idx2D(kd, 0, lda), lda, strideA, // A
+                        tau, n, // tau
+                        tmptau_W, idx2D(kd, 0, ldw), ldw, strideW, // W
+                        batch_count, scalars, ormqr_AbyxORwork, ormqr_diagORtmptr, ormqr_trfact,
+                        ormqr_workArr, ormqr_workArr2);
                 }
                 else
                 {
                     ROCBLAS_CHECK(rocsolver_ormqr_unmqr_template<BATCHED, STRIDED, T>(
-                        handle, rocblas_side_left, rocblas_operation_none, n_kd, n, n_kd, A,
-                        shiftA + idx2D(kd, 0, lda), lda, strideA, tau, n, tmptau_W,
-                        idx2D(kd, 0, ldw), ldw, strideW, batch_count, scalars, ormqr_AbyxORwork,
-                        ormqr_diagORtmptr, ormqr_trfact, ormqr_workArr));
+                        handle, rocblas_side_left, rocblas_operation_none, n_kd, n, n_kd, // opts
+                        A, shiftA + idx2D(kd, 0, lda), lda, strideA, // A
+                        tau, n, // tau
+                        tmptau_W, idx2D(kd, 0, ldw), ldw, strideW, // W
+                        batch_count, scalars, ormqr_AbyxORwork, ormqr_diagORtmptr, ormqr_trfact,
+                        ormqr_workArr));
                 }
 
                 // copy matrix product into A
-                const I copyblocks = (n - 1) / BS2 + 1;
+                const I copyblocks = ceildiv(n, BS2);
                 ROCSOLVER_LAUNCH_KERNEL(copy_mat<T>, dim3(copyblocks, copyblocks, batch_count),
-                                        dim3(BS2, BS2), 0, stream, n, n, tmptau_W, 0, ldw, strideW,
-                                        A, shiftA, lda, strideA);
+                                        dim3(BS2, BS2), 0, stream, n, n, // opts
+                                        tmptau_W, 0, ldw, strideW, // W
+                                        A, shiftA, lda, strideA); // A
             }
         }
 
@@ -777,8 +796,9 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
     // 2-stage path: he2hb + hb2st + unmtr_hb2st + ormqr
     // When BATCHED=true, A is T* const*; the adapter overload of ormqr_unmqr_template handles
     // the type mismatch between A (batched pointer array) and C (strided tmptau_W).
-    const bool use_2stage = (hetrd_mode == rocsolver_alg_mode_2stage
-                             || (hetrd_mode == rocsolver_alg_mode_auto && n >= SYEVD_2STAGE_SWITCHSIZE));
+    const bool use_2stage
+        = (hetrd_mode == rocsolver_alg_mode_2stage
+           || (hetrd_mode == rocsolver_alg_mode_auto && n >= SYEVD_2STAGE_SWITCHSIZE));
     if(use_2stage)
     {
         const I kd = SYEVD_2STAGE_KD;
@@ -809,15 +829,22 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
         // Stage 1: reduce dense Hermitian to band form (he2hb)
         // tau (size n) stores the he2hb Householder scalars; A stores the Householder vectors
         ROCBLAS_CHECK(rocsolver_sy2sb_he2hb_template<BATCHED, STRIDED, T, I>(
-            handle, uplo, n, kd, nb, A, shiftA, lda, strideA, Aband, ldab, strideAband, tau, n,
+            handle, uplo, n, kd, nb, // opts
+            A, shiftA, lda, strideA, // A
+            Aband, ldab, strideAband, // Aband
+            tau, n, // tau
             batch_count, scalars, he2hb_D, he2hb_V, he2hb_W, he2hb_X, he2hb_Z, he2hb_work2,
             he2hb_workArr));
 
         // Stage 2: reduce band to tridiagonal form (hb2st)
         // V_hb2st and tau_hb2st store the hb2st Householder data
         ROCBLAS_CHECK(rocsolver_sb2st_hb2st_template<BATCHED, STRIDED, T, I>(
-            handle, rocblas_fill_lower, n, kd, Aband, 0, ldab, strideAband, D, strideD, E, strideE,
-            V_hb2st, ldv_hb2st, strideV_hb2st, tau_hb2st, strideTau_hb2st, batch_count));
+            handle, rocblas_fill_lower, n, kd, // opts
+            Aband, 0, ldab, strideAband, // Aband
+            D, strideD, // D
+            E, strideE, // E
+            V_hb2st, ldv_hb2st, strideV_hb2st, // V
+            tau_hb2st, strideTau_hb2st, batch_count));
 
         if(sterf_mode == rocsolver_alg_mode_hybrid && evect != rocblas_evect_original)
         {
@@ -833,7 +860,10 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
             const rocblas_stride strideW = n * n;
 
             rocsolver_stedc_template<false, ISBATCHED, T>(
-                handle, rocblas_evect_tridiagonal, n, D, 0, strideD, E, 0, strideE, tmptau_W, 0, ldw,
+                handle, rocblas_evect_tridiagonal, n, // opts
+                D, 0, strideD, // D
+                E, 0, strideE, // E
+                tmptau_W, 0, ldw, // W
                 strideW, info, batch_count, work3, (S*)work2, (S*)work1, tmpz, splits, (S**)workArr);
 
             // update the eigenvectors (if applicable)
@@ -855,9 +885,11 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
                 // Back-transform stage 2: apply Q_hb2st to eigenvector matrix (unmtr_hb2st)
                 // C = Q_hb2st * tmptau_W (tmptau_W holds the eigenvectors from stedc)
                 ROCBLAS_CHECK(rocsolver_ormtr_unmtr_hb2st_template<BATCHED, STRIDED, T, T*>(
-                    handle, rocblas_side_left, rocblas_operation_none, n, n, kd, V_hb2st, I(0),
-                    ldv_hb2st, strideV_hb2st, tau_hb2st, strideTau_hb2st, tmptau_W, I(0), ldw,
-                    strideW, batch_count, max_parallel_2stage, scalars, unmtr_Tr, unmtr_W, unmtr_Z,
+                    handle, rocblas_side_left, rocblas_operation_none, n, n, kd, // opts
+                    V_hb2st, I(0), ldv_hb2st, strideV_hb2st, // V
+                    tau_hb2st, strideTau_hb2st, // tau
+                    tmptau_W, I(0), ldw, strideW, // W
+                    batch_count, max_parallel_2stage, scalars, unmtr_Tr, unmtr_W, unmtr_Z,
                     unmtr_work, unmtr_workArr));
 
                 // Back-transform stage 1: apply Q_he2hb to eigenvector matrix (ormqr)
@@ -883,24 +915,29 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
                 {
                     rocsolver_ormqr_unmqr_template<BATCHED, STRIDED, T>(
                         handle, rocblas_side_left, rocblas_operation_none, n_kd, n, n_kd, A,
-                        shiftA + idx2D(kd, 0, lda), lda, strideA, tau, n, tmptau_W,
-                        idx2D(kd, 0, ldw), ldw, strideW, batch_count, scalars, ormqr_AbyxORwork,
-                        ormqr_diagORtmptr, ormqr_trfact, ormqr_workArr, ormqr_workArr2);
+                        shiftA + idx2D(kd, 0, lda), lda, strideA, // A
+                        tau, n, // tau
+                        tmptau_W, idx2D(kd, 0, ldw), ldw, strideW, // W
+                        batch_count, scalars, ormqr_AbyxORwork, ormqr_diagORtmptr, ormqr_trfact,
+                        ormqr_workArr, ormqr_workArr2);
                 }
                 else
                 {
                     ROCBLAS_CHECK(rocsolver_ormqr_unmqr_template<BATCHED, STRIDED, T>(
-                        handle, rocblas_side_left, rocblas_operation_none, n_kd, n, n_kd, A,
-                        shiftA + idx2D(kd, 0, lda), lda, strideA, tau, n, tmptau_W,
-                        idx2D(kd, 0, ldw), ldw, strideW, batch_count, scalars, ormqr_AbyxORwork,
-                        ormqr_diagORtmptr, ormqr_trfact, ormqr_workArr));
+                        handle, rocblas_side_left, rocblas_operation_none, n_kd, n, n_kd, // opts
+                        A, shiftA + idx2D(kd, 0, lda), lda, strideA, // A
+                        tau, n, // tau
+                        tmptau_W, idx2D(kd, 0, ldw), ldw, strideW, // W
+                        batch_count, scalars, ormqr_AbyxORwork, ormqr_diagORtmptr, ormqr_trfact,
+                        ormqr_workArr));
                 }
 
                 // copy matrix product into A
-                const I copyblocks = (n - 1) / BS2 + 1;
+                const I copyblocks = ceildiv(n, BS2);
                 ROCSOLVER_LAUNCH_KERNEL(copy_mat<T>, dim3(copyblocks, copyblocks, batch_count),
-                                        dim3(BS2, BS2), 0, stream, n, n, tmptau_W, 0, ldw, strideW,
-                                        A, shiftA, lda, strideA);
+                                        dim3(BS2, BS2), 0, stream, n, n, // opts
+                                        tmptau_W, 0, ldw, strideW, // W
+                                        A, shiftA, lda, strideA); // A
             }
         }
 
