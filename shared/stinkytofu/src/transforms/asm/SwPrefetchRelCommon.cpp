@@ -1,25 +1,6 @@
-/* ************************************************************************
- * Copyright (C) 2026 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated software files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- *
- * ************************************************************************ */
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
 #include "stinkytofu/transforms/asm/SwPrefetchRelCommon.hpp"
 
 #include <algorithm>
@@ -720,7 +701,7 @@ SwPrefetchGridWalkResult walkSwPrefetchRelGridInBlockPerBbAnchor(
         const int64_t postCpCumulBefore = postCpCumul;
         const int64_t postCpCumulAfter = postCpCumul + postCpInsn;
         // Per-BB anchor grid is in layout coordinates: gate each grid point against this insn's
-        // layout span so 4 KiB steps land on interior insns (no CFG-accum remap, §15).
+        // layout span so 4 KiB steps land on interior insns (no CFG-accum remap).
         const int64_t gateBefore = globalPcBefore;
         const int64_t gateAfter = globalPcAfter;
 
@@ -893,7 +874,7 @@ GfxArchID gfxArchFromBasicBlock(const BasicBlock& bb) {
                         static_cast<uint32_t>(archArr[2]));
 }
 
-/// Dry-run grid walk (phase 2 preview): CFG-interval anchor + dual gate (§2.3).
+/// Dry-run grid walk (phase 2 preview): CFG-interval anchor + dual gate.
 int64_t debugPlanInsertSitesInBlock(BasicBlock& bb, int64_t blockGlobalByteOffset,
                                     int64_t bbEntryAccum, int64_t kNextIn,
                                     const std::unordered_map<std::string, int64_t>& labelOff,
@@ -952,7 +933,7 @@ void debugPrintPhase1PlannedInsertSites(
                                                          phase1.accumByte.at(bp), anchor, labelOff,
                                                          asmSetSymbols, os, planInsert, skip);
         } else {
-            // Per-BB kNextIn=0: same P(k) may PLAN_INSERT in multiple branch BBs (§4.3 / §4.6).
+            // Per-BB kNextIn=0: same P(k) may PLAN_INSERT in multiple branch BBs.
             (void)debugPlanInsertSitesInBlock(bb, phase1.layoutStart.at(bp),
                                               phase1.accumByte.at(bp), 0, labelOff, asmSetSymbols,
                                               os, planInsert, skip);

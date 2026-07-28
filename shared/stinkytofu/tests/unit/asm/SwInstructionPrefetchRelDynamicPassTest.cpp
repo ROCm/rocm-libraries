@@ -1,8 +1,7 @@
-/* ************************************************************************
- * Copyright (C) 2026 Advanced Micro Devices, Inc.
- *
- * Unit tests for SwInstructionPrefetchRelDynamicPass (Phase 1 + Phase 2).
- * ************************************************************************ */
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+// Unit tests for SwInstructionPrefetchRelDynamicPass (Phase 1 + Phase 2).
 
 #include <gtest/gtest.h>
 

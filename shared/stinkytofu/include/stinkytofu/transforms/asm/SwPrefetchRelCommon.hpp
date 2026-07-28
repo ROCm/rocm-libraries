@@ -1,25 +1,6 @@
-/* ************************************************************************
- * Copyright (C) 2026 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- *
- * ************************************************************************ */
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
 #pragma once
 
 #include <cstdint>
@@ -35,6 +16,8 @@ class BasicBlock;
 class Function;
 struct StinkyInstruction;
 
+// TODO(next PR): move these gfx1250 HW constants into Gfx1250Formats.def and derive them
+// from there; they are duplicated here only to keep this PR self-contained.
 /// Global byte offsets for SW prefetch (128*255, then every 32*128).
 inline constexpr int64_t kSwPrefetchFirstGlobalByte = int64_t(128) * 255;
 inline constexpr int64_t kSwPrefetchSpacingBytes = int64_t(32) * 128;
@@ -52,8 +35,8 @@ inline constexpr int64_t kSwPrefetchNoPerBbGridAnchor = int64_t(-1);
 
 /// Per-BB anchored grid: `P_bb(localK) = bbAnchorGlobal + localK * kSwPrefetchSpacingBytes`
 /// (4 KiB steps from the first post-CP byte in the BB). \p bbAnchorGlobal must be ≥ `P(0)` when
-/// valid; see §15 of SwInstructionPrefetchRelDynamicPass-Design.md. Original dynamic pass uses
-/// global `swPrefetchGridOffset(k)` instead; both are global layout coordinates for ISA lowering.
+/// valid. The original dynamic pass uses global `swPrefetchGridOffset(k)` instead; both are
+/// global layout coordinates for ISA lowering.
 inline int64_t swPrefetchPerBbAnchorGridOffset(int64_t localK, int64_t bbAnchorGlobal) {
     return bbAnchorGlobal + localK * kSwPrefetchSpacingBytes;
 }
@@ -77,7 +60,9 @@ STINKYTOFU_EXPORT void debugPrintSwPrefetchGrid(
     std::ostream& os, const std::string& bbLabel, int64_t blockGlobalStart, int64_t blockBytes,
     const char* debugPassTag = "SwInstructionPrefetchRelStaticPass");
 
-/// Phase 1 (dynamic pass): layout map + CFG post-CP accum (front-edge Phi-max). No IR mutation.
+/// Phase 1 (dynamic pass): builds the layout map and the per-BB post-CP byte accumulation
+/// (`accumByte`); each BB's value is the max over its predecessors, following forward edges only
+/// (loop back-edges excluded). No IR mutation.
 struct STINKYTOFU_EXPORT SwPrefetchRelPhase1Accum {
     int64_t totalLayoutBytes = 0;
     std::unordered_map<BasicBlock*, int64_t> layoutStart;
@@ -94,16 +79,27 @@ struct STINKYTOFU_EXPORT SwPrefetchRelPhase1Accum {
     std::unordered_map<StinkyInstruction*, int64_t> layoutGlobal;
 };
 
-/// Walk all BBs in function list order (layout), then CFG RPO for `accumByte` (post-32640,
-/// front-edge predecessors only; loop back-edges excluded).
+/// Two read-only walks: (1) all BBs in function list order to record layout offsets, then (2) a
+/// single CFG reverse-post-order pass that fills `accumByte`. A BB's entry value is the max of its
+/// predecessors' exit values, taken only over forward edges — every CFG edge except a loop
+/// back-edge (an edge that jumps back to a loop header). Ignoring back-edges makes the propagation
+/// acyclic, so one pass suffices and every reachable BB is visited exactly once (no BB is skipped;
+/// unreachable BBs default to 0). This does not drop any block's own bytes: a loop body's post-CP
+/// bytes are still counted when its BBs are visited — only the back-edge's contribution is not fed
+/// back around the cycle.
 STINKYTOFU_EXPORT void computeSwPrefetchRelPhase1Accum(
     Function& func, const std::unordered_map<std::string, int64_t>* asmSetSymbols,
     SwPrefetchRelPhase1Accum& out, std::ostream* dbgOut = nullptr,
     const char* debugPassTag = "SwInstructionPrefetchRelDynamicPass",
     bool phase2UsesPerBbAnchorGrid = false);
 
-/// CFG-gated grid walk (dual gate §2.3): emit `s_prefetch_inst_pc_rel` when `cfgGate` holds.
-/// \p bbEntryAccum is Phase-1 `accumByte[bb]`. \p kNextIn is usually 0 (per-BB sweep §4.3).
+/// Walk the fixed prefetch grid `P(k) = 32640 + k*4096` across this BB and emit
+/// `s_prefetch_inst_pc_rel` at a grid point only when two conditions both hold: (1) the point is
+/// past the CP window (`P >= 32640`), and (2) it lies within this BB's accumulated post-CP
+/// execution range (so each point is prefetched once, along the path that reaches it).
+/// \p bbEntryAccum is Phase-1 `accumByte[bb]` (post-CP bytes accumulated before this BB).
+/// \p kNextIn is the first grid index `k` not yet consumed by earlier BBs; the walk runs BB-by-BB
+/// in layout order and carries `k` forward, so pass 0 only to start a fresh sweep.
 /// Returns number of prefetches inserted in this BB.
 STINKYTOFU_EXPORT int insertSwPrefetchLabelsDynamic(
     BasicBlock& bb, int64_t blockGlobalByteOffset, int64_t bbEntryAccum, int64_t kNextIn,
@@ -112,7 +108,7 @@ STINKYTOFU_EXPORT int insertSwPrefetchLabelsDynamic(
     bool allowSwPrefetchInsertion = true,
     const char* debugPassTag = "SwInstructionPrefetchRelDynamicPass");
 
-/// Alternate Phase-2 pipeline: same CFG dual gate (with **closed-left** match when
+/// Alternate Phase-2 pipeline: same two-condition insert test (with **closed-left** match when
 /// `P == bbGridAnchorGlobal == layoutBefore` so `P_bb(0)==A==layoutStart` inserts **before** the
 /// first insn at the anchor), opcode, and getpc rules as `insertSwPrefetchLabelsDynamic`, but
 /// grid targets are **`bbGridAnchorGlobal + localK * kSwPrefetchSpacingBytes`** (anchor from

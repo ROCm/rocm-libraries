@@ -1,25 +1,6 @@
-/* ************************************************************************
- * Copyright (C) 2026 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated software files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- *
- * ************************************************************************ */
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
 #include "stinkytofu/transforms/asm/SwInstructionPrefetchRelDynamicPass.hpp"
 
 #include <cstdint>
@@ -72,7 +53,7 @@ class SwInstructionPrefetchRelDynamicPass : public StinkyInstPass {
         int inserted = 0;
         if (m_usePerBbAnchorPrefetchGrid) {
             // Real first post-CP byte from Phase 1 (honors alignment gaps), shifted from pre-insert
-            // layout into Phase 2's post-insert coordinates (§12.3) so the per-BB grid stays
+            // layout into Phase 2's post-insert coordinates so the per-BB grid stays
             // aligned with this BB's actual emitted offsets.
             const int64_t firstPostCp = m_phase1.firstPostCpLayoutByte.at(bp);
             const int64_t anchor =
@@ -192,7 +173,7 @@ class SwInstructionPrefetchRelDynamicPass : public StinkyInstPass {
     std::unordered_map<std::string, int64_t> m_asmSetSymbols;
     bool m_debug = false;
     bool m_skipSwPrefetchInNaturalLoopBodies = false;
-    /// Default true: `P_bb(localK) = A(bb) + localK×4096` with `A` from phase 1 (§15).
+    /// Default true: `P_bb(localK) = A(bb) + localK×4096` with `A` from phase 1.
     bool m_usePerBbAnchorPrefetchGrid = true;
     std::string m_debugOutputPath;
     std::ofstream m_debugFile;
