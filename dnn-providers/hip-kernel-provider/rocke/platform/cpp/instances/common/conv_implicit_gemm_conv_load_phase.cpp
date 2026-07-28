@@ -279,14 +279,22 @@ void rocke_conv_emit_global_read(rocke_conv_build_ctx_t* ctx,
     rocke_ir_builder_t* b = ctx->b;
     /* k_off_capture[0] = k_off */
     ctx->k_off_capture = k_off;
-    rocke_coalesced_tile_loader_load_global(
-        b, &ctx->a_sync_loader, ctx->tid,
-        rocke_conv_a_descriptor, ctx,
-        ctx->a_rsrc, NULL, a_staged);
-    rocke_coalesced_tile_loader_load_global(
-        b, &ctx->b_sync_loader, ctx->tid,
-        rocke_conv_b_descriptor, ctx,
-        ctx->b_rsrc, NULL, b_staged);
+    rocke_coalesced_tile_loader_load_global(b,
+                                            &ctx->a_sync_loader,
+                                            ctx->tid,
+                                            rocke_conv_a_descriptor,
+                                            ctx,
+                                            ctx->a_rsrc,
+                                            NULL,
+                                            a_staged);
+    rocke_coalesced_tile_loader_load_global(b,
+                                            &ctx->b_sync_loader,
+                                            ctx->tid,
+                                            rocke_conv_b_descriptor,
+                                            ctx,
+                                            ctx->b_rsrc,
+                                            NULL,
+                                            b_staged);
 }
 
 /* ===================================================================== *

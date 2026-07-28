@@ -328,22 +328,24 @@ void rocke_coalesced_tile_loader_load_global(rocke_ir_builder_t* b,
     }
     if(self->use_buffer_rsrc && rsrc == NULL)
     {
-        rocke_i_set_err(b, ROCKE_ERR_VALUE, "CoalescedTileLoader: use_buffer_rsrc=True requires rsrc");
+        rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "CoalescedTileLoader: use_buffer_rsrc=True requires rsrc");
         return;
     }
     if(!self->use_buffer_rsrc && ptr == NULL)
     {
-        rocke_i_set_err(b, ROCKE_ERR_VALUE, "CoalescedTileLoader: use_buffer_rsrc=False requires ptr");
+        rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "CoalescedTileLoader: use_buffer_rsrc=False requires ptr");
         return;
     }
 
     /* Same constants as load() — byte-identical SSA prefix. */
-    c_threads      = rocke_b_const_i32(b, self->block_size);
-    c_load_vec     = rocke_b_const_i32(b, self->load_vec);
+    c_threads = rocke_b_const_i32(b, self->block_size);
+    c_load_vec = rocke_b_const_i32(b, self->load_vec);
     c_cols_per_vec = rocke_b_const_i32(b, rocke_coalesced_tile_loader_cols_per_vec(self));
-    c_half_bytes   = rocke_b_const_i32(b, 2);
-    c0             = rocke_b_const_i32(b, 0);
-    c_oob          = rocke_b_const_i32(b, self->oob_sentinel);
+    c_half_bytes = rocke_b_const_i32(b, 2);
+    c0 = rocke_b_const_i32(b, 0);
+    c_oob = rocke_b_const_i32(b, self->oob_sentinel);
 
     if(rocke_coalesced_tile_loader_vecs_per_thread(self, &vecs_per_thread) != ROCKE_OK)
     {
@@ -352,9 +354,12 @@ void rocke_coalesced_tile_loader_load_global(rocke_ir_builder_t* b,
     }
     if(vecs_per_thread > ROCKE_CTL_MAX_VECS_PER_THREAD)
     {
-        rocke_i_set_err(b, ROCKE_ERR_VALUE,
-                        "CoalescedTileLoader: vecs_per_thread %d > ROCKE_CTL_MAX_VECS_PER_THREAD %d",
-                        vecs_per_thread, ROCKE_CTL_MAX_VECS_PER_THREAD);
+        rocke_i_set_err(
+            b,
+            ROCKE_ERR_VALUE,
+            "CoalescedTileLoader: vecs_per_thread %d > ROCKE_CTL_MAX_VECS_PER_THREAD %d",
+            vecs_per_thread,
+            ROCKE_CTL_MAX_VECS_PER_THREAD);
         return;
     }
 
@@ -369,18 +374,18 @@ void rocke_coalesced_tile_loader_load_global(rocke_ir_builder_t* b,
         rocke_value_t* v;
 
         vec_idx = rocke_b_add(b, rocke_b_mul(b, rocke_b_const_i32(b, e), c_threads), tid);
-        row     = rocke_b_div(b, vec_idx, c_cols_per_vec);
-        col_v   = rocke_b_mod(b, vec_idx, c_cols_per_vec);
-        col     = (self->load_vec > 1) ? rocke_b_mul(b, col_v, c_load_vec) : col_v;
+        row = rocke_b_div(b, vec_idx, c_cols_per_vec);
+        col_v = rocke_b_mod(b, vec_idx, c_cols_per_vec);
+        col = (self->load_vec > 1) ? rocke_b_mul(b, col_v, c_load_vec) : col_v;
 
-        valid    = NULL;
+        valid = NULL;
         off_elems = descriptor(b, row, col, &valid, descriptor_user);
 
         if(self->use_buffer_rsrc)
         {
             rocke_value_t* off_bytes = rocke_b_mul(b, off_elems, c_half_bytes);
-            rocke_value_t* safe = (valid != NULL) ? rocke_b_select(b, valid, off_bytes, c_oob)
-                                                  : off_bytes;
+            rocke_value_t* safe
+                = (valid != NULL) ? rocke_b_select(b, valid, off_bytes, c_oob) : off_bytes;
             if(self->load_vec == 1)
                 v = rocke_b_buffer_load_f16(b, rsrc, safe, c0);
             else
@@ -396,7 +401,7 @@ void rocke_coalesced_tile_loader_load_global(rocke_ir_builder_t* b,
 
         staged->vecs[e].row = row;
         staged->vecs[e].col = col;
-        staged->vecs[e].v   = v;
+        staged->vecs[e].v = v;
     }
     staged->count = vecs_per_thread;
 }

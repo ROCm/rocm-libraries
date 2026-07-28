@@ -170,8 +170,8 @@ void rocke_conv_emit_kloop_v1(rocke_conv_build_ctx_t* ctx)
         /* Commit the next tile's staged VGPRs to LDS. */
         if(has_pending)
         {
-            rocke_conv_emit_lds_write(ctx, pending_k_off, &pending_a, &pending_b,
-                                      ctx->A_smem, ctx->B_smem);
+            rocke_conv_emit_lds_write(
+                ctx, pending_k_off, &pending_a, &pending_b, ctx->A_smem, ctx->B_smem);
             has_pending = 0;
         }
     }
