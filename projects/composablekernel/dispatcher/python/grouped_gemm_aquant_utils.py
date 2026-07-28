@@ -287,7 +287,8 @@ class AQuantDispatcherLib:
         import numpy as np
 
         A  = np.ascontiguousarray(A)
-        B  = np.ascontiguousarray(B)
+        # B is col-major [K, N]: Fortran order makes the leading dim = K (stride_B = K).
+        B  = np.asfortranarray(B)
         AQ = np.ascontiguousarray(AQ)
         C  = np.ascontiguousarray(C)
 
@@ -356,6 +357,7 @@ class AQuantGpuGemmRunner:
         B       shape: (K, N) col-major  dtype: fp8/bf8 or pk_int4
         AQ      shape: (QM_A, QK_A)     dtype: float (for fp8/bf8) or fp8/bf8 (for fp8i4/bf8i4)
         c_dtype numpy dtype for the output C buffer.  Defaults to np.float16.
+                Pass np.bfloat16 for MX variants whose CDataType is bf16.
         Returns AQuantGemmResult with C shape (M, N).
         """
         import numpy as np
@@ -392,6 +394,22 @@ class AQuantGpuGemmRunner:
                 f"dispatcher_run_aquant_gemm failed with code {rc} "
                 f"for kernel {self.kernel_name}"
             )
+
+        # permute_n epilogue writes C with N-columns riffled into r groups
+        # (r = tile_n / warp_tile_n / warp_n). Undo it so the caller gets logical C.
+        _name = self.kernel_name
+        if 'permute_n' in _name:
+            import re as _re
+            _m = _re.search(r'_(\d+)x(\d+)x(\d+)_(\d+)x(\d+)x(\d+)_(\d+)x(\d+)x(\d+)_', _name)
+            if _m:
+                _tile_n = int(_m.group(2)); _warp_n = int(_m.group(5)); _wt_n = int(_m.group(8))
+                _r = _tile_n // _wt_n // _warp_n
+                if _r > 1 and (N % _r) == 0:
+                    _half = N // _r
+                    _logical = [(c % _r) * _half + (c // _r) for c in range(N)]
+                    _Cp = np.empty_like(C)
+                    _Cp[:, _logical] = C
+                    C = _Cp
 
         return AQuantGemmResult(C=C, time_ms=time_ms, kernel_name=self.kernel_name)
 

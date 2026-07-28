@@ -17,6 +17,8 @@ Covers fp8, bf8 dtype variants with separate AQuantGroupSize and BQuantGroupSize
 
 Constraint: AQuantGroupSize::kK == BQuantGroupSize::kK (enforced at codegen time).
 
+BQ layout: ColumnMajor [ceil(K/bK), ceil(N/bN)] — the kernel asserts ColumnMajor for BQ.
+
 Pipeline selection (mirrors run_gemm_quant_example.inc):
   compv3:     ABQuantGemmPipelineAgBgCrCompV3 (GemmConfigABQuantPrefill, non-gfx950)
   eightwaves: ABQuantGemmPipelineAgBgCrEightWaves (GemmConfigEightWaves, gfx950)
@@ -221,8 +223,8 @@ class ABQuantKernelHeaderGenerator:
         layout_c_ck = ABQUANT_LAYOUT_TO_CK[spec.layout[2]]
         # AQ is RowMajor: [ceil(M/gM), ceil(K/gK)]
         layout_aq_ck = ABQUANT_LAYOUT_TO_CK["r"]
-        # BQ is RowMajor: [ceil(K/gK), ceil(N/gN)]
-        layout_bq_ck = ABQUANT_LAYOUT_TO_CK["r"]
+        # BQ is ColumnMajor: [ceil(K/gK), ceil(N/gN)] — kernel asserts against RowMajor BQ.
+        layout_bq_ck = ABQUANT_LAYOUT_TO_CK["c"]
 
         pipeline_ck      = ABQUANT_PIPELINE_MAP[spec.pipeline]
         base_pipeline_ck = ABQUANT_BASE_PIPELINE_MAP[spec.pipeline]
@@ -305,7 +307,7 @@ using ALayout  = {layout_a_ck};
 using BLayout  = {layout_b_ck};
 using CLayout  = {layout_c_ck};
 using AQLayout = {layout_aq_ck};  // RowMajor: [ceil(M/aM), ceil(K/aK)]
-using BQLayout = {layout_bq_ck};  // RowMajor: [ceil(K/bK), ceil(N/bN)]
+using BQLayout = {layout_bq_ck};  // ColumnMajor: [ceil(K/bK), ceil(N/bN)]
 
 // Separate group sizes — ABQuant requires AQuantGroupSize::kK == BQuantGroupSize::kK
 using AQuantGroupSize = ck_tile::QuantGroupShape<ck_tile::sequence<

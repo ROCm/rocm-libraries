@@ -15,8 +15,13 @@
  *
  * ABQuant: both A-side and B-side quantization active.
  *   AQ[ceil(M/aM), ceil(K/aK)] - A-side scale tensor (RowMajor)
- *   BQ[ceil(K/bK), ceil(N/bN)] - B-side scale tensor (RowMajor)
+ *   BQ[ceil(K/bK), ceil(N/bN)] - B-side scale tensor (ColumnMajor, as required by kernel)
  *   Constraint: AQuantGroupSize::kK == BQuantGroupSize::kK
+ *
+ * Design: direct launch -- SelectedKernel::launch(QuantGemmHostArgs, stream_config) is
+ * called directly. No dispatcher registry is used: ABQuant kernels take QuantGemmHostArgs,
+ * which is incompatible with the GeneratedTileKernelInstance::run() signature used by
+ * the dispatcher's registry backend.
  *
  * Memory model: host-pointer (this library owns hipMalloc/hipMemcpy/hipFree).
  */
@@ -25,27 +30,26 @@
 #include <cstdint>
 #include <cstring>
 #include <iostream>
-#include <memory>
 #include <string>
-
-#include "ck_tile/dispatcher/dispatcher.hpp"
-#include "ck_tile/dispatcher/registry.hpp"
-#include "ck_tile/dispatcher/backends/generated_tile_backend.hpp"
+#include <type_traits>
 
 // Kernel header force-included via -include compiler flag.
 // Defines: ADataType, BDataType, CDataType, QDataType (shared AQ/BQ type), AccDataType,
 //          AQuantGroupSize, BQuantGroupSize, SelectedKernel, KERNEL_NAME
 
-#ifndef GFX_ARCH
-#define GFX_ARCH "gfx950"
-#endif
+// Compute the byte count for N logical elements of type T.
+// For packed types (pk_int4_t, pk_fp4_t) PackedSize=2, so N logical values
+// occupy N/2 bytes even though sizeof(T)==1.  For all other types PackedSize=1.
+template <typename T>
+static constexpr std::size_t elements_to_bytes(std::size_t n)
+{
+    return n * sizeof(T) / ck_tile::numeric_traits<T>::PackedSize;
+}
 
-using namespace ck_tile::dispatcher;
-using namespace ck_tile::dispatcher::backends;
-using Priority = ck_tile::dispatcher::Registry::Priority;
+// GPU architecture is derived from the running device at launch time rather than
+// assumed at compile time -- do not hardcode a default architecture here.
 
-static std::shared_ptr<Dispatcher> g_dispatcher = nullptr;
-static bool g_initialized                       = false;
+static bool g_initialized = false;
 
 #define HIP_CHECK(call)                                                                        \
     {                                                                                          \
@@ -61,55 +65,19 @@ static bool g_initialized                       = false;
 extern "C" {
 
 /**
- * Initialize dispatcher -- must be called before dispatcher_run_abquant_gemm.
- * Returns 0 on success, -1 on error.
+ * Initialize the ctypes lib. Must be called before dispatcher_run_abquant_gemm.
+ *
+ * This library uses a single-kernel-per-.so model: SelectedKernel is
+ * force-included at compile time and invoked directly via SelectedKernel::launch().
+ * No dispatcher registry is involved -- ABQuant kernels require QuantGemmHostArgs
+ * which is incompatible with the GeneratedTileKernelInstance::run() signature.
+ *
+ * Returns 0 on success.
  */
 int dispatcher_initialize()
 {
     if(g_initialized)
         return 0;
-
-    KernelKey key;
-    key.signature.dtype_a             = DataType::FP8;
-    key.signature.dtype_b             = DataType::FP8;
-    key.signature.dtype_c             = DataType::FP16;
-    key.signature.dtype_acc           = DataType::FP32;
-    key.signature.layout_a            = LayoutTag::RowMajor;
-    key.signature.layout_b            = LayoutTag::ColMajor;
-    key.signature.layout_c            = LayoutTag::RowMajor;
-    key.signature.transpose_a         = false;
-    key.signature.transpose_b         = false;
-    key.signature.grouped             = false;
-    key.signature.split_k             = 1;
-    key.signature.elementwise_op      = "PassThrough";
-    key.signature.num_d_tensors       = 0;
-    key.signature.structured_sparsity = false;
-
-    key.algorithm.tile_shape = {
-        SelectedKernel::TileM, SelectedKernel::TileN, SelectedKernel::TileK};
-    key.algorithm.wave_shape = {
-        SelectedKernel::WarpM, SelectedKernel::WarpN, SelectedKernel::WarpK};
-    key.algorithm.warp_tile_shape = {
-        SelectedKernel::WarpTileM, SelectedKernel::WarpTileN, SelectedKernel::WarpTileK};
-    key.algorithm.pipeline        = Pipeline::CompV3;
-    key.algorithm.scheduler       = Scheduler::Intrawave;
-    key.algorithm.epilogue        = Epilogue::CShuffle;
-    key.algorithm.block_size      = SelectedKernel::BlockSize;
-    key.algorithm.double_buffer   = SelectedKernel::DoubleSmemBuffer;
-    key.algorithm.persistent      = false;
-    key.algorithm.preshuffle      = SelectedKernel::PreshuffleB;
-    key.algorithm.transpose_c     = SelectedKernel::TransposeC;
-    key.algorithm.num_wave_groups = 1;
-    key.gfx_arch                  = GFX_ARCH;
-
-    auto kernel =
-        create_generated_tile_kernel<SelectedKernel, ADataType, BDataType, CDataType, AccDataType>(
-            key, KERNEL_NAME);
-
-    Registry::instance().clear();
-    Registry::instance().register_kernel(kernel, Priority::High);
-
-    g_dispatcher  = std::make_shared<Dispatcher>();
     g_initialized = true;
     return 0;
 }
@@ -127,7 +95,7 @@ int dispatcher_initialize()
  *   stride_A         - leading dim of A (row-major: K)
  *   stride_B         - leading dim of B (col-major: K)
  *   stride_AQ        - leading dim of AQ (row-major: ceil(K/aK))
- *   stride_BQ        - leading dim of BQ (row-major: ceil(N/bN))
+ *   stride_BQ        - leading dim of BQ (col-major: ceil(K/bK))
  *   stride_C         - leading dim of C  (row-major: N)
  *   QK_A             - ceil(K / aquant_group_k)
  *   QM_A             - ceil(M / aquant_group_m)  (typically == M when aM=1)
@@ -174,6 +142,25 @@ int dispatcher_run_abquant_gemm(const void* A,
         return -1;
     }
 
+    // Derive the GPU architecture from the running device and reject unsupported archs.
+    {
+        int dev = 0;
+        hipDeviceProp_t props{};
+        if(hipGetDevice(&dev) != hipSuccess || hipGetDeviceProperties(&props, dev) != hipSuccess)
+        {
+            std::cerr << "dispatcher_run_abquant_gemm: could not query device architecture\n";
+            return -1;
+        }
+        const std::string arch(props.gcnArchName);
+        if(arch.rfind("gfx950", 0) != 0 && arch.rfind("gfx942", 0) != 0 &&
+           arch.rfind("gfx90a", 0) != 0)
+        {
+            std::cerr << "dispatcher_run_abquant_gemm: unsupported GPU architecture '" << arch
+                      << "' (supported: gfx90a, gfx942, gfx950)\n";
+            return -1;
+        }
+    }
+
     // Validate AQ dimensions
     {
         const int64_t exp_QK_A =
@@ -206,12 +193,12 @@ int dispatcher_run_abquant_gemm(const void* A,
 
     // Only packed (contiguous) layouts are supported.
     // AQ is RowMajor [QM_A, QK_A]: stride_AQ == QK_A
-    // BQ is RowMajor [QK_B, QN_B]: stride_BQ == QN_B
-    if(stride_A != K || stride_B != K || stride_AQ != QK_A || stride_BQ != QN_B || stride_C != N)
+    // BQ is ColumnMajor [QK_B, QN_B]: stride_BQ == QK_B (leading dim = number of K-groups)
+    if(stride_A != K || stride_B != K || stride_AQ != QK_A || stride_BQ != QK_B || stride_C != N)
     {
         std::cerr << "dispatcher_run_abquant_gemm: non-packed strides not supported. "
                   << "Expected stride_A=" << K << " stride_B=" << K << " stride_AQ=" << QK_A
-                  << " stride_BQ=" << QN_B << " stride_C=" << N << "\n";
+                  << " stride_BQ=" << QK_B << " stride_C=" << N << "\n";
         return -1;
     }
 
@@ -240,55 +227,59 @@ int dispatcher_run_abquant_gemm(const void* A,
             (void)hipFree(C_dev);
     };
 
-    if(hipMalloc(&A_dev, M * K * sizeof(ADataType)) != hipSuccess)
+    // Allocate device buffers.
+    // elements_to_bytes<T>(n) handles packed types (pk_int4_t etc.) via PackedSize.
+    if(hipMalloc(&A_dev, elements_to_bytes<ADataType>(M * K)) != hipSuccess)
     {
         cleanup();
         return -1;
     }
-    if(hipMalloc(&B_dev, K * N * sizeof(BDataType)) != hipSuccess)
+    if(hipMalloc(&B_dev, elements_to_bytes<BDataType>(K * N)) != hipSuccess)
     {
         cleanup();
         return -1;
     }
-    if(hipMalloc(&AQ_dev, QM_A * QK_A * sizeof(QDataType)) != hipSuccess)
+    if(hipMalloc(&AQ_dev, elements_to_bytes<QDataType>(QM_A * QK_A)) != hipSuccess)
     {
         cleanup();
         return -1;
     }
-    if(hipMalloc(&BQ_dev, QK_B * QN_B * sizeof(QDataType)) != hipSuccess)
+    if(hipMalloc(&BQ_dev, elements_to_bytes<QDataType>(QK_B * QN_B)) != hipSuccess)
     {
         cleanup();
         return -1;
     }
-    if(hipMalloc(&C_dev, M * N * sizeof(CDataType)) != hipSuccess)
+    if(hipMalloc(&C_dev, elements_to_bytes<CDataType>(M * N)) != hipSuccess)
     {
         cleanup();
         return -1;
     }
 
-    if(hipMemcpy(A_dev, A_host, M * K * sizeof(ADataType), hipMemcpyHostToDevice) != hipSuccess)
-    {
-        cleanup();
-        return -1;
-    }
-    if(hipMemcpy(B_dev, B_host, K * N * sizeof(BDataType), hipMemcpyHostToDevice) != hipSuccess)
-    {
-        cleanup();
-        return -1;
-    }
-    if(hipMemcpy(AQ_dev, AQ_host, QM_A * QK_A * sizeof(QDataType), hipMemcpyHostToDevice) !=
+    if(hipMemcpy(A_dev, A_host, elements_to_bytes<ADataType>(M * K), hipMemcpyHostToDevice) !=
        hipSuccess)
     {
         cleanup();
         return -1;
     }
-    if(hipMemcpy(BQ_dev, BQ_host, QK_B * QN_B * sizeof(QDataType), hipMemcpyHostToDevice) !=
+    if(hipMemcpy(B_dev, B_host, elements_to_bytes<BDataType>(K * N), hipMemcpyHostToDevice) !=
        hipSuccess)
     {
         cleanup();
         return -1;
     }
-    if(hipMemset(C_dev, 0, M * N * sizeof(CDataType)) != hipSuccess)
+    if(hipMemcpy(AQ_dev, AQ_host, elements_to_bytes<QDataType>(QM_A * QK_A), hipMemcpyHostToDevice) !=
+       hipSuccess)
+    {
+        cleanup();
+        return -1;
+    }
+    if(hipMemcpy(BQ_dev, BQ_host, elements_to_bytes<QDataType>(QK_B * QN_B), hipMemcpyHostToDevice) !=
+       hipSuccess)
+    {
+        cleanup();
+        return -1;
+    }
+    if(hipMemset(C_dev, 0, elements_to_bytes<CDataType>(M * N)) != hipSuccess)
     {
         cleanup();
         return -1;
@@ -313,7 +304,17 @@ int dispatcher_run_abquant_gemm(const void* A,
     args.stride_AQ = static_cast<ck_tile::index_t>(stride_AQ);
     args.stride_BQ = static_cast<ck_tile::index_t>(stride_BQ);
 
-    ck_tile::stream_config stream_cfg{nullptr, false, 0, 0, 1, false, false, 1};
+    const bool do_time = (time_ms != nullptr);
+    ck_tile::stream_config stream_cfg{
+        nullptr,          // stream_id_
+        do_time,          // time_kernel_
+        0,                // log_level_
+        do_time ? 3 : 0,  // cold_niters_
+        do_time ? 10 : 1, // nrepeat_
+        do_time,          // is_gpu_timer_
+        false,            // flush_cache_
+        1,                // rotating_count_
+    };
 
     float exec_time = SelectedKernel::launch(args, stream_cfg);
 
@@ -324,7 +325,8 @@ int dispatcher_run_abquant_gemm(const void* A,
         return -2;
     }
 
-    if(hipMemcpy(C_host, C_dev, M * N * sizeof(CDataType), hipMemcpyDeviceToHost) != hipSuccess)
+    if(hipMemcpy(C_host, C_dev, elements_to_bytes<CDataType>(M * N), hipMemcpyDeviceToHost) !=
+       hipSuccess)
     {
         cleanup();
         return -1;
@@ -350,15 +352,11 @@ int dispatcher_init() { return dispatcher_initialize(); }
 /**
  * Number of kernels registered (always 1 for single-kernel-per-.so model).
  */
-int dispatcher_get_kernel_count() { return static_cast<int>(Registry::instance().size()); }
+int dispatcher_get_kernel_count() { return 1; }
 
 /**
  * Release dispatcher resources.
  */
-void dispatcher_cleanup()
-{
-    g_dispatcher.reset();
-    g_initialized = false;
-}
+void dispatcher_cleanup() { g_initialized = false; }
 
 } // extern "C"
