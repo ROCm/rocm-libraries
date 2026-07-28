@@ -54,43 +54,115 @@ pytest -m unit --cov=Tensile --cov-config=pyproject.toml \
 
 Line coverage = `(Stmts - Miss) / Stmts`.
 
-## Coverage floor + ratchet (CI enforcement)
+## Coverage floors + ratchet (CI enforcement)
 
-Two complementary gates keep this net from silently eroding. Both run in the `coverage-unit`
-tox environment (`tox -e coverage-unit`), which the Math CI codecov job and the TensileLite
-coverage GitHub Actions lane both invoke.
+A **floor** is a minimum level of coverage that CI will not let you fall below. There are floors at
+two granularities, and every coverage run enforces both:
 
-- **Floor** (AIHPBLAS-3877): a single whole-project minimum. The value lives in **one place** —
-  `fail_under` under `[tool.coverage.report]` in the top-level [`pyproject.toml`](../../../../pyproject.toml)
-  — and the combined-coverage `coverage report` step (in the env's `commands_post`) fails the run
-  when whole-project coverage drops below it. There is no second copy of the number in `tox.ini` or
-  in CI YAML.
-- **Ratchet** (AIHPBLAS-3878): a per-file no-regression guard. `coverage-baseline.json` (in this
-  directory) pins each file's current coverage; `tools/coverage_ratchet.py check` (wired into the
-  `coverage-unit` env's `commands_post`) fails the run if any file drops below its baseline by more
-  than the recorded tolerance. Coverage may rise freely; it may not silently fall. The failure
-  message names every regressed file and prints the exact remediation command.
+- **A whole-project floor**: one fixed percentage for the combined total, summed across every
+  measured file.
+- **A per-file floor**: one number per file, recorded in a committed baseline, so each file is held
+  to its own line.
 
-### Moving the baseline on purpose
+If the combined total, or any single file, drops below its floor, the run fails.
 
-A coverage drop is a signal, not a chore — first decide whether it is a real regression (add the
-missing test) or an intentional, reviewed change (e.g. code removed). Only for an intentional move
-do you regenerate the baseline, and it is a single reviewed command whose diff is reviewed like any
-other change:
+The **ratchet** is how the floors move: one way, up, and only on purpose. Picture a ratchet wrench;
+it only turns one way. Each upward click locks in a new, higher floor you can no longer fall back
+below. Raising the floors is a deliberate, occasional maintenance step: a reviewed PR that recomputes
+per-file coverage, updates the baseline, and bumps the whole-project number. Everyday coverage gains
+never lower anything; the floors advance only when someone clicks them up.
 
-```bash
-tox -e coverage-unit    # regenerates coverage.json (even if the ratchet then fails)
-python Tensile/Tests/unit/characterization/tools/coverage_ratchet.py update --current coverage.json
-```
+Why per-file floors, and not just a whole-project one? A single project-wide floor can be fooled. One
+file can quietly lose its tests while another file's gains prop the average back up, so the combined
+total still clears the floor. Per-file floors catch that: a drop in any single file fails the run
+even when the overall number looks fine.
 
-Then commit the reviewed `coverage-baseline.json` diff. Never widen the tolerance or blank the
-baseline to go green.
+### What the coverage number counts: the union of two suites
 
-> The committed baseline is **populated** (one entry per measured file) and the ratchet is
-> **active**. It was seeded from a real GPU-less `coverage-unit` run (with `rocisa` built); refresh
-> it with the `update` command above whenever an intentional change moves coverage. A brand-new
-> source file is not in the baseline yet, so the ratchet ignores it until the next `update` pins it
-> — the whole-project floor is the backstop for that window.
+The tests that run here are really two suites: the **characterization** tests (this directory) and
+the **pure unit** tests (the rest of `Tensile/Tests/unit`). Coverage is measured on the **union** of
+the two. A line counts as covered if *either* suite reaches it. The floors are measured on that
+union, so a per-file floor pins "coverage from characterization or unit, whichever reaches this
+line", not characterization alone.
+
+### The characterization → unit migration, and what the floors do (and do not) show
+
+Characterization tests are scaffolding. They pin today's behavior so the code can be refactored
+safely, but the long-term goal is real unit tests that make the scaffolding unnecessary. Because
+coverage is measured on the union, moving a line's protection from a characterization test to a unit
+test does not change the number: the union still covers the line, so no floor moves. That is
+deliberate. The per-file floors act as a **safety rail for the migration** rather than an obstacle:
+you can retire a characterization test only once a unit test covers the same lines, because if you
+remove the net before the replacement exists, coverage drops below the floor and CI stops you.
+
+What the floors do **not** do is measure migration progress. They do not know, or care, whether a
+covered line was reached by a characterization test or a unit test. The characterization-vs-unit
+**summary card** (rendered by the coverage lane into the GitHub run summary) is what shows that. The
+card splits every measurable statement into four buckets that sum to 100%: reached by both suites,
+by characterization only, by unit only, or by no test at all. The *characterization-only* count is
+the migration debt (lines still protected only by scaffolding, which should fall toward zero as unit
+tests take over), and the *no test coverage* count is the untested surface behind the whole-project
+floor.
+
+Both floors are enforced in the `coverage-unit` tox environment (`tox -e coverage-unit`), which the
+TensileLite coverage GitHub Actions lane invokes.
+
+- **Whole-project floor** (AIHPBLAS-3877). The value lives in exactly one place: `fail_under` under
+  `[tool.coverage.report]` in the top-level [`pyproject.toml`](../../../../pyproject.toml). The
+  combined-coverage `coverage report` step (in the env's `commands_post`) fails the run when the
+  combined total drops below it. The number is not duplicated in `tox.ini` or in CI YAML.
+- **Per-file floors** (AIHPBLAS-3878). `coverage-baseline.json` (in this directory) holds each
+  file's floor. `tools/coverage_ratchet.py check` (also in the env's `commands_post`) fails the run
+  if any file drops below its floor by more than a small tolerance (the tolerance absorbs
+  floating-point and test-ordering noise, not real regressions). The failure message names every
+  file that dropped and prints the one command that raises the floors on purpose.
+
+### Raising the floors (the ratchet)
+
+Raising the floors is the ratchet click: a deliberate, reviewed step, never automatic. Most of the
+time it is a genuine rise (new tests pushed coverage up, so you lock the gain in). A per-file drop is
+a signal to decide first. If a file lost coverage because a test is missing, that is a real
+regression; add the test rather than lowering its floor. Only when a drop is intentional (for
+example, code was removed) do you reset that file's floor as part of the same reviewed change.
+
+A floor-raising PR is a small, behavior-neutral maintenance change. It should touch only
+`coverage-baseline.json` (the per-file floors) and, when you also lift the whole-project floor,
+`fail_under` in `pyproject.toml`. Nothing else.
+
+1. **Get fresh numbers.** Run the lane so it writes a current `coverage.json`:
+
+   ```bash
+   tox -e coverage-unit    # writes coverage.json even if the per-file check then fails
+   ```
+
+2. **Recompute the per-file floors.** Rewrite the baseline from that report:
+
+   ```bash
+   python Tensile/Tests/unit/characterization/tools/coverage_ratchet.py update --current coverage.json
+   ```
+
+   This sets each file's floor to its current coverage (rounded to two decimals). The numbers
+   normally go up.
+
+3. **Review the baseline diff before you commit it.** Expect rises. If a file dropped, do not just
+   record the lower number: decide first (a missing test means add the test; an intentional code
+   removal means say so in the PR). The diff is the review artifact, so keep it readable.
+
+4. **Optionally raise the whole-project floor.** If combined coverage has climbed with room to
+   spare, bump `fail_under` in `pyproject.toml` toward the 80% target. Leave a small margin below the
+   measured number (a point or two): the per-file `--tolerance` already absorbs run-to-run wobble for
+   the per-file floors, but `fail_under` is an exact cutoff, so a floor set right at the current
+   number can trip on normal noise.
+
+5. **Commit and open the PR.** Commit the `coverage-baseline.json` (and, if changed, `pyproject.toml`)
+   diff with a one-line rationale, for example "raise floors after landing the DataType tests". Never
+   widen the tolerance or blank the baseline to go green.
+
+> The committed baseline is **populated** (one entry per measured file) and the per-file floors are
+> **active**. They were seeded from a real GPU-less `coverage-unit` run (with `rocisa` built);
+> refresh them with the `update` command above whenever an intentional change moves coverage. A
+> brand-new source file has no floor yet, so the per-file check ignores it until the next `update`
+> records one. During that window the whole-project floor is the backstop.
 
 ## Snapshot / golden discipline (governance)
 

@@ -1,27 +1,40 @@
 #!/usr/bin/env python3
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Per-file coverage ratchet for the TensileLite characterization suite.
+"""Per-file coverage floors (and the ratchet that raises them) for TensileLite.
 
-The coverage *floor* (a single whole-project minimum) lives in
-``[tool.coverage.report] fail_under`` in ``pyproject.toml`` and is enforced by
-pytest-cov. This ratchet is the complementary no-silent-regression mechanism
-(AIHPBLAS-3878): it pins the *current* per-file coverage in a committed
-baseline so coverage may rise but never quietly fall, even while the whole
-project stays above the floor.
+This tool maintains a *per-file floor*: a minimum coverage percentage for each
+file, recorded in a committed baseline (``coverage-baseline.json``). It is the
+per-file complement to the whole-project floor (a single minimum for the
+combined total, set by ``[tool.coverage.report] fail_under`` in
+``pyproject.toml``, AIHPBLAS-3877). Per-file floors catch a single file
+backsliding even when the overall total still clears the whole-project floor
+(AIHPBLAS-3878).
+
+The floors move one way only: up, and on purpose. That upward move is the
+*ratchet*. Like a ratchet wrench that only turns one way, each click locks in a
+higher floor. Raising the floors is a deliberate maintenance step done in a
+reviewed PR (this tool's ``update`` mode); everyday coverage gains never lower
+anything on their own.
 
 Two modes:
 
-* ``check``  - compare a fresh ``coverage.json`` against the committed baseline
-  and fail (exit 1) if any file regressed by more than ``--tolerance``
-  percentage points. Prints exactly which files dropped and the one command to
-  fix it.
-* ``update`` - rewrite the baseline from the current ``coverage.json``. This is
-  the single reviewed command for an intentional baseline move; the resulting
-  diff is reviewed like any other change.
+* ``check``  - enforce the floors: compare a fresh ``coverage.json`` against the
+  committed per-file floors and fail (exit 1) if any file dropped below its floor
+  by more than ``--tolerance`` percentage points. This runs in CI on every
+  coverage run. Prints exactly which files dropped and the one command to fix it.
+* ``update`` - the ratchet click: rewrite the baseline from the current
+  ``coverage.json``, raising each file's floor to the new level (or, for a
+  reviewed intentional reduction, resetting it). This is the single reviewed
+  command for a deliberate floor move; the resulting diff is reviewed like any
+  other change.
 
 Input is the coverage.py JSON report (``--cov-report=json``), whose per-file
-line-coverage percentage is ``files[<path>]["summary"]["percent_covered"]``.
+line-coverage percentage is ``files[<path>]["summary"]["percent_covered"]``. In
+the ``coverage-unit`` lane that report is the *combined* dataset (the
+characterization and pure-unit suites unioned by ``coverage combine``), so the
+ratchet is agnostic to which suite reaches a line. That is why it does not track
+the characterization-to-unit migration; the split-summary card does that.
 """
 
 from __future__ import annotations

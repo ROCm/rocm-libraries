@@ -1,5 +1,19 @@
 name: "Component CI: TensileLite coverage"
 
+# Why this lane exists
+#
+# This is a lightweight (CPU-only, ~7 min), from-source coverage generator for
+# the TensileLite Python suite. It is deliberately separate from the functional
+# test jobs (which answer "does it work"). This lane only measures coverage: it
+# enforces the whole-project floor and the per-file ratchet and renders the
+# characterization-vs-unit migration card.
+#
+# It exists to support the characterization-to-unit refactor and is expected to
+# retire once that conversion is done, so it is intentionally a small, standalone
+# lane that is a clean delete later. It is not a general test run: the functional
+# suites, and the TheRock foothold that runs the suite on GPU archs from installed
+# artifacts, stay as they are.
+
 on:
   workflow_call:
     inputs:

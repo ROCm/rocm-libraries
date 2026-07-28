@@ -40,14 +40,23 @@ css = _load_module()
 pytestmark = pytest.mark.unit
 
 
-def _cov(files: dict[str, list[int]], total: float) -> dict:
-    """coverage.py-shaped report from {path: executed_lines} plus a total pct."""
+def _cov(
+    files: dict[str, list[int]], total: float, num_statements: int | None = None
+) -> dict:
+    """coverage.py-shaped report from {path: executed_lines} plus a total pct.
+
+    ``num_statements`` populates ``totals.num_statements`` (covered + uncovered),
+    which the card needs from the combined report to compute the untested surface.
+    """
+    totals: dict = {"percent_covered": total}
+    if num_statements is not None:
+        totals["num_statements"] = num_statements
     return {
         "meta": {"format": 3},
         "files": {
             path: {"executed_lines": lines} for path, lines in files.items()
         },
-        "totals": {"percent_covered": total},
+        "totals": totals,
     }
 
 
@@ -135,21 +144,43 @@ def test_build_markdown_line_level_split_is_set_arithmetic():
     # char reaches a.py:1,2 ; unit reaches a.py:2 and b.py:1
     char = _cov({"a.py": [1, 2]}, 40.0)
     unit = _cov({"a.py": [2], "b.py": [1]}, 30.0)
+    # No combined report -> falls back to the union-denominator table.
     md = css.build_markdown(char, unit, None, char_tests=10, unit_tests=20)
 
     assert "characterization vs unit" in md
     # union is {a:1, a:2, b:1} = 3 lines; both = {a:2} = 1
     assert "Union (any suite)" in md and _has_cell(md, "3")
     assert "Both suites" in md and _has_cell(md, "1")
+    # without a combined report there is no untested-surface row
+    assert "No test coverage" not in md
     # test counts render, combined row absent when combined is None
     assert _has_cell(md, "10") and _has_cell(md, "20")
     assert "**Combined**" not in md
 
 
+def test_build_markdown_all_statements_split_shows_untested_surface():
+    # char reaches a.py:1,2 ; unit reaches a.py:2 and b.py:1 -> union covers 3
+    char = _cov({"a.py": [1, 2]}, 40.0)
+    unit = _cov({"a.py": [2], "b.py": [1]}, 30.0)
+    # 5 measurable statements total, so 3 covered leaves 2 with no test coverage.
+    combined = _cov({"a.py": [1, 2], "b.py": [1]}, 60.0, num_statements=5)
+    md = css.build_markdown(char, unit, combined, char_tests=10, unit_tests=20)
+
+    assert "**Combined**" in md and "60.00%" in md
+    assert "share of all measurable statements" in md
+    # covered = 3/5 = 60.00% ; untested = 2/5 = 40.00% ; they sum to 100%
+    assert "Covered by any suite" in md and _has_cell(md, "3")
+    assert "No test coverage" in md and _has_cell(md, "2")
+    assert "60.00%" in md and "40.00%" in md
+    assert "Total statements" in md
+    # char-only = {a:1} = 1 is the migration debt; unit-only = {b:1} = 1
+    assert "Characterization only" in md and "Unit only" in md
+
+
 def test_build_markdown_includes_combined_and_dashes_for_missing_counts():
     char = _cov({"a.py": [1]}, 40.0)
     unit = _cov({"a.py": [1]}, 40.0)
-    combined = _cov({"a.py": [1]}, 55.5)
+    combined = _cov({"a.py": [1]}, 55.5, num_statements=2)
     md = css.build_markdown(char, unit, combined, char_tests=None, unit_tests=None)
     assert "**Combined**" in md and "55.50%" in md
     # missing test counts collapse to '-'

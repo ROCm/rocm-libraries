@@ -3,20 +3,33 @@
 # SPDX-License-Identifier: MIT
 """Render a characterization-vs-unit coverage breakdown as Markdown.
 
-The coverage-unit lane measures one combined coverage number (characterization
-tests plus the pure unit tests, which all live under Tensile/Tests/unit and
-carry the ``unit`` marker). Characterization tests are separated only by path
-(the ``characterization/`` subtree), so to attribute coverage to each suite we
-run coverage.py twice with different test selections and feed the two JSON
-reports (plus the combined report) here.
+The coverage-unit lane runs two disjoint test selections: the characterization
+suite (the ``characterization/`` subtree) and the pure unit tests (the rest of
+``Tensile/Tests/unit``, with the characterization subtree excluded). It feeds
+their two JSON coverage reports here, plus the combined report.
+
+Why this card exists: characterization tests are scaffolding, and the goal is to
+replace them with real unit tests. This card is the migration dashboard. Its key
+number is the *characterization-only* line count: the lines still reached only by
+scaffolding, i.e. the migration debt that should fall toward zero as unit tests
+take over.
 
 This produces:
 
 * a headline table of each suite's whole-project coverage percentage, and
-* a line-level "who covers what" breakdown - lines reached only by
-  characterization, only by the unit tests, or by both - which is the honest
-  way to show each suite's unique contribution (the two percentages overlap
-  heavily and do not add up to the combined number).
+* a line-level breakdown, as a share of every measurable statement, of what each
+  suite reaches: both suites, characterization only, unit only, or no test at
+  all (the untested surface). Those rows sum to 100% of the project, so the
+  breakdown, not the two overlapping percentages, is what shows each suite's
+  unique contribution and how much code no test touches yet. (When no combined
+  report is passed the total-statement count is unknown, so this falls back to
+  shares of the union of executed lines and omits the untested-surface row.)
+
+The per-suite attribution is only meaningful because the two selections are
+disjoint. If the pure-unit run re-ran the characterization tests, every
+characterization line would also count as "unit" and the characterization-only
+number would collapse to ~0. The ``--ignore`` in the coverage-unit tox env is
+what keeps them disjoint.
 
 Output goes to stdout and, when running in GitHub Actions, is appended to the
 job summary (``$GITHUB_STEP_SUMMARY``) so it renders as a card in the run UI.
@@ -126,26 +139,67 @@ def build_markdown(
             ["Suite", "Tests", "Whole-project coverage"], suite_rows, right={1, 2}
         ),
         "",
-        "### Line-level contribution (executed lines)",
-        "",
-        "Percentages overlap, so they do not sum to the combined number. This is "
-        "who actually reaches each line:",
-        "",
-        *_aligned_table(
-            ["Reached by", "Executed lines", "Share of union"],
-            [
-                ["Both suites", _fmt_int(len(both)),
-                 (f"{len(both) / len(union) * 100:.1f}%" if union else "-")],
-                ["Characterization only", _fmt_int(len(char_only)),
-                 (f"{len(char_only) / len(union) * 100:.1f}%" if union else "-")],
-                ["Unit only", _fmt_int(len(unit_only)),
-                 (f"{len(unit_only) / len(union) * 100:.1f}%" if union else "-")],
-                ["Union (any suite)", _fmt_int(len(union)), ("100.0%" if union else "-")],
-            ],
-            right={1, 2},
-        ),
-        "",
     ]
+
+    # Total measurable statements (covered + uncovered) comes from the combined
+    # report. With it we can show every statement as one of: reached by both
+    # suites, characterization only, unit only, or reached by no test at all
+    # (the untested surface). Those shares sum to 100% of the project.
+    total_stmts = combined.get("totals", {}).get("num_statements") if combined else None
+
+    if total_stmts:
+        covered = len(union)
+        no_tests = max(0, total_stmts - covered)
+
+        def share(n: int) -> str:
+            return f"{n / total_stmts * 100:.2f}%"
+
+        rows += [
+            "### Line-level contribution (share of all measurable statements)",
+            "",
+            'Every statement falls into exactly one row below, so the shares sum '
+            'to 100%. "No test coverage" is the untested surface; its share is '
+            "100% minus the combined coverage above.",
+            "",
+            *_aligned_table(
+                ["Reached by", "Statements", "Share of all"],
+                [
+                    ["Both suites", _fmt_int(len(both)), share(len(both))],
+                    ["Characterization only", _fmt_int(len(char_only)), share(len(char_only))],
+                    ["Unit only", _fmt_int(len(unit_only)), share(len(unit_only))],
+                    ["Covered by any suite", _fmt_int(covered), share(covered)],
+                    ["No test coverage", _fmt_int(no_tests), share(no_tests)],
+                    ["**Total statements**", f"**{_fmt_int(total_stmts)}**", "**100.00%**"],
+                ],
+                right={1, 2},
+            ),
+            "",
+        ]
+    else:
+        # No combined report, so the total-statement denominator is unknown; fall
+        # back to shares of the union of executed lines (the untested surface
+        # cannot be shown without the combined totals).
+        rows += [
+            "### Line-level contribution (executed lines)",
+            "",
+            "No combined report was provided, so the untested surface is unknown. "
+            "These are shares of the union of executed lines:",
+            "",
+            *_aligned_table(
+                ["Reached by", "Executed lines", "Share of union"],
+                [
+                    ["Both suites", _fmt_int(len(both)),
+                     (f"{len(both) / len(union) * 100:.1f}%" if union else "-")],
+                    ["Characterization only", _fmt_int(len(char_only)),
+                     (f"{len(char_only) / len(union) * 100:.1f}%" if union else "-")],
+                    ["Unit only", _fmt_int(len(unit_only)),
+                     (f"{len(unit_only) / len(union) * 100:.1f}%" if union else "-")],
+                    ["Union (any suite)", _fmt_int(len(union)), ("100.0%" if union else "-")],
+                ],
+                right={1, 2},
+            ),
+            "",
+        ]
     return "\n".join(rows)
 
 
