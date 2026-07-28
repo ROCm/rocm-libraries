@@ -31,13 +31,15 @@ namespace rpptest {
 
 inline double log_scalar(double v) { return std::log(std::fabs(v)); }
 
+// src and dst have the same logical shape; only the dtype (and possibly the stride padding)
+// differs, so each is addressed through its own descriptor.
 template <typename Tin, typename Tout>
 void log_reference(const Tin* src, Tout* dst, const RpptGenericDesc& srcDesc,
                    const RpptGenericDesc& dstDesc) {
-    (void)dstDesc;  // src and dst are the same packed shape; only the dtype differs
-    const std::size_t count = generic_element_count(srcDesc);
-    for (std::size_t i = 0; i < count; ++i)
-        dst[i] = from_double<Tout>(log_scalar(to_double(src[i])));
+    for_each_nd_coord(dstDesc, [&](const std::vector<Rpp32u>& coord) {
+        dst[nd_offset(dstDesc, coord)] =
+            from_double<Tout>(log_scalar(to_double(src[nd_offset(srcDesc, coord)])));
+    });
 }
 
 }  // namespace rpptest

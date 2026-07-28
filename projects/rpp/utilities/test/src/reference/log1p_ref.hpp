@@ -36,10 +36,12 @@ inline double log1p_scalar(double v) { return std::log1p(std::fabs(v)); }
 template <typename Tin, typename Tout>
 void log1p_reference(const Tin* src, Tout* dst, const RpptGenericDesc& srcDesc,
                      const RpptGenericDesc& dstDesc) {
-    (void)dstDesc;  // src and dst are the same packed shape; only the dtype differs
-    const std::size_t count = generic_element_count(srcDesc);
-    for (std::size_t i = 0; i < count; ++i)
-        dst[i] = from_double<Tout>(log1p_scalar(to_double(src[i])));
+    // Same logical shape, differing dtype and possibly stride padding: address each through its
+    // own descriptor rather than walking either buffer flat.
+    for_each_nd_coord(dstDesc, [&](const std::vector<Rpp32u>& coord) {
+        dst[nd_offset(dstDesc, coord)] =
+            from_double<Tout>(log1p_scalar(to_double(src[nd_offset(srcDesc, coord)])));
+    });
 }
 
 }  // namespace rpptest

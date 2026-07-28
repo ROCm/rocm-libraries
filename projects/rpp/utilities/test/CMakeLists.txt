@@ -30,6 +30,7 @@ include(CTest)
 add_executable(rpp_tests
     src/tests/core/handle_test.cpp
     src/tests/core/descriptor_test.cpp
+    src/tests/core/golden_layout_test.cpp
     src/tests/image/color/brightness_test.cpp
     src/tests/image/color/exposure_test.cpp
     src/tests/image/color/blend_test.cpp
@@ -92,6 +93,9 @@ add_executable(rpp_tests
     src/tests/misc/bitwise/tensor_or_tensor_test.cpp
     src/tests/misc/bitwise/tensor_xor_tensor_test.cpp
     src/tests/misc/statistical/normalize_test.cpp
+    src/tests/misc/geometric/slice_test.cpp
+    src/tests/misc/geometric/transpose_test.cpp
+    src/tests/misc/geometric/concat_test.cpp
 )
 target_include_directories(rpp_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 if(rpp_INCLUDE_DIR)

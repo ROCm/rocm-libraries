@@ -67,7 +67,6 @@ void normalize_reference(const Tin* src, Tout* dst, const RpptGenericDesc& srcDe
                          Rpp8u computeMeanStddev, Rpp32f scale, Rpp32f shift) {
     const Rpp32u nDim = nd_rank(dims);
     const Rpp32u batch = dims[0];
-    const std::size_t perSample = srcDesc.strides[0];
 
     const std::vector<Rpp32u> paramDims = normalize_param_dims(dims, axisMask);
     const std::vector<Rpp32u> paramStrides = normalize_param_strides(paramDims);
@@ -79,34 +78,49 @@ void normalize_reference(const Tin* src, Tout* dst, const RpptGenericDesc& srcDe
     std::vector<double> mean(paramSize), stdDev(paramSize);
     std::vector<double> acc(paramSize);
     std::vector<std::size_t> count(paramSize);
-    std::vector<Rpp32u> coords(nDim);
 
-    for (Rpp32u n = 0; n < batch; ++n) {
+    // Walks one sample's logical coordinates, handing the callback the source and destination
+    // addresses (each formed from its own descriptor's strides) and the param slot the element
+    // reduces into. Addressing by coordinate rather than walking the sample flat matters twice
+    // over for a reduction op: padding slack must not enter the mean/stddev, and it must not be
+    // mistaken for a coordinate.
+    const std::size_t perSampleLogical = [&] {
+        std::size_t t = 1;
+        for (Rpp32u a = 0; a < nDim; ++a) t *= dims[a + 1];
+        return t;
+    }();
+
+    auto for_each_element = [&](Rpp32u n, auto fn) {
         const std::size_t srcBase = static_cast<std::size_t>(n) * srcDesc.strides[0];
         const std::size_t dstBase = static_cast<std::size_t>(n) * dstDesc.strides[0];
+        std::vector<Rpp32u> coord(nDim, 0);
+        for (std::size_t k = 0; k < perSampleLogical; ++k) {
+            std::size_t srcIdx = srcBase, dstIdx = dstBase;
+            Rpp32u p = 0;
+            for (Rpp32u a = 0; a < nDim; ++a) {
+                srcIdx += static_cast<std::size_t>(coord[a]) * srcDesc.strides[a + 1];
+                dstIdx += static_cast<std::size_t>(coord[a]) * dstDesc.strides[a + 1];
+                if (!((axisMask >> a) & 1u)) p += coord[a] * paramStrides[a];
+            }
+            fn(srcIdx, dstIdx, p);
+            for (Rpp32u a = nDim; a-- > 0;) {
+                if (++coord[a] < dims[a + 1]) break;
+                coord[a] = 0;
+            }
+        }
+    };
+
+    for (Rpp32u n = 0; n < batch; ++n) {
         const Rpp32f* sampleMean = meanTensor + static_cast<std::size_t>(n) * paramSize;
         const Rpp32f* sampleStdDev = stdDevTensor + static_cast<std::size_t>(n) * paramSize;
-
-        // Map a within-sample linear index onto its param slot.
-        auto param_index = [&](std::size_t linear) {
-            std::size_t rem = linear;
-            Rpp32u idx = 0;
-            for (Rpp32u a = 0; a < nDim; ++a) {
-                coords[a] = static_cast<Rpp32u>(rem / srcDesc.strides[a + 1]);
-                rem %= srcDesc.strides[a + 1];
-                if (!((axisMask >> a) & 1u)) idx += coords[a] * paramStrides[a];
-            }
-            return idx;
-        };
 
         if (computeMean) {
             std::fill(acc.begin(), acc.end(), 0.0);
             std::fill(count.begin(), count.end(), std::size_t{0});
-            for (std::size_t i = 0; i < perSample; ++i) {
-                const Rpp32u p = param_index(i);
-                acc[p] += to_double(src[srcBase + i]);
+            for_each_element(n, [&](std::size_t srcIdx, std::size_t, Rpp32u p) {
+                acc[p] += to_double(src[srcIdx]);
                 ++count[p];
-            }
+            });
             for (Rpp32u p = 0; p < paramSize; ++p)
                 mean[p] = count[p] ? acc[p] / static_cast<double>(count[p]) : 0.0;
         } else {
@@ -116,26 +130,23 @@ void normalize_reference(const Tin* src, Tout* dst, const RpptGenericDesc& srcDe
         if (computeStdDev) {
             std::fill(acc.begin(), acc.end(), 0.0);
             std::fill(count.begin(), count.end(), std::size_t{0});
-            for (std::size_t i = 0; i < perSample; ++i) {
-                const Rpp32u p = param_index(i);
-                const double d = to_double(src[srcBase + i]) - mean[p];
+            for_each_element(n, [&](std::size_t srcIdx, std::size_t, Rpp32u p) {
+                const double d = to_double(src[srcIdx]) - mean[p];
                 acc[p] += d * d;
                 ++count[p];
-            }
+            });
             for (Rpp32u p = 0; p < paramSize; ++p)
                 stdDev[p] = count[p] ? std::sqrt(acc[p] / static_cast<double>(count[p])) : 0.0;
         } else {
             for (Rpp32u p = 0; p < paramSize; ++p) stdDev[p] = static_cast<double>(sampleStdDev[p]);
         }
 
-        for (std::size_t i = 0; i < perSample; ++i) {
-            const Rpp32u p = param_index(i);
+        for_each_element(n, [&](std::size_t srcIdx, std::size_t dstIdx, Rpp32u p) {
             const double inv = (stdDev[p] != 0.0) ? (1.0 / stdDev[p]) : 0.0;
-            const double v =
-                (to_double(src[srcBase + i]) - mean[p]) * inv * static_cast<double>(scale) +
-                static_cast<double>(shift);
-            dst[dstBase + i] = from_double<Tout>(v);
-        }
+            const double v = (to_double(src[srcIdx]) - mean[p]) * inv * static_cast<double>(scale) +
+                             static_cast<double>(shift);
+            dst[dstIdx] = from_double<Tout>(v);
+        });
     }
 }
 
