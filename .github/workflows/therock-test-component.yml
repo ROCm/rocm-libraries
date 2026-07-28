@@ -163,31 +163,9 @@ jobs:
           # Create logs directory
           mkdir -p ./test_logs
 
-          if [[ "${{ inputs.coverage_enabled }}" == "true" ]]; then
-            # reboss suggestion: run the tests via coverage_runner.py (it sets
-            # LLVM_PROFILE_FILE, runs ctest, then merges profraw + generates the
-            # coverage report) instead of TheRock's normal test runner.
-            uv pip install pyyaml 2>/dev/null || python -m pip install --quiet pyyaml 2>/dev/null || true
-            CFG="$(find "rocm-libraries/projects/${TEST_COMPONENT}" -name test_categories_coverage.yaml 2>/dev/null | head -1 || true)"
-            # ctest dir is build/bin/<Component>; TheRock's dir casing may differ from
-            # TEST_COMPONENT (e.g. hipRAND vs hiprand), so match case-insensitively.
-            # The '|| true' keeps set -e/pipefail from killing the step when find/grep
-            # produce no match.
-            TDIR="$(find build/bin -maxdepth 1 -type d -iname "${TEST_COMPONENT}" 2>/dev/null | head -1 || true)"
-            TDIR="${TDIR:-build/bin/${TEST_COMPONENT}}"
-            echo "coverage_runner.py: config=${CFG} test-dir=${TDIR}"
-            python rocm-libraries/.github/scripts/export_coverage_metadata.py \
-              --build-dir ./build --project "${TEST_COMPONENT}" \
-              --config "${CFG}" --output ./coverage_metadata.json
-            python rocm-libraries/.github/scripts/coverage_runner.py \
-              --build-dir ./build --metadata ./coverage_metadata.json \
-              --coverage-dir "${GITHUB_WORKSPACE}/coverage-report" \
-              --test-dir "${TDIR}" 2>&1 | tee ./test_logs/test_output.log
-          else
-            # Run test and capture output (still display to console)
-            python ./build_tools/memory_monitor.py --phase "Test ${{ fromJSON(inputs.component).job_name }}" -- \
-              bash -c '${{ fromJSON(inputs.component).test_script }}' 2>&1 | tee ./test_logs/test_output.log
-          fi
+          # Run test and capture output (still display to console)
+          python ./build_tools/memory_monitor.py --phase "Test ${{ fromJSON(inputs.component).job_name }}" -- \
+            bash -c '${{ fromJSON(inputs.component).test_script }}' 2>&1 | tee ./test_logs/test_output.log
 
       - name: Merge profraw and generate coverage report
         # Superseded by coverage_runner.py in the Test step (reboss suggestion):
