@@ -3330,18 +3330,17 @@ Tests:
 ###############################################################################
 # GPU correctness reference (check_ref) coverage.
 #
-# check_ref selects the verification reference: 1=gpu, 2=both (cpu+gpu). The GPU
-# reference (clients/common/src/reference_device.cpp) supports plain GEMM with
-# matching f32/f16/bf16 A/B and f32/f16/bf16 C/D on compute 32F, default
-# epilogue, strided batch, no scaling. integer_exact init keeps the serial
-# reference bit-exact against the library reduction at small K, so the GPU leg's
-# exact 4-ULP unit_check holds. All four checks are enabled together: check_ref 1
-# (gpu) drives the GPU leg's own error/atol/rtol/ULP reporting (report=true),
-# while check_ref 2 (both) exercises the CPU/GPU cross-check. Scoped to gfx950,
-# where these entries run.
+# check_ref selects the verification reference: 1=gpu, 2=both (cpu+gpu). The set
+# of configs the GPU reference supports is defined by gpu_ref_supported() in
+# clients/common/src/reference_device.cpp; these entries stay within it.
+# integer_exact init keeps the serial reference bit-exact against the library
+# reduction at small K, so the GPU leg's exact 4-ULP unit_check holds. All four
+# checks are enabled together: check_ref 1 (gpu) drives the GPU leg's own
+# error/atol/rtol/ULP reporting (report=true), while check_ref 2 (both) exercises
+# the CPU/GPU cross-check. Scoped to gfx950, where these entries run.
 ###############################################################################
 
-# Plain GEMM across f32/f16/bf16 and all four transpose combinations, gpu and
+# Plain GEMM across precisions and all four transpose combinations, gpu and
 # both references. allclose_check/ulp_check on check_ref 1 cover the GPU leg's
 # allclose-grid search and ULP averaging.
 - name: matmul_check_ref

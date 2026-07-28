@@ -14,21 +14,21 @@
  *        not part of the GPU library.
  *
  * One thread per output element, implemented independently of TensileLite so it
- * can catch kernel bugs. All supported types accumulate in float. Selected via
- * the `check_ref` argument / `--check_ref` bench flag.
+ * can catch kernel bugs. Accumulates in float. Selected via the `check_ref`
+ * argument / `--check_ref` bench flag.
  */
 
-/// True when `arg` describes a matmul the GPU reference path currently supports:
-/// plain GEMM with matching f32/f16/bf16 A/B and f32/f16/bf16 C/D on compute 32F,
-/// default epilogue, strided batch, no scaling. On false, `reason` is filled with
-/// the first unsupported feature encountered.
+/// True when `arg` describes a matmul the GPU reference path currently supports.
+/// The supported set is enumerated in the definition (reference_device.cpp), the
+/// single source of truth; on false, `reason` names the first unsupported feature.
 bool gpu_ref_supported(const Arguments& arg, std::string& reason);
 
 /// Compute D_gold on the device: D = alpha * op(A)op(B) + beta * C, accumulated
-/// in float. A/B carry matching f32/f16/bf16 input types; C/D are f32/f16/bf16.
-/// Column-major, with the same transpose/leading-dim/batch-stride conventions as
-/// cblas_gemm(). All pointers are device pointers. Returns false (after logging)
-/// if the launch hits a HIP error, so the caller can fail loudly.
+/// in float. Input/output element types are the runtime hipDataType tags (tA/tB/
+/// tC/tD); the accepted set is gated by gpu_ref_supported(). Column-major, with
+/// the same transpose/leading-dim/batch-stride conventions as cblas_gemm(). All
+/// pointers are device pointers. Returns false (after logging) if the launch hits
+/// a HIP error, so the caller can fail loudly.
 bool run_reference_gemm_device(bool        transA_is_n,
                                bool        transB_is_n,
                                int64_t     M,
