@@ -2105,6 +2105,14 @@ void testing_matmul_with_bias(const Arguments& arg,
         if(!gpu_ref_supported(arg, reason))
             fail_gpu_ref("unsupported configuration for GPU reference: " + reason);
     }
+    // The output/reference matrix dump reads host buffers, which only exist on the
+    // CPU-reference path; in gpu-only mode the output and D_gold stay on the device,
+    // so only the input dumps run. Warn rather than silently producing no D dump.
+    if(arg.dump_matrix && use_gpu_ref && !use_cpu_ref)
+        hipblaslt_cerr << "hipblaslt warning: --dump_matrix does not dump the output or "
+                          "reference in --check_ref gpu mode (both stay on the device); use "
+                          "cpu or both to dump D_output/D_Gold."
+                       << std::endl;
     std::vector<HipDeviceBuffer>  dScaleAlphaVec, dScaleA, dScaleB, dScaleC, dScaleD, dScaleE,
         dAmaxD;
 
