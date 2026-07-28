@@ -650,55 +650,56 @@ rocblas_status rocsolver_sygst_hegst_template(rocblas_handle handle,
 
               auto B, rocblas_stride const shiftB, I const ldb, rocblas_stride const strideB,
 
-              I const batch_count) {
-              if(use_sygs2_hegs2_alt)
-              {
-                  // ------------------------------------------
-                  // note use nb to maintain alignment in temp1
-                  // ------------------------------------------
-                  auto const nb = xxGST_BLOCKSIZE;
-                  size_t const len_Asave = size_t(nb * (nb - 1) / 2) * batch_count;
-                  T* const Asave = static_cast<T*>(work_x_temp);
+              I const batch_count) -> rocblas_status {
+        rocblas_status istat = rocblas_status_success;
+        if(use_sygs2_hegs2_alt)
+        {
+            // ------------------------------------------
+            // note use nb to maintain alignment in temp1
+            // ------------------------------------------
+            auto const nb = xxGST_BLOCKSIZE;
+            size_t const len_Asave = size_t(nb * (nb - 1) / 2) * batch_count;
+            T* const Asave = static_cast<T*>(work_x_temp);
 
-                  // ------------------------
-                  // scratch storage for TRSM
-                  // ------------------------
-                  auto const temp1 = Asave + len_Asave;
-                  auto const temp2 = workArr_temp_arr;
-                  auto const temp3 = store_wcs_invA;
-                  auto const temp4 = invA_arr;
+            // ------------------------
+            // scratch storage for TRSM
+            // ------------------------
+            auto const temp1 = Asave + len_Asave;
+            auto const temp2 = workArr_temp_arr;
+            auto const temp3 = store_wcs_invA;
+            auto const temp4 = invA_arr;
 
-                  auto istat = sygs2_hegs2_alt(handle, itype, uplo, n,
+            istat = sygs2_hegs2_alt(handle, itype, uplo, n,
 
-                                               A, shiftA, lda, strideA,
+                                    A, shiftA, lda, strideA,
 
-                                               B, shiftB, ldb, strideB, batch_count,
+                                    B, shiftB, ldb, strideB, batch_count,
 
-                                               Asave, optim_mem, temp1, temp2, temp3, temp4);
-                  if(istat != rocblas_status_success)
-                  {
-                      return (istat);
-                  }
-              }
-              else
-              {
-                  auto istat = rocsolver_sygs2_hegs2_template<BATCHED, T>(
-                      handle, itype, uplo, n,
+                                    Asave, optim_mem, temp1, temp2, temp3, temp4);
+            if(istat != rocblas_status_success)
+            {
+                return (istat);
+            }
+        }
+        else
+        {
+            istat = rocsolver_sygs2_hegs2_template<BATCHED, T>(handle, itype, uplo, n,
 
-                      A, shiftA, lda, strideA,
+                                                               A, shiftA, lda, strideA,
 
-                      B, shiftB, ldb, strideB,
+                                                               B, shiftB, ldb, strideB,
 
-                      batch_count,
+                                                               batch_count,
 
-                      scalars, work_x_temp, store_wcs_invA, (T**)workArr_temp_arr);
-                  if(istat != rocblas_status_success)
-                  {
-                      return (istat);
-                  }
-              }
-              return (rocblas_status_success);
-          }; // end call_sygs2_hegs2
+                                                               scalars, work_x_temp, store_wcs_invA,
+                                                               (T**)workArr_temp_arr);
+            if(istat != rocblas_status_success)
+            {
+                return (istat);
+            }
+        }
+        return (istat);
+    }; // end call_sygs2_hegs2
 
     auto sygst_hegst_alt
         = [call_sygs2_hegs2, optim_mem, scalars, work_x_temp, workArr_temp_arr, store_wcs_invA,
@@ -718,18 +719,18 @@ rocblas_status rocsolver_sygst_hegst_template(rocblas_handle handle,
         // ----------------------------------------------------------------------
         // if the matrix is too small, use the unblocked variant of the algorithm
         // ----------------------------------------------------------------------
+        rocblas_status istat = rocblas_status_success;
         if(n <= xxGST_BLOCKSIZE)
         {
-            return call_sygs2_hegs2(handle, itype, uplo, n,
+            istat = call_sygs2_hegs2(handle, itype, uplo, n,
 
-                                    A, shiftA, lda, strideA,
+                                     A, shiftA, lda, strideA,
 
-                                    B, shiftB, ldb, strideB,
+                                     B, shiftB, ldb, strideB,
 
-                                    batch_count);
+                                     batch_count);
+            return (istat);
         }
-
-        rocblas_status istat = rocblas_status_success;
 
         I nb = xxGST_BLOCKSIZE;
         if(use_recursion)
@@ -763,37 +764,57 @@ rocblas_status rocsolver_sygst_hegst_template(rocblas_handle handle,
 
                     if(k + kb < n)
                     {
-                        rocsolver_trsm_upper<BATCHED, STRIDED, T>(
+                        istat = rocsolver_trsm_upper<BATCHED, STRIDED, T>(
                             handle, rocblas_side_left, rocblas_operation_conjugate_transpose,
                             rocblas_diagonal_non_unit, kb, n - k - kb, B, shiftB + idx2D(k, k, ldb),
                             ldb, strideB, A, shiftA + idx2D(k, k + kb, lda), lda, strideA,
                             batch_count, optim_mem, work_x_temp, workArr_temp_arr, store_wcs_invA,
                             invA_arr);
+                        if(istat != rocblas_status_success)
+                        {
+                            return (istat);
+                        }
 
-                        rocblasCall_symm_hemm(handle, rocblas_side_left, uplo, kb, n - k - kb,
-                                              &t_minhalf, A, shiftA + idx2D(k, k, lda), lda,
-                                              strideA, B, shiftB + idx2D(k, k + kb, ldb), ldb,
-                                              strideB, &t_one, A, shiftA + idx2D(k, k + kb, lda),
-                                              lda, strideA, batch_count);
+                        istat = rocblasCall_symm_hemm(
+                            handle, rocblas_side_left, uplo, kb, n - k - kb, &t_minhalf, A,
+                            shiftA + idx2D(k, k, lda), lda, strideA, B,
+                            shiftB + idx2D(k, k + kb, ldb), ldb, strideB, &t_one, A,
+                            shiftA + idx2D(k, k + kb, lda), lda, strideA, batch_count);
+                        if(istat != rocblas_status_success)
+                        {
+                            return (istat);
+                        }
 
-                        rocblasCall_syr2k_her2k<BATCHED, T>(
+                        istat = rocblasCall_syr2k_her2k<BATCHED, T>(
                             handle, uplo, rocblas_operation_conjugate_transpose, n - k - kb, kb,
                             &t_minone, A, shiftA + idx2D(k, k + kb, lda), lda, strideA, B,
                             shiftB + idx2D(k, k + kb, ldb), ldb, strideB, &s_one, A,
                             shiftA + idx2D(k + kb, k + kb, lda), lda, strideA, batch_count);
+                        if(istat != rocblas_status_success)
+                        {
+                            return (istat);
+                        }
 
-                        rocblasCall_symm_hemm(handle, rocblas_side_left, uplo, kb, n - k - kb,
-                                              &t_minhalf, A, shiftA + idx2D(k, k, lda), lda,
-                                              strideA, B, shiftB + idx2D(k, k + kb, ldb), ldb,
-                                              strideB, &t_one, A, shiftA + idx2D(k, k + kb, lda),
-                                              lda, strideA, batch_count);
+                        istat = rocblasCall_symm_hemm(
+                            handle, rocblas_side_left, uplo, kb, n - k - kb, &t_minhalf, A,
+                            shiftA + idx2D(k, k, lda), lda, strideA, B,
+                            shiftB + idx2D(k, k + kb, ldb), ldb, strideB, &t_one, A,
+                            shiftA + idx2D(k, k + kb, lda), lda, strideA, batch_count);
+                        if(istat != rocblas_status_success)
+                        {
+                            return (istat);
+                        }
 
-                        rocsolver_trsm_upper<BATCHED, STRIDED, T>(
+                        istat = rocsolver_trsm_upper<BATCHED, STRIDED, T>(
                             handle, rocblas_side_right, rocblas_operation_none,
                             rocblas_diagonal_non_unit, kb, n - k - kb, B,
                             shiftB + idx2D(k + kb, k + kb, ldb), ldb, strideB, A,
                             shiftA + idx2D(k, k + kb, lda), lda, strideA, batch_count, optim_mem,
                             work_x_temp, workArr_temp_arr, store_wcs_invA, invA_arr);
+                        if(istat != rocblas_status_success)
+                        {
+                            return (istat);
+                        }
                     }
                 }
             }
@@ -820,37 +841,57 @@ rocblas_status rocsolver_sygst_hegst_template(rocblas_handle handle,
 
                     if(k + kb < n)
                     {
-                        rocsolver_trsm_lower<BATCHED, STRIDED, T>(
+                        istat = rocsolver_trsm_lower<BATCHED, STRIDED, T>(
                             handle, rocblas_side_right, rocblas_operation_conjugate_transpose,
                             rocblas_diagonal_non_unit, n - k - kb, kb, B, shiftB + idx2D(k, k, ldb),
                             ldb, strideB, A, shiftA + idx2D(k + kb, k, lda), lda, strideA,
                             batch_count, optim_mem, work_x_temp, workArr_temp_arr, store_wcs_invA,
                             invA_arr);
+                        if(istat != rocblas_status_success)
+                        {
+                            return (istat);
+                        }
 
-                        rocblasCall_symm_hemm(handle, rocblas_side_right, uplo, n - k - kb, kb,
-                                              &t_minhalf, A, shiftA + idx2D(k, k, lda), lda,
-                                              strideA, B, shiftB + idx2D(k + kb, k, ldb), ldb,
-                                              strideB, &t_one, A, shiftA + idx2D(k + kb, k, lda),
-                                              lda, strideA, batch_count);
+                        istat = rocblasCall_symm_hemm(
+                            handle, rocblas_side_right, uplo, n - k - kb, kb, &t_minhalf, A,
+                            shiftA + idx2D(k, k, lda), lda, strideA, B,
+                            shiftB + idx2D(k + kb, k, ldb), ldb, strideB, &t_one, A,
+                            shiftA + idx2D(k + kb, k, lda), lda, strideA, batch_count);
+                        if(istat != rocblas_status_success)
+                        {
+                            return (istat);
+                        }
 
-                        rocblasCall_syr2k_her2k<BATCHED, T>(
+                        istat = rocblasCall_syr2k_her2k<BATCHED, T>(
                             handle, uplo, rocblas_operation_none, n - k - kb, kb, &t_minone, A,
                             shiftA + idx2D(k + kb, k, lda), lda, strideA, B,
                             shiftB + idx2D(k + kb, k, ldb), ldb, strideB, &s_one, A,
                             shiftA + idx2D(k + kb, k + kb, lda), lda, strideA, batch_count);
+                        if(istat != rocblas_status_success)
+                        {
+                            return (istat);
+                        }
 
-                        rocblasCall_symm_hemm(handle, rocblas_side_right, uplo, n - k - kb, kb,
-                                              &t_minhalf, A, shiftA + idx2D(k, k, lda), lda,
-                                              strideA, B, shiftB + idx2D(k + kb, k, ldb), ldb,
-                                              strideB, &t_one, A, shiftA + idx2D(k + kb, k, lda),
-                                              lda, strideA, batch_count);
+                        istat = rocblasCall_symm_hemm(
+                            handle, rocblas_side_right, uplo, n - k - kb, kb, &t_minhalf, A,
+                            shiftA + idx2D(k, k, lda), lda, strideA, B,
+                            shiftB + idx2D(k + kb, k, ldb), ldb, strideB, &t_one, A,
+                            shiftA + idx2D(k + kb, k, lda), lda, strideA, batch_count);
+                        if(istat != rocblas_status_success)
+                        {
+                            return (istat);
+                        }
 
-                        rocsolver_trsm_lower<BATCHED, STRIDED, T>(
+                        istat = rocsolver_trsm_lower<BATCHED, STRIDED, T>(
                             handle, rocblas_side_left, rocblas_operation_none,
                             rocblas_diagonal_non_unit, n - k - kb, kb, B,
                             shiftB + idx2D(k + kb, k + kb, ldb), ldb, strideB, A,
                             shiftA + idx2D(k + kb, k, lda), lda, strideA, batch_count, optim_mem,
                             work_x_temp, workArr_temp_arr, store_wcs_invA, invA_arr);
+                        if(istat != rocblas_status_success)
+                        {
+                            return (istat);
+                        }
                     }
                 }
             }
@@ -864,31 +905,51 @@ rocblas_status rocsolver_sygst_hegst_template(rocblas_handle handle,
                 {
                     I kb = std::min(n - k, nb);
 
-                    rocblasCall_trmm(handle, rocblas_side_left, uplo, rocblas_operation_none,
-                                     rocblas_diagonal_non_unit, k, kb, &t_one, 0, B, shiftB, ldb,
-                                     strideB, A, shiftA + idx2D(0, k, lda), lda, strideA,
-                                     batch_count, (T**)workArr_temp_arr);
+                    istat = rocblasCall_trmm(handle, rocblas_side_left, uplo, rocblas_operation_none,
+                                             rocblas_diagonal_non_unit, k, kb, &t_one, 0, B, shiftB,
+                                             ldb, strideB, A, shiftA + idx2D(0, k, lda), lda,
+                                             strideA, batch_count, (T**)workArr_temp_arr);
+                    if(istat != rocblas_status_success)
+                    {
+                        return (istat);
+                    }
 
-                    rocblasCall_symm_hemm(handle, rocblas_side_right, uplo, k, kb, &t_half, A,
-                                          shiftA + idx2D(k, k, lda), lda, strideA, B,
-                                          shiftB + idx2D(0, k, ldb), ldb, strideB, &t_one, A,
-                                          shiftA + idx2D(0, k, lda), lda, strideA, batch_count);
+                    istat = rocblasCall_symm_hemm(
+                        handle, rocblas_side_right, uplo, k, kb, &t_half, A,
+                        shiftA + idx2D(k, k, lda), lda, strideA, B, shiftB + idx2D(0, k, ldb), ldb,
+                        strideB, &t_one, A, shiftA + idx2D(0, k, lda), lda, strideA, batch_count);
+                    if(istat != rocblas_status_success)
+                    {
+                        return (istat);
+                    }
 
-                    rocblasCall_syr2k_her2k<BATCHED, T>(
+                    istat = rocblasCall_syr2k_her2k<BATCHED, T>(
                         handle, uplo, rocblas_operation_none, k, kb, &t_one, A,
                         shiftA + idx2D(0, k, lda), lda, strideA, B, shiftB + idx2D(0, k, ldb), ldb,
                         strideB, &s_one, A, shiftA, lda, strideA, batch_count);
+                    if(istat != rocblas_status_success)
+                    {
+                        return (istat);
+                    }
 
-                    rocblasCall_symm_hemm(handle, rocblas_side_right, uplo, k, kb, &t_half, A,
-                                          shiftA + idx2D(k, k, lda), lda, strideA, B,
-                                          shiftB + idx2D(0, k, ldb), ldb, strideB, &t_one, A,
-                                          shiftA + idx2D(0, k, lda), lda, strideA, batch_count);
+                    istat = rocblasCall_symm_hemm(
+                        handle, rocblas_side_right, uplo, k, kb, &t_half, A,
+                        shiftA + idx2D(k, k, lda), lda, strideA, B, shiftB + idx2D(0, k, ldb), ldb,
+                        strideB, &t_one, A, shiftA + idx2D(0, k, lda), lda, strideA, batch_count);
+                    if(istat != rocblas_status_success)
+                    {
+                        return (istat);
+                    }
 
-                    rocblasCall_trmm(handle, rocblas_side_right, uplo,
-                                     rocblas_operation_conjugate_transpose, rocblas_diagonal_non_unit,
-                                     k, kb, &t_one, 0, B, shiftB + idx2D(k, k, ldb), ldb, strideB,
-                                     A, shiftA + idx2D(0, k, lda), lda, strideA, batch_count,
-                                     (T**)workArr_temp_arr);
+                    istat = rocblasCall_trmm(
+                        handle, rocblas_side_right, uplo, rocblas_operation_conjugate_transpose,
+                        rocblas_diagonal_non_unit, k, kb, &t_one, 0, B, shiftB + idx2D(k, k, ldb),
+                        ldb, strideB, A, shiftA + idx2D(0, k, lda), lda, strideA, batch_count,
+                        (T**)workArr_temp_arr);
+                    if(istat != rocblas_status_success)
+                    {
+                        return (istat);
+                    }
 
                     {
                         istat = self(handle, itype, uplo, kb,
@@ -912,31 +973,51 @@ rocblas_status rocsolver_sygst_hegst_template(rocblas_handle handle,
                 {
                     I kb = std::min(n - k, nb);
 
-                    rocblasCall_trmm(handle, rocblas_side_right, uplo, rocblas_operation_none,
-                                     rocblas_diagonal_non_unit, kb, k, &t_one, 0, B, shiftB, ldb,
-                                     strideB, A, shiftA + idx2D(k, 0, lda), lda, strideA,
-                                     batch_count, (T**)workArr_temp_arr);
+                    istat = rocblasCall_trmm(handle, rocblas_side_right, uplo, rocblas_operation_none,
+                                             rocblas_diagonal_non_unit, kb, k, &t_one, 0, B, shiftB,
+                                             ldb, strideB, A, shiftA + idx2D(k, 0, lda), lda,
+                                             strideA, batch_count, (T**)workArr_temp_arr);
+                    if(istat != rocblas_status_success)
+                    {
+                        return (istat);
+                    }
 
-                    rocblasCall_symm_hemm(handle, rocblas_side_left, uplo, kb, k, &t_half, A,
-                                          shiftA + idx2D(k, k, lda), lda, strideA, B,
-                                          shiftB + idx2D(k, 0, ldb), ldb, strideB, &t_one, A,
-                                          shiftA + idx2D(k, 0, lda), lda, strideA, batch_count);
+                    istat = rocblasCall_symm_hemm(
+                        handle, rocblas_side_left, uplo, kb, k, &t_half, A,
+                        shiftA + idx2D(k, k, lda), lda, strideA, B, shiftB + idx2D(k, 0, ldb), ldb,
+                        strideB, &t_one, A, shiftA + idx2D(k, 0, lda), lda, strideA, batch_count);
+                    if(istat != rocblas_status_success)
+                    {
+                        return (istat);
+                    }
 
-                    rocblasCall_syr2k_her2k<BATCHED, T>(
+                    istat = rocblasCall_syr2k_her2k<BATCHED, T>(
                         handle, uplo, rocblas_operation_conjugate_transpose, k, kb, &t_one, A,
                         shiftA + idx2D(k, 0, lda), lda, strideA, B, shiftB + idx2D(k, 0, ldb), ldb,
                         strideB, &s_one, A, shiftA, lda, strideA, batch_count);
+                    if(istat != rocblas_status_success)
+                    {
+                        return (istat);
+                    }
 
-                    rocblasCall_symm_hemm(handle, rocblas_side_left, uplo, kb, k, &t_half, A,
-                                          shiftA + idx2D(k, k, lda), lda, strideA, B,
-                                          shiftB + idx2D(k, 0, ldb), ldb, strideB, &t_one, A,
-                                          shiftA + idx2D(k, 0, lda), lda, strideA, batch_count);
+                    istat = rocblasCall_symm_hemm(
+                        handle, rocblas_side_left, uplo, kb, k, &t_half, A,
+                        shiftA + idx2D(k, k, lda), lda, strideA, B, shiftB + idx2D(k, 0, ldb), ldb,
+                        strideB, &t_one, A, shiftA + idx2D(k, 0, lda), lda, strideA, batch_count);
+                    if(istat != rocblas_status_success)
+                    {
+                        return (istat);
+                    }
 
-                    rocblasCall_trmm(handle, rocblas_side_left, uplo,
-                                     rocblas_operation_conjugate_transpose, rocblas_diagonal_non_unit,
-                                     kb, k, &t_one, 0, B, shiftB + idx2D(k, k, ldb), ldb, strideB,
-                                     A, shiftA + idx2D(k, 0, lda), lda, strideA, batch_count,
-                                     (T**)workArr_temp_arr);
+                    istat = rocblasCall_trmm(
+                        handle, rocblas_side_left, uplo, rocblas_operation_conjugate_transpose,
+                        rocblas_diagonal_non_unit, kb, k, &t_one, 0, B, shiftB + idx2D(k, k, ldb),
+                        ldb, strideB, A, shiftA + idx2D(k, 0, lda), lda, strideA, batch_count,
+                        (T**)workArr_temp_arr);
+                    if(istat != rocblas_status_success)
+                    {
+                        return (istat);
+                    }
 
                     {
                         istat = self(handle, itype, uplo, kb,
