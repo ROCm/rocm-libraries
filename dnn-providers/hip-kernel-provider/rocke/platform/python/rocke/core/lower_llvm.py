@@ -64,7 +64,11 @@ from .ir import (
 #         LLVM 20:  ...-p8:128:128-...
 #         LLVM 22:  ...-p8:128:128:128:48-...
 #
-# (Both confirmed against clang 20 and clang 23 amdgcn output.) On the
+# Note: early LLVM 22 builds added an ELF mangling spec ``m:e`` prefix,
+# but the current ROCm 7.2 toolchain does not emit it. The constant below
+# reflects what the installed hipcc actually produces.
+#
+# (Confirmed against clang 20 and current clang 22 amdgcn output.) On the
 # textual-IR (comgr SOURCE) path the parser is lenient: it overrides the
 # module datalayout with the target's canonical one, so a stale-but-well-
 # formed string compiles to byte-identical HSACO and the drift is

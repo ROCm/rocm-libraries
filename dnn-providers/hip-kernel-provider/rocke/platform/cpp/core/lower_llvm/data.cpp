@@ -27,10 +27,11 @@ namespace ckc
 /* ---------------------------------------------------------------------- */
 /* datalayout / triple (Python _DATALAYOUT_LLVM20 / _DATALAYOUT_LLVM22 /   */
 /* _TRIPLE). The AMDGPU datalayout is FLAVOR-KEYED: two fields drift        */
-/* between LLVM flavors -- the ELF mangling spec (m:e, added under LLVM     */
-/* 21+) and the buffer-fat-pointer address space (p8) --                    */
+/* between LLVM flavors -- the buffer-fat-pointer address space (p8):       */
 /*   LLVM 20 (ROCm 7.0/7.1):  e-...-p8:128:128-...                          */
-/*   LLVM 22 (ROCm >= 7.2):   e-...-p8:128:128:128:48-...                    */
+/*   LLVM 22 (ROCm >= 7.2):   e-...-p8:128:128:128:48-...                   */
+/* Note: the ELF mangling spec (m:e) was present in early LLVM 22 builds    */
+/* but was removed; the current ROCm 7.2 toolchain does not emit it.        */
 /* (Python _DATALAYOUT_LLVM20 / _DATALAYOUT_LLVM22; pick via               */
 /* rocke_ll_datalayout_for_flavor, mirroring _datalayout_for_flavor.)        */
 /* ---------------------------------------------------------------------- */
