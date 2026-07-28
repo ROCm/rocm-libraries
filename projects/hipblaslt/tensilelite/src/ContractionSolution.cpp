@@ -1929,6 +1929,7 @@ namespace TensileLite
                 = calculateAutoStaggerU(problem, &hardware, sk.grid, autoWGM);
             if(T_Debug)
             {
+                std::cout << "OCCUPANCY: " << sizeMapping.CUOccupancy << std::endl;
                 std::cout << "WGM: " << autoWGM << ", WGMXCC: " << autoWGMXCC
                           << ", WGMXCCCHUNK: " << autoWGMXCCCHUNK << std::endl;
                 std::cout << "StaggerUMapping: " << autoStaggerUMapping
