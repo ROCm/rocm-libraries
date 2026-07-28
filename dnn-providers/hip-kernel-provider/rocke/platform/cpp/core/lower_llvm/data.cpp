@@ -210,6 +210,9 @@ const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS[] = {
     {"global.atomic.fadd.v2bf16",
      "declare <2 x bfloat> @llvm.amdgcn.global.atomic.fadd.v2bf16.p1("
      "ptr addrspace(1), <2 x bfloat>)"},
+    {"global.atomic.fadd.v2f16",
+     "declare <2 x half> @llvm.amdgcn.global.atomic.fadd.v2f16.p1("
+     "ptr addrspace(1), <2 x half>)"},
     {"mbcnt.lo", "declare i32 @llvm.amdgcn.mbcnt.lo(i32, i32)"},
     {"mbcnt.hi", "declare i32 @llvm.amdgcn.mbcnt.hi(i32, i32)"},
     {"ds.read.tr16.b64", "declare <4 x i16> @llvm.amdgcn.ds.read.tr16.b64(ptr addrspace(3))"},
