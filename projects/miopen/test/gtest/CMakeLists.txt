@@ -278,8 +278,6 @@ function(add_gtest TEST_NAME TEST_CPP)
     set(MIOPEN_GTEST_SHARDS "")
 
     if(MIOPEN_ENABLE_DAPPER_NATIVE)
-      file(REMOVE "${SHARDS_FILE}")
-      file(TOUCH "${SHARDS_FILE}")
       dapper_dev_filters()
     endif()
 
@@ -296,7 +294,7 @@ function(add_gtest TEST_NAME TEST_CPP)
         WORKING_DIRECTORY "${KERNELS_BINARY_DIR}"
       )
       if(MIOPEN_ENABLE_DAPPER_NATIVE)
-        file(APPEND ${SHARDS_FILE} "${MIOPEN_GTEST_SHARD_XML}\n")
+        list(APPEND MIOPEN_DAPPER_PRIMARY_SHARD_XMLS "${MIOPEN_GTEST_SHARD_XML}")
       endif()
       list(APPEND MIOPEN_GTEST_SHARDS ${MIOPEN_GTEST_SHARD})
 
@@ -305,28 +303,44 @@ function(add_gtest TEST_NAME TEST_CPP)
       )
     endforeach()
 
-    # HipGraphExist was filtered out of the shards above (LLVM JIT OOM under concurrent GPU memory
-    # pressure). Register it as a single RUN_SERIAL entry so ctest runs it alone, never alongside
-    # another test on the GPU. Skipped when there is no GPU, since these are *GPU* tests.
+    # HipGraphExist is a secondary Dapper domain: filtered out of the parallel shards above
+    # (LLVM JIT OOM under concurrent GPU memory pressure) and run as its own RUN_SERIAL
+    # invocation so ctest runs it alone. Skipped when there is no GPU, since these are *GPU*
+    # tests. Its shard output file feeds an independent Dapper analysis (its own domain).
     if(NOT MIOPEN_NO_GPU)
-      set(SERIAL_TEST_XML ${PROJECT_BINARY_DIR}/test_results/${TEST_NAME}_shard_hip_graph_serial.xml)
-      add_test(NAME ${TEST_NAME}_hip_graph_serial
+      set(SERIAL_TEST_XML ${PROJECT_BINARY_DIR}/test_results/${TEST_NAME}_HipGraphExist.xml)
+      add_test(NAME ${TEST_NAME}_HipGraphExist
         COMMAND ${TEST_NAME}
           --gtest_filter=*HipGraphExist*
           --gtest_output=xml:${SERIAL_TEST_XML}
         WORKING_DIRECTORY "${KERNELS_BINARY_DIR}"
       )
-      set_tests_properties(${TEST_NAME}_hip_graph_serial PROPERTIES
+      set_tests_properties(${TEST_NAME}_HipGraphExist PROPERTIES
         RUN_SERIAL TRUE
         ENVIRONMENT "MIOPEN_USER_DB_PATH=${CMAKE_CURRENT_BINARY_DIR};MIOPEN_INVOKED_FROM_CTEST=1"
       )
-      if(MIOPEN_ENABLE_DAPPER_NATIVE)
-        # Serial runs are also analyzed by dapper.
-        file(APPEND ${SHARDS_FILE} "${SERIAL_TEST_XML}\n")
-      endif()
     endif()
 
+    # Write the per-domain shard grouping to miopen_gtest_shards.txt as JSON: one entry per
+    # Dapper domain -- 'primary' (the parallel shards) plus each secondary that runs its own
+    # invocation. Dapper analyzes each domain independently from its own shard file(s). The
+    # domain names here must match SECONDARY_DOMAINS in miopen_gtest_runner.py.
     if(MIOPEN_ENABLE_DAPPER_NATIVE)
+      set(_dapper_primary_json "")
+      foreach(_x IN LISTS MIOPEN_DAPPER_PRIMARY_SHARD_XMLS)
+        if(_dapper_primary_json)
+          string(APPEND _dapper_primary_json ", ")
+        endif()
+        string(APPEND _dapper_primary_json "\"${_x}\"")
+      endforeach()
+      set(_dapper_shards_json "[\n  { \"name\": \"primary\", \"shards\": [${_dapper_primary_json}] }")
+      if(NOT MIOPEN_NO_GPU)
+        string(APPEND _dapper_shards_json ",\n  { \"name\": \"HipGraphExist\", \"shards\": [\"${SERIAL_TEST_XML}\"] }")
+      endif()
+      string(APPEND _dapper_shards_json "\n]\n")
+      file(WRITE "${SHARDS_FILE}" "${_dapper_shards_json}")
+      unset(_dapper_primary_json)
+      unset(_dapper_shards_json)
       dapper_add_sharded_test()
     endif()
 
