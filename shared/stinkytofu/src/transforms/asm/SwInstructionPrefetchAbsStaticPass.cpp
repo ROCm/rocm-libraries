@@ -46,6 +46,7 @@
 #include <iostream>
 #include <string>
 #include <unordered_map>
+#include <utility>
 
 #include "stinkytofu/bindings/python/Module.hpp"
 #include "stinkytofu/core/BasicBlock.hpp"
@@ -58,6 +59,54 @@
 #include "stinkytofu/transforms/asm/SwPrefetchRelCommon.hpp"
 
 namespace stinkytofu {
+
+namespace {
+// Return {BB, iterator} for the entry prefetch-burst insertion point: immediately AFTER the
+// gfx1250 hardware-entrypoint prologue (`global_prefetch_b8` [+ following `v_nop`], inserted by
+// InsertInitialUnclausedVmemPass) so the prologue stays the kernel's first executed
+// instruction(s). The prologue is the function's first real (non label/phi/directive) instruction
+// and may sit in a later BB than getEntryBlock() (e.g. after an empty preamble + label_ASM_Start),
+// so we scan the whole function. Falls back to {entryBB, begin()} when no prologue is present
+// (isolated unit tests / non-gfx1250), preserving prior behavior and the empty-entry-BB APPEND
+// (begin()==end()).
+std::pair<BasicBlock*, IRList::iterator> entryBurstInsertPoint(Function& func) {
+    for (BasicBlock& bb : func) {
+        for (IRList::iterator it = bb.begin(); it != bb.end(); ++it) {
+            IRBase* node = it.getNodePtr();
+            if (node->getType() != IRBase::IRType::StinkyTofu) continue;  // asm directives
+            const StinkyInstruction* inst = static_cast<const StinkyInstruction*>(node);
+            // Skip pseudo nodes using the SAME predicate InsertInitialUnclausedVmemPass uses to
+            // find the "first real instruction" (LABEL/PHI/FENCE/placement marker), so both passes
+            // agree on where the prologue sits.
+            if (isPseudoInst(inst)) continue;
+            // First real instruction of the function.
+            if (inst->getUnifiedOpcode() == GFX::global_prefetch_b8) {
+                IRList::iterator after = it;
+                ++after;  // past global_prefetch_b8
+                if (after != bb.end()) {
+                    IRBase* n2 = after.getNodePtr();
+                    if (n2->getType() == IRBase::IRType::StinkyTofu &&
+                        static_cast<const StinkyInstruction*>(n2)->getUnifiedOpcode() == GFX::v_nop)
+                        ++after;  // past v_nop
+                }
+                return {&bb, after};
+            }
+            // First real insn isn't the prologue -> no prologue; fall back to entry begin().
+            BasicBlock* entry = func.getEntryBlock();
+            if (entry == nullptr) entry = &bb;
+            return {entry, entry->begin()};
+        }
+    }
+    // No real instruction anywhere (empty stub): entry begin() so insertIR appends.
+    BasicBlock* entry = func.getEntryBlock();
+    if (entry == nullptr) {
+        auto it = func.begin();
+        if (it == func.end()) return {nullptr, IRList::iterator{}};
+        entry = &(*it);
+    }
+    return {entry, entry->begin()};
+}
+}  // namespace
 
 class SwInstructionPrefetchAbsStaticPass : public StinkyInstPass {
    public:
@@ -211,28 +260,25 @@ class SwInstructionPrefetchAbsStaticPass : public StinkyInstPass {
 
         const std::string targetLabelName = std::string(kSwPrefetchAbsTargetLabelBase) + "0";
 
-        // Resolve the entry BB (burst site).
-        BasicBlock* entryBB = func.getEntryBlock();
-        if (!entryBB) {
-            auto it = func.begin();
-            if (it != func.end()) entryBB = &(*it);
-        }
-        if (!entryBB) {
+        // Resolve the burst site: AFTER the gfx1250 hardware-entrypoint prologue
+        // (global_prefetch_b8 + v_nop) wherever it lives in the function, so the prologue stays the
+        // kernel's first executed instruction(s). May be a later BB than getEntryBlock() (empty
+        // preamble + label_ASM_Start). Falls back to entry begin() when no prologue is present.
+        auto [burstBB, insertAt] = entryBurstInsertPoint(func);
+        if (burstBB == nullptr) {
             if (m_debug)
                 *m_debugStream << "[" << getName() << "] warning: no entry BB found; skip burst\n";
             closeDebugFile();
             return PreservedAnalyses::all();
         }
 
-        // Insert the site burst at the very beginning of the entry BB, FORWARD-referencing
-        // label_SW_PrefetchAbs_0 by name. The label object is created afterwards, once its anchor
-        // is known from the post-insertion layout (a bare-label operand always costs +4 regardless
-        // of whether the label is resolved yet, so this forward reference is layout-safe).
-        // insertIR(insertAt, X) puts X before insertAt, so the final order is:
-        //   siteLabel, getpc, add_off, add_lo, add_hi, pf_0..pf_{N-1}, [original body...].
+        // Insert the site burst FORWARD-referencing label_SW_PrefetchAbs_0 by name. The label
+        // object is created afterwards, once its anchor is known from the post-insertion layout (a
+        // bare-label operand always costs +4 regardless of whether the label is resolved yet, so
+        // this forward reference is layout-safe). insertIR(insertAt, X) puts X before insertAt, so
+        // the final order is: [prologue] siteLabel, getpc, add*, pf_0..pf_{N-1}, [original body].
         {
-            AsmIRBuilder builder(*entryBB, archId);
-            IRList::iterator insertAt = entryBB->begin();
+            AsmIRBuilder builder(*burstBB, archId);
             const uint32_t baseLo = static_cast<uint32_t>(m_baseSgpr);
             const uint32_t baseHi = static_cast<uint32_t>(m_baseSgpr + 1);
             // Scratch SGPR (base+2): holds the PC-relative offset for the address computation
@@ -245,12 +291,12 @@ class SwInstructionPrefetchAbsStaticPass : public StinkyInstPass {
             // label_Do_SW_PrefetchAbs_entry
             StinkyInstruction* siteLabel =
                 builder.createLabel(std::string(kSwPrefetchAbsSiteLabel), 1);
-            entryBB->insertIR(insertAt, siteLabel);
+            burstBB->insertIR(insertAt, siteLabel);
 
             // s_getpc_b64 s[base:base+1]   ; PC of the next instruction
             StinkyInstruction* getpc = builder.create(getMCIDByUOp(GFX::s_getpc_b64, archId));
             getpc->addDestReg(StinkyRegister("s", baseLo, 2));
-            entryBB->insertIR(insertAt, getpc);
+            burstBB->insertIR(insertAt, getpc);
 
             // s_add_i32 s[tmp], label_SW_PrefetchAbs_0, 4
             //   Bare label operand -> assembler emits a PC-relative relocation; +4 corrects for
@@ -260,21 +306,21 @@ class SwInstructionPrefetchAbsStaticPass : public StinkyInstPass {
             addOff->addDestReg(StinkyRegister("s", tmp, 1));
             addOff->addSrcReg(StinkyRegister(targetLabelName));
             addOff->addSrcReg(StinkyRegister(4));
-            entryBB->insertIR(insertAt, addOff);
+            burstBB->insertIR(insertAt, addOff);
 
             // s_add_u32 s[base], s[base], s[tmp]
             StinkyInstruction* addLo = builder.create(getMCIDByUOp(GFX::s_add_u32, archId));
             addLo->addDestReg(StinkyRegister("s", baseLo, 1));
             addLo->addSrcReg(StinkyRegister("s", baseLo, 1));
             addLo->addSrcReg(StinkyRegister("s", tmp, 1));
-            entryBB->insertIR(insertAt, addLo);
+            burstBB->insertIR(insertAt, addLo);
 
             // s_addc_u32 s[base+1], s[base+1], 0
             StinkyInstruction* addHi = builder.create(getMCIDByUOp(GFX::s_addc_u32, archId));
             addHi->addDestReg(StinkyRegister("s", baseHi, 1));
             addHi->addSrcReg(StinkyRegister("s", baseHi, 1));
             addHi->addSrcReg(StinkyRegister(0));
-            entryBB->insertIR(insertAt, addHi);
+            burstBB->insertIR(insertAt, addHi);
 
             // XNACK safety: one s_wait_xcnt 0 before the contiguous prefetch burst (Method 2 — a
             // single drain covers the whole back-to-back group). No-op when the toggle is off or
@@ -284,7 +330,7 @@ class SwInstructionPrefetchAbsStaticPass : public StinkyInstPass {
                 if (const HwInstDesc* xcntDesc = getMCIDByUOp(GFX::s_wait_xcnt, archId)) {
                     StinkyInstruction* xcnt = builder.create(xcntDesc);
                     xcnt->addSrcReg(StinkyRegister(0));  // xcnt = 0
-                    entryBB->insertIR(insertAt, xcnt);
+                    burstBB->insertIR(insertAt, xcnt);
                 }
             }
 
@@ -305,7 +351,7 @@ class SwInstructionPrefetchAbsStaticPass : public StinkyInstPass {
                     pf->addSrcReg(StinkyRegister("null"));  // slength = null (0)
                     pf->addSrcReg(
                         StinkyRegister(kSwPrefetchPcRelKlengthImm));  // klength = 31 (0x1f)
-                    entryBB->insertIR(insertAt, pf);
+                    burstBB->insertIR(insertAt, pf);
                     ++m_totalPrefetchInserted;
                 }
             }
@@ -366,7 +412,7 @@ class SwInstructionPrefetchAbsStaticPass : public StinkyInstPass {
 
         if (m_debug) {
             *m_debugStream << "[" << getName() << "] Phase 2 abs-static complete: inserted " << N
-                           << " s_prefetch_inst in entry BB \"" << entryBB->getLabel() << "\"\n";
+                           << " s_prefetch_inst in BB \"" << burstBB->getLabel() << "\"\n";
             *m_debugStream << "[" << getName() << "]   site: " << kSwPrefetchAbsSiteLabel << "\n";
             *m_debugStream << "[" << getName() << "]   target: " << targetLabelName << " @ layout "
                            << anchorOff << " (P0=" << P0 << ", base<=P0 => no gap) in BB \""

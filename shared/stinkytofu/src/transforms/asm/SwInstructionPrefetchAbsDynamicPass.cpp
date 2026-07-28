@@ -36,6 +36,7 @@
 #include <iostream>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "stinkytofu/bindings/python/Module.hpp"
@@ -51,6 +52,53 @@
 #include "stinkytofu/transforms/asm/SwPrefetchRelCommon.hpp"
 
 namespace stinkytofu {
+
+namespace {
+// Return the entry-BB insertion point AFTER the gfx1250 hardware-entrypoint prologue
+// (`global_prefetch_b8` + `v_nop`, inserted by InsertInitialUnclausedVmemPass) so the entry
+// CP-cover burst is placed after the prologue and the prologue stays the kernel's first executed
+// instruction(s). Falls back to begin() when no prologue is present (isolated unit tests /
+// non-gfx1250), preserving prior behavior and the empty-entry-BB APPEND (begin()==end()).
+// Returns {BB, iterator} for the entry CP-cover insertion point: immediately AFTER the gfx1250
+// hardware-entrypoint prologue (global_prefetch_b8 [+ v_nop]) wherever it lives in the function
+// (it may be in a later BB than getEntryBlock(), e.g. after an empty preamble + label_ASM_Start),
+// so the prologue stays first. Falls back to {entryBB, begin()} when no prologue is present,
+// preserving prior behavior and the empty-entry-BB APPEND (begin()==end()).
+std::pair<BasicBlock*, IRList::iterator> entryBurstInsertPoint(Function& func) {
+    for (BasicBlock& bb : func) {
+        for (IRList::iterator it = bb.begin(); it != bb.end(); ++it) {
+            IRBase* node = it.getNodePtr();
+            if (node->getType() != IRBase::IRType::StinkyTofu) continue;  // asm directives
+            const StinkyInstruction* inst = static_cast<const StinkyInstruction*>(node);
+            // Skip pseudo nodes using the SAME predicate InsertInitialUnclausedVmemPass uses to
+            // find the "first real instruction" (LABEL/PHI/FENCE/placement marker), so both passes
+            // agree on where the prologue sits.
+            if (isPseudoInst(inst)) continue;
+            if (inst->getUnifiedOpcode() == GFX::global_prefetch_b8) {
+                IRList::iterator after = it;
+                ++after;  // past global_prefetch_b8
+                if (after != bb.end()) {
+                    IRBase* n2 = after.getNodePtr();
+                    if (n2->getType() == IRBase::IRType::StinkyTofu &&
+                        static_cast<const StinkyInstruction*>(n2)->getUnifiedOpcode() == GFX::v_nop)
+                        ++after;  // past v_nop
+                }
+                return {&bb, after};
+            }
+            BasicBlock* entry = func.getEntryBlock();
+            if (entry == nullptr) entry = &bb;
+            return {entry, entry->begin()};
+        }
+    }
+    BasicBlock* entry = func.getEntryBlock();
+    if (entry == nullptr) {
+        auto it = func.begin();
+        if (it == func.end()) return {nullptr, IRList::iterator{}};
+        entry = &(*it);
+    }
+    return {entry, entry->begin()};
+}
+}  // namespace
 
 class SwInstructionPrefetchAbsDynamicPass : public StinkyInstPass {
    public:
@@ -613,18 +661,13 @@ class SwInstructionPrefetchAbsDynamicPass : public StinkyInstPass {
         // is layout-safe (always +4 / FK_PCRel_4) even before the label exists.
         bool coverEmitted = false;
         if (emitCover && coverN > 0) {
-            BasicBlock* entryBB = func.getEntryBlock();
-            if (entryBB == nullptr) {
-                auto itF = func.begin();
-                if (itF != func.end()) entryBB = &(*itF);
-            }
-            if (entryBB != nullptr) {
-                // Reuse emitBurst at the entry: at = entryBB->begin() so insertIR APPENDS on the
-                // empty-CFG-stub entry BBs real kernels use (begin()==end()), so the cover is never
-                // silently skipped. Mirrors the abs-static entry burst (see
-                // SwInstructionPrefetchAbsStaticPass.cpp:253-318). See the emitBurst note for why
-                // this is behavior-identical to the arms' create-before-siteAnchor form.
-                emitBurst(*entryBB, entryBB->begin(), std::string(kCpBoundaryLabel), coverN);
+            // Insert the CP cover AFTER the gfx1250 prologue (global_prefetch_b8 + v_nop), wherever
+            // it lives, so the prologue stays the kernel's first executed instruction(s). Falls
+            // back to the entry BB begin() (empty-CFG-stub APPEND preserved) when no prologue is
+            // present.
+            auto [coverBB, coverAt] = entryBurstInsertPoint(func);
+            if (coverBB != nullptr) {
+                emitBurst(*coverBB, coverAt, std::string(kCpBoundaryLabel), coverN);
                 coverEmitted = true;
             } else if (m_debug) {
                 *m_debugStream << "[" << getName() << "] CP cover skip: no entry BB\n";
