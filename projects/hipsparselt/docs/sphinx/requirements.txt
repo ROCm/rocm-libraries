@@ -41,7 +41,7 @@ click-log==0.4.0
     # via doxysphinx
 comm==0.2.3
     # via ipykernel
-cryptography==46.0.5
+cryptography==48.0.1
     # via pyjwt
 debugpy==1.8.20
     # via ipykernel
@@ -177,7 +177,7 @@ pygments==2.19.2
     #   sphinx
 pyjson5==1.6.9
     # via doxysphinx
-pyjwt[crypto]==2.12.1
+pyjwt[crypto]==2.13.0
     # via pygithub
 pynacl==1.6.2
     # via pygithub
@@ -217,7 +217,7 @@ smmap==5.0.3
     # via gitdb
 snowballstemmer==3.0.1
     # via sphinx
-soupsieve==2.8.3
+soupsieve==2.8.4
     # via beautifulsoup4
 sphinx==8.1.3
     # via
@@ -270,7 +270,7 @@ tabulate==0.10.0
     # via jupyter-cache
 tomli==2.4.0
     # via sphinx
-tornado==6.5.5
+tornado==6.5.7
     # via
     #   ipykernel
     #   jupyter-client
