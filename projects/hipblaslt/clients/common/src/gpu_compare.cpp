@@ -299,41 +299,28 @@ GpuRefResult compare_gemm_device(const void* dGpu,
         return result;
     }
 
-    // Reuse a small accumulator across comparisons. thread_local keeps concurrent
-    // multi-thread/multi-stream tests from sharing it; it is reallocated when the
-    // active device changes so it always lives on the same device as the stream.
-    // `dBins` holds 2*batchCount per-batch Frobenius sums and grows when batchCount
-    // increases. Both are intentionally not freed -- reclaimed at thread/process exit.
-    thread_local DevAccum* dAccum       = nullptr;
-    thread_local double*   dBins        = nullptr;
-    thread_local int       dAccumDevice = -1;
-    thread_local int       dBinsCap     = 0;
-    int                    device       = -1;
-    if(!gpu_ref_hip_check(hipGetDevice(&device), "get device"))
+    // Per-call device scratch: the global accumulator and the 2*batchCount per-batch
+    // Frobenius sums. The destructor frees both on every return path (including the
+    // error exits below)
+    struct DeviceScratch
+    {
+        DevAccum* accum = nullptr;
+        double*   bins  = nullptr;
+        ~DeviceScratch()
+        {
+            if(accum)
+                hipFree(accum);
+            if(bins)
+                hipFree(bins);
+        }
+    } scratch;
+    if(!gpu_ref_hip_check(hipMalloc(&scratch.accum, sizeof(DevAccum)), "accumulator alloc"))
         return result;
-    if(dAccum == nullptr || device != dAccumDevice)
-    {
-        if(dAccum)
-            hipFree(dAccum);
-        if(dBins)
-            hipFree(dBins);
-        dAccum   = nullptr;
-        dBins    = nullptr;
-        dBinsCap = 0;
-        if(!gpu_ref_hip_check(hipMalloc(&dAccum, sizeof(DevAccum)), "accumulator alloc"))
-            return result;
-        dAccumDevice = device;
-    }
-    if(dBins == nullptr || batchCount > dBinsCap)
-    {
-        if(dBins)
-            hipFree(dBins);
-        dBins = nullptr;
-        if(!gpu_ref_hip_check(hipMalloc(&dBins, sizeof(double) * 2 * size_t(batchCount)),
-                              "per-batch bins alloc"))
-            return result;
-        dBinsCap = batchCount;
-    }
+    if(!gpu_ref_hip_check(hipMalloc(&scratch.bins, sizeof(double) * 2 * size_t(batchCount)),
+                          "per-batch bins alloc"))
+        return result;
+    DevAccum* dAccum = scratch.accum;
+    double*   dBins  = scratch.bins;
     if(!gpu_ref_hip_check(hipMemsetAsync(dAccum, 0, sizeof(DevAccum), stream), "accumulator zero"))
         return result;
     if(!gpu_ref_hip_check(
