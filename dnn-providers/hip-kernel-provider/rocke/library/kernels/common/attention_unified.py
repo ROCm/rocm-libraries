@@ -1204,6 +1204,16 @@ def _tiled_cache_key(problem: UnifiedAttentionProblem) -> Tuple:
         _enable_gfx942_flash_q_direct(problem),
         _enable_gfx942_flash_mask_limit(problem),
         _enable_gfx942_flash_k_sliced_ring(problem),
+        # Ring pipeline depth (fp16 D128 uses depth-2, everything else depth-3):
+        # depth-2 and depth-3 are distinct schedules (different slot map / LDS
+        # footprint), so the key must distinguish them or two shapes that share the
+        # geometry but differ on depth would collide on the same cached launcher.
+        # Only meaningful when the ring is active.
+        (
+            _select_gfx942_flash_ring_depth(problem)
+            if _enable_gfx942_flash_k_sliced_ring(problem)
+            else None
+        ),
         _enable_gfx942_flash_k_sliced_ldsseq(problem),
         # bf16-wide non-ring geometry knobs: cfvst (HIPDNN_GFX942_BF16_CFVST) and
         # small-tile double-K (HIPDNN_GFX942_D128_SMALLTILE_DK) affect num_warps,
