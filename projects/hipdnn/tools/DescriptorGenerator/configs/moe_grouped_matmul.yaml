@@ -139,6 +139,26 @@ operation:
       required: true
       frontend_getter: "get_top_k()"
 
+
+  mode_integration_scenarios:
+    - name: "none_omits_routing"
+      mode: "NONE"
+      provided_optional_inputs: ["token_index", "token_ks"]
+      expected_optional_inputs: []
+      scalar_overrides: { top_k: 2 }
+      expected_scalar_values: { top_k: 0 }
+    - name: "gather_serializes_token_index"
+      mode: "GATHER"
+      provided_optional_inputs: ["token_index", "token_ks"]
+      expected_optional_inputs: ["token_index"]
+      scalar_overrides: { top_k: 2 }
+      expected_scalar_values: { top_k: 0 }
+    - name: "scatter_serializes_routing"
+      mode: "SCATTER"
+      provided_optional_inputs: ["token_index", "token_ks"]
+      expected_optional_inputs: ["token_index", "token_ks"]
+      scalar_overrides: { top_k: 2 }
+      expected_scalar_values: { top_k: 2 }
   tensor_array_fields: []
 
   has_compute_data_type: true

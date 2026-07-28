@@ -366,6 +366,31 @@ class TestTestDataParsing:
         assert tensor_configs["token_index"].data_type == "INT32"
         assert tensor_configs["token_ks"].data_type == "INT32"
 
+    def test_moe_mode_integration_scenarios_cover_all_modes(self, load_test_config):
+        config = load_test_config("moe_grouped_matmul.yaml")
+        scenarios = config.mode_integration_scenarios
+
+        assert [scenario.mode for scenario in scenarios] == [
+            "NONE",
+            "GATHER",
+            "SCATTER",
+        ]
+        assert scenarios[0].provided_optional_inputs == ["token_index", "token_ks"]
+        assert scenarios[0].expected_optional_inputs == []
+        assert scenarios[1].expected_optional_inputs == ["token_index"]
+        assert scenarios[2].expected_optional_inputs == ["token_index", "token_ks"]
+        assert scenarios[2].scalar_overrides == {"top_k": 2}
+        assert scenarios[2].expected_scalar_values == {"top_k": 2}
+
+    def test_moe_mode_integration_scenarios_require_all_executable_modes(
+        self, load_test_config
+    ):
+        config = load_test_config("moe_grouped_matmul.yaml")
+        config.mode_integration_scenarios.pop()
+
+        with pytest.raises(ConfigError, match="missing.*SCATTER"):
+            _validate_config(config)
+
 
 # ---------------------------------------------------------------------------
 # Task 2B.3: _parse_frontend_config() and _parse_frontend_tensors()

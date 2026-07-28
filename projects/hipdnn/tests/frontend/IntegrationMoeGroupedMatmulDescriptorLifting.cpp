@@ -6,6 +6,7 @@
 #include <hip/hip_runtime.h>
 #include <memory>
 #include <set>
+#include <utility>
 #include <vector>
 
 #include <hipdnn_frontend.hpp>
@@ -35,9 +36,23 @@ class IntegrationMoeGroupedMatmulDescriptorLifting : public IntegrationTestFixtu
 {
 protected:
     /// Builds a standard MoeGroupedMatmul graph for round-trip testing.
-    static std::shared_ptr<TestableGraphLifting>
-        buildGraph(DataType operationComputeDataType = DataType::NOT_SET,
-                   MoeGroupedMatmulMode mode = MoeGroupedMatmulMode::NONE)
+    static MoeGroupedMatmulAttributes createAttributes(DataType operationComputeDataType
+                                                       = DataType::NOT_SET)
+    {
+        MoeGroupedMatmulAttributes attrs;
+        attrs.set_name("test_op");
+        attrs.set_mode(MoeGroupedMatmulMode::NONE);
+        attrs.set_top_k(0);
+        if(operationComputeDataType != DataType::NOT_SET)
+        {
+            attrs.set_compute_data_type(operationComputeDataType);
+        }
+        return attrs;
+    }
+
+    static std::shared_ptr<TestableGraphLifting> buildGraph(MoeGroupedMatmulAttributes attrs,
+                                                            bool includeTokenIndex = false,
+                                                            bool includeTokenKs = false)
     {
         auto graph = std::make_shared<TestableGraphLifting>();
         graph->set_name("MoeGroupedMatmulLiftingTestGraph")
@@ -67,7 +82,7 @@ protected:
             .set_stride(toVec(K_MOE_GROUPED_MATMUL_TENSOR_FIRST_TOKEN_OFFSET_STRIDES));
 
         std::shared_ptr<TensorAttributes> tokenIndex;
-        if(mode != MoeGroupedMatmulMode::NONE)
+        if(includeTokenIndex)
         {
             tokenIndex = std::make_shared<TensorAttributes>();
             tokenIndex->set_uid(K_MOE_GROUPED_MATMUL_TENSOR_TOKEN_INDEX_UID)
@@ -78,7 +93,7 @@ protected:
         }
 
         std::shared_ptr<TensorAttributes> tokenKs;
-        if(mode == MoeGroupedMatmulMode::SCATTER)
+        if(includeTokenKs)
         {
             tokenKs = std::make_shared<TensorAttributes>();
             tokenKs->set_uid(K_MOE_GROUPED_MATMUL_TENSOR_TOKEN_KS_UID)
@@ -88,17 +103,8 @@ protected:
                 .set_stride(toVec(K_MOE_GROUPED_MATMUL_TENSOR_TOKEN_KS_STRIDES));
         }
 
-        MoeGroupedMatmulAttributes attrs;
-        attrs.set_name("test_op");
-        attrs.set_mode(mode);
-        attrs.set_top_k(2);
-        if(operationComputeDataType != DataType::NOT_SET)
-        {
-            attrs.set_compute_data_type(operationComputeDataType);
-        }
-
         auto output = graph->moe_grouped_matmul(
-            token, weight, firstTokenOffset, tokenIndex, tokenKs, attrs);
+            token, weight, firstTokenOffset, tokenIndex, tokenKs, std::move(attrs));
         output->set_uid(K_MOE_GROUPED_MATMUL_TENSOR_OUTPUT_UID).set_output(true).set_name("output");
 
         return graph;
@@ -110,7 +116,7 @@ protected:
 // validation of graph data types, tensor attributes, and operation parameters.
 TEST_F(IntegrationMoeGroupedMatmulDescriptorLifting, BasicMoeGroupedMatmulRoundTrip)
 {
-    auto originalGraph = buildGraph();
+    auto originalGraph = buildGraph(createAttributes());
 
     auto liftedGraph = liftGraph(*originalGraph, _handle);
     ASSERT_NE(liftedGraph, nullptr);
@@ -188,9 +194,10 @@ TEST_F(IntegrationMoeGroupedMatmulDescriptorLifting, BasicMoeGroupedMatmulRoundT
     EXPECT_EQ(opNode->attributes.get_name(), "test_op");
 }
 
+// Verifies an operation-level compute type survives descriptor lifting.
 TEST_F(IntegrationMoeGroupedMatmulDescriptorLifting, OperationComputeDataTypeSurvivesLifting)
 {
-    auto originalGraph = buildGraph(DataType::HALF);
+    auto originalGraph = buildGraph(createAttributes(DataType::HALF));
 
     auto liftedGraph = liftGraph(*originalGraph, _handle);
     ASSERT_NE(liftedGraph, nullptr);
@@ -202,9 +209,66 @@ TEST_F(IntegrationMoeGroupedMatmulDescriptorLifting, OperationComputeDataTypeSur
     EXPECT_EQ(opNode->attributes.get_compute_data_type(), DataType::HALF);
 }
 
-TEST_F(IntegrationMoeGroupedMatmulDescriptorLifting, ScatterRoutingTensorsSurviveLifting)
+// Verifies NONE mode survives lowering and descriptor lifting.
+TEST_F(IntegrationMoeGroupedMatmulDescriptorLifting, ModeScenarioNoneOmitsRouting)
 {
-    auto originalGraph = buildGraph(DataType::NOT_SET, MoeGroupedMatmulMode::SCATTER);
+    auto attrs = createAttributes();
+    attrs.set_name("test_none_omits_routing");
+    attrs.set_mode(MoeGroupedMatmulMode::NONE);
+    attrs.set_top_k(2);
+
+    auto originalGraph = buildGraph(std::move(attrs), true, true);
+
+    auto liftedGraph = liftGraph(*originalGraph, _handle);
+    ASSERT_NE(liftedGraph, nullptr);
+
+    const auto tensorMap = liftedGraph->getTensorsByUid();
+    ASSERT_EQ(tensorMap.size(), 4u);
+    auto& subNodes = liftedGraph->getSubNodes();
+    ASSERT_EQ(subNodes.size(), 1u);
+    auto* opNode = dynamic_cast<MoeGroupedMatmulNode*>(subNodes[0].get());
+    ASSERT_NE(opNode, nullptr);
+    EXPECT_EQ(opNode->attributes.get_mode(), MoeGroupedMatmulMode::NONE);
+    EXPECT_EQ(opNode->attributes.get_token_index(), nullptr);
+    EXPECT_EQ(opNode->attributes.get_token_ks(), nullptr);
+    EXPECT_EQ(opNode->attributes.get_top_k(), 0);
+}
+// Verifies GATHER mode survives lowering and descriptor lifting.
+TEST_F(IntegrationMoeGroupedMatmulDescriptorLifting, ModeScenarioGatherSerializesTokenIndex)
+{
+    auto attrs = createAttributes();
+    attrs.set_name("test_gather_serializes_token_index");
+    attrs.set_mode(MoeGroupedMatmulMode::GATHER);
+    attrs.set_top_k(2);
+
+    auto originalGraph = buildGraph(std::move(attrs), true, true);
+
+    auto liftedGraph = liftGraph(*originalGraph, _handle);
+    ASSERT_NE(liftedGraph, nullptr);
+
+    const auto tensorMap = liftedGraph->getTensorsByUid();
+    ASSERT_EQ(tensorMap.size(), 5u);
+    auto& subNodes = liftedGraph->getSubNodes();
+    ASSERT_EQ(subNodes.size(), 1u);
+    auto* opNode = dynamic_cast<MoeGroupedMatmulNode*>(subNodes[0].get());
+    ASSERT_NE(opNode, nullptr);
+    EXPECT_EQ(opNode->attributes.get_mode(), MoeGroupedMatmulMode::GATHER);
+    ASSERT_NE(opNode->attributes.get_token_index(), nullptr);
+    EXPECT_EQ(opNode->attributes.get_token_index()->get_data_type(), DataType::INT32);
+    EXPECT_EQ(tensorMap.at(K_MOE_GROUPED_MATMUL_TENSOR_TOKEN_INDEX_UID).get(),
+              opNode->attributes.get_token_index().get());
+    EXPECT_EQ(opNode->attributes.get_token_ks(), nullptr);
+    EXPECT_EQ(opNode->attributes.get_top_k(), 0);
+}
+// Verifies SCATTER mode survives lowering and descriptor lifting.
+TEST_F(IntegrationMoeGroupedMatmulDescriptorLifting, ModeScenarioScatterSerializesRouting)
+{
+    auto attrs = createAttributes();
+    attrs.set_name("test_scatter_serializes_routing");
+    attrs.set_mode(MoeGroupedMatmulMode::SCATTER);
+    attrs.set_top_k(2);
+
+    auto originalGraph = buildGraph(std::move(attrs), true, true);
 
     auto liftedGraph = liftGraph(*originalGraph, _handle);
     ASSERT_NE(liftedGraph, nullptr);
@@ -216,22 +280,22 @@ TEST_F(IntegrationMoeGroupedMatmulDescriptorLifting, ScatterRoutingTensorsSurviv
     auto* opNode = dynamic_cast<MoeGroupedMatmulNode*>(subNodes[0].get());
     ASSERT_NE(opNode, nullptr);
     EXPECT_EQ(opNode->attributes.get_mode(), MoeGroupedMatmulMode::SCATTER);
-    EXPECT_EQ(opNode->attributes.get_top_k(), 2);
     ASSERT_NE(opNode->attributes.get_token_index(), nullptr);
-    ASSERT_NE(opNode->attributes.get_token_ks(), nullptr);
     EXPECT_EQ(opNode->attributes.get_token_index()->get_data_type(), DataType::INT32);
-    EXPECT_EQ(opNode->attributes.get_token_ks()->get_data_type(), DataType::INT32);
     EXPECT_EQ(tensorMap.at(K_MOE_GROUPED_MATMUL_TENSOR_TOKEN_INDEX_UID).get(),
               opNode->attributes.get_token_index().get());
+    ASSERT_NE(opNode->attributes.get_token_ks(), nullptr);
+    EXPECT_EQ(opNode->attributes.get_token_ks()->get_data_type(), DataType::INT32);
     EXPECT_EQ(tensorMap.at(K_MOE_GROUPED_MATMUL_TENSOR_TOKEN_KS_UID).get(),
               opNode->attributes.get_token_ks().get());
+    EXPECT_EQ(opNode->attributes.get_top_k(), 2);
 }
 
 // After lifting, verifies tensor objects in the node attributes are the same
 // shared_ptr instances as in the tensor map (pointer equality).
 TEST_F(IntegrationMoeGroupedMatmulDescriptorLifting, MoeGroupedMatmulTensorSharingPreserved)
 {
-    auto originalGraph = buildGraph();
+    auto originalGraph = buildGraph(createAttributes());
 
     auto liftedGraph = liftGraph(*originalGraph, _handle);
     ASSERT_NE(liftedGraph, nullptr);
@@ -268,7 +332,7 @@ TEST_F(IntegrationMoeGroupedMatmulDescriptorLifting, MoeGroupedMatmulTensorShari
 // all fields survive the backend C API serialization path.
 TEST_F(IntegrationMoeGroupedMatmulDescriptorLifting, MoeGroupedMatmulLiftWithoutFinalization)
 {
-    auto originalGraph = buildGraph();
+    auto originalGraph = buildGraph(createAttributes());
 
     auto liftedGraph = liftGraphWithoutFinalization(*originalGraph);
     ASSERT_NE(liftedGraph, nullptr);
@@ -356,7 +420,7 @@ TEST_F(IntegrationMoeGroupedMatmulDescriptorLifting, AutoAssignedUidsPreservedIn
     MoeGroupedMatmulAttributes attrs;
     attrs.set_name("test_auto_uid");
     attrs.set_mode(MoeGroupedMatmulMode::NONE);
-    attrs.set_top_k(2);
+    attrs.set_top_k(0);
 
     auto output
         = graph->moe_grouped_matmul(token, weight, firstTokenOffset, tokenIndex, tokenKs, attrs);

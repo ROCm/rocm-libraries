@@ -24,3 +24,14 @@
 {{ object_name }}.{{ field.frontend_setter_name }}({{ value }});
 {%- endif -%}
 {%- endmacro -%}
+
+{#- Renders YAML scalar values as C++ literals for generated test setup. -#}
+{%- macro cpp_literal(value) -%}
+{%- if value is sameas true -%}
+true
+{%- elif value is sameas false -%}
+false
+{%- else -%}
+{{ value }}
+{%- endif -%}
+{%- endmacro -%}

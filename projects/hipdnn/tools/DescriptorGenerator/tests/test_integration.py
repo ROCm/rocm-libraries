@@ -793,6 +793,41 @@ class TestTemplateOutputContent:
         assert "EXPECT_FALSE(attrs.get_relu_lower_clip().has_value());" in content
         assert "EXPECT_FALSE(attrs.get_axis().has_value());" in content
 
+    def test_mode_integration_scenarios_render_lowering_and_lifting_coverage(
+        self, load_test_config, generator, tmp_path
+    ):
+        """Configured executable modes generate valid optional-input scenarios."""
+        config = load_test_config("moe_grouped_matmul.yaml")
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        generator.render(config, output_dir, "full")
+
+        lowering_content = (
+            output_dir / "tests" / "frontend" / config.test_integration_filename
+        ).read_text()
+        lifting_content = (
+            output_dir / "tests" / "frontend" / config.test_integration_lifting_filename
+        ).read_text()
+
+        for scenario in config.mode_integration_scenarios:
+            suffix = scenario.pascal_name
+            assert f"ModeScenario{suffix}" in lowering_content
+            assert f"ModeScenario{suffix}" in lifting_content
+
+        assert "OperationComputeDataTypeOverride" in lowering_content
+        assert "OperationComputeDataTypeSurvivesLifting" in lifting_content
+        assert "AutoAssignedUidsPreservedInRoundTrip" in lowering_content
+        assert "includeTokenIndex" in lowering_content
+        assert "includeTokenKs" in lowering_content
+        assert "ModeScenarioGatherSerializesTokenIndex" in lowering_content
+        assert (
+            "EXPECT_FALSE(opNode->token_ks_tensor_uid.has_value());" in lowering_content
+        )
+        assert "ModeScenarioScatterSerializesRouting" in lifting_content
+        assert (
+            "ASSERT_NE(opNode->attributes.get_token_ks(), nullptr);" in lifting_content
+        )
+
     def test_frontend_test_node_content(
         self, convolution_fwd_config, generator, tmp_path
     ):

@@ -568,6 +568,29 @@ class TestData:
 
 
 @dataclass
+class ModeIntegrationScenario:
+    """A valid graph scenario for one executable frontend mode.
+
+    Scenarios drive lowering and lifting coverage only. They declare the
+    optional graph inputs supplied to a valid graph, the optional inputs
+    expected after canonical descriptor serialization, and scalar values that
+    may be changed by mode-specific packing.
+    """
+
+    name: str
+    mode: str
+    provided_optional_inputs: list[str] = field(default_factory=list)
+    expected_optional_inputs: list[str] = field(default_factory=list)
+    scalar_overrides: dict[str, int | float | bool] = field(default_factory=dict)
+    expected_scalar_values: dict[str, int | float | bool] = field(default_factory=dict)
+
+    @property
+    def pascal_name(self) -> str:
+        """Scenario name formatted for a C++ test suffix."""
+        return "".join(part.capitalize() for part in self.name.split("_"))
+
+
+@dataclass
 class FrontendTensorConfig:
     """An input or output tensor for the frontend Attributes class."""
 
@@ -807,6 +830,9 @@ class OperationConfig:
     tensor_array_fields: list[TensorArrayField] = field(default_factory=list)
     extra_data_type_fields: list[ExtraDataTypeField] = field(default_factory=list)
 
+    mode_integration_scenarios: list[ModeIntegrationScenario] = field(
+        default_factory=list
+    )
     data_fields_helper: Optional[DataFieldsHelper] = None
 
     has_compute_data_type: bool = True

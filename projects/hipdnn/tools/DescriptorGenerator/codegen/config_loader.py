@@ -18,6 +18,7 @@ from .models import (
     ExtraDataTypeField,
     FrontendConfig,
     FrontendTensorConfig,
+    ModeIntegrationScenario,
     GraphMethodParam,
     InferPropertiesConfig,
     OperationConfig,
@@ -178,6 +179,25 @@ def load_config(path: Path) -> OperationConfig:
         test_data.constants_include = td_raw.get("constants_include", "")
         test_data.tensor_const_prefix = td_raw.get("tensor_const_prefix", None)
 
+    # Mode integration scenarios exercise every configured executable mode
+    # through graph lowering and lifting.
+    mode_integration_scenarios = []
+    for scenario in op.get("mode_integration_scenarios", []):
+        if "name" not in scenario or "mode" not in scenario:
+            raise ConfigError(
+                f"Operation '{op['name']}': each mode_integration_scenarios entry "
+                "must define 'name' and 'mode'."
+            )
+        mode_integration_scenarios.append(
+            ModeIntegrationScenario(
+                name=scenario["name"],
+                mode=scenario["mode"],
+                provided_optional_inputs=scenario.get("provided_optional_inputs", []),
+                expected_optional_inputs=scenario.get("expected_optional_inputs", []),
+                scalar_overrides=scenario.get("scalar_overrides", {}),
+                expected_scalar_values=scenario.get("expected_scalar_values", {}),
+            )
+        )
     # Data fields helper (shared pack/unpack functions)
     data_fields_helper = _parse_data_fields_helper(op.get("data_fields_helper"))
 
@@ -199,6 +219,7 @@ def load_config(path: Path) -> OperationConfig:
         data_fields=data_fields,
         tensor_array_fields=tensor_array_fields,
         extra_data_type_fields=extra_data_type_fields,
+        mode_integration_scenarios=mode_integration_scenarios,
         data_fields_helper=data_fields_helper,
         has_compute_data_type=op.get("has_compute_data_type", True),
         compute_data_type_attr=op.get("compute_data_type_attr", ""),
@@ -563,6 +584,100 @@ def _validate_config(config: OperationConfig) -> None:
                 f"frontend.inputs[]/frontend.outputs[]."
             )
 
+    if config.mode_integration_scenarios:
+        if len(config.mode_fields) != 1:
+            raise ConfigError(
+                f"Operation '{config.name}': mode_integration_scenarios requires exactly one "
+                "data field with type 'mode'."
+            )
+
+        mode_field = config.mode_fields[0]
+        if not mode_field.enum_def:
+            raise ConfigError(
+                f"Operation '{config.name}': mode_integration_scenarios requires the mode "
+                "field to define enum_def values."
+            )
+
+        executable_modes = {
+            value.effective_frontend_name
+            for value in mode_field.enum_def.non_sentinel_values
+        }
+        optional_input_names = {
+            param.tensor_name or param.name
+            for param in config.frontend.graph_method_params
+            if param.optional
+        }
+        scalar_names = {field.name for field in config.data_fields if field.is_scalar}
+        scenario_names: set[str] = set()
+        scenario_modes: set[str] = set()
+
+        for scenario in config.mode_integration_scenarios:
+            if not scenario.name:
+                raise ConfigError(
+                    f"Operation '{config.name}': mode integration scenario names must not be empty."
+                )
+            if scenario.name in scenario_names:
+                raise ConfigError(
+                    f"Operation '{config.name}': duplicate mode integration scenario name "
+                    f"'{scenario.name}'."
+                )
+            scenario_names.add(scenario.name)
+
+            if scenario.mode not in executable_modes:
+                raise ConfigError(
+                    f"Operation '{config.name}': mode integration scenario '{scenario.name}' "
+                    f"references unknown or non-executable mode '{scenario.mode}'."
+                )
+            if scenario.mode in scenario_modes:
+                raise ConfigError(
+                    f"Operation '{config.name}': duplicate mode integration scenario for "
+                    f"mode '{scenario.mode}'."
+                )
+            scenario_modes.add(scenario.mode)
+
+            provided_unknown = (
+                set(scenario.provided_optional_inputs) - optional_input_names
+            )
+            if provided_unknown:
+                raise ConfigError(
+                    f"Operation '{config.name}', mode integration scenario '{scenario.name}': "
+                    f"provided_optional_inputs contains non-optional graph inputs "
+                    f"{sorted(provided_unknown)}."
+                )
+            expected_unknown = (
+                set(scenario.expected_optional_inputs) - optional_input_names
+            )
+            if expected_unknown:
+                raise ConfigError(
+                    f"Operation '{config.name}', mode integration scenario '{scenario.name}': "
+                    f"expected_optional_inputs contains non-optional graph inputs "
+                    f"{sorted(expected_unknown)}."
+                )
+            not_provided = set(scenario.expected_optional_inputs) - set(
+                scenario.provided_optional_inputs
+            )
+            if not_provided:
+                raise ConfigError(
+                    f"Operation '{config.name}', mode integration scenario '{scenario.name}': "
+                    f"expected_optional_inputs must be a subset of provided_optional_inputs; "
+                    f"missing {sorted(not_provided)}."
+                )
+
+            scalar_unknown = (
+                set(scenario.scalar_overrides) | set(scenario.expected_scalar_values)
+            ) - scalar_names
+            if scalar_unknown:
+                raise ConfigError(
+                    f"Operation '{config.name}', mode integration scenario '{scenario.name}': "
+                    f"scalar override keys are not scalar data fields: {sorted(scalar_unknown)}."
+                )
+
+        missing_modes = executable_modes - scenario_modes
+        if missing_modes:
+            raise ConfigError(
+                f"Operation '{config.name}': mode_integration_scenarios must cover every "
+                f"executable mode; missing {sorted(missing_modes)}."
+            )
     # Auto-detect mode_sentinel for mode fields where it's unset and the enum
     # has no sentinel. Emit one warning per affected field so authors can set
     # mode_sentinel: none explicitly to silence the warning. The DataField
