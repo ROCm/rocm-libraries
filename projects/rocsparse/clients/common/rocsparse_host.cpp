@@ -2289,6 +2289,72 @@ void host_csrsv(rocsparse_operation  trans,
     *numeric_pivot = (*numeric_pivot == M + 1) ? -1 : *numeric_pivot;
 }
 
+template <typename I, typename J, typename T>
+void host_cscsv(rocsparse_operation  trans,
+                J                    M,
+                I                    nnz,
+                T                    alpha,
+                const I*             csc_col_ptr,
+                const J*             csc_row_ind,
+                const T*             csc_val,
+                const T*             x,
+                int64_t              x_inc,
+                T*                   y,
+                rocsparse_diag_type  diag_type,
+                rocsparse_fill_mode  fill_mode,
+                rocsparse_index_base base,
+                J*                   struct_pivot,
+                J*                   numeric_pivot)
+{
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
+
+    // A CSC matrix is the transpose of the CSR matrix sharing the same arrays,
+    // so a CSC triangular solve is a CSR triangular solve with the transpose
+    // operation and the fill mode flipped:
+    //   op=none          -> op'=transpose       (solve A*y=α*x via (A^T)^T=A)
+    //   op=transpose     -> op'=none            (data is already A^T)
+    //   op=conj_trans    -> op'=none on conj    (A^H = conj(A^T); pre-conjugate values)
+    //   fill=lower (A)   -> fill'=upper (A^T), and vice versa
+    const rocsparse_operation trans_csr = (trans == rocsparse_operation_none)
+                                              ? rocsparse_operation_transpose
+                                              : rocsparse_operation_none;
+    const rocsparse_fill_mode fill_csr  = (fill_mode == rocsparse_fill_mode_lower)
+                                              ? rocsparse_fill_mode_upper
+                                              : rocsparse_fill_mode_lower;
+
+    // For the conjugate transpose, pre-conjugate the values so the CSR solve with
+    // op'=none solves conj(A^T)*y = alpha*x = A^H*y = alpha*x.
+    const T*       val = csc_val;
+    std::vector<T> conj_val;
+    if(trans == rocsparse_operation_conjugate_transpose)
+    {
+        conj_val.resize(nnz);
+        for(I i = 0; i < nnz; ++i)
+        {
+            conj_val[i] = rocsparse_conj(csc_val[i]);
+        }
+        val = conj_val.data();
+    }
+
+    // The CSC column pointer / row index arrays act as the CSR row pointer /
+    // column index arrays of A^T.
+    host_csrsv<I, J, T>(trans_csr,
+                        M,
+                        nnz,
+                        alpha,
+                        csc_col_ptr,
+                        csc_row_ind,
+                        val,
+                        x,
+                        x_inc,
+                        y,
+                        diag_type,
+                        fill_csr,
+                        base,
+                        struct_pivot,
+                        numeric_pivot);
+}
+
 template <typename I, typename T>
 void host_coosv(rocsparse_operation  trans,
                 I                    M,
@@ -3939,6 +4005,76 @@ void host_csrsm(J                    M,
         *struct_pivot  = (*struct_pivot == M + 1) ? -1 : *struct_pivot;
         *numeric_pivot = (*numeric_pivot == M + 1) ? -1 : *numeric_pivot;
     }
+}
+
+template <typename I, typename J, typename T>
+void host_cscsm(J                    M,
+                J                    nrhs,
+                I                    nnz,
+                rocsparse_operation  transA,
+                rocsparse_operation  transB,
+                T                    alpha,
+                const I*             csc_col_ptr,
+                const J*             csc_row_ind,
+                const T*             csc_val,
+                T*                   B,
+                int64_t              ldb,
+                rocsparse_order      order_B,
+                rocsparse_diag_type  diag_type,
+                rocsparse_fill_mode  fill_mode,
+                rocsparse_index_base base,
+                J*                   struct_pivot,
+                J*                   numeric_pivot)
+{
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
+
+    // A CSC matrix is the transpose of the CSR matrix sharing the same arrays, so
+    // a CSC triangular solve is a CSR triangular solve on A^T with the transpose
+    // operation and the fill mode flipped (transB acts on B and is unchanged):
+    //   opA=none       -> opA'=transpose       (solve A*C=α*op_B(B) via (A^T)^T=A)
+    //   opA=transpose  -> opA'=none            (data is already A^T)
+    //   opA=conj_trans -> opA'=none on conj    (A^H = conj(A^T); pre-conjugate values)
+    //   fill=lower (A) -> fill'=upper (A^T), and vice versa
+    const rocsparse_operation transA_csr = (transA == rocsparse_operation_none)
+                                               ? rocsparse_operation_transpose
+                                               : rocsparse_operation_none;
+    const rocsparse_fill_mode fill_csr   = (fill_mode == rocsparse_fill_mode_lower)
+                                               ? rocsparse_fill_mode_upper
+                                               : rocsparse_fill_mode_lower;
+
+    // For the conjugate transpose, pre-conjugate the values so the CSR solve with
+    // opA'=none solves conj(A^T)*C = alpha*op_B(B) = A^H*C = alpha*op_B(B).
+    const T*       val = csc_val;
+    std::vector<T> conj_val;
+    if(transA == rocsparse_operation_conjugate_transpose)
+    {
+        conj_val.resize(nnz);
+        for(I i = 0; i < nnz; ++i)
+        {
+            conj_val[i] = rocsparse_conj(csc_val[i]);
+        }
+        val = conj_val.data();
+    }
+
+    // The CSC column pointer / row index arrays act as the CSR row pointer /
+    // column index arrays of A^T.
+    host_csrsm<I, J, T>(M,
+                        nrhs,
+                        nnz,
+                        transA_csr,
+                        transB,
+                        alpha,
+                        csc_col_ptr,
+                        csc_row_ind,
+                        val,
+                        B,
+                        ldb,
+                        order_B,
+                        diag_type,
+                        fill_csr,
+                        base,
+                        struct_pivot,
+                        numeric_pivot);
 }
 
 template <typename I, typename T>
@@ -9915,6 +10051,21 @@ template struct rocsparse_host<rocsparse_double_complex,
                                                   rocsparse_index_base base,                 \
                                                   JTYPE*               struct_pivot,         \
                                                   JTYPE*               numeric_pivot);                     \
+    template void host_cscsv<ITYPE, JTYPE, TTYPE>(rocsparse_operation  trans,                \
+                                                  JTYPE                M,                    \
+                                                  ITYPE                nnz,                  \
+                                                  TTYPE                alpha,                \
+                                                  const ITYPE*         csc_col_ptr,          \
+                                                  const JTYPE*         csc_row_ind,          \
+                                                  const TTYPE*         csc_val,              \
+                                                  const TTYPE*         x,                    \
+                                                  int64_t              x_inc,                \
+                                                  TTYPE*               y,                    \
+                                                  rocsparse_diag_type  diag_type,            \
+                                                  rocsparse_fill_mode  fill_mode,            \
+                                                  rocsparse_index_base base,                 \
+                                                  JTYPE*               struct_pivot,         \
+                                                  JTYPE*               numeric_pivot);                     \
     template void host_csrsm<ITYPE, JTYPE, TTYPE>(JTYPE                M,                    \
                                                   JTYPE                nrhs,                 \
                                                   ITYPE                nnz,                  \
@@ -9924,6 +10075,23 @@ template struct rocsparse_host<rocsparse_double_complex,
                                                   const ITYPE*         csr_row_ptr,          \
                                                   const JTYPE*         csr_col_ind,          \
                                                   const TTYPE*         csr_val,              \
+                                                  TTYPE*               B,                    \
+                                                  int64_t              ldb,                  \
+                                                  rocsparse_order      order_B,              \
+                                                  rocsparse_diag_type  diag_type,            \
+                                                  rocsparse_fill_mode  fill_mode,            \
+                                                  rocsparse_index_base base,                 \
+                                                  JTYPE*               struct_pivot,         \
+                                                  JTYPE*               numeric_pivot);                     \
+    template void host_cscsm<ITYPE, JTYPE, TTYPE>(JTYPE                M,                    \
+                                                  JTYPE                nrhs,                 \
+                                                  ITYPE                nnz,                  \
+                                                  rocsparse_operation  transA,               \
+                                                  rocsparse_operation  transB,               \
+                                                  TTYPE                alpha,                \
+                                                  const ITYPE*         csc_col_ptr,          \
+                                                  const JTYPE*         csc_row_ind,          \
+                                                  const TTYPE*         csc_val,              \
                                                   TTYPE*               B,                    \
                                                   int64_t              ldb,                  \
                                                   rocsparse_order      order_B,              \

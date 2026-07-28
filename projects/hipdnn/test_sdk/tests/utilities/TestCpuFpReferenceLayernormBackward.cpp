@@ -958,9 +958,9 @@ TEST(TestCpuFpReferenceLayernormBackwardFp64, BpropNormalizeLastTwoDims)
 
     // Batch 1: dy values 1.3..2.4, x values 13..24, mean = (13+14+...+24)/12 = 222/12 = 18.5
     batchVar = 0.0;
-    for(int i = 0; i < 2; i++)
+    for(int i = 0; i < 3; i++)
     {
-        for(int j = 0; j < 3; j++)
+        for(int j = 0; j < 4; j++)
         {
             dy.setHostValue(static_cast<double>(i * 4 + j + 13) / 10.0, 1, i, j);
             auto xVal = static_cast<double>(i * 4 + j + 13);
