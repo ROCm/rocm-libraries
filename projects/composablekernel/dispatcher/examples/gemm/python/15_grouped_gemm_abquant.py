@@ -30,7 +30,6 @@ Usage:
 
 import argparse
 import logging
-import math
 import sys
 import tempfile
 from pathlib import Path
@@ -206,12 +205,6 @@ def main():
     # 3. Generate inputs
     # -------------------------------------------------------------------------
     rng = np.random.default_rng(42)
-    QK_A = math.ceil(K / gK)
-    QM_A = 1  # aquant_group_m=1 by default → QM_A == M
-    QK_B = math.ceil(K / gK)
-    QN_B = math.ceil(N / bN)
-
-    # Recompute using actual problem to be safe
     problem = ABQuantGemmProblem(
         M=M, N=N, K=K,
         aquant_group_m=1, aquant_group_n=1, aquant_group_k=gK,
