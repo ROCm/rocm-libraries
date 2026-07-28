@@ -34,6 +34,7 @@ MoeGroupedMatmulAttributes createValidAttributes()
     auto firstTokenOffsetTensor = std::make_shared<TensorAttributes>();
     firstTokenOffsetTensor->set_dim({2, 1, 1});
     firstTokenOffsetTensor->set_stride({1, 1, 1});
+    firstTokenOffsetTensor->set_data_type(DataType::INT32);
     attrs.set_first_token_offset(firstTokenOffsetTensor);
     auto outputTensor = std::make_shared<TensorAttributes>();
     outputTensor->set_dim({1, 8, 32});
@@ -83,6 +84,7 @@ TEST(TestMoeGroupedMatmulNode, PreValidateNodeMissingTokenTensor)
     auto firstTokenOffsetTensor = std::make_shared<TensorAttributes>();
     firstTokenOffsetTensor->set_dim({2, 1, 1});
     firstTokenOffsetTensor->set_stride({1, 1, 1});
+    firstTokenOffsetTensor->set_data_type(DataType::INT32);
     attrs.set_first_token_offset(firstTokenOffsetTensor);
     auto outputTensor = std::make_shared<TensorAttributes>();
     outputTensor->set_dim({1, 8, 32});
@@ -111,6 +113,7 @@ TEST(TestMoeGroupedMatmulNode, PreValidateNodeMissingWeightTensor)
     auto firstTokenOffsetTensor = std::make_shared<TensorAttributes>();
     firstTokenOffsetTensor->set_dim({2, 1, 1});
     firstTokenOffsetTensor->set_stride({1, 1, 1});
+    firstTokenOffsetTensor->set_data_type(DataType::INT32);
     attrs.set_first_token_offset(firstTokenOffsetTensor);
     auto outputTensor = std::make_shared<TensorAttributes>();
     outputTensor->set_dim({1, 8, 32});
@@ -171,6 +174,7 @@ TEST(TestMoeGroupedMatmulNode, PreValidateNodeMissingOutputTensor)
     auto firstTokenOffsetTensor = std::make_shared<TensorAttributes>();
     firstTokenOffsetTensor->set_dim({2, 1, 1});
     firstTokenOffsetTensor->set_stride({1, 1, 1});
+    firstTokenOffsetTensor->set_data_type(DataType::INT32);
     attrs.set_first_token_offset(firstTokenOffsetTensor);
 
     attrs.set_top_k(2);
@@ -209,7 +213,7 @@ TEST(TestMoeGroupedMatmulNode, ScatterRequiresTokenKs)
 {
     auto attrs = createValidAttributes();
     auto tokenIndex = std::make_shared<TensorAttributes>();
-    tokenIndex->set_dim({1, 8, 1}).set_stride({8, 1, 1});
+    tokenIndex->set_dim({1, 8, 1}).set_stride({8, 1, 1}).set_data_type(DataType::INT32);
     attrs.set_token_index(tokenIndex).set_mode(MoeGroupedMatmulMode::SCATTER);
 
     const GraphAttributes graphAttributes;
@@ -222,9 +226,9 @@ TEST(TestMoeGroupedMatmulNode, ScatterRejectsNonpositiveTopK)
 {
     auto attrs = createValidAttributes();
     auto tokenIndex = std::make_shared<TensorAttributes>();
-    tokenIndex->set_dim({1, 8, 1}).set_stride({8, 1, 1});
+    tokenIndex->set_dim({1, 8, 1}).set_stride({8, 1, 1}).set_data_type(DataType::INT32);
     auto tokenKs = std::make_shared<TensorAttributes>();
-    tokenKs->set_dim({1, 8, 1}).set_stride({8, 1, 1});
+    tokenKs->set_dim({1, 8, 1}).set_stride({8, 1, 1}).set_data_type(DataType::INT32);
     attrs.set_token_index(tokenIndex)
         .set_token_ks(tokenKs)
         .set_mode(MoeGroupedMatmulMode::SCATTER)
@@ -240,9 +244,9 @@ TEST(TestMoeGroupedMatmulNode, ScatterRejectsTopKGreaterThanExpertCount)
 {
     auto attrs = createValidAttributes();
     auto tokenIndex = std::make_shared<TensorAttributes>();
-    tokenIndex->set_dim({1, 8, 1}).set_stride({8, 1, 1});
+    tokenIndex->set_dim({1, 8, 1}).set_stride({8, 1, 1}).set_data_type(DataType::INT32);
     auto tokenKs = std::make_shared<TensorAttributes>();
-    tokenKs->set_dim({1, 8, 1}).set_stride({8, 1, 1});
+    tokenKs->set_dim({1, 8, 1}).set_stride({8, 1, 1}).set_data_type(DataType::INT32);
     attrs.set_token_index(tokenIndex)
         .set_token_ks(tokenKs)
         .set_mode(MoeGroupedMatmulMode::SCATTER)
@@ -265,11 +269,50 @@ TEST(TestMoeGroupedMatmulNode, RejectsMismatchedMatmulDimensions)
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
 }
 
+TEST(TestMoeGroupedMatmulNode, RejectsNonInt32FirstTokenOffset)
+{
+    auto attrs = createValidAttributes();
+    attrs.get_first_token_offset()->set_data_type(DataType::FLOAT);
+
+    const GraphAttributes graphAttributes;
+    const MoeGroupedMatmulNode node(std::move(attrs), graphAttributes);
+    const auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+}
+
+TEST(TestMoeGroupedMatmulNode, GatherRejectsNonInt32TokenIndex)
+{
+    auto attrs = createValidAttributes();
+    auto tokenIndex = std::make_shared<TensorAttributes>();
+    tokenIndex->set_dim({1, 8, 1}).set_stride({8, 1, 1}).set_data_type(DataType::FLOAT);
+    attrs.set_token_index(tokenIndex).set_mode(MoeGroupedMatmulMode::GATHER);
+
+    const GraphAttributes graphAttributes;
+    const MoeGroupedMatmulNode node(std::move(attrs), graphAttributes);
+    const auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+}
+
+TEST(TestMoeGroupedMatmulNode, ScatterRejectsNonInt32TokenKs)
+{
+    auto attrs = createValidAttributes();
+    auto tokenIndex = std::make_shared<TensorAttributes>();
+    tokenIndex->set_dim({1, 8, 1}).set_stride({8, 1, 1}).set_data_type(DataType::INT32);
+    auto tokenKs = std::make_shared<TensorAttributes>();
+    tokenKs->set_dim({1, 8, 1}).set_stride({8, 1, 1}).set_data_type(DataType::FLOAT);
+    attrs.set_token_index(tokenIndex).set_token_ks(tokenKs).set_mode(MoeGroupedMatmulMode::SCATTER);
+
+    const GraphAttributes graphAttributes;
+    const MoeGroupedMatmulNode node(std::move(attrs), graphAttributes);
+    const auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+}
+
 TEST(TestMoeGroupedMatmulNode, GatherInfersOutputDimensionsAndStrides)
 {
     auto attrs = createValidAttributes();
     auto tokenIndex = std::make_shared<TensorAttributes>();
-    tokenIndex->set_dim({1, 6, 1}).set_stride({6, 1, 1});
+    tokenIndex->set_dim({1, 6, 1}).set_stride({6, 1, 1}).set_data_type(DataType::INT32);
     auto output = std::make_shared<TensorAttributes>();
     attrs.set_token_index(tokenIndex).set_output(output).set_mode(MoeGroupedMatmulMode::GATHER);
 

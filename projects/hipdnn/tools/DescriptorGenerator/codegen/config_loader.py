@@ -172,6 +172,7 @@ def load_config(path: Path) -> OperationConfig:
             test_data.tensor_configs[name] = TensorConfig(
                 dims=cfg.get("dims", []),
                 strides=cfg.get("strides", []),
+                data_type=cfg.get("data_type", "FLOAT"),
             )
         test_data.field_values = td_raw.get("field_values", {})
         test_data.constants_include = td_raw.get("constants_include", "")

@@ -42,18 +42,36 @@ inline Error createMoeGroupedMatmulOperation(
                               attributes.get_first_token_offset(),
                               tensorDescs,
                               "MoE grouped matmul FIRST_TOKEN_OFFSET_DESC"));
-    HIPDNN_CHECK_ERROR(
-        ensureAndSetOptionalTensorRef(opDesc.get(),
-                                      HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_TOKEN_INDEX_DESC,
-                                      attributes.get_token_index(),
-                                      tensorDescs,
-                                      "MoE grouped matmul TOKEN_INDEX_DESC"));
-    HIPDNN_CHECK_ERROR(
-        ensureAndSetOptionalTensorRef(opDesc.get(),
-                                      HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_TOKEN_KS_DESC,
-                                      attributes.get_token_ks(),
-                                      tensorDescs,
-                                      "MoE grouped matmul TOKEN_KS_DESC"));
+    switch(attributes.get_mode())
+    {
+    case MoeGroupedMatmulMode::NONE:
+        break;
+    case MoeGroupedMatmulMode::GATHER:
+        HIPDNN_CHECK_ERROR(
+            ensureAndSetTensorRef(opDesc.get(),
+                                  HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_TOKEN_INDEX_DESC,
+                                  attributes.get_token_index(),
+                                  tensorDescs,
+                                  "MoE grouped matmul TOKEN_INDEX_DESC"));
+        break;
+    case MoeGroupedMatmulMode::SCATTER:
+        HIPDNN_CHECK_ERROR(
+            ensureAndSetTensorRef(opDesc.get(),
+                                  HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_TOKEN_INDEX_DESC,
+                                  attributes.get_token_index(),
+                                  tensorDescs,
+                                  "MoE grouped matmul TOKEN_INDEX_DESC"));
+        HIPDNN_CHECK_ERROR(
+            ensureAndSetTensorRef(opDesc.get(),
+                                  HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_TOKEN_KS_DESC,
+                                  attributes.get_token_ks(),
+                                  tensorDescs,
+                                  "MoE grouped matmul TOKEN_KS_DESC"));
+        break;
+    default:
+        return {ErrorCode::INVALID_VALUE, "MoE grouped matmul has an unknown routing mode"};
+    }
+
     HIPDNN_CHECK_ERROR(ensureAndSetTensorRef(opDesc.get(),
                                              HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_OUTPUT_DESC,
                                              attributes.get_output(),
@@ -69,11 +87,14 @@ inline Error createMoeGroupedMatmulOperation(
                                                HIPDNN_TYPE_MOE_GROUPED_MATMUL_MODE,
                                                mode,
                                                "MoE grouped matmul mode"));
-    HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(opDesc.get(),
-                                               HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_TOP_K,
-                                               HIPDNN_TYPE_INT32,
-                                               attributes.get_top_k(),
-                                               "MoE grouped matmul top_k"));
+    if(attributes.get_mode() == MoeGroupedMatmulMode::SCATTER)
+    {
+        HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(opDesc.get(),
+                                                   HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_TOP_K,
+                                                   HIPDNN_TYPE_INT32,
+                                                   attributes.get_top_k(),
+                                                   "MoE grouped matmul top_k"));
+    }
 
     HIPDNN_CHECK_ERROR(setDescriptorAttrDataType(opDesc.get(),
                                                  HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_MATH_PREC,

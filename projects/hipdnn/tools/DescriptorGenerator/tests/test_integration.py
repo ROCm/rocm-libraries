@@ -27,12 +27,14 @@ FRONTEND_CAPABLE_CONFIGS = [
     "pointwise.yaml",
     "batchnorm_inference.yaml",
     "sdpa.yaml",
+    "moe_grouped_matmul.yaml",
 ]
 
 # Configs that generate mode enum files (has enum_def, not shared)
 MODE_ENUM_CONFIGS = [
     "convolution_fwd.yaml",
     "pointwise.yaml",
+    "moe_grouped_matmul.yaml",
 ]
 
 # Copyright header present in all generated C++ files
@@ -738,6 +740,50 @@ class TestTemplateOutputContent:
         # Templates may use TEST() or TEST_F() depending on the test pattern
         assert "TEST" in content
         assert config.frontend.attributes_class in content
+
+    def test_member_access_data_fields_render_as_assignments(
+        self, sdpa_config, generator, tmp_path
+    ):
+        """Handwritten public attribute members are assigned, never invoked."""
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        generator.render(sdpa_config, output_dir, "full")
+
+        attributes_content = (
+            output_dir / "frontend" / "tests" / sdpa_config.test_attributes_filename
+        ).read_text()
+        graph_content = (
+            output_dir / "frontend" / "tests" / sdpa_config.test_frontend_graph_filename
+        ).read_text()
+        lowering_content = (
+            output_dir / "tests" / "frontend" / sdpa_config.test_integration_filename
+        ).read_text()
+        lifting_content = (
+            output_dir
+            / "tests"
+            / "frontend"
+            / sdpa_config.test_integration_lifting_filename
+        ).read_text()
+
+        for content in (attributes_content, graph_content, lowering_content, lifting_content):
+            assert "dropout_probability = " in content
+            assert "dropout_probability(" not in content
+            assert "diagonal_alignment = " in content
+            assert "diagonal_alignment(" not in content
+
+    def test_optional_scalar_defaults_render_as_empty_optionals(
+        self, pointwise_config, generator, tmp_path
+    ):
+        """Optional scalar defaults must remain unset rather than compare equal to zero."""
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        generator.render(pointwise_config, output_dir, "frontend")
+
+        content = (
+            output_dir / "frontend" / "tests" / pointwise_config.test_attributes_filename
+        ).read_text()
+        assert "EXPECT_FALSE(attrs.get_relu_lower_clip().has_value());" in content
+        assert "EXPECT_FALSE(attrs.get_axis().has_value());" in content
 
     def test_frontend_test_node_content(
         self, convolution_fwd_config, generator, tmp_path

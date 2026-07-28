@@ -57,7 +57,7 @@ protected:
             = TensorDescriptor::fromFlatBuffer(weightAttrs);
         TensorAttributesT firstTokenOffsetAttrs;
         firstTokenOffsetAttrs.uid = K_MOE_GROUPED_MATMUL_TENSOR_FIRST_TOKEN_OFFSET_UID;
-        firstTokenOffsetAttrs.data_type = DataType::FLOAT;
+        firstTokenOffsetAttrs.data_type = DataType::INT32;
         firstTokenOffsetAttrs.dims = toVec(K_MOE_GROUPED_MATMUL_TENSOR_FIRST_TOKEN_OFFSET_DIMS);
         firstTokenOffsetAttrs.strides
             = toVec(K_MOE_GROUPED_MATMUL_TENSOR_FIRST_TOKEN_OFFSET_STRIDES);
@@ -66,7 +66,7 @@ protected:
             = TensorDescriptor::fromFlatBuffer(firstTokenOffsetAttrs);
         TensorAttributesT tokenIndexAttrs;
         tokenIndexAttrs.uid = K_MOE_GROUPED_MATMUL_TENSOR_TOKEN_INDEX_UID;
-        tokenIndexAttrs.data_type = DataType::FLOAT;
+        tokenIndexAttrs.data_type = DataType::INT32;
         tokenIndexAttrs.dims = toVec(K_MOE_GROUPED_MATMUL_TENSOR_TOKEN_INDEX_DIMS);
         tokenIndexAttrs.strides = toVec(K_MOE_GROUPED_MATMUL_TENSOR_TOKEN_INDEX_STRIDES);
 
@@ -74,7 +74,7 @@ protected:
             = TensorDescriptor::fromFlatBuffer(tokenIndexAttrs);
         TensorAttributesT tokenKsAttrs;
         tokenKsAttrs.uid = K_MOE_GROUPED_MATMUL_TENSOR_TOKEN_KS_UID;
-        tokenKsAttrs.data_type = DataType::FLOAT;
+        tokenKsAttrs.data_type = DataType::INT32;
         tokenKsAttrs.dims = toVec(K_MOE_GROUPED_MATMUL_TENSOR_TOKEN_KS_DIMS);
         tokenKsAttrs.strides = toVec(K_MOE_GROUPED_MATMUL_TENSOR_TOKEN_KS_STRIDES);
 
@@ -237,7 +237,7 @@ TEST_F(TestMoeGroupedMatmulOperationFromNode, SetsTensorReferencesWithFullValues
     ASSERT_NE(desc->getFirstTokenOffsetDesc(), nullptr);
     EXPECT_EQ(desc->getFirstTokenOffsetDesc()->getData().uid,
               K_MOE_GROUPED_MATMUL_TENSOR_FIRST_TOKEN_OFFSET_UID);
-    EXPECT_EQ(desc->getFirstTokenOffsetDesc()->getData().data_type, DataType::FLOAT);
+    EXPECT_EQ(desc->getFirstTokenOffsetDesc()->getData().data_type, DataType::INT32);
     EXPECT_EQ(desc->getFirstTokenOffsetDesc()->getData().dims, (std::vector<int64_t>{2, 1, 1}));
     EXPECT_EQ(desc->getFirstTokenOffsetDesc()->getData().strides, (std::vector<int64_t>{1, 1, 1}));
 
@@ -250,13 +250,13 @@ TEST_F(TestMoeGroupedMatmulOperationFromNode, SetsTensorReferencesWithFullValues
     ASSERT_NE(desc->getTokenIndexDesc(), nullptr);
     EXPECT_EQ(desc->getTokenIndexDesc()->getData().uid,
               K_MOE_GROUPED_MATMUL_TENSOR_TOKEN_INDEX_UID);
-    EXPECT_EQ(desc->getTokenIndexDesc()->getData().data_type, DataType::FLOAT);
+    EXPECT_EQ(desc->getTokenIndexDesc()->getData().data_type, DataType::INT32);
     EXPECT_EQ(desc->getTokenIndexDesc()->getData().dims, (std::vector<int64_t>{1, 8, 1}));
     EXPECT_EQ(desc->getTokenIndexDesc()->getData().strides, (std::vector<int64_t>{8, 1, 1}));
 
     ASSERT_NE(desc->getTokenKsDesc(), nullptr);
     EXPECT_EQ(desc->getTokenKsDesc()->getData().uid, K_MOE_GROUPED_MATMUL_TENSOR_TOKEN_KS_UID);
-    EXPECT_EQ(desc->getTokenKsDesc()->getData().data_type, DataType::FLOAT);
+    EXPECT_EQ(desc->getTokenKsDesc()->getData().data_type, DataType::INT32);
     EXPECT_EQ(desc->getTokenKsDesc()->getData().dims, (std::vector<int64_t>{1, 8, 1}));
     EXPECT_EQ(desc->getTokenKsDesc()->getData().strides, (std::vector<int64_t>{8, 1, 1}));
 }
@@ -319,6 +319,62 @@ TEST_F(TestMoeGroupedMatmulOperationFromNode, SucceedsWithOnlyRequiredTensors)
     // Optional tensor getters are null
     EXPECT_EQ(desc->getTokenIndexDesc(), nullptr);
     EXPECT_EQ(desc->getTokenKsDesc(), nullptr);
+}
+
+TEST_F(TestMoeGroupedMatmulOperationFromNode, FailsForGatherWithoutTokenIndex)
+{
+    auto attrs = createStandardMoeGroupedMatmulAttrs();
+    attrs.mode = MoeGroupedMatmulMode::GATHER;
+    attrs.token_index_tensor_uid = flatbuffers::nullopt;
+
+    NodeT node;
+    node.compute_data_type = DataType::FLOAT;
+    node.attributes.Set(attrs);
+
+    ASSERT_THROW_HIPDNN_STATUS(MoeGroupedMatmulOperationDescriptor::fromNode(node, _tensorMap),
+                               HIPDNN_STATUS_BAD_PARAM);
+}
+
+TEST_F(TestMoeGroupedMatmulOperationFromNode, FailsForScatterWithoutTokenKs)
+{
+    auto attrs = createStandardMoeGroupedMatmulAttrs();
+    attrs.mode = MoeGroupedMatmulMode::SCATTER;
+    attrs.token_ks_tensor_uid = flatbuffers::nullopt;
+
+    NodeT node;
+    node.compute_data_type = DataType::FLOAT;
+    node.attributes.Set(attrs);
+
+    ASSERT_THROW_HIPDNN_STATUS(MoeGroupedMatmulOperationDescriptor::fromNode(node, _tensorMap),
+                               HIPDNN_STATUS_BAD_PARAM);
+}
+
+TEST_F(TestMoeGroupedMatmulOperationFromNode, FailsForNonInt32FirstTokenOffset)
+{
+    TensorAttributesT invalidFirstTokenOffset;
+    invalidFirstTokenOffset.uid = K_MOE_GROUPED_MATMUL_TENSOR_FIRST_TOKEN_OFFSET_UID;
+    invalidFirstTokenOffset.data_type = DataType::FLOAT;
+    invalidFirstTokenOffset.dims = toVec(K_MOE_GROUPED_MATMUL_TENSOR_FIRST_TOKEN_OFFSET_DIMS);
+    invalidFirstTokenOffset.strides = toVec(K_MOE_GROUPED_MATMUL_TENSOR_FIRST_TOKEN_OFFSET_STRIDES);
+    _tensorMap[K_MOE_GROUPED_MATMUL_TENSOR_FIRST_TOKEN_OFFSET_UID]
+        = TensorDescriptor::fromFlatBuffer(invalidFirstTokenOffset);
+
+    ASSERT_THROW_HIPDNN_STATUS(
+        MoeGroupedMatmulOperationDescriptor::fromNode(createStandardNode(), _tensorMap),
+        HIPDNN_STATUS_BAD_PARAM);
+}
+
+TEST_F(TestMoeGroupedMatmulOperationFromNode, FailsForUnknownRoutingMode)
+{
+    auto attrs = createStandardMoeGroupedMatmulAttrs();
+    attrs.mode = static_cast<MoeGroupedMatmulMode>(99);
+
+    NodeT node;
+    node.compute_data_type = DataType::FLOAT;
+    node.attributes.Set(attrs);
+
+    ASSERT_THROW_HIPDNN_STATUS(MoeGroupedMatmulOperationDescriptor::fromNode(node, _tensorMap),
+                               HIPDNN_STATUS_BAD_PARAM);
 }
 
 TEST_F(TestMoeGroupedMatmulOperationFromNode, FailsWhenOptionalTokenIndexUidSetButTensorMissing)
@@ -445,7 +501,7 @@ TEST_F(TestMoeGroupedMatmulOperationFromNode, GetAttributeWorksAfterFromNode)
     ASSERT_NE(firstTokenOffsetScoped.get(), nullptr);
     verifyTensorDescriptor(firstTokenOffsetScoped.get(),
                            K_MOE_GROUPED_MATMUL_TENSOR_FIRST_TOKEN_OFFSET_UID,
-                           HIPDNN_DATA_FLOAT,
+                           HIPDNN_DATA_INT32,
                            {2, 1, 1},
                            {1, 1, 1});
 
@@ -477,7 +533,7 @@ TEST_F(TestMoeGroupedMatmulOperationFromNode, GetAttributeWorksAfterFromNode)
     ASSERT_NE(tokenIndexScoped.get(), nullptr);
     verifyTensorDescriptor(tokenIndexScoped.get(),
                            K_MOE_GROUPED_MATMUL_TENSOR_TOKEN_INDEX_UID,
-                           HIPDNN_DATA_FLOAT,
+                           HIPDNN_DATA_INT32,
                            {1, 8, 1},
                            {8, 1, 1});
 
@@ -493,7 +549,7 @@ TEST_F(TestMoeGroupedMatmulOperationFromNode, GetAttributeWorksAfterFromNode)
     ASSERT_NE(tokenKsScoped.get(), nullptr);
     verifyTensorDescriptor(tokenKsScoped.get(),
                            K_MOE_GROUPED_MATMUL_TENSOR_TOKEN_KS_UID,
-                           HIPDNN_DATA_FLOAT,
+                           HIPDNN_DATA_INT32,
                            {1, 8, 1},
                            {8, 1, 1});
 

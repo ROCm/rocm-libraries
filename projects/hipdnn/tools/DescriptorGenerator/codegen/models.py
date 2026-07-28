@@ -553,6 +553,7 @@ class TensorConfig:
 
     dims: list[int] = field(default_factory=list)
     strides: list[int] = field(default_factory=list)
+    data_type: str = "FLOAT"
 
 
 @dataclass

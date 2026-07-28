@@ -1,3 +1,4 @@
+{% from "macros.j2" import assign_frontend_data_field %}
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 #include <gtest/gtest.h>
@@ -30,6 +31,7 @@ namespace
 {% if tc %}
     {{ tensor.camel_name }}Tensor->set_dim({{ '{' }}{{ tc.dims | join(', ') }}{{ '}' }});
     {{ tensor.camel_name }}Tensor->set_stride({{ '{' }}{{ tc.strides | join(', ') }}{{ '}' }});
+    {{ tensor.camel_name }}Tensor->set_data_type(DataType::{{ tc.data_type }});
 {% endif %}
     attrs.{{ tensor.effective_setter_name }}({{ tensor.camel_name }}Tensor);
 {% endif %}
@@ -38,16 +40,18 @@ namespace
 {% for df in op.data_fields %}
 {% if df.required %}
 {% if df.is_vector %}
-    attrs.{{ df.frontend_setter_name }}({{ '{' }}{{ op.test_data.field_values.get(df.name, [1, 1]) | join(', ') }}{{ '}' }});
+{% set value = '{' ~ (op.test_data.field_values.get(df.name, [1, 1]) | join(', ')) ~ '}' %}
+    {{ assign_frontend_data_field("attrs", df, value) }}
 {% elif df.is_mode or df.is_enum %}
 {% if df.effective_frontend_type and df.test_enum_value %}
-    attrs.{{ df.frontend_setter_name }}({{ df.effective_frontend_type }}::{{ df.test_enum_value }});
+{% set value = df.effective_frontend_type ~ '::' ~ df.test_enum_value %}
+    {{ assign_frontend_data_field("attrs", df, value) }}
 {% else %}
     // TODO: Set {{ df.name }} — provide frontend_type and test_enum_value in YAML config
 {% endif %}
 {% elif df.is_scalar %}
 {% set value = df.test_value if df.test_value is not none else op.test_data.field_values.get(df.name, 0) %}
-    attrs.{{ df.frontend_setter_name }}({{ value }});
+    {{ assign_frontend_data_field("attrs", df, value) }}
 {% endif %}
 {% endif %}
 {% endfor %}
@@ -94,6 +98,7 @@ TEST(Test{{ op.frontend.node_class }}, PreValidateNodeMissing{{ tensor.name | re
 {% if tc %}
     {{ other.camel_name }}Tensor->set_dim({{ '{' }}{{ tc.dims | join(', ') }}{{ '}' }});
     {{ other.camel_name }}Tensor->set_stride({{ '{' }}{{ tc.strides | join(', ') }}{{ '}' }});
+    {{ other.camel_name }}Tensor->set_data_type(DataType::{{ tc.data_type }});
 {% endif %}
     attrs.{{ other.effective_setter_name }}({{ other.camel_name }}Tensor);
 {% endif %}
@@ -102,16 +107,18 @@ TEST(Test{{ op.frontend.node_class }}, PreValidateNodeMissing{{ tensor.name | re
 {% for df in op.data_fields %}
 {% if df.required %}
 {% if df.is_vector %}
-    attrs.{{ df.frontend_setter_name }}({{ '{' }}{{ op.test_data.field_values.get(df.name, [1, 1]) | join(', ') }}{{ '}' }});
+{% set value = '{' ~ (op.test_data.field_values.get(df.name, [1, 1]) | join(', ')) ~ '}' %}
+    {{ assign_frontend_data_field("attrs", df, value) }}
 {% elif df.is_mode or df.is_enum %}
 {% if df.effective_frontend_type and df.test_enum_value %}
-    attrs.{{ df.frontend_setter_name }}({{ df.effective_frontend_type }}::{{ df.test_enum_value }});
+{% set value = df.effective_frontend_type ~ '::' ~ df.test_enum_value %}
+    {{ assign_frontend_data_field("attrs", df, value) }}
 {% else %}
     // TODO: Set {{ df.name }} — provide frontend_type and test_enum_value in YAML config
 {% endif %}
 {% elif df.is_scalar %}
 {% set value = df.test_value if df.test_value is not none else op.test_data.field_values.get(df.name, 0) %}
-    attrs.{{ df.frontend_setter_name }}({{ value }});
+    {{ assign_frontend_data_field("attrs", df, value) }}
 {% endif %}
 {% endif %}
 {% endfor %}
@@ -138,6 +145,7 @@ TEST(Test{{ op.frontend.node_class }}, PreValidateNodeMissingParameters)
 {% if tc %}
     {{ tensor.camel_name }}Tensor->set_dim({{ '{' }}{{ tc.dims | join(', ') }}{{ '}' }});
     {{ tensor.camel_name }}Tensor->set_stride({{ '{' }}{{ tc.strides | join(', ') }}{{ '}' }});
+    {{ tensor.camel_name }}Tensor->set_data_type(DataType::{{ tc.data_type }});
 {% endif %}
     attrs.{{ tensor.effective_setter_name }}({{ tensor.camel_name }}Tensor);
 {% endif %}
@@ -198,16 +206,18 @@ TEST(Test{{ op.frontend.node_class }}, GatherHipdnnTensor)
 {% for df in op.data_fields %}
 {% if df.required %}
 {% if df.is_vector %}
-    attrs.{{ df.frontend_setter_name }}({{ '{' }}{{ op.test_data.field_values.get(df.name, [1, 1]) | join(', ') }}{{ '}' }});
+{% set value = '{' ~ (op.test_data.field_values.get(df.name, [1, 1]) | join(', ')) ~ '}' %}
+    {{ assign_frontend_data_field("attrs", df, value) }}
 {% elif df.is_mode or df.is_enum %}
 {% if df.effective_frontend_type and df.test_enum_value %}
-    attrs.{{ df.frontend_setter_name }}({{ df.effective_frontend_type }}::{{ df.test_enum_value }});
+{% set value = df.effective_frontend_type ~ '::' ~ df.test_enum_value %}
+    {{ assign_frontend_data_field("attrs", df, value) }}
 {% else %}
     // TODO: Set {{ df.name }} — provide frontend_type and test_enum_value in YAML config
 {% endif %}
 {% elif df.is_scalar %}
 {% set value = df.test_value if df.test_value is not none else op.test_data.field_values.get(df.name, 0) %}
-    attrs.{{ df.frontend_setter_name }}({{ value }});
+    {{ assign_frontend_data_field("attrs", df, value) }}
 {% endif %}
 {% endif %}
 {% endfor %}

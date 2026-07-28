@@ -13,3 +13,14 @@
 {{ op.tensor_const_prefix }}{{ df.name | upper }}
 {%- endif -%}
 {%- endmacro -%}
+
+{#- Emits an assignment for a frontend DataField. Existing handwritten
+    attribute classes expose some fields as public members rather than setter
+    methods, so generated tests must mirror the configured access pattern. -#}
+{%- macro assign_frontend_data_field(object_name, field, value) -%}
+{%- if field.frontend_uses_member_access -%}
+{{ object_name }}.{{ field.frontend_member_name }} = {{ value }};
+{%- else -%}
+{{ object_name }}.{{ field.frontend_setter_name }}({{ value }});
+{%- endif -%}
+{%- endmacro -%}

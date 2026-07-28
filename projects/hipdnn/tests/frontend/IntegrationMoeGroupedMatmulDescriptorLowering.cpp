@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 #include <memory>
+#include <unordered_set>
 #include <vector>
 
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
@@ -40,7 +41,9 @@ protected:
     /// Callers set up attrs before calling; this creates tensors, calls the
     /// graph method, validates, lowers, serializes, and deserializes.
     hipdnn_flatbuffers_sdk::data_objects::GraphT
-        buildAndDeserialize(MoeGroupedMatmulAttributes& attrs)
+        buildAndDeserialize(MoeGroupedMatmulAttributes& attrs,
+                            bool includeTokenIndex = false,
+                            bool includeTokenKs = false)
     {
         auto graph = std::make_shared<TestableGraphLowering>();
         graph->set_name("MoeGroupedMatmulIntegrationTest")
@@ -65,13 +68,31 @@ protected:
         auto firstTokenOffset = std::make_shared<TensorAttributes>();
         firstTokenOffset->set_uid(K_MOE_GROUPED_MATMUL_TENSOR_FIRST_TOKEN_OFFSET_UID)
             .set_name("first_token_offset")
-            .set_data_type(DataType::FLOAT);
+            .set_data_type(DataType::INT32);
         firstTokenOffset->set_dim(toVec(K_MOE_GROUPED_MATMUL_TENSOR_FIRST_TOKEN_OFFSET_DIMS))
             .set_stride(toVec(K_MOE_GROUPED_MATMUL_TENSOR_FIRST_TOKEN_OFFSET_STRIDES));
 
-        const std::shared_ptr<TensorAttributes> tokenIndex;
+        std::shared_ptr<TensorAttributes> tokenIndex;
+        if(includeTokenIndex)
+        {
+            tokenIndex = std::make_shared<TensorAttributes>();
+            tokenIndex->set_uid(K_MOE_GROUPED_MATMUL_TENSOR_TOKEN_INDEX_UID)
+                .set_name("token_index")
+                .set_data_type(DataType::INT32);
+            tokenIndex->set_dim(toVec(K_MOE_GROUPED_MATMUL_TENSOR_TOKEN_INDEX_DIMS))
+                .set_stride(toVec(K_MOE_GROUPED_MATMUL_TENSOR_TOKEN_INDEX_STRIDES));
+        }
 
-        const std::shared_ptr<TensorAttributes> tokenKs;
+        std::shared_ptr<TensorAttributes> tokenKs;
+        if(includeTokenKs)
+        {
+            tokenKs = std::make_shared<TensorAttributes>();
+            tokenKs->set_uid(K_MOE_GROUPED_MATMUL_TENSOR_TOKEN_KS_UID)
+                .set_name("token_ks")
+                .set_data_type(DataType::INT32);
+            tokenKs->set_dim(toVec(K_MOE_GROUPED_MATMUL_TENSOR_TOKEN_KS_DIMS))
+                .set_stride(toVec(K_MOE_GROUPED_MATMUL_TENSOR_TOKEN_KS_STRIDES));
+        }
 
         auto output = graph->moe_grouped_matmul(
             token, weight, firstTokenOffset, tokenIndex, tokenKs, attrs);
@@ -117,7 +138,7 @@ TEST_F(IntegrationMoeGroupedMatmulDescriptorLowering, MoeGroupedMatmulLoweringRo
     EXPECT_EQ(tensorMap[K_MOE_GROUPED_MATMUL_TENSOR_FIRST_TOKEN_OFFSET_UID]->strides,
               toVec(K_MOE_GROUPED_MATMUL_TENSOR_FIRST_TOKEN_OFFSET_STRIDES));
     EXPECT_EQ(tensorMap[K_MOE_GROUPED_MATMUL_TENSOR_FIRST_TOKEN_OFFSET_UID]->data_type,
-              DataTypeSdk::FLOAT);
+              DataTypeSdk::INT32);
     EXPECT_EQ(tensorMap[K_MOE_GROUPED_MATMUL_TENSOR_FIRST_TOKEN_OFFSET_UID]->name,
               "first_token_offset");
     ASSERT_NE(tensorMap.count(K_MOE_GROUPED_MATMUL_TENSOR_OUTPUT_UID), 0u);
@@ -150,7 +171,119 @@ TEST_F(IntegrationMoeGroupedMatmulDescriptorLowering, MoeGroupedMatmulLoweringRo
     // Verify mode
     EXPECT_EQ(opNode->mode, MoeGroupedMatmulModeSdk::NONE);
 
+    EXPECT_EQ(opNode->top_k, 0);
+}
+
+TEST_F(IntegrationMoeGroupedMatmulDescriptorLowering, OperationComputeDataTypeIsSerialized)
+{
+    MoeGroupedMatmulAttributes attrs;
+    attrs.set_compute_data_type(DataType::HALF);
+
+    auto graphT = buildAndDeserialize(attrs);
+
+    ASSERT_EQ(graphT.nodes.size(), 1u);
+    EXPECT_EQ(graphT.nodes[0]->compute_data_type, DataTypeSdk::HALF);
+}
+
+TEST_F(IntegrationMoeGroupedMatmulDescriptorLowering, NoneOmitsRoutingDescriptors)
+{
+    MoeGroupedMatmulAttributes attrs;
+    attrs.set_mode(MoeGroupedMatmulMode::NONE).set_top_k(2);
+
+    auto graphT = buildAndDeserialize(attrs, true, true);
+
+    ASSERT_EQ(graphT.tensors.size(), 4u);
+    const auto* opNode = graphT.nodes[0]->attributes.AsMoeGroupedMatmulAttributes();
+    ASSERT_NE(opNode, nullptr);
+    EXPECT_FALSE(opNode->token_index_tensor_uid.has_value());
+    EXPECT_FALSE(opNode->token_ks_tensor_uid.has_value());
+    EXPECT_EQ(opNode->top_k, 0);
+}
+
+TEST_F(IntegrationMoeGroupedMatmulDescriptorLowering, GatherSerializesOnlyTokenIndex)
+{
+    MoeGroupedMatmulAttributes attrs;
+    attrs.set_mode(MoeGroupedMatmulMode::GATHER).set_top_k(2);
+
+    auto graphT = buildAndDeserialize(attrs, true, true);
+
+    ASSERT_EQ(graphT.tensors.size(), 5u);
+    const auto* opNode = graphT.nodes[0]->attributes.AsMoeGroupedMatmulAttributes();
+    ASSERT_NE(opNode, nullptr);
+    ASSERT_TRUE(opNode->token_index_tensor_uid.has_value());
+    EXPECT_EQ(*opNode->token_index_tensor_uid, K_MOE_GROUPED_MATMUL_TENSOR_TOKEN_INDEX_UID);
+    EXPECT_FALSE(opNode->token_ks_tensor_uid.has_value());
+    EXPECT_EQ(opNode->top_k, 0);
+}
+
+TEST_F(IntegrationMoeGroupedMatmulDescriptorLowering, ScatterSerializesRoutingDescriptorsAndTopK)
+{
+    MoeGroupedMatmulAttributes attrs;
+    attrs.set_mode(MoeGroupedMatmulMode::SCATTER).set_top_k(2);
+
+    auto graphT = buildAndDeserialize(attrs, true, true);
+
+    ASSERT_EQ(graphT.tensors.size(), 6u);
+    const auto* opNode = graphT.nodes[0]->attributes.AsMoeGroupedMatmulAttributes();
+    ASSERT_NE(opNode, nullptr);
+    ASSERT_TRUE(opNode->token_index_tensor_uid.has_value());
+    EXPECT_EQ(*opNode->token_index_tensor_uid, K_MOE_GROUPED_MATMUL_TENSOR_TOKEN_INDEX_UID);
+    ASSERT_TRUE(opNode->token_ks_tensor_uid.has_value());
+    EXPECT_EQ(*opNode->token_ks_tensor_uid, K_MOE_GROUPED_MATMUL_TENSOR_TOKEN_KS_UID);
     EXPECT_EQ(opNode->top_k, 2);
+}
+
+TEST_F(IntegrationMoeGroupedMatmulDescriptorLowering, AutoAssignedUidsPreservedInRoundTrip)
+{
+    auto graph = std::make_shared<TestableGraphLowering>();
+    graph->set_name("MoeGroupedMatmulAutoUidLowering")
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT)
+        .set_io_data_type(DataType::FLOAT);
+
+    auto token = std::make_shared<TensorAttributes>();
+    token->set_name("token").set_data_type(DataType::FLOAT);
+    token->set_dim(toVec(K_MOE_GROUPED_MATMUL_TENSOR_TOKEN_DIMS))
+        .set_stride(toVec(K_MOE_GROUPED_MATMUL_TENSOR_TOKEN_STRIDES));
+
+    auto weight = std::make_shared<TensorAttributes>();
+    weight->set_name("weight").set_data_type(DataType::FLOAT);
+    weight->set_dim(toVec(K_MOE_GROUPED_MATMUL_TENSOR_WEIGHT_DIMS))
+        .set_stride(toVec(K_MOE_GROUPED_MATMUL_TENSOR_WEIGHT_STRIDES));
+
+    auto firstTokenOffset = std::make_shared<TensorAttributes>();
+    firstTokenOffset->set_name("first_token_offset").set_data_type(DataType::INT32);
+    firstTokenOffset->set_dim(toVec(K_MOE_GROUPED_MATMUL_TENSOR_FIRST_TOKEN_OFFSET_DIMS))
+        .set_stride(toVec(K_MOE_GROUPED_MATMUL_TENSOR_FIRST_TOKEN_OFFSET_STRIDES));
+
+    const std::shared_ptr<TensorAttributes> tokenIndex;
+    const std::shared_ptr<TensorAttributes> tokenKs;
+    MoeGroupedMatmulAttributes attrs;
+    attrs.set_mode(MoeGroupedMatmulMode::NONE).set_top_k(0);
+
+    auto output
+        = graph->moe_grouped_matmul(token, weight, firstTokenOffset, tokenIndex, tokenKs, attrs);
+    output->set_output(true).set_name("output");
+
+    auto graphT = lowerAndDeserialize(*graph, _handle);
+
+    ASSERT_EQ(graphT.tensors.size(), 4u);
+    std::unordered_set<int64_t> uids;
+    for(const auto& tensor : graphT.tensors)
+    {
+        uids.insert(tensor->uid);
+    }
+    ASSERT_EQ(uids.size(), 4u);
+
+    ASSERT_EQ(graphT.nodes.size(), 1u);
+    const auto* opNode = graphT.nodes[0]->attributes.AsMoeGroupedMatmulAttributes();
+    ASSERT_NE(opNode, nullptr);
+    EXPECT_TRUE(uids.count(opNode->token_tensor_uid) > 0);
+    EXPECT_TRUE(uids.count(opNode->weight_tensor_uid) > 0);
+    EXPECT_TRUE(uids.count(opNode->first_token_offset_tensor_uid) > 0);
+    EXPECT_TRUE(uids.count(opNode->output_tensor_uid) > 0);
+    EXPECT_FALSE(opNode->token_index_tensor_uid.has_value());
+    EXPECT_FALSE(opNode->token_ks_tensor_uid.has_value());
 }
 
 } // namespace

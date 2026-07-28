@@ -359,6 +359,13 @@ class TestTestDataParsing:
     def test_tensor_const_prefix(self, convolution_fwd_config):
         assert convolution_fwd_config.test_data.tensor_const_prefix == "K_FPROP_"
 
+    def test_moe_routing_tensor_data_types(self, load_test_config):
+        config = load_test_config("moe_grouped_matmul.yaml")
+        tensor_configs = config.test_data.tensor_configs
+        assert tensor_configs["first_token_offset"].data_type == "INT32"
+        assert tensor_configs["token_index"].data_type == "INT32"
+        assert tensor_configs["token_ks"].data_type == "INT32"
+
 
 # ---------------------------------------------------------------------------
 # Task 2B.3: _parse_frontend_config() and _parse_frontend_tensors()

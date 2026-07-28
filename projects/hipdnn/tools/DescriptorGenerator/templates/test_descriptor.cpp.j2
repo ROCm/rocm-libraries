@@ -120,7 +120,7 @@ protected:
 {% set dims_const = op.tensor_const_prefix ~ "TENSOR_" ~ (tf.name | upper) ~ "_DIMS" %}
 {% set strides_const = op.tensor_const_prefix ~ "TENSOR_" ~ (tf.name | upper) ~ "_STRIDES" %}
         {{ tf.member_name }} = createFinalizedTensor(
-            {{ uid_const }}, toVec({{ dims_const }}), toVec({{ strides_const }}));
+            {{ uid_const }}, toVec({{ dims_const }}), toVec({{ strides_const }}), HIPDNN_DATA_{{ tc.data_type }});
 {% else %}
 {% set uid_const = op.tensor_const_prefix ~ "TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
         {{ tf.member_name }} = createFinalizedTensor({{ uid_const }});

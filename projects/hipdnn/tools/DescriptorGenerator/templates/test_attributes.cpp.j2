@@ -1,3 +1,4 @@
+{% from "macros.j2" import assign_frontend_data_field %}
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 #include <gtest/gtest.h>
@@ -26,16 +27,18 @@ TEST(Test{{ op.frontend.attributes_class }}, Create{{ op.frontend.attributes_cla
     // Set data fields
 {% for df in op.data_fields %}
 {% if df.is_vector %}
-    attrs.{{ df.frontend_setter_name }}({{ '{' }}{{ op.test_data.field_values.get(df.name, [1, 1]) | join(', ') }}{{ '}' }});
+{% set value = '{' ~ (op.test_data.field_values.get(df.name, [1, 1]) | join(', ')) ~ '}' %}
+    {{ assign_frontend_data_field("attrs", df, value) }}
 {% elif df.is_mode or df.is_enum %}
 {% if df.effective_frontend_type and df.test_enum_value %}
-    attrs.{{ df.frontend_setter_name }}({{ df.effective_frontend_type }}::{{ df.test_enum_value }});
+{% set value = df.effective_frontend_type ~ '::' ~ df.test_enum_value %}
+    {{ assign_frontend_data_field("attrs", df, value) }}
 {% else %}
     // TODO: Set {{ df.name }} — provide frontend_type and test_enum_value in YAML config
 {% endif %}
 {% elif df.is_scalar %}
 {% set value = df.test_value if df.test_value is not none else op.test_data.field_values.get(df.name, 0) %}
-    attrs.{{ df.frontend_setter_name }}({{ value }});
+    {{ assign_frontend_data_field("attrs", df, value) }}
 {% endif %}
 {% endfor %}
 
@@ -69,6 +72,8 @@ TEST(Test{{ op.frontend.attributes_class }}, DefaultValues)
 {% for df in op.data_fields %}
 {% if df.is_vector %}
     EXPECT_TRUE(attrs.{{ df.frontend_getter }}.empty());
+{% elif df.is_optional_scalar %}
+    EXPECT_FALSE(attrs.{{ df.frontend_getter }}.has_value());
 {% elif df.is_scalar %}
     EXPECT_EQ(attrs.{{ df.frontend_getter }}, {{ df.default_value if df.default_value else "0" }});
 {% endif %}
@@ -107,7 +112,7 @@ TEST(Test{{ op.frontend.attributes_class }}, Set{{ df.name | replace('_', ' ') |
     {{ op.frontend.attributes_class }} attrs;
 
     std::vector<int64_t> {{ df.camel_name }}Move = {{ '{' }}{{ op.test_data.field_values.get(df.name, [1, 1]) | join(', ') }}{{ '}' }};
-    attrs.{{ df.frontend_setter_name }}(std::move({{ df.camel_name }}Move));
+    {{ assign_frontend_data_field("attrs", df, "std::move(" ~ df.camel_name ~ "Move)") }}
 
     EXPECT_EQ(attrs.{{ df.frontend_getter }}, (std::vector<int64_t>{{ '{' }}{{ op.test_data.field_values.get(df.name, [1, 1]) | join(', ') }}{{ '}' }}));
 }

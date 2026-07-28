@@ -34,6 +34,54 @@ void MoeGroupedMatmulOperationDescriptor::finalize()
                   "MoeGroupedMatmulOperationDescriptor::finalize() failed: compute data type not "
                   "set");
 
+    const auto requireInt32RoutingTensor
+        = [](const std::shared_ptr<TensorDescriptor>& tensor, const char* attributeName) {
+              THROW_IF_TRUE(tensor->getData().data_type
+                                != hipdnn_flatbuffers_sdk::data_objects::DataType::INT32,
+                            HIPDNN_STATUS_BAD_PARAM,
+                            std::string("MoeGroupedMatmulOperationDescriptor::finalize() failed: ")
+                                + attributeName + " tensor must have INT32 data type");
+          };
+
+    requireInt32RoutingTensor(_firstTokenOffsetDesc, "FIRST_TOKEN_OFFSET_DESC");
+
+    switch(_data.mode)
+    {
+    case hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulMode::NONE:
+        break;
+    case hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulMode::GATHER:
+        THROW_IF_NULL(_tokenIndexDesc,
+                      HIPDNN_STATUS_BAD_PARAM,
+                      "MoeGroupedMatmulOperationDescriptor::finalize() failed: GATHER mode "
+                      "requires TOKEN_INDEX_DESC tensor");
+        requireInt32RoutingTensor(_tokenIndexDesc, "TOKEN_INDEX_DESC");
+        break;
+    case hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulMode::SCATTER:
+        THROW_IF_NULL(_tokenIndexDesc,
+                      HIPDNN_STATUS_BAD_PARAM,
+                      "MoeGroupedMatmulOperationDescriptor::finalize() failed: SCATTER mode "
+                      "requires TOKEN_INDEX_DESC tensor");
+        THROW_IF_NULL(_tokenKsDesc,
+                      HIPDNN_STATUS_BAD_PARAM,
+                      "MoeGroupedMatmulOperationDescriptor::finalize() failed: SCATTER mode "
+                      "requires TOKEN_KS_DESC tensor");
+        requireInt32RoutingTensor(_tokenIndexDesc, "TOKEN_INDEX_DESC");
+        requireInt32RoutingTensor(_tokenKsDesc, "TOKEN_KS_DESC");
+        THROW_IF_FALSE(_data.top_k > 0,
+                       HIPDNN_STATUS_BAD_PARAM,
+                       "MoeGroupedMatmulOperationDescriptor::finalize() failed: SCATTER mode "
+                       "requires top_k to be positive");
+        THROW_IF_TRUE(_data.top_k > _weightDesc->getData().dims.front(),
+                      HIPDNN_STATUS_BAD_PARAM,
+                      "MoeGroupedMatmulOperationDescriptor::finalize() failed: top_k must not "
+                      "exceed the number of experts");
+        break;
+    default:
+        throw HipdnnException(
+            HIPDNN_STATUS_BAD_PARAM,
+            "MoeGroupedMatmulOperationDescriptor::finalize() failed: unknown routing mode");
+    }
+
     HipdnnBackendDescriptorImpl<MoeGroupedMatmulOperationDescriptor>::finalize();
 }
 

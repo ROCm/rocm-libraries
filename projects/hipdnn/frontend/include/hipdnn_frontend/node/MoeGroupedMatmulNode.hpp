@@ -96,12 +96,18 @@ public:
             firstTokenOffset->get_dim()[0] % weight->get_dim()[0] != 0,
             ErrorCode::INVALID_VALUE,
             "MoE first-token-offset tensor length must be divisible by expert count");
+        HIPDNN_RETURN_IF_TRUE(firstTokenOffset->get_data_type() != DataType::INT32,
+                              ErrorCode::INVALID_VALUE,
+                              "MoE first-token-offset tensor must have INT32 data type");
 
         const auto validateRoutingTensor
             = [](const std::shared_ptr<TensorAttributes>& tensor, const char* name) -> Error {
             HIPDNN_RETURN_IF_FALSE(tensor,
                                    ErrorCode::ATTRIBUTE_NOT_SET,
                                    std::string("MoeGroupedMatmulNode missing ") + name + " input");
+            HIPDNN_RETURN_IF_TRUE(tensor->get_data_type() != DataType::INT32,
+                                  ErrorCode::INVALID_VALUE,
+                                  std::string(name) + " must have INT32 data type");
             HIPDNN_CHECK_ERROR(
                 detail::validateMinimumTensorDimensions(tensor, K_TENSOR_RANK, name));
             HIPDNN_RETURN_IF_NE(tensor->get_dim().size(),

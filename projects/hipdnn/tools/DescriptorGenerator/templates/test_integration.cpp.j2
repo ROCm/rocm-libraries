@@ -1,4 +1,4 @@
-{% from "macros.j2" import vector_const_name %}
+{% from "macros.j2" import assign_frontend_data_field, vector_const_name %}
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
@@ -67,7 +67,7 @@ protected:
         auto {{ param.name }} = std::make_shared<TensorAttributes>();
         {{ param.name }}->set_uid({{ op.tensor_const_prefix }}TENSOR_{{ tf_name | upper }}_UID)
             .set_name("{{ param.tensor_name }}")
-            .set_data_type(DataType::FLOAT);
+            .set_data_type(DataType::{{ tc.data_type if tc else "FLOAT" }});
 {% if tc %}
         {{ param.name }}->set_dim(toVec({{ op.tensor_const_prefix }}TENSOR_{{ tf_name | upper }}_DIMS)).set_stride(toVec({{ op.tensor_const_prefix }}TENSOR_{{ tf_name | upper }}_STRIDES));
 {% endif %}
@@ -107,17 +107,18 @@ TEST_F(Integration{{ op.frontend.attributes_filename or op.name }}DescriptorLowe
     attrs.set_name("test_op");
 {% if op.mode_fields %}
 {% set mf = op.mode_fields[0] %}
-    attrs.{{ mf.frontend_setter_name }}({{ mf.effective_frontend_type }}::{{ mf.test_enum_value }});
+{% set value = mf.effective_frontend_type ~ '::' ~ mf.test_enum_value %}
+    {{ assign_frontend_data_field("attrs", mf, value) }}
 {% endif %}
 {% for df in op.data_fields if df.is_vector and df.required %}
 {% if df.name in op.test_data.field_values %}
 {% set const_name = vector_const_name(df, op) %}
-    attrs.{{ df.frontend_setter_name }}(toVec({{ const_name }}));
+    {{ assign_frontend_data_field("attrs", df, "toVec(" ~ const_name ~ ")") }}
 {% endif %}
 {% endfor %}
 {% for df in op.data_fields if df.is_scalar %}
 {% set value = df.test_value if df.test_value is not none else op.test_data.field_values.get(df.name, 0) %}
-    attrs.{{ df.frontend_setter_name }}({{ value }});
+    {{ assign_frontend_data_field("attrs", df, value) }}
 {% endfor %}
 
     auto graphT = buildAndDeserialize(attrs);
@@ -135,7 +136,7 @@ TEST_F(Integration{{ op.frontend.attributes_filename or op.name }}DescriptorLowe
     EXPECT_EQ(tensorMap[{{ op.tensor_const_prefix }}TENSOR_{{ tf_upper }}_UID]->dims, toVec({{ op.tensor_const_prefix }}TENSOR_{{ tf_upper }}_DIMS));
     EXPECT_EQ(tensorMap[{{ op.tensor_const_prefix }}TENSOR_{{ tf_upper }}_UID]->strides, toVec({{ op.tensor_const_prefix }}TENSOR_{{ tf_upper }}_STRIDES));
 {% endif %}
-    EXPECT_EQ(tensorMap[{{ op.tensor_const_prefix }}TENSOR_{{ tf_upper }}_UID]->data_type, DataTypeSdk::FLOAT);
+    EXPECT_EQ(tensorMap[{{ op.tensor_const_prefix }}TENSOR_{{ tf_upper }}_UID]->data_type, DataTypeSdk::{{ tc.data_type if tc else "FLOAT" }});
 {% set ft = op.tensor_field_frontend_map.get(tf.name) %}
     EXPECT_EQ(tensorMap[{{ op.tensor_const_prefix }}TENSOR_{{ tf_upper }}_UID]->name, "{{ ft.name if ft else tf.name }}");
 {% endfor %}
@@ -195,15 +196,16 @@ TEST_F(Integration{{ op.frontend.attributes_filename or op.name }}DescriptorLowe
     attrs.set_name("test_{{ df.name }}");
 {% if op.mode_fields %}
 {% set mf = op.mode_fields[0] %}
-    attrs.{{ mf.frontend_setter_name }}({{ mf.effective_frontend_type }}::{{ mf.test_enum_value }});
+{% set value = mf.effective_frontend_type ~ '::' ~ mf.test_enum_value %}
+    {{ assign_frontend_data_field("attrs", mf, value) }}
 {% endif %}
 {% for vf in op.data_fields if vf.is_vector and vf.required %}
 {% if vf.name in op.test_data.field_values %}
 {% set const_name = vector_const_name(vf, op) %}
-    attrs.{{ vf.frontend_setter_name }}(toVec({{ const_name }}));
+    {{ assign_frontend_data_field("attrs", vf, "toVec(" ~ const_name ~ ")") }}
 {% endif %}
 {% endfor %}
-    attrs.{{ df.frontend_setter_name }}({{ test_val }});
+    {{ assign_frontend_data_field("attrs", df, test_val) }}
 
     auto graphT = buildAndDeserialize(attrs);
 
