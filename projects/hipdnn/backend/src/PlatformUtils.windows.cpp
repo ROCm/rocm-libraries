@@ -6,6 +6,7 @@
 #ifdef _WIN32
 
 #include "HipdnnException.hpp"
+#include <array>
 #include <spdlog/fmt/fmt.h>
 #include <winternl.h>
 
@@ -23,10 +24,9 @@ std::filesystem::path getCurrentModuleDirectory()
                           &moduleHandle)
        == TRUE)
     {
-        char* dst = new char[MAX_PATH];
-        DWORD len = GetModuleFileNameA(moduleHandle, dst, MAX_PATH);
-        std::string modulePathStr(dst);
-        delete[] dst;
+        std::array<char, MAX_PATH> dst{};
+        DWORD len = GetModuleFileNameA(moduleHandle, dst.data(), MAX_PATH);
+        std::string modulePathStr(dst.data());
 
         if(len > 0 && len < MAX_PATH)
         {
