@@ -68,6 +68,15 @@ already bundled. Verify each printed `--gtest_filter` line runs and passes
 as a bundle case, then delete the C++ `TEST_P`/`INSTANTIATE_TEST_SUITE_P`
 registration for that case.
 
+**This produces a graph-only bundle** — `--capture-bundles` dumps the graph
+topology only, never golden output tensors, so `import_graph.py` has nothing
+to attach as `.tensors.dvc`/`.bin`. Golden data is optional (see [RFC 0011
+§4.1](../../../projects/hipdnn/docs/rfcs/0011_GoldenReferenceValidation.md));
+a graph-only case still runs and is verified against the GPU/CPU reference
+executor. Generate and commit golden tensors separately (a per-op generator
+script, see `integration_test_bundles/README.md`) only if you want the more
+sensitive golden-comparison mode for that case too.
+
 **Note:** `import_graph.py` does not read the `.meta.json` sidecar that
 `--capture-bundles` writes next to each graph — pass `--seed` and
 `--meta inputs=<json>` explicitly (copy the values out of the `.meta.json`)

@@ -51,34 +51,39 @@ There are two mechanisms for testing that a graph runs correctly on an engine.
 
 ## Bundle Formats: Single-Graph vs Template-Sweep
 
-A *bundle* is a graph plus its pre-computed golden reference tensors. hipDNN
-supports two bundle kinds (RFC 0011 §4.1). They differ only in whether one
-graph JSON serves one case or many.
+A *bundle* is a graph, optionally paired with pre-computed golden reference
+tensors. hipDNN supports two bundle kinds (RFC 0011 §4.1), and either kind can
+be **full** (tensor data included) or **graph-only** (no tensor data — the
+engine's output is compared against a live GPU/CPU reference executor
+instead). The two kinds below differ only in whether one graph JSON serves
+one case or many; golden data is optional in both.
 
 ### Single-graph bundle (no sweep)
 
-One graph, one set of golden tensors.
+One graph, optionally one set of golden tensors:
 
 ```
 integration_test_bundles/{Tier}/{Operation}/{Layout}/{DataType}/{Name}/
     {Name}.json              # one concrete graph (committed to git)
-    {Name}.tensors.dvc       # DVC pointer for this bundle's .bin tensors
-    {Name}.tensor0.bin       # binary tensor data (DVC-tracked, in S3)
+    {Name}.tensors.dvc       # optional — omit for a graph-only bundle
+    {Name}.tensor0.bin       # optional — DVC-tracked, in S3
     ...
 ```
 
 ### Template-sweep bundle
 
 One invariant topology (`graph.template.json`) with `${case.*}` placeholders,
-plus a `sweep.json` case matrix that fills those placeholders per case. Each
-expanded case gets its own golden pointer.
+plus a `sweep.json` case matrix that fills those placeholders per case. A
+case's `golden` pointer is optional — a sweep case with no `golden` entry (or
+no `.dvc`/`.bin` fetched) is a graph-only case, verified against the GPU/CPU
+reference executor instead of golden comparison.
 
 ```
 integration_test_bundles/{Tier}/{Operation}/{TopologyName}/
     graph.template.json      # topology skeleton with ${case.dims}, ${case.data_type}, ...
-    sweep.json               # list of cases: values + golden path + metadata
-    golden/{CaseId}/tensors.dvc
-    golden/{CaseId}/tensor0.bin
+    sweep.json               # list of cases: values + optional golden path + metadata
+    golden/{CaseId}/tensors.dvc   # optional per case
+    golden/{CaseId}/tensor0.bin   # optional per case
     ...
 ```
 
@@ -297,14 +302,59 @@ hipdnn_integration_tests --test-article <plugin.so> --test-engine <ENGINE> [--te
   (`$<TARGET_FILE:...>`).
 - `--test-engine` pins the run to that provider's engine, so unsupported ops
   `SKIP` rather than fall through to another loaded engine.
-- `--test-config` supplies per-test tolerance overrides (a TOML file the
-  provider owns, e.g. `config/MIOPEN_ENGINE.toml`).
+- `--test-config` points at a TOML file the provider owns (e.g.
+  `config/MIOPEN_ENGINE.toml`) for per-test tolerance overrides and skips —
+  see [Per-provider TOML config](#per-provider-toml-config-tolerance-overrides--skips).
 - `TEST_CATEGORIES_YAML` generates tier-labelled ctest suites so
   `ctest -L quick|standard|...` selects tiers for the external run too.
 
 Both the superbuild (target already present) and standalone provider builds
 (`find_package`) are supported; if the package is not found the target is
 skipped with a status message.
+
+### Per-provider TOML config (tolerance overrides & skips)
+
+Each provider owns one `--test-config` TOML file (e.g.
+`miopen-provider/config/MIOPEN_ENGINE.toml`,
+`hipblaslt-provider/config/HIPBLASLT_ENGINE.toml`,
+`hip-kernel-provider/config/HIP_MLOPS_ENGINE.toml`) that can, without
+recompiling or touching test source:
+
+- **Override tolerances** for specific tests/groups, when that engine's
+  numerics legitimately differ from the default atol/rtol (e.g. reduced
+  precision from split-k accumulation).
+- **Skip tests** on specific architectures (or globally), when that engine
+  has no applicable kernel/solution for a case.
+
+```toml
+[meta]
+version = 1
+
+[[tolerance_overrides]]
+filters = ["Smoke/IntegrationGpuConvWrw3dBfp16.Correctness/14"]
+atol = 1.19
+rtol = 0.2
+
+[[test_skips]]
+archs   = ["gfx90a", "gfx10", "gfx11", "gfx12"]   # optional; omit to skip everywhere
+filters = ["*ConvFwdBiasActiv*"]
+reason  = "ROCm/rocm-libraries#6979 — no engine has an applicable solution for ConvBiasActiv fusion"
+```
+
+- `filters` are GTest-style globs (`*` wildcard) matched against the full
+  GTest name — same string a `--gtest_filter` would match.
+- `tolerance_overrides`: later entries take precedence when multiple filters
+  match. Both `atol` and `rtol` are required.
+- `test_skips`: the first matching entry wins; `reason` is surfaced in the
+  `GTEST_SKIP` message. `archs` (substring match against the raw
+  `gcnArchName`) and `platforms` (`"windows"`/`"linux"`) are both optional —
+  omit either to match any.
+- Applies to **both** bundle/sweep tests and C++ graph tests; the lookup runs
+  in the shared harness (`TestConfig`/`TestSettings`), not per test type.
+- `[meta] version = 1` is required; the file is rejected on parse if missing
+  or on an unsupported version.
+
+Full schema and matching semantics: [`src/harness/TestSettings.hpp`](src/harness/TestSettings.hpp).
 
 ### Per-provider category filtering
 
