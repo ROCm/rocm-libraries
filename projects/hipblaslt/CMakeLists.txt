@@ -29,6 +29,7 @@ include(CMakeDependentOption)
 
 include(fetch_rocm_cmake)
 include(hipblaslt_python)
+include(hipblaslt_sanitizer_runtime)
 include(hipblaslt_target_configure_sanitizers)
 include(tensilelite_supported_architectures)
 
@@ -175,50 +176,33 @@ if(HIPBLASLT_ENABLE_YAML)
     find_package(LLVM REQUIRED)
 endif()
 
-if(HIPBLASLT_ENABLE_DEVICE AND NOT WIN32)
+if(HIPBLASLT_BUNDLE_PYTHON_DEPS)
+    set(HIPBLASLT_PYTHON_DEPS "_rocisa")
+    set(hipblaslt_python_dev Development.Module)
+endif()
+hipblaslt_find_python("${hipblaslt_python_dev}")
+
+# Resolved after the interpreter is known because the consumer of san_opts is
+# `cmake -E env LD_PRELOAD=... -- python`, and the loader resolves the preload
+# against the RUNPATH of that main executable. Deliberately not gated on
+# HIPBLASLT_ENABLE_DEVICE: the Python code generation and test data generation
+# steps below run either way, and must not run uninstrumented.
+if(NOT WIN32)
     if(HIPBLASLT_ENABLE_ASAN OR THEROCK_SANITIZER STREQUAL "ASAN" OR THEROCK_SANITIZER STREQUAL "HOST_ASAN")
-        execute_process(
-            COMMAND ${CMAKE_CXX_COMPILER} --print-file-name=libclang_rt.asan-x86_64.so
-            OUTPUT_VARIABLE ASAN_LIB_PATH
-            OUTPUT_STRIP_TRAILING_WHITESPACE
-            COMMAND_ERROR_IS_FATAL ANY
-        )
-        # If ASAN_LIB_PATH is libclang_rt.asan-x86_64.so
-        # rather than /path/to/libclang_rt.asan-x86_64.so then
-        # we failed to locate it and HAS_PARENT_PATH is false.
-        cmake_path(HAS_PARENT_PATH ASAN_LIB_PATH result)
-        if(NOT result)
-            message(FATAL_ERROR "Failed to locate libclang_rt.asan-x86_64.so ")
-        endif()
+        hipblaslt_resolve_sanitizer_runtime(asan ASAN_LIB_PATH PROBE_PYTHON "${Python3_EXECUTABLE}")
         # Disable a few asan options to get builds going but these should be addressed
         set(san_opts "LD_PRELOAD=${ASAN_LIB_PATH}" "ASAN_OPTIONS=detect_leaks=0,new_delete_type_mismatch=0,malloc_context_size=0,quarantine_size_mb=0")
     elseif(HIPBLASLT_ENABLE_TSAN OR THEROCK_SANITIZER STREQUAL "TSAN")
-        execute_process(
-            COMMAND ${CMAKE_CXX_COMPILER} --print-file-name=libclang_rt.tsan-x86_64.so
-            OUTPUT_VARIABLE TSAN_LIB_PATH
-            OUTPUT_STRIP_TRAILING_WHITESPACE
-            COMMAND_ERROR_IS_FATAL ANY
-        )
-        # If TSAN_LIB_PATH is libclang_rt.tsan-x86_64.so
-        # rather than /path/to/libclang_rt.tsan-x86_64.so then
-        # we failed to locate it and HAS_PARENT_PATH is false.
-        cmake_path(HAS_PARENT_PATH TSAN_LIB_PATH result)
-        if(NOT result)
-            message(FATAL_ERROR "Failed to locate libclang_rt.tsan-x86_64.so ")
-        endif()
+        hipblaslt_resolve_sanitizer_runtime(tsan TSAN_LIB_PATH PROBE_PYTHON "${Python3_EXECUTABLE}")
         # Disable a few tsan options to get builds going but these should be addressed
         set(san_opts "LD_PRELOAD=${TSAN_LIB_PATH}" "TSAN_OPTIONS=detect_leaks=0,new_delete_type_mismatch=0")
     endif()
 endif()
 
 if(HIPBLASLT_BUNDLE_PYTHON_DEPS)
-    set(HIPBLASLT_PYTHON_DEPS "_rocisa")
-    set(hipblaslt_python_dev Development.Module)
-    hipblaslt_find_python("${hipblaslt_python_dev}")
     hipblaslt_configure_bundled_python_command("${CMAKE_CURRENT_BINARY_DIR}/tensilelite/rocisa;${CMAKE_CURRENT_BINARY_DIR}/tensilelite" "${san_opts}")
 else()
-    hipblaslt_find_python("${hipblaslt_python_dev}")
-    set(HIPBLASLT_PYTHON_COMMAND "${Python_EXECUTABLE}")
+    hipblaslt_configure_python_command("${san_opts}")
 endif()
 
 if(HIPBLASLT_ENABLE_ROCROLLER)
