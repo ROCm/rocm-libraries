@@ -10,7 +10,7 @@
 // Each #define renames a public MIOpen C entry point to its _impl form, so the
 // provider — whose sources call the public names — binds the private
 // implementation entry points exported by libMIOpen_private.so, without routing
-// back out through the public wrapper (RFC 0001 §4.5). When the split is OFF this
+// back out through the public wrapper. When the split is OFF this
 // header is not force-included, the provider sources are left untouched, and they
 // call the public C API exactly as before the split.
 //
