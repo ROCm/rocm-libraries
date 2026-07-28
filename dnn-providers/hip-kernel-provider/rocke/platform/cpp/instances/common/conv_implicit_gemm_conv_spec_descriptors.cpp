@@ -722,16 +722,22 @@ bool rocke_implicit_gemm_conv_is_valid_spec(const rocke_implicit_gemm_conv_spec_
             "spec wave_size %d != %s wave_size %d", s->wave_size, arch, target->wave_size);
     }
 
-    /* MMA atom must be in the target's catalog (f16 in/out fp32 acc). */
-    mma = rocke_archtarget_mma(target);
-    if(!rocke_mma_catalog_has_shape(
-           mma, family, "f16", "f16", "fp32", s->warp_tile_m, s->warp_tile_n, s->warp_tile_k))
+    /* MMA atom must be in the target's catalog for the requested dtype. */
     {
-        ROCKE_CONVVS_REJECT("unsupported f16 warp_tile (%d, %d, %d) on %s",
-                            s->warp_tile_m,
-                            s->warp_tile_n,
-                            s->warp_tile_k,
-                            arch);
+        char a_scratch[32], b_scratch[32];
+        const char* a_norm = rocke_normalize_dtype(s->dtype_a, a_scratch, sizeof(a_scratch));
+        const char* b_norm = rocke_normalize_dtype(s->dtype_b, b_scratch, sizeof(b_scratch));
+        mma = rocke_archtarget_mma(target);
+        if(!rocke_mma_catalog_has_shape(
+               mma, family, a_norm, b_norm, "fp32", s->warp_tile_m, s->warp_tile_n, s->warp_tile_k))
+        {
+            ROCKE_CONVVS_REJECT("unsupported %s warp_tile (%d, %d, %d) on %s",
+                                s->dtype_a ? s->dtype_a : "f16",
+                                s->warp_tile_m,
+                                s->warp_tile_n,
+                                s->warp_tile_k,
+                                arch);
+        }
     }
 
     /* LDS budget: A/B staging (×2 for double-buffer) + optional cshuffle C.
@@ -794,14 +800,18 @@ bool rocke_implicit_gemm_conv_is_valid_spec(const rocke_implicit_gemm_conv_spec_
     /* WMMA (RDNA wave32) narrow-subset gates. */
     if(strcmp(family, "wmma") == 0)
     {
+        /* gfx11/gfx12 use 16x16x16; gfx1250 uses 16x16x32 (fp16/bf16) or 16x16x4 (fp32) */
+        int is_16x16x4 = (s->warp_tile_m == 16 && s->warp_tile_n == 16 && s->warp_tile_k == 4);
         int is_16x16x16 = (s->warp_tile_m == 16 && s->warp_tile_n == 16 && s->warp_tile_k == 16);
-        if(!is_16x16x16)
+        int is_16x16x32 = (s->warp_tile_m == 16 && s->warp_tile_n == 16 && s->warp_tile_k == 32);
+        if(!is_16x16x4 && !is_16x16x16 && !is_16x16x32)
         {
-            ROCKE_CONVVS_REJECT("WMMA conv supports only 16x16x16 (got (%d, %d, %d)) on %s",
-                                s->warp_tile_m,
-                                s->warp_tile_n,
-                                s->warp_tile_k,
-                                arch);
+            ROCKE_CONVVS_REJECT(
+                "WMMA conv supports only 16x16x4, 16x16x16, or 16x16x32 (got (%d, %d, %d)) on %s",
+                s->warp_tile_m,
+                s->warp_tile_n,
+                s->warp_tile_k,
+                arch);
         }
         if(!(s->pipeline && strcmp(s->pipeline, "mem") == 0))
         {
@@ -898,16 +908,21 @@ const rocke_mmaop_t* rocke_conv_resolve_op(rocke_ir_builder_t* b,
     }
 
     /* op = target.mma.op_for_shape(family=_conv_mma_family(arch),
-     *                              a/b="f16", c="fp32",
+     *                              a=spec.data.dtype_a, b=spec.data.dtype_b, c="fp32",
      *                              m=warp_tile_m, n=warp_tile_n, k=warp_tile_k) */
-    op = rocke_archtarget_op_for_shape(target,
-                                       rocke_conv_mma_family(arch),
-                                       "f16",
-                                       "f16",
-                                       "fp32",
-                                       spec->warp_tile_m,
-                                       spec->warp_tile_n,
-                                       spec->warp_tile_k);
+    {
+        char a_scratch[32], b_scratch[32];
+        const char* a_norm = rocke_normalize_dtype(spec->dtype_a, a_scratch, sizeof(a_scratch));
+        const char* b_norm = rocke_normalize_dtype(spec->dtype_b, b_scratch, sizeof(b_scratch));
+        op = rocke_archtarget_op_for_shape(target,
+                                           rocke_conv_mma_family(arch),
+                                           a_norm,
+                                           b_norm,
+                                           "fp32",
+                                           spec->warp_tile_m,
+                                           spec->warp_tile_n,
+                                           spec->warp_tile_k);
+    }
     if(op == NULL)
     {
         /* raise ValueError(f"no MMA atom for conv warp_tile (...) on {arch}") */
