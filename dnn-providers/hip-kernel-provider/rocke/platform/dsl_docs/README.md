@@ -161,29 +161,45 @@ python -m rocke.examples.common.bake_off_implicit_gemm --output-dir "$OUT_DIR"
 python -m rocke.run_manifest "$OUT_DIR"/*.hsaco "$OUT_DIR"/manifest.json --verify
 ```
 
-See `development/testing.md` for the full procedure and
-`optimization/measured_results.md` for the evidence-retention policy and index
-of properly scoped experiment records.
+See [`development/testing.md`](./development/testing.md) for the full procedure
+and [`optimization/measured_results.md`](./optimization/measured_results.md) for
+the evidence-retention policy and index of properly scoped experiment records.
 
 ## Source Material
 
-These docs are written against the current code. When this file and code disagree, trust code. The most important source files are listed in `reference/file_index.md`.
+These docs are written against the current code. When this file and code disagree,
+trust code. The most important source files are listed in
+[`reference/file_index.md`](./reference/file_index.md).
 
 Conventional anchors:
 
-- Package re-exports: `python/rocke/__init__.py`, `python/rocke/helpers/__init__.py`.
-- IR + builder: `python/rocke/core/ir.py`.
-- Production lowering: `python/rocke/core/lower_llvm.py`.
-- HIP debug lowering: `python/rocke/core/lower_hip.py`.
-- CK Tile parity emission: `python/rocke/core/lower_cktile.py`.
-- Conservative passes: `python/rocke/core/passes.py`.
-- COMGR: `python/rocke/runtime/comgr.py`.
-- HIP runtime: `python/rocke/runtime/hip_module.py`.
-- Launcher / workspace / timing: `python/rocke/runtime/launcher.py`.
-- Kernel arg packing: `python/rocke/runtime/packing.py`.
-- High-level compile: `python/rocke/helpers/compile.py`.
-- Manifest schema: `python/rocke/helpers/manifest.py`.
-- Optimization runbook: `dsl_docs/optimization/optimization_runbook.md`.
-- DSL runbook compliance table: `dsl_docs/optimization/runbook_compliance.md`.
-- Coordinate-transform DAG walkthrough: `dsl_docs/architecture/transform_dag.md`.
-- Helpers reference: `python/rocke/helpers/README.md`.
+- Package re-exports: [`python/rocke/__init__.py`](../python/rocke/__init__.py),
+  [`python/rocke/helpers/__init__.py`](../python/rocke/helpers/__init__.py).
+- IR + builder: [`python/rocke/core/ir.py`](../python/rocke/core/ir.py).
+- Production lowering:
+  [`python/rocke/core/lower_llvm.py`](../python/rocke/core/lower_llvm.py).
+- HIP debug lowering:
+  [`python/rocke/core/lower_hip.py`](../python/rocke/core/lower_hip.py).
+- CK Tile parity emission:
+  [`python/rocke/core/lower_cktile.py`](../python/rocke/core/lower_cktile.py).
+- Conservative passes:
+  [`python/rocke/core/passes.py`](../python/rocke/core/passes.py).
+- COMGR: [`python/rocke/runtime/comgr.py`](../python/rocke/runtime/comgr.py).
+- HIP runtime:
+  [`python/rocke/runtime/hip_module.py`](../python/rocke/runtime/hip_module.py).
+- Launcher / workspace / timing:
+  [`python/rocke/runtime/launcher.py`](../python/rocke/runtime/launcher.py).
+- Kernel arg packing:
+  [`python/rocke/runtime/packing.py`](../python/rocke/runtime/packing.py).
+- High-level compile:
+  [`python/rocke/helpers/compile.py`](../python/rocke/helpers/compile.py).
+- Manifest schema:
+  [`python/rocke/helpers/manifest.py`](../python/rocke/helpers/manifest.py).
+- Optimization runbook:
+  [`dsl_docs/optimization/optimization_runbook.md`](./optimization/optimization_runbook.md).
+- DSL runbook compliance table:
+  [`dsl_docs/optimization/runbook_compliance.md`](./optimization/runbook_compliance.md).
+- Coordinate-transform DAG walkthrough:
+  [`dsl_docs/architecture/transform_dag.md`](./architecture/transform_dag.md).
+- Helpers reference:
+  [`python/rocke/helpers/README.md`](../python/rocke/helpers/README.md).
