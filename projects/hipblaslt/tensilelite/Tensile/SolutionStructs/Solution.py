@@ -1363,14 +1363,17 @@ class Solution(collections.abc.Mapping):
       state["Multicast"] = int(state["ClusterDim"] != [1, 1]
                                and state["StreamK"] == 0)
     # The cluster-scope barrier handshake (s_barrier_signal/wait -3, inserted by
-    # StinkyTofu's InsertClusterBarrierPass around each multicast tensor_load_to_lds)
-    # keeps the C cluster peers in lockstep on the multicast loads. It applies to
-    # both clustered multicast paths: the legacy/subtile clustered multicast
-    # (StreamK == 0) and the StreamK DP cooperative multicast (StreamKMulticast).
-    # A forced-off Multicast keeps it off.
-    if state["ClusterDim"] != [1, 1] and state["Multicast"] \
-       and state["TDMInst"] != 0 \
-       and (state["StreamK"] == 0 or state.get("StreamKMulticast", 0)) \
+    # StinkyTofu's InsertClusterBarrierPass) keeps the cluster peers in lockstep.
+    # ANY active cluster (ClusterDim != [1, 1]) needs it, independent of Multicast
+    # or the StreamK mode: every cluster role -- multicast, partial reduction,
+    # factored and dual-2D -- relies on its co-resident peers staying synchronized,
+    # not just the B-multicast path. In particular a pure reduction cluster ([1, C])
+    # and a factored [Cs, Ck] cluster derive Multicast off on the reduction axis yet
+    # still need the barrier. Still gated on TDM being live (TDMInst != 0 -- an
+    # active cluster loads cooperatively via tensor_load_to_lds; without TDM there
+    # is nothing to synchronize) and on the ISA providing the cluster-barrier
+    # instruction (HasClusterBarrier).
+    if state["ClusterDim"] != [1, 1] and state["TDMInst"] != 0 \
        and isaInfoMap[state["ISA"]].asmCaps.get("HasClusterBarrier", False):
       state["ClusterBarrier"] = True
 

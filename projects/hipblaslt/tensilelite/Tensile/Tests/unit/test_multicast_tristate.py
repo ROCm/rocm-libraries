@@ -92,8 +92,12 @@ class TestDerivation:
         assert states, "expected >=1 derived solution"
         assert all(st["Multicast"] == 0 for st in states), (
             [st["Multicast"] for st in states])
-        # ClusterBarrier is gated on Multicast, so it must also be off.
-        assert all(st["ClusterBarrier"] is False for st in states)
+        # ClusterBarrier is decoupled from Multicast: any active cluster
+        # (ClusterDim != [1, 1] with TDM live) keeps the cluster-scope barrier even
+        # with the B-multicast forced off -- the [2, 2] cluster peers still load
+        # cooperatively and must stay in lockstep.
+        assert all(st["ClusterBarrier"] is True for st in states), (
+            [st["ClusterBarrier"] for st in states])
 
     def test_explicit_on(self, tmp_path):
         # Multicast=1 forces on.
