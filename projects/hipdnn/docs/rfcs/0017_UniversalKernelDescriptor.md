@@ -376,15 +376,13 @@ workspace-size-limit knob's bounds from the actual convolution problem it is giv
 knob's legal *value set* from a pre-built kernel catalog is the same shape one step further:
 graph-scoped input, narrower output.
 
-**Open dependency: ordering.** On hipDNN's current front-end API, this ordering runs in reverse.
-Applicability and ranking queries are knob-blind today, and knob settings are consumed only after
-an engine id is already chosen, at plan build. No API today accepts knob settings before or during
-the applicability query, and no provider's applicability decision depends on a knob value. This RFC
-takes the conservative scope: knob filtering applies within the already-selected engine, at
-plan-build time, where that graph's catalog is already available. The earlier case, a knob value
-narrowing which *engine* is even applicable, is named here as a front-end dependency for a
-follow-up to close, not something this RFC's descriptors implement on their own. Moving knob input
-earlier, ahead of the applicability query, is under consideration but not committed by this RFC.
+**Ordering works on today's API.** Because the catalog is derived from graph details alone, it is
+already built by the time the engine answers applicability, so a knob's legal values are known up
+front and are reported through the existing graph-parameterized knob query. That the user's knob
+values are consumed later, after an engine id is chosen, costs nothing: the UHD ranks the whole
+catalog, and the knob settings then narrow that ranked list to the best-scoring kernel that matches
+the user's choices. Ranking and filtering are independent, so their order does not change the
+result. No new front-end entry point and no change to the existing call order is required.
 
 **Autotune.** Because a sweep's values are validated against the same per-graph knob lookup used
 for a manually-set knob, a catalog-filtered value set is inherited by autotune automatically. A
@@ -1041,19 +1039,18 @@ sequenceDiagram
     ERM->>Plan: execute(handle, deviceBuffers, numDeviceBuffers, workspace)  (step 9)
 ```
 
-**The catalog and the bound token state are provider-owned, not hipDNN-owned.** Today,
-`IEngine::isApplicable` and `IEngine::initializeExecutionContext` share only two things across a
-session: the provider's own handle, the one object guaranteed to be the same instance across both
-calls, and the graph's serialized bytes, freshly wrapped on the stack on every single call, with no
-persistent graph identity and no correlation id crossing the plugin ABI. hipDNN passes no stable graph
-identity to a provider, and neither `IEngine`/`IPlanBuilder` nor the execution context carries an
-opaque-state slot the host could fill on the provider's behalf. So the catalog from step 5 and the
-bound token state from step 8 are cached on the provider's own handle object, keyed by a hash the
-provider computes itself over the serialized graph bytes it already receives on every call, the same
-way a provider already holds other per-session state on its handle. This is implementable without any
-hipDNN interface change today; the tradeoff is that a provider must compute or look up that hash on
-every `isApplicable` and every `initializeExecutionContext` call, since hipDNN gives it nothing better
-to key on.
+**The catalog and the bound token state are provider-owned, not hipDNN-owned.** Across a session,
+`IEngine::isApplicable` and `IEngine::initializeExecutionContext` share two things: the provider's own
+handle, the one object guaranteed to be the same instance across both calls, and the graph's
+serialized bytes, which the provider receives on every call. That is enough. The catalog from step 5
+and the bound token state from step 8 are cached on the provider's handle, keyed by a hash the
+provider computes over the serialized graph bytes **before deserializing them**, with a `memcmp`
+against the cached bytes on a hash hit to confirm the graph is byte-for-byte identical rather than
+merely hash-equal. Hashing raw bytes ahead of deserialization keeps the lookup cheap: the expensive
+work, deserializing the graph and running the matchers, happens only on a miss, and a hit skips
+straight to the cached catalog and token state. The provider already holds other per-session state on
+its handle the same way. No hipDNN interface change is required, and no correlation id or
+host-provided graph identity is needed, since the graph bytes themselves are the identity.
 
 **Base-path invariant: accept implies a non-empty catalog.** Accepting applicability, returning true
 from `isApplicable`, means a non-empty catalog exists for this graph: at least one UKD passed every
