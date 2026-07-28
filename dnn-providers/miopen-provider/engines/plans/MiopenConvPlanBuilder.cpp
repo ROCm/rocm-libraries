@@ -17,8 +17,8 @@
 #include "engines/plans/MiopenConvWrwPlan.hpp"
 
 // The miopenConvolution*GetWorkSpaceSizeRange entry points are declared via
-// <MiopenApi.hpp> (ALMIOPEN-2246) — under their _impl names when linking the
-// private implementation library, otherwise their public names — so no local
+// <MiopenApi.hpp> — under their _impl names when linking the private
+// implementation library, otherwise their public names — so no local
 // prototype is needed here.
 
 namespace miopen_plugin

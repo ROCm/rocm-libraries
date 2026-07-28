@@ -318,7 +318,7 @@
 
 // The three miopenConvolution*GetWorkSpaceSizeRange entry points are exported
 // with MIOPEN_EXPORT from src/convolution_api.cpp but intentionally absent from
-// the public <miopen/miopen.h> (ALMIOPEN-2246). They are renamed to _impl here
+// the public <miopen/miopen.h>. They are renamed to _impl here
 // too so the private library exports them under _impl names alongside the rest of
 // the C API; the hipDNN MIOpen provider, which links the private library, mirrors
 // these renames in its own force-included MiopenApiPrivateRename.hpp. Flag-off

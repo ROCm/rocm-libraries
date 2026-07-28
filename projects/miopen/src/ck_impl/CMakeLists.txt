@@ -154,7 +154,7 @@ foreach(gpu_target IN LISTS _CK_FILTERED_TARGETS)
     # (ConvSolution, InvokerFactory, ProblemDescription, etc.). With the public/private
     # split enabled (MIOPEN_ENABLE_HIPDNN_WRAPPER=ON) these live only in
     # libMIOpen_private.so — the public MIOpen wrapper exports only the public C API
-    # (RFC 0001 §4.10 item 1) — and _MIOPEN_IMPL_TARGET resolves to MIOpen_private.
+    # — and _MIOPEN_IMPL_TARGET resolves to MIOpen_private.
     # With the split OFF (default) it resolves to the single MIOpen library, exactly
     # as before the split. Unlike the hipDNN provider, these plugins consume MIOpen's
     # internal C++ symbols directly, not the C API.
