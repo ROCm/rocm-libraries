@@ -16,6 +16,7 @@ pr:
   bump_bot_authors:
     - assistant-librarian
     - systems-assistant
+    - dependabot
 
   # PR title rules
   title:
@@ -93,7 +94,7 @@ pr:
       - .rb
       - .rs
     # A changed file is treated as a unit test if its basename matches one of
-    # these glob patterns (e.g. test_parser.py, parser_test.cpp, testing_x.py).
+    # these glob patterns (e.g. test_parser.py, test_parser.cpp, testing_x.py).
     # Patterns that contain a '/' are matched against the FULL path instead of
     # the basename, so entire test directories can be recognised
     # (e.g. anything under a 'test/gtest/' folder).
@@ -104,16 +105,12 @@ pr:
       - '*_tests.*'
       - 'Test*'
       - '*_gtest.*'
-    # Unit tests are required for source code ANYWHERE in the repository — there
-    # are NO folder-based exemptions. A test file may also live in any folder;
-    # it is recognised by its name (test_* / *_test.* / Test* / *_gtest.*), not
-    # its location.
-    # Path-based: any file under a 'test/gtest/' directory is a unit test
-    # (e.g. projects/miopen/test/gtest/unit_conv_solver_ConvWinoRageRxS.cpp).
+      # Path-based: any file under a 'test/gtest/' directory is a unit test
+      # (e.g. projects/miopen/test/gtest/unit_conv_solver_ConvWinoRageRxS.cpp).
       - '**/test/gtest/**'
     # Unit tests are required for source code ANYWHERE in the repository — there
     # are NO folder-based exemptions. A test file may also live in any folder;
-    # it is recognised by its name (test_* / *_test.*), not its location.
+    # it is recognised by its name or path pattern, not its location alone.
     # Doc/config files are still skipped by EXTENSION (they are simply not in
     # `code_extensions`), not by path.
     exempt_paths: []

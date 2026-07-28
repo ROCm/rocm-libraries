@@ -93,6 +93,7 @@ class CheckResult:
     wip: bool = False
     tbe: bool = False
     note: Optional[str] = None
+    warn: bool = False
 
 
 @dataclass(frozen=True)
@@ -1024,15 +1025,35 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     check_errors = []
     ensure_no_forbidden_files(policy, pr_files, check_errors)
-    results.append(CheckResult("Forbidden Files", "⛔", not check_errors, check_errors))
+    # Forbidden Files is WARNING-ONLY: passed=True guarantees it never turns the
+    # workflow red or adds a label; warn=True surfaces the offending file(s).
+    results.append(
+        CheckResult(
+            name="Forbidden Files",
+            icon="⛔",
+            passed=True,
+            details=check_errors,
+            warn=bool(check_errors),
+        )
+    )
 
     check_errors = []
     ensure_unit_tests(policy, pr_files, check_errors)
     ut_note = None
+    ut_warn = bool(check_errors)
     if not check_errors and not pr_has_code_files(policy, pr_files):
         ut_note = "PR does not contain code files — Unit Test auto-passed"
+    # Unit Test is WARNING-ONLY: passed=True means it never fails the workflow
+    # or adds a label; a missing test surfaces a ⚠️ Warning row instead.
     results.append(
-        CheckResult("Unit Test", "🧪", not check_errors, check_errors, note=ut_note)
+        CheckResult(
+            name="Unit Test",
+            icon="🧪",
+            passed=True,
+            details=check_errors,
+            warn=ut_warn,
+            note=ut_note,
+        )
     )
 
     # "Enabled soon" placeholders — logic to be implemented later.
@@ -1043,7 +1064,9 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     # Build the policy table; on failure we ALSO append the current
     # pre-commit / CodeQL rows so the table is always complete.
-    errors = [d for r in results for d in r.details]
+    # NOTE: warning-only rows (e.g. Unit Test, Forbidden Files) are excluded
+    # from the blocking `errors` — they show a ⚠️ Warning but never fail.
+    errors = [d for r in results for d in r.details if not r.warn]
     marker = "<!-- therock-pr-bot-policy-check -->"
 
     if errors:
