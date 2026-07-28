@@ -6,6 +6,8 @@
 #include <miopen/solver/implicitgemm_ck_util_common.hpp>
 #include <miopen/kernel_tuning_mode.hpp>
 
+#include <limits>
+
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
 #include <ck/utility/data_type.hpp>
 #include <ck/utility/numeric_limits.hpp>
@@ -167,7 +169,8 @@ typename ConvPtrsType::iterator FindConvPtrByID(ConvPtrsType& conv_ptrs,
     });
 }
 
-// Returns true when any tensor stride/dim exceeds INT_MAX, so the problem
+// Returns true when any tensor stride/dim exceeds INT_MAX, or when a grouped
+// backward-weights tensor's flattened element count exceeds INT_MAX, so the problem
 // must be dispatched to a CK instance whose argument types are int64 end-to-end.
 //
 // CK exposes both index_t (int32) and long_index_t (int64) MakeArgumentPointer
@@ -179,7 +182,24 @@ typename ConvPtrsType::iterator FindConvPtrByID(ConvPtrsType& conv_ptrs,
 template <typename ProblemDescriptionType>
 inline bool RequiresLargeTensorCKInstance(const ProblemDescriptionType& problem)
 {
-    return !problem.AllTensorsDimsFitIntoInt();
+    if(!problem.AllTensorsDimsFitIntoInt())
+        return true;
+
+    // AllTensorsDimsFitIntoInt() only checks that each individual length/stride fits in
+    // int32; it does NOT bound the flattened element count. A grouped backward-weights
+    // tensor whose total element count exceeds INT_MAX overflows a non-large CK instance's
+    // 32-bit element indexing and returns silently wrong results, so require a large-tensor
+    // (int64) instance for those too. Scoped to the backward-weights direction: forward and
+    // backward-data verify correctly on the int32 instances and must keep them (the
+    // large-tensor instances are measurably slower).
+    if(problem.IsDirectionBackwardWrW())
+    {
+        constexpr std::size_t max_int32 = static_cast<std::size_t>(std::numeric_limits<int>::max());
+        return problem.GetIn().GetElementSize() > max_int32 ||
+               problem.GetOut().GetElementSize() > max_int32 ||
+               problem.GetWeights().GetElementSize() > max_int32;
+    }
+    return false;
 }
 
 // Large-tensor xdl impls embed "Large_Tensor" in their GetTypeString() (see

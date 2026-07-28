@@ -26,6 +26,8 @@
 
 #include <miopen/conv/problem_description.hpp>
 #include <miopen/conv/solvers.hpp>
+#include <miopen/convolution.hpp>
+#include <miopen/tensor.hpp>
 #include "../../src/ck_impl/implicitgemm_ck_util.hpp"
 #include <gtest/gtest.h>
 #include <iostream>
@@ -416,3 +418,70 @@ TEST_F(CPU_SplitKGenericDirectTest_NONE, MultipleKernelsWithDifferentSplitKSuppo
 }
 
 } // namespace unit_implicitgemm_ck_util_test
+
+// ---------------------------------------------------------------------------
+// Regression: RequiresLargeTensorCKInstance must force a large-tensor (int64) CK
+// instance for a grouped backward-weights problem whose flattened element count
+// exceeds INT_MAX even though every individual length/stride still fits int32.
+// Without the element-count gate the loader keeps such a problem eligible for a
+// fast int32-indexing instance whose flat element offset overflows, silently
+// returning wrong results. The gate is scoped to backward-weights: forward and
+// backward-data verify correctly on the int32 instances. Shape is synthetic.
+// ---------------------------------------------------------------------------
+namespace {
+
+miopen::conv::ProblemDescription MakeElemCountConvProblem(miopen::conv::Direction dir,
+                                                          std::size_t n,
+                                                          std::size_t c,
+                                                          std::size_t h,
+                                                          std::size_t w,
+                                                          std::size_t k)
+{
+    const miopen::TensorDescriptor x{miopenHalf, miopenTensorNHWC, {n, c, h, w}};
+    const miopen::TensorDescriptor weights{miopenHalf, miopenTensorNHWC, {k, c, 3, 3}};
+    const miopen::ConvolutionDescriptor conv{2,
+                                             miopenConvolution,
+                                             miopenPaddingDefault,
+                                             {1, 1}, // pads (SAME for 3x3)
+                                             {1, 1}, // strides
+                                             {1, 1}, // dilations
+                                             {0, 0}, // trans output pads
+                                             1,      // group count
+                                             1.0f};  // lowp quant
+    const miopen::TensorDescriptor y = conv.GetForwardOutputTensor(x, weights, miopenHalf);
+
+    // ProblemDescription ctor: (in = x for fwd / y for backward*, weights,
+    //                           out = y for fwd / x for backward*, conv, direction)
+    if(dir == miopen::conv::Direction::Forward)
+        return {x, weights, y, conv, dir};
+    return {y, weights, x, conv, dir};
+}
+
+} // namespace
+
+TEST(CPU_UnitTestImplicitGemmCKUtilLargeTensor_NONE, WrwElementCountOverflowGate)
+{
+    using miopen::conv::Direction;
+    using miopen::solver::RequiresLargeTensorCKInstance;
+
+    // N*C*H*W = 256*1024*128*128 = 4.29e9 > INT_MAX, yet every length and stride
+    // (max stride = H*W*C = 16.78M) fits int32, so AllTensorsDimsFitIntoInt() is true
+    // and only the element-count gate can flag it.
+    constexpr std::size_t n = 256, c = 1024, hw = 128, k = 1024;
+
+    EXPECT_TRUE(RequiresLargeTensorCKInstance(
+        MakeElemCountConvProblem(Direction::BackwardWeights, n, c, hw, hw, k)))
+        << "grouped wrw with >INT_MAX element count must require a large-tensor instance";
+
+    EXPECT_FALSE(RequiresLargeTensorCKInstance(
+        MakeElemCountConvProblem(Direction::Forward, n, c, hw, hw, k)))
+        << "forward must stay on the (faster) int32 instances";
+
+    EXPECT_FALSE(RequiresLargeTensorCKInstance(
+        MakeElemCountConvProblem(Direction::BackwardData, n, c, hw, hw, k)))
+        << "backward-data must stay on the (faster) int32 instances";
+
+    // A small wrw problem (element count well within int32) stays on the int32 path.
+    EXPECT_FALSE(RequiresLargeTensorCKInstance(
+        MakeElemCountConvProblem(Direction::BackwardWeights, 1, 64, 32, 32, 64)));
+}

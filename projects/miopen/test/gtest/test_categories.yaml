@@ -160,6 +160,7 @@ test_categories:
       - "Full/GPU_UnitTestConvSolverImplicitGemm3DGroupBwdXdlops_LargeStride_*"
       - "Full/GPU_UnitTestConvSolverImplicitGemmGroupWrwXdlops_LargeStride_*"
       - "Full/GPU_UnitTestConvSolverImplicitGemm3DGroupWrwXdlops_LargeStride_*"
+      - "Full/GPU_UnitTestConvSolverImplicitGemmGroupWrwXdlops_ElementCountOverflow_*"
       # Large BN tests - full suite only
       - "Full/GPU_BNCKFWDTrainLarge2D_*"
       - "Full/GPU_BNOCLFWDTrainLarge2D_*"
@@ -257,6 +258,9 @@ test_categories:
       # share the same dispatch code path and stay in full. Keep BFP16 in
       # comprehensive (nightly) for coverage.
       - "Full/GPU_UnitTestConvSolverImplicitGemm*Xdlops_LargeStride_FP*"
+      # Heavyweight (~60s) large-tensor wrw test; full-only like _LargeStride.
+      # FP16-only (no BFP16 variant to keep in nightly), so exclude the family.
+      - "Full/GPU_UnitTestConvSolverImplicitGemmGroupWrwXdlops_ElementCountOverflow_*"
       # Only exclude explicitly disabled tests
       - "*DISABLED*"
 
