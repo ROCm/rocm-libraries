@@ -176,7 +176,7 @@ int main() {
                     }
                     col /= float(ns);
                     col = vec3( sqrt(col[0]), sqrt(col[1]), sqrt(col[2]) );
-                
+
                     image[3*(j*nx+i)+0] = int(255.99*col[0]);
                     image[3*(j*nx+i)+1] = int(255.99*col[1]);
                     image[3*(j*nx+i)+2] = int(255.99*col[2]);
