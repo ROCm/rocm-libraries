@@ -9,7 +9,7 @@
 //
 // Run with: hip_kernel_provider_integration_tests --gtest_filter="*HipFlash2*"
 
-#include "IntegrationGraphVerificationHarness.hpp"
+#include "../IntegrationGraphVerificationHarness.hpp"
 
 #include <gtest/gtest.h>
 #include <hipdnn_frontend/Graph.hpp>

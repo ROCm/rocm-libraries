@@ -14,7 +14,10 @@
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 
-#include "harness/GoldenReferenceCpu.hpp"
+// NOTE: GoldenReferenceCpu.hpp is from hipdnn-integration-tests project;
+// include path not available in hip_kernel_provider_integration_tests target.
+// This file requires relocation alongside dnn-providers/integration-tests/ to compile.
+// #include "harness/GoldenReferenceCpu.hpp"
 
 using namespace hipdnn_integration_tests;
 using namespace hipdnn_data_sdk::types;

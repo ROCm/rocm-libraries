@@ -32,7 +32,7 @@ Requires rocWMMA (rocm-libraries component).
 - **gfx950 (CDNA4/MI355X)**: The softmax reduction in the V7 kernel diverges to
   inf on gfx950 due to MFMA fragment lane-to-row mapping differences between
   CDNA3 and CDNA4. Under investigation. The engine's `isApplicable()` currently
-  enables gfx950 for the fix to be validated; set to gfx942-only until resolved.
+  enables gfx950 for the fix to be validated; set to gfx942-only until resolved. **DONE: gfx950 disabled in isApplicable() as of this commit.**
 
 ## Engine Registration
 

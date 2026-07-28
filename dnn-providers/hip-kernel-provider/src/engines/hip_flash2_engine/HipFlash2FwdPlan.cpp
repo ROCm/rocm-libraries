@@ -76,8 +76,8 @@ void HipFlash2FwdPlan::execute(const Handle& handle,
 
     // Strides (in elements, BHSD layout).
     // Guard against int64_t -> int truncation (I9): strides must fit in int.
-    // For the FP16 shapes this engine accepts (seq ??? 131072, D ??? 128, H ??? 128,
-    // B ??? 32768) the largest possible batch stride is ~32768x128x131072x128
+    // For the FP16 shapes this engine accepts (seq <= 131072, D <= 128, H <= 128,
+    // B <= 32768) the largest possible batch stride is ~32768x128x131072x128
     // which overflows int.  Log and abort if any stride exceeds INT_MAX.
     auto checkedStride = [&](int64_t s, const char* name) -> int {
         if(s > static_cast<int64_t>(std::numeric_limits<int>::max()) || s < 0)
@@ -102,17 +102,18 @@ void HipFlash2FwdPlan::execute(const Handle& handle,
     args.o_stride_head = checkedStride(_params.o_stride_head, "o_stride_head");
     args.o_stride_seq = checkedStride(_params.o_stride_seq, "o_stride_seq");
 
-    // -- 3. Grid dimensions -------------------------------??
+    // -- 3. Grid dimensions -------------------------------?
 
     // -- 3. Grid dimensions ----------------------------------------------------
     // V7 uses BQ=64 tile -- one CTA per (tile_q, head, batch)
     constexpr unsigned int K_BQ = 64;
     const unsigned int gridX = (static_cast<unsigned>(_params.seq_len_q) + K_BQ - 1u) / K_BQ;
-    const unsigned int gridY = static_cast<unsigned>(_params.num_heads_q);
-    const unsigned int gridZ = static_cast<unsigned>(_params.batch);
+    // Finding 3 fix: kernel decodes blockIdx.y=batch, blockIdx.z=head_q
+    const unsigned int gridY = static_cast<unsigned>(_params.batch);
+    const unsigned int gridZ = static_cast<unsigned>(_params.num_heads_q);
 
-    // Block dim: 4 warps x 64 threads/warp = 256 threads per CTA
-    constexpr unsigned int K_BLOCK_DIM = 256;
+    // Block dim: kernel compiled __launch_bounds__(64,2) -- must match
+    constexpr unsigned int K_BLOCK_DIM = 64;
 
     // -- 4. Dispatch -----------------------------------------------------------
     // I5: propagate launch failure so callers see a hard error.
