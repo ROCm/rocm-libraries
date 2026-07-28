@@ -591,14 +591,14 @@ class ProblemPredicate(Properties.Predicate):
         valuepredicates.append(state["MacroTile1"])
         valuepredicates.append(state["GlobalSplitU"])
         # value[3] is the M-adjacency (shared-B) alignment axis Cs = ClusterDim[0].
-        # Pure multicast [C,1]: Cs = C (byte-identical to historic value). Pure
-        # reduction [1,C]: Cs = 1 (no M-alignment constraint).
+        # Pure multicast [C,1]: Cs = C. Pure reduction [1,C]: Cs = 1 (no
+        # M-alignment constraint).
         valuepredicates.append(state["ClusterDim"][0])
         # value[4] is the N-tile divisor. For a genuine 2-D StreamK cluster
         # (Ck = ClusterDim[1] > 1, e.g. pure reduction [1,C]) the Y-extent is the
         # K-split reduction / index-generation axis, NOT an N-tiling axis, so it
         # must NOT constrain the N-tile grid -> pin to 1. 1-D StreamK ([C,1]) and
-        # dense (non-StreamK) clusters keep ClusterDim[1] (byte-identical).
+        # dense (non-StreamK) clusters keep ClusterDim[1].
         if state.get("StreamK", 0) == 3 and state["ClusterDim"][1] > 1:
             valuepredicates.append(1)
         else:

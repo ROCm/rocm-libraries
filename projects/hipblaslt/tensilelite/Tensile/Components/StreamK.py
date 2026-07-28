@@ -1005,8 +1005,7 @@ class StreamK(Component):
                     # invalidate is not guaranteed to re-fetch a peer partial
                     # written back on a different partition, so escalate the
                     # cluster-reduction acquire (paired with the SCOPE_SYS
-                    # release below) to the system-coherent point. Held fix for
-                    # the PGR1 boundary-cluster race; see red-pgr1-fix notes.
+                    # release below) to the system-coherent point.
                     module.add(memOrder.acquireFence(writer, scope=CacheScope.SCOPE_SYS))  # once: observe peers' published partials
                     module.add(skClusterSetupDone)
 
@@ -1452,8 +1451,7 @@ class StreamK(Component):
             # then arrives at the split barrier; escalate the release writeback
             # to SCOPE_SYS so the partial is globally visible past gfx1250's
             # partitioned L2 before the owner's paired SCOPE_SYS acquire reads
-            # it. Non-cluster StreamK keeps the SCOPE_DEV default. Held fix for
-            # the PGR1 boundary-cluster race; see red-pgr1-fix notes.
+            # it. Non-cluster StreamK keeps the SCOPE_DEV default.
             releaseScope = (CacheScope.SCOPE_SYS
                             if self._streamKClusterReductionEnabled(writer, kernel)
                             else None)
@@ -1464,7 +1462,7 @@ class StreamK(Component):
             # SCOPE_SYS release fence, participate in the SYMMETRIC cluster
             # barrier INSTEAD OF raising the global completion flag. The peer
             # both ARRIVES (s_barrier_signal -3) and WAITS (s_barrier_wait -3),
-            # exactly like the owner and like the HW-validated multicast
+            # exactly like the owner and like the multicast
             # handshake -- it does NOT signal-and-exit. The peer's wait keeps it
             # parked at the cluster rendezvous until every member (owner
             # included) has arrived, giving the owner's paired acquire a real
@@ -1626,24 +1624,15 @@ class StreamK(Component):
         The cluster ``s_barrier_signal/wait -3`` orders EXECUTION across all C
         co-resident peers; peer->owner memory VISIBILITY rides on the paired
         SCOPE_SYS release (peer, before it arrives) / acquire (owner, after it
-        waits) fences. The earlier ASYMMETRIC form -- peers only
-        ``s_barrier_signal -3`` (arrive) and then branch away / exit while only
-        the owner ``s_barrier_wait -3`` -- was not a genuine cluster
-        synchronisation point on gfx1250: for a C >= 4 reduction cluster the
-        owner could observe the barrier satisfied and sum a peer slot before
-        that cross-WGP peer's partial was globally visible, dropping exactly one
-        contribution (device ~= (C-1)/C * reference, a cluster-aligned column
-        stripe confined to the grid tail). Adding more fences did not help
-        because the defect was structural, not a missing drain.
+        waits) fences.
 
-        The fix mirrors the HW-validated multicast handshake: make the barrier
-        SYMMETRIC -- every cluster member (owner AND every peer) both arrives
-        (``s_barrier_signal -3``) AND waits (``s_barrier_wait -3``) on the same
-        barrier, so no peer proceeds/exits until the whole cluster has rendezvoused
-        and the owner's acquire has a real cross-cluster order to observe. With
-        the symmetric barrier the fast path is correct for ALL C (validated
-        C = 2, 4, 8), so it is enabled whenever the cluster reduction is active;
-        there is NO per-peer global-flag fallback on the C >= 4 correctness path.
+        The split barrier must be SYMMETRIC: every cluster member (owner AND
+        every peer) both arrives (``s_barrier_signal -3``) AND waits
+        (``s_barrier_wait -3``) on the same barrier. An arrive-and-exit peer is
+        not a genuine synchronisation point -- the owner could sum a peer slot
+        before that cross-WGP peer's partial is globally visible across the
+        partitioned L2, dropping ~(C-1)/C for C >= 4 (a cluster-aligned column
+        stripe confined to the grid tail).
 
         The per-tile global-flag handshake still exists, but only for a cluster
         that straddles the SK grid boundary (``clusterReduceIntraCheck`` == SCC0,
@@ -1665,8 +1654,8 @@ class StreamK(Component):
         the remaining waves branch over it via ``labelBase``. When ``wait`` is set
         an all-waves cluster wait (``s_barrier_wait -3``) follows the arrive.
         ``labelBase``/``electTag`` are supplied per call site so the emitted label
-        and pool tag -- and hence the assembly -- stay byte-identical to the
-        pre-extraction inline copies. Instructions are appended to ``module``.
+        and pool tag are distinct per call site. Instructions are appended to
+        ``module``.
         """
         skipSignal = Label(label=writer.labels.getNameInc(labelBase), comment="")
         elect = writer.sgprPool.checkOut(1, electTag)
@@ -1722,7 +1711,7 @@ class StreamK(Component):
         """
         module = Module("StreamK cluster intra-cluster check")
         # Whole-cluster size C spans every co-resident peer WG. 1-D pure-multicast
-        # [C,1]: C = Cs = ClusterDim[0] (byte-identical). 2-D pure-reduction [1,C]:
+        # [C,1]: C = Cs = ClusterDim[0]. 2-D pure-reduction [1,C]:
         # C = Ck = ClusterDim[1]. In general C = Cs*Ck.
         _, _, C, _ = streamKClusterFactors(kernel)
         skConstsInVgprs = writer.isStreamKConstantsToVgprEnabled(kernel)
@@ -2939,8 +2928,8 @@ class StreamKTwoTileDPFirst(StreamK):
         # This keeps StreamKIdx a dense unique index whose (s,k) decode matches the
         # 1-D [C,1] scheme (StreamKIdx & (Ck-1) = wg_y = k, StreamKIdx & (C-1) = the
         # within-cluster rank). The fold is written into WorkGroup0 so the SMov/VMov
-        # save below (unchanged) still copies the final index; the 1-D Ck==1 path is
-        # byte-identical (no fold emitted). See docs/design/streamk-wg-clusters.md.
+        # save below (unchanged) still copies the final index; the 1-D Ck==1 path
+        # emits no fold. See docs/design/streamk-wg-clusters.md.
         _, ck2d, _, is2d = streamKClusterFactors(kernel)
         if is2d:
             module.add(SMulI32(dst=sgpr("WorkGroup0"), src0=sgpr("WorkGroup0"), src1=hex(ck2d),

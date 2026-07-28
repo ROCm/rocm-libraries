@@ -376,9 +376,9 @@ def streamKClusterFactors(d):
     index folds the cluster Y rank in (StreamKIdx = WorkGroup0*Ck + WorkGroup1).
 
     Config expressions:
-      * [C, 1] -> Cs=C, Ck=1  : pure multicast   (1-D launch, byte-identical)
+      * [C, 1] -> Cs=C, Ck=1  : pure multicast   (1-D launch)
       * [1, C] -> Cs=1, Ck=C  : pure reduction    (2-D launch)
-      * [Cs,Ck]-> both > 1     : factored          (2-D launch; factored branch only)
+      * [Cs,Ck]-> both > 1     : factored          (2-D launch; not supported)
 
     ``d`` may be a kernel or a solution ``state`` dict; both expose "ClusterDim".
     See docs/design/streamk-wg-clusters.md.

@@ -295,7 +295,7 @@ class TestReductionValidation:
 
     def test_reject_non_reduction_shape_cluster(self):
         # Pure reduction requires [1, C]; a factored [Cs,Ck] with Cs>1 (here
-        # [2,2]) is not supported on this branch and is rejected.
+        # [2,2]) is not supported and is rejected.
         assert self._validate(self._state(ClusterDim=[2, 2])) is False
         # Pure multicast [C,1] is not a reduction shape either.
         assert self._validate(self._state(ClusterDim=[4, 1])) is False

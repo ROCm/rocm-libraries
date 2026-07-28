@@ -129,16 +129,11 @@ class TestValidation:
             # cluster-scope barrier handshake, so ClusterBarrier is derived on.
             assert st["ClusterBarrier"] is True, st.get("ClusterBarrier")
 
-    # NB: test_auto_enable_from_bare_cluster was removed as a strict subset of
-    # test_multicast_tristate.py::TestDerivation::test_streamk_cluster_auto_multicast,
-    # which derives the same bare SK3 + ClusterDim config and asserts the same
-    # StreamKMulticast==1 / Multicast==1 (plus ClusterBarrier is True).
-
     def test_reduction_shape_keeps_cooperative_loads_off(self, tmp_path):
         """Param-free derivation: expressing the cluster as ClusterDim = [1, C]
         (pure reduction) derives StreamKClusterReduction=1 and leaves the spatial
         cooperative-load multicast off (StreamKMulticast=0, Multicast False),
-        since Cs = ClusterDim[0] = 1. Reduction is no longer a user param."""
+        since Cs = ClusterDim[0] = 1. Reduction is derived from ClusterDim[1] (Ck)."""
         from Tensile import LibraryIO
         import yaml
         cfg = copy.deepcopy(LibraryIO.read(_STREAMK_CLUSTER_BARE))
@@ -164,9 +159,9 @@ class TestValidation:
     def test_xor_streamk_cluster_reduction(self):
         """The mutual-exclusion invariant is enforced at the validator: a state
         that has BOTH StreamKMulticast (Cs>1) and StreamKClusterReduction (Ck>1)
-        is the FACTORED cluster [Cs,Ck], which lives on the factored-cluster-mode
-        branch and is rejected in the SK cluster guard on this branch. The
-        validator keeps the xor as a hard defensive invariant regardless."""
+        is the FACTORED cluster [Cs,Ck], which is not supported and is rejected
+        in the SK cluster guard. The validator keeps the xor as a hard defensive
+        invariant regardless."""
         from Tensile.SolutionStructs.Solution import _validateStreamKMulticast
         st = {
             "StreamKMulticast": 1,
@@ -192,12 +187,6 @@ class TestValidation:
         cfg = _write_variant(tmp_path, "mc_off.yaml",
                              fork_overrides={"Multicast": [0]})
         assert _derive_states(cfg) == []
-
-    # NB: test_control_multicast_auto_enabled was removed as a subset of
-    # test_accepted_baseline above, which derives the same SK3 [4,1] cluster
-    # config with the default Multicast=-1 (auto) and already asserts
-    # StreamKMulticast==1 / Multicast==1 (plus ClusterDim/ClusterBarrier). The
-    # negative-path partner test_reject_multicast_force_off is retained.
 
     def test_reject_atomic(self, tmp_path):
         cfg = _write_variant(tmp_path, "atomic.yaml",
