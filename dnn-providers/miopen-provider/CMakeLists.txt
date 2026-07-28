@@ -178,7 +178,7 @@ endif()
 # the MIOpen build) MIOpen ships a private implementation library MIOpen_private
 # that exports the internal C API under _impl names. The provider links it directly
 # and, via the force-included MiopenApiPrivateRename.hpp (below), its public C API
-# calls are renamed to those _impl entry points (RFC 0001 §4.5) — linking the public
+# calls are renamed to those _impl entry points — linking the public
 # wrapper would fail to load, since libMIOpen.so exports only the public names. We
 # detect that build by the presence of the MIOpen_private target.
 #

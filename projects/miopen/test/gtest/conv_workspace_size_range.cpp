@@ -20,8 +20,8 @@
 #include <hip/hip_runtime_api.h>
 
 // With the public/private split enabled (MIOPEN_ENABLE_HIPDNN_WRAPPER=ON) these
-// three entry points are exported from libMIOpen_private.so under _impl names
-// (ALMIOPEN-2246). Rename the local prototypes and call sites to match, mirroring
+// three entry points are exported from libMIOpen_private.so under _impl names.
+// Rename the local prototypes and call sites to match, mirroring
 // src/private/miopen_private_rename.h. With the split OFF they keep their public
 // names and resolve from libMIOpen.so exactly as before.
 #ifdef MIOPEN_ENABLE_HIPDNN_WRAPPER
