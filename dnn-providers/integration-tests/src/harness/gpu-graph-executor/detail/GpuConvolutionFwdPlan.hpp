@@ -114,7 +114,14 @@ public:
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->w_tensor_uid(), WDataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->y_tensor_uid(), OutputDataTypeEnum);
 
-        return true;
+        // Reject if any operand is runtime pass-by-value; the conv fwd plan
+        // cannot resolve a PBV host scalar. ConvolutionFwd has no scalar
+        // operand today, but scan all three tensors so the guard holds if the
+        // schema ever adds one.
+        return !anyOperandIsRuntimePassByValue(tensorMap,
+                                               {nodeAttributes->x_tensor_uid(),
+                                                nodeAttributes->w_tensor_uid(),
+                                                nodeAttributes->y_tensor_uid()});
     }
 
     std::unique_ptr<IGpuGraphNodePlanExecutor>
