@@ -24,6 +24,7 @@ v1 scope matches Old-TE gemm/batched_contraction argparse: dtype {fp16,bf16,fp32
 
 import concurrent.futures
 import ctypes
+import functools
 import itertools
 import json
 import logging
@@ -52,6 +53,57 @@ _CTYPES_LIB_SRC = (
     Path(__file__).parent.parent / "bindings" / "ctypes" / "batched_contraction_ctypes_lib.cpp"
 )
 _HIPCC = os.environ.get("CK_TILE_HIPCC", "/opt/rocm/bin/hipcc")
+
+# ---------------------------------------------------------------------------
+# Tile Engine codegen flags -- must match exactly what Old-TE CMake applies to
+# its GEMM/contraction benchmarks so the bridge .so produces the same machine
+# code (inlining, register allocation, occupancy).  These are the same flags
+# used by the sibling gemm_utils._tile_engine_codegen_flags(), kept inline here
+# so batched_contraction_utils stays self-contained.
+# ---------------------------------------------------------------------------
+_TILE_ENGINE_CODEGEN_FLAGS = (
+    "-mllvm", "--lsr-drop-solution=1",
+    "-mllvm", "-enable-post-misched=0",
+    "-mllvm", "-amdgpu-early-inline-all=true",
+    "-mllvm", "-amdgpu-function-calls=false",
+    "-fno-offload-uniform-block",
+)
+
+# Flags TE's CMake only adds when ``check_cxx_compiler_flag`` passes (newer
+# -mllvm options that some clang builds reject).
+_PROBED_CODEGEN_FLAGS = (
+    ("-mllvm", "-amdgpu-coerce-illegal-types=1"),
+)
+
+
+@functools.lru_cache(maxsize=None)
+def _hipcc_accepts(flag_tuple: Tuple[str, ...]) -> bool:
+    """Mirror CMake check_cxx_compiler_flag: does hipcc compile a trivial TU
+    with these flags?  Cached so the probe runs at most once per flag set."""
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            src = Path(d) / "probe.cpp"
+            src.write_text("int main(){}\n")
+            r = subprocess.run(
+                [_HIPCC, *flag_tuple, "-c", str(src), "-o", str(Path(d) / "probe.o")],
+                capture_output=True, timeout=120,
+            )
+            return r.returncode == 0
+    except Exception:
+        return False
+
+
+@functools.lru_cache(maxsize=1)
+def _tile_engine_codegen_flags() -> Tuple[str, ...]:
+    """TE's GEMM/contraction codegen flags plus any probe-gated flags the
+    compiler accepts -- the exact backend flag set the TE benchmark is built
+    with."""
+    flags = list(_TILE_ENGINE_CODEGEN_FLAGS)
+    for pair in _PROBED_CODEGEN_FLAGS:
+        if _hipcc_accepts(pair):
+            flags = list(pair) + flags
+    return tuple(flags)
+
 
 _SUPPORTED_ARCHS = ("gfx90a", "gfx942", "gfx950")
 
@@ -484,6 +536,11 @@ def _compile_kernel(hpp: Path, so: Path, arch: str) -> bool:
         f"-I{ck_root}/include", f"-I{ck_root}",
         "-DCK_TILE_SINGLE_KERNEL_INCLUDE", f"-include{hpp}",
         "-D__HIP_PLATFORM_AMD__", f"--offload-arch={arch}", f'-DGFX_ARCH="{arch}"',
+        # Match Tile Engine's AMDGPU codegen flags exactly so the bridge .so
+        # produces the same machine code as Old-TE (inlining, register
+        # allocation, occupancy).  Without these, persistent kernels size their
+        # grid differently and perf gaps appear.
+        *_tile_engine_codegen_flags(),
         "-Wno-undefined-func-template", "-Wno-float-equal",
         str(_CTYPES_LIB_SRC), "-o", str(obj),
     ]
