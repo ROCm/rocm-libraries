@@ -765,7 +765,12 @@ class TestTemplateOutputContent:
             / sdpa_config.test_integration_lifting_filename
         ).read_text()
 
-        for content in (attributes_content, graph_content, lowering_content, lifting_content):
+        for content in (
+            attributes_content,
+            graph_content,
+            lowering_content,
+            lifting_content,
+        ):
             assert "dropout_probability = " in content
             assert "dropout_probability(" not in content
             assert "diagonal_alignment = " in content
@@ -780,7 +785,10 @@ class TestTemplateOutputContent:
         generator.render(pointwise_config, output_dir, "frontend")
 
         content = (
-            output_dir / "frontend" / "tests" / pointwise_config.test_attributes_filename
+            output_dir
+            / "frontend"
+            / "tests"
+            / pointwise_config.test_attributes_filename
         ).read_text()
         assert "EXPECT_FALSE(attrs.get_relu_lower_clip().has_value());" in content
         assert "EXPECT_FALSE(attrs.get_axis().has_value());" in content

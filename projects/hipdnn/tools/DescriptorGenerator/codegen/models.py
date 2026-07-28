@@ -1031,7 +1031,11 @@ class OperationConfig:
     @property
     def graph_verifiable_data_fields(self) -> list[DataField]:
         """Data fields included in verify<Op>Node helpers."""
-        return [f for f in self.data_fields if f.is_vector or f.is_mode or f.is_enum or f.is_scalar]
+        return [
+            f
+            for f in self.data_fields
+            if f.is_vector or f.is_mode or f.is_enum or f.is_scalar
+        ]
 
     @property
     def has_tensor_array_fields(self) -> bool:
