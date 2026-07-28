@@ -201,7 +201,7 @@ block_z = b.block_id_z()
 `helpers/geometry.py::WarpGrid` packages this for matrix kernels. Its
 `from_atom` constructor can obtain the required wave size from the selected
 operation. `WarpGrid` also exposes the historically named
-`mfmas_per_warp_m / n`, `k_atoms_per_tile_k`, and per-CTA
+`mfmas_per_warp_m / n`, `k_atoms_per_tile_k`, and per-workgroup
 `block_m_off / block_n_off` values for both supported matrix paths.
 
 Grid conventions in shipped instances:
@@ -211,7 +211,7 @@ GEMM:                 (ceil(N/tile_n), ceil(M/tile_m), batch?)
 implicit-GEMM conv:   (ceil(K_out/tile_n), ceil(M/tile_m), 1)
 direct 16c conv:      (ceil(W/block_q), groups/block_groups, N)
 direct 4c conv:       groups packed across wave lanes/batches
-reduce / norm:        one CTA per row
+reduce / norm:        one workgroup per row
 elementwise:          1D grid over contiguous elements
 attention 3D tiled:   (q_blocks, kv_heads, split_kv_segments)
 ```
