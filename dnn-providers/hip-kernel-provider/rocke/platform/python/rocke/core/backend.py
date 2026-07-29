@@ -251,9 +251,9 @@ def _lower_via_cpp_engine(
     # contract is backend-INDEPENDENT: backend="cpp" must reject a bad flavor with
     # the same ValueError as backend="python"/"both", not the engine's RuntimeError
     # (which only surfaces once the rocke_engine .so is on the path).
-    from .lower_llvm import LLVM_FLAVOR_LLVM20, LLVM_FLAVOR_LLVM22
+    from .lower_llvm import LLVM_FLAVORS
 
-    if flavor not in (LLVM_FLAVOR_LLVM20, LLVM_FLAVOR_LLVM22):
+    if flavor not in LLVM_FLAVORS:
         raise ValueError(f"unknown LLVM flavor {flavor!r}")
     try:
         return engine.lower_serialized_ir(ir_text, arch=arch, flavor=flavor or "")

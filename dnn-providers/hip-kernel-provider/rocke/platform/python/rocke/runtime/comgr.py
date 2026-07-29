@@ -215,57 +215,48 @@ def prefer_bundled_lib() -> Optional[Tuple[int, int]]:
     return resolved_lib_rocm_version()
 
 
-def _ir_flavor_from_datalayout(ir_text: str) -> Optional[str]:
-    """Infer coarse LLVM flavor from the module ``target datalayout`` p8 field.
-
-    Returns ``LLVM_FLAVOR_LLVM20`` for the legacy ``p8:128:128`` form,
-    ``"modern"`` for the LLVM 21+ ``p8:128:128:128:48`` form (shared by
-    llvm22 and llvm23 -- indistinguishable from datalayout alone), or
-    ``None`` when no recognisable datalayout is present. Kept here (not
-    imported from ``core.lower_llvm``) to avoid a runtime->core import cycle
-    at module load; mirrors :data:`_DATALAYOUT_LLVM20` /
-    :data:`_DATALAYOUT_LLVM22` / :data:`_DATALAYOUT_LLVM23`.
-    """
-    if "p8:128:128:128:48" in ir_text:
-        return "modern"
-    if "p8:128:128-" in ir_text:
-        return "llvm20"
-    return None
-
-
 def _assert_ir_flavor_matches_lib(ir_text: str) -> None:
     """Refuse to feed comgr an IR whose LLVM flavor mismatches the loaded comgr.
 
-    Modern IR (llvm22 / llvm23) on a pre-7.2 comgr SIGABRTs deep in codegen
+    LLVM 21+ IR (llvm22 / llvm23) on a pre-7.2 comgr SIGABRTs deep in codegen
     (the ``make.buffer.rsrc.p8.p1`` i64-stride form only the >=7.2 backend
-    selects); legacy llvm20 IR on a modern comgr errors the other way. This
+    selects); legacy llvm20 IR on a newer comgr errors the other way. This
     guard turns that into a clear, catchable :class:`ComgrError` naming the
-    fix. No-op when either side is unknown -- we never block compilation on
-    uncertainty.
-    """
-    ir_coarse = _ir_flavor_from_datalayout(ir_text)
-    if ir_coarse is None:
-        return
-    ver = resolved_lib_rocm_version()
-    if ver is None:
-        return
-    try:
-        from ..core.lower_llvm import _flavor_for_rocm
+    fix.
 
+    The comparison is on datalayout *generation*
+    (:class:`~rocke.core.lower_llvm.LlvmDatalayoutKind`), not on a flavor: the
+    module's ``p8`` field cannot distinguish llvm22 from llvm23, and only the
+    generation is what codegen actually aborts over. No-op when either side is
+    unknown -- we never block compilation on uncertainty. ``core.lower_llvm``
+    is imported lazily to keep the runtime->core cycle broken at module load.
+    """
+    try:
+        from ..core.lower_llvm import (
+            _datalayout_kind_for_flavor,
+            _datalayout_kind_from_ir,
+            _flavor_for_rocm,
+        )
+
+        ir_kind = _datalayout_kind_from_ir(ir_text)
+        if ir_kind is None:
+            return
+        ver = resolved_lib_rocm_version()
+        if ver is None:
+            return
         lib_flavor = _flavor_for_rocm(*ver)
+        lib_kind = _datalayout_kind_for_flavor(lib_flavor)
     except Exception:
         return
-    ir_modern = ir_coarse == "modern"
-    lib_modern = lib_flavor != "llvm20"
-    if ir_modern == lib_modern:
+    if lib_kind is None or lib_kind is ir_kind:
         return
     raise ComgrError(
         "LLVM IR flavor / comgr vintage mismatch: IR datalayout is "
-        f"{'modern (llvm22/llvm23)' if ir_modern else 'llvm20'} but the "
-        f"loaded comgr is ROCm {ver[0]}.{ver[1]} ({lib_flavor}) at "
+        f"{ir_kind.describe()} but the loaded comgr is ROCm "
+        f"{ver[0]}.{ver[1]} ({lib_flavor}, {lib_kind.describe()}) at "
         f"{resolved_lib_path()!r}. Import torch before lowering so both pick "
         "the same vintage, or set ROCKE_LLVM_FLAVOR to match the comgr lib. "
-        "(Modern IR on a <7.2 comgr aborts in codegen; this guard turns that "
+        "(LLVM 21+ IR on a <7.2 comgr aborts in codegen; this guard turns that "
         "abort into a clean error.)"
     )
 

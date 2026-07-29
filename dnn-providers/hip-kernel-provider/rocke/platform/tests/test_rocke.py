@@ -685,56 +685,6 @@ class TestHelpers(unittest.TestCase):
         # The conversion uses a zext-to-i32 + lane-0 intrinsic call.
         self.assertIn("zext i8", ll)
 
-    def test_future_intrinsic_lowering(self):
-        """New cross-lane / async / reduction intrinsics lower with declares."""
-        from rocke.core.ir import (
-            F32,
-            IRBuilder,
-            PtrType,
-        )
-
-        b = IRBuilder("future_intrinsics_smoke")
-        out_p = b.param("out", PtrType(F32, "global"), align=4)
-        tid = b.thread_id_x()
-        x = b.const_f32(1.0)
-        xi = b.const_i32(1)
-        # Reduction + DPP + swizzle relayout
-        rmax = b.wave_reduce(x, "fmax")
-        _radd = b.wave_reduce(xi, "add")
-        _dpp8 = b.mov_dpp8(xi, 0x765432)
-        _sw = b.ds_swizzle_xor(xi, 1)
-        _sw2 = b.ds_swizzle(xi, 0x041F)
-        # Lane ops + permute
-        _rl = b.readlane(xi, b.const_i32(0))
-        _wl = b.writelane(xi, b.const_i32(0), xi)
-        _pl = b.permlane64(xi)
-        _ab = b.alignbyte(xi, xi, b.const_i32(8))
-        _wqm = b.s_wqm(xi)
-        lo, hi = b.permlane32_swap(xi, xi)
-        # Async markers
-        b.asyncmark()
-        b.wait_asyncmark(0)
-        # Store results (use lo to keep SSA live)
-        b.global_store(out_p, tid, rmax, align=4)
-        _ = lo, hi
-        b.ret()
-        ll = lower_kernel_to_llvm(b.kernel)
-        for needle in (
-            "@llvm.amdgcn.wave.reduce.fmax.f32",
-            "@llvm.amdgcn.wave.reduce.add.i32",
-            "@llvm.amdgcn.mov.dpp8.i32",
-            "@llvm.amdgcn.ds.swizzle",
-            "@llvm.amdgcn.readlane.i32",
-            "@llvm.amdgcn.writelane.i32",
-            "@llvm.amdgcn.permlane64",
-            "@llvm.amdgcn.alignbyte",
-            "@llvm.amdgcn.s.wqm.i32",
-            "@llvm.amdgcn.asyncmark",
-            "@llvm.amdgcn.wait.asyncmark",
-            "@llvm.amdgcn.permlane32.swap",
-        ):
-            self.assertIn(needle, ll)
-
 
 # ---------------------------------------------------------------------
 # Instances (end-to-end build smoke)
@@ -1449,6 +1399,239 @@ class TestLlvmFlavorPolymorphism(unittest.TestCase):
             lower_kernel_to_llvm(
                 self._buffer_rsrc_kernel(), llvm_flavor="not-a-real-flavor"
             )
+
+
+class TestLlvmFlavorEnumeration(unittest.TestCase):
+    """The flavor set is enumerated once and every check goes through it.
+
+    Flavors used to be re-listed by hand at each membership test, which is how
+    ``llvm23`` ended up accepted by the Python lowerer but rejected by the C++
+    backend path. These tests pin the single enumeration
+    (:data:`LLVM_FLAVORS`), its partition into datalayout generations, and the
+    version-ladder policy, so adding a flavor cannot half-land again.
+    """
+
+    def test_datalayout_kinds_partition_every_flavor(self):
+        """Every flavor belongs to exactly one datalayout generation."""
+        from rocke.core.lower_llvm import (
+            LLVM_FLAVORS,
+            LlvmDatalayoutKind,
+            _DATALAYOUT_KIND_FLAVORS,
+            _datalayout_kind_for_flavor,
+        )
+
+        # Exhaustive over the enum: a new member without a mapping fails here
+        # (the check a language-level ``match`` would do statically).
+        self.assertEqual(
+            set(_DATALAYOUT_KIND_FLAVORS), set(LlvmDatalayoutKind), "kind coverage"
+        )
+        # ...and exhaustive over the flavors, with no flavor in two kinds.
+        buckets = list(_DATALAYOUT_KIND_FLAVORS.values())
+        union = frozenset().union(*buckets)
+        self.assertEqual(union, frozenset(LLVM_FLAVORS), "flavor coverage")
+        self.assertEqual(
+            sum(len(b) for b in buckets), len(union), "flavor in multiple kinds"
+        )
+        for flavor in LLVM_FLAVORS:
+            self.assertIsNotNone(_datalayout_kind_for_flavor(flavor), flavor)
+        self.assertIsNone(_datalayout_kind_for_flavor("not-a-real-flavor"))
+
+    def test_datalayout_kind_markers_match_datalayouts(self):
+        """The p8 sniff markers must match what the flavors actually emit."""
+        from rocke.core.lower_llvm import (
+            LLVM_FLAVORS,
+            LlvmDatalayoutKind,
+            _datalayout_for_flavor,
+            _datalayout_kind_for_flavor,
+            _datalayout_kind_from_ir,
+        )
+
+        for flavor in LLVM_FLAVORS:
+            with self.subTest(flavor=flavor):
+                ir = f'target datalayout = "{_datalayout_for_flavor(flavor)}"'
+                self.assertIs(
+                    _datalayout_kind_from_ir(ir),
+                    _datalayout_kind_for_flavor(flavor),
+                    "sniffing a flavor's own datalayout must recover its generation",
+                )
+        # The indexed marker must not match the legacy layout: "p8:128:128" is a
+        # prefix of "p8:128:128:128:48", so ordering/anchoring matters.
+        legacy = f'target datalayout = "{_datalayout_for_flavor("llvm20")}"'
+        self.assertIs(_datalayout_kind_from_ir(legacy), LlvmDatalayoutKind.P8_PLAIN)
+        self.assertIsNone(_datalayout_kind_from_ir("define void @k() {}"))
+
+    def test_flavor_for_rocm_clamps_at_both_ends(self):
+        """Version mapping is clamped, never raising: newest above, oldest below."""
+        from rocke.core.lower_llvm import (
+            LLVM_FLAVOR_LLVM20,
+            LLVM_FLAVOR_LLVM22,
+            LLVM_FLAVOR_LLVM23,
+            LLVM_FLAVORS,
+            _flavor_for_rocm,
+        )
+
+        # Exact boundaries.
+        self.assertEqual(_flavor_for_rocm(7, 1), LLVM_FLAVOR_LLVM20)
+        self.assertEqual(_flavor_for_rocm(7, 2), LLVM_FLAVOR_LLVM22)
+        self.assertEqual(_flavor_for_rocm(7, 12), LLVM_FLAVOR_LLVM22)
+        self.assertEqual(_flavor_for_rocm(7, 13), LLVM_FLAVOR_LLVM23)
+        # Clamped: a ROCm newer than anything we know resolves to the newest
+        # flavor, and one older than every row to the oldest.
+        self.assertEqual(_flavor_for_rocm(99, 9), LLVM_FLAVORS[-1])
+        self.assertEqual(_flavor_for_rocm(0, 0), LLVM_FLAVORS[0])
+        self.assertEqual(_flavor_for_rocm(6, 4), LLVM_FLAVOR_LLVM20)
+        # Never raises, and always returns a member of the enumeration.
+        for major, minor in ((0, 0), (-1, 0), (5, 7), (7, 2), (12, 0)):
+            self.assertIn(_flavor_for_rocm(major, minor), LLVM_FLAVORS)
+
+    def test_is_modern_flavor_tracks_datalayout_kind(self):
+        """The mfma-packing predicate is derived from the generation table."""
+        from rocke.core.lower_llvm import (
+            LLVM_FLAVORS,
+            LlvmDatalayoutKind,
+            _datalayout_kind_for_flavor,
+            _is_modern_flavor,
+        )
+
+        for flavor in LLVM_FLAVORS:
+            with self.subTest(flavor=flavor):
+                self.assertEqual(
+                    _is_modern_flavor(flavor),
+                    _datalayout_kind_for_flavor(flavor)
+                    is LlvmDatalayoutKind.P8_INDEXED,
+                )
+        # An unrecognised flavor is not "modern" (it must not silently pick the
+        # i64 mfma operand packing).
+        self.assertFalse(_is_modern_flavor("not-a-real-flavor"))
+
+    def test_cpp_backend_path_accepts_every_known_flavor(self):
+        """Regression: the C++ backend rejected ``llvm23`` while Python took it.
+
+        ``_lower_via_cpp_engine`` validated against its own hand-written flavor
+        tuple, so a newly added flavor raised ``ValueError`` on backend="cpp"
+        even though the engine itself supported it.
+        """
+        from rocke.core import backend as backend_mod
+        from rocke.core.lower_llvm import LLVM_FLAVORS
+
+        engine = type(
+            "_FakeEngine",
+            (),
+            {"lower_serialized_ir": staticmethod(lambda *a, **k: "lowered")},
+        )()
+        orig = backend_mod._import_engine
+        backend_mod._import_engine = lambda: engine
+        try:
+            for flavor in LLVM_FLAVORS:
+                with self.subTest(flavor=flavor):
+                    self.assertEqual(
+                        backend_mod._lower_via_cpp_engine(
+                            "ir", arch="gfx950", llvm_flavor=flavor
+                        ),
+                        "lowered",
+                    )
+            with self.assertRaises(ValueError):
+                backend_mod._lower_via_cpp_engine(
+                    "ir", arch="gfx950", llvm_flavor="not-a-real-flavor"
+                )
+        finally:
+            backend_mod._import_engine = orig
+
+    def test_comgr_guard_compares_datalayout_generation_not_flavor(self):
+        """The comgr mismatch guard keys on generation, so llvm22/llvm23 mix.
+
+        A module's ``p8`` field cannot tell llvm22 from llvm23, and codegen only
+        aborts across the *generation* boundary. Comparing flavors instead would
+        false-positive on llvm22 IR fed to an llvm23 comgr.
+        """
+        from rocke.core.lower_llvm import _datalayout_for_flavor
+        from rocke.runtime import comgr as comgr_mod
+
+        def ir_for(flavor):
+            return f'target datalayout = "{_datalayout_for_flavor(flavor)}"\n'
+
+        orig_ver = comgr_mod.resolved_lib_rocm_version
+        orig_path = comgr_mod.resolved_lib_path
+        comgr_mod.resolved_lib_path = lambda: "/fake/libamd_comgr.so"
+        try:
+            # Same generation on both sides (including the llvm22-IR/llvm23-comgr
+            # cross pair) must pass.
+            for lib_ver, flavor in (
+                ((7, 0), "llvm20"),
+                ((7, 2), "llvm22"),
+                ((7, 13), "llvm23"),
+                ((7, 13), "llvm22"),
+                ((7, 2), "llvm23"),
+            ):
+                with self.subTest(lib=lib_ver, ir=flavor):
+                    comgr_mod.resolved_lib_rocm_version = lambda v=lib_ver: v
+                    comgr_mod._assert_ir_flavor_matches_lib(ir_for(flavor))
+            # Crossing the generation boundary must raise either way.
+            for lib_ver, flavor in (((7, 0), "llvm22"), ((7, 13), "llvm20")):
+                with self.subTest(lib=lib_ver, ir=flavor, expect="raise"):
+                    comgr_mod.resolved_lib_rocm_version = lambda v=lib_ver: v
+                    with self.assertRaises(comgr_mod.ComgrError) as cm:
+                        comgr_mod._assert_ir_flavor_matches_lib(ir_for(flavor))
+                    # The message must name both generations, not just "modern".
+                    self.assertIn("p8_", str(cm.exception))
+            # Unknown IR (no datalayout) never blocks compilation.
+            comgr_mod.resolved_lib_rocm_version = lambda: (7, 0)
+            comgr_mod._assert_ir_flavor_matches_lib("define void @k() {}")
+        finally:
+            comgr_mod.resolved_lib_rocm_version = orig_ver
+            comgr_mod.resolved_lib_path = orig_path
+
+    def test_no_hand_rolled_flavor_membership_lists(self):
+        """Flavor membership must go through :data:`LLVM_FLAVORS`.
+
+        A tuple/set literal naming two or more ``LLVM_FLAVOR_*`` constants is
+        the exact shape that drifted out of date; the enumeration exists so
+        such a list never needs writing again.
+        """
+        import ast
+        from pathlib import Path
+
+        import rocke
+
+        # The two definitions that are *supposed* to list flavors: the
+        # enumeration itself and its partition by datalayout generation.
+        allowed_targets = {"LLVM_FLAVORS", "_DATALAYOUT_KIND_FLAVORS"}
+        root = Path(rocke.__file__).parent
+        offenders = []
+        for path in sorted(root.rglob("*.py")):
+            tree = ast.parse(path.read_text())
+            allowed_spans = []
+            for node in ast.walk(tree):
+                if not isinstance(node, (ast.Assign, ast.AnnAssign)):
+                    continue
+                targets = (
+                    node.targets if isinstance(node, ast.Assign) else [node.target]
+                )
+                if {t.id for t in targets if isinstance(t, ast.Name)} & allowed_targets:
+                    allowed_spans.append((node.lineno, node.end_lineno or node.lineno))
+            # A tuple/set/list literal naming 2+ flavor constants. Using the AST
+            # (not a regex) keeps prose in docstrings from tripping this.
+            for node in ast.walk(tree):
+                if not isinstance(node, (ast.Tuple, ast.Set, ast.List)):
+                    continue
+                named = [
+                    e.id
+                    for e in node.elts
+                    if isinstance(e, ast.Name) and e.id.startswith("LLVM_FLAVOR_")
+                ]
+                if len(named) < 2:
+                    continue
+                if any(lo <= node.lineno <= hi for lo, hi in allowed_spans):
+                    continue
+                offenders.append(
+                    f"{path.relative_to(root)}:{node.lineno}: {', '.join(named)}"
+                )
+        self.assertEqual(
+            offenders,
+            [],
+            "use LLVM_FLAVORS (or the datalayout-kind table) instead of "
+            "re-listing flavors:\n  " + "\n  ".join(offenders),
+        )
 
 
 class TestTransformsBridge(unittest.TestCase):
@@ -2528,6 +2711,397 @@ class TestCdnaPrimitives(unittest.TestCase):
         )
         with self.assertRaisesRegex(ValueError, "unsupported bf16 warp_tile"):
             build_universal_gemm(spec)
+
+
+class TestNewTargetIntrinsics(unittest.TestCase):
+    """One case per intrinsic added for the LLVM 23 / future-operator surface.
+
+    Each test emits exactly one intrinsic from the smallest possible kernel and
+    pins the full ``declare`` plus call-site text. Asserting the whole call --
+    operand order, types, and immediate encoding -- is what catches a signature
+    regression; merely asserting the mangled name appears somewhere in the
+    module cannot tell a correct call from a malformed one, and gives no signal
+    about which intrinsic broke.
+    """
+
+    def _builder(self, name):
+        from rocke.core.ir import IRBuilder
+
+        b = IRBuilder(name)
+        b.kernel.attrs["max_workgroup_size"] = 64
+        return b
+
+    def _lower(self, name, build, **kw):
+        """Build a single-intrinsic kernel and return its lowered LLVM IR."""
+        from rocke.core.lower_llvm import lower_kernel_to_llvm
+
+        b = self._builder(name)
+        build(b)
+        return lower_kernel_to_llvm(b.kernel, **kw)
+
+    # ---- ds_swizzle (raw offset + XOR-butterfly encoding) ----
+    def test_ds_swizzle_passes_raw_offset_immediate(self):
+        ll = self._lower("dssw", lambda b: b.ds_swizzle(b.const_i32(1), 0x041F))
+        self.assertIn("declare i32 @llvm.amdgcn.ds.swizzle(i32, i32 immarg)", ll)
+        # The raw immediate reaches the call verbatim (0x041F == 1055).
+        self.assertIn("call i32 @llvm.amdgcn.ds.swizzle(i32 1, i32 1055)", ll)
+
+    def test_ds_swizzle_xor_encodes_swap_mode_offset(self):
+        # offset = (xor_mask << 10) | 0x1F -> (2 << 10) | 31 == 2079 (0x081F).
+        ll = self._lower("dsswx", lambda b: b.ds_swizzle_xor(b.const_i32(1), 2))
+        self.assertIn("call i32 @llvm.amdgcn.ds.swizzle(i32 1, i32 2079)", ll)
+        # Regression: the handler used to request a decl key ("ds.swizzle") that
+        # does not exist, so the declare was silently omitted.
+        self.assertIn("declare i32 @llvm.amdgcn.ds.swizzle(i32, i32 immarg)", ll)
+
+    # ---- mov_dpp8 ----
+    def test_mov_dpp8_i32_emits_typed_intrinsic(self):
+        ll = self._lower("dpp8i", lambda b: b.mov_dpp8(b.const_i32(1), 0x765432))
+        self.assertIn("declare i32 @llvm.amdgcn.mov.dpp8.i32(i32, i32 immarg)", ll)
+        # 0x765432 == 7754802, passed through as the 24-bit lane-select imm.
+        self.assertIn("call i32 @llvm.amdgcn.mov.dpp8.i32(i32 1, i32 7754802)", ll)
+
+    def test_mov_dpp8_f32_emits_typed_intrinsic(self):
+        ll = self._lower("dpp8f", lambda b: b.mov_dpp8(b.const_f32(1.0), 0x765432))
+        self.assertIn("declare float @llvm.amdgcn.mov.dpp8.f32(float, i32 immarg)", ll)
+        self.assertIn("call float @llvm.amdgcn.mov.dpp8.f32(float", ll)
+
+    def test_mov_dpp8_both_types_coexist_in_one_module(self):
+        """i32 and f32 mov_dpp8 must not collide on one overloaded symbol.
+
+        Both used to declare bare ``@llvm.amdgcn.mov.dpp8``, so a kernel using
+        each type emitted two conflicting declares for the same name.
+        """
+
+        def build(b):
+            b.mov_dpp8(b.const_i32(1), 0x11)
+            b.mov_dpp8(b.const_f32(1.0), 0x11)
+
+        ll = self._lower("dpp8_both", build)
+        self.assertIn("declare i32 @llvm.amdgcn.mov.dpp8.i32(", ll)
+        self.assertIn("declare float @llvm.amdgcn.mov.dpp8.f32(", ll)
+        # No bare (untyped) declare, which is what caused the duplicate symbol.
+        self.assertNotIn("@llvm.amdgcn.mov.dpp8(", ll)
+
+    def test_mov_dpp8_rejects_oversized_sel_and_bad_type(self):
+        b = self._builder("dpp8_bad")
+        with self.assertRaises(ValueError):
+            b.mov_dpp8(b.const_i32(1), 0x1000000)  # 25 bits
+        with self.assertRaises(ValueError):
+            b.mov_dpp8(b.const_i64(1), 0x11)
+
+    # ---- wave_reduce ----
+    def test_wave_reduce_emits_typed_reduction_per_op(self):
+        for reduce_op, ty in (
+            ("fmax", "float"),
+            ("fadd", "float"),
+            ("add", "i32"),
+            ("max", "i32"),
+            ("min", "i32"),
+        ):
+            with self.subTest(reduce_op=reduce_op):
+                suffix = "f32" if ty == "float" else "i32"
+
+                def build(b, reduce_op=reduce_op, suffix=suffix):
+                    v = b.const_f32(1.0) if suffix == "f32" else b.const_i32(1)
+                    b.wave_reduce(v, reduce_op)
+
+                ll = self._lower(f"wred_{reduce_op}", build)
+                name = f"@llvm.amdgcn.wave.reduce.{reduce_op}.{suffix}"
+                self.assertIn(f"declare {ty} {name}({ty}, i32 immarg)", ll)
+                # Trailing i32 is the strategy immediate (0 == default).
+                self.assertIn(f"call {ty} {name}({ty}", ll)
+                self.assertIn(", i32 0)", ll)
+
+    def test_wave_reduce_propagates_strategy_immediate(self):
+        ll = self._lower(
+            "wred_strat",
+            lambda b: b.wave_reduce(b.const_f32(1.0), "fmax", strategy=2),
+        )
+        self.assertIn("@llvm.amdgcn.wave.reduce.fmax.f32(float", ll)
+        self.assertIn(", i32 2)", ll)
+
+    def test_wave_reduce_rejects_op_type_mismatch(self):
+        b = self._builder("wred_bad")
+        with self.assertRaises(ValueError):
+            b.wave_reduce(b.const_f32(1.0), "add")  # integer op on f32
+        with self.assertRaises(ValueError):
+            b.wave_reduce(b.const_i32(1), "fmax")  # float op on i32
+
+    # ---- readlane / writelane ----
+    def test_readlane_emits_typed_call_with_i32_lane(self):
+        for suffix, ty, mk in (
+            ("i32", "i32", "const_i32"),
+            ("f32", "float", "const_f32"),
+        ):
+            with self.subTest(suffix=suffix):
+                ll = self._lower(
+                    f"rlane_{suffix}",
+                    lambda b, mk=mk: b.readlane(getattr(b, mk)(1), b.const_i32(0)),
+                )
+                name = f"@llvm.amdgcn.readlane.{suffix}"
+                self.assertIn(f"declare {ty} {name}({ty}, i32)", ll)
+                self.assertIn(f"call {ty} {name}({ty}", ll)
+
+    def test_writelane_emits_value_lane_passthrough_order(self):
+        ll = self._lower(
+            "wlane",
+            lambda b: b.writelane(b.const_i32(7), b.const_i32(0), b.const_i32(9)),
+        )
+        self.assertIn("declare i32 @llvm.amdgcn.writelane.i32(i32, i32, i32)", ll)
+        # Operand order is (uniform_val, lane, passthrough).
+        self.assertIn("call i32 @llvm.amdgcn.writelane.i32(i32 7, i32 0, i32 9)", ll)
+
+    def test_lane_ops_reject_non_i32_lane_index(self):
+        b = self._builder("lane_bad")
+        with self.assertRaises(ValueError):
+            b.readlane(b.const_i32(1), b.const_i64(0))
+        with self.assertRaises(ValueError):
+            b.writelane(b.const_i32(1), b.const_i64(0), b.const_i32(1))
+        with self.assertRaises(ValueError):
+            # passthrough type must match the uniform value's type
+            b.writelane(b.const_i32(1), b.const_i32(0), b.const_f32(1.0))
+
+    # ---- permlane16 / permlane64 / permlane32_swap ----
+    def test_permlane16_emits_four_sources_and_bool_flags(self):
+        ll = self._lower(
+            "pl16",
+            lambda b: b.permlane16(*[b.const_i32(i) for i in range(4)]),
+        )
+        self.assertIn(
+            "declare i32 @llvm.amdgcn.permlane16"
+            "(i32, i32, i32, i32, i1 immarg, i1 immarg)",
+            ll,
+        )
+        self.assertIn(
+            "call i32 @llvm.amdgcn.permlane16"
+            "(i32 0, i32 1, i32 2, i32 3, i1 false, i1 false)",
+            ll,
+        )
+
+    def test_permlane16_propagates_fi_and_bound_ctrl(self):
+        ll = self._lower(
+            "pl16_flags",
+            lambda b: b.permlane16(
+                *[b.const_i32(i) for i in range(4)], fi=True, bound_ctrl=True
+            ),
+        )
+        self.assertIn(
+            "call i32 @llvm.amdgcn.permlane16"
+            "(i32 0, i32 1, i32 2, i32 3, i1 true, i1 true)",
+            ll,
+        )
+
+    def test_permlane64_emits_single_operand_call(self):
+        ll = self._lower("pl64", lambda b: b.permlane64(b.const_i32(1)))
+        self.assertIn("declare i32 @llvm.amdgcn.permlane64(i32)", ll)
+        self.assertIn("call i32 @llvm.amdgcn.permlane64(i32 1)", ll)
+
+    def test_permlane32_swap_unpacks_struct_result(self):
+        ll = self._lower(
+            "psw", lambda b: b.permlane32_swap(b.const_i32(1), b.const_i32(2))
+        )
+        # Regression: the handler used to request a decl key without the
+        # "amdgcn." prefix, so this declare went missing.
+        self.assertIn(
+            "declare { i32, i32 } @llvm.amdgcn.permlane32.swap(i32, i32, i1, i1)",
+            ll,
+        )
+        self.assertIn(
+            "call { i32, i32 } @llvm.amdgcn.permlane32.swap"
+            "(i32 1, i32 2, i1 false, i1 false)",
+            ll,
+        )
+        # Both halves are extracted from the returned struct.
+        self.assertIn("extractvalue { i32, i32 }", ll)
+        self.assertEqual(ll.count("extractvalue { i32, i32 }"), 2)
+
+    # ---- alignbyte / s_wqm ----
+    def test_alignbyte_emits_three_operand_call(self):
+        ll = self._lower(
+            "algn",
+            lambda b: b.alignbyte(b.const_i32(1), b.const_i32(2), b.const_i32(8)),
+        )
+        self.assertIn("declare i32 @llvm.amdgcn.alignbyte(i32, i32, i32)", ll)
+        self.assertIn("call i32 @llvm.amdgcn.alignbyte(i32 1, i32 2, i32 8)", ll)
+
+    def test_s_wqm_emits_width_matched_intrinsic(self):
+        for suffix, ty, mk in (
+            ("i32", "i32", "const_i32"),
+            ("i64", "i64", "const_i64"),
+        ):
+            with self.subTest(suffix=suffix):
+                ll = self._lower(
+                    f"wqm_{suffix}",
+                    lambda b, mk=mk: b.s_wqm(getattr(b, mk)(0xF)),
+                )
+                self.assertIn(f"declare {ty} @llvm.amdgcn.s.wqm.{suffix}({ty})", ll)
+                self.assertIn(f"call {ty} @llvm.amdgcn.s.wqm.{suffix}({ty} 15)", ll)
+
+    def test_s_wqm_rejects_narrow_mask(self):
+        b = self._builder("wqm_bad")
+        with self.assertRaises(ValueError):
+            b.s_wqm(b.const_f32(1.0))
+
+    # ---- av.load / av.store (agent-scope 128-bit vector mem) ----
+    def test_av_load_b128_emits_agent_scope_metadata(self):
+        from rocke.core.ir import I32, PtrType
+
+        def build(b):
+            p = b.param("p", PtrType(I32, "global"), align=16)
+            b.av_load_b128(p)
+
+        ll = self._lower("avld", build)
+        self.assertIn("declare <4 x i32> @llvm.amdgcn.av.load.b128(ptr, metadata)", ll)
+        self.assertIn(
+            "call <4 x i32> @llvm.amdgcn.av.load.b128(ptr %p, metadata !3)", ll
+        )
+        # The scope operand must be backed by a real metadata node.
+        self.assertIn('!3 = !{!"agent"}', ll)
+
+    def test_av_store_b128_emits_agent_scope_metadata(self):
+        from rocke.core.ir import I32, PtrType
+
+        def build(b):
+            p = b.param("p", PtrType(I32, "global"), align=16)
+            b.av_store_b128(p, b.av_load_b128(p))
+
+        ll = self._lower("avst", build)
+        self.assertIn(
+            "declare void @llvm.amdgcn.av.store.b128(ptr, <4 x i32>, metadata)", ll
+        )
+        self.assertIn("call void @llvm.amdgcn.av.store.b128(ptr %p, <4 x i32>", ll)
+        self.assertIn("metadata !3)", ll)
+        self.assertIn('!3 = !{!"agent"}', ll)
+
+    def test_av_store_b128_requires_v4i32_data(self):
+        from rocke.core.ir import I32, PtrType
+
+        b = self._builder("avst_bad")
+        p = b.param("p", PtrType(I32, "global"), align=16)
+        # Right vector length, wrong element type: the ABI expects <4 x i32>.
+        with self.assertRaises(ValueError):
+            b.av_store_b128(p, b.zero_vec_f32(4))
+        with self.assertRaises(ValueError):
+            b.av_store_b128(p, b.const_i32(0))
+
+    # ---- s_alloc_vgpr ----
+    def test_s_alloc_vgpr_zexts_i1_result_to_i32(self):
+        ll = self._lower("valloc", lambda b: b.s_alloc_vgpr(8))
+        self.assertIn("declare i1 @llvm.amdgcn.s.alloc.vgpr(i32)", ll)
+        self.assertIn("call i1 @llvm.amdgcn.s.alloc.vgpr(i32 8)", ll)
+        # The intrinsic returns i1; the IR value is an i32, so a zext is required.
+        self.assertIn("zext i1 ", ll)
+
+    def test_s_alloc_vgpr_rejects_non_positive_count(self):
+        b = self._builder("valloc_bad")
+        with self.assertRaises(ValueError):
+            b.s_alloc_vgpr(0)
+
+    # ---- async markers / event waits / prefetch ----
+    def test_asyncmark_emits_void_call(self):
+        ll = self._lower("amark", lambda b: b.asyncmark())
+        self.assertIn("declare void @llvm.amdgcn.asyncmark()", ll)
+        self.assertIn("call void @llvm.amdgcn.asyncmark()", ll)
+
+    def test_wait_asyncmark_passes_i16_count(self):
+        ll = self._lower("await", lambda b: b.wait_asyncmark(3))
+        self.assertIn("declare void @llvm.amdgcn.wait.asyncmark(i16 immarg)", ll)
+        self.assertIn("call void @llvm.amdgcn.wait.asyncmark(i16 3)", ll)
+
+    def test_s_wait_event_passes_i16_bitmask(self):
+        ll = self._lower("sevt", lambda b: b.s_wait_event(1))
+        self.assertIn("declare void @llvm.amdgcn.s.wait.event(i16 immarg)", ll)
+        self.assertIn("call void @llvm.amdgcn.s.wait.event(i16 1)", ll)
+
+    def test_s_prefetch_inst_emits_ptr_and_length(self):
+        from rocke.core.ir import I32, PtrType
+
+        def build(b):
+            code = b.param("code", PtrType(I32, "global"), align=4)
+            b.s_prefetch_inst(code, b.const_i32(64))
+
+        ll = self._lower("sprefetch", build)
+        self.assertIn("declare void @llvm.amdgcn.s.prefetch.inst(ptr, i32)", ll)
+        self.assertIn("call void @llvm.amdgcn.s.prefetch.inst(ptr %code, i32 64)", ll)
+
+    # ---- async buffer / global -> LDS ----
+    def test_buffer_load_lds_async_converts_dwords_to_bytes(self):
+        from rocke.core.ir import CACHE_STREAM, F16, I32, PtrType
+
+        def build(b):
+            X = b.param("X", PtrType(F16, "global"))
+            N = b.param("N_bytes", I32)
+            rsrc = b.buffer_rsrc(X, N)
+            lds = b.smem_alloc(F16, [64, 8], name_hint="stage")
+            b.buffer_load_lds_async(
+                rsrc,
+                b.smem_addr_of(lds),
+                b.const_i32(0),
+                b.const_i32(0),
+                dwords=4,
+                coherency=CACHE_STREAM,
+            )
+
+        ll = self._lower("buf_async", build)
+        self.assertIn("@llvm.amdgcn.raw.ptr.buffer.load.async.lds", ll)
+        # dwords=4 -> 16 bytes per lane; trailing imm is coherency (CACHE_STREAM=2).
+        self.assertIn("i32 16, i32 0, i32 0, i32 0, i32 2)", ll)
+
+    def test_buffer_load_lds_async_rejects_bad_dwords_and_coherency(self):
+        from rocke.core.ir import F16, I32, PtrType
+
+        b = self._builder("buf_async_bad")
+        X = b.param("X", PtrType(F16, "global"))
+        N = b.param("N_bytes", I32)
+        rsrc = b.buffer_rsrc(X, N)
+        lds_addr = b.smem_addr_of(b.smem_alloc(F16, [64, 8], name_hint="stage"))
+        with self.assertRaises(ValueError):
+            b.buffer_load_lds_async(
+                rsrc, lds_addr, b.const_i32(0), b.const_i32(0), dwords=2
+            )
+        with self.assertRaises(ValueError):
+            b.buffer_load_lds_async(
+                rsrc, lds_addr, b.const_i32(0), b.const_i32(0), dwords=4, coherency=7
+            )
+
+    def test_global_load_async_to_lds_supports_b8_width(self):
+        """width_bytes=1 selects the LLVM 23 ``.b8`` async copy.
+
+        The opcode is a gfx1250 one, but its lowering is arch-independent, so
+        this runs on the default backend to keep the expected text identical to
+        the C++ parity gate (which has no gfx1250 ISA backend).
+        """
+        from rocke.core.ir import I32, PtrType
+
+        def build(b):
+            src = b.param("src", PtrType(I32, "global"), align=4)
+            lds = b.smem_alloc(I32, [64], name_hint="stage")
+            b.global_load_async_to_lds(
+                src, b.const_i32(0), lds, [b.const_i32(0)], width_bytes=1
+            )
+
+        ll = self._lower("gl_async_b8", build)
+        self.assertIn(
+            "declare void @llvm.amdgcn.global.load.async.to.lds.b8("
+            "ptr addrspace(1) nocapture, ptr addrspace(3) nocapture, "
+            "i32 immarg, i32 immarg)",
+            ll,
+        )
+        self.assertIn("call void @llvm.amdgcn.global.load.async.to.lds.b8(", ll)
+        # Per-lane source/destination addresses are computed with GEPs.
+        self.assertIn("getelementptr inbounds", ll)
+
+    def test_global_load_async_to_lds_rejects_unsupported_width(self):
+        from rocke.core.ir import I32, PtrType
+
+        b = self._builder("gl_async_bad")
+        src = b.param("src", PtrType(I32, "global"), align=4)
+        lds = b.smem_alloc(I32, [64], name_hint="stage")
+        with self.assertRaises(ValueError):
+            b.global_load_async_to_lds(
+                src, b.const_i32(0), lds, [b.const_i32(0)], width_bytes=2
+            )
 
 
 class TestFusionPlanner(unittest.TestCase):

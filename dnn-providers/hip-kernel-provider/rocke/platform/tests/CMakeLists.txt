@@ -36,7 +36,7 @@ if(BUILD_TESTING)
                  rocke_ir_serialize_roundtrip)
   endif()
 
-  # C++ parity for Python TestHelpers::test_future_intrinsic_lowering.
+  # C++ parity for Python TestNewTargetIntrinsics.
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/future_intrinsic_lowering.cpp")
     add_executable(rocke_future_intrinsic_lowering core/future_intrinsic_lowering.cpp)
     target_link_libraries(rocke_future_intrinsic_lowering PRIVATE rocke_core)

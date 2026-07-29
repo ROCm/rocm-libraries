@@ -32,10 +32,11 @@ What's hard, and how we handle it:
 
 from __future__ import annotations
 
+import enum
 import os
 import sys
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, FrozenSet, List, Optional, Tuple
 
 from .ir import (
     KernelDef,
@@ -115,23 +116,119 @@ LLVM_FLAVOR_LLVM20 = "llvm20"
 LLVM_FLAVOR_LLVM22 = "llvm22"
 LLVM_FLAVOR_LLVM23 = "llvm23"
 
-# First ROCm release known to bundle LLVM 23.0.0 (confirm on an LLVM 23 host).
-_LLVM23_MIN_ROCM: Tuple[int, int] = (7, 13)
+# Every flavor rocke can emit, oldest first. This is the SSOT every flavor
+# membership test must go through -- validating against a hand-rolled tuple is
+# how ``llvm23`` was silently rejected by the C++ backend path while the Python
+# path accepted it. ``test_llvm_flavors_enumeration_is_ssot`` pins that no such
+# private list reappears.
+LLVM_FLAVORS: Tuple[str, ...] = (
+    LLVM_FLAVOR_LLVM20,
+    LLVM_FLAVOR_LLVM22,
+    LLVM_FLAVOR_LLVM23,
+)
+
+
+class LlvmDatalayoutKind(enum.Enum):
+    """Datalayout generation, i.e. what an IR module's ``p8`` field can reveal.
+
+    The buffer-fat-pointer address space ``p8`` is the only datalayout field
+    that drifts between flavors, so it identifies a *generation* shared by one
+    or more flavors rather than a single flavor -- llvm22 and llvm23 are
+    indistinguishable from the datalayout alone.
+
+    Members are named after the datalayout shape, deliberately not after its
+    recency: a "modern" label stops being true the moment a newer generation
+    lands, whereas ``P8_INDEXED`` keeps describing exactly what it matches.
+    """
+
+    #: LLVM 20 and older: ``p8:128:128`` (no index-width field).
+    P8_PLAIN = "p8_plain"
+    #: LLVM 21+: ``p8:128:128:128:48`` (index width appended).
+    P8_INDEXED = "p8_indexed"
+
+    @property
+    def flavors(self) -> FrozenSet[str]:
+        """Flavors that emit this datalayout generation."""
+        return _DATALAYOUT_KIND_FLAVORS[self]
+
+    def describe(self) -> str:
+        """Human-readable form for diagnostics, e.g. ``p8_indexed (llvm22/llvm23)``."""
+        return f"{self.value} ({'/'.join(sorted(self.flavors))})"
+
+
+# Partition of :data:`LLVM_FLAVORS` by datalayout generation. Every flavor must
+# appear in exactly one entry, and every enum member must have an entry;
+# ``test_datalayout_kinds_partition_every_flavor`` is the exhaustiveness check a
+# language-level ``match`` would give for free.
+_DATALAYOUT_KIND_FLAVORS: Dict[LlvmDatalayoutKind, FrozenSet[str]] = {
+    LlvmDatalayoutKind.P8_PLAIN: frozenset({LLVM_FLAVOR_LLVM20}),
+    LlvmDatalayoutKind.P8_INDEXED: frozenset({LLVM_FLAVOR_LLVM22, LLVM_FLAVOR_LLVM23}),
+}
+
+# Substrings that identify each generation in a module's ``target datalayout``.
+# Kept consistent with the ``_DATALAYOUT_*`` constants by
+# ``test_datalayout_kind_markers_match_datalayouts``.
+_P8_MARKERS: Dict[LlvmDatalayoutKind, str] = {
+    LlvmDatalayoutKind.P8_INDEXED: "p8:128:128:128:48",
+    LlvmDatalayoutKind.P8_PLAIN: "p8:128:128-",
+}
+
+# ROCm release -> flavor bundled with that release's comgr, newest first. Add a
+# row when a ROCm release bumps its bundled LLVM; nothing else needs editing.
+_ROCM_FLAVOR_LADDER: Tuple[Tuple[Tuple[int, int], str], ...] = (
+    # First ROCm release known to bundle LLVM 23.0.0 (confirm on an LLVM 23 host).
+    ((7, 13), LLVM_FLAVOR_LLVM23),
+    ((7, 2), LLVM_FLAVOR_LLVM22),
+)
 
 
 def _flavor_for_rocm(major: int, minor: int) -> str:
-    """ROCm release -> LLVM flavor expected by the bundled comgr."""
+    """ROCm release -> LLVM flavor expected by that release's bundled comgr.
+
+    The mapping is *clamped at both ends* and never raises. A release newer
+    than the newest ladder row resolves to the newest flavor (a future ROCm
+    bundles LLVM >= 23, and llvm23 is the closest shape we know how to emit);
+    anything below the last row resolves to the oldest, which is what pre-7.2
+    releases actually shipped rather than a fallback.
+
+    Raising on an unrecognised version would be wrong here: both callers are
+    best-effort. :func:`_detect_llvm_flavor` uses this to guess a host's
+    vintage at import time, and ``runtime.comgr._assert_ir_flavor_matches_lib``
+    uses it for a guard that must degrade rather than fail when the host is
+    unfamiliar. Callers wanting strictness pass ``llvm_flavor=`` explicitly,
+    which *is* validated against :data:`LLVM_FLAVORS`.
+    """
     ver = (major, minor)
-    if ver >= _LLVM23_MIN_ROCM:
-        return LLVM_FLAVOR_LLVM23
-    if ver >= (7, 2):
-        return LLVM_FLAVOR_LLVM22
-    return LLVM_FLAVOR_LLVM20
+    for min_ver, flavor in _ROCM_FLAVOR_LADDER:
+        if ver >= min_ver:
+            return flavor
+    return LLVM_FLAVORS[0]
+
+
+def _datalayout_kind_for_flavor(flavor: str) -> Optional[LlvmDatalayoutKind]:
+    """Datalayout generation a flavor emits, or ``None`` if unrecognised."""
+    for kind, flavors in _DATALAYOUT_KIND_FLAVORS.items():
+        if flavor in flavors:
+            return kind
+    return None
+
+
+def _datalayout_kind_from_ir(ir_text: str) -> Optional[LlvmDatalayoutKind]:
+    """Datalayout generation of an IR module, read from its ``p8`` field.
+
+    ``None`` when the module has no recognisable ``target datalayout``. This
+    cannot narrow to a single flavor -- see :class:`LlvmDatalayoutKind`.
+    """
+    # P8_INDEXED first: its marker has the plain form as a prefix.
+    for kind in (LlvmDatalayoutKind.P8_INDEXED, LlvmDatalayoutKind.P8_PLAIN):
+        if _P8_MARKERS[kind] in ir_text:
+            return kind
+    return None
 
 
 def _is_modern_flavor(flavor: str) -> bool:
-    """True for LLVM 21+ IR shapes (llvm22 / llvm23)."""
-    return flavor in (LLVM_FLAVOR_LLVM22, LLVM_FLAVOR_LLVM23)
+    """True for flavors emitting the LLVM 21+ ``p8`` shape (llvm22 / llvm23)."""
+    return flavor in _DATALAYOUT_KIND_FLAVORS[LlvmDatalayoutKind.P8_INDEXED]
 
 
 def _datalayout_for_flavor(flavor: str) -> str:
@@ -227,7 +324,7 @@ def _detect_llvm_flavor() -> str:
     misconfigured environment never crashes import.
     """
     env = os.environ.get("ROCKE_LLVM_FLAVOR", "").strip().lower()
-    if env in (LLVM_FLAVOR_LLVM20, LLVM_FLAVOR_LLVM22, LLVM_FLAVOR_LLVM23):
+    if env in LLVM_FLAVORS:
         return env
     comgr_ver = _comgr_lib_rocm_version()
     if comgr_ver is not None:
@@ -253,7 +350,7 @@ _LLVM_FLAVOR_BASIS: Optional[str] = None
 def _resolve_llvm_flavor() -> str:
     global _LLVM_FLAVOR, _LLVM_FLAVOR_BASIS
     env = os.environ.get("ROCKE_LLVM_FLAVOR", "").strip().lower()
-    if env in (LLVM_FLAVOR_LLVM20, LLVM_FLAVOR_LLVM22, LLVM_FLAVOR_LLVM23):
+    if env in LLVM_FLAVORS:
         return env
     try:
         from ..runtime.comgr import resolved_lib_path
@@ -958,11 +1055,7 @@ class _Lowerer:
 
         self._backend = backend_for(arch or "gfx950")
         flavor = llvm_flavor if llvm_flavor is not None else _resolve_llvm_flavor()
-        if flavor not in (
-            LLVM_FLAVOR_LLVM20,
-            LLVM_FLAVOR_LLVM22,
-            LLVM_FLAVOR_LLVM23,
-        ):
+        if flavor not in LLVM_FLAVORS:
             raise ValueError(f"unknown LLVM flavor {flavor!r}")
         self._flavor: str = flavor
         # Preserve insertion order of ``_INTRINSIC_DECLS`` -- it drives

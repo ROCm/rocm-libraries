@@ -76,7 +76,11 @@ namespace ckc
 #define ROCKE_LL_LLVM23_MIN_ROCM_MAJOR 7
 #define ROCKE_LL_LLVM23_MIN_ROCM_MINOR 13
 
-/* Python _flavor_for_rocm: >= (7,13) => LLVM23, >= (7,2) => LLVM22, else LLVM20. */
+/* Python _flavor_for_rocm: >= (7,13) => LLVM23, >= (7,2) => LLVM22, else LLVM20.
+ * Clamped at both ends and never an error: a ROCm newer than the newest row
+ * resolves to the newest flavor, and anything older to LLVM20 (what pre-7.2
+ * actually shipped). Callers wanting strictness pass an explicit flavor, which
+ * IS validated in rocke_lower_kernel_to_llvm. */
 static rocke_llvm_flavor_t ll_flavor_for_rocm(int major, int minor)
 {
     if(major > ROCKE_LL_LLVM23_MIN_ROCM_MAJOR
