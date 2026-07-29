@@ -274,6 +274,29 @@ if(ROCKE_INSTALL_TESTS)
               PATTERN "run_all.py" EXCLUDE)
 
     endblock()
+
+    # Library golden IR lane (host-only). The attention goldens live in the
+    # sibling library/ tree and import the library packages (kernels/builders/
+    # dispatch) plus the platform `rocke` engine. Stage all of it under the
+    # already-captured tests/ subtree (tests/library/) so the installed test
+    # artifact picks it up with no change to TheRock's capture manifest; the
+    # co-located conftest.py puts the packages + engine on sys.path. This is a
+    # deliberate, test-only reach from platform into ../library.
+    set(_ROCKE_LIBRARY_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../library")
+    set(_ROCKE_LIBRARY_TEST_DEST "${ROCKE_TEST_INSTALL_DIR}/tests/library")
+    foreach(_pkg kernels builders dispatch)
+      install(DIRECTORY "${_ROCKE_LIBRARY_DIR}/${_pkg}"
+              DESTINATION "${_ROCKE_LIBRARY_TEST_DEST}"
+              PATTERN "__pycache__" EXCLUDE
+              REGEX "\\.pyc$" EXCLUDE)
+    endforeach()
+    install(FILES
+            "${_ROCKE_LIBRARY_DIR}/tests/conftest.py"
+            "${_ROCKE_LIBRARY_DIR}/tests/test_attention_dense_golden.py"
+            "${_ROCKE_LIBRARY_DIR}/tests/test_d256_attention_ir_golden.py"
+            DESTINATION "${_ROCKE_LIBRARY_TEST_DEST}")
+    install(DIRECTORY "${_ROCKE_LIBRARY_DIR}/tests/golden/"
+            DESTINATION "${_ROCKE_LIBRARY_TEST_DEST}/golden")
   endif()
 
   set(_ROCKE_INSTALLED_CTEST_ENTRIES "")
@@ -303,12 +326,26 @@ if(ROCKE_INSTALL_TESTS)
 
     # Full pytest suite. PYTHONPATH points at the CTestTestfile's working
     # directory (which contains the installed rocke package) so `import rocke`
-    # resolves without the source-tree sys.path shims.
+    # resolves without the source-tree sys.path shims. The library golden lane
+    # (tests/library) is ignored here so it stays a separate, nameable signal
+    # (rocke_library_golden below) rather than double-running under this target.
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-           "add_test(rocke_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests\" -v --timeout=60)\n")
+           "add_test(rocke_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests\" -v --timeout=60 --ignore=\"${ROCKE_TEST_CTEST_REL}tests/library\")\n")
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "set_tests_properties(rocke_pytest PROPERTIES\n"
            "  LABELS \"ckc\\;python\\;quick\"\n"
+           "  ENVIRONMENT \"PYTHONPATH=.\"\n"
+           "  TIMEOUT 300)\n")
+
+    # Library golden IR lane: the attention (SDPA product) goldens staged under
+    # tests/library. Host-only (no GPU/comgr). The co-located conftest.py puts
+    # the library packages + `rocke` engine on sys.path; PYTHONPATH=. keeps the
+    # working-dir rocke resolvable too, matching rocke_pytest.
+    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "add_test(rocke_library_golden python -m pytest \"${ROCKE_TEST_CTEST_REL}tests/library\" -v --timeout=120)\n")
+    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "set_tests_properties(rocke_library_golden PROPERTIES\n"
+           "  LABELS \"ckc\\;python\\;golden\\;library\\;host\\;quick\"\n"
            "  ENVIRONMENT \"PYTHONPATH=.\"\n"
            "  TIMEOUT 300)\n")
   endif()

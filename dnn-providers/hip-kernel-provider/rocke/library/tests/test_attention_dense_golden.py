@@ -7,11 +7,13 @@ Hashes the Python-lowered LLVM IR (SHA256) of representative ``attention_dense``
 specs and compares against a checked-in per-flavor golden fixture, catching any
 unintended codegen drift. Pure text lowering — no GPU / no comgr required.
 
-NOT WIRED INTO CI (by request): this file lives under ``library/tests/`` (which
-``platform/tests/run_all.py``'s CI gate does NOT collect — it only pytests
-``platform/tests/``), registers NO byte-identity ``*_emit`` parity pair, adds NO
-case to ``rocke_ir_parity_harness.cases()`` / the platform golden, and adds NO
-``add_test(...)`` CMake entry. Run it manually:
+Wired into CI as the ``rocke_library_golden`` CTest target (host-only): the
+provider install stages this file, its golden, and the library packages under
+``tests/library/`` and registers a pytest lane over them. It is still NOT part
+of ``platform/tests/run_all.py``'s dev gate (which only pytests
+``platform/tests/``), and registers NO byte-identity ``*_emit`` parity pair /
+adds NO case to ``rocke_ir_parity_harness.cases()`` — the Python↔C++ contract
+stays with the emit-pair gate, not this file. Run it manually:
 
     cd rocke/library
     PYTHONPATH=../platform/python:. python -m pytest tests/test_attention_dense_golden.py
@@ -148,6 +150,17 @@ def test_attention_dense_ir_matches_golden():
     gflav = golden.get("flavors", {}).get(flavor)
     if not gflav:
         pytest.skip(f"no golden recorded for llvm flavor {flavor!r}")
+    # Guard against golden staleness: the recorded case set must match the live
+    # case set exactly, so a dropped/renamed case (or an empty golden) fails
+    # loudly instead of silently skipping. Catching a golden that fell behind its
+    # cases is the whole reason this lane exists.
+    live = set(_cases())
+    recorded = set(gflav.get("cases", {}))
+    assert live == recorded, (
+        "attention_dense golden case set out of sync (re-bless with --write):\n"
+        f"  missing from golden: {sorted(live - recorded)}\n"
+        f"  stale in golden:     {sorted(recorded - live)}"
+    )
     drift = []
     for cid, build in _cases().items():
         want = gflav["cases"].get(cid, {}).get("sha256")
