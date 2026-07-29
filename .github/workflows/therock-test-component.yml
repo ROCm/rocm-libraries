@@ -166,10 +166,7 @@ jobs:
             bash -c '${{ fromJSON(inputs.component).test_script }}' 2>&1 | tee ./test_logs/test_output.log
 
       - name: Merge profraw and generate coverage report
-        # Superseded by coverage_runner.py in the Test step (reboss suggestion):
-        # coverage_runner.py now runs the tests, merges profraw, and generates the
-        # report. Kept here (disabled) for reference / quick revert.
-        if: ${{ false }}
+        if: ${{ inputs.coverage_enabled }}
         shell: bash
         env:
           AMDGPU_FAMILIES: ${{ inputs.amdgpu_families }}
