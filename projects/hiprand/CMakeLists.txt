@@ -261,15 +261,15 @@ if(HIPRAND_ENABLE_COVERAGE)
   # still hit ccache, so the build is not fully recompiled.
   target_compile_definitions(hiprand PRIVATE HIPRAND_COVERAGE_INSTRUMENTED=1)
 
-  # Device-side coverage causes kernel launch failures (ROCm 7.14). Without
-  # --offload-new-driver, HIP's default compilation model naturally separates host
-  # and device passes, so coverage flags only instrument host code (including host
-  # code in mixed .cpp files with both __global__ kernels and host functions).
+  # Device-side coverage causes kernel launch failures (ROCm 7.14). Use -Xarch_host
+  # to apply coverage flags only to host compilation passes, excluding device code.
+  # This instruments host code (including host functions in mixed .cpp files with
+  # __global__ kernels) without breaking GPU kernels.
   target_compile_options(hiprand PRIVATE
-    -g
-    -O0
-    -fprofile-instr-generate
-    -fcoverage-mapping
+    -Xarch_host -g
+    -Xarch_host -O0
+    -Xarch_host -fprofile-instr-generate
+    -Xarch_host -fcoverage-mapping
   )
   target_link_options(hiprand PUBLIC
     -fprofile-instr-generate
