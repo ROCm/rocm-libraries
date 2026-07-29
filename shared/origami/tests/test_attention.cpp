@@ -905,18 +905,51 @@ TEST_CASE("Attention: causal_active_kv_tiles_for_qtile", "[attention][causal]") 
 TEST_CASE("Attention: causal_active_tile_pairs", "[attention][causal]") {
   using origami::attention::causal_active_tile_pairs;
 
-  // Square, tile-aligned: grid = 32 -> triangular sum 32*33/2 = 528.
-  REQUIRE(causal_active_tile_pairs(32, 32, 128, 128, 4096, 4096) == 528);
+  // --- Square tiles (mt_m == mt_n): triangular sum grid_m*(grid_m+1)/2 ---
+  REQUIRE(causal_active_tile_pairs(32, 32, 128, 128, 4096, 4096) == 528);  // 32*33/2
 
-  // Bounded to [grid_m, grid_m*grid_n].
   const size_t pairs = causal_active_tile_pairs(16, 16, 128, 128, 2048, 2048);
-  REQUIRE(pairs == 16 * 17 / 2);
+  REQUIRE(pairs == 16 * 17 / 2);  // 136
   REQUIRE(pairs >= 16);
   REQUIRE(pairs <= 16 * 16);
 
-  // Decode scenario: single Q-tile (M=1), large KV context (N=1024)
-  // grid_m=1, grid_n=8, offset=1023, offset_tiles=7, result = 7*1 + 1*2/2 = 8
+  // Decode scenario: single Q-tile, large KV context.
   REQUIRE(causal_active_tile_pairs(1, 8, 128, 128, 128, 1024) == 8);
+}
+
+TEST_CASE("Attention: causal_active_tile_pairs non-square tiles", "[attention][causal]") {
+  // Regression coverage for mt_m != mt_n. The diagonal advances mt_m/mt_n
+  // KV-tiles per Q-tile, so the triangular growth must scale with that ratio
+  // (the old grid_m*(grid_m+1)/2 form ignored it and undercounted by mt_m/mt_n).
+  // Expected values verified against an independent brute-force reference.
+  using cap = decltype(&origami::attention::causal_active_tile_pairs);
+  cap fn = &origami::attention::causal_active_tile_pairs;
+
+  // r = mt_m/mt_n > 1 (wider Q-tiles): square problem, so the count is purely
+  // triangular. Old code returned 136 here; correct is 4x that.
+  REQUIRE(fn(16, 64, 128, 32, 2048, 2048) == 544);   // r=4
+  REQUIRE(fn(8, 64, 128, 16, 1024, 1024) == 288);    // r=8
+  REQUIRE(fn(16, 64, 128, 64, 2048, 4096) == 784);   // r=2, with offset (M<N)
+
+  // r = mt_m/mt_n < 1 (taller KV-tiles): several Q-tiles share a KV-tile column.
+  REQUIRE(fn(64, 16, 32, 128, 2048, 2048) == 544);   // r=1/4
+  REQUIRE(fn(16, 8, 64, 128, 1024, 1024) == 72);     // r=1/2
+
+  // Decode (grid_m == 1) with non-square tiles.
+  REQUIRE(fn(1, 128, 128, 32, 128, 4096) == 128);
+  REQUIRE(fn(1, 64, 16, 64, 1, 4096) == 64);
+
+  // Saturation: large offset makes early Q-tiles already span most of N.
+  REQUIRE(fn(2, 256, 128, 32, 256, 8192) == 508);
+
+  // Non-tile-divisible M/N (partial final tiles) with non-square tiles.
+  REQUIRE(fn(3, 32, 128, 128, 270, 4096) == 95);     // square tiles, partial M
+  REQUIRE(fn(3, 128, 128, 32, 270, 4096) == 380);    // non-square, partial M
+  REQUIRE(fn(12, 79, 256, 64, 3000, 5000) == 695);   // non-square, partial M and N
+
+  // Bounds: every result must lie within [grid_m, grid_m*grid_n].
+  REQUIRE(fn(16, 64, 128, 32, 2048, 2048) >= 16);
+  REQUIRE(fn(16, 64, 128, 32, 2048, 2048) <= 16 * 64);
 }
 
 TEST_CASE("Attention: causal total latency lower than non-causal", "[attention][causal]") {

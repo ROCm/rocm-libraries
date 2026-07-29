@@ -104,6 +104,17 @@ std::tuple<size_t, size_t, size_t, size_t> compute_cu_occupancy(const problem_t&
 /* Causal masking helpers                                                                   */
 /* ======================================================================================== */
 
+namespace {
+// Closed form for sum_{j=1}^{m} floor(j / s), s >= 1.
+//   with q = floor(m/s), r = m mod s:  s*q*(q-1)/2 + (r+1)*q
+size_t sum_floor_j_over_s(size_t m, size_t s) {
+  if (m == 0) return 0;
+  const size_t q = m / s;
+  const size_t r = m % s;
+  return s * q * (q - 1) / 2 + (r + 1) * q;
+}
+}  // namespace
+
 size_t causal_active_tile_pairs(size_t grid_m,
                                 size_t grid_n,
                                 size_t mt_m,
@@ -112,22 +123,49 @@ size_t causal_active_tile_pairs(size_t grid_m,
                                 size_t N) {
   if (grid_m == 0 || grid_n == 0) return 0;
 
-  // Closed-form computation using arithmetic sequence formula.
-  // For bottom-right alignment, Q-tiles form an arithmetic progression in the
-  // number of KV-tiles they access. The base triangular sum (grid_m*(grid_m+1)/2)
-  // is offset by (N-M) tiles per Q-tile, with corrections for partial tiles.
-
   // For causal attention: prefill has M=N, decode has M<N. M>N is invalid.
   assert(M <= N && "Causal attention requires M <= N (Q_SEQ <= KV_SEQ)");
+  // Attention macro-tiles are powers of two, so one tile dim divides the other.
+  // The closed form below relies on that (mt_n | mt_m or mt_m | mt_n).
+  assert(((mt_m % mt_n == 0) || (mt_n % mt_m == 0)) &&
+         "causal_active_tile_pairs requires mt_n|mt_m or mt_m|mt_n");
 
+  // Bottom-right causal alignment: Q-tile i (1-indexed, i = 1..grid_m) attends
+  //   c(i) = ceil((i*mt_m + offset) / mt_n) KV-tiles, capped at grid_n.
+  // Total active pairs = sum_i min(c(i), grid_n): a capped sum of ceilings of an
+  // arithmetic progression. c(i) grows by mt_m/mt_n KV-tiles per Q-tile (not 1) --
+  // the factor the previous grid_m*(grid_m+1)/2 form dropped, undercounting
+  // non-square tiles by exactly mt_m/mt_n.
   const size_t offset = N - M;
-  const size_t offset_tiles = offset / mt_n;  // floor division
-  const bool has_offset_remainder = (offset % mt_n != 0);
-  const bool needs_n_correction = (N % mt_n != 0) && (offset > 0);
 
-  size_t result = offset_tiles * grid_m + (grid_m * (grid_m + 1)) / 2;
-  if (has_offset_remainder) result += (grid_m - 1);
-  if (needs_n_correction) result += 1;
+  // Saturation index i_sat: smallest i >= 1 with c(i) >= grid_n (fully-covered).
+  // c(grid_m) >= grid_n always, so 1 <= i_sat <= grid_m. Tiles i >= i_sat each
+  // contribute grid_n; tiles i < i_sat form the diagonal band.
+  //   ceil((mt_m*i + offset)/mt_n) >= grid_n  <=>  mt_m*i >= (grid_n-1)*mt_n + 1 - offset
+  const long long rhs =
+      static_cast<long long>((grid_n - 1) * mt_n + 1) - static_cast<long long>(offset);
+  size_t i_sat = (rhs <= 0) ? 1 : math::safe_ceil_div(static_cast<size_t>(rhs), mt_m);
+  if (i_sat > grid_m) i_sat = grid_m;
+  const size_t U = i_sat - 1;  // unsaturated (diagonal-band) Q-tiles
+
+  // Diagonal band: sum_{i=1}^{U} ceil((mt_m*i + offset)/mt_n)
+  //             = sum_{i=1}^{U} floor((mt_m*i + C)/mt_n),  C = offset + mt_n - 1.
+  size_t triangular = 0;
+  if (U > 0) {
+    const size_t C = offset + mt_n - 1;
+    if (mt_m % mt_n == 0) {
+      // mt_n | mt_m: c(i) = (mt_m/mt_n)*i + floor(C/mt_n) exactly.
+      const size_t r = mt_m / mt_n;
+      triangular = r * U * (U + 1) / 2 + U * (C / mt_n);
+    } else {
+      // mt_m | mt_n: floor((mt_m*i + C)/mt_n) = floor((i + p)/s), p = floor(C/mt_m).
+      const size_t s = mt_n / mt_m;
+      const size_t p = C / mt_m;
+      triangular = sum_floor_j_over_s(p + U, s) - sum_floor_j_over_s(p, s);
+    }
+  }
+
+  const size_t result = triangular + (grid_m - U) * grid_n;
 
   // Sanity check: causal work must be in [grid_m, grid_m * grid_n].
   assert(result >= grid_m && "Causal active pairs below lower bound");
@@ -832,8 +870,11 @@ double compute_total_latency(const problem_t& problem,
   OLOG_DEBUG("  Causal=" << problem.causal << " tile_pairs=" << tile_pairs
              << " (rectangular=" << (grid_m * grid_n) << ")");
 
-  const size_t adjustment_factor = 8; // adjusting amount of work for prolog or epilogue bound tile sizes
-  double total_tiles = static_cast<double>(adjustment_factor) *
+  // Adjusting amount of work for prolog or epilogue bound tile sizes. The causal
+  // schedule has a different prolog/epilogue balance than the dense one, so it
+  // uses its own calibrated factor.
+  const double adjustment_factor = problem.causal ? 3.57 : 8.0;
+  double total_tiles = adjustment_factor *
                        static_cast<double>(batch) *
                        static_cast<double>(q_heads) *
                        static_cast<double>(tile_pairs) *
