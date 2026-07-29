@@ -48,6 +48,9 @@
 namespace {
 using namespace stinkytofu;
 
+// Gate for the ESM2 VALU source-operand VA_VDST stamp (the src-operand WAR hazard).
+bool g_enableESM2TrackValuVsrc = false;
+
 // ---------------------------------------------------------------------------
 // Mode 2 counters and events (VA_VDST, VM_VSRC).
 // ---------------------------------------------------------------------------
@@ -332,15 +335,15 @@ class WaitcntBrackets {
             auto stampVA = [&](unsigned idx, HighBitSel half) {
                 RegKey k = keyer.producerKey(idx, half);
                 VgprStamp& s = scores[k];
-                // Set only this pipe.
                 s.vaOrd[pipe] = ord;
                 PASS_DEBUG(std::cerr << "[InsertWaitAlu]     stamp va v" << k.idx << "("
                                      << halfName(k.half) << ") [pipe=" << vaPipeName(pipe)
                                      << " ord=" << ord << "]\n");
             };
-            forEachVGPR(
-                inst.getSrcRegs(), [&](size_t i) { return srcHalfSel(true16Mod, i); },
-                [&](unsigned idx, HighBitSel half) { stampVA(idx, half); });
+            if (g_enableESM2TrackValuVsrc)
+                forEachVGPR(
+                    inst.getSrcRegs(), [&](size_t i) { return srcHalfSel(true16Mod, i); },
+                    [&](unsigned idx, HighBitSel half) { stampVA(idx, half); });
             forEachVGPR(
                 inst.getDestRegs(), [&](size_t i) { return destHalfSel(true16Mod, i); },
                 [&](unsigned idx, HighBitSel half) { stampVA(idx, half); });
@@ -638,7 +641,10 @@ class InsertWaitAluPassImpl : public Pass {
     VGPRHalfKeyer keyer{};
 
    public:
-    explicit InsertWaitAluPassImpl(StinkyAsmModule* module) : module(module) {}
+    explicit InsertWaitAluPassImpl(StinkyAsmModule* module, bool enableESM2TrackValuVsrc)
+        : module(module) {
+        g_enableESM2TrackValuVsrc = enableESM2TrackValuVsrc;
+    }
 
    private:
     StinkyInstruction* emitWaitAlu(BasicBlock& bb, IRBase* insertBefore, const Wait& wait,
@@ -1033,10 +1039,11 @@ char InsertWaitAluPassImpl::ID = 0;
 }  // namespace
 
 namespace stinkytofu {
-std::unique_ptr<Pass> createInsertWaitAluPass(StinkyAsmModule& module) {
-    return std::make_unique<InsertWaitAluPassImpl>(&module);
+std::unique_ptr<Pass> createInsertWaitAluPass(StinkyAsmModule& module,
+                                              bool enableESM2TrackValuVsrc) {
+    return std::make_unique<InsertWaitAluPassImpl>(&module, enableESM2TrackValuVsrc);
 }
-std::unique_ptr<Pass> createInsertWaitAluPass() {
-    return std::make_unique<InsertWaitAluPassImpl>(nullptr);
+std::unique_ptr<Pass> createInsertWaitAluPass(bool enableESM2TrackValuVsrc) {
+    return std::make_unique<InsertWaitAluPassImpl>(nullptr, enableESM2TrackValuVsrc);
 }
 }  // namespace stinkytofu
