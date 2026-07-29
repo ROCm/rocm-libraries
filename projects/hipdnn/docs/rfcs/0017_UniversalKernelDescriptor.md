@@ -125,7 +125,7 @@ exception). This complements build-time codegen rather than replacing it.
 | Capability | This RFC (day-one) | Deferred to a follow-up |
 |---|---|---|
 | Single-kernel path: UKD + UMD + UDD + UED + UHD + KMD, bound by a KDP | Yes | None |
-| Fusion **matching**: one UMD matches a bounded multi-op subgraph, run as one kernel (the choice of whether to fuse is the host's, via engine selection; see [§5](#5-matching-and-the-umd)) | Yes ([§5](#5-matching-and-the-umd)) | None |
+| Fusion **matching**: one UMD matches a bounded multi-op subgraph, run as one kernel | Yes ([§5](#5-matching-and-the-umd)) | None |
 | Match criteria: opcode, dtype, shape/rank, stride order, packed, divisibility, range, attribute, graph-structure, cross-tensor, per-element `all`, bounded `or` | Yes ([§5](#5-matching-and-the-umd)) | None |
 | General matching: N-ary commutative, unbounded chains, optional/variadic operands | None | JIT ([§9.3](#93-future-jit-and-normalized-providers)) |
 | Kernel sources | `kpack`, `hsaco`, and the rocKE adapter (build-only, lowers to `hsaco`) first; `hip` follows | new authoring adapters, DSLs ([§9.1](#91-kernel-source-adapters)) |
