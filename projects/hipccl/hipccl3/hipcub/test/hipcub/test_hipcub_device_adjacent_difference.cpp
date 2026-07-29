@@ -173,7 +173,6 @@ TYPED_TEST(HipcubDeviceAdjacentDifference, SubtractLeftCopy)
         for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
         {
             SCOPED_TRACE(testing::Message() << "with size= " << size);
-            CHECK_SIZE_ENABLEMENT(size);
 
             const auto input = test_utils::get_random_data<input_type>(
                 size,
@@ -470,7 +469,6 @@ TYPED_TEST(HipcubDeviceAdjacentDifferenceLargeTests, LargeIndicesAndOpOnce)
         for(const auto size : sizes)
         {
             SCOPED_TRACE(testing::Message() << "with size = " << size);
-            CHECK_SIZE_ENABLEMENT(size);
 
             flag_type*              d_incorrect_flag;
             unsigned long long int* d_counter;

@@ -102,7 +102,7 @@ struct HipcubDeviceTransformParams
 };
 
 template<class Params>
-struct HipcubDeviceTransformTests : public ::testing::Test
+struct HipcubDeviceTransformTests : public test_controller::ControlledTest<>
 {
     using input_type                        = typename Params::input_type;
     using output_type                       = typename Params::output_type;
@@ -134,7 +134,6 @@ TYPED_TEST(HipcubDeviceTransformTests, Transform)
         {
             hipStream_t stream = hipStreamDefault;
             SCOPED_TRACE(testing::Message() << "with size = " << size);
-            CHECK_SIZE_ENABLEMENT(size);
 
             // Generate data
             std::vector<input_type> h_input
@@ -193,7 +192,6 @@ TYPED_TEST(HipcubDeviceTransformTests, TransformAddrStableNonCopyable)
         {
             hipStream_t stream = hipStreamDefault;
             SCOPED_TRACE(testing::Message() << "with size = " << size);
-            CHECK_SIZE_ENABLEMENT(size);
 
             // Generate data
             std::vector<input_type> h_input
@@ -255,7 +253,6 @@ TYPED_TEST(HipcubDeviceTransformTests, TransformAddrStablePointerDiff)
         {
             hipStream_t stream = hipStreamDefault;
             SCOPED_TRACE(testing::Message() << "with size = " << size);
-            CHECK_SIZE_ENABLEMENT(size);
 
             // Generate data
             std::vector<input_type>  h_input(size);

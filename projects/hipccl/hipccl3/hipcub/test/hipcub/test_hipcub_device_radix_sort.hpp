@@ -1247,10 +1247,6 @@ inline void sort_keys_over_4g()
 
     CHECK_SIZE_ENABLEMENT(size);
 
-    int device_id = test_common_utils::obtain_device_from_ctest();
-    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
-    HIP_CHECK(hipSetDevice(device_id));
-
     // Radix sort requires 2 buffers of `size`, so a minimum of 8 GB of vram for this test.
     // This is more than some cards provide.
     hipDeviceProp_t dev_prop;

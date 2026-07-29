@@ -168,7 +168,6 @@ TYPED_TEST(HipcubDeviceScanTests, InclusiveScan)
         for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
         {
             SCOPED_TRACE(testing::Message() << "with size= " << size);
-            CHECK_SIZE_ENABLEMENT(size);
             if(single_op_precision * size > 0.5)
             {
                 std::cout << "Test is skipped from size " << size
@@ -361,7 +360,6 @@ TYPED_TEST(HipcubDeviceScanTests, InclusiveScanInit)
         for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
         {
             SCOPED_TRACE(testing::Message() << "with size= " << size);
-            CHECK_SIZE_ENABLEMENT(size);
             if(single_op_precision * size > 0.5)
             {
                 std::cout << "Test is skipped from size " << size
@@ -545,7 +543,6 @@ TYPED_TEST(HipcubDeviceScanTests, InclusiveScanByKey)
         for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
         {
             SCOPED_TRACE(testing::Message() << "with size= " << size);
-            CHECK_SIZE_ENABLEMENT(size);
             if(single_op_precision * size > 0.5)
             {
                 std::cout << "Test is skipped from size " << size
@@ -732,7 +729,6 @@ TYPED_TEST(HipcubDeviceScanTests, ExclusiveScan)
         for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
         {
             SCOPED_TRACE(testing::Message() << "with size= " << size);
-            CHECK_SIZE_ENABLEMENT(size);
             if(single_op_precision * size > 0.5)
             {
                 std::cout << "Test is skipped from size " << size
@@ -937,7 +933,6 @@ TYPED_TEST(HipcubDeviceScanTests, ExclusiveScanByKey)
         for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
         {
             SCOPED_TRACE(testing::Message() << "with size= " << size);
-            CHECK_SIZE_ENABLEMENT(size);
             if(single_op_precision * size > 0.5)
             {
                 std::cout << "Test is skipped from size " << size
@@ -1102,7 +1097,6 @@ TEST_F(HipcubDeviceScanNonTypedTests, LargeIndicesInclusiveScan)
     using OutputIterator = test_utils::single_index_iterator<T>;
 
     const size_t size = (1ul << 31) + 1ul;
-    CHECK_SIZE_ENABLEMENT(size);
 
     hipStream_t stream = 0; // default
 
@@ -1173,7 +1167,6 @@ TEST_F(HipcubDeviceScanNonTypedTests, LargeIndicesExclusiveScan)
     using OutputIterator = test_utils::single_index_iterator<T>;
 
     const size_t size = (1ul << 31) + 1ul;
-    CHECK_SIZE_ENABLEMENT(size);
 
     hipStream_t stream = 0; // default
 
@@ -1292,7 +1285,6 @@ TYPED_TEST(HipcubDeviceScanTests, ExclusiveScanFuture)
         for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
         {
             SCOPED_TRACE(testing::Message() << "with size= " << size);
-            CHECK_SIZE_ENABLEMENT(size);
             if(single_op_precision * size > 0.5)
             {
                 std::cout << "Test is skipped from size " << size

@@ -132,7 +132,7 @@ TYPED_TEST(HipcubThreadOperatorsTests, ArgMin)
 // Non-commutative operators.
 
 template<class Params>
-class HipcubNCThreadOperatorsTests : public ::testing::Test
+class HipcubNCThreadOperatorsTests : public test_controller::ControlledTest<>
 {
 public:
     using input_type  = typename Params::input_type;
@@ -490,7 +490,6 @@ TYPED_TEST(HipcubNCThreadOperatorsTests, ReduceByKeyOp)
 }
 
 // Unary operators tests.
-
 TYPED_TEST(HipcubNCThreadOperatorsTests, CastOp)
 {
     using input_type  = typename TestFixture::input_type;

@@ -96,7 +96,6 @@ TYPED_TEST(HipcubDevicePartitionTests, Flagged)
         for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
         {
             SCOPED_TRACE(testing::Message() << "with size= " << size);
-            CHECK_SIZE_ENABLEMENT(size);
             // Generate data
             std::vector<T> input = test_utils::get_random_data<T>(size, 1, 100, seed_value);
             std::vector<F> flags = test_utils::get_random_data01<F>(size, 0.25, seed_value);
@@ -408,7 +407,6 @@ TYPED_TEST(HipcubDevicePartitionTests, If)
         for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
         {
             SCOPED_TRACE(testing::Message() << "with size= " << size);
-            CHECK_SIZE_ENABLEMENT(size);
             // Generate data
             std::vector<T> input = test_utils::get_random_data<T>(size, 1, 100, seed_value);
 
@@ -713,7 +711,6 @@ TYPED_TEST(HipcubDevicePartitionTests, IfThreeWay)
         for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
         {
             SCOPED_TRACE(testing::Message() << "with size= " << size);
-            CHECK_SIZE_ENABLEMENT(size);
             // Generate data
             const auto input = test_utils::get_random_data<T>(size, 1, 100, seed_value);
 

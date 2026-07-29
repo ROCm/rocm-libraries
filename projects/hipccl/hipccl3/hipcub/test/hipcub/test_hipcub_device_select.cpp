@@ -92,7 +92,6 @@ TYPED_TEST(HipcubDeviceSelectTests, Flagged)
         for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
         {
             SCOPED_TRACE(testing::Message() << "with size= " << size);
-            CHECK_SIZE_ENABLEMENT(size);
 
             // Generate data
             std::vector<T> input
@@ -361,7 +360,6 @@ TYPED_TEST(HipcubDeviceSelectTests, SelectOp)
         for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
         {
             SCOPED_TRACE(testing::Message() << "with size= " << size);
-            CHECK_SIZE_ENABLEMENT(size);
 
             // Generate data
             std::vector<T> input
@@ -517,7 +515,6 @@ TYPED_TEST(HipcubDeviceSelectTests, FlaggedIf)
         for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
         {
             SCOPED_TRACE(testing::Message() << "with size= " << size);
-            CHECK_SIZE_ENABLEMENT(size);
 
             // Generate data
             std::vector<T> input
@@ -686,7 +683,6 @@ TYPED_TEST(HipcubDeviceSelectTests, Unique)
         for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
         {
             SCOPED_TRACE(testing::Message() << "with size= " << size);
-            CHECK_SIZE_ENABLEMENT(size);
             for(auto p : probabilities)
             {
                 SCOPED_TRACE(testing::Message() << "with p= " << p);
@@ -903,7 +899,6 @@ TEST_P(HipcubDeviceSelectLargeIndicesTests, LargeIndicesSelectOp)
     for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_large_sizes(0)))
     {
         SCOPED_TRACE(testing::Message() << "with size= " << size);
-        CHECK_SIZE_ENABLEMENT(size);
 
         // Generate data
         test_utils::counting_iterator<T> d_input(0);
@@ -1063,7 +1058,6 @@ TYPED_TEST(HipcubDeviceUniqueByKeyTests, UniqueByKey)
         for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
         {
             SCOPED_TRACE(testing::Message() << "with size= " << size);
-            CHECK_SIZE_ENABLEMENT(size);
 
             for(auto p : probabilities)
             {
@@ -1244,7 +1238,6 @@ TEST_F(HipcubDeviceUniqueByKeySingleTests, LargeIndicesUniqueByKey)
         for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_large_sizes(seed_value)))
         {
             SCOPED_TRACE(testing::Message() << "with size= " << size);
-            CHECK_SIZE_ENABLEMENT(size);
             TestUniqueEqualityOp equality_op;
 
             const size_t selected_count
