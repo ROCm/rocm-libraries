@@ -4,7 +4,7 @@
 add_executable(hipdnn_integration_tests_unit_tests
     main.cpp
     ../src/harness/bundle/IntegrationBundleVerificationHarness.cpp
-    ../src/harness/input-init/SynthesizeInputs.cpp
+    ../src/harness/input-init/FillInputs.cpp
     TestArchMatch.cpp
     TestBundleMetadata.cpp
     TestGraphDescription.cpp
@@ -21,8 +21,8 @@ add_executable(hipdnn_integration_tests_unit_tests
     TestBundleDiscovery.cpp
     TestVerificationPaths.cpp
     TestBundleVerificationHarness.cpp
-    TestSynthesisConfig.cpp
-    TestSynthesizeInputs.cpp
+    TestInputFillRecipes.cpp
+    TestFillInputs.cpp
     TestToleranceResolver.cpp
     TestVerificationModePaths.cpp
     TestErrorPaths.cpp
