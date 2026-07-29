@@ -2,7 +2,7 @@
 
 This page preserves the reusable engineering method, qualitative decision record,
 and code-grounded lessons from the gfx950 tiled-attention experiments. In accordance
-with the repository [compliance rules](../../AGENTS.md), achieved performance values
+with the repository [compliance rules](../../../AGENTS.md), achieved performance values
 and product/software comparisons are intentionally omitted from this public case
 study. Record numeric results only in the approved access-controlled system.
 
@@ -10,15 +10,17 @@ study. Record numeric results only in the approved access-controlled system.
 
 Paths are relative to `rocke/platform/`.
 
-- `../library/kernels/gfx950/attention_tiled_2d.py` owns the gfx950 tiled-2D
-  builder, spec, validators, and schedule flags.
-- `../library/kernels/gfx950/attention_tiled_2d_fastkv_regp.py` owns the isolated
-  fast-paged-KV/register-P experiment.
-- `../library/kernels/common/attention_unified.py` owns routing, selector policy,
-  cache identity, launch geometry, and LDS-budget checks.
-- `../library/benchmarks/gfx950/attention/prefill/` owns workload-specific rerun
-  drivers. Do not copy their measured output into the repository.
-- [`../development/testing.md`](../development/testing.md) describes the supported
+- [`../library/kernels/gfx950/attention_tiled_2d.py`](../../../../library/kernels/gfx950/attention_tiled_2d.py)
+  owns the gfx950 tiled-2D builder, spec, validators, and schedule flags.
+- [`../library/kernels/gfx950/attention_tiled_2d_fastkv_regp.py`](../../../../library/kernels/gfx950/attention_tiled_2d_fastkv_regp.py)
+  owns the isolated fast-paged-KV/register-P experiment.
+- [`../library/kernels/common/attention_unified.py`](../../../../library/kernels/common/attention_unified.py)
+  owns routing, selector policy, cache identity, launch geometry, and LDS-budget
+  checks.
+- [`../library/benchmarks/gfx950/attention/prefill/`](../../../../library/benchmarks/gfx950/attention/prefill/)
+  owns workload-specific rerun drivers. Do not copy their measured output into the
+  repository.
+- [`../development/testing.md`](../../development/testing.md) describes the supported
   CPU and GPU validation lanes.
 
 The current source and tests are authoritative. Historical configurations establish
