@@ -221,6 +221,10 @@ def _comgr_options_for_kernel(kernel: KernelDef) -> List[str]:
     agpr_alloc = kernel.attrs.get("agpr_alloc")
     if kernel.attrs.get("mfma_vgpr_form") or _is_zero_agpr_alloc(agpr_alloc):
         options.extend(["-mllvm", "-amdgpu-mfma-vgpr-form"])
+    # Escape hatch for backend codegen switches a kernel wants to pin (e.g.
+    # -amdgpu-enable-vopd). Each entry is passed as its own -mllvm argument.
+    for opt in kernel.attrs.get("llvm_opts") or ():
+        options.extend(["-mllvm", str(opt)])
     return options
 
 

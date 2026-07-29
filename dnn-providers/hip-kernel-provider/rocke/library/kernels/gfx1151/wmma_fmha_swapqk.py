@@ -78,6 +78,7 @@ __all__ = [
     "SwapQKCfg",
     "build_wmma_fmha_swapqk",
     "swapqk_grid",
+    "swapqk_transpose_v",
 ]
 
 _WMMA_OP_ID = "wmma_f32_16x16x16_f16"
@@ -132,6 +133,18 @@ class SwapQKCfg:
     # blocking is a D64 (and smaller-head) win; D128 L>=4096 stays DRAM-bound
     # (~17-18 TF), register-wall-limited as throughout the campaign.
     q_block: int = 1
+    # waves_per_eu: amdgpu-waves-per-eu hint. Occupancy on gfx1151 wave32 is a
+    # STEP function -- VGPRs come from a 1536-entry file in granules of 16, so
+    # 199 VGPR occupies a 208 granule = 7 waves/SIMD and the 8th wave needs <=192.
+    #
+    # MEASURED DEAD-END as an occupancy lever (L16384, mq1/of32/bn64/vt/qk_douter):
+    # waves_per_eu=8 does force the allocation under the boundary (199 -> 190) and
+    # does report 8 waves/SIMD, but it buys those 9 registers with 24 spills into
+    # 100B of scratch and a loop grown to 1105 instructions. The scratch traffic
+    # makes it not just slower on average but UNSTABLE across reps
+    # (21.88 / 9.22 / 22.82 TF vs a steady 22.9 without it). Squeezing the
+    # allocator does not create registers; crossing 192 has to come from needing
+    # fewer live values, not from telling the allocator to want them less.
     waves_per_eu: Optional[int] = None
     sched_mode: str = "pingpong"  # "none" | "pingpong"
     # iglp: -1 = off; >=0 = emit llvm.amdgcn.iglp_opt(level) at the loop-body top
@@ -304,6 +317,14 @@ class SwapQKCfg:
     # ~92 VGPR of headroom (its next-QK accumulators), so o_f16+pipeline still
     # spills (vgpr=256 + 111). Net dead-end for D=128; the register relief is real
     # but an order of magnitude short of unblocking the pipeline.
+    #
+    # ALSO MEASURED as an occupancy lever, and rejected: at bn64/vt it is the only
+    # way found to reach 8 waves/SIMD with ZERO spill (vgpr 199 -> 183, crossing
+    # the 192 granule), but the loop grows 1082 -> 1251 instructions and it goes
+    # PATHOLOGICAL at long sequences -- 2.71-7.26 TF at L16384 (vs 22.9 with
+    # o_f32) while still fine at L2048 (21.50), independent of qk_douter. Whatever
+    # that cliff is, it is not the +14% occupancy paying off. Unexplained; do not
+    # reach for o_f16 to buy waves at L>=8K without profiling it first.
     o_f16: bool = False
     # d16hi: d16_hi buffer gather (buffer_gather + dual_gather only). Pins
     # buffer_load_d16_b16/_hi_b16 via inline asm (hi tied to lo) so each strided
@@ -349,6 +370,160 @@ class SwapQKCfg:
     # the head-chunked launch (concurrent working set <= MALL) for large Sq.
     o_nt: bool = False
     q_nt: bool = False
+    # v_transposed: take V pre-transposed as [B, H, D, S] instead of [B, S, H, D].
+    # The PV A-operand needs V[kv=0..15, d_col] per lane. In [B,S,H,D] those 16
+    # values sit one token-stride (H*D*2 = 6 KB) apart, so the gather is 16
+    # separate d16 loads; the 32 lanes DO coalesce (they cover 32 consecutive d,
+    # i.e. 64 contiguous bytes), but each instruction only moves 64 B where a
+    # dwordx4 moves 512 B. Transposing makes the 16 keys contiguous, so one lane
+    # reads them as 2 dwordx4 -- 16 loads collapse to 2 (256 -> 32 vector-memory
+    # instructions per K-loop iteration at bn64/D128).
+    #
+    # The tradeoff is address divergence: the 32 lanes now sit on 32 different
+    # d-rows (S*2 bytes apart) instead of one cache line. Measured in isolation
+    # (profiling/vgather.hip, gfx1151, S=16K/D128/H24, 512 waves): 850 GB/s for
+    # [B,S,H,D] vs 1685 GB/s for [B,H,D,S] -- the instruction saving wins ~2x,
+    # and the transposed form saturates at low occupancy while the row-major one
+    # needs 2-4x the waves to catch up (this kernel is VGPR-capped at ~12.8
+    # waves/CU, so it never gets there).
+    #
+    # MEASURED (gfx1151 stx-halo-mini, H24 B1 D128, mq1/of32/bn64, single-head
+    # dispatch, exact: 1.53e-05, identical to the default layout). ISA does what
+    # it promises -- buffer_load 256->32, v_mov_b16 145->17, s_waitcnt 163->67,
+    # +3 VGPR, 0 spill. Cycle counts (GRBM_GUI_ACTIVE, so clock-independent --
+    # see the throttling note below) and memory-unit busy cycles (TA_TA_BUSY):
+    #                cycles      TA busy
+    #   * L4096      -20.3%      -24%
+    #   * L8192       -5.9%      -10%
+    #   * L16384      +0.3%        0%
+    # The benefit tracks whether the memory unit RESPONDS at all: at L4096 the
+    # gather is the constraint and removing 8/9 of the loads removes a fifth of
+    # the runtime; by L16384 TA_TA_BUSY is pinned at ~480 Mcycles no matter what
+    # the load stream looks like, so there is nothing left to win. At L16K the
+    # unit is latency-saturated (holding outstanding L2/MALL returns), not
+    # throughput-saturated -- see v_kblock for the experiment that rules out
+    # instruction count and cache-line count as the L16K constraint.
+    #
+    # BEWARE when re-measuring in wall-clock TF: sustained runs power-throttle
+    # this part from 2405 MHz / 87 W down to ~1600 MHz / 43 W within ~5 s, and
+    # long-L runs sit deep in that regime. That swing (20-40%) is larger than
+    # any of the effects here and it masked the L4096/L8192 wins entirely in an
+    # earlier end-to-end sweep. Compare cycles, not TF.
+    #
+    # REQUIRES q_block=1. At q_block=2 the wide loads land on a kernel already
+    # pinned at the 256-VGPR cap and spills explode (38 -> 153, scratch 28 ->
+    # 114) for -24% (23.4 -> 17.8 TF @ L2048).
+    #
+    # Requires buffer_gather and is incompatible with kv_lds (an LDS-staged V
+    # tile is a separate lever that solves the same problem a different way).
+    # Callers must supply V already transposed; see swapqk_transpose_v().
+    v_transposed: bool = False
+    # v_kblock: with v_transposed, use the KEY-BLOCKED layout [B, H, S/KB, D, KB]
+    # instead of the full transpose (KB=0). KB keys stay contiguous per d, and d
+    # advances every KB*2 bytes, so one instruction's 32 lanes cover 32*KB*2
+    # contiguous bytes instead of 32 rows S*2 bytes apart.
+    #
+    # This exists to separate the two things the full transpose changes at once.
+    # Per K-loop iteration at bn64/D128 the three layouts are:
+    #   default   [B,S,H,D]     256 loads,  1 cache line each
+    #   transpose [B,H,D,S]      32 loads, 32 cache lines each (rows S*2 apart)
+    #   blocked   KB=8           32 loads,  4 cache lines each
+    # KB=8 is the discriminating point: the transpose's instruction count AND
+    # fewer lines than the default. If the memory unit were bound by either
+    # instruction issue or line lookups, KB=8 would be the clear winner.
+    #
+    # MEASURED (L16384, single-head dispatch, 3 reps, GRBM_GUI_ACTIVE Mcycles):
+    #   default 16.49 | transpose 16.54 (+0.3%) | blocked KB8 18.02 (+9.3%)
+    #   TA_TA_BUSY:  480 |  483 | 484 Mcycles -- FLAT to within 1%
+    # So KB=8 is the WORST of the three, and the memory-unit busy counter does
+    # not budge across an 8x swing in instructions and an 8x swing in lines.
+    # That rules out both as the L16K constraint (at L4096, where the gather IS
+    # binding, the same counter moves -24%). The kernel is memory-LATENCY bound
+    # there: TA reads as ~75% busy because it is holding outstanding L2/MALL
+    # returns, and issuing fewer/cheaper requests does not shorten the wait.
+    # Kept only as the probe that establishes this; KB=0 is the useful setting.
+    # KB must divide 16 and give a 4/8/16-byte load, so KB in {2, 4, 8}.
+    v_kblock: int = 0
+    # v_prefetch: keep N V-gathers in flight across the PV step sequence. The
+    # loads for step i+N are issued before step i's permute + WMMAs, so the
+    # s_waitcnt for the fragment in hand does not also gate issuing the next
+    # requests. Costs 8 VGPR per outstanding step (the RAW <16 x f16>; the
+    # permute to a fragment PAIR is deferred until the data is needed, so the
+    # in-flight cost is half of what carrying finished fragments would be).
+    #
+    # This is the lever for the L16K regime, which is memory-LATENCY bound: the
+    # SIMD issues on ~16% of cycles and a wave spends ~55 cycles per instruction
+    # waiting, while occupancy is hard-capped at 8-9 waves/SIMD by the O
+    # accumulator (see v_kblock and the occupancy sweep in
+    # profiling/occ_sweep.py). More requests per wave is the only remaining way
+    # to cover the latency once more waves are unavailable.
+    #
+    # Distinct from prefetch_v, which only ever ran on the NON-dual_gather path
+    # (it sits in an elif after dual_gather, so with the shipped dual_gather=True
+    # default it was dead code -- its recorded regression was measured on a path
+    # that is not the production one). v_prefetch targets the dual path and
+    # composes with v_transposed, where a gather is only 2 loads to issue.
+    #
+    # MEASURED DEAD-END (gfx1151, H24 B1 D128 L16K, GRBM cycles, o_f32/bn32/vt):
+    #   depth 0 -> 15.96 Mcyc, 187 VGPR, L2 0.3M miss,  0.2M 128B DRAM reads
+    #   depth 2 -> 15.58 Mcyc, 204 VGPR, L2 0.8M miss,  0.7M
+    #   depth 3 -> 51.56 Mcyc, 220 VGPR, L2 12.4M miss, 12.4M
+    #   depth 4 -> 56.20 Mcyc, 220 VGPR, L2 13.5M miss, 13.5M
+    # Depth 2 is neutral (within run-to-run spread); depth >=3 falls off a cliff.
+    # The cliff is NOT registers or instructions: spill and scratch stay 0, the
+    # static mix is unchanged (16 buffer_load / 48 global_load / 32 wmma),
+    # s_waitcnt actually DROPS 35 -> 30, and dynamic loads are identical at 8.4M
+    # with VALU 10% LOWER. What breaks is locality -- holding steps i..i+depth in
+    # flight widens the concurrently-touched footprint past what L0/L1 holds, so
+    # lines are evicted before the next step reuses them and DRAM reads go up 40x
+    # for the same 8.4M loads.
+    #
+    # The deeper reason this lever cannot pay: at depth 0 the kernel only pulls
+    # ~26 MB from DRAM (~4% of bandwidth), so the latency the waves are hiding is
+    # mostly L0/L1/L2-HIT latency on the vector-memory path, not DRAM latency.
+    # Adding requests-in-flight cannot cover that without spending the very cache
+    # residency that makes those hits cheap.
+    v_prefetch: int = 0
+    # NOTE on the dual-gather broadcast cost (248 v_cndmask_b32 + 146
+    # v_permlanex16_b32, together ~16% of the K-loop's issue cycles): pairing
+    # those into VOPD is not available. The backend's gcn-create-vopd pass is
+    # already on and already forms 42 v_dual_* pairs in this loop; forcing
+    # -amdgpu-enable-vopd on/off produces byte-identical code. The selects cannot
+    # pair because v_dual_cndmask_b32 reads VCC implicitly, so an OPX/OPY pair
+    # would have to share one mask, and the gather's masks differ per select.
+    # Cutting this cost needs FEWER broadcast ops, not denser issue of them.
+    #
+    # qk_douter: run the QK loop d-OUTER / kv-inner instead of kv-outer / d-inner.
+    #
+    # Q[d] does not depend on the kv sub-tile, so d-outer needs one Q fragment
+    # live at a time and drops the qk_ilp machinery: the n_kv_sub accumulator
+    # chains are mutually independent, so they already supply the ILP acc_ilp was
+    # building by hand, and its tail reduction disappears (1102 -> 1082 loop
+    # instructions). Distinct from q_hoist, which lifts Q out of the WHOLE K-loop
+    # and must keep all n_dk fragments live (64 VGPR at D=128 -> spills).
+    #
+    # MEASURED WIN (L16384 H24 B1 D128, mq1/of32/bn64/vt, 3 interleaved reps):
+    # 22.05/22.04/22.12 -> 22.81/22.97/22.61 TF, i.e. +3.3%; GRBM cycles
+    # 15.80 -> 15.16 Mcyc (-4.0%), TA_TA_BUSY 504.7M -> 449.9M (-11%), stall
+    # 4.84 -> 4.27 Mcyc. vgpr 200 -> 199, zero spill, zero scratch, error
+    # unchanged (1.53e-05 @ L2048, 7.63e-06 @ L16384). Interleave the reps: a
+    # sequential A/B/A/B reads BACKWARDS here because the part decays from 2405
+    # to ~1600 MHz within seconds and the drift exceeds the effect.
+    #
+    # The win is NOT the mechanism this was built for. The intent was to delete
+    # n_kv_sub*n_dk - n_dk = 24 redundant Q loads per iteration, but the in-loop
+    # global_load count does not move (64 at bn64, 32 at bn32) under ANY nesting,
+    # and does not move when o_f16 frees 17 VGPR either, so it is not remat under
+    # pressure. Grouping the loads by address operand (see profiling/loaddbg.py)
+    # shows what actually changed: kv-outer issues 32 distinct addresses TWICE
+    # each, d-outer issues 64 distinct addresses once each. Same instruction
+    # count, but the duplicate fetches were spending requests on a texture-address
+    # path already 96.9% busy -- which is why TA_TA_BUSY, not the load count, is
+    # where the gain shows up.
+    #
+    # MQ>1 has its own QK loop that already hoists K across query groups; this
+    # knob is rejected there rather than silently doing nothing.
+    qk_douter: bool = False
     name: str = "wmma_fmha_swapqk"
 
     @property
@@ -392,8 +567,34 @@ class SwapQKCfg:
             "d16hi" if self.d16hi else "d16lo",
             "ont" if self.o_nt else "oct",
             "qnt" if self.q_nt else "qct",
+            (
+                ("vt" if not self.v_kblock else f"vk{self.v_kblock}")
+                if self.v_transposed
+                else "vn"
+            ),
+            f"vpf{self.v_prefetch}" if self.v_prefetch else "novpf",
+            "qkdo" if self.qk_douter else "qkno",
             f"iglp{self.iglp}" if self.iglp >= 0 else "noiglp",
         )
+
+
+def swapqk_transpose_v(v, kblock: int = 0):
+    """Relay V for ``cfg.v_transposed``: [B, S, H, D] -> [B, H, D, S].
+
+    With ``kblock=KB`` (matching ``cfg.v_kblock``) the result is the key-blocked
+    [B, H, S/KB, D, KB] form instead. Either way the head stride becomes ``D * S``
+    elements (it is ``D`` in the default layout), which matters when a caller
+    offsets the V pointer for a head-chunked launch.
+    """
+    import numpy as np
+
+    if not kblock:
+        return np.ascontiguousarray(np.transpose(v, (0, 2, 3, 1)))
+    bsz, s, h, d = v.shape
+    if s % kblock:
+        raise ValueError(f"seqlen {s} must be a multiple of v_kblock {kblock}")
+    blocked = v.reshape(bsz, s // kblock, kblock, h, d).transpose(0, 3, 1, 4, 2)
+    return np.ascontiguousarray(blocked)
 
 
 def swapqk_grid(cfg: SwapQKCfg, *, seqlen_q: int, batch: int):
@@ -500,6 +701,27 @@ def build_wmma_fmha_swapqk(cfg: SwapQKCfg, arch: str = "gfx1151") -> KernelDef:
     MQ = cfg.q_block  # query-blocking factor (16-row query tiles per wave)
     if MQ > 1 and cfg.pipeline:
         raise ValueError("q_block>1 is incompatible with pipeline")
+    if cfg.v_transposed:
+        if not cfg.buffer_gather:
+            raise ValueError("v_transposed requires buffer_gather")
+        if cfg.kv_lds:
+            raise ValueError("v_transposed is incompatible with kv_lds")
+        if cfg.v_kblock not in (0, 2, 4, 8):
+            raise ValueError(f"v_kblock must be 0, 2, 4 or 8 (got {cfg.v_kblock})")
+    elif cfg.v_kblock:
+        raise ValueError("v_kblock requires v_transposed")
+    if cfg.qk_douter and MQ > 1:
+        raise ValueError(
+            "qk_douter applies to the MQ==1 QK loop; the q_block>1 path has its "
+            "own K-hoisting loop (would silently be a no-op)"
+        )
+    if cfg.v_prefetch:
+        if cfg.v_prefetch < 0:
+            raise ValueError("v_prefetch must be >= 0")
+        if not cfg.dual_gather:
+            raise ValueError("v_prefetch requires dual_gather (see prefetch_v)")
+        if cfg.pipeline:
+            raise ValueError("v_prefetch is incompatible with pipeline")
     q_rows_per_cta = b.const_i32(cfg.q_rows_per_cta)
     cta_row0 = b.mul(q_group, q_rows_per_cta)
     # this wave owns MQ contiguous 16-row query tiles.
@@ -595,10 +817,76 @@ def build_wmma_fmha_swapqk(cfg: SwapQKCfg, arch: str = "gfx1151") -> KernelDef:
         soff_list = [b.mul(b.const_i32(j), sv2) for j in range(a_frag)]  # hoisted
         kvh_off = b.mul(kv_head, svh)  # element base for this (kv) head, per-CTA
 
+    KB = cfg.v_kblock
+    if cfg.v_transposed:
+        # Both transposed forms put the head base at kv_head*(hs*S) and both are
+        # addressed from k_base = batch*S + k_local (the [B,S,H,D] convention the
+        # callers use), so the batch term needs scaling up by kvh*hs.
+        v_t_cta = b.add(
+            b.mul(kv_head, b.mul(b.const_i32(hs), seqlen_k)),
+            b.mul(
+                batch_tok_k,
+                b.const_i32(hs * (kvh - 1) if KB else kvh * hs - 1),
+            ),
+        )
+        c16b = b.const_i32(16)  # byte offset of the second dwordx4 (kv 8..15)
+
+    def _load_col_transposed(k_base, d_col):
+        """Contiguous-in-k V read: the lane's 16 keys are 32 consecutive bytes,
+        so the whole A-fragment is 2 dwordx4. voffset is per-lane and fully
+        loop-invariant (d_col and S don't move), so only the scalar soffset
+        advances with the K-loop."""
+        voff = b.mul(b.add(v_t_cta, b.mul(d_col, seqlen_k)), c2)
+        soff = b.mul(k_base, c2)
+        halves = [
+            b.buffer_load_vN_f16(v_rsrc, voff, soff, 4),  # kv 0..7
+            b.buffer_load_vN_f16(v_rsrc, voff, b.add(soff, c16b), 4),  # kv 8..15
+        ]
+        words = [
+            b.vec_extract(b.vec_bitcast(h, VectorType(I32, 4)), i)
+            for h in halves
+            for i in range(4)
+        ]
+        return b.vec_bitcast(b.vec_pack(words, I32), VectorType(dtype_ir, a_frag))
+
+    def _load_col_blocked(k_base, d_col):
+        """V as [B, H, S/KB, D, KB]: KB keys contiguous per d, tiled along S.
+
+        Keeps the full transpose's wide loads (KB keys in one dwordxN) but puts
+        adjacent d only KB*2 bytes apart, so the 32 lanes of one instruction span
+        32*KB*2 bytes instead of 32 separate S-strided rows. At KB=8 that is 512
+        contiguous bytes -- 4 cache lines per instruction rather than 32.
+        """
+        n_load = a_frag // KB  # loads per 16-key fragment
+        dwords = (KB * 2) // 4
+        voff = b.mul(b.mul(d_col, b.const_i32(KB)), c2)  # per-lane, KB*2 B apart
+        # k_base is a multiple of 16 and KB divides 16, so this tile index is exact.
+        tile0 = b.div(k_base, b.const_i32(KB))
+        base_e = b.add(v_t_cta, b.mul(tile0, b.const_i32(hs * KB)))
+        parts = [
+            b.buffer_load_vN_f16(
+                v_rsrc,
+                voff,
+                b.mul(b.add(base_e, b.const_i32(i * hs * KB)), c2),
+                dwords,
+            )
+            for i in range(n_load)
+        ]
+        words = [
+            b.vec_extract(b.vec_bitcast(p, VectorType(I32, dwords)), i)
+            for p in parts
+            for i in range(dwords)
+        ]
+        return b.vec_bitcast(b.vec_pack(words, I32), VectorType(dtype_ir, a_frag))
+
+    _load_v_wide = _load_col_blocked if KB else _load_col_transposed
+
     def gather_v_a_frag_buf(k_base, d):
         # k_base = batch_tok_k + k_block_base + ns*16 (uniform i32). Per-lane
         # voffset selects V[kv=0, d_col]; the buffer HW adds soffset = kv*stride_v.
         d_col = b.add(b.const_i32(d * 16), col)
+        if cfg.v_transposed:
+            return _load_v_wide(k_base, d_col)
         elem0 = b.add(b.add(kvh_off, b.mul(k_base, sv)), d_col)
         voff = b.mul(elem0, c2)  # bytes, per-lane
         v_a = b.undef_vec(dtype_ir, a_frag)  # fully overwritten by the 16 loads
@@ -616,6 +904,8 @@ def build_wmma_fmha_swapqk(cfg: SwapQKCfg, arch: str = "gfx1151") -> KernelDef:
     def _load_col(k_base, vwin, d_col):
         """Gather V[kv=0..15, d_col] (per-lane d_col) via buffer or flat path.
         kv_lds forces the flat path so it reads the shared-LDS window."""
+        if cfg.v_transposed:
+            return _load_v_wide(k_base, d_col)
         if cfg.buffer_gather and not cfg.kv_lds:
             elem0 = b.add(b.add(kvh_off, b.mul(k_base, sv)), d_col)
             voff = b.mul(elem0, c2)
@@ -651,14 +941,18 @@ def build_wmma_fmha_swapqk(cfg: SwapQKCfg, arch: str = "gfx1151") -> KernelDef:
             v_a = b.vec_insert(v_a, _load(j), j)
         return v_a
 
-    def dual_gather(k_base, vwin, d):
-        """Return the A-fragments for subtiles (d, d+1) from ONE gather: lanes
-        0-15 load subtile d, lanes 16-31 load subtile d+1, then permlanex16 +
-        select broadcast each subtile into both lane-halves (the layout the WMMA
-        A-operand's lane^16 duplication requires)."""
+    def dual_gather_issue(k_base, vwin, d):
+        """Issue only the loads for subtiles (d, d+1): lanes 0-15 fetch subtile d,
+        lanes 16-31 subtile d+1. Returns the raw <16 x f16> (8 VGPRs), so a caller
+        that wants several gathers in flight pays 8 registers per outstanding
+        step instead of the 16 a finished fragment pair costs."""
         # per-lane d_col = (d + lane//16)*16 + lane%16  -> lo half=d, hi half=d+1
         d_col = b.add(b.const_i32(d * 16), b.add(b.mul(b.div(lane, c16), c16), col))
-        loaded = _load_col(k_base, vwin, d_col)
+        return _load_col(k_base, vwin, d_col)
+
+    def dual_gather_finish(loaded):
+        """permlanex16 + select broadcast each subtile into both lane-halves (the
+        layout the WMMA A-operand's lane^16 duplication requires)."""
         li = b.vec_bitcast(loaded, VectorType(I32, n_i32))
         fd, fd1 = [], []
         for i in range(n_i32):
@@ -669,6 +963,9 @@ def build_wmma_fmha_swapqk(cfg: SwapQKCfg, arch: str = "gfx1151") -> KernelDef:
         frag_d = b.vec_bitcast(b.vec_pack(fd, I32), VectorType(dtype_ir, a_frag))
         frag_d1 = b.vec_bitcast(b.vec_pack(fd1, I32), VectorType(dtype_ir, a_frag))
         return frag_d, frag_d1
+
+    def dual_gather(k_base, vwin, d):
+        return dual_gather_finish(dual_gather_issue(k_base, vwin, d))
 
     def _tree(vals, op):
         # log-depth reduction (shorter loop-carried m/l critical path).
@@ -804,44 +1101,67 @@ def build_wmma_fmha_swapqk(cfg: SwapQKCfg, arch: str = "gfx1151") -> KernelDef:
             V_lds, (1, 16, hs), origin=(c0, b.const_i32(ns * 16), c0)
         )
 
+    def _k_frag(kwin, ns, d):
+        if cfg.kv_lds:
+            return k_lds_read(ns, d)  # K from shared LDS (2x vec8)
+        return load_wmma_tile(b, kwin, atom, lane, role="a", k_offset=d * 16, lead=[c0])
+
+    def _q_frag(d):
+        if cfg.q_hoist:
+            return q_hoisted[d]
+        if cfg.q_lds:
+            return q_lds_read(d)
+        return load_wmma_tile(
+            b,
+            qwin,
+            atom,
+            lane,
+            role="b",
+            k_offset=d * 16,
+            lead=[c0],
+            nontemporal=cfg.q_nt,
+        )
+
     def compute_qk(k_block_base):
         """S^T = K @ Q^T for all n_kv_sub sub-tiles -> list of score WmmaTensors."""
         if pingpong:
             b.s_setprio(1)
         subs = []
-        for ns in range(n_kv_sub):
-            if not cfg.kv_lds:
-                kwin = k_window(b.add(k_block_base, b.const_i32(ns * 16)))
-            acc_ilp = [WmmaTensor.zero_acc(b, atom, arch=arch) for _ in range(ilp)]
+        if cfg.qk_douter:
+            # d-outer / kv-inner: Q[d] is invariant in ns, so loading it in the
+            # OUTER loop issues n_dk Q loads per K-tile instead of
+            # n_kv_sub*n_dk. The n_kv_sub accumulator chains are mutually
+            # independent, so they supply the ILP that qk_ilp exists to create
+            # and no separate acc_ilp / tail reduction is needed.
+            kwins = (
+                [None] * n_kv_sub
+                if cfg.kv_lds
+                else [
+                    k_window(b.add(k_block_base, b.const_i32(ns * 16)))
+                    for ns in range(n_kv_sub)
+                ]
+            )
+            subs = [WmmaTensor.zero_acc(b, atom, arch=arch) for _ in range(n_kv_sub)]
             for d in range(n_dk):
-                if cfg.kv_lds:
-                    k_tile = k_lds_read(ns, d)  # K from shared LDS (2x vec8)
-                else:
-                    k_tile = load_wmma_tile(
-                        b, kwin, atom, lane, role="a", k_offset=d * 16, lead=[c0]
+                q_tile = _q_frag(d)
+                for ns in range(n_kv_sub):
+                    subs[ns] = wmma_mma(b, _k_frag(kwins[ns], ns, d), q_tile, subs[ns])
+        else:
+            for ns in range(n_kv_sub):
+                kwin = None
+                if not cfg.kv_lds:
+                    kwin = k_window(b.add(k_block_base, b.const_i32(ns * 16)))
+                acc_ilp = [WmmaTensor.zero_acc(b, atom, arch=arch) for _ in range(ilp)]
+                for d in range(n_dk):
+                    acc_ilp[d % ilp] = wmma_mma(
+                        b, _k_frag(kwin, ns, d), _q_frag(d), acc_ilp[d % ilp]
                     )
-                if cfg.q_hoist:
-                    q_tile = q_hoisted[d]
-                elif cfg.q_lds:
-                    q_tile = q_lds_read(d)
-                else:
-                    q_tile = load_wmma_tile(
-                        b,
-                        qwin,
-                        atom,
-                        lane,
-                        role="b",
-                        k_offset=d * 16,
-                        lead=[c0],
-                        nontemporal=cfg.q_nt,
+                sc = acc_ilp[0]
+                for si in range(1, ilp):
+                    sc = WmmaTensor(
+                        atom, "c", b.vector_add(sc.value, acc_ilp[si].value), arch
                     )
-                acc_ilp[d % ilp] = wmma_mma(b, k_tile, q_tile, acc_ilp[d % ilp])
-            sc = acc_ilp[0]
-            for si in range(1, ilp):
-                sc = WmmaTensor(
-                    atom, "c", b.vector_add(sc.value, acc_ilp[si].value), arch
-                )
-            subs.append(sc)
+                subs.append(sc)
         if pingpong:
             b.s_setprio(0)
         return subs
@@ -1191,6 +1511,28 @@ def build_wmma_fmha_swapqk(cfg: SwapQKCfg, arch: str = "gfx1151") -> KernelDef:
             for ns in range(n_kv_sub)
         ]
 
+        def pv_pipelined(steps, consume):
+            """Run the PV steps with ``v_prefetch`` V-gathers outstanding.
+
+            The loads for step i+depth are issued BEFORE step i's permute and
+            WMMAs, so the s_waitcnt for the fragment in hand does not also gate
+            issuing the next requests. That raises requests-in-flight per wave,
+            which is the lever when the kernel is memory-latency bound rather
+            than issue- or bandwidth-bound (see v_kblock).
+            """
+            depth = min(max(1, cfg.v_prefetch), len(steps))
+            fifo = [
+                dual_gather_issue(k_bases[ns], vwins[ns], dp)
+                for ns, dp in steps[:depth]
+            ]
+            for i, (ns, dp) in enumerate(steps):
+                raw = fifo.pop(0)
+                if i + depth < len(steps):
+                    n1, d1 = steps[i + depth]
+                    fifo.append(dual_gather_issue(k_bases[n1], vwins[n1], d1))
+                fd, fd1 = dual_gather_finish(raw)
+                consume(ns, dp, fd, fd1)
+
         if cfg.o_f16:
             # f16-carry, d-pair-outer PV: upgrade one d-pair's f16 carry to f32,
             # fuse the alpha rescale, accumulate BOTH kv sub-tiles, truncate back
@@ -1198,31 +1540,67 @@ def build_wmma_fmha_swapqk(cfg: SwapQKCfg, arch: str = "gfx1151") -> KernelDef:
             if pingpong:
                 b.s_setprio(1)
             new_acc_vals = [None] * n_dk
-            for dp in range(0, n_dk, 2):
-                t0 = WmmaTensor(
-                    atom,
-                    "c",
-                    b.vector_mul(b.vec_ext_to_f32(accs[dp]), alpha_vec),
-                    arch,
+            if cfg.v_prefetch and cfg.dual_gather:
+                # d-pair outer, kv inner (same order as the loop below), so a
+                # d-pair's f32 upgrade stays live only across its own kv steps.
+                pair = {}
+
+                def _consume_f16(ns, dp, fd, fd1):
+                    if ns == 0:
+                        pair[dp] = (
+                            WmmaTensor(
+                                atom,
+                                "c",
+                                b.vector_mul(b.vec_ext_to_f32(accs[dp]), alpha_vec),
+                                arch,
+                            ),
+                            WmmaTensor(
+                                atom,
+                                "c",
+                                b.vector_mul(b.vec_ext_to_f32(accs[dp + 1]), alpha_vec),
+                                arch,
+                            ),
+                        )
+                    t0, t1 = pair[dp]
+                    t0 = wmma_mma(b, WmmaTensor(atom, "a", fd, arch), p_tiles[ns], t0)
+                    t1 = wmma_mma(b, WmmaTensor(atom, "a", fd1, arch), p_tiles[ns], t1)
+                    pair[dp] = (t0, t1)
+                    if ns == n_kv_sub - 1:
+                        new_acc_vals[dp] = b.vec_trunc_f32_to_f16(t0.value)
+                        new_acc_vals[dp + 1] = b.vec_trunc_f32_to_f16(t1.value)
+
+                pv_pipelined(
+                    [(ns, dp) for dp in range(0, n_dk, 2) for ns in range(n_kv_sub)],
+                    _consume_f16,
                 )
-                t1 = WmmaTensor(
-                    atom,
-                    "c",
-                    b.vector_mul(b.vec_ext_to_f32(accs[dp + 1]), alpha_vec),
-                    arch,
-                )
-                for ns in range(n_kv_sub):
-                    frag_d, frag_d1 = dual_gather(k_bases[ns], vwins[ns], dp)
-                    t0 = wmma_mma(
-                        b, WmmaTensor(atom, "a", frag_d, arch), p_tiles[ns], t0
+                if pingpong:
+                    b.s_setprio(0)
+            else:
+                for dp in range(0, n_dk, 2):
+                    t0 = WmmaTensor(
+                        atom,
+                        "c",
+                        b.vector_mul(b.vec_ext_to_f32(accs[dp]), alpha_vec),
+                        arch,
                     )
-                    t1 = wmma_mma(
-                        b, WmmaTensor(atom, "a", frag_d1, arch), p_tiles[ns], t1
+                    t1 = WmmaTensor(
+                        atom,
+                        "c",
+                        b.vector_mul(b.vec_ext_to_f32(accs[dp + 1]), alpha_vec),
+                        arch,
                     )
-                new_acc_vals[dp] = b.vec_trunc_f32_to_f16(t0.value)
-                new_acc_vals[dp + 1] = b.vec_trunc_f32_to_f16(t1.value)
-            if pingpong:
-                b.s_setprio(0)
+                    for ns in range(n_kv_sub):
+                        frag_d, frag_d1 = dual_gather(k_bases[ns], vwins[ns], dp)
+                        t0 = wmma_mma(
+                            b, WmmaTensor(atom, "a", frag_d, arch), p_tiles[ns], t0
+                        )
+                        t1 = wmma_mma(
+                            b, WmmaTensor(atom, "a", frag_d1, arch), p_tiles[ns], t1
+                        )
+                    new_acc_vals[dp] = b.vec_trunc_f32_to_f16(t0.value)
+                    new_acc_vals[dp + 1] = b.vec_trunc_f32_to_f16(t1.value)
+                if pingpong:
+                    b.s_setprio(0)
         else:
             accs_wt = [WmmaTensor(atom, "c", v, arch) for v in accs]
             # rescale the O^T accumulators by alpha ONCE per block_n keys.
@@ -1250,7 +1628,24 @@ def build_wmma_fmha_swapqk(cfg: SwapQKCfg, arch: str = "gfx1151") -> KernelDef:
             # ---- PV: O^T += V @ P per kv sub-tile (register P-transpose, no LDS) ----
             if pingpong:
                 b.s_setprio(1)
-            if cfg.dual_gather:
+            if cfg.dual_gather and cfg.v_prefetch:
+
+                def _consume_f32(ns, dp, fd, fd1):
+                    new_accs[dp] = wmma_mma(
+                        b, WmmaTensor(atom, "a", fd, arch), p_tiles[ns], new_accs[dp]
+                    )
+                    new_accs[dp + 1] = wmma_mma(
+                        b,
+                        WmmaTensor(atom, "a", fd1, arch),
+                        p_tiles[ns],
+                        new_accs[dp + 1],
+                    )
+
+                pv_pipelined(
+                    [(ns, dp) for ns in range(n_kv_sub) for dp in range(0, n_dk, 2)],
+                    _consume_f32,
+                )
+            elif cfg.dual_gather:
                 for ns in range(n_kv_sub):
                     for dp in range(0, n_dk, 2):
                         frag_d, frag_d1 = dual_gather(k_bases[ns], vwins[ns], dp)
