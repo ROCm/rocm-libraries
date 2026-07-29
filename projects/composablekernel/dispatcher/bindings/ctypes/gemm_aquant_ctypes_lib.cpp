@@ -60,16 +60,16 @@ static constexpr std::size_t elements_to_bytes(std::size_t n)
 
 static bool g_initialized = false;
 
-#define HIP_CHECK(call)                                                                         \
-    {                                                                                           \
-        hipError_t _err = (call);                                                               \
-        if(_err != hipSuccess)                                                                  \
-        {                                                                                       \
+#define HIP_CHECK(call)                                                                        \
+    {                                                                                          \
+        hipError_t _err = (call);                                                              \
+        if(_err != hipSuccess)                                                                 \
+        {                                                                                      \
             std::cerr << "HIP error: " << hipGetErrorString(_err) << " at " << __FILE__ << ":" \
-                      << __LINE__ << "\n";                                                      \
-            cleanup();                                                                          \
-            return -1;                                                                          \
-        }                                                                                       \
+                      << __LINE__ << "\n";                                                     \
+            cleanup();                                                                         \
+            return -1;                                                                         \
+        }                                                                                      \
     }
 
 extern "C" {
@@ -231,10 +231,10 @@ int dispatcher_run_aquant_gemm(const void* A,
     // Allocate device buffers.
     // A may be a packed type (pk_int4_t): 2 logical values per byte.
     // elements_to_bytes<T>(n) handles the packed case via numeric_traits::PackedSize.
-    HIP_CHECK(hipMalloc(&A_dev,  elements_to_bytes<ADataType>(M * K)));
+    HIP_CHECK(hipMalloc(&A_dev, elements_to_bytes<ADataType>(M * K)));
     HIP_CHECK(hipMalloc(&AQ_dev, elements_to_bytes<QDataType>(M * QK_A)));
-    HIP_CHECK(hipMalloc(&B_dev,  elements_to_bytes<BDataType>(K * N)));
-    HIP_CHECK(hipMalloc(&C_dev,  elements_to_bytes<CDataType>(M * N)));
+    HIP_CHECK(hipMalloc(&B_dev, elements_to_bytes<BDataType>(K * N)));
+    HIP_CHECK(hipMalloc(&C_dev, elements_to_bytes<CDataType>(M * N)));
 
     // Copy A to device.  For pk_int4 A the raw i4x4 values must be permuted for the
     // device implementation -- mirrors run_gemm_quant_example.inc:758-763.
