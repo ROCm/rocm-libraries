@@ -4,114 +4,114 @@
       "cases": {
         "attention/gfx942/2d_bf16_d128_b64": {
           "arch": "gfx942",
-          "bytes": 400332,
+          "bytes": 393876,
           "family": "attention",
           "kernel_name": "rocke_uattn2d_tiled_d128_b64_h4kv2_bf16",
-          "sha256": "094d8c9aebac88f8714c1ecf5cd03eb2855a9a290ba5a5d83b0abeb2840956b3",
+          "sha256": "b4eef40529fdfcff153d91817a129e49eddcc53be5cfd9143ca6c550d78e1f8a",
           "status": "ok"
         },
         "attention/gfx942/2d_fp16_d128_b64": {
           "arch": "gfx942",
-          "bytes": 388654,
+          "bytes": 382206,
           "family": "attention",
           "kernel_name": "rocke_uattn2d_tiled_d128_b64_h4kv2_fp16",
-          "sha256": "2a8a887c95a17388ba7d9497f988ca1043a85193f1ef99480de74afa3400def4",
+          "sha256": "2d3fa65fded01fdadc4e09499036672b035971914b00a94233cd589ae735a431",
           "status": "ok"
         },
         "attention/gfx942/3d_bf16_d128_b64": {
           "arch": "gfx942",
-          "bytes": 232447,
+          "bytes": 228890,
           "family": "attention",
           "kernel_name": "rocke_uattn3d_tiled_d128_b64_h4kv2_seg4_bf16",
-          "sha256": "b7b2e738dc87a6d1c47f9982bf70e1cd6834ba31bd579f8706fca5308e5473fe",
+          "sha256": "479c839e6965a8263dabdecb2e018709613f639e82a6e9b48c4da73630758af4",
           "status": "ok"
         },
         "attention/gfx942/3d_fp16_d128_b64": {
           "arch": "gfx942",
-          "bytes": 231086,
+          "bytes": 227537,
           "family": "attention",
           "kernel_name": "rocke_uattn3d_tiled_d128_b64_h4kv2_seg4_fp16",
-          "sha256": "eac8a07fea1a2b1cdd9f279724f4050b5d50cc896d2dd34de4660c5e11765a97",
+          "sha256": "b27b6e624e881f45ff15803ba6b311e90781dfec5e096b2c4094d1a225a81234",
           "status": "ok"
         },
         "attention/gfx942/reduce_bf16_d128": {
           "arch": "gfx942",
-          "bytes": 9403,
+          "bytes": 9390,
           "family": "attention",
           "kernel_name": "rocke_uattn_reduce_tiled_d128_h4_seg4_bf16",
-          "sha256": "8b867fa99006487e6af097686fc3edd168e90a3ac53e9100dcb7e76e7bc81915",
+          "sha256": "c523413098088fd180c60defca8a8448a14a57e8fb4d05954fa217834cba1d45",
           "status": "ok"
         },
         "attention/gfx942/reduce_fp16_d128": {
           "arch": "gfx942",
-          "bytes": 9391,
+          "bytes": 9378,
           "family": "attention",
           "kernel_name": "rocke_uattn_reduce_tiled_d128_h4_seg4_fp16",
-          "sha256": "dbc46916c2aa3b34e4c74748785f9b4ea28b3993160839ac5ded67ec36ec22a0",
+          "sha256": "0b232afc576c4f9eb53b90b0bc892c547a28101c17a3301ca0775afd0fd84697",
           "status": "ok"
         },
         "attention/gfx950/2d_bf16_d128_b64": {
           "arch": "gfx950",
-          "bytes": 170079,
+          "bytes": 167253,
           "family": "attention",
           "kernel_name": "rocke_uattn2d_tiled_d128_b64_h4kv2_bf16",
-          "sha256": "5904adbd8697045a23925db3bdd1b1c3826c8b20c821dcde0589b90ae6bcb801",
+          "sha256": "d561253a0846addb64ffd9cc07ee8ebbf367a98a697bf14eaab5919acb167eb5",
           "status": "ok"
         },
         "attention/gfx950/2d_fp16_d128_b64": {
           "arch": "gfx950",
-          "bytes": 168494,
+          "bytes": 165676,
           "family": "attention",
           "kernel_name": "rocke_uattn2d_tiled_d128_b64_h4kv2_fp16",
-          "sha256": "91731485b17556e75c6cb769cd9354e6a5f90c9e21587b109205c814eece96d6",
+          "sha256": "76742642dbf16625b468895becb044f29655165f3cad5aa47a32eb41b896285b",
           "status": "ok"
         },
         "attention/gfx950/2d_fp16_d128_b64_alibi": {
           "arch": "gfx950",
-          "bytes": 174251,
+          "bytes": 170851,
           "family": "attention",
           "kernel_name": "rocke_uattn2d_tiled_d128_b64_h4kv2_fp16_alibi",
-          "sha256": "268ca3573f464dce229abe0c1475e316b2bcbaa77ce9bb3663e35fb2a92fc7bc",
+          "sha256": "3802292ba1482e456d2f041a0bc9e1332c2a3919613aaec28298bb8225c81d38",
           "status": "ok"
         },
         "attention/gfx950/2d_fp16_d128_b64_softcap": {
           "arch": "gfx950",
-          "bytes": 177302,
+          "bytes": 173708,
           "family": "attention",
           "kernel_name": "rocke_uattn2d_tiled_d128_b64_h4kv2_fp16_softcap",
-          "sha256": "e1eaba2abe3c632f0c76e1a66b18a217dd4ed9f0cffcd9b8ef33748f8c36dfed",
+          "sha256": "70df55876ad3ce9d3a2d3cefd1204fafbded68d44f2660be21a8ec786ed82151",
           "status": "ok"
         },
         "attention/gfx950/3d_bf16_d128_b64": {
           "arch": "gfx950",
-          "bytes": 232447,
+          "bytes": 228890,
           "family": "attention",
           "kernel_name": "rocke_uattn3d_tiled_d128_b64_h4kv2_seg4_bf16",
-          "sha256": "b7b2e738dc87a6d1c47f9982bf70e1cd6834ba31bd579f8706fca5308e5473fe",
+          "sha256": "479c839e6965a8263dabdecb2e018709613f639e82a6e9b48c4da73630758af4",
           "status": "ok"
         },
         "attention/gfx950/3d_fp16_d128_b64": {
           "arch": "gfx950",
-          "bytes": 231086,
+          "bytes": 227537,
           "family": "attention",
           "kernel_name": "rocke_uattn3d_tiled_d128_b64_h4kv2_seg4_fp16",
-          "sha256": "eac8a07fea1a2b1cdd9f279724f4050b5d50cc896d2dd34de4660c5e11765a97",
+          "sha256": "b27b6e624e881f45ff15803ba6b311e90781dfec5e096b2c4094d1a225a81234",
           "status": "ok"
         },
         "attention/gfx950/reduce_bf16_d128": {
           "arch": "gfx950",
-          "bytes": 9403,
+          "bytes": 9390,
           "family": "attention",
           "kernel_name": "rocke_uattn_reduce_tiled_d128_h4_seg4_bf16",
-          "sha256": "8b867fa99006487e6af097686fc3edd168e90a3ac53e9100dcb7e76e7bc81915",
+          "sha256": "c523413098088fd180c60defca8a8448a14a57e8fb4d05954fa217834cba1d45",
           "status": "ok"
         },
         "attention/gfx950/reduce_fp16_d128": {
           "arch": "gfx950",
-          "bytes": 9391,
+          "bytes": 9378,
           "family": "attention",
           "kernel_name": "rocke_uattn_reduce_tiled_d128_h4_seg4_fp16",
-          "sha256": "dbc46916c2aa3b34e4c74748785f9b4ea28b3993160839ac5ded67ec36ec22a0",
+          "sha256": "0b232afc576c4f9eb53b90b0bc892c547a28101c17a3301ca0775afd0fd84697",
           "status": "ok"
         },
         "conv/gfx1151/n1h8c16k32r3": {
@@ -502,114 +502,114 @@
       "cases": {
         "attention/gfx942/2d_bf16_d128_b64": {
           "arch": "gfx942",
-          "bytes": 400432,
+          "bytes": 393972,
           "family": "attention",
           "kernel_name": "rocke_uattn2d_tiled_d128_b64_h4kv2_bf16",
-          "sha256": "2b748e1631bd87dbc704818590d650e27b3515f5df4d148d54f7dc8411159c88",
+          "sha256": "f174ea4d4de2a2f9ed44be631580783856897897e276fac077ab1239498e3b0c",
           "status": "ok"
         },
         "attention/gfx942/2d_fp16_d128_b64": {
           "arch": "gfx942",
-          "bytes": 388754,
+          "bytes": 382302,
           "family": "attention",
           "kernel_name": "rocke_uattn2d_tiled_d128_b64_h4kv2_fp16",
-          "sha256": "1c4694c50b0f6eb077a31ca09dcf66f784344d61571c8a75858d1632648354a0",
+          "sha256": "6a4684b595d4d092a922df0c96cc5aee550dfa530503e3e005cf199dea8c32f6",
           "status": "ok"
         },
         "attention/gfx942/3d_bf16_d128_b64": {
           "arch": "gfx942",
-          "bytes": 232547,
+          "bytes": 228986,
           "family": "attention",
           "kernel_name": "rocke_uattn3d_tiled_d128_b64_h4kv2_seg4_bf16",
-          "sha256": "00626199668ecbc7c39e44dbcbf4eab5e5f78303f857c090f67a662a7959d286",
+          "sha256": "fa545cbe2e9eae58284e4b69ae03d084767863e86bb3fc187c90e6857b85e295",
           "status": "ok"
         },
         "attention/gfx942/3d_fp16_d128_b64": {
           "arch": "gfx942",
-          "bytes": 231186,
+          "bytes": 227633,
           "family": "attention",
           "kernel_name": "rocke_uattn3d_tiled_d128_b64_h4kv2_seg4_fp16",
-          "sha256": "4832cc2a91cdafe4b490b0f8d2c85ca6af048ccd1fd24ee73a6faf908c59c5fa",
+          "sha256": "af58abc39ac3e98326f45cc33d21f4ac90bdc7c2069cd2a7898bd1d71bf92738",
           "status": "ok"
         },
         "attention/gfx942/reduce_bf16_d128": {
           "arch": "gfx942",
-          "bytes": 9414,
+          "bytes": 9397,
           "family": "attention",
           "kernel_name": "rocke_uattn_reduce_tiled_d128_h4_seg4_bf16",
-          "sha256": "5130b9b04b5547a7ced1e42929bd114d276969b3863b840196243277505af397",
+          "sha256": "513bf35b90ef0b436e2fcb1833ba7bdbfcaf55389ea43bdd8ce866514af7bb8a",
           "status": "ok"
         },
         "attention/gfx942/reduce_fp16_d128": {
           "arch": "gfx942",
-          "bytes": 9402,
+          "bytes": 9385,
           "family": "attention",
           "kernel_name": "rocke_uattn_reduce_tiled_d128_h4_seg4_fp16",
-          "sha256": "4576aded3985baa13913e6874aefeae418e6db115c6334d704df55dceedede80",
+          "sha256": "21070b5d12afb548e00e64b4468918185a2cb347711e92f6796f8cefdb7a87fe",
           "status": "ok"
         },
         "attention/gfx950/2d_bf16_d128_b64": {
           "arch": "gfx950",
-          "bytes": 170179,
+          "bytes": 167349,
           "family": "attention",
           "kernel_name": "rocke_uattn2d_tiled_d128_b64_h4kv2_bf16",
-          "sha256": "d012eba208dc4ff33bfb484e319acc7e06072933824288136d5bf6b4636724a1",
+          "sha256": "1e6eadb29eaf07ac3a17c1acb2217ccf1e66f4437cf4f23b2548ebf94ace5f4d",
           "status": "ok"
         },
         "attention/gfx950/2d_fp16_d128_b64": {
           "arch": "gfx950",
-          "bytes": 168594,
+          "bytes": 165772,
           "family": "attention",
           "kernel_name": "rocke_uattn2d_tiled_d128_b64_h4kv2_fp16",
-          "sha256": "acf2c549cf9143cf989d9003d8c0be2cd7f22dd5e6c3ecd13693b27ba0673b70",
+          "sha256": "eca633d97af15ff410c23ba2c660937c6d20d59e7d9f2f5cf9c6ab035d59ecc6",
           "status": "ok"
         },
         "attention/gfx950/2d_fp16_d128_b64_alibi": {
           "arch": "gfx950",
-          "bytes": 174351,
+          "bytes": 170947,
           "family": "attention",
           "kernel_name": "rocke_uattn2d_tiled_d128_b64_h4kv2_fp16_alibi",
-          "sha256": "2aa7d63ab16072c7fdac4f4f6df573e5a34db1ee40a1b78b1319412e60b0b1ef",
+          "sha256": "10a732857686d7ed3fdcdc15efa09b6fcf04b8f5da29ed00b9bd155e384b2c63",
           "status": "ok"
         },
         "attention/gfx950/2d_fp16_d128_b64_softcap": {
           "arch": "gfx950",
-          "bytes": 177402,
+          "bytes": 173804,
           "family": "attention",
           "kernel_name": "rocke_uattn2d_tiled_d128_b64_h4kv2_fp16_softcap",
-          "sha256": "1a108f20d97ccc9540b83ebc07440c28fbef11e0d1b85535451800780dafcca0",
+          "sha256": "49022e9df784e41f60fd42aa976a419b9836c431f39941c4defef4df9b84176c",
           "status": "ok"
         },
         "attention/gfx950/3d_bf16_d128_b64": {
           "arch": "gfx950",
-          "bytes": 232547,
+          "bytes": 228986,
           "family": "attention",
           "kernel_name": "rocke_uattn3d_tiled_d128_b64_h4kv2_seg4_bf16",
-          "sha256": "00626199668ecbc7c39e44dbcbf4eab5e5f78303f857c090f67a662a7959d286",
+          "sha256": "fa545cbe2e9eae58284e4b69ae03d084767863e86bb3fc187c90e6857b85e295",
           "status": "ok"
         },
         "attention/gfx950/3d_fp16_d128_b64": {
           "arch": "gfx950",
-          "bytes": 231186,
+          "bytes": 227633,
           "family": "attention",
           "kernel_name": "rocke_uattn3d_tiled_d128_b64_h4kv2_seg4_fp16",
-          "sha256": "4832cc2a91cdafe4b490b0f8d2c85ca6af048ccd1fd24ee73a6faf908c59c5fa",
+          "sha256": "af58abc39ac3e98326f45cc33d21f4ac90bdc7c2069cd2a7898bd1d71bf92738",
           "status": "ok"
         },
         "attention/gfx950/reduce_bf16_d128": {
           "arch": "gfx950",
-          "bytes": 9414,
+          "bytes": 9397,
           "family": "attention",
           "kernel_name": "rocke_uattn_reduce_tiled_d128_h4_seg4_bf16",
-          "sha256": "5130b9b04b5547a7ced1e42929bd114d276969b3863b840196243277505af397",
+          "sha256": "513bf35b90ef0b436e2fcb1833ba7bdbfcaf55389ea43bdd8ce866514af7bb8a",
           "status": "ok"
         },
         "attention/gfx950/reduce_fp16_d128": {
           "arch": "gfx950",
-          "bytes": 9402,
+          "bytes": 9385,
           "family": "attention",
           "kernel_name": "rocke_uattn_reduce_tiled_d128_h4_seg4_fp16",
-          "sha256": "4576aded3985baa13913e6874aefeae418e6db115c6334d704df55dceedede80",
+          "sha256": "21070b5d12afb548e00e64b4468918185a2cb347711e92f6796f8cefdb7a87fe",
           "status": "ok"
         },
         "conv/gfx1151/n1h8c16k32r3": {
