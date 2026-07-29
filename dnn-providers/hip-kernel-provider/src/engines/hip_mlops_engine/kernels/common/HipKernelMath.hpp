@@ -3,7 +3,6 @@
 
 #pragma once
 
-#include "FloatTypes.h"
 #include "VectorTypes.hpp"
 
 namespace hip_kernel_provider
