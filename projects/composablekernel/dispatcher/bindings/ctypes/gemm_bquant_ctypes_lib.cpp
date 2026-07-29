@@ -270,7 +270,8 @@ int dispatcher_run_bquant_gemm(const void* A,
             ck_tile::permute_vectors_i4x4_b(b_k_n_dev);
         }
 
-        HIP_CHECK(hipMemcpy(B_dev, b_k_n_dev.data(), elements_to_bytes<BDataType>(K * N), hipMemcpyHostToDevice));
+        HIP_CHECK(hipMemcpy(
+            B_dev, b_k_n_dev.data(), elements_to_bytes<BDataType>(K * N), hipMemcpyHostToDevice));
     }
     // Apply BQ preshuffle when required -- mirrors run_gemm_quant_example.inc:794-825
     // exactly. There are three cases:
