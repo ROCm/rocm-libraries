@@ -279,8 +279,9 @@ the kernels are data, and the single builder's job is to produce a plan that can
 the catalog does not build anything, so an engine with 150 kernels still has one builder and pays only
 for the kernels a plan actually needs. In the ordinary case that is the heuristic's top choice, and the
 plan holds one kernel loaded with its UDD bound. When the caller has opted into measurement, the builder
-prepares the candidates being sampled instead, each loaded and dispatch-ready in the same plan, so the
-measured winner can be chosen and cached ([Section 8](#8-end-to-end-flow)).
+prepares the candidates being sampled instead, each loaded and dispatch-ready in the same plan, with a
+UDD per pack they came from, so the measured winner can be chosen and cached
+([Section 8](#8-end-to-end-flow)).
 
 No new host or plugin-ABI interfaces are introduced; the generic engine satisfies hipDNN's existing
 contracts using descriptor data, and the new machinery it needs (the matcher, the expression
@@ -1071,7 +1072,8 @@ survivor. If a knob query never ran, the UHD loads here.
 able to launch, loading each one's `kernel_source` and evaluating its pack's UDD grid, block,
 shared-memory, and argument formulas over the bound token state from step 5. Ordinarily that is the
 single chosen kernel; under measurement it is the candidates being sampled, prepared the same way in
-the same plan ([Section 3](#3-how-it-works)).
+the same plan ([Section 3](#3-how-it-works)). Candidates can come from different packs, so a plan may
+hold several UDDs, each bound to the kernels from its own pack.
 *Stored:* the resulting plan, held by the execution context. Nothing is re-matched and nothing is
 re-scanned; every decision was made before this step.
 
@@ -1091,9 +1093,9 @@ launcher resolves each UDD argument against it by uid.
 | 6 | nothing | reports whether the catalog is non-empty | nothing |
 | 7 | nothing | hipDNN selects among engines; no descriptor is read | nothing |
 | 8 | UHD | first call needing an order, not a membership test | ranked catalog, cached with the catalog |
-| 9 | UDD | first question whose answer is a dispatch property | handle |
+| 9 | UDD of each surviving kernel's pack | first question whose answer is a dispatch property | handle |
 | 10 | UHD, if step 8 never ran | the plan needs an order too | execution context |
-| 11 | `kernel_source` of each kernel the plan must launch | only kernels the plan dispatches are loaded | plan, held by the execution context |
+| 11 | `kernel_source` and pack UDD of each kernel the plan must launch | only kernels the plan dispatches are loaded | plan, held by the execution context |
 | 12 | nothing | the plan holds everything the launch needs | nothing |
 
 **Base-path invariant: accept implies a non-empty catalog.** Returning true from `isApplicable` means
