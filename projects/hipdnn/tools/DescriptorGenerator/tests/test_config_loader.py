@@ -439,6 +439,19 @@ class TestTestDataParsing:
         with pytest.raises(ConfigError, match="mode_rules must cover.*SCATTER"):
             _validate_config(config)
 
+    def test_moe_mode_rules_require_baseline_without_optional_tensors(
+        self, load_test_config
+    ):
+        config = load_test_config("moe_grouped_matmul.yaml")
+        for rule in config.mode_rules:
+            if not rule.required_optional_tensors:
+                rule.required_optional_tensors = ["token_index"]
+
+        with pytest.raises(
+            ConfigError, match="at least one mode with no required optional tensors"
+        ):
+            _validate_config(config)
+
 
 # ---------------------------------------------------------------------------
 # Task 2B.3: _parse_frontend_config() and _parse_frontend_tensors()

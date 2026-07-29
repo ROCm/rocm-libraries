@@ -50,6 +50,16 @@ void {{ op.class_name }}::finalize()
                   "{{ op.class_name }}::finalize() failed: {{ tf.attr_suffix }} tensor must have "
                   "{{ tf.expected_data_type }} data type");
 {% endfor %}
+{% for tf in op.optional_tensor_fields if tf.expected_data_type %}
+    if({{ tf.member_name }} != nullptr)
+    {
+        THROW_IF_TRUE({{ tf.member_name }}->getData().data_type
+                          != {{ op.fbs_namespace }}::DataType::{{ tf.expected_data_type }},
+                      HIPDNN_STATUS_BAD_PARAM,
+                      "{{ op.class_name }}::finalize() failed: {{ tf.attr_suffix }} tensor must "
+                      "have {{ tf.expected_data_type }} data type");
+    }
+{% endfor %}
 {% if op.mode_rules %}
 {% set tf_by_name = op.tensor_field_by_name %}
 {% set df_by_name = op.data_field_by_name %}
@@ -64,13 +74,6 @@ void {{ op.class_name }}::finalize()
                       HIPDNN_STATUS_BAD_PARAM,
                       "{{ op.class_name }}::finalize() failed: {{ rule.mode }} mode "
                       "requires {{ tf.attr_suffix }} tensor");
-{% if tf.expected_data_type %}
-        THROW_IF_TRUE({{ tf.member_name }}->getData().data_type
-                          != {{ op.fbs_namespace }}::DataType::{{ tf.expected_data_type }},
-                      HIPDNN_STATUS_BAD_PARAM,
-                      "{{ op.class_name }}::finalize() failed: {{ tf.attr_suffix }} tensor must "
-                      "have {{ tf.expected_data_type }} data type");
-{% endif %}
 {% endfor %}
 {% for tf in op.optional_tensor_fields if tf.name not in rule.required_optional_tensors %}
         THROW_IF_TRUE({{ tf.member_name }} != nullptr,

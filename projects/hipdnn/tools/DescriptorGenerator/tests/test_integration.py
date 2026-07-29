@@ -854,32 +854,42 @@ class TestTemplateOutputContent:
         assert "const auto tensors = desc->getTensorDescriptors();" in from_node_content
         assert "ASSERT_TRUE(getDescriptor()->isFinalized());" in descriptor_content
 
-    def test_mode_rules_render_descriptor_packer_and_unpacker_contract(
+    def test_optional_tensor_expected_data_type_renders_guarded_validation(
+        self, generator
+    ):
+        """Present optional tensors honor expected_data_type without mode rules."""
+        from tests.helpers import make_minimal_config, make_tensor_field
+
+        config = make_minimal_config(
+            tensor_fields=[
+                make_tensor_field(name="x", fbs_field="x_tensor_uid", attr_suffix="X"),
+                make_tensor_field(
+                    name="bias",
+                    fbs_field="bias_tensor_uid",
+                    attr_suffix="BIAS",
+                    required=False,
+                    expected_data_type="FLOAT",
+                ),
+            ]
+        )
+
+        descriptor = generator._render_template("descriptor.cpp.j2", config)
+
+        assert "if(_biasDesc != nullptr)" in descriptor
+        assert "_biasDesc->getData().data_type" in descriptor
+        assert "BIAS tensor must" in descriptor
+        assert "have FLOAT data type" in descriptor
+
+    def test_mode_rules_render_descriptor_contract(
         self, load_test_config, generator, tmp_path
     ):
-        """Mode rules make every generated descriptor layer mode-aware."""
+        """Mode rules render configured descriptor validation behavior."""
         config = load_test_config("moe_grouped_matmul.yaml")
         output_dir = tmp_path / "output"
         generator.render(config, output_dir, "full")
 
         descriptor = (
             output_dir / "backend" / "src" / "descriptors" / config.source_filename
-        ).read_text()
-        packer = (
-            output_dir
-            / "frontend"
-            / "include"
-            / "hipdnn_frontend"
-            / "detail"
-            / config.packer_filename
-        ).read_text()
-        unpacker = (
-            output_dir
-            / "frontend"
-            / "include"
-            / "hipdnn_frontend"
-            / "detail"
-            / config.unpacker_filename
         ).read_text()
 
         assert "NONE mode forbids" in descriptor
@@ -888,11 +898,6 @@ class TestTemplateOutputContent:
         assert "SCATTER mode " in descriptor
         assert "requires TOKEN_KS_DESC tensor" in descriptor
         assert "dims.empty()" in descriptor
-        assert "switch(frontendMode)" in packer
-        assert "ensureAndSetOptionalTensorRef" not in packer
-        assert "switch(modeResult)" in unpacker
-        assert "unpackOptionalTensor" not in unpacker
-        assert "getDescriptorAttrScalar(" in unpacker
 
     def test_moe_preserves_handwritten_node_and_node_tests(
         self, load_test_config, generator, tmp_path

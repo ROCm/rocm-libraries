@@ -785,6 +785,11 @@ def _validate_config(config: OperationConfig) -> None:
                 f"Operation '{config.name}': mode_rules must include every optional "
                 f"tensor in at least one mode; missing {sorted(missing_optional_tensors)}."
             )
+        if not any(not rule.required_optional_tensors for rule in config.mode_rules):
+            raise ConfigError(
+                f"Operation '{config.name}': mode_rules requires at least one mode "
+                "with no required optional tensors for generated baseline tests."
+            )
 
     if config.mode_integration_scenarios:
         if len(config.mode_fields) != 1:
