@@ -56,10 +56,10 @@ launches the kernel with no new code, and because the behavior lives in one shar
 cross-cutting feature is written once and inherited by every descriptor-backed kernel. It
 works from a small family of reusable descriptors, bound together for a family of kernels by a **KDP
 (Kernel Descriptor Pack)**, the cohesive file that packages a kernel family and the pieces it shares.
-Five of them share the shape `U*D`, Universal-something-Descriptor, and the middle letter is the
-something: U**M**D matches, U**D**D dispatches, U**E**D is the engine, U**H**D is the heuristic, U**K**D
-is the kernel. The KMD does not follow that pattern and is not per-kernel: it is the engine-wide schema
-the UKDs fill in.
+There are five **Universal** descriptors, and the middle letter of each says what it describes: a
+U**M**D matches, a U**D**D dispatches, a U**E**D is the engine, a U**H**D is the heuristic, and a
+U**K**D is the kernel. Two more complete the set: the **KMD** is the engine-wide metadata schema every
+UKD fills in, and the **KDP** is the pack that binds them together.
 
 - **UMD (Universal Match Descriptor).** A matcher: when a kernel applies, given as a graph pattern and a
   declarative criteria expression, which also bind the named variables the launch references.
@@ -72,11 +72,11 @@ the UKDs fill in.
 - **UHD (Universal Heuristic Descriptor).** One kernel-selection model, one per engine: given the
   kernels that fit a graph, the engine's **catalog** for that graph, it picks the best for the problem,
   ranking on their metadata, the problem shape, and device details.
-- **KMD (Kernel Metadata Descriptor).** The engine's metadata schema: the variant fields every kernel in
-  the engine carries, each with a type and an optional default (tile size, block size, and the like).
-  Each UKD supplies concrete values; that completed tuple is the kernel's unique key in the catalog,
-  the engine's heuristic ranks the catalog on it, and matchers read the fields as
-  `$kernel.<field>`.
+- **KMD (Kernel Metadata Descriptor).** The engine's metadata schema, one per engine rather than one per
+  kernel: the variant fields every kernel in the engine carries, each with a type and an optional
+  default (tile size, block size, and the like). Each UKD supplies concrete values; that completed tuple
+  is the kernel's unique key in the catalog, the engine's heuristic ranks the catalog on it, and
+  matchers read the fields as `$kernel.<field>`.
 - **UKD (Universal Kernel Descriptor).** One launchable kernel, carrying no logic of its own: its source
   details plus concrete metadata values for the fields the engine's KMD declares. The source is either a
   compiled kernel or the details for building it ahead-of-time (AOT). A UKD lives in a KDP and inherits
@@ -187,7 +187,7 @@ becomes data instead of hand-written code.
 | **UDD** (dispatch) | Invoke a kernel: args & ordering, grid/block, shared mem, workspace | The bespoke launch and argument-wiring code |
 | **UED** (engine) | A stable engine identity with its heuristic, metadata schema, knobs, and behavior/numerical notes | The provider's engine-registration table plus a `HIPDNN_REGISTER_ENGINE` id |
 | **UHD** (heuristic) | Rank the kernels within one engine and pick one | A ranking model living inside an engine's dispatcher |
-| **KMD** (metadata) | Declare the engine's variant fields, each with a type and optional default; the field set must be rich enough that every kernel variant in the engine is uniquely described by its values | The compile-time template and tuning parameters that distinguish one kernel variant from another |
+| **KMD** (metadata) | One per engine, not per kernel: declare the engine's variant fields, each with a type and optional default; the field set must be rich enough that every kernel variant in the engine is uniquely described by its values | The compile-time template and tuning parameters that distinguish one kernel variant from another |
 
 A UED is deliberately 1:1 with a hipDNN engine, so "the engine" and "the UED" name the same unit going
 forward. The intent is that an engine serves a scoped family of kernels: tight enough that one heuristic
@@ -2231,11 +2231,13 @@ choices; none is a dependency.
   metadata schema (KMD); many KDPs may share one engine.
 - **UHD (Universal Heuristic Descriptor):** one kernel-selection model that ranks the kernels fitting
   a graph and picks one. One per engine, named by the UED.
-- **KMD (Kernel Metadata Descriptor):** the engine's variant fields, each with a type and optional
-  default; it is the feature space the UHD ranks over, so it and the UHD are both engine-owned and change
-  together. Each UKD fills in concrete values, and that completed tuple is the kernel's unique key in
-  the engine's catalog, so the fields must be rich enough to tell every variant apart. Matchers read
-  them as `$kernel.<field>`. One per engine, named by the UED ([Section 4](#4-descriptor-formats)).
+- **KMD (Kernel Metadata Descriptor):** despite the name, an **engine-wide schema, not a per-kernel
+  file**: one KMD per engine, named by the UED, declaring the variant fields every kernel in that
+  engine carries, each with a type and optional default. It is the feature space the UHD ranks over, so
+  it and the UHD are both engine-owned and change together. Each UKD fills in concrete values, and that
+  completed tuple is the kernel's unique key in the engine's catalog, so the fields must be rich enough
+  to tell every variant apart. Matchers read them as `$kernel.<field>`
+  ([Section 4](#4-descriptor-formats)).
 - **Launch:** one dispatch step in a UDD (grid, block, shared memory, argument signature) with a named
   source slot, paired at runtime with the UKD source that fills it. A UDD holds one Launch for a
   single-kernel pack, several run in order for a multi-launch pack
