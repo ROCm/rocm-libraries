@@ -122,7 +122,9 @@ scalar value in the variant pack.
    <https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipdnn/samples/batchnorm/BnInferenceWithVariance.cpp>`_,
    `hipdnn_sample_fused_bn_training_activ
    <https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipdnn/samples/batchnorm/FusedBnTrainingActiv.cpp>`_,
-   and `hipdnn_sample_fused_bn_inference_variance_activ
-   <https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipdnn/samples/batchnorm/FusedBnInferenceVarianceActiv.cpp>`_)
+   `hipdnn_sample_fused_bn_inference_variance_activ
+   <https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipdnn/samples/batchnorm/FusedBnInferenceVarianceActiv.cpp>`_,
+   and `hipdnn_sample_sdpa_fprop
+   <https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipdnn/samples/sdpa/SdpaFprop.cpp>`_)
    demonstrate both modes. Pass ``--runtime-pass-by-value`` to activate the runtime pass-by-value
    path.

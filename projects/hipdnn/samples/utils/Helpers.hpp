@@ -111,6 +111,14 @@ enum class SampleType
     BN_WITH_PASS_BY_VALUE, // batchnorm samples that support pass-by-value tensors (epsilon)
 };
 
+// Single source of truth for which sample types accept --runtime-pass-by-value, so the
+// help text and the CLI parser can't drift out of sync as more sample types gain support.
+inline bool supportsRuntimePassByValue(SampleType sampleType)
+{
+    return sampleType == SampleType::BN_TRAINING || sampleType == SampleType::BN_WITH_PASS_BY_VALUE
+           || sampleType == SampleType::SDPA;
+}
+
 // HELP MESSAGE
 
 inline void printSampleHelp(const std::string& sampleName,
@@ -149,7 +157,7 @@ inline void printSampleHelp(const std::string& sampleName,
                   << "  --full-training             Use running statistics\n";
     }
 
-    if(sampleType == SampleType::BN_TRAINING || sampleType == SampleType::BN_WITH_PASS_BY_VALUE)
+    if(supportsRuntimePassByValue(sampleType))
     {
         std::cout << "  --runtime-pass-by-value     Supply pass-by-value tensors as runtime host\n"
                   << "                              values instead of compile-time constants\n";
@@ -312,9 +320,7 @@ inline Config
         {
             config.useRunningStats = true;
         }
-        else if(arg == "--runtime-pass-by-value"
-                && (sampleType == SampleType::BN_TRAINING
-                    || sampleType == SampleType::BN_WITH_PASS_BY_VALUE))
+        else if(arg == "--runtime-pass-by-value" && supportsRuntimePassByValue(sampleType))
         {
             config.useRuntimePassByValue = true;
         }
