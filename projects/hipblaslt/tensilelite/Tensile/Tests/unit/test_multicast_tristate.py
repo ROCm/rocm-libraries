@@ -117,8 +117,9 @@ class TestDerivation:
         cfg = _write_variant(tmp_path, _STREAMK_CLUSTER, "sk_auto_mc.yaml")
         states = _derive_states(cfg)
         assert states, "expected >=1 derived solution"
-        assert all(st["StreamKMulticast"] == 1 for st in states), (
-            [st.get("StreamKMulticast") for st in states])
+        from Tensile.Common import streamKMulticast
+        assert all(streamKMulticast(st) for st in states), (
+            [(st.get("StreamK"), st.get("ClusterDim")) for st in states])
         assert all(st["Multicast"] == 1 for st in states), (
             [st["Multicast"] for st in states])
         # The cooperative multicast now pairs the masks with the cluster-scope

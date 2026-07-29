@@ -36,7 +36,7 @@ from Tensile.AsmStoreState import VectorDataTypes
 from Tensile.Common import assignParameterWithDefault, IsaInfo, \
                     print2, printExit, printWarning, \
                     roundUp, INDEX_CHARS, IsaVersion, SemanticVersion, \
-                    roundUpToNearestMultiple, effectiveMatrixInstMN
+                    roundUpToNearestMultiple, effectiveMatrixInstMN, streamKMulticast
 from Tensile.Common.DataType import DataType
 from Tensile.Common.TypeValidationErrors import ConfigTypeError
 from Tensile.SolutionStructs.LdsPadding import get_fp4_mt_config, get_fp8_mt_config, get_mxs_mt_config, \
@@ -250,7 +250,7 @@ def _validateStreamKClusterReduction(state, printRejectionReason, isaInfoMap):
   # Pure reduction ([1, C]) has Cs = ClusterDim[0] = 1, so StreamKMulticast is
   # off. Factored ([Cs,Ck] with BOTH axes > 1) would turn both on, which is
   # rejected in the SK cluster guard. Defensive: reject the combination here too.
-  if state.get("StreamKMulticast", 0):
+  if streamKMulticast(state):
     reject(state, printRejectionReason,
            "Factored StreamK cluster [Cs,Ck] with both axes > 1 is not "
            "supported; use ClusterDim=[C,1] (multicast) or [1,C] (reduction)")
@@ -331,7 +331,7 @@ def _validateStreamKMulticast(state, printRejectionReason, isaInfoMap):
   cluster rather than an explicit opt-in.
   See docs/design/cluster-load-component-and-streamk-multicast.md.
   """
-  if not state.get("StreamKMulticast", 0):
+  if not streamKMulticast(state):
     return True
 
   # Multicast (Cs>1) and reduction (Ck>1) both on is the FACTORED cluster
@@ -1256,16 +1256,13 @@ class Solution(collections.abc.Mapping):
           reject(state, printRejectionReason, "UseSubtileImpl=1 PrefetchAcrossPersistent not supported with DirectToVgpr MX scale tensors")
 
     state["ClusterBarrier"] = False
-    # StreamKMulticast is a DERIVED-ONLY internal state key (not a valid/benchmark
-    # parameter -- see ValidParameters.py). Seed it off here (mirroring the
-    # ClusterBarrier default above) so it is always present on state; the collapse
-    # below is the ONLY place it is turned on.
-    state["StreamKMulticast"] = 0
-    # StreamKClusterReduction is a DERIVED-ONLY internal state key (like
-    # StreamKMulticast): reduction is not a user opt-in -- it is expressed
-    # purely by the cluster shape ClusterDim = [1, C] (Ck = ClusterDim[1] > 1).
-    # Seed it off here (mirroring StreamKMulticast); the collapse below is its
-    # sole enable site.
+    # The StreamK=3 DP cooperative B-multicast fast path is no longer stored as a
+    # separate derived state key: it is derived on demand from ClusterDim via the
+    # streamKMulticast(state) helper (StreamK==3 and ClusterDim[0] = Cs > 1).
+    # StreamKClusterReduction is a DERIVED-ONLY internal state key: reduction is
+    # not a user opt-in -- it is expressed purely by the cluster shape
+    # ClusterDim = [1, C] (Ck = ClusterDim[1] > 1). Seed it off here (mirroring the
+    # ClusterBarrier default above); the collapse below is its sole enable site.
     state["StreamKClusterReduction"] = 0
     # ClusterDim-driven StreamK cluster derivation (fully param-free). On StreamK=3
     # a non-[1,1] ClusterDim = [Cs, Ck] AUTO-ENABLES the cooperative cluster path;
@@ -1286,9 +1283,7 @@ class Solution(collections.abc.Mapping):
     # non-clustered state, which some partial-state derivation call sites construct
     # without a StreamK key. See docs/design/streamk-wg-clusters.md.
     if state["ClusterDim"] != [1, 1] and state.get("StreamK", 0) == 3:
-      cs = state["ClusterDim"][0]
       ck = state["ClusterDim"][1]
-      state["StreamKMulticast"] = 1 if cs > 1 else 0
       state["StreamKClusterReduction"] = 1 if ck > 1 else 0
     # Multicast tri-state (see ValidParameters): -1 auto (legacy), 0 off, 1 on.
     # Default -1 reproduces the ClusterDim-coupled derivation, so YAML that omits
@@ -1307,8 +1302,8 @@ class Solution(collections.abc.Mapping):
       state["Multicast"] = 1
     elif mc == 0:
       state["Multicast"] = 0
-    elif state.get("StreamKMulticast", 0):
-      # StreamKMulticast (auto-derived above from StreamK=3 + ClusterDim) drives
+    elif streamKMulticast(state):
+      # StreamKMulticast (auto-derived from StreamK=3 + ClusterDim) drives
       # TDM B-multicast through the ClusterLoad component (its [C,1] cluster is
       # spatial DP peers, not the legacy subtile coupling). The C co-resident
       # peers must stay in lockstep around each multicast tensor_load_to_lds, so
@@ -2130,7 +2125,6 @@ class Solution(collections.abc.Mapping):
       state["StreamKXCCMapping"] = 0
       state["StreamKFixupTreeReduction"] = 0
       state["StreamKClusterReduction"] = 0
-      state["StreamKMulticast"] = 0
       state["DebugStreamK"] = 0
       state["PrefetchAcrossPersistent"] = 0
       state["DebugPersistentKernelLoopForever"] = False

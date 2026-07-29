@@ -75,7 +75,11 @@ def _kernel(*, multicast=True, clusterDim=(2, 2), tdmA=True, tdmB=True,
         "TDMInst": tdmInst,
         "ProblemType": {"Sparse": sparse},
         "PrefetchAcrossPersistent": pap,
-        "StreamKMulticast": streamKMulticast,
+        # The StreamK=3 DP cooperative B-multicast path is now derived from
+        # StreamK==3 + ClusterDim[0] > 1 (streamKMulticast helper), not a stored
+        # state key. Drive it here by setting StreamK (the streamKMulticast=True
+        # cases all use a ClusterDim with Cs = clusterDim[0] > 1).
+        "StreamK": 3 if streamKMulticast else 0,
     }
 
 

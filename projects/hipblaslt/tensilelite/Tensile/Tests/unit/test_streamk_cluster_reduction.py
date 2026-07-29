@@ -254,7 +254,7 @@ class TestReductionValidation:
     @staticmethod
     def _state(**overrides):
         st = {
-            "StreamKClusterReduction": 1, "StreamKMulticast": 0, "StreamK": 3,
+            "StreamKClusterReduction": 1, "StreamK": 3,
             "StreamKAtomic": 0, "StreamKForceDPOnly": 0, "StreamKXCCMapping": 0,
             "ClusterDim": [1, 4], "ISA": [12, 5, 0], "TDMInst": 3,
         }
@@ -278,8 +278,10 @@ class TestReductionValidation:
         assert self._validate(self._state(StreamKClusterReduction=0)) is True
 
     def test_reject_multicast_combo(self):
-        # #9611 keeps multicast and cluster reduction mutually exclusive.
-        assert self._validate(self._state(StreamKMulticast=1)) is False
+        # #9611 keeps multicast and cluster reduction mutually exclusive. The
+        # multicast role is derived from ClusterDim[0] (Cs), so a factored
+        # [Cs,Ck] with both axes > 1 turns both on -> the combo reject fires.
+        assert self._validate(self._state(ClusterDim=[2, 4])) is False
 
     def test_reject_streamk_not_3(self):
         assert self._validate(self._state(StreamK=4)) is False

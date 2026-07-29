@@ -10,7 +10,7 @@ Capability-selected (``HasTDM`` + ``TDMInst == 3``), like ``TensorDataMoverLoad`
 """
 
 from ..Component import ClusterLoad
-from ..Common import clusterEnabled
+from ..Common import clusterEnabled, streamKMulticast
 from typing import Mapping
 from rocisa.code import Module, Label
 from rocisa.container import sgpr
@@ -36,7 +36,7 @@ class ClusterLoadTDM(ClusterLoad):
         across the [C,1] cluster while A stays per-workgroup -- the combined
         parity mask would be wrong for both.
         """
-        if kernel.get("StreamKMulticast", 0):
+        if streamKMulticast(kernel):
             return False
         tdmA: bool = kernel["enableTDMA"]
         tdmB: bool = kernel["enableTDMB"]
@@ -51,7 +51,7 @@ class ClusterLoadTDM(ClusterLoad):
         (any ``MXS`` prefix stripped). StreamK forces the split name so B never
         resolves to the never-declared combined SGPR.
         """
-        if kernel.get("StreamKMulticast", 0):
+        if streamKMulticast(kernel):
             string = tc.removeprefix("MXS") if tc.startswith("MXS") else tc
             return f"MulticastMask{string}"
         if waveSeparated and not subtile:
@@ -82,7 +82,7 @@ class ClusterLoadTDM(ClusterLoad):
         live past the prologue -- freeing it makes those reuses reference an
         undeclared SGPR (``expected absolute expression`` at assembly time).
         """
-        return bool(kernel.get("PrefetchAcrossPersistent") and kernel.get("StreamKMulticast", 0))
+        return bool(kernel.get("PrefetchAcrossPersistent") and streamKMulticast(kernel))
 
     def papDropsSelfOnlyMaskA(self, kernel: Mapping) -> bool:
         """True when the PAP-live A mask can be freed because it is self-only.

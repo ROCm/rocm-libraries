@@ -845,20 +845,19 @@ validParameters = { # we need to make sure this matches develop
     # 0: use linear reduction
     # 1: use tree reduction
     "StreamKFixupTreeReduction": [0, 1],
-    # NOTE: StreamKMulticast and StreamKClusterReduction (the gfx1250 StreamK DP
-    # cooperative cluster-load / TDM B-multicast fast path and the cluster split-
-    # barrier K-reduction fast path) are intentionally NOT valid/benchmark
-    # parameters. They are DERIVED-ONLY internal state keys (see the ClusterBarrier
-    # precedent): Solution.assignProblemIndependentDerivedParameters auto-enables
-    # them for StreamK==3 purely from the cluster shape ClusterDim = [Cs, Ck]
-    # (StreamKMulticast iff Cs = ClusterDim[0] > 1, StreamKClusterReduction iff
-    # Ck = ClusterDim[1] > 1) -- so [C,1] = pure multicast, [1,C] = pure reduction.
-    # _validateStreamKMulticast / _validateStreamKClusterReduction then hard-reject
-    # any cluster config that cannot satisfy their constraints. They must not be
-    # user/YAML-settable, so they have no entry here (checkParametersAreValid would
-    # otherwise accept them as a fork/constant param). They still serialize to C++
-    # via Contractions.SizeMapping (streamKMulticast / streamKClusterReduction, read
-    # with d.get()). See docs/design/streamk-wg-clusters.md.
+    # NOTE: the gfx1250 StreamK DP cooperative cluster-load / TDM B-multicast fast
+    # path and the cluster split-barrier K-reduction fast path are intentionally
+    # NOT valid/benchmark parameters and are auto-derived for StreamK==3 purely
+    # from the cluster shape ClusterDim = [Cs, Ck] -- [C,1] = pure multicast,
+    # [1,C] = pure reduction. The B-multicast path is no longer a state key at all:
+    # it is derived on demand via the streamKMulticast(state) helper (StreamK==3 and
+    # ClusterDim[0] = Cs > 1). StreamKClusterReduction remains a DERIVED-ONLY
+    # internal state key (iff Ck = ClusterDim[1] > 1). _validateStreamKMulticast /
+    # _validateStreamKClusterReduction hard-reject any cluster config that cannot
+    # satisfy their constraints. Neither is user/YAML-settable (no entry here).
+    # ClusterDim is the single source of truth for the multicast axis and is what
+    # serializes to C++ (SizeMapping.clusterDim); only StreamKClusterReduction still
+    # serializes via Contractions.SizeMapping. See docs/design/streamk-wg-clusters.md.
     # Debug settings for stream-k kernels to disable parts of the kernel
     #   Bit 0: Don't generate fixup code
     #   Bit 1: Don't generate write to partials code
