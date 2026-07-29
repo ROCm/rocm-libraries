@@ -152,6 +152,20 @@ const auto& GetTestParams()
     return params;
 }
 
+// Bwd-data grid-overflow (subbatch) test case
+// Bwd-data launch grid ∝ n·c; need n·c > MAX_GRID_SIZE (16M) to trigger overflow.
+// n=16777217, c=1 → n·c = 16777217 > 16M → exercises the unhandled overflow path.
+auto GetSubbatchTestCaseBwd()
+{
+    using TestCase = miopen::unit_tests::ConvTestCase;
+    return std::vector{
+        // clang-format off
+        // n·c > 16M: triggers grid-dimension overflow in naive Bwd-data kernel launch
+        TestCase{{16777217, 1, 1, 1}, {1, 1, 1, 1}, {0, 0}, {1, 1}, {1, 1}, miopenHalf},
+        // clang-format on
+    };
+}
+
 } // namespace
 
 using GPU_UnitTestConvSolverDirectNaiveBwd_FP16  = GPU_UnitTestConvSolverBwd_FP16;
@@ -225,20 +239,9 @@ INSTANTIATE_TEST_SUITE_P(Full,
                                           testing::Values(miopenConvolutionAlgoDirect),
                                           testing::ValuesIn(GetConvTestCasesFull(miopenFloat))));
 
-// Subbatch chunking test case (3D convolution triggering 2-chunk processing)
-// MAX_GRID_SIZE = 16M, batch_chunk_size = 16M/k
-// n=17, k=1000000: batch_chunk_size=16, n>16 triggers 2-chunk processing
-auto GetSubbatchTestCase()
-{
-    using TestCase = miopen::unit_tests::ConvTestCase;
-    return std::vector{
-        // clang-format off
-        TestCase{{17, 1, 1, 1, 1}, {1000000, 1, 1, 1, 1}, {0, 0, 0}, {1, 1, 1}, {1, 1, 1}, miopenHalf},
-        // clang-format on
-    };
-}
-
-// Full: Subbatch chunking test (tests 2-chunk processing to prevent grid dimension overflow)
+// Full: Bwd-data grid-overflow test (n·c > 16M crosses MAX_GRID_SIZE boundary)
 INSTANTIATE_TEST_SUITE_P(FullSubbatch,
                          GPU_UnitTestConvSolverDirectNaiveBwd_FP16,
                          testing::Combine(testing::Values(GetTestParams()),
+                                          testing::Values(miopenConvolutionAlgoDirect),
+                                          testing::ValuesIn(GetSubbatchTestCaseBwd())));
