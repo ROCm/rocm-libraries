@@ -112,7 +112,9 @@ For hipDNN author-assist, use this section order instead of the base's generic t
 
 ```markdown
 ## Summary
-<1–3 sentences: purpose, motivation, what it enables. Put the tracking reference here.>
+<1–3 sentences: purpose, motivation, what it enables.>
+
+JIRA ID : <key>   <!-- tracking reference on its own line, exactly as the PR bot expects -->
 
 ## Risk Assessment
 <Risk level (1–5) and a one-paragraph rationale.>

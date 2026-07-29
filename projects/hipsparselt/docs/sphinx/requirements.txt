@@ -70,7 +70,7 @@ gitpython==3.1.54
     # via rocm-docs-core
 greenlet==3.3.2
     # via sqlalchemy
-idna==3.11
+idna==3.15
     # via requests
 imagesize==2.0.0
     # via sphinx
@@ -168,7 +168,7 @@ pydata-sphinx-theme==0.15.4
     #   sphinx-book-theme
 pygithub==2.8.1
     # via rocm-docs-core
-pygments==2.19.2
+pygments==2.20.0
     # via
     #   accessible-pygments
     #   ipython
@@ -201,7 +201,7 @@ referencing==0.37.0
     # via
     #   jsonschema
     #   jsonschema-specifications
-requests==2.32.5
+requests==2.33.0
     # via
     #   pygithub
     #   sphinx
@@ -297,7 +297,7 @@ typing-extensions==4.15.0
     #   pyjwt
     #   referencing
     #   sqlalchemy
-urllib3==2.6.3
+urllib3==2.7.0
     # via
     #   pygithub
     #   requests

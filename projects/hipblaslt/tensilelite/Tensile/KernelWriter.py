@@ -3410,8 +3410,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
       return module
 
     skipLabel = Label(self.labels.getNameInc("SK_SkipNllSubtilePAP"), "")
-    module.add(SCmpEQU64(src0=sgpr("AddressFlags", 2), src1=hex(0), comment="Parallel reduction: skip Subtile PAP"))
-    module.add(SCBranchSCC1(labelName=skipLabel.getLabelName(), comment=""))
+    # Under StreamKForceDPOnly the reduction is always forced to the tree path
+    # (AddressFlags != 0 invariant), so this parallel-reduction skip never fires;
+    # fold it out and keep only the StreamKIter >= StreamKIterEnd (last-tile) check.
+    if not kernel["StreamKForceDPOnly"]:
+      module.add(SCmpEQU64(src0=sgpr("AddressFlags", 2), src1=hex(0), comment="Parallel reduction: skip Subtile PAP"))
+      module.add(SCBranchSCC1(labelName=skipLabel.getLabelName(), comment=""))
     module.add(SCmpGeU32(src0=sgpr("StreamKIter"), src1=sgpr("StreamKIterEnd"), comment="No next persistent iteration"))
     module.add(SCBranchSCC1(labelName=skipLabel.getLabelName(), comment=""))
     if not skipBarrier:
@@ -9368,7 +9372,16 @@ class KernelWriter(metaclass=abc.ABCMeta):
       self.defineSgpr("AddressMXSB", numSgprAddressMXSB)
     if kernel["ProblemType"]["Sparse"]:
       self.defineSgpr("AddressMetadata", numSgprAddressMetadata)
-    if kernel["StreamK"] > 0 and kernel["StreamKAtomic"] == 0:
+    # AddressWS/AddressFlags are the StreamK workspace + synchronizer-flag kernarg
+    # pointers. Under StreamKForceDPOnly (SK3 DP-first, gfx1250) the reduction is
+    # always the single-kernel tree path and the workspace partials/fixup path is
+    # never reached, so both are dead (every runtime reader is constant-folded or
+    # removed, see StreamK.py / KernelWriterAssembly.py). Drop them from the kernarg
+    # SGPR define to shrink the persistent kernarg footprint (peak .amdhsa_next_free_sgpr
+    # -4 SGPRs). The .kd metadata (Components/Signature.py) and the host kernarg builder
+    # (ContractionSolution.cpp singleCallArgs) are gated identically so the positional
+    # layout stays consistent host<->device.
+    if kernel["StreamK"] > 0 and kernel["StreamKAtomic"] == 0 and not kernel["StreamKForceDPOnly"]:
       self.defineSgpr("AddressWS", numSgprAddressWS)
       self.defineSgpr("AddressFlags", numSgprAddressFlags)
       self.states.numSgprStreamK += numSgprAddressWS + numSgprAddressFlags
@@ -9529,14 +9542,33 @@ class KernelWriter(metaclass=abc.ABCMeta):
       requiredUnalignedSgprVar += [
         "StreamKIter",
         "StreamKIterEnd",
-        "StreamKLocalStart",
-        "StreamKLocalEnd",
       ]
+      # Under StreamKForceDPOnly every WG processes complete tiles, so the
+      # per-tile local iteration bounds are compile-time constants
+      # (StreamKLocalStart == 0, StreamKLocalEnd == ItersPerTile). Skip these
+      # two persistent SGPRs; all readers are constant-folded/removed under
+      # DP-only (see StreamK.py Common methods, graWorkGroup, and the TDM
+      # StreamK-offset helpers, all gated on StreamKForceDPOnly).
+      if not kernel["StreamKForceDPOnly"]:
+        requiredUnalignedSgprVar += [
+          "StreamKLocalStart",
+          "StreamKLocalEnd",
+        ]
       if len(kernel["SpaceFillingAlgo"]):
         requiredUnalignedSgprVar.append("StreamKTileID")
       if self.isPrefetchAcrossPersistentEnabled(kernel):
         requiredUnalignedSgprVar.append("SkPrefetchPrimed")
-      if kernel["StreamKAtomic"] == 0:
+      # SrdWS is the 4-aligned StreamK workspace SRD, used only by the
+      # partials/fixup reduction path. Under StreamKForceDPOnly there are no
+      # partials/fixup: computeStoreSrdStartCommon and storeBranchesCommon
+      # early-return, computeWorkspaceSrd (the sole AddressWS->SrdWS init) and
+      # the tc=='WS' workspace store are never emitted, and the epilogue SrdWS
+      # borrow is guarded by "SrdWS" in self.sgprs. So skip these 4 aligned
+      # SGPRs (plus any alignment padding) for DP-only kernels. AddressWS and
+      # AddressFlags are likewise dropped for DP-only (see the kernarg define
+      # above): all their runtime readers are constant-folded/removed, and the
+      # .kd metadata + host kernarg builder are gated to match.
+      if kernel["StreamKAtomic"] == 0 and not kernel["StreamKForceDPOnly"]:
         requiredAligned4SgprVar.append("SrdWS")
 
     if kernel["UseSubtileImpl"]:
