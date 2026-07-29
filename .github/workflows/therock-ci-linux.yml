@@ -24,6 +24,11 @@ on:
         type: string
       build_runs_on:
         type: string
+    secrets:
+      MIOPEN_CI_WEBHOOK_URL:
+        required: false
+      HIPDNN_CI_WEBHOOK_URL:
+        required: false
 
 permissions:
   contents: read
@@ -174,4 +179,6 @@ jobs:
       test_runs_on: ${{ inputs.test_runs_on }}
       platform: "linux"
       test_type: ${{ inputs.test_type }}
-    secrets: inherit
+    secrets:
+      MIOPEN_CI_WEBHOOK_URL: ${{ secrets.MIOPEN_CI_WEBHOOK_URL }}
+      HIPDNN_CI_WEBHOOK_URL: ${{ secrets.HIPDNN_CI_WEBHOOK_URL }}

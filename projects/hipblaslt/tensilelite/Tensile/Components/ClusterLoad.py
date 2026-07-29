@@ -14,7 +14,8 @@ from ..Common import clusterEnabled, streamKMulticast
 from typing import Mapping
 from rocisa.code import Module, Label
 from rocisa.container import sgpr
-from rocisa.instruction import SLShiftLeftB32, SMulI32, SBitcmp1B32, SCBranchSCC1, SBranch
+from rocisa.instruction import SLShiftLeftB32, SMulI32, SBitcmp1B32, SCBranchSCC1, SBranch, \
+    SMovB32, SAndB32
 
 
 class ClusterLoadTDM(ClusterLoad):
@@ -136,21 +137,53 @@ class ClusterLoadTDM(ClusterLoad):
             return mod
         mod.addComment0("Calculate multicast mask")
 
+        # sTmp+0 / sTmp+4 double as scratch for the reduced-bit masks of a padded
+        # boundary cluster: maskCol = (1<<(validY*cx))-1 (AND with maskA), maskRow =
+        # (1<<validX)-1 (AND with maskB). computeMulticastMaskReduction writes them.
+        maskColSgpr = sTmp + 0
+        maskRowSgpr = sTmp + 4
+
         maskA = 1
         for idx in range(kernel["ClusterDim"][1]):
             maskA |= (1 << (idx * kernel["ClusterDim"][0]))
 
         maskB = (1 << kernel["ClusterDim"][0]) - 1
 
+        # Reduce the broadcast mask to the WGs actually present in a padded boundary
+        # cluster (grid rounded up to ClusterDim). Writes maskColSgpr/maskRowSgpr and
+        # returns True; for Stream-K's 1-D grid or non-cluster it returns False and we
+        # fall back to the full mask. NOTE: the StreamK-aware analogue that also covers
+        # the [C,1] / [Cs,Ck] StreamK folds lives in StreamK.streamKMulticastMaskReduction.
+        reduced = writer.computeMulticastMaskReduction(
+            kernel, mod, sgprWgX, sgprWgY, maskColSgpr, maskRowSgpr)
+        if not reduced:
+            maskColSgpr = None
+            maskRowSgpr = None
+
+        def setMask(dst, maskConst, shiftReg, reducedBits, comment):
+            # dst = (maskConst [& reducedBits]) << shiftReg. When reducedBits is present
+            # the constant is first ANDed to the WGs that really exist in this cluster;
+            # otherwise it degenerates to the original single shift of the immediate.
+            if reducedBits is not None:
+                mod.add(SMovB32(dst=sgpr(dst), src=hex(maskConst), comment=comment))
+                mod.add(SAndB32(dst=sgpr(dst), src0=sgpr(dst), src1=sgpr(reducedBits),
+                                comment="reduce to real WGs"))
+                mod.add(SLShiftLeftB32(dst=sgpr(dst), shiftHex=sgpr(shiftReg), src=sgpr(dst),
+                                       comment=comment))
+            else:
+                mod.add(SLShiftLeftB32(dst=sgpr(dst), shiftHex=sgpr(shiftReg), src=hex(maskConst),
+                                       comment=comment))
+
         if kernel["enableTDMMetadata"]:
             if kernel["ProblemType"]["Sparse"] == 1:
-                mod.add(SLShiftLeftB32(dst=sgpr("MulticastMaskMetadata"), shiftHex=sgpr(sgprWgX), src=hex(maskA),\
-                                        comment="Setting metadata mask (follows sparse A)"))
+                setMask("MulticastMaskMetadata", maskA, sgprWgX, maskColSgpr,
+                        "Setting metadata mask (follows sparse A)")
             elif kernel["ProblemType"]["Sparse"] == 2:
-                mod.add(SMulI32(dst=sgpr(sTmp+4), src0=sgpr(sgprWgY), src1=sgpr(sgprNWgX),\
-                                comment="Shift factor: wg_y * nwg_x (metadata)"))
-                mod.add(SLShiftLeftB32(dst=sgpr("MulticastMaskMetadata"), shiftHex=sgpr(sTmp+4), src=hex(maskB),\
-                                        comment="Setting metadata mask (follows sparse B)"))
+                with writer.allocTmpSgpr(1, tag="multicastMetadataShift") as shiftTmp:
+                    mod.add(SMulI32(dst=sgpr(shiftTmp.idx), src0=sgpr(sgprWgY), src1=sgpr(sgprNWgX),\
+                                    comment="Shift factor: wg_y * nwg_x (metadata)"))
+                    setMask("MulticastMaskMetadata", maskB, shiftTmp.idx, maskRowSgpr,
+                            "Setting metadata mask (follows sparse B)")
 
         if self.usesCombinedMask(kernel):
             setMulticastMaskLblOdd = Label(f"setMulticastMask_OddWave", "")
@@ -161,24 +194,20 @@ class ClusterLoadTDM(ClusterLoad):
             mod.add(SCBranchSCC1(setMulticastMaskLblOdd.getLabelName(), "Jump if wId is odd"))
 
             mod.add(setMulticastMaskLblEven)
-            mod.add(SLShiftLeftB32(dst=sgpr("MulticastMask"), shiftHex=sgpr(sgprWgX), src=hex(maskA),\
-                                    comment="Setting maskA for even wave"))
+            setMask("MulticastMask", maskA, sgprWgX, maskColSgpr, "Setting maskA for even wave")
             mod.add(SBranch(setMulticastMaskLblEnd.getLabelName()))
             mod.add(setMulticastMaskLblOdd)
             mod.add(SMulI32(dst=sgpr(sgprWgY), src0=sgpr(sgprWgY), src1=sgpr(sgprNWgX),\
                             comment="Shift factor: wg_y * nwg_x"))
-            mod.add(SLShiftLeftB32(dst=sgpr("MulticastMask"), shiftHex=sgpr(sgprWgY), src=hex(maskB),\
-                                    comment="Setting maskB for odd wave"))
+            setMask("MulticastMask", maskB, sgprWgY, maskRowSgpr, "Setting maskB for odd wave")
             mod.add(setMulticastMaskLblEnd)
 
         else:
-            mod.add(SLShiftLeftB32(dst=sgpr("MulticastMaskA"), shiftHex=sgpr(sgprWgX), src=hex(maskA),\
-                                    comment="Setting maskA"))
+            setMask("MulticastMaskA", maskA, sgprWgX, maskColSgpr, "Setting maskA")
 
             mod.add(SMulI32(dst=sgpr(sgprWgY), src0=sgpr(sgprWgY), src1=sgpr(sgprNWgX),\
                             comment="Shift factor: wg_y * nwg_x"))
-            mod.add(SLShiftLeftB32(dst=sgpr("MulticastMaskB"), shiftHex=sgpr(sgprWgY), src=hex(maskB),\
-                                    comment="Setting maskB"))
+            setMask("MulticastMaskB", maskB, sgprWgY, maskRowSgpr, "Setting maskB")
         return mod
 
     # -- descriptor attach ---------------------------------------------------

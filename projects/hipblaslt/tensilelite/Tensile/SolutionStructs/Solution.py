@@ -47,7 +47,10 @@ from Tensile.Common.GlobalParameters import defaultSolution, \
 from Tensile.Common.ValidParameters import validParameters, \
                                             _getExpectedTypes, \
                                             _expectedParamTypes, \
-                                            _skipTypeCheck
+                                            _skipTypeCheck, \
+                                            normalizeSwInstructionPrefetch, \
+                                            SW_INSTRUCTION_PREFETCH_ABSOLUTE, \
+                                            SW_INSTRUCTION_PREFETCH_AUTO
 from Tensile.SolutionStructs.Naming import getSolutionNameFull
 from Tensile.SolutionStructs.Problem import ProblemType
 from Tensile.SolutionStructs.segment_interleave import evaluate as segIntEval, aligned_budget_ok as segAlignedBudget
@@ -848,6 +851,33 @@ class Solution(collections.abc.Mapping):
     else:
       state["_ScheduleIterAlg"] = state["ScheduleIterAlg"]
       state["_StinkyTofuOptLevel"] = 0
+
+    # SwInstructionPrefetch (single-integer bitmask): explicit Absolute(2) is only supported on
+    # gfx1250 non-Stream-K. Auto(-1) already resolves to Relative on Stream-K / non-gfx1250, so it
+    # is never rejected; legacy bool aliases (True->Relative, False->Off) never request Absolute.
+    # Only an explicit Absolute request on an unsupported target is rejected here (users should
+    # pick Auto(-1) or Relative(1) instead).
+    swpMode = normalizeSwInstructionPrefetch(
+        state.get("SwInstructionPrefetch", SW_INSTRUCTION_PREFETCH_AUTO))
+    if swpMode == SW_INSTRUCTION_PREFETCH_ABSOLUTE:
+      if state.get("StreamK", 0) != 0:
+        reject(state, printRejectionReason,
+               "SwInstructionPrefetch=2 (Absolute) is not supported on Stream-K kernels; "
+               "use Auto(-1) or Relative(1)")
+        return
+      if state["ISA"] != (12, 5, 0):
+        reject(state, printRejectionReason,
+               f"SwInstructionPrefetch=2 (Absolute) is only supported on gfx1250, not {state['ISA']}; "
+               "use Auto(-1) or Off(0)")
+        return
+      if state["ProblemType"]["DataType"].isDouble():
+        # f64: OptNLL epilogue routinely exceeds the 64 KiB I-cache (bucket-c fleet-wide) so the
+        # abs cover/ladder yields no reliable benefit, and sgprAlpha is a 2-dword pair (the
+        # OptNLL-aware Case-B fp32 predicate does not apply). See design doc §16.8/§16.13.
+        reject(state, printRejectionReason,
+               "SwInstructionPrefetch=2 (Absolute) is not supported for f64 (double) kernels; "
+               "use Auto(-1) or Relative(1)")
+        return
 
     if (not state["ProblemType"]["StridedBatched"]) and (not state["ProblemType"]['Batched']):
       reject(state, printRejectionReason, "General Batched GEMM only support Batched Problem")
@@ -3080,8 +3110,14 @@ class Solution(collections.abc.Mapping):
       if state["ProblemType"]["ComputeDataType"].isDouble() or state["ProblemType"]["ComputeDataType"].isDoubleComplex(): return False
       return True
 
+    # Track VALU source operands on VA_VDST (src-operand WAR hazard). On only for
+    # sparse; non-sparse kernels skip the stamp. Pre-armed for when sparse enables ESM2.
+    def evaluateEnableESM2TrackValuVsrc() -> bool:
+      return bool(state["ProblemType"]["Sparse"])
+
     state["ExpertSchedulingMode"] = evaluateExpertSchedulingMode()
     state["EnableStinkyTofuESM2"] = evaluateStinkyTofuESM2()
+    state["EnableESM2TrackValuVsrc"] = evaluateEnableESM2TrackValuVsrc()
 
     state["ESMRuntimeGate"] = tuple(state["ISA"])[:2] == (12, 0)
     # Some restrictions for float4 and 6bitFloat:

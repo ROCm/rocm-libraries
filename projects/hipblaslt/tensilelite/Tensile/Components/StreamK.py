@@ -615,11 +615,17 @@ class StreamK(Component):
         module.add(SMulI32(dst=sgpr(sTmp+1), src0=sgpr(sTmp), src1=sgpr(sIpt), comment="Tile start iteration"))
         module.add(SAddU32(dst=sgpr(sTmp+2), src0=sgpr(sTmp+1), src1=sgpr(sIpt), comment="Tile end iteration"))
         writer.releaseStreamKConstSgpr(sIpt)
-        # local start
-        module.add(SSubU32(dst=sgpr("StreamKLocalStart"), src0=sgpr("StreamKIter"), src1=sgpr(sTmp+1), comment="Local iteration start"))
-        # local end (SK tile)
-        module.add(SMinU32(dst=sgpr("StreamKLocalEnd"), src0=sgpr("StreamKIterEnd"), src1=sgpr(sTmp+2), comment="1. (Local) iteration end (SK tile)"))
-        module.add(SSubU32(dst=sgpr("StreamKLocalEnd"), src0=sgpr("StreamKLocalEnd"), src1=sgpr(sTmp+1), comment="2. Local iteration end (SK tile)"))
+        # StreamKLocalStart/End are the per-tile local iteration bounds. Under
+        # StreamKForceDPOnly every WG spans complete tiles (StreamKIter is always
+        # a multiple of ItersPerTile), so StreamKLocalStart is always 0 and
+        # StreamKLocalEnd is always ItersPerTile. These SGPRs are not allocated
+        # in DP-only mode; readers use the constants directly.
+        if not kernel["StreamKForceDPOnly"]:
+            # local start
+            module.add(SSubU32(dst=sgpr("StreamKLocalStart"), src0=sgpr("StreamKIter"), src1=sgpr(sTmp+1), comment="Local iteration start"))
+            # local end (SK tile)
+            module.add(SMinU32(dst=sgpr("StreamKLocalEnd"), src0=sgpr("StreamKIterEnd"), src1=sgpr(sTmp+2), comment="1. (Local) iteration end (SK tile)"))
+            module.add(SSubU32(dst=sgpr("StreamKLocalEnd"), src0=sgpr("StreamKLocalEnd"), src1=sgpr(sTmp+1), comment="2. Local iteration end (SK tile)"))
 
         return module
 
@@ -686,6 +692,11 @@ class StreamK(Component):
 
     def computeLoadSrdCommon(self, writer, kernel, tP, sTmp):
         module = Module("StreamK Common computeLoadSrd")
+
+        # DP-only: StreamKLocalStart == 0, so the partial-tile start offset is 0
+        # and the load SRD is unchanged (no StreamKLocalStart SGPR to read).
+        if kernel["StreamKForceDPOnly"]:
+            return module
 
         tileStart = sTmp + 2
         tc = tP["tensorChar"]
@@ -769,6 +780,14 @@ class StreamK(Component):
         module = Module("StreamK Common graAddresses")
 
         tc = tP["tensorChar"]
+        # DP-only: StreamKLocalStart == 0, so there is no partial-tile start
+        # offset; the global-read address is just Address{tc} (no StreamKLocalStart
+        # SGPR to read).
+        if kernel["StreamKForceDPOnly"]:
+            module.add(VMovB32(dst=vgpr(vTmp+0), src=sgpr("Address%s+0" % tc)))
+            module.add(VMovB32(dst=vgpr(vTmp+1), src=sgpr("Address%s+1" % tc)))
+            return module
+
         depthU = self._depthUForTc(kernel, tc)
         # StreamK partial tile - offset to tile start index
         tmpOffset = writer.sgprPool.checkOut(2, "skStartOffset")
@@ -793,6 +812,12 @@ class StreamK(Component):
     def declareStaggerParmsCommon(self, writer, kernel):
         module = Module("StreamK Common declareStaggerParms")
 
+        # DP-only: tiles are always full (StreamKLocalStart == 0 and
+        # StreamKLocalEnd == ItersPerTile), so neither partial-tile stagger
+        # override fires. Nothing to do (no StreamKLocalStart/End SGPRs to read).
+        if kernel["StreamKForceDPOnly"]:
+            return module
+
         # Set stagger=0 for partial tiles to avoid using stagger larger than workload
         sIpt = writer.acquireStreamKConstSgpr(kernel, "ItersPerTile")
         if writer.isStreamKConstantsToVgprEnabled(kernel):
@@ -812,6 +837,12 @@ class StreamK(Component):
     def tailLoopNumIterCommon(self, writer, kernel, loopCounter):
         module = Module("StreamK Common tailLoopNumIter")
 
+        # DP-only: every WG processes the final iteration of its tile
+        # (StreamKLocalEnd == ItersPerTile), so the "skip tail loop" adjustment
+        # never fires. Nothing to do (no StreamKLocalEnd SGPR to read).
+        if kernel["StreamKForceDPOnly"]:
+            return module
+
         # skip tail loop if StreamK WG not processing final iteration
         # Check if tile finished
         sIpt = writer.acquireStreamKConstSgpr(kernel, "ItersPerTile")
@@ -830,8 +861,17 @@ class StreamK(Component):
     def calculateLoopNumIterCommon(self, writer, kernel, loopCounterName, loopIdx, tmpSgprInfo):
         module = Module("StreamK Common calculateLoopNumIter")
 
-        # Use StreamK params for loop count
-        module.add(SSubU32(dst=sgpr(loopCounterName), src0=sgpr("StreamKLocalEnd"), src1=sgpr("StreamKLocalStart"), comment="StreamK loop counter = localEnd - localStart"))
+        # Use StreamK params for loop count. DP-only: StreamKLocalStart == 0 and
+        # StreamKLocalEnd == ItersPerTile, so the loop count is exactly
+        # ItersPerTile (no StreamKLocalStart/End SGPRs to read).
+        if kernel["StreamKForceDPOnly"]:
+            sIpt = writer.acquireStreamKConstSgpr(kernel, "ItersPerTile")
+            if writer.isStreamKConstantsToVgprEnabled(kernel):
+                module.add(VReadfirstlaneB32(dst=sgpr(sIpt), src=vgpr(writer.states.skConstVgprs["ItersPerTile"])))
+            module.add(SMovB32(dst=sgpr(loopCounterName), src=sgpr(sIpt), comment="StreamK loop counter = ItersPerTile (DP-only full tile)"))
+            writer.releaseStreamKConstSgpr(sIpt)
+        else:
+            module.add(SSubU32(dst=sgpr(loopCounterName), src0=sgpr("StreamKLocalEnd"), src1=sgpr("StreamKLocalStart"), comment="StreamK loop counter = localEnd - localStart"))
         # Short circuit if alpha==0 (set loopCounter to 0 to skip main loop)
         alphaLabel2 = Label(writer.labels.getNameInc("SKAlphaCheck"), "")
         module.add(BranchIfNotZero("Alpha", kernel["ProblemType"]["ComputeDataType"].toEnum(), alphaLabel2))
@@ -855,12 +895,16 @@ class StreamK(Component):
                         module.add(scalarStaticDivideAndRemainder(qReg=tmpSgpr, rReg=tmpSgpr+1, dReg=("SizesSum+%u" % unrollIdx), divisor=kernel["DepthU"], tmpSgprRes=tmpSgpr1, doRemainder=2))
                 module.add(SCmpEQU32(src0=sgpr(tmpSgpr+1), src1=0, comment="numIter%s == 0"%loopChar ))
                 module.add(SCSelectB32(dst=sgpr(tmpSgpr), src0=0, src1=1, comment="check if size uses tail loop"))
-                sIpt = writer.acquireStreamKConstSgpr(kernel, "ItersPerTile")
-                if writer.isStreamKConstantsToVgprEnabled(kernel):
-                    module.add(VReadfirstlaneB32(dst=sgpr(sIpt), src=vgpr(writer.states.skConstVgprs["ItersPerTile"])))
-                module.add(SCmpEQU32(src0=sgpr("StreamKLocalEnd"), src1=sgpr(sIpt), comment="Check if WG processes final iteration of tile"))
-                writer.releaseStreamKConstSgpr(sIpt)
-                module.add(SCSelectB32(dst=sgpr(tmpSgpr), src0=sgpr(tmpSgpr), src1=0, comment="this WG runs tail loop"))
+                # DP-only: StreamKLocalEnd == ItersPerTile always, so this WG
+                # always processes the tile's final iteration; keep the size-based
+                # tail-loop decision unchanged (no StreamKLocalEnd SGPR to read).
+                if not kernel["StreamKForceDPOnly"]:
+                    sIpt = writer.acquireStreamKConstSgpr(kernel, "ItersPerTile")
+                    if writer.isStreamKConstantsToVgprEnabled(kernel):
+                        module.add(VReadfirstlaneB32(dst=sgpr(sIpt), src=vgpr(writer.states.skConstVgprs["ItersPerTile"])))
+                    module.add(SCmpEQU32(src0=sgpr("StreamKLocalEnd"), src1=sgpr(sIpt), comment="Check if WG processes final iteration of tile"))
+                    writer.releaseStreamKConstSgpr(sIpt)
+                    module.add(SCSelectB32(dst=sgpr(tmpSgpr), src0=sgpr(tmpSgpr), src1=0, comment="this WG runs tail loop"))
 
                 if writer.states.tailloopInNll and maxUnit > 1:
                     # tailloopInNll + maxUnit > 1 case, we need to check if SizesSum is multiple of maxUnit at runtime.
@@ -2520,8 +2564,15 @@ class StreamK(Component):
             # Check for StreamK Kernel when ArgType == 3 (General Batched GEMM)
             # AddressFlags == 0, then parallel reduction in StreamK and SrdC/D is not dereferenced as pointer array
             # AddressFlags != 0, then not parallel reduction in StreamK and SrdC/D is dereferenced as pointer array                   
-            module.add(SCmpEQU64(src0=sgpr("AddressFlags", 2), src1=hex(0), comment="Check for synchronizer"))
-            module.add(SCBranchSCC0(labelName=generalBatchedGemmLoad.getLabelName()))
+            if kernel["StreamKForceDPOnly"]:
+                # DP-only: reduction is always forced to the tree path (Synchronizer
+                # always non-null, AddressFlags != 0 invariant), so the flag compare
+                # always takes the not-parallel-reduction (general-batched) branch.
+                # Fold it to an unconditional branch and drop the dead AddressFlags reader.
+                module.add(SBranch(labelName=generalBatchedGemmLoad.getLabelName(), comment="DP-only: synchronizer always present"))
+            else:
+                module.add(SCmpEQU64(src0=sgpr("AddressFlags", 2), src1=hex(0), comment="Check for synchronizer"))
+                module.add(SCBranchSCC0(labelName=generalBatchedGemmLoad.getLabelName()))
         return module
 
     @abc.abstractmethod
@@ -3138,17 +3189,11 @@ class StreamKTwoTileDPFirst(StreamK):
 
             module.add(self.skIndexToWG(writer, kernel, sTmp))
 
-            alphaLabel = Label(writer.labels.getNameInc("SKAlphaCheck"), "")
-            module.add(BranchIfNotZero("Alpha", kernel["ProblemType"]["ComputeDataType"].toEnum(), alphaLabel))
-            module.add(SCmpEQU32(src0=sgpr("StreamKLocalStart"), src1=0, comment="does wg start tile?"))
-            skCloseLoopLabel = Label("SK_CloseLoop", "")
-            module.add(writer.longBranchScc0(skCloseLoopLabel, posNeg=1))
-            sIpt = writer.acquireStreamKConstSgpr(kernel, "ItersPerTile")
-            if writer.isStreamKConstantsToVgprEnabled(kernel):
-                module.add(VReadfirstlaneB32(dst=sgpr(sIpt), src=vgpr(writer.states.skConstVgprs["ItersPerTile"])))
-            module.add(SMovB32(dst=sgpr("StreamKLocalEnd"), src=sgpr(sIpt), comment="Skip iterations"))
-            writer.releaseStreamKConstSgpr(sIpt)
-            module.add(alphaLabel)
+            # DP-only: every WG spans a complete tile, so StreamKLocalStart is
+            # always 0 ("does wg start tile?" is always true) and the general-SK
+            # skip-to-close-loop / StreamKLocalEnd=ItersPerTile bookkeeping is a
+            # no-op. The alpha==0 main-loop skip is still handled downstream in
+            # calculateLoopNumIterCommon. StreamKLocalStart/End are not allocated.
 
             writer.sgprPool.checkIn(sTmp)
             return module

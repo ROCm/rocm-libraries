@@ -1197,6 +1197,10 @@ def tdmApplyStreamKOffsetSubtile(writer, kernel, tP):
   inc = int(ti.depthUBytes)  # per-unroll TDM advance; same source as _emitGRPtrUpdate_TLU0
   group0 = f"tdm{tc}Group0"
   mod = Module(f"TDM StreamK K-offset subtile {tc}")
+  # DP-only: StreamKLocalStart == 0, so the K-start offset is 0 and this is a
+  # no-op. StreamKLocalStart is not allocated in DP-only mode.
+  if kernel["StreamKForceDPOnly"]:
+    return mod
   with writer.allocTmpSgpr(2, alignment=2, tag="tdmSkOffset") as tmpSgprRes:
     o = tmpSgprRes.idx
     mod.add(SMulI32(dst=sgpr(o), src0=sgpr("StreamKLocalStart"), src1=inc,
