@@ -252,9 +252,10 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
                                         effective_uniform_summation_order(handle, matmul_descr)};
     problem.streamKFlags = streamKFlags;
 
-    hipblaslt_check_streamk_sync_reset(handle, stream);
+    // Check if the synchronizer buffer is clean when enabled
+    hipblaslt_check_streamk_sync_scope sync_check(handle, stream, "rocblaslt_matmul_impl");
+
     rocblaslt_status st = runContractionProblem(handle, algo, problem, gemmData);
-    hipblaslt_check_streamk_sync_scan(handle, stream, "rocblaslt_matmul_impl");
 
     if(st == rocblaslt_status_success)
     {

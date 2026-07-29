@@ -65,4 +65,30 @@ inline void hipblaslt_check_streamk_sync_scan(rocblaslt_handle handle,
                 first);
 }
 
+// Resets the Synchronizer buffer on construction and scans it on
+// destruction, reporting any residue left by whatever ran in between.
+class hipblaslt_check_streamk_sync_scope
+{
+public:
+    hipblaslt_check_streamk_sync_scope(rocblaslt_handle handle,
+                                       hipStream_t      stream,
+                                       const char*      label)
+        : handle_(handle)
+        , stream_(stream)
+        , label_(label)
+    {
+        hipblaslt_check_streamk_sync_reset(handle_, stream_);
+    }
+
+    ~hipblaslt_check_streamk_sync_scope()
+    {
+        hipblaslt_check_streamk_sync_scan(handle_, stream_, label_);
+    }
+
+private:
+    rocblaslt_handle handle_;
+    hipStream_t      stream_;
+    const char*      label_;
+};
+
 #endif // HIPBLASLT_CHECK_STREAMK_SYNC_HPP
