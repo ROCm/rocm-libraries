@@ -15,18 +15,20 @@ tox -e unit -- tensilelite/Tests/unit
 tox -e py3 -- tensilelite/Tests -m gemm
 
 # Run a single test directly (after a prior `invoke build-client`)
-tensilelite/bin/Tensile tensilelite/Tests/common/exception/<test>.yaml tensile-out
+python -m tensilelite run tensilelite/Tests/common/exception/<test>.yaml tensile-out
 ```
 
 ## Custom CMake Build
 
 ```bash
+# A suitable rocisa must already be importable in the selected Python.
 cmake --preset tensilelite -S .. -B my-custom-build
 cmake --build my-custom-build --parallel
 
 # Run test with custom client path
-./my-custom-build/Tensile.sh tensilelite/Tests/common/<test>.yaml tensile-out \
-    --prebuilt-client=my-custom-build/tensilelite-client/tensilelite-client
+ROCM_PATH=my-custom-build/tensilelite-rocm \
+    my-custom-build/tensilelite-venv/bin/python -m tensilelite run \
+    tensilelite/Tests/common/<test>.yaml tensile-out
 
 # Build with custom args (e.g., Debug + specific GPU)
 TENSILELITE_CLIENT_ARGS="--build-type Debug --gpu-targets gfx90a --clean" tox -e py3 -- tensilelite/Tests -m common
@@ -40,7 +42,7 @@ cmake -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_COMPILER=$ROCM_PATH/bin/amdclang++ ..
 make -j8
 ```
 
-`invoke build-client` accepts `--clean`, `--build-dir`, `--build-type`, `--gpu-targets`, `--rocm-path`, `--export-compile-commands`, `--bundle-python-deps`, `--enable-rocprof`, `--cxx-flags-release`. See `tasks.py`.
+`invoke build-client` accepts `--clean`, `--build-dir`, `--build-type`, `--gpu-targets`, `--rocm-path`, `--export-compile-commands`, `--enable-rocprof`, and `--cxx-flags-release`. See `tasks.py`.
 
 ## Linting and Formatting
 
@@ -66,8 +68,8 @@ make co TENSILE_OUT=tensile-out ARCH="gfx1100" WAVE=32  # gfx11 explicit
 |--------|---------|---------|
 | `TENSILELITE_ENABLE_HOST` | ON | Build C++ runtime library |
 | `TENSILELITE_ENABLE_CLIENT` | ON | Build benchmark client |
-| `TENSILELITE_ENABLE_AUTOBUILD` | OFF | Auto-rebuild rocisa wrapper scripts |
 | `TENSILELITE_BUILD_TESTING` | OFF | Build C++ host library tests |
+| `HIPBLASLT_TENSILELITE_PYTHON_MODE` | BUILD | Use a private editable TensileLite environment or an installed `SYSTEM` package |
 | `GPU_TARGETS` | (detected) | Semicolon-separated list of gfx targets |
 
 ## Supported Targets

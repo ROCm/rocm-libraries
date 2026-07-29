@@ -4,7 +4,7 @@ This file provides guidance for AI coding agents when working with code in this 
 
 ## Overview
 
-TensileLite is an auto-tuning framework for generating and selecting high-performance GPU kernels for tensor contractions (GEMM and related operations) on AMD GPUs. It is a component of hipBLASLt. The Python package (`tensilelite/`) drives kernel generation and benchmarking; `rocisa/` provides a C++ (Nanobind-wrapped) assembly generation module; `include/` and `src/` form the C++ runtime library; and `client/` contains the benchmark executable.
+TensileLite is an auto-tuning framework for generating and selecting high-performance GPU kernels for tensor contractions (GEMM and related operations) on AMD GPUs. It is a component of hipBLASLt. The Python package (`tensilelite/`) drives kernel generation and benchmarking; `rocisa` is a separately packaged Python dependency whose in-tree source has its own developer workflow; `include/` and `src/` form the C++ runtime library; and `client/` contains the benchmark executable.
 
 ## Working environment
 
@@ -108,7 +108,7 @@ Use the `users/<github-username>/<branch-name>` branch convention and base PRs o
 
 3. **ClientWriter** (`tensilelite/ClientWriter.py`): Wraps the selected kernels in a C++ library and generates the benchmark client. Output: `4_LibraryClient/`.
 
-Entry point: `tensilelite/bin/Tensile` → `tensilelite/Tensile.py:Tensile()` → `executeStepsInConfig()`.
+Entry point: `python -m tensilelite run` → `tensilelite/Tensile.py:Tensile()` → `executeStepsInConfig()`.
 
 ### Key Python Modules
 
@@ -121,11 +121,15 @@ Entry point: `tensilelite/bin/Tensile` → `tensilelite/Tensile.py:Tensile()` �
 | `tensilelite/LibraryIO.py` | YAML/MsgPack serialization |
 | `tensilelite/Common/` | Global parameters, architecture tables, utilities |
 | `tensilelite/Components/` | Modular kernel building blocks (MAC variants, local/global read/write, scheduling) |
-| `tensilelite/TensileCreateLibrary.py` | Standalone library-creation utility (no benchmarking) |
+| `tensilelite/TensileCreateLibrary/` | Standalone library-creation implementation (no benchmarking) |
 
 ### rocisa
 
 `rocisa/` is a C++ module (compiled with amdclang++, bound via Nanobind) that provides instruction-level assembly generation, optimization passes, and instruction counting for AMDGPU kernels. `KernelWriter.py` calls into it to emit actual assembly instructions.
+
+TensileLite packaging treats rocisa as opaque and independently supplied. Do
+not infer or change rocisa's wheel tags, Python ABI, native-library placement,
+or release version while working on the TensileLite package boundary.
 
 Normal install (once after cloning, or after `rocisa/pyproject.toml` / `CMakeLists.txt` changes):
 
