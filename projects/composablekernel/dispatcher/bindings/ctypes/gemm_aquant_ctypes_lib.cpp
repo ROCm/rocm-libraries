@@ -60,15 +60,16 @@ static constexpr std::size_t elements_to_bytes(std::size_t n)
 
 static bool g_initialized = false;
 
-#define HIP_CHECK(call)                                                                        \
-    {                                                                                          \
-        hipError_t _err = (call);                                                              \
-        if(_err != hipSuccess)                                                                 \
-        {                                                                                      \
+#define HIP_CHECK(call)                                                                         \
+    {                                                                                           \
+        hipError_t _err = (call);                                                               \
+        if(_err != hipSuccess)                                                                  \
+        {                                                                                       \
             std::cerr << "HIP error: " << hipGetErrorString(_err) << " at " << __FILE__ << ":" \
-                      << __LINE__ << "\n";                                                     \
-            return -1;                                                                         \
-        }                                                                                      \
+                      << __LINE__ << "\n";                                                      \
+            cleanup();                                                                          \
+            return -1;                                                                          \
+        }                                                                                       \
     }
 
 extern "C" {
@@ -230,26 +231,10 @@ int dispatcher_run_aquant_gemm(const void* A,
     // Allocate device buffers.
     // A may be a packed type (pk_int4_t): 2 logical values per byte.
     // elements_to_bytes<T>(n) handles the packed case via numeric_traits::PackedSize.
-    if(hipMalloc(&A_dev, elements_to_bytes<ADataType>(M * K)) != hipSuccess)
-    {
-        cleanup();
-        return -1;
-    }
-    if(hipMalloc(&AQ_dev, elements_to_bytes<QDataType>(M * QK_A)) != hipSuccess)
-    {
-        cleanup();
-        return -1;
-    }
-    if(hipMalloc(&B_dev, elements_to_bytes<BDataType>(K * N)) != hipSuccess)
-    {
-        cleanup();
-        return -1;
-    }
-    if(hipMalloc(&C_dev, elements_to_bytes<CDataType>(M * N)) != hipSuccess)
-    {
-        cleanup();
-        return -1;
-    }
+    HIP_CHECK(hipMalloc(&A_dev,  elements_to_bytes<ADataType>(M * K)));
+    HIP_CHECK(hipMalloc(&AQ_dev, elements_to_bytes<QDataType>(M * QK_A)));
+    HIP_CHECK(hipMalloc(&B_dev,  elements_to_bytes<BDataType>(K * N)));
+    HIP_CHECK(hipMalloc(&C_dev,  elements_to_bytes<CDataType>(M * N)));
 
     // Copy A to device.  For pk_int4 A the raw i4x4 values must be permuted for the
     // device implementation -- mirrors run_gemm_quant_example.inc:758-763.
@@ -269,22 +254,11 @@ int dispatcher_run_aquant_gemm(const void* A,
         // Mirrors the B path in gemm_bquant_ctypes_lib.cpp.
         std::copy(A_host, A_host + a_h.size(), a_h.begin());
         ck_tile::permute_vectors_i4x4_b(a_h);
-        if(hipMemcpy(
-               A_dev, a_h.data(), elements_to_bytes<ADataType>(M * K), hipMemcpyHostToDevice) !=
-           hipSuccess)
-        {
-            cleanup();
-            return -1;
-        }
+        HIP_CHECK(hipMemcpy(A_dev, a_h.data(), elements_to_bytes<ADataType>(M * K), hipMemcpyHostToDevice));
     }
     else
     {
-        if(hipMemcpy(A_dev, A_host, elements_to_bytes<ADataType>(M * K), hipMemcpyHostToDevice) !=
-           hipSuccess)
-        {
-            cleanup();
-            return -1;
-        }
+        HIP_CHECK(hipMemcpy(A_dev, A_host, elements_to_bytes<ADataType>(M * K), hipMemcpyHostToDevice));
     }
 
     // Apply AQ preshuffle when required -- mirrors run_gemm_quant_example.inc:746-751.
@@ -310,36 +284,14 @@ int dispatcher_run_aquant_gemm(const void* A,
                                             ck_tile::bool_constant<true>{} /*row-major*/));
         std::copy(AQ_host, AQ_host + M * QK_A, aq_h.begin());
         auto aq_shuffled = ck_tile::shuffle_aq(&aq_h, block_aq_k);
-        if(hipMemcpy(AQ_dev,
-                     aq_shuffled.data(),
-                     elements_to_bytes<QDataType>(M * QK_A),
-                     hipMemcpyHostToDevice) != hipSuccess)
-        {
-            cleanup();
-            return -1;
-        }
+        HIP_CHECK(hipMemcpy(AQ_dev, aq_shuffled.data(), elements_to_bytes<QDataType>(M * QK_A), hipMemcpyHostToDevice));
     }
     else
     {
-        if(hipMemcpy(
-               AQ_dev, AQ_host, elements_to_bytes<QDataType>(M * QK_A), hipMemcpyHostToDevice) !=
-           hipSuccess)
-        {
-            cleanup();
-            return -1;
-        }
+        HIP_CHECK(hipMemcpy(AQ_dev, AQ_host, elements_to_bytes<QDataType>(M * QK_A), hipMemcpyHostToDevice));
     }
-    if(hipMemcpy(B_dev, B_host, elements_to_bytes<BDataType>(K * N), hipMemcpyHostToDevice) !=
-       hipSuccess)
-    {
-        cleanup();
-        return -1;
-    }
-    if(hipMemset(C_dev, 0, elements_to_bytes<CDataType>(M * N)) != hipSuccess)
-    {
-        cleanup();
-        return -1;
-    }
+    HIP_CHECK(hipMemcpy(B_dev, B_host, elements_to_bytes<BDataType>(K * N), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemset(C_dev, 0, elements_to_bytes<CDataType>(M * N)));
 
     // Build QuantGemmHostArgs (bq_ptr = nullptr, QK_B = 0, stride_BQ = 0 for AQuant-only)
     ck_tile::QuantGemmHostArgs args;
@@ -384,12 +336,7 @@ int dispatcher_run_aquant_gemm(const void* A,
     }
 
     // Copy result back
-    if(hipMemcpy(C_host, C_dev, elements_to_bytes<CDataType>(M * N), hipMemcpyDeviceToHost) !=
-       hipSuccess)
-    {
-        cleanup();
-        return -1;
-    }
+    HIP_CHECK(hipMemcpy(C_host, C_dev, elements_to_bytes<CDataType>(M * N), hipMemcpyDeviceToHost));
 
     if(time_ms)
         *time_ms = exec_time;
