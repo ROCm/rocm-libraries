@@ -1039,30 +1039,23 @@ the top-ranked kernel carries ([Section 4](#4-descriptor-formats)).
 the plan build reuses it.
 
 This phase is optional and is not confined to the winner: a caller enumerating its options queries
-knobs for every ranked engine id, so a UHD may load for an engine that is never selected. It cannot
-arrive first, because the id it needs came from applicability.
+knobs for every ranked engine id, so a UHD may load for an engine that is never selected.
 
 ### 8.4 Workspace
 
 **9. Report the workspace requirement.** `IEngine::getMaxWorkspaceSize(handle, opGraph, engineConfig)`
-takes an engine config but no execution context, and autotune calls it for every candidate engine, most
-of which are never selected ([RFC 0013](0013_Autotune.md)). The config may carry knob settings, though
-autotune's per-candidate estimate passes only the engine id, so the general case is that no kernel has
-been chosen yet. Apply whatever knob filter the config carries, load the **UDD** of each surviving
-kernel's pack, evaluate its workspace requirement over the cached bound token state, and report the
-**maximum** across survivors.
+arrives with no execution context, so in general no kernel has been chosen yet. Apply whatever knob
+filter the config carries, load the **UDD** of each surviving kernel's pack, and evaluate its workspace
+requirement over the cached bound token state: `workspace_bytes`, or for a multi-launch program the sum
+of its intermediates and each Launch's own scratch ([Section 15.3](#153-intermediate-buffers)). Report
+the **maximum** across survivors.
 *Why the UDD loads here:* workspace is the first question whose answer is a dispatch property.
 *Stored:* the parsed UDDs, on the handle; the plan build reuses them.
 
-**Why the maximum, and why it is enough.** One kernel's requirement is its UDD's `workspace_bytes`, or,
-for a multi-launch program, the sum of that program's intermediates and each Launch's own scratch
-([Section 15.3](#153-intermediate-buffers)). Reduce each survivor to that single number first, then
-take the maximum over survivors. The maximum is correct because the buffer is reused, not partitioned:
-the plan launches one kernel at a time on one stream, so a candidate's scratch is live only while it
-runs. That holds under measurement too, where the plan holds several candidates at once
-([Section 3](#3-how-it-works)): they are loaded together but sampled one after another, each reusing
-the same buffer, so the requirement is still the largest single candidate rather than the sum. Any
-candidate needing less over-allocates, which is accepted; under-allocating is not.
+The maximum is enough because the buffer is reused rather than partitioned: kernels launch one at a
+time on one stream, so a candidate's scratch is live only while it runs. That holds under measurement,
+where the plan holds several candidates loaded at once but samples them one after another. Any kernel
+needing less over-allocates, which is accepted.
 
 A workspace **limit** exposed as a knob follows the ordinary rule: default from the ranked winner,
 range `[min, max]` across the catalog.
