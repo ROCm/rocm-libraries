@@ -77,7 +77,8 @@ extern "C" __global__
     for(int qg = 0; qg < 4; qg++)
         for(int d16 = 0; d16 < D16; d16++)
             fill_fragment(o_frags[qg][d16], 0.f);
-    float row_m = -1e38f, row_d = 0.f;
+    // Per-group softmax state: each of the 4 query groups has its own max+normalizer
+    float row_m[4] = {-1e38f, -1e38f, -1e38f, -1e38f}, row_d[4] = {0.f, 0.f, 0.f, 0.f};
     for(int kb = 0; kb < (seq_len_kv + 63) / 64; kb++)
     {
         const int ki0 = kb * 64;
@@ -118,7 +119,11 @@ extern "C" __global__
                     load_matrix_sync(kf, &sK[d16 * 16][kg * 16], 64);
                     mma_sync(sf[qg][kg], q_frags[qg][d16], kf, sf[qg][kg]);
                 }
-        float nm = row_m, ms[4][4][4];
+        // Defect A fix: per-group softmax state (row_m[4], row_d[4])
+        // Each group qg tracks its own running max and normalizer independently.
+        float nm[4], ms[4][4][4];
+        for(int qg = 0; qg < 4; qg++)
+            nm[qg] = row_m[qg];
         for(int qg = 0; qg < 4; qg++)
             for(int kg = 0; kg < 4; kg++)
                 for(int e = 0; e < 4; e++)
@@ -129,18 +134,24 @@ extern "C" __global__
                     if(ki0 + kg * 16 + my_cg * 4 + e >= seq_len_kv)
                         s = -1e38f;
                     ms[qg][kg][e] = s;
+                    // Only update group qg's max from lanes that own group qg rows
                     if(qg == my_cg)
-                        nm = fmaxf(nm, s);
+                        nm[qg] = fmaxf(nm[qg], s);
                 }
-        for(int g = 1; g < 4; g++)
-            nm = fmaxf(nm, __shfl_xor(nm, g * 16));
-        const float br = flash2_expf(row_m - nm);
-        row_m = nm;
+        // Reduce nm[qg] within the 16-lane group (offsets 1,2,4,8 stay in-group)
         for(int qg = 0; qg < 4; qg++)
+            for(int off = 1; off < 16; off <<= 1)
+                nm[qg] = fmaxf(nm[qg], __shfl_xor(nm[qg], off));
+        // Per-group rescale of output accumulators and denominator
+        for(int qg = 0; qg < 4; qg++)
+        {
+            const float br = flash2_expf(row_m[qg] - nm[qg]);
+            row_m[qg] = nm[qg];
             for(int d16 = 0; d16 < D16; d16++)
                 for(int e = 0; e < 4; e++)
                     o_frags[qg][d16].x[e] *= br;
-        row_d *= br;
+            row_d[qg] *= br;
+        }
         fp pf[4][4];
         for(int qg = 0; qg < 4; qg++)
             for(int kg = 0; kg < 4; kg++)
@@ -148,10 +159,10 @@ extern "C" __global__
                 fill_fragment(pf[qg][kg], __half(0));
                 for(int e = 0; e < 4; e++)
                 {
-                    float pv = flash2_expf(ms[qg][kg][e] - row_m);
+                    float pv = flash2_expf(ms[qg][kg][e] - row_m[qg]);
                     pf[qg][kg].x[e] = (_Float16)pv;
                     if(qg == my_cg)
-                        row_d += pv;
+                        row_d[qg] += pv;
                 }
             }
         for(int kg = 0; kg < 4; kg++)
@@ -166,10 +177,11 @@ extern "C" __global__
     }
     if(my_valid)
     {
-        const float inv = (row_d > 0.f) ? 1.f / row_d : 0.f;
         __shared__ float so[64][D];
+        // Each group uses its own normalizer
         for(int qg = 0; qg < 4; qg++)
         {
+            const float inv = (row_d[qg] > 0.f) ? 1.f / row_d[qg] : 0.f;
             for(int d16 = 0; d16 < D16; d16++)
             {
                 for(int e = 0; e < 4; e++)
@@ -247,7 +259,8 @@ extern "C" __global__
     for(int qg = 0; qg < 4; qg++)
         for(int d16 = 0; d16 < D16; d16++)
             fill_fragment(o_frags[qg][d16], 0.f);
-    float row_m = -1e38f, row_d = 0.f;
+    // Per-group softmax state: each of the 4 query groups has its own max+normalizer
+    float row_m[4] = {-1e38f, -1e38f, -1e38f, -1e38f}, row_d[4] = {0.f, 0.f, 0.f, 0.f};
     for(int kb = 0; kb < (seq_len_kv + 63) / 64; kb++)
     {
         const int ki0 = kb * 64;
@@ -288,7 +301,11 @@ extern "C" __global__
                     load_matrix_sync(kf, &sK[d16 * 16][kg * 16], 64);
                     mma_sync(sf[qg][kg], q_frags[qg][d16], kf, sf[qg][kg]);
                 }
-        float nm = row_m, ms[4][4][4];
+        // Defect A fix: per-group softmax state (row_m[4], row_d[4])
+        // Each group qg tracks its own running max and normalizer independently.
+        float nm[4], ms[4][4][4];
+        for(int qg = 0; qg < 4; qg++)
+            nm[qg] = row_m[qg];
         for(int qg = 0; qg < 4; qg++)
             for(int kg = 0; kg < 4; kg++)
                 for(int e = 0; e < 4; e++)
@@ -299,18 +316,24 @@ extern "C" __global__
                     if(ki0 + kg * 16 + my_cg * 4 + e >= seq_len_kv)
                         s = -1e38f;
                     ms[qg][kg][e] = s;
+                    // Only update group qg's max from lanes that own group qg rows
                     if(qg == my_cg)
-                        nm = fmaxf(nm, s);
+                        nm[qg] = fmaxf(nm[qg], s);
                 }
-        for(int g = 1; g < 4; g++)
-            nm = fmaxf(nm, __shfl_xor(nm, g * 16));
-        const float br = flash2_expf(row_m - nm);
-        row_m = nm;
+        // Reduce nm[qg] within the 16-lane group (offsets 1,2,4,8 stay in-group)
         for(int qg = 0; qg < 4; qg++)
+            for(int off = 1; off < 16; off <<= 1)
+                nm[qg] = fmaxf(nm[qg], __shfl_xor(nm[qg], off));
+        // Per-group rescale of output accumulators and denominator
+        for(int qg = 0; qg < 4; qg++)
+        {
+            const float br = flash2_expf(row_m[qg] - nm[qg]);
+            row_m[qg] = nm[qg];
             for(int d16 = 0; d16 < D16; d16++)
                 for(int e = 0; e < 4; e++)
                     o_frags[qg][d16].x[e] *= br;
-        row_d *= br;
+            row_d[qg] *= br;
+        }
         fp pf[4][4];
         for(int qg = 0; qg < 4; qg++)
             for(int kg = 0; kg < 4; kg++)
@@ -318,10 +341,10 @@ extern "C" __global__
                 fill_fragment(pf[qg][kg], __half(0));
                 for(int e = 0; e < 4; e++)
                 {
-                    float pv = flash2_expf(ms[qg][kg][e] - row_m);
+                    float pv = flash2_expf(ms[qg][kg][e] - row_m[qg]);
                     pf[qg][kg].x[e] = (_Float16)pv;
                     if(qg == my_cg)
-                        row_d += pv;
+                        row_d[qg] += pv;
                 }
             }
         for(int kg = 0; kg < 4; kg++)
@@ -336,10 +359,11 @@ extern "C" __global__
     }
     if(my_valid)
     {
-        const float inv = (row_d > 0.f) ? 1.f / row_d : 0.f;
         __shared__ float so[64][D];
+        // Each group uses its own normalizer
         for(int qg = 0; qg < 4; qg++)
         {
+            const float inv = (row_d[qg] > 0.f) ? 1.f / row_d[qg] : 0.f;
             for(int d16 = 0; d16 < D16; d16++)
             {
                 for(int e = 0; e < 4; e++)
