@@ -3,8 +3,6 @@
 
 #pragma once
 
-#include "Bfloat16Dev.hpp"
-
 #define PPCAT_NX(A, B) A##B
 #define PPCAT(A, B) PPCAT_NX(A, B)
 #define TWO 2
@@ -98,8 +96,8 @@
 #endif // HIP_PLUGIN_USE_FP32
 
 #if(HIP_PLUGIN_USE_BFP16 == 1) || (HIP_PLUGIN_USE_BFPMIX == 1)
-#define CVT_FLOAT2ACCUM(x) (bfloat16_to_float(x))
-#define CVT_ACCUM2FLOAT(x) (float_to_bfloat16(x))
+#define CVT_FLOAT2ACCUM(x) (static_cast<float>(x))
+#define CVT_ACCUM2FLOAT(x) (static_cast<__bf16>(x))
 #define CVT_INTEGRAL2ACCUM(x) (static_cast<FLOAT_ACCUM>(x))
 #define CVT_FP32_2FLOAT(x) (CVT_ACCUM2FLOAT(x))
 #define CVT_FP32_2ACCUM(x) (x)
@@ -141,7 +139,7 @@
 #if(HIP_PLUGIN_USE_BFP16 == 1) || (HIP_PLUGIN_USE_BFPMIX == 1)
 // No direct conversion from integral types to BF16 is available.
 // WARNING: Precision loss when integral type is wider than 16 bits.
-#define CVT_INTEGRAL2ACCUM(x) (float_to_bfloat16(static_cast<float>(x)))
+#define CVT_INTEGRAL2ACCUM(x) (static_cast<__bf16>(static_cast<float>(x)))
 #else
 #define CVT_INTEGRAL2ACCUM(x) (static_cast<FLOAT>(x))
 #endif

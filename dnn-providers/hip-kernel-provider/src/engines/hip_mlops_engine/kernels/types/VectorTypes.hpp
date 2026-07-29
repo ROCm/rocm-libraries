@@ -3,7 +3,6 @@
 
 #pragma once
 
-#include "Bfloat16Dev.hpp"
 #ifndef __HIPCC_RTC__
 #include <hip/hip_fp16.h>
 #endif
@@ -111,14 +110,6 @@ __forceinline__ __device__ __host__ OutType scalarcast(InType in)
     if constexpr(std::is_same<OutType, InType>::value)
     {
         return in;
-    }
-    else if constexpr(std::is_same<OutType, __bf16>::value && std::is_same<InType, float>::value)
-    {
-        return float_to_bfloat16(in);
-    }
-    else if constexpr(std::is_same<InType, __bf16>::value && std::is_same<OutType, float>::value)
-    {
-        return bfloat16_to_float(in);
     }
     else
     {
