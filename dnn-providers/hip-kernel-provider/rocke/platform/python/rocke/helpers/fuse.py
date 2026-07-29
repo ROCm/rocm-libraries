@@ -62,7 +62,21 @@ from dataclasses import dataclass, field
 import operator
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
-from ..core.ir import BF16, F16, F32, IRBuilder, PtrType, Type, Value
+from ..core.ir import (
+    BF16,
+    BF8E5M2,
+    F16,
+    F32,
+    FP8E4M3,
+    I8,
+    I16,
+    I32,
+    I64,
+    IRBuilder,
+    PtrType,
+    Type,
+    Value,
+)
 from .activations import _sigmoid_via_exp2, _tanh_via_exp2
 from .autotune import Autotuner, AutotuneConfig
 
@@ -179,6 +193,18 @@ def ir_dtype_global_load(b: IRBuilder, dtype: Type, ptr: Value, idx: Value) -> V
         return b.global_load_bf16(ptr, idx)
     if dtype == F32:
         return b.global_load_f32(ptr, idx)
+    if dtype == I8:
+        return b.global_load_i8(ptr, idx)
+    if dtype == I16:
+        return b.global_load_i16(ptr, idx)
+    if dtype == I32:
+        return b.global_load_i32(ptr, idx)
+    if dtype == I64:
+        return b.global_load_i64(ptr, idx)
+    if dtype == FP8E4M3:
+        return b.global_load_fp8e4m3(ptr, idx)
+    if dtype == BF8E5M2:
+        return b.global_load_bf8e5m2(ptr, idx)
     raise NotImplementedError(f"ir_dtype_global_load: unsupported {dtype}")
 
 

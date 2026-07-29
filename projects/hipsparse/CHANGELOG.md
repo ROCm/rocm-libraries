@@ -12,6 +12,9 @@ Documentation for hipSPARSE is available at
 * Added CSC format support to `hipsparseSpSV`.
 * Added CSC format support to `hipsparseSpSM`.
 
+### Resolved issues
+* Fixed an issue with `hipsparseSpMM`, which produced incorrect results for the Blocked ELL sparse format.
+
 ## hipSPARSE 4.6.0 for ROCm 7.14
 
 ### Added
