@@ -641,6 +641,7 @@ operator fails load validation ([Section 10](#10-observability-and-diagnostics))
 | Comparison | `==`, `!=`, `<`, `<=`, `>`, `>=`, `in` |
 | Arithmetic | `+`, `-`, `*`, `/`, `%`, `ceil_div`, `min`, `max`, `rsqrt` |
 | Per-element | `all` |
+| Presence | `present`, `not_present` |
 | Short-hands | `divisible`, `value_or_default`, and the pattern-binding `shape`/`rank` |
 | Escape hatch | registry-resolved custom operations, for checks the built-ins cannot express (below) |
 
@@ -686,10 +687,11 @@ namespaces, and every criteria and dispatch expression draws from the same set:
   part of this work; like the graph identity of [Section 8](#8-end-to-end-flow), each addition is an
   additive schema field rather than a new interface.
 
-A bare token used on its own is a truthiness check. For a boolean field that is its value: a lone
-`"$q.packed"` in an `and` list reads as "the tensor is packed", equivalent to `==($q.packed, true)`.
-For an operand token it is presence: a lone `"$bias"` reads as "the graph supplies this operand".
-Either way such a token is a criterion, not a stray element.
+A bare token used on its own is a truthiness check on a boolean field: a lone `"$q.packed"` in an
+`and` list reads as "the tensor is packed", equivalent to `==($q.packed, true)`, so such a token is a
+criterion, not a stray element. Asking whether an *optional* operand or field was supplied at all is
+a different question, and `present`/`not_present` ask it
+([Section 5](#5-matching-and-the-umd) below).
 
 New fields are added to the schema and referenced the same way; the full field and operator vocabulary,
 the operand-property set (broadcast, alignment, sparse and ragged kinds), and the interpreter profile
@@ -855,14 +857,31 @@ top-scored kernel wins. Ties break in a fixed order: explicit `priority`, then t
 chosen because it is stable across runs, load orders, and machines, not because a lower id is better.
 When the decision falls to `id`, the provider logs the conflict to the warning log.
 
-**Optional operands.** A pattern marks an operand optional with a `?` suffix, `"bias": "$bias?"`, binding
-it only when the graph supplies it; a formula then reads a possibly-absent value with a default via
-`value_or_default(["$bias", 0])`. A criterion over an optional operand's *fields* is checked only when
-that operand is bound, so a dtype or layout check on an absent `$bias` neither passes nor fails, it
-simply does not run. Testing the operand token itself is different and always runs: a bare `"$bias"`
-asks whether the operand is present, and `{"!": ["$bias"]}` asks whether it is absent. That is how a
-pack refuses a feature it cannot serve, and it is the one criterion form an unbound operand still
-answers ([Section 13.2](#132-the-matcher) rejects 24 optional operands this way).
+**Optional operands and optional fields.** A pattern marks an operand optional with a `?` suffix,
+`"bias": "$bias?"`, binding it only when the graph supplies it. Whether something optional was
+supplied is asked directly: `{"present": ["$bias"]}` and `{"not_present": ["$bias"]}`. Both apply to
+an optional operand and to an optional schema field alike, and both always evaluate, because
+answering "was this supplied?" is exactly what they are for.
+
+A criterion over an optional operand's *fields* is different: it is checked only when that operand is
+bound, so a dtype or layout check on an absent `$bias` neither passes nor fails, it simply does not
+run. That is what makes the two compose. A pack that cannot serve a bias at all writes
+`{"not_present": ["$bias"]}`. A pack that serves one only in a particular form writes the pair it
+actually means:
+
+```jsonc
+{"or": [
+  {"not_present": ["$bias"]},                                  // no bias: fine
+  {"and": [{"present": ["$bias"]},                             // or a bias, but only bf16 and packed
+           {"==": ["$bias.dtype", "BFLOAT16"]}, "$bias.packed"]}
+]}
+```
+
+Without a presence operator that second form cannot be written: a bare field check is skipped when
+the operand is absent, so "absent, or present and constrained" collapses into "present and
+constrained or nothing at all" and the pack silently accepts graphs it cannot serve. Presence is
+also how a pack refuses a feature outright, which is how the worked example declines the 24 optional
+operands its kernel does not implement ([Section 13.2](#132-the-matcher)).
 
 **Out of scope for v1.** General N-ary commutative matching, unbounded variadic operands, and unbounded
 chains are deferred to the JIT follow-up ([Section 9.3](#93-future-jit-and-normalized-providers)); a
@@ -1623,38 +1642,39 @@ gated modes of the same kernel file and are called out as an extension point in 
   "nodes": [
     {"kind": "op", "id": "sdpa_fwd", "op": "sdpa_fwd",
      "operands": {
-       "Q": "$q", "K": "$k", "V": "$v",
-       // The 24 optional operands this family's dispatch candidate does not serve. Same field
-       // set the retired adapter's usesUnsupportedTensor swept (SdpaGraphAdapter.cpp:101-115,
-       // now removed by PR #9800; the field set itself is generic hipDNN SDPA vocabulary, not
-       // specific to any one kernel family, and every one of these is genuinely absent from
-       // AttentionDenseSpec's fields today).
-       "AttnScale":   "$attn_scale?",    // the scale-tensor form this pack declines; see below
-       "AttnMask":    "$attn_mask?",
-       "SeqLenQ":     "$seq_len_q?",     // varlen: a real AttentionDenseSpec.varlen mode, not
-       "SeqLenKV":    "$seq_len_kv?",    // wired into this candidate; see Section 13.8.
-       "Seed":        "$seed?",
-       "Offset":      "$offset?",
-       "DropoutMask": "$dropout_mask?",
-       "DropoutScale":"$dropout_scale?",
-       "PageTblK":    "$page_tbl_k?",
-       "PageTblV":    "$page_tbl_v?",
-       "BlockMask":   "$block_mask?",
-       "SinkTok":     "$sink_tok?",
-       "DescaleQ":    "$descale_q?",
-       "DescaleK":    "$descale_k?",
-       "DescaleV":    "$descale_v?",
-       "DescaleS":    "$descale_s?",
-       "ScaleS":      "$scale_s?",
-       "ScaleO":      "$scale_o?",
-       "Stats":       "$stats_out?",
-       "Max":         "$max_out?",
-       "SumExp":      "$sum_exp?",
-       "RngDump":     "$rng_dump?",
-       "AmaxS":       "$amax_s?",
-       "AmaxO":       "$amax_o?"
+       // Required operands, named as the schema names them (`sdpa_attributes.fbs`), minus the
+       // `_tensor_uid` suffix, since a pattern binds the tensor rather than its uid.
+       "q": "$q", "k": "$k", "v": "$v",
+
+       // Every optional tensor the schema declares. This family serves none of them, so each is
+       // bound here and declined below. The set is generic hipDNN SDPA vocabulary, not specific to
+       // any one kernel family, and every one is genuinely absent from AttentionDenseSpec.
+       "attn_mask":     "$attn_mask?",
+       "scale":         "$scale?",           // the scale-tensor form; this pack takes a scalar
+       "seq_len_q":     "$seq_len_q?",       // varlen: a real AttentionDenseSpec.varlen mode, not
+       "seq_len_kv":    "$seq_len_kv?",      // wired into this candidate; see Section 13.8.
+       "seed":          "$seed?",
+       "offset":        "$offset?",
+       "dropout_mask":  "$dropout_mask?",
+       "dropout_scale": "$dropout_scale?",
+       "page_table_k":  "$page_table_k?",
+       "page_table_v":  "$page_table_v?",
+       "block_mask":    "$block_mask?",
+       "sink_token":    "$sink_token?",
+       "descale_q":     "$descale_q?",
+       "descale_k":     "$descale_k?",
+       "descale_v":     "$descale_v?",
+       "descale_s":     "$descale_s?",
+       "scale_s":       "$scale_s?",
+       "scale_o":       "$scale_o?",
+       "stats":         "$stats?",
+       "max":           "$max?",
+       "sum_exp":       "$sum_exp?",
+       "rng_dump":      "$rng_dump?",
+       "amax_s":        "$amax_s?",
+       "amax_o":        "$amax_o?"
      },
-     "results": {"O": "$o"}}
+     "results": {"o": "$o"}}
   ],
   "criteria": {"and": [
     // --- graph-level: a prebuilt kernel serves one fixed compile-time shape ---
@@ -1662,18 +1682,14 @@ gated modes of the same kernel file and are called out as an extension point in 
     {"==": ["$graph.node_count", 1]},
     {"==": ["$graph.node_kind", "sdpa_fwd"]},
 
-    // --- none of the 24 optional operands may be present. Each `{"!": ["$operand"]}` is a
-    //     presence test on the operand token, which an unbound operand still answers (Section 5) ---
-    {"and": [
-      {"!": ["$attn_mask"]},    {"!": ["$seq_len_q"]},   {"!": ["$seq_len_kv"]},
-      {"!": ["$seed"]},         {"!": ["$offset"]},      {"!": ["$dropout_mask"]},
-      {"!": ["$dropout_scale"]},{"!": ["$page_tbl_k"]},  {"!": ["$page_tbl_v"]},
-      {"!": ["$block_mask"]},   {"!": ["$sink_tok"]},    {"!": ["$descale_q"]},
-      {"!": ["$descale_k"]},    {"!": ["$descale_v"]},   {"!": ["$descale_s"]},
-      {"!": ["$scale_s"]},      {"!": ["$scale_o"]},     {"!": ["$stats_out"]},
-      {"!": ["$max_out"]},      {"!": ["$sum_exp"]},     {"!": ["$rng_dump"]},
-      {"!": ["$amax_s"]},       {"!": ["$amax_o"]},      {"!": ["$attn_scale"]}
-    ]},
+    // --- none of the 24 optional tensors may be supplied. A pack that served one of these in a
+    //     restricted form would write `{"or": [{"not_present": [...]}, {"and": [{"present": [...]},
+    //     ...constraints...]}]}` instead (Section 5); this family serves none. ---
+    {"not_present": ["$attn_mask", "$scale", "$seq_len_q", "$seq_len_kv", "$seed", "$offset",
+                     "$dropout_mask", "$dropout_scale", "$page_table_k", "$page_table_v",
+                     "$block_mask", "$sink_token", "$descale_q", "$descale_k", "$descale_v",
+                     "$descale_s", "$scale_s", "$scale_o", "$stats", "$max", "$sum_exp",
+                     "$rng_dump", "$amax_s", "$amax_o"]},
 
     // --- rank-4-ness and cross-tensor dim equality via capture reuse. The technique is
     //     family-agnostic: it expresses the same equalities a hand-written adapter checks
@@ -1728,20 +1744,24 @@ gated modes of the same kernel file and are called out as an extension point in 
     {"==": ["$sdpa_fwd.mma_core_mode", "UNSET"]},
     {"in": ["$sdpa_fwd.implementation", ["AUTO", "UNIFIED"]]},
 
-    // --- real: no ALiBi, no padding mask, no dropout anywhere in AttentionDenseSpec's fields ---
+    // --- real: no ALiBi, no padding mask, no dropout. alibi_mask and padding_mask are plain bools
+    //     with a false default, so a bare negation is the right form. dropout_probability is an
+    //     optional float: unset accepts, and an explicit 0.0 also accepts, so the two cases are
+    //     spelled out rather than folded into a default substitution. ---
     {"!": ["$sdpa_fwd.alibi_mask"]}, {"!": ["$sdpa_fwd.padding_mask"]},
-    // dropout_probability is an optional float, so it is defaulted before comparison rather than
-    // read bare: unset and an explicit 0.0 both accept, any positive rate declines
-    {"<=": [{"value_or_default": ["$sdpa_fwd.dropout_probability", 0.0]}, 0.0]},
+    {"or": [{"not_present": ["$sdpa_fwd.dropout_probability"]},
+            {"==": ["$sdpa_fwd.dropout_probability", 0.0]}]},
 
-    // --- scale: this pack takes the scale from the graph rather than deriving it. Accepting the
-    //     SDPA convention's implicit default would instead read `rsqrt($sdpa_fwd.head_size)`
-    //     (Section 5); requiring the attribute keeps the pack's contract narrow.
-    //     attn_scale_value is an optional float with no legal zero, so defaulting it to 0.0 and
-    //     rejecting that value is a sound "must be set" test. The scale *tensor* form has no such
-    //     spare value (0 is a legal uid), so it is bound as an optional operand and rejected by
-    //     presence in the conjunction above. ---
-    {"!=": [{"value_or_default": ["$sdpa_fwd.attn_scale_value", 0.0]}, 0.0]},
+    // --- stats and paged-KV attributes this family does not implement ---
+    {"or": [{"not_present": ["$sdpa_fwd.generate_stats"]},
+            {"!": ["$sdpa_fwd.generate_stats"]}]},
+    {"not_present": ["$sdpa_fwd.max_seq_len_kv"]},
+
+    // --- scale: this pack requires the scalar form and declines the tensor form. The scale tensor
+    //     is refused with the other 24 operands above; here the scalar attribute is required to be
+    //     supplied, because this pack does not derive the conventional default
+    //     (`rsqrt($sdpa_fwd.head_size)`, Section 5) and will not run on a graph that meant it. ---
+    {"present": ["$sdpa_fwd.attn_scale_value"]},
 
     // --- gate #21-equivalent: the mask-mode classifier, written out in full in Section 13.3.
     //     The ENTIRE block returned by Section 13.3, contradiction check AND
@@ -1784,6 +1804,13 @@ and `causal_top_left` have real, buildable `AttentionDenseSpec` instances today
 them, `causal_top_left`; §13.4's Case C shows what happens to a graph that resolves to an
 unpopulated mode.
 
+`left_bound` and `right_bound` are optional (`long = null`), and the C++ they mirror treats an absent
+bound as unbounded, i.e. `-1`. Written out, each arm below would need
+`{"or": [{"not_present": ["$sdpa_fwd.left_bound"]}, {"==": ["$sdpa_fwd.left_bound", -1]}]}` wherever
+it means "left unbounded". That is correct but unreadable six times over, so the arms use
+`value_or_default` to normalize an absent bound to `-1` first and then compare
+([Section 5](#5-matching-and-the-umd)). The two spellings are equivalent; this one is legible.
+
 ```jsonc
 // The full contradiction-check-plus-classifier block. Spliced into 13.2 in one piece (the fix):
 // pasting only the inner `or` there would let the contradiction check become a disjunct instead
@@ -1801,35 +1828,34 @@ unpopulated mode.
 
     {"and": [{"==": ["$kernel.mask_mode", "none"]},
              {"!": ["$sdpa_fwd.causal_mask"]}, {"!": ["$sdpa_fwd.causal_mask_bottom_right"]},
-             {"==": ["$sdpa_fwd.left_bound",  -1]},
-             {"==": ["$sdpa_fwd.right_bound", -1]}]},
+             {"==": [{"value_or_default": ["$sdpa_fwd.left_bound",  -1]}, -1]},
+             {"==": [{"value_or_default": ["$sdpa_fwd.right_bound", -1]}, -1]}]},
 
     {"and": [{"==": ["$kernel.mask_mode", "causal_bottom_right"]},
              {"!": ["$sdpa_fwd.causal_mask"]}, {"!": ["$sdpa_fwd.causal_mask_bottom_right"]},
-             {"==": ["$sdpa_fwd.left_bound",  -1]},
-             {"==": ["$sdpa_fwd.right_bound",  0]},
+             {"==": [{"value_or_default": ["$sdpa_fwd.left_bound",  -1]}, -1]},
+             {"==": [{"value_or_default": ["$sdpa_fwd.right_bound", -1]},  0]},
              {"==": ["$sdpa_fwd.diagonal_alignment", "BOTTOM_RIGHT"]}]},
     {"and": [{"==": ["$kernel.mask_mode", "causal_top_left"]},
              {"!": ["$sdpa_fwd.causal_mask"]}, {"!": ["$sdpa_fwd.causal_mask_bottom_right"]},
-             {"==": ["$sdpa_fwd.left_bound",  -1]},
-             {"==": ["$sdpa_fwd.right_bound",  0]},
+             {"==": [{"value_or_default": ["$sdpa_fwd.left_bound",  -1]}, -1]},
+             {"==": [{"value_or_default": ["$sdpa_fwd.right_bound", -1]},  0]},
              {"!": [{"==": ["$sdpa_fwd.diagonal_alignment", "BOTTOM_RIGHT"]}]}]},
 
     {"and": [{"==": ["$kernel.mask_mode", "sliding_window"]},
              {"!": ["$sdpa_fwd.causal_mask"]}, {"!": ["$sdpa_fwd.causal_mask_bottom_right"]},
-             {"!": [{"and": [{"==": ["$sdpa_fwd.left_bound",  -1]},
-                             {"==": ["$sdpa_fwd.right_bound", -1]}]}]},
-             {"!": [{"and": [{"==": ["$sdpa_fwd.left_bound",  -1]},
-                             {"==": ["$sdpa_fwd.right_bound",  0]}]}]}]}
+             {"!": [{"and": [{"==": [{"value_or_default": ["$sdpa_fwd.left_bound",  -1]}, -1]},
+                             {"==": [{"value_or_default": ["$sdpa_fwd.right_bound", -1]}, -1]}]}]},
+             {"!": [{"and": [{"==": [{"value_or_default": ["$sdpa_fwd.left_bound",  -1]}, -1]},
+                             {"==": [{"value_or_default": ["$sdpa_fwd.right_bound", -1]},  0]}]}]}]}
   ]}
 ]}
 ```
 
-`left_bound`/`right_bound` are compared with plain `==` against `-1`. That is the direct spelling and
-it is what this pack uses, because the graphs it serves bind both bounds. A pack whose graphs may
-omit them wraps each reference in `value_or_default`
-([Section 5](#5-matching-and-the-umd)), which supplies the `-1` first and matches how hand-written
-applicability code normalizes an absent bound before classifying.
+**Verdict.** No custom operation, no escape hatch, no new operator. The apparent need for one came
+from copying the C++ shape, compute a mode then compare it, into a language that never needs to name
+the value: the kernel's own metadata supplies the right-hand side, so the comparison collapses into
+the predicate. That inversion is the general recipe for porting a classifier.
 
 ### 13.4 One Accept, Two Declines
 
@@ -1847,7 +1873,7 @@ below `num_persistent`'s default of 256, so the real host-side rule in
 mode) would itself pick the non-persistent cohort for this exact shape. Applicable.
 
 **Case B: matcher decline.** Same graph plus an additive attention bias, so `$attn_mask` is bound.
-The optional-operand conjunction fails the moment that operand is present, before mask mode, dtype,
+The `not_present` list fails the moment that operand is bound, before mask mode, dtype,
 or layout are considered. Any of the other 23 optional operands declines identically, and so does
 `$graph.override_shape`, which rejects before any tensor is bound because this kernel bakes its
 shape at compile time and cannot serve a runtime-overridden one.
