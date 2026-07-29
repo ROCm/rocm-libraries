@@ -20,15 +20,16 @@ TEST(TestGpuPointwiseMixedLayouts, Unary)
     Tensor<float> outputGpuTensor({1, 3, 2, 2}, TensorLayout::NCHW);
 
     const unsigned int seed = getGlobalTestSeed();
-    inputTensor.fillWithRandomValues(-1.0f, 1.0f, seed);
+    const float fillRange = 1.0f;
+    inputTensor.fillWithRandomValues(-fillRange, fillRange, seed);
 
-    CpuReferencePointwiseImpl<float>::pointwiseCompute(
-        PointwiseMode::ABS, outputCpuTensor, inputTensor);
+    auto operation = PointwiseMode::ABS;
+    CpuReferencePointwiseImpl<float>::pointwiseCompute(operation, outputCpuTensor, inputTensor);
 
-    GpuReferencePointwise::pointwiseCompute<float>(
-        PointwiseMode::ABS, outputGpuTensor, inputTensor);
+    GpuReferencePointwise::pointwiseCompute<float>(operation, outputGpuTensor, inputTensor);
 
-    assertAllClose(outputCpuTensor, outputGpuTensor, pointwise::getTolerance<float>());
+    assertAllClose(
+        outputCpuTensor, outputGpuTensor, getDynamicTolerance<float>(operation, fillRange));
 }
 
 TEST(TestGpuPointwiseMixedLayouts, Binary)
@@ -42,16 +43,19 @@ TEST(TestGpuPointwiseMixedLayouts, Binary)
     Tensor<float> outputGpuTensor({1, 3, 2, 2}, TensorLayout::NHWC);
 
     const unsigned int seed = getGlobalTestSeed();
-    input0Tensor.fillWithRandomValues(-1.0f, 1.0f, seed);
-    input1Tensor.fillWithRandomValues(-1.0f, 1.0f, seed);
+    const float fillRange = 1.0f;
+    input0Tensor.fillWithRandomValues(-fillRange, fillRange, seed);
+    input1Tensor.fillWithRandomValues(-fillRange, fillRange, seed);
 
+    auto operation = PointwiseMode::ADD;
     CpuReferencePointwiseImpl<float>::pointwiseCompute(
-        PointwiseMode::ADD, outputCpuTensor, input0Tensor, input1Tensor);
+        operation, outputCpuTensor, input0Tensor, input1Tensor);
 
     GpuReferencePointwise::pointwiseCompute<float>(
-        PointwiseMode::ADD, outputGpuTensor, input0Tensor, input1Tensor);
+        operation, outputGpuTensor, input0Tensor, input1Tensor);
 
-    assertAllClose(outputCpuTensor, outputGpuTensor, pointwise::getTolerance<float>());
+    assertAllClose(
+        outputCpuTensor, outputGpuTensor, getDynamicTolerance<float>(operation, fillRange));
 }
 
 // --- Test mixed types ---
@@ -66,15 +70,16 @@ TEST(TestGpuPointwiseMixedTypes, UnaryUpcast)
     Tensor<float> outputGpuTensor({1, 3, 2, 2});
 
     const unsigned int seed = getGlobalTestSeed();
-    inputTensor.fillWithRandomValues(half{-1.0}, half{1.0}, seed);
+    const float fillRange = 1.0f;
+    inputTensor.fillWithRandomValues(half{-fillRange}, half{fillRange}, seed);
 
-    CpuReferencePointwiseImpl<float>::pointwiseCompute(
-        PointwiseMode::ABS, outputCpuTensor, inputTensor);
+    auto operation = PointwiseMode::ABS;
+    CpuReferencePointwiseImpl<float>::pointwiseCompute(operation, outputCpuTensor, inputTensor);
 
-    GpuReferencePointwise::pointwiseCompute<float>(
-        PointwiseMode::ABS, outputGpuTensor, inputTensor);
+    GpuReferencePointwise::pointwiseCompute<float>(operation, outputGpuTensor, inputTensor);
 
-    assertAllClose(outputCpuTensor, outputGpuTensor, pointwise::getTolerance<float>());
+    assertAllClose(
+        outputCpuTensor, outputGpuTensor, getDynamicTolerance<float, half>(operation, fillRange));
 }
 
 TEST(TestGpuPointwiseMixedTypes, UnaryDowncast)
@@ -87,15 +92,17 @@ TEST(TestGpuPointwiseMixedTypes, UnaryDowncast)
     Tensor<bfloat16> outputGpuTensor({1, 3, 2, 2});
 
     const unsigned int seed = getGlobalTestSeed();
-    inputTensor.fillWithRandomValues(half{-1.0}, half{1.0}, seed);
+    const float fillRange = 1.0f;
+    inputTensor.fillWithRandomValues(half{-fillRange}, half{fillRange}, seed);
 
-    CpuReferencePointwiseImpl<bfloat16>::pointwiseCompute(
-        PointwiseMode::ABS, outputCpuTensor, inputTensor);
+    auto operation = PointwiseMode::ABS;
+    CpuReferencePointwiseImpl<bfloat16>::pointwiseCompute(operation, outputCpuTensor, inputTensor);
 
-    GpuReferencePointwise::pointwiseCompute<bfloat16>(
-        PointwiseMode::ABS, outputGpuTensor, inputTensor);
+    GpuReferencePointwise::pointwiseCompute<bfloat16>(operation, outputGpuTensor, inputTensor);
 
-    assertAllClose(outputCpuTensor, outputGpuTensor, pointwise::getTolerance<bfloat16>());
+    assertAllClose(outputCpuTensor,
+                   outputGpuTensor,
+                   getDynamicTolerance<bfloat16, half>(operation, fillRange));
 }
 
 TEST(TestGpuPointwiseMixedTypes, BinaryMixedInputs)
@@ -109,16 +116,19 @@ TEST(TestGpuPointwiseMixedTypes, BinaryMixedInputs)
     Tensor<float> outputGpuTensor({1, 3, 2, 2});
 
     const unsigned int seed = getGlobalTestSeed();
-    input0Tensor.fillWithRandomValues(half{-1.0f}, half{1.0f}, seed);
-    input1Tensor.fillWithRandomValues(bfloat16{-1.0f}, bfloat16{1.0f}, seed);
+    const float fillRange = 1.0f;
+    input0Tensor.fillWithRandomValues(half{-fillRange}, half{fillRange}, seed);
+    input1Tensor.fillWithRandomValues(bfloat16{-fillRange}, bfloat16{fillRange}, seed);
 
+    auto operation = PointwiseMode::ADD;
     CpuReferencePointwiseImpl<float>::pointwiseCompute(
-        PointwiseMode::ADD, outputCpuTensor, input0Tensor, input1Tensor);
+        operation, outputCpuTensor, input0Tensor, input1Tensor);
 
     GpuReferencePointwise::pointwiseCompute<float>(
-        PointwiseMode::ADD, outputGpuTensor, input0Tensor, input1Tensor);
+        operation, outputGpuTensor, input0Tensor, input1Tensor);
 
-    assertAllClose(outputCpuTensor, outputGpuTensor, pointwise::getTolerance<float>());
+    assertAllClose(
+        outputCpuTensor, outputGpuTensor, getDynamicTolerance<float, half>(operation, fillRange));
 }
 
 // --- Test 1D/2D/3D shapes ---
@@ -132,15 +142,16 @@ TEST(TestGpuPointwise1DShapes, Unary)
     Tensor<float> outputGpuTensor({3});
 
     const unsigned int seed = getGlobalTestSeed();
-    inputTensor.fillWithRandomValues(-1.0f, 1.0f, seed);
+    const float fillRange = 1.0f;
+    inputTensor.fillWithRandomValues(-fillRange, fillRange, seed);
 
-    CpuReferencePointwiseImpl<float>::pointwiseCompute(
-        PointwiseMode::ABS, outputCpuTensor, inputTensor);
+    auto operation = PointwiseMode::ABS;
+    CpuReferencePointwiseImpl<float>::pointwiseCompute(operation, outputCpuTensor, inputTensor);
 
-    GpuReferencePointwise::pointwiseCompute<float>(
-        PointwiseMode::ABS, outputGpuTensor, inputTensor);
+    GpuReferencePointwise::pointwiseCompute<float>(operation, outputGpuTensor, inputTensor);
 
-    assertAllClose(outputCpuTensor, outputGpuTensor, pointwise::getTolerance<float>());
+    assertAllClose(
+        outputCpuTensor, outputGpuTensor, getDynamicTolerance<float>(operation, fillRange));
 }
 
 TEST(TestGpuPointwise1DShapes, Binary)
@@ -153,16 +164,19 @@ TEST(TestGpuPointwise1DShapes, Binary)
     Tensor<float> outputGpuTensor({3});
 
     const unsigned int seed = getGlobalTestSeed();
-    input0Tensor.fillWithRandomValues(-1.0f, 1.0f, seed);
-    input1Tensor.fillWithRandomValues(-1.0f, 1.0f, seed);
+    const float fillRange = 1.0f;
+    input0Tensor.fillWithRandomValues(-fillRange, fillRange, seed);
+    input1Tensor.fillWithRandomValues(-fillRange, fillRange, seed);
 
+    auto operation = PointwiseMode::ADD;
     CpuReferencePointwiseImpl<float>::pointwiseCompute(
-        PointwiseMode::ADD, outputCpuTensor, input0Tensor, input1Tensor);
+        operation, outputCpuTensor, input0Tensor, input1Tensor);
 
     GpuReferencePointwise::pointwiseCompute<float>(
-        PointwiseMode::ADD, outputGpuTensor, input0Tensor, input1Tensor);
+        operation, outputGpuTensor, input0Tensor, input1Tensor);
 
-    assertAllClose(outputCpuTensor, outputGpuTensor, pointwise::getTolerance<float>());
+    assertAllClose(
+        outputCpuTensor, outputGpuTensor, getDynamicTolerance<float>(operation, fillRange));
 }
 
 TEST(TestGpuPointwise2DShapes, Unary)
@@ -174,15 +188,16 @@ TEST(TestGpuPointwise2DShapes, Unary)
     Tensor<float> outputGpuTensor({3, 2});
 
     const unsigned int seed = getGlobalTestSeed();
-    inputTensor.fillWithRandomValues(-1.0f, 1.0f, seed);
+    const float fillRange = 1.0f;
+    inputTensor.fillWithRandomValues(-fillRange, fillRange, seed);
 
-    CpuReferencePointwiseImpl<float>::pointwiseCompute(
-        PointwiseMode::ABS, outputCpuTensor, inputTensor);
+    auto operation = PointwiseMode::ABS;
+    CpuReferencePointwiseImpl<float>::pointwiseCompute(operation, outputCpuTensor, inputTensor);
 
-    GpuReferencePointwise::pointwiseCompute<float>(
-        PointwiseMode::ABS, outputGpuTensor, inputTensor);
+    GpuReferencePointwise::pointwiseCompute<float>(operation, outputGpuTensor, inputTensor);
 
-    assertAllClose(outputCpuTensor, outputGpuTensor, pointwise::getTolerance<float>());
+    assertAllClose(
+        outputCpuTensor, outputGpuTensor, getDynamicTolerance<float>(operation, fillRange));
 }
 
 TEST(TestGpuPointwise2DShapes, Binary)
@@ -195,16 +210,19 @@ TEST(TestGpuPointwise2DShapes, Binary)
     Tensor<float> outputGpuTensor({3, 2});
 
     const unsigned int seed = getGlobalTestSeed();
-    input0Tensor.fillWithRandomValues(-1.0f, 1.0f, seed);
-    input1Tensor.fillWithRandomValues(-1.0f, 1.0f, seed);
+    const float fillRange = 1.0f;
+    input0Tensor.fillWithRandomValues(-fillRange, fillRange, seed);
+    input1Tensor.fillWithRandomValues(-fillRange, fillRange, seed);
 
+    auto operation = PointwiseMode::ADD;
     CpuReferencePointwiseImpl<float>::pointwiseCompute(
-        PointwiseMode::ADD, outputCpuTensor, input0Tensor, input1Tensor);
+        operation, outputCpuTensor, input0Tensor, input1Tensor);
 
     GpuReferencePointwise::pointwiseCompute<float>(
-        PointwiseMode::ADD, outputGpuTensor, input0Tensor, input1Tensor);
+        operation, outputGpuTensor, input0Tensor, input1Tensor);
 
-    assertAllClose(outputCpuTensor, outputGpuTensor, pointwise::getTolerance<float>());
+    assertAllClose(
+        outputCpuTensor, outputGpuTensor, getDynamicTolerance<float>(operation, fillRange));
 }
 
 TEST(TestGpuPointwise3DShapes, Unary)
@@ -216,15 +234,16 @@ TEST(TestGpuPointwise3DShapes, Unary)
     Tensor<float> outputGpuTensor({3, 2, 4});
 
     const unsigned int seed = getGlobalTestSeed();
-    inputTensor.fillWithRandomValues(-1.0f, 1.0f, seed);
+    const float fillRange = 1.0f;
+    inputTensor.fillWithRandomValues(-fillRange, fillRange, seed);
 
-    CpuReferencePointwiseImpl<float>::pointwiseCompute(
-        PointwiseMode::ABS, outputCpuTensor, inputTensor);
+    auto operation = PointwiseMode::ABS;
+    CpuReferencePointwiseImpl<float>::pointwiseCompute(operation, outputCpuTensor, inputTensor);
 
-    GpuReferencePointwise::pointwiseCompute<float>(
-        PointwiseMode::ABS, outputGpuTensor, inputTensor);
+    GpuReferencePointwise::pointwiseCompute<float>(operation, outputGpuTensor, inputTensor);
 
-    assertAllClose(outputCpuTensor, outputGpuTensor, pointwise::getTolerance<float>());
+    assertAllClose(
+        outputCpuTensor, outputGpuTensor, getDynamicTolerance<float>(operation, fillRange));
 }
 
 TEST(TestGpuPointwise3DShapes, Binary)
@@ -237,16 +256,19 @@ TEST(TestGpuPointwise3DShapes, Binary)
     Tensor<float> outputGpuTensor({3, 2, 4});
 
     const unsigned int seed = getGlobalTestSeed();
-    input0Tensor.fillWithRandomValues(-1.0f, 1.0f, seed);
-    input1Tensor.fillWithRandomValues(-1.0f, 1.0f, seed);
+    const float fillRange = 1.0f;
+    input0Tensor.fillWithRandomValues(-fillRange, fillRange, seed);
+    input1Tensor.fillWithRandomValues(-fillRange, fillRange, seed);
 
+    auto operation = PointwiseMode::ADD;
     CpuReferencePointwiseImpl<float>::pointwiseCompute(
-        PointwiseMode::ADD, outputCpuTensor, input0Tensor, input1Tensor);
+        operation, outputCpuTensor, input0Tensor, input1Tensor);
 
     GpuReferencePointwise::pointwiseCompute<float>(
-        PointwiseMode::ADD, outputGpuTensor, input0Tensor, input1Tensor);
+        operation, outputGpuTensor, input0Tensor, input1Tensor);
 
-    assertAllClose(outputCpuTensor, outputGpuTensor, pointwise::getTolerance<float>());
+    assertAllClose(
+        outputCpuTensor, outputGpuTensor, getDynamicTolerance<float>(operation, fillRange));
 }
 
 // --- Test validation ---
@@ -255,22 +277,22 @@ TEST(TestGpuPointwiseValidation, UnaryNotBroadcastable)
 {
     SKIP_IF_NO_DEVICES();
 
+    auto operation = PointwiseMode::ABS;
+
     // Not broadcastable if output tensor has less dimensions than input
     {
         Tensor<float> inputTensor({1, 3, 2, 4});
         Tensor<float> outputTensor({3, 2, 4});
-        EXPECT_THROW(
-            GpuReferencePointwise::pointwiseCompute(PointwiseMode::ABS, outputTensor, inputTensor),
-            std::invalid_argument);
+        EXPECT_THROW(GpuReferencePointwise::pointwiseCompute(operation, outputTensor, inputTensor),
+                     std::invalid_argument);
     }
 
     // Not broadcastable if dims mismatch and input is not 1
     {
         Tensor<float> inputTensor({1, 3, 2, 2});
         Tensor<float> outputTensor({1, 3, 2, 4});
-        EXPECT_THROW(
-            GpuReferencePointwise::pointwiseCompute(PointwiseMode::ABS, outputTensor, inputTensor),
-            std::invalid_argument);
+        EXPECT_THROW(GpuReferencePointwise::pointwiseCompute(operation, outputTensor, inputTensor),
+                     std::invalid_argument);
     }
 }
 
@@ -323,15 +345,16 @@ TEST(TestGpuPointwiseBroadcast, Broadcast2D)
     Tensor<float> outputCpuTensor({3, 4});
 
     const unsigned int seed = getGlobalTestSeed();
-    inputTensor.fillWithRandomValues(-1.0f, 1.0f, seed);
+    const float fillRange = 1.0f;
+    inputTensor.fillWithRandomValues(-fillRange, fillRange, seed);
 
-    CpuReferencePointwiseImpl<float>::pointwiseCompute(
-        PointwiseMode::ABS, outputCpuTensor, inputTensor);
+    auto operation = PointwiseMode::ABS;
+    CpuReferencePointwiseImpl<float>::pointwiseCompute(operation, outputCpuTensor, inputTensor);
 
-    GpuReferencePointwise::pointwiseCompute<float>(
-        PointwiseMode::ABS, outputGpuTensor, inputTensor);
+    GpuReferencePointwise::pointwiseCompute<float>(operation, outputGpuTensor, inputTensor);
 
-    assertAllClose(outputCpuTensor, outputGpuTensor, pointwise::getTolerance<float>());
+    assertAllClose(
+        outputCpuTensor, outputGpuTensor, getDynamicTolerance<float>(operation, fillRange));
 }
 
 TEST(TestGpuPointwiseBroadcast, Broadcast2DImplicitLeading)
@@ -345,16 +368,19 @@ TEST(TestGpuPointwiseBroadcast, Broadcast2DImplicitLeading)
     Tensor<float> outputCpuTensor({3, 4});
 
     const unsigned int seed = getGlobalTestSeed();
-    input1Tensor.fillWithRandomValues(-1.0f, 1.0f, seed);
-    input2Tensor.fillWithRandomValues(-1.0f, 1.0f, seed);
+    const float fillRange = 1.0f;
+    input1Tensor.fillWithRandomValues(-fillRange, fillRange, seed);
+    input2Tensor.fillWithRandomValues(-fillRange, fillRange, seed);
 
+    auto operation = PointwiseMode::MUL;
     CpuReferencePointwiseImpl<float>::pointwiseCompute(
-        PointwiseMode::MUL, outputCpuTensor, input1Tensor, input2Tensor);
+        operation, outputCpuTensor, input1Tensor, input2Tensor);
 
     GpuReferencePointwise::pointwiseCompute<float>(
-        PointwiseMode::MUL, outputGpuTensor, input1Tensor, input2Tensor);
+        operation, outputGpuTensor, input1Tensor, input2Tensor);
 
-    assertAllClose(outputCpuTensor, outputGpuTensor, pointwise::getTolerance<float>());
+    assertAllClose(
+        outputCpuTensor, outputGpuTensor, getDynamicTolerance<float>(operation, fillRange));
 }
 
 TEST(TestGpuPointwiseBroadcast, Broadcast3D)
@@ -368,16 +394,19 @@ TEST(TestGpuPointwiseBroadcast, Broadcast3D)
     Tensor<float> outputCpuTensor({2, 3, 4});
 
     const unsigned int seed = getGlobalTestSeed();
-    input1Tensor.fillWithRandomValues(-1.0f, 1.0f, seed);
-    input2Tensor.fillWithRandomValues(-1.0f, 1.0f, seed);
+    const float fillRange = 1.0f;
+    input1Tensor.fillWithRandomValues(-fillRange, fillRange, seed);
+    input2Tensor.fillWithRandomValues(-fillRange, fillRange, seed);
 
+    auto operation = PointwiseMode::MUL;
     CpuReferencePointwiseImpl<float>::pointwiseCompute(
-        PointwiseMode::MUL, outputCpuTensor, input1Tensor, input2Tensor);
+        operation, outputCpuTensor, input1Tensor, input2Tensor);
 
     GpuReferencePointwise::pointwiseCompute<float>(
-        PointwiseMode::MUL, outputGpuTensor, input1Tensor, input2Tensor);
+        operation, outputGpuTensor, input1Tensor, input2Tensor);
 
-    assertAllClose(outputCpuTensor, outputGpuTensor, pointwise::getTolerance<float>());
+    assertAllClose(
+        outputCpuTensor, outputGpuTensor, getDynamicTolerance<float>(operation, fillRange));
 }
 
 TEST(TestGpuPointwiseBroadcast, Broadcast3DImplicitLeading)
@@ -391,16 +420,19 @@ TEST(TestGpuPointwiseBroadcast, Broadcast3DImplicitLeading)
     Tensor<float> outputCpuTensor({2, 3, 4});
 
     const unsigned int seed = getGlobalTestSeed();
-    input1Tensor.fillWithRandomValues(-1.0f, 1.0f, seed);
-    input2Tensor.fillWithRandomValues(-1.0f, 1.0f, seed);
+    const float fillRange = 1.0f;
+    input1Tensor.fillWithRandomValues(-fillRange, fillRange, seed);
+    input2Tensor.fillWithRandomValues(-fillRange, fillRange, seed);
 
+    auto operation = PointwiseMode::MUL;
     CpuReferencePointwiseImpl<float>::pointwiseCompute(
-        PointwiseMode::MUL, outputCpuTensor, input1Tensor, input2Tensor);
+        operation, outputCpuTensor, input1Tensor, input2Tensor);
 
     GpuReferencePointwise::pointwiseCompute<float>(
-        PointwiseMode::MUL, outputGpuTensor, input1Tensor, input2Tensor);
+        operation, outputGpuTensor, input1Tensor, input2Tensor);
 
-    assertAllClose(outputCpuTensor, outputGpuTensor, pointwise::getTolerance<float>());
+    assertAllClose(
+        outputCpuTensor, outputGpuTensor, getDynamicTolerance<float>(operation, fillRange));
 }
 
 TEST(TestGpuPointwiseBroadcast, Broadcast4D)
@@ -414,16 +446,19 @@ TEST(TestGpuPointwiseBroadcast, Broadcast4D)
     Tensor<float> outputCpuTensor({2, 2, 3, 4});
 
     const unsigned int seed = getGlobalTestSeed();
-    input1Tensor.fillWithRandomValues(-1.0f, 1.0f, seed);
-    input2Tensor.fillWithRandomValues(-1.0f, 1.0f, seed);
+    const float fillRange = 1.0f;
+    input1Tensor.fillWithRandomValues(-fillRange, fillRange, seed);
+    input2Tensor.fillWithRandomValues(-fillRange, fillRange, seed);
 
+    auto operation = PointwiseMode::MUL;
     CpuReferencePointwiseImpl<float>::pointwiseCompute(
-        PointwiseMode::MUL, outputCpuTensor, input1Tensor, input2Tensor);
+        operation, outputCpuTensor, input1Tensor, input2Tensor);
 
     GpuReferencePointwise::pointwiseCompute<float>(
-        PointwiseMode::MUL, outputGpuTensor, input1Tensor, input2Tensor);
+        operation, outputGpuTensor, input1Tensor, input2Tensor);
 
-    assertAllClose(outputCpuTensor, outputGpuTensor, pointwise::getTolerance<float>());
+    assertAllClose(
+        outputCpuTensor, outputGpuTensor, getDynamicTolerance<float>(operation, fillRange));
 }
 
 TEST(TestGpuPointwiseBroadcast, Broadcast5D)
@@ -437,16 +472,19 @@ TEST(TestGpuPointwiseBroadcast, Broadcast5D)
     Tensor<float> outputCpuTensor({2, 3, 2, 2, 2}, TensorLayout::NDHWC);
 
     const unsigned int seed = getGlobalTestSeed();
-    input1Tensor.fillWithRandomValues(-1.0f, 1.0f, seed);
-    input2Tensor.fillWithRandomValues(-1.0f, 1.0f, seed);
+    const float fillRange = 1.0f;
+    input1Tensor.fillWithRandomValues(-fillRange, fillRange, seed);
+    input2Tensor.fillWithRandomValues(-fillRange, fillRange, seed);
 
+    auto operation = PointwiseMode::MUL;
     CpuReferencePointwiseImpl<float>::pointwiseCompute(
-        PointwiseMode::MUL, outputCpuTensor, input1Tensor, input2Tensor);
+        operation, outputCpuTensor, input1Tensor, input2Tensor);
 
     GpuReferencePointwise::pointwiseCompute<float>(
-        PointwiseMode::MUL, outputGpuTensor, input1Tensor, input2Tensor);
+        operation, outputGpuTensor, input1Tensor, input2Tensor);
 
-    assertAllClose(outputCpuTensor, outputGpuTensor, pointwise::getTolerance<float>());
+    assertAllClose(
+        outputCpuTensor, outputGpuTensor, getDynamicTolerance<float>(operation, fillRange));
 }
 
 // --- Test activation parameters ---
@@ -460,16 +498,19 @@ TEST(TestGpuPointwiseRefSwishForward, WithBetaVal)
     Tensor<float> outputGpuTensor({1, 1, 4, 4});
 
     const unsigned int seed = getGlobalTestSeed();
-    inputTensor.fillWithRandomValues(-1.0f, 1.0f, seed);
+    const float fillRange = 1.0f;
+    inputTensor.fillWithRandomValues(-fillRange, fillRange, seed);
 
+    auto operation = PointwiseMode::SWISH_FWD;
     const float beta = 2.0f;
     CpuReferencePointwiseImpl<float>::pointwiseCompute(
-        PointwiseMode::SWISH_FWD, outputCpuTensor, inputTensor, 0.f, 0.f, 0.f, beta);
+        operation, outputCpuTensor, inputTensor, 0.f, 0.f, 0.f, beta);
 
     GpuReferencePointwise::pointwiseCompute<float>(
-        PointwiseMode::SWISH_FWD, outputGpuTensor, inputTensor, 0.f, 0.f, 0.f, beta);
+        operation, outputGpuTensor, inputTensor, 0.f, 0.f, 0.f, beta);
 
-    assertAllClose(outputCpuTensor, outputGpuTensor, pointwise::getTolerance<float>());
+    assertAllClose(
+        outputCpuTensor, outputGpuTensor, getDynamicTolerance<float>(operation, fillRange));
 }
 
 TEST(TestGpuPointwiseRefRELuForward, WithVals)
@@ -494,13 +535,14 @@ TEST(TestGpuPointwiseRefRELuForward, WithVals)
     const float upperClip = 4.0f;
     const float lowerSlope = 0.1f;
 
+    auto operation = PointwiseMode::RELU_FWD;
     CpuReferencePointwiseImpl<float>::pointwiseCompute(
-        PointwiseMode::RELU_FWD, outputCpuTensor, inputTensor, lowerClip, upperClip, lowerSlope);
+        operation, outputCpuTensor, inputTensor, lowerClip, upperClip, lowerSlope);
 
     GpuReferencePointwise::pointwiseCompute<float>(
-        PointwiseMode::RELU_FWD, outputGpuTensor, inputTensor, lowerClip, upperClip, lowerSlope);
+        operation, outputGpuTensor, inputTensor, lowerClip, upperClip, lowerSlope);
 
-    assertAllClose(outputCpuTensor, outputGpuTensor, pointwise::getTolerance<float>());
+    assertAllClose(outputCpuTensor, outputGpuTensor, getDynamicTolerance<float>(operation, 5.0f));
 }
 
 TEST(TestGpuPointwiseRefRELuBackward, WithVals)
@@ -535,22 +577,13 @@ TEST(TestGpuPointwiseRefRELuBackward, WithVals)
     const float upperClip = 4.f;
     const float lowerSlope = 0.1f;
 
-    CpuReferencePointwiseImpl<float>::pointwiseCompute(PointwiseMode::RELU_BWD,
-                                                       outputCpuTensor,
-                                                       input0Tensor,
-                                                       input1Tensor,
-                                                       lowerClip,
-                                                       upperClip,
-                                                       lowerSlope);
+    auto operation = PointwiseMode::RELU_BWD;
+    CpuReferencePointwiseImpl<float>::pointwiseCompute(
+        operation, outputCpuTensor, input0Tensor, input1Tensor, lowerClip, upperClip, lowerSlope);
 
-    GpuReferencePointwise::pointwiseCompute<float>(PointwiseMode::RELU_BWD,
-                                                   outputGpuTensor,
-                                                   input0Tensor,
-                                                   input1Tensor,
-                                                   lowerClip,
-                                                   upperClip,
-                                                   lowerSlope);
-    assertAllClose(outputCpuTensor, outputGpuTensor, pointwise::getTolerance<float>());
+    GpuReferencePointwise::pointwiseCompute<float>(
+        operation, outputGpuTensor, input0Tensor, input1Tensor, lowerClip, upperClip, lowerSlope);
+    assertAllClose(outputCpuTensor, outputGpuTensor, getDynamicTolerance<float>(operation, 5.0f));
 }
 
 // --- Test suite instantiations ---
