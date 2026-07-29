@@ -1204,6 +1204,16 @@ def _tiled_cache_key(problem: UnifiedAttentionProblem) -> Tuple:
         _enable_gfx942_flash_q_direct(problem),
         _enable_gfx942_flash_mask_limit(problem),
         _enable_gfx942_flash_k_sliced_ring(problem),
+        # Ring pipeline depth (fp16 D128 uses depth-2, everything else depth-3):
+        # depth-2 and depth-3 are distinct schedules (different slot map / LDS
+        # footprint), so the key must distinguish them or two shapes that share the
+        # geometry but differ on depth would collide on the same cached launcher.
+        # Only meaningful when the ring is active.
+        (
+            _select_gfx942_flash_ring_depth(problem)
+            if _enable_gfx942_flash_k_sliced_ring(problem)
+            else None
+        ),
         _enable_gfx942_flash_k_sliced_ldsseq(problem),
         # bf16-wide non-ring geometry knobs: cfvst (HIPDNN_GFX942_BF16_CFVST) and
         # small-tile double-K (HIPDNN_GFX942_D128_SMALLTILE_DK) affect num_warps,
@@ -1862,19 +1872,24 @@ def _enable_gfx942_flash_k_sliced_ring(problem: UnifiedAttentionProblem) -> bool
     # is 13-17% faster than the prior D64 best (beats Torch at S2048, ~parity
     # elsewhere).
     #
-    # D128 (k_groups=4) is EXCLUDED for BOTH dtypes. The k_groups=4 ring produces
-    # numerically wrong results at realistic input magnitude -- max_abs ~0.5-1.3
-    # vs the fp32 oracle (bf16 AND fp16, GQA), even at S512 when the ring is forced
-    # -- while the non-ring D128 path (nw2/nw4, T=64, no ring) passes at max_abs
-    # ~0.0156 (bf16) / ~0.002 (fp16) on every S. #9198's "max_abs 0.00049 verified"
-    # claim was measured against a uniform_(-0.1,0.1) oracle whose near-uniform
-    # softmax never exercises the online-softmax running-max rescale across the four
-    # K slices, so the defect was masked; it reproduces immediately with randn
-    # (unit-variance) inputs (study s34_..._ring_correctness_regression). Until the
-    # k_groups=4 sliced-K accumulation is fixed in attention_tiled_2d.py, D128 stays
-    # on the non-ring flash geometry (correct-but-slower).
+    # D128 (k_groups=4) ring history: the default depth-3 kg%3 slot map reuses
+    # slot 0 for slice 3, and the reusing DMA was unfenced -> numerically wrong at
+    # magnitude (max_abs ~0.5-1.3, both dtypes; study s34). Two independent things
+    # fix it: the drain-on-reuse fence (now unconditional in the ring schedule) and
+    # the depth-2 ring (ring_depth=2, k%2 -> no slot reuse in the k_groups=4 live
+    # set). Routing (see _tiled_spec_from_problem):
+    #   * bf16 D128 -> NON-ring. At the production block_size=64 the correct rings
+    #     (fenced depth-3 or depth-2) are all slower than the non-ring T=64 flash
+    #     path, so bf16 keeps non-ring. (The faster T=32 ring needs block_size=32,
+    #     which production never sends for D128 -- latent, not shipped.)
+    #   * fp16 D128 -> depth-2 ring (ring_depth=2): correct at magnitude and the
+    #     measured best fp16 D128 prefill path (~0.72-1.05x AOTriton flash).
     if _resolve_attention_arch() == "gfx942" and problem.head_size == 128:
-        return False
+        # bf16 D128 stays off the ring (non-ring T=64 is its bs=64 optimum).
+        if _enable_gfx942_bf16_flash(problem):
+            return False
+        # fp16 D128 takes the (correct) depth-2 ring; fall through to the env/
+        # prefill gate below. _select_gfx942_flash_ring_depth pins depth=2.
     if not (
         (_enable_gfx942_fp16_flash(problem) or _enable_gfx942_bf16_flash(problem))
         and problem.head_size in (64, 128)
@@ -1892,8 +1907,28 @@ def _enable_gfx942_flash_k_sliced_ring(problem: UnifiedAttentionProblem) -> bool
     return problem.max_seqlen_q > 1
 
 
+def _select_gfx942_flash_ring_depth(problem: UnifiedAttentionProblem) -> int:
+    """Ring pipeline depth for the gfx942 sliced-K ring.
+
+    D128 fp16 uses depth-2 (k%2 slot map -> no reuse in the k_groups=4 live set;
+    lower LDS/occupancy pressure -- the measured best fp16 D128 prefill path).
+    Everything else (D64, both dtypes) keeps the depth-3 ring. Only meaningful
+    when the ring is active."""
+    if (
+        _resolve_attention_arch() == "gfx942"
+        and problem.head_size == 128
+        and _enable_gfx942_fp16_flash(problem)
+    ):
+        return 2
+    return 3
+
+
 def _enable_gfx942_flash_k_sliced_ldsseq(problem: UnifiedAttentionProblem) -> bool:
     if not _enable_gfx942_flash_k_sliced_ring(problem):
+        return False
+    # LdsSeq is a depth-3 slot layout (its maps reference slot 2); it is undefined
+    # for the depth-2 ring (fp16 D128). Don't enable it there even if the env asks.
+    if _select_gfx942_flash_ring_depth(problem) != 3:
         return False
     env = __import__("os").environ.get("HIPDNN_GFX942_K_LDSSEQ", "").strip().lower()
     return env in ("1", "on", "enable", "enabled", "yes", "true", "ck")
