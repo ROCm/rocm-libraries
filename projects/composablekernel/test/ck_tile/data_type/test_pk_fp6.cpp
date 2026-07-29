@@ -736,19 +736,20 @@ void test_pkscale_type_convert_device()
     {
         if constexpr(Block16Mod)
         {
-            /* Each iteration take care of 16 x 128 matrix
-             * opsel-4, use scale[th0:15]   [7:0]->col[0:15],   [23:16]->col[16:31]
-             * opsel-5, use scale[th16:31]  [7:0]->col[0:15],   [23:16]->col[16:31]
-             * opsel-6, use scale[th0:15]   [15:8]->col[32:47], [31:24]->col[48:63]
-             * opsel-7, use scale[th16:31]  [15:8]->col[32:47], [31:24]->col[48:63] */
+            /* Each iteration take care of 16 x 128 matrix.
+             * The scale byte→column mapping is the same as Block32Mod (opsel 0-3):
+             * opsel-4, use scale[th0:15]   [7:0]->col[0:15],   [15:8]->col[16:31]
+             * opsel-5, use scale[th16:31]  [7:0]->col[0:15],   [15:8]->col[16:31]
+             * opsel-6, use scale[th0:15]   [23:16]->col[32:47], [31:24]->col[48:63]
+             * opsel-7, use scale[th16:31]  [23:16]->col[32:47], [31:24]->col[48:63] */
             ck_tile::Packed4Scale_E8M0 scale4(fscale[m * N_scale + 5],
-                                              fscale[m * N_scale + 1],
                                               fscale[m * N_scale + 4],
+                                              fscale[m * N_scale + 1],
                                               fscale[m * N_scale + 0]);
             scale[m] = scale4.data(); // will load by th0-15
             scale4.set_scales_from_float(fscale[m * N_scale + 7],
-                                         fscale[m * N_scale + 3],
                                          fscale[m * N_scale + 6],
+                                         fscale[m * N_scale + 3],
                                          fscale[m * N_scale + 2]);
             scale[m + M] = scale4.data(); // will load by th16-31
         }
