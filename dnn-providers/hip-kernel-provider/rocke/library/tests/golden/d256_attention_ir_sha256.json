@@ -2,6 +2,12 @@
   "flavors": {
     "llvm20": {
       "cases": {
+        "d256_4warp_gqa/gfx942": {
+          "arch": "gfx942",
+          "bytes": 466049,
+          "kernel_name": "rocke_uattn2d_tiled_d256_b16_t32_h16kv2_bf16_wpe2_mw32_regpv_4wgqa",
+          "sha256": "49d434f3788b284af8bbd7c8930b99b46a1f4ce17a8e8103bab0bac35367ad53"
+        },
         "d256_pad_interleave/gfx950": {
           "arch": "gfx950",
           "bytes": 609602,
@@ -12,6 +18,12 @@
     },
     "llvm22": {
       "cases": {
+        "d256_4warp_gqa/gfx942": {
+          "arch": "gfx942",
+          "bytes": 466060,
+          "kernel_name": "rocke_uattn2d_tiled_d256_b16_t32_h16kv2_bf16_wpe2_mw32_regpv_4wgqa",
+          "sha256": "7492c0d81db5ba3d10a63ff69b6079e9c98fab68aba37ad65868389749feca7f"
+        },
         "d256_pad_interleave/gfx950": {
           "arch": "gfx950",
           "bytes": 609706,
