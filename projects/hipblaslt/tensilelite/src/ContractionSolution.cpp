@@ -3405,7 +3405,7 @@ namespace TensileLite
             // correctness on any partially-filled cluster is handled by the kernel's
             // clusterMulticastValid runtime guard + the normal (non-cooperative) load
             // fallback.
-            if(sizeMapping.streamKMulticast && sizeMapping.clusterDim.x > 1)
+            if(sizeMapping.streamK == 3 && sizeMapping.clusterDim.x > 1)
             {
                 size_t c = sizeMapping.clusterDim.x;
                 sk.grid  = ((sk.grid + c - 1) / c) * c;
@@ -4340,7 +4340,7 @@ namespace TensileLite
             // has idle-but-present tail WGs whose cluster is disabled by the kernel's
             // clusterMulticastValid runtime predicate (so a masked target is never left
             // without a matching load). See docs/design/cluster-load-component-and-streamk-multicast.md.
-            if(self.sizeMapping.streamKMulticast && self.sizeMapping.clusterDim.x > 1)
+            if(self.sizeMapping.streamK == 3 && self.sizeMapping.clusterDim.x > 1)
             {
                 size_t c = self.sizeMapping.clusterDim.x;
                 skGrid   = ((tiles + c - 1) / c) * c;

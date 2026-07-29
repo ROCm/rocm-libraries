@@ -365,6 +365,22 @@ def clusterEnabled(clusterDim):
     """True when a workgroup cluster is requested (ClusterDim [x, y] is not [1, 1])."""
     return (clusterDim[0] * clusterDim[1]) != 1
 
+def streamKMulticast(d):
+    """True when the StreamK=3 DP cooperative B-multicast fast path is active.
+
+    Single source of truth derived from ClusterDim: on StreamK=3 a spatial
+    cluster (ClusterDim[0] = Cs > 1, i.e. Cs peers sharing B across M-adjacent
+    DP tiles) IS the cooperative B-multicast path. This replaces the former
+    derived/serialized ``StreamKMulticast`` state key -- ClusterDim is now the
+    only source of truth, so there is nothing extra to store or serialize.
+
+    ``d`` may be a kernel or a solution ``state`` dict; both expose "StreamK"
+    and "ClusterDim". Uses ``.get`` for partial-state derivation call sites that
+    construct a dict without a StreamK / ClusterDim key.
+    See docs/design/cluster-load-component-and-streamk-multicast.md.
+    """
+    return d.get("StreamK", 0) == 3 and d.get("ClusterDim", [1, 1])[0] > 1
+
 def log2(x):
     return int(log(x, 2) + 0.5)
 

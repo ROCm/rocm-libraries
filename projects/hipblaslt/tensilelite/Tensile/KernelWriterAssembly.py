@@ -83,7 +83,7 @@ from .SolutionStructs import isPackedIndex
 from .AsmStoreState import StoreState, VectorDataTypes
 from .Activation import ActivationType
 from .CustomKernels import isCustomKernelConfig
-from .Common import roundUp, log2, ceilDivide, choose_multiplier, wmmaV3InputVgprLayout, clusterEnabled
+from .Common import roundUp, log2, ceilDivide, choose_multiplier, wmmaV3InputVgprLayout, clusterEnabled, streamKMulticast
 from .OccupancyMeasure import compute_occupancy_from_asm_source, _arch_caps_for_kernel
 from rocisa.instruction import ECvtF16toF32, ECvtF32toF16, ECvtPkFP8toF32
 from Tensile.Common import print2, printExit, printWarning, INDEX_CHARS, DebugConfig, DataDirection, isSubtileMultiDU
@@ -9713,7 +9713,7 @@ class KernelWriterAssembly(KernelWriter):
             # is consumed on every control-flow path (whole-cluster barrier
             # symmetry). scc (from checkLastIter) is preserved for the branch
             # below. No-op unless StreamKMulticast.
-            if kernel.get("StreamKMulticast", 0):
+            if streamKMulticast(kernel):
               skComponent = Component.StreamK.find(self)
               module.add(skComponent.streamKMulticastZeroIterClusterWait(self, kernel))
             # use positive offset only long jump

@@ -36,7 +36,7 @@ from rocisa.functions import scalarStaticDivideAndRemainder, sMagicDiv2, \
 
 from .Subtile.SubtileLREmit import localReadResetOffsetsSubtile
 
-from ..Common import print2, ceilDivide, log2, clusterEnabled
+from ..Common import print2, ceilDivide, log2, clusterEnabled, streamKMulticast
 from ..Component import Component
 from ..AsmStoreState import StoreState, VectorDataTypes
 from ..AsmAddressCalculation import AddrCalculation
@@ -2667,10 +2667,10 @@ class StreamKTwoTileDPFirst(StreamK):
         semantics could not be verified on silicon). Inert unless StreamKMulticast.
         """
         module = Module("StreamK multicast mask predicate")
-        if not kernel.get("StreamKMulticast", 0):
+        if not streamKMulticast(kernel):
             return module
         c = kernel["ClusterDim"][0]
-        module.addComment0("StreamKMulticast: gate B-broadcast on clusterMulticastValid")
+        module.addComment0("cluster B-multicast: gate B-broadcast on clusterMulticastValid")
         skConstsInVgprs = writer.isStreamKConstantsToVgprEnabled(kernel)
         mcInvalid = Label(writer.labels.getNameInc("SKMC_Invalid"), "")
         mcEnd = Label(writer.labels.getNameInc("SKMC_End"), "")
@@ -2723,9 +2723,9 @@ class StreamKTwoTileDPFirst(StreamK):
         Inert unless StreamKMulticast.
         """
         module = Module("StreamK multicast DP->SK boundary clear")
-        if not kernel.get("StreamKMulticast", 0):
+        if not streamKMulticast(kernel):
             return module
-        module.addComment0("StreamKMulticast: clear B-broadcast mask at DP->SK boundary")
+        module.addComment0("cluster B-multicast: clear B-broadcast mask at DP->SK boundary")
         module.add(SMovB32(dst=sgpr("MulticastMaskB"), src=sgpr("MulticastMaskA"),
                            comment="DP->SK: drop B broadcast -> self-only (normal B load)"))
         return module
@@ -2766,11 +2766,11 @@ class StreamKTwoTileDPFirst(StreamK):
         StreamKMulticast. See docs/design/cluster-load-component-and-streamk-multicast.md.
         """
         module = Module("StreamK multicast prologue signal")
-        if not kernel.get("StreamKMulticast", 0):
+        if not streamKMulticast(kernel):
             return module
         assert writer.states.asmCaps.get("HasClusterBarrier", False), \
-            "StreamKMulticast requires the HasClusterBarrier asm capability"
-        module.addComment0("StreamKMulticast: elect wave 0 to signal the cluster barrier (pairs first-load wait)")
+            "cluster B-multicast requires the HasClusterBarrier asm capability"
+        module.addComment0("cluster B-multicast: elect wave 0 to signal the cluster barrier (pairs first-load wait)")
         self._clusterElectArriveSignal(
             writer, module, labelBase="SKMC_SkipSignal", electTag="SKMulticastElect")
         return module
@@ -2787,11 +2787,11 @@ class StreamKTwoTileDPFirst(StreamK):
         See docs/design/cluster-load-component-and-streamk-multicast.md.
         """
         module = Module("StreamK multicast prologue prefetch cluster handshake")
-        if not kernel.get("StreamKMulticast", 0):
+        if not streamKMulticast(kernel):
             return module
         assert writer.states.asmCaps.get("HasClusterBarrier", False), \
-            "StreamKMulticast requires the HasClusterBarrier asm capability"
-        module.addComment0("StreamKMulticast: bracket prologue double-buffer prefetch load with cluster handshake")
+            "cluster B-multicast requires the HasClusterBarrier asm capability"
+        module.addComment0("cluster B-multicast: bracket prologue double-buffer prefetch load with cluster handshake")
         self._clusterElectArriveSignal(
             writer, module, labelBase="SKMC_SkipPrefetchSignal", electTag="SKMulticastPrefetchElect", wait=True)
         return module
@@ -2809,11 +2809,11 @@ class StreamKTwoTileDPFirst(StreamK):
         See docs/design/cluster-load-component-and-streamk-multicast.md.
         """
         module = Module("StreamK multicast zero-iteration cluster wait")
-        if not kernel.get("StreamKMulticast", 0):
+        if not streamKMulticast(kernel):
             return module
         assert writer.states.asmCaps.get("HasClusterBarrier", False), \
-            "StreamKMulticast requires the HasClusterBarrier asm capability"
-        module.addComment0("StreamKMulticast: zero-iteration skip path consumes the prologue cluster arrive (pairs prologue arrive)")
+            "cluster B-multicast requires the HasClusterBarrier asm capability"
+        module.addComment0("cluster B-multicast: zero-iteration skip path consumes the prologue cluster arrive (pairs prologue arrive)")
         skipWait = Label(label=writer.labels.getNameInc("SKMC_SkipZeroIterClusterWait"), comment="")
         module.add(SCBranchSCC0(labelName=skipWait.getLabelName(),
                                 comment=">=1 full iteration: the first-load cluster wait pairs the arrive"))

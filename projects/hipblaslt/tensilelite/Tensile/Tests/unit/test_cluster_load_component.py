@@ -64,6 +64,10 @@ class _StubWriter:
 def _kernel(*, multicast=True, clusterDim=(2, 2), tdmA=True, tdmB=True,
             numWaves=4, useSubtile=False, sparse=0, tdmMeta=False, tdmInst=3,
             pap=False, streamKMulticast=False):
+    # The StreamK=3 DP cooperative B-multicast path is no longer a stored state
+    # key: the component derives it from StreamK==3 + ClusterDim[0] > 1 via the
+    # streamKMulticast(kernel) helper. Drive it here by setting StreamK (the
+    # streamKMulticast=True cases all use a ClusterDim with Cs = clusterDim[0] > 1).
     return {
         "Multicast": multicast,
         "ClusterDim": list(clusterDim),
@@ -75,7 +79,7 @@ def _kernel(*, multicast=True, clusterDim=(2, 2), tdmA=True, tdmB=True,
         "TDMInst": tdmInst,
         "ProblemType": {"Sparse": sparse},
         "PrefetchAcrossPersistent": pap,
-        "StreamKMulticast": streamKMulticast,
+        "StreamK": 3 if streamKMulticast else 0,
     }
 
 
