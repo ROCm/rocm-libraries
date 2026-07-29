@@ -460,6 +460,7 @@ def supports_native_unified_attention_tiled(
         use_k_single_buffer=gfx942_flash and _gfx942_flash_use_single_buffer(problem),
         use_conflict_free_v_store=gfx942_flash and _gfx942_flash_use_cfvst(problem),
         use_k_sliced_ring=_enable_gfx942_flash_k_sliced_ring(problem),
+        use_d256_gfx942_fast=_d256_gfx942_fast(problem),
     )
 
 
@@ -732,6 +733,49 @@ def _enable_softmax_mfma_interleave(problem: UnifiedAttentionProblem) -> bool:
     )
 
 
+def _d256_gfx942_fast(problem: "UnifiedAttentionProblem") -> bool:
+    """Route the D256 gfx942 bf16 prefill cohort to the natural-QK
+    (``S = Q @ K^T``) paged fast path (``build_gfx942_4warp_gqa``).
+
+    gfx942 has no fast D256 route on the default builder: the wide-flash gate
+    (``_enable_gfx942_bf16_flash``) excludes head_size==256 and the narrow
+    16x16x16 fallback overflows the 64 KB LDS at a competitive tile. This gate
+    picks a distinct, LDS-light 32x32x8 natural-QK builder instead. The spec +
+    ``_tiled_cache_key`` carry num_warps=1 / tile_size=32 / block_m_per_warp=32
+    purely as the cohort *discriminator* (a distinct HSACO cache slot; every
+    other shape stays byte-identical) -- the builder itself is the 4-wave64 /
+    BLOCK_M=128 ``build_gfx942_4warp_gqa`` (selected in ``_get_2d_launcher``),
+    which ``_get_2d_launch_meta`` deliberately launches with block=(256,1,1) /
+    BLOCK_M=128, NOT the spec's 1-warp/32 geometry. Narrow + arch/feature-
+    guarded: every other shape is byte-identical.
+
+    Perf (gfx942, same-run vs AITER ``unified_attention``, D256 bf16 causal
+    prefill GQA 16/2 bs=16): OURS/AITER ~= 0.98x @ Sq4096 (parity), ~= 0.94x @
+    Sq8192 (OURS ~6% faster). Measured on MI300A 2026-07-11 (MI300X prototype
+    run: 0.97x / 0.94x); OURS matches the fp32 reference + AITER within bf16 tol.
+    """
+    return (
+        _resolve_attention_arch() == "gfx942"
+        and problem.head_size == 256
+        and problem.dtype == "bf16"
+        and not problem.use_fp8
+        and problem.sliding_window == 0
+        and problem.softcap == 0
+        and not problem.use_sinks
+        and not problem.use_alibi
+        and not problem.use_qq_bias
+        and problem.max_seqlen_q > 1
+        # tile_size==32 requires block_size in {16, 32} (tile % block == 0). The
+        # ticket pins gfx942 D256 to block_size=16 (block_size=64 is too large
+        # for the tiled kernel here,); 64 cleanly falls back.
+        and problem.block_size in (16, 32)
+        # The natural-QK builder uses i32 paged element addressing (like the
+        # shipped builder's default). Exclude caches > 2 GiB, which need the
+        # i64 path -- they fall back to the correct default builder.
+        and not _enable_i64_kv_addr(problem)
+    )
+
+
 def _select_2d_tile_size(problem: UnifiedAttentionProblem) -> int:
     """Choose ``tile_size`` (T) for the tiled 2D kernel.
 
@@ -761,6 +805,8 @@ def _select_2d_tile_size(problem: UnifiedAttentionProblem) -> int:
     """
     if _d256_gfx950_fast(problem):
         return 64
+    if _d256_gfx942_fast(problem):
+        return 32  # BLOCK_N of the natural-QK paged kernel
     if _resolve_attention_arch() == "gfx1250":
         # gfx1250 v1 consumes exactly one 32-token paged-KV block per WMMA
         # iteration; wider T needs separate multi-block block-table handling.
@@ -916,6 +962,8 @@ def _select_2d_num_warps(problem: UnifiedAttentionProblem) -> int:
     """
     if _d256_gfx950_fast(problem):
         return 2
+    if _d256_gfx942_fast(problem):
+        return 1  # cache-key discriminator only; the 4-warp kernel launches block=(256,1,1) / BLOCK_M=128 via _get_2d_launch_meta
     if _resolve_attention_arch() == "gfx1250":
         # A gfx1250 workgroup is one wave32 in the v1 WMMA tiled path.
         return 1
@@ -1171,6 +1219,10 @@ def _tiled_cache_key(problem: UnifiedAttentionProblem) -> Tuple:
         # deliberately lives ABOVE the autotuner-regenerable `_enable_*` helpers
         # below; keying on the predicate (not the flags) keeps that layering.
         _d256_gfx950_fast(problem),
+        # Selects the distinct natural-QK 4-warp GQA builder (build_gfx942_4warp_gqa)
+        # in `_get_2d_launcher`; keyed so its HSACO never shares a cache slot with
+        # the default gfx942 builder for the same geometry.
+        _d256_gfx942_fast(problem),
         _enable_mfma_32x32(problem),
         _enable_transposed_qk_32x32(problem),
         _enable_transposed_half_local_pv(problem),
@@ -2341,6 +2393,8 @@ def _select_2d_block_m_per_warp(problem: UnifiedAttentionProblem) -> int:
     """
     if _d256_gfx950_fast(problem):
         return 32
+    if _d256_gfx942_fast(problem):
+        return 32  # cache-key discriminator only; the dedicated 4-warp kernel uses BLOCK_M=128
     if _resolve_attention_arch() == "gfx1250":
         return 16
     # mw=32 (BLOCK_M = 32 * num_warps) only pays off when a path actually
@@ -3520,7 +3574,16 @@ def _get_2d_launcher(
         arch = _resolve_attention_arch()
         _, build_unified_attention_2d_tiled, _ = _tiled_2d_impl(arch)
         spec = _tiled_spec_from_problem(problem)
-        kernel = build_unified_attention_2d_tiled(spec, arch=arch)
+        if _d256_gfx942_fast(problem):
+            # Distinct 4-warp GQA paged builder for the D256 gfx942 cohort
+            # (keyed separately in `_tiled_cache_key`; grid in
+            # `_get_2d_launch_meta`). Same paged ABI as the default builder.
+            # Parity+ with AITER @Sq4096/8192 (vs the 1-warp std-QK's 0.55x).
+            from ..gfx942.attention_tiled_2d import build_gfx942_4warp_gqa
+
+            kernel = build_gfx942_4warp_gqa(spec, arch=arch)
+        else:
+            kernel = build_unified_attention_2d_tiled(spec, arch=arch)
         backend = _select_2d_compile_backend(problem)
         if backend == "hipcc":
             from rocke.helpers.compile import compile_kernel_via_hipcc
@@ -3553,6 +3616,17 @@ def _get_2d_launch_meta(
     if meta_key in _2D_LAUNCH_META:
         return _2D_LAUNCH_META[meta_key]
     arch = _resolve_attention_arch()
+    if _d256_gfx942_fast(problem):
+        # 4-warp GQA paged kernel: 4 wave64/CTA own BLOCK_M=128 q-tokens for ONE
+        # query head. grid = (num_query_heads, q-token-blocks + per-seq padding).
+        # block_q == BLOCK_M == 128, matching the kernel's binary_search_seq_idx.
+        total_num_q_blocks = problem.total_q // 128 + problem.num_seqs
+        meta = _Attention2DLaunchMeta(
+            grid=(int(problem.num_query_heads), int(total_num_q_blocks), 1),
+            block=(256, 1, 1),
+        )
+        _2D_LAUNCH_META[meta_key] = meta
+        return meta
     if _enable_gfx942_bf16_flash(problem):
         # _select_gfx942_flash_num_warps mirrors the spec builder for BOTH dtypes:
         # ring-active -> fp16-flash wide geometry; bf16 non-ring -> bf16-wide nw.
