@@ -593,6 +593,7 @@ defaultBenchmarkCommonParameters = [
     {"ExtraLatencyForLR": [0]},
     {"TailloopInNll": [False]},
     {"PostLoopStoreInNll": [True]},
+    {"PLSINStoreMode": ["Weave"]},
     {"SwapGlobalReadOrder": [0]},
     {"ScheduleGROverBarrier": [-1]},
     {"DtlPlusLdsBuf": [-1]},

@@ -2359,24 +2359,75 @@ class GlobalWriteBatchWriter:
     else:
       module.add(SLShiftRightB64(dst=sgpr(tmpS, 2), src=-1, shiftHex=sgpr(tmpS2),
                                  comment="M mask = -1 >> shiftAmt"))
+    # Fully-OOB block (validRows==0 => shiftAmt==wavelen): s_lshr masks the shift
+    # count to log2(wavelen) bits, so -1 >> wavelen wraps to -1 >> 0 == -1 (a FULL
+    # mask) instead of 0 -> the branch-free fused store (which elides the OOB skip
+    # branches, see _emitSubtileOobGuard skipOob) would then write OOB rows. Force
+    # the mask to 0 for those blocks. shiftAmt==wavelen iff validRows==0, so interior
+    # (shiftAmt==0) and partial (0<shiftAmt<wavelen) blocks are unchanged.
+    # This clamp is REQUIRED only when the per-store OOB skip branches are elided
+    # (_fusedSkipOobGuard -> branch-free fused store). The non-fused store branches
+    # over fully-OOB blocks entirely, so the mask value is dead there; emitting the
+    # clamp only under _fusedSkipOobGuard() keeps the non-fused (PLSIN0) instruction
+    # stream byte-identical to the develop baseline.
+    if self._fusedSkipOobGuard():
+      module.add(SCmpEQU32(src0=sgpr(tmpS2), src1=self.wavelen,
+                           comment="fully-OOB M block? (shiftAmt==wavelen => validRows==0)"))
+      module.add(SCSelectB32(dst=sgpr(tmpS), src0=0, src1=sgpr(tmpS),
+                             comment="mask%s = 0 if fully OOB (avoid -1>>wavelen wrap)" % ("" if isWave32 else "_lo")))
+      if not isWave32:
+        module.add(SCSelectB32(dst=sgpr(tmpS+1), src0=0, src1=sgpr(tmpS+1),
+                               comment="mask_hi = 0 if fully OOB"))
     module.add(mMaskDone)
 
-    # --- N mask: per-column bit-mask for arbitrary partial N ---
+    # --- N mask: per-column bit-mask for arbitrary partial / fully-OOB N ---
+    # validCols = clamp(SubtileNGuard - blockIdxN*16, 0): the number of valid columns
+    # this wave owns within this 16-col MMA tile. 0 => this N block is entirely OOB
+    # (mask 0, no store); 1..15 => partial; 16 => full. Using a clamped SUBTRACTION
+    # (not "clamped %% 16") makes a fully-OOB block mask to 0 rather than aliasing onto
+    # a full block whenever SubtileNGuard %% 16 == 0 -> with the branch-free fused store
+    # (OOB skip branches elided, see _emitSubtileOobGuard skipOob) that alias would
+    # otherwise write OOB columns.
     nCmpVal = (blockIdxN + 1) * 16
+    nLowVal = blockIdxN * 16
     nMaskDone = Label(self.parentWriter.labels.getNameInc("align8_n_done"), "")
     module.add(_scmpGtU32(self.parentWriter, sgpr("SubtileNGuard"), nCmpVal,
-                          comment=f"clamped > {nCmpVal}? (not last N block)"))
+                          comment=f"clamped > {nCmpVal}? (interior: all 16 cols valid)"))
     module.add(SCBranchSCC1(labelName=nMaskDone.getLabelName(),
                             comment="interior N block -> mask unchanged"))
-    module.add(SAndB32(dst=sgpr(tmpS2), src0=sgpr("SubtileNGuard"), src1=0xF,
-                       comment="partialN = clamped %% 16, SCC=1 if non-zero"))
-    nFullLabel = Label(self.parentWriter.labels.getNameInc("align8_n_full"), "")
-    module.add(SCBranchSCC0(labelName=nFullLabel.getLabelName(),
-                            comment="partialN==0 -> full 16-col block"))
-    module.add(SLShiftLeftB32(dst=sgpr(tmpS2), src=1, shiftHex=sgpr(tmpS2),
-                              comment="1 << partialN"))
-    module.add(SSubU32(dst=sgpr(tmpS2), src0=sgpr(tmpS2), src1=1,
-                       comment="(1 << partialN) - 1"))
+    # Only the branch-free fused store (skipOob) needs the fully-OOB -> 0 handling to
+    # be branchless: it elides the per-store OOB skip branches, so a fully-OOB N block
+    # that aliased onto a full block would write OOB columns. The non-fused store keeps
+    # those skip branches, so it can use develop's exact branch-based partialN = clamped
+    # %% 16 form (SCC0 -> align8_n_full) -- keeping the PLSIN0 stream byte-identical to
+    # the develop baseline.
+    nFullLabel = None
+    if self._fusedSkipOobGuard():
+      # Branch-free: clamped SUBTRACTION (not "clamped %% 16") so a fully-OOB block
+      # masks to 0 rather than aliasing onto a full block when SubtileNGuard %% 16 == 0.
+      if nLowVal > 0:
+        module.add(SSubU32(dst=sgpr(tmpS2), src0=sgpr("SubtileNGuard"), src1=nLowVal,
+                           comment=f"validCols = clamped - {nLowVal}; SCC=1 if OOB (borrow)"))
+        module.add(SCSelectB32(dst=sgpr(tmpS2), src0=0, src1=sgpr(tmpS2),
+                               comment="fully-OOB N block -> 0 valid cols"))
+      else:
+        module.add(SMovB32(dst=sgpr(tmpS2), src=sgpr("SubtileNGuard"),
+                           comment="validCols = clamped (blockIdxN==0)"))
+      module.add(SLShiftLeftB32(dst=sgpr(tmpS2), src=1, shiftHex=sgpr(tmpS2),
+                                comment="1 << validCols"))
+      module.add(SSubU32(dst=sgpr(tmpS2), src0=sgpr(tmpS2), src1=1,
+                         comment="nMask = (1 << validCols) - 1  (0 if fully OOB)"))
+    else:
+      # Develop baseline (non-fused): partialN = clamped %% 16, branch over full block.
+      module.add(SAndB32(dst=sgpr(tmpS2), src0=sgpr("SubtileNGuard"), src1=0xF,
+                         comment="partialN = clamped %% 16, SCC=1 if non-zero"))
+      nFullLabel = Label(self.parentWriter.labels.getNameInc("align8_n_full"), "")
+      module.add(SCBranchSCC0(labelName=nFullLabel.getLabelName(),
+                              comment="partialN==0 -> full 16-col block"))
+      module.add(SLShiftLeftB32(dst=sgpr(tmpS2), src=1, shiftHex=sgpr(tmpS2),
+                                comment="1 << partialN"))
+      module.add(SSubU32(dst=sgpr(tmpS2), src0=sgpr(tmpS2), src1=1,
+                         comment="(1 << partialN) - 1"))
     if isWave32:
       # wave32: replicate lo16 to both halves without extra scratch SGPR
       module.add(SMulI32(dst=sgpr(tmpS2), src0=sgpr(tmpS2), src1=hex(0x10001),
@@ -2392,7 +2443,8 @@ class GlobalWriteBatchWriter:
                          comment="mask_lo &= N mask"))
       module.add(SAndB32(dst=sgpr(tmpS+1), src0=sgpr(tmpS+1), src1=sgpr(tmpS2),
                          comment="mask_hi &= N mask"))
-    module.add(nFullLabel)
+    if nFullLabel is not None:
+      module.add(nFullLabel)
     module.add(nMaskDone)
 
   def _popSubtileAccVgprReads(self, elementIdx: int) -> Module:

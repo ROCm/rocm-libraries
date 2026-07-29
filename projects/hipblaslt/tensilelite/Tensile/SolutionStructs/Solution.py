@@ -4317,6 +4317,20 @@ class Solution(collections.abc.Mapping):
       # overflow shapes (auto-disable, always correct).
       storeFitsVgpr = not (bool(miwt) and len(miwt) == 2 and
                            min(miwt[0], miwt[1]) >= 4 and max(miwt[0], miwt[1]) >= 14)
+      # Overlap feasibility: PLSIN only pays for its front guard + fused drain/setup
+      # if the terminal-MFMA weave can actually hide the store behind the loop's
+      # MFMAs. The weave (LogicalScheduler._extractTerminalMfmaGroups) only weaves
+      # store-pairs whose pair index is >= weaveLA (TENSILE_WEAVE_LA, default 4);
+      # numStorePairs = MIWT0*MIWT1//2 for the 16x16 fp4 MI (each pair = 8 accs = 2
+      # paired 16x16 output tiles on wave64). When numStorePairs <= weaveLA NO pair is
+      # woven (zero overlap), so the fused path is pure guard/setup overhead with no
+      # latency hiding (validated on MT-shape 320x5760x3072, MIWT[2,4] -> 4 pairs, 0
+      # woven: serial buffer_store, feature slower than develop). Emit the plain
+      # non-fused kernel (PLSIN0) for these tiles. WEAVE_LA_DEFAULT must track the
+      # TENSILE_WEAVE_LA default in LogicalScheduler.py.
+      WEAVE_LA_DEFAULT = 4
+      overlapPossible = bool(miwt) and len(miwt) == 2 and \
+                        (miwt[0] * miwt[1] // 2) > WEAVE_LA_DEFAULT
       # StreamK non-atomic partial-tile fixup (_emitNonatomicAdd) previously
       # allocated its 16bit-paired-store lane mask via a fresh
       # checkOutAligned(2,2, preventOverflow=True). That hard-failed on skewed /
@@ -4362,6 +4376,7 @@ class Solution(collections.abc.Mapping):
          (not barrierFreeStore) or \
          (not spillFree) or \
          (not storeFitsVgpr) or \
+         (not overlapPossible) or \
          (not streamKFixupSafe) or \
          (not mxBlockScaleSgprFits):
         state["PostLoopStoreInNll"] = False
@@ -5688,6 +5703,14 @@ class Solution(collections.abc.Mapping):
     # so this is a defensive re-check.
     if state["PostLoopStoreInNll"] and state["PrefetchGlobalRead"] < 1:
       state["PostLoopStoreInNll"] = False
+
+    # PLSINStoreMode (Weave/Lend) only affects the fused store epilogue, so it is
+    # meaningless once PLSIN is disabled. Canonicalize it to the default in that case
+    # so a non-PLSIN kernel is not split into spurious Weave/Lend name variants (the
+    # parameter is in RequiredParameters and thus part of the kernel name). It is also
+    # inert for tiles > 256x256, which LogicalScheduler forces to Lend regardless.
+    if not state.get("PostLoopStoreInNll", False):
+      state["PLSINStoreMode"] = "Weave"
 
     # if state["GlobalSplitU"] > 1 or state["GlobalSplitU"] == -1:
     #   if state["ProblemType"]["SupportUserArgs"] and state["_GlobalAccumulation"] != 'MultipleBufferSingleKernel':
