@@ -3,7 +3,6 @@
 
 #pragma once
 
-#include "Bfloat16Dev.hpp"
 #include "FloatTypes.h"
 #include "VectorTypes.hpp"
 
@@ -190,58 +189,58 @@ using bf16_ushort_conversion_t = union
 
 __forceinline__ __device__ __bf16 exp(__bf16 x)
 {
-    return float_to_bfloat16(exp(bfloat16_to_float(x)));
+    return static_cast<__bf16>(exp(static_cast<float>(x)));
 }
 
 __forceinline__ __device__ __bf16 log(__bf16 x)
 {
-    return float_to_bfloat16(log(bfloat16_to_float(x)));
+    return static_cast<__bf16>(log(static_cast<float>(x)));
 }
 __forceinline__ __device__ __bf16 sqrt(__bf16 x)
 {
-    return float_to_bfloat16(sqrt(bfloat16_to_float(x)));
+    return static_cast<__bf16>(sqrt(static_cast<float>(x)));
 }
 __forceinline__ __device__ __bf16 rsqrt(__bf16 x)
 {
-    return float_to_bfloat16(rsqrt(bfloat16_to_float(x)));
+    return static_cast<__bf16>(rsqrt(static_cast<float>(x)));
 }
 __forceinline__ __device__ __bf16 sin(__bf16 x)
 {
-    return float_to_bfloat16(sin(bfloat16_to_float(x)));
+    return static_cast<__bf16>(sin(static_cast<float>(x)));
 }
 __forceinline__ __device__ __bf16 cos(__bf16 x)
 {
-    return float_to_bfloat16(cos(bfloat16_to_float(x)));
+    return static_cast<__bf16>(cos(static_cast<float>(x)));
 }
 __forceinline__ __device__ __bf16 fabs(__bf16 x)
 {
-    return float_to_bfloat16(fabsf(bfloat16_to_float(x)));
+    return static_cast<__bf16>(fabsf(static_cast<float>(x)));
 }
 __forceinline__ __device__ __bf16 fmax(__bf16 x, __bf16 y)
 {
-    return float_to_bfloat16(fmax(bfloat16_to_float(x), bfloat16_to_float(y)));
+    return static_cast<__bf16>(fmax(static_cast<float>(x), static_cast<float>(y)));
 }
 __forceinline__ __device__ __bf16 fmin(__bf16 x, __bf16 y)
 {
-    return float_to_bfloat16(fmin(bfloat16_to_float(x), bfloat16_to_float(y)));
+    return static_cast<__bf16>(fmin(static_cast<float>(x), static_cast<float>(y)));
 }
 
 __forceinline__ __device__ __bf16 pow(__bf16 x, __bf16 y)
 {
-    return float_to_bfloat16(exp(bfloat16_to_float(x * y)));
+    return static_cast<__bf16>(exp(static_cast<float>(x * y)));
 }
 __forceinline__ __device__ __bf16 tan(__bf16 x)
 {
-    float sinVal = sin(bfloat16_to_float(x));
-    float cosVal = cos(bfloat16_to_float(x));
+    float sinVal = sin(static_cast<float>(x));
+    float cosVal = cos(static_cast<float>(x));
 
-    return float_to_bfloat16(sinVal / cosVal);
+    return static_cast<__bf16>(sinVal / cosVal);
 }
 __forceinline__ __device__ __bf16 tanh(__bf16 x)
 {
     const auto two = static_cast<__bf16>(2.0f);
     const auto one = static_cast<__bf16>(1.0f);
-    __bf16 exp2x = static_cast<__bf16>(exp(float_to_bfloat16(two * x)));
+    __bf16 exp2x = static_cast<__bf16>(exp(static_cast<__bf16>(two * x)));
     __bf16 numerator = exp2x - one;
     __bf16 denominator = exp2x + one;
     return (numerator / denominator);
