@@ -57,18 +57,7 @@ namespace rocalution
 
     /** \ingroup precond_module
   * \class Jacobi
-  * \brief Jacobi Method
-  * \details
-  * The Jacobi method is for solving a diagonally dominant system of linear equations
-  * \f$Ax=b\f$. It solves for each diagonal element iteratively until convergence, such
-  * that
-  * \f[
-  *   x_{i}^{(k+1)} = (1 - \omega)x_{i}^{(k)} + \frac{\omega}{a_{ii}}
-  *   \left(
-  *     b_{i} - \sum\limits_{j=1}^{i-1}{a_{ij}x_{j}^{(k)}} -
-  *     \sum\limits_{j=i}^{n}{a_{ij}x_{j}^{(k)}}
-  *   \right)
-  * \f]
+  * \brief Jacobi preconditioner for diagonally dominant linear systems.
   *
   * \tparam OperatorType - can be LocalMatrix or GlobalMatrix
   * \tparam VectorType - can be LocalVector or GlobalVector
@@ -105,18 +94,7 @@ namespace rocalution
 
     /** \ingroup precond_module
   * \class GS
-  * \brief Gauss-Seidel / Successive Over-Relaxation Method
-  * \details
-  * The Gauss-Seidel / SOR method is for solving system of linear equations \f$Ax=b\f$.
-  * It approximates the solution iteratively with
-  * \f[
-  *    x_{i}^{(k+1)} = (1 - \omega) x_{i}^{(k)} + \frac{\omega}{a_{ii}}
-  *    \left(
-  *      b_{i} - \sum\limits_{j=1}^{i-1}{a_{ij}x_{j}^{(k+1)}} -
-  *      \sum\limits_{j=i}^{n}{a_{ij}x_{j}^{(k)}}
-  *    \right),
-  * \f]
-  * with \f$\omega \in (0,2)\f$.
+  * \brief Gauss-Seidel / Successive Over-Relaxation preconditioner.
   *
   * \tparam OperatorType - can be LocalMatrix
   * \tparam VectorType - can be LocalVector
@@ -153,10 +131,7 @@ namespace rocalution
 
     /** \ingroup precond_module
   * \class SGS
-  * \brief Symmetric Gauss-Seidel / Symmetric Successive Over-Relaxation Method
-  * \details
-  * The Symmetric Gauss-Seidel / SSOR method is for solving system of linear equations
-  * \f$Ax=b\f$. It approximates the solution iteratively.
+  * \brief Symmetric Gauss-Seidel / Symmetric Successive Over-Relaxation preconditioner.
   *
   * \tparam OperatorType - can be LocalMatrix
   * \tparam VectorType - can be LocalVector
@@ -196,10 +171,7 @@ namespace rocalution
 
     /** \ingroup precond_module
   * \class ILU
-  * \brief Incomplete LU Factorization based on levels
-  * \details
-  * The Incomplete LU Factorization based on levels computes a sparse lower and sparse
-  * upper triangular matrix such that \f$A = LU - R\f$.
+  * \brief Incomplete LU factorization preconditioner based on fill levels.
   *
   * \tparam OperatorType - can be LocalMatrix
   * \tparam VectorType - can be LocalVector
@@ -273,10 +245,7 @@ namespace rocalution
 
     /** \ingroup precond_module
   * \class ItILU0
-  * \brief Iterative Incomplete LU factorization with 0 fill-ins and no pivoting
-  * \details
-  * The Iterative Incomplete LU factorization with 0 fill-ins iteratively computes a sparse lower and sparse
-  * upper triangular matrix such that \f$A \approx LU\f$.
+  * \brief Iterative Incomplete LU factorization with zero fill-in and no pivoting.
   *
   * \tparam OperatorType - can be LocalMatrix
   * \tparam VectorType - can be LocalVector
@@ -340,12 +309,7 @@ namespace rocalution
 
     /** \ingroup precond_module
   * \class ILUT
-  * \brief Incomplete LU Factorization based on threshold
-  * \details
-  * The Incomplete LU Factorization based on threshold computes a sparse lower and sparse
-  * upper triangular matrix such that \f$A = LU - R\f$. Fill-in values are dropped
-  * depending on a threshold and number of maximal fill-ins per row.
-  * \cite SAAD
+  * \brief Incomplete LU factorization preconditioner based on a drop threshold.
   *
   * \tparam OperatorType - can be LocalMatrix
   * \tparam VectorType - can be LocalVector
@@ -390,11 +354,7 @@ namespace rocalution
 
     /** \ingroup precond_module
   * \class IC
-  * \brief Incomplete Cholesky Factorization without fill-ins
-  * \details
-  * The Incomplete Cholesky Factorization computes a sparse lower triangular matrix
-  * such that \f$A=LL^{T} - R\f$. Additional fill-ins are dropped and the sparsity
-  * pattern of the original matrix is preserved.
+  * \brief Incomplete Cholesky factorization preconditioner without fill-in.
   *
   * \tparam OperatorType - can be LocalMatrix
   * \tparam VectorType - can be LocalVector
@@ -429,13 +389,7 @@ namespace rocalution
 
     /** \ingroup precond_module
   * \class VariablePreconditioner
-  * \brief Variable Preconditioner
-  * \details
-  * The Variable Preconditioner can hold a selection of preconditioners. Thus, any type
-  * of preconditioners can be combined. As example, the variable preconditioner can
-  * combine Jacobi, GS and ILU - then, the first iteration of the iterative solver will
-  * apply Jacobi, the second iteration will apply GS and the third iteration will apply
-  * ILU. After that, the solver will start again with Jacobi, GS, ILU.
+  * \brief Preconditioner that cycles through a sequence of preconditioners.
   *
   * \tparam OperatorType - can be LocalMatrix
   * \tparam VectorType - can be LocalVector
