@@ -656,10 +656,29 @@ bool rocke_gfx942_attn2d_build_ctx_init(rocke_gfx942_attn2d_build_ctx_t* ctx,
         ctx->Q_lds = rocke_b_smem_alloc(b, dtype, shp, 2, "Qlds");
     }
 
-    /* ---- Acc_lds (line 1873) ---- */
+    /* ---- Acc_lds (line 1873) ---- *
+     * Only allocated on the epilogues that stage through it. The transposed-x8
+     * epilogue stores per-lane straight to global and returns before any Acc_lds
+     * access, so on that path the buffer is dead. That used to cost nothing,
+     * because an unreferenced addrspace(3) global is dead and was removed; now
+     * that LDS allocations are placed in a single pool that reserves bytes for
+     * every allocation regardless of use, a dead buffer costs real occupancy.
+     * NULL rather than a smaller allocation so an unexpected use fails loudly.
+     * Mirrors ACC_LDS_USED in the Python builder -- keep the two in step or the
+     * byte-identity gate diverges on the transposed-x8 parity configs.
+     * Keyed on USE_MFMA_32X32X8, not USE_MFMA_32X32 (the union of both 32x32
+     * flags): the gfx950 fastKV register-P experiment reaches THIS builder in
+     * the C++ engine and the gfx950 builder in Python, and only the latter still
+     * allocates on the R4 transposed path. See the Python comment. */
+    const bool ACC_LDS_USED = !(USE_MFMA_32X32X8 && ctx->TRANSPOSED_QK_32X32);
+    if(ACC_LDS_USED)
     {
         int shp[2] = {BLOCK_M, OUT_STRIPE_COLS};
         ctx->Acc_lds = rocke_b_smem_alloc(b, dtype, shp, 2, "Aclds");
+    }
+    else
+    {
+        ctx->Acc_lds = NULL;
     }
 
     /* ---- transpose-LDS lane formula params (lines 1883-1889) ---- *

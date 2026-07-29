@@ -390,9 +390,9 @@ class UnifiedAttention2DTiledSpec:
     # K_lds (``[2, T, HD]``) so the next-tile async-DMA K[i+1] overlaps softmax+PV
     # of tile i. On the transposed-x8 D128 fp16 path that double buffer is the LDS
     # peak: K_lds(2*T*HD*2=32KB) + V_lds(T*HD*2=16KB) = 48KB > the 32KB
-    # 2-wg/CU threshold (STEP-0 evidence: Acc_lds is already backend-aliased into
-    # the loop region, so dropping it / acc->AGPR does NOT cross the threshold;
-    # only cutting LOOP LDS does). When True, K_lds is single-buffered
+    # 2-wg/CU threshold (Acc_lds is not allocated on this path at all, so dropping
+    # it / acc->AGPR does NOT cross the threshold; only cutting LOOP LDS does).
+    # When True, K_lds is single-buffered
     # (``[1, T, HD]`` = 16KB) so loop LDS = 16+16 = 32KB -> 2 wg/CU on gfx942.
     # Correctness: the next-K async DMA into the shared slot races the tail of
     # QK[i]'s LDS reads via raw_ptr_buffer_load_lds lgkmcnt accounting; we close
@@ -1750,8 +1750,9 @@ def build_unified_attention_2d_tiled(
     # ``_lds_natural`` above over-counts the transposed-x8 path (it assumes
     # P_lds present, K always double-buffered, full Acc_lds) and walls the wide
     # (nw=4 / T=128) geometry the FLASH_WIDE=4 baseline actually runs. On
-    # TRANSPOSED_X8: P_lds=0 (P^T in registers); Acc_lds aliases the loop-dead
-    # K/V region (~0 to the binding peak); Q_lds=0 when BLOCK_M<=2*T; K is single-
+    # TRANSPOSED_X8: P_lds=0 (P^T in registers); Acc_lds is not allocated at all on
+    # this path (its epilogue stores per-lane direct to global, see ACC_LDS_USED);
+    # Q_lds=0 when BLOCK_M<=2*T; K is single-
     # buffered when BLOCK_M<=T else double. V_lds is the transposed [HD,T+pad].
     # Mirrors compile_service's ``_lds_bytes_transposed_x8``.
     _x8_k_slots = 1 if (BLOCK_M <= T) else 2
@@ -2028,7 +2029,32 @@ def build_unified_attention_2d_tiled(
     # CTA, vs P_lds's per-iter writes), so the bank-conflict cost is a
     # one-shot overhead and the pad's LDS budget cost doesn't pay back.
     # Keep Acc_lds tight.
-    Acc_lds = b.smem_alloc(dtype, [BLOCK_M, OUT_STRIPE_COLS], name_hint="Aclds")
+    #
+    # Only allocate it on the epilogues that stage through it. The transposed-x8
+    # epilogue stores per-lane straight to global and returns before any Acc_lds
+    # access, so on that path the buffer is dead. That used to cost nothing: an
+    # unreferenced ``addrspace(3)`` global is dead and the backend removed it. LDS
+    # allocations are now placed in a single pool that reserves bytes for every
+    # allocation regardless of whether it has any uses, so a dead buffer costs real
+    # occupancy -- at BLOCK_M=64 HD=128 it is 16 KB, which is the difference between
+    # two workgroups per CU and one on gfx942's 64 KB.
+    #
+    # ``None`` rather than a smaller allocation so that an unexpected use fails
+    # loudly instead of silently landing on another buffer's bytes.
+    #
+    # Keyed on ``USE_MFMA_32X32X8`` rather than ``USE_MFMA_32X32`` (which is the
+    # union of both 32x32 flags): the R4 transposed path does not stage through
+    # the buffer either, but one gfx950 kernel -- the fastKV register-P
+    # experiment -- is emitted by THIS builder in the C++ engine and by the
+    # gfx950 builder in Python, and only the gfx950 builder still allocates.
+    # Narrowing to x8 leaves that pair matched. Widening this to the R4 path is
+    # a real (small, non-production) saving and belongs with the gfx950 mirror.
+    ACC_LDS_USED = not (USE_MFMA_32X32X8 and TRANSPOSED_QK_32X32)
+    Acc_lds = (
+        b.smem_alloc(dtype, [BLOCK_M, OUT_STRIPE_COLS], name_hint="Aclds")
+        if ACC_LDS_USED
+        else None
+    )
     # NOTE: A staged Acc_lds epilogue for the transposed 32x32 path was
     # tested (one 32-d stripe per MFMA tile, bank-padded to 17 dwords/row
     # for HD>=128). It regressed on every tested shape (HD=64/128, single
