@@ -40,9 +40,8 @@
 //          SelectedKernel, KERNEL_NAME
 
 // Compute the byte count for N logical elements of type T.
-// For packed types PackedSize=2, so N logical values occupy N/2 bytes even
-// though sizeof(T)==1. For all other types PackedSize=1.  RowColQuant only uses
-// fp8/bf8 (non-packed), but keep the helper generic for consistency.
+// For packed types (pk_int4_t, pk_fp4_t) PackedSize=2, so N logical values
+// occupy N/2 bytes even though sizeof(T)==1.  For all other types PackedSize=1.
 template <typename T>
 static constexpr std::size_t elements_to_bytes(std::size_t n)
 {
@@ -55,15 +54,16 @@ static constexpr std::size_t elements_to_bytes(std::size_t n)
 
 static bool g_initialized = false;
 
-#define HIP_CHECK(call)                                                                        \
-    {                                                                                          \
-        hipError_t _err = (call);                                                              \
-        if(_err != hipSuccess)                                                                 \
-        {                                                                                      \
+#define HIP_CHECK(call)                                                                         \
+    {                                                                                           \
+        hipError_t _err = (call);                                                               \
+        if(_err != hipSuccess)                                                                  \
+        {                                                                                       \
             std::cerr << "HIP error: " << hipGetErrorString(_err) << " at " << __FILE__ << ":" \
-                      << __LINE__ << "\n";                                                     \
-            return -1;                                                                         \
-        }                                                                                      \
+                      << __LINE__ << "\n";                                                      \
+            cleanup();                                                                          \
+            return -1;                                                                          \
+        }                                                                                       \
     }
 
 extern "C" {
@@ -193,62 +193,18 @@ int dispatcher_run_rowcolquant_gemm(const void* A,
     };
 
     // Allocate device buffers. AQ has M elements (row scale), BQ has N (col scale).
-    if(hipMalloc(&A_dev, elements_to_bytes<ADataType>(M * K)) != hipSuccess)
-    {
-        cleanup();
-        return -1;
-    }
-    if(hipMalloc(&B_dev, elements_to_bytes<BDataType>(K * N)) != hipSuccess)
-    {
-        cleanup();
-        return -1;
-    }
-    if(hipMalloc(&AQ_dev, elements_to_bytes<QDataType>(M)) != hipSuccess)
-    {
-        cleanup();
-        return -1;
-    }
-    if(hipMalloc(&BQ_dev, elements_to_bytes<QDataType>(N)) != hipSuccess)
-    {
-        cleanup();
-        return -1;
-    }
-    if(hipMalloc(&C_dev, elements_to_bytes<CDataType>(M * N)) != hipSuccess)
-    {
-        cleanup();
-        return -1;
-    }
+    HIP_CHECK(hipMalloc(&A_dev,  elements_to_bytes<ADataType>(M * K)));
+    HIP_CHECK(hipMalloc(&B_dev,  elements_to_bytes<BDataType>(K * N)));
+    HIP_CHECK(hipMalloc(&AQ_dev, elements_to_bytes<QDataType>(M)));
+    HIP_CHECK(hipMalloc(&BQ_dev, elements_to_bytes<QDataType>(N)));
+    HIP_CHECK(hipMalloc(&C_dev,  elements_to_bytes<CDataType>(M * N)));
 
     // Copy inputs to device
-    if(hipMemcpy(A_dev, A_host, elements_to_bytes<ADataType>(M * K), hipMemcpyHostToDevice) !=
-       hipSuccess)
-    {
-        cleanup();
-        return -1;
-    }
-    if(hipMemcpy(B_dev, B_host, elements_to_bytes<BDataType>(K * N), hipMemcpyHostToDevice) !=
-       hipSuccess)
-    {
-        cleanup();
-        return -1;
-    }
-    if(hipMemcpy(AQ_dev, AQ_host, elements_to_bytes<QDataType>(M), hipMemcpyHostToDevice) !=
-       hipSuccess)
-    {
-        cleanup();
-        return -1;
-    }
-    if(hipMemcpy(BQ_dev, BQ_host, elements_to_bytes<QDataType>(N), hipMemcpyHostToDevice) !=
-       hipSuccess)
-    {
-        cleanup();
-        return -1;
-    }
-    if(hipMemset(C_dev, 0, elements_to_bytes<CDataType>(M * N)) != hipSuccess)
-    {
-        cleanup();
-        return -1;
-    }
+    HIP_CHECK(hipMemcpy(A_dev,  A_host,  elements_to_bytes<ADataType>(M * K), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(B_dev,  B_host,  elements_to_bytes<BDataType>(K * N), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(AQ_dev, AQ_host, elements_to_bytes<QDataType>(M),     hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(BQ_dev, BQ_host, elements_to_bytes<QDataType>(N),     hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemset(C_dev, 0, elements_to_bytes<CDataType>(M * N)));
 
     // Build QuantGemmHostArgs.
     // RowColQuant: AQ is the row scale ([M,1], stride_AQ=1), BQ is the col scale
@@ -297,12 +253,7 @@ int dispatcher_run_rowcolquant_gemm(const void* A,
     }
 
     // Copy result back
-    if(hipMemcpy(C_host, C_dev, elements_to_bytes<CDataType>(M * N), hipMemcpyDeviceToHost) !=
-       hipSuccess)
-    {
-        cleanup();
-        return -1;
-    }
+    HIP_CHECK(hipMemcpy(C_host, C_dev, elements_to_bytes<CDataType>(M * N), hipMemcpyDeviceToHost));
 
     if(time_ms)
         *time_ms = exec_time;
