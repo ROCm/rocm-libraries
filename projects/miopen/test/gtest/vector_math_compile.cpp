@@ -29,6 +29,8 @@
 // registered vector width (1, 2, 4, 8). This catches missing vector-width
 // support before it surfaces as a runtime HIPRTC_ERROR_COMPILATION in production.
 
+#include <gtest/gtest.h>
+
 #define WORKAROUND_SWDEV_257056_PCH_MISSING_MACROS 1
 #define MIOPEN_WORKAROUND_COMPILER_CHANGE 1
 
