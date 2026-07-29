@@ -22,6 +22,11 @@
 #   not folded into the tiers below, all of which run on single-GPU runners where
 #   every multi_gpu test would skip while the run still reported green.
 #
+#   The "*HostUnit*" pattern is different in kind: clients/tests/unit holds
+#   hand-written host-only gtest cases (no device, no data-driven parameters)
+#   registered as plain suites named HostUnit*. They are seconds-fast and cover
+#   pure helpers, so every tier runs them.
+#
 # These tiers are TheRock ctest presets; they are NOT a port of hipBLASLt's
 # rocJenkins job filters (those are wired differently).
 #
@@ -37,6 +42,7 @@ test_categories:
     description: "Smoke surface for fast PR gating (target: ~5 min)"
     test_patterns:
       - "*smoke*"
+      - "*HostUnit*"
     exclude:
       - "*known_bug*"
     labels:
@@ -49,6 +55,7 @@ test_categories:
       - "*smoke*"
       - "*quick*"
       - "*pre_checkin*"
+      - "*HostUnit*"
     exclude:
       - "*known_bug*"
     labels:
@@ -63,6 +70,7 @@ test_categories:
       - "*quick*"
       - "*pre_checkin*"
       - "*nightly*"
+      - "*HostUnit*"
     exclude:
       - "*known_bug*"
     labels:
@@ -78,6 +86,7 @@ test_categories:
       - "*pre_checkin*"
       - "*nightly*"
       - "*HMM*"
+      - "*HostUnit*"
     exclude:
       - "*known_bug*"
     labels:
