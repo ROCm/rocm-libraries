@@ -63,11 +63,12 @@ class _StubWriter:
 
 def _kernel(*, multicast=True, clusterDim=(2, 2), tdmA=True, tdmB=True,
             numWaves=4, useSubtile=False, sparse=0, tdmMeta=False, tdmInst=3,
-            pap=False, streamKMulticast=False):
+            pap=False, streamKMulticast=False, forceDPOnly=0, dualMulticast=0):
     # The StreamK=3 DP cooperative B-multicast path is no longer a stored state
     # key: the component derives it from StreamK==3 + ClusterDim[0] > 1 via the
     # streamKMulticast(kernel) helper. Drive it here by setting StreamK (the
     # streamKMulticast=True cases all use a ClusterDim with Cs = clusterDim[0] > 1).
+    # StreamKForceDPOnly / StreamKDualMulticast select the 2-D dual-multicast path.
     return {
         "Multicast": multicast,
         "ClusterDim": list(clusterDim),
@@ -80,6 +81,8 @@ def _kernel(*, multicast=True, clusterDim=(2, 2), tdmA=True, tdmB=True,
         "ProblemType": {"Sparse": sparse},
         "PrefetchAcrossPersistent": pap,
         "StreamK": 3 if streamKMulticast else 0,
+        "StreamKForceDPOnly": forceDPOnly,
+        "StreamKDualMulticast": dualMulticast,
     }
 
 
@@ -152,6 +155,20 @@ class TestMaskSgprName:
         assert self._c().maskSgprName(k, "B", subtile=True) == "MulticastMaskB"
 
 
+class TestCooperativeThreadPartition:
+    def _c(self):
+        from Tensile.Components.ClusterLoad import ClusterLoadTDM
+        return ClusterLoadTDM()
+
+    def test_a_uses_clusterdim1_b_uses_clusterdim0(self):
+        k = _kernel(clusterDim=(4, 2))
+        assert self._c().cooperativeThreadPartition(k, "A") == 2
+        assert self._c().cooperativeThreadPartition(k, "B") == 4
+        # MXS tensors resolve by their trailing tensor char.
+        assert self._c().cooperativeThreadPartition(k, "MXSA") == 2
+        assert self._c().cooperativeThreadPartition(k, "MXSB") == 4
+
+
 # --- SGPR declare / undeclare ----------------------------------------------
 
 class TestDeclareUndeclare:
@@ -217,13 +234,20 @@ class TestDeclareUndeclare:
         self._c().undeclareSgprs(w, _kernel(streamKMulticast=True, pap=True, clusterDim=(2, 1)))
         assert w.undefined == ["MulticastMaskA"]
 
-    def test_undeclare_keeps_both_live_under_pap_2d_cluster(self):
-        # On a 2-D cluster (ClusterDim[1]>1) A is a real multicast, not self-only,
-        # so both masks stay live across the PAP refresh (neither is freed).
+    def test_undeclare_keeps_both_live_under_pap_dual_2d_cluster(self):
+        # On a DUAL-2D cluster (ForceDPOnly 2-D or StreamKDualMulticast) the Ck peers
+        # reuse A on N-adjacent tiles, so A is a REAL multicast (aPeers>1), not
+        # self-only. Both masks must stay live across the PAP refresh (neither freed).
         _init_rocisa_gfx1250()
         w = _StubWriter()
-        self._c().undeclareSgprs(w, _kernel(streamKMulticast=True, pap=True, clusterDim=(2, 2)))
+        self._c().undeclareSgprs(
+            w, _kernel(streamKMulticast=True, pap=True, clusterDim=(2, 2), forceDPOnly=1))
         assert w.undefined == []
+        # StreamKDualMulticast (standard two-tile) is the other dual-2D entry.
+        w2 = _StubWriter()
+        self._c().undeclareSgprs(
+            w2, _kernel(streamKMulticast=True, pap=True, clusterDim=(2, 2), dualMulticast=1))
+        assert w2.undefined == []
 
     def test_undeclare_frees_both_without_pap(self):
         # Same StreamK multicast kernel but PAP off: no persistent refresh, so both
@@ -361,6 +385,16 @@ class TestApplyToDescriptor:
         w = _StubWriter()
         mod = self._c().applyToDescriptor(
             w, _kernel(streamKMulticast=True, pap=False, clusterDim=(2, 1)), "tdmAGroup1", "A")
+        assert "s_or_b32 s[sgprtdmAGroup1], s[sgprtdmAGroup1], s[sgprMulticastMaskA]" in str(mod)
+
+    def test_pap_dual_2d_still_applies_maskA(self):
+        # Dual-2D (ForceDPOnly 2-D): A IS a real multicast across Ck peers, so it
+        # stays live and is applied on every refresh.
+        _init_rocisa_gfx1250()
+        w = _StubWriter()
+        mod = self._c().applyToDescriptor(
+            w, _kernel(streamKMulticast=True, pap=True, clusterDim=(2, 2), forceDPOnly=1),
+            "tdmAGroup1", "A")
         assert "s_or_b32 s[sgprtdmAGroup1], s[sgprtdmAGroup1], s[sgprMulticastMaskA]" in str(mod)
 
 

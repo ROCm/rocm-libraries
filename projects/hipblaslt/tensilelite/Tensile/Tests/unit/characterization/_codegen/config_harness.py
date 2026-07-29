@@ -233,6 +233,27 @@ def _emit_one(kwa, kernel, splitGSU, canonical):
     return base, src, res.err
 
 
+def assert_cluster_barrier_balanced(src, base):
+    """Cluster-scope split-barrier balance check shared by the gfx1250 StreamK
+    cluster char tests. Every arrive (``s_barrier_signal -3``) must be consumed by
+    a completion (``s_barrier_wait -3``) on every control-flow path. The prologue
+    wave-0 arrive is consumed by exactly one of two mutually exclusive cluster
+    waits: the last-iteration guard's zero-iteration skip-edge wait, or the
+    first-load wait on the >=1-iteration fall-through. Both waits are emitted
+    statically but only one executes on any given path, so the static wait count
+    is exactly one greater than the signal count; every other arrive (including a
+    config's dedicated prologue-prefetch handshake) is a self-contained arrive/wait
+    pair. Any other imbalance would leave a cluster wait unpaired and stall the
+    cluster waves.
+    """
+    n_signal = src.count("s_barrier_signal -3")
+    n_wait = src.count("s_barrier_wait -3")
+    assert n_wait == n_signal + 1, (
+        f"Kernel {base!r}: unexpected cluster barrier balance: "
+        f"{n_signal} signal(-3) vs {n_wait} wait(-3) (expected wait == signal + 1)"
+    )
+
+
 # --- in-file smoke runner ---------------------------------------------------
 #
 # NOT a pytest test (no ``test_`` prefix; guarded under __main__). Drives the

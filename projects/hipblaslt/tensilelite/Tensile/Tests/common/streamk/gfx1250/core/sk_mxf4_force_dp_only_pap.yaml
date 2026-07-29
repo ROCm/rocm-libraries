@@ -1,5 +1,15 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
+################################################################################
+# ForceDPOnly 2-D DUAL-operand multicast + PrefetchAcrossPersistent, mxf4.
+#
+# PAP companion to sk_mxf4_force_dp_only_cluster_multicast.yaml (the [2,2] row).
+# A genuine 2-D cluster ClusterDim=[Cs,Ck]=[2,2] where BOTH operands multicast
+# (Cs X-peers reuse B on M-adjacent tiles; Ck Y-peers reuse A on N-adjacent
+# tiles -- an A-multicast, NOT a K-split reduction). Because A IS a real
+# multicast (aPeers=Ck>1) the guard refinement does NOT free maskA: BOTH masks
+# stay live across the PAP refresh. Already fit the SGPR budget (FDPO=1);
+# included to lock in the dual-2D + PAP path alongside the factored one.
 TestParameters:
   marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201]
 
@@ -24,7 +34,7 @@ BenchmarkProblems:
   -
     -
       OperationType: GEMM
-      DataType: F8
+      DataType: F4
       DestDataType: s
       ComputeDataType: s
       HighPrecisionAccumulate: True
@@ -32,6 +42,9 @@ BenchmarkProblems:
       TransposeB: False
       UseBeta: True
       Batched: True
+      Activation: True
+      SupportUserArgs: True
+      UseBias: 0
       MXBlockA: 32
       MXBlockB: 32
 
@@ -59,6 +72,7 @@ BenchmarkProblems:
         - LDSTrInst: [False]
         - PrefetchGlobalRead: [1, 2]
         - PrefetchLocalRead: [1]
+        - PrefetchAcrossPersistent: [1]
         - ScheduleIterAlg: [4]
         - SourceSwap: [False]
         - StoreRemapVectorWidth: [0]
@@ -82,15 +96,10 @@ BenchmarkProblems:
         - TDMInst: [3]
         - MXLoadInst: ["TDM"]
         - MXScaleFormat: ["InMemorySwizzle"]
-        # ForceDPOnly cluster multicast sweep, 1-D AND 2-D in one file:
-        #   [C,1] = 1-D B-multicast (Cs=C X-peers on M-adjacent tiles reuse B);
-        #   [2,2] = 2-D DUAL-multicast (Cs=2 reuse B on M-adjacent tiles, Ck=2
-        #           Y-peers reuse A on N-adjacent tiles). Ck here is an N-tiling
-        #           axis, NOT a K-split reduction.
-        # ProblemSizes below are chosen so nWG0=ceil(M/MT0) is divisible by 8
-        # (covers Cs in {2,4,8}) and nWG1=ceil(N/MT1) is even (covers Ck=2), so
-        # EVERY swept ClusterDim enumerates with ZERO DID_NOT_SATISFY_ASSERTS.
-        - ClusterDim: [[2, 1], [4, 1], [8, 1], [2, 2]]
+        # 2-D DUAL-multicast [2,2]: Cs=2 reuse B (M-adjacent), Ck=2 reuse A
+        # (N-adjacent). Both masks stay live under PAP. Zero-skip: nWG0=ceil(M/MT0)
+        # divisible by 2 and nWG1=ceil(N/MT1) even.
+        - ClusterDim: [[2, 2]]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:

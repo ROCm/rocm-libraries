@@ -381,6 +381,44 @@ def streamKMulticast(d):
     """
     return d.get("StreamK", 0) == 3 and d.get("ClusterDim", [1, 1])[0] > 1
 
+def streamKForceDP2DMulticast(d):
+    """True for the ForceDPOnly 2-D dual-operand multicast cluster.
+
+    This is a StreamK==3 ``StreamKForceDPOnly`` (dense data-parallel, no K-split
+    reduction) kernel given a GENUINE 2-D cluster ClusterDim = [Cs, Ck] with BOTH
+    axes > 1. Unlike the factored K-split cluster (where Ck is a reduction axis),
+    here the Ck (Y) axis maps to N-ADJACENT output tiles so the Y-peers reuse the
+    A operand (A-multicast), while the Cs (X) peers reuse B on M-adjacent tiles
+    exactly as in the shipped 1-D [C,1] ForceDPOnly multicast. Both operands are
+    multicast via the DENSE ClusterLoad 2-D masks.
+
+    Detected purely structurally (ForceDPOnly + ClusterDim[0]>1 + ClusterDim[1]>1).
+    ``d`` may be a kernel or a solution ``state`` dict; both expose
+    "StreamKForceDPOnly" and "ClusterDim".
+    See docs/design/streamk-wg-clusters.md.
+    """
+    return bool(d.get("StreamKForceDPOnly", 0)) \
+        and d["ClusterDim"][0] > 1 and d["ClusterDim"][1] > 1
+
+def streamKDual2DMulticast(d):
+    """True for a 2-D DUAL-operand multicast cluster (generalized detector).
+
+    Covers BOTH the ForceDPOnly 2-D dual-operand multicast (``StreamKForceDPOnly``
+    + 2-D cluster) and the STANDARD two-tile StreamK path
+    (``StreamKForceDPOnly == 0``) opted in via ``StreamKDualMulticast``. In both
+    the DP (full-tile) round does the 2-D dual multicast (Cs/X peers share B on
+    M-adjacent tiles, Ck/Y peers share A on N-adjacent tiles); the standard path's
+    SK (partial-tile) round reduces 1-D via the workspace as today.
+
+    Both cases require a GENUINE 2-D cluster ClusterDim = [Cs, Ck] (both axes > 1)
+    where Ck (Y) is an N-tiling / A-multicast axis, NOT a K-split reduction axis.
+    ``d`` may be a kernel or a solution ``state`` dict.
+    See docs/design/streamk-wg-clusters.md.
+    """
+    if not (d["ClusterDim"][0] > 1 and d["ClusterDim"][1] > 1):
+        return False
+    return bool(d.get("StreamKForceDPOnly", 0)) or bool(d.get("StreamKDualMulticast", 0))
+
 def log2(x):
     return int(log(x, 2) + 0.5)
 

@@ -83,7 +83,15 @@ BenchmarkProblems:
         - TDMInst: [3]
         - MXLoadInst: ["TDM"]
         - MXScaleFormat: ["InMemorySwizzle"]
-        - ClusterDim: [[2, 1], [4, 1], [8, 1]]
+        # ForceDPOnly cluster multicast sweep, 1-D AND 2-D in one file:
+        #   [C,1] = 1-D B-multicast (Cs=C X-peers on M-adjacent tiles reuse B);
+        #   [2,2] = 2-D DUAL-multicast (Cs=2 reuse B on M-adjacent tiles, Ck=2
+        #           Y-peers reuse A on N-adjacent tiles). Ck here is an N-tiling
+        #           axis, NOT a K-split reduction.
+        # ProblemSizes below are chosen so nWG0=ceil(M/MT0) is divisible by 8
+        # (covers Cs in {2,4,8}) and nWG1=ceil(N/MT1) is even (covers Ck=2), so
+        # EVERY swept ClusterDim enumerates with ZERO DID_NOT_SATISFY_ASSERTS.
+        - ClusterDim: [[2, 1], [4, 1], [8, 1], [2, 2]]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
