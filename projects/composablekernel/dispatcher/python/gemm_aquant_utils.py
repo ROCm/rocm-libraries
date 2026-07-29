@@ -771,6 +771,12 @@ def _warp_tile_k_for(gfx_arch: str, preshuffle_aquant: bool = False) -> int:
     return 64 if preshuffle_aquant else 32
 
 
+# =============================================================================
+# Decode family (GemmConfigQuantDecodeInterwave, tile 16x64x256, IsFlatMM=false)
+#   fp8/bf8/fp8i4/bf8i4: K_warp = 128 on gfx950, 32 on gfx942.
+# =============================================================================
+
+
 def _decode_config(
     variant_key: str,
     warp_tile_k: int,
@@ -843,6 +849,12 @@ def default_bf8i4_config(quant_group_k: int = 128, quant_group_n: int = 1,
     if warp_tile_k is None:
         warp_tile_k = _warp_tile_k_for(gfx_arch, preshuffle_aquant=False)
     return _decode_config("bf8i4", warp_tile_k, quant_group_k, quant_group_n, layout, gfx_arch)
+
+
+# =============================================================================
+# Preshufflequant family (GemmConfigPreshuffleQuantDecode, tile 16x64x256, IsFlatMM=true)
+#   fp8/bf8/fp8i4/bf8i4: K_warp = 128 on gfx950, 64 on gfx942.
+# =============================================================================
 
 
 def _preshufflequant_config(
