@@ -24,8 +24,6 @@
  *
  *******************************************************************************/
 
-// Regression tests for ROCM-28684.
-//
 // The spatial batch-norm tuning heuristic must only ever propose vector sizes
 // that the kernel's vector machinery (mapped_vector_type<T, N> and the miopen
 // vector math / cast<> helpers) actually implements. Originally the heuristic
@@ -77,7 +75,7 @@ struct Shape
 std::vector<Shape> GetShapes()
 {
     return {
-        {42, 24, 240, 320, "ticket_c24_nonpow2"}, // ROCM-28684 repro shape
+        {42, 24, 240, 320, "c24_nonpow2"}, 
         {16, 256, 64, 64, "c256_hw4096"},
         {8, 512, 32, 32, "c512_hw1024"},
         {8, 1024, 16, 16, "c1024_hw256"},
