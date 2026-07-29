@@ -28,7 +28,7 @@ from typing import Optional, Protocol
 
 import requests
 
-from ci_utils import retry, set_github_output
+from ci_utils import append_step_summary, retry, set_github_output
 
 GITHUB_API = "https://api.github.com"
 DEFAULT_THEROCK_REPO = "ROCm/TheRock"
@@ -362,15 +362,6 @@ def build_summary(resolution: Resolution, now: Optional[datetime] = None) -> str
     return "\n".join(lines) + "\n"
 
 
-def _append_step_summary(summary: str) -> None:
-    summary_file = os.environ.get("GITHUB_STEP_SUMMARY", "")
-    if not summary_file:
-        print(summary)
-        return
-    with open(summary_file, "a", encoding="utf-8") as f:
-        f.write(summary)
-
-
 def main() -> None:
     token = os.environ.get("GITHUB_TOKEN", "")
     event_name = os.environ.get("GITHUB_EVENT_NAME", "")
@@ -398,7 +389,7 @@ def main() -> None:
     )
 
     set_github_output({"therock_ref": resolution.therock_ref})
-    _append_step_summary(build_summary(resolution))
+    append_step_summary(build_summary(resolution))
 
 
 if __name__ == "__main__":
