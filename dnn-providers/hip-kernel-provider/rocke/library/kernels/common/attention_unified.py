@@ -887,6 +887,12 @@ def _select_2d_tile_size(problem: UnifiedAttentionProblem) -> int:
             ):
                 return 64
             return 128
+        # fp16 D128 sliding-window: force T=64. single_batch_combo only admits SW
+        # for fp16 D128 (below); at bs=16 the default 2*bs would give T=32, and the
+        # T=32 hipcc combos are flagged numerically wrong for SW in
+        # _select_2d_block_m_per_warp. T=64 dodges that (correctness-clean SW tile).
+        if problem.sliding_window > 0:
+            return 64
         # d128 occupancy lever (supersedes the small-tile pick for the
         # LONG-context holdout): at num_warps=2 the d128 combo is LDS-bound
         # (K_lds[2,T,HD]+V_lds[1,T,HD] = 48 KB at T=2*BS=64 -> 1 WG/CU). The
@@ -1459,7 +1465,14 @@ def _enable_single_batch_combo(problem: UnifiedAttentionProblem) -> bool:
         return False
     if problem.softcap > 0 or problem.use_sinks:
         return False
-    if problem.sliding_window > 0:
+    # fp16 D128 sliding-window prefill routes to the transposed-32x32 fp32
+    # online-softmax path (the narrow 16x16 path loses accuracy on long-KV fp16;
+    # bf16 D128 SW stays on its already-correct narrow path). Other SW shapes are
+    # excluded; the mask-once/limit VALU sub-flags need no-SW and auto-disable via
+    # _enable_transposed_subflags, leaving the bare transposed path + window mask.
+    if problem.sliding_window > 0 and not (
+        problem.head_size == 128 and problem.dtype == "fp16"
+    ):
         return False
     if problem.head_size not in (64, 128):
         return False
