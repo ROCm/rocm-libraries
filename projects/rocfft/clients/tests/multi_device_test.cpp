@@ -21,7 +21,9 @@
 // RCCL coverage: when built with ROCFFT_RCCL_ENABLE, this multi-device suite
 // drives the RCCL paths (InitRCCLCommunicator, CommRCCLGrouped/AllToAll). CI
 // runs it against both the normal and RCCL builds, so these cases cover the
-// RCCL interface without a separate standalone unit test.
+// RCCL interface without a separate standalone unit test. Running any case
+// under --gtest_repeat also exercises cached-communicator reuse across
+// sequential plans.
 
 #include "../../shared/accuracy_test.h"
 #include "../../shared/fft_enums.h"
