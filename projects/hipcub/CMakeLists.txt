@@ -35,11 +35,11 @@ endif()
 # Update these variables at release time
 #
 # Set the library version
-set(VERSION_STRING "4.5.0")
+set(VERSION_STRING "5.0.0")
 # Set the CCCL-compatible version.
-set(HIPCUB_CCCL_VERSION_MAJOR 2)
-set(HIPCUB_CCCL_VERSION_MINOR 8)
-set(HIPCUB_CCCL_VERSION_PATCH 2)
+set(HIPCUB_CCCL_VERSION_MAJOR 3)
+set(HIPCUB_CCCL_VERSION_MINOR 0)
+set(HIPCUB_CCCL_VERSION_PATCH 3)
 # Set the minimum required rocPRIM version
 set(MIN_ROCPRIM_PACKAGE_VERSION "4.1.0" CACHE STRING "Minimum version of rocPRIM to search for when ROCPRIM_FETCH_METHOD is set to PACKAGE.")
 # Set download branch for dependency rocPRIM
@@ -59,10 +59,8 @@ endif()
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-if (CMAKE_CXX_STANDARD EQUAL 14)
-  message(WARNING "C++14 will be deprecated in the next major release")
-elseif(NOT CMAKE_CXX_STANDARD EQUAL 17)
-  message(FATAL_ERROR "Only C++14 and C++17 are supported")
+if(NOT CMAKE_CXX_STANDARD EQUAL 17)
+  message(FATAL_ERROR "Only C++17 are supported")
 endif()
 
 # Set HIP flags
