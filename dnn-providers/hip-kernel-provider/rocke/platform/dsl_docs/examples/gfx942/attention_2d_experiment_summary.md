@@ -2,7 +2,7 @@
 
 This page preserves the reusable engineering method, qualitative decision record,
 and code-grounded lessons from the gfx942 tiled-attention work. In accordance with
-the repository [compliance rules](../../AGENTS.md), achieved performance values and
+the repository [compliance rules](../../../AGENTS.md), achieved performance values and
 product/software comparisons are omitted. Record numeric evidence only in the
 approved access-controlled system.
 
@@ -10,12 +10,13 @@ approved access-controlled system.
 
 Paths are relative to `rocke/platform/`.
 
-- `../library/kernels/gfx942/attention_tiled_2d.py` owns the builder, layouts,
-  loaders, validators, and guarded experiments.
-- `../library/kernels/common/attention_unified.py` owns routing, selector policy,
-  cache identity, launch geometry, and LDS-budget checks.
-- [`../development/testing.md`](../development/testing.md) and
-  [`../optimization/optimization_runbook.md`](../optimization/optimization_runbook.md)
+- [`../library/kernels/gfx942/attention_tiled_2d.py`](../../../../library/kernels/gfx942/attention_tiled_2d.py)
+  owns the builder, layouts, loaders, validators, and guarded experiments.
+- [`../library/kernels/common/attention_unified.py`](../../../../library/kernels/common/attention_unified.py)
+  owns routing, selector policy, cache identity, launch geometry, and LDS-budget
+  checks.
+- [`../development/testing.md`](../../development/testing.md) and
+  [`../optimization/optimization_runbook.md`](../../optimization/optimization_runbook.md)
   define the supported validation and measurement methods.
 
 The current source and tests are authoritative. Historical configurations identify
