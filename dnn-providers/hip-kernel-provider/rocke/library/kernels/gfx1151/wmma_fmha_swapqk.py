@@ -485,13 +485,31 @@ class SwapQKCfg:
     # residency that makes those hits cheap.
     v_prefetch: int = 0
     # NOTE on the dual-gather broadcast cost (248 v_cndmask_b32 + 146
-    # v_permlanex16_b32, together ~16% of the K-loop's issue cycles): pairing
-    # those into VOPD is not available. The backend's gcn-create-vopd pass is
-    # already on and already forms 42 v_dual_* pairs in this loop; forcing
-    # -amdgpu-enable-vopd on/off produces byte-identical code. The selects cannot
-    # pair because v_dual_cndmask_b32 reads VCC implicitly, so an OPX/OPY pair
-    # would have to share one mask, and the gather's masks differ per select.
-    # Cutting this cost needs FEWER broadcast ops, not denser issue of them.
+    # v_permlanex16_b32 in dual_gather_finish, together ~16% of the K-loop's issue
+    # cycles). Two routes to make it cheaper, measured with profiling/shufdbg.py:
+    #
+    # (a) One-instruction row swap: NOT on this target. v_permlane16_swap_b32
+    #     would turn the 3-op broadcast (1 permlane + 2 selects per dword) into
+    #     mov+swap, but llvm-mc rejects it for gfx1151 (it is gfx950/gfx125x).
+    #     permlanex16 with a tied vdst under a half-exec mask also costs 3 ops
+    #     (mov + 2 permlane), so there is no 2-op formulation on RDNA3.5.
+    #
+    # (b) VOPD: LEGAL here and largely UNTAKEN -- the open lever.
+    #     v_dual_cndmask_b32 :: v_dual_cndmask_b32 assembles for gfx1151, all 248
+    #     selects read the SAME mask (one distinct operand, vcc_lo, so the shared-
+    #     VCC rule is satisfied by construction), and 120 of them already sit
+    #     adjacent to another select. Yet the backend forms only 4
+    #     v_dual_cndmask_b32. gcn-create-vopd is on and forcing
+    #     -amdgpu-enable-vopd either way is byte-identical, so what blocks the
+    #     other ~116 pairs is VOPD's operand rules (src bank / dst parity), not
+    #     eligibility. The two selects of one dword are the worst possible
+    #     neighbours for those rules: they read the SAME register pair (e, p) with
+    #     operands swapped. Emitting selects from DIFFERENT dwords back-to-back
+    #     gives the allocator bank freedom. Ceiling if fully paired: 248 -> 128
+    #     issue slots, ~157 cyc/iter, ~4.7% of the issue floor.
+    #     Watch for: holding all n_i32 permlane results live at once to expose
+    #     those runs raises the register peak -- check spill=0 before believing a
+    #     win.
     #
     # qk_douter: run the QK loop d-OUTER / kv-inner instead of kv-outer / d-inner.
     #
