@@ -248,11 +248,8 @@ selection, launch) is identical regardless of how a kernel arrived.
 Loading is on demand and cached. Nothing is parsed until a graph needs it: an engine whose matchers
 reject a graph never pays to load its kernels, and a heuristic model is not read until something needs
 the catalog ranked. What the provider keeps up front is only the descriptor inventory, the ids, kinds,
-and locations that say what exists. Because the drop-in location is a directory an operator writes to,
-that inventory is refreshed as needed rather than snapshotted once, so a pack added or removed while
-the process runs is picked up or dropped without a restart, and anything cached from a removed pack is
-discarded. [Section 8](#8-end-to-end-flow) gives the exact order, what each step loads, and where the
-result is kept.
+and locations that say what exists. [Section 8](#8-end-to-end-flow) gives the exact order, what each
+step loads, and where the result is kept.
 
 Each UED becomes an engine that names its heuristic (UHD) and metadata schema (KMD); the KDPs that name
 it contribute their matchers, dispatch, and kernels. Deciding which kernels apply to a graph is a cheap,
@@ -996,12 +993,10 @@ that needs it.
 own handle, the same instance on every call for this session.
 
 **2. Check the cache.** Hash the graph bytes before deserializing them and look up
-`(graph hash, device id, inventory generation)` on the handle. On a hit, `memcmp` the stored bytes to
+`(graph hash, device id)` on the handle. On a hit, `memcmp` the stored bytes to
 confirm the graph is byte-identical rather than merely hash-equal, and return the cached verdict.
-*Why this key:* the graph bytes are the problem identity; the device id matters because the bound token
-state resolves `$device.*` and a handle can be rebound to another device; the inventory generation
-changes whenever the drop-in location does, so a pack added or removed invalidates every catalog built
-before it.
+*Why this key:* the graph bytes are the problem identity, and the device id matters because the bound
+token state resolves `$device.*` and a handle can be rebound to another device.
 
 **3. Resolve this engine's UED and KMD.** The UED gives the engine identity, the KMD fields it exposes
 as knobs, and the ids of its one heuristic (UHD) and one metadata schema (KMD). The KMD loads with it,
@@ -1115,10 +1110,9 @@ closed and hipDNN falls through to the next candidate engine, exactly as if this
 claimed applicability. [Section 15.4](#154-execution-and-selection) states the same rule for a
 composite's mandatory stage; that is this invariant applied to one stage, not a separate rule.
 
-Descriptors and kernel sources load lazily at runtime, from a location an operator can write to, so a
-load can fail: a pack removed after this engine accepted leaves a source that no longer resolves. That
-is an ordinary error at plan build rather than a crash at launch, and hipDNN falls through to the next
-candidate engine.
+Descriptors and kernel sources load lazily, so a load can fail: a source that does not resolve, or a
+descriptor that fails validation, is an ordinary error at plan build rather than a crash at launch, and
+hipDNN falls through to the next candidate engine.
 
 **The cache is provider-owned.** hipDNN passes no graph identity and no opaque state slot between these
 calls, and caches nothing itself: each knob query round-trips to the provider. It does not need to pass
@@ -1140,7 +1134,7 @@ sequenceDiagram
     Note over FE,Cache: Steps 1-6: asked of every loaded engine
     FE->>ERM: create_execution_plans() -> getApplicableEngineIds
     ERM->>Eng: isApplicable(handle, opGraph)
-    Eng->>Cache: probe (graph hash, device id, inventory generation)
+    Eng->>Cache: probe (graph hash, device id)
     Eng->>Eng: resolve UED + KMD (3), KDPs + matchers + UKD metadata (4)
     Eng->>Eng: matchers in pruning order, graph-level then $kernel-level (5)
     Eng->>Cache: store catalog + bound token state
@@ -1366,9 +1360,7 @@ The two ingestion paths differ only in where a kernel's code comes from:
   build id) so incompatible bundles are rejected before load.
 - **Runtime drop-in.** The path is opt-in and off by default. When enabled, the provider scans a
   dedicated drop-in location for custom bundles, compiles each descriptor to a matcher once on first
-  use, and registers it exactly as an installed one. The location is refreshed as needed
-  ([Section 8](#8-end-to-end-flow)), so a bundle added or removed while the process runs is
-  picked up or dropped without a restart. A single package may declare many descriptors, and a
+  use, and registers it exactly as an installed one. A single package may declare many descriptors, and a
   bad descriptor is quarantined on load without failing the rest. JIT kernels compile on first use and
   cache their result. (The concrete enablement and location mechanism is left to the delivery
   follow-up RFC.)
