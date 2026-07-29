@@ -56,15 +56,16 @@ static constexpr std::size_t elements_to_bytes(std::size_t n)
 
 static bool g_initialized = false;
 
-#define HIP_CHECK(call)                                                                        \
-    {                                                                                          \
-        hipError_t _err = (call);                                                              \
-        if(_err != hipSuccess)                                                                 \
-        {                                                                                      \
+#define HIP_CHECK(call)                                                                         \
+    {                                                                                           \
+        hipError_t _err = (call);                                                               \
+        if(_err != hipSuccess)                                                                  \
+        {                                                                                       \
             std::cerr << "HIP error: " << hipGetErrorString(_err) << " at " << __FILE__ << ":" \
-                      << __LINE__ << "\n";                                                     \
-            return -1;                                                                         \
-        }                                                                                      \
+                      << __LINE__ << "\n";                                                      \
+            cleanup();                                                                          \
+            return -1;                                                                          \
+        }                                                                                       \
     }
 
 extern "C" {
@@ -218,34 +219,13 @@ int dispatcher_run_bquant_gemm(const void* A,
     // Allocate device buffers.
     // B may be a packed type (pk_int4_t, pk_fp4_t): 2 logical values per byte.
     // elements_to_bytes<T>(n) handles the packed case via numeric_traits::PackedSize.
-    if(hipMalloc(&A_dev, elements_to_bytes<ADataType>(M * K)) != hipSuccess)
-    {
-        cleanup();
-        return -1;
-    }
-    if(hipMalloc(&B_dev, elements_to_bytes<BDataType>(K * N)) != hipSuccess)
-    {
-        cleanup();
-        return -1;
-    }
-    if(hipMalloc(&BQ_dev, elements_to_bytes<QDataType>(QK_B * QN_B)) != hipSuccess)
-    {
-        cleanup();
-        return -1;
-    }
-    if(hipMalloc(&C_dev, elements_to_bytes<CDataType>(M * N)) != hipSuccess)
-    {
-        cleanup();
-        return -1;
-    }
+    HIP_CHECK(hipMalloc(&A_dev,  elements_to_bytes<ADataType>(M * K)));
+    HIP_CHECK(hipMalloc(&B_dev,  elements_to_bytes<BDataType>(K * N)));
+    HIP_CHECK(hipMalloc(&BQ_dev, elements_to_bytes<QDataType>(QK_B * QN_B)));
+    HIP_CHECK(hipMalloc(&C_dev,  elements_to_bytes<CDataType>(M * N)));
 
     // Copy inputs to device
-    if(hipMemcpy(A_dev, A_host, elements_to_bytes<ADataType>(M * K), hipMemcpyHostToDevice) !=
-       hipSuccess)
-    {
-        cleanup();
-        return -1;
-    }
+    HIP_CHECK(hipMemcpy(A_dev, A_host, elements_to_bytes<ADataType>(M * K), hipMemcpyHostToDevice));
     // Copy the B weight matrix to device. This mirrors Old-TE's host-side B prep
     // in run_gemm_quant_example.inc:770-789 exactly:
     //   1. For PreshuffleB kernels, pre-shuffle B into the interleaved layout the
@@ -290,14 +270,7 @@ int dispatcher_run_bquant_gemm(const void* A,
             ck_tile::permute_vectors_i4x4_b(b_k_n_dev);
         }
 
-        if(hipMemcpy(B_dev,
-                     b_k_n_dev.data(),
-                     elements_to_bytes<BDataType>(K * N),
-                     hipMemcpyHostToDevice) != hipSuccess)
-        {
-            cleanup();
-            return -1;
-        }
+        HIP_CHECK(hipMemcpy(B_dev, b_k_n_dev.data(), elements_to_bytes<BDataType>(K * N), hipMemcpyHostToDevice));
     }
     // Apply BQ preshuffle when required -- mirrors run_gemm_quant_example.inc:794-825
     // exactly. There are three cases:
@@ -349,17 +322,9 @@ int dispatcher_run_bquant_gemm(const void* A,
             copy_rc = hipMemcpy(BQ_dev, bq_h.data(), bq_bytes, hipMemcpyHostToDevice);
         }
 
-        if(copy_rc != hipSuccess)
-        {
-            cleanup();
-            return -1;
-        }
+        HIP_CHECK(copy_rc);
     }
-    if(hipMemset(C_dev, 0, elements_to_bytes<CDataType>(M * N)) != hipSuccess)
-    {
-        cleanup();
-        return -1;
-    }
+    HIP_CHECK(hipMemset(C_dev, 0, elements_to_bytes<CDataType>(M * N)));
 
     // Build QuantGemmHostArgs (aq_ptr = nullptr, QK_A = 0, stride_AQ = 0 for BQuant-only)
     ck_tile::QuantGemmHostArgs args;
@@ -404,12 +369,7 @@ int dispatcher_run_bquant_gemm(const void* A,
     }
 
     // Copy result back
-    if(hipMemcpy(C_host, C_dev, elements_to_bytes<CDataType>(M * N), hipMemcpyDeviceToHost) !=
-       hipSuccess)
-    {
-        cleanup();
-        return -1;
-    }
+    HIP_CHECK(hipMemcpy(C_host, C_dev, elements_to_bytes<CDataType>(M * N), hipMemcpyDeviceToHost));
 
     if(time_ms)
         *time_ms = exec_time;
