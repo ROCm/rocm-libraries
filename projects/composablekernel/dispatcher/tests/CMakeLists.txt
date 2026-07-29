@@ -54,6 +54,31 @@ set_tests_properties(dispatcher_test_gemm_utils PROPERTIES
     ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
 )
 
+# =============================================================================
+# Bridge operator unit tests (CPU-only) — previously present in-tree but NOT
+# registered in CI. Each is a pure host-side test (codegen/config/name/ABI
+# marshalling with a mocked .so); no GPU or built library required.
+# =============================================================================
+foreach(_bridge_test
+        test_multi_d_bridge
+        test_multi_abd_bridge
+        test_mx_gemm_bridge
+        test_streamk_gemm_utils
+        test_grouped_gemm_codegen
+        test_codegen_common
+        test_dispatcher_common)
+    add_test(
+        NAME dispatcher_${_bridge_test}
+        COMMAND ${Python3_EXECUTABLE} -m unittest discover -s ${CMAKE_CURRENT_SOURCE_DIR} -p ${_bridge_test}.py -v
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+    set_tests_properties(dispatcher_${_bridge_test} PROPERTIES
+        LABELS "dispatcher;python;bridge"
+        TIMEOUT 120
+        ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
+    )
+endforeach()
+
 # Verbose version of the test
 add_test(
     NAME dispatcher_test_autocorrect_verbose
