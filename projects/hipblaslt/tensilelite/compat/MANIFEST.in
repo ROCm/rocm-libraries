@@ -1,0 +1,4 @@
+include README.md
+include release_metadata.py
+prune tests
+global-exclude __pycache__ *.py[cod]
