@@ -1556,68 +1556,44 @@ value with the graph condition that produces it:
 ]}
 ```
 
-**Verdict.** No custom operation, no escape hatch, no new operator, and no precomputed field. The
-apparent need for one came from copying the C++ shape, compute a value, then compare, into a language
-that never needs to name the value: the kernel's own metadata supplies the right-hand side, so the
-comparison collapses into the predicate. This is the general pattern for porting a classifier, and
-§13.7 lists it as such.
-
-It is verbose, and deliberately shown in full because an author writing this is the point. It is also
-authored once per pack and shared by every kernel in it, which is the trade the pack boundary exists to
-make ([Section 2](#2-the-descriptors)).
+**Verdict.** No custom operation, no escape hatch, no new operator, no precomputed field. The apparent
+need for one came from copying the C++ shape, compute a value then compare, into a language that never
+needs to name the value: the kernel's metadata supplies the right-hand side, so the comparison
+collapses into the predicate. That inversion is the general recipe for porting a classifier, and it is
+why the criteria language stays boolean.
 
 ### 13.4 One Accept, Two Declines
 
-All three cases below share one graph shape: a single `sdpa_fwd` node, Q/K/V/O rank-4, bf16, contiguous
-BHSD, `batch=2`, `num_heads=num_kv_heads=16`, `head_size=128`, `seqlen_q=seqlen_k=2048`,
+All three cases share one graph: a single `sdpa_fwd` node, Q/K/V/O rank-4, bf16, contiguous BHSD,
+`batch=2`, `num_heads=num_kv_heads=16`, `head_size=128`, `seqlen_q=seqlen_k=2048`,
 `compute_data_type=FLOAT`, `mma_core_mode=UNSET`, `implementation=AUTO`, no optional tensors, no
-alibi/padding, dropout and scale unset. They differ only in the field named in each case.
+alibi/padding, dropout and scale unset. They differ only in the field named.
 
-**Case A: accept.** `causal_mask=true` (all other mask fields unset). `classifyMaskMode` returns
-`causal_top_left`; every §13.2 criterion passes; `translate()` builds a problem with
-`mask_mode="causal_top_left"`. `select()` then finds a catalog entry (§13.6's first sibling UKD)
-whose declared `head_size=128`, `dtype="bf16"`, `mask_mode="causal_top_left"` match exactly.
-`isApplicable` returns true.
+**Case A: accept.** `causal_mask=true`. Every §13.2 gate passes with `mask_mode` resolving to
+`causal_top_left`, and §13.6's first sibling UKD declares exactly that alongside `head_size=128` and
+`dtype="bf16"`. Applicable.
 
-**Case B: matcher-stage decline.** Same graph, but the caller also supplies an additive attention bias
-(`attn_mask_tensor_uid` set, i.e. `$attn_mask` bound). `none_of` in §13.2's gate #4 fails the instant
-that operand is present, before mask mode, dtype, or layout are even considered; `translate()` returns
-nullopt. `select()` never runs. This is one instance of the "none of a large optional set" shape
-(§13.2); binding any other one of the 23 (varlen seqlens, dropout seed, paged-KV tables, a block mask,
-a sink token, FP8 descale/scale, a stats/LSE/max/sum_exp output, an RNG dump, an FP8 amax output)
-declines the same way, at the same gate.
+**Case B: matcher decline.** Same graph plus an additive attention bias, so `$attn_mask` is bound.
+Gate #4's `none_of` fails the moment that operand is present, before mask mode, dtype, or layout are
+considered. Any of the other 22 optional operands declines identically, and so does
+`$graph.override_shape` at gate #1, which rejects before any tensor is bound because a prebuilt kernel
+serves one fixed compile-time shape.
 
-The graph-level flag (`$graph.override_shape`, §13.2's gate #1) declines the identical way: if the
-caller enables execute-time override shapes, `translate()` declines before any tensor is even bound,
-because a prebuilt kernel serves one fixed compile-time shape and an override shape can diverge from it.
-This is the third decline shape distinct from a tensor-presence or a tri-state check: a plain fact about
-the graph itself, outside both the tensor and attribute namespaces, proving `$graph.*` is not limited to
-topology counts.
-
-**Case C: catalog-stage decline.** Same graph, but instead of `causal_mask`, the caller sets
-`left_bound=64, right_bound=64` (a finite window on both sides). Every §13.2 criterion still passes:
-this is not a contradiction, and `left==-1 && right==0` does not hold, so per §13.3's branch 6,
-`classifyMaskMode` returns `"sliding_window"`, a legal member of the `in` list at gate #21.
-`translate()` **accepts**, building a problem with `mask_mode="sliding_window"`. `select()` then filters
-the pack's catalog for a kernel declaring `mask_mode="sliding_window"`: neither sibling UKD in §13.6
-declares it (both declare `causal_top_left`), and no other kernel in this KDP does either. `select()`
-returns nullopt for want of a matching catalog entry, not because any criterion failed. `isApplicable`
-is false, and the reason lives entirely in the kernel vector's declared metadata, invisible to anyone
-reading only the matcher. This is why §13.1 calls the catalog part of the contract: a KDP author who
-adds a `sliding_window`-capable kernel later needs no matcher change at all, only a new entry in
-`kernelDescriptors`.
+**Case C: catalog decline.** Same graph, but `left_bound=64, right_bound=64`. Every gate still passes:
+a finite window on both sides is branch 6, so the matcher accepts with `mask_mode` = `sliding_window`.
+No kernel in the pack declares that mode, so the catalog is empty and the engine is not applicable.
+Nothing failed; the kernel vector simply does not cover this graph yet, which is what §13.1 means by
+the catalog carrying its share of the contract. Adding a `sliding_window` kernel later needs a new
+entry in `kernelDescriptors` and no matcher change.
 
 ### 13.5 Dispatch Geometry from `$kernel.*`
 
-The launch geometry rocKE actually uses is not a formula over graph dims; it is the output of
-measured-threshold branching over the problem shape (`_select_2d_num_warps`,
-`kernels/common/attention_unified.py:719-948`), fixed per kernel once built. Its dispatcher already draws
-the same line for the tiling it does carry, marking its `CompileSpec` block-size fields
-"kernel-internal tiling and are NOT part of selection" (`AotInstance.hpp:65-67`); `num_warps` and
-`tile_size` are the analogous quantities one layer up, in the kernel build spec. That is exactly KMD
-territory, not a UDD formula to derive: each measured cohort becomes
-its own UKD, carrying its own `num_warps`, `block_m_per_warp`, `tile_size` as ordinary metadata, and the
-UDD's grid/block formulas read those values through `$kernel.*` instead of hard-coding a thread count:
+rocKE's launch geometry is not a formula over graph dims; it is the output of measured-threshold
+branching over the problem shape (`_select_2d_num_warps`,
+`kernels/common/attention_unified.py:719-948`), fixed per kernel once built. That is KMD territory
+rather than a UDD formula ([Section 6](#6-dispatch-and-workspace)): each measured cohort becomes its
+own UKD carrying `num_warps`, `block_m_per_warp`, and `tile_size` as metadata, and the UDD reads them
+through `$kernel.*` instead of hard-coding a thread count:
 
 ```jsonc
 {
@@ -1654,13 +1630,10 @@ UDD's grid/block formulas read those values through `$kernel.*` instead of hard-
 }
 ```
 
-`grid` and `block` are now genuine formulas: arithmetic over `$kernel.num_warps`,
-`$kernel.block_m_per_warp`, and `$device.warp_size`, exactly as [Section 6](#6-dispatch-and-workspace)
-already describes for `$kernel.*` in a UDD. What is **not** a formula, and is not meant to be, is which
-`(num_warps, block_m_per_warp, tile_size)` triple a given problem shape should use; that selection stays
-UHD territory, trained on the same sweeps rocKE's threshold branches were tuned against. One UDD, shared
-by the whole pack, now expresses geometry for every kernel whose metadata differs; §13.6 shows two such
-kernels sharing it.
+What is **not** a formula, and is not meant to be, is which `(num_warps, block_m_per_warp, tile_size)`
+triple a given problem shape should use. That stays UHD territory, trained on the same sweeps rocKE's
+threshold branches were tuned against. One UDD shared by the pack expresses geometry for every kernel
+whose metadata differs; §13.6 shows two such kernels sharing it.
 
 ### 13.6 The Engine, Metadata, and Kernel Vector
 
@@ -1731,28 +1704,23 @@ kernels sharing it.
 | argument wiring | UDD `args_signature[].source` | §13.5 |
 | module load and launch | the generic launcher | `kernel_source: kpack` paired with the UDD |
 
-The generic launcher runs either sibling kernel with no SDPA-specific code, decline is handled the same
-way whether it happens in the matcher or the catalog, and a third measured cohort, or a `sliding_window`
-kernel, is one more entry in `kernelDescriptors`, reusing every matcher, the engine, and the UDD above.
-This descriptor set is what the phased delivery ([Section 14](#14-phased-delivery)) produces: the
-pieces land and are used to implement SDPA for rocKE as the first real target, and the existing
-hand-written engine is replaced by its descriptor-backed equivalent over time.
+The generic launcher runs either sibling kernel with no SDPA-specific code, and decline is handled the
+same way whether it happens in the matcher or the catalog.
 
 ### 13.8 What an Author Actually Writes
 
-The example above is the whole system; this is the much smaller slice a kernel author touches. Adding
-one kernel to an **existing** engine, the common case, is a single UKD:
+The example above is the whole system; this is the slice a kernel author touches. Adding one kernel to
+an **existing** engine, the common case, is a single UKD:
 
-1. Build the kernel and get a code object into a pack the provider can load ([Section 7](#7-kernel-source)).
-2. Write one UKD: an `id`, a `name`, a `kernel_source` pointing at that symbol, and a value for each
-   field the engine's KMD declares. The metadata values must not duplicate an existing kernel's
+1. Build the kernel into a pack the provider can load ([Section 7](#7-kernel-source)).
+2. Write one UKD: an `id`, a `name`, a `kernel_source` naming that symbol, and a value for each field
+   the engine's KMD declares, distinct from every existing kernel's
    ([Section 4](#4-descriptor-formats)).
 3. Add it to a KDP's `kernelDescriptors`, or ship it as a drop-in pack
    ([Section 12](#12-packaging-and-delivery)).
 
-Nothing else. No matcher, no dispatch, no engine, no heuristic: the pack supplies the first two and the
-engine the last two, which is what makes a sibling kernel a few lines rather than a new file set. The
-two kernels in §13.6 differ only in their metadata values and their symbols.
+No matcher, no dispatch, no engine, no heuristic: the pack supplies the first two and the engine the
+last two. The two kernels in §13.6 differ only in their metadata values and their symbols.
 
 Wider changes cost more, in proportion to what they change:
 
