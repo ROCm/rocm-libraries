@@ -64,7 +64,7 @@ BenchmarkProblems:
         - HalfPLR: [1,2,3]
         - TDMIterateMode: [1]
           #- TDMSplit: [False,True]
-        - PrefetchGL2: [0]
+        - PrefetchGL2: [0,1]
         - TransposeLDS: [-1]
         - LdsPadA: [-1]
         - LdsPadB: [-1]
@@ -75,7 +75,7 @@ BenchmarkProblems:
         - LdsBlockSizePerPadMXSA: [-1]
         - LdsBlockSizePerPadMXSB: [-1]
         - LDSTrInst: [False]
-        - StaggerU: [16]
+        - StaggerU: [0]
         - ScheduleIterAlg: [4]
         - PrefetchLocalRead: [1]
         - PrefetchGlobalRead: [2]
@@ -89,11 +89,9 @@ BenchmarkProblems:
         - LocalReadVectorWidth: [-1]
         - 1LDSBuffer: [0]
         - SourceSwap: [True]
-        - ClusterDim: [[1,1]]
+        - ClusterDim: [[2,4],[4,2],[4,4]]
         - LDSSegmentInterleave: [1]
-        - WorkGroupMapping: [1,8,16]
-          #- WorkGroupMappingXCC: [32]
-          #- WorkGroupMappingXCCGroup: [256]
+        - WorkGroupMapping: [1]
         - StoreVectorWidth: [-1]
         - WavefrontSize: [32]
         - ExpandPointerSwap: [False]
@@ -114,4 +112,4 @@ BenchmarkProblems:
 #    LibraryType: "GridBased"
 #
 #LibraryClient:
-#
+
