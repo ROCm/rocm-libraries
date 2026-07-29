@@ -4,9 +4,9 @@
 
 .. _pass-by-value-tensors:
 
-*****************************
-Use pass-by-value tensors
-*****************************
+************************************
+Use pass-by-value tensors in hipDNN
+************************************
 
 Several hipDNN operations accept scalar parameters — such as **epsilon** and **momentum** for
 batch normalization — as pass-by-value tensors rather than device buffers. hipDNN supports two
