@@ -912,6 +912,7 @@ def supports_tiled_2d(
     use_k_single_buffer: bool = False,
     use_conflict_free_v_store: bool = False,
     use_k_sliced_ring: bool = False,
+    use_d256_fast: bool = False,
 ) -> Tuple[bool, str]:
     # ``block_m_per_warp`` and the ``use_mfma_32x32x8`` /
     # ``use_transposed_qk_32x32`` / ``use_k_single_buffer`` /

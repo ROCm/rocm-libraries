@@ -24,7 +24,7 @@
 #include <cstdio>
 
 // Device-side detection of library misuse (e.g. destroying a still-joinable
-// hip::thread, recursive-locking a non-recursive mutex, unlocking a mutex the
+// hip::wthread, recursive-locking a non-recursive mutex, unlocking a mutex the
 // caller does not own). These conditions used to be guarded by assert(), which
 // is compiled out under NDEBUG, so in release builds misuse silently became
 // undefined behavior (UB / livelock / state corruption). The hook below detects

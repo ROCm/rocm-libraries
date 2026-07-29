@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2020-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -30,7 +30,6 @@
 
 // HIP API
 #include <hipcub/device/device_histogram.hpp>
-#include <hipcub/iterator/transform_input_iterator.hpp>
 
 #ifndef DEFAULT_N
 const size_t DEFAULT_N = 1024 * 1024 * 32;
@@ -54,7 +53,7 @@ std::vector<T>
     std::default_random_engine gen(rd());
     std::vector<T>             data(size);
     std::generate(data.begin(),
-                  data.begin() + std::min(size, max_random_size),
+                  data.begin() + _HIPCUB_STD::min(size, max_random_size),
                   [&]()
                   {
                       // Reduce entropy by applying bitwise AND to random bits
@@ -69,7 +68,7 @@ std::vector<T>
                   });
     for(size_t i = max_random_size; i < size; i += max_random_size)
     {
-        std::copy_n(data.begin(), std::min(size - i, max_random_size), data.begin() + i);
+        std::copy_n(data.begin(), _HIPCUB_STD::min(size - i, max_random_size), data.begin() + i);
     }
     return data;
 }
@@ -464,7 +463,7 @@ struct num_limits
 {
     static constexpr T max()
     {
-        return std::numeric_limits<T>::max();
+        return _HIPCUB_STD::numeric_limits<T>::max();
     };
 };
 
