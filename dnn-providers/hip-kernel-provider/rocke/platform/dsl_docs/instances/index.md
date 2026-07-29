@@ -25,6 +25,17 @@ Atom set: `16x16x16`, `16x16x32`, `32x32x8`, `32x32x16` f16.
 
 Pipelines: `mem`, `compv3`, `compv4`. Epilogues: `default`, `cshuffle`. Layout: `RCR`.
 
+Quantized-weight GEMM:
+[`matmul_nbits.py`](../../python/rocke/instances/common/matmul_nbits.py) ships
+`MatMulNBitsSpec` for fp16 activations and packed-int4 weights with group size
+32. Its validator accepts gfx1151 and gfx1201.
+
+Deep fusion:
+[`deep_fused_conv_pool.py`](../../python/rocke/instances/common/deep_fused_conv_pool.py)
+ships the conv -> epilogue -> conv -> maxpool prototype. gfx950 and gfx1201 use
+the shared target-selected `MmaOp` body; gfx1151 has a target-specific
+implementation.
+
 ## Convolution Family
 
 | File | Spec | Doc |

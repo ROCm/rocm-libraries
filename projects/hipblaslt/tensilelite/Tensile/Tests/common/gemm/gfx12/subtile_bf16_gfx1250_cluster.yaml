@@ -64,9 +64,10 @@ BenchmarkProblems:
       JoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          # MT 64x64, ClusterDim 2x2: every size yields an even WG grid
-          # (ceil(M/64) and ceil(N/64) both divisible by 2), as required by the
-          # host ClusterDimCheck launch predicate.
+          # MT 64x64, ClusterDim 2x2: these sizes yield an even WG grid
+          # (ceil(M/64) and ceil(N/64) both divisible by 2). Non-multiple grids
+          # are also supported (padded up + padded WGs early-exit); these cases
+          # cover the divisible path.
           - Exact: [128, 128, 1, 128]  # WG 2x2, aligned
           - Exact: [96,  96,  1, 128]  # WG 2x2, mult-of-32 edge
           - Exact: [256, 256, 1, 256]  # WG 4x4, larger K
