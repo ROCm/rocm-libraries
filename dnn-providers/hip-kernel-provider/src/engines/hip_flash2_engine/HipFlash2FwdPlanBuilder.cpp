@@ -67,7 +67,7 @@ bool HipFlash2FwdPlanBuilder::isApplicable(const Handle& handle,
     HIP_KERNEL_RETURN_FALSE_IF(attrs.page_table_k_tensor_uid(), "page_table_k not supported");
     HIP_KERNEL_RETURN_FALSE_IF(attrs.page_table_v_tensor_uid(), "page_table_v not supported");
     HIP_KERNEL_RETURN_FALSE_IF(attrs.generate_stats().value_or(false),
-        "LSE stats output not supported");
+                               "LSE stats output not supported");
     HIP_KERNEL_RETURN_FALSE_IF(attrs.seq_len_q_tensor_uid().has_value()
                                    || attrs.seq_len_kv_tensor_uid().has_value(),
                                "variable-length (group) batch mode not supported");

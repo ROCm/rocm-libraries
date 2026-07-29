@@ -94,8 +94,7 @@ protected:
 
         auto validationResult = graph->validate();
         ASSERT_TRUE(validationResult.is_good())
-            << "Graph validation failed for " << cfg.name << ": "
-            << validationResult.get_message();
+            << "Graph validation failed for " << cfg.name << ": " << validationResult.get_message();
 
         // Register O for comparison against CPU reference
         this->registerValidator(O, tolerance);
