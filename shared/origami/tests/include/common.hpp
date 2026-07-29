@@ -147,6 +147,18 @@ inline origami::hardware_t make_hardware(int gpu_arch) {
     compute_clock_ghz          = 1.2;
     parallel_mi_cu             = 1;
     mem_bw_per_wg_coefficients = std::make_tuple(0, 0.008, 0);
+  } else if (gpu_arch == 1100) {
+    n_cu                       = 96;
+    lds_capacity               = 65536;
+    rf_capacity                = 256 * 1024;
+    num_xcd                    = 1;
+    mem1_perf_ratio            = 7.12;
+    mem2_perf_ratio            = 1.21875 * 3.48;
+    mem3_perf_ratio            = 0.732;
+    l2_capacity                = 6 * 1024 * 1024;
+    compute_clock_ghz          = 2.3;
+    parallel_mi_cu             = 2;
+    mem_bw_per_wg_coefficients = std::make_tuple(0, 0.11, 0);
   } else if(gpu_arch == 1250) {
     // TODO: using gfx950 placeholders for most fields, update lds_capacity and l2_capacity later
     auto hw = make_hardware(950);

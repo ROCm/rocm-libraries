@@ -1931,6 +1931,48 @@ double compute_total_latency(const problem_t& problem,
   double L_parallel_reduce = compute_parallel_reduction_latency(problem, hardware, config, context);
   total_latency += L_parallel_reduce;
 
+  // 5) Optional resource/edge correction. Defaults are inert. This block is
+  // deliberately limited to gfx1100 HHS TN StreamK=3 until calibrated and
+  // validated for other architectures/problem types.
+  const auto heuristic = get_heuristic_params(problem, hardware, config);
+  const bool targeted = hardware.arch == hardware_t::architecture_t::gfx1100 &&
+                        problem.a_dtype == data_type_t::Half &&
+                        problem.b_dtype == data_type_t::Half &&
+                        problem.a_transpose == transpose_t::T &&
+                        problem.b_transpose == transpose_t::N &&
+                        config.has_tensile_params() && config.tensile().stream_k == 3;
+  if (targeted) {
+    const auto& tensile = config.tensile();
+    if (heuristic.resource_residency_weight > 0.0 && tensile.compiled_cu_occupancy > 0) {
+      const double residency = static_cast<double>(tensile.compiled_cu_occupancy);
+      const double deficit = std::max(0.0, heuristic.resource_residency_target / residency - 1.0);
+      total_latency *= 1.0 + heuristic.resource_residency_weight * deficit;
+    }
+    const double util_m = std::min(1.0, static_cast<double>(M) / static_cast<double>(MT_M));
+    const double util_n = std::min(1.0, static_cast<double>(N) / static_cast<double>(MT_N));
+    const double output_waste = 1.0 - util_m * util_n;
+    const double depth_waste =
+        1.0 - std::min(1.0, static_cast<double>(K) / static_cast<double>(MT_K));
+    total_latency *= 1.0 + heuristic.edge_tile_penalty_weight * output_waste +
+                     heuristic.depth_u_edge_weight * depth_waste;
+
+    // Deep reductions can amortize the extra buffering of a fully pipelined
+    // PGR/PLR main loop. Scale the benefit smoothly by K iterations so it is
+    // inert for shallow reductions, and constrain it to [1/(1+w), 1].
+    if (heuristic.deep_k_pipeline_weight > 0.0 && tensile.prefetch_global_read > 0 &&
+        tensile.prefetch_local_read > 0 && tensile.depth_u > 0) {
+      const double iterations =
+          static_cast<double>(K) / static_cast<double>(tensile.depth_u);
+      const double depth_saturation = std::max(0.0, (iterations - 1.0) / iterations);
+      const double global_pipeline =
+          std::min(1.0, static_cast<double>(tensile.prefetch_global_read) / 2.0);
+      const double local_pipeline =
+          std::min(1.0, static_cast<double>(tensile.prefetch_local_read));
+      const double pipeline_strength = depth_saturation * global_pipeline * local_pipeline;
+      total_latency /= 1.0 + heuristic.deep_k_pipeline_weight * pipeline_strength;
+    }
+  }
+
   if (context.debug) {
     OLOG_DEBUG("L_parallel_reduce: " << L_parallel_reduce);
     OLOG_DEBUG("total_latency: " << total_latency);

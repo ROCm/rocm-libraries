@@ -63,6 +63,13 @@ void heuristic_params_t::merge_with(const heuristic_params_t& other) {
   // Main loop efficiency
   main_loop_efficiency = other.main_loop_efficiency;
 
+  // Resource and edge terms
+  resource_residency_weight = other.resource_residency_weight;
+  resource_residency_target = other.resource_residency_target;
+  edge_tile_penalty_weight  = other.edge_tile_penalty_weight;
+  depth_u_edge_weight       = other.depth_u_edge_weight;
+  deep_k_pipeline_weight    = other.deep_k_pipeline_weight;
+
   // Kernel rejection
   reject = other.reject;
 }
@@ -131,6 +138,13 @@ heuristics_database_t::heuristics_database_t() { initialize_defaults(); }
 heuristics_database_t& heuristics_database_t::get_instance() {
   static heuristics_database_t instance;
   return instance;
+}
+
+void heuristics_database_t::reset_defaults() {
+  entries_.clear();
+  hand_optimized_map_.clear();
+  default_params_ = heuristic_params_t{};
+  initialize_defaults();
 }
 
 /**
@@ -282,6 +296,42 @@ bool heuristics_database_t::has_hand_optimized_entry(hardware_t::architecture_t 
 }
 
 void heuristics_database_t::initialize_defaults() {
+  // ========================================================================
+  // gfx1100 HHS-TN Resource/Edge v1 (StreamK=3 formula gate in gemm.cpp)
+  // Model: fresh-model/resource-v1 seed 3300
+  // Source SHA-256: 218e1a8bef642cfd526276021da4d85af85810a1a81384dc8ea332bdc0f84242
+  // Fitted on core DEV and selected on an independent acquired-DEV panel.
+  // These weights are frozen for the guided kernel-catalog and E2E campaign.
+  // ========================================================================
+  {
+    heuristic_key_t key;
+    key.arch        = hardware_t::architecture_t::gfx1100;
+    key.a_dtype     = data_type_t::Half;
+    key.b_dtype     = data_type_t::Half;
+    key.mi_dtype    = data_type_t::Half;
+    key.a_transpose = transpose_t::T;
+    key.b_transpose = transpose_t::N;
+
+    heuristic_params_t params;
+    params.depth_u_edge_weight            = 3.923640703044928;
+    params.edge_tile_penalty_weight       = 5.191999760573993;
+    params.epilogue_cycles_per_acc_read   = 31.64007035926588;
+    params.main_memory_load_latency       = 248.45772812159083;
+    params.occupancy_decay_base           = 0.6383476252402018;
+    params.resource_residency_target      = 2.316770847186393;
+    params.resource_residency_weight      = 0.498023658223131;
+    params.weight_compute                 = 0.44685841231661577;
+    params.weight_epilogue                = 0.8797164319485722;
+    params.weight_loop_overhead           = 223.12499489944884;
+    params.weight_mem_dram                = 0.24437313100319394;
+    params.weight_mem_l2                  = 1.9070802956673185;
+    params.weight_mem_mall                = 0.9794372170266592;
+    params.weight_memory                  = 0.061263078769635354;
+    params.weight_prologue                = 1.2920239843500416;
+    params.weight_wg_setup                = 0.17738548307022806;
+    add_entry(key, params);
+  }
+
   // ========================================================================
   // HEURISTIC 1: Problematic tile configuration (MT64x32x32)
   // ========================================================================

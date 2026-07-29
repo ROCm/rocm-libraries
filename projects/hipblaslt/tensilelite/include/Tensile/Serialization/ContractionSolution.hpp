@@ -151,6 +151,17 @@ namespace TensileLite
                 iot::mapRequired(io, "DirectToLdsA", s.DirectToLdsA);
                 iot::mapRequired(io, "DirectToLdsB", s.DirectToLdsB);
                 iot::mapOptional(io, "ExpertSchedulingMode", s.expertSchedulingMode);
+                iot::mapOptional(io, "scheduleIterAlg", s.scheduleIterAlg);
+                iot::mapOptional(io, "prefetchLocalRead", s.prefetchLocalRead);
+                iot::mapOptional(io, "oneLDSBuffer", s.oneLDSBuffer);
+                iot::mapOptional(io, "transposeLDS", s.transposeLDS);
+                iot::mapOptional(io, "sourceSwap", s.sourceSwap);
+                iot::mapOptional(io, "localReadVectorWidth", s.localReadVectorWidth);
+                iot::mapOptional(io, "totalVgprs", s.totalVgprs);
+                iot::mapOptional(io, "accumulatorVgprs", s.accumulatorVgprs);
+                iot::mapOptional(io, "totalSgprs", s.totalSgprs);
+                iot::mapOptional(io, "ldsBytes", s.ldsBytes);
+                iot::mapOptional(io, "scratchBytes", s.scratchBytes);
                 iot::mapOptional(io, "clusterDim", s.clusterDim);
             }
 

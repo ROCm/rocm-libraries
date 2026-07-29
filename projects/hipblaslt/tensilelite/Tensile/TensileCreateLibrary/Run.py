@@ -144,12 +144,22 @@ class KernelCodeGenResult(NamedTuple):
     cuoccupancy: int
     pgr: int
     mathclk: int
+    totalVgprs: int = 0
+    accumulatorVgprs: int = 0
+    totalSgprs: int = 0
+    ldsBytes: int = 0
+    scratchBytes: int = 0
 
 class KernelMinResult(NamedTuple):
     err: int
     cuoccupancy: int
     pgr: int
     mathclk: int
+    totalVgprs: int = 0
+    accumulatorVgprs: int = 0
+    totalSgprs: int = 0
+    ldsBytes: int = 0
+    scratchBytes: int = 0
 
 
 def _stinky_asm_verify_wanted(isa: IsaVersion) -> bool:
@@ -240,7 +250,12 @@ def processKernelSource(kernelWriterAssembly, data, outOptions, splitGSU, kernel
     return KernelCodeGenResult(
         err, src, header, asmFilename, objFilename, tuple(kernel["ISA"]), \
         kernel["WavefrontSize"], cuocc, \
-        pgr, kernel["MathClocksUnrolledLoop"]
+        pgr, kernel["MathClocksUnrolledLoop"], \
+        int(kernel.get("TotalVgprs", 0)), \
+        int(kernel.get("AccumulatorVgprs", 0)), \
+        int(kernel.get("TotalSgprs", 0)), \
+        int(kernel.get("LdsNumBytes", 0)), \
+        int(kernel.get("ScratchBytes", 0))
     )
 
 def _checkInvalidSolutionsAndKernels(errorTolerant, result, kernel):
@@ -308,6 +323,11 @@ def passPostKernelInfoToSolution(results, kernels, solutions, splitGSU: bool):
             solution._state["CUOccupancy"] = result.cuoccupancy
             solution._state["PrefetchGlobalRead"] = result.pgr
             solution._state["MathClocksUnrolledLoop"] = result.mathclk
+            solution._state["TotalVgprs"] = result.totalVgprs
+            solution._state["AccumulatorVgprs"] = result.accumulatorVgprs
+            solution._state["TotalSgprs"] = result.totalSgprs
+            solution._state["LdsNumBytes"] = result.ldsBytes
+            solution._state["ScratchBytes"] = result.scratchBytes
 
 def passPostKernelInfoToLibrary(results, kernels, masterLibraries, splitGSU: bool):
     resultDict = {}
@@ -323,7 +343,19 @@ def passPostKernelInfoToLibrary(results, kernels, masterLibraries, splitGSU: boo
                     result = resultDict["%s"%kName]
                     sol.sizeMapping.CUOccupancy = result.cuoccupancy
                     sol.sizeMapping.MathClocksUnrolledLoop = result.mathclk
+                    sol.sizeMapping.totalVgprs = result.totalVgprs
+                    sol.sizeMapping.accumulatorVgprs = result.accumulatorVgprs
+                    sol.sizeMapping.totalSgprs = result.totalSgprs
+                    sol.sizeMapping.ldsBytes = result.ldsBytes
+                    sol.sizeMapping.scratchBytes = result.scratchBytes
                     sol.sizeMapping.PrefetchGlobalRead = sol.originalSolution._state['PrefetchGlobalRead']
+                    sol.sizeMapping.scheduleIterAlg = int(sol.originalSolution._state.get(
+                        '_ScheduleIterAlg', sol.originalSolution._state.get('ScheduleIterAlg', 0)))
+                    sol.sizeMapping.prefetchLocalRead = int(sol.originalSolution._state.get('PrefetchLocalRead', 0))
+                    sol.sizeMapping.oneLDSBuffer = bool(sol.originalSolution._state.get('1LDSBuffer', 0))
+                    sol.sizeMapping.transposeLDS = int(sol.originalSolution._state.get('TransposeLDS', 0))
+                    sol.sizeMapping.sourceSwap = bool(sol.originalSolution._state.get('SourceSwap', False))
+                    sol.sizeMapping.localReadVectorWidth = int(sol.originalSolution._state.get('LocalReadVectorWidth', 0))
                     sol.sizeMapping.NonTemporalA = sol.originalSolution._state['NonTemporalA']
                     sol.sizeMapping.NonTemporalB = sol.originalSolution._state['NonTemporalB']
                     sol.sizeMapping.adaptiveGemmNTAB = sol.originalSolution._state.get('AdaptiveGemmNTAB', 0)
@@ -353,7 +385,19 @@ def passPostKernelInfoToLibrary(results, kernels, masterLibraries, splitGSU: boo
                         result = resultDict["%s"%kName]
                         sol.sizeMapping.CUOccupancy = result.cuoccupancy
                         sol.sizeMapping.MathClocksUnrolledLoop = result.mathclk
+                        sol.sizeMapping.totalVgprs = result.totalVgprs
+                        sol.sizeMapping.accumulatorVgprs = result.accumulatorVgprs
+                        sol.sizeMapping.totalSgprs = result.totalSgprs
+                        sol.sizeMapping.ldsBytes = result.ldsBytes
+                        sol.sizeMapping.scratchBytes = result.scratchBytes
                         sol.sizeMapping.PrefetchGlobalRead = sol.originalSolution._state['PrefetchGlobalRead']
+                        sol.sizeMapping.scheduleIterAlg = int(sol.originalSolution._state.get(
+                            '_ScheduleIterAlg', sol.originalSolution._state.get('ScheduleIterAlg', 0)))
+                        sol.sizeMapping.prefetchLocalRead = int(sol.originalSolution._state.get('PrefetchLocalRead', 0))
+                        sol.sizeMapping.oneLDSBuffer = bool(sol.originalSolution._state.get('1LDSBuffer', 0))
+                        sol.sizeMapping.transposeLDS = int(sol.originalSolution._state.get('TransposeLDS', 0))
+                        sol.sizeMapping.sourceSwap = bool(sol.originalSolution._state.get('SourceSwap', False))
+                        sol.sizeMapping.localReadVectorWidth = int(sol.originalSolution._state.get('LocalReadVectorWidth', 0))
                         sol.sizeMapping.NonTemporalA = sol.originalSolution._state['NonTemporalA']
                         sol.sizeMapping.NonTemporalB = sol.originalSolution._state['NonTemporalB']
                         sol.sizeMapping.adaptiveGemmNTAB = sol.originalSolution._state.get('AdaptiveGemmNTAB', 0)
@@ -388,7 +432,17 @@ def writeAssembly(asmPath: Union[Path, str], result: KernelCodeGenResult):
             src = memDecompress(src)
         f.write(src)
 
-    minResult = KernelMinResult(result.err, result.cuoccupancy, result.pgr, result.mathclk)
+    minResult = KernelMinResult(
+        result.err,
+        result.cuoccupancy,
+        result.pgr,
+        result.mathclk,
+        result.totalVgprs,
+        result.accumulatorVgprs,
+        result.totalSgprs,
+        result.ldsBytes,
+        result.scratchBytes,
+    )
     return path, isa, wfsize, minResult
 
 def writeHelpers(

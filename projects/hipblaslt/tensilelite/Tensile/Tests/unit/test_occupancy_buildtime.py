@@ -483,3 +483,6 @@ class TestUpdateOccupancyFromMaxVgprO1Path:
         assert mkb.set_gprs_called
         assert mkb.set_gprs_kwargs["totalVgprs"] == 10
         assert mkb.set_gprs_kwargs["totalAgprs"] == 256
+        assert kernel["TotalVgprs"] == 10
+        assert kernel["AccumulatorVgprs"] == 256
+        assert kernel["TotalSgprs"] == 64

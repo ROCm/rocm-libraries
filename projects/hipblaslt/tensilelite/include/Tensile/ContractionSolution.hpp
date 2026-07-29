@@ -197,6 +197,22 @@ namespace TensileLite
 
         int expertSchedulingMode = 0;
 
+        // Main-loop scheduling metadata used by analytical prediction.
+        int  scheduleIterAlg       = 0;
+        int  prefetchLocalRead     = 0;
+        bool oneLDSBuffer          = false;
+        int  transposeLDS          = 0;
+        bool sourceSwap            = false;
+        int  localReadVectorWidth  = 0;
+
+        // Generated resource metadata used by Origami prediction. Zero means
+        // unavailable, not a measured zero-resource kernel.
+        int    totalVgprs       = 0;
+        int    accumulatorVgprs = 0;
+        int    totalSgprs       = 0;
+        size_t ldsBytes         = 0;
+        size_t scratchBytes     = 0;
+
         std::array<int, 2> waveGroup;
     };
 
@@ -240,6 +256,8 @@ namespace TensileLite
             FreeSize, // FreeSizeMatching
             GridBased, // GridBasedMatching
             Prediction, // PredictionMatching
+            FixedLinearArbiter, // Frozen two-candidate linear arbitration
+            FixedLinearCatalog, // Frozen linear ranking over one complete catalog
             Experimental, // ExperimentalStreamK or ExperimentalMLP
             Others, // Default
         };

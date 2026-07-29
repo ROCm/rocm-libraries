@@ -136,6 +136,24 @@ NB_MODULE(origami, m) {
       .def_rw("wave_group_n", &origami::tensile_params_t::wave_group_n)
       .def_rw("prefetch_global_read", &origami::tensile_params_t::prefetch_global_read)
       .def_rw("math_clocks_unrolled_loop", &origami::tensile_params_t::math_clocks_unrolled_loop)
+      .def_rw("stream_k", &origami::tensile_params_t::stream_k)
+      .def_rw("stream_k_force_dp_only", &origami::tensile_params_t::stream_k_force_dp_only)
+      .def_rw("stream_k_fixup_tree", &origami::tensile_params_t::stream_k_fixup_tree)
+      .def_rw("schedule_iter_alg", &origami::tensile_params_t::schedule_iter_alg)
+      .def_rw("prefetch_local_read", &origami::tensile_params_t::prefetch_local_read)
+      .def_rw("one_lds_buffer", &origami::tensile_params_t::one_lds_buffer)
+      .def_rw("transpose_lds", &origami::tensile_params_t::transpose_lds)
+      .def_rw("stagger_u", &origami::tensile_params_t::stagger_u)
+      .def_rw("stagger_u_mapping", &origami::tensile_params_t::stagger_u_mapping)
+      .def_rw("source_swap", &origami::tensile_params_t::source_swap)
+      .def_rw("local_read_vector_width", &origami::tensile_params_t::local_read_vector_width)
+      .def_rw("lds_bytes", &origami::tensile_params_t::lds_bytes)
+      .def_rw("total_vgprs", &origami::tensile_params_t::total_vgprs)
+      .def_rw("accumulator_vgprs", &origami::tensile_params_t::accumulator_vgprs)
+      .def_rw("total_sgprs", &origami::tensile_params_t::total_sgprs)
+      .def_rw("scratch_bytes", &origami::tensile_params_t::scratch_bytes)
+      .def_rw("threads_per_workgroup", &origami::tensile_params_t::threads_per_workgroup)
+      .def_rw("compiled_cu_occupancy", &origami::tensile_params_t::compiled_cu_occupancy)
       .def_rw("swizzle_a", &origami::tensile_params_t::swizzle_a)
       .def_rw("swizzle_b", &origami::tensile_params_t::swizzle_b)
       .def_rw("workgroup_mapping_xcc", &origami::tensile_params_t::workgroup_mapping_xcc)
@@ -165,6 +183,7 @@ NB_MODULE(origami, m) {
       .def_rw("gwvw_d", &origami::config_t::gwvw_d)
       .def_rw("vector_width_a", &origami::config_t::vector_width_a)
       .def_rw("vector_width_b", &origami::config_t::vector_width_b)
+      .def_rw("index", &origami::config_t::index)
       // Tensile-specific parameters accessed via variant backend
       .def("tensile",
            static_cast<origami::tensile_params_t& (origami::config_t::*)()>(
@@ -178,6 +197,59 @@ NB_MODULE(origami, m) {
           "set_tensile_params",
           [](origami::config_t& c, const origami::tensile_params_t& p) { c.backend = p; },
           "Set Tensile params from a tensile_params_t object");
+
+  nanobind::class_<origami::heuristic_params_t>(m, "heuristic_params_t")
+      .def(nanobind::init<>())
+      .def_rw("weight_mem_l2", &origami::heuristic_params_t::weight_mem_l2)
+      .def_rw("weight_mem_mall", &origami::heuristic_params_t::weight_mem_mall)
+      .def_rw("weight_mem_dram", &origami::heuristic_params_t::weight_mem_dram)
+      .def_rw("weight_compute", &origami::heuristic_params_t::weight_compute)
+      .def_rw("weight_memory", &origami::heuristic_params_t::weight_memory)
+      .def_rw("weight_wg_setup", &origami::heuristic_params_t::weight_wg_setup)
+      .def_rw("weight_prologue", &origami::heuristic_params_t::weight_prologue)
+      .def_rw("weight_epilogue", &origami::heuristic_params_t::weight_epilogue)
+      .def_rw("weight_loop_overhead", &origami::heuristic_params_t::weight_loop_overhead)
+      .def_rw("weight_tile_total", &origami::heuristic_params_t::weight_tile_total)
+      .def_rw("main_memory_load_latency", &origami::heuristic_params_t::main_memory_load_latency)
+      .def_rw("occupancy_decay_base", &origami::heuristic_params_t::occupancy_decay_base)
+      .def_rw("mall_depth_sq", &origami::heuristic_params_t::mall_depth_sq)
+      .def_rw("mall_cold_floor", &origami::heuristic_params_t::mall_cold_floor)
+      .def_rw("l2_depth_sq", &origami::heuristic_params_t::l2_depth_sq)
+      .def_rw("l2_cold_floor", &origami::heuristic_params_t::l2_cold_floor)
+      .def_rw("l2_pollution_penalty", &origami::heuristic_params_t::l2_pollution_penalty)
+      .def_rw("l2_amp_ceiling_batched", &origami::heuristic_params_t::l2_amp_ceiling_batched)
+      .def_rw("l2_amp_ceiling_k_split", &origami::heuristic_params_t::l2_amp_ceiling_k_split)
+      .def_rw("l2_amp_ceiling_skinny", &origami::heuristic_params_t::l2_amp_ceiling_skinny)
+      .def_rw("l2_depth_penalty", &origami::heuristic_params_t::l2_depth_penalty)
+      .def_rw("l1_hit_rate_ceiling_skinny", &origami::heuristic_params_t::l1_hit_rate_ceiling_skinny)
+      .def_rw("epilogue_cycles_per_acc_read", &origami::heuristic_params_t::epilogue_cycles_per_acc_read)
+      .def_rw("epilogue_acc_read_parallelism", &origami::heuristic_params_t::epilogue_acc_read_parallelism)
+      .def_rw("epilogue_cycles_per_bounds_check", &origami::heuristic_params_t::epilogue_cycles_per_bounds_check)
+      .def_rw("epilogue_scalar_store_penalty", &origami::heuristic_params_t::epilogue_scalar_store_penalty)
+      .def_rw("epilogue_salu_overhead", &origami::heuristic_params_t::epilogue_salu_overhead)
+      .def_rw("epilogue_l_barrier", &origami::heuristic_params_t::epilogue_l_barrier)
+      .def_rw("epilogue_l_smem", &origami::heuristic_params_t::epilogue_l_smem)
+      .def_rw("epilogue_k_padding_penalty", &origami::heuristic_params_t::epilogue_k_padding_penalty)
+      .def_rw("postgsu_kernel_launch_overhead", &origami::heuristic_params_t::postgsu_kernel_launch_overhead)
+      .def_rw("main_loop_efficiency", &origami::heuristic_params_t::main_loop_efficiency)
+      .def_rw("resource_residency_weight", &origami::heuristic_params_t::resource_residency_weight)
+      .def_rw("resource_residency_target", &origami::heuristic_params_t::resource_residency_target)
+      .def_rw("edge_tile_penalty_weight", &origami::heuristic_params_t::edge_tile_penalty_weight)
+      .def_rw("depth_u_edge_weight", &origami::heuristic_params_t::depth_u_edge_weight)
+      .def_rw("deep_k_pipeline_weight", &origami::heuristic_params_t::deep_k_pipeline_weight);
+
+  m.def("set_heuristic_defaults", [](const origami::heuristic_params_t& params) {
+    origami::heuristics_database_t::get_instance().set_default_params(params);
+  });
+  m.def("get_heuristic_defaults", []() {
+    return origami::heuristics_database_t::get_instance().get_default_params();
+  });
+  m.def("clear_heuristic_entries", []() {
+    origami::heuristics_database_t::get_instance().clear_general_entries();
+  });
+  m.def("reset_heuristics", []() {
+    origami::heuristics_database_t::get_instance().reset_defaults();
+  });
 
   nanobind::class_<origami::workgroup_mapping_t>(m, "workgroup_mapping_t")
       .def(nanobind::init<>())

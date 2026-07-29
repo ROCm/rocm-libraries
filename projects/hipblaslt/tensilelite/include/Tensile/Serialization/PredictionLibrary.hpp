@@ -29,6 +29,7 @@
 #include <Tensile/SingleSolutionLibrary.hpp>
 
 #include <Tensile/PredictionLibrary.hpp>
+#include <Tensile/OrigamiConfig.hpp>
 
 #include <Tensile/Debug.hpp>
 #include <tensilelitehost/export.h>
@@ -88,51 +89,8 @@ namespace TensileLite
                             auto solution = slnIter->second;
                             lib.solution_list.emplace_back(index, solution);
 
-                            origami::dim3_t origami_mi;
-                            if(solution->sizeMapping.matrixInstruction[0] == 0
-                               && solution->sizeMapping.matrixInstruction[1] == 0
-                               && solution->sizeMapping.matrixInstruction[2] == 0)
-                            {
-                                // Override dot2 instruction with vector lane widths
-                                origami_mi = {1, 1, 64};
-                            }
-                            else
-                            {
-                                origami_mi = {
-                                    static_cast<size_t>(solution->sizeMapping.matrixInstruction[0]),
-                                    static_cast<size_t>(solution->sizeMapping.matrixInstruction[1]),
-                                    static_cast<size_t>(
-                                        solution->sizeMapping.matrixInstruction[2])};
-                            }
-
-                            if(Debug::Instance().printPropertyEvaluation()
-                               && solution->sizeMapping.CUOccupancy <= 0)
-                            {
-                                std::cerr << "TensileLite::DEBUG: sizeMapping.CUOccupancy="
-                                          << solution->sizeMapping.CUOccupancy
-                                          << " (<=0) for solution '" << solution->kernelName
-                                          << "'; clamping to 1 in origami config.\n";
-                            }
-                            origami::config_t origami_config = {
-                                .mt = {solution->sizeMapping.macroTile.x,
-                                       solution->sizeMapping.macroTile.y,
-                                       solution->sizeMapping.depthU},
-                                .mi = origami_mi,
-                                .hand_optimized_main_loop
-                                = (solution->sizeMapping.customMainLoopScheduling > 0) ? true
-                                                                                       : false,
-                                .subtile                   = solution->sizeMapping.useSubtileImpl,
-                                .occupancy
-                                = std::max(solution->sizeMapping.CUOccupancy, static_cast<int>(1)),
-                                .workgroup_mapping         = solution->sizeMapping.workGroupMapping,
-                                .cache_hints_a             = solution->sizeMapping.nonTemporalA,
-                                .cache_hints_b             = solution->sizeMapping.nonTemporalB,
-                                .workspace_size            = std::numeric_limits<size_t>::max(),
-                                .workspace_size_per_elem_c = std::numeric_limits<size_t>::max(),
-                                .index                     = local_index,
-                            };
-
-                            lib.origami_config_list.emplace_back(origami_config);
+                            lib.origami_config_list.emplace_back(
+                                makeOrigamiConfig(*solution, local_index));
                         }
                     }
                 }
