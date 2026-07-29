@@ -218,6 +218,12 @@ class ImplicitGemmConvSpec:
     # It composes simple fp32 VALU transforms directly on MFMA accumulator
     # fragments before the existing direct/cshuffle store path.
     acc_epilogue: ConvAccumulatorEpilogue = ConvAccumulatorEpilogue()
+    # cshuffle epilogue LDS aliasing (same knob as UniversalGemmSpec.trait).
+    # False (default): the smem-pool packer aliases the cshuffle C tile onto the
+    # A/B staging bytes (pool = max(ab, c)) with a step-0 reuse barrier. True:
+    # C gets its own LDS bytes (pool = ab + c) and the barrier is elided ->
+    # lower small-tile latency, more LDS. Only affects epilogue == "cshuffle".
+    cshuffle_no_alias: bool = False
 
     @property
     def block_size(self) -> int:
@@ -253,7 +259,7 @@ class ImplicitGemmConvSpec:
             f"a{self.warp_tile_m}x{self.warp_tile_n}x{self.warp_tile_k}",
             f"{self.pipeline}_{self.epilogue}",
             self.acc_epilogue.tag(),
-            flags={"async": self.async_dma},
+            flags={"async": self.async_dma, "noalc": self.cshuffle_no_alias},
         )
 
     def validate(self) -> None:
@@ -303,6 +309,23 @@ class ImplicitGemmConvSpec:
         layout.validate()
         return layout
 
+    @staticmethod
+    def default_vector_sizes(C: int, K: int, dtype: str) -> "Tuple[int, int, int]":
+        """Return ``(vec_a, vec_b, vec_c)`` for a forward-pass problem.
+
+        Forward pass memory layout:
+          A (input):  NHWC → last dim C → vec_a
+          B (filter): KYXC → last dim C → vec_b
+          D (output): NHWK → last dim K → vec_c
+        """
+        sizes = [8, 4, 2, 1] if dtype != "fp32" else [4, 2, 1]
+
+        def _vec(n: int) -> int:
+            return next(v for v in sizes if n % v == 0)
+
+        vec_c = _vec(C)
+        return vec_c, vec_c, _vec(K)
+
 
 # ---------------------------------------------------------------------
 # Arch-aware spec validation
@@ -317,11 +340,29 @@ def is_valid_spec_for_problem(
     Extends :func:`is_valid_spec` with problem-aware checks — e.g. tile
     divisibility against the actual M / N_gemm / K_gemm dimensions,
     minimum occupancy constraints, or problem-specific LDS pressure.
-
-    Currently delegates entirely to :func:`is_valid_spec`; problem-aware
-    filters will be added here as they are identified.
     """
-    return is_valid_spec(spec, arch)
+    ok, reason = is_valid_spec(spec, arch)
+    if not ok:
+        return False, reason
+
+    # caps gridDim.y (and .x/.z) at 65535. The M-tile axis maps
+    # to gridDim.y so reject specs whose grid would silently truncate and
+    # leave output tiles unwritten.
+    _MAX_GRID_DIM = 65535
+    _grid_m = (problem.M + spec.tile_m - 1) // spec.tile_m
+    _grid_n = (problem.N_gemm + spec.tile_n - 1) // spec.tile_n
+    if _grid_m > _MAX_GRID_DIM:
+        return False, (
+            f"grid_m {_grid_m} > {_MAX_GRID_DIM} (hardware gridDim.y cap): "
+            f"M={problem.M} tile_m={spec.tile_m}"
+        )
+    if _grid_n > _MAX_GRID_DIM:
+        return False, (
+            f"grid_n {_grid_n} > {_MAX_GRID_DIM} (hardware gridDim.x cap): "
+            f"N_gemm={problem.N_gemm} tile_n={spec.tile_n}"
+        )
+
+    return True, "ok"
 
 
 def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[bool, str]:
@@ -405,7 +446,11 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
     _c_lds = (
         spec.tile_m * spec.tile_n * _c_dtype_bytes if spec.epilogue == "cshuffle" else 0
     )
-    _total_lds = _ab_lds + _c_lds
+    # cshuffle_no_alias decides whether the cshuffle C tile shares the A/B pool
+    # bytes, so the LDS budget must be computed per case:
+    #   OFF (default, aliased): C reuses the A/B bytes   -> pool = max(ab, c)
+    #   ON  (exclusive):        C gets its own LDS bytes -> pool = ab + c
+    _total_lds = (_ab_lds + _c_lds) if spec.cshuffle_no_alias else max(_ab_lds, _c_lds)
     if not target.fits_lds(_total_lds):
         return False, (
             f"LDS budget {_total_lds} bytes "
@@ -413,29 +458,26 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
             f"> {target.lds_capacity_bytes} cap on {arch}"
         )
 
-    # v1 pipeline uses the split emit_global_read/emit_lds_write path which
-    # is only available on the sync (non-async-DMA) CoalescedTileLoader path.
-    # async_dma uses raw_ptr_buffer_load_lds which atomically loads directly
-    # into LDS with no VGPR staging, making the split impossible.
-    if spec.pipeline == "v1" and spec.async_dma:
-        return False, "pipeline='v1' is incompatible with async_dma=True"
-
     # WMMA (RDNA wave32) coverage mirrors the unified GEMM's narrow subset: the
-    # 16x16x16 atom with the simple ``mem`` pipeline + ``default`` epilogue and
-    # synchronous descriptor-driven loads. The richer MFMA-shaped paths
-    # (compv3/compv4 scheduler interleave, cshuffle LDS-staged C, async DMA,
-    # K-unroll, chiplet swizzle, grouped conv) are gated off until ported.
+    # 16x16x16 atom (gfx11/gfx12) or 16x16x32 atom (gfx1250) with the simple
+    # ``mem`` pipeline + ``default`` epilogue and synchronous descriptor-driven
+    # loads. The richer MFMA-shaped paths (compv3/compv4 scheduler interleave,
+    # cshuffle LDS-staged C, async DMA, K-unroll, chiplet swizzle, grouped conv)
+    # are gated off until ported.
     if family == "wmma":
-        if atom != (16, 16, 16):
-            return False, f"WMMA conv supports only 16x16x16 (got {atom}) on {arch}"
+        if atom not in ((16, 16, 4), (16, 16, 16), (16, 16, 32)):
+            return (
+                False,
+                f"WMMA conv supports only 16x16x4, 16x16x16, or 16x16x32 (got {atom}) on {arch}",
+            )
         if spec.pipeline != "mem":
             return False, (
                 f"WMMA conv supports only the 'mem' pipeline "
                 f"(got {spec.pipeline!r}) on {arch}"
             )
-        if spec.epilogue != "default":
+        if spec.epilogue not in ("default", "cshuffle"):
             return False, (
-                f"WMMA conv supports only the 'default' epilogue "
+                f"WMMA conv supports only 'default' or 'cshuffle' epilogue "
                 f"(got {spec.epilogue!r}) on {arch}"
             )
         for flag, label in (
@@ -914,13 +956,17 @@ def build_implicit_gemm_conv(
     ]
 
     threads = spec.block_size
-    _auto_load_vec = _choose_load_vec(spec)
-    load_vec_a = (
-        spec.vector_size_a if spec.vector_size_a is not None else _auto_load_vec
+    _def_vec_a, _def_vec_b, _ = ImplicitGemmConvSpec.default_vector_sizes(
+        p.C, p.K, spec.data.dtype_a
     )
-    load_vec_b = (
-        spec.vector_size_b if spec.vector_size_b is not None else _auto_load_vec
-    )
+    # Clamp the C/K-derived default by the tile-geometry safe maximum so that the
+    # CoalescedTileLoader's (tile_rows * tile_cols / vec) % block_size == 0 invariant
+    # is always satisfied (e.g. when tile_n is small relative to block_size).
+    _tile_vec = _choose_load_vec(spec)
+    _def_vec_a = min(_def_vec_a, _tile_vec)
+    _def_vec_b = min(_def_vec_b, _tile_vec)
+    load_vec_a = spec.vector_size_a if spec.vector_size_a is not None else _def_vec_a
+    load_vec_b = spec.vector_size_b if spec.vector_size_b is not None else _def_vec_b
     # ``CoalescedTileLoader`` derives ``vecs_per_thread`` /
     # ``cols_per_vec`` internally from ``(tile_rows, tile_cols,
     # block_size, load_vec)`` and re-emits the per-iter constants
@@ -1109,36 +1155,6 @@ def build_implicit_gemm_conv(
             rsrc=b_rsrc,
         )
 
-    def emit_global_read(k_off: Value) -> tuple:
-        """Issue only the global memory reads (buffer_load_vN) for one K tile.
-
-        Returns ``(k_off, a_staged, b_staged)`` — the tile offset and the two
-        lists of ``(row, col, v)`` triples from :meth:`CoalescedTileLoader.load_global`.
-        The caller must later call :func:`emit_lds_write` to commit these values
-        to LDS. Only valid on the sync (non-async-DMA) path; CK pipeline_v1
-        uses this to overlap VMEM latency with MFMA compute.
-        """
-        k_off_capture[0] = k_off
-        a_staged = a_sync_loader.load_global(
-            b, tid=tid, descriptor=a_descriptor, rsrc=a_rsrc
-        )
-        b_staged = b_sync_loader.load_global(
-            b, tid=tid, descriptor=b_descriptor, rsrc=b_rsrc
-        )
-        return k_off, a_staged, b_staged
-
-    def emit_lds_write(staged_tuple: tuple, A_dst: Value, B_dst: Value) -> None:
-        """Commit previously-staged VGPR values to LDS (smem_store_vN).
-
-        ``staged_tuple`` is the value returned by :func:`emit_global_read`.
-        Restores ``k_off_capture`` so the descriptor sees the correct k offset
-        even though the global read and LDS write happen in different loop positions.
-        """
-        k_off, a_staged, b_staged = staged_tuple
-        k_off_capture[0] = k_off
-        a_sync_loader.store_lds(b, smem_dst=A_dst, staged=a_staged)
-        b_sync_loader.store_lds(b, smem_dst=B_dst, staged=b_staged)
-
     def emit_wmma_phase(
         A_src: Value, B_src: Value, iter_vars: Sequence[Value]
     ) -> List[Value]:
@@ -1302,29 +1318,24 @@ def build_implicit_gemm_conv(
         return new_accs
 
     # ---- the K loop ----
-    # The K-loop *structure* determines the branch — not the pipeline string.
-    # "mem", "compv3", and "compv4" all share the same scf.for_iter shape;
-    # their differences (scheduling hints, double-buffering) are handled inside
-    # emit_mfma_phase and the LDS allocation, not by the K-loop itself.
-    # A new branch is only introduced when the loop structure itself changes.
+    # Two code paths:
     #
-    # 1) unroll_k: Python-unroll + double-buffer ping-pong (no scf.for_iter).
-    #    Stage tile t+1 into the alternate buffer while MFMA runs on tile t.
+    # 1) Sync path (`async_dma=False`): emit a single `scf.for_iter`
+    #    body that runs the load + barrier + MFMA + barrier sequence.
+    #    No software pipelining; each iter waits for its own load.
     #
-    # 2) pipeline="v1": Python-unroll + single buffer + split global_read /
-    #    lds_write (no scf.for_iter). buffer_load_vN for tile t+1 is issued
-    #    before sync+mfma, smem_store_vN is deferred until after the second
-    #    sync. Overlaps VMEM latency with compute without double-buffering.
+    # 2) Async path (`async_dma=True`): Python-unroll the K loop and
+    #    ping-pong between `A_smem`/`A_smem2` (and `B_smem`/`B_smem2`)
+    #    so that the load for iter `t+1` is issued while the MFMA for
+    #    iter `t` runs. This is the runbook §8.1 software-pipeline
+    #    pattern. The `s_waitcnt(vmcnt=0)` drains only the *previous*
+    #    iter's DMA before consumers read its LDS buffer; the next
+    #    iter's DMA is already in flight against the other buffer.
     #
-    # 3) not async_dma (mem/compv3/compv4): single scf.for_iter with
-    #    emit_load_phase -> sync -> emit_mfma_phase -> sync per tile.
-    #
-    # 4) async_dma: Python-unroll the K loop and ping-pong between
-    #    A_smem/A_smem2 via SoftwarePipeline.run_ping_pong. The
-    #    s_waitcnt(vmcnt=0) drains only the previous iter's DMA;
-    #    the next iter's DMA is in flight against the other buffer.
     #    K_gemm / block_k is the number of unrolled iters; for the
-    #    bake-off shape this is 9 (576 / 64), generating ~9x more IR.
+    #    bake-off shape this is 9 (576 / 64), generating ~9x more IR
+    #    but staying well under the 160 KiB LDS budget and the
+    #    per-kernel ISA size limits.
     if spec.unroll_k:
         # Double-buffered Python-unrolled K-loop software pipeline.
         #
@@ -1358,53 +1369,6 @@ def build_implicit_gemm_conv(
             k_off_capture[0] = b.const_i32(it * block_k)
             current_accs = emit_mfma_phase(cur[0], cur[1], current_accs)
             b.sync()
-
-        final_accs = current_accs
-    elif spec.pipeline == "v1":
-        # CK pipeline_v1: single-buffer, global-read/compute overlap.
-        #
-        # The buffer_load_vN for tile k+1 is issued before the sync+mfma for
-        # tile k so VMEM latency is hidden behind compute. The LDS write
-        # (smem_store_vN) is deferred until AFTER the second sync (after all
-        # ds_reads for tile k have drained), using the split emit_global_read /
-        # emit_lds_write helpers. Only one LDS buffer is needed.
-        #
-        # Per-iteration instruction order:
-        #   emit_global_read(k+1)         buffer_load_vN (VMEM, in flight)
-        #   sync()                        s_waitcnt(lgkmcnt=0) + s_barrier
-        #                                 (drains prior ds_write; tile k RAW-safe)
-        #   k_off_capture = k             (descriptor uses tile k's offset)
-        #   emit_mfma_phase               ds_read(A_smem,B_smem) + mfma
-        #   sync()                        s_waitcnt(lgkmcnt=0) + s_barrier
-        #                                 (drains ds_reads; A_smem WAR-safe)
-        #   emit_lds_write(staged_k+1)    smem_store_vN (now safe to write)
-        K_iters = (p.K_gemm + block_k - 1) // block_k
-        current_accs = [v for _, v in accs]
-
-        # Prologue: global read for tile 0 then immediately write to LDS.
-        # (No prior ds_reads to drain, so lds_write can follow immediately.)
-        staged0 = emit_global_read(b.const_i32(0))
-        emit_lds_write(staged0, A_smem, B_smem)
-
-        pending_staged = None  # staged tuple for the tile whose ds_write is next
-
-        for it in range(K_iters):
-            # Issue buffer_load for tile it+1 BEFORE the sync. The VMEM latency
-            # (~300-600 cycles) overlaps with the mfma stream that follows.
-            if it + 1 < K_iters:
-                pending_staged = emit_global_read(b.const_i32((it + 1) * block_k))
-            # Drain the current tile's ds_write (prologue or previous iter's
-            # emit_lds_write), then barrier all waves.
-            b.sync()
-            # Set k offset so descriptors address tile it during mfma.
-            k_off_capture[0] = b.const_i32(it * block_k)
-            current_accs = emit_mfma_phase(A_smem, B_smem, current_accs)
-            # Drain ds_reads before the next ds_write can overwrite A_smem/B_smem.
-            b.sync()
-            # Now safe to commit the next tile's staged VGPRs to LDS.
-            if pending_staged is not None:
-                emit_lds_write(pending_staged, A_smem, B_smem)
-                pending_staged = None
 
         final_accs = current_accs
     elif not spec.async_dma:
@@ -1454,7 +1418,7 @@ def build_implicit_gemm_conv(
     if epilogue_override is not None:
         epilogue_override(b, spec, final_accs, grid, d_rsrc, extra_context)
     elif spec.epilogue == "cshuffle":
-        _emit_cshuffle_epilogue(b, spec, final_accs, grid, d_rsrc)
+        _emit_cshuffle_epilogue(b, spec, final_accs, grid, d_rsrc, op=op)
     elif op.family == "wmma":
         # WMMA (RDNA) direct epilogue still uses the explicit per-warp/lane
         # decomposition (it predates the helper-based path); pass the bound
@@ -1591,6 +1555,8 @@ def _emit_cshuffle_epilogue(
     accs: Sequence[Value],
     grid: WarpGrid,
     d_rsrc: Value,
+    *,
+    op=None,
 ) -> None:
     """LDS-staged cshuffle epilogue — the runbook §9.3 lever.
 
@@ -1600,7 +1566,7 @@ def _emit_cshuffle_epilogue(
 
       1. Each lane converts its `<c_per_lane x f32>` accumulator to
          `<c_per_lane x dtype_d>` (f16/bf16/f32) and stores them into an
-         `[tile_m x tile_n]` LDS region at the MFMA *output* layout.
+         `[tile_m x tile_n]` LDS region at the MMA *output* layout.
       2. ``block_sync_lds`` (s_barrier).
       3. A flat distribution of `block_size` threads reads
          `<store_vec x dtype_d>` from LDS at consecutive row-major
@@ -1613,6 +1579,10 @@ def _emit_cshuffle_epilogue(
     The conv-specific bit is the ``addr_fn``: the D descriptor maps
     ``(m, k_out) -> NHWK linear element offset`` via the
     coordinate-transform DAG.
+
+    ``op`` is the resolved :class:`~rocke.core.arch.MmaOp`; when it is a
+    WMMA op (``op.family == "wmma"``) the LDS scatter uses
+    ``op.c_layout().coord()`` instead of the MFMA ``atom.lane_to_output``.
     """
     p = spec.problem
     D_desc = make_d_descriptor(p, dtype=spec.data.dtype_d)
@@ -1620,10 +1590,22 @@ def _emit_cshuffle_epilogue(
     def d_addr(b_: IRBuilder, m_val: Value, n_val: Value):
         return D_desc.offset(b_, m=m_val, k_out=n_val)
 
-    _cshuffle_kwargs: dict = {"out_dtype": spec.data.dtype_d}
+    _cshuffle_kwargs: dict = {
+        "out_dtype": spec.data.dtype_d,
+        "no_alias": spec.cshuffle_no_alias,
+    }
     if spec.vector_size_c is not None:
         _cshuffle_kwargs["max_store_vec"] = spec.vector_size_c
-    CShuffleEpilogue.from_grid(atom=spec.atom, grid=grid, **_cshuffle_kwargs).store(
+    else:
+        _, __, vec_c = ImplicitGemmConvSpec.default_vector_sizes(
+            p.C, p.K, spec.data.dtype_d
+        )
+        _cshuffle_kwargs["max_store_vec"] = vec_c
+    if op is not None and op.family == "wmma":
+        _epi = CShuffleEpilogue.from_grid_op(op=op, grid=grid, **_cshuffle_kwargs)
+    else:
+        _epi = CShuffleEpilogue.from_grid(atom=spec.atom, grid=grid, **_cshuffle_kwargs)
+    _epi.store(
         b,
         accs=accs,
         addr_fn=d_addr,

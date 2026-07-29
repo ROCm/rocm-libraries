@@ -95,16 +95,10 @@ static int make_cfg(int idx, rocke_implicit_gemm_conv_spec_t* spec, const char**
         *arch = "gfx950";
         return 0;
     case 10:
-        /* v1 pipeline, default epilogue. */
-        spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
-        spec->pipeline = "v1";
-        *arch = "gfx950";
-        return 0;
-    case 11:
-        /* v1 pipeline, cshuffle epilogue. */
-        spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
-        spec->pipeline = "v1";
+        /* cshuffle with cshuffle_no_alias=True (idx 2 shape). */
+        spec->problem = rocke_conv_problem_default(16, 112, 112, 128, 128, 3, 3);
         spec->epilogue = "cshuffle";
+        spec->cshuffle_no_alias = true;
         *arch = "gfx950";
         return 0;
     default:

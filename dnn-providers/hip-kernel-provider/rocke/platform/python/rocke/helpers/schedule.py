@@ -450,10 +450,6 @@ class SchedulePolicy:
             # WMMA intrawave schedule: ds_read/wmma interleave in the compute
             # region (no MFMA-cycle model; see :class:`WmmaHotLoopInstList`).
             return cls(name="wmma_v1", emit_hints=True, mode="intrawave")
-        if pipeline == "v1":
-            # CK pipeline_v1: naive single-buffer pipeline with global-read/
-            # compute overlap. No scheduling hints (lowest resource pressure).
-            return cls(name="v1", emit_hints=False)
         raise ValueError(f"unknown schedule policy {pipeline!r}")
 
     def emit_prologue(self, b: IRBuilder) -> None:

@@ -12,10 +12,10 @@
  *   K_dg  = Y*X*K         (filter spatial x output channels -- reduction)
  *   A: dY (NHWK), B: W (KYXC), D: dX (NHWC)
  *
- * For stride=1 a single GEMM is used (compile-time descriptor transforms).
- * For stride>1 a tilde decomposition splits the problem into up to 64+
- * sub-GEMMs dispatched inside a single kernel via a parameter buffer +
- * binary search.
+ * For stride=1 a single sub-GEMM covers the full problem (the tilde
+ * decomposition produces exactly one entry). For stride>1 up to 64+
+ * sub-GEMMs are dispatched inside a single kernel via a runtime parameter
+ * buffer and binary search. Both paths use runtime descriptor closures.
  *
  *   Python (conv_implicit_gemm_dgrad.py)    C99 (this header)
  *   -----------------------------------    ----------------------------------------
@@ -272,9 +272,8 @@ struct rocke_tensor_descriptor* rocke_dgrad_make_dx_descriptor(rocke_ir_builder_
  * ============================================================ *
  *
  * Builds the IR for one implicit-GEMM backward-data conv kernel.
- * For stride=1 uses compile-time descriptors. For stride>1 emits a
- * single kernel with runtime sub-GEMM dispatch (binary search over
- * a parameter buffer).
+ * Uses runtime descriptor closures for both stride=1 (single sub-GEMM)
+ * and stride>1 (binary search over a runtime parameter buffer).
  *
  * arch NULL => "gfx950". Returns the kernel or NULL with b's sticky
  * error set.
