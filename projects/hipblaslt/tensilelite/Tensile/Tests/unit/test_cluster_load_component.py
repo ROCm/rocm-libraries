@@ -62,7 +62,8 @@ class _StubWriter:
 
 
 def _kernel(*, multicast=True, clusterDim=(2, 2), tdmA=True, tdmB=True,
-            numWaves=4, useSubtile=False, sparse=0, tdmMeta=False, tdmInst=3):
+            numWaves=4, useSubtile=False, sparse=0, tdmMeta=False, tdmInst=3,
+            pap=False, streamKMulticast=False):
     return {
         "Multicast": multicast,
         "ClusterDim": list(clusterDim),
@@ -73,6 +74,8 @@ def _kernel(*, multicast=True, clusterDim=(2, 2), tdmA=True, tdmB=True,
         "UseSubtileImpl": useSubtile,
         "TDMInst": tdmInst,
         "ProblemType": {"Sparse": sparse},
+        "PrefetchAcrossPersistent": pap,
+        "StreamKMulticast": streamKMulticast,
     }
 
 
@@ -198,6 +201,34 @@ class TestDeclareUndeclare:
         self._c().undeclareSgprs(w, _kernel(multicast=False))
         assert w.undefined == []
 
+    def test_undeclare_keeps_maskB_live_frees_selfonly_maskA_under_pap(self):
+        # PAP re-applies the [C,1] broadcast mask (MulticastMaskB) on every
+        # persistent-loop TDM refresh, so it must stay live past the prologue;
+        # freeing it makes those reuses reference an undeclared SGPR (assembly
+        # failure). The self-only A mask (ClusterDim[1]==1) is still freed so the
+        # kernel stays within the 106-SGPR budget (the PAP+cluster+FDPO=0 overflow
+        # bug: sgprs=107 -> s_endpgm stub -> output unwritten).
+        _init_rocisa_gfx1250()
+        w = _StubWriter()
+        self._c().undeclareSgprs(w, _kernel(streamKMulticast=True, pap=True, clusterDim=(2, 1)))
+        assert w.undefined == ["MulticastMaskA"]
+
+    def test_undeclare_keeps_both_live_under_pap_2d_cluster(self):
+        # On a 2-D cluster (ClusterDim[1]>1) A is a real multicast, not self-only,
+        # so both masks stay live across the PAP refresh (neither is freed).
+        _init_rocisa_gfx1250()
+        w = _StubWriter()
+        self._c().undeclareSgprs(w, _kernel(streamKMulticast=True, pap=True, clusterDim=(2, 2)))
+        assert w.undefined == []
+
+    def test_undeclare_frees_both_without_pap(self):
+        # Same StreamK multicast kernel but PAP off: no persistent refresh, so both
+        # masks are freed in the prologue (byte-identical to the pre-fix behavior).
+        _init_rocisa_gfx1250()
+        w = _StubWriter()
+        self._c().undeclareSgprs(w, _kernel(streamKMulticast=True, pap=False, clusterDim=(2, 1)))
+        assert w.undefined == ["MulticastMaskA", "MulticastMaskB"]
+
 
 # --- computeMasks emitted asm ----------------------------------------------
 
@@ -300,6 +331,33 @@ class TestApplyToDescriptor:
         w = _StubWriter()
         mod = self._c().applyToDescriptor(w, _kernel(clusterDim=(1, 1)), "tdmAGroup1", "A")
         assert str(mod).strip() == ""
+
+    def test_pap_streamk_skips_selfonly_maskA(self):
+        # Under PAP+StreamK multicast the A mask SGPR is freed (kept out of the
+        # SGPR budget); its value is self-only (A stays per-workgroup, no [C,1]
+        # broadcast) so re-applying it is a no-op. applyToDescriptor must emit
+        # nothing for the A side rather than reference the freed SGPR.
+        _init_rocisa_gfx1250()
+        w = _StubWriter()
+        mod = self._c().applyToDescriptor(
+            w, _kernel(streamKMulticast=True, pap=True, clusterDim=(2, 1)), "tdmAGroup1", "A")
+        assert str(mod).strip() == ""
+
+    def test_pap_streamk_still_applies_maskB(self):
+        # The B broadcast mask is still applied on every refresh (it stays live).
+        _init_rocisa_gfx1250()
+        w = _StubWriter()
+        mod = self._c().applyToDescriptor(
+            w, _kernel(streamKMulticast=True, pap=True, clusterDim=(2, 1)), "tdmBGroup1", "B")
+        assert "s_or_b32 s[sgprtdmBGroup1], s[sgprtdmBGroup1], s[sgprMulticastMaskB]" in str(mod)
+
+    def test_no_pap_streamk_still_applies_maskA(self):
+        # Without PAP the A mask remains live and is applied as before.
+        _init_rocisa_gfx1250()
+        w = _StubWriter()
+        mod = self._c().applyToDescriptor(
+            w, _kernel(streamKMulticast=True, pap=False, clusterDim=(2, 1)), "tdmAGroup1", "A")
+        assert "s_or_b32 s[sgprtdmAGroup1], s[sgprtdmAGroup1], s[sgprMulticastMaskA]" in str(mod)
 
 
 if __name__ == "__main__":
