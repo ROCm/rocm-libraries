@@ -113,11 +113,19 @@ function(tensilelite_sanitizer_requires_xnack output_var)
 endfunction()
 
 function(tensilelite_offload_target output_var arch)
-    set(_xnack_capable gfx908 gfx90a gfx942 gfx950 gfx1250)
+    # Keep this as a base-architecture capability list. gfx90c variants share
+    # one logic database; sanitizer builds only change the code-object target.
+    set(_xnack_capable gfx908 gfx90a gfx90c gfx942 gfx950 gfx1250)
     set(_target "${arch}")
     tensilelite_sanitizer_requires_xnack(_requires_xnack)
-    if(_requires_xnack AND NOT "${arch}" MATCHES ":" AND "${arch}" IN_LIST _xnack_capable)
-        set(_target "${arch}:xnack+")
+    if(_requires_xnack)
+        if("${arch}" MATCHES ":xnack-($|:)")
+            message(FATAL_ERROR
+                "GPU target ${arch} explicitly disables XNACK, but this sanitizer build requires XNACK. "
+                "Use ${arch}'s base architecture or request :xnack+ explicitly.")
+        elseif(NOT "${arch}" MATCHES ":" AND "${arch}" IN_LIST _xnack_capable)
+            set(_target "${arch}:xnack+")
+        endif()
     endif()
     set(${output_var} "${_target}" PARENT_SCOPE)
 endfunction()

@@ -22,6 +22,7 @@ TEST(Gfx90cSupport, ArchitectureConversionHandlesTargetIds)
 {
     EXPECT_EQ(AMDGPU::toProcessor("gfx90c"), AMDGPU::Processor::gfx90c);
     EXPECT_EQ(AMDGPU::toProcessor("gfx90c:xnack+"), AMDGPU::Processor::gfx90c);
+    EXPECT_EQ(AMDGPU::toProcessor("gfx90c:xnack-"), AMDGPU::Processor::gfx90c);
     EXPECT_EQ(AMDGPU::toString(AMDGPU::Processor::gfx90c), "gfx90c");
 }
 

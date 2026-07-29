@@ -111,6 +111,10 @@ def buildAssemblyCodeObjectFiles(
     extCoRaw = ".co.raw"
 
     destRoot = Path(destRoot)
+    # Kernels currently carry only numeric ISA identity. Consequently explicit
+    # xnack+ and xnack- requests for one ISA cannot form independent object
+    # groups or filenames here. targetArchForIsa deliberately selects the bare
+    # target for that multi-variant case until grouping by full target ID exists.
     archKernelMap = collections.defaultdict(list)
     for k in kernels:
       archKernelMap[tuple(k['ISA'])].append(k)

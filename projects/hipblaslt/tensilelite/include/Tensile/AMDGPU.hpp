@@ -84,6 +84,7 @@ namespace TensileLite
 
         static Processor toProcessor(std::string archName)
         {
+            const auto baseArch = archName.substr(0, archName.find(':'));
             if(archName.find("gfx803") != std::string::npos)
             {
                 return Processor::gfx803;
@@ -92,7 +93,7 @@ namespace TensileLite
             {
                 return Processor::gfx900;
             }
-            else if(archName.find("gfx90c") != std::string::npos)
+            else if(baseArch == "gfx90c")
             {
                 return Processor::gfx90c;
             }

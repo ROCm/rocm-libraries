@@ -234,6 +234,7 @@ namespace
 
     Tensile::LazyLoadingInit getLazyLoadingArch(const std::string& deviceString)
     {
+        const std::string baseArch = deviceString.substr(0, deviceString.find(':'));
         if(deviceString.find("gfx803") != std::string::npos)
         {
             return Tensile::LazyLoadingInit::gfx803;
@@ -242,7 +243,7 @@ namespace
         {
             return Tensile::LazyLoadingInit::gfx900;
         }
-        else if(deviceString.find("gfx90c") != std::string::npos)
+        else if(baseArch == "gfx90c")
         {
             return Tensile::LazyLoadingInit::gfx90c;
         }
