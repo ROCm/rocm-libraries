@@ -30,6 +30,7 @@
 #include <Tensile/ContractionSolution.hpp>
 #include <Tensile/ExactLogicLibrary.hpp>
 #include <Tensile/FreeSizeLibrary.hpp>
+#include <Tensile/FixedLinearArbiterLibrary.hpp>
 #include <Tensile/PredictionLibrary.hpp>
 #include <Tensile/GranularitySelectionLibrary.hpp>
 #include <Tensile/MapLibrary.hpp>
@@ -55,6 +56,8 @@ namespace TensileLite
         = ProblemFreeSizeLibrary<ContractionProblemGemm, ContractionSolution>;
     using ContractionProblemPredictionLibrary
         = ProblemPredictionLibrary<ContractionProblemGemm, ContractionSolution>;
+    using ContractionFixedLinearArbiterLibrary
+        = FixedLinearArbiterLibrary<ContractionProblemGemm, ContractionSolution>;
     using ContractionProblemMatchingLibrary
         = ProblemMatchingLibrary<ContractionProblemGemm, ContractionSolution>;
     using ContractionProblemMapLibrary

@@ -40,6 +40,8 @@
 #include <Tensile/Serialization/Predicates.hpp>
 
 #include <Tensile/Serialization/ExactLogicLibrary.hpp>
+#include <Tensile/Serialization/FixedLinearArbiterLibrary.hpp>
+#include <Tensile/Serialization/FixedLinearCatalogLibrary.hpp>
 #include <Tensile/Serialization/GranularitySelectionLibrary.hpp>
 #include <Tensile/Serialization/MLPClassificationLibrary.hpp>
 #include <Tensile/Serialization/MapLibrary.hpp>
@@ -80,6 +82,8 @@ namespace TensileLite
                      Base::template Pair<ProblemMapLibrary<MyProblem, MySolution>>(),
                      Base::template Pair<ProblemFreeSizeLibrary<MyProblem, MySolution>>(),
                      Base::template Pair<ProblemPredictionLibrary<MyProblem, MySolution>>(),
+                     Base::template Pair<FixedLinearArbiterLibrary<MyProblem, MySolution>>(),
+                     Base::template Pair<FixedLinearCatalogLibrary<MyProblem, MySolution>>(),
                      Base::template Pair<ProblemMatchingLibrary<MyProblem, MySolution>>(),
                      Base::template Pair<GranularitySelectionLibrary<MyProblem, MySolution>>(),
                      Base::template Pair<PlaceholderLibrary<MyProblem, MySolution>>(),
