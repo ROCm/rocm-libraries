@@ -836,7 +836,7 @@ def build_implicit_gemm_conv_dgrad(
 ) -> KernelDef:
     """Build the IR for one implicit-GEMM backward-data conv kernel.
 
-    GEMM shape (per sub-GEMM for stride > 1):
+    GEMM shape (per sub-GEMM):
         M     = N*HTildeSlice*WTildeSlice   (input spatial positions)
         N_dg  = C                           (input channels)
         K_dg  = YDotSlice*XDotSlice*K       (filter × output channels, reduction)
@@ -846,11 +846,13 @@ def build_implicit_gemm_conv_dgrad(
         B (W):  weight tensor, KYXC layout.
         D (dX): input-gradient output, NHWC layout.
 
-    For stride=1 + dilation=1 this uses compile-time descriptors (fast path).
-    For stride > 1 or dilation > 1 this emits a single kernel with a
-    runtime-parameterized sub-GEMM dispatch: a parameter buffer stores
-    per-sub-GEMM constants, each CTA binary-searches it, then uses runtime
-    offset arithmetic to address the tensors.
+    All convolutions are handled by a single tiled kernel path with a
+    runtime-parameterised sub-GEMM dispatch (a parameter buffer stores
+    per-sub-GEMM constants; each CTA binary-searches it).  For stride=1
+    the tilde decomposition has exactly one sub-GEMM, so the binary search
+    degenerates and the epilogue emits a direct buffer_store (no atomics).
+    For stride > 1 or split_k > 1, multiple CTAs write to overlapping dX
+    positions and the epilogue uses global_atomic_fadd.
     """
     if spec.split_k == -1:
         from ...helpers.split_k import select_split_k_wgrad
@@ -875,448 +877,7 @@ def build_implicit_gemm_conv_dgrad(
     if not ok:
         raise ValueError(f"invalid dgrad spec for {arch}: {why}")
 
-    if spec.is_strided:
-        return _build_tilde_dgrad(spec, arch)
-
-    # Stride=1, dilation=1 fast path: compile-time descriptors.
-    p = spec.problem
-    ir_dtype_a = _ir_dtype(spec.data.dtype_a)
-    ir_dtype_b = _ir_dtype(spec.data.dtype_b)
-    ir_dtype_d = _ir_dtype(spec.data.dtype_d)
-
-    _is_split_k = spec.split_k > 1
-
-    b = IRBuilder(spec.kernel_name())
-    if spec.waves_per_eu is not None:
-        b.kernel.attrs["waves_per_eu"] = spec.waves_per_eu
-
-    dY = b.param(
-        "dY", PtrType(ir_dtype_a, "global"), noalias=True, readonly=True, align=16
-    )
-    W = b.param(
-        "W", PtrType(ir_dtype_b, "global"), noalias=True, readonly=True, align=16
-    )
-    _dx_writeonly = not _is_split_k
-    dX = b.param(
-        "dX",
-        PtrType(ir_dtype_d, "global"),
-        noalias=True,
-        writeonly=_dx_writeonly,
-        align=16,
-    )
-    dY_bytes = b.param("dY_bytes", I32)
-    W_bytes = b.param("W_bytes", I32)
-    dX_bytes = b.param("dX_bytes", I32)
-
-    op = _resolve_dgrad_op(spec, arch)
-    atom = spec.atom if op.family == "mma" else None
-    a_per_lane = op.a_frag_len
-    b_per_lane = op.b_frag_len
-    _smem_dtype: Optional[Type] = (
-        BF16 if op.a_dtype == "bf16" else F32 if op.a_dtype == "fp32" else None
-    )
-    c_per_lane = op.c_frag_len
-
-    dg_M = _dg_M(p)  # N*Hi*Wi
-    dg_N = _dg_N(p)  # C
-    dg_K = _dg_K(p)  # Y*X*K
-
-    block_m, block_n, block_k = spec.tile_m, spec.tile_n, spec.tile_k
-
-    grid = WarpGrid.from_atom(
-        op,
-        tile_m=block_m,
-        tile_n=block_n,
-        tile_k=block_k,
-        warp_m=spec.warp_m,
-        warp_n=spec.warp_n,
-        wave_size=spec.wave_size,
-    ).bind(b, block_m_axis="y", block_n_axis="x")
-    tid = grid.tid
-    lane = grid.lane
-    warp_id = grid.warp_id
-    warp_m_idx = grid.warp_m_idx
-    warp_n_idx = grid.warp_n_idx
-
-    c0 = b.const_i32(0)
-    c_block_k = b.const_i32(block_k)
-    c_dg_K = b.const_i32(dg_K)
-
-    if _is_split_k:
-        dg_K_padded = spec.dg_K_padded()
-        c_ks = b.const_i32(dg_K_padded // spec.split_k)
-        k_lo = b.to_sgpr_u32(b.mul(b.block_id_z(), c_ks))
-        k_hi = b.to_sgpr_u32(b.add(k_lo, c_ks))
-    else:
-        k_lo = c0
-        k_hi = None
-
-    if spec.chiplet_swizzle:
-        from ...helpers.grid import chiplet_aware_super_tile
-
-        num_pid_m = (dg_M + block_m - 1) // block_m
-        num_pid_n = (dg_N + block_n - 1) // block_n
-        c_num_pid_n = b.const_i32(num_pid_n)
-        wgid_flat = b.add(b.mul(b.block_id_y(), c_num_pid_n), b.block_id_x())
-        swz = chiplet_aware_super_tile(
-            b,
-            wgid_flat,
-            num_pid_m=num_pid_m,
-            num_pid_n=num_pid_n,
-            wgm=spec.chiplet_wgm,
-            num_xcds=spec.chiplet_num_xcds,
-            chunk_size=spec.chiplet_chunk_size,
-        )
-        block_m_off_v = b.mul(swz.row, b.const_i32(block_m))
-        block_n_off_v = b.mul(swz.col, b.const_i32(block_n))
-        grid = dc_replace(grid, block_m_off=block_m_off_v, block_n_off=block_n_off_v)
-    else:
-        block_m_off_v = grid.block_m_off
-        block_n_off_v = grid.block_n_off
-
-    lds_layout = spec.effective_lds_layout()
-    if spec.async_dma:
-        lds_layout.validate_for_async()
-    A_smem = b.smem_alloc(
-        ir_dtype_a, lds_layout.storage_shape(block_m), name_hint="A_smem"
-    )
-    B_smem = b.smem_alloc(
-        ir_dtype_b, lds_layout.storage_shape(block_n), name_hint="B_smem"
-    )
-    double_buffer = spec.pipeline == "compv4" or spec.async_dma or spec.unroll_k
-    if double_buffer:
-        A_smem2 = b.smem_alloc(
-            ir_dtype_a, lds_layout.storage_shape(block_m), name_hint="A_smem2"
-        )
-        B_smem2 = b.smem_alloc(
-            ir_dtype_b, lds_layout.storage_shape(block_n), name_hint="B_smem2"
-        )
-    else:
-        A_smem2 = A_smem
-        B_smem2 = B_smem
-
-    mfmas_m = spec.mfmas_per_warp_m
-    mfmas_n = spec.mfmas_per_warp_n
-    k_atoms = spec.k_atoms_per_tile_k
-
-    acc_init = b.zero_vec_f32(c_per_lane)
-    accs = [
-        (f"acc_m{mi}_n{ni}", acc_init)
-        for mi in range(mfmas_m)
-        for ni in range(mfmas_n)
-    ]
-
-    threads = spec.block_size
-    load_vec_a = 1
-    load_vec_b = 1
-
-    dY_desc = make_dgrad_dy_descriptor(p, dtype=spec.data.dtype_a)
-    W_desc = make_dgrad_w_descriptor(p, dtype=spec.data.dtype_b)
-
-    dy_buf_rsrc = make_buffer_resource(b, dY, num_bytes=dY_bytes)
-    w_buf_rsrc = make_buffer_resource(b, W, num_bytes=W_bytes)
-    dx_buf_rsrc = make_buffer_resource(b, dX, num_bytes=dX_bytes)
-    dy_rsrc = dy_buf_rsrc.rsrc
-    w_rsrc = w_buf_rsrc.rsrc
-    dx_rsrc = dx_buf_rsrc.rsrc
-
-    k_off_capture: List[Optional[Value]] = [None]
-
-    def dy_descriptor(b_: IRBuilder, row: Value, col: Value):
-        m_val = b_.add(block_m_off_v, row)
-        k_dg_val = b_.add(k_off_capture[0], col)
-        return dY_desc.offset(b_, m=m_val, k_dg=k_dg_val)
-
-    def w_descriptor(b_: IRBuilder, row: Value, col: Value):
-        c_val = b_.add(block_n_off_v, row)
-        k_dg_val = b_.add(k_off_capture[0], col)
-        return W_desc.offset(b_, c=c_val, k_dg=k_dg_val)
-
-    if spec.async_dma:
-        a_loader = AsyncTileLoader.from_tile(
-            tile_rows=block_m,
-            tile_cols=block_k,
-            block_size=threads,
-            wave_size=spec.wave_size,
-            elem_dtype=ir_dtype_a,
-        )
-        b_loader = AsyncTileLoader.from_tile(
-            tile_rows=block_n,
-            tile_cols=block_k,
-            block_size=threads,
-            wave_size=spec.wave_size,
-            elem_dtype=ir_dtype_b,
-        )
-        a_sync_loader = None
-        b_sync_loader = None
-    else:
-        a_loader = None
-        b_loader = None
-        a_sync_loader = CoalescedTileLoader(
-            tile_rows=block_m,
-            tile_cols=block_k,
-            block_size=threads,
-            load_vec=load_vec_a,
-            elem_dtype=ir_dtype_a,
-        )
-        b_sync_loader = CoalescedTileLoader(
-            tile_rows=block_n,
-            tile_cols=block_k,
-            block_size=threads,
-            load_vec=load_vec_b,
-            elem_dtype=ir_dtype_b,
-        )
-
-    schedule = SchedulePolicy.for_pipeline(
-        "async_dma" if spec.async_dma else spec.pipeline
-    )
-    schedule.emit_prologue(b)
-
-    def emit_load_phase(k_off: Value, A_dst: Value, B_dst: Value) -> None:
-        k_off_capture[0] = k_off
-
-        if spec.async_dma:
-            from ...core.ir import CACHE_STREAM
-
-            a_slot = a_loader.bind(b, smem_dst=A_dst, wave_id=warp_id)
-            a_slot.issue(
-                b,
-                tid=tid,
-                rsrc=dy_rsrc,
-                descriptor=dy_descriptor,
-                coherency=CACHE_STREAM,
-            )
-            b_slot = b_loader.bind(b, smem_dst=B_dst, wave_id=warp_id)
-            b_slot.issue(
-                b,
-                tid=tid,
-                rsrc=w_rsrc,
-                descriptor=w_descriptor,
-                coherency=CACHE_STREAM,
-            )
-            return
-
-        a_sync_loader.load(
-            b, tid=tid, smem_dst=A_dst, descriptor=dy_descriptor, rsrc=dy_rsrc
-        )
-        b_sync_loader.load(
-            b, tid=tid, smem_dst=B_dst, descriptor=w_descriptor, rsrc=w_rsrc
-        )
-
-    def emit_wmma_phase(
-        A_src: Value, B_src: Value, iter_vars: Sequence[Value]
-    ) -> List[Value]:
-        a_map = op.a_layout()
-        b_map = op.b_layout()
-        a_row_in_atom, a_k_in_atom = a_map.coord(b, lane, 0)
-        b_k_in_atom, b_col_in_atom = b_map.coord(b, lane, 0)
-        warp_m_off = grid.warp_m_off(b)
-        warp_n_off = grid.warp_n_off(b)
-        new_accs: List[Value] = list(iter_vars)
-        for kk in range(k_atoms):
-            k_tile_base = b.const_i32(kk * spec.warp_tile_k)
-            a_rows = []
-            for mi in range(mfmas_m):
-                atom_row = b.add(warp_m_off, b.const_i32(mi * spec.warp_tile_m))
-                a_rows.append(
-                    _emit_frag_smem_load(
-                        b,
-                        A_src,
-                        a_row_in_atom,
-                        a_k_in_atom,
-                        atom_row,
-                        k_tile_base,
-                        a_per_lane,
-                        smem_dtype=_smem_dtype,
-                    )
-                )
-            b_cols = []
-            for ni in range(mfmas_n):
-                atom_row = b.add(warp_n_off, b.const_i32(ni * spec.warp_tile_n))
-                b_cols.append(
-                    _emit_frag_smem_load(
-                        b,
-                        B_src,
-                        b_col_in_atom,
-                        b_k_in_atom,
-                        atom_row,
-                        k_tile_base,
-                        b_per_lane,
-                        smem_dtype=_smem_dtype,
-                    )
-                )
-            flat = 0
-            for mi in range(mfmas_m):
-                for ni in range(mfmas_n):
-                    new_accs[flat] = b.mma(op, a_rows[mi], b_cols[ni], new_accs[flat])
-                    flat += 1
-        return new_accs
-
-    def emit_mfma_phase(
-        A_src: Value, B_src: Value, iter_vars: Sequence[Value]
-    ) -> List[Value]:
-        if op.family == "wmma":
-            return emit_wmma_phase(A_src, B_src, iter_vars)
-
-        decoded = decode_mfma_lanes(b, atom, lane)
-        m_in_atom = decoded.m_in_atom
-        n_in_atom = decoded.n_in_atom
-        k_blk = decoded.k_blk
-
-        warp_m_off = grid.warp_m_off(b)
-        warp_n_off = grid.warp_n_off(b)
-        new_accs: List[Value] = list(iter_vars)
-
-        for kk in range(k_atoms):
-            col_base = b.add(
-                b.mul(k_blk, b.const_i32(a_per_lane)),
-                b.const_i32(kk * spec.warp_tile_k),
-            )
-            a_rows = []
-            for mi in range(mfmas_m):
-                a_row = b.add(
-                    warp_m_off,
-                    b.add(b.const_i32(mi * spec.warp_tile_m), m_in_atom),
-                )
-                a_rows.append(
-                    _emit_smem_load(
-                        b, A_src, a_row, col_base, a_per_lane, smem_dtype=_smem_dtype
-                    )
-                )
-
-            b_cols = []
-            for ni in range(mfmas_n):
-                b_row = b.add(
-                    warp_n_off,
-                    b.add(b.const_i32(ni * spec.warp_tile_n), n_in_atom),
-                )
-                b_cols.append(
-                    _emit_smem_load(
-                        b, B_src, b_row, col_base, b_per_lane, smem_dtype=_smem_dtype
-                    )
-                )
-
-            flat = 0
-            for mi in range(mfmas_m):
-                for ni in range(mfmas_n):
-                    acc = _emit_mfma(b, atom, a_rows[mi], b_cols[ni], new_accs[flat])
-                    new_accs[flat] = acc
-                    flat += 1
-
-            schedule.emit_after_mfma_step(
-                b,
-                ds_read_count=mfmas_m + mfmas_n,
-                mfma_count=mfmas_m * mfmas_n,
-            )
-
-        return new_accs
-
-    # ---- K loop ----
-    _k_upper = c_dg_K if k_hi is None else k_hi
-
-    if spec.unroll_k:
-        slice_k = dg_K if k_hi is None else (spec.dg_K_padded() // spec.split_k)
-        K_iters = (slice_k + block_k - 1) // block_k
-        current_accs = [v for _, v in accs]
-        bufs = [(A_smem, B_smem), (A_smem2, B_smem2)]
-
-        emit_load_phase(k_lo, bufs[0][0], bufs[0][1])
-        b.sync()
-
-        for it in range(K_iters):
-            cur = bufs[it % 2]
-            if it + 1 < K_iters:
-                nxt = bufs[(it + 1) % 2]
-                emit_load_phase(
-                    b.add(k_lo, b.const_i32((it + 1) * block_k)), nxt[0], nxt[1]
-                )
-            k_off_capture[0] = b.add(k_lo, b.const_i32(it * block_k))
-            current_accs = emit_mfma_phase(cur[0], cur[1], current_accs)
-            b.sync()
-
-        final_accs = current_accs
-    elif not spec.async_dma:
-        for_op = b.scf_for_iter(k_lo, _k_upper, c_block_k, accs, iv_name="k0")
-        with for_op as (k0, iter_vars):
-            emit_load_phase(k0, A_smem, B_smem)
-            b.sync()
-            new_accs = emit_mfma_phase(A_smem, B_smem, iter_vars)
-            b.sync()
-            b.scf_yield(*new_accs)
-        final_accs = for_op.results
-    else:
-        slice_k = dg_K if k_hi is None else (spec.dg_K_padded() // spec.split_k)
-        K_iters = (slice_k + block_k - 1) // block_k
-        bufs = [(A_smem, B_smem), (A_smem2, B_smem2)]
-
-        pipeline = SoftwarePipeline(
-            num_iters=K_iters,
-            double_buffer=double_buffer,
-            wait_vmcnt=True,
-            sync_after_wait=True,
-            sync_before_issue=True,
-            overlap_vmcnt=True,
-        )
-
-        def issue_load(it: int, buf_pair):
-            emit_load_phase(
-                b.add(k_lo, b.const_i32(it * block_k)), buf_pair[0], buf_pair[1]
-            )
-
-        def compute(_, buf_pair, state):
-            return emit_mfma_phase(buf_pair[0], buf_pair[1], state)
-
-        final_accs = pipeline.run_ping_pong(
-            b,
-            buffers=bufs,
-            initial_state=[v for _, v in accs],
-            issue_load=issue_load,
-            compute=compute,
-            schedule=schedule,
-        )
-
-    # ---- epilogue ----
-    final_accs = _apply_accumulator_epilogue(b, spec.acc_epilogue, final_accs)
-
-    if _is_split_k:
-        _emit_dgrad_split_k_epilogue(
-            b,
-            spec,
-            atom,
-            final_accs,
-            warp_m_idx,
-            warp_n_idx,
-            lane,
-            block_m_off_v,
-            block_n_off_v,
-            dX,
-            c_per_lane,
-        )
-    elif spec.epilogue == "cshuffle":
-        _emit_dgrad_cshuffle_epilogue(b, spec, final_accs, grid, dx_rsrc)
-    elif op.family == "wmma":
-        _emit_dgrad_direct_epilogue_wmma(
-            b,
-            spec,
-            op,
-            final_accs,
-            warp_m_idx,
-            warp_n_idx,
-            lane,
-            block_m_off_v,
-            block_n_off_v,
-            dx_rsrc,
-            c0,
-        )
-    else:
-        _emit_dgrad_direct_epilogue(b, spec, final_accs, grid, dx_rsrc)
-
-    return b.kernel
-
-
-# ---------------------------------------------------------------------
-# Phase 2: tilde-decomposition kernel builder (stride > 1)
-# ---------------------------------------------------------------------
+    return _build_tilde_dgrad(spec, arch)
 
 _RECORD_FIELDS = 22  # number of i32 fields per SubGemmRecord
 
@@ -1367,11 +928,16 @@ def _build_tilde_dgrad(
     spec: DgradConvSpec,
     arch: str,
 ) -> KernelDef:
-    """Build the tilde-decomposition dgrad kernel for stride > 1.
+    """Build the tiled dgrad kernel for any stride.
 
-    The kernel receives a parameter buffer with per-sub-GEMM constants.
-    Each CTA binary-searches the buffer to find its sub-GEMM, loads the
-    record fields, then uses runtime arithmetic for tensor offset computation.
+    A parameter buffer holds per-sub-GEMM constants. Each CTA binary-searches
+    it to find its sub-GEMM, loads the record fields, and uses runtime
+    arithmetic for tensor offsets.
+
+    For stride=1 (1 sub-GEMM, split_k=1): ``needs_atomic`` is False and the
+    epilogue emits a direct buffer_store — equivalent to the old fast path.
+    For stride>1 or split_k>1: the epilogue uses global_atomic_fadd to
+    accumulate partial results from overlapping CTAs.
     """
     p = spec.problem
     sub_gemms = spec.compute_sub_gemms()
@@ -1740,19 +1306,32 @@ def _build_tilde_dgrad(
     # ---- epilogue ----
     final_accs = _apply_accumulator_epilogue(b, spec.acc_epilogue, final_accs)
 
-    # Tilde kernel always uses atomic-add epilogue (multiple sub-GEMMs
-    # write to overlapping dX positions).
-    _emit_dgrad_tilde_atomic_epilogue(
-        b, spec, atom, final_accs,
-        warp_m_idx, warp_n_idx, lane,
-        block_m_off_v, block_n_off_v,
-        dX, c_per_lane,
-        rec_gemm_m, c_dg_N,
-        rec_h_tilde_slice, rec_w_tilde_slice,
-        rec_d_h_stride, rec_d_h_offset,
-        rec_d_w_stride, rec_d_w_offset,
-        c_Hi, c_Wi, c_C,
-    )
+    if not spec.needs_atomic:
+        # Single sub-GEMM, split_k=1: each dX cell is written by exactly one
+        # CTA, so a direct buffer_store is safe and avoids the atomic overhead.
+        if op.family == "wmma":
+            _emit_dgrad_direct_epilogue_wmma(
+                b, spec, op, final_accs,
+                warp_m_idx, warp_n_idx, lane,
+                block_m_off_v, block_n_off_v,
+                dx_rsrc, c0,
+            )
+        else:
+            _emit_dgrad_direct_epilogue(b, spec, final_accs, grid, dx_rsrc)
+    else:
+        # Multiple sub-GEMMs or split_k>1: CTAs write to overlapping dX cells
+        # and must use atomic accumulation.
+        _emit_dgrad_tilde_atomic_epilogue(
+            b, spec, atom, final_accs,
+            warp_m_idx, warp_n_idx, lane,
+            block_m_off_v, block_n_off_v,
+            dX, c_per_lane,
+            rec_gemm_m, c_dg_N,
+            rec_h_tilde_slice, rec_w_tilde_slice,
+            rec_d_h_stride, rec_d_h_offset,
+            rec_d_w_stride, rec_d_w_offset,
+            c_Hi, c_Wi, c_C,
+        )
 
     return b.kernel
 
