@@ -189,26 +189,10 @@ if(ROCROLLER_ENABLE_TIMERS)
 endif()
 
 if(ROCROLLER_ENABLE_YAML_CPP)
-    if(ROCROLLER_ENABLE_FETCH)
-        block(SCOPE_FOR VARIABLES PROPAGATE yaml_cpp_SOURCE_DIR)
-            # option() honors existing variables
-            set(CMAKE_POLICY_DEFAULT_CMP0077 NEW)
-
-            set(YAML_CPP_BUILD_TOOLS OFF)
-            set(YAML_BUILD_SHARED_LIBS OFF)
-            set(BUILD_TESTING OFF)
-            option(YAML_CPP_INSTALL "" ON)
-            FetchContent_Declare(
-                yaml_cpp
-                GIT_REPOSITORY https://github.com/jbeder/yaml-cpp.git
-                GIT_TAG 0.8.0
-            )
-            FetchContent_MakeAvailable(yaml_cpp)
-        endblock()
-        set_property(DIRECTORY ${yaml_cpp_SOURCE_DIR} PROPERTY EXCLUDE_FROM_ALL ON)
-    else()
-        find_package(yaml-cpp 0.8.0 REQUIRED)
-    endif()
+    list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../cmake")
+    include(EnsureYamlCpp)
+    set(ENSURE_YAML_CPP_ALLOW_FETCH ${ROCROLLER_ENABLE_FETCH})
+    ensure_yaml_cpp()
     target_link_libraries(rocroller PUBLIC yaml-cpp::yaml-cpp)
     target_compile_definitions(rocroller PUBLIC ROCROLLER_USE_YAML_CPP)
 endif()

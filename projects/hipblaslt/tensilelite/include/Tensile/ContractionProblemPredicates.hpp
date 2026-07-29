@@ -2022,6 +2022,35 @@ namespace TensileLite
                 }
             };
 
+            struct Embedding : public Predicate_CRTP<Embedding, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = false
+                };
+
+                Embedding() = default;
+
+                static std::string Type()
+                {
+                    return "Embedding";
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    return true;
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    bool rv = (*this)(problem);
+                    PredicateDebugger::printRow(stream, rv, this->type());
+                    return rv;
+                }
+            };
+
             struct GridBasedMatching
                 : public Predicate_CRTP<GridBasedMatching, ContractionProblemGemm>
             {

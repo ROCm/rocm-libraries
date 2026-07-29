@@ -69,9 +69,10 @@ _MATCHING_ORDER = {
     'EqualityMatching': 0,
     'RangeMatching': 1,
     'PredictionMatching': 2,
-    'GridBasedMatching': 3,
-    'FreeSizeMatching': 4,
-    'TruePred': 5,
+    'Embedding': 3,
+    'GridBasedMatching': 4,
+    'FreeSizeMatching': 5,
+    'TruePred': 6,
 }
 
 
@@ -96,7 +97,7 @@ class Predicate(Property):
         return cls('Or', value=predicates)
 
     def __lt__(self, other):
-        # EqualityMatching < RangeMatching < PredictionMatching < GridBasedMatching < FreeSizeMatching < TruePred
+        # EqualityMatching < RangeMatching < PredictionMatching < Embedding < GridBasedMatching < FreeSizeMatching < TruePred
         if self.tag in _MATCHING_ORDER and other.tag in _MATCHING_ORDER:
             return _MATCHING_ORDER[self.tag] < _MATCHING_ORDER[other.tag]
 

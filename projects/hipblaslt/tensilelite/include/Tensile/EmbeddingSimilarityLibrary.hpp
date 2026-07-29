@@ -25,17 +25,26 @@
  *******************************************************************************/
 
 #pragma once
+#include <cmath>
 #include <iostream>
+#include <limits>
 #include <queue>
 #include <set>
 #include <vector>
 
 #include <Tensile/Debug.hpp>
-#include <Tensile/EmbeddingSimilarity.hpp>
-#include <Tensile/MLFeatures.hpp>
-#include <Tensile/ProblemKey.hpp>
 #include <Tensile/SolutionLibrary.hpp>
 #include <Tensile/Utils.hpp>
+#include <Tensile/UtilsOrigami.hpp>
+#include <Tensile/hip/HipHardware.hpp>
+
+#if ORIGAMI_ENABLE_NN
+#  include <origami/nn/nn.hpp>
+#else
+#  include <Tensile/EmbeddingSimilarity.hpp>
+#  include <Tensile/MLFeatures.hpp>
+#  include <Tensile/ProblemKey.hpp>
+#endif
 
 
 namespace TensileLite
@@ -50,30 +59,35 @@ namespace TensileLite
     template <typename MyProblem, typename MySolution = typename MyProblem::Solution>
     struct EmbeddingSimilarityLibrary : public SolutionLibrary<MyProblem, MySolution>
     {
+        std::map<int, std::shared_ptr<MySolution>> solutionmap;
+        std::vector<std::shared_ptr<MySolution>>   solutions;
+        std::vector<origami::config_t>             origami_config_list;
+
+#if ORIGAMI_ENABLE_NN
+        origami::nn::library_models_t nn_models;
+
+        void quantize() {}
+#else
         using Encoder            = EmbeddingSimilarity::Encoder;
         using SolutionEmbeddings = TensileLite::EmbeddingSimilarity::SolutionEmbeddings;
         using HardwareConstants  = EmbeddingSimilarity::HardwareConstants;
         using FallbackRules      = EmbeddingSimilarity::FallbackRules;
 
-
-        std::map<int, std::shared_ptr<MySolution>> solutionmap;
-        std::vector<std::shared_ptr<MySolution>>   solutions;
-        std::shared_ptr<Encoder>                   encoder;
-        std::shared_ptr<SolutionEmbeddings>        embeddings;
-        std::shared_ptr<HardwareConstants>         hw_constants;
-        std::shared_ptr<FallbackRules>             fallback_rules;
-        bool                                       is_quantized_ = false;
+        std::shared_ptr<Encoder>           encoder;
+        std::shared_ptr<SolutionEmbeddings> embeddings;
+        std::shared_ptr<HardwareConstants> hw_constants;
+        std::shared_ptr<FallbackRules>     fallback_rules;
+        bool                               is_quantized_ = false;
 
         void quantize()
         {
             if(encoder == nullptr || embeddings == nullptr)
-            {
                 return;
-            }
             encoder->network.quantize();
             embeddings->quantize();
             is_quantized_ = true;
         }
+#endif
 
         static std::string Type()
         {
@@ -85,10 +99,13 @@ namespace TensileLite
         }
         virtual std::string description() const override
         {
+#if ORIGAMI_ENABLE_NN
+            return concatenate(type(), ", configs: ", origami_config_list.size());
+#else
             if(encoder == nullptr)
                 return concatenate(type(), ", EmbeddingSimilarity: nullptr");
-            else
-                return concatenate(type(), ": ", encoder->description());
+            return concatenate(type(), ": ", encoder->description());
+#endif
         }
 
         virtual std::shared_ptr<MySolution> getSolutionByIndex(MyProblem const& problem,
@@ -128,41 +145,151 @@ namespace TensileLite
                                                             Hardware const&  hardware,
                                                             int numSolutions) const override
         {
-            bool debug = Debug::Instance().printPropertyEvaluation();
+#if ORIGAMI_ENABLE_NN
+            if(!origami_config_list.empty())
+                return findTopSolutionsOrigami(problem, hardware, numSolutions);
+            return {};
+#else
+            if(hasLegacyModel())
+                return findTopSolutionsLegacy(problem, hardware, numSolutions);
+            return {};
+#endif
+        }
+
+        virtual SolutionSet<MySolution>
+            findAllSolutionsGroupedGemm(std::vector<MyProblem> const& problems,
+                                        Hardware const&               hardware,
+                                        SolutionLibrarySearchType     searchType
+                                        = SolutionLibrarySearchType::DEFAULT) const override
+        {
+            SolutionSet<MySolution> rv;
+            for(auto const& row : solutionmap)
+                rv.insert(row.second);
+
+            return rv;
+        }
+
+    protected:
+#if ORIGAMI_ENABLE_NN
+        SolutionVector<MySolution> findTopSolutionsOrigami(MyProblem const& problem,
+                                                           Hardware const&  hardware,
+                                                           int              numSolutions) const
+        {
+            SolutionVector<MySolution> rv;
+
+            if(nn_models.embedding_similarity < 0)
+                return rv;
+
+            hip::HipAMDGPU const* pAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
+            if(pAMDGPU == nullptr || pAMDGPU->analyticalHardware == nullptr)
+                return rv;
+
+            size_t m     = 1;
+            size_t n     = 1;
+            size_t k     = 1;
+            size_t batch = 1;
+            for(size_t i = 0; i < problem.freeIndicesA().size(); i++)
+                m *= problem.freeSizeA(i);
+            for(size_t i = 0; i < problem.freeIndicesB().size(); i++)
+                n *= problem.freeSizeB(i);
+            for(size_t i = 0; i < problem.boundIndices().size(); ++i)
+                k *= problem.boundSize(i);
+            for(size_t i = 0; i < problem.batchIndices().size(); ++i)
+                batch *= problem.batchSize(i);
+
+            auto miDataType = datatypeToAnalyticalDatatype(problem.computeInputTypeA());
+            if(problem.f32XdlMathOp() == rocisa::DataType::XFloat32)
+                miDataType = origami::data_type_t::XFloat32;
+
+            origami::problem_t origami_problem = {
+                .size        = {m, n, k},
+                .batch       = batch,
+                .a_transpose = problem.transA() ? origami::transpose_t::T : origami::transpose_t::N,
+                .b_transpose = problem.transB() ? origami::transpose_t::T : origami::transpose_t::N,
+                .a_dtype     = datatypeToAnalyticalDatatype(problem.a().dataType()),
+                .b_dtype     = datatypeToAnalyticalDatatype(problem.b().dataType()),
+                .c_dtype     = datatypeToAnalyticalDatatype(problem.c().dataType()),
+                .d_dtype     = datatypeToAnalyticalDatatype(problem.d().dataType()),
+                .mi_dtype    = miDataType,
+                .a_mx_block_size = 0,
+                .b_mx_block_size = 0,
+            };
+
+            origami::rank_options_t rank_options;
+            rank_options.inference      = origami::inference_mode_t::nn_fallback;
+            rank_options.nn_backend     = origami::nn_backend_t::embedding_similarity;
+            rank_options.library_models = &nn_models;
+
+            auto prediction_result = origami::rank_configs(
+                origami_problem, *(pAMDGPU->analyticalHardware), origami_config_list, rank_options);
+
+            for(const auto& r : prediction_result)
+            {
+                if(std::isnan(r.latency))
+                    continue;
+                auto solutionIter = solutionmap.find(static_cast<int>(r.config.index));
+                if(solutionIter == solutionmap.end())
+                    continue;
+                auto& solution = solutionIter->second;
+                if((*(solution->hardwarePredicate))(hardware)
+                   && (*(solution->problemPredicate))(problem))
+                {
+                    rv.emplace_back(solution);
+                    if(numSolutions >= 0
+                       && rv.size() == static_cast<std::size_t>(numSolutions))
+                        break;
+                }
+            }
+
+            return rv;
+        }
+#else
+        static constexpr float EPSILON = 1e-8f;
+
+        bool hasLegacyModel() const
+        {
+            return encoder != nullptr && embeddings != nullptr
+                   && !encoder->network.proj_bias_.empty() && !embeddings->embeddings.empty();
+        }
+
+        SolutionVector<MySolution> findTopSolutionsLegacy(MyProblem const& problem,
+                                                          Hardware const&  hardware,
+                                                          int              numSolutions) const
+        {
+            bool  debug       = Debug::Instance().printPropertyEvaluation();
             float batch_count = problem.batchSize(0);
-            
+
             if(batch_count > 1) // TODO batch_count !=  1 not supported
                 return {};
 
             float m = problem.freeSizeA(0);
             float n = problem.freeSizeB(0);
             float k = problem.boundSize(0);
-            int gemm_category = -1;
+            int   gemm_category = -1;
 
-            if (fallback_rules && fallback_rules->hasData())
+            if(fallback_rules && fallback_rules->hasData())
             {
-                gemm_category = classifyGEMM(m, n, k, batch_count); 
-                if (fallback_rules->matchesPreModel(m, n, k, gemm_category, debug))
-                {
+                gemm_category = classifyGEMM(m, n, k, batch_count);
+                if(fallback_rules->matchesPreModel(m, n, k, gemm_category, debug))
                     return {};
-                }
             }
-            
+
             std::vector<float> gemm_embedding = computeGEMMEmbeddings(problem);
 
-            std::vector<int> centroid_indexes(embeddings->centroids.size());
+            std::vector<int>   centroid_indexes(embeddings->centroids.size());
             std::iota(centroid_indexes.begin(), centroid_indexes.end(), 0);
             std::vector<float> centroid_similarities(embeddings->centroids.size());
 
             int max_sim_idx = 0;
-            if (embeddings->centroids.size() > 1)
+            if(embeddings->centroids.size() > 1)
             {
-                if (is_quantized_)
-                    inner_product_bf16(embeddings->centroids_bf16, gemm_embedding, centroid_similarities);
+                if(is_quantized_)
+                    inner_product_bf16(
+                        embeddings->centroids_bf16, gemm_embedding, centroid_similarities);
                 else
                     inner_product(embeddings->centroids, gemm_embedding, centroid_similarities);
             }
-    
+
             std::vector<std::pair<float, std::shared_ptr<MySolution>>> rankedSolutions;
             rankedSolutions.reserve(numSolutions);
 
@@ -203,14 +330,11 @@ namespace TensileLite
                                   });
             }
 
-            // Check post-model fallback rules with top score
-            if (gemm_category != -1 && !rankedSolutions.empty())
+            if(gemm_category != -1 && !rankedSolutions.empty())
             {
-                float top_score = rankedSolutions[0].first; 
-                if (fallback_rules->matchesPostModel(m, n, k, gemm_category, top_score, debug))
-                {
-                    return {}; 
-                }
+                float top_score = rankedSolutions[0].first;
+                if(fallback_rules->matchesPostModel(m, n, k, gemm_category, top_score, debug))
+                    return {};
             }
 
             SolutionVector<MySolution> rv;
@@ -223,22 +347,6 @@ namespace TensileLite
                            });
             return rv;
         }
-
-        virtual SolutionSet<MySolution>
-            findAllSolutionsGroupedGemm(std::vector<MyProblem> const& problems,
-                                        Hardware const&               hardware,
-                                        SolutionLibrarySearchType     searchType
-                                        = SolutionLibrarySearchType::DEFAULT) const override
-        {
-            SolutionSet<MySolution> rv;
-            for(auto const& row : solutionmap)
-                rv.insert(row.second);
-
-            return rv;
-        }
-
-    protected:
-        static constexpr float EPSILON = 1e-8f;
 
         int classifyGEMM(float m, float n, float k, float batch_count) const
         {
@@ -1089,6 +1197,7 @@ namespace TensileLite
 
             return amax;
         }
+#endif
     };
 
 } // namespace TensileLite

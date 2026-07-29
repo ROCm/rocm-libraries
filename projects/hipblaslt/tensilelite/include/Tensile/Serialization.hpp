@@ -33,6 +33,7 @@
 #include <Tensile/Serialization/Containers.hpp>
 #include <Tensile/Serialization/ContractionPredicates.hpp>
 #include <Tensile/Serialization/ContractionSolution.hpp>
+#include <Tensile/Serialization/EmbeddingSimilarityLibrary.hpp>
 #include <Tensile/Serialization/ExactLogicLibrary.hpp>
 #include <Tensile/Serialization/FreeSizeLibrary.hpp>
 #include <Tensile/Serialization/PredictionLibrary.hpp>

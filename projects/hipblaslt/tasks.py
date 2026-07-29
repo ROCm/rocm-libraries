@@ -532,6 +532,9 @@ def build(
     if no_lazy_load:
         cmake_opts.append("-DHIPBLASLT_ENABLE_LAZY_LOAD=OFF")
 
+    if os.environ.get("ORIGAMI_ENABLE_NN", "").upper() in ("ON", "1", "TRUE", "YES"):
+        cmake_opts.append("-DORIGAMI_ENABLE_NN=ON")
+
     # Client options
     if not clients:
         client_opts = ["-DHIPBLASLT_ENABLE_CLIENT=OFF"]

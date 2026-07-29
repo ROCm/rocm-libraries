@@ -271,8 +271,8 @@ namespace TensileLite
             const bool effectiveDynamic = 
                 (forceDynamic == 1) ||
                 (forceDynamic != 0 && problem.getParams().streamKTileSchedulingMode() != 0);
-            const bool                 predictionLib = Debug::Instance().usePredictionLibrary() || effectiveDynamic;
-
+            const bool                 predictionLib = (Debug::Instance().usePredictionLibrary() == 1)|| effectiveDynamic;
+            const bool                 embeddingLib = Debug::Instance().usePredictionLibrary() == 2;
             // false in case of early return;
             lastFindTopRetAll = false;
 
@@ -286,6 +286,11 @@ namespace TensileLite
                        || (row.first.value->type() == "RangeMatching")))
                     continue;
 
+                if(embeddingLib
+                    && ((row.first.value->type() == "EqualityMatching")
+                        || (row.first.value->type() == "RangeMatching")
+                        || (row.first.value->type() == "PredictionMatching")))
+                        continue;
                 if(row.first(problem, hardware))
                 {
                     solutions

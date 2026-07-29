@@ -35,7 +35,8 @@ from Tensile.SolutionStructs import Solution, ProblemSizes
 from Tensile.SolutionStructs.Problem import ProblemType, problemTypeToEnum
 
 from typing import IO, NamedTuple, List, Dict, Optional
-from Tensile.SolutionStructs.Solution import BiasTypeArgs, ActivationArgs
+from Tensile.SolutionStructs.Solution import BiasTypeArgs, ActivationArgs, \
+    resetTypeMismatchCollector, getTypeMismatchCollector
 import io
 import os
 import sys
@@ -325,6 +326,7 @@ class LibraryLogic(NamedTuple):
     solutions: list
     exactLogic: list
     library: SolutionLibrary.MasterSolutionLibrary
+    typeMismatches: dict = {}
 
 def parseLibraryLogicFile(
         filename,
@@ -359,6 +361,7 @@ def parseLibraryLogicData(
         lazyLibraryLoading: bool
     ):
     """Parses the data of a library logic file."""
+    resetTypeMismatchCollector()
     if isinstance(data, List):
         data = parseLibraryLogicList(data, srcFile)
     elif data.get("LibraryType", "") == "EmbeddingSimilarity":
@@ -454,7 +457,7 @@ def parseLibraryLogicData(
     )
 
     return LibraryLogic(data["ScheduleName"], data["ArchitectureName"], problemType, solutions, \
-            data.get("ExactLogic"), newLibrary)
+            data.get("ExactLogic"), newLibrary, getTypeMismatchCollector())
 
 
 def parseLibraryLogicList(data, srcFile="?"):

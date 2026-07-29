@@ -28,9 +28,19 @@
 
 #include <Tensile/Debug.hpp>
 #include <Tensile/EmbeddingSimilarityLibrary.hpp>
+#include <Tensile/MasterSolutionLibrary.hpp>
 
 #include <cstddef>
+#include <cstring>
+#include <iostream>
+#include <limits>
 #include <unordered_set>
+
+#if ORIGAMI_ENABLE_NN
+#  include <origami/nn/nn.hpp>
+#else
+#  include <Tensile/EmbeddingSimilarity.hpp>
+#endif
 
 
 namespace TensileLite
@@ -38,6 +48,7 @@ namespace TensileLite
     namespace Serialization
     {
 
+#ifndef ORIGAMI_ENABLE_NN
         template <typename IO>
         struct MappingTraits<EmbeddingSimilarity::StandardScaler, IO>
         {
@@ -257,12 +268,81 @@ namespace TensileLite
             
             const static bool flow = false;
         };
+#endif
 
         template <typename MyProblem, typename MySolution, typename IO>
         struct MappingTraits<EmbeddingSimilarityLibrary<MyProblem, MySolution>, IO>
         {
             using Library = EmbeddingSimilarityLibrary<MyProblem, MySolution>;
             using iot     = IOTraits<IO>;
+
+#if ORIGAMI_ENABLE_NN
+            static std::string logic_stem_from_path(const std::string& path)
+            {
+                std::string stem = path;
+                const auto  slashPos = stem.find_last_of("/\\");
+                if(slashPos != std::string::npos)
+                    stem = stem.substr(slashPos + 1);
+                const auto periodPos = stem.find('.');
+                if(periodPos != std::string::npos)
+                    stem = stem.substr(0, periodPos);
+                return stem;
+            }
+
+            static std::string directory_from_path(const std::string& path)
+            {
+                const auto slashPos = path.find_last_of("/\\");
+                if(slashPos == std::string::npos)
+                    return ".";
+                return path.substr(0, slashPos);
+            }
+
+            static origami::config_t make_origami_config(MySolution const& solution, int index)
+            {
+                origami::dim3_t origami_mi;
+                if(solution.sizeMapping.matrixInstruction[0] == 0
+                   && solution.sizeMapping.matrixInstruction[1] == 0
+                   && solution.sizeMapping.matrixInstruction[2] == 0)
+                {
+                    origami_mi = {1, 1, 64};
+                }
+                else
+                {
+                    origami_mi = {
+                        static_cast<size_t>(solution.sizeMapping.matrixInstruction[0]),
+                        static_cast<size_t>(solution.sizeMapping.matrixInstruction[1]),
+                        static_cast<size_t>(solution.sizeMapping.matrixInstruction[2])};
+                }
+
+                if(Debug::Instance().printPropertyEvaluation()
+                   && solution.sizeMapping.CUOccupancy <= 0)
+                {
+                    std::cerr << "TensileLite::DEBUG: sizeMapping.CUOccupancy="
+                              << solution.sizeMapping.CUOccupancy
+                              << " (<=0) for solution '" << solution.kernelName
+                              << "'; clamping to 1 in origami config.\n";
+                }
+
+                return origami::config_t{
+                    .mt = {solution.sizeMapping.macroTile.x,
+                           solution.sizeMapping.macroTile.y,
+                           solution.sizeMapping.depthU},
+                    .mi                        = origami_mi,
+                    .hand_optimized_main_loop  = (solution.sizeMapping.customMainLoopScheduling > 0),
+                    .subtile                   = solution.sizeMapping.useSubtileImpl,
+                    .occupancy = std::max(solution.sizeMapping.CUOccupancy, static_cast<int>(1)),
+                    .workgroup_mapping         = solution.sizeMapping.workGroupMapping,
+                    .cache_hints_a             = solution.sizeMapping.nonTemporalA,
+                    .cache_hints_b             = solution.sizeMapping.nonTemporalB,
+                    .workspace_size            = std::numeric_limits<size_t>::max(),
+                    .workspace_size_per_elem_c = std::numeric_limits<size_t>::max(),
+                    .index                     = static_cast<size_t>(index),
+                    .grvw_a                    = solution.sizeMapping.grvwA,
+                    .grvw_b                    = solution.sizeMapping.grvwB,
+                    .gwvw_d                    = solution.sizeMapping.gwvwD,
+                };
+            }
+#endif
 
             static void mapping(IO& io, Library& lib)
             {
@@ -307,9 +387,35 @@ namespace TensileLite
                         auto solution = slnIter->second;
                         lib.solutionmap.insert(std::make_pair(index, solution));
                         lib.solutions.push_back(solution);
+#if ORIGAMI_ENABLE_NN
+                        lib.origami_config_list.emplace_back(make_origami_config(*solution, index));
+#endif
                     }
                 }
 
+#if ORIGAMI_ENABLE_NN
+                if(!iot::outputting(io))
+                {
+                    const std::string logicStem = logic_stem_from_path(ctx->filename);
+                    const std::string dataDir   = directory_from_path(ctx->filename);
+                    lib.nn_models               = origami::nn::load_models_for_logic(logicStem, dataDir);
+                    if(const char* diag = std::getenv("ORIGAMI_NN_DIAG"))
+                    {
+                        if(diag[0] != '\0' && std::strcmp(diag, "0") != 0)
+                        {
+                            std::fprintf(stderr,
+                                         "[ORIGAMI_NN_DIAG] EmbeddingSimilarityLibrary stem=%s dir=%s "
+                                         "embedding_similarity_handle=%d\n",
+                                         logicStem.c_str(),
+                                         dataDir.c_str(),
+                                         lib.nn_models.embedding_similarity);
+                            std::fflush(stderr);
+                        }
+                    }
+                }
+#endif
+
+#ifndef ORIGAMI_ENABLE_NN
                 auto encoder     = std::make_shared<EmbeddingSimilarity::Encoder>();
                 lib.encoder      = encoder;
                 iot::mapOptional(io, "encoder", *encoder);
@@ -339,9 +445,7 @@ namespace TensileLite
                 iot::mapOptional(io, "quantize", quantize);
 
                 if(quantize)
-                {
                     lib.quantize();
-                }
 
                 const bool model_loaded = !encoder->network.proj_bias_.empty()
                                           && !embeddings->embeddings.empty();
@@ -366,6 +470,7 @@ namespace TensileLite
                     throw std::runtime_error(
                         "ERROR: EmbeddingSimilarity library solution embeddings size "
                         "does not match the network output size.");
+#endif
             }
 
             const static bool flow = false;

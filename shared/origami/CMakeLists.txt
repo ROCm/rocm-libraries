@@ -153,21 +153,10 @@ if(ORIGAMI_ENABLE_NN)
         PRIVATE ORIGAMI_NN_BUNDLED_WEIGHTS_DIR="${_origami_nn_bundled_weights_dir}"
     )
 
-    find_package(yaml-cpp 0.8 QUIET CONFIG)
-    if(NOT yaml-cpp_FOUND)
-        if(ORIGAMI_ENABLE_FETCH)
-            include(FetchContent)
-            FetchContent_Declare(
-                yaml-cpp
-                GIT_REPOSITORY https://github.com/jbeder/yaml-cpp.git
-                GIT_TAG 0.8.0
-                GIT_SHALLOW TRUE
-            )
-            FetchContent_MakeAvailable(yaml-cpp)
-        else()
-            message(FATAL_ERROR "yaml-cpp not found (set ORIGAMI_ENABLE_FETCH=ON to auto-fetch)")
-        endif()
-    endif()
+    list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../cmake")
+    include(EnsureYamlCpp)
+    set(ENSURE_YAML_CPP_ALLOW_FETCH ${ORIGAMI_ENABLE_FETCH})
+    ensure_yaml_cpp()
     target_link_libraries(origami PRIVATE yaml-cpp::yaml-cpp)
 endif()
 

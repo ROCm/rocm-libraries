@@ -487,6 +487,8 @@ class ProblemPredicate(Properties.Predicate):
             return cls(tag, index=index, value=value)
 
         if key.startswith('Assert'):
+            if not value:
+                return None
             raise RuntimeError("Unknown assertion key: {}".format(key))
 
     @classmethod
