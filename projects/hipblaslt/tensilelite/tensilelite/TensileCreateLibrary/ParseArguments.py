@@ -204,7 +204,7 @@ def parseArguments(input: Optional[List[str]] = None) -> Dict[str, Any]:
         "(subtile kernels only; adds 2 instructions per iteration)"
     )
 
-    args = argParser.parse_args()
+    args = argParser.parse_args(input)
 
     arguments = {}
     arguments["RuntimeLanguage"] = args.RuntimeLanguage

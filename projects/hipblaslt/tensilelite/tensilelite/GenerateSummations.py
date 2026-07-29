@@ -27,7 +27,6 @@ import os
 import pandas as pd
 import numpy as np
 import yaml
-import subprocess
 import glob
 
 from shutil import copyfile
@@ -37,6 +36,7 @@ from . import LibraryIO
 
 from . import ClientWriter
 from .TensileCreateLibrary import tensileLibraryFile
+from .TensileCreateLibrary import run as createLibrary
 from tensilelite.Common import ensurePath, printExit
 from tensilelite.Common.Architectures import isaToGfx, gfxToSwCodename, detectGlobalCurrentISA
 from tensilelite.Common.GlobalParameters import assignGlobalParameters
@@ -51,15 +51,13 @@ def createLibraryForBenchmark(logicPath, libraryPath, currentPath):
     Selection.
     """
 
-    pythonExePath = os.path.join(os.path.dirname(os.path.realpath(__file__)), "bin", "TensileCreateLibrary")
-    args = [pythonExePath, \
-        "--new-client-only", "--no-short-file-names", \
+    args = [
         "--architecture=all", "--code-object-version=default", "--library-format=yaml", \
-        logicPath, libraryPath, "HIP"]
+        os.path.abspath(logicPath), os.path.abspath(libraryPath), "HIP"]
 
     try:
-        subprocess.run(args, check=True, cwd=currentPath)
-    except (subprocess.CalledProcessError, OSError) as e:
+        createLibrary(args)
+    except (RuntimeError, OSError, SystemExit) as e:
         printExit("ClientWriter Benchmark Process exited with error: {}".format(e))
 
 def GenerateSummations(userArgs):

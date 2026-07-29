@@ -575,12 +575,12 @@ class TestMain:
 
     def test_main_strict_known_bugs_exits_on_stale(self):
         """main should exit 1 under --strict-known-bugs when a stale entry now passes"""
-        from Tensile.TensileLogic.Run import main
+        from tensilelite.TensileLogic.Run import main
 
-        with patch('Tensile.TensileLogic.Run.ParallelMap2') as mock_parallel_map, \
-             patch('Tensile.TensileLogic.Run.load_known_bugs') as mock_load_bugs, \
-             patch('Tensile.TensileLogic.Run._setup') as mock_setup, \
-             patch('Tensile.TensileLogic.Run.reset_reported_failures') as mock_reset, \
+        with patch('tensilelite.TensileLogic.Run.ParallelMap2') as mock_parallel_map, \
+             patch('tensilelite.TensileLogic.Run.load_known_bugs') as mock_load_bugs, \
+             patch('tensilelite.TensileLogic.Run._setup') as mock_setup, \
+             patch('tensilelite.TensileLogic.Run.reset_reported_failures') as mock_reset, \
              patch('warnings.filterwarnings'):
 
             mock_args = Mock()
@@ -610,12 +610,12 @@ class TestMain:
 
     def test_main_stale_known_bugs_lenient_without_strict(self):
         """main should not fail on stale entries when --strict-known-bugs is off"""
-        from Tensile.TensileLogic.Run import main
+        from tensilelite.TensileLogic.Run import main
 
-        with patch('Tensile.TensileLogic.Run.ParallelMap2') as mock_parallel_map, \
-             patch('Tensile.TensileLogic.Run.load_known_bugs') as mock_load_bugs, \
-             patch('Tensile.TensileLogic.Run._setup') as mock_setup, \
-             patch('Tensile.TensileLogic.Run.reset_reported_failures') as mock_reset, \
+        with patch('tensilelite.TensileLogic.Run.ParallelMap2') as mock_parallel_map, \
+             patch('tensilelite.TensileLogic.Run.load_known_bugs') as mock_load_bugs, \
+             patch('tensilelite.TensileLogic.Run._setup') as mock_setup, \
+             patch('tensilelite.TensileLogic.Run.reset_reported_failures') as mock_reset, \
              patch('warnings.filterwarnings'):
 
             mock_args = Mock()
