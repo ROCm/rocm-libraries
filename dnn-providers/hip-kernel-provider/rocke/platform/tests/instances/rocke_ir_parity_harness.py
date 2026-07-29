@@ -64,7 +64,6 @@ def gemm_spec(
     pipeline,
     epilogue,
     wave_size,
-    cshuffle_no_alias=False,
 ):
     from rocke.instances.common.gemm_universal import (
         DataSpec,
@@ -93,18 +92,62 @@ def gemm_spec(
             pad_m=True,
             pad_n=True,
             pad_k=True,
-            cshuffle_no_alias=cshuffle_no_alias,
         ),
         data=DataSpec(dtype_a="fp16", dtype_b="fp16", dtype_c="fp16"),
         wave_size=wave_size,
     )
 
 
-def build_gemm(name, arch, *args, **kwargs):
+def build_gemm(name, arch, *args):
     def _build():
         from rocke.instances.common.gemm_universal import build_universal_gemm
 
-        return build_universal_gemm(gemm_spec(name, arch, *args, **kwargs), arch=arch)
+        return build_universal_gemm(gemm_spec(name, arch, *args), arch=arch)
+
+    return _build
+
+
+def build_dgrad(
+    name,
+    arch,
+    problem_args,
+    *,
+    wave_size,
+    wtm,
+    wtn,
+    wtk,
+    tile_m,
+    tile_n,
+    tile_k,
+    split_k=1,
+):
+    def _build():
+        from rocke.instances.common.conv_implicit_gemm_dgrad import (
+            DgradConvSpec,
+            build_implicit_gemm_conv_dgrad,
+        )
+        from rocke.instances.common._conv_implicit_gemm_common import (
+            ConvDataSpec,
+            ConvProblem,
+        )
+
+        p = ConvProblem(*problem_args)
+        spec = DgradConvSpec(
+            problem=p,
+            name=name,
+            data=ConvDataSpec(dtype_a="fp16", dtype_b="fp16", dtype_d="fp16"),
+            tile_m=tile_m,
+            tile_n=tile_n,
+            tile_k=tile_k,
+            warp_m=2,
+            warp_n=1 if wave_size == 32 else 2,
+            warp_tile_m=wtm,
+            warp_tile_n=wtn,
+            warp_tile_k=wtk,
+            wave_size=wave_size,
+            split_k=split_k,
+        )
+        return build_implicit_gemm_conv_dgrad(spec, arch=arch)
 
     return _build
 
@@ -154,7 +197,7 @@ def build_conv(
     return _build
 
 
-def build_conv_wgrad(
+def build_dgrad(
     name,
     arch,
     problem_args,
@@ -166,15 +209,12 @@ def build_conv_wgrad(
     tile_m,
     tile_n,
     tile_k,
-    pipeline="mem",
-    epilogue="default",
     split_k=1,
-    dtype_d="fp16",
 ):
     def _build():
-        from rocke.instances.common.conv_implicit_gemm_wgrad import (
-            WgradConvSpec,
-            build_implicit_gemm_conv_wgrad,
+        from rocke.instances.common.conv_implicit_gemm_dgrad import (
+            DgradConvSpec,
+            build_implicit_gemm_conv_dgrad,
         )
         from rocke.instances.common._conv_implicit_gemm_common import (
             ConvDataSpec,
@@ -182,10 +222,10 @@ def build_conv_wgrad(
         )
 
         p = ConvProblem(*problem_args)
-        spec = WgradConvSpec(
+        spec = DgradConvSpec(
             problem=p,
             name=name,
-            data=ConvDataSpec(dtype_a="fp16", dtype_b="fp16", dtype_d=dtype_d),
+            data=ConvDataSpec(dtype_a="fp16", dtype_b="fp16", dtype_d="fp16"),
             tile_m=tile_m,
             tile_n=tile_n,
             tile_k=tile_k,
@@ -195,11 +235,9 @@ def build_conv_wgrad(
             warp_tile_n=wtn,
             warp_tile_k=wtk,
             wave_size=wave_size,
-            pipeline=pipeline,
-            epilogue=epilogue,
             split_k=split_k,
         )
-        return build_implicit_gemm_conv_wgrad(spec, arch=arch)
+        return build_implicit_gemm_conv_dgrad(spec, arch=arch)
 
     return _build
 
@@ -352,27 +390,6 @@ def cases():
             "compv4",
             "cshuffle",
             64,
-        ),
-    )
-    add(
-        "gemm",
-        "gemm/gfx950/t128x128x32/cshuffle_no_alias",
-        "gfx950",
-        build_gemm(
-            "irhash_gemm_950_a_noalc",
-            "gfx950",
-            128,
-            128,
-            32,
-            2,
-            2,
-            32,
-            32,
-            16,
-            "compv4",
-            "cshuffle",
-            64,
-            cshuffle_no_alias=True,
         ),
     )
     add(
@@ -690,90 +707,90 @@ def cases():
         ),
     )
 
-    # Conv wgrad: implicit-GEMM backward-weight direction (NHWK x NHWC -> KYXC).
-    # wgrad1: small 3x3 conv (N8 H8 W8 C16 K32 Y3 X3, stride/pad=defaults).
-    # wgrad2: 1x1 conv (N2 H16 W16 C32 K32, no filter spatial).
-    wgrad1 = (1, 8, 8, 16, 32, 3, 3, 1, 1, 1, 1, 1, 1)
-    wgrad2 = (2, 16, 16, 32, 32, 1, 1, 1, 1, 0, 0, 1, 1)
+    # Dgrad: backward-data implicit-GEMM.  Problem args match the forward conv
+    # set; atoms chosen to be valid on each arch.  Stride=2 exercises the tiled
+    # (multi-sub-GEMM) path; stride=1 exercises the direct-store epilogue.
+    #
+    # ConvProblem positional args: (N, Hi, Wi, C, K, Y, X, sH, sW, pH, pW, dH, dW)
+    dgrad1 = (1, 8, 8, 16, 32, 3, 3, 1, 1, 1, 1, 1, 1)   # stride=1
+    dgrad2 = (2, 16, 16, 32, 32, 3, 3, 2, 2, 1, 1, 1, 1)  # stride=2, 4 sub-GEMMs
     add(
-        "conv_wgrad",
-        "conv_wgrad/gfx942/n1h8c16k32r3",
+        "conv_dgrad",
+        "conv_dgrad/gfx942/n1h8c16k32r3_s1",
         "gfx942",
-        build_conv_wgrad(
-            "irhash_wgrad_942_a",
+        build_dgrad(
+            "irhash_dgrad_942_s1",
             "gfx942",
-            wgrad1,
+            dgrad1,
+            wave_size=64,
+            wtm=32,
+            wtn=32,
+            wtk=8,
+            tile_m=64,
+            tile_n=64,
+            tile_k=64,
+        ),
+    )
+    add(
+        "conv_dgrad",
+        "conv_dgrad/gfx942/n2h16c32k32r3_s2",
+        "gfx942",
+        build_dgrad(
+            "irhash_dgrad_942_s2",
+            "gfx942",
+            dgrad2,
             wave_size=64,
             wtm=16,
             wtn=16,
             wtk=16,
             tile_m=64,
-            tile_n=32,
-            tile_k=16,
+            tile_n=64,
+            tile_k=32,
         ),
     )
     add(
-        "conv_wgrad",
-        "conv_wgrad/gfx950/n1h8c16k32r3",
+        "conv_dgrad",
+        "conv_dgrad/gfx950/n1h8c16k32r3_s1",
         "gfx950",
-        build_conv_wgrad(
-            "irhash_wgrad_950_a",
+        build_dgrad(
+            "irhash_dgrad_950_s1",
             "gfx950",
-            wgrad1,
+            dgrad1,
             wave_size=64,
             wtm=32,
             wtn=32,
             wtk=16,
             tile_m=64,
             tile_n=64,
-            tile_k=32,
-            pipeline="mem",
-            epilogue="default",
+            tile_k=64,
         ),
     )
     add(
-        "conv_wgrad",
-        "conv_wgrad/gfx950/n2h16c32k32r1",
+        "conv_dgrad",
+        "conv_dgrad/gfx950/n2h16c32k32r3_s2",
         "gfx950",
-        build_conv_wgrad(
-            "irhash_wgrad_950_b",
+        build_dgrad(
+            "irhash_dgrad_950_s2",
             "gfx950",
-            wgrad2,
+            dgrad2,
             wave_size=64,
-            wtm=16,
-            wtn=16,
+            wtm=32,
+            wtn=32,
             wtk=16,
             tile_m=64,
-            tile_n=32,
-            tile_k=16,
+            tile_n=64,
+            tile_k=64,
         ),
     )
+    # gfx1151 WMMA (wave32) — stride=1 only; WMMA dgrad supports only 16x16x16.
     add(
-        "conv_wgrad",
-        "conv_wgrad/gfx950/n1h8c16k32r3_spk4",
-        "gfx950",
-        build_conv_wgrad(
-            "irhash_wgrad_950_spk4",
-            "gfx950",
-            wgrad1,
-            wave_size=64,
-            wtm=16,
-            wtn=16,
-            wtk=16,
-            tile_m=64,
-            tile_n=32,
-            tile_k=16,
-            split_k=4,
-        ),
-    )
-    add(
-        "conv_wgrad",
-        "conv_wgrad/gfx1151/n1h8c16k32r3",
+        "conv_dgrad",
+        "conv_dgrad/gfx1151/n1h8c16k32r3_s1",
         "gfx1151",
-        build_conv_wgrad(
-            "irhash_wgrad_1151_a",
+        build_dgrad(
+            "irhash_dgrad_1151_s1",
             "gfx1151",
-            wgrad1,
+            dgrad1,
             wave_size=32,
             wtm=16,
             wtn=16,
@@ -783,39 +800,134 @@ def cases():
             tile_k=16,
         ),
     )
+    # gfx90a mirrors gfx942 (wave64 MFMA).
     add(
-        "conv_wgrad",
-        "conv_wgrad/gfx1201/n1h8c16k32r3",
-        "gfx1201",
-        build_conv_wgrad(
-            "irhash_wgrad_1201_a",
-            "gfx1201",
-            wgrad1,
-            wave_size=32,
-            wtm=16,
-            wtn=16,
-            wtk=16,
-            tile_m=32,
-            tile_n=32,
-            tile_k=16,
-        ),
-    )
-    # gfx90a wgrad mirrors the gfx942 MFMA path.
-    add(
-        "conv_wgrad",
-        "conv_wgrad/gfx90a/n1h8c16k32r3",
+        "conv_dgrad",
+        "conv_dgrad/gfx90a/n1h8c16k32r3_s1",
         "gfx90a",
-        build_conv_wgrad(
-            "irhash_wgrad_90a_a",
+        build_dgrad(
+            "irhash_dgrad_90a_s1",
             "gfx90a",
-            wgrad1,
+            dgrad1,
+            wave_size=64,
+            wtm=32,
+            wtn=32,
+            wtk=8,
+            tile_m=64,
+            tile_n=64,
+            tile_k=64,
+        ),
+    )
+
+    # Dgrad: backward-data implicit-GEMM.  Problem args match the forward conv
+    # set; atoms chosen to be valid on each arch.  Stride=2 exercises the tiled
+    # (multi-sub-GEMM) path; stride=1 exercises the direct-store epilogue.
+    #
+    # ConvProblem positional args: (N, Hi, Wi, C, K, Y, X, sH, sW, pH, pW, dH, dW)
+    dgrad1 = (1, 8, 8, 16, 32, 3, 3, 1, 1, 1, 1, 1, 1)   # stride=1
+    dgrad2 = (2, 16, 16, 32, 32, 3, 3, 2, 2, 1, 1, 1, 1)  # stride=2, 4 sub-GEMMs
+    add(
+        "conv_dgrad",
+        "conv_dgrad/gfx942/n1h8c16k32r3_s1",
+        "gfx942",
+        build_dgrad(
+            "irhash_dgrad_942_s1",
+            "gfx942",
+            dgrad1,
+            wave_size=64,
+            wtm=32,
+            wtn=32,
+            wtk=8,
+            tile_m=64,
+            tile_n=64,
+            tile_k=64,
+        ),
+    )
+    add(
+        "conv_dgrad",
+        "conv_dgrad/gfx942/n2h16c32k32r3_s2",
+        "gfx942",
+        build_dgrad(
+            "irhash_dgrad_942_s2",
+            "gfx942",
+            dgrad2,
             wave_size=64,
             wtm=16,
             wtn=16,
             wtk=16,
             tile_m=64,
+            tile_n=64,
+            tile_k=64,
+        ),
+    )
+    add(
+        "conv_dgrad",
+        "conv_dgrad/gfx950/n1h8c16k32r3_s1",
+        "gfx950",
+        build_dgrad(
+            "irhash_dgrad_950_s1",
+            "gfx950",
+            dgrad1,
+            wave_size=64,
+            wtm=32,
+            wtn=32,
+            wtk=16,
+            tile_m=64,
+            tile_n=64,
+            tile_k=64,
+        ),
+    )
+    add(
+        "conv_dgrad",
+        "conv_dgrad/gfx950/n2h16c32k32r3_s2",
+        "gfx950",
+        build_dgrad(
+            "irhash_dgrad_950_s2",
+            "gfx950",
+            dgrad2,
+            wave_size=64,
+            wtm=32,
+            wtn=32,
+            wtk=16,
+            tile_m=64,
+            tile_n=64,
+            tile_k=64,
+        ),
+    )
+    # gfx1151 WMMA (wave32) — stride=1 only; WMMA dgrad supports only 16x16x16.
+    add(
+        "conv_dgrad",
+        "conv_dgrad/gfx1151/n1h8c16k32r3_s1",
+        "gfx1151",
+        build_dgrad(
+            "irhash_dgrad_1151_s1",
+            "gfx1151",
+            dgrad1,
+            wave_size=32,
+            wtm=16,
+            wtn=16,
+            wtk=16,
+            tile_m=32,
             tile_n=32,
             tile_k=16,
+        ),
+    )
+    # gfx90a mirrors gfx942 (wave64 MFMA).
+    add(
+        "conv_dgrad",
+        "conv_dgrad/gfx90a/n1h8c16k32r3_s1",
+        "gfx90a",
+        build_dgrad(
+            "irhash_dgrad_90a_s1",
+            "gfx90a",
+            dgrad1,
+            wave_size=64,
+            wtm=32,
+            wtn=32,
+            wtk=8,
+            tile_m=64,
+            tile_n=64,
+            tile_k=64,
         ),
     )
 
