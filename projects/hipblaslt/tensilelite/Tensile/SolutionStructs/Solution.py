@@ -957,6 +957,8 @@ class Solution(collections.abc.Mapping):
       isa = state["ISA"]
       if isaInfoMap[isa].asmCaps.get("HasMFMA", False):
         state["UseMFMAF32XEmulation"] = True # MFMA version for gfx950 etc.
+      # TF32 Emu Inf support: enabled by default for F32X emulation
+      state["_UseTF32EmuInfSupport"] = True
 
     state["MfmaInitCVgprs"] = False
 
@@ -2781,6 +2783,12 @@ class Solution(collections.abc.Mapping):
       #   Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT16x16x512_MI16x16x1
       if (state["MacroTile0"] == 16 and state["MacroTile1"] == 16 and state["DepthU"] == 512):
         state["UseDirect32XEmulation"] = False
+
+    # workaround for TF32 Emu Inf support:
+    # disable CMS for now (Inf-guard code scheduling not yet handled under CMS)
+    # TODO: re-enable CMS with Inf support
+    if state["UseF32XEmulation"]:
+      state["UseCustomMainLoopSchedule"] = 0
 
     # backup UsePLRPack from yaml before calling hasCustomSchedule
     backup_UsePLRPack = state["UsePLRPack"]

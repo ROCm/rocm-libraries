@@ -1047,6 +1047,10 @@ class KernelWriterAssembly(KernelWriter):
     # MFMA case
     if kernel["UseMFMAF32XEmulation"]:
       self.moduleVgprMacroValuB_T.add(RegSet("v", "IdentityMatrix", self.states.startVgprIdentityMatrix, 0))
+    # TF32 Inf Support
+    if self.states.useTF32EmuInfSupport:
+      self.moduleVgprMacroValuB_T.add(RegSet("v", "InfCheck", self.states.startVgprInfCheck, 0))
+      self.moduleVgprMacroValuB_T.add(RegSet("v", "InfTmp", self.states.startVgprInfTmp, 0))
 
   def _emitGL2PrefetchAddrRegSets(self, module, kernel, tPA, tPB):
     """Emit RegSet declarations for GL2 prefetch address vgprs (A, B, and MX scale variants)."""
