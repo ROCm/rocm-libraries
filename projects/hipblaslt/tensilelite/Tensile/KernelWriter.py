@@ -296,7 +296,6 @@ class StateValues:
   startVgprSKConsts: int                 = -1
   numVgprSKConsts: int                   = 0
   startVgprIdentityMatrix: int           = -1
-  startVgprInfTmp: int                   = -1
   startVgprInfCheck: int                 = -1
 
   numSgprSizesSum: int                   = 0
@@ -9056,11 +9055,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
           kernel["UseMFMAF32XEmulation"] = False
           kernel["UseDot2F32XEmulation"] = True
 
-      # TF32 Emu Inf support: 1 vreg for v_cmp_class_f32 source + 1 tmp vreg
+      # TF32 Emu Inf support: 1 vreg holding the v_cmp_class_f32 mask constant (0x204)
       if self.states.useTF32EmuInfSupport:
         self.states.startVgprInfCheck = vgprIdx
-        vgprIdx+=1
-        self.states.startVgprInfTmp = vgprIdx
         vgprIdx+=1
       # vreg allocation for UseMFMAF32XEmulation
       if kernel["UseMFMAF32XEmulation"]:
