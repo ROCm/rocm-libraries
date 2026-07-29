@@ -85,6 +85,9 @@ class Result:
     ms: float
     tflops: float
     gbps: float
+    vec_a: int = 1
+    vec_b: int = 1
+    vec_c: int = 1
     passed: bool | None = None  # None when --verify was not requested
 
 
@@ -852,6 +855,7 @@ def _run_sweep(
         cur_tflops = (flop / ms) * 1e-9
         cur_gbps = (bytes_xfer / ms) * 1e-6
 
+        _va, _vb, _vc = ImplicitGemmConvSpec.default_vector_sizes(p.C, p.K, dtype)
         results.append(
             Result(
                 kernel_name=artifact.kernel_name,
@@ -868,6 +872,9 @@ def _run_sweep(
                 ms=ms,
                 tflops=cur_tflops,
                 gbps=cur_gbps,
+                vec_a=_va,
+                vec_b=_vb,
+                vec_c=_vc,
                 passed=kernel_passed,
             )
         )
@@ -877,6 +884,7 @@ def _run_sweep(
             f"warp={warp_m}x{warp_n} "
             f"atom={warp_tile_mn}x{warp_tile_mn}x{warp_tile_k} "
             f"{pipeline}/{epilogue:9s} "
+            f"vec={_va}/{_vb}/{_vc} "
             f"{cur_tflops:6.1f} TFLOPS  {ms:.3f} ms",
             flush=True,
         )
@@ -899,7 +907,7 @@ def _run_sweep(
     top_n = min(args.top, len(results))
 
     show_verify = args.verify
-    width = 84 if show_verify else 72
+    width = 96 if show_verify else 84
     print(f"\n{'='*width}")
     print(f"Top {top_n} configurations for {arch} {dtype} {p.short()}")
     print(f"{'='*width}")
@@ -915,6 +923,7 @@ def _run_sweep(
             f"tile={r.tile_m}x{r.tile_n}x{r.tile_k} "
             f"warp={r.warp_m}x{r.warp_n} "
             f"atom={r.warp_tile_mn}x{r.warp_tile_mn}x{r.warp_tile_k} "
+            f"vec={r.vec_a}/{r.vec_b}/{r.vec_c} "
             f"{r.pipeline}/{r.epilogue}"
         )
         if show_verify:
@@ -1042,6 +1051,8 @@ def _run_wgrad_sweep(
         f"(split_k={_spk_label}) ...",
         flush=True,
     )
+    if p.is_pointwise:
+        print("  (pointwise 1x1/s1/p0 — using explicit GEMM descriptors)", flush=True)
 
     rt = Runtime()
     results: List[Result] = []
@@ -1208,6 +1219,9 @@ def _run_wgrad_sweep(
         cur_tflops = (flop / ms) * 1e-9
         cur_gbps = (bytes_xfer / ms) * 1e-6
 
+        _va, _vb, _vc = WgradConvSpec.default_vector_sizes(
+            p.C, p.K, dtype, split_k=resolved_split_k
+        )
         results.append(
             Result(
                 kernel_name=artifact.kernel_name,
@@ -1224,6 +1238,9 @@ def _run_wgrad_sweep(
                 ms=ms,
                 tflops=cur_tflops,
                 gbps=cur_gbps,
+                vec_a=_va,
+                vec_b=_vb,
+                vec_c=_vc,
             )
         )
 
@@ -1232,6 +1249,7 @@ def _run_wgrad_sweep(
             f"warp={warp_m}x{warp_n} "
             f"atom={warp_tile_mn}x{warp_tile_mn}x{warp_tile_k} "
             f"{pipeline}/{epilogue:9s} spk{resolved_split_k:<3d} "
+            f"vec={_va}/{_vb}/{_vc} "
             f"{cur_tflops:6.1f} TFLOPS  {ms:.3f} ms",
             flush=True,
         )
@@ -1249,17 +1267,18 @@ def _run_wgrad_sweep(
     results.sort(key=lambda r: r.tflops, reverse=True)
     top_n = min(args.top, len(results))
 
-    print(f"\n{'='*72}")
+    print(f"\n{'='*84}")
     print(f"Top {top_n} wgrad configurations for {arch} {dtype} {p.short()}")
-    print(f"{'='*72}")
+    print(f"{'='*84}")
     hdr = f"{'rank':>4}  {'TFLOPS':>7}  {'ms':>8}  {'GBps':>7}  config"
     print(hdr)
-    print("-" * 72)
+    print("-" * 84)
     for rank, r in enumerate(results[:top_n], 1):
         cfg_str = (
             f"tile={r.tile_m}x{r.tile_n}x{r.tile_k} "
             f"warp={r.warp_m}x{r.warp_n} "
             f"atom={r.warp_tile_mn}x{r.warp_tile_mn}x{r.warp_tile_k} "
+            f"vec={r.vec_a}/{r.vec_b}/{r.vec_c} "
             f"{r.pipeline}/{r.epilogue} spk{r.split_k}"
         )
         print(f"{rank:>4}  {r.tflops:>7.1f}  {r.ms:>8.3f}  {r.gbps:>7.1f}  {cfg_str}")
