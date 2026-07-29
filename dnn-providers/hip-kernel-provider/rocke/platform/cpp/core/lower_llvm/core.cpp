@@ -1462,12 +1462,16 @@ const char* rocke_ll_smem_global_name(rocke_lower_t* L,
 /* smem live-interval analysis + pool layout (_compute_smem_layout)       */
 /* ====================================================================== */
 
-/* Live-interval entry: (first_seq, last_seq) for one smem global. */
+/* Live-interval entry: (first_seq, last_seq) for one smem global. `used` is
+ * set when the global appears as an operand of some op (i.e. is actually read,
+ * written or address-taken); an allocation that is only defined but never used
+ * is dead and must not consume pool space (mirrors Python's `used` set). */
 typedef struct ll_live_interval
 {
     const char* gname;
     int first_seq;
     int last_seq;
+    int used;
 } ll_live_interval_t;
 
 /* Mutable state threaded through the DFS walk (mirrors Python closures). */
@@ -1569,6 +1573,7 @@ static void
             int ii = ll_interval_index(ctx, gn);
             if(ii < 0)
                 continue;
+            ctx->intervals[ii].used = 1;
             int first = (ctx->intervals[ii].first_seq < 0) ? idx : ctx->intervals[ii].first_seq;
             int new_last = (loop_end >= 0) ? loop_end : idx;
             int last = ctx->intervals[ii].last_seq;
@@ -1665,6 +1670,7 @@ void rocke_ll_compute_smem_layout(rocke_lower_t* L)
         intervals[i].gname = L->smem_globals.data[i].gname;
         intervals[i].first_seq = -1; /* unset */
         intervals[i].last_seq = -1;
+        intervals[i].used = 0;
     }
 
     ll_liveness_walk_ctx_t ctx;
@@ -1728,6 +1734,15 @@ void rocke_ll_compute_smem_layout(rocke_lower_t* L)
     for(size_t si = 0; si < n; si++)
     {
         int gi = order[si]; /* smem_globals index */
+        /* Dead allocations (never read/written/address-taken) consume no pool
+         * space: the pre-pool lowering emitted them as their own addrspace(3)
+         * globals that the AMDGPU backend dead-strips. Folding them into the
+         * single referenced pool would make their bytes count and can overflow
+         * the 64 KB LDS limit (the fp16 D128 nw=4 attention Acc_lds regression).
+         * offsets[] is calloc'd to 0, so a dead alloc keeps a harmless offset 0
+         * and is simply not given a slot. Mirrors Python's `used` filter. */
+        if(!intervals[gi].used)
+            continue;
         const rocke_type_t* stype = L->smem_globals.data[gi].stype;
         int seg = ll_smem_seg_size(stype);
         int aln = ll_smem_align(stype);

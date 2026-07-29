@@ -36,7 +36,7 @@ import enum
 import os
 import sys
 from dataclasses import dataclass, field
-from typing import Dict, FrozenSet, List, Optional, Tuple
+from typing import Dict, FrozenSet, List, Optional, Set, Tuple
 
 from .ir import (
     KernelDef,
@@ -1316,21 +1316,27 @@ class _Lowerer:
             for r in op.regions:
                 self._collect_smem(r)
 
-    def _collect_smem_liveness(self, region: Region) -> Dict[str, Tuple[int, int]]:
+    def _collect_smem_liveness(
+        self, region: Region
+    ) -> Tuple[Dict[str, Tuple[int, int]], Set[str]]:
         """Compute live intervals for smem allocations via a DFS preorder walk.
 
-        Returns a dict mapping global-name -> (first_seq, last_seq) where
-        seq is the preorder index of the op that defines / last-uses the
-        allocation.  Uses inside a loop body (``scf.for``) are conservatively
-        extended to the *last* sequence index of the enclosing ``scf.for``
-        subtree so that two allocations that are both live inside the loop
-        always interfere (they may be read on any iteration).
+        Returns ``(intervals, used)`` where ``intervals`` maps global-name ->
+        (first_seq, last_seq) (seq is the preorder index of the op that defines
+        / last-uses the allocation) and ``used`` is the set of global-names that
+        appear as an operand of at least one op (i.e. are actually read, written
+        or address-taken -- as opposed to allocated but never referenced).
+        Uses inside a loop body (``scf.for``) are conservatively extended to the
+        *last* sequence index of the enclosing ``scf.for`` subtree so that two
+        allocations that are both live inside the loop always interfere (they
+        may be read on any iteration).
         """
         # Map from IR value name (%foo) -> global name (@foo.kernel)
         val_to_gname: Dict[str, str] = {
             v: g for v, g in self._smem_storage_name.items()
         }
         intervals: Dict[str, Tuple[int, int]] = {}  # gname -> (first, last)
+        used: Set[str] = set()  # gnames referenced by some op operand
         counter = [0]  # mutable int for nested closures
 
         def _subtree_size(op) -> int:
@@ -1359,6 +1365,7 @@ class _Lowerer:
                 for v in op.operands:
                     gname = val_to_gname.get(v.name)
                     if gname is not None:
+                        used.add(gname)
                         first, last = intervals.get(gname, (idx, idx))
                         new_last = loop_end if loop_end is not None else idx
                         intervals[gname] = (min(first, idx), max(last, new_last))
@@ -1391,7 +1398,7 @@ class _Lowerer:
                         walk(r.ops, loop_end=loop_end)
 
         walk(region.ops, loop_end=None)
-        return intervals
+        return intervals, used
 
     def _compute_smem_layout(self) -> None:
         """Compute byte offsets for all smem allocations in a single pool.
@@ -1446,7 +1453,24 @@ class _Lowerer:
             return 16 if stype.elem.name in ("i8", "fp8e4m3", "bf8e5m2") else 4
 
         # ---- live intervals from the kernel body ----
-        live = self._collect_smem_liveness(self.kernel.body)
+        live, used = self._collect_smem_liveness(self.kernel.body)
+
+        # Never-referenced allocations (allocated but never read, written or
+        # address-taken) must not consume pool space. The pre-pool lowering
+        # emitted every allocation as its own addrspace(3) global, and the
+        # AMDGPU backend dead-strips the ones nothing references, so a kernel
+        # that unconditionally allocates a scratch tile it does not use in a
+        # given spec paid zero LDS for it. Folding those dead tiles into the
+        # single referenced pool would make their bytes count -- e.g. the
+        # transposed/cfvst attention epilogue allocates ``Acc_lds`` (32 KB) but
+        # writes the output straight from registers, leaving it unreferenced;
+        # pooling it pushes the fp16 D128 nw=4 kernel from 50 KB to 82 KB and it
+        # then fails codegen with "local memory exceeds limit (65536)". Exclude
+        # dead allocations here to preserve the backend's dead-strip behaviour;
+        # give them a harmless offset 0 so any unexpected access stays in-bounds.
+        dead = [item for item in self._smem_globals if item[0] not in used]
+        for gname, _stype in dead:
+            self._smem_offsets.setdefault(gname, 0)
 
         # Sort allocations by live-interval start (definition order is a good
         # proxy; fall back to declaration order for allocations with no uses).
@@ -1454,7 +1478,20 @@ class _Lowerer:
             gname, _ = item
             return live.get(gname, (0, 0))[0]
 
-        sorted_allocs = sorted(self._smem_globals, key=_sort_key)
+        sorted_allocs = sorted(
+            (item for item in self._smem_globals if item[0] in used),
+            key=_sort_key,
+        )
+        if not sorted_allocs:
+            # Every allocation was dead -> empty pool (and no pool global
+            # needed). Clear _smem_globals so finalize() emits no pool global:
+            # otherwise Python would emit a zero-length `[0 x i8]` addrspace(3)
+            # global while the C++ engine (which gates emission on
+            # smem_pool_size > 0) emits nothing -- a byte-identity divergence,
+            # and some LLVM/AMDGPU pipelines reject a zero-length global.
+            self._smem_pool_size = 0
+            self._smem_globals = []
+            return
 
         # ---- greedy interval packing ----
         # Each "slot" is (offset, size, last_seq) – the byte range it occupies

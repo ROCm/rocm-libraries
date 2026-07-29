@@ -47,7 +47,7 @@
           "bytes": 23162,
           "family": "conv",
           "kernel_name": "irhash_conv_950_a_N1H8W8C16_K32Y3X3_t64x64x32_w2x2_a32x32x16_compv4_cshuffle",
-          "sha256": "fca9393b171090b7ea99543bee2559d4bb4526477550d582f8c906e7d34b10fe",
+          "sha256": "fabf05c09130f6fffce81d8022b97a1a932c5afe06f98b80f3125e5d61313b85",
           "status": "ok"
         },
         "conv/gfx950/n2h16c32k32r1": {
@@ -432,7 +432,7 @@
           "bytes": 23295,
           "family": "conv",
           "kernel_name": "irhash_conv_950_a_N1H8W8C16_K32Y3X3_t64x64x32_w2x2_a32x32x16_compv4_cshuffle",
-          "sha256": "e2aca30141115bdb6a30ff561af8a19c474abf2e10a64ec2e284cde98816beb9",
+          "sha256": "cf569d57d0fda33ca410b369f6b739752abc56790a31be24e820316c432e3909",
           "status": "ok"
         },
         "conv/gfx950/n2h16c32k32r1": {
