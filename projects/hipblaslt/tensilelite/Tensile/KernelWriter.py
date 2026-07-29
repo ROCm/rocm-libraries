@@ -55,7 +55,7 @@ from .SolutionStructs.Utilities import getMiInputType
 from .AsmMemoryInstruction import MemoryInstruction
 from .Activation import ActivationModule
 from .Common import printWarning, roundUp, print2, DebugConfig, DataDirection, \
-  INDEX_CHARS, IsaVersion, log2
+  INDEX_CHARS, IsaVersion, log2, clusterEnabled
 from .Common.GlobalParameters import globalParameters
 from .Common.ValidParameters import resolveSwInstructionPrefetch, \
   SW_INSTRUCTION_PREFETCH_AUTO
@@ -7032,13 +7032,17 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # - StreamK + MX (not enough sgpr. gfx950 only for now)
     # - BufferLoad=0 (stagger uses SRD increment which only exists in buffer mode)
     # - MX PAP without TDM/DTL (not enough sgpr)
+    # - workgroup cluster: staggerU offsets each WG's K start so WGs sharing the
+    #   same B never request the same address at the same time, which defeats
+    #   cross-WG multicast. Disable stagger so K phases stay aligned.
     self.states.staggerUCode = True
     if self.states.tailloopInNll or \
        not kernel["BufferLoad"] or \
        (kernel["StreamK"] and \
         hasMx and isgfx950) or \
        disableStaggerForMxPap or \
-       kernel["UseSubtileImpl"]:
+       kernel["UseSubtileImpl"] or \
+       clusterEnabled(kernel["ClusterDim"]):
       self.states.staggerUCode = False
     
     self.states.tailloopInNllmaxUnit = 1
