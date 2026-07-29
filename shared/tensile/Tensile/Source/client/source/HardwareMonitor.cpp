@@ -239,7 +239,7 @@ namespace Tensile
                     if(rawValue == std::numeric_limits<int64_t>::max())
                         return std::numeric_limits<double>::quiet_NaN();
 
-                    return static_cast<double>(rawValue) / (1000.0 * m_dataPoints);
+                    return smiTempSumToCelsius(rawValue, m_dataPoints);
                 }
             }
 

@@ -56,3 +56,19 @@ TEST(HardwareMonitorTypeTest, ClockTypeCountFromBounds)
     // FIRST..LAST inclusive must cover exactly the five live clock types.
     EXPECT_EQ(CLK_TYPE_LAST - CLK_TYPE_FIRST + 1, 5);
 }
+
+// Readings pass through unscaled; the rocm-smi path's /1000 would report 63 C as 0.063 C.
+TEST(HardwareMonitorTypeTest, TempIsCelsiusNotMillidegrees)
+{
+    EXPECT_DOUBLE_EQ(smiTempSumToCelsius(63, 1), 63.0);
+    EXPECT_DOUBLE_EQ(smiTempSumToCelsius(0, 1), 0.0);
+    EXPECT_DOUBLE_EQ(smiTempSumToCelsius(105, 1), 105.0);
+    EXPECT_NE(smiTempSumToCelsius(63, 1), 63.0 / 1000.0);
+}
+
+// The accumulated sum is divided by the number of samples taken.
+TEST(HardwareMonitorTypeTest, TempAveragesOverDataPoints)
+{
+    EXPECT_DOUBLE_EQ(smiTempSumToCelsius(60 + 62 + 64, 3), 62.0);
+    EXPECT_DOUBLE_EQ(smiTempSumToCelsius(45 + 46, 2), 45.5);
+}
