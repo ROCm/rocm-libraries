@@ -108,7 +108,7 @@ enum class SampleType
     GENERIC,
     BN_TRAINING,
     SDPA,
-    BN_WITH_SCALARS, // batchnorm samples that support pass-by-value scalars (epsilon)
+    BN_WITH_PASS_BY_VALUE, // batchnorm samples that support pass-by-value tensors (epsilon)
 };
 
 // HELP MESSAGE
@@ -149,9 +149,9 @@ inline void printSampleHelp(const std::string& sampleName,
                   << "  --full-training             Use running statistics\n";
     }
 
-    if(sampleType == SampleType::BN_TRAINING || sampleType == SampleType::BN_WITH_SCALARS)
+    if(sampleType == SampleType::BN_TRAINING || sampleType == SampleType::BN_WITH_PASS_BY_VALUE)
     {
-        std::cout << "  --runtime-scalars           Supply pass-by-value scalars as runtime host\n"
+        std::cout << "  --runtime-pass-by-value     Supply pass-by-value tensors as runtime host\n"
                   << "                              values instead of compile-time constants\n";
     }
 
@@ -164,7 +164,7 @@ struct Config
 {
     bool cpuValidation = false;
     bool useRunningStats = false;
-    bool useRuntimeScalars = false;
+    bool useRuntimePassByValue = false;
 
     int engineId = -1;
     std::string dtype;
@@ -283,7 +283,8 @@ inline void printConfig(const Config& config)
     printList("--stride", config.stride);
     printList("--padding", config.padding);
     printList("--dilation", config.dilation);
-    std::cout << "  --runtime-scalars: " << (config.useRuntimeScalars ? "true" : "false") << '\n';
+    std::cout << "  --runtime-pass-by-value: " << (config.useRuntimePassByValue ? "true" : "false")
+              << '\n';
 
     std::cout << '\n';
 }
@@ -311,11 +312,11 @@ inline Config
         {
             config.useRunningStats = true;
         }
-        else if(arg == "--runtime-scalars"
+        else if(arg == "--runtime-pass-by-value"
                 && (sampleType == SampleType::BN_TRAINING
-                    || sampleType == SampleType::BN_WITH_SCALARS))
+                    || sampleType == SampleType::BN_WITH_PASS_BY_VALUE))
         {
-            config.useRuntimeScalars = true;
+            config.useRuntimePassByValue = true;
         }
         else if(arg == "--engine-id")
         {

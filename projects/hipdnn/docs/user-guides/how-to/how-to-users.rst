@@ -19,4 +19,4 @@ Topics
 - :ref:`build-execute`
 - :ref:`set-engine-knobs`
 - :ref:`migrate-cudnn`
-- :ref:`pass-by-value-scalars`
+- :ref:`pass-by-value-tensors`
