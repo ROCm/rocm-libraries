@@ -245,13 +245,26 @@ class RowColQuantDispatcherLib:
         """
         import numpy as np
 
+        # A/B are consumed as raw 1-byte fp8/bf8 (const fp8_t*/bf8_t*) on the
+        # C++ side. Reject wider dtypes so float32/float16 can't be silently
+        # reinterpreted as fp8 (which would read a fraction of the buffer as
+        # garbage). Encode real fp8/bf8 bytes via encode_fp8_bytes() first.
+        A = np.asarray(A)
+        B = np.asarray(B)
+        if A.dtype.itemsize != 1 or B.dtype.itemsize != 1:
+            raise TypeError(
+                f"A and B must be 1-byte fp8/bf8 arrays (got A={A.dtype}, "
+                f"B={B.dtype}); encode via encode_fp8_bytes() before run()."
+            )
+
         A  = np.ascontiguousarray(A)
         # Kernel BLayout is ColumnMajor (rcr): B[k,n] lives at offset n*K+k.
         # Supply column-major bytes for 2-D B; ascontiguousarray would force
         # row-major and silently transpose.
         B  = np.asfortranarray(B) if B.ndim == 2 else np.ascontiguousarray(B)
-        AQ = np.ascontiguousarray(AQ)
-        BQ = np.ascontiguousarray(BQ)
+        # Scales are always float32 on the device side.
+        AQ = np.ascontiguousarray(AQ, dtype=np.float32)
+        BQ = np.ascontiguousarray(BQ, dtype=np.float32)
         C  = np.ascontiguousarray(C)
 
         time_ms = ctypes.c_float(0.0)

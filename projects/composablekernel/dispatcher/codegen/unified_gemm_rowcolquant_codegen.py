@@ -410,6 +410,12 @@ def _build_specs(config: dict) -> List[RowColQuantKernelSpec]:
         if pipeline not in ROWCOLQUANT_PIPELINE_MAP:
             log.warning("Unsupported pipeline %s -- skipping", pipeline)
             continue
+        # Downstream codegen indexes layout[0/1/2] and looks each char up in
+        # ROWCOLQUANT_LAYOUT_TO_CK, so anything but the supported rcr scope would
+        # raise IndexError/KeyError. Skip cleanly with a warning instead.
+        if layout != "rcr":
+            log.warning("Unsupported layout %s (only rcr) -- skipping", layout)
+            continue
 
         tile = RowColQuantTileConfig(
             tile_m=tile_dict["tile_m"],

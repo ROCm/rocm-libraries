@@ -85,9 +85,12 @@ def _run_one(so_path, variant_key, M, N, K, verify, gfx_arch=None):
         A_ref = u.quantize_dequantize_fp8(A_f, variant_key, gfx_arch)
         B_ref = u.quantize_dequantize_fp8(B_f, variant_key, gfx_arch)
     else:
-        # SMOKE-ONLY: pass float32 so the kernel launches; we make no numeric
-        # claim in this path (the buffer is not a valid fp8 encoding).
-        A, B = A_f, B_f
+        # SMOKE-ONLY: ml_dtypes is unavailable, so we cannot build a valid fp8
+        # encoding. Feed correctly-sized 1-byte buffers (random bytes) so the
+        # kernel launches and run()'s dtype guard is satisfied; the device reads
+        # these as fp8_t/bf8_t, so we make NO numeric claim in this path.
+        A = rng.integers(0, 256, size=(M, K), dtype=np.uint8)
+        B = rng.integers(0, 256, size=(K, N), dtype=np.uint8)
 
     result = runner.run(A, B, AQ, BQ, u.RowColQuantGemmProblem(M=M, N=N, K=K))
     log.info("kernel %s ran in %.4f ms", name, result.time_ms)
