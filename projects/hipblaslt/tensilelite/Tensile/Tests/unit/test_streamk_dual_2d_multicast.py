@@ -48,7 +48,10 @@ sys.path.insert(0, os.path.join(
 _DESIGNED = os.path.join(
     TENSILE_ROOT, "Tensile", "Tests", "unit", "characterization",
     "_codegen", "data", "test_data", "_designed", "gfx1250")
-_DUAL2D = os.path.join(_DESIGNED, "streamk_dual_2d_multicast.yaml")
+# 1-D and 2-D multicast were unified into one cluster_multicast config; the dual-2D
+# [2,2] shape now lives alongside the 1-D [C,1] shapes here. Tests filter to the
+# 2-D states via _dual_states().
+_DUAL2D = os.path.join(_DESIGNED, "streamk_cluster_multicast.yaml")
 
 _ARCH = "gfx1250"
 
@@ -83,6 +86,13 @@ def _derive_states(cfg_path):
     return [s._state if hasattr(s, "_state") else s for s in sols]
 
 
+def _dual_states():
+    """States of the unified cluster_multicast config filtered to the 2-D [Cs,Ck]
+    (both>1) dual shape -- the unified config also derives 1-D [C,1] solutions."""
+    return [st for st in _derive_states(_DUAL2D)
+            if st["ClusterDim"][0] > 1 and st["ClusterDim"][1] > 1]
+
+
 def _compound_preds(state):
     import Tensile.Contractions as C
     from Tensile.Contractions import ProblemType
@@ -109,16 +119,23 @@ class TestDetector:
             _k(StreamKForceDPOnly=0, StreamKDualMulticast=1, ClusterDim=[2, 2])) is True
 
     def test_true_for_forcedp_2d(self):
-        """Generalizes the ForceDPOnly-2D detector: ForceDPOnly + both>1 stays True
-        (no opt-in flag needed -- that shape is unambiguous)."""
+        """ForceDPOnly + both>1 is dual (detected purely on ClusterDim -- the mode
+        knob is irrelevant to the 1-D-vs-2-D distinction)."""
         from Tensile.Common import streamKDual2DMulticast
         assert streamKDual2DMulticast(
             _k(StreamKForceDPOnly=1, ClusterDim=[2, 2])) is True
 
+    def test_true_for_knobless_2d(self):
+        """On the multicast PR the dual-2D detector is PURE ClusterDim: a [Cs, Ck]
+        with both axes > 1 is dual even with NO StreamKDualMulticast / ForceDPOnly
+        knob (there is no factored K-split here to disambiguate against)."""
+        from Tensile.Common import streamKDual2DMulticast
+        assert streamKDual2DMulticast(
+            _k(StreamKForceDPOnly=0, StreamKDualMulticast=0, ClusterDim=[2, 2])) is True
+
     @pytest.mark.parametrize("state", [
-        _k(StreamKDualMulticast=1, ClusterDim=[4, 1]),   # opt-in but 1-D (Ck==1): not 2-D
-        _k(StreamKDualMulticast=1, ClusterDim=[1, 4]),   # opt-in but Cs==1: no B axis
-        _k(StreamKForceDPOnly=0, StreamKDualMulticast=0, ClusterDim=[2, 2]),  # FACTORED (no flag)
+        _k(StreamKDualMulticast=1, ClusterDim=[4, 1]),   # 1-D (Ck==1): not 2-D
+        _k(StreamKDualMulticast=1, ClusterDim=[1, 4]),   # Cs==1: no B axis (reduction shape)
         _k(StreamKForceDPOnly=1, ClusterDim=[8, 1]),     # 1-D ForceDPOnly multicast
         _k(ClusterDim=[1, 1]),                            # no cluster
     ])
@@ -138,34 +155,40 @@ class TestDetector:
 
 class TestDerivation:
     def test_dual2d_derives_multicast_without_reduction(self):
-        """StreamKDualMulticast=1 on [2,2]/SK3/ForceDPOnly=0: B-multicast on,
-        StreamKClusterReduction OFF (Ck is an N-tiling / A-multicast axis)."""
-        from Tensile.Common import streamKMulticast
-        states = _derive_states(_DUAL2D)
+        """[2,2]/SK3/ForceDPOnly=0 on the unified config (knobless -- pure-ClusterDim
+        gating): B+A dual-multicast on, StreamKClusterReduction OFF (Ck is an
+        N-tiling / A-multicast axis)."""
+        from Tensile.Common import streamKMulticast, streamKDual2DMulticast
+        states = _dual_states()
         assert states
         for st in states:
             assert st["ClusterDim"] == [2, 2]
             assert st["StreamKForceDPOnly"] == 0
-            assert st["StreamKDualMulticast"] == 1
             assert streamKMulticast(st)
+            assert streamKDual2DMulticast(st)
             assert st.get("StreamKClusterReduction", 0) == 0
             assert st["Multicast"] == 1
             assert st["ClusterBarrier"] is True
 
-    def test_same_config_without_flag_is_rejected(self, tmp_path):
-        """MUTUAL EXCLUSION on the multicast PR: the identical config with
-        StreamKDualMulticast=0 is NOT a dual-2D cluster. On this PR (1-D multicast
-        + 2-D dual-multicast only, no reduction/factored) a 2-D cluster [Cs,Ck]
-        both>1 without a dual flag is the factored (K-split) shape, which is not
-        supported here and is REJECTED at build time -- so no solution derives.
-        The opt-in flag is the sole discriminator between dual-2D and the
-        (rejected-here) factored interpretation."""
-        cfg = _write_variant(tmp_path, _DUAL2D, "factored_no_flag.yaml",
+    def test_same_config_without_flag_still_derives_dual(self, tmp_path):
+        """PURE-ClusterDim gating on the multicast PR: the identical config with
+        StreamKDualMulticast=0 is STILL a dual-2D cluster. With no factored K-split
+        here, a 2-D cluster [Cs,Ck] both>1 is unambiguously dual regardless of the
+        knob, so it derives (not rejected) and StreamKClusterReduction stays OFF
+        (Ck is an N-tiling / A-multicast axis, not a reduction axis)."""
+        from Tensile.Common import streamKDual2DMulticast, streamKMulticast
+        cfg = _write_variant(tmp_path, _DUAL2D, "knobless_2d.yaml",
                              fork_overrides={"StreamKDualMulticast": [0]})
-        states = _derive_states(cfg)
-        assert not states, (
-            "2-D [Cs,Ck] without a dual flag (factored K-split) must be rejected on "
-            "the multicast PR; got %d derived solution(s)" % len(states))
+        states = [st for st in _derive_states(cfg)
+                  if st["ClusterDim"][0] > 1 and st["ClusterDim"][1] > 1]
+        assert states, (
+            "2-D [Cs,Ck] both>1 must derive as dual-2D on the multicast PR even "
+            "without the StreamKDualMulticast knob (pure-ClusterDim gating)")
+        for st in states:
+            assert st["ClusterDim"] == [2, 2]
+            assert streamKMulticast(st)
+            assert streamKDual2DMulticast(st)
+            assert st.get("StreamKClusterReduction", 0) == 0
 
 
 # --- selection predicates --------------------------------------------------
@@ -179,7 +202,7 @@ class TestPredicates:
         emitted. Dual-2D keeping Ck as a spatial N-tiling axis (not a factored
         K-split) is now proven purely by StreamKClusterReduction == 0 below and by
         the absent ClusterReductionIterCheck."""
-        states = _derive_states(_DUAL2D)
+        states = _dual_states()
         assert states
         st = states[0]
         preds = _compound_preds(st)
@@ -191,7 +214,7 @@ class TestPredicates:
         """ClusterReductionIterCheck is emitted only when StreamKClusterReduction
         is derived; dual-2D does not derive it, so the predicate is ABSENT (no
         itersPerTile % Ck constraint -- Ck is not a K-split)."""
-        states = _derive_states(_DUAL2D)
+        states = _dual_states()
         assert states
         st = states[0]
         preds = _compound_preds(st)

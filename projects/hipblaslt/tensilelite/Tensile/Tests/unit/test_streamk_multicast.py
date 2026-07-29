@@ -50,6 +50,11 @@ _STREAMK_CLUSTER_BARE = os.path.join(_DESIGNED, "streamk_cluster_coop_load.yaml"
 
 _ARCH = "gfx1250"
 
+# The multicast configs were unified: streamk_cluster_multicast.yaml now sweeps
+# BOTH 1-D [C,1] and 2-D [2,2] shapes. This file pins the 1-D B-multicast path, so
+# it dispatches on the ABSENCE of the 2-D DP fold marker to keep only 1-D kernels.
+_TWO_D_MARKER = "2-D DP: StreamKIdx = batch*(nWG0*nWG1) + N*nWG0 + M"
+
 
 # --- registration ----------------------------------------------------------
 
@@ -113,7 +118,8 @@ class TestValidation:
         """The designed SK3 cluster config (ClusterDim=[4,1]) derives valid
         solutions with the internal StreamKMulticast auto-derived to 1 and
         Multicast on."""
-        cfg = _write_variant(tmp_path, "ok.yaml")
+        cfg = _write_variant(tmp_path, "ok.yaml",
+                             fork_overrides={"ClusterDim": [[4, 1]]})
         states = _derive_states(cfg)
         assert states, "expected >=1 derived solution for the valid config"
         for st in states:
@@ -188,11 +194,20 @@ class TestValidation:
             assert streamKMulticast(st)
             assert st["StreamKXCCMapping"] == 0, st["StreamKXCCMapping"]
 
-    def test_reject_non_1d_cluster(self, tmp_path):
-        # ClusterDim = [2, 2] is not the [C, 1] spatial DP cluster.
+    def test_non_1d_cluster_is_the_dual_2d_path(self, tmp_path):
+        # ClusterDim = [2, 2] is NOT the 1-D [C,1] B-multicast path; on this PR it
+        # is now the 2-D dual-multicast path (detected purely on ClusterDim, both
+        # axes > 1), so it is NO LONGER rejected -- it derives as dual-2D. (The old
+        # "reject non-[C,1]" behavior was replaced by the unified 1-D+2-D support.)
+        from Tensile.Common import streamKDual2DMulticast
         cfg = _write_variant(tmp_path, "cd22.yaml",
                              fork_overrides={"ClusterDim": [[2, 2]]})
-        assert _derive_states(cfg) == []
+        states = _derive_states(cfg)
+        assert states, "[2,2] must derive as the dual-2D multicast path (not rejected)"
+        for st in states:
+            assert st["ClusterDim"] == [2, 2]
+            assert streamKMulticast(st)
+            assert streamKDual2DMulticast(st)
 
     def test_reject_non_pow2_cluster(self, tmp_path):
         cfg = _write_variant(tmp_path, "cd3.yaml",
@@ -310,7 +325,11 @@ class TestEmit:
     # combined-mask-leak scan.
     def _emit(self, cfg=_STREAMK_MULTICAST):
         from config_harness import emit_kernels_from_config
-        return emit_kernels_from_config(cfg, limit=8, arch=_ARCH)
+        results = emit_kernels_from_config(cfg, limit=8, arch=_ARCH)
+        # Unified config also emits 2-D [2,2] dual kernels; this file pins the 1-D
+        # [C,1] C=4 mask arithmetic, so keep only the 1-D kernels.
+        one_d = [r for r in results if _TWO_D_MARKER not in r[1]]
+        return one_d or results
 
     def test_broadcast_mask_value(self):
         """maskB = (1<<C)-1 = 0xf for C=4; maskA = self bit (shift of 0x1)."""

@@ -1951,7 +1951,11 @@ namespace TensileLite
             rv.numWorkGroups.x = RoundUpToMultiple(rv.numWorkGroups.x, rv.clusterDim.x);
             rv.numWorkGroups.y = RoundUpToMultiple(rv.numWorkGroups.y, rv.clusterDim.y);
         }
-        // 2-D DUAL-multicast Stream-K (ForceDPOnly-2D and StreamKDualMulticast):
+        // 2-D DUAL-multicast Stream-K: a genuine 2-D cluster [Cs, Ck] (both axes
+        // > 1). On the multicast PR there is no factored K-split, so both-axes>1 is
+        // unambiguously the dual-operand multicast -- gate PURELY on ClusterDim
+        // (clusterDim.x > 1 && clusterDim.y > 1), not on the ForceDPOnly /
+        // StreamKDualMulticast knobs (StreamKForceDPOnly stays a mode axis).
         // gridX=nWG0 / gridY (above) are the REAL tile extents, which -- now that
         // ClusterDimCheck is dropped -- need not be multiples of Cs/Ck. Round the
         // 2-D grid up to the cluster dims so the launch is legal; the padded
@@ -1960,11 +1964,9 @@ namespace TensileLite
         // barrier (their WAVEDONE frees the barrier slot), and the surviving
         // peers' broadcast masks are trimmed to the present lanes
         // (computeMulticastMaskReduction). sk.grid / the SK tile accounting keep
-        // using the real nWG0*gridY, so the padded WGs carry no work. (gridY is
-        // already a multiple of Ck for StreamKDualMulticast, so its round-up is a
-        // no-op there; only ForceDPOnly-2D rounds the N extent.)
-        else if(enableCluster && sizeMapping.streamK == 3 && sizeMapping.clusterDim.y > 1
-                && (sizeMapping.streamKForceDPOnly != 0 || sizeMapping.streamKDualMulticast != 0))
+        // using the real nWG0*gridY, so the padded WGs carry no work.
+        else if(enableCluster && sizeMapping.streamK == 3
+                && sizeMapping.clusterDim.x > 1 && sizeMapping.clusterDim.y > 1)
         {
             rv.numWorkGroups.x = RoundUpToMultiple(rv.numWorkGroups.x, rv.clusterDim.x);
             rv.numWorkGroups.y = RoundUpToMultiple(rv.numWorkGroups.y, rv.clusterDim.y);

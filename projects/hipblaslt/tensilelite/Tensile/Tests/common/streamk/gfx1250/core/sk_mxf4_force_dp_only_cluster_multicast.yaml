@@ -91,7 +91,7 @@ BenchmarkProblems:
         # ProblemSizes below are chosen so nWG0=ceil(M/MT0) is divisible by 8
         # (covers Cs in {2,4,8}) and nWG1=ceil(N/MT1) is even (covers Ck=2), so
         # EVERY swept ClusterDim enumerates with ZERO DID_NOT_SATISFY_ASSERTS.
-        - ClusterDim: [[2, 1], [4, 1], [8, 1], [2, 2]]
+        - ClusterDim: [[2, 1], [4, 1], [8, 1], [2, 2], [2, 4], [4, 2]]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:

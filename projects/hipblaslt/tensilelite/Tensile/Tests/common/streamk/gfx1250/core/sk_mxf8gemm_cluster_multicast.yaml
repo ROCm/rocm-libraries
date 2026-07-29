@@ -75,7 +75,13 @@ BenchmarkProblems:
         - StreamK: [3]
         - StreamKAtomic: [0]
         - StreamKXCCMapping: [0]
-        - ClusterDim: [[2, 1], [4, 1], [8, 1]]
+        # Unified 1-D + 2-D cluster multicast sweep (one file, one size sweep):
+        #   [C,1] = 1-D B-multicast; [Cs,Ck] both>1 = 2-D DUAL-multicast, detected
+        #   PURELY on ClusterDim (streamKDual2DMulticast, both axes>1) -- no
+        #   StreamKDualMulticast knob needed (no factored K-split on this PR).
+        #   Non-divisible sizes are legal for every shape (dropped ClusterDimCheck +
+        #   runtime pad-exit), so ONE size sweep covers all shapes with zero skips.
+        - ClusterDim: [[2, 1], [4, 1], [8, 1], [2, 2], [2, 4], [4, 2]]
         - StaggerU: [0]
         - DirectToVgprA: [False]
         - DirectToVgprB: [False]

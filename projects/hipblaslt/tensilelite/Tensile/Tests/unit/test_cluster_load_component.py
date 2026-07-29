@@ -19,6 +19,7 @@ import shutil
 import sys
 
 import pytest
+from contextlib import contextmanager
 from types import SimpleNamespace
 
 pytestmark = pytest.mark.unit
@@ -59,6 +60,19 @@ class _StubWriter:
         from rocisa.code import ValueSet
         self.undefined.append(name)
         return ValueSet(name="sgpr" + name, value="UNDEF", format=-1)
+
+    def computeMulticastMaskReduction(self, kernel, mod, sgprWgX, sgprWgY,
+                                      maskColSgpr, maskRowSgpr):
+        # Unit harness has no rounded launch grid / real WG registers, so there is
+        # no boundary cluster to reduce: report "not reduced" and let computeMasks
+        # fall back to the full dense mask path (what these mask tests pin).
+        return False
+
+    @contextmanager
+    def allocTmpSgpr(self, num, tag=None):
+        # Fake scratch allocator: yield a deterministic index (the historic sTmp+4
+        # scratch slot) so the emitted-asm assertions stay stable.
+        yield SimpleNamespace(idx=64)
 
 
 def _kernel(*, multicast=True, clusterDim=(2, 2), tdmA=True, tdmB=True,

@@ -302,12 +302,13 @@ def _validateStreamKMulticast(state, printRejectionReason, isaInfoMap):
     return False
 
   # Cluster shape: 1-D pure multicast [C, 1] (Cs=C, Ck=1) OR a genuine 2-D
-  # DUAL-operand multicast cluster [Cs, Ck] (both > 1, ForceDPOnly-2D or
-  # StreamKDualMulticast) where Ck is an N-tiling / A-multicast axis. Both are
-  # validated by the shared shape helper (Cs, Ck each a power of two with
-  # C = Cs*Ck in [2, 16]); for the 1-D case that reduces exactly to the historic
-  # pow2/range check. A 2-D cluster WITHOUT a dual flag (factored K-split) is not
-  # supported on this PR and is rejected as a non-[C,1] shape below.
+  # DUAL-operand multicast cluster [Cs, Ck] (both > 1) where Ck is an N-tiling /
+  # A-multicast axis. The 2-D case is detected PURELY on ClusterDim (both axes > 1)
+  # via streamKDual2DMulticast -- on this PR there is no factored K-split, so a
+  # [Cs, Ck] both>1 is unambiguously dual regardless of the StreamKDualMulticast
+  # knob. Both are validated by the shared shape helper (Cs, Ck each a power of two
+  # with C = Cs*Ck in [2, 16]); for the 1-D case that reduces exactly to the
+  # historic pow2/range check.
   clusterDim = state["ClusterDim"]
   cs, ck = clusterDim[0], clusterDim[1]
   if streamKDual2DMulticast(state):
@@ -1257,20 +1258,19 @@ class Solution(collections.abc.Mapping):
                                and state["StreamK"] == 0)
     # The cluster-scope barrier handshake (s_barrier_signal/wait -3, inserted by
     # StinkyTofu's InsertClusterBarrierPass) brackets the cooperative multicast
-    # tensor_load_to_lds groups, keeping the Cs spatial peers in lockstep. It is
-    # meaningful only when there ARE cooperative multicast loads to bracket, i.e.
-    # when Cs = ClusterDim[0] > 1 (spatial multicast peers: [C,1], [C,C], factored,
-    # dual-2D). A pure-reduction cluster ([1, C], Cs=1, StreamKClusterReduction) has
-    # NO cooperative multicast loads and is synchronized entirely by its own StreamK
-    # reduction -3 barriers; enabling the mainloop cluster barrier there emits an
-    # unmatched prologue s_barrier_wait -3 (Member N / Signal 0) that never completes
-    # -> cluster deadlock. So gate on Cs>1, in addition to an active cluster, TDM
-    # live (TDMInst != 0 -- cooperative tensor_load_to_lds), and the ISA providing
-    # the cluster-barrier instruction (HasClusterBarrier).
-    if state["ClusterDim"] != [1, 1] and state["ClusterDim"][0] > 1 \
-       and state["TDMInst"] != 0 \
-       and isaInfoMap[state["ISA"]].asmCaps.get("HasClusterBarrier", False):
-      state["ClusterBarrier"] = True
+    # tensor_load_to_lds groups, keeping the cluster peers in lockstep. Enable it
+    # for any active cluster (ClusterDim != [1, 1]) with TDM live (TDMInst != 0 --
+    # cooperative tensor_load_to_lds) and the ISA providing the cluster-barrier
+    # instruction (HasClusterBarrier).
+    state["ClusterBarrier"] = bool(state["ClusterDim"] != [1, 1]
+                                   and state["TDMInst"] != 0
+                                   and isaInfoMap[state["ISA"]].asmCaps.get("HasClusterBarrier", False))
+    # 1-D cluster reduction must NOT use the mainloop cooperative-load barrier
+    # (no multicast loads to bracket -> unmatched prologue s_barrier_wait -3 -> deadlock).
+    # StreamKForceDPOnly=1 has no partials reduction, so it is never this case.
+    if (state["ClusterDim"][0] == 1 and state["ClusterDim"][1] > 1
+            and state["StreamK"] != 0 and state["StreamKForceDPOnly"] == 0):
+      state["ClusterBarrier"] = False
 
     # done
     state["AssignedProblemIndependentDerivedParameters"] = True
@@ -1921,16 +1921,16 @@ class Solution(collections.abc.Mapping):
                  "(cluster support is SK3-only)")
         # A pure 1-D StreamK grid would collide WorkGroup0 across WGs that differ
         # only in Y. A Y-extent > 1 is only legal for the SK3 2-D DUAL-multicast
-        # cluster (ForceDPOnly-2D or StreamKDualMulticast, both axes > 1), which
-        # launches a genuine 2-D grid and folds the Y rank into the index
-        # (StreamK.preLoop) so uniqueness is preserved. Pure reduction [1,C] and
-        # factored [Cs,Ck] (K-split) are NOT supported on this PR (they live in the
-        # cluster-reduction / factored PRs); reject a non-dual Y-extent > 1.
+        # cluster [Cs, Ck] (both axes > 1), which launches a genuine 2-D grid and
+        # folds the Y rank into the index (StreamK.preLoop) so uniqueness is
+        # preserved. streamKDual2DMulticast is now pure ClusterDim (both>1), so the
+        # only Y-extent>1 shape it rejects is pure reduction [1, C] (Cs == 1),
+        # which is NOT supported on this PR (it lives in the cluster-reduction PR).
         if state["ClusterDim"][1] != 1 and not streamKDual2DMulticast(state):
           reject(state, printRejectionReason,
-                 "Stream-K + ClusterDim Y-extent > 1 requires 2-D dual multicast "
-                 "(StreamKForceDPOnly or StreamKDualMulticast); got %s"
-                 % state["ClusterDim"])
+                 "Stream-K + ClusterDim Y-extent > 1 requires a 2-D dual multicast "
+                 "cluster [Cs, Ck] with both axes > 1 (pure reduction [1, C] is not "
+                 "supported here); got %s" % state["ClusterDim"])
         # StreamKXCCMapping remaps WorkGroup0 with no cluster awareness; disable it.
         state["StreamKXCCMapping"] = 0
       if not state["EnableMatrixInstruction"]:
