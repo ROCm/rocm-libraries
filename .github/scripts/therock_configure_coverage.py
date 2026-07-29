@@ -7,7 +7,7 @@ from pathlib import Path
 from therock_matrix import collect_projects_to_run
 from pr_detect_changed_subtrees import get_valid_prefixes, find_matched_subtrees
 from config_loader import load_repo_config
-from therock_configure_ci import get_modified_paths  # reuse existing helper
+from ci_utils import get_modified_paths
 
 logging.basicConfig(level=logging.INFO)
 SCRIPT_DIR = Path(__file__).resolve().parent
