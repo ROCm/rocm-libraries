@@ -246,8 +246,8 @@ selection, launch) is identical regardless of how a kernel arrived.
 ![Two ingestion paths converging on one generic engine and launcher](../images/ukd_flows.svg)
 
 Loading is on demand and cached. Nothing is parsed until a graph needs it: an engine whose matchers
-reject a graph never pays to load its kernels, and a heuristic model is never read for an engine that
-is never selected. What the provider keeps up front is only the descriptor inventory, the ids, kinds,
+reject a graph never pays to load its kernels, and a heuristic model is not read until something needs
+the catalog ranked. What the provider keeps up front is only the descriptor inventory, the ids, kinds,
 and locations that say what exists. Because the drop-in location is a directory an operator writes to,
 that inventory is rescanned on each applicability call, so a pack added or removed while the process
 runs is picked up or dropped without a restart, and anything cached from a removed pack is discarded.
