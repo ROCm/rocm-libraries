@@ -280,6 +280,7 @@ TEST_F(Test{{ op.class_name }}, FinalizeSucceedsFor{{ rule.mode }}Mode)
 {
     setModeRuleAttributes({{ mode_field.enum_def.backend_prefix }}{{ rule.mode }});
     ASSERT_NO_THROW(getDescriptor()->finalize());
+    ASSERT_TRUE(getDescriptor()->isFinalized());
 }
 {% for tensor_name in rule.required_optional_tensors %}
 {% set tf = tf_by_name[tensor_name] %}

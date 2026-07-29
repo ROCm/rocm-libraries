@@ -819,14 +819,40 @@ class TestTemplateOutputContent:
         assert "AutoAssignedUidsPreservedInRoundTrip" in lowering_content
         assert "includeTokenIndex" in lowering_content
         assert "includeTokenKs" in lowering_content
-        assert "ModeScenarioGatherSerializesTokenIndex" in lowering_content
+        assert (
+            "ModeScenarioGatherCanonicalizesIgnoredScatterAttributes"
+            in lowering_content
+        )
         assert (
             "EXPECT_FALSE(opNode->token_ks_tensor_uid.has_value());" in lowering_content
         )
-        assert "ModeScenarioScatterSerializesRouting" in lifting_content
+        assert "ModeScenarioScatterPreservesRouting" in lifting_content
         assert (
             "ASSERT_NE(opNode->attributes.get_token_ks(), nullptr);" in lifting_content
         )
+        assert "JsonRoundTripsAllModeScenarios" in lifting_content
+
+        from_node_content = (
+            output_dir
+            / "backend"
+            / "tests"
+            / "descriptors"
+            / config.test_from_node_filename
+        ).read_text()
+        descriptor_content = (
+            output_dir
+            / "backend"
+            / "tests"
+            / "descriptors"
+            / config.test_descriptor_filename
+        ).read_text()
+        assert "RejectsMissingTokenIndexInGATHERMode" in from_node_content
+        assert "RejectsTokenKsInGATHERMode" in from_node_content
+        assert "RejectsNoncanonicalTopKInGATHERMode" in from_node_content
+        assert "RejectsBelowMinimumTopKInSCATTERMode" in from_node_content
+        assert "RejectsAboveMaximumTopKInSCATTERMode" in from_node_content
+        assert "const auto tensors = desc->getTensorDescriptors();" in from_node_content
+        assert "ASSERT_TRUE(getDescriptor()->isFinalized());" in descriptor_content
 
     def test_mode_rules_render_descriptor_packer_and_unpacker_contract(
         self, load_test_config, generator, tmp_path

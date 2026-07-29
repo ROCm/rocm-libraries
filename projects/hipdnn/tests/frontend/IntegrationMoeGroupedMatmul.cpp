@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 
+#include <cstdint>
 #include <memory>
 #include <unordered_map>
 
@@ -20,18 +21,25 @@ using namespace hipdnn_data_sdk::utilities;
 namespace
 {
 
-class IntegrationMoeGroupedMatmul : public hipdnn_tests::IntegrationTestFixture
+class IntegrationMoeGroupedMatmul : public hipdnn_tests::IntegrationTestFixture,
+                                    public ::testing::WithParamInterface<MoeGroupedMatmulMode>
 {
 };
 
-TEST_F(IntegrationMoeGroupedMatmul, ScatterGraphDispatchesToProvider)
+TEST_P(IntegrationMoeGroupedMatmul, GraphDispatchesToProvider)
 {
-    Tensor<float> tokenTensor({1, 8, 16});
+    const auto mode = GetParam();
+    constexpr int64_t K_SOURCE_TOKENS = 8;
+    constexpr int64_t K_GATHERED_TOKENS = 6;
+    const int64_t routedTokens
+        = mode == MoeGroupedMatmulMode::GATHER ? K_GATHERED_TOKENS : K_SOURCE_TOKENS;
+
+    Tensor<float> tokenTensor({1, K_SOURCE_TOKENS, 16});
     Tensor<float> weightTensor({2, 16, 32});
     Tensor<int32_t> firstTokenOffsetTensor({2, 1, 1});
-    Tensor<int32_t> tokenIndexTensor({1, 8, 1});
-    Tensor<int32_t> tokenKsTensor({1, 8, 1});
-    Tensor<float> outputTensor({1, 8, 32});
+    Tensor<int32_t> tokenIndexTensor({1, routedTokens, 1});
+    Tensor<int32_t> tokenKsTensor({1, routedTokens, 1});
+    Tensor<float> outputTensor({1, routedTokens, 32});
 
     tokenTensor.fillWithValue(1.0F);
     weightTensor.fillWithValue(1.0F);
@@ -55,21 +63,32 @@ TEST_F(IntegrationMoeGroupedMatmul, ScatterGraphDispatchesToProvider)
     auto firstTokenOffset = std::make_shared<TensorAttributes>(makeTensorAttributes(
         "first_token_offset", getDataTypeEnumFromType<int32_t>(), firstTokenOffsetTensor));
     firstTokenOffset->set_uid(3);
-    auto tokenIndex = std::make_shared<TensorAttributes>(
-        makeTensorAttributes("token_index", getDataTypeEnumFromType<int32_t>(), tokenIndexTensor));
-    tokenIndex->set_uid(4);
-    auto tokenKs = std::make_shared<TensorAttributes>(
-        makeTensorAttributes("token_ks", getDataTypeEnumFromType<int32_t>(), tokenKsTensor));
-    tokenKs->set_uid(5);
+    std::shared_ptr<TensorAttributes> tokenIndex;
+    if(mode != MoeGroupedMatmulMode::NONE)
+    {
+        tokenIndex = std::make_shared<TensorAttributes>(makeTensorAttributes(
+            "token_index", getDataTypeEnumFromType<int32_t>(), tokenIndexTensor));
+        tokenIndex->set_uid(4);
+    }
+    std::shared_ptr<TensorAttributes> tokenKs;
+    if(mode == MoeGroupedMatmulMode::SCATTER)
+    {
+        tokenKs = std::make_shared<TensorAttributes>(
+            makeTensorAttributes("token_ks", getDataTypeEnumFromType<int32_t>(), tokenKsTensor));
+        tokenKs->set_uid(5);
+    }
 
     MoeGroupedMatmulAttributes attributes;
-    attributes.set_name("moe_grouped_matmul").set_mode(MoeGroupedMatmulMode::SCATTER).set_top_k(2);
+    attributes.set_name("moe_grouped_matmul")
+        .set_mode(mode)
+        .set_top_k(mode == MoeGroupedMatmulMode::SCATTER ? 2 : 0);
     auto output = graph->moe_grouped_matmul(
         token, weight, firstTokenOffset, tokenIndex, tokenKs, attributes);
     output->set_uid(6).set_output(true).set_name("output");
 
     auto result = graph->validate();
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+    EXPECT_EQ(output->get_dim(), (std::vector<int64_t>{1, routedTokens, 32}));
 
     result = graph->build_operation_graph(_handle);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
@@ -92,12 +111,24 @@ TEST_F(IntegrationMoeGroupedMatmul, ScatterGraphDispatchesToProvider)
         {token->get_uid(), tokenTensor.memory().deviceData()},
         {weight->get_uid(), weightTensor.memory().deviceData()},
         {firstTokenOffset->get_uid(), firstTokenOffsetTensor.memory().deviceData()},
-        {tokenIndex->get_uid(), tokenIndexTensor.memory().deviceData()},
-        {tokenKs->get_uid(), tokenKsTensor.memory().deviceData()},
         {output->get_uid(), outputTensor.memory().deviceData()},
     };
+    if(tokenIndex)
+    {
+        variantPack.emplace(tokenIndex->get_uid(), tokenIndexTensor.memory().deviceData());
+    }
+    if(tokenKs)
+    {
+        variantPack.emplace(tokenKs->get_uid(), tokenKsTensor.memory().deviceData());
+    }
     result = graph->execute(_handle, variantPack, workspace.get());
     EXPECT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 }
+
+INSTANTIATE_TEST_SUITE_P(AllModes,
+                         IntegrationMoeGroupedMatmul,
+                         ::testing::Values(MoeGroupedMatmulMode::NONE,
+                                           MoeGroupedMatmulMode::GATHER,
+                                           MoeGroupedMatmulMode::SCATTER));
 
 } // namespace

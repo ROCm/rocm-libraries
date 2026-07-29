@@ -236,6 +236,8 @@ TEST_F(Integration{{ op.frontend.attributes_filename or op.name }}DescriptorLowe
 
 {% for scenario in op.mode_integration_scenarios %}
 // Verifies the canonical serialized footprint for {{ scenario.mode }} mode.
+// Surplus frontend attributes are accepted for cuDNN compatibility and omitted
+// when the selected mode does not serialize them.
 TEST_F(Integration{{ op.frontend.attributes_filename or op.name }}DescriptorLowering, ModeScenario{{ scenario.pascal_name }})
 {
     {{ op.frontend.attributes_class }} attrs;

@@ -291,6 +291,7 @@ TEST_F(TestMoeGroupedMatmulOperationDescriptor, FinalizeSucceedsForNONEMode)
 {
     setModeRuleAttributes(HIPDNN_MOE_GROUPED_MATMUL_MODE_NONE);
     ASSERT_NO_THROW(getDescriptor()->finalize());
+    ASSERT_TRUE(getDescriptor()->isFinalized());
 }
 
 TEST_F(TestMoeGroupedMatmulOperationDescriptor, FinalizeRejectsTokenIndexInNONEMode)
@@ -328,6 +329,7 @@ TEST_F(TestMoeGroupedMatmulOperationDescriptor, FinalizeSucceedsForGATHERMode)
 {
     setModeRuleAttributes(HIPDNN_MOE_GROUPED_MATMUL_MODE_GATHER);
     ASSERT_NO_THROW(getDescriptor()->finalize());
+    ASSERT_TRUE(getDescriptor()->isFinalized());
 }
 
 TEST_F(TestMoeGroupedMatmulOperationDescriptor, FinalizeRejectsMissingTokenIndexInGATHERMode)
@@ -361,6 +363,7 @@ TEST_F(TestMoeGroupedMatmulOperationDescriptor, FinalizeSucceedsForSCATTERMode)
 {
     setModeRuleAttributes(HIPDNN_MOE_GROUPED_MATMUL_MODE_SCATTER);
     ASSERT_NO_THROW(getDescriptor()->finalize());
+    ASSERT_TRUE(getDescriptor()->isFinalized());
 }
 
 TEST_F(TestMoeGroupedMatmulOperationDescriptor, FinalizeRejectsMissingTokenIndexInSCATTERMode)

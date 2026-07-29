@@ -205,10 +205,12 @@ TEST_F(IntegrationMoeGroupedMatmulDescriptorLowering, OperationComputeDataTypeOv
 }
 
 // Verifies the canonical serialized footprint for NONE mode.
-TEST_F(IntegrationMoeGroupedMatmulDescriptorLowering, ModeScenarioNoneOmitsRouting)
+// Surplus frontend attributes are accepted for cuDNN compatibility and omitted
+// when the selected mode does not serialize them.
+TEST_F(IntegrationMoeGroupedMatmulDescriptorLowering, ModeScenarioNoneCanonicalizesIgnoredRouting)
 {
     MoeGroupedMatmulAttributes attrs;
-    attrs.set_name("test_none_omits_routing");
+    attrs.set_name("test_none_canonicalizes_ignored_routing");
     attrs.set_mode(MoeGroupedMatmulMode::NONE);
     attrs.set_top_k(2);
 
@@ -224,10 +226,13 @@ TEST_F(IntegrationMoeGroupedMatmulDescriptorLowering, ModeScenarioNoneOmitsRouti
     EXPECT_EQ(opNode->top_k, 0);
 }
 // Verifies the canonical serialized footprint for GATHER mode.
-TEST_F(IntegrationMoeGroupedMatmulDescriptorLowering, ModeScenarioGatherSerializesTokenIndex)
+// Surplus frontend attributes are accepted for cuDNN compatibility and omitted
+// when the selected mode does not serialize them.
+TEST_F(IntegrationMoeGroupedMatmulDescriptorLowering,
+       ModeScenarioGatherCanonicalizesIgnoredScatterAttributes)
 {
     MoeGroupedMatmulAttributes attrs;
-    attrs.set_name("test_gather_serializes_token_index");
+    attrs.set_name("test_gather_canonicalizes_ignored_scatter_attributes");
     attrs.set_mode(MoeGroupedMatmulMode::GATHER);
     attrs.set_top_k(2);
 
@@ -244,10 +249,12 @@ TEST_F(IntegrationMoeGroupedMatmulDescriptorLowering, ModeScenarioGatherSerializ
     EXPECT_EQ(opNode->top_k, 0);
 }
 // Verifies the canonical serialized footprint for SCATTER mode.
-TEST_F(IntegrationMoeGroupedMatmulDescriptorLowering, ModeScenarioScatterSerializesRouting)
+// Surplus frontend attributes are accepted for cuDNN compatibility and omitted
+// when the selected mode does not serialize them.
+TEST_F(IntegrationMoeGroupedMatmulDescriptorLowering, ModeScenarioScatterPreservesRouting)
 {
     MoeGroupedMatmulAttributes attrs;
-    attrs.set_name("test_scatter_serializes_routing");
+    attrs.set_name("test_scatter_preserves_routing");
     attrs.set_mode(MoeGroupedMatmulMode::SCATTER);
     attrs.set_top_k(2);
 

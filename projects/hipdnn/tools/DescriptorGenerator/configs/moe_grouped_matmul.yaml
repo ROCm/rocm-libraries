@@ -177,19 +177,19 @@ operation:
           maximum: { tensor: "weight", dimension: 0 }
 
   mode_integration_scenarios:
-    - name: "none_omits_routing"
+    - name: "none_canonicalizes_ignored_routing"
       mode: "NONE"
       provided_optional_inputs: ["token_index", "token_ks"]
       expected_optional_inputs: []
       scalar_overrides: { top_k: 2 }
       expected_scalar_values: { top_k: 0 }
-    - name: "gather_serializes_token_index"
+    - name: "gather_canonicalizes_ignored_scatter_attributes"
       mode: "GATHER"
       provided_optional_inputs: ["token_index", "token_ks"]
       expected_optional_inputs: ["token_index"]
       scalar_overrides: { top_k: 2 }
       expected_scalar_values: { top_k: 0 }
-    - name: "scatter_serializes_routing"
+    - name: "scatter_preserves_routing"
       mode: "SCATTER"
       provided_optional_inputs: ["token_index", "token_ks"]
       expected_optional_inputs: ["token_index", "token_ks"]
