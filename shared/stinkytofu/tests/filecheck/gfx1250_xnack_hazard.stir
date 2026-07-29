@@ -1,0 +1,73 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --CFGBuilderPass --Gfx1250HazardPass --print-output
+#
+# Gfx1250HazardPass initially implements MI450 single-group replay protection
+# that hardware does not insert itself. It must:
+#   * split unsafe SMEM and FLAT groups with s_wait_xcnt 0;
+#   * drain VMEM before the first atomic, but not between atomics;
+#   * drain before forever s_sleep and non-adjacent s_set_vgpr_msb;
+#   * carry a group through a fall-through block-label boundary.
+
+# CHECK-LABEL: @smem_source_clobber
+# CHECK: s_load_b32
+# CHECK-NEXT: s_wait_xcnt"(0)
+# CHECK-NEXT: s_load_b32
+st.func @smem_source_clobber() {
+^entry:
+  s4 = "st.s_load_b32"(s[0:1])
+  s0 = "st.s_load_b32"(s[2:3])
+}
+
+# CHECK-LABEL: @flat_source_clobber_across_fallthrough
+# CHECK: flat_load_b32
+# CHECK: ^fallthrough:
+# CHECK-NEXT: s_wait_xcnt"(0)
+# CHECK-NEXT: flat_load_b32
+st.func @flat_source_clobber_across_fallthrough() {
+^entry:
+  v9 = "st.flat_load_b32"(v[0:1], s[16:17])
+  Successors: ^fallthrough
+^fallthrough:
+  v0 = "st.flat_load_b32"(v[2:3], s[16:17])
+}
+
+# CHECK-LABEL: @atomic_run
+# CHECK: buffer_load_b32
+# CHECK-NEXT: s_wait_xcnt"(0)
+# CHECK-NEXT: global_atomic_inc_u32
+# CHECK-NEXT: flat_atomic_dec_u32
+st.func @atomic_run() {
+^entry:
+  v9 = "st.buffer_load_b32"(v0)
+  v3 = "st.global_atomic_inc_u32"(v1, v2, s[14:15])
+  v5 = "st.flat_atomic_dec_u32"(v[6:7], v8, s[6:7])
+}
+
+# CHECK-LABEL: @forever_sleep_and_msb
+# CHECK: buffer_load_b32
+# CHECK-NEXT: s_wait_xcnt"(0)
+# CHECK-NEXT: s_sleep"(-32768)
+# CHECK: buffer_load_b32
+# CHECK-NEXT: s_wait_xcnt"(0)
+# CHECK-NEXT: s_set_vgpr_msb"(1)
+st.func @forever_sleep_and_msb() {
+^entry:
+  v9 = "st.buffer_load_b32"(v0)
+  "st.s_sleep"(-32768)
+  v10 = "st.buffer_load_b32"(v1)
+  "st.s_set_vgpr_msb"(1)
+  v11 = "st.v_add_f32"(v2, v3)
+}
+
+# CHECK-LABEL: @preserve_existing_xcnt_and_finite_sleep
+# CHECK: buffer_load_b32
+# CHECK-NEXT: s_wait_xcnt"(0)
+# CHECK-NEXT: global_atomic_inc_u32
+# CHECK-NEXT: s_sleep"(127)
+# CHECK-NOT: s_wait_xcnt
+st.func @preserve_existing_xcnt_and_finite_sleep() {
+^entry:
+  v9 = "st.buffer_load_b32"(v0)
+  "st.s_wait_xcnt"(0)
+  v3 = "st.global_atomic_inc_u32"(v1, v2, s[14:15])
+  "st.s_sleep"(127)
+}
