@@ -1098,16 +1098,20 @@ launcher resolves each UDD argument against it by uid.
 | 11 | `kernel_source` and pack UDD of each kernel the plan must launch | only kernels the plan dispatches are loaded | plan, held by the execution context |
 | 12 | nothing | the plan holds everything the launch needs | nothing |
 
-**Base-path invariant: accept implies a non-empty catalog.** Returning true from `isApplicable` means
-at least one UKD passed every matcher in some KDP. Producing no launchable kernel after accepting is a
-bug, not a legal outcome. An empty catalog at step 5, or a UHD that returns nothing at step 8, fails
-closed and hipDNN falls through to the next candidate engine, exactly as if this engine had never
-claimed applicability. [Section 15.4](#154-execution-and-selection) states the same rule for a
-composite's mandatory stage; that is this invariant applied to one stage, not a separate rule.
+**Base-path invariant: accept implies a launchable kernel.** Returning true from `isApplicable` means
+at least one UKD passed every matcher in some KDP, and it is a promise the engine keeps for the rest of
+the flow. Applicability is the only stage where declining is free: an empty catalog at step 5 simply
+returns false, and hipDNN moves on to the next engine having lost nothing.
 
-Descriptors and kernel sources load lazily, so a load can fail: a source that does not resolve, or a
-descriptor that fails validation, is an ordinary error at plan build rather than a crash at launch, and
-hipDNN falls through to the next candidate engine.
+After that the promise is binding. hipDNN has already chosen this engine on the strength of it, so a
+failure at step 8, 9, or 11, a UHD that ranks nothing, a source that does not resolve, a descriptor
+that fails validation, is not a fallback to another engine; it surfaces to the caller as a failed plan
+build. That is why the catalog is settled during applicability and every later stage is a read: the
+cost of being wrong is paid by the user, not absorbed by the framework. Producing no launchable kernel
+after accepting is a bug, not a legal outcome.
+
+[Section 15.4](#154-execution-and-selection) states the same rule for a composite's mandatory stage;
+that is this invariant applied to one stage, not a separate rule.
 
 **The cache is provider-owned.** hipDNN passes no graph identity and no opaque state slot between these
 calls, and caches nothing itself: each knob query round-trips to the provider. It does not need to pass
@@ -2022,7 +2026,9 @@ Selection reuses the two levels defined in [Section 2](#2-the-descriptors): a pr
 descriptor ranked by its heuristic descriptor, competing alternatives are separate engines ranked by
 the existing engine chain, and within a composite each stage's engine answers its child graph in
 dependency order, its own heuristic picking the kernel. A mandatory stage whose engine cannot satisfy
-its child graph fails the composite closed, and engine selection falls through to another engine.
+its child graph fails the composite closed **at applicability**, so the composite declines and engine
+selection moves on to another engine, the same free decline any engine gets at that stage
+([Section 8](#8-end-to-end-flow)).
 Comparing whole chains against each other never arises, because those alternatives are separate
 engines the existing chain already ranks.
 
