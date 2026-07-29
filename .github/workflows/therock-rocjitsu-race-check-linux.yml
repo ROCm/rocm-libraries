@@ -25,7 +25,9 @@ permissions:
 jobs:
   rocjitsu-race-check-linux:
     name: rocjitsu race check (${{ inputs.amdgpu_families }})
-    # Keep this sidecar advisory during its initial burn-in.
+    # This job is advisory. Failures remain visible, but continue-on-error keeps
+    # the calling Linux workflow successful. ROCm/rocm-libraries#10072 verifies
+    # this behavior.
     # TODO(AIHPBLAS-3605): Remove after the check is reliably green.
     continue-on-error: true
     runs-on: ${{ inputs.build_runs_on }}
@@ -51,8 +53,9 @@ jobs:
       ROCJITSU_SOURCE_DIR: ${{ github.workspace }}/rocm-systems/emulation/rocjitsu
       ROCJITSU_BUILD_DIR: ${{ github.workspace }}/rocjitsu-build
       RACE_REPORT_DIR: ${{ github.workspace }}/race-reports
-      # Per-workload timeouts are below the job timeout so the script can report
-      # which workload failed and still upload race-reports on exit.
+      # The driver uses these values for its two timeout commands. Both are
+      # shorter than the job timeout, so reports can still upload after a
+      # workload timeout.
       RACE_TIMEOUT_SECONDS: "180"
       TENSILELITE_TIMEOUT_SECONDS: "420"
     steps:
@@ -110,6 +113,7 @@ jobs:
           OUTPUT_ARTIFACTS_DIR: ${{ env.OUTPUT_ARTIFACTS_DIR }}
           VENV_DIR: ${{ env.VENV_DIR }}
           FETCH_ARTIFACT_ARGS: --blas --tests
+
       - name: Run rocjitsu race check
         timeout-minutes: 75
         run: bash rocm-libraries/.github/scripts/run_rocjitsu_hipblaslt_race_check.sh
