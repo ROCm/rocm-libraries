@@ -31,15 +31,14 @@ namespace stinkytofu {
 class Pass;
 class StinkyAsmModule;
 
-/// Factory only (same pattern as other *Pass.hpp). Does not include or alter
-/// AccumulateInstructionSizePass.hpp; implementation lives in
-/// SwPrefetchInsertionPass.cpp.
+/// Factory only (same pattern as other *Pass.hpp). Grid walk / insertion live in
+/// SwPrefetchRelCommon.{hpp,cpp}; this pass wires pipeline + accumulate.
 ///
 /// Second pipeline pass: same per-instruction byte layout as
 /// AccumulateInstructionSizePass, plus optional dump of proposed SW prefetch
 /// sites. When \p debugOutputPath is non-empty, enables debug and writes to
 /// that file.
-STINKYTOFU_EXPORT std::unique_ptr<Pass> createSwPrefetchInsertionPass(
+STINKYTOFU_EXPORT std::unique_ptr<Pass> createSwInstructionPrefetchRelStaticPass(
     const std::string& debugOutputPath);
 
 /// Uses StinkyAsmModule::setOutputDir / setOutputName: when the output
@@ -48,6 +47,7 @@ STINKYTOFU_EXPORT std::unique_ptr<Pass> createSwPrefetchInsertionPass(
 /// AccumulateInstructionSizePass / Backend). SW prefetch insertion always runs;
 /// an empty output directory only means no debug dump (same pattern as
 /// createAccumulateInstructionSizePass(module)).
-STINKYTOFU_EXPORT std::unique_ptr<Pass> createSwPrefetchInsertionPass(StinkyAsmModule& module);
+STINKYTOFU_EXPORT std::unique_ptr<Pass> createSwInstructionPrefetchRelStaticPass(
+    StinkyAsmModule& module);
 
 }  // namespace stinkytofu

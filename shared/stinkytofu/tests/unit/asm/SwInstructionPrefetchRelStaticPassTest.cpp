@@ -1,11 +1,11 @@
 /* ************************************************************************
  * Copyright (C) 2026 Advanced Micro Devices, Inc.
  *
- * Unit tests for SwPrefetchInsertionPass (insertSwPrefetchLabels is exercised
- * only through the public pass API; this file does not include the .cpp).
+ * Unit tests for SwInstructionPrefetchRelStaticPass (insertSwPrefetchLabels is
+ * exercised only through the public pass API; this file does not include the .cpp).
  *
  * First SW threshold P(0) = 128*255 = 32640 bytes; small blocks stay below
- * P(0), so no mov+prefetch is inserted — we assert stability and debug dump
+ * P(0), so no prefetch is inserted — we assert stability and debug dump
  * content.
  * ************************************************************************ */
 
@@ -24,7 +24,7 @@
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/support/Casting.hpp"
-#include "stinkytofu/transforms/asm/SwPrefetchInsertionPass.hpp"
+#include "stinkytofu/transforms/asm/SwInstructionPrefetchRelStaticPass.hpp"
 
 using namespace stinkytofu;
 using stinkytofu::test::createVAddInBlock;
@@ -52,7 +52,7 @@ int countPrefetchInstPcRel(const BasicBlock& bb) {
 }
 }  // namespace
 
-class SwPrefetchInsertionPassTest : public ::testing::Test {
+class SwInstructionPrefetchRelStaticPassTest : public ::testing::Test {
    protected:
     void SetUp() override {
         arch = getGfxArchID(12, 5, 0);
@@ -77,10 +77,10 @@ class SwPrefetchInsertionPassTest : public ::testing::Test {
 };
 
 // ---------------------------------------------------------------------------
-// insertSwPrefetchLabels: block end < P(0) => no mov+prefetch IR
+// insertSwPrefetchLabels: block end < P(0) => no prefetch IR
 // ---------------------------------------------------------------------------
 
-TEST_F(SwPrefetchInsertionPassTest, SmallBlock_BelowFirstThreshold_NoPrefetchInserted) {
+TEST_F(SwInstructionPrefetchRelStaticPassTest, SmallBlock_BelowFirstThreshold_NoPrefetchInserted) {
     for (int i = 0; i < 8; ++i) createVAddInBlock(bb, arch, 0, 1, 2);
 
     const int before = countStinkyInstructions(*bb);
@@ -90,7 +90,7 @@ TEST_F(SwPrefetchInsertionPassTest, SmallBlock_BelowFirstThreshold_NoPrefetchIns
     PassManager pm;
     registerAllAnalyses(pm.getAnalysisManager());
     pm.setGemmTileConfig(gemmConfig);
-    pm.addPass(createSwPrefetchInsertionPass(std::string{}));
+    pm.addPass(createSwInstructionPrefetchRelStaticPass(std::string{}));
     pm.run(*func);
 
     EXPECT_EQ(countStinkyInstructions(*bb), before);
@@ -101,7 +101,7 @@ TEST_F(SwPrefetchInsertionPassTest, SmallBlock_BelowFirstThreshold_NoPrefetchIns
 // Debug path: proposals section reports block below first threshold (32640)
 // ---------------------------------------------------------------------------
 
-TEST_F(SwPrefetchInsertionPassTest, DebugFile_ContainsBelowThresholdMessage) {
+TEST_F(SwInstructionPrefetchRelStaticPassTest, DebugFile_ContainsBelowThresholdMessage) {
     createVAddInBlock(bb, arch, 0, 1, 2);
 
     std::random_device rd;
@@ -112,7 +112,7 @@ TEST_F(SwPrefetchInsertionPassTest, DebugFile_ContainsBelowThresholdMessage) {
         PassManager pm;
         registerAllAnalyses(pm.getAnalysisManager());
         pm.setGemmTileConfig(gemmConfig);
-        pm.addPass(createSwPrefetchInsertionPass(outPath.string()));
+        pm.addPass(createSwInstructionPrefetchRelStaticPass(outPath.string()));
         pm.run(*func);
     }
 
@@ -124,9 +124,9 @@ TEST_F(SwPrefetchInsertionPassTest, DebugFile_ContainsBelowThresholdMessage) {
     std::error_code ec;
     std::filesystem::remove(outPath, ec);
 
-    EXPECT_NE(text.find("[SwPrefetchInsertionPass]"), std::string::npos);
-    EXPECT_NE(text.find("SW prefetch proposals"), std::string::npos);
-    // insertSwPrefetchLabels + debugPrintSwPrefetchProposals: small block < P(0)
+    EXPECT_NE(text.find("[SwInstructionPrefetchRelStaticPass]"), std::string::npos);
+    EXPECT_NE(text.find("SW prefetch grid"), std::string::npos);
+    // insertSwPrefetchLabels + debugPrintSwPrefetchGrid: small block < P(0)
     EXPECT_NE(text.find("first threshold"), std::string::npos);
     EXPECT_NE(text.find("32640"), std::string::npos);
 }
