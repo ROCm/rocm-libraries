@@ -33,7 +33,7 @@ an engine, a registration-table entry, bespoke launch code, and a selection heur
 kernel's behavior as code creates four problems that compound as the library grows.
 
 - **Scale.** Kernels multiply combinatorially: a variant per architecture, data type, and problem
-  shape, and again per fused form. rocKE (ROCm's kernel engine) already carries three to four scaled
+  shape, and again per fused form. rocKE already carries three to four scaled
   dot-product attention (SDPA) forward variants per architecture, and convolution alone spans several
   algorithm families (implicit GEMM, explicit GEMM,
   direct, and Winograd). Ten variants per architecture is a near-term floor, with hundreds looming as
@@ -51,27 +51,32 @@ kernel's behavior as code creates four problems that compound as the library gro
   slowly and unevenly.
 
 This RFC moves kernel behavior out of code and into data: declarative descriptor files that one
-generic provider loads and runs. An author drops in files and the provider matches, selects, and
+**generic engine** loads and runs. An author drops in files and that engine matches, selects, and
 launches the kernel with no new code, and because the behavior lives in one shared base, a
-cross-cutting feature is written once and inherited by every descriptor-backed kernel. The provider
+cross-cutting feature is written once and inherited by every descriptor-backed kernel. It
 works from a small family of reusable descriptors, bound together for a family of kernels by a **KDP
-(Kernel Descriptor Pack)**, the cohesive file that packages a kernel family and the pieces it shares:
+(Kernel Descriptor Pack)**, the cohesive file that packages a kernel family and the pieces it shares.
+Five of them share the shape `U*D`, Universal-something-Descriptor, and the middle letter is the
+something: U**M**D matches, U**D**D dispatches, U**E**D is the engine, U**H**D is the heuristic, U**K**D
+is the kernel. The KMD does not follow that pattern and is not per-kernel: it is the engine-wide schema
+the UKDs fill in.
 
 - **UMD (Universal Match Descriptor).** A matcher: when a kernel applies, given as a graph pattern and a
   declarative criteria expression, which also bind the named variables the launch references.
 - **UDD (Universal Dispatch Descriptor).** How to invoke a kernel, the dispatch application binary interface (ABI): argument binding
   and ordering, grid, block, shared memory, and workspace.
-- **UED (Universal Engine Descriptor).** One engine: a stable identity plus the knobs it exposes and its
-  behavior and numerical notes. It also names the engine's **one heuristic (UHD)** and **one kernel
-  metadata schema (KMD)**, since a single selector ranks all the engine's kernels over one feature space.
-  An engine is a named group of kernels.
+- **UED (Universal Engine Descriptor).** One engine: a stable identity, the KMD fields it exposes as
+  knobs, and its behavior and numerical notes. It carries no logic itself; it **names** the engine's one
+  heuristic (UHD) and one metadata schema (KMD) by id, since a single selector ranks all the engine's
+  kernels over one feature space. An engine is a named group of kernels.
 - **UHD (Universal Heuristic Descriptor).** One kernel-selection model, one per engine: given the
-  kernels that fit a graph, it picks the best for the problem, ranking on their metadata, the problem
-  shape, and device details.
+  kernels that fit a graph, the engine's **catalog** for that graph, it picks the best for the problem,
+  ranking on their metadata, the problem shape, and device details.
 - **KMD (Kernel Metadata Descriptor).** The engine's metadata schema: the variant fields every kernel in
   the engine carries, each with a type and an optional default (tile size, block size, and the like).
-  Each UKD supplies concrete values; the engine's heuristic ranks the catalog on them, and matchers read
-  them as `$kernel.<field>`.
+  Each UKD supplies concrete values; that completed tuple is the kernel's unique key in the catalog,
+  the engine's heuristic ranks the catalog on it, and matchers read the fields as
+  `$kernel.<field>`.
 - **UKD (Universal Kernel Descriptor).** One launchable kernel, carrying no logic of its own: its source
   details plus concrete metadata values for the fields the engine's KMD declares. The source is either a
   compiled kernel or the details for building it ahead-of-time (AOT). A UKD lives in a KDP and inherits
@@ -83,13 +88,14 @@ only in their compiled source and its build metadata. That family is exactly a K
 that binds a **set of matchers** (referenced by ID and shared across packs), **one engine descriptor**,
 and **one dispatch descriptor**, over a **vector of child kernels** that each supply only their source
 and metadata values. The engine carries the heuristic and metadata schema, so many KDPs may share one
-engine while differing in their matchers and dispatch. One matcher set and UDD per KDP is intentional: a
+engine. Matchers and the UDD are authored once and referenced by ID, so packs may share those too.
+One matcher set and UDD per KDP is intentional: a
 kernel whose ABI or matcher set differs belongs in another pack, and one whose engine, heuristic, or
 metadata schema differs belongs in another engine. Because every shared descriptor is authored once and
 referenced by ID, a family is a handful of shared descriptors plus one tiny entry per kernel, not
 hundreds of near-duplicate files.
 
-A prototype for a single operation (SDPA) runs a kernel end-to-end from a generic launch core plus a
+A prototype for a single operation (SDPA) runs a kernel end-to-end from a generic engine plus a
 thin operation-specific adapter (rocKE, [PR #9207](https://github.com/ROCm/rocm-libraries/pull/9207)).
 This RFC generalizes that adapter into a complete data description of a kernel and makes that
 generalized form the delivery vehicle: any kernel expressible as a code object plus a description of
@@ -111,7 +117,7 @@ single-kernel path. Multi-kernel launch and composition
 ([Section 15](#15-multiple-kernels-and-composition)) are separate follow-ups, not part of this initial design.
 A named escape hatch covers a step that genuinely needs C++ (Sections [5](#5-matching-and-the-umd) and
 [6](#6-dispatch-and-workspace)); anything that needs a new runtime dependency stays a full provider, one
-provider per dependency ([Section 1.2](#12-provider-boundary) states the minimum bar and the JIT
+provider per dependency ([Section 1.2](#12-provider-or-kernel-pack) covers the choice and the JIT
 exception). This complements build-time codegen rather than replacing it.
 
 ### 1.1 What Ships Now Versus Later
@@ -126,66 +132,45 @@ exception). This complements build-time codegen rather than replacing it.
 | Heuristic sources | LightGBM model; custom C-API library | other model formats, static tables ([§9.2](#92-heuristic-adapters)) |
 | Runtime drop-in | prebuilt code objects, opt-in, off by default | JIT-compiled sources ([§12](#12-packaging-and-delivery)) |
 | Multi-kernel launch program (e.g. SDPA backward) | None | composition ([§15.1](#151-several-kernels-for-one-operation)) |
-| Selection composition: UCD (Universal Composite Descriptor) pipeline | None | composition ([§15.2](#152-a-pipeline-of-separately-chosen-kernels)) |
+| Selection composition: UCD (Universal Composite Descriptor) decomposition | None | composition ([§15.2](#152-one-graph-split-across-several-engines)) |
 | JIT compilation; normalized providers | None | JIT ([§9.3](#93-future-jit-and-normalized-providers)) |
 
-### 1.2 Provider Boundary
+### 1.2 Provider or Kernel Pack
 
-A provider is the right unit when a kernel source needs a new **runtime** dependency; keep each
-provider one to one with the dependency it carries, mirroring the three providers that exist today
-(MIOpen, hipBLASLt, and the HIP kernel provider), each built around exactly one backend library. This
-descriptor system is for the opposite case: a **drop-in kernel source** with no new runtime dependency
-of its own. Anything the source needs to build or bundle, an authoring toolchain, a compiler, a codegen
-step, is an **adapter** ([Section 9](#9-adapters-and-extensibility)), not a reason to add a provider.
+Both paths add a kernel to hipDNN; they differ in what they cost and what they can carry.
 
-JIT complicates this, because a JIT source can pull in a real runtime dependency: the compiler or
-interpreter that turns a DSL into a kernel at request time. Where that happens, the right unit may be a
-**JIT-specific provider per technology**, not an adapter. A DSL provider whose runtime depends on its
-own compiler is handled as its own provider because of that dependency and the delivery system hipDNN
-conforms to. Concretely: a Python DSL reached through JIT would likely need to be its own provider,
-installed separately from both hipDNN and TheRock, because of the Python ABI and the Python runtime
-dependency it carries. A provider that embeds an interpreter is not a drop-in kernel source in the sense
-this RFC targets.
+A **provider** is the unit that carries a **runtime dependency**. It is a whole project: built,
+versioned, packaged, and shipped on its own, one per dependency, mirroring the three that exist today
+(MIOpen, hipBLASLt, and the HIP kernel provider), each wrapping exactly one backend library. Choose a
+provider when you are bringing an existing library into hipDNN, and accept that you are taking on a
+project to build, maintain, and release.
 
-This codebase has already drawn the line both ways. rocKE's own authoring
-toolchain is a Python environment used only at build time, never installed with the shipped kernel, so
-it is absorbed as a build-only adapter inside the HIP kernel provider
-([Section 9.1](#91-kernel-source-adapters)) rather than shipping as its own provider. A separate,
-unmerged in-tree design took the opposite case seriously: it designed a standalone provider specifically
-to carry an embedded Python interpreter as a runtime dependency, because that dependency belongs behind
-its own C-API boundary rather than inside the generic engine. Two directions, the same rule: a
-build-time-only dependency becomes an adapter, and a runtime dependency becomes its own provider.
+A **KDP** is the unit for the opposite case: a standalone kernel someone wants to ship, with no new
+runtime dependency of its own. It skips the project entirely, so an author self-serves and fast-tracks
+delivery instead of waiting on a release vehicle. Anything the kernel needs only to *build*, an
+authoring toolchain, a compiler, a codegen step, is an **adapter**
+([Section 9](#9-adapters-and-extensibility)), not a reason to add a provider; the build-time dependency
+never reaches the shipped runtime. rocKE is exactly this case: a Python authoring environment used only
+at build time, absorbed as a build-only adapter ([Section 9.1](#91-kernel-source-adapters)). The
+**HIP kernel provider is the first home** for data-driven ingestion, covering HIP kernels, assembly, and
+AOT rocKE.
 
-Where this is genuinely open is packaging. Today's install destinations for a provider's shared library
-are shared and provider-agnostic, so nothing in them forbids installing a provider with a runtime Python
-dependency alongside the others. But nothing supports it either: no mechanism today ships a Python
-runtime, resolves a Python ABI, or manages a `site-packages` tree at install time, and none of the three
-shipped providers need one. How a Python-runtime provider would actually be delivered separately from
-hipDNN and TheRock is left to the delivery follow-up RFC ([Section 12](#12-packaging-and-delivery)); this
-RFC states the boundary, not the mechanism.
+**The pieces are shared, not exclusive to one provider.** The machinery this system needs (the matcher,
+the expression interpreter, the selector, the loader) is built as reusable static libraries in the
+provider SDK, so any provider can adopt a piece without adopting the whole ingestor. Converting MIOpen's
+hand-coded applicability checks to UMD-style declarative ones is the obvious candidate: the same
+matcher, applied to a provider that keeps its own kernels and its own selection.
 
-The graded ladder ([Section 5](#5-matching-and-the-umd)) ends at "a full provider" without saying what a
-provider must minimally supply, the same floor hipDNN's existing plugin contract already enforces at
-load time:
-
-- **MUST** export the identity and lifecycle entry points every plugin needs: name, version, error
-  reporting, and a logging callback.
-- **MUST** declare its plugin kind (engine or heuristic) and, for an engine, export the applicability
-  query, workspace sizing, execution-context creation and destruction, and execute entry points; a
-  heuristic plugin exports the equivalent policy and scoring entry points instead.
-- **MUST** declare an API version whose major component is checked against hipDNN's own plugin ABI major
-  version; a provider that reports, or defaults to, a mismatched major is excluded before its
-  applicability is ever asked, the same reject-before-query gate the KDP version tag mirrors
-  ([Section 4](#4-descriptor-formats)).
-- **MUST** register at least one globally unique engine id, and build with hidden symbol visibility and
-  position-independent code so the loader's eager, load-time symbol resolution succeeds and the provider
-  installs cleanly into the shared plugin search path.
-- **Optional**: serialized-execution-context replay and policy-override entry points exist for providers
-  that support them; a provider that omits them simply does not support that path.
-
-Nothing beyond this surface is required. hipDNN does not mandate any particular internal architecture,
-an engine object, a plan builder, or plan classes, inside the provider; the only true requirement is the
-exported contract above.
+**JIT is where a technology can force a new provider.** A JIT engine may need runtime access to a
+compiler or interpreter, which is a runtime dependency by definition, so a JIT technology can warrant a
+provider scoped to it rather than an adapter. DSLs are the prime example. hipDNN and TheRock cannot ship
+a native library carrying a Python dependency, so a Python DSL would be delivered as its own project
+shipping an **extension wheel** that installs a provider into hipDNN's plugin folder, published in as
+many builds as the Python ABIs it must support. That provider extends hipDNN with the DSL, and can
+itself accept drop-in KDPs written for that technology, so the data-driven path survives the dependency
+split rather than being blocked by it. hipDNN's plugin mechanism already supports loading such a
+provider; when and how an extension provider is bundled and released is future work, left to the
+delivery follow-up RFC ([Section 12](#12-packaging-and-delivery)).
 
 ---
 
@@ -197,19 +182,18 @@ becomes data instead of hand-written code.
 | Descriptor | Purpose | Exists in hipDNN today as |
 |---|---|---|
 | **UKD** (kernel) | One launchable kernel: its source details plus build metadata; the KDP binds the rest | The compiled kernel module (code object) and its hand-tracked build config |
-| **KDP** (pack) | Bind a matcher set, one engine, and one dispatch over a kernel vector | The engine-registration table plus the per-kernel applicability and launch scaffolding |
-| **UMD** (match) | Accept a graph and bind its named variables | The graph half of `isApplicable` |
+| **KDP** (pack) | Bind a matcher set, one engine, and one dispatch over a kernel vector | The engine-registration table plus the per-kernel registration and launch scaffolding |
+| **UMD** (match) | One applicability check over the graph, device properties, and kernel metadata, binding the named variables it matches on; a KDP's matcher **set** is the pack's full applicability test, and what survives it is the engine's catalog of kernels for that graph | The provider's entire applicability implementation: the graph-level, device-level, and per-kernel checks a hand-written `isApplicable` performs before a kernel is considered a candidate |
 | **UDD** (dispatch) | Invoke a kernel: args & ordering, grid/block, shared mem, workspace | The bespoke launch and argument-wiring code |
 | **UED** (engine) | A stable engine identity with its heuristic, metadata schema, knobs, and behavior/numerical notes | The provider's engine-registration table plus a `HIPDNN_REGISTER_ENGINE` id |
 | **UHD** (heuristic) | Rank the kernels within one engine and pick one | A ranking model living inside an engine's dispatcher |
-| **KMD** (metadata) | Declare the engine's variant fields, each with a type and optional default | The compile-time template/tuning parameters that distinguish each hand-written kernel variant |
+| **KMD** (metadata) | Declare the engine's variant fields, each with a type and optional default; the field set must be rich enough that every kernel variant in the engine is uniquely described by its values | The compile-time template and tuning parameters that distinguish one kernel variant from another |
 
-A UED is deliberately 1:1 with a hipDNN engine: engines are intended to be scoped tightly enough that
-one heuristic and one metadata schema cover exactly the kernels an engine owns, so "the engine" and
-"the UED" name the same unit going forward. Today's MIOpen engine is not that; it is a legacy wrapper
-bundling what should be several distinct, tightly-scoped engines into one registration. Mapping UED onto
-today's engine-registration table is therefore a deliberate restructuring of how engines are meant to be
-organized, not a literal analogy to how MIOpen uses the term today.
+A UED is deliberately 1:1 with a hipDNN engine, so "the engine" and "the UED" name the same unit going
+forward. The intent is that an engine serves a scoped family of kernels: tight enough that one heuristic
+and one metadata schema cover exactly the kernels it owns. Legacy engines are not scoped this way today,
+so mapping UED onto the existing registration is a restructuring of how engines are organized, not a
+description of current practice.
 
 A UKD carries no logic of its own: it is just its source details plus metadata values, and it inherits
 when it applies, how it launches, how it is ranked, and its schema from its KDP and that KDP's engine
@@ -217,41 +201,34 @@ when it applies, how it launches, how it is ranked, and its schema from its KDP 
 at runtime with the UKD source that fills it: a simple kernel is a one-Launch UDD, and a multi-launch
 kernel such as SDPA backward is a several-Launch UDD run in order
 ([Section 15](#15-multiple-kernels-and-composition)). The remaining term is the **UCD (Universal
-Composite Descriptor)**, which composes stages that each resolve to a UKD (future work,
-[Section 15](#15-multiple-kernels-and-composition)).
+Composite Descriptor)**, which splits a graph into child graphs, each satisfied by an engine (future
+work, [Section 15](#15-multiple-kernels-and-composition)).
 
 ![How the descriptors relate: an engine owning one heuristic and one metadata schema; a KDP binding a matcher set, that engine, and one UDD over a vector of child kernels](../images/ukd_concepts.svg)
 
 There are two independent selection levels, and they are named apart to avoid conflation. The
 **engine-selection heuristic** is hipDNN's existing heuristic plugin interface, which chooses which
 engine handles a graph. A UHD is a **kernel-selection heuristic** that operates one level down,
-choosing which kernel within an engine to run; it is part of the generic provider, not a new host
+choosing which kernel within an engine to run; it is part of the generic engine, not a new host
 interface. Both are needed: engine selection is unchanged by this proposal, and the kernel-selection
 heuristic is what makes dropping in a family of kernels useful, because it ranks them per problem.
 
-**Cross-engine arbitration today.** Engine selection, the level above the UHD, already exists in hipDNN
-as an ordered-policy loop: a resolved sequence of heuristic-policy plugins runs in order, and the first
-policy that succeeds wins, supplying the ranked engine list. The order resolves from an environment
-override, then a descriptor attribute, then a built-in default. If every policy declines, the query
-fails outright instead of silently falling back to some hidden order. The top-level mechanism is
-therefore not first-claim-wins by registration order, though the built-in fallback policy does order a
-curated set of named engines first and stable-sort the rest, so two UKD-backed engines that policy
-does not name are left in registration order unless a configuration rule or a custom policy separates
-them. It is unchanged by this proposal.
+**Cross-engine arbitration is hipDNN's, and the user controls it.** Which engine handles a graph is
+decided above the descriptor system, by the caller, through three existing mechanisms: **explicit
+selection** of an engine, **policy configuration**, where a resolved sequence of heuristic-policy
+plugins supplies the ranked engine list and a policy may itself be a heuristic, and **auto-tuning**,
+which measures engines and picks the winner outright ([RFC 0013](0013_Autotune.md)). It is not
+first-claim-wins by registration order. This proposal changes none of it; it only makes engine
+selection more visible, because more engines become cheap to add. A KDP and a UHD have no say in it: a
+UHD's scores are meaningful only within its own engine and are never compared across engines.
 
-Choosing between engines is therefore hipDNN's job, not a KDP's or a UHD's, and hipDNN already has
-three mechanisms for it: engine-selection policies, explicit user selection, and auto-tuning. Two
-kernels in different engines are arbitrated by those, whatever their UHDs scored them at internally.
-This proposal does not change the engine-selection problem; it only makes it more visible, because
-more engines become cheap to add.
-
-Out-of-box kernel selection is the UHD's job: given a catalog, it picks one kernel. There is no UKD
-equivalent of MIOpen's Find modes (enumerate every applicable kernel, benchmark it, and pick by
-measured time); that distinction lives one level up, in hipDNN's out-of-box versus tuning paths, not
-inside the descriptor system. A tuning run may ignore the heuristic's suggestion entirely and
-benchmark every kernel in the catalog, or use the suggestion to tune faster
-([RFC 0013](0013_Autotune.md)). Exactly how hipDNN uses heuristic output in each path is left to the
-UHD follow-up RFC.
+Kernel selection is the UHD's job: given a catalog, it picks one kernel. That is the out-of-box path,
+one ranked choice, no measurement. Exhaustive search is the opt-in path instead: a user can restrict
+the catalog through knob configuration, or use the auto-tuning API to sample candidates and keep the
+measured winner, opting in to testing across engines, within one engine's full catalog, or both
+([RFC 0013](0013_Autotune.md)). A tuning run may ignore the heuristic's suggestion entirely or use it
+to converge faster. Exactly how hipDNN consumes heuristic output on each path is left to the UHD
+follow-up RFC.
 
 ---
 
@@ -278,71 +255,91 @@ runs is picked up or dropped without a restart, and anything cached from a remov
 [Section 8](#8-end-to-end-flow) gives the exact order, what each step loads, and where the result is
 kept.
 
-Each UED becomes an engine that names its heuristic (UHD) and metadata
-schema (KMD); the KDPs that name it contribute their matchers, dispatch, and kernels, and each child
-kernel becomes a data-backed plan builder inside that engine. Deciding which kernels apply to a graph is
-then a cheap, shared-matcher pass ([Section 5](#5-matching-and-the-umd)): shared checks run once for the
-whole graph, per-kernel checks run only for the survivors, and results are cached. No new host or plugin-ABI interfaces are introduced; the
-generic engine satisfies hipDNN's existing contracts using descriptor data, and the new machinery it
-needs (the matcher, the expression interpreter, the selector, and the predicate and custom-plan
-registries) lives inside the provider behind those contracts.
+Each UED becomes an engine that names its heuristic (UHD) and metadata schema (KMD); the KDPs that name
+it contribute their matchers, dispatch, and kernels. Deciding which kernels apply to a graph is a cheap,
+shared-matcher pass ([Section 5](#5-matching-and-the-umd)): shared checks run once for the whole graph,
+per-kernel checks run only for the survivors, and results are cached.
+
+**The runtime lifecycle in one table.** The rest of this document describes formats; this is the order
+they are consumed in, so that the sections below can refer to it. hipDNN makes up to four calls per
+graph, and each can only arrive after the one above it:
+
+| Call | Asked of | Loads | Produces |
+|---|---|---|---|
+| `isApplicable` | every engine | UED, KMD, KDPs, UMDs, kernel metadata | the **catalog** and the **bound token state** |
+| `getDetails` (knobs, optional) | engines the caller inspects | UHD | a ranked catalog |
+| `getMaxWorkspaceSize` | candidate engines | UDD | a byte count |
+| `initializeExecutionContext` | the selected engine | kernel sources | the plan |
+
+Two terms come from that first call and are used throughout. The **catalog** is the set of an engine's
+kernels that pass every matcher for one graph, keyed by each kernel's KMD values; an engine is
+applicable exactly when its catalog is non-empty. The **bound token state** is every `$`-prefixed value
+the matchers resolved along the way (`$graph.*`, `$device.*`, tensor fields, `$kernel.*`), kept so that
+ranking, workspace, and dispatch read it instead of recomputing it. Both are cached per graph.
+[Section 8](#8-end-to-end-flow) walks the same lifecycle in full, step by step.
+
+The engine has **one plan builder**, not one per kernel. A catalog entry is a candidate, not a builder:
+the kernels are data, and the single builder's job is to produce a plan that can launch them. Ranking
+the catalog does not build anything, so an engine with 150 kernels still has one builder and pays only
+for the kernels a plan actually needs. In the ordinary case that is the heuristic's top choice, and the
+plan holds one kernel loaded with its UDD bound. When the caller has opted into measurement, the builder
+prepares the candidates being sampled instead, each loaded and dispatch-ready in the same plan, so the
+measured winner can be chosen and cached ([Section 8](#8-end-to-end-flow)).
+
+No new host or plugin-ABI interfaces are introduced; the generic engine satisfies hipDNN's existing
+contracts using descriptor data, and the new machinery it needs (the matcher, the expression
+interpreter, the selector, and the predicate and custom-plan registries) lives inside the provider
+behind those contracts.
 
 ---
 
 ## 4. Descriptor Formats
 
 Descriptors are authored in a human-readable, diffable text format and compiled to a compact binary
-form for fast loading. Each format (KDP, UMD, UDD, UED, UHD, KMD, UKD) has a defined schema and its
-own `major.minor` version, versioned independently per file type rather than as one shared component
-version. A descriptor is refused, never silently reinterpreted, if its version is newer than the
-runtime understands: a major-version mismatch is always refused, and within a major version an older
-minor always loads (minor versions are additive only) while a newer minor is refused. Concretely, a
-pack stamped `1.0.0` loads under a `1.1.0` runtime, but a pack stamped `1.1.0` does not load under a
-`1.0.0` runtime, because it carries features that runtime does not understand. Breaking changes
-(removing or retyping a field, changing field order, or anything else consumers must expect to react
-to) require a major bump; every other change is a minor bump, and authors should stamp the lowest
-version their descriptor actually requires, for maximum compatibility with older runtimes. This is a
-finer granularity than [RFC 0005](0005_Versioning.md)'s component-level `MAJOR.MINOR.PATCH.TWEAK`
-versioning, not the same policy applied more narrowly: RFC 0005 advances each hipDNN component
-(schema, plugin SDK, backend, ...) in lockstep, while this versions each descriptor file type
-independently, so a KMD and a UDD can advance their minor versions on different schedules. The
-reject-newer, accept-older-within-major shape itself is not new: hipDNN already rejects a plugin
-whose major API version mismatches, accepts an older plugin minor version for graphs that do not
-need its newer features, and rejects a serialized graph or execution plan whose version exceeds what
-the build understands ([RFC 0005](0005_Versioning.md) section 4.6.4,
-[RFC 0009](0009_CompiledPlanSerialization.md)); per-file-type descriptor versioning follows that
-same established shape. The concrete serialization and schema for each format are deferred to that
-format's follow-up RFC.
-Every descriptor also carries a stable `id`, a GUID, used for cross-references, and a `name` that is
-mandatory for logging and diagnostics; both appear in the examples. GUIDs let any author mint an id
-locally that never collides with another author's, so there is no central allocation authority to
-serialize through. The schema and its relations are still centrally defined (the field vocabulary
-and the custom-operation registry are part of the provider's published contract); what a follow-up
-adds is authoring tooling to generate and lint descriptors, mint ids, and drive this from
-higher-level inputs. The examples are illustrative, and the `schema`/version plumbing is shown once
-here and elided elsewhere.
+form for fast loading. Every descriptor carries a stable `id`, a GUID, used for cross-references, and a
+`name` that is mandatory for logging and diagnostics; both appear in the examples. GUIDs let any author
+mint an id locally that never collides with another author's, so there is no central allocation
+authority to serialize through. The examples are illustrative, and the version plumbing shown here is
+elided in later ones.
 
-**KDP schema/SDK-version tag.** A KDP separately declares the schema (SDK) version its matchers were
-authored against: an explicit ceiling of the graph features its author understands, not an
-enumeration of which fields its matchers reference. The alternative considered and rejected was
-auto-rejecting a KDP for any graph field its matchers do not mention; that would force every matcher
-into a massive, exhaustive field-by-field block and would break every existing KDP, including
-third-party drop-ins, each time hipDNN adds a field. Instead, a graph's minimum required schema
-version is computed from the optional fields it actually sets, and a KDP whose declared schema
-version is below that floor is declined automatically, before its matchers run. For example: a KDP
-declares support for schema `1.0.0`; hipDNN later adds an optional SDPA field at `1.1.0`; a graph
-that sets that field now requires `1.1.0` and the KDP is declined before its matcher runs, while a
-graph that does not set it still resolves to `1.0.0` and still reaches the KDP. This lets KDP
-authors add support for new features asynchronously, or deliberately stay on an older schema version
-when their kernel cannot support the newer feature.
+**Each file type is versioned independently**, as `major.minor`, following ordinary semantic-version
+rules:
 
-This mirrors, rather than invents, an existing hipDNN mechanism: a graph already carries a
-minimum-required engine-plugin API version, computed by a single source-of-truth function in the
-plugin SDK as a monotonic maximum over the optional features the graph uses, and providers below
-that floor are excluded before their applicability check runs; a serialized graph above the build's
-ceiling is rejected outright at deserialize. The KDP schema/SDK-version tag is the same pattern
-applied to matchers instead of engine plugins. This is a high-level statement of intent; the future
-KDP follow-up RFC must specify this tag concretely in the schema.
+| Condition | Result |
+|---|---|
+| `major` differs from the runtime's | Reject |
+| `minor` newer than the runtime's | Reject |
+| Otherwise | Load |
+
+A descriptor is refused, never silently reinterpreted. A file stamped `1.0` loads on a `1.1` runtime; a
+file stamped `1.1` does not load on a `1.0` runtime, because it carries features that runtime does not
+understand. Removing or retyping a field is a major bump; adding one is a minor bump. Authors stamp the
+lowest version their descriptor actually needs, so it stays loadable on the oldest runtime that can
+serve it.
+
+Versioning is per file type, not one shared version, so a KMD and a UDD advance on their own schedules.
+In practice these versions should move rarely: the formats carry expressions rather than fixed fields,
+so new behavior is usually authored in the expression language instead of requiring a schema change.
+The versions exist so a breaking change remains possible, not because one is expected often.
+
+**A UMD carries a second version: the graph schema it understands.** A matcher is the one descriptor
+that reads graph fields, so besides its own format version it declares the hipDNN schema (SDK) version
+it was authored against, an explicit ceiling on the graph features its author accounted for. hipDNN
+computes a graph's minimum required schema version from the optional fields the graph actually sets,
+and a matcher declaring less than that floor is declined before it runs. A matcher declaring `1.0` keeps
+matching graphs that need only `1.0`; once hipDNN adds an optional SDPA field at `1.1`, a graph that
+sets it requires `1.1` and that matcher is skipped, while graphs that leave it unset still reach it.
+Authors adopt new graph features when they are ready, or stay on an older schema deliberately when a
+kernel cannot support the newer one. Every other descriptor needs only its own version, since none of
+them read the graph.
+
+This mirrors an existing hipDNN mechanism rather than inventing one: a graph already carries a
+minimum-required engine-plugin API version, computed in the plugin SDK from the optional features it
+uses, and providers below that floor are excluded before their applicability check
+runs ([RFC 0005](0005_Versioning.md) section 4.6.4,
+[RFC 0009](0009_CompiledPlanSerialization.md)). Both mechanisms are finer-grained than RFC 0005's
+component-level versioning, which advances hipDNN's components in lockstep. The concrete serialization,
+schema, and version tags for each format are specified in that format's follow-up RFC.
 
 **UED, an engine with its heuristic, metadata schema, knobs, and notes:**
 
@@ -355,50 +352,58 @@ KDP follow-up RFC must specify this tag concretely in the schema.
   "metadata":  "9ae0b215-32a7-49d1-96df-e9b05e1927ea",                     // one KMD: the variant schema this engine's kernels fill
   "behavior_notes":  ["runtime_compilation"],  // hipDNN behavior notes for this engine
   "numerical_notes": ["tensor_core", "reduced_precision_reduction"],  // hipDNN numerical notes
-  "knobs": [                                   // author-exposed, user-controllable
-    {"name": "split_k",     "type": "int", "default": 1, "constraint": {"min": 1, "max": 8}},
-    {"name": "use_atomics", "type": "int", "default": 0, "constraint": {"one_of": [0, 1]}}
-  ]
+  "knobs": ["split_k", "tile_m"]               // KMD fields this engine lets the user control
 }
 ```
 
-**Knobs are restricted to the loaded catalog.** For both the AOT path and the future JIT path
-([Section 9.3](#93-future-jit-and-normalized-providers)), the knob values an engine presents are a
-function of two things: the fields its KMD declares, and the values those fields actually take
-among the kernels in the catalog loaded for this graph. A knob's legal values are not the KMD
-field's theoretical range; they are whatever the surviving kernels actually have. If a `tile_size`
-field exists in the KMD but every kernel that matched this graph declares `tile_size: 4`, the
-presented "choice" is `[4, 4]`, not a selectable range: one value is not a choice.
+**A knob is a KMD field the engine chooses to expose.** It is a name, nothing more. The KMD already
+declares the field's type and default and every kernel already carries a value for it, so restating any
+of that in the UED would be a second source of truth that can disagree with the first. Exposing a field
+is additive and reversible: add a name to expose it, remove the name to withdraw it. Only KMD fields
+can be knobs, and a name no field matches is a load error.
 
-Because a knob's value can affect which kernels apply, the catalog is built first and legal knob
-values are derived from the kernels that survive it, never the other way around. A user-set knob then
-restricts that catalog: setting `split_k = 4` keeps only kernels whose KMD `split_k` field equals 4,
-and the UHD's ranking decides among those
-([Section 10](#10-observability-and-diagnostics) shows where this is visible at runtime).
+**A knob's legal values come from the catalog, not the schema.** What a knob offers is the set of
+values the field takes among the kernels in the catalog for this graph, never the KMD field's
+theoretical range. If the KMD declares `tile_m` but every kernel matching this graph declares
+`tile_m: 4`, the value set is `[4, 4]`: offering a range no kernel implements would only produce a
+request nothing can serve. This holds for the AOT path and the future JIT path alike
+([Section 9.3](#93-future-jit-and-normalized-providers)).
 
-This fits hipDNN's existing knob-discovery shape rather than requiring a new one: today's
-per-engine knob query already takes the operation graph, not just the engine id, and one existing
-provider already narrows a knob's *range* from the graph it is handed (MIOpen derives its
-workspace-size-limit knob's bounds from the actual convolution problem it is given). Deriving a
-knob's legal *value set* from a pre-built kernel catalog is the same shape one step further:
-graph-scoped input, narrower output.
+**A knob's default is the heuristic's choice, not a constant.** Whatever the UHD ranks first is what the
+knob reports, so leaving every knob alone reproduces the out-of-box selection and the reported default
+tracks the ranking instead of drifting from it as kernels are added.
 
-**Ordering works on today's API.** The catalog derives from graph details alone, so it exists by the
-time the engine answers applicability and a knob's legal values are known then, reported through the
-existing graph-parameterized knob query. That the user's values are consumed later, after an engine id
-is chosen, costs nothing. A UHD scores each kernel on its own metadata and the problem, independently
-of which other kernels are in the catalog, so restricting the catalog and ranking it commute: the
-highest-scoring kernel that satisfies the knobs is the same either way. An implementation restricts
-first, to avoid scoring candidates it would discard. That independence is a requirement on a UHD, not
-an assumption about one: a scorer that normalized across the catalog or broke ties on the surviving
-set would make selection depend on filtering order, and is out of contract. No new front-end entry
-point and no change to the existing call order is required.
+Order follows from that: the catalog is built first, its values determine what the knobs offer, and a
+user-set knob then restricts it. Setting `split_k = 4` keeps only kernels whose `split_k` is 4, and the
+UHD ranks those.
 
-**Autotune.** Because a sweep's values are validated against the same per-graph knob lookup used
-for a manually-set knob, a catalog-filtered value set is inherited by autotune automatically. A
-caller that hardcodes a sweep axis from a knob's general range instead of re-querying it per graph
-has its out-of-catalog entries skipped with a warning, not the whole sweep rejected
-([RFC 0013](0013_Autotune.md)).
+**hipDNN already enforces this order.** A knob query reaches an engine as
+`IEngine::getDetails(handle, opGraph, out)`, whose interface comment states the graph is passed
+precisely so an engine can consult its plan builders for knobs; by the convention every provider
+follows today, it fans out to `IPlanBuilder::getCustomKnobs(handle, opGraph)`. What hipDNN itself
+enforces is the ordering: a knob query cannot arrive without a built graph, and cannot arrive before
+applicability, because the engine id it needs came from the list hipDNN's own engine-selection
+heuristic ranked after calling `isApplicable` on every engine. So the catalog already exists and is
+cached when the query lands ([Section 8](#8-end-to-end-flow)).
+
+Ranking that catalog to report a default is ordinary work for this call, and less than the existing
+precedent: MIOpen's convolution knob query iterates **every registered convolution solver**, testing
+each for applicability and querying its workspace size, and reports the resulting maximum as the knob's
+default. That is a full solver sweep with a computed default, per query, uncached. Ranking an
+already-cached catalog is the same shape and cheaper. hipDNN caches nothing between these calls, which
+is why the provider-owned cache ([Section 8](#8-end-to-end-flow)) is what keeps a repeated query a
+lookup.
+
+Restricting the catalog and ranking it commute, so the order of those two costs nothing: a UHD scores
+each kernel on its own metadata and the problem, independently of the rest of the catalog, and an
+implementation restricts first to avoid scoring candidates it would discard. That independence is a
+requirement on a UHD: a scorer that normalized across the catalog or broke ties on the surviving set
+would make selection depend on filtering order, and is out of contract.
+
+**Autotune** inherits the catalog-filtered value set automatically, because a sweep's values are
+validated against the same per-graph knob lookup a manually-set knob uses. A caller that hardcodes a
+sweep axis from a knob's general range instead of re-querying it per graph has its out-of-catalog
+entries skipped with a warning, not the whole sweep rejected ([RFC 0013](0013_Autotune.md)).
 
 **UHD, a kernel-selection model for one group:**
 
@@ -437,6 +442,22 @@ an optional default. It declares upfront which variants the engine spans; each U
 values. When the engine's KDPs span different axes, the schema is their union and unused fields take
 their defaults.
 
+**The KMD field set is the engine's kernel key, and it must be unique.** A kernel's metadata values,
+with defaults filled in for the fields it omits, form its key, and every kernel in the engine must
+produce a distinct one. This is a hard requirement, not a style rule, because the KMD fields are the
+only per-kernel input selection has: a UHD scores a kernel on its metadata plus device and graph
+features ([Section 4](#4-descriptor-formats)), and a matcher reads the same values as `$kernel.*`. Two
+kernels with the same key are indistinguishable to both, so there is no basis on which to prefer one
+over the other, and no answer to give. The catalog is therefore keyed on the tuple: a duplicate key is
+logged as an error and the colliding kernel dropped, rather than silently admitted into a set where
+selection cannot choose between its entries. Uniqueness is engine-wide, not per-pack, because the
+catalog spans every KDP that names the engine.
+
+The remedy when two kernels must coexist is to add the KMD field that actually distinguishes them, so
+the schema grows to describe the variants the engine spans. This is an additive change and carries no
+retrain obligation until the new field is exposed to selection
+([Section 16](#16-risks)).
+
 The KMD is the feature space the engine's heuristic ranks over, which is why the UED owns both the
 KMD and the one UHD. The coupling is not unconditional: an additive change, a new field or new legal
 values added to an existing field, does not require a retrain until the change is exposed, because the
@@ -455,7 +476,7 @@ compute per-kernel dispatch detail, such as launch geometry
   "schema": "hipdnn.kmd/v1",
   "id":     "9ae0b215-32a7-49d1-96df-e9b05e1927ea",       // stable, unique; referenced by the UED (one per engine)
   "name":   "Example attention variant fields",
-  "fields": [
+  "fields": [                                             // the UED's knobs[] names a subset of these
     {"name": "tile_m",  "type": "int", "optional": true, "default": 1},
     {"name": "split_k", "type": "int", "optional": true, "default": 1}
   ]
@@ -469,6 +490,8 @@ its kernels require.
 ```jsonc
 {
   "schema": "hipdnn.umd/v1",
+  "version":     "1.0",   // matcher format version, gated at load (Section 4)
+  "sdk_version": "1.0",   // hipDNN graph schema version this matcher was authored against (Section 4)
   "id":     "968156a8-ee21-4827-bcd7-893a8a72dccc",    // stable; listed in KDP matchers[], shared across packs
   "name":   "Example attention forward (d128, bf16) match",
   "nodes":    [ ... ],     // structural pattern that binds $vars (Section 5)
@@ -502,11 +525,9 @@ tokens ([Section 5](#5-matching-and-the-umd)); they are checked against the engi
 matchers, engine, and dispatch are all the KDP's, and its heuristic and metadata schema are the engine's,
 so it names none of them.
 
-Because applicability and ranking both key on these `$kernel.*` values, a kernel's identity for matching
-and dispatch purposes is exactly its KMD field values: two kernels with identical metadata and the same
-ABI cannot diverge in applicability or ranking, since nothing distinguishes them to a matcher or the UHD.
-This is a design boundary: if two kernels must behave differently, add a KMD field
-that distinguishes them; a kernel vector should never carry two entries keyed to the same metadata.
+A UKD's `id` identifies the descriptor; its **metadata values identify the kernel** to the system that
+has to choose it, since applicability and ranking read only those. That completed tuple is the kernel's
+catalog key and must be unique, by the KMD rule above.
 
 ```jsonc
 {
@@ -528,7 +549,6 @@ kernels are unique to this pack.
 {
   "schema": "hipdnn.kdp/v1",
   "version": "1.0",            // pack format version, major.minor, gated at load (Section 4)
-  "sdk_version": "1.0",        // hipDNN schema version this pack's matchers were authored against
   "arch":     ["gfx942"],      // arch is a pack property, resolved at selection (Section 5)
   "matchers": ["968156a8-ee21-4827-bcd7-893a8a72dccc"],   // UMD ids; a child kernel applies iff all listed matchers pass
   "engine":    "efc9eae4-fe33-4cb0-a593-95d771dc13b2",     // one UED id: the engine every child kernel joins (carries UHD + KMD)
@@ -712,17 +732,20 @@ custom plan ([Section 6](#6-dispatch-and-workspace)); together they form a grade
 data, to a named escape hatch for a step that needs real C++, to a full provider.
 
 **Applicability is a cheap, shared-matcher pass.** A matcher that reads only graph fields
-(Tensor/Graph/Attributes/Device) runs **once for the whole graph**; on failure it disqualifies every
-pack that lists it, so evaluating the most-shared checks first (arch, dtype, layout) prunes the
-candidate set fast. A matcher that also reads `$kernel.*` is the **same** matcher re-evaluated **once
-per kernel** (per distinct metadata, memoized) and disqualifies per kernel, not per pack. Those
-kernel-level checks are expected; they stay cheap because distinct metadata values are far fewer than
-kernels and they run only for kernels whose packs survived the graph-only pruning. Results are cached
-across queries, and a kernel whose matchers all pass goes to the UHD to be ranked.
+(Tensor/Graph/Attributes/Device) runs **once for the whole graph** (*run-once memoization*); on failure
+it disqualifies every pack that lists it (*fail-prune*), so evaluating the most-shared checks first
+(arch, dtype, layout) prunes the candidate set fast. A matcher that also reads `$kernel.*` is the
+**same** matcher re-evaluated **once per kernel** (per distinct metadata, memoized) and disqualifies per
+kernel, not per pack. Those kernel-level checks are expected; they stay cheap because distinct metadata
+values are far fewer than kernels and they run only for kernels whose packs survived the graph-only
+pruning. Results are cached across queries, and a kernel whose matchers all pass goes to the UHD to be
+ranked.
 
 **Arbitration is deterministic.** When several UKDs accept the same graph, the UHD ranks them and the
 top-scored kernel wins. Ties break in a fixed order: explicit `priority`, then the descriptor's stable
-`id`. When the decision falls to `id`, the provider logs the conflict to the warning log.
+`id`, compared as raw bytes. That byte order is arbitrary and carries no meaning; it is a tie-break
+chosen because it is stable across runs, load orders, and machines, not because a lower id is better.
+When the decision falls to `id`, the provider logs the conflict to the warning log.
 
 **Optional operands.** A pattern marks an operand optional with a `?` suffix, `"bias": "$bias?"`, binding
 it only when the graph supplies it; a formula then reads a possibly-absent value with a default via
@@ -808,8 +831,10 @@ Workspace, when non-zero, is an expression in this same language, most commonly 
 dimension products (from the graph) times per-element byte rates (author constants), gated by knobs or
 attributes where needed. Kernels whose scratch depends on a knob, such as a split-K GEMM sizing its
 partials by the split factor, use the full expression (ceil-div, max, and the rest), not only the
-sum-of-products form. It is evaluated once per plan, satisfying hipDNN's existing workspace-size query
-generically. The formula is the author's contract: the provider allocates exactly what it reports and
+sum-of-products form. Because the query is answered before a kernel is chosen, it is evaluated for each
+kernel the caller's knobs leave in the catalog and reported as the maximum
+([Section 8](#8-end-to-end-flow)), satisfying hipDNN's existing workspace-size query generically. The
+formula is the author's contract: the provider allocates exactly what it reports and
 hands the kernel that scratch, so a wrong formula is an author bug in the same class as a wrong kernel,
 caught by testing and code review rather than by a runtime guard.
 
@@ -851,10 +876,11 @@ the metadata values that kernel supplies ([Section 4](#4-descriptor-formats)).
 
 rocKE's CTA-geometry heuristics are a concrete instance of the case this answers. Today `num_warps`,
 `block_m_per_warp`, and `tile_size` are the output of measured-threshold branching over the problem
-shape, a decision tree of roughly ten named cohort gates, each backed by an out-of-tree performance
-sweep, not a formula over graph dimensions. That branch tree is exactly what a UKD vector replaces: each
-measured cohort becomes one distinct UKD whose geometry is fixed KMD metadata, and the engine's UHD,
-trained on the same sweep data, replaces the hand-written thresholds. Ranking the catalog picks the
+shape, a decision tree of roughly ten gates, each selecting a **cohort**, a bucket of problem shapes
+that share one measured tuning configuration, and each backed by an out-of-tree performance sweep
+rather than a formula over graph dimensions. That branch tree is exactly what a UKD vector replaces:
+each measured cohort becomes one distinct UKD whose geometry is fixed KMD metadata, and the engine's
+UHD, trained on the same sweep data, replaces the hand-written thresholds. Ranking the catalog picks the
 cohort; the winning UKD's KMD values then carry its geometry into the shared UDD's formulas. Fixed
 per-instance metadata that is not formula-derivable from the graph is exactly what `$kernel.*` is for.
 rocKE's own dispatcher already treats tiling this way at its own layer: the block-size fields in its
@@ -886,7 +912,7 @@ a different ABI and belongs in a different pack. That is the existing pack rule,
   "grid":  {"x": {"ceil_div": ["$q.seqlen_q",
                                 {"*": ["$kernel.num_warps", "$kernel.block_m_per_warp"]}]},
             "y": "$q.num_heads", "z": "$q.batch"},
-  "block": {"x": {"*": ["$device.wave_size", "$kernel.num_warps"]}, "y": 1, "z": 1},
+  "block": {"x": {"*": ["$device.warp_size", "$kernel.num_warps"]}, "y": 1, "z": 1},
   "shared_mem_bytes": {"*": [{"*": ["$kernel.num_warps", "$kernel.tile_size"]}, 4]}
 }
 ```
@@ -956,11 +982,21 @@ the runtime order: what loads, when, why, and where the result is kept. Everythi
 `IEngine` and `IPlan`, the contracts a hand-written engine already implements, so no new host or
 plugin-ABI interface is introduced.
 
-Two host calls frame the flow. `IEngine::isApplicable` is asked of **every** loaded engine, so steps 1
-to 7 run once per engine per graph and must stay cheap. `IEngine::initializeExecutionContext` arrives
-**only for the engine hipDNN selected**, so steps 9 to 11 run once, for one engine. Everything that is
-per-engine-per-graph is therefore computed in the first phase and cached; the second phase reads that
-cache and never re-matches.
+**The order is not a convention; hipDNN enforces it.** Four host calls arrive, and each one can only
+arrive after the last:
+
+| Phase | Host call | Asked of | Loads | Produces |
+|---|---|---|---|---|
+| Applicability | `IEngine::isApplicable` | every loaded engine | UED, KMD, KDPs, UMDs, UKD metadata | the **catalog**, plus the **bound token state**: every `$`-prefixed value the matchers resolved |
+| Knob query (optional) | `IEngine::getDetails` | engines the caller asks about | UHD | a **ranked** catalog, so knob value sets and defaults |
+| Workspace | `IEngine::getMaxWorkspaceSize` | candidate engines | UDD | a byte count |
+| Plan build | `IEngine::initializeExecutionContext` | the selected engine only | kernel sources | the plan |
+
+A knob query cannot precede applicability: the engine id a caller passes came from the list hipDNN's
+engine-selection heuristic ranked after calling `isApplicable` on every engine, and finalizing the
+engine descriptor re-checks the id against the applicable set before requesting details. So every phase
+reads what the phase before it cached, and each descriptor kind loads exactly once, at the first phase
+that needs it.
 
 ### 8.1 Applicability, Once Per Engine
 
@@ -982,10 +1018,10 @@ catalog, since a pack added or removed changes which kernels are candidates. Thi
 `isApplicable` call, which is why it must stay a stat and not a directory walk.
 *Loads:* nothing yet, only the inventory of ids, kinds, and locations.
 
-**4. Resolve this engine's UED.** Gives the engine identity, its knobs, and the ids of its one
-heuristic (UHD) and one metadata schema (KMD).
-*Why now:* the KMD field names are needed to validate `$kernel.*` references in step 6. The UHD is
-named but **not** loaded; nothing ranks yet.
+**4. Resolve this engine's UED and KMD.** The UED gives the engine identity, the KMD fields it exposes
+as knobs, and the ids of its one heuristic (UHD) and one metadata schema (KMD). The KMD loads with it:
+its fields key the catalog ([Section 4](#4-descriptor-formats)) and name the `$kernel.*` references
+step 6 must validate. The UHD is named but **not** loaded; nothing ranks yet.
 *Stored:* parsed UED and KMD, cached on the handle, reused by every later graph.
 
 **5. Resolve the KDPs that name this engine, and their matchers.** Each KDP contributes a matcher set,
@@ -994,17 +1030,19 @@ one UDD id, and a kernel vector of UKDs with their metadata values.
 inputs those matchers read. The UDD is named but **not** loaded; nothing dispatches yet.
 *Stored:* parsed KDPs, matchers, and kernel metadata, cached on the handle.
 
-**6. Run the matchers in priority order.** Graph-level matchers first, the ones reading only
+**6. Run the matchers in pruning order.** Graph-level matchers first, the ones reading only
 `$graph.*`, node-attribute, and tensor fields; `$kernel.*` matchers last
 ([Section 5](#5-matching-and-the-umd)). A graph-level failure disqualifies every kernel in every pack
 that lists it, so the broadly shared checks (architecture, dtype, layout) prune before the per-kernel
 pass runs at all.
 *Produces two things, both cached together under step 2's key:*
-- the **catalog**, the UKDs whose full matcher set passed, and
+- the **catalog**, the UKDs whose full matcher set passed, keyed by each kernel's KMD value tuple; a
+  duplicate key is logged and dropped ([Section 4](#4-descriptor-formats)), and
 - the **bound token state**, the `$graph`, `$device`, node-attribute, tensor, and `$kernel` values
   bound while matching.
 
-**7. Return.** True if and only if the catalog is non-empty.
+**7. Return.** True if and only if the catalog is non-empty. Applicability is not a separate verdict;
+it is whether any kernel survived.
 
 ### 8.2 Selection, By hipDNN
 
@@ -1013,40 +1051,82 @@ pass runs at all.
 answered true but are not selected do no further work; their cached catalog stays on the handle in case
 a later graph hashes to it.
 
-### 8.3 Plan Build and Execute, Selected Engine Only
+### 8.3 Knobs, If The Caller Asks
 
-**9. Rank the catalog.** `IEngine::initializeExecutionContext` arrives. Read the cached catalog and
-bound token state, apply any user-set knobs as a filter ([Section 4](#4-descriptor-formats)), then load
-this engine's **UHD** and score the survivors. It returns a ranked list whose top entry is the default
-selection.
-*Why the UHD loads here and not earlier:* ranking is only ever needed for the one engine that won, so a
-heuristic model is never read for an engine hipDNN did not pick.
+**9. Rank the catalog to answer a knob query.** `IEngine::getDetails(handle, opGraph, out)` arrives for
+an engine the caller is inspecting. Read the cached catalog and bound token state, load this engine's
+**UHD**, and score the catalog. A knob reports two things and the ranked catalog supplies both: the
+**value set** is the distinct values that field takes across the catalog, the **default** is the value
+the top-ranked kernel carries ([Section 4](#4-descriptor-formats)).
+*Why the UHD loads here:* this is the first call needing an order rather than a membership test.
+*Stored:* the ranked catalog, cached with the catalog it came from, so a repeated query is a lookup and
+the plan build reuses it.
 
-**10. Build the launcher.** The winning UKD is known, so load its pack's **UDD** and evaluate its grid,
-block, shared-memory, and argument formulas over the bound token state from step 6.
+This phase is optional and is not confined to the winner: a caller enumerating its options queries
+knobs for every ranked engine id, so a UHD may load for an engine that is never selected. It cannot
+arrive first, because the id it needs came from applicability.
+
+### 8.4 Workspace
+
+**10. Report the workspace requirement.** `IEngine::getMaxWorkspaceSize(handle, opGraph, engineConfig)`
+takes an engine config but no execution context, and autotune calls it for every candidate engine, most
+of which are never selected ([RFC 0013](0013_Autotune.md)). The config may carry knob settings, though
+autotune's per-candidate estimate passes only the engine id, so the general case is that no kernel has
+been chosen yet. Apply whatever knob filter the config carries, load the **UDD** of each surviving
+kernel's pack, evaluate its workspace requirement over the cached bound token state, and report the
+**maximum** across survivors.
+*Why the UDD loads here:* workspace is the first question whose answer is a dispatch property.
+*Stored:* the parsed UDDs, on the handle; the plan build reuses them.
+
+**Why the maximum, and why it is enough.** One kernel's requirement is its UDD's `workspace_bytes`, or,
+for a multi-launch program, the sum of that program's intermediates and each Launch's own scratch
+([Section 15.3](#153-intermediate-buffers)). Reduce each survivor to that single number first, then
+take the maximum over survivors. The maximum is correct because the buffer is reused, not partitioned:
+the plan launches one kernel at a time on one stream, so a candidate's scratch is live only while it
+runs. That holds under measurement too, where the plan holds several candidates at once
+([Section 3](#3-how-it-works)): they are loaded together but sampled one after another, each reusing
+the same buffer, so the requirement is still the largest single candidate rather than the sum. Any
+candidate needing less over-allocates, which is accepted; under-allocating is not.
+
+A workspace **limit** exposed as a knob follows the ordinary rule: default from the ranked winner,
+range `[min, max]` across the catalog.
+
+### 8.5 Plan Build and Execute, Selected Engine Only
+
+**11. Choose the kernel.** `IEngine::initializeExecutionContext` arrives. Read the cached catalog,
+bound token state, and ranked order. With no knobs set the kernel is the top-ranked one; with knobs
+set, filter the catalog to the kernels whose KMD values match every setting and take the highest-ranked
+survivor. If a knob query never ran, the UHD loads here.
+
+**12. Build the plan.** The engine's one plan builder produces a plan for the kernels it needs to be
+able to launch, loading each one's `kernel_source` and evaluating its pack's UDD grid, block,
+shared-memory, and argument formulas over the bound token state from step 6. Ordinarily that is the
+single chosen kernel; under measurement it is the candidates being sampled, prepared the same way in
+the same plan ([Section 3](#3-how-it-works)).
 *Stored:* the resulting plan, held by the execution context. Nothing is re-matched and nothing is
-re-scanned; selection has already happened.
+re-scanned; every decision was made before this step.
 
-**11. Execute.** `IPlan::execute(handle, deviceBuffers, numDeviceBuffers, workspace)`. hipDNN passes a
+**13. Execute.** `IPlan::execute(handle, deviceBuffers, numDeviceBuffers, workspace)`. hipDNN passes a
 flat array pairing each tensor uid with a device pointer, built from the caller's variant pack, and the
 launcher resolves each UDD argument against it by uid.
 
-**Workspace** is queried by `IEngine::getMaxWorkspaceSize(handle, opGraph, engineConfig)`, evaluating
-the UDD's `workspace_bytes` formula over the cached bound token state. It carries no execution context
-and autotune calls it for every candidate engine, most of which are never selected
-([RFC 0013](0013_Autotune.md)), so any engine that reached step 6 can answer it without a plan.
-
-### 8.4 What Each Step Loads and Keeps
+### 8.6 What Each Step Loads and Keeps
 
 | Step | Loads | Why then | Stored where |
 |---|---|---|---|
+| 1 | nothing | the host call arrives | nothing |
 | 2 | nothing | cache probe before any parsing | reads the handle cache |
 | 3 | inventory only | detect drop-in changes per call | inventory generation on the handle |
-| 4 | UED, KMD | engine identity; KMD names the `$kernel.*` fields | handle, reused across graphs |
+| 4 | UED, KMD | engine identity; the KMD keys the catalog and names the `$kernel.*` fields | handle, reused across graphs |
 | 5 | KDPs, UMDs, UKD metadata | the matchers are the applicability test | handle, reused across graphs |
 | 6 | nothing new | evaluates what 4 and 5 loaded | catalog + bound token state, keyed per graph |
-| 9 | UHD | only the selected engine ranks | execution context |
-| 10 | UDD, UKD `kernel_source` | only the winning kernel dispatches | plan, held by the execution context |
+| 7 | nothing | reports whether the catalog is non-empty | nothing |
+| 8 | nothing | hipDNN selects among engines; no descriptor is read | nothing |
+| 9 | UHD | first call needing an order, not a membership test | ranked catalog, cached with the catalog |
+| 10 | UDD | first question whose answer is a dispatch property | handle |
+| 11 | UHD, if step 9 never ran | the plan needs an order too | execution context |
+| 12 | `kernel_source` of each kernel the plan must launch | only kernels the plan dispatches are loaded | plan, held by the execution context |
+| 13 | nothing | the plan holds everything the launch needs | nothing |
 
 **Base-path invariant: accept implies a non-empty catalog.** Returning true from `isApplicable` means
 at least one UKD passed every matcher in some KDP. Producing no launchable kernel after accepting is a
@@ -1055,10 +1135,19 @@ closed and hipDNN falls through to the next candidate engine, exactly as if this
 claimed applicability. [Section 15.4](#154-execution-and-selection) states the same rule for a
 composite's mandatory stage; that is this invariant applied to one stage, not a separate rule.
 
-**The cache is provider-owned.** hipDNN passes no graph identity and no opaque state slot across
-`isApplicable` and `initializeExecutionContext`. It does not need to: the two calls share the
-provider's handle and the graph's serialized bytes, and the bytes are the identity. No hipDNN interface
-change is required.
+Descriptors and kernel sources load lazily at runtime, from a location an operator can write to, so a
+load can fail: a pack removed after this engine accepted leaves a source that no longer resolves. That
+is an ordinary error at plan build rather than a crash at launch, and hipDNN falls through to the next
+candidate engine.
+
+**The cache is provider-owned.** hipDNN passes no graph identity and no opaque state slot between these
+calls, and caches nothing itself: each knob query round-trips to the provider. It does not need to pass
+identity: the calls share the provider's handle and the graph's serialized bytes, and the bytes are the
+identity. That is what makes each phase a lookup rather than a repeat of the one before it, and it
+requires no hipDNN interface change.
+
+It is an LRU cache with a bounded entry count, sized generously since entries hold ids and bound field
+values rather than kernels. Eviction only costs a rematch on the next query, never a wrong answer.
 
 ```mermaid
 sequenceDiagram
@@ -1074,27 +1163,34 @@ sequenceDiagram
     Eng->>Cache: probe (graph hash, device id, inventory generation)
     Eng->>Eng: rescan drop-in location; bump generation if changed (3)
     Eng->>Eng: resolve UED + KMD (4), KDPs + matchers + UKD metadata (5)
-    Eng->>Eng: matchers in priority order, graph-level then $kernel-level (6)
+    Eng->>Eng: matchers in pruning order, graph-level then $kernel-level (6)
     Eng->>Cache: store catalog + bound token state
     Eng-->>ERM: true if catalog non-empty (7)
 
     Note over FE: Step 8: hipDNN engine selection, unchanged, not the UHD
     FE->>FE: select engine
 
-    Note over FE,Plan: Steps 9-11: selected engine only
+    Note over FE,Cache: Steps 9-10: optional, any candidate engine
+    FE->>ERM: get_knobs_for_engine(engineId)
+    ERM->>Eng: getDetails(handle, opGraph, out)
+    Eng->>Eng: load UHD, rank catalog (9)
+    Eng->>Cache: store ranked catalog
+    Eng-->>ERM: knob value sets + heuristic defaults
+    ERM->>Eng: getMaxWorkspaceSize(handle, opGraph, engineConfig)
+    Eng->>Eng: knob filter, load UDD, max workspace_bytes (10)
+
+    Note over FE,Plan: Steps 11-13: selected engine only
     FE->>ERM: build_plans() -> finalizePlanDescriptor
     ERM->>Eng: initializeExecutionContext(handle, opGraph, engineConfig, ctx)
-    Eng->>Cache: read catalog + bound token state
-    Eng->>Eng: apply knob filter, load UHD, rank (9)
-    Eng->>Eng: load UDD, build launcher over bound token state (10)
+    Eng->>Cache: read catalog, bound token state, ranked order
+    Eng->>Eng: knob filter then highest-ranked survivor (11)
+    Eng->>Eng: load kernel sources, build plan (12)
     Eng->>Plan: ctx.setPlan(...)
-    ERM->>Eng: getMaxWorkspaceSize(handle, opGraph, engineConfig)
     FE->>ERM: execute -> backendExecute
-    ERM->>Plan: execute(handle, deviceBuffers, numDeviceBuffers, workspace) (11)
+    ERM->>Plan: execute(handle, deviceBuffers, numDeviceBuffers, workspace) (13)
 ```
 
 ---
-
 
 ## 9. Adapters and Extensibility
 
@@ -1173,8 +1269,8 @@ enough to describe compositions *within* a provider ([Section 15](#15-multiple-k
 where support is extended through composition instead of a hand-fused kernel. This is not every
 provider's destination. MIOpen and hipBLASLt keep their own internal kernel selection behind their
 existing C-API and are not expected to converge onto this system; they do not have the same needs. MIOpen
-in particular keeps its own Find-mode selection process, and cross-engine comparison against UKD-backed
-engines happens at the higher engine-policy level, not by folding MIOpen's internal selection into a UHD.
+in particular keeps its own internal selection, and comparison against UKD-backed engines happens at the
+engine-selection level ([Section 2](#2-the-descriptors)), not by folding it into a UHD.
 This RFC describes a new ingestion path for engines that want one, not a replacement mandate: its focus
 is giving kernel authors a generic, self-serve recipe for delivering their kernels through hipDNN.
 
@@ -1210,6 +1306,11 @@ The provider surfaces:
   mismatch is caught here rather than corrupting the launch. Anything that fails, an unbound token, an
   unknown operator, a dangling reference, is a clear error that quarantines the offending descriptor,
   never a runtime surprise.
+- **Duplicate kernel keys**: a UKD whose completed KMD tuple collides with one already admitted to the
+  engine is logged as an error and dropped ([Section 4](#4-descriptor-formats)), naming both ids and
+  the tuple they share. Only the colliding kernel is dropped; the rest of its pack loads. Because the
+  key is engine-wide, a collision can span two packs that were each valid alone, so the diagnostic
+  names the pack as well as the kernel.
 - **Operator opt-out**: an engine, an individual kernel pack (KDP), or a single kernel (UKD) can
   each be disabled at runtime by id or name through an environment variable (for example
   `HIPDNN_DISABLE_ENGINES`, `HIPDNN_DISABLE_KDPS`, and `HIPDNN_DISABLE_UKDS`, each taking a
@@ -1231,8 +1332,9 @@ The provider surfaces:
 
 - **Knob-flow visibility**: a knob's path from input to effect is observable at every step, since
   static ownership ([`ukd_concepts.svg`](../images/ukd_concepts.svg)) does not show configuration
-  flow. The load and why-not diagnostics report which KMD field a knob came from, which catalog
-  entries its value filtered out, and what the UHD then ranked
+  flow. The load and why-not diagnostics report the KMD field each knob names, the value set the
+  catalog left it, which catalog entries its value filtered out, and what the UHD then ranked. A knob
+  naming a field the KMD does not declare is a load error, reported like any other validation failure
   ([Section 4](#4-descriptor-formats) defines the rule,
   [Section 8](#8-end-to-end-flow) places it in the flow).
 
@@ -1384,7 +1486,7 @@ of the contract, and the example below (§13.4, case C) shows it happening.
     {"in": ["$q.dtype", ["HALF", "BFLOAT16"]]},
     {"==": ["$k.dtype", "$q.dtype"]}, {"==": ["$v.dtype", "$q.dtype"]}, {"==": ["$o.dtype", "$q.dtype"]},
 
-    // --- gate #17: physical layout, precomputed convenience fields (D1). packed/stride_order
+    // --- gate #17: physical layout, precomputed convenience fields. packed/stride_order
     //     replace inferLayout's contiguous-stride formulas; equality is capture-free here because
     //     stride_order is a value, not a shape-bound name, so it needs an explicit comparison ---
     "$q.packed", "$k.packed", "$v.packed", "$o.packed",
@@ -1392,7 +1494,10 @@ of the contract, and the example below (§13.4, case C) shows it happening.
     {"==": ["$v.stride_order", "$q.stride_order"]},
     {"==": ["$o.stride_order", "$q.stride_order"]},
 
-    // --- gate #10: tri-state, UNSET declines. Only FLOAT is accepted; UNSET is a distinct enum
+    // --- gates #10-#12 are tri-state fields: an explicit UNSET enumerator distinct from every
+    //     real value, so the matcher must say whether UNSET accepts or declines. Each is still
+    //     one ordinary equality or membership test.
+    // gate #10: UNSET declines. Only FLOAT is accepted; UNSET is a distinct enum
     //     value (index 0) so this one equality rejects both UNSET and any other explicit dtype ---
     {"==": ["$sdpa_fwd.compute_data_type", "FLOAT"]},
     // --- gate #11: tri-state, UNSET accepts, any explicit value declines ---
@@ -1415,7 +1520,9 @@ of the contract, and the example below (§13.4, case C) shows it happening.
 ```
 
 Not shown in JSON, because each is a one-line repeat of a pattern already above, and the coverage is
-easier to state than to re-encode: `generate_stats` (gate #5) and `dropout_probability` (gate #19) are
+easier to state than to re-encode: the node-type check (gate #3) is an `==` against the operation kind,
+`{"==": ["$graph.node_kind", "sdpa_fwd"]}`, which the structural `nodes` pattern already pins;
+`generate_stats` (gate #5) and `dropout_probability` (gate #19) are
 the same "UNSET accepts" tri-state shape as `mma_core_mode`, just on a bool and a float respectively,
 each `and`ed in as `{"!": [{"value_or_default": ["$sdpa_fwd.generate_stats", false]}]}` and
 `{"<=": [{"value_or_default": ["$sdpa_fwd.dropout_probability", 0.0]}, 0.0]}`; `max_seq_len_kv` (gate
@@ -1425,9 +1532,9 @@ capture reuse (`shape`), or the mask-mode classifier (§13.3). None needed a cus
 
 ### 13.3 Encoding `classifyMaskMode`
 
-Reviewer AnaghaRaoAMD asked the design to prove itself against `classifyMaskMode`
-(`SdpaGraphAdapter.cpp:124-159`), a 5-input precedence machine, before accepting "no custom operation
-needed." It reads `causal_mask`, `causal_mask_bottom_right`, `left_bound`, `right_bound` (unset
+To test the "no custom operation needed" claim against the hardest case in the adapter, take
+`classifyMaskMode` (`SdpaGraphAdapter.cpp:124-158`), a 5-input precedence machine. It reads
+`causal_mask`, `causal_mask_bottom_right`, `left_bound`, `right_bound` (unset
 normalized to -1), and `diagonal_alignment`, in that order, first match wins:
 
 1. Contradiction, checked first: both deprecated booleans set. Decline.
@@ -1470,13 +1577,13 @@ out anyway, to see exactly where that gap is:
 **Verdict.** The part that gates admission, the contradiction check, is fully expressible with the
 criteria built-ins today; no custom operation, no escape hatch. The part that classifies into five
 named modes is a value derivation the pure-boolean criteria language does not have a primitive for, and
-adding one (`cond` above) is one option. The better fit, and the one this RFC recommends, is the same
-resolution D1 already commits to for layout: `mask_mode` becomes a **precomputed field**, `$sdpa_fwd.mask_mode`,
+adding one (`cond` above) is one option. The better fit, and the one this RFC recommends, is the
+resolution layout already uses: `mask_mode` becomes a **precomputed field**, `$sdpa_fwd.mask_mode`,
 computed once by the schema layer exactly the way `stride_order` and `packed` are, so every matcher
 compares it (`==`, `in`, as in §13.2) instead of re-deriving it. Either path keeps this out of the
 registry-resolved custom-operation escape hatch ([Section 5](#5-matching-and-the-umd)); the honest
 finding is that the criteria language's built-ins fully cover *deciding*, and a small, generically
-useful addition (a precomputed derived field, the same shape D1 already asked for) covers *producing
+useful addition (one more precomputed derived field) covers *producing
 the classified value*. `classifyMaskMode` does not force the heavier escape hatch.
 
 ### 13.4 One Accept, Two Declines
@@ -1542,7 +1649,7 @@ UDD's grid/block formulas read those values through `$kernel.*` instead of hard-
             "y": "$q.num_heads", "z": "$q.batch"},
   "block": {"x": {"*": ["$device.warp_size", "$kernel.num_warps"]}, "y": 1, "z": 1},
   // the real LDS-budget formula from the step-down loop this geometry replaces
-  // (attention_unified.py:140), now over $kernel.* and the matched head_size
+  // (attention_unified.py:938-947), now over $kernel.* and the matched head_size
   "shared_mem_bytes": {"+": [
     {"*": [16, "$kernel.num_warps",  "$sdpa_fwd.head_size", 2]},
     {"*": [2,  "$kernel.tile_size",  "$sdpa_fwd.head_size", 2]},
@@ -1651,6 +1758,33 @@ This descriptor set is what the phased delivery ([Section 14](#14-phased-deliver
 pieces land and are used to implement SDPA for rocKE as the first real target, and the existing
 hand-written engine is replaced by its descriptor-backed equivalent over time.
 
+### 13.8 What an Author Actually Writes
+
+The example above is the whole system; this is the much smaller slice a kernel author touches. Adding
+one kernel to an **existing** engine, the common case, is a single UKD:
+
+1. Build the kernel and get a code object into a pack the provider can load ([Section 7](#7-kernel-source)).
+2. Write one UKD: an `id`, a `name`, a `kernel_source` pointing at that symbol, and a value for each
+   field the engine's KMD declares. The metadata values must not duplicate an existing kernel's
+   ([Section 4](#4-descriptor-formats)).
+3. Add it to a KDP's `kernelDescriptors`, or ship it as a drop-in pack
+   ([Section 12](#12-packaging-and-delivery)).
+
+Nothing else. No matcher, no dispatch, no engine, no heuristic: the pack supplies the first two and the
+engine the last two, which is what makes a sibling kernel a few lines rather than a new file set. The
+two kernels in §13.6 differ only in their metadata values and their symbols.
+
+Wider changes cost more, in proportion to what they change:
+
+| Change | What the author writes |
+|---|---|
+| A kernel with different metadata values | one UKD (above) |
+| A kernel matching different graphs | a new UMD, and a KDP that lists it |
+| A kernel with a different launch ABI | a new UDD, and its own KDP ([Section 6](#6-dispatch-and-workspace)) |
+| A kernel with a variant field the schema lacks | a KMD field, which is additive ([Section 16](#16-risks)) |
+| A new family with its own ranking | a UED, a UHD, and a KMD, plus the pack |
+| A kernel needing a new runtime dependency | a provider, not a pack ([Section 1.2](#12-provider-or-kernel-pack)) |
+
 ---
 
 ## 14. Phased Delivery
@@ -1705,13 +1839,13 @@ a descriptor format with the subsystem it drives, and together they form the pla
 |---|---|
 | KDP + AOT packaging | The pack format plus the producer, packer, per-architecture manifest, and build-time validation ([§12](#12-packaging-and-delivery)) |
 | UMD + graph matcher | The match format plus the pattern and criteria-expression model, the shared-matcher evaluator (run-once memoization, fail-prune), custom-operation registry, and arbitration ([§5](#5-matching-and-the-umd)) |
-| UED + engine registry | The engine format plus the registry that populates the generic engine and its plan builders from descriptor data |
+| UED + engine registry | The engine format plus the registry that populates the generic engine and its plan builder from descriptor data |
 | UDD + expression language | The dispatch format plus the symbolic grid, block, shared-memory, workspace, and argument language and its safe interpreter ([§6](#6-dispatch-and-workspace)) |
 | UHD + kernel selection | The heuristic format plus the generic selector that ranks the kernels matching a graph |
 | KMD + metadata schema | The metadata format plus the field/type/default declaration and the feature contract the heuristic and matchers consume |
-| Runtime drop-in | Loading custom bundles, compatibility gating, and source-trust rules ([§12](#12-packaging-and-delivery)) |
+| Runtime drop-in | Loading custom bundles, compatibility gating, and source-trust rules ([§12](#12-packaging-and-delivery)). Five open questions land here: the enablement and location mechanism; the minimum trust requirement for drop-in source, including whether JIT source is allowed at all; whether a pack may carry its own engine/heuristic pair or must bind an installed one; how an extension provider (a DSL wheel, [§1.2](#12-provider-or-kernel-pack)) is bundled and released; and the three removal/deprecation cases ([§16](#16-risks)) |
 | Adapters | Registering kernel-source and heuristic adapters ([§9](#9-adapters-and-extensibility)) |
-| Composition | Multi-kernel launch, intermediate buffers, and UCD pipelines ([§15](#15-multiple-kernels-and-composition)) |
+| Composition | Multi-kernel launch, intermediate buffers, and UCD graph decomposition ([§15](#15-multiple-kernels-and-composition)) |
 | JIT and normalized providers | JIT sources, general pattern matching, and normalizing existing providers onto the descriptor system ([§9.3](#93-future-jit-and-normalized-providers)) |
 
 ---
@@ -1730,11 +1864,12 @@ capabilities go further, and they differ in kind. Both are future work:
   with a separate reduction has the same shape. These kernels share tiling and scratch, are authored
   together, and are selected as a unit. This is not composition: it is one KDP whose shared UDD holds
   several Launches over a single match, with each UKD supplying a source per Launch.
-- **Composition (a pipeline of separately-chosen kernels).** A graph is satisfied by chaining
-  independently-authored kernels, each picked by its own heuristic, for example
-  `Transpose -> Work -> Transpose`, where a reusable transpose adapts a layout the work kernel
-  requires. The pieces are not co-designed; each is chosen on its own merits. Composition is the one
-  new descriptor kind here, the **UCD (Universal Composite Descriptor)**.
+- **Composition (one graph split across several engines).** No single engine satisfies the graph, but a
+  chain of them does, for example `Transpose -> Conv -> Transpose` where a reusable transpose adapts a
+  layout the convolution requires. The composite splits the parent graph into child graphs and assigns
+  each to an engine, which answers it the same way it answers any graph. The pieces are not
+  co-designed; each engine is chosen on its own merits. Composition is the one new descriptor kind
+  here, the **UCD (Universal Composite Descriptor)**.
 
 Both are the target design, presented so the single-kernel format does not foreclose them; both are
 future work, not committed in this RFC or its first deliverable, and each will be specified in its own
@@ -1742,7 +1877,7 @@ follow-up RFC. The pack's UDD resolves to a program: an ordered sequence of Laun
 symbol table and a shared set of intermediate buffers ([Section 15.3](#153-intermediate-buffers)). The
 single-Launch case is the one-step form, so nothing authored today changes.
 
-![A multi-kernel launch UKD (several kernels, one selection) versus composition (a pipeline of independently-chosen kernels)](../images/ukd_composition.svg)
+![A multi-kernel launch UKD (several kernels, one selection) versus composition (a graph split into child graphs, each answered by its own engine)](../images/ukd_composition.svg)
 
 ### 15.1 Several Kernels for One Operation
 
@@ -1765,7 +1900,7 @@ seqlen_k` that the Launch formulas and the `$D` intermediate use.
   "schema": "hipdnn.udd/v1",
   "id":   "f2513834-5b17-4084-b09f-f0c3b440588a",
   "name": "SDPA backward (d128) dispatch",
-  "intermediates": [        // named scratch shared across the Launches (see 14.3)
+  "intermediates": [        // named scratch shared across the Launches (see 15.3)
     {"name": "$D", "dtype": "FLOAT", "shape": ["batch", "num_heads", "seqlen_q"]}
   ],
   "launches": [             // three dispatch steps, run in order; each has a named source slot
@@ -1796,7 +1931,7 @@ seqlen_k` that the Launch formulas and the `$D` intermediate use.
   "schema": "hipdnn.ukd/v1",
   "id":   "8e0f76d6-3522-4099-b5f1-7b1544bde29c",
   "name": "SDPA backward (d128, bf16, gfx942)",
-  "sources": {              // one kernel source per Launch name in the pack's UDD
+  "sources": {              // replaces kernel_source: one source per Launch name in the pack's UDD
     "preprocess": {"kind": "kpack", "library": "rocke_attn.kpack", "symbol": "sdpa_bwd_preprocess_d128_bf16_gfx942"},
     "dkdv":       {"kind": "kpack", "library": "rocke_attn.kpack", "symbol": "sdpa_bwd_dkdv_d128_bf16_gfx942"},
     "dq":         {"kind": "kpack", "library": "rocke_attn.kpack", "symbol": "sdpa_bwd_dq_d128_bf16_gfx942"}
@@ -1805,84 +1940,80 @@ seqlen_k` that the Launch formulas and the `$D` intermediate use.
 }
 ```
 
-Each Launch carries a `name` for diagnostics, for wiring intermediates, and for matching a UKD's source
-to its slot; `preprocess` writes `$D` and both `dkdv` and `dq` read it, so the producer-before-consumer
-order is explicit. (A single-Launch UDD has one unnamed slot, filled directly by the UKD's
-`kernel_source`.) The loader rejects a UKD that does not fill every Launch the UDD declares, the same
+A multi-launch UKD replaces the single-Launch `kernel_source` object with a `sources` map keyed by
+Launch name. Each Launch carries a `name` for diagnostics, for wiring intermediates, and for matching a
+UKD's source to its slot; `preprocess` writes `$D` and both `dkdv` and `dq` read it, so the
+producer-before-consumer order is explicit. (A single-Launch UDD has one unnamed slot, filled directly
+by the UKD's `kernel_source`.) The loader rejects a UKD that does not fill every Launch the UDD
+declares, the same
 gate that rejects a UDD symbol no matcher binds ([Section 6](#6-dispatch-and-workspace)). A sibling
 family member (d64) is one more UKD supplying its own sources against the same UDD; because the UDD holds
 the launch structure, a variant that needs a different Launch count or wiring shares nothing at that
 level and belongs in its own pack.
 
-### 15.2 A Pipeline of Separately-Chosen Kernels
+### 15.2 One Graph Split Across Several Engines
 
-Folding `Transpose -> Work -> Transpose` into one UKD would be wrong, because the transposes are
-reusable, separately-tuned kernels that each deserve their own heuristic. A **composite descriptor
-(UCD)** instead declares an ordered array of stages wired by intermediate tensors. Each stage
-resolves to an engine at plan time, and that engine's own heuristic picks the kernel.
+Some graphs no single engine can serve, but a short chain of engines can. NCHW convolution with only an
+NHWC convolution kernel available is the standard case: `Transpose -> Conv -> Transpose` satisfies the
+request, and each of those three steps is an operation some engine already implements well. Folding the
+chain into one UKD would be wrong, because the transposes are reusable, separately-tuned kernels that
+each deserve their own heuristic.
 
-A stage does not embed a kernel. It names its input and output tensors (drawn from the composite's
-bound graph tensors and its declared intermediates) and a `select` that references kernels in one of
-two ways:
+A **composite descriptor (UCD)** expresses this as a decomposition: it claims a parent graph, splits it
+into an ordered set of **child graphs** wired by intermediate tensors, and assigns each child graph to a
+UED. The child graphs together must satisfy the parent, which is what makes the composite a legal
+substitute for it. Each assigned engine then answers its child graph through the ordinary path, its own
+applicability check and its own heuristic, exactly as it would answer a user's graph; the composite
+supplies the graph, not the kernel.
 
-- `select.criteria`: a graph fragment over the stage's tensors. Any registered KDP whose matchers
-  accept that fragment contributes its engine as a candidate, so packs dropped in later are picked up
-  automatically. This is the open, drop-in-friendly form. (A UKD carries no matcher of its own; it is
-  matchable only through its pack, so a fragment resolves to packs and their engines, not bare UKDs.)
-- `select.candidates`: an explicit array of UED ids, for when a stage should draw from a fixed set. A
-  stage names engines, not kernels: the named engine's own heuristic then picks the kernel, which is
-  the same contract every other selection in this design uses. A bare UKD id could not fulfil it
-  anyway, since a UKD carries no matcher and no dispatch of its own.
+So the unit of composition is the **engine**, not the kernel. A composite says "this engine transposes,
+this engine convolves, this engine transposes back," and each engine resolves its own step. That keeps
+the composite author in control of which pieces combine, while every selection decision stays where it
+already lives. Within one engine, picking a specific kernel is what the UHD and knobs do
+([Section 4](#4-descriptor-formats)); across engines it is ordinary engine selection
+([Section 2](#2-the-descriptors)). A composite adds no third selection mechanism and no way to hand-pick
+a kernel.
 
-Either way the stage resolves to one engine, whose own heuristic then ranks that engine's applicable
-kernels and picks one, exactly as a single UKD is chosen within an engine on the base path. When a
-stage's `criteria` or `candidates` leave more than one engine qualifying, that is ordinary
-cross-engine arbitration and is resolved the same way as anywhere else in hipDNN
-([Section 2](#2-the-descriptors)); a composite introduces no stage-level ranking of its own. Because a
-resolved stage may itself be a multi-step program
-([Section 15.1](#151-several-kernels-for-one-operation)), the composite's plan is the concatenation of
-its stages' programs, with each stage's intermediates remapped into the composite's buffer set.
-
-**Composition reuses engine selection; it does not add a pinning mechanism.** A stage resolves to an
-engine and that engine's heuristic picks the kernel, so a composite is a sequential meta-fusion built
-out of the ordinary engine components rather than a way to hand-pick individual kernels. Selecting a
-specific kernel outright is not a composition feature: within one engine that is what the UHD and the
-engine's knobs already do ([Section 4](#4-descriptor-formats)), and across engines it is explicit
-engine selection ([Section 2](#2-the-descriptors)).
+Sketch, not a proposed schema:
 
 ```jsonc
 {
   "schema": "hipdnn.ucd/v1",  // UCD = Universal Composite Descriptor
   "id":   "21d7eb92-5948-43f0-a4c7-d25bf60fca40",
-  "name": "Layout-adapted work pipeline",
-  "engine": "9a5d91ec-0b87-43dd-bb3e-69ebeabc6a76",       // its own engine; engine selection picks it vs. the fused engine
-  "match":  "aa038018-049d-4caf-a448-b26f6c2f5b5f",       // one UMD: matches the work fragment once; binds $x (in), $y (out)
+  "name": "Layout-adapted convolution",
+  "engine": "9a5d91ec-0b87-43dd-bb3e-69ebeabc6a76",  // its own engine; engine selection picks it vs. a native NCHW engine
+  "match":  "aa038018-049d-4caf-a448-b26f6c2f5b5f",  // the parent graph it claims: NCHW conv; binds $x, $w, $y
 
   "intermediates": [
-    {"name": "$x_t", "dtype": {"same_as": "$x"}, "shape": {"layout_of": "$x", "as": "nchw"}},
-    {"name": "$y_t", "dtype": {"same_as": "$y"}, "shape": {"layout_of": "$y", "as": "nchw"}}
+    {"name": "$x_t", "dtype": {"same_as": "$x"}, "shape": {"layout_of": "$x", "as": "nhwc"}},
+    {"name": "$y_t", "dtype": {"same_as": "$y"}, "shape": {"layout_of": "$y", "as": "nhwc"}}
   ],
   "stages": [
-    {"name": "transpose_in",  "in": "$x",   "out": "$x_t",
-     "select": {"criteria": {"kind": "op", "op": "transpose"}}},
-    {"name": "work",          "in": "$x_t", "out": "$y_t",
-     "select": {"criteria": { ... work fragment ... }}},
-    {"name": "transpose_out", "in": "$y_t", "out": "$y",
-     "select": {"candidates": ["1bd3d4c3-84bc-4b9b-a375-e8e14ebd4659"]}}  // UED ids; that engine's own UHD picks the kernel
+    // each stage: a child graph, and the engine that must satisfy it
+    {"name": "to_nhwc",   "engine": "1bd3d4c3-...", "graph": { ... transpose($x) -> $x_t ... }},
+    {"name": "conv",      "engine": "7f2c60a1-...", "graph": { ... conv($x_t, $w) -> $y_t ... }},
+    {"name": "to_nchw",   "engine": "1bd3d4c3-...", "graph": { ... transpose($y_t) -> $y ... }}
   ]
 }
 ```
 
-The choice between a fused kernel and a decomposed pipeline is not made inside a descriptor: each
-alternative is its own engine, so ordinary engine-selection ([Section 2](#2-the-descriptors))
-picks between them, with no new composite cost model.
+The choice between a fused kernel and a decomposed chain is not made inside a descriptor: each
+alternative is its own engine, so ordinary engine selection ([Section 2](#2-the-descriptors)) picks
+between them, with no new composite cost model.
+
+**What is unresolved.** How a child graph is written is the substance of this feature and is not settled
+here. The open questions are how much of the child graph the composite states literally versus derives
+from the parent binding, whether a stage names its engine outright or states criteria and lets any
+matching engine qualify (drop-in packs would then extend a composite without editing it), and how the
+split is validated to actually reconstruct the parent rather than merely type-check. Each will be
+settled in the composition RFC.
 
 ### 15.3 Intermediate Buffers
 
-Both capabilities share one new data model: **virtual tensors**. A multi-launch UDD (or a composite)
-declares named intermediate regions that exist only across its Launches and are never part of the
-graph, each with a dtype, a symbolic shape drawn from the same expression language and bound dims as
-grid and block, and an optional `align` giving the region's byte alignment:
+Both capabilities share one new data model: **intermediate buffers**. A multi-launch UDD (or a
+composite) declares named intermediate regions that exist only across its Launches and are never part
+of the graph, each with a dtype, a symbolic shape drawn from the same expression language and bound
+dims as grid and block, and an optional `align` giving the region's byte alignment:
 
 ```jsonc
 "intermediates": [
@@ -1890,7 +2021,10 @@ grid and block, and an optional `align` giving the region's byte alignment:
 ]
 ```
 
-These are virtual tensors: scratch shared between Launches, not graph tensors. They, and each Launch's
+These are scratch shared between Launches, not graph tensors, and they are distinct from a matcher's
+`$x.virtual` ([Section 5](#5-matching-and-the-umd)), which marks a tensor that *is* in the matched
+graph as an internal one the fused kernel absorbs. An intermediate buffer is never in the graph at all.
+They, and each Launch's
 own scratch, are sub-allocated from the single flat workspace pointer the host already provides in the
 execute call, which is why they need no ABI change. This relies on the existing execution contract: the
 host hands a plan one workspace buffer that stays valid for the plan's whole execution, and all of the
@@ -1920,15 +2054,16 @@ it is a natural capture-and-replay target when launch latency matters.
 
 Selection reuses the two levels defined in [Section 2](#2-the-descriptors): a program is one kernel
 descriptor ranked by its heuristic descriptor, competing alternatives are separate engines ranked by
-the existing engine chain, and within a composite each stage resolves in dependency order to an engine
-whose heuristic picks its kernel. A mandatory stage with no candidate fails the composite closed, and
-engine selection falls through to another engine. Comparing whole pipelines against each other never
-arises, because those alternatives are separate engines the existing chain already ranks.
+the existing engine chain, and within a composite each stage's engine answers its child graph in
+dependency order, its own heuristic picking the kernel. A mandatory stage whose engine cannot satisfy
+its child graph fails the composite closed, and engine selection falls through to another engine.
+Comparing whole chains against each other never arises, because those alternatives are separate
+engines the existing chain already ranks.
 
 Cross-step correctness is the new surface, validated at build and load: every read of an intermediate
 is preceded by a write with matching dtype and shape, every region is written before it is read, the
 stage graph is acyclic, and a composite is offered on a given architecture only if every mandatory
-stage has at least one candidate kernel for that architecture.
+stage's engine can satisfy its child graph on that architecture.
 
 ### 15.5 What This Adds
 
@@ -1936,13 +2071,13 @@ stage has at least one candidate kernel for that architecture.
 |---|---|---|
 | Multi-launch program | the pack's one shared UDD ([Section 6](#6-dispatch-and-workspace)) | the UDD's `launches[]` holds several dispatch steps; each UKD supplies a source per Launch; one Launch is the simple case |
 | Intermediate buffers | workspace + argument sources ([Section 6](#6-dispatch-and-workspace)) | scalar workspace becomes named `intermediates[]`, summed; new `intermediate` argument source |
-| Composite pipeline | concepts ([Section 2](#2-the-descriptors)); matching ([Section 5](#5-matching-and-the-umd)) | a composite descriptor (UCD) whose stages resolve to UKDs |
+| Composite decomposition | concepts ([Section 2](#2-the-descriptors)); matching ([Section 5](#5-matching-and-the-umd)) | a composite descriptor (UCD) that splits a parent graph into child graphs, each assigned to an engine |
 | Alternative selection | engine selection ([Section 2](#2-the-descriptors)) | each alternative is its own engine; the existing chain arbitrates |
 | Cross-step safety | validation | producer-before-consumer, acyclicity, and per-arch coverage gates |
 
 The only new descriptor kind is the UCD. There are no new plugin interfaces and no hipDNN core
-changes: a multi-step program is a UDD with several Launches, and a pipeline is one composite descriptor
-that resolves to ordinary UKDs.
+changes: a multi-step program is a UDD with several Launches, and a decomposition is one composite
+descriptor whose child graphs are answered by ordinary engines.
 
 ---
 
@@ -1995,8 +2130,8 @@ follow-up RFCs rather than solved now.
 
   | Class | Examples | When it must land | Consumer expectation |
   |---|---|---|---|
-  | Additive (non-breaking) | a new knob; new values added to a knob with no change to the existing values | no retrain required until the new capability is exposed; may land after the PR that adds it | old state is still valid, no change should be expected |
-  | Breaking (mutates an existing KMD) | removing values from a knob; removing a knob; new values that change the meaning of the existing ones | the heuristic retrain must land in the same change as the KMD mutation | old state is no longer valid, or results have changed, and change should be expected |
+  | Additive (non-breaking) | a new KMD field; new values a field takes with no change to the meaning of the existing ones; exposing or withdrawing a knob, which only changes what the user may set | no retrain required until the new capability is exposed; may land after the PR that adds it | old state is still valid, no change should be expected |
+  | Breaking (mutates an existing KMD) | removing a field; retyping a field; changing a default; new values that change the meaning of the existing ones | the heuristic retrain must land in the same change as the KMD mutation | old state is no longer valid, or results have changed, and change should be expected |
 
   The general rule: a breaking change updates every related piece, KMD, UHD, matchers, and metadata,
   as it lands. An additive change may land alone because the old state is still valid, but it still
@@ -2044,7 +2179,7 @@ follow-up RFCs rather than solved now.
 1. **Source trust for drop-in:** what is the minimum trust requirement for drop-in JIT source, from
    restricting drop-in to prebuilt code objects, to bounding compiler inputs, to a separate opt-in?
 2. **Composition:** if composition ([Section 15](#15-multiple-kernels-and-composition)) is pursued,
-   should multi-kernel launch land before composite pipelines?
+   should multi-kernel launch land before composite graph decomposition?
 3. **Expression coverage:** validate the expression language against several real kernels (for
    example a split-K GEMM with workspace, a normalization, and a ragged attention that forces the
    data-dependent-launch discussion) before freezing it.
@@ -2065,7 +2200,7 @@ choices; none is a dependency.
 | **XLA pattern matcher** | Exact-vs-compatible equality; use-count vs user-count; layout as a distinct constraint; optional operands; capture-by-reference |
 | **PyTorch Inductor / torch.library** | Node/edge pattern vocabulary; serialized precompiled patterns; duplicate-pattern detection; fake-tensor shape derivation as the basis for symbolic workspace sizing |
 | **ExecuTorch** | Tag-then-lower seam; backend interface (is-available, init, execute); name-keyed registration; compatibility rejection |
-| **ONNX Runtime** | Single-node vs fused-subgraph capability; shared-context blobs; session-scoped drop-in registration (not borrowed: strict first-claim-wins arbitration; hipDNN's own engine selection is a resolved, ordered-policy loop, see [Section 2](#2-the-descriptors), not registration-order first-claim) |
+| **ONNX Runtime** | Single-node vs fused-subgraph capability; shared-context blobs; session-scoped drop-in registration (not borrowed: strict first-claim-wins arbitration; hipDNN's engine selection is user-controlled through explicit choice, policy, or auto-tuning, see [Section 2](#2-the-descriptors), not registration-order first-claim) |
 | **MIGraphX** | Generic code-object launch (raw module load plus kernarg patching); problem-to-solution cache; module-of-instructions model for fused operations |
 | **Triton AOT** | Generic launch stub with trailing scratch slots |
 | **CUTLASS / CK / Tensile** | Description/configuration/arguments split; per-problem workspace sizing; workspace as a sum of dim-product terms times byte rates; natural-alignment argument packing |
@@ -2091,15 +2226,16 @@ choices; none is a dependency.
 - **Criteria expression:** the declarative `{"op": [args]}` tree that forms a matcher's checks, over
   `$`-prefixed references to schema-declared fields. Plain data the safe interpreter walks; it fails
   closed on any field the schema does not declare ([Section 5](#5-matching-and-the-umd)).
-- **UED (Universal Engine Descriptor):** one engine, a stable identity plus knobs and behavior/numerical
-  notes. It names the engine's one heuristic (UHD) and one metadata schema (KMD); many KDPs may share
-  one engine.
+- **UED (Universal Engine Descriptor):** one engine, a stable identity plus the KMD fields it exposes
+  as knobs and its behavior/numerical notes. It names the engine's one heuristic (UHD) and one
+  metadata schema (KMD); many KDPs may share one engine.
 - **UHD (Universal Heuristic Descriptor):** one kernel-selection model that ranks the kernels fitting
   a graph and picks one. One per engine, named by the UED.
 - **KMD (Kernel Metadata Descriptor):** the engine's variant fields, each with a type and optional
   default; it is the feature space the UHD ranks over, so it and the UHD are both engine-owned and change
-  together. Each UKD fills in concrete values; matchers read them as `$kernel.<field>`. One per engine,
-  named by the UED ([Section 4](#4-descriptor-formats)).
+  together. Each UKD fills in concrete values, and that completed tuple is the kernel's unique key in
+  the engine's catalog, so the fields must be rich enough to tell every variant apart. Matchers read
+  them as `$kernel.<field>`. One per engine, named by the UED ([Section 4](#4-descriptor-formats)).
 - **Launch:** one dispatch step in a UDD (grid, block, shared memory, argument signature) with a named
   source slot, paired at runtime with the UKD source that fills it. A UDD holds one Launch for a
   single-kernel pack, several run in order for a multi-launch pack
@@ -2110,13 +2246,12 @@ choices; none is a dependency.
   heuristic and metadata schema, so many KDPs may share one engine while differing in their matchers and
   dispatch. One of each is intentional: a kernel whose launch ABI, engine, or matcher set differs belongs
   in a different pack.
-- **UCD (Universal Composite Descriptor):** a pipeline of stages, each resolving to a UKD chosen by
-  its own heuristic ([Section 15.2](#152-a-pipeline-of-separately-chosen-kernels)).
+- **UCD (Universal Composite Descriptor):** a decomposition of one graph into ordered child graphs, each
+  assigned to an engine that satisfies it with its own applicability check and heuristic
+  ([Section 15.2](#152-one-graph-split-across-several-engines)).
 - **id / name:** every descriptor carries a stable `id`, a GUID minted by the author so ids never
   collide without a central authority, and a human-readable `name`; references (a KDP's `matchers`,
   `engine`, and `dispatch`, and a UED's `heuristic` and `metadata`) use the id.
-- **AOT:** ahead-of-time compilation; kernels compiled per architecture at build time and installed
-  beside the provider, as opposed to runtime JIT.
 - **ABI:** the calling convention a kernel expects, its argument layout and order plus launch
   configuration, which a UDD encodes as data.
 - **SDPA:** scaled dot-product attention, the running example operation (forward in
@@ -2132,13 +2267,18 @@ choices; none is a dependency.
 - **Engine:** a named group of kernels with a stable identity; hipDNN selects among engines, then a
   UHD selects a kernel within the chosen engine.
 - **Catalog:** the set of an engine's kernels that pass every matcher for one graph, built during the
-  applicability query and cached for that graph. The UHD ranks it, knobs restrict it, and it is what
+  applicability query and cached for that graph, keyed on each kernel's KMD value tuple
+  ([Section 4](#4-descriptor-formats)). The UHD ranks it, knobs restrict it, and it is what
   "applicable" means: a non-empty catalog ([Section 8](#8-end-to-end-flow)).
+- **Cohort:** a bucket of problem shapes that share one measured tuning configuration. rocKE's
+  threshold branches pick a cohort today; under this design each cohort is one UKD carrying that
+  configuration as KMD metadata ([Section 13.5](#135-dispatch-geometry-from-kernel)).
 - **Bound token state:** the field values the match sequence binds for one graph (`$kernel`, `$graph`,
   `$device`, node attributes, tensor fields), cached alongside the catalog so matching, ranking, and
   dispatch all read them without recomputing ([Section 8](#8-end-to-end-flow)).
-- **knobs:** author-exposed, user-controllable tuning parameters a UED declares (name, type, default,
-  constraint).
+- **knobs:** the KMD fields a UED exposes for user control, named only; type and default come from the
+  KMD, the legal value set from the catalog, and the reported default from the heuristic's top-ranked
+  kernel ([Section 4](#4-descriptor-formats)).
 - **Behavior / numerical notes:** hipDNN's existing per-engine annotations that a UED carries; behavior
   notes describe execution properties (for example runtime compilation), numerical notes describe
   precision behavior (for example tensor-core use).
