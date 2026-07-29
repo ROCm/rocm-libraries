@@ -54,8 +54,10 @@ TEST(datatype_utils, datatype_sizeof_real)
 
 TEST(datatype_utils, datatype_sizeof_complex)
 {
-    EXPECT_EQ(rocsparse::datatype_sizeof(rocsparse_datatype_f32_c), sizeof(rocsparse_float_complex));
-    EXPECT_EQ(rocsparse::datatype_sizeof(rocsparse_datatype_f64_c), sizeof(rocsparse_double_complex));
+    EXPECT_EQ(rocsparse::datatype_sizeof(rocsparse_datatype_f32_c),
+              sizeof(rocsparse_float_complex));
+    EXPECT_EQ(rocsparse::datatype_sizeof(rocsparse_datatype_f64_c),
+              sizeof(rocsparse_double_complex));
     // A complex value is exactly two real components wide.
     EXPECT_EQ(rocsparse::datatype_sizeof(rocsparse_datatype_f32_c),
               2 * rocsparse::datatype_sizeof(rocsparse_datatype_f32_r));
