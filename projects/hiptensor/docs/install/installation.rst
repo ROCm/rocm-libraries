@@ -27,7 +27,7 @@ Install hipTensor on Linux
 Alternatively, if you want to install hipTensor without additional ROCm libraries and tools, install the ``amdrocm-hiptensor`` package.
 
 1. Complete the `ROCm installation prerequisites
-   <https://rocm.docs.amd.com/en/latest/install/rocm.html#prerequisites>`_ to install dependencies and configure GPU access permissions.
+   <https://rocm.docs.amd.com/en/latest/install/rocm.html?fam=all&w=compute&os=ubuntu&ubuntu-ver=26.04&i=pkgman#prerequisites>`_ to install dependencies and configure GPU access permissions.
 
 2. Install the hipTensor package that matches your desired ROCm version,
    development package needs, and AMD GPU architecture. Package names use the
