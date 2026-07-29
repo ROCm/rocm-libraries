@@ -858,15 +858,17 @@ validParameters = { # we need to make sure this matches develop
     # 0: use linear reduction
     # 1: use tree reduction
     "StreamKFixupTreeReduction": [0, 1],
-    # NOTE: StreamKMulticast and StreamKClusterReduction (the gfx1250 StreamK DP
-    # cooperative cluster-load / TDM B-multicast fast path and the cluster split-
-    # barrier K-reduction fast path) are intentionally NOT valid/benchmark
-    # parameters, and there is NO StreamKClusterKSplit knob. The StreamK cluster is
-    # described entirely by the ClusterDim = [Cs, Ck] shape; both features are
-    # DERIVED-ONLY internal state keys (see the ClusterBarrier precedent):
-    # Solution.assignProblemIndependentDerivedParameters auto-enables them for
-    # StreamK==3 purely from the cluster shape (StreamKMulticast iff Cs =
-    # ClusterDim[0] > 1, StreamKClusterReduction iff Ck = ClusterDim[1] > 1) so:
+    # NOTE: the gfx1250 StreamK DP cooperative cluster-load / TDM B-multicast fast
+    # path and the cluster split-barrier K-reduction fast path are intentionally
+    # NOT valid/benchmark parameters, and there is NO StreamKClusterKSplit knob.
+    # The StreamK cluster is described entirely by the ClusterDim = [Cs, Ck] shape:
+    #   * B-multicast is DERIVED-ONLY with NO state key -- it is computed on demand
+    #     from StreamK==3 + Cs = ClusterDim[0] > 1 via Common.streamKMulticast
+    #     (ClusterDim is the single source of truth);
+    #   * StreamKClusterReduction is a DERIVED-ONLY internal state key (see the
+    #     ClusterBarrier precedent) that Solution auto-enables for StreamK==3 iff
+    #     Ck = ClusterDim[1] > 1 (subject to the dual-2D caveat).
+    # So:
     #   * [C,1]  => pure multicast  (Cs=C, Ck=1);
     #   * [1,C]  => pure reduction   (Cs=1, Ck=C);
     #   * [Cs,Ck] both > 1 => FACTORED -- one cluster does the spatial B-multicast
@@ -875,10 +877,11 @@ validParameters = { # we need to make sure this matches develop
     #     mutually exclusive. Cs and Ck must each be powers of two with C in [2,16].
     # _validateStreamKMulticast / _validateStreamKClusterReduction /
     # _validateStreamKClusterShape then hard-reject any cluster config that cannot
-    # satisfy their constraints. These flags must not be user/YAML-settable, so they
-    # have no entry here (checkParametersAreValid would otherwise accept them as a
-    # fork/constant param). They still serialize to C++ via Contractions.SizeMapping
-    # (streamKMulticast / streamKClusterReduction, read with d.get()).
+    # satisfy their constraints. StreamKClusterReduction must not be user/YAML-
+    # settable, so it has no entry here (checkParametersAreValid would otherwise
+    # accept it as a fork/constant param). StreamKClusterReduction still serializes
+    # to C++ via Contractions.SizeMapping (read with d.get()); B-multicast does not
+    # serialize -- C++ derives it from clusterDim (streamK == 3 && clusterDim.x > 1).
     # See docs/design/streamk-wg-clusters.md.
     # Debug settings for stream-k kernels to disable parts of the kernel
     #   Bit 0: Don't generate fixup code

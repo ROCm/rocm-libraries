@@ -1,0 +1,9 @@
+# serializer version: 1
+# name: test_streamk_forcedp_2d_pap_gfx1250_golden
+  list([
+    dict({
+      'basename': 'Cijk_Alik_Bljk_F4SS_MXAE8B32_MXBE8B32_BH_UserArgC-SsVRMvMU24VAm3_KICvTjxEgYgV8zjUsf22eFkVD0=',
+      'err': 0,
+    }),
+  ])
+# ---

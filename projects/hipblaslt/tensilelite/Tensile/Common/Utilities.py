@@ -365,6 +365,19 @@ def clusterEnabled(clusterDim):
     """True when a workgroup cluster is requested (ClusterDim [x, y] is not [1, 1])."""
     return (clusterDim[0] * clusterDim[1]) != 1
 
+def streamKMulticast(d):
+    """True when the StreamK=3 DP cooperative B-multicast fast path is active.
+
+    Derived purely from ClusterDim (the single source of truth): a StreamK=3
+    kernel whose spatial axis Cs = ClusterDim[0] > 1 multicasts B across the Cs
+    co-resident peers. There is no separate serialized/derived key -- this is
+    the sole detector. Uses ``.get`` for partial-state safety (some derivation
+    call sites build dicts without a StreamK/ClusterDim key). ``d`` may be a
+    kernel or a solution ``state`` dict; both expose "StreamK" and "ClusterDim".
+    See docs/design/streamk-wg-clusters.md.
+    """
+    return d.get("StreamK", 0) == 3 and d.get("ClusterDim", [1, 1])[0] > 1
+
 def streamKClusterFactors(d):
     """Return (Cs, Ck, C, is2D) for a StreamK workgroup cluster (ClusterDim-driven).
 

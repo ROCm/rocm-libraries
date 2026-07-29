@@ -3489,7 +3489,7 @@ namespace TensileLite
             // sk.grid = tiles), per-tile correctness on any partially-filled cluster
             // is handled by the kernel's runtime guard (clusterMulticastValid for
             // multicast, intra_cluster for cluster reduction) + global-flag fallback.
-            if((sizeMapping.streamKMulticast || sizeMapping.streamKClusterReduction)
+            if(sizeMapping.streamK == 3
                && (static_cast<size_t>(sizeMapping.clusterDim.x)
                    * static_cast<size_t>(sizeMapping.clusterDim.y))
                       > 1)
@@ -4436,7 +4436,7 @@ namespace TensileLite
             // cluster genuinely 2-D. A trailing partial cluster (tiles % Cs != 0)
             // falls back to the kernel runtime guards (multicast self-mask +
             // global-flag reduction). See docs/design/streamk-wg-clusters.md.
-            if((self.sizeMapping.streamKMulticast || self.sizeMapping.streamKClusterReduction)
+            if(self.sizeMapping.streamK == 3
                && (static_cast<size_t>(self.sizeMapping.clusterDim.x)
                    * static_cast<size_t>(self.sizeMapping.clusterDim.y))
                       > 1)

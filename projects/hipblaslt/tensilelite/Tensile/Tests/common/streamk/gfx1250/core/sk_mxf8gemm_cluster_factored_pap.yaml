@@ -1,5 +1,16 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
+################################################################################
+# Factored 2-D StreamK cluster + PrefetchAcrossPersistent (FDPO=0), mxf8.
+#
+# PAP companion to sk_mxf8gemm_cluster_factored.yaml. This is the previously-
+# OVERFLOWING path: on a factored cluster A is per-workgroup (Ck is a K-split
+# REDUCTION axis, not an A-multicast axis) so maskA is self-only. Before the
+# ClusterLoad.papDropsSelfOnlyMaskA refinement the self-only maskA was kept live
+# under PAP whenever ClusterDim[1]>1, pushing FDPO=0 factored kernels to
+# sgprs=107 -> s_endpgm stub. The refined guard frees the self-only maskA on the
+# factored path (aPeers==1), so these fit <=106 SGPRs. Restricted to the smaller
+# factored shapes [2,2],[2,4],[4,2] first.
 TestParameters:
   marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201]
 GlobalParameters:
@@ -24,7 +35,7 @@ BenchmarkProblems:
   -
     -
       OperationType: GEMM
-      DataType: F4
+      DataType: F8
       DestDataType: s
       ComputeDataType: s
       HighPrecisionAccumulate: True
@@ -32,9 +43,6 @@ BenchmarkProblems:
       TransposeB: False
       UseBeta: True
       Batched: True
-      Activation: True
-      SupportUserArgs: True
-      UseBias: 0
       MXBlockA: 32
       MXBlockB: 32
     -
@@ -61,11 +69,10 @@ BenchmarkProblems:
         - LdsBlockSizePerPadMXSA: [-1]
         - LdsBlockSizePerPadMXSB: [-1]
         - LdsPadMetadata: [0]
-        - LDSTrInst: [True, False]
-        - 1LDSBuffer: [0]
-        - DirectToVgprSparseMetadata: [False]
+        - LDSTrInst: [False]
         - PrefetchGlobalRead: [1, 2]
         - PrefetchLocalRead: [1]
+        - PrefetchAcrossPersistent: [1]
         - ScheduleIterAlg: [4]
         - SourceSwap: [False]
         - StoreRemapVectorWidth: [0]
@@ -78,14 +85,12 @@ BenchmarkProblems:
         - LocalReadVectorWidth: [-1]
         - StoreVectorWidth: [-1]
         - StreamK: [3]
+        - StreamKForceDPOnly: [0]
         - StreamKAtomic: [0]
         - StreamKXCCMapping: [0]
-        # Factored 2-D cluster: ClusterDim = [Cs, Ck] with Cs>1 (spatial B-multicast)
-        # AND Ck>1 (K-split reduction). Both roles are derived from the cluster
-        # shape (no user param): the B-multicast condition (Common.streamKMulticast,
-        # Cs>1) and StreamKClusterReduction (Ck>1).
-        # Shapes up to C = Cs*Ck = 16 (all pow2): Cs in {2,4,8}, Ck in {2,4,8}.
-        - ClusterDim: [[2, 2], [2, 4], [4, 2], [4, 4], [2, 8], [8, 2]]
+        # Factored 2-D cluster: Cs>1 (B-multicast) AND Ck>1 (K-split reduction).
+        # A is self-only -> maskA freed under PAP (guard refinement).
+        - ClusterDim: [[2, 2], [2, 4], [4, 2]]
         - StaggerU: [0]
         - DirectToVgprA: [False]
         - DirectToVgprB: [False]
@@ -98,15 +103,13 @@ BenchmarkProblems:
       JoinParameters:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
-        # Cluster-aligned for EVERY swept (ClusterDim, MacroTile) combo so no
-        # solution is skipped (ClusterDimCheck: ceil(M/MT0) % Cs == 0 and
-        # ceil(N/MT1) % Ck == 0; ClusterReductionIterCheck: ceil(K/DepthU) % Ck
-        # == 0). M=N=1024 => ceil/MT0,MT1 in {8,16,32,64}, each divisible by the
-        # largest Cs=Ck=8; K in {2048,4096} => ceil(K/256) in {8,16}, divisible
-        # by 8. DepthU=256, MT0,MT1 in {16,32,64,128}.
+        # Cluster-aligned zero-skip for every (ClusterDim, MacroTile) combo:
+        # ClusterDimCheck ceil(M/MT0)%Cs==0 and ceil(N/MT1)%Ck==0;
+        # ClusterReductionIterCheck ceil(K/DepthU)%Ck==0. M=N=1024 => ceil/MT in
+        # {8,16,32,64} (divisible by Cs,Ck<=4); K in {2048,4096} => ceil(K/256)
+        # in {8,16} (divisible by Ck<=4). DepthU=256.
         - ProblemSizes:
           - Exact: [1024, 1024, 1, 2048]
           - Exact: [1024, 1024, 1, 4096]
-          - Exact: [1024, 1024, 2, 4096]
         - ActivationArgs:
           - [Enum: none]

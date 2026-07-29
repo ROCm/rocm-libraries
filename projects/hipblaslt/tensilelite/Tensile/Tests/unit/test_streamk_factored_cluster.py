@@ -126,37 +126,40 @@ class TestRegistration:
 
 class TestFactoring:
     def test_factored_both_axes(self):
-        """[2,2] => Cs=2, Ck=2: BOTH StreamKMulticast and StreamKClusterReduction
-        derived on (relaxed, composable mutual exclusion)."""
+        """[2,2] => Cs=2, Ck=2: BOTH the derived B-multicast condition and
+        StreamKClusterReduction on (relaxed, composable mutual exclusion)."""
+        from Tensile.Common import streamKMulticast
         states = _derive_states(_FACTORED)
         assert states
         for st in states:
             assert st["ClusterDim"] == [2, 2]
-            assert st["StreamKMulticast"] == 1
+            assert streamKMulticast(st)
             assert st["StreamKClusterReduction"] == 1
             assert st["Multicast"] == 1
             assert st["ClusterBarrier"] is True
 
     def test_pure_multicast(self, tmp_path):
         """[C,1] => Cs=C, Ck=1: pure multicast (no reduction)."""
+        from Tensile.Common import streamKMulticast
         cfg = _write_variant(tmp_path, _MULTICAST, "pure_mc.yaml",
                              fork_overrides={"ClusterDim": [[4, 1]]})
         states = _derive_states(cfg)
         assert states
         for st in states:
             assert st["ClusterDim"] == [4, 1]
-            assert st["StreamKMulticast"] == 1
+            assert streamKMulticast(st)
             assert not st.get("StreamKClusterReduction", 0)
 
     def test_pure_reduction(self, tmp_path):
         """[1,C] => Cs=1, Ck=C: pure reduction (no multicast)."""
+        from Tensile.Common import streamKMulticast
         cfg = _write_variant(tmp_path, _REDUCTION, "pure_red.yaml",
                              fork_overrides={"ClusterDim": [[1, 4]]})
         states = _derive_states(cfg)
         assert states
         for st in states:
             assert st["ClusterDim"] == [1, 4]
-            assert not st.get("StreamKMulticast", 0)
+            assert not streamKMulticast(st)
             assert st["StreamKClusterReduction"] == 1
 
 

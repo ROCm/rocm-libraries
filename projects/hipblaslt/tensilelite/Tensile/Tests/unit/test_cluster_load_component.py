@@ -63,7 +63,10 @@ class _StubWriter:
 
 def _kernel(*, multicast=True, clusterDim=(2, 2), tdmA=True, tdmB=True,
             numWaves=4, useSubtile=False, sparse=0, tdmMeta=False, tdmInst=3,
-            pap=False, streamKMulticast=False):
+            pap=False, streamKMulticast=False, forceDPOnly=0, dualMulticast=0):
+    # B-multicast has no state key -- it is derived from StreamK==3 + ClusterDim[0]>1
+    # (Common.streamKMulticast). Drive it via StreamK so the component sees the same
+    # condition production does. streamKMulticast=True with ClusterDim[0]>1 turns it on.
     return {
         "Multicast": multicast,
         "ClusterDim": list(clusterDim),
@@ -75,7 +78,9 @@ def _kernel(*, multicast=True, clusterDim=(2, 2), tdmA=True, tdmB=True,
         "TDMInst": tdmInst,
         "ProblemType": {"Sparse": sparse},
         "PrefetchAcrossPersistent": pap,
-        "StreamKMulticast": streamKMulticast,
+        "StreamK": 3 if streamKMulticast else 0,
+        "StreamKForceDPOnly": forceDPOnly,
+        "StreamKDualMulticast": dualMulticast,
     }
 
 
@@ -227,13 +232,32 @@ class TestDeclareUndeclare:
         self._c().undeclareSgprs(w, _kernel(streamKMulticast=True, pap=True, clusterDim=(2, 1)))
         assert w.undefined == ["MulticastMaskA"]
 
-    def test_undeclare_keeps_both_live_under_pap_2d_cluster(self):
-        # On a 2-D cluster (ClusterDim[1]>1) A is a real multicast, not self-only,
-        # so both masks stay live across the PAP refresh (neither is freed).
+    def test_undeclare_keeps_both_live_under_pap_dual_2d_cluster(self):
+        # On a DUAL-2D cluster (ForceDPOnly 2-D or StreamKDualMulticast) the Ck peers
+        # reuse A on N-adjacent tiles, so A is a REAL multicast (aPeers>1), not
+        # self-only. Both masks must stay live across the PAP refresh (neither freed).
         _init_rocisa_gfx1250()
         w = _StubWriter()
-        self._c().undeclareSgprs(w, _kernel(streamKMulticast=True, pap=True, clusterDim=(2, 2)))
+        self._c().undeclareSgprs(
+            w, _kernel(streamKMulticast=True, pap=True, clusterDim=(2, 2), forceDPOnly=1))
         assert w.undefined == []
+        # StreamKDualMulticast (standard two-tile) is the other dual-2D entry.
+        w2 = _StubWriter()
+        self._c().undeclareSgprs(
+            w2, _kernel(streamKMulticast=True, pap=True, clusterDim=(2, 2), dualMulticast=1))
+        assert w2.undefined == []
+
+    def test_undeclare_frees_selfonly_maskA_under_pap_factored_2d(self):
+        # FACTORED 2-D cluster (both>1, FDPO=0, no StreamKDualMulticast): Ck is a
+        # K-split REDUCTION axis, so A stays per-workgroup (aPeers==1 -> self-only).
+        # After the guard refinement the self-only A mask is freed under PAP even on
+        # a 2-D cluster, so factored 2-D + PAP + FDPO=0 fits the 106-SGPR budget
+        # (was sgprs=107 -> s_endpgm stub). B stays live (real B-multicast).
+        _init_rocisa_gfx1250()
+        for cd in [(2, 2), (2, 4), (4, 2)]:
+            w = _StubWriter()
+            self._c().undeclareSgprs(w, _kernel(streamKMulticast=True, pap=True, clusterDim=cd))
+            assert w.undefined == ["MulticastMaskA"], cd
 
     def test_undeclare_frees_both_without_pap(self):
         # Same StreamK multicast kernel but PAP off: no persistent refresh, so both
@@ -371,6 +395,25 @@ class TestApplyToDescriptor:
         w = _StubWriter()
         mod = self._c().applyToDescriptor(
             w, _kernel(streamKMulticast=True, pap=False, clusterDim=(2, 1)), "tdmAGroup1", "A")
+        assert "s_or_b32 s[sgprtdmAGroup1], s[sgprtdmAGroup1], s[sgprMulticastMaskA]" in str(mod)
+
+    def test_pap_factored_2d_skips_selfonly_maskA(self):
+        # Factored 2-D (both>1, FDPO=0): A is self-only (Ck is the reduction axis),
+        # so the freed A mask means applyToDescriptor emits nothing for the A side.
+        _init_rocisa_gfx1250()
+        w = _StubWriter()
+        mod = self._c().applyToDescriptor(
+            w, _kernel(streamKMulticast=True, pap=True, clusterDim=(2, 2)), "tdmAGroup1", "A")
+        assert str(mod).strip() == ""
+
+    def test_pap_dual_2d_still_applies_maskA(self):
+        # Dual-2D (ForceDPOnly 2-D): A IS a real multicast across Ck peers, so it
+        # stays live and is applied on every refresh.
+        _init_rocisa_gfx1250()
+        w = _StubWriter()
+        mod = self._c().applyToDescriptor(
+            w, _kernel(streamKMulticast=True, pap=True, clusterDim=(2, 2), forceDPOnly=1),
+            "tdmAGroup1", "A")
         assert "s_or_b32 s[sgprtdmAGroup1], s[sgprtdmAGroup1], s[sgprMulticastMaskA]" in str(mod)
 
 

@@ -138,15 +138,16 @@ class TestDetector:
 
 class TestDerivation:
     def test_dual2d_derives_multicast_without_reduction(self):
-        """StreamKDualMulticast=1 on [2,2]/SK3/ForceDPOnly=0: StreamKMulticast on,
+        """StreamKDualMulticast=1 on [2,2]/SK3/ForceDPOnly=0: B-multicast on,
         StreamKClusterReduction OFF (Ck is an N-tiling / A-multicast axis)."""
+        from Tensile.Common import streamKMulticast
         states = _derive_states(_DUAL2D)
         assert states
         for st in states:
             assert st["ClusterDim"] == [2, 2]
             assert st["StreamKForceDPOnly"] == 0
             assert st["StreamKDualMulticast"] == 1
-            assert st["StreamKMulticast"] == 1
+            assert streamKMulticast(st)
             assert st.get("StreamKClusterReduction", 0) == 0
             assert st["Multicast"] == 1
             assert st["ClusterBarrier"] is True
@@ -155,13 +156,14 @@ class TestDerivation:
         """MUTUAL EXCLUSION: the identical config with StreamKDualMulticast=0
         reverts to the factored interpretation (multicast AND reduction). The
         opt-in flag is the sole discriminator; a config never matches both."""
+        from Tensile.Common import streamKMulticast
         cfg = _write_variant(tmp_path, _DUAL2D, "factored_no_flag.yaml",
                              fork_overrides={"StreamKDualMulticast": [0]})
         states = _derive_states(cfg)
         assert states
         for st in states:
             assert st["ClusterDim"] == [2, 2]
-            assert st["StreamKMulticast"] == 1
+            assert streamKMulticast(st)
             assert st["StreamKClusterReduction"] == 1  # factored: Ck IS reduction
 
 

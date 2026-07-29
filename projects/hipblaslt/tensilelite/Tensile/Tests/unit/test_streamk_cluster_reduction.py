@@ -250,7 +250,7 @@ class TestReductionValidation:
     @staticmethod
     def _state(**overrides):
         st = {
-            "StreamKClusterReduction": 1, "StreamKMulticast": 0, "StreamK": 3,
+            "StreamKClusterReduction": 1, "StreamK": 3,
             "StreamKAtomic": 0, "StreamKForceDPOnly": 0, "StreamKXCCMapping": 0,
             "ClusterDim": [1, 4], "ISA": [12, 5, 0], "TDMInst": 3,
         }

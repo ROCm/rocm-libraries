@@ -10,7 +10,7 @@ Capability-selected (``HasTDM`` + ``TDMInst == 3``), like ``TensorDataMoverLoad`
 """
 
 from ..Component import ClusterLoad
-from ..Common import clusterEnabled, streamKDual2DMulticast
+from ..Common import clusterEnabled, streamKDual2DMulticast, streamKMulticast
 from typing import Mapping
 from rocisa.code import Module, Label
 from rocisa.container import sgpr
@@ -36,7 +36,7 @@ class ClusterLoadTDM(ClusterLoad):
         across the [C,1] cluster while A stays per-workgroup -- the combined
         parity mask would be wrong for both.
         """
-        if kernel.get("StreamKMulticast", 0):
+        if streamKMulticast(kernel):
             return False
         tdmA: bool = kernel["enableTDMA"]
         tdmB: bool = kernel["enableTDMB"]
@@ -51,7 +51,7 @@ class ClusterLoadTDM(ClusterLoad):
         (any ``MXS`` prefix stripped). StreamK forces the split name so B never
         resolves to the never-declared combined SGPR.
         """
-        if kernel.get("StreamKMulticast", 0):
+        if streamKMulticast(kernel):
             string = tc.removeprefix("MXS") if tc.startswith("MXS") else tc
             return f"MulticastMask{string}"
         if waveSeparated and not subtile:
@@ -87,22 +87,31 @@ class ClusterLoadTDM(ClusterLoad):
         live past the prologue -- freeing it makes those reuses reference an
         undeclared SGPR (``expected absolute expression`` at assembly time).
         """
-        return bool(kernel.get("PrefetchAcrossPersistent") and kernel.get("StreamKMulticast", 0))
+        return bool(kernel.get("PrefetchAcrossPersistent") and streamKMulticast(kernel))
 
     def papDropsSelfOnlyMaskA(self, kernel: Mapping) -> bool:
         """True when the PAP-live A mask can be freed because it is self-only.
 
-        StreamK keeps A per-workgroup on a 1-D ``[C,1]`` cluster
-        (``ClusterDim[1]==1`` -> ``maskA==1`` -> ``1<<wg_x``), so re-applying it is
-        a no-op and the SGPR is freed to stay within the 106-SGPR budget (the
-        PAP+cluster+FDPO=0 overflow bug: sgprs=107 -> kernel replaced by an
-        ``s_endpgm`` stub -> output tensor left unwritten).  On a 2-D cluster
-        (``ClusterDim[1]>1``) A is a real multicast and must stay live.  (The
-        factored/dual-2D path forces maskA self-only only when its own aPeers==1;
-        the ClusterDim[1]==1 test conservatively keeps A live otherwise, so no
-        real 2-D A-multicast is ever dropped.)
+        ``maskA`` is self-only (``1 << wg_x``) exactly when ``computeMasks`` uses
+        ``aPeers == 1`` -- i.e. on the StreamK B-multicast path whenever A is NOT
+        a genuine 2-D dual/factored A-multicast.  This mirrors the ``aPeers``
+        derivation directly (``streamKMulticast(kernel) and not
+        streamKDual2DMulticast(kernel)``, which under PAP is equivalent to
+        ``papRefreshesMask(kernel) and not streamKDual2DMulticast(kernel)``):
+
+          * ``[C,1]`` pure multicast  -> aPeers==1 -> self-only -> DROP.
+          * FACTORED ``[Cs,Ck]`` (FDPO=0, no StreamKDualMulticast) -> Ck is a
+            K-split *reduction* axis, so A is still per-workgroup (aPeers==1) ->
+            self-only -> DROP.  This is what lets factored 2-D + PAP + FDPO=0 fit
+            the 106-SGPR budget (was sgprs=107 -> ``s_endpgm`` stub overflow).
+          * dual-2D (ForceDPOnly 2-D or StreamKDualMulticast) -> Ck peers reuse A
+            on N-adjacent tiles, so A is a real multicast (aPeers>1) -> KEEP live.
+
+        Freeing the self-only mask is a no-op re-apply, so codegen is byte-
+        identical to keeping it (minus the freed SGPR); the only observable
+        effect is the reduced SGPR count.
         """
-        return self.papRefreshesMask(kernel) and kernel["ClusterDim"][1] == 1
+        return self.papRefreshesMask(kernel) and not streamKDual2DMulticast(kernel)
 
     def undeclareSgprs(self, writer: "KernelWriter", kernel: Mapping) -> Module:
         """Free the ``MulticastMask*`` SGPRs."""
@@ -154,7 +163,7 @@ class ClusterLoadTDM(ClusterLoad):
         # no preLoop overwrite is needed (see StreamK.preLoop /
         # streamKMulticastMaskPredicate). On the standard path the masks are later
         # dropped to self-only at the DP->SK boundary (streamKMulticastBoundaryClear).
-        if kernel.get("StreamKMulticast", 0) and not streamKDual2DMulticast(kernel):
+        if streamKMulticast(kernel) and not streamKDual2DMulticast(kernel):
             aPeers = 1
         else:
             aPeers = kernel["ClusterDim"][1]

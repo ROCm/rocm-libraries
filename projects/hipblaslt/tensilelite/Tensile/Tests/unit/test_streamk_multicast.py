@@ -38,6 +38,9 @@ sys.path.insert(0, TENSILE_ROOT)
 sys.path.insert(0, os.path.join(
     TENSILE_ROOT, "Tensile", "Tests", "unit", "characterization", "_codegen"))
 
+# B-multicast has no state key: it is derived from StreamK==3 + ClusterDim[0]>1.
+from Tensile.Common import streamKMulticast
+
 _DESIGNED = os.path.join(
     TENSILE_ROOT, "Tensile", "Tests", "unit", "characterization",
     "_codegen", "data", "test_data", "_designed", "gfx1250")
@@ -113,7 +116,7 @@ class TestValidation:
         states = _derive_states(cfg)
         assert states, "expected >=1 derived solution for the valid config"
         for st in states:
-            assert st["StreamKMulticast"] == 1
+            assert streamKMulticast(st)
             assert st["Multicast"] == 1, st["Multicast"]
             assert st["ClusterDim"] == [4, 1]
             # The cooperative multicast pairs the B-broadcast masks with the
@@ -138,7 +141,7 @@ class TestValidation:
         states = _derive_states(str(out))
         assert states, "expected the bare SK3 cluster config to derive solutions"
         for st in states:
-            assert st["StreamKMulticast"] == 1, st.get("StreamKMulticast")
+            assert streamKMulticast(st), (st.get("StreamK"), st.get("ClusterDim"))
             assert st["Multicast"] == 1, st["Multicast"]
 
     def test_reduction_keeps_cooperative_loads_off(self, tmp_path):
@@ -152,7 +155,7 @@ class TestValidation:
         assert states, "expected the SK3 [1,C] reduction cluster to derive solutions"
         for st in states:
             assert st["ClusterDim"] == [1, 4], st["ClusterDim"]
-            assert not st.get("StreamKMulticast", 0), st.get("StreamKMulticast")
+            assert not streamKMulticast(st), (st.get("StreamK"), st.get("ClusterDim"))
             assert st["StreamKClusterReduction"] == 1, st.get("StreamKClusterReduction")
             assert st["Multicast"] == 0, st["Multicast"]
 
@@ -178,7 +181,7 @@ class TestValidation:
         states = _derive_states(cfg)
         assert states, "expected the Multicast=-1 control config to derive solutions"
         for st in states:
-            assert st["StreamKMulticast"] == 1
+            assert streamKMulticast(st)
             assert st["Multicast"] == 1, st["Multicast"]
 
     def test_reject_atomic(self, tmp_path):
@@ -199,7 +202,6 @@ class TestValidation:
 
         def _state(pgr):
             return {
-                "StreamKMulticast": 1,
                 "Multicast": 1,
                 "StreamK": 3,
                 "StreamKAtomic": 0,
@@ -218,7 +220,7 @@ class TestValidation:
         states = _derive_states(cfg)
         assert states, "expected the PrefetchGlobalRead=2 multicast config to be accepted"
         for st in states:
-            assert st["StreamKMulticast"] == 1
+            assert streamKMulticast(st)
 
     def test_xcc_mapping_forced_to_zero(self, tmp_path):
         """StreamKXCCMapping is coerced to 0 (not rejected) under StreamK+ClusterDim.
@@ -234,7 +236,7 @@ class TestValidation:
         states = _derive_states(cfg)
         assert states, "expected the XCC=3 config to be accepted with XCC coerced to 0"
         for st in states:
-            assert st["StreamKMulticast"] == 1
+            assert streamKMulticast(st)
             assert st["StreamKXCCMapping"] == 0, st["StreamKXCCMapping"]
 
     # NB: the 2-D [2,2] cluster accept path (StreamKMulticast + StreamKClusterReduction
@@ -260,8 +262,10 @@ class TestValidation:
     # --- direct _validateStreamKMulticast reject branches ------------------
     @staticmethod
     def _direct_state(**overrides):
+        # StreamK=3 + ClusterDim=[4,1] -> the derived B-multicast condition holds,
+        # so _validateStreamKMulticast engages (no explicit key needed).
         st = {
-            "StreamKMulticast": 1, "Multicast": 1, "StreamK": 3,
+            "Multicast": 1, "StreamK": 3,
             "StreamKAtomic": 0, "StreamKXCCMapping": 0, "ClusterDim": [4, 1],
             "ISA": [12, 5, 0], "TDMInst": 3, "PrefetchGlobalRead": 1,
         }
@@ -274,10 +278,14 @@ class TestValidation:
             asmCaps = {"HasTDM": has_tdm, "HasClusterBarrier": has_cluster_barrier}
         return {(12, 5, 0): _Info()}
 
-    def test_reject_streamk_not_3_direct(self):
+    def test_streamk_not_3_is_not_multicast_path(self):
+        # StreamK != 3 -> the derived B-multicast condition is False, so there is
+        # no multicast to validate: streamKMulticast() is False and the validator
+        # is a no-op (returns True) rather than rejecting.
         from Tensile.SolutionStructs.Solution import _validateStreamKMulticast
-        assert _validateStreamKMulticast(
-            self._direct_state(StreamK=4), False, self._isa_map()) is False
+        st = self._direct_state(StreamK=4)
+        assert not streamKMulticast(st)
+        assert _validateStreamKMulticast(st, False, self._isa_map()) is True
 
     def test_reject_xcc_mapping_direct(self):
         from Tensile.SolutionStructs.Solution import _validateStreamKMulticast
@@ -308,8 +316,8 @@ class TestTDMInstValidation:
     @staticmethod
     def _state(tdminst, pgr=1):
         return {
-            "StreamKMulticast": 1,
-            # StreamKMulticast on always co-derives Multicast on (real invariant).
+            # StreamK=3 + ClusterDim=[4,1] -> B-multicast derived on; it always
+            # co-derives Multicast on (real invariant).
             "Multicast": 1,
             "StreamK": 3,
             "StreamKAtomic": 0,
