@@ -25,22 +25,33 @@ from _emit_common import run_emit
 
 
 def build_async_lds_two_allocs(b: IRBuilder) -> None:
-    """Async global->LDS copy into the SECOND of two LDS allocations.
+    """Async global->LDS copy into each of two LDS allocations.
 
-    With two allocations the destination sits at a non-zero offset in the
-    unified smem pool, so a lowering that skips the pool base-pointer step
-    cannot accidentally produce the right address.
+    The second destination sits at a non-zero offset in the unified smem pool,
+    so a lowering that skips the pool base-pointer step cannot accidentally
+    produce the right address. Both allocations are copied into because an
+    allocation with no use is dropped from the pool: leaving stageA dead would
+    put stageB back at offset 0, where _emit_smem_base_ptr returns the pool
+    name directly and the base-pointer hop this config exists to cover never
+    runs.
     """
     src = b.param("src", PtrType(I32, "global"), align=16)
-    # The first allocation exists only to push the second off pool offset 0.
-    b.smem_alloc(I32, [64], name_hint="stageA")
-    dst = b.smem_alloc(I32, [64, 4], name_hint="stageB")
+    stage_a = b.smem_alloc(I32, [64], name_hint="stageA")
+    stage_b = b.smem_alloc(I32, [64, 4], name_hint="stageB")
     tid = b.thread_id_x()
     zero = b.const_i32(0)
     b.global_load_async_to_lds(
         src,
         tid,
-        dst,
+        stage_a,
+        [tid],
+        width_bytes=16,
+        coherency=CACHE_STREAM,
+    )
+    b.global_load_async_to_lds(
+        src,
+        tid,
+        stage_b,
         [tid, zero],
         width_bytes=16,
         coherency=CACHE_STREAM,

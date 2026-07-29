@@ -14,7 +14,9 @@ Tests are organised mirror-of-layer:
 
 These run in-process (no subprocess, no GPU); they test the static
 IR/lowering pipeline only. End-to-end runtime tests live in
-`test_rocke_examples.py`.
+`test_rocke_examples.py`. The one exception is opt-in: setting
+`ROCKE_TEST_VERIFY_IR=1` assembles emitted IR with `llvm-as` (still no
+GPU), so the default run keeps the no-subprocess contract.
 """
 
 from __future__ import annotations
@@ -1633,6 +1635,182 @@ class TestLlvmFlavorEnumeration(unittest.TestCase):
             "re-listing flavors:\n  " + "\n  ".join(offenders),
         )
 
+    def test_cpp_engine_accepts_exactly_the_python_flavor_set(self):
+        """The C++ ladder and :data:`LLVM_FLAVORS` must agree, in order.
+
+        The engine has its own copy of the enumeration, so the two can drift
+        into a state where a flavor lowers on one side and is rejected on the
+        other. Reading the engine's list back is what makes its table an
+        actual mirror rather than a second, independent source.
+        """
+        try:
+            import rocke_engine
+        except ImportError:
+            self.skipTest("rocke_engine extension not built")
+        from rocke.core.lower_llvm import LLVM_FLAVORS
+
+        self.assertEqual(tuple(rocke_engine.llvm_flavors()), LLVM_FLAVORS)
+
+
+# Probe run in a child process: print the datalayout the Python resolver picks
+# for AUTO, and the one the C++ engine picks for AUTO (flavor=""). Must be a
+# child because the flavor depends on process environment and Python memoises
+# its answer per comgr path.
+_FLAVOR_AUTO_PROBE = """
+import sys
+from rocke.core.ir import IRBuilder
+from rocke.core.ir_serialize import serialize
+from rocke.core.lower_llvm import _datalayout_for_flavor, _resolve_llvm_flavor
+import rocke_engine
+
+b = IRBuilder("probe")
+b.kernel.attrs["max_workgroup_size"] = 64
+b.const_i32(1)
+cpp = rocke_engine.lower_serialized_ir(serialize(b.kernel), arch="gfx950", flavor="")
+cpp_dl = next(
+    ln.split('"')[1] for ln in cpp.splitlines() if ln.startswith("target datalayout")
+)
+print(_datalayout_for_flavor(_resolve_llvm_flavor()))
+print(cpp_dl)
+"""
+
+
+class TestCrossEngineFlavorAutoResolution(unittest.TestCase):
+    """The two engines must pick the SAME flavor when asked to auto-detect.
+
+    Both sides answer "which LLVM flavor is this host?" independently: Python in
+    ``_detect_llvm_flavor``, the engine in ``ll_resolve_flavor``. If they answer
+    differently they emit different IR from the same kernel while each looks
+    self-consistent, and no byte-identity run can see it -- the gate pins a
+    flavor explicitly, and ``backend.py`` resolves in Python before calling the
+    engine, so the engine's own resolver is never exercised on the paths the
+    suite covers. The C++ resolver used to read a single hardcoded
+    ``/opt/rocm/.info/version`` while Python located the comgr library that will
+    actually compile the IR and took *that* tree's ROCm version, so the two
+    disagreed on every host where /opt/rocm is absent, stale, or not the install
+    ``$ROCM_PATH`` names.
+
+    The layouts below are the ones that actually distinguish the resolvers; each
+    is checked through the emitted datalayout, which is the observable the
+    flavor controls.
+    """
+
+    def _probe(self, env_overrides):
+        import os
+        import subprocess
+        import sys
+
+        env = dict(os.environ)
+        env.pop("ROCKE_LLVM_FLAVOR", None)
+        for k in ("ROCM_PATH", "ROCM_HOME", "ROCKE_COMGR_LIB"):
+            env.pop(k, None)
+        env.update(env_overrides)
+        env["PYTHONPATH"] = os.pathsep.join(p for p in sys.path if p)
+        out = subprocess.run(
+            [sys.executable, "-c", _FLAVOR_AUTO_PROBE],
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+        self.assertEqual(out.returncode, 0, out.stderr)
+        py_dl, cpp_dl = out.stdout.strip().splitlines()[-2:]
+        return py_dl, cpp_dl
+
+    def _fake_rocm_tree(self):
+        """A packaged install: release 7.0.0 at the root, component 7.13.0 in
+        ``core-7.13/lib`` where comgr lives.
+
+        The two versions map to *different* flavors (llvm20 vs llvm23), which is
+        what makes this fixture worth having: a resolver that stops at the first
+        ``.info/version`` it meets while climbing out of the lib dir reads the
+        component version and picks llvm23 for a ROCm 7.0 toolchain.
+        """
+        import os
+        import shutil
+        import tempfile
+
+        root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, root, ignore_errors=True)
+        rocm = os.path.join(root, "rocm-7.0.0")
+        core_lib = os.path.join(rocm, "core-7.13", "lib")
+        os.makedirs(os.path.join(rocm, ".info"))
+        os.makedirs(os.path.join(rocm, "core-7.13", ".info"))
+        os.makedirs(core_lib)
+        os.makedirs(os.path.join(rocm, "lib"))
+        with open(os.path.join(rocm, ".info", "version"), "w") as fh:
+            fh.write("7.0.0-1234\n")
+        with open(os.path.join(rocm, "core-7.13", ".info", "version"), "w") as fh:
+            fh.write("7.13.0\n")
+        for d in (core_lib, os.path.join(rocm, "lib")):
+            open(os.path.join(d, "libamd_comgr.so"), "w").close()
+        return rocm
+
+    def _assert_agree(self, env_overrides):
+        py_dl, cpp_dl = self._probe(env_overrides)
+        self.assertEqual(
+            py_dl,
+            cpp_dl,
+            f"python and cpp AUTO flavor resolution disagree for {env_overrides}: "
+            f"python picked a datalayout the engine did not",
+        )
+        return py_dl
+
+    def setUp(self):
+        try:
+            import rocke_engine  # noqa: F401
+        except ImportError:
+            self.skipTest("rocke_engine extension not built")
+
+    def test_agree_on_the_bare_host(self):
+        """No env pointing anywhere: whatever this machine has, both must see it."""
+        self._assert_agree({})
+
+    def test_agree_when_rocm_path_names_an_older_install(self):
+        """``$ROCM_PATH`` outranks /opt/rocm on both sides, or they split."""
+        rocm = self._fake_rocm_tree()
+        dl = self._assert_agree({"ROCM_PATH": rocm})
+        # 7.0.0 is pre-7.2, i.e. the LLVM 20 plain-p8 datalayout. Pinning the
+        # value (not just agreement) is what proves the env root was honoured
+        # rather than both engines ignoring it and agreeing on the host default.
+        self.assertIn("-p8:128:128-", dl)
+
+    def test_agree_when_rocm_home_names_an_older_install(self):
+        rocm = self._fake_rocm_tree()
+        dl = self._assert_agree({"ROCM_HOME": rocm})
+        self.assertIn("-p8:128:128-", dl)
+
+    def test_agree_when_comgr_lib_is_pinned_in_a_component_subdir(self):
+        """The RELEASE version wins over the component version next to comgr.
+
+        ``$ROCKE_COMGR_LIB`` points into ``core-7.13/lib``, whose own
+        ``.info/version`` says 7.13.0 (-> llvm23) while the install root says
+        7.0.0 (-> llvm20). Both engines must climb to the root.
+        """
+        import os
+
+        rocm = self._fake_rocm_tree()
+        lib = os.path.join(rocm, "core-7.13", "lib", "libamd_comgr.so")
+        dl = self._assert_agree({"ROCKE_COMGR_LIB": lib})
+        self.assertIn("-p8:128:128-", dl)
+
+    def test_agree_when_the_named_root_has_no_comgr(self):
+        """A root with a version file but no comgr is NOT a flavor signal.
+
+        Python only takes the version of a tree it can actually find comgr in;
+        a C-side resolver that read ``$ROCM_PATH/.info/version`` directly would
+        honour this root and diverge.
+        """
+        import os
+        import shutil
+        import tempfile
+
+        root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, root, ignore_errors=True)
+        os.makedirs(os.path.join(root, ".info"))
+        with open(os.path.join(root, ".info", "version"), "w") as fh:
+            fh.write("7.0.0\n")
+        self._assert_agree({"ROCM_PATH": root})
+
 
 class TestTransformsBridge(unittest.TestCase):
     def test_view_from_transforms_descriptor(self):
@@ -2713,6 +2891,149 @@ class TestCdnaPrimitives(unittest.TestCase):
             build_universal_gemm(spec)
 
 
+# ---------------------------------------------------------------------
+# Emitted-IR validation (opt-in)
+# ---------------------------------------------------------------------
+#
+# A substring assertion cannot tell well-formed IR from IR that merely
+# contains the right text: several intrinsic lowerings named a pointer of the
+# wrong address space, or an i64 where a pointer was declared, and every
+# assertion still matched. Assembling the module answers that directly.
+#
+# This is the one place in the file that shells out, which the module docstring
+# otherwise rules out, so it is opt-in: unset ROCKE_TEST_VERIFY_IR and the
+# suite stays in-process. Opting in without llvm-as reachable is an error
+# rather than a silent skip -- a verification lane that quietly verifies
+# nothing is worse than no lane.
+_ENV_VERIFY_IR = "ROCKE_TEST_VERIFY_IR"
+
+
+def _llvm_as_path():
+    """Locate ``llvm-as``: PATH first, then a ROCm-bundled LLVM.
+
+    The ROCm tiers mirror ``runtime_coexistence._rocm_root_libdirs`` -- the
+    operator override first, then the globbed install layouts, newest first --
+    so the tool is found on the same boxes the runtime finds comgr on.
+    """
+    import glob
+    import os
+    import shutil
+    from pathlib import Path
+
+    found = shutil.which("llvm-as")
+    if found:
+        return found
+    roots = [os.environ.get(v) for v in ("ROCM_PATH", "ROCM_HOME")]
+    roots += sorted(glob.glob("/opt/rocm*"), reverse=True)
+    for root in roots:
+        if not root:
+            continue
+        cand = Path(root) / "llvm" / "bin" / "llvm-as"
+        if cand.is_file():
+            return str(cand)
+    return None
+
+
+def _llvm_as_major(path):
+    """Major version llvm-as reports, or None if it cannot be parsed."""
+    import re
+    import subprocess
+
+    try:
+        out = subprocess.run([path, "--version"], capture_output=True, text=True).stdout
+    except OSError:
+        return None
+    m = re.search(r"LLVM version (\d+)", out)
+    return int(m.group(1)) if m else None
+
+
+def _newest_llvm_major():
+    """LLVM major of the newest flavor rocke emits (``llvm23`` -> 23)."""
+    from rocke.core.lower_llvm import LLVM_FLAVORS
+
+    return int(LLVM_FLAVORS[-1][len("llvm") :])
+
+
+def _assert_ir_assembles(test, ir_text, kernel_name):
+    """Assemble ``ir_text`` with llvm-as when ROCKE_TEST_VERIFY_IR is set.
+
+    llvm-as runs the same parser and verifier comgr does, so a malformed
+    declare, or a call whose operand type contradicts it, fails here with the
+    exact diagnostic the toolchain would give.
+
+    The tool has to be at least as new as the newest flavor rocke emits. These
+    cases exist to cover intrinsics that only exist in that generation, so an
+    older llvm-as reports them as defects for the sole reason that it predates
+    them -- ``s.prefetch.inst``, ``av.load.b128`` and
+    ``raw.ptr.buffer.load.async.lds`` are all absent from LLVM 22. Both "no
+    tool" and "tool too old" are failures rather than silent skips: whoever
+    set the variable asked for verification, and a lane that quietly verifies
+    nothing is worse than no lane.
+    """
+    import os
+    import subprocess
+    import tempfile
+    from pathlib import Path
+
+    if os.environ.get(_ENV_VERIFY_IR, "").strip() in ("", "0"):
+        return
+    llvm_as = _llvm_as_path()
+    if llvm_as is None:
+        test.fail(
+            f"{_ENV_VERIFY_IR} is set but 'llvm-as' was not found on PATH, "
+            "under $ROCM_PATH/llvm/bin, or in a /opt/rocm* install; install "
+            "it or unset the variable"
+        )
+    want = _newest_llvm_major()
+    have = _llvm_as_major(llvm_as)
+    if have is None or have < want:
+        test.fail(
+            f"{_ENV_VERIFY_IR} is set but {llvm_as} reports LLVM "
+            f"{have if have is not None else '?'}; these cases emit LLVM "
+            f"{want} intrinsics, so an older assembler cannot judge them. "
+            "Point PATH or $ROCM_PATH at a newer LLVM, or unset the variable."
+        )
+    with tempfile.TemporaryDirectory() as td:
+        src = Path(td) / f"{kernel_name}.ll"
+        src.write_text(ir_text)
+        proc = subprocess.run(
+            [llvm_as, str(src), "-o", str(Path(td) / "out.bc")],
+            capture_output=True,
+            text=True,
+        )
+    if proc.returncode != 0:
+        test.fail(
+            f"llvm-as rejected the IR for kernel '{kernel_name}':\n"
+            f"{proc.stderr.strip()}\n--- emitted IR ---\n{ir_text}"
+        )
+
+
+def _assert_engines_agree(test, kernel, python_ir, **kw):
+    """Byte-compare the C++ engine against ``python_ir``.
+
+    Never falls back to the Python result. If the extension is not importable
+    the test *skips* -- visibly, and counted in the run summary -- rather than
+    returning and letting the case pass as though parity had been checked. Any
+    other engine outcome (it failed, or it produced different bytes) is a
+    failure: a built engine that disagrees is a divergence, not a gap.
+    """
+    from rocke.core.backend import BackendError, _lower_via_cpp_engine, _text_diff
+    from rocke.core.ir_serialize import serialize
+
+    try:
+        cpp_ir = _lower_via_cpp_engine(
+            serialize(kernel), kw.get("arch") or "gfx950", kw.get("llvm_flavor")
+        )
+    except BackendError as e:
+        test.skipTest(f"C++ engine unavailable, cross-engine check not run: {e}")
+    if cpp_ir != python_ir:
+        test.fail(
+            f"python vs cpp engine disagree for kernel "
+            f"'{getattr(kernel, 'name', '?')}':\n"
+            + _text_diff("lowered AMDGPU .ll", python_ir, cpp_ir)
+        )
+
+
 class TestNewTargetIntrinsics(unittest.TestCase):
     """One case per intrinsic added for the LLVM 23 / future-operator surface.
 
@@ -2732,12 +3053,24 @@ class TestNewTargetIntrinsics(unittest.TestCase):
         return b
 
     def _lower(self, name, build, **kw):
-        """Build a single-intrinsic kernel and return its lowered LLVM IR."""
-        from rocke.core.lower_llvm import lower_kernel_to_llvm
+        """Build a single-intrinsic kernel and return its lowered LLVM IR.
+
+        Pins the NATIVE Python lowerer rather than going through
+        ``lower_kernel_to_llvm``, whose engine comes from ``ROCKE_BACKEND``
+        with a silent cpp->python fallback: an unpinned call makes these
+        assertions describe C++ on a machine where the engine is built and
+        Python on one where it is not, so the same suite means two different
+        things. The C++ engine is then byte-compared against that result
+        whenever it is importable, which covers it without the ambiguity.
+        """
+        from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
 
         b = self._builder(name)
         build(b)
-        return lower_kernel_to_llvm(b.kernel, **kw)
+        ll = _lower_kernel_to_llvm_python(b.kernel, **kw)
+        _assert_engines_agree(self, b.kernel, ll, **kw)
+        _assert_ir_assembles(self, ll, name)
+        return ll
 
     # ---- ds_swizzle (raw offset + XOR-butterfly encoding) ----
     def test_ds_swizzle_passes_raw_offset_immediate(self):
@@ -2868,13 +3201,17 @@ class TestNewTargetIntrinsics(unittest.TestCase):
             "pl16",
             lambda b: b.permlane16(*[b.const_i32(i) for i in range(4)]),
         )
+        # The data type is an overloaded position, so the mangled name carries
+        # its suffix. LLVM accepts the bare "permlane16" and auto-upgrades it,
+        # but rewrites it to this on the way out, so the bare form is the one
+        # that would not survive a round trip.
         self.assertIn(
-            "declare i32 @llvm.amdgcn.permlane16"
+            "declare i32 @llvm.amdgcn.permlane16.i32"
             "(i32, i32, i32, i32, i1 immarg, i1 immarg)",
             ll,
         )
         self.assertIn(
-            "call i32 @llvm.amdgcn.permlane16"
+            "call i32 @llvm.amdgcn.permlane16.i32"
             "(i32 0, i32 1, i32 2, i32 3, i1 false, i1 false)",
             ll,
         )
@@ -2887,15 +3224,15 @@ class TestNewTargetIntrinsics(unittest.TestCase):
             ),
         )
         self.assertIn(
-            "call i32 @llvm.amdgcn.permlane16"
+            "call i32 @llvm.amdgcn.permlane16.i32"
             "(i32 0, i32 1, i32 2, i32 3, i1 true, i1 true)",
             ll,
         )
 
     def test_permlane64_emits_single_operand_call(self):
         ll = self._lower("pl64", lambda b: b.permlane64(b.const_i32(1)))
-        self.assertIn("declare i32 @llvm.amdgcn.permlane64(i32)", ll)
-        self.assertIn("call i32 @llvm.amdgcn.permlane64(i32 1)", ll)
+        self.assertIn("declare i32 @llvm.amdgcn.permlane64.i32(i32)", ll)
+        self.assertIn("call i32 @llvm.amdgcn.permlane64.i32(i32 1)", ll)
 
     def test_permlane32_swap_unpacks_struct_result(self):
         ll = self._lower(
@@ -2903,8 +3240,11 @@ class TestNewTargetIntrinsics(unittest.TestCase):
         )
         # Regression: the handler used to request a decl key without the
         # "amdgcn." prefix, so this declare went missing.
+        # No name suffix: unlike its permlane siblings this one is not
+        # overloaded. The flags are still immarg.
         self.assertIn(
-            "declare { i32, i32 } @llvm.amdgcn.permlane32.swap(i32, i32, i1, i1)",
+            "declare { i32, i32 } @llvm.amdgcn.permlane32.swap"
+            "(i32, i32, i1 immarg, i1 immarg)",
             ll,
         )
         self.assertIn(
@@ -2935,8 +3275,14 @@ class TestNewTargetIntrinsics(unittest.TestCase):
                     f"wqm_{suffix}",
                     lambda b, mk=mk: b.s_wqm(getattr(b, mk)(0xF)),
                 )
-                self.assertIn(f"declare {ty} @llvm.amdgcn.s.wqm.{suffix}({ty})", ll)
-                self.assertIn(f"call {ty} @llvm.amdgcn.s.wqm.{suffix}({ty} 15)", ll)
+                # Result and operand are separately overloaded, so the
+                # canonical name repeats the type: s.wqm.i32.i32.
+                self.assertIn(
+                    f"declare {ty} @llvm.amdgcn.s.wqm.{suffix}.{suffix}({ty})", ll
+                )
+                self.assertIn(
+                    f"call {ty} @llvm.amdgcn.s.wqm.{suffix}.{suffix}({ty} 15)", ll
+                )
 
     def test_s_wqm_rejects_narrow_mask(self):
         b = self._builder("wqm_bad")
@@ -3181,6 +3527,159 @@ class TestNewTargetIntrinsics(unittest.TestCase):
             b.global_load_async_to_lds(
                 src, b.const_i32(0), lds, [b.const_i32(0)], width_bytes=2
             )
+
+
+class TestBothBackendDifferentialGate(unittest.TestCase):
+    """``backend="both"`` must never answer with IR it did not compare.
+
+    This mode exists to catch the two engines emitting different bytes, so the
+    one thing it may not do is return the Python result when the C++ engine
+    failed: that reports an *uncompared* kernel as parity-verified, and it is
+    invisible -- the caller gets plausible IR and the suite goes green. So
+    every cpp-side failure propagates here. A failure on an arch named in
+    ``CPP_UNPORTED_ARCHES`` is relabelled ``BackendCoverageGap`` (the test layer
+    turns those into visible skips, see tests/conftest.py); anything else
+    surfaces as-is. That list is empty today -- gfx1250, the last entry, is
+    ported -- so the tests that need a gap install a stand-in arch.
+    """
+
+    def setUp(self):
+        from rocke.core import backend
+
+        self.backend = backend
+        backend.reset_cpp_fallbacks()
+        self._env = patch.dict("os.environ", {"ROCKE_BACKEND": "both"})
+        self._env.start()
+        self.addCleanup(self._env.stop)
+        self.addCleanup(backend.reset_cpp_fallbacks)
+
+    def _kernel(self):
+        b = IRBuilder("both_gate")
+        b.kernel.attrs["max_workgroup_size"] = 64
+        b.ret()
+        return b.kernel
+
+    def _run(self, cpp_result, arch=None):
+        """Dispatch with the cpp engine stubbed to ``cpp_result``."""
+
+        def python_lower(kernel, *, llvm_flavor=None, arch=None):
+            return "PYTHON IR\n"
+
+        def fake_cpp(ir_text, arch, llvm_flavor=None):
+            if isinstance(cpp_result, BaseException):
+                raise cpp_result
+            return cpp_result
+
+        with patch.object(self.backend, "_lower_via_cpp_engine", fake_cpp):
+            return self.backend.lower_kernel_via_backend(
+                self._kernel(), python_lower=python_lower, arch=arch
+            )
+
+    def test_agreement_returns_the_shared_text(self):
+        self.assertEqual(self._run("PYTHON IR\n"), "PYTHON IR\n")
+        self.assertEqual(self.backend.cpp_fallbacks(), [])
+
+    def test_differing_ir_raises_backend_mismatch(self):
+        with self.assertRaises(self.backend.BackendMismatch):
+            self._run("CPP IR\n")
+
+    def _with_gap(self, arch):
+        """Put ``arch`` on the gap list for one test.
+
+        The list is empty now that every arch is ported, so the relabelling
+        mechanism has to be exercised against a stand-in. Patching it here also
+        keeps these tests from having to change again the next time the list
+        does.
+        """
+        p = patch.object(self.backend, "CPP_UNPORTED_ARCHES", (arch,))
+        p.start()
+        self.addCleanup(p.stop)
+
+    def test_unported_arch_raises_a_coverage_gap_not_python_ir(self):
+        """A listed gap is still an exception -- never a substituted result."""
+        self._with_gap("gfxfuture")
+        gap = RuntimeError("unknown arch backend gfxfuture")
+        with self.assertRaises(self.backend.BackendCoverageGap) as ctx:
+            self._run(gap, arch="gfxfuture")
+        # The message has to name the arch and the underlying failure, since
+        # this is what the skip line in the run summary shows.
+        self.assertIn("gfxfuture", str(ctx.exception))
+        self.assertIn("unknown arch backend gfxfuture", str(ctx.exception))
+        # And nothing was logged as a fallback: no Python IR was handed out.
+        self.assertEqual(self.backend.cpp_fallbacks(), [])
+
+    def test_failure_on_a_ported_arch_is_not_excused_as_a_gap(self):
+        """Only arches on the named list get the gap treatment.
+
+        A gfx950 lowering failure is a regression in a path the C++ engine is
+        supposed to serve, so it must surface as the engine's own error rather
+        than be relabelled into something the suite skips.
+        """
+        boom = RuntimeError("internal engine failure")
+        with self.assertRaises(RuntimeError) as ctx:
+            self._run(boom, arch="gfx950")
+        self.assertNotIsInstance(ctx.exception, self.backend.BackendCoverageGap)
+        self.assertEqual(self.backend.cpp_fallbacks(), [])
+
+    def test_coverage_gap_is_a_backend_error(self):
+        """So a caller outside pytest can catch it with the normal base class."""
+        self.assertTrue(
+            issubclass(self.backend.BackendCoverageGap, self.backend.BackendError)
+        )
+
+    def test_every_arch_is_ported(self):
+        """The gap list is empty, so no kernel can reach the skip path.
+
+        gfx1250 was the last entry. With the list empty, every arch the Python
+        engine lowers is held to byte-identity by this lane -- a re-entry here
+        would silently convert a divergence into a skip, so the emptiness is
+        the property worth asserting.
+        """
+        self.assertEqual(self.backend.CPP_UNPORTED_ARCHES, ())
+
+    def test_cpp_engine_lowers_every_arch_python_wires(self):
+        """The invariant that replaced the gap list, checked against the engine.
+
+        With ``CPP_UNPORTED_ARCHES`` empty, "no gaps" is only an assertion about
+        a tuple. This checks the thing the tuple stands for: for every arch the
+        Python ISA registry wires, the C++ engine resolves a backend and emits
+        the same bytes. Wiring a new arch in Python without adding the two C++
+        backend rows (``rocke_ll_backend_for`` and the ISA ``REGISTRY``) fails
+        here instead of silently reintroducing a skip.
+        """
+        from rocke.core.backend import BackendError, _lower_via_cpp_engine, _text_diff
+        from rocke.core.ir_serialize import serialize
+        from rocke.core.isa.backend import wired_arches
+        from rocke.core.lower_llvm import lower_kernel_to_llvm
+
+        arches = wired_arches()
+        self.assertIn("gfx1250", arches)
+        for arch in arches:
+            with self.subTest(arch=arch):
+                kernel = self._kernel()
+                py_ir = lower_kernel_to_llvm(kernel, arch=arch)
+                try:
+                    cpp_ir = _lower_via_cpp_engine(serialize(kernel), arch, None)
+                except BackendError as e:
+                    self.skipTest(f"C++ engine unavailable: {e}")
+                self.assertEqual(
+                    cpp_ir,
+                    py_ir,
+                    f"engines disagree on {arch}:\n"
+                    + _text_diff("lowered AMDGPU .ll", py_ir, cpp_ir),
+                )
+
+    def test_flavor_rejection_is_never_swallowed(self):
+        """One engine rejecting a flavor the other took is a defect, not a gap."""
+        with self.assertRaises(ValueError):
+            self._run(ValueError("unknown LLVM flavor 'llvm24'"))
+        self.assertEqual(self.backend.cpp_fallbacks(), [])
+
+    def test_flavor_rejection_is_not_excused_on_an_unported_arch(self):
+        """Even on a listed arch a ValueError is a defect, not a coverage gap."""
+        self._with_gap("gfxfuture")
+        with self.assertRaises(ValueError):
+            self._run(ValueError("unknown LLVM flavor 'llvm24'"), arch="gfxfuture")
 
 
 class TestFusionPlanner(unittest.TestCase):

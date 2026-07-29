@@ -20,6 +20,7 @@
 #include "rocke/ir_internal.h"
 #include "rocke/lower_llvm_internal.h"
 
+#include <stdio.h>
 #include <string.h>
 
 namespace ckc
@@ -428,7 +429,7 @@ static void _op_tile_permlane16(rocke_lower_t* L, const rocke_op_t* op)
     bool bound_ctrl = rocke_attr_get_bool(&op->attrs, "bound_ctrl", false);
     rocke_ll_need(L, "amdgcn.permlane16");
     rocke_ll_emitf(L,
-                   "  %s = call i32 @llvm.amdgcn.permlane16("
+                   "  %s = call i32 @llvm.amdgcn.permlane16.i32("
                    "i32 %s, i32 %s, i32 %s, i32 %s, i1 %s, i1 %s)",
                    ll_result_name(op),
                    rocke_ll_operand(L, op->operands[0]),
@@ -443,7 +444,7 @@ static void _op_tile_permlane64(rocke_lower_t* L, const rocke_op_t* op)
 {
     rocke_ll_need(L, "amdgcn.permlane64");
     rocke_ll_emitf(L,
-                   "  %s = call i32 @llvm.amdgcn.permlane64(i32 %s)",
+                   "  %s = call i32 @llvm.amdgcn.permlane64.i32(i32 %s)",
                    ll_result_name(op),
                    rocke_ll_operand(L, op->operands[0]));
 }
@@ -471,10 +472,13 @@ static void _op_tile_s_wqm(rocke_lower_t* L, const rocke_op_t* op)
     else
         rocke_ll_fail(L, ROCKE_ERR_NOTIMPL, "s_wqm: unsupported type %s", mask->type->name);
     rocke_ll_need(L, key);
+    /* Two suffixes: result and operand are independently overloaded, even
+     * though the ISA only defines the matched-width pair. */
     rocke_ll_emitf(L,
-                   "  %s = call %s @llvm.amdgcn.s.wqm.%s(%s %s)",
+                   "  %s = call %s @llvm.amdgcn.s.wqm.%s.%s(%s %s)",
                    ll_result_name(op),
                    llvm_ty,
+                   mask->type->name,
                    mask->type->name,
                    llvm_ty,
                    rocke_ll_operand(L, mask));
@@ -626,7 +630,7 @@ static void _op_tile_permlanex16(rocke_lower_t* L, const rocke_op_t* op)
     rocke_ll_need(L, "amdgcn.permlanex16");
     src = rocke_ll_operand(L, v);
     rocke_ll_emitf(L,
-                   "  %s = call i32 @llvm.amdgcn.permlanex16("
+                   "  %s = call i32 @llvm.amdgcn.permlanex16.i32("
                    "i32 %s, i32 %s, i32 1985229328, i32 -19088744, "
                    "i1 false, i1 true)",
                    ll_result_name(op),
@@ -663,30 +667,75 @@ static void _op_tile_byte_perm(rocke_lower_t* L, const rocke_op_t* op)
 /* ds_read_tr16_b64 / ds_read_tr16_b128 / ds_read_tr_b8                   */
 /* ====================================================================== */
 
-/* Shared body for the b16 transpose reads (b64 = <4 x i16>, b128 = <8 x i16>).
- * Mirrors the two near-identical Python handlers. */
-static void ll_ds_read_tr16(rocke_lower_t* L,
-                            const rocke_op_t* op,
-                            const char* base_hint,
-                            const char* raw_hint,
-                            int vec,
-                            const char* intrin_key,
-                            const char* intrin_name)
+/* Python ISABackend.ds_tr16_b128_spec: the gfx950 opcode is type-agnostic --
+ * it returns <8 x i16> whatever the payload is, so the handler reinterprets. */
+bool rocke_ll_tr16_spec_b128_default(const char* elem_type, rocke_ll_tr16_spec_t* out)
+{
+    if(strcmp(elem_type, "bf16") != 0 && strcmp(elem_type, "f16") != 0
+       && strcmp(elem_type, "fp16") != 0)
+    {
+        return false;
+    }
+    out->decl_key = "ds.read.tr16.b128";
+    out->intrinsic = "llvm.amdgcn.ds.read.tr16.b128";
+    out->ret_ty = "<8 x i16>";
+    return true;
+}
+
+/* Python Gfx1250Backend.ds_tr16_b128_spec: the gfx1250 wave32 opcode is
+ * overloaded on the result element type. Select the one matching the op so an
+ * f16 read does not reinterpret a bf16 payload (and vice versa). */
+bool rocke_ll_tr16_spec_b128_gfx1250(const char* elem_type, rocke_ll_tr16_spec_t* out)
+{
+    if(strcmp(elem_type, "bf16") == 0)
+    {
+        out->decl_key = "ds.load.tr16.b128.v8bf16";
+        out->intrinsic = "llvm.amdgcn.ds.load.tr16.b128.v8bf16";
+        out->ret_ty = "<8 x bfloat>";
+        return true;
+    }
+    if(strcmp(elem_type, "f16") == 0 || strcmp(elem_type, "fp16") == 0)
+    {
+        out->decl_key = "ds.load.tr16.b128.v8f16";
+        out->intrinsic = "llvm.amdgcn.ds.load.tr16.b128.v8f16";
+        out->ret_ty = "<8 x half>";
+        return true;
+    }
+    return false;
+}
+
+/* Python self._backend.ds_tr16_b128_spec(elem_type), with the type-agnostic
+ * gfx950 opcode as the fallback when no backend is bound. */
+static bool
+    ll_backend_tr16_spec_b128(rocke_lower_t* L, const char* elem_type, rocke_ll_tr16_spec_t* out)
+{
+    if(L && L->backend && L->backend->ds_tr16_b128_spec)
+    {
+        return L->backend->ds_tr16_b128_spec(elem_type, out);
+    }
+    return rocke_ll_tr16_spec_b128_default(elem_type, out);
+}
+
+/* Shared prologue for the b16 transpose reads: emit the getelementptr that
+ * addresses the LDS slot and return its SSA name. The two handlers diverge
+ * after this (b64 always reinterprets a type-agnostic <4 x i16>; b128 asks the
+ * backend which opcode to use and only reinterprets if it has to), so only the
+ * address computation is shared. */
+static const char*
+    ll_ds_read_tr16_base(rocke_lower_t* L, const rocke_op_t* op, const char* base_hint)
 {
     const rocke_value_t* smem = op->operands[0];
     const char* gname;
     const rocke_type_t* stype = NULL;
     const char* agg_ty;
     const char* base;
-    const char* raw;
-    const char* elem_ty;
     rocke_strbuf_t gep;
     int i;
 
     gname = rocke_ll_smem_global_name(L, smem, &stype);
     if(!rocke_ll_live(L))
     {
-        return;
+        return NULL;
     }
     agg_ty = rocke_ll_smem_storage_type(L, stype);
     {
@@ -716,29 +765,81 @@ static void ll_ds_read_tr16(rocke_lower_t* L,
     }
     rocke_ll_emit(L, rocke_strbuf_cstr(&gep));
     rocke_strbuf_free(&gep);
-
-    rocke_ll_need(L, intrin_key);
-    raw = rocke_ll_fresh(L, raw_hint);
-    rocke_ll_emitf(L,
-                   "  %s = call <%d x i16> @llvm.amdgcn.%s(ptr addrspace(3) %s)",
-                   raw,
-                   vec,
-                   intrin_name,
-                   base);
-
-    elem_ty = rocke_ll_llvm_type(L, op->results[0]->type->elem);
-    rocke_ll_emitf(
-        L, "  %s = bitcast <%d x i16> %s to <%d x %s>", ll_result_name(op), vec, raw, vec, elem_ty);
+    return base;
 }
 
+/* ds_read_b64_tr_b16: the opcode is type-agnostic (<4 x i16>), so the payload
+ * is always reinterpreted as the op's element type. No backend dispatch --
+ * Python has none for the b64 form either. */
 static void _op_tile_ds_read_tr16_b64(rocke_lower_t* L, const rocke_op_t* op)
 {
-    ll_ds_read_tr16(L, op, "tr.base", "tr.raw", 4, "ds.read.tr16.b64", "ds.read.tr16.b64");
+    const char* base = ll_ds_read_tr16_base(L, op, "tr.base");
+    const char* raw;
+    const char* elem_ty;
+
+    if(!rocke_ll_live(L))
+    {
+        return;
+    }
+    rocke_ll_need(L, "ds.read.tr16.b64");
+    raw = rocke_ll_fresh(L, "tr.raw");
+    rocke_ll_emitf(
+        L, "  %s = call <4 x i16> @llvm.amdgcn.ds.read.tr16.b64(ptr addrspace(3) %s)", raw, base);
+    elem_ty = rocke_ll_llvm_type(L, op->results[0]->type->elem);
+    rocke_ll_emitf(L, "  %s = bitcast <4 x i16> %s to <4 x %s>", ll_result_name(op), raw, elem_ty);
 }
 
+/* ds_read_b128_tr_b16. The backend chooses the opcode: gfx950 has one
+ * type-agnostic <8 x i16> form that the payload is reinterpreted out of, while
+ * gfx1250 has per-element-type forms that land in the right type directly. */
 static void _op_tile_ds_read_tr16_b128(rocke_lower_t* L, const rocke_op_t* op)
 {
-    ll_ds_read_tr16(L, op, "trw.base", "trw.raw", 8, "ds.read.tr16.b128", "ds.read.tr16.b128");
+    const char* base = ll_ds_read_tr16_base(L, op, "trw.base");
+    const char* elem_name = "f16";
+    rocke_ll_tr16_spec_t spec;
+    const char* elem_ty;
+    char want_ty[32];
+
+    if(!rocke_ll_live(L))
+    {
+        return;
+    }
+    {
+        const char* attr = rocke_attr_get_str(&op->attrs, "elem_type");
+        if(attr)
+        {
+            elem_name = attr;
+        }
+    }
+    if(!ll_backend_tr16_spec_b128(L, elem_name, &spec))
+    {
+        rocke_ll_fail(L,
+                      ROCKE_ERR_NOTIMPL,
+                      "ds_load_tr16_b128 on %s supports f16/bf16 only, got elem_type='%s'",
+                      L->backend ? L->backend->gfx : "(unknown)",
+                      elem_name);
+        return;
+    }
+    rocke_ll_need(L, spec.decl_key);
+    elem_ty = rocke_ll_llvm_type(L, op->results[0]->type->elem);
+    snprintf(want_ty, sizeof(want_ty), "<8 x %s>", elem_ty);
+    if(strcmp(spec.ret_ty, want_ty) == 0)
+    {
+        rocke_ll_emitf(L,
+                       "  %s = call %s @%s(ptr addrspace(3) %s)",
+                       ll_result_name(op),
+                       spec.ret_ty,
+                       spec.intrinsic,
+                       base);
+        return;
+    }
+    {
+        const char* raw = rocke_ll_fresh(L, "trw.raw");
+        rocke_ll_emitf(
+            L, "  %s = call %s @%s(ptr addrspace(3) %s)", raw, spec.ret_ty, spec.intrinsic, base);
+        rocke_ll_emitf(
+            L, "  %s = bitcast %s %s to %s", ll_result_name(op), spec.ret_ty, raw, want_ty);
+    }
 }
 
 static void _op_tile_ds_read_tr_b8(rocke_lower_t* L, const rocke_op_t* op)

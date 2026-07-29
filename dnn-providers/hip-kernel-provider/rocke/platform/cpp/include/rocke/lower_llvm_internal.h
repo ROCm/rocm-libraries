@@ -64,11 +64,13 @@ extern const char* const ROCKE_LL_TRIPLE;
 const char* rocke_ll_datalayout_for_flavor(rocke_llvm_flavor_t flavor);
 
 /* Python _is_modern_flavor: true for LLVM 21+ IR shapes (llvm22 / llvm23),
- * which share the same datalayout + intrinsic declares. */
-static inline bool rocke_ll_flavor_is_modern(rocke_llvm_flavor_t flavor)
-{
-    return flavor == ROCKE_LLVM_FLAVOR_LLVM22 || flavor == ROCKE_LLVM_FLAVOR_LLVM23;
-}
+ * which share the same datalayout + intrinsic declares.
+ *
+ * Reads the datalayout-generation column of the flavor ladder in
+ * lower_llvm/core.cpp rather than naming the members here, mirroring Python,
+ * where the answer comes from _DATALAYOUT_KIND_FLAVORS. Spelling the pair out
+ * in an expression is what leaves a new flavor silently classed as legacy. */
+bool rocke_ll_flavor_is_modern(rocke_llvm_flavor_t flavor);
 
 /* CDNA buffer-resource-descriptor DWORD3 (Python ISABackend.buffer_rsrc_word3
  * == 0x00027000). RDNA word3 differs (0x31014000) -- see backend struct. */
@@ -141,14 +143,39 @@ extern const int ROCKE_LL_AV_B128_PTR_TYPES_COUNT;
  * matching tile.<op_id> CDNA handler.
  *
  * encode_waitcnt: -1 for a counter means "no wait" (architectural max). */
-/* RDNA-family discriminator for the lowering path. CDNA targets reject WMMA;
- * RDNA3/3.5 (gfx11) and RDNA4 (gfx12) emit WMMA. The gfx12 op_ids are distinct
- * (``wmma_gfx12_*``), so the kind only needs to separate CDNA from RDNA-any. */
+/* WMMA-capability discriminator for the lowering path. CDNA/MFMA targets
+ * reject WMMA; RDNA3/3.5 (gfx11), RDNA4 (gfx12) and gfx1250 emit it. Each
+ * family's op_ids are distinct (``wmma_*`` / ``wmma_gfx12_*`` /
+ * ``wmma_gfx1250_*``), so the kind only needs to separate "rejects WMMA" from
+ * "emits WMMA" -- the op_id picks the atom.
+ *
+ * gfx1250 is a CDNA part but is programmed on the GFX12 model, and Python
+ * models it the same way (Gfx1250Backend derives from Gfx12RdnaBackend). It is
+ * ROCKE_LL_ISA_RDNA here for exactly that reason: this enum is about who emits
+ * WMMA, not about the marketing family. */
 typedef enum rocke_ll_isa_kind
 {
     ROCKE_LL_ISA_CDNA = 0, /* gfx908/gfx90a/gfx942/gfx950 (MFMA)         */
-    ROCKE_LL_ISA_RDNA /* gfx11 / gfx12 (WMMA)                       */
+    ROCKE_LL_ISA_RDNA /* gfx11 / gfx12 / gfx1250 (WMMA)             */
 } rocke_ll_isa_kind_t;
+
+/* Forward declaration: the backend struct below carries emit hooks that take
+ * the lowerer, and the lowerer struct (defined further down) carries a pointer
+ * to a backend, so one of the two has to be named before it is complete. */
+typedef struct rocke_lower rocke_lower_t;
+
+/* The (decl_key, intrinsic, return type) triple a ds_read_tr16_b128 lowering
+ * needs. Python ISABackend.ds_tr16_b128_spec returns the same 3-tuple.
+ * `ret_ty` is the intrinsic's LLVM return type: "<8 x i16>" on the
+ * type-agnostic gfx950 opcode (the handler then bitcasts to the op's element
+ * type) or "<8 x half>" / "<8 x bfloat>" on gfx1250, where the opcode is
+ * overloaded on the element type and no reinterpret is needed. */
+typedef struct rocke_ll_tr16_spec
+{
+    const char* decl_key;
+    const char* intrinsic;
+    const char* ret_ty;
+} rocke_ll_tr16_spec_t;
 
 typedef struct rocke_isa_backend
 {
@@ -159,12 +186,26 @@ typedef struct rocke_isa_backend
     int (*encode_waitcnt)(int vmcnt, int expcnt, int lgkmcnt);
     rocke_ll_isa_kind_t kind; /* CDNA (reject WMMA) vs RDNA (emit WMMA)      */
     /* Python ISABackend.has_async_lds_counter: the gfx1250 dedicated async-DMA
-     * counter (s_wait_asynccnt + global_load_async_to_lds). False on every
-     * backend registered here -- no gfx1250 row exists yet (see the NAMED GAP
-     * in mma.cpp) -- so s_wait_asynccnt lowers to nothing. Declared as a
+     * counter (s_wait_asynccnt + global_load_async_to_lds). True only on
+     * gfx1250; elsewhere s_wait_asynccnt lowers to nothing. Declared as a
      * backend fact rather than tested by gfx-string prefix so the capability
      * has one definition site per backend, as in Python. */
     bool has_async_lds_counter;
+    /* Python ISABackend.emits_legacy_s_waitcnt. gfx1250 replaced the
+     * monolithic s_waitcnt with split counters (s_wait_dscnt / s_wait_loadcnt
+     * / ...) and llvm.amdgcn.s.waitcnt is NOT selectable there, so tile.s_waitcnt
+     * must emit nothing rather than an instruction the backend cannot select. */
+    bool emits_legacy_s_waitcnt;
+    /* Python ISABackend.emit_lds_barrier_drain: the memory wait that has to
+     * precede an LDS workgroup barrier. A function pointer because the two
+     * families emit different *text*, not a different immediate --
+     * gfx9/10/11 emit one monolithic s_waitcnt, gfx1250 emits split
+     * s_wait_loadcnt / s_wait_dscnt calls. */
+    void (*emit_lds_barrier_drain)(rocke_lower_t* L, bool drain_vmem);
+    /* Python ISABackend.ds_tr16_b128_spec. Returns false when the element type
+     * is one the opcode cannot carry (the caller then fails with the same
+     * message Python raises). */
+    bool (*ds_tr16_b128_spec)(const char* elem_type, rocke_ll_tr16_spec_t* out);
 } rocke_isa_backend_t;
 
 /* Resolve a gfx string to its backend (Python backend_for). NULL => "gfx950".
@@ -176,6 +217,18 @@ const rocke_isa_backend_t* rocke_ll_backend_for(const char* arch, rocke_status_t
  * lowering path uses gfx9_10. */
 int rocke_ll_encode_waitcnt_gfx9_10(int vmcnt, int expcnt, int lgkmcnt);
 int rocke_ll_encode_waitcnt_gfx11(int vmcnt, int expcnt, int lgkmcnt);
+
+/* The two LDS-barrier drains (Python ISABackend.emit_lds_barrier_drain and the
+ * Gfx1250Backend override). Defined in the control bucket alongside the
+ * barrier handlers that call them through the backend. */
+void rocke_ll_emit_lds_barrier_drain_legacy(rocke_lower_t* L, bool drain_vmem);
+void rocke_ll_emit_lds_barrier_drain_split(rocke_lower_t* L, bool drain_vmem);
+
+/* The two ds_read_tr16_b128 opcode selections (Python
+ * ISABackend.ds_tr16_b128_spec and the Gfx1250Backend override). Defined in
+ * the crosslane bucket alongside the handler. */
+bool rocke_ll_tr16_spec_b128_default(const char* elem_type, rocke_ll_tr16_spec_t* out);
+bool rocke_ll_tr16_spec_b128_gfx1250(const char* elem_type, rocke_ll_tr16_spec_t* out);
 
 /* ====================================================================== */
 /* Block / CFG model (Python _Block)                                      */
@@ -235,7 +288,7 @@ typedef struct rocke_ll_need
 /* The full lowerer state. Allocated on the stack of the entry point; its arena
  * owns every transient string/array. The strbuf `out` (in finalize) is the one
  * heap buffer. */
-typedef struct rocke_lower
+struct rocke_lower
 {
     rocke_arena_t arena; /* owns blocks, lines, fresh names    */
     const rocke_kernel_def_t* kernel;
@@ -279,7 +332,7 @@ typedef struct rocke_lower
     /* sticky error (the lowerer has no builder to carry it). */
     rocke_status_t status;
     char* err; /* arena-owned, ROCKE_ERR_MSG_CAP cap   */
-} rocke_lower_t;
+}; /* rocke_lower_t typedef'd forward, above the backend struct */
 
 /* ====================================================================== */
 /* Error model                                                            */

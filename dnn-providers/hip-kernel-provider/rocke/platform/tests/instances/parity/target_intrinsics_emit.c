@@ -37,29 +37,42 @@ static rocke_value_t*
  * the same IR under different SSA names -- a byte mismatch with no real defect
  * behind it. */
 
-/* Async global->LDS copy into the SECOND of two LDS allocations, so the
- * destination sits at a non-zero offset in the unified smem pool. */
+/* Async global->LDS copy into each of two LDS allocations, so the second
+ * destination sits at a non-zero offset in the unified smem pool. Both are
+ * copied into because a dead allocation is dropped from the pool, which would
+ * put stageB back at offset 0 and skip the base-pointer hop entirely. */
 static void build_async_lds_two_allocs(rocke_ir_builder_t* b)
 {
     rocke_value_t* src = global_ptr_param(b, "src", rocke_i32(), 16);
     const int shape_a[] = {64};
     const int shape_b[] = {64, 4};
-    rocke_value_t* dst;
+    rocke_value_t* stage_a;
+    rocke_value_t* stage_b;
     rocke_value_t* tid;
     rocke_value_t* zero;
-    rocke_value_t* idx[2];
-    /* The first allocation exists only to push the second off pool offset 0. */
-    rocke_b_smem_alloc(b, rocke_i32(), shape_a, 1, "stageA");
-    dst = rocke_b_smem_alloc(b, rocke_i32(), shape_b, 2, "stageB");
+    rocke_value_t* idx_a[1];
+    rocke_value_t* idx_b[2];
+    stage_a = rocke_b_smem_alloc(b, rocke_i32(), shape_a, 1, "stageA");
+    stage_b = rocke_b_smem_alloc(b, rocke_i32(), shape_b, 2, "stageB");
     tid = rocke_b_thread_id_x(b);
     zero = rocke_b_const_i32(b, 0);
-    idx[0] = tid;
-    idx[1] = zero;
+    idx_a[0] = tid;
+    idx_b[0] = tid;
+    idx_b[1] = zero;
     rocke_b_global_load_async_to_lds(b,
                                      src,
                                      tid,
-                                     dst,
-                                     idx,
+                                     stage_a,
+                                     idx_a,
+                                     /*num_lds_indices=*/1,
+                                     /*width_bytes=*/16,
+                                     /*coherency=*/ROCKE_PARITY_CACHE_STREAM,
+                                     /*offset_bytes=*/0);
+    rocke_b_global_load_async_to_lds(b,
+                                     src,
+                                     tid,
+                                     stage_b,
+                                     idx_b,
                                      /*num_lds_indices=*/2,
                                      /*width_bytes=*/16,
                                      /*coherency=*/ROCKE_PARITY_CACHE_STREAM,

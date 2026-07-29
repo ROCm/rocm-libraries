@@ -248,11 +248,15 @@ void case_permlane16()
                            false,
                            false);
     });
+    /* The data type is an overloaded position, so the mangled name carries its
+     * suffix. LLVM accepts the bare "permlane16" and auto-upgrades it, but
+     * rewrites it to this on the way out, so the bare form is the one that
+     * would not survive a round trip. */
     EXPECT_IR(ir,
-              "declare i32 @llvm.amdgcn.permlane16"
+              "declare i32 @llvm.amdgcn.permlane16.i32"
               "(i32, i32, i32, i32, i1 immarg, i1 immarg)");
     EXPECT_IR(ir,
-              "call i32 @llvm.amdgcn.permlane16"
+              "call i32 @llvm.amdgcn.permlane16.i32"
               "(i32 0, i32 1, i32 2, i32 3, i1 false, i1 false)");
 }
 
@@ -268,7 +272,7 @@ void case_permlane16_flags()
                            true);
     });
     EXPECT_IR(ir,
-              "call i32 @llvm.amdgcn.permlane16"
+              "call i32 @llvm.amdgcn.permlane16.i32"
               "(i32 0, i32 1, i32 2, i32 3, i1 true, i1 true)");
 }
 
@@ -276,8 +280,8 @@ void case_permlane64()
 {
     const std::string ir = lower_one(
         "pl64", [](rocke_ir_builder_t* b) { rocke_b_permlane64(b, rocke_b_const_i32(b, 1)); });
-    EXPECT_IR(ir, "declare i32 @llvm.amdgcn.permlane64(i32)");
-    EXPECT_IR(ir, "call i32 @llvm.amdgcn.permlane64(i32 1)");
+    EXPECT_IR(ir, "declare i32 @llvm.amdgcn.permlane64.i32(i32)");
+    EXPECT_IR(ir, "call i32 @llvm.amdgcn.permlane64.i32(i32 1)");
 }
 
 void case_permlane32_swap()
@@ -287,7 +291,11 @@ void case_permlane32_swap()
         rocke_value_t* hi = nullptr;
         rocke_b_permlane32_swap(b, rocke_b_const_i32(b, 1), rocke_b_const_i32(b, 2), &lo, &hi);
     });
-    EXPECT_IR(ir, "declare { i32, i32 } @llvm.amdgcn.permlane32.swap(i32, i32, i1, i1)");
+    /* No name suffix: unlike its permlane siblings this one is not overloaded.
+     * The flags are still immarg. */
+    EXPECT_IR(ir,
+              "declare { i32, i32 } @llvm.amdgcn.permlane32.swap"
+              "(i32, i32, i1 immarg, i1 immarg)");
     EXPECT_IR(ir,
               "call { i32, i32 } @llvm.amdgcn.permlane32.swap"
               "(i32 1, i32 2, i1 false, i1 false)");
@@ -310,13 +318,15 @@ void case_s_wqm()
 {
     const std::string i32_ir = lower_one(
         "wqm_i32", [](rocke_ir_builder_t* b) { rocke_b_s_wqm(b, rocke_b_const_i32(b, 0xF)); });
-    EXPECT_IR(i32_ir, "declare i32 @llvm.amdgcn.s.wqm.i32(i32)");
-    EXPECT_IR(i32_ir, "call i32 @llvm.amdgcn.s.wqm.i32(i32 15)");
+    /* Result and operand are separately overloaded, so the canonical name
+     * repeats the type: s.wqm.i32.i32. */
+    EXPECT_IR(i32_ir, "declare i32 @llvm.amdgcn.s.wqm.i32.i32(i32)");
+    EXPECT_IR(i32_ir, "call i32 @llvm.amdgcn.s.wqm.i32.i32(i32 15)");
 
     const std::string i64_ir = lower_one(
         "wqm_i64", [](rocke_ir_builder_t* b) { rocke_b_s_wqm(b, rocke_b_const_i64(b, 0xF)); });
-    EXPECT_IR(i64_ir, "declare i64 @llvm.amdgcn.s.wqm.i64(i64)");
-    EXPECT_IR(i64_ir, "call i64 @llvm.amdgcn.s.wqm.i64(i64 15)");
+    EXPECT_IR(i64_ir, "declare i64 @llvm.amdgcn.s.wqm.i64.i64(i64)");
+    EXPECT_IR(i64_ir, "call i64 @llvm.amdgcn.s.wqm.i64.i64(i64 15)");
 }
 
 /* ---- av.load / av.store (agent-scope 128-bit vector mem) ---- */

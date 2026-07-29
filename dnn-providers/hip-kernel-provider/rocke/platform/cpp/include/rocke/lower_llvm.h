@@ -59,6 +59,16 @@ const char* rocke_llvm_flavor_name(rocke_llvm_flavor_t flavor);
  * unknown. */
 rocke_llvm_flavor_t rocke_llvm_flavor_from_name(const char* name);
 
+/* Enumerate the concrete (non-AUTO) flavors, oldest first, so a caller can
+ * build a message or a list without restating the set. Adding a flavor is
+ * then one table row in lower_llvm/core.cpp plus the enumerator above --
+ * mirroring the Python side, where LLVM_FLAVORS is the single source and a
+ * lint forbids hand-rolled membership lists. Index is [0, count). */
+int rocke_llvm_flavor_count(void);
+const char* rocke_llvm_flavor_at(int index);
+/* True for a concrete flavor; false for AUTO or an out-of-range value. */
+bool rocke_llvm_flavor_is_known(rocke_llvm_flavor_t flavor);
+
 /* ------------------------------------------------------------ entry point */
 
 /* Lower `kernel` to AMDGPU LLVM IR text.

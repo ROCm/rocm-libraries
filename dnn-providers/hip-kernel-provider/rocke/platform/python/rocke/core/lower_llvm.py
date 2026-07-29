@@ -120,8 +120,10 @@ LLVM_FLAVOR_LLVM23 = "llvm23"
 # Every flavor rocke can emit, oldest first. This is the SSOT every flavor
 # membership test must go through -- validating against a hand-rolled tuple is
 # how ``llvm23`` was silently rejected by the C++ backend path while the Python
-# path accepted it. ``test_llvm_flavors_enumeration_is_ssot`` pins that no such
-# private list reappears.
+# path accepted it. ``test_no_hand_rolled_flavor_membership_lists`` pins that no
+# such private list reappears, and
+# ``test_cpp_engine_accepts_exactly_the_python_flavor_set`` pins that the C++
+# engine's ladder still matches this tuple.
 LLVM_FLAVORS: Tuple[str, ...] = (
     LLVM_FLAVOR_LLVM20,
     LLVM_FLAVOR_LLVM22,
@@ -799,16 +801,21 @@ _INTRINSIC_DECLS: Dict[str, str] = {
     # wave64 softmax reduction (combining the lo-32 and hi-32 lane half
     # partial reductions). Returns a struct holding both swapped values
     # so a single call covers BOTH register exchanges.
+    # Not overloaded, so the name needs no suffix, but the two flags are
+    # immarg like every other permlane* flag pair.
     "amdgcn.permlane32.swap": (
-        "declare { i32, i32 } @llvm.amdgcn.permlane32.swap(i32, i32, i1, i1)"
+        "declare { i32, i32 } @llvm.amdgcn.permlane32.swap("
+        "i32, i32, i1 immarg, i1 immarg)"
     ),
     # gfx11 ``v_permlanex16_b32`` — swap each lane with its ``lane ^ 16``
     # partner within a 32-lane group via a permute network (NOT the LDS
     # unit). One VALU op; this is the cheap cross-half vehicle CK's gfx11
     # FMHA pipelines use for the WMMA C->A transpose. Args:
     # (old, src, sel_lo, sel_hi, fi, bound_ctrl).
+    # Overloaded on the data type like permlane16; see that entry.
     "amdgcn.permlanex16": (
-        "declare i32 @llvm.amdgcn.permlanex16(i32, i32, i32, i32, i1, i1)"
+        "declare i32 @llvm.amdgcn.permlanex16.i32("
+        "i32, i32, i32, i32, i1 immarg, i1 immarg)"
     ),
     # gfx950 ``v_mfma_f32_32x32x16_bf16`` — wider MFMA shape (32x32
     # output × 16-K) than the 16x16x32 we use elsewhere. Same FLOPs
@@ -896,14 +903,20 @@ _INTRINSIC_DECLS: Dict[str, str] = {
     "writelane.i32": "declare i32 @llvm.amdgcn.writelane.i32(i32, i32, i32)",
     "writelane.f32": "declare float @llvm.amdgcn.writelane.f32(float, i32, float)",
     # --- Permute / WQM / byte align ---
+    # permlane16/64 and s.wqm are overloaded on their value type, so LLVM
+    # mangles a suffix per overloaded position: one for permlane* (the data
+    # type), two for s.wqm (result and operand are separately overloaded).
+    # The unmangled spellings parse -- LLVM auto-upgrades them -- but they do
+    # not survive a round trip, so emitting them makes the canonical form the
+    # odd one out and any test pinning it fail.
     "amdgcn.permlane16": (
-        "declare i32 @llvm.amdgcn.permlane16("
+        "declare i32 @llvm.amdgcn.permlane16.i32("
         "i32, i32, i32, i32, i1 immarg, i1 immarg)"
     ),
-    "amdgcn.permlane64": "declare i32 @llvm.amdgcn.permlane64(i32)",
+    "amdgcn.permlane64": "declare i32 @llvm.amdgcn.permlane64.i32(i32)",
     "amdgcn.alignbyte": "declare i32 @llvm.amdgcn.alignbyte(i32, i32, i32)",
-    "amdgcn.s.wqm.i64": "declare i64 @llvm.amdgcn.s.wqm.i64(i64)",
-    "amdgcn.s.wqm.i32": "declare i32 @llvm.amdgcn.s.wqm.i32(i32)",
+    "amdgcn.s.wqm.i64": "declare i64 @llvm.amdgcn.s.wqm.i64.i64(i64)",
+    "amdgcn.s.wqm.i32": "declare i32 @llvm.amdgcn.s.wqm.i32.i32(i32)",
     # --- Aligned vector 128b loads (LLVM 23) ---
     # ``av.load/store.b128`` take an ``llvm_anyptr_ty`` pointer (flat or global
     # only, per AMDGPUUsage), so the overload is mangled by address space; see
@@ -3428,7 +3441,7 @@ class _Lowerer:
         bound_ctrl = "true" if op.attrs.get("bound_ctrl", False) else "false"
         self._need("amdgcn.permlane16")
         self._current().emit(
-            f"  {op.result.name} = call i32 @llvm.amdgcn.permlane16("
+            f"  {op.result.name} = call i32 @llvm.amdgcn.permlane16.i32("
             f"i32 {self._operand(old)}, i32 {self._operand(src0)}, "
             f"i32 {self._operand(src1)}, i32 {self._operand(src2)}, "
             f"i1 {fi}, i1 {bound_ctrl})"
@@ -3438,7 +3451,7 @@ class _Lowerer:
         (src,) = op.operands
         self._need("amdgcn.permlane64")
         self._current().emit(
-            f"  {op.result.name} = call i32 @llvm.amdgcn.permlane64("
+            f"  {op.result.name} = call i32 @llvm.amdgcn.permlane64.i32("
             f"i32 {self._operand(src)})"
         )
 
@@ -3458,9 +3471,12 @@ class _Lowerer:
             raise NotImplementedError(f"s_wqm: unsupported type {ty_name!r}")
         llvm_ty = _llvm_type(mask.type)
         self._need(f"amdgcn.s.wqm.{ty_name}")
+        # Two suffixes: result and operand are independently overloaded, even
+        # though the ISA only defines the matched-width pair.
         self._current().emit(
             f"  {op.result.name} = call {llvm_ty} "
-            f"@llvm.amdgcn.s.wqm.{ty_name}({llvm_ty} {self._operand(mask)})"
+            f"@llvm.amdgcn.s.wqm.{ty_name}.{ty_name}"
+            f"({llvm_ty} {self._operand(mask)})"
         )
 
     def _op_tile_av_load_b128(self, op: Op) -> None:
@@ -3552,7 +3568,7 @@ class _Lowerer:
         self._need("amdgcn.permlanex16")
         src = self._operand(v)
         self._current().emit(
-            f"  {op.result.name} = call i32 @llvm.amdgcn.permlanex16("
+            f"  {op.result.name} = call i32 @llvm.amdgcn.permlanex16.i32("
             f"i32 {src}, i32 {src}, i32 1985229328, i32 -19088744, "
             f"i1 false, i1 true)"
         )

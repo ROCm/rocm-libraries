@@ -290,9 +290,13 @@ const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS[] = {
     {"amdgcn.cvt.scalef32.pk.bf8.f32",
      "declare i32 @llvm.amdgcn.cvt.scalef32.pk.bf8.f32(i32, <2 x float>, float, i1)"},
     {"amdgcn.ds.swizzle", "declare i32 @llvm.amdgcn.ds.swizzle(i32, i32 immarg)"},
+    /* Not overloaded, so no name suffix, but the flags are immarg like every
+     * other permlane* flag pair. */
     {"amdgcn.permlane32.swap",
-     "declare { i32, i32 } @llvm.amdgcn.permlane32.swap(i32, i32, i1, i1)"},
-    {"amdgcn.permlanex16", "declare i32 @llvm.amdgcn.permlanex16(i32, i32, i32, i32, i1, i1)"},
+     "declare { i32, i32 } @llvm.amdgcn.permlane32.swap(i32, i32, i1 immarg, i1 immarg)"},
+    /* Overloaded on the data type; see the amdgcn.permlane16 note below. */
+    {"amdgcn.permlanex16",
+     "declare i32 @llvm.amdgcn.permlanex16.i32(i32, i32, i32, i32, i1 immarg, i1 immarg)"},
     {"mfma.f32.32x32x16.bf16",
      "declare <16 x float> @llvm.amdgcn.mfma.f32.32x32x16.bf16(<8 x bfloat>, <8 x bfloat>, <16 x "
      "float>, i32 immarg, i32 immarg, i32 immarg)"},
@@ -327,12 +331,18 @@ const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS[] = {
     {"readlane.f32", "declare float @llvm.amdgcn.readlane.f32(float, i32)"},
     {"writelane.i32", "declare i32 @llvm.amdgcn.writelane.i32(i32, i32, i32)"},
     {"writelane.f32", "declare float @llvm.amdgcn.writelane.f32(float, i32, float)"},
+    /* permlane16/64 and s.wqm are overloaded on their value type, so LLVM
+     * mangles a suffix per overloaded position: one for permlane* (the data
+     * type), two for s.wqm (result and operand are separately overloaded).
+     * The unmangled spellings parse -- LLVM auto-upgrades them -- but they do
+     * not survive a round trip, so emitting them makes the canonical form the
+     * odd one out and any test pinning it fail. Mirrors Python. */
     {"amdgcn.permlane16",
-     "declare i32 @llvm.amdgcn.permlane16(i32, i32, i32, i32, i1 immarg, i1 immarg)"},
-    {"amdgcn.permlane64", "declare i32 @llvm.amdgcn.permlane64(i32)"},
+     "declare i32 @llvm.amdgcn.permlane16.i32(i32, i32, i32, i32, i1 immarg, i1 immarg)"},
+    {"amdgcn.permlane64", "declare i32 @llvm.amdgcn.permlane64.i32(i32)"},
     {"amdgcn.alignbyte", "declare i32 @llvm.amdgcn.alignbyte(i32, i32, i32)"},
-    {"amdgcn.s.wqm.i64", "declare i64 @llvm.amdgcn.s.wqm.i64(i64)"},
-    {"amdgcn.s.wqm.i32", "declare i32 @llvm.amdgcn.s.wqm.i32(i32)"},
+    {"amdgcn.s.wqm.i64", "declare i64 @llvm.amdgcn.s.wqm.i64.i64(i64)"},
+    {"amdgcn.s.wqm.i32", "declare i32 @llvm.amdgcn.s.wqm.i32.i32(i32)"},
     /* av.load/store.b128 are llvm_anyptr_ty too; see the s.prefetch.inst note
      * below and ROCKE_LL_AV_B128_PTR_TYPES. */
     {"av.load.b128.p0", "declare <4 x i32> @llvm.amdgcn.av.load.b128.p0(ptr, metadata)"},
