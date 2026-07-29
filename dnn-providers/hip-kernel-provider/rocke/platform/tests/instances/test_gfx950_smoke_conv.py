@@ -1,10 +1,11 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""gfx950 GPU smoke tests for the implicit-GEMM forward convolution benchmark.
+"""gfx950 GPU smoke tests for the implicit-GEMM convolution benchmark.
 
-Tests bf16 and fp32 dtypes. Each test method runs the benchmark sweep with
---verify (the benchmark itself prints PASS/FAIL per kernel) and checks TFLOPS
-against the committed baseline in rocke_gfx950_smoke_perf.json.
+Tests bf16 and fp32 dtypes for forward (fwd) and backward-data (dgrad)
+directions. Each test method runs the benchmark sweep with --verify (the
+benchmark itself prints PASS/FAIL per kernel) and checks TFLOPS against the
+committed baseline in rocke_gfx950_smoke_perf.json.
 
 Run on a gfx950 ROCm runner:
   HIP_VISIBLE_DEVICES=0 PYTHONPATH=rocke/platform/python \
@@ -51,19 +52,32 @@ class TestGfx950ConvSmoke(unittest.TestCase):
         else _DEFAULT_BASELINE.read_text()
     )
 
-    def _run_benchmark(self, dtype: str, timeout: int = 600) -> str:
+    def _run_benchmark(
+        self, dtype: str, direction: str = "fwd", timeout: int = 600
+    ) -> str:
         env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
+        cmd = [
+            sys.executable,
+            "-m",
+            "rocke.benchmark.benchmark_implicit_gemm_conv",
+            "--arch",
+            "gfx950",
+            "--dtype",
+            dtype,
+            "--direction",
+            direction,
+            "--sample",
+            "0.05",
+            "--warmup",
+            "3",
+            "--iters",
+            "5",
+            "--verify",
+        ]
+        if direction in ("wgrad", "dgrad"):
+            cmd += ["--split-k", "-1"]
         proc = subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "rocke.benchmark.benchmark_implicit_gemm_conv",
-                "--arch",
-                "gfx950",
-                "--dtype",
-                dtype,
-                "--verify",
-            ],
+            cmd,
             env=env,
             capture_output=True,
             text=True,
@@ -73,13 +87,14 @@ class TestGfx950ConvSmoke(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, out[-3500:])
         return out
 
-    def _verify_and_sweep(self, dtype: str, baseline_key: str):
-        out = self._run_benchmark(dtype)
+    def _verify_and_sweep(
+        self, dtype: str, baseline_key: str, direction: str = "fwd"
+    ):
+        out = self._run_benchmark(dtype, direction=direction)
 
-        # TODO: Reenable
-        # self.assertNotIn(
-        #     "FAIL", out, f"conv {dtype} correctness failure:\n{out[-3500:]}"
-        # )
+        self.assertNotIn(
+            "FAIL", out, f"conv {dtype} correctness failure:\n{out[-3500:]}"
+        )
 
         match = re.search(r"^\s*1\s+([\d.]+)", out, re.MULTILINE)
         self.assertIsNotNone(match, f"no results in benchmark output:\n{out[-2000:]}")
@@ -100,6 +115,20 @@ class TestGfx950ConvSmoke(unittest.TestCase):
 
     def test_conv_fp32(self):
         self._verify_and_sweep("fp32", "conv_fwd_fp32_gfx950_N8H56W56C64K64R3S3")
+
+    def test_conv_dgrad_bf16(self):
+        self._verify_and_sweep(
+            "bf16",
+            "conv_dgrad_bf16_gfx950_N8H56W56C64K64R3S3",
+            direction="dgrad",
+        )
+
+    def test_conv_dgrad_fp32(self):
+        self._verify_and_sweep(
+            "fp32",
+            "conv_dgrad_fp32_gfx950_N8H56W56C64K64R3S3",
+            direction="dgrad",
+        )
 
 
 if __name__ == "__main__":

@@ -2,9 +2,9 @@
 # SPDX-License-Identifier: MIT
 """Tile/pipeline sweep benchmark for implicit-GEMM convolution (gfx950).
 
-Supports both the forward pass (NHWC × KYXC → NHWK) and the backward-weight
-(wgrad) pass (dY × X → dW).  Select with ``--direction fwd`` (default) or
-``--direction wgrad``.
+Supports forward (NHWC × KYXC → NHWK), backward-weight (wgrad, dY × X → dW),
+and backward-data (dgrad, dY × W → dX) directions.  Select with
+``--direction fwd`` (default), ``--direction wgrad``, or ``--direction dgrad``.
 
 Builds every valid combination of tile / warp / pipeline / epilogue parameters,
 runs each on GPU, and reports the best configuration ranked by TFLOPS.
@@ -129,6 +129,30 @@ def _grid_for_wgrad_spec(spec, split_k: int):
     tile_m, tile_n = spec.tile_m, spec.tile_n
     gx = (spec.wg_N + tile_n - 1) // tile_n
     gy = (spec.wg_M + tile_m - 1) // tile_m
+    return (gx, gy, split_k)
+
+
+def _get_vector_sizes_dgrad(C: int, K: int, dtype: str):
+    """Per-operand vector widths for the dgrad direction.
+
+    Last memory dimension of each dgrad operand:
+      A = dY  NHWK  → last dim K  → vec_a
+      B = W   KYXC  → last dim C  → vec_b
+      D = dX  NHWC  → last dim C  → vec_c
+    """
+
+    def _vec(n: int) -> int:
+        sizes = [8, 4, 2, 1] if dtype != "fp32" else [4, 2, 1]
+        return next(v for v in sizes if n % v == 0)
+
+    return _vec(K), _vec(C), _vec(C)
+
+
+def _grid_for_dgrad_spec(spec, split_k: int):
+    """Derive launch grid from dgrad spec and split-K degree."""
+    tile_m, tile_n = spec.tile_m, spec.tile_n
+    gx = (spec.dg_N + tile_n - 1) // tile_n
+    gy = (spec.dg_M + tile_m - 1) // tile_m
     return (gx, gy, split_k)
 
 
@@ -340,8 +364,8 @@ def main() -> int:
     parser.add_argument(
         "--direction",
         default="fwd",
-        choices=["fwd", "wgrad"],
-        help="convolution direction: forward (fwd) or backward-weight (wgrad) (default: fwd)",
+        choices=["fwd", "wgrad", "dgrad"],
+        help="convolution direction: forward (fwd), backward-weight (wgrad), or backward-data (dgrad) (default: fwd)",
     )
     parser.add_argument(
         "--arch",
@@ -488,6 +512,11 @@ def main() -> int:
         build_implicit_gemm_conv_wgrad,
         is_valid_wgrad_spec,
     )
+    from rocke.instances.common.conv_implicit_gemm_dgrad import (
+        DgradConvSpec,
+        build_implicit_gemm_conv_dgrad,
+        is_valid_dgrad_spec,
+    )
     from rocke.runtime import synchronize_and_release, time_launches
     from rocke.runtime.hip_module import Runtime
     from rocke.runtime.launcher import KernelLauncher, LaunchConfig
@@ -573,6 +602,13 @@ def main() -> int:
                 WgradConvSpec=WgradConvSpec,
                 build_implicit_gemm_conv_wgrad=build_implicit_gemm_conv_wgrad,
                 is_valid_wgrad_spec=is_valid_wgrad_spec,
+            )
+        elif args.direction == "dgrad":
+            rc = _run_dgrad_sweep(
+                **_common,
+                DgradConvSpec=DgradConvSpec,
+                build_implicit_gemm_conv_dgrad=build_implicit_gemm_conv_dgrad,
+                is_valid_dgrad_spec=is_valid_dgrad_spec,
             )
         else:
             rc = _run_sweep(
@@ -1170,6 +1206,368 @@ def _run_wgrad_sweep(
 
     print(f"\n{'='*72}")
     print(f"Top {top_n} wgrad configurations for {arch} {dtype} {p.short()}")
+    print(f"{'='*72}")
+    hdr = f"{'rank':>4}  {'TFLOPS':>7}  {'ms':>8}  {'GBps':>7}  config"
+    print(hdr)
+    print("-" * 72)
+    for rank, r in enumerate(results[:top_n], 1):
+        cfg_str = (
+            f"tile={r.tile_m}x{r.tile_n}x{r.tile_k} "
+            f"warp={r.warp_m}x{r.warp_n} "
+            f"atom={r.warp_tile_mn}x{r.warp_tile_mn}x{r.warp_tile_k} "
+            f"{r.pipeline}/{r.epilogue} spk{r.split_k}"
+        )
+        print(f"{rank:>4}  {r.tflops:>7.1f}  {r.ms:>8.3f}  {r.gbps:>7.1f}  {cfg_str}")
+
+    best = results[0]
+    print(f"\nBest: {best.tflops:.1f} TFLOPS — {best.kernel_name}")
+    return 0
+
+
+def _run_dgrad_sweep(
+    *,
+    args,
+    problem,
+    dtype: str,
+    arch: str,
+    target,
+    compile_kernel,
+    ConvDataSpec,
+    DgradConvSpec,
+    build_implicit_gemm_conv_dgrad,
+    is_valid_dgrad_spec,
+    synchronize_and_release,
+    time_launches,
+    Runtime,
+    KernelLauncher,
+    LaunchConfig,
+    u8,
+    **_ignored,
+) -> int:
+    """Sweep dgrad configurations and rank by TFLOPS.
+
+    Dgrad GEMM dims:
+        M    = N*Hi*Wi      (input spatial positions)
+        N_dg = C            (input channels)
+        K_dg = Y*X*K        (filter spatial × output channels — reduction)
+
+    Operands:
+        A (dY): output gradient, shape (N, Ho, Wo, K)
+        B (W):  weights, shape (K, Y, X, C)
+        D (dX): input gradient, shape (N, Hi, Wi, C)
+
+    Split-K (``--split-k``):
+        1        — disabled (normal epilogue, z-grid = 1).
+        >1       — fixed degree; dX is zero-initialised before each launch,
+                   kernel atomic-adds partials, result is final dX.
+        0 (auto) — sweep all degrees in _SPLIT_K_AUTO.
+    """
+    import torch
+    from rocke.helpers.manifest import conv_args_signature
+
+    _u8 = u8
+    p = problem
+
+    _torch_dtype = {
+        "fp16": torch.float16,
+        "bf16": torch.bfloat16,
+        "fp32": torch.float32,
+    }[dtype]
+    torch.manual_seed(42)
+
+    def _make(*shape):
+        return (
+            torch.full(shape, args.debug_init)
+            if args.debug_init is not None
+            else torch.empty(*shape).uniform_(-1.0, 1.0)
+        )
+
+    _dY_f32 = _make(p.N, p.Ho, p.Wo, p.K)
+    _W_f32 = _make(p.K, p.Y, p.X, p.C)
+    dX_t = torch.empty(p.N, p.Hi, p.Wi, p.C, dtype=_torch_dtype)
+
+    dY_t = _dY_f32.to(_torch_dtype)
+    W_t = _W_f32.to(_torch_dtype)
+
+    bytes_xfer = float(dY_t.nbytes + W_t.nbytes + dX_t.nbytes)
+    flop = float(p.flops)
+
+    vec_a, vec_b, vec_c = _get_vector_sizes_dgrad(p.C, p.K, dtype)
+    base_sig = conv_args_signature(dtype)
+    ext_sig = base_sig + [
+        {"name": "sub_gemm_buf", "type": "ptr<i32, global>", "size_bytes": 8},
+        {"name": "num_sub_gemms", "type": "i32", "size_bytes": 4},
+    ]
+
+    split_k_values = _SPLIT_K_AUTO if args.split_k == 0 else (args.split_k,)
+
+    combos = list(
+        itertools.product(
+            _TILE_MN,
+            _TILE_MN,
+            _TILE_K,
+            _WARP_MN,
+            _WARP_MN,
+            _WARP_TILE_MN,
+            _PIPELINES,
+            _EPILOGUES,
+            split_k_values,
+        )
+    )
+
+    if hasattr(args, "sample") and args.sample is not None:
+        combos = _sample_combos(combos, args.sample, args.seed)
+
+    _spk_label = {0: "sweep", -1: "auto(CK)"}.get(args.split_k, str(args.split_k))
+    print(
+        f"Sweeping {len(combos)} dgrad combinations for {arch} {dtype} {p.short()} "
+        f"(split_k={_spk_label}) ...",
+        flush=True,
+    )
+
+    rt = Runtime()
+    results: List[Result] = []
+    n_built = 0
+    n_skipped = 0
+
+    dY_dev = rt.alloc(dY_t.nbytes)
+    W_dev = rt.alloc(W_t.nbytes)
+    dX_dev = rt.alloc(dX_t.nbytes)
+    rt.memcpy_h2d(dY_dev, _u8(dY_t), dY_t.nbytes)
+    rt.memcpy_h2d(W_dev, _u8(W_t), W_t.nbytes)
+    rt.memset(dX_dev, 0, dX_t.nbytes)
+
+    ref_out: torch.Tensor | None = None
+    if args.verify or args.dump_fail:
+        from rocke.benchmark.conv_reference import dgrad_reference
+
+        ref_out = dgrad_reference(_dY_f32, _W_f32, p)
+        print(
+            f"Dgrad reference computed ({tuple(ref_out.shape)}, {ref_out.dtype}).",
+            flush=True,
+        )
+
+    for (
+        tile_m,
+        tile_n,
+        tile_k,
+        warp_m,
+        warp_n,
+        warp_tile_mn,
+        pipeline,
+        epilogue,
+        split_k,
+    ) in combos:
+        if split_k > 1 and epilogue == "cshuffle":
+            n_skipped += 1
+            continue
+
+        atom = target.mma.select_largest_k(
+            a_dtype=dtype,
+            b_dtype=dtype,
+            c_dtype="fp32",
+            m=warp_tile_mn,
+            n=warp_tile_mn,
+            k_max=tile_k,
+        )
+        if atom is None:
+            n_skipped += 1
+            continue
+
+        warp_tile_k = atom.k
+        if split_k == -1:
+            from rocke.helpers.split_k import select_split_k_wgrad
+
+            resolved_split_k = select_split_k_wgrad(
+                wg_M=p.N * p.Hi * p.Wi,
+                wg_N=p.cpg,
+                wg_K=p.Y * p.X * p.kpg,
+                tile_m=tile_m,
+                tile_n=tile_n,
+                tile_k=tile_k,
+                arch=arch,
+            ).split_k
+        else:
+            resolved_split_k = split_k
+
+        spec = DgradConvSpec(
+            problem=problem,
+            name="rocke_bench_igemm_dgrad",
+            data=ConvDataSpec(dtype_a=dtype, dtype_b=dtype, dtype_d=dtype),
+            tile_m=tile_m,
+            tile_n=tile_n,
+            tile_k=tile_k,
+            warp_m=warp_m,
+            warp_n=warp_n,
+            warp_tile_m=warp_tile_mn,
+            warp_tile_n=warp_tile_mn,
+            warp_tile_k=warp_tile_k,
+            pipeline=pipeline,
+            epilogue=epilogue,
+            split_k=resolved_split_k,
+            vector_size_a=vec_a,
+            vector_size_b=vec_b,
+            vector_size_c=vec_c,
+        )
+
+        ok, reason = is_valid_dgrad_spec(spec, arch)
+        if not ok:
+            n_skipped += 1
+            continue
+
+        try:
+            kernel = build_implicit_gemm_conv_dgrad(spec, arch=arch)
+        except ValueError:
+            n_skipped += 1
+            continue
+
+        try:
+            artifact = compile_kernel(kernel, arch=arch)
+        except Exception:
+            n_skipped += 1
+            continue
+        n_built += 1
+
+        _is_strided = spec.is_strided
+        if _is_strided:
+            from rocke.instances.common.conv_implicit_gemm_dgrad import (
+                pack_sub_gemm_buffer,
+            )
+            import struct as _struct
+
+            sub_gemms = spec.compute_sub_gemms()
+            buf_i32 = pack_sub_gemm_buffer(sub_gemms, spec.tile_m, spec.tile_n)
+            buf_bytes = _struct.pack(f"{len(buf_i32)}i", *buf_i32)
+            total_flat_tiles = sub_gemms[-1].block_end
+            sgbuf_dev = rt.alloc(len(buf_bytes))
+            rt.memcpy_h2d(
+                sgbuf_dev,
+                (ctypes.c_uint8 * len(buf_bytes)).from_buffer_copy(buf_bytes),
+                len(buf_bytes),
+            )
+            sig = ext_sig
+            grid = (total_flat_tiles, 1, resolved_split_k)
+            values = {
+                "A": dY_dev,
+                "B": W_dev,
+                "D": dX_dev,
+                "A_bytes": dY_t.nbytes,
+                "B_bytes": W_t.nbytes,
+                "D_bytes": dX_t.nbytes,
+                "sub_gemm_buf": sgbuf_dev,
+                "num_sub_gemms": len(sub_gemms),
+            }
+        else:
+            sig = base_sig
+            grid = _grid_for_dgrad_spec(spec, resolved_split_k)
+            values = {
+                "A": dY_dev,
+                "B": W_dev,
+                "D": dX_dev,
+                "A_bytes": dY_t.nbytes,
+                "B_bytes": W_t.nbytes,
+                "D_bytes": dX_t.nbytes,
+            }
+
+        launcher = KernelLauncher(
+            hsaco=artifact.hsaco,
+            kernel_name=artifact.kernel_name,
+            signature=sig,
+        )
+        block = (spec.block_size, 1, 1)
+        stream = 0
+        cfg = LaunchConfig(grid=grid, block=block, stream=stream)
+
+        _zero_init = spec.needs_atomic
+
+        if args.verify or args.dump_fail:
+            if _verify_kernel(
+                rt=rt,
+                launcher=launcher,
+                values=values,
+                grid=grid,
+                block=block,
+                out_dev=dX_dev,
+                out_t=dX_t,
+                zero_init_out=_zero_init,
+                ref_out=ref_out,
+                kernel_name=artifact.kernel_name,
+                dump_fail=args.dump_fail,
+                extra_tensors={"dY": dY_t, "W": W_t},
+                u8=_u8,
+            ):
+                rt.free(dY_dev)
+                rt.free(W_dev)
+                rt.free(dX_dev)
+                return 1
+
+        if _zero_init:
+
+            def _launch_atomic():
+                rt.memset(dX_dev, 0, dX_t.nbytes)
+                launcher(values, config=cfg)
+
+            timed_fn = _launch_atomic
+        else:
+            timed_fn = lambda: launcher(values, config=cfg)
+
+        ms = time_launches(
+            timed_fn,
+            warmup=args.warmup,
+            iters=args.iters,
+            stream=stream,
+        )
+        synchronize_and_release(stream)
+
+        cur_tflops = (flop / ms) * 1e-9
+        cur_gbps = (bytes_xfer / ms) * 1e-6
+
+        results.append(
+            Result(
+                kernel_name=artifact.kernel_name,
+                tile_m=tile_m,
+                tile_n=tile_n,
+                tile_k=tile_k,
+                warp_m=warp_m,
+                warp_n=warp_n,
+                warp_tile_mn=warp_tile_mn,
+                warp_tile_k=warp_tile_k,
+                pipeline=pipeline,
+                epilogue=epilogue,
+                split_k=resolved_split_k,
+                ms=ms,
+                tflops=cur_tflops,
+                gbps=cur_gbps,
+            )
+        )
+
+        print(
+            f"[{n_built:4d}] tile={tile_m}x{tile_n}x{tile_k} "
+            f"warp={warp_m}x{warp_n} "
+            f"atom={warp_tile_mn}x{warp_tile_mn}x{warp_tile_k} "
+            f"{pipeline}/{epilogue:9s} spk{resolved_split_k:<3d} "
+            f"{cur_tflops:6.1f} TFLOPS  {ms:.3f} ms",
+            flush=True,
+        )
+
+        if _is_strided:
+            rt.free(sgbuf_dev)
+
+    rt.free(dY_dev)
+    rt.free(W_dev)
+    rt.free(dX_dev)
+
+    print(f"\nDgrad sweep done: {n_built} built, {n_skipped} skipped.", flush=True)
+
+    if not results:
+        print("No valid dgrad configurations found.", file=sys.stderr)
+        return 1
+
+    results.sort(key=lambda r: r.tflops, reverse=True)
+    top_n = min(args.top, len(results))
+
+    print(f"\n{'='*72}")
+    print(f"Top {top_n} dgrad configurations for {arch} {dtype} {p.short()}")
     print(f"{'='*72}")
     hdr = f"{'rank':>4}  {'TFLOPS':>7}  {'ms':>8}  {'GBps':>7}  config"
     print(hdr)

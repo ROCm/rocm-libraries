@@ -1267,33 +1267,15 @@ def _emit_wgrad_split_k_epilogue(
                     c_n = b.add(atom_n_base, cols[i])
                     _emit_scalar_atomic(c_m, c_n, b.vec_extract(acc, i))
             else:
-                # bf16 / fp16: use packed <2 x dtype> atomics for pairs of slots
-                # that share the same MFMA row (same rows[i]) and are at
-                # adjacent N-positions (cols[i]+1 == cols[i+1]).
-                # Any pair that crosses a row boundary or is non-adjacent falls
-                # back to _emit_single_packed_atomic.
-                i = 0
-                while i < c_per_lane:
-                    same_row = (i + 1 < c_per_lane) and (i // kc_m1) == (
-                        (i + 1) // kc_m1
-                    )
-                    if same_row:
-                        c_m_i = b.add(atom_m_base, rows[i])
-                        c_n_i = b.add(atom_n_base, cols[i])
-                        c_n_i1 = b.add(atom_n_base, cols[i + 1])
-                        _emit_pair_packed_atomics(
-                            c_m_i,
-                            c_n_i,
-                            c_n_i1,
-                            b.vec_extract(acc, i),
-                            b.vec_extract(acc, i + 1),
-                        )
-                        i += 2
-                    else:
-                        c_m_i = b.add(atom_m_base, rows[i])
-                        c_n_i = b.add(atom_n_base, cols[i])
-                        _emit_single_packed_atomic(c_m_i, c_n_i, b.vec_extract(acc, i))
-                        i += 1
+                # bf16 / fp16: emit one packed atomic per slot. The old
+                # "pair" optimization assumed consecutive slots had adjacent
+                # N-positions, but for atoms with kc_m1 >= 2 (e.g. 16x16x16)
+                # consecutive slots share the SAME N-position (different
+                # M-positions), causing double-writes to the same address.
+                for i in range(c_per_lane):
+                    c_m_i = b.add(atom_m_base, rows[i])
+                    c_n_i = b.add(atom_n_base, cols[i])
+                    _emit_single_packed_atomic(c_m_i, c_n_i, b.vec_extract(acc, i))
 
 
 def _emit_wgrad_direct_epilogue(
