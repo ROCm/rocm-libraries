@@ -39,14 +39,14 @@ TEST(indextype_utils, get_indextype)
 {
     EXPECT_EQ(rocsparse::get_indextype<int32_t>(), rocsparse_indextype_i32);
     EXPECT_EQ(rocsparse::get_indextype<int64_t>(), rocsparse_indextype_i64);
-    EXPECT_EQ(rocsparse::get_indextype<uint16_t>(), rocsparse_indextype_u16);
+    EXPECT_EQ(rocsparse::get_indextype<uint16_t>(), deprecated_rocsparse_indextype_u16);
 }
 
 TEST(indextype_utils, indextype_sizeof)
 {
     EXPECT_EQ(rocsparse::indextype_sizeof(rocsparse_indextype_i32), sizeof(int32_t));
     EXPECT_EQ(rocsparse::indextype_sizeof(rocsparse_indextype_i64), sizeof(int64_t));
-    EXPECT_EQ(rocsparse::indextype_sizeof(rocsparse_indextype_u16), sizeof(uint16_t));
+    EXPECT_EQ(rocsparse::indextype_sizeof(deprecated_rocsparse_indextype_u16), sizeof(uint16_t));
 }
 
 // Round-trip: the size reported for the enum returned by get_indextype<T>()
