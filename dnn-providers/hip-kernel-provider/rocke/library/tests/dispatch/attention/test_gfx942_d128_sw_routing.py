@@ -128,6 +128,35 @@ class TestGfx942D128SwRouting(unittest.TestCase):
                 self.assertFalse(au._enable_gfx942_bf16_flash(p))
                 self.assertFalse(au._enable_gfx942_fp16_flash(p))
 
+    def test_sw_variants_route_flash_non_ring(self):
+        # The gate opens D128 SW flash for every block_size / num_seqs / seqlen,
+        # not just the primary bench shape. Each variant must take the flash path
+        # (ring off, nw=2) and emit a valid spec.
+        _, build2d, _ = _tiled_2d_impl("gfx942")
+        variants = (
+            dict(block_size=64),  # real production paged block size (confirm-config)
+            dict(num_seqs=2, total_q=16384),  # multi-batch
+            dict(
+                max_seqlen_q=512, max_seqlen_k=512, total_q=512
+            ),  # short (Sq < window)
+        )
+        with _PinArch("gfx942"):
+            for dt in ("bf16", "fp16"):
+                for kw in variants:
+                    p = _d128_problem(dtype=dt, **kw)
+                    flash = (
+                        au._enable_gfx942_bf16_flash(p)
+                        if dt == "bf16"
+                        else au._enable_gfx942_fp16_flash(p)
+                    )
+                    self.assertTrue(flash, msg=f"{dt} {kw} must take flash")
+                    self.assertFalse(
+                        au._enable_gfx942_flash_k_sliced_ring(p),
+                        msg=f"{dt} {kw} must be non-ring",
+                    )
+                    self.assertEqual(au._select_gfx942_flash_num_warps(p), 2)
+                    build2d(_tiled_spec_from_problem(p), arch="gfx942")
+
 
 if __name__ == "__main__":
     unittest.main()
