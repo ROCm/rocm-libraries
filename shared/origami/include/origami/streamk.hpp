@@ -77,12 +77,13 @@ ORIGAMI_EXPORT size_t select_grid_size(const problem_t& problem,
 /**
  * @brief Pick the SK3-vs-SK4 sub-path for a StreamK=5 hybrid kernel.
  *
- * Decision rule fit to measured SK5 on(SK4)/off(SK3) sweeps on MI350X
- * (gfx950); see origami::streamk_hybrid_defaults_t for the thresholds.
- * Other architectures always return hybrid_mode_t::static_ until they are
- * tuned in a follow-up PR. Gates, in order: grid size (tiles), then whether
- * a cotenant currently holds any CU away from this kernel, then occupancy,
- * falling back to tiles-per-CU only once occupancy alone isn't decisive.
+ * Decision rule uses per-architecture thresholds fit to measured SK5
+ * on(SK4)/off(SK3) sweeps; see origami::streamk_hybrid_thresholds_t for the
+ * thresholds and which architectures are tuned. Architectures without a tuned
+ * threshold set always return hybrid_mode_t::static_. Gates, in order: grid
+ * size (tiles), then whether a cotenant currently holds any CU away from this
+ * kernel, then occupancy, falling back to tiles-per-CU only once occupancy
+ * alone isn't decisive.
  *
  * @param problem            Problem description (M, N, K, batch).
  * @param hardware           Hardware characteristics (@see origami::hardware_t).

@@ -26,7 +26,9 @@
 
 #pragma once
 
+#include <array>
 #include <functional>
+#include <limits>
 #include <optional>
 #include <string_view>
 #include <unordered_map>
@@ -94,16 +96,47 @@ struct heuristic_defaults_t {
 /**
  * @brief StreamK=5 hybrid-mode (SK3 static vs SK4 dynamic) selection thresholds.
  *
- * Fit to measured SK5 on(SK4)/off(SK3) sweeps on MI350X (gfx950); see
- * origami::streamk::select_hybrid_mode() for what each threshold gates and
- * why. Other architectures keep the static (SK3) sub-path until they are
- * tuned in a follow-up PR.
+ * Fit to measured SK5 on(SK4)/off(SK3) sweeps per architecture; see
+ * origami::streamk::select_hybrid_mode() for what each threshold gates and why.
+ * Architectures without a getThresholds() entry keep the static (SK3) sub-path
+ * until they are tuned in a follow-up PR.
  */
-struct streamk_hybrid_defaults_t {
-  static constexpr size_t MIN_TILES_FOR_DYNAMIC                  = 480;
-  static constexpr int    MAX_OCCUPANCY_FOR_UNCONDITIONAL_DYNAMIC = 3;
-  static constexpr double TILES_PER_CU_THRESHOLD_HIGH_OCCUPANCY   = 8.41;
+struct streamk_hybrid_thresholds_t {
+  struct streamk_hybrid_threshold_values_t {
+    size_t min_tiles_for_dynamic;
+    int max_occupancy_for_unconditional_dynamic;
+    double tiles_per_cu_threshold_high_occupancy;
+  };
+
+  struct streamk_hybrid_arch_entry_t {
+    hardware_t::architecture_t arch;
+    streamk_hybrid_threshold_values_t defaults;
+  };
+
+  // Per-architecture tuned thresholds. Architectures absent from this table
+  // keep the static (SK3) sub-path (getThresholds returns std::nullopt).
+  static constexpr std::array<streamk_hybrid_arch_entry_t, 2>
+      kStreamkHybridDefaults{{
+          {hardware_t::architecture_t::gfx950,
+           {/*min_tiles_for_dynamic=*/480,
+            /*max_occupancy_for_unconditional_dynamic=*/3,
+            /*tiles_per_cu_threshold_high_occupancy=*/8.41}},
+          {hardware_t::architecture_t::gfx942,
+           {/*min_tiles_for_dynamic=*/2048,
+            /*max_occupancy_for_unconditional_dynamic=*/0,
+            /*tiles_per_cu_threshold_high_occupancy=*/30.0}},
+      }};
+
+  static constexpr std::optional<streamk_hybrid_threshold_values_t> getThresholds(
+      hardware_t::architecture_t arch) {
+    for (const auto& entry : kStreamkHybridDefaults) {
+      if (entry.arch == arch) return entry.defaults;
+    }
+    return std::nullopt;
+  }
 };
+
+
 
 /**
  * @brief Structure containing all trainable heuristic parameters.

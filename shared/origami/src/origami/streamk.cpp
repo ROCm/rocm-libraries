@@ -482,10 +482,13 @@ hybrid_mode_t select_hybrid_mode(const problem_t& problem,
                                  const hardware_t& hardware,
                                  const config_t& config,
                                  size_t sm_count_target) {
-  // Fit on gfx950 (MI350X) sweeps only; other architectures stay static
-  // until tuned in a follow-up PR.
-  if (hardware.arch != hardware_t::architecture_t::gfx950)
+  // Thresholds are tuned per-architecture; architectures without a tuned set
+  // stay on the static SK3 sub-path.
+  const auto thresholds = streamk_hybrid_thresholds_t::getThresholds(hardware.arch);
+  if (!thresholds) 
+  {
     return hybrid_mode_t::static_;
+  }
 
   const size_t MT_M  = config.mt.m;
   const size_t MT_N  = config.mt.n;
@@ -495,7 +498,10 @@ hybrid_mode_t select_hybrid_mode(const problem_t& problem,
 
   // Too little work in the grid for dynamic rebalancing to be worth its
   // overhead.
-  if (tiles <= streamk_hybrid_defaults_t::MIN_TILES_FOR_DYNAMIC) return hybrid_mode_t::static_;
+  if (tiles <= thresholds->min_tiles_for_dynamic) 
+  {
+    return hybrid_mode_t::static_;
+  }
 
   size_t available_cus = (sm_count_target > 0)
                              ? std::min<size_t>(sm_count_target, hardware.N_CU)
@@ -512,7 +518,7 @@ hybrid_mode_t select_hybrid_mode(const problem_t& problem,
   // regardless of tiles_per_cu. (occupancy <= 0 means "unknown" -- fall
   // through to the tiles_per_cu check instead.)
   if (config.occupancy > 0 &&
-      config.occupancy <= streamk_hybrid_defaults_t::MAX_OCCUPANCY_FOR_UNCONDITIONAL_DYNAMIC)
+      config.occupancy <= thresholds->max_occupancy_for_unconditional_dynamic)
     return hybrid_mode_t::dynamic;
 
   // At higher occupancy that overlap already absorbs small mismatches, so
@@ -520,7 +526,7 @@ hybrid_mode_t select_hybrid_mode(const problem_t& problem,
   // the CUs actually available to it.
   const double tiles_per_cu =
       static_cast<double>(tiles) / static_cast<double>(available_cus);
-  return (tiles_per_cu > streamk_hybrid_defaults_t::TILES_PER_CU_THRESHOLD_HIGH_OCCUPANCY)
+  return (tiles_per_cu > thresholds->tiles_per_cu_threshold_high_occupancy)
              ? hybrid_mode_t::dynamic
              : hybrid_mode_t::static_;
 }
