@@ -178,7 +178,7 @@ struct proto_config
     using fp_type = typename std::conditional<
         input_type_strategy == type_strategy::fp16 || input_type_strategy == type_strategy::fpmix,
         _Float16,
-        typename std::conditional<input_type_strategy == type_strategy::fp32, float, ushort>::
+        typename std::conditional<input_type_strategy == type_strategy::fp32, float, __bf16>::
             type>::type;
     using fp_prec_type = float;
     using fp_accum_type = float;
