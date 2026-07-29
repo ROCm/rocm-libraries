@@ -61,7 +61,7 @@ def getCustomKernelConfigAndAssembly(name, directory=globalParameters["CustomKer
 def getCustomKernelConfig(name, directory=globalParameters["CustomKernelDirectory"]):
     rawConfig, _ = getCustomKernelConfigAndAssembly(name, directory)
     try:
-        config = yaml.load(rawConfig, yamlLoader)["custom.config"]  # nosec B506 - safe loader (CSafeLoader/SafeLoader) via alias  # fmt: skip
+        config = yaml.load(rawConfig, yamlLoader)["custom.config"]  # nosec B506
         if "ISA" not in config:
             raise RuntimeError(f"ISA not found in custom kernel config {name}")
         config["ISA"] = tuple(config["ISA"])

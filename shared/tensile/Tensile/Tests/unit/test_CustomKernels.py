@@ -43,7 +43,7 @@ def test_FindCustomKernel(objs):
     except:
         assert False
 
-configResult = yaml.load(  # nosec B506 - safe loader (CSafeLoader/SafeLoader) via alias
+configResult = yaml.load(  # nosec B506
 """
 ProblemType:
     OperationType: GEMM

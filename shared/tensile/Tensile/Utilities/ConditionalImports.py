@@ -16,6 +16,8 @@ except ImportError:
     print = print
 
 
+# Bandit can't see that this alias is a safe loader, so yaml.load call sites carry a
+# bare nosec B506 marker (SEC-00404).
 try:
     from yaml import CSafeLoader as yamlLoader
 except ImportError:

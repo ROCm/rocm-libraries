@@ -156,7 +156,7 @@ def test_WriteClientLibraryFromSolutions(tmpdir):
         stream = open(tensileYamlFilePath, "r")
     except IOError:
         mylogger.error("Cannot open file: %s" % tensileYamlFilePath)
-    config = yaml.load(stream, yamlLoader)  # nosec B506 - safe loader (CSafeLoader/SafeLoader) via alias  # fmt: skip
+    config = yaml.load(stream, yamlLoader)  # nosec B506
     stream.close()
     actualSolutions = config["solutions"]
 
@@ -170,7 +170,7 @@ def test_WriteClientLibraryFromSolutions(tmpdir):
         stream = open(metadataYamlFilePath, "r")
     except IOError:
         mylogger.error("Cannot open file: %s" % metadataYamlFilePath)
-    metadata = yaml.load(stream, yamlLoader)  # nosec B506 - safe loader (CSafeLoader/SafeLoader) via alias  # fmt: skip
+    metadata = yaml.load(stream, yamlLoader)  # nosec B506
     stream.close()
     actualProblemType = metadata["ProblemType"]
 

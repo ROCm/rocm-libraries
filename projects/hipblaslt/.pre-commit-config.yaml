@@ -18,8 +18,9 @@ repos:
         stages: [pre-commit]
 
       # Blocks any new unsafe yaml.load (arbitrary-object deserialization) from
-      # landing. See ROCM-26843 / SEC-00404. Verified-safe loads are marked
-      # `# nosec B506` at their call site.
+      # landing. See ROCM-26843 / SEC-00404. Reviewed-safe loads carry a bare
+      # "# nosec B506"; keep it bare, since bandit reads any trailing prose as more
+      # test ids and warns once per word.
       - id: bandit-b506
         name: bandit (unsafe yaml.load / B506)
         entry: bandit

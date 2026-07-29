@@ -58,7 +58,7 @@ def main():
         print("Sizes File  : " + args.sizeList)
 
     with open(args.inLogic) as inFile:
-        logicData = yaml.load(inFile, yamlLoader)  # nosec B506 - safe loader (CSafeLoader/SafeLoader) via alias  # fmt: skip
+        logicData = yaml.load(inFile, yamlLoader)  # nosec B506
 
     mapping = logicData[7]
     if args.verbose:

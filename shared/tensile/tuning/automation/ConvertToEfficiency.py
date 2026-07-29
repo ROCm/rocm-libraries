@@ -78,7 +78,7 @@ def main():
     mfmaKey = "mfma" if args.mfma else "non_mfma"
 
     with open(args.specs) as y:
-        specs = yaml.load(y, yamlLoader)  # nosec B506 - safe loader (CSafeLoader/SafeLoader) via alias  # fmt: skip
+        specs = yaml.load(y, yamlLoader)  # nosec B506
 
     try:
         os.makedirs(args.outDir)
@@ -91,7 +91,7 @@ def main():
             print(f)
             with open(f) as y:
 
-                data = yaml.load(y, yamlLoader)  # nosec B506 - safe loader (CSafeLoader/SafeLoader) via alias  # fmt: skip
+                data = yaml.load(y, yamlLoader)  # nosec B506
 
                 sched = data[1]
                 if args.x:

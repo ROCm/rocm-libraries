@@ -40,7 +40,7 @@ class BenchmarkSplitter(object):
     @staticmethod
     def __readConfigFile(benchmarkConfigFile):
         with open(benchmarkConfigFile) as f:
-            data = yaml.load(f, yamlLoader)  # nosec B506 - safe loader (CSafeLoader/SafeLoader) via alias  # fmt: skip
+            data = yaml.load(f, yamlLoader)  # nosec B506
         return data
 
     # data: a loaded .yaml file

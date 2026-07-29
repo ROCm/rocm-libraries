@@ -174,10 +174,10 @@ def test_read_dispatch_unrecognized(tmp_path):
 
 def test_strict_type_loader_values(snapshot):
     doc = "a: 1\nb: 0\nc: true\nd: false\ne: True\nf: False\ng: yes\nh: no\ni: hello\n"
-    assert yaml.load(doc, L.StrictTypeLoader) == snapshot  # nosec B506 - StrictTypeLoader subclasses CSafeLoader/SafeLoader  # fmt: skip
+    assert yaml.load(doc, L.StrictTypeLoader) == snapshot  # nosec B506
 
 
 def test_strict_type_loader_types(snapshot):
     doc = "a: 1\nb: 0\nc: true\nd: false\ne: yes\nf: no\n"
-    parsed = yaml.load(doc, L.StrictTypeLoader)  # nosec B506 - StrictTypeLoader subclasses CSafeLoader/SafeLoader  # fmt: skip
+    parsed = yaml.load(doc, L.StrictTypeLoader)  # nosec B506
     assert {k: type(v).__name__ for k, v in parsed.items()} == snapshot

@@ -141,7 +141,7 @@ def GenerateSummations(userArgs):
         tensileLibraryFile = os.path.join(libPath, "library", "TensileLibrary.yaml")
 
         stream = open(tensileLibraryFile, "r")
-        tensileLibrary = yaml.load(stream, yamlLoader)  # nosec B506 - safe loader (CSafeLoader/SafeLoader) via alias  # fmt: skip
+        tensileLibrary = yaml.load(stream, yamlLoader)  # nosec B506
         stream.close()
 
         libSolutions = tensileLibrary["solutions"]
