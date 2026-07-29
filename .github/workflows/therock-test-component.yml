@@ -167,83 +167,12 @@ jobs:
 
       - name: Merge profraw and generate coverage report
         if: ${{ inputs.coverage_enabled }}
-        shell: bash
-        env:
-          AMDGPU_FAMILIES: ${{ inputs.amdgpu_families }}
-          PROJECT: ${{ fromJSON(inputs.component).job_name }}
-          BUILD: ${{ github.workspace }}/build
-          PROFRAW_DIR: ${{ github.workspace }}/coverage-report/profraw
-          REPORT_DIR: ${{ github.workspace }}/coverage-report
-          LLVM_BIN: ${{ github.workspace }}/build/lib/llvm/bin
-          LD_LIBRARY_PATH: ${{ github.workspace }}/build/lib/llvm/lib:${{ github.workspace }}/build/lib
         run: |
-          set -euo pipefail
-          # --- TEMP DEBUG: locate profraw files across the container ---
-          echo "== profraw discovery =="
-          echo "PROFRAW_DIR=${PROFRAW_DIR}"
-          ls -la "${PROFRAW_DIR}" 2>/dev/null || echo "(coverage-profraw dir missing)"
-          echo "-- find *.profraw under workspace, /tmp, HOME --"
-          find "${GITHUB_WORKSPACE}" /tmp "${HOME}" -name '*.profraw' 2>/dev/null | head -50 || true
-          _SO="${BUILD}/lib/lib${PROJECT}.so"
-          echo "-- lib layout: ${BUILD}/lib/lib${PROJECT}.so* --"
-          ls -la "${BUILD}/lib/lib${PROJECT}.so"* 2>/dev/null || echo "(no lib${PROJECT}.so* under ${BUILD}/lib)"
-          _REAL="$(readlink -f "${_SO}" 2>/dev/null || true)"
-          echo "readlink -f ${_SO} -> ${_REAL:-<dangling/unresolved>}"
-          echo "-- instr check (direct symlink path) --"
-          "${LLVM_BIN}/llvm-nm" "${_SO}" 2>/dev/null | grep -c "__llvm_profile" || echo "(nm failed / lib missing)"
-          echo "-- instr check (readlink-resolved real file) --"
-          if [ -n "${_REAL}" ] && [ -e "${_REAL}" ]; then
-            echo "resolved __llvm_profile count: $("${LLVM_BIN}/llvm-nm" "${_REAL}" 2>/dev/null | grep -c "__llvm_profile" || true)"
-          else
-            echo "(resolved target missing)"
-          fi
-          echo "-- all lib${PROJECT}.so* under build (resolved symbol counts) --"
-          find "${BUILD}" -name "lib${PROJECT}.so*" 2>/dev/null | while read -r f; do
-            r="$(readlink -f "$f" 2>/dev/null || echo "$f")"
-            echo "  $("${LLVM_BIN}/llvm-nm" "$r" 2>/dev/null | grep -c "__llvm_profile" || true) : $f -> $r"
-          done || true
-          echo "-- ldd of ${PROJECT} test binaries (which lib${PROJECT} is loaded) --"
-          for tb in $(find "${BUILD}/bin" -type f -name "*${PROJECT}*" 2>/dev/null | head -3); do
-            echo "  [$tb]"; ldd "$tb" 2>/dev/null | grep -i "${PROJECT}" || echo "    (no ${PROJECT} entry in ldd)"
-          done
-          echo "== end profraw discovery =="
-          # --- END TEMP DEBUG ---
-          mkdir -p "${REPORT_DIR}"
-          OBJECT="${BUILD}/lib/lib${PROJECT}.so"
-          PROFDATA="${REPORT_DIR}/${PROJECT}.profdata"
-
-          IGNORE_RE=""
-          CFG="$(find "${GITHUB_WORKSPACE}/rocm-libraries/projects/${PROJECT}" -name test_categories_coverage.yaml 2>/dev/null | head -1)"
-          if [[ -n "${CFG}" ]]; then
-            val="$(grep -m1 '^ignore_filename_regex:' "${CFG}" | cut -d: -f2- | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
-            case "${val}" in
-              \'*\') val="${val#\'}"; val="${val%\'}" ;;
-              \"*\") val="${val#\"}"; val="${val%\"}" ;;
-            esac
-            IGNORE_RE="${val}"
-          fi
-          IGNORE_ARGS=()
-          if [[ -n "${IGNORE_RE}" ]]; then IGNORE_ARGS=("-ignore-filename-regex=${IGNORE_RE}"); fi
-
-          PATHEQ="-path-equivalence=${GITHUB_WORKSPACE},${GITHUB_WORKSPACE}/rocm-libraries"
-
-          "${LLVM_BIN}/llvm-profdata" merge -sparse -o "${PROFDATA}" ${PROFRAW_DIR}/*.profraw
-          "${LLVM_BIN}/llvm-cov" report -object "${OBJECT}" -instr-profile="${PROFDATA}" ${IGNORE_ARGS[@]+"${IGNORE_ARGS[@]}"} \
-            | tee "${REPORT_DIR}/code_cov_${PROJECT}.report"
-          "${LLVM_BIN}/llvm-cov" show -object "${OBJECT}" -instr-profile="${PROFDATA}" ${IGNORE_ARGS[@]+"${IGNORE_ARGS[@]}"} \
-            "${PATHEQ}" -Xdemangler="${LLVM_BIN}/llvm-cxxfilt" --format=html --output-dir="${REPORT_DIR}" || true
-          "${LLVM_BIN}/llvm-cov" export -object "${OBJECT}" -instr-profile="${PROFDATA}" ${IGNORE_ARGS[@]+"${IGNORE_ARGS[@]}"} \
-            --format=lcov > "${REPORT_DIR}/coverage.info"
-
-          sed -i "s|${GITHUB_WORKSPACE}/||g" "${REPORT_DIR}/coverage.info"
-
-          {
-            echo "### ${PROJECT} coverage (${AMDGPU_FAMILIES})"
-            echo ""
-            echo '```'
-            tail -n 3 "${REPORT_DIR}/code_cov_${PROJECT}.report"
-            echo '```'
-          } | tee -a "${GITHUB_STEP_SUMMARY}"
+          cd ${{ github.workspace }}/coverage-report
+          ${{ github.workspace }}/build/lib/llvm/bin/llvm-profdata merge -sparse -o coverage.profdata profraw/*.profraw
+          ${{ github.workspace }}/build/lib/llvm/bin/llvm-cov export \
+            -object ${{ github.workspace }}/build/lib/lib${{ fromJSON(inputs.component).job_name }}.so \
+            -instr-profile=coverage.profdata --format=lcov > coverage.info
 
       - name: Notify Teams Channel on Failure
         if: ${{ failure() && !github.event.pull_request.head.repo.fork }}
