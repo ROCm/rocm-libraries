@@ -5,8 +5,9 @@
 // hipblaslt_datatype2string.hpp: scaleDataType, isBlockScaling, blockSize, and
 // scaleBufferSize. All four are pure functions of their arguments, so they are
 // compiled into both hipblaslt-test and the standalone
-// hipblaslt-client-unit-tests binary. See parser_gtest.cpp for the naming and
-// dual-target rationale.
+// hipblaslt-client-unit-tests binary. See parser_gtest.cpp for the dual-target
+// rationale and for why the names carry both a HostUnit suite prefix and a
+// smoke_ test prefix.
 //
 // scaleBufferSize is the interesting one: it applies two independent paddings
 // with integer division, so it gets explicit boundary cases rather than a
@@ -88,7 +89,7 @@ namespace
     };
 }
 
-TEST(HostUnitScalingFormat, RegisteredFormatsMapAsExpected)
+TEST(HostUnitScalingFormat, smoke_RegisteredFormatsMapAsExpected)
 {
     for(const auto& e : known_scaling_formats())
     {
@@ -108,7 +109,7 @@ TEST(HostUnitScalingFormat, RegisteredFormatsMapAsExpected)
 // Known limitation: none/Scalar/Vector are registered but also produce the
 // default triple, so a new *non-block* format is indistinguishable from an
 // unhandled value and this guard cannot catch it.
-TEST(HostUnitScalingFormat, EveryEnumeratorIsRegistered)
+TEST(HostUnitScalingFormat, smoke_EveryEnumeratorIsRegistered)
 {
     for(int value = 0; value <= kScalingSweepMax; ++value)
     {
@@ -131,7 +132,7 @@ TEST(HostUnitScalingFormat, EveryEnumeratorIsRegistered)
 // scaleBufferSize pads rows to a multiple of 8 after dividing by the block size,
 // and pads columns to a multiple of 32. Each case below sits on one side of a
 // padding boundary so an off-by-one in either division shows up.
-TEST(HostUnitScalingFormat, ScaleBufferSizePadsRowsAndColumns)
+TEST(HostUnitScalingFormat, smoke_ScaleBufferSizePadsRowsAndColumns)
 {
     const std::vector<ScaleBufferSizeCase> cases = {
         // Block size 32: 8 scale rows exactly covers 256 data rows, 16 beyond that.
@@ -175,7 +176,7 @@ TEST(HostUnitScalingFormat, ScaleBufferSizePadsRowsAndColumns)
 // The pre-swizzled EXT format shares block size 32 with Block_32_UE8M0, so it
 // must size buffers identically. This pins the pair together: they are wired
 // through separate switch arms and could drift.
-TEST(HostUnitScalingFormat, PreSwizzledExtMatchesPlainBlock32)
+TEST(HostUnitScalingFormat, smoke_PreSwizzledExtMatchesPlainBlock32)
 {
     for(int64_t rows : {1, 31, 32, 256, 257, 1024})
     {

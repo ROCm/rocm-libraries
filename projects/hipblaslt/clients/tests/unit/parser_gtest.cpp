@@ -6,8 +6,16 @@
 // compiled into both hipblaslt-test (where it runs in the existing CI lane) and
 // the standalone hipblaslt-client-unit-tests binary (which needs no GPU).
 //
-// Suites are prefixed `HostUnit` so a single pattern in
-// clients/tests/test_categories.yaml selects all of them for every ctest tier.
+// Naming carries two selectors, because two different mechanisms may pick these
+// cases up. The `smoke_` prefix on each test name is what matters today: the
+// hipblaslt test lane execs hipblaslt-test directly (see
+// test/therock/test_hipblaslt.py), and the only filter it ever passes is
+// `*smoke*` on the quick tier, so without that prefix these would be skipped
+// exactly where a host-only check is cheapest. This follows the convention
+// already used in tests/src/caching_library_gtest.cpp. The `HostUnit` suite
+// prefix is for the ctest path: it matches the "*HostUnit*" pattern in
+// clients/tests/test_categories.yaml, which takes effect if hipblaslt ever
+// moves to TheRock's generic test_runner.py.
 //
 // Motivated by the PR #6514 review (davidd-amd), observation #2 ("Do we have a
 // plan to start adding unit tests for functions that we are changing that can be
@@ -133,7 +141,7 @@ namespace
     constexpr int kBiasSourceSweepMax = 63; // enumerators run to 3
 }
 
-TEST(HostUnitInitParser, KnownStringsMapToExpectedEnum)
+TEST(HostUnitInitParser, smoke_KnownStringsMapToExpectedEnum)
 {
     for(const auto& [name, expected] : known_init_modes())
     {
@@ -143,7 +151,7 @@ TEST(HostUnitInitParser, KnownStringsMapToExpectedEnum)
     }
 }
 
-TEST(HostUnitInitParser, RoundTripsThroughInitialization2String)
+TEST(HostUnitInitParser, smoke_RoundTripsThroughInitialization2String)
 {
     for(const auto& [name, expected] : known_init_modes())
     {
@@ -152,7 +160,7 @@ TEST(HostUnitInitParser, RoundTripsThroughInitialization2String)
     }
 }
 
-TEST(HostUnitInitParser, EveryEnumeratorIsRegistered)
+TEST(HostUnitInitParser, smoke_EveryEnumeratorIsRegistered)
 {
     expect_table_is_exhaustive(
         known_init_modes(),
@@ -168,13 +176,13 @@ TEST(HostUnitInitParser, EveryEnumeratorIsRegistered)
 // #6514 review, observation #3. AIHPBLAS-3551 replaces this with a
 // std::optional-returning, noexcept parser, at which point this expectation is
 // meant to flip.
-TEST(HostUnitInitParser, UnknownStringMapsToZeroSentinel_PreAIHPBLAS3551)
+TEST(HostUnitInitParser, smoke_UnknownStringMapsToZeroSentinel_PreAIHPBLAS3551)
 {
     EXPECT_EQ(static_cast<int>(string2hipblaslt_initialization("not_a_real_init_mode")), 0);
     EXPECT_EQ(static_cast<int>(string2hipblaslt_initialization("")), 0);
 }
 
-TEST(HostUnitActivationParser, KnownStringsMapAndRoundTrip)
+TEST(HostUnitActivationParser, smoke_KnownStringsMapAndRoundTrip)
 {
     for(const auto& [name, expected] : known_activations())
     {
@@ -185,7 +193,7 @@ TEST(HostUnitActivationParser, KnownStringsMapAndRoundTrip)
     }
 }
 
-TEST(HostUnitActivationParser, EveryEnumeratorIsRegistered)
+TEST(HostUnitActivationParser, smoke_EveryEnumeratorIsRegistered)
 {
     expect_table_is_exhaustive(
         known_activations(),
@@ -196,12 +204,12 @@ TEST(HostUnitActivationParser, EveryEnumeratorIsRegistered)
 }
 
 // none == 0 is a valid activation, so the unknown sentinel here is -1, not 0.
-TEST(HostUnitActivationParser, UnknownStringMapsToNegativeSentinel)
+TEST(HostUnitActivationParser, smoke_UnknownStringMapsToNegativeSentinel)
 {
     EXPECT_EQ(static_cast<int>(string_to_hipblaslt_activation_type("not_an_activation")), -1);
 }
 
-TEST(HostUnitBiasSourceParser, KnownStringsMapAndRoundTrip)
+TEST(HostUnitBiasSourceParser, smoke_KnownStringsMapAndRoundTrip)
 {
     for(const auto& [name, expected] : known_bias_sources())
     {
@@ -212,7 +220,7 @@ TEST(HostUnitBiasSourceParser, KnownStringsMapAndRoundTrip)
     }
 }
 
-TEST(HostUnitBiasSourceParser, EveryEnumeratorIsRegistered)
+TEST(HostUnitBiasSourceParser, smoke_EveryEnumeratorIsRegistered)
 {
     expect_table_is_exhaustive(
         known_bias_sources(),
@@ -223,7 +231,7 @@ TEST(HostUnitBiasSourceParser, EveryEnumeratorIsRegistered)
 }
 
 // bias_source values start at 1, so 0 is the unknown sentinel.
-TEST(HostUnitBiasSourceParser, UnknownStringMapsToZeroSentinel)
+TEST(HostUnitBiasSourceParser, smoke_UnknownStringMapsToZeroSentinel)
 {
     EXPECT_EQ(static_cast<int>(string_to_hipblaslt_bias_source("not_a_bias_source")), 0);
 }
