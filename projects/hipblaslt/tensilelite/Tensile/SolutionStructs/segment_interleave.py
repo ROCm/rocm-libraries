@@ -8,8 +8,6 @@ split its A/B halves across LDS segments (so the two MFMA read ports hit differe
 segments), and returns the offsets the emit sites consume.
 """
 
-import os
-
 # gfx1250 LDS segment size (5 x 64 KiB segments).
 SEG = 65536
 
@@ -132,13 +130,9 @@ def evaluate(state):
     base = state["LdsOffsetA"]
     bpe = _bpe(state)
 
-    # LDSSegmentInterleave==2 (or env TENSILE_LDS_BCONTIG_FORCE=1) forces the bcontig layout even on
-    # shapes where split would normally run, so both can be built and compared in one run.
-    _force_bcontig = os.environ.get("TENSILE_LDS_BCONTIG_FORCE") == "1" or mode == 2
-    if _force_bcontig or not _b_readable(state):
-        # bcontig layout [A0][B0][B1][A1]: B stays in one piece with normal addressing and acts as the
-        # gap that pushes A1 into a different segment. Used when B cannot be split correctly (odd
-        # WaveTileB) or when forced. Only A moves to a separate segment; B keeps its normal layout.
+    # bcontig fallback [A0][B0][B1][A1] (auto-only, not user-forceable): when B can't be split
+    # (odd WaveTileB), keep B whole and use it as the gap that pushes A1 into the next segment.
+    if not _b_readable(state):
         strideA = fA + 2 * fB                       # distance A0 -> A1: skip A0 and the whole B block
         a0 = base // SEG
         a1 = (base + strideA) // SEG

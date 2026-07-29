@@ -5075,10 +5075,7 @@ class Solution(collections.abc.Mapping):
       ldsNumBytesAB = state["LdsOffsetB"] + ldsNumBytesB
     state["NumLdsBlk"] = numLdsBlk
 
-    # Resolve the -1/0/1/2 knob to the applied LAYOUT: 0=off, 1=split(tight/aligned), 2=bcontig.
-    # Naming keys off the value, so split(LDSSI1) and bcontig(LDSSI2) get distinct kernel names and
-    # can coexist in one build (fork [0,1,2]). Requested 1=auto, 2=force-bcontig. Defer the one case
-    # whose applicability isn't known yet: unresolved 1LDSBuffer(-1) blocked only on "needs 1LDSBuffer==0".
+    # Defer resolving if the oracle only blocked on an unresolved 1LDSBuffer(-1) (resolved later, then re-evaluated).
     _segRequested = state["LDSSegmentInterleave"]
     _segDeferForBuf = _oneLdsBufAtEval == -1 and _segReason == "needs 1LDSBuffer==0"
     if not _segDeferForBuf:

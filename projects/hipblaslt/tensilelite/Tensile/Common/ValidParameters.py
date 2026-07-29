@@ -398,7 +398,7 @@ validParameters = { # we need to make sure this matches develop
     #    0 = off (default): baseline layout.
     #    1 = force on: apply both "tight" and "aligned" wherever valid.
     # Recommended: set [0, 1] when tuning, so both baseline and interleaved kernels are benchmarked.
-    "LDSSegmentInterleave": [-1, 0, 1, 2],
+    "LDSSegmentInterleave": [-1, 0, 1],
     # StreamK persistent loop: use the current tile's no-load-loop window to
     # issue the first global-read group for the next persistent tile. The
     # generated code keeps that first-PGR data durable and restores borrowed
