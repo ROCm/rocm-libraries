@@ -66,6 +66,16 @@ TEST(TestMoeGroupedMatmulNode, NoneModeAcceptsRequiredInputs)
     EXPECT_TRUE(node.pre_validate_node().is_good());
 }
 
+TEST(TestMoeGroupedMatmulNode, NotSetModeIsRejected)
+{
+    auto attrs = createValidAttributes();
+    attrs.set_mode(MoeGroupedMatmulMode::NOT_SET);
+
+    const GraphAttributes graphAttrs;
+    EXPECT_EQ(MoeGroupedMatmulNode(std::move(attrs), graphAttrs).pre_validate_node().code,
+              ErrorCode::INVALID_VALUE);
+}
+
 TEST(TestMoeGroupedMatmulNode, RequiredTensorsMustBePresent)
 {
     const GraphAttributes graphAttrs;

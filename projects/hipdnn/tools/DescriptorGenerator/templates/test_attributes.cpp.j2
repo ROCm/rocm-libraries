@@ -74,6 +74,8 @@ TEST(Test{{ op.frontend.attributes_class }}, DefaultValues)
     EXPECT_TRUE(attrs.{{ df.frontend_getter }}.empty());
 {% elif df.is_optional_scalar %}
     EXPECT_FALSE(attrs.{{ df.frontend_getter }}.has_value());
+{% elif df.is_mode %}
+    EXPECT_EQ(attrs.{{ df.frontend_getter }}, {{ df.default_value }});
 {% elif df.is_scalar %}
     EXPECT_EQ(attrs.{{ df.frontend_getter }}, {{ df.default_value if df.default_value else "0" }});
 {% endif %}

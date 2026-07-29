@@ -136,6 +136,7 @@ def load_config(path: Path) -> OperationConfig:
                 frontend_inverse_converter=df.get("frontend_inverse_converter", ""),
                 enum_def=enum_def,
                 mode_sentinel=mode_sentinel,
+                frontend_sentinel_only=df.get("frontend_sentinel_only", False),
             )
         )
 
@@ -619,6 +620,17 @@ def _validate_config(config: OperationConfig) -> None:
                     f"mode fields must have 'backend_type_name' set "
                     f"(e.g., 'HIPDNN_TYPE_CONVOLUTION_MODE')."
                 )
+            if df.frontend_sentinel_only:
+                if df.mode_sentinel != "optional":
+                    raise ConfigError(
+                        f"Operation '{config.name}', mode field '{df.name}': "
+                        "frontend_sentinel_only requires mode_sentinel: optional."
+                    )
+                if not df.has_sentinel_in_enum_def:
+                    raise ConfigError(
+                        f"Operation '{config.name}', mode field '{df.name}': "
+                        "frontend_sentinel_only requires a sentinel enum value."
+                    )
             if not df.frontend_inverse_converter:
                 print(
                     f"Warning: Mode field '{df.name}' in operation "

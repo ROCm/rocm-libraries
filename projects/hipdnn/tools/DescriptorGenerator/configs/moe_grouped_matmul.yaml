@@ -121,9 +121,13 @@ operation:
       type: "mode"
       cpp_enum: "hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulMode"
       frontend_type: "MoeGroupedMatmulMode"
+      # cuDNN exposes NOT_SET in its frontend enum, but MoE attributes still
+      # default to NONE. Keep the sentinel frontend-only to preserve existing
+      # C API and FlatBuffers values: NONE=0, GATHER=1, SCATTER=2.
       default_value: "MoeGroupedMatmulMode::NONE"
       required: false
-      mode_sentinel: "none"
+      mode_sentinel: "optional"
+      frontend_sentinel_only: true
       frontend_getter: "get_mode()"
       backend_setter: "setMoeGroupedMatmulMode"
       backend_getter: "getMoeGroupedMatmulMode"
@@ -139,9 +143,10 @@ operation:
         backend_header: "HipdnnMoeGroupedMatmulMode.h"
         backend_prefix: "HIPDNN_MOE_GROUPED_MATMUL_MODE_"
         values:
-          - { name: "NONE", value: 0, description: "Tokens are already routed" }
-          - { name: "GATHER", value: 1, description: "Gather tokens before grouped matmul" }
-          - { name: "SCATTER", value: 2, description: "Scatter grouped matmul output to source token order" }
+          - { name: "NOT_SET", value: 0, sentinel: true, description: "Mode not specified" }
+          - { name: "NONE", value: 0, frontend_value: 1, description: "Tokens are already routed" }
+          - { name: "GATHER", value: 1, frontend_value: 2, description: "Gather tokens before grouped matmul" }
+          - { name: "SCATTER", value: 2, frontend_value: 3, description: "Scatter grouped matmul output to source token order" }
 
     - name: "top_k"
       fbs_field: "top_k"

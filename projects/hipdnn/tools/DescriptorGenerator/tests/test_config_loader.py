@@ -412,6 +412,19 @@ class TestTestDataParsing:
         assert scatter_top_k.maximum_tensor == "weight"
         assert scatter_top_k.maximum_dimension == 0
 
+    def test_moe_frontend_sentinel_preserves_cudnn_default(self, load_test_config):
+        config = load_test_config("moe_grouped_matmul.yaml")
+        mode = config.mode_fields[0]
+        values = {value.name: value for value in mode.enum_def.values}
+
+        assert mode.frontend_sentinel_only is True
+        assert mode.default_value == "MoeGroupedMatmulMode::NONE"
+        assert mode.mode_converter_returns_optional is True
+        assert mode.emit_mode_sentinel_check is False
+        assert values["NOT_SET"].sentinel is True
+        assert values["NONE"].value == 0
+        assert values["NONE"].effective_frontend_value == 1
+
     def test_moe_mode_rules_require_every_executable_mode(self, load_test_config):
         config = load_test_config("moe_grouped_matmul.yaml")
         config.mode_rules.pop()

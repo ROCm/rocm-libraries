@@ -274,9 +274,10 @@ typedef AttentionImplementation
  */
 enum class MoeGroupedMatmulMode
 {
-    NONE = 0, ///< Tokens are already routed.
-    GATHER = 1, ///< Gather source tokens before grouped matmul.
-    SCATTER = 2 ///< Scatter grouped-matmul output to source token order.
+    NOT_SET = 0, ///< Mode not specified.
+    NONE = 1, ///< Tokens are already routed.
+    GATHER = 2, ///< Gather source tokens before grouped matmul.
+    SCATTER = 3 ///< Scatter grouped-matmul output to source token order.
 };
 typedef MoeGroupedMatmulMode MoeGroupedMatmulMode_t; ///< @brief MoE routing mode alias
 
@@ -519,7 +520,8 @@ inline hipdnnAttentionImplementation_t
     }
 }
 
-inline hipdnnMoeGroupedMatmulMode_t toBackendMoeGroupedMatmulMode(const MoeGroupedMatmulMode& mode)
+inline std::optional<hipdnnMoeGroupedMatmulMode_t>
+    toBackendMoeGroupedMatmulMode(const MoeGroupedMatmulMode& mode)
 {
     switch(mode)
     {
@@ -530,7 +532,7 @@ inline hipdnnMoeGroupedMatmulMode_t toBackendMoeGroupedMatmulMode(const MoeGroup
     case MoeGroupedMatmulMode::SCATTER:
         return HIPDNN_MOE_GROUPED_MATMUL_MODE_SCATTER;
     default:
-        return HIPDNN_MOE_GROUPED_MATMUL_MODE_NONE;
+        return std::nullopt;
     }
 }
 
@@ -599,7 +601,7 @@ inline std::pair<MoeGroupedMatmulMode, Error>
     case HIPDNN_MOE_GROUPED_MATMUL_MODE_SCATTER:
         return {MoeGroupedMatmulMode::SCATTER, {}};
     default:
-        return {MoeGroupedMatmulMode::NONE,
+        return {MoeGroupedMatmulMode::NOT_SET,
                 {ErrorCode::HIPDNN_BACKEND_ERROR,
                  "Unknown hipdnnMoeGroupedMatmulMode_t value: "
                      + std::to_string(static_cast<int>(mode))}};

@@ -50,10 +50,14 @@ inline Error createMoeGroupedMatmulOperation(
     // Mode selects the canonical optional descriptor footprint.
     const auto frontendMode = attributes.get_mode();
     auto mode = hipdnn_frontend::toBackendMoeGroupedMatmulMode(frontendMode);
+    if(!mode.has_value())
+    {
+        return {ErrorCode::INVALID_VALUE, "Unsupported mode"};
+    }
     HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(opDesc.get(),
                                                HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_MODE,
                                                HIPDNN_TYPE_MOE_GROUPED_MATMUL_MODE,
-                                               mode,
+                                               *mode,
                                                "MoE grouped matmul mode"));
 
     switch(frontendMode)

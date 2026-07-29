@@ -237,6 +237,12 @@ class DataField:
     #   None       — unset; resolved by `effective_mode_sentinel` via auto-detection
     mode_sentinel: Optional[str] = None
 
+    # True when a frontend-only sentinel is intentionally absent from the
+    # backend C API and FlatBuffers enum. The packer rejects it before the
+    # backend descriptor is built, so finalize must not test the SDK enum for
+    # an unavailable sentinel value.
+    frontend_sentinel_only: bool = False
+
     @property
     def has_enum_def(self) -> bool:
         """Whether this field has a generatable enum definition."""
@@ -281,6 +287,8 @@ class DataField:
         - ``optional``: emit only if a sentinel is present in the enum_def
         - ``none``: never emit
         """
+        if self.frontend_sentinel_only:
+            return False
         policy = self.effective_mode_sentinel
         if policy == "none":
             return False

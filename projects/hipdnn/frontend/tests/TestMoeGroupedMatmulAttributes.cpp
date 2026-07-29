@@ -71,6 +71,7 @@ TEST(TestMoeGroupedMatmulAttributes, DefaultValues)
     EXPECT_EQ(attrs.get_output(), nullptr);
 
     // Vector fields should be empty by default
+    EXPECT_EQ(attrs.get_mode(), MoeGroupedMatmulMode::NONE);
     EXPECT_EQ(attrs.get_top_k(), 0);
 }
 
