@@ -1137,10 +1137,31 @@ void rocke_b_s_waitcnt(rocke_ir_builder_t* b, int vmcnt, int lgkmcnt, int expcnt
     rocke_i_op0(b, ROCKE_OP_TILE_S_WAITCNT, NULL, 0, &attrs);
 }
 
+/* Range-check an immediate the intrinsic declares as i16 (Python _check_u16).
+ * LLVM truncates a too-wide immediate silently (i16 70000 becomes i16 4464),
+ * turning an out-of-range wait count into a WRONG wait count with no
+ * diagnostic. Record the error instead; masking would be equally silent. */
+static int rocke_i_check_u16(rocke_ir_builder_t* b, const char* op, const char* field, int value)
+{
+    if(value < 0 || value > 0xFFFF)
+    {
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "%s %s must fit an unsigned i16 (0..65535), got %d",
+                        op,
+                        field,
+                        value);
+        return 0;
+    }
+    return 1;
+}
+
 void rocke_b_s_wait_asynccnt(rocke_ir_builder_t* b, int n)
 {
     rocke_attr_map_t attrs;
     if(!rocke_i_live(b))
+        return;
+    if(!rocke_i_check_u16(b, "s_wait_asynccnt", "n", n))
         return;
     attrs = rocke_i_attrs(b);
     rocke_attr_set_int(b, &attrs, "n", (int64_t)n);
@@ -1159,6 +1180,8 @@ void rocke_b_wait_asyncmark(rocke_ir_builder_t* b, int n)
     rocke_attr_map_t attrs;
     if(!rocke_i_live(b))
         return;
+    if(!rocke_i_check_u16(b, "wait_asyncmark", "n", n))
+        return;
     attrs = rocke_i_attrs(b);
     rocke_attr_set_int(b, &attrs, "n", (int64_t)n);
     rocke_i_op0(b, ROCKE_OP_TILE_WAIT_ASYNCMARK, NULL, 0, &attrs);
@@ -1169,8 +1192,10 @@ void rocke_b_s_wait_event(rocke_ir_builder_t* b, int imm)
     rocke_attr_map_t attrs;
     if(!rocke_i_live(b))
         return;
+    if(!rocke_i_check_u16(b, "s_wait_event", "imm", imm))
+        return;
     attrs = rocke_i_attrs(b);
-    rocke_attr_set_int(b, &attrs, "imm", (int64_t)(imm & 0xFFFF));
+    rocke_attr_set_int(b, &attrs, "imm", (int64_t)imm);
     rocke_i_op0(b, ROCKE_OP_TILE_S_WAIT_EVENT, NULL, 0, &attrs);
 }
 

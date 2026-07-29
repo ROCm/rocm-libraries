@@ -41,6 +41,7 @@ from typing import Dict, FrozenSet, List, Optional, Tuple
 from .ir import (
     KernelDef,
     Op,
+    Param,
     PtrType,
     Region,
     SmemType,
@@ -385,7 +386,7 @@ _INTRINSIC_DECLS: Dict[str, str] = {
     "s.wait.loadcnt": "declare void @llvm.amdgcn.s.wait.loadcnt(i16)",
     # gfx1250 (gfx1250) async global<->LDS DMA + its dedicated ASYNC counter.
     # The gfx9 buffer/global load-to-LDS intrinsics are NOT selectable here.
-    "s.wait.asynccnt": "declare void @llvm.amdgcn.s.wait.asynccnt(i16)",
+    "s.wait.asynccnt": "declare void @llvm.amdgcn.s.wait.asynccnt(i16 immarg)",
     "global.load.async.to.lds.b32": (
         "declare void @llvm.amdgcn.global.load.async.to.lds.b32("
         "ptr addrspace(1) nocapture, ptr addrspace(3) nocapture, i32 immarg, i32 immarg)"
@@ -904,14 +905,56 @@ _INTRINSIC_DECLS: Dict[str, str] = {
     "amdgcn.s.wqm.i64": "declare i64 @llvm.amdgcn.s.wqm.i64(i64)",
     "amdgcn.s.wqm.i32": "declare i32 @llvm.amdgcn.s.wqm.i32(i32)",
     # --- Aligned vector 128b loads (LLVM 23) ---
-    "av.load.b128": "declare <4 x i32> @llvm.amdgcn.av.load.b128(ptr, metadata)",
-    "av.store.b128": (
-        "declare void @llvm.amdgcn.av.store.b128(ptr, <4 x i32>, metadata)"
+    # ``av.load/store.b128`` take an ``llvm_anyptr_ty`` pointer (flat or global
+    # only, per AMDGPUUsage), so the overload is mangled by address space; see
+    # _AV_B128_PTR_TYPES and the s.prefetch.inst note below.
+    "av.load.b128.p0": "declare <4 x i32> @llvm.amdgcn.av.load.b128.p0(ptr, metadata)",
+    "av.load.b128.p1": (
+        "declare <4 x i32> @llvm.amdgcn.av.load.b128.p1(ptr addrspace(1), metadata)"
+    ),
+    "av.store.b128.p0": (
+        "declare void @llvm.amdgcn.av.store.b128.p0(ptr, <4 x i32>, metadata)"
+    ),
+    "av.store.b128.p1": (
+        "declare void @llvm.amdgcn.av.store.b128.p1("
+        "ptr addrspace(1), <4 x i32>, metadata)"
     ),
     # --- Scheduler / resource hints (LLVM 23) ---
     "s.alloc.vgpr": "declare i1 @llvm.amdgcn.s.alloc.vgpr(i32)",
     "s.wait.event": "declare void @llvm.amdgcn.s.wait.event(i16 immarg)",
-    "s.prefetch.inst": "declare void @llvm.amdgcn.s.prefetch.inst(ptr, i32)",
+    # ``s.prefetch.inst`` takes an ``llvm_anyptr_ty`` operand, so the overload
+    # is mangled by address space and the declare has to name the SAME address
+    # space the call site passes. One key per space rather than a single
+    # unmangled declare: a kernel prefetching two pointers in different spaces
+    # would otherwise redefine one name with two signatures ("invalid
+    # redefinition of function"). Instruction memory is reached through flat,
+    # global, or constant pointers; see _S_PREFETCH_INST_PTR_TYPES.
+    "s.prefetch.inst.p0": "declare void @llvm.amdgcn.s.prefetch.inst.p0(ptr, i32)",
+    "s.prefetch.inst.p1": (
+        "declare void @llvm.amdgcn.s.prefetch.inst.p1(ptr addrspace(1), i32)"
+    ),
+    "s.prefetch.inst.p4": (
+        "declare void @llvm.amdgcn.s.prefetch.inst.p4(ptr addrspace(4), i32)"
+    ),
+}
+
+# Address spaces each ``llvm_anyptr_ty`` intrinsic accepts, mapped to their LLVM
+# pointer text. Every key MUST have a matching ``<key>.p<N>`` declare above: an
+# unknown need-key emits NO declare at all (``finalize`` skips it), so a missing
+# entry would silently produce a call to an undeclared function.
+#
+# ``s.prefetch.inst`` reaches instruction memory through a flat, global, or
+# constant pointer (LLVM's own test uses ``addrspace(4)``).
+_S_PREFETCH_INST_PTR_TYPES: Dict[int, str] = {
+    0: "ptr",
+    1: "ptr addrspace(1)",
+    4: "ptr addrspace(4)",
+}
+# ``av.load/store.b128`` are documented as flat or global only: a global pointer
+# selects ``global_load/store``, a flat pointer ``flat_load/store``.
+_AV_B128_PTR_TYPES: Dict[int, str] = {
+    0: "ptr",
+    1: "ptr addrspace(1)",
 }
 
 
@@ -985,6 +1028,23 @@ def _llvm_type(t: Type) -> str:
     if t.name == "f32":
         return "float"
     raise NotImplementedError(f"no LLVM mapping for type {t!r}")
+
+
+def _param_llvm_type(p: Param) -> str:
+    """LLVM text for a kernel parameter, honouring the ``addr_space`` override.
+
+    A ``PtrType`` param may be pinned to a different address space than its IR
+    type says (P17: descriptor tables ask for ``addrspace(4)``). The function
+    header and any call site passing that param must name the same type, so
+    both go through here.
+    """
+    if isinstance(p.type, PtrType):
+        ovr = p.attrs.get("addr_space")
+        if ovr == "constant":
+            return "ptr addrspace(4)"
+        if ovr == "global":
+            return "ptr addrspace(1)"
+    return _llvm_type(p.type)
 
 
 def _escape_llvm_asm_string(s: str) -> str:
@@ -1128,8 +1188,78 @@ class _Lowerer:
     def _operand_with_type(self, v: Value) -> str:
         return f"{_llvm_type(v.type)} {self._operand(v)}"
 
+    def _anyptr_space(
+        self, op: str, ptr: Value, allowed: Dict[int, str]
+    ) -> Tuple[int, str]:
+        """Resolve an ``llvm_anyptr_ty`` operand to its (address space, type).
+
+        For these intrinsics the address space is part of the overload, so the
+        mangled name, the declare, and the call site all have to agree with the
+        pointer's real type. Naming a bare ``ptr`` for an ``addrspace(N)`` value
+        is not a lax spelling -- LLVM rejects the module outright with
+        "defined with type 'ptr addrspace(N)' but expected 'ptr'".
+        """
+        ty = self._ptr_llvm_type(ptr)
+        for space, text in allowed.items():
+            if text == ty:
+                return space, text
+        raise ValueError(
+            f"{op}: pointer operand is {ty}, but the intrinsic accepts only "
+            f"{', '.join(allowed[s] for s in sorted(allowed))}"
+        )
+
+    def _lds_ptr_operand(self, op: str, v: Value) -> str:
+        """Operand text for an intrinsic's ``ptr addrspace(3)`` LDS argument.
+
+        At the builder level an LDS "pointer" is an i64 address -- that is what
+        ``smem_addr_of`` returns, and no builder op produces an ``addrspace(3)``
+        pointer value -- while these intrinsics declare ``ptr addrspace(3)``.
+        Convert rather than relabel the i64: LLVM rejects the module with
+        "defined with type 'i64' but expected 'ptr addrspace(3)'".
+        """
+        ty = _llvm_type(v.type)
+        if ty == "ptr addrspace(3)":
+            return self._operand(v)
+        if ty != "i64":
+            raise ValueError(
+                f"{op}: LDS argument must be an i64 LDS address (from "
+                f"smem_addr_of) or a ptr addrspace(3), got {ty}"
+            )
+        name = self._fresh("lds_ptr")
+        self._current().emit(
+            f"  {name} = inttoptr i64 {self._operand(v)} to ptr addrspace(3)"
+        )
+        return name
+
+    def _ptr_llvm_type(self, v: Value) -> str:
+        """LLVM pointer text for an operand as the *module* sees it.
+
+        For a kernel parameter that is the type in the function header, which
+        the ``addr_space`` override can move away from the IR type; naming the
+        IR type at a call site instead would emit a type mismatch against the
+        signature.
+        """
+        for p in self.kernel.params:
+            if f"%{p.name}" == v.name:
+                return _param_llvm_type(p)
+        return _llvm_type(v.type)
+
     def _need(self, key: str) -> None:
         self._needs_intrin[key] = True
+
+    def _check_u16(self, op: str, field: str, value: object) -> int:
+        """Reject an immediate that does not fit the declared ``i16``.
+
+        The builder checks too, but serialized IR reaches the lowerer without
+        passing through it, and LLVM truncates silently (``i16 70000`` becomes
+        ``i16 4464``) -- a wrong wait count with no diagnostic.
+        """
+        v = int(value)  # type: ignore[call-overload]
+        if not 0 <= v <= 0xFFFF:
+            raise ValueError(
+                f"{op} {field} must fit an unsigned i16 (0..65535), got {v}"
+            )
+        return v
 
     # ----- constant folding helpers -----
 
@@ -3335,20 +3465,23 @@ class _Lowerer:
 
     def _op_tile_av_load_b128(self, op: Op) -> None:
         (ptr,) = op.operands
-        self._need("av.load.b128")
+        space, ptr_ty = self._anyptr_space("av_load_b128", ptr, _AV_B128_PTR_TYPES)
+        self._need(f"av.load.b128.p{space}")
         self._needs_av_scope_md = True
         self._current().emit(
-            f"  {op.result.name} = call <4 x i32> @llvm.amdgcn.av.load.b128("
-            f"ptr {self._operand(ptr)}, metadata !3)"
+            f"  {op.result.name} = call <4 x i32> "
+            f"@llvm.amdgcn.av.load.b128.p{space}("
+            f"{ptr_ty} {self._operand(ptr)}, metadata !3)"
         )
 
     def _op_tile_av_store_b128(self, op: Op) -> None:
         ptr, data = op.operands
-        self._need("av.store.b128")
+        space, ptr_ty = self._anyptr_space("av_store_b128", ptr, _AV_B128_PTR_TYPES)
+        self._need(f"av.store.b128.p{space}")
         self._needs_av_scope_md = True
         self._current().emit(
-            f"  call void @llvm.amdgcn.av.store.b128("
-            f"ptr {self._operand(ptr)}, <4 x i32> {self._operand(data)}, "
+            f"  call void @llvm.amdgcn.av.store.b128.p{space}("
+            f"{ptr_ty} {self._operand(ptr)}, <4 x i32> {self._operand(data)}, "
             f"metadata !3)"
         )
 
@@ -3364,21 +3497,24 @@ class _Lowerer:
         self._current().emit("  call void @llvm.amdgcn.asyncmark()")
 
     def _op_tile_wait_asyncmark(self, op: Op) -> None:
-        n = int(op.attrs.get("n", 0))
+        n = self._check_u16("wait_asyncmark", "n", op.attrs.get("n", 0))
         self._need("wait.asyncmark")
         self._current().emit(f"  call void @llvm.amdgcn.wait.asyncmark(i16 {n})")
 
     def _op_tile_s_wait_event(self, op: Op) -> None:
-        imm = int(op.attrs.get("imm", 0))
+        imm = self._check_u16("s_wait_event", "imm", op.attrs.get("imm", 0))
         self._need("s.wait.event")
         self._current().emit(f"  call void @llvm.amdgcn.s.wait.event(i16 {imm})")
 
     def _op_tile_s_prefetch_inst(self, op: Op) -> None:
         ptr, length = op.operands
-        self._need("s.prefetch.inst")
+        space, ptr_ty = self._anyptr_space(
+            "s_prefetch_inst", ptr, _S_PREFETCH_INST_PTR_TYPES
+        )
+        self._need(f"s.prefetch.inst.p{space}")
         self._current().emit(
-            f"  call void @llvm.amdgcn.s.prefetch.inst("
-            f"ptr {self._operand(ptr)}, i32 {self._operand(length)})"
+            f"  call void @llvm.amdgcn.s.prefetch.inst.p{space}("
+            f"{ptr_ty} {self._operand(ptr)}, i32 {self._operand(length)})"
         )
 
     def _op_tile_permlane32_swap(self, op: Op) -> None:
@@ -3700,7 +3836,7 @@ class _Lowerer:
         # (they have no async global<->LDS instructions to track).
         if not getattr(self._backend, "has_async_lds_counter", False):
             return
-        n = int(op.attrs.get("n", 0))
+        n = self._check_u16("s_wait_asynccnt", "n", op.attrs.get("n", 0))
         self._need("s.wait.asynccnt")
         self._current().emit(f"  call void @llvm.amdgcn.s.wait.asynccnt(i16 {n})")
 
@@ -4254,10 +4390,11 @@ class _Lowerer:
         bytes_per_lane = dwords * 4
         aux = int(op.attrs.get("aux", 0))
         self._need("raw.ptr.buffer.load.lds")
+        lds = self._lds_ptr_operand("async_buffer_load_lds", lds_ptr)
         self._current().emit(
             f"  call void @llvm.amdgcn.raw.ptr.buffer.load.lds("
             f"ptr addrspace(8) {self._operand(rsrc)}, "
-            f"ptr addrspace(3) {self._operand(lds_ptr)}, "
+            f"ptr addrspace(3) {lds}, "
             f"i32 {bytes_per_lane}, "
             f"i32 {self._operand(voffset)}, "
             f"i32 {self._operand(soffset)}, "
@@ -4272,10 +4409,11 @@ class _Lowerer:
         bytes_per_lane = dwords * 4
         aux = int(op.attrs.get("aux", 0))
         self._need("raw.ptr.buffer.load.async.lds")
+        lds = self._lds_ptr_operand("buffer_load_lds_async", lds_ptr)
         self._current().emit(
             f"  call void @llvm.amdgcn.raw.ptr.buffer.load.async.lds("
             f"ptr addrspace(8) {self._operand(rsrc)}, "
-            f"ptr addrspace(3) {self._operand(lds_ptr)}, "
+            f"ptr addrspace(3) {lds}, "
             f"i32 {bytes_per_lane}, "
             f"i32 {self._operand(voffset)}, "
             f"i32 {self._operand(soffset)}, "
@@ -5050,18 +5188,8 @@ class _Lowerer:
         # space via the ``addr_space`` attr (P17): ``"constant"`` →
         # ``ptr addrspace(4)`` for descriptor tables, otherwise the
         # default ``ptr addrspace(1)`` (global).
-        def _param_type_str(p):
-            t = _llvm_type(p.type)
-            if isinstance(p.type, PtrType):
-                ovr = p.attrs.get("addr_space")
-                if ovr == "constant":
-                    t = "ptr addrspace(4)"
-                elif ovr == "global":
-                    t = "ptr addrspace(1)"
-            return t
-
         params = [
-            f"{_param_type_str(p)}{_param_attrs(p.attrs, p.type)} %{p.name}"
+            f"{_param_llvm_type(p)}{_param_attrs(p.attrs, p.type)} %{p.name}"
             for p in self.kernel.params
         ]
         out.append(

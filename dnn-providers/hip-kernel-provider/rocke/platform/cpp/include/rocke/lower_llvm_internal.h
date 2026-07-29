@@ -109,6 +109,26 @@ extern const int ROCKE_LL_INTRINSIC_DECLS_LLVM23_OVERRIDES_COUNT;
 /* Resolve the flavor-specific override table (NULL/0 for non-modern flavors). */
 const rocke_ll_decl_t* rocke_ll_flavor_overrides(rocke_llvm_flavor_t flavor, int* out_count);
 
+/* ---------------------------------------------------------- anyptr overloads */
+
+/* One accepted address space of an llvm_anyptr_ty intrinsic, with the LLVM
+ * pointer text that names it. Mirrors one entry of the Python
+ * _S_PREFETCH_INST_PTR_TYPES / _AV_B128_PTR_TYPES dicts; every entry needs a
+ * matching "<key>.p<space>" row in ROCKE_LL_INTRINSIC_DECLS. */
+typedef struct rocke_ll_anyptr_space
+{
+    int space;
+    const char* ptr_ty;
+} rocke_ll_anyptr_space_t;
+
+extern const rocke_ll_anyptr_space_t ROCKE_LL_S_PREFETCH_INST_PTR_TYPES[];
+extern const int ROCKE_LL_S_PREFETCH_INST_PTR_TYPES_COUNT;
+extern const rocke_ll_anyptr_space_t ROCKE_LL_AV_B128_PTR_TYPES[];
+extern const int ROCKE_LL_AV_B128_PTR_TYPES_COUNT;
+
+/* The resolver that consumes these tables is rocke_ll_anyptr_space, declared
+ * with the other rocke_lower_t helpers below. */
+
 /* ====================================================================== */
 /* ISA backend (the gfx-keyed LLVM details)                               */
 /* ====================================================================== */
@@ -138,6 +158,13 @@ typedef struct rocke_isa_backend
     int buffer_rsrc_word3;
     int (*encode_waitcnt)(int vmcnt, int expcnt, int lgkmcnt);
     rocke_ll_isa_kind_t kind; /* CDNA (reject WMMA) vs RDNA (emit WMMA)      */
+    /* Python ISABackend.has_async_lds_counter: the gfx1250 dedicated async-DMA
+     * counter (s_wait_asynccnt + global_load_async_to_lds). False on every
+     * backend registered here -- no gfx1250 row exists yet (see the NAMED GAP
+     * in mma.cpp) -- so s_wait_asynccnt lowers to nothing. Declared as a
+     * backend fact rather than tested by gfx-string prefix so the capability
+     * has one definition site per backend, as in Python. */
+    bool has_async_lds_counter;
 } rocke_isa_backend_t;
 
 /* Resolve a gfx string to its backend (Python backend_for). NULL => "gfx950".
@@ -325,6 +352,28 @@ const char* rocke_ll_operand_with_type(rocke_lower_t* L, const rocke_value_t* v)
 /* Map an IR Type to its LLVM textual form (Python _llvm_type). Sets NOTIMPL on
  * an unmapped type and returns "" . */
 const char* rocke_ll_llvm_type(rocke_lower_t* L, const rocke_type_t* t);
+
+/* LLVM text for a kernel parameter, honouring the addr_space override (P17)
+ * (Python _param_llvm_type). Used by the function header AND by call sites
+ * passing the param, so the two can never name different types. */
+const char* rocke_ll_param_llvm_type(rocke_lower_t* L, const rocke_param_t* p);
+
+/* LLVM pointer text for an operand as the module sees it: the function
+ * header's type for a kernel param, else the IR type (Python
+ * _Lowerer._ptr_llvm_type). */
+const char* rocke_ll_value_ptr_type(rocke_lower_t* L, const rocke_value_t* v);
+
+/* Address space of an llvm_anyptr_ty operand, validated against `allowed`
+ * (Python _Lowerer._anyptr_space). Also writes the matching pointer text to
+ * *out_ptr_ty when non-NULL. Fails (does not return) for a space the intrinsic
+ * does not accept: the space is part of the overload, so the mangled name, the
+ * declare, and the call site all have to agree with the pointer's real type. */
+int rocke_ll_anyptr_space(rocke_lower_t* L,
+                          const char* op,
+                          const rocke_value_t* ptr,
+                          const rocke_ll_anyptr_space_t* allowed,
+                          int count,
+                          const char** out_ptr_ty);
 
 /* Map an IR type-NAME string (from op.attrs, e.g. iter_args metadata) back to
  * LLVM text (Python _llvm_type_from_name). Handles scalars + "vec<exN>". */

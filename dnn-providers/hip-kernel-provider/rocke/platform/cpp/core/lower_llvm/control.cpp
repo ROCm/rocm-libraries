@@ -974,10 +974,26 @@ static void _op_tile_s_waitcnt(rocke_lower_t* L, const rocke_op_t* op)
     rocke_ll_emitf(L, "  call void @llvm.amdgcn.s.waitcnt(i32 %d)", mask);
 }
 
+/* Python: getattr(self._backend, "has_async_lds_counter", False). */
 static bool ll_has_async_lds_counter(const rocke_lower_t* L)
 {
-    const char* gfx = (L && L->backend && L->backend->gfx) ? L->backend->gfx : "";
-    return strncmp(gfx, "gfx125", 6) == 0;
+    return L && L->backend && L->backend->has_async_lds_counter;
+}
+
+/* Reject an immediate that does not fit the i16 the intrinsic declares (Python
+ * _Lowerer._check_u16). The builders check too, but serialized IR reaches the
+ * lowerer without passing through them, and LLVM would truncate silently. */
+static void ll_check_u16(rocke_lower_t* L, const char* op, const char* field, int64_t value)
+{
+    if(value < 0 || value > 0xFFFF)
+    {
+        rocke_ll_fail(L,
+                      ROCKE_ERR_VALUE,
+                      "%s %s must fit an unsigned i16 (0..65535), got %lld",
+                      op,
+                      field,
+                      (long long)value);
+    }
 }
 
 static void _op_tile_s_wait_asynccnt(rocke_lower_t* L, const rocke_op_t* op)
@@ -989,6 +1005,7 @@ static void _op_tile_s_wait_asynccnt(rocke_lower_t* L, const rocke_op_t* op)
         return;
     if(!rocke_attr_get_int(&op->attrs, "n", &n))
         n = 0;
+    ll_check_u16(L, "s_wait_asynccnt", "n", n);
     rocke_ll_need(L, "s.wait.asynccnt");
     rocke_ll_emitf(L, "  call void @llvm.amdgcn.s.wait.asynccnt(i16 %lld)", (long long)n);
 }
@@ -1009,6 +1026,7 @@ static void _op_tile_wait_asyncmark(rocke_lower_t* L, const rocke_op_t* op)
         return;
     if(!rocke_attr_get_int(&op->attrs, "n", &n))
         n = 0;
+    ll_check_u16(L, "wait_asyncmark", "n", n);
     rocke_ll_need(L, "wait.asyncmark");
     rocke_ll_emitf(L, "  call void @llvm.amdgcn.wait.asyncmark(i16 %lld)", (long long)n);
 }
@@ -1020,17 +1038,28 @@ static void _op_tile_s_wait_event(rocke_lower_t* L, const rocke_op_t* op)
         return;
     if(!rocke_attr_get_int(&op->attrs, "imm", &imm))
         imm = 0;
+    ll_check_u16(L, "s_wait_event", "imm", imm);
     rocke_ll_need(L, "s.wait.event");
-    rocke_ll_emitf(L, "  call void @llvm.amdgcn.s.wait.event(i16 %lld)", (long long)(imm & 0xFFFF));
+    rocke_ll_emitf(L, "  call void @llvm.amdgcn.s.wait.event(i16 %lld)", (long long)imm);
 }
 
 static void _op_tile_s_prefetch_inst(rocke_lower_t* L, const rocke_op_t* op)
 {
+    const char* ptr_ty = NULL;
+    int space;
     if(!rocke_ll_live(L))
         return;
-    rocke_ll_need(L, "s.prefetch.inst");
+    space = rocke_ll_anyptr_space(L,
+                                  "s_prefetch_inst",
+                                  op->operands[0],
+                                  ROCKE_LL_S_PREFETCH_INST_PTR_TYPES,
+                                  ROCKE_LL_S_PREFETCH_INST_PTR_TYPES_COUNT,
+                                  &ptr_ty);
+    rocke_ll_need(L, rocke_arena_printf(&L->arena, "s.prefetch.inst.p%d", space));
     rocke_ll_emitf(L,
-                   "  call void @llvm.amdgcn.s.prefetch.inst(ptr %s, i32 %s)",
+                   "  call void @llvm.amdgcn.s.prefetch.inst.p%d(%s %s, i32 %s)",
+                   space,
+                   ptr_ty,
                    rocke_ll_operand(L, op->operands[0]),
                    rocke_ll_operand(L, op->operands[1]));
 }

@@ -482,20 +482,38 @@ static void _op_tile_s_wqm(rocke_lower_t* L, const rocke_op_t* op)
 
 static void _op_tile_av_load_b128(rocke_lower_t* L, const rocke_op_t* op)
 {
-    rocke_ll_need(L, "av.load.b128");
+    const char* ptr_ty = NULL;
+    int space = rocke_ll_anyptr_space(L,
+                                      "av_load_b128",
+                                      op->operands[0],
+                                      ROCKE_LL_AV_B128_PTR_TYPES,
+                                      ROCKE_LL_AV_B128_PTR_TYPES_COUNT,
+                                      &ptr_ty);
+    rocke_ll_need(L, rocke_arena_printf(&L->arena, "av.load.b128.p%d", space));
     L->needs_av_scope_md = true;
     rocke_ll_emitf(L,
-                   "  %s = call <4 x i32> @llvm.amdgcn.av.load.b128(ptr %s, metadata !3)",
+                   "  %s = call <4 x i32> @llvm.amdgcn.av.load.b128.p%d(%s %s, metadata !3)",
                    ll_result_name(op),
+                   space,
+                   ptr_ty,
                    rocke_ll_operand(L, op->operands[0]));
 }
 
 static void _op_tile_av_store_b128(rocke_lower_t* L, const rocke_op_t* op)
 {
-    rocke_ll_need(L, "av.store.b128");
+    const char* ptr_ty = NULL;
+    int space = rocke_ll_anyptr_space(L,
+                                      "av_store_b128",
+                                      op->operands[0],
+                                      ROCKE_LL_AV_B128_PTR_TYPES,
+                                      ROCKE_LL_AV_B128_PTR_TYPES_COUNT,
+                                      &ptr_ty);
+    rocke_ll_need(L, rocke_arena_printf(&L->arena, "av.store.b128.p%d", space));
     L->needs_av_scope_md = true;
     rocke_ll_emitf(L,
-                   "  call void @llvm.amdgcn.av.store.b128(ptr %s, <4 x i32> %s, metadata !3)",
+                   "  call void @llvm.amdgcn.av.store.b128.p%d(%s %s, <4 x i32> %s, metadata !3)",
+                   space,
+                   ptr_ty,
                    rocke_ll_operand(L, op->operands[0]),
                    rocke_ll_operand(L, op->operands[1]));
 }

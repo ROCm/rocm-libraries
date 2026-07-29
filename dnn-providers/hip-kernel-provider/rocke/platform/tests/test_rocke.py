@@ -2952,9 +2952,16 @@ class TestNewTargetIntrinsics(unittest.TestCase):
             b.av_load_b128(p)
 
         ll = self._lower("avld", build)
-        self.assertIn("declare <4 x i32> @llvm.amdgcn.av.load.b128(ptr, metadata)", ll)
+        # A global pointer param is ptr addrspace(1) in the header, so the
+        # overload -- declare and call -- has to be the p1 one.
         self.assertIn(
-            "call <4 x i32> @llvm.amdgcn.av.load.b128(ptr %p, metadata !3)", ll
+            "declare <4 x i32> @llvm.amdgcn.av.load.b128.p1(ptr addrspace(1), metadata)",
+            ll,
+        )
+        self.assertIn(
+            "call <4 x i32> @llvm.amdgcn.av.load.b128.p1("
+            "ptr addrspace(1) %p, metadata !3)",
+            ll,
         )
         # The scope operand must be backed by a real metadata node.
         self.assertIn('!3 = !{!"agent"}', ll)
@@ -2968,11 +2975,26 @@ class TestNewTargetIntrinsics(unittest.TestCase):
 
         ll = self._lower("avst", build)
         self.assertIn(
-            "declare void @llvm.amdgcn.av.store.b128(ptr, <4 x i32>, metadata)", ll
+            "declare void @llvm.amdgcn.av.store.b128.p1("
+            "ptr addrspace(1), <4 x i32>, metadata)",
+            ll,
         )
-        self.assertIn("call void @llvm.amdgcn.av.store.b128(ptr %p, <4 x i32>", ll)
+        self.assertIn(
+            "call void @llvm.amdgcn.av.store.b128.p1(ptr addrspace(1) %p, <4 x i32>", ll
+        )
         self.assertIn("metadata !3)", ll)
         self.assertIn('!3 = !{!"agent"}', ll)
+
+    def test_av_b128_rejects_lds_pointer(self):
+        """LDS is not one of the spaces the intrinsic is defined for."""
+        from rocke.core.ir import I32, PtrType
+        from rocke.core.lower_llvm import lower_kernel_to_llvm
+
+        b = self._builder("av_lds")
+        p = b.param("p", PtrType(I32, "lds"), align=16)
+        b.av_load_b128(p)
+        with self.assertRaises(ValueError):
+            lower_kernel_to_llvm(b.kernel)
 
     def test_av_store_b128_requires_v4i32_data(self):
         from rocke.core.ir import I32, PtrType
@@ -3022,8 +3044,56 @@ class TestNewTargetIntrinsics(unittest.TestCase):
             b.s_prefetch_inst(code, b.const_i32(64))
 
         ll = self._lower("sprefetch", build)
-        self.assertIn("declare void @llvm.amdgcn.s.prefetch.inst(ptr, i32)", ll)
-        self.assertIn("call void @llvm.amdgcn.s.prefetch.inst(ptr %code, i32 64)", ll)
+        # The operand is llvm_anyptr_ty, so the call and its declare have to
+        # name the pointer's real space. Emitting a bare ``ptr`` for this
+        # addrspace(1) param is what LLVM rejects with "'%code' defined with
+        # type 'ptr addrspace(1)' but expected 'ptr'".
+        self.assertIn(
+            "declare void @llvm.amdgcn.s.prefetch.inst.p1(ptr addrspace(1), i32)", ll
+        )
+        self.assertIn(
+            "call void @llvm.amdgcn.s.prefetch.inst.p1("
+            "ptr addrspace(1) %code, i32 64)",
+            ll,
+        )
+
+    def test_s_prefetch_inst_spaces_coexist_in_one_module(self):
+        """Two spaces in one kernel must not collide on one declare.
+
+        LLVM's own ``llvm.amdgcn.s.prefetch.inst.ll`` test prefetches through
+        addrspace(4), so instruction memory really is reached through more than
+        one space. Since the overload is keyed on that space, an unmangled
+        declare would have to name one symbol twice with two signatures --
+        the same failure mode as ``mov_dpp8`` above.
+        """
+        from rocke.core.ir import I32, PtrType
+
+        def build(b):
+            glob = b.param("glob", PtrType(I32, "global"), align=4)
+            const = b.param("const_", PtrType(I32, "constant"), align=4)
+            n = b.const_i32(64)
+            b.s_prefetch_inst(glob, n)
+            b.s_prefetch_inst(const, n)
+
+        ll = self._lower("sprefetch_spaces", build)
+        self.assertIn(
+            "declare void @llvm.amdgcn.s.prefetch.inst.p1(ptr addrspace(1), i32)", ll
+        )
+        self.assertIn(
+            "declare void @llvm.amdgcn.s.prefetch.inst.p4(ptr addrspace(4), i32)", ll
+        )
+        self.assertIn("s.prefetch.inst.p1(ptr addrspace(1) %glob, i32 64)", ll)
+        self.assertIn("s.prefetch.inst.p4(ptr addrspace(4) %const_, i32 64)", ll)
+
+    def test_s_prefetch_inst_rejects_lds_pointer(self):
+        from rocke.core.ir import I32, PtrType
+        from rocke.core.lower_llvm import lower_kernel_to_llvm
+
+        b = self._builder("sprefetch_lds")
+        p = b.param("p", PtrType(I32, "lds"), align=4)
+        b.s_prefetch_inst(p, b.const_i32(64))
+        with self.assertRaises(ValueError):
+            lower_kernel_to_llvm(b.kernel)
 
     # ---- async buffer / global -> LDS ----
     def test_buffer_load_lds_async_converts_dwords_to_bytes(self):
@@ -3047,6 +3117,15 @@ class TestNewTargetIntrinsics(unittest.TestCase):
         self.assertIn("@llvm.amdgcn.raw.ptr.buffer.load.async.lds", ll)
         # dwords=4 -> 16 bytes per lane; trailing imm is coherency (CACHE_STREAM=2).
         self.assertIn("i32 16, i32 0, i32 0, i32 0, i32 2)", ll)
+        # smem_addr_of yields an i64 LDS address, but the intrinsic declares
+        # ptr addrspace(3); passing the i64 through is what LLVM rejects with
+        # "defined with type 'i64' but expected 'ptr addrspace(3)'".
+        self.assertIn("= inttoptr i64 ", ll)
+        self.assertRegex(
+            ll,
+            r"buffer\.load\.async\.lds\(ptr addrspace\(8\) \S+, "
+            r"ptr addrspace\(3\) %lds_ptr",
+        )
 
     def test_buffer_load_lds_async_rejects_bad_dwords_and_coherency(self):
         from rocke.core.ir import F16, I32, PtrType

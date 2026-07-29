@@ -325,8 +325,10 @@ void case_av_load_b128()
     const std::string ir = lower_one("avld", [](rocke_ir_builder_t* b) {
         rocke_b_av_load_b128(b, global_ptr_param(b, "p", rocke_i32()));
     });
-    EXPECT_IR(ir, "declare <4 x i32> @llvm.amdgcn.av.load.b128(ptr, metadata)");
-    EXPECT_IR(ir, "call <4 x i32> @llvm.amdgcn.av.load.b128(ptr %p, metadata !3)");
+    /* A global pointer param is ptr addrspace(1) in the header, so the
+     * overload -- declare and call -- has to be the p1 one. */
+    EXPECT_IR(ir, "declare <4 x i32> @llvm.amdgcn.av.load.b128.p1(ptr addrspace(1), metadata)");
+    EXPECT_IR(ir, "call <4 x i32> @llvm.amdgcn.av.load.b128.p1(ptr addrspace(1) %p, metadata !3)");
     /* The scope operand must be backed by a real metadata node. */
     EXPECT_IR(ir, "!3 = !{!\"agent\"}");
 }
@@ -337,8 +339,9 @@ void case_av_store_b128()
         rocke_value_t* p = global_ptr_param(b, "p", rocke_i32());
         rocke_b_av_store_b128(b, p, rocke_b_av_load_b128(b, p));
     });
-    EXPECT_IR(ir, "declare void @llvm.amdgcn.av.store.b128(ptr, <4 x i32>, metadata)");
-    EXPECT_IR(ir, "call void @llvm.amdgcn.av.store.b128(ptr %p, <4 x i32>");
+    EXPECT_IR(ir,
+              "declare void @llvm.amdgcn.av.store.b128.p1(ptr addrspace(1), <4 x i32>, metadata)");
+    EXPECT_IR(ir, "call void @llvm.amdgcn.av.store.b128.p1(ptr addrspace(1) %p, <4 x i32>");
     EXPECT_IR(ir, "metadata !3)");
     EXPECT_IR(ir, "!3 = !{!\"agent\"}");
 }
@@ -384,8 +387,12 @@ void case_s_prefetch_inst()
         rocke_b_s_prefetch_inst(
             b, global_ptr_param(b, "code", rocke_i32()), rocke_b_const_i32(b, 64));
     });
-    EXPECT_IR(ir, "declare void @llvm.amdgcn.s.prefetch.inst(ptr, i32)");
-    EXPECT_IR(ir, "call void @llvm.amdgcn.s.prefetch.inst(ptr %code, i32 64)");
+    /* The operand is llvm_anyptr_ty, so the call and its declare have to name
+     * the pointer's real space. A bare `ptr` for this addrspace(1) param is
+     * what LLVM rejects with "'%code' defined with type 'ptr addrspace(1)' but
+     * expected 'ptr'". */
+    EXPECT_IR(ir, "declare void @llvm.amdgcn.s.prefetch.inst.p1(ptr addrspace(1), i32)");
+    EXPECT_IR(ir, "call void @llvm.amdgcn.s.prefetch.inst.p1(ptr addrspace(1) %code, i32 64)");
 }
 
 /* ---- async buffer / global -> LDS ---- */
@@ -408,6 +415,11 @@ void case_buffer_load_lds_async()
     EXPECT_IR(ir, "@llvm.amdgcn.raw.ptr.buffer.load.async.lds");
     /* dwords=4 -> 16 bytes per lane; trailing imm is coherency (CACHE_STREAM=2). */
     EXPECT_IR(ir, "i32 16, i32 0, i32 0, i32 0, i32 2)");
+    /* smem_addr_of yields an i64 LDS address, but the intrinsic declares
+     * ptr addrspace(3); passing the i64 through is what LLVM rejects with
+     * "defined with type 'i64' but expected 'ptr addrspace(3)'". */
+    EXPECT_IR(ir, " = inttoptr i64 ");
+    EXPECT_IR(ir, "ptr addrspace(3) %lds_ptr");
 }
 
 void case_global_load_async_to_lds_b8()
@@ -437,6 +449,65 @@ void case_global_load_async_to_lds_b8()
     EXPECT_IR(ir, "call void @llvm.amdgcn.global.load.async.to.lds.b8(");
     /* Per-lane source/destination addresses are computed with GEPs. */
     EXPECT_IR(ir, "getelementptr inbounds");
+}
+
+/* ---- opcode table alignment ---- */
+
+/* These opcodes were spliced into rocke_opcode_t's family groups rather than
+ * appended, which is only safe while the two opcode-INDEXED tables in
+ * core_types.cpp (rocke_opcode_names / rocke_opcode_pure) get their new row in
+ * the same position. Both are sized ROCKE_OP__COUNT, so a missing row does not
+ * fail the build: it shifts every later row by one and zero-fills the tail,
+ * silently renaming ops. Pin each new opcode to its dotted name so that shift
+ * is a test failure instead of a mislabelled op in serialized IR.
+ *
+ * ROCKE_OP_CF_RETURN is the last enumerator, so it catches a shift introduced
+ * anywhere ahead of it -- including by an opcode this list does not name. */
+void case_opcode_names_are_aligned()
+{
+    static const struct
+    {
+        rocke_opcode_t opcode;
+        const char* name;
+    } k_expect[] = {
+        {ROCKE_OP_TILE_DS_SWIZZLE, "tile.ds_swizzle"},
+        {ROCKE_OP_TILE_DS_SWIZZLE_XOR, "tile.ds_swizzle_xor"},
+        {ROCKE_OP_TILE_MOV_DPP8, "tile.mov_dpp8"},
+        {ROCKE_OP_TILE_WAVE_REDUCE, "tile.wave_reduce"},
+        {ROCKE_OP_TILE_READLANE, "tile.readlane"},
+        {ROCKE_OP_TILE_WRITELANE, "tile.writelane"},
+        {ROCKE_OP_TILE_PERMLANE16, "tile.permlane16"},
+        {ROCKE_OP_TILE_PERMLANE64, "tile.permlane64"},
+        {ROCKE_OP_TILE_ALIGNBYTE, "tile.alignbyte"},
+        {ROCKE_OP_TILE_S_WQM, "tile.s_wqm"},
+        {ROCKE_OP_TILE_AV_LOAD_B128, "tile.av_load_b128"},
+        {ROCKE_OP_TILE_AV_STORE_B128, "tile.av_store_b128"},
+        {ROCKE_OP_TILE_S_ALLOC_VGPR, "tile.s_alloc_vgpr"},
+        {ROCKE_OP_TILE_ASYNCMARK, "tile.asyncmark"},
+        {ROCKE_OP_TILE_WAIT_ASYNCMARK, "tile.wait_asyncmark"},
+        {ROCKE_OP_TILE_S_WAIT_EVENT, "tile.s_wait_event"},
+        {ROCKE_OP_TILE_S_WAIT_ASYNCCNT, "tile.s_wait_asynccnt"},
+        {ROCKE_OP_TILE_S_PREFETCH_INST, "tile.s_prefetch_inst"},
+        {ROCKE_OP_TILE_BUFFER_LOAD_LDS_ASYNC, "tile.buffer_load_lds_async"},
+        {ROCKE_OP_TILE_GLOBAL_LOAD_ASYNC_TO_LDS, "tile.global_load_async_to_lds"},
+        {ROCKE_OP_CF_RETURN, "cf.return"},
+    };
+    for(const auto& e : k_expect)
+    {
+        if(strcmp(rocke_opcode_name(e.opcode), e.name) != 0)
+        {
+            char msg[256];
+            snprintf(msg,
+                     sizeof(msg),
+                     "opcode %d is named \"%s\", expected \"%s\"",
+                     (int)e.opcode,
+                     rocke_opcode_name(e.opcode),
+                     e.name);
+            fail(msg, __LINE__);
+        }
+        if(rocke_opcode_from_name(e.name) != e.opcode)
+            fail(e.name, __LINE__);
+    }
 }
 
 struct TestCase
@@ -470,6 +541,7 @@ const TestCase k_cases[] = {
     {"s_prefetch_inst", case_s_prefetch_inst},
     {"buffer_load_lds_async", case_buffer_load_lds_async},
     {"global_load_async_to_lds_b8", case_global_load_async_to_lds_b8},
+    {"opcode_names_are_aligned", case_opcode_names_are_aligned},
 };
 
 } // namespace

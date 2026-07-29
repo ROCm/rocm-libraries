@@ -87,7 +87,7 @@ const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS[] = {
     {"s.barrier", "declare void @llvm.amdgcn.s.barrier()"},
     {"s.wait.dscnt", "declare void @llvm.amdgcn.s.wait.dscnt(i16)"},
     {"s.wait.loadcnt", "declare void @llvm.amdgcn.s.wait.loadcnt(i16)"},
-    {"s.wait.asynccnt", "declare void @llvm.amdgcn.s.wait.asynccnt(i16)"},
+    {"s.wait.asynccnt", "declare void @llvm.amdgcn.s.wait.asynccnt(i16 immarg)"},
     {"global.load.async.to.lds.b32",
      "declare void @llvm.amdgcn.global.load.async.to.lds.b32(ptr addrspace(1) nocapture, ptr "
      "addrspace(3) nocapture, i32 immarg, i32 immarg)"},
@@ -333,15 +333,54 @@ const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS[] = {
     {"amdgcn.alignbyte", "declare i32 @llvm.amdgcn.alignbyte(i32, i32, i32)"},
     {"amdgcn.s.wqm.i64", "declare i64 @llvm.amdgcn.s.wqm.i64(i64)"},
     {"amdgcn.s.wqm.i32", "declare i32 @llvm.amdgcn.s.wqm.i32(i32)"},
-    {"av.load.b128", "declare <4 x i32> @llvm.amdgcn.av.load.b128(ptr, metadata)"},
-    {"av.store.b128", "declare void @llvm.amdgcn.av.store.b128(ptr, <4 x i32>, metadata)"},
+    /* av.load/store.b128 are llvm_anyptr_ty too; see the s.prefetch.inst note
+     * below and ROCKE_LL_AV_B128_PTR_TYPES. */
+    {"av.load.b128.p0", "declare <4 x i32> @llvm.amdgcn.av.load.b128.p0(ptr, metadata)"},
+    {"av.load.b128.p1",
+     "declare <4 x i32> @llvm.amdgcn.av.load.b128.p1(ptr addrspace(1), metadata)"},
+    {"av.store.b128.p0", "declare void @llvm.amdgcn.av.store.b128.p0(ptr, <4 x i32>, metadata)"},
+    {"av.store.b128.p1",
+     "declare void @llvm.amdgcn.av.store.b128.p1(ptr addrspace(1), <4 x i32>, metadata)"},
     {"s.alloc.vgpr", "declare i1 @llvm.amdgcn.s.alloc.vgpr(i32)"},
     {"s.wait.event", "declare void @llvm.amdgcn.s.wait.event(i16 immarg)"},
-    {"s.prefetch.inst", "declare void @llvm.amdgcn.s.prefetch.inst(ptr, i32)"},
+    /* s.prefetch.inst takes an llvm_anyptr_ty operand, so the overload is
+     * mangled by address space and the declare has to name the SAME address
+     * space the call site passes. One key per space rather than a single
+     * unmangled declare: a kernel prefetching two pointers in different spaces
+     * would otherwise redefine one name with two signatures. Mirrors Python
+     * _S_PREFETCH_INST_PTR_TYPES. */
+    {"s.prefetch.inst.p0", "declare void @llvm.amdgcn.s.prefetch.inst.p0(ptr, i32)"},
+    {"s.prefetch.inst.p1", "declare void @llvm.amdgcn.s.prefetch.inst.p1(ptr addrspace(1), i32)"},
+    {"s.prefetch.inst.p4", "declare void @llvm.amdgcn.s.prefetch.inst.p4(ptr addrspace(4), i32)"},
 };
 
 const int ROCKE_LL_INTRINSIC_DECLS_COUNT
     = (int)(sizeof(ROCKE_LL_INTRINSIC_DECLS) / sizeof(ROCKE_LL_INTRINSIC_DECLS[0]));
+
+/* ---------------------------------------------------------------------- */
+/* anyptr overload tables (Python _S_PREFETCH_INST_PTR_TYPES /            */
+/* _AV_B128_PTR_TYPES)                                                    */
+/* ---------------------------------------------------------------------- */
+
+/* s.prefetch.inst reaches instruction memory through a flat, global, or
+ * constant pointer (LLVM's own test uses addrspace(4)). */
+const rocke_ll_anyptr_space_t ROCKE_LL_S_PREFETCH_INST_PTR_TYPES[] = {
+    {0, "ptr"},
+    {1, "ptr addrspace(1)"},
+    {4, "ptr addrspace(4)"},
+};
+const int ROCKE_LL_S_PREFETCH_INST_PTR_TYPES_COUNT
+    = (int)(sizeof(ROCKE_LL_S_PREFETCH_INST_PTR_TYPES)
+            / sizeof(ROCKE_LL_S_PREFETCH_INST_PTR_TYPES[0]));
+
+/* av.load/store.b128 are documented as flat or global only: a global pointer
+ * selects global_load/store, a flat pointer flat_load/store. */
+const rocke_ll_anyptr_space_t ROCKE_LL_AV_B128_PTR_TYPES[] = {
+    {0, "ptr"},
+    {1, "ptr addrspace(1)"},
+};
+const int ROCKE_LL_AV_B128_PTR_TYPES_COUNT
+    = (int)(sizeof(ROCKE_LL_AV_B128_PTR_TYPES) / sizeof(ROCKE_LL_AV_B128_PTR_TYPES[0]));
 
 /* ---------------------------------------------------------------------- */
 /* LLVM22 overrides (Python _INTRINSIC_DECLS_LLVM22_OVERRIDES)            */

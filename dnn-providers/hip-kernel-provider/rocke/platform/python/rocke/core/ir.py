@@ -87,6 +87,20 @@ _MMA_RESULT_HINT: Dict[str, str] = {
 }
 
 
+def _check_u16(op: str, field: str, value: int) -> int:
+    """Range-check an immediate the intrinsic declares as ``i16``.
+
+    LLVM truncates a too-wide immediate silently (``i16 70000`` becomes
+    ``i16 4464``), which turns an out-of-range wait count into a *wrong* wait
+    count with no diagnostic. Raise instead; masking here would be equally
+    silent.
+    """
+    v = int(value)
+    if not 0 <= v <= 0xFFFF:
+        raise ValueError(f"{op} {field} must fit an unsigned i16 (0..65535), got {v}")
+    return v
+
+
 def _mma_c_frag_len(op_id: str) -> int:
     """Accumulator fragment length for ``op_id`` from the arch SSOT.
 
@@ -2401,11 +2415,17 @@ class IRBuilder:
 
     def wait_asyncmark(self, n: int = 0) -> None:
         """``llvm.amdgcn.wait.asyncmark`` — wait for the Nth prior asyncmark."""
-        self._op("tile.wait_asyncmark", attrs={"n": int(n)})
+        self._op(
+            "tile.wait_asyncmark",
+            attrs={"n": _check_u16("wait_asyncmark", "n", n)},
+        )
 
     def s_wait_event(self, imm: int = 0) -> None:
         """``llvm.amdgcn.s.wait.event`` — block on an export/event bitmask."""
-        self._op("tile.s_wait_event", attrs={"imm": int(imm) & 0xFFFF})
+        self._op(
+            "tile.s_wait_event",
+            attrs={"imm": _check_u16("s_wait_event", "imm", imm)},
+        )
 
     def s_prefetch_inst(self, ptr: Value, length: Value) -> None:
         """``llvm.amdgcn.s.prefetch.inst`` — instruction-cache prefetch."""
@@ -3035,7 +3055,10 @@ class IRBuilder:
         On non-gfx1250 backends this is a no-op (the counter does not exist);
         callers must only emit it on the gfx1250 async-to-LDS path.
         """
-        self._op("tile.s_wait_asynccnt", attrs={"n": int(n)})
+        self._op(
+            "tile.s_wait_asynccnt",
+            attrs={"n": _check_u16("s_wait_asynccnt", "n", n)},
+        )
 
     def global_load_async_to_lds(
         self,

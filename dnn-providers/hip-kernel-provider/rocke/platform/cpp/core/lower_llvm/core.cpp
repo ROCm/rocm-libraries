@@ -135,25 +135,29 @@ static const rocke_isa_backend_t LL_BACKEND_GFX950 = {"gfx950",
                                                       NULL,
                                                       ROCKE_LL_BUFFER_RSRC_WORD3_CDNA,
                                                       rocke_ll_encode_waitcnt_gfx9_10,
-                                                      ROCKE_LL_ISA_CDNA};
+                                                      ROCKE_LL_ISA_CDNA,
+                                                      false};
 static const rocke_isa_backend_t LL_BACKEND_GFX942 = {"gfx942",
                                                       NULL,
                                                       NULL,
                                                       ROCKE_LL_BUFFER_RSRC_WORD3_CDNA,
                                                       rocke_ll_encode_waitcnt_gfx9_10,
-                                                      ROCKE_LL_ISA_CDNA};
+                                                      ROCKE_LL_ISA_CDNA,
+                                                      false};
 static const rocke_isa_backend_t LL_BACKEND_GFX908 = {"gfx908",
                                                       NULL,
                                                       NULL,
                                                       ROCKE_LL_BUFFER_RSRC_WORD3_CDNA,
                                                       rocke_ll_encode_waitcnt_gfx9_10,
-                                                      ROCKE_LL_ISA_CDNA};
+                                                      ROCKE_LL_ISA_CDNA,
+                                                      false};
 static const rocke_isa_backend_t LL_BACKEND_GFX90A = {"gfx90a",
                                                       NULL,
                                                       NULL,
                                                       ROCKE_LL_BUFFER_RSRC_WORD3_CDNA,
                                                       rocke_ll_encode_waitcnt_gfx9_10,
-                                                      ROCKE_LL_ISA_CDNA};
+                                                      ROCKE_LL_ISA_CDNA,
+                                                      false};
 /* RDNA backends (Python Gfx11RdnaBackend / Gfx12RdnaBackend): same
  * datalayout/triple as CDNA on the ROCm releases we target, but the RDNA buffer
  * SRD word3 and the contiguous gfx11 s_waitcnt layout. gfx12 differs from gfx11
@@ -163,19 +167,22 @@ static const rocke_isa_backend_t LL_BACKEND_GFX1151 = {"gfx1151",
                                                        NULL,
                                                        ROCKE_LL_BUFFER_RSRC_WORD3_RDNA,
                                                        rocke_ll_encode_waitcnt_gfx11,
-                                                       ROCKE_LL_ISA_RDNA};
+                                                       ROCKE_LL_ISA_RDNA,
+                                                       false};
 static const rocke_isa_backend_t LL_BACKEND_GFX1201 = {"gfx1201",
                                                        NULL,
                                                        NULL,
                                                        ROCKE_LL_BUFFER_RSRC_WORD3_RDNA,
                                                        rocke_ll_encode_waitcnt_gfx11,
-                                                       ROCKE_LL_ISA_RDNA};
+                                                       ROCKE_LL_ISA_RDNA,
+                                                       false};
 static const rocke_isa_backend_t LL_BACKEND_GFX11_GENERIC = {"gfx11-generic",
                                                              NULL,
                                                              NULL,
                                                              ROCKE_LL_BUFFER_RSRC_WORD3_RDNA,
                                                              rocke_ll_encode_waitcnt_gfx11,
-                                                             ROCKE_LL_ISA_RDNA};
+                                                             ROCKE_LL_ISA_RDNA,
+                                                             false};
 
 /* Mutable copies so datalayout/triple (extern consts resolved at runtime) can
  * be patched in. backend_for fills them from ROCKE_LL_DATALAYOUT/TRIPLE. */
@@ -572,6 +579,80 @@ const char* rocke_ll_llvm_type(rocke_lower_t* L, const rocke_type_t* t)
             return "float";
     }
     rocke_ll_fail(L, ROCKE_ERR_NOTIMPL, "no LLVM mapping for type %s", n ? n : "(null)");
+}
+
+const char* rocke_ll_param_llvm_type(rocke_lower_t* L, const rocke_param_t* p)
+{
+    const char* ovr;
+    if(!p)
+        return "";
+    if(p->type && p->type->kind == ROCKE_TYPE_PTR)
+    {
+        /* addr_space override (P17): a pointer param can be pinned to a
+         * different space than its IR type says. The function header and any
+         * call site passing that param must name the same type. */
+        ovr = rocke_attr_get_str(&p->attrs, "addr_space");
+        if(ovr && strcmp(ovr, "constant") == 0)
+            return "ptr addrspace(4)";
+        if(ovr && strcmp(ovr, "global") == 0)
+            return "ptr addrspace(1)";
+    }
+    return rocke_ll_llvm_type(L, p->type);
+}
+
+const char* rocke_ll_value_ptr_type(rocke_lower_t* L, const rocke_value_t* v)
+{
+    int i;
+    if(!v)
+        return "";
+    /* Python _Lowerer._ptr_llvm_type: kernel params carry the header's type. */
+    if(L && L->kernel && v->name)
+    {
+        for(i = 0; i < L->kernel->num_params; i++)
+        {
+            const rocke_param_t* p = L->kernel->params[i];
+            if(p && p->name && v->name[0] == '%' && strcmp(v->name + 1, p->name) == 0)
+                return rocke_ll_param_llvm_type(L, p);
+        }
+    }
+    return rocke_ll_llvm_type(L, v->type);
+}
+
+int rocke_ll_anyptr_space(rocke_lower_t* L,
+                          const char* op,
+                          const rocke_value_t* ptr,
+                          const rocke_ll_anyptr_space_t* allowed,
+                          int count,
+                          const char** out_ptr_ty)
+{
+    const char* ty = rocke_ll_value_ptr_type(L, ptr);
+    char list[128];
+    size_t used = 0;
+    int i;
+    for(i = 0; i < count; i++)
+    {
+        if(strcmp(ty, allowed[i].ptr_ty) == 0)
+        {
+            if(out_ptr_ty)
+                *out_ptr_ty = allowed[i].ptr_ty;
+            return allowed[i].space;
+        }
+    }
+    list[0] = '\0';
+    for(i = 0; i < count && used + 1 < sizeof(list); i++)
+    {
+        int n
+            = snprintf(list + used, sizeof(list) - used, "%s%s", i ? ", " : "", allowed[i].ptr_ty);
+        if(n < 0)
+            break;
+        used += (size_t)n;
+    }
+    rocke_ll_fail(L,
+                  ROCKE_ERR_VALUE,
+                  "%s: pointer operand is %s, but the intrinsic accepts only %s",
+                  op,
+                  ty,
+                  list);
 }
 
 const char* rocke_ll_llvm_type_from_name(rocke_lower_t* L, const char* name)
@@ -1694,20 +1775,7 @@ void rocke_ll_finalize(rocke_lower_t* L, rocke_strbuf_t* out)
         for(int i = 0; i < L->kernel->num_params; i++)
         {
             const rocke_param_t* p = L->kernel->params[i];
-            const char* tstr = rocke_ll_llvm_type(L, p->type);
-            /* addr_space override (P17). */
-            if(p->type && p->type->kind == ROCKE_TYPE_PTR)
-            {
-                const char* ovr = rocke_attr_get_str(&p->attrs, "addr_space");
-                if(ovr && strcmp(ovr, "constant") == 0)
-                {
-                    tstr = "ptr addrspace(4)";
-                }
-                else if(ovr && strcmp(ovr, "global") == 0)
-                {
-                    tstr = "ptr addrspace(1)";
-                }
-            }
+            const char* tstr = rocke_ll_param_llvm_type(L, p);
             const char* attrs = rocke_ll_param_attrs(L, p);
             rocke_strbuf_appendf(out, "%s%s%s %%%s", i ? ", " : "", tstr, attrs, p->name);
         }
