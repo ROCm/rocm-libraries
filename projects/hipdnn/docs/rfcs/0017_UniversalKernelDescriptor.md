@@ -1128,46 +1128,6 @@ cache entry, and one handle rebound to a different device does not.
 It is an LRU cache with a bounded entry count, sized generously since entries hold ids and bound field
 values rather than kernels. Eviction only costs a rematch on the next query, never a wrong answer.
 
-```mermaid
-sequenceDiagram
-    participant FE as Frontend Graph
-    participant ERM as EnginePluginResourceManager (host)
-    participant Eng as IEngine (UKD provider)
-    participant Cache as Provider cache
-    participant Plan as IPlan
-
-    Note over FE,Cache: Steps 1-6: asked of every loaded engine
-    FE->>ERM: create_execution_plans() -> getApplicableEngineIds
-    ERM->>Eng: isApplicable(handle, opGraph)
-    Eng->>Cache: probe (graph hash, device id)
-    Eng->>Eng: resolve UED + KMD (3), KDPs + matchers + UKD metadata (4)
-    Eng->>Eng: matchers in pruning order, graph-level then $kernel-level (5)
-    Eng->>Cache: store catalog + bound token state
-    Eng-->>ERM: true if catalog non-empty (6)
-
-    Note over FE: Step 7: hipDNN engine selection, unchanged, not the UHD
-    FE->>FE: select engine
-
-    Note over FE,Cache: Steps 8-9: optional, any candidate engine
-    FE->>ERM: get_knobs_for_engine(engineId)
-    ERM->>Eng: getDetails(handle, opGraph, out)
-    Eng->>Eng: load UHD, rank catalog (8)
-    Eng->>Cache: store ranked catalog
-    Eng-->>ERM: knob value sets + heuristic defaults
-    ERM->>Eng: getMaxWorkspaceSize(handle, opGraph, engineConfig)
-    Eng->>Eng: knob filter, load UDD, max workspace_bytes (9)
-
-    Note over FE,Plan: Steps 10-12: selected engine only
-    FE->>ERM: build_plans() -> finalizePlanDescriptor
-    ERM->>Eng: initializeExecutionContext(handle, opGraph, engineConfig, ctx)
-    Eng->>Cache: read catalog, bound token state, ranked order
-    Eng->>Eng: knob filter then highest-ranked survivor (10)
-    Eng->>Eng: load kernel sources, build plan (11)
-    Eng->>Plan: ctx.setPlan(...)
-    FE->>ERM: execute -> backendExecute
-    ERM->>Plan: execute(handle, deviceBuffers, numDeviceBuffers, workspace) (12)
-```
-
 ---
 
 ## 9. Adapters and Extensibility
