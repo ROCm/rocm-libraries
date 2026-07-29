@@ -33,6 +33,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "rocke/arch_target.h" /* arch catalog lookup for the arch seam guard */
 #include "rocke/arena.h"
 #include "rocke/error.hpp" /* ckc::Error boundary translation */
 #include "rocke/ir.h"
@@ -884,7 +885,9 @@ rocke_hip_arch_t rocke_hip_arch_from_gfx(const char* gfx)
         a.has_wmma = true;
         a.family = "rdna";
     }
-    /* Anything unrecognised keeps the gfx950 default facts (per the header). */
+    /* Anything unrecognised keeps the gfx950 default facts (per the header).
+     * rocke_lower_kernel_to_hip rejects such a string before it gets here, so
+     * this fallback only serves direct callers of the resolver. */
 
     return a;
 }
@@ -925,6 +928,15 @@ rocke_status_t rocke_lower_kernel_to_hip(rocke_ir_builder_t* b,
             include_prologue = opts->include_prologue;
         }
         arch_name = opts->arch;
+    }
+
+    /* Mirror the Python _Lowerer: an arch that was passed but is empty or is
+     * absent from the arch catalog is a caller bug (ValueError / KeyError
+     * there), so reject it instead of silently lowering with the gfx950
+     * baseline facts. A NULL arch still takes that baseline. */
+    if(arch_name && (arch_name[0] == '\0' || !rocke_arch_target_from_gfx(arch_name)))
+    {
+        return ROCKE_ERR_VALUE;
     }
 
     /* ---- init lowerer ---- */

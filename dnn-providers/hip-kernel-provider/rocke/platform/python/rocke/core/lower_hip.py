@@ -266,7 +266,16 @@ class _Lowerer:
         # or WMMA (RDNA/wave32), and whether ``ds_read_*_tr_*`` is available.
         from .arch import ArchTarget
 
-        self.arch = ArchTarget.from_gfx(arch or _DEFAULT_HIP_ARCH)
+        # Only an omitted arch (``None``) takes the baseline default; an arch
+        # that was passed but is empty/unknown is a caller bug, so surface it
+        # rather than silently lowering for a different target. ``from_gfx``
+        # raises on an unknown gfx string.
+        if arch is not None and not arch.strip():
+            raise ValueError(
+                "arch must be a gfx target string (e.g. 'gfx950'), not "
+                f"{arch!r}; pass None to use the {_DEFAULT_HIP_ARCH} baseline"
+            )
+        self.arch = ArchTarget.from_gfx(arch if arch is not None else _DEFAULT_HIP_ARCH)
 
     # -------------------- arch seam --------------------
 

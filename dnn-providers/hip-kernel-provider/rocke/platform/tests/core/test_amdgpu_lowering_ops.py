@@ -12,6 +12,8 @@ These are engine-level (not kernel-family) contracts, so they live in
 * ``lower_hip`` typed vector loads/stores -- the element-type prefix map must
   honor i32/f32/i8 for both the LDS and the global vN ops (the prior f16-only
   map silently reinterpreted them as f16), and reject anything unmapped.
+* ``lower_hip`` arch seam -- an explicitly passed arch must resolve in the arch
+  catalog; only an omitted arch falls back to the gfx950 baseline.
 * ``lower_llvm._op_memref_global_atomic_add_pk_bf16`` -- lowers to a generic
   ``atomicrmw fadd <2 x bfloat>`` (the ``llvm.amdgcn.global.atomic.fadd.v2bf16``
   intrinsic does not exist in the shipping ROCm LLVM).
@@ -130,6 +132,32 @@ class TestSmemTypedVectorLoadHip(unittest.TestCase):
             _vec_prefix("f64", "global_load_vN")
         self.assertIn("global_load_vN", str(cm.exception))
         self.assertIn("f64", str(cm.exception))
+
+
+class TestHipArchSeamValidation(unittest.TestCase):
+    """An arch the caller passed explicitly must resolve or fail loudly; only an
+    omitted arch takes the gfx950 baseline."""
+
+    def _kernel(self):
+        b = IRBuilder("arch_seam")
+        out = b.param("out", PtrType(I32, "global"))
+        b.store(b.const_i32(1), out, b.const_i32(0))
+        b.ret()
+        return b.kernel
+
+    def test_unknown_arch_raises(self):
+        with self.assertRaises(KeyError):
+            lower_kernel_to_hip(self._kernel(), arch="gfx999")
+
+    def test_empty_arch_raises(self):
+        with self.assertRaises(ValueError):
+            lower_kernel_to_hip(self._kernel(), arch="")
+
+    def test_omitted_arch_uses_baseline(self):
+        self.assertEqual(
+            lower_kernel_to_hip(self._kernel()),
+            lower_kernel_to_hip(self._kernel(), arch="gfx950"),
+        )
 
 
 class TestDsReadTr16NameHint(unittest.TestCase):
