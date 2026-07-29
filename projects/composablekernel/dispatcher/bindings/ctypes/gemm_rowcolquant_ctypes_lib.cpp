@@ -54,16 +54,16 @@ static constexpr std::size_t elements_to_bytes(std::size_t n)
 
 static bool g_initialized = false;
 
-#define HIP_CHECK(call)                                                                         \
-    {                                                                                           \
-        hipError_t _err = (call);                                                               \
-        if(_err != hipSuccess)                                                                  \
-        {                                                                                       \
+#define HIP_CHECK(call)                                                                        \
+    {                                                                                          \
+        hipError_t _err = (call);                                                              \
+        if(_err != hipSuccess)                                                                 \
+        {                                                                                      \
             std::cerr << "HIP error: " << hipGetErrorString(_err) << " at " << __FILE__ << ":" \
-                      << __LINE__ << "\n";                                                      \
-            cleanup();                                                                          \
-            return -1;                                                                          \
-        }                                                                                       \
+                      << __LINE__ << "\n";                                                     \
+            cleanup();                                                                         \
+            return -1;                                                                         \
+        }                                                                                      \
     }
 
 extern "C" {
@@ -193,17 +193,17 @@ int dispatcher_run_rowcolquant_gemm(const void* A,
     };
 
     // Allocate device buffers. AQ has M elements (row scale), BQ has N (col scale).
-    HIP_CHECK(hipMalloc(&A_dev,  elements_to_bytes<ADataType>(M * K)));
-    HIP_CHECK(hipMalloc(&B_dev,  elements_to_bytes<BDataType>(K * N)));
+    HIP_CHECK(hipMalloc(&A_dev, elements_to_bytes<ADataType>(M * K)));
+    HIP_CHECK(hipMalloc(&B_dev, elements_to_bytes<BDataType>(K * N)));
     HIP_CHECK(hipMalloc(&AQ_dev, elements_to_bytes<QDataType>(M)));
     HIP_CHECK(hipMalloc(&BQ_dev, elements_to_bytes<QDataType>(N)));
-    HIP_CHECK(hipMalloc(&C_dev,  elements_to_bytes<CDataType>(M * N)));
+    HIP_CHECK(hipMalloc(&C_dev, elements_to_bytes<CDataType>(M * N)));
 
     // Copy inputs to device
-    HIP_CHECK(hipMemcpy(A_dev,  A_host,  elements_to_bytes<ADataType>(M * K), hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(B_dev,  B_host,  elements_to_bytes<BDataType>(K * N), hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(AQ_dev, AQ_host, elements_to_bytes<QDataType>(M),     hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(BQ_dev, BQ_host, elements_to_bytes<QDataType>(N),     hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(A_dev, A_host, elements_to_bytes<ADataType>(M * K), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(B_dev, B_host, elements_to_bytes<BDataType>(K * N), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(AQ_dev, AQ_host, elements_to_bytes<QDataType>(M), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(BQ_dev, BQ_host, elements_to_bytes<QDataType>(N), hipMemcpyHostToDevice));
     HIP_CHECK(hipMemset(C_dev, 0, elements_to_bytes<CDataType>(M * N)));
 
     // Build QuantGemmHostArgs.
