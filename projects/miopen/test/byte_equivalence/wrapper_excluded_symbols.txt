@@ -28,6 +28,17 @@
 #       header. The typed miopen{Get,Set}ConvolutionFindMode were the ones
 #       promoted to miopen.h; these int-based variants were left as the
 #       MIGraphX back-compat shim.
+#   - miopenConvolutionForwardGetWorkSpaceSizeRange
+#   - miopenConvolutionBackwardDataGetWorkSpaceSizeRange
+#   - miopenConvolutionBackwardWeightsGetWorkSpaceSizeRange
+#       Query-only workspace-range APIs defined with MIOPEN_EXPORT in
+#       src/convolution_api.cpp but never declared in include/miopen/miopen.h
+#       (consumers and tests forward-declare them locally). Not renamed in the
+#       private lib, so they stay exported under their original names and
+#       resolve transitively via DT_NEEDED libMIOpen_private.
 miopenConvolutionABBackwardWeightsGetWorkSpaceSize
+miopenConvolutionBackwardDataGetWorkSpaceSizeRange
+miopenConvolutionBackwardWeightsGetWorkSpaceSizeRange
+miopenConvolutionForwardGetWorkSpaceSizeRange
 miopenHiddenGetConvolutionFindMode
 miopenHiddenSetConvolutionFindMode
