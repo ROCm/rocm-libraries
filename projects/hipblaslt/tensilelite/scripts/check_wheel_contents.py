@@ -7,9 +7,13 @@
 from __future__ import annotations
 
 import argparse
+from email.parser import Parser
 from pathlib import Path
 import sys
 import zipfile
+
+from packaging.requirements import Requirement
+from packaging.utils import canonicalize_name
 
 
 _HEADERS = {
@@ -21,10 +25,28 @@ _HEADERS = {
     "tensile_float8_bfloat8.h",
 }
 
+_OPTIONAL_REQUIREMENTS = {
+    "hip-query": "hip-python",
+    "orjson": "orjson",
+    "profile": "yappi",
+    "simplejson": "simplejson",
+    "ujson": "ujson",
+}
+
 
 def _wheel_names(wheel: Path) -> set[str]:
     with zipfile.ZipFile(wheel) as archive:
         return set(archive.namelist())
+
+
+def _wheel_metadata(wheel: Path):
+    with zipfile.ZipFile(wheel) as archive:
+        metadata_files = [
+            name for name in archive.namelist() if name.endswith(".dist-info/METADATA")
+        ]
+        if len(metadata_files) != 1:
+            raise ValueError(f"expected one METADATA file, found {metadata_files}")
+        return Parser().parsestr(archive.read(metadata_files[0]).decode("utf-8"))
 
 
 def _forbidden_entries(names: set[str]) -> list[str]:
@@ -88,6 +110,25 @@ def errors(wheel: Path, source_root: Path) -> list[str]:
     ):
         if required not in names:
             problems.append(f"missing resource: {required}")
+
+    metadata = _wheel_metadata(wheel)
+    provided_extras = set(metadata.get_all("Provides-Extra", []))
+    requirements = [Requirement(value) for value in metadata.get_all("Requires-Dist", [])]
+    for extra, dependency in _OPTIONAL_REQUIREMENTS.items():
+        if extra not in provided_extras:
+            problems.append(f"missing optional extra: {extra}")
+        matching = [
+            requirement
+            for requirement in requirements
+            if canonicalize_name(requirement.name) == canonicalize_name(dependency)
+        ]
+        if not any(
+            requirement.marker and requirement.marker.evaluate({"extra": extra})
+            for requirement in matching
+        ):
+            problems.append(
+                f"missing conditional requirement: {dependency} for extra {extra}"
+            )
     return problems
 
 

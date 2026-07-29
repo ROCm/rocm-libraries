@@ -110,9 +110,13 @@ Windows uses the corresponding ROCm SDK runtime directory for the client.
    - packaging;
    - NumPy;
    - filelock.
-5. Keep yappi and hip-python optional. Remove CMake, nanobind, setuptools,
-   Invoke, JSON accelerators, and other build/development packages from default
-   runtime requirements.
+5. Keep fallback/runtime capabilities available as optional extras:
+   - `profile` installs yappi;
+   - `hip-query` installs hip-python;
+   - `orjson`, `ujson`, and `simplejson` each install the named JSON backend.
+   Preserve the JSON fallback order through the standard library, while keeping
+   CMake, nanobind, setuptools, Invoke, and other build/development packages out
+   of runtime extras.
 6. Replace broad `MANIFEST.in` rules with an explicit resource allowlist and
    package exclusions.
 7. Build both sdist and wheel from the ROCm-versioned metadata path.
@@ -178,6 +182,8 @@ Windows uses the corresponding ROCm SDK runtime directory for the client.
 - Verify the complete local versions and exact `Requires-Dist` coupling.
 - Verify the TensileLite wheel declares rocisa as an external dependency without
   embedding a premature rocisa release policy.
+- Verify every optional fallback is represented by `Provides-Extra` and a
+  conditional `Requires-Dist` entry in wheel metadata.
 - Compare wheel resources with the tracked header and custom-kernel source sets.
 - Fail if a canonical wheel contains `Tensile`, tests, legacy launchers, native
   objects, CMake caches/manifests, build directories, rocisa source, or Invoke
@@ -248,6 +254,9 @@ Implemented on 2026-07-29 with the following local evidence:
   wheels rebuilt from those sdists.
 - Canonical wheel metadata requires Python 3.10 or newer and declares plain
   `Requires-Dist: rocisa`, with no rocisa version or local-version constraint.
+- Wheel metadata publishes `profile`, `hip-query`, `orjson`, `ujson`, and
+  `simplejson` extras with conditional requirements, so every optional runtime
+  fallback remains explicitly installable without enlarging the default set.
 - Both wheels passed the forbidden-content checker. In the canonical wheel,
   six headers, all 119 custom kernels, known bugs, and ductile defaults were
   present; legacy `Tensile`, tests, launchers, build artifacts, native binaries,

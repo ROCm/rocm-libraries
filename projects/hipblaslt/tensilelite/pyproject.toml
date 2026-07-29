@@ -80,6 +80,9 @@ tensilelite = "tensilelite.cli:main"
 [project.optional-dependencies]
 profile = ["yappi"]
 hip-query = ["hip-python"]
+orjson = ["orjson"]
+ujson = ["ujson"]
+simplejson = ["simplejson"]
 [dependency-groups]
 dev = [
     "rocisa",

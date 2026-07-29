@@ -40,6 +40,20 @@ Import fails deliberately when the wheel and ROCm release differ, when rocisa
 cannot be imported, or when the ROCm-owned client is missing. There is no
 client-path override.
 
+Optional runtime capabilities remain available as extras:
+
+```bash
+python -m pip install 'tensilelite[profile]'     # yappi profiling
+python -m pip install 'tensilelite[hip-query]'   # hip-python GPU queries
+python -m pip install 'tensilelite[orjson]'      # preferred JSON accelerator
+python -m pip install 'tensilelite[ujson]'
+python -m pip install 'tensilelite[simplejson]'
+```
+
+Only one JSON extra is needed. If multiple backends are installed, TensileLite
+prefers orjson, then ujson, then simplejson, and finally the Python standard
+library.
+
 ## Source development
 
 Install or otherwise provide a working rocisa first. `invoke build-client`

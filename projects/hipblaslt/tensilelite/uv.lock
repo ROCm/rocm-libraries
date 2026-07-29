@@ -844,6 +844,23 @@ dependencies = [
     { name = "rocisa" },
 ]
 
+[package.optional-dependencies]
+hip-query = [
+    { name = "hip-python" },
+]
+orjson = [
+    { name = "orjson" },
+]
+profile = [
+    { name = "yappi" },
+]
+simplejson = [
+    { name = "simplejson" },
+]
+ujson = [
+    { name = "ujson" },
+]
+
 [package.dev-dependencies]
 dev = [
     { name = "filelock" },
@@ -859,12 +876,17 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "filelock" },
+    { name = "hip-python", marker = "extra == 'hip-query'" },
     { name = "joblib", specifier = ">=1.4.0" },
     { name = "msgpack" },
     { name = "numpy" },
+    { name = "orjson", marker = "extra == 'orjson'" },
     { name = "packaging" },
     { name = "pyyaml" },
     { name = "rocisa" },
+    { name = "simplejson", marker = "extra == 'simplejson'" },
+    { name = "ujson", marker = "extra == 'ujson'" },
+    { name = "yappi", marker = "extra == 'profile'" },
 ]
 
 [package.metadata.requires-dev]

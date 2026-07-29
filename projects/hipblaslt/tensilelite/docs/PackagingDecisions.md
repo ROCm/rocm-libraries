@@ -290,6 +290,34 @@ Reasoning:
 An explicit allowlist makes accidental package contents a test failure rather
 than a growing public contract.
 
+### D11. Optional fallback dependencies remain available
+
+Decision:
+
+- A dependency used by an optional runtime path or fallback remains published
+  as an installable extra rather than disappearing from package metadata.
+- The supported extras are `profile` for yappi, `hip-query` for hip-python,
+  and one extra per JSON backend: `orjson`, `ujson`, and `simplejson`.
+- The JSON selection order remains orjson, ujson, simplejson, then Python's
+  standard-library `json`. Users may install one backend or combine extras.
+- Test runners, source-checkout task frameworks, and native build backends do
+  not become runtime extras because they are development/build tools rather
+  than optional runtime capabilities.
+
+Reasoning:
+
+Optional dependencies should remain discoverable and easy to request without
+making every installation carry redundant JSON implementations, a profiler, or
+a platform-specific GPU binding. Separate extras preserve user choice while
+keeping the default runtime portable and minimal.
+
+Consequences:
+
+- Wheel metadata and documentation expose every supported extra explicitly.
+- CI verifies the `Provides-Extra` and conditional `Requires-Dist` entries.
+- Adding a new optional fallback requires adding a corresponding extra rather
+  than merely deleting it from the mandatory dependency set.
+
 ## Non-Goals
 
 - Changing generated kernel semantics or library logic formats.
