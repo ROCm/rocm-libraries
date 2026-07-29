@@ -516,6 +516,15 @@ def _build_specs(config: dict) -> List[TensorQuantKernelSpec]:
     specs = []
     pipeline  = config.get("pipeline", "compv3")
     epilogue  = config.get("epilogue", "cshuffle")
+    # TensorQuant codegen only ever emits the CShuffle epilogue (see
+    # tensor_quant_effective_epilogue), and the kernel name ignores this field.
+    # Coerce any other request so the config can't imply a kernel we don't build.
+    if epilogue != "cshuffle":
+        log.warning(
+            "TensorQuant codegen only emits the CShuffle epilogue; "
+            "overriding requested epilogue %r with 'cshuffle'.", epilogue,
+        )
+        epilogue = "cshuffle"
     scheduler = config.get("scheduler", "intrawave")
     pad_m     = config.get("pad_m", False)
     pad_n     = config.get("pad_n", False)

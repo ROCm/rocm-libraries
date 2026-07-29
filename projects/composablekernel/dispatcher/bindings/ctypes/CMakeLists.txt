@@ -312,17 +312,14 @@ if(TENSOR_QUANT_GEMM_KERNEL_HEADERS)
         GFX_ARCH="${CK_TILE_TENSOR_QUANT_GFX_ARCH}"
     )
 else()
-    message(STATUS "No TensorQuant GEMM kernel found for ctypes lib - building without kernel")
-    add_library(dispatcher_gemm_tensor_quant_lib SHARED gemm_tensor_quant_ctypes_lib.cpp)
-    target_include_directories(dispatcher_gemm_tensor_quant_lib PRIVATE
-        ${PROJECT_SOURCE_DIR}/include
-        ${PROJECT_SOURCE_DIR}/dispatcher/include
-    )
-    target_link_libraries(dispatcher_gemm_tensor_quant_lib PRIVATE hip::device)
-    set_target_properties(dispatcher_gemm_tensor_quant_lib PROPERTIES
-        POSITION_INDEPENDENT_CODE ON
-        CXX_STANDARD 17
-    )
+    # gemm_tensor_quant_ctypes_lib.cpp requires a force-included generated header
+    # (SelectedKernel/KERNEL_NAME/ADataType/...) under CK_TILE_SINGLE_KERNEL_INCLUDE,
+    # so there is no valid kernel-less build. Skip the target when no header exists
+    # (the Python bridge builds it at runtime once a kernel header is generated),
+    # matching the sibling bridge targets below.
+    message(STATUS
+        "No TensorQuant GEMM kernel found for ctypes lib - skipping dispatcher_gemm_tensor_quant_lib "
+        "(built at runtime by the Python bridge once a kernel header exists)")
 endif()
 
 # =============================================================================
