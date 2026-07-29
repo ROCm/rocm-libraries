@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Library-side IR golden for the gfx950 D256 bf16 prefill *fast* spec.
+"""Library-side IR golden for the D256 bf16 prefill *fast* specs (gfx950 + gfx942).
 
 Pins the emitted LLVM IR (sha256, both ``llvm20``/``llvm22`` flavors) of the
 D256 fast spec: 32x32-transposed + ``use_kq_lds_pad`` (slab-granularity K_lds
@@ -104,10 +104,60 @@ def _build_d256_fast(arch: str):
         asb._resolve_attention_arch = o_asb
 
 
+def _build_d256_gfx942_fast(arch: str):
+    """Build the D256 gfx942 4-warp GQA fast-path kernel under a pinned arch.
+
+    Mirrors ``_build_d256_fast`` (both arch bindings patched wholesale so the
+    fast route selects deterministically on any host), but pins the *gfx942*
+    cohort: raises if ``_d256_gfx942_fast`` is not selected (so the golden can
+    never pin the fallback), then lowers the dedicated ``build_gfx942_4warp_gqa``
+    builder -- the byte-sensitive V wide-load -> ``V_lds`` transpose kernel this
+    golden exists to pin.
+    """
+    import builders.common.attention_spec_builder as asb
+    import kernels.common.attention_unified as au
+    from kernels.common.attention_unified import (
+        UnifiedAttentionProblem,
+        _d256_gfx942_fast,
+        _tiled_spec_from_problem,
+    )
+    from kernels.gfx942.attention_tiled_2d import build_gfx942_4warp_gqa
+
+    # Validated gfx942 D256 cohort point (GQA 16/2, hd256, bs16, sq4096 bf16).
+    problem = UnifiedAttentionProblem(
+        total_q=4096,
+        num_seqs=1,
+        num_query_heads=16,
+        num_kv_heads=2,
+        head_size=256,
+        block_size=16,
+        max_seqlen_q=4096,
+        max_seqlen_k=4096,
+        dtype="bf16",
+        num_sms=120,
+    )
+    pin = lambda: arch  # noqa: E731
+    o_au, o_asb = au._resolve_attention_arch, asb._resolve_attention_arch
+    au._resolve_attention_arch = pin
+    asb._resolve_attention_arch = pin
+    try:
+        if not _d256_gfx942_fast(problem):
+            raise RuntimeError(
+                f"D256 gfx942 fast route not selected under pinned arch {arch!r}; "
+                "golden would pin the fallback (slow scalar path)"
+            )
+        spec = _tiled_spec_from_problem(problem)
+        return build_gfx942_4warp_gqa(spec, arch=arch)
+    finally:
+        au._resolve_attention_arch = o_au
+        asb._resolve_attention_arch = o_asb
+
+
 def _cases():
     """case_id -> (arch, build thunk). Add future D256 IR pins here."""
     return {
         "d256_pad_interleave/gfx950": ("gfx950", lambda: _build_d256_fast("gfx950")),
+        "d256_4warp_gqa/gfx942": ("gfx942", lambda: _build_d256_gfx942_fast("gfx942")),
     }
 
 
