@@ -55,6 +55,19 @@ TEST(TestShallowTensor, FillWithRandomValuesThrows)
     EXPECT_THROW(tensor.fillWithRandomValues(-1.f, 1.f, 1337), std::runtime_error);
 }
 
+TEST(TestShallowTensor, FillWithValuesThrows)
+{
+    std::array<float, 5> backing = {0.f, 1.f, 2.f, 3.f, 4.f};
+    ShallowTensor<float> tensor(backing.data(), {1, 1, 1, 5}, {5, 5, 5, 1});
+
+    struct DummyGenerator
+    {
+        void operator()([[maybe_unused]] float* ptr, [[maybe_unused]] size_t count) const {}
+    };
+    EXPECT_THROW(tensor.fillWithValues(DummyGenerator(), true), std::runtime_error);
+    EXPECT_THROW(tensor.fillWithValues(DummyGenerator(), false), std::runtime_error);
+}
+
 TEST(TestShallowTensor, DeviceAccessThrows)
 {
     std::array<float, 2> backing = {0.f, 1.f};

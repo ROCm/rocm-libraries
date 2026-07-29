@@ -101,6 +101,20 @@ TEST(TestShallowRaggedTensor, EmptyBatchSkipped)
 // Unsupported operations throw (host-only, non-owning)
 // ============================================================================
 
+TEST(TestShallowRaggedTensor, FillWithValuesThrows)
+{
+    auto aux = makeOffsetAux<int32_t>(K_OFFSETS);
+    std::vector<float> backing(20, 0.0f);
+    ShallowRaggedTensor<float> tensor(backing.data(), K_DIMS, K_STRIDES, BSHD_SEQ_AXIS, aux);
+
+    struct DummyGenerator
+    {
+        void operator()([[maybe_unused]] float* ptr, [[maybe_unused]] size_t count) const {}
+    };
+    EXPECT_THROW(tensor.fillWithValues(DummyGenerator(), true), std::runtime_error);
+    EXPECT_THROW(tensor.fillWithValues(DummyGenerator(), false), std::runtime_error);
+}
+
 TEST(TestShallowRaggedTensor, FillWithRandomValuesThrows)
 {
     auto aux = makeOffsetAux<int32_t>(K_OFFSETS);

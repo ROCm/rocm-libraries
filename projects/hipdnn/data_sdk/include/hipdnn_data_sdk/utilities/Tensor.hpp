@@ -558,6 +558,18 @@ protected:
     }
 };
 
+/// @brief A callable that fills a tensor with user defined values.
+///
+/// Signature: void(T* data, size_t count)
+/// The generator is called once per tensor fill and must fill `count` elements of
+/// the `data` pointer. If `fillWithValues` sets `hostFill` to true, then the data
+/// pointer will be a pointer to a host memory allocation. Otherwise, if `hostFill`
+/// was set to false, then this is a pointer to a device allocation.
+/// It is not the responsibility of the generator to mark the tensor as host or
+/// device modified.
+template <typename T>
+using ValueGenerator = std::function<void(T* data, size_t count)>;
+
 template <typename T>
 class TensorBase : public ITensor
 {
@@ -662,6 +674,7 @@ public:
     }
 
     virtual void fillWithValue(T value) = 0;
+    virtual void fillWithValues(const ValueGenerator<T>& generator, bool hostFill) = 0;
     virtual void fillWithRandomValues(T min, T max, unsigned int seed = std::random_device{}()) = 0;
 
     ITensorIterator<false> begin() override
@@ -816,9 +829,22 @@ public:
         }
     }
 
+    void fillWithValues(const ValueGenerator<T>& generator, bool hostFill) override
+    {
+        if(hostFill)
+        {
+            _memory.markHostModified();
+            generator(reinterpret_cast<T*>(_memory.hostData()), _memory.count());
+        }
+        else
+        {
+            _memory.markDeviceModified();
+            generator(reinterpret_cast<T*>(_memory.deviceData()), _memory.count());
+        }
+    }
+
     void fillWithRandomValues(T min, T max, unsigned int seed = std::random_device{}()) override
     {
-
         std::mt19937 generator(seed);
         std::uniform_real_distribution<float> distribution(static_cast<float>(min),
                                                            static_cast<float>(max));
@@ -829,6 +855,7 @@ public:
             *static_cast<T*>(valuePtr) = static_cast<T>(distribution(generator));
         }
     }
+
     bool isPacked() const override
     {
         return _packed;

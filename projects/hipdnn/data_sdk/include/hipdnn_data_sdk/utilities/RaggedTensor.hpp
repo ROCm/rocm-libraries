@@ -316,6 +316,21 @@ public:
         }
     }
 
+    void fillWithValues([[maybe_unused]] const ValueGenerator<T>& generator,
+                        [[maybe_unused]] bool hostFill) override
+    {
+        if(hostFill)
+        {
+            _memory.markHostModified();
+            generator(reinterpret_cast<T*>(_memory.hostData()), _memory.count());
+        }
+        else
+        {
+            _memory.markDeviceModified();
+            generator(reinterpret_cast<T*>(_memory.deviceData()), _memory.count());
+        }
+    }
+
     void fillWithRandomValues(T min, T max, unsigned int seed = std::random_device{}()) override
     {
         std::mt19937 generator(seed);

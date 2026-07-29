@@ -81,6 +81,13 @@ public:
         throwNotSupported();
     }
 
+    void fillWithValues(
+        [[maybe_unused]] const hipdnn_data_sdk::utilities::ValueGenerator<T>& generator,
+        [[maybe_unused]] bool hostFill) override
+    {
+        throwNotSupported();
+    }
+
     void fillWithRandomValues([[maybe_unused]] T min,
                               [[maybe_unused]] T max,
                               [[maybe_unused]] unsigned int seed = std::random_device{}()) override

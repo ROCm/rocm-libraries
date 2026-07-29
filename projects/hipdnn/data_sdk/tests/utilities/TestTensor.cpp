@@ -7,6 +7,8 @@
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
+#include <random>
+#include <stdexcept>
 
 using namespace hipdnn_data_sdk::utilities;
 using namespace hipdnn_data_sdk::types;
@@ -92,6 +94,74 @@ TEST(TestTensor, FillWithRandomValuesNonPacked)
         auto val{(*reinterpret_cast<const float*>((*it)))};
         EXPECT_GE(val, 1.0f);
         EXPECT_LE(val, 3.0f);
+    }
+}
+
+TEST(TestTensor, FillWithValuesHostGenerator)
+{
+    Tensor<float> tensor({1, 2, 3, 4});
+    struct UniformCpuGenerator
+    {
+        explicit UniformCpuGenerator(float min, float max, unsigned int seed)
+            : _min(min)
+            , _max(max)
+            , _seed(seed)
+        {
+        }
+
+        void operator()(float* data, size_t count) const
+        {
+            std::mt19937 rng(_seed);
+            std::uniform_real_distribution<float> dist(_min, _max);
+
+            for(size_t i = 0; i < count; ++i)
+            {
+                data[i] = static_cast<float>(dist(rng));
+            }
+        }
+
+    private:
+        float _min;
+        float _max;
+        unsigned int _seed;
+    };
+
+    const float min = 7.0f;
+    const float max = 10.0f;
+    tensor.fillWithValues(UniformCpuGenerator(min, max, std::random_device{}()), true);
+
+    for(auto it{tensor.cbegin()}; it != tensor.cend(); ++it)
+    {
+        auto val{(*reinterpret_cast<const float*>((*it)))};
+        EXPECT_GE(val, min);
+        EXPECT_LE(val, max);
+    }
+}
+
+TEST(TestTensor, FillWithValuesDeviceGenerator)
+{
+    SKIP_IF_NO_DEVICES();
+
+    Tensor<float> tensor({1, 2, 3, 4});
+    struct ZeroInitGpuGenerator
+    {
+        void operator()(float* data, size_t count) const
+        {
+            const int zero = 0;
+            auto err = hipMemset(data, zero, count * sizeof(float));
+            if(err != hipSuccess)
+            {
+                throw std::runtime_error("hipMemset failed");
+            }
+        }
+    };
+
+    tensor.fillWithValues(ZeroInitGpuGenerator(), false);
+
+    auto hostData = reinterpret_cast<float*>(tensor.rawHostData());
+    for(size_t i = 0; i < tensor.elementCount(); i++)
+    {
+        EXPECT_EQ(hostData[i], 0);
     }
 }
 
