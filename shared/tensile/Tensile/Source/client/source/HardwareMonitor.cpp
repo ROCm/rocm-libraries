@@ -378,7 +378,7 @@ namespace Tensile
 
                 auto status = amdsmi_get_clk_freq(
                     m_processorHandles[m_smiDeviceIndex], m_clockMetrics[i], &freq);
-                if(status != AMDSMI_STATUS_SUCCESS || freq.current > AMDSMI_MAX_NUM_FREQUENCIES)
+                if(status != AMDSMI_STATUS_SUCCESS || freq.current >= AMDSMI_MAX_NUM_FREQUENCIES)
                 {
                     m_clockValues[i] = std::numeric_limits<uint64_t>::max();
                 }
