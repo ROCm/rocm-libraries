@@ -29,8 +29,8 @@ double color_to_greyscale_tolerance(DType dt) {
         case DType::I8: return 1.0;
         case DType::F32: return 2e-3;
         case DType::F16: return 5e-3;
+        default: return 0.0;
     }
-    return 0.0;
 }
 
 template <typename T>
@@ -100,6 +100,8 @@ TEST_P(ColorToGreyscaleTest, Correctness) {
         case DType::I8:
             run_color_to_greyscale<Rpp8s>(p.cfg, p.op);
             break;
+        default:
+            FAIL() << "unsupported dtype for color_to_greyscale";
     }
 }
 

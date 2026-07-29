@@ -72,6 +72,8 @@ TEST_P(CopyTest, Correctness) {
         case DType::I8:
             run_copy<Rpp8s>(cfg);
             break;
+        default:
+            FAIL() << "unsupported dtype for copy";
     }
 }
 

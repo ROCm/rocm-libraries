@@ -37,8 +37,9 @@ double color_cast_tolerance(DType dt) {
             return 2e-3;
         case DType::F16:
             return 5e-3;
+        default:
+            return 0.0;
     }
-    return 0.0;
 }
 
 template <typename T>
@@ -109,6 +110,8 @@ TEST_P(ColorCastTest, Correctness) {
         case DType::I8:
             run_color_cast<Rpp8s>(p.cfg, p.op);
             break;
+        default:
+            FAIL() << "unsupported dtype for color_cast";
     }
 }
 

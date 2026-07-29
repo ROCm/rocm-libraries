@@ -38,8 +38,9 @@ double snow_tolerance(DType dt) {
             return 1e-3;
         case DType::F16:
             return 5e-3;
+        default:
+            return 0.0;
     }
-    return 0.0;
 }
 
 template <typename T>
@@ -104,6 +105,8 @@ TEST_P(SnowTest, Correctness) {
         case DType::I8:
             run_snow<Rpp8s>(p.cfg, p.op);
             break;
+        default:
+            FAIL() << "unsupported dtype for snow";
     }
 }
 

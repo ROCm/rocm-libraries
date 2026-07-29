@@ -121,6 +121,8 @@ TEST_P(CoarseDropoutTest, Correctness) {
         case DType::I8:
             run_coarse_dropout<Rpp8s>(cfg);
             break;
+        default:
+            FAIL() << "unsupported dtype for coarse_dropout";
     }
 }
 

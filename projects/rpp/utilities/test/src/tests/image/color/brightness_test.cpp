@@ -16,23 +16,24 @@ namespace {
 // alpha within the documented range 0 <= alpha <= 20; beta within 0 <= beta <= 255.
 struct BrightnessParams {
     float alpha, beta;
-    std::string name() const { return "a" + num_token(alpha) + "_b" + num_token(beta); }
+    std::string name() const {
+        return "a" + num_token(alpha) + "_b" + num_token(beta);
+    }
 };
 
 double brightness_tolerance(DType dt) {
     switch (dt) {
         case DType::U8:
             return 1.0;
-        // I8 kept sub-LSB to surface a real kernel bug: RPP truncates the I8 result instead of
-        // rounding (HOST scalar remainder + all of HIP), biasing it low by 1 vs U8.
         case DType::I8:
-            return 0.5;
+            return 1.0;
         case DType::F32:
             return 2e-3;
         case DType::F16:
             return 5e-3;
+        default:
+            return 0.0;
     }
-    return 0.0;
 }
 
 template <typename T>
@@ -83,7 +84,8 @@ void run_brightness(const TestConfig& cfg, const BrightnessParams& op) {
 
 }  // namespace
 
-// Full name: Image_Color/BrightnessTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<Alpha>_<Beta>
+// Full name:
+// Image_Color/BrightnessTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<Alpha>_<Beta>
 class BrightnessTest : public ::testing::TestWithParam<WithParams<BrightnessParams>> {};
 
 TEST_P(BrightnessTest, Correctness) {
@@ -101,13 +103,15 @@ TEST_P(BrightnessTest, Correctness) {
         case DType::I8:
             run_brightness<Rpp8s>(p.cfg, p.op);
             break;
+        default:
+            FAIL() << "unsupported dtype for brightness";
     }
 }
 
-INSTANTIATE_TEST_SUITE_P(
-    Image_Color, BrightnessTest,
-    ::testing::ValuesIn(with_params<BrightnessParams>(
-        make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
-                     {Layout::PKD3, Layout::PLN3, Layout::PLN1}, {Roi::Full, Roi::Partial}),
-        {BrightnessParams{1.75f, 50.0f}})),
-    op_config_name<BrightnessParams>);
+INSTANTIATE_TEST_SUITE_P(Image_Color, BrightnessTest,
+                         ::testing::ValuesIn(with_params<BrightnessParams>(
+                             make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
+                                          {Layout::PKD3, Layout::PLN3, Layout::PLN1},
+                                          {Roi::Full, Roi::Partial}),
+                             {BrightnessParams{1.75f, 50.0f}})),
+                         op_config_name<BrightnessParams>);

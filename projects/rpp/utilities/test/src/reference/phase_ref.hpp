@@ -33,8 +33,9 @@ inline double phase_scalar(double a, double b, DType dt) {
         case DType::F16:
         case DType::F32:
             return clampd(kTwoOverPi * std::atan2(a, b), 0.0, 1.0);
+        default:
+            return 0.0;
     }
-    return 0.0;
 }
 
 template <typename T>

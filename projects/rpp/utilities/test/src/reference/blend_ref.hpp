@@ -25,8 +25,8 @@ inline double blend_scalar(double s1, double s2, DType dt, double alpha) {
         case DType::I8: return clampd(std::nearbyint(v), -128.0, 127.0);
         case DType::F16:
         case DType::F32: return clampd(v, 0.0, 1.0);
+        default: return v;
     }
-    return v;
 }
 
 template <typename T>

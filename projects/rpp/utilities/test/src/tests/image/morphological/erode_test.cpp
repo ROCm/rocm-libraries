@@ -16,7 +16,9 @@ namespace {
 // kernelSize is a single odd number (3/5/7/9) applied to every image in the batch.
 struct ErodeParams {
     Rpp32u kernelSize;
-    std::string name() const { return "k" + std::to_string(kernelSize); }
+    std::string name() const {
+        return "k" + std::to_string(kernelSize);
+    }
 };
 
 template <typename T>
@@ -86,7 +88,8 @@ void run_erode(const TestConfig& cfg, const ErodeParams& op) {
 
 }  // namespace
 
-// Full name: Image_Morphological/ErodeTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_k<KernelSize>
+// Full name:
+// Image_Morphological/ErodeTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_k<KernelSize>
 class ErodeTest : public ::testing::TestWithParam<WithParams<ErodeParams>> {};
 
 TEST_P(ErodeTest, Correctness) {
@@ -104,13 +107,16 @@ TEST_P(ErodeTest, Correctness) {
         case DType::I8:
             run_erode<Rpp8s>(p.cfg, p.op);
             break;
+        default:
+            FAIL() << "Unsupported dtype for erode";
+            break;
     }
 }
 
-INSTANTIATE_TEST_SUITE_P(
-    Image_Morphological, ErodeTest,
-    ::testing::ValuesIn(with_params<ErodeParams>(
-        make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
-                     {Layout::PKD3, Layout::PLN3, Layout::PLN1}, {Roi::Full, Roi::Partial}),
-        {ErodeParams{3}, ErodeParams{5}})),
-    op_config_name<ErodeParams>);
+INSTANTIATE_TEST_SUITE_P(Image_Morphological, ErodeTest,
+                         ::testing::ValuesIn(with_params<ErodeParams>(
+                             make_configs({DType::U8, DType::F16, DType::F32},
+                                          {Layout::PKD3, Layout::PLN3, Layout::PLN1},
+                                          {Roi::Full, Roi::Partial}),
+                             {ErodeParams{3}, ErodeParams{5}})),
+                         op_config_name<ErodeParams>);

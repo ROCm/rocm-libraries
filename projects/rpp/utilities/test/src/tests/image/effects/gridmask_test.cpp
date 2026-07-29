@@ -23,12 +23,16 @@ struct GridmaskParams {
     float gridAngle;
     Rpp32u tx, ty;
     std::string tag;
-    std::string name() const { return tag; }
+    std::string name() const {
+        return tag;
+    }
 };
 
 // gridmask is a pure copy/mask: kept pixels are copied bit-exact, masked pixels are set to an
 // exact constant (black). No arithmetic, so every dtype is bit-exact.
-double gridmask_tolerance(DType) { return 0.0; }
+double gridmask_tolerance(DType) {
+    return 0.0;
+}
 
 template <typename T>
 void run_gridmask(const TestConfig& cfg, const GridmaskParams& op) {
@@ -58,10 +62,10 @@ void run_gridmask(const TestConfig& cfg, const GridmaskParams& op) {
     dst.write(input.data(), bytes);  // define outside-ROI dst to mirror the golden
 
     RppHandle handle(cfg.backend, shape.n);
-    ASSERT_EQ(rppt_gridmask(src.ptr(), &desc, dst.ptr(), &desc, op.tileWidth, op.gridRatio,
-                            op.gridAngle, translateVector, roi.data(), XYWH, handle.get(),
-                            cfg.backend),
-              RPP_SUCCESS);
+    ASSERT_EQ(
+        rppt_gridmask(src.ptr(), &desc, dst.ptr(), &desc, op.tileWidth, op.gridRatio, op.gridAngle,
+                      translateVector, roi.data(), XYWH, handle.get(), cfg.backend),
+        RPP_SUCCESS);
 
     // (3) Retrieve the result on the host (no-op copy for HOST, device->host for HIP).
     handle.sync();  // drain the op's stream before copying results back
@@ -112,13 +116,13 @@ TEST_P(GridmaskTest, Correctness) {
 // scalar tail. Tolerance stays 0 -- see
 // .notes/issues/gridmask-host-i8-scalar-tail-black-unshifted.md. The same grid at 2x36x64
 // (width 32) is green, which is why both sizes are instantiated.
-INSTANTIATE_TEST_SUITE_P(
-    Image_Effects, GridmaskTest,
-    ::testing::ValuesIn(with_params<GridmaskParams>(
-        make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
-                     {Layout::PKD3, Layout::PLN3, Layout::PLN1}, {Roi::Full, Roi::Partial},
-                     {{2, 36, 48}, {2, 36, 64}}),
-        {GridmaskParams{8, 0.5f, 0.0f, 0, 0, "axis"}, GridmaskParams{8, 0.5f, 0.0f, 3, 2, "shift"},
-         GridmaskParams{10, 0.55f, 0.0f, 0, 0, "wide"},
-         GridmaskParams{10, 0.55f, 0.5f, 0, 0, "rot"}})),
-    op_config_name<GridmaskParams>);
+INSTANTIATE_TEST_SUITE_P(Image_Effects, GridmaskTest,
+                         ::testing::ValuesIn(with_params<GridmaskParams>(
+                             make_configs({DType::U8, DType::F16, DType::F32},
+                                          {Layout::PKD3, Layout::PLN3, Layout::PLN1},
+                                          {Roi::Full, Roi::Partial}, {{2, 36, 48}, {2, 36, 64}}),
+                             {GridmaskParams{8, 0.5f, 0.0f, 0, 0, "axis"},
+                              GridmaskParams{8, 0.5f, 0.0f, 3, 2, "shift"},
+                              GridmaskParams{10, 0.55f, 0.0f, 0, 0, "wide"},
+                              GridmaskParams{10, 0.55f, 0.5f, 0, 0, "rot"}})),
+                         op_config_name<GridmaskParams>);

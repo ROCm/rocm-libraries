@@ -33,8 +33,9 @@ double gaussian_filter_tolerance(DType dt) {
             return 1e-3;
         case DType::F16:
             return 1e-2;
+        default:
+            return 0.0;
     }
-    return 0.0;
 }
 
 template <typename T>
@@ -119,6 +120,8 @@ TEST_P(GaussianFilterTest, Correctness) {
         case DType::I8:
             run_gaussian_filter<Rpp8s>(p.cfg, p.op);
             break;
+        default:
+            FAIL() << "unsupported dtype for gaussian_filter";
     }
 }
 

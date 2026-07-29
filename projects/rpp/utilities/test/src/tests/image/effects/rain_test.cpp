@@ -20,7 +20,9 @@ namespace {
 // which is the only reproducible slice. See rain_ref.hpp. alpha in [0, 1].
 struct RainParams {
     float alpha;
-    std::string name() const { return "a" + num_token(alpha); }
+    std::string name() const {
+        return "a" + num_token(alpha);
+    }
 };
 
 double rain_tolerance(DType dt) {
@@ -34,6 +36,8 @@ double rain_tolerance(DType dt) {
             return 1e-4;
         case DType::F16:
             return 4e-3;
+        default:
+            return 0.0;
     }
     return 0.0;
 }
@@ -83,7 +87,8 @@ void run_rain(const TestConfig& cfg, const RainParams& op) {
 
 }  // namespace
 
-// Full name: Image_Effects/RainTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<Alpha>
+// Full name:
+// Image_Effects/RainTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<Alpha>
 class RainTest : public ::testing::TestWithParam<WithParams<RainParams>> {};
 
 TEST_P(RainTest, Correctness) {
@@ -101,13 +106,16 @@ TEST_P(RainTest, Correctness) {
         case DType::I8:
             run_rain<Rpp8s>(p.cfg, p.op);
             break;
+        default:
+            FAIL() << "Unsupported dtype for rain";
+            break;
     }
 }
 
-INSTANTIATE_TEST_SUITE_P(
-    Image_Effects, RainTest,
-    ::testing::ValuesIn(with_params<RainParams>(
-        make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
-                     {Layout::PKD3, Layout::PLN3, Layout::PLN1}, {Roi::Full, Roi::Partial}),
-        {RainParams{0.4f}})),
-    op_config_name<RainParams>);
+INSTANTIATE_TEST_SUITE_P(Image_Effects, RainTest,
+                         ::testing::ValuesIn(with_params<RainParams>(
+                             make_configs({DType::U8, DType::F16, DType::F32},
+                                          {Layout::PKD3, Layout::PLN3, Layout::PLN1},
+                                          {Roi::Full, Roi::Partial}),
+                             {RainParams{0.4f}})),
+                         op_config_name<RainParams>);

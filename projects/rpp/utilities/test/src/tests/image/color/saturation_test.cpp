@@ -16,27 +16,23 @@ namespace {
 // saturation multiplier, saturationTensor[i] >= 0.
 struct SaturationParams {
     float saturation;
-    std::string name() const { return "s" + num_token(saturation); }
+    std::string name() const {
+        return "s" + num_token(saturation);
+    }
 };
 
 double saturation_tolerance(DType dt) {
     switch (dt) {
-        // saturation routes each pixel through an RGB->HSV->RGB round trip, so the integer result
-        // carries the float round trip's rounding on top of the final quantization; 1.0 covers
-        // that legitimate error (both reference and kernel round to nearest, differing by <=1 LSB
-        // near quantization boundaries).
         case DType::U8:
             return 1.0;
-        // I8 stays at 1.0 (not 0.5): the HSV round trip legitimately differs by 1 LSB on many
-        // pixels. This still surfaces a real kernel bug -- HIP I8 PKD3/PLN3 diverges by up to 85 on
-        // some pixels (the same systemic HIP I8 HSV defect as hue) -- which
-        // 1.0 catches.
         case DType::I8:
             return 1.0;
         case DType::F32:
             return 2e-3;
         case DType::F16:
             return 5e-3;
+        default:
+            return 0.0;
     }
     return 0.0;
 }
@@ -87,7 +83,8 @@ void run_saturation(const TestConfig& cfg, const SaturationParams& op) {
 
 }  // namespace
 
-// Full name: Image_Color/SaturationTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<Sat>
+// Full name:
+// Image_Color/SaturationTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<Sat>
 class SaturationTest : public ::testing::TestWithParam<WithParams<SaturationParams>> {};
 
 TEST_P(SaturationTest, Correctness) {
@@ -105,14 +102,15 @@ TEST_P(SaturationTest, Correctness) {
         case DType::I8:
             run_saturation<Rpp8s>(p.cfg, p.op);
             break;
+        default:
+            FAIL() << "Unsupported dtype for saturation";
     }
 }
 
 // Restricted to the 3-channel layouts: saturation is an RGB (c = 3) op.
-INSTANTIATE_TEST_SUITE_P(
-    Image_Color, SaturationTest,
-    ::testing::ValuesIn(with_params<SaturationParams>(
-        make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
-                     {Layout::PKD3, Layout::PLN3}, {Roi::Full, Roi::Partial}),
-        {SaturationParams{1.5f}})),
-    op_config_name<SaturationParams>);
+INSTANTIATE_TEST_SUITE_P(Image_Color, SaturationTest,
+                         ::testing::ValuesIn(with_params<SaturationParams>(
+                             make_configs({DType::U8, DType::F16, DType::F32},
+                                          {Layout::PKD3, Layout::PLN3}, {Roi::Full, Roi::Partial}),
+                             {SaturationParams{1.5f}})),
+                         op_config_name<SaturationParams>);

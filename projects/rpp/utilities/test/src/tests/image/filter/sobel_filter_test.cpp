@@ -35,8 +35,8 @@ double sobel_filter_tolerance(DType dt) {
         case DType::I8: return 1.0;
         case DType::F32: return 1e-3;
         case DType::F16: return 1e-2;
+        default: return 0.0;
     }
-    return 0.0;
 }
 
 template <typename T>
@@ -116,6 +116,8 @@ TEST_P(SobelFilterTest, Correctness) {
         case DType::I8:
             run_sobel_filter<Rpp8s>(p.cfg, p.op);
             break;
+        default:
+            FAIL() << "unsupported dtype for sobel_filter";
     }
 }
 

@@ -95,6 +95,8 @@ TEST_P(ChannelPermuteTest, Correctness) {
         case DType::I8:
             run_channel_permute<Rpp8s>(p.cfg, p.op);
             break;
+        default:
+            FAIL() << "unsupported dtype for channel_permute";
     }
 }
 

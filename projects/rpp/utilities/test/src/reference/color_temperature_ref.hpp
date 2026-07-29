@@ -30,8 +30,9 @@ inline double color_temperature_scalar(double v, DType dt, double delta) {
         case DType::F16:
         case DType::F32:
             return clampd(v + delta / 255.0, 0.0, 1.0);
+        default:
+            return v;
     }
-    return v;
 }
 
 // Writes the color-temperature result into dst, reading the source at the ROI offset and

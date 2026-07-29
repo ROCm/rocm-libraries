@@ -41,8 +41,9 @@ inline double non_linear_blend_scalar(double s1, double s2, DType dt, double gau
         case DType::F16:
         case DType::F32:
             return clampd(v, 0.0, 1.0);
+        default:
+            return v;
     }
-    return v;
 }
 
 template <typename T>

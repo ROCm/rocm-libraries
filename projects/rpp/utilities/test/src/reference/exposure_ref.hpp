@@ -24,8 +24,8 @@ inline double exposure_scalar(double v, DType dt, double mult) {
         case DType::I8: return clampd(std::nearbyint((v + 128.0) * mult), 0.0, 255.0) - 128.0;
         case DType::F16:
         case DType::F32: return clampd(v * mult, 0.0, 1.0);
+        default: return v;
     }
-    return v;
 }
 
 template <typename T>

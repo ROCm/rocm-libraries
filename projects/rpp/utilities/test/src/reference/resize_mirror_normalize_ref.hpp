@@ -64,8 +64,8 @@ inline double resize_mirror_normalize_scalar(double v, DType dt, double mean, do
         case DType::I8: return ((v + 128.0) - mean) / stdDev - 128.0;
         case DType::F16:
         case DType::F32: return (v - mean / 255.0) / stdDev;
+        default: return v;
     }
-    return v;
 }
 
 // meanTensor / stdDevTensor hold one value per channel per image; mirrorTensor one flag per image.

@@ -30,8 +30,8 @@ float cutoff_in_dtype(float raw, DType dt) {
         case DType::I8: return raw - 128.0f;
         case DType::F16:
         case DType::F32: return raw / 255.0f;
+        default: return raw;
     }
-    return raw;
 }
 
 // The mask is exactly 0/255, -128/127, or 0.0/1.0 -- all exactly representable, so the
@@ -106,6 +106,8 @@ TEST_P(ThresholdTest, Correctness) {
         case DType::I8:
             run_threshold<Rpp8s>(p.cfg, p.op);
             break;
+        default:
+            FAIL() << "unsupported dtype for threshold";
     }
 }
 

@@ -95,6 +95,8 @@ TEST_P(MedianFilterTest, Correctness) {
         case DType::I8:
             run_median_filter<Rpp8s>(p.cfg, p.op);
             break;
+        default:
+            FAIL() << "unsupported dtype for median_filter";
     }
 }
 

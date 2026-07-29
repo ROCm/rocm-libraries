@@ -127,6 +127,8 @@ TEST_P(CutoutDropoutTest, Correctness) {
         case DType::I8:
             run_cutout_dropout<Rpp8s>(cfg);
             break;
+        default:
+            FAIL() << "unsupported dtype for cutout_dropout";
     }
 }
 

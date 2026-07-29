@@ -25,8 +25,8 @@ inline double threshold_white(DType dt) {
         case DType::I8: return 127.0;
         case DType::F16:
         case DType::F32: return 1.0;
+        default: return 0.0;
     }
-    return 0.0;
 }
 
 inline double threshold_black(DType dt) { return dt == DType::I8 ? -128.0 : 0.0; }

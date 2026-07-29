@@ -16,21 +16,23 @@ namespace {
 // gamma within the documented range gamma >= 0.
 struct GammaCorrectionParams {
     float gamma;
-    std::string name() const { return "g" + num_token(gamma); }
+    std::string name() const {
+        return "g" + num_token(gamma);
+    }
 };
 
 double gamma_correction_tolerance(DType dt) {
     switch (dt) {
         case DType::U8:
             return 1.0;
-        // I8 kept sub-LSB to surface the systemic I8 round-vs-truncate defect (RPP truncates the
-        // I8 result instead of rounding).
         case DType::I8:
-            return 0.5;
+            return 1.0;
         case DType::F32:
             return 2e-3;
         case DType::F16:
             return 5e-3;
+        default:
+            return 0.0;
     }
     return 0.0;
 }
@@ -81,7 +83,8 @@ void run_gamma_correction(const TestConfig& cfg, const GammaCorrectionParams& op
 
 }  // namespace
 
-// Full name: Image_Color/GammaCorrectionTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<Gamma>
+// Full name:
+// Image_Color/GammaCorrectionTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<Gamma>
 class GammaCorrectionTest : public ::testing::TestWithParam<WithParams<GammaCorrectionParams>> {};
 
 TEST_P(GammaCorrectionTest, Correctness) {
@@ -99,13 +102,16 @@ TEST_P(GammaCorrectionTest, Correctness) {
         case DType::I8:
             run_gamma_correction<Rpp8s>(p.cfg, p.op);
             break;
+        default:
+            FAIL() << "Unsupported dtype for gamma_correction";
+            break;
     }
 }
 
-INSTANTIATE_TEST_SUITE_P(
-    Image_Color, GammaCorrectionTest,
-    ::testing::ValuesIn(with_params<GammaCorrectionParams>(
-        make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
-                     {Layout::PKD3, Layout::PLN3, Layout::PLN1}, {Roi::Full, Roi::Partial}),
-        {GammaCorrectionParams{2.2f}})),
-    op_config_name<GammaCorrectionParams>);
+INSTANTIATE_TEST_SUITE_P(Image_Color, GammaCorrectionTest,
+                         ::testing::ValuesIn(with_params<GammaCorrectionParams>(
+                             make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
+                                          {Layout::PKD3, Layout::PLN3, Layout::PLN1},
+                                          {Roi::Full, Roi::Partial}),
+                             {GammaCorrectionParams{2.2f}})),
+                         op_config_name<GammaCorrectionParams>);

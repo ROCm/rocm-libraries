@@ -42,8 +42,8 @@ double resize_crop_mirror_tolerance(DType dt, RpptInterpolationType interp) {
         case DType::I8: return 1.0;
         case DType::F32: return 2e-3;
         case DType::F16: return 5e-3;
+        default: return 0.0;
     }
-    return 0.0;
 }
 
 template <typename T>
@@ -124,6 +124,8 @@ TEST_P(ResizeCropMirrorTest, Correctness) {
         case DType::I8:
             run_resize_crop_mirror<Rpp8s>(p.cfg, p.op);
             break;
+        default:
+            FAIL() << "unsupported dtype for resize_crop_mirror";
     }
 }
 

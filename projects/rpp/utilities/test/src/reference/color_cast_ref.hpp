@@ -33,8 +33,8 @@ inline double color_cast_scalar(double v, DType dt, double alpha, double c) {
             const double cn = c / 255.0;
             return clampd((v - cn) * alpha + cn, 0.0, 1.0);
         }
+        default: return v;
     }
-    return v;
 }
 
 // Writes the color-cast result into dst, reading the source at the ROI offset and writing

@@ -45,8 +45,8 @@ double rmn_tolerance(DType dt, const TestConfig& cfg, const RmnParams& op) {
         case DType::I8: return 1.0;
         case DType::F32: return 2e-3;
         case DType::F16: return 5e-3;
+        default: return 0.0;
     }
-    return 0.0;
 }
 
 template <typename T>
@@ -134,6 +134,8 @@ TEST_P(ResizeMirrorNormalizeTest, Correctness) {
         case DType::I8:
             run_resize_mirror_normalize<Rpp8s>(p.cfg, p.op);
             break;
+        default:
+            FAIL() << "unsupported dtype for resize_mirror_normalize";
     }
 }
 

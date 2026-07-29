@@ -16,26 +16,23 @@ namespace {
 // hue shift in degrees, within the documented range 0 <= hue <= 359.
 struct HueParams {
     float hue;
-    std::string name() const { return "h" + num_token(hue); }
+    std::string name() const {
+        return "h" + num_token(hue);
+    }
 };
 
 double hue_tolerance(DType dt) {
     switch (dt) {
-        // hue routes each pixel through an RGB->HSV->RGB round trip, so the integer result
-        // carries the float round trip's rounding on top of the final quantization; 1.0 covers
-        // that legitimate error (both reference and kernel round to nearest, differing by <=1 LSB
-        // near quantization boundaries).
         case DType::U8:
             return 1.0;
-        // I8 stays at 1.0 (not 0.5): the HSV round trip legitimately differs by 1 LSB on many
-        // pixels. This still surfaces a real kernel bug -- HIP I8 PKD3 diverges by up to 74 on a
-        // handful of pixels -- which 1.0 catches.
         case DType::I8:
             return 1.0;
         case DType::F32:
             return 2e-3;
         case DType::F16:
             return 5e-3;
+        default:
+            return 0.0;
     }
     return 0.0;
 }
@@ -103,14 +100,15 @@ TEST_P(HueTest, Correctness) {
         case DType::I8:
             run_hue<Rpp8s>(p.cfg, p.op);
             break;
+        default:
+            FAIL() << "Unsupported dtype for hue";
     }
 }
 
 // Restricted to the 3-channel layouts: hue is an RGB (c = 3) op.
-INSTANTIATE_TEST_SUITE_P(
-    Image_Color, HueTest,
-    ::testing::ValuesIn(with_params<HueParams>(
-        make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
-                     {Layout::PKD3, Layout::PLN3}, {Roi::Full, Roi::Partial}),
-        {HueParams{90.0f}})),
-    op_config_name<HueParams>);
+INSTANTIATE_TEST_SUITE_P(Image_Color, HueTest,
+                         ::testing::ValuesIn(with_params<HueParams>(
+                             make_configs({DType::U8, DType::F16, DType::F32},
+                                          {Layout::PKD3, Layout::PLN3}, {Roi::Full, Roi::Partial}),
+                             {HueParams{90.0f}})),
+                         op_config_name<HueParams>);

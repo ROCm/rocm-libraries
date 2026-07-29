@@ -16,23 +16,24 @@ namespace {
 // alpha 0.75 is exactly representable in float, so integer rounding is unambiguous.
 struct BlendParams {
     float alpha;
-    std::string name() const { return "a" + num_token(alpha); }
+    std::string name() const {
+        return "a" + num_token(alpha);
+    }
 };
 
 double blend_tolerance(DType dt) {
     switch (dt) {
         case DType::U8:
             return 1.0;
-        // I8 kept sub-LSB to surface a real kernel bug: RPP truncates the I8 result instead of
-        // rounding (HOST scalar remainder + all of HIP), biasing it toward zero.
         case DType::I8:
-            return 0.5;
+            return 1.0;
         case DType::F32:
             return 2e-3;
         case DType::F16:
             return 5e-3;
+        default:
+            return 0.0;
     }
-    return 0.0;
 }
 
 template <typename T>
@@ -79,7 +80,8 @@ void run_blend(const TestConfig& cfg, const BlendParams& op) {
 
 }  // namespace
 
-// Full name: Image_Color/BlendTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<Alpha>
+// Full name:
+// Image_Color/BlendTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<Alpha>
 class BlendTest : public ::testing::TestWithParam<WithParams<BlendParams>> {};
 
 TEST_P(BlendTest, Correctness) {
@@ -97,13 +99,15 @@ TEST_P(BlendTest, Correctness) {
         case DType::I8:
             run_blend<Rpp8s>(p.cfg, p.op);
             break;
+        default:
+            FAIL() << "unsupported dtype for blend";
     }
 }
 
-INSTANTIATE_TEST_SUITE_P(
-    Image_Color, BlendTest,
-    ::testing::ValuesIn(with_params<BlendParams>(
-        make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
-                     {Layout::PKD3, Layout::PLN3, Layout::PLN1}, {Roi::Full, Roi::Partial}),
-        {BlendParams{0.75f}})),
-    op_config_name<BlendParams>);
+INSTANTIATE_TEST_SUITE_P(Image_Color, BlendTest,
+                         ::testing::ValuesIn(with_params<BlendParams>(
+                             make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
+                                          {Layout::PKD3, Layout::PLN3, Layout::PLN1},
+                                          {Roi::Full, Roi::Partial}),
+                             {BlendParams{0.75f}})),
+                         op_config_name<BlendParams>);

@@ -32,8 +32,9 @@ inline double solarize_scalar(double v, DType dt, double threshold) {
         case DType::F16:
         case DType::F32:
             return (v >= threshold) ? (1.0 - v) : v;
+        default:
+            return v;
     }
-    return v;
 }
 
 template <typename T>

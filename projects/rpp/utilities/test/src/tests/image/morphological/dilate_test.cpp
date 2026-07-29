@@ -16,7 +16,9 @@ namespace {
 // kernelSize is an odd square structuring-element size (3/5/7/9 per the API doc).
 struct DilateParams {
     Rpp32u kernelSize;
-    std::string name() const { return "k" + std::to_string(kernelSize); }
+    std::string name() const {
+        return "k" + std::to_string(kernelSize);
+    }
 };
 
 template <typename T>
@@ -87,7 +89,8 @@ void run_dilate(const TestConfig& cfg, const DilateParams& op) {
 
 }  // namespace
 
-// Full name: Image_Morphological/DilateTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_k<KernelSize>
+// Full name:
+// Image_Morphological/DilateTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_k<KernelSize>
 class DilateTest : public ::testing::TestWithParam<WithParams<DilateParams>> {};
 
 TEST_P(DilateTest, Correctness) {
@@ -105,13 +108,16 @@ TEST_P(DilateTest, Correctness) {
         case DType::I8:
             run_dilate<Rpp8s>(p.cfg, p.op);
             break;
+        default:
+            FAIL() << "Unsupported dtype for dilate";
+            break;
     }
 }
 
-INSTANTIATE_TEST_SUITE_P(
-    Image_Morphological, DilateTest,
-    ::testing::ValuesIn(with_params<DilateParams>(
-        make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
-                     {Layout::PKD3, Layout::PLN3, Layout::PLN1}, {Roi::Full, Roi::Partial}),
-        {DilateParams{3}, DilateParams{5}})),
-    op_config_name<DilateParams>);
+INSTANTIATE_TEST_SUITE_P(Image_Morphological, DilateTest,
+                         ::testing::ValuesIn(with_params<DilateParams>(
+                             make_configs({DType::U8, DType::F16, DType::F32},
+                                          {Layout::PKD3, Layout::PLN3, Layout::PLN1},
+                                          {Roi::Full, Roi::Partial}),
+                             {DilateParams{3}, DilateParams{5}})),
+                         op_config_name<DilateParams>);

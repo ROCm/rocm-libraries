@@ -112,6 +112,8 @@ TEST_P(GridDropoutTest, Correctness) {
         case DType::I8:
             run_grid_dropout<Rpp8s>(cfg);
             break;
+        default:
+            FAIL() << "unsupported dtype for grid_dropout";
     }
 }
 

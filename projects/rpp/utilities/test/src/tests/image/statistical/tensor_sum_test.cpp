@@ -25,8 +25,9 @@ double tensor_sum_tolerance(DType dt) {
             return 1e-1;
         case DType::F16:
             return 1e-1;
+        default:
+            return 0.0;
     }
-    return 0.0;
 }
 
 // Tin is the source element type; Tout is the op's output element type (U8->Rpp64u, I8->Rpp64s,
@@ -89,6 +90,8 @@ TEST_P(TensorSumTest, Correctness) {
         case DType::I8:
             run_tensor_sum<Rpp8s, Rpp64s>(cfg);
             break;
+        default:
+            FAIL() << "unsupported dtype for tensor_sum";
     }
 }
 

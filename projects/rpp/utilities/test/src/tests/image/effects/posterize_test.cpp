@@ -29,8 +29,9 @@ double posterize_tolerance(DType dt) {
             return 1e-3;
         case DType::F16:
             return 4e-3;
+        default:
+            return 0.0;
     }
-    return 0.0;
 }
 
 template <typename T>
@@ -92,6 +93,8 @@ TEST_P(PosterizeTest, Correctness) {
         case DType::I8:
             run_posterize<Rpp8s>(p.cfg, p.op);
             break;
+        default:
+            FAIL() << "unsupported dtype for posterize";
     }
 }
 

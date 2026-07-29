@@ -78,6 +78,8 @@ TEST_P(TensorMinTest, Correctness) {
         case DType::I8:
             run_tensor_min<Rpp8s, Rpp8s>(cfg);
             break;
+        default:
+            FAIL() << "unsupported dtype for tensor_min";
     }
 }
 

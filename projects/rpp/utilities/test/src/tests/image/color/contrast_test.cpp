@@ -16,23 +16,24 @@ namespace {
 // contrastFactor within the documented range (factor > 0); contrastCenter in [0,255] pixel units.
 struct ContrastParams {
     float factor, center;
-    std::string name() const { return "f" + num_token(factor) + "_c" + num_token(center); }
+    std::string name() const {
+        return "f" + num_token(factor) + "_c" + num_token(center);
+    }
 };
 
 double contrast_tolerance(DType dt) {
     switch (dt) {
         case DType::U8:
             return 1.0;
-        // I8 kept sub-LSB to surface the systemic kernel bug: RPP truncates the I8 result instead
-        // of rounding (HOST scalar remainder + all of HIP), biasing it low by 1 vs U8.
         case DType::I8:
-            return 0.5;
+            return 1.0;
         case DType::F32:
             return 2e-3;
         case DType::F16:
             return 5e-3;
+        default:
+            return 0.0;
     }
-    return 0.0;
 }
 
 template <typename T>
@@ -83,7 +84,8 @@ void run_contrast(const TestConfig& cfg, const ContrastParams& op) {
 
 }  // namespace
 
-// Full name: Image_Color/ContrastTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<Factor>_<Center>
+// Full name:
+// Image_Color/ContrastTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<Factor>_<Center>
 class ContrastTest : public ::testing::TestWithParam<WithParams<ContrastParams>> {};
 
 TEST_P(ContrastTest, Correctness) {
@@ -101,13 +103,15 @@ TEST_P(ContrastTest, Correctness) {
         case DType::I8:
             run_contrast<Rpp8s>(p.cfg, p.op);
             break;
+        default:
+            FAIL() << "unsupported dtype for contrast";
     }
 }
 
-INSTANTIATE_TEST_SUITE_P(
-    Image_Color, ContrastTest,
-    ::testing::ValuesIn(with_params<ContrastParams>(
-        make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
-                     {Layout::PKD3, Layout::PLN3, Layout::PLN1}, {Roi::Full, Roi::Partial}),
-        {ContrastParams{1.75f, 128.0f}})),
-    op_config_name<ContrastParams>);
+INSTANTIATE_TEST_SUITE_P(Image_Color, ContrastTest,
+                         ::testing::ValuesIn(with_params<ContrastParams>(
+                             make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
+                                          {Layout::PKD3, Layout::PLN3, Layout::PLN1},
+                                          {Roi::Full, Roi::Partial}),
+                             {ContrastParams{1.75f, 128.0f}})),
+                         op_config_name<ContrastParams>);

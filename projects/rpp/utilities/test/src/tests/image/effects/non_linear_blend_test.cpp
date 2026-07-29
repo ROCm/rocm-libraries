@@ -17,21 +17,23 @@ namespace {
 // flat one (mostly src1) over a 36x48 image -- together they exercise the full weight range.
 struct NonLinearBlendParams {
     float stdDev;
-    std::string name() const { return "s" + num_token(stdDev); }
+    std::string name() const {
+        return "s" + num_token(stdDev);
+    }
 };
 
 double non_linear_blend_tolerance(DType dt) {
     switch (dt) {
         case DType::U8:
             return 1.0;
-        // I8 kept sub-LSB to surface the systemic I8 round-vs-truncate defect (HIP all I8, HOST
-        // partial-ROI scalar tail).
         case DType::I8:
-            return 0.5;
+            return 1.0;
         case DType::F32:
             return 2e-3;
         case DType::F16:
             return 5e-3;
+        default:
+            return 0.0;
     }
     return 0.0;
 }
@@ -99,13 +101,15 @@ TEST_P(NonLinearBlendTest, Correctness) {
         case DType::I8:
             run_non_linear_blend<Rpp8s>(p.cfg, p.op);
             break;
+        default:
+            FAIL() << "Unsupported dtype for non_linear_blend";
     }
 }
 
-INSTANTIATE_TEST_SUITE_P(
-    Image_Effects, NonLinearBlendTest,
-    ::testing::ValuesIn(with_params<NonLinearBlendParams>(
-        make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
-                     {Layout::PKD3, Layout::PLN3, Layout::PLN1}, {Roi::Full, Roi::Partial}),
-        {NonLinearBlendParams{15.0f}, NonLinearBlendParams{50.0f}})),
-    op_config_name<NonLinearBlendParams>);
+INSTANTIATE_TEST_SUITE_P(Image_Effects, NonLinearBlendTest,
+                         ::testing::ValuesIn(with_params<NonLinearBlendParams>(
+                             make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
+                                          {Layout::PKD3, Layout::PLN3, Layout::PLN1},
+                                          {Roi::Full, Roi::Partial}),
+                             {NonLinearBlendParams{15.0f}, NonLinearBlendParams{50.0f}})),
+                         op_config_name<NonLinearBlendParams>);

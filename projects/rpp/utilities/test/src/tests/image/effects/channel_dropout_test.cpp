@@ -96,6 +96,8 @@ TEST_P(ChannelDropoutTest, Correctness) {
         case DType::I8:
             run_channel_dropout<Rpp8s>(p.cfg, p.op);
             break;
+        default:
+            FAIL() << "unsupported dtype for channel_dropout";
     }
 }
 

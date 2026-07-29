@@ -17,15 +17,14 @@ double phase_tolerance(DType dt) {
     switch (dt) {
         case DType::U8:
             return 1.0;
-        // I8 kept sub-LSB to surface the systemic I8 round-vs-truncate defect: HIP truncates all I8
-        // (actual = ref - 1), HOST truncates the partial-ROI scalar tail (here actual = ref + 1 as
-        // phase's negative I8 output truncates toward zero).
         case DType::I8:
-            return 0.5;
+            return 1.0;
         case DType::F32:
             return 2e-3;
         case DType::F16:
             return 5e-3;
+        default:
+            return 0.0;
     }
     return 0.0;
 }
@@ -87,6 +86,9 @@ TEST_P(PhaseTest, Correctness) {
             break;
         case DType::I8:
             run_phase<Rpp8s>(cfg);
+            break;
+        default:
+            FAIL() << "Unsupported dtype for phase";
             break;
     }
 }

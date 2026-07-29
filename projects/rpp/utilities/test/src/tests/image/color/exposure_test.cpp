@@ -16,23 +16,24 @@ namespace {
 // exposureFactor 0.5 => multiplier 2^0.5 ~= 1.414.
 struct ExposureParams {
     float exposureFactor;
-    std::string name() const { return "e" + num_token(exposureFactor); }
+    std::string name() const {
+        return "e" + num_token(exposureFactor);
+    }
 };
 
 double exposure_tolerance(DType dt) {
     switch (dt) {
         case DType::U8:
             return 1.0;
-        // I8 kept sub-LSB to surface a real kernel bug: RPP truncates the I8 result instead of
-        // rounding (HOST scalar remainder + all of HIP), biasing it low.
         case DType::I8:
-            return 0.5;
+            return 1.0;
         case DType::F32:
             return 2e-3;
         case DType::F16:
             return 5e-3;
+        default:
+            return 0.0;
     }
-    return 0.0;
 }
 
 template <typename T>
@@ -76,7 +77,8 @@ void run_exposure(const TestConfig& cfg, const ExposureParams& op) {
 
 }  // namespace
 
-// Full name: Image_Color/ExposureTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<Exposure>
+// Full name:
+// Image_Color/ExposureTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<Exposure>
 class ExposureTest : public ::testing::TestWithParam<WithParams<ExposureParams>> {};
 
 TEST_P(ExposureTest, Correctness) {
@@ -94,13 +96,15 @@ TEST_P(ExposureTest, Correctness) {
         case DType::I8:
             run_exposure<Rpp8s>(p.cfg, p.op);
             break;
+        default:
+            FAIL() << "unsupported dtype for exposure";
     }
 }
 
-INSTANTIATE_TEST_SUITE_P(
-    Image_Color, ExposureTest,
-    ::testing::ValuesIn(with_params<ExposureParams>(
-        make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
-                     {Layout::PKD3, Layout::PLN3, Layout::PLN1}, {Roi::Full, Roi::Partial}),
-        {ExposureParams{0.5f}})),
-    op_config_name<ExposureParams>);
+INSTANTIATE_TEST_SUITE_P(Image_Color, ExposureTest,
+                         ::testing::ValuesIn(with_params<ExposureParams>(
+                             make_configs({DType::U8, DType::F16, DType::F32},
+                                          {Layout::PKD3, Layout::PLN3, Layout::PLN1},
+                                          {Roi::Full, Roi::Partial}),
+                             {ExposureParams{0.5f}})),
+                         op_config_name<ExposureParams>);

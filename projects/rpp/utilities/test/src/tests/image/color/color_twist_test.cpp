@@ -36,8 +36,9 @@ double color_twist_tolerance(DType dt) {
             return 3e-3;
         case DType::F16:
             return 5e-3;
+        default:
+            return 0.0;
     }
-    return 0.0;
 }
 
 template <typename T>
@@ -112,6 +113,8 @@ TEST_P(ColorTwistTest, Correctness) {
         case DType::I8:
             run_color_twist<Rpp8s>(p.cfg, p.op);
             break;
+        default:
+            FAIL() << "unsupported dtype for color_twist";
     }
 }
 

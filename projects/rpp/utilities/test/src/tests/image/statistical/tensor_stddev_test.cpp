@@ -26,8 +26,9 @@ double tensor_stddev_tolerance(DType dt) {
             return 1e-3;
         case DType::F16:
             return 1e-2;
+        default:
+            return 0.0;
     }
-    return 0.0;
 }
 
 // stddev always outputs Rpp32f, and takes a meanTensor of size n*4 in [MeanR,MeanG,MeanB,MeanImage]
@@ -113,6 +114,8 @@ TEST_P(TensorStddevTest, Correctness) {
         case DType::I8:
             run_tensor_stddev<Rpp8s>(cfg);
             break;
+        default:
+            FAIL() << "unsupported dtype for tensor_stddev";
     }
 }
 

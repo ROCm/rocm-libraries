@@ -25,8 +25,9 @@ double tensor_mean_tolerance(DType dt) {
             return 1e-4;
         case DType::F16:
             return 1e-3;
+        default:
+            return 0.0;
     }
-    return 0.0;
 }
 
 // mean always outputs Rpp32f regardless of the source dtype (per the API contract).
@@ -88,6 +89,8 @@ TEST_P(TensorMeanTest, Correctness) {
         case DType::I8:
             run_tensor_mean<Rpp8s>(cfg);
             break;
+        default:
+            FAIL() << "unsupported dtype for tensor_mean";
     }
 }
 

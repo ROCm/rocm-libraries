@@ -38,8 +38,8 @@ inline double posterize_scalar(double v, DType dt, int levelBits) {
             const int i = static_cast<int>(clampd(std::lround(v * 255.0), 0.0, 255.0));
             return static_cast<double>(i & mask) / 255.0;
         }
+        default: return v;
     }
-    return v;
 }
 
 template <typename T>

@@ -101,6 +101,8 @@ TEST_P(RicapTest, Correctness) {
         case DType::I8:
             run_ricap<Rpp8s>(p.cfg, p.op);
             break;
+        default:
+            FAIL() << "unsupported dtype for ricap";
     }
 }
 

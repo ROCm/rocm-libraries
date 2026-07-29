@@ -127,6 +127,8 @@ TEST_P(EraseTest, Correctness) {
         case DType::I8:
             run_erase<Rpp8s>(cfg);
             break;
+        default:
+            FAIL() << "unsupported dtype for erase";
     }
 }
 

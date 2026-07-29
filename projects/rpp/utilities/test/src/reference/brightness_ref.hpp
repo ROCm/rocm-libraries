@@ -29,8 +29,9 @@ inline double brightness_scalar(double v, DType dt, double alpha, double beta) {
         case DType::F16:
         case DType::F32:
             return clampd(v * alpha + beta / 255.0, 0.0, 1.0);
+        default:
+            return v;
     }
-    return v;
 }
 
 // Writes the brightness result into dst, reading the source at the ROI offset and writing

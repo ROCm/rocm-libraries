@@ -101,6 +101,8 @@ TEST_P(CropAndPatchTest, Correctness) {
         case DType::I8:
             run_crop_and_patch<Rpp8s>(p.cfg, p.op);
             break;
+        default:
+            FAIL() << "unsupported dtype for crop_and_patch";
     }
 }
 

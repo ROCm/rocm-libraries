@@ -36,6 +36,7 @@ endif()
 
 add_executable(rpp_tests ${RPP_TEST_SOURCES})
 target_include_directories(rpp_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+set_property(TARGET rpp_tests PROPERTY COMPILE_WARNING_AS_ERROR ON)
 if(rpp_INCLUDE_DIR)
     target_include_directories(rpp_tests PRIVATE ${rpp_INCLUDE_DIR}/rpp)
 endif()

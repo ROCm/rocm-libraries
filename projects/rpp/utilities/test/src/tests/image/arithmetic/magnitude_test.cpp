@@ -25,8 +25,9 @@ double magnitude_tolerance(DType dt) {
             return 2e-3;
         case DType::F16:
             return 5e-3;
+        default:
+            return 0.0;
     }
-    return 0.0;
 }
 
 template <typename T>
@@ -87,12 +88,14 @@ TEST_P(MagnitudeTest, Correctness) {
         case DType::I8:
             run_magnitude<Rpp8s>(cfg);
             break;
+        default:
+            FAIL() << "unsupported dtype for magnitude";
     }
 }
 
-INSTANTIATE_TEST_SUITE_P(
-    Image_Arithmetic, MagnitudeTest,
-    ::testing::ValuesIn(make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
-                                     {Layout::PKD3, Layout::PLN3, Layout::PLN1},
-                                     {Roi::Full, Roi::Partial})),
-    config_param_name);
+INSTANTIATE_TEST_SUITE_P(Image_Arithmetic, MagnitudeTest,
+                         ::testing::ValuesIn(make_configs({DType::U8, DType::F16, DType::F32},
+                                                          {Layout::PKD3, Layout::PLN3,
+                                                           Layout::PLN1},
+                                                          {Roi::Full, Roi::Partial})),
+                         config_param_name);

@@ -78,6 +78,8 @@ TEST_P(TensorMaxTest, Correctness) {
         case DType::I8:
             run_tensor_max<Rpp8s, Rpp8s>(cfg);
             break;
+        default:
+            FAIL() << "unsupported dtype for tensor_max";
     }
 }
 
