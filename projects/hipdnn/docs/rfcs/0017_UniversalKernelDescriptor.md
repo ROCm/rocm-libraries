@@ -219,10 +219,9 @@ selection** of an engine, **policy configuration**, where a resolved sequence of
 plugins supplies the ranked engine list and a policy may itself be a heuristic, and **auto-tuning**,
 which measures engines and picks the winner outright ([RFC 0013](0013_Autotune.md)). It is not
 first-claim-wins by registration order. This proposal changes none of it; it only makes engine
-selection more visible, because more engines become cheap to add. A KDP and a UHD have no say in it: a
-UHD's scores are meaningful only within its own engine and are never compared across engines.
+selection more visible, because more engines become cheap to add.
 
-Kernel selection is the UHD's job: given a catalog, it picks one kernel. That is the out-of-box path,
+Kernel selection is the UHD's job: given a catalog, it picks one kernel. That is the out-of-the-box path,
 one ranked choice, no measurement. Exhaustive search is the opt-in path instead: a user can restrict
 the catalog through knob configuration, or use the auto-tuning API to sample candidates and keep the
 measured winner, opting in to testing across engines, within one engine's full catalog, or both
@@ -370,7 +369,7 @@ request nothing can serve. This holds for the AOT path and the future JIT path a
 ([Section 9.3](#93-future-jit-and-normalized-providers)).
 
 **A knob's default is the heuristic's choice, not a constant.** Whatever the UHD ranks first is what the
-knob reports, so leaving every knob alone reproduces the out-of-box selection and the reported default
+knob reports, so leaving every knob alone reproduces the out-of-the-box selection and the reported default
 tracks the ranking instead of drifting from it as kernels are added.
 
 Order follows from that: the catalog is built first, its values determine what the knobs offer, and a
