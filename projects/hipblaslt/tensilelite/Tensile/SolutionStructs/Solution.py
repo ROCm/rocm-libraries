@@ -256,9 +256,11 @@ def _validateStreamKMulticast(state, printRejectionReason, isaInfoMap):
   StreamKMulticast co-locates C consecutive StreamK DP workgroups in a 1-D
   cluster (ClusterDim = [C, 1]); those M-adjacent tiles share the same B over
   full K, so B is TDM-multicast to the cluster while A stays per-workgroup.
-  Solution-level requirements are rejected here at build time; the runtime
-  nWG0 % C "multiple-of-cluster-size" requirement is enforced by the
-  ClusterDimCheck predicate at selection time (not a silent fallback).
+  Solution-level requirements are rejected here at build time. The old
+  nWG0 % C "multiple-of-cluster-size" ClusterDimCheck predicate is DROPPED:
+  non-multiple cluster launches are now supported at runtime via the C++ grid
+  round-up plus the prologue pad-early-exit + multicast mask reduction (padded
+  boundary-cluster peers s_endpgm before the -3 cluster barrier).
   Auto-derived for StreamK=3 + ClusterDim != [1, 1] (the bare index-only cluster
   state collapsed into this path), so the rejects below reject an unusable
   cluster rather than an explicit opt-in.

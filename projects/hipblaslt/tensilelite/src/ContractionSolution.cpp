@@ -1942,9 +1942,29 @@ namespace TensileLite
         // The HIP driver rejects a cluster launch whose grid is not divisible by
         // clusterDim, so round up. The extra padded WGs early-exit in the kernel
         // prologue; their WAVEDONE decrements the barrier's live member count.
-        // Stream-K has its own cluster-aware 1-D grid (sk.grid) and WG-id decode,
-        // so leave it untouched.
+        // The 1-D [C,1] Stream-K grid has its own cluster-aware 1-D grid (sk.grid,
+        // already rounded to a Cs multiple in getSKGridImpl) and a scalar WG-id
+        // decode with a self-only fallback for boundary clusters, so leave it
+        // untouched.
         if(enableCluster && sizeMapping.streamK == 0)
+        {
+            rv.numWorkGroups.x = RoundUpToMultiple(rv.numWorkGroups.x, rv.clusterDim.x);
+            rv.numWorkGroups.y = RoundUpToMultiple(rv.numWorkGroups.y, rv.clusterDim.y);
+        }
+        // 2-D DUAL-multicast Stream-K (ForceDPOnly-2D and StreamKDualMulticast):
+        // gridX=nWG0 / gridY (above) are the REAL tile extents, which -- now that
+        // ClusterDimCheck is dropped -- need not be multiples of Cs/Ck. Round the
+        // 2-D grid up to the cluster dims so the launch is legal; the padded
+        // boundary WGs (WorkGroup0>=nWG0 or WorkGroup1>=nWG1*gsu) early-exit in
+        // StreamK.preLoop (streamKClusterPadEarlyExit) BEFORE the -3 cluster
+        // barrier (their WAVEDONE frees the barrier slot), and the surviving
+        // peers' broadcast masks are trimmed to the present lanes
+        // (computeMulticastMaskReduction). sk.grid / the SK tile accounting keep
+        // using the real nWG0*gridY, so the padded WGs carry no work. (gridY is
+        // already a multiple of Ck for StreamKDualMulticast, so its round-up is a
+        // no-op there; only ForceDPOnly-2D rounds the N extent.)
+        else if(enableCluster && sizeMapping.streamK == 3 && sizeMapping.clusterDim.y > 1
+                && (sizeMapping.streamKForceDPOnly != 0 || sizeMapping.streamKDualMulticast != 0))
         {
             rv.numWorkGroups.x = RoundUpToMultiple(rv.numWorkGroups.x, rv.clusterDim.x);
             rv.numWorkGroups.y = RoundUpToMultiple(rv.numWorkGroups.y, rv.clusterDim.y);

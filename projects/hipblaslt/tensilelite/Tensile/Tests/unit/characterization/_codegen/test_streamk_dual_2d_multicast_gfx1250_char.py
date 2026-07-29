@@ -78,8 +78,8 @@ def test_streamk_dual_2d_multicast_gfx1250_emits_assembly():
         assert "s[sgprMulticastMaskB], 0x3" in src, (
             f"Kernel {base!r} DP round does not set maskB=0x3 (B NOT multicast!)"
         )
-        assert "keep dense 2-D masks" in src, (
-            f"Kernel {base!r} missing the dense-mask short-circuit note"
+        assert "keep kernel-init 2-D masks" in src, (
+            f"Kernel {base!r} missing the kernel-init mask short-circuit note"
         )
         assert "sgprMulticastMaskA" in src and "sgprMulticastMaskB" in src, (
             f"Kernel {base!r} never binds both multicast masks to TDM descriptors"

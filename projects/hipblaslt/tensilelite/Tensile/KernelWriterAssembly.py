@@ -83,7 +83,7 @@ from .SolutionStructs import isPackedIndex
 from .AsmStoreState import StoreState, VectorDataTypes
 from .Activation import ActivationType
 from .CustomKernels import isCustomKernelConfig
-from .Common import roundUp, log2, ceilDivide, choose_multiplier, wmmaV3InputVgprLayout, clusterEnabled, streamKMulticast
+from .Common import roundUp, log2, ceilDivide, choose_multiplier, wmmaV3InputVgprLayout, clusterEnabled, streamKMulticast, streamKDual2DMulticast
 from .OccupancyMeasure import compute_occupancy_from_asm_source, _arch_caps_for_kernel
 from rocisa.instruction import ECvtF16toF32, ECvtF32toF16, ECvtPkFP8toF32
 from Tensile.Common import print2, printExit, printWarning, INDEX_CHARS, DebugConfig, DataDirection, isSubtileMultiDU
@@ -2359,14 +2359,27 @@ class KernelWriterAssembly(KernelWriter):
     tilesN*GSU.
 
     Writes the reduced-bit masks into maskColSgpr/maskRowSgpr and returns True;
-    returns False (no write) for Stream-K or non-cluster, where the caller falls
-    back to the full mask.
+    returns False (no write) for the 1-D Stream-K grid or non-cluster, where the
+    caller falls back to the full mask.
+
+    Stream-K 2-D dual multicast (streamKDual2DMulticast) IS handled: at this
+    (kernel-init) point WorkGroup0/1 hold the raw M-tile/N-tile coords (the
+    linear StreamKIdx fold runs later in StreamK.preLoop), the ClusterDim axes
+    are Cs (X/M, B-multicast) and Ck (Y/N, A-multicast), and the grid is rounded
+    up to a ClusterDim multiple, so the same validX/validY reduction applies.
+    Its padded peers early-exit in StreamK.streamKClusterPadEarlyExit, so the
+    surviving peers' ld_bcst must wait only on the present lanes. The 1-D [C,1]
+    Stream-K grid is excluded: WorkGroup0 there is the SK work index (not an
+    M-tile) and its boundary clusters conservatively drop to self-only loads
+    (streamKMulticastMaskPredicate), so no reduced broadcast is needed.
     """
     cx = kernel["ClusterDim"][0]
     cy = kernel["ClusterDim"][1]
-    # Stream-K's 1-D grid is not padded and WorkGroup0/1 are not M/N tile indices,
-    # so the reduction (like the padded early-exit) does not apply.
-    if not ((cx > 1 or cy > 1) and kernel["StreamK"] == 0):
+    # Non-cluster: nothing to reduce. 1-D Stream-K: WorkGroup0/1 are not M/N tile
+    # indices and the grid is handled by the self-only fallback, so skip. The 2-D
+    # dual Stream-K path decodes real M/N tile coords here and is reduced like the
+    # data-parallel path.
+    if not ((cx > 1 or cy > 1) and (kernel["StreamK"] == 0 or streamKDual2DMulticast(kernel))):
       return False
 
     module.addComment0("reduce multicast mask to real WGs in cluster")

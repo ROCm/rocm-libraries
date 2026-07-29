@@ -27,7 +27,7 @@ from rocisa.container import vgpr, sgpr, mgpr, SMEMModifiers, MUBUFModifiers, GL
 from rocisa.instruction import GlobalInv, GlobalWb, SAddCU32, SAddU32, SAndB32, SBarrier, \
     SBranch, SCBranchSCC0, SCBranchSCC1, SCMovB32, SCSelectB32, SCmpEQU32, SCmpEQU64, \
     SCmpGeU32, SCmpGtU32, SCmpLeU32, SCmpLtU32, SLShiftLeftB32, SLShiftLeftB64, SLShiftRightB32, VLShiftLeftB32, SLoadB32, \
-    SMaxI32, SMinU32, SMovB32, SMovB64, SMulHIU32, SMulI32, SNop, SOrB32, SSleep, SStoreB32, SSubU32, \
+    SEndpgm, SMaxI32, SMinU32, SMovB32, SMovB64, SMulHIU32, SMulI32, SNop, SOrB32, SSleep, SStoreB32, SSubU32, \
     SWaitCnt, SWaitXCnt, VAddF32, VAddF64, VAddPKF16, VAddU32, VSubU32, VLShiftRightB32, VMovB32, \
     VReadfirstlaneB32, VCmpXEqU32, VCvtBF16toFP32, GlobalAtomicIncU32Saddr, BufferLoadB32, BufferStoreB32, \
     SAtomicInc, DSLoadB32, DSStoreB32, SLongBranch, SLongBranchPositive
@@ -2722,15 +2722,18 @@ class StreamKTwoTileDPFirst(StreamK):
             return module
         if streamKDual2DMulticast(kernel):
             # 2-D DUAL-multicast (ForceDPOnly 2-D dual multicast AND the standard
-            # StreamKDualMulticast path): the dense 2-D masks emitted at kernel init
+            # StreamKDualMulticast path): the 2-D masks emitted at kernel init
             # (ClusterLoad.computeMasks, aPeers=Ck) are already correct for BOTH
             # operands (A along Ck/Y N-adjacent peers, B along Cs/X M-adjacent peers)
-            # using the raw HW wg_x/wg_y within-cluster ranks. ClusterDimCheck
-            # guarantees full/aligned DP clusters (nWG0%Cs==0 && gridDimY%Ck==0), so
-            # the DP round needs no preLoop overwrite or self-mask fallback. (On the
-            # standard path the masks are later dropped to self-only at the DP->SK
-            # boundary -- see streamKMulticastBoundaryClear.)
-            module.addComment0("StreamKDual2DMulticast: keep dense 2-D masks (A & B); no preLoop overwrite")
+            # using the raw HW wg_x/wg_y within-cluster ranks. With ClusterDimCheck
+            # dropped, non-divisible sizes are handled structurally rather than by a
+            # selection guard: padded lanes early-exit (streamKClusterPadEarlyExit)
+            # and computeMulticastMaskReduction trims those same masks to the present
+            # peers for a boundary cluster -- so the DP round still needs no preLoop
+            # overwrite or self-mask fallback here. (On the standard path the masks
+            # are later dropped to self-only at the DP->SK boundary -- see
+            # streamKMulticastBoundaryClear.)
+            module.addComment0("StreamKDual2DMulticast: keep kernel-init 2-D masks (A & B, boundary-reduced); no preLoop overwrite")
             return module
         c = kernel["ClusterDim"][0]
         module.addComment0("cluster B-multicast: gate B-broadcast on clusterMulticastValid")
@@ -2902,6 +2905,68 @@ class StreamKTwoTileDPFirst(StreamK):
         module.add(skipWait)
         return module
 
+    def streamKClusterPadEarlyExit(self, writer, kernel):
+        """Exit padded boundary-cluster peers before the first cluster barrier.
+
+        With ``ClusterDimCheck`` dropped (gfx1250 non-multiple cluster launch
+        support, #9690), the StreamK cluster launch grid is rounded up to a
+        ClusterDim multiple (``ContractionSolution`` ``getSKGridImpl`` /
+        ``generateSingleCall``), so a boundary cluster contains PADDED
+        work-groups whose assigned tile lies beyond the real M/N tile extent.
+        Those padded peers must ``s_endpgm`` in the prologue BEFORE the first
+        ``s_barrier_signal -3`` so their WAVEDONE decrements the SQG
+        cluster-barrier live-member count and the ``-3`` barrier still completes
+        for the present peers (otherwise the real peers wait on peers that never
+        arrive -> hang). Emitting the exit before the load also means the exited
+        peers never issue a ``ld_bcst``; combined with
+        ``computeMulticastMaskReduction`` (which trims the broadcast mask to the
+        present peers), the surviving peers' ``ld_bcst`` waits only on peers that
+        are actually there.
+
+        Only the 2-D dual path (``streamKDual2DMulticast``: FDPO=1 ForceDP-2D and
+        FDPO=0 StreamKDualMulticast) needs this: it decodes the raw 2-D HW
+        workgroup coords (``WorkGroup0``=M-tile, ``WorkGroup1``=N-tile) into the
+        linear DP index and multicasts on the dense kernel-init masks, so a
+        padded lane would both hang the ``-3`` barrier and stall ``ld_bcst``. The
+        1-D ``[C,1]`` path keeps every launched WG live and conservatively drops
+        its whole boundary cluster to self-only loads
+        (``streamKMulticastMaskPredicate``), issuing no broadcast that a padded
+        peer must balance.
+
+        MUST be called from ``preLoop`` BEFORE the 2-D fold overwrites
+        ``WorkGroup0`` and BEFORE ``streamKMulticastPrologueSignal``.
+        """
+        module = Module("StreamK cluster pad early-exit")
+        if not (streamKMulticast(kernel) and streamKDual2DMulticast(kernel)):
+            return module
+        assert clusterEnabled(kernel["ClusterDim"]), \
+            "streamKClusterPadEarlyExit requires an enabled cluster"
+        module.addComment1("Stream-K 2-D dual: exit padded boundary-cluster peers before the cluster barrier (grid rounded up to ClusterDim)")
+        padExit   = Label(writer.labels.getNameInc("SKClusterPad_EarlyStop"), "")
+        padNoExit = Label(writer.labels.getNameInc("SKClusterPad_NoEarlyStop"), "")
+        # Raw HW coords here are the M-tile (WorkGroup0) / N-tile (WorkGroup1):
+        # the linear StreamKIdx fold has not run yet. NumWorkGroups0/1 hold the
+        # real (unrounded) tile counts; WorkGroup1 carries the GSU factor.
+        module.add(SCmpGeU32(src0=sgpr("WorkGroup0"), src1=sgpr("NumWorkGroups0"),
+                             comment="padded if WorkGroup0 (M-tile) >= tilesM"))
+        module.add(SCBranchSCC1(labelName=padExit.getLabelName()))
+        with writer.allocTmpSgpr(1, tag="skClusterPad_tmpSgpr") as padTmp:
+            boundN = "NumWorkGroups1"
+            if kernel["GlobalSplitU"] != 0:
+                module.add(SAndB32(dst=sgpr(padTmp.idx), src0=sgpr("GSU"),
+                                   src1=writer.gsuMaskHex(kernel), comment="Restore GSU"))
+                module.add(SMulI32(dst=sgpr(padTmp.idx), src0=sgpr("NumWorkGroups1"),
+                                   src1=sgpr(padTmp.idx), comment="tilesN * GSU"))
+                boundN = padTmp.idx
+            module.add(SCmpGeU32(src0=sgpr("WorkGroup1"), src1=sgpr(boundN),
+                                 comment="padded if WorkGroup1 (N-tile) >= tilesN*GSU"))
+            module.add(SCBranchSCC1(labelName=padExit.getLabelName()))
+            module.add(SBranch(labelName=padNoExit.getLabelName()))
+            module.add(padExit)
+            module.add(SEndpgm(comment="padded work-group: exit before any cluster barrier/load (WAVEDONE frees -3 barrier slot)"))
+            module.add(padNoExit)
+        return module
+
     def preLoop(self, writer, kernel):
         module = Module("StreamK TwoTileDPFirst openLoop")
         skConstsInVgprs = writer.isStreamKConstantsToVgprEnabled(kernel)
@@ -2916,6 +2981,13 @@ class StreamKTwoTileDPFirst(StreamK):
             module.add(SMovB32(dst=sgpr("WorkGroup0"), src="ttmp9", comment="workaround"))
             module.add(SAndB32(dst=sgpr("WorkGroup1"), src0=hex(0xFFFF), src1="ttmp7", comment="workaround"))
             module.add(SLShiftRightB32(dst=sgpr("WorkGroup2"), shiftHex=hex(0x10), src="ttmp7", comment="workaround"))
+
+        # StreamKMulticast (2-D dual only): exit padded boundary-cluster peers
+        # here, before the 2-D fold overwrites WorkGroup0 with the linear index
+        # and before the prologue cluster-barrier arrive, so their WAVEDONE frees
+        # the -3 barrier slot for the present peers (non-divisible-size support
+        # now that ClusterDimCheck is gone). No-op unless 2-D dual multicast.
+        module.add(self.streamKClusterPadEarlyExit(writer, kernel))
 
         # 2-D DUAL-multicast (ForceDPOnly 2-D dual multicast AND the standard
         # StreamKDualMulticast path): fold the genuine 2-D (+batch) HW workgroup
