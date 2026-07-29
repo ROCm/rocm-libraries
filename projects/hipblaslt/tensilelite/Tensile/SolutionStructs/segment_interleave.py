@@ -14,18 +14,18 @@ import os
 SEG = 65536
 
 def _bpe(state):
-    # DataType is a DataType object, not a string; numBytes() is 2.0 for bf16.
-    return int(state["ProblemType"]["DataType"].numBytes())
+    # float, not int: fp4 is 0.5 B/elem. Callers int() the final byte counts.
+    return state["ProblemType"]["DataType"].numBytes()
 
 def _pad(x, blk, padElems, bpe):
     if blk == 0 or padElems == 0:
         return 0
-    return (x // blk) * (padElems * bpe)
+    return int((x // blk) * padElems * bpe)
 
 def _data_bytes(state, tc):
     numComp = state["NumWaves"] // 2
     mt = state["MacroTile0"] if tc == "A" else state["MacroTile1"]
-    return (mt // numComp) * state["DepthU"] * _bpe(state)
+    return int((mt // numComp) * state["DepthU"] * _bpe(state))
 
 def _footprint(state, tc):
     d = _data_bytes(state, tc)
@@ -121,9 +121,9 @@ def evaluate(state):
     # (Solution.py resolves it later, then re-evaluates).
     if state.get("1LDSBuffer", 0) != 0:                         return _no("needs 1LDSBuffer==0")
     _dt = pt["DataType"]
-    # fp8 covers mxf8; its MX scales are relocated as a trailing block (see _mx_scale_bases).
-    if not (_dt.isBFloat16() or _dt.isHalf() or _dt.is8bitFloat()):
-        return _no("bf16/fp16/fp8 only")
+    # fp8/fp4 cover mxf8/mxf4; MX scales are relocated as a trailing block (see _mx_scale_bases).
+    if not (_dt.isBFloat16() or _dt.isHalf() or _dt.is8bitFloat() or _dt.isFloat4()):
+        return _no("bf16/fp16/fp8/fp4 only")
     # A must be coarse (VWA==WaveTileA) or port-split (VWA==WaveTileA/2, needs TDMSplit).
     _portSplit = _port_split_a(state)
     if not (_coarse_a(state) or _portSplit):                  return _no("A: VWA must be WaveTileA, or WaveTileA/2 with TDMSplit")
@@ -147,7 +147,7 @@ def evaluate(state):
             offsets = {
                 "ldsBaseB":         base + fA,      # B starts right after A0
                 "writeStrideBytes": strideA,        # A0 -> A1 distance (pad already included)
-                "readWaveStride":   strideA // bpe,  # same distance in elements (A only)
+                "readWaveStride":   int(strideA / bpe),
                 "footprintPacked":  True,
                 "bBaseline":        True,           # B uses its normal (non-interleaved) addressing
             }
@@ -170,7 +170,7 @@ def evaluate(state):
         offsets = {
             "ldsBaseB":         base + fA,          # B starts right after A0
             "writeStrideBytes": pre,                # A0 -> A1 distance (rounded to a segment)
-            "readWaveStride":   pre // bpe,
+            "readWaveStride":   int(pre / bpe),
             "footprintPacked":  True,
             "bBaseline":        True,
         }
@@ -195,7 +195,7 @@ def evaluate(state):
         offsets = {
             "ldsBaseB":         base + fA,              # B0 right after A0 in seg0
             "writeStrideBytes": pre,                    # segment stride; no re-pad on the jump
-            "readWaveStride":   pre // bpe,
+            "readWaveStride":   int(pre / bpe),
             "footprintPacked":  True,
         }
         if _portSplit:
@@ -217,7 +217,7 @@ def evaluate(state):
     offsets = {
         "ldsBaseB":         base + fA,          # B0 right after A0
         "writeStrideBytes": fA + fB,            # footprint stride (post-pad), no re-pad on the jump
-        "readWaveStride":   (fA + fB) // bpe,   # same, in elements
+        "readWaveStride":   int((fA + fB) / bpe),
         "footprintPacked":  True,
     }
     if _portSplit:

@@ -5,10 +5,11 @@ pytestmark = pytest.mark.unit
 
 class _FakeDataType:
     # Mirrors the real DataType API the oracle uses, without importing rocisa.
-    def __init__(self, bf16=True, half=False, f8=False, nbytes=2.0):
+    def __init__(self, bf16=True, half=False, f8=False, f4=False, nbytes=2.0):
         self._bf16 = bf16
         self._half = half
         self._f8 = f8
+        self._f4 = f4
         self._nbytes = nbytes
     def isBFloat16(self):
         return self._bf16
@@ -16,6 +17,8 @@ class _FakeDataType:
         return self._half
     def is8bitFloat(self):
         return self._f8
+    def isFloat4(self):
+        return self._f4
     def numBytes(self):
         return self._nbytes
 
@@ -267,6 +270,28 @@ def test_mxf8_tight_relocates_scales():
     assert r["applicable"] is True and r["reason"] == "tight"
     assert r["offsets"]["ldsBaseMXSA"] == 2 * (2 * fA)          # after [A0][B0][A1][B1]
     assert r["offsets"]["ldsBaseMXSB"] == 2 * (2 * fA) + 2304   # MXSB right after MXSA
+
+def test_fp4_tight_applies():
+    # fp4 (bpe=0.5): fractional bpe needs DepthU>=512 for MT256; byte footprints stay integral.
+    r = evaluate(_vw8_state(DepthU=512,
+                            ProblemType={"DataType": _FakeDataType(bf16=False, f4=True, nbytes=0.5)}))
+    fA = int(128 * 512 * 0.5) + (int(128 * 512 * 0.5) // 2048) * int(8 * 0.5)
+    assert r["applicable"] is True and r["reason"] == "tight"
+    assert r["offsets"]["writeStrideBytes"] == 2 * fA
+    assert r["offsets"]["readWaveStride"] == int(2 * fA / 0.5)
+    assert "ldsBaseMXSA" not in r["offsets"] and "ldsBaseMXSB" not in r["offsets"]
+
+def test_mxf4_tight_relocates_scales():
+    # mxf4: scales are 1 B/elem (bpe-independent), relocated to base+2*(fA+fB) as mxf8.
+    r = evaluate(_vw8_state(DepthU=512,
+                            LdsNumElementsAlignedMXSA=2304, LdsNumElementsAlignedMXSB=2304,
+                            DirectToVgprMXSA=0, DirectToVgprMXSB=0,
+                            ProblemType={"DataType": _FakeDataType(bf16=False, f4=True, nbytes=0.5),
+                                         "MXBlockA": 32, "MXBlockB": 32}))
+    fA = int(128 * 512 * 0.5) + (int(128 * 512 * 0.5) // 2048) * int(8 * 0.5)
+    assert r["applicable"] is True and r["reason"] == "tight"
+    assert r["offsets"]["ldsBaseMXSA"] == 2 * (2 * fA)
+    assert r["offsets"]["ldsBaseMXSB"] == 2 * (2 * fA) + 2304
 
 def test_fp32_skips():
     r = evaluate(_vw8_state(ProblemType={"DataType": _FakeDataType(bf16=False, half=False, nbytes=4)}))
