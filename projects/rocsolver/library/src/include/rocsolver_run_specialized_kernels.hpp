@@ -292,7 +292,8 @@ rocblas_status potf2_run_small(rocblas_handle handle,
                                const I lda,
                                const rocblas_stride strideA,
                                INFO* info,
-                               const I batch_count);
+                               const I batch_count,
+                               const I offset_row = 0);
 
 #ifdef OPTIMAL
 

@@ -57,7 +57,8 @@ ROCSOLVER_KERNEL void potf2_kernel_small(const bool is_upper,
                                          const rocblas_stride shiftA,
                                          const I lda,
                                          const rocblas_stride strideA,
-                                         INFO* const info)
+                                         INFO* const info,
+                                         const I offset_row)
 {
     auto const tid = hipThreadIdx_y * hipBlockDim_x + hipThreadIdx_x;
     auto const inc = hipBlockDim_y * hipBlockDim_x;
@@ -173,7 +174,7 @@ ROCSOLVER_KERNEL void potf2_kernel_small(const bool is_upper,
                     Ash[kk] = akk;
                     // Fortran 1-based index
                     if(*info_bid == 0)
-                        *info_bid = kb * PANEL_SIZE + kcol + 1;
+                        *info_bid = kb * PANEL_SIZE + kcol + 1 + offset_row;
                 }
                 failed = true;
                 __syncthreads();
@@ -343,10 +344,11 @@ rocblas_status potf2_run_small(rocblas_handle handle,
                                const I lda,
                                const rocblas_stride strideA,
                                INFO* info,
-                               const I batch_count)
+                               const I batch_count,
+                               const I offset_row)
 {
-    ROCSOLVER_ENTER("potf2_kernel_small", "uplo:", uplo, "n:", n, "shiftA:", shiftA, "lda:", lda,
-                    "bc:", batch_count);
+    ROCSOLVER_ENTER("potf2_run_small", "uplo:", uplo, "n:", n, "shiftA:", shiftA, "lda:", lda,
+                    "bc:", batch_count, "offset_row:", offset_row);
 
     hipStream_t stream;
     rocblas_get_stream(handle, &stream);
@@ -377,8 +379,8 @@ rocblas_status potf2_run_small(rocblas_handle handle,
         {
             return rocblas_status_internal_error;
         }
-        ROCSOLVER_LAUNCH_KERNEL(kernel[nb - 1], dim3(1, 1, batch_count), dim3(BS2, BS2, 1),
-                                lmemsize, stream, is_upper, n, A, shiftA, lda, strideA, info);
+        ROCSOLVER_LAUNCH_KERNEL(kernel[nb - 1], dim3(1, 1, batch_count), dim3(BS2, BS2, 1), lmemsize,
+                                stream, is_upper, n, A, shiftA, lda, strideA, info, offset_row);
     }
     else if constexpr(BS2 == 32)
     {
@@ -391,8 +393,8 @@ rocblas_status potf2_run_small(rocblas_handle handle,
         {
             return rocblas_status_internal_error;
         }
-        ROCSOLVER_LAUNCH_KERNEL(kernel[nb - 1], dim3(1, 1, batch_count), dim3(BS2, BS2, 1),
-                                lmemsize, stream, is_upper, n, A, shiftA, lda, strideA, info);
+        ROCSOLVER_LAUNCH_KERNEL(kernel[nb - 1], dim3(1, 1, batch_count), dim3(BS2, BS2, 1), lmemsize,
+                                stream, is_upper, n, A, shiftA, lda, strideA, info, offset_row);
     }
     else
     {
@@ -406,9 +408,10 @@ rocblas_status potf2_run_small(rocblas_handle handle,
     Instantiation macros
 *************************************************************/
 
-#define INSTANTIATE_POTF2_SMALL(T, I, INFO, U)                                                       \
-    template rocblas_status potf2_run_small<T, I, INFO, U>(                                          \
-        rocblas_handle handle, const rocblas_fill uplo, const I n, U A, const rocblas_stride shiftA, \
-        const I lda, const rocblas_stride strideA, INFO* info, const I batch_count)
+#define INSTANTIATE_POTF2_SMALL(T, I, INFO, U)                                              \
+    template rocblas_status potf2_run_small<T, I, INFO, U>(                                 \
+        rocblas_handle handle, const rocblas_fill uplo, const I n, U A,                     \
+        const rocblas_stride shiftA, const I lda, const rocblas_stride strideA, INFO* info, \
+        const I batch_count, const I offset_row = 0)
 
 ROCSOLVER_END_NAMESPACE
