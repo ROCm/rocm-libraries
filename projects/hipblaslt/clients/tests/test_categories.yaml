@@ -17,6 +17,11 @@
 #   nightly, HMM, plus known_bug (assigned dynamically, including per-GPU via
 #   known_bug_platforms). There are currently no multi_gpu tests.
 #
+#   The "*HostUnit*" pattern is different in kind: clients/tests/unit holds
+#   hand-written host-only gtest cases (no device, no data-driven parameters)
+#   registered as plain suites named HostUnit*. They are seconds-fast and cover
+#   pure helpers, so every tier runs them.
+#
 # These tiers are TheRock ctest presets; they are NOT a port of hipBLASLt's
 # rocJenkins job filters (those are wired differently).
 #
@@ -32,6 +37,7 @@ test_categories:
     description: "Smoke surface for fast PR gating (target: ~5 min)"
     test_patterns:
       - "*smoke*"
+      - "*HostUnit*"
     exclude:
       - "*known_bug*"
     labels:
@@ -44,6 +50,7 @@ test_categories:
       - "*smoke*"
       - "*quick*"
       - "*pre_checkin*"
+      - "*HostUnit*"
     exclude:
       - "*known_bug*"
     labels:
@@ -58,6 +65,7 @@ test_categories:
       - "*quick*"
       - "*pre_checkin*"
       - "*nightly*"
+      - "*HostUnit*"
     exclude:
       - "*known_bug*"
     labels:
@@ -73,6 +81,7 @@ test_categories:
       - "*pre_checkin*"
       - "*nightly*"
       - "*HMM*"
+      - "*HostUnit*"
     exclude:
       - "*known_bug*"
     labels:
