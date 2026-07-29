@@ -58,6 +58,7 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--block-n", type=int, default=64)
     ap.add_argument("--qkdo", type=int, default=1)
+    ap.add_argument("--bg", type=int, default=0)
     args = ap.parse_args()
 
     cfg = SwapQKCfg(
@@ -76,6 +77,7 @@ def main() -> int:
         fast_exp2=True,
         v_transposed=True,
         qk_douter=bool(args.qkdo),
+        bcast_group=args.bg,
     )
     art = compile_kernel(build_wmma_fmha_swapqk(cfg, arch="gfx1151"), arch="gfx1151")
     with tempfile.NamedTemporaryFile(suffix=".hsaco", delete=False) as f:

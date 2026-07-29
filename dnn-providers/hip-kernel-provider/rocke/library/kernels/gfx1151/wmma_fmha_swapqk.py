@@ -542,6 +542,47 @@ class SwapQKCfg:
     # MQ>1 has its own QK loop that already hoists K across query groups; this
     # knob is rejected there rather than silently doing nothing.
     qk_douter: bool = False
+    # bcast_group: emit dual_gather_finish's lane broadcast in groups of N dwords
+    # (all permlanes of the group, then its d selects, then its d+1 selects).
+    # 0/1 = today's per-dword interleave. See the VOPD note above: the two selects
+    # of ONE dword read the same register pair with operands swapped, which is the
+    # worst case for VOPD's src-bank/dst-parity rules, and only 4 of 64 such pairs
+    # actually form. Grouping makes neighbouring selects come from DIFFERENT
+    # dwords, so they touch disjoint registers and the allocator has N independent
+    # chances to land a legal pair. N=8 (all of n_i32 at D=128) exposes the longest
+    # runs but holds 8 permlane results live at once; N=4 halves that pressure,
+    # which matters because 199 VGPR is only 9 short of the 208 granule where
+    # occupancy drops from 7 waves/SIMD to 6.
+    #
+    # MEASURED: the packing works exactly as designed, and it is a SHORT-SEQUENCE
+    # win that falls off a cliff at long sequences. Default off.
+    #   codegen (bn64/vt/qk_douter, N=4): selects 248 -> 20 singles + 118
+    #     v_dual_cndmask_b32 pairs (from 4), K-loop 1082 -> 899 instructions,
+    #     dynamic VALU 201.6M -> 173.3M (-14%), issue floor 10.89 -> 10.43 Mcyc.
+    #     Zero spill, zero scratch. N=0 and N=1 compile identically, confirming
+    #     this is a pure reorder; error is 1.53e-05 at every N, as it must be.
+    #   L2048 bn64: +6.2% (19.24 -> 20.44 TF, 3 interleaved reps). Real win.
+    #   L16384 bn64: 11x LOSS (22.5 -> 2.0 TF). Root cause is a cache-residency
+    #     collapse, NOT the occupancy drop: at the real 24-chunk shape L2 misses go
+    #     3.75M -> 393M (105x) and DRAM read 323 MiB -> 47.9 GiB (148x). Grouping
+    #     lets the scheduler hoist the gather loads away from their consumers, and
+    #     the extra distinct lines in flight blow L2 once 24 heads are resident --
+    #     the same failure mode as v_prefetch depth>=3 (0.3M -> 12.4M misses).
+    #   L16384 bn32: VGPR stays 179 so occupancy is UNCHANGED (8 waves/SIMD) and
+    #     the loop still shrinks 581 -> 500 instructions, yet cycles are FLAT
+    #     (16.43 -> 16.41 Mcyc): issue 11.22 -> 10.67 while stall rises
+    #     5.20 -> 5.74. The freed issue slots convert 1:1 into stall, which says
+    #     these selects were never on the critical path -- they were being issued
+    #     in stall shadow. Cutting VALU issue is not a lever for this kernel at
+    #     long L; the memory path is.
+    #
+    # NOTE on measuring this: prof_full.py's reduced single-head dispatch reported
+    # merely +8% cycles for N=4 at L16384 and completely masked the 11x cliff,
+    # which only appears in the 24-chunk shape. Use profiling/sum_counters.py to
+    # point rocprofv3 at chunk_sweep itself before trusting a long-L verdict. The
+    # o_f16 L16384 cliff is probably the same effect and is worth re-checking that
+    # way.
+    bcast_group: int = 0
     name: str = "wmma_fmha_swapqk"
 
     @property
@@ -592,6 +633,7 @@ class SwapQKCfg:
             ),
             f"vpf{self.v_prefetch}" if self.v_prefetch else "novpf",
             "qkdo" if self.qk_douter else "qkno",
+            f"bg{self.bcast_group}" if self.bcast_group else "bgoff",
             f"iglp{self.iglp}" if self.iglp >= 0 else "noiglp",
         )
 
@@ -728,6 +770,13 @@ def build_wmma_fmha_swapqk(cfg: SwapQKCfg, arch: str = "gfx1151") -> KernelDef:
             raise ValueError(f"v_kblock must be 0, 2, 4 or 8 (got {cfg.v_kblock})")
     elif cfg.v_kblock:
         raise ValueError("v_kblock requires v_transposed")
+    if cfg.bcast_group < 0:
+        raise ValueError(f"bcast_group must be >= 0, got {cfg.bcast_group}")
+    if cfg.bcast_group and not cfg.dual_gather:
+        raise ValueError(
+            "bcast_group reorders the dual_gather broadcast; it is a no-op "
+            "without dual_gather"
+        )
     if cfg.qk_douter and MQ > 1:
         raise ValueError(
             "qk_douter applies to the MQ==1 QK loop; the q_block>1 path has its "
@@ -972,12 +1021,21 @@ def build_wmma_fmha_swapqk(cfg: SwapQKCfg, arch: str = "gfx1151") -> KernelDef:
         """permlanex16 + select broadcast each subtile into both lane-halves (the
         layout the WMMA A-operand's lane^16 duplication requires)."""
         li = b.vec_bitcast(loaded, VectorType(I32, n_i32))
-        fd, fd1 = [], []
-        for i in range(n_i32):
-            e = b.vec_extract(li, i)
-            p = b.permlanex16(e)  # value held by lane^16 (the other subtile)
-            fd.append(b.select(lane_lt16, e, p))  # subtile d in both halves
-            fd1.append(b.select(lane_lt16, p, e))  # subtile d+1 in both halves
+        fd, fd1 = [None] * n_i32, [None] * n_i32
+        # Emit in groups of `bcast_group` dwords: all permlanes of the group, then
+        # its subtile-d selects, then its subtile-d+1 selects. group==1 reproduces
+        # the per-dword interleave exactly, so bcast_group 0 and 1 must compile to
+        # identical code -- that equality is the check that this is a pure reorder.
+        group = cfg.bcast_group if cfg.bcast_group else 1
+        for lo in range(0, n_i32, group):
+            idx = range(lo, min(lo + group, n_i32))
+            e = [b.vec_extract(li, i) for i in idx]
+            # value held by lane^16 (the other subtile)
+            p = [b.permlanex16(x) for x in e]
+            for j, i in enumerate(idx):
+                fd[i] = b.select(lane_lt16, e[j], p[j])  # subtile d, both halves
+            for j, i in enumerate(idx):
+                fd1[i] = b.select(lane_lt16, p[j], e[j])  # subtile d+1, both halves
         frag_d = b.vec_bitcast(b.vec_pack(fd, I32), VectorType(dtype_ir, a_frag))
         frag_d1 = b.vec_bitcast(b.vec_pack(fd1, I32), VectorType(dtype_ir, a_frag))
         return frag_d, frag_d1

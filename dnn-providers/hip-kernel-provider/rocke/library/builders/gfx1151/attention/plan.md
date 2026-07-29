@@ -39,7 +39,47 @@ issue-bound first and latency-bound second, and instruction count is the currenc
 
 ---
 
-## 1. Step 1 — `bcast_group`: phase the gather broadcast to unlock VOPD
+## 1. Step 1 — `bcast_group` — **DONE: implemented, and it is a short-L win / long-L cliff**
+
+**Outcome.** The knob landed and does precisely what this section predicted, but the
+verdict is shape-dependent, so it ships **default off**.
+
+| gate | result |
+|---|---|
+| VOPD formation | **pass, beyond target** — selects 248 → 20 singles + **118 pairs** (from 4); K-loop 1082 → **899** instructions; dynamic VALU 201.6M → 173.3M (−14%); issue floor 10.89 → 10.43 Mcyc |
+| pure-reorder check | **pass** — `bcast_group` 0 and 1 compile identically |
+| registers | **bn64 fails the wave gate**: 199 → 222 VGPR (no spill, no scratch) crosses the 208 granule → 7 → 6 waves/SIMD. **bn32 is free**: 179 unchanged, 8 waves/SIMD held |
+| correctness | **pass** — 1.53e-05 at every group size, as a pure rearrangement must be |
+| perf L=2048 bn64 | **+6.2%** (19.24 → 20.44 TF, 3 interleaved reps) |
+| perf L=16384 bn64 | **11× loss** (22.5 → 2.0 TF) |
+| perf L=16384 bn32 | **flat** (16.43 → 16.41 Mcyc) with occupancy unchanged |
+
+**Two findings that matter more than the knob.**
+
+1. **The selects were never on the critical path.** bn32 holds occupancy constant
+   and still shrinks the loop 581 → 500 instructions, yet cycles do not move:
+   issue 11.22 → 10.67 Mcyc while stall rises 5.20 → 5.74. The freed slots convert
+   1:1 into stall, i.e. these VALU ops were being issued in stall shadow. **Cutting
+   VALU issue is not a lever for this kernel at long L** — which retro-explains why
+   `qk_douter` won: it barely changed instruction count (−20) and instead removed
+   duplicate memory *requests* (TA_TA_BUSY −11%). Wins here come from the memory
+   path.
+2. **The long-L cliff is a cache-residency collapse, not the lost wave.** At the
+   real 24-chunk shape, L2 misses go 3.75M → **393M (105×)** and DRAM read
+   323 MiB → **47.9 GiB (148×)**, cycles 352M → 5847M. Grouping lets the scheduler
+   hoist the gather loads away from their consumers, and the extra distinct lines
+   in flight blow L2 once 24 heads are resident — the same failure mode as
+   `v_prefetch` depth≥3 (0.3M → 12.4M misses). **In-flight distinct lines, not
+   issue slots, are the scarce resource on this part.**
+
+**Tooling gap this exposed (fixed).** `prof_full.py` profiles a reduced single-head
+dispatch and reported merely +8% cycles for the config that is 11× slower in the
+real benchmark — it masked the cliff entirely. Added `profiling/sum_counters.py` to
+point rocprofv3 at `chunk_sweep.py` itself. **Any long-L verdict must be taken at
+the 24-chunk shape.** The `o_f16` L=16384 cliff is probably the same effect and is
+worth re-checking this way.
+
+### Original analysis (retained — it is why the codegen gate passed)
 
 **The cost.** All of it is in `dual_gather_finish`. Per gather it converts 8 loaded
 dwords into two 8-dword fragments, paying per dword one `permlanex16` plus two
@@ -180,11 +220,18 @@ pairs), `loaddbg.py` (loads grouped by address operand), `chunk_sweep.py`
 ## 5. Honest ceiling
 
 WMMA issue alone is 7.58 Mcyc = 50% of the 15.16 Mcyc budget, and the measured
-WMMA ceiling is 43.51 TF. Step 1 in full is worth ~+3% (→ ~23.6 TF), which is
-**not enough for 25 TF on its own** — it needs Step 2's amortization, or a
-reduction in the 28% stall, to finish. If MQ=2 does not fit at D=128 even after
-`qk_douter`, then 25 TF at L=16K likely needs the KV-stationary persistent kernel
-rather than more tuning of this one.
+WMMA ceiling is 43.51 TF.
+
+**Step 1 revised the model.** It cut the issue floor by 4.9% with occupancy held
+and gained nothing, because the freed slots became stall. So the remaining 9.2% to
+25 TF cannot come from instruction count at all — the 28% stall and the memory path
+are the only live targets at L=16K. That makes Step 2 (MQ=2 amortization, which cuts
+*requests* per WMMA, not just VALU) the load-bearing item, and it raises the odds
+that 25 TF at L=16K belongs to the KV-stationary persistent kernel rather than to
+more tuning of this one.
+
+`bcast_group` remains worth keeping for short sequences, where the kernel is not
+DRAM-resident and the +6.2% at L=2048 is real.
 
 ---
 ---

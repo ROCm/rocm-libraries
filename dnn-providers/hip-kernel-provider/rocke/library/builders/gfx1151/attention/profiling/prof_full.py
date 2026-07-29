@@ -96,6 +96,7 @@ def main() -> int:
     ap.add_argument("--of16", type=int, default=0)
     ap.add_argument("--dual", default="1")
     ap.add_argument("--qkdo", default="0", help="comma list of qk_douter values")
+    ap.add_argument("--bg", default="0", help="comma list of bcast_group values")
     ap.add_argument(
         "--vkb", default="0", help="key-blocked V: comma list of KB (0=full transpose)"
     )
@@ -109,15 +110,16 @@ def main() -> int:
     iters = L // args.block_n
 
     combos = [
-        (d, k, q)
+        (d, k, q, bg)
         for d in (int(x) for x in args.dual.split(","))
         for k in (int(x) for x in args.vkb.split(","))
         for q in (int(x) for x in args.qkdo.split(","))
+        for bg in (int(x) for x in args.bg.split(","))
     ]
-    for dual, vkb, qkdo in combos:
+    for dual, vkb, qkdo, bg in combos:
         got = {}
         for tag, ctrs in PASSES:
-            outdir = f"/tmp/pf_{dual}_{vkb}_{qkdo}_{tag}"
+            outdir = f"/tmp/pf_{dual}_{vkb}_{qkdo}_{bg}_{tag}"
             shutil.rmtree(outdir, ignore_errors=True)
             try:
                 subprocess.run(
@@ -154,6 +156,8 @@ def main() -> int:
                         str(vkb),
                         "--qkdo",
                         str(qkdo),
+                        "--bg",
+                        str(bg),
                     ],
                     capture_output=True,
                     text=True,
@@ -167,7 +171,7 @@ def main() -> int:
                 got.update(r)
 
         if "SQ_INSTS_VALU" not in got:
-            print(f"dual={dual} vkb={vkb} qkdo={qkdo}: FAIL")
+            print(f"dual={dual} vkb={vkb} qkdo={qkdo} bg={bg}: FAIL")
             continue
 
         cyc = got["GRBM_GUI_ACTIVE"]
@@ -189,7 +193,7 @@ def main() -> int:
         h, m = got.get("GL2C_HIT_sum", 0), got.get("GL2C_MISS_sum", 0)
 
         print(
-            f"\n{'=' * 72}\ndual={dual} vkb={vkb} qkdo={qkdo}  L={L} bn={args.block_n} "
+            f"\n{'=' * 72}\ndual={dual} vkb={vkb} qkdo={qkdo} bg={bg}  L={L} bn={args.block_n} "
             f"vt={args.vt} of16={args.of16}   {iters} iters, "
             f"{waves:.0f} waves ({waves / SIMDS:.1f}/SIMD)\n{'=' * 72}"
         )

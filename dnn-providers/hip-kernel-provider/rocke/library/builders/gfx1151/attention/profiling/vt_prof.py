@@ -51,6 +51,7 @@ def main() -> int:
     ap.add_argument("--vkb", type=int, default=0)
     ap.add_argument("--dual", type=int, default=1)
     ap.add_argument("--qkdo", type=int, default=0)
+    ap.add_argument("--bg", type=int, default=0)
     ap.add_argument(
         "--vpf",
         type=int,
@@ -82,6 +83,7 @@ def main() -> int:
         v_kblock=args.vkb,
         v_prefetch=args.vpf,
         qk_douter=bool(args.qkdo),
+        bcast_group=args.bg,
         waves_per_eu=(args.wpe or None),
     )
 

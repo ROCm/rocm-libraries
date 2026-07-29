@@ -145,6 +145,12 @@ def main() -> int:
         help="key-blocked V [B,H,S/KB,D,KB]; 0=full transpose",
     )
     ap.add_argument(
+        "--bg",
+        type=int,
+        default=0,
+        help="bcast_group: phase the gather broadcast in N-dword groups",
+    )
+    ap.add_argument(
         "--qkdo",
         type=int,
         default=0,
@@ -223,6 +229,7 @@ def main() -> int:
             v_kblock=args.vkb,
             v_prefetch=args.vpf,
             qk_douter=bool(args.qkdo),
+            bcast_group=args.bg,
             waves_per_eu=(args.wpe or None),
         )
         art = compile_kernel(

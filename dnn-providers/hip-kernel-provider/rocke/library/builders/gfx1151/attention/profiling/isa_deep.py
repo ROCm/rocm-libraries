@@ -203,6 +203,7 @@ def main() -> int:
     ap.add_argument("--vt", type=int, default=1)
     ap.add_argument("--dual", type=int, default=1)
     ap.add_argument("--qkdo", type=int, default=0)
+    ap.add_argument("--bg", type=int, default=0)
     ap.add_argument("--qh", type=int, default=0, help="q_hoist (Q out of K-loop)")
     ap.add_argument("--wpe", type=int, default=0, help="waves_per_eu hint (0=none)")
     ap.add_argument(
@@ -231,6 +232,7 @@ def main() -> int:
         v_transposed=bool(args.vt),
         qk_douter=bool(args.qkdo),
         q_hoist=bool(args.qh),
+        bcast_group=args.bg,
         waves_per_eu=(args.wpe or None),
     )
     art = compile_kernel(build_wmma_fmha_swapqk(cfg, arch="gfx1151"), arch="gfx1151")
