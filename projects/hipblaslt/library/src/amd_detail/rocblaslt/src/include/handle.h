@@ -70,6 +70,10 @@ private:
     size_t _data_size = 0;
 };
 
+// Size (ints) of the StreamK Synchronizer buffer allocated once in
+// hipblasLtCreate and reused across every launch. See check_streamk_sync.hpp.
+constexpr size_t hipblaslt_streamk_synchronizer_ints = 16 * 409600;
+
 /********************************************************************************
  * \brief rocblaslt_handle is a structure holding the rocblaslt library context.
  * It must be initialized using rocblaslt_create_handle()
@@ -126,6 +130,10 @@ struct _rocblaslt_handle
     bool                  check_numerics_stop_on_first = false;
     // Sticky bypass for scan_D once any caller observes a NaN.
     std::atomic<bool>     check_numerics_short_circuit{false};
+
+    // HIPBLASLT_CHECK_STREAMK_SYNC state. Read once in the ctor; opt-in via
+    // env. See check_streamk_sync.hpp for the checker protocol.
+    bool check_streamk_sync = false;
 };
 
 /********************************************************************************
