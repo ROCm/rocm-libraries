@@ -31,16 +31,20 @@
 
 namespace rocsparse
 {
-    // Scale the value array of the target in place by alpha (host or device pointer mode, taken
-    // from the handle which the caller sets to match the alpha descriptor).
+    // Scale the value array of the target in place by alpha. The memory space of alpha is taken
+    // from its descriptor and passed explicitly, so the handle pointer mode is never involved.
     template <typename T>
-    static rocsparse_status spmat_scale_scale_values(rocsparse_handle handle,
-                                                     int64_t          nnz,
-                                                     const void*      alpha,
-                                                     void*            target_val)
+    static rocsparse_status spmat_scale_scale_values(rocsparse_handle       handle,
+                                                     int64_t                nnz,
+                                                     rocsparse_pointer_mode alpha_pointer_mode,
+                                                     const void*            alpha,
+                                                     void*                  target_val)
     {
-        RETURN_IF_ROCSPARSE_ERROR((rocsparse::scale_array(
-            handle, nnz, static_cast<const T*>(alpha), static_cast<T*>(target_val))));
+        RETURN_IF_ROCSPARSE_ERROR((rocsparse::scale_array(handle,
+                                                          nnz,
+                                                          alpha_pointer_mode,
+                                                          static_cast<const T*>(alpha),
+                                                          static_cast<T*>(target_val))));
         return rocsparse_status_success;
     }
 
@@ -73,10 +77,6 @@ namespace rocsparse
         ROCSPARSE_CHECKARG_HANDLE(0, handle);
         ROCSPARSE_CHECKARG_POINTER(arg_source, source);
         ROCSPARSE_CHECKARG_POINTER(arg_target, target);
-        ROCSPARSE_CHECKARG(
-            arg_source, source, (source->init == false), rocsparse_status_not_initialized);
-        ROCSPARSE_CHECKARG(
-            arg_target, target, (target->init == false), rocsparse_status_not_initialized);
 
         // Source and target must share the same format, and the format must be supported.
         ROCSPARSE_CHECKARG(arg_target,
@@ -348,35 +348,31 @@ namespace rocsparse
                                                       size_t(val_length) * val_size));
             }
 
-            // Scale the target values by alpha. scale_array reads the scalar according to the
-            // handle pointer mode, so temporarily align it with the alpha descriptor.
-            const rocsparse_pointer_mode saved_mode = handle->pointer_mode;
-            handle->pointer_mode                    = alpha_pointer_mode;
-
+            // Scale the target values by alpha, passing alpha's memory space explicitly so the
+            // handle pointer mode is not touched.
             rocsparse_status scale_status = rocsparse_status_success;
             switch(source->data_type)
             {
             case rocsparse_datatype_f32_r:
                 scale_status = rocsparse::spmat_scale_scale_values<float>(
-                    handle, val_length, alpha, target->val_data);
+                    handle, val_length, alpha_pointer_mode, alpha, target->val_data);
                 break;
             case rocsparse_datatype_f64_r:
                 scale_status = rocsparse::spmat_scale_scale_values<double>(
-                    handle, val_length, alpha, target->val_data);
+                    handle, val_length, alpha_pointer_mode, alpha, target->val_data);
                 break;
             case rocsparse_datatype_f32_c:
                 scale_status = rocsparse::spmat_scale_scale_values<rocsparse_float_complex>(
-                    handle, val_length, alpha, target->val_data);
+                    handle, val_length, alpha_pointer_mode, alpha, target->val_data);
                 break;
             case rocsparse_datatype_f64_c:
                 scale_status = rocsparse::spmat_scale_scale_values<rocsparse_double_complex>(
-                    handle, val_length, alpha, target->val_data);
+                    handle, val_length, alpha_pointer_mode, alpha, target->val_data);
                 break;
             default:
                 scale_status = rocsparse_status_not_implemented;
             }
 
-            handle->pointer_mode = saved_mode;
             RETURN_IF_ROCSPARSE_ERROR(scale_status);
         }
 
@@ -397,9 +393,15 @@ try
     // p_error is reserved for forward compatibility and is not populated yet.
     (void)p_error;
 
-    ROCSPARSE_CHECKARG_POINTER(1, alpha);
+    // Argument positions in this routine's signature.
+    static constexpr int arg_alpha  = 1;
+    static constexpr int arg_target = 2;
+    static constexpr int arg_source = 3;
 
-    const rocsparse_status status = rocsparse::spmat_scale_checkarg(handle, source, target, 3, 2);
+    ROCSPARSE_CHECKARG_POINTER(arg_alpha, alpha);
+
+    const rocsparse_status status
+        = rocsparse::spmat_scale_checkarg(handle, source, target, arg_source, arg_target);
     if(status != rocsparse_status_continue)
     {
         RETURN_IF_ROCSPARSE_ERROR(status);
@@ -407,12 +409,13 @@ try
     }
 
     // alpha is a single scalar dense vector; its data type must match the matrices.
-    ROCSPARSE_CHECKARG(1, alpha, (alpha->init == false), rocsparse_status_not_initialized);
+    ROCSPARSE_CHECKARG(arg_alpha,
+                       alpha,
+                       (alpha->size != 1 || alpha->batch_count != 1),
+                       rocsparse_status_not_implemented);
     ROCSPARSE_CHECKARG(
-        1, alpha, (alpha->size != 1 || alpha->batch_count != 1), rocsparse_status_not_implemented);
-    ROCSPARSE_CHECKARG(
-        1, alpha, (alpha->data_type != source->data_type), rocsparse_status_type_mismatch);
-    ROCSPARSE_CHECKARG_POINTER(1, alpha->const_values);
+        arg_alpha, alpha, (alpha->data_type != source->data_type), rocsparse_status_type_mismatch);
+    ROCSPARSE_CHECKARG_POINTER(arg_alpha, alpha->const_values);
 
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::spmat_scale_core(
         handle, alpha->const_values, alpha->pointer_mode, source, target));
