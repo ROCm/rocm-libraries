@@ -31,6 +31,7 @@ subtree_to_project_map = {
     "projects/rocthrust": "prim",
     "projects/rocalution": "rocalution",
     "projects/rocwmma": "rocwmma",
+    "projects/hipthreads": "hipthreads",
     "shared/mxdatagenerator": "blas",
     "shared/origami": "blas",
     "shared/rocroller": "rocroller",
@@ -71,6 +72,10 @@ project_map = {
             "-DTHEROCK_FLAG_HIPKERNELPROVIDER_ENABLE_ROCKE=ON",
         ],
         "projects_to_test": ["hipkernelprovider"],
+    },
+    "hipthreads": {
+        "cmake_options": ["-DTHEROCK_ENABLE_HIPTHREADS=ON"],
+        "projects_to_test": ["hipthreads"],
     },
 }
 

@@ -137,6 +137,43 @@ TEST_CASE("Origami: hardware_arch_enum", "[origami]") {
   }
 }
 
+TEST_CASE("Origami: gfx1250 complex matrix instructions", "[origami]") {
+  auto hardware = make_hardware(1250);
+
+  struct ComplexMiCase {
+    origami::data_type_t complex_dtype;
+    origami::data_type_t base_dtype;
+    const char* string_dtype;
+  };
+
+  const ComplexMiCase cases[] = {{origami::data_type_t::ComplexFloat,
+                                  origami::data_type_t::Float,
+                                  "c32"},
+                                 {origami::data_type_t::ComplexDouble,
+                                  origami::data_type_t::Double,
+                                  "c64"}};
+
+  for (const auto& tc : cases) {
+    DYNAMIC_SECTION(tc.string_dtype) {
+      const auto instructions = hardware.get_valid_matrix_instructions(tc.complex_dtype);
+      REQUIRE(instructions.size() == 1);
+      REQUIRE(instructions[0].m == 16);
+      REQUIRE(instructions[0].n == 16);
+      REQUIRE(instructions[0].k == 4);
+
+      const size_t base_latency    = hardware.get_mi_latency(16, 16, 4, tc.base_dtype);
+      const size_t complex_latency = hardware.get_mi_latency(16, 16, 4, tc.complex_dtype);
+      REQUIRE(base_latency > 0);
+      REQUIRE(complex_latency == base_latency * 4);
+
+      const auto from_string =
+          hardware.get_valid_matrix_instructions(origami::string_to_datatype(tc.string_dtype));
+      REQUIRE(from_string.size() == 1);
+      REQUIRE(from_string[0] == instructions[0]);
+    }
+  }
+}
+
 TEST_CASE("Origami: has_MALL", "[origami]") {
   for (int gpu_arch : test_architectures) {
     DYNAMIC_SECTION("gfx" << gpu_arch << " - MALL support check") {
