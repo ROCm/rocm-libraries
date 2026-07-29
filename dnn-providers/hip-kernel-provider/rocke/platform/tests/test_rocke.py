@@ -25,8 +25,15 @@ from unittest.mock import patch, Mock
 import pytest
 
 from rocke import (
+    BF16,
+    BF8E5M2,
     F16,
+    F32,
+    FP8E4M3,
+    I8,
+    I16,
     I32,
+    F32,
     I64,
     IRBuilder,
     PtrType,
@@ -198,6 +205,35 @@ class TestCoreIR(unittest.TestCase):
         b.s_waitcnt(vmcnt=16, lgkmcnt=16)
         ll = lower_kernel_to_llvm(b.kernel)
         self.assertIn("call void @llvm.amdgcn.s.waitcnt(i32 20336)", ll)
+
+    def test_global_load_typed_wrappers(self):
+        """Test all typed global_load_* wrappers lower correctly."""
+        test_cases = [
+            # (Type, wrapper_fn, llvm_type, align)
+            (I8, "global_load_i8", "i8", 1),
+            (I16, "global_load_i16", "i16", 2),
+            (I32, "global_load_i32", "i32", 4),
+            (I64, "global_load_i64", "i64", 8),
+            (F16, "global_load_f16", "half", 2),
+            (BF16, "global_load_bf16", "bfloat", 2),
+            (F32, "global_load_f32", "float", 4),
+            (FP8E4M3, "global_load_fp8e4m3", "i8", 1),  # fp8 lowers to i8
+            (BF8E5M2, "global_load_bf8e5m2", "i8", 1),  # bf8 lowers to i8
+        ]
+
+        for ir_type, wrapper_name, llvm_type, align in test_cases:
+            with self.subTest(wrapper=wrapper_name):
+                b = IRBuilder(f"test_{wrapper_name}")
+                X = b.param("X", PtrType(ir_type, "global"))
+                tid = b.thread_id_x()
+                # Call global_load_{ir_type}(X, tid)
+                getattr(b, wrapper_name)(X, tid)
+                ll = lower_kernel_to_llvm(b.kernel)
+                self.assertIn(
+                    f"getelementptr inbounds {llvm_type}, ptr addrspace(1)", ll
+                )
+                self.assertIn(f"load {llvm_type}, ptr addrspace(1)", ll)
+                self.assertIn(f"align {align}", ll)
 
 
 # ---------------------------------------------------------------------
@@ -4952,6 +4988,81 @@ class TestPackArgsKernargABI(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             pack_args([{"name": "x", "type": "f16"}], {"x": 1})
+
+    def test_as_ptr_accepts_devicemem_ptr_method(self):
+        import struct
+
+        from rocke.runtime.packing import pack_args
+
+        # DeviceMem exposes its raw device pointer via a ptr() method; the
+        # torch-free numpy path passes it straight into a launcher's values.
+        class _FakeDeviceMem:
+            def ptr(self):
+                return 0xDEAD
+
+        packed = pack_args(
+            [{"name": "p", "type": "ptr<f16,global>"}], {"p": _FakeDeviceMem()}
+        )
+        self.assertEqual(struct.unpack_from("<Q", packed, 0)[0], 0xDEAD)
+
+    def test_as_ptr_prefers_data_ptr_over_ptr(self):
+        import struct
+
+        from rocke.runtime.packing import pack_args
+
+        # A torch tensor exposes data_ptr(); if some object exposed both, the
+        # data_ptr() branch must win (it precedes the DeviceMem ptr() branch).
+        class _Both:
+            def data_ptr(self):
+                return 0xAAAA
+
+            def ptr(self):
+                return 0xBBBB
+
+        packed = pack_args([{"name": "p", "type": "ptr<f16,global>"}], {"p": _Both()})
+        self.assertEqual(struct.unpack_from("<Q", packed, 0)[0], 0xAAAA)
+
+    def test_as_ptr_none_encodes_null(self):
+        import struct
+
+        from rocke.runtime.packing import pack_args
+
+        packed = pack_args([{"name": "p", "type": "ptr<f16,global>"}], {"p": None})
+        self.assertEqual(struct.unpack_from("<Q", packed, 0)[0], 0)
+
+    def test_as_ptr_rejects_unconvertible(self):
+        from rocke.runtime.packing import pack_args
+
+        # A non-callable ptr attribute is not a device pointer -- the callable()
+        # guard must fall through to the TypeError, not silently use the attr.
+        class _NonCallablePtr:
+            ptr = 0x1234
+
+        with self.assertRaises(TypeError):
+            pack_args(
+                [{"name": "p", "type": "ptr<f16,global>"}], {"p": _NonCallablePtr()}
+            )
+        with self.assertRaises(TypeError):
+            pack_args(
+                [{"name": "p", "type": "ptr<f16,global>"}], {"p": "not a pointer"}
+            )
+
+
+class TestHostBufferReExportShim(unittest.TestCase):
+    """The manifest_runner.utils re-export shim over rocke.runtime.host_buffers.
+
+    The three host byte helpers moved to ``rocke.runtime.host_buffers``; the old
+    ``instances.common.manifest_runner.utils`` path re-exports them so existing
+    importers keep working. Pin the identity so a severed shim fails loudly.
+    """
+
+    def test_utils_reexports_host_buffer_helpers(self):
+        from rocke.instances.common.manifest_runner import utils
+        from rocke.runtime import host_buffers
+
+        self.assertIs(utils.as_u8_buffer, host_buffers.as_u8_buffer)
+        self.assertIs(utils.nbytes, host_buffers.nbytes)
+        self.assertIs(utils.require_numpy, host_buffers.require_numpy)
 
 
 class TestLibDiscoveryOrder(unittest.TestCase):

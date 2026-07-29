@@ -67,6 +67,7 @@
 
 #include <algorithm>
 #include <array>
+#include <iterator>
 #include <optional>
 #include <sstream>
 #include <unordered_map>
@@ -851,6 +852,7 @@ private:
         // toHipdnnDataType() and are skipped by assembleGraphDescriptor().
         // This is intentional -- graphs can have unset graph-level data types
         // as long as individual tensors have their types set.
+
         std::unique_ptr<detail::ScopedHipdnnBackendDescriptor> desc;
         if(handle.has_value())
         {
@@ -5500,6 +5502,11 @@ public:
         {
             attributes.set_name("SdpaFwd_" + std::to_string(_sub_nodes.size()));
         }
+        if(attributes.unfuse_fma_hint)
+        {
+            HIPDNN_FE_LOG_WARN("Ignoring SDPA unfuse-FMA hint on node '"
+                               << attributes.get_name() << "'; hipDNN selects fusion internally");
+        }
         if(q->get_name().empty())
         {
             q->set_name(attributes.get_name() + "::Q");
@@ -5634,7 +5641,7 @@ public:
      *         - [0] y: Resampled output tensor
      *         - [1] index: Max-pool indices when requested; nullptr otherwise
      *
-     * @see hipdnn_frontend::graph::ResampleFwdAttributes
+      * @see hipdnn_frontend::graph::ResampleFwdAttributes
      */
     // NOLINTBEGIN(readability-identifier-naming)
     std::array<std::shared_ptr<TensorAttributes>, 2> resample(std::shared_ptr<TensorAttributes> x,
@@ -5656,7 +5663,7 @@ public:
         if(generateIndex && attributes.get_resample_mode() == ResampleMode::MAXPOOL)
         {
             index = outputTensor(attributes.get_name() + "::Index");
-            // Index tensor needs to be a integer data type, default to int32
+            // Index tensor needs to be an integer data type, default to int32.
             index->set_data_type(DataType::INT32);
             attributes.set_index(index);
         }
@@ -5688,7 +5695,7 @@ public:
      * @param x Input activation tensor (batch, channels, spatial dimensions)
      * @param attributes Resample parameters: mode, padding mode, pre/post padding, stride,
      *        window size. Optional max-pool index generation parameter is ignored.
-     * @return  y: Resampled output tensor
+     * @return y Resampled output tensor
      *
      * @see hipdnn_frontend::graph::ResampleFwdAttributes
      */
@@ -5708,6 +5715,7 @@ public:
 
         auto y = outputTensor(attributes.get_name() + "::Y");
 
+        attributes.set_generate_index(false);
         attributes.set_x(std::move(x));
         attributes.set_y(y);
 
@@ -5982,6 +5990,19 @@ public:
         auto newTensor = std::make_shared<TensorAttributes>(tensor);
 
         return newTensor;
+    }
+
+    /**
+     * @brief Create a pass-by-value scalar tensor with an explicit mode
+     * @tparam T Scalar type
+     * @param scalar The scalar value
+     * @param type RUNTIME_PARAM => runtime-with-default; COMPILE_TIME_CONST => compile-time constant
+     * @return Shared pointer to the created tensor attributes
+     */
+    template <typename T>
+    static std::shared_ptr<TensorAttributes> tensor(const T& scalar, ScalarType type)
+    {
+        return tensor(TensorAttributes(scalar, type));
     }
 };
 

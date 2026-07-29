@@ -22,17 +22,47 @@ namespace
 {
 
 // SDPA-specific runner: iterates over data types with BHSD and BSHD layouts.
-// Both layouts are controlled via strides on TensorAttributes.
+// Both layouts are controlled via strides on TensorAttributes. Filtering mirrors
+// the shared run() in Helpers.hpp: an empty config.dtype/config.layout means
+// "run all", otherwise only the requested combination is run.
 template <typename F>
 bool runSdpa(F&& f)
 {
     bool allPassed = true;
-    allPassed &= f.template operator()<float, float>(TensorLayout::BHSD);
-    allPassed &= f.template operator()<half, float>(TensorLayout::BHSD);
-    allPassed &= f.template operator()<bfloat16, float>(TensorLayout::BHSD);
-    allPassed &= f.template operator()<float, float>(TensorLayout::BSHD);
-    allPassed &= f.template operator()<half, float>(TensorLayout::BSHD);
-    allPassed &= f.template operator()<bfloat16, float>(TensorLayout::BSHD);
+
+    const std::vector<std::string> dtypes = {"fp32", "fp16", "bf16"};
+    const std::vector<std::pair<std::string, TensorLayout>> layouts
+        = {{"bhsd", TensorLayout::BHSD}, {"bshd", TensorLayout::BSHD}};
+
+    for(const auto& dt : dtypes)
+    {
+        if(!f.config.dtype.empty() && f.config.dtype != dt)
+        {
+            continue;
+        }
+
+        for(const auto& [layoutName, layout] : layouts)
+        {
+            if(!f.config.layout.empty() && f.config.layout != layoutName)
+            {
+                continue;
+            }
+
+            if(dt == "fp32")
+            {
+                allPassed &= f.template operator()<float, float>(layout);
+            }
+            else if(dt == "fp16")
+            {
+                allPassed &= f.template operator()<half, float>(layout);
+            }
+            else if(dt == "bf16")
+            {
+                allPassed &= f.template operator()<bfloat16, float>(layout);
+            }
+        }
+    }
+
     return allPassed;
 }
 
@@ -57,13 +87,15 @@ bool SampleRunner::operator()(const TensorLayout& layout)
         .set_intermediate_data_type(hipdnn_frontend::DataType::FLOAT)
         .set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
 
+    setPreferredEngine(graph, config);
+
     auto qAttr = createTensor({BATCH, NUM_HEADS, SEQ_LEN, HEAD_DIM}, inputType, layout);
     auto kAttr = createTensor({BATCH, NUM_HEADS, SEQ_LEN, HEAD_DIM}, inputType, layout);
     auto vAttr = createTensor({BATCH, NUM_HEADS, SEQ_LEN, HEAD_DIM}, inputType, layout);
 
     graph::SdpaAttributes sdpaAttributes;
     sdpaAttributes.set_name("sdpa_fprop_node");
-    sdpaAttributes.set_attn_scale_value(1.0f / std::sqrt(static_cast<float>(HEAD_DIM)));
+    sdpaAttributes.set_attn_scale(1.0f / std::sqrt(static_cast<float>(HEAD_DIM)));
 
     auto [oAttr, statsAttr] = graph->sdpa(qAttr, kAttr, vAttr, std::move(sdpaAttributes));
     oAttr->set_output(true);
@@ -152,18 +184,21 @@ int main(int argc, char* argv[])
 {
     try
     {
-        auto config = parseCommandLineArgs(argc, argv);
+        RETURN_SUCCESS_IF_NO_DEVICE();
+
+        auto config = parseCommandLineArgs(argc, argv, SampleType::SDPA);
 
         auto [handle, handleError] = createHipdnnHandle();
         HIPDNN_FE_CHECK(handleError);
 
-        const bool allPassed = runSdpa(SampleRunner{*handle, config});
+        bool allPassed = runSdpa(SampleRunner{*handle, config});
 
         if(allPassed)
         {
             std::cout << "All SDPA forward runs completed successfully.\n";
             return 0;
         }
+
         std::cout << "One or more SDPA forward runs failed validation.\n";
         return 1;
     }

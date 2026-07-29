@@ -124,7 +124,8 @@ inline flatbuffers::FlatBufferBuilder createValidBatchnormWithVarianceInferenceG
     hipdnn_flatbuffers_sdk::data_objects::DataType inputDataType
     = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
     hipdnn_flatbuffers_sdk::data_objects::DataType computeDataType
-    = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT)
+    = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+    bool overrideShapeEnabled = false)
 {
     flatbuffers::FlatBufferBuilder builder;
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
@@ -215,7 +216,9 @@ inline flatbuffers::FlatBufferBuilder createValidBatchnormWithVarianceInferenceG
         hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
         hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
         &tensorAttributes,
-        &nodes);
+        &nodes,
+        flatbuffers::nullopt,
+        overrideShapeEnabled);
     builder.Finish(graphOffset);
     return builder;
 }
@@ -665,7 +668,11 @@ inline flatbuffers::FlatBufferBuilder createValidBatchnormInferActBwdGraph(
 inline flatbuffers::FlatBufferBuilder
     createValidBatchnormFwdTrainingGraph(const std::vector<int64_t>& strides = {588, 196, 14, 1},
                                          const std::vector<int64_t>& dims = {1, 3, 14, 14},
-                                         bool withMeanVariance = true)
+                                         bool withMeanVariance = true,
+                                         bool overrideShapeEnabled = false,
+                                         bool runtimeEpsilon = false,
+                                         bool withRunningStatsAndMomentum = false,
+                                         bool runtimeMomentum = false)
 {
     flatbuffers::FlatBufferBuilder builder;
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
@@ -695,19 +702,39 @@ inline flatbuffers::FlatBufferBuilder
         &derivedStrides,
         &derivedDims));
 
-    // Epsilon (pass-by-value)
+    // Epsilon (pass-by-value): baked constant, or a pure runtime PBV scalar with no
+    // baked value when runtimeEpsilon is set.
     const std::vector<int64_t> passByValueDims = {1};
-    const hipdnn_flatbuffers_sdk::data_objects::Float32Value epsilonVal(1e-5f);
-    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
-        builder,
-        5,
-        "epsilon",
-        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
-        &passByValueDims,
-        &passByValueDims,
-        false,
-        hipdnn_flatbuffers_sdk::data_objects::TensorValue::Float32Value,
-        builder.CreateStruct(epsilonVal).Union()));
+    if(runtimeEpsilon)
+    {
+        tensorAttributes.push_back(
+            hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+                builder,
+                5,
+                "epsilon",
+                hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                &passByValueDims,
+                &passByValueDims,
+                false,
+                hipdnn_flatbuffers_sdk::data_objects::TensorValue::NONE,
+                0,
+                true));
+    }
+    else
+    {
+        const hipdnn_flatbuffers_sdk::data_objects::Float32Value epsilonVal(1e-5f);
+        tensorAttributes.push_back(
+            hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+                builder,
+                5,
+                "epsilon",
+                hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                &passByValueDims,
+                &passByValueDims,
+                false,
+                hipdnn_flatbuffers_sdk::data_objects::TensorValue::Float32Value,
+                builder.CreateStruct(epsilonVal).Union()));
+    }
 
     flatbuffers::Optional<int64_t> meanUid = flatbuffers::nullopt;
     flatbuffers::Optional<int64_t> invVarUid = flatbuffers::nullopt;
@@ -735,6 +762,67 @@ inline flatbuffers::FlatBufferBuilder
         invVarUid = flatbuffers::Optional<int64_t>(7);
     }
 
+    flatbuffers::Optional<int64_t> prevMeanUid = flatbuffers::nullopt;
+    flatbuffers::Optional<int64_t> prevVarianceUid = flatbuffers::nullopt;
+    flatbuffers::Optional<int64_t> momentumUid = flatbuffers::nullopt;
+
+    if(withRunningStatsAndMomentum)
+    {
+        // Optional running-stats inputs: prev mean/variance are always baked data
+        // tensors; momentum is pass-by-value, baked unless runtimeMomentum is set.
+        tensorAttributes.push_back(
+            hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+                builder,
+                8,
+                "prev_running_mean",
+                hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                &derivedStrides,
+                &derivedDims));
+        tensorAttributes.push_back(
+            hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+                builder,
+                9,
+                "prev_running_variance",
+                hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                &derivedStrides,
+                &derivedDims));
+
+        if(runtimeMomentum)
+        {
+            tensorAttributes.push_back(
+                hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+                    builder,
+                    10,
+                    "momentum",
+                    hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                    &passByValueDims,
+                    &passByValueDims,
+                    false,
+                    hipdnn_flatbuffers_sdk::data_objects::TensorValue::NONE,
+                    0,
+                    true));
+        }
+        else
+        {
+            const hipdnn_flatbuffers_sdk::data_objects::Float32Value momentumVal(0.1f);
+            tensorAttributes.push_back(
+                hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+                    builder,
+                    10,
+                    "momentum",
+                    hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                    &passByValueDims,
+                    &passByValueDims,
+                    false,
+                    hipdnn_flatbuffers_sdk::data_objects::TensorValue::Float32Value,
+                    builder.CreateStruct(momentumVal).Union()));
+        }
+
+        prevMeanUid = flatbuffers::Optional<int64_t>(8);
+        prevVarianceUid = flatbuffers::Optional<int64_t>(9);
+        momentumUid = flatbuffers::Optional<int64_t>(10);
+    }
+
     auto bnormAttributes = hipdnn_flatbuffers_sdk::data_objects::CreateBatchnormAttributes(
         builder,
         1, // x_tensor_uid
@@ -742,9 +830,9 @@ inline flatbuffers::FlatBufferBuilder
         4, // bias_tensor_uid
         5, // epsilon_tensor_uid
         0, // peer_stats_tensor_uid
-        flatbuffers::nullopt, // prev_running_mean_tensor_uid
-        flatbuffers::nullopt, // prev_running_variance_tensor_uid
-        flatbuffers::nullopt, // momentum_tensor_uid
+        prevMeanUid, // prev_running_mean_tensor_uid
+        prevVarianceUid, // prev_running_variance_tensor_uid
+        momentumUid, // momentum_tensor_uid
         2, // y_tensor_uid
         meanUid, // mean_tensor_uid
         invVarUid, // inv_variance_tensor_uid
@@ -768,7 +856,9 @@ inline flatbuffers::FlatBufferBuilder
         hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
         hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
         &tensorAttributes,
-        &nodes);
+        &nodes,
+        flatbuffers::nullopt,
+        overrideShapeEnabled);
     builder.Finish(graphOffset);
     return builder;
 }
@@ -1019,7 +1109,8 @@ inline flatbuffers::FlatBufferBuilder
                             const std::vector<int64_t>& convStrides = {1, 1},
                             const std::vector<int64_t>& convDilation = {1, 1},
                             hipdnn_flatbuffers_sdk::data_objects::DataType dataType
-                            = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT)
+                            = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                            bool overrideShapeEnabled = false)
 {
     flatbuffers::FlatBufferBuilder builder;
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
@@ -1062,7 +1153,9 @@ inline flatbuffers::FlatBufferBuilder
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
         &tensorAttributes,
-        &nodes);
+        &nodes,
+        flatbuffers::nullopt,
+        overrideShapeEnabled);
     builder.Finish(graphOffset);
     return builder;
 }
@@ -1268,7 +1361,8 @@ inline flatbuffers::FlatBufferBuilder
                                      std::optional<float> swishBeta,
                                      std::optional<float> eluAlpha,
                                      std::optional<float> softplusBeta,
-                                     hipdnn_flatbuffers_sdk::data_objects::DataType dataType)
+                                     hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
+                                     bool overrideShapeEnabled = false)
 {
     flatbuffers::FlatBufferBuilder builder;
 
@@ -1381,7 +1475,9 @@ inline flatbuffers::FlatBufferBuilder
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
         &tensorAttributes,
-        &nodes);
+        &nodes,
+        flatbuffers::nullopt,
+        overrideShapeEnabled);
     builder.Finish(graphOffset);
     return builder;
 }
@@ -1449,7 +1545,8 @@ inline flatbuffers::FlatBufferBuilder createValidConvFwdBiasActivGraph(
     std::optional<float> eluAlpha = std::nullopt,
     std::optional<float> softplusBeta = std::nullopt,
     hipdnn_flatbuffers_sdk::data_objects::DataType dataType
-    = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT)
+    = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+    bool overrideShapeEnabled = false)
 {
     return createValidConvFwdBiasActivGraph(xDims,
                                             xStrides,
@@ -1469,7 +1566,8 @@ inline flatbuffers::FlatBufferBuilder createValidConvFwdBiasActivGraph(
                                             swishBeta,
                                             eluAlpha,
                                             softplusBeta,
-                                            dataType);
+                                            dataType,
+                                            overrideShapeEnabled);
 }
 
 inline flatbuffers::FlatBufferBuilder
@@ -1708,7 +1806,8 @@ inline flatbuffers::FlatBufferBuilder
                                    hipdnn_flatbuffers_sdk::data_objects::DataType inputDataType
                                    = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
                                    hipdnn_flatbuffers_sdk::data_objects::DataType computeDataType
-                                   = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT)
+                                   = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                                   bool overrideShapeEnabled = false)
 {
     flatbuffers::FlatBufferBuilder builder;
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
@@ -1773,7 +1872,9 @@ inline flatbuffers::FlatBufferBuilder
         hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
         hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
         &tensorAttributes,
-        &nodes);
+        &nodes,
+        flatbuffers::nullopt,
+        overrideShapeEnabled);
     builder.Finish(graphOffset);
     return builder;
 }
@@ -1887,7 +1988,8 @@ inline flatbuffers::FlatBufferBuilder
                             hipdnn_flatbuffers_sdk::data_objects::DataType inputDataType
                             = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
                             hipdnn_flatbuffers_sdk::data_objects::DataType computeDataType
-                            = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT)
+                            = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                            bool overrideShapeEnabled = false)
 {
     flatbuffers::FlatBufferBuilder builder;
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
@@ -1951,7 +2053,9 @@ inline flatbuffers::FlatBufferBuilder
         hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
         hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
         &tensorAttributes,
-        &nodes);
+        &nodes,
+        flatbuffers::nullopt,
+        overrideShapeEnabled);
     builder.Finish(graphOffset);
     return builder;
 }
@@ -1963,7 +2067,8 @@ inline flatbuffers::FlatBufferBuilder
                                hipdnn_flatbuffers_sdk::data_objects::DataType inputDataType
                                = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
                                hipdnn_flatbuffers_sdk::data_objects::DataType computeDataType
-                               = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT)
+                               = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                               bool overrideShapeEnabled = false)
 {
     flatbuffers::FlatBufferBuilder builder;
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
@@ -2061,7 +2166,9 @@ inline flatbuffers::FlatBufferBuilder
         hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
         hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
         &tensorAttributes,
-        &nodes);
+        &nodes,
+        flatbuffers::nullopt,
+        overrideShapeEnabled);
     builder.Finish(graphOffset);
     return builder;
 }
@@ -2207,7 +2314,8 @@ inline flatbuffers::FlatBufferBuilder
                             bool withStats = false,
                             bool alibiMask = false,
                             bool paddingMask = false,
-                            bool causalMask = false)
+                            bool causalMask = false,
+                            bool overrideShapeEnabled = false)
 {
     flatbuffers::FlatBufferBuilder builder;
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
@@ -2333,7 +2441,9 @@ inline flatbuffers::FlatBufferBuilder
         hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
         hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
         &tensorAttributes,
-        &nodes);
+        &nodes,
+        flatbuffers::nullopt,
+        overrideShapeEnabled);
     builder.Finish(graphOffset);
     return builder;
 }
@@ -2531,7 +2641,8 @@ inline flatbuffers::FlatBufferBuilder
                             bool withScale = false,
                             bool alibiMask = false,
                             bool paddingMask = false,
-                            bool causalMask = false)
+                            bool causalMask = false,
+                            bool overrideShapeEnabled = false)
 {
     flatbuffers::FlatBufferBuilder builder;
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
@@ -2645,7 +2756,9 @@ inline flatbuffers::FlatBufferBuilder
         hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
         hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
         &tensorAttributes,
-        &nodes);
+        &nodes,
+        flatbuffers::nullopt,
+        overrideShapeEnabled);
     builder.Finish(graphOffset);
     return builder;
 }
@@ -2750,7 +2863,12 @@ inline flatbuffers::FlatBufferBuilder createValidReductionGraph()
     return builder;
 }
 
-inline flatbuffers::FlatBufferBuilder createValidResampleFwdGraph()
+inline flatbuffers::FlatBufferBuilder
+    createValidResampleFwdGraph(std::optional<bool> generateIndex = std::nullopt,
+                                hipdnn_flatbuffers_sdk::data_objects::ResampleMode mode
+                                = hipdnn_flatbuffers_sdk::data_objects::ResampleMode::MAXPOOL,
+                                hipdnn_flatbuffers_sdk::data_objects::PaddingMode paddingMode
+                                = hipdnn_flatbuffers_sdk::data_objects::PaddingMode::ZERO_PAD)
 {
     flatbuffers::FlatBufferBuilder builder;
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
@@ -2765,23 +2883,42 @@ inline flatbuffers::FlatBufferBuilder createValidResampleFwdGraph()
         builder, 1, "x", hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, &xStrides, &xDims));
     tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
         builder, 2, "y", hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, &yStrides, &yDims));
+    const bool shouldGenerateIndex = generateIndex.value_or(false);
+    if(shouldGenerateIndex)
+    {
+        tensorAttributes.push_back(
+            hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+                builder,
+                3,
+                "index",
+                hipdnn_flatbuffers_sdk::data_objects::DataType::INT32,
+                &yStrides,
+                &yDims));
+    }
 
     const std::vector<int64_t> prePadding = {0, 0};
     const std::vector<int64_t> postPadding = {0, 0};
     const std::vector<int64_t> stride = {2, 2};
     const std::vector<int64_t> window = {2, 2};
+    ::flatbuffers::Optional<bool> flatbufferGenerateIndex = ::flatbuffers::nullopt;
+    if(generateIndex.has_value())
+    {
+        const bool generateIndexValue = generateIndex.value_or(false);
+        flatbufferGenerateIndex = ::flatbuffers::Optional<bool>(generateIndexValue);
+    }
 
     auto resampleAttr = hipdnn_flatbuffers_sdk::data_objects::CreateResampleFwdAttributesDirect(
         builder,
         1,
         2,
-        ::flatbuffers::nullopt,
+        shouldGenerateIndex ? ::flatbuffers::Optional<int64_t>(3) : ::flatbuffers::nullopt,
         &prePadding,
         &postPadding,
         &stride,
         &window,
-        hipdnn_flatbuffers_sdk::data_objects::ResampleMode::MAXPOOL,
-        hipdnn_flatbuffers_sdk::data_objects::PaddingMode::ZERO_PAD);
+        mode,
+        paddingMode,
+        flatbufferGenerateIndex);
 
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> nodes;
     nodes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(

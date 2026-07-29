@@ -8,6 +8,10 @@ on:
       projects:
         type: string
         description: "Insert space-separated list of projects to test or 'all' to test all projects. ex: 'projects/rocprim projects/hipcub'"
+      therock_ref_override:
+        type: string
+        description: "Optional explicit TheRock ref (branch/tag/SHA) to build against. Empty resolves the live tip of ROCm/TheRock@main."
+        default: ""
 
 permissions:
   contents: read
@@ -17,7 +21,7 @@ jobs:
     name: "Setup"
     runs-on: ubuntu-24.04
     outputs:
-      therock_ref: ${{ steps.ci-env.outputs.therock-ref }}
+      therock_ref: ${{ steps.checkout_therock.outputs.commit }}
       docker_image: ${{ steps.ci-env.outputs.docker-image }}
       rocm_package_version: ${{ steps.rocm_package_version.outputs.rocm_package_version }}
       linux_projects: ${{ steps.linux_projects.outputs.linux_projects }}
@@ -39,12 +43,30 @@ jobs:
         id: ci-env
         uses: ./.github/actions/ci-env
 
+      # Resolve the TheRock ref to build against exactly once here. By default
+      # this is the live tip of ROCm/TheRock@main; the checkout records the
+      # concrete SHA as steps.checkout_therock.outputs.commit, which is what
+      # every downstream job consumes (via needs.setup.outputs.therock_ref) so
+      # no other job re-resolves main. Set the therock_ref_override input to
+      # pin an explicit ref instead.
       - name: Checkout TheRock repository
+        id: checkout_therock
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: "ROCm/TheRock"
           path: TheRock
-          ref: ${{ steps.ci-env.outputs.therock-ref }}
+          ref: ${{ inputs.therock_ref_override || 'main' }}
+
+      - name: Log locked TheRock ref
+        run: |
+          RESOLVED_REF="${{ steps.checkout_therock.outputs.commit }}"
+          COMMIT_URL="https://github.com/ROCm/TheRock/commit/${RESOLVED_REF}"
+          echo "Locked TheRock ref for this run: ${RESOLVED_REF} (${COMMIT_URL})"
+          {
+            echo "### Locked TheRock ref"
+            echo ""
+            echo "This nightly builds every job against ROCm/TheRock commit [\`${RESOLVED_REF}\`](${COMMIT_URL})."
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Checkout CI config
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -67,7 +89,9 @@ jobs:
       - name: Compute package version
         id: rocm_package_version
         run: |
-          python TheRock/build_tools/compute_rocm_package_version.py --release-type=dev
+          python TheRock/build_tools/compute_rocm_package_version.py \
+            --release-type=dev \
+            --override-git-sha=${{ steps.checkout_therock.outputs.commit }}
 
       - name: Determine Linux projects to run
         id: linux_projects

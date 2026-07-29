@@ -25,6 +25,7 @@
 #include "TestHelpers.hpp"
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/core/PassManager.hpp"
+#include "stinkytofu/ir/asm/StinkyModifiers.hpp"
 #include "stinkytofu/support/Casting.hpp"
 #include "stinkytofu/transforms/asm/StinkyDAGSchedulerPass.hpp"
 
@@ -181,6 +182,30 @@ class DAGSchedulerPassTest : public ::testing::Test {
 
     StinkyInstruction* createWmmaF32_16x16x16_bf16(int destStart, int src0Start) {
         return createWmmaF32_16x16x16_bf16_in(bb, destStart, src0Start);
+    }
+
+    // v_wmma_scale_f32_16x16x128_f8f6f4 with F8 (FP8) input matrix formats. Its
+    // cost is {issue=1, latency=8}, so the co-issue latency window stays open
+    // right after issue, which is what exercises the co-exec hazard gate.
+    // src VGPRs: v[src0Start:src0Start+8) (src0/src1) and v[destStart:destStart+8) (acc).
+    StinkyInstruction* createWmmaScaleF8_in(BasicBlock* targetBB, int destStart, int src0Start) {
+        AsmIRBuilder builder(*targetBB, arch);
+        const HwInstDesc* desc = getMCIDByUOp(GFX::v_wmma_scale_f32_16x16x128_f8f6f4, arch);
+        if (!desc) return nullptr;
+        StinkyInstruction* inst = builder.create(desc);
+        inst->addDestReg(StinkyRegister("v", destStart, 8));
+        inst->addSrcReg(StinkyRegister("v", src0Start, 8));
+        inst->addSrcReg(StinkyRegister("v", src0Start, 8));
+        inst->addSrcReg(StinkyRegister("v", destStart, 8));
+        MatrixFmtModifiers fmtMod;
+        fmtMod.fmtA = MatrixFmt::FP8;
+        fmtMod.fmtB = MatrixFmt::FP8;
+        inst->addModifier(fmtMod);
+        return inst;
+    }
+
+    StinkyInstruction* createWmmaScaleF8(int destStart, int src0Start) {
+        return createWmmaScaleF8_in(bb, destStart, src0Start);
     }
 
     StinkyInstruction* createMovableDsLoad(int destReg, int addrReg, int ldsToken) {
@@ -471,6 +496,230 @@ TEST_F(DAGSchedulerPassTest, IndependentWMMAFirst_ThenDsThenVALU) {
 }
 
 // ---------------------------------------------------------------------------
+// Co-execution hazard (regression test for destOverlapsActiveWmmaSrc):
+// a ds_load whose dest VGPRs overlap the in-flight WMMA's src VGPRs must NOT be
+// issued inside that WMMA's latency window, because the load could clobber a
+// source register the WMMA is still reading.
+//
+// Setup: WMMA #0 reads v[50:58); the ds_load writes v[52:56) (overlap). Four
+// more independent WMMAs (disjoint registers) are available. While WMMA #0 is
+// in flight the ds_load is held back by the hazard gate, so the scheduler
+// issues the next independent WMMA (D#100) first and only then the ds_load,
+// once a WMMA whose sources it does not touch is the active one:
+//
+//   wmma D#12  ->  wmma D#100  ->  ds_load D#52  ->  wmma D#108/116/124
+//
+// Without the hazard gate the ds_load would issue right after WMMA #0
+// (wmma D#12 -> ds_load -> wmma D#100 -> ...), clobbering v[52:56) mid-read.
+// ---------------------------------------------------------------------------
+TEST_F(DAGSchedulerPassTest, WmmaSrcOverlap_HazardDsLoadDeferredPastWindow) {
+    const int addrReg = 80;
+    // F8 MX WMMA fires first (Phase B). Its src VGPRs are v[50:58) (src0/src1)
+    // and v[12:20) (acc); see createWmmaScaleF8. cost latency=8 keeps the
+    // co-issue window open so the hazard gate is exercised.
+    createWmmaScaleF8(/*destStart=*/12, /*src0Start=*/50);
+    // ds_load dest v[52:56) overlaps the WMMA's src0 v[50:58): co-exec hazard.
+    createMovableDsLoad(/*destReg=*/52, addrReg, /*ldsToken=*/1);
+    // Independent WMMAs (registers disjoint from the hazard pair and from each
+    // other) to fill the latency window ahead of the deferred ds_load.
+    for (int i = 0; i < 4; i++)
+        createWmmaScaleF8(/*destStart=*/100 + i * 8, /*src0Start=*/200 + i * 8);
+
+    int beforeCount = countStinkyInstructions(*bb);
+    runPassWithUnrollGemm();
+    EXPECT_EQ(countStinkyInstructions(*bb), beforeCount)
+        << "hazard deferral must not drop instructions";
+
+    // Collect (mnemonic-kind, first-dest-vgpr) in scheduled order.
+    std::vector<std::pair<std::string, int>> seq;
+    for (const IRBase& ir : *bb) {
+        if (ir.getType() != IRBase::IRType::StinkyTofu) continue;
+        const auto* inst = cast<StinkyInstruction>(&ir);
+        const HwInstDesc* hw = inst->getHwInstDesc();
+        if (!hw || !hw->mnemonic) continue;
+        std::string_view mnem(hw->mnemonic);
+        std::string kind = mnem.find("wmma") != std::string_view::npos      ? "wmma"
+                           : mnem.find("ds_load") != std::string_view::npos ? "ds"
+                                                                            : std::string(mnem);
+        int dst = (!inst->getDestRegs().empty() && inst->getDestRegs()[0].isRegister())
+                      ? static_cast<int>(inst->getDestRegs()[0].reg.idx)
+                      : -1;
+        seq.push_back({kind, dst});
+    }
+
+    const std::vector<std::pair<std::string, int>> expected = {
+        {"wmma", 12}, {"wmma", 100}, {"ds", 52}, {"wmma", 108}, {"wmma", 116}, {"wmma", 124},
+    };
+    EXPECT_EQ(seq, expected)
+        << "hazardous ds_load must be deferred until an independent WMMA (D#100) has "
+           "issued; it must not co-issue inside WMMA D#12's latency window";
+}
+
+// ---------------------------------------------------------------------------
+// Co-execution hazard, VALU variant (regression test for destOverlapsActiveWmmaSrc
+// on the VALU path): a VALU whose dest VGPR overlaps the in-flight WMMA's src VGPRs
+// must NOT be issued inside that WMMA's latency window, because it could clobber a
+// source register the WMMA is still reading.
+//
+// Unlike the ds_load variant, a VALU only becomes co-issue pickable at the positions
+// set in the WMMA's co-issue window (MXWMMA_SCALE = 0x00C0, i.e. positions 6/7). Right
+// after issue the position is 1, where isValuPickable() is already false, so extra
+// non-hazardous fillers are needed to advance the co-issue timeline into a pickable
+// position while WMMA #0 is still in flight. That is exactly the moment the hazard gate
+// must fire:
+//   - 3 non-hazardous ds_loads (v[300:], v[320:], v[340:]) fill the per-WMMA DS cap and
+//     advance positions 1 -> 4.
+//   - 3 independent scalar ops advance positions 4 -> 7; at position 6 the VALU becomes
+//     co-issue pickable while WMMA #0 (v[50:58)) is still the active window.
+//
+// With the gate the hazardous VALU (dst v52) is skipped at position 6 (inside WMMA #0's
+// window) and deferred until that window closes; it then issues right after D#100 opens a
+// non-overlapping window. Without the gate it would co-issue at position 6, clobbering v52.
+// ---------------------------------------------------------------------------
+TEST_F(DAGSchedulerPassTest, WmmaSrcOverlap_HazardValuDeferredPastWindow) {
+    const int addrReg = 400;
+    auto createScalarOp = [&](int dst, int src0, int src1) {
+        AsmIRBuilder builder(*bb, arch);
+        StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::s_add_u32, arch));
+        inst->addDestReg(StinkyRegister("s", dst, 1));
+        inst->addSrcReg(StinkyRegister("s", src0, 1));
+        inst->addSrcReg(StinkyRegister("s", src1, 1));
+        return inst;
+    };
+    // F8 MX WMMA fires first (Phase B). Its src VGPRs are v[50:58) (src0/src1) and
+    // v[12:20) (acc); latency=8 keeps the co-issue window open so the gate is exercised.
+    createWmmaScaleF8(/*destStart=*/12, /*src0Start=*/50);
+    // Hazardous VALU: dst v52 overlaps the WMMA's src0 v[50:58): co-exec hazard.
+    createVAddInBlock(bb, arch, /*destReg=*/52, /*src0Reg=*/60, /*src1Reg=*/61);
+    // Non-hazardous fillers to advance the co-issue timeline into a VALU-pickable
+    // position (6) while WMMA #0 is still in flight.
+    createMovableDsLoad(/*destReg=*/300, addrReg, /*ldsToken=*/1);
+    createMovableDsLoad(/*destReg=*/320, addrReg, /*ldsToken=*/2);
+    createMovableDsLoad(/*destReg=*/340, addrReg, /*ldsToken=*/3);
+    createScalarOp(/*dst=*/10, 11, 12);
+    createScalarOp(/*dst=*/13, 14, 15);
+    createScalarOp(/*dst=*/16, 17, 18);
+    // Independent WMMAs (registers disjoint from the hazard pair and each other) to fill
+    // the latency windows ahead of the deferred VALU.
+    for (int i = 0; i < 4; i++)
+        createWmmaScaleF8(/*destStart=*/100 + i * 16, /*src0Start=*/200 + i * 16);
+
+    int beforeCount = countStinkyInstructions(*bb);
+    runPassWithUnrollGemm();
+    EXPECT_EQ(countStinkyInstructions(*bb), beforeCount)
+        << "hazard deferral must not drop instructions";
+
+    // Collect (mnemonic-kind, first-dest-reg) in scheduled order.
+    std::vector<std::pair<std::string, int>> seq;
+    for (const IRBase& ir : *bb) {
+        if (ir.getType() != IRBase::IRType::StinkyTofu) continue;
+        const auto* inst = cast<StinkyInstruction>(&ir);
+        const HwInstDesc* hw = inst->getHwInstDesc();
+        if (!hw || !hw->mnemonic) continue;
+        std::string_view mnem(hw->mnemonic);
+        std::string kind = mnem.find("wmma") != std::string_view::npos      ? "wmma"
+                           : mnem.find("ds_load") != std::string_view::npos ? "ds"
+                           : mnem.rfind("v_", 0) == 0                       ? "valu"
+                           : mnem.rfind("s_", 0) == 0                       ? "s"
+                                                                            : std::string(mnem);
+        int dst = (!inst->getDestRegs().empty() && inst->getDestRegs()[0].isRegister())
+                      ? static_cast<int>(inst->getDestRegs()[0].reg.idx)
+                      : -1;
+        seq.push_back({kind, dst});
+    }
+
+    // Hazardous VALU (dst v52) is deferred past WMMA D#12's window, then issues right after
+    // the first independent WMMA (D#100), whose window no longer overlaps v52.
+    const std::vector<std::pair<std::string, int>> expected = {
+        {"wmma", 12}, {"ds", 300},   {"ds", 320},  {"ds", 340},   {"s", 10},     {"s", 13},
+        {"s", 16},    {"wmma", 100}, {"valu", 52}, {"wmma", 116}, {"wmma", 132}, {"wmma", 148},
+    };
+    EXPECT_EQ(seq, expected)
+        << "hazardous VALU (dst v52) must not co-issue inside WMMA D#12's latency window; "
+           "it must be deferred until that window closes, then issue once a non-overlapping "
+           "WMMA window is open";
+}
+
+// ---------------------------------------------------------------------------
+// Hidden-stall window fill (pickFreeBest allowHiddenStall path): a SALU that is
+// only blocked by a src RAW hazard whose remaining wait fits under the active
+// WMMA's latency shadow may be co-issued *inside* that window — the stall we pay
+// waiting for its src is hidden by the in-flight WMMA, so it costs no extra
+// cycles. It must therefore be preferred over starting the next independent WMMA.
+//
+// Setup (region, not a loop, so no loop-head deferral):
+//   - WMMA #0 (v[12:20)) fires first (Phase B) and opens an 8-cycle window.
+//   - A chain of inter-dependent SALUs a0 -> a1 -> a2 -> a3, each writing s(100+i)
+//     with latency=2 > issue=1 so issuing it stamps a 1-cycle data-ready latency
+//     on its dest (the src RAW gate for the next link). a0 is free; a1..a3 are
+//     each RAW-blocked for 1 cycle, which fits under WMMA #0's remaining latency
+//     shadow, so every link is a valid hidden-stall fill. The chain is strict, so
+//     only one link is ready at a time — their relative order is forced by the
+//     DAG; the test is purely about whether each link lands inside the window.
+//   - WMMA #1 (v[200:208)) is independent and ready.
+//
+// Expected (new behavior):  wmma#0, a0, a1, a2, a3, wmma#1
+//   Every chain link is co-issued inside wmma#0's window, ahead of wmma#1.
+// Old behavior would issue wmma#1 as soon as a0's consumer was RAW-blocked
+// (wmma#0, a0, wmma#1, a1, a2, a3), because a RAW-blocked SALU was never pickable
+// inside the window.
+// ---------------------------------------------------------------------------
+TEST_F(DAGSchedulerPassTest, HiddenStallSaluFillsWmmaWindowBeforeNextWmma) {
+    auto createScalarAdd = [&](int dst, int src0, int src1) {
+        AsmIRBuilder builder(*bb, arch);
+        StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::s_add_u32, arch));
+        inst->addDestReg(StinkyRegister("s", dst, 1));
+        inst->addSrcReg(StinkyRegister("s", src0, 1));
+        inst->addSrcReg(StinkyRegister("s", src1, 1));
+        return inst;
+    };
+
+    // WMMA #0 fires first (Phase B), latency=8 keeps its co-issue window open.
+    createWmmaScaleF8(/*destStart=*/12, /*src0Start=*/50);
+    // Chain a0 -> a1 -> a2 -> a3: a_i writes s(100+i), a_(i+1) reads it (RAW).
+    // Each 1-cycle wait fits the shrinking window (positions 2,4,6,8), so all four
+    // are hidden-stall filled inside WMMA #0's window.
+    const int kChain = 4;
+    for (int i = 0; i < kChain; i++) {
+        const int src0 = (i == 0) ? 0 : (100 + i - 1);  // previous link's dest
+        StinkyInstruction* a = createScalarAdd(/*dst=*/100 + i, src0, /*src1=*/1);
+        a->issueCycles = 1;
+        a->latencyCycles = 2;
+    }
+    // WMMA #1: independent (disjoint regs) and ready.
+    createWmmaScaleF8(/*destStart=*/200, /*src0Start=*/220);
+
+    int beforeCount = countStinkyInstructions(*bb);
+    runPassWithUnrollGemm();
+    EXPECT_EQ(countStinkyInstructions(*bb), beforeCount)
+        << "hidden-stall fill must not drop instructions";
+
+    std::vector<std::pair<std::string, int>> seq;
+    for (const IRBase& ir : *bb) {
+        if (ir.getType() != IRBase::IRType::StinkyTofu) continue;
+        const auto* inst = cast<StinkyInstruction>(&ir);
+        const HwInstDesc* hw = inst->getHwInstDesc();
+        if (!hw || !hw->mnemonic) continue;
+        std::string_view mnem(hw->mnemonic);
+        std::string kind = mnem.find("wmma") != std::string_view::npos ? "wmma"
+                           : mnem.rfind("s_", 0) == 0                  ? "s"
+                                                                       : std::string(mnem);
+        int dst = (!inst->getDestRegs().empty() && inst->getDestRegs()[0].isRegister())
+                      ? static_cast<int>(inst->getDestRegs()[0].reg.idx)
+                      : -1;
+        seq.push_back({kind, dst});
+    }
+
+    const std::vector<std::pair<std::string, int>> expected = {
+        {"wmma", 12}, {"s", 100}, {"s", 101}, {"s", 102}, {"s", 103}, {"wmma", 200},
+    };
+    EXPECT_EQ(seq, expected)
+        << "every link of the RAW-dependent SALU chain must be co-issued inside WMMA #0's latency "
+           "window (each 1-cycle wait hidden by the in-flight WMMA), ahead of the independent "
+           "WMMA #1";
+}
+
+// ---------------------------------------------------------------------------
 // Property: per-WMMA-window DS cap — after a WMMA fires,
 // at most floor((latency - issue) / 2) = 3 ds_loads can issue in its window
 // because back-to-back ds_load issue cost doubles.
@@ -634,6 +883,54 @@ TEST_F(DAGSchedulerPassTest, GlobalReadThrottle_Disabled_PreservesAll) {
     EXPECT_EQ(countStinkyInstructions(*body), beforeCount);
 }
 
+// SGPR->tensor_load hazard: a SALU that writes an SGPR a tensor_load reads must be
+// separated from that tensor_load by the fixed hardware gap (kCdna5HazardRules'
+// SaluSgprToMemAddr entry, 8 cycles). Mirrors the real case (wmma/ds fill around the
+// SALU): the scheduler hoists the SALU and/or holds the tensor_load so >= 8 cycles of
+// work sit between them. We assert the cycle invariant, not an exact order. A WMMA
+// counts as its latencyCycles (the co-issue window it opens, 8 here), other ops as
+// issueCycles.
+TEST_F(DAGSchedulerPassTest, SgprToTensorLoadHazard_AtLeast8CycleGap) {
+    BasicBlock* body = bb;
+    body->addSuccessor(body);
+
+    // Movable ds_loads (LDS token -> stay in one region, no side-effect boundary) as the
+    // fill work, a SALU writing s0, and a tensor_load reading s[0:4) so s0 is the hazard
+    // register. Enough ds fill (>= hazard) so the gap is filled by real work, observable
+    // in the emitted order rather than an invisible stall.
+    for (int i = 0; i < 12; i++)
+        createMovableDsLoad(/*destReg=*/8 + i * 4, /*addrReg=*/60, /*ldsToken=*/i + 2);
+
+    AsmIRBuilder builder(*body, arch);
+    StinkyInstruction* salu = builder.create(getMCIDByUOp(GFX::s_mov_b32, arch));
+    salu->addDestReg(StinkyRegister("s", 0, 1));
+    salu->addSrcReg(StinkyRegister(0));
+
+    createMovableTensorLoad(body, /*s0=*/0, /*s1=*/4, /*ldsToken=*/1);
+
+    runPassWithGlobalReadThrottle(/*depth=*/4, /*drainLatency=*/8);
+
+    // Locate the SALU and the tensor_load in the scheduled order, and total the cycles
+    // of the work between them (WMMA -> latency window, else issue cycles).
+    int saluPos = -1, tensorPos = -1, idx = 0;
+    std::vector<int> cyclesAt;
+    for (const IRBase& ir : *body) {
+        if (ir.getType() != IRBase::IRType::StinkyTofu) continue;
+        const auto* inst = cast<StinkyInstruction>(&ir);
+        cyclesAt.push_back(isMatrixInstruction(*inst) ? inst->latencyCycles : inst->issueCycles);
+        if (inst == salu) saluPos = idx;
+        if (isTensorLoad(*inst)) tensorPos = idx;
+        idx++;
+    }
+    ASSERT_GE(saluPos, 0);
+    ASSERT_GE(tensorPos, 0);
+    ASSERT_LT(saluPos, tensorPos) << "SALU must be scheduled before the tensor_load it feeds";
+
+    int gap = 0;
+    for (int i = saluPos + 1; i < tensorPos; i++) gap += cyclesAt[i];
+    EXPECT_GE(gap, 8) << "tensor_load must be >= 8 cycles after the SALU writing its SGPR";
+}
+
 // ---------------------------------------------------------------------------
 // dsReadQueueDepth / dsReadDrainLatency / dsReadPerWmma: same in-flight
 // credit-pool mechanism as globalReadQueueDepth/globalReadDrainLatency, but
@@ -675,22 +972,84 @@ TEST_F(DAGSchedulerPassTest, DsReadThrottle_Depth1_SeparatesEveryLoad) {
     EXPECT_EQ(maxConsecutiveDsReads(seq), 1) << "depth=1: no two ds_reads may be adjacent";
 }
 
-// dsReadPerWmma isolated: hold the credit pool generously large so it never
-// binds, leaving the per-WMMA-window cap (only one WMMA present) as the sole
-// active constraint.
-TEST_F(DAGSchedulerPassTest, DsReadThrottle_PerWmmaCap_RespectsCap) {
+// NOTE: the former DsReadThrottle_PerWmmaCap_RespectsCap test isolated the
+// per-WMMA-window cap with a single WMMA. That predated the ds_load in-flight
+// queue; now the cap only binds while a WMMA window is active (covered by
+// DSWindowCap_VALUInterleaveAfter3, which keeps two WMMAs pending), and the
+// no-WMMA case is bounded by the in-flight queue (covered by
+// DsReadThrottle_Depth2_RespectsQueueDepth). No standalone single-WMMA cap test
+// is kept — it would assert behavior the cap no longer has.
+
+// Regression (see image(2).png bug): with no WMMA to issue and a chain of
+// ds_loads each consumed by a VALU (RAW), the scheduler must NOT interleave
+// ds,ds,valu,ds,ds,valu — that pattern forces an s_wait_dscnt per pair and
+// tanks the kernel. Loads have their own in-flight queue, so they should drain
+// (up to queue depth) before the consumer VALUs run: the consumers RAW-depend on
+// the loads and are hazard-deferred until the load latency clears. Assert the
+// loads front-load ahead of every consumer VALU.
+TEST_F(DAGSchedulerPassTest, DsReadThrottle_NoWmma_LoadsDrainBeforeConsumerValu) {
     BasicBlock* body = bb;
     body->addSuccessor(body);
-    createWmmaF32_16x16x16_bf16_in(body, /*destStart=*/200, /*src0Start=*/204);
-    for (int i = 0; i < 4; i++)
-        createMovableDsLoad(/*destReg=*/i * 4, /*addrReg=*/300 + i * 4, /*ldsToken=*/i + 1);
-    for (int i = 0; i < 30; i++) createVAddInBlock(body, arch, 40 + i, 80 + i, 100 + i);
+    // 6 ds_loads (movable via LDS token) on the same address register; each VALU
+    // consumes the matching load's dest (RAW), mirroring the image's
+    // ds_load_u8 -> v_lshl_or_b32 dependency chain. No WMMA in the region.
+    for (int i = 0; i < 6; i++)
+        createMovableDsLoad(/*destReg=*/i * 4, /*addrReg=*/200, /*ldsToken=*/i + 1);
+    for (int i = 0; i < 6; i++)
+        createVAddInBlock(body, arch, /*dst=*/100 + i, /*src0=*/i * 4, /*src1=*/i * 4 + 1);
 
-    runPassWithDsReadThrottle(/*queueDepth=*/100, /*drainLatency=*/8, /*perWmma=*/2);
+    // Queue depth 6 so all loads can be in flight at once; perWmma irrelevant (no WMMA).
+    runPassWithDsReadThrottle(/*queueDepth=*/6, /*drainLatency=*/8, /*perWmma=*/100);
 
     std::vector<std::string> seq = mnemonicSequence(*body);
-    EXPECT_EQ(maxConsecutiveDsReads(seq), 2)
-        << "dsReadPerWmma=2: at most 2 ds_reads per WMMA window with only one WMMA present";
+    // Every ds_load must precede every v_add: find the last load and first valu.
+    int lastLoad = -1, firstValu = -1;
+    for (int i = 0; i < (int)seq.size(); i++) {
+        if (seq[i] == "ds_load_b128") lastLoad = i;
+        if (seq[i] == "v_add_f32" && firstValu < 0) firstValu = i;
+    }
+    ASSERT_GE(lastLoad, 0);
+    ASSERT_GE(firstValu, 0);
+    EXPECT_LT(lastLoad, firstValu)
+        << "no-WMMA: all ds_loads must drain before consumer VALUs (no ds,valu,ds interleave)";
+}
+
+// Type-A WAR via elapse-time ordering (replaces the old dsAddrReadLatencyCounters):
+// a VALU that overwrites the ds_load's address reg must be deferred behind other
+// independent VALUs, because that reg was just touched (small elapse) — even though
+// the overwrite is EARLIEST in program order (smallest DAG id, which plain
+// pop()-by-id would pick first). This proves the read->write gap comes from elapse
+// ordering, not a hard counter.
+TEST_F(DAGSchedulerPassTest, WarOverwriteOfDsAddrDeferredByElapse) {
+    BasicBlock* body = bb;
+    body->addSuccessor(body);
+    // ds_load reads address v200 (single ds_load so no load-drain effects dominate).
+    createMovableDsLoad(/*destReg=*/8, /*addrReg=*/200, /*ldsToken=*/1);
+    // Overwrite of v200 — created FIRST after the load, so it has the smallest DAG id
+    // among the VALUs. Independent VALUs (disjoint regs) created after it.
+    StinkyInstruction* overwrite = createVAddInBlock(body, arch, /*dst=*/200, /*src0=*/101,
+                                                     /*src1=*/102);
+    for (int i = 0; i < 3; i++)
+        createVAddInBlock(body, arch, /*dst=*/50 + i, /*src0=*/60 + i, /*src1=*/70 + i);
+
+    runPassWithUnrollGemm();
+
+    // Find the scheduled position of the overwrite vs. the independent VALUs.
+    int overwritePos = -1, firstIndependentPos = -1, idx = 0;
+    for (const IRBase& ir : *body) {
+        if (ir.getType() != IRBase::IRType::StinkyTofu) continue;
+        const auto* inst = cast<StinkyInstruction>(&ir);
+        if (inst == overwrite)
+            overwritePos = idx;
+        else if (inst->getUnifiedOpcode() == GFX::v_add_f32 && firstIndependentPos < 0)
+            firstIndependentPos = idx;
+        idx++;
+    }
+    ASSERT_GE(overwritePos, 0);
+    ASSERT_GE(firstIndependentPos, 0);
+    EXPECT_GT(overwritePos, firstIndependentPos)
+        << "WAR overwrite of the ds_load address must be deferred behind independent VALUs "
+           "by elapse-time ordering, despite having the smallest DAG id";
 }
 
 // All instructions are preserved regardless of throttle (count invariant).
