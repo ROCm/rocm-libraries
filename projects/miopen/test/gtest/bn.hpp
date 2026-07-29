@@ -395,10 +395,22 @@ protected:
         auto&& handle                      = get_handle();
         miopenStatus_t res                 = miopenStatusUnknownError;
         miopenTuningPolicy_t tuning_policy = GetTuningPolicy();
-        if(tuning_policy == miopenTuningPolicy_t::miopenTuningPolicySearch)
+        // ScopedTuningPolicy ensures the policy is reset even when GTEST_FAIL() unwinds.
+        struct ScopedTuningPolicy
         {
-            miopenSetTuningPolicy(&handle, tuning_policy); // set tuning
-        }
+            miopen::Handle* h;
+            miopenTuningPolicy_t policy;
+            ScopedTuningPolicy(miopen::Handle* h_, miopenTuningPolicy_t p) : h(h_), policy(p)
+            {
+                if(policy == miopenTuningPolicy_t::miopenTuningPolicySearch)
+                    miopenSetTuningPolicy(h, policy);
+            }
+            ~ScopedTuningPolicy()
+            {
+                if(policy == miopenTuningPolicy_t::miopenTuningPolicySearch)
+                    miopenSetTuningPolicy(h, miopenTuningPolicy_t::miopenTuningPolicyNone);
+            }
+        } tuning_guard(&handle, tuning_policy);
         if(bn_bwd_test_data.activ_mode > 0)
         {
             miopenCreateActivationDescriptor(&activ_desc);
@@ -485,11 +497,6 @@ protected:
             else
                 GTEST_FAIL() << "ERROR: unknown bn api type!!";
         }
-        if(tuning_policy == miopenTuningPolicy_t::miopenTuningPolicySearch)
-        {
-            miopenSetTuningPolicy(&handle,
-                                  miopenTuningPolicy_t::miopenTuningPolicyNone); // unset tuning
-        }
         if(res != miopenStatusSuccess)
         {
             GTEST_FAIL() << "miopenBatchNormalizationBackward failed";
@@ -569,10 +576,22 @@ protected:
         auto&& handle                      = get_handle();
         miopenStatus_t res                 = miopenStatusUnknownError;
         miopenTuningPolicy_t tuning_policy = GetTuningPolicy();
-        if(tuning_policy == miopenTuningPolicy_t::miopenTuningPolicySearch)
+        // ScopedTuningPolicy ensures the policy is reset even when GTEST_FAIL() unwinds.
+        struct ScopedTuningPolicy
         {
-            miopenSetTuningPolicy(&handle, tuning_policy); // set tuning
-        }
+            miopen::Handle* h;
+            miopenTuningPolicy_t policy;
+            ScopedTuningPolicy(miopen::Handle* h_, miopenTuningPolicy_t p) : h(h_), policy(p)
+            {
+                if(policy == miopenTuningPolicy_t::miopenTuningPolicySearch)
+                    miopenSetTuningPolicy(h, policy);
+            }
+            ~ScopedTuningPolicy()
+            {
+                if(policy == miopenTuningPolicy_t::miopenTuningPolicySearch)
+                    miopenSetTuningPolicy(h, miopenTuningPolicy_t::miopenTuningPolicyNone);
+            }
+        } tuning_guard(&handle, tuning_policy);
         if(bn_fwd_train_test_data.activ_mode > 0)
         {
             miopenCreateActivationDescriptor(&activ_desc);
@@ -680,11 +699,6 @@ protected:
             }
             else
                 GTEST_FAIL() << "ERROR: unknown bn api type!!";
-        }
-        if(tuning_policy == miopenTuningPolicy_t::miopenTuningPolicySearch)
-        {
-            miopenSetTuningPolicy(&handle,
-                                  miopenTuningPolicy_t::miopenTuningPolicyNone); // unset tuning
         }
         if(res != miopenStatusSuccess)
         {
