@@ -9,6 +9,7 @@
 #pragma once
 
 #include "GpuRefConvArgs.h"
+#include "GpuRefRMSNormArgs.h"
 
 namespace gpu_ref
 {
