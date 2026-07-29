@@ -711,9 +711,9 @@ symbol name and typed arguments, never inline code. It is a deliberate last reso
 the validated catalog of MIOpen CK convolution and rocKE SDPA applicability needed no custom
 operation. It did rely on a third mechanism between the built-ins and the escape hatch:
 **precomputed fields**, values the schema layer derives once and exposes as ordinary tokens, so a
-matcher compares them instead of re-deriving them. `$q.packed`, `$q.stride_order`, and the classified
-`$sdpa_fwd.mask_mode` ([Section 13.3](#133-encoding-classifymaskmode)) are the examples in this
-document. A precomputed field is declared in the hipDNN schema like any other field and versioned with
+matcher compares them instead of re-deriving them. `$q.packed` and `$q.stride_order` are the examples
+in this document, standing in for `inferLayout`'s contiguous-stride arithmetic. A precomputed field is
+declared in the hipDNN schema like any other field and versioned with
 it, so adding one is an additive schema change, not a per-pack extension point. A file that names a
 predicate the provider does not ship
 fails to resolve, so the registry is part of its published contract. The dispatch layer has an analogous
@@ -1371,6 +1371,10 @@ of the contract, and the example below (§13.4, case C) shows it happening.
 
 ### 13.2 The Matcher: the Real Gate Set
 
+Shown in full, all 21 gates and all 23 optional operands, because what an author writes is the point.
+It is repetitive by nature: most gates are one line, and the repetition is the cost the pack boundary
+amortizes, since this matcher is authored once and every kernel in the pack shares it.
+
 ```jsonc
 {
   "schema": "hipdnn.umd/v1",
@@ -1380,19 +1384,31 @@ of the contract, and the example below (§13.4, case C) shows it happening.
     {"kind": "op", "id": "sdpa_fwd", "op": "sdpa_fwd",
      "operands": {
        "Q": "$q", "K": "$k", "V": "$v",
-       // representative subset of 23 optional operands the real dispatcher rejects on presence;
-       // one per category; the full 23 are the fields swept by usesUnsupportedTensor
-       // in SdpaGraphAdapter.cpp
-       "AttnMask":  "$attn_mask?",   // additive attention bias
-       "SeqLenQ":   "$seq_len_q?",   // varlen
-       "DropSeed":  "$drop_seed?",   // dropout machinery
-       "PageTblK":  "$page_tbl_k?",  // paged-KV
-       "BlockMask": "$block_mask?",  // sparse/block mask
-       "SinkTok":   "$sink_tok?",    // sink-token attention
-       "DescaleQ":  "$descale_q?",   // FP8 input
-       "StatsOut":  "$stats_out?",   // stats/LSE output
-       "RngDump":   "$rng_dump?",    // dropout debug output
-       "AmaxO":     "$amax_o?"       // FP8 output
+       // all 23 optional operands the real dispatcher rejects on presence: the exact
+       // field set swept by usesUnsupportedTensor in SdpaGraphAdapter.cpp
+       "AttnMask":    "$attn_mask?",     // additive attention bias
+       "SeqLenQ":     "$seq_len_q?",     // varlen
+       "SeqLenKV":    "$seq_len_kv?",    // varlen
+       "Seed":        "$seed?",          // dropout machinery
+       "Offset":      "$offset?",        // dropout machinery
+       "DropoutMask": "$dropout_mask?",  // dropout machinery
+       "DropoutScale":"$dropout_scale?", // dropout machinery
+       "PageTblK":    "$page_tbl_k?",    // paged-KV
+       "PageTblV":    "$page_tbl_v?",    // paged-KV
+       "BlockMask":   "$block_mask?",    // sparse/block mask
+       "SinkTok":     "$sink_tok?",      // sink-token attention
+       "DescaleQ":    "$descale_q?",     // FP8 input
+       "DescaleK":    "$descale_k?",     // FP8 input
+       "DescaleV":    "$descale_v?",     // FP8 input
+       "DescaleS":    "$descale_s?",     // FP8 intermediate
+       "ScaleS":      "$scale_s?",       // FP8 intermediate
+       "ScaleO":      "$scale_o?",       // FP8 output
+       "Stats":       "$stats_out?",     // stats/LSE output
+       "Max":         "$max_out?",       // softmax stats output
+       "SumExp":      "$sum_exp?",       // softmax stats output
+       "RngDump":     "$rng_dump?",      // dropout debug output
+       "AmaxS":       "$amax_s?",        // FP8 amax output
+       "AmaxO":       "$amax_o?"         // FP8 amax output
      },
      "results": {"O": "$o"}}
   ],
@@ -1401,11 +1417,21 @@ of the contract, and the example below (§13.4, case C) shows it happening.
     {"!": ["$graph.override_shape"]},
     // --- gate #2: exact graph shape, this kernel is the whole graph ---
     {"==": ["$graph.node_count", 1]},
+    // --- gate #3: node type; the structural `nodes` pattern above already pins this, stated
+    //     explicitly so the gate set reads one-to-one against translate() ---
+    {"==": ["$graph.node_kind", "sdpa_fwd"]},
 
-    // --- gate #4: "none of a large optional set". 23 total; 10 shown above are representative,
-    //     one from each optional-tensor category. Any one bound anywhere in the 23 declines. ---
-    {"none_of": ["$attn_mask", "$seq_len_q", "$drop_seed", "$page_tbl_k", "$block_mask",
-                 "$sink_tok", "$descale_q", "$stats_out", "$rng_dump", "$amax_o"]},
+    // --- gate #4: "none of a large optional set", all 23. Any one bound anywhere declines. ---
+    {"none_of": ["$attn_mask", "$seq_len_q", "$seq_len_kv", "$seed", "$offset",
+                 "$dropout_mask", "$dropout_scale", "$page_tbl_k", "$page_tbl_v",
+                 "$block_mask", "$sink_tok", "$descale_q", "$descale_k", "$descale_v",
+                 "$descale_s", "$scale_s", "$scale_o", "$stats_out", "$max_out",
+                 "$sum_exp", "$rng_dump", "$amax_s", "$amax_o"]},
+
+    // --- gate #5: generate_stats, tri-state on a bool; unset accepts, true declines ---
+    {"!": [{"value_or_default": ["$sdpa_fwd.generate_stats", false]}]},
+    // --- gate #6: max_seq_len_kv, presence alone declines ---
+    {"none_of": ["$sdpa_fwd.max_seq_len_kv"]},
 
     // --- gates #7, #13-#16: rank-4-ness and cross-tensor dim equality, all as ordinary capture
     //     reuse, not relational operators. head_size named the same in all four shapes enforces
@@ -1444,83 +1470,101 @@ of the contract, and the example below (§13.4, case C) shows it happening.
     // --- gate #18: plain bools, default false, any true declines ---
     {"!": ["$sdpa_fwd.alibi_mask"]}, {"!": ["$sdpa_fwd.padding_mask"]},
 
+    // --- gate #19: dropout_probability, tri-state on a float; unset or 0.0 accepts ---
+    {"<=": [{"value_or_default": ["$sdpa_fwd.dropout_probability", 0.0]}, 0.0]},
+
     // --- gate #20: scale, a second none_of use over two fields of different kinds (a float
     //     attribute and a tensor-uid reference); both unset accepts, either set declines ---
     {"none_of": ["$sdpa_fwd.attn_scale_value", "$sdpa_fwd.scale_tensor_uid"]},
 
-    // --- gate #21: the mask-mode classifier's legal outputs, see §13.3. "sliding_window" is a
-    //     LEGAL value here; the matcher does not know no catalog kernel declares it, see §13.4 ---
-    {"in": ["$sdpa_fwd.mask_mode", ["none", "causal_top_left", "causal_bottom_right", "sliding_window"]]}
+    // --- gate #21: the mask-mode classifier, written out in full in Section 13.3. It is one
+    //     `or` over $kernel.mask_mode, so it belongs here in the same `and` as everything above. ---
+    {"or": [ "... Section 13.3 ..." ]}
   ]}
 }
 ```
 
-Not shown in JSON, because each is a one-line repeat of a pattern already above, and the coverage is
-easier to state than to re-encode: the node-type check (gate #3) is an `==` against the operation kind,
-`{"==": ["$graph.node_kind", "sdpa_fwd"]}`, which the structural `nodes` pattern already pins;
-`generate_stats` (gate #5) and `dropout_probability` (gate #19) are
-the same "UNSET accepts" tri-state shape as `mma_core_mode`, just on a bool and a float respectively,
-each `and`ed in as `{"!": [{"value_or_default": ["$sdpa_fwd.generate_stats", false]}]}` and
-`{"<=": [{"value_or_default": ["$sdpa_fwd.dropout_probability", 0.0]}, 0.0]}`; `max_seq_len_kv` (gate
-#6) is a third `none_of` singleton, `{"none_of": ["$sdpa_fwd.max_seq_len_kv"]}`. All 21 gates land in
-one of the shapes already written out above: presence (`none_of`), equality/membership (`==`, `in`),
-capture reuse (`shape`), or the mask-mode classifier (§13.3). None needed a custom operation.
+Every gate `translate()` enforces appears above, in one of four shapes: presence (`none_of`),
+equality or membership (`==`, `in`), capture reuse (`shape`), and the mask-mode classifier
+(§13.3). None needed a custom operation.
 
 ### 13.3 Encoding `classifyMaskMode`
 
-To test the "no custom operation needed" claim against the hardest case in the adapter, take
-`classifyMaskMode` (`SdpaGraphAdapter.cpp:124-158`), a 5-input precedence machine. It reads
-`causal_mask`, `causal_mask_bottom_right`, `left_bound`, `right_bound` (unset
-normalized to -1), and `diagonal_alignment`, in that order, first match wins:
+The hardest-looking gate is `classifyMaskMode` (`SdpaGraphAdapter.cpp:124-158`), a 5-input precedence
+machine over `causal_mask`, `causal_mask_bottom_right`, `left_bound`, `right_bound` (unset normalized
+to -1), and `diagonal_alignment`, first match wins:
 
-1. Contradiction, checked first: both deprecated booleans set. Decline.
+1. Both deprecated booleans set: contradiction, decline.
 2. `causal_mask` alone: `causal_top_left`.
 3. `causal_mask_bottom_right` alone: `causal_bottom_right`.
-4. Only now are the bounds read. Both unbounded (`-1, -1`): `none`.
+4. Both bounds unbounded (`-1, -1`): `none`.
 5. Left unbounded, right exactly `0`: `causal_bottom_right` if `diagonal_alignment == BOTTOM_RIGHT`,
-   else `causal_top_left`. The only branch that reads `diagonal_alignment`.
-6. Anything else (any other bound pair, including finite windows on both sides): `sliding_window`.
+   else `causal_top_left`.
+6. Anything else: `sliding_window`.
 
-The decline test, the *only* place this machine can fail a graph, is one contradiction check, and it
-encodes with today's built-ins alone, no new operator:
+It looks like it needs a value-producing operator, because the C++ computes a mode string and then
+compares it against a candidate kernel. **The matcher does not have to work that way.** A kernel
+already declares its mode as KMD metadata, readable as `$kernel.mask_mode`, so the question is not
+"what mode is this graph?" but "does this graph satisfy the mode this kernel declares?" That is a
+boolean, and booleans are what the criteria language already returns.
 
-```jsonc
-{"!": [{"and": ["$sdpa_fwd.causal_mask", "$sdpa_fwd.causal_mask_bottom_right"]}]}
-```
-
-The full 5-way classification, needed downstream so `select()` can compare `mask_mode` against a
-catalog entry's declared mode, is a different problem: it does not decide accept/decline, it *produces
-a value*, and none of `and`/`or`/`!`/`==`/`in`/`shape` return anything other than a boolean. Writing it
-out anyway, to see exactly where that gap is:
+So the classifier inverts into one `or` over the five modes, each arm pairing a `$kernel.mask_mode`
+value with the graph condition that produces it:
 
 ```jsonc
-// Illustrative: the value-producing shape classifyMaskMode needs. "cond" (first-match [test, value]
-// pairs) is NOT a built-in the criteria language has today; shown to make the gap concrete.
-{"cond": [
-  [{"and": ["$sdpa_fwd.causal_mask", "$sdpa_fwd.causal_mask_bottom_right"]}, null],  // contradiction
-  [ "$sdpa_fwd.causal_mask",              "causal_top_left" ],
-  [ "$sdpa_fwd.causal_mask_bottom_right", "causal_bottom_right" ],
-  [ {"and": [{"==": [{"value_or_default": ["$sdpa_fwd.left_bound",  -1]}, -1]},
-             {"==": [{"value_or_default": ["$sdpa_fwd.right_bound", -1]}, -1]}]}, "none" ],
-  [ {"and": [{"==": [{"value_or_default": ["$sdpa_fwd.left_bound",  -1]}, -1]},
-             {"==": [{"value_or_default": ["$sdpa_fwd.right_bound", -1]},  0]}]},
-    {"cond": [[{"==": ["$sdpa_fwd.diagonal_alignment", "BOTTOM_RIGHT"]}, "causal_bottom_right"],
-              [true, "causal_top_left"]]} ],
-  [ true, "sliding_window" ]
+// gate #21, in full: the mask-mode classifier as a boolean over $kernel.mask_mode.
+// No new operator, no precomputed field: and / or / ! / == / value_or_default only.
+{"and": [
+  // the contradiction check, the one place this machine declines outright
+  {"!": [{"and": ["$sdpa_fwd.causal_mask", "$sdpa_fwd.causal_mask_bottom_right"]}]},
+
+  {"or": [
+    // branch 2: causal_mask alone
+    {"and": [{"==": ["$kernel.mask_mode", "causal_top_left"]},
+             "$sdpa_fwd.causal_mask"]},
+
+    // branch 3: causal_mask_bottom_right alone
+    {"and": [{"==": ["$kernel.mask_mode", "causal_bottom_right"]},
+             "$sdpa_fwd.causal_mask_bottom_right"]},
+
+    // branch 4: neither boolean, both bounds unbounded
+    {"and": [{"==": ["$kernel.mask_mode", "none"]},
+             {"!": ["$sdpa_fwd.causal_mask"]}, {"!": ["$sdpa_fwd.causal_mask_bottom_right"]},
+             {"==": [{"value_or_default": ["$sdpa_fwd.left_bound",  -1]}, -1]},
+             {"==": [{"value_or_default": ["$sdpa_fwd.right_bound", -1]}, -1]}]},
+
+    // branch 5: left unbounded, right 0; diagonal_alignment picks which causal spelling
+    {"and": [{"==": ["$kernel.mask_mode", "causal_bottom_right"]},
+             {"!": ["$sdpa_fwd.causal_mask"]}, {"!": ["$sdpa_fwd.causal_mask_bottom_right"]},
+             {"==": [{"value_or_default": ["$sdpa_fwd.left_bound",  -1]}, -1]},
+             {"==": [{"value_or_default": ["$sdpa_fwd.right_bound", -1]},  0]},
+             {"==": ["$sdpa_fwd.diagonal_alignment", "BOTTOM_RIGHT"]}]},
+    {"and": [{"==": ["$kernel.mask_mode", "causal_top_left"]},
+             {"!": ["$sdpa_fwd.causal_mask"]}, {"!": ["$sdpa_fwd.causal_mask_bottom_right"]},
+             {"==": [{"value_or_default": ["$sdpa_fwd.left_bound",  -1]}, -1]},
+             {"==": [{"value_or_default": ["$sdpa_fwd.right_bound", -1]},  0]},
+             {"!": [{"==": ["$sdpa_fwd.diagonal_alignment", "BOTTOM_RIGHT"]}]}]},
+
+    // branch 6: any other bound pair
+    {"and": [{"==": ["$kernel.mask_mode", "sliding_window"]},
+             {"!": ["$sdpa_fwd.causal_mask"]}, {"!": ["$sdpa_fwd.causal_mask_bottom_right"]},
+             {"!": [{"and": [{"==": [{"value_or_default": ["$sdpa_fwd.left_bound",  -1]}, -1]},
+                             {"==": [{"value_or_default": ["$sdpa_fwd.right_bound", -1]}, -1]}]}]},
+             {"!": [{"and": [{"==": [{"value_or_default": ["$sdpa_fwd.left_bound",  -1]}, -1]},
+                             {"==": [{"value_or_default": ["$sdpa_fwd.right_bound", -1]},  0]}]}]}]}
+  ]}
 ]}
 ```
 
-**Verdict.** The part that gates admission, the contradiction check, is fully expressible with the
-criteria built-ins today; no custom operation, no escape hatch. The part that classifies into five
-named modes is a value derivation the pure-boolean criteria language does not have a primitive for, and
-adding one (`cond` above) is one option. The better fit, and the one this RFC recommends, is the
-resolution layout already uses: `mask_mode` becomes a **precomputed field**, `$sdpa_fwd.mask_mode`,
-computed once by the schema layer exactly the way `stride_order` and `packed` are, so every matcher
-compares it (`==`, `in`, as in §13.2) instead of re-deriving it. Either path keeps this out of the
-registry-resolved custom-operation escape hatch ([Section 5](#5-matching-and-the-umd)); the honest
-finding is that the criteria language's built-ins fully cover *deciding*, and a small, generically
-useful addition (one more precomputed derived field) covers *producing
-the classified value*. `classifyMaskMode` does not force the heavier escape hatch.
+**Verdict.** No custom operation, no escape hatch, no new operator, and no precomputed field. The
+apparent need for one came from copying the C++ shape, compute a value, then compare, into a language
+that never needs to name the value: the kernel's own metadata supplies the right-hand side, so the
+comparison collapses into the predicate. This is the general pattern for porting a classifier, and
+§13.7 lists it as such.
+
+It is verbose, and deliberately shown in full because an author writing this is the point. It is also
+authored once per pack and shared by every kernel in it, which is the trade the pack boundary exists to
+make ([Section 2](#2-the-descriptors)).
 
 ### 13.4 One Accept, Two Declines
 
@@ -1678,7 +1722,7 @@ kernels sharing it.
 | tri-state UNSET-accepts (`mma_core_mode`) | `==` against `UNSET` | gate #11, §13.2 |
 | no-UNSET-enumerator (`implementation`) | `in` over the accepted values | gate #12, §13.2 |
 | `classifyMaskMode`'s contradiction check | `!(and(...))` over the two deprecated bools | gate #21, §13.3 |
-| `classifyMaskMode`'s 5-way classification | a precomputed `$sdpa_fwd.mask_mode` field | §13.3 verdict |
+| `classifyMaskMode`'s 5-way classification | an `or` over `$kernel.mask_mode`, one arm per mode | gate #21, §13.3 |
 | `inferLayout` + cross-tensor layout equality | `$q.packed`/`$q.stride_order` convenience fields | gate #17, §13.2 |
 | cross-tensor dim equality (gates #13-#16) | reused capture names in `shape` | §13.2 |
 | catalog existence + `satisfies()` match | the KDP's `kernelDescriptors` metadata | §13.6, case C |
