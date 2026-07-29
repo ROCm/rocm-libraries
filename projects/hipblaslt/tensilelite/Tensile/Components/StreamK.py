@@ -36,7 +36,7 @@ from rocisa.functions import scalarStaticDivideAndRemainder, sMagicDiv2, \
 
 from .Subtile.SubtileLREmit import localReadResetOffsetsSubtile
 
-from ..Common import print2, ceilDivide, log2, clusterEnabled, streamKMulticast, streamKClusterFactors
+from ..Common import print2, ceilDivide, log2, clusterEnabled, streamKMulticast, streamKClusterFactors, streamKDual2DMulticast
 from ..Component import Component
 from ..AsmStoreState import StoreState, VectorDataTypes
 from ..AsmAddressCalculation import AddrCalculation
@@ -2917,6 +2917,18 @@ class StreamKTwoTileDPFirst(StreamK):
         module = Module("StreamK multicast mask predicate")
         if not streamKMulticast(kernel):
             return module
+        if streamKDual2DMulticast(kernel):
+            # 2-D DUAL-multicast (ForceDPOnly 2-D dual multicast AND the standard
+            # StreamKDualMulticast path): the dense 2-D masks emitted at kernel init
+            # (ClusterLoad.computeMasks, aPeers=Ck) are already correct for BOTH
+            # operands (A along Ck/Y N-adjacent peers, B along Cs/X M-adjacent peers)
+            # using the raw HW wg_x/wg_y within-cluster ranks. ClusterDimCheck
+            # guarantees full/aligned DP clusters (nWG0%Cs==0 && gridDimY%Ck==0), so
+            # the DP round needs no preLoop overwrite or self-mask fallback. (On the
+            # standard path the masks are later dropped to self-only at the DP->SK
+            # boundary -- see streamKMulticastBoundaryClear.)
+            module.addComment0("StreamKDual2DMulticast: keep dense 2-D masks (A & B); no preLoop overwrite")
+            return module
         c = kernel["ClusterDim"][0]
         module.addComment0("cluster B-multicast: gate B-broadcast on clusterMulticastValid")
         skConstsInVgprs = writer.isStreamKConstantsToVgprEnabled(kernel)
@@ -2972,6 +2984,24 @@ class StreamKTwoTileDPFirst(StreamK):
         """
         module = Module("StreamK multicast DP->SK boundary clear")
         if not streamKMulticast(kernel):
+            return module
+        if streamKDual2DMulticast(kernel):
+            # 2-D DUAL multicast (standard StreamKForceDPOnly=0 path): the
+            # DP round multicasts BOTH operands via the dense kernel-init masks (A
+            # along the Ck/Y peers, B along the Cs/X peers). At the DP->SK boundary
+            # the SK partial-tile peers no longer co-issue the identical full-K load
+            # for EITHER operand, so BOTH masks must drop to self-only (unlike the
+            # 1-D path, where only B was ever broadcast). The single self bit is
+            # (MulticastMaskA & MulticastMaskB): in a 2-D cluster the A-peer set
+            # (same X, all Y) and the B-peer set (same Y, all X) intersect at
+            # exactly this WG's own lane. Set both masks to it so each operand loads
+            # per-workgroup for the remaining SK iterations. (ForceDPOnly-2D never
+            # reaches here -- it has no SK round.)
+            module.addComment0("StreamKDual2DMulticast: clear BOTH A & B broadcast masks at DP->SK boundary")
+            module.add(SAndB32(dst=sgpr("MulticastMaskA"), src0=sgpr("MulticastMaskA"), src1=sgpr("MulticastMaskB"),
+                               comment="StreamKDual2DMulticast: clear BOTH A & B broadcast masks at DP->SK boundary: self = maskA & maskB (2-D cluster A/B peer sets meet at self)"))
+            module.add(SMovB32(dst=sgpr("MulticastMaskB"), src=sgpr("MulticastMaskA"),
+                               comment="DP->SK: drop A & B broadcast -> self-only (normal loads)"))
             return module
         module.addComment0("cluster B-multicast: clear B-broadcast mask at DP->SK boundary")
         module.add(SMovB32(dst=sgpr("MulticastMaskB"), src=sgpr("MulticastMaskA"),
@@ -3059,18 +3089,45 @@ class StreamKTwoTileDPFirst(StreamK):
             module.add(SAndB32(dst=sgpr("WorkGroup1"), src0=hex(0xFFFF), src1="ttmp7", comment="workaround"))
             module.add(SLShiftRightB32(dst=sgpr("WorkGroup2"), shiftHex=hex(0x10), src="ttmp7", comment="workaround"))
 
-        # Genuine 2-D StreamK cluster (Ck = ClusterDim[1] > 1, e.g. pure reduction
-        # [1, C]): the K-split reduction axis is the HW cluster Y rank (WorkGroup1
-        # in [0, Ck)). The launch grid is 2-D [skGrid/Ck, Ck, 1], so fold the Y rank
-        # into the linear StreamK index:
-        #   StreamKIdx = WorkGroup0*Ck + WorkGroup1   (k = WorkGroup1 fastest)
-        # This keeps StreamKIdx a dense unique index whose (s,k) decode matches the
-        # 1-D [C,1] scheme (StreamKIdx & (Ck-1) = wg_y = k, StreamKIdx & (C-1) = the
-        # within-cluster rank). The fold is written into WorkGroup0 so the SMov/VMov
-        # save below (unchanged) still copies the final index; the 1-D Ck==1 path
-        # emits no fold. See docs/design/streamk-wg-clusters.md.
+        # Genuine 2-D StreamK cluster fold. Two mutually-exclusive shapes share the
+        # 2-D launch grid but fold the HW workgroup coords into StreamKIdx
+        # DIFFERENTLY:
+        #
+        #  (a) 2-D DUAL-multicast (ForceDPOnly 2-D dual multicast AND the standard
+        #      StreamKDualMulticast path): Ck (Y) is an N-TILING / A-multicast axis,
+        #      NOT a reduction axis. Fold the genuine 2-D (+batch) coords into the
+        #      linear DP tile index the DP decode expects (M-fastest, matching
+        #      skIndexToWG):
+        #        StreamKIdx = WorkGroup2*(nWG0*nWG1) + WorkGroup1*nWG0 + WorkGroup0
+        #      so X-peers land on M-adjacent tiles (reuse B) and Y-peers on
+        #      N-adjacent tiles (reuse A). ClusterDimCheck guarantees nWG0 % Cs == 0
+        #      and nWG1 % Ck == 0 so every HW cluster is a full 2-D tile block.
+        #
+        #  (b) K-split reduction cluster (Ck = ClusterDim[1] > 1 WITHOUT a dual flag,
+        #      e.g. pure reduction [1, C]): the K-split reduction axis is the HW
+        #      cluster Y rank (WorkGroup1 in [0, Ck)); the grid is [skGrid/Ck, Ck, 1]:
+        #        StreamKIdx = WorkGroup0*Ck + WorkGroup1   (k = WorkGroup1 fastest)
+        #      keeping the dense (s,k) decode of the 1-D [C,1] scheme.
+        #
+        # The fold is written into WorkGroup0 so the SMov/VMov save below (unchanged)
+        # still copies the final index; the 1-D [C,1] path emits no fold.
+        # See docs/design/streamk-wg-clusters.md.
         _, ck2d, _, is2d = streamKClusterFactors(kernel)
-        if is2d:
+        if streamKDual2DMulticast(kernel):
+            with writer.allocTmpSgpr(2, tag="ForceDP2DFold") as tRes:
+                t0 = tRes.idx
+                t1 = tRes.idx + 1
+                module.add(SMulI32(dst=sgpr(t0), src0=sgpr("WorkGroup1"), src1=sgpr("NumWorkGroups0"),
+                                   comment="2-D DP: WorkGroup1 * nWG0 (N-tile row)"))
+                module.add(SMulI32(dst=sgpr(t1), src0=sgpr("NumWorkGroups0"), src1=sgpr("NumWorkGroups1"),
+                                   comment="2-D DP: nWG0 * nWG1 (tiles per batch)"))
+                module.add(SMulI32(dst=sgpr(t1), src0=sgpr(t1), src1=sgpr("WorkGroup2"),
+                                   comment="2-D DP: batch * (nWG0*nWG1)"))
+                module.add(SAddU32(dst=sgpr("WorkGroup0"), src0=sgpr("WorkGroup0"), src1=sgpr(t0),
+                                   comment="2-D DP: + WorkGroup1*nWG0"))
+                module.add(SAddU32(dst=sgpr("WorkGroup0"), src0=sgpr("WorkGroup0"), src1=sgpr(t1),
+                                   comment="2-D DP: StreamKIdx = batch*(nWG0*nWG1) + N*nWG0 + M"))
+        elif is2d:
             module.add(SMulI32(dst=sgpr("WorkGroup0"), src0=sgpr("WorkGroup0"), src1=hex(ck2d),
                                comment="2-D cluster: WorkGroup0 * Ck"))
             module.add(SAddU32(dst=sgpr("WorkGroup0"), src0=sgpr("WorkGroup0"), src1=sgpr("WorkGroup1"),
@@ -3092,7 +3149,18 @@ class StreamKTwoTileDPFirst(StreamK):
         # barrier here in the prologue, before the first tensor_load_to_lds, so
         # it pairs the cluster-barrier pass's first-load wait. No-op unless
         # StreamKMulticast is enabled.
-        module.add(self.streamKMulticastPrologueSignal(writer, kernel))
+        #
+        # EXCEPTION -- standard dual-2D (StreamKForceDPOnly==0 +
+        # StreamKDualMulticast): the SK partial round RE-ENTERS the persistent loop,
+        # so the main-loop first-load `s_barrier_wait -3` executes ONCE PER PASS while
+        # this pre-loop arrive fires only ONCE -> arrivals(1) < waits(N) -> the SK
+        # round's cluster barrier deadlocks (HW-observed hang). For that path the
+        # arrive is instead emitted PER PERSISTENT PASS in graWorkGroup (after the
+        # alpha/start-tile gate, on the same main-loop path as the wait) so every
+        # pass is balanced. ForceDPOnly-2D (single pass, no SK round) and 1-D
+        # multicast keep the pre-loop arrive.
+        if not (streamKDual2DMulticast(kernel) and not kernel["StreamKForceDPOnly"]):
+            module.add(self.streamKMulticastPrologueSignal(writer, kernel))
 
         if kernel["StreamKForceDPOnly"]:
             sIdx = writer.acquireStreamKConstSgpr(kernel, "StreamKIdx")
@@ -3431,6 +3499,20 @@ class StreamKTwoTileDPFirst(StreamK):
         module.add(SMovB32(dst=sgpr("StreamKLocalEnd"), src=sgpr(sIpt), comment="Skip iterations"))
         writer.releaseStreamKConstSgpr(sIpt)
         module.add(alphaLabel)
+
+        # Standard dual-2D (StreamKForceDPOnly==0 + StreamKDualMulticast):
+        # emit the cluster prologue arrive PER PERSISTENT PASS here, on the main-loop
+        # path (past the alpha / start-tile gate that reaches alphaLabel), so it pairs
+        # THIS pass's first-load `s_barrier_wait -3`. The pre-loop arrive is skipped
+        # for this path (see preLoop), so every DP and SK pass has exactly one arrive
+        # + one wait -> the split cluster barrier stays balanced when the SK partial
+        # round re-enters the persistent loop (fixes the [2,2] SK-round deadlock). The
+        # SK reduction/fixup itself uses the global-flag/workspace handshake, not the
+        # cluster -3 barrier. Assumes cluster peers make matching passes (uniform DP+SK
+        # share, true for the [2,2] case with alpha!=0); non-uniform/zero-share
+        # divergence is not handled. No-op for every other path.
+        if streamKDual2DMulticast(kernel) and not kernel["StreamKForceDPOnly"]:
+            module.add(self.streamKMulticastPrologueSignal(writer, kernel))
 
         writer.sgprPool.checkIn(sTmp)
 

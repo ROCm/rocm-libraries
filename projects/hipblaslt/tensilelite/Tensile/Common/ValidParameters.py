@@ -828,6 +828,15 @@ validParameters = { # we need to make sure this matches develop
     # 0: uses workspace to store partial tiles, accumulate in deterministic fix-up step
     # 1: uses atomics to accumulate partial tiles
     "StreamKAtomic": [0, 1],
+    # Opt-in for 2-D DUAL-operand multicast on the STANDARD two-tile StreamK
+    # path (StreamKForceDPOnly=0). On a genuine 2-D cluster ClusterDim=[Cs,Ck]
+    # (both > 1) the DP (full-tile) round does 2-D dual multicast (Cs/X peers
+    # share B on M-adjacent tiles, Ck/Y peers share A on N-adjacent tiles) and
+    # the SK (partial-tile) round reduces 1-D via the workspace as today. Ck is
+    # an N-tiling / A-multicast axis, NOT a K-split reduction axis. ForceDPOnly-2D
+    # does not need it (that shape is unambiguous). Limited to batch==1. See
+    # streamKDual2DMulticast and docs/design/streamk-wg-clusters.md.
+    "StreamKDualMulticast": [0, 1],
     # Codegen-time toggle for single-hop next-neighbor work stealing in the
     # dynamic-queue StreamK fetch (SK4 / SK5-dynamic). Queue count =
     # archCaps['NumXCD'] (8 on gfx942/gfx950). When a workgroup's home queue

@@ -36,7 +36,8 @@ from Tensile.AsmStoreState import VectorDataTypes
 from Tensile.Common import assignParameterWithDefault, IsaInfo, \
                     print2, printExit, printWarning, \
                     roundUp, INDEX_CHARS, IsaVersion, SemanticVersion, \
-                    roundUpToNearestMultiple, effectiveMatrixInstMN, streamKMulticast
+                    roundUpToNearestMultiple, effectiveMatrixInstMN, streamKMulticast, \
+                    streamKDual2DMulticast
 from Tensile.Common.DataType import DataType
 from Tensile.Common.TypeValidationErrors import ConfigTypeError
 from Tensile.SolutionStructs.LdsPadding import get_fp4_mt_config, get_fp8_mt_config, get_mxs_mt_config, \
@@ -317,6 +318,21 @@ def _validateStreamKClusterReduction(state, printRejectionReason, isaInfoMap):
   return True
 
 
+def _isPow2(n):
+  """True when ``n`` is a positive power of two."""
+  return n >= 1 and (n & (n - 1)) == 0
+
+def _validateStreamK2DClusterShape(cs, ck):
+  """Shape check for a StreamK cluster [Cs, Ck].
+
+  Cs and Ck must each be powers of two and the total cluster C = Cs*Ck must lie
+  in the supported [2, 16] range (matches the 1-D [C,1] limit). The mask bit-math
+  assumes powers of two, so a non-pow2 factoring is rejected. For the 1-D
+  [C,1] path (Ck==1) this reduces exactly to the historic pow2/range check.
+  """
+  return _isPow2(cs) and _isPow2(ck) and 2 <= cs * ck <= 16
+
+
 def _validateStreamKMulticast(state, printRejectionReason, isaInfoMap):
   """Validate the gfx1250 StreamK DP cooperative cluster-load fast path.
 
@@ -376,19 +392,31 @@ def _validateStreamKMulticast(state, printRejectionReason, isaInfoMap):
            "StreamKMulticast requires StreamKXCCMapping=0 (WGM/XCC remap is bypassed under clustering)")
     return False
 
-  # 1-D cluster [C, 1] with C a power of two in [2, 16]. ClusterDim[1] == 1
-  # because the StreamK grid is effectively 1-D along x and consecutive-WG
-  # clustering is what produces M-adjacent (shared-B) DP tiles.
+  # Cluster shape: 1-D pure multicast [C, 1] (Cs=C, Ck=1) OR a genuine 2-D
+  # DUAL-operand multicast cluster [Cs, Ck] (both > 1, ForceDPOnly-2D or
+  # StreamKDualMulticast) where Ck is an N-tiling / A-multicast axis. Both are
+  # validated by the shared shape helper (Cs, Ck each a power of two with
+  # C = Cs*Ck in [2, 16]); for the 1-D case that reduces exactly to the historic
+  # pow2/range check. A 2-D cluster WITHOUT a dual flag (factored K-split) is not
+  # supported on this PR and is rejected as a non-[C,1] shape below.
   clusterDim = state["ClusterDim"]
-  c = clusterDim[0]
-  if clusterDim[1] != 1:
-    reject(state, printRejectionReason,
-           "StreamKMulticast requires ClusterDim = [C, 1] (got %s)" % clusterDim)
-    return False
-  if c < 2 or c > 16 or (c & (c - 1)) != 0:
-    reject(state, printRejectionReason,
-           "StreamKMulticast requires ClusterDim[0] a power of two in [2, 16] (got %d)" % c)
-    return False
+  cs, ck = clusterDim[0], clusterDim[1]
+  if streamKDual2DMulticast(state):
+    if not _validateStreamK2DClusterShape(cs, ck):
+      reject(state, printRejectionReason,
+             "StreamK 2-D dual multicast requires Cs=ClusterDim[0] and "
+             "Ck=ClusterDim[1] each a power of two with C=Cs*Ck in [2, 16] "
+             "(got %s)" % clusterDim)
+      return False
+  else:
+    if ck != 1:
+      reject(state, printRejectionReason,
+             "StreamKMulticast requires ClusterDim = [C, 1] (got %s)" % clusterDim)
+      return False
+    if cs < 2 or cs > 16 or (cs & (cs - 1)) != 0:
+      reject(state, printRejectionReason,
+             "StreamKMulticast requires ClusterDim[0] a power of two in [2, 16] (got %d)" % cs)
+      return False
 
   # gfx1250 with TDM multicast loads (multicast is a TDM feature).
   isa = tuple(state["ISA"])
@@ -1284,7 +1312,15 @@ class Solution(collections.abc.Mapping):
     # without a StreamK key. See docs/design/streamk-wg-clusters.md.
     if state["ClusterDim"] != [1, 1] and state.get("StreamK", 0) == 3:
       ck = state["ClusterDim"][1]
-      state["StreamKClusterReduction"] = 1 if ck > 1 else 0
+      # Ck = ClusterDim[1] > 1 is the K-split REDUCTION axis only for the pure
+      # reduction [1,C] shape. For a 2-D DUAL-operand multicast cluster
+      # (ForceDPOnly-2D or StreamKDualMulticast, both axes > 1) Ck is instead an
+      # N-tiling / A-multicast axis: both operands broadcast and there is no
+      # workspace K-split, so reduction must NOT be derived (the M-fastest DP fold
+      # in StreamK.preLoop replaces the K-split fold). Keeping this off is what lets
+      # _validateStreamKMulticast accept the dual 2-D shape instead of rejecting it
+      # as factored.
+      state["StreamKClusterReduction"] = 1 if (ck > 1 and not streamKDual2DMulticast(state)) else 0
     # Multicast tri-state (see ValidParameters): -1 auto (legacy), 0 off, 1 on.
     # Default -1 reproduces the ClusterDim-coupled derivation, so YAML that omits
     # Multicast is unchanged.
@@ -1980,19 +2016,26 @@ class Solution(collections.abc.Mapping):
           reject(state, printRejectionReason,
                  "StreamK dynamic/hybrid (SK4/SK5) do not support ClusterDim "
                  "(cluster support is SK3-only)")
-        # ClusterDim-driven cluster shape (SK3). A genuine 2-D cluster ([Cs,Ck]
-        # with Ck=ClusterDim[1]>1) launches a 2-D grid [skGrid/Ck, Ck, 1] and folds
-        # the Y rank into the index (StreamKIdx = WorkGroup0*Ck + WorkGroup1, see
-        # StreamK.preLoop), so a Y-extent > 1 no longer collides WorkGroup0. Only
-        # the pure-reduction shape [1, C] is supported here; factored [Cs,Ck] with
-        # BOTH axes > 1 (spatial multicast AND K-split in one cluster) is not
-        # supported -- reject it here. Pure multicast stays [C, 1] (Ck==1, 1-D
-        # launch).
-        if state["ClusterDim"][1] > 1 and state["ClusterDim"][0] > 1:
+        # ClusterDim-driven cluster shape (SK3). Legal shapes on this branch:
+        #   [C,1]           1-D pure B-multicast (Ck==1, 1-D launch).
+        #   [1,C]           pure K-split reduction (Cs==1, genuine 2-D launch;
+        #                   StreamK.preLoop folds StreamKIdx = WorkGroup0*Ck +
+        #                   WorkGroup1) -- so a Y-extent > 1 no longer collides
+        #                   WorkGroup0.
+        #   [Cs,Ck] both>1  2-D DUAL-multicast, ONLY with the dual opt-in
+        #                   (StreamKForceDPOnly-2D or StreamKDualMulticast): genuine
+        #                   2-D launch, M-fastest fold, both operands broadcast.
+        # The factored [Cs,Ck] (both axes > 1 as spatial multicast AND K-split in
+        # one cluster) is NOT supported here (it lives in the factored PR) -- reject
+        # a both-axes cluster that is not the dual-multicast shape.
+        if state["ClusterDim"][1] > 1 and state["ClusterDim"][0] > 1 \
+            and not streamKDual2DMulticast(state):
           reject(state, printRejectionReason,
                  "Factored StreamK cluster [Cs,Ck] with both axes > 1 is not "
-                 "supported; use ClusterDim=[C,1] (multicast) or [1,C] "
-                 "(reduction) (got %s)" % state["ClusterDim"])
+                 "supported unless it is 2-D dual multicast (StreamKForceDPOnly "
+                 "or StreamKDualMulticast); use ClusterDim=[C,1] (multicast), "
+                 "[1,C] (reduction), or set the dual flag (got %s)"
+                 % state["ClusterDim"])
         # StreamKXCCMapping remaps WorkGroup0 with no cluster awareness; disable it.
         state["StreamKXCCMapping"] = 0
       if not state["EnableMatrixInstruction"]:

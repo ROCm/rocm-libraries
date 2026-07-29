@@ -1910,14 +1910,46 @@ namespace TensileLite
 
         if(sizeMapping.streamK != 0)
         {
-            if(sizeMapping.clusterDim.y > 1)
+            if(sizeMapping.streamKForceDPOnly != 0 && sizeMapping.clusterDim.y > 1)
             {
-                // Genuine 2-D StreamK cluster (Ck = clusterDim.y > 1, e.g. pure
-                // reduction [1, C]): launch a 2-D grid so the cluster Y-extent is
-                // legal (gridDimY % Ck == 0) and every WG gets a unique index via
-                // StreamKIdx = WorkGroup0*Ck + WorkGroup1 (kernel preLoop). sk.grid
-                // is rounded to a multiple of C = Cs*Ck (getSKGridImpl), so
-                // gridDimX = skGrid/Ck is a whole number.
+                // ForceDPOnly 2-D dual-operand multicast: a genuine 2-D HW
+                // cluster ClusterDim=[Cs,Ck] where Cs (x) B-multicast peers are
+                // M-adjacent tiles and Ck (y) A-multicast peers are N-ADJACENT tiles.
+                // Launch a grid that spans the FULL M x N tile space -- gridX = nWG0
+                // (M-tiles), gridY = nWG1 (N-tiles) -- so Y-neighbors are N-adjacent
+                // output tiles. The kernel folds StreamKIdx = batch*(nWG0*nWG1) +
+                // WorkGroup1*nWG0 + WorkGroup0 (StreamK.preLoop) so each WG owns one
+                // tile. ClusterDimCheck guarantees nWG0 % Cs == 0 and nWG1 % Ck == 0,
+                // so gridDimX % Cs == 0 and gridDimY % Ck == 0 (legal cluster launch)
+                // and every HW cluster is a full 2-D tile block. sk.grid == tiles ==
+                // nWG0*nWG1 here (getSKGrid). See docs/design/streamk-wg-clusters.md.
+                rv.numWorkGroups.x = problemNumGroupTiles.x; // nWG0 (M-tiles)
+                // rv.numWorkGroups.y already = nWG1 * gsu (N-tiles); z stays batch.
+            }
+            else if(sizeMapping.streamKDualMulticast != 0 && sizeMapping.clusterDim.y > 1)
+            {
+                // STANDARD two-tile StreamK 2-D DUAL-multicast (StreamKDualMulticast).
+                // Launch a PERSISTENT 2-D cluster grid [nWG0, gridY, batch]: gridX is
+                // PINNED to nWG0 so the kernel's dense DP fold StreamKIdx =
+                // WorkGroup1*nWG0 + WorkGroup0 (StreamK.preLoop) is dense in
+                // [0, skGrid) and its Cs X-peers are M-ADJACENT (share B) / Ck Y-peers
+                // are N-ADJACENT (share A). gridY = sk.grid / nWG0 is a multiple of Ck
+                // (getSKGridImpl), so gridDimY % Ck == 0 and gridDimX (== nWG0) % Cs ==
+                // 0 (ClusterDimCheck) -- a legal cluster launch. When gridY < nWG1 the
+                // leftover tiles form the SK partial round (standard two-tile
+                // accounting). See docs/design/streamk-wg-clusters.md.
+                rv.numWorkGroups.x = problemNumGroupTiles.x;           // nWG0
+                rv.numWorkGroups.y = sk.grid / problemNumGroupTiles.x; // gridY (mult of Ck)
+                // rv.numWorkGroups.z stays batch.
+            }
+            else if(sizeMapping.clusterDim.y > 1)
+            {
+                // Genuine 2-D StreamK cluster with Ck = clusterDim.y > 1 that is NOT
+                // dual multicast: the pure K-split reduction [1, C]. Launch a 2-D grid
+                // so the cluster Y-extent is legal (gridDimY % Ck == 0) and every WG
+                // gets a unique index via StreamKIdx = WorkGroup0*Ck + WorkGroup1
+                // (kernel preLoop). sk.grid is rounded to a multiple of C = Cs*Ck
+                // (getSKGridImpl), so gridDimX = skGrid/Ck is a whole number.
                 uint32_t ck        = sizeMapping.clusterDim.y;
                 rv.numWorkGroups.x = sk.grid / ck;
                 rv.numWorkGroups.y = ck;
@@ -4386,19 +4418,81 @@ namespace TensileLite
                 }
             }
 
-            // StreamKMulticast (gfx1250): DP cooperative B-multicast. The multicast
-            // cluster is SPATIAL: the C peers of a cluster process C DISTINCT,
-            // M-adjacent tiles and share the B (N-block) tile. v1 is single-round, so
-            // the launched grid is `tiles` rounded UP to a multiple of C = clusterDim.x.
-            // Rounding up keeps every launched HW cluster full while giving each WG one
-            // tile in the single DP round; a trailing partial cluster (tiles % C != 0)
-            // has idle-but-present tail WGs whose cluster is disabled by the kernel's
-            // clusterMulticastValid runtime predicate (so a masked target is never left
-            // without a matching load). See docs/design/cluster-load-component-and-streamk-multicast.md.
-            if(self.sizeMapping.streamK == 3 && self.sizeMapping.clusterDim.x > 1)
+            // StreamK cluster grid (gfx1250, ClusterDim-driven). The 1-D
+            // pure-multicast [C,1] cluster is SPATIAL: the Cs peers process Cs
+            // DISTINCT M-adjacent tiles and share B, so the launched grid is `tiles`
+            // rounded UP to a multiple of Cs = clusterDim.x (a trailing partial
+            // cluster is disabled by the kernel's clusterMulticastValid runtime
+            // guard). The genuine 2-D DUAL-multicast cluster ([Cs,Ck] both > 1)
+            // instead tiles the M x N space (ForceDPOnly-2D) or reshapes the DP grid
+            // into a 2-D cluster grid (standard StreamKDualMulticast); Ck is an
+            // N-tiling / A-multicast axis, not a K-split. See
+            // docs/design/streamk-wg-clusters.md.
+            if(self.sizeMapping.streamK == 3
+               && (static_cast<size_t>(self.sizeMapping.clusterDim.x)
+                   * static_cast<size_t>(self.sizeMapping.clusterDim.y))
+                      > 1)
             {
-                size_t c = self.sizeMapping.clusterDim.x;
-                skGrid   = ((tiles + c - 1) / c) * c;
+                if(self.sizeMapping.streamKForceDPOnly)
+                {
+                    // ForceDPOnly 2-D dual-operand multicast: one WG per output tile
+                    // (Cs peers M-adjacent -> share B, Ck peers N-adjacent -> share
+                    // A). Not a K-split, so the grid is exactly `tiles` (already a
+                    // multiple of C=Cs*Ck since nWG0 % Cs == 0 and nWG1 % Ck == 0 via
+                    // ClusterDimCheck). The 2-D launch splits this into [nWG0, nWG1, 1]
+                    // (generateSingleCall). See docs/design/streamk-wg-clusters.md.
+                    skGrid = tiles;
+                }
+                else if(self.sizeMapping.streamKDualMulticast)
+                {
+                    // STANDARD two-tile StreamK (streamKForceDPOnly==0,
+                    // StreamKDualMulticast) 2-D DUAL-multicast. UNLIKE ForceDPOnly
+                    // (skGrid==tiles, no SK round), the standard schedule keeps a real
+                    // DP + SK split, so we RESHAPE the base DP grid (skGrid computed
+                    // above from the CU budget / origami) into a 2-D cluster grid
+                    // [nWG0, gridY]:
+                    //   * gridX is PINNED to nWG0 so the kernel's dense DP fold
+                    //     StreamKIdx = WorkGroup1*nWG0 + WorkGroup0 (StreamK.preLoop)
+                    //     is dense in [0, skGrid) AND its Cs X-peers land on
+                    //     M-ADJACENT tiles (share B) while its Ck Y-peers land on
+                    //     N-ADJACENT tiles (share A) -- the 2-D dual multicast.
+                    //   * gridY = round(baseSkGrid / nWG0) up to a multiple of Ck,
+                    //     clamped to the full N-extent floor(nWG1/Ck)*Ck.
+                    // skGrid = nWG0 * gridY is a multiple of C = Cs*Ck (nWG0 % Cs == 0
+                    // via ClusterDimCheck, gridY % Ck == 0 by construction), so every
+                    // launched HW cluster is full. A genuine SK partial round runs
+                    // whenever nWG1 % gridY != 0 (tiles % skGrid != 0), driving the
+                    // standard SK3 two-tile accounting below; at the DP->SK boundary
+                    // the kernel drops BOTH masks to self-only
+                    // (streamKMulticastBoundaryClear). batch==1 only (the fold's batch
+                    // stride is nWG0*nWG1). See docs/design/streamk-wg-clusters.md.
+                    size_t ck = static_cast<size_t>(self.sizeMapping.clusterDim.y);
+                    // Derive nWG0/nWG1 with the SAME routine the launch uses
+                    // (calculateGrid): it folds packBatchDims into nWG0/nWG1, applies
+                    // transposeC01(), and CeilDivides by the macroTile, so the reshaped
+                    // grid matches the launched grid.
+                    dim3 wgSizeTmp, nWGTmp;
+                    self.calculateGrid(wgSizeTmp, nWGTmp, problem);
+                    size_t nwg0 = static_cast<size_t>(nWGTmp.x);
+                    size_t nwg1 = static_cast<size_t>(nWGTmp.y);
+                    size_t nwg1Ck = (nwg1 / ck) * ck; // largest multiple of Ck <= nWG1
+                    if(nwg1Ck < ck)
+                        nwg1Ck = ck; // at least one full cluster row
+                    size_t gridY = nwg0 > 0 ? (skGrid + nwg0 - 1) / nwg0 : ck; // base rows
+                    gridY = ((gridY + ck - 1) / ck) * ck; // round up to a multiple of Ck
+                    if(gridY < ck)
+                        gridY = ck;
+                    if(gridY > nwg1Ck)
+                        gridY = nwg1Ck; // clamp to full N-extent
+                    skGrid = nwg0 * gridY;
+                }
+                else
+                {
+                    size_t c = static_cast<size_t>(self.sizeMapping.clusterDim.x)
+                               * static_cast<size_t>(self.sizeMapping.clusterDim.y);
+                    size_t ck = static_cast<size_t>(self.sizeMapping.clusterDim.y);
+                    skGrid = ((ck * tiles + c - 1) / c) * c;
+                }
             }
 
             // StreamKClusterReduction (gfx1250): fixed even split / one-tile-per-cluster

@@ -1,0 +1,150 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+################################################################################
+# STANDARD StreamK (StreamKForceDPOnly=0) 2-D DUAL-multicast (gfx1250, HW-runnable).
+# MXFP8 analogue of sk_mxf4_2d_dual_multicast.yaml (identical schedule; DataType F8).
+#
+# A genuine 2-D HW cluster ClusterDim = [Cs, Ck] = [2, 2] on a StreamK==3
+# TWO-TILE (DP-first) kernel -- StreamKForceDPOnly=0, so there is a REAL SK
+# partial-tile round in addition to the DP full-tile round. Selected via the
+# StreamKDualMulticast=1 opt-in (mutually exclusive with the factored [Cs,Ck]
+# K-reduction path, which leaves the flag 0).
+#
+# Temporal reuse of ONE physical cluster:
+#   * DP (full-tile) round: 2-D DUAL multicast of BOTH operands --
+#       Cs = ClusterDim[0] = 2 : X-peers on M-ADJACENT output tiles reuse B;
+#       Ck = ClusterDim[1] = 2 : Y-peers on N-ADJACENT output tiles reuse A
+#       (Ck is an N-tiling / A-multicast axis, NOT a K-split reduction axis).
+#   * DP->SK boundary: BOTH masks drop to self-only
+#       (streamKMulticastBoundaryClear).
+#   * SK (partial-tile) round: 1-D workspace reduction exactly as today.
+#
+# Run on a gfx1250 device (functional-sim is a regression check only).
+#
+# Sizes are cluster-aligned. MT = 32x32 (MatrixInstruction [16,16,128,1,1,1,1,2,2]):
+#   M=256 -> nWG0=8 (8 % Cs=2 == 0); N=192 -> nWG1=6 (6 % Ck=2 == 0); tiles=48.
+#
+# *** IMPORTANT -- forcing a LIVE SK partial round (env vars, NOT a config knob) ***
+# The DP grid is CU-budget-clamped: getSKGridImpl uses origami select_grid_size
+# (TENSILE_STREAMK_DYNAMIC_GRID default 6) or, failing that, skGrid=cuCount
+# (ContractionSolution.cpp getSKGridImpl). The dual-2D reshape then pins gridX=nWG0
+# and clamps gridY UP to floor(nWG1/Ck)*Ck == nWG1 (ClusterDimCheck requires
+# nWG1 % Ck == 0). So on a large-CU gfx1250 the budget >= tiles => gridY rounds to
+# nWG1=6 => skGrid = nWG0*nWG1 = 48 = tiles => tiles % skGrid == 0 => DP-ONLY (the
+# SK round is NOT exercised). Problem size / MacroTile CANNOT force the SK round
+# device-independently for this reason.
+#
+# To DETERMINISTICALLY exercise BOTH the DP dual-multicast AND a live SK reduction
+# on ANY gfx1250 CU count, set these host env vars when running:
+#     TENSILE_STREAMK_FIXED_GRID=32   # -> reshape gridY=ceil(32/8)=4 (mult of Ck),
+#                                     #    skGrid = nWG0*gridY = 8*4 = 32 < tiles=48
+#     TENSILE_STREAMK_FULL_TILES=0    # -> skTiles = tiles % skGrid = 16 (else the
+#                                     #    default FULL_TILES=1 makes skTiles=48 =
+#                                     #    ALL-SK, dpTiles=0, no DP multicast)
+# Result: skGrid=32, 32 DP full tiles (the [nWG0=8 x gridY=4] block, dual-multicast)
+# + 16 SK partial tiles (the remaining 2 N-rows, workspace-reduced; itersPerTile=4,
+# SKItersPerWG=16*4/32=2). Any TENSILE_STREAMK_FIXED_GRID in [17,32] reshapes to the
+# same gridY=4/skGrid=32; 32 is canonical (== the final skGrid, no rounding).
+#   The [512,512,...] size is a fully-DP-divisible companion (pure DP dual-multicast).
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201]
+
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  NumElementsToValidate: -1
+  BoundsCheck: 0
+  KernelTime: False
+  CpuThreads: 32
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  DataInitTypeD: 2
+  DataInitTypeMXSA: 3
+  DataInitTypeMXSB: 3
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 1
+  PrintLevel: 2
+  PrintSolutionRejectionReason: True
+  ForceGenerateKernel: True
+
+BenchmarkProblems:
+  -
+    -
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      MXBlockA: 32
+      MXBlockB: 32
+
+    -
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [True]
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1,  1, 1,  2, 2]
+        - DepthU: [256]
+        - ClusterLocalRead: [0]
+        - TransposeLDS: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LdsPadMXSA: [-1]
+        - LdsPadMXSB: [-1]
+        - LdsBlockSizePerPadMXSA: [-1]
+        - LdsBlockSizePerPadMXSB: [-1]
+        - LdsPadMetadata: [0]
+        - LDSTrInst: [False]
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [4]
+        - SourceSwap: [False]
+        - StoreRemapVectorWidth: [0]
+        - GlobalSplitU: [0]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - ExpandPointerSwap: [False]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - LocalReadVectorWidth: [-1]
+        - 1LDSBuffer: [0]
+        - DirectToVgprSparseMetadata: [false]
+        - StoreVectorWidth: [-1]
+        - StreamK: [3]
+        # STANDARD two-tile schedule (NOT ForceDPOnly) + dual-2D opt-in.
+        - StreamKForceDPOnly: [0]
+        - StreamKDualMulticast: [1]
+        - StreamKAtomic: [0]
+        - StreamKXCCMapping: [0]
+        - StaggerU: [0]
+        - DirectToVgprA: [False]
+        - DirectToVgprB: [False]
+        - WavefrontSize: [32]
+        - WorkGroupMapping: [1]
+        - TDMInst: [3]
+        - MXLoadInst: ["TDM"]
+        - MXScaleFormat: ["InMemorySwizzle"]
+        # DP round: Cs=2 (B, M-adjacent) x Ck=2 (A, N-adjacent). Ck is an
+        # N-tiling / A-multicast axis, NOT a K-split reduction axis.
+        - ClusterDim: [[2, 2]]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          # M=256->nWG0=8, N=192->nWG1=6 (both cluster-aligned); skGrid=32,
+          # tiles=48 -> 16-tile SK partial round: exercises DP dual-multicast
+          # AND SK reduction.
+          - Exact: [256, 192, 1, 1024]
+          # Fully DP-divisible companion (nWG0=nWG1=16): pure DP dual-multicast.
+          - Exact: [512, 512, 1, 1056]
+        - ActivationArgs:
+          - [Enum: none]

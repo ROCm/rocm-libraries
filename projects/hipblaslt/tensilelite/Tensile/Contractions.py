@@ -27,7 +27,7 @@ from typing import Dict
 from .Activation import ActivationType
 from . import Hardware
 from . import Properties
-from Tensile.Common import state, state_key_ordering, IsaInfo
+from Tensile.Common import state, state_key_ordering, IsaInfo, streamKDual2DMulticast
 from Tensile.Common.Architectures import gfxToIsa
 from Tensile.Common.DataType import DataType
 from Tensile.Common.GlobalParameters import internalParameters
@@ -609,12 +609,16 @@ class ProblemPredicate(Properties.Predicate):
         # Pure multicast [C,1]: Cs = C. Pure reduction [1,C]: Cs = 1 (no
         # M-alignment constraint).
         valuepredicates.append(state["ClusterDim"][0])
-        # value[4] is the N-tile divisor. For a genuine 2-D StreamK cluster
-        # (Ck = ClusterDim[1] > 1, e.g. pure reduction [1,C]) the Y-extent is the
-        # K-split reduction / index-generation axis, NOT an N-tiling axis, so it
-        # must NOT constrain the N-tile grid -> pin to 1. 1-D StreamK ([C,1]) and
-        # dense (non-StreamK) clusters keep ClusterDim[1].
-        if state.get("StreamK", 0) == 3 and state["ClusterDim"][1] > 1:
+        # value[4] is the N-tile divisor. For a genuine K-SPLIT reduction StreamK
+        # cluster (Ck = ClusterDim[1] > 1 WITHOUT a dual flag, e.g. pure reduction
+        # [1,C]) the Y-extent is the reduction / index-generation axis, NOT an
+        # N-tiling axis, so it must NOT constrain the N-tile grid -> pin to 1.
+        # For a 2-D DUAL-multicast cluster (ForceDPOnly-2D or StreamKDualMulticast)
+        # Ck IS a spatial N-tiling / A-multicast axis, so it must remain the N-tile
+        # divisor (nWG1 % Ck == 0). 1-D StreamK ([C,1]) and dense (non-StreamK)
+        # clusters keep ClusterDim[1].
+        if state.get("StreamK", 0) == 3 and state["ClusterDim"][1] > 1 \
+                and not streamKDual2DMulticast(state):
             valuepredicates.append(1)
         else:
             valuepredicates.append(state["ClusterDim"][1])
@@ -667,6 +671,7 @@ class SizeMapping:
                  'streamKForceDPOnly',
                  'streamKAtomic',
                  'streamKClusterReduction',
+                 'streamKDualMulticast',
                  'prefetchAcrossPersistent',
                  'sourceKernel',
                  'globalAccumulation',
@@ -762,6 +767,7 @@ class SizeMapping:
                    streamKForceDPOnly       = d.get('StreamKForceDPOnly', 0),
                    streamKAtomic            = d['StreamKAtomic'] if 'StreamKAtomic' in d else 0,
                    streamKClusterReduction  = d.get('StreamKClusterReduction', 0),
+                   streamKDualMulticast     = d.get('StreamKDualMulticast', 0),
                    prefetchAcrossPersistent = d.get('PrefetchAcrossPersistent', 0),
                    magicDivAlg              = d.get('MagicDivAlg', 1),
                    sourceKernel             = d['KernelLanguage'] == 'Source',
