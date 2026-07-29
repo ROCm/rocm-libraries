@@ -3136,7 +3136,7 @@ rocsparse_status rocsparse_create_const_dnvec_descr(rocsparse_const_dnvec_descr*
  *  records whether its value lives in host or device memory. It is a convenience wrapper for
  *  passing a self-describing scalar argument (for example the scaling factor consumed by
  *  \ref rocsparse_spmat_scale) without relying on the handle pointer mode. It should be destroyed
- *  at the end using rocsparse_destroy_dnvec_descr().
+ *  when it is no longer needed using rocsparse_destroy_dnvec_descr().
  *
  *  @param[out]
  *  descr   the pointer to the dense vector descriptor.

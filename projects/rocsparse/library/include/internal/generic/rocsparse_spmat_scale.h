@@ -53,7 +53,7 @@ extern "C" {
 *  zero (the pattern is not dropped). In-place operation is supported: \p target and \p source may
 *  reference the same arrays.
 *
-*  The scaling factor \f$\alpha\f$ is passed as a size-one dense vector descriptor. It may live in
+*  The scaling factor \f$\alpha\f$ is passed as a size-one dense vector descriptor. It can live in
 *  host or device memory; the memory space is taken from the descriptor itself (see
 *  \ref rocsparse_create_dnvec_descr_scalar), so the handle pointer mode does not affect it. The
 *  data type of \p alpha must match the data type of the matrices.
@@ -62,9 +62,7 @@ extern "C" {
 *  \ref rocsparse_format_coo_aos, \ref rocsparse_format_csr, \ref rocsparse_format_csc,
 *  \ref rocsparse_format_bsr, \ref rocsparse_format_ell, \ref rocsparse_format_bell and
 *  \ref rocsparse_format_sell. \p source and \p target must use the same format.
-*  \note Only the non-transpose operation is supported. Scaling combined with a transpose is not
-*  part of this routine.
-*  \note Batched matrices are not supported yet.
+*  \note Batched matrices are not supported.
 *  \note
 *  This routine does not support execution in a hipGraph context.
 *

@@ -6,7 +6,7 @@ Documentation for rocSPARSE is available at
 ## (Unreleased) rocSPARSE 5.0.0
 
 ### Added
-* Added the `rocsparse_spmat_scale` generic routine for sparse matrix scaling (`C = alpha * A`), where `C` shares the sparsity pattern of `A` and its values are scaled by `alpha`. The COO, COO AoS, CSR, CSC, BSR, ELL, Blocked ELL, and SELL formats are supported, in-place operation is allowed, and `alpha` is passed as a self-describing scalar dense vector descriptor that may live in host or device memory. No temporary storage buffer is required.
+* Added the `rocsparse_spmat_scale` generic routine for sparse matrix scaling (`C = alpha * A`), where `C` shares the sparsity pattern of `A`, whose values are scaled by `alpha`. The COO, COO AoS, CSR, CSC, BSR, ELL, Blocked ELL, and SELL formats are supported. In-place operation is allowed, and `alpha` is passed as a self-describing scalar dense vector descriptor that can live in host or device memory. No temporary storage buffer is required.
 * Added the `rocsparse_create_dnvec_descr_scalar` auxiliary routine, which creates a size-one dense vector descriptor for a host or device scalar.
 * Added Blocked ELL format support to the `rocsparse_dense_to_sparse` routine, including the new `rocsparse_bell_set_pointers` function to set the Blocked ELL array pointers.
 * Added CSC format support to `rocsparse_spsv` and `rocsparse_sptrsv`.

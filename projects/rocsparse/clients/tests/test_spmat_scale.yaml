@@ -37,9 +37,61 @@ Definitions:
 Tests:
 # C = alpha * A
 
-# Quick - all supported formats (COO, COO AoS, CSR, CSC, BSR, ELL, SELL, BELL).
+# Quick - representative slice per distinct value-array layout (CSR: nnz, BSR: blocked,
+# ELL: ell_width, SELL: slice-packed). COO/COO AoS/CSC share the CSR nnz layout and the full
+# format cross-product runs in nightly and pre_checkin.
 - name: spmat_scale
   category: quick
+  function: spmat_scale
+  indextype: *i32i32_i64i32_i64i64
+  precision: *single_double_precisions_complex_real
+  M: [300]
+  N: [300]
+  block_dim: [2]
+  sell_slice_size: [8]
+  alpha_alphai: *alpha_range_quick
+  baseA: [rocsparse_index_base_zero]
+  baseC: [rocsparse_index_base_zero]
+  formatA: [rocsparse_format_csr,
+            rocsparse_format_bsr,
+            rocsparse_format_ell,
+            rocsparse_format_sell]
+  matrix: [rocsparse_matrix_random]
+
+# Quick - Blocked-ELL smoke test (single block size).
+- name: spmat_scale
+  category: quick
+  function: spmat_scale
+  indextype: *i32i32_i64i32_i64i64
+  precision: *single_double_precisions_complex_real
+  M: [300]
+  N: [300]
+  block_dim: [2]
+  alpha_alphai: *alpha_range_quick
+  baseA: [rocsparse_index_base_zero]
+  baseC: [rocsparse_index_base_zero]
+  formatA: [rocsparse_format_bell]
+  matrix: [rocsparse_matrix_random]
+
+- name: spmat_scale_file
+  category: quick
+  function: spmat_scale
+  indextype: *i32i32_i64i32_i64i64
+  precision: *single_double_precisions
+  M: 1
+  N: 1
+  alpha_alphai: *alpha_range_quick
+  baseA: [rocsparse_index_base_one]
+  baseC: [rocsparse_index_base_one]
+  formatA: [rocsparse_format_csr]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [nos1,
+             nos5]
+
+# Nightly - exhaustive format cross-product and full file set (moved out of quick to keep
+# quick runtime low; see PR #9729 review).
+- name: spmat_scale
+  category: nightly
   function: spmat_scale
   indextype: *i32i32_i64i32_i64i64
   precision: *single_double_precisions_complex_real
@@ -59,9 +111,8 @@ Tests:
             rocsparse_format_sell]
   matrix: [rocsparse_matrix_random]
 
-# Quick - Blocked-ELL across a couple of block sizes.
 - name: spmat_scale
-  category: quick
+  category: nightly
   function: spmat_scale
   indextype: *i32i32_i64i32_i64i64
   precision: *single_double_precisions_complex_real
@@ -75,7 +126,7 @@ Tests:
   matrix: [rocsparse_matrix_random]
 
 - name: spmat_scale_file
-  category: quick
+  category: nightly
   function: spmat_scale
   indextype: *i32i32_i64i32_i64i64
   precision: *single_double_precisions
