@@ -13,8 +13,8 @@
 
 #include "Attributes.hpp"
 #include "TensorAttributes.hpp"
-#include <hipdnn_frontend/Types.hpp>
 #include <cstdint>
+#include <hipdnn_frontend/Types.hpp>
 #include <memory>
 #include <unordered_map>
 
@@ -126,7 +126,8 @@ public:
     }
     /// @brief Set the first_token_offset input tensor (copy)
     // NOLINTNEXTLINE(readability-identifier-naming)
-    MoeGroupedMatmulAttributes& set_first_token_offset(const std::shared_ptr<TensorAttributes>& value)
+    MoeGroupedMatmulAttributes&
+        set_first_token_offset(const std::shared_ptr<TensorAttributes>& value)
     {
         return setInput(InputNames::FIRST_TOKEN_OFFSET, value);
     }
