@@ -1674,7 +1674,11 @@ def _enable_gfx942_fp16_flash(problem: UnifiedAttentionProblem) -> bool:
         and problem.head_size in (64, 128)
         and problem.dtype == "fp16"
         and not problem.use_fp8
-        and problem.sliding_window == 0
+        # D128 sliding-window prefill rides the non-ring wide flash
+        # path (fp32 online softmax). SW mask + windowed KV-skip already live in
+        # the emitter; the sliced-K ring is forced off for D128 SW (see
+        # _enable_gfx942_flash_k_sliced_ring), so no ring/SW composition.
+        and (problem.sliding_window == 0 or problem.head_size == 128)
         and not problem.use_sinks
         and problem.softcap == 0
         and not problem.use_alibi
@@ -1719,7 +1723,9 @@ def _enable_gfx942_bf16_flash(problem: UnifiedAttentionProblem) -> bool:
         and problem.head_size in (64, 128)
         and problem.dtype == "bf16"
         and not problem.use_fp8
-        and problem.sliding_window == 0
+        # D128 sliding-window prefill rides the non-ring wide flash
+        # path (fp32 online softmax); SW mask + KV-skip already in the emitter.
+        and (problem.sliding_window == 0 or problem.head_size == 128)
         and not problem.use_sinks
         and problem.softcap == 0
         and not problem.use_alibi
@@ -1868,6 +1874,11 @@ def _select_gfx942_flash_num_warps(problem: UnifiedAttentionProblem) -> int:
     superseded the prior D64 nw2/single-buffer config: 13-17% faster, beats Torch
     at S2048). See _enable_gfx942_flash_k_sliced_ring.
     """
+    # D128 sliding-window prefill runs non-ring; at nw=4 the wide
+    # non-ring D128 tile overflows the 64 KB LDS cap (nw=4 only fits with the
+    # sliced-K ring). Use nw=2 (the bf16 non-ring geometry) for both dtypes.
+    if problem.head_size == 128 and problem.sliding_window > 0:
+        return 2
     if _enable_gfx942_bf16_flash(problem) and not _enable_gfx942_flash_k_sliced_ring(
         problem
     ):
@@ -1880,6 +1891,10 @@ def _select_gfx942_flash_num_warps(problem: UnifiedAttentionProblem) -> int:
 def _gfx942_flash_use_cfvst(problem: UnifiedAttentionProblem) -> bool:
     # cfvst (conflict-free V store) is required by the ring and used by both
     # D64 and D128 prefill under the wide ring geometry.
+    # cfvst requires the nw=4 wide geometry, which D128 SW cannot use
+    # (see _select_gfx942_flash_num_warps). Disable cfvst for D128 SW.
+    if problem.head_size == 128 and problem.sliding_window > 0:
+        return False
     return _gfx942_flash_wide_setting() in (2, 4)
 
 
@@ -1900,6 +1915,12 @@ def _enable_gfx942_flash_q_direct(problem: UnifiedAttentionProblem) -> bool:
 
 def _enable_gfx942_flash_mask_limit(problem: UnifiedAttentionProblem) -> bool:
     if not (_enable_gfx942_fp16_flash(problem) or _enable_gfx942_bf16_flash(problem)):
+        return False
+    # D128 SW: the R4_s1mask transposed VALU stack (scalar_state / invariant_hoist
+    # / mask_once / mask_limit) collapses or elides the per-element causal compare,
+    # which is invalid once a sliding window must be applied. Disable it for SW so
+    # the emitter's per-element window mask (dist < sliding_window) runs.
+    if problem.sliding_window > 0:
         return False
     env = __import__("os").environ.get("HIPDNN_GFX942_FLASH_MLIM", "").strip().lower()
     if env in ("0", "off", "disable", "disabled", "no", "false"):
@@ -1937,6 +1958,12 @@ def _enable_gfx942_flash_k_sliced_ring(problem: UnifiedAttentionProblem) -> bool
     #   * fp16 D128 -> depth-2 ring (ring_depth=2): correct at magnitude and the
     #     measured best fp16 D128 prefill path (~0.72-1.05x AOTriton flash).
     if _resolve_attention_arch() == "gfx942" and problem.head_size == 128:
+        # D128 sliding-window prefill uses the NON-ring wide flash
+        # (single-pass fp32 online softmax) for both dtypes. Keeping fp16 SW off
+        # the sliced-K ring avoids composing the windowed KV-skip / all-masked
+        # (-inf) rows with the ring's per-slice online-softmax merge.
+        if problem.sliding_window > 0:
+            return False
         # bf16 D128 stays off the ring (non-ring T=64 is its bs=64 optimum).
         if _enable_gfx942_bf16_flash(problem):
             return False
