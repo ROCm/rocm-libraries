@@ -98,6 +98,9 @@ typedef struct rocke_conv_problem
     int sD;
     int pD;
     int dD;
+    /* Grouped convolution (Python ConvProblem.groups, default 1).
+     * C and K are always the total counts across all groups. */
+    int groups; /* default 1 */
 } rocke_conv_problem_t;
 
 /* ConvProblem(N, Hi, Wi, C, K, Y, X, sH=1, sW=1, pH=0, pW=0, dH=1, dW=1):

@@ -418,6 +418,23 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
     /* ---- global -> LDS coalesced copy plan ---- (924-925) */
     ctx->threads = rocke_implicit_gemm_conv_spec_block_size(spec);
     ctx->load_vec = rocke_conv_choose_load_vec(spec);
+    /* Mirror Python default_vector_sizes: clamp the tile-geometry vec by the largest
+     * power-of-two that divides C (A and B both stride along C in NHWC/KYXC layouts).
+     * Python: sizes = [8,4,2,1] for fp16/bf16, [4,2,1] for fp32; vec = largest s in
+     * sizes where C % s == 0.  For C=3 this yields vec=1; without the clamp the
+     * tile-geometry picker returns a wider vec that Python never uses, causing MISMATCH
+     * (e.g. the ImageNet-stem N1H224W224C3K64Y7X7 conv). */
+    {
+        bool is_fp32 = (spec->dtype_a && strcmp(spec->dtype_a, "fp32") == 0);
+        int max_elem = is_fp32 ? 4 : 8;
+        int c_dim = ctx->p->C;
+        int max_ab = (c_dim % max_elem == 0) ? max_elem
+                     : (c_dim % 4 == 0)      ? 4
+                     : (c_dim % 2 == 0)      ? 2
+                                             : 1;
+        if(ctx->load_vec > max_ab)
+            ctx->load_vec = max_ab;
+    }
 
     /* ---- coordinate-transform descriptors ---- (935-936).
      * A_desc decompose_m = (a_mhw_index_fn is None). */

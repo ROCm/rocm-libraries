@@ -1050,6 +1050,41 @@ class IRBuilder:
             result_name_hint="atom_bf16",
         ).result
 
+    def global_atomic_add_pk_f16(
+        self,
+        ptr: Value,
+        idx: Value,
+        value: Value,
+        *,
+        ordering: str = "monotonic",
+    ) -> Value:
+        """Packed-fp16 atomic add: two fp16 lanes per transaction.
+
+        Lowers to AMDGPU's ``llvm.amdgcn.global.atomic.fadd.v2f16``
+        intrinsic (gfx940+); returns the pre-add value. ``value``
+        must be a ``<2 x f16>`` vector and the pointer must reach
+        into an fp16 buffer with an even element index.
+        """
+        if ordering not in ("monotonic", "acquire", "release", "acq_rel", "seq_cst"):
+            raise ValueError(f"unknown ordering {ordering!r}")
+        if not isinstance(value.type, VectorType):
+            raise ValueError(
+                f"global_atomic_add_pk_f16 expects <2 x f16> input, "
+                f"got {value.type.name}"
+            )
+        if value.type.elem != F16 or value.type.count != 2:
+            raise ValueError(
+                f"global_atomic_add_pk_f16 expects <2 x f16> input, "
+                f"got {value.type.name}"
+            )
+        return self._op(
+            "memref.global_atomic_add_pk_f16",
+            [ptr, idx, value],
+            [value.type],
+            attrs={"elem_type": "f16", "vec": 2, "ordering": ordering},
+            result_name_hint="atom_f16",
+        ).result
+
     def fp16_zero(self) -> Value:
         return self._op(
             "arith.constant",
@@ -1178,6 +1213,15 @@ class IRBuilder:
 
     def global_load_bf16(self, ptr: Value, idx: Value, *, align: int = 2) -> Value:
         return self.global_load(ptr, idx, BF16, align=align)
+
+    def global_load_i8(self, ptr: Value, idx: Value, *, align: int = 1) -> Value:
+        return self.global_load(ptr, idx, I8, align=align)
+
+    def global_load_i16(self, ptr: Value, idx: Value, *, align: int = 2) -> Value:
+        return self.global_load(ptr, idx, I16, align=align)
+
+    def global_load_bf8e5m2(self, ptr: Value, idx: Value, *, align: int = 1) -> Value:
+        return self.global_load(ptr, idx, BF8E5M2, align=align)
 
     def global_load_fp8e4m3(self, ptr: Value, idx: Value, *, align: int = 1) -> Value:
         return self.global_load(ptr, idx, FP8E4M3, align=align)
