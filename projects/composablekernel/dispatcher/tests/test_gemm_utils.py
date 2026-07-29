@@ -215,6 +215,15 @@ class TestModuleImportsAndRunnerShape(unittest.TestCase):
     def test_module_imports(self):
         import gemm_utils  # noqa: F401  (import must not raise)
 
+    def test_codegen_module_parses(self):
+        # unified_gemm_codegen.py was truncated by the same #9308 merge (an
+        # unterminated f-string in _multi_d_single_include). Parse it directly so
+        # a syntax-level truncation is caught even without importing its deps.
+        import ast
+
+        codegen = DISPATCHER_DIR / "codegen" / "unified_gemm_codegen.py"
+        ast.parse(codegen.read_text(), filename=str(codegen))
+
     def test_multi_d_runner_has_run_returning_multi_d_result(self):
         import inspect
         import gemm_utils as g
