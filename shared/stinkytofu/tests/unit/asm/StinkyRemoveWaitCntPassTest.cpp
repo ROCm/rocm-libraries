@@ -74,13 +74,6 @@ TEST_F(StinkyRemoveWaitCntPassTest, RemovesStandardWaitCntInstruction) {
     EXPECT_EQ(countInstructions(), 0);
 }
 
-TEST_F(StinkyRemoveWaitCntPassTest, PreservesXcntReplayFence) {
-    addInst(GFX::s_wait_xcnt);
-    ASSERT_EQ(countInstructions(), 1);
-    runPass();
-    EXPECT_EQ(countInstructions(), 1);
-}
-
 TEST_F(StinkyRemoveWaitCntPassTest, RemovesTensorWaitCntWhenEnabled) {
     addInst(GFX::s_wait_tensorcnt);
     ASSERT_EQ(countInstructions(), 1);

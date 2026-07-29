@@ -22,11 +22,10 @@ class Pass;
 /// a physical basic-block boundary must have the corresponding fall-through
 /// edge.
 ///
-/// An s_wait_xcnt 0 that survives the earlier wait-count removal pass is a full
-/// drain: it closes the open replay group, so a hand-authored fence is reused
-/// rather than duplicated. When \p functions is non-empty, the
-/// pass walks the whole kernel (entry plus callable functions); otherwise it
-/// processes the single Function given to the pipeline.
+/// Existing full s_wait_xcnt drains reset the pass's replay-group state. When
+/// \p functions is non-empty, the pass walks the whole kernel (entry plus
+/// callable functions); otherwise it processes the single Function given to
+/// the pipeline.
 STINKYTOFU_EXPORT std::unique_ptr<Pass> createGfx1250HazardPass(
     std::vector<Function*> functions = {});
 

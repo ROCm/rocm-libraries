@@ -106,6 +106,9 @@ void assertFallthrough(const BasicBlock& previous, const BasicBlock& next) {
     const auto& successors = previous.getSuccessors();
     const auto& predecessors = next.getPredecessors();
 
+    // `next` may also have branch predecessors; those paths arrive with XCNT
+    // drained. Only the physical predecessor carrying this group's state must
+    // be an unconditional fall-through to `next`.
     assert(successors.size() == 1 && successors.front() == &next &&
            "an open replay group must reach the next physical block by fall-through");
     assert(std::find(predecessors.begin(), predecessors.end(), &previous) != predecessors.end() &&
