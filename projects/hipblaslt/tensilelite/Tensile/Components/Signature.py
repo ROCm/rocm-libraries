@@ -56,18 +56,31 @@ def fusedA2AKernArgLayout():
 
     The offsets are relative to the segment base (recv_ptr_0 == 0). Order and
     sizes MUST match the addArg() sequence in SignatureDefault.__call__:
-      recv_ptr_0..7  : 8B each  (remote recv base pointers, incl. self)
-      flag_ptr_0..7  : 8B each  (remote flag base pointers)
-      counter_ptr    : 8B       (this device's counter base)
-      FusedMyRank    : 4B (u32)
-      FusedTarget    : 4B (u32)  == M_tiles * tiles_per_rank
-      FusedW         : 4B (u32)  world size
-      FusedNShard    : 4B (u32)
-      FusedDrain     : 4B (u32)  runtime drain flag (NOT a compile-time gate)
-      FusedAM        : 4B (u32)  A2A feature-row count (first AM rows PUSH, rest local)
+      recv_ptr_0..7    : 8B each  (remote recv base pointers, incl. self)
+      flag_ptr_0..7    : 8B each  (remote flag base pointers)
+      counter_ptr      : 8B       (this device's counter base)
+      FusedMyRank      : 4B (u32)
+      FusedTarget      : 4B (u32)  DEPRECATED: legacy per-dst-rank contributing-WG
+                                   count (== M_tiles * tiles_per_rank). Superseded
+                                   by the W*tokenTiles counter grain of the SDMA
+                                   path (Task 6); slot retained so preceding
+                                   offsets do not shift while the epilogue still
+                                   reads it. Do not remove until Task 6 lands.
+      FusedW           : 4B (u32)  world size
+      FusedNShard      : 4B (u32)
+      FusedDrain       : 4B (u32)  runtime drain flag (NOT a compile-time gate)
+      FusedAM          : 4B (u32)  A2A feature-row count (first AM rows PUSH, rest local)
+      FusedSdmaQueues  : 8B        device pointer to the W-element SdmaQueueDeviceHandle
+                                   array (Task 2 SdmaQueueSet::deviceHandles); consumed
+                                   by the Task 4/5 ring/packet emitters
+      FusedTilesPerRank: 4B (u32)  feature-tiles per rank shard (nShard/MT0), == the
+                                   SDMA counter target (Task 6)
+      FusedTokenTiles  : 4B (u32)  token-tiles across N (N/MT1), == the SDMA flag target
 
-    FusedAM is appended at the END of the scalar list (after FusedDrain) so the
-    offsets of every preceding arg are unchanged from earlier tasks.
+    The three SDMA args are appended at the END of the segment (after FusedAM) so
+    the offsets of every preceding arg are unchanged from earlier tasks. The
+    segment base is already 8-aligned and off==160 here is a multiple of 8, so
+    the FusedSdmaQueues pointer needs no padding.
     """
     layout = {}
     off = 0
@@ -82,10 +95,19 @@ def fusedA2AKernArgLayout():
     for name in ("FusedMyRank", "FusedTarget", "FusedW", "FusedNShard", "FusedDrain", "FusedAM"):
         layout[name] = off
         off += 4
+    # SDMA offload args (Task 3). Pointer first (lands 8-aligned at off==160),
+    # then the two u32 tile counts.
+    layout["FusedSdmaQueues"] = off
+    off += 8
+    for name in ("FusedTilesPerRank", "FusedTokenTiles"):
+        layout[name] = off
+        off += 4
     return layout
 
-# Total bytes of the fused-A2A kernarg segment.
-FUSED_A2A_SEGMENT_BYTES = (2 * FUSED_A2A_MAX_RANKS + 1) * 8 + 6 * 4
+# Total bytes of the fused-A2A kernarg segment. Pointers: 2*8 recv/flag + 1
+# counter + 1 FusedSdmaQueues == (2*MAX_RANKS + 2) * 8. Scalars: 6 legacy
+# (MyRank/Target/W/NShard/Drain/AM) + 2 SDMA (TilesPerRank/TokenTiles) == 8 * 4.
+FUSED_A2A_SEGMENT_BYTES = (2 * FUSED_A2A_MAX_RANKS + 2) * 8 + 8 * 4
 
 def _currentKernArgOffset(signature) -> int:
     """Byte offset the NEXT addArg() would receive (== accumulated kernarg size).
@@ -442,11 +464,18 @@ class SignatureDefault(Signature):
                 signature.addArg("flag_ptr_%u" % j, SVK.SIG_GLOBALBUFFER, "void", "generic")
             signature.addArg("counter_ptr", SVK.SIG_GLOBALBUFFER, "void", "generic")
             signature.addArg("FusedMyRank", SVK.SIG_VALUE, "u32")
-            signature.addArg("FusedTarget", SVK.SIG_VALUE, "u32")
+            signature.addArg("FusedTarget", SVK.SIG_VALUE, "u32")  # deprecated; see fusedA2AKernArgLayout()
             signature.addArg("FusedW",      SVK.SIG_VALUE, "u32")
             signature.addArg("FusedNShard", SVK.SIG_VALUE, "u32")
             signature.addArg("FusedDrain",  SVK.SIG_VALUE, "u32")
             signature.addArg("FusedAM",     SVK.SIG_VALUE, "u32")
+            # SDMA offload args (Task 3), appended at the very end so preceding
+            # offsets are untouched. FusedSdmaQueues points at the W-element
+            # SdmaQueueDeviceHandle array; the two u32s are the SDMA counter/flag
+            # targets. Wired into the emitters in Task 4/5, consumed in Task 6.
+            signature.addArg("FusedSdmaQueues",   SVK.SIG_GLOBALBUFFER, "void", "generic")
+            signature.addArg("FusedTilesPerRank", SVK.SIG_VALUE, "u32")
+            signature.addArg("FusedTokenTiles",   SVK.SIG_VALUE, "u32")
             # Publish the segment base for the epilogue (Task 6-9). The epilogue
             # dereferences fused args against sgprKernArgAddress, which the
             # prologue has already advanced past the common-args header by

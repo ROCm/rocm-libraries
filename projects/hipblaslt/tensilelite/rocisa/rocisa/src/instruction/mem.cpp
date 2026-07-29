@@ -1407,6 +1407,25 @@ void mem_inst(nb::module_ m_mem)
             return new rocisa::GlobalAtomicAddU32(self);
         });
 
+    nb::class_<rocisa::GlobalAtomicCmpswapB64, rocisa::GlobalWriteInstruction>(
+        m_mem, "GlobalAtomicCmpswapB64")
+        .def(nb::init<const std::shared_ptr<rocisa::RegisterContainer>&,
+                      const std::shared_ptr<rocisa::RegisterContainer>&,
+                      const std::shared_ptr<rocisa::RegisterContainer>&,
+                      const std::shared_ptr<rocisa::RegisterContainer>&,
+                      std::optional<rocisa::GLOBALModifiers>,
+                      const std::string&>(),
+             nb::arg("dst"),
+             nb::arg("vaddr"),
+             nb::arg("data"),
+             nb::arg("saddr"),
+             nb::arg("modifier") = std::nullopt,
+             nb::arg("comment")  = "")
+        .def("__str__", &rocisa::GlobalAtomicCmpswapB64::toString)
+        .def("__deepcopy__", [](const rocisa::GlobalAtomicCmpswapB64& self, const nb::dict&) {
+            return new rocisa::GlobalAtomicCmpswapB64(self);
+        });
+
     nb::class_<rocisa::DSLoadU8, rocisa::DSLoadInstruction>(m_mem, "DSLoadU8")
         .def(nb::init<const std::shared_ptr<rocisa::RegisterContainer>&,
                       const std::shared_ptr<rocisa::RegisterContainer>&,

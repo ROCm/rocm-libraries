@@ -2291,6 +2291,81 @@ namespace rocisa
         std::shared_ptr<RegisterContainer> dst;
     };
 
+    // global_atomic_cmpswap_x2 dst, vaddr, data, saddr sc0  — 64-bit compare-and-
+    // swap with return-of-pre-op-value on gfx950 (CDNA4). Used by the SDMA ring
+    // producer to reserve queue space (ReserveQueueSpace CAS on cachedWptr).
+    // `data` is a 4-dword VGPR: [0:1] = swap value (new), [2:3] = compare value
+    // (expected cur); the pre-op memory value is returned in [0:1], success iff
+    // it equals the compare value.
+    //
+    // The type suffix is chosen HERE (isa[0] < 11 ? "_x2" : "_b64"), NOT via the
+    // ReadWriteInstruction generic type table: on gfx9 the atomic mnemonic is
+    // `..._x2`, and the generic table's `dwordx2`/`b64` forms are BOTH invalid on
+    // atomic opcodes ("invalid instruction" on gfx950). Return-of-pre-op comes
+    // from sc0 (GLOBALModifiers glc=True); the assembler *requires* sc0 on this
+    // op ("instruction must use sc0"). sc1 (slc) selects device(0)/system(1)
+    // scope; the ring reserve uses device scope (slc=False).
+    struct GlobalAtomicCmpswapB64 : public GlobalWriteInstruction
+    {
+        std::shared_ptr<Container>     vaddr;
+        std::shared_ptr<Container>     saddr;
+        std::optional<GLOBALModifiers> modifier;
+
+        GlobalAtomicCmpswapB64(const std::shared_ptr<RegisterContainer>& dst,
+                               const std::shared_ptr<RegisterContainer>& vaddr,
+                               const std::shared_ptr<RegisterContainer>& data,
+                               const std::shared_ptr<RegisterContainer>& saddr,
+                               std::optional<GLOBALModifiers>            modifier = std::nullopt,
+                               const std::string&                        comment  = "")
+            : GlobalWriteInstruction(InstType::INST_B64, data, comment)
+            , vaddr(vaddr)
+            , saddr(saddr)
+            , modifier(modifier)
+            , dst(dst)
+        {
+            setInst("global_atomic_cmpswap");
+        }
+
+        GlobalAtomicCmpswapB64(const GlobalAtomicCmpswapB64& other)
+            : GlobalWriteInstruction(other)
+            , vaddr(other.vaddr ? other.vaddr->clone() : nullptr)
+            , saddr(other.saddr ? other.saddr->clone() : nullptr)
+            , modifier(other.modifier)
+            , dst(other.dst ? other.dst->clone2() : nullptr)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<GlobalAtomicCmpswapB64>(*this);
+        }
+
+        std::vector<InstructionInput> getParams() const override { return {vaddr, srcData, saddr}; }
+        std::vector<InstructionInput> getDstParams() const override { return {dst}; }
+        std::vector<InstructionInput> getSrcParams() const override { return {vaddr, srcData, saddr}; }
+
+        std::string getArgStr() const
+        {
+            return dst->toString() + ", " + vaddr->toString() + ", "
+                 + srcData->toString() + ", " + saddr->toString();
+        }
+
+        std::string toString() const override
+        {
+            // gfx9 uses the "_x2" mnemonic; gfx11+ uses "_b64". Chosen locally
+            // because the generic type suffix is illegal on atomic opcodes.
+            auto              isa    = kernel().isaVersion;
+            const std::string suffix = isa[0] < 11 ? "_x2" : "_b64";
+            std::string       kStr   = instStr + suffix + " " + getArgStr();
+            if(modifier)
+                kStr += modifier->toString();
+            return formatWithComment(kStr);
+        }
+
+    private:
+        std::shared_ptr<RegisterContainer> dst;
+    };
+
     struct GLOBALStoreInstruction : public GlobalWriteInstruction
     {
         std::shared_ptr<Container>     vaddr;

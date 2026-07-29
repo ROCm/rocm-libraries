@@ -70,8 +70,9 @@ namespace TensileLite
         // 8 of each (unused slots j>=W filled with nullptr).
         static constexpr int    FUSED_A2A_MAX_RANKS      = 8;
         // Expected byte growth of args after appending the fused segment:
-        //   (2*8 + 1) pointers * 8B + 6 scalars * 4B = 160B.
-        static constexpr size_t FUSED_A2A_SEGMENT_BYTES  = (2 * FUSED_A2A_MAX_RANKS + 1) * 8 + 6 * 4;
+        //   (2*8 recv/flag + 1 counter + 1 FusedSdmaQueues) pointers * 8B
+        //   + (6 legacy + 2 SDMA) scalars * 4B = 176B.
+        static constexpr size_t FUSED_A2A_SEGMENT_BYTES  = (2 * FUSED_A2A_MAX_RANKS + 2) * 8 + 8 * 4;
 
         namespace
         {
@@ -92,7 +93,10 @@ namespace TensileLite
                                     uint32_t                   worldSize,
                                     uint32_t                   nShard,
                                     uint32_t                   drain,
-                                    uint32_t                   an)
+                                    uint32_t                   an,
+                                    void*                      sdmaQueues,   // W-element SdmaQueueDeviceHandle array
+                                    uint32_t                   tilesPerRank,
+                                    uint32_t                   tokenTiles)
             {
                 size_t before = args.size();
 
@@ -119,6 +123,15 @@ namespace TensileLite
                 // Signature.py); the value `an` carries AM (A2A width along
                 // FEATURE) from the swapped client.
                 args.append<uint32_t>("FusedAM", an);
+                // SDMA offload args (Task 3), appended at the very end to match
+                // Signature.py. FusedSdmaQueues is nullptr this round -- T3 is
+                // pure ABI and does not instantiate the SdmaQueueSet (its
+                // SdmaQueue.cpp only compiles under TENSILELITE_ENABLE_SDMA_A2A).
+                // TODO(T7): pass SdmaQueueSet::deviceHandles() (the device
+                // pointer to the W-element SdmaQueueDeviceHandle array).
+                args.append<void*>("FusedSdmaQueues", sdmaQueues);
+                args.append<uint32_t>("FusedTilesPerRank", tilesPerRank);
+                args.append<uint32_t>("FusedTokenTiles", tokenTiles);
 
                 size_t grew = args.size() - before;
                 if(grew != FUSED_A2A_SEGMENT_BYTES)
@@ -614,7 +627,12 @@ namespace TensileLite
                                        (uint32_t)drain,
                                        // kernarg "FusedAM" (Signature.py); pass AM as
                                        // the value to keep the client/kernel ABI matched.
-                                       (uint32_t)AM);
+                                       (uint32_t)AM,
+                                       // SDMA offload args (Task 3). nullptr this round;
+                                       // TODO(T7) fill with SdmaQueueSet::deviceHandles().
+                                       nullptr,
+                                       tilesPerRank,
+                                       tokenTiles);
                     // Print kernarg size only on iter 0 to avoid log spam; a constant
                     // size across iterations confirms exactly one fused segment.
                     if(it == 0)
