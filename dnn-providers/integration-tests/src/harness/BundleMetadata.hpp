@@ -19,7 +19,7 @@
 
 #include <nlohmann/json.hpp>
 
-namespace hipdnn_test_sdk::utilities
+namespace hipdnn_integration_tests
 {
 
 /// Metadata read from a {Name}.meta.json companion file alongside a golden
@@ -269,6 +269,6 @@ inline std::optional<std::string> checkArchCompatibility(const BundleMetadata& m
     return std::nullopt;
 }
 
-} // namespace hipdnn_test_sdk::utilities
+} // namespace hipdnn_integration_tests
 
 #endif // HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB
