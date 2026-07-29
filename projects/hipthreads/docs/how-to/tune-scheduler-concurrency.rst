@@ -9,7 +9,7 @@ How to tune scheduler concurrency
 **************************************
 
 The hipThreads scheduler launches a fixed number of execution slots ("vcores"), and
-``hip::thread::hardware_concurrency()`` reports that number.
+``hip::wthread::hardware_concurrency()`` reports that number.
 It is computed as:
 
 .. code-block:: text

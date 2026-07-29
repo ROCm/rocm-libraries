@@ -25,8 +25,15 @@ from unittest.mock import patch, Mock
 import pytest
 
 from rocke import (
+    BF16,
+    BF8E5M2,
     F16,
+    F32,
+    FP8E4M3,
+    I8,
+    I16,
     I32,
+    F32,
     I64,
     IRBuilder,
     PtrType,
@@ -198,6 +205,35 @@ class TestCoreIR(unittest.TestCase):
         b.s_waitcnt(vmcnt=16, lgkmcnt=16)
         ll = lower_kernel_to_llvm(b.kernel)
         self.assertIn("call void @llvm.amdgcn.s.waitcnt(i32 20336)", ll)
+
+    def test_global_load_typed_wrappers(self):
+        """Test all typed global_load_* wrappers lower correctly."""
+        test_cases = [
+            # (Type, wrapper_fn, llvm_type, align)
+            (I8, "global_load_i8", "i8", 1),
+            (I16, "global_load_i16", "i16", 2),
+            (I32, "global_load_i32", "i32", 4),
+            (I64, "global_load_i64", "i64", 8),
+            (F16, "global_load_f16", "half", 2),
+            (BF16, "global_load_bf16", "bfloat", 2),
+            (F32, "global_load_f32", "float", 4),
+            (FP8E4M3, "global_load_fp8e4m3", "i8", 1),  # fp8 lowers to i8
+            (BF8E5M2, "global_load_bf8e5m2", "i8", 1),  # bf8 lowers to i8
+        ]
+
+        for ir_type, wrapper_name, llvm_type, align in test_cases:
+            with self.subTest(wrapper=wrapper_name):
+                b = IRBuilder(f"test_{wrapper_name}")
+                X = b.param("X", PtrType(ir_type, "global"))
+                tid = b.thread_id_x()
+                # Call global_load_{ir_type}(X, tid)
+                getattr(b, wrapper_name)(X, tid)
+                ll = lower_kernel_to_llvm(b.kernel)
+                self.assertIn(
+                    f"getelementptr inbounds {llvm_type}, ptr addrspace(1)", ll
+                )
+                self.assertIn(f"load {llvm_type}, ptr addrspace(1)", ll)
+                self.assertIn(f"align {align}", ll)
 
 
 # ---------------------------------------------------------------------
