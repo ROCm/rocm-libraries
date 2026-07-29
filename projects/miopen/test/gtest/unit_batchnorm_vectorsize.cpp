@@ -33,7 +33,8 @@
 // instantiated mapped_vector_type<float, 8> (no specialization) and aborted the
 // HIPRTC compile.
 //
-// This build supports vector sizes 1/2/4/8, so kMaxVectorSize is 8. The tests
+// This build supports vector sizes 1/2/4/8, so kMaxVectorSize equals
+// kMaxSupportedVectorSize (currently 8). The tests
 // assert the heuristic never proposes a size outside the implemented set. They
 // are pure-CPU: they only run the solver's performance-config generation (which
 // is handle-free), so they catch a heuristic/kernel mismatch deterministically
@@ -58,13 +59,13 @@ using namespace miopen::solver::batchnorm;
 namespace {
 
 // Largest vector size the batch-norm kernels implement (mapped_vector_type<T, N>
-// and the vector math / cast<> helpers). See src/kernels/vector_types.hpp and
-// src/kernels/miopen_math.hpp. The heuristic must never propose a larger size.
-constexpr size_t kMaxVectorSize = 8;
+// and the vector math / cast<> helpers). Sourced from common_spatial.hpp so that
+// adding a new vector width only requires one update (there, not here too).
+constexpr size_t kMaxVectorSize = miopen::solver::batchnorm::kMaxSupportedVectorSize;
 
 bool IsSupportedVectorSize(size_t v)
 {
-    return v == 1 || v == 2 || v == 4 || v == 8;
+    return v == 1 || v == 2 || v == 4 || v == kMaxVectorSize;
 }
 
 struct Shape
