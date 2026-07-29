@@ -25,6 +25,7 @@ include "reduction_attributes.fbs";
 include "resample_fwd_attributes.fbs";
 include "resample_bwd_attributes.fbs";
 include "moe_grouped_matmul_attributes.fbs";
+include "moe_grouped_matmul_bwd_attributes.fbs";
 
 namespace hipdnn_flatbuffers_sdk.data_objects;
 
@@ -50,7 +51,8 @@ union NodeAttributes {
 	ResampleFwdAttributes,
 	LayernormBackwardAttributes,
 	ResampleBwdAttributes,
-	MoeGroupedMatmulAttributes
+	MoeGroupedMatmulAttributes,
+	MoeGroupedMatmulBwdAttributes
 }
 
 table Node {
