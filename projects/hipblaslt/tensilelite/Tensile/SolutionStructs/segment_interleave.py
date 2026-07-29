@@ -108,8 +108,8 @@ def evaluate(state):
     # assume exactly 2 waves per MFMA dim. MIWaveGroup!=[2,2] (e.g. [4,1]) loses the component
     # jump on the dim==1 tensor and reads OOB on the dim==4 one.
     if list(state.get("MIWaveGroup", [])) != [2, 2]:           return _no("MIWaveGroup!=[2,2]")
-    if state.get("TDMSplit") or pt.get("Sparse"):
-        return _no("split/sparse")
+    if pt.get("Sparse"):
+        return _no("sparse")
     # Subtile uses a separate codegen body; the emit path these offsets target runs only for
     # non-subtile kernels.
     if state.get("UseSubtileImpl"):                            return _no("subtile")

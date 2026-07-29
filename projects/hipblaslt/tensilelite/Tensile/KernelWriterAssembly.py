@@ -11462,7 +11462,9 @@ class KernelWriterAssembly(KernelWriter):
               else:
                 with self.allocTmpSgpr(1, tag="tdmSplitDim1Parity") as waveIdTmp:
                   self._emitTdmWaveParitySCC(imod.middle, kernel, waveIdTmp.idx)
-              imod.middle.add(SCSelectB32(sgpr(hr), halfRowsB, halfRowsA, "halfRows = parity ? B : A"))
+              # SALU: one literal per instr; s_mov A first (keeps SCC), then s_cselect against B.
+              imod.middle.add(SMovB32(sgpr(hr), halfRowsA, "halfRows = A"))
+              imod.middle.add(SCSelectB32(sgpr(hr), halfRowsB, sgpr(hr), "halfRows = parity ? B : A"))
             imod.middle.add(SLShiftRightB32(sgpr(h0), hex(16), sgpr(f"{group1}+2"), "H0 = dim1 lo"))
             imod.middle.add(SLShiftLeftB32(sgpr(h1), hex(16), sgpr(f"{group1}+3"), "H0 hi << 16"))
             imod.middle.add(SOrB32(sgpr(h0), sgpr(h0), sgpr(h1), "H0 = full dim1"))
@@ -19134,6 +19136,10 @@ class KernelWriterAssembly(KernelWriter):
     the TDMSplit && !MXS && !Sparse precondition, i.e. dim1Divisor == 2."""
     tc: str = tP['tensorChar']
     ti: int = tP["idx"]
+    if kernel.get("LDSSegmentInterleave") in (1, 2) and tc in ("A", "B"):
+      _segOff = kernel["LDSSegInterleaveOffsets"]
+      if tc == "A" or not _segOff.get("bBaseline", False):
+        return _segOff["writeStrideBytes"]
     mt: int = kernel[f"MacroTile{ti}"]
     du: int = kernel["DepthU"]
     bpe: float = tP["bpeGR"] if not tP["isM"] else 1
@@ -19429,12 +19435,11 @@ class KernelWriterAssembly(KernelWriter):
       tmpPadSgprIdx: int = tmpSgprRes.idx + 1
       mod.add(SLShiftRightB32(sgpr(waveOffsetSgprIdx), 1, sgpr(waveIdxSgpr), "wId=WaveIdx // 2 (each component covers 2 waves: numComp = numWaves // 2)"))
       dataBytes = mt // numComp * du * int(bpe * 4) // (4 * dim1Divisor)
-      # Interleave rewrites only A/B; MX scales keep their own stride, relocated via ldsBaseMXS*.
-      # bcontig layout: B is NOT interleaved (baseline stride, only relocated via ldsBaseB) -> exclude it.
       _segAB = bool(kernel.get("LDSSegmentInterleave") in (1, 2)) and (
           tc == "A" or (tc == "B" and not kernel["LDSSegInterleaveOffsets"].get("bBaseline", False)))
-      _segFootprint = _segAB and kernel["LDSSegInterleaveOffsets"].get("footprintPacked", False)
-      if _segAB:
+      _segABnoSplit = _segAB and not kernel["TDMSplit"]
+      _segFootprint = _segABnoSplit and kernel["LDSSegInterleaveOffsets"].get("footprintPacked", False)
+      if _segABnoSplit:
           dataBytes = kernel["LDSSegInterleaveOffsets"]["writeStrideBytes"]
       mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), dataBytes, f"woffset = wId * (mt // numComp * du * bpe // dim1Divisor)"))
       # footprintPacked: writeStrideBytes is the post-pad footprint fA+fB; A/B tiles are packed

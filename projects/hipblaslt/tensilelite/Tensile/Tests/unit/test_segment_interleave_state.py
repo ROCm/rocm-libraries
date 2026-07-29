@@ -72,8 +72,7 @@ def test_resolved_1ldsbuffer_forceon_conflict_still_rejects():
 
 
 def test_unrelated_disqualifier_rejects_even_with_unresolved_buffer():
-    # An unresolved 1LDSBuffer (-1) defers ONLY when it is the (short-circuit) disqualifier. A
-    # reason that fires earlier in the oracle (e.g. TDMSplit) does not defer, so force-on rejects.
+    # A disqualifier that fires before the 1LDSBuffer short-circuit rejects (does not defer).
     from Tensile.Tests.unit.test_segment_interleave import _vw8_state
-    assert _resolve_lsi(_vw8_state(**{"TDMSplit": 1, "1LDSBuffer": -1,
+    assert _resolve_lsi(_vw8_state(**{"UseSubtileImpl": 1, "1LDSBuffer": -1,
                                       "LDSSegmentInterleave": 1})) == (0, True)

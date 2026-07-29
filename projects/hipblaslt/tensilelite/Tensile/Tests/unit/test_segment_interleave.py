@@ -222,8 +222,11 @@ def test_miwavegroup_not_2x2_skips():
         r = evaluate(_vw8_state(MIWaveGroup=miwg))
         assert r["applicable"] is False and "MIWaveGroup" in r["reason"], miwg
 
-def test_tdmsplit_skips():
-    assert evaluate(_vw8_state(TDMSplit=1))["applicable"] is False
+def test_tdmsplit_composes():
+    # TDMSplit composes: same offsets as the non-split path.
+    r = evaluate(_vw8_state(TDMSplit=1))
+    assert r["applicable"] is True
+    assert r["offsets"] == evaluate(_vw8_state(TDMSplit=0))["offsets"]
 
 def test_tile_major_skips():
     r = evaluate(_vw8_state(UnrollMajorLDSA=0))  # not unrollMajor -> deferred
