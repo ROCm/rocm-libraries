@@ -197,6 +197,22 @@ jobs:
             "$lib" \
             projects/miopen/test/byte_equivalence/public_symbols.baseline
 
+      # Asserts the flag-on wrapper's exported public C API set equals the
+      # committed baseline minus the committed excluded set (experimental
+      # miopen_internal.h APIs + Hidden MIGraphX shims, which intentionally stay
+      # on libMIOpen_private.so under their original names). Enforces the flag-on
+      # symbol boundary that hipDNN will consume.
+      - name: Flag-on wrapper symbol-set check
+        if: matrix.job_id == 'flag-on-build'
+        run: |
+          lib=$(find build -name 'libMIOpen.so.1.0' -not -name 'libMIOpen_private*' | head -1)
+          test -n "$lib" || { echo "wrapper libMIOpen.so.1.0 not found under build/"; exit 1; }
+          echo "Checking wrapper $lib against baseline − excluded"
+          projects/miopen/script/check_byte_equivalence.sh check-wrapper \
+            "$lib" \
+            projects/miopen/test/byte_equivalence/public_symbols.baseline \
+            projects/miopen/test/byte_equivalence/wrapper_excluded_symbols.txt
+
       - name: Configure Tuna Fin
         if: matrix.job_id == 'tuna-fin-build'
         run: |

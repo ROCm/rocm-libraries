@@ -25,8 +25,28 @@
 # a flag-off build) from the same environment, where SHA256 is reported for
 # information.
 #
+# For the flag-on wrapper (MIOPEN_ENABLE_HIPDNN_WRAPPER=ON) the public surface
+# is split: the thin wrapper libMIOpen.so re-exports only the miopen.h
+# public-header contract, while a handful of baseline exports that were never in
+# miopen.h (experimental miopen_internal.h APIs and the "Hidden" MIGraphX shims)
+# stay on libMIOpen_private.so under their original names. `check-wrapper`
+# asserts that partition on a flag-on wrapper build:
+#
+#   1. SONAME is libMIOpen.so.1 (unchanged).
+#   2. The wrapper's exported public C API symbol set exactly equals the
+#      committed baseline minus the committed excluded set
+#      (test/byte_equivalence/wrapper_excluded_symbols.txt).
+#   3. No *_impl symbols are exported from the wrapper (the private rename must
+#      not leak into the public surface).
+#   4. libMIOpen_private IS in DT_NEEDED (the wrapper forwards to the private lib).
+#
+# This enforces the flag-on boundary in CI rather than asserting it in prose,
+# and catches drift such as a new miopen.h export added to neither the rename
+# header nor the wrapper.
+#
 # Usage:
 #   check_byte_equivalence.sh check <libMIOpen.so> <baseline_symbols_file>
+#   check_byte_equivalence.sh check-wrapper <libMIOpen.so> <baseline_symbols_file> <excluded_symbols_file>
 #   check_byte_equivalence.sh dump-symbols <libMIOpen.so> [out_file]
 #   check_byte_equivalence.sh dump <libMIOpen.so> <out_prefix>
 #   check_byte_equivalence.sh compare-pair <baseline_prefix> <candidate_prefix>
@@ -129,6 +149,82 @@ cmd_check() {
     return "$rc"
 }
 
+# Strip comments/blank lines and sort-unique a symbol list file.
+clean_symbol_list() {
+    grep -vE '^[[:space:]]*(#|$)' "$1" | sort -u
+}
+
+cmd_check_wrapper() {
+    local so="$1" baseline="$2" excluded="$3"
+    [ -f "$so" ]       || die "wrapper library not found: $so"
+    [ -f "$baseline" ] || die "baseline symbols file not found: $baseline"
+    [ -f "$excluded" ] || die "excluded symbols file not found: $excluded"
+
+    local rc=0
+
+    # 1. SONAME
+    local sn
+    sn="$(soname "$so")"
+    if [ "$sn" = "libMIOpen.so.1" ]; then
+        echo "PASS: SONAME is $sn"
+    else
+        echo "FAIL: SONAME is '$sn', expected 'libMIOpen.so.1'"; rc=1
+    fi
+
+    # Excluded set must be a subset of the baseline; otherwise a stale entry (a
+    # symbol removed from the public surface) would silently mask real drift.
+    local base_clean excl_clean stray
+    base_clean="$(mktemp)"; excl_clean="$(mktemp)"
+    clean_symbol_list "$baseline" > "$base_clean"
+    clean_symbol_list "$excluded" > "$excl_clean"
+    stray="$(comm -13 "$base_clean" "$excl_clean")"
+    if [ -n "$stray" ]; then
+        echo "FAIL: excluded-symbols file lists symbols absent from the baseline (stale entries):"
+        echo "$stray" | sed 's/^/  /'
+        rc=1
+    fi
+
+    # 2. Wrapper exported public set == baseline − excluded
+    local expected got
+    expected="$(mktemp)"; got="$(mktemp)"
+    comm -23 "$base_clean" "$excl_clean" > "$expected"
+    public_api_symbols "$so" > "$got"
+    if diff -u "$expected" "$got" > /tmp/be_wrapper_symdiff.txt 2>&1; then
+        echo "PASS: wrapper public API set == baseline − excluded ($(wc -l < "$expected") symbols, $(wc -l < "$excl_clean") excluded)"
+    else
+        echo "FAIL: wrapper public API set != baseline − excluded (< expected, > built):"
+        cat /tmp/be_wrapper_symdiff.txt
+        rc=1
+    fi
+    rm -f "$base_clean" "$excl_clean" "$expected" "$got"
+
+    # 3. No _impl leakage into the public wrapper
+    local impl
+    impl="$(impl_symbols "$so")"
+    if [ -z "$impl" ]; then
+        echo "PASS: no *_impl symbols exported from wrapper"
+    else
+        echo "FAIL: wrapper exported *_impl symbols (private rename leaked into public surface):"
+        echo "$impl" | sed 's/^/  /'
+        rc=1
+    fi
+
+    # 4. Wrapper forwards to the private library
+    if dt_needed "$so" | grep -q '^libMIOpen_private'; then
+        echo "PASS: DT_NEEDED on libMIOpen_private (wrapper links the private library)"
+    else
+        echo "FAIL: flag-on wrapper has no DT_NEEDED on libMIOpen_private"
+        rc=1
+    fi
+
+    if [ "$rc" -eq 0 ]; then
+        echo "wrapper symbol-set: PASS"
+    else
+        echo "wrapper symbol-set: FAIL"
+    fi
+    return "$rc"
+}
+
 cmd_compare_pair() {
     local base="$1" cand="$2"
     local rc=0
@@ -153,6 +249,7 @@ cmd_compare_pair() {
 sub="$1"; shift
 case "$sub" in
     check)        [ $# -eq 2 ] || die "usage: check <so> <baseline_symbols_file>"; cmd_check "$@" ;;
+    check-wrapper) [ $# -eq 3 ] || die "usage: check-wrapper <so> <baseline_symbols_file> <excluded_symbols_file>"; cmd_check_wrapper "$@" ;;
     dump-symbols) [ $# -ge 1 ] || die "usage: dump-symbols <so> [out_file]";        cmd_dump_symbols "$@" ;;
     dump)         [ $# -eq 2 ] || die "usage: dump <so> <out_prefix>";               cmd_dump "$@" ;;
     compare-pair) [ $# -eq 2 ] || die "usage: compare-pair <base_prefix> <cand_prefix>"; cmd_compare_pair "$@" ;;
