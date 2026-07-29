@@ -239,7 +239,7 @@ __forceinline__ __device__ __bf16 tanh(__bf16 x)
 {
     const auto two = static_cast<__bf16>(2.0f);
     const auto one = static_cast<__bf16>(1.0f);
-    __bf16 exp2x = static_cast<__bf16>(exp(static_cast<__bf16>(two * x)));
+    __bf16 exp2x = static_cast<__bf16>(exp(static_cast<float>(two * x)));
     __bf16 numerator = exp2x - one;
     __bf16 denominator = exp2x + one;
     return (numerator / denominator);
