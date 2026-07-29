@@ -80,11 +80,18 @@ static inline bool isSaluHazardConsumer(const StinkyInstruction& inst) {
     return isGlobalMemLoad(inst) || isTensorLoad(inst);
 }
 
+// VMEM vgpr-address consumers: buffer/flat/global loads plus global_prefetch_b8, whose
+// vaddr is a vgpr. The prefetch is not a load (no dest, not IF_GLOBALLoad), so it is
+// listed explicitly rather than folded into isBufferMemLoad.
+static inline bool isVmemAddrHazardConsumer(const StinkyInstruction& inst) {
+    return isBufferMemLoad(inst) || isGlobalPrefetch(inst);
+}
+
 static constexpr HazardRule kCdna5HazardRules[] = {
     {"SaluSgprToMemAddr", isScalarALU, isSaluHazardConsumer, RegType::S, 8},
     // VALU vgpr -> VMEM address (global_read/MUBUF/FLAT/GLOBAL). Excludes SMEM/tensor_load:
     // those addresses are sgpr-only, never vgpr.
-    {"ValuVgprToVmemAddr", isVectorALU, isBufferMemLoad, RegType::V, 16},
+    {"ValuVgprToVmemAddr", isVectorALU, isVmemAddrHazardConsumer, RegType::V, 16},
 };
 constexpr int kNumCdna5HazardRules =
     static_cast<int>(sizeof(kCdna5HazardRules) / sizeof(kCdna5HazardRules[0]));

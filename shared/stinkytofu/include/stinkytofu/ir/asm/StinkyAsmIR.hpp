@@ -397,6 +397,10 @@ inline bool isGLOBALAtomic(const StinkyInstruction& inst) {
     return inst.is(InstFlag::IF_GLOBALAtomic);
 }
 
+inline bool isGlobalPrefetch(const StinkyInstruction& inst) {
+    return inst.is(InstFlag::IF_GLOBALPrefetch);
+}
+
 inline bool isGLOBAL(const StinkyInstruction& inst) {
     return isGLOBALLoad(inst) || isGLOBALStore(inst);
 }
