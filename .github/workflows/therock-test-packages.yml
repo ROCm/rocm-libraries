@@ -16,17 +16,15 @@ on:
         type: string
       test_type:
         type: string
+      coverage_enabled:
+        description: "When true, collect llvm profraw from the test runs and generate a coverage report."
+        type: boolean
+        default: false
     secrets:
       MIOPEN_CI_WEBHOOK_URL:
         required: false
       HIPDNN_CI_WEBHOOK_URL:
         required: false
-      coverage:
-        description: "When true, collect llvm profraw data from the test runs for a coverage report."
-      coverage_enabled:
-        description: "When true, collect llvm profraw from the test runs and generate a coverage report."
-        type: boolean
-        default: false
 
 permissions:
   contents: read
