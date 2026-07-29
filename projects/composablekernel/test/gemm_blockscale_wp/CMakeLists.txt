@@ -7,3 +7,11 @@ if(GPU_TARGETS MATCHES "gfx9[45]|gfx12")
         target_link_libraries(test_gemm_blockscale_wp_fp8 PRIVATE utility device_gemm_blockscale_wp_instance)
     endif()
 endif()
+
+# Split-K accumulates into C with atomics, which needs XDL.
+if(GPU_TARGETS MATCHES "gfx9[45]")
+    add_gtest_executable(test_gemm_blockscale_wp_fp8_splitk test_gemm_blockscale_wp_fp8_splitk.cpp)
+    if(result EQUAL 0)
+        target_link_libraries(test_gemm_blockscale_wp_fp8_splitk PRIVATE utility)
+    endif()
+endif()
