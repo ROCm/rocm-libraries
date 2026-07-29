@@ -9,6 +9,11 @@
 #include <iostream>
 #include <stdexcept>
 
+// Per-architecture geometry table generated at build time from
+// data/hardware/*.json by tools/hardware_codegen. Defines
+// origami::generated::kArchGeometry.
+#include "origami/hardware_generated.inc"
+
 namespace origami {
 
 // Resolve the number of CUs to model against.
@@ -209,31 +214,24 @@ bool hardware_t::is_hardware_supported(hipDeviceProp_t properties) {
 }
 
 size_t hardware_t::get_default_num_xcds(architecture_t arch) {
-  // Do NOT add new architectures here — see declaration in hardware.hpp.
-  switch (arch) {
-    case architecture_t::gfx90a:  return 1;
-    case architecture_t::gfx942:  return 8;
-    case architecture_t::gfx950:  return 8;
-    case architecture_t::gfx1200: return 1;
-    case architecture_t::gfx1201: return 1;
-    case architecture_t::gfx1100: return 1;
-    case architecture_t::gfx1150: return 1;
-    case architecture_t::gfx1151: return 1;
-    case architecture_t::gfx1152: return 1;
-    case architecture_t::gfx1153: return 1;
-    // TODO: Update this with real value
-    case architecture_t::gfx1250: return 1;
-    default:
-      throw std::runtime_error(
-          std::string("No default XCD count for architecture ") +
-          std::string(arch_enum_to_name(arch)) +
-          ". Use get_hardware_for_device() with a live GPU to query at runtime.");
+  // Values are generated from data/hardware/*.json (see hardware_generated.inc).
+  // To change an arch's default XCD count, edit its JSON descriptor, not this code.
+  for (const auto& g : generated::kArchGeometry) {
+    if (g.arch == arch) { return g.num_xcds; }
   }
+  throw std::runtime_error(
+      std::string("No default XCD count for architecture ") +
+      std::string(arch_enum_to_name(arch)) +
+      ". Use get_hardware_for_device() with a live GPU to query at runtime.");
 }
 
-size_t hardware_t::get_default_cache_line_bytes(architecture_t /*arch*/) {
-  // Per-arch L2 cache-line size, currently uniform 128 B across supported archs.
-  return 128;
+size_t hardware_t::get_default_cache_line_bytes(architecture_t arch) {
+  // Per-arch L2 cache-line size, generated from data/hardware/*.json
+  // (see hardware_generated.inc). Currently uniform 128 B across supported archs.
+  for (const auto& g : generated::kArchGeometry) {
+    if (g.arch == arch) { return g.l2_cache_line_bytes; }
+  }
+  return 128;  // Historical uniform default for any unlisted arch.
 }
 
 void hardware_t::print() const {

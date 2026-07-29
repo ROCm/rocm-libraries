@@ -109,6 +109,38 @@ target_sources(
 
 target_link_libraries(origami PRIVATE hip::host)
 
+# --- Generated per-architecture hardware constants ---------------------------
+# A host-only tool (tools/hardware_codegen) derives per-arch geometry from the
+# rocjitsu simulator descriptors (data/hardware/rocjitsu/gfx*.json) and, for the
+# architectures rocjitsu does not describe, from flat descriptors
+# (data/hardware/*.json). It emits hardware_generated.inc, which
+# src/origami/hardware.cpp includes. Regenerated whenever any descriptor or the
+# generator changes.
+add_subdirectory(tools/hardware_codegen)
+
+# rocjitsu simulator descriptors (gfx*.json excludes the guest_* variants).
+file(GLOB ORIGAMI_HW_ROCJITSU_JSON CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/data/hardware/rocjitsu/gfx*.json"
+)
+# Flat origami descriptors for archs rocjitsu omits.
+file(GLOB ORIGAMI_HW_FLAT_JSON CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/data/hardware/*.json"
+)
+set(ORIGAMI_HW_JSON ${ORIGAMI_HW_ROCJITSU_JSON} ${ORIGAMI_HW_FLAT_JSON})
+
+set(ORIGAMI_HW_GENERATED "${PROJECT_BINARY_DIR}/include/origami/hardware_generated.inc")
+
+add_custom_command(
+    OUTPUT "${ORIGAMI_HW_GENERATED}"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${PROJECT_BINARY_DIR}/include/origami"
+    COMMAND hardware_codegen "${ORIGAMI_HW_GENERATED}" ${ORIGAMI_HW_JSON}
+    DEPENDS hardware_codegen ${ORIGAMI_HW_JSON}
+    COMMENT "Generating hardware_generated.inc from data/hardware descriptors"
+    VERBATIM
+)
+add_custom_target(origami_hardware_generated DEPENDS "${ORIGAMI_HW_GENERATED}")
+add_dependencies(origami origami_hardware_generated)
+
 if(ORIGAMI_ENABLE_PYTHON)
     add_subdirectory(python)
 endif()

@@ -21,6 +21,7 @@ target_sources(
                           "${CMAKE_CURRENT_SOURCE_DIR}/test_gemm.cpp"
                           "${CMAKE_CURRENT_SOURCE_DIR}/test_origami.cpp"
                           "${CMAKE_CURRENT_SOURCE_DIR}/test_formocast.cpp"
+                          "${CMAKE_CURRENT_SOURCE_DIR}/test_hardware.cpp"
                           "${CMAKE_CURRENT_SOURCE_DIR}/test_logger.cpp"
                           "${CMAKE_CURRENT_SOURCE_DIR}/test_streamk.cpp"
 )

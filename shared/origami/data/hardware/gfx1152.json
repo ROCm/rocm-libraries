@@ -1,0 +1,5 @@
+{
+  "arch": "gfx1152",
+  "num_xcds": 1,
+  "l2_cache_line_bytes": 128
+}
