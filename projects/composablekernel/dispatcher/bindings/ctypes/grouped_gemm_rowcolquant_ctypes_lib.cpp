@@ -6,14 +6,15 @@
  *
  * Provides a C API for Python ctypes integration. One .so is compiled per
  * kernel variant; the kernel is force-included at compile time:
- *   hipcc -include <kernel.hpp> -DCK_TILE_SINGLE_KERNEL_INCLUDE grouped_gemm_rowcolquant_ctypes_lib.cpp
+ *   hipcc -include <kernel.hpp> -DCK_TILE_SINGLE_KERNEL_INCLUDE
+ * grouped_gemm_rowcolquant_ctypes_lib.cpp
  *
  * Force-include defines (from generated kernel header):
  *   SelectedKernel, KERNEL_NAME
  *   ADataType, BDataType, CDataType, AQDataType, BQDataType, AccDataType
  *
- * Design: direct launch -- SelectedKernel::launch(vector<QuantGroupedGemmHostArgs>, stream_config, kargs_ptr)
- * is called directly. No dispatcher registry is used: RowColQuant kernels take
+ * Design: direct launch -- SelectedKernel::launch(vector<QuantGroupedGemmHostArgs>, stream_config,
+ * kargs_ptr) is called directly. No dispatcher registry is used: RowColQuant kernels take
  * QuantGroupedGemmHostArgs, which is incompatible with the GeneratedTileKernelInstance::run()
  * signature used by the dispatcher's registry backend.
  *
@@ -43,20 +44,19 @@ static constexpr std::size_t elements_to_bytes(std::size_t n)
     return n * sizeof(T) / ck_tile::numeric_traits<T>::PackedSize;
 }
 
-#define HIP_CHECK(call)                                                                         \
-    {                                                                                           \
-        hipError_t _err = (call);                                                               \
-        if(_err != hipSuccess)                                                                  \
-        {                                                                                       \
+#define HIP_CHECK(call)                                                                        \
+    {                                                                                          \
+        hipError_t _err = (call);                                                              \
+        if(_err != hipSuccess)                                                                 \
+        {                                                                                      \
             std::cerr << "HIP error: " << hipGetErrorString(_err) << " at " << __FILE__ << ":" \
-                      << __LINE__ << "\n";                                                      \
-            cleanup();                                                                          \
-            return -1;                                                                          \
-        }                                                                                       \
+                      << __LINE__ << "\n";                                                     \
+            cleanup();                                                                         \
+            return -1;                                                                         \
+        }                                                                                      \
     }
 
 static std::atomic<bool> g_initialized{false};
-
 
 extern "C" {
 
@@ -74,8 +74,7 @@ int dispatcher_initialize()
         return -1;
     }
     const std::string arch(props.gcnArchName);
-    if(arch.rfind("gfx950", 0) != 0 && arch.rfind("gfx942", 0) != 0 &&
-       arch.rfind("gfx90a", 0) != 0)
+    if(arch.rfind("gfx950", 0) != 0 && arch.rfind("gfx942", 0) != 0 && arch.rfind("gfx90a", 0) != 0)
     {
         std::cerr << "dispatcher_initialize: unsupported GPU architecture '" << arch
                   << "' (supported: gfx90a, gfx942, gfx950)\n";
@@ -153,26 +152,32 @@ int dispatcher_run_rowcolquant_gemm(const void* A,
         return -1;
     }
 
-    const ADataType*   A_host  = static_cast<const ADataType*>(A);
-    const BDataType*   B_host  = static_cast<const BDataType*>(B);
-    const AQDataType*  AQ_host = static_cast<const AQDataType*>(AQ);
-    const BQDataType*  BQ_host = static_cast<const BQDataType*>(BQ);
-    CDataType*         C_host  = static_cast<CDataType*>(C);
+    const ADataType* A_host   = static_cast<const ADataType*>(A);
+    const BDataType* B_host   = static_cast<const BDataType*>(B);
+    const AQDataType* AQ_host = static_cast<const AQDataType*>(AQ);
+    const BQDataType* BQ_host = static_cast<const BQDataType*>(BQ);
+    CDataType* C_host         = static_cast<CDataType*>(C);
 
-    ADataType*  A_dev  = nullptr;
-    BDataType*  B_dev  = nullptr;
+    ADataType* A_dev   = nullptr;
+    BDataType* B_dev   = nullptr;
     AQDataType* AQ_dev = nullptr;
     BQDataType* BQ_dev = nullptr;
-    CDataType*  C_dev  = nullptr;
-    void*       kargs_dev = nullptr;
+    CDataType* C_dev   = nullptr;
+    void* kargs_dev    = nullptr;
 
     auto cleanup = [&]() {
-        if(A_dev)     (void)hipFree(A_dev);
-        if(B_dev)     (void)hipFree(B_dev);
-        if(AQ_dev)    (void)hipFree(AQ_dev);
-        if(BQ_dev)    (void)hipFree(BQ_dev);
-        if(C_dev)     (void)hipFree(C_dev);
-        if(kargs_dev) (void)hipFree(kargs_dev);
+        if(A_dev)
+            (void)hipFree(A_dev);
+        if(B_dev)
+            (void)hipFree(B_dev);
+        if(AQ_dev)
+            (void)hipFree(AQ_dev);
+        if(BQ_dev)
+            (void)hipFree(BQ_dev);
+        if(C_dev)
+            (void)hipFree(C_dev);
+        if(kargs_dev)
+            (void)hipFree(kargs_dev);
     };
 
     // Allocate device buffers.
