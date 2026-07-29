@@ -289,11 +289,13 @@ int dispatcher_run_abquant_gemm(const void* A,
                 return ck_tile::shuffle_b<typename SelectedKernel::BShuffleConfig>(b_k_n);
         }();
 
-        HIP_CHECK(hipMemcpy(B_dev, b_shuffled.data(), elements_to_bytes<BDataType>(K * N), hipMemcpyHostToDevice));
+        HIP_CHECK(hipMemcpy(
+            B_dev, b_shuffled.data(), elements_to_bytes<BDataType>(K * N), hipMemcpyHostToDevice));
     }
     else
     {
-        HIP_CHECK(hipMemcpy(B_dev, B_host, elements_to_bytes<BDataType>(K * N), hipMemcpyHostToDevice));
+        HIP_CHECK(
+            hipMemcpy(B_dev, B_host, elements_to_bytes<BDataType>(K * N), hipMemcpyHostToDevice));
     }
 
     // Apply AQ preshuffle when required -- mirrors the profiler's shuffle_aq path.
@@ -310,11 +312,15 @@ int dispatcher_run_abquant_gemm(const void* A,
                                             ck_tile::bool_constant<true>{} /*row-major*/));
         std::copy(AQ_host, AQ_host + M * QK_A, aq_h.begin());
         auto aq_shuffled = ck_tile::shuffle_aq(&aq_h, block_aq_k);
-        HIP_CHECK(hipMemcpy(AQ_dev, aq_shuffled.data(), elements_to_bytes<QDataType>(M * QK_A), hipMemcpyHostToDevice));
+        HIP_CHECK(hipMemcpy(AQ_dev,
+                            aq_shuffled.data(),
+                            elements_to_bytes<QDataType>(M * QK_A),
+                            hipMemcpyHostToDevice));
     }
     else
     {
-        HIP_CHECK(hipMemcpy(AQ_dev, AQ_host, elements_to_bytes<QDataType>(M * QK_A), hipMemcpyHostToDevice));
+        HIP_CHECK(hipMemcpy(
+            AQ_dev, AQ_host, elements_to_bytes<QDataType>(M * QK_A), hipMemcpyHostToDevice));
     }
 
     // Apply the BQ scale-tensor preshuffle when required. This mirrors Old-TE's
@@ -352,7 +358,10 @@ int dispatcher_run_abquant_gemm(const void* A,
                 return bq_permuted;
             }
         }();
-        HIP_CHECK(hipMemcpy(BQ_dev, bq_final.data(), elements_to_bytes<QDataType>(QK_B * QN_B), hipMemcpyHostToDevice));
+        HIP_CHECK(hipMemcpy(BQ_dev,
+                            bq_final.data(),
+                            elements_to_bytes<QDataType>(QK_B * QN_B),
+                            hipMemcpyHostToDevice));
     }
     else if constexpr(SelectedKernel::BPreshuffleQuant)
     {
@@ -365,11 +374,15 @@ int dispatcher_run_abquant_gemm(const void* A,
                                             ck_tile::bool_constant<false>{} /*col-major*/));
         std::copy(BQ_host, BQ_host + QK_B * QN_B, bq_h.begin());
         auto bq_shuffled = ck_tile::shuffle_bq(&bq_h, block_bq_k);
-        HIP_CHECK(hipMemcpy(BQ_dev, bq_shuffled.data(), elements_to_bytes<QDataType>(QK_B * QN_B), hipMemcpyHostToDevice));
+        HIP_CHECK(hipMemcpy(BQ_dev,
+                            bq_shuffled.data(),
+                            elements_to_bytes<QDataType>(QK_B * QN_B),
+                            hipMemcpyHostToDevice));
     }
     else
     {
-        HIP_CHECK(hipMemcpy(BQ_dev, BQ_host, elements_to_bytes<QDataType>(QK_B * QN_B), hipMemcpyHostToDevice));
+        HIP_CHECK(hipMemcpy(
+            BQ_dev, BQ_host, elements_to_bytes<QDataType>(QK_B * QN_B), hipMemcpyHostToDevice));
     }
 
     HIP_CHECK(hipMemset(C_dev, 0, elements_to_bytes<CDataType>(M * N)));
