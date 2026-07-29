@@ -937,8 +937,8 @@ class KernelWriterAssembly(KernelWriter):
 
       # WS mode aliases B's descriptor onto A's SGPRs, so A's Group2
       # must exist whenever either tile is iterate-mode.
-      if (kernel.get("_TDMIterateModeA", False)
-          or (kernel.get("_TDMIterateModeB", False)
+      if (kernel.get("_TDMIterateModeA", False) or self.states.subtileIterateModeA
+          or ((kernel.get("_TDMIterateModeB", False) or self.states.subtileIterateModeB)
               and kernel["NumWaves"] > 1)):
         # Group 2: iter_count / lds_inc / global_inc when iterate_enable=1.
         module.add(self.defineSgpr("tdmAGroup2", 4, 4))
@@ -967,7 +967,7 @@ class KernelWriterAssembly(KernelWriter):
       else:
         module.add(self.defineSgpr("tdmBGroup0", 4, 4))
         module.add(self.defineSgpr("tdmBGroup1", 8, 4))
-        if kernel.get("_TDMIterateModeB", False):
+        if kernel.get("_TDMIterateModeB", False) or self.states.subtileIterateModeB:
           module.add(self.defineSgpr("tdmBGroup2", 4, 4))
           module.add(RegSet("s", "sgprtdmBGroup3", "sgprtdmBGroup2"))
         if kernel["ProblemType"]["MXBlockB"]:
