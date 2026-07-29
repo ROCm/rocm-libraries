@@ -57,15 +57,16 @@ static constexpr std::size_t elements_to_bytes(std::size_t n)
 
 static bool g_initialized = false;
 
-#define HIP_CHECK(call)                                                                        \
-    {                                                                                          \
-        hipError_t _err = (call);                                                              \
-        if(_err != hipSuccess)                                                                 \
-        {                                                                                      \
+#define HIP_CHECK(call)                                                                         \
+    {                                                                                           \
+        hipError_t _err = (call);                                                               \
+        if(_err != hipSuccess)                                                                  \
+        {                                                                                       \
             std::cerr << "HIP error: " << hipGetErrorString(_err) << " at " << __FILE__ << ":" \
-                      << __LINE__ << "\n";                                                     \
-            return -1;                                                                         \
-        }                                                                                      \
+                      << __LINE__ << "\n";                                                      \
+            cleanup();                                                                          \
+            return -1;                                                                          \
+        }                                                                                       \
     }
 
 extern "C" {
@@ -254,39 +255,14 @@ int dispatcher_run_abquant_gemm(const void* A,
     // Allocate device buffers.
     // A/B may be packed types (pk_fp4_t): 2 logical values per byte.
     // elements_to_bytes<T>(n) handles the packed case via numeric_traits::PackedSize.
-    if(hipMalloc(&A_dev, elements_to_bytes<ADataType>(M * K)) != hipSuccess)
-    {
-        cleanup();
-        return -1;
-    }
-    if(hipMalloc(&B_dev, elements_to_bytes<BDataType>(K * N)) != hipSuccess)
-    {
-        cleanup();
-        return -1;
-    }
-    if(hipMalloc(&AQ_dev, elements_to_bytes<QDataType>(M * QK_A)) != hipSuccess)
-    {
-        cleanup();
-        return -1;
-    }
-    if(hipMalloc(&BQ_dev, elements_to_bytes<QDataType>(QK_B * QN_B)) != hipSuccess)
-    {
-        cleanup();
-        return -1;
-    }
-    if(hipMalloc(&C_dev, elements_to_bytes<CDataType>(M * N)) != hipSuccess)
-    {
-        cleanup();
-        return -1;
-    }
+    HIP_CHECK(hipMalloc(&A_dev,  elements_to_bytes<ADataType>(M * K)));
+    HIP_CHECK(hipMalloc(&B_dev,  elements_to_bytes<BDataType>(K * N)));
+    HIP_CHECK(hipMalloc(&AQ_dev, elements_to_bytes<QDataType>(M * QK_A)));
+    HIP_CHECK(hipMalloc(&BQ_dev, elements_to_bytes<QDataType>(QK_B * QN_B)));
+    HIP_CHECK(hipMalloc(&C_dev,  elements_to_bytes<CDataType>(M * N)));
 
     // Copy A input to device.
-    if(hipMemcpy(A_dev, A_host, elements_to_bytes<ADataType>(M * K), hipMemcpyHostToDevice) !=
-       hipSuccess)
-    {
-        cleanup();
-        return -1;
-    }
+    HIP_CHECK(hipMemcpy(A_dev, A_host, elements_to_bytes<ADataType>(M * K), hipMemcpyHostToDevice));
 
     // Copy the B weight matrix to device. For PreshuffleB kernels the B matrix
     // must be pre-shuffled on host FIRST, exactly as Old-TE does before its device
@@ -313,23 +289,11 @@ int dispatcher_run_abquant_gemm(const void* A,
                 return ck_tile::shuffle_b<typename SelectedKernel::BShuffleConfig>(b_k_n);
         }();
 
-        if(hipMemcpy(B_dev,
-                     b_shuffled.data(),
-                     elements_to_bytes<BDataType>(K * N),
-                     hipMemcpyHostToDevice) != hipSuccess)
-        {
-            cleanup();
-            return -1;
-        }
+        HIP_CHECK(hipMemcpy(B_dev, b_shuffled.data(), elements_to_bytes<BDataType>(K * N), hipMemcpyHostToDevice));
     }
     else
     {
-        if(hipMemcpy(B_dev, B_host, elements_to_bytes<BDataType>(K * N), hipMemcpyHostToDevice) !=
-           hipSuccess)
-        {
-            cleanup();
-            return -1;
-        }
+        HIP_CHECK(hipMemcpy(B_dev, B_host, elements_to_bytes<BDataType>(K * N), hipMemcpyHostToDevice));
     }
 
     // Apply AQ preshuffle when required -- mirrors the profiler's shuffle_aq path.
@@ -346,24 +310,11 @@ int dispatcher_run_abquant_gemm(const void* A,
                                             ck_tile::bool_constant<true>{} /*row-major*/));
         std::copy(AQ_host, AQ_host + M * QK_A, aq_h.begin());
         auto aq_shuffled = ck_tile::shuffle_aq(&aq_h, block_aq_k);
-        if(hipMemcpy(AQ_dev,
-                     aq_shuffled.data(),
-                     elements_to_bytes<QDataType>(M * QK_A),
-                     hipMemcpyHostToDevice) != hipSuccess)
-        {
-            cleanup();
-            return -1;
-        }
+        HIP_CHECK(hipMemcpy(AQ_dev, aq_shuffled.data(), elements_to_bytes<QDataType>(M * QK_A), hipMemcpyHostToDevice));
     }
     else
     {
-        if(hipMemcpy(
-               AQ_dev, AQ_host, elements_to_bytes<QDataType>(M * QK_A), hipMemcpyHostToDevice) !=
-           hipSuccess)
-        {
-            cleanup();
-            return -1;
-        }
+        HIP_CHECK(hipMemcpy(AQ_dev, AQ_host, elements_to_bytes<QDataType>(M * QK_A), hipMemcpyHostToDevice));
     }
 
     // Apply the BQ scale-tensor preshuffle when required. This mirrors Old-TE's
@@ -401,14 +352,7 @@ int dispatcher_run_abquant_gemm(const void* A,
                 return bq_permuted;
             }
         }();
-        if(hipMemcpy(BQ_dev,
-                     bq_final.data(),
-                     elements_to_bytes<QDataType>(QK_B * QN_B),
-                     hipMemcpyHostToDevice) != hipSuccess)
-        {
-            cleanup();
-            return -1;
-        }
+        HIP_CHECK(hipMemcpy(BQ_dev, bq_final.data(), elements_to_bytes<QDataType>(QK_B * QN_B), hipMemcpyHostToDevice));
     }
     else if constexpr(SelectedKernel::BPreshuffleQuant)
     {
@@ -421,31 +365,14 @@ int dispatcher_run_abquant_gemm(const void* A,
                                             ck_tile::bool_constant<false>{} /*col-major*/));
         std::copy(BQ_host, BQ_host + QK_B * QN_B, bq_h.begin());
         auto bq_shuffled = ck_tile::shuffle_bq(&bq_h, block_bq_k);
-        if(hipMemcpy(BQ_dev,
-                     bq_shuffled.data(),
-                     elements_to_bytes<QDataType>(QK_B * QN_B),
-                     hipMemcpyHostToDevice) != hipSuccess)
-        {
-            cleanup();
-            return -1;
-        }
+        HIP_CHECK(hipMemcpy(BQ_dev, bq_shuffled.data(), elements_to_bytes<QDataType>(QK_B * QN_B), hipMemcpyHostToDevice));
     }
     else
     {
-        if(hipMemcpy(
-               BQ_dev, BQ_host, elements_to_bytes<QDataType>(QK_B * QN_B), hipMemcpyHostToDevice) !=
-           hipSuccess)
-        {
-            cleanup();
-            return -1;
-        }
+        HIP_CHECK(hipMemcpy(BQ_dev, BQ_host, elements_to_bytes<QDataType>(QK_B * QN_B), hipMemcpyHostToDevice));
     }
 
-    if(hipMemset(C_dev, 0, elements_to_bytes<CDataType>(M * N)) != hipSuccess)
-    {
-        cleanup();
-        return -1;
-    }
+    HIP_CHECK(hipMemset(C_dev, 0, elements_to_bytes<CDataType>(M * N)));
 
     // Build QuantGemmHostArgs -- both aq_ptr and bq_ptr are non-null for ABQuant.
     ck_tile::QuantGemmHostArgs args;
@@ -490,12 +417,7 @@ int dispatcher_run_abquant_gemm(const void* A,
     }
 
     // Copy result back
-    if(hipMemcpy(C_host, C_dev, elements_to_bytes<CDataType>(M * N), hipMemcpyDeviceToHost) !=
-       hipSuccess)
-    {
-        cleanup();
-        return -1;
-    }
+    HIP_CHECK(hipMemcpy(C_host, C_dev, elements_to_bytes<CDataType>(M * N), hipMemcpyDeviceToHost));
 
     if(time_ms)
         *time_ms = exec_time;
