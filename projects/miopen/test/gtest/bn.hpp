@@ -392,8 +392,13 @@ protected:
             bn_bwd_test_data.activ_mode == miopenActivationCLAMP ? 0.1 : 0.5;
         bn_bwd_test_data.activ_beta = 0.3;
 
-        auto&& handle      = get_handle();
-        miopenStatus_t res = miopenStatusUnknownError;
+        auto&& handle                      = get_handle();
+        miopenStatus_t res                 = miopenStatusUnknownError;
+        miopenTuningPolicy_t tuning_policy = GetTuningPolicy();
+        if(tuning_policy == miopenTuningPolicy_t::miopenTuningPolicySearch)
+        {
+            miopenSetTuningPolicy(&handle, tuning_policy); // set tuning
+        }
         if(bn_bwd_test_data.activ_mode > 0)
         {
             miopenCreateActivationDescriptor(&activ_desc);
@@ -480,6 +485,11 @@ protected:
             else
                 GTEST_FAIL() << "ERROR: unknown bn api type!!";
         }
+        if(tuning_policy == miopenTuningPolicy_t::miopenTuningPolicySearch)
+        {
+            miopenSetTuningPolicy(&handle,
+                                  miopenTuningPolicy_t::miopenTuningPolicyNone); // unset tuning
+        }
         if(res != miopenStatusSuccess)
         {
             GTEST_FAIL() << "miopenBatchNormalizationBackward failed";
@@ -556,8 +566,13 @@ protected:
         bn_fwd_train_test_data.activ_alpha = 0.1;
         bn_fwd_train_test_data.activ_beta  = 0.3;
 
-        auto&& handle      = get_handle();
-        miopenStatus_t res = miopenStatusUnknownError;
+        auto&& handle                      = get_handle();
+        miopenStatus_t res                 = miopenStatusUnknownError;
+        miopenTuningPolicy_t tuning_policy = GetTuningPolicy();
+        if(tuning_policy == miopenTuningPolicy_t::miopenTuningPolicySearch)
+        {
+            miopenSetTuningPolicy(&handle, tuning_policy); // set tuning
+        }
         if(bn_fwd_train_test_data.activ_mode > 0)
         {
             miopenCreateActivationDescriptor(&activ_desc);
@@ -665,6 +680,11 @@ protected:
             }
             else
                 GTEST_FAIL() << "ERROR: unknown bn api type!!";
+        }
+        if(tuning_policy == miopenTuningPolicy_t::miopenTuningPolicySearch)
+        {
+            miopenSetTuningPolicy(&handle,
+                                  miopenTuningPolicy_t::miopenTuningPolicyNone); // unset tuning
         }
         if(res != miopenStatusSuccess)
         {
