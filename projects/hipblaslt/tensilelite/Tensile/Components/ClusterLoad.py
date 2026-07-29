@@ -74,17 +74,45 @@ class ClusterLoadTDM(ClusterLoad):
         if tdmM:
             writer.defineSgpr("MulticastMaskMetadata", 1)
 
+    def papRefreshesMask(self, kernel: Mapping) -> bool:
+        """True when PrefetchAcrossPersistent re-applies the mask after prologue.
+
+        PAP re-emits the TDM descriptor setup (``applyToDescriptor``) on every
+        persistent-loop iteration, so the StreamK multicast mask SGPR must stay
+        live past the prologue -- freeing it makes those reuses reference an
+        undeclared SGPR (``expected absolute expression`` at assembly time).
+        """
+        return bool(kernel.get("PrefetchAcrossPersistent") and kernel.get("StreamKMulticast", 0))
+
+    def papDropsSelfOnlyMaskA(self, kernel: Mapping) -> bool:
+        """True when the PAP-live A mask can be freed because it is self-only.
+
+        StreamK keeps A per-workgroup on a 1-D ``[C,1]`` cluster
+        (``ClusterDim[1]==1`` -> ``maskA==1`` -> ``1<<wg_x``), so re-applying it is
+        a no-op and the SGPR is freed to stay within the 106-SGPR budget (the
+        PAP+cluster+FDPO=0 overflow bug: sgprs=107 -> kernel replaced by an
+        ``s_endpgm`` stub -> output tensor left unwritten).  On a 2-D cluster
+        (``ClusterDim[1]>1``) A is a real multicast and must stay live.
+        """
+        return self.papRefreshesMask(kernel) and kernel["ClusterDim"][1] == 1
+
     def undeclareSgprs(self, writer: "KernelWriter", kernel: Mapping) -> Module:
         """Free the ``MulticastMask*`` SGPRs."""
         mod = Module()
         if not (kernel["Multicast"] and kernel["TDMInst"] != 0):
             return mod
         tdmM: bool = kernel["enableTDMMetadata"]
+        refresh: bool = self.papRefreshesMask(kernel)
+        dropMaskA: bool = self.papDropsSelfOnlyMaskA(kernel)
         if self.usesCombinedMask(kernel):
             mod.add(writer.undefineSgpr("MulticastMask"))
         else:
-            mod.add(writer.undefineSgpr("MulticastMaskA"))
-            mod.add(writer.undefineSgpr("MulticastMaskB"))
+            # Under PAP the A mask stays live unless it is self-only (freed then).
+            if not refresh or dropMaskA:
+                mod.add(writer.undefineSgpr("MulticastMaskA"))
+            # Under PAP the B broadcast mask is re-applied every iteration: keep live.
+            if not refresh:
+                mod.add(writer.undefineSgpr("MulticastMaskB"))
         if tdmM:
             mod.add(writer.undefineSgpr("MulticastMaskMetadata"))
         return mod
@@ -162,6 +190,12 @@ class ClusterLoadTDM(ClusterLoad):
         mod = Module()
         if kernel["Multicast"] and clusterEnabled(kernel["ClusterDim"]):
             mask = self.maskSgprName(kernel, tc, subtile=subtile, waveSeparated=waveSeparated)
+            # Under PAP the self-only A-side mask SGPR is freed (see
+            # papDropsSelfOnlyMaskA): the StreamK [C,1] A mask carries no multicast
+            # peers, so re-applying it is a no-op. Skip it so the freed SGPR is not
+            # referenced across the persistent-loop refresh.
+            if self.papDropsSelfOnlyMaskA(kernel) and mask == "MulticastMaskA":
+                return mod
             tdm = TensorDataMoverLoad.find(writer)
             mod.add(tdm.setMulticastMask(group1, mask, writer))
         return mod
