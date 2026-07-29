@@ -2311,6 +2311,93 @@ class KernelWriterAssembly(KernelWriter):
 
     return module
 
+  def clusterPadEarlyExit(self, kernel):
+    # Exit padded work-groups from a grid rounded up to a ClusterDim multiple
+    # (see ContractionSolution::generateSingleCall), before any TDM load,
+    # multicast, or cluster barrier. WorkGroup1 carries the GSU factor, so its
+    # bound is NumWorkGroups1 * GSU. Emitted on both prologue WG-decode paths
+    # (ArgType-routed deepcopy(moduleWg) and normal moduleWg); getNameInc keeps
+    # the labels unique across the two copies.
+    module = Module("ClusterPadEarlyExit")
+    # Stream-K uses a 1-D cluster-aware grid (WorkGroup0 is the SK work-item
+    # index, not an M-tile), and its grid is not padded, so this guard does not
+    # apply.
+    if not clusterEnabled(kernel["ClusterDim"]) or kernel["StreamK"] != 0:
+      return module
+    module.addComment1("Early stop padded work-groups in a boundary cluster (grid rounded up to ClusterDim)")
+    padExitLabel   = Label(self.labels.getNameInc("ClusterPad_EarlyStop"), "")
+    padNoExitLabel = Label(self.labels.getNameInc("ClusterPad_NoEarlyStop"), "")
+    module.add(SCmpGeU32(src0=sgpr("WorkGroup0"), src1=sgpr("NumWorkGroups0"),
+                         comment="padded if WorkGroup0 >= tilesM"))
+    module.add(SCBranchSCC1(labelName=padExitLabel.getLabelName()))
+    with self.allocTmpSgpr(1, tag="clusterPad_tmpSgpr") as padTmp:
+      boundN = "NumWorkGroups1"
+      if kernel["GlobalSplitU"] != 0:
+        module.add(SAndB32(dst=sgpr(padTmp.idx), src0=sgpr("GSU"),
+                           src1=self.gsuMaskHex(kernel), comment="Restore GSU"))
+        module.add(SMulI32(dst=sgpr(padTmp.idx), src0=sgpr("NumWorkGroups1"),
+                           src1=sgpr(padTmp.idx), comment="tilesN * GSU"))
+        boundN = padTmp.idx
+      module.add(SCmpGeU32(src0=sgpr("WorkGroup1"), src1=sgpr(boundN),
+                           comment="padded if WorkGroup1 >= tilesN*GSU"))
+      module.add(SCBranchSCC1(labelName=padExitLabel.getLabelName()))
+      module.add(SBranch(labelName=padNoExitLabel.getLabelName()))
+      module.add(padExitLabel)
+      module.add(SEndpgm(comment="padded work-group: exit before any load/barrier"))
+      module.add(padNoExitLabel)
+    return module
+
+  def computeMulticastMaskReduction(self, kernel, module, sgprWgX, sgprWgY, maskColSgpr, maskRowSgpr):
+    """Emit the per-cluster reduced broadcast-bit masks for the padded edge-size path.
+
+    A boundary cluster (grid rounded up to ClusterDim) contains padded WGs that
+    early-exit and never issue a ld_bcst, so a full mask makes the load wait for
+    the multicast timeout every iteration. Keep only the low validX cols / validY
+    rows that map to real tiles (clusterBase = WorkGroup - wg, same for all
+    sharers of a row/column). GSU only scales the Y (WorkGroup1) extent to
+    tilesN*GSU.
+
+    Writes the reduced-bit masks into maskColSgpr/maskRowSgpr and returns True;
+    returns False (no write) for Stream-K or non-cluster, where the caller falls
+    back to the full mask.
+    """
+    cx = kernel["ClusterDim"][0]
+    cy = kernel["ClusterDim"][1]
+    # Stream-K's 1-D grid is not padded and WorkGroup0/1 are not M/N tile indices,
+    # so the reduction (like the padded early-exit) does not apply.
+    if not ((cx > 1 or cy > 1) and kernel["StreamK"] == 0):
+      return False
+
+    module.addComment0("reduce multicast mask to real WGs in cluster")
+    # Reuse the NumWorkGroups0/1 named SGPRs here: at this point they are uninitialized.
+    # Note: the grouped-gemm path also borrows NumWorkGroups0/1 as temps later, but
+    # grouped-gemm + Multicast is not a supported combination today; if that changes,
+    # verify the two uses do not overlap (they write/consume in sequence, so they should
+    # not cause failures).
+    with self.allocTmpSgpr(2, tag="reduceMulticastMaskScratch") as rmScratch:
+      tiles = self.sgprs["NumWorkGroups0"]
+      gsuTmp = self.sgprs["NumWorkGroups1"]
+      regStateRes = ContinuousRegister(idx=rmScratch.idx, size=2)
+      # validX = clamp(tilesM - (WorkGroup0 - wg_x), 0..cx)
+      module.add(scalarStaticCeilDivide(qReg=sgpr(tiles), dReg=sgpr("SizeI"), divisor=kernel["MacroTile0"], tmpSgprRes=regStateRes))
+      module.add(SSubU32(dst=sgpr(maskColSgpr), src0=sgpr("WorkGroup0"), src1=sgpr(sgprWgX), comment="clusterBaseX"))
+      module.add(SSubU32(dst=sgpr(tiles), src0=sgpr(tiles), src1=sgpr(maskColSgpr), comment="tilesM - clusterBaseX"))
+      module.add(SMinU32(dst=sgpr(tiles), src0=sgpr(tiles), src1=cx, comment="validX = min(.., cx)"))
+      module.add(SBfmB32(dst=sgpr(maskRowSgpr), src0=sgpr(tiles), src1=0, comment="maskRow bits = (1<<validX)-1"))
+      # validY = clamp(tilesN*GSU - (WorkGroup1 - wg_y), 0..cy). WorkGroup1 is the
+      # raw y grid index (grid.y = tilesN*GSU before rounding), so the Y extent
+      # must include the GSU factor.
+      module.add(scalarStaticCeilDivide(qReg=sgpr(tiles), dReg=sgpr("SizeJ"), divisor=kernel["MacroTile1"], tmpSgprRes=regStateRes))
+      if kernel["GlobalSplitU"] != 0:
+        module.add(SAndB32(dst=sgpr(gsuTmp), src0=sgpr("GSU"), src1=self.gsuMaskHex(kernel), comment="Restore GSU"))
+        module.add(SMulI32(dst=sgpr(tiles), src0=sgpr(tiles), src1=sgpr(gsuTmp), comment="tilesN * GSU (raw y extent)"))
+      module.add(SSubU32(dst=sgpr(maskColSgpr), src0=sgpr("WorkGroup1"), src1=sgpr(sgprWgY), comment="clusterBaseY"))
+      module.add(SSubU32(dst=sgpr(tiles), src0=sgpr(tiles), src1=sgpr(maskColSgpr), comment="tilesN*GSU - clusterBaseY"))
+      module.add(SMinU32(dst=sgpr(tiles), src0=sgpr(tiles), src1=cy, comment="validY = min(.., cy)"))
+      module.add(SMulI32(dst=sgpr(tiles), src0=sgpr(tiles), src1=cx, comment="validY*cx"))
+      module.add(SBfmB32(dst=sgpr(maskColSgpr), src0=sgpr(tiles), src1=0, comment="maskCol bits = (1<<(validY*cx))-1"))
+    return True
+
   def remapWgSerial(self, kernel, earlyStop=True):
     module = Module("RemapWgSerial")
     ########
@@ -2647,55 +2734,74 @@ class KernelWriterAssembly(KernelWriter):
                                comment="WorkGroup2 = (cluster_z * nwg_z) + wg_z"))
             moduleRegInit.add(label_calculate_workgroup_done)
 
-        if kernel["Multicast"]:
-          moduleRegInit.addComment0("Calculate multicast mask")
-          sgprWgX = sTmp+1
-          sgprWgY = sTmp+2
-          sgprNWgX = sTmp+3
+            if kernel["Multicast"]:
+              moduleRegInit.addComment0("Calculate multicast mask")
+              sgprWgX  = sTmp+1
+              sgprWgY  = sTmp+2
+              sgprNWgX = sTmp+3
+              maskColSgpr = sTmp+0  # runtime (1<<(validY*cx))-1 to AND with maskA
+              maskRowSgpr = sTmp+4  # runtime (1<<validX)-1       to AND with maskB
 
-          maskA = 1
-          for idx in range(kernel["ClusterDim"][1]):
-            maskA |= (1 << (idx * kernel["ClusterDim"][0]))
+              maskA = 1
+              for idx in range(kernel["ClusterDim"][1]):
+                maskA |= (1 << (idx * kernel["ClusterDim"][0]))
 
-          maskB = (1 << kernel["ClusterDim"][0]) - 1
+              maskB = (1 << kernel["ClusterDim"][0]) - 1
 
-          if kernel["enableTDMMetadata"]:
-            if kernel["ProblemType"]["Sparse"] == 1:
-              moduleRegInit.add(SLShiftLeftB32(dst=sgpr("MulticastMaskMetadata"), shiftHex=sgpr(sgprWgX), src=hex(maskA),\
-                                                comment="Setting metadata mask (follows sparse A)"))
-            elif kernel["ProblemType"]["Sparse"] == 2:
-              moduleRegInit.add(SMulI32(dst=sgpr(sTmp+4), src0=sgpr(sgprWgY), src1=sgpr(sgprNWgX),\
-                                        comment="Shift factor: wg_y * nwg_x (metadata)"))
-              moduleRegInit.add(SLShiftLeftB32(dst=sgpr("MulticastMaskMetadata"), shiftHex=sgpr(sTmp+4), src=hex(maskB),\
-                                                comment="Setting metadata mask (follows sparse B)"))
+              # Reduce the broadcast mask to the WGs actually present in a padded
+              # boundary cluster. Writes maskColSgpr/maskRowSgpr and returns True; for
+              # Stream-K or non-cluster it returns False and we fall back to the full mask.
+              reduced = self.computeMulticastMaskReduction(kernel, moduleRegInit, sgprWgX, sgprWgY, maskColSgpr, maskRowSgpr)
+              if not reduced:
+                maskColSgpr = None
+                maskRowSgpr = None
 
-          if tdmA and tdmB and kernel["NumWaves"] > 1 and not kernel.get("UseSubtileImpl"):
-            setMulticastMaskLblOdd = Label(f"setMulticastMask_OddWave", "")
-            setMulticastMaskLblEven = Label(f"setMulticastMask_EvenWave", "")
-            setMulticastMaskLblEnd = Label(f"setMulticastMaskEnd", "")
+              # Emit dst = (maskConst [& reducedBits]) << shiftReg. When a reduced-bits
+              # sgpr is present the constant is ANDed to the WGs that really exist in
+              # this cluster before the shift; otherwise it degenerates to the original
+              # single shift of the immediate.
+              def setMask(dst, maskConst, shiftReg, reducedBits, comment):
+                if reducedBits is not None:
+                  moduleRegInit.add(SMovB32(dst=sgpr(dst), src=hex(maskConst), comment=comment))
+                  moduleRegInit.add(SAndB32(dst=sgpr(dst), src0=sgpr(dst), src1=sgpr(reducedBits), comment="reduce to real WGs"))
+                  moduleRegInit.add(SLShiftLeftB32(dst=sgpr(dst), shiftHex=sgpr(shiftReg), src=sgpr(dst), comment=comment))
+                else:
+                  moduleRegInit.add(SLShiftLeftB32(dst=sgpr(dst), shiftHex=sgpr(shiftReg), src=hex(maskConst), comment=comment))
 
-            moduleRegInit.add(SBitcmp1B32(sgpr("WaveIdx"), 0, "Check parity of wId"))
-            moduleRegInit.add(SCBranchSCC1(setMulticastMaskLblOdd.getLabelName(), "Jump if wId is odd"))
+              if kernel["enableTDMMetadata"]:
+                if kernel["ProblemType"]["Sparse"] == 1:
+                  setMask("MulticastMaskMetadata", maskA, sgprWgX, maskColSgpr,
+                          "Setting metadata mask (follows sparse A)")
+                elif kernel["ProblemType"]["Sparse"] == 2:
+                  with self.allocTmpSgpr(1, tag="multicastMetadataShift") as shiftTmp:
+                    moduleRegInit.add(SMulI32(dst=sgpr(shiftTmp.idx), src0=sgpr(sgprWgY), src1=sgpr(sgprNWgX),\
+                                              comment="Shift factor: wg_y * nwg_x (metadata)"))
+                    setMask("MulticastMaskMetadata", maskB, shiftTmp.idx, maskRowSgpr,
+                            "Setting metadata mask (follows sparse B)")
 
-            moduleRegInit.add(setMulticastMaskLblEven)
-            moduleRegInit.add(SLShiftLeftB32(dst=sgpr("MulticastMask"), shiftHex=sgpr(sgprWgX), src=hex(maskA),\
-                                              comment="Setting maskA for even wave"))
-            moduleRegInit.add(SBranch(setMulticastMaskLblEnd.getLabelName()))
-            moduleRegInit.add(setMulticastMaskLblOdd)
-            moduleRegInit.add(SMulI32(dst=sgpr(sgprWgY), src0=sgpr(sgprWgY), src1=sgpr(sgprNWgX),\
-                                      comment="Shift factor: wg_y * nwg_x"))
-            moduleRegInit.add(SLShiftLeftB32(dst=sgpr("MulticastMask"), shiftHex=sgpr(sgprWgY), src=hex(maskB),\
-                                              comment="Setting maskB for odd wave"))
-            moduleRegInit.add(setMulticastMaskLblEnd)
+              if tdmA and tdmB and kernel["NumWaves"] > 1 and not kernel.get("UseSubtileImpl"):
+                setMulticastMaskLblOdd = Label(f"setMulticastMask_OddWave", "")
+                setMulticastMaskLblEven = Label(f"setMulticastMask_EvenWave", "")
+                setMulticastMaskLblEnd = Label(f"setMulticastMaskEnd", "")
 
-          else:
-            moduleRegInit.add(SLShiftLeftB32(dst=sgpr("MulticastMaskA"), shiftHex=sgpr(sgprWgX), src=hex(maskA),\
-                                              comment="Setting maskA"))
+                moduleRegInit.add(SBitcmp1B32(sgpr("WaveIdx"), 0, "Check parity of wId"))
+                moduleRegInit.add(SCBranchSCC1(setMulticastMaskLblOdd.getLabelName(), "Jump if wId is odd"))
 
-            moduleRegInit.add(SMulI32(dst=sgpr(sgprWgY), src0=sgpr(sgprWgY), src1=sgpr(sgprNWgX),\
-                                      comment="Shift factor: wg_y * nwg_x"))
-            moduleRegInit.add(SLShiftLeftB32(dst=sgpr("MulticastMaskB"), shiftHex=sgpr(sgprWgY), src=hex(maskB),\
-                                              comment="Setting maskB"))
+                moduleRegInit.add(setMulticastMaskLblEven)
+                setMask("MulticastMask", maskA, sgprWgX, maskColSgpr, "Setting maskA for even wave")
+                moduleRegInit.add(SBranch(setMulticastMaskLblEnd.getLabelName()))
+                moduleRegInit.add(setMulticastMaskLblOdd)
+                moduleRegInit.add(SMulI32(dst=sgpr(sgprWgY), src0=sgpr(sgprWgY), src1=sgpr(sgprNWgX),\
+                                          comment="Shift factor: wg_y * nwg_x"))
+                setMask("MulticastMask", maskB, sgprWgY, maskRowSgpr, "Setting maskB for odd wave")
+                moduleRegInit.add(setMulticastMaskLblEnd)
+
+              else:
+                setMask("MulticastMaskA", maskA, sgprWgX, maskColSgpr, "Setting maskA")
+
+                moduleRegInit.add(SMulI32(dst=sgpr(sgprWgY), src0=sgpr(sgprWgY), src1=sgpr(sgprNWgX),\
+                                          comment="Shift factor: wg_y * nwg_x"))
+                setMask("MulticastMaskB", maskB, sgprWgY, maskRowSgpr, "Setting maskB")
       # SrdD can be used as temp sgprs for a bit
       if self.states.doShadowInit and kernel["BufferStore"]:
         self.addSgprVarToPool("SrdD")
@@ -2807,8 +2913,9 @@ class KernelWriterAssembly(KernelWriter):
       self.sgprPool.checkIn(sgprArgType)
       sgprArgType = None # Cannot be used after this point
       module.add(SCBranchSCC0(labelName=labelMultiGemm.getLabelName()))
-      module.add(ArgType3_Routed_To_ArgType0)      
+      module.add(ArgType3_Routed_To_ArgType0)
       module.add(deepcopy(moduleWg))
+      module.add(self.clusterPadEarlyExit(kernel))
       if kernel["StreamK"] == 0:
         if clusterEnabled(kernel["ClusterDim"]):
           module.add(SBranch(labelName=labelMultiGemmEnd.getLabelName(), comment="Already using 3D WorkGroups, skip remap"))
@@ -3019,6 +3126,8 @@ class KernelWriterAssembly(KernelWriter):
       earlyReturnModule.add(SEndpgm())
       earlyReturnModule.add(noEarlyReturnLabel)
       module.add(earlyReturnModule)
+
+      module.add(self.clusterPadEarlyExit(kernel))
       if kernel["StreamK"] == 0:
         if clusterEnabled(kernel["ClusterDim"]):
           module.add(SBranch(labelName=labelMultiGemmEnd.getLabelName(), comment="Already using 3D WorkGroups, skip remap"))
@@ -7404,7 +7513,10 @@ class KernelWriterAssembly(KernelWriter):
 
         if tailloopInNll and NLLindex == 0:
           # tailLoop in NLL case
-          if kernel["StreamK"]:
+          # DP-only: every WG processes the final iteration of its tile
+          # (StreamKLocalEnd == ItersPerTile), so the "skip TailLoopINNLL" guard
+          # never fires and there is no StreamKLocalEnd SGPR to read.
+          if kernel["StreamK"] and not kernel["StreamKForceDPOnly"]:
             # StreamK + TailLoopINNLL case
             # skip TailLoopINNLL if StreamK WG not processing final iteration
             # Check if tile finished
@@ -13781,8 +13893,15 @@ class KernelWriterAssembly(KernelWriter):
       # Check for StreamK Kernel when ArgType == 3 (General Batched GEMM)
       # AddressFlags == 0, then parallel reduction in StreamK and SrdC/D needs to be initialized to workspace pointer (AddressC/D)
       # AddressFlags != 0, then not parallel reduction in StreamK and SrdC/D should be initialized to batch matrix address from pointer array (AddressC/D)      
-      skComponent = Component.StreamK.find(self)
-      module.add(skComponent.initializeSrdAddressFlagsCheck(GeneralBatchedGemmSrdInitiation))
+      if kernel["StreamKForceDPOnly"]:
+        # DP-only: reduction is always forced to the tree path (AddressFlags != 0
+        # invariant), so initializeSrdAddressFlagsCheck always branches to the
+        # general-batched (Srd=0) initialization. Fold it to an unconditional branch
+        # here (the component method reads AddressFlags) and drop the dead reader.
+        module.add(SBranch(labelName=GeneralBatchedGemmSrdInitiation.getLabelName(), comment="DP-only: synchronizer always present, skip flag check"))
+      else:
+        skComponent = Component.StreamK.find(self)
+        module.add(skComponent.initializeSrdAddressFlagsCheck(GeneralBatchedGemmSrdInitiation))
     module.add(RegularSrdInitialization)      
     module.add(SMovB64(dst=sgpr("Srd%s+0"%ch, 2), src=sgpr("Address%s+0"%ch, 2), comment="init SRD base address" ))
     module.add(SBranch(labelName=GeneralBatchedGemmSrdInitiation_End.getLabelName()))
@@ -15111,6 +15230,13 @@ class KernelWriterAssembly(KernelWriter):
     if gsuLimit > 1:
       gsuLabel = Label(label=self.labels.getNameInc("GSU"), comment="")
       if kernel["StreamK"]:
+        # DP-only never reaches this GSU-split store branch: SK3 sets GlobalSplitU==0
+        # and StreamKForceDPOnly forces noGSUBranch=True (gsuLimit==1), so this block
+        # is not entered. Assert to keep this dead AddressFlags reader out of DP-only
+        # codegen and to fail loudly (rather than read a removed SGPR) if that
+        # invariant ever changes.
+        assert not kernel["StreamKForceDPOnly"], \
+          "StreamKForceDPOnly must not reach the GSU-split AddressFlags store branch"
         if deferGSU0:
           gsu0DeferredLabel = Label(label=self.labels.getNameInc("GW_B0_Deferred"), comment="")
           gsu0ReturnLabel = Label(label=self.labels.getNameInc("GW_B0_Deferred_Return"), comment="")
@@ -18117,9 +18243,14 @@ class KernelWriterAssembly(KernelWriter):
       return module
 
     skipLabel = Label(self.labels.getNameInc("SK_SkipNllPAP"), "")
-    # Parallel reduction (no synchronizer): WGs do not advance across tiles
-    module.add(SCmpEQU64(src0=sgpr("AddressFlags", 2), src1=hex(0), comment="Parallel reduction: skip PAP"))
-    module.add(SCBranchSCC1(labelName=skipLabel.getLabelName(), comment=""))
+    # Parallel reduction (no synchronizer): WGs do not advance across tiles.
+    # Under StreamKForceDPOnly the reduction is always forced to the tree path
+    # (Synchronizer always non-null, AddressFlags != 0 invariant), so this
+    # parallel-reduction skip never fires; fold it out and keep only the
+    # StreamKIter >= StreamKIterEnd (last-tile) check.
+    if not kernel["StreamKForceDPOnly"]:
+      module.add(SCmpEQU64(src0=sgpr("AddressFlags", 2), src1=hex(0), comment="Parallel reduction: skip PAP"))
+      module.add(SCBranchSCC1(labelName=skipLabel.getLabelName(), comment=""))
     module.add(SCmpGeU32(src0=sgpr("StreamKIter"), src1=sgpr("StreamKIterEnd"), comment="No next persistent iteration"))
     module.add(SCBranchSCC1(labelName=skipLabel.getLabelName(), comment=""))
 
@@ -19391,6 +19522,11 @@ class KernelWriterAssembly(KernelWriter):
     incSgprName = f"tdm{tcA}{tcB}Incs"
     group0Name = f"tdm{tcA}Group0"
 
+    # DP-only: StreamKLocalStart == 0, so the K-offset is 0 * increment == 0 and
+    # applying it is a no-op. StreamKLocalStart is not allocated in DP-only mode.
+    if kernel["StreamKForceDPOnly"]:
+      return mod
+
     with self.allocTmpSgpr(1, tag="tdmApplyStreamKOffsetWaveSeparated_tmpSgprRes") as tmpSgprRes:
       tmpSgpr = tmpSgprRes.idx
       mod.add(SMulI32(dst=sgpr(tmpSgpr), src0=sgpr("StreamKLocalStart"), src1=sgpr(incSgprName),
@@ -19409,8 +19545,20 @@ class KernelWriterAssembly(KernelWriter):
 
     with self.allocTmpSgpr(1) as tmpSgprRes:
       tmpSgpr = tmpSgprRes.idx
-      mod.add(SSubU32(dst=sgpr(tmpSgpr), src0=sgpr("StreamKLocalEnd"), src1=1,
-                      comment="tail iteration index within current StreamK tile"))
+      # DP-only: StreamKLocalEnd == ItersPerTile (every WG spans a full tile), so
+      # the tail iteration index is (ItersPerTile - 1). StreamKLocalEnd is not
+      # allocated in DP-only mode; derive it from the ItersPerTile constant
+      # (kept in a VGPR on gfx1250).
+      if kernel["StreamKForceDPOnly"]:
+        sIpt = self.acquireStreamKConstSgpr(kernel, "ItersPerTile")
+        if self.isStreamKConstantsToVgprEnabled(kernel):
+          mod.add(VReadfirstlaneB32(dst=sgpr(sIpt), src=vgpr(self.states.skConstVgprs["ItersPerTile"])))
+        mod.add(SSubU32(dst=sgpr(tmpSgpr), src0=sgpr(sIpt), src1=1,
+                        comment="tail iteration index within current StreamK tile (DP-only: ItersPerTile - 1)"))
+        self.releaseStreamKConstSgpr(sIpt)
+      else:
+        mod.add(SSubU32(dst=sgpr(tmpSgpr), src0=sgpr("StreamKLocalEnd"), src1=1,
+                        comment="tail iteration index within current StreamK tile"))
       mod.add(SMulI32(dst=sgpr(tmpSgpr), src0=sgpr(tmpSgpr), src1=sgpr(incSgprName),
                       comment="StreamK tail K-offset = (localEnd - 1) * increment"))
       mod.add(SAddU32(dst=sgpr(f"{group0Name}+2"), src0=sgpr(f"{group0Name}+2"), src1=sgpr(tmpSgpr),

@@ -55,16 +55,20 @@ from .ir import (
 # wired arch shares one datalayout, but two fields drift between LLVM 20
 # (ROCm 7.0/7.1) and LLVM 21+ (ROCm 7.2 ships LLVM 22):
 #
-#   * the ELF symbol-mangling spec ``m:e`` was added to the LLVM 21+
-#     AMDGPU datalayout (absent under LLVM 20):
+#   * LLVM 20 and LLVM 22 both omit the ELF symbol-mangling spec ``m:e``
+#     from the AMDGPU datalayout on this toolchain:
 #         LLVM 20:  e-p:64:64-...
-#         LLVM 22:  e-m:e-p:64:64-...
+#         LLVM 22:  e-p:64:64-...
 #   * the buffer-fat-pointer address space (``p8``) gained an index-width
 #     field:
 #         LLVM 20:  ...-p8:128:128-...
 #         LLVM 22:  ...-p8:128:128:128:48-...
 #
-# (Both confirmed against clang 20 and clang 23 amdgcn output.) On the
+# Note: early LLVM 22 builds added an ELF mangling spec ``m:e`` prefix,
+# but the current ROCm 7.2 toolchain does not emit it. The constant below
+# reflects what the installed hipcc actually produces.
+#
+# (Confirmed against clang 20 and current clang 22 amdgcn output.) On the
 # textual-IR (comgr SOURCE) path the parser is lenient: it overrides the
 # module datalayout with the target's canonical one, so a stale-but-well-
 # formed string compiles to byte-identical HSACO and the drift is
@@ -81,7 +85,7 @@ _DATALAYOUT_LLVM20 = (
     "-n32:64-S32-A5-G1-ni:7:8:9"
 )
 _DATALAYOUT_LLVM22 = (
-    "e-m:e-p:64:64-p1:64:64-p2:32:32-p3:32:32-p4:64:64-p5:32:32-p6:32:32"
+    "e-p:64:64-p1:64:64-p2:32:32-p3:32:32-p4:64:64-p5:32:32-p6:32:32"
     "-p7:160:256:256:32-p8:128:128:128:48-p9:192:256:256:32-i64:64-v16:16-v24:32"
     "-v32:32-v48:64-v96:128-v192:256-v256:256-v512:512-v1024:1024-v2048:2048"
     "-n32:64-S32-A5-G1-ni:7:8:9"
@@ -114,10 +118,11 @@ def _flavor_for_rocm(major: int, minor: int) -> str:
 def _datalayout_for_flavor(flavor: str) -> str:
     """Module ``target datalayout`` string for an LLVM flavor.
 
-    Two fields drift between flavors: the ELF mangling spec ``m:e`` (added
-    under LLVM 21+) and the buffer-fat-pointer address space ``p8`` (see
-    :data:`_DATALAYOUT_LLVM20` / :data:`_DATALAYOUT_LLVM22`). LLVM22 is the
-    default for unknown values so a typo'd override degrades to the modern
+    One field drifts between flavors: the buffer-fat-pointer address space
+    ``p8`` gained an index-width field in LLVM 22 (see :data:`_DATALAYOUT_LLVM20`
+    / :data:`_DATALAYOUT_LLVM22`).  The ELF symbol-mangling spec ``m:e`` is
+    omitted by both LLVM 20 and LLVM 22 on the AMDGPU datalayout.  LLVM22 is
+    the default for unknown values so a typo'd override degrades to the modern
     layout rather than the legacy one.
     """
     return _DATALAYOUT_LLVM20 if flavor == LLVM_FLAVOR_LLVM20 else _DATALAYOUT_LLVM22
@@ -509,6 +514,11 @@ _INTRINSIC_DECLS: Dict[str, str] = {
     "global.atomic.fadd.v2bf16": (
         "declare <2 x bfloat> @llvm.amdgcn.global.atomic.fadd.v2bf16.p1("
         "ptr addrspace(1), <2 x bfloat>)"
+    ),
+    # Packed fp16 atomic add (gfx940+). Two fp16 lanes per atomic transaction.
+    "global.atomic.fadd.v2f16": (
+        "declare <2 x half> @llvm.amdgcn.global.atomic.fadd.v2f16.p1("
+        "ptr addrspace(1), <2 x half>)"
     ),
     "mbcnt.lo": ("declare i32 @llvm.amdgcn.mbcnt.lo(i32, i32)"),
     "mbcnt.hi": ("declare i32 @llvm.amdgcn.mbcnt.hi(i32, i32)"),
@@ -2115,6 +2125,26 @@ class _Lowerer:
             f"  {op.result.name} = call <2 x bfloat> "
             f"@llvm.amdgcn.global.atomic.fadd.v2bf16.p1("
             f"ptr addrspace(1) {gep}, <2 x bfloat> {self._operand(val)})"
+        )
+
+    def _op_memref_global_atomic_add_pk_f16(self, op: Op) -> None:
+        """Lower the packed-fp16 atomic add to its AMDGCN intrinsic.
+
+        Mirrors ``_op_memref_global_atomic_add_pk_bf16`` for fp16.
+        GEPs into the fp16 buffer at ``idx`` and calls
+        ``llvm.amdgcn.global.atomic.fadd.v2f16.p1`` (gfx940+).
+        """
+        ptr, idx, val = op.operands
+        self._needs_intrin["global.atomic.fadd.v2f16"] = True
+        gep = self._fresh("gep")
+        self._current().emit(
+            f"  {gep} = getelementptr inbounds half, ptr addrspace(1) "
+            f"{self._operand(ptr)}, i32 {self._operand(idx)}"
+        )
+        self._current().emit(
+            f"  {op.result.name} = call <2 x half> "
+            f"@llvm.amdgcn.global.atomic.fadd.v2f16.p1("
+            f"ptr addrspace(1) {gep}, <2 x half> {self._operand(val)})"
         )
 
     def _op_memref_global_load_vN(self, op: Op) -> None:
