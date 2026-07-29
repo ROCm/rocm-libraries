@@ -31,6 +31,7 @@
 #include "stinkytofu/ir/DumpStinkyModulePass.hpp"
 #include "stinkytofu/pipeline/ScopeAdaptor.hpp"
 #include "stinkytofu/support/DebugPrintInstrumentation.hpp"
+#include "stinkytofu/transforms/asm/AccumulateInstructionSizePass.hpp"
 #include "stinkytofu/transforms/asm/BuildDefUseChain.hpp"
 #include "stinkytofu/transforms/asm/CFGBuilderPass.hpp"
 #include "stinkytofu/transforms/asm/DeadCodeEliminationPass.hpp"
@@ -55,6 +56,8 @@
 #include "stinkytofu/transforms/asm/StinkyRemoveNopPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyRemoveWaitCntPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyWaitCntInsertionPass.hpp"
+#include "stinkytofu/transforms/asm/SwInstructionPrefetchRelDynamicPass.hpp"
+#include "stinkytofu/transforms/asm/SwInstructionPrefetchRelStaticPass.hpp"
 
 using namespace stinkytofu;
 
@@ -81,6 +84,14 @@ inline bool hasPassArg(const std::vector<std::string>& args, const char* flag) {
 const std::vector<PassInfo> availablePasses = {
     {"StinkyDAGSchedulerPass", [](const auto&) { return createStinkyDAGSchedulerPass(); }},
     {"SetMatrixReusePass", [](const auto&) { return createSetMatrixReusePass(); }},
+    {"SwInstructionPrefetchRelStaticPass",
+     [](const auto&) { return createSwInstructionPrefetchRelStaticPass(std::string{}); }},
+    {"SwInstructionPrefetchRelDynamicPass",
+     [](const auto&) { return createSwInstructionPrefetchRelDynamicPass(std::string{}); }},
+    {"AccumulateInstructionSizePass",
+     [](const auto&) { return createAccumulateInstructionSizePass(""); }},
+    {"AccumulateInstructionSizeDebugPass",
+     [](const auto&) { return createAccumulateInstructionSizePassWithDebug(); }},
     {"StinkyBuildImplicitDependencyPass",
      [](const auto&) { return createStinkyBuildImplicitDependencyPass(); }},
     {"StinkyRemoveWaitCntPass", [](const auto&) { return createStinkyRemoveWaitCntPass(); }},

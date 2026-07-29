@@ -57,6 +57,8 @@ from .Activation import ActivationModule
 from .Common import printWarning, roundUp, print2, DebugConfig, DataDirection, \
   INDEX_CHARS, IsaVersion, log2
 from .Common.GlobalParameters import globalParameters
+from .Common.ValidParameters import resolveSwInstructionPrefetch, \
+  SW_INSTRUCTION_PREFETCH_AUTO
 from Tensile.SolutionStructs.Naming import getKernelNameMin
 from Tensile.Toolchain.Component import Assembler
 
@@ -307,6 +309,15 @@ class StateValues:
   numSgprAddressDbg: int                 = 0
 
   firstInitSgpr: int                     = -1
+  # Abs SW instruction prefetch base: low index of 3 contiguous SGPRs (even-aligned pair
+  # s[N:N+1] + scratch s[N+2]) auto-allocated in _initKernel. Reserved through the prolog and
+  # checked back in at label_MultiGemmEnd (just before defineVariableSgprs reclaims the slots),
+  # so the dynamic CFG-target prefetch ladder inserted there can use it without clobbering body
+  # values (net +0 SGPR). The scratch holds the PC-rel offset (bare-label + temp idiom). -1 = off.
+  swPrefetchAbsBaseSgpr: int             = -1
+  # Pending deferred check-in of the abs-prefetch base triple: set in _initKernel, freed at
+  # label_MultiGemmEnd in KernelWriterAssembly. -1 = nothing pending / already freed.
+  swPrefetchAbsBaseSgprPendingCheckIn: int = -1
   nonPostLoopSgpr: List[str]             = field(init=False)
   userArgsInfo: UserArgumentsInfo        = field(default_factory=UserArgumentsInfo)
   numSgprToLoad: int                     = 0 # For kernel args
@@ -6666,6 +6677,17 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
       moduleKernelBody.body.setParent()
 
+      # Resolve the SwInstructionPrefetch bitmask (int; legacy bool accepted as a
+      # deprecated alias) to the (relative, absolute) enable pair the StinkyTofu
+      # passes read. Auto resolves to Absolute on gfx1250 non-Stream-K, Relative
+      # otherwise. Absolute gating (Stream-K / non-gfx1250 / GSU) is enforced
+      # downstream by the baseSgpr=-1 reservation gate and the C++ passes.
+      swpRelEnable, swpAbsEnable = resolveSwInstructionPrefetch(
+          kernel.get("SwInstructionPrefetch", SW_INSTRUCTION_PREFETCH_AUTO),
+          self.states.version == (12, 5, 0),
+          bool(kernel.get("StreamK", 0)),
+          kernel["ProblemType"]["DataType"].isDouble())
+
       # Set StinkyTofu module options
       stinky_module_options = {"OptLevel": stinky_opt_level,
                                "EnableRemarks": bool(globalParameters.get("StinkyTofuEnableRemarks") or False),
@@ -6692,8 +6714,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
                                "DirectToLdsA": bool(kernel["DirectToLdsA"]),
                                "DirectToLdsB": bool(kernel["DirectToLdsB"]),
                                "UseSgprForGRO": kernel["_UseSgprForGRO"],
-                               # -1 disables SwInstructionPrefetch in Gfx1250Backend; else scratch pool index
-                               "SwPrefetchScratchSgpr": int(self.sgprs.get("SwPrefetchScratch", -1)),
+                               "EnableSwInstructionPrefetchRelStatic": swpRelEnable,
                                # Cluster-barrier handshake insertion in Gfx1250Backend
                                # (kernel-scope at every OptLevel when set).
                                "ClusterBarrier": bool(kernel.get("ClusterBarrier", False)),
@@ -6709,6 +6730,14 @@ class KernelWriter(metaclass=abc.ABCMeta):
                                # a workgroup sync inside the LCL-gated signal block.
                                # Defaults to 1 (fallback off) when unset.
                                "PrefetchLocalRead": int(kernel.get("PrefetchLocalRead", 1)),
+                               # Abs SW prefetch: mutually exclusive with PC-rel.
+                               # Abs takes priority when both are True (backend enforces via else-if).
+                               "EnableSwInstructionPrefetchAbs": swpAbsEnable,
+                               # Auto-allocated 3-SGPR triple (even-aligned pair + scratch),
+                               # reserved in _initKernel and freed at label_MultiGemmEnd; -1 when
+                               # abs prefetch is off (also -1 for Stream-K / non-gfx1250).
+                               "SwInstructionPrefetchAbsBaseSgpr": int(
+                                   self.states.swPrefetchAbsBaseSgpr),
                               }
 
       # Region-clone jobs for StinkyTofu RegionClonePass.
@@ -9313,10 +9342,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     self.defineSgpr("OrigLoopCounter", 1)
 
-    # Whole-kernel scratch for StinkyTofu SwPrefetchInsertionPass (user SGPR; pool order);
-    if rocisa.isSupportedByStinkyTofu(self.states.version) and bool(kernel.get("SwInstructionPrefetch", True)):
-      self.defineSgpr("SwPrefetchScratch", 1)
-
     if self.debugConfig.debugKernel:
       self.defineSgpr("AddressDbg", self.states.numSgprAddressDbg)
       self.defineSgpr("DebugKernelItems", 1)
@@ -9677,6 +9702,61 @@ class KernelWriter(metaclass=abc.ABCMeta):
     while SgprSlot:
       tempSgpr = SgprSlot.pop(0)
       self.sgprPool.checkIn(tempSgpr)
+
+    # Abs SW instruction prefetch base SGPRs.
+    # Reserve 3 contiguous SGPRs with an even-aligned base for the StinkyTofu abs static pass,
+    # which inserts the prefetch burst
+    #   (s_getpc_b64 -> s_add_i32 -> s_add_u32 -> s_addc_u32 -> s_prefetch_inst)
+    # at kernel entry-begin:
+    #   s[base:base+1] = even-aligned 64-bit address pair (s_getpc_b64 / s_prefetch_inst base)
+    #   s[base+2]      = scratch (PC-rel offset, then klength=31 for the slength operand)
+    # The burst runs BEFORE the kernarg preload shuffle has moved preloaded arguments out of their
+    # launch SGPRs, so with PreloadKernArgs the base pair MUST NOT alias the live-in preload region
+    # s[0:MaxSgprPreload). checkOutAligned() returns the lowest free aligned block, which can fall
+    # inside that region (e.g. s20 == SrdC, holding a preloaded stride at entry), so temporarily
+    # reserve s[0:MaxSgprPreload) to force the base above it (mirrors the preloadGuard above). The
+    # base triple's check-in is DEFERRED to label_MultiGemmEnd (KernelWriterAssembly), so it stays
+    # reserved across the prolog for the dynamic CFG-target ladder and is reclaimed by
+    # defineVariableSgprs right after MGE (net +0). Fallback: immediate check-in when do["PreLoop"]
+    # is off. Stream-K / non-gfx1250 are excluded from allocation entirely (see below).
+    self.states.swPrefetchAbsBaseSgpr = -1
+    self.states.swPrefetchAbsBaseSgprPendingCheckIn = -1
+    # Only gfx1250 non-Stream-K kernels reserve the abs base; leaving baseSgpr = -1 makes both
+    # abs passes no-op. Stream-K is unsupported (may be GSU0, so sgprGSU can be unset, and its
+    # SrdWS prolog SGPRs would collide with the base); non-gfx1250 never uses s_prefetch_inst.
+    # The StreamK/ISA guards below mirror the resolver (defense-in-depth).
+    swpAbsRequested = resolveSwInstructionPrefetch(
+        kernel.get("SwInstructionPrefetch", SW_INSTRUCTION_PREFETCH_AUTO),
+        self.states.version == (12, 5, 0),
+        bool(kernel.get("StreamK", 0)),
+        kernel["ProblemType"]["DataType"].isDouble())[1]
+    if swpAbsRequested and not kernel["StreamK"] \
+       and self.states.version == (12, 5, 0):
+      # Force the base past the live-in kernarg preload region when preloading is enabled.
+      prefetchPreloadGuard = []
+      if kernel["PreloadKernArgs"]:
+        while True:
+          guardSgpr = self.sgprPool.checkOut(1, "SwPrefetchAbsPreloadGuard", preventOverflow=False)
+          if guardSgpr >= self.states.archCaps["MaxSgprPreload"]:
+            self.sgprPool.checkIn(guardSgpr)
+            break
+          prefetchPreloadGuard.append(guardSgpr)
+      absBaseIdx = self.sgprPool.checkOutAligned(3, 2, tag="SwPrefetchAbsBase", preventOverflow=False)
+      assert absBaseIdx % 2 == 0, "abs prefetch base SGPR pair must be even-aligned"
+      assert (not kernel["PreloadKernArgs"]) or absBaseIdx >= self.states.archCaps["MaxSgprPreload"], \
+        "abs prefetch base SGPR must not alias the kernarg preload region"
+      self.states.swPrefetchAbsBaseSgpr = absBaseIdx
+      # Defer the check-in to label_MultiGemmEnd (KernelWriterAssembly) so the triple stays
+      # reserved across the prolog for the dynamic CFG-target prefetch ladder inserted there; it is
+      # reclaimed by defineVariableSgprs right after MGE (net +0 SGPR; fleet-verified). (Stream-K
+      # is already excluded above, so no SrdWS collision here.) Fall back to an immediate check-in
+      # if the PreLoop block that emits labelMultiGemmEnd is disabled (avoids leaking the pair).
+      if self.do.get("PreLoop", True):
+        self.states.swPrefetchAbsBaseSgprPendingCheckIn = absBaseIdx
+      else:
+        self.sgprPool.checkIn(absBaseIdx)
+      for guardSgpr in prefetchPreloadGuard:
+        self.sgprPool.checkIn(guardSgpr)
 
     if self.sgprPool.size() > self.states.regCaps["MaxSgpr"]:
       print ("warning: Number of first half of defined SGPRS (%d) overflowed max SGPRS (%d)." \
