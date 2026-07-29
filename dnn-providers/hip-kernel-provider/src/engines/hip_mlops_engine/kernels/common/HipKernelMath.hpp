@@ -180,12 +180,6 @@ __forceinline__ __device__ __half tanh(__half x)
 // BFloat16 overloads
 //=============================================================================
 
-using bf16_ushort_conversion_t = union
-{
-    unsigned short int usi;
-    __bf16 bf16;
-};
-
 __forceinline__ __device__ __bf16 exp(__bf16 x)
 {
     return static_cast<__bf16>(exp(static_cast<float>(x)));
