@@ -13674,6 +13674,7 @@ class KernelWriterAssembly(KernelWriter):
     tmpspgr0 = self.sgprPool.checkOut(1, tag="SrdTDInit_tmpspgr0", preventOverflow=False)
     tmpspgr1 = self.sgprPool.checkOutAligned(2, 4, tag="SrdTDInit_tmpspgr1", preventOverflow=False)
     tmpspgr2 = self.sgprPool.checkOutAligned(2, 4, tag="SrdTDInit_tmpspgr2", preventOverflow=False)
+    tmpsgpr3 = self.sgprPool.checkOutAligned(2, 4, tag="SrdTDInit_tmpsgpr3", preventOverflow=False)
     module.addComment0("calculate SrdTD address")
 
     module.add(SMovB32(dst=sgpr("SrdTD+2"), src="BufferOOB"))
@@ -13709,13 +13710,16 @@ class KernelWriterAssembly(KernelWriter):
     # Load and apply batch offset for General Batched GEMM (dstD) as necessary.
     if not kernel["ProblemType"]["GroupedGemm"]:
       # Add explicit wait for gfx12 as a workaround
-      if kernel["ExpertSchedulingMode"] > 0:
-        module.add(SWaitAlu(va_ssrc=0, comment="Wait for reads to complete"))  ## test 1
-        #module.add(SWaitCnt(kmcnt=0, comment="Wait for the Matrix Address Load from the Pointer Array"))
-      module.add(SLoadB64(dst=sgpr(tmpspgr2, 2), base=sgpr("KernArgAddress", 2), soffset=hex(self.states.batchOffsetDKernArgOffset), comment="Load batchOffsetD from kernel args"))
+      #if kernel["ExpertSchedulingMode"] > 0:
+      #  module.add(SWaitAlu(va_ssrc=0, comment="Wait for reads to complete"))  ## test 1
+      #  #module.add(SWaitCnt(kmcnt=0, comment="Wait for the Matrix Address Load from the Pointer Array"))
+#      module.add(SLoadB64(dst=sgpr(tmpspgr2, 2), base=sgpr("KernArgAddress", 2), soffset=hex(self.states.batchOffsetDKernArgOffset), comment="Load batchOffsetD from kernel args"))
+      module.add(SLoadB64(dst=sgpr(tmpsgpr3, 2), base=sgpr("KernArgAddress", 2), soffset=hex(self.states.batchOffsetDKernArgOffset), comment="Load batchOffsetD from kernel args"))
       module.add(SWaitCnt(kmcnt=0, comment="Wait for the Matrix Address and batchOffsetD Load"))
-      module.add(SAddU32(dst=sgpr("SrdTD+0"), src0=sgpr("SrdTD+0"), src1=sgpr(tmpspgr2+0), comment="Apply batchOffsetD to SrdTD (low)"))
-      module.add(SAddCU32(dst=sgpr("SrdTD+1"), src0=sgpr("SrdTD+1"), src1=sgpr(tmpspgr2+1), comment="Apply batchOffsetD to SrdTD (high)"))
+#      module.add(SAddU32(dst=sgpr("SrdTD+0"), src0=sgpr("SrdTD+0"), src1=sgpr(tmpspgr2+0), comment="Apply batchOffsetD to SrdTD (low)"))
+#      module.add(SAddCU32(dst=sgpr("SrdTD+1"), src0=sgpr("SrdTD+1"), src1=sgpr(tmpspgr2+1), comment="Apply batchOffsetD to SrdTD (high)"))
+      module.add(SAddU32(dst=sgpr("SrdTD+0"), src0=sgpr("SrdTD+0"), src1=sgpr(tmpsgpr3+0), comment="Apply batchOffsetD to SrdTD (low)"))
+      module.add(SAddCU32(dst=sgpr("SrdTD+1"), src0=sgpr("SrdTD+1"), src1=sgpr(tmpsgpr3+1), comment="Apply batchOffsetD to SrdTD (high)"))
     else:
       module.add(SWaitCnt(kmcnt=0, comment="Wait for the Matrix Address Load from the Pointer Array"))
     module.add(SrdTDGeneralBatched_End)
@@ -13725,6 +13729,7 @@ class KernelWriterAssembly(KernelWriter):
     self.sgprPool.checkIn(tmpspgr0)
     self.sgprPool.checkIn(tmpspgr1)
     self.sgprPool.checkIn(tmpspgr2)
+    self.sgprPool.checkIn(tmpsgpr3)
 
     module.add(self.shiftSrd("TD"))
 
