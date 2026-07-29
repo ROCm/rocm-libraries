@@ -680,7 +680,7 @@ void dispatcher_cleanup()
 {
     g_dispatcher.reset();
     g_initialized = false;
-#ifdef GEMM_KEY_PRESHUFFLE
+#if defined(GEMM_KEY_PRESHUFFLE) && (GEMM_KEY_PRESHUFFLE != 0)
     // Release the process-lifetime shuffled-B cache so an embedding library that
     // calls dispatcher_cleanup() frees the held HostTensor instead of leaking it
     // until process exit (the benchmark process never calls cleanup, but a

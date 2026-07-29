@@ -244,5 +244,42 @@ class TestPreshuffleConfigsCoverPersistentFalse(unittest.TestCase):
                 self.assertIn(True, vals, f"{name} must sweep persistent=True")
 
 
+class TestShuffledBCacheGuardParity(unittest.TestCase):
+    """The shuffled-B cache use-site guard must match its definition guard.
+
+    ``ShuffledBCache``/``g_shuffled_b_cache`` are defined only under
+    ``#if defined(GEMM_KEY_PRESHUFFLE) && (GEMM_KEY_PRESHUFFLE != 0)``. Codegen
+    emits ``#define GEMM_KEY_PRESHUFFLE 0`` for every non-preshuffle kernel, so a
+    bare ``#ifdef GEMM_KEY_PRESHUFFLE`` at a use-site is true for those kernels
+    and references the (undeclared) cache, breaking the standard dispatcher_gemm
+    lib. The use-site must therefore carry the same ``!= 0`` guard.
+    """
+
+    _SRC = DISPATCHER_DIR / "bindings" / "ctypes" / "gemm_ctypes_lib.cpp"
+
+    def test_cache_use_site_guard_is_nonzero_form(self):
+        lines = self._SRC.read_text().splitlines()
+        use_idx = next(
+            i
+            for i, ln in enumerate(lines)
+            if "g_shuffled_b_cache = ShuffledBCache{}" in ln
+        )
+        guard = next(
+            lines[j]
+            for j in range(use_idx, -1, -1)
+            if lines[j].lstrip().startswith(("#if", "#ifdef"))
+            and "GEMM_KEY_PRESHUFFLE" in lines[j]
+        )
+        self.assertIn(
+            "GEMM_KEY_PRESHUFFLE != 0",
+            guard,
+            f"cache use-site guarded by non-'!= 0' directive: {guard!r}",
+        )
+        self.assertFalse(
+            guard.lstrip().startswith("#ifdef "),
+            f"cache use-site must not use bare #ifdef: {guard!r}",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
