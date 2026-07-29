@@ -24,8 +24,18 @@ enum class MemoryGroupKind {
     None,
     SMEM,
     VMEM,
-    TDM,
+    Other,
 };
+
+enum class ReplayMode {
+    SingleGroup,
+    MultiGroup,
+};
+
+// This pass currently implements only the single-group policy. Keep the
+// mapping explicit because gfx1250 categorizes tensor memory differently in
+// multi-group mode.
+constexpr ReplayMode kReplayMode = ReplayMode::SingleGroup;
 
 struct GroupState {
     MemoryGroupKind kind = MemoryGroupKind::None;
@@ -41,14 +51,16 @@ struct GroupState {
     }
 };
 
-MemoryGroupKind getMemoryGroupKind(const StinkyInstruction& inst) {
+MemoryGroupKind getMemoryGroupKind(const StinkyInstruction& inst, ReplayMode replayMode) {
     if (isSMemLoad(inst) || isSMemStore(inst) || inst.is(InstFlag::IF_SMemAtomic))
         return MemoryGroupKind::SMEM;
     if (isMUBUFLoad(inst) || isMUBUFStore(inst) || isMUBUFAtomic(inst) || isFLATLoad(inst) ||
         isFLATStore(inst) || isFLATAtomic(inst) || isGLOBALLoad(inst) || isGLOBALStore(inst) ||
         isGLOBALAtomic(inst))
         return MemoryGroupKind::VMEM;
-    if (isTensorLoad(inst)) return MemoryGroupKind::TDM;
+    if (isTensorLoad(inst))
+        return replayMode == ReplayMode::SingleGroup ? MemoryGroupKind::Other
+                                                     : MemoryGroupKind::VMEM;
     return MemoryGroupKind::None;
 }
 
@@ -88,11 +100,11 @@ bool isForeverSleep(const StinkyInstruction& inst) {
     return (static_cast<uint16_t>(srcs.front().getLiteralInt()) & 0x8000U) != 0;
 }
 
-bool isImmediateMemorySuccessor(BasicBlock::iterator it, BasicBlock& bb) {
+bool isImmediateMemorySuccessor(BasicBlock::iterator it, BasicBlock& bb, ReplayMode replayMode) {
     for (auto next = std::next(it); next != bb.end(); ++next) {
         auto* inst = dyn_cast<StinkyInstruction>(next.getNodePtr());
         if (inst == nullptr || isPseudoInst(inst)) continue;
-        return getMemoryGroupKind(*inst) != MemoryGroupKind::None;
+        return getMemoryGroupKind(*inst, replayMode) != MemoryGroupKind::None;
     }
     return false;
 }
@@ -180,14 +192,14 @@ class Gfx1250HazardPass : public Pass {
                 }
 
                 if (inst->getUnifiedOpcode() == GFX::s_set_vgpr_msb) {
-                    if (!isImmediateMemorySuccessor(it, bb) && state.hasMemory)
+                    if (!isImmediateMemorySuccessor(it, bb, kReplayMode) && state.hasMemory)
                         insertXcntDrain(builder, archId, inst, state);
                     // s_set_vgpr_msb is a non-memory single-group boundary.
                     state.clear();
                     continue;
                 }
 
-                const MemoryGroupKind kind = getMemoryGroupKind(*inst);
+                const MemoryGroupKind kind = getMemoryGroupKind(*inst, kReplayMode);
                 if (kind == MemoryGroupKind::None) {
                     // In single-group mode hardware drains XCNT before every
                     // real non-memory instruction, including control flow.

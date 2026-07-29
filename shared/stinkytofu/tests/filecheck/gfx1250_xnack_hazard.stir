@@ -71,3 +71,15 @@ st.func @preserve_existing_xcnt_and_finite_sleep() {
   v3 = "st.global_atomic_inc_u32"(v1, v2, s[14:15])
   "st.s_sleep"(127)
 }
+
+# Single-group hardware treats TDM as "other", so tensor -> VMEM is a
+# hardware-drained type switch. The pass must not add a redundant XCnt drain.
+# CHECK-LABEL: @single_group_tensor_is_other
+# CHECK: tensor_load_to_lds
+# CHECK-NEXT: global_atomic_inc_u32
+# CHECK-NOT: s_wait_xcnt
+st.func @single_group_tensor_is_other() {
+^entry:
+  "st.tensor_load_to_lds"(s[0:3], s[4:11]) { mod.memtoken = { tokens = [0] } }
+  v3 = "st.global_atomic_inc_u32"(v1, v2, s[14:15])
+}
