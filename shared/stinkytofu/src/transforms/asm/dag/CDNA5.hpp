@@ -91,7 +91,7 @@ static constexpr HazardRule kCdna5HazardRules[] = {
     {"SaluSgprToMemAddr", isScalarALU, isSaluHazardConsumer, RegType::S, 8},
     // VALU vgpr -> VMEM address (global_read/MUBUF/FLAT/GLOBAL). Excludes SMEM/tensor_load:
     // those addresses are sgpr-only, never vgpr.
-    {"ValuVgprToVmemAddr", isVectorALU, isVmemAddrHazardConsumer, RegType::V, 16},
+    {"ValuVgprToVmemAddr", isVectorALU, isVmemAddrHazardConsumer, RegType::V, 32},
 };
 constexpr int kNumCdna5HazardRules =
     static_cast<int>(sizeof(kCdna5HazardRules) / sizeof(kCdna5HazardRules[0]));
