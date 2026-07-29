@@ -196,7 +196,7 @@ TYPED_TEST(HipcubThreadOperatorsTests, Difference)
 
 // Division operator is not defined for custom_test_type.
 template<class Params>
-class HipcubDivisionOperatorTests : public ::testing::Test
+class HipcubDivisionOperatorTests : public test_controller::ControlledTest<>
 {
 public:
     using input_type  = typename Params::input_type;
@@ -340,7 +340,7 @@ TYPED_TEST(HipcubThreadOperatorsTests, ArgMin)
 // Non-commutative operators.
 
 template<class Params>
-class HipcubNCThreadOperatorsTests : public ::testing::Test
+class HipcubNCThreadOperatorsTests : public test_controller::ControlledTest<>
 {
 public:
     using input_type  = typename Params::input_type;
@@ -736,15 +736,13 @@ TYPED_TEST(HipcubNCThreadOperatorsTests, BinaryFlip)
 }
 
 // Unary operators tests.
-
 TYPED_TEST(HipcubNCThreadOperatorsTests, CastOp)
 {
     using input_type  = typename TestFixture::input_type;
     using output_type = typename TestFixture::output_type;
     using IteratorType
         = rocprim::transform_iterator<input_type*, hipcub::CastOp<output_type>, output_type>;
-    const std::vector<size_t> sizes = get_sizes();
-    for(auto input_size : CHECK_SIZE_FILTERS(sizes))
+    for(auto input_size : CHECK_SIZE_FILTERS(get_sizes()))
     {
         // Generate data.
         std::vector<input_type> input(input_size);

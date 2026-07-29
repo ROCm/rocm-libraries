@@ -101,7 +101,6 @@ TYPED_TEST(HipcubDeviceMergeSort, SortKeys)
                 continue;
             }
             SCOPED_TRACE(testing::Message() << "with size= " << size);
-            CHECK_SIZE_ENABLEMENT(size);
 
             // Generate data
             std::vector<key_type> keys_input;
@@ -198,7 +197,6 @@ TYPED_TEST(HipcubDeviceMergeSort, SortKeysCopy)
                 continue;
             }
             SCOPED_TRACE(testing::Message() << "with size= " << size);
-            CHECK_SIZE_ENABLEMENT(size);
 
             // Generate data
             std::vector<key_type> keys_input;
@@ -300,7 +298,6 @@ TYPED_TEST(HipcubDeviceMergeSort, StableSortKeys)
                 continue;
             }
             SCOPED_TRACE(testing::Message() << "with size= " << size);
-            CHECK_SIZE_ENABLEMENT(size);
             // Generate data
             std::vector<key_type> keys_input;
             keys_input
@@ -397,7 +394,6 @@ TYPED_TEST(HipcubDeviceMergeSort, StableSortKeysCopy)
                 continue;
             }
             SCOPED_TRACE(testing::Message() << "with size= " << size);
-            CHECK_SIZE_ENABLEMENT(size);
 
             // Generate data
             std::vector<key_type> keys_input;
@@ -499,7 +495,6 @@ TYPED_TEST(HipcubDeviceMergeSort, SortPairs)
                 continue;
             }
             SCOPED_TRACE(testing::Message() << "with size= " << size);
-            CHECK_SIZE_ENABLEMENT(size);
             compare_function compare_op;
             using key_value = std::pair<key_type, value_type>;
 
@@ -640,7 +635,6 @@ TYPED_TEST(HipcubDeviceMergeSort, SortPairsCopy)
                 continue;
             }
             SCOPED_TRACE(testing::Message() << "with size= " << size);
-            CHECK_SIZE_ENABLEMENT(size);
             compare_function compare_op;
             using key_value = std::pair<key_type, value_type>;
 
@@ -793,7 +787,6 @@ TYPED_TEST(HipcubDeviceMergeSort, StableSortPairs)
                 continue;
             }
             SCOPED_TRACE(testing::Message() << "with size= " << size);
-            CHECK_SIZE_ENABLEMENT(size);
             compare_function compare_op;
             using key_value = std::pair<key_type, value_type>;
 

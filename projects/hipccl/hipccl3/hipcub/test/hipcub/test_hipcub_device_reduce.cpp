@@ -102,7 +102,6 @@ TYPED_TEST(HipcubDeviceReduceTests, ReduceSum)
         for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
         {
             SCOPED_TRACE(testing::Message() << "with size= " << size);
-            CHECK_SIZE_ENABLEMENT(size);
             if(test_utils::precision<U>::value * size > 0.5)
             {
                 std::cout << "Test is skipped from size " << size
@@ -253,7 +252,6 @@ TYPED_TEST(HipcubDeviceReduceTests, ReduceMinimum)
         for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
         {
             SCOPED_TRACE(testing::Message() << "with size= " << size);
-            CHECK_SIZE_ENABLEMENT(size);
 
             // Generate data
             std::vector<T> input = test_utils::get_random_data<T>(size, 1.0f, 100.0f, seed_value);
@@ -368,7 +366,6 @@ TYPED_TEST(HipcubDeviceReduceTests, ReduceMaximum)
         for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
         {
             SCOPED_TRACE(testing::Message() << "with size= " << size);
-            CHECK_SIZE_ENABLEMENT(size);
 
             // Generate data
             std::vector<T> input = test_utils::get_random_data<T>(size, 1.0f, 100.0f, seed_value);
@@ -827,7 +824,7 @@ TYPED_TEST(HipcubDeviceReduceTests, ReduceArg2Maximum)
 }
 
 template<class T>
-class HipcubDeviceReduceArgMinMaxSpecialTests : public testing::Test
+class HipcubDeviceReduceArgMinMaxSpecialTests : public test_controller::ControlledTest<>
 {};
 
 using HipcubDeviceReduceArgMinMaxSpecialTestsParams
@@ -1033,7 +1030,6 @@ TYPED_TEST(HipcubDeviceReduceTests, TransformReduce)
         for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
         {
             SCOPED_TRACE(testing::Message() << "with size= " << size);
-            CHECK_SIZE_ENABLEMENT(size);
             if(test_utils::precision<U>::value * size > 0.5)
             {
                 std::cout << "Test is skipped from size " << size
@@ -1172,7 +1168,6 @@ TYPED_TEST(HipcubDeviceReduceLargeIndicesTests, LargeIndices)
         for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
         {
             const size_t size = 1ll << exponent;
-            CHECK_SIZE_ENABLEMENT(size);
             unsigned int seed_value
                 = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
             SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);

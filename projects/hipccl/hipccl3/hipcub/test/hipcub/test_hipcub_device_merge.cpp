@@ -481,8 +481,7 @@ std::vector<std::tuple<size_t, size_t>> get_large_sizes()
 }
 
 class HipcubDeviceMergeNonTyped : public test_controller::ControlledTest<PairTransformer>
-{
-};
+{};
 
 TEST_F(HipcubDeviceMergeNonTyped, MergeLargeSizeIterators)
 {

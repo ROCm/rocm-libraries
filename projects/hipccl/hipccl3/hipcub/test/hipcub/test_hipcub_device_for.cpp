@@ -108,7 +108,6 @@ TYPED_TEST(HipcubDeviceForTests, ForEach)
         for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
         {
             SCOPED_TRACE(testing::Message() << "with size = " << size);
-            CHECK_SIZE_ENABLEMENT(size);
 
             // Generate data
             std::vector<T> input = test_utils::get_random_data<T>(size, 1, 100, seed_value);
@@ -202,7 +201,6 @@ TEST_F(HipcubDeviceForNonTypedTests, ForEachTempStore)
             hipStream_t stream = 0; // default
 
             SCOPED_TRACE(testing::Message() << "with size = " << size);
-            CHECK_SIZE_ENABLEMENT(size);
 
             // Generate data
             std::vector<T>      input    = test_utils::get_random_data<T>(size, 1, 100, seed_value);
@@ -288,7 +286,6 @@ TYPED_TEST(HipcubDeviceForTests, ForEachN)
         for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
         {
             SCOPED_TRACE(testing::Message() << "with size = " << size);
-            CHECK_SIZE_ENABLEMENT(size);
 
             size_t n = size / 2;
 
@@ -367,7 +364,6 @@ TEST_F(HipcubDeviceForNonTypedTests, ForEachNTempStore)
             hipStream_t stream = 0; // default
 
             SCOPED_TRACE(testing::Message() << "with size = " << size);
-            CHECK_SIZE_ENABLEMENT(size);
 
             size_t n = size / 2;
 
@@ -452,7 +448,6 @@ TYPED_TEST(HipcubDeviceForTests, ForEachCopy)
         for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
         {
             SCOPED_TRACE(testing::Message() << "with size = " << size);
-            CHECK_SIZE_ENABLEMENT(size);
 
             // Generate data
             std::vector<T> input    = test_utils::get_random_data<T>(size, 1, 100, seed_value);
@@ -532,7 +527,6 @@ TEST_F(HipcubDeviceForNonTypedTests, ForEachCopyTempStore)
             hipStream_t stream = 0; // default
 
             SCOPED_TRACE(testing::Message() << "with size = " << size);
-            CHECK_SIZE_ENABLEMENT(size);
 
             // Generate data
             std::vector<T> input    = test_utils::get_random_data<T>(size, 1, 100, seed_value);
@@ -618,7 +612,6 @@ TYPED_TEST(HipcubDeviceForTests, ForEachCopyN)
         for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
         {
             SCOPED_TRACE(testing::Message() << "with size = " << size);
-            CHECK_SIZE_ENABLEMENT(size);
 
             // Generate data
             std::vector<T> input    = test_utils::get_random_data<T>(size, 1, 100, seed_value);
@@ -696,7 +689,6 @@ TEST_F(HipcubDeviceForNonTypedTests, ForCountingIterator)
             hipStream_t stream = 0; // default
 
             SCOPED_TRACE(testing::Message() << "with size = " << size);
-            CHECK_SIZE_ENABLEMENT(size);
 
             // Generate data
             unsigned int expected = 0;
@@ -750,7 +742,6 @@ TEST_F(HipcubDeviceForNonTypedTests, ForCopyCountingIterator)
             hipStream_t stream = 0; // default
 
             SCOPED_TRACE(testing::Message() << "with size = " << size);
-            CHECK_SIZE_ENABLEMENT(size);
 
             // Generate data
             unsigned int expected = 0;
@@ -805,7 +796,6 @@ TEST_F(HipcubDeviceForNonTypedTests, ForEachCopyNTempStore)
             hipStream_t stream = 0; // default
 
             SCOPED_TRACE(testing::Message() << "with size = " << size);
-            CHECK_SIZE_ENABLEMENT(size);
 
             // Generate data
             std::vector<T> input    = test_utils::get_random_data<T>(size, 1, 100, seed_value);
@@ -1131,7 +1121,6 @@ TYPED_TEST(HipcubDeviceForBulkTests, Bulk)
         {
 
             SCOPED_TRACE(testing::Message() << "with size = " << size);
-            CHECK_SIZE_ENABLEMENT(size);
 
             T n = static_cast<T>(size);
 
@@ -1179,7 +1168,6 @@ TEST_F(HipcubDeviceForBulkNonTypedTests, BulkTempStore)
             hipStream_t stream = 0; // default
 
             SCOPED_TRACE(testing::Message() << "with size = " << size);
-            CHECK_SIZE_ENABLEMENT(size);
 
             T n = static_cast<T>(size);
 
