@@ -10,6 +10,18 @@ cmake_minimum_required(VERSION 3.16)
 # Find Python
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
 
+# Bridge on-device GPU correctness test (SKIPs cleanly without a GPU/built lib).
+add_test(
+    NAME dispatcher_test_aquant_gpu_correctness
+    COMMAND ${Python3_EXECUTABLE} -m unittest discover -s ${CMAKE_CURRENT_SOURCE_DIR} -p test_aquant_gpu_correctness.py -v
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+set_tests_properties(dispatcher_test_aquant_gpu_correctness PROPERTIES
+    LABELS "dispatcher;python;bridge;gpu"
+    TIMEOUT 600
+    ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
+)
+
 # =============================================================================
 # Python Tests
 # =============================================================================
