@@ -92,7 +92,7 @@ struct NonCopyable
 static_assert(std::is_same_v<std::invoke_result_t<DoubleIt<int32_t>, int32_t>, int32_t>);
 
 // Params for tests
-template<class InputType, class UnaryOp = DoubleIt<InputType>, bool UseGraphs = false>
+template<class InputType, class UnaryOp = DoubleIt<InputType>>
 struct HipcubDeviceTransformParams
 {
     using input_type                 = InputType;
@@ -290,4 +290,95 @@ TYPED_TEST(HipcubDeviceTransformTests, TransformAddrStablePointerDiff)
             HIP_CHECK(hipFree(d_output));
         }
     }
+}
+
+template<class T>
+struct flag_expected_op_t
+{
+    bool* d_flag;
+    T     expected;
+    T     expected_above_limit;
+
+    HIPCUB_DEVICE
+    auto  operator()(const T& value) -> int
+    {
+        if(value == expected)
+        {
+            d_flag[0] = true;
+        }
+        if(value == expected_above_limit)
+        {
+            d_flag[1] = true;
+        }
+        return 0;
+    }
+};
+
+void test_large_indices()
+{
+    const int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
+    using T             = size_t;
+    using InputIterator = test_utils::counting_iterator<T>;
+
+    hipStream_t stream = 0; // default
+
+    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    {
+        unsigned int seed_value
+            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
+
+        for(const auto size : test_utils::get_large_sizes(seed_value))
+        {
+            SCOPED_TRACE(testing::Message() << "with size = " << size);
+
+            const InputIterator input{0};
+            auto                output = test_utils::make_discard_iterator();
+
+            // Using char instead of bool here, since C++ vectors pack bools in single bits
+            std::vector<char> flags           = {false, false};
+            size_t            num_flags_bytes = flags.size() * sizeof(char);
+            char*             d_flag;
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_flag, num_flags_bytes));
+            HIP_CHECK(hipMemcpy(d_flag, flags.data(), num_flags_bytes, hipMemcpyHostToDevice));
+
+            const auto expected = test_utils::get_random_value<T>(0, size - 1, seed_value);
+            const auto limit    = std::numeric_limits<unsigned int>::max();
+            const auto expected_above_limit
+                = size - 1 > limit ? test_utils::get_random_value<T>(limit, size - 1, seed_value)
+                                   : size - 1;
+
+            SCOPED_TRACE(testing::Message() << "expected = " << expected);
+            SCOPED_TRACE(testing::Message() << "expected_above_limit = " << expected_above_limit);
+
+            const auto flag_expected
+                = flag_expected_op_t<T>{(bool*)d_flag, expected, expected_above_limit};
+
+            // Run
+            HIP_CHECK(
+                hipcub::DeviceTransform::Transform(input, output, size, flag_expected, stream));
+
+            HIP_CHECK(hipGetLastError());
+            HIP_CHECK(hipDeviceSynchronize());
+
+            // Copy output to host
+            HIP_CHECK(hipMemcpy(flags.data(), d_flag, num_flags_bytes, hipMemcpyDeviceToHost))
+
+            ASSERT_TRUE(flags[0]);
+            ASSERT_TRUE(flags[1]);
+        }
+    }
+}
+
+TEST(RocprimDeviceTransformTests, LargeIndices)
+{
+#if HAS_VALGRIND_H
+    //Disable large tests to reduce valgrind run time
+    if(RUNNING_ON_VALGRIND)
+        GTEST_SKIP() << "Skipping LargeIndices test under Valgrind";
+#endif // HAS_VALGRIND_H
+    test_large_indices();
 }
