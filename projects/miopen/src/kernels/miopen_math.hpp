@@ -221,6 +221,8 @@ template <typename FpVecType>
 __forceinline__ __device__ FpVecType exp(FpVecType x)
 {
     constexpr auto VecSize = mapped_vector_info<FpVecType>::size;
+    static_assert(VecSize == 1 || VecSize == 2 || VecSize == 4 || VecSize == 8,
+                  "Unsupported miopen vector operation.");
     if constexpr(VecSize == 1)
     {
         return detail::exp(x);
@@ -241,6 +243,8 @@ template <typename FpVecType>
 __forceinline__ __device__ FpVecType log(FpVecType x)
 {
     constexpr auto VecSize = mapped_vector_info<FpVecType>::size;
+    static_assert(VecSize == 1 || VecSize == 2 || VecSize == 4 || VecSize == 8,
+                  "Unsupported miopen vector operation.");
     if constexpr(VecSize == 1)
     {
         return detail::log(x);
@@ -261,6 +265,8 @@ template <typename FpVecType>
 __forceinline__ __device__ FpVecType sqrt(FpVecType x)
 {
     constexpr auto VecSize = mapped_vector_info<FpVecType>::size;
+    static_assert(VecSize == 1 || VecSize == 2 || VecSize == 4 || VecSize == 8,
+                  "Unsupported miopen vector operation.");
     if constexpr(VecSize == 1)
     {
         return detail::sqrt(x);
@@ -281,6 +287,8 @@ template <typename FpVecType>
 __forceinline__ __device__ FpVecType rsqrt(FpVecType x)
 {
     constexpr auto VecSize = mapped_vector_info<FpVecType>::size;
+    static_assert(VecSize == 1 || VecSize == 2 || VecSize == 4 || VecSize == 8,
+                  "Unsupported miopen vector operation.");
     if constexpr(VecSize == 1)
     {
         return detail::rsqrt(x);
@@ -301,6 +309,8 @@ template <typename FpVecType>
 __forceinline__ __device__ FpVecType fma(FpVecType a, FpVecType b, FpVecType c)
 {
     constexpr auto VecSize = mapped_vector_info<FpVecType>::size;
+    static_assert(VecSize == 1 || VecSize == 2 || VecSize == 4 || VecSize == 8,
+                  "Unsupported miopen vector operation.");
     if constexpr(VecSize == 1)
     {
         return detail::fma(a, b, c);
@@ -323,6 +333,8 @@ template <typename FpVecType>
 __forceinline__ __device__ FpVecType fmax(FpVecType x, FpVecType y)
 {
     constexpr auto VecSize = mapped_vector_info<FpVecType>::size;
+    static_assert(VecSize == 1 || VecSize == 2 || VecSize == 4 || VecSize == 8,
+                  "Unsupported miopen vector operation.");
     if constexpr(VecSize == 1)
     {
         return detail::fmax(x, y);
@@ -331,9 +343,9 @@ __forceinline__ __device__ FpVecType fmax(FpVecType x, FpVecType y)
     {
         using ScalarType = typename mapped_vector_info<FpVecType>::UnderlyingType;
         FpVecType out;
-        auto* outp      = reinterpret_cast<ScalarType*>(&out);
-        const auto* xp  = reinterpret_cast<const ScalarType*>(&x);
-        const auto* yp  = reinterpret_cast<const ScalarType*>(&y);
+        auto* outp     = reinterpret_cast<ScalarType*>(&out);
+        const auto* xp = reinterpret_cast<const ScalarType*>(&x);
+        const auto* yp = reinterpret_cast<const ScalarType*>(&y);
         for(int i = 0; i < static_cast<int>(VecSize); ++i)
             outp[i] = detail::fmax(xp[i], yp[i]);
         return out;
@@ -344,6 +356,8 @@ template <typename FpVecType>
 __forceinline__ __device__ FpVecType fmin(FpVecType x, FpVecType y)
 {
     constexpr auto VecSize = mapped_vector_info<FpVecType>::size;
+    static_assert(VecSize == 1 || VecSize == 2 || VecSize == 4 || VecSize == 8,
+                  "Unsupported miopen vector operation.");
     if constexpr(VecSize == 1)
     {
         return detail::fmin(x, y);
@@ -352,9 +366,9 @@ __forceinline__ __device__ FpVecType fmin(FpVecType x, FpVecType y)
     {
         using ScalarType = typename mapped_vector_info<FpVecType>::UnderlyingType;
         FpVecType out;
-        auto* outp      = reinterpret_cast<ScalarType*>(&out);
-        const auto* xp  = reinterpret_cast<const ScalarType*>(&x);
-        const auto* yp  = reinterpret_cast<const ScalarType*>(&y);
+        auto* outp     = reinterpret_cast<ScalarType*>(&out);
+        const auto* xp = reinterpret_cast<const ScalarType*>(&x);
+        const auto* yp = reinterpret_cast<const ScalarType*>(&y);
         for(int i = 0; i < static_cast<int>(VecSize); ++i)
             outp[i] = detail::fmin(xp[i], yp[i]);
         return out;
@@ -377,6 +391,8 @@ template <typename FpVecType>
 __forceinline__ __device__ FpVecType tanh(FpVecType x)
 {
     constexpr auto VecSize = mapped_vector_info<FpVecType>::size;
+    static_assert(VecSize == 1 || VecSize == 2 || VecSize == 4 || VecSize == 8,
+                  "Unsupported miopen vector operation.");
     if constexpr(VecSize == 1)
     {
         return detail::tanh(x);
@@ -397,6 +413,8 @@ template <typename FpVecType>
 __forceinline__ __device__ FpVecType pow(FpVecType x, FpVecType y)
 {
     constexpr auto VecSize = mapped_vector_info<FpVecType>::size;
+    static_assert(VecSize == 1 || VecSize == 2 || VecSize == 4 || VecSize == 8,
+                  "Unsupported miopen vector operation.");
     if constexpr(VecSize == 1)
     {
         return detail::pow(x, y);
@@ -405,9 +423,9 @@ __forceinline__ __device__ FpVecType pow(FpVecType x, FpVecType y)
     {
         using ScalarType = typename mapped_vector_info<FpVecType>::UnderlyingType;
         FpVecType out;
-        auto* outp      = reinterpret_cast<ScalarType*>(&out);
-        const auto* xp  = reinterpret_cast<const ScalarType*>(&x);
-        const auto* yp  = reinterpret_cast<const ScalarType*>(&y);
+        auto* outp     = reinterpret_cast<ScalarType*>(&out);
+        const auto* xp = reinterpret_cast<const ScalarType*>(&x);
+        const auto* yp = reinterpret_cast<const ScalarType*>(&y);
         for(int i = 0; i < static_cast<int>(VecSize); ++i)
             outp[i] = detail::pow(xp[i], yp[i]);
         return out;
@@ -418,6 +436,8 @@ template <typename FpVecType>
 __forceinline__ __device__ FpVecType fabs(FpVecType x)
 {
     constexpr auto VecSize = mapped_vector_info<FpVecType>::size;
+    static_assert(VecSize == 1 || VecSize == 2 || VecSize == 4 || VecSize == 8,
+                  "Unsupported miopen vector operation.");
     if constexpr(VecSize == 1)
     {
         return detail::fabs(x);

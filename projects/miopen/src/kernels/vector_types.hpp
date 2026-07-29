@@ -150,6 +150,8 @@ __forceinline__ __device__ __host__ OutType cast(InType input)
 
     constexpr auto inSize  = InTypeInfo::size;
     constexpr auto outSize = OutTypeInfo::size;
+    static_assert(outSize == 1 || outSize == 2 || outSize == 4 || outSize == 8,
+                  "Unsupported miopen vector cast.");
 
     if constexpr(inSize == outSize && outSize == 1)
     {
