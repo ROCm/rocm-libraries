@@ -59,10 +59,10 @@
 #endif // HIP_PLUGIN_USE_FP32
 
 #if(HIP_PLUGIN_USE_BFP16 == 1) || (HIP_PLUGIN_USE_BFPMIX == 1)
-#define FLOAT ushort
+#define FLOAT __bf16
 #define SIZEOF_FLOAT 2
 // Max value for the main datatype
-#define MAX_VAL 0x7F7F
+#define MAX_VAL reinterpret_cast<__bf16>(0x7F7F)
 #endif // HIP_PLUGIN_USE_BFP16 || HIP_PLUGIN_USE_BFPMIX
 
 #if(HIP_PLUGIN_USE_FP16 == 1) || (HIP_PLUGIN_USE_FPMIX == 1)

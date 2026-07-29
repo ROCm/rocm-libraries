@@ -51,7 +51,7 @@ struct mapped_vector_info;
 DEFINE_SCALAR_MAPPING(double)
 DEFINE_SCALAR_MAPPING(float)
 DEFINE_SCALAR_MAPPING(_Float16)
-DEFINE_SCALAR_MAPPING(ushort)
+DEFINE_SCALAR_MAPPING(__bf16)
 DEFINE_SCALAR_MAPPING(int)
 DEFINE_SCALAR_MAPPING(unsigned int)
 
@@ -62,9 +62,9 @@ DEFINE_VECTOR_MAPPING(_Float16, 2)
 DEFINE_VECTOR_MAPPING(_Float16, 4)
 DEFINE_VECTOR_MAPPING(_Float16, 8)
 
-DEFINE_VECTOR_MAPPING(ushort, 2)
-DEFINE_VECTOR_MAPPING(ushort, 4)
-DEFINE_VECTOR_MAPPING(ushort, 8)
+DEFINE_VECTOR_MAPPING(__bf16, 2)
+DEFINE_VECTOR_MAPPING(__bf16, 4)
+DEFINE_VECTOR_MAPPING(__bf16, 8)
 
 DEFINE_VECTOR_MAPPING(int, 2)
 DEFINE_VECTOR_MAPPING(int, 4)
@@ -112,11 +112,11 @@ __forceinline__ __device__ __host__ OutType scalarcast(InType in)
     {
         return in;
     }
-    else if constexpr(std::is_same<OutType, ushort>::value && std::is_same<InType, float>::value)
+    else if constexpr(std::is_same<OutType, __bf16>::value && std::is_same<InType, float>::value)
     {
         return float_to_bfloat16(in);
     }
-    else if constexpr(std::is_same<InType, ushort>::value && std::is_same<OutType, float>::value)
+    else if constexpr(std::is_same<InType, __bf16>::value && std::is_same<OutType, float>::value)
     {
         return bfloat16_to_float(in);
     }
