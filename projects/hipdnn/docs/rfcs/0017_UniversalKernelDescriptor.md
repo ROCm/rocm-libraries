@@ -384,7 +384,9 @@ tracks the ranking instead of drifting from it as kernels are added.
 
 Order follows from that: the catalog is built first, its values determine what the knobs offer, and a
 user-set knob then restricts it. Setting `split_k = 4` keeps only kernels whose `split_k` is 4, and the
-UHD ranks those.
+UHD ranks those. Filtering and ranking commute, because a UHD scores each kernel on its own metadata
+and the problem rather than relative to the rest of the catalog. That independence is a requirement on
+a UHD, not an assumption about one.
 
 **hipDNN already enforces this order.** A knob query reaches an engine as
 `IEngine::getDetails(handle, opGraph, out)`, which fans out to the engine's plan builders. It cannot
@@ -393,17 +395,6 @@ came from the list hipDNN ranked after calling `isApplicable` on every engine. S
 exists and is cached when the query lands ([Section 8](#8-end-to-end-flow)), and ranking it is a read
 rather than a rebuild. Existing providers already do comparable work here: MIOpen's convolution knob
 query sweeps its solvers to compute a workspace default.
-
-Restricting the catalog and ranking it commute, so their order costs nothing: a UHD scores each kernel
-on its own metadata and the problem, independently of the rest of the catalog, and an implementation
-restricts first to avoid scoring candidates it would discard. That independence is a requirement on a
-UHD: a scorer that normalized across the catalog or broke ties on the surviving set would make
-selection depend on filtering order, and is out of contract.
-
-**Autotune** inherits the catalog-filtered value set automatically, because a sweep's values are
-validated against the same per-graph knob lookup a manually-set knob uses. A caller that hardcodes a
-sweep axis from a knob's general range instead of re-querying it per graph has its out-of-catalog
-entries skipped with a warning, not the whole sweep rejected ([RFC 0013](0013_Autotune.md)).
 
 **UHD, a kernel-selection model for one group:**
 
