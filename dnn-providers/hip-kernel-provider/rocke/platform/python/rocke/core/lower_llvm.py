@@ -55,16 +55,20 @@ from .ir import (
 # wired arch shares one datalayout, but two fields drift between LLVM 20
 # (ROCm 7.0/7.1) and LLVM 21+ (ROCm 7.2 ships LLVM 22):
 #
-#   * the ELF symbol-mangling spec ``m:e`` was added to the LLVM 21+
-#     AMDGPU datalayout (absent under LLVM 20):
+#   * LLVM 20 and LLVM 22 both omit the ELF symbol-mangling spec ``m:e``
+#     from the AMDGPU datalayout on this toolchain:
 #         LLVM 20:  e-p:64:64-...
-#         LLVM 22:  e-m:e-p:64:64-...
+#         LLVM 22:  e-p:64:64-...
 #   * the buffer-fat-pointer address space (``p8``) gained an index-width
 #     field:
 #         LLVM 20:  ...-p8:128:128-...
 #         LLVM 22:  ...-p8:128:128:128:48-...
 #
-# (Both confirmed against clang 20 and clang 23 amdgcn output.) On the
+# Note: early LLVM 22 builds added an ELF mangling spec ``m:e`` prefix,
+# but the current ROCm 7.2 toolchain does not emit it. The constant below
+# reflects what the installed hipcc actually produces.
+#
+# (Confirmed against clang 20 and current clang 22 amdgcn output.) On the
 # textual-IR (comgr SOURCE) path the parser is lenient: it overrides the
 # module datalayout with the target's canonical one, so a stale-but-well-
 # formed string compiles to byte-identical HSACO and the drift is
@@ -81,7 +85,7 @@ _DATALAYOUT_LLVM20 = (
     "-n32:64-S32-A5-G1-ni:7:8:9"
 )
 _DATALAYOUT_LLVM22 = (
-    "e-m:e-p:64:64-p1:64:64-p2:32:32-p3:32:32-p4:64:64-p5:32:32-p6:32:32"
+    "e-p:64:64-p1:64:64-p2:32:32-p3:32:32-p4:64:64-p5:32:32-p6:32:32"
     "-p7:160:256:256:32-p8:128:128:128:48-p9:192:256:256:32-i64:64-v16:16-v24:32"
     "-v32:32-v48:64-v96:128-v192:256-v256:256-v512:512-v1024:1024-v2048:2048"
     "-n32:64-S32-A5-G1-ni:7:8:9"
@@ -114,10 +118,11 @@ def _flavor_for_rocm(major: int, minor: int) -> str:
 def _datalayout_for_flavor(flavor: str) -> str:
     """Module ``target datalayout`` string for an LLVM flavor.
 
-    Two fields drift between flavors: the ELF mangling spec ``m:e`` (added
-    under LLVM 21+) and the buffer-fat-pointer address space ``p8`` (see
-    :data:`_DATALAYOUT_LLVM20` / :data:`_DATALAYOUT_LLVM22`). LLVM22 is the
-    default for unknown values so a typo'd override degrades to the modern
+    One field drifts between flavors: the buffer-fat-pointer address space
+    ``p8`` gained an index-width field in LLVM 22 (see :data:`_DATALAYOUT_LLVM20`
+    / :data:`_DATALAYOUT_LLVM22`).  The ELF symbol-mangling spec ``m:e`` is
+    omitted by both LLVM 20 and LLVM 22 on the AMDGPU datalayout.  LLVM22 is
+    the default for unknown values so a typo'd override degrades to the modern
     layout rather than the legacy one.
     """
     return _DATALAYOUT_LLVM20 if flavor == LLVM_FLAVOR_LLVM20 else _DATALAYOUT_LLVM22
@@ -273,6 +278,7 @@ _INTRINSIC_DECLS: Dict[str, str] = {
         "ptr addrspace(1) nocapture, ptr addrspace(3) nocapture, i32 immarg, i32 immarg)"
     ),
     "exp2.f32": "declare float @llvm.exp2.f32(float)",
+    "amdgcn.exp2.f32": "declare float @llvm.amdgcn.exp2.f32(float)",
     "log2.f32": "declare float @llvm.log2.f32(float)",
     "sqrt.f32": "declare float @llvm.sqrt.f32(float)",
     "rsqrt.f32": "declare float @llvm.amdgcn.rsq.f32(float)",
@@ -508,6 +514,11 @@ _INTRINSIC_DECLS: Dict[str, str] = {
     "global.atomic.fadd.v2bf16": (
         "declare <2 x bfloat> @llvm.amdgcn.global.atomic.fadd.v2bf16.p1("
         "ptr addrspace(1), <2 x bfloat>)"
+    ),
+    # Packed fp16 atomic add (gfx940+). Two fp16 lanes per atomic transaction.
+    "global.atomic.fadd.v2f16": (
+        "declare <2 x half> @llvm.amdgcn.global.atomic.fadd.v2f16.p1("
+        "ptr addrspace(1), <2 x half>)"
     ),
     "mbcnt.lo": ("declare i32 @llvm.amdgcn.mbcnt.lo(i32, i32)"),
     "mbcnt.hi": ("declare i32 @llvm.amdgcn.mbcnt.hi(i32, i32)"),
@@ -880,6 +891,15 @@ class _Lowerer:
         self._needs_fp_atomic_md: bool = False
         self._smem_globals: List[Tuple[str, SmemType]] = []
         self._smem_storage_name: Dict[str, str] = {}  # IR value name -> @global name
+        # smem pool: one unified addrspace(3) buffer; per-allocation byte offsets.
+        self._smem_offsets: Dict[str, int] = {}
+        self._smem_pool_size: int = 0
+        self._smem_pool_name: Optional[str] = None
+        # Cache of per-allocation base pointers already emitted, keyed by
+        # (block label, global name). Lets a non-zero-offset allocation that is
+        # accessed several times in the same block reuse a single byte-level
+        # GEP instead of re-emitting it per access.
+        self._smem_base_cache: Dict[Tuple[str, str], str] = {}
         self._blocks: List[_Block] = [_Block("entry")]
         self._block_counter = 0
         self._tmp_counter = 0
@@ -967,6 +987,261 @@ class _Lowerer:
                 self._smem_storage_name[op.result.name] = gname
             for r in op.regions:
                 self._collect_smem(r)
+
+    def _collect_smem_liveness(self, region: Region) -> Dict[str, Tuple[int, int]]:
+        """Compute live intervals for smem allocations via a DFS preorder walk.
+
+        Returns a dict mapping global-name -> (first_seq, last_seq) where
+        seq is the preorder index of the op that defines / last-uses the
+        allocation.  Uses inside a loop body (``scf.for``) are conservatively
+        extended to the *last* sequence index of the enclosing ``scf.for``
+        subtree so that two allocations that are both live inside the loop
+        always interfere (they may be read on any iteration).
+        """
+        # Map from IR value name (%foo) -> global name (@foo.kernel)
+        val_to_gname: Dict[str, str] = {
+            v: g for v, g in self._smem_storage_name.items()
+        }
+        intervals: Dict[str, Tuple[int, int]] = {}  # gname -> (first, last)
+        counter = [0]  # mutable int for nested closures
+
+        def _subtree_size(op) -> int:
+            # Number of ops in this op's DFS-preorder subtree (itself + all
+            # descendants).  Preorder numbers an op *before* its body, so the
+            # subtree rooted at index ``idx`` occupies contiguous sequence
+            # indices ``[idx, idx + _subtree_size(op) - 1]``.
+            n = 1
+            for r in op.regions:
+                for child in r.ops:
+                    n += _subtree_size(child)
+            return n
+
+        def walk(ops: List, loop_end: Optional[int]) -> None:
+            for op in ops:
+                idx = counter[0]
+                counter[0] += 1
+
+                # Definition point of an alloc
+                if op.name == "tile.smem_alloc":
+                    gname = val_to_gname[op.result.name]
+                    if gname not in intervals:
+                        intervals[gname] = (idx, idx)
+
+                # Any operand that is an smem value extends its live range
+                for v in op.operands:
+                    gname = val_to_gname.get(v.name)
+                    if gname is not None:
+                        first, last = intervals.get(gname, (idx, idx))
+                        new_last = loop_end if loop_end is not None else idx
+                        intervals[gname] = (min(first, idx), max(last, new_last))
+
+                # Recurse into sub-regions; scf.for gets a conservative loop_end
+                for r in op.regions:
+                    if op.name == "scf.for":
+                        # Conservative loop liveness: a value written on one
+                        # iteration may be read on the next, so every allocation
+                        # touched anywhere in the loop body must be treated as
+                        # live for the whole loop and thus interfere with the
+                        # others.  Preorder numbers the for-op *before* its body,
+                        # so the loop subtree ends at ``idx + size - 1``; extend
+                        # uses to that last index (not the for-op's own, earlier
+                        # index, which would under-extend allocations defined
+                        # inside the loop and let them wrongly share LDS).
+                        #
+                        # For a nested loop, an allocation used only in the inner
+                        # loop can still be re-read on a later *outer* iteration,
+                        # so its live range must reach the enclosing loop's end
+                        # too -- take the max with any enclosing ``loop_end``,
+                        # otherwise the inner alloc could wrongly share LDS with
+                        # an allocation used later in the outer body.
+                        own_last = idx + _subtree_size(op) - 1
+                        loop_last = (
+                            own_last if loop_end is None else max(own_last, loop_end)
+                        )
+                        walk(r.ops, loop_end=loop_last)
+                    else:
+                        walk(r.ops, loop_end=loop_end)
+
+        walk(region.ops, loop_end=None)
+        return intervals
+
+    def _compute_smem_layout(self) -> None:
+        """Compute byte offsets for all smem allocations in a single pool.
+
+        Called after ``_collect_smem`` and before ``lower_region``.
+
+        Uses live-interval analysis to let non-interfering allocations share
+        the same LDS region.  Two allocations *interfere* when their live
+        intervals overlap; overlapping allocations must occupy disjoint byte
+        ranges.  Non-interfering allocations may reuse the same range,
+        reducing total LDS consumption.
+
+        The packing algorithm is a greedy linear-scan: allocations are
+        processed in order of their live-interval start.  For each allocation
+        we find the lowest free slot (a previously assigned range whose end
+        is before the current start and whose size is large enough), or open
+        a new slot at the end of the pool.
+
+        Alignment is preserved: 16 bytes for byte-element types, 4 bytes
+        otherwise.  The pool itself is rounded up to 16-byte alignment.
+
+        Falls back to the original sequential packing when liveness analysis
+        yields no intervals (e.g. zero smem allocations).
+        """
+        _elem_bytes = {
+            "i8": 1,
+            "fp8e4m3": 1,
+            "bf8e5m2": 1,
+            "f16": 2,
+            "bf16": 2,
+            "i32": 4,
+            "f32": 4,
+            "i64": 8,
+        }
+
+        pool_name = f"@smem_pool.{self.kernel.name}"
+        self._smem_pool_name = pool_name
+
+        if not self._smem_globals:
+            self._smem_pool_size = 0
+            return
+
+        # ---- compute per-allocation sizes and alignments ----
+        def _seg_size(stype: "SmemType") -> int:
+            eb = _elem_bytes.get(stype.elem.name, 2)
+            seg = eb
+            for d in stype.shape:
+                seg *= d
+            return seg
+
+        def _align(stype: "SmemType") -> int:
+            return 16 if stype.elem.name in ("i8", "fp8e4m3", "bf8e5m2") else 4
+
+        # ---- live intervals from the kernel body ----
+        live = self._collect_smem_liveness(self.kernel.body)
+
+        # Sort allocations by live-interval start (definition order is a good
+        # proxy; fall back to declaration order for allocations with no uses).
+        def _sort_key(item: Tuple[str, "SmemType"]) -> int:
+            gname, _ = item
+            return live.get(gname, (0, 0))[0]
+
+        sorted_allocs = sorted(self._smem_globals, key=_sort_key)
+
+        # ---- greedy interval packing ----
+        # Each "slot" is (offset, size, last_seq) – the byte range it occupies
+        # and the latest sequence index at which it is still live.
+        slots: List[Tuple[int, int, int]] = []  # (offset, size, last_seq)
+        # Sentinel "never dies" last_seq for exclusive (no-alias) allocations,
+        # so the reuse test ``s_last >= first_seq`` is always true for their
+        # slots and nothing else packs onto them. Larger than any real preorder
+        # index. (Mirrored as ROCKE_LL_EXCL_LAST_SEQ in the C++ engine.)
+        _EXCL_LAST_SEQ = 1 << 30
+
+        for gname, stype in sorted_allocs:
+            seg = _seg_size(stype)
+            aln = _align(stype)
+            first_seq, last_seq = live.get(gname, (0, 0))
+            # Exclusive (cshuffle no-alias) allocations must not reuse another
+            # allocation's slot, and must never be reused by later allocations,
+            # so they occupy their own byte range. Skipping the free-slot search
+            # forces a fresh slot; recording it with a sentinel last_seq below
+            # keeps it permanently "live" so nothing else packs onto it.
+            excl = getattr(stype, "exclusive", False)
+
+            # Try to reuse any slot that is free before this allocation starts.
+            # A "free" slot (s_last < first_seq) provides a candidate base
+            # address: we place the new allocation at aligned(s_off), regardless
+            # of whether it fits within s_size.  The allocation may extend
+            # beyond the slot's original footprint — that is intentional.
+            #
+            # Example: A (12 KB, live 0..3) and B (12 KB, live 1..3) are packed
+            # into slots [0,12K] and [12K,12K].  C (64 KB, live 5..10) is free
+            # to reuse slot A (starting at offset 0) even though 64 KB > 12 KB.
+            # The pool size becomes max(0+64K, 12K+12K) = 64 KB instead of
+            # 12K+12K+64K = 88 KB.
+            #
+            # Among free slots, prefer the one with the smallest aligned start
+            # (lowest address, cache-friendly, minimises pool fragmentation).
+            best: Optional[int] = None  # index into slots[]
+            best_aligned = 0
+            for i, (s_off, s_size, s_last) in enumerate([] if excl else slots):
+                if s_last >= first_seq:
+                    # Still live when we start – interference, skip.
+                    continue
+                aligned_off = (s_off + aln - 1) & ~(aln - 1)
+                # Reusing slot i places this allocation at [aligned_off,
+                # aligned_off + seg). Because it may be larger than slot i's
+                # original footprint, that range can spill upward into a
+                # DIFFERENT slot that is still live while this allocation is
+                # live -- which would alias two simultaneously-live allocations
+                # and corrupt data. Reject any candidate whose placed range
+                # overlaps a still-live slot; slots already dead before
+                # first_seq are safe to overlap.
+                placed_end = aligned_off + seg
+                conflict = False
+                for j, (o2, sz2, last2) in enumerate(slots):
+                    if j == i or last2 < first_seq:
+                        continue
+                    if aligned_off < o2 + sz2 and o2 < placed_end:
+                        conflict = True
+                        break
+                if conflict:
+                    continue
+                if best is None or aligned_off < best_aligned:
+                    best = i
+                    best_aligned = aligned_off
+
+            if best is not None:
+                s_off, s_size, _ = slots[best]
+                aligned_off = best_aligned
+                self._smem_offsets[gname] = aligned_off
+                # Expand the slot to cover the new allocation if it overflows.
+                # The guard above proved the placed range does not overlap any
+                # live slot, so the expansion is safe.
+                new_size = max(s_size, aligned_off - s_off + seg)
+                slots[best] = (s_off, new_size, last_seq)
+            else:
+                # No reusable slot – open a new one at the end of the pool.
+                current_end = max(
+                    (s_off + s_size for s_off, s_size, _ in slots), default=0
+                )
+                aligned_off = (current_end + aln - 1) & ~(aln - 1)
+                self._smem_offsets[gname] = aligned_off
+                # Exclusive allocs stay permanently live (sentinel last_seq) so
+                # no later allocation reuses their bytes.
+                slots.append((aligned_off, seg, _EXCL_LAST_SEQ if excl else last_seq))
+
+        pool_size = max(s_off + s_size for s_off, s_size, _ in slots)
+        self._smem_pool_size = (pool_size + 15) & ~15
+
+    def _emit_smem_base_ptr(self, gname: str, stype: SmemType) -> str:
+        """Return an addrspace(3) pointer to the start of the smem segment.
+
+        When the segment sits at offset 0 in the pool, returns the pool name
+        directly (no extra GEP instruction). Otherwise emits one byte-level
+        GEP and returns the fresh SSA name.
+
+        The byte offset is a compile-time constant, so the base pointer is
+        cached per (block, allocation): repeated accesses to the same segment
+        within one block reuse a single GEP. Keying on the current block keeps
+        every reuse dominance-safe -- instructions within a block execute
+        sequentially, so the cached value always dominates its later uses.
+        """
+        offset = self._smem_offsets[gname]
+        if offset == 0:
+            return self._smem_pool_name
+        key = (self._current().label, gname)
+        cached = self._smem_base_cache.get(key)
+        if cached is not None:
+            return cached
+        base = self._fresh("smem_base")
+        self._current().emit(
+            f"  {base} = getelementptr inbounds i8, ptr addrspace(3) "
+            f"{self._smem_pool_name}, i32 {offset}"
+        )
+        self._smem_base_cache[key] = base
+        return base
 
     # ----- per-op lowerings -----
 
@@ -1646,6 +1921,17 @@ class _Lowerer:
             f"  {op.result.name} = call float @llvm.exp2.f32(float {self._operand(v)})"
         )
 
+    def _op_math_exp2_fast(self, op: Op) -> None:
+        (v,) = op.operands
+        if v.type.name != "f32":
+            raise NotImplementedError("math.exp2_fast currently supports f32")
+        # Native single-instruction exp2 (v_exp_f32), no overflow guard.
+        self._need("amdgcn.exp2.f32")
+        self._current().emit(
+            f"  {op.result.name} = call float "
+            f"@llvm.amdgcn.exp2.f32(float {self._operand(v)})"
+        )
+
     def _op_math_log2(self, op: Op) -> None:
         (v,) = op.operands
         if v.type.name != "f32":
@@ -1841,6 +2127,26 @@ class _Lowerer:
             f"ptr addrspace(1) {gep}, <2 x bfloat> {self._operand(val)})"
         )
 
+    def _op_memref_global_atomic_add_pk_f16(self, op: Op) -> None:
+        """Lower the packed-fp16 atomic add to its AMDGCN intrinsic.
+
+        Mirrors ``_op_memref_global_atomic_add_pk_bf16`` for fp16.
+        GEPs into the fp16 buffer at ``idx`` and calls
+        ``llvm.amdgcn.global.atomic.fadd.v2f16.p1`` (gfx940+).
+        """
+        ptr, idx, val = op.operands
+        self._needs_intrin["global.atomic.fadd.v2f16"] = True
+        gep = self._fresh("gep")
+        self._current().emit(
+            f"  {gep} = getelementptr inbounds half, ptr addrspace(1) "
+            f"{self._operand(ptr)}, i32 {self._operand(idx)}"
+        )
+        self._current().emit(
+            f"  {op.result.name} = call <2 x half> "
+            f"@llvm.amdgcn.global.atomic.fadd.v2f16.p1("
+            f"ptr addrspace(1) {gep}, <2 x half> {self._operand(val)})"
+        )
+
     def _op_memref_global_load_vN(self, op: Op) -> None:
         """Vectorised <vec x 16-bit> load: a single naturally-aligned
         global_load_dwordx{1,2,4} on AMDGPU when the address is aligned."""
@@ -1869,11 +2175,12 @@ class _Lowerer:
         indices = op.operands[1:-1]
         value = op.operands[-1]
         gname, stype = self._smem_global_name(smem)
+        base_ptr = self._emit_smem_base_ptr(gname, stype)
         gep = self._fresh("gep")
         gidx = ["i32 0"] + [f"i32 {self._operand(i)}" for i in indices]
         agg_ty = _smem_storage_type(stype)
         self._current().emit(
-            f"  {gep} = getelementptr inbounds {agg_ty}, ptr addrspace(3) {gname}, "
+            f"  {gep} = getelementptr inbounds {agg_ty}, ptr addrspace(3) {base_ptr}, "
             f"{', '.join(gidx)}"
         )
         # Alignment is the element byte size: 1 for i8, 2 for f16/bf16,
@@ -1907,11 +2214,12 @@ class _Lowerer:
         val = op.operands[-1]
         elem_ty = _llvm_type(val.type)
         gname, stype = self._smem_global_name(smem)
+        base_ptr = self._emit_smem_base_ptr(gname, stype)
         agg_ty = _smem_storage_type(stype)
         gep = self._fresh("gep")
         gidx = ["i32 0"] + [f"i32 {self._operand(i)}" for i in indices]
         self._current().emit(
-            f"  {gep} = getelementptr inbounds {agg_ty}, ptr addrspace(3) {gname}, "
+            f"  {gep} = getelementptr inbounds {agg_ty}, ptr addrspace(3) {base_ptr}, "
             f"{', '.join(gidx)}"
         )
         ordering = op.attrs.get("ordering", "monotonic")
@@ -1933,11 +2241,12 @@ class _Lowerer:
         value = op.operands[-1]
         vec = int(op.attrs["vec"])
         gname, stype = self._smem_global_name(smem)
+        base_ptr = self._emit_smem_base_ptr(gname, stype)
         agg_ty = _smem_storage_type(stype)
         gep = self._fresh("gep")
         gidx = ["i32 0"] + [f"i32 {self._operand(i)}" for i in indices]
         self._current().emit(
-            f"  {gep} = getelementptr inbounds {agg_ty}, ptr addrspace(3) {gname}, "
+            f"  {gep} = getelementptr inbounds {agg_ty}, ptr addrspace(3) {base_ptr}, "
             f"{', '.join(gidx)}"
         )
         elem_ty = _llvm_type(value.type.elem)  # type: ignore[attr-defined]
@@ -1962,10 +2271,11 @@ class _Lowerer:
     def _op_tile_smem_load_v4(self, op: Op) -> None:
         smem, row, col = op.operands
         gname, stype = self._smem_global_name(smem)
+        base_ptr = self._emit_smem_base_ptr(gname, stype)
         agg_ty = _smem_storage_type(stype)
         base = self._fresh("smem.base")
         self._current().emit(
-            f"  {base} = getelementptr inbounds {agg_ty}, ptr addrspace(3) {gname}, "
+            f"  {base} = getelementptr inbounds {agg_ty}, ptr addrspace(3) {base_ptr}, "
             f"i32 0, i32 {self._operand(row)}, i32 {self._operand(col)}"
         )
         # 4 contiguous fp16 loads + insertelement chain. We do separate
@@ -2001,11 +2311,12 @@ class _Lowerer:
         indices = list(op.operands[1:])
         vec = int(op.attrs["vec"])
         gname, stype = self._smem_global_name(smem)
+        base_ptr = self._emit_smem_base_ptr(gname, stype)
         agg_ty = _smem_storage_type(stype)
         base = self._fresh("smem.base")
         idx_strs = ["i32 0"] + [f"i32 {self._operand(i)}" for i in indices]
         self._current().emit(
-            f"  {base} = getelementptr inbounds {agg_ty}, ptr addrspace(3) {gname}, "
+            f"  {base} = getelementptr inbounds {agg_ty}, ptr addrspace(3) {base_ptr}, "
             f"{', '.join(idx_strs)}"
         )
         elem_ty = _llvm_type(op.result.type.elem)  # type: ignore[attr-defined]
@@ -2408,6 +2719,7 @@ class _Lowerer:
         values = op.operands[1]
         n = values.type.count if isinstance(values.type, VectorType) else 1
         gname, stype = self._smem_global_name(smem)
+        base_ptr = self._emit_smem_base_ptr(gname, stype)
         agg_ty = _smem_storage_type(stype)
         elem_ty = (
             _llvm_type(values.type.elem)
@@ -2423,7 +2735,7 @@ class _Lowerer:
             )
             self._current().emit(
                 f"  {gep} = getelementptr inbounds {agg_ty}, "
-                f"ptr addrspace(3) {gname}, i32 0, i32 {i}"
+                f"ptr addrspace(3) {base_ptr}, i32 0, i32 {i}"
             )
             self._current().emit(
                 f"  store {elem_ty} {ev}, ptr addrspace(3) {gep}, align 2"
@@ -2789,11 +3101,12 @@ class _Lowerer:
         smem = op.operands[0]
         indices = list(op.operands[1:])
         gname, stype = self._smem_global_name(smem)
+        base_ptr = self._emit_smem_base_ptr(gname, stype)
         agg_ty = _smem_storage_type(stype)
         base = self._fresh("tr.base")
         idx_strs = ["i32 0"] + [f"i32 {self._operand(i)}" for i in indices]
         self._current().emit(
-            f"  {base} = getelementptr inbounds {agg_ty}, ptr addrspace(3) {gname}, "
+            f"  {base} = getelementptr inbounds {agg_ty}, ptr addrspace(3) {base_ptr}, "
             f"{', '.join(idx_strs)}"
         )
         self._need("ds.read.tr16.b64")
@@ -2818,11 +3131,12 @@ class _Lowerer:
         smem = op.operands[0]
         indices = list(op.operands[1:])
         gname, stype = self._smem_global_name(smem)
+        base_ptr = self._emit_smem_base_ptr(gname, stype)
         agg_ty = _smem_storage_type(stype)
         base = self._fresh("trw.base")
         idx_strs = ["i32 0"] + [f"i32 {self._operand(i)}" for i in indices]
         self._current().emit(
-            f"  {base} = getelementptr inbounds {agg_ty}, ptr addrspace(3) {gname}, "
+            f"  {base} = getelementptr inbounds {agg_ty}, ptr addrspace(3) {base_ptr}, "
             f"{', '.join(idx_strs)}"
         )
         elem_name = op.attrs.get("elem_type", "f16")
@@ -2912,11 +3226,12 @@ class _Lowerer:
         smem = op.operands[0]
         indices = list(op.operands[1:])
         gname, stype = self._smem_global_name(smem)
+        base_ptr = self._emit_smem_base_ptr(gname, stype)
         agg_ty = _smem_storage_type(stype)
         base = self._fresh("tr8.base")
         idx_strs = ["i32 0"] + [f"i32 {self._operand(i)}" for i in indices]
         self._current().emit(
-            f"  {base} = getelementptr inbounds {agg_ty}, ptr addrspace(3) {gname}, "
+            f"  {base} = getelementptr inbounds {agg_ty}, ptr addrspace(3) {base_ptr}, "
             f"{', '.join(idx_strs)}"
         )
         addr = self._fresh("tr8.addr")
@@ -2988,9 +3303,11 @@ class _Lowerer:
     def _op_tile_smem_addr_of(self, op: Op) -> None:
         (smem,) = op.operands
         gname = self._smem_storage_name[smem.name]
+        stype = smem.type
+        base_ptr = self._emit_smem_base_ptr(gname, stype)
         # The global is ptr addrspace(3); cast to i64 for arithmetic.
         self._current().emit(
-            f"  {op.result.name} = ptrtoint ptr addrspace(3) {gname} to i64"
+            f"  {op.result.name} = ptrtoint ptr addrspace(3) {base_ptr} to i64"
         )
 
     def _op_tile_smem_ptr_add(self, op: Op) -> None:
@@ -3067,11 +3384,12 @@ class _Lowerer:
         )
         # Per-lane LDS destination address (typed aggregate GEP).
         gname, stype = self._smem_global_name(lds_smem)
+        base_ptr = self._emit_smem_base_ptr(gname, stype)
         agg_ty = _smem_storage_type(stype)
         gidx = ["i32 0"] + [f"i32 {self._operand(i)}" for i in lds_indices]
         gep_l = self._fresh("async_dst")
         self._current().emit(
-            f"  {gep_l} = getelementptr inbounds {agg_ty}, ptr addrspace(3) {gname}, "
+            f"  {gep_l} = getelementptr inbounds {agg_ty}, ptr addrspace(3) {base_ptr}, "
             f"{', '.join(gidx)}"
         )
         self._need(f"global.load.async.to.lds.{suffix}")
@@ -3644,11 +3962,12 @@ class _Lowerer:
         value = op.operands[-1]
         vec = int(op.attrs["vec"])
         gname, stype = self._smem_global_name(smem)
+        base_ptr = self._emit_smem_base_ptr(gname, stype)
         agg_ty = _smem_storage_type(stype)
         gep = self._fresh("gep")
         gidx = ["i32 0"] + [f"i32 {self._operand(i)}" for i in indices]
         self._current().emit(
-            f"  {gep} = getelementptr inbounds {agg_ty}, ptr addrspace(3) {gname}, "
+            f"  {gep} = getelementptr inbounds {agg_ty}, ptr addrspace(3) {base_ptr}, "
             f"{', '.join(gidx)}"
         )
         align = vec * 4
@@ -3678,11 +3997,12 @@ class _Lowerer:
         indices = list(op.operands[1:])
         vec = int(op.attrs["vec"])
         gname, stype = self._smem_global_name(smem)
+        base_ptr = self._emit_smem_base_ptr(gname, stype)
         agg_ty = _smem_storage_type(stype)
         base = self._fresh("smem.base")
         idx_strs = ["i32 0"] + [f"i32 {self._operand(i)}" for i in indices]
         self._current().emit(
-            f"  {base} = getelementptr inbounds {agg_ty}, ptr addrspace(3) {gname}, "
+            f"  {base} = getelementptr inbounds {agg_ty}, ptr addrspace(3) {base_ptr}, "
             f"{', '.join(idx_strs)}"
         )
         align = vec * 4
@@ -4343,28 +4663,21 @@ class _Lowerer:
         out.append(f'target triple = "{self._backend.triple}"')
         out.append("")
 
-        # smem globals.
-        # ``align 4`` matches the natural alignment of f16/bf16/f32/i32
-        # LDS storage and is what every 16 B ``ds_read_b128`` /
-        # ``ds_write_b128`` issued against them needs (the runtime
-        # offset math handles the per-row 16 B stride). The exception
-        # is fp8/bf8/i8 storage paired with ``ds_read_b64_tr_b8``: that
-        # intrinsic packs 8 bytes per lane and the AMDGPU backend
-        # requires the load address to be 8 B aligned; landing the i8
-        # global on a 4 B boundary silently corrupts the b64
-        # transpose-read output. Bump only the i8/fp8 globals to 16 B
-        # so the b64 transpose-read is always safe; leave fp16/f32
-        # globals at align 4 (raising them would inflate occupancy
-        # pressure on long-prefill 3D kernels).
-        for gname, stype in self._smem_globals:
-            agg = _smem_storage_type(stype)
-            elem_name = stype.elem.name
-            elem_is_byte = elem_name in ("i8", "fp8e4m3", "bf8e5m2")
-            align = 16 if elem_is_byte else 4
-            out.append(
-                f"{gname} = internal unnamed_addr addrspace(3) global {agg} poison, align {align}"
-            )
+        # smem pool: a single unified addrspace(3) global backing all smem
+        # allocations. Segments are placed by liveness-guided interval packing
+        # (see _compute_smem_layout): non-interfering allocations reuse the same
+        # byte range, so the pool holds max(overlapping segments) rather than the
+        # sum. Per-allocation alignment is preserved (4 bytes for f16/bf16/f32/
+        # i32, 16 bytes for i8/fp8).
+        # Each _op_tile_smem_* method emits a byte-level GEP to its segment
+        # base before the typed aggregate GEP, so the typed addressing is
+        # unchanged. align 16 satisfies all segment alignments (the strictest
+        # is the 16-byte requirement for ds_read_b64_tr_b8 on i8/fp8 tiles).
         if self._smem_globals:
+            out.append(
+                f"{self._smem_pool_name} = internal unnamed_addr addrspace(3) "
+                f"global [{self._smem_pool_size} x i8] poison, align 16"
+            )
             out.append("")
 
         # Intrinsic declarations actually used. ``self._decls`` is
@@ -4609,6 +4922,7 @@ def _lower_kernel_to_llvm_python(
     """
     lowerer = _Lowerer(kernel, llvm_flavor=llvm_flavor, arch=arch)
     lowerer._collect_smem(kernel.body)
+    lowerer._compute_smem_layout()
     lowerer.lower_region(kernel.body)
     return lowerer.finalize()
 

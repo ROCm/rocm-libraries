@@ -42,7 +42,7 @@ from .SubtileScaleEmit import emitScaleGRLDSSwap
 
 from math import ceil, log, log2, prod
 from rocisa.code import Label
-from ...Common import INDEX_CHARS
+from ...Common import INDEX_CHARS, clusterEnabled
 from ...Common.DataType import DataType
 
 
@@ -1109,8 +1109,7 @@ def initTDMDescriptorSubtile(writer, kernel, tP):
   # OR the per-tensor broadcast mask into the descriptor for TDM multicast.
   # Subtile loads both A and B on every wave, so it uses split masks
   # (MulticastMask{tc}), not the non-subtile single parity mask.
-  enableCluster = (kernel["ClusterDim"][0] * kernel["ClusterDim"][1]) != 1
-  if kernel["Multicast"] and enableCluster:
+  if kernel["Multicast"] and clusterEnabled(kernel["ClusterDim"]):
     mod.add(comp.setMulticastMask(descSgprName(1), f"MulticastMask{tc}", writer))
 
   with writer.allocTmpSgpr(1) as tmpSgprRes:
@@ -1196,6 +1195,10 @@ def tdmApplyStreamKOffsetSubtile(writer, kernel, tP):
   inc = int(ti.depthUBytes)  # per-unroll TDM advance; same source as _emitGRPtrUpdate_TLU0
   group0 = f"tdm{tc}Group0"
   mod = Module(f"TDM StreamK K-offset subtile {tc}")
+  # DP-only: StreamKLocalStart == 0, so the K-start offset is 0 and this is a
+  # no-op. StreamKLocalStart is not allocated in DP-only mode.
+  if kernel["StreamKForceDPOnly"]:
+    return mod
   with writer.allocTmpSgpr(2, alignment=2, tag="tdmSkOffset") as tmpSgprRes:
     o = tmpSgprRes.idx
     mod.add(SMulI32(dst=sgpr(o), src0=sgpr("StreamKLocalStart"), src1=inc,

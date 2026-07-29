@@ -48,6 +48,7 @@ Tests:
   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
   spmv_alg: [HIPSPARSE_SPMV_ALG_DEFAULT, 
              HIPSPARSE_SPMV_SELL_ALG1]
+  call_preprocess: [true, false]
 
 - name: spmv_sell
   category: pre_checkin
@@ -72,7 +73,8 @@ Tests:
              nos5,
              nos6,
              nos7]
-
+  call_preprocess: [true]
+  
 - name: spmv_sell
   category: pre_checkin
   function: spmv_sell
@@ -93,3 +95,4 @@ Tests:
              shipsec1,
              bibd_22_8,
              scircuit]
+  call_preprocess: [true]

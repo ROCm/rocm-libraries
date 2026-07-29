@@ -37,6 +37,9 @@ namespace rocalution
   * The Block-Jacobi preconditioner is designed to wrap any local preconditioner and
   * apply it in a global block fashion locally on each interior matrix.
   *
+  * An example of a four block-decomposed Block-Jacobi (MPI) preconditioner is shown in
+  * the rocALUTION API reference figure for Block-Jacobi preconditioners.
+  *
   * \tparam OperatorType - can be GlobalMatrix
   * \tparam VectorType - can be GlobalVector
   * \tparam ValueType - can be float, double, std::complex<float> or std::complex<double>
