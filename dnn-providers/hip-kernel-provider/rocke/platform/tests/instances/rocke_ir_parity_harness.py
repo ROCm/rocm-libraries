@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
 import json
 import traceback
@@ -345,6 +346,143 @@ def build_attention_reduce(
             num_segments=num_segments,
         )
         return build_unified_attention_reduce_tiled(spec)
+
+    return _build
+
+
+def build_attention_dense(arch, **over):
+    """Dense flash-attn prefill spec (library ``kernels/gfx950/attention_dense``).
+
+    ``over`` patches the shared base spec; a small Sq keeps the IR compact while
+    still exercising the full pipeline (both the default one-CTA-per-q-block grid
+    and the persistent grid-stride grid).
+    """
+
+    def _build():
+        from kernels.gfx950.attention_dense import (
+            AttentionDenseSpec,
+            build_attention_dense as _build_dense,
+        )
+
+        spec = dict(
+            batch=1,
+            seqlen_q=512,
+            seqlen_kv=512,
+            num_query_heads=128,
+            num_kv_heads=8,
+            head_size=128,
+            causal=True,
+            dtype="bf16",
+        )
+        spec.update(over)
+        return _build_dense(AttentionDenseSpec(**spec))
+
+    return _build
+
+
+def _d256_problem():
+    """Validated D256 cohort point (GQA 16/2, hd256, bs16, sq4096 bf16)."""
+    from kernels.common.attention_unified import UnifiedAttentionProblem
+
+    return UnifiedAttentionProblem(
+        total_q=4096,
+        num_seqs=1,
+        num_query_heads=16,
+        num_kv_heads=2,
+        head_size=256,
+        block_size=16,
+        max_seqlen_q=4096,
+        max_seqlen_k=4096,
+        dtype="bf16",
+        num_sms=120,
+    )
+
+
+@contextlib.contextmanager
+def _pinned_attention_arch(arch):
+    """Pin the *memoized runtime device arch* the D256 fast routes gate on.
+
+    Those routes consult ``_resolve_attention_arch`` -- NOT any per-case argument
+    -- and the spec builder holds a *bound* import of it, so both bindings are
+    patched wholesale (per its docstring: "Tests that monkeypatch this function
+    replace it wholesale"). Without this a non-gfx950 host silently selects the
+    FALLBACK spec and the recorded sha becomes host-dependent.
+    """
+    import builders.common.attention_spec_builder as asb
+    import kernels.common.attention_unified as au
+
+    pin = lambda: arch  # noqa: E731
+    o_au, o_asb = au._resolve_attention_arch, asb._resolve_attention_arch
+    au._resolve_attention_arch = pin
+    asb._resolve_attention_arch = pin
+    try:
+        yield
+    finally:
+        au._resolve_attention_arch = o_au
+        asb._resolve_attention_arch = o_asb
+
+
+def build_attention_d256_gfx950(arch):
+    """D256 bf16 prefill *fast* spec: 32x32-transposed + ``use_kq_lds_pad``
+    (slab-granularity K_lds pad) + ``use_softmax_mfma_interleave``.
+
+    The slab pad's async-DMA write and its padded read remap must agree
+    byte-for-byte or numerics silently corrupt, and an addressing drift would pass
+    every other CPU test and fail only on GPU (#9233 review). Raises if the fast
+    spec / pad+interleave is not selected, so this can never pin the fallback.
+    """
+
+    def _build():
+        from kernels import build_unified_attention_2d_tiled
+        from kernels.common.attention_unified import (
+            _d256_gfx950_fast,
+            _tiled_spec_from_problem,
+        )
+
+        problem = _d256_problem()
+        with _pinned_attention_arch(arch):
+            if not _d256_gfx950_fast(problem):
+                raise RuntimeError(
+                    f"D256 fast spec not selected under pinned arch {arch!r}; "
+                    "would pin the fallback (no pad/interleave)"
+                )
+            spec = _tiled_spec_from_problem(problem)
+            if not (spec.use_kq_lds_pad and spec.use_softmax_mfma_interleave):
+                raise RuntimeError(
+                    "expected pad+interleave in the D256 fast spec; got "
+                    f"pad={spec.use_kq_lds_pad} "
+                    f"interleave={spec.use_softmax_mfma_interleave}"
+                )
+            return build_unified_attention_2d_tiled(spec, arch=arch)
+
+    return _build
+
+
+def build_attention_d256_gfx942(arch):
+    """D256 gfx942 4-warp GQA fast path.
+
+    Mirrors ``build_attention_d256_gfx950`` but pins the *gfx942* cohort: raises
+    if ``_d256_gfx942_fast`` is not selected (so this can never pin the fallback),
+    then lowers the dedicated ``build_gfx942_4warp_gqa`` builder -- the
+    byte-sensitive V wide-load -> ``V_lds`` transpose kernel worth pinning.
+    """
+
+    def _build():
+        from kernels.common.attention_unified import (
+            _d256_gfx942_fast,
+            _tiled_spec_from_problem,
+        )
+        from kernels.gfx942.attention_tiled_2d import build_gfx942_4warp_gqa
+
+        problem = _d256_problem()
+        with _pinned_attention_arch(arch):
+            if not _d256_gfx942_fast(problem):
+                raise RuntimeError(
+                    f"D256 gfx942 fast route not selected under pinned arch "
+                    f"{arch!r}; would pin the fallback (slow scalar path)"
+                )
+            spec = _tiled_spec_from_problem(problem)
+            return build_gfx942_4warp_gqa(spec, arch=arch)
 
     return _build
 
@@ -1309,6 +1447,92 @@ def cases():
             dtype="bf16",
             num_segments=4,
         ),
+    )
+
+    # Dense flash-attn prefill (gfx950-only builder). Registered as a table rather
+    # than 18 add() blocks because every case is the same base spec with one or two
+    # overrides; the variant name is the only thing that differs case to case.
+    for _variant, _over in (
+        # --- default (one CTA per q-block/head) grid ---
+        ("default_causal_sq512", {}),
+        ("swa_w128_sq512", {"sliding_window": 128}),
+        ("varlen_sq512", {"varlen": True}),
+        ("lazy_off_sq512", {"lazy_rescale": False}),
+        ("fp16_h64_sq512", {"dtype": "fp16", "head_size": 64}),
+        ("bn128_sq512", {"block_n": 128}),
+        ("noncausal_sq512", {"causal": False}),
+        # --- persistent (grid-stride) grid + decode variants ---
+        ("persistent_causal_sq512", {"persistent": True, "num_persistent": 256}),
+        (
+            "persist_qbmaj_sq512",
+            {"persistent": True, "num_persistent": 256, "persist_decode": "qb_major"},
+        ),
+        (
+            "persist_hkvmaj_sq512",
+            {"persistent": True, "num_persistent": 256, "persist_decode": "hkv_major"},
+        ),
+        (
+            "persist_intl_sq512",
+            {"persistent": True, "num_persistent": 256, "interleave": True},
+        ),
+        (
+            "persist_lazy_off_sq512",
+            {"persistent": True, "num_persistent": 256, "lazy_rescale": False},
+        ),
+        (
+            "persist_swa_w128_sq512",
+            {"persistent": True, "num_persistent": 256, "sliding_window": 128},
+        ),
+        # D=64 packed-row DMA loader (2 rows/instr, unpadded LDS) on the persistent
+        # builder -- locks the head_size=64 fix (fp16_h64 above only exercises the
+        # default builder).
+        (
+            "persist_h64_sq512",
+            {"persistent": True, "num_persistent": 256, "head_size": 64},
+        ),
+        # ragged (non-256 seqlen) in-kernel path: on-chip boundary padding. causal
+        # (no key mask), non-causal (ktok<seqlen_kv key mask), D=64, and the
+        # persistent variant -- lock all four ragged codegen shapes.
+        ("ragged_causal_sq500", {"seqlen_q": 500, "seqlen_kv": 500, "ragged": True}),
+        (
+            "ragged_full_sq500",
+            {"seqlen_q": 500, "seqlen_kv": 500, "ragged": True, "causal": False},
+        ),
+        (
+            "ragged_h64_sq500",
+            {"seqlen_q": 500, "seqlen_kv": 500, "ragged": True, "head_size": 64},
+        ),
+        (
+            "persist_ragged_sq500",
+            {
+                "seqlen_q": 500,
+                "seqlen_kv": 500,
+                "ragged": True,
+                "persistent": True,
+                "num_persistent": 256,
+            },
+        ),
+    ):
+        add(
+            "attention_dense",
+            f"attention_dense/gfx950/{_variant}",
+            "gfx950",
+            build_attention_dense("gfx950", **_over),
+        )
+
+    # D256 bf16 prefill fast specs: the byte-sensitive slab-pad (gfx950) and
+    # 4-warp GQA V-transpose (gfx942) routes.
+    add(
+        "attention_d256",
+        "attention_d256/gfx950/pad_interleave",
+        "gfx950",
+        build_attention_d256_gfx950("gfx950"),
+    )
+    add(
+        "attention_d256",
+        "attention_d256/gfx942/4warp_gqa",
+        "gfx942",
+        build_attention_d256_gfx942("gfx942"),
     )
     return out
 
