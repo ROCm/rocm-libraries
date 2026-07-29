@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2024, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2024-2025, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2024-2026, Advanced Micro Devices, Inc.  All rights reserved.
  * 
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -33,40 +33,5 @@
 #include "../../config.hpp"
 
 #include <cub/util_temporary_storage.cuh> // IWYU pragma: export
-
-BEGIN_HIPCUB_NAMESPACE
-
-/// \brief Alias temporaries to externally-allocated device storage (or simply return the amount of storage needed).
-/// \tparam ALLOCATIONS The number of allocations that are needed.
-/// \param d_temp_storage [in] Device-accessible allocation of temporary storage.  When nullptr, the required allocation size is written to \p temp_storage_bytes and no work is done.
-/// \param temp_storage_bytes [in,out] Size in bytes of \t d_temp_storage allocation.
-/// \param allocations [out] Pointers to device allocations needed.
-/// \param allocation_sizes [in] Sizes in bytes of device allocations needed.
-template<int ALLOCATIONS>
-HIPCUB_DEPRECATED_BECAUSE("Internal-only implementation detail")
-HIPCUB_HOST_DEVICE HIPCUB_FORCEINLINE hipError_t
-    AliasTemporaries(void*   d_temp_storage,
-                     size_t& temp_storage_bytes,
-                     void* (&allocations)[ALLOCATIONS],
-                     const size_t (&allocation_sizes)[ALLOCATIONS])
-{
-    cudaError_t error = ::cub::detail::AliasTemporaries(d_temp_storage,
-                                                        temp_storage_bytes,
-                                                        allocations,
-                                                        allocation_sizes);
-
-    if(cudaSuccess == error)
-    {
-        return hipSuccess;
-    }
-    else if(cudaErrorInvalidValue == error)
-    {
-        return hipErrorInvalidValue;
-    }
-
-    return hipErrorUnknown;
-}
-
-END_HIPCUB_NAMESPACE
 
 #endif // HIPCUB_CUB_UTIL_TEMPORARY_STORAGE_HPP_

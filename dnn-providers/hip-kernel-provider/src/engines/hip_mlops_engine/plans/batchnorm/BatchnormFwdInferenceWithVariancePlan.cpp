@@ -139,28 +139,28 @@ void BatchnormFwdInferenceWithVariancePlan::compile(const IKernelCompiler& kerne
     // Check if 4D (NCHW/NHWC) or 5D (NCDHW/NDHWC)
     if(xDims->size() == 4)
     {
-        n = static_cast<int>(xDims->Get(0));
-        c = static_cast<int>(xDims->Get(1));
-        h = static_cast<int>(xDims->Get(2));
-        w = static_cast<int>(xDims->Get(3));
+        n = checkedNarrowToInt(xDims->Get(0), "n");
+        c = checkedNarrowToInt(xDims->Get(1), "c");
+        h = checkedNarrowToInt(xDims->Get(2), "h");
+        w = checkedNarrowToInt(xDims->Get(3), "w");
 
-        nStride = static_cast<int>(xStrides->Get(0));
-        cStride = static_cast<int>(xStrides->Get(1));
-        wStride = static_cast<int>(xStrides->Get(3));
+        nStride = checkedNarrowToInt(xStrides->Get(0), "nStride");
+        cStride = checkedNarrowToInt(xStrides->Get(1), "cStride");
+        wStride = checkedNarrowToInt(xStrides->Get(3), "wStride");
     }
     else if(xDims->size() == 5)
     {
-        n = static_cast<int>(xDims->Get(0));
-        c = static_cast<int>(xDims->Get(1));
-        auto d = static_cast<int>(xDims->Get(2));
-        h = static_cast<int>(xDims->Get(3));
-        w = static_cast<int>(xDims->Get(4));
+        n = checkedNarrowToInt(xDims->Get(0), "n");
+        c = checkedNarrowToInt(xDims->Get(1), "c");
+        auto d = checkedNarrowToInt(xDims->Get(2), "d");
+        h = checkedNarrowToInt(xDims->Get(3), "h");
+        w = checkedNarrowToInt(xDims->Get(4), "w");
         // For 5D, combine D*H*W into spatial dimension
         h = d * h;
 
-        nStride = static_cast<int>(xStrides->Get(0));
-        cStride = static_cast<int>(xStrides->Get(1));
-        wStride = static_cast<int>(xStrides->Get(4));
+        nStride = checkedNarrowToInt(xStrides->Get(0), "nStride");
+        cStride = checkedNarrowToInt(xStrides->Get(1), "cStride");
+        wStride = checkedNarrowToInt(xStrides->Get(4), "wStride");
     }
     else
     {
