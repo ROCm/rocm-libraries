@@ -39,6 +39,8 @@
 
 ROCSOLVER_BEGIN_NAMESPACE
 
+static constexpr bool use_recursion = true;
+
 template <typename I>
 static I get_lds_size()
 {
@@ -78,19 +80,8 @@ ROCSOLVER_KERNEL void chk_positive(INFO* iinfo, INFO* info, I j, I batch_count)
 template <typename T, typename I>
 I potrf_get_block_size(const I n)
 {
-    if constexpr(sizeof(T) == 4)
-    {
-        return 256;
-    }
-    else if constexpr(sizeof(T) == 8)
-    {
-        if(n <= 6400)
-            return 128;
-        else
-            return 256;
-    }
-
-    return POTF2_MAX_SMALL_SIZE(T);
+    I const nb = POTF2_MAX_SMALL_SIZE(T);
+    return std::min(n, nb);
 }
 
 template <bool BATCHED, bool STRIDED, typename T, typename I>
@@ -107,21 +98,21 @@ void rocsolver_potrf_getMemorySize(const I n,
                                    bool* optim_mem)
 {
     // if quick return no need of workspace
+    *size_scalars = 0;
+    *size_work1 = 0;
+    *size_work2 = 0;
+    *size_work3 = 0;
+    *size_work4 = 0;
+    *size_pivots = 0;
+    *size_iinfo = 0;
+    *optim_mem = true;
     if(n == 0 || batch_count == 0)
     {
-        *size_scalars = 0;
-        *size_work1 = 0;
-        *size_work2 = 0;
-        *size_work3 = 0;
-        *size_work4 = 0;
-        *size_pivots = 0;
-        *size_iinfo = 0;
-        *optim_mem = true;
         return;
     }
 
     I nb = potrf_get_block_size<T>(n);
-    if(n <= POTRF_POTF2_SWITCHSIZE(T))
+    if(n <= nb)
     {
         // requirements for calling a single POTF2
         rocsolver_potf2_getMemorySize<T>(n, batch_count, size_scalars, size_work1, size_pivots);
@@ -157,6 +148,47 @@ void rocsolver_potrf_getMemorySize(const I n,
         }
 
         *size_work1 = std::max(s1, s2);
+    }
+
+    if(use_recursion)
+    {
+        I n1 = n / 2;
+        I n2 = n - n1;
+        I nn = std::max(n1, n2);
+
+        size_t lwork1{}, lwork2{}, lwork3{}, lwork4{};
+        rocblas_status istat = rocblas_status_success;
+
+        if(uplo == rocblas_fill_upper)
+        {
+            I const lda_estimate = nn;
+            I const ldb_estimate = nn;
+
+            istat = rocblasCall_trsm_mem<BATCHED, T>(rocblas_side_left,
+                                                     rocblas_operation_conjugate_transpose,
+
+                                                     nn, nn, lda_estimate, ldb_estimate, batch_count,
+
+                                                     &lwork1, &lwork2, &lwork3, &lwork4);
+        }
+        else
+        {
+            I const lda_estimate = nn;
+            I const ldb_estimate = nn;
+
+            istat = rocblasCall_trsm_mem<BATCHED, T>(rocblas_side_right,
+                                                     rocblas_operation_conjugate_transpose,
+
+                                                     nn, nn, lda_estimate, ldb_estimate, batch_count,
+
+                                                     &lwork1, &lwork2, &lwork3, &lwork4);
+        }
+        assert(istat == rocblas_status_success);
+
+        *size_work1 = std::max(*size_work1, lwork1);
+        *size_work2 = std::max(*size_work2, lwork2);
+        *size_work3 = std::max(*size_work3, lwork3);
+        *size_work4 = std::max(*size_work4, lwork4);
     }
 }
 
@@ -203,99 +235,144 @@ rocblas_status rocsolver_potrf_template(rocblas_handle handle,
     // everything must be executed with scalars on the host
     rocblas_pointer_mode_saver saver(handle, rocblas_pointer_mode_host);
 
-    // if the matrix is small, use the unblocked (BLAS-levelII) variant of the
-    // algorithm
-    I nb = potrf_get_block_size<T>(n);
-    if(n <= POTRF_POTF2_SWITCHSIZE(T))
-        return rocsolver_potf2_template<T>(handle, uplo, n, A, shiftA, lda, strideA, info,
-                                           batch_count, scalars, (T*)work1, pivots);
+    auto potrf_alt
+        = [=](rocblas_handle handle, rocblas_fill const uplo, I const n,
 
-    // constants for rocblas functions calls
-    T t_one = 1;
-    S s_one = 1;
-    S s_minone = -1;
+              auto A, rocblas_stride const shiftA, I const lda, rocblas_stride strideA,
 
-    I jb, j = 0;
-
-    // (TODO: When the matrix is detected to be non positive definite, we need to
-    //  prevent TRSM and HERK to modify further the input matrix; ideally with no
-    //  synchronizations.)
-
-    if(uplo == rocblas_fill_upper)
-    {
-        // Compute the Cholesky factorization A = U'*U.
-        while(j < n - POTRF_POTF2_SWITCHSIZE(T))
+              auto info, I const batch_count, I const offset_row, auto&& self) -> rocblas_status {
+        // if the matrix is small, use the unblocked (BLAS-levelII) variant of the
+        // algorithm
         {
-            // Factor diagonal and subdiagonal blocks
-            jb = std::min(n - j, nb); // number of columns in the block
-            ROCSOLVER_LAUNCH_KERNEL(reset_info, gridReset, threads, 0, stream, iinfo, batch_count, 0);
-            rocsolver_potf2_template<T>(handle, uplo, jb, A, shiftA + idx2D(j, j, lda), lda,
-                                        strideA, iinfo, batch_count, scalars, (T*)work1, pivots);
-
-            // test for non-positive-definiteness.
-            ROCSOLVER_LAUNCH_KERNEL((chk_positive<I, INFO, U>), gridReset, threads, 0, stream,
-                                    iinfo, info, j, batch_count);
-
-            if(j + jb < n)
+            I nb = potrf_get_block_size<T>(n);
+            if(n <= nb)
             {
-                // update trailing submatrix
-                rocsolver_trsm_upper<BATCHED, STRIDED, T>(
-                    handle, rocblas_side_left, rocblas_operation_conjugate_transpose,
-                    rocblas_diagonal_non_unit, jb, (n - j - jb), A, shiftA + idx2D(j, j, lda), lda,
-                    strideA, A, shiftA + idx2D(j, j + jb, lda), lda, strideA, batch_count,
-                    optim_mem, work1, work2, work3, work4);
+                return potf2_run_small<T>(handle, uplo, n,
 
-                rocblasCall_syrk_herk<BATCHED, T>(
-                    handle, uplo, rocblas_operation_conjugate_transpose, n - j - jb, jb, &s_minone,
-                    A, shiftA + idx2D(j, j + jb, lda), lda, strideA, &s_one, A,
-                    shiftA + idx2D(j + jb, j + jb, lda), lda, strideA, batch_count);
+                                          A, shiftA, lda, strideA,
+
+                                          info, batch_count, offset_row);
             }
-            j += nb;
         }
-    }
-    else
-    {
-        // Compute the Cholesky factorization A = L*L'.
-        while(j < n - POTRF_POTF2_SWITCHSIZE(T))
+
+        // constants for rocblas functions calls
+        T t_one = 1;
+        S s_one = 1;
+        S s_minone = -1;
+
+        I jb = 0, j = 0;
+
+        I nb = potrf_get_block_size<T>(n);
+        if(use_recursion)
         {
-            // Factor diagonal and subdiagonal blocks
-            jb = std::min(n - j, nb); // number of columns in the block
-            ROCSOLVER_LAUNCH_KERNEL(reset_info, gridReset, threads, 0, stream, iinfo, batch_count, 0);
-            rocsolver_potf2_template<T>(handle, uplo, jb, A, shiftA + idx2D(j, j, lda), lda,
-                                        strideA, iinfo, batch_count, scalars, (T*)work1, pivots);
-
-            // test for non-positive-definiteness.
-            ROCSOLVER_LAUNCH_KERNEL((chk_positive<I, INFO, U>), gridReset, threads, 0, stream,
-                                    iinfo, info, j, batch_count);
-
-            if(j + jb < n)
-            {
-                // update trailing submatrix
-                rocsolver_trsm_lower<BATCHED, STRIDED, T>(
-                    handle, rocblas_side_right, rocblas_operation_conjugate_transpose,
-                    rocblas_diagonal_non_unit, (n - j - jb), jb, A, shiftA + idx2D(j, j, lda), lda,
-                    strideA, A, shiftA + idx2D(j + jb, j, lda), lda, strideA, batch_count,
-                    optim_mem, work1, work2, work3, work4);
-
-                rocblasCall_syrk_herk<BATCHED, T>(
-                    handle, uplo, rocblas_operation_none, n - j - jb, jb, &s_minone, A,
-                    shiftA + idx2D(j + jb, j, lda), lda, strideA, &s_one, A,
-                    shiftA + idx2D(j + jb, j + jb, lda), lda, strideA, batch_count);
-            }
-            j += nb;
+            I const n1 = n / 2;
+            I const n2 = n - n1;
+            nb = std::max(n1, n2);
         }
-    }
 
-    // factor last block
-    if(j < n)
-    {
-        rocsolver_potf2_template<T>(handle, uplo, n - j, A, shiftA + idx2D(j, j, lda), lda, strideA,
-                                    iinfo, batch_count, scalars, (T*)work1, pivots);
-        ROCSOLVER_LAUNCH_KERNEL((chk_positive<I, INFO, U>), gridReset, threads, 0, stream, iinfo,
-                                info, j, batch_count);
-    }
+        // (TODO: When the matrix is detected to be non positive definite, we need to
+        //  prevent TRSM and HERK to modify further the input matrix; ideally with no
+        //  synchronizations.)
 
-    return rocblas_status_success;
+        rocblas_status istat = rocblas_status_success;
+
+        if(uplo == rocblas_fill_upper)
+        {
+            // Compute the Cholesky factorization A = U'*U.
+            for(I j = 0; j < n; j += nb)
+            {
+                // Factor diagonal and subdiagonal blocks
+                jb = std::min(n - j, nb); // number of columns in the block
+
+                istat = self(handle, uplo, jb,
+
+                             A, shiftA + idx2D(j, j, lda), lda, strideA,
+
+                             info, batch_count, offset_row + j, self);
+
+                if(istat != rocblas_status_success)
+                {
+                    return (istat);
+                }
+
+                if(j + jb < n)
+                {
+                    // update trailing submatrix
+                    istat = rocsolver_trsm_upper<BATCHED, STRIDED, T>(
+                        handle, rocblas_side_left, rocblas_operation_conjugate_transpose,
+                        rocblas_diagonal_non_unit, jb, (n - j - jb), A, shiftA + idx2D(j, j, lda),
+                        lda, strideA, A, shiftA + idx2D(j, j + jb, lda), lda, strideA, batch_count,
+                        optim_mem, work1, work2, work3, work4);
+
+                    if(istat != rocblas_status_success)
+                    {
+                        return (istat);
+                    }
+
+                    istat = rocblasCall_syrk_herk<BATCHED, T>(
+                        handle, uplo, rocblas_operation_conjugate_transpose, n - j - jb, jb,
+                        &s_minone, A, shiftA + idx2D(j, j + jb, lda), lda, strideA, &s_one, A,
+                        shiftA + idx2D(j + jb, j + jb, lda), lda, strideA, batch_count);
+                    if(istat != rocblas_status_success)
+                    {
+                        return (istat);
+                    }
+                }
+            } // end for
+        }
+        else
+        {
+            // Compute the Cholesky factorization A = L*L'.
+            for(I j = 0; j < n; j += nb)
+            {
+                // Factor diagonal and subdiagonal blocks
+                jb = std::min(n - j, nb); // number of columns in the block
+
+                istat = self(handle, uplo, jb,
+
+                             A, shiftA + idx2D(j, j, lda), lda, strideA,
+
+                             info, batch_count, offset_row + j, self);
+                if(istat != rocblas_status_success)
+                {
+                    return (istat);
+                }
+
+                if(j + jb < n)
+                {
+                    // update trailing submatrix
+                    istat = rocsolver_trsm_lower<BATCHED, STRIDED, T>(
+                        handle, rocblas_side_right, rocblas_operation_conjugate_transpose,
+                        rocblas_diagonal_non_unit, (n - j - jb), jb, A, shiftA + idx2D(j, j, lda),
+                        lda, strideA, A, shiftA + idx2D(j + jb, j, lda), lda, strideA, batch_count,
+                        optim_mem, work1, work2, work3, work4);
+                    if(istat != rocblas_status_success)
+                    {
+                        return (istat);
+                    }
+
+                    istat = rocblasCall_syrk_herk<BATCHED, T>(
+                        handle, uplo, rocblas_operation_none, n - j - jb, jb, &s_minone, A,
+                        shiftA + idx2D(j + jb, j, lda), lda, strideA, &s_one, A,
+                        shiftA + idx2D(j + jb, j + jb, lda), lda, strideA, batch_count);
+                    if(istat != rocblas_status_success)
+                    {
+                        return (istat);
+                    }
+                }
+            } // end for
+        }
+
+        return istat;
+    };
+
+    I const offset_row = 0;
+    rocblas_status const istat = potrf_alt(handle, uplo, n,
+
+                                           A, shiftA, lda, strideA,
+
+                                           info, batch_count, offset_row, potrf_alt);
+
+    return (istat);
 }
-
 ROCSOLVER_END_NAMESPACE
