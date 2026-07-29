@@ -863,7 +863,7 @@ def _stage_conv0_a(
 
         in_off = b.add(b.mul(b.add(b.mul(ih, c_Wi), iw), c_cc), ci)
         safe_off = b.select(valid, in_off, c0)
-        raw_i8 = b.global_load(x_ptr, safe_off, I8)
+        raw_i8 = b.global_load_i8(x_ptr, safe_off)
         v = b.select(valid, _i8_to_f32(b, raw_i8), zero_f)
         b.smem_store_f16(a_smem, [row, kg], b.trunc_f32_to_f16(v))
 
@@ -955,7 +955,7 @@ def _stage_input_footprint(
         )
         off = b.add(b.mul(b.add(b.mul(ih, c_Wi), iw), c_cc), ci)
         safe_off = b.select(valid, off, c0)
-        raw_i8 = b.global_load(x_ptr, safe_off, I8)
+        raw_i8 = b.global_load_i8(x_ptr, safe_off)
         v = b.select(valid, _i8_to_f32(b, raw_i8), zero_f)
         with b.scf_if(in_range):
             b.smem_store_f16(inp_smem, [pix, ci], b.trunc_f32_to_f16(v))
@@ -1107,7 +1107,7 @@ def _stage_input_footprint_int(
         )
         off = b.add(b.mul(b.add(b.mul(ih, c_Wi), iw), c_cc), ci)
         safe_off = b.select(valid, off, c0)
-        raw_i8 = b.global_load(x_ptr, safe_off, I8)
+        raw_i8 = b.global_load_i8(x_ptr, safe_off)
         code = b.select(valid, raw_i8, zero_i8)
         with b.scf_if(in_range):
             b.smem_store_vN(inp_smem, [pix, ci], code, n=1)
@@ -1185,7 +1185,7 @@ def _stage_conv0_w0(
         valid = b.land(in_range, b.land(b.cmp_lt(n, c_k0), b.cmp_lt(kg, c_kg)))
         off = b.add(b.mul(n, c_kg), kg)
         safe_off = b.select(valid, off, c0)
-        raw_i8 = b.global_load(w0_ptr, safe_off, I8)
+        raw_i8 = b.global_load_i8(w0_ptr, safe_off)
         v = b.select(valid, _i8_to_f32(b, raw_i8), zero_f)
         with b.scf_if(in_range):
             b.smem_store_f16(w0_smem, [n, kg], b.trunc_f32_to_f16(v))
@@ -1303,7 +1303,7 @@ def _stage_conv0_a_int(
 
         in_off = b.add(b.mul(b.add(b.mul(ih, c_Wi), iw), c_cc), ci)
         safe_off = b.select(valid, in_off, c0)
-        raw_i8 = b.global_load(x_ptr, safe_off, I8)
+        raw_i8 = b.global_load_i8(x_ptr, safe_off)
         code = b.select(valid, raw_i8, zero_i8)
         b.smem_store_vN(a_smem, [row, kg], code, n=1)
 
@@ -1373,7 +1373,7 @@ def _stage_conv0_w0_int(
         valid = b.land(in_range, b.land(b.cmp_lt(n, c_k0), b.cmp_lt(kg, c_kg)))
         off = b.add(b.mul(n, c_kg), kg)
         safe_off = b.select(valid, off, c0)
-        raw_i8 = b.global_load(w0_ptr, safe_off, I8)
+        raw_i8 = b.global_load_i8(w0_ptr, safe_off)
         code = b.select(valid, raw_i8, zero_i8)
         with b.scf_if(in_range):
             b.smem_store_vN(w0_smem, [n, kg], code, n=1)
@@ -1853,7 +1853,7 @@ def _stage_conv1_w1(
         valid = b.land(in_range, b.cmp_lt(n, c_k1))
         off = b.add(b.mul(n, c_bpr), kb)
         safe_off = b.select(valid, off, c0)
-        byte = b.global_load(w1_ptr, safe_off, I8)
+        byte = b.global_load_i8(w1_ptr, safe_off)
         lo_i32, hi_i32 = unpack_i4_byte_to_pair_i32(b, byte)
         lo_h = b.trunc_f32_to_f16(b.sitofp_f32(lo_i32))
         hi_h = b.trunc_f32_to_f16(b.sitofp_f32(hi_i32))
@@ -1935,7 +1935,7 @@ def _stage_conv1_w1_i8(
         valid = b.land(in_range, b.cmp_lt(n, c_k1))
         off = b.add(b.mul(n, c_bpr), kb)
         safe_off = b.select(valid, off, c0)
-        byte = b.global_load(w1_ptr, safe_off, I8)
+        byte = b.global_load_i8(w1_ptr, safe_off)
         lo_i32, hi_i32 = unpack_i4_byte_to_pair_i32(b, byte)
         lo_i8 = b.select(valid, b.trunc(lo_i32, I8), zero_i8)
         hi_i8 = b.select(valid, b.trunc(hi_i32, I8), zero_i8)
