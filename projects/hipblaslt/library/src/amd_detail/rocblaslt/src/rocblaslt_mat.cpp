@@ -25,6 +25,7 @@
  * ************************************************************************ */
 
 #include "check_numerics_matrix.hpp"
+#include "check_streamk_sync.hpp"
 #include "definitions.h"
 #include "handle.h"
 #include "rocblaslt_fused_a2a_validate.hpp"
@@ -265,7 +266,9 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
         return rocblaslt_status_invalid_value;
 #endif
 
+    hipblaslt_check_streamk_sync_reset(handle, stream);
     rocblaslt_status st = runContractionProblem(handle, algo, problem, gemmData);
+    hipblaslt_check_streamk_sync_scan(handle, stream, "rocblaslt_matmul_impl");
 
     if(st == rocblaslt_status_success)
     {
