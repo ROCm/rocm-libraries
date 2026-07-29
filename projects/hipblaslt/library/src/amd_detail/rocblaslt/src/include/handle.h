@@ -135,6 +135,10 @@ struct _rocblaslt_handle
     // Sticky bypass for scan_D once any caller observes a NaN.
     std::atomic<bool>     check_numerics_short_circuit{false};
 
+    // HIPBLASLT_CHECK_STREAMK_SYNC state. Read once in the ctor; opt-in via
+    // env. See check_streamk_sync.hpp for the checker protocol.
+    bool check_streamk_sync = false;
+
     // Kernels treat these buffers as inter-workgroup flags that they set, spin
     // on, and reset themselves, so a flag region may only be touched by one
     // kernel at a time. Two GEMMs running concurrently on different streams
