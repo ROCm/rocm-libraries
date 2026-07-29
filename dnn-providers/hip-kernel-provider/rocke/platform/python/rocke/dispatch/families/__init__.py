@@ -35,6 +35,7 @@ registry exactly the way ``gemm/fp16_rcr.py`` does:
 from __future__ import annotations
 
 from .conv import CONV_REGISTRY, ConvRequest, dispatch_conv
+from .conv_dgrad import CONV_DGRAD_REGISTRY, ConvDgradRequest, dispatch_conv_dgrad
 from .moe import MOE_REGISTRY, MoeRequest, dispatch_moe
 from .norm import NORM_REGISTRY, NormRequest, dispatch_norm
 
@@ -42,6 +43,9 @@ __all__ = [
     "CONV_REGISTRY",
     "ConvRequest",
     "dispatch_conv",
+    "CONV_DGRAD_REGISTRY",
+    "ConvDgradRequest",
+    "dispatch_conv_dgrad",
     "MOE_REGISTRY",
     "MoeRequest",
     "dispatch_moe",
