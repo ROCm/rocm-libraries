@@ -110,9 +110,4 @@ jobs:
         }}
       platform: ${{ inputs.platform }}
       component: ${{ toJSON(matrix.components) }}
-    secrets:
-      MIOPEN_CI_WEBHOOK_URL: ${{ secrets.MIOPEN_CI_WEBHOOK_URL }}
-      HIPDNN_CI_WEBHOOK_URL: ${{ secrets.HIPDNN_CI_WEBHOOK_URL }}
-      coverage: ${{ inputs.coverage }}
-      coverage_enabled: ${{ inputs.coverage_enabled }}
     secrets: inherit
