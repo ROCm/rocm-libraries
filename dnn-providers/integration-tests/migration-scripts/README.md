@@ -48,7 +48,7 @@ to migrate a whole suite in bulk with a byte- and behavior-level proof. For
 
 ```bash
 # Step 1: Capture — dump the graph(s) for just this test
-./build/bin/integration_tests --capture-bundles /tmp/captured \
+./build/bin/hipdnn_integration_tests --capture-bundles /tmp/captured \
     --gtest_filter='Full/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness/*'
 
 # Step 2: Import — merge each captured graph into the bundle tree
@@ -94,13 +94,13 @@ was lost.
 Build the integration test binary (no GPU required for Layers 1-3):
 
 ```bash
-cmake --build build --target integration_tests
+cmake --build build --target hipdnn_integration_tests
 ```
 
 ### Automated: Full pipeline
 
 ```bash
-migration-scripts/run_capture_pipeline.sh build/bin/integration_tests
+migration-scripts/run_capture_pipeline.sh build/bin/hipdnn_integration_tests
 ```
 
 This runs Hops A–D plus the supporting checks in sequence. Pass
@@ -111,7 +111,7 @@ This runs Hops A–D plus the supporting checks in sequence. Pass
 #### Step 1: Census — see what exists
 
 ```bash
-python3 migration-scripts/census.py build/bin/integration_tests
+python3 migration-scripts/census.py build/bin/hipdnn_integration_tests
 ```
 
 Runs `--gtest_list_tests` and classifies every test case as `graph`
@@ -120,7 +120,7 @@ Runs `--gtest_list_tests` and classifies every test case as `graph`
 #### Step 2: Capture (Hop A) — serialize C++ graphs as JSON
 
 ```bash
-./build/bin/integration_tests --capture-bundles captured_bundles \
+./build/bin/hipdnn_integration_tests --capture-bundles captured_bundles \
     --gtest_filter='*IntegrationGpu*'
 ```
 

@@ -20,7 +20,8 @@ graph test runs against every engine** — see
 # Superbuild — plugin discovery is automatic
 ./bin/hipdnn_integration_tests
 
-# Enable data-driven bundle/sweep tests (opt-in)
+# Enable data-driven bundle/sweep tests — opt-in at runtime during rollout,
+# see "Bundles are opt-in at runtime" below
 ./bin/hipdnn_integration_tests --allow-bundles
 ```
 
@@ -48,6 +49,18 @@ There are two mechanisms for testing that a graph runs correctly on an engine.
 > behavior, serialization round-trips, benchmarking knobs, determinism, and
 > pass-by-value semantics. See
 > [C++ Integration Tests](#c-integration-tests-history--when-to-use).
+
+### Bundles are opt-in at runtime (for now)
+
+"Default" above is about **authoring**: write new graph-verification tests as
+bundles, not C++. It is not yet true of **execution**: `--allow-bundles` (or
+`HIPDNN_TEST_ALLOW_BUNDLES=1`) gates whether any registered bundle actually
+runs, and none of the three providers' `add_external_integration_test_target()`
+CMake calls pass it yet (see [Provider Integration](#provider-integration)) —
+so bundle tests do not currently run in the wired-up provider CI checks, only
+in local/manual invocations and the migration pipeline. Pass `--allow-bundles`
+yourself to exercise bundles locally; flipping it on in provider CI wiring is
+pending validation per engine.
 
 ## Bundle Formats: Single-Graph vs Template-Sweep
 
@@ -146,6 +159,33 @@ What happens:
 3. **New case for an existing topology** → appends to that `sweep.json`.
 4. **New topology** → creates a new template+sweep directory.
 5. The auto-generated case id is printed to stderr — that id is the gtest name.
+
+### What is a "sweep", and how do you author one?
+
+A **sweep** is the `sweep.json` case matrix belonging to a template-sweep
+bundle (see [Bundle Formats](#bundle-formats-single-graph-vs-template-sweep)):
+one row per case, each with concrete `values` for the template's `${case.*}`
+placeholders plus per-case metadata and an optional `golden` pointer.
+
+**Never hand-write a `sweep.json` from scratch.** Existing sweeps (some are
+thousands of lines, e.g. `quick/Batchnorm/Default/sweep.json`) are tool
+output, not hand-authored — `import_graph.py` appends one case at a time and
+auto-assigns its id; nobody typed those rows by hand.
+
+**Gap: there is no tool to author a brand-new sweep's full case matrix from
+scratch.** `import_graph.py` only appends cases you already have as concrete
+graph JSON, one call per case; there's no "generate N cases for these
+dims/dtypes/layouts" command for a topology that doesn't already exist
+anywhere. Today's mitigation is a round trip through C++: write the case
+matrix as a normal C++ `INSTANTIATE_TEST_SUITE_P` graph test (fast to iterate
+over many shapes/dtypes in one parameterized fixture), then run the existing
+export tooling — `--capture-bundles` (Hop A) to serialize each parameterized
+case as JSON, then `place_bundles.py` (Hop B, bulk) or `import_graph.py`
+(Step 5, incremental) to fold them into a `sweep.json` — and delete the C++
+test once the exported bundle is verified equivalent (see
+[`migration-scripts/README.md`](migration-scripts/README.md)). A direct
+sweep-authoring tool that skips the C++ detour is a known future need, not
+yet built.
 
 Golden tensor data is tracked with DVC (stored in S3, not git). See
 [`integration_test_bundles/README.md`](integration_test_bundles/README.md) for
