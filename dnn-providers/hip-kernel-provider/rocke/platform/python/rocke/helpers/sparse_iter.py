@@ -141,7 +141,7 @@ def block_sparse_iter(
     )
     with loop as k_block:
         mask_off = b.add(base, k_block)
-        mask_byte = b.global_load(mask_ptr, mask_off, I8)
+        mask_byte = b.global_load_i8(mask_ptr, mask_off)
         zero_i8 = b._op(  # noqa: SLF001 - i8 constant factory
             "arith.constant",
             result_types=[mask_byte.type],

@@ -131,9 +131,10 @@ const rocke_type_t*
     return t;
 }
 
-/* SmemType(elem, shape) -> "smem<{elem}, [{d0}x{d1}...]>" */
-const rocke_type_t*
-    rocke_smem_type(rocke_ir_builder_t* b, const rocke_type_t* elem, const int* shape, int rank)
+/* SmemType(elem, shape) -> "smem<{elem}, [{d0}x{d1}...]>"
+ * `exclusive` is kept OUT of the name (default 0 stays byte-identical). */
+const rocke_type_t* rocke_smem_type(
+    rocke_ir_builder_t* b, const rocke_type_t* elem, const int* shape, int rank, int exclusive)
 {
     rocke_type_t* t;
     int* shape_copy = NULL;
@@ -146,6 +147,9 @@ const rocke_type_t*
     if(!elem)
         return (const rocke_type_t*)rocke_i_set_err(
             b, ROCKE_ERR_VALUE, "smem_type: NULL element type");
+    if(exclusive != 0 && exclusive != 1)
+        return (const rocke_type_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "smem_type: exclusive must be 0 or 1, got %d", exclusive);
     if(rank < 0)
         rank = 0;
 
@@ -166,6 +170,7 @@ const rocke_type_t*
     t->elem = elem;
     t->shape = shape_copy;
     t->rank = rank;
+    t->smem_exclusive = exclusive; /* guarded to 0/1 above */
 
     /* Build the "[d0xd1x...]" body, then the full canonical name. The Python
      * form is f"smem<{elem.name}, [{'x'.join(...)}]>". */
@@ -492,6 +497,7 @@ static const char* const rocke_opcode_names[ROCKE_OP__COUNT] = {
     "memref.global_atomic_add",
     "memref.global_atomic_add_f32",
     "memref.global_atomic_add_pk_bf16",
+    "memref.global_atomic_add_pk_f16",
     "memref.cooperative_global_store",
 
     /* vector.* */
@@ -698,6 +704,7 @@ static const bool rocke_opcode_pure[ROCKE_OP__COUNT] = {
     /* global_atomic_add            */ false,
     /* global_atomic_add_f32        */ false,
     /* global_atomic_add_pk_bf16    */ false,
+    /* global_atomic_add_pk_f16     */ false,
     /* cooperative_global_store     */ false,
 
     /* vector.* */
