@@ -463,3 +463,24 @@ behavior-changing or known-wrong is pinned); this registry line is the record.
 The parse_integration additions begin in the mutation infra base and continue
 in this slice.
 **Re-run:** goldens byte-identical on two further no-update runs; `-m unit` green.
+
+## D22 — Solution.py mutation kill: pickle-free `.ambr` derivation golden
+**Decision:** Kill the `Solution.assignDerivedParameters` mutant giant with a
+syrupy `.ambr` full-derived-state golden regenerated from in-tree designed YAML
+configs, committing no pickle. See ADR 0003.
+**Why:** the giant (~18820 mutants across the `depthU`/`adp` families) is only
+observable by asserting the complete derived `_state`; a pickle golden is opaque,
+version-coupled, and undiffable, against the suite's add-only diffable-golden
+discipline. Unlike the LibraryIO add-only cases in D21, this introduces a new
+golden *vehicle* with a non-obvious regeneration mechanism, so it lands with an
+ADR (0003), not just this registry line.
+**Equivalence evidence:** verified kill-equivalent to the interim pickle corpus
+over 8 stratified windows (lines 1567-2857, 684 mutants, 0 per-key exit-code
+divergence). Byte-stability confirmed by two further no-update runs.
+**Harness fixes (not source):** derivation moved out of collection (a
+collection-time try/except was swallowing raising mutants); `_sanitize` now
+recurses into any `Mapping` so `ProblemType` is deep-compared, closing 4
+`MirrorDimsMetadata` mutants a `str()`-only render missed.
+**Regeneration:** on an intentional derivation/config change, rerun with
+`--snapshot-update`, confirm byte-stability with two clean runs, and log the
+regeneration here.
