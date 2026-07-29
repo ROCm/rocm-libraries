@@ -104,20 +104,8 @@ void testing_spmat_scale_bad_arg(const Arguments& arg)
         EXPECT_ROCSPARSE_STATUS(rocsparse_spmat_scale(handle, alpha, target_dtype, source, p_error),
                                 rocsparse_status_type_mismatch);
 
-        // Index-base mismatch: differing base between source and target is not supported yet.
-        rocsparse_local_spmat local_C_base(m,
-                                           n,
-                                           nnz,
-                                           csr_row_ptr_C,
-                                           csr_col_ind_C,
-                                           csr_val_C,
-                                           itype,
-                                           jtype,
-                                           rocsparse_index_base_one,
-                                           ttype);
-        rocsparse_spmat_descr target_base = local_C_base;
-        EXPECT_ROCSPARSE_STATUS(rocsparse_spmat_scale(handle, alpha, target_base, source, p_error),
-                                rocsparse_status_not_implemented);
+        // Note: a differing index base or index type between source and target is intentionally
+        // accepted, since rocsparse_spmat_scale only operates on the value arrays.
 
         // Data-type mismatch between alpha and the matrices.
         rocsparse_local_dnvec       alpha_other(static_cast<int64_t>(1), &local_alpha, other_ttype);

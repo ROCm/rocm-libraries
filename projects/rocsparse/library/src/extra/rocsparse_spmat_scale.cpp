@@ -88,21 +88,15 @@ namespace rocsparse
                            (rocsparse::spmat_scale_is_supported_format(source->format) == false),
                            rocsparse_status_not_implemented);
 
-        // Source and target must have matching shape, nonzero count and types.
+        // Source and target must have matching shape and nonzero count so their value arrays have
+        // the same length, and the same value data type. The index arrays are never touched, so
+        // the index types and index base of source and target are allowed to differ.
         ROCSPARSE_CHECKARG(
             arg_target, target, (target->rows != source->rows), rocsparse_status_invalid_size);
         ROCSPARSE_CHECKARG(
             arg_target, target, (target->cols != source->cols), rocsparse_status_invalid_size);
         ROCSPARSE_CHECKARG(
             arg_target, target, (target->nnz != source->nnz), rocsparse_status_invalid_size);
-        ROCSPARSE_CHECKARG(arg_target,
-                           target,
-                           (target->row_type != source->row_type),
-                           rocsparse_status_type_mismatch);
-        ROCSPARSE_CHECKARG(arg_target,
-                           target,
-                           (target->col_type != source->col_type),
-                           rocsparse_status_type_mismatch);
         ROCSPARSE_CHECKARG(arg_target,
                            target,
                            (target->data_type != source->data_type),
@@ -163,13 +157,6 @@ namespace rocsparse
             arg_source, source, (source->batch_count != 1), rocsparse_status_not_implemented);
         ROCSPARSE_CHECKARG(
             arg_target, target, (target->batch_count != 1), rocsparse_status_not_implemented);
-
-        // Differing index base between source and target is not yet supported (base conversion
-        // follow-up).
-        ROCSPARSE_CHECKARG(arg_target,
-                           target,
-                           (target->idx_base != source->idx_base),
-                           rocsparse_status_not_implemented);
 
         return rocsparse_status_continue;
     }
@@ -261,7 +248,6 @@ extern "C" rocsparse_status rocsparse_spmat_scale(rocsparse_handle            ha
 try
 {
     ROCSPARSE_ROUTINE_TRACE;
-    rocsparse::log_trace("rocsparse_spmat_scale", handle, alpha, target, source);
 
     // p_error is reserved for forward compatibility and is not populated yet.
     (void)p_error;
