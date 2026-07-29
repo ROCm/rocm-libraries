@@ -27,82 +27,14 @@ enable_testing()
 include(GoogleTest)
 include(CTest)
 
-add_executable(rpp_tests
-    src/tests/core/handle_test.cpp
-    src/tests/core/descriptor_test.cpp
-    src/tests/core/golden_layout_test.cpp
-    src/tests/image/color/brightness_test.cpp
-    src/tests/image/color/exposure_test.cpp
-    src/tests/image/color/blend_test.cpp
-    src/tests/image/color/contrast_test.cpp
-    src/tests/image/color/gamma_correction_test.cpp
-    src/tests/image/color/color_cast_test.cpp
-    src/tests/image/color/color_temperature_test.cpp
-    src/tests/image/color/hue_test.cpp
-    src/tests/image/color/lut_test.cpp
-    src/tests/image/color/saturation_test.cpp
-    src/tests/image/color/histogram_equalize_test.cpp
-    src/tests/image/color/color_twist_test.cpp
-    src/tests/image/arithmetic/magnitude_test.cpp
-    src/tests/image/effects/solarize_test.cpp
-    src/tests/image/effects/posterize_test.cpp
-    src/tests/image/effects/non_linear_blend_test.cpp
-    src/tests/image/effects/erase_test.cpp
-    src/tests/image/effects/channel_dropout_test.cpp
-    src/tests/image/effects/snow_test.cpp
-    src/tests/image/effects/rain_test.cpp
-    src/tests/image/effects/cutout_dropout_test.cpp
-    src/tests/image/effects/coarse_dropout_test.cpp
-    src/tests/image/effects/grid_dropout_test.cpp
-    src/tests/image/effects/gridmask_test.cpp
-    src/tests/image/effects/ricap_test.cpp
-    src/tests/image/effects/pixelate_test.cpp
-    src/tests/image/bitwise/bitwise_and_test.cpp
-    src/tests/image/bitwise/bitwise_or_test.cpp
-    src/tests/image/bitwise/bitwise_xor_test.cpp
-    src/tests/image/bitwise/bitwise_not_test.cpp
-    src/tests/image/data_exchange/copy_test.cpp
-    src/tests/image/data_exchange/channel_permute_test.cpp
-    src/tests/image/data_exchange/color_to_greyscale_test.cpp
-    src/tests/image/data_exchange/yuv_to_rgb_test.cpp
-    src/tests/image/geometric/crop_test.cpp
-    src/tests/image/geometric/resize_test.cpp
-    src/tests/image/geometric/warp_affine_test.cpp
-    src/tests/image/geometric/warp_perspective_test.cpp
-    src/tests/image/geometric/rotate_test.cpp
-    src/tests/image/geometric/remap_test.cpp
-    src/tests/image/geometric/lens_correction_test.cpp
-    src/tests/image/geometric/resize_mirror_normalize_test.cpp
-    src/tests/image/geometric/crop_and_patch_test.cpp
-    src/tests/image/geometric/phase_test.cpp
-    src/tests/image/geometric/resize_crop_mirror_test.cpp
-    src/tests/image/morphological/erode_test.cpp
-    src/tests/image/morphological/dilate_test.cpp
-    src/tests/image/filter/box_filter_test.cpp
-    src/tests/image/filter/gaussian_filter_test.cpp
-    src/tests/image/filter/median_filter_test.cpp
-    src/tests/image/filter/sobel_filter_test.cpp
-    src/tests/image/filter/emboss_test.cpp
-    src/tests/image/statistical/tensor_sum_test.cpp
-    src/tests/image/statistical/threshold_test.cpp
-    src/tests/image/statistical/tensor_min_test.cpp
-    src/tests/image/statistical/tensor_max_test.cpp
-    src/tests/image/statistical/tensor_mean_test.cpp
-    src/tests/image/statistical/tensor_stddev_test.cpp
-    src/tests/misc/arithmetic/tensor_add_tensor_test.cpp
-    src/tests/misc/arithmetic/tensor_subtract_tensor_test.cpp
-    src/tests/misc/arithmetic/tensor_multiply_tensor_test.cpp
-    src/tests/misc/arithmetic/tensor_divide_tensor_test.cpp
-    src/tests/misc/arithmetic/log_test.cpp
-    src/tests/misc/arithmetic/log1p_test.cpp
-    src/tests/misc/bitwise/tensor_and_tensor_test.cpp
-    src/tests/misc/bitwise/tensor_or_tensor_test.cpp
-    src/tests/misc/bitwise/tensor_xor_tensor_test.cpp
-    src/tests/misc/statistical/normalize_test.cpp
-    src/tests/misc/geometric/slice_test.cpp
-    src/tests/misc/geometric/transpose_test.cpp
-    src/tests/misc/geometric/concat_test.cpp
-)
+file(GLOB_RECURSE RPP_TEST_SOURCES CONFIGURE_DEPENDS
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/tests/*.cpp)
+
+if(NOT RPP_TEST_SOURCES)
+    message(FATAL_ERROR "No test sources found under ${CMAKE_CURRENT_SOURCE_DIR}/src/tests")
+endif()
+
+add_executable(rpp_tests ${RPP_TEST_SOURCES})
 target_include_directories(rpp_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 if(rpp_INCLUDE_DIR)
     target_include_directories(rpp_tests PRIVATE ${rpp_INCLUDE_DIR}/rpp)
