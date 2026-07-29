@@ -94,7 +94,7 @@ void writeBackendValue(void* destination, const T& value)
     std::memcpy(destination, static_cast<const void*>(std::addressof(value)), sizeof(T));
 }
 
-class MoeMockBackendFixture : public ::testing::Test
+class TestMoeGroupedMatmulMockBackend : public ::testing::Test
 {
 protected:
     std::shared_ptr<NiceMock<Mock_hipdnn_backend>> _mockBackend;
@@ -174,8 +174,8 @@ struct UnpackScenario
     int32_t topK;
 };
 
-class MoeUnpackModeTest : public MoeMockBackendFixture,
-                          public ::testing::WithParamInterface<UnpackScenario>
+class TestMoeGroupedMatmulUnpackMode : public TestMoeGroupedMatmulMockBackend,
+                                       public ::testing::WithParamInterface<UnpackScenario>
 {
 protected:
     DescriptorStorage<1> _operationStorage{};
@@ -435,7 +435,7 @@ TEST(TestMoeGroupedMatmulNode, NoneInfersOutputDimensionsAndRejectsMismatch)
     EXPECT_EQ(mismatchedNode.infer_properties_node().code, ErrorCode::INVALID_VALUE);
 }
 
-TEST_F(MoeMockBackendFixture, CreateOperationUsesCanonicalNONEFootprint)
+TEST_F(TestMoeGroupedMatmulMockBackend, CreateOperationUsesCanonicalNONEFootprint)
 {
     expectNoOperationAttribute(HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_TOKEN_INDEX_DESC);
     expectNoOperationAttribute(HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_TOKEN_KS_DESC);
@@ -451,7 +451,7 @@ TEST_F(MoeMockBackendFixture, CreateOperationUsesCanonicalNONEFootprint)
     EXPECT_EQ(operations.size(), 1u);
 }
 
-TEST_F(MoeMockBackendFixture, CreateOperationUsesCanonicalGATHERFootprint)
+TEST_F(TestMoeGroupedMatmulMockBackend, CreateOperationUsesCanonicalGATHERFootprint)
 {
     expectOperationAttribute(HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_TOKEN_INDEX_DESC);
     expectNoOperationAttribute(HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_TOKEN_KS_DESC);
@@ -467,7 +467,7 @@ TEST_F(MoeMockBackendFixture, CreateOperationUsesCanonicalGATHERFootprint)
     EXPECT_EQ(operations.size(), 1u);
 }
 
-TEST_F(MoeMockBackendFixture, CreateOperationUsesCanonicalSCATTERFootprint)
+TEST_F(TestMoeGroupedMatmulMockBackend, CreateOperationUsesCanonicalSCATTERFootprint)
 {
     expectOperationAttribute(HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_TOKEN_INDEX_DESC);
     expectOperationAttribute(HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_TOKEN_KS_DESC);
@@ -483,7 +483,7 @@ TEST_F(MoeMockBackendFixture, CreateOperationUsesCanonicalSCATTERFootprint)
     EXPECT_EQ(operations.size(), 1u);
 }
 
-TEST_F(MoeMockBackendFixture, CreateOperationPropagatesBackendCreationError)
+TEST_F(TestMoeGroupedMatmulMockBackend, CreateOperationPropagatesBackendCreationError)
 {
     EXPECT_CALL(*_mockBackend,
                 backendCreateDescriptor(HIPDNN_BACKEND_OPERATION_MOE_GROUPED_MATMUL_DESCRIPTOR, _))
@@ -498,7 +498,7 @@ TEST_F(MoeMockBackendFixture, CreateOperationPropagatesBackendCreationError)
     EXPECT_TRUE(operations.empty());
 }
 
-TEST_P(MoeUnpackModeTest, UnpackFromDescriptorReadsOnlyModeSpecificAttributes)
+TEST_P(TestMoeGroupedMatmulUnpackMode, UnpackFromDescriptorReadsOnlyModeSpecificAttributes)
 {
     const auto scenario = GetParam();
     std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>> tensorMap;
@@ -631,7 +631,7 @@ TEST_P(MoeUnpackModeTest, UnpackFromDescriptorReadsOnlyModeSpecificAttributes)
     EXPECT_EQ(node.attributes.get_top_k(), scenario.topK);
 }
 
-TEST_F(MoeUnpackModeTest, UnpackFromDescriptorPreservesAttributesOnFailure)
+TEST_F(TestMoeGroupedMatmulUnpackMode, UnpackFromDescriptorPreservesAttributesOnFailure)
 {
     auto original = createValidAttributes();
     original.set_name("preserved");
@@ -656,7 +656,7 @@ TEST_F(MoeUnpackModeTest, UnpackFromDescriptorPreservesAttributesOnFailure)
 
 INSTANTIATE_TEST_SUITE_P(
     AllModes,
-    MoeUnpackModeTest,
+    TestMoeGroupedMatmulUnpackMode,
     ::testing::Values(
         UnpackScenario{
             MoeGroupedMatmulMode::NONE, HIPDNN_MOE_GROUPED_MATMUL_MODE_NONE, false, false, 0},
