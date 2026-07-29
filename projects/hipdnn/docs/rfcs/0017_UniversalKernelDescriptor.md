@@ -271,7 +271,7 @@ Two terms come from that first call and are used throughout. The **catalog** is 
 kernels that pass every matcher for one graph, keyed by each kernel's KMD values; an engine is
 applicable exactly when its catalog is non-empty. The **bound token state** is every `$`-prefixed value
 the matchers resolved along the way (`$graph.*`, `$device.*`, tensor fields, `$kernel.*`), kept so that
-ranking, workspace, and dispatch read it instead of recomputing it. Both are cached per graph.
+ranking, workspace, and dispatch read it instead of recomputing it. Both are cached per graph and device.
 [Section 8](#8-end-to-end-flow) walks the same lifecycle in full, step by step.
 
 The engine has **one plan builder**, not one per kernel. A catalog entry is a candidate, not a builder:
@@ -990,25 +990,26 @@ that needs it.
 ### 8.1 Applicability, Once Per Engine
 
 **1. The host asks whether this engine can serve the graph.**
-`IEngine::isApplicable(handle, opGraph)`. The provider receives the graph as serialized bytes and its
-own handle, the same instance on every call for this session.
+`IEngine::isApplicable(handle, opGraph)`. The provider receives the graph as serialized bytes, and the
+handle it is given identifies the device the answer is for.
 
 **2. Check the cache.** Hash the graph bytes before deserializing them and look up
-`(graph hash, device id)` on the handle. On a hit, `memcmp` the stored bytes to
+`(graph hash, device id)`. On a hit, `memcmp` the stored bytes to
 confirm the graph is byte-identical rather than merely hash-equal, and return the cached verdict.
-*Why this key:* the graph bytes are the problem identity, and the device id matters because the bound
-token state resolves `$device.*` and a handle can be rebound to another device.
+*Why this key:* the graph bytes are the problem identity and the device id is what the bound token
+state resolved `$device.*` against. Both come from the call; neither is the handle, which the caller
+may swap between calls.
 
 **3. Resolve this engine's UED and KMD.** The UED gives the engine identity, the KMD fields it exposes
 as knobs, and the ids of its one heuristic (UHD) and one metadata schema (KMD). The KMD loads with it,
 because its fields key the catalog and name the `$kernel.*` references step 5 must validate. The UHD is
 named but **not** loaded; nothing ranks yet.
-*Stored:* parsed UED and KMD, cached on the handle, reused by every later graph.
+*Stored:* parsed UED and KMD, in the provider's descriptor cache, reused by every later graph.
 
 **4. Resolve the KDPs that name this engine, and their matchers.** Each KDP contributes a matcher set,
 one UDD id, and a kernel vector of UKDs with their metadata values. The UDD is named but **not**
 loaded; nothing dispatches yet.
-*Stored:* parsed KDPs, matchers, and kernel metadata, cached on the handle.
+*Stored:* parsed KDPs, matchers, and kernel metadata, in the same descriptor cache.
 
 **5. Run the matchers in pruning order.** Graph-level matchers first, the ones reading only `$graph.*`,
 node-attribute, and tensor fields; `$kernel.*` matchers last ([Section 5](#5-matching-and-the-umd)). A
@@ -1025,8 +1026,8 @@ it is whether any kernel survived.
 
 **7. hipDNN picks the engine.** Its existing engine-selection heuristic, unchanged by this proposal
 ([Section 2](#2-the-descriptors)). Engines that answered false are not candidates. Engines that
-answered true but are not selected do no further work; their cached catalog stays on the handle in case
-a later graph hashes to it.
+answered true but are not selected do no further work; their cached catalog is kept in case a later
+graph and device match it.
 
 ### 8.3 Knobs, If The Caller Asks
 
@@ -1051,7 +1052,7 @@ requirement over the cached bound token state: `workspace_bytes`, or for a multi
 of its intermediates and each Launch's own scratch ([Section 15.3](#153-intermediate-buffers)). Report
 the **maximum** across survivors.
 *Why the UDD loads here:* workspace is the first question whose answer is a dispatch property.
-*Stored:* the parsed UDDs, on the handle; the plan build reuses them.
+*Stored:* the parsed UDDs, in the descriptor cache; the plan build reuses them.
 
 The maximum is enough because the buffer is reused rather than partitioned: kernels launch one at a
 time on one stream, so a candidate's scratch is live only while it runs. That holds under measurement,
@@ -1086,14 +1087,14 @@ launcher resolves each UDD argument against it by uid.
 | Step | Loads | Why then | Stored where |
 |---|---|---|---|
 | 1 | nothing | the host call arrives | nothing |
-| 2 | nothing | cache probe before any parsing | reads the handle cache |
-| 3 | UED, KMD | engine identity; the KMD keys the catalog and names the `$kernel.*` fields | handle, reused across graphs |
-| 4 | KDPs, UMDs, UKD metadata | the matchers are the applicability test | handle, reused across graphs |
-| 5 | nothing new | evaluates what 3 and 4 loaded | catalog + bound token state, keyed per graph |
+| 2 | nothing | cache probe before any parsing | reads the provider cache |
+| 3 | UED, KMD | engine identity; the KMD keys the catalog and names the `$kernel.*` fields | descriptor cache, reused across graphs |
+| 4 | KDPs, UMDs, UKD metadata | the matchers are the applicability test | descriptor cache, reused across graphs |
+| 5 | nothing new | evaluates what 3 and 4 loaded | catalog + bound token state, keyed per graph and device |
 | 6 | nothing | reports whether the catalog is non-empty | nothing |
 | 7 | nothing | hipDNN selects among engines; no descriptor is read | nothing |
 | 8 | UHD | first call needing an order, not a membership test | ranked catalog, cached with the catalog |
-| 9 | UDD of each surviving kernel's pack | first question whose answer is a dispatch property | handle |
+| 9 | UDD of each surviving kernel's pack | first question whose answer is a dispatch property | descriptor cache |
 | 10 | UHD, if step 8 never ran | the plan needs an order too | execution context |
 | 11 | `kernel_source` and pack UDD of each kernel the plan must launch | only kernels the plan dispatches are loaded | plan, held by the execution context |
 | 12 | nothing | the plan holds everything the launch needs | nothing |
@@ -1113,11 +1114,16 @@ after accepting is a bug, not a legal outcome.
 [Section 15.4](#154-execution-and-selection) states the same rule for a composite's mandatory stage;
 that is this invariant applied to one stage, not a separate rule.
 
-**The cache is provider-owned.** hipDNN passes no graph identity and no opaque state slot between these
-calls, and caches nothing itself: each knob query round-trips to the provider. It does not need to pass
-identity: the calls share the provider's handle and the graph's serialized bytes, and the bytes are the
-identity. That is what makes each phase a lookup rather than a repeat of the one before it, and it
-requires no hipDNN interface change.
+**The cache is provider-owned and keyed on the problem, not the caller.** hipDNN passes no graph
+identity and no opaque state slot between these calls, and caches nothing itself, so the provider
+keeps its own. It does not need an identity from hipDNN: the graph bytes and the device those calls
+carry are the identity, and both describe the problem rather than who asked.
+
+**Nothing is keyed on the handle.** A handle is a caller-side object that can be swapped, rebound to
+another device, or destroyed while a plan built through it is still in use, so keying on it would tie
+cached work to a lifetime that has nothing to do with the work's validity. The provider reads the
+device from whichever handle a call carries and keys on that; two handles on the same device share a
+cache entry, and one handle rebound to a different device does not.
 
 It is an LRU cache with a bounded entry count, sized generously since entries hold ids and bound field
 values rather than kernels. Eviction only costs a rematch on the next query, never a wrong answer.
@@ -1127,7 +1133,7 @@ sequenceDiagram
     participant FE as Frontend Graph
     participant ERM as EnginePluginResourceManager (host)
     participant Eng as IEngine (UKD provider)
-    participant Cache as Provider handle cache
+    participant Cache as Provider cache
     participant Plan as IPlan
 
     Note over FE,Cache: Steps 1-6: asked of every loaded engine
