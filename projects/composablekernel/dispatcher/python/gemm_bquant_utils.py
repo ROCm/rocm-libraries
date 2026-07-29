@@ -1229,6 +1229,13 @@ def _warp_tile_k_for(gfx_arch: str, is_flatmm: bool = False) -> int:
     return 64 if is_flatmm else 32
 
 
+# =============================================================================
+# Decode family (BQuantGemmPipelineAgBgCrCompV3, tile 16x64x256)
+#   GemmConfigBQuantDecode: warp 1x4x1, warp_tile 16x16x{K_warp}
+#   fp8/bf8/fp8i4/bf8i4: K_warp = 128 on gfx950, 32 on gfx942.
+# =============================================================================
+
+
 def default_fp8_config(
     quant_group_k: int = 128,
     quant_group_n: int = 1,
