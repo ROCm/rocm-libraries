@@ -387,27 +387,18 @@ user-set knob then restricts it. Setting `split_k = 4` keeps only kernels whose 
 UHD ranks those.
 
 **hipDNN already enforces this order.** A knob query reaches an engine as
-`IEngine::getDetails(handle, opGraph, out)`, whose interface comment states the graph is passed
-precisely so an engine can consult its plan builders for knobs; by the convention every provider
-follows today, it fans out to `IPlanBuilder::getCustomKnobs(handle, opGraph)`. What hipDNN itself
-enforces is the ordering: a knob query cannot arrive without a built graph, and cannot arrive before
-applicability, because the engine id it needs came from the list hipDNN's own engine-selection
-heuristic ranked after calling `isApplicable` on every engine. So the catalog already exists and is
-cached when the query lands ([Section 8](#8-end-to-end-flow)).
+`IEngine::getDetails(handle, opGraph, out)`, which fans out to the engine's plan builders. It cannot
+arrive without a built graph, and cannot arrive before applicability, because the engine id it needs
+came from the list hipDNN ranked after calling `isApplicable` on every engine. So the catalog already
+exists and is cached when the query lands ([Section 8](#8-end-to-end-flow)), and ranking it is a read
+rather than a rebuild. Existing providers already do comparable work here: MIOpen's convolution knob
+query sweeps its solvers to compute a workspace default.
 
-Ranking that catalog to report a default is ordinary work for this call, and less than the existing
-precedent: MIOpen's convolution knob query iterates **every registered convolution solver**, testing
-each for applicability and querying its workspace size, and reports the resulting maximum as the knob's
-default. That is a full solver sweep with a computed default, per query, uncached. Ranking an
-already-cached catalog is the same shape and cheaper. hipDNN caches nothing between these calls, which
-is why the provider-owned cache ([Section 8](#8-end-to-end-flow)) is what keeps a repeated query a
-lookup.
-
-Restricting the catalog and ranking it commute, so the order of those two costs nothing: a UHD scores
-each kernel on its own metadata and the problem, independently of the rest of the catalog, and an
-implementation restricts first to avoid scoring candidates it would discard. That independence is a
-requirement on a UHD: a scorer that normalized across the catalog or broke ties on the surviving set
-would make selection depend on filtering order, and is out of contract.
+Restricting the catalog and ranking it commute, so their order costs nothing: a UHD scores each kernel
+on its own metadata and the problem, independently of the rest of the catalog, and an implementation
+restricts first to avoid scoring candidates it would discard. That independence is a requirement on a
+UHD: a scorer that normalized across the catalog or broke ties on the surviving set would make
+selection depend on filtering order, and is out of contract.
 
 **Autotune** inherits the catalog-filtered value set automatically, because a sweep's values are
 validated against the same per-graph knob lookup a manually-set knob uses. A caller that hardcodes a
