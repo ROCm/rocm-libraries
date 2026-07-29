@@ -828,6 +828,82 @@ class TestTemplateOutputContent:
             "ASSERT_NE(opNode->attributes.get_token_ks(), nullptr);" in lifting_content
         )
 
+    def test_mode_rules_render_descriptor_packer_and_unpacker_contract(
+        self, load_test_config, generator, tmp_path
+    ):
+        """Mode rules make every generated descriptor layer mode-aware."""
+        config = load_test_config("moe_grouped_matmul.yaml")
+        output_dir = tmp_path / "output"
+        generator.render(config, output_dir, "full")
+
+        descriptor = (
+            output_dir / "backend" / "src" / "descriptors" / config.source_filename
+        ).read_text()
+        packer = (
+            output_dir
+            / "frontend"
+            / "include"
+            / "hipdnn_frontend"
+            / "detail"
+            / config.packer_filename
+        ).read_text()
+        unpacker = (
+            output_dir
+            / "frontend"
+            / "include"
+            / "hipdnn_frontend"
+            / "detail"
+            / config.unpacker_filename
+        ).read_text()
+
+        assert "NONE mode forbids" in descriptor
+        assert "GATHER mode " in descriptor
+        assert "requires TOKEN_INDEX_DESC tensor" in descriptor
+        assert "SCATTER mode " in descriptor
+        assert "requires TOKEN_KS_DESC tensor" in descriptor
+        assert "dims.empty()" in descriptor
+        assert "switch(frontendMode)" in packer
+        assert "ensureAndSetOptionalTensorRef" not in packer
+        assert "switch(modeResult)" in unpacker
+        assert "unpackOptionalTensor" not in unpacker
+        assert "getDescriptorAttrScalar(" in unpacker
+
+    def test_moe_uses_configured_node_templates_and_inference_strategy(
+        self, load_test_config, generator, tmp_path
+    ):
+        """Custom validation remains regenerable while dimensions come from YAML."""
+        config = load_test_config("moe_grouped_matmul.yaml")
+        output_dir = tmp_path / "output"
+        generator.render(config, output_dir, "frontend")
+
+        node = (
+            output_dir
+            / "frontend"
+            / "include"
+            / "hipdnn_frontend"
+            / "node"
+            / config.node_header_filename
+        ).read_text()
+        node_test = (
+            output_dir / "frontend" / "tests" / config.test_node_filename
+        ).read_text()
+
+        assert "MoeGroupedMatmulNode missing token input" in node
+        assert "attributes.get_mode() == MoeGroupedMatmulMode::GATHER" in node
+        assert "HIPDNN_CHECK_ERROR(pre_validate_node())" not in node
+        assert "ScatterValidatesRoutingAndTopK" in node_test
+
+    def test_member_access_scalars_do_not_render_colliding_accessors(
+        self, sdpa_config, generator
+    ):
+        """Bare member getters must not produce same-named accessor methods."""
+        rendered = generator._render_template("attributes.hpp.j2", sdpa_config)
+
+        assert "std::optional<int32_t> max_seq_len_kv" in rendered
+        assert "max_seq_len_kv() const" not in rendered
+        assert "std::optional<int64_t> left_bound" in rendered
+        assert "left_bound() const" not in rendered
+
     def test_frontend_test_node_content(
         self, convolution_fwd_config, generator, tmp_path
     ):

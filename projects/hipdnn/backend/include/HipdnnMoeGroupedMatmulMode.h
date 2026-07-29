@@ -19,6 +19,5 @@ typedef enum
 {
     HIPDNN_MOE_GROUPED_MATMUL_MODE_NONE = 0, ///< Tokens are already routed
     HIPDNN_MOE_GROUPED_MATMUL_MODE_GATHER = 1, ///< Gather tokens before grouped matmul
-    HIPDNN_MOE_GROUPED_MATMUL_MODE_SCATTER
-    = 2 ///< Scatter grouped matmul output to source token order
+    HIPDNN_MOE_GROUPED_MATMUL_MODE_SCATTER = 2 ///< Scatter grouped matmul output to source token order
 } hipdnnMoeGroupedMatmulMode_t;

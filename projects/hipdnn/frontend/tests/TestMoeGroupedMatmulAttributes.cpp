@@ -37,7 +37,7 @@ TEST(TestMoeGroupedMatmulAttributes, CreateMoeGroupedMatmulAttributes)
     attrs.set_output(outputTensor);
 
     // Set data fields
-    attrs.set_mode(MoeGroupedMatmulMode::NONE);
+    attrs.set_mode(MoeGroupedMatmulMode::SCATTER);
     attrs.set_top_k(2);
 
     // Verify tensor getters

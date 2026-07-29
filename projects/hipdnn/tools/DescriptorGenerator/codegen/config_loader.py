@@ -21,6 +21,9 @@ from .models import (
     ModeIntegrationScenario,
     GraphMethodParam,
     InferPropertiesConfig,
+    InferenceDimension,
+    ModeRule,
+    ModeScalarConstraint,
     OperationConfig,
     TensorArrayField,
     TensorConfig,
@@ -86,6 +89,7 @@ def load_config(path: Path) -> OperationConfig:
                 attr_suffix=tf["attr_suffix"],
                 required=tf.get("required", True),
                 frontend_getter=stripped_fg,
+                expected_data_type=tf.get("expected_data_type", ""),
             )
         )
 
@@ -198,6 +202,8 @@ def load_config(path: Path) -> OperationConfig:
                 expected_scalar_values=scenario.get("expected_scalar_values", {}),
             )
         )
+    mode_rules = _parse_mode_rules(op.get("mode_rules"), op["name"])
+
     # Data fields helper (shared pack/unpack functions)
     data_fields_helper = _parse_data_fields_helper(op.get("data_fields_helper"))
 
@@ -220,6 +226,7 @@ def load_config(path: Path) -> OperationConfig:
         tensor_array_fields=tensor_array_fields,
         extra_data_type_fields=extra_data_type_fields,
         mode_integration_scenarios=mode_integration_scenarios,
+        mode_rules=mode_rules,
         data_fields_helper=data_fields_helper,
         has_compute_data_type=op.get("has_compute_data_type", True),
         compute_data_type_attr=op.get("compute_data_type_attr", ""),
@@ -284,6 +291,8 @@ def _parse_frontend_config(fe_raw: dict, operation_name: str) -> FrontendConfig:
         node_type_enum=fe_raw.get("node_type_enum", ""),
         node_attributes_union_type=fe_raw.get("node_attributes_union_type", ""),
         compatibility_typedef=fe_raw.get("compatibility_typedef", ""),
+        node_template=fe_raw.get("node_template", ""),
+        node_test_template=fe_raw.get("node_test_template", ""),
     )
 
 
@@ -376,10 +385,26 @@ def _parse_infer_properties(raw: dict | None) -> InferPropertiesConfig | None:
     if raw is None:
         return None
 
+    dimensions = []
+    for dimension in raw.get("dimensions", []):
+        otherwise = dimension.get("otherwise", {})
+        dimensions.append(
+            InferenceDimension(
+                literal=dimension.get("literal"),
+                tensor=dimension.get("tensor", ""),
+                dimension=dimension.get("dimension"),
+                when_mode=dimension.get("when_mode", ""),
+                otherwise_tensor=otherwise.get("tensor", ""),
+                otherwise_dimension=otherwise.get("dimension"),
+            )
+        )
+
     return InferPropertiesConfig(
         strategy=raw.get("strategy", "stub"),
         reference_input=raw.get("reference_input", ""),
         dimension_formula=raw.get("dimension_formula", ""),
+        mode_field=raw.get("mode_field", ""),
+        dimensions=dimensions,
     )
 
 
@@ -393,6 +418,63 @@ def _parse_validation(raw: dict | None) -> ValidationConfig | None:
         required_input_dims=raw.get("required_input_dims", []),
         custom_checks=raw.get("custom_checks", []),
     )
+
+
+def _parse_mode_rules(raw: list | None, operation_name: str) -> list[ModeRule]:
+    """Parse declarative mode-dependent descriptor contracts."""
+    if raw is None:
+        return []
+    if not isinstance(raw, list):
+        raise ConfigError(
+            f"Operation '{operation_name}': mode_rules must be a list of mode rules."
+        )
+
+    rules = []
+    for rule_raw in raw:
+        if not isinstance(rule_raw, dict) or not rule_raw.get("mode"):
+            raise ConfigError(
+                f"Operation '{operation_name}': each mode rule must define a mode."
+            )
+
+        constraints_raw = rule_raw.get("scalar_constraints", {})
+        if not isinstance(constraints_raw, dict):
+            raise ConfigError(
+                f"Operation '{operation_name}', mode rule '{rule_raw['mode']}': "
+                "scalar_constraints must map field names to constraint objects."
+            )
+
+        constraints = []
+        for field_name, constraint_raw in constraints_raw.items():
+            if not isinstance(constraint_raw, dict):
+                raise ConfigError(
+                    f"Operation '{operation_name}', mode rule '{rule_raw['mode']}', "
+                    f"scalar '{field_name}': constraint must be an object."
+                )
+            maximum = constraint_raw.get("maximum", {})
+            if maximum and not isinstance(maximum, dict):
+                raise ConfigError(
+                    f"Operation '{operation_name}', mode rule '{rule_raw['mode']}', "
+                    f"scalar '{field_name}': maximum must be an object."
+                )
+            constraints.append(
+                ModeScalarConstraint(
+                    field=field_name,
+                    equals=constraint_raw.get("equals"),
+                    minimum=constraint_raw.get("minimum"),
+                    maximum_tensor=maximum.get("tensor", ""),
+                    maximum_dimension=maximum.get("dimension"),
+                )
+            )
+
+        rules.append(
+            ModeRule(
+                mode=rule_raw["mode"],
+                required_optional_tensors=rule_raw.get("required_optional_tensors", []),
+                serialized_scalars=rule_raw.get("serialized_scalars", []),
+                scalar_constraints=constraints,
+            )
+        )
+    return rules
 
 
 def validate_for_mode(config: OperationConfig, mode: str) -> None:
@@ -584,6 +666,186 @@ def _validate_config(config: OperationConfig) -> None:
                 f"frontend.inputs[]/frontend.outputs[]."
             )
 
+    if config.mode_rules:
+        if len(config.mode_fields) != 1:
+            raise ConfigError(
+                f"Operation '{config.name}': mode_rules requires exactly one data field "
+                "with type 'mode'."
+            )
+
+        mode_field = config.mode_fields[0]
+        if not mode_field.enum_def:
+            raise ConfigError(
+                f"Operation '{config.name}': mode_rules requires the mode field to "
+                "define enum_def values."
+            )
+
+        executable_modes = {
+            value.effective_frontend_name
+            for value in mode_field.enum_def.non_sentinel_values
+        }
+        optional_tensor_names = {field.name for field in config.optional_tensor_fields}
+        scalar_names = {field.name for field in config.data_fields if field.is_scalar}
+        tensor_names = {field.name for field in config.tensor_fields}
+        rule_modes: set[str] = set()
+        covered_optional_tensors: set[str] = set()
+
+        for rule in config.mode_rules:
+            if rule.mode not in executable_modes:
+                raise ConfigError(
+                    f"Operation '{config.name}': mode rule references unknown or "
+                    f"non-executable mode '{rule.mode}'."
+                )
+            if rule.mode in rule_modes:
+                raise ConfigError(
+                    f"Operation '{config.name}': duplicate mode rule for '{rule.mode}'."
+                )
+            rule_modes.add(rule.mode)
+
+            required_names = set(rule.required_optional_tensors)
+            if len(required_names) != len(rule.required_optional_tensors):
+                raise ConfigError(
+                    f"Operation '{config.name}', mode rule '{rule.mode}': "
+                    "required_optional_tensors contains duplicate names."
+                )
+            unknown_tensors = required_names - optional_tensor_names
+            if unknown_tensors:
+                raise ConfigError(
+                    f"Operation '{config.name}', mode rule '{rule.mode}': "
+                    "required_optional_tensors must name optional tensor fields; "
+                    f"got {sorted(unknown_tensors)}."
+                )
+            covered_optional_tensors.update(required_names)
+
+            serialized_scalars = set(rule.serialized_scalars)
+            if len(serialized_scalars) != len(rule.serialized_scalars):
+                raise ConfigError(
+                    f"Operation '{config.name}', mode rule '{rule.mode}': "
+                    "serialized_scalars contains duplicate names."
+                )
+            unknown_scalars = serialized_scalars - scalar_names
+            if unknown_scalars:
+                raise ConfigError(
+                    f"Operation '{config.name}', mode rule '{rule.mode}': "
+                    f"serialized_scalars must name scalar data fields; got "
+                    f"{sorted(unknown_scalars)}."
+                )
+
+            constraint_fields: set[str] = set()
+            for constraint in rule.scalar_constraints:
+                if constraint.field not in scalar_names:
+                    raise ConfigError(
+                        f"Operation '{config.name}', mode rule '{rule.mode}': "
+                        f"scalar constraint '{constraint.field}' is not a scalar data field."
+                    )
+                if constraint.field in constraint_fields:
+                    raise ConfigError(
+                        f"Operation '{config.name}', mode rule '{rule.mode}': "
+                        f"duplicate scalar constraint for '{constraint.field}'."
+                    )
+                constraint_fields.add(constraint.field)
+                if constraint.equals is not None and (
+                    constraint.minimum is not None
+                    or constraint.maximum_tensor
+                    or constraint.maximum_dimension is not None
+                ):
+                    raise ConfigError(
+                        f"Operation '{config.name}', mode rule '{rule.mode}', scalar "
+                        f"'{constraint.field}': equals cannot be combined with bounds."
+                    )
+                if (
+                    constraint.maximum_tensor and constraint.maximum_dimension is None
+                ) or (
+                    constraint.maximum_dimension is not None
+                    and not constraint.maximum_tensor
+                ):
+                    raise ConfigError(
+                        f"Operation '{config.name}', mode rule '{rule.mode}', scalar "
+                        f"'{constraint.field}': maximum requires both tensor and dimension."
+                    )
+                if constraint.maximum_tensor:
+                    if constraint.maximum_tensor not in tensor_names:
+                        raise ConfigError(
+                            f"Operation '{config.name}', mode rule '{rule.mode}', scalar "
+                            f"'{constraint.field}': maximum references unknown tensor "
+                            f"'{constraint.maximum_tensor}'."
+                        )
+                    if (
+                        constraint.maximum_dimension is None
+                        or constraint.maximum_dimension < 0
+                    ):
+                        raise ConfigError(
+                            f"Operation '{config.name}', mode rule '{rule.mode}', scalar "
+                            f"'{constraint.field}': maximum dimension must be non-negative."
+                        )
+
+        missing_modes = executable_modes - rule_modes
+        if missing_modes:
+            raise ConfigError(
+                f"Operation '{config.name}': mode_rules must cover every executable "
+                f"mode; missing {sorted(missing_modes)}."
+            )
+        missing_optional_tensors = optional_tensor_names - covered_optional_tensors
+        if missing_optional_tensors:
+            raise ConfigError(
+                f"Operation '{config.name}': mode_rules must include every optional "
+                f"tensor in at least one mode; missing {sorted(missing_optional_tensors)}."
+            )
+
+    infer_properties = config.infer_properties
+    if infer_properties and infer_properties.strategy == "mode_select_dimensions":
+        mode_field = config.data_field_by_name.get(infer_properties.mode_field)
+        if not mode_field or not mode_field.is_mode:
+            raise ConfigError(
+                f"Operation '{config.name}': mode_select_dimensions requires "
+                "infer_properties.mode_field to name a mode data field."
+            )
+        if not infer_properties.dimensions:
+            raise ConfigError(
+                f"Operation '{config.name}': mode_select_dimensions requires "
+                "at least one inferred dimension."
+            )
+        tensor_names = {field.name for field in config.tensor_fields}
+        for dimension in infer_properties.dimensions:
+            is_literal = dimension.literal is not None
+            is_tensor_dimension = bool(dimension.tensor)
+            if is_literal == is_tensor_dimension:
+                raise ConfigError(
+                    f"Operation '{config.name}': each inferred dimension must define "
+                    "exactly one of literal or tensor."
+                )
+            if is_tensor_dimension and (
+                dimension.dimension is None or dimension.dimension < 0
+            ):
+                raise ConfigError(
+                    f"Operation '{config.name}': tensor inferred dimensions require "
+                    "a non-negative dimension index."
+                )
+            if dimension.tensor and dimension.tensor not in tensor_names:
+                raise ConfigError(
+                    f"Operation '{config.name}': inferred dimension references "
+                    f"unknown tensor '{dimension.tensor}'."
+                )
+            if dimension.when_mode:
+                if (
+                    not dimension.otherwise_tensor
+                    or dimension.otherwise_dimension is None
+                ):
+                    raise ConfigError(
+                        f"Operation '{config.name}': conditional inferred dimensions "
+                        "require otherwise.tensor and otherwise.dimension."
+                    )
+                if dimension.otherwise_tensor not in tensor_names:
+                    raise ConfigError(
+                        f"Operation '{config.name}': inferred dimension references "
+                        f"unknown fallback tensor '{dimension.otherwise_tensor}'."
+                    )
+                if dimension.otherwise_dimension < 0:
+                    raise ConfigError(
+                        f"Operation '{config.name}': fallback inferred dimension index "
+                        "must be non-negative."
+                    )
+
     if config.mode_integration_scenarios:
         if len(config.mode_fields) != 1:
             raise ConfigError(
@@ -671,6 +933,17 @@ def _validate_config(config: OperationConfig) -> None:
                     f"Operation '{config.name}', mode integration scenario '{scenario.name}': "
                     f"scalar override keys are not scalar data fields: {sorted(scalar_unknown)}."
                 )
+            if config.mode_rules:
+                rule = next(
+                    rule for rule in config.mode_rules if rule.mode == scenario.mode
+                )
+                expected_rule_tensors = set(rule.required_optional_tensors)
+                if set(scenario.expected_optional_inputs) != expected_rule_tensors:
+                    raise ConfigError(
+                        f"Operation '{config.name}', mode integration scenario "
+                        f"'{scenario.name}': expected_optional_inputs must match the "
+                        f"mode rule footprint {sorted(expected_rule_tensors)}."
+                    )
 
         missing_modes = executable_modes - scenario_modes
         if missing_modes:

@@ -42,7 +42,21 @@ inline Error createMoeGroupedMatmulOperation(
                               attributes.get_first_token_offset(),
                               tensorDescs,
                               "MoE grouped matmul FIRST_TOKEN_OFFSET_DESC"));
-    switch(attributes.get_mode())
+    HIPDNN_CHECK_ERROR(ensureAndSetTensorRef(opDesc.get(),
+                                             HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_OUTPUT_DESC,
+                                             attributes.get_output(),
+                                             tensorDescs,
+                                             "MoE grouped matmul OUTPUT_DESC"));
+    // Mode selects the canonical optional descriptor footprint.
+    const auto frontendMode = attributes.get_mode();
+    auto mode = hipdnn_frontend::toBackendMoeGroupedMatmulMode(frontendMode);
+    HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(opDesc.get(),
+                                               HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_MODE,
+                                               HIPDNN_TYPE_MOE_GROUPED_MATMUL_MODE,
+                                               mode,
+                                               "MoE grouped matmul mode"));
+
+    switch(frontendMode)
     {
     case MoeGroupedMatmulMode::NONE:
         break;
@@ -67,34 +81,17 @@ inline Error createMoeGroupedMatmulOperation(
                                   attributes.get_token_ks(),
                                   tensorDescs,
                                   "MoE grouped matmul TOKEN_KS_DESC"));
-        break;
-    default:
-        return {ErrorCode::INVALID_VALUE, "MoE grouped matmul has an unknown routing mode"};
-    }
-
-    HIPDNN_CHECK_ERROR(ensureAndSetTensorRef(opDesc.get(),
-                                             HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_OUTPUT_DESC,
-                                             attributes.get_output(),
-                                             tensorDescs,
-                                             "MoE grouped matmul OUTPUT_DESC"));
-
-    // Set MoE grouped matmul parameters
-
-    // Set MoE grouped matmul mode
-    auto mode = hipdnn_frontend::toBackendMoeGroupedMatmulMode(attributes.get_mode());
-    HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(opDesc.get(),
-                                               HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_MODE,
-                                               HIPDNN_TYPE_MOE_GROUPED_MATMUL_MODE,
-                                               mode,
-                                               "MoE grouped matmul mode"));
-    if(attributes.get_mode() == MoeGroupedMatmulMode::SCATTER)
-    {
         HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(opDesc.get(),
                                                    HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_TOP_K,
                                                    HIPDNN_TYPE_INT32,
                                                    attributes.get_top_k(),
                                                    "MoE grouped matmul top_k"));
+        break;
+    default:
+        return {ErrorCode::INVALID_VALUE, "MoE grouped matmul has an unknown routing mode"};
     }
+
+    // Set MoE grouped matmul parameters
 
     HIPDNN_CHECK_ERROR(setDescriptorAttrDataType(opDesc.get(),
                                                  HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_MATH_PREC,

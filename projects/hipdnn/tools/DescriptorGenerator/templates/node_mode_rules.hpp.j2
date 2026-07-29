@@ -5,21 +5,22 @@
 #include "Node.hpp"
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_frontend/Error.hpp>
+#include <hipdnn_frontend/attributes/{{ op.frontend.effective_attributes_filename_full }}.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
-#include <hipdnn_frontend/attributes/MoeGroupedMatmulAttributes.hpp>
-#include <hipdnn_frontend/detail/MoeGroupedMatmulPacker.hpp>
-#include <hipdnn_frontend/detail/MoeGroupedMatmulUnpacker.hpp>
-#include <hipdnn_frontend/detail/ScopedHipdnnBackendDescriptor.hpp>
+#include <hipdnn_frontend/detail/{{ op.packer_filename }}>
 #include <hipdnn_frontend/node/detail/Utilities.hpp>
+#include <hipdnn_frontend/detail/{{ op.unpacker_filename }}>
+#include <hipdnn_frontend/detail/ScopedHipdnnBackendDescriptor.hpp>
 
 namespace hipdnn_frontend::graph
 {
-class MoeGroupedMatmulNode : public BaseNode<MoeGroupedMatmulNode, NodeType::MOE_GROUPED_MATMUL>
+class {{ op.frontend.node_class }} : public BaseNode<{{ op.frontend.node_class }}, {{ op.frontend.node_type_enum }}>
 {
 public:
-    MoeGroupedMatmulAttributes attributes;
+    {{ op.frontend.attributes_class }} attributes;
 
-    MoeGroupedMatmulNode(MoeGroupedMatmulAttributes&& attrs, const GraphAttributes& graphAttrs)
+    {{ op.frontend.node_class }}({{ op.frontend.attributes_class }}&& attrs,
+                                 const GraphAttributes& graphAttrs)
         : BaseNode(graphAttrs)
         , attributes(std::move(attrs))
     {
@@ -30,8 +31,8 @@ public:
         hipdnnBackendDescriptor_t opDesc,
         std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>>& tensorMap) override
     {
-        MoeGroupedMatmulAttributes attrs;
-        HIPDNN_CHECK_ERROR(detail::unpackMoeGroupedMatmulOperation(opDesc, tensorMap, attrs));
+        {{ op.frontend.attributes_class }} attrs;
+        HIPDNN_CHECK_ERROR(detail::{{ op.frontend.unpacker_function }}(opDesc, tensorMap, attrs));
         attributes = std::move(attrs);
         return {};
     }
@@ -104,29 +105,29 @@ public:
 
         const auto validateRoutingTensor
             = [](const std::shared_ptr<TensorAttributes>& tensor, const char* name) -> Error {
-            constexpr size_t K_ROUTING_TENSOR_RANK = 3;
-            HIPDNN_RETURN_IF_FALSE(tensor,
-                                   ErrorCode::ATTRIBUTE_NOT_SET,
-                                   std::string("MoeGroupedMatmulNode missing ") + name + " input");
-            HIPDNN_RETURN_IF_TRUE(tensor->get_data_type() != DataType::INT32,
+              constexpr size_t K_ROUTING_TENSOR_RANK = 3;
+              HIPDNN_RETURN_IF_FALSE(tensor,
+                                     ErrorCode::ATTRIBUTE_NOT_SET,
+                                     std::string("MoeGroupedMatmulNode missing ") + name + " input");
+              HIPDNN_RETURN_IF_TRUE(tensor->get_data_type() != DataType::INT32,
+                                    ErrorCode::INVALID_VALUE,
+                                    std::string(name) + " must have INT32 data type");
+              HIPDNN_CHECK_ERROR(
+                  detail::validateMinimumTensorDimensions(tensor, K_ROUTING_TENSOR_RANK, name));
+              HIPDNN_RETURN_IF_NE(tensor->get_dim().size(),
+                                  K_ROUTING_TENSOR_RANK,
                                   ErrorCode::INVALID_VALUE,
-                                  std::string(name) + " must have INT32 data type");
-            HIPDNN_CHECK_ERROR(
-                detail::validateMinimumTensorDimensions(tensor, K_ROUTING_TENSOR_RANK, name));
-            HIPDNN_RETURN_IF_NE(tensor->get_dim().size(),
-                                K_ROUTING_TENSOR_RANK,
-                                ErrorCode::INVALID_VALUE,
-                                std::string(name) + " must have shape [1, routed_tokens, 1]");
-            HIPDNN_RETURN_IF_NE(tensor->get_dim()[0],
-                                1,
-                                ErrorCode::INVALID_VALUE,
-                                std::string(name) + " must have a singleton leading dimension");
-            HIPDNN_RETURN_IF_NE(tensor->get_dim()[2],
-                                1,
-                                ErrorCode::INVALID_VALUE,
-                                std::string(name) + " must have a singleton trailing dimension");
-            return {};
-        };
+                                  std::string(name) + " must have shape [1, routed_tokens, 1]");
+              HIPDNN_RETURN_IF_NE(tensor->get_dim()[0],
+                                  1,
+                                  ErrorCode::INVALID_VALUE,
+                                  std::string(name) + " must have a singleton leading dimension");
+              HIPDNN_RETURN_IF_NE(tensor->get_dim()[2],
+                                  1,
+                                  ErrorCode::INVALID_VALUE,
+                                  std::string(name) + " must have a singleton trailing dimension");
+              return {};
+          };
 
         switch(attributes.get_mode())
         {
@@ -161,14 +162,28 @@ public:
     {
         HIPDNN_CHECK_ERROR(attributes.fill_from_context(graph_attributes));
 
-        const std::vector<int64_t> expectedOutputDims
-            = {1,
-               attributes.get_mode() == MoeGroupedMatmulMode::GATHER
-                   ? attributes.get_token_index()->get_dim()[1]
-                   : attributes.get_token()->get_dim()[1],
-               attributes.get_weight()->get_dim()[2]};
+{% set inference = op.infer_properties %}
+{% set mode_field = op.data_field_by_name[inference.mode_field] %}
+{% set tensor_map = op.tensor_field_frontend_map %}
+{% set output = op.frontend.outputs[0] %}
+        const std::vector<int64_t> expectedOutputDims = {
+{% for dimension in inference.dimensions %}
+{% if dimension.literal is not none %}
+            {{ dimension.literal }}{% if not loop.last %},{% endif %}
+{% elif dimension.when_mode %}
+{% set conditional_tensor = tensor_map[dimension.tensor] %}
+{% set fallback_tensor = tensor_map[dimension.otherwise_tensor] %}
+            attributes.{{ mode_field.frontend_getter }} == {{ mode_field.effective_frontend_type }}::{{ dimension.when_mode }}
+                ? attributes.{{ conditional_tensor.effective_getter_name }}()->get_dim()[{{ dimension.dimension }}]
+                : attributes.{{ fallback_tensor.effective_getter_name }}()->get_dim()[{{ dimension.otherwise_dimension }}]{% if not loop.last %},{% endif %}
+{% else %}
+{% set source_tensor = tensor_map[dimension.tensor] %}
+            attributes.{{ source_tensor.effective_getter_name }}()->get_dim()[{{ dimension.dimension }}]{% if not loop.last %},{% endif %}
+{% endif %}
+{% endfor %}
+        };
 
-        const auto output = attributes.get_output();
+        const auto output = attributes.{{ output.effective_getter_name }}();
         if(output->get_dim().empty())
         {
             output->set_dim(expectedOutputDims);
@@ -179,7 +194,7 @@ public:
                 output->get_dim(),
                 expectedOutputDims,
                 ErrorCode::INVALID_VALUE,
-                "MoeGroupedMatmul output tensor dimensions do not match the inferred dimensions");
+                "{{ op.name }} output tensor dimensions do not match the inferred dimensions");
         }
 
         if(output->get_stride().empty())
@@ -195,7 +210,7 @@ public:
         std::unordered_map<int64_t, detail::ScopedHipdnnBackendDescriptor>& tensorDescs,
         std::vector<detail::ScopedHipdnnBackendDescriptor>& operations) const override
     {
-        return detail::createMoeGroupedMatmulOperation(attributes, tensorDescs, operations);
+        return detail::{{ op.frontend.packer_function }}(attributes, tensorDescs, operations);
     }
 };
 } // namespace hipdnn_frontend::graph

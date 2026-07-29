@@ -148,6 +148,47 @@ public:
             auto {{ first_output.name }}Strides = hipdnn_data_sdk::utilities::generateStrides({{ first_output.name }}Dims, strideOrder);
             {{ first_output.name }}Tensor->set_stride({{ first_output.name }}Strides);
         }
+{% elif op.infer_properties and op.infer_properties.strategy == "mode_select_dimensions" %}
+{% set first_output = op.frontend.outputs[0] %}
+{% set mode_field = op.data_field_by_name[op.infer_properties.mode_field] %}
+{% set tensor_map = op.tensor_field_frontend_map %}
+        auto {{ first_output.name }}Tensor = attributes.{{ first_output.effective_getter_name }}();
+        const std::vector<int64_t> expectedOutputDims = {
+{% for dimension in op.infer_properties.dimensions %}
+{% if dimension.literal is not none %}
+            {{ dimension.literal }}{% if not loop.last %},{% endif %}
+{% elif dimension.when_mode %}
+{% set conditional_tensor = tensor_map[dimension.tensor] %}
+{% set fallback_tensor = tensor_map[dimension.otherwise_tensor] %}
+            attributes.{{ mode_field.frontend_getter }} == {{ mode_field.effective_frontend_type }}::{{ dimension.when_mode }}
+                ? attributes.{{ conditional_tensor.effective_getter_name }}()->get_dim()[{{ dimension.dimension }}]
+                : attributes.{{ fallback_tensor.effective_getter_name }}()->get_dim()[{{ dimension.otherwise_dimension }}]{% if not loop.last %},{% endif %}
+{% else %}
+{% set source_tensor = tensor_map[dimension.tensor] %}
+            attributes.{{ source_tensor.effective_getter_name }}()->get_dim()[{{ dimension.dimension }}]{% if not loop.last %},{% endif %}
+{% endif %}
+{% endfor %}
+        };
+
+        if({{ first_output.name }}Tensor->get_dim().empty())
+        {
+            {{ first_output.name }}Tensor->set_dim(expectedOutputDims);
+        }
+        else
+        {
+            HIPDNN_RETURN_IF_NE(
+                {{ first_output.name }}Tensor->get_dim(),
+                expectedOutputDims,
+                ErrorCode::INVALID_VALUE,
+                "{{ op.frontend.node_class }} output tensor dimensions do not match the inferred dimensions");
+        }
+
+        if({{ first_output.name }}Tensor->get_stride().empty())
+        {
+            {{ first_output.name }}Tensor->set_stride(
+                hipdnn_data_sdk::utilities::generateStrides({{ first_output.name }}Tensor->get_dim()));
+        }
+
 {% else %}
 {% if op.frontend.outputs %}
 {% set first_output = op.frontend.outputs[0] %}

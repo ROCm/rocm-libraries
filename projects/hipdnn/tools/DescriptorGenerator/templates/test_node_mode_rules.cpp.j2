@@ -3,8 +3,8 @@
 #include <gtest/gtest.h>
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
-#include <hipdnn_frontend/attributes/MoeGroupedMatmulAttributes.hpp>
-#include <hipdnn_frontend/node/MoeGroupedMatmulNode.hpp>
+#include <hipdnn_frontend/attributes/{{ op.frontend.effective_attributes_filename_full }}.hpp>
+#include <hipdnn_frontend/node/{{ op.frontend.node_class }}.hpp>
 
 #include <memory>
 #include <vector>
@@ -28,7 +28,9 @@ MoeGroupedMatmulAttributes createValidAttributes()
     attrs.set_weight(weight);
 
     auto firstTokenOffset = std::make_shared<TensorAttributes>();
-    firstTokenOffset->set_dim({2, 1, 1}).set_stride({1, 1, 1}).set_data_type(DataType::INT32);
+    firstTokenOffset->set_dim({2, 1, 1})
+        .set_stride({1, 1, 1})
+        .set_data_type(DataType::INT32);
     attrs.set_first_token_offset(firstTokenOffset);
 
     auto output = std::make_shared<TensorAttributes>();
@@ -38,10 +40,12 @@ MoeGroupedMatmulAttributes createValidAttributes()
 }
 
 std::shared_ptr<TensorAttributes> makeRoutingTensor(int64_t routedTokens = 8,
-                                                    DataType dataType = DataType::INT32)
+                                                     DataType dataType = DataType::INT32)
 {
     auto tensor = std::make_shared<TensorAttributes>();
-    tensor->set_dim({1, routedTokens, 1}).set_stride({routedTokens, 1, 1}).set_data_type(dataType);
+    tensor->set_dim({1, routedTokens, 1})
+        .set_stride({routedTokens, 1, 1})
+        .set_data_type(dataType);
     return tensor;
 }
 
@@ -156,7 +160,9 @@ TEST(TestMoeGroupedMatmulNode, ScatterRequiresValidRoutingAndBoundedTopK)
     const GraphAttributes graphAttrs;
 
     auto attrs = createValidAttributes();
-    attrs.set_mode(MoeGroupedMatmulMode::SCATTER).set_token_index(makeRoutingTensor()).set_top_k(1);
+    attrs.set_mode(MoeGroupedMatmulMode::SCATTER)
+        .set_token_index(makeRoutingTensor())
+        .set_top_k(1);
     EXPECT_EQ(MoeGroupedMatmulNode(std::move(attrs), graphAttrs).pre_validate_node().code,
               ErrorCode::ATTRIBUTE_NOT_SET);
 

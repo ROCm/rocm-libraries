@@ -46,31 +46,6 @@ namespace hipdnn_frontend::detail
                                 "MoE grouped matmul FIRST_TOKEN_OFFSET_DESC tensor"));
     attributes.set_first_token_offset(firstTokenOffsetTensor);
 
-    // Unpack token_index tensor
-    std::shared_ptr<graph::TensorAttributes> tokenIndexTensor;
-    HIPDNN_CHECK_ERROR(
-        unpackOptionalTensor(opDesc,
-                             HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_TOKEN_INDEX_DESC,
-                             tensorMap,
-                             tokenIndexTensor,
-                             "MoE grouped matmul TOKEN_INDEX_DESC tensor"));
-    if(tokenIndexTensor)
-    {
-        attributes.set_token_index(tokenIndexTensor);
-    }
-
-    // Unpack token_ks tensor
-    std::shared_ptr<graph::TensorAttributes> tokenKsTensor;
-    HIPDNN_CHECK_ERROR(unpackOptionalTensor(opDesc,
-                                            HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_TOKEN_KS_DESC,
-                                            tensorMap,
-                                            tokenKsTensor,
-                                            "MoE grouped matmul TOKEN_KS_DESC tensor"));
-    if(tokenKsTensor)
-    {
-        attributes.set_token_ks(tokenKsTensor);
-    }
-
     // Unpack output tensor
     std::shared_ptr<graph::TensorAttributes> outputTensor;
     HIPDNN_CHECK_ERROR(unpackAndRegisterTensor(opDesc,
@@ -80,7 +55,7 @@ namespace hipdnn_frontend::detail
                                                "MoE grouped matmul OUTPUT_DESC tensor"));
     attributes.set_output(outputTensor);
 
-    // Unpack mode
+    // The mode determines which routing attributes are present.
     hipdnnMoeGroupedMatmulMode_t mode{};
     HIPDNN_CHECK_ERROR(getDescriptorAttrScalar(opDesc,
                                                HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_MODE,
@@ -94,14 +69,57 @@ namespace hipdnn_frontend::detail
     }
     attributes.set_mode(modeResult);
 
-    // Unpack top_k
-    int32_t topK = 0;
-    HIPDNN_CHECK_ERROR(getDescriptorAttrScalar(opDesc,
-                                               HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_TOP_K,
-                                               HIPDNN_TYPE_INT32,
-                                               topK,
-                                               "MoE grouped matmul top_k"));
-    attributes.set_top_k(topK);
+    switch(modeResult)
+    {
+    case MoeGroupedMatmulMode::NONE:
+        break;
+    case MoeGroupedMatmulMode::GATHER:
+    {
+        std::shared_ptr<graph::TensorAttributes> tokenIndexTensor;
+        HIPDNN_CHECK_ERROR(
+            unpackAndRegisterTensor(opDesc,
+                                    HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_TOKEN_INDEX_DESC,
+                                    tensorMap,
+                                    tokenIndexTensor,
+                                    "MoE grouped matmul TOKEN_INDEX_DESC tensor"));
+        attributes.set_token_index(tokenIndexTensor);
+    }
+    break;
+    case MoeGroupedMatmulMode::SCATTER:
+    {
+        std::shared_ptr<graph::TensorAttributes> tokenIndexTensor;
+        HIPDNN_CHECK_ERROR(
+            unpackAndRegisterTensor(opDesc,
+                                    HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_TOKEN_INDEX_DESC,
+                                    tensorMap,
+                                    tokenIndexTensor,
+                                    "MoE grouped matmul TOKEN_INDEX_DESC tensor"));
+        attributes.set_token_index(tokenIndexTensor);
+    }
+        {
+            std::shared_ptr<graph::TensorAttributes> tokenKsTensor;
+            HIPDNN_CHECK_ERROR(
+                unpackAndRegisterTensor(opDesc,
+                                        HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_TOKEN_KS_DESC,
+                                        tensorMap,
+                                        tokenKsTensor,
+                                        "MoE grouped matmul TOKEN_KS_DESC tensor"));
+            attributes.set_token_ks(tokenKsTensor);
+        }
+        {
+            int32_t topK = 0;
+            HIPDNN_CHECK_ERROR(
+                getDescriptorAttrScalar(opDesc,
+                                        HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_TOP_K,
+                                        HIPDNN_TYPE_INT32,
+                                        topK,
+                                        "MoE grouped matmul top_k"));
+            attributes.set_top_k(topK);
+        }
+        break;
+    default:
+        return {ErrorCode::INVALID_VALUE, "MoE grouped matmul has an unknown routing mode"};
+    }
 
     // Unpack compute data type
     auto [dt, dtErr] = unpackGraphDataType(opDesc,

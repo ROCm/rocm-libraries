@@ -74,6 +74,11 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
     desc->setAttribute({{ df.attr_name }}, {{ df.backend_type }}, 1, &{{ df.camel_name }});
 {% endif %}
 {% endfor %}
+{% for cf in op.mode_fields %}
+
+    auto {{ cf.camel_name }} = {{ cf.test_backend_value }};
+    desc->setAttribute({{ cf.attr_name }}, {{ cf.backend_type }}, 1, &{{ cf.camel_name }});
+{% endfor %}
 {% if op.has_compute_data_type %}
     desc->setAttribute({{ op.compute_data_type_attr }}, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
 {% endif %}

@@ -1,4 +1,4 @@
-{% from "macros.j2" import assign_frontend_data_field, cpp_literal, vector_const_name %}
+{% from "macros.j2" import assign_frontend_data_field, baseline_mode_name, baseline_scalar_value, cpp_literal, vector_const_name %}
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
@@ -132,7 +132,7 @@ TEST_F(Integration{{ op.frontend.attributes_filename or op.name }}DescriptorLowe
     attrs.set_name("test_op");
 {% if op.mode_fields %}
 {% set mf = op.mode_fields[0] %}
-{% set value = mf.effective_frontend_type ~ '::' ~ mf.test_enum_value %}
+{% set value = mf.effective_frontend_type ~ '::' ~ baseline_mode_name(op, mf) %}
     {{ assign_frontend_data_field("attrs", mf, value) }}
 {% endif %}
 {% for df in op.data_fields if df.is_vector and df.required %}
@@ -188,7 +188,7 @@ TEST_F(Integration{{ op.frontend.attributes_filename or op.name }}DescriptorLowe
 {% if op.mode_fields %}
 {% set mf = op.mode_fields[0] %}
     // Verify mode
-    EXPECT_EQ(opNode->{{ mf.fbs_field }}, {{ mf.enum_short_type }}Sdk::{{ mf.test_enum_value }});
+    EXPECT_EQ(opNode->{{ mf.fbs_field }}, {{ mf.enum_short_type }}Sdk::{{ baseline_mode_name(op, mf) }});
 {% endif %}
 
 {% for df in op.data_fields if df.is_vector and df.required %}
@@ -199,7 +199,7 @@ TEST_F(Integration{{ op.frontend.attributes_filename or op.name }}DescriptorLowe
 {% endif %}
 {% endfor %}
 {% for df in op.data_fields if df.is_scalar %}
-{% set value = df.test_value if df.test_value is not none else op.test_data.field_values.get(df.name, 0) %}
+{% set value = baseline_scalar_value(op, df) %}
     EXPECT_EQ(opNode->{{ df.fbs_field }}, {{ value }});
 {% endfor %}
 }
@@ -212,7 +212,7 @@ TEST_F(Integration{{ op.frontend.attributes_filename or op.name }}DescriptorLowe
     attrs.set_name("test_operation_compute_type");
 {% if op.mode_fields %}
 {% set mf = op.mode_fields[0] %}
-{% set value = mf.effective_frontend_type ~ '::' ~ mf.test_enum_value %}
+{% set value = mf.effective_frontend_type ~ '::' ~ baseline_mode_name(op, mf) %}
     {{ assign_frontend_data_field("attrs", mf, value) }}
 {% endif %}
 {% for df in op.data_fields if df.is_vector and df.required %}
@@ -222,7 +222,7 @@ TEST_F(Integration{{ op.frontend.attributes_filename or op.name }}DescriptorLowe
 {% endif %}
 {% endfor %}
 {% for df in op.data_fields if df.is_scalar %}
-{% set value = df.test_value if df.test_value is not none else op.test_data.field_values.get(df.name, 0) %}
+{% set value = baseline_scalar_value(op, df) %}
     {{ assign_frontend_data_field("attrs", df, value) }}
 {% endfor %}
     attrs.set_compute_data_type(DataType::HALF);
@@ -290,7 +290,7 @@ TEST_F(Integration{{ op.frontend.attributes_filename or op.name }}DescriptorLowe
     attrs.set_name("test_auto_uid");
 {% if op.mode_fields %}
 {% set mf = op.mode_fields[0] %}
-{% set value = mf.effective_frontend_type ~ '::' ~ mf.test_enum_value %}
+{% set value = mf.effective_frontend_type ~ '::' ~ baseline_mode_name(op, mf) %}
     {{ assign_frontend_data_field("attrs", mf, value) }}
 {% endif %}
 {% for df in op.data_fields if df.is_vector and df.required %}
@@ -300,7 +300,7 @@ TEST_F(Integration{{ op.frontend.attributes_filename or op.name }}DescriptorLowe
 {% endif %}
 {% endfor %}
 {% for df in op.data_fields if df.is_scalar %}
-{% set value = df.test_value if df.test_value is not none else op.test_data.field_values.get(df.name, 0) %}
+{% set value = baseline_scalar_value(op, df) %}
     {{ assign_frontend_data_field("attrs", df, value) }}
 {% endfor %}
 
@@ -345,7 +345,7 @@ TEST_F(Integration{{ op.frontend.attributes_filename or op.name }}DescriptorLowe
     attrs.set_name("test_{{ df.name }}");
 {% if op.mode_fields %}
 {% set mf = op.mode_fields[0] %}
-{% set value = mf.effective_frontend_type ~ '::' ~ mf.test_enum_value %}
+{% set value = mf.effective_frontend_type ~ '::' ~ baseline_mode_name(op, mf) %}
     {{ assign_frontend_data_field("attrs", mf, value) }}
 {% endif %}
 {% for vf in op.data_fields if vf.is_vector and vf.required %}

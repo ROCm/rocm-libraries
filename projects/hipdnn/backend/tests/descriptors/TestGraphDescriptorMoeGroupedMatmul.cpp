@@ -75,6 +75,12 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
 
     auto topK = static_cast<int32_t>(2);
     desc->setAttribute(HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_TOP_K, HIPDNN_TYPE_INT32, 1, &topK);
+
+    auto mode = HIPDNN_MOE_GROUPED_MATMUL_MODE_SCATTER;
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_MODE,
+                       HIPDNN_TYPE_MOE_GROUPED_MATMUL_MODE,
+                       1,
+                       &mode);
     desc->setAttribute(
         HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_MATH_PREC, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
 
@@ -182,10 +188,12 @@ TEST_F(TestGraphDescriptorMoeGroupedMatmul, BuildFromSingleOperation)
 {
     auto tokenDesc = createFinalizedTensor(K_MOE_GROUPED_MATMUL_TENSOR_TOKEN_UID,
                                            toVec(K_MOE_GROUPED_MATMUL_TENSOR_TOKEN_DIMS),
-                                           toVec(K_MOE_GROUPED_MATMUL_TENSOR_TOKEN_STRIDES));
+                                           toVec(K_MOE_GROUPED_MATMUL_TENSOR_TOKEN_STRIDES),
+                                           HIPDNN_DATA_FLOAT);
     auto weightDesc = createFinalizedTensor(K_MOE_GROUPED_MATMUL_TENSOR_WEIGHT_UID,
                                             toVec(K_MOE_GROUPED_MATMUL_TENSOR_WEIGHT_DIMS),
-                                            toVec(K_MOE_GROUPED_MATMUL_TENSOR_WEIGHT_STRIDES));
+                                            toVec(K_MOE_GROUPED_MATMUL_TENSOR_WEIGHT_STRIDES),
+                                            HIPDNN_DATA_FLOAT);
     auto firstTokenOffsetDesc
         = createFinalizedTensor(K_MOE_GROUPED_MATMUL_TENSOR_FIRST_TOKEN_OFFSET_UID,
                                 toVec(K_MOE_GROUPED_MATMUL_TENSOR_FIRST_TOKEN_OFFSET_DIMS),
@@ -202,7 +210,8 @@ TEST_F(TestGraphDescriptorMoeGroupedMatmul, BuildFromSingleOperation)
                                              HIPDNN_DATA_INT32);
     auto outputDesc = createFinalizedTensor(K_MOE_GROUPED_MATMUL_TENSOR_OUTPUT_UID,
                                             toVec(K_MOE_GROUPED_MATMUL_TENSOR_OUTPUT_DIMS),
-                                            toVec(K_MOE_GROUPED_MATMUL_TENSOR_OUTPUT_STRIDES));
+                                            toVec(K_MOE_GROUPED_MATMUL_TENSOR_OUTPUT_STRIDES),
+                                            HIPDNN_DATA_FLOAT);
     auto opDesc = createFinalizedMoeGroupedMatmulOp(tokenDesc.get(),
                                                     weightDesc.get(),
                                                     firstTokenOffsetDesc.get(),
@@ -274,7 +283,7 @@ TEST_F(TestGraphDescriptorMoeGroupedMatmul, BuildFromSingleOperation)
                                K_MOE_GROUPED_MATMUL_TENSOR_TOKEN_INDEX_UID,
                                K_MOE_GROUPED_MATMUL_TENSOR_TOKEN_KS_UID,
                                K_MOE_GROUPED_MATMUL_TENSOR_OUTPUT_UID,
-                               MoeGroupedMatmulMode::NONE,
+                               MoeGroupedMatmulMode::SCATTER,
                                static_cast<int32_t>(2));
 
     // Verify default node name is empty
@@ -285,10 +294,12 @@ TEST_F(TestGraphDescriptorMoeGroupedMatmul, ComputeDataTypePreserved)
 {
     auto tokenDesc = createFinalizedTensor(K_MOE_GROUPED_MATMUL_TENSOR_TOKEN_UID,
                                            toVec(K_MOE_GROUPED_MATMUL_TENSOR_TOKEN_DIMS),
-                                           toVec(K_MOE_GROUPED_MATMUL_TENSOR_TOKEN_STRIDES));
+                                           toVec(K_MOE_GROUPED_MATMUL_TENSOR_TOKEN_STRIDES),
+                                           HIPDNN_DATA_FLOAT);
     auto weightDesc = createFinalizedTensor(K_MOE_GROUPED_MATMUL_TENSOR_WEIGHT_UID,
                                             toVec(K_MOE_GROUPED_MATMUL_TENSOR_WEIGHT_DIMS),
-                                            toVec(K_MOE_GROUPED_MATMUL_TENSOR_WEIGHT_STRIDES));
+                                            toVec(K_MOE_GROUPED_MATMUL_TENSOR_WEIGHT_STRIDES),
+                                            HIPDNN_DATA_FLOAT);
     auto firstTokenOffsetDesc
         = createFinalizedTensor(K_MOE_GROUPED_MATMUL_TENSOR_FIRST_TOKEN_OFFSET_UID,
                                 toVec(K_MOE_GROUPED_MATMUL_TENSOR_FIRST_TOKEN_OFFSET_DIMS),
@@ -305,7 +316,8 @@ TEST_F(TestGraphDescriptorMoeGroupedMatmul, ComputeDataTypePreserved)
                                              HIPDNN_DATA_INT32);
     auto outputDesc = createFinalizedTensor(K_MOE_GROUPED_MATMUL_TENSOR_OUTPUT_UID,
                                             toVec(K_MOE_GROUPED_MATMUL_TENSOR_OUTPUT_DIMS),
-                                            toVec(K_MOE_GROUPED_MATMUL_TENSOR_OUTPUT_STRIDES));
+                                            toVec(K_MOE_GROUPED_MATMUL_TENSOR_OUTPUT_STRIDES),
+                                            HIPDNN_DATA_FLOAT);
     auto opDesc = createFinalizedMoeGroupedMatmulOp(tokenDesc.get(),
                                                     weightDesc.get(),
                                                     firstTokenOffsetDesc.get(),
@@ -335,10 +347,12 @@ TEST_F(TestGraphDescriptorMoeGroupedMatmul, MoeGroupedMatmulAttributesPreserved)
 {
     auto tokenDesc = createFinalizedTensor(K_MOE_GROUPED_MATMUL_TENSOR_TOKEN_UID,
                                            toVec(K_MOE_GROUPED_MATMUL_TENSOR_TOKEN_DIMS),
-                                           toVec(K_MOE_GROUPED_MATMUL_TENSOR_TOKEN_STRIDES));
+                                           toVec(K_MOE_GROUPED_MATMUL_TENSOR_TOKEN_STRIDES),
+                                           HIPDNN_DATA_FLOAT);
     auto weightDesc = createFinalizedTensor(K_MOE_GROUPED_MATMUL_TENSOR_WEIGHT_UID,
                                             toVec(K_MOE_GROUPED_MATMUL_TENSOR_WEIGHT_DIMS),
-                                            toVec(K_MOE_GROUPED_MATMUL_TENSOR_WEIGHT_STRIDES));
+                                            toVec(K_MOE_GROUPED_MATMUL_TENSOR_WEIGHT_STRIDES),
+                                            HIPDNN_DATA_FLOAT);
     auto firstTokenOffsetDesc
         = createFinalizedTensor(K_MOE_GROUPED_MATMUL_TENSOR_FIRST_TOKEN_OFFSET_UID,
                                 toVec(K_MOE_GROUPED_MATMUL_TENSOR_FIRST_TOKEN_OFFSET_DIMS),
@@ -355,7 +369,8 @@ TEST_F(TestGraphDescriptorMoeGroupedMatmul, MoeGroupedMatmulAttributesPreserved)
                                              HIPDNN_DATA_INT32);
     auto outputDesc = createFinalizedTensor(K_MOE_GROUPED_MATMUL_TENSOR_OUTPUT_UID,
                                             toVec(K_MOE_GROUPED_MATMUL_TENSOR_OUTPUT_DIMS),
-                                            toVec(K_MOE_GROUPED_MATMUL_TENSOR_OUTPUT_STRIDES));
+                                            toVec(K_MOE_GROUPED_MATMUL_TENSOR_OUTPUT_STRIDES),
+                                            HIPDNN_DATA_FLOAT);
 
     // Create op with non-default parameters to test graph roundtrip
     auto wrapper = createDescriptor<MoeGroupedMatmulOperationDescriptor>();
@@ -392,7 +407,7 @@ TEST_F(TestGraphDescriptorMoeGroupedMatmul, MoeGroupedMatmulAttributesPreserved)
                          1,
                          static_cast<const void*>(&outputPtr));
 
-    auto mode = HIPDNN_MOE_GROUPED_MATMUL_MODE_NONE;
+    auto mode = HIPDNN_MOE_GROUPED_MATMUL_MODE_SCATTER;
     opDesc->setAttribute(HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_MODE,
                          HIPDNN_TYPE_MOE_GROUPED_MATMUL_MODE,
                          1,
@@ -471,7 +486,7 @@ TEST_F(TestGraphDescriptorMoeGroupedMatmul, MoeGroupedMatmulAttributesPreserved)
                                K_MOE_GROUPED_MATMUL_TENSOR_TOKEN_INDEX_UID,
                                K_MOE_GROUPED_MATMUL_TENSOR_TOKEN_KS_UID,
                                K_MOE_GROUPED_MATMUL_TENSOR_OUTPUT_UID,
-                               MoeGroupedMatmulMode::NONE,
+                               MoeGroupedMatmulMode::SCATTER,
                                static_cast<int32_t>(2));
 
     // Verify operation name
@@ -482,10 +497,12 @@ TEST_F(TestGraphDescriptorMoeGroupedMatmul, OperationNamePreservedInSerializatio
 {
     auto tokenDesc = createFinalizedTensor(K_MOE_GROUPED_MATMUL_TENSOR_TOKEN_UID,
                                            toVec(K_MOE_GROUPED_MATMUL_TENSOR_TOKEN_DIMS),
-                                           toVec(K_MOE_GROUPED_MATMUL_TENSOR_TOKEN_STRIDES));
+                                           toVec(K_MOE_GROUPED_MATMUL_TENSOR_TOKEN_STRIDES),
+                                           HIPDNN_DATA_FLOAT);
     auto weightDesc = createFinalizedTensor(K_MOE_GROUPED_MATMUL_TENSOR_WEIGHT_UID,
                                             toVec(K_MOE_GROUPED_MATMUL_TENSOR_WEIGHT_DIMS),
-                                            toVec(K_MOE_GROUPED_MATMUL_TENSOR_WEIGHT_STRIDES));
+                                            toVec(K_MOE_GROUPED_MATMUL_TENSOR_WEIGHT_STRIDES),
+                                            HIPDNN_DATA_FLOAT);
     auto firstTokenOffsetDesc
         = createFinalizedTensor(K_MOE_GROUPED_MATMUL_TENSOR_FIRST_TOKEN_OFFSET_UID,
                                 toVec(K_MOE_GROUPED_MATMUL_TENSOR_FIRST_TOKEN_OFFSET_DIMS),
@@ -502,7 +519,8 @@ TEST_F(TestGraphDescriptorMoeGroupedMatmul, OperationNamePreservedInSerializatio
                                              HIPDNN_DATA_INT32);
     auto outputDesc = createFinalizedTensor(K_MOE_GROUPED_MATMUL_TENSOR_OUTPUT_UID,
                                             toVec(K_MOE_GROUPED_MATMUL_TENSOR_OUTPUT_DIMS),
-                                            toVec(K_MOE_GROUPED_MATMUL_TENSOR_OUTPUT_STRIDES));
+                                            toVec(K_MOE_GROUPED_MATMUL_TENSOR_OUTPUT_STRIDES),
+                                            HIPDNN_DATA_FLOAT);
     auto opDesc = createFinalizedMoeGroupedMatmulOp(tokenDesc.get(),
                                                     weightDesc.get(),
                                                     firstTokenOffsetDesc.get(),
@@ -533,10 +551,12 @@ TEST_F(TestGraphDescriptorMoeGroupedMatmul, OperationNameRoundTripThroughLifting
 {
     auto tokenDesc = createFinalizedTensor(K_MOE_GROUPED_MATMUL_TENSOR_TOKEN_UID,
                                            toVec(K_MOE_GROUPED_MATMUL_TENSOR_TOKEN_DIMS),
-                                           toVec(K_MOE_GROUPED_MATMUL_TENSOR_TOKEN_STRIDES));
+                                           toVec(K_MOE_GROUPED_MATMUL_TENSOR_TOKEN_STRIDES),
+                                           HIPDNN_DATA_FLOAT);
     auto weightDesc = createFinalizedTensor(K_MOE_GROUPED_MATMUL_TENSOR_WEIGHT_UID,
                                             toVec(K_MOE_GROUPED_MATMUL_TENSOR_WEIGHT_DIMS),
-                                            toVec(K_MOE_GROUPED_MATMUL_TENSOR_WEIGHT_STRIDES));
+                                            toVec(K_MOE_GROUPED_MATMUL_TENSOR_WEIGHT_STRIDES),
+                                            HIPDNN_DATA_FLOAT);
     auto firstTokenOffsetDesc
         = createFinalizedTensor(K_MOE_GROUPED_MATMUL_TENSOR_FIRST_TOKEN_OFFSET_UID,
                                 toVec(K_MOE_GROUPED_MATMUL_TENSOR_FIRST_TOKEN_OFFSET_DIMS),
@@ -553,7 +573,8 @@ TEST_F(TestGraphDescriptorMoeGroupedMatmul, OperationNameRoundTripThroughLifting
                                              HIPDNN_DATA_INT32);
     auto outputDesc = createFinalizedTensor(K_MOE_GROUPED_MATMUL_TENSOR_OUTPUT_UID,
                                             toVec(K_MOE_GROUPED_MATMUL_TENSOR_OUTPUT_DIMS),
-                                            toVec(K_MOE_GROUPED_MATMUL_TENSOR_OUTPUT_STRIDES));
+                                            toVec(K_MOE_GROUPED_MATMUL_TENSOR_OUTPUT_STRIDES),
+                                            HIPDNN_DATA_FLOAT);
     auto opDesc = createFinalizedMoeGroupedMatmulOp(tokenDesc.get(),
                                                     weightDesc.get(),
                                                     firstTokenOffsetDesc.get(),

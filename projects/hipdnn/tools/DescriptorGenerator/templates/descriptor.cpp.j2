@@ -43,6 +43,83 @@ void {{ op.class_name }}::finalize()
                   "{{ op.class_name }}::finalize() failed: {{ cf.name }} not set");
 {% endif %}
 {% endfor %}
+{% for tf in op.required_tensor_fields if tf.expected_data_type %}
+    THROW_IF_TRUE({{ tf.member_name }}->getData().data_type
+                      != {{ op.fbs_namespace }}::DataType::{{ tf.expected_data_type }},
+                  HIPDNN_STATUS_BAD_PARAM,
+                  "{{ op.class_name }}::finalize() failed: {{ tf.attr_suffix }} tensor must have "
+                  "{{ tf.expected_data_type }} data type");
+{% endfor %}
+{% if op.mode_rules %}
+{% set tf_by_name = op.tensor_field_by_name %}
+{% set df_by_name = op.data_field_by_name %}
+{% set mode_field = op.mode_rule_mode_field %}
+    switch(_data.{{ mode_field.fbs_field }})
+    {
+{% for rule in op.mode_rules %}
+    case {{ mode_field.cpp_enum }}::{{ rule.mode }}:
+{% for tensor_name in rule.required_optional_tensors %}
+{% set tf = tf_by_name[tensor_name] %}
+        THROW_IF_NULL({{ tf.member_name }},
+                      HIPDNN_STATUS_BAD_PARAM,
+                      "{{ op.class_name }}::finalize() failed: {{ rule.mode }} mode "
+                      "requires {{ tf.attr_suffix }} tensor");
+{% if tf.expected_data_type %}
+        THROW_IF_TRUE({{ tf.member_name }}->getData().data_type
+                          != {{ op.fbs_namespace }}::DataType::{{ tf.expected_data_type }},
+                      HIPDNN_STATUS_BAD_PARAM,
+                      "{{ op.class_name }}::finalize() failed: {{ tf.attr_suffix }} tensor must "
+                      "have {{ tf.expected_data_type }} data type");
+{% endif %}
+{% endfor %}
+{% for tf in op.optional_tensor_fields if tf.name not in rule.required_optional_tensors %}
+        THROW_IF_TRUE({{ tf.member_name }} != nullptr,
+                      HIPDNN_STATUS_BAD_PARAM,
+                      "{{ op.class_name }}::finalize() failed: {{ rule.mode }} mode forbids "
+                      "{{ tf.attr_suffix }} tensor");
+{% endfor %}
+{% for constraint in rule.scalar_constraints %}
+{% set field = df_by_name[constraint.field] %}
+{% if constraint.equals is not none %}
+        THROW_IF_NE(_data.{{ field.fbs_field }},
+                    {{ constraint.equals }},
+                    HIPDNN_STATUS_BAD_PARAM,
+                    "{{ op.class_name }}::finalize() failed: {{ rule.mode }} mode requires "
+                    "{{ field.name }} to equal {{ constraint.equals }}");
+{% endif %}
+{% if constraint.minimum is not none %}
+        THROW_IF_TRUE(_data.{{ field.fbs_field }} < {{ constraint.minimum }},
+                      HIPDNN_STATUS_BAD_PARAM,
+                      "{{ op.class_name }}::finalize() failed: {{ rule.mode }} mode requires "
+                      "{{ field.name }} to be at least {{ constraint.minimum }}");
+{% endif %}
+{% if constraint.maximum_tensor %}
+{% set max_tensor = tf_by_name[constraint.maximum_tensor] %}
+{% if constraint.maximum_dimension == 0 %}
+        THROW_IF_TRUE({{ max_tensor.member_name }}->getData().dims.empty(),
+{% else %}
+        THROW_IF_TRUE({{ max_tensor.member_name }}->getData().dims.size()
+                          <= {{ constraint.maximum_dimension }},
+{% endif %}
+                      HIPDNN_STATUS_BAD_PARAM,
+                      "{{ op.class_name }}::finalize() failed: {{ max_tensor.attr_suffix }} "
+                      "tensor has too few dimensions to bound {{ field.name }}");
+        THROW_IF_TRUE(_data.{{ field.fbs_field }}
+                          > {{ max_tensor.member_name }}->getData().dims[{{ constraint.maximum_dimension }}],
+                      HIPDNN_STATUS_BAD_PARAM,
+                      "{{ op.class_name }}::finalize() failed: {{ field.name }} must not "
+                      "exceed {{ max_tensor.name }} dimension {{ constraint.maximum_dimension }}");
+{% endif %}
+{% endfor %}
+        break;
+{% endfor %}
+    default:
+        throw HipdnnException(
+            HIPDNN_STATUS_BAD_PARAM,
+            "{{ op.class_name }}::finalize() failed: unknown routing mode");
+    }
+{% endif %}
+
 
     HipdnnBackendDescriptorImpl<{{ op.class_name }}>::finalize();
 }

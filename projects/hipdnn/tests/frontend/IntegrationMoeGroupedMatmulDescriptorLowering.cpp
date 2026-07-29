@@ -124,7 +124,7 @@ TEST_F(IntegrationMoeGroupedMatmulDescriptorLowering, MoeGroupedMatmulLoweringRo
     MoeGroupedMatmulAttributes attrs;
     attrs.set_name("test_op");
     attrs.set_mode(MoeGroupedMatmulMode::NONE);
-    attrs.set_top_k(0);
+    attrs.set_top_k(2);
 
     auto graphT = buildAndDeserialize(attrs);
 

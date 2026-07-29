@@ -99,6 +99,7 @@ class TensorField:
     attr_suffix: str
     required: bool = True
     frontend_getter: str = ""
+    expected_data_type: str = ""
 
     @property
     def camel_name(self) -> str:
@@ -591,6 +592,47 @@ class ModeIntegrationScenario:
 
 
 @dataclass
+class ModeScalarConstraint:
+    """Bounds or canonical value required for a scalar in one mode."""
+
+    field: str
+    equals: int | float | None = None
+    minimum: int | float | None = None
+    maximum_tensor: str = ""
+    maximum_dimension: int | None = None
+
+
+@dataclass
+class ModeRule:
+    """Descriptor contract for one executable value of a mode field.
+
+    ``required_optional_tensors`` is the exact optional-tensor footprint for
+    the mode: every listed tensor is required and every other optional tensor
+    is forbidden. ``serialized_scalars`` lists scalars the packer transfers
+    from frontend attributes for this mode. Scalar constraints apply to direct
+    backend descriptors and deserialized graphs regardless of whether the
+    packer emitted the scalar explicitly.
+    """
+
+    mode: str
+    required_optional_tensors: list[str] = field(default_factory=list)
+    serialized_scalars: list[str] = field(default_factory=list)
+    scalar_constraints: list[ModeScalarConstraint] = field(default_factory=list)
+
+
+@dataclass
+class InferenceDimension:
+    """One inferred output dimension for the ``mode_select_dimensions`` strategy."""
+
+    literal: int | None = None
+    tensor: str = ""
+    dimension: int | None = None
+    when_mode: str = ""
+    otherwise_tensor: str = ""
+    otherwise_dimension: int | None = None
+
+
+@dataclass
 class FrontendTensorConfig:
     """An input or output tensor for the frontend Attributes class."""
 
@@ -639,6 +681,8 @@ class InferPropertiesConfig:
     strategy: str = "stub"
     reference_input: str = ""
     dimension_formula: str = ""
+    mode_field: str = ""
+    dimensions: list[InferenceDimension] = field(default_factory=list)
 
 
 @dataclass
@@ -685,6 +729,8 @@ class FrontendConfig:
     node_type_enum: str = ""
     node_attributes_union_type: str = ""
     compatibility_typedef: str = ""
+    node_template: str = ""
+    node_test_template: str = ""
 
     @property
     def effective_attributes_filename(self) -> str:
@@ -833,6 +879,8 @@ class OperationConfig:
     mode_integration_scenarios: list[ModeIntegrationScenario] = field(
         default_factory=list
     )
+    mode_rules: list[ModeRule] = field(default_factory=list)
+
     data_fields_helper: Optional[DataFieldsHelper] = None
 
     has_compute_data_type: bool = True
@@ -915,6 +963,58 @@ class OperationConfig:
     @property
     def source_filename(self) -> str:
         return f"{self.class_name}.cpp"
+
+    @property
+    def tensor_field_by_name(self) -> dict[str, TensorField]:
+        """Tensor fields keyed by their logical config names."""
+        return {field.name: field for field in self.tensor_fields}
+
+    @property
+    def data_field_by_name(self) -> dict[str, DataField]:
+        """Data fields keyed by their logical config names."""
+        return {field.name: field for field in self.data_fields}
+
+    @property
+    def has_mode_rules(self) -> bool:
+        """Whether descriptor behavior is selected by declarative mode rules."""
+        return bool(self.mode_rules)
+
+    @property
+    def mode_rule_mode_field(self) -> Optional[DataField]:
+        """The sole mode field selected by mode-rule validation."""
+        if not self.mode_rules or len(self.mode_fields) != 1:
+            return None
+        return self.mode_fields[0]
+
+    @property
+    def mode_rule_controlled_scalar_fields(self) -> list[DataField]:
+        """Scalar fields emitted or constrained by at least one mode rule."""
+        names = {
+            scalar_name
+            for rule in self.mode_rules
+            for scalar_name in (
+                rule.serialized_scalars
+                + [constraint.field for constraint in rule.scalar_constraints]
+            )
+        }
+        return [
+            field
+            for field in self.data_fields
+            if field.name in names and field.is_scalar
+        ]
+
+    @property
+    def mode_rule_controlled_scalar_names(self) -> set[str]:
+        """Names of scalar fields emitted or constrained by mode rules."""
+        return {field.name for field in self.mode_rule_controlled_scalar_fields}
+
+    @property
+    def mode_rule_without_optional_tensors(self) -> Optional[ModeRule]:
+        """A rule suitable for constructing a mandatory-input-only descriptor."""
+        return next(
+            (rule for rule in self.mode_rules if not rule.required_optional_tensors),
+            None,
+        )
 
     @property
     def packer_filename(self) -> str:

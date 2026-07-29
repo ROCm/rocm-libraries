@@ -151,6 +151,7 @@ public:
 {% endfor %}
     // NOLINTEND(readability-identifier-naming)
 {% for df in op.data_fields %}
+{% if not df.frontend_uses_member_access %}
 {% if df.is_vector %}
 
     /**
@@ -291,6 +292,7 @@ public:
     {
         return {{ df.name }};
     }
+{% endif %}
 {% endif %}
 {% endfor %}
 };

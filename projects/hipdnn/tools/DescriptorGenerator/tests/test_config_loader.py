@@ -391,6 +391,34 @@ class TestTestDataParsing:
         with pytest.raises(ConfigError, match="missing.*SCATTER"):
             _validate_config(config)
 
+    def test_moe_mode_rules_define_canonical_descriptor_footprints(
+        self, load_test_config
+    ):
+        config = load_test_config("moe_grouped_matmul.yaml")
+        rules = {rule.mode: rule for rule in config.mode_rules}
+
+        assert set(rules) == {"NONE", "GATHER", "SCATTER"}
+        assert rules["NONE"].required_optional_tensors == []
+        assert rules["GATHER"].required_optional_tensors == ["token_index"]
+        assert rules["SCATTER"].required_optional_tensors == [
+            "token_index",
+            "token_ks",
+        ]
+        assert rules["SCATTER"].serialized_scalars == ["top_k"]
+
+        scatter_top_k = rules["SCATTER"].scalar_constraints[0]
+        assert scatter_top_k.field == "top_k"
+        assert scatter_top_k.minimum == 1
+        assert scatter_top_k.maximum_tensor == "weight"
+        assert scatter_top_k.maximum_dimension == 0
+
+    def test_moe_mode_rules_require_every_executable_mode(self, load_test_config):
+        config = load_test_config("moe_grouped_matmul.yaml")
+        config.mode_rules.pop()
+
+        with pytest.raises(ConfigError, match="mode_rules must cover.*SCATTER"):
+            _validate_config(config)
+
 
 # ---------------------------------------------------------------------------
 # Task 2B.3: _parse_frontend_config() and _parse_frontend_tensors()
