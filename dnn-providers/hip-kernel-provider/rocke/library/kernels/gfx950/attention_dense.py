@@ -45,7 +45,7 @@ Head-size / seqlen coverage:
     D=128 uses the per-row padded LDS fast path (1 K/V row per async-DMA instr).
     D=64 packs 2 rows per instr (64 lanes x 2 bf16 = 128 elems = 2 D=64 rows),
     which rules out a per-row pad because a padded row is not contiguous with
-    the next -- so K instead pads between DMA row-GROUPS (``_LDS_PAD_K64``):
+    the next -- so K instead pads between DMA row-GROUPS (``lds_k_group_pad``):
     the group stays contiguous for the DMA while the group pitch restores the
     QK read's bank spread. V still uses the unpadded packed pitch, so a
     conflict-free transposed-V layout remains an open D=64 lever. D=128 codegen
@@ -98,29 +98,6 @@ _LDS_PAD = 8
 import os as _os  # noqa: E402
 
 _LDS_PAD_V = int(_os.environ.get("ROCKE_DENSE_VPAD", "32"))
-# _LDS_PAD_K64: bf16 elements of K padding between DMA row-GROUPS on the packed
-#   D<128 path. The async DMA writes ROWS_PER_INSTR rows contiguously, so a
-#   per-row pad is impossible there -- but the pad can sit BETWEEN groups, which
-#   still breaks the QK ds_read_b128 bank pattern. A wave64 b128 read moves
-#   1024 B while LDS delivers 64 banks x 4 B = 256 B/cycle, so 4 lanes per bank
-#   is the conflict-free floor. Aggregated over all 64 lanes (4 dwords each):
-#   unpadded D=64 touches 16 of 64 banks at 16 lanes deep; a group pad of 8, 16
-#   or 24 reaches all 64 banks at the 4-deep floor; 32 falls back to 32 banks at
-#   8 deep. Within the 8/16/24 set this whole-wave model does not discriminate,
-#   but a 16-lane phase (16 x 4 dwords = one full 64-bank sweep) does: pad 8
-#   gives 16 distinct start banks, pad 16 repeats each twice. Hence 8.
-#   MUST be a non-negative multiple of 8 bf16 elements (16 B): smem_load_vN
-#   stamps `align 16` on the n=8 read unconditionally, so a pitch that is only
-#   8-byte aligned would keep the ds_read_b128 but break its alignment
-#   contract -- wrong data or a fault, silently. Validated below, not just
-#   documented. Overridable via ROCKE_DENSE_KPAD64 for re-sweeps.
-_LDS_PAD_K64 = int(_os.environ.get("ROCKE_DENSE_KPAD64", "8"))
-if _LDS_PAD_K64 < 0 or _LDS_PAD_K64 % 8 != 0:
-    raise ValueError(
-        "ROCKE_DENSE_KPAD64 must be a non-negative multiple of 8 bf16 elements "
-        "(16 bytes) so the K group pitch stays ds_read_b128-aligned, got "
-        f"{_LDS_PAD_K64}"
-    )
 # Lazy-rescale re-anchor threshold in the log2 domain: skip the O/l rescale when
 # every lane's (tile_max - running_max) <= this. exp2(8)=256 bounds P safely.
 _LAZY_RESCALE_THRESHOLD = 8.0
@@ -179,6 +156,24 @@ class AttentionDenseSpec:
     # waves_per_eu: occupancy hint. 2 is a free win (tighter allocation, still 2
     #   waves/SIMD); 3 is a measured trap (VGPR<=170 forces spills -> -20%).
     waves_per_eu: int = 2
+    # lds_k_group_pad: bf16 elements of K padding between DMA row-GROUPS, on the
+    #   packed head_size<128 path only (ignored at 128, which pads per row via
+    #   _LDS_PAD). The async DMA writes 128//head_size rows contiguously, so a
+    #   per-row pad is impossible there -- but the pad can sit BETWEEN groups and
+    #   still break the QK ds_read_b128 bank pattern. A wave64 b128 read moves
+    #   1024 B while LDS delivers 64 banks x 4 B = 256 B/cycle, so 4 lanes per
+    #   bank is the conflict-free floor. Aggregated over all 64 lanes (4 dwords
+    #   each): unpadded D=64 touches 16 of 64 banks at 16 lanes deep; a group pad
+    #   of 8, 16 or 24 reaches all 64 banks at that floor; 32 falls back to 32
+    #   banks at 8 deep. The whole-wave model does not separate 8/16/24, but a
+    #   16-lane phase (16 x 4 dwords = one full 64-bank sweep) does: pad 8 gives
+    #   16 distinct start banks, pad 16 repeats each twice -- hence 8, which is
+    #   also the cheaper of the two in LDS. Must be a non-negative multiple of 8
+    #   elements (16 B) because smem_load_vN stamps `align 16` on the n=8 read
+    #   unconditionally, so an 8-byte-aligned pitch would keep the ds_read_b128
+    #   while silently breaking its alignment contract. 0 reproduces the old
+    #   unpadded layout for A/B.
+    lds_k_group_pad: int = 8
     # persistent: emit the grid-stride PERSISTENT variant instead of one CTA per
     #   (query-block, head, batch). A 1-D grid of ``num_persistent`` long-lived CTAs
     #   grid-strides over the W = (seqlen_q//256)*Hq*B work items, so the per-CTA
@@ -231,6 +226,17 @@ class AttentionDenseSpec:
         # 128 % head_size == 0 so it packs a whole number of rows per instr.
         if self.head_size not in (64, 128):
             raise ValueError(f"head_size must be 64 or 128, got {self.head_size}")
+        # A group pitch that is not 16-byte aligned would keep the QK
+        # ds_read_b128 while breaking its alignment contract (smem_load_vN stamps
+        # `align 16` on the n=8 read unconditionally) -- wrong data or a fault,
+        # silently. Checked for every head size so an unused value cannot go
+        # stale and then bite when head_size changes.
+        if self.lds_k_group_pad < 0 or self.lds_k_group_pad % 8 != 0:
+            raise ValueError(
+                "lds_k_group_pad must be a non-negative multiple of 8 bf16 "
+                "elements (16 bytes) so the K group pitch stays "
+                f"ds_read_b128-aligned, got {self.lds_k_group_pad}"
+            )
         if self.block_n % 32 != 0:
             raise ValueError(f"block_n must be a multiple of 32, got {self.block_n}")
         if self.ragged:
@@ -323,6 +329,14 @@ class AttentionDenseSpec:
             f"kv{self.num_kv_heads}",
             f"bn{self.block_n}",
             self.dtype,
+        ]
+        # The K group pad changes the emitted layout, so it has to be part of the
+        # kernel identity or two kernels that differ only in pad share a symbol
+        # name (and a launcher-cache entry). Only live on the packed path, so the
+        # head_size=128 name is unchanged.
+        if 128 // self.head_size > 1:
+            parts.append(f"kpad{self.lds_k_group_pad}")
+        parts += [
             f"sq{self.seqlen_q}",
             f"sk{self.seqlen_kv}",
             "causal" if self.causal else "full",
@@ -479,7 +493,8 @@ def build_attention_dense(
     #     padded row is not contiguous with the next), so the packed D<128 K
     #     loader pads between DMA row-GROUPS instead: the group stays contiguous
     #     for the multi-row DMA while the group pitch still breaks the QK read's
-    #     bank pattern (see _LDS_PAD_K64). V keeps the unpadded packed pitch. ---
+    #     bank pattern (see the ``lds_k_group_pad`` spec field). V keeps the
+    #     unpadded packed pitch. ---
     if ROWS_PER_INSTR == 1:
         K_GROUP = 1
         K_ROWS_LDS = BN
@@ -487,7 +502,7 @@ def build_attention_dense(
     else:
         K_GROUP = ROWS_PER_INSTR
         K_ROWS_LDS = BN // K_GROUP
-        LDROW = K_GROUP * D + _LDS_PAD_K64
+        LDROW = K_GROUP * D + spec.lds_k_group_pad
     VROW = D + _LDS_PAD_V if ROWS_PER_INSTR == 1 else D
     K_lds = b.smem_alloc(dtype, [NBUF, K_ROWS_LDS, LDROW], name_hint="Klds")
     V_lds = b.smem_alloc(dtype, [NBUF, BN, VROW], name_hint="Vlds")
@@ -1089,7 +1104,7 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
     else:
         K_GROUP = ROWS_PER_INSTR
         K_ROWS_LDS = BN // K_GROUP
-        LDROW = K_GROUP * D + _LDS_PAD_K64
+        LDROW = K_GROUP * D + spec.lds_k_group_pad
     VROW = (D + _LDS_PAD_V) if ROWS_PER_INSTR == 1 else D
     K_lds = b.smem_alloc(dtype, [NBUF, K_ROWS_LDS, LDROW], name_hint="Klds")
     V_lds = b.smem_alloc(dtype, [NBUF, BN, VROW], name_hint="Vlds")
