@@ -83,7 +83,7 @@ struct FmhaBwdWorkspaceManager
     static constexpr size_t ALIGNMENT = 16;
 
     template <bool kUseQrQtrDorPipeline>
-    CK_TILE_HOST static size_t GetDqAccSplitsSize(const int batch)
+    CK_TILE_HOST_DEVICE static size_t GetDqAccSplitsSize(const int batch)
     {
         if constexpr(kUseQrQtrDorPipeline)
             return 0;
@@ -91,7 +91,7 @@ struct FmhaBwdWorkspaceManager
             (kIsGroupMode && kIsDeterministic) ? static_cast<size_t>(batch) : 1;
         return integer_least_multiple(sizeof(index_t) * dqAccSplitsElems, ALIGNMENT);
     }
-    CK_TILE_HOST static size_t GetDqAccOffsetsSize(const int batch)
+    CK_TILE_HOST_DEVICE static size_t GetDqAccOffsetsSize(const int batch)
     {
         // batch + 1: extra sentinel slot at [batch] holds total dq_acc element
         // count for DqAccPrezeroKernel.
@@ -100,7 +100,7 @@ struct FmhaBwdWorkspaceManager
         return integer_least_multiple(sizeof(long_index_t) * dqAccOffsetsElems, ALIGNMENT);
     }
     // cu_state[num_cus]: per-CU persistent state packed into one array (group det only).
-    CK_TILE_HOST static size_t GetCuStateSize(const int num_cus)
+    CK_TILE_HOST_DEVICE static size_t GetCuStateSize(const int num_cus)
     {
         if constexpr(kIsGroupMode && kIsDeterministic)
             return integer_least_multiple(sizeof(FmhaBwdGroupPersistentCuState) * num_cus,
@@ -108,7 +108,7 @@ struct FmhaBwdWorkspaceManager
         return 0;
     }
     // batch_state[batch]: per-batch sq/nc/nsplits for group det dispatch loop.
-    CK_TILE_HOST static size_t GetBatchStateSize(const int batch)
+    CK_TILE_HOST_DEVICE static size_t GetBatchStateSize(const int batch)
     {
         if constexpr(kIsGroupMode && kIsDeterministic)
             return integer_least_multiple(sizeof(FmhaBwdBatchState) * batch, ALIGNMENT);
@@ -125,19 +125,26 @@ struct FmhaBwdWorkspaceManager
         return integer_least_multiple(raw, static_cast<size_t>(4096));
     }
 
-    CK_TILE_HOST static size_t GetDqAccSplitsOffset(const int) { return 0; }
+    CK_TILE_HOST_DEVICE static size_t GetDqAccSplitsOffset(const int) { return 0; }
     template <bool kUseQrQtrDorPipeline>
-    CK_TILE_HOST static size_t GetDqAccOffsetsOffset(const int batch)
+    CK_TILE_HOST_DEVICE static size_t GetDqAccOffsetsOffset(const int batch)
     {
         return GetDqAccSplitsSize<kUseQrQtrDorPipeline>(batch);
     }
-    CK_TILE_HOST static size_t GetCuStateOffset(const int batch)
+    CK_TILE_HOST_DEVICE static size_t GetCuStateOffset(const int batch)
     {
         return GetDqAccSplitsSize<false>(batch) + GetDqAccOffsetsSize(batch);
     }
+    // num_cus overload: callable from the device prepare kernel, which cannot query
+    // get_num_cus() and is handed the host's value instead. Both must agree, otherwise
+    // the device kernel writes batch_state at a different offset than the host layout.
+    CK_TILE_HOST_DEVICE static size_t GetBatchStateOffset(const int batch, const int num_cus)
+    {
+        return GetCuStateOffset(batch) + GetCuStateSize(num_cus);
+    }
     CK_TILE_HOST static size_t GetBatchStateOffset(const int batch)
     {
-        return GetCuStateOffset(batch) + GetCuStateSize(get_num_cus());
+        return GetBatchStateOffset(batch, static_cast<int>(get_num_cus()));
     }
     template <bool kUseQrQtrDorPipeline>
     CK_TILE_HOST static size_t GetDqAccDataOffset(const int batch)
@@ -145,8 +152,49 @@ struct FmhaBwdWorkspaceManager
         return GetWorkspaceHostSize<kUseQrQtrDorPipeline>(batch);
     }
 
+    // XCD-contiguous remap of the cu_state array: each XCD's round-robin blockIdx.x
+    // values must land on a contiguous range of logical CUs. Mirrors
+    // GemmSpatiallyLocalTilePartitioner::RemapXCD; tall_xcds handles the non-divisible
+    // case. CuStateOutputToLogical is the host's forward map (which logical CU belongs in
+    // output slot b); CuStateLogicalToOutput is its inverse, used by the device prepare
+    // kernel, which produces logical CUs in order and needs to know where each one goes.
+    static constexpr index_t NUM_XCDS = 8;
+
+    CK_TILE_HOST_DEVICE static index_t CuStateOutputToLogical(index_t b, index_t num_cus)
+    {
+        const index_t ids_per_xcd = (num_cus + NUM_XCDS - 1) / NUM_XCDS;
+        const index_t tall_xcds = (num_cus % NUM_XCDS == 0) ? NUM_XCDS : num_cus % NUM_XCDS;
+        const index_t xcd       = b % NUM_XCDS;
+        const index_t local_id  = b / NUM_XCDS;
+        return (xcd < tall_xcds)
+                   ? xcd * ids_per_xcd + local_id
+                   : tall_xcds * ids_per_xcd + (xcd - tall_xcds) * (ids_per_xcd - 1) + local_id;
+    }
+
+    CK_TILE_HOST_DEVICE static index_t CuStateLogicalToOutput(index_t logical, index_t num_cus)
+    {
+        const index_t ids_per_xcd = (num_cus + NUM_XCDS - 1) / NUM_XCDS;
+        const index_t tall_xcds = (num_cus % NUM_XCDS == 0) ? NUM_XCDS : num_cus % NUM_XCDS;
+        const index_t tall_span = tall_xcds * ids_per_xcd;
+        index_t xcd, local_id;
+        if(logical < tall_span)
+        {
+            xcd      = logical / ids_per_xcd;
+            local_id = logical % ids_per_xcd;
+        }
+        else
+        {
+            // Only reachable when ids_per_xcd >= 2; guard keeps the divide safe anyway.
+            const index_t short_len = max(ids_per_xcd - 1, index_t(1));
+            const index_t r         = logical - tall_span;
+            xcd                     = tall_xcds + r / short_len;
+            local_id                = r % short_len;
+        }
+        return local_id * NUM_XCDS + xcd;
+    }
+
     template <typename T>
-    CK_TILE_HOST static T* workspace_ptr(void* base, size_t offset)
+    CK_TILE_HOST_DEVICE static T* workspace_ptr(void* base, size_t offset)
     {
         return reinterpret_cast<T*>(static_cast<char*>(base) + offset);
     }
@@ -321,23 +369,10 @@ struct FmhaBwdWorkspaceManager
                 cu_states[c].w_hi = cu_states[c + 1].w_lo;
             cu_states[num_cus - 1].w_hi = total_w;
 
-            // XCD-contiguous remap so each XCD's round-robin blockIdx.x values
-            // map to a contiguous range of logical CUs. Mirrors
-            // GemmSpatiallyLocalTilePartitioner::RemapXCD; tall_xcds handles the
-            // non-divisible case.
-            constexpr index_t NUM_XCDS = 8;
-            const index_t ids_per_xcd  = (num_cus + NUM_XCDS - 1) / NUM_XCDS;
-            const index_t tall_xcds    = (num_cus % NUM_XCDS == 0) ? NUM_XCDS : num_cus % NUM_XCDS;
+            // XCD-contiguous remap (see CuStateOutputToLogical) so each XCD's round-robin
+            // blockIdx.x values map to a contiguous range of logical CUs.
             for(index_t b = 0; b < num_cus; ++b)
-            {
-                const index_t xcd      = b % NUM_XCDS;
-                const index_t local_id = b / NUM_XCDS;
-                const index_t logical  = (xcd < tall_xcds)
-                                             ? xcd * ids_per_xcd + local_id
-                                             : tall_xcds * ids_per_xcd +
-                                                  (xcd - tall_xcds) * (ids_per_xcd - 1) + local_id;
-                cu_states_out[b]       = cu_states[logical];
-            }
+                cu_states_out[b] = cu_states[CuStateOutputToLogical(b, num_cus)];
 
             for(index_t b = 0; b < batch_size; ++b)
                 nsplits[b] = batch_states[b].nsplits;
@@ -380,7 +415,7 @@ struct FmhaBwdWorkspaceManager
     // single thread; the metadata is a few ints plus a serial per-batch scan. Unlike the
     // host version it takes num_cus as an argument (the device has no get_num_cus()) and
     // does not return the device size (the caller sizes the workspace from an upper bound).
-    template <index_t kN0>
+    template <index_t kN0, index_t kM0>
     CK_TILE_DEVICE static void
     PrepareWorkspaceDevice(void* gpu_ws,
                            index_t batch_size,
@@ -401,23 +436,144 @@ struct FmhaBwdWorkspaceManager
             nsplits[0] = 1;
         }
         else if constexpr(kIsGroupMode)
-        { // deterministic group mode
-            // Metadata layout mirrors GetDqAccOffsetsOffset (host): the offsets array
-            // follows the 16B-aligned nsplits[batch] array. Recomputed inline here because
-            // the host offset helpers are not device-callable.
-            const size_t splits_bytes = sizeof(index_t) * static_cast<size_t>(batch_size);
-            const size_t splits_size  = (splits_bytes + ALIGNMENT - 1) / ALIGNMENT * ALIGNMENT;
-            auto* offsets =
-                reinterpret_cast<long_index_t*>(reinterpret_cast<char*>(gpu_ws) + splits_size);
-            offsets[0] = 0;
-            index_t i  = 0;
-            for(; i < batch_size - 1; ++i)
+        { // deterministic group mode (persistent)
+            // Mirrors the four steps of PrepareWorkspaceHost. Two differences, both
+            // forced by running as a single device thread with no scratch allocation:
+            //   - prefix_batch[] is not materialized; the total is computed in a first
+            //     pass and the running prefix is carried in a register in the second.
+            //   - cu_states are emitted straight into their XCD-remapped output slot
+            //     (see CuStateLogicalToOutput) instead of being built in logical order
+            //     and permuted afterwards. Logical CU order is still monotonically
+            //     increasing across the scan, so w_hi (= next CU's w_lo) is patched into
+            //     the previously emitted slot as the scan advances.
+            auto* offsets = workspace_ptr<long_index_t>(gpu_ws, GetDqAccOffsetsOffset<false>(batch_size));
+            auto* cu_states_out =
+                workspace_ptr<FmhaBwdGroupPersistentCuState>(gpu_ws, GetCuStateOffset(batch_size));
+            auto* batch_states =
+                workspace_ptr<FmhaBwdBatchState>(gpu_ws, GetBatchStateOffset(batch_size, num_cus));
+
+            // sq aligned to kM0 for work-distribution purposes; sq==0 still gets kM0 so
+            // the CU is dispatched and writes dK/dV=0.
+            const auto sq_work = [](index_t sq) -> index_t {
+                return sq == 0 ? kM0 : integer_least_multiple(sq, kM0);
+            };
+
+            // No K work anywhere: mark every CU inactive and zero the rest. Must match
+            // the host early-out exactly, including the offsets sentinel at [batch_size].
+            if(seqstart_ks[batch_size] == 0)
             {
-                nsplits[i]     = integer_divide_ceil(seqstart_ks[i + 1] - seqstart_ks[i], kN0);
-                offsets[i + 1] = offsets[i] + static_cast<long_index_t>(nhead_q) * nsplits[i] *
-                                                  (seqstart_qs[i + 1] - seqstart_qs[i]) * hdim_q;
+                for(index_t b = 0; b < batch_size; ++b)
+                {
+                    nsplits[b]     = 1;
+                    offsets[b]     = 0;
+                    batch_states[b] = FmhaBwdBatchState{0, 0, 1};
+                }
+                offsets[batch_size] = 0;
+                for(index_t c = 0; c < num_cus; ++c)
+                    cu_states_out[c] = FmhaBwdGroupPersistentCuState{0, 0, batch_size, 0, 0, 0};
+                return;
             }
-            nsplits[i] = integer_divide_ceil(seqstart_ks[i + 1] - seqstart_ks[i], kN0);
+
+            // Step 1: total work (= host prefix_batch[batch_size]) and the per-CU target.
+            index_t total_w = 0;
+            for(index_t b = 0; b < batch_size; ++b)
+            {
+                const index_t sq = seqstart_qs[b + 1] - seqstart_qs[b];
+                const index_t nc = integer_divide_ceil(seqstart_ks[b + 1] - seqstart_ks[b], kN0);
+                total_w += nhead_q * nc * sq_work(sq);
+            }
+            const index_t target_w = integer_divide_ceil(total_w, num_cus);
+
+            // Emit helper: write logical CU `c` into its remapped slot and close out the
+            // previous CU's w_hi. prev_out < 0 means nothing emitted yet.
+            index_t prev_out = -1;
+            const auto emit   = [&](index_t c, const FmhaBwdGroupPersistentCuState& st) {
+                const index_t out = CuStateLogicalToOutput(c, num_cus);
+                cu_states_out[out] = st;
+                if(prev_out >= 0)
+                    cu_states_out[prev_out].w_hi = st.w_lo;
+                prev_out = out;
+            };
+
+            // Steps 2+3: two-pointer scan over batches, filling batch_states and cu_states.
+            // Step 4 (offsets) folds into the same pass: nsplits[b] is final at the end of
+            // iteration b, which is all offsets[b+1] depends on.
+            index_t cu_lo = 0;
+            index_t pb    = 0; // running prefix_batch[b]
+            offsets[0]    = 0;
+            for(index_t b = 0; b < batch_size; ++b)
+            {
+                const index_t sq   = seqstart_qs[b + 1] - seqstart_qs[b];
+                const index_t sq_w = sq_work(sq);
+                const index_t nc   = integer_divide_ceil(seqstart_ks[b + 1] - seqstart_ks[b], kN0);
+                const index_t hw   = nc * sq_w; // per-head work; sq_w so sq=0 batches get work
+                const index_t pb_next = pb + nhead_q * hw;
+                const index_t cu_hi   = min(num_cus, integer_divide_ceil(pb_next, target_w));
+
+                index_t ns = 1; // floor; bumped below by max(isplit + 1)
+                for(index_t c = cu_lo; c < cu_hi; ++c)
+                {
+                    const index_t w_lo = c * target_w;
+                    FmhaBwdGroupPersistentCuState st{};
+                    st.ibatch = b;
+                    if(hw > 0)
+                    {
+                        const index_t head_start =
+                            max(static_cast<index_t>((w_lo - pb) / hw), index_t(0));
+                        const index_t w_head   = pb + head_start * hw;
+                        const index_t wc_start = max(w_lo - w_head, index_t(0));
+                        const index_t c_start =
+                            wc_start > 0 ? integer_divide_ceil(wc_start, sq_w) : 0;
+                        // denom = max(sq_w, target_w) keeps isplit in [0, nc-1] (the upper
+                        // bound assumed by GetWorkspaceDeviceSizeUpperBound).
+                        const index_t denom = max(sq_w, target_w);
+                        const index_t raw_isp =
+                            wc_start > 0 ? integer_divide_ceil(wc_start, denom) : 0;
+                        st.isplit     = min(raw_isp, max(nc - 1, index_t(0)));
+                        st.head_start = head_start;
+                        st.c_start    = c_start;
+                        st.w_lo       = pb + head_start * hw + c_start * sq_w;
+
+                        // Only CUs that do real K-row work (c_start < nc) may raise
+                        // nsplits, so it matches the set of slots actually written by
+                        // atomic_add; otherwise the reduction reads an unwritten slot.
+                        if(c_start < nc)
+                            ns = max(ns, st.isplit + 1);
+                    }
+                    else
+                    {
+                        st.isplit     = 0;
+                        st.head_start = 0;
+                        st.c_start    = 0;
+                        st.w_lo       = pb; // hw==0: degenerate, w_lo=batch start
+                    }
+                    emit(c, st);
+                }
+                cu_lo = cu_hi;
+
+                nsplits[b]      = ns;
+                batch_states[b] = FmhaBwdBatchState{sq_w, nc, ns};
+                // Compact dq_acc layout: [nhead, nsplits_b, sq_b, hdim_q] per batch. Uses
+                // raw sq (not sq_w), matching the host and the kernel's addressing.
+                offsets[b + 1] = offsets[b] + static_cast<long_index_t>(nhead_q) * ns * sq * hdim_q;
+                pb             = pb_next;
+            }
+
+            // Inactive CUs: w_lo = total_w sentinel so the last active CU's w_hi closes at
+            // total_w; ibatch = batch_size makes the GPU early-return.
+            for(index_t c = cu_lo; c < num_cus; ++c)
+            {
+                FmhaBwdGroupPersistentCuState st{};
+                st.w_lo       = total_w;
+                st.w_hi       = total_w;
+                st.ibatch     = batch_size;
+                st.isplit     = 0;
+                st.head_start = 0;
+                st.c_start    = 0;
+                emit(c, st);
+            }
+            if(prev_out >= 0)
+                cu_states_out[prev_out].w_hi = total_w;
         }
         else // deterministic non-group mode (kUsePersistent)
         {
@@ -501,7 +657,7 @@ struct FmhaBwdWorkspaceManager
 // Tiny single-thread kernel that populates the workspace metadata region on-device via
 // FmhaBwdWorkspaceManager::PrepareWorkspaceDevice. Launched (grid=1, block=1) on the same
 // stream as the backward kernels; fully stream-capturable.
-template <typename AccDataType, bool kIsGroupMode, bool kIsDeterministic, index_t kN0>
+template <typename AccDataType, bool kIsGroupMode, bool kIsDeterministic, index_t kN0, index_t kM0>
 struct FmhaBwdPrepareWorkspaceKernel
 {
     using WorkspaceManager = FmhaBwdWorkspaceManager<AccDataType, kIsGroupMode, kIsDeterministic>;
@@ -552,7 +708,7 @@ struct FmhaBwdPrepareWorkspaceKernel
     {
         if(threadIdx.x != 0 || blockIdx.x != 0)
             return;
-        WorkspaceManager::template PrepareWorkspaceDevice<kN0>(kargs.gpu_ws,
+        WorkspaceManager::template PrepareWorkspaceDevice<kN0, kM0>(kargs.gpu_ws,
                                                               kargs.batch_size,
                                                               kargs.hdim_q,
                                                               kargs.nhead_q,
@@ -684,6 +840,13 @@ struct FmhaBwdDQDKDVKernel
             kUseQrQtrDorPipeline,
             FmhaPipeline::BlockFmhaShape::kN0>(std::forward<Args>(args)...);
     }
+    // Device-side counterpart of PrepareWorkspaceHost, exposed as a kernel type so the
+    // codegen cannot instantiate it with a different tile shape than this kernel uses.
+    using PrepareWorkspaceKernel = FmhaBwdPrepareWorkspaceKernel<AccDataType,
+                                                                 kIsGroupMode,
+                                                                 kIsDeterministic,
+                                                                 FmhaPipeline::BlockFmhaShape::kN0,
+                                                                 FmhaPipeline::BlockFmhaShape::kM0>;
     CK_TILE_HOST static constexpr bool NeedsZeroDqAcc()
     {
         return WorkspaceManager::template NeedsZeroDqAcc<kUseQrQtrDorPipeline, kHasMask>();

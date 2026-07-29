@@ -687,6 +687,20 @@ struct fmha_bwd_launcher
                              s);
     }
 
+    // Backward-compatible overload for callers written against the previous API,
+    // which passed a pinned-host-buffer allocator for staging workspace metadata.
+    // Metadata is now produced by an on-device kernel, so the allocator is unused.
+    template <typename HostAllocFn>
+    void prepare_workspace_async( //
+        void* device_ws_ptr,
+        const int* seqstart_q_dev,
+        const int* seqstart_k_dev,
+        const ck_tile::stream_config& s,
+        const HostAllocFn&)
+    {
+        prepare_workspace_async(device_ws_ptr, seqstart_q_dev, seqstart_k_dev, s);
+    }
+
     private:
     fmha_bwd_traits traits_{};
     size_t host_ws_size_    = 0;

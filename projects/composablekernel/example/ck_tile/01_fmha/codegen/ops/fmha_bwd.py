@@ -229,10 +229,7 @@ void fmha_bwd_dq_dk_dv_dq_prepare_ws_device_<dq_dk_dv_trait_{F_idx}, {F_arch.tag
     const ck_tile::index_t* seqstart_ks, const ck_tile::stream_config& s)
 {{
     using k_      = fmha_bwd_dq_dk_dv_kernel_{F_idx};
-    using prep_k_ = ck_tile::FmhaBwdPrepareWorkspaceKernel<typename k_::AccDataType,
-                                                           k_::kIsGroupMode,
-                                                           k_::kIsDeterministic,
-                                                           k_::FmhaPipeline::BlockFmhaShape::kN0>;
+    using prep_k_ = typename k_::PrepareWorkspaceKernel;
     auto kargs        = prep_k_::MakeKargs(gpu_ws, batch_size, hdim_q, nhead_q, seqlen_q,
                                     seqlen_k, num_cus, seqstart_qs, seqstart_ks);
     const dim3 grids  = prep_k_::GridSize();
