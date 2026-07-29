@@ -36,26 +36,25 @@ extern "C" {
 *  \brief Sparse matrix scaling.
 *
 *  \details
-*  \p rocsparse_spmat_scale multiplies the sparse matrix \p source (\f$A\f$) by the scalar
-*  \f$\alpha\f$ and stores the result in the sparse matrix \p target (\f$C\f$):
+*  \p rocsparse_spmat_scale multiplies the values of the sparse matrix \p source (\f$A\f$) by the
+*  scalar \f$\alpha\f$ and writes them into the sparse matrix \p target (\f$C\f$):
 *  \f[
 *    C := \alpha \cdot A.
 *  \f]
-*  The output matrix \f$C\f$ has the same sparsity pattern as \f$A\f$ (its structure is copied
-*  from \f$A\f$ and \f$nnz(C) = nnz(A)\f$) and each value is scaled by \f$\alpha\f$. This is a
+*  Only the value array of \p target is written; its data type is scaled by \f$\alpha\f$. This is a
 *  uniform scalar multiply of the matrix values; it is unrelated to row/column equilibration
 *  scaling. No temporary storage buffer is required.
 *
-*  \p target must be created with the same format and dimensions as \p source and with its arrays
-*  allocated for \f$nnz(A)\f$ nonzeros; the column indices and value arrays are set through the
-*  format specific set-pointers routine (e.g. \ref rocsparse_csr_set_pointers). A value of
-*  \f$\alpha = 0\f$ produces \f$C\f$ with the sparsity pattern of \f$A\f$ and all values equal to
-*  zero (the pattern is not dropped). In-place operation is supported: \p target and \p source may
-*  reference the same arrays.
+*  This routine does not copy the sparsity pattern. \p target is assumed to already describe the
+*  same sparsity pattern as \p source (same format, dimensions and nonzero count), so its index
+*  arrays are left untouched. When \p target and \p source alias the same value array the scaling
+*  is performed in place; otherwise the scaled source values are written into \p target. In-place
+*  operation is the common case. A value of \f$\alpha = 0\f$ writes all-zero values into \p target
+*  (the pattern is not dropped).
 *
 *  The scaling factor \f$\alpha\f$ is passed as a size-one dense vector descriptor. It can live in
 *  host or device memory; the memory space is taken from the descriptor itself (see
-*  \ref rocsparse_create_dnvec_descr_scalar), so the handle pointer mode does not affect it. The
+*  \ref rocsparse_dnvec_descr_create_scalar), so the handle pointer mode does not affect it. The
 *  data type of \p alpha must match the data type of the matrices.
 *
 *  \note The following formats are supported: \ref rocsparse_format_coo,

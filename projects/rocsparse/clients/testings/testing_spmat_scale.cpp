@@ -143,18 +143,28 @@ static void testing_spmat_scale_dispatch(const Arguments& arg, HostMatrix& hA)
 
     // alpha as a self-describing scalar descriptor, in host and device memory.
     rocsparse_dnvec_descr alpha_host;
-    CHECK_ROCSPARSE_ERROR(rocsparse_create_dnvec_descr_scalar(
-        &alpha_host, &h_alpha, get_datatype<T>(), rocsparse_pointer_mode_host));
+    CHECK_ROCSPARSE_ERROR(rocsparse_dnvec_descr_create_scalar(handle,
+                                                              &alpha_host,
+                                                              rocsparse_pointer_mode_host,
+                                                              get_datatype<T>(),
+                                                              &h_alpha,
+                                                              &h_alpha,
+                                                              nullptr));
     rocsparse_dnvec_descr alpha_device;
-    CHECK_ROCSPARSE_ERROR(rocsparse_create_dnvec_descr_scalar(
-        &alpha_device, (void*)(T*)d_alpha, get_datatype<T>(), rocsparse_pointer_mode_device));
+    CHECK_ROCSPARSE_ERROR(rocsparse_dnvec_descr_create_scalar(handle,
+                                                              &alpha_device,
+                                                              rocsparse_pointer_mode_device,
+                                                              get_datatype<T>(),
+                                                              (const void*)(const T*)d_alpha,
+                                                              (void*)(T*)d_alpha,
+                                                              nullptr));
 
     // Declare device matrix A (the source).
     DeviceMatrix dA(hA);
 
-    // Declare and set up C with the same layout as A but without copying its content: the
-    // structure and the scaled values are produced by rocsparse_spmat_scale itself.
-    DeviceMatrix dC(dA, false);
+    // Target C carries the same sparsity pattern as A (spmat_scale does not copy the pattern; it
+    // only writes C's values = alpha * A's values).
+    DeviceMatrix dC(dA);
 
     rocsparse_local_spmat mat_A(dA), mat_C(dC);
 

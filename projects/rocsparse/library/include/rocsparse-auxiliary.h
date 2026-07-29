@@ -3132,32 +3132,47 @@ rocsparse_status rocsparse_create_const_dnvec_descr(rocsparse_const_dnvec_descr*
 /*! \ingroup aux_module
  *  \brief Create a dense vector descriptor for a single scalar.
  *  \details
- *  \p rocsparse_create_dnvec_descr_scalar creates a size-one dense vector descriptor that
- *  records whether its value lives in host or device memory. It is a convenience wrapper for
- *  passing a self-describing scalar argument (for example the scaling factor consumed by
- *  \ref rocsparse_spmat_scale) without relying on the handle pointer mode. It should be destroyed
- *  when it is no longer needed using rocsparse_destroy_dnvec_descr().
+ *  \p rocsparse_dnvec_descr_create_scalar creates a size-one dense vector descriptor that records
+ *  whether its value lives in host or device memory. It is a convenience wrapper for passing a
+ *  self-describing scalar argument (for example the scaling factor consumed by
+ *  \ref rocsparse_spmat_scale) without relying on the handle pointer mode. Pass a non-null
+ *  \p values to obtain a read-write descriptor, or only \p const_values (with \p values null) for
+ *  a read-only descriptor. It should be destroyed when it is no longer needed using
+ *  rocsparse_destroy_dnvec_descr().
  *
+ *  @param[in]
+ *  handle   handle to the rocSPARSE library context queue.
  *  @param[out]
  *  descr   the pointer to the dense vector descriptor.
  *  @param[in]
- *  values   pointer to the scalar value. The memory space is given by \p pointer_mode.
+ *  pointer_mode   \ref rocsparse_pointer_mode_host if the scalar lives in host memory,
+ *                 \ref rocsparse_pointer_mode_device if it lives in device memory.
  *  @param[in]
  *  data_type   \ref rocsparse_datatype_f32_r, \ref rocsparse_datatype_f64_r,
  *              \ref rocsparse_datatype_f32_c, or \ref rocsparse_datatype_f64_c.
  *  @param[in]
- *  pointer_mode   \ref rocsparse_pointer_mode_host if \p values points to host memory,
- *                 \ref rocsparse_pointer_mode_device if it points to device memory.
+ *  const_values   pointer to the scalar value (read-only view). Must not be null.
+ *  @param[in]
+ *  values   pointer to the scalar value (read-write view), or null for a read-only descriptor.
+ *           When non-null it must equal \p const_values.
+ *  @param[out]
+ *  p_error   error descriptor created if the returned status is not
+ *            \ref rocsparse_status_success. A null pointer can be passed if an error descriptor is
+ *            not required.
  *
  *  \retval rocsparse_status_success the operation completed successfully.
- *  \retval rocsparse_status_invalid_pointer if \p descr or \p values is invalid.
+ *  \retval rocsparse_status_invalid_handle the library context was not initialized.
+ *  \retval rocsparse_status_invalid_pointer if \p descr or \p const_values is invalid.
  *  \retval rocsparse_status_invalid_value if \p data_type or \p pointer_mode is invalid.
  */
 ROCSPARSE_EXPORT
-rocsparse_status rocsparse_create_dnvec_descr_scalar(rocsparse_dnvec_descr* descr,
-                                                     void*                  values,
+rocsparse_status rocsparse_dnvec_descr_create_scalar(rocsparse_handle       handle,
+                                                     rocsparse_dnvec_descr* descr,
+                                                     rocsparse_pointer_mode pointer_mode,
                                                      rocsparse_datatype     data_type,
-                                                     rocsparse_pointer_mode pointer_mode);
+                                                     const void*            const_values,
+                                                     void*                  values,
+                                                     rocsparse_error*       p_error);
 
 /*! \ingroup aux_module
  *  \brief Destroy a dense vector descriptor.

@@ -318,7 +318,7 @@ Auxiliary functions
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_create_const_dnvec_descr`       |
 +-----------------------------------------------------+
-|:cpp:func:`rocsparse_create_dnvec_descr_scalar`      |
+|:cpp:func:`rocsparse_dnvec_descr_create_scalar`      |
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_destroy_dnvec_descr`            |
 +-----------------------------------------------------+

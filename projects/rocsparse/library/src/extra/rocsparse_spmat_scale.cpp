@@ -174,17 +174,27 @@ namespace rocsparse
         return rocsparse_status_continue;
     }
 
-    // Device-to-device copy of a single structure array. Only performed when both endpoints are
-    // valid and there is something to copy.
-    static rocsparse_status
-        spmat_scale_copy_array(rocsparse_handle handle, void* dst, const void* src, size_t bytes)
+    // Number of scalar value entries for the given format. This is not always nnz (e.g. BSR
+    // stores block_dim^2 values per block-nonzero, ELL stores rows*ell_width, and so on).
+    static int64_t spmat_scale_value_length(rocsparse_const_spmat_descr mat)
     {
-        if(bytes > 0 && dst != nullptr && src != nullptr && dst != src)
+        switch(mat->format)
         {
-            RETURN_IF_HIP_ERROR(
-                hipMemcpyAsync(dst, src, bytes, hipMemcpyDeviceToDevice, handle->stream));
+        case rocsparse_format_coo:
+        case rocsparse_format_coo_aos:
+        case rocsparse_format_csr:
+        case rocsparse_format_csc:
+            return mat->nnz;
+        case rocsparse_format_bsr:
+            return mat->nnz * mat->block_dim * mat->block_dim;
+        case rocsparse_format_ell:
+            return mat->rows * mat->ell_width;
+        case rocsparse_format_sell:
+            return mat->sell_colval_size;
+        case rocsparse_format_bell:
+            return mat->rows * mat->ell_cols * mat->block_dim * mat->block_dim;
         }
-        return rocsparse_status_success;
+        return 0;
     }
 
     static rocsparse_status spmat_scale_core(rocsparse_handle            handle,
@@ -193,187 +203,50 @@ namespace rocsparse
                                              rocsparse_const_spmat_descr source,
                                              rocsparse_spmat_descr       target)
     {
-        const int64_t rows = source->rows;
-        const int64_t cols = source->cols;
-        const int64_t nnz  = source->nnz;
+        const size_t  val_size   = rocsparse::datatype_sizeof(source->data_type);
+        const int64_t val_length = rocsparse::spmat_scale_value_length(source);
 
-        const size_t row_size = rocsparse::indextype_sizeof(source->row_type);
-        const size_t col_size = rocsparse::indextype_sizeof(source->col_type);
-        const size_t val_size = rocsparse::datatype_sizeof(source->data_type);
+        if(val_length <= 0)
+        {
+            return rocsparse_status_success;
+        }
 
-        // In-place scaling: the target already holds the source arrays, so no copy is required.
+        // This routine only writes the value array; the sparsity pattern of target is assumed to
+        // already match source and is never copied. When target and source are distinct, the
+        // source values are copied into target before scaling; when they alias, the scaling is
+        // done in place.
         const bool in_place = (target->val_data == source->const_val_data);
-
-        // Number of value entries to copy and scale. This is format specific and is not always
-        // equal to nnz (e.g. BSR stores block_dim^2 values per block-nonzero).
-        int64_t val_length = 0;
-
-        // Copy the sparsity structure of the source into the target. The index base of source and
-        // target is guaranteed to match by the argument checks, so a plain device-to-device copy
-        // is sufficient.
-        switch(source->format)
+        if(!in_place)
         {
-        case rocsparse_format_csr:
-        {
-            // row_data[rows + 1], col_data[nnz], val[nnz].
-            if(!in_place)
-            {
-                RETURN_IF_ROCSPARSE_ERROR(rocsparse::spmat_scale_copy_array(
-                    handle, target->row_data, source->const_row_data, size_t(rows + 1) * row_size));
-                RETURN_IF_ROCSPARSE_ERROR(rocsparse::spmat_scale_copy_array(
-                    handle, target->col_data, source->const_col_data, size_t(nnz) * col_size));
-            }
-            val_length = nnz;
-            break;
-        }
-        case rocsparse_format_csc:
-        {
-            // col_data[cols + 1], row_data[nnz], val[nnz].
-            if(!in_place)
-            {
-                RETURN_IF_ROCSPARSE_ERROR(rocsparse::spmat_scale_copy_array(
-                    handle, target->col_data, source->const_col_data, size_t(cols + 1) * col_size));
-                RETURN_IF_ROCSPARSE_ERROR(rocsparse::spmat_scale_copy_array(
-                    handle, target->row_data, source->const_row_data, size_t(nnz) * row_size));
-            }
-            val_length = nnz;
-            break;
-        }
-        case rocsparse_format_coo:
-        {
-            // row_data[nnz], col_data[nnz], val[nnz].
-            if(!in_place)
-            {
-                RETURN_IF_ROCSPARSE_ERROR(rocsparse::spmat_scale_copy_array(
-                    handle, target->row_data, source->const_row_data, size_t(nnz) * row_size));
-                RETURN_IF_ROCSPARSE_ERROR(rocsparse::spmat_scale_copy_array(
-                    handle, target->col_data, source->const_col_data, size_t(nnz) * col_size));
-            }
-            val_length = nnz;
-            break;
-        }
-        case rocsparse_format_coo_aos:
-        {
-            // ind_data[2 * nnz], val[nnz].
-            if(!in_place)
-            {
-                RETURN_IF_ROCSPARSE_ERROR(rocsparse::spmat_scale_copy_array(
-                    handle, target->ind_data, source->const_ind_data, size_t(2 * nnz) * col_size));
-            }
-            val_length = nnz;
-            break;
-        }
-        case rocsparse_format_bsr:
-        {
-            // row_data[rows + 1], col_data[nnz], val[nnz * block_dim * block_dim].
-            if(!in_place)
-            {
-                RETURN_IF_ROCSPARSE_ERROR(rocsparse::spmat_scale_copy_array(
-                    handle, target->row_data, source->const_row_data, size_t(rows + 1) * row_size));
-                RETURN_IF_ROCSPARSE_ERROR(rocsparse::spmat_scale_copy_array(
-                    handle, target->col_data, source->const_col_data, size_t(nnz) * col_size));
-            }
-            val_length = nnz * source->block_dim * source->block_dim;
-            break;
-        }
-        case rocsparse_format_ell:
-        {
-            // col_data[rows * ell_width], val[rows * ell_width]. ELL has no row_data and the
-            // descriptor nnz already equals rows * ell_width.
-            const int64_t ell_length = rows * source->ell_width;
-            if(!in_place)
-            {
-                RETURN_IF_ROCSPARSE_ERROR(
-                    rocsparse::spmat_scale_copy_array(handle,
-                                                      target->col_data,
-                                                      source->const_col_data,
-                                                      size_t(ell_length) * col_size));
-            }
-            val_length = ell_length;
-            break;
-        }
-        case rocsparse_format_sell:
-        {
-            // row_data[nslices + 1], col_data[sell_colval_size], val[sell_colval_size].
-            const int64_t nslices
-                = (source->sell_slice_size > 0)
-                      ? (rows + source->sell_slice_size - 1) / source->sell_slice_size
-                      : 0;
-            if(!in_place)
-            {
-                RETURN_IF_ROCSPARSE_ERROR(
-                    rocsparse::spmat_scale_copy_array(handle,
-                                                      target->row_data,
-                                                      source->const_row_data,
-                                                      size_t(nslices + 1) * row_size));
-                RETURN_IF_ROCSPARSE_ERROR(
-                    rocsparse::spmat_scale_copy_array(handle,
-                                                      target->col_data,
-                                                      source->const_col_data,
-                                                      size_t(source->sell_colval_size) * col_size));
-            }
-            val_length = source->sell_colval_size;
-            break;
-        }
-        case rocsparse_format_bell:
-        {
-            // Blocked-ELL: the descriptor stores rows and ell_cols in block units (rows is the
-            // number of block-rows, ell_cols is the ELL block-width). col_data holds one
-            // block-column index per block, laid out as rows * ell_cols. val holds a
-            // block_dim x block_dim dense block per ELL position, laid out as
-            // rows * ell_cols * block_dim * block_dim scalars. There is no row_data.
-            const int64_t block_dim      = source->block_dim;
-            const int64_t col_ind_length = rows * source->ell_cols;
-            if(!in_place)
-            {
-                RETURN_IF_ROCSPARSE_ERROR(
-                    rocsparse::spmat_scale_copy_array(handle,
-                                                      target->col_data,
-                                                      source->const_col_data,
-                                                      size_t(col_ind_length) * col_size));
-            }
-            val_length = rows * source->ell_cols * block_dim * block_dim;
-            break;
-        }
+            RETURN_IF_HIP_ERROR(hipMemcpyAsync(target->val_data,
+                                               source->const_val_data,
+                                               size_t(val_length) * val_size,
+                                               hipMemcpyDeviceToDevice,
+                                               handle->stream));
         }
 
-        if(val_length > 0)
+        // Scale the target values by alpha, passing alpha's memory space explicitly so the handle
+        // pointer mode is not touched.
+        switch(source->data_type)
         {
-            if(!in_place)
-            {
-                RETURN_IF_ROCSPARSE_ERROR(
-                    rocsparse::spmat_scale_copy_array(handle,
-                                                      target->val_data,
-                                                      source->const_val_data,
-                                                      size_t(val_length) * val_size));
-            }
-
-            // Scale the target values by alpha, passing alpha's memory space explicitly so the
-            // handle pointer mode is not touched.
-            rocsparse_status scale_status = rocsparse_status_success;
-            switch(source->data_type)
-            {
-            case rocsparse_datatype_f32_r:
-                scale_status = rocsparse::spmat_scale_scale_values<float>(
-                    handle, val_length, alpha_pointer_mode, alpha, target->val_data);
-                break;
-            case rocsparse_datatype_f64_r:
-                scale_status = rocsparse::spmat_scale_scale_values<double>(
-                    handle, val_length, alpha_pointer_mode, alpha, target->val_data);
-                break;
-            case rocsparse_datatype_f32_c:
-                scale_status = rocsparse::spmat_scale_scale_values<rocsparse_float_complex>(
-                    handle, val_length, alpha_pointer_mode, alpha, target->val_data);
-                break;
-            case rocsparse_datatype_f64_c:
-                scale_status = rocsparse::spmat_scale_scale_values<rocsparse_double_complex>(
-                    handle, val_length, alpha_pointer_mode, alpha, target->val_data);
-                break;
-            default:
-                scale_status = rocsparse_status_not_implemented;
-            }
-
-            RETURN_IF_ROCSPARSE_ERROR(scale_status);
+        case rocsparse_datatype_f32_r:
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse::spmat_scale_scale_values<float>(
+                handle, val_length, alpha_pointer_mode, alpha, target->val_data));
+            break;
+        case rocsparse_datatype_f64_r:
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse::spmat_scale_scale_values<double>(
+                handle, val_length, alpha_pointer_mode, alpha, target->val_data));
+            break;
+        case rocsparse_datatype_f32_c:
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse::spmat_scale_scale_values<rocsparse_float_complex>(
+                handle, val_length, alpha_pointer_mode, alpha, target->val_data));
+            break;
+        case rocsparse_datatype_f64_c:
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse::spmat_scale_scale_values<rocsparse_double_complex>(
+                handle, val_length, alpha_pointer_mode, alpha, target->val_data));
+            break;
+        default:
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
         }
 
         return rocsparse_status_success;

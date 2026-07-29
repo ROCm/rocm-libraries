@@ -133,6 +133,13 @@ int main(int argc, char* argv[])
     HIP_CHECK(hipMalloc((void**)&dcsr_col_ind_C, sizeof(int32_t) * nnz_C));
     HIP_CHECK(hipMalloc((void**)&dcsr_val_C, sizeof(double) * nnz_C));
 
+    // rocsparse_spmat_scale writes only C's values; the caller owns C's sparsity pattern, so copy
+    // A's structure (row pointers and column indices) into C here.
+    HIP_CHECK(hipMemcpy(
+        dcsr_row_ptr_C, dcsr_row_ptr_A, sizeof(int64_t) * (m + 1), hipMemcpyDeviceToDevice));
+    HIP_CHECK(hipMemcpy(
+        dcsr_col_ind_C, dcsr_col_ind_A, sizeof(int32_t) * nnz_C, hipMemcpyDeviceToDevice));
+
     // Create sparse matrices
     rocsparse_spmat_descr A;
     rocsparse_spmat_descr C;
@@ -149,8 +156,8 @@ int main(int argc, char* argv[])
 
     // Wrap the host scalar alpha in a self-describing size-one dense vector descriptor.
     rocsparse_dnvec_descr alpha_descr;
-    ROCSPARSE_CHECK(rocsparse_create_dnvec_descr_scalar(
-        &alpha_descr, &alpha, ttype, rocsparse_pointer_mode_host));
+    ROCSPARSE_CHECK(rocsparse_dnvec_descr_create_scalar(
+        handle, &alpha_descr, rocsparse_pointer_mode_host, ttype, &alpha, &alpha, nullptr));
 
     // Compute C = alpha * A. No temporary storage buffer is required.
     ROCSPARSE_CHECK(rocsparse_spmat_scale(handle, alpha_descr, C, A, nullptr));
