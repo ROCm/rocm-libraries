@@ -526,7 +526,7 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1
     // Non-grouped GridwiseGemm for single-group specialization.
     // Uses simpler epilogue and address computation, matching the non-grouped kernel.
     // Requires AK1 == BK1 (true for all backward data convolution instances).
-    template <index_t NXdlPerWave_>
+    template <typename WarpTileConfig>
     using NonGroupedGridwiseGemmBase =
         GridwiseGemm_k0mk1_k0nk1_mn_xdlops_v2r3<BlockSize,
                                                 ABDataType,
@@ -539,11 +539,11 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1
                                                 MPerBlock,
                                                 NPerBlock,
                                                 KPerBlock / AK1,
-                                                MPerXDL,
-                                                NPerXDL,
+                                                WarpTileConfig::At(0),
+                                                WarpTileConfig::At(1),
                                                 AK1,
-                                                MXdlPerWave,
-                                                NXdlPerWave_,
+                                                WarpTileConfig::At(2),
+                                                WarpTileConfig::At(3),
                                                 ABlockTransferThreadClusterLengths_AK0_M_AK1,
                                                 ABlockTransferThreadClusterArrangeOrder,
                                                 ABlockTransferSrcAccessOrder,
@@ -563,8 +563,8 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1
                                                 Sequence<2, 3, 0, 1, 7, 5, 4, 6>,
                                                 7,
                                                 1>;
-    using NonGroupedGridwiseGemm64 = NonGroupedGridwiseGemmBase<math::max(NXdlPerWave64, 1)>;
-    using NonGroupedGridwiseGemm32 = NonGroupedGridwiseGemmBase<math::max(NXdlPerWave32, 1)>;
+    using NonGroupedGridwiseGemm64 = NonGroupedGridwiseGemmBase<decltype(WarpTileConfig64)>;
+    using NonGroupedGridwiseGemm32 = NonGroupedGridwiseGemmBase<decltype(WarpTileConfig32)>;
 
     // Flat descriptor type aliases for group_count=1 fast path.
     // Derived from the _Packed() methods in ConvToGemmBwdDataTransform.
@@ -1746,18 +1746,18 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1
         }
         float Run(const Argument& arg, const StreamConfig& stream_config = StreamConfig{})
         {
-            // if(get_warp_size() == 64)
-            // {
-            //     if constexpr(NXdlPerWave64 > 0)
-            //     {
-            //         return RunImp<GridwiseGemm64, GridwiseGemmCTranspose64, NonGroupedGridwiseGemm64>(arg, stream_config);
-            //     }
-            //     else
-            //     {
-            //         return 0;
-            //     }
-            // }
-            // else
+            if(get_warp_size() == 64)
+            {
+                if constexpr(NXdlPerWave64 > 0)
+                {
+                    return RunImp<GridwiseGemm64, GridwiseGemmCTranspose64, NonGroupedGridwiseGemm64>(arg, stream_config);
+                }
+                else
+                {
+                    return 0;
+                }
+            }
+            else
             {
                 if constexpr(NXdlPerWave32 > 0)
                 {
@@ -1797,11 +1797,11 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1
         {
             return false;
         }
-        if(!is_xdl_wmma_k_supported<AComputeType, KPerBlock>())
+        if(!is_xdl_wmma_k_supported<AComputeType, KPerBlock, AK1>())
         {
             return false;
         }
-        if(!is_xdl_wmma_k_supported<BComputeType, KPerBlock>())
+        if(!is_xdl_wmma_k_supported<BComputeType, KPerBlock, BK1>())
         {
             return false;
         }
