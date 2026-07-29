@@ -880,8 +880,9 @@ actually means:
 Without a presence operator that second form cannot be written: a bare field check is skipped when
 the operand is absent, so "absent, or present and constrained" collapses into "present and
 constrained or nothing at all" and the pack silently accepts graphs it cannot serve. Presence is
-also how a pack refuses a feature outright, which is how the worked example declines the 24 optional
-operands its kernel does not implement ([Section 13.2](#132-the-matcher)).
+also how a pack refuses a feature outright, which is how the worked example declines 23 of the 24
+optional operands its kernel does not implement, admitting the 24th only in a restricted form
+([Section 13.2](#132-the-matcher)).
 
 **Out of scope for v1.** General N-ary commutative matching, unbounded variadic operands, and unbounded
 chains are deferred to the JIT follow-up ([Section 9.3](#93-future-jit-and-normalized-providers)); a
@@ -1682,10 +1683,11 @@ gated modes of the same kernel file and are called out as an extension point in 
     {"==": ["$graph.node_count", 1]},
     {"==": ["$graph.node_kind", "sdpa_fwd"]},
 
-    // --- none of the 24 optional tensors may be supplied. A pack that served one of these in a
-    //     restricted form would write `{"or": [{"not_present": [...]}, {"and": [{"present": [...]},
-    //     ...constraints...]}]}` instead (Section 5); this family serves none. ---
-    {"not_present": ["$attn_mask", "$scale", "$seq_len_q", "$seq_len_kv", "$seed", "$offset",
+    // --- 23 of the 24 optional tensors are refused outright. The 24th, the scale tensor, is the
+    //     one this family can serve in a restricted form, so it is handled below rather than here:
+    //     that pairing of `not_present` with a constrained `present` is what Section 5 means by
+    //     composition. ---
+    {"not_present": ["$attn_mask", "$seq_len_q", "$seq_len_kv", "$seed", "$offset",
                      "$dropout_mask", "$dropout_scale", "$page_table_k", "$page_table_v",
                      "$block_mask", "$sink_token", "$descale_q", "$descale_k", "$descale_v",
                      "$descale_s", "$scale_s", "$scale_o", "$stats", "$max", "$sum_exp",
@@ -1752,16 +1754,34 @@ gated modes of the same kernel file and are called out as an extension point in 
     {"or": [{"not_present": ["$sdpa_fwd.dropout_probability"]},
             {"==": ["$sdpa_fwd.dropout_probability", 0.0]}]},
 
-    // --- stats and paged-KV attributes this family does not implement ---
-    {"or": [{"not_present": ["$sdpa_fwd.generate_stats"]},
-            {"!": ["$sdpa_fwd.generate_stats"]}]},
+    // --- stats and paged-KV attributes this family does not implement. max_seq_len_kv declines on
+    //     presence alone. generate_stats is a tri-state bool (unset, true, false) where unset and
+    //     false both accept, so it is defaulted and negated rather than spelled as an `or` over the
+    //     two accepting cases. ---
+    {"!": [{"value_or_default": ["$sdpa_fwd.generate_stats", false]}]},
     {"not_present": ["$sdpa_fwd.max_seq_len_kv"]},
 
-    // --- scale: this pack requires the scalar form and declines the tensor form. The scale tensor
-    //     is refused with the other 24 operands above; here the scalar attribute is required to be
-    //     supplied, because this pack does not derive the conventional default
-    //     (`rsqrt($sdpa_fwd.head_size)`, Section 5) and will not run on a graph that meant it. ---
-    {"present": ["$sdpa_fwd.attn_scale_value"]},
+    // --- scale. hipDNN can carry this three ways, and the kernel needs the value at launch, so
+    //     what this pack requires is that the scale be *knowable before the launch*, not that it
+    //     arrive by one particular route:
+    //       - as the `attn_scale_value` attribute, a plain constant on the node;
+    //       - as a scale tensor holding a compile-time `value`;
+    //       - as a scale tensor marked `is_runtime_pass_by_value`, whose value the host supplies
+    //         per execution (RFC 0016). That one this pack declines: the kernel takes `scale` as a
+    //         kernarg the UDD fills at plan build, so a value that only exists at execute time
+    //         cannot reach it without a dispatch change.
+    //     Exactly one of the two accepted forms must be supplied, since a graph carrying both has
+    //     said two different things. This is the composition presence tests exist for: the scale
+    //     tensor is not refused outright above, it is admitted in one form and rejected in the
+    //     other. ---
+    {"or": [
+      {"and": [{"present":     ["$sdpa_fwd.attn_scale_value"]},
+               {"not_present": ["$scale"]}]},
+      {"and": [{"not_present": ["$sdpa_fwd.attn_scale_value"]},
+               {"present":     ["$scale"]},
+               {"present":     ["$scale.value"]},
+               {"!": ["$scale.is_runtime_pass_by_value"]}]}
+    ]},
 
     // --- gate #21-equivalent: the mask-mode classifier, written out in full in Section 13.3.
     //     The ENTIRE block returned by Section 13.3, contradiction check AND
@@ -1862,8 +1882,8 @@ the predicate. That inversion is the general recipe for porting a classifier.
 All three cases share one graph: a single `sdpa_fwd` node, Q/K/V/O rank-4, bf16, BSHD-contiguous,
 `batch=1`, `num_heads=16`, `num_kv_heads=2` (GQA ratio 8), `head_size=128`, `seqlen_q=seqlen_kv=2048`,
 `compute_data_type=FLOAT`, `mma_core_mode=UNSET`, `implementation=AUTO`, no optional tensors, no
-alibi/padding/dropout, `attn_scale_value=0.08838834764831845` (`1/sqrt(128)`), `scale_tensor_uid`
-unset. They differ only in the field named.
+alibi/padding/dropout, `attn_scale_value=0.08838834764831845` (`1/sqrt(128)`) and no scale tensor.
+They differ only in the field named.
 
 **Case A: accept.** `causal_mask=true`. Every §13.2 gate passes, `mask_mode` resolves to
 `causal_top_left`, and §13.6's non-persistent UKD declares exactly that alongside `head_size=128`
@@ -1874,7 +1894,7 @@ mode) would itself pick the non-persistent cohort for this exact shape. Applicab
 
 **Case B: matcher decline.** Same graph plus an additive attention bias, so `$attn_mask` is bound.
 The `not_present` list fails the moment that operand is bound, before mask mode, dtype,
-or layout are considered. Any of the other 23 optional operands declines identically, and so does
+or layout are considered. Any of the other 22 refused-outright operands declines identically, and so does
 `$graph.override_shape`, which rejects before any tensor is bound because this kernel bakes its
 shape at compile time and cannot serve a runtime-overridden one.
 
@@ -1926,7 +1946,8 @@ The persistent UDD, the measured ~940-970 TFLOPS path (PR #9480):
     {"name": "v_ptr", "kind": "pointer", "source": {"from": "tensor", "ref": "$v"}},
     {"name": "o_ptr", "kind": "pointer", "source": {"from": "tensor", "ref": "$o"}},
     {"name": "scale", "kind": "scalar", "type": "f32",
-      "source": {"from": "attr", "ref": "$sdpa_fwd.attn_scale_value"}}
+      "source": {"from": "expr", "expr": {"value_or_default": ["$sdpa_fwd.attn_scale_value",
+                                                               "$scale.value"]}}}
   ]
 }
 ```
@@ -1961,19 +1982,25 @@ formula over graph dims instead of a `$kernel.*` constant) and shares the identi
     {"name": "v_ptr", "kind": "pointer", "source": {"from": "tensor", "ref": "$v"}},
     {"name": "o_ptr", "kind": "pointer", "source": {"from": "tensor", "ref": "$o"}},
     {"name": "scale", "kind": "scalar", "type": "f32",
-      "source": {"from": "attr", "ref": "$sdpa_fwd.attn_scale_value"}}
+      "source": {"from": "expr", "expr": {"value_or_default": ["$sdpa_fwd.attn_scale_value",
+                                                               "$scale.value"]}}}
   ]
 }
 ```
 
-**What requiring an explicit `attn_scale_value` buys.** Both UDDs source `scale` straight from
-the graph attribute with `{"from": "attr", ...}`, no computation at all. The alternative, accepting
-the SDPA convention's implicit default (`1/sqrt(head_size)`, exactly what both `asm_sdpa_engine`'s
-`SdpaFwdPlanBuilder::buildPlan` and `attention_unified`'s dispatch code compute in real, current C++
-and Python respectively), is expressible: `rsqrt` is a defined operator
-([Section 5](#5-matching-and-the-umd)). This pack still requires the attribute, because a family that
-only ever runs with the conventional scale has no reason to accept a graph that means something else.
-The narrower contract is a choice this pack makes, not a limit the language imposes.
+**What the scale binding shows.** Both UDDs resolve `scale` from whichever of the two accepted forms
+the graph supplied, the node attribute or the compile-time tensor value, with no branch in the
+dispatch: `value_or_default` reads the attribute and falls back to the tensor's value, and the
+matcher has already guaranteed that exactly one of them is there. A form the kernel cannot take, a
+scale whose value only exists at execute time, was excluded at match time rather than handled here,
+which is the division of labour the two descriptors are for: the matcher decides what the pack
+accepts, the UDD only says how to fill a kernarg.
+
+The pack could accept more. The SDPA convention's implicit default (`1/sqrt(head_size)`, exactly
+what both `asm_sdpa_engine`'s `SdpaFwdPlanBuilder::buildPlan` and `attention_unified`'s dispatch code
+compute in real, current C++ and Python respectively) is expressible, since `rsqrt` is a defined
+operator ([Section 5](#5-matching-and-the-umd)). Requiring the scale to be stated is a choice this
+pack makes, not a limit the language imposes.
 
 ### 13.6 The Engine, Metadata, and Two Kernel Packs
 
