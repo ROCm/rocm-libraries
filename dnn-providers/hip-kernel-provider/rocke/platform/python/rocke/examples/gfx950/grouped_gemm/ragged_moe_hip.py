@@ -13,17 +13,21 @@ Inputs (moe_align precomputed on host, passed in):
 * routing_weights[num_expanded] -- per expanded-row routing weight.
 * num_expanded (scalar) -- = num_tokens*top_k; also the padding sentinel and sink-row.
 
-Env levers: PLOG, HOIST, RWLDS, EPIFUSE, CSHUF, BRRR, ASM, SWZ, CHIP, COMBINE
-(see instances/gfx950/ragged_moe.py docstring for details).
+Shape, tile geometry, and every optimization lever are command-line flags (same
+convention as ``grouped_gemm_hip.py``); see the ``RaggedMoeSpec`` docstring in
+instances/gfx950/ragged_moe.py for what each lever does. Defaults are the
+production config; use ``--no-<flag>`` to disable a boolean lever, e.g.
+``--no-epifuse``. ``--help`` lists them all.
 
 Run:
-    PYTHONPATH=Python python3 Python/rocke/examples/gfx950/grouped_gemm/ragged_moe_hip.py
+    PYTHONPATH=python python3 \
+        python/rocke/examples/gfx950/grouped_gemm/ragged_moe_hip.py [--brrr ...]
 """
 
 from __future__ import annotations
 
+import argparse
 import math
-import os
 
 from rocke.helpers.compile import compile_kernel, compile_kernel_via_hipcc
 from rocke.instances.gfx950.ragged_moe import (
@@ -57,42 +61,108 @@ def _moe_align(expert_of, E, TM, num_expanded):
     return sorted_ids.astype(np.int32), np.asarray(expert_ids, dtype=np.int32)
 
 
-def _main() -> int:
+def _parse_args(argv=None) -> argparse.Namespace:
+    p = argparse.ArgumentParser(description="gfx950 fused ragged MoE bf16 GEMM harness")
+    # Problem shape.
+    p.add_argument("--num-tokens", type=int, default=524288)
+    p.add_argument("--n", type=int, default=1024)
+    p.add_argument("--k", type=int, default=512)
+    p.add_argument("--e", type=int, default=64)
+    p.add_argument("--topk", type=int, default=2)
+    p.add_argument("--device", type=int, default=0)
+    # Tile / warp geometry + chiplet knobs.
+    p.add_argument("--tm", type=int, default=256)
+    p.add_argument("--tn", type=int, default=256)
+    p.add_argument("--tk", type=int, default=64)
+    p.add_argument("--wm", type=int, default=2)
+    p.add_argument("--wn", type=int, default=4)
+    p.add_argument("--xcds", type=int, default=8)
+    p.add_argument("--wgm", type=int, default=8)
+    # Production levers (defaults on). Use --no-<flag> to disable.
+    B = argparse.BooleanOptionalAction
+    p.add_argument("--plog", action=B, default=True, help="overlap prologue B load")
+    p.add_argument("--hoist", action=B, default=True, help="hoist gather/load offsets")
+    p.add_argument("--rwlds", action=B, default=True, help="stage routing wts in LDS")
+    p.add_argument("--epifuse", action=B, default=True, help="fuse scatter into MFMAs")
+    p.add_argument("--swz", action=B, default=True, help="st_16x32 LDS XOR swizzle")
+    p.add_argument("--asm", action=B, default=True, help="inline-asm ds_read")
+    p.add_argument("--deeppipe", action=B, default=True, help="deep operand pipeline")
+    p.add_argument("--prio", action=B, default=True, help="s_setprio around MFMAs")
+    p.add_argument("--chip", action=B, default=True, help="chiplet super-tile remap")
+    p.add_argument("--pin", action=B, default=True, help="pin wave-uniform indices")
+    p.add_argument(
+        "--burstprio", action=B, default=False, help="per-k-chunk prio toggle"
+    )
+    p.add_argument(
+        "--brrr", action=B, default=False, help="NN weight layout (B=[E,K,N])"
+    )
+    # Experimental levers: measured NOT wins, kept for exploration (see the
+    # RAGGED_CASE_STUDY.md negative results). Default off.
+    p.add_argument(
+        "--cshuf", action=B, default=False, help="C-shuffle wide-store epilogue"
+    )
+    p.add_argument(
+        "--cksched", action=B, default=False, help="CK-HotLoop sched interleave"
+    )
+    p.add_argument(
+        "--permmasched", action=B, default=False, help="per-MFMA prio + sched_barrier"
+    )
+    p.add_argument(
+        "--tr128", action=B, default=False, help="ds_read_tr16_b128 transpose read"
+    )
+    p.add_argument("--opsw", action=B, default=False, help="operand-swap packed store")
+    p.add_argument(
+        "--combine", action=B, default=False, help="fused atomic top-k combine"
+    )
+    p.add_argument(
+        "--storesink", action=B, default=False, help="diagnostic: collapse stores"
+    )
+    return p.parse_args(argv)
+
+
+def _main(argv=None) -> int:
+    args = _parse_args(argv)
+
     import numpy as np
     import torch
 
-    N = int(os.environ.get("N", "1024"))
-    K = int(os.environ.get("K", "512"))
-    E = int(os.environ.get("E", "64"))
-    TOPK = int(os.environ.get("TOPK", "2"))
-    NTOK = int(os.environ.get("NTOK", "524288"))
+    N, K, E, TOPK, NTOK = args.n, args.k, args.e, args.topk, args.num_tokens
 
-    # Build spec from env (defaults = production opts, env can override)
     spec = RaggedMoeSpec(
         N=N,
         K=K,
         E=E,
         TOPK=TOPK,
-        plog=os.environ.get("PLOG", "1") == "1",
-        hoist=os.environ.get("HOIST", "1") == "1",
-        rwlds=os.environ.get("RWLDS", "1") == "1",
-        epifuse=os.environ.get("EPIFUSE", "1") == "1",
-        swz=os.environ.get("SWZ", "1") == "1",
-        asm_reads=os.environ.get("ASM", "1") == "1",
-        chiplet=os.environ.get("CHIP", "1") == "1",
-        pin=os.environ.get("PIN", "1") == "1",
-        b_rrr=os.environ.get("BRRR", "0") == "1",
-        cshuf=os.environ.get("CSHUF", "0") == "1",
-        cksched=os.environ.get("CKSCHED", "0") == "1",
-        permmasched=os.environ.get("PERMMASCHED", "0") == "1",
-        tr128=os.environ.get("TR128", "0") == "1",
-        opsw=os.environ.get("OPSW", "0") == "1",
-        combine=os.environ.get("COMBINE", "0") == "1",
-        storesink=os.environ.get("STORESINK", "0") == "1",
+        TM=args.tm,
+        TN=args.tn,
+        TK=args.tk,
+        WM=args.wm,
+        WN=args.wn,
+        plog=args.plog,
+        hoist=args.hoist,
+        rwlds=args.rwlds,
+        epifuse=args.epifuse,
+        swz=args.swz,
+        asm_reads=args.asm,
+        deeppipe=args.deeppipe,
+        prio=args.prio,
+        burstprio=args.burstprio,
+        chiplet=args.chip,
+        chiplet_xcds=args.xcds,
+        chiplet_wgm=args.wgm,
+        pin=args.pin,
+        b_rrr=args.brrr,
+        cshuf=args.cshuf,
+        cksched=args.cksched,
+        permmasched=args.permmasched,
+        tr128=args.tr128,
+        opsw=args.opsw,
+        combine=args.combine,
+        storesink=args.storesink,
     )
 
     torch.manual_seed(0)
-    dev = f"cuda:{int(os.environ.get('DEVICE', '0'))}"
+    dev = f"cuda:{args.device}"
     X = torch.randn(NTOK, K, device=dev, dtype=torch.bfloat16)
     B = torch.randn(
         E,

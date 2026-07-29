@@ -8,8 +8,8 @@ gfx950 (CDNA4), bf16 inputs / f32 accumulate. Kernel: `grouped_gemm_hip.py`.
 
 | Layout | How | Median | Peak |
 |---|---|---|---|
-| **NT** (RCR, B `[N,K]`) — default | (no env) | **~808 TF** | **~815 TF** |
-| **NN** (natural weights, B `[K,N]`) | `BRRR=1` | **~728 TF** | **~746 TF** |
+| **NT** (RCR, B `[N,K]`) — default | (no flags) | **~808 TF** | **~815 TF** |
+| **NN** (natural weights, B `[K,N]`) | `--brrr` | **~728 TF** | **~746 TF** |
 
 For reference on the same machine:
 - `torch.bmm` (rocBLAS, natural NN weights): **~780 TF** ceiling.
@@ -40,31 +40,32 @@ Output tile `256×256×64`, `2×4` warp grid (BS=512, 8 wave64 waves/block),
 
 ## The levers (all default-on in `_main`)
 
-Running the kernel with **no environment variables** selects the best
-configuration. Each lever is individually gateable for ablation.
+Running the kernel with **no flags** selects the best configuration. Each lever
+is individually gateable for ablation via `--no-<flag>`.
 
-| Lever | Env | Default | What it does | Measured |
+| Lever | Flag | Default | What it does | Measured |
 |---|---|---|---|---|
-| Chiplet super-tile grid swizzle | `CHIP` | on | Remaps block→tile assignment for XCD/L2 locality | **+40 TF** |
-| `st_16x32` LDS swizzle | `SWZ` | on | Bank-conflict-free LDS layout for operand reads | **+54 TF** |
-| Inline-asm `b128` `ds_read` | `ASM` | on | Wide 128-bit LDS operand reads | on |
-| Cooperative direct-to-LDS load | `DTL` | on | `buffer_load_dwordx4 ... lds` (global→LDS, no ds_write) | on |
-| Double-buffered tiles | `DB` | on | Overlap next K-tile load with current compute | on |
-| Deep operand pipeline | `DEEPPIPE` | on | Issue next chunk's `ds_read`s under current MFMAs | **+4 TF** |
-| `s_setprio` compute priority | `PRIO` | on | Raise wave priority around the MFMA region | on |
-| **Epilogue-store interleave** | `EPIFUSE` | on | Store each accumulator right after its final MFMA so store-issue + address VALU overlap the last K-tile's MFMAs instead of running exposed | **+10–20 TF med, +13 TF peak** |
+| Chiplet super-tile grid swizzle | `--chip` | on | Remaps block→tile assignment for XCD/L2 locality | **+40 TF** |
+| `st_16x32` LDS swizzle | `--swz` | on | Bank-conflict-free LDS layout for operand reads | **+54 TF** |
+| Inline-asm `b128` `ds_read` | `--asm` | on | Wide 128-bit LDS operand reads | on |
+| Cooperative direct-to-LDS load | `--dtl` | on | `buffer_load_dwordx4 ... lds` (global→LDS, no ds_write) | on |
+| Double-buffered tiles | `--db` | on | Overlap next K-tile load with current compute | on |
+| Deep operand pipeline | `--deeppipe` | on | Issue next chunk's `ds_read`s under current MFMAs | **+4 TF** |
+| `s_setprio` compute priority | `--prio` | on | Raise wave priority around the MFMA region | on |
+| **Epilogue-store interleave** | `--epifuse` | on | Store each accumulator right after its final MFMA so store-issue + address VALU overlap the last K-tile's MFMAs instead of running exposed | **+10–20 TF med, +13 TF peak** |
 
-Gated experiments that did **not** help (kept off, documented for the record):
+Gated experiments that did **not** help. These stay off and are reachable only as
+`build_grouped_gemm` parameters, not harness flags:
 
-| Lever | Env | Result |
+| Lever | Builder param | Result |
 |---|---|---|
-| Per-burst priority ping-pong | `BURSTPRIO` | Neutral — our cooperative DTL synchronizes all waves into the *same* phase, so there is no opposite-phase sibling wave to ping-pong with (see "Gap to the reference"). |
-| Per-MFMA `s_setprio` + `sched_barrier` | `PERMMASCHED` | Slower / correctness-fragile. |
-| CK `sched_group_barrier` hints | `CKSCHED` | Hurt RCR correctness. |
-| `32×32×8` MFMA atom | `MFMA32` | ~346 TF — stalls without hand-tuned per-MFMA scheduling. |
-| cshuffle store-coalescing epilogue | `CSHUF` | No win. |
+| Per-burst priority ping-pong | `burstprio` | Neutral — our cooperative DTL synchronizes all waves into the *same* phase, so there is no opposite-phase sibling wave to ping-pong with (see "Gap to the reference"). |
+| Per-MFMA `s_setprio` + `sched_barrier` | `permmasched` | Slower / correctness-fragile. |
+| CK `sched_group_barrier` hints | `cksched` | Hurt RCR correctness. |
+| `32×32×8` MFMA atom | `mfma32` | ~346 TF — stalls without hand-tuned per-MFMA scheduling. |
+| cshuffle store-coalescing epilogue | `cshuf` | No win. |
 
-The natural-NN path (`BRRR=1`, ~728 TF) is a supported, correct layout — see
+The natural-NN path (`--brrr`, ~728 TF) is a supported, correct layout — see
 the results table above — not a failed experiment; it is simply bounded by the
 missing `b128` transpose-read.
 
@@ -131,18 +132,20 @@ larger change with real correctness risk.
 
 ## How to run
 
-From the `rocKE` root (`.../dnn-providers/hip-kernel-provider/rocKE`), with a
-ROCm 7.x toolchain (`hipcc` on `PATH`) and a Python env that has `torch`
-(ROCm build):
+From the rocKE platform root
+(`.../dnn-providers/hip-kernel-provider/rocke/platform`), with a ROCm 7.x
+toolchain (`hipcc` on `PATH`) and a Python env that has `torch` (ROCm build):
 
 ```bash
 # NT / RCR layout (default) -> ~808 TF median, ~815 TF peak
-PYTHONPATH="$PWD/Python" python \
-  Python/rocke/examples/gfx950/grouped_gemm/grouped_gemm_hip.py
+PYTHONPATH="$PWD/python" python \
+  python/rocke/examples/gfx950/grouped_gemm/grouped_gemm_hip.py
 
 # NN / natural-weights layout -> ~728 TF median, ~746 TF peak
-BRRR=1 PYTHONPATH="$PWD/Python" python \
-  Python/rocke/examples/gfx950/grouped_gemm/grouped_gemm_hip.py
+PYTHONPATH="$PWD/python" python \
+  python/rocke/examples/gfx950/grouped_gemm/grouped_gemm_hip.py --brrr
+
+# --help lists every shape/geometry/lever flag; --no-<flag> turns a lever off.
 ```
 
 Expected output (NT):
@@ -163,6 +166,6 @@ additional core changes.
 Disable any lever to measure its contribution, e.g.:
 
 ```bash
-EPIFUSE=0 PYTHONPATH="$PWD/Python" python .../grouped_gemm/grouped_gemm_hip.py
-SWZ=0     PYTHONPATH="$PWD/Python" python .../grouped_gemm/grouped_gemm_hip.py
+PYTHONPATH="$PWD/python" python .../grouped_gemm/grouped_gemm_hip.py --no-epifuse
+PYTHONPATH="$PWD/python" python .../grouped_gemm/grouped_gemm_hip.py --no-swz
 ```

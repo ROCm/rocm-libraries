@@ -82,19 +82,18 @@ Pure ragged grouped bf16 GEMM without gather/scatter/routing.
 Run with optimized defaults:
 ```bash
 cd <repo>/dnn-providers/hip-kernel-provider/rocke/platform
-export PYTHONPATH=$PWD/Python
-export DEVICE=0
+export PYTHONPATH=$PWD/python
 
 # NT layout (default, faster)
-python3 Python/rocke/examples/gfx950/grouped_gemm/ragged_gemm_hip.py
+python3 python/rocke/examples/gfx950/grouped_gemm/ragged_gemm_hip.py --device 0
 
 # NN layout
-BRRR=1 python3 Python/rocke/examples/gfx950/grouped_gemm/ragged_gemm_hip.py
+python3 python/rocke/examples/gfx950/grouped_gemm/ragged_gemm_hip.py --brrr
 ```
 
 Override defaults (revert to old behavior):
 ```bash
-HOIST=1 DEEPPIPE=1 python3 Python/rocke/examples/gfx950/grouped_gemm/ragged_gemm_hip.py
+python3 python/rocke/examples/gfx950/grouped_gemm/ragged_gemm_hip.py --hoist --deeppipe
 ```
 
 ### Historical Performance
@@ -247,7 +246,7 @@ def _mma_block(a_fr, b_fr, acc, store_row_cb=None):
             store_row_cb(acc, mi)  # scatter row mi (overlaps next mi's MFMAs)
 ```
 
-The scatter is now **pipelined** instead of exposed. Requires `RWLDS=1` (routing weights in LDS) because a mid-MFMA-pipeline global scatter-load would race the hand-managed `lgkmcnt` waits.
+The scatter is now **pipelined** instead of exposed. Requires `--rwlds` (routing weights in LDS) because a mid-MFMA-pipeline global scatter-load would race the hand-managed `lgkmcnt` waits.
 
 **Measured impact:** Default epilogue. Baseline is EPIFUSE=ON; turning it off exposes the tail. The win is baked into the 743 TF number.
 
@@ -374,17 +373,17 @@ The A-gather DTL and scatter epilogue then read the token via **cheap LDS reads*
 
 | Config | Median TF | Peak TF | Notes |
 |--------|-----------|---------|-------|
-| **Full optimizations** (PLOG+HOIST+RWLDS+EPIFUSE+ASM+CHIP) | **743 TF** | 746 TF | Production config (NT) |
+| **Full optimizations** (plog+hoist+rwlds+epifuse+asm+chip) | **743 TF** | 746 TF | Production config (NT) |
 | Dense grouped GEMM (no gather/scatter) | 805 TF | 808 TF | Ceiling (see grouped_gemm CASE_STUDY.md) |
-| PLOG=0 (no prologue overlap) | ~730 TF | — | Token-load + B-DMA serial (-13 TF) |
-| EPIFUSE=0 (exposed scatter tail) | ~710 TF | — | Scatter tail un-pipelined (-33 TF) |
-| CHIP=0 (no super-tile remap) | ~700 TF | — | L2 thrash on B weights (-43 TF) |
+| `--no-plog` (no prologue overlap) | ~730 TF | — | Token-load + B-DMA serial (-13 TF) |
+| `--no-epifuse` (exposed scatter tail) | ~710 TF | — | Scatter tail un-pipelined (-33 TF) |
+| `--no-chip` (no super-tile remap) | ~700 TF | — | L2 thrash on B weights (-43 TF) |
 
-#### NN Layout (B=[E,K,N], BRRR=1)
+#### NN Layout (B=[E,K,N], `--brrr`)
 
 | Config | Median TF | Peak TF | Notes |
 |--------|-----------|---------|-------|
-| **Full optimizations** (BRRR=1, all opts) | **728 TF** | 731 TF | NN production config |
+| **Full optimizations** (`--brrr`, all opts) | **728 TF** | 731 TF | NN production config |
 | Dense grouped GEMM NN (no gather/scatter) | 728 TF | 730 TF | NN ceiling (grouped_gemm case study) |
 
 **NN vs NT:** NN is ~15 TF slower (-2%) due to transpose-read path (2× `ds_read_tr16_b64` per B fragment vs 1× `ds_read_b128`). NT (RCR) is the recommended default. NN exists for compatibility with NN-native weight layouts and as the required path for COMBINE (which needs OPSW contiguous-N layout).
@@ -406,7 +405,7 @@ The scatter is **34% of wall time** despite EPIFUSE overlap. It's the next bottl
 
 **Idea:** Atomically `+=` each expert's partial directly into `C[token, n]` (final output) instead of writing the expanded buffer. Eliminates the host combine pass (0.54 ms) and halves C-store volume (2.15 GB → 1.07 GB).
 
-**Implementation:** `global_atomic_add_pk_bf16` (packed 2×bf16 per atomic) on the OPSW contiguous-N layout. Requires `BRRR=1` (NN weights). Fixed a **latent compiler bug**: the original lowering emitted `@llvm.amdgcn.global.atomic.fadd.v2bf16`, an intrinsic that **doesn't exist** in ROCm 7.2 LLVM. Rewrote to use generic `atomicrmw fadd <2 x bfloat>` + AMDGPU metadata, which correctly lowers to the `global_atomic_pk_add_bf16` HW instruction.
+**Implementation:** `global_atomic_add_pk_bf16` (packed 2×bf16 per atomic) on the OPSW contiguous-N layout. Requires `--brrr` (NN weights). Fixed a **latent compiler bug**: the original lowering emitted `@llvm.amdgcn.global.atomic.fadd.v2bf16`, an intrinsic that **doesn't exist** in ROCm 7.2 LLVM. Rewrote to use generic `atomicrmw fadd <2 x bfloat>` + AMDGPU metadata, which correctly lowers to the `global_atomic_pk_add_bf16` HW instruction.
 
 **Result:** **3.7× slower end-to-end** (2.03 ms baseline → 7.60 ms). Kernel drops from 743 TF → 144 TF.
 
@@ -422,7 +421,7 @@ The scatter is **34% of wall time** despite EPIFUSE overlap. It's the next bottl
 
 **Why it loses:** The default fragment already coalesces each token's N across **16 adjacent lanes** in one 32 B transaction. OPSW instead maps adjacent lanes to **different token rows** → scattered 8 B stores (cache-line thrash). Plus the NN transpose-read penalty (2× `ds_read_tr16_b64` vs 1× `ds_read_b128`). Trading wave-coalesced 2 B stores for lane-packed 8 B scattered stores is a losing bargain.
 
-**Status:** Gated off (OPSW=0 default). Kept as experimental lever only.
+**Status:** Gated off (`--opsw` off by default). Kept as experimental lever only.
 
 #### CSHUF — C-Shuffle Wide-Store Epilogue
 
@@ -432,7 +431,7 @@ The scatter is **34% of wall time** despite EPIFUSE overlap. It's the next bottl
 
 **Why it loses:** Two extra workgroup barriers (`sync` before C-stage write, `sync` before read) + the serial LDS round-trip outweigh the store-width gain. The per-element scatter is already **wave-coalesced** (16 lanes/token → 32 B transaction), so widening to b128 only saves ~0.1 ms. EPIFUSE (**overlap** the narrow stores with MFMAs) is cheaper than CSHUF (**serialize** wide stores after a barrier). The LDS round-trip is not free.
 
-**Status:** Gated off (CSHUF=0 default). Kept as documented negative result.
+**Status:** Gated off (`--cshuf` off by default). Kept as documented negative result.
 
 ### Fusion Analysis: Why Combine Can't Be Fused
 
@@ -507,22 +506,23 @@ HipKittens' own numbers (139–665 TF range) confirm **no win at K-starved shape
 ## Run
 
 ```bash
-export PYTHONPATH=Python PATH=/opt/rocm/llvm/bin:$PATH
+export PYTHONPATH=python PATH=/opt/rocm/llvm/bin:$PATH
+GG=python/rocke/examples/gfx950/grouped_gemm
 
 # Pure ragged GEMM (Part 1)
-python3 Python/rocke/examples/gfx950/grouped_gemm/ragged_gemm_hip.py
-BRRR=1 python3 Python/rocke/examples/gfx950/grouped_gemm/ragged_gemm_hip.py   # NN layout
-N=1024 K=512 E=64 M=524288 DIST=ragged                                        # shape knobs (equal|ragged|bimodal)
+python3 $GG/ragged_gemm_hip.py
+python3 $GG/ragged_gemm_hip.py --brrr                             # NN layout
+python3 $GG/ragged_gemm_hip.py --n 1024 --k 512 --e 64 \
+    --m-total 524288 --dist ragged                                # shape knobs (equal|ragged|bimodal)
 
 # Fused ragged MoE (Part 2)
-python3 Python/rocke/examples/gfx950/grouped_gemm/ragged_moe_hip.py
+python3 $GG/ragged_moe_hip.py
 
-# Ragged MoE env levers:
-PLOG=1 HOIST=1 RWLDS=1 EPIFUSE=1 CHIP=1 ASM=1 SWZ=1  # defaults (full opts)
-BRRR=1       # NN weights (transpose-read path, needed for COMBINE)
-COMBINE=1    # fused atomic combine (slow, documented dead-end)
-CSHUF=1      # wide-store epilogue (neutral, off by default)
-NTOK=524288 N=1024 K=512 E=64 TOPK=2  # shape knobs
+# Ragged MoE levers (defaults = full opts; --no-<flag> disables, --help lists all):
+python3 $GG/ragged_moe_hip.py --brrr        # NN weights (transpose-read path, needed for --combine)
+python3 $GG/ragged_moe_hip.py --combine     # fused atomic combine (slow, documented dead-end)
+python3 $GG/ragged_moe_hip.py --cshuf       # wide-store epilogue (neutral, off by default)
+python3 $GG/ragged_moe_hip.py --num-tokens 524288 --n 1024 --k 512 --e 64 --topk 2  # shape knobs
 ```
 
 **Ragged MoE output:**

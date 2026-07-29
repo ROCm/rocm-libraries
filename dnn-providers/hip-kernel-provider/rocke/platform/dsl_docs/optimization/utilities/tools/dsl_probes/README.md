@@ -55,8 +55,9 @@ boundary.
 ### `probe_regs.py`
 **Input**: one kernel, supplied as a pre-built code object (`--co` /
 `--hsaco`), a runtime-resolved builder (`--builder module:fn`), a
-programmatic list of `(label, KernelDef, block_size)`, or -- with no
-args -- a tiny self-contained demo kernel.
+programmatic list of `(label, KernelDef, block_size)`, or -- with only
+`--arch` -- a tiny self-contained demo kernel. `--arch` is required in
+every mode (it selects the occupancy model and the unbundling target).
 **Output**: single-kernel VGPR / SGPR / spill / LDS / scratch, the ISA
 opcode mix (MFMA, `ds_read` / `ds_write`, `buffer_load_lds`, `s_waitcnt` /
 `s_barrier` / `sched_barrier`, VALU / SALU), the `ds_read/mfma` ratio,
@@ -71,7 +72,7 @@ Unlike `probe_occupancy.py` (notes-only, multi-variant table) this is a
 single-kernel deep-dive that folds in the ISA mix, and it can probe a
 **pre-built `.co`/`.hsaco` with no rocke build at all**. It imports
 nothing from `rocke.instances`/kernels: point `--builder` at a family, or
-feed `probe_regs([(label, kdef, bs)])` a `KernelDef` you built.
+feed `probe_regs([(label, kdef, bs)], arch=...)` a `KernelDef` you built.
 
 Useful for: the "inspect the artifact before chasing performance" step on
 one variant -- e.g. confirming an LDS bump dropped occupancy from 2 to 1

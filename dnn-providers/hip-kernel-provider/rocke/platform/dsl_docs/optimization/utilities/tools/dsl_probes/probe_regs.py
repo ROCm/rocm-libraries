@@ -11,27 +11,33 @@ SALU), the ``ds_read/mfma`` ratio, and a gfx950-style occupancy estimate.
 It imports **nothing from** ``rocke.instances`` / kernels. It only touches
 ``rocke.core`` (types + builder, used by the self-contained ``--demo`` kernel),
 ``rocke.helpers.compile`` (to turn a ``KernelDef`` into a code object) and
-``rocke.analysis.isa`` (to disassemble + parse). Feed it a kernel one of three
-ways, none of which couple this file to a specific kernel family:
+``rocke.analysis.isa`` (to disassemble + parse).
+
+``--arch`` is always required: both the occupancy model and the code-object
+unbundling are arch-specific, so the target is stated by the caller rather than
+defaulted. Feed it a kernel one of three ways, none of which couple this file to
+a specific kernel family:
 
 1. A pre-built code object on disk (fully decoupled -- no rocke build at all)::
 
-       python probe_regs.py --co path/to/kernel.co
-       python probe_regs.py --hsaco path/to/kernel.hsaco   # hipcc bundle ok
+       python probe_regs.py --arch gfx950 --co path/to/kernel.co
+       python probe_regs.py --arch gfx950 --hsaco path/to/kernel.hsaco   # hipcc bundle ok
 
 2. A builder resolved dynamically at runtime (the import happens in *your*
    string, not in this module)::
 
-       python probe_regs.py --builder rocke.instances.gfx950.grouped_gemm:build_grouped_gemm \
+       python probe_regs.py --arch gfx950 \
+           --builder rocke.instances.gfx950.grouped_gemm:build_grouped_gemm \
            --builder-kwargs '{}' --bs 512
 
 3. Programmatically, passing ``KernelDef`` objects you built yourself::
 
        from probe_regs import probe_regs
-       probe_regs([("my_variant", my_kernel_def, 512)])  # (label, KernelDef, block_size)
+       # (label, KernelDef, block_size)
+       probe_regs([("my_variant", my_kernel_def, 512)], arch="gfx950")
 
-With no arguments it builds a tiny self-contained kernel via ``IRBuilder`` and
-probes that, so the tool is CI-safe and needs no GPU (compile + static
+With only ``--arch`` it builds a tiny self-contained kernel via ``IRBuilder``
+and probes that, so the tool is CI-safe and needs no GPU (compile + static
 inspection only).
 """
 
@@ -116,6 +122,16 @@ ARCH_BY_NAME = {
 }
 
 
+def _caps_for(arch: str) -> ArchCaps:
+    try:
+        return ARCH_BY_NAME[arch]
+    except KeyError:
+        raise SystemExit(
+            f"probe_regs: no occupancy model for arch {arch!r} "
+            f"(known: {', '.join(sorted(ARCH_BY_NAME))})"
+        ) from None
+
+
 # ---- llvm tool discovery -----------------------------------------------
 
 _LLVM_BIN = "/opt/rocm/llvm/bin"
@@ -130,10 +146,10 @@ def _llvm_tool(name: str, env_var: str) -> str:
 
 
 def _bundler() -> str:
-    return shutil.which("clang-offload-bundler") or f"{_LLVM_BIN}/clang-offload-bundler"
+    return _llvm_tool("clang-offload-bundler", "CLANG_OFFLOAD_BUNDLER")
 
 
-def _ensure_code_object(blob: bytes, arch: str, out: Path) -> Path:
+def _to_code_object(blob: bytes, arch: str, out: Path) -> Path:
     """Return a bare AMDGPU ELF path for ``blob``.
 
     ``compile_kernel`` (comgr) already yields a bare ELF; ``hipcc --genco`` and
@@ -236,16 +252,19 @@ def report_code_object(
 def probe_regs(
     entries: Iterable[tuple],
     *,
-    arch: str = "gfx950",
+    arch: str,
     use_hipcc: bool = False,
 ) -> list[dict]:
     """Compile and probe each ``(label, KernelDef, block_size)`` entry.
+
+    ``arch`` is explicit: the occupancy model and the code-object unbundling
+    are both arch-specific, so there is no default target.
 
     ``block_size`` (threads/block) drives only the occupancy estimate; pass the
     launch block size (``BS``) your builder reports. This function never imports
     a kernel family -- the caller supplies the already-built ``KernelDef``.
     """
-    caps = ARCH_BY_NAME[arch]
+    caps = _caps_for(arch)
     rows: list[dict] = []
     with tempfile.TemporaryDirectory() as d:
         for i, (label, kdef, block_size) in enumerate(entries):
@@ -258,7 +277,7 @@ def probe_regs(
             except Exception as e:  # noqa: BLE001
                 print(f"[probe:{label}] BUILD-FAIL: {type(e).__name__}: {e}")
                 continue
-            co = _ensure_code_object(art.hsaco, arch, Path(d) / f"k{i}.co")
+            co = _to_code_object(art.hsaco, arch, Path(d) / f"k{i}.co")
             rows.append(report_code_object(label, co, block_size=block_size, caps=caps))
     return rows
 
@@ -267,9 +286,9 @@ def probe_regs(
 
 
 def _probe_existing(path: Path, *, arch: str, block_size: int) -> int:
-    caps = ARCH_BY_NAME[arch]
+    caps = _caps_for(arch)
     with tempfile.TemporaryDirectory() as d:
-        co = _ensure_code_object(path.read_bytes(), arch, Path(d) / "k.co")
+        co = _to_code_object(path.read_bytes(), arch, Path(d) / "k.co")
         report_code_object(path.stem, co, block_size=block_size, caps=caps)
     return 0
 
@@ -313,10 +332,10 @@ def _probe_demo(*, arch: str, block_size: int) -> int:
     b.ret()
     # backend="python" keeps the demo deterministic and independent of a built
     # rocke_engine C++ extension.
-    caps = ARCH_BY_NAME[arch]
+    caps = _caps_for(arch)
     with tempfile.TemporaryDirectory() as d:
         art = compile_kernel(b.kernel, arch=arch, backend="python")
-        co = _ensure_code_object(art.hsaco, arch, Path(d) / "demo.co")
+        co = _to_code_object(art.hsaco, arch, Path(d) / "demo.co")
         report_code_object("demo", co, block_size=block_size, caps=caps)
     return 0
 
@@ -340,8 +359,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     p.add_argument(
         "--arch",
         choices=list(ARCH_BY_NAME),
-        default="gfx950",
-        help="arch caps for the occupancy estimate (default gfx950)",
+        required=True,
+        help="target arch for the occupancy estimate and code-object unbundling",
     )
     p.add_argument(
         "--bs",

@@ -369,6 +369,41 @@ const char* rocke_h_vec_prefix(const char* ir_scalar_name, bool full_map)
     return "f16x";
 }
 
+/* True iff `name` is one of the element types rocke_h_vec_prefix maps for real
+ * (i.e. would not land on the "f16x" fallback). */
+static bool rocke_h_scalar_in_vec_map(const char* name, bool full_map)
+{
+    if(strcmp(name, "f16") == 0 || strcmp(name, "bf16") == 0)
+    {
+        return true;
+    }
+    if(!full_map)
+    {
+        return false;
+    }
+    return strcmp(name, "f32") == 0 || strcmp(name, "i32") == 0 || strcmp(name, "i16") == 0
+           || strcmp(name, "i8") == 0 || strcmp(name, "fp8e4m3") == 0
+           || strcmp(name, "bf8e5m2") == 0;
+}
+
+const char* rocke_h_vec_prefix_checked(rocke_h_lowerer_t* lw,
+                                       const char* ir_scalar_name,
+                                       bool full_map,
+                                       const char* op_desc)
+{
+    /* Mirrors Python _vec_prefix: an elem_type outside the map is a hard error,
+     * not a silent "f16x" that would reinterpret the bits of another type. */
+    if(!ir_scalar_name || !rocke_h_scalar_in_vec_map(ir_scalar_name, full_map))
+    {
+        rocke_h_fail(lw,
+                     ROCKE_ERR_KEY,
+                     "%s: unsupported element type '%s'",
+                     op_desc,
+                     ir_scalar_name ? ir_scalar_name : "(null)");
+    }
+    return rocke_h_vec_prefix(ir_scalar_name, full_map);
+}
+
 /* Python _type_to_hip(t). Returns arena-owned string; "" + sticky error on an
  * unmappable type (KeyError parity). */
 const char* rocke_h_type_to_hip(rocke_h_lowerer_t* lw, const rocke_type_t* t)

@@ -163,9 +163,9 @@ def _name(v: Value) -> str:
     return v.name[1:] if v.name.startswith("%") else v.name
 
 
-# LDS vector-load/store element type -> ext_vector_type prefix (see the
-# _ROCKE_VEC typedefs in the prologue). fp8/bf8 share the i8 byte-storage view.
-_SMEM_VEC_PREFIX = {
+# Vector-load/store element type -> ext_vector_type prefix (see the _ROCKE_VEC
+# typedefs in the prologue). fp8/bf8 share the i8 byte-storage view.
+_VEC_PREFIX = {
     "f16": "f16x",
     "bf16": "bf16x",
     "f32": "f32x",
@@ -177,15 +177,17 @@ _SMEM_VEC_PREFIX = {
 }
 
 
-def _smem_vec_prefix(elem_name: str, op_desc: str) -> str:
-    """Vector prefix for an LDS ``elem_type``. Validate rather than silently
-    falling back to f16 (which would reinterpret the bits of another type)."""
+def _vec_prefix(elem_name: str, op_desc: str) -> str:
+    """Vector prefix for a vector load/store ``elem_type``. Validate rather than
+    silently falling back to f16, which would reinterpret the bits of another
+    type: an ``i32`` load viewed as ``f16x4`` then assigned to an ``i32x4``
+    converts the values instead of moving them."""
     try:
-        return _SMEM_VEC_PREFIX[elem_name]
+        return _VEC_PREFIX[elem_name]
     except KeyError:
         raise NotImplementedError(
-            f"{op_desc}: unsupported LDS element type {elem_name!r} "
-            f"(supported: {sorted(_SMEM_VEC_PREFIX)})"
+            f"{op_desc}: unsupported element type {elem_name!r} "
+            f"(supported: {sorted(_VEC_PREFIX)})"
         ) from None
 
 
@@ -453,7 +455,7 @@ class _Lowerer:
         ptr, idx = op.operands
         vec = int(op.attrs["vec"])
         elem_name = op.attrs.get("elem_type", "f16")
-        prefix = {"f16": "f16x", "bf16": "bf16x"}.get(elem_name, "f16x")
+        prefix = _vec_prefix(elem_name, "global_load_vN")
         self._emit(
             f"{prefix}{vec} {_name(op.result)} = "
             f"*reinterpret_cast<const {prefix}{vec}*>({_name(ptr)} + {_name(idx)});"
@@ -469,7 +471,7 @@ class _Lowerer:
             raise RuntimeError("smem store_vN before smem_alloc was lowered")
         idx_str = "][".join(_name(i) for i in indices)
         elem_name = op.attrs.get("elem_type", "f16")
-        prefix = _smem_vec_prefix(elem_name, "smem_store_vN")
+        prefix = _vec_prefix(elem_name, "smem_store_vN")
         self._emit(
             f"*reinterpret_cast<{prefix}{vec}*>(&{storage}[{idx_str}]) = {_name(value)};"
         )
@@ -1134,18 +1136,6 @@ class _Lowerer:
             inner = (" " + ins) if ins else ""
             self._emit(f'asm {side}("{template}" : :{inner}{clob_str});')
 
-    def _op_memref_global_store_vN(self, op: Op) -> None:
-        ptr, idx, val = op.operands
-        vec = int(op.attrs["vec"])
-        self._emit(
-            f"*reinterpret_cast<f16x{vec}*>({_name(ptr)} + {_name(idx)}) = "
-            f"{_name(val)};"
-        )
-
-    def _op_memref_global_atomic_add_f32(self, op: Op) -> None:
-        ptr, idx, val = op.operands
-        self._emit(f"atomicAdd({_name(ptr)} + {_name(idx)}, {_name(val)});")
-
     def _op_vector_extract(self, op: Op) -> None:
         (v,) = op.operands
         i = op.attrs["index"]
@@ -1759,7 +1749,7 @@ class _Lowerer:
         ptr, idx, val = op.operands
         n = int(op.attrs["vec"])
         elem_name = op.attrs.get("elem_type", "f16")
-        prefix = {"f16": "f16x", "bf16": "bf16x"}.get(elem_name, "f16x")
+        prefix = _vec_prefix(elem_name, "global_store_vN")
         self._emit(
             f"*reinterpret_cast<{prefix}{n}*>({_name(ptr)} + {_name(idx)}) = "
             f"{_name(val)};"
@@ -1777,7 +1767,7 @@ class _Lowerer:
         n = int(op.attrs["vec"])
         elem_name = op.attrs.get("elem_type", "f16")
         # Validate rather than silently reinterpreting an unmapped type as f16.
-        prefix = _smem_vec_prefix(elem_name, "smem_load_vN")
+        prefix = _vec_prefix(elem_name, "smem_load_vN")
         storage = smem.op.attrs.get("_storage")
         if storage is None:
             raise RuntimeError("smem load_vN before smem_alloc was lowered")
