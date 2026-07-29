@@ -222,7 +222,7 @@ the shipped `BLOCK_M=128` `use_q_direct_reg` body is already occupancy-clean;
 > production lever.
 
 The reusable qualitative lever and decision record is in the
-[attention 2D experiment summary](../examples/attention_2d_gfx950_experiment_summary.md).
+[attention 2D experiment summary](../examples/gfx950/attention_2d_experiment_summary.md).
 
 ## Build Timings
 
