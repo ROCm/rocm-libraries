@@ -110,7 +110,6 @@ TYPED_TEST(HipcubDeviceSegmentedReduceOp, Reduce)
         for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
         {
             SCOPED_TRACE(testing::Message() << "with size= " << size);
-            CHECK_SIZE_ENABLEMENT(size);
 
             // Generate data and calculate expected results
             std::vector<output_type> aggregates_expected;
@@ -310,7 +309,6 @@ TYPED_TEST(HipcubDeviceSegmentedReduce, Sum)
         for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
         {
             SCOPED_TRACE(testing::Message() << "with size= " << size);
-            CHECK_SIZE_ENABLEMENT(size);
 
             // Generate data and calculate expected results
             std::vector<output_type> aggregates_expected;
@@ -468,7 +466,6 @@ TYPED_TEST(HipcubDeviceSegmentedReduce, Min)
         for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
         {
             SCOPED_TRACE(testing::Message() << "with size= " << size);
-            CHECK_SIZE_ENABLEMENT(size);
 
             // Generate data and calculate expected results
             std::vector<output_type> aggregates_expected;
@@ -626,7 +623,6 @@ TYPED_TEST(HipcubDeviceSegmentedReduce, Max)
         for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
         {
             SCOPED_TRACE(testing::Message() << "with size= " << size);
-            CHECK_SIZE_ENABLEMENT(size);
 
             // Generate data and calculate expected results
             std::vector<output_type> aggregates_expected;
@@ -835,7 +831,6 @@ void test_argminmax(typename TestFixture::params::input_type empty_value)
         for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
         {
             SCOPED_TRACE(testing::Message() << "with size= " << size);
-            CHECK_SIZE_ENABLEMENT(size);
 
             // Generate data and calculate expected results
             std::vector<key_value> aggregates_expected;
@@ -991,7 +986,7 @@ TYPED_TEST(HipcubDeviceSegmentedReduce, ArgMax)
 }
 
 template<class T>
-class HipcubDeviceSegmentedReduceArgMinMaxSpecialTests : public testing::Test
+class HipcubDeviceSegmentedReduceArgMinMaxSpecialTests : public test_controller::ControlledTest<>
 {};
 
 using HipcubDeviceSegmentedReduceArgMinMaxSpecialTestsParams

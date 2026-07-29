@@ -35,6 +35,9 @@
 #include <hipcub/grid/grid_even_share.hpp>
 #include <hipcub/grid/grid_queue.hpp>
 
+class HipcubGridTests : public test_controller::ControlledTest<>
+{};
+
 template<
     int32_t BlockSize,
     class T,
