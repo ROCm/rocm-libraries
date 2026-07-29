@@ -337,6 +337,8 @@ class CDNA5ReadyQueue : public ReadyQueue {
     // --- Per-WMMA-window DS cap (dagFeatures.dsReadPerWmma) ---
     int maxDsPerWmmaWindow_ = 0;
     int dsInsertedSinceLastWmma_ = 0;
+    // Per-window override for maxDsPerWmmaWindow_; empty => use the flat value.
+    std::vector<int> dsTargetPerWindow_;
 
     // (A) RAW data-ready gate. Per reg index: remaining modeled latency until a
     // producer's result is safe to consume (e.g. ds_load LDS->VGPR, 56 cyc). Any
@@ -814,7 +816,12 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
     // co-issue window; it is meaningless when no WMMA is available to issue, so it
     // is applied only while a WMMA is pending. Otherwise ds_loads drain freely,
     // bounded only by the real hardware limiter dsReadQueueFull().
-    const bool dsCapReached = !wmmaQueue.empty() && dsInsertedSinceLastWmma_ >= maxDsPerWmmaWindow_;
+    int windowCap = maxDsPerWmmaWindow_;
+    if (!dsTargetPerWindow_.empty()) {
+        const int w = std::min((int)wmmaIssuedCountThisRegion_, (int)dsTargetPerWindow_.size() - 1);
+        windowCap = dsTargetPerWindow_[w];
+    }
+    const bool dsCapReached = !wmmaQueue.empty() && dsInsertedSinceLastWmma_ >= windowCap;
     bool dsWindowOk =
         pickedDS && !dsCapReached && !dsReadQueueFull() && !destOverlapsActiveWmmaSrc(pickedDS);
 
@@ -1635,6 +1642,9 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
             hasWMMAInRegion_ = true;
         }
     }
+
+    // Flat fill (one entry per window); a later commit computes per-window targets.
+    dsTargetPerWindow_.assign(wmmaIssueConfig.issuedCount + 1, dsReadPerWmma());
 
     barrierWmmaThresholds_.clear();
     barrierDsLoadCounts_.clear();
