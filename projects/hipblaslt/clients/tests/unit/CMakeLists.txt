@@ -3,7 +3,8 @@
 
 # Host-only client unit tests: they exercise pure functions from
 # hipblaslt_datatype2string.hpp (string<->enum parsers and the scaling-format
-# helpers) and never initialize a device.
+# helpers) and never initialize a device. "Host-only" means no device code and no
+# GPU needed at run time; the TUs are still compiled as HIP, see below.
 #
 # These sources are compiled into two targets on purpose:
 #
@@ -15,13 +16,9 @@
 #      "*HostUnit*" pattern in ../test_categories.yaml, without which the cases
 #      would be built but never selected.
 #
-#   2. hipblaslt-client-unit-tests, a standalone binary that proves these tests
-#      need no GPU and is ready for a future CPU-only lane. It is deliberately
-#      not installed or registered with ctest yet.
-#
-# Building both is also a cheap cross-check that the code stays host-clean:
-# hipblaslt-test compiles these TUs as HIP (`-x hip`, from its hip::device),
-# while the standalone target compiles them as plain host C++.
+#   2. hipblaslt-client-unit-tests, a standalone binary that runs these cases
+#      without the rest of the matmul suite, ready for a future CPU-only lane. It
+#      is deliberately not installed or registered with ctest yet.
 set(HIPBLASLT_HOST_UNIT_TEST_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/parser_gtest.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/scaling_format_gtest.cpp
@@ -31,15 +28,15 @@ set(HIPBLASLT_HOST_UNIT_TEST_SOURCES
 # so the target already exists here.
 target_sources(hipblaslt-test PRIVATE ${HIPBLASLT_HOST_UNIT_TEST_SOURCES})
 
-# hip::host rather than hip::device: hipblaslt_datatype2string.hpp reaches
-# <hip/hip_runtime.h> through hipblaslt.h, so the TU still needs HIP host
-# headers and __HIP_PLATFORM_AMD__, but nothing here is device code and the
-# `-x hip` that hip::device adds via INTERFACE_COMPILE_OPTIONS would compile
-# this TU as HIP for no reason.
+# hip::device, not hip::host, even though nothing here is device code: the client
+# headers require compilation as HIP. Without the `-x hip` that hip::device adds
+# via INTERFACE_COMPILE_OPTIONS there is no __HIPCC__, and without __HIPCC__
+# hipblaslt_float8.h hands out opaque `struct { uint8_t __x; }` stubs for the f8
+# and bf8 types while auxiliary.hpp, reached through hipblaslt_datatype2string.hpp,
+# calls is_nan() on them. hip::device cannot be inherited here either:
+# hipblaslt-clients-common is STATIC and takes it PRIVATE, so it arrives as
+# $<LINK_ONLY:hip::device>, which carries no compile options.
 #
-# Note that "host-only" means no device code and no GPU needed at run time, not
-# that libamdhip64 goes unlinked: hipblaslt-clients-common is STATIC, so its
-# PRIVATE hip::device still reaches this target as $<LINK_ONLY:hip::device>.
 # OpenMP is omitted because it is already a PUBLIC dependency of
 # hipblaslt-clients-common.
 add_executable(hipblaslt-client-unit-tests ${HIPBLASLT_HOST_UNIT_TEST_SOURCES})
@@ -47,7 +44,7 @@ add_executable(hipblaslt-client-unit-tests ${HIPBLASLT_HOST_UNIT_TEST_SOURCES})
 target_link_libraries(hipblaslt-client-unit-tests
     PRIVATE
         hipblaslt::hipblaslt-clients-common
-        hip::host
+        hip::device
         GTest::gtest
         GTest::gtest_main
 )
