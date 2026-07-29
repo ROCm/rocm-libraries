@@ -70,6 +70,7 @@ Tests:
   alpha_vector_scaling: [true]
   factor_dim: [0, 1]
   gate_residual: [true]
+  gate_type: [f16_r, bf16_r]
   gpu_arch: '9(42|50)'
 
 - name: spmm_batched_medium

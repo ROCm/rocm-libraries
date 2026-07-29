@@ -98,6 +98,7 @@ Tests:
   sparse_b: [ true, false]
   alpha_vector_scaling: [true, false]
   gate_residual: [true]  
+  gate_type: [f16_r, bf16_r]
   orderA: [R]
   orderB: [R]
   orderC: [R]

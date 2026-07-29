@@ -61,6 +61,7 @@ Tests:
   sparse_b: [true, false]
   alpha_vector_scaling: true
   gate_residual: [true]
+  gate_type: [f16_r, bf16_r]
   stride_gate: [0, -1, 16384]
   gpu_arch: '9(42|50)'
 
