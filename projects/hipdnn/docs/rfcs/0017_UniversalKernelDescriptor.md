@@ -249,10 +249,10 @@ Loading is on demand and cached. Nothing is parsed until a graph needs it: an en
 reject a graph never pays to load its kernels, and a heuristic model is not read until something needs
 the catalog ranked. What the provider keeps up front is only the descriptor inventory, the ids, kinds,
 and locations that say what exists. Because the drop-in location is a directory an operator writes to,
-that inventory is rescanned on each applicability call, so a pack added or removed while the process
-runs is picked up or dropped without a restart, and anything cached from a removed pack is discarded.
-[Section 8](#8-end-to-end-flow) gives the exact order, what each step loads, and where the result is
-kept.
+that inventory is refreshed as needed rather than snapshotted once, so a pack added or removed while
+the process runs is picked up or dropped without a restart, and anything cached from a removed pack is
+discarded. [Section 8](#8-end-to-end-flow) gives the exact order, what each step loads, and where the
+result is kept.
 
 Each UED becomes an engine that names its heuristic (UHD) and metadata schema (KMD); the KDPs that name
 it contribute their matchers, dispatch, and kernels. Deciding which kernels apply to a graph is a cheap,
@@ -1011,10 +1011,10 @@ Nothing below runs. On a miss, continue.
 state resolves `$device.*` and a handle can be rebound to another device; the inventory generation is
 step 3's counter.
 
-**3. Rescan the drop-in location.** Cheap staleness check, on the order of a directory mtime. If it
-changed, bump the inventory generation, drop descriptors that disappeared, and discard every cached
-catalog, since a pack added or removed changes which kernels are candidates. This runs per
-`isApplicable` call, which is why it must stay a stat and not a directory walk.
+**3. Refresh the drop-in inventory.** A staleness check cheap enough to run on this path, on the order
+of a directory mtime. If the location changed, bump the inventory generation, drop descriptors that
+disappeared, and discard every cached catalog, since a pack added or removed changes which kernels are
+candidates.
 *Loads:* nothing yet, only the inventory of ids, kinds, and locations.
 
 **4. Resolve this engine's UED and KMD.** The UED gives the engine identity, the KMD fields it exposes
@@ -1115,7 +1115,7 @@ launcher resolves each UDD argument against it by uid.
 |---|---|---|---|
 | 1 | nothing | the host call arrives | nothing |
 | 2 | nothing | cache probe before any parsing | reads the handle cache |
-| 3 | inventory only | detect drop-in changes per call | inventory generation on the handle |
+| 3 | inventory only | detect drop-in changes | inventory generation on the handle |
 | 4 | UED, KMD | engine identity; the KMD keys the catalog and names the `$kernel.*` fields | handle, reused across graphs |
 | 5 | KDPs, UMDs, UKD metadata | the matchers are the applicability test | handle, reused across graphs |
 | 6 | nothing new | evaluates what 4 and 5 loaded | catalog + bound token state, keyed per graph |
@@ -1160,7 +1160,7 @@ sequenceDiagram
     FE->>ERM: create_execution_plans() -> getApplicableEngineIds
     ERM->>Eng: isApplicable(handle, opGraph)
     Eng->>Cache: probe (graph hash, device id, inventory generation)
-    Eng->>Eng: rescan drop-in location; bump generation if changed (3)
+    Eng->>Eng: refresh drop-in inventory; bump generation if changed (3)
     Eng->>Eng: resolve UED + KMD (4), KDPs + matchers + UKD metadata (5)
     Eng->>Eng: matchers in pruning order, graph-level then $kernel-level (6)
     Eng->>Cache: store catalog + bound token state
@@ -1386,8 +1386,8 @@ The two ingestion paths differ only in where a kernel's code comes from:
   build id) so incompatible bundles are rejected before load.
 - **Runtime drop-in.** The path is opt-in and off by default. When enabled, the provider scans a
   dedicated drop-in location for custom bundles, compiles each descriptor to a matcher once on first
-  use, and registers it exactly as an installed one. The location is rescanned on each applicability
-  call ([Section 8](#8-end-to-end-flow)), so a bundle added or removed while the process runs is
+  use, and registers it exactly as an installed one. The location is refreshed as needed
+  ([Section 8](#8-end-to-end-flow)), so a bundle added or removed while the process runs is
   picked up or dropped without a restart. A single package may declare many descriptors, and a
   bad descriptor is quarantined on load without failing the rest. JIT kernels compile on first use and
   cache their result. (The concrete enablement and location mechanism is left to the delivery
