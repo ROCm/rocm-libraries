@@ -252,7 +252,7 @@ else()
 endif()
 
 if(HIPRAND_ENABLE_COVERAGE)
-  message(STATUS "hipRAND: code coverage instrumentation ENABLED (libhiprand)")
+  message(STATUS "hipRAND: code coverage instrumentation ENABLED (host code only)")
   # ccache (direct mode) does not include -fprofile-instr-generate in its hash, so a
   # coverage compile can hit a cached NON-coverage object and come back
   # un-instrumented (observed: 0 __llvm_profile symbols despite the flag). Add a
@@ -261,18 +261,18 @@ if(HIPRAND_ENABLE_COVERAGE)
   # still hit ccache, so the build is not fully recompiled.
   target_compile_definitions(hiprand PRIVATE HIPRAND_COVERAGE_INSTRUMENTED=1)
 
-  # ROCm 7.14: Device PGO/coverage requires the new offload driver and LLVM commit
-  # 7c0a3a52cf96 which fixes device profile collection and sections emission.
+  # Device-side coverage causes kernel launch failures (ROCm 7.14). Without
+  # --offload-new-driver, HIP's default compilation model naturally separates host
+  # and device passes, so coverage flags only instrument host code (including host
+  # code in mixed .cpp files with both __global__ kernels and host functions).
   target_compile_options(hiprand PRIVATE
     -g
     -O0
     -fprofile-instr-generate
     -fcoverage-mapping
-    --offload-new-driver
   )
   target_link_options(hiprand PUBLIC
     -fprofile-instr-generate
-    --offload-new-driver
   )
 endif()
 
