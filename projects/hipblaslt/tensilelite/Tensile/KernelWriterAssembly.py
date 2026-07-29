@@ -5620,6 +5620,18 @@ class KernelWriterAssembly(KernelWriter):
         dtvKInterval = kernel["MIInputPerThread"]
       module.add(vectorStaticMultiply(vgpr(qReg), vgpr(qReg), dtvKInterval, None))
 
+      # A WMMA v1 operand holds the whole MatrixInstK in every lane -- lane l and
+      # lane l + MatrixInst<M|N> are replicas -- so LraTileAssignment emits no
+      # per-lane K offset for it (its noUnrollOffset). For a local read that is
+      # right, the K coordinate is folded into the ds_read offset. For
+      # DirectToVgpr this register *is* the unroll coordinate of a global
+      # address, and leaving it as the wave-lane id makes every lane read a
+      # different 16-element K window of the same column. Zero it: the K
+      # advance comes solely from the per-load offsets.
+      if self.states.asmCaps["HasWMMA_V1"]:
+        module.add(VMovB32(dst=vgpr(qReg), src=0, \
+            comment="DirectToVgpr%s: WMMA v1 replicates the operand over the half-waves, every lane holds the same K range" % tc))
+
       # DTV+localSplitU case. Calculate LSU offset here
       if kernel["LocalSplitU"] > 1:
         # allocate resources
@@ -9501,6 +9513,16 @@ class KernelWriterAssembly(KernelWriter):
       else: #wmma
         iui = 0
         abReg      = self.vgprPool.checkOutAligned(2, 2, tag="wmmaIter_abReg")
+
+        # Resolve the operand register through the same helper the WMMA instructions
+        # themselves use. Hard-coding "Valu<tc>_X<m>_I<iui>+..." here breaks
+        # DirectToVgpr<tc>: the operand then lives in the G2L<tc> buffer and no
+        # Valu<tc> symbol is ever defined, so the assembler rejects the reference.
+        def tailValuStr(tP, vgprPerInput, idxAB, bk, numReg=1):
+          return vgpr(self.generateSrcStrForMFMAshiftK(kernel, tP, innerUnroll, vregSetIdx, \
+                                                       vgprPerInput, m, u, iui, idxAB, \
+                                                       lc=unrollLoopIdx, bk=bk), numReg)
+
         with self.allocTmpSgpr(3, tag="wmmaIter_tmpSgprInfo") as tmpSgprInfo:
           sgprShift = tmpSgprInfo.idx
           sgpr64bIdx = sgprShift + 1
@@ -9515,26 +9537,26 @@ class KernelWriterAssembly(KernelWriter):
           for it in range(int((kernel["MatrixInstK"] * numRegistersIn) // 2)): # handle 64 bit per iteration
             shiftK.add(VCmpEQI32(dst=sgpr(sgprMask), src0=sgpr(sgpr64bIdx), src1=it, comment='handle this 64bit group: part 1'))
             for a in range(0, kernel["MIWaveTileA"]):
-              aStr = vgpr("ValuA_X%u_I%u+%u+%u" % (m, iui, a*vgprPerInUnroll, it*2), 2)
+              aStr = tailValuStr(tPA, vgprPerInputA, a, it*2, 2)
               shiftK.add(VLShiftLeftB64(dst=vgpr(abReg,2), shiftHex=sgpr(sgprShift), src=aStr, comment=f"shfit for ValuA[{it*2}:{it*2+1}]"))
               for bk in range(2):
-                aStr = vgpr("ValuA_X%u_I%u+%u+%u+%u" % (m, iui, a*vgprPerInUnroll, it*2, bk))
+                aStr = tailValuStr(tPA, vgprPerInputA, a, it*2+bk)
                 shiftK.add(VCndMaskB32(dst=aStr, src0=aStr, src1=vgpr(abReg+bk), src2=sgpr(sgprMask), comment="shift if in this 64b group"))
             for b in range(0, kernel["MIWaveTileB"]):
-              bStr = vgpr("ValuB_X%u_I%u+%u+%u" % (m, iui, b*vgprPerInUnroll, it*2), 2)
+              bStr = tailValuStr(tPB, vgprPerInputB, b, it*2, 2)
               shiftK.add(VLShiftLeftB64(dst=vgpr(abReg,2), shiftHex=sgpr(sgprShift), src=bStr, comment=f"shfit for ValuB[{it*2}:{it*2+1}]"))
               for bk in range(2):
-                bStr = vgpr("ValuB_X%u_I%u+%u+%u+%u" % (m, iui, b*vgprPerInUnroll, it*2, bk))
+                bStr = tailValuStr(tPB, vgprPerInputB, b, it*2+bk)
                 shiftK.add(VCndMaskB32(dst=bStr, src0=bStr, src1=vgpr(abReg+bk), src2=sgpr(sgprMask), comment="shift if in this 64b group"))
             if it > 0:
               shiftK.add(VCmpLtI32(dst=sgpr(sgprMask), src0=sgpr(sgpr64bIdx), src1=it, comment='handle this 64bit group: part 2'))
               for a in range(0, kernel["MIWaveTileA"]):
                 for bk in range(2):
-                  aStr = vgpr("ValuA_X%u_I%u+%u+%u+%u" % (m, iui, a*vgprPerInUnroll, it*2, bk))
+                  aStr = tailValuStr(tPA, vgprPerInputA, a, it*2+bk)
                   shiftK.add(VCndMaskB32(dst=aStr, src0=aStr, src1=0, src2=sgpr(sgprMask), comment="shift if in this 64b group"))
               for b in range(0, kernel["MIWaveTileB"]):
                 for bk in range(2):
-                  bStr = vgpr("ValuB_X%u_I%u+%u+%u+%u" % (m, iui, b*vgprPerInUnroll, it*2, bk))
+                  bStr = tailValuStr(tPB, vgprPerInputB, b, it*2+bk)
                   shiftK.add(VCndMaskB32(dst=bStr, src0=bStr, src1=0, src2=sgpr(sgprMask), comment="shift if in this 64b group"))
 
       s_nop = 2

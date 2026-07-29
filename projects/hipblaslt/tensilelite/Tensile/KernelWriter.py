@@ -7773,6 +7773,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     _flat_load_b128 = MemoryInstruction(FlatLoadB128, 1, 0, 0, 4)
     _flat_load_b64 = MemoryInstruction(FlatLoadB64,   1, 0, 0, 2)
     _flat_load_b32 = MemoryInstruction(FlatLoadB32,   1, 0, 0, 1)
+    _global_load_b256 = MemoryInstruction(GlobalLoadB128, 1, 0, 0, 8)
     _global_load_b192 = MemoryInstruction(GlobalLoadB192, 1, 0, 0, 6)
     _global_load_b128 = MemoryInstruction(GlobalLoadB128, 1, 0, 0, 4)
     _global_load_b96  = MemoryInstruction(GlobalLoadB96,  1, 0, 0, 3)
@@ -7781,6 +7782,14 @@ class KernelWriter(metaclass=abc.ABCMeta):
     _global_load_d16_b16 = MemoryInstruction(GlobalLoadD16B16, 1, 0, 0, 0.5)
     _global_load_d16_u8  = MemoryInstruction(GlobalLoadD16U8,  1, 0, 0, 0.25)
 
+    # 32-byte load. There is no single buffer_load_b256; chooseGlobalRead emits it
+    # as two buffer_load_b128 (see its bpl==32 case). The entry has to exist here
+    # anyway because this table -- not chooseGlobalRead -- is what sizes the tiled
+    # global read: nrcvpi comes from totalWidth, and both the G2L destination stride
+    # and numVgprG2L follow from that. Without it a GRVW*bpe==32 request is split
+    # into two instructions that each still load the full 32 bytes, so the read
+    # overruns its G2L buffer.
+    _buffer_load_b256 = MemoryInstruction(BufferLoadB128, 1, 0, 0, 8)
     _buffer_load_b192 = MemoryInstruction(BufferLoadB192, 1, 0, 0, 6)
     _buffer_load_b128 = MemoryInstruction(BufferLoadB128, 1, 0, 0, 4)
     _buffer_load_b96 = MemoryInstruction(BufferLoadB96, 1, 0, 0, 3)
@@ -7808,6 +7817,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # gfx900
     ########################################
     if (kernel["BufferLoad"]):
+      chosen_load_b256 = _buffer_load_b256
       chosen_load_b192 = _buffer_load_b192
       chosen_load_b128 = _buffer_load_b128
       chosen_load_b96 = _buffer_load_b96
@@ -7816,6 +7826,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       chosen_load_b16  = _buffer_load_d16_b16
       chosen_load_b8   = _buffer_load_d16_u8
     else:
+      chosen_load_b256 = _global_load_b256
       chosen_load_b192 = _global_load_b192
       chosen_load_b128 = _global_load_b128
       chosen_load_b96  = _global_load_b96
@@ -7829,7 +7840,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     chosen_store_b32  = _global_store_b32
 
     self.memoryInstructions = {
-          "GlobalRead" : [ chosen_load_b192, chosen_load_b128, chosen_load_b96, chosen_load_b64,
+          "GlobalRead" : [ chosen_load_b256, chosen_load_b192, chosen_load_b128, chosen_load_b96, chosen_load_b64,
                            chosen_load_b32, chosen_load_b16, chosen_load_b8 ],
           "GlobalWrite": [ chosen_store_b128, chosen_store_b64, chosen_store_b32 ],
           "LocalRead"  : [ _ds_load_b192, _ds_load_b128, _ds_load2_b64, _ds_load_b64,

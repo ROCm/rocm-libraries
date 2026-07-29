@@ -1191,6 +1191,30 @@ class Solution(collections.abc.Mapping):
     state["AssignedProblemIndependentDerivedParameters"] = True
 
   ########################################
+  # How many times DirectToVgpr has to load each element of tensor tc.
+  #
+  # A matrix-instruction operand is held as MIInputPerThread values per lane.
+  # On WMMA v1 that is more than the number of *distinct* values the lane
+  # contributes: the operand is replicated across the half-waves (lane l and
+  # lane l + MatrixInst<M|N> hold the same column), and an LDS-staged kernel
+  # gets that replication for free out of the ds_read. DirectToVgpr has no LDS,
+  # so its global read has to issue the redundant loads itself and the G2L
+  # buffer has to be sized for them -- otherwise generateSrcStrForMFMA, which
+  # addresses the operand as LoopIters * MIWaveTile * vgprPerInput per vreg
+  # set, runs off the end of the buffer.
+  #
+  # MFMA and WMMA v2/v3 give every lane distinct values, so the factor is 1.
+  @staticmethod
+  def dtvOperandDuplication(state, tc, isaInfoMap) -> int:
+    if not state["EnableMatrixInstruction"]:
+      return 1
+    isa = tuple(state["ISA"])
+    if not isaInfoMap[isa].asmCaps["HasWMMA_V1"]:
+      return 1
+    miDim = state["MatrixInstM"] if tc == "A" else state["MatrixInstN"]
+    return max(1, state["WavefrontSize"] // (miDim * state["MatrixInstB"]))
+
+  ########################################
   # This is the "classic" algorithm which requires that each threads load the same number of bytes
   # Called with tc=A and then with tc=B
   # totalVectors is totalElements/GRVW, this is #vectors loaded by the LoadTile
@@ -4153,10 +4177,20 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason, "VWB * MacDataTypeB.numBytes() > 16")
 
       # reject - GRVW too big
-      if (state["GlobalReadVectorWidthA"] * state["ProblemType"]["DataTypeA"].numBytes()) > 24:
-        reject(state, printRejectionReason, "GRVWA * DataTypeA.numBytes() > 24")
-      if (state["GlobalReadVectorWidthB"] * state["ProblemType"]["DataTypeB"].numBytes()) > 24:
-        reject(state, printRejectionReason, "GRVWB * DataTypeB.numBytes() > 24")
+      # This bound must stay equal to the widest entry in the "GlobalRead"
+      # MemoryInstruction table (KernelWriter, now b256 = 32 bytes). It is not
+      # merely the widest load chooseGlobalRead() can emit -- that one also
+      # emulates 64 bytes -- because the tiled global-read bookkeeping is driven
+      # by the table: nrcvpi comes from globalReadInstruction.totalWidth, and
+      # both the G2L destination stride (g2lIdx) and numVgprG2L follow from it.
+      # Allowing a vector wider than any table entry makes the emitter split it
+      # into several instructions that each still pass the whole vector width as
+      # bpl, so it issues twice the loads at half the register stride and writes
+      # past the end of the G2L buffer.
+      if (state["GlobalReadVectorWidthA"] * state["ProblemType"]["DataTypeA"].numBytes()) > 32:
+        reject(state, printRejectionReason, "GRVWA * DataTypeA.numBytes() > 32")
+      if (state["GlobalReadVectorWidthB"] * state["ProblemType"]["DataTypeB"].numBytes()) > 32:
+        reject(state, printRejectionReason, "GRVWB * DataTypeB.numBytes() > 32")
 
       disableGNLC = False # Set to true to disable GNLC if needed
       if state["UseSgprForGRO"] == 1:
@@ -4204,11 +4238,13 @@ class Solution(collections.abc.Mapping):
           totalElementsPerpA = state["_DepthUA"]
           if state["DirectToVgprA"]:
             totalElementsCoalescedA *= state["MIWaveGroup"][1]
+            totalElementsCoalescedA *= Solution.dtvOperandDuplication(state, "A", isaInfoMap)
         else: # TN/TT
           totalElementsCoalescedA = state["_DepthUA"]
           totalElementsPerpA = state["MacroTileA"]
           if state["DirectToVgprA"]:
             totalElementsPerpA *= state["MIWaveGroup"][1]
+            totalElementsPerpA *= Solution.dtvOperandDuplication(state, "A", isaInfoMap)
 
         if state["GlobalReadVectorWidthA"] > totalElementsCoalescedA:
           reject(state, printRejectionReason, f"GRVWA({state['GlobalReadVectorWidthA']}) > Coaleased({totalElementsCoalescedA})")
@@ -4270,11 +4306,13 @@ class Solution(collections.abc.Mapping):
           totalElementsPerpB = depthUB
           if state["DirectToVgprB"]:
             totalElementsCoalescedB *= state["MIWaveGroup"][0]
+            totalElementsCoalescedB *= Solution.dtvOperandDuplication(state, "B", isaInfoMap)
         else: # TN/NN
           totalElementsCoalescedB = depthUB
           totalElementsPerpB = state["MacroTileB"]
           if state["DirectToVgprB"]:
             totalElementsPerpB *= state["MIWaveGroup"][0]
+            totalElementsPerpB *= Solution.dtvOperandDuplication(state, "B", isaInfoMap)
 
         if state["GlobalReadVectorWidthB"] > totalElementsCoalescedB:
           reject(state, printRejectionReason, f"GRVWB({state['GlobalReadVectorWidthB']}) > Coaleased({totalElementsCoalescedB})")

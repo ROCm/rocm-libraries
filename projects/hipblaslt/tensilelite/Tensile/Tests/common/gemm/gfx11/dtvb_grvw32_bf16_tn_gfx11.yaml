@@ -1,0 +1,93 @@
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1200, skip-gfx1201, skip-gfx1250] # WMMA v1 (gfx11) only
+
+# DirectToVgprB on a TN bf16 WMMA kernel with 32-byte global loads
+# (GlobalReadVectorWidthB=16 * 2 bytes). AIESW-40348.
+#
+# This is the hardware half of the checks in
+# Tests/unit/test_dtvb_tailloop_grvw32.py, which pins the same four changes at
+# emit level:
+#   * a b256 GlobalRead MemoryInstruction, so a 32-byte vector is one load
+#     rather than two loads that each still fetch 32 bytes,
+#   * the GRVW rejection bound moving with it, 24 -> 32 bytes,
+#   * numVgprG2L accounting for the WMMA v1 half-wave operand replication that
+#     DirectToVgpr has to load itself,
+#   * the WMMA v1 tail-loop K-masking naming the operand through
+#     generateSrcStrForMFMA instead of a hard-coded "ValuB_X..", which for
+#     DirectToVgprB is a symbol that is never defined.
+#
+# DirectToVgprB is forked over [false, true] so the non-DTV 32-byte-load
+# control is validated by the same run. The K sizes deliberately straddle
+# DepthU=32 so the tail loop -- one of the broken paths -- actually executes.
+
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: -1
+  DataInitTypeA: 13
+  DataInitTypeB: 12
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 1
+  DataInitTypeBias: 13
+  Device: 0
+  KernelTime: True
+  PrintSolutionRejectionReason: True
+
+BenchmarkProblems:
+  ########################################
+  # BBS TN, DirectToVgprB, GRVWB * 2B == 32
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      UseBias: 1
+      Batched: True
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 16, 1,  1,   2, 2,  1,2 ]
+        - DirectToVgprB: [false, true]
+        - DepthU: [32]
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [3]
+        - WavefrontSize: [32]
+        - TransposeLDS: [1]
+        - GlobalReadVectorWidthA: [8]
+        - GlobalReadVectorWidthB: [16]
+        - LocalReadVectorWidth: [16]
+        - VectorWidthA: [2]
+        - VectorWidthB: [2]
+        - StoreVectorWidth: [2]
+        - SourceSwap: [true]
+        - MIArchVgpr: [true]
+        - StaggerU: [8]
+        - WorkGroupMapping: [1]
+        - GlobalSplitU: [1]
+        - ExpandPointerSwap: [true]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          # K straddling DepthU=32 exercises the tail loop; the K==32 and
+          # K==64 entries are the no-tail control.
+          - Exact: [ 127,  57, 1,   1]
+          - Exact: [ 127,  57, 1,  31]
+          - Exact: [ 127,  57, 1,  32]
+          - Exact: [ 127,  57, 1,  33]
+          - Exact: [ 128,  64, 1,  63]
+          - Exact: [ 128,  64, 1,  64]
+          - Exact: [ 128,  64, 1,  65]
+          - Exact: [ 257, 129, 1, 255]
+          - Exact: [ 257, 129, 1, 256]
+          - Exact: [ 257, 129, 1, 257]
+        - BiasTypeArgs: ['b']
