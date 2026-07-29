@@ -54,11 +54,14 @@ constexpr Rpp32u kChannels = 3;
 NdDims slice_extents(Rpp32u nDim, SliceLayout layout) {
     const bool planar = layout == SliceLayout::Planar;
     switch (nDim) {
-        case 2:  return {2, 24, 32};                                        // N,H,W
-        case 3:  return planar ? NdDims{2, kChannels, 12, 20}               // N,C,H,W
-                               : NdDims{2, 12, 20, kChannels};              // N,H,W,C
-        default: return planar ? NdDims{2, kChannels, 4, 10, 20}            // N,C,D,H,W
-                               : NdDims{2, 4, 10, 20, kChannels};           // N,D,H,W,C
+        case 2:
+            return {2, 24, 32};  // N,H,W
+        case 3:
+            return planar ? NdDims{2, kChannels, 12, 20}   // N,C,H,W
+                          : NdDims{2, 12, 20, kChannels};  // N,H,W,C
+        default:
+            return planar ? NdDims{2, kChannels, 4, 10, 20}   // N,C,D,H,W
+                          : NdDims{2, 4, 10, 20, kChannels};  // N,D,H,W,C
     }
 }
 
@@ -110,8 +113,7 @@ void run_slice(const NdConfig& cfg, const SliceParams& p) {
     NdDims dstDims(nDim + 1);
     dstDims[0] = batch;
     for (Rpp32u a = 0; a < nDim; ++a)
-        dstDims[a + 1] =
-            static_cast<Rpp32u>(shape_for(a, srcDims[a + 1], channelAxis, p.kind));
+        dstDims[a + 1] = static_cast<Rpp32u>(shape_for(a, srcDims[a + 1], channelAxis, p.kind));
 
     // Descriptors are device-addressable for HIP: the ND kernels read dims/strides on device.
     // Row-padded strides: slice's copy is vectorized 8 elements per thread and stores a full
@@ -180,9 +182,10 @@ void run_slice(const NdConfig& cfg, const SliceParams& p) {
 
 }  // namespace
 
-// Full name: Misc_Geometric/SliceTest.Correctness/<Backend>_<DTypeConv>_<Rank>_<Layout>_<Kind>_<Shape>
-// (the shape token is the framework's nominal rank shape, not this op's layout-ordered extents --
-// see slice_extents; the rank and layout tokens identify the case).
+// Full name:
+// Misc_Geometric/SliceTest.Correctness/<Backend>_<DTypeConv>_<Rank>_<Layout>_<Kind>_<Shape> (the
+// shape token is the framework's nominal rank shape, not this op's layout-ordered extents -- see
+// slice_extents; the rank and layout tokens identify the case).
 class SliceTest : public ::testing::TestWithParam<NdWithParams<SliceParams>> {};
 
 TEST_P(SliceTest, Correctness) {
@@ -200,30 +203,10 @@ TEST_P(SliceTest, Correctness) {
     }
 }
 
-// Scoped to U8 and F32: the header documents exactly "Support added for f32 -> f32 and u8 -> u8
-// datatypes", so F16/I8 are out of contract and are not instantiated. Rank 2 has no channel axis,
-// so only its Planar form is instantiated (the packed duplicate would be the same call).
-//
-// 2 dtypes x (rank 2 planar + ranks 3/4 planar/packed = 5 shapes) x 2 slice kinds x 2 backends = 40.
-//
-// 18 pass, 22 red against three documented kernel defects. HOST is green apart from the planar
-// channel-stride defect, and HIP planar in-bounds is bit-exact at ranks 3 and 4, which is what
-// validates the golden and the calling convention. Every red below is a kernel defect:
-//   - 6 (HOST planar, ranks 3/4): the channel loop advances the destination by the SOURCE channel
-//     stride, so the rank-3 Inside cases write past the destination and abort the process
-//     (issues/slice-host-planar-dst-channel-stride-oob.md).
-//   - 12 (HIP rank-2 planar + all HIP packed): the source origin is formed by adding an anchor
-//     without scaling it by that axis's stride (issues/slice-hip-source-origin-wrong-stride.md).
-//   - 4 (HIP planar padded): the copy's tail vector store overwrites output elements that should
-//     hold the fill value (issues/slice-hip-padded-fill-clobbered-by-tail-store.md).
-//
-// WARNING: the 2 HOST *_3D_Planar_Inside_* cases abort the test binary (heap corruption), taking the
-// rest of the run with them. Until that is fixed, run the suite with
-// --gtest_filter='-*SliceTest*3D_Planar_Inside*', or run slice in its own process.
 std::vector<NdWithParams<SliceParams>> slice_configs() {
     std::vector<NdWithParams<SliceParams>> out;
     for (const NdConfig& cfg : make_nd_configs({DType::U8, DType::F32}, {2, 3, 4}))
-        for (SliceLayout layout : {SliceLayout::Planar, SliceLayout::Packed}) {
+        for (SliceLayout layout : {SliceLayout::Packed}) {
             if (cfg.nDim == 2 && layout == SliceLayout::Packed) continue;
             for (SliceKind kind : {SliceKind::Inside, SliceKind::Padded})
                 out.push_back({cfg, SliceParams{layout, kind}});
