@@ -1,0 +1,41 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "mutation-report.schema.json",
+  "title": "Per-slice mutation report",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "slice_id",
+    "src_commit",
+    "container",
+    "mutmut_version",
+    "total_mutants",
+    "killed",
+    "inconclusive",
+    "survived",
+    "no_test",
+    "equivalent",
+    "pragmas_applied",
+    "pragma_free_shadow_score",
+    "covered_score",
+    "by_bucket",
+    "tests_added"
+  ],
+  "properties": {
+    "slice_id": { "type": ["integer", "string"] },
+    "src_commit": { "type": "string" },
+    "container": { "type": "string" },
+    "mutmut_version": { "type": ["string", "null"] },
+    "total_mutants": { "type": "integer", "minimum": 0 },
+    "killed": { "type": "integer", "minimum": 0 },
+    "inconclusive": { "type": "integer", "minimum": 0 },
+    "survived": { "type": "integer", "minimum": 0 },
+    "no_test": { "type": "integer", "minimum": 0 },
+    "equivalent": { "type": "integer", "minimum": 0 },
+    "pragmas_applied": { "type": "integer", "minimum": 0 },
+    "pragma_free_shadow_score": { "type": "number", "minimum": 0, "maximum": 1 },
+    "covered_score": { "type": "number", "minimum": 0, "maximum": 1 },
+    "by_bucket": { "type": "object" },
+    "tests_added": { "type": "integer", "minimum": 0 }
+  }
+}
