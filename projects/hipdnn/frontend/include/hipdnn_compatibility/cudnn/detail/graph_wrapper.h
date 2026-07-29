@@ -106,6 +106,17 @@ public:
 
     error_t create_execution_plans(const std::vector<HeurMode_t>& modes = {HeurMode_t::FALLBACK})
     {
+        for(const auto mode : modes)
+        {
+            if(mode != HeurMode_t::FALLBACK)
+            {
+                HIPDNN_FE_LOG_WARN("[cudnn_frontend] cuDNN heuristic mode "
+                                   << hipdnn_frontend::to_string(mode)
+                                   << " is accepted but not honored; hipDNN uses fallback "
+                                      "selection. Plan choice may differ from cuDNN.");
+            }
+        }
+
         if(auto err = getRecordedError(); err.is_bad())
         {
             return err;
@@ -350,6 +361,80 @@ public:
         static_cast<void>(deviceProperties);
         CUDNN_FE_LOG_LABEL("ERROR: Device properties are unsupported by this shim");
         recordError(error_code_t::INVALID_VALUE, "Device properties are unsupported by this shim");
+        return *this;
+    }
+
+    // --- Plan-selection note filters ---------------------------------------
+    //
+    // Inline triage: advisory filters warn-and-ignore, while exclusions that
+    // request a numerical guarantee hipDNN cannot prove record an error.
+
+    Graph& select_numeric_notes(const std::vector<NumericalNote_t>& notes)
+    {
+        for(const auto note : notes)
+        {
+            if(note != NumericalNote_t::NOT_SET)
+            {
+                HIPDNN_FE_LOG_WARN("[cudnn_frontend] Ignoring select_numeric_notes("
+                                   << hipdnn_frontend::to_string(note)
+                                   << "); hipDNN exposes no per-plan numerical-note metadata.");
+            }
+        }
+        return *this;
+    }
+
+    Graph& deselect_numeric_notes(const std::vector<NumericalNote_t>& notes)
+    {
+        for(const auto note : notes)
+        {
+            if(note == NumericalNote_t::NOT_SET)
+            {
+                continue;
+            }
+
+            if(note == NumericalNote_t::NONDETERMINISTIC
+               || note == NumericalNote_t::REDUCED_PRECISION_REDUCTION)
+            {
+                recordError(error_code_t::GRAPH_NOT_SUPPORTED,
+                            std::string{"deselect_numeric_notes("}
+                                + hipdnn_frontend::to_string(note)
+                                + ") requests a guarantee this shim cannot enforce; refusing to "
+                                  "run rather than return a plan the caller excluded");
+                continue;
+            }
+
+            HIPDNN_FE_LOG_WARN("[cudnn_frontend] Ignoring deselect_numeric_notes("
+                               << hipdnn_frontend::to_string(note)
+                               << "); hipDNN exposes no per-plan numerical-note metadata.");
+        }
+        return *this;
+    }
+
+    Graph& select_behavior_notes(const std::vector<BehaviorNote_t>& notes)
+    {
+        for(const auto note : notes)
+        {
+            if(note != BehaviorNote_t::NOT_SET)
+            {
+                HIPDNN_FE_LOG_WARN("[cudnn_frontend] Ignoring select_behavior_notes("
+                                   << hipdnn_frontend::to_string(note)
+                                   << "); this shim does not filter plans by behavior note.");
+            }
+        }
+        return *this;
+    }
+
+    Graph& deselect_behavior_notes(const std::vector<BehaviorNote_t>& notes)
+    {
+        for(const auto note : notes)
+        {
+            if(note != BehaviorNote_t::NOT_SET)
+            {
+                HIPDNN_FE_LOG_WARN("[cudnn_frontend] Ignoring deselect_behavior_notes("
+                                   << hipdnn_frontend::to_string(note)
+                                   << "); this shim does not filter plans by behavior note.");
+            }
+        }
         return *this;
     }
 

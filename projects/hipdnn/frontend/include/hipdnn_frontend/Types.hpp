@@ -307,9 +307,40 @@ enum class BehaviorNote : int32_t
     REQUIRES_LAYOUT_TRANSFORM = 1, ///< Engine may require internal tensor layout transforms.
     SUPPORTS_GRAPH_CAPTURE = 2, ///< Engine supports execution during stream graph capture.
     EXTERNAL_LIBRARY_DEPENDENCY = 3, ///< Engine depends on a library outside core hipDNN.
-    SUPPORTS_EXECUTION_PLAN_SERIALIZATION = 4 ///< Engine supports execution plan serialization.
+    SUPPORTS_EXECUTION_PLAN_SERIALIZATION = 4, ///< Engine supports execution plan serialization.
+    // cuDNN-frontend name-superset values: CUDA-specific/advisory notes hipDNN
+    // engines never emit, present so the cuDNN-shim spellings alias 1:1.
+    NOT_SET = 5, ///< No behavior note set (cuDNN compatibility).
+    REQUIRES_FILTER_INT8x32_REORDER = 6, ///< cuDNN INT8x32 filter reorder (advisory).
+    REQUIRES_BIAS_INT8x32_REORDER = 7, ///< cuDNN INT8x32 bias reorder (advisory).
+    SUPPORTS_CUDA_GRAPH_NATIVE_API = 8, ///< cuDNN CUDA-graph native API (advisory).
+    CUBLASLT_DEPENDENCY = 9 ///< cuDNN cuBLASLt dependency (advisory).
 };
 typedef BehaviorNote BehaviorNote_t; ///< @brief Type alias for BehaviorNote
+
+/**
+ * @enum NumericalNote
+ * @brief Numerical-precision/behavior metadata reported by an engine.
+ *
+ * Value set mirrors the cuDNN frontend NumericalNote_t for source compatibility.
+ * hipDNN does not yet surface per-plan numerical-note metadata, so these are
+ * accepted for API parity and triaged by the cuDNN-compatibility shim.
+ */
+enum class NumericalNote : int32_t
+{
+    NOT_SET = 0, ///< No numerical note set.
+    TENSOR_CORE = 1, ///< Engine uses tensor-core instructions.
+    DOWN_CONVERT_INPUTS = 2, ///< Engine down-converts inputs to lower precision.
+    REDUCED_PRECISION_REDUCTION = 3, ///< Engine reduces in reduced precision.
+    FFT = 4, ///< Engine uses an FFT-based algorithm.
+    NONDETERMINISTIC = 5, ///< Engine may produce non-deterministic results.
+    WINOGRAD = 6, ///< Engine uses a Winograd algorithm.
+    WINOGRAD_TILE_4x4 = 7, ///< Winograd with a 4x4 tile.
+    WINOGRAD_TILE_6x6 = 8, ///< Winograd with a 6x6 tile.
+    WINOGRAD_TILE_13x13 = 9, ///< Winograd with a 13x13 tile.
+    STRICT_NAN_PROP = 10 ///< Engine strictly propagates NaNs.
+};
+typedef NumericalNote NumericalNote_t; ///< @brief Type alias for NumericalNote
 
 /**
  * @enum BuildPlanPolicy
@@ -1053,12 +1084,63 @@ inline const char* to_string(const BehaviorNote& note)
         return "EXTERNAL_LIBRARY_DEPENDENCY";
     case BehaviorNote::SUPPORTS_EXECUTION_PLAN_SERIALIZATION:
         return "SUPPORTS_EXECUTION_PLAN_SERIALIZATION";
+    case BehaviorNote::NOT_SET:
+        return "NOT_SET";
+    case BehaviorNote::REQUIRES_FILTER_INT8x32_REORDER:
+        return "REQUIRES_FILTER_INT8x32_REORDER";
+    case BehaviorNote::REQUIRES_BIAS_INT8x32_REORDER:
+        return "REQUIRES_BIAS_INT8x32_REORDER";
+    case BehaviorNote::SUPPORTS_CUDA_GRAPH_NATIVE_API:
+        return "SUPPORTS_CUDA_GRAPH_NATIVE_API";
+    case BehaviorNote::CUBLASLT_DEPENDENCY:
+        return "CUBLASLT_DEPENDENCY";
     default:
         return "unknown";
     }
 }
 
 inline std::ostream& operator<<(std::ostream& os, const BehaviorNote& note)
+{
+    os << to_string(note);
+    return os;
+}
+
+/// @brief Convert NumericalNote to a human-readable string
+/// @param note The numerical note to convert
+/// @return A C-string representation of the numerical note
+// NOLINTNEXTLINE(readability-identifier-naming)
+inline const char* to_string(const NumericalNote& note)
+{
+    switch(note)
+    {
+    case NumericalNote::NOT_SET:
+        return "NOT_SET";
+    case NumericalNote::TENSOR_CORE:
+        return "TENSOR_CORE";
+    case NumericalNote::DOWN_CONVERT_INPUTS:
+        return "DOWN_CONVERT_INPUTS";
+    case NumericalNote::REDUCED_PRECISION_REDUCTION:
+        return "REDUCED_PRECISION_REDUCTION";
+    case NumericalNote::FFT:
+        return "FFT";
+    case NumericalNote::NONDETERMINISTIC:
+        return "NONDETERMINISTIC";
+    case NumericalNote::WINOGRAD:
+        return "WINOGRAD";
+    case NumericalNote::WINOGRAD_TILE_4x4:
+        return "WINOGRAD_TILE_4x4";
+    case NumericalNote::WINOGRAD_TILE_6x6:
+        return "WINOGRAD_TILE_6x6";
+    case NumericalNote::WINOGRAD_TILE_13x13:
+        return "WINOGRAD_TILE_13x13";
+    case NumericalNote::STRICT_NAN_PROP:
+        return "STRICT_NAN_PROP";
+    default:
+        return "unknown";
+    }
+}
+
+inline std::ostream& operator<<(std::ostream& os, const NumericalNote& note)
 {
     os << to_string(note);
     return os;

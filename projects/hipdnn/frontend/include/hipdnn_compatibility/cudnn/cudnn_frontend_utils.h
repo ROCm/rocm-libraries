@@ -34,6 +34,7 @@ using hipdnn_frontend::DataType_t;
 using hipdnn_frontend::DiagonalAlignment_t;
 using hipdnn_frontend::HeurMode_t;
 using hipdnn_frontend::NormFwdPhase_t;
+using hipdnn_frontend::NumericalNote_t;
 using hipdnn_frontend::PaddingMode_t;
 using hipdnn_frontend::PointwiseMode_t;
 using hipdnn_frontend::ReductionMode_t;
@@ -52,10 +53,10 @@ struct DeviceProperties
 {
 };
 
-// Other cuDNN FE-namespace enums (NumericalNote_t, NormMode_t, RngDistribution_t,
-// DescriptorType_t, MoeGroupedMatmulMode_t, TensorReordering_t, ReshapeMode_t)
-// are not aliased yet: hipDNN does not publish them and their nodes are out of
-// scope. They are aliased when their node lands.
+// Other cuDNN FE-namespace enums (NormMode_t, RngDistribution_t, DescriptorType_t,
+// MoeGroupedMatmulMode_t, TensorReordering_t, ReshapeMode_t) are not aliased yet:
+// hipDNN does not publish them and their nodes are out of scope. They are aliased
+// when their node lands.
 
 } // namespace hipdnn_frontend::compatibility::cudnn_frontend
 
