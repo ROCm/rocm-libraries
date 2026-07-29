@@ -30,6 +30,65 @@ from .Architectures import SUPPORTED_ISA
 from .Types import IsaVersion
 
 ################################################################################
+# SwInstructionPrefetch bitmask API
+################################################################################
+# Single integer knob replacing the legacy (SwInstructionPrefetch: bool,
+# SwInstructionPrefetchAbs: bool) pair. Domain:
+#   -1 Auto      : resolve by architecture (Absolute on gfx1250 non-Stream-K,
+#                  Relative otherwise).
+#    0 Off       : no software instruction prefetch.
+#    1 Relative  : PC-relative prefetch (s_prefetch_inst_pc_rel; legacy default).
+#    2 Absolute  : absolute prefetch (s_prefetch_inst + label-fixed base);
+#                  gfx1250 non-Stream-K only.
+# Legacy booleans remain accepted as a deprecated alias so already-shipped
+# library-logic YAMLs (which carry `SwInstructionPrefetch: true`) keep loading
+# without a mass rewrite: True -> Relative(1), False -> Off(0).
+SW_INSTRUCTION_PREFETCH_AUTO = -1
+SW_INSTRUCTION_PREFETCH_OFF = 0
+SW_INSTRUCTION_PREFETCH_RELATIVE = 1
+SW_INSTRUCTION_PREFETCH_ABSOLUTE = 2
+
+
+def normalizeSwInstructionPrefetch(value):
+    """Map the SwInstructionPrefetch value (int bitmask or legacy bool) to the
+    canonical integer mode. ``True`` -> Relative(1), ``False`` -> Off(0)."""
+    # bool is a subclass of int, so check it first.
+    if isinstance(value, bool):
+        return SW_INSTRUCTION_PREFETCH_RELATIVE if value else SW_INSTRUCTION_PREFETCH_OFF
+    return int(value)
+
+
+def resolveSwInstructionPrefetch(value, isGfx1250, isStreamK, isF64=False):
+    """Resolve the SwInstructionPrefetch mode to the two module-option enables
+    the StinkyTofu passes read: ``(enableRelative, enableAbsolute)``.
+
+    Auto(-1) resolves to Absolute on gfx1250 non-Stream-K non-f64, and Relative
+    otherwise (Relative is a no-op on non-gfx1250, where StinkyTofu does not
+    run). Explicit Absolute(2) on Stream-K / non-gfx1250 / f64 is rejected
+    earlier in Solution.assignProblemIndependentDerivedParameters; the value it
+    maps to here is neutralized downstream by the baseSgpr=-1 gate regardless.
+
+    f64 (double) is excluded from Absolute: its OptNLL epilogue routinely exceeds
+    the 64 KiB I-cache (bucket-c fleet-wide) so the abs cover/ladder yields no
+    reliable benefit, and its sgprAlpha is a 2-dword pair (the OptNLL-aware
+    Case-B fp32 predicate does not apply). See design doc §16.8/§16.13.
+    """
+    mode = normalizeSwInstructionPrefetch(value)
+    if mode == SW_INSTRUCTION_PREFETCH_OFF:
+        return (False, False)
+    if mode == SW_INSTRUCTION_PREFETCH_RELATIVE:
+        return (True, False)
+    if mode == SW_INSTRUCTION_PREFETCH_ABSOLUTE:
+        # Absolute on f64 is rejected earlier; defensively fall back to Relative
+        # if it ever reaches this point.
+        return (True, False) if isF64 else (False, True)
+    # Auto
+    if isGfx1250 and not isStreamK and not isF64:
+        return (False, True)
+    return (True, False)
+
+
+################################################################################
 # Enumerate Valid Solution Parameters
 ################################################################################
 
@@ -358,16 +417,30 @@ validParameters = { # we need to make sure this matches develop
     # don't create a whole copy of the Unroll loop with loads removed - instead
     # use buffer limits to suppress global loads and ignore unnecessary ds_reads
     "SuppressNoLoadLoop": [False, True],
-    # StinkyTofu: whether SwPrefetchInsertionPass may insert software instruction prefetch.
-    # True: Turn on StinkyTofu instruction prefetch for this solution (extra SGPR on supported ISAs only).
-    # False: no prefetch SGPR, prefetch pass disabled for this kernel.
+    # StinkyTofu: whether SwInstructionPrefetchRelStaticPass may insert software instruction prefetch.
+    # StinkyTofu software instruction-prefetch mode (single integer bitmask; see
+    # SW_INSTRUCTION_PREFETCH_* above). -1 Auto, 0 Off, 1 Relative, 2 Absolute.
     #
     # Purpose: command-processor (CP) prefetch only covers a bounded amount of code. When
     # the kernel's assembly footprint is large enough to exceed that window, the front of the
     # kernel can fall out of the I-cache before execution reaches it, causing misses. Software
     # prefetch instructions bring hot code back under software control so execution stays ahead of
     # the fetch pointer and avoids those misses.
-    "SwInstructionPrefetch": [False, True],
+    #
+    # Relative(1): PC-relative prefetch (s_prefetch_inst_pc_rel; no reserved SGPR needed).
+    # Absolute(2): absolute prefetch (s_prefetch_inst) using a label-fixed base address built from
+    #   s_getpc_b64 + s_add_u32; gfx1250 non-Stream-K only. Static regime (32640 < totalBytes <=
+    #   65536): single-label + koffset burst at entry BB. Dynamic regime (totalBytes > 65536):
+    #   run-time-targeted policy — emits a predicated prefetch ladder after label_MultiGemmEnd
+    #   (SwInstructionPrefetchAbsDynamicPass). The 3-SGPR base (even-aligned pair s[base:base+1] +
+    #   scratch s[base+2]) is auto-allocated in KernelWriter (reserved past the kernel-argument
+    #   region, then freed at label_MultiGemmEnd for body reuse) — no manual SGPR index needed.
+    # Auto(-1): Absolute on gfx1250 non-Stream-K, Relative otherwise.
+    # Explicit Absolute(2) on Stream-K / non-gfx1250 is rejected in Solution.py.
+    #
+    # Legacy booleans are accepted as a deprecated alias (True -> Relative, False -> Off) so
+    # already-shipped library-logic YAMLs keep loading; hence bool is a valid type here.
+    "SwInstructionPrefetch": [-1, 0, 1, 2, False, True],
     # For PrefetchGlobalRead=1, create a second copy of the unroll loop with
     # the LDS pointer swaps expanded into inline constants for LDS read and write instructions
     # This eliminates 4 vector XOR instructions used for pointer swap
