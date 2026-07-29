@@ -3408,9 +3408,24 @@ class LogicalScheduler:
         self._preloop_emitted = [[emitted]]
         return self._preloop_emitted
 
-    def _emitLoop(self, writer, kernel, label, emitted_3d, schedule=True):
+    @staticmethod
+    def _stinkyRegionModuleName(section):
+        """Map subtile loop section ids to classic StinkyTofu region module names.
+
+        Gfx1250 waitcnt auto-detection keys off Module(\"loopBody\") and
+        Module(\"noLoadLoopBody\"). Keep the original section id in comments.
+        """
+        if section.startswith("NLL_C") or section == "TAILLOOP":
+            return "noLoadLoopBody"
+        if section == "PRELOOP" or section.startswith(("MAINLOOP_", "NGLL_")):
+            return "loopBody"
+
+        return section
+
+    def _emitLoop(self, writer, kernel, section, emitted_3d, schedule=True):
         """Emit a loop section from a 3D emitted structure.
 
+        section: logical loop id for comments/debug (PRELOOP, MAINLOOP_C0, NLL_C0, ...).
         emitted_3d: [partition][subIterK][EmittedModule]
 
         When schedule=True and a group has MFMAs, calls instructionSchedule
@@ -3421,8 +3436,6 @@ class LogicalScheduler:
             _MIN_MFMA_GAP_DS_READ_TO_WAIT_DEFAULT,
             _MIN_MFMA_GAP_DS_READ_TO_WAIT_GFX1250,
         )
-        from Tensile.Components.Subtile.WaitAluInsertion import (
-            insertLRSwapRawWaitAlu, setMatrixReuse, insertLRSwapWarWaitAlu)
         from rocisa.code import Module, Label
         from rocisa.container import sgpr
         from rocisa.instruction import SCmpEQU32, SCBranchSCC0, SMovB32
@@ -3433,10 +3446,10 @@ class LogicalScheduler:
                               if isGfx1250
                               else _MIN_MFMA_GAP_DS_READ_TO_WAIT_DEFAULT)
 
-        module = Module(label)
-        module.addComment0(f"{label} start")
+        module = Module(self._stinkyRegionModuleName(section))
+        module.addComment0(f"{section} start")
         use_pap_preloop_skip = (
-            label == "PRELOOP"
+            section == "PRELOOP"
             and kernel.get("UseSubtileImpl")
             and kernel.get("PrefetchAcrossPersistent")
             and kernel.get("StreamK") == 3
@@ -3476,18 +3489,7 @@ class LogicalScheduler:
             module.add(pap_merge_label)
             module.add(SMovB32(dst=sgpr("SkPrefetchPrimed"), src=0,
                                comment="Subtile PAP: clear after first PRELOOP GR merge"))
-        module.addComment0(f"{label} end")
-        # SCHED_MODE 2: guard the LR offset-swap -> ds_read RAW hazard once, against
-        # the final post-schedule order (no-op on other archs).
-        module = insertLRSwapRawWaitAlu(module, writer, kernel)
-        # gfx1250: enable WMMA matrix-A reuse on the final post-schedule order.
-        module = setMatrixReuse(module, writer, kernel, 'a')
-        module = setMatrixReuse(module, writer, kernel, 'b')
-        # PGR=0 only: the unprefetched loop puts the ds_read of an LR offset
-        # right before the swap that overwrites it.  PGR>=1 prefetch separates
-        # them (swap hoisted ahead, dscnt drain between), so no WAR can form.
-        if self.config.pgr == 0 and label.startswith("MAINLOOP"):
-            module = insertLRSwapWarWaitAlu(module, writer, kernel)
+        module.addComment0(f"{section} end")
         # Cluster barrier: splice both halves against the final post-schedule order.
         # Signal goes right after the mainloop's existing workgroup barrier (reusing
         # that sync); the wait is appended at the end to hide its cross-CU latency.
@@ -3551,7 +3553,8 @@ class LogicalScheduler:
         assert self._emitter is not None, \
             "populate_instructions() must be called first"
 
-        module = Module("MainAndExitLoops")
+        module = Module("loopBody")
+        module.addComment0("MainAndExitLoops")
         uf = self.unroll_factor
 
         # gfx1250 requires a loop-back/exit s_cbranch to be alone/first after an
@@ -3751,22 +3754,26 @@ class LogicalScheduler:
         return module
 
     def emitTailLoop(self, writer, kernel):
-        """Emit the tail loop body only (no counter setup, no skip branch).
+        """Emit the tail loop as top-level ST-visible modules.
 
-        Returns an empty Module when NoTailLoop is set. The caller is
-        responsible for emitting calculateLoopNumIter(-1) before this and
-        closeLoop(emitEndLabelOnly=True) after, mirroring the legacy
-        KernelWriter pattern.
+        Returns [tailSetup, tailLoopBody, tailCleanup].  tailLoopBody is
+        Module(\"noLoadLoopBody\") from _emitLoop so Gfx1250 waitcnt
+        auto-detection covers the tail.  The caller still emits
+        calculateLoopNumIter(-1) before these parts and closeLoop after.
+
+        Returns three empty modules when NoTailLoop is set.
         """
         assert self._emitter is not None, \
             "populate_instructions() must be called first"
 
-        module = Module("TailLoop")
+        setup = Module("TailLoopSetup")
+        loop_body = Module(self._stinkyRegionModuleName("TAILLOOP"))
+        cleanup = Module("TailLoopCleanup")
 
         if kernel["NoTailLoop"]:
-            return module
+            return [setup, loop_body, cleanup]
 
-        module.addComment0("TAILLOOP")
+        setup.addComment0("TAILLOOP")
         # Swap to the flat tail vgpr tile layout. Frees the mainloop's
         # per-partition tiles back to the pool and reallocates a flat set
         # sized by _compute_flat_tail_tile_state (already invoked by
@@ -3775,14 +3782,14 @@ class LogicalScheduler:
         # init must run before populate so each MaskKOp in the body can read
         # the mask vgprs (kReg, vDiff, …) that init allocates.
         for inst in self._emitter.emit_mask_k_init():
-            module.add(inst)
+            setup.add(inst)
         self._emitter.populate(self._tailloop_emitted, unroll_iter=0)
-        module.add(self._emitLoop(writer, kernel, "TAILLOOP",
-                                  self._tailloop_emitted,
-                                  schedule=False))
+        loop_body = self._emitLoop(writer, kernel, "TAILLOOP",
+                                   self._tailloop_emitted,
+                                   schedule=False)
         for inst in self._emitter.emit_mask_k_done():
-            module.add(inst)
-        return module
+            cleanup.add(inst)
+        return [setup, loop_body, cleanup]
 
     # ── VGPR tile allocation ──────────────────────────────
 
