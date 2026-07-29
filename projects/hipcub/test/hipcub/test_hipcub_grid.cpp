@@ -28,7 +28,6 @@
  ******************************************************************************/
 
 #include "common_test_header.hpp"
-#include "test_utils_controller.hpp"
 
 #include <hipcub/block/block_reduce.hpp>
 #include <hipcub/thread/thread_operators.hpp>
@@ -36,6 +35,9 @@
 #include <hipcub/grid/grid_barrier.hpp>
 #include <hipcub/grid/grid_even_share.hpp>
 #include <hipcub/grid/grid_queue.hpp>
+
+// Test utils
+#include "test_utils_controller.hpp"
 
 #if defined(__HIP_PLATFORM_NVIDIA__)
 _CCCL_SUPPRESS_DEPRECATED_PUSH
@@ -56,7 +58,10 @@ void KernelGridBarrier(hipcub::GridBarrier global_barrier, int iterations)
     }
 }
 
-TEST(HipcubGridTests, GridBarrier)
+class HipcubGridTests : public test_controller::ControlledTest<>
+{};
+
+TEST_F(HipcubGridTests, GridBarrier)
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
@@ -101,6 +106,7 @@ TEST(HipcubGridTests, GridBarrier)
 #else
     HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
 #endif
+    CHECK_SIZE_ENABLEMENT(grid_size);
     HIP_CHECK(global_barrier.Setup(grid_size));
 
     KernelGridBarrier<<<grid_size, block_size>>>(global_barrier, iterations);

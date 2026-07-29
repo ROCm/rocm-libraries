@@ -108,7 +108,6 @@ TYPED_TEST(HipcubDeviceReduceByKey, ReduceByKey)
         for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
         {
             SCOPED_TRACE(testing::Message() << "with size= " << size);
-            CHECK_SIZE_ENABLEMENT(size);
 
             // Generate data and calculate expected results
             std::vector<key_type> unique_expected;
