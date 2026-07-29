@@ -102,15 +102,15 @@ static int make_cfg(int idx, rocke_implicit_gemm_conv_spec_t* spec, const char**
         *arch = "gfx950";
         return 0;
     case 11:
-        /* v1 pipeline, default epilogue. */
+        /* basic pipeline, default epilogue. */
         spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
-        spec->pipeline = "v1";
+        spec->pipeline = "basic";
         *arch = "gfx950";
         return 0;
     case 12:
-        /* v1 pipeline, cshuffle epilogue. */
+        /* basic pipeline, cshuffle epilogue. */
         spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
-        spec->pipeline = "v1";
+        spec->pipeline = "basic";
         spec->epilogue = "cshuffle";
         *arch = "gfx950";
         return 0;

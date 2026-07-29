@@ -190,7 +190,7 @@ class CoalescedTileLoader:
         and the loaded VGPR value — that can later be passed to
         :meth:`store_lds` to emit the matching ``smem_store_vN`` operations.
         This split is required by pipelines that need to issue the global read for
-        tile k+1 before the LDS write, e.g. CK pipeline_v1.
+        tile k+1 before the LDS write, e.g. CK pipeline_basic.
         """
         if self.use_buffer_rsrc and rsrc is None:
             raise ValueError("CoalescedTileLoader: use_buffer_rsrc=True requires rsrc")

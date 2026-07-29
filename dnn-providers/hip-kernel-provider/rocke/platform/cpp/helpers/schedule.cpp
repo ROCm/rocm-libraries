@@ -284,11 +284,11 @@ rocke_schedule_policy_t rocke_schedule_policy_for_pipeline(rocke_ir_builder_t* b
         p.mode = "intrawave";
         return p;
     }
-    else if(strcmp(pipeline, "v1") == 0)
+    else if(strcmp(pipeline, "basic") == 0)
     {
-        /* CK pipeline_v1: naive single-buffer pipeline with global-read/
+        /* CK pipeline_basic: naive single-buffer pipeline with global-read/
          * compute overlap. No scheduling hints (lowest resource pressure). */
-        p.name = "v1";
+        p.name = "basic";
         p.emit_hints = false;
         return p;
     }

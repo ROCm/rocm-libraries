@@ -96,10 +96,10 @@ void rocke_conv_emit_kloop_unroll(rocke_conv_build_ctx_t* ctx)
 }
 
 /* ===================================================================== *
- * rocke_conv_emit_kloop_v1
+ * rocke_conv_emit_kloop_basic
  *
- * CK pipeline_v1: single-buffer, global-read/compute overlap.
- * Mirrors the Python ``elif spec.pipeline == "v1":`` branch.
+ * CK pipeline_basic: single-buffer, global-read/compute overlap.
+ * Mirrors the Python ``elif spec.pipeline == "basic":`` branch.
  *
  * Per-iteration order (byte-identical to Python):
  *   emit_global_read(it+1)   buffer_load_vN (VMEM, in flight)
@@ -111,7 +111,7 @@ void rocke_conv_emit_kloop_unroll(rocke_conv_build_ctx_t* ctx)
  *                            (drains ds_reads; A_smem WAR-safe)
  *   emit_lds_write(staged)   smem_store_vN (safe to write now)
  * ===================================================================== */
-void rocke_conv_emit_kloop_v1(rocke_conv_build_ctx_t* ctx)
+void rocke_conv_emit_kloop_basic(rocke_conv_build_ctx_t* ctx)
 {
     rocke_ir_builder_t* b = ctx->b;
     const rocke_conv_problem_t* p = ctx->p;

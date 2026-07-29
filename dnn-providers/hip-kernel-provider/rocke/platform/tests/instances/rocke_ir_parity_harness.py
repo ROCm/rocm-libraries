@@ -639,13 +639,13 @@ def cases():
             tile_k=16,
         ),
     )
-    # pipeline=v1: single-buffer global-read/compute overlap on gfx950.
+    # pipeline=basic: single-buffer global-read/compute overlap on gfx950.
     add(
         "conv",
-        "conv/gfx950/n1h8c16k32r3/v1_default",
+        "conv/gfx950/n1h8c16k32r3/basic_default",
         "gfx950",
         build_conv(
-            "irhash_conv_950_v1_a",
+            "irhash_conv_950_basic_a",
             "gfx950",
             conv1,
             wave_size=64,
@@ -655,16 +655,16 @@ def cases():
             tile_m=64,
             tile_n=64,
             tile_k=32,
-            pipeline="v1",
+            pipeline="basic",
             epilogue="default",
         ),
     )
     add(
         "conv",
-        "conv/gfx950/n1h8c16k32r3/v1_cshuffle",
+        "conv/gfx950/n1h8c16k32r3/basic_cshuffle",
         "gfx950",
         build_conv(
-            "irhash_conv_950_v1_b",
+            "irhash_conv_950_basic_b",
             "gfx950",
             conv1,
             wave_size=64,
@@ -674,7 +674,7 @@ def cases():
             tile_m=64,
             tile_n=64,
             tile_k=32,
-            pipeline="v1",
+            pipeline="basic",
             epilogue="cshuffle",
         ),
     )

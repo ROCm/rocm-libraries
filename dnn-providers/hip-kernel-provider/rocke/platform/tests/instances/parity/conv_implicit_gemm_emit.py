@@ -208,7 +208,7 @@ def _spec(idx: int):
             "gfx950",
         )
     if idx == 11:
-        # v1 pipeline, default epilogue (basic global-read/compute overlap).
+        # basic pipeline, default epilogue (single-buffer global-read/compute overlap).
         p = _cp(N=8, Hi=56, Wi=56, C=64, K=64, fy=3, fx=3)
         return (
             ImplicitGemmConvSpec(
@@ -221,13 +221,13 @@ def _spec(idx: int):
                 warp_tile_m=32,
                 warp_tile_n=32,
                 warp_tile_k=16,
-                pipeline="v1",
+                pipeline="basic",
                 epilogue="default",
             ),
             "gfx950",
         )
     if idx == 12:
-        # v1 pipeline, cshuffle epilogue.
+        # basic pipeline, cshuffle epilogue.
         p = _cp(N=8, Hi=56, Wi=56, C=64, K=64, fy=3, fx=3)
         return (
             ImplicitGemmConvSpec(
@@ -240,7 +240,7 @@ def _spec(idx: int):
                 warp_tile_m=32,
                 warp_tile_n=32,
                 warp_tile_k=16,
-                pipeline="v1",
+                pipeline="basic",
                 epilogue="cshuffle",
             ),
             "gfx950",

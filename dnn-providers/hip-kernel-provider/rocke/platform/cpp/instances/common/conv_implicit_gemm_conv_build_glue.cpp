@@ -559,9 +559,9 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv(rocke_ir_builder_t* b,
      *
      *   unroll_k     -> kloop_unroll  (Python-unrolled prologue+ping-pong;
      *                                  2 LDS buffers; no scf.for_iter)
-     *   pipeline="v1"-> kloop_v1     (split global_read/lds_write;
-     *                                  single LDS buffer; no scf.for_iter;
-     *                                  VMEM/compute overlap without double-buf)
+     *   pipeline="basic"-> kloop_basic (split global_read/lds_write;
+     *                                   single LDS buffer; no scf.for_iter;
+     *                                   VMEM/compute overlap without double-buf)
      *   else no async -> kloop_simple (scf.for_iter; mem/compv3/compv4 all
      *                                  share this; pipeline string only
      *                                  affects schedule hints inside mfma)
@@ -571,9 +571,9 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv(rocke_ir_builder_t* b,
     {
         rocke_conv_emit_kloop_unroll(&ctx);
     }
-    else if(spec->pipeline != NULL && strcmp(spec->pipeline, "v1") == 0)
+    else if(spec->pipeline != NULL && strcmp(spec->pipeline, "basic") == 0)
     {
-        rocke_conv_emit_kloop_v1(&ctx);
+        rocke_conv_emit_kloop_basic(&ctx);
     }
     else if(!ctx.async_dma)
     {

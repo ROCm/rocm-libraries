@@ -591,12 +591,12 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
             f"> {target.lds_capacity_bytes} cap on {arch}"
         )
 
-    # v1 pipeline uses the split emit_global_read/emit_lds_write path which
+    # basic pipeline uses the split emit_global_read/emit_lds_write path which
     # is only available on the sync (non-async-DMA) CoalescedTileLoader path.
     # async_dma uses raw_ptr_buffer_load_lds which atomically loads directly
     # into LDS with no VGPR staging, making the split impossible.
-    if spec.pipeline == "v1" and spec.async_dma:
-        return False, "pipeline='v1' is incompatible with async_dma=True"
+    if spec.pipeline == "basic" and spec.async_dma:
+        return False, "pipeline='basic' is incompatible with async_dma=True"
 
     # WMMA (RDNA wave32) coverage mirrors the unified GEMM's narrow subset: the
     # 16x16x16 atom with the simple ``mem`` pipeline + ``default`` epilogue and
@@ -1408,7 +1408,7 @@ def build_implicit_gemm_conv(
         Returns ``(k_off, a_staged, b_staged)`` — the tile offset and the two
         lists of ``(row, col, v)`` triples from :meth:`CoalescedTileLoader.load_global`.
         The caller must later call :func:`emit_lds_write` to commit these values
-        to LDS. Only valid on the sync (non-async-DMA) path; CK pipeline_v1
+        to LDS. Only valid on the sync (non-async-DMA) path; CK pipeline_basic
         uses this to overlap VMEM latency with MFMA compute.
         """
         k_off_capture[0] = k_off
@@ -1604,7 +1604,7 @@ def build_implicit_gemm_conv(
     # 1) unroll_k: Python-unroll + double-buffer ping-pong (no scf.for_iter).
     #    Stage tile t+1 into the alternate buffer while MFMA runs on tile t.
     #
-    # 2) pipeline="v1": Python-unroll + single buffer + split global_read /
+    # 2) pipeline="basic": Python-unroll + single buffer + split global_read /
     #    lds_write (no scf.for_iter). buffer_load_vN for tile t+1 is issued
     #    before sync+mfma, smem_store_vN is deferred until after the second
     #    sync. Overlaps VMEM latency with compute without double-buffering.
@@ -1653,8 +1653,8 @@ def build_implicit_gemm_conv(
             b.sync()
 
         final_accs = current_accs
-    elif spec.pipeline == "v1":
-        # CK pipeline_v1: single-buffer, global-read/compute overlap.
+    elif spec.pipeline == "basic":
+        # CK pipeline_basic: single-buffer, global-read/compute overlap.
         #
         # The buffer_load_vN for tile k+1 is issued before the sync+mfma for
         # tile k so VMEM latency is hidden behind compute. The LDS write

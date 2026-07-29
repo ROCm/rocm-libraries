@@ -294,7 +294,7 @@ void rocke_coalesced_tile_loader_load(rocke_ir_builder_t* b,
 /* ============================================================================
  * CoalescedTileLoader split-load helpers (load_global / store_lds)
  *
- * Mirror of Python load_global() / store_lds() added for CK pipeline_v1.
+ * Mirror of Python load_global() / store_lds() added for CK pipeline_basic.
  * load_global emits only buffer_load_vN; store_lds emits only smem_store_vN.
  * ========================================================================== */
 

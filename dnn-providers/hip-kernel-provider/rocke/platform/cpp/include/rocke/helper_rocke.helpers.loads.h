@@ -188,7 +188,7 @@ typedef struct rocke_ctl_staged
  * Issues the global memory reads into VGPR SSA values and stores them in
  * `staged` (which the caller must allocate). The matching smem_store_vN
  * ops are deferred to rocke_coalesced_tile_loader_store_lds(). This split is
- * required by CK pipeline_v1 where the global read for tile k+1 must be issued
+ * required by CK pipeline_basic where the global read for tile k+1 must be issued
  * before the sync+mfma for tile k but the LDS write must come after.
  *
  * Mirrors Python CoalescedTileLoader.load_global() -> list[(row, col, v)]. */
