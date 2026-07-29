@@ -98,11 +98,8 @@ hundreds of near-duplicate files.
 A prototype for a single operation (SDPA) matches and selects a prebuilt kernel end-to-end from a
 generic engine plus a thin operation-specific adapter, and proves the AOT load path
 (rocKE, [PR #9207](https://github.com/ROCm/rocm-libraries/pull/9207)); running the selected kernel is
-its remaining step. That prototype's hand-written C++ client has since been retired deliberately,
-because this design replaces it: the generalization below is what it is being replaced with, not a
-parallel effort. This RFC generalizes that adapter into a complete data description of a kernel and
-makes that
-generalized form the delivery vehicle: any kernel expressible as a code object plus a description of
+its remaining step. This RFC generalizes that adapter into a complete data description of a kernel and
+makes that generalized form the delivery vehicle: any kernel expressible as a code object plus a description of
 when and how to run it is ingested the same way.
 
 ![Hand-written C++ per kernel today versus dropping in descriptor data](../images/ukd_before_after.svg)
@@ -202,12 +199,13 @@ and one metadata schema cover exactly the kernels it owns. Legacy engines are no
 so mapping UED onto the existing registration is a restructuring of how engines are organized, not a
 description of current practice.
 
-**A note on the name.** "Engine descriptor" is an overloaded term in hipDNN. The host has one: the
-caller-facing object that names an engine and its knob settings for a graph. A UED is not that; it is
-the provider-side data that *defines* an engine, its heuristic, and its metadata schema. The two never
-appear in the same layer, so where this document says "engine descriptor" unqualified the surrounding
-context settles which is meant, and "UED" always means the descriptor file. Renaming the UED was
-considered and rejected, because the U*D naming carries the family's structure.
+**A note on the name.** hipDNN's host-side engine descriptor and a UED describe the same engine from
+two sides. The host object is what a caller holds: an engine plus the knob settings it is being asked
+to run with, for one graph. A UED is the provider-side definition that engine is built from, its
+identity, its heuristic, its metadata schema, and the fields it exposes as knobs. One is the
+definition, the other is a caller's handle on it, and the knobs a caller sets through the host object
+are exactly the KMD fields the UED chose to expose. This document uses "UED" for the descriptor file
+throughout, and "engine descriptor" only where the host object is meant.
 
 A UKD carries no logic of its own: it is just its source details plus metadata values, and it inherits
 when it applies, how it launches, how it is ranked, and its schema from its KDP and that KDP's engine
@@ -318,7 +316,7 @@ and each is additive, but they are named here rather than left to be discovered:
 |---|---|
 | A **graph identity**, an additive field carried on the graph ([Section 8](#8-end-to-end-flow)) | so a provider can cache per-graph work instead of reconstructing an identity of its own |
 | An extended **`$device.*` property set** ([Section 5](#5-matching-and-the-umd)) | the expression vocabulary reads device facts hipDNN does not carry today |
-| **UED names** in hipDNN's engine-id space ([Section 4](#4-descriptor-formats)) | a descriptor-backed engine needs an id the host already understands |
+| **UED names** in hipDNN's engine-id space, registered at load ([Section 4](#4-descriptor-formats)) | a descriptor-backed engine needs an id the host already understands, and a name diagnostics can print |
 | A **workspace entry point for custom plans** ([Section 6](#6-dispatch-and-workspace)) | the workspace query arrives before a plan exists, so a custom-plan handler must be able to answer it |
 
 ---
@@ -342,6 +340,15 @@ than at build, the collision that a compile-time registration would have caught 
 check**: two UED names colliding, whether by duplicate name or by hash, is an error naming both,
 reported like any other validation failure ([Section 10](#10-observability-and-diagnostics)). The id
 space is sized for this; hundreds to low thousands of engines is the design target, not millions.
+
+Naming both requires one small addition. hipDNN's name-to-id map is populated by a compile-time
+registration macro, so it holds only engines built into the tree; a descriptor-backed engine never
+reaches it, and today's diagnostics fall back to the numeric id, rendered as hex, wherever a name is
+wanted. That is enough for a hand-written engine, whose name is in the source, and not enough for a
+dropped-in one, whose name exists only in its UED. So the loader registers each UED's name against
+its id as the descriptor loads, which is what lets a collision name both descriptors, a support
+claim ([RFC 0015](0015_EngineSupportClaims.md)) key on the engine's real name, and an operator read
+a log line that says which engine rather than which hex value.
 
 **Each file type is versioned independently**, as `major.minor`, following ordinary semantic-version
 rules:
@@ -387,8 +394,11 @@ deliberately when it cannot.
 This mirrors an existing hipDNN mechanism rather than inventing one: a graph already carries a
 minimum-required engine-plugin API version, computed in the plugin SDK from the optional features it
 uses, and providers below that floor are excluded before their applicability check
-runs ([RFC 0005](0005_Versioning.md) section 4.6.4). Both mechanisms are finer-grained than RFC 0005's
-component-level versioning, which advances hipDNN's components in lockstep. The concrete serialization,
+runs ([RFC 0016](0016_RuntimePassByValueTensors.md) and
+[RFC 0008](0008_OverridableTensorShapesDesign.md) are the features that drive it today; the plugin's
+side of the contract is [RFC 0005](0005_Versioning.md) section 4.6.4). Both mechanisms are
+finer-grained than RFC 0005's component-level versioning, which advances hipDNN's components in
+lockstep. The concrete serialization,
 schema, and version tags for each format are specified in that format's follow-up RFC.
 
 **UED, an engine with its heuristic, metadata schema, knobs, and notes:**
@@ -410,7 +420,15 @@ schema, and version tags for each format are specified in that format's follow-u
 declares the field's type and default and every kernel already carries a value for it, so restating any
 of that in the UED would be a second source of truth that can disagree with the first. Exposing a field
 is additive and reversible: add a name to expose it, remove the name to withdraw it. Only KMD fields
-can be knobs, and a name no field matches is a load error.
+can appear in a UED's `knobs` list, and a name no field matches is a load error.
+
+That rule governs the knobs a UED *declares*. It does not displace hipDNN's reserved `global.`
+knobs, which every engine answers and no plugin may register
+([RFC 0004](0004_EngineConfigKnobs.md)). The self-measure lever of
+[Section 2](#2-the-descriptors) is one of those: it reaches a descriptor-backed engine as
+`global.benchmarking`, the same built-in knob the MIOpen provider already implements, not as a KMD
+field a UED exposes. The two namespaces do not overlap, and a descriptor-backed engine implements
+the reserved ones the way any other engine does.
 
 **A knob's legal values come from the catalog, not the schema.** What a knob offers is the set of
 values the field takes among the kernels in the catalog for this graph, never the KMD field's
@@ -621,7 +639,7 @@ operator fails load validation ([Section 10](#10-observability-and-diagnostics))
 |---|---|
 | Logical | `and`, `or`, `!` |
 | Comparison | `==`, `!=`, `<`, `<=`, `>`, `>=`, `in` |
-| Arithmetic | `+`, `-`, `*`, `%`, `ceil_div`, `min`, `max`, `rsqrt` |
+| Arithmetic | `+`, `-`, `*`, `/`, `%`, `ceil_div`, `min`, `max`, `rsqrt` |
 | Per-element | `all` |
 | Short-hands | `divisible`, `value_or_default`, and the pattern-binding `shape`/`rank` |
 | Escape hatch | registry-resolved custom operations, for checks the built-ins cannot express (below) |
@@ -684,6 +702,23 @@ are in the UMD follow-up.
 graph-shape-agnostic, so one such matcher composes into packs of either shape. Matching a pattern inside
 a larger graph, without a fixed count, is the looser JIT / general-matching mode
 ([Section 9.3](#93-future-jit-and-normalized-providers)).
+
+**Exactness runs to the kernel, not just the graph.** Node count and topology pin the *shape of the
+graph*; they say nothing about whether a given candidate kernel can serve it. A prebuilt kernel
+typically bakes quantities into its binary, a dtype, a head size, sometimes a full sequence length,
+and a graph that satisfies the pack's graph-level gates may still disagree with what a particular
+kernel baked. So the rule has a second half: **every quantity a kernel bakes must be a KMD field,
+and the pack's matcher must pin it against the graph with a `$kernel.*` criterion.** These are
+exactly the clauses the matcher is re-evaluated on per candidate, and they are what turns one
+matcher plus a kernel vector into a per-kernel applicability test.
+
+Getting this wrong is the characteristic failure of a prebuilt system, and it is silent: a matcher
+that gates dtype only as `in ["HALF", "BFLOAT16"]` accepts an fp16 graph and may hand it to a bf16
+binary, which does not fail, it returns wrong numbers. A field that is not in the KMD also cannot be
+pinned, and two kernels differing only in an unmodelled baked constant collide on the catalog key
+([Section 4](#4-descriptor-formats)). The check is mechanical, so the loader performs it: a UKD
+whose source declares a baked constant with no corresponding KMD field is a load error
+([Section 10](#10-observability-and-diagnostics)).
 
 **Formal constraint: every KDP needs an umbrella matcher.** At least one matcher in a KDP must check the
 complete graph topology it accepts, the same node_count and shape-defining criteria described above,
@@ -827,7 +862,7 @@ that operand is bound, so a dtype or layout check on an absent `$bias` neither p
 simply does not run. Testing the operand token itself is different and always runs: a bare `"$bias"`
 asks whether the operand is present, and `{"!": ["$bias"]}` asks whether it is absent. That is how a
 pack refuses a feature it cannot serve, and it is the one criterion form an unbound operand still
-answers ([Section 13.2](#132-the-matcher) rejects 23 optional operands this way).
+answers ([Section 13.2](#132-the-matcher) rejects 24 optional operands this way).
 
 **Out of scope for v1.** General N-ary commutative matching, unbounded variadic operands, and unbounded
 chains are deferred to the JIT follow-up ([Section 9.3](#93-future-jit-and-normalized-providers)); a
@@ -995,6 +1030,17 @@ metadata schema are all shared by ID.
 This is distinct from one kernel that genuinely needs several dispatches. That is a multi-launch
 pack: one UDD holding several Launches over a single match
 ([Section 15.1](#151-several-kernels-for-one-operation)), not two packs.
+
+**When optional groups multiply, count the ABIs, not the options.** Some operations vary their
+argument list over more than one independent choice at once. Batch normalization is the standard
+case: whether it saves mean and variance, and whether it maintains running statistics, are separate
+options, and a kernel exists for each of the four combinations. That is four argument lists, so by
+the rule above it is four packs, one per real ABI, sharing a matcher set and an engine. The count
+that matters is how many distinct `args_signature` shapes actually ship, which is usually far fewer
+than the combinations the options could describe, because most operations build only the
+combinations worth building. Where the shipped set really is the full cross-product and large
+enough that per-pack authoring stops paying, that is a signal the family wants a generated pack set
+rather than hand-written ones ([Section 11](#11-tooling)).
 
 ```jsonc
 {  // one UDD shared by a two-kernel pack; per-kernel geometry comes from $kernel.* metadata
@@ -1578,11 +1624,12 @@ gated modes of the same kernel file and are called out as an extension point in 
     {"kind": "op", "id": "sdpa_fwd", "op": "sdpa_fwd",
      "operands": {
        "Q": "$q", "K": "$k", "V": "$v",
-       // The 23 optional operands this family's dispatch candidate does not serve. Same field
+       // The 24 optional operands this family's dispatch candidate does not serve. Same field
        // set the retired adapter's usesUnsupportedTensor swept (SdpaGraphAdapter.cpp:101-115,
        // now removed by PR #9800; the field set itself is generic hipDNN SDPA vocabulary, not
        // specific to any one kernel family, and every one of these is genuinely absent from
        // AttentionDenseSpec's fields today).
+       "AttnScale":   "$attn_scale?",    // the scale-tensor form this pack declines; see below
        "AttnMask":    "$attn_mask?",
        "SeqLenQ":     "$seq_len_q?",     // varlen: a real AttentionDenseSpec.varlen mode, not
        "SeqLenKV":    "$seq_len_kv?",    // wired into this candidate; see Section 13.8.
@@ -1615,7 +1662,7 @@ gated modes of the same kernel file and are called out as an extension point in 
     {"==": ["$graph.node_count", 1]},
     {"==": ["$graph.node_kind", "sdpa_fwd"]},
 
-    // --- none of the 23 optional operands may be present. Each `{"!": ["$operand"]}` is a
+    // --- none of the 24 optional operands may be present. Each `{"!": ["$operand"]}` is a
     //     presence test on the operand token, which an unbound operand still answers (Section 5) ---
     {"and": [
       {"!": ["$attn_mask"]},    {"!": ["$seq_len_q"]},   {"!": ["$seq_len_kv"]},
@@ -1625,7 +1672,7 @@ gated modes of the same kernel file and are called out as an extension point in 
       {"!": ["$descale_k"]},    {"!": ["$descale_v"]},   {"!": ["$descale_s"]},
       {"!": ["$scale_s"]},      {"!": ["$scale_o"]},     {"!": ["$stats_out"]},
       {"!": ["$max_out"]},      {"!": ["$sum_exp"]},     {"!": ["$rng_dump"]},
-      {"!": ["$amax_s"]},       {"!": ["$amax_o"]}
+      {"!": ["$amax_s"]},       {"!": ["$amax_o"]},      {"!": ["$attn_scale"]}
     ]},
 
     // --- rank-4-ness and cross-tensor dim equality via capture reuse. The technique is
@@ -1636,12 +1683,23 @@ gated modes of the same kernel file and are called out as an extension point in 
     {"shape": ["$v", ["batch", "num_kv_heads", "seqlen_kv", "head_size"]]},
     {"shape": ["$o", ["batch", "num_heads",    "seqlen_q",  "head_size"]]},
 
-    // --- dtype: bf16 OR fp16 (the real family; unlike the retired example's f16-only mismatch) ---
+    // --- family-level dtype and head_size: what AttentionDenseSpec accepts at all
+    //     (__post_init__:206-207) ---
     {"in": ["$q.dtype", ["HALF", "BFLOAT16"]]},
     {"==": ["$k.dtype", "$q.dtype"]}, {"==": ["$v.dtype", "$q.dtype"]}, {"==": ["$o.dtype", "$q.dtype"]},
-
-    // --- head_size: real constraint, AttentionDenseSpec.__post_init__:206-207 ---
     {"in": ["$q.head_size", [64, 128]]},
+
+    // --- and now the kernel-level pin: this family bakes its shape and dtype into the compiled
+    //     binary, so the family-level gates above are not sufficient on their own. Each candidate
+    //     kernel must also agree with the graph on every quantity it baked, or a d64 fp16 graph
+    //     would launch a d128 bf16 code object. These are the `$kernel.*` clauses the matcher is
+    //     re-evaluated on per candidate (Section 5), and every one of them names a KMD field. ---
+    {"==": ["$q.dtype",     "$kernel.dtype"]},
+    {"==": ["$q.head_size", "$kernel.head_size"]},
+    {"==": ["$q.num_heads", "$kernel.num_heads"]},
+    {"==": ["$k.num_kv_heads", "$kernel.num_kv_heads"]},
+    {"==": ["$q.seqlen_q",  "$kernel.seqlen_q"]},
+    {"==": ["$k.seqlen_kv", "$kernel.seqlen_kv"]},
 
     // --- GQA: real constraint, __post_init__:231-235 ("a positive multiple") ---
     {"divisible": ["$q.num_heads", "$k.num_kv_heads"]},
@@ -1678,11 +1736,12 @@ gated modes of the same kernel file and are called out as an extension point in 
 
     // --- scale: this pack takes the scale from the graph rather than deriving it. Accepting the
     //     SDPA convention's implicit default would instead read `rsqrt($sdpa_fwd.head_size)`
-    //     (Section 5); requiring the attribute keeps the pack's contract narrow. Both fields are
-    //     optional scalars, so both are defaulted: a sentinel the graph cannot legally carry says
-    //     "unset", which is what makes the scale required and the scale tensor forbidden. ---
+    //     (Section 5); requiring the attribute keeps the pack's contract narrow.
+    //     attn_scale_value is an optional float with no legal zero, so defaulting it to 0.0 and
+    //     rejecting that value is a sound "must be set" test. The scale *tensor* form has no such
+    //     spare value (0 is a legal uid), so it is bound as an optional operand and rejected by
+    //     presence in the conjunction above. ---
     {"!=": [{"value_or_default": ["$sdpa_fwd.attn_scale_value", 0.0]}, 0.0]},
-    {"==": [{"value_or_default": ["$sdpa_fwd.scale_tensor_uid", 0]}, 0]},
 
     // --- gate #21-equivalent: the mask-mode classifier, written out in full in Section 13.3.
     //     The ENTIRE block returned by Section 13.3, contradiction check AND
@@ -1782,14 +1841,14 @@ unset. They differ only in the field named.
 
 **Case A: accept.** `causal_mask=true`. Every §13.2 gate passes, `mask_mode` resolves to
 `causal_top_left`, and §13.6's non-persistent UKD declares exactly that alongside `head_size=128`
-and `dtype="bf16"`. `nqb = ceil(2048/256) = 8`; `work = nqb * num_heads * batch = 8*16*1 = 128`,
+and `dtype="BFLOAT16"`. `nqb = ceil(2048/256) = 8`; `work = nqb * num_heads * batch = 8*16*1 = 128`,
 below `num_persistent`'s default of 256, so the real host-side rule in
 `_dense_spec` (`dispatch/attention.py:329-372`, `persistent = work >= num_persistent` in `"auto"`
 mode) would itself pick the non-persistent cohort for this exact shape. Applicable.
 
 **Case B: matcher decline.** Same graph plus an additive attention bias, so `$attn_mask` is bound.
 The optional-operand conjunction fails the moment that operand is present, before mask mode, dtype,
-or layout are considered. Any of the other 22 optional operands declines identically, and so does
+or layout are considered. Any of the other 23 optional operands declines identically, and so does
 `$graph.override_shape`, which rejects before any tensor is bound because this kernel bakes its
 shape at compile time and cannot serve a runtime-overridden one.
 
@@ -1852,7 +1911,7 @@ ABI at all, because every shape quantity is a Python-level compile-time constant
 (`attention_dense.py:369-370`), not a runtime argument. This is exactly the tradeoff the RFC argues
 for in "a prebuilt match is exact" ([Section 5](#5-matching-and-the-umd)): the kernel author's own docstring for
 `AttentionDenseSpec` independently confirms it in the same words ("Functional fields ... are baked
-into the kernel as constants, this is a dense, statically-sized ABI", `attention_dense.py:106-107`).
+into the kernel as constants, this is a dense, statically-sized ABI", `attention_dense.py:107-108`).
 
 The non-persistent UDD, referenced from a second KDP, differs only in the `grid` field (a real
 formula over graph dims instead of a `$kernel.*` constant) and shares the identical `args_signature`:
@@ -1904,9 +1963,15 @@ values are genuinely distinct, not just their `id`s, satisfying the RFC's own KM
   "id":     "9c53b6b0-9a1e-4b1d-8b5c-7e2d9a6f3c40",
   "name":   "attention_dense variant fields",
   "fields": [
+    // every field the compiled binary bakes, so a matcher can pin the graph to it
     {"name": "head_size",      "type": "int",    "optional": false},
     {"name": "dtype",          "type": "string",  "optional": false},
+    {"name": "num_heads",      "type": "int",     "optional": false},
+    {"name": "num_kv_heads",   "type": "int",     "optional": false},
+    {"name": "seqlen_q",       "type": "int",     "optional": false},
+    {"name": "seqlen_kv",      "type": "int",     "optional": false},
     {"name": "mask_mode",      "type": "string",  "optional": false},
+    // and the tuning axes that vary independently of the graph
     {"name": "persistent",     "type": "bool",    "optional": true, "default": false},
     {"name": "num_persistent", "type": "int",     "optional": true, "default": 256},
     {"name": "block_n",        "type": "int",     "optional": true, "default": 64}
@@ -1955,7 +2020,8 @@ values are genuinely distinct, not just their `id`s, satisfying the RFC's own KM
       // step is added to produce that artifact; that step does not exist yet.
       "kernel_source": {"kind": "hsaco",
                         "file": "rocke_attention_dense_d128_hq16_kv2_bn64_bf16_sq2048_sk2048_causal_lazyrs.co"},
-      "metadata": {"head_size": 128, "dtype": "bf16", "mask_mode": "causal_top_left",
+      "metadata": {"head_size": 128, "dtype": "BFLOAT16", "num_heads": 16, "num_kv_heads": 2,
+                   "seqlen_q": 2048, "seqlen_kv": 2048, "mask_mode": "causal_top_left",
                    "persistent": false, "block_n": 64},
       "priority":  0
     }
@@ -1976,7 +2042,8 @@ values are genuinely distinct, not just their `id`s, satisfying the RFC's own KM
       "name": "attention_dense d128 bf16 causal (persistent grid-stride, gfx950)",
       "kernel_source": {"kind": "hsaco",
                         "file": "rocke_attention_dense_d128_hq16_kv2_bn64_bf16_sq2048_sk2048_causal_lazyrs_persist256_hkvmaj.co"},
-      "metadata": {"head_size": 128, "dtype": "bf16", "mask_mode": "causal_top_left",
+      "metadata": {"head_size": 128, "dtype": "BFLOAT16", "num_heads": 16, "num_kv_heads": 2,
+                   "seqlen_q": 2048, "seqlen_kv": 2048, "mask_mode": "causal_top_left",
                    "persistent": true, "num_persistent": 256, "block_n": 64},
       // Given a genuine, measured preference (512 -> 853 TFLOPS, +70%, attention_dense.py:162)
       // for the persistent cohort wherever the custom_library heuristic's threshold call is not
@@ -2399,6 +2466,11 @@ follow-up RFCs rather than solved now.
   parse input that, on the drop-in path, may be untrusted or simply malformed. They must be bounded
   (recursion, step count, and size limits) and fail closed rather than crash, and shape and workspace
   arithmetic must use checked-width integers that fail closed on overflow rather than under-allocate.
+  The same applies to the launch configuration a UDD computes: a grid or block extent that evaluates
+  to zero, to a negative number, or past the device's limits is refused rather than launched. A zero
+  extent is the dangerous one, because it is a legal argument that dispatches no work and returns
+  success, so a kernel that never ran looks like a kernel that ran and produced whatever the output
+  buffer already held.
 - **Identity collisions.** Ids are GUIDs, so independent authors do not collide by construction and
   no central allocation authority is needed. References are typed by field (a match descriptor and
   an engine descriptor are told apart by where the id appears). A duplicate id, which should only
@@ -2637,6 +2709,14 @@ choices; none is a dependency.
 - **Behavior / numerical notes:** hipDNN's existing per-engine annotations that a UED carries; behavior
   notes describe execution properties (for example runtime compilation), numerical notes describe
   precision behavior (for example tensor-core use).
+- **GQA:** grouped-query attention, where several query heads share one key/value head, so
+  `num_heads` is a multiple of `num_kv_heads` rather than equal to it.
+- **LDS:** local data share, a GPU workgroup's on-chip scratch memory. A kernel either requests it
+  dynamically at launch, which a UDD's `shared_mem_bytes` describes, or sizes it internally at build
+  time, in which case the launch value is zero ([Section 17](#17-open-questions)).
+- **CTA:** cooperative thread array, one workgroup's worth of threads; the unit a launch grid counts.
+- **FMHA:** fused multi-head attention, the family of attention kernels that fuse the whole
+  attention computation into one kernel rather than materializing the intermediate score matrix.
 - **Code object:** a loadable, prebuilt GPU kernel binary.
 - **kpack:** a packed multi-architecture archive of code objects.
 - **hsaco:** a single prebuilt GPU code-object file (Heterogeneous System Architecture Code Object).
