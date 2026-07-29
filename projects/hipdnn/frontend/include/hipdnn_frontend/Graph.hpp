@@ -92,6 +92,7 @@
 #include <hipdnn_frontend/attributes/LayernormBackwardAttributes.hpp>
 #include <hipdnn_frontend/attributes/MatmulAttributes.hpp>
 #include <hipdnn_frontend/attributes/MoeGroupedMatmulAttributes.hpp>
+#include <hipdnn_frontend/attributes/MoeGroupedMatmulBwdAttributes.hpp>
 #include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
 #include <hipdnn_frontend/attributes/RMSNormAttributes.hpp>
 #include <hipdnn_frontend/attributes/RMSNormBackwardAttributes.hpp>
@@ -129,6 +130,7 @@
 #include <hipdnn_frontend/node/LayerNormNode.hpp>
 #include <hipdnn_frontend/node/LayernormBackwardNode.hpp>
 #include <hipdnn_frontend/node/MatmulNode.hpp>
+#include <hipdnn_frontend/node/MoeGroupedMatmulBwdNode.hpp>
 #include <hipdnn_frontend/node/MoeGroupedMatmulNode.hpp>
 #include <hipdnn_frontend/node/Node.hpp>
 #include <hipdnn_frontend/node/PointwiseNode.hpp>
@@ -5480,6 +5482,58 @@ public:
         _sub_nodes.emplace_back(
             std::make_shared<MoeGroupedMatmulNode>(std::move(attributes), graph_attributes));
         return output;
+    }
+
+    /**
+     * @brief Performs backward mixture-of-experts grouped matrix multiplication.
+     *
+     * Computes `dweight` from `dOutput`, `token`, and `firstTokenOffset`. NONE-mode
+     * routing only — there is no mode/top_k/token-index/token-ks support. `dweight`
+     * is caller-supplied and validated (shape `[experts, K, N]`); the expert count
+     * cannot be derived from any input tensor, so it is not inferred.
+     *
+     * @param dOutput Output gradient, shaped `[1, tokens, N]`.
+     * @param token Token activations, shaped `[1, tokens, K]`.
+     * @param firstTokenOffset First routed-token offset for every expert, shaped `[experts, 1, 1]`.
+     * @param attributes Operation configuration.
+     * @return Weight gradient tensor.
+     */
+    // NOLINTBEGIN(readability-identifier-naming)
+    std::shared_ptr<TensorAttributes>
+        moe_grouped_matmul_bwd(std::shared_ptr<TensorAttributes> dOutput,
+                               std::shared_ptr<TensorAttributes> token,
+                               std::shared_ptr<TensorAttributes> firstTokenOffset,
+                               MoeGroupedMatmulBwdAttributes attributes)
+    // NOLINTEND(readability-identifier-naming)
+    {
+        if(attributes.get_name().empty())
+        {
+            attributes.set_name("MoeGroupedMatmulBwd_" + std::to_string(_sub_nodes.size()));
+        }
+        if(dOutput->get_name().empty())
+        {
+            dOutput->set_name(attributes.get_name() + "::DOUTPUT");
+        }
+        if(token->get_name().empty())
+        {
+            token->set_name(attributes.get_name() + "::TOKEN");
+        }
+        if(firstTokenOffset->get_name().empty())
+        {
+            firstTokenOffset->set_name(attributes.get_name() + "::FIRST_TOKEN_OFFSET");
+        }
+
+        auto dweight = outputTensor(attributes.get_name() + "::DWEIGHT");
+
+        attributes.set_doutput(std::move(dOutput));
+        attributes.set_token(std::move(token));
+        attributes.set_first_token_offset(std::move(firstTokenOffset));
+        attributes.set_dweight(dweight);
+
+        _sub_nodes.emplace_back(
+            std::make_shared<MoeGroupedMatmulBwdNode>(std::move(attributes), graph_attributes));
+
+        return dweight;
     }
 
     /** @brief Add a custom operation to the graph
