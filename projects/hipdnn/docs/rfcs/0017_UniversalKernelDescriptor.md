@@ -993,58 +993,48 @@ that needs it.
 
 **1. The host asks whether this engine can serve the graph.**
 `IEngine::isApplicable(handle, opGraph)`. The provider receives the graph as serialized bytes and its
-own handle, which is the same instance on every call for this session.
+own handle, the same instance on every call for this session.
 
-**2. Check the cache.** Hash the serialized graph bytes before deserializing them, and look up
+**2. Check the cache.** Hash the graph bytes before deserializing them and look up
 `(graph hash, device id, inventory generation)` on the handle. On a hit, `memcmp` the stored bytes to
-confirm the graph is byte-identical rather than merely hash-equal, then return the cached verdict.
-Nothing below runs. On a miss, continue.
+confirm the graph is byte-identical rather than merely hash-equal, and return the cached verdict.
 *Why this key:* the graph bytes are the problem identity; the device id matters because the bound token
-state resolves `$device.*` and a handle can be rebound to another device; the inventory generation is
-step 3's counter.
+state resolves `$device.*` and a handle can be rebound to another device; the inventory generation
+changes whenever the drop-in location does, so a pack added or removed invalidates every catalog built
+before it.
 
-**3. Refresh the drop-in inventory.** A staleness check cheap enough to run on this path, on the order
-of a directory mtime. If the location changed, bump the inventory generation, drop descriptors that
-disappeared, and discard every cached catalog, since a pack added or removed changes which kernels are
-candidates.
-*Loads:* nothing yet, only the inventory of ids, kinds, and locations.
-
-**4. Resolve this engine's UED and KMD.** The UED gives the engine identity, the KMD fields it exposes
-as knobs, and the ids of its one heuristic (UHD) and one metadata schema (KMD). The KMD loads with it:
-its fields key the catalog ([Section 4](#4-descriptor-formats)) and name the `$kernel.*` references
-step 6 must validate. The UHD is named but **not** loaded; nothing ranks yet.
+**3. Resolve this engine's UED and KMD.** The UED gives the engine identity, the KMD fields it exposes
+as knobs, and the ids of its one heuristic (UHD) and one metadata schema (KMD). The KMD loads with it,
+because its fields key the catalog and name the `$kernel.*` references step 5 must validate. The UHD is
+named but **not** loaded; nothing ranks yet.
 *Stored:* parsed UED and KMD, cached on the handle, reused by every later graph.
 
-**5. Resolve the KDPs that name this engine, and their matchers.** Each KDP contributes a matcher set,
-one UDD id, and a kernel vector of UKDs with their metadata values.
-*Why now:* the matchers are the applicability test, and the UKD metadata values are the `$kernel.*`
-inputs those matchers read. The UDD is named but **not** loaded; nothing dispatches yet.
+**4. Resolve the KDPs that name this engine, and their matchers.** Each KDP contributes a matcher set,
+one UDD id, and a kernel vector of UKDs with their metadata values. The UDD is named but **not**
+loaded; nothing dispatches yet.
 *Stored:* parsed KDPs, matchers, and kernel metadata, cached on the handle.
 
-**6. Run the matchers in pruning order.** Graph-level matchers first, the ones reading only
-`$graph.*`, node-attribute, and tensor fields; `$kernel.*` matchers last
-([Section 5](#5-matching-and-the-umd)). A graph-level failure disqualifies every kernel in every pack
-that lists it, so the broadly shared checks (architecture, dtype, layout) prune before the per-kernel
-pass runs at all.
-*Produces two things, both cached together under step 2's key:*
-- the **catalog**, the UKDs whose full matcher set passed, keyed by each kernel's KMD value tuple; a
-  duplicate key is logged and dropped ([Section 4](#4-descriptor-formats)), and
-- the **bound token state**, the `$graph`, `$device`, node-attribute, tensor, and `$kernel` values
-  bound while matching.
+**5. Run the matchers in pruning order.** Graph-level matchers first, the ones reading only `$graph.*`,
+node-attribute, and tensor fields; `$kernel.*` matchers last ([Section 5](#5-matching-and-the-umd)). A
+graph-level failure disqualifies every kernel in every pack that lists it, so the broadly shared checks
+prune before the per-kernel pass runs.
+*Produces two things, cached together under step 2's key:* the **catalog**, the UKDs whose full matcher
+set passed, keyed by each kernel's KMD value tuple ([Section 4](#4-descriptor-formats)); and the
+**bound token state**, the values bound while matching.
 
-**7. Return.** True if and only if the catalog is non-empty. Applicability is not a separate verdict;
+**6. Return.** True if and only if the catalog is non-empty. Applicability is not a separate verdict;
 it is whether any kernel survived.
 
 ### 8.2 Selection, By hipDNN
 
-**8. hipDNN picks the engine.** Its existing engine-selection heuristic, unchanged by this proposal
+**7. hipDNN picks the engine.** Its existing engine-selection heuristic, unchanged by this proposal
 ([Section 2](#2-the-descriptors)). Engines that answered false are not candidates. Engines that
 answered true but are not selected do no further work; their cached catalog stays on the handle in case
 a later graph hashes to it.
 
 ### 8.3 Knobs, If The Caller Asks
 
-**9. Rank the catalog to answer a knob query.** `IEngine::getDetails(handle, opGraph, out)` arrives for
+**8. Rank the catalog to answer a knob query.** `IEngine::getDetails(handle, opGraph, out)` arrives for
 an engine the caller is inspecting. Read the cached catalog and bound token state, load this engine's
 **UHD**, and score the catalog. A knob reports two things and the ranked catalog supplies both: the
 **value set** is the distinct values that field takes across the catalog, the **default** is the value
@@ -1059,7 +1049,7 @@ arrive first, because the id it needs came from applicability.
 
 ### 8.4 Workspace
 
-**10. Report the workspace requirement.** `IEngine::getMaxWorkspaceSize(handle, opGraph, engineConfig)`
+**9. Report the workspace requirement.** `IEngine::getMaxWorkspaceSize(handle, opGraph, engineConfig)`
 takes an engine config but no execution context, and autotune calls it for every candidate engine, most
 of which are never selected ([RFC 0013](0013_Autotune.md)). The config may carry knob settings, though
 autotune's per-candidate estimate passes only the engine id, so the general case is that no kernel has
@@ -1084,20 +1074,20 @@ range `[min, max]` across the catalog.
 
 ### 8.5 Plan Build and Execute, Selected Engine Only
 
-**11. Choose the kernel.** `IEngine::initializeExecutionContext` arrives. Read the cached catalog,
+**10. Choose the kernel.** `IEngine::initializeExecutionContext` arrives. Read the cached catalog,
 bound token state, and ranked order. With no knobs set the kernel is the top-ranked one; with knobs
 set, filter the catalog to the kernels whose KMD values match every setting and take the highest-ranked
 survivor. If a knob query never ran, the UHD loads here.
 
-**12. Build the plan.** The engine's one plan builder produces a plan for the kernels it needs to be
+**11. Build the plan.** The engine's one plan builder produces a plan for the kernels it needs to be
 able to launch, loading each one's `kernel_source` and evaluating its pack's UDD grid, block,
-shared-memory, and argument formulas over the bound token state from step 6. Ordinarily that is the
+shared-memory, and argument formulas over the bound token state from step 5. Ordinarily that is the
 single chosen kernel; under measurement it is the candidates being sampled, prepared the same way in
 the same plan ([Section 3](#3-how-it-works)).
 *Stored:* the resulting plan, held by the execution context. Nothing is re-matched and nothing is
 re-scanned; every decision was made before this step.
 
-**13. Execute.** `IPlan::execute(handle, deviceBuffers, numDeviceBuffers, workspace)`. hipDNN passes a
+**12. Execute.** `IPlan::execute(handle, deviceBuffers, numDeviceBuffers, workspace)`. hipDNN passes a
 flat array pairing each tensor uid with a device pointer, built from the caller's variant pack, and the
 launcher resolves each UDD argument against it by uid.
 
@@ -1107,21 +1097,20 @@ launcher resolves each UDD argument against it by uid.
 |---|---|---|---|
 | 1 | nothing | the host call arrives | nothing |
 | 2 | nothing | cache probe before any parsing | reads the handle cache |
-| 3 | inventory only | detect drop-in changes | inventory generation on the handle |
-| 4 | UED, KMD | engine identity; the KMD keys the catalog and names the `$kernel.*` fields | handle, reused across graphs |
-| 5 | KDPs, UMDs, UKD metadata | the matchers are the applicability test | handle, reused across graphs |
-| 6 | nothing new | evaluates what 4 and 5 loaded | catalog + bound token state, keyed per graph |
-| 7 | nothing | reports whether the catalog is non-empty | nothing |
-| 8 | nothing | hipDNN selects among engines; no descriptor is read | nothing |
-| 9 | UHD | first call needing an order, not a membership test | ranked catalog, cached with the catalog |
-| 10 | UDD | first question whose answer is a dispatch property | handle |
-| 11 | UHD, if step 9 never ran | the plan needs an order too | execution context |
-| 12 | `kernel_source` of each kernel the plan must launch | only kernels the plan dispatches are loaded | plan, held by the execution context |
-| 13 | nothing | the plan holds everything the launch needs | nothing |
+| 3 | UED, KMD | engine identity; the KMD keys the catalog and names the `$kernel.*` fields | handle, reused across graphs |
+| 4 | KDPs, UMDs, UKD metadata | the matchers are the applicability test | handle, reused across graphs |
+| 5 | nothing new | evaluates what 3 and 4 loaded | catalog + bound token state, keyed per graph |
+| 6 | nothing | reports whether the catalog is non-empty | nothing |
+| 7 | nothing | hipDNN selects among engines; no descriptor is read | nothing |
+| 8 | UHD | first call needing an order, not a membership test | ranked catalog, cached with the catalog |
+| 9 | UDD | first question whose answer is a dispatch property | handle |
+| 10 | UHD, if step 8 never ran | the plan needs an order too | execution context |
+| 11 | `kernel_source` of each kernel the plan must launch | only kernels the plan dispatches are loaded | plan, held by the execution context |
+| 12 | nothing | the plan holds everything the launch needs | nothing |
 
 **Base-path invariant: accept implies a non-empty catalog.** Returning true from `isApplicable` means
 at least one UKD passed every matcher in some KDP. Producing no launchable kernel after accepting is a
-bug, not a legal outcome. An empty catalog at step 6, or a UHD that returns nothing at step 9, fails
+bug, not a legal outcome. An empty catalog at step 5, or a UHD that returns nothing at step 8, fails
 closed and hipDNN falls through to the next candidate engine, exactly as if this engine had never
 claimed applicability. [Section 15.4](#154-execution-and-selection) states the same rule for a
 composite's mandatory stage; that is this invariant applied to one stage, not a separate rule.
@@ -1148,37 +1137,36 @@ sequenceDiagram
     participant Cache as Provider handle cache
     participant Plan as IPlan
 
-    Note over FE,Cache: Steps 1-7: asked of every loaded engine
+    Note over FE,Cache: Steps 1-6: asked of every loaded engine
     FE->>ERM: create_execution_plans() -> getApplicableEngineIds
     ERM->>Eng: isApplicable(handle, opGraph)
     Eng->>Cache: probe (graph hash, device id, inventory generation)
-    Eng->>Eng: refresh drop-in inventory; bump generation if changed (3)
-    Eng->>Eng: resolve UED + KMD (4), KDPs + matchers + UKD metadata (5)
-    Eng->>Eng: matchers in pruning order, graph-level then $kernel-level (6)
+    Eng->>Eng: resolve UED + KMD (3), KDPs + matchers + UKD metadata (4)
+    Eng->>Eng: matchers in pruning order, graph-level then $kernel-level (5)
     Eng->>Cache: store catalog + bound token state
-    Eng-->>ERM: true if catalog non-empty (7)
+    Eng-->>ERM: true if catalog non-empty (6)
 
-    Note over FE: Step 8: hipDNN engine selection, unchanged, not the UHD
+    Note over FE: Step 7: hipDNN engine selection, unchanged, not the UHD
     FE->>FE: select engine
 
-    Note over FE,Cache: Steps 9-10: optional, any candidate engine
+    Note over FE,Cache: Steps 8-9: optional, any candidate engine
     FE->>ERM: get_knobs_for_engine(engineId)
     ERM->>Eng: getDetails(handle, opGraph, out)
-    Eng->>Eng: load UHD, rank catalog (9)
+    Eng->>Eng: load UHD, rank catalog (8)
     Eng->>Cache: store ranked catalog
     Eng-->>ERM: knob value sets + heuristic defaults
     ERM->>Eng: getMaxWorkspaceSize(handle, opGraph, engineConfig)
-    Eng->>Eng: knob filter, load UDD, max workspace_bytes (10)
+    Eng->>Eng: knob filter, load UDD, max workspace_bytes (9)
 
-    Note over FE,Plan: Steps 11-13: selected engine only
+    Note over FE,Plan: Steps 10-12: selected engine only
     FE->>ERM: build_plans() -> finalizePlanDescriptor
     ERM->>Eng: initializeExecutionContext(handle, opGraph, engineConfig, ctx)
     Eng->>Cache: read catalog, bound token state, ranked order
-    Eng->>Eng: knob filter then highest-ranked survivor (11)
-    Eng->>Eng: load kernel sources, build plan (12)
+    Eng->>Eng: knob filter then highest-ranked survivor (10)
+    Eng->>Eng: load kernel sources, build plan (11)
     Eng->>Plan: ctx.setPlan(...)
     FE->>ERM: execute -> backendExecute
-    ERM->>Plan: execute(handle, deviceBuffers, numDeviceBuffers, workspace) (13)
+    ERM->>Plan: execute(handle, deviceBuffers, numDeviceBuffers, workspace) (12)
 ```
 
 ---
