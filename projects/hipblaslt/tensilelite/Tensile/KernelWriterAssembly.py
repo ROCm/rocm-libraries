@@ -19136,16 +19136,22 @@ class KernelWriterAssembly(KernelWriter):
     the TDMSplit && !MXS && !Sparse precondition, i.e. dim1Divisor == 2."""
     tc: str = tP['tensorChar']
     ti: int = tP["idx"]
-    if kernel.get("LDSSegmentInterleave") in (1, 2) and tc in ("A", "B"):
-      _segOff = kernel["LDSSegInterleaveOffsets"]
-      if tc == "A" or not _segOff.get("bBaseline", False):
-        return _segOff["writeStrideBytes"]
     mt: int = kernel[f"MacroTile{ti}"]
     du: int = kernel["DepthU"]
     bpe: float = tP["bpeGR"] if not tP["isM"] else 1
     dim1Divisor = 2
     ldsBlockSizePerPad: int = kernel[f"LdsBlockSizePerPad{tc}"]
     ldsPadSize: int = int(kernel[f"LdsPad{tc}"] * bpe)
+    if kernel.get("LDSSegmentInterleave") in (1, 2) and tc in ("A", "B"):
+      _segOff = kernel["LDSSegInterleaveOffsets"]
+      if tc == "A" and _segOff.get("portSplitA", False):
+        numVec = kernel["MIWaveTile"][ti] // kernel["VectorWidthA"]
+        vIdxFootprint = round(mt * du * bpe // dim1Divisor // numVec)   # per-vIdx, not the component jump
+        vIdxPad = vIdxFootprint // ldsBlockSizePerPad * ldsPadSize if ldsBlockSizePerPad != 0 and ldsPadSize != 0 else 0
+        return vIdxFootprint + vIdxPad
+      # Coarse A / non-bcontig B: component jump.
+      if tc == "A" or not _segOff.get("bBaseline", False):
+        return _segOff["writeStrideBytes"]
     half = round(mt * du * bpe // dim1Divisor)
     extraPadSize = half // ldsBlockSizePerPad * ldsPadSize if ldsBlockSizePerPad != 0 and ldsPadSize != 0 else 0
     return half + extraPadSize
@@ -19437,9 +19443,10 @@ class KernelWriterAssembly(KernelWriter):
       dataBytes = mt // numComp * du * int(bpe * 4) // (4 * dim1Divisor)
       _segAB = bool(kernel.get("LDSSegmentInterleave") in (1, 2)) and (
           tc == "A" or (tc == "B" and not kernel["LDSSegInterleaveOffsets"].get("bBaseline", False)))
-      _segABnoSplit = _segAB and not kernel["TDMSplit"]
-      _segFootprint = _segABnoSplit and kernel["LDSSegInterleaveOffsets"].get("footprintPacked", False)
-      if _segABnoSplit:
+      _segPortSplitA = _segAB and tc == "A" and kernel["LDSSegInterleaveOffsets"].get("portSplitA", False)
+      _segWaveJump = (_segAB and not kernel["TDMSplit"]) or _segPortSplitA
+      _segFootprint = _segWaveJump and kernel["LDSSegInterleaveOffsets"].get("footprintPacked", False)
+      if _segWaveJump:
           dataBytes = kernel["LDSSegInterleaveOffsets"]["writeStrideBytes"]
       mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), dataBytes, f"woffset = wId * (mt // numComp * du * bpe // dim1Divisor)"))
       # footprintPacked: writeStrideBytes is the post-pad footprint fA+fB; A/B tiles are packed

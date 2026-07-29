@@ -54,6 +54,14 @@ def _coarse_a(state):
     mi_threads = min(state["MatrixInstM"], state["MatrixInstN"])
     return mi_threads * state["VectorWidthA"] >= state["MacroTile0"] // numComp
 
+def _port_split_a(state):
+    # Fine A (VWA==WaveTileA/2, not coarse): split along the port axis instead of the component axis.
+    # Only VWA==WaveTileA/2 (2 vIdx per port) works, and only with TDMSplit; finer VWA can't.
+    if _coarse_a(state) or not state.get("TDMSplit"):
+        return False
+    vwa = state["VectorWidthA"]
+    return vwa > 0 and state["MIWaveTile"][0] % vwa == 0 and state["MIWaveTile"][0] // vwa == 2
+
 def _b_readable(state):
     # True if B can be split across segments and still read correctly: either B covers a full
     # component (coarse), or its per-vIdx column span (vIdxColsB) divides compColsB evenly so no
@@ -65,10 +73,6 @@ def _b_readable(state):
     compColsB = state["MacroTile1"] // numComp
     vIdxColsB = state["MatrixInstN"] * state.get("MatrixInstBN", 1) * state["MIWaveGroup"][1] * state["VectorWidthB"]
     return vIdxColsB > 0 and compColsB % vIdxColsB == 0
-
-def _coarse_vw(state):
-    # Both A coarse and B readable -> the interleave can split BOTH operands (tight/aligned path).
-    return _coarse_a(state) and _b_readable(state)
 
 def _no(reason):
     return {"applicable": False, "aligned": False, "offsets": None,
@@ -120,7 +124,9 @@ def evaluate(state):
     # fp8 covers mxf8; its MX scales are relocated as a trailing block (see _mx_scale_bases).
     if not (_dt.isBFloat16() or _dt.isHalf() or _dt.is8bitFloat()):
         return _no("bf16/fp16/fp8 only")
-    if not _coarse_a(state):                                   return _no("A not coarse (VWA<WaveTileA)")
+    # A must be coarse (VWA==WaveTileA) or port-split (VWA==WaveTileA/2, needs TDMSplit).
+    _portSplit = _port_split_a(state)
+    if not (_coarse_a(state) or _portSplit):                  return _no("A: VWA must be WaveTileA, or WaveTileA/2 with TDMSplit")
 
     fA, fB = _footprint(state, "A"), _footprint(state, "B")
     base = state["LdsOffsetA"]
@@ -145,6 +151,8 @@ def evaluate(state):
                 "footprintPacked":  True,
                 "bBaseline":        True,           # B uses its normal (non-interleaved) addressing
             }
+            if _portSplit:
+                offsets["portSplitA"] = True
             # mxf8: put the scale block after A1 (bf16/fp16 have no scales).
             bMXSA, bMXSB, _ = _mx_scale_bases(state, base + 2 * fA + 2 * fB)
             if bMXSA is not None: offsets["ldsBaseMXSA"] = bMXSA
@@ -166,6 +174,8 @@ def evaluate(state):
             "footprintPacked":  True,
             "bBaseline":        True,
         }
+        if _portSplit:
+            offsets["portSplitA"] = True
         blockSpan = base + pre + fA                 # A1 ends here (past the B block, with a gap)
         bMXSA, bMXSB, mxEnd = _mx_scale_bases(state, blockSpan)
         if bMXSA is not None: offsets["ldsBaseMXSA"] = bMXSA
@@ -188,6 +198,8 @@ def evaluate(state):
             "readWaveStride":   pre // bpe,
             "footprintPacked":  True,
         }
+        if _portSplit:
+            offsets["portSplitA"] = True
         # Per-buffer span: B1 ends at base + pre(=A1) + fA + fB.
         blockSpan = base + pre + fA + fB
         # mxf8: put the scale block after B1. Needs extra LDS, so extend the size below.
@@ -208,6 +220,8 @@ def evaluate(state):
         "readWaveStride":   (fA + fB) // bpe,   # same, in elements
         "footprintPacked":  True,
     }
+    if _portSplit:
+        offsets["portSplitA"] = True
     # mxf8: put the scale block after B1. Uses no more LDS than the non-interleaved layout.
     bMXSA, bMXSB, _ = _mx_scale_bases(state, base + 2 * (fA + fB))
     if bMXSA is not None: offsets["ldsBaseMXSA"] = bMXSA

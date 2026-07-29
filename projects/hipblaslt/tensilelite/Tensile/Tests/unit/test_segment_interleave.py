@@ -25,7 +25,7 @@ def _vw8_state(**ovr):
              ISA=(12, 5, 0),
              LdsOffsetA=0, LdsBlockSizePerPadA=2048, LdsBlockSizePerPadB=2048,
              LdsPadA=8, LdsPadB=8, VectorWidthA=8, VectorWidthB=8,
-             MatrixInstM=16, MatrixInstN=16, MIWaveGroup=[2, 2], TDMSplit=0, enableTDMA=1, enableTDMB=1,
+             MatrixInstM=16, MatrixInstN=16, MIWaveGroup=[2, 2], MIWaveTile=[8, 8], TDMSplit=0, enableTDMA=1, enableTDMB=1,
              UnrollMajorLDSA=1, UnrollMajorLDSB=1,
              ProblemType=dict(Sparse=0, DataType=_FakeDataType(), MXBlockA=0, MXBlockB=0))
     s["ProblemType"] = {**s["ProblemType"], **ovr.pop("ProblemType", {})}
@@ -38,10 +38,17 @@ def test_vw8_applies_with_handedit_values():
     assert r["offsets"] == {"ldsBaseB": 33024, "writeStrideBytes": 66048,
                             "readWaveStride": 33024, "footprintPacked": True}
 
-def test_vw4_skips_fine_vw():
-    # VWA=4 < WaveTileA -> A would cross a component; A must stay coarse (also required by bcontig).
-    r = evaluate(_vw8_state(VectorWidthA=4))
-    assert r["applicable"] is False and "not coarse" in r["reason"]
+def test_vw4_fine_uses_port_split():
+    # VWA=4 == WaveTileA/2 + TDMSplit -> port-split; same tight footprint as coarse.
+    r = evaluate(_vw8_state(VectorWidthA=4, TDMSplit=1))
+    assert r["applicable"] is True
+    assert r["offsets"].get("portSplitA") is True
+    assert r["offsets"]["writeStrideBytes"] == 66048 and r["offsets"]["ldsBaseB"] == 33024
+
+def test_port_split_needs_tdmsplit():
+    # Port-split needs TDMSplit's store split; VWA==WaveTileA/2 without TDMSplit must reject.
+    r = evaluate(_vw8_state(VectorWidthA=4, TDMSplit=0))
+    assert r["applicable"] is False and "WaveTileA/2" in r["reason"]
 
 def test_non_gfx1250_skips():
     # SEG=64KiB layout is gfx1250-specific; other ISAs must not apply the interleave.
@@ -93,11 +100,10 @@ def test_bcontig_small_mt_needs_pgr2():
                             PrefetchGlobalRead=1, LDSSegmentInterleave=1))
     assert r["applicable"] is False and "PGR" in r["reason"]
 
-def test_vwa_fine_always_skips():
-    # A's own read must never cross a component -> coarseA stays mandatory regardless of B
-    # (bcontig also requires coarse A).
-    r = evaluate(_vw8_state(VectorWidthA=4))
-    assert r["applicable"] is False and "not coarse" in r["reason"]
+def test_vwa_finer_than_half_skips():
+    # VWA=2 (numVec=4) is finer than WaveTileA/2 -> TDMSplit's 2-way split can't place it -> reject.
+    r = evaluate(_vw8_state(VectorWidthA=2, TDMSplit=1))
+    assert r["applicable"] is False and "WaveTileA/2" in r["reason"]
 
 def test_small_mt_skips_without_pgr2():
     # Small MT is the aligned candidate, but it requires PGR2 double-buffer; with no
