@@ -5223,11 +5223,23 @@ class KernelWriter(metaclass=abc.ABCMeta):
       # emits the full C+D SRD compute.
 
     # PostLoopStoreInNll: precompute the "effective alpha == 1" predicate into the
-    # persistent PostLoopAlphaIsOne SGPR BEFORE the main loop, while Alpha / ArgType /
+    # persistent PostLoopFusedStore SGPR BEFORE the main loop, while Alpha / ArgType /
     # KernArgAddress are live and the fused-store guard sites are still downstream. The
     # scalar scaleA/scaleB pointers are only materialized in the epilogue (after both
     # guard sites), so this null-safe check reads them straight from KernArgAddress.
-    module.add(self.computePostLoopAlphaIsOne(kernel))
+    #
+    # PLSIN guard-hoist (subtile fused-store path ONLY): when this kernel prefetches
+    # global reads (PGR>=1), DEFER the fold into the preloop global-read shadow
+    # (LogicalScheduler.emitMainAndExitLoops injects it right after the MT0 buffer_load
+    # issue, before the wait_gr drain) so its loop-invariant SALU/VALU executes while
+    # the prefetch loads are in flight instead of sitting on the pre-main-loop critical
+    # path. PGR==0 (no shadow) and non-fused-store-eligible kernels emit here unchanged
+    # -- computePostLoopFusedStore returns an empty module for the latter, so the
+    # non-subtile / non-eligible code path is byte-identical.
+    _plsinDeferFold = (self._plsinAlphaSkipEligible(kernel)
+                       and kernel["PrefetchGlobalRead"] >= 1)
+    if not _plsinDeferFold:
+      module.add(self.computePostLoopFusedStore(kernel))
 
     module.add(mainLoop(self, kernel))
 
@@ -9528,14 +9540,16 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     self.defineSgpr("OrigLoopCounter", 1)
 
-    # PostLoopStoreInNll: persistent predicate "effective alpha (= Alpha*scaleA*scaleB)
-    # == 1", precomputed before the main loop (see computePostLoopAlphaIsOne). The fused
-    # store's front guard / post-loop dedup read it to decide whether the epilogue alpha
-    # multiply can be skipped. Defined here (before the nonPostLoopSgpr snapshot below)
-    # so it survives endSummation and is live at BOTH guard sites. Only defined when the
-    # optimization is eligible so non-PLSIN / non-fp32-compute kernels are unaffected.
+    # PostLoopStoreInNll: persistent "this tile fuses the store" predicate, precomputed
+    # per-tile before the main loop (see computePostLoopFusedStore). It ANDs every
+    # fused-store sub-guard (eff-alpha==1, no-tail, numIter>=minIter, beta==0,
+    # full-tile M/N, StreamK owner) into one bit so all three guard sites collapse to a
+    # single flag compare, and still implies eff-alpha==1 for the epilogue alpha-skip.
+    # Defined here (before the nonPostLoopSgpr snapshot below) so it survives
+    # endSummation and is live at all guard sites. Only defined when the optimization is
+    # eligible so non-PLSIN / non-fp32-compute kernels are unaffected.
     if kernel["PostLoopStoreInNll"] and kernel["ProblemType"]["ComputeDataType"].isSingle():
-      self.defineSgpr("PostLoopAlphaIsOne", 1)
+      self.defineSgpr("PostLoopFusedStore", 1)
 
 
     if self.debugConfig.debugKernel:

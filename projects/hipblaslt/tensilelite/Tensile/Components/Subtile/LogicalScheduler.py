@@ -3652,7 +3652,7 @@ class LogicalScheduler:
         module.add(doneLabel)
         return module
 
-    def _emitNllMaybeFused(self, writer, kernel, label, emitted_3d):
+    def _emitNllMaybeFused(self, writer, kernel, label, emitted_3d, fusedExitLabel=None):
         """Emit the NLL, optionally as a FUSED/PLAIN dual variant (PostLoopStoreInNll).
 
         Non-fused kernels: byte-identical to the stock single-NLL emission (early
@@ -3700,7 +3700,25 @@ class LogicalScheduler:
         # the store batch reuses the freed holes instead of extending the watermark.
         # Tiles <= 256x256 keep the existing weave (they already fit at occupancy).
         largeTile = (kernel["MacroTile0"] > 256) or (kernel["MacroTile1"] > 256)
-        if largeTile:
+        # Store-bound small tiles (#1): on shapes where the terminal-MFMA drain is
+        # too small to hide the woven store (drain-MFMA cycles << store-epilogue
+        # cycles), weaving buys nothing but forces the store to run while the input
+        # VGPR tiles are still live -- the store's temp checkouts then collide with
+        # those live tiles and spill into extra register-shuffle VALU (v_mov / v_and
+        # / v_lshlrev / v_permlane). Opt such small tiles into the SAME strategy as
+        # large tiles: keep the terminal MFMAs IN the loop (every input tile dead
+        # before the store) and lend the now-dead input-tile VGPRs to the store pool
+        # so its temps reuse the freed holes instead of shuffling. Env-gated (default
+        # off) so compute-bound tiles, where the weave overlap is a net win, are
+        # unaffected. In production this is selected by the PLSINStoreMode solution
+        # parameter (Lend vs Weave), so the host can pick the lend-general kernel for
+        # store-bound shapes and the fused-general (weave) kernel for compute-bound
+        # shapes without a single-binary compromise. TENSILE_PLSIN_SMALLTILE_LEND=1
+        # remains a test-only override that forces Lend regardless of the parameter.
+        paramLend = kernel.get("PLSINStoreMode", "Weave") == "Lend"
+        envLend = plsinDebugEnv("TENSILE_PLSIN_SMALLTILE_LEND", "0") != "0"
+        smallTileLend = (not largeTile) and (paramLend or envLend)
+        if largeTile or smallTileLend:
             weaveGroups = None
             # Carry (base, size) per input tile so buildSubtileFusedStore can skip
             # any tile that overlaps the spilled-accumulator arch-VGPR region. For
@@ -3758,12 +3776,29 @@ class LogicalScheduler:
         # No "did-fuse" flag: the post-loop store dedups by re-evaluating the same
         # emitFusedStoreGuard (a WG that fused here will re-pass the guard there and
         # skip the redundant store). See kernelBodySubtile post-loop dedup.
-        # doneLabel is past the entire PLAIN NLL body -> use a 32-bit long branch
-        # (the bias/SAV FUSED store pushes this jump out of short-branch range).
+        # B': the FUSED arm is provably no-tail (the front guard / computePostLoopFusedStore
+        # ANDs in SizesSum % DepthU == 0), so once its store completes the wave has no tail
+        # loop and no other mainloop exit path left to run -- it only needs to reach the
+        # shared SkipToEnd join. When the caller hands us that join label (fusedExitLabel),
+        # branch the FUSED arm STRAIGHT there in a single 32-bit long branch, merging what
+        # used to be two long-branch trampolines: this "skip PLAIN NLL" branch AND the
+        # "skip other exit paths" branch emitted by emitMainAndExitLoops. It also bypasses
+        # the tail-only PGR2 LW-parity re-align (a no-op for a no-tail wave). doneLabel is
+        # kept as the PLAIN arm's fall-through join (it just no longer has an incoming
+        # branch from the FUSED arm). Persistence is preserved: the fused arm still lands
+        # at SkipToEnd -> post-loop dedup -> closePersistentLoop back-edge, unchanged.
+        # Fallback (fusedExitLabel is None): original skip-PLAIN-to-doneLabel branch, so
+        # every non-plsin / legacy caller stays byte-identical.
         from rocisa.instruction import SLongBranchPositive
+        if fusedExitLabel is not None:
+            fusedBranchTarget = fusedExitLabel
+            fusedBranchComment = "PostLoopStoreInNll: FUSED done, skip PLAIN NLL + exit paths -> SkipToEnd (long)"
+        else:
+            fusedBranchTarget = doneLabel
+            fusedBranchComment = "PostLoopStoreInNll: FUSED done, skip PLAIN NLL (long)"
         with writer.allocTmpSgpr(3, tag="fusedNllDone_longBranch") as tmpSgprInfo:
-            module.add(SLongBranchPositive(doneLabel, tmpSgprInfo,
-                       comment="PostLoopStoreInNll: FUSED done, skip PLAIN NLL (long)"))
+            module.add(SLongBranchPositive(fusedBranchTarget, tmpSgprInfo,
+                       comment=fusedBranchComment))
         module.add(plainLabel)
         module.add(plain)
         module.add(doneLabel)
@@ -4127,6 +4162,37 @@ class LogicalScheduler:
             module.add(SCBranchSCC1(labelName=skipGRLabel.getLabelName(),
                                     comment="K < DepthU: skip prefetch GR, still run initC"))
 
+        # ── PLSIN guard-hoist: fold into the preloop global-read shadow ──
+        # computePostLoopFusedStore is pure loop-invariant SALU/VALU that writes the
+        # persistent PostLoopFusedStore flag (read by the NGLL/NLL front guards and the
+        # post-loop dedup). Emitting it AFTER the MT0 global-read issue but BEFORE the
+        # wait_gr drain lets it execute while the prefetch buffer_loads are in flight,
+        # hiding its latency under the load shadow instead of exposing it on the
+        # pre-main-loop critical path (KernelWriter defers it here when PGR>=1). The
+        # preloop is emitted unscheduled (schedule=False, sequential list order), so a
+        # simple list splice just before the first wait_gr lands the fold in the shadow.
+        # Subtile fused-store path only (guarded by _plsinAlphaSkipEligible); PGR==0 and
+        # every other kernel are untouched.
+        #
+        # Must run before the deepcopy below, which snapshots _preloop_emitted.
+        if (self.config.pgr >= 1
+                and not getattr(self, "_foldInjectedIntoPreloop", False)
+                and hasattr(writer, "_plsinAlphaSkipEligible")
+                and writer._plsinAlphaSkipEligible(kernel)
+                and self._preloop_emitted
+                and self._preloop_emitted[0] and self._preloop_emitted[0][0]):
+            fold_module = writer.computePostLoopFusedStore(kernel)
+            em_list = self._preloop_emitted[0][0]
+            drain_idx = next((i for i, em in enumerate(em_list)
+                              if em.opType == 'wait_gr'), len(em_list))
+            new_id = max((em.moduleId for em in em_list), default=-1) + 1
+            em_list.insert(drain_idx,
+                           EmittedModule(moduleId=new_id,
+                                         instructions=[fold_module],
+                                         before=None,
+                                         source=None))
+            self._foldInjectedIntoPreloop = True
+
         # ── Preloop (initC + tail jump woven around the single init op) ──
         # Operate on a copy so self._preloop_emitted (read by PAP and the
         # per-unroll copies) stays untouched.
@@ -4228,7 +4294,8 @@ class LogicalScheduler:
             module.add(Label("SkipToNLL", ""))
         module.addComment0(f"NLL_C{last}")
         module.add(self._emitNllMaybeFused(writer, kernel, f"NLL_C{last}",
-                                  inject_pap_after_nll_drain(self._nll_per_unroll[nll_ft])))
+                                  inject_pap_after_nll_drain(self._nll_per_unroll[nll_ft]),
+                                  fusedExitLabel=(endLabel if plsin else None)))
         module.add(self._emit_pgr2_tail_lw_align(kernel))
         if plsin:
             with writer.allocTmpSgpr(3, tag="nllLastExit_longBranch") as tmpSgprInfo:
@@ -4249,7 +4316,8 @@ class LogicalScheduler:
                 module.add(Label("SkipToNLL", ""))
             module.addComment0(f"NLL_C{ui}")
             module.add(self._emitNllMaybeFused(writer, kernel, f"NLL_C{ui}",
-                                      inject_pap_after_nll_drain(self._nll_per_unroll[nll_idx])))
+                                      inject_pap_after_nll_drain(self._nll_per_unroll[nll_idx]),
+                                      fusedExitLabel=(endLabel if plsin else None)))
             module.add(self._emit_pgr2_tail_lw_align(kernel))
             if ui < uf - 2:
                 if plsin:

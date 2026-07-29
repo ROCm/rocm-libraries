@@ -14475,11 +14475,26 @@ class KernelWriterAssembly(KernelWriter):
     # the lent set below at zero SGPR cost: the epilogue kernarg block first-fits
     # into the remaining dead SRD holes (SrdA/SrdB/MXSA/MXSB), so next_free_sgpr is
     # unchanged (96, still under the gfx950 MaxSgpr=102 cap).
-    for _name in ("LocalWriteBaseAddrA", "LocalWriteBaseAddrB",
+    _lendNames = ["LocalWriteBaseAddrA", "LocalWriteBaseAddrB",
                   "LocalWriteBaseAddrMXSA", "LocalWriteBaseAddrMXSB",
                   "SwapA", "SwapB", "SwapMXSA", "SwapMXSB",
                   "SrdA", "SrdB", "SrdMXSA", "SrdMXSB",
-                  "SrdC"):
+                  "SrdC"]
+    # SrdWS re-lend A/B knob (TENSILE_PLSIN_LEND_SRDWS): opt-in ONLY. Lending SrdWS
+    # recovers the weave-store winner speedup (+4-6% on 1-WG-per-tile 4096^2/8192^2
+    # fp4) because it hands the epilogue an extra genuinely-dead 4-aligned SRD hole,
+    # avoiding the extra register-shuffle the repack into SrdA/B/MXSA/MXSB costs.
+    # It is UNSAFE as a static default on StreamK kernels: a persistent WG that is a
+    # full owner for one tile but a split contributor / fixup reducer for others
+    # keeps SrdWS live across the persistent loop (VM_L2_PROTECTION_FAULT on split
+    # shapes, e.g. 200x57344x8192, 256x256x16384). Since a static SGPR allocation
+    # cannot be runtime-branched, the safe production path is a separate kernel
+    # variant selected by the host ONLY for provably non-splitting dispatches
+    # (grid WGs == tiles). This env gate exists to measure that recovery in
+    # isolation on non-splitting winner shapes.
+    if plsinDebugEnv("TENSILE_PLSIN_LEND_SRDWS", "0") != "0":
+      _lendNames.append("SrdWS")
+    for _name in _lendNames:
       if _name in self.sgprs and _name not in self.states.freeSgprVarPool:
         self.addSgprVarToPool(_name)
         lentSgprs.append(_name)
@@ -14756,12 +14771,17 @@ class KernelWriterAssembly(KernelWriter):
     # PLAIN post-loop store re-folds from the correct original Alpha (no double scaling).
     # With applyAlpha=False the per-element alpha multiply is dropped, which is only
     # correct when the effective alpha is exactly 1.0 -- so this fast path is gated on
-    # the front guard having already proven that (PostLoopAlphaIsOne, checked in
+    # the front guard having already proven that (PostLoopFusedStore, checked in
     # emitFusedStoreGuard). The internal scalar-ScaleAB->Alpha fold still runs but is a
     # no-op there (Alpha*1*1), so skipping the ~per-element muls is the whole win. When
     # not eligible we keep applyAlpha=True (always correct). beta==0 and full-tile are
     # guaranteed by the front guard, so no C-read/edge path is added.
-    skipAlpha = self._plsinAlphaSkipEligible(kernel)
+    # PLSIN: by default apply alpha IN the fused store (weave per-element _applyAlpha,
+    # VALU woven under the terminal MFMAs) so alpha!=1 and scalar scaleA*scaleB are
+    # handled here instead of forcing the PLAIN path. The eff-alpha==1 fold is dropped
+    # from the front guard (computePostLoopFusedStore) in the same mode, so alpha!=1 WGs
+    # now reach this store. TENSILE_PLSIN_APPLY_ALPHA=0 restores the old skip fast path.
+    skipAlpha = self._plsinAlphaSkipEligible(kernel) and not self._plsinApplyAlphaInFused(kernel)
     storeModule, _ = self.globalWriteElements(
       kernel, tPA, tPB,
       [fullVws[0]], [fullVws_1[0]], [elements[0]], [elements_1[0]],
@@ -15925,17 +15945,17 @@ class KernelWriterAssembly(KernelWriter):
   ##############################################################################
   def _plsinMinIter(self, kernel):
     """Minimum numIter (= SizesSum/DepthU) that still takes the FUSED store. Default
-    is PGR: the NGLL init-hoist arm only executes when the PGR=2 preloop dispatch does
-    NOT take SkipToNLL (numIter >= PGR), so below PGR the hoisted write-index coords
-    are never computed at runtime. TENSILE_PLSIN_MIN_ITER lowers this (=1 enables the
-    numIter==1 / K==DepthU case) -- correct only in tandem with the runtime coord
-    recompute emitted in buildSubtileFusedStore (which refills the hoisted coord VGPRs
-    when numIter < PGR). Clamped to [1, PGR] so it can only ever RELAX the gate."""
+    is 1: the numIter==1 / K==DepthU case is handled by the runtime coord recompute
+    emitted in buildSubtileFusedStore (which refills the hoisted write-index coord
+    VGPRs when numIter < PGR, since the NGLL init-hoist arm only runs for numIter>=PGR).
+    Validated bit-exact vs develop on K==DepthU shapes, so the fused store covers small-K
+    tiles too. TENSILE_PLSIN_MIN_ITER can raise this back toward PGR to restore the
+    conservative gate. Clamped to [1, PGR] so it can only ever RELAX the gate."""
     pgr = kernel["PrefetchGlobalRead"]
     try:
-      v = int(plsinDebugEnv("TENSILE_PLSIN_MIN_ITER", str(pgr)))
+      v = int(plsinDebugEnv("TENSILE_PLSIN_MIN_ITER", "1"))
     except (TypeError, ValueError):
-      v = pgr
+      v = 1
     return max(1, min(v, pgr))
 
   def _plsinAlphaSkipEligible(self, kernel):
@@ -15945,10 +15965,59 @@ class KernelWriterAssembly(KernelWriter):
     the always-correct applyAlpha=True path."""
     return bool(kernel["PostLoopStoreInNll"]) and kernel["ProblemType"]["ComputeDataType"].isSingle()
 
-  def computePostLoopAlphaIsOne(self, kernel):
-    """Precompute the persistent predicate 'effective alpha == 1' into
-    PostLoopAlphaIsOne, so the fused-store guard can drop the ~per-element epilogue
-    alpha multiply on the fast path.
+  def _plsinApplyAlphaInFused(self, kernel):
+    """PostLoopStoreInNll: apply the effective alpha (and folded scalar scaleA*scaleB)
+    INSIDE the fused NLL store via the weave per-element _applyAlpha, instead of
+    requiring effective-alpha==1 and routing alpha!=1 / scalar-scaled WGs to the PLAIN
+    store. The multiply is VALU (v_mul_f32 / v_pk_mul_f32) woven under the terminal
+    MFMAs, so it overlaps matrix compute (the same _weaveReadBeforeEpilogue machinery
+    the bias / ScaleAlphaVec epilogue already rides). Only meaningful on the fp32 fast
+    path (_plsinAlphaSkipEligible); the non-fp32 fused store already keeps
+    applyAlpha=True. Default ON; TENSILE_PLSIN_APPLY_ALPHA=0 restores the old
+    eff-alpha==1-gated skip (applyAlpha=False fast path + Alpha==1 front-guard fold)."""
+    return self._plsinAlphaSkipEligible(kernel) and \
+           plsinDebugEnv("TENSILE_PLSIN_APPLY_ALPHA", "1") != "0"
+
+  def _plsinSubtileEdge(self, kernel):
+    """PostLoopStoreInNll fused-store edge policy.
+
+    Default (True): the fused-store front guard admits subtile-aligned partial tiles --
+    an M remainder that is a multiple of the paired-store block (16//destBpe; = 8 for a
+    bf16 D) and ANY N remainder take the FUSED store, which masks the trailing partial
+    AND fully-OOB M/N blocks branch-free via the SubtileMGuard/SubtileNGuard align8 exec
+    masks (see GlobalWriteBatch._emitAlign8ExecMask). This lets thin-M / edge shapes take
+    the fused runtime branch instead of the (slightly slower) PLAIN + edge post-loop
+    store, and was validated bit-exact vs develop across partial-M / partial-N sweeps.
+    TENSILE_PLSIN_SUBTILE_EDGE=0 restores the conservative full-tile-only gate
+    (requireFullTile=True). Only meaningful for the subtile paired-store path
+    (storeAlign8)."""
+    return plsinDebugEnv("TENSILE_PLSIN_SUBTILE_EDGE", "1") != "0"
+
+  def _plsinSubtileEdgeAlign(self, kernel, isSize1):
+    """Subtile-edge admissible remainder alignment for dim (M: isSize1=False, N: True).
+    M: 16//destBpe (paired dwordx4 store width / dest bpe = 8 for bf16). N: 1 (any
+    remainder -- the align8 N exec mask handles arbitrary partial columns)."""
+    if isSize1:
+      return 1
+    destBpe = int(kernel["ProblemType"]["DestDataType"].numBytes())
+    return max(1, 16 // destBpe)
+
+  def computePostLoopFusedStore(self, kernel):
+    """Precompute the persistent 'this tile falls through the fused-store path' predicate
+    into PostLoopFusedStore, ANDing EVERY fused-store sub-guard into one bit so all three
+    guard sites (NGLL front, NLL front, post-loop dedup) collapse to a single flag
+    compare instead of recomputing the chain each time (and the SALU overlaps the
+    prefetch/MFMA shadow instead of the NLL prologue critical path):
+        flag = (eff-alpha==1) && (no tail) && (numIter>=minIter)
+               && (beta==0) && (full-tile in M) && (full-tile in N)
+               && (StreamK full-tile owner)
+    flag==1 still implies eff-alpha==1, so the applyAlpha=False fast path (gated by
+    _plsinAlphaSkipEligible + this flag) is unaffected; any failing sub-guard forces
+    flag=0 => PLAIN NLL. NOTE: only defined/computed for fp32-compute PLSIN kernels
+    (_plsinAlphaSkipEligible); non-fp32 PLSIN keeps the inline emitFusedStoreGuard chain.
+
+    The eff-alpha==1 term (below) uses a strictly CONSERVATIVE, fault-free test:
+        (Alpha == 1.0) && (AddressScaleA == null) && (AddressScaleB == null)
 
     effective alpha = Alpha * scaleA * scaleB, where scaleA/scaleB default to 1.0 and
     are only overridden when the caller passes a non-null AddressScaleA/B pointer (the
@@ -15966,49 +16035,59 @@ class KernelWriterAssembly(KernelWriter):
     sites), so we read them straight from KernArgAddress using the same ArgType-aware
     byte offsets the epilogue loader uses (packed: argLoader offset; UserArgs external
     struct: externalArgLoader offset)."""
-    module = Module("computePostLoopAlphaIsOne")
+    module = Module("computePostLoopFusedStore")
     if not self._plsinAlphaSkipEligible(kernel):
       return module
-    module.addComment1("PLSIN: precompute effective-alpha==1 (Alpha & null scaleA/B) -> PostLoopAlphaIsOne")
-    flag = "PostLoopAlphaIsOne"
-    # Fail-safe default: 0 (=> PLAIN NLL). Any early return below leaves this in place.
-    module.add(SMovB32(dst=sgpr(flag), src=0, comment="default: assume effective alpha != 1"))
+    flag = "PostLoopFusedStore"
+    applyAlphaInFused = self._plsinApplyAlphaInFused(kernel)
+    if applyAlphaInFused:
+      # Alpha (and folded scalar scaleA*scaleB) is applied INSIDE the fused NLL store
+      # (weave per-element _applyAlpha), so effective-alpha==1 is no longer a fusion
+      # precondition -- do NOT fold the Alpha==1 / null-scale checks into the flag. The
+      # remaining loop-invariant sub-guards (no-tail / numIter / beta / full-tile /
+      # StreamK-owner) are still folded below.
+      module.addComment1("PLSIN: alpha applied in fused store -> eff-alpha==1 NOT gated; fold remaining sub-guards -> PostLoopFusedStore")
+    else:
+      module.addComment1("PLSIN: precompute effective-alpha==1 (Alpha & null scaleA/B) -> PostLoopFusedStore")
+    # Base: tentatively fuse-eligible; every sub-guard below ANDs in via s_cselect
+    # (keep flag on true, else 0). Any failing sub-guard forces flag=0 -> PLAIN NLL.
+    module.add(SMovB32(dst=sgpr(flag), src=1, comment="tentatively fuse-eligible"))
 
-    isScalarScale = (kernel["ProblemType"]["UseScaleAB"] == "Scalar")
-    supportUA = kernel["ProblemType"]["SupportUserArgs"]
-    # Byte offsets of the scaleA/scaleB pointer pair within the current gemm's kernargs.
-    # These mirror loadFusedEpilogueStoreSgprs: packed -> argLoader base offset (scaleA
-    # is the first store-sgpr chunk, packedOff 0); external UserArgs struct ->
-    # externalArgLoader base offset (scaleA chunk extOff 0). Both are compile-time
-    # constants and the loaders are in their post-prologue state here.
-    packedOff = self.argLoader.getOffset() if isScalarScale else None
-    extOff = self.externalArgLoader.getOffset() if (isScalarScale and supportUA) else None
-    ptrBytes = self.states.rpga * self.states.bpr  # scaleA/scaleB are contiguous pointers
+    if not applyAlphaInFused:
+      # AND-in effective-alpha==1: user Alpha==1 AND (scalar) scaleA/scaleB pointers null.
+      module.add(SCmpEQU32(src0=sgpr("Alpha"), src1=1.0, comment="Alpha == 1.0 ?"))
+      module.add(SCSelectB32(dst=sgpr(flag), src0=sgpr(flag), src1=0, comment="Alpha!=1 -> not one"))
 
-    # flag = 1, then AND-in each condition via s_cselect (keep flag on true, else 0).
-    module.add(SMovB32(dst=sgpr(flag), src=1, comment="tentatively effective alpha == 1"))
-    module.add(SCmpEQU32(src0=sgpr("Alpha"), src1=1.0, comment="Alpha == 1.0 ?"))
-    module.add(SCSelectB32(dst=sgpr(flag), src0=sgpr(flag), src1=0, comment="Alpha!=1 -> not one"))
+      isScalarScale = (kernel["ProblemType"]["UseScaleAB"] == "Scalar")
+      supportUA = kernel["ProblemType"]["SupportUserArgs"]
+      # Byte offsets of the scaleA/scaleB pointer pair within the current gemm's kernargs.
+      # These mirror loadFusedEpilogueStoreSgprs: packed -> argLoader base offset (scaleA
+      # is the first store-sgpr chunk, packedOff 0); external UserArgs struct ->
+      # externalArgLoader base offset (scaleA chunk extOff 0). Both are compile-time
+      # constants and the loaders are in their post-prologue state here.
+      packedOff = self.argLoader.getOffset() if isScalarScale else None
+      extOff = self.externalArgLoader.getOffset() if (isScalarScale and supportUA) else None
+      ptrBytes = self.states.rpga * self.states.bpr  # scaleA/scaleB are contiguous pointers
 
-    if isScalarScale:
-      with self.allocTmpSgpr(4, alignment=4, tag="plsinAlphaOne_ptr") as ptrTmp, \
-           self.allocTmpSgpr(2, tag="plsinAlphaOne_off") as offTmp:
-        ptrA = ptrTmp.idx      # scaleA pointer (2 regs, 4-aligned block)
-        ptrB = ptrTmp.idx + 2  # scaleB pointer (2 regs)
-        off = offTmp.idx
-        off2 = offTmp.idx + 1
-        module.add(SMovB32(dst=sgpr(off), src=packedOff, comment="scaleA ptr kernarg byte offset (packed)"))
-        if supportUA:
-          module.add(SCmpEQU32(src0=sgpr("ArgType"), src1=2, comment="ArgType == 2 (UserArgs external struct) ?"))
-          module.add(SCMovB32(dst=sgpr(off), src=extOff, comment="use external-struct scale offset"))
-        module.add(SAddU32(dst=sgpr(off2), src0=sgpr(off), src1=ptrBytes, comment="scaleB ptr kernarg byte offset"))
-        module.add(SLoadB64(dst=sgpr(ptrA, 2), base=sgpr("KernArgAddress", 2), soffset=sgpr(off), comment="load AddressScaleA pointer"))
-        module.add(SLoadB64(dst=sgpr(ptrB, 2), base=sgpr("KernArgAddress", 2), soffset=sgpr(off2), comment="load AddressScaleB pointer"))
-        module.add(SWaitCnt(kmcnt=0, comment="wait for scale pointer loads"))
-        module.add(SCmpEQU64(src0=sgpr(ptrA, 2), src1=0, comment="AddressScaleA == null (=> scaleA==1) ?"))
-        module.add(SCSelectB32(dst=sgpr(flag), src0=sgpr(flag), src1=0, comment="scaleA not null -> not one"))
-        module.add(SCmpEQU64(src0=sgpr(ptrB, 2), src1=0, comment="AddressScaleB == null (=> scaleB==1) ?"))
-        module.add(SCSelectB32(dst=sgpr(flag), src0=sgpr(flag), src1=0, comment="scaleB not null -> not one"))
+      if isScalarScale:
+        with self.allocTmpSgpr(4, alignment=4, tag="plsinAlphaOne_ptr") as ptrTmp, \
+             self.allocTmpSgpr(2, tag="plsinAlphaOne_off") as offTmp:
+          ptrA = ptrTmp.idx      # scaleA pointer (2 regs, 4-aligned block)
+          ptrB = ptrTmp.idx + 2  # scaleB pointer (2 regs)
+          off = offTmp.idx
+          off2 = offTmp.idx + 1
+          module.add(SMovB32(dst=sgpr(off), src=packedOff, comment="scaleA ptr kernarg byte offset (packed)"))
+          if supportUA:
+            module.add(SCmpEQU32(src0=sgpr("ArgType"), src1=2, comment="ArgType == 2 (UserArgs external struct) ?"))
+            module.add(SCMovB32(dst=sgpr(off), src=extOff, comment="use external-struct scale offset"))
+          module.add(SAddU32(dst=sgpr(off2), src0=sgpr(off), src1=ptrBytes, comment="scaleB ptr kernarg byte offset"))
+          module.add(SLoadB64(dst=sgpr(ptrA, 2), base=sgpr("KernArgAddress", 2), soffset=sgpr(off), comment="load AddressScaleA pointer"))
+          module.add(SLoadB64(dst=sgpr(ptrB, 2), base=sgpr("KernArgAddress", 2), soffset=sgpr(off2), comment="load AddressScaleB pointer"))
+          module.add(SWaitCnt(kmcnt=0, comment="wait for scale pointer loads"))
+          module.add(SCmpEQU64(src0=sgpr(ptrA, 2), src1=0, comment="AddressScaleA == null (=> scaleA==1) ?"))
+          module.add(SCSelectB32(dst=sgpr(flag), src0=sgpr(flag), src1=0, comment="scaleA not null -> not one"))
+          module.add(SCmpEQU64(src0=sgpr(ptrB, 2), src1=0, comment="AddressScaleB == null (=> scaleB==1) ?"))
+          module.add(SCSelectB32(dst=sgpr(flag), src0=sgpr(flag), src1=0, comment="scaleB not null -> not one"))
 
     # PLSIN guard-hoist: fold the loop-invariant SCALAR fused-store sub-guards into this
     # same persistent flag so the NLL front guard / post-loop dedup collapse to a single
@@ -16023,7 +16102,7 @@ class KernelWriterAssembly(KernelWriter):
     # path and reads only this flag.
     depthU = kernel["DepthU"]
     if (depthU & (depthU - 1)) == 0:
-      module.addComment1("PLSIN guard-hoist: fold no-tail into PostLoopAlphaIsOne (pre-loop shadow)")
+      module.addComment1("PLSIN guard-hoist: fold no-tail into PostLoopFusedStore (pre-loop shadow)")
       with self.allocTmpSgpr(1, tag="plsinFused_tail") as tTmp:
         module.add(SAndB32(dst=sgpr(tTmp.idx),
                            src0=sgpr("SizesSum+%u" % self.states.unrollIdx),
@@ -16034,7 +16113,7 @@ class KernelWriterAssembly(KernelWriter):
       pgr = kernel["PrefetchGlobalRead"]
       minIter = self._plsinMinIter(kernel)
       if pgr >= 2 and minIter > 1:
-        module.addComment1("PLSIN guard-hoist: fold numIter>=%u into PostLoopAlphaIsOne (pre-loop shadow)" % minIter)
+        module.addComment1("PLSIN guard-hoist: fold numIter>=%u into PostLoopFusedStore (pre-loop shadow)" % minIter)
         with self.allocTmpSgpr(1, tag="plsinFused_numIter") as nTmp:
           module.add(SLShiftRightB32(dst=sgpr(nTmp.idx),
                                      src=sgpr("SizesSum+%u" % self.states.unrollIdx),
@@ -16042,6 +16121,86 @@ class KernelWriterAssembly(KernelWriter):
                                      comment="numIter = SizesSum / DepthU"))
           module.add(SCmpGeU32(src0=sgpr(nTmp.idx), src1=minIter, comment="numIter >= minIter (real NLL drain)?"))
           module.add(SCSelectB32(dst=sgpr(flag), src0=sgpr(flag), src1=0, comment="too few K-iters -> not fused"))
+
+    # ------------------------------------------------------------------------
+    # FULL fold: AND the remaining PER-TILE fused-store sub-guards -- beta==0,
+    # full-tile in M and N, and StreamK full-tile owner -- into this same flag so
+    # ALL THREE guard sites (NGLL front, NLL front, post-loop dedup) collapse to a
+    # single flag compare instead of recomputing an edge/owner/beta chain each time.
+    # Every input is per-tile but already live here (setupNewTile ran graWorkGroup +
+    # StreamK preLoop above), and computing it pre-main-loop lets the SALU overlap the
+    # prefetch/MFMA shadow rather than sitting on the NLL prologue critical path. All
+    # tests are fault-free arithmetic on sizes/counters (no dereference). flag stays
+    # "==1 => fully fuse-eligible": flag==1 still implies eff-alpha==1, so the
+    # applyAlpha=False fast path (gated by _plsinAlphaSkipEligible + this flag) is
+    # unaffected; any failing sub-guard forces flag=0 -> PLAIN NLL.
+    # beta == 0 (loop-invariant). UseBeta False => nothing to test (stays eligible).
+    if kernel["ProblemType"]["UseBeta"]:
+      module.addComment1("PLSIN guard-hoist: fold beta==0 into %s (pre-loop shadow)" % flag)
+      if self.states.bpeCinternal <= self.states.bpr:
+        module.add(self.getSCMPKInstruction("EQU32", "Beta", 0, comment="Beta == 0 ?"))
+        module.add(SCSelectB32(dst=sgpr(flag), src0=sgpr(flag), src1=0, comment="beta != 0 -> not fused"))
+      else:
+        with self.allocTmpSgpr(1, tag="plsinFused_beta") as bTmp:
+          module.add(SMovB32(dst=sgpr(bTmp.idx), src=sgpr("Beta+0"), comment="tmp = Beta[0]"))
+          for i in range(1, self.states.bpeCinternal // self.states.bpr):
+            module.add(SOrB32(dst=sgpr(bTmp.idx), src0=sgpr("Beta+%u" % i), src1=sgpr(bTmp.idx), comment="tmp |= Beta[%u]" % i))
+          module.add(self.getSCMPKInstruction("EQU32", bTmp.idx, 0, comment="Beta == 0 ?"))
+          module.add(SCSelectB32(dst=sgpr(flag), src0=sgpr(flag), src1=0, comment="beta != 0 -> not fused"))
+
+    # full MacroTile in M and N: for the last WG in each dim, SizeX % MTx must be 0
+    # (non-last WGs are always full -> forced remainder 0). Mirrors
+    # checkIsEdgeSubtile(requireFullTile=True) but folds the rem==0 predicate into the
+    # flag via s_cselect instead of branching.
+    #
+    # Subtile-edge relaxation (TENSILE_PLSIN_SUBTILE_EDGE): admit subtile-aligned
+    # partial tiles into the fused store too -- the align8 exec masks
+    # (_emitAlign8ExecMask) mask the trailing partial AND fully-OOB M/N blocks
+    # branch-free, so the last-WG remainder only needs to be a multiple of the
+    # paired-store block in M (16//destBpe = 8 for bf16) and is unconstrained in N.
+    # We fold (myRem & (alignSize-1)) == 0 instead of myRem == 0.
+    subtileEdge = self._plsinSubtileEdge(kernel)
+    for isSize1 in (False, True):
+      dimName  = "N" if isSize1 else "M"
+      divisor  = kernel["MacroTile1"] if isSize1 else kernel["MacroTile0"]
+      wgSgpr   = "WorkGroup1" if isSize1 else "WorkGroup0"
+      nwgSgpr  = "NumWorkGroups1" if isSize1 else "NumWorkGroups0"
+      if isSize1:
+        sizeBoundary = sgpr("PackedSize1") if len(kernel["PackedC1IndicesX"]) > 1 else self.sizeRef(kernel["ProblemType"]["Index1"])
+      else:
+        sizeBoundary = sgpr("PackedSize0") if len(kernel["PackedC0IndicesX"]) > 1 else self.sizeRef(kernel["ProblemType"]["Index0"])
+      alignSize = self._plsinSubtileEdgeAlign(kernel, isSize1) if subtileEdge else divisor
+      module.addComment1("PLSIN guard-hoist: fold %s-tile %s (SizeX %% %d aligned on last WG) into %s" %
+                         ("subtile" if subtileEdge else "full", dimName, alignSize, flag))
+      with self.allocTmpSgpr(4, tag="plsinFused_fulltile") as eTmp:
+        rem  = eTmp.idx        # SizeX % divisor
+        quo  = eTmp.idx + 1    # SizeX / divisor (reused as nwg-1 after the divide)
+        div2 = eTmp.idx + 2    # 2-reg divide scratch
+        module.add(scalarStaticDivideAndRemainder(quo, rem, sizeBoundary, divisor,
+                                                  ContinuousRegister(div2, 2), 2))
+        module.add(SAddU32(dst=sgpr(quo), src0=hex(-1), src1=sgpr(nwgSgpr), comment="nwg-1"))
+        module.add(SCmpGeU32(src0=sgpr(wgSgpr), src1=sgpr(quo), comment="last WG in %s ?" % dimName))
+        module.add(SCSelectB32(dst=sgpr(rem), src0=sgpr(rem), src1=0, comment="myRem = last WG ? rem : 0"))
+        if subtileEdge and alignSize > 1:
+          module.add(SAndB32(dst=sgpr(rem), src0=sgpr(rem), src1=alignSize - 1,
+                             comment="myRem %% %d (subtile-edge: paired-store aligned)" % alignSize))
+        elif subtileEdge:  # alignSize == 1 (N): any remainder admitted
+          module.add(SMovB32(dst=sgpr(rem), src=0, comment="N subtile-edge: any remainder admitted"))
+        module.add(SCmpEQU32(src0=sgpr(rem), src1=0, comment="%s-tile-aligned in %s ?" % ("subtile" if subtileEdge else "full", dimName)))
+        module.add(SCSelectB32(dst=sgpr(flag), src0=sgpr(flag), src1=0, comment="misaligned %s tile -> not fused" % dimName))
+
+    # StreamK full-tile owner: started (LocalStart==0) AND finished (LocalEnd==ItersPerTile).
+    if kernel["StreamK"] > 0 and not kernel["StreamKAtomic"] and not kernel["StreamKForceDPOnly"]:
+      module.addComment1("PLSIN guard-hoist: fold StreamK full-tile owner into %s" % flag)
+      module.add(SCmpEQU32(src0=sgpr("StreamKLocalStart"), src1=0, comment="wg started this tile ?"))
+      module.add(SCSelectB32(dst=sgpr(flag), src0=sgpr(flag), src1=0, comment="split contributor (not start) -> not fused"))
+      sIpt = self.acquireStreamKConstSgpr(kernel, "ItersPerTile")
+      if self.isStreamKConstantsToVgprEnabled(kernel):
+        module.add(VReadfirstlaneB32(dst=sgpr(sIpt), src=vgpr(self.states.skConstVgprs["ItersPerTile"]),
+                                     comment="ItersPerTile const -> sgpr"))
+      module.add(SCmpEQU32(src0=sgpr("StreamKLocalEnd"), src1=sgpr(sIpt), comment="wg finished this tile ?"))
+      self.releaseStreamKConstSgpr(sIpt)
+      module.add(SCSelectB32(dst=sgpr(flag), src0=sgpr(flag), src1=0, comment="split contributor (not finish) -> not fused"))
     return module
 
   ##############################################################################
@@ -16078,7 +16237,7 @@ class KernelWriterAssembly(KernelWriter):
     assert (depthU & (depthU - 1)) == 0, \
       "PostLoopStoreInNll assumes DepthU is a power of two"
     # PLSIN guard-hoist: when the pre-loop scalar-eligibility flag exists (fp32 path,
-    # computePostLoopAlphaIsOne) it already folds (no-tail) && (numIter>=PGR) &&
+    # computePostLoopFusedStore) it already folds (no-tail) && (numIter>=PGR) &&
     # (effective alpha==1) -- all loop-invariant, computed BEFORE the main loop so the
     # scalar work overlaps the prefetch/MFMA shadow instead of sitting on this NLL
     # prologue critical path. Collapse those three sub-guards to one flag compare+branch.
@@ -16086,15 +16245,21 @@ class KernelWriterAssembly(KernelWriter):
     # checks inline as before. The alpha check that used to live here is folded into the
     # flag, so no separate alpha branch is emitted on the eligible path.
     if self._plsinAlphaSkipEligible(kernel):
-      module.addComment1("Fused-store guard: scalar eligibility hoisted (no-tail && numIter>=PGR && eff-alpha==1) -> PostLoopAlphaIsOne, else -> %s" % targetLabel.getLabelName())
-      module.add(SCmpEQU32(src0=sgpr("PostLoopAlphaIsOne"), src1=1,
-                           comment="fused guard: hoisted scalar eligibility == 1?"))
+      # FULL fold: PostLoopFusedStore now encodes EVERY sub-guard (no-tail && numIter &&
+      # eff-alpha==1 && beta==0 && full-tile(M,N) && StreamK-owner) -- see
+      # computePostLoopFusedStore. So this site collapses to a single flag compare+branch
+      # and emits NOTHING else (the inline beta/edge/owner blocks below are for the
+      # non-fp32 fallback path only).
+      module.addComment1("Fused-store guard: FULL eligibility hoisted (no-tail && numIter && eff-alpha==1 && beta==0 && full-tile(M,N) && SK-owner) -> PostLoopFusedStore, else -> %s" % targetLabel.getLabelName())
+      module.add(SCmpEQU32(src0=sgpr("PostLoopFusedStore"), src1=1,
+                           comment="fused guard: hoisted full eligibility == 1?"))
       if longBranch:
         module.add(self.longBranchScc0(targetLabel, posNeg=1,
-                                       comment="scalar not eligible -> not fused (long)"))
+                                       comment="not eligible -> not fused (long)"))
       else:
         module.add(SCBranchSCC0(labelName=targetLabel.getLabelName(),
-                                comment="scalar not eligible -> not fused"))
+                                comment="not eligible -> not fused"))
+      return module
     else:
       module.addComment1("Fused-store guard: FUSED iff (no tail) && beta==0 && full-tile(M,N), else -> %s" % targetLabel.getLabelName())
       with self.allocTmpSgpr(1, tag="fusedStoreGuard_tail") as tmpSgprInfo:
@@ -16116,7 +16281,7 @@ class KernelWriterAssembly(KernelWriter):
       # (illegal memory access at K == DepthU, e.g. the K=256 / MT256x256x256 repro).
       # minIter defaults to PGR; TENSILE_PLSIN_MIN_ITER=1 lowers it (numIter==1 case),
       # which is correct only with the runtime coord recompute in buildSubtileFusedStore.
-      # The fp32 path folds this into PostLoopAlphaIsOne above; this inline copy covers
+      # The fp32 path folds this into PostLoopFusedStore above; this inline copy covers
       # the rest.
       pgr = kernel["PrefetchGlobalRead"]
       minIter = self._plsinMinIter(kernel)
@@ -16135,18 +16300,21 @@ class KernelWriterAssembly(KernelWriter):
           else:
             module.add(SCBranchSCC0(labelName=targetLabel.getLabelName(),
                                     comment="too few K-iters -> not fused"))
-    # (effective alpha == 1 is folded into PostLoopAlphaIsOne along with no-tail /
+    # (effective alpha == 1 is folded into PostLoopFusedStore along with no-tail /
     # numIter>=PGR on the eligible fp32 path above -- no separate alpha branch here.)
     # beta==0 (checkIsBetaZero emits nothing when UseBeta is False -> stays eligible).
     # A long branch needs 3 scratch SGPRs, so widen the temp alloc in that mode.
     with self.allocTmpSgpr(3 if longBranch else 1, tag="fusedStoreGuard_beta") as tmpSgprInfo:
       module.add(self.checkIsBetaZero(kernel, tmpSgprInfo, targetLabel, isLongBranch=longBranch, posNeg=1))
-    # full-tile in M and N (the branch-free fused store is only valid on a complete tile).
+    # full-tile (or, under TENSILE_PLSIN_SUBTILE_EDGE, subtile-aligned) in M and N: the
+    # branch-free fused store's align8 exec masks handle trailing partial + fully-OOB
+    # blocks, so requireFullTile can relax to the subtile-aligned check.
+    _requireFullTile = not self._plsinSubtileEdge(kernel)
     with self.allocTmpSgpr(4, tag="fusedStoreGuard_edge") as tmpSgprInfo:
       module.add(self.checkIsEdgeSubtile(kernel, tmpSgprInfo, targetLabel,
-                                         isSize1=False, requireFullTile=True, isLongBranch=longBranch))
+                                         isSize1=False, requireFullTile=_requireFullTile, isLongBranch=longBranch))
       module.add(self.checkIsEdgeSubtile(kernel, tmpSgprInfo, targetLabel,
-                                         isSize1=True, requireFullTile=True, isLongBranch=longBranch))
+                                         isSize1=True, requireFullTile=_requireFullTile, isLongBranch=longBranch))
     # StreamK full-tile OWNER: only a WG that both started (StreamKLocalStart==0) and
     # finished (StreamKLocalEnd==ItersPerTile) this output tile computed the whole K
     # range, so it may store D directly. Split contributors must take the target
