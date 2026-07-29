@@ -986,6 +986,13 @@ def _abquant_prefill_config(
     )
 
 
+# =============================================================================
+# Decode family (non-preshuffle, tile 128x128x128, warp 1x4x1)
+#   fp8/bf8: K_warp = 128 on gfx950 (EightWaves for bquant_group_n>1), 32 on gfx942.
+#   fp4:     K_warp = 32 on all arches.
+# =============================================================================
+
+
 def default_fp8_config(bquant_group_n: int = 1, gfx_arch: str = "gfx950") -> ABQuantKernelConfig:
     """fp8 ABQuant, non-preshuffle.
 
@@ -1018,6 +1025,12 @@ def default_fp4_config(gfx_arch: str = "gfx950") -> ABQuantKernelConfig:
                                    bquant_group_n=128, transpose_c=False, gfx_arch=gfx_arch)
 
 
+# =============================================================================
+# Preshufflequant-only family (GemmConfigPreshuffleBQuantPrefill, tile 128x128x128)
+#   NOT eight_waves. IsFlatMM=false: K_warp = 128 on gfx950, 32 on gfx942.
+# =============================================================================
+
+
 def default_fp8_preshufflequant_config(
     bquant_group_n: int = 1, gfx_arch: str = "gfx950"
 ) -> ABQuantKernelConfig:
@@ -1043,6 +1056,13 @@ def default_fp8_preshufflequant_config(
         pad_k=True,
         gfx_arch=gfx_arch,
     )
+
+
+# =============================================================================
+# Preshuffleb family (tile 128x128x128, warp 2x2x1, DoubleSmemBuffer=true)
+#   fp8/bf8: gfx950 -> EightWaves (warp 4x2x1, K_warp=128); gfx942 -> K_warp=64 (IsFlatMM=true).
+#   fp4:     K_warp=32 on all arches; never eight_waves.
+# =============================================================================
 
 
 def _abquant_preshuffleb_config(
@@ -1117,6 +1137,12 @@ def default_fp4_preshuffleb_config(gfx_arch: str = "gfx950") -> ABQuantKernelCon
         "fp4", warp_tile_k=_warp_tile_k_for("fp4", gfx_arch, is_flat_mm=True),
         bquant_group_n=128,
         preshuffle_bquant=False, transpose_c=True, gfx_arch=gfx_arch)
+
+
+# =============================================================================
+# Preshuffleb + preshufflequant combined (tile 128x128x128, IsFlatMM=true)
+#   NOT eight_waves on either arch. K_warp = 128 on gfx950, 64 on gfx942.
+# =============================================================================
 
 
 def default_fp8_preshuffleb_preshufflequant_config(
