@@ -894,30 +894,29 @@ class TestTemplateOutputContent:
         assert "unpackOptionalTensor" not in unpacker
         assert "getDescriptorAttrScalar(" in unpacker
 
-    def test_moe_uses_configured_node_templates_and_inference_strategy(
+    def test_moe_preserves_handwritten_node_and_node_tests(
         self, load_test_config, generator, tmp_path
     ):
-        """Custom validation remains regenerable while dimensions come from YAML."""
+        """Frontend generation skips operation-specific handwritten artifacts."""
         config = load_test_config("moe_grouped_matmul.yaml")
-        output_dir = tmp_path / "output"
-        generator.render(config, output_dir, "frontend")
+        assert config.frontend.generate_node is False
 
-        node = (
+        output_dir = tmp_path / "output"
+        result = generator.render_frontend(config, output_dir)
+
+        node_path = (
             output_dir
             / "frontend"
             / "include"
             / "hipdnn_frontend"
             / "node"
             / config.node_header_filename
-        ).read_text()
-        node_test = (
-            output_dir / "frontend" / "tests" / config.test_node_filename
-        ).read_text()
-
-        assert "MoeGroupedMatmulNode missing token input" in node
-        assert "attributes.get_mode() == MoeGroupedMatmulMode::GATHER" in node
-        assert "HIPDNN_CHECK_ERROR(pre_validate_node())" not in node
-        assert "ScatterValidatesRoutingAndTopK" in node_test
+        )
+        node_test_path = output_dir / "frontend" / "tests" / config.test_node_filename
+        assert not node_path.exists()
+        assert not node_test_path.exists()
+        assert str(node_path.relative_to(output_dir)) not in result
+        assert str(node_test_path.relative_to(output_dir)) not in result
 
     def test_member_access_scalars_do_not_render_colliding_accessors(
         self, sdpa_config, generator
@@ -1185,6 +1184,18 @@ class TestDirectRenderMethods:
         assert len(self._FRONTEND_FILE_TEMPLATE_BASENAMES) == len(
             expected_file_basenames
         )
+
+    def test_render_frontend_skips_handwritten_node_files(
+        self, load_test_config, generator, tmp_path
+    ):
+        config = load_test_config("moe_grouped_matmul.yaml")
+        result = generator.render_frontend(config, tmp_path / "output")
+        basenames = {Path(path).name for path in result}
+
+        assert config.node_header_filename not in basenames
+        assert config.test_node_filename not in basenames
+        assert config.attributes_header_filename in basenames
+        assert config.test_attributes_filename in basenames
 
     def test_render_frontend_honors_attributes_filename_override(
         self, convolution_fwd_config, generator, tmp_path

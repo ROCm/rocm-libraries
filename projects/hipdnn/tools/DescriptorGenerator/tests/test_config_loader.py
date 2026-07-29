@@ -110,6 +110,13 @@ class TestLoadConvolutionFwd:
         assert convolution_fwd_config.infer_properties is not None
         assert convolution_fwd_config.infer_properties.strategy == "stub"
 
+    def test_generate_node_defaults_true(self, convolution_fwd_config):
+        assert convolution_fwd_config.frontend.generate_node is True
+
+    def test_moe_disables_node_generation(self, load_test_config):
+        config = load_test_config("moe_grouped_matmul.yaml")
+        assert config.frontend.generate_node is False
+
     def test_validation(self, convolution_fwd_config):
         assert convolution_fwd_config.validation is not None
         assert "x" in convolution_fwd_config.validation.required_input_tensors

@@ -48,14 +48,12 @@ class DescriptorGenerator:
         lines.append(f"# Descriptor Lifting Additions for {cn}")
         lines.append(f"# Add these changes to the existing {cn}.hpp/.cpp files.")
         lines.append("")
-        if config.frontend.node_template:
-            lines.append(
-                f"# Node source is generated from {config.frontend.node_template}."
-            )
-        else:
+        if config.frontend.generate_node:
             lines.append(
                 "# Node source is generated from the default node.hpp.j2 template."
             )
+        else:
+            lines.append("# Node source and unit tests are handwritten.")
         lines.append("")
 
         # --- HPP additions ---
@@ -260,14 +258,15 @@ class DescriptorGenerator:
         """Render frontend templates and write to output_dir. Returns list of written files."""
         written = []
 
-        # Frontend file templates
-        node_template = config.frontend.node_template or "node.hpp.j2"
         file_templates = {
             "attributes.hpp.j2": Path("frontend/include/hipdnn_frontend/attributes")
             / config.attributes_header_filename,
-            node_template: Path("frontend/include/hipdnn_frontend/node")
-            / config.node_header_filename,
         }
+        if config.frontend.generate_node:
+            file_templates["node.hpp.j2"] = (
+                Path("frontend/include/hipdnn_frontend/node")
+                / config.node_header_filename
+            )
 
         for template_name, rel_path in file_templates.items():
             out_path = output_dir / rel_path
@@ -276,15 +275,16 @@ class DescriptorGenerator:
             out_path.write_text(content)
             written.append(str(rel_path))
 
-        # Frontend test templates
-        node_test_template = config.frontend.node_test_template or "test_node.cpp.j2"
         test_templates = {
             "test_attributes.cpp.j2": Path("frontend/tests")
             / config.test_attributes_filename,
-            node_test_template: Path("frontend/tests") / config.test_node_filename,
             "test_frontend_graph.cpp.j2": Path("frontend/tests")
             / config.test_frontend_graph_filename,
         }
+        if config.frontend.generate_node:
+            test_templates["test_node.cpp.j2"] = (
+                Path("frontend/tests") / config.test_node_filename
+            )
 
         for template_name, rel_path in test_templates.items():
             out_path = output_dir / rel_path

@@ -19,8 +19,7 @@ operation:
     unpacker_function: "unpackMoeGroupedMatmulOperation"
     node_class: "MoeGroupedMatmulNode"
     attributes_class: "MoeGroupedMatmulAttributes"
-    node_template: "node_mode_rules.hpp.j2"
-    node_test_template: "test_node_mode_rules.cpp.j2"
+    generate_node: false
 
     inputs:
       - name: "token"
@@ -74,16 +73,6 @@ operation:
     node_type_enum: "NodeType::MOE_GROUPED_MATMUL"
     node_attributes_union_type: "MoeGroupedMatmulAttributes"
 
-  infer_properties:
-    strategy: "mode_select_dimensions"
-    mode_field: "mode"
-    dimensions:
-      - { literal: 1 }
-      - tensor: "token_index"
-        dimension: 1
-        when_mode: "GATHER"
-        otherwise: { tensor: "token", dimension: 1 }
-      - { tensor: "weight", dimension: 2 }
 
   tensor_fields:
     - name: "token"

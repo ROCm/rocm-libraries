@@ -629,18 +629,6 @@ class ModeRule:
 
 
 @dataclass
-class InferenceDimension:
-    """One inferred output dimension for the ``mode_select_dimensions`` strategy."""
-
-    literal: int | None = None
-    tensor: str = ""
-    dimension: int | None = None
-    when_mode: str = ""
-    otherwise_tensor: str = ""
-    otherwise_dimension: int | None = None
-
-
-@dataclass
 class FrontendTensorConfig:
     """An input or output tensor for the frontend Attributes class."""
 
@@ -689,8 +677,6 @@ class InferPropertiesConfig:
     strategy: str = "stub"
     reference_input: str = ""
     dimension_formula: str = ""
-    mode_field: str = ""
-    dimensions: list[InferenceDimension] = field(default_factory=list)
 
 
 @dataclass
@@ -737,8 +723,7 @@ class FrontendConfig:
     node_type_enum: str = ""
     node_attributes_union_type: str = ""
     compatibility_typedef: str = ""
-    node_template: str = ""
-    node_test_template: str = ""
+    generate_node: bool = True
 
     @property
     def effective_attributes_filename(self) -> str:

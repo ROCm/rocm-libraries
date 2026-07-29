@@ -21,7 +21,6 @@ from .models import (
     ModeIntegrationScenario,
     GraphMethodParam,
     InferPropertiesConfig,
-    InferenceDimension,
     ModeRule,
     ModeScalarConstraint,
     OperationConfig,
@@ -292,8 +291,7 @@ def _parse_frontend_config(fe_raw: dict, operation_name: str) -> FrontendConfig:
         node_type_enum=fe_raw.get("node_type_enum", ""),
         node_attributes_union_type=fe_raw.get("node_attributes_union_type", ""),
         compatibility_typedef=fe_raw.get("compatibility_typedef", ""),
-        node_template=fe_raw.get("node_template", ""),
-        node_test_template=fe_raw.get("node_test_template", ""),
+        generate_node=fe_raw.get("generate_node", True),
     )
 
 
@@ -386,26 +384,10 @@ def _parse_infer_properties(raw: dict | None) -> InferPropertiesConfig | None:
     if raw is None:
         return None
 
-    dimensions = []
-    for dimension in raw.get("dimensions", []):
-        otherwise = dimension.get("otherwise", {})
-        dimensions.append(
-            InferenceDimension(
-                literal=dimension.get("literal"),
-                tensor=dimension.get("tensor", ""),
-                dimension=dimension.get("dimension"),
-                when_mode=dimension.get("when_mode", ""),
-                otherwise_tensor=otherwise.get("tensor", ""),
-                otherwise_dimension=otherwise.get("dimension"),
-            )
-        )
-
     return InferPropertiesConfig(
         strategy=raw.get("strategy", "stub"),
         reference_input=raw.get("reference_input", ""),
         dimension_formula=raw.get("dimension_formula", ""),
-        mode_field=raw.get("mode_field", ""),
-        dimensions=dimensions,
     )
 
 
@@ -803,60 +785,6 @@ def _validate_config(config: OperationConfig) -> None:
                 f"Operation '{config.name}': mode_rules must include every optional "
                 f"tensor in at least one mode; missing {sorted(missing_optional_tensors)}."
             )
-
-    infer_properties = config.infer_properties
-    if infer_properties and infer_properties.strategy == "mode_select_dimensions":
-        mode_field = config.data_field_by_name.get(infer_properties.mode_field)
-        if not mode_field or not mode_field.is_mode:
-            raise ConfigError(
-                f"Operation '{config.name}': mode_select_dimensions requires "
-                "infer_properties.mode_field to name a mode data field."
-            )
-        if not infer_properties.dimensions:
-            raise ConfigError(
-                f"Operation '{config.name}': mode_select_dimensions requires "
-                "at least one inferred dimension."
-            )
-        tensor_names = {field.name for field in config.tensor_fields}
-        for dimension in infer_properties.dimensions:
-            is_literal = dimension.literal is not None
-            is_tensor_dimension = bool(dimension.tensor)
-            if is_literal == is_tensor_dimension:
-                raise ConfigError(
-                    f"Operation '{config.name}': each inferred dimension must define "
-                    "exactly one of literal or tensor."
-                )
-            if is_tensor_dimension and (
-                dimension.dimension is None or dimension.dimension < 0
-            ):
-                raise ConfigError(
-                    f"Operation '{config.name}': tensor inferred dimensions require "
-                    "a non-negative dimension index."
-                )
-            if dimension.tensor and dimension.tensor not in tensor_names:
-                raise ConfigError(
-                    f"Operation '{config.name}': inferred dimension references "
-                    f"unknown tensor '{dimension.tensor}'."
-                )
-            if dimension.when_mode:
-                if (
-                    not dimension.otherwise_tensor
-                    or dimension.otherwise_dimension is None
-                ):
-                    raise ConfigError(
-                        f"Operation '{config.name}': conditional inferred dimensions "
-                        "require otherwise.tensor and otherwise.dimension."
-                    )
-                if dimension.otherwise_tensor not in tensor_names:
-                    raise ConfigError(
-                        f"Operation '{config.name}': inferred dimension references "
-                        f"unknown fallback tensor '{dimension.otherwise_tensor}'."
-                    )
-                if dimension.otherwise_dimension < 0:
-                    raise ConfigError(
-                        f"Operation '{config.name}': fallback inferred dimension index "
-                        "must be non-negative."
-                    )
 
     if config.mode_integration_scenarios:
         if len(config.mode_fields) != 1:
