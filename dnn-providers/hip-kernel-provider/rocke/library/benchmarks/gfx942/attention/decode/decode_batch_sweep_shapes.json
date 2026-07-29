@@ -5,7 +5,7 @@
     "block_size": 16,
     "use_sinks": false,
     "sliding_window": 0,
-    "note": "Representative continuous-batching decode sweep (seqlen_q=1) across 5 GQA configs (Llama-3-8B/70B, Llama-3.1-405B, Qwen3-30B, Qwen3-235B), D64/D128. batch in {8,16,32,64,128,256} models real serving concurrency, plus a per-config 'flipwin' batch that lands in the num_sms 2D->3D routing window (num_2d in (480,1216] on MI300X=304 CU). Extends the prior batch=1-only corpus to exercise the device-CU-count num_sms resolver + split-KV segment bound across mid/large batch."
+    "note": "Representative continuous-batching decode sweep (seqlen_q=1) across 5 GQA configs (Llama-3-8B/70B, Llama-3.1-405B, Qwen3-30B, Qwen3-235B), D64/D128. batch in {8,16,32,64,128,256} models real serving concurrency, plus a per-config 'flipwin' batch that lands in the num_sms 2D->3D routing window (num_2d in (480,1216] on 304-CU gfx942). Extends the prior batch=1-only corpus to exercise the device-CU-count num_sms resolver + split-KV segment bound across mid/large batch."
   },
   "shapes": [
     {
