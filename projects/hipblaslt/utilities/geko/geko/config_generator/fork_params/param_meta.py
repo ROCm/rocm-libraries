@@ -19,7 +19,7 @@ def _format_range(rng, start_elements=2, end_elements=2):
 
 @lru_cache(maxsize=1)
 def load_tensile_metadata() -> Dict[str, ParamMeta]:
-    """Pull defaults and valid ranges from tensilelite's validParameters
+    """Pull defaults and valid ranges from Tensile's validParameters
     and defaultBenchmarkCommonParameters.  Returns Dict[str, ParamMeta].
     Loaded lazily and cached for reuse across callers."""
     from tensilelite.Common.GlobalParameters import defaultBenchmarkCommonParameters

@@ -112,12 +112,13 @@ def test_gfx950_postprocessor_adjustments(monkeypatch) -> None:
     assert "MIArchVgpr" in g2[1]
     assert f2["UseCustomMainLoopSchedule"].values == [0]
 
-
-def test_load_cms_groups_import_error(monkeypatch) -> None:
-    monkeypatch.setattr(os.path, "isdir", lambda _p: False)
-    raised = False
-    try:
-        gfx950_pp.load_CMS_groups("H", "N", "N", lambda *a, **k: ForkParameter(name=a[0], values=a[1]))
-    except ImportError:
-        raised = True
-    assert raised is True
+def test_load_cms_groups_uses_installed_tensilelite(monkeypatch) -> None:
+    monkeypatch.setattr(
+        os.path,
+        "isdir",
+        lambda _p: (_ for _ in ()).throw(AssertionError("checkout discovery is forbidden")),
+    )
+    result = gfx950_pp.load_CMS_groups(
+        "H", "N", "N", lambda *a, **k: ForkParameter(name=a[0], values=a[1])
+    )
+    assert isinstance(result, list)

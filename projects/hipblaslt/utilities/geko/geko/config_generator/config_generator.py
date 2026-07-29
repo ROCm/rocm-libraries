@@ -51,8 +51,6 @@ def run(
     """
     hipblaslt_path, output_path = map(Path, (hipblaslt_path, output_path))
 
-    sys.path.insert(0, str(hipblaslt_path / "tensilelite"))
-
     client_path = None
     if write_shell_scripts:
         client_path = build_tensilelite_client(

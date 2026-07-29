@@ -106,16 +106,17 @@ def test_merge_rejects_missing_hipblaslt_path(tmp_path: Path) -> None:
 
 def test_merge_invokes_tensile_merge_library(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     hip = tmp_path / "hip"
-    (hip / "tensilelite/tensilelite/bin").mkdir(parents=True)
+    hip.mkdir()
     called = {}
 
-    def _fake_run(cmd):
-        called["cmd"] = cmd
+    from tensilelite import TensileMergeLibrary
 
-    monkeypatch.setattr(operations, "run_silent_command", _fake_run)
+    def _fake_merge(*args):
+        called["args"] = args
+
+    monkeypatch.setattr(TensileMergeLibrary, "avoidRegressions", _fake_merge)
     operations.merge(hip, "orig", "inc", "out", eff=False, force=True)
-    assert "TensileMergeLibrary" in called["cmd"][0]
-    assert "--no_eff" in called["cmd"]
+    assert called["args"] == ("orig", "inc", "out", True, True)
 
 
 def test_create_rejects_missing_hip_path(tmp_path: Path) -> None:
@@ -134,7 +135,7 @@ def test_create_rejects_empty_library_dir(tmp_path: Path) -> None:
 
 def test_create_invokes_tensile_create_library(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     hip = tmp_path / "hip"
-    (hip / "tensilelite/tensilelite/bin").mkdir(parents=True)
+    hip.mkdir()
     libs = tmp_path / "libs"
     libs.mkdir()
     _write_library_yaml(libs, "x.yaml")
@@ -146,7 +147,7 @@ def test_create_invokes_tensile_create_library(monkeypatch: pytest.MonkeyPatch, 
 
     monkeypatch.setattr(operations, "run_silent_command", _fake_run)
     operations.create(hip, libs, tmp_path / "out")
-    assert "TensileCreateLibrary" in called["cmd"][0]
+    assert called["cmd"][1:4] == ["-m", "tensilelite", "create-library"]
 
 
 def test_from_dataframe_requires_lib_column(tmp_path: Path) -> None:

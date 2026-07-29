@@ -43,6 +43,7 @@ import logging
 import copy
 import pandas as pd
 import glob
+import sys
 
 from pathlib import Path
 from typing import List, Tuple, Sequence
@@ -317,12 +318,10 @@ def merge(
     if not hipblaslt_path.is_dir():
         raise FileNotFoundError(f"hipBLASLt path not found: '{hipblaslt_path}'")
 
-    logger.info(f"Calling TensileMergeLibrary on '{inc_dir}'")
-    cmd = [str(hipblaslt_path / "tensilelite/tensilelite/bin/TensileMergeLibrary")]
-    if not eff:
-        cmd += ["--no_eff"]
-    cmd += ["--force_merge", str(force), orig_dir, inc_dir, output_dir]
-    run_silent_command(cmd)
+    logger.info(f"Merging TensileLite library '{inc_dir}'")
+    from tensilelite.TensileMergeLibrary import avoidRegressions
+
+    avoidRegressions(orig_dir, inc_dir, output_dir, force, not eff)
 
 
 def create(hipblaslt_path: str | Path, library_dir: str | Path, output_dir: str | Path, version: str = "5") -> None:
@@ -349,10 +348,13 @@ def create(hipblaslt_path: str | Path, library_dir: str | Path, output_dir: str 
 
     arch = load_library(lib_paths[0]).arch
 
-    logger.info(f"Calling TensileCreateLibrary on '{library_dir}'")
+    logger.info(f"Calling tensilelite create-library on '{library_dir}'")
     run_silent_command(
         [
-            str(hipblaslt_path / "tensilelite/tensilelite/bin/TensileCreateLibrary"),
+            sys.executable,
+            "-m",
+            "tensilelite",
+            "create-library",
             "--code-object-version",
             version,
             "--library-format",

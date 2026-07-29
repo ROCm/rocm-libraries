@@ -207,7 +207,7 @@ def run(
 
     Args:
         hipblaslt_path (str | Path): Path to hipBLASLt installation. Used both
-            for the Tensile binary and to add tensilelite to PYTHONPATH.
+            for the staged TensileLite ROCm root and installed package command.
         tuning_dir (str | Path): Directory containing per-GEMM optimization
             YAML configs (see configure).
         devices (Sequence[int], optional): GPU device IDs used by the load
@@ -300,15 +300,20 @@ def run(
             self.build_dir.mkdir(parents=True, exist_ok=True)
             (self.build_dir / ".running").write_text(f"device={self.device}\nslot={self.slot_id}\n")
 
-            env = {"PYTHONPATH": str(hipblaslt_path / "tensilelite")}
+            runtime_root = client_build_dir / "tensilelite-rocm"
+            python = client_build_dir / "tensilelite-venv" / (
+                "Scripts/python.exe" if os.name == "nt" else "bin/python"
+            )
+            env = {"ROCM_PATH": str(runtime_root)}
             with open(self.build_dir / f"{self.config_name}-tensilelite.log", "w") as f:
                 proc = subprocess.Popen(
                     [
-                        hipblaslt_path / "tensilelite/tensilelite/bin/Tensile",
+                        python,
+                        "-m",
+                        "tensilelite",
+                        "run",
                         self.config,
                         self.build_dir,
-                        "--prebuilt-client",
-                        client_build_dir / "tensilelite/client/tensilelite-client",
                         "--client-lock",
                         (tuning_dir / f"gpulock_{self.device}").resolve(),
                     ],

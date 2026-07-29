@@ -105,7 +105,8 @@ def build_tensilelite_client(hipblaslt_path: str | Path, build_dir: str | Path =
         build_dir = default_build_dir
 
     build_dir = Path(build_dir).resolve()
-    client_path = build_dir / "tensilelite/client/tensilelite-client"
+    runtime_root = build_dir / "tensilelite-rocm"
+    client_path = runtime_root / "libexec/hipblaslt/tensilelite/tensilelite-client"
     hash_file_path = build_dir / "hash.txt"
 
     build = True
@@ -135,9 +136,9 @@ def build_tensilelite_client(hipblaslt_path: str | Path, build_dir: str | Path =
         with open(hash_file_path, "w") as f:
             f.write(current_hash)
     else:
-        logger.debug(f"Skipping tensilelite client build, using cached client at '{client_path}'")
+        logger.debug(f"Skipping TensileLite runtime build, using cached stage at '{runtime_root}'")
 
-    return client_path if build_dir != default_build_dir else None
+    return runtime_root
 
 
 def parse_devices(devices: str | list[int]) -> List[int]:

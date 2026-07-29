@@ -114,10 +114,16 @@ def test_output_writer_scripts_and_orchestrator(tmp_path: Path) -> None:
     assert "#kernels 3" in cfg_log.read_text(encoding="utf-8")
 
     hip = tmp_path / "hip"
-    (hip / "tensilelite/tensilelite/bin").mkdir(parents=True)
+    hip.mkdir()
     script = tmp_path / "e1.sh"
-    ow.write_run_script(script, "e1", hip, client_path=hip / "client")
+    runtime_root = tmp_path / "build" / "tensilelite-rocm"
+    ow.write_run_script(script, "e1", hip, client_path=runtime_root)
     assert script.is_file()
+    script_text = script.read_text(encoding="utf-8")
+    assert f"ROCM_PATH={runtime_root}" in script_text
+    assert "-m tensilelite run" in script_text
+    assert "PYTHONPATH" not in script_text
+    assert "--prebuilt-client" not in script_text
 
     writer = ow.EntityOutputWriter(tmp_path / "out", "HHS_NN", hip, write_shell_scripts=False)
     (tmp_path / "out").mkdir(parents=True, exist_ok=True)

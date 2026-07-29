@@ -589,7 +589,7 @@ my_optimization/
 HIPBLASLT_PATH="/path/to/rocm-libraries/projects/hipblaslt"
 LIBRARY_DIR="${HIPBLASLT_PATH}/library/src/amd_detail/rocblaslt/src/Tensile/Logic/asm_full/gfx950/Equality/"
 
-${HIPBLASLT_PATH}/tensilelite/tensilelite/bin/TensileMergeLibrary \
+TensileMergeLibrary \
   --no_eff --force_merge True \
   "${LIBRARY_DIR}" my_optimization/final_libs "${LIBRARY_DIR}"
 
@@ -597,7 +597,10 @@ cd "${HIPBLASLT_PATH}"
 invoke build --install-deps --clients --architecture gfx950 --skip-rocroller
 ```
 
-`TensileMergeLibrary` arguments: `--no_eff` skips efficiency calculations; `--force_merge True` forces merge on conflicts; the three positional args are original dir, new libs dir, output dir (same as original to update in place).
+`TensileMergeLibrary` is supplied only by the deprecated
+`tensilelite-tensile-compat` wheel. GEKO's library API now calls the installed
+TensileLite merge implementation directly; new automation should use GEKO rather
+than depending on this legacy command.
 
 **Verify:**
 ```bash
@@ -949,7 +952,7 @@ from geko.schemas import GemmType, GemmConfig
 gemm_type = GemmType.from_hipblaslt(
     "T", "N", "f16_r", "f16_r", "f16_r", "f32_r"
 )
-# Or from tensilelite YAML codes only:
+# Or from Tensile YAML codes only:
 # gemm_type = GemmType.from_tensile("N", "T", "H", "H", "S")
 
 gemm_config = GemmConfig(
@@ -1211,7 +1214,7 @@ If the benchmark fails, check for:
 
 **Invalid GEMM Types:**
 Check the supported data types in hipBLASLt:
-- Visit the [tensilelite DataType definitions](https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipblaslt/tensilelite/tensilelite/Common/DataType.py)
+- Visit the [tensilelite DataType definitions](https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipblaslt/tensilelite/Tensile/Common/DataType.py)
 - Verify your log file contains valid `a_type`, `b_type`, `c_type`, and `compute_type` combinations
 - Example valid types: `f16_r`, `bf16_r`, `f32_r`, `f8_r`, `bf8_r`
 
@@ -1329,4 +1332,3 @@ If you want to submit an issue, you can do so on
 ## License
 
 MIT License. Copyright (C) Advanced Micro Devices, Inc.
-

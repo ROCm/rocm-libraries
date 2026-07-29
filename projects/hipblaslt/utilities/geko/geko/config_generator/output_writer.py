@@ -20,6 +20,7 @@ Serializes ForkParameter objects directly to YAML in a single pass with no post-
 import logging
 import os
 from pathlib import Path
+import shlex
 from typing import Any, Dict, List, Optional
 
 from geko.config_generator.shared_utils import ConfigEntry, ForkParameter
@@ -284,17 +285,21 @@ def write_run_script(
         filepath: Path for the ``.sh`` file (created with mode ``0o755``).
         entity_name: Base name matching ``{entity_name}.yaml`` in the working directory.
         hipblaslt_path: Root of the hipBLASLt checkout (for ``tensilelite`` paths).
-        client_path: Optional path passed as ``--prebuilt-client`` when set.
+        client_path: Optional staged ROCm root returned by the TensileLite build.
     """
-    hip_s = str(Path(hipblaslt_path).resolve())
-    client_path_str = ''
+    command = "tensilelite run"
+    environment = ""
     if client_path:
-        client_path_str = f'--prebuilt-client {Path(client_path).resolve()}'
+        runtime_root = Path(client_path).resolve()
+        build_dir = runtime_root.parent
+        python = build_dir / "tensilelite-venv" / (
+            "Scripts/python.exe" if os.name == "nt" else "bin/python"
+        )
+        environment = f"ROCM_PATH={shlex.quote(str(runtime_root))} "
+        command = f"{shlex.quote(str(python))} -m tensilelite run"
 
     run_command = (
-        f'PYTHONPATH={hip_s}/tensilelite/ '
-        f'{hip_s}/tensilelite/tensilelite/bin/Tensile '
-        f'$YAML $WORK_DIR {client_path_str} 2>&1 | tee $OUT'
+        f'{environment}{command} $YAML $WORK_DIR 2>&1 | tee $OUT'
     )
 
     content = _RUN_SCRIPT_TEMPLATE.format(
@@ -388,7 +393,7 @@ class EntityOutputWriter:
             output_dir: Directory for YAML and ``.sh`` files (and ``run_<gemm_type>_all.sh``).
             gemm_type: GEMM string used in run-all and config log basenames.
             hipblaslt_path: hipBLASLt root for per-entity run scripts.
-            client_path: Optional prebuilt Tensile client for run scripts.
+            client_path: Optional staged ROCm root for run scripts.
             write_shell_scripts: If false, skip ``.sh`` and ``run_*_all.sh`` (YAML and log only).
         """
         self._output_dir = Path(output_dir)
