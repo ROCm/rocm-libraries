@@ -108,4 +108,5 @@ jobs:
         }}
       platform: ${{ inputs.platform }}
       component: ${{ toJSON(matrix.components) }}
+      coverage_enabled: ${{ inputs.coverage_enabled }}
     secrets: inherit
