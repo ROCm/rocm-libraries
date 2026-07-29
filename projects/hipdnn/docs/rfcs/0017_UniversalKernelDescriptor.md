@@ -321,16 +321,26 @@ In practice these versions should move rarely: the formats carry expressions rat
 so new behavior is usually authored in the expression language instead of requiring a schema change.
 The versions exist so a breaking change remains possible, not because one is expected often.
 
-**A UMD carries a second version: the graph schema it understands.** A matcher is the one descriptor
+**A UMD carries a second version: the graph schema it understands.** A matcher is the only descriptor
 that reads graph fields, so besides its own format version it declares the hipDNN schema (SDK) version
-it was authored against, an explicit ceiling on the graph features its author accounted for. hipDNN
-computes a graph's minimum required schema version from the optional fields the graph actually sets,
-and a matcher declaring less than that floor is declined before it runs. A matcher declaring `1.0` keeps
-matching graphs that need only `1.0`; once hipDNN adds an optional SDPA field at `1.1`, a graph that
-sets it requires `1.1` and that matcher is skipped, while graphs that leave it unset still reach it.
-Authors adopt new graph features when they are ready, or stay on an older schema deliberately when a
-kernel cannot support the newer one. Every other descriptor needs only its own version, since none of
-them read the graph.
+it was authored against. Every other descriptor needs only its own version.
+
+The rule is the same reject-what-you-do-not-understand shape, applied to the graph rather than the
+file. A graph reports the schema version its own contents require, computed from the optional fields it
+actually sets. A matcher declaring a version below that floor is declined before it runs, because the
+graph uses a feature its author never accounted for.
+
+Concretely: a matcher is authored against schema `1.0` and accepts SDPA graphs. hipDNN later adds an
+optional SDPA field at `1.1`.
+
+- A graph that leaves the new field unset still requires only `1.0`, so the matcher runs as before.
+- A graph that sets it requires `1.1`. The matcher declares `1.0`, so it is skipped rather than asked,
+  because it would otherwise match on the fields it does know and silently ignore a field that changes
+  what the graph means.
+
+The matcher is not broken and does not need reauthoring; it has simply stopped claiming graphs it was
+never written for. Its author adopts `1.1` when the kernel can honor the new field, or stays on `1.0`
+deliberately when it cannot.
 
 This mirrors an existing hipDNN mechanism rather than inventing one: a graph already carries a
 minimum-required engine-plugin API version, computed in the plugin SDK from the optional features it
