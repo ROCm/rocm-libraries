@@ -77,11 +77,11 @@ UKD fills in, and the **KDP** is the pack that binds them together.
   default (tile size, block size, and the like). Each UKD supplies concrete values; that completed tuple
   is the kernel's unique key in the catalog, the engine's heuristic ranks the catalog on it, and
   matchers read the fields as `$kernel.<field>`.
-- **UKD (Universal Kernel Descriptor).** One launchable kernel, carrying no logic of its own: its source
-  details plus concrete metadata values for the fields the engine's KMD declares. The source is either a
-  compiled kernel or the details for building it ahead-of-time (AOT). A UKD lives in a KDP and inherits
-  the pack's matchers and dispatch and, through the pack's engine, the heuristic and metadata schema, so
-  it names none of them; it is applicable only when **all** of its pack's matchers pass.
+- **UKD (Universal Kernel Descriptor).** One launchable kernel, carrying no logic of its own: a source
+  plus concrete values for the fields the engine's KMD declares. The source is either a compiled kernel
+  or the details for building it ahead-of-time (AOT). Everything else a UKD needs, it inherits: matchers
+  and dispatch from its KDP, heuristic and metadata schema from that pack's engine. It names none of
+  them, and it applies only when **all** of its pack's matchers pass.
 
 A family of near-identical kernels launches the same way and matches the same graph shapes, differing
 only in their compiled source and its build metadata. That family is exactly a KDP: one cohesive file
@@ -2209,11 +2209,11 @@ choices; none is a dependency.
 
 ## 19. Glossary
 
-- **UKD (Universal Kernel Descriptor):** one launchable kernel, carrying no logic of its own: its source
-  details (a compiled kernel, or how to build it AOT; one source per Launch for a multi-launch pack) and
-  concrete metadata values for the fields its engine's KMD declares (with an optional `priority`). It
-  lives in a KDP and inherits everything shared (the pack's matchers, engine, and UDD, and through the
-  engine its heuristic and metadata schema), so it names none of them.
+- **UKD (Universal Kernel Descriptor):** one launchable kernel, carrying no logic of its own. It holds a
+  source, either a compiled kernel or how to build it AOT, with one source per Launch for a multi-launch
+  pack; concrete metadata values for the fields its engine's KMD declares; and an optional `priority`.
+  Everything shared it inherits: matchers, engine, and UDD from its KDP, heuristic and metadata schema
+  from that engine. It names none of them.
 - **UMD (Universal Match Descriptor) / matcher:** one shared, ID-referenced matcher, a structural
   pattern (when present) plus a declarative **criteria expression**, that decides whether a kernel
   applies and binds the variables its dispatch and workspace formulas use
