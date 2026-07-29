@@ -69,11 +69,42 @@ TEST(TestTypes, BehaviorNoteToString)
                  "EXTERNAL_LIBRARY_DEPENDENCY");
     EXPECT_STREQ(to_string(BehaviorNote::SUPPORTS_EXECUTION_PLAN_SERIALIZATION),
                  "SUPPORTS_EXECUTION_PLAN_SERIALIZATION");
+    EXPECT_STREQ(to_string(BehaviorNote::NOT_SET), "NOT_SET");
+    EXPECT_STREQ(to_string(BehaviorNote::REQUIRES_FILTER_INT8x32_REORDER),
+                 "REQUIRES_FILTER_INT8x32_REORDER");
+    EXPECT_STREQ(to_string(BehaviorNote::REQUIRES_BIAS_INT8x32_REORDER),
+                 "REQUIRES_BIAS_INT8x32_REORDER");
+    EXPECT_STREQ(to_string(BehaviorNote::SUPPORTS_CUDA_GRAPH_NATIVE_API),
+                 "SUPPORTS_CUDA_GRAPH_NATIVE_API");
+    EXPECT_STREQ(to_string(BehaviorNote::CUBLASLT_DEPENDENCY), "CUBLASLT_DEPENDENCY");
     EXPECT_STREQ(to_string(static_cast<BehaviorNote>(-1)), "unknown");
 
     std::ostringstream oss;
     oss << BehaviorNote::SUPPORTS_GRAPH_CAPTURE;
     EXPECT_EQ(oss.str(), "SUPPORTS_GRAPH_CAPTURE");
+}
+
+TEST(TestTypes, NumericalNoteToString)
+{
+    using namespace hipdnn_frontend;
+
+    EXPECT_STREQ(to_string(NumericalNote::NOT_SET), "NOT_SET");
+    EXPECT_STREQ(to_string(NumericalNote::TENSOR_CORE), "TENSOR_CORE");
+    EXPECT_STREQ(to_string(NumericalNote::DOWN_CONVERT_INPUTS), "DOWN_CONVERT_INPUTS");
+    EXPECT_STREQ(to_string(NumericalNote::REDUCED_PRECISION_REDUCTION),
+                 "REDUCED_PRECISION_REDUCTION");
+    EXPECT_STREQ(to_string(NumericalNote::FFT), "FFT");
+    EXPECT_STREQ(to_string(NumericalNote::NONDETERMINISTIC), "NONDETERMINISTIC");
+    EXPECT_STREQ(to_string(NumericalNote::WINOGRAD), "WINOGRAD");
+    EXPECT_STREQ(to_string(NumericalNote::WINOGRAD_TILE_4x4), "WINOGRAD_TILE_4x4");
+    EXPECT_STREQ(to_string(NumericalNote::WINOGRAD_TILE_6x6), "WINOGRAD_TILE_6x6");
+    EXPECT_STREQ(to_string(NumericalNote::WINOGRAD_TILE_13x13), "WINOGRAD_TILE_13x13");
+    EXPECT_STREQ(to_string(NumericalNote::STRICT_NAN_PROP), "STRICT_NAN_PROP");
+    EXPECT_STREQ(to_string(static_cast<NumericalNote>(-1)), "unknown");
+
+    std::ostringstream oss;
+    oss << NumericalNote::STRICT_NAN_PROP;
+    EXPECT_EQ(oss.str(), "STRICT_NAN_PROP");
 }
 
 TEST(TestTypes, GetDataTypeEnumFromType)
