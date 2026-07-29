@@ -35,6 +35,8 @@ subtrees:
         title: Get and set engine knob configurations
       - file: how-to/migrate-cudnn.rst
         title: Migrate a cuDNN project to hipDNN
+      - file: how-to/pass-by-value-scalars.rst
+        title: Use pass-by-value scalars
   - file: how-to/how-to-plugin.rst
     title: For plugin developers
     subtrees:

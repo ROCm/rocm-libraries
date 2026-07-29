@@ -4,45 +4,45 @@
 
 .. _pass-by-value-scalars:
 
-*****************************
-Use pass-by-value scalars
-*****************************
+************************************
+Use pass-by-value scalars in hipDNN
+************************************
 
 Several hipDNN operations accept scalar parameters — such as **epsilon** and **momentum** for
 batch normalization — as pass-by-value tensors rather than device buffers. hipDNN supports two
 ways to supply these scalars:
 
-- **Compile-time constants**: the value is baked into the operation graph at ``build()`` time.
+- **Compile-time constants**: The value is baked into the operation graph at ``build()`` time.
   No entry in the variant pack is needed at ``execute()`` time. This works with any plugin
   version and is the preferred choice when the value is fixed.
 
-- **Runtime pass-by-value**: the value is supplied as a host pointer in the variant pack at
+- **Runtime pass-by-value**: The value is supplied as a host pointer in the variant pack at
   ``execute()`` time. The graph can be built once and executed repeatedly with different scalar
   values without rebuilding. This requires plugin SDK ≥ 1.2.0.
 
 When to use each
 ================
 
-Prefer **compile-time constants** when the scalar value is fixed for the lifetime of the program
+Use compile-time constants when the scalar value is fixed for the lifetime of the program
 (for example, a standard epsilon of ``1e-5`` that never changes). The graph is slightly smaller
 and no pointer bookkeeping is needed at execute time.
 
-Use **runtime pass-by-value** when the scalar value must change between executions — for example,
+Use runtime pass-by-value when the scalar value must change between executions — for example,
 when the caller controls epsilon or momentum dynamically — and rebuilding the graph on each change
 would be too expensive.
 
 .. note::
 
-   Compile-time constants are always compatible with implementations that support runtime
+   Compile-time constants are compatible with all implementations that support runtime
    pass-by-value, because the baked value can be treated as a constant runtime input internally.
    The reverse is not true: a runtime pass-by-value scalar requires plugin SDK ≥ 1.2.0 and will
    not work with older plugins.
 
-Using compile-time constants
+Use compile-time constants
 ============================
 
 Call ``set_value()`` on the scalar tensor before passing it to the operation attributes.
-The tensor must **not** appear in the variant pack at ``execute()``.
+The tensor must *not* appear in the variant pack at ``execute()``.
 
 .. code-block:: cpp
 
@@ -66,7 +66,7 @@ The tensor must **not** appear in the variant pack at ``execute()``.
    // ... other tensors ...
    graph->execute(handle, variantPack, workspace);
 
-Using runtime pass-by-value
+Use runtime pass-by-value
 ============================
 
 Call ``set_as_runtime_parameter()`` instead of ``set_value()``. Then at ``execute()``,
