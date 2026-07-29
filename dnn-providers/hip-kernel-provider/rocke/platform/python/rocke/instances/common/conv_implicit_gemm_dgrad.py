@@ -20,15 +20,10 @@ So:
     B operand: W  (weights),         layout KYXC  →  GEMM B: (K_dg, N_dg)
     D operand: dX (input gradient),  layout NHWC  →  GEMM D: (M, N_dg)
 
-The A descriptor maps ``(m, k_dg)`` to an NHWK offset using an inverted
-convolution embed:  ``ho = hi*1 + y*(-1) + pH`` (for stride=1, dilation=1).
-The embed's ``lo=0, hi=Ho`` bounds check handles out-of-bounds naturally.
-
-Phase 1 limitation
-------------------
-Only ``stride=1, dilation=1`` is supported.  For stride > 1 the backward data
-convolution requires a tilde decomposition that splits the problem into
-``XTilde × YTilde`` independent sub-GEMMs; this is planned for Phase 2.
+All convolutions are handled by a single tiled kernel using a tilde
+decomposition into ``y_tilde × x_tilde`` sub-GEMMs.  For stride=1 this
+degenerates to one sub-GEMM and the epilogue uses a direct buffer_store.
+For stride > 1 or split_k > 1 the epilogue uses global_atomic_fadd.
 
 GEMM dimension mapping
 ----------------------
@@ -46,16 +41,10 @@ Dgrad::
 
 Split-K
 -------
-When ``split_k > 1`` the kernel partitions K_dg into ``split_k`` slices along
-the Z grid dimension and atomic-adds each CTA's partial f32 accumulator
-directly into ``dX``.  The caller must zero-initialise ``dX`` before launch.
-
-Supported output dtypes for split-K:
-  - ``fp32``: scalar ``global_atomic_add`` (f32 atomicrmw fadd, gfx940+).
-  - ``bf16``: packed ``global_atomic_add_pk_bf16`` (<2 x bfloat>, gfx940+).
-  - ``fp16``: packed ``global_atomic_add_pk_f16`` (<2 x half>, gfx940+).
-
-When ``split_k == 1`` the kernel writes ``dX`` normally (no atomics).
+When ``split_k > 1`` the K_dg reduction is partitioned across ``split_k``
+Z-grid CTAs.  The caller must zero-initialise ``dX`` before launch; all
+kernels (including stride=1 with split_k=1) accept a ``sub_gemm_buf``
+parameter carrying the tilde-decomposition record(s).
 """
 
 from __future__ import annotations
@@ -1466,120 +1455,6 @@ def _emit_dgrad_tilde_atomic_epilogue(
                         v_odd = b.select(is_odd, val_cvt, zero)
                         vec = b.vec_pack([v_even, v_odd], val_cvt.type)
                         b.global_atomic_add_pk_f16(dx_ptr, off_even, vec)
-
-
-# ---------------------------------------------------------------------
-# Epilogues
-# ---------------------------------------------------------------------
-
-
-def _emit_dgrad_split_k_epilogue(
-    b: IRBuilder,
-    spec: DgradConvSpec,
-    atom: MfmaAtom,
-    accs: Sequence[Value],
-    warp_m_idx: Value,
-    warp_n_idx: Value,
-    lane: Value,
-    block_m_off: Value,
-    block_n_off: Value,
-    dx_ptr: Value,
-    c_per_lane: int,
-) -> None:
-    """Atomic-add partial accumulator directly into dX for all split-K slices."""
-    from ...helpers.atoms import c_warp_params, make_c_warp_dstr_encoding
-    from ...helpers.distribution import make_static_tile_distribution
-
-    dtype_d = spec.data.dtype_d
-    p = spec.problem
-    mfmas_m = spec.mfmas_per_warp_m
-    mfmas_n = spec.mfmas_per_warp_n
-
-    warp_m_off = b.mul(warp_m_idx, b.const_i32(mfmas_m * spec.warp_tile_m))
-    warp_n_off = b.mul(warp_n_idx, b.const_i32(mfmas_n * spec.warp_tile_n))
-    block_warp_m_off = b.add(block_m_off, warp_m_off)
-    block_warp_n_off = b.add(block_n_off, warp_n_off)
-
-    _, __, kc_m1, kc_nlane = c_warp_params(atom)
-    c_dist = make_static_tile_distribution(make_c_warp_dstr_encoding(atom))
-
-    c_nlane = b.const_i32(kc_nlane)
-    n_in_atom = b.mod(lane, c_nlane)
-    m_blk = b.div(lane, c_nlane)
-    p_lane = [m_blk, n_in_atom]
-
-    rows: List[Value] = []
-    cols: List[Value] = []
-    for i in range(c_per_lane):
-        ys = [b.const_i32(i // kc_m1), b.const_i32(i % kc_m1)]
-        x_row, x_col = c_dist.calculate_x(b, ys=ys, ps=[p_lane])
-        rows.append(x_row)
-        cols.append(x_col)
-
-    dg_M_v = b.const_i32(_dg_M(p))
-    dg_N_v = b.const_i32(_dg_N(p))
-
-    def _to_dtype(v_f32: Value) -> Value:
-        if dtype_d == "fp32":
-            return v_f32
-        if dtype_d == "bf16":
-            return b.trunc_f32_to_bf16(v_f32)
-        return b.trunc_f32_to_f16(v_f32)
-
-    def _emit_single_packed_atomic(c_m: Value, c_n: Value, val_f32: Value) -> None:
-        zero = _to_dtype(b.const_f32(0.0))
-        val = _to_dtype(val_f32)
-        m_ok = b.cmp_lt(c_m, dg_M_v)
-        n_ok = b.cmp_lt(c_n, dg_N_v)
-        with b.scf_if(b.land(m_ok, n_ok)):
-            c_n_is_odd = b.mod(c_n, b.const_i32(2))
-            is_odd = b.cmp_ne(c_n_is_odd, b.const_i32(0))
-            c_n_even = b.sub(c_n, c_n_is_odd)
-            c_off_even = b.add(b.mul(c_m, dg_N_v), c_n_even)
-            v_even = b.select(is_odd, zero, val)
-            v_odd = b.select(is_odd, val, zero)
-            vec = b.vec_pack([v_even, v_odd], val.type)
-            if dtype_d == "bf16":
-                b.global_atomic_add_pk_bf16(dx_ptr, c_off_even, vec)
-            else:
-                b.global_atomic_add_pk_f16(dx_ptr, c_off_even, vec)
-
-    def _emit_scalar_atomic(c_m: Value, c_n: Value, val_f32: Value) -> None:
-        if dtype_d == "fp32":
-            c_off = b.add(b.mul(c_m, dg_N_v), c_n)
-            with b.scf_if(b.land(b.cmp_lt(c_m, dg_M_v), b.cmp_lt(c_n, dg_N_v))):
-                b.global_atomic_add(dx_ptr, c_off, val_f32)
-        else:
-            _emit_single_packed_atomic(c_m, c_n, val_f32)
-
-    def _emit_pair_packed_atomics(
-        c_m: Value, c_n0: Value, c_n1: Value, v0_f32: Value, v1_f32: Value
-    ) -> None:
-        _emit_single_packed_atomic(c_m, c_n0, v0_f32)
-        _emit_single_packed_atomic(c_m, c_n1, v1_f32)
-
-    flat = 0
-    for mi in range(mfmas_m):
-        atom_m_base = b.add(block_warp_m_off, b.const_i32(mi * spec.warp_tile_m))
-        for ni in range(mfmas_n):
-            acc = accs[flat]
-            flat += 1
-            atom_n_base = b.add(
-                block_warp_n_off, b.const_i32(ni * spec.warp_tile_n)
-            )
-
-            if dtype_d == "fp32":
-                for i in range(c_per_lane):
-                    c_m = b.add(atom_m_base, rows[i])
-                    c_n = b.add(atom_n_base, cols[i])
-                    _emit_scalar_atomic(c_m, c_n, b.vec_extract(acc, i))
-            else:
-                for i in range(c_per_lane):
-                    c_m_i = b.add(atom_m_base, rows[i])
-                    c_n_i = b.add(atom_n_base, cols[i])
-                    _emit_single_packed_atomic(
-                        c_m_i, c_n_i, b.vec_extract(acc, i)
-                    )
 
 
 def _emit_dgrad_direct_epilogue(
