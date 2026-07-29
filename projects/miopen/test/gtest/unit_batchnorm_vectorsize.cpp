@@ -63,10 +63,7 @@ namespace {
 // adding a new vector width only requires one update (there, not here too).
 constexpr size_t kMaxVectorSize = miopen::solver::batchnorm::kMaxSupportedVectorSize;
 
-bool IsSupportedVectorSize(size_t v)
-{
-    return v == 1 || v == 2 || v == 4 || v == kMaxVectorSize;
-}
+bool IsSupportedVectorSize(size_t v) { return v == 1 || v == 2 || v == 4 || v == kMaxVectorSize; }
 
 struct Shape
 {
