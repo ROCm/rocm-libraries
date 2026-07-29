@@ -44,9 +44,9 @@ struct GroupState {
 MemoryGroupKind getMemoryGroupKind(const StinkyInstruction& inst) {
     if (isSMemLoad(inst) || isSMemStore(inst) || inst.is(InstFlag::IF_SMemAtomic))
         return MemoryGroupKind::SMEM;
-    if (isMUBUFLoad(inst) || isMUBUFStore(inst) || isMUBUFAtomic(inst) ||
-        isFLATLoad(inst) || isFLATStore(inst) || isFLATAtomic(inst) ||
-        isGLOBALLoad(inst) || isGLOBALStore(inst) || isGLOBALAtomic(inst))
+    if (isMUBUFLoad(inst) || isMUBUFStore(inst) || isMUBUFAtomic(inst) || isFLATLoad(inst) ||
+        isFLATStore(inst) || isFLATAtomic(inst) || isGLOBALLoad(inst) || isGLOBALStore(inst) ||
+        isGLOBALAtomic(inst))
         return MemoryGroupKind::VMEM;
     if (isTensorLoad(inst)) return MemoryGroupKind::TDM;
     return MemoryGroupKind::None;
@@ -119,7 +119,8 @@ class Gfx1250HazardPass : public Pass {
    public:
     static char ID;
 
-    explicit Gfx1250HazardPass(std::vector<Function*> functions) : functions(std::move(functions)) {}
+    explicit Gfx1250HazardPass(std::vector<Function*> functions)
+        : functions(std::move(functions)) {}
 
     const char* getName() const override {
         return "Gfx1250HazardPass";
@@ -144,8 +145,8 @@ class Gfx1250HazardPass : public Pass {
     }
 
    private:
-    static void insertXcntDrain(AsmIRBuilder& builder, GfxArchID archId,
-                                StinkyInstruction* anchor, GroupState& state) {
+    static void insertXcntDrain(AsmIRBuilder& builder, GfxArchID archId, StinkyInstruction* anchor,
+                                GroupState& state) {
         StinkyInstruction* wait = builder.create(getMCIDByUOp(GFX::s_wait_xcnt, archId), anchor);
         wait->addSrcReg(StinkyRegister(0));
         state.clear();
