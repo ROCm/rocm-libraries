@@ -22,6 +22,15 @@
 #   registered as plain suites named HostUnit*. They are seconds-fast and cover
 #   pure helpers, so every tier runs them.
 #
+#   Note that this file is not what selects those cases today. The hipblaslt
+#   test lane execs hipblaslt-test directly rather than through ctest (see
+#   test/therock/test_hipblaslt.py and TheRock's fetch_test_configurations.py,
+#   which maps hipblaslt to that driver instead of the generic test_runner.py).
+#   The HostUnit cases therefore also carry a "smoke_" test-name prefix so the
+#   driver's `--gtest_filter=*smoke*` picks them up. The pattern below is the
+#   wiring for the ctest path, and takes effect if hipblaslt moves to
+#   test_runner.py.
+#
 # These tiers are TheRock ctest presets; they are NOT a port of hipBLASLt's
 # rocJenkins job filters (those are wired differently).
 #
