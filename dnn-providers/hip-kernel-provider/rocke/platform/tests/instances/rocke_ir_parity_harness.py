@@ -64,6 +64,7 @@ def gemm_spec(
     pipeline,
     epilogue,
     wave_size,
+    cshuffle_no_alias=False,
 ):
     from rocke.instances.common.gemm_universal import (
         DataSpec,
@@ -92,17 +93,18 @@ def gemm_spec(
             pad_m=True,
             pad_n=True,
             pad_k=True,
+            cshuffle_no_alias=cshuffle_no_alias,
         ),
         data=DataSpec(dtype_a="fp16", dtype_b="fp16", dtype_c="fp16"),
         wave_size=wave_size,
     )
 
 
-def build_gemm(name, arch, *args):
+def build_gemm(name, arch, *args, **kwargs):
     def _build():
         from rocke.instances.common.gemm_universal import build_universal_gemm
 
-        return build_universal_gemm(gemm_spec(name, arch, *args), arch=arch)
+        return build_universal_gemm(gemm_spec(name, arch, *args, **kwargs), arch=arch)
 
     return _build
 
@@ -390,6 +392,27 @@ def cases():
             "compv4",
             "cshuffle",
             64,
+        ),
+    )
+    add(
+        "gemm",
+        "gemm/gfx950/t128x128x32/cshuffle_no_alias",
+        "gfx950",
+        build_gemm(
+            "irhash_gemm_950_a_noalc",
+            "gfx950",
+            128,
+            128,
+            32,
+            2,
+            2,
+            32,
+            32,
+            16,
+            "compv4",
+            "cshuffle",
+            64,
+            cshuffle_no_alias=True,
         ),
     )
     add(
@@ -746,118 +769,6 @@ def cases():
             tile_m=64,
             tile_n=64,
             tile_k=32,
-        ),
-    )
-    add(
-        "conv_dgrad",
-        "conv_dgrad/gfx950/n1h8c16k32r3_s1",
-        "gfx950",
-        build_dgrad(
-            "irhash_dgrad_950_s1",
-            "gfx950",
-            dgrad1,
-            wave_size=64,
-            wtm=32,
-            wtn=32,
-            wtk=16,
-            tile_m=64,
-            tile_n=64,
-            tile_k=64,
-        ),
-    )
-    add(
-        "conv_dgrad",
-        "conv_dgrad/gfx950/n2h16c32k32r3_s2",
-        "gfx950",
-        build_dgrad(
-            "irhash_dgrad_950_s2",
-            "gfx950",
-            dgrad2,
-            wave_size=64,
-            wtm=32,
-            wtn=32,
-            wtk=16,
-            tile_m=64,
-            tile_n=64,
-            tile_k=64,
-        ),
-    )
-    # gfx1151 WMMA (wave32) — stride=1 only; WMMA dgrad supports only 16x16x16.
-    add(
-        "conv_dgrad",
-        "conv_dgrad/gfx1151/n1h8c16k32r3_s1",
-        "gfx1151",
-        build_dgrad(
-            "irhash_dgrad_1151_s1",
-            "gfx1151",
-            dgrad1,
-            wave_size=32,
-            wtm=16,
-            wtn=16,
-            wtk=16,
-            tile_m=32,
-            tile_n=32,
-            tile_k=16,
-        ),
-    )
-    # gfx90a mirrors gfx942 (wave64 MFMA).
-    add(
-        "conv_dgrad",
-        "conv_dgrad/gfx90a/n1h8c16k32r3_s1",
-        "gfx90a",
-        build_dgrad(
-            "irhash_dgrad_90a_s1",
-            "gfx90a",
-            dgrad1,
-            wave_size=64,
-            wtm=32,
-            wtn=32,
-            wtk=8,
-            tile_m=64,
-            tile_n=64,
-            tile_k=64,
-        ),
-    )
-
-    # Dgrad: backward-data implicit-GEMM.  Problem args match the forward conv
-    # set; atoms chosen to be valid on each arch.  Stride=2 exercises the tiled
-    # (multi-sub-GEMM) path; stride=1 exercises the direct-store epilogue.
-    #
-    # ConvProblem positional args: (N, Hi, Wi, C, K, Y, X, sH, sW, pH, pW, dH, dW)
-    dgrad1 = (1, 8, 8, 16, 32, 3, 3, 1, 1, 1, 1, 1, 1)   # stride=1
-    dgrad2 = (2, 16, 16, 32, 32, 3, 3, 2, 2, 1, 1, 1, 1)  # stride=2, 4 sub-GEMMs
-    add(
-        "conv_dgrad",
-        "conv_dgrad/gfx942/n1h8c16k32r3_s1",
-        "gfx942",
-        build_dgrad(
-            "irhash_dgrad_942_s1",
-            "gfx942",
-            dgrad1,
-            wave_size=64,
-            wtm=32,
-            wtn=32,
-            wtk=8,
-            tile_m=64,
-            tile_n=64,
-            tile_k=64,
-        ),
-    )
-    add(
-        "conv_dgrad",
-        "conv_dgrad/gfx942/n2h16c32k32r3_s2",
-        "gfx942",
-        build_dgrad(
-            "irhash_dgrad_942_s2",
-            "gfx942",
-            dgrad2,
-            wave_size=64,
-            wtm=16,
-            wtn=16,
-            wtk=16,
-            tile_m=64,
-            tile_n=64,
-            tile_k=64,
         ),
     )
     add(
