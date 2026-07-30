@@ -1005,7 +1005,7 @@ def supports_tiled_2d(
     use_k_single_buffer: bool = False,
     use_conflict_free_v_store: bool = False,
     use_k_sliced_ring: bool = False,
-    use_d256_gfx942_fast: bool = False,
+    use_d256_fast: bool = False,
 ) -> Tuple[bool, str]:
     # The gfx942 variant runs the narrow 16x16x16 default path. The arch gate
     # admits gfx942 (narrow atom present + non-transpose V pipeline selectable)
@@ -1114,7 +1114,7 @@ def supports_tiled_2d(
     # (K double-buffer + V + Q_lds + P_lds) does NOT apply. Validate the fast
     # path's hard requirements explicitly instead of trusting the flag; earlier
     # checks already covered dtype family, block_size, and tile_size % block_size.
-    if use_d256_gfx942_fast:
+    if use_d256_fast:
         if head_size == 256 and dtype == "bf16":
             return True, "supported"
         return (

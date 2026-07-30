@@ -460,7 +460,7 @@ def supports_native_unified_attention_tiled(
         use_k_single_buffer=gfx942_flash and _gfx942_flash_use_single_buffer(problem),
         use_conflict_free_v_store=gfx942_flash and _gfx942_flash_use_cfvst(problem),
         use_k_sliced_ring=_enable_gfx942_flash_k_sliced_ring(problem),
-        use_d256_gfx942_fast=_d256_gfx942_fast(problem),
+        use_d256_fast=_d256_gfx942_fast(problem),
     )
 
 
