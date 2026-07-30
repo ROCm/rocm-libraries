@@ -5421,8 +5421,7 @@ void testing_matmul_with_bias(const Arguments& arg,
             {
                 // Gaussian-filled inputs + batched GEMM: use near_check like fp16_accumulator_probe
                 // (CPU ref vs GPU are not always bit-identical for f32/f16 accumulations).
-                for(int gemmIdx = 0; gemmIdx < gemm_count; gemmIdx++)
-                    tol[gemmIdx] = 1e-2;
+                std::fill(tol.begin(), tol.end(), 1e-2);
             }
 
             if(arg.unit_check || arg.norm_check || arg.allclose_check)
@@ -6036,8 +6035,7 @@ void testing_matmul_with_bias(const Arguments& arg,
             }
             else if(arg.initialization == hipblaslt_initialization::norm_dist_one_special)
             {
-                for(int gemmIdx = 0; gemmIdx < gemm_count; gemmIdx++)
-                    tol[gemmIdx] = 1e-2;
+                std::fill(tol.begin(), tol.end(), 1e-2);
             }
             if(arg.unit_check || arg.norm_check || arg.allclose_check)
             {
