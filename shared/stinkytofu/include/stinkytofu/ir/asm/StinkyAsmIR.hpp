@@ -751,6 +751,11 @@ inline bool isXDLWMMA(const StinkyInstruction& inst) {
     return inst.is(InstFlag::IF_WMMA_XDL);
 }
 
+/// Check if instruction is a Tensor-LUT op (v_perm_pk16*).
+inline bool isTensorLUT(const StinkyInstruction& inst) {
+    return inst.is(InstFlag::IF_TensorLUT);
+}
+
 /// Check if instruction is a 64-bit transcendental.
 /// Includes v_rcp_f64, v_rsq_f64, v_sqrt_f64.
 inline bool isTrans64(const StinkyInstruction& inst) {
