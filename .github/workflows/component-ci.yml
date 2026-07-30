@@ -22,6 +22,7 @@ jobs:
     outputs:
       stinkytofu: ${{ steps.configure.outputs.stinkytofu }}
       rocisa: ${{ steps.configure.outputs.rocisa }}
+      geko: ${{ steps.configure.outputs.geko }}
       miopen: ${{ steps.configure.outputs.miopen }}
       docker-image: ${{ steps.env.outputs.docker-image }}
       linux-runner: ${{ steps.env.outputs.linux-runner }}
@@ -61,6 +62,16 @@ jobs:
       linux_runner: ${{ needs.changes.outputs.linux-runner }}
       windows_runner: ${{ needs.changes.outputs.windows-runner }}
 
+  geko:
+    name: "GEKO"
+    needs: changes
+    if: needs.changes.outputs.geko == 'true'
+    uses: ./.github/workflows/component-ci-geko.yml
+    with:
+      docker_image: ${{ needs.changes.outputs.docker-image }}
+      linux_runner: ${{ needs.changes.outputs.linux-runner }}
+      windows_runner: ${{ needs.changes.outputs.windows-runner }}
+
   miopen:
     name: "MIOpen"
     needs: changes
@@ -73,6 +84,7 @@ jobs:
     needs:
       - stinkytofu
       - rocisa
+      - geko
       - miopen
     runs-on: ubuntu-24.04
     steps:
