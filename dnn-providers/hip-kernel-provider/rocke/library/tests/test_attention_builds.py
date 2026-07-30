@@ -630,6 +630,56 @@ class TestAttentionHelpers(unittest.TestCase):
         # `qq_bias_stride_0` is the very last kernel param.
         self.assertIn("i32 %qq_bias_stride_0", ll)
 
+    def test_gfx942_bf16_swa_decode_no_fp8_loader_assert(self):
+        """Regression: bf16 windowed-decode must not trip the fp8-loader assert.
+
+        gfx942 2D built the fp8 chunk-count assert unconditionally. A bf16
+        SWA/decode small-tile config (T=16, HD=64, THREADS=256) gives
+        fp8_total_chunks=128; 128 % 256 != 0 raised AssertionError. The fp8
+        loader is never used for bf16, so the guard (``if KV_FP8:``, matching
+        the 3D builder) is load-bearing: gfx942 *does* support fp8 K/V via
+        ``kv_storage_dtype='fp8e4m3'`` (the 2D gate admits it), so the assert
+        must fire for fp8 and stay dormant for bf16.
+        """
+        from kernels.gfx942.attention_tiled_2d import (
+            UnifiedAttention2DTiledSpec,
+            build_unified_attention_2d_tiled,
+        )
+
+        # Precondition that makes this a regression test, not a smoke test:
+        # the config must be one the old unconditional assert rejected, i.e.
+        # (T*HD)//8 not divisible by THREADS=num_warps*64. T=16,HD=64,nw=4 ->
+        # 128 chunks, 256 threads -> 128 % 256 != 0.
+        T, HD, THREADS = 16, 64, 4 * 64
+        self.assertNotEqual(((T * HD) // 8) % THREADS, 0)
+
+        spec = UnifiedAttention2DTiledSpec(
+            head_size=64,
+            block_size=16,
+            num_query_heads=64,
+            num_kv_heads=8,  # gpt-oss 64/8 GQA
+            dtype="bf16",
+            use_sinks=True,
+            sliding_window=128,
+            has_softcap=False,
+            num_warps=4,
+            tile_size=16,
+            block_m_per_warp=16,
+        )
+        k = build_unified_attention_2d_tiled(spec, arch="gfx942")
+        ll = lower_kernel_to_llvm(k, arch="gfx942")
+        self.assertIn("define amdgpu_kernel void", ll)
+        # The bf16 kernel must emit no fp8 dequant path.
+        self.assertNotIn("@llvm.amdgcn.cvt.f32.fp8", ll)
+
+        # The guard must not neuter fp8 validation: the same geometry with
+        # fp8 K/V still trips the chunk-count assert (128 % 256 != 0).
+        import dataclasses
+
+        fp8_spec = dataclasses.replace(spec, kv_storage_dtype="fp8e4m3")
+        with self.assertRaisesRegex(AssertionError, "fp8 loader"):
+            build_unified_attention_2d_tiled(fp8_spec, arch="gfx942")
+
     def test_unified_attention_2d_tiled_half_local_pv_compiles(self):
         """The R4 half-local PV variant emits 32x32 MFMA with its suffixes."""
         from kernels import (
@@ -1010,6 +1060,42 @@ class TestAttentionHelpers(unittest.TestCase):
                 au._select_2d_num_warps(p),
                 au._select_gfx942_flash_num_warps(p),
             )
+
+    def test_gfx942_d64_decode_num_warps(self):
+        """gfx942 D64 decode picks num_warps=1; prefill keeps num_warps=4.
+
+        Decode (max_seqlen_q == 1) is memory-bound and wins at nw=1 (BLOCK_M=32,
+        4x the CTAs of nw=4). Prefill is compute-bound and stays at nw=4. fp8
+        decode is excluded from the nw=1 lever (dequant-bound, wants more warps),
+        so it also stays at nw=4. This branch is the production geometry change;
+        pin it so a refactor can't silently revert it. The C++ selector mirrors
+        this exactly (see attention_unified_selectors.cpp); the run_all.py
+        byte-identity gate enforces the two agree.
+        """
+        import kernels.common.attention_unified as au
+
+        def _p(max_seqlen_q, use_fp8=False):
+            return UnifiedAttentionProblem(
+                total_q=max_seqlen_q,
+                num_seqs=1,
+                num_query_heads=64,
+                num_kv_heads=8,
+                head_size=64,
+                block_size=16,
+                max_seqlen_q=max_seqlen_q,
+                max_seqlen_k=2048,
+                dtype="bf16",
+                use_sinks=True,
+                use_fp8=use_fp8,
+            )
+
+        with _patch_resolved_arch("gfx942"):
+            self.assertEqual(au._select_2d_num_warps(_p(1)), 1)  # decode
+            self.assertEqual(au._select_2d_num_warps(_p(512)), 4)  # prefill
+            self.assertEqual(au._select_2d_num_warps(_p(2048)), 4)  # prefill
+            self.assertEqual(
+                au._select_2d_num_warps(_p(1, use_fp8=True)), 4
+            )  # fp8 decode excluded
 
     def test_tiled_3d_dispatch_gate_accepts_kwargs_per_arch(self):
         """Regression: the shared dispatch entry

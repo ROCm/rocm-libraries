@@ -4,7 +4,11 @@
 target_sources(stinkytofu_objs PRIVATE
     InstructionSizeCosting.cpp
     AccumulateInstructionSizePass.cpp
-    SwPrefetchInsertionPass.cpp
+    SwPrefetchRelCommon.cpp
+    SwInstructionPrefetchRelStaticPass.cpp
+    SwInstructionPrefetchRelDynamicPass.cpp
+    SwInstructionPrefetchAbsStaticPass.cpp
+    SwInstructionPrefetchAbsDynamicPass.cpp
     PhiPlacement.cpp
     BuildDefUseChain.cpp
     CFGBuilderPass.cpp
@@ -36,6 +40,7 @@ target_sources(stinkytofu_objs PRIVATE
     InsertWaitAluPass.cpp
     RederiveExpertScopePass.cpp
     EstimateAsmCyclesPass.cpp
+    InsertCoexecHazardPass.cpp
     StinkyWmmaVgprReorderPass.cpp
     FlattenCalleesPass.cpp
 )

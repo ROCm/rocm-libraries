@@ -37,7 +37,7 @@ from typing import FrozenSet, List, Dict, NamedTuple, Tuple
 from Tensile.Common import ParallelMap2, print1, print2, IsaVersion, IsaInfo, setVerbosity
 from Tensile.Common.Architectures import SUPPORTED_ISA
 from Tensile.Common.Capabilities import makeIsaInfoMap
-from Tensile.Common.GlobalParameters import assignGlobalParameters
+from Tensile.Common.GlobalParameters import assignGlobalParameters, defaultSolution
 from Tensile.LibraryIO import readYAML
 from Tensile.Toolchain.Validators import validateToolchain
 
@@ -112,13 +112,28 @@ def _runChecks(
         # --- Solution level validation ---
         solutions = []
         data = readYAML(file)
-        problemType = data[4]
+        if isinstance(data, dict):
+            problemType = data.get("ProblemType")
+            all_solutions = data.get("Solutions") or []
+
+            # Per-file defaults: fill missing solution keys from this first, then defaultSolution.            
+            for solution in all_solutions:
+                for key, val in data.get("DefaultSolution", {}).items():
+                    if key not in solution:
+                        solution[key] = val
+                for key, val in defaultSolution.items():
+                    if key not in solution:
+                        solution[key] = val
+            
+        else:
+            problemType = data[4]
+            all_solutions = data[5]
         if check.OnlyCustomKernels and hasCustomKernel(file):
             print2(f">> {rel}")
-            solutions = data[5]  # Solutions are the 5th index
+            solutions = all_solutions
         elif check.All:
             print2(f">> {rel}")
-            solutions = data[5]  # Solutions are the 5th index
+            solutions = all_solutions
 
         for list_idx, s in enumerate(solutions):
             s, isCustom = handleCustomKernel(s, isaInfoMap)
@@ -155,7 +170,6 @@ def _runChecks(
                 else:
                     known_bug_skips += 1
                 continue
-
             if all(
                 [
                     _validateMatrixInstruction(s, isaInfoMap, rel),
