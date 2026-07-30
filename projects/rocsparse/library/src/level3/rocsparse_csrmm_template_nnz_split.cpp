@@ -126,7 +126,7 @@ namespace rocsparse
     }
 
     template <typename J>
-    static uint16_t get_y_grid_size(J batch_count)
+    static uint16_t get_batch_grid_size(J batch_count)
     {
         return (batch_count > 65535) ? 32768 : batch_count;
     }
@@ -135,7 +135,7 @@ namespace rocsparse
 #define LAUNCH_CSRMMNN_NNZ_SPLIT_MAIN_KERNEL(CSRMMNT_DIM, WF_SIZE)        \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                   \
         (rocsparse::csrmmnn_nnz_split_main_kernel<CSRMMNT_DIM, WF_SIZE>), \
-        dim3(nblocks, get_y_grid_size<J>(batch_count_C)),                 \
+        dim3(nblocks, get_batch_grid_size<J>(batch_count_C)),             \
         dim3(CSRMMNT_DIM),                                                \
         0,                                                                \
         handle->stream,                                                   \
@@ -170,7 +170,7 @@ namespace rocsparse
 #define LAUNCH_CSRMMNN_NNZ_SPLIT_REMAINDER_KERNEL(CSRMMNT_DIM, WF_SIZE)        \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                        \
         (rocsparse::csrmmnn_nnz_split_remainder_kernel<CSRMMNT_DIM, WF_SIZE>), \
-        dim3(nblocks, get_y_grid_size<J>(batch_count_C)),                      \
+        dim3(nblocks, get_batch_grid_size<J>(batch_count_C)),                  \
         dim3(CSRMMNT_DIM),                                                     \
         0,                                                                     \
         handle->stream,                                                        \
@@ -307,7 +307,7 @@ namespace rocsparse
         }
 
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::csrmmnn_general_block_reduce<1024>),
-                                           dim3(n, get_y_grid_size<J>(batch_count_C)),
+                                           dim3(n, get_batch_grid_size<J>(batch_count_C)),
                                            dim3(1024),
                                            0,
                                            handle->stream,
@@ -324,68 +324,68 @@ namespace rocsparse
     }
 }
 
-#define LAUNCH_CSRMMNT_NNZ_SPLIT_MAIN_KERNEL(CSRMMNT_DIM, WF_SIZE, LOOPS)        \
-    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                          \
-        (rocsparse::csrmmnt_nnz_split_main_kernel<CSRMMNT_DIM, WF_SIZE, LOOPS>), \
-        dim3((nnz - 1) / CSRMMNT_DIM + 1, get_y_grid_size<J>(batch_count_C)),    \
-        dim3(CSRMMNT_DIM),                                                       \
-        0,                                                                       \
-        handle->stream,                                                          \
-        conj_A,                                                                  \
-        conj_B,                                                                  \
-        main,                                                                    \
-        m,                                                                       \
-        n,                                                                       \
-        k,                                                                       \
-        nnz,                                                                     \
-        batch_count_C,                                                           \
-        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),            \
-        row_limits,                                                              \
-        offsets_batch_stride_A,                                                  \
-        columns_values_batch_stride_A,                                           \
-        csr_row_ptr,                                                             \
-        csr_col_ind,                                                             \
-        csr_val,                                                                 \
-        dense_B,                                                                 \
-        ldb,                                                                     \
-        batch_stride_B,                                                          \
-        dense_C,                                                                 \
-        ldc,                                                                     \
-        batch_stride_C,                                                          \
-        order_C,                                                                 \
-        descr->base,                                                             \
+#define LAUNCH_CSRMMNT_NNZ_SPLIT_MAIN_KERNEL(CSRMMNT_DIM, WF_SIZE, LOOPS)         \
+    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                           \
+        (rocsparse::csrmmnt_nnz_split_main_kernel<CSRMMNT_DIM, WF_SIZE, LOOPS>),  \
+        dim3((nnz - 1) / CSRMMNT_DIM + 1, get_batch_grid_size<J>(batch_count_C)), \
+        dim3(CSRMMNT_DIM),                                                        \
+        0,                                                                        \
+        handle->stream,                                                           \
+        conj_A,                                                                   \
+        conj_B,                                                                   \
+        main,                                                                     \
+        m,                                                                        \
+        n,                                                                        \
+        k,                                                                        \
+        nnz,                                                                      \
+        batch_count_C,                                                            \
+        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),             \
+        row_limits,                                                               \
+        offsets_batch_stride_A,                                                   \
+        columns_values_batch_stride_A,                                            \
+        csr_row_ptr,                                                              \
+        csr_col_ind,                                                              \
+        csr_val,                                                                  \
+        dense_B,                                                                  \
+        ldb,                                                                      \
+        batch_stride_B,                                                           \
+        dense_C,                                                                  \
+        ldc,                                                                      \
+        batch_stride_C,                                                           \
+        order_C,                                                                  \
+        descr->base,                                                              \
         handle->pointer_mode == rocsparse_pointer_mode_host)
 
-#define LAUNCH_CSRMMNT_NNZ_SPLIT_REMAINDER_KERNEL(CSRMMNT_DIM, WF_SIZE)        \
-    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                        \
-        (rocsparse::csrmmnt_nnz_split_remainder_kernel<CSRMMNT_DIM, WF_SIZE>), \
-        dim3((nnz - 1) / CSRMMNT_DIM + 1, get_y_grid_size<J>(batch_count_C)),  \
-        dim3(CSRMMNT_DIM),                                                     \
-        0,                                                                     \
-        handle->stream,                                                        \
-        conj_A,                                                                \
-        conj_B,                                                                \
-        main,                                                                  \
-        m,                                                                     \
-        n,                                                                     \
-        k,                                                                     \
-        nnz,                                                                   \
-        batch_count_C,                                                         \
-        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),          \
-        row_limits,                                                            \
-        offsets_batch_stride_A,                                                \
-        columns_values_batch_stride_A,                                         \
-        csr_row_ptr,                                                           \
-        csr_col_ind,                                                           \
-        csr_val,                                                               \
-        dense_B,                                                               \
-        ldb,                                                                   \
-        batch_stride_B,                                                        \
-        dense_C,                                                               \
-        ldc,                                                                   \
-        batch_stride_C,                                                        \
-        order_C,                                                               \
-        descr->base,                                                           \
+#define LAUNCH_CSRMMNT_NNZ_SPLIT_REMAINDER_KERNEL(CSRMMNT_DIM, WF_SIZE)           \
+    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                           \
+        (rocsparse::csrmmnt_nnz_split_remainder_kernel<CSRMMNT_DIM, WF_SIZE>),    \
+        dim3((nnz - 1) / CSRMMNT_DIM + 1, get_batch_grid_size<J>(batch_count_C)), \
+        dim3(CSRMMNT_DIM),                                                        \
+        0,                                                                        \
+        handle->stream,                                                           \
+        conj_A,                                                                   \
+        conj_B,                                                                   \
+        main,                                                                     \
+        m,                                                                        \
+        n,                                                                        \
+        k,                                                                        \
+        nnz,                                                                      \
+        batch_count_C,                                                            \
+        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),             \
+        row_limits,                                                               \
+        offsets_batch_stride_A,                                                   \
+        columns_values_batch_stride_A,                                            \
+        csr_row_ptr,                                                              \
+        csr_col_ind,                                                              \
+        csr_val,                                                                  \
+        dense_B,                                                                  \
+        ldb,                                                                      \
+        batch_stride_B,                                                           \
+        dense_C,                                                                  \
+        ldc,                                                                      \
+        batch_stride_C,                                                           \
+        order_C,                                                                  \
+        descr->base,                                                              \
         handle->pointer_mode == rocsparse_pointer_mode_host)
 
 namespace rocsparse
