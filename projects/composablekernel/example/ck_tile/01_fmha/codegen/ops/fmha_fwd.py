@@ -1353,7 +1353,8 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                 ( 64,  64) : [FmhaFwdTileSize( 64,  64,  32,  64,  32,   64,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1)],
                 (128, 128) : [FmhaFwdTileSize( 64,  64,  32, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1, CppConstraint("a.max_seqlen_q < 2048")),
                               FmhaFwdTileSize(128,  64,  32, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1)],
-                (192, 128) : [FmhaFwdTileSize( 64,  64,  32, 128,  32,  256,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1)],
+                (192, 128) : [FmhaFwdTileSize( 64,  64,  32, 128,  32,  192,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1, CppConstraint("a.max_seqlen_q < 2048")),
+                              FmhaFwdTileSize(128,  64,  32, 128,  32,  192,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1)],
                 (256, 256) : [FmhaFwdTileSize( 64,  64,  32, 256,  32,  256,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1)],
             }  # fmt: skip
         elif dtype in cls._DT_FP8_FP8BF16:
@@ -1383,7 +1384,7 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
             # when both match (dispatch order = list order in generated code).
             # NOTE: dropout is not yet implemented in qr_tdm — only emit
             # dropout="f" so dropout workloads fall through to qr.
-            if hdim == 128 and hdim_v == 128:
+            if (hdim, hdim_v) in {(128, 128), (192, 128)}:
                 for logits, mask, bias, lse, sink in itertools.product(
                     ["t", "f"],
                     get_mask_map(mask_impl).keys(),
