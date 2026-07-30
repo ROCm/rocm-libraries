@@ -27,7 +27,7 @@ from typing import Dict
 from .Activation import ActivationType
 from . import Hardware
 from . import Properties
-from Tensile.Common import state, state_key_ordering, IsaInfo, streamKDual2DMulticast
+from Tensile.Common import state, state_key_ordering, IsaInfo
 from Tensile.Common.Architectures import gfxToIsa
 from Tensile.Common.DataType import DataType
 from Tensile.Common.GlobalParameters import internalParameters
@@ -601,33 +601,6 @@ class ProblemPredicate(Properties.Predicate):
         if state['ProblemType']['SwizzleTensorB']:
             rv += [cls('SwizzleTensorB', value=state['ProblemType']['SwizzleTensorB'])]
 
-        valuepredicates = []
-        valuepredicates.append(state["MacroTile0"])
-        valuepredicates.append(state["MacroTile1"])
-        valuepredicates.append(state["GlobalSplitU"])
-        # value[3] is the M-adjacency (shared-B) alignment axis Cs = ClusterDim[0]
-        # (the spatial multicast peers). Pure multicast [C,1]: Cs=C. Factored
-        # [Cs,Ck]: Cs=ClusterDim[0] -> the
-        # predicate requires nWG_x % Cs == 0. Pure reduction [1,C]: Cs=1 (no M
-        # constraint). The factoring is the ClusterDim shape (no StreamKClusterKSplit).
-        valuepredicates.append(state["ClusterDim"][0])
-        # value[4] is the N-tile divisor. For a K-split StreamK cluster
-        # (Ck = ClusterDim[1] > 1 as a REDUCTION axis, i.e. pure reduction [1,C] or
-        # factored [Cs,Ck]) the Y-extent is the K-split / index-generation axis, NOT
-        # an N-tiling axis, so it must NOT constrain the N-tile grid -> pin to 1.
-        # EXCEPTION -- 2-D DUAL-multicast (ForceDPOnly 2-D dual multicast AND the
-        # standard StreamKDualMulticast path): there Ck IS an N-tiling axis (Y-peers
-        # map to N-adjacent output tiles for A-reuse), so it MUST constrain the
-        # N-tile grid (nWG_y % Ck == 0) -> keep ClusterDim[1], exactly like the
-        # dense/1-D path. 1-D StreamK ([C,1]) and dense (non-StreamK) clusters keep
-        # ClusterDim[1].
-        if state.get("StreamK", 0) == 3 and state["ClusterDim"][1] > 1 \
-           and not streamKDual2DMulticast(state):
-            valuepredicates.append(1)
-        else:
-            valuepredicates.append(state["ClusterDim"][1])
-        rv += [cls('ClusterDimCheck', value=valuepredicates)]
-
         # StreamK cluster-reduction split-barrier safety (gfx1250). The Ck =
         # ClusterDim[1] reduction peers split a tile's itersPerTile = ceil(K/DepthU)
         # K-iterations and hand off through an intra-cluster split barrier; if
@@ -636,7 +609,8 @@ class ProblemPredicate(Properties.Predicate):
         # per-problem HARD REJECT (not a build-time reject, not a silent fallback).
         # Reduction is the Ck = ClusterDim[1] > 1 axis (pure reduction [1,C] or the
         # Ck axis of a factored [Cs,Ck]); value[1] is that Ck. Pure multicast (no
-        # K-split, Ck==1) relies on ClusterDimCheck instead.
+        # K-split, Ck==1) relies on the kernel's runtime pad-exit / cluster-valid
+        # guards (#9690), not a static ClusterDimCheck predicate.
         cd = state["ClusterDim"]
         if state.get("StreamKClusterReduction", 0) and cd[1] > 1:
             rv += [cls('ClusterReductionIterCheck',

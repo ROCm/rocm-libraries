@@ -84,8 +84,8 @@ def test_streamk_forcedp_2d_gfx1250_emits_assembly():
         )
 
         # --- dense 2-D masks reused for BOTH operands; no preLoop overwrite ---
-        assert "keep dense 2-D masks" in src, (
-            f"Kernel {base!r} missing the dense-mask short-circuit note"
+        assert "keep kernel-init 2-D masks" in src, (
+            f"Kernel {base!r} missing the kernel-init mask short-circuit note"
         )
         assert "sgprMulticastMaskA" in src, (
             f"Kernel {base!r} never binds MulticastMaskA (A is NOT multicast!)"

@@ -36,7 +36,8 @@ from Tensile.AsmStoreState import VectorDataTypes
 from Tensile.Common import assignParameterWithDefault, IsaInfo, \
                     print2, printExit, printWarning, \
                     roundUp, INDEX_CHARS, IsaVersion, SemanticVersion, \
-                    roundUpToNearestMultiple, effectiveMatrixInstMN, streamKMulticast
+                    roundUpToNearestMultiple, effectiveMatrixInstMN, streamKMulticast, \
+                    streamKDual2DMulticast
 from Tensile.Common.DataType import DataType
 from Tensile.Common.TypeValidationErrors import ConfigTypeError
 from Tensile.SolutionStructs.LdsPadding import get_fp4_mt_config, get_fp8_mt_config, get_mxs_mt_config, \
@@ -46,7 +47,10 @@ from Tensile.Common.GlobalParameters import defaultSolution, \
 from Tensile.Common.ValidParameters import validParameters, \
                                             _getExpectedTypes, \
                                             _expectedParamTypes, \
-                                            _skipTypeCheck
+                                            _skipTypeCheck, \
+                                            normalizeSwInstructionPrefetch, \
+                                            SW_INSTRUCTION_PREFETCH_ABSOLUTE, \
+                                            SW_INSTRUCTION_PREFETCH_AUTO
 from Tensile.SolutionStructs.Naming import getSolutionNameFull
 from Tensile.SolutionStructs.Problem import ProblemType
 from Tensile.SolutionStructs.segment_interleave import evaluate as segIntEval, aligned_budget_ok as segAlignedBudget
@@ -281,7 +285,7 @@ def _validateStreamKClusterReduction(state, printRejectionReason, isaInfoMap):
   time, else the split barrier over-signals) is instead a per-problem selection
   reject via the ClusterReductionIterCheck predicate (Contractions.py). Composes
   with StreamKMulticast under a factored cluster (orthogonal Ck/Cs axes of
-  C = Cs*Ck, shape validated by _validateStreamKClusterShape).
+  C = Cs*Ck, shape validated by _validateStreamK2DClusterShape).
   See docs/design/streamk-wg-clusters.md.
   """
   if not state.get("StreamKClusterReduction", 0):
@@ -352,13 +356,15 @@ def _validateStreamKMulticast(state, printRejectionReason, isaInfoMap):
   StreamKMulticast co-locates C consecutive StreamK DP workgroups in a 1-D
   cluster (ClusterDim = [C, 1]); those M-adjacent tiles share the same B over
   full K, so B is TDM-multicast to the cluster while A stays per-workgroup.
-  Solution-level requirements are rejected here at build time; the runtime
-  nWG0 % C "multiple-of-cluster-size" requirement is enforced by the
-  ClusterDimCheck predicate at selection time (not a silent fallback).
+  Solution-level requirements are rejected here at build time. The old
+  nWG0 % C "multiple-of-cluster-size" ClusterDimCheck predicate is DROPPED:
+  non-multiple cluster launches are now supported at runtime via the C++ grid
+  round-up plus the prologue pad-early-exit + multicast mask reduction (padded
+  boundary-cluster peers s_endpgm before the -3 cluster barrier).
   Auto-derived for StreamK=3 + ClusterDim != [1, 1] (the bare index-only cluster
   state collapsed into this path), so the rejects below reject an unusable
   cluster rather than an explicit opt-in. Composes with StreamKClusterReduction
-  under a factored cluster (orthogonal Cs/Ck axes; see _validateStreamKClusterShape).
+  under a factored cluster (orthogonal Cs/Ck axes; see _validateStreamK2DClusterShape).
   See docs/design/cluster-load-component-and-streamk-multicast.md.
   """
   if not streamKMulticast(state):
@@ -397,8 +403,11 @@ def _validateStreamKMulticast(state, printRejectionReason, isaInfoMap):
     return False
 
   # Cluster shape: 1-D pure multicast [C, 1] (Cs=C, Ck=1) OR a genuine 2-D
-  # cluster [Cs, Ck] (Cs = ClusterDim[0] spatial B-multicast axis). Both are
-  # validated by the shared shape helper (Cs, Ck each a power of two with
+  # cluster [Cs, Ck] (Cs = ClusterDim[0] spatial B-multicast axis). The 2-D case
+  # is either FACTORED (Ck a K-split reduction axis, StreamKClusterReduction
+  # derived) or DUAL-operand multicast (Ck an N-tiling / A-multicast axis, opted
+  # in via StreamKDualMulticast / ForceDPOnly); both share the same 2-D shape.
+  # All are validated by the shared shape helper (Cs, Ck each a power of two with
   # C = Cs*Ck in [2, 16]); _validateStreamK2DClusterShape(C, 1) reduces exactly
   # to the historic 1-D pow2/range check. Mirrors _validateStreamKClusterReduction.
   clusterDim = state["ClusterDim"]
@@ -854,10 +863,6 @@ class Solution(collections.abc.Mapping):
     )
     self._name = config["CustomKernelName"] if "CustomKernelName" in config and config["CustomKernelName"] else None
 
-    # Note: derivation now emits an int Multicast (0/1) on all paths, so no
-    # post-derivation coercion is needed. The pre-load coerceLegacyMulticastType
-    # above still guards shipped library YAMLs that serialize a bool Multicast.
-
     # Only merge and report mismatches if there were no pre-existing mismatches
     # To avoid duplicates and noise from cascading issues.
     if not pre_records:
@@ -939,6 +944,33 @@ class Solution(collections.abc.Mapping):
     else:
       state["_ScheduleIterAlg"] = state["ScheduleIterAlg"]
       state["_StinkyTofuOptLevel"] = 0
+
+    # SwInstructionPrefetch (single-integer bitmask): explicit Absolute(2) is only supported on
+    # gfx1250 non-Stream-K. Auto(-1) already resolves to Relative on Stream-K / non-gfx1250, so it
+    # is never rejected; legacy bool aliases (True->Relative, False->Off) never request Absolute.
+    # Only an explicit Absolute request on an unsupported target is rejected here (users should
+    # pick Auto(-1) or Relative(1) instead).
+    swpMode = normalizeSwInstructionPrefetch(
+        state.get("SwInstructionPrefetch", SW_INSTRUCTION_PREFETCH_AUTO))
+    if swpMode == SW_INSTRUCTION_PREFETCH_ABSOLUTE:
+      if state.get("StreamK", 0) != 0:
+        reject(state, printRejectionReason,
+               "SwInstructionPrefetch=2 (Absolute) is not supported on Stream-K kernels; "
+               "use Auto(-1) or Relative(1)")
+        return
+      if state["ISA"] != (12, 5, 0):
+        reject(state, printRejectionReason,
+               f"SwInstructionPrefetch=2 (Absolute) is only supported on gfx1250, not {state['ISA']}; "
+               "use Auto(-1) or Off(0)")
+        return
+      if state["ProblemType"]["DataType"].isDouble():
+        # f64: OptNLL epilogue routinely exceeds the 64 KiB I-cache (bucket-c fleet-wide) so the
+        # abs cover/ladder yields no reliable benefit, and sgprAlpha is a 2-dword pair (the
+        # OptNLL-aware Case-B fp32 predicate does not apply). See design doc §16.8/§16.13.
+        reject(state, printRejectionReason,
+               "SwInstructionPrefetch=2 (Absolute) is not supported for f64 (double) kernels; "
+               "use Auto(-1) or Relative(1)")
+        return
 
     if (not state["ProblemType"]["StridedBatched"]) and (not state["ProblemType"]['Batched']):
       reject(state, printRejectionReason, "General Batched GEMM only support Batched Problem")
@@ -1367,20 +1399,21 @@ class Solution(collections.abc.Mapping):
                                and state["StreamK"] == 0)
     # The cluster-scope barrier handshake (s_barrier_signal/wait -3, inserted by
     # StinkyTofu's InsertClusterBarrierPass) brackets the cooperative multicast
-    # tensor_load_to_lds groups, keeping the Cs spatial peers in lockstep. It is
-    # meaningful only when there ARE cooperative multicast loads to bracket, i.e.
-    # when Cs = ClusterDim[0] > 1 (spatial multicast peers: [C,1], [C,C], factored,
-    # dual-2D). A pure-reduction cluster ([1, C], Cs=1, StreamKClusterReduction) has
-    # NO cooperative multicast loads and is synchronized entirely by its own StreamK
-    # reduction -3 barriers; enabling the mainloop cluster barrier there emits an
-    # unmatched prologue s_barrier_wait -3 (Member N / Signal 0) that never completes
-    # -> cluster deadlock. So gate on Cs>1, in addition to an active cluster, TDM
-    # live (TDMInst != 0 -- cooperative tensor_load_to_lds), and the ISA providing
-    # the cluster-barrier instruction (HasClusterBarrier).
-    if state["ClusterDim"] != [1, 1] and state["ClusterDim"][0] > 1 \
-       and state["TDMInst"] != 0 \
-       and isaInfoMap[state["ISA"]].asmCaps.get("HasClusterBarrier", False):
-      state["ClusterBarrier"] = True
+    # tensor_load_to_lds groups, keeping the cluster peers in lockstep. Enable it
+    # for any active cluster (ClusterDim != [1, 1]) with TDM live (TDMInst != 0 --
+    # cooperative tensor_load_to_lds) and the ISA providing the cluster-barrier
+    # instruction (HasClusterBarrier).
+    state["ClusterBarrier"] = bool(state["ClusterDim"] != [1, 1]
+                                   and state["TDMInst"] != 0
+                                   and isaInfoMap[state["ISA"]].asmCaps.get("HasClusterBarrier", False))
+    # 1-D cluster reduction ([1, C], Cs=1) must NOT use the mainloop cooperative-load
+    # barrier (no B-multicast loads to bracket -> unmatched prologue s_barrier_wait -3
+    # -> deadlock). This is the PURE reduction case only; a factored [Cs,Ck] (Cs>1)
+    # keeps the barrier for its Cs B-multicast loads. StreamKForceDPOnly=1 has no
+    # partials reduction, so it is never this case.
+    if (state["ClusterDim"][0] == 1 and state["ClusterDim"][1] > 1
+            and state["StreamK"] != 0 and state["StreamKForceDPOnly"] == 0):
+      state["ClusterBarrier"] = False
 
     # done
     state["AssignedProblemIndependentDerivedParameters"] = True
@@ -3224,8 +3257,14 @@ class Solution(collections.abc.Mapping):
       if state["ProblemType"]["ComputeDataType"].isDouble() or state["ProblemType"]["ComputeDataType"].isDoubleComplex(): return False
       return True
 
+    # Track VALU source operands on VA_VDST (src-operand WAR hazard). On only for
+    # sparse; non-sparse kernels skip the stamp. Pre-armed for when sparse enables ESM2.
+    def evaluateEnableESM2TrackValuVsrc() -> bool:
+      return bool(state["ProblemType"]["Sparse"])
+
     state["ExpertSchedulingMode"] = evaluateExpertSchedulingMode()
     state["EnableStinkyTofuESM2"] = evaluateStinkyTofuESM2()
+    state["EnableESM2TrackValuVsrc"] = evaluateEnableESM2TrackValuVsrc()
 
     state["ESMRuntimeGate"] = tuple(state["ISA"])[:2] == (12, 0)
     # Some restrictions for float4 and 6bitFloat:

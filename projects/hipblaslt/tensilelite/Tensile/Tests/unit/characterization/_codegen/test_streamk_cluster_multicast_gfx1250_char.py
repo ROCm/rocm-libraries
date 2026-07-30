@@ -45,16 +45,26 @@ _CONFIG = os.path.join(
 )
 
 
+# The unified config also folds in the 2-D [2,2] dual shape; the 1-D-specific
+# assertions below (split B-broadcast, clusterMulticastValid predicate, DP->SK
+# "drop B" clear) apply only to the 1-D [C,1] kernels, dispatched on the ABSENCE of
+# the 2-D fold marker. The 2-D dual kernels are covered by
+# test_streamk_dual_2d_multicast_gfx1250_char.py.
+_TWO_D_MARKER = "2-D DP: StreamKIdx = batch*(nWG0*nWG1) + N*nWG0 + M"
+
+
 def test_streamk_cluster_multicast_gfx1250_emits_assembly():
     """gfx1250 SK3 cluster config (StreamKMulticast auto-derived on) emits real
     assembly, err==0, with the split B-broadcast mask, runtime predicate, and
-    DP->SK boundary clear."""
+    DP->SK boundary clear. Asserts the 1-D [C,1] kernels of the unified config."""
     results = emit_kernels_from_config(_CONFIG, limit=8, arch=_ARCH)
     assert len(results) >= 1, "Expected >=1 kernel, got 0"
     assert all(err == 0 for (_b, _s, err) in results), (
         f"Expected all err==0, got: {[(b, e) for b, _s, e in results if e != 0]}"
     )
-    for base, src, _err in results:
+    one_d = [(b, s, e) for (b, s, e) in results if _TWO_D_MARKER not in s]
+    assert one_d, "Unified cluster_multicast config emitted no 1-D [C,1] kernel"
+    for base, src, _err in one_d:
         assert src and len(src.splitlines()) > 50, (
             f"Kernel {base!r} emitted suspiciously short source"
         )

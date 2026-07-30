@@ -102,10 +102,11 @@ def test_problem_predicate_compound(problem_type, solution_state, snapshot):
 # --- StreamK cluster-reduction split-barrier selection guard --
 #
 # ClusterReductionIterCheck must be emitted only for StreamKClusterReduction
-# solutions with a real cluster (ClusterDim[0] > 1); its value carries
-# [DepthU, C] so the host predicate can reject problems whose
-# itersPerTile = ceil(K/DepthU) is not a multiple of C (split-barrier
-# over-signal). It must NOT be emitted for non-cluster or multicast solutions.
+# solutions with a real reduction cluster (pure reduction [1, C], so
+# Ck = ClusterDim[1] > 1); its value carries [DepthU, Ck] so the host predicate
+# can reject problems whose itersPerTile = ceil(K/DepthU) is not a multiple of
+# Ck (split-barrier over-signal). It must NOT be emitted for non-cluster or
+# multicast ([C,1]) solutions.
 
 def _preds_for(solution_state, problem_type, **overrides):
     st = dict(solution_state)
@@ -129,14 +130,14 @@ def test_cluster_reduction_iter_check_emitted(problem_type, solution_state):
 
 
 def test_cluster_reduction_iter_check_not_emitted_when_off(problem_type, solution_state):
-    # StreamKClusterReduction off -> no guard (the param is inert).
+    # StreamKClusterReduction off -> no guard (derived flag off).
     preds = _preds_for(solution_state, problem_type,
-                       StreamKClusterReduction=0, ClusterDim=[4, 1], DepthU=256)
+                       StreamKClusterReduction=0, ClusterDim=[1, 4], DepthU=256)
     assert _cluster_iter_pred(preds) is None
 
 
 def test_cluster_reduction_iter_check_not_emitted_without_cluster(problem_type, solution_state):
-    # Reduction requested but C == 1 (no real cluster) -> no guard.
+    # Reduction requested but Ck == 1 (no real reduction cluster) -> no guard.
     preds = _preds_for(solution_state, problem_type,
                        StreamKClusterReduction=1, ClusterDim=[1, 1], DepthU=256)
     assert _cluster_iter_pred(preds) is None

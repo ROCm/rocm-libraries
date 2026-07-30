@@ -21,8 +21,9 @@
 #   * the derivation gating vs the factored path (same ClusterDim=[2,2], SK3,
 #     ForceDPOnly=0: flag on -> multicast + NO reduction; flag off -> factored,
 #     i.e. multicast + reduction), proving mutual exclusion;
-#   * the selection predicates (ClusterDimCheck keeps Ck as the N-tile divisor,
-#     value[4]=Ck, unlike the factored path which pins it to 1; and
+#   * the selection predicates (ClusterDimCheck is DROPPED -- alignment is now a
+#     runtime pad-exit, not a selection guard; dual-2D keeping Ck as a spatial
+#     N-tiling axis is proven by StreamKClusterReduction == 0; and
 #     ClusterReductionIterCheck is ABSENT because reduction is not derived); and
 #   * the dense 2-D dual-mask math (maskA=0x5, maskB=0x3) and the DP->SK
 #     boundary self bit (self = maskA & maskB).
@@ -48,6 +49,10 @@ sys.path.insert(0, os.path.join(
 _DESIGNED = os.path.join(
     TENSILE_ROOT, "Tensile", "Tests", "unit", "characterization",
     "_codegen", "data", "test_data", "_designed", "gfx1250")
+# The dedicated dual-2D config sets StreamKDualMulticast=1 on ClusterDim=[2,2]:
+# on the FACTORED branch a knobless [2,2]/SK3/ForceDPOnly=0 is factored (Ck is the
+# K-split reduction axis), so the StreamKDualMulticast knob is the sole
+# discriminator selecting the dual-2D interpretation instead.
 _DUAL2D = os.path.join(_DESIGNED, "streamk_dual_2d_multicast.yaml")
 
 _ARCH = "gfx1250"
@@ -170,18 +175,21 @@ class TestDerivation:
 # --- selection predicates --------------------------------------------------
 
 class TestPredicates:
-    def test_cluster_dim_check_keeps_ck_as_n_divisor(self):
-        """For dual-2D the Ck axis is a spatial N-tiling axis, so ClusterDimCheck
-        keeps ClusterDim[1] as the N-tile divisor (value[4]=Ck=2) -- unlike the
-        factored path, which pins value[4]=1. value[3] is Cs=2 (M-adjacency)."""
+    def test_cluster_dim_check_dropped(self):
+        """ClusterDimCheck no longer exists (removed by the gfx1250 non-multiple
+        cluster-launch support merged from develop, #9690). The old selection-time
+        "nWG0 % Cs == 0 && nWG1 % Ck == 0" alignment guard is replaced by the
+        runtime pad-early-exit + mask reduction, so no ClusterDimCheck predicate is
+        emitted. Dual-2D keeping Ck as a spatial N-tiling axis (not a factored
+        K-split) is now proven purely by StreamKClusterReduction == 0 below and by
+        the absent ClusterReductionIterCheck."""
         states = _derive_states(_DUAL2D)
         assert states
         st = states[0]
         preds = _compound_preds(st)
-        p = _pred(preds, "ClusterDimCheck")
-        assert p is not None
-        assert p.value[3] == st["ClusterDim"][0] == 2, p.value
-        assert p.value[4] == st["ClusterDim"][1] == 2, p.value
+        assert _pred(preds, "ClusterDimCheck") is None
+        assert st.get("StreamKClusterReduction", 0) == 0
+        assert st["ClusterDim"][1] == 2  # Ck kept as the N-tile axis (not pinned to 1)
 
     def test_no_cluster_reduction_iter_check(self):
         """ClusterReductionIterCheck is emitted only when StreamKClusterReduction

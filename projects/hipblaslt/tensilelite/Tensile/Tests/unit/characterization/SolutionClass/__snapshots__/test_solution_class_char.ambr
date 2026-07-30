@@ -103,6 +103,7 @@
       'DtlPlusLdsBuf',
       'ESMRuntimeGate',
       'EdgeType',
+      'EnableESM2TrackValuVsrc',
       'EnableF32XdlMathOp',
       'EnableMatrixInstruction',
       'EnableStinkyTofuESM2',

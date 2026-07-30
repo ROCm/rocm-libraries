@@ -99,7 +99,11 @@ def _make_writer(has_cluster_barrier=True):
 
 
 def _valid_cluster_kernel(C=4):
-    """A kernel dict that satisfies _streamKClusterReductionEnabled."""
+    """A kernel dict that satisfies _streamKClusterReductionEnabled.
+
+    Pure reduction is expressed as ClusterDim = [1, C] (Cs=1, Ck=C): the whole
+    cluster C = Cs*Ck = ClusterDim[1] reduction peers.
+    """
     return {
         "StreamKClusterReduction": 1,
         "StreamK": 3,

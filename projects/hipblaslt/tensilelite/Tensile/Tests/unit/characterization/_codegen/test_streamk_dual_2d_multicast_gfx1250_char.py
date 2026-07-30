@@ -18,7 +18,7 @@ SK round, so it additionally asserts:
   * the DP->SK boundary drops BOTH masks to self-only (not just B); and
   * the SK partial-tile workspace/reduction machinery is intact.
 
-Asserts (see ``_designed/gfx1250/streamk_dual_2d_multicast.yaml``):
+Asserts (2-D [2,2] kernels of the unified ``_designed/gfx1250/streamk_cluster_multicast.yaml``):
   * err == 0, real gfx1250 assembly;
   * DP round binds BOTH MulticastMaskA (0x5) and MulticastMaskB (0x3) -- A is
     genuinely multicast -- via the dense 2-D masks (keep-dense short-circuit);
@@ -27,8 +27,9 @@ Asserts (see ``_designed/gfx1250/streamk_dual_2d_multicast.yaml``):
   * the SK partial round + cluster split-barrier arrive/wait are present; and
   * the factored K-split decode/shift are ABSENT (Ck is a spatial N-axis).
 
-CPU-only. The on-device correctness check is the user's HW run of
-``Tests/common/streamk/gfx1250/core/sk_mxf4_2d_dual_multicast.yaml``.
+CPU-only. The on-device correctness check is the user's HW run of the 2-D
+ClusterDim entries ([2,2]/[2,4]/[4,2]) now folded into
+``Tests/common/streamk/gfx1250/core/sk_mxf4gemm_cluster_multicast.yaml``.
 """
 
 import os
@@ -41,26 +42,38 @@ pytestmark = pytest.mark.unit
 
 _ARCH = "gfx1250"
 
+# The 1-D and 2-D multicast configs were unified into ONE cluster_multicast set
+# (former streamk_dual_2d_multicast.yaml folded in), so this config now emits both
+# 1-D [C,1] and 2-D [2,2] kernels; this test dispatches on the "2-D DP:" fold marker
+# and asserts the dual-2D properties on the 2-D kernels only.
 _CONFIG = os.path.join(
     os.path.dirname(__file__),
     "data",
     "test_data",
     "_designed",
     "gfx1250",
-    "streamk_dual_2d_multicast.yaml",
+    "streamk_cluster_multicast.yaml",
 )
+
+_TWO_D_MARKER = "2-D DP: StreamKIdx = batch*(nWG0*nWG1) + N*nWG0 + M"
 
 
 def test_streamk_dual_2d_multicast_gfx1250_emits_assembly():
     """gfx1250 standard-StreamK [2,2] dual-2D emits real assembly, err==0,
     with dual DP masks (A on Ck/Y, B on Cs/X), the 2-D DP fold, a DP->SK BOTH-mask
-    clear, an intact SK partial round, and NO factored K-split decode."""
+    clear, an intact SK partial round, and NO factored K-split decode. The unified
+    cluster_multicast config also emits 1-D [C,1] kernels, which are skipped here."""
     results = emit_kernels_from_config(_CONFIG, limit=8, arch=_ARCH)
     assert len(results) >= 1, "Expected >=1 kernel, got 0"
     assert all(err == 0 for (_b, _s, err) in results), (
         f"Expected all err==0, got: {[(b, e) for b, _s, e in results if e != 0]}"
     )
-    for base, src, _err in results:
+    dual_results = [(b, s, e) for (b, s, e) in results if _TWO_D_MARKER in s]
+    assert dual_results, (
+        "Unified cluster_multicast config emitted no 2-D dual kernel "
+        "(expected the ClusterDim=[2,2] shape to fold in)"
+    )
+    for base, src, _err in dual_results:
         assert src and len(src.splitlines()) > 50, (
             f"Kernel {base!r} emitted suspiciously short source"
         )
@@ -78,8 +91,8 @@ def test_streamk_dual_2d_multicast_gfx1250_emits_assembly():
         assert "s[sgprMulticastMaskB], 0x3" in src, (
             f"Kernel {base!r} DP round does not set maskB=0x3 (B NOT multicast!)"
         )
-        assert "keep dense 2-D masks" in src, (
-            f"Kernel {base!r} missing the dense-mask short-circuit note"
+        assert "keep kernel-init 2-D masks" in src, (
+            f"Kernel {base!r} missing the kernel-init mask short-circuit note"
         )
         assert "sgprMulticastMaskA" in src and "sgprMulticastMaskB" in src, (
             f"Kernel {base!r} never binds both multicast masks to TDM descriptors"

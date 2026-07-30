@@ -4,10 +4,11 @@
 """StreamK workgroup-cluster reduction -- gfx1250 characterization (CPU-only).
 
 Exercises the intra-cluster split-barrier reduction fast path added to
-``Tensile/Components/StreamK.py`` (StreamKClusterReduction=1, ClusterDim=[C,1]).
+``Tensile/Components/StreamK.py`` (StreamKClusterReduction=1, ClusterDim=[1,C]
+-- pure K-reduction: Ck = ClusterDim[1] > 1, Cs = ClusterDim[0] = 1).
 It drives the same config -> Solutions -> emit path as the sibling
 ``test_r3_streamk_gfx1250_char.py``, but through the cluster-enabled designed
-config ``_designed/gfx1250/streamk_cluster.yaml``.
+config ``_designed/gfx1250/streamk_cluster_reduction.yaml``.
 
 Asserts:
   * every kernel emits real gfx1250 assembly with ``err == 0``;
