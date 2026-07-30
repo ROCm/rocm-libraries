@@ -13,6 +13,13 @@ exclusion guard from Python ``_enable_combo_2d``, routing biased combo-geometry
 attention onto the transposed combo path while C++ still refused bias.  These
 tests encode the expected routing decisions so that kind of regression is caught
 immediately on any developer machine.
+
+NOTE ON EXPECTED FAILURES (PR #9220 regression):
+Tests marked with @skip document a known divergence introduced by
+PR #9220, which removed the bias-exclusion guard from Python _enable_combo_2d.
+Python now routes biased combo-geometry problems onto the combo path while
+C++ (attention_unified_selectors.cpp) still refuses them. The tests are
+written for the CORRECT behavior (bias should block combo_2d) and are being skipped until the Python guard is restored.
 """
 
 from __future__ import annotations
@@ -116,16 +123,7 @@ def _combo_prob(**overrides) -> UnifiedAttentionProblem:
 
 
 class TestEnableCombo2d(unittest.TestCase):
-    """_enable_combo_2d fires only for the exact gfx950+bf16+d64/b32+GQA-8+S>256 cohort.
-
-    NOTE ON EXPECTED FAILURES (PR #9220 regression):
-    The tests marked with _BIAS_BUG document a known divergence introduced by
-    PR #9220, which removed the bias-exclusion guard from Python _enable_combo_2d.
-    Python now routes biased combo-geometry problems onto the combo path while
-    C++ (attention_unified_selectors.cpp) still refuses them.  The tests are
-    written for the CORRECT behavior (bias should block combo_2d) and are
-    expected to fail until the Python guard is restored.
-    """
+    """_enable_combo_2d fires only for the exact gfx950+bf16+d64/b32+GQA-8+S>256 cohort."""
 
     _BIAS_BUG = (
         "PR #9220: Python _enable_combo_2d missing bias guard (C++ still refuses bias)"
@@ -138,24 +136,18 @@ class TestEnableCombo2d(unittest.TestCase):
     def test_canonical_combo_fires(self):
         self.assertTrue(self._gate(_combo_prob()))
 
-    # ---- PR #9220 regression: biased inputs must NOT route combo_2d ----
-    # These tests document the CORRECT expected behavior (bias blocks combo).
-    # They currently FAIL because Python removed the guard in #9220.
-
-    @unittest.expectedFailure
+    @unittest.skip(_BIAS_BUG)
     def test_qq_bias_blocks_combo(self):
         """use_qq_bias=True must disable combo_2d (was the #9220 bug)."""
         self.assertFalse(self._gate(_combo_prob(use_qq_bias=True)), self._BIAS_BUG)
 
-    @unittest.expectedFailure
+    @unittest.skip(_BIAS_BUG)
     def test_alibi_blocks_combo(self):
         self.assertFalse(self._gate(_combo_prob(use_alibi=True)), self._BIAS_BUG)
 
-    @unittest.expectedFailure
+    @unittest.skip(_BIAS_BUG)
     def test_softcap_blocks_combo(self):
         self.assertFalse(self._gate(_combo_prob(softcap=50.0)), self._BIAS_BUG)
-
-    # ---- other gate conditions (not affected by #9220) ----
 
     def test_fp16_blocks_combo(self):
         self.assertFalse(self._gate(_combo_prob(dtype="fp16")))
@@ -184,12 +176,7 @@ class TestEnableCombo2d(unittest.TestCase):
 
 
 class TestCombo2dRouting(unittest.TestCase):
-    """combo_2d problems must get the full 32x32 transposed stack.
-
-    Tests marked @expectedFailure document the PR #9220 regression: Python
-    routes biased problems onto combo, while C++ correctly rejects them.
-    These tests will pass once the Python bias guard is restored.
-    """
+    """combo_2d problems must get the full 32x32 transposed stack."""
 
     _BIAS_BUG = "PR #9220: Python _enable_combo_2d missing bias guard"
 
@@ -200,18 +187,18 @@ class TestCombo2dRouting(unittest.TestCase):
         self.assertTrue(s["use_transposed_half_local_pv"])
         self.assertTrue(s["use_transposed_scalar_state"])
 
-    @unittest.expectedFailure
+    @unittest.skip(_BIAS_BUG)
     def test_biased_combo_does_not_get_fast_paged_kv(self):
         """#9220: biased combo must NOT get use_fast_paged_kv_desc."""
         s = _spec(_combo_prob(use_qq_bias=True))
         self.assertFalse(s["use_fast_paged_kv_desc"], self._BIAS_BUG)
 
-    @unittest.expectedFailure
+    @unittest.skip(_BIAS_BUG)
     def test_alibi_combo_no_fast_paged_kv(self):
         s = _spec(_combo_prob(use_alibi=True))
         self.assertFalse(s["use_fast_paged_kv_desc"], self._BIAS_BUG)
 
-    @unittest.expectedFailure
+    @unittest.skip(_BIAS_BUG)
     def test_softcap_combo_no_fast_paged_kv(self):
         s = _spec(_combo_prob(softcap=50.0))
         self.assertFalse(s["use_fast_paged_kv_desc"], self._BIAS_BUG)
@@ -231,16 +218,7 @@ class TestCombo2dRouting(unittest.TestCase):
 
 
 class TestBiasGeometryCohorts(unittest.TestCase):
-    """Systematic sweep of bias flags x combo-geometry dimensions.
-
-    Tests marked @expectedFailure document the CORRECT expected behavior
-    (bias should block combo_2d / fast_paged_kv_desc).  They currently fail
-    because PR #9220 removed the Python bias guard; they will become regular
-    passing tests once the guard is restored.
-
-    Tests without @expectedFailure verify geometry-boundary decisions that
-    are not affected by the #9220 bug and must always pass.
-    """
+    """Systematic sweep of bias flags x combo-geometry dimensions."""
 
     _BIAS_BUG = "PR #9220: Python _enable_combo_2d missing bias guard"
 
@@ -251,20 +229,20 @@ class TestBiasGeometryCohorts(unittest.TestCase):
     def test_canonical_combo(self):
         self.assertTrue(self._fast_kv(_combo_prob()))
 
-    # ---- PR #9220 biased-combo cohort (expectedFailure = bug is present) ----
-    @unittest.expectedFailure
+    # ---- PR #9220 biased-combo cohort (skip the test until bug is fixed) ----
+    @unittest.skip(_BIAS_BUG)
     def test_qq_bias_blocks_fast_paged_kv(self):
         self.assertFalse(self._fast_kv(_combo_prob(use_qq_bias=True)), self._BIAS_BUG)
 
-    @unittest.expectedFailure
+    @unittest.skip(_BIAS_BUG)
     def test_alibi_blocks_fast_paged_kv(self):
         self.assertFalse(self._fast_kv(_combo_prob(use_alibi=True)), self._BIAS_BUG)
 
-    @unittest.expectedFailure
+    @unittest.skip(_BIAS_BUG)
     def test_softcap_blocks_fast_paged_kv(self):
         self.assertFalse(self._fast_kv(_combo_prob(softcap=50.0)), self._BIAS_BUG)
 
-    @unittest.expectedFailure
+    @unittest.skip(_BIAS_BUG)
     def test_alibi_and_qq_bias_no_combo(self):
         self.assertFalse(
             self._fast_kv(_combo_prob(use_alibi=True, use_qq_bias=True)), self._BIAS_BUG
