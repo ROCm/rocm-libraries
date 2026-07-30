@@ -45,6 +45,18 @@ def _add_installed_python_paths() -> None:
                 found.append(path)
     if script.parent not in found:
         found.append(script.parent)
+    # The harness' attention families build library kernels, so `kernels` and
+    # `builders` must resolve too. They are staged under tests/library/ in an
+    # install (the destination TheRock's test-artifact globs capture) and live in
+    # the sibling library tree in a checkout.
+    lib_roots = [script.parent / "tests" / "library"]
+    if len(script.parents) > 2:
+        lib_roots.append(script.parents[2] / "library")
+    for lib_root in lib_roots:
+        if (lib_root / "kernels").is_dir():
+            if lib_root not in found:
+                found.append(lib_root)
+            break
     for path in reversed(found):
         sys.path.insert(0, str(path))
 

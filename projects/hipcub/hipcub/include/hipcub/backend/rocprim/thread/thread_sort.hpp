@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2011-2021, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2021-2025, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2021-2026, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -31,23 +31,19 @@
 
 #include "../../../config.hpp"
 
+#include "../util_macro.hpp"
 #include "../util_ptx.hpp"
 #include "../util_type.hpp"
 
 #include <rocprim/functional.hpp> // IWYU pragma: export
 
+#include <utility>
+
+#if defined(__HIP_PLATFORM_NVIDIA__)
+    #include <cuda/std/utility>
+#endif
+
 BEGIN_HIPCUB_NAMESPACE
-
-// Should be deprecated once hip::std::swap is available in this scope.
-template<typename T>
-HIPCUB_DEVICE
-HIPCUB_FORCEINLINE void Swap(T& lhs, T& rhs)
-{
-  T temp = lhs;
-  lhs    = rhs;
-  rhs    = temp;
-}
-
 
 /**
  * @brief Sorts data using odd-even sort method
@@ -89,22 +85,28 @@ StableOddEvenSort(KeyT (&keys)[ITEMS_PER_THREAD],
 {
   constexpr bool KEYS_ONLY = ::rocprim::Equals<ValueT, NullType>::VALUE;
 
-  #pragma unroll
-  for (int i = 0; i < ITEMS_PER_THREAD; ++i)
+  _CCCL_SORT_MAYBE_UNROLL()
+  for(int i = 0; i < ITEMS_PER_THREAD; ++i)
   {
-  #pragma unroll
-    for (int j = 1 & i; j < ITEMS_PER_THREAD - 1; j += 2)
-    {
-      if (compare_op(keys[j + 1], keys[j]))
+      _CCCL_SORT_MAYBE_UNROLL()
+      for(int j = 1 & i; j < ITEMS_PER_THREAD - 1; j += 2)
       {
-        Swap(keys[j], keys[j + 1]);
-        if (!KEYS_ONLY)
-        {
-          Swap(items[j], items[j + 1]);
-        }
-      }
-    } // inner loop
-  }   // outer loop
+          if(compare_op(keys[j + 1], keys[j]))
+          {
+
+#if defined(__HIP_PLATFORM_NVIDIA__)
+              using ::cuda::std::swap;
+#else
+              using ::rocprim::swap;
+#endif
+              swap(keys[j], keys[j + 1]);
+              if(!KEYS_ONLY)
+              {
+                  swap(items[j], items[j + 1]);
+              }
+          }
+      } // inner loop
+  } // outer loop
 }
 
 

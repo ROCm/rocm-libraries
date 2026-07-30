@@ -1,0 +1,29 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyBuildImplicitDependencyPass --StinkyWaitCntInsertionPass --print-output
+#
+# Regression: default tensor queue freezing must not hide tensor ops from an
+# untagged loop-header barrier. Sweep 0 sees no tensor op before the barrier,
+# but later sweeps receive the loop body's tensor_load_to_lds through the
+# back-edge. Because the barrier has no MemTokenData, it is a tensor fence and
+# must conservatively drain the whole tensor counter.
+#
+# CHECK-LABEL: @waitcnt_insertion_loop_untagged_barrier_tensor_backedge
+# CHECK: ^loop:
+# CHECK-NEXT: "st.s_wait_tensorcnt"(0) {{.*}}mod.swaittensorcnt = { tlcnt = 0 }
+# CHECK-NEXT: "st.s_barrier"()
+# CHECK-NEXT: LDS0 = "st.tensor_load_to_lds"(s[0:3], s[10:17])
+# CHECK-SAME: mod.memtoken = { tokens = [0] }
+# CHECK-NEXT: "st.s_cbranch_scc1"(loop, SCC0)
+# CHECK-NOT: s_wait_dscnt
+# CHECK-NOT: s_wait_loadcnt
+
+st.func @waitcnt_insertion_loop_untagged_barrier_tensor_backedge() {
+^entry:
+  "st.s_branch"("loop")
+  Successors: ^loop
+^loop:
+  "st.s_barrier"()
+  "st.tensor_load_to_lds"(s[0:3], s[10:17]) { mod.memtoken = { tokens = [0] } }
+  "st.s_cbranch_scc1"("loop", SCC0)
+  Successors: ^loop, ^exit
+^exit:
+}
