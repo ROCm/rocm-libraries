@@ -150,6 +150,10 @@ together: `check` reads the baseline's value while `update` writes the default, 
 apart the next ratchet click would silently retune the gate. Tighten the buffer once the numbers
 prove stable across a few `develop` merges; the whole-project floor is the backstop meanwhile.
 
+Note that `update` rewrites the baseline's `_comment` and `tolerance` from the tool, so record
+anything durable about them in `write_baseline` rather than hand-editing the JSON, which the next
+regeneration would silently discard.
+
 ### Raising the floors (the ratchet)
 
 Raising the floors is the ratchet click: a deliberate, reviewed step, never automatic. Most of the

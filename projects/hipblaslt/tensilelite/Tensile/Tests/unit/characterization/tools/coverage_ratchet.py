@@ -132,10 +132,16 @@ def write_baseline(
     current: dict[str, float], baseline_path: Path, tolerance: float
 ) -> None:
     payload = {
+        # Written here rather than hand-edited in the JSON, so it survives every
+        # regeneration instead of being silently overwritten by the next update.
         "_comment": (
             "Per-file coverage ratchet baseline for the TensileLite "
             "characterization suite (AIHPBLAS-3878). Coverage may rise but not "
-            "fall. Regenerate with coverage_ratchet.py update; review the diff."
+            "fall. Regenerate with coverage_ratchet.py update; review the diff. "
+            "'tolerance' is the noise buffer in percentage points, set wide "
+            "while the gate first lands; see DEFAULT_TOLERANCE in "
+            "tools/coverage_ratchet.py for why, and tighten it once the numbers "
+            "prove stable."
         ),
         "tolerance": tolerance,
         "files": {path: round(pct, 2) for path, pct in sorted(current.items())},
