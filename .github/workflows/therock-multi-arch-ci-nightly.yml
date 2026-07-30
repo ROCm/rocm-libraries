@@ -41,7 +41,7 @@ concurrency:
 
 jobs:
   setup:
-    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@main
+    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@release/therock-10.0
     with:
       build_variant: "release"
       # Limit GPU families for nightly CI: gfx94X, gfx950 (Linux) and gfx1151 (Windows)
