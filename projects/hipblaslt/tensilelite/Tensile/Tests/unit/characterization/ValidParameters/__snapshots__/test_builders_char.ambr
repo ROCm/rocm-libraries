@@ -1481,6 +1481,7 @@
     'StoreVectorWidth',
     'StreamK',
     'StreamKAtomic',
+    'StreamKDualMulticast',
     'StreamKFixupTreeReduction',
     'StreamKForceDPOnly',
     'StreamKWorkStealing',
@@ -2584,6 +2585,14 @@
       'type': 'list',
     }),
     'StreamKAtomic': dict({
+      'head': list([
+        0,
+        1,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'StreamKDualMulticast': dict({
       'head': list([
         0,
         1,
