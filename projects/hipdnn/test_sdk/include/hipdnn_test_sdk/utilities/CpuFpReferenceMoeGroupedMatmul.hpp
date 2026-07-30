@@ -196,11 +196,16 @@ public:
                 = tokenBase + sourceRow[static_cast<size_t>(o)] * tokenStride1;
             const WeightDataType* wExpert = weightBase + expert * weightStride0;
 
-            std::vector<ComputeDataType> acc(static_cast<size_t>(outputN), ComputeDataType{0});
-
             if(weightStride2 == 1)
             {
-                // Row-major weight layout {K*N, N, 1}: unit stride along N.
+                // Row-major weight layout {K*N, N, 1}: unit stride along N, so the K
+                // loop accumulates across a whole output row at once and needs a
+                // scratch row. thread_local keeps that off the per-row allocation
+                // path - this functor body runs once per output row, on every worker
+                // thread.
+                thread_local std::vector<ComputeDataType> acc;
+                acc.assign(static_cast<size_t>(outputN), ComputeDataType{0});
+
                 for(int64_t kIdx = 0; kIdx < hiddenK; ++kIdx)
                 {
                     const auto a = static_cast<ComputeDataType>(tokRow[kIdx * tokenStride2]);
@@ -211,11 +216,19 @@ public:
                             += a * static_cast<ComputeDataType>(wRow[nIdx]);
                     }
                 }
+
+                for(int64_t nIdx = 0; nIdx < outputN; ++nIdx)
+                {
+                    outRow[nIdx * outputStride2]
+                        = hipdnn_test_sdk::detail::safeConvert<OutputDataType>(
+                            acc[static_cast<size_t>(nIdx)]);
+                }
             }
             else
             {
                 // Column-major weight layout {K*N, 1, K} (cuDNN's documented MoE
-                // layout): unit stride along K.
+                // layout): unit stride along K, so each output element is a
+                // self-contained dot product and no scratch row is needed.
                 for(int64_t nIdx = 0; nIdx < outputN; ++nIdx)
                 {
                     ComputeDataType s{0};
@@ -225,14 +238,9 @@ public:
                         s += static_cast<ComputeDataType>(tokRow[kIdx * tokenStride2])
                              * static_cast<ComputeDataType>(wCol[kIdx * weightStride1]);
                     }
-                    acc[static_cast<size_t>(nIdx)] = s;
+                    outRow[nIdx * outputStride2]
+                        = hipdnn_test_sdk::detail::safeConvert<OutputDataType>(s);
                 }
-            }
-
-            for(int64_t nIdx = 0; nIdx < outputN; ++nIdx)
-            {
-                outRow[nIdx * outputStride2] = hipdnn_test_sdk::detail::safeConvert<OutputDataType>(
-                    acc[static_cast<size_t>(nIdx)]);
             }
         };
 

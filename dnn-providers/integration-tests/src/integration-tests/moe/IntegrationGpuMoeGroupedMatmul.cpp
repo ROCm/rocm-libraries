@@ -21,8 +21,8 @@ using namespace hipdnn_integration_tests;
 namespace
 {
 
-// Routed-row count always equals token-row count in these cases (GATHER never
-// aliases a distinct routed-row count here), so only one row count is needed.
+// `routedRows` is the length of the routing tensors, and for GATHER also the
+// output row count. NONE and SCATTER require it to equal `tokenRows`.
 struct MoeTestCase
 {
     int64_t experts;
@@ -30,27 +30,38 @@ struct MoeTestCase
     int64_t hiddenK;
     int64_t weightN;
     int64_t tokenRows;
+    int64_t routedRows;
     MoeGroupedMatmulMode mode;
     int32_t topK;
     unsigned int seed;
+
+    /// Rows the group offsets partition: routed rows under GATHER, token rows otherwise.
+    int64_t rowsTotal() const
+    {
+        return mode == MoeGroupedMatmulMode::GATHER ? routedRows : tokenRows;
+    }
 
     friend std::ostream& operator<<(std::ostream& os, const MoeTestCase& tc)
     {
         return os << "experts=" << tc.experts << ",batch=" << tc.batch << ",K=" << tc.hiddenK
                   << ",N=" << tc.weightN << ",rows=" << tc.tokenRows
-                  << ",mode=" << static_cast<int>(tc.mode) << ",topK=" << tc.topK
-                  << ",seed=" << tc.seed;
+                  << ",routed=" << tc.routedRows << ",mode=" << static_cast<int>(tc.mode)
+                  << ",topK=" << tc.topK << ",seed=" << tc.seed;
     }
 };
 
 std::vector<MoeTestCase> getMoeTestCases()
 {
     return {
-        MoeTestCase{4, 1, 64, 32, 32, MoeGroupedMatmulMode::NONE, 0, 1},
-        MoeTestCase{4, 1, 64, 32, 32, MoeGroupedMatmulMode::SCATTER, 2, 1},
-        MoeTestCase{4, 1, 64, 32, 32, MoeGroupedMatmulMode::GATHER, 0, 1},
-        MoeTestCase{2, 2, 64, 32, 32, MoeGroupedMatmulMode::NONE, 0, 1}, // batched
-        MoeTestCase{4, 1, 64, 32, 30, MoeGroupedMatmulMode::NONE, 0, 1}, // rows % experts != 0
+        MoeTestCase{4, 1, 64, 32, 32, 32, MoeGroupedMatmulMode::NONE, 0, 1},
+        MoeTestCase{4, 1, 64, 32, 32, 32, MoeGroupedMatmulMode::SCATTER, 2, 1},
+        MoeTestCase{4, 1, 64, 32, 32, 32, MoeGroupedMatmulMode::GATHER, 0, 1},
+        MoeTestCase{2, 2, 64, 32, 32, 32, MoeGroupedMatmulMode::NONE, 0, 1}, // batched
+        MoeTestCase{4, 1, 64, 32, 30, 30, MoeGroupedMatmulMode::NONE, 0, 1}, // rows % experts != 0
+        // GATHER over a subset of the tokens: routed rows != token rows, so the
+        // output is shorter than the token tensor and the offsets partition the
+        // routed rows rather than the token rows.
+        MoeTestCase{4, 1, 64, 32, 32, 16, MoeGroupedMatmulMode::GATHER, 0, 1},
     };
 }
 
@@ -94,7 +105,7 @@ public:
                 offsetDims,
                 generateStrides(offsetDims)));
 
-        const std::vector<int64_t> routingDims = {1, tc.tokenRows, 1};
+        const std::vector<int64_t> routingDims = {1, tc.routedRows, 1};
         std::shared_ptr<graph::TensorAttributes> tokenIndexAttr;
         if(tc.mode != MoeGroupedMatmulMode::NONE)
         {
@@ -184,22 +195,29 @@ protected:
             = static_cast<hipdnn_data_sdk::utilities::TensorBase<int32_t>&>(
                 bundle.getTensor(_firstTokenOffsetUid));
         const int64_t groupCount = offsetTensor.dims()[0];
+        const int64_t rowsTotal = testCase.rowsTotal();
         for(int64_t g = 0; g < groupCount; ++g)
         {
-            offsetTensor.setHostValue(static_cast<int32_t>((g * testCase.tokenRows) / groupCount),
+            offsetTensor.setHostValue(static_cast<int32_t>((g * rowsTotal) / groupCount),
                                       {g, 0, 0});
         }
         offsetTensor.markHostModified();
 
+        // Both permutations below are deliberately non-identity. With identity
+        // routing a provider that ignored the routing tensors entirely would still
+        // match the reference, which is the one thing this suite exists to catch.
         if(_tokenIndexUid.has_value())
         {
             auto& tokenIndexTensor = static_cast<hipdnn_data_sdk::utilities::TensorBase<int32_t>&>(
                 bundle.getTensor(*_tokenIndexUid));
-            for(int64_t r = 0; r < testCase.tokenRows; ++r)
+            for(int64_t r = 0; r < testCase.routedRows; ++r)
             {
+                // GATHER reads token row `reversed`; SCATTER writes output row
+                // `reversed` via dst = tokenIndex * topK + tokenKs.
+                const int64_t reversed = testCase.tokenRows - 1 - r;
                 const int32_t value = (testCase.mode == MoeGroupedMatmulMode::GATHER)
-                                          ? static_cast<int32_t>(r)
-                                          : static_cast<int32_t>(r / testCase.topK);
+                                          ? static_cast<int32_t>(reversed)
+                                          : static_cast<int32_t>(reversed / testCase.topK);
                 tokenIndexTensor.setHostValue(value, {0, r, 0});
             }
             tokenIndexTensor.markHostModified();
@@ -209,9 +227,11 @@ protected:
         {
             auto& tokenKsTensor = static_cast<hipdnn_data_sdk::utilities::TensorBase<int32_t>&>(
                 bundle.getTensor(*_tokenKsUid));
-            for(int64_t r = 0; r < testCase.tokenRows; ++r)
+            for(int64_t r = 0; r < testCase.routedRows; ++r)
             {
-                tokenKsTensor.setHostValue(static_cast<int32_t>(r % testCase.topK), {0, r, 0});
+                const int64_t reversed = testCase.tokenRows - 1 - r;
+                tokenKsTensor.setHostValue(static_cast<int32_t>(reversed % testCase.topK),
+                                           {0, r, 0});
             }
             tokenKsTensor.markHostModified();
         }

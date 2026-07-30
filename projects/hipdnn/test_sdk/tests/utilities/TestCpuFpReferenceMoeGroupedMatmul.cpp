@@ -67,23 +67,22 @@ void expectTensorValues(const Tensor<Type>& tensor, const std::vector<float>& ex
 }
 
 // E=2, K=2, N=2, with W[0] = identity and W[1] = swap, row-major {K*N, N, 1}.
-// Both matrices are symmetric, so the flat layout is identical under the
-// column-major {K*N, 1, K} layout too -- see ColumnMajorWeightMatchesRowMajor.
+// Both matrices are symmetric, so this helper says nothing about weight layout -
+// ColumnMajorWeightMatchesRowMajor uses an asymmetric weight for that.
 template <typename Type>
-Tensor<Type> makeIdentitySwapWeight(bool columnMajor = false)
+Tensor<Type> makeIdentitySwapWeight()
 {
-    auto weight = columnMajor ? Tensor<Type>({2, 2, 2}, {4, 1, 2})
-                              : createTensor<Type>({2, 2, 2});
+    auto weight = createTensor<Type>({2, 2, 2});
     setValues(weight, {1.0F, 0.0F, 0.0F, 1.0F, 0.0F, 1.0F, 1.0F, 0.0F});
     return weight;
 }
 
 template <typename Type>
-void runNoneModeGroupsTokensByOffset(bool columnMajorWeight = false)
+void runNoneModeGroupsTokensByOffset()
 {
     auto token = createTensor<Type>({1, 4, 2});
     setValues(token, {1.0F, 2.0F, 3.0F, 4.0F, 5.0F, 6.0F, 7.0F, 8.0F});
-    auto weight = makeIdentitySwapWeight<Type>(columnMajorWeight);
+    auto weight = makeIdentitySwapWeight<Type>();
     auto offsets = createTensor<int32_t>({2, 1, 1});
     setValues(offsets, {0, 2});
     auto output = createTensor<Type>({1, 4, 2});
@@ -121,6 +120,9 @@ TEST(TestCpuFpReferenceMoeGroupedMatmul, NoneModeZeroFillsRowsBeforeFirstOffset)
     auto offsets = createTensor<int32_t>({2, 1, 1});
     setValues(offsets, {1, 3});
     auto output = createTensor<float>({1, 4, 2});
+    // Row 0 is never routed to, so the zeros asserted below must come from the
+    // kernel's zero-fill, not from whatever the allocator happened to hand back.
+    output.fillWithSentinelValue();
 
     CpuFpReferenceMoeGroupedMatmul::forward<float, float, float, float>(
         token, weight, offsets, output, Mode::NONE, 0);
@@ -194,9 +196,32 @@ TEST(TestCpuFpReferenceMoeGroupedMatmul, BatchedOffsetsCycleExperts)
     expectTensorValues(output, {1.0F, 2.0F, 4.0F, 3.0F, 5.0F, 6.0F, 8.0F, 7.0F});
 }
 
+// W = [[1, 2], [3, 4]] for one expert: asymmetric, so the two layouts have
+// genuinely different flat contents ({1,2,3,4} row-major vs {1,3,2,4}
+// column-major) and the expected values below only hold if the kernel honours
+// the stride split. Forcing the row-major branch for both makes the
+// column-major case yield {31, 23} instead of {31, 42}.
 TEST(TestCpuFpReferenceMoeGroupedMatmul, ColumnMajorWeightMatchesRowMajor)
 {
-    runNoneModeGroupsTokensByOffset<float>(/*columnMajorWeight=*/true);
+    auto token = createTensor<float>({1, 1, 2});
+    setValues(token, {1.0F, 10.0F});
+    auto offsets = createTensor<int32_t>({1, 1, 1});
+    setValues(offsets, {0});
+
+    auto rowMajorWeight = createTensor<float>({1, 2, 2});
+    setValues(rowMajorWeight, {1.0F, 2.0F, 3.0F, 4.0F});
+    auto rowMajorOutput = createTensor<float>({1, 1, 2});
+    CpuFpReferenceMoeGroupedMatmul::forward<float, float, float, float>(
+        token, rowMajorWeight, offsets, rowMajorOutput, Mode::NONE, 0);
+
+    auto columnMajorWeight = Tensor<float>({1, 2, 2}, {4, 1, 2});
+    setValues(columnMajorWeight, {1.0F, 3.0F, 2.0F, 4.0F});
+    auto columnMajorOutput = createTensor<float>({1, 1, 2});
+    CpuFpReferenceMoeGroupedMatmul::forward<float, float, float, float>(
+        token, columnMajorWeight, offsets, columnMajorOutput, Mode::NONE, 0);
+
+    expectTensorValues(rowMajorOutput, {31.0F, 42.0F});
+    expectTensorValues(columnMajorOutput, {31.0F, 42.0F});
 }
 
 /* ============================= Rejection tests ============================= */

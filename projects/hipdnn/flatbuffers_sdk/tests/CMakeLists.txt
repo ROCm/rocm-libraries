@@ -28,9 +28,9 @@ add_executable(
     utilities/TestApplicabilityUtils.cpp
     utilities/TestFlatbufferUtils.cpp
     utilities/TestJson.cpp
-    utilities/TestPointwiseValidation.cpp
     utilities/TestUuid.cpp
     utilities/TestMoeGroupedMatmulValidation.cpp
+    utilities/TestPointwiseValidation.cpp
 )
 
 target_compile_options(hipdnn_flatbuffers_sdk_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS} ${HIPDNN_NO_RTTI_OPTIONS})
