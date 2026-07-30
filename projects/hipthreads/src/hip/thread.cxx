@@ -406,7 +406,15 @@ static __host__ void prepDeviceForWork() {
     // hipStreamSynchronize until the kernel eventually exits, at which point the thread silently terminates.
     #ifdef _WIN32
         ::std::thread([](){
-            __LIBHIPTHREADS_HIP_CHECK__(hipStreamSynchronize(mainStream));
+            // Don't use __LIBHIPTHREADS_HIP_CHECK__: it throws, and an exception
+            // escaping this detached thread calls std::terminate(). The sync can
+            // legitimately error when threading_main faults/tears down, so log and
+            // swallow it instead of aborting the process.
+            hipError_t error = hipStreamSynchronize(mainStream);
+            if (error != hipSuccess) {
+                ::std::cerr << "[hipthreads] kicker hipStreamSynchronize: "
+                            << hipGetErrorString(error) << " (ignored)\n";
+            }
         }).detach();
     #endif
 }
