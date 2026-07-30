@@ -2061,11 +2061,17 @@ rocKE adapter invocation: the builder, plus the exact build values for that inst
     {"name": "seqlen_q",       "type": "int",     "optional": false},
     {"name": "seqlen_kv",      "type": "int",     "optional": false},
     {"name": "mask_mode",      "type": "string",  "optional": false},
-    // and the tuning axes that vary independently of the graph
+    // and the tuning axes: baked too, but not derivable from the graph, so they are catalog-key
+    // material and heuristic features rather than things a `$kernel.*` criterion pins. Every one
+    // is a real AttentionDenseSpec field the builder bakes, and the defaults are the spec's own,
+    // so a UKD that omits one gets the same binary the builder would have produced anyway.
     {"name": "persistent",     "type": "bool",    "optional": true, "default": false},
     {"name": "num_persistent", "type": "int",     "optional": true, "default": 256},
     {"name": "persist_decode", "type": "string",  "optional": true, "default": "qb_major"},
-    {"name": "block_n",        "type": "int",     "optional": true, "default": 64}
+    {"name": "interleave",     "type": "bool",    "optional": true, "default": false},
+    {"name": "block_n",        "type": "int",     "optional": true, "default": 64},
+    {"name": "waves_per_eu",   "type": "int",     "optional": true, "default": 2},
+    {"name": "lazy_rescale",   "type": "bool",    "optional": true, "default": true}
   ]
 }
 
