@@ -6,16 +6,14 @@
 // compiled into both hipblaslt-test (where it runs in the existing CI lane) and
 // the standalone hipblaslt-client-unit-tests binary (which needs no GPU).
 //
-// Naming carries two selectors, because two different mechanisms may pick these
-// cases up. The `smoke_` prefix on each test name is what matters today: the
-// hipblaslt test lane execs hipblaslt-test directly (see
-// test/therock/test_hipblaslt.py), and the only filter it ever passes is
-// `*smoke*` on the quick tier, so without that prefix these would be skipped
-// exactly where a host-only check is cheapest. This follows the convention
-// already used in tests/src/caching_library_gtest.cpp. The `HostUnit` suite
-// prefix is for the ctest path: it matches the "*HostUnit*" pattern in
-// clients/tests/test_categories.yaml, which takes effect if hipblaslt ever
-// moves to TheRock's generic test_runner.py.
+// The names carry two selectors. The `HostUnit` suite prefix is the one that
+// picks these cases up in PR CI: every tier in clients/tests/test_categories.yaml
+// carries a "*HostUnit*" pattern, and ctest bakes the tier's patterns into the
+// hipblaslt-test entry as a gtest filter. The `smoke_` test-name prefix is
+// belt-and-braces: it keeps the cases selected by test/therock/test_hipblaslt.py,
+// which execs the binary directly with `--gtest_filter=*smoke*` on its quick
+// tier, and it follows the convention already used in
+// tests/src/caching_library_gtest.cpp.
 //
 // Motivated by the PR #6514 review (davidd-amd), observation #2 ("Do we have a
 // plan to start adding unit tests for functions that we are changing that can be
