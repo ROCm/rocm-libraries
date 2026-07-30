@@ -740,7 +740,16 @@ inline const char* special_value_class_name(special_value_class c)
  *  unit/norm checks. The comparison is symmetric on purpose: a finite reference paired with a
  *  non-finite result must fail here, because GoogleTest's ULP-based FLOAT_EQ/DOUBLE_EQ treat the
  *  largest finite value as almost equal to Inf and would otherwise accept that overflow.
- *  Only for FP types that can have Inf/NaN; no-op for others. Run before unit_check so Inf->NaN bugs are reported clearly. */
+ *  Only for FP types that can have Inf/NaN; no-op for others. Run before unit_check so Inf->NaN bugs are reported clearly.
+ *
+ *  PREFERRED DIRECTION for future work (AIHPBLAS-989): this separate traversal is interim. The
+ *  intended end state is for classify_special_value() to be called from the elementwise
+ *  comparison operators themselves, so that equality policy lives in one place: inline in the
+ *  unit_check_general()/near_check_general() element loops, and during the conversion pass in
+ *  norm_check_general(), which still has no defined behavior for matched non-finite entries
+ *  (Inf - Inf is NaN, and a relative norm over an infinite reference is meaningless). That also
+ *  removes the extra O(M*N*batch_count) host traversal this function costs. Please extend that
+ *  path rather than growing this pre-pass. */
 #ifdef GOOGLE_TEST
 template <typename T>
 inline void check_special_value_consistency_impl(int64_t M,

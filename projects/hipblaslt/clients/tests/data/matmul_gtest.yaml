@@ -108,8 +108,10 @@ Tests:
 - {name: alpha_beta_zero_NaN, category: pre_checkin, precision: *real_precisions,
    function: matmul, transA: N, transB: N, M: 256, N: 128, K:  64, alpha: [ .NaN, 2 ], beta: [ .NaN, 2 ] }
 
-# Special floating-point inputs (+0, -0, +Inf, -Inf, NaN) on 64x64, FP types only. Exercises
-# check_special_value_consistency(): CPU and GPU must agree on Inf/NaN (no Inf->NaN).
+# Special floating-point inputs on 64x64, FP types only. The inf, neg_inf and nan cases exercise
+# check_special_value_consistency(): CPU and GPU must agree on the IEEE class (no Inf->NaN).
+# The zero and neg_zero cases are ordinary initialization coverage that flows through the normal
+# unit check; the consistency check does not inspect the sign of zero.
 - name: matmul_special_fp_64x64
   category: pre_checkin
   function:
