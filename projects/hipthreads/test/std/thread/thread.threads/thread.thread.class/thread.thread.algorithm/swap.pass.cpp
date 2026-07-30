@@ -10,9 +10,9 @@
 
 // <thread>
 
-// class thread
+// class wthread
 
-// void swap(thread& x, thread& y);
+// void swap(wthread& x, wthread& y);
 
 #include <hip/thread>
 #include <new>
@@ -51,10 +51,10 @@ int main(int, char**)
 #ifdef __HIP_DEVICE_COMPILE__
     {
         G g;
-        hip::thread t0 = support::make_test_thread(g);
-        hip::thread::id id0 = t0.get_id();
-        hip::thread t1;
-        hip::thread::id id1 = t1.get_id();
+        hip::wthread t0 = support::make_test_thread(g);
+        hip::wthread::id id0 = t0.get_id();
+        hip::wthread t1;
+        hip::wthread::id id1 = t1.get_id();
         hip::std::swap(t0, t1);
         assert(t0.get_id() == id1);
         assert(t1.get_id() == id0);
