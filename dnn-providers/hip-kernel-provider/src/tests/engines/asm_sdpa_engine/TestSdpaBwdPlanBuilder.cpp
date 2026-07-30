@@ -220,7 +220,7 @@ flatbuffers::FlatBufferBuilder createSdpaBwdGraphWithRuntimePbvScale()
     std::vector<flatbuffers::Offset<Node>> nodes;
     nodes.push_back(CreateNodeDirect(builder,
                                      "sdpa_bwd",
-                                     DataType::BFLOAT16,
+                                     DataType::FLOAT,
                                      NodeAttributes::SdpaBackwardAttributes,
                                      sdpaAttributes.Union()));
 
@@ -300,7 +300,7 @@ flatbuffers::FlatBufferBuilder createSdpaBwdGraphWithNonPbvScaleTensor()
     std::vector<flatbuffers::Offset<Node>> nodes;
     nodes.push_back(CreateNodeDirect(builder,
                                      "sdpa_bwd",
-                                     DataType::BFLOAT16,
+                                     DataType::FLOAT,
                                      NodeAttributes::SdpaBackwardAttributes,
                                      sdpaAttributes.Union()));
 
