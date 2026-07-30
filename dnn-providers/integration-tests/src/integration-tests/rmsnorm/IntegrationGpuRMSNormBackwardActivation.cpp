@@ -138,6 +138,7 @@ public:
         }
 
         auto dyDreluTensorAttr = graphObj.pointwise(dyTensorAttr, yTensorAttr, activBwdAttrs);
+        dyDreluTensorAttr->set_data_type(dyType);
 
         graph::RMSNormBackwardAttributes rmsnormBwdAttrs;
         rmsnormBwdAttrs.set_compute_data_type(computeType);
