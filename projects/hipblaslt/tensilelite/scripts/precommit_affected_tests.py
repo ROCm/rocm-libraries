@@ -22,7 +22,7 @@ from pathlib import Path
 
 TL_REL = Path("projects/hipblaslt/tensilelite")
 TESTS_REL = Path("tensilelite/Tests/unit")
-SRC_REL = Path("Tensile")
+SRC_REL = Path("tensilelite")
 
 BROAD_TRIGGER_PARTS = (
     "conftest.py",
@@ -36,7 +36,7 @@ BROAD_TRIGGER_PARTS = (
 MATCH_TOO_MANY_FRACTION = 0.40
 
 IMPORT_MODULE_RE = re.compile(r"""import_module\(\s*["']([\w.]+)["']""")
-DOTTED_STRING_RE = re.compile(r"""["'](Tensile\.[\w.]+)["']""")
+DOTTED_STRING_RE = re.compile(r"""["'](tensilelite\.[\w.]+)["']""")
 
 
 def log(msg: str = "") -> None:
@@ -220,13 +220,13 @@ def classify_staged(tl_staged: list[Path]):
             broad_reasons.append(rel_str)
         elif rel.parts[:1] == ("rocisa",):
             broad_reasons.append(rel_str + " (native ext)")
-        elif rel.parts[:3] == ("Tensile", "Tests", "unit") and rel.name.startswith("test_"):
+        elif rel.parts[:3] == ("tensilelite", "Tests", "unit") and rel.name.startswith("test_"):
             changed_tests.add(rel)
-        elif rel.parts[:2] == ("Tensile", "Tests"):
+        elif rel.parts[:2] == ("tensilelite", "Tests"):
             broad_reasons.append(rel_str + " (test support)")
         elif rel.suffix != ".py":
             ignored.append(rel)
-        elif rel.parts[:1] == ("Tensile",):
+        elif rel.parts[:1] == ("tensilelite",):
             changed_sources.append(rel)
         else:
             ignored.append(rel)
@@ -329,10 +329,21 @@ def main() -> int:
         log(bar)
         return 1
 
+    runtime_root = tl_root / "build_tmp" / "tensilelite-rocm"
+    if not (runtime_root / ".info" / "version").is_file():
+        log("[tensilelite-tests] ERROR: staged ROCm runtime is missing.")
+        log("    Run: invoke build-client --gpu-targets <gfx target>")
+        return 1
+    test_env = os.environ.copy()
+    test_env["ROCM_PATH"] = str(runtime_root)
+
     # --no-sync: use the provisioned .venv without rewriting uv.lock mid-commit.
     # -n 8: fixed; -n auto = os.cpu_count() over-subscribes large CI/dev hosts.
-    argv = ["uv", "run", "--no-sync", "pytest", "-q", "-ra", "-n", "8", *nodes]
-    result = subprocess.run(argv, cwd=tl_root)
+    argv = [
+        "uv", "run", "--no-sync", "pytest", "--snapshot-warn-unused",
+        "-q", "-ra", "-n", "8", *nodes,
+    ]
+    result = subprocess.run(argv, cwd=tl_root, env=test_env)
     rc = result.returncode
     if rc == 5:  # pytest: no tests collected
         log("[tensilelite-tests] no tests collected (treated as pass)")
@@ -343,7 +354,10 @@ def main() -> int:
 
     bar = "=" * 64
     update_targets = failed_test_files(tl_root) or nodes
-    update_cmd = "uv run --no-sync pytest --snapshot-update " + " ".join(update_targets)
+    update_cmd = (
+        f"ROCM_PATH={runtime_root} uv run --no-sync pytest --snapshot-update "
+        + " ".join(update_targets)
+    )
     log("")
     log(bar)
     log("  X  TENSILELITE TESTS FAILED (rc=%d) -- COMMIT BLOCKED" % rc)
