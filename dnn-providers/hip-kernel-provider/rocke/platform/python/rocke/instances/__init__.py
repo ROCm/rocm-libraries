@@ -86,6 +86,14 @@ from .common.conv_implicit_gemm import (  # noqa: F401
     make_b_descriptor,
     make_d_descriptor,
 )
+from .common.conv_implicit_gemm_wgrad import (  # noqa: F401
+    WgradConvSpec,
+    build_implicit_gemm_conv_wgrad,
+    is_valid_wgrad_spec,
+    make_dy_descriptor,
+    make_dw_descriptor,
+    make_x_wgrad_descriptor,
+)
 from .common.gemm_universal import (  # noqa: F401
     DataSpec,
     Epilogue,

@@ -66,5 +66,7 @@
 #  include "impl/uninitialized.hpp"
 // Math library implementation
 #  include "impl/math_lib.hpp"
+// Global variable interposition
+#  include "impl/global_interposition.hpp"
 
 #endif
