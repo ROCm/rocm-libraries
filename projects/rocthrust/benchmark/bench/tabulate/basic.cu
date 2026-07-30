@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2024, NVIDIA CORPORATION. All rights reserved.
- * Modifications Copyright (c) 2024-2025, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2024-2026, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -124,10 +124,9 @@ void run_benchmark(benchmark::State& state, const std::size_t elements, const st
   }
 
 template <class Benchmark>
-void add_benchmarks(
-  const std::string& name, std::vector<benchmark::internal::Benchmark*>& benchmarks, const std::string seed_type)
+void add_benchmarks(const std::string& name, std::vector<benchmark::Benchmark*>& benchmarks, const std::string seed_type)
 {
-  std::vector<benchmark::internal::Benchmark*> bs;
+  std::vector<benchmark::Benchmark*> bs;
   BENCHMARK_TYPE(uint32_t)
   BENCHMARK_TYPE(uint64_t)
 
@@ -151,7 +150,7 @@ int main(int argc, char* argv[])
   benchmark::AddCustomContext("seed", seed_type);
 
   // Add benchmark
-  std::vector<benchmark::internal::Benchmark*> benchmarks;
+  std::vector<benchmark::Benchmark*> benchmarks;
   add_benchmarks<basic>("basic", benchmarks, seed_type);
 
   // Use manual timing

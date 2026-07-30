@@ -1,6 +1,6 @@
 ################################################################################
 #
-# Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -35,7 +35,7 @@ from Tensile.SolutionStructs.Problem import ProblemType
 
 from .CustomKernels import getAllCustomKernelNames
 from .SolutionStructs import ProblemSizes, ActivationArgs, BiasTypeArgs, \
-        FactorDimArgs
+        FactorDimArgs, GateTypeArgs
 
 
 def getDefaultsForMissingParameters(paramList, defaultParams):
@@ -214,6 +214,7 @@ class BenchmarkProcess:
         biasTypesConf  = ""
         factorDimConf  = ""
         icacheFlush = None
+        gateTypesConf = ""
         if "BenchmarkFinalParameters" in config:
             sizes          = config["BenchmarkFinalParameters"][0]["ProblemSizes"]
             for bfp in config["BenchmarkFinalParameters"][1:]:
@@ -233,6 +234,10 @@ class BenchmarkProcess:
                   if icacheFlush is not None:
                     printExit("Duplicated ICacheFlush.")
                   icacheFlush = bfp["ICacheFlush"]
+                if "GateTypeArgs" in bfp:
+                  if gateTypesConf:
+                    printExit("Duplicated GateTypeArgs.")
+                  gateTypesConf = bfp["GateTypeArgs"]                  
         else:
             sizes = defaultBatchedBenchmarkFinalProblemSizes if isbatched \
                 else defaultBenchmarkFinalProblemSizes
@@ -247,6 +252,7 @@ class BenchmarkProcess:
         self.activationArgs = ActivationArgs(self.problemType, activationConf)
         self.factorDimArgs  = FactorDimArgs(self.problemType, factorDimConf)
         self.icacheFlushArgs = icacheFlush
+        self.gateTypesArgs = GateTypeArgs(self.problemType, gateTypesConf)
 
         commonPrefix = f"{keyPathPrefix}.BenchmarkCommonParameters" if keyPathPrefix \
                        else "BenchmarkCommonParameters"
@@ -314,7 +320,8 @@ class BenchmarkProcess:
                 self.factorDimArgs, \
                 self.activationArgs, \
                 self.icacheFlushArgs, \
-                self.benchmarkStepIdx)
+                self.benchmarkStepIdx, \
+                gateTypeArgs=self.gateTypesArgs)
         self.benchmarkSteps.append(benchmarkStep)
         self.benchmarkStepIdx += 1
 
@@ -385,7 +392,7 @@ def constructLazyForkPermutations(forkParams, paramGroups):
 class BenchmarkStep:
     """A single benchmark step which consists of constant and fork parameters and a set of sizes"""
 
-    def __init__(self, forkParams, constantParams, paramGroups, customKernels, internalSupportParams, problemSizes, biasTypeArgs, factorDimArgs, activationArgs, icacheFlushArgs, idx):
+    def __init__(self, forkParams, constantParams, paramGroups, customKernels, internalSupportParams, problemSizes, biasTypeArgs, factorDimArgs, activationArgs, icacheFlushArgs, idx, gateTypeArgs=None):
         """Basic constructor storing each argument"""
         self.forkParams = forkParams
         self.constantParams = constantParams
@@ -397,6 +404,7 @@ class BenchmarkStep:
         self.factorDimArgs = factorDimArgs
         self.activationArgs = activationArgs
         self.icacheFlushArgs = icacheFlushArgs
+        self.gateTypeArgs = gateTypeArgs
         self.stepIdx = idx
 
         self.customKernelWildcard = False

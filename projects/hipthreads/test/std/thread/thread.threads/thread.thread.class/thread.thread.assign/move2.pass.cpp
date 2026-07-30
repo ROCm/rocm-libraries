@@ -10,9 +10,9 @@
 
 // <thread>
 
-// class thread
+// class wthread
 
-// thread& operator=(thread&& t);
+// wthread& operator=(wthread&& t);
 
 #include <hip/thread>
 #include <hip/__support/misuse.h>
@@ -44,8 +44,8 @@ int main(int, char**)
         hip::__hipthreads_misuse_nonfatal = true;
 
         G g;
-        hip::thread t0 = support::make_test_thread(g);
-        hip::thread t1;
+        hip::wthread t0 = support::make_test_thread(g);
+        hip::wthread t1;
 
         unsigned int before = hip::__hipthreads_misuse_count;
         t0 = ::std::move(t1);                       // misuse: t0 is joinable
