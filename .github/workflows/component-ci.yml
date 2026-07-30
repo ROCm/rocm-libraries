@@ -70,7 +70,6 @@ jobs:
     with:
       docker_image: ${{ needs.changes.outputs.docker-image }}
       linux_runner: ${{ needs.changes.outputs.linux-runner }}
-      windows_runner: ${{ needs.changes.outputs.windows-runner }}
 
   miopen:
     name: "MIOpen"

@@ -37,7 +37,6 @@ subtree_to_project_map = {
     "shared/rocroller": "rocroller",
     "shared/stinkytofu": "blas",
     "shared/tensile": "blas",
-    "projects/hipblaslt/utilities/geko": "blas",
 }
 
 project_map = {
