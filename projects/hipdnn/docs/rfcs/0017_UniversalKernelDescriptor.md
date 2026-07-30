@@ -202,16 +202,15 @@ existing registration restructures how engines are organized, not merely describ
 two sides: the host object is what a caller holds, an engine plus the knob settings it runs with for
 one graph, and a UED is the provider-side definition that engine is built from, its identity,
 heuristic, metadata schema, and the fields it exposes as knobs. The knobs a caller sets through the
-host object are exactly the KMD fields the UED chose to expose. This document uses "UED" for the
-descriptor file, and "engine descriptor" only for the host object.
+host object are exactly the KMD fields the UED chose to expose.
 
 A UKD carries only source details and metadata values, inheriting how it applies, launches, is
-ranked, and its schema from its KDP and that KDP's engine ([Section 1](#1-overview)). The KDP's one UDD holds one or
-more **Launches**, each a dispatch step paired at runtime with the UKD source that fills it: a simple
-kernel is a one-Launch UDD, and a multi-launch kernel such as SDPA backward is a several-Launch UDD
-run in order ([Section 15](#15-multiple-kernels-and-composition)). The remaining term is the **UCD
-(Universal Composite Descriptor)**, which splits a graph into child graphs, each satisfied by an
-engine (future work, [Section 15](#15-multiple-kernels-and-composition)).
+ranked, and its schema from its KDP and that KDP's engine ([Section 1](#1-overview)). The KDP's one
+UDD holds one or more **Launches**, each a dispatch step paired at runtime with the UKD source that
+fills it: a simple kernel is a one-Launch UDD, and a multi-launch kernel such as SDPA backward is a
+several-Launch UDD run in order ([Section 15](#15-multiple-kernels-and-composition)). The remaining
+term is the **UCD (Universal Composite Descriptor)**, which splits a graph into child graphs, each
+satisfied by an engine (future work, [Section 15](#15-multiple-kernels-and-composition)).
 
 ![How the descriptors relate: an engine owning one heuristic and one metadata schema; a KDP binding a matcher set, that engine, and one UDD over a vector of child kernels](../images/ukd_concepts.svg)
 
