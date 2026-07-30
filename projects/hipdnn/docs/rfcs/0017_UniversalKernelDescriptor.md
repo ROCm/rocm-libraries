@@ -1344,17 +1344,12 @@ a self-contained generator can be build-and-runtime. Runtime JIT of source is a 
 ([Section 9.3](#93-future-jit-and-normalized-providers)).
 
 The rocKE prototype ([PR #9207](https://github.com/ROCm/rocm-libraries/pull/9207)) is the first
-concrete case and gets its own **build-only** kernel-source adapter, the `rocke` source kind of
-[Section 7](#7-kernel-source). A rocKE kernel is a Python builder function that emits IR from a
-frozen spec: the adapter must call it to produce a code object, and one builder yields a
-different code object for every spec it is called with. The adapter takes both halves, the
-builder (`source` plus `entry`) and the explicit `build` values for one instance, calls the
-builder, runs the rocKE AOT compile, and packs the resulting code object. Every UKD in a pack
-names the same builder and differs only in its `build` values, so the pack's kernel vector *is*
-the AOT build list: the set of instances to compile is derived from the descriptors instead of
-maintained beside them, and a kernel that is catalogued but never built is a build-time error, not
-a load-time surprise. The artifact's name is the adapter's business, not the author's; this is the
-adapter migrated in the first implementation work ([Section 14](#14-phased-delivery)).
+concrete case, the **build-only** `rocke` source kind of [Section 7](#7-kernel-source). A rocKE
+kernel is a Python builder that emits IR from a frozen spec, so the adapter takes the builder
+(`source` plus `entry`) and the `build` values for one instance, calls it, runs the rocKE AOT
+compile, and packs the resulting code object. Every UKD in a pack names the same builder and
+differs only in its `build` values, so the pack's kernel vector *is* the AOT build list: what gets
+compiled is derived from the descriptors instead of tracked beside them.
 
 ### 9.2 Heuristic Adapters
 
