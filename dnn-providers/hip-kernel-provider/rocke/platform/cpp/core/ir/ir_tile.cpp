@@ -16,53 +16,25 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "rocke/arch_target.h"
 #include "rocke/ir_internal.h"
 
 /* ===================================================================== */
-/*  target-neutral MMA metadata (mirrors the module-level tables in       */
-/*  ir.py: _MMA_C_FRAG_LEN, _MMA_C_INT_OP_IDS, _MMA_RESULT_HINT).         */
+/*  target-neutral MMA metadata                                          */
 /* ===================================================================== */
-
-typedef struct
-{
-    const char* op_id;
-    int c_frag_len;
-} rocke_mma_frag_row_t;
-
-/* op_id -> per-lane accumulator/result fragment length. */
-static const rocke_mma_frag_row_t ROCKE_MMA_C_FRAG_LEN[] = {
-    {"mfma_f32_16x16x4_f32", 4},
-    {"mfma_f32_32x32x2_f32", 16},
-    {"mfma_f32_16x16x16_f16", 4},
-    {"mfma_f32_16x16x32_f16", 4},
-    {"mfma_f32_16x16x16_bf16", 4},
-    {"mfma_f32_16x16x32_bf16", 4},
-    {"mfma_f32_16x16x32_fp8", 4},
-    {"mfma_f32_16x16x32_bf8", 4},
-    {"mfma_f32_32x32x8_f16", 16},
-    {"mfma_f32_32x32x16_f16", 16},
-    {"mfma_f32_32x32x8_bf16", 16},
-    {"mfma_f32_32x32x16_bf16", 16},
-    {"mfma_f32_32x32x16_fp8", 16},
-    {"mfma_f32_32x32x16_bf8", 16},
-    {"mfma_f32_4x4x4_f16", 4},
-    {"mfma_f32_16x16x128_fp4", 4},
-    {"mfma_f32_16x16x96_fp6", 4},
-    {"mfma_f32_16x16x128_fp8", 4},
-    {"mfma_scale_f32_16x16x128_f8f6f4", 4},
-    {"wmma_f32_16x16x16_f16", 8},
-    {"wmma_f32_16x16x16_bf16", 8},
-    {"wmma_i32_16x16x16_iu8", 8},
-    {"wmma_i32_16x16x16_iu4", 8},
-    {"wmma_gfx12_f32_16x16x16_f16", 8},
-    {"wmma_gfx12_f32_16x16x16_bf16", 8},
-};
-
-/* op_ids that accumulate in i32 (integer WMMA atoms). */
-static const char* const ROCKE_MMA_C_INT_OP_IDS[] = {
-    "wmma_i32_16x16x16_iu8",
-    "wmma_i32_16x16x16_iu4",
-};
+/*
+ * rocke_b_mma emits a single tile.mma op keyed by op_id; the ISA backend lowers
+ * that op_id to the matching MFMA/WMMA call. To size the result vector it needs
+ * the accumulator fragment length and dtype for the atom. Both come from the
+ * arch SSOT (core/arch/target): frag lengths from rocke_arch_mma_c_frag_len (the
+ * _MMA_FRAGMENT_INFO projection) and the accumulator dtype from
+ * rocke_arch_mma_op_id_c_dtype (the JSON catalog aggregation). This bucket keeps
+ * NO private copy of that data, mirroring ir.py after it dropped _MMA_C_FRAG_LEN
+ * / _MMA_C_INT_OP_IDS.
+ *
+ * ROCKE_MMA_RESULT_HINT below is purely ir-side SSA naming (not arch data), kept
+ * here so the emitted value numbering stays byte-identical.
+ */
 
 /* op_id -> result_name_hint override (default "acc"). */
 typedef struct
@@ -79,39 +51,20 @@ static const rocke_mma_hint_row_t ROCKE_MMA_RESULT_HINT[] = {
     {"mfma_scale_f32_16x16x128_f8f6f4", "mxacc"},
 };
 
-/* Returns the c_frag_len for op_id, or -1 if unknown. */
+/* Accumulator fragment length for op_id, from the arch SSOT
+ * (target._frag_info(op_id).c_frag_len). Returns <= 0 for an unknown atom (the
+ * zero-length _frag_info fallback), which rocke_b_mma reports as an error. */
 static int rocke_mma_c_frag_len(const char* op_id)
 {
-    size_t i;
-    if(!op_id)
-    {
-        return -1;
-    }
-    for(i = 0; i < sizeof(ROCKE_MMA_C_FRAG_LEN) / sizeof(ROCKE_MMA_C_FRAG_LEN[0]); ++i)
-    {
-        if(strcmp(ROCKE_MMA_C_FRAG_LEN[i].op_id, op_id) == 0)
-        {
-            return ROCKE_MMA_C_FRAG_LEN[i].c_frag_len;
-        }
-    }
-    return -1;
+    return rocke_arch_mma_c_frag_len(op_id);
 }
 
+/* True when op_id accumulates in i32 (integer WMMA), from the arch catalog SSOT
+ * (target._op_id_c_dtype()[op_id] == "i32"). */
 static bool rocke_mma_is_int_acc(const char* op_id)
 {
-    size_t i;
-    if(!op_id)
-    {
-        return false;
-    }
-    for(i = 0; i < sizeof(ROCKE_MMA_C_INT_OP_IDS) / sizeof(ROCKE_MMA_C_INT_OP_IDS[0]); ++i)
-    {
-        if(strcmp(ROCKE_MMA_C_INT_OP_IDS[i], op_id) == 0)
-        {
-            return true;
-        }
-    }
-    return false;
+    const char* c_dtype = rocke_arch_mma_op_id_c_dtype(op_id);
+    return c_dtype != NULL && strcmp(c_dtype, ROCKE_DTYPE_I32) == 0;
 }
 
 static const char* rocke_mma_result_hint(const char* op_id)
@@ -199,24 +152,46 @@ static rocke_value_t** rocke_build_mem_operands(rocke_ir_builder_t* b,
 /*  LDS (shared memory) -- alloc                                          */
 /* ===================================================================== */
 
+rocke_value_t* rocke_b_smem_alloc_ex(rocke_ir_builder_t* b,
+                                     const rocke_type_t* elem,
+                                     const int* shape,
+                                     int rank,
+                                     const char* name_hint,
+                                     int exclusive)
+{
+    const rocke_type_t* t;
+    rocke_attr_map_t attrs;
+    const rocke_attr_map_t* attrs_p = NULL;
+    if(!rocke_i_live(b))
+    {
+        return NULL;
+    }
+    t = rocke_smem_type(b, elem, shape, rank, exclusive);
+    if(!t)
+    {
+        return NULL;
+    }
+    /* Carry the exclusive bit as an op attr so it round-trips through the
+     * ck.dsl.ir/v1 serializer (the type name deliberately omits it). Only
+     * emitted when set, so the default stays byte-identical. Ignored by the
+     * native .ll lowering (which reads the SmemType's smem_exclusive). */
+    if(exclusive)
+    {
+        attrs = rocke_i_attrs(b);
+        rocke_attr_set_bool(b, &attrs, "exclusive", true);
+        attrs_p = &attrs;
+    }
+    return rocke_i_op1(
+        b, ROCKE_OP_TILE_SMEM_ALLOC, NULL, 0, t, attrs_p, name_hint ? name_hint : "smem");
+}
+
 rocke_value_t* rocke_b_smem_alloc(rocke_ir_builder_t* b,
                                   const rocke_type_t* elem,
                                   const int* shape,
                                   int rank,
                                   const char* name_hint)
 {
-    const rocke_type_t* t;
-    if(!rocke_i_live(b))
-    {
-        return NULL;
-    }
-    t = rocke_smem_type(b, elem, shape, rank);
-    if(!t)
-    {
-        return NULL;
-    }
-    return rocke_i_op1(
-        b, ROCKE_OP_TILE_SMEM_ALLOC, NULL, 0, t, NULL, name_hint ? name_hint : "smem");
+    return rocke_b_smem_alloc_ex(b, elem, shape, rank, name_hint, 0);
 }
 
 /* ===================================================================== */
@@ -592,10 +567,11 @@ rocke_value_t* rocke_b_mma(rocke_ir_builder_t* b,
         return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "mma op_id is NULL");
     }
     /* C has no MmaOp object; op_id is always a bare string, so the frag length
-     * and accumulator element come from the static op_id table (the Python
-     * bare-string code path). */
+     * and accumulator element are resolved from the arch SSOT (the Python
+     * bare-string code path). A <= 0 frag length means the op_id is unknown to
+     * the SSOT (the zero-length _frag_info fallback). */
     c_frag_len = rocke_mma_c_frag_len(op_id);
-    if(c_frag_len < 0)
+    if(c_frag_len <= 0)
     {
         return (rocke_value_t*)rocke_i_set_err(
             b, ROCKE_ERR_VALUE, "unknown MMA op_id '%s'; pass a known mfma_*/wmma_* op_id", op_id);

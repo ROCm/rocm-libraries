@@ -65,63 +65,19 @@ NON_TEMPORAL = 3  # GLC + SLC — bypass cache hierarchy entirely.
 # ----- target-neutral MMA metadata ---------------------------------------
 #
 # ``IRBuilder.mma`` emits a single ``tile.mma`` op keyed by ``op_id``; the ISA
-# backend lowers that op_id to the matching MFMA/WMMA call. To stay BYTE-
-# IDENTICAL with the historical ISA-named emission, ``mma`` must size the result
-# vector and pick the result-name hint exactly as the legacy method did. These
-# tables encode both, keyed by op_id.
-#
-# ``_MMA_C_FRAG_LEN`` is duplicated here (rather than imported from
-# ``core/arch``) so ``ir.py`` stays free of an ``arch`` import when a caller
-# passes a bare op_id string; an ``MmaOp`` object always supplies its own
-# ``c_frag_len`` and bypasses this table.
-_MMA_C_FRAG_LEN: Dict[str, int] = {
-    "mfma_f32_16x16x4_f32": 4,
-    "mfma_f32_32x32x2_f32": 16,
-    "mfma_f32_16x16x16_f16": 4,
-    "mfma_f32_16x16x32_f16": 4,
-    "mfma_f32_16x16x16_bf16": 4,
-    "mfma_f32_16x16x32_bf16": 4,
-    "mfma_f32_16x16x32_fp8": 4,
-    "mfma_f32_16x16x32_bf8": 4,
-    "mfma_f32_32x32x8_f16": 16,
-    "mfma_f32_32x32x16_f16": 16,
-    "mfma_f32_32x32x8_bf16": 16,
-    "mfma_f32_32x32x16_bf16": 16,
-    "mfma_f32_32x32x16_fp8": 16,
-    "mfma_f32_32x32x16_bf8": 16,
-    "mfma_f32_4x4x4_f16": 4,
-    "mfma_f32_16x16x128_fp4": 4,
-    "mfma_f32_16x16x96_fp6": 4,
-    "mfma_f32_16x16x128_fp8": 4,
-    "mfma_scale_f32_16x16x128_f8f6f4": 4,
-    "wmma_f32_16x16x16_f16": 8,
-    "wmma_f32_16x16x16_bf16": 8,
-    "wmma_i32_16x16x16_iu8": 8,
-    "wmma_i32_16x16x16_iu4": 8,
-    "wmma_gfx12_f32_16x16x16_f16": 8,
-    "wmma_gfx12_f32_16x16x16_bf16": 8,
-    "wmma_gfx1250_f32_16x16x32_f16": 8,
-    "wmma_gfx1250_f32_16x16x32_bf16": 8,
-    "wmma_gfx1250_f32_16x16x64_fp8_fp8": 8,
-    "wmma_gfx1250_f32_16x16x64_fp8_bf8": 8,
-    "wmma_gfx1250_f32_16x16x64_bf8_fp8": 8,
-    "wmma_gfx1250_f32_16x16x64_bf8_bf8": 8,
-}
+# backend lowers that op_id to the matching MFMA/WMMA call. To size the result
+# vector, ``mma`` needs the accumulator fragment length and dtype for the atom.
+# Both are read from the arch SSOT (``core/arch/target``): fragment lengths from
+# ``_MMA_FRAGMENT_INFO`` and the accumulator dtype from the JSON catalog. ir.py
+# keeps *no* private copy of that data — an ``MmaOp`` object supplies both fields
+# directly, and a bare op_id string is resolved through the lazy helpers below.
+# The arch package is imported lazily (inside the helpers) so ir.py stays
+# importable without eagerly loading the arch tree.
 
-# op_id -> accumulator/result *element* type. Float atoms accumulate in f32;
-# integer WMMA atoms (iu8/iu4) accumulate in i32. Used by ``IRBuilder.mma`` to
-# size the result vector element type when ``op`` is a bare op_id string; an
-# ``MmaOp`` object supplies its ``c_dtype`` directly and bypasses this table.
-_MMA_C_INT_OP_IDS = frozenset(
-    {
-        "wmma_i32_16x16x16_iu8",
-        "wmma_i32_16x16x16_iu4",
-    }
-)
-
-# op_id -> the ``result_name_hint`` the legacy ISA-named method used. Most atoms
-# used "acc"; a handful used distinct hints that must be preserved verbatim so
-# the SSA value numbering (and thus the emitted text) is unchanged.
+# op_id -> the ``result_name_hint`` the legacy ISA-named method used. This is
+# purely ir-side SSA naming (not arch data), kept here so the emitted value
+# numbering stays byte-identical. Most atoms used "acc"; a handful used distinct
+# hints that must be preserved verbatim.
 _MMA_RESULT_HINT: Dict[str, str] = {
     "mfma_f32_32x32x16_bf16": "acc32",
     "mfma_f32_16x16x128_fp4": "acc4",
@@ -132,13 +88,33 @@ _MMA_RESULT_HINT: Dict[str, str] = {
 
 
 def _mma_c_frag_len(op_id: str) -> int:
-    try:
-        return _MMA_C_FRAG_LEN[op_id]
-    except KeyError:
+    """Accumulator fragment length for ``op_id`` from the arch SSOT.
+
+    Resolved through ``core/arch/target._MMA_FRAGMENT_INFO`` (imported lazily);
+    ir.py holds no private copy. Unknown op_ids (frag length 0) raise, matching
+    the strictness callers relied on.
+    """
+    from rocke.core.arch import target as _arch
+
+    frag_len = _arch._frag_info(op_id).c_frag_len
+    if frag_len <= 0:
         raise ValueError(
             f"unknown MMA op_id {op_id!r}; pass an MmaOp or one of "
-            f"{sorted(_MMA_C_FRAG_LEN)}"
+            f"{sorted(_arch._MMA_FRAGMENT_INFO)}"
         )
+    return frag_len
+
+
+def _mma_c_is_int(op_id: str) -> bool:
+    """True when ``op_id`` accumulates in i32 (integer WMMA).
+
+    Sourced from the arch catalog's accumulator dtype
+    (``core/arch/data/arch_specs.json`` via ``target._op_id_c_dtype``), imported
+    lazily. Op_ids absent from the catalog default to the f32 accumulator.
+    """
+    from rocke.core.arch import target as _arch
+
+    return _arch._op_id_c_dtype().get(op_id) == "i32"
 
 
 @dataclass(frozen=True)
@@ -167,13 +143,22 @@ class PtrType(Type):
 class SmemType(Type):
     elem: Type
     shape: Tuple[int, ...]
+    # When True, the smem-pool packer must give this allocation its own
+    # byte range (never reuse another allocation's slot, and never be reused).
+    # Used by the cshuffle "no-alias" mode so the C tile does not overlap the
+    # A/B staging bytes. Deliberately kept OUT of ``name`` so the LLVM type
+    # text is unchanged for the default (exclusive=False) case -> byte-identical.
+    exclusive: bool = False
 
-    def __init__(self, elem: Type, shape: Sequence[int]) -> None:
+    def __init__(
+        self, elem: Type, shape: Sequence[int], exclusive: bool = False
+    ) -> None:
         shape = tuple(int(x) for x in shape)
         s = "x".join(str(x) for x in shape)
         object.__setattr__(self, "name", f"smem<{elem.name}, [{s}]>")
         object.__setattr__(self, "elem", elem)
         object.__setattr__(self, "shape", shape)
+        object.__setattr__(self, "exclusive", exclusive)
 
 
 # ----------------------------- Values / Ops ------------------------------
@@ -535,6 +520,20 @@ class IRBuilder:
 
     def exp2(self, a: Value) -> Value:
         return self._op("math.exp2", [a], [a.type], result_name_hint="exp2").result
+
+    def exp2_fast(self, a: Value) -> Value:
+        """Native single-instruction base-2 exp: ``llvm.amdgcn.exp2.f32`` -> one
+        ``v_exp_f32``. Unlike ``exp2`` (``llvm.exp2.f32``), it emits NO
+        overflow/underflow guard (the ~5-VALU range-reduction clamp), so the
+        caller must guarantee the argument stays in the hardware's valid range.
+
+        Safe for softmax where the argument is always <= 0 (``s - m_new`` and
+        ``m_i - m_new``): no overflow, and ``v_exp_f32`` already flushes large
+        negatives to 0. Matches FlyDSL's ``rocdl.exp2`` emission. f32 only.
+        """
+        return self._op(
+            "math.exp2_fast", [a], [a.type], result_name_hint="exp2f"
+        ).result
 
     def log2(self, a: Value) -> Value:
         return self._op("math.log2", [a], [a.type], result_name_hint="log2").result
@@ -1051,6 +1050,41 @@ class IRBuilder:
             result_name_hint="atom_bf16",
         ).result
 
+    def global_atomic_add_pk_f16(
+        self,
+        ptr: Value,
+        idx: Value,
+        value: Value,
+        *,
+        ordering: str = "monotonic",
+    ) -> Value:
+        """Packed-fp16 atomic add: two fp16 lanes per transaction.
+
+        Lowers to AMDGPU's ``llvm.amdgcn.global.atomic.fadd.v2f16``
+        intrinsic (gfx940+); returns the pre-add value. ``value``
+        must be a ``<2 x f16>`` vector and the pointer must reach
+        into an fp16 buffer with an even element index.
+        """
+        if ordering not in ("monotonic", "acquire", "release", "acq_rel", "seq_cst"):
+            raise ValueError(f"unknown ordering {ordering!r}")
+        if not isinstance(value.type, VectorType):
+            raise ValueError(
+                f"global_atomic_add_pk_f16 expects <2 x f16> input, "
+                f"got {value.type.name}"
+            )
+        if value.type.elem != F16 or value.type.count != 2:
+            raise ValueError(
+                f"global_atomic_add_pk_f16 expects <2 x f16> input, "
+                f"got {value.type.name}"
+            )
+        return self._op(
+            "memref.global_atomic_add_pk_f16",
+            [ptr, idx, value],
+            [value.type],
+            attrs={"elem_type": "f16", "vec": 2, "ordering": ordering},
+            result_name_hint="atom_f16",
+        ).result
+
     def fp16_zero(self) -> Value:
         return self._op(
             "arith.constant",
@@ -1129,11 +1163,23 @@ class IRBuilder:
     # ----- memory -----
 
     def smem_alloc(
-        self, elem: Type, shape: Sequence[int], name_hint: str = "smem"
+        self,
+        elem: Type,
+        shape: Sequence[int],
+        name_hint: str = "smem",
+        exclusive: bool = False,
     ) -> Value:
-        t = SmemType(elem, shape)
+        t = SmemType(elem, shape, exclusive=exclusive)
+        # The smem type name deliberately omits ``exclusive``; carry it as an op
+        # attr so it round-trips through the ck.dsl.ir/v1 serializer (whose type
+        # reconstruction is name-only). Only emitted when set -> the default
+        # (exclusive=False) serialized form is unchanged / byte-identical.
+        attrs = {"exclusive": True} if exclusive else None
         return self._op(
-            "tile.smem_alloc", result_types=[t], result_name_hint=name_hint
+            "tile.smem_alloc",
+            result_types=[t],
+            attrs=attrs,
+            result_name_hint=name_hint,
         ).result
 
     def global_load(
@@ -1167,6 +1213,15 @@ class IRBuilder:
 
     def global_load_bf16(self, ptr: Value, idx: Value, *, align: int = 2) -> Value:
         return self.global_load(ptr, idx, BF16, align=align)
+
+    def global_load_i8(self, ptr: Value, idx: Value, *, align: int = 1) -> Value:
+        return self.global_load(ptr, idx, I8, align=align)
+
+    def global_load_i16(self, ptr: Value, idx: Value, *, align: int = 2) -> Value:
+        return self.global_load(ptr, idx, I16, align=align)
+
+    def global_load_bf8e5m2(self, ptr: Value, idx: Value, *, align: int = 1) -> Value:
+        return self.global_load(ptr, idx, BF8E5M2, align=align)
 
     def global_load_fp8e4m3(self, ptr: Value, idx: Value, *, align: int = 1) -> Value:
         return self.global_load(ptr, idx, FP8E4M3, align=align)
@@ -1544,11 +1599,9 @@ class IRBuilder:
         )
         # Accumulator element type: integer WMMA atoms (iu8/iu4) accumulate in
         # i32; everything else in f32. Prefer the atom's own c_dtype when ``op``
-        # is an MmaOp, else fall back to the op_id table.
+        # is an MmaOp, else resolve from the arch SSOT via op_id.
         c_dtype = getattr(op, "c_dtype", None)
-        is_int_acc = (
-            c_dtype == "i32" if c_dtype is not None else op_id in _MMA_C_INT_OP_IDS
-        )
+        is_int_acc = c_dtype == "i32" if c_dtype is not None else _mma_c_is_int(op_id)
         c_elem = I32 if is_int_acc else F32
         hint = _MMA_RESULT_HINT.get(op_id, "acc")
         return self._op(
@@ -3551,6 +3604,7 @@ PURE_OP_NAMES = {
     "arith.sitofp_f32",
     "arith.cvt_fp8_to_f32",
     "math.exp2",
+    "math.exp2_fast",
     "math.log2",
     "math.rcp",
     "math.rcp_fast",

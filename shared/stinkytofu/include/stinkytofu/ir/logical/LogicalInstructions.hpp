@@ -84,9 +84,11 @@ class LogicalInstruction : public IRBase {
     std::string comment;                ///< Optional comment
 
     // Instruction modifiers (optional, only used by specific instructions)
-    std::optional<DPPModifiers> dpp;    ///< Data parallel processing modifier
-    std::optional<SDWAModifiers> sdwa;  ///< Sub-dword addressing modifier
-    std::optional<DSModifiers> ds;      ///< LDS/GDS modifier
+    std::optional<DPPModifiers> dpp;      ///< Data parallel processing modifier
+    std::optional<SDWAModifiers> sdwa;    ///< Sub-dword addressing modifier
+    std::optional<DSModifiers> ds;        ///< LDS/GDS modifier
+    std::optional<MUBUFModifiers> mubuf;  ///< MUBUF (buffer load/store) modifier
+    std::optional<VOP3PModifiers> vop3;   ///< VOP3P (op_sel) modifier
 
     /// LLVM-style casting support
     static bool classof(const IRBase* ir) {
@@ -286,6 +288,20 @@ class LogicalInstruction : public IRBase {
     }
 
     /**
+     * @brief Get SWaitAlu data (returns nullptr if not SWaitAlu)
+     */
+    SWaitAluLogicalData* asSWaitAlu() {
+        return (opcode_ == logical::SWaitAlu) ? static_cast<SWaitAluLogicalData*>(specialData_)
+                                              : nullptr;
+    }
+
+    const SWaitAluLogicalData* asSWaitAlu() const {
+        return (opcode_ == logical::SWaitAlu)
+                   ? static_cast<const SWaitAluLogicalData*>(specialData_)
+                   : nullptr;
+    }
+
+    /**
      * @brief Get Label data (returns nullptr if not Label)
      */
     LogicalLabelData* asLabel() {
@@ -333,6 +349,12 @@ class LogicalInstruction : public IRBase {
                 break;
             case logical::IntrinsicCall:
                 delete static_cast<IntrinsicCallData*>(specialData_);
+                break;
+            case logical::SWaitAlu:
+                delete static_cast<SWaitAluLogicalData*>(specialData_);
+                break;
+            case logical::SchedulingFence:
+                // No special data for SchedulingFence
                 break;
             default:
                 // No special data for regular instructions

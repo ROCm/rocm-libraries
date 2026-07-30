@@ -235,6 +235,20 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
         install(FILES "${CMAKE_CURRENT_BINARY_DIR}/rocisa/_build_info.py" DESTINATION rocisa)
     endif()
 
+    # Windows: emit the resolved runtime DLL dependencies so __init__.py can
+    # register their directories via os.add_dll_directory(). Since Python 3.8 the
+    # extension loader ignores PATH, and in a source/integrated build _rocisa's
+    # deps (origami, hip, comgr, stinkytofu) live in scattered per-subproject
+    # directories. TARGET_RUNTIME_DLLS resolves the full set (direct + transitive)
+    # from the linked/imported targets. Build-tree only, like _build_info.py; not
+    # installed -- packaged builds resolve deps via the merged install layout.
+    if(WIN32)
+        file(GENERATE
+            OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/rocisa/_dll_dirs.py"
+            CONTENT "DEP_DLLS = [p for p in r'''$<TARGET_RUNTIME_DLLS:_rocisa>'''.split(';') if p]\n"
+        )
+    endif()
+
     if(ROCISA_STANDALONE)
         # scikit-build-core wheel install rules: place _rocisa and __init__.py into the
         # rocisa/ package directory in the wheel.

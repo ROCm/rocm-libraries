@@ -21,8 +21,9 @@ Pipeline (each stage verifies its own output artifact; nothing is produced
 silently half-built):
 
   list-solutions
-             Filter the solutions in a shipped ``3_LibraryLogic`` by parameter
-             (e.g. ``--where StreamK=5``) to discover which indices to extract.
+             Filter the solutions in one or more shipped ``3_LibraryLogic``
+             yaml file(s)/dir(s) by parameter (e.g. ``--where StreamK=5``) to
+             discover which indices to extract.
   extract    Reverse a shipped ``3_LibraryLogic`` yaml into a benchmark config
              (wraps ``Tensile.TensileLibLogicToYaml``).
   merge      Combine several per-solution ``extract`` configs into one
@@ -33,10 +34,18 @@ silently half-built):
              ``Experimental/<feature>/`` tree.
   gen-logic  Run the Tensile benchmark+analyze flow to emit ``3_LibraryLogic``
              and classify failures: kernel-generation error vs. all-solutions
-             rejected by Solution validation. Benchmarks on the target-arch GPU
-             (fails fast if that arch is not present on the host).
+             rejected by Solution validation vs. an unedited placeholder
+             ``ProblemSizes`` left over from extracting a ``Prediction``-type
+             source. Benchmarks on the target-arch GPU (fails fast if that
+             arch is not present on the host).
   build-lib  Run ``Tensile.TensileCreateLibrary --experimental`` to turn the
              staged logic into a loadable device library.
+  patch-logic
+             Override ``--set`` params on shipped ``3_LibraryLogic`` solutions
+             (optionally narrowed by ``--where``) and build a matched
+             baseline/patched library pair for an A/B experiment -- no
+             re-benchmark (works for Origami/learned-rule logic that
+             ``gen-logic`` cannot reproduce).
   find-index Run ``hipblaslt-bench --algo_method all`` to discover the solution
              indices reachable in the experimental library.
   bench      Run ``hipblaslt-bench --algo_method index --solution_index N``.
@@ -58,7 +67,7 @@ subcommand:
       --logic <shipped>/gfx950/.../<liblogic>.yaml --indices 0 --out base.yaml
   python -m Tensile.ExperimentalLibrary pipeline \\
       --config base.yaml --set StreamKFixupTreeReduction=1 \\
-      --set StreamK=1 --feature-name streamk_treereduce \\
+      --set StreamK=3 --feature-name streamk_treereduce \\
       --arch gfx950 --cu 256 --out work/
 
 A/B family example -- rebuild every StreamK==5 solution from a shipped logic
@@ -67,7 +76,7 @@ be contrasted by solution index (StreamKWorkStealing is illustrative; use any
 real parameter, and --skip-validation for a parameter not yet in the registry):
 
   IDX=$(python -m Tensile.ExperimentalLibrary list-solutions \\
-      --logic <shipped>/.../<liblogic>.yaml --where StreamK=5 --indices-only)
+      --logic-src <shipped>/.../<liblogic>.yaml --where StreamK=5 --indices-only)
   python -m Tensile.ExperimentalLibrary extract \\
       --logic <shipped>/.../<liblogic>.yaml --indices "$IDX" --out sk5/base.yaml
   python -m Tensile.ExperimentalLibrary merge \\
@@ -80,6 +89,24 @@ real parameter, and --skip-validation for a parameter not yet in the registry):
 
 Omit the ``--set`` / use ``gen-logic`` + ``build-lib`` directly to just rebuild
 the selected family as-is into one experimental library.
+
+Origami/Prediction-logic A/B example -- toggle a parameter on every matching
+solution across several shipped files (e.g. one per transpose) and get back
+two libraries that differ only in that parameter, with no re-benchmark:
+
+  python -m Tensile.ExperimentalLibrary patch-logic \\
+      --logic-src <shipped>/gfx950/.../gfx950_Cijk_Ailk_Bjlk_*.yaml \\
+                  <shipped>/gfx950/.../gfx950_Cijk_Ailk_Bljk_*.yaml \\
+      --where StreamK=5 --set PrefetchAcrossPersistent=1 \\
+      --matched-pair --skip-unbuildable \\
+      --arch gfx950 --out work/pap --feature-name sk5_pap1
+      # prints both HIPBLASLT_TENSILE_LIBPATH exports and writes
+      # work/pap/patch_manifest.csv (per-solution applied/skipped + reason)
+
+``--where`` is optional: dropping it from the command above selects every
+solution under ``--logic-src`` instead of just the ``StreamK=5`` family, so
+the same ``--set`` is applied library-wide. ``--set`` itself is always
+required.
 """
 
 from __future__ import annotations
@@ -328,6 +355,26 @@ def augment_config(
     return config
 
 
+_PLACEHOLDER_PROBLEM_SIZES = [{"Exact": [1, 1, 1, 1]}]
+
+
+def _placeholder_problem_size_groups(config: Dict[str, Any]) -> List[int]:
+    """Indices (within ``BenchmarkProblems``) of groups whose ``ProblemSizes``
+    is still ``TensileLibLogicToYaml``'s placeholder (``[{'Exact': [1, 1, 1,
+    1]}]``), emitted when ``extract`` has no real per-size table to recover
+    from a ``Prediction``-type source and left unedited by the user.
+    """
+    placeholder_groups: List[int] = []
+    for i, group in enumerate(config.get("BenchmarkProblems") or []):
+        if not (isinstance(group, list) and len(group) >= 2 and isinstance(group[1], dict)):
+            continue
+        for params in group[1].get("BenchmarkFinalParameters") or []:
+            if isinstance(params, dict) and params.get("ProblemSizes") == _PLACEHOLDER_PROBLEM_SIZES:
+                placeholder_groups.append(i)
+                break
+    return placeholder_groups
+
+
 def merge_configs(configs: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
     """Combine several per-solution ``extract`` configs into one config.
 
@@ -430,22 +477,43 @@ def count_solutions(logic_yaml_path: str) -> int:
         return _count_solutions_structural(logic_yaml_path)
 
 
-def _count_solutions_structural(logic_yaml_path: str) -> int:
-    try:
-        data = load_yaml(logic_yaml_path)
-    except Exception:
-        return 0
+def _scan_for_solutions_element(
+    data: Any,
+) -> Optional[Tuple[int, List[Dict[str, Any]]]]:
+    """Locate the solution-states element inside a parsed ``3_LibraryLogic``.
+
+    A shipped logic yaml parses to a raw LIST, one element of which is itself a
+    list of solution-state dicts. Returns ``(index_in_data, that_list)``, or
+    ``None`` if ``data`` is not a list or no such element is found.
+    """
     if not isinstance(data, list):
-        return 0
-    # The solutions list is the element that is a list of solution dicts.
-    for element in data:
+        return None
+    for i, element in enumerate(data):
         if isinstance(element, list) and element and all(isinstance(e, dict) for e in element):
             if any(
                 ("SolutionIndex" in e) or ("MacroTile0" in e) or ("ProblemType" in e)
                 for e in element
             ):
-                return len(element)
-    return 0
+                return i, element
+    return None
+
+
+def _library_type(raw: Any) -> Optional[str]:
+    """Read the LibraryType discriminator at position 11 of a parsed
+    ``3_LibraryLogic`` list, if present (mirrors ``LibraryIO.parseLibraryLogicList``).
+    """
+    if isinstance(raw, list) and len(raw) > 11 and raw[11]:
+        return raw[11]
+    return None
+
+
+def _count_solutions_structural(logic_yaml_path: str) -> int:
+    try:
+        data = load_yaml(logic_yaml_path)
+    except Exception:
+        return 0
+    found = _scan_for_solutions_element(data)
+    return len(found[1]) if found else 0
 
 
 _SUMMARY_KEYS = (
@@ -499,10 +567,77 @@ def select_indices(
     ]
 
 
-def summarize_solution(state: Dict[str, Any]) -> str:
-    """One-line digest of a solution's notable parameters for listing."""
-    parts = [f"{k}={state[k]}" for k in _SUMMARY_KEYS if k in state]
+def _dedup_keys(*key_lists: Sequence[str]) -> List[str]:
+    """Flatten several key lists into one, keeping first occurrence order."""
+    seen = set()
+    result = []
+    for keys in key_lists:
+        for k in keys:
+            if k not in seen:
+                seen.add(k)
+                result.append(k)
+    return result
+
+
+def summarize_solution(state: Dict[str, Any], extra_keys: Sequence[str] = ()) -> str:
+    """One-line digest of a solution's notable parameters for listing.
+
+    ``extra_keys`` (e.g. the active ``--where`` names) are shown first, followed
+    by ``_SUMMARY_KEYS``, de-duplicated; only keys present in ``state`` appear.
+    """
+    keys = _dedup_keys(extra_keys, _SUMMARY_KEYS)
+    parts = [f"{k}={state[k]}" for k in keys if k in state]
     return " ".join(parts) if parts else "(no summary keys)"
+
+
+def _resolve_logic_sources(sources: Sequence[str]) -> List[str]:
+    """Expand ``--logic-src`` entries (files and/or dirs) into logic yaml paths.
+
+    A directory contributes every ``*.yaml`` found recursively within it. The
+    result is de-duplicated (by realpath) while preserving first-seen order.
+    """
+    files: List[str] = []
+    for src in sources:
+        p = Path(src)
+        if p.is_dir():
+            files.extend(str(f) for f in sorted(p.rglob("*.yaml")))
+        elif p.is_file():
+            files.append(str(p))
+        else:
+            raise ExperimentalLibraryError(
+                f"--logic-src not found (no such file or dir): {src}"
+            )
+    resolved: List[str] = []
+    seen = set()
+    for f in files:
+        rp = os.path.realpath(f)
+        if rp not in seen:
+            seen.add(rp)
+            resolved.append(rp)
+    if not resolved:
+        raise ExperimentalLibraryError(
+            "--logic-src resolved to no *.yaml logic files."
+        )
+    return resolved
+
+
+def _find_solutions_element(raw: Any, path: str) -> Tuple[int, List[Dict[str, Any]]]:
+    """Locate the solution-states element inside a parsed ``3_LibraryLogic``.
+
+    Uses the same detection as :func:`_count_solutions_structural` (via
+    :func:`_scan_for_solutions_element`), but on an already-parsed ``raw``
+    object, and raises instead of silently returning a fallback.
+    """
+    if not isinstance(raw, list):
+        raise ExperimentalLibraryError(
+            f"{path} did not parse as a LibraryLogic list."
+        )
+    found = _scan_for_solutions_element(raw)
+    if found is None:
+        raise ExperimentalLibraryError(
+            f"could not find a solution-states list in {path}."
+        )
+    return found
 
 
 # ---------------------------------------------------------------------------
@@ -515,9 +650,9 @@ def _indexed_out_path(out: str, idx: int, single: bool) -> str:
 
     A single index uses ``out`` verbatim. For multiple indices each gets a
     distinct file derived from ``out``'s stem/suffix (``base.yaml`` ->
-    ``base_<idx>.yaml``; a suffix-less ``base`` -> ``base_<idx>.yaml``). This
-    avoids the old ``str.replace('.yaml', ...)`` no-op that silently collided
-    when ``--out`` had no ``.yaml`` suffix.
+    ``base_<idx>.yaml``; a suffix-less ``base`` -> ``base_<idx>.yaml``), so a
+    suffix-less ``--out`` still yields one distinct file per index instead of
+    every index writing the same path.
     """
     if single:
         return out
@@ -530,19 +665,12 @@ def _indexed_out_path(out: str, idx: int, single: bool) -> str:
 def _extract_snippet() -> str:
     return (
         "import sys\n"
-        "from pathlib import Path\n"
         "from Tensile.TensileLibLogicToYaml import TensileLibLogicToYaml\n"
+        "from Tensile.ExperimentalLibrary import _indexed_out_path\n"
         "inp, out, skip = sys.argv[1], sys.argv[2], sys.argv[3] == '1'\n"
         "ids = [int(x.strip()) for x in sys.argv[4].split(',')]\n"
-        "def out_for(idx):\n"
-        "    if len(ids) == 1:\n"
-        "        return out\n"
-        "    p = Path(out)\n"
-        "    if p.suffix:\n"
-        "        return str(p.with_name(p.stem + '_' + str(idx) + p.suffix))\n"
-        "    return str(p.with_name(p.name + '_' + str(idx) + '.yaml'))\n"
         "for idx in ids:\n"
-        "    f = out_for(idx)\n"
+        "    f = _indexed_out_path(out, idx, len(ids) == 1)\n"
         "    res = TensileLibLogicToYaml(inp, idx, f, skip)\n"
         "    if not res:\n"
         "        raise SystemExit(f'TensileLibLogicToYaml failed for index {idx}')\n"
@@ -558,6 +686,19 @@ def cmd_extract(args: argparse.Namespace) -> int:
     ids = [s.strip() for s in args.indices.split(",") if s.strip()]
     if not ids:
         raise ExperimentalLibraryError("--indices must contain at least one index")
+
+    # A structural fact about the source file, independent of whether the
+    # subprocess actually runs, so this check applies under --dry-run too
+    # (skipped only if the file doesn't exist yet).
+    if os.path.isfile(logic) and _library_type(load_yaml(logic)) == "Prediction":
+        sys.stderr.write(
+            f"extract: warning: {logic} is a 'Prediction'-type library logic "
+            "with no real per-size table; the extracted config's ProblemSizes "
+            "will be a placeholder ([{'Exact': [1, 1, 1, 1]}]) that must be "
+            "hand-edited to real sizes before benchmarking with gen-logic. To "
+            "toggle a parameter and rebuild the same library instead, use "
+            "patch-logic.\n"
+        )
 
     cmd = [
         args.python,
@@ -591,84 +732,46 @@ def cmd_extract(args: argparse.Namespace) -> int:
     return 0
 
 
-_INDICES_SENTINEL = "INDICES:"
-
-
-def _list_snippet() -> str:
-    # --indices-only output is machine-consumed (IDX=$(... --indices-only)), so
-    # the index list is tagged with a sentinel and the match summary goes to
-    # stderr; the parent then forwards only the sentinel payload to stdout. This
-    # keeps any import-time banners on stdout/stderr from corrupting $IDX.
-    return (
-        "import sys\n"
-        "from Tensile import LibraryIO\n"
-        "from Tensile.ExperimentalLibrary import "
-        "parse_set_arg, select_indices, summarize_solution\n"
-        "logic, indices_only = sys.argv[1], sys.argv[2] == '1'\n"
-        "wheres = [parse_set_arg(a) for a in sys.argv[3:]]\n"
-        "states = LibraryIO.rawLibraryLogic(LibraryIO.readYAML(logic))[5] or []\n"
-        "idxs = select_indices(states, wheres)\n"
-        "if indices_only:\n"
-        "    print('INDICES:' + ','.join(str(i) for i in idxs))\n"
-        "else:\n"
-        "    for i in idxs:\n"
-        "        print(str(i) + '\\t' + summarize_solution(states[i]))\n"
-        "sys.stderr.write(str(len(idxs)) + ' / ' + str(len(states)) "
-        "+ ' solution(s) matched\\n')\n"
-    )
-
-
 def cmd_list_solutions(args: argparse.Namespace) -> int:
-    logic = os.path.realpath(args.logic)
-    if not args.dry_run and not os.path.isfile(logic):
-        raise ExperimentalLibraryError(f"Library logic file not found: {logic}")
-    # Parse --where up front so a malformed predicate fails before the subprocess.
-    for w in args.where:
-        parse_set_arg(w)
+    wheres = [parse_set_arg(w) for w in args.where]
+    files = _resolve_logic_sources(args.logic_src)
 
-    cmd = [
-        args.python,
-        "-c",
-        _list_snippet(),
-        logic,
-        "1" if args.indices_only else "0",
-        *args.where,
-    ]
-    if args.dry_run or args.verbose:
-        print(f"$ {_format_command(cmd, None)}")
-    if args.dry_run:
-        return 0
-
-    # Capture stdout (the data) and stderr (banners + match summary) separately
-    # so --indices-only is never polluted by Tensile import noise.
-    proc = subprocess.run(
-        list(map(str, cmd)), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
-    )
-    if proc.stderr:
-        sys.stderr.write(proc.stderr)
-    if proc.returncode != 0:
+    # Indices are per-file (not global), so a flat comma-separated list is only
+    # unambiguous when exactly one logic file is in play.
+    if args.indices_only and len(files) > 1:
         raise ExperimentalLibraryError(
-            f"list-solutions failed (rc={proc.returncode}). Output:\n"
-            f"{proc.stdout}{proc.stderr}"
+            f"list-solutions: --logic-src resolved {len(files)} logic files, "
+            "but --indices-only requires exactly one (its output is a single "
+            "file's index list, and indices are not comparable across files); "
+            "narrow --logic-src to one file."
         )
+
+    per_file: List[Tuple[str, List[Dict[str, Any]], List[int], Optional[str]]] = []
+    for path in files:
+        raw = load_yaml(path)
+        _, states = _find_solutions_element(raw, path)
+        idxs = select_indices(states, wheres)
+        per_file.append((path, states, idxs, _library_type(raw)))
 
     if args.indices_only:
-        payload = next(
-            (
-                line[len(_INDICES_SENTINEL):]
-                for line in reversed(proc.stdout.splitlines())
-                if line.startswith(_INDICES_SENTINEL)
-            ),
-            None,
+        _, _, idxs, _ = per_file[0]
+        print(",".join(str(i) for i in idxs))
+        return 0
+
+    for path, states, idxs, library_type in per_file:
+        print(f"== {path} [{library_type or 'unknown'}] ({len(idxs)}/{len(states)} match) ==")
+        for i in idxs:
+            print(f"{i}\t{summarize_solution(states[i], extra_keys=[name for name, _ in wheres])}")
+
+    total_matched = sum(len(idxs) for _, _, idxs, _ in per_file)
+    total_states = sum(len(states) for _, states, _, _ in per_file)
+    if len(per_file) > 1:
+        print(
+            f"list-solutions: {total_matched}/{total_states} solution(s) "
+            f"matched across {len(per_file)} file(s)."
         )
-        if payload is None:
-            raise ExperimentalLibraryError(
-                f"list-solutions did not emit an index list.\n{proc.stdout}"
-            )
-        print(payload)
     else:
-        out = proc.stdout
-        sys.stdout.write(out if out.endswith("\n") or not out else out + "\n")
+        print(f"list-solutions: {total_matched}/{total_states} solution(s) matched.")
     return 0
 
 
@@ -695,6 +798,11 @@ def cmd_merge(args: argparse.Namespace) -> int:
     return 0
 
 
+def _augment_staging_path(staging: str, arch: str, feature_name: str, config_basename: str) -> str:
+    """Default augment output path when ``--out`` is not given."""
+    return os.path.join(staging, "Logic", arch, "Experimental", feature_name, config_basename)
+
+
 def _do_augment(args: argparse.Namespace) -> str:
     """Shared augment implementation; returns the output config path."""
     sets = [parse_set_arg(s) for s in args.set]
@@ -715,9 +823,7 @@ def _do_augment(args: argparse.Namespace) -> str:
     else:
         staging = os.path.realpath(args.staging)
         base = os.path.basename(args.config)
-        out_path = os.path.join(
-            staging, "Logic", args.arch, "Experimental", args.name, base
-        )
+        out_path = _augment_staging_path(staging, args.arch, args.name, base)
     dump_config_with_header(config, out_path, args.name)
     return out_path
 
@@ -736,6 +842,13 @@ def cmd_augment(args: argparse.Namespace) -> int:
     return 0
 
 
+def _experimental_staging_path(root: str, arch: str, feature_name: str, filename: str) -> str:
+    """Build the ``<root>/<arch>/Experimental/<feature_name>/<filename>`` staging
+    path shared by gen-logic's output staging and patch-logic's logic trees.
+    """
+    return os.path.join(root, arch, "Experimental", feature_name, filename)
+
+
 def _stage_logic(workdir: str, arch: str, feature_name: str) -> str:
     """Copy produced 3_LibraryLogic yaml(s) into an Experimental staging tree.
 
@@ -747,12 +860,13 @@ def _stage_logic(workdir: str, arch: str, feature_name: str) -> str:
 
     src_dir = Path(workdir) / "3_LibraryLogic"
     logic_files = sorted(src_dir.glob("*.yaml"))
-    staging_root = Path(workdir) / "experimental_logic"
-    dest_dir = staging_root / arch / "Experimental" / feature_name
+    staging_root = str(Path(workdir) / "experimental_logic")
+    dest_dir = Path(_experimental_staging_path(staging_root, arch, feature_name, ""))
     dest_dir.mkdir(parents=True, exist_ok=True)
     for f in logic_files:
-        shutil.copy2(f, dest_dir / f.name)
-    return str(staging_root)
+        dest = _experimental_staging_path(staging_root, arch, feature_name, f.name)
+        shutil.copy2(f, dest)
+    return staging_root
 
 
 def cmd_gen_logic(args: argparse.Namespace) -> int:
@@ -763,6 +877,22 @@ def cmd_gen_logic(args: argparse.Namespace) -> int:
     if not args.dry_run:
         os.makedirs(workdir, exist_ok=True)
     feature_name = args.feature_name or "feature"
+
+    # A structural fact about the config file's contents; skipped under
+    # --dry-run when the config doesn't exist yet (e.g. a pipeline dry-run
+    # whose augment stage hasn't actually written it).
+    if os.path.isfile(config):
+        placeholder_groups = _placeholder_problem_size_groups(load_yaml(config))
+        if placeholder_groups:
+            raise ExperimentalLibraryError(
+                f"Config {config} has BenchmarkProblems group(s) "
+                f"{placeholder_groups} with an unedited placeholder "
+                f"ProblemSizes ({_PLACEHOLDER_PROBLEM_SIZES}), left over from "
+                "extracting a 'Prediction'-type source with no real per-size "
+                "table. Set real ProblemSizes for those group(s) before "
+                "benchmarking, or use patch-logic instead to toggle a "
+                "parameter and rebuild the same library without benchmarking."
+            )
 
     # Fail fast (before any kernel generation) if the target arch is not a GPU
     # present on this host. gen-logic runs REAL benchmarking so winner selection
@@ -870,6 +1000,37 @@ def cmd_gen_logic(args: argparse.Namespace) -> int:
     )
 
 
+def _tensile_create_library_cmd(
+    python: str,
+    logic_dir: str,
+    out_dir: str,
+    arch: str,
+    *,
+    experimental: bool = True,
+    jobs: Optional[int] = None,
+) -> List[str]:
+    """Build the ``python -m Tensile.TensileCreateLibrary ...`` argv shared by
+    build-lib and patch-logic's buildability probe.
+    """
+    cmd = [
+        python,
+        "-m",
+        "Tensile.TensileCreateLibrary",
+        logic_dir,
+        out_dir,
+        "HIP",
+        f"--architecture={arch}",
+        "--code-object-version=default",
+        "--library-format=msgpack",
+        "--no-enumerate",
+    ]
+    if experimental:
+        cmd.append("--experimental")
+    if jobs is not None:
+        cmd += ["--jobs", str(jobs)]
+    return cmd
+
+
 def cmd_build_lib(args: argparse.Namespace) -> int:
     logic_dir = os.path.realpath(args.logic_dir)
     if not args.dry_run and not os.path.isdir(logic_dir):
@@ -878,20 +1039,14 @@ def cmd_build_lib(args: argparse.Namespace) -> int:
     if not args.dry_run:
         os.makedirs(libdir, exist_ok=True)
 
-    cmd = [
+    cmd = _tensile_create_library_cmd(
         args.python,
-        "-m",
-        "Tensile.TensileCreateLibrary",
         logic_dir,
         libdir,
-        "HIP",
-        f"--architecture={args.arch}",
-        "--code-object-version=default",
-        "--library-format=msgpack",
-        "--no-enumerate",
-    ]
-    if args.experimental:
-        cmd.append("--experimental")
+        args.arch,
+        experimental=args.experimental,
+        jobs=getattr(args, "jobs", None),
+    )
 
     log_path = os.path.join(libdir, "build_lib.log")
     rc, output = run_command(
@@ -1090,9 +1245,8 @@ def cmd_pipeline(args: argparse.Namespace) -> int:
         if not args.skip_validation:
             validate_sets(sets)
         print(f"[dry-run] augment: inject {sets} into {args.config}")
-        augmented = os.path.join(
-            out_root, "Logic", args.arch, "Experimental", args.feature_name,
-            os.path.basename(args.config),
+        augmented = _augment_staging_path(
+            out_root, args.arch, args.feature_name, os.path.basename(args.config)
         )
     else:
         augmented = _do_augment(augment_ns)
@@ -1125,6 +1279,7 @@ def cmd_pipeline(args: argparse.Namespace) -> int:
         python=args.python,
         dry_run=args.dry_run,
         verbose=args.verbose,
+        jobs=None,
     )
     cmd_build_lib(build_ns)
     if not args.dry_run:
@@ -1133,16 +1288,340 @@ def cmd_pipeline(args: argparse.Namespace) -> int:
 
 
 # ---------------------------------------------------------------------------
+# patch-logic: override params on matching shipped-logic solutions and build a
+# matched baseline/patched library pair (no re-benchmark).
+# ---------------------------------------------------------------------------
+
+
+# Diagnostic-context columns for patch_manifest.csv, appended after whatever
+# --set/--where names the run actually queried (see cmd_patch_logic).
+_PATCH_MANIFEST_PARAMS = (
+    "StreamK",
+    "MacroTile0",
+    "MacroTile1",
+    "DepthU",
+    "PrefetchGlobalRead",
+    "1LDSBuffer",
+    "DirectToLdsA",
+    "DirectToLdsB",
+)
+
+# A probe builds exactly one solution, so its internal TensileCreateLibrary -j
+# gains nothing from scaling with probe concurrency (that would multiply out
+# to concurrency * this many processes).
+_PROBE_INTERNAL_JOBS = 1
+
+
+def _apply_overrides(state: Dict[str, Any], sets: Sequence[Tuple[str, List[Any]]]) -> None:
+    """Set each ``NAME=value`` override directly on a solution-state dict.
+
+    Each ``--set`` carries exactly one value (enforced by the caller), so the
+    scalar is written straight onto the state; rebuilding re-derives the kernel
+    because ``solutionStateToSolution`` clears the derived-parameter flags.
+    """
+    for name, values in sets:
+        state[name] = values[0]
+
+
+def _unique_staged_name(base: str, assigned: set) -> str:
+    """Pick a collision-free staged filename for a source basename."""
+    if base not in assigned:
+        assigned.add(base)
+        return base
+    stem, dot, ext = base.rpartition(".")
+    n = 1
+    while True:
+        cand = f"{stem}_{n}.{ext}" if dot else f"{base}_{n}"
+        if cand not in assigned:
+            assigned.add(cand)
+            return cand
+        n += 1
+
+
+def _probe_override(
+    args: argparse.Namespace,
+    raw: Any,
+    sol_pos: int,
+    override_state: Dict[str, Any],
+    probe_dir: str,
+) -> Tuple[bool, str]:
+    """Build a single-solution logic (with the override) to test buildability.
+
+    Writes ``raw`` with its solution element replaced by ``[override_state]``
+    into an ``Experimental`` staging tree, then runs TensileCreateLibrary and
+    classifies the outcome. Returns ``(passed, reason)``: ``reason`` is empty on
+    success, else ``reject`` / ``codegen`` / ``other`` from scanning output.
+    """
+    import copy
+
+    probe_raw = copy.deepcopy(raw)
+    probe_raw[sol_pos] = [copy.deepcopy(override_state)]
+    # The truncated one-solution list invalidates any winner table that
+    # references other positions; force FreeSize's trivial [0, len(solutions)]
+    # dispatch instead of carrying over the source's real indexOrder/
+    # exactLogic/rangeLogic/LibraryType, which would otherwise be
+    # inconsistent with the truncated list.
+    for i in (6, 7, 8):  # indexOrder, exactLogic, rangeLogic
+        if i < len(probe_raw):
+            probe_raw[i] = None
+    if len(probe_raw) > 11:
+        probe_raw[11] = "FreeSize"
+    logic_root = Path(probe_dir) / "logic"
+    dest = _experimental_staging_path(
+        str(logic_root), args.arch, args.feature_name, "probe.yaml"
+    )
+    dump_config_with_header(probe_raw, dest, args.feature_name)
+    out_dir = Path(probe_dir) / "out"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    cmd = _tensile_create_library_cmd(
+        args.python,
+        str(logic_root),
+        str(out_dir),
+        args.arch,
+        experimental=True,
+        jobs=_PROBE_INTERNAL_JOBS,
+    )
+
+    log_path = str(Path(probe_dir) / "probe.log")
+    # The caller only invokes _probe_override when not args.dry_run, so this
+    # always runs for real.
+    rc, output = run_command(cmd, verbose=args.verbose, log_path=log_path)
+    if rc == 0:
+        return True, ""
+    low = output.lower()
+    if "rejection of a librarylogic" in low:
+        return False, "reject"
+    if "resulted in error" in low:
+        return False, "codegen"
+    return False, "other"
+
+
+def cmd_patch_logic(args: argparse.Namespace) -> int:
+    import copy
+    import csv
+    import shutil
+    from concurrent.futures import ThreadPoolExecutor
+
+    if not args.feature_name:
+        raise ExperimentalLibraryError("patch-logic requires --feature-name.")
+    wheres = [parse_set_arg(w) for w in args.where]
+    if not wheres:
+        sys.stderr.write(
+            "patch-logic: warning: no --where given; --set will be applied to "
+            "every solution in --logic-src.\n"
+        )
+    sets = [parse_set_arg(s) for s in args.set]
+    if not sets:
+        raise ExperimentalLibraryError(
+            "patch-logic requires at least one --set NAME=value."
+        )
+    for name, values in sets:
+        if len(values) != 1:
+            raise ExperimentalLibraryError(
+                f"patch-logic --set '{name}' takes exactly one value (got "
+                f"{values}); patch-logic writes a single scalar per parameter. "
+                "Use --matched-pair to contrast this value against baseline."
+            )
+    if not args.skip_validation:
+        validate_sets(sets)
+
+    # Manifest columns: the --set/--where names the user actually queried come
+    # first (what they care about), _PATCH_MANIFEST_PARAMS fills in the rest as
+    # diagnostic context, with no duplicate columns for overlapping names.
+    manifest_params = _dedup_keys(
+        [name for name, _ in sets], [name for name, _ in wheres], _PATCH_MANIFEST_PARAMS
+    )
+
+    files = _resolve_logic_sources(args.logic_src)
+    out_root = os.path.realpath(args.out)
+
+    # Pass 1: parse each file, locate its solution list, and select matches.
+    # ``raw`` here is the untouched BASELINE for each file; the patched copy is
+    # derived later so both trees stay identical except for applied overrides.
+    file_infos: List[Dict[str, Any]] = []
+    assigned_names: set = set()
+    total_matched = 0
+    for path in files:
+        raw = load_yaml(path)
+        sol_pos, solutions = _find_solutions_element(raw, path)
+        matched = [
+            i
+            for i, s in enumerate(solutions)
+            if isinstance(s, dict) and solution_matches(s, wheres)
+        ]
+        total_matched += len(matched)
+        staged_name = _unique_staged_name(os.path.basename(path), assigned_names)
+        file_infos.append(
+            {
+                "path": path,
+                "raw": raw,
+                "sol_pos": sol_pos,
+                "solutions": solutions,
+                "matched": matched,
+                "staged_name": staged_name,
+            }
+        )
+        print(
+            f"patch-logic: {path}: {len(matched)}/{len(solutions)} solution(s) "
+            f"match --where"
+        )
+
+    if total_matched == 0:
+        sys.stderr.write(
+            "patch-logic: warning: no solutions matched --where; the patched "
+            "library will be identical to baseline.\n"
+        )
+
+    # Pass 2: decide, per matching solution, whether the override is applied.
+    # Default: apply to all matches. With --skip-unbuildable, probe each match
+    # (single-solution build) and skip the override on any that fail, keeping
+    # that solution as baseline in BOTH libraries so dispatch never diverges.
+    probe_root = os.path.join(out_root, "_probe")
+    if args.skip_unbuildable and not args.dry_run:
+        os.makedirs(probe_root, exist_ok=True)
+        tasks = []  # (fi_index, sol_index, override_state, probe_dir)
+        for fi_idx, fi in enumerate(file_infos):
+            for pos in fi["matched"]:
+                override_state = copy.deepcopy(fi["solutions"][pos])
+                _apply_overrides(override_state, sets)
+                probe_dir = os.path.join(probe_root, f"{fi_idx}_{pos}")
+                tasks.append((fi_idx, pos, override_state, probe_dir))
+        results: Dict[Tuple[int, int], Tuple[bool, str]] = {}
+        max_workers = args.jobs if (args.jobs and args.jobs > 0) else (os.cpu_count() or 1)
+        if tasks:
+            print(
+                f"patch-logic: probing {len(tasks)} override(s) for buildability "
+                f"(up to {max_workers} concurrent)..."
+            )
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            futures = {
+                pool.submit(
+                    _probe_override,
+                    args,
+                    file_infos[fi_idx]["raw"],
+                    file_infos[fi_idx]["sol_pos"],
+                    override_state,
+                    probe_dir,
+                ): (fi_idx, pos)
+                for (fi_idx, pos, override_state, probe_dir) in tasks
+            }
+            for fut, key in futures.items():
+                results[key] = fut.result()
+        # Attach per-solution decisions.
+        for fi_idx, fi in enumerate(file_infos):
+            decisions = {}
+            for pos in fi["matched"]:
+                passed, reason = results.get((fi_idx, pos), (True, ""))
+                decisions[pos] = (passed, reason)
+            fi["decisions"] = decisions
+        shutil.rmtree(probe_root, ignore_errors=True)
+    else:
+        # No probing: every match gets the override (a build failure surfaces
+        # directly). Dry-run also lands here and assumes all-applied for planning.
+        for fi in file_infos:
+            fi["decisions"] = {pos: (True, "") for pos in fi["matched"]}
+
+    # Pass 3: emit the patched (and, for --matched-pair, baseline) logic trees.
+    patched_root = os.path.join(out_root, "patched_logic")
+    baseline_root = os.path.join(out_root, "baseline_logic")
+    manifest_rows: List[List[Any]] = []
+    applied_total = 0
+    skipped_total = 0
+    for fi in file_infos:
+        raw = fi["raw"]
+        sol_pos = fi["sol_pos"]
+        staged_name = fi["staged_name"]
+        patched_raw = copy.deepcopy(raw)
+        patched_solutions = patched_raw[sol_pos]
+        for pos in fi["matched"]:
+            passed, reason = fi["decisions"][pos]
+            base_state = fi["solutions"][pos]
+            if passed:
+                _apply_overrides(patched_solutions[pos], sets)
+                applied_total += 1
+                status, row_reason = "applied", ""
+            else:
+                skipped_total += 1
+                status, row_reason = "skipped", reason
+            sol_index = base_state.get("SolutionIndex", pos)
+            manifest_rows.append(
+                [fi["path"], sol_index, status, row_reason]
+                + [base_state.get(k, "") for k in manifest_params]
+            )
+
+        if not args.dry_run:
+            patched_dest = _experimental_staging_path(
+                patched_root, args.arch, args.feature_name, staged_name
+            )
+            dump_config_with_header(patched_raw, patched_dest, args.feature_name)
+            if args.matched_pair:
+                baseline_dest = _experimental_staging_path(
+                    baseline_root, args.arch, args.feature_name, staged_name
+                )
+                dump_config_with_header(raw, baseline_dest, args.feature_name)
+
+    print(
+        f"patch-logic: {applied_total} override(s) applied, "
+        f"{skipped_total} skipped across {len(file_infos)} file(s)."
+    )
+
+    # Manifest CSV (one row per matching solution).
+    if not args.dry_run:
+        manifest_path = os.path.join(out_root, "patch_manifest.csv")
+        os.makedirs(out_root, exist_ok=True)
+        with open(manifest_path, "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(
+                ["logic_file", "solution_index", "status", "reason"] + manifest_params
+            )
+            writer.writerows(manifest_rows)
+        print(f"patch-logic: manifest written to {manifest_path}")
+
+    # Pass 4: build the loadable library/libraries via the existing build path.
+    def _build_tree(logic_root: str, lib_out: str, label: str) -> str:
+        print(f"=== patch-logic: building {label} library ===")
+        ns = argparse.Namespace(
+            logic_dir=logic_root,
+            arch=args.arch,
+            out=lib_out,
+            experimental=True,
+            python=args.python,
+            dry_run=args.dry_run,
+            verbose=args.verbose,
+            jobs=args.jobs,
+        )
+        cmd_build_lib(ns)
+        return _resolve_lib_dir(lib_out, args.arch, must_exist=not args.dry_run)
+
+    patched_libpath = _build_tree(
+        patched_root, os.path.join(out_root, "patched"), "PATCHED"
+    )
+    baseline_libpath = None
+    if args.matched_pair:
+        baseline_libpath = _build_tree(
+            baseline_root, os.path.join(out_root, "baseline"), "BASELINE"
+        )
+
+    print("\npatch-logic OK. Export to load a library at runtime:")
+    print(f"  PATCHED : export HIPBLASLT_TENSILE_LIBPATH={patched_libpath}")
+    if baseline_libpath is not None:
+        print(f"  BASELINE: export HIPBLASLT_TENSILE_LIBPATH={baseline_libpath}")
+    return 0
+
+
+# ---------------------------------------------------------------------------
 # Argument parsing
 # ---------------------------------------------------------------------------
 
 
-def _add_global_flags(p: argparse.ArgumentParser) -> None:
-    p.add_argument(
-        "--python",
-        default=None,
-        help="Interpreter to drive Tensile (default: repo venv if present, else current).",
-    )
+def _add_global_flags(p: argparse.ArgumentParser, *, include_python: bool = True) -> None:
+    if include_python:
+        p.add_argument(
+            "--python",
+            default=None,
+            help="Interpreter to drive Tensile (default: repo venv if present, else current).",
+        )
     p.add_argument("--dry-run", action="store_true", help="Print commands/env without executing.")
     p.add_argument("--verbose", "-v", action="store_true", help="Verbose logging.")
 
@@ -1159,9 +1638,13 @@ def build_parser() -> argparse.ArgumentParser:
     # list-solutions
     pl = sub.add_parser(
         "list-solutions",
-        help="List/filter solution indices in a 3_LibraryLogic by parameter.",
+        help="List/filter solution indices in 3_LibraryLogic yaml file(s)/dir(s) by parameter.",
     )
-    pl.add_argument("--logic", required=True, help="Shipped 3_LibraryLogic yaml.")
+    pl.add_argument(
+        "--logic-src", nargs="+", required=True,
+        help="Shipped 3_LibraryLogic yaml file(s) and/or dir(s) (dirs are "
+        "globbed for *.yaml recursively).",
+    )
     pl.add_argument(
         "--where", action="append", default=[], metavar="NAME=v1[,v2]",
         help="Keep solutions whose NAME is one of the values "
@@ -1170,9 +1653,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     pl.add_argument(
         "--indices-only", action="store_true",
-        help="Print only a comma-separated index list (feed to extract --indices).",
+        help="Print only a comma-separated index list for the single resolved "
+        "logic file (feed to extract --indices); errors if --logic-src "
+        "resolves to more than one file, since indices are per-file.",
     )
-    _add_global_flags(pl)
     pl.set_defaults(func=cmd_list_solutions)
 
     # extract
@@ -1197,7 +1681,10 @@ def build_parser() -> argparse.ArgumentParser:
     pm.add_argument(
         "--feature-name", default=None, help="Optional header annotation."
     )
-    _add_global_flags(pm)
+    pm.add_argument(
+        "--dry-run", action="store_true",
+        help="Print what would be merged without writing the output.",
+    )
     pm.set_defaults(func=cmd_merge)
 
     # augment
@@ -1224,7 +1711,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="Skip --set validation against validParameters (no rocisa needed; "
         "pure config editing).",
     )
-    _add_global_flags(pa)
+    pa.add_argument(
+        "--dry-run", action="store_true",
+        help="Print what would be injected without writing the output.",
+    )
     pa.set_defaults(func=cmd_augment)
 
     # gen-logic
@@ -1250,8 +1740,62 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-experimental", dest="experimental", action="store_false",
         help="Disable Experimental/ inclusion.",
     )
+    pb.add_argument(
+        "--jobs", "-j", dest="jobs", type=int, default=None,
+        help="Parallel jobs for TensileCreateLibrary (passed through as -j).",
+    )
     _add_global_flags(pb)
     pb.set_defaults(func=cmd_build_lib)
+
+    # patch-logic
+    ppl = sub.add_parser(
+        "patch-logic",
+        help="Override --set params on shipped-logic solutions (optionally "
+        "narrowed by --where) and build a matched baseline/patched library "
+        "pair (no re-benchmark).",
+    )
+    ppl.add_argument(
+        "--logic-src", nargs="+", required=True,
+        help="Shipped 3_LibraryLogic yaml file(s) and/or dir(s) (dirs are "
+        "globbed for *.yaml recursively).",
+    )
+    ppl.add_argument(
+        "--where", action="append", default=[], metavar="NAME=v1[,v2]",
+        help="Select solutions to patch (repeatable; AND across keys, OR within "
+        "values), e.g. --where StreamK=5. Omit to select every solution in "
+        "--logic-src.",
+    )
+    ppl.add_argument(
+        "--set", action="append", default=[], required=True, metavar="NAME=value",
+        help="Override to apply to matching solutions (repeatable; one value "
+        "each), e.g. --set PrefetchAcrossPersistent=1.",
+    )
+    ppl.add_argument(
+        "--matched-pair", action="store_true",
+        help="Also emit an unmodified baseline library alongside the patched "
+        "one for A/B comparison.",
+    )
+    ppl.add_argument(
+        "--skip-unbuildable", action="store_true",
+        help="Probe each override; if a solution's override fails to build, skip "
+        "the override (keep it as baseline in both libraries) instead of aborting.",
+    )
+    ppl.add_argument("--arch", default="gfx950", help="GPU target (default gfx950).")
+    ppl.add_argument("--out", required=True, help="Output root for logic/libraries/manifest.")
+    ppl.add_argument("--feature-name", required=True, help="Experimental staging dir component.")
+    ppl.add_argument(
+        "--jobs", "-j", dest="jobs", type=int, default=None,
+        help="Parallel jobs: TensileCreateLibrary -j for the final build(s), and "
+        "max concurrent probes with --skip-unbuildable (each probe builds a "
+        "single solution regardless of this value). Default: all CPUs for "
+        "probing, whatever TensileCreateLibrary's own default is for builds.",
+    )
+    ppl.add_argument(
+        "--skip-validation", action="store_true",
+        help="Skip --set validation against validParameters (no rocisa needed).",
+    )
+    _add_global_flags(ppl)
+    ppl.set_defaults(func=cmd_patch_logic)
 
     # find-index
     pf = sub.add_parser(
@@ -1266,7 +1810,7 @@ def build_parser() -> argparse.ArgumentParser:
     pf.add_argument("--arch", default="gfx950", help="GPU target (default gfx950).")
     pf.add_argument("--bench", default=None, help="Path to hipblaslt-bench.")
     pf.add_argument("extra", nargs=argparse.REMAINDER, help="Problem args after --.")
-    _add_global_flags(pf)
+    _add_global_flags(pf, include_python=False)
     pf.set_defaults(func=cmd_find_index)
 
     # bench
@@ -1280,7 +1824,7 @@ def build_parser() -> argparse.ArgumentParser:
     pbn.add_argument("--bench", required=True, help="Path to hipblaslt-bench.")
     pbn.add_argument("--solution-index", required=True, type=int, help="Solution index to run.")
     pbn.add_argument("extra", nargs=argparse.REMAINDER, help="Problem args after --.")
-    _add_global_flags(pbn)
+    _add_global_flags(pbn, include_python=False)
     pbn.set_defaults(func=cmd_bench)
 
     # pipeline

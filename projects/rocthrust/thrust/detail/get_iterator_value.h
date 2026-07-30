@@ -1,4 +1,3 @@
-#pragma once
 /*
  *  Copyright 2008-2016 NVIDIA Corporation
  *
@@ -14,8 +13,17 @@
  *  See the License for the specific language governing permissions and
  *  limitations under the License.
  */
+#pragma once
 
 #include <thrust/detail/config.h>
+
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 
 #include <thrust/detail/type_traits/pointer_traits.h>
 #include <thrust/execution_policy.h>
@@ -31,8 +39,7 @@ namespace detail
 // --------------------------------------------------
 // it is okay to dereference iterator in the usual way
 template <typename DerivedPolicy, typename Iterator>
-THRUST_HOST_DEVICE typename thrust::iterator_traits<Iterator>::value_type
-get_iterator_value(thrust::execution_policy<DerivedPolicy>&, Iterator it)
+THRUST_HOST_DEVICE it_value_t<Iterator> get_iterator_value(thrust::execution_policy<DerivedPolicy>&, Iterator it)
 {
   return *it;
 } // get_iterator_value(exec,Iterator);

@@ -55,6 +55,7 @@
 #include <hipblaslt/hipblaslt-ext-op.h>
 #include <hipblaslt/hipblaslt-ext.hpp>
 #include <hipblaslt/hipblaslt.h>
+#include <iomanip>
 #include <map>
 #include <numeric>
 #include <omp.h>
@@ -2235,14 +2236,17 @@ void testing_matmul_with_bias(const Arguments& arg,
     gpu_mem_gbytes = static_cast<double>(totalRotatingSizeNeeded) / (1024 * 1024 * 1024);
 
     // Calculating block count
-    int32_t max_iters   = max(arg.cold_iters, arg.iters);
-    int32_t block_count = max(1, min(max_iters, ceil((float)rotating / totalRotatingSizeNeeded)));
+    auto plan = hipblaslt_bench::compute_rotating_buffer_plan(
+        arg.adaptive, arg.max_iters, arg.cold_iters, arg.iters, rotating, totalRotatingSizeNeeded);
+    int32_t block_count = plan.block_count;
     if(rotating > 0)
     {
         hipblaslt_cout << "Rotating buffer " << rotating / (1024 * 1024) << " MiB. "
                        << "Needed Size: " << totalRotatingSizeNeeded / (1024 * 1024) << " MiB. "
-                       << "Needed block count: " << block_count
-                       << " (Capped to max iters: " << max_iters << ")" << std::endl;
+                       << "Needed block count: " << block_count;
+        if(plan.capped)
+            hipblaslt_cout << " (Capped to max iters: " << plan.iter_cap << ")";
+        hipblaslt_cout << std::endl;
     }
     // Calculating block count end
     matmul.resize(block_count, std::vector<hipblasLtMatmulDesc_t>(gemm_count));
@@ -4834,6 +4838,22 @@ void testing_matmul_with_bias(const Arguments& arg,
 
     auto ptrs = benchmark_allocation();
 
+    if(arg.adaptive)
+    {
+        hipblaslt_bench::TimingConfig cfg;
+        cfg.warmup_time         = arg.warmup_time;
+        cfg.sample_time         = arg.sample_time;
+        cfg.measure_time        = arg.measure_time;
+        cfg.max_measure_time    = arg.max_measure_time;
+        cfg.min_iters           = arg.min_iters;
+        cfg.max_iters           = arg.max_iters;
+        cfg.noise_threshold     = arg.noise_threshold;
+        cfg.stability_threshold = arg.stability_threshold;
+        cfg.stability_window    = arg.stability_window;
+        cfg.stability_interval  = arg.stability_interval;
+        hipblaslt_cout << hipblaslt_bench::format_adaptive_timing_summary(cfg) << std::endl;
+    }
+
     if(arg.print_solution_found)
         hipblaslt_cout << "Is supported " << heuristicResult.size()
                        << " / Total solutions: " << returnedAlgoCount * tuningVec.size()
@@ -5401,8 +5421,7 @@ void testing_matmul_with_bias(const Arguments& arg,
             {
                 // Gaussian-filled inputs + batched GEMM: use near_check like fp16_accumulator_probe
                 // (CPU ref vs GPU are not always bit-identical for f32/f16 accumulations).
-                for(int gemmIdx = 0; gemmIdx < gemm_count; gemmIdx++)
-                    tol[gemmIdx] = 1e-2;
+                std::fill(tol.begin(), tol.end(), 1e-2);
             }
 
             if(arg.unit_check || arg.norm_check || arg.allclose_check)
@@ -5551,6 +5570,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                 flush_time_used = flush_times_cache[device_uuid];
             }
         }
+        timingCfg.flush_us = flush_time_used;
 
         for(size_t sol = 0; sol < heuristicResult.size(); sol++)
         {
@@ -5830,9 +5850,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                         timing,
                         timingAbort);
                 }
-                // gpu time is reported per hot call; log_perf divides by hot_calls,
-                // so scale the mean back up to a total here.
-                gpu_time_used = timing.median_us * (number_hot_calls < 1 ? 1 : number_hot_calls);
+                gpu_time_used = timing.median_us;
                 perf_monitor->stop();
             }
             else
@@ -5901,8 +5919,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                         stream,
                         timing,
                         timingAbort);
-                    gpu_time_used
-                        = timing.median_us * (number_hot_calls < 1 ? 1 : number_hot_calls);
+                    gpu_time_used = timing.median_us;
                     perf_monitor->stop();
                 }
                 else
@@ -5960,8 +5977,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                         stream,
                         timing,
                         timingAbort);
-                    gpu_time_used
-                        = timing.median_us * (number_hot_calls < 1 ? 1 : number_hot_calls);
+                    gpu_time_used = timing.median_us;
                     perf_monitor->stop();
                 }
             }
@@ -6019,8 +6035,7 @@ void testing_matmul_with_bias(const Arguments& arg,
             }
             else if(arg.initialization == hipblaslt_initialization::norm_dist_one_special)
             {
-                for(int gemmIdx = 0; gemmIdx < gemm_count; gemmIdx++)
-                    tol[gemmIdx] = 1e-2;
+                std::fill(tol.begin(), tol.end(), 1e-2);
             }
             if(arg.unit_check || arg.norm_check || arg.allclose_check)
             {
@@ -6140,7 +6155,6 @@ void testing_matmul_with_bias(const Arguments& arg,
                     (uint32_t)tuningVec[heuristicTuningIndex[sol]].getSplitK(),
                     (uint32_t)tuningVec[heuristicTuningIndex[sol]].getWgm(),
                     gpu_time_used,
-                    flush_time_used,
                     flops,
                     gpu_mem_gbytes,
                     cpu_time_used,
@@ -6204,7 +6218,6 @@ void testing_matmul_with_bias(const Arguments& arg,
                 (uint32_t)tuningVec[heuristicTuningIndex[best_sol]].getSplitK(),
                 (uint32_t)tuningVec[heuristicTuningIndex[best_sol]].getWgm(),
                 best_gpu_time,
-                flush_time_used,
                 best_flops,
                 gpu_mem_gbytes,
                 cpu_time_used,
