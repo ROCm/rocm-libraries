@@ -36,7 +36,6 @@ from pathlib import Path
 from timeit import default_timer as timer
 from typing import Collection, List, NamedTuple, Optional, Union
 
-from Tensile import SOURCE_PATH, LibraryIO
 from Tensile.Common import (
     CHeader,
     DebugConfig,
@@ -86,6 +85,31 @@ from Tensile.Utilities.Decorators.Profile import profile
 from Tensile.Utilities.Decorators.Timing import timing
 
 from .ParseArguments import parseArguments
+
+
+from ..Resources import copy_static_headers
+
+################################################################################
+#
+# Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+#
+################################################################################
 
 
 def libraryRoot(outputPath: Union[str, Path]) -> Path:
@@ -683,19 +707,7 @@ def writeSolutionsAndKernelsTCL(
 
 @timing
 def copyStaticFiles(outputPath):
-    libraryStaticFiles = [
-        "TensileTypes.h",
-        "tensile_bfloat16.h",
-        "tensile_float8_bfloat8.h",
-        "KernelHeader.h",
-        "ReductionTemplate.h",
-        "memory_gfx.h",
-    ]
-
-    for fileName in libraryStaticFiles:
-        shutil.copy(os.path.join(SOURCE_PATH, fileName), outputPath)
-
-    return libraryStaticFiles
+    return copy_static_headers(outputPath)
 
 
 @timing

@@ -35,7 +35,7 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Dict, List, Optional, TypedDict
 
-from Tensile import CUSTOM_KERNEL_PATH, SolutionLibrary, LibraryIO
+from Tensile import SolutionLibrary, LibraryIO
 from Tensile.KernelWriter import DebugConfig
 from Tensile.KernelHelperNaming import KernelHelperEnum, initHelperKernelObjects
 from Tensile.Toolchain.Component import Assembler
@@ -285,7 +285,7 @@ def _getCustomKernelSolutionObj(
         assembler: Assembler,
         debugConfig: DebugConfig,
         isaInfoMap: Dict[IsaVersion, IsaInfo],
-        directory=CUSTOM_KERNEL_PATH
+        directory=None
     ):
     """Creates the Solution object for a custom kernel"""
     sol = getCustomKernelConfig(kernelName, internalSupportParams, directory)
