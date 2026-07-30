@@ -561,14 +561,20 @@ static MatrixFmtModifiers extractMatrixFormats(std::string_view instString) {
 void handleMXMFMAModifiers(StinkyInstruction* stinkyInst, const std::string& instString) {
     // MXMFMA does not support neg_lo/neg_hi modifiers; only matrix formats.
     auto fmts = extractMatrixFormats(instString);
-    if (!fmts.empty()) stinkyInst->addModifier<MatrixFmtModifiers>(fmts);
+    if (!fmts.empty()) {
+        stinkyInst->addModifier<MatrixFmtModifiers>(fmts);
+        stinkyInst->resolveMatrixFmtOverrides();
+    }
     stinkyInst->addModifier<MFMAModifiers>(MFMAModifiers{});
 }
 
 /// Helper to handle MFMA instruction modifiers
 void handleMFMAModifiers(StinkyInstruction* stinkyInst, const std::string& instString) {
     auto fmts = extractMatrixFormats(instString);
-    if (!fmts.empty()) stinkyInst->addModifier<MatrixFmtModifiers>(fmts);
+    if (!fmts.empty()) {
+        stinkyInst->addModifier<MatrixFmtModifiers>(fmts);
+        stinkyInst->resolveMatrixFmtOverrides();
+    }
 
     MFMAModifiers mod;
     mod.negBits = extractNegModifiers(instString);
