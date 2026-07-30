@@ -92,7 +92,7 @@ jobs:
 
   setup:
     needs: configure
-    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@main
+    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@release/therock-10.0
     with:
       build_variant: "release"
       # Limit GPU families for rocm-libraries CI
