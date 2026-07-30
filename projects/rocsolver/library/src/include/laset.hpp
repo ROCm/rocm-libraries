@@ -134,8 +134,6 @@ __global__ static void __launch_bounds__(LASET_MAX_THREADS) laset_kernel(char co
                 }
             }
         }
-
-        __syncthreads();
     } // end for bid
 }
 
