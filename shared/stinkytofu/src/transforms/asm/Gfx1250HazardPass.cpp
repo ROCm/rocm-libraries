@@ -241,6 +241,8 @@ class Gfx1250HazardPass : public Pass {
             return;
         }
 
+        // SW-prefetch runs later and owns its hints' XCnt waits; handle only
+        // pre-existing scalar prefetches here.
         if (isScalarPrefetch(*inst)) {
             if (state.hasMemory)
                 insertXcntDrain(builder, archId, inst, state, profile,

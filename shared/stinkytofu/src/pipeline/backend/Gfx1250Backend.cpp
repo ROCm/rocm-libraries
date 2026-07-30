@@ -201,6 +201,8 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBu
     // each in isolation (reuse never chains across a call site or a function boundary).
     pm.addPass(createSetMatrixReusePass(module.getFunctions()));
 
+    // Run after the final CFG build but before flatten/SW-prefetch: this pass
+    // covers final per-function code, while SW-prefetch owns its hints' XCnt waits.
     pm.addPass(createGfx1250HazardPass(module.getFunctions(), &module));
 
     // Re-merge callable functions into the entry at their ASM placement markers so
