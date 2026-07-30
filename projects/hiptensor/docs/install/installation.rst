@@ -19,7 +19,7 @@ Install the ROCm HPC SDK
 
 hipTensor is part of the ROCm HPC SDK on Linux, alongside rocALUTION. It is not included in the ROCm Core SDK. For the most complete installation, we recommend that developers use the ``amdrocm-hpc-sdk`` meta package.
 
-For instructions, see `Install ROCm HPC-SDK <https://rocm.docs.amd.com/en/latest/components/hpc-sdk/install.html>`_. Use the selector panel on that page to view instructions appropriate for your system environment.
+For instructions, see `Install ROCm HPC SDK <https://rocm.docs.amd.com/en/latest/components/hpc-sdk/install.html>`_. Use the selector panel on that page to view instructions appropriate for your system environment.
 
 Install hipTensor on Linux
 --------------------------
