@@ -359,6 +359,27 @@ Test markers and skip flags (registered in `tests/conftest.py`):
 python3 -m pytest tests/ --skip-slow --skip-geko-bin
 ```
 
+Coverage gate (local and CI):
+
+```bash
+# Full GEKO coverage with threshold enforcement (>=80%)
+tox -e coverage
+
+# Fast PR-like coverage (exclude slow + bin/geko subprocess tests)
+tox -e coverage -- --skip-slow --skip-geko-bin
+```
+
+The coverage environment writes:
+- `htmlcov/index.html`
+- `coverage.xml`
+- `coverage.json`
+- `geko_tests.xml` (JUnit)
+
+CI integration notes:
+- GEKO exposes category metadata in `test_categories.yaml` for external pytest category runners.
+- In CI lanes, run coverage from `projects/hipblaslt/utilities/geko` via `tox -e coverage`.
+- For Codecov status checks, upload GEKO coverage with the `GEKO` flag.
+
 See [`tests/README.md`](tests/README.md) for further details on the test layout.
 
 

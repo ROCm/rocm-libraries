@@ -30,6 +30,9 @@ coverage:
       TensileLite-CPP:
         flags: [TensileLite-CPP]
         target: 80%
+      GEKO:
+        flags: [GEKO]
+        target: 80%
       hipCUB:
         flags: [hipCUB]
         target: 80%
