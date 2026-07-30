@@ -25,9 +25,15 @@ def _ck_library_dir():
     return gemm_instances_path
 
 
-def parse_instances(str_instances: List[str]) -> List[CKGemmOperation]:
+def parse_instances(
+    str_instances: List[str], class_name: str = "DeviceGemm_Xdl_CShuffleV3"
+) -> List[CKGemmOperation]:
     """
-    Parse the lines containing Universal Gemm template instances into `CKGemmOperation` instances
+    Parse the lines containing Universal Gemm template instances into `CKGemmOperation` instances.
+
+    `class_name` is the CK device-op class the instance lines instantiate. Defaults to the
+    classic XDL class; pass "DeviceGemm_Wmma_CShuffleV3" for the gfx1250 WMMA instances, whose
+    template argument list is positionally identical after the class-name split.
     """
 
     def maybe_int(s):
@@ -38,7 +44,7 @@ def parse_instances(str_instances: List[str]) -> List[CKGemmOperation]:
 
     op_instances = []
     for line in str_instances:
-        s_template_args = line.split("DeviceGemm_Xdl_CShuffleV3")[-1].strip("<>, ")
+        s_template_args = line.split(class_name)[-1].strip("<>, ")
         template_args = []
         i_current = 0
         while i_current < len(s_template_args):
@@ -161,6 +167,14 @@ def gen_ops_library() -> List[CKGemmOperation]:
 
     log.debug("ck instances from library: %d", len(op_instances))
 
+    return _substitute_scheduler_spec(op_instances)
+
+
+def _substitute_scheduler_spec(
+    op_instances: List[CKGemmOperation],
+) -> List[CKGemmOperation]:
+    """Expand each parsed instance across the scheduler x GemmSpecialization domains,
+    but only for the fields left as placeholders (`BlkGemmPipeSched` / `GemmSpec`)."""
     schedulers = [
         "BlockGemmPipelineScheduler::Intrawave",
         "BlockGemmPipelineScheduler::Interwave",
@@ -176,7 +190,6 @@ def gen_ops_library() -> List[CKGemmOperation]:
         "GemmSpecialization::MNKPadding",
     ]
 
-    # substitute templated args by looping through their domains
     substitute_instances = []
     for instance in op_instances:
         sub_scheduler = instance.block_gemm_pipeline_scheduler == "BlkGemmPipeSched"
