@@ -78,7 +78,10 @@ void addGfx1250RegionPasses(PassManager& pm, const StinkyAsmModule& module, OptL
 
     pm.addPass(createCFGBuilderPass());
     if (enableWaitCnt) {
-        pm.addPass(createStinkyRemoveWaitCntPass());
+        // TODO: remove this temporary SIA4/SIA0 split once a dedicated hazard pass
+        // handles xcnt placement.
+        pm.addPass(createStinkyRemoveWaitCntPass(/*removeTensorWaitCnt=*/true,
+                                                 /*removeXcntWaitCnt=*/optLevel == OptLevel::O3));
         pm.addPass(createStinkyRemoveNopPass());
     }
 
