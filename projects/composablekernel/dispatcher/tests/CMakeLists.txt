@@ -27,6 +27,33 @@ set_tests_properties(dispatcher_test_autocorrect PROPERTIES
     ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
 )
 
+# Operator tile-constraints table regression test
+add_test(
+    NAME dispatcher_test_arch_filter_constraints
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_arch_filter_constraints.py
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/..
+)
+
+set_tests_properties(dispatcher_test_arch_filter_constraints PROPERTIES
+    LABELS "dispatcher;python;validation"
+    TIMEOUT 60
+    ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
+)
+
+# gemm_utils host-helper + runner-shape regression test. Also acts as an import
+# canary: a merge that truncates python/gemm_utils.py (see #9308) makes this fail.
+add_test(
+    NAME dispatcher_test_gemm_utils
+    COMMAND ${Python3_EXECUTABLE} -m unittest discover -s ${CMAKE_CURRENT_SOURCE_DIR} -p test_gemm_utils.py -v
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+set_tests_properties(dispatcher_test_gemm_utils PROPERTIES
+    LABELS "dispatcher;python;gemm;validation"
+    TIMEOUT 60
+    ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
+)
+
 # Verbose version of the test
 add_test(
     NAME dispatcher_test_autocorrect_verbose

@@ -636,6 +636,49 @@ class TestTemplateOutputContent:
         assert "TEST_F" in content
         assert "fromBackendDescriptor" in content or "fromNode" in content
 
+    @pytest.mark.parametrize("config_name", ALL_CONFIG_NAMES)
+    def test_integration_round_trip_tests_compare_tensor_names(
+        self, config_name, load_test_config, generator, tmp_path
+    ):
+        """Generated lowering and lifting tests compare every required tensor name."""
+        config = load_test_config(config_name)
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        generator.render(config, output_dir, "backend")
+
+        lowering_content = (
+            output_dir / "tests" / "frontend" / config.test_integration_filename
+        ).read_text()
+        lifting_content = (
+            output_dir / "tests" / "frontend" / config.test_integration_lifting_filename
+        ).read_text()
+        frontend_map = config.tensor_field_frontend_map
+
+        for tensor_field in config.required_tensor_fields:
+            frontend_tensor = frontend_map.get(tensor_field.name)
+            expected_name = (
+                frontend_tensor.name if frontend_tensor else tensor_field.name
+            )
+            uid_constant = (
+                f"{config.tensor_const_prefix}TENSOR_{tensor_field.name.upper()}_UID"
+            )
+            lowering_assertion = (
+                f'EXPECT_EQ(tensorMap[{uid_constant}]->name, "{expected_name}");'
+            )
+            lifting_assertion = (
+                f'EXPECT_EQ(tensorMap[{uid_constant}]->get_name(), "{expected_name}");'
+            )
+
+            assert lowering_assertion in lowering_content
+            assert lifting_content.count(lifting_assertion) >= 2
+
+            if frontend_tensor:
+                attribute_assertion = (
+                    "EXPECT_EQ(opNode->attributes."
+                    f'{frontend_tensor.effective_getter_name}()->get_name(), "{expected_name}");'
+                )
+                assert attribute_assertion in lifting_content
+
     def test_frontend_attributes_hpp_content(
         self, convolution_fwd_config, generator, tmp_path
     ):

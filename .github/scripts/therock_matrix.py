@@ -18,7 +18,6 @@ subtree_to_project_map = {
     "projects/hipdnn": "hipdnn",
     "projects/hipfft": "fft",
     "projects/hiprand": "rand",
-    "projects/hiptensor": "hiptensor",
     "projects/hipsolver": "solver",
     "projects/hipsparse": "sparse",
     "projects/hipsparselt": "sparselt",
@@ -32,6 +31,7 @@ subtree_to_project_map = {
     "projects/rocthrust": "prim",
     "projects/rocalution": "rocalution",
     "projects/rocwmma": "rocwmma",
+    "projects/hipthreads": "hipthreads",
     "shared/mxdatagenerator": "blas",
     "shared/origami": "blas",
     "shared/rocroller": "rocroller",
@@ -65,17 +65,6 @@ project_map = {
         "cmake_options": ["-DTHEROCK_ENABLE_FFT=ON", "-DTHEROCK_ENABLE_RAND=ON"],
         "projects_to_test": ["hipfft", "rocfft"],
     },
-    "hiptensor": {
-        "cmake_options": [
-            "-DTHEROCK_ENABLE_HIPTENSOR=ON",
-            "-DTHEROCK_ENABLE_COMPOSABLE_KERNEL=ON",
-            "-DTHEROCK_ENABLE_RAND=ON",
-        ],
-        "additional_flags": {
-            "linux": ["-DTHEROCK_ENABLE_ROCPROFV3=ON"],
-        },
-        "projects_to_test": ["hiptensor"],
-    },
     "hip-kernel-provider": {
         "cmake_options": [
             "-DTHEROCK_ENABLE_HIPKERNELPROVIDER=ON",
@@ -83,6 +72,10 @@ project_map = {
             "-DTHEROCK_FLAG_HIPKERNELPROVIDER_ENABLE_ROCKE=ON",
         ],
         "projects_to_test": ["hipkernelprovider"],
+    },
+    "hipthreads": {
+        "cmake_options": ["-DTHEROCK_ENABLE_HIPTHREADS=ON"],
+        "projects_to_test": ["hipthreads"],
     },
 }
 

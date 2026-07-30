@@ -17,15 +17,22 @@
 #pragma once
 
 #include <thrust/detail/config.h>
-#include <thrust/device_new.h>
+
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/device_malloc.h>
+#include <thrust/device_new.h>
 #include <thrust/uninitialized_fill.h>
 
 THRUST_NAMESPACE_BEGIN
 
-template<typename T>
-  device_ptr<T> device_new(device_ptr<void> p,
-                           const size_t n)
+template <typename T>
+device_ptr<T> device_new(device_ptr<void> p, const size_t n)
 {
   // XXX TODO dispatch n null device constructors at p here
   // in the meantime, dispatch 1 null host constructor here
@@ -33,10 +40,8 @@ template<typename T>
   return device_new<T>(p, T(), n);
 } // end device_new()
 
-template<typename T>
-  device_ptr<T> device_new(device_ptr<void> p,
-                           const T &exemplar,
-                           const size_t n)
+template <typename T>
+device_ptr<T> device_new(device_ptr<void> p, const T& exemplar, const size_t n)
 {
   device_ptr<T> result(reinterpret_cast<T*>(p.get()));
 
@@ -46,8 +51,8 @@ template<typename T>
   return result;
 } // end device_new()
 
-template<typename T>
-  device_ptr<T> device_new(const size_t n)
+template <typename T>
+device_ptr<T> device_new(const size_t n)
 {
   // call placement new
   return device_new<T>(thrust::device_malloc<T>(n));
