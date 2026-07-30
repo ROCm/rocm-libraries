@@ -35,10 +35,8 @@ jobs:
         with:
           amdgpu_family: gfx94X-dcgpu
 
-      - name: Set up Python
-        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
-        with:
-          python-version: "3.12"
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
 
       - name: Install test dependencies
         run: |
@@ -59,11 +57,12 @@ jobs:
         shell: bash
         working-directory: projects/hipblaslt/utilities/geko
     steps:
+      - name: Configure git long paths
+        working-directory: .
+        run: git config --global core.longpaths true
+
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-
-      - name: Configure git long paths
-        run: git config --global core.longpaths true
 
       - name: Set up Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
@@ -74,6 +73,9 @@ jobs:
         uses: ./.github/actions/setup-rocm-windows
         with:
           amdgpu_family: gfx1151
+      
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
 
       - name: Install test dependencies
         run: |
