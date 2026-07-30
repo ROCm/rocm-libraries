@@ -26,6 +26,7 @@
 import contextlib
 import functools
 import io
+import os
 import sys
 import threading
 import time
@@ -225,8 +226,10 @@ def _setup(argv=None):
     if logicPath.is_file() and logicPath.suffix == ".yaml":
         files = [logicPath]
     else:
-        pattern = "**/*.yaml"
-        files = list(logicPath.glob(pattern))
+        logic_filter = getattr(args, "logic_filter", "**/*.yaml")
+        if not isinstance(logic_filter, (str, os.PathLike)):
+            logic_filter = "**/*.yaml"
+        files = list(logicPath.glob(logic_filter))
     if len(files) == 0:
         print1(f"No files found in {logicPath}")
         exit(1)
@@ -270,7 +273,9 @@ def main(argv=None):
     warnings.filterwarnings("ignore", message=".*timeout.*will not be used.*")
 
     reset_reported_failures()
-    jobs, isaInfoMap, logicPath, files, check, args = _setup(argv)
+    jobs, isaInfoMap, logicPath, files, check, args = (
+        _setup() if argv is None else _setup(argv)
+    )
 
     try:
         known_bugs = (
