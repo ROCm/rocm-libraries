@@ -8,11 +8,11 @@
 
 // <thread>
 
-// class thread
+// class wthread
 //     template <class _Fp, class ..._Args,
-//         explicit thread(_Fp&& __f, _Args&&... __args);
+//         explicit wthread(_Fp&& __f, _Args&&... __args);
 //  This constructor shall not participate in overload resolution
-//       if decay<F>::type is the same type as hip::thread.
+//       if decay<F>::type is the same type as hip::wthread.
 
 
 #include <hip/thread>
@@ -21,7 +21,7 @@
 
 int main(int, char**)
 {
-    volatile hip::thread t1;
-    hip::thread t2 ( t1, 1, 2.0 );
+    volatile hip::wthread t1;
+    hip::wthread t2 ( t1, 1, 2.0 );
     return 0;
 }
