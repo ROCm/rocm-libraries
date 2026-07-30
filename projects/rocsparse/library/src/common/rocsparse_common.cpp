@@ -126,14 +126,8 @@ namespace rocsparse
     }
 
     template <uint32_t BLOCKSIZE, typename I, typename A, typename T>
-    ROCSPARSE_DEVICE_ILF void scale_2d_device(I               m,
-                                              I               n,
-                                              int64_t         ld,
-                                              int64_t         stride,
-                                              int64_t         batch,
-                                              T               value,
-                                              A* __restrict__ array,
-                                              rocsparse_order order)
+    ROCSPARSE_DEVICE_ILF void scale_2d_device(
+        I m, I n, int64_t ld, T value, A* __restrict__ array, rocsparse_order order)
     {
         I gid = hipBlockIdx_x * BLOCKSIZE + hipThreadIdx_x;
 
@@ -147,11 +141,11 @@ namespace rocsparse
 
         if(value == static_cast<T>(0))
         {
-            array[lid + ld * wid + stride * batch] = static_cast<A>(0);
+            array[lid + ld * wid] = static_cast<A>(0);
         }
         else
         {
-            array[lid + ld * wid + stride * batch] *= value;
+            array[lid + ld * wid] *= value;
         }
     }
 
@@ -225,11 +219,11 @@ namespace rocsparse
         {
             for(int64_t batch = hipBlockIdx_y; batch < batch_count; batch += hipGridDim_y)
             {
-                rocsparse::scale_2d_device<BLOCKSIZE>(m, n, ld, stride, batch, scalar, array, order);
+                rocsparse::scale_2d_device<BLOCKSIZE>(
+                    m, n, ld, scalar, rocsparse::load_pointer(array, batch, stride), order);
             }
         }
     }
-
 }
 
 template <typename I, typename T>
