@@ -348,7 +348,7 @@ char Gfx1250HazardPass::ID = 0;
 
 namespace stinkytofu {
 std::unique_ptr<Pass> createGfx1250HazardPass(std::vector<Function*> functions,
-                                               StinkyAsmModule* module) {
+                                              StinkyAsmModule* module) {
     return std::make_unique<Gfx1250HazardPass>(std::move(functions), module);
 }
 }  // namespace stinkytofu
