@@ -2928,10 +2928,15 @@ class StreamKTwoTileDPFirst(StreamK):
         workgroup coords (``WorkGroup0``=M-tile, ``WorkGroup1``=N-tile) into the
         linear DP index and multicasts on the dense kernel-init masks, so a
         padded lane would both hang the ``-3`` barrier and stall ``ld_bcst``. The
-        1-D ``[C,1]`` path keeps every launched WG live and conservatively drops
-        its whole boundary cluster to self-only loads
-        (``streamKMulticastMaskPredicate``), issuing no broadcast that a padded
-        peer must balance.
+        1-D ``[C,1]`` path keeps every launched WG live and instead defers its
+        prologue cluster arrive until AFTER the StreamK work-check (see
+        ``preLoop``), so a no-work peer -- whether a padded boundary tile or an
+        empty K-split partial -- ``s_endpgm``\\ s at the work-check before it can
+        signal ``-3`` (its WAVEDONE frees the barrier slot), while every peer with
+        real work still arrives. That defer is correct for both reductions,
+        including the single-kernel tree K-split where the rounded grid splits
+        each tile across peers (so ``StreamKIdx >= totalTiles`` does NOT imply
+        no work), which a coord-based early-exit here would wrongly drop.
 
         MUST be called from ``preLoop`` BEFORE the 2-D fold overwrites
         ``WorkGroup0`` and BEFORE ``streamKMulticastPrologueSignal``.
@@ -2986,7 +2991,10 @@ class StreamKTwoTileDPFirst(StreamK):
         # here, before the 2-D fold overwrites WorkGroup0 with the linear index
         # and before the prologue cluster-barrier arrive, so their WAVEDONE frees
         # the -3 barrier slot for the present peers (non-divisible-size support
-        # now that ClusterDimCheck is gone). No-op unless 2-D dual multicast.
+        # now that ClusterDimCheck is gone). No-op unless 2-D dual multicast. The
+        # 1-D [C,1] path handles its no-work peers differently: it defers the
+        # prologue arrive to AFTER the StreamK work-check (see below), so padded
+        # boundary tiles AND empty K-split partials exit before signaling -3.
         module.add(self.streamKClusterPadEarlyExit(writer, kernel))
 
         # 2-D DUAL-multicast (ForceDPOnly 2-D dual multicast AND the standard
@@ -3036,16 +3044,28 @@ class StreamKTwoTileDPFirst(StreamK):
         # it pairs the cluster-barrier pass's first-load wait. No-op unless
         # StreamKMulticast is enabled.
         #
-        # EXCEPTION -- standard dual-2D (StreamKForceDPOnly==0 +
+        # EXCEPTION 1 -- standard dual-2D (StreamKForceDPOnly==0 +
         # StreamKDualMulticast): the SK partial round RE-ENTERS the persistent loop,
         # so the main-loop first-load `s_barrier_wait -3` executes ONCE PER PASS while
         # this pre-loop arrive fires only ONCE -> arrivals(1) < waits(N) -> the SK
         # round's cluster barrier deadlocks (HW-observed hang). For that path the
         # arrive is instead emitted PER PERSISTENT PASS in graWorkGroup (after the
         # alpha/start-tile gate, on the same main-loop path as the wait) so every
-        # pass is balanced. ForceDPOnly-2D (single pass, no SK round) and 1-D
-        # multicast keep the pre-loop arrive.
-        if not (streamKDual2DMulticast(kernel) and not kernel["StreamKForceDPOnly"]):
+        # pass is balanced.
+        #
+        # EXCEPTION 2 -- 1-D [C,1] multicast (StreamKForceDPOnly==0, not dual-2D):
+        # with ClusterDimCheck dropped the rounded-up grid can leave a boundary
+        # cluster with NO-WORK peers -- either padded tiles beyond the M extent
+        # (StreamKIdx >= totalTiles) or, under the single-kernel tree K-split,
+        # empty partials. Those peers exit at the StreamK work-check below; if the
+        # arrive fired here (before the work-check) they would signal -3 and then
+        # WAVEDONE, over-counting the barrier ("signal for barrier (-3) that is
+        # already completed"). So DEFER the 1-D arrive to just AFTER the work-check
+        # (emitted at the end of this method) -- only peers with real work reach it.
+        #
+        # ForceDPOnly-2D (single pass, no SK round) keeps the pre-loop arrive.
+        if not ((streamKDual2DMulticast(kernel) and not kernel["StreamKForceDPOnly"])
+                or (streamKMulticast(kernel) and not streamKDual2DMulticast(kernel))):
             module.add(self.streamKMulticastPrologueSignal(writer, kernel))
 
         if kernel["StreamKForceDPOnly"]:
@@ -3064,6 +3084,16 @@ class StreamKTwoTileDPFirst(StreamK):
                 module.add(SCmpLtU32(src0=sgpr("StreamKIter"), src1=sgpr(sTmp), comment="Make sure there's work to do"))
             writer.releaseStreamKConstSgpr(sIpt)
             module.add(writer.longBranchScc0(Label("KernelEnd", ""), posNeg=1))
+            # StreamKMulticast 1-D [C,1] (deferred prologue arrive, ForceDPOnly
+            # single-DP path): emit the cluster split-barrier arrive AFTER the
+            # work-check above so only peers with real work signal -3. A degenerate
+            # boundary cluster's padded peers (StreamKIdx >= totalTiles) already
+            # s_endpgm'd at the work-check, their WAVEDONE freeing the -3 slot; every
+            # non-degenerate peer still arrives (as it did pre-fix, just later in the
+            # prologue). No-op unless 1-D StreamKMulticast. 2-D dual keeps its
+            # pre-fold arrive (emitted above) + streamKClusterPadEarlyExit.
+            if streamKMulticast(kernel) and not streamKDual2DMulticast(kernel):
+                module.add(self.streamKMulticastPrologueSignal(writer, kernel))
             return module
 
         # Two-tile SK (DP first)
@@ -3226,6 +3256,19 @@ class StreamKTwoTileDPFirst(StreamK):
             module.add(self.computeTotalIters(writer, kernel, sTmp))
             module.add(SCmpLtU32(src0=sgpr("StreamKIter"), src1=sgpr(sTmp), comment="Make sure there's work to do"))
         module.add(writer.longBranchScc0(Label("KernelEnd", ""), posNeg=1))
+
+        # StreamKMulticast 1-D [C,1] (deferred prologue arrive): emit the cluster
+        # split-barrier arrive HERE, after the no-work KernelEnd branch, so only
+        # peers with real work signal -3. A boundary cluster's no-work peers --
+        # padded tiles (StreamKIdx >= totalTiles) OR empty tree-K-split partials --
+        # already s_endpgm'd at the work-check above, decrementing the -3 barrier's
+        # live-member count via WAVEDONE before any arrival, so the surviving peers'
+        # first-load `s_barrier_wait -3` completes exactly (no over-signal). Keeps
+        # non-degenerate 1-D behavior unchanged (every peer has work -> every peer
+        # arrives, same as before, only later in the prologue). No-op unless 1-D
+        # StreamKMulticast. See EXCEPTION 2 in the pre-fold gating above.
+        if streamKMulticast(kernel) and not streamKDual2DMulticast(kernel):
+            module.add(self.streamKMulticastPrologueSignal(writer, kernel))
 
         return module
 
