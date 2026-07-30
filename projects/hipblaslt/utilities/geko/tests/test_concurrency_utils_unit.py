@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import os
 import signal
 import subprocess
 
@@ -84,6 +85,8 @@ def test_terminate_process_tree_windows_timeout_fallback(monkeypatch):
 
 
 def test_terminate_process_tree_posix_lookup_failure(monkeypatch):
+    if os.name == "nt":
+        pytest.skip("POSIX-only test")
     proc = _Proc()
     monkeypatch.setattr(cutils.os, "getpgid", lambda _pid: (_ for _ in ()).throw(ProcessLookupError()))
     cutils._terminate_process_tree_posix(proc, proc_name="cfg", terminate_timeout=1.0)
@@ -92,6 +95,8 @@ def test_terminate_process_tree_posix_lookup_failure(monkeypatch):
 
 
 def test_terminate_process_tree_posix_group_leader_sigterm_then_sigkill(monkeypatch):
+    if os.name == "nt":
+        pytest.skip("POSIX-only test")
     proc = _Proc(wait_raises=[subprocess.TimeoutExpired("cmd", 1), None])
     monkeypatch.setattr(cutils.os, "getpgid", lambda _pid: proc.pid)
 
@@ -108,6 +113,8 @@ def test_terminate_process_tree_posix_group_leader_sigterm_then_sigkill(monkeypa
 
 
 def test_terminate_process_tree_posix_non_group_leader_timeout_kill(monkeypatch):
+    if os.name == "nt":
+        pytest.skip("POSIX-only test")
     proc = _Proc(wait_raises=[subprocess.TimeoutExpired("cmd", 1), None])
     monkeypatch.setattr(cutils.os, "getpgid", lambda _pid: proc.pid + 1)
     cutils._terminate_process_tree_posix(proc, proc_name="cfg", terminate_timeout=1.0)

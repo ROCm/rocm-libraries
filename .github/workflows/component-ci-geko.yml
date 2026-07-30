@@ -53,7 +53,7 @@ jobs:
         uses: ./.github/actions/pip-install-test
         with:
           package_path: projects/hipblaslt/utilities/geko
-          test_path: python_module/tests
+          test_path: tests
 
   windows:
     name: Windows
@@ -98,4 +98,4 @@ jobs:
         uses: ./.github/actions/pip-install-test
         with:
           package_path: projects/hipblaslt/utilities/geko
-          test_path: python_module/tests
+          test_path: tests
