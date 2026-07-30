@@ -1,0 +1,111 @@
+################################################################################
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+# SPDX-License-Identifier: MIT
+################################################################################
+# R6 DESIGNED config — gfx950 MXFP8 rich GEMM: bias + activation + GSU fork.
+#
+# Targets uncovered arms in Tensile/KernelWriterAssembly.py for gfx950:
+#
+#   isgfx950 MX shiftK / tail zeroing (lines ~8725-8830):
+#     MXBlockA=32, MXBlockB=32 with isgfx950=True reaches the separate
+#     VCndMaskB32 zeroing path for MX tail loops.
+#
+#   isgfx950 MX HostPreSwizzle SRD limit (lines ~4207-4298):
+#     computeLoadSrd path for swizzled MX scale tensors on gfx950;
+#     reached when MXScaleFormat resolves to HostPreSwizzle.
+#
+#   GSU > 1 accumulation paths (lines ~2652, ~3148-3158):
+#     GlobalSplitU=2 drives the GSU offset assignment and the
+#     MultipleBuffer accumulation path (graUnrollAssignment += gsuOffset).
+#
+#   Bias + Activation fused path (globalStoreWait / epilogue):
+#     UseBias=1 + Activation=True + ActivationType=hipblaslt_all exercises
+#     the fused epilogue bias + activation emit in GlobalWriteBatch.
+#
+#   StreamK on vs off (StreamK=0 vs StreamK=3):
+#     Two variants -- one standard GEMM, one StreamK-3 -- exercise the
+#     StreamK fork in the emit (kernel preamble, tile grid logic, etc.).
+#
+# ForkParameters product: 2 (MI shapes) x 2 (GSU) x 2 (StreamK) = 8 kernels.
+# All 8 must emit err=0.
+#
+# Derived from the MX.yaml curated logic (gfx950 MXBlockA/B=32, DataType=S/F8,
+# ISA=[9,5,0]) and the mx32f8_tn.yaml pattern (bias + activation + scale).
+
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  SleepPercent: 0
+  NumElementsToValidate: 0
+  NumWarmups: 0
+  NumBenchmarks: 1
+  EnqueuesPerSync: 1
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  Device: 0
+  PrintSolutionRejectionReason: False
+
+BenchmarkProblems:
+  ########################################
+  # MXFP8 -> FP32 (TN), MXBlockA=B=32
+  # Bias=S, Activation=hipblaslt_all, GSU fork, StreamK fork
+  # Targets: gfx950 MX HostPreSwizzle SRD-limit, isgfx950 shiftK zeroing,
+  #          GSU offset assignment, and bias+activation fused epilogue.
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      MXBlockA: 32
+      MXBlockB: 32
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Activation: True
+      ActivationType: hipblaslt_all
+      UseBias: 1
+      BiasDataTypeList: [s]
+      UseScaleAlphaVec: 1
+    - # BenchmarkProblemSizeGroup
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        # Two MI shapes: 16x16x128 and 32x32x64, each with 2x2 wave-group
+        # (matching valid MX.yaml shapes for gfx950)
+        - MatrixInstruction:
+          - [16, 16, 128, 1, 1, 2, 2, 2, 2]
+          - [32, 32,  64, 1, 1, 2, 2, 2, 2]
+        # GSU=1 (base) vs GSU=2 (exercises graUnrollAssignment gsuOffset path)
+        - GlobalSplitU: [1, 2]
+        # StreamK=0 (standard) vs StreamK=3 (XCC StreamK)
+        - StreamK: [0, 3]
+        # Required fixed parameters for gfx950 MX subtile path
+        - DepthU: [256]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [True]
+        - TransposeLDS: [1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - 1LDSBuffer: [-1]
+        - LocalReadVectorWidth: [16]
+        - GlobalReadVectorWidthA: [16]
+        - GlobalReadVectorWidthB: [16]
+        - StaggerU: [0]
+        - SourceSwap: [True]
+        - StoreVectorWidth: [-1]
+        - GlobalSplitUAlgorithm: ["MultipleBuffer"]
+        - UseSubtileImpl: [True]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 256]
+          - Exact: [256, 256, 1, 256]
+        - BiasTypeArgs: ['s']
+        - ActivationArgs:
+          - [Enum: none]

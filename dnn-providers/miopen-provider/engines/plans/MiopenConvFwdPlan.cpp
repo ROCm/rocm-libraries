@@ -1,8 +1,8 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#include <hipdnn_data_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
+#include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
@@ -13,8 +13,9 @@ namespace miopen_plugin
 {
 
 ConvFwdParams::ConvFwdParams(
-    const hipdnn_data_sdk::data_objects::ConvolutionFwdAttributes& attributes,
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+    const hipdnn_flatbuffers_sdk::data_objects::ConvolutionFwdAttributes& attributes,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap,
     bool deterministicEnabled)
     : _spatialDimCount(miopen_utils::getSpatialDimCount(
@@ -28,9 +29,9 @@ ConvFwdParams::ConvFwdParams(
     const auto& attrY = miopen_utils::findTensorAttributes(tensorMap, _y.uid());
 
     const auto inputDims
-        = hipdnn_data_sdk::utilities::convertFlatBufferVectorToStdVector(attrX.dims());
+        = hipdnn_flatbuffers_sdk::utilities::convertFlatBufferVectorToStdVector(attrX.dims());
     const auto weightDims
-        = hipdnn_data_sdk::utilities::convertFlatBufferVectorToStdVector(attrW.dims());
+        = hipdnn_flatbuffers_sdk::utilities::convertFlatBufferVectorToStdVector(attrW.dims());
     const auto groupCount = hipdnn_data_sdk::utilities::calculateGroupCount(inputDims, weightDims);
 
     _conv = MiopenConvDescriptor(
@@ -59,6 +60,11 @@ const MiopenConvDescriptor& ConvFwdParams::conv() const
     return _conv;
 }
 
+size_t ConvFwdParams::spatialDimCount() const
+{
+    return _spatialDimCount;
+}
+
 bool ConvFwdParams::validTensors() const
 {
     return _tensorsValid;
@@ -70,6 +76,26 @@ ConvFwdPlan::ConvFwdPlan(const HipdnnMiopenHandle& handle,
     : _params(std::move(params))
     , _executionSettings(executionSettings)
 {
+    const size_t expectedDims = _params.spatialDimCount() + 2;
+    int wDimCount = 0;
+    int yDimCount = 0;
+    miopenGetTensorDescriptorSize(_params.w().tensorDescriptor(), &wDimCount);
+    miopenGetTensorDescriptorSize(_params.y().tensorDescriptor(), &yDimCount);
+    if(static_cast<size_t>(wDimCount) != expectedDims)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Weight tensor has " + std::to_string(wDimCount) + " dimensions, expected "
+                + std::to_string(expectedDims));
+    }
+    if(static_cast<size_t>(yDimCount) != expectedDims)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Output tensor has " + std::to_string(yDimCount) + " dimensions, expected "
+                + std::to_string(expectedDims));
+    }
+
     // Validate that there are solutions available for this configuration.
     size_t solutionCount;
     THROW_ON_MIOPEN_FAILURE(
@@ -91,6 +117,14 @@ ConvFwdPlan::ConvFwdPlan(const HipdnnMiopenHandle& handle,
     if(_executionSettings.workspaceSizeLimit().has_value())
     {
         _workspaceSize = _executionSettings.workspaceSizeLimit().value();
+        HIPDNN_PLUGIN_LOG_INFO(
+            "Convolution Fwd: Using knob settings workspace size: " << _workspaceSize);
+    }
+    else if(_executionSettings.defaultWorkspaceSize().has_value())
+    {
+        _workspaceSize = _executionSettings.defaultWorkspaceSize().value();
+        HIPDNN_PLUGIN_LOG_INFO(
+            "Convolution Fwd: Using default max workspace size: " << _workspaceSize);
     }
     else
     {
@@ -101,6 +135,7 @@ ConvFwdPlan::ConvFwdPlan(const HipdnnMiopenHandle& handle,
                                                      _params.conv().convDescriptor(),
                                                      _params.y().tensorDescriptor(),
                                                      &_workspaceSize));
+        HIPDNN_PLUGIN_LOG_WARN("Convolution Fwd: Using queried workspace size: " << _workspaceSize);
     }
 }
 
@@ -115,11 +150,11 @@ void ConvFwdPlan::execute(const HipdnnMiopenHandle& handle,
                           void* workspace) const
 {
     auto xBuffer
-        = miopen_utils::findDeviceBuffer(_params.x().uid(), deviceBuffers, numDeviceBuffers);
+        = hipdnn_plugin_sdk::findDeviceBuffer(_params.x().uid(), deviceBuffers, numDeviceBuffers);
     auto wBuffer
-        = miopen_utils::findDeviceBuffer(_params.w().uid(), deviceBuffers, numDeviceBuffers);
+        = hipdnn_plugin_sdk::findDeviceBuffer(_params.w().uid(), deviceBuffers, numDeviceBuffers);
     auto yBuffer
-        = miopen_utils::findDeviceBuffer(_params.y().uid(), deviceBuffers, numDeviceBuffers);
+        = hipdnn_plugin_sdk::findDeviceBuffer(_params.y().uid(), deviceBuffers, numDeviceBuffers);
 
     size_t workspaceSize = 0;
     if(workspace != nullptr)
@@ -128,22 +163,26 @@ void ConvFwdPlan::execute(const HipdnnMiopenHandle& handle,
         workspaceSize = _workspaceSize;
     }
 
-    ScopedTuningPolicy tuningGuard(handle.miopenHandle, _executionSettings.benchmarkingEnabled());
+    const ScopedTuningPolicy tuningGuard(handle.miopenHandle,
+                                         _executionSettings.benchmarkingEnabled());
 
     // Algorithm selection is performed on first execute() call rather than in constructor
     // because miopenFindConvolutionForwardAlgorithm requires device memory buffers.
     // These buffers are only available during execute(), not during plan construction.
     // The selected algorithm is cached to avoid redundant find calls on subsequent executions.
     {
-        std::lock_guard<std::mutex> lock(_algorithmMutex);
+        const std::lock_guard<std::mutex> lock(_algorithmMutex);
 
         if(!_algorithm.has_value())
         {
             HIPDNN_PLUGIN_LOG_INFO(
                 "Convolution Fwd: Performing algorithm selection (first execution)");
 
-            bool traceEnabled = HIPDNN_PLUGIN_LOG_IS_TRACE_ENABLED();
-            int requestCount = traceEnabled ? 10 : 1;
+            const bool traceEnabled = HIPDNN_PLUGIN_LOG_IS_TRACE_ENABLED();
+            // Find dedupes by algorithm class (ShrinkToFind10Results in
+            // projects/miopen/src/ocl/convolutionocl.cpp:238), so it returns at most one
+            // entry per value of miopenConvFwdAlgorithm_t (5 enumerators).
+            const int requestCount = traceEnabled ? 5 : 1;
 
             std::vector<miopenConvAlgoPerf_t> perfResults(static_cast<size_t>(requestCount));
             int returnedAlgoCount;

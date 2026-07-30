@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -45,6 +45,13 @@ endif()
 set(USER_ROCM_WARN_TOOLCHAIN_VAR ${ROCM_WARN_TOOLCHAIN_VAR})
 
 set(ROCM_WARN_TOOLCHAIN_VAR OFF CACHE BOOL "")
+# Suppress ROCMChecks WARNING on third-party dependencies
+set(_HIPCUB_DISABLE_ROCM_CHECKS FALSE)
+macro(rocm_check_toolchain_var var access value list_file)
+  if(NOT _HIPCUB_DISABLE_ROCM_CHECKS)
+    _rocm_check_toolchain_var("${var}" "${access}" "${value}" "${list_file}")
+  endif()
+endmacro()
 # Turn off warnings and errors for all warnings in dependencies
 separate_arguments(CXX_FLAGS_LIST NATIVE_COMMAND ${CMAKE_CXX_FLAGS})
 list(REMOVE_ITEM CXX_FLAGS_LIST /WX -Werror -Werror=pendantic -pedantic-errors)
@@ -323,7 +330,9 @@ if(USER_BUILD_TEST)
         GIT_TAG        release-1.11.0
       )
     endif()
+    set(_HIPCUB_DISABLE_ROCM_CHECKS TRUE)
     FetchContent_MakeAvailable(googletest)
+    set(_HIPCUB_DISABLE_ROCM_CHECKS FALSE)
     add_library(GTest::GTest ALIAS gtest)
     add_library(GTest::Main  ALIAS gtest_main)
   else()
@@ -349,7 +358,11 @@ if(USER_BUILD_BENCHMARK)
       GIT_REPOSITORY https://github.com/google/benchmark.git
       GIT_TAG        v${BENCHMARK_VERSION}
     )
+    set(HAVE_STD_REGEX ON)
+    set(RUN_HAVE_STD_REGEX 1)
+    set(_HIPCUB_DISABLE_ROCM_CHECKS TRUE)
     FetchContent_MakeAvailable(googlebench)
+    set(_HIPCUB_DISABLE_ROCM_CHECKS FALSE)
     if(NOT TARGET benchmark::benchmark)
       add_library(benchmark::benchmark ALIAS benchmark)
     endif()
@@ -360,7 +373,7 @@ endif(USER_BUILD_BENCHMARK)
 
 # CUB (only for CUDA platform)
 if(HIP_COMPILER STREQUAL "nvcc")
-  set(CCCL_MINIMUM_VERSION 2.8.2)
+  set(CCCL_MINIMUM_VERSION 3.0.0)
   if(NOT DOWNLOAD_CUB)
     find_package(CCCL ${CCCL_MINIMUM_VERSION} CONFIG)
   endif()

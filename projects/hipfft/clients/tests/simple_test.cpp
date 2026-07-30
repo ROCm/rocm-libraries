@@ -26,6 +26,8 @@
 #include <random>
 #include <vector>
 
+#include "../../shared/fftw_transform.h"
+#include "../../shared/params_gen.h"
 #include "../hipfft_params.h"
 
 DISABLE_WARNING_PUSH
@@ -128,6 +130,11 @@ const std::vector<hipfftLibraryPropertyType> enum_helper<hipfftLibraryPropertyTy
 
 TEST(hipfftTest, Create1dPlan)
 {
+    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
+       > unittest_prob)
+    {
+        GTEST_SKIP();
+    }
     hipfftHandle plan   = hipfft_params::INVALID_PLAN_HANDLE;
     size_t       length = 1024;
     ASSERT_EQ(hipfftPlan1d(&plan, length, HIPFFT_C2C, 1), HIPFFT_SUCCESS);
@@ -137,6 +144,11 @@ TEST(hipfftTest, Create1dPlan)
 
 TEST(hipfftTest, CreatePlanMany)
 {
+    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
+       > unittest_prob)
+    {
+        GTEST_SKIP();
+    }
     int const  rank         = 3;
     int const  nX           = 64;
     int const  nY           = 128;
@@ -254,6 +266,11 @@ TEST(hipfftTest, CreatePlanMany)
 
 TEST(hipfftTest, CreatePlanMany64)
 {
+    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
+       > unittest_prob)
+    {
+        GTEST_SKIP();
+    }
     int const           rank               = 3;
     long long int const nX                 = 64;
     long long int const nY                 = 128;
@@ -365,6 +382,11 @@ TEST(hipfftTest, CreatePlanMany64)
 
 TEST(hipfftTest, hipfftGetSizeMany)
 {
+    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
+       > unittest_prob)
+    {
+        GTEST_SKIP();
+    }
     int const  rank       = 3;
     int const  nX         = 33;
     int const  nY         = 128;
@@ -401,6 +423,11 @@ TEST(hipfftTest, hipfftGetSizeMany)
 
 TEST(hipfftTest, hipfftGetSizeMany64)
 {
+    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
+       > unittest_prob)
+    {
+        GTEST_SKIP();
+    }
     int const           rank       = 3;
     long long int const nX         = 133;
     long long int const nY         = 354;
@@ -437,6 +464,11 @@ TEST(hipfftTest, hipfftGetSizeMany64)
 
 TEST(hipfftTest, CheckBufferSizeC2C)
 {
+    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
+       > unittest_prob)
+    {
+        GTEST_SKIP();
+    }
     hipfftHandle plan = hipfft_params::INVALID_PLAN_HANDLE;
     ASSERT_EQ(hipfftCreate(&plan), HIPFFT_SUCCESS);
     size_t n        = 1024;
@@ -453,6 +485,11 @@ TEST(hipfftTest, CheckBufferSizeC2C)
 
 TEST(hipfftTest, CheckBufferSizeR2C)
 {
+    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
+       > unittest_prob)
+    {
+        GTEST_SKIP();
+    }
     hipfftHandle plan = hipfft_params::INVALID_PLAN_HANDLE;
     ASSERT_EQ(hipfftCreate(&plan), HIPFFT_SUCCESS);
     // real forward transform cannot modify input, so we need to pick
@@ -481,6 +518,11 @@ TEST(hipfftTest, CheckBufferSizeR2C)
 
 TEST(hipfftTest, CheckBufferSizeC2R)
 {
+    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
+       > unittest_prob)
+    {
+        GTEST_SKIP();
+    }
     hipfftHandle plan = hipfft_params::INVALID_PLAN_HANDLE;
     ASSERT_EQ(hipfftCreate(&plan), HIPFFT_SUCCESS);
     size_t n        = 2048;
@@ -506,6 +548,11 @@ TEST(hipfftTest, CheckBufferSizeC2R)
 
 TEST(hipfftTest, CheckBufferSizeD2Z)
 {
+    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
+       > unittest_prob)
+    {
+        GTEST_SKIP();
+    }
     hipfftHandle plan = hipfft_params::INVALID_PLAN_HANDLE;
     ASSERT_EQ(hipfftCreate(&plan), HIPFFT_SUCCESS);
     // real forward transform cannot modify input, so we need to pick
@@ -536,6 +583,11 @@ TEST(hipfftTest, CheckBufferSizeD2Z)
 
 TEST(hipfftTest, CheckBufferSizeZ2D)
 {
+    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
+       > unittest_prob)
+    {
+        GTEST_SKIP();
+    }
     hipfftHandle plan = hipfft_params::INVALID_PLAN_HANDLE;
     ASSERT_EQ(hipfftCreate(&plan), HIPFFT_SUCCESS);
     size_t n        = 2048;
@@ -564,6 +616,11 @@ TEST(hipfftTest, CheckBufferSizeZ2D)
 #ifdef __HIP_PLATFORM_AMD__
 TEST(hipfftTest, CheckNullWorkBuffer)
 {
+    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
+       > unittest_prob)
+    {
+        GTEST_SKIP();
+    }
     hipfftHandle plan = hipfft_params::INVALID_PLAN_HANDLE;
     ASSERT_EQ(hipfftCreate(&plan), HIPFFT_SUCCESS);
     size_t n        = 2048;
@@ -578,6 +635,11 @@ TEST(hipfftTest, CheckNullWorkBuffer)
 
 TEST(hipfftTest, RunR2C)
 {
+    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
+       > unittest_prob)
+    {
+        GTEST_SKIP();
+    }
     const size_t N = 4096;
     float        in[N];
     for(size_t i = 0; i < N; i++)
@@ -618,11 +680,11 @@ TEST(hipfftTest, RunR2C)
         ref_in[i] = in[i];
 
     fftw_complex* ref_out;
-    fftw_plan     ref_p;
 
     ref_out = (fftw_complex*)fftw_malloc(sizeof(fftw_complex) * (N / 2 + 1));
-    ref_p   = fftw_plan_dft_r2c_1d(N, ref_in, ref_out, FFTW_ESTIMATE);
-    fftw_execute(ref_p);
+    fftw_plan_wrapper_t<double> ref_p
+        = fftw_trait<double>::make_wrapper(fftw_plan_dft_r2c_1d(N, ref_in, ref_out, FFTW_ESTIMATE));
+    fftw_execute_type<double>(ref_p);
 
     double maxv  = 0;
     double nrmse = 0; // normalized root mean square error
@@ -640,9 +702,8 @@ TEST(hipfftTest, RunR2C)
     nrmse = sqrt(nrmse);
     nrmse /= maxv;
 
-    EXPECT_LT(nrmse, type_epsilon_simple<double>());
-    fftw_destroy_plan(ref_p);
     fftw_free(ref_out);
+    EXPECT_LT(nrmse, type_epsilon_simple<double>());
 }
 
 // ask for a transform whose parameters are only valid out-of-place.
@@ -652,6 +713,11 @@ TEST(hipfftTest, RunR2C)
 // the out-place plan from working.
 TEST(hipfftTest, OutplaceOnly)
 {
+    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
+       > unittest_prob)
+    {
+        GTEST_SKIP();
+    }
     static const int N_in_const  = 4;
     static const int N_out_const = N_in_const / 2 + 1;
     // mutable sizes for passing to hipFFT
@@ -696,11 +762,11 @@ TEST(hipfftTest, OutplaceOnly)
         ref_in[i] = in[i];
 
     fftw_complex* ref_out;
-    fftw_plan     ref_p;
 
-    ref_out = (fftw_complex*)fftw_malloc(sizeof(fftw_complex) * N_out);
-    ref_p   = fftw_plan_dft_r2c_1d(N_in, ref_in, ref_out, FFTW_ESTIMATE);
-    fftw_execute(ref_p);
+    ref_out                           = (fftw_complex*)fftw_malloc(sizeof(fftw_complex) * N_out);
+    fftw_plan_wrapper_t<double> ref_p = fftw_trait<double>::make_wrapper(
+        fftw_plan_dft_r2c_1d(N_in, ref_in, ref_out, FFTW_ESTIMATE));
+    fftw_execute_type<double>(ref_p);
 
     double maxv  = 0;
     double nrmse = 0; // normalized root mean square error
@@ -718,14 +784,18 @@ TEST(hipfftTest, OutplaceOnly)
     nrmse = sqrt(nrmse);
     nrmse /= maxv;
 
-    ASSERT_LT(nrmse, type_epsilon_simple<double>());
-    fftw_destroy_plan(ref_p);
     fftw_free(ref_out);
+    ASSERT_LT(nrmse, type_epsilon_simple<double>());
 }
 
 static constexpr int absurd_version_or_property = std::numeric_limits<int>::min();
 TEST(hipfftTest, GetVersion)
 {
+    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
+       > unittest_prob)
+    {
+        GTEST_SKIP();
+    }
     // valid use case(s)
     int tmp = absurd_version_or_property;
     EXPECT_EQ(hipfftGetVersion(&tmp), HIPFFT_SUCCESS);
@@ -735,6 +805,11 @@ TEST(hipfftTest, GetVersion)
 
 TEST(hipfftTest, GetProperty)
 {
+    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
+       > unittest_prob)
+    {
+        GTEST_SKIP();
+    }
     // valid use case(s)
     int tmp;
     for(auto prop_type : enum_helper<hipfftLibraryPropertyType>::valid_values)

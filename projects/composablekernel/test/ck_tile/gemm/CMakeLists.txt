@@ -46,8 +46,12 @@ if(GPU_TARGETS MATCHES "gfx94|gfx95|gfx90a|gfx11|gfx12")
         add_gtest_executable(test_ck_tile_gemm_pipeline_comp_async test_gemm_pipeline_comp_async.cpp)
         target_compile_options(test_ck_tile_gemm_pipeline_comp_async PRIVATE ${EXAMPLE_GEMM_COMPILE_COMPUTE_ASYNC_OPTIONS})
 
+        add_gtest_executable(test_ck_tile_gemm_pipeline_tf32_mem test_gemm_pipeline_tf32_mem.cpp)
+        target_compile_options(test_ck_tile_gemm_pipeline_tf32_mem PRIVATE ${EXAMPLE_GEMM_COMPILE_OPTIONS})
+
         list(APPEND CK_TILE_GEMM_TEST_TARGETS
             test_ck_tile_gemm_pipeline_comp_async
+            test_ck_tile_gemm_pipeline_tf32_mem
         )
 
         add_gtest_executable(test_ck_tile_gemm_pipeline_comp_async_eight_waves test_gemm_pipeline_comp_async_eight_waves.cpp)
@@ -55,6 +59,41 @@ if(GPU_TARGETS MATCHES "gfx94|gfx95|gfx90a|gfx11|gfx12")
 
         list(APPEND CK_TILE_GEMM_TEST_TARGETS
             test_ck_tile_gemm_pipeline_comp_async_eight_waves
+        )
+
+        add_gtest_executable(test_ck_tile_gemm_pipeline_compv3_async_rrr test_gemm_pipeline_compv3_async_rrr.cpp)
+        target_compile_options(test_ck_tile_gemm_pipeline_compv3_async_rrr PRIVATE ${EXAMPLE_GEMM_COMPILE_COMPUTE_ASYNC_OPTIONS})
+
+        list(APPEND CK_TILE_GEMM_TEST_TARGETS
+            test_ck_tile_gemm_pipeline_compv3_async_rrr
+        )
+
+        add_gtest_executable(test_ck_tile_gemm_pipeline_compv3_async_rcr test_gemm_pipeline_compv3_async_rcr.cpp)
+        target_compile_options(test_ck_tile_gemm_pipeline_compv3_async_rcr PRIVATE ${EXAMPLE_GEMM_COMPILE_COMPUTE_ASYNC_OPTIONS})
+
+        list(APPEND CK_TILE_GEMM_TEST_TARGETS
+            test_ck_tile_gemm_pipeline_compv3_async_rcr
+        )
+
+        add_gtest_executable(test_ck_tile_gemm_pipeline_compv3_async_ccr test_gemm_pipeline_compv3_async_ccr.cpp)
+        target_compile_options(test_ck_tile_gemm_pipeline_compv3_async_ccr PRIVATE ${EXAMPLE_GEMM_COMPILE_COMPUTE_ASYNC_OPTIONS})
+
+        list(APPEND CK_TILE_GEMM_TEST_TARGETS
+            test_ck_tile_gemm_pipeline_compv3_async_ccr
+        )
+
+        add_gtest_executable(test_ck_tile_gemm_pipeline_compv3_async_crr test_gemm_pipeline_compv3_async_crr.cpp)
+        target_compile_options(test_ck_tile_gemm_pipeline_compv3_async_crr PRIVATE ${EXAMPLE_GEMM_COMPILE_COMPUTE_ASYNC_OPTIONS})
+
+        list(APPEND CK_TILE_GEMM_TEST_TARGETS
+            test_ck_tile_gemm_pipeline_compv3_async_crr
+        )
+
+        add_gtest_executable(test_ck_tile_gemm_pipeline_compv3_async_persistent test_gemm_pipeline_compv3_async_persistent.cpp)
+        target_compile_options(test_ck_tile_gemm_pipeline_compv3_async_persistent PRIVATE ${EXAMPLE_GEMM_COMPILE_COMPUTE_ASYNC_OPTIONS})
+
+        list(APPEND CK_TILE_GEMM_TEST_TARGETS
+            test_ck_tile_gemm_pipeline_compv3_async_persistent
         )
     endif()
 
@@ -84,6 +123,14 @@ if(GPU_TARGETS MATCHES "gfx94|gfx95|gfx90a|gfx11|gfx12")
             test_ck_tile_gemm_pipeline_compv4_wmma
             test_ck_tile_gemm_pipeline_persistent_wmma
         )
+        
+        if(GPU_TARGETS MATCHES "gfx125")
+            add_gtest_executable(test_ck_tile_gemm_pipeline_tdm_wmma test_gemm_pipeline_comp_tdm_wmma.cpp)
+            target_compile_options(test_ck_tile_gemm_pipeline_tdm_wmma PRIVATE ${EXAMPLE_GEMM_COMPILE_OPTIONS})
+            add_gtest_executable(test_ck_tile_gemm_pipeline_comp_async_wmma test_gemm_pipeline_comp_async_wmma.cpp)
+            target_compile_options(test_ck_tile_gemm_pipeline_comp_async_wmma PRIVATE ${EXAMPLE_GEMM_COMPILE_COMPUTE_ASYNC_OPTIONS})
+            target_compile_options(test_ck_tile_gemm_pipeline_comp_async_wmma PRIVATE ${EXAMPLE_GEMM_COMPILE_OPTIONS})
+        endif()
     endif()
 
     # Label all ck_tile gemm tests with CK_TILE_GEMM_TESTS for selective execution

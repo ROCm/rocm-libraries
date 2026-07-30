@@ -50,6 +50,9 @@ set(rocsolver_lapack_source
   lapack/roclapack_getrs.cpp
   lapack/roclapack_getrs_batched.cpp
   lapack/roclapack_getrs_strided_batched.cpp
+  lapack/roclapack_getrs_npvt.cpp
+  lapack/roclapack_getrs_npvt_batched.cpp
+  lapack/roclapack_getrs_npvt_strided_batched.cpp
   lapack/roclapack_gesv.cpp
   lapack/roclapack_gesv_batched.cpp
   lapack/roclapack_gesv_strided_batched.cpp
@@ -61,6 +64,13 @@ set(rocsolver_lapack_source
   lapack/roclapack_posv.cpp
   lapack/roclapack_posv_batched.cpp
   lapack/roclapack_posv_strided_batched.cpp
+  #- symmetric indefinite matrices
+  lapack/roclapack_sytrs.cpp
+  lapack/roclapack_sytrs_batched.cpp
+  lapack/roclapack_sytrs_strided_batched.cpp
+  lapack/roclapack_sytrs2.cpp
+  lapack/roclapack_sytrs2_batched.cpp
+  lapack/roclapack_sytrs2_strided_batched.cpp
   #- block-tridiagonal systems
   lapack/roclapack_geblttrs_npvt.cpp
   lapack/roclapack_geblttrs_npvt_batched.cpp
@@ -493,6 +503,14 @@ endif()
 
 if(OPTIMAL)
   target_compile_definitions(rocsolver PRIVATE OPTIMAL)
+endif()
+
+# Feature flag: 64-bit eigensolver API (syev/heev/syevd/heevd). Option is declared
+# at the top-level CMakeLists.txt so the library and test client stay in sync.
+# PUBLIC so the definition propagates through the exported roc::rocsolver interface,
+# letting consumers (e.g. hipSOLVER) detect whether the _64 entry points are available.
+if(ROCSOLVER_ENABLE_EIGENSOLVERS_64)
+  target_compile_definitions(rocsolver PUBLIC ROCSOLVER_ENABLE_EIGENSOLVERS_64)
 endif()
 
 if(ROCSOLVER_USE_INTERNAL_BLAS)

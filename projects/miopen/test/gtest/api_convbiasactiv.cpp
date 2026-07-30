@@ -70,7 +70,7 @@ bool IsTestSupportedForDevice()
 #if WORKAROUND_ISSUE_2212
     using namespace miopen::debug;
     using e_mask = enabled<Gpu::gfx900, Gpu::gfx906, Gpu::gfx908, Gpu::gfx90A, Gpu::gfx103X>;
-    using d_mask = disabled<Gpu::gfx110X, Gpu::gfx94X>;
+    using d_mask = disabled<Gpu::gfx94X, Gpu::gfx110X, Gpu::gfx115X>;
     return ::IsTestSupportedForDevMask<d_mask, e_mask>();
 #else
     return true;

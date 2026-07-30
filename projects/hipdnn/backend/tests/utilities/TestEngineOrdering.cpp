@@ -51,8 +51,8 @@ TEST(TestEngineOrdering, BothMiopenEngines)
 TEST(TestEngineOrdering, MiopenEnginesWithOthers)
 {
     // Create a fake "other" engine ID
-    int64_t const otherEngine1 = HIPBLASLT_ENGINE_ID;
-    int64_t const otherEngine2 = 999999; // Arbitrary other engine
+    const int64_t otherEngine1 = HIPBLASLT_ENGINE_ID;
+    const int64_t otherEngine2 = 999999; // Arbitrary other engine
 
     // Test: other, MIOPEN_ENGINE_DETERMINISTIC, MIOPEN_ENGINE, other
     std::vector<int64_t> engineIds
@@ -70,12 +70,12 @@ TEST(TestEngineOrdering, MiopenEnginesWithOthers)
 
 TEST(TestEngineOrdering, OnlyOtherEngines)
 {
-    int64_t const otherEngine1 = HIPBLASLT_ENGINE_ID;
-    int64_t const otherEngine2 = 888888;
-    int64_t const otherEngine3 = 777777;
+    const int64_t otherEngine1 = HIPBLASLT_ENGINE_ID;
+    const int64_t otherEngine2 = 888888;
+    const int64_t otherEngine3 = 777777;
 
     std::vector<int64_t> engineIds = {otherEngine1, otherEngine2, otherEngine3};
-    std::vector<int64_t> const originalOrder = engineIds;
+    const std::vector<int64_t> originalOrder = engineIds;
 
     sortEngineIds(engineIds);
 
@@ -86,9 +86,9 @@ TEST(TestEngineOrdering, OnlyOtherEngines)
 
 TEST(TestEngineOrdering, ComplexScenario)
 {
-    int64_t const other1 = 111111;
-    int64_t const other2 = 222222;
-    int64_t const other3 = 333333;
+    const int64_t other1 = 111111;
+    const int64_t other2 = 222222;
+    const int64_t other3 = 333333;
 
     // Start with: other1, MIOPEN_ENGINE_DETERMINISTIC, other2, MIOPEN_ENGINE, other3
     std::vector<int64_t> engineIds
@@ -106,10 +106,10 @@ TEST(TestEngineOrdering, ComplexScenario)
 
 TEST(TestEngineOrdering, StableOrderPreservedForOthers)
 {
-    int64_t const other1 = 100;
-    int64_t const other2 = 200;
-    int64_t const other3 = 300;
-    int64_t const other4 = 400;
+    const int64_t other1 = 100;
+    const int64_t other2 = 200;
+    const int64_t other3 = 300;
+    const int64_t other4 = 400;
 
     // Mix with MIOpen engines
     std::vector<int64_t> engineIds
@@ -124,4 +124,78 @@ TEST(TestEngineOrdering, StableOrderPreservedForOthers)
     EXPECT_EQ(engineIds[3], other3);
     EXPECT_EQ(engineIds[4], other4);
     EXPECT_EQ(engineIds[5], MIOPEN_ENGINE_DETERMINISTIC_ID);
+}
+
+TEST(TestEngineOrdering, IsIdempotent)
+{
+    std::vector<int64_t> engineIds
+        = {MIOPEN_ENGINE_DETERMINISTIC_ID, HIPBLASLT_ENGINE_ID, MIOPEN_ENGINE_ID};
+    sortEngineIds(engineIds);
+    const auto firstPass = engineIds;
+
+    sortEngineIds(engineIds);
+    EXPECT_EQ(engineIds, firstPass);
+}
+
+TEST(TestEngineOrdering, UnknownEngineIdsTreatedAsMiddlePriority)
+{
+    // Engine IDs that don't correspond to any known well-known name should
+    // sort into the middle bucket (between MIOPEN_ENGINE and
+    // MIOPEN_ENGINE_DETERMINISTIC) without crashing.
+    const auto unknown1 = static_cast<int64_t>(0x1234567890ABCDEF);
+    const auto unknown2 = static_cast<int64_t>(0xFEDCBA0987654321);
+
+    std::vector<int64_t> engineIds = {unknown1, MIOPEN_ENGINE_ID, unknown2};
+
+    EXPECT_NO_THROW(sortEngineIds(engineIds));
+    ASSERT_EQ(engineIds.size(), 3u);
+    EXPECT_EQ(engineIds[0], MIOPEN_ENGINE_ID);
+    EXPECT_EQ(engineIds[1], unknown1);
+    EXPECT_EQ(engineIds[2], unknown2);
+}
+
+TEST(TestEngineOrdering, AsmRankedAboveRocke)
+{
+    // When both the ASM (ASM_SDPA) and rocKE engines are applicable, ASM
+    // must be selected first. Start reversed to prove the sort reorders them.
+    std::vector<int64_t> engineIds = {ROCKE_ENGINE_ID, ASM_SDPA_ENGINE_ID};
+    sortEngineIds(engineIds);
+
+    ASSERT_EQ(engineIds.size(), 2u);
+    EXPECT_EQ(engineIds[0], ASM_SDPA_ENGINE_ID) << "ASM (ASM_SDPA) should rank above rocKE";
+    EXPECT_EQ(engineIds[1], ROCKE_ENGINE_ID);
+}
+
+TEST(TestEngineOrdering, RockeSelectedWhenAsmAbsent)
+{
+    // With ASM not applicable, rocKE still ranks ahead of generic "other"
+    // engines and MIOPEN_ENGINE_DETERMINISTIC, matching prior behaviour.
+    const int64_t otherEngine = HIPBLASLT_ENGINE_ID;
+    std::vector<int64_t> engineIds = {MIOPEN_ENGINE_DETERMINISTIC_ID, otherEngine, ROCKE_ENGINE_ID};
+    sortEngineIds(engineIds);
+
+    ASSERT_EQ(engineIds.size(), 3u);
+    EXPECT_EQ(engineIds[0], ROCKE_ENGINE_ID) << "rocKE ranks above other engines when ASM absent";
+    EXPECT_EQ(engineIds[1], otherEngine);
+    EXPECT_EQ(engineIds[2], MIOPEN_ENGINE_DETERMINISTIC_ID);
+}
+
+TEST(TestEngineOrdering, FullPriorityOrdering)
+{
+    // Full ordering: MIOPEN_ENGINE > ASM_SDPA (ASM) > ROCKE > others >
+    // MIOPEN_ENGINE_DETERMINISTIC. Provide the candidates shuffled.
+    const int64_t otherEngine = HIPBLASLT_ENGINE_ID;
+    std::vector<int64_t> engineIds = {MIOPEN_ENGINE_DETERMINISTIC_ID,
+                                      ROCKE_ENGINE_ID,
+                                      otherEngine,
+                                      ASM_SDPA_ENGINE_ID,
+                                      MIOPEN_ENGINE_ID};
+    sortEngineIds(engineIds);
+
+    ASSERT_EQ(engineIds.size(), 5u);
+    EXPECT_EQ(engineIds[0], MIOPEN_ENGINE_ID);
+    EXPECT_EQ(engineIds[1], ASM_SDPA_ENGINE_ID);
+    EXPECT_EQ(engineIds[2], ROCKE_ENGINE_ID);
+    EXPECT_EQ(engineIds[3], otherEngine);
+    EXPECT_EQ(engineIds[4], MIOPEN_ENGINE_DETERMINISTIC_ID);
 }

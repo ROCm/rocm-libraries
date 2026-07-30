@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -99,8 +99,8 @@ TYPED_TEST(HipcubBlockShuffleTests, BlockOffset)
     {
         unsigned int seed_value
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-        int distance
-            = rand() % std::min(size_t(10), block_size / 2) - std::min(size_t(10), block_size / 2);
+        int distance = rand() % _HIPCUB_STD::min(size_t(10), block_size / 2)
+                       - _HIPCUB_STD::min(size_t(10), block_size / 2);
         SCOPED_TRACE(testing::Message()
                      << "with seed= " << seed_value << " & distance = " << distance);
         // Generate data
@@ -183,7 +183,7 @@ TYPED_TEST(HipcubBlockShuffleTests, BlockRotate)
     {
         unsigned int seed_value
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-        int distance = rand() % std::min(size_t(5), block_size / 2);
+        int distance = rand() % _HIPCUB_STD::min(size_t(5), block_size / 2);
         SCOPED_TRACE(testing::Message()
                      << "with seed= " << seed_value << " & distance = " << distance);
         // Generate data
@@ -431,6 +431,7 @@ TYPED_TEST(HipcubBlockShuffleTests, BlockUpWithSuffix)
         delete[] host_block_suffix;
         HIP_CHECK(hipFree(device_input));
         HIP_CHECK(hipFree(device_output));
+        HIP_CHECK(hipFree(device_suffix));
     }
 }
 
@@ -626,5 +627,6 @@ TYPED_TEST(HipcubBlockShuffleTests, BlockDownWithSuffix)
         delete[] host_block_prefix;
         HIP_CHECK(hipFree(device_input));
         HIP_CHECK(hipFree(device_output));
+        HIP_CHECK(hipFree(device_prefix));
     }
 }

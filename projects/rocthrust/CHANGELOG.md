@@ -3,6 +3,37 @@
 Documentation for rocThrust available at
 [https://rocm.docs.amd.com/projects/rocThrust/en/latest/](https://rocm.docs.amd.com/projects/rocThrust/en/latest/).
 
+## rocThrust 5.0.0 for ROCm 10.0
+
+### Added
+
+* Largely in feature parity with CCCL/thrust v3.0.3.
+  - `thrust::tuple`, `thrust::pair` and `thrust::zip_iterator` fall back to rocThrust 4.4.0 implementations when a libhipcxx counterpart corresponding to CCCL/libcudacxx >= v3.0.3 is unavailable, ie
+    * `thrust::tuple` and `thrust::pair`: some features may differ from CCCL/thrust v3.0.3.
+    * `thrust::zip_iterator`: some iterator concepts present in CCCL/thrust v3.0.3 are missing.
+
+### Removed
+
+* rocThrust compatibility with PyTorch v2.9 and v2.10 has been removed in this release.  Please use PyTorch v2.11 or later.
+
+## rocThrust 4.5.0 for ROCm 7.14
+
+### Added
+
+* gfx1250 support
+* For hipstdpar algorithms running on GPUs that support xnack, and __HIPSTDPAR_INTERPOSE_ALLOC__ or __HIPSTDPAR_INTERPOSE_ALLOC_V1__ are not enabled, emit a runtime warning once if xnack is off.
+
+### Upcoming changes
+
+* CCCL 2.8.x compatibility is deprecated. hipCUB and rocThrust will be brought forward to CCCL 3.0.x compatibility in an upcoming version.
+
+## Since last release ROCm 7.12
+
+### Resolved issues
+
+* Fixed memory leak in unit test.
+* Fixed unit test compatibility with ASAN.
+
 ## rocThrust 4.3.0 for ROCm 7.12
 
 ### Added

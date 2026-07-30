@@ -25,6 +25,13 @@
 #include "rocsparse_arguments.hpp"
 
 // clang-format off
+#ifdef ROCSPARSE_WITH_ILDLT0
+#define ROCSPARSE_FOREACH_ROUTINE_ILDLT0    \
+ROCSPARSE_DO_ROUTINE(spildlt0)
+#else
+#define ROCSPARSE_FOREACH_ROUTINE_ILDLT0
+#endif
+
 #define ROCSPARSE_FOREACH_ROUTINE			\
 ROCSPARSE_DO_ROUTINE(axpyi)						\
 ROCSPARSE_DO_ROUTINE(bellmm)						\
@@ -74,11 +81,14 @@ ROCSPARSE_DO_ROUTINE(csrmm_batched)					\
 ROCSPARSE_DO_ROUTINE(cscmm)					\
 ROCSPARSE_DO_ROUTINE(cscmm_batched)					\
 ROCSPARSE_DO_ROUTINE(csrsm)					\
+ROCSPARSE_DO_ROUTINE(cscsm)					\
 ROCSPARSE_DO_ROUTINE(csrsort)					\
 ROCSPARSE_DO_ROUTINE(csrsv)					\
+ROCSPARSE_DO_ROUTINE(cscsv)					\
 ROCSPARSE_DO_ROUTINE(csritsv)					\
 ROCSPARSE_DO_ROUTINE(spitsv_csr)				\
 ROCSPARSE_DO_ROUTINE(spic0)				\
+ROCSPARSE_FOREACH_ROUTINE_ILDLT0			\
 ROCSPARSE_DO_ROUTINE(spilu0)				\
 ROCSPARSE_DO_ROUTINE(sptrsv)				\
 ROCSPARSE_DO_ROUTINE(csr2dense)					\
@@ -92,6 +102,7 @@ ROCSPARSE_DO_ROUTINE(csr2hyb)					\
 ROCSPARSE_DO_ROUTINE(dense2coo)					\
 ROCSPARSE_DO_ROUTINE(dense2csc)					\
 ROCSPARSE_DO_ROUTINE(dense2csr)					\
+ROCSPARSE_DO_ROUTINE(dense_to_sparse_bell)			\
 ROCSPARSE_DO_ROUTINE(dense_to_sparse_coo)			\
 ROCSPARSE_DO_ROUTINE(dense_to_sparse_csc)			\
 ROCSPARSE_DO_ROUTINE(dense_to_sparse_csr)			\

@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-"""Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights reserved.
+"""Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights reserved.
 
   Permission is hereby granted, free of charge, to any person obtaining a copy
   of this software and associated documentation files (the "Software"), to deal
@@ -58,8 +58,12 @@ def parse_args():
     # hipsparse    
     parser.add_argument(     '--clients-only', dest='clients_only', required=False, default = False, action='store_true',
                         help='Build only clients with a pre-built library')
+    # Path to rocsparse
     parser.add_argument('--rocsparse-path', dest='rocsparse_path', type=str, required=False, default=None,
                         help='Set specific path to custom build rocSPARSE (optional)')
+    # Path to gtest
+    parser.add_argument('--gtest-path', dest='gtest_path', required=False, default="",
+                        help='Path to gtest')
 
     return parser.parse_args()
 
@@ -184,6 +188,10 @@ def config_cmd():
             args.rocsparse_path = "/opt/rocm/"
 
     cmake_options.append( f"-DROCSPARSE_PATH=\"{args.rocsparse_path}\"")
+
+    if args.gtest_path != "":
+        gtest_path = cmake_path(os.path.abspath(args.gtest_path))
+        cmake_options.append(f'-DGTest_DIR=\"{gtest_path}\"')
 
     if args.matrices_dir is not None:
         matrices_dir = cmake_path(os.path.abspath(args.matrices_dir))

@@ -2,23 +2,80 @@
 
 Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projects/rocPRIM/en/latest/](https://rocm.docs.amd.com/projects/rocPRIM/en/latest/).
 
-## rocPRIM 4.4.0 for ROCm 7.13
+## rocPRIM 5.0.0 for ROCm 10.0
+
+### Added
+
+* Added a parallel `device_topk`, which finds the largest/smallest K elements from an input array of keys.
+* Added a parallel `device_segmented_topk`, which finds the largest/smallest K elements from segmented groups.
+* `device_topk` and `device_segmented_topk` are controlled by cmake flag `ROCPRIM_ENABLE_TOPK`. Passing `-DROCPRIM_ENABLE_TOPK=ON` to enable these features
+* Added C++ 17 style type_traits utilities
+ * is_floating_point_v
+ * is_integral_v
+ * is_arithmetic_v
+ * is_fundamental_v
+ * is_unsigned_v
+ * is_signed_v
+ * is_scalar_v
+ * is_compound_v
 
 ### Changed
 
-* Building benchmarks on Windows is not currently possible because of the dependency on AMD SMI. 
-  * A CMake-level check has been added to prevent them from being built on Windows.
-  * The rmake.py build script no longer builds benchmarks by default on Windows when passed the `--clients` option.
+* Combined and simplified separate assertion templates using `std::is_floating_point`, `rocprim::half`, and `rocprim::bfloat16` to use `rocprim::is_floating_point`
+
+## rocPRIM 4.5.0 for ROCm 7.14
+
+### Added
+
+* Added `generate_resource_spec.cpp` to the test directory and built as a new target by CMake. It generates the resource spec file required by CTest when running tests in parallel.
+* gfx1250 support
+
+* Added a parallel `device_topk`, which finds the largest/smallest K elements from an input array of keys.
+
+### Optimizations
+
+* Improved performance for the fallback path of lookback scan where the flag can't be fit into the same atomic load/store.
+
+### Changed
+
+* Updated the documentation on how to run rocPrim tests on multiple GPUs in parallel.
+
+### Removed
+
+* Removed the `GenerateResourceSpec.cmake` script - it is replaced by the added `generate_resource_spec.cpp` code above.
+
+## Since last release ROCm 7.12
+
+### Added
+
+* Added type trait definitions for `__hip_bfloat16`. This should resolve issues where this type did not work with radix-based algorithms.
+* Unit tests for config_types
+
+### Optimized
+
+* Reduced build times for unit tests.
+* Memory usage in unit tests.
+
+### Changed
+
+* Changed the `bitonic_sort` algorithm in `warp_sort_shuffle` to use forward-only comparison for better performance. `block_sort_bitonic` is also changed to use forward-only comparison, to align the sorting with `warp_sort`.
+
+### Resolved issues
+
+* Fixed a silent overflow in `rocprim::device_segmented_reduce` where it could exceed the maximum number of HIP threads, resulting in missing output.
+* Certain large unit tests now properly detect if insufficient system memory is present and skip the test case accordingly.
+* Fixed out-of-bounds memory access in block run length decode.
+* Fixed memory leak in unit tests.
 
 ## rocPRIM 4.3.0 for ROCm 7.12
+
+### Added
+
+* Added tested examples for all algorithms.
 
 ### Optimizations
 
 * Updated config system to pick better fallback configs for untuned GPUs.
-
-### Upcoming changes
-
-* Deprecated the `ROCPRIM_PRINT_ERROR_ONCE` macro.
 
 ### Changed
 
@@ -26,6 +83,7 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 * Benchmarking now requires [AMD SMI](https://rocm.docs.amd.com/projects/amdsmi/en/latest/) to be installed.
   * rocPRIM now uses the new single-header library 'primbench' for benchmarks, rather than Google Benchmark. primbench requires AMD SMI.
   * See `shared/primbench/README.md` for primbench its documentation.
+* Uses mold linker for compilation if availible.
 
 ### Removed
 
@@ -33,8 +91,13 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 
 ### Removed
 
+* Removed deprecated `zip_iterator::operator->`, `invoke_result_binary_op_t`.
 * Removed unused `equality`, `inequality`, `sum`, `max`, `min` from thread_operator.hpp.
 * Removed duplicate `inequality_operator` from binary_op_warpper.hpp
+
+### Upcoming changes
+
+* Deprecated the `ROCPRIM_PRINT_ERROR_ONCE` macro.
 
 ## rocPRIM 4.2.0 for ROCm 7.2
 
@@ -77,6 +140,10 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 * Added a new CMake option `-DUSE_SYSTEM_LIB` to allow tests to be built from `ROCm` libraries provided by the system.
 * Added `rocprim::apply` which applies a function to a `rocprim::tuple`.
 
+
+### Known issues
+
+* benchmark_device_adjacent_difference build hangs due to https://github.com/ROCm/llvm-project/issues/2616.  Workaround is to build with -O1.
 
 ### Changed
 

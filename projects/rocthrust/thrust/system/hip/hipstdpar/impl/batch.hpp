@@ -1,4 +1,4 @@
-// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -40,11 +40,13 @@
 
 #if defined(__HIPSTDPAR__)
 
+#  include <thrust/detail/config/namespace.h>
 #  include <thrust/execution_policy.h>
 #  include <thrust/for_each.h>
 
 #  include <algorithm>
 #  include <execution>
+#  include <type_traits>
 #  include <utility>
 
 #  include "hipstd.hpp"
@@ -57,7 +59,32 @@ template <typename I,
           enable_if_t<::hipstd::is_offloadable_iterator<I>() && ::hipstd::is_offloadable_callable<F>()>* = nullptr>
 inline void for_each(execution::parallel_unsequenced_policy, I f, I l, F fn)
 {
-  ::thrust::for_each(::thrust::device, f, l, ::std::move(fn));
+  ::hipstd::__maybe_bind_globals();
+
+  ::hipstd::warn_if_no_xnack();
+  using fn_t = ::std::decay_t<F>;
+
+  if constexpr (::std::is_trivially_destructible_v<fn_t>)
+  {
+    THRUST_NS_QUALIFIER::for_each(THRUST_NS_QUALIFIER::device, f, l, ::std::move(fn));
+  }
+  else
+  {
+    ::hipstd::detail::device_callable_guard<fn_t> guard(::std::move(fn));
+    try
+    {
+      THRUST_NS_QUALIFIER::for_each(
+        THRUST_NS_QUALIFIER::device, f, l, ::hipstd::detail::callable_proxy<fn_t>{guard.get()});
+    }
+    catch (...)
+    {
+      (void) ::hipDeviceSynchronize();
+      throw;
+    }
+    THRUST_NS_QUALIFIER::hip_rocprim::throw_on_error(
+      ::hipDeviceSynchronize(), "hipstdpar for_each: failed to synchronize");
+    guard.destroy_and_free();
+  }
 }
 
 template <typename I,
@@ -85,7 +112,34 @@ template <typename I,
           enable_if_t<::hipstd::is_offloadable_iterator<I>() && ::hipstd::is_offloadable_callable<F>()>* = nullptr>
 inline I for_each_n(execution::parallel_unsequenced_policy, I f, N n, F fn)
 {
-  return ::thrust::for_each_n(::thrust::device, f, n, ::std::move(fn));
+  ::hipstd::__maybe_bind_globals();
+
+  ::hipstd::warn_if_no_xnack();
+  using fn_t = ::std::decay_t<F>;
+
+  if constexpr (::std::is_trivially_destructible_v<fn_t>)
+  {
+    return THRUST_NS_QUALIFIER::for_each_n(THRUST_NS_QUALIFIER::device, f, n, ::std::move(fn));
+  }
+  else
+  {
+    ::hipstd::detail::device_callable_guard<fn_t> guard(::std::move(fn));
+    I result;
+    try
+    {
+      result = THRUST_NS_QUALIFIER::for_each_n(
+        THRUST_NS_QUALIFIER::device, f, n, ::hipstd::detail::callable_proxy<fn_t>{guard.get()});
+    }
+    catch (...)
+    {
+      (void) ::hipDeviceSynchronize();
+      throw;
+    }
+    THRUST_NS_QUALIFIER::hip_rocprim::throw_on_error(
+      ::hipDeviceSynchronize(), "hipstdpar for_each_n: failed to synchronize");
+    guard.destroy_and_free();
+    return result;
+  }
 }
 
 template <typename I,

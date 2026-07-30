@@ -1,4 +1,4 @@
-// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -40,6 +40,7 @@
 
 #if defined(__HIPSTDPAR__)
 
+#  include <thrust/detail/config/namespace.h>
 #  include <thrust/execution_policy.h>
 #  include <thrust/mismatch.h>
 
@@ -55,6 +56,7 @@ namespace std
 template <typename I0, typename I1, enable_if_t<::hipstd::is_offloadable_iterator<I0, I1>()>* = nullptr>
 inline bool lexicographical_compare(execution::parallel_unsequenced_policy, I0 f0, I0 l0, I1 f1, I1 l1)
 {
+  ::hipstd::warn_if_no_xnack();
   if (f0 == l0)
   {
     return f1 != l1;
@@ -64,11 +66,13 @@ inline bool lexicographical_compare(execution::parallel_unsequenced_policy, I0 f
     return false;
   }
 
+  ::hipstd::__maybe_bind_globals();
+
   const auto n0 = l0 - f0;
   const auto n1 = l1 - f1;
   const auto n  = ::std::min(n0, n1);
 
-  const auto m = ::thrust::mismatch(::thrust::device, f0, f0 + n, f1);
+  const auto m = THRUST_NS_QUALIFIER::mismatch(THRUST_NS_QUALIFIER::device, f0, f0 + n, f1);
 
   if (m.first == f0 + n)
   {
@@ -93,6 +97,7 @@ template <typename I0,
           enable_if_t<::hipstd::is_offloadable_iterator<I0, I1>() && ::hipstd::is_offloadable_callable<R>()>* = nullptr>
 inline bool lexicographical_compare(execution::parallel_unsequenced_policy, I0 f0, I0 l0, I1 f1, I1 l1, R r)
 {
+  ::hipstd::warn_if_no_xnack();
   if (f0 == l0)
   {
     return f1 != l1;
@@ -102,11 +107,13 @@ inline bool lexicographical_compare(execution::parallel_unsequenced_policy, I0 f
     return false;
   }
 
+  ::hipstd::__maybe_bind_globals();
+
   const auto n0 = l0 - f0;
   const auto n1 = l1 - f1;
   const auto n  = ::std::min(n0, n1);
 
-  const auto m = ::thrust::mismatch(::thrust::device, f0, f0 + n, f1, [=](auto&& x, auto&& y) {
+  const auto m = THRUST_NS_QUALIFIER::mismatch(THRUST_NS_QUALIFIER::device, f0, f0 + n, f1, [=](auto&& x, auto&& y) {
     return !r(x, y) && !r(y, x);
   });
 

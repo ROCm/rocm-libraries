@@ -25,7 +25,7 @@ TEST_F(TestStringUtil, Fnv1aHashDeterministicBehavior)
 TEST_F(TestStringUtil, Fnv1aHashDifferentStringsDifferentHashes)
 {
     // Different strings should produce different hashes
-    std::vector<std::string> const testStrings = {"MIOPEN_PLUGIN",
+    const std::vector<std::string> testStrings = {"MIOPEN_PLUGIN",
                                                   "VENDOR_FAST_CONV",
                                                   "CPU_REFERENCE_ENGINE",
                                                   "EXAMPLE_PLUGIN_RENAME_THIS",
@@ -60,8 +60,8 @@ TEST_F(TestStringUtil, Fnv1aHashHandlesEmptyString)
 TEST_F(TestStringUtil, Fnv1aHashStringOverloadsConsistent)
 {
     const char* cStr = "TEST_STRING";
-    std::string const stdStr = "TEST_STRING";
-    std::string_view const strView = "TEST_STRING";
+    const std::string stdStr = "TEST_STRING";
+    const std::string_view strView = "TEST_STRING";
 
     auto hashCStr = hipdnn_data_sdk::utilities::fnv1aHash(cStr);
     auto hashStdStr = hipdnn_data_sdk::utilities::fnv1aHash(stdStr);
@@ -91,7 +91,7 @@ TEST_F(TestStringUtil, Fnv1aHashSpecialCharacters)
 {
     // Test that special characters are treated as distinct regular characters
     // All strings have same base but different special character in the middle
-    std::vector<std::string> const specialStrings = {"STRING_CHAR_END",
+    const std::vector<std::string> specialStrings = {"STRING_CHAR_END",
                                                      "STRING-CHAR-END",
                                                      "STRING.CHAR.END",
                                                      "STRING:CHAR:END",
@@ -275,32 +275,32 @@ TEST_F(TestStringUtil, RemoveNewlines)
 
 TEST_F(TestStringUtil, VecToString)
 {
-    std::vector<int> const intVec = {1, 2, 3, 4};
+    const std::vector<int> intVec = {1, 2, 3, 4};
     EXPECT_EQ(hipdnn_data_sdk::utilities::vecToString(intVec), "[1, 2, 3, 4]");
 
-    std::vector<double> const doubleVec = {1.5, 2.5, 3.5};
-    std::string const result = hipdnn_data_sdk::utilities::vecToString(doubleVec);
+    const std::vector<double> doubleVec = {1.5, 2.5, 3.5};
+    const std::string result = hipdnn_data_sdk::utilities::vecToString(doubleVec);
     EXPECT_TRUE(result.find("1.5") != std::string::npos);
     EXPECT_TRUE(result.find("2.5") != std::string::npos);
     EXPECT_TRUE(result.find("3.5") != std::string::npos);
 
-    std::vector<int> const emptyVec;
+    const std::vector<int> emptyVec;
     EXPECT_EQ(hipdnn_data_sdk::utilities::vecToString(emptyVec), "[]");
 }
 
 TEST_F(TestStringUtil, StringVecToStream)
 {
-    std::vector<std::string> const strVec = {"hello", "world", "test"};
+    const std::vector<std::string> strVec = {"hello", "world", "test"};
     std::ostringstream oss;
     hipdnn_data_sdk::utilities::stringVecToStream(oss, strVec);
     EXPECT_EQ(oss.str(), "[\"hello\", \"world\", \"test\"]");
 
-    std::vector<std::string> const singleVec = {"single"};
+    const std::vector<std::string> singleVec = {"single"};
     std::ostringstream oss2;
     hipdnn_data_sdk::utilities::stringVecToStream(oss2, singleVec);
     EXPECT_EQ(oss2.str(), "[\"single\"]");
 
-    std::vector<std::string> const emptyVec;
+    const std::vector<std::string> emptyVec;
     std::ostringstream oss3;
     hipdnn_data_sdk::utilities::stringVecToStream(oss3, emptyVec);
     EXPECT_EQ(oss3.str(), "[]");

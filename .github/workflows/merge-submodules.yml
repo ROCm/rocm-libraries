@@ -3,12 +3,17 @@ name: Merge .gitmodules
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   combine-gitmodules:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Checkout Monorepo
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6.0.2
 
       - name: Set up Python
         uses: actions/setup-python@v6

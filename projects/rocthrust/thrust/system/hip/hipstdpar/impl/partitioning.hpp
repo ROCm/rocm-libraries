@@ -1,4 +1,4 @@
-// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -40,6 +40,7 @@
 
 #if defined(__HIPSTDPAR__)
 
+#  include <thrust/detail/config/namespace.h>
 #  include <thrust/execution_policy.h>
 #  include <thrust/partition.h>
 
@@ -57,7 +58,10 @@ template <typename I,
           enable_if_t<::hipstd::is_offloadable_iterator<I>() && ::hipstd::is_offloadable_callable<P>()>* = nullptr>
 inline bool is_partitioned(execution::parallel_unsequenced_policy, I f, I l, P p)
 {
-  return ::thrust::is_partitioned(::thrust::device, f, l, ::std::move(p));
+  ::hipstd::__maybe_bind_globals();
+
+  ::hipstd::warn_if_no_xnack();
+  return THRUST_NS_QUALIFIER::is_partitioned(THRUST_NS_QUALIFIER::device, f, l, ::std::move(p));
 }
 
 template <typename I,
@@ -84,7 +88,10 @@ template <typename I,
           enable_if_t<::hipstd::is_offloadable_iterator<I>() && ::hipstd::is_offloadable_callable<P>()>* = nullptr>
 inline I partition(execution::parallel_unsequenced_policy, I f, I l, P p)
 {
-  return ::thrust::partition(::thrust::device, f, l, ::std::move(p));
+  ::hipstd::__maybe_bind_globals();
+
+  ::hipstd::warn_if_no_xnack();
+  return THRUST_NS_QUALIFIER::partition(THRUST_NS_QUALIFIER::device, f, l, ::std::move(p));
 }
 
 template <typename I,
@@ -114,7 +121,10 @@ template <
   enable_if_t<::hipstd::is_offloadable_iterator<I, O0, O1>() && ::hipstd::is_offloadable_callable<P>()>* = nullptr>
 inline pair<O0, O1> partition_copy(execution::parallel_unsequenced_policy, I f, I l, O0 fo0, O1 fo1, P p)
 {
-  auto [r0, r1] = ::thrust::partition_copy(::thrust::device, f, l, fo0, fo1, ::std::move(p));
+  ::hipstd::__maybe_bind_globals();
+
+  ::hipstd::warn_if_no_xnack();
+  auto [r0, r1] = THRUST_NS_QUALIFIER::partition_copy(THRUST_NS_QUALIFIER::device, f, l, fo0, fo1, ::std::move(p));
 
   return {::std::move(r0), ::std::move(r1)};
 }
@@ -148,7 +158,10 @@ template <typename I,
           enable_if_t<::hipstd::is_offloadable_iterator<I>() && ::hipstd::is_offloadable_callable<P>()>* = nullptr>
 inline I stable_partition(execution::parallel_unsequenced_policy, I f, I l, P p)
 {
-  return ::thrust::stable_partition(::thrust::device, f, l, ::std::move(p));
+  ::hipstd::__maybe_bind_globals();
+
+  ::hipstd::warn_if_no_xnack();
+  return THRUST_NS_QUALIFIER::stable_partition(THRUST_NS_QUALIFIER::device, f, l, ::std::move(p));
 }
 
 template <typename I,

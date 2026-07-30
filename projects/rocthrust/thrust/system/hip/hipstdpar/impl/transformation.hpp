@@ -1,4 +1,4 @@
-// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -40,12 +40,14 @@
 
 #if defined(__HIPSTDPAR__)
 
+#  include <thrust/detail/config/namespace.h>
 #  include <thrust/execution_policy.h>
 #  include <thrust/replace.h>
 #  include <thrust/transform.h>
 
 #  include <algorithm>
 #  include <execution>
+#  include <type_traits>
 #  include <utility>
 
 #  include "hipstd.hpp"
@@ -59,7 +61,34 @@ template <typename I,
           enable_if_t<::hipstd::is_offloadable_iterator<I, O>() && ::hipstd::is_offloadable_callable<F>()>* = nullptr>
 inline O transform(execution::parallel_unsequenced_policy, I fi, I li, O fo, F fn)
 {
-  return ::thrust::transform(::thrust::device, fi, li, fo, ::std::move(fn));
+  ::hipstd::__maybe_bind_globals();
+
+  ::hipstd::warn_if_no_xnack();
+  using fn_t = ::std::decay_t<F>;
+
+  if constexpr (::std::is_trivially_destructible_v<fn_t>)
+  {
+    return THRUST_NS_QUALIFIER::transform(THRUST_NS_QUALIFIER::device, fi, li, fo, ::std::move(fn));
+  }
+  else
+  {
+    ::hipstd::detail::device_callable_guard<fn_t> guard(::std::move(fn));
+    O result;
+    try
+    {
+      result = THRUST_NS_QUALIFIER::transform(
+        THRUST_NS_QUALIFIER::device, fi, li, fo, ::hipstd::detail::callable_proxy<fn_t>{guard.get()});
+    }
+    catch (...)
+    {
+      (void) ::hipDeviceSynchronize();
+      throw;
+    }
+    THRUST_NS_QUALIFIER::hip_rocprim::throw_on_error(
+      ::hipDeviceSynchronize(), "hipstdpar transform: failed to synchronize");
+    guard.destroy_and_free();
+    return result;
+  }
 }
 
 template <typename I,
@@ -89,7 +118,34 @@ template <
   enable_if_t<::hipstd::is_offloadable_iterator<I0, I1, O>() && ::hipstd::is_offloadable_callable<F>()>* = nullptr>
 inline O transform(execution::parallel_unsequenced_policy, I0 fi0, I0 li0, I1 fi1, O fo, F fn)
 {
-  return ::thrust::transform(::thrust::device, fi0, li0, fi1, fo, ::std::move(fn));
+  ::hipstd::__maybe_bind_globals();
+
+  ::hipstd::warn_if_no_xnack();
+  using fn_t = ::std::decay_t<F>;
+
+  if constexpr (::std::is_trivially_destructible_v<fn_t>)
+  {
+    return THRUST_NS_QUALIFIER::transform(THRUST_NS_QUALIFIER::device, fi0, li0, fi1, fo, ::std::move(fn));
+  }
+  else
+  {
+    ::hipstd::detail::device_callable_guard<fn_t> guard(::std::move(fn));
+    O result;
+    try
+    {
+      result = THRUST_NS_QUALIFIER::transform(
+        THRUST_NS_QUALIFIER::device, fi0, li0, fi1, fo, ::hipstd::detail::callable_proxy<fn_t>{guard.get()});
+    }
+    catch (...)
+    {
+      (void) ::hipDeviceSynchronize();
+      throw;
+    }
+    THRUST_NS_QUALIFIER::hip_rocprim::throw_on_error(
+      ::hipDeviceSynchronize(), "hipstdpar transform: failed to synchronize");
+    guard.destroy_and_free();
+    return result;
+  }
 }
 
 template <
@@ -119,7 +175,10 @@ inline O transform(execution::parallel_unsequenced_policy, I0 fi0, I0 li0, I1 fi
 template <typename I, typename T, enable_if_t<::hipstd::is_offloadable_iterator<I>()>* = nullptr>
 inline void replace(execution::parallel_unsequenced_policy, I f, I l, const T& x, const T& y)
 {
-  return ::thrust::replace(::thrust::device, f, l, x, y);
+  ::hipstd::__maybe_bind_globals();
+
+  ::hipstd::warn_if_no_xnack();
+  return THRUST_NS_QUALIFIER::replace(THRUST_NS_QUALIFIER::device, f, l, x, y);
 }
 
 template <typename I, typename T, enable_if_t<!::hipstd::is_offloadable_iterator<I>()>* = nullptr>
@@ -138,7 +197,32 @@ template <typename I,
           enable_if_t<::hipstd::is_offloadable_iterator<I>() && ::hipstd::is_offloadable_callable<P>()>* = nullptr>
 inline void replace_if(execution::parallel_unsequenced_policy, I f, I l, P p, const T& x)
 {
-  return ::thrust::replace_if(::thrust::device, f, l, ::std::move(p), x);
+  ::hipstd::__maybe_bind_globals();
+
+  ::hipstd::warn_if_no_xnack();
+  using p_t = ::std::decay_t<P>;
+
+  if constexpr (::std::is_trivially_destructible_v<p_t>)
+  {
+    THRUST_NS_QUALIFIER::replace_if(THRUST_NS_QUALIFIER::device, f, l, ::std::move(p), x);
+  }
+  else
+  {
+    ::hipstd::detail::device_callable_guard<p_t> guard(::std::move(p));
+    try
+    {
+      THRUST_NS_QUALIFIER::replace_if(
+        THRUST_NS_QUALIFIER::device, f, l, ::hipstd::detail::callable_proxy<p_t>{guard.get()}, x);
+    }
+    catch (...)
+    {
+      (void) ::hipDeviceSynchronize();
+      throw;
+    }
+    THRUST_NS_QUALIFIER::hip_rocprim::throw_on_error(
+      ::hipDeviceSynchronize(), "hipstdpar replace_if: failed to synchronize");
+    guard.destroy_and_free();
+  }
 }
 
 template <typename I,
@@ -164,7 +248,10 @@ inline void replace_if(execution::parallel_unsequenced_policy, I f, I l, P p, co
 template <typename I, typename O, typename T, enable_if_t<::hipstd::is_offloadable_iterator<I, O>()>* = nullptr>
 inline void replace_copy(execution::parallel_unsequenced_policy, I fi, I li, O fo, const T& x, const T& y)
 {
-  return ::thrust::replace_copy(::thrust::device, fi, li, fo, x, y);
+  ::hipstd::__maybe_bind_globals();
+
+  ::hipstd::warn_if_no_xnack();
+  return THRUST_NS_QUALIFIER::replace_copy(THRUST_NS_QUALIFIER::device, fi, li, fo, x, y);
 }
 
 template <typename I, typename O, typename T, enable_if_t<!::hipstd::is_offloadable_iterator<I, O>()>* = nullptr>
@@ -185,7 +272,32 @@ template <typename I,
           enable_if_t<::hipstd::is_offloadable_iterator<I, O>() && ::hipstd::is_offloadable_callable<P>()>* = nullptr>
 inline void replace_copy_if(execution::parallel_unsequenced_policy, I fi, I li, O fo, P p, const T& x)
 {
-  return ::thrust::replace_copy_if(::thrust::device, fi, li, fo, ::std::move(p), x);
+  ::hipstd::__maybe_bind_globals();
+
+  ::hipstd::warn_if_no_xnack();
+  using p_t = ::std::decay_t<P>;
+
+  if constexpr (::std::is_trivially_destructible_v<p_t>)
+  {
+    THRUST_NS_QUALIFIER::replace_copy_if(THRUST_NS_QUALIFIER::device, fi, li, fo, ::std::move(p), x);
+  }
+  else
+  {
+    ::hipstd::detail::device_callable_guard<p_t> guard(::std::move(p));
+    try
+    {
+      THRUST_NS_QUALIFIER::replace_copy_if(
+        THRUST_NS_QUALIFIER::device, fi, li, fo, ::hipstd::detail::callable_proxy<p_t>{guard.get()}, x);
+    }
+    catch (...)
+    {
+      (void) ::hipDeviceSynchronize();
+      throw;
+    }
+    THRUST_NS_QUALIFIER::hip_rocprim::throw_on_error(
+      ::hipDeviceSynchronize(), "hipstdpar replace_copy_if: failed to synchronize");
+    guard.destroy_and_free();
+  }
 }
 
 template <typename I,

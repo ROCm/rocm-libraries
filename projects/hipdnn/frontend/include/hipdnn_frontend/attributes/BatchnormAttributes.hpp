@@ -14,7 +14,6 @@
 
 #include "Attributes.hpp"
 #include "TensorAttributes.hpp"
-#include <hipdnn_data_sdk/data_objects/batchnorm_attributes_generated.h>
 #include <memory>
 #include <unordered_map>
 #include <vector>
@@ -69,6 +68,8 @@ namespace hipdnn_frontend::graph
 class BatchnormAttributes : public Attributes<BatchnormAttributes>
 {
 public:
+    BatchnormAttributes() = default;
+
     enum class InputNames
     {
         X = 0,
@@ -314,104 +315,56 @@ public:
             .set_momentum(std::move(momentum));
     }
 
-    flatbuffers::Offset<hipdnn_data_sdk::data_objects::BatchnormAttributes>
-        pack_attributes(flatbuffers::FlatBufferBuilder& builder) const // NOLINT
+    /**
+     * @brief Custom hook for matching peer_stats logically
+     */
+    bool logicallyEqualsImpl(const BatchnormAttributes& other) const
     {
-        auto peerStatsVector = std::vector<int64_t>{};
-        for(const auto& peerStat : peer_stats)
+        // Core maps (inputs/outputs) are already structurally matched by Attributes::logicallyEquals
+        if(peer_stats.size() != other.peer_stats.size())
         {
-            if(peerStat)
+            return false;
+        }
+        for(size_t i = 0; i < peer_stats.size(); ++i)
+        {
+            if(!peer_stats[i] && !other.peer_stats[i])
             {
-                peerStatsVector.emplace_back(peerStat->get_uid());
+                continue;
+            }
+            if(!peer_stats[i] || !other.peer_stats[i]
+               || !peer_stats[i]->logicallyEquals(*other.peer_stats[i]))
+            {
+                return false;
             }
         }
 
-        auto prevRunningMean = get_prev_running_mean();
-        auto prevRunningVariance = get_prev_running_variance();
-        auto momentum = get_momentum();
-        auto mean = get_mean();
-        auto invVariance = get_inv_variance();
-        auto nextRunningMean = get_next_running_mean();
-        auto nextRunningVariance = get_next_running_variance();
-
-        return hipdnn_data_sdk::data_objects::CreateBatchnormAttributesDirect(
-            builder,
-            get_x()->get_uid(),
-            get_scale()->get_uid(),
-            get_bias()->get_uid(),
-            get_epsilon()->get_uid(),
-            &peerStatsVector,
-            prevRunningMean ? flatbuffers::Optional<int64_t>(prevRunningMean->get_uid())
-                            : flatbuffers::nullopt,
-            prevRunningVariance ? flatbuffers::Optional<int64_t>(prevRunningVariance->get_uid())
-                                : flatbuffers::nullopt,
-            momentum ? flatbuffers::Optional<int64_t>(momentum->get_uid()) : flatbuffers::nullopt,
-            get_y()->get_uid(),
-            mean ? flatbuffers::Optional<int64_t>(mean->get_uid()) : flatbuffers::nullopt,
-            invVariance ? flatbuffers::Optional<int64_t>(invVariance->get_uid())
-                        : flatbuffers::nullopt,
-            nextRunningMean ? flatbuffers::Optional<int64_t>(nextRunningMean->get_uid())
-                            : flatbuffers::nullopt,
-            nextRunningVariance ? flatbuffers::Optional<int64_t>(nextRunningVariance->get_uid())
-                                : flatbuffers::nullopt);
+        return true;
     }
 
-    static BatchnormAttributes fromFlatBuffer(
-        const hipdnn_data_sdk::data_objects::BatchnormAttributes* fb,
-        const std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>>& tensorMap)
+    /**
+     * @brief Custom hook for matching peer_stats strictly
+     */
+    bool strictEqualsImpl(const BatchnormAttributes& other) const
     {
-        BatchnormAttributes attr;
-
-        attr.set_x(tensorMap.at(fb->x_tensor_uid()));
-        attr.set_scale(tensorMap.at(fb->scale_tensor_uid()));
-        attr.set_bias(tensorMap.at(fb->bias_tensor_uid()));
-        attr.set_epsilon(tensorMap.at(fb->epsilon_tensor_uid()));
-
-        std::vector<std::shared_ptr<TensorAttributes>> peerStats;
-        if(fb->peer_stats_tensor_uid() != nullptr)
+        if(!logicallyEqualsImpl(other))
         {
-            for(auto uid : *fb->peer_stats_tensor_uid())
+            return false;
+        }
+
+        for(size_t i = 0; i < peer_stats.size(); ++i)
+        {
+            if(!peer_stats[i])
             {
-                peerStats.push_back(tensorMap.at(uid));
+                continue; // Both are null (proven by logical checking step)
+            }
+
+            if(!(*peer_stats[i] == *other.peer_stats[i]))
+            {
+                return false;
             }
         }
-        attr.set_peer_stats(peerStats);
 
-        if(fb->prev_running_mean_tensor_uid().has_value())
-        {
-            attr.set_prev_running_mean(tensorMap.at(fb->prev_running_mean_tensor_uid().value()));
-        }
-        if(fb->prev_running_variance_tensor_uid().has_value())
-        {
-            attr.set_prev_running_variance(
-                tensorMap.at(fb->prev_running_variance_tensor_uid().value()));
-        }
-        if(fb->momentum_tensor_uid().has_value())
-        {
-            attr.set_momentum(tensorMap.at(fb->momentum_tensor_uid().value()));
-        }
-
-        attr.set_y(tensorMap.at(fb->y_tensor_uid()));
-
-        if(fb->mean_tensor_uid().has_value())
-        {
-            attr.set_mean(tensorMap.at(fb->mean_tensor_uid().value()));
-        }
-        if(fb->inv_variance_tensor_uid().has_value())
-        {
-            attr.set_inv_variance(tensorMap.at(fb->inv_variance_tensor_uid().value()));
-        }
-        if(fb->next_running_mean_tensor_uid().has_value())
-        {
-            attr.set_next_running_mean(tensorMap.at(fb->next_running_mean_tensor_uid().value()));
-        }
-        if(fb->next_running_variance_tensor_uid().has_value())
-        {
-            attr.set_next_running_variance(
-                tensorMap.at(fb->next_running_variance_tensor_uid().value()));
-        }
-
-        return attr;
+        return true;
     }
 };
 

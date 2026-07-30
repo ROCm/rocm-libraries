@@ -1,4 +1,4 @@
-// Copyright (C) 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -306,16 +306,28 @@ void write_standalone_test_harness(const Function& f, const std::string& src)
     main_file << "#include <functional>\n";
     main_file << "#include <future>\n";
     main_file << "#include <memory>\n";
+    main_file << "#include <optional>\n";
+    main_file << "#include <mutex>\n";
     main_file << "#include <random>\n";
+    main_file << "#include <shared_mutex>\n";
+    main_file << "#include <sstream>\n";
+    main_file << "#include <stdexcept>\n";
     main_file << "#include <string>\n";
     main_file << "#include <vector>\n";
+    main_file << "#include <utility>\n";
+#ifdef _WIN32
+    main_file << "#include <windows.h>\n";
+#else
+    main_file << "#include <sys/sysinfo.h>\n";
+#endif
 
     main_file << "#define ROCFFT_DEBUG_GENERATE_KERNEL_HARNESS\n";
     main_file << rocfft_hip_h;
     main_file << rocfft_complex_h;
+    main_file << sys_mem_h;
+    main_file << device_properties_h;
     main_file << gpubuf_h;
     main_file << hip_object_wrapper_h;
-    main_file << device_properties_h;
     main_file << rtc_kernel_h;
     main_file << rtc_kernel_cpp;
     main_file << rtc_test_harness_helper_cpp;

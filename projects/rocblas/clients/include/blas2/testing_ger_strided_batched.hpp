@@ -259,6 +259,9 @@ void testing_ger_strided_batched(const Arguments& arg)
     int64_t stride_a    = arg.stride_a;
     int64_t batch_count = arg.batch_count;
 
+    bool    ab_striding  = arg.alpha_beta_stride;
+    int64_t alpha_stride = ab_striding ? arg.stride_c : 0;
+
     rocblas_local_handle handle{arg};
 
     // argument check before allocating invalid memory
@@ -292,19 +295,20 @@ void testing_ger_strided_batched(const Arguments& arg)
     HOST_MEMCHECK(host_strided_batch_matrix<T>, hA_gold, (M, N, lda, stride_a, batch_count));
     HOST_MEMCHECK(host_strided_batch_vector<T>, hx, (M, incx, stride_x, batch_count));
     HOST_MEMCHECK(host_strided_batch_vector<T>, hy, (N, incy, stride_y, batch_count));
-    HOST_MEMCHECK(host_vector<T>, halpha, (1));
-    halpha[0] = h_alpha;
+    HOST_MEMCHECK(host_vector<T>, halpha, (batch_count, alpha_stride));
 
     // Allocate device memory
     DEVICE_MEMCHECK(device_strided_batch_matrix<T>, dA, (M, N, lda, stride_a, batch_count));
     DEVICE_MEMCHECK(device_strided_batch_vector<T>, dx, (M, incx, stride_x, batch_count));
     DEVICE_MEMCHECK(device_strided_batch_vector<T>, dy, (N, incy, stride_y, batch_count));
-    DEVICE_MEMCHECK(device_vector<T>, d_alpha, (1));
+    DEVICE_MEMCHECK(device_vector<T>, d_alpha, (batch_count, alpha_stride));
 
     // Initialize data on host memory
     rocblas_init_matrix(hA, arg, rocblas_client_never_set_nan, rocblas_client_general_matrix, true);
     rocblas_init_vector(hx, arg, rocblas_client_alpha_sets_nan, false, true);
     rocblas_init_vector(hy, arg, rocblas_client_alpha_sets_nan);
+
+    rocblas_init_vector_alternating_sign(halpha, h_alpha);
 
     // Copy matrix
     hA_gold.copy_from(hA);
@@ -394,7 +398,7 @@ void testing_ger_strided_batched(const Arguments& arg)
                         device_strided_batch_vector<T>, dx_copy, (M, incx, stride_x, batch_count));
                     DEVICE_MEMCHECK(
                         device_strided_batch_vector<T>, dy_copy, (N, incy, stride_y, batch_count));
-                    DEVICE_MEMCHECK(device_vector<T>, d_alpha_copy, (1));
+                    DEVICE_MEMCHECK(device_vector<T>, d_alpha_copy, (batch_count, alpha_stride));
 
                     CHECK_HIP_ERROR(dx_copy.transfer_from(hx));
                     CHECK_HIP_ERROR(dy_copy.transfer_from(hy));
@@ -434,7 +438,8 @@ void testing_ger_strided_batched(const Arguments& arg)
 
         for(size_t b = 0; b < batch_count; ++b)
         {
-            ref_ger<T, CONJ>(M, N, h_alpha, hx[b], incx, hy[b], incy, hA_gold[b], lda);
+            ref_ger<T, CONJ>(
+                M, N, halpha[b * alpha_stride], hx[b], incx, hy[b], incy, hA_gold[b], lda);
         }
 
         cpu_time_used = get_time_us_no_sync() - cpu_time_used;
@@ -493,6 +498,15 @@ void testing_ger_strided_batched(const Arguments& arg)
 
         CHECK_ROCBLAS_ERROR(rocblas_set_pointer_mode(handle, rocblas_pointer_mode_host));
 
+        const T* alpha = &h_alpha;
+        if(arg.alpha_beta_stride)
+        {
+            CHECK_ROCBLAS_ERROR(rocblas_set_pointer_mode(handle, rocblas_pointer_mode_device));
+            CHECK_HIP_ERROR(d_alpha.transfer_from(halpha));
+            alpha = d_alpha;
+            handle.pre_test(arg);
+        }
+
         hipStream_t stream;
         CHECK_ROCBLAS_ERROR(rocblas_get_stream(handle, &stream));
 
@@ -505,7 +519,7 @@ void testing_ger_strided_batched(const Arguments& arg)
                           (handle,
                            M,
                            N,
-                           &h_alpha,
+                           alpha,
                            dx,
                            incx,
                            stride_x,
@@ -519,6 +533,11 @@ void testing_ger_strided_batched(const Arguments& arg)
         }
 
         gpu_time_used = get_time_us_sync(stream) - gpu_time_used;
+
+        if(arg.alpha_beta_stride)
+        {
+            handle.post_test(arg);
+        }
 
         ArgumentModel<e_M,
                       e_N,

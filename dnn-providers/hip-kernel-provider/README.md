@@ -24,25 +24,42 @@ HipKernelEngine
 ### Key Components
 
 - **Engines** (`src/engines/`): High-level operation orchestration
-- **Plans** (`src/engines/plans/`): Kernel-specific execution logic
+    - **HIP MLops engine** (`src/engines/hip_mlops_engine/`): Kernel-specific execution logic. Enabled via the compile flag `ENABLE_HIP_MLOPS_ENGINE` (on by default)
+    - **ASM SDPA engine** (`src/engines/asm_sdpa_engine/`): Assembly kernels to do scaled dot-product attention (SDPA). Enabled via `ENABLE_ASM_SDPA_ENGINE` (on by default)
 - **HIP Infrastructure** (`src/hip/`): HIPRTC wrapper classes for compilation and execution
 - **Kernels** (`kernels/`): Device-side kernel source code embedded at build time
 - **Plugin SDK Integration**: Implements `IPlan`, `IPlanBuilder`, `IEngine` interfaces
 
 ## Building
 
-This plugin should be built as a standalone plugin. To build the plugin, first install hipDNN on the system and then follow these steps:
+This plugin is built as a standalone project outside of the main hipDNN build. It depends on the hipDNN SDK packages (`hipdnn_data_sdk` and `hipdnn_plugin_sdk`), which must be available on the system before building.
+
+The SDK packages can come from either:
+
+- **Building hipDNN from source** (in the `projects/hipdnn` directory of this repository): build hipDNN and run `ninja install` to install the SDK packages. Note that the `CMAKE_INSTALL_PREFIX` may need to be set when configuring the hipDNN CMake project if ROCm was not installed to the default `/opt/rocm` on your system.
+- **A ROCm or TheRock installation** that includes hipDNN: the SDK packages are installed as part of the install.
+
+Either approach works as long as the installed SDK version is compatible with the plugin version being built.
+
+> **Avoiding header conflicts:** If you have hipDNN installed system-wide (e.g., from ROCm or TheRock) and also build hipDNN from source in the repository, the two sets of headers may conflict. To avoid this, use `CMAKE_PREFIX_PATH` to point at exactly the installation you intend to use:
+>
+> ```bash
+> cmake -GNinja -DCMAKE_PREFIX_PATH=<path-to-hipdnn-install> -DCMAKE_CXX_COMPILER=<path-to-amdclang>/clang++ ..
+> ```
+
+### Steps
 
 1. Navigate to the `dnn-providers/hip-kernel-provider` directory.
 2. Make a build directory using `mkdir build && cd build`.
 3. Configure the build using `cmake -GNinja -DCMAKE_CXX_COMPILER=<path to amdclang>/clang++ ..`.
+    - If you would like to enable/disable a specific engine, add the argument `-DENABLE_<engine>=0` (example: `-DENABLE_ASM_SDPA_ENGINE=0`)
 4. Finally, run `ninja` to build the plugin.
 
 ### Build Requirements
 
-- hipDNN installed (via `ninja install` from hipDNN build)
+- hipDNN SDK packages installed (`hipdnn_data_sdk`, `hipdnn_plugin_sdk`)
 - ROCm with HIP and HIPRTC
-- CMake 3.16+
+- CMake 3.25+
 - Ninja build system
 - C++17 compatible compiler (amdclang++ recommended)
 
@@ -60,9 +77,9 @@ After building, run the test suites:
 
 ## Kernel Embedding System
 
-Kernel source files (`.cpp`, `.hpp`, `.h`) under `kernels/` are embedded as C++ string literals at CMake configure time. This allows runtime compilation via HIPRTC while keeping kernel sources as regular C++ files (with syntax highlighting, IDE support, etc.).
+Kernel source files (`.cpp`, `.hpp`, `.h`) under `engines/` are embedded as C++ string literals at CMake configure time. *Use the CMake function `add_kernels_for_embedding` in any engine you define that implements HIP kernels.* This allows runtime compilation via HIPRTC while keeping kernel sources as regular C++ files (with syntax highlighting, IDE support, etc.).
 
-The embedding is handled by the `embed_kernel_sources()` CMake function in `kernels/CMakeLists.txt`.
+The embedding is handled by the `embed_kernel_sources()` CMake function in `src/cmake/KernelEmbedding.cmake`.
 
 ## Contributing
 

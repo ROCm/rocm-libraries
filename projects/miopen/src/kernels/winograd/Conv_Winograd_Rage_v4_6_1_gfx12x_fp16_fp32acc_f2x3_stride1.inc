@@ -39,11 +39,6 @@
     .long  0x18000100 + ((\src0) << (32-32)) + ((\src1) << (41-32))
 .endm
 
-.macro _v_pk_add_u16_vsv dst, src0, src1
-    .long  0xCC0A0000 + (\dst)
-    .long  0x18020000 + ((\src0) << (32-32)) + ((\src1) << (41-32))
-.endm
-
 .macro _v_pk_add_u16_vvs dst, src0, src1
     .long  0xCC0A0800 + (\dst)
     .long  0x18000100 + ((\src0) << (32-32)) + ((\src1) << (41-32))

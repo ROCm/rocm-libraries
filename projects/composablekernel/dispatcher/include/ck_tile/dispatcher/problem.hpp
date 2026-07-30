@@ -7,6 +7,8 @@
 #include <stdexcept>
 #include <string>
 
+#include "ck_tile/dispatcher/kernel_key.hpp" // ReductionStrategy
+
 namespace ck_tile {
 namespace dispatcher {
 
@@ -58,6 +60,10 @@ struct Problem
     // Validation control
     bool enable_validation; // Enable output validation against reference
 
+    // Stream-K request: which reduction strategy the caller wants (None = non-Stream-K)
+    bool streamk                         = false;
+    ReductionStrategy reduction_strategy = ReductionStrategy::None;
+
     /// Default constructor with sensible defaults
     Problem()
         : M(0),
@@ -66,7 +72,9 @@ struct Problem
           k_batch(1),
           smem_budget(0),
           prefer_persistent(false),
-          enable_validation(false)
+          enable_validation(false),
+          streamk(false),
+          reduction_strategy(ReductionStrategy::None)
     {
     }
 
@@ -78,7 +86,9 @@ struct Problem
           k_batch(1),
           smem_budget(0),
           prefer_persistent(false),
-          enable_validation(false)
+          enable_validation(false),
+          streamk(false),
+          reduction_strategy(ReductionStrategy::None)
     {
     }
 
@@ -98,7 +108,7 @@ struct Problem
     /**
      * Create Problem by inferring MNK from tensor shapes.
      *
-     * For GEMM: C[M,N] = A[M,K] × B[K,N]
+     * For GEMM: C[M,N] = A[M,K] x B[K,N]
      *
      * @param a_shape Shape of matrix A (M x K, or K x M if transposed)
      * @param b_shape Shape of matrix B (K x N, or N x K if transposed)
@@ -113,7 +123,7 @@ struct Problem
     [[nodiscard]] static Problem
     from_shapes(TensorShape a_shape, TensorShape b_shape, TensorShape c_shape)
     {
-        // For C = A × B:
+        // For C = A x B:
         // A: [M, K] (or [K, M] if transposed)
         // B: [K, N] (or [N, K] if transposed)
         // C: [M, N]
@@ -164,7 +174,7 @@ struct Problem
      * @throws std::invalid_argument if dimensions are inconsistent
      *
      * Example:
-     *   // A[512,256] × B[256,1024] = C[512,1024]
+     *   // A[512,256] x B[256,1024] = C[512,1024]
      *   auto problem = Problem::from_dimensions(512, 256, 256, 1024, 512, 1024);
      */
     [[nodiscard]] static Problem from_dimensions(std::int64_t a_rows,
@@ -188,7 +198,7 @@ struct Problem
      * @throws std::invalid_argument if K dimensions don't match
      *
      * Example:
-     *   // A[512,256] × B[256,1024] = C[512,1024]
+     *   // A[512,256] x B[256,1024] = C[512,1024]
      *   auto problem = Problem::from_ab(512, 256, 256, 1024);
      */
     [[nodiscard]] static Problem
@@ -290,6 +300,14 @@ class ProblemBuilder
     ProblemBuilder& validate(bool enable = true)
     {
         problem_.enable_validation = enable;
+        return *this;
+    }
+
+    /// Request a Stream-K kernel with a given reduction strategy
+    ProblemBuilder& stream_k(ReductionStrategy strategy = ReductionStrategy::Atomic)
+    {
+        problem_.streamk            = true;
+        problem_.reduction_strategy = strategy;
         return *this;
     }
 

@@ -65,24 +65,27 @@ auto GetConvTestCasesFloat()
 }
 
 template <miopenDataType_t datatype>
-const auto& GetTestParams()
+miopen::unit_tests::UnitTestConvSolverParams GetTestParams()
 {
-    static const auto params = [] {
-        Gpu supported_gpus = Gpu::gfx906 | Gpu::gfx908;
-        if constexpr(datatype == miopenFloat)
-        {
-            supported_gpus = supported_gpus | Gpu::gfx900;
-        }
-        auto p = miopen::unit_tests::UnitTestConvSolverParams(supported_gpus);
-        p.CheckXnackDisabled();
-        return p;
-    }();
-    return params;
+    Gpu supported_gpus = Gpu::gfx906 | Gpu::gfx908;
+    if constexpr(datatype == miopenFloat)
+    {
+        supported_gpus = supported_gpus | Gpu::gfx900;
+    }
+    auto p = miopen::unit_tests::UnitTestConvSolverParams(supported_gpus);
+    p.CheckXnackDisabled();
+    return p;
 }
 
-const auto& GetTestParamsHalf() { return GetTestParams<miopenHalf>(); }
+miopen::unit_tests::UnitTestConvSolverParams GetTestParamsHalf()
+{
+    return GetTestParams<miopenHalf>();
+}
 
-const auto& GetTestParamsFloat() { return GetTestParams<miopenFloat>(); }
+miopen::unit_tests::UnitTestConvSolverParams GetTestParamsFloat()
+{
+    return GetTestParams<miopenFloat>();
+}
 
 } // namespace
 
@@ -218,6 +221,26 @@ auto GetConvTestCasesNHWCFloat()
     };
 }
 
+auto GetConvTestCasesNHWCFloatWrw()
+{
+    using TestCase = miopen::unit_tests::ConvTestCase;
+
+    return std::vector{
+        // clang-format off
+        TestCase{{miopenFloat, miopenTensorNHWC, {1, 20, 20, 20}},
+                 {miopenFloat, miopenTensorNHWC, {20, 20, 3, 3}},
+                 miopenFloat, {{1, 1}, {1, 1}, {1, 1}}},
+        // Degenerate spatial dims (H=1, W=1) with 1x1 filter that has ambiguous layout strides
+        // so HeuristicUpdateLayouts() can't fix the layout string after NHWC->NCHW transposition.
+        // Targets GetSwappedNCLayout(NHWC)->CHWN
+        // then hits missing return in GetGroupConvLayout.
+        TestCase{{miopenFloat, miopenTensorNHWC, {2, 40, 1, 1}},
+                 {miopenFloat, miopenTensorNHWC, {8, 40, 1, 1}},
+                 miopenFloat, {{0, 0}, {1, 1}, {1, 1}}},
+        // clang-format on
+    };
+}
+
 } // namespace
 
 using GPU_UnitTestConvSolverTransposedBinWinogradRxSFwd_FP16 = GPU_UnitTestConvSolverFwd_FP16;
@@ -296,7 +319,7 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_UnitTestConvSolverTransposedBinWinogradRxSWrw_FP32,
                          testing::Combine(testing::Values(GetTestParamsFloat()),
                                           testing::Values(miopenConvolutionAlgoWinograd),
-                                          testing::ValuesIn(GetConvTestCasesNHWCFloat())));
+                                          testing::ValuesIn(GetConvTestCasesNHWCFloatWrw())));
 
 // Device applicability test
 INSTANTIATE_TEST_SUITE_P(Smoke,

@@ -58,7 +58,15 @@
 struct _rocsparse_handle
 {
     // constructor
+#ifdef ROCSPARSE_WITH_HANDLE_CREATE
+    // A user-defined stream must be provided so that all stream-ordered setup
+    // work during construction runs on that stream instead of the default
+    // (NULL) stream, which would otherwise implicitly synchronize with all
+    // other streams on the device.
+    explicit _rocsparse_handle(hipStream_t stream);
+#else
     _rocsparse_handle();
+#endif
     // destructor
     ~_rocsparse_handle();
 
@@ -99,7 +107,7 @@ struct _rocsparse_handle
     void* done{};
 
     // blas handle
-    rocsparse::blas_handle blas_handle;
+    rocsparse::blas_handle blas_handle{};
 
     // Temporary storage for spmv descriptor during csrmv calls
     // This allows template functions to access pre-extracted arrays

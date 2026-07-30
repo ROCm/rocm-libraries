@@ -2,11 +2,20 @@
 // SPDX-License-Identifier:  MIT
 
 #include <algorithm>
-#include <hipdnn_data_sdk/data_objects/engine_details_generated.h>
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
+#include <hipdnn_data_sdk/utilities/VersionUtils.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/engine_details_generated.h>
+#include <limits>
 #include <mutex>
+#include <numeric>
+#include <string_view>
+#include <unordered_map>
 #include <vector>
 
+#include "EnginePlugin.hpp"
 #include "EnginePluginManager.hpp"
 #include "EnginePluginResourceManager.hpp"
 #include "HipdnnException.hpp"
@@ -17,6 +26,7 @@
 #include "descriptors/VariantDescriptor.hpp"
 #include "logging/Logging.hpp"
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
+#include <hipdnn_plugin_sdk/PluginVersionConstants.hpp>
 #include <spdlog/fmt/ranges.h>
 
 namespace hipdnn_backend
@@ -27,58 +37,85 @@ namespace plugin
 namespace
 {
 
-struct PluginLoadingConfig
+// Static storage for engine plugin configuration
+std::mutex gEngineMutex;
+PluginLoadingConfig gEngineConfig;
+std::weak_ptr<EnginePluginManager> gEngineWeakPtr;
+std::shared_ptr<EnginePluginManager> gEnginePersistentPtr;
+std::atomic<bool> gEngineShutdownFlag{false};
+
+// Register atexit handler to set shutdown flag
+struct EnginePluginShutdownRegistrar
 {
-    std::set<std::filesystem::path> paths;
-    hipdnnPluginLoadingMode_ext_t mode = HIPDNN_DEFAULT_PLUGIN_LOADING_MODE;
-    hipdnnPluginUnloadingMode_ext_t unloadingMode = HIPDNN_DEFAULT_PLUGIN_UNLOADING_MODE;
+    EnginePluginShutdownRegistrar()
+    {
+        std::atexit([]() { gEngineShutdownFlag.store(true, std::memory_order_release); });
+    }
 };
 
-std::mutex pluginMutex;
-PluginLoadingConfig pluginConfig;
-std::weak_ptr<EnginePluginManager> pmPtr;
-// Keeps EnginePluginManager alive in lazy unloading mode
-std::shared_ptr<EnginePluginManager> persistentPmPtr;
+EnginePluginShutdownRegistrar gEngineShutdownRegistrar;
+
+/// Missing override flag means false; other descriptor errors propagate.
+bool readIsOverrideShapeEnabled(const GraphDescriptor& graphDesc)
+{
+    bool flag = false;
+    int64_t elementCount = 0;
+    try
+    {
+        graphDesc.getAttribute(HIPDNN_ATTR_OPERATIONGRAPH_IS_OVERRIDE_SHAPE_ENABLED_EXT,
+                               HIPDNN_TYPE_BOOLEAN,
+                               1,
+                               &elementCount,
+                               &flag);
+    }
+    catch(const HipdnnException& ex)
+    {
+        // Only swallow "attribute not supported" — anything else is a real
+        // error in the descriptor or its attribute machinery.
+        if(ex.getStatus() == HIPDNN_STATUS_NOT_SUPPORTED)
+        {
+            return false;
+        }
+        throw;
+    }
+    if(elementCount < 1)
+    {
+        return false;
+    }
+    return flag;
+}
 
 } // namespace
 
-void EnginePluginResourceManager::setPluginPaths(
-    const std::vector<std::filesystem::path>& pluginPaths,
-    hipdnnPluginLoadingMode_ext_t loadingMode)
+// Static accessor implementations for CRTP base class
+std::mutex& EnginePluginResourceManager::getMutex()
 {
-    std::lock_guard<std::mutex> const lock(pluginMutex);
-
-    auto newPathsSet = std::set<std::filesystem::path>{pluginPaths.begin(), pluginPaths.end()};
-    if(pluginConfig.paths == newPathsSet && pluginConfig.mode == loadingMode)
-    {
-        return;
-    }
-
-    // Clear persistent pointer first to allow lazy mode check to work correctly.
-    // If only persistentPmPtr is keeping plugins alive (no active handles),
-    // then pmPtr will expire after this reset.
-    persistentPmPtr.reset();
-
-    THROW_IF_FALSE(pmPtr.expired(),
-                   HIPDNN_STATUS_NOT_SUPPORTED,
-                   "hipdnnSetEnginePluginPaths_ext cannot be called with an active handle.");
-
-    pluginConfig.mode = loadingMode;
-
-    if(loadingMode == HIPDNN_PLUGIN_LOADING_ABSOLUTE)
-    {
-        pluginConfig.paths = {pluginPaths.begin(), pluginPaths.end()};
-    }
-    else
-    {
-        pluginConfig.paths.insert(pluginPaths.begin(), pluginPaths.end());
-    }
+    return gEngineMutex;
 }
 
-std::set<std::filesystem::path> EnginePluginResourceManager::getPluginPaths()
+PluginLoadingConfig& EnginePluginResourceManager::getConfig()
 {
-    std::lock_guard<std::mutex> const lock(pluginMutex);
-    return pluginConfig.paths;
+    return gEngineConfig;
+}
+
+std::weak_ptr<EnginePluginManager>& EnginePluginResourceManager::getWeakPtr()
+{
+    return gEngineWeakPtr;
+}
+
+std::shared_ptr<EnginePluginManager>& EnginePluginResourceManager::getPersistentPtr()
+{
+    return gEnginePersistentPtr;
+}
+
+std::atomic<bool>& EnginePluginResourceManager::getShutdownFlag()
+{
+    return gEngineShutdownFlag;
+}
+
+const char* EnginePluginResourceManager::getPluginTypeName()
+{
+    return "engine";
 }
 
 size_t EnginePluginResourceManager::getEngineCount() const
@@ -137,109 +174,19 @@ std::vector<EngineInfo> EnginePluginResourceManager::getEngineInfos() const
     return infos;
 }
 
-void EnginePluginResourceManager::setPluginUnloadingMode(hipdnnPluginUnloadingMode_ext_t mode)
-{
-    std::lock_guard<std::mutex> const lock(pluginMutex);
-
-    switch(mode)
-    {
-    case HIPDNN_PLUGIN_UNLOAD_EAGER:
-        // Clear persistent pointer - if no handles exist, plugins will be unloaded
-        persistentPmPtr.reset();
-        break;
-
-    case HIPDNN_PLUGIN_UNLOAD_LAZY:
-        // If plugins are already loaded, keep them alive by storing in persistent pointer
-        if(auto pm = pmPtr.lock())
-        {
-            persistentPmPtr = pm;
-        }
-        // If no plugins loaded yet, persistentPmPtr will be set when create() is called
-        break;
-
-    default:
-        throw HipdnnException(HIPDNN_STATUS_BAD_PARAM,
-                              "Invalid plugin unloading mode: " + std::to_string(mode));
-    }
-
-    pluginConfig.unloadingMode = mode;
-}
-
-void EnginePluginResourceManager::getLoadedPluginFiles(size_t* numPlugins,
-                                                       char** pluginPaths,
-                                                       size_t* maxStringLen) const
-{
-    if(!_pm)
-    {
-        *numPlugins = 0;
-        *maxStringLen = 0;
-        return;
-    }
-
-    const auto& pathSet = _pm->getLoadedPluginFiles();
-
-    size_t requiredLen = 0;
-    for(const auto& path : pathSet)
-    {
-        requiredLen = std::max(requiredLen, path.string().length() + 1);
-    }
-
-    if(pluginPaths == nullptr)
-    {
-        *numPlugins = pathSet.size();
-        *maxStringLen = requiredLen;
-        return;
-    }
-
-    if(*numPlugins < pathSet.size() || *maxStringLen < requiredLen)
-    {
-        throw HipdnnException(HIPDNN_STATUS_BAD_PARAM, "Insufficient buffer space provided.");
-    }
-
-    std::vector<std::filesystem::path> pathsVec;
-    pathsVec.reserve(pathSet.size());
-    pathsVec.assign(pathSet.begin(), pathSet.end());
-
-    for(size_t i = 0; i < pathsVec.size(); ++i)
-    {
-        if(pluginPaths[i] == nullptr)
-        {
-            throw HipdnnException(HIPDNN_STATUS_BAD_PARAM, "A plugin path string buffer is null.");
-        }
-        hipdnn_data_sdk::utilities::copyMaxSizeWithNullTerminator(
-            pluginPaths[i], pathsVec[i].string().c_str(), *maxStringLen);
-    }
-}
-
 std::shared_ptr<EnginePluginResourceManager> EnginePluginResourceManager::create()
 {
-    std::lock_guard<std::mutex> const lock(pluginMutex);
-
-    auto pm = pmPtr.lock();
-
-    if(!pm)
-    {
-        pm = std::make_shared<EnginePluginManager>();
-        pm->loadPlugins(pluginConfig.paths, pluginConfig.mode);
-        pmPtr = pm;
-
-        // In lazy mode, keep the plugin manager alive by storing in persistent pointer
-        if(pluginConfig.unloadingMode == HIPDNN_PLUGIN_UNLOAD_LAZY)
-        {
-            persistentPmPtr = pm;
-        }
-    }
-
+    auto pm = getOrCreatePluginManager();
     return std::make_shared<EnginePluginResourceManager>(pm);
 }
 
 EnginePluginResourceManager::EnginePluginResourceManager()
-    : _pm(std::make_shared<EnginePluginManager>())
+    : PluginResourceManagerBase(std::make_shared<EnginePluginManager>())
 {
 }
 
 EnginePluginResourceManager::EnginePluginResourceManager(std::shared_ptr<EnginePluginManager> pm)
-    : _pm(std::move(pm))
+    : PluginResourceManagerBase(std::move(pm))
 {
     // Helper to safely destroy a handle during error cleanup, logging any failures
     auto safeDestroyHandle = [](const EnginePlugin* plugin, hipdnnEnginePluginHandle_t handle) {
@@ -320,27 +267,41 @@ EnginePluginResourceManager::EnginePluginResourceManager(std::shared_ptr<EngineP
 
 EnginePluginResourceManager::~EnginePluginResourceManager()
 {
-    // Destroy plugin handles
-    for(const auto& [handle, plugin] : _handleToPlugin)
-    {
+    // Lambda to safely destroy a handle, catching all errors
+    auto safeDestroyHandle = [](const EnginePlugin* plugin, hipdnnEnginePluginHandle_t handle) {
         try
         {
             plugin->destroyHandle(handle);
         }
-        catch(const HipdnnException& e)
+        catch(const std::exception& e)
         {
-            HIPDNN_BACKEND_LOG_ERROR(e.getMessage());
+            HIPDNN_BACKEND_LOG_WARN("Failed to destroy handle for plugin '{}' during cleanup: {}",
+                                    plugin->name(),
+                                    e.what());
         }
+        catch(...)
+        {
+            HIPDNN_BACKEND_LOG_WARN(
+                "Failed to destroy handle for plugin '{}' during cleanup: unknown error",
+                plugin->name());
+        }
+    };
+
+    // Destroy plugin handles
+    for(const auto& [handle, plugin] : _handleToPlugin)
+    {
+        safeDestroyHandle(plugin, handle);
     }
 }
 
 EnginePluginResourceManager::EnginePluginResourceManager(
     EnginePluginResourceManager&& other) noexcept
-    : _pm(std::move(other._pm))
-    , _handleToPlugin(std::move(other._handleToPlugin))
+    : _handleToPlugin(std::move(other._handleToPlugin))
     , _engineIdToHandle(std::move(other._engineIdToHandle))
     , _cachedEngineInfos(std::move(other._cachedEngineInfos))
 {
+    // Move base class member explicitly
+    _pm = std::move(other._pm);
 }
 
 EnginePluginResourceManager&
@@ -348,10 +309,10 @@ EnginePluginResourceManager&
 {
     if(this != &other)
     {
-        _pm = std::move(other._pm);
         _handleToPlugin = std::move(other._handleToPlugin);
         _engineIdToHandle = std::move(other._engineIdToHandle);
         _cachedEngineInfos = std::move(other._cachedEngineInfos);
+        _pm = std::move(other._pm);
     }
     return *this;
 }
@@ -365,16 +326,50 @@ void EnginePluginResourceManager::setStream(hipStream_t stream) const
 }
 
 std::vector<int64_t>
-    EnginePluginResourceManager::getApplicableEngineIds(const GraphDescriptor* graphDesc) const
+    EnginePluginResourceManager::getApplicableEngineIds(const GraphDescriptor* graphDesc,
+                                                        bool findFirst) const
 {
     THROW_IF_NULL(graphDesc, HIPDNN_STATUS_INTERNAL_ERROR, "Graph descriptor cannot be null");
 
     auto serializedGraphData = graphDesc->getSerializedGraph();
 
+    // Applicability filter: all graphs require the baseline engine plugin API,
+    // and graphs that opt in to overridable tensor shapes require the extended
+    // override-execute SDK surface. Older explicit API versions are skipped.
+    const bool isOverrideShapeEnabled = readIsOverrideShapeEnabled(*graphDesc);
+    const bool isRuntimePBV = graphDesc->isRuntimePassByValueEnabled();
+    const bool isRaggedTensorEnabled = graphDesc->hasRaggedTensors();
+    const bool hasNonDefaultTensorAlignment = graphDesc->hasNonDefaultTensorAlignment();
+
+    const auto& requiredVersion = hipdnn_plugin_sdk::computeMinimumEnginePluginApiVersion(
+        isOverrideShapeEnabled, isRuntimePBV, isRaggedTensorEnabled, hasNonDefaultTensorAlignment);
+
     std::vector<int64_t> engineIds;
 
     for(const auto& [handle, plugin] : _handleToPlugin)
     {
+        // Safe to deref: validateBeforeAdding rejected plugins with
+        // unparseable versions at load time.
+        const auto pluginVersion = *plugin->parsedApiVersion();
+        if(pluginVersion < requiredVersion)
+        {
+            HIPDNN_BACKEND_LOG_INFO(
+                "Skipping plugin '{}' (apiVersion={}) for graph requiring at least {}",
+                plugin->cachedName(),
+                pluginVersion.str(),
+                requiredVersion.str());
+            continue;
+        }
+
+        if(isOverrideShapeEnabled && !plugin->hasOverrideExecute())
+        {
+            HIPDNN_BACKEND_LOG_INFO(
+                "Skipping plugin '{}' for override-enabled graph because it does not export "
+                "hipdnnEnginePluginExecuteOpGraphWithOverrides",
+                plugin->cachedName());
+            continue;
+        }
+
         auto ids = plugin->getApplicableEngineIds(handle, &serializedGraphData);
         engineIds.insert(engineIds.end(), ids.begin(), ids.end());
 
@@ -392,6 +387,11 @@ std::vector<int64_t>
                                       "Engine ID " + std::to_string(id)
                                           + " is already associated with a different plugin");
             }
+        }
+
+        if(findFirst && !engineIds.empty())
+        {
+            break;
         }
     }
 
@@ -491,6 +491,26 @@ hipdnnEnginePluginExecutionContext_t
     return plugin->createExecutionContext(handle, engineConfig, &serializedGraphData);
 }
 
+hipdnnEnginePluginExecutionContext_t
+    EnginePluginResourceManager::createExecutionContextFromSerialized(
+        int64_t engineId, const hipdnnPluginConstData_t* serializedContext) const
+{
+    THROW_IF_NULL(
+        serializedContext, HIPDNN_STATUS_BAD_PARAM, "Serialized execution context cannot be null");
+
+    auto it = _engineIdToHandle.find(engineId);
+    if(it == _engineIdToHandle.end())
+    {
+        throw HipdnnException(HIPDNN_STATUS_INTERNAL_ERROR,
+                              "Invalid engine ID: " + std::to_string(engineId));
+    }
+
+    auto handle = it->second;
+    auto plugin = _handleToPlugin.at(handle);
+
+    return plugin->createExecutionContextFromSerialized(handle, serializedContext);
+}
+
 void EnginePluginResourceManager::destroyExecutionContext(
     int64_t engineId, hipdnnEnginePluginExecutionContext_t executionContext) const
 {
@@ -510,6 +530,15 @@ std::shared_ptr<const EngineExecutionContextWrapper>
     return std::make_shared<EngineExecutionContextWrapper>(rm, engineId, engineConfig, graphDesc);
 }
 
+std::shared_ptr<const EngineExecutionContextWrapper>
+    EnginePluginResourceManager::createExecutionContextFromSerialized(
+        const std::shared_ptr<EnginePluginResourceManager>& rm,
+        int64_t engineId,
+        const hipdnnPluginConstData_t* serializedContext)
+{
+    return std::make_shared<EngineExecutionContextWrapper>(rm, engineId, serializedContext);
+}
+
 size_t EnginePluginResourceManager::getWorkspaceSize(
     int64_t engineId, hipdnnEnginePluginExecutionContext_t executionContext) const
 {
@@ -527,6 +556,47 @@ size_t EnginePluginResourceManager::getWorkspaceSize(
     auto plugin = _handleToPlugin.at(handle);
 
     return plugin->getWorkspaceSize(handle, executionContext);
+}
+
+void EnginePluginResourceManager::serializeExecutionContext(
+    int64_t engineId,
+    hipdnnEnginePluginExecutionContext_t executionContext,
+    std::vector<uint8_t>& serializedContext) const
+{
+    THROW_IF_NULL(executionContext, HIPDNN_STATUS_BAD_PARAM, "Execution context cannot be null");
+
+    auto it = _engineIdToHandle.find(engineId);
+    if(it == _engineIdToHandle.end())
+    {
+        throw HipdnnException(HIPDNN_STATUS_INTERNAL_ERROR,
+                              "Invalid engine ID: " + std::to_string(engineId));
+    }
+
+    auto handle = it->second;
+    auto plugin = _handleToPlugin.at(handle);
+
+    hipdnnPluginConstData_t pluginData{nullptr, 0};
+    plugin->serializeExecutionContext(handle, executionContext, &pluginData);
+
+    try
+    {
+        THROW_IF_NULL(pluginData.ptr,
+                      HIPDNN_STATUS_PLUGIN_ERROR,
+                      "Serialized execution context payload is null");
+        THROW_IF_TRUE(pluginData.size == 0,
+                      HIPDNN_STATUS_PLUGIN_ERROR,
+                      "Serialized execution context payload is empty");
+
+        serializedContext.resize(pluginData.size);
+        std::memcpy(serializedContext.data(), pluginData.ptr, pluginData.size);
+    }
+    catch(...)
+    {
+        plugin->destroySerializedExecutionContext(handle, &pluginData);
+        throw;
+    }
+
+    plugin->destroySerializedExecutionContext(handle, &pluginData);
 }
 
 void EnginePluginResourceManager::executeOpGraph(
@@ -558,9 +628,7 @@ void EnginePluginResourceManager::executeOpGraph(hipdnnBackendDescriptor_t execu
                    "Engine_plugin_resource_manager::execute_op_graph failed: variantPackDesc is "
                    "not finalized");
 
-    auto config = executionPlanDesc->getEngineConfig();
-    auto engine = config->getEngine();
-    auto engineId = engine->getEngineId();
+    auto engineId = executionPlanDesc->getEngineId();
     void* workspace = variantPackDesc->getWorkspace();
 
     auto& tensorIds = variantPackDesc->getTensorIds();
@@ -582,6 +650,173 @@ void EnginePluginResourceManager::executeOpGraph(hipdnnBackendDescriptor_t execu
         deviceBuffers.push_back(buffer);
     }
 
+    // Enforce each tensor's required device-pointer byte alignment. Alignments
+    // are carried on the execution plan (populated from the graph at finalize and
+    // preserved across plan serialization), keyed by tensor uid. Null pointers
+    // (absent optional tensors) and uids without a recorded alignment are skipped.
+    const auto& planTensorUids = executionPlanDesc->getTensorUids();
+    const auto& planTensorAlignments = executionPlanDesc->getTensorAlignments();
+    if(!planTensorAlignments.empty() && planTensorUids.size() == planTensorAlignments.size())
+    {
+        std::unordered_map<int64_t, int64_t> alignmentByUid;
+        alignmentByUid.reserve(planTensorUids.size());
+        for(size_t i = 0; i < planTensorUids.size(); ++i)
+        {
+            alignmentByUid.emplace(planTensorUids[i], planTensorAlignments[i]);
+        }
+
+        for(const auto& buffer : deviceBuffers)
+        {
+            if(buffer.ptr == nullptr)
+            {
+                continue;
+            }
+
+            const auto it = alignmentByUid.find(buffer.uid);
+            if(it == alignmentByUid.end() || it->second <= 0)
+            {
+                continue;
+            }
+
+            const auto alignment = static_cast<uintptr_t>(it->second);
+            const auto address = reinterpret_cast<uintptr_t>(buffer.ptr);
+            THROW_IF_TRUE(address % alignment != 0,
+                          HIPDNN_STATUS_BAD_PARAM,
+                          "Tensor uid " + std::to_string(buffer.uid)
+                              + " device pointer is not aligned to the required "
+                              + std::to_string(it->second) + " bytes");
+        }
+    }
+
+    const auto& overrideUniqueIds = variantPackDesc->getOverrideUniqueIds();
+    const auto& overrideShapesFlat = variantPackDesc->getOverrideShapes();
+    const auto& overrideStridesFlat = variantPackDesc->getOverrideStrides();
+    const auto& overrideLengths64 = variantPackDesc->getOverrideLengths();
+
+    const bool hasOverrides = !overrideUniqueIds.empty() || !overrideShapesFlat.empty()
+                              || !overrideStridesFlat.empty() || !overrideLengths64.empty();
+
+    if(hasOverrides)
+    {
+        THROW_IF_FALSE(executionPlanDesc->isOverrideShapeEnabled(),
+                       HIPDNN_STATUS_NOT_SUPPORTED,
+                       "Execution plan was not built with override shape support enabled, but the "
+                       "variant pack carries override-tensor selectors.");
+
+        THROW_IF_NE(overrideUniqueIds.size(),
+                    overrideLengths64.size(),
+                    HIPDNN_STATUS_BAD_PARAM,
+                    "Override variant pack: OVERRIDE_UNIQUE_IDS and OVERRIDE_LENGTHS must have "
+                    "the same size");
+
+        auto handleIt = _engineIdToHandle.find(engineId);
+        THROW_IF_FALSE(
+            handleIt != _engineIdToHandle.end(),
+            HIPDNN_STATUS_INTERNAL_ERROR,
+            "Engine_plugin_resource_manager::execute_op_graph failed: unknown engine ID");
+        const auto* plugin = _handleToPlugin.at(handleIt->second);
+
+        // Never silently fall back to legacy execute when override metadata exists.
+        THROW_IF_FALSE(plugin->hasOverrideExecute(),
+                       HIPDNN_STATUS_NOT_SUPPORTED,
+                       "Selected plugin does not export "
+                       "hipdnnEnginePluginExecuteOpGraphWithOverrides although the variant pack "
+                       "carries override-tensor selectors.");
+
+        // Defense-in-depth recheck of the override-execute floor. Override-shape
+        // support is hipDNN-owned routing metadata carried in the execution plan
+        // envelope, so it is cheap and correct to re-verify here that the selected
+        // plugin still meets the override API floor. Pass-by-value is intentionally
+        // false: per RFC 0009, once a serialized plan resolves to an engine id the
+        // plugin owns its own payload versioning/compatibility, so hipDNN does not
+        // re-gate feature floors (like pbv) that live in the plugin payload rather
+        // than the envelope.
+        const auto pluginApiVersion = plugin->parsedApiVersion();
+        THROW_IF_FALSE(pluginApiVersion.has_value()
+                           && *pluginApiVersion
+                                  >= hipdnn_plugin_sdk::computeMinimumEnginePluginApiVersion(
+                                      true,
+                                      /*isRuntimePassByValue=*/false,
+                                      /*isRaggedTensorEnabled=*/false,
+                                      /*hasNonDefaultTensorAlignment=*/false),
+                       HIPDNN_STATUS_NOT_SUPPORTED,
+                       "Selected plugin API version does not support "
+                       "hipdnnEnginePluginExecuteOpGraphWithOverrides.");
+
+        // Validate before narrowing variant-pack int64 lengths to the SDK uint32 surface.
+        const auto numOverridesSize = overrideUniqueIds.size();
+        if constexpr(sizeof(size_t) > sizeof(uint32_t))
+        {
+            THROW_IF_TRUE(numOverridesSize > std::numeric_limits<uint32_t>::max(),
+                          HIPDNN_STATUS_BAD_PARAM_OUT_OF_BOUND,
+                          "Override variant pack: number of overrides exceeds uint32 max");
+        }
+
+        std::vector<uint32_t> overrideLengthsU32;
+        overrideLengthsU32.reserve(numOverridesSize);
+        for(size_t i = 0; i < overrideLengths64.size(); ++i)
+        {
+            const auto value = overrideLengths64[i];
+            THROW_IF_TRUE(value <= 0,
+                          HIPDNN_STATUS_BAD_PARAM_OUT_OF_BOUND,
+                          "Override variant pack: OVERRIDE_LENGTHS for unique-id "
+                              + std::to_string(overrideUniqueIds[i]) + " must be positive ("
+                              + std::to_string(value) + ")");
+            THROW_IF_TRUE(static_cast<uint64_t>(value) > std::numeric_limits<uint32_t>::max(),
+                          HIPDNN_STATUS_BAD_PARAM_OUT_OF_BOUND,
+                          "Override variant pack: OVERRIDE_LENGTHS for unique-id "
+                              + std::to_string(overrideUniqueIds[i]) + " exceeds uint32 max ("
+                              + std::to_string(value) + ")");
+            overrideLengthsU32.push_back(static_cast<uint32_t>(value));
+        }
+
+        // Reconstruct per-UID pointers into the flat shape/stride buffers.
+        std::vector<const int64_t*> overrideShapesPerUid;
+        overrideShapesPerUid.reserve(numOverridesSize);
+        std::vector<const int64_t*> overrideStridesPerUid;
+        overrideStridesPerUid.reserve(numOverridesSize);
+
+        size_t expectedFlatTotal = 0;
+        for(const auto rank : overrideLengthsU32)
+        {
+            const auto rankSize = static_cast<size_t>(rank);
+            THROW_IF_TRUE(expectedFlatTotal > std::numeric_limits<size_t>::max() - rankSize,
+                          HIPDNN_STATUS_BAD_PARAM_OUT_OF_BOUND,
+                          "Override variant pack: OVERRIDE_LENGTHS sum overflow");
+            expectedFlatTotal += rankSize;
+        }
+        THROW_IF_NE(overrideShapesFlat.size(),
+                    expectedFlatTotal,
+                    HIPDNN_STATUS_BAD_PARAM,
+                    "Override variant pack: OVERRIDE_SHAPES total length does not match the "
+                    "sum of OVERRIDE_LENGTHS");
+        THROW_IF_NE(overrideStridesFlat.size(),
+                    expectedFlatTotal,
+                    HIPDNN_STATUS_BAD_PARAM,
+                    "Override variant pack: OVERRIDE_STRIDES total length does not match the "
+                    "sum of OVERRIDE_LENGTHS");
+
+        size_t offset = 0;
+        for(size_t i = 0; i < numOverridesSize; ++i)
+        {
+            overrideShapesPerUid.push_back(overrideShapesFlat.data() + offset);
+            overrideStridesPerUid.push_back(overrideStridesFlat.data() + offset);
+            offset += static_cast<size_t>(overrideLengthsU32[i]);
+        }
+
+        plugin->executeOpGraphWithOverrides(handleIt->second,
+                                            executionPlanDesc->getExecutionContext(),
+                                            workspace,
+                                            deviceBuffers.data(),
+                                            static_cast<uint32_t>(tensorIds.size()),
+                                            static_cast<uint32_t>(numOverridesSize),
+                                            overrideUniqueIds.data(),
+                                            overrideLengthsU32.data(),
+                                            overrideShapesPerUid.data(),
+                                            overrideStridesPerUid.data());
+        return;
+    }
+
     executeOpGraph(engineId,
                    executionPlanDesc->getExecutionContext(),
                    workspace,
@@ -593,15 +828,38 @@ EngineDetailsWrapper::EngineDetailsWrapper(const std::shared_ptr<EnginePluginRes
                                            int64_t engineId,
                                            const GraphDescriptor* graphDesc)
     : _rm(rm)
+    , _engineId(engineId)
 {
-    _rm->getEngineDetails(engineId, graphDesc, &_engineDetailsData);
-    flatbuffers::Verifier verifier(static_cast<const uint8_t*>(_engineDetailsData.ptr),
-                                   _engineDetailsData.size);
-    if(!verifier.VerifyBuffer<hipdnn_data_sdk::data_objects::EngineDetails>())
+    hipdnnPluginConstData_t engineDetailsData{nullptr, 0};
+    _rm->getEngineDetails(engineId, graphDesc, &engineDetailsData);
+
+    try
     {
-        throw HipdnnException(HIPDNN_STATUS_BAD_PARAM,
-                              "EngineDetailsWrapper: unable to verify the flatbuffer schema.");
+        flatbuffers::Verifier verifier(static_cast<const uint8_t*>(engineDetailsData.ptr),
+                                       engineDetailsData.size);
+        if(!verifier.VerifyBuffer<hipdnn_flatbuffers_sdk::data_objects::EngineDetails>())
+        {
+            throw HipdnnException(HIPDNN_STATUS_BAD_PARAM,
+                                  "EngineDetailsWrapper: unable to verify the flatbuffer schema.");
+        }
     }
+    catch(...)
+    {
+        if(engineDetailsData.ptr != nullptr)
+        {
+            try
+            {
+                _rm->destroyEngineDetails(engineId, &engineDetailsData);
+            }
+            catch(const HipdnnException& e)
+            {
+                HIPDNN_BACKEND_LOG_ERROR(e.getMessage());
+            }
+        }
+        throw;
+    }
+
+    _engineDetailsData = engineDetailsData;
 }
 
 EngineDetailsWrapper::~EngineDetailsWrapper()
@@ -613,7 +871,7 @@ EngineDetailsWrapper::~EngineDetailsWrapper()
 
     try
     {
-        _rm->destroyEngineDetails(get()->engine_id(), &_engineDetailsData);
+        _rm->destroyEngineDetails(_engineId, &_engineDetailsData);
     }
     catch(const HipdnnException& e)
     {
@@ -623,26 +881,44 @@ EngineDetailsWrapper::~EngineDetailsWrapper()
 
 EngineDetailsWrapper::EngineDetailsWrapper(EngineDetailsWrapper&& other) noexcept
     : _rm(std::move(other._rm))
+    , _engineId(other._engineId)
     , _engineDetailsData(other._engineDetailsData)
 {
     other._rm = nullptr;
+    other._engineId = 0;
     other._engineDetailsData.ptr = nullptr;
+    other._engineDetailsData.size = 0;
 }
 
 EngineDetailsWrapper& EngineDetailsWrapper::operator=(EngineDetailsWrapper&& other) noexcept
 {
     if(this != &other)
     {
+        if(_engineDetailsData.ptr != nullptr && _rm != nullptr)
+        {
+            try
+            {
+                _rm->destroyEngineDetails(_engineId, &_engineDetailsData);
+            }
+            catch(const HipdnnException& e)
+            {
+                HIPDNN_BACKEND_LOG_ERROR(e.getMessage());
+            }
+        }
+
         _rm = std::move(other._rm);
+        _engineId = other._engineId;
         _engineDetailsData = other._engineDetailsData;
 
         other._rm = nullptr;
+        other._engineId = 0;
         other._engineDetailsData.ptr = nullptr;
+        other._engineDetailsData.size = 0;
     }
     return *this;
 }
 
-const hipdnn_data_sdk::data_objects::EngineDetails* EngineDetailsWrapper::get() const
+const hipdnn_flatbuffers_sdk::data_objects::EngineDetails* EngineDetailsWrapper::get() const
 {
     if(_engineDetailsData.ptr == nullptr)
     {
@@ -651,7 +927,7 @@ const hipdnn_data_sdk::data_objects::EngineDetails* EngineDetailsWrapper::get() 
                               "get() called on an empty object");
     }
 
-    return hipdnn_data_sdk::data_objects::GetEngineDetails(_engineDetailsData.ptr);
+    return hipdnn_flatbuffers_sdk::data_objects::GetEngineDetails(_engineDetailsData.ptr);
 }
 
 // TODO: Use engineId from engineConfig
@@ -664,6 +940,16 @@ EngineExecutionContextWrapper::EngineExecutionContextWrapper(
     , _engineId(engineId)
 {
     _executionContext = _rm->createExecutionContext(engineId, engineConfig, graphDesc);
+}
+
+EngineExecutionContextWrapper::EngineExecutionContextWrapper(
+    const std::shared_ptr<EnginePluginResourceManager>& rm,
+    int64_t engineId,
+    const hipdnnPluginConstData_t* serializedContext)
+    : _rm(rm)
+    , _engineId(engineId)
+{
+    _executionContext = _rm->createExecutionContextFromSerialized(engineId, serializedContext);
 }
 
 EngineExecutionContextWrapper::~EngineExecutionContextWrapper()
@@ -690,6 +976,7 @@ EngineExecutionContextWrapper::EngineExecutionContextWrapper(
     , _executionContext(other._executionContext)
 {
     other._rm = nullptr;
+    other._engineId = 0;
     other._executionContext = nullptr;
 }
 
@@ -698,11 +985,24 @@ EngineExecutionContextWrapper&
 {
     if(this != &other)
     {
+        if(_executionContext != nullptr && _rm != nullptr)
+        {
+            try
+            {
+                _rm->destroyExecutionContext(_engineId, _executionContext);
+            }
+            catch(const HipdnnException& e)
+            {
+                HIPDNN_BACKEND_LOG_ERROR(e.getMessage());
+            }
+        }
+
         _rm = std::move(other._rm);
         _engineId = other._engineId;
         _executionContext = other._executionContext;
 
         other._rm = nullptr;
+        other._engineId = 0;
         other._executionContext = nullptr;
     }
     return *this;

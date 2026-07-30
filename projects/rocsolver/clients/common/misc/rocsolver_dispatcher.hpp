@@ -88,6 +88,7 @@
 #include "common/lapack/testing_getri_npvt_outofplace.hpp"
 #include "common/lapack/testing_getri_outofplace.hpp"
 #include "common/lapack/testing_getrs.hpp"
+#include "common/lapack/testing_getrs_npvt.hpp"
 #include "common/lapack/testing_posv.hpp"
 #include "common/lapack/testing_potf2_potrf.hpp"
 #include "common/lapack/testing_potri.hpp"
@@ -106,6 +107,8 @@
 #include "common/lapack/testing_sygvj_hegvj.hpp"
 #include "common/lapack/testing_sygvx_hegvx.hpp"
 #include "common/lapack/testing_sytf2_sytrf.hpp"
+#include "common/lapack/testing_sytrs.hpp"
+#include "common/lapack/testing_sytrs2.hpp"
 #include "common/lapack/testing_sytxx_hetxx.hpp"
 #include "common/lapack/testing_trtri.hpp"
 
@@ -254,6 +257,27 @@ class rocsolver_dispatcher
             {"getrs_64", testing_getrs<false, false, T, int64_t>},
             {"getrs_batched_64", testing_getrs<true, true, T, int64_t>},
             {"getrs_strided_batched_64", testing_getrs<false, true, T, int64_t>},
+            // sytrs
+            {"sytrs", testing_sytrs<false, false, T, rocblas_int>},
+            {"sytrs_batched", testing_sytrs<true, true, T, rocblas_int>},
+            {"sytrs_strided_batched", testing_sytrs<false, true, T, rocblas_int>},
+            {"sytrs_64", testing_sytrs<false, false, T, int64_t>},
+            {"sytrs_batched_64", testing_sytrs<true, true, T, int64_t>},
+            {"sytrs_strided_batched_64", testing_sytrs<false, true, T, int64_t>},
+            // sytrs2
+            {"sytrs2", testing_sytrs2<false, false, T, rocblas_int>},
+            {"sytrs2_batched", testing_sytrs2<true, true, T, rocblas_int>},
+            {"sytrs2_strided_batched", testing_sytrs2<false, true, T, rocblas_int>},
+            {"sytrs2_64", testing_sytrs2<false, false, T, int64_t>},
+            {"sytrs2_batched_64", testing_sytrs2<true, true, T, int64_t>},
+            {"sytrs2_strided_batched_64", testing_sytrs2<false, true, T, int64_t>},
+            // getrs_npvt
+            {"getrs_npvt", testing_getrs_npvt<false, false, T, rocblas_int>},
+            {"getrs_npvt_batched", testing_getrs_npvt<true, true, T, rocblas_int>},
+            {"getrs_npvt_strided_batched", testing_getrs_npvt<false, true, T, rocblas_int>},
+            {"getrs_npvt_64", testing_getrs_npvt<false, false, T, int64_t>},
+            {"getrs_npvt_batched_64", testing_getrs_npvt<true, true, T, int64_t>},
+            {"getrs_npvt_strided_batched_64", testing_getrs_npvt<false, true, T, int64_t>},
             // gesv
             {"gesv", testing_gesv<false, false, T>},
             {"gesv_batched", testing_gesv<true, true, T>},
@@ -382,13 +406,19 @@ class rocsolver_dispatcher
             {"sygst_batched", testing_sygsx_hegsx<true, true, 1, T>},
             {"sygst_strided_batched", testing_sygsx_hegsx<false, true, 1, T>},
             // syev
-            {"syev", testing_syev_heev<false, false, T>},
-            {"syev_batched", testing_syev_heev<true, true, T>},
-            {"syev_strided_batched", testing_syev_heev<false, true, T>},
+            {"syev", testing_syev_heev<false, false, T, rocblas_int>},
+            {"syev_batched", testing_syev_heev<true, true, T, rocblas_int>},
+            {"syev_strided_batched", testing_syev_heev<false, true, T, rocblas_int>},
+            {"syev_64", testing_syev_heev<false, false, T, int64_t>},
+            {"syev_batched_64", testing_syev_heev<true, true, T, int64_t>},
+            {"syev_strided_batched_64", testing_syev_heev<false, true, T, int64_t>},
             // syevd
-            {"syevd", testing_syevd_heevd<false, false, T>},
-            {"syevd_batched", testing_syevd_heevd<true, true, T>},
-            {"syevd_strided_batched", testing_syevd_heevd<false, true, T>},
+            {"syevd", testing_syevd_heevd<false, false, T, rocblas_int>},
+            {"syevd_batched", testing_syevd_heevd<true, true, T, rocblas_int>},
+            {"syevd_strided_batched", testing_syevd_heevd<false, true, T, rocblas_int>},
+            {"syevd_64", testing_syevd_heevd<false, false, T, int64_t>},
+            {"syevd_batched_64", testing_syevd_heevd<true, true, T, int64_t>},
+            {"syevd_strided_batched_64", testing_syevd_heevd<false, true, T, int64_t>},
             // syevdj
             {"syevdj", testing_syevdj_heevdj<false, false, T>},
             {"syevdj_batched", testing_syevdj_heevdj<true, true, T>},
@@ -490,13 +520,19 @@ class rocsolver_dispatcher
             {"hegst_batched", testing_sygsx_hegsx<true, true, 1, T>},
             {"hegst_strided_batched", testing_sygsx_hegsx<false, true, 1, T>},
             // heev
-            {"heev", testing_syev_heev<false, false, T>},
-            {"heev_batched", testing_syev_heev<true, true, T>},
-            {"heev_strided_batched", testing_syev_heev<false, true, T>},
+            {"heev", testing_syev_heev<false, false, T, rocblas_int>},
+            {"heev_batched", testing_syev_heev<true, true, T, rocblas_int>},
+            {"heev_strided_batched", testing_syev_heev<false, true, T, rocblas_int>},
+            {"heev_64", testing_syev_heev<false, false, T, int64_t>},
+            {"heev_batched_64", testing_syev_heev<true, true, T, int64_t>},
+            {"heev_strided_batched_64", testing_syev_heev<false, true, T, int64_t>},
             // heevd
-            {"heevd", testing_syevd_heevd<false, false, T>},
-            {"heevd_batched", testing_syevd_heevd<true, true, T>},
-            {"heevd_strided_batched", testing_syevd_heevd<false, true, T>},
+            {"heevd", testing_syevd_heevd<false, false, T, rocblas_int>},
+            {"heevd_batched", testing_syevd_heevd<true, true, T, rocblas_int>},
+            {"heevd_strided_batched", testing_syevd_heevd<false, true, T, rocblas_int>},
+            {"heevd_64", testing_syevd_heevd<false, false, T, int64_t>},
+            {"heevd_batched_64", testing_syevd_heevd<true, true, T, int64_t>},
+            {"heevd_strided_batched_64", testing_syevd_heevd<false, true, T, int64_t>},
             // heevdj
             {"heevdj", testing_syevdj_heevdj<false, false, T>},
             {"heevdj_batched", testing_syevdj_heevdj<true, true, T>},

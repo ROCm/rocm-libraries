@@ -157,10 +157,6 @@ Options
 * ``TENSILE_ENABLE_MSGPACK``: Enable MessagePack support (default: ``ON``)
 * ``TENSILE_ENABLE_LLVM``: Use LLVM YAML library; this should only be used by project developers and for testing (default: ``OFF``)
 
-*Client options*:
-
-* ``TENSILE_ENABLE_ROCM_SMI``: Enable rocm_smi support (default: ``ON`` on Linux, ``OFF`` on Windows)
-
 CMake Targets
 -------------
 

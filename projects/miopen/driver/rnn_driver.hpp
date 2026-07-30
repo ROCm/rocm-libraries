@@ -318,7 +318,8 @@ std::vector<int> RNNDriver<Tgpu, Tref>::GetInputTensorLengthsFromCmdLine()
         if(cont > 0 && in_n[cont] > in_n[cont - 1])
         {
             printf("Incorrect input batch size at time %d\n", cont);
-            return std::vector<int>({0});
+            in_n = std::vector<int>({0});
+            return in_n;
         }
         else
         {
@@ -483,9 +484,6 @@ int RNNDriver<Tgpu, Tref>::SetRNNDescriptorFromCmdLineArgs()
         size_t states_size = statesSizeInBytes / sizeof(rocrand_state_xorwow);
 
         DEFINE_CONTEXT(ctx);
-#if MIOPEN_BACKEND_OPENCL
-        clGetCommandQueueInfo(q, CL_QUEUE_CONTEXT, sizeof(cl_context), &ctx, nullptr);
-#endif
 
         dropout_states_dev =
             std::unique_ptr<GPUMem>(new GPUMem(ctx, states_size, sizeof(rocrand_state_xorwow)));
@@ -563,9 +561,6 @@ int RNNDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
     reserveSpace_sz = (reserveSpace_sz + sizeof(Tgpu) - 1) / sizeof(Tgpu);
 
     DEFINE_CONTEXT(ctx);
-#if MIOPEN_BACKEND_OPENCL
-    clGetCommandQueueInfo(q, CL_QUEUE_CONTEXT, sizeof(cl_context), &ctx, nullptr);
-#endif
 
     in_dev           = std::unique_ptr<GPUMem>(new GPUMem(ctx, in_sz, sizeof(Tgpu)));
     hx_dev           = std::unique_ptr<GPUMem>(new GPUMem(ctx, hy_sz, sizeof(Tgpu)));

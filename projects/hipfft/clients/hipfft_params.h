@@ -1,4 +1,4 @@
-// Copyright (C) 2021 - 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2021 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -161,23 +161,19 @@ public:
     // will be provided with externally-managed work area(s):
     static std::vector<gpubuf> externally_managed_workareas;
 
-    size_t auto_allocated_extra_vram_footprint() const
+    static std::vector<size_t> externally_managed_extra_vram_footprint()
     {
-        return std::accumulate(auto_allocated_worksizes.begin(),
-                               auto_allocated_worksizes.end(),
-                               static_cast<size_t>(0));
-    }
-
-    static size_t externally_managed_extra_vram_footprint()
-    {
-        return std::accumulate(externally_managed_workareas.begin(),
-                               externally_managed_workareas.end(),
-                               static_cast<size_t>(0),
-                               [](size_t total, const gpubuf& buf) { return total + buf.size(); });
+        std::vector<size_t> footprint;
+        for(const auto& buf : externally_managed_workareas)
+            footprint.push_back(buf.size());
+        return footprint;
     }
 
     bool is_preventing_auto_allocation_at_generation() const
     {
+        if(vram_footprint_workspace_probe_mode)
+            return true;
+
         if(auto_allocate != fft_auto_allocation_off)
             return false;
         // Let hipFFT sometimes auto-allocate nonetheless so that tests cover its
@@ -194,6 +190,26 @@ public:
         : fft_params(p)
     {
     }
+
+    // Copy constructor: copies all configuration but not plan handles or multi-GPU state
+    hipfft_params(const hipfft_params& p)
+        : fft_params(static_cast<const fft_params&>(p))
+        , plan(INVALID_PLAN_HANDLE)
+        , current_token() // no valid current_token yet (in copy) since plan is not copied
+        , hipfft_transform_type(p.hipfft_transform_type)
+        , inputType(p.inputType)
+        , outputType(p.outputType)
+        , direction(p.direction)
+        , int_length(p.int_length)
+        , ll_length(p.ll_length)
+        , xt_inBricks(p.xt_inBricks)
+        , xt_outBricks(p.xt_outBricks)
+        , auto_allocated_worksizes(p.auto_allocated_worksizes)
+        , vram_footprint_workspace_probe_mode(p.vram_footprint_workspace_probe_mode)
+    {
+        // xt_input and xt_output remain nullptr (default-initialized)
+    }
+
     hipfft_params(hipfft_params&& p) = default;
     hipfft_params& operator=(hipfft_params&& other) = default;
 
@@ -213,28 +229,70 @@ public:
         xt_output.reset();
     }
 
-    size_t vram_footprint() override
+    // reports the *minimal* VRAM footprints required by hipFFT to execute the
+    // transform with this object's configuration.
+    // Externally-allocated buffers are ignored herein as they can always be (and
+    // are) cleared at plan creation if found excessively large.
+    std::vector<size_t> vram_footprint() override
     {
-        size_t val = fft_params::vram_footprint();
-        // auto-allocated plans fail here if not enough VRAM, skip these tests
+        // No device allocation should be attempted in this function: if one occurs and
+        // results in a failure herein, an std::logic_error needs to be thrown so that
+        // it's clear that this implementation needs revisions.
+        const std::string logic_error_msg_prefix{
+            "A failing device allocation caused hipfft_params::vram_footprint() to fail. "
+            "Intercepted exception's details:\n"};
         try
         {
-            if(create_plan() != fft_status_success)
+            auto footprint = fft_params::io_vram_footprint();
+            // Create a temporary copy of this object to measure workspace without
+            // modifying the original object's plan state.
+            hipfft_params temp_copy(*this);
+            // Force plan generation to avoid internal workspace allocation.
+            // Set the flag on the temporary copy only.
+            temp_copy.vram_footprint_workspace_probe_mode = true;
+
+            const auto plan_status = temp_copy.create_plan();
+            if(plan_status != fft_status_success)
             {
-                throw std::runtime_error("Plan creation or struct setup failed");
+                throw std::runtime_error("Plan creation or struct setup failed (temp_copy for "
+                                         "vram-probing purposes, error code: "
+                                         + std::to_string(plan_status) + ")");
             }
+            std::vector<size_t> required_worksizes(temp_copy.get_num_used_gpus());
+            required_worksizes[0] = absurd_init_worksize_estimate;
+            // replace the above by
+            //std::vector<size_t> required_worksizes(temp_copy.get_num_used_gpus(),
+            //                                       absurd_init_worksize_estimate);
+            // when hipFFT's mGPU workspace size query is fixed for multi-GPU
+            auto get_size_ret = hipfftGetSize(temp_copy.plan, required_worksizes.data());
+            if(get_size_ret != HIPFFT_SUCCESS)
+            {
+                throw std::runtime_error(
+                    "hipfftGetSize failed to query required workspace (return code: "
+                    + hipfftResult_string(get_size_ret) + ")");
+            }
+            if(std::any_of(required_worksizes.begin(), required_worksizes.end(), [](size_t s) {
+                   return s == absurd_init_worksize_estimate;
+               }))
+            {
+                throw std::runtime_error(
+                    "hipfftGetSize failed to query required workspace (absurd estimate value "
+                    "detected in output)");
+            }
+            if(footprint.size() < required_worksizes.size())
+                footprint.resize(required_worksizes.size(), 0);
+            for(size_t i = 0; i < required_worksizes.size(); ++i)
+                footprint[i] += required_worksizes[i];
+            return footprint;
         }
         catch(fft_params::work_buffer_alloc_failure& e)
         {
-            val += auto_allocated_extra_vram_footprint();
-            val += externally_managed_extra_vram_footprint();
-            std::stringstream msg;
-            msg << "Plan work buffer size (" << val << " bytes raw data) too large for device";
-            throw ROCFFT_SKIP{msg.str()};
+            throw std::logic_error(logic_error_msg_prefix + e.what());
         }
-        val += auto_allocated_extra_vram_footprint();
-        val += externally_managed_extra_vram_footprint();
-        return val;
+        catch(const DEVICEBUF_MEM_USAGE& e)
+        {
+            throw std::logic_error(logic_error_msg_prefix + e.what());
+        }
     }
 
     fft_status setup_structs()
@@ -415,7 +473,8 @@ public:
         }
         }
 
-        if(ret == HIPFFT_SUCCESS && auto_allocate == fft_auto_allocation_off)
+        if(ret == HIPFFT_SUCCESS && auto_allocate == fft_auto_allocation_off
+           && !vram_footprint_workspace_probe_mode)
         {
             ret = set_externally_managed_work_areas();
         }
@@ -426,7 +485,11 @@ public:
         // case failed.
         if(ret == HIPFFT_ALLOC_FAILED)
         {
-            if(!final_attempt_at_plan_creation && externally_managed_extra_vram_footprint() > 0)
+            bool has_external_footprint
+                = std::any_of(externally_managed_workareas.begin(),
+                              externally_managed_workareas.end(),
+                              [](const gpubuf& buf) { return buf.size() > 0; });
+            if(!final_attempt_at_plan_creation && has_external_footprint)
             {
                 final_attempt_at_plan_creation = true;
                 // device allocation(s) in externally_managed_workareas might be
@@ -439,8 +502,7 @@ public:
             {
                 throw fft_params::work_buffer_alloc_failure(
                     "plan create failed due to allocation failure",
-                    externally_managed_extra_vram_footprint()
-                        + auto_allocated_extra_vram_footprint());
+                    sum(externally_managed_extra_vram_footprint()) + sum(auto_allocated_worksizes));
             }
         }
 
@@ -514,14 +576,14 @@ public:
                                static_cast<size_t>(0),
                                [](size_t s, const fft_field& f) { return s + f.bricks.size(); });
     }
-    fft_status set_callbacks(std::vector<void*>* load_cb_func,
-                             std::vector<void*>* load_cb_data,
-                             std::vector<void*>* store_cb_func,
-                             std::vector<void*>* store_cb_data,
-                             size_t              load_cb_shared_mem_bytes  = 0,
-                             size_t              store_cb_shared_mem_bytes = 0) override
+    fft_status set_funcptr_callbacks(std::vector<void*>* load_cb_func,
+                                     std::vector<void*>* load_cb_data,
+                                     std::vector<void*>* store_cb_func,
+                                     std::vector<void*>* store_cb_data,
+                                     size_t              load_cb_shared_mem_bytes  = 0,
+                                     size_t              store_cb_shared_mem_bytes = 0) override
     {
-        if(run_callbacks)
+        if(run_callbacks == fft_callback_type_funcptr)
         {
             if(!hipfft_transform_type)
                 throw std::runtime_error("callbacks require a valid hipfftType");
@@ -836,10 +898,10 @@ public:
     }
 
     // call the hipFFT APIs to distribute data to multiple GPUs
-    void multi_gpu_prepare(std::vector<hostbuf>& /* unused */,
-                           std::vector<gpubuf>& ibuffer,
-                           std::vector<void*>&  pibuffer,
-                           std::vector<void*>&  pobuffer) override
+    void multi_gpu_prepare(const std::vector<hostbuf>& /* unused */,
+                           const std::vector<gpubuf>& ibuffer,
+                           std::vector<void*>&        pibuffer,
+                           std::vector<void*>&        pobuffer) override
     {
         if(multiGPU <= 1)
             return;
@@ -1203,7 +1265,7 @@ private:
         if(get_num_used_gpus() > 1)
         {
             // TODO: enable below once hipfftXtSetWorkArea is enabled
-#if(0)
+#if 0
             ret = hipfftXtSetWorkArea(plan, workareas.data);
 #else
             throw unimplemented_exception(
@@ -1226,12 +1288,14 @@ private:
     // allocation and plan init
     bool need_separate_create_make() const
     {
-        // scale factor and multi-GPU and disabled auto-allocation need API
-        // calls between create + init
-        if(scale_factor != 1.0 || multiGPU > 1 || mp_lib != fft_mp_lib_none
-           || auto_allocate == fft_auto_allocation_off)
-            return true;
-        return false;
+        // several features require API calls between create + init:
+        // - result scaling
+        // - multi-GPU
+        // - disabling auto work buffer alloc
+        // - JIT callbacks
+        return scale_factor != 1.0 || multiGPU > 1 || mp_lib != fft_mp_lib_none
+               || auto_allocate == fft_auto_allocation_off || run_callbacks == fft_callback_type_jit
+               || vram_footprint_workspace_probe_mode;
     }
 
     // Not all plan options work with all creation types.  Return a
@@ -1312,6 +1376,121 @@ private:
                              *hipfft_transform_type,
                              nbatch);
         return ret;
+    }
+
+    hipfftResult_t set_jit_callbacks()
+    {
+        if(run_callbacks != fft_callback_type_jit)
+        {
+            return HIPFFT_SUCCESS;
+        }
+        throw unimplemented_exception("jit callbacks not implemented");
+#if 0
+        hipfftResult_t       ret{HIPFFT_INVALID_PLAN};
+        hipfftXtCallbackType cbtype = HIPFFT_CB_UNDEFINED;
+        switch(itype)
+        {
+        case fft_array_type_complex_interleaved:
+        case fft_array_type_hermitian_interleaved:
+        {
+            switch(precision)
+            {
+            case fft_precision_single:
+                cbtype = HIPFFT_CB_LD_COMPLEX;
+                break;
+            case fft_precision_double:
+                cbtype = HIPFFT_CB_LD_COMPLEX_DOUBLE;
+                break;
+            case fft_precision_half:
+                throw std::runtime_error("half-precision callbacks are not supported");
+            }
+            break;
+        }
+        case fft_array_type_real:
+        {
+            switch(precision)
+            {
+            case fft_precision_single:
+                cbtype = HIPFFT_CB_LD_REAL;
+                break;
+            case fft_precision_double:
+                cbtype = HIPFFT_CB_LD_REAL_DOUBLE;
+                break;
+            case fft_precision_half:
+                throw std::runtime_error("half-precision callbacks are not supported");
+            }
+            break;
+        }
+        case fft_array_type_complex_planar:
+        case fft_array_type_hermitian_planar:
+        case fft_array_type_unset:
+        {
+            throw std::runtime_error("unsupported data type for load callback");
+        }
+        }
+
+        check_jit_callback_state();
+        ret = hipfftXtSetJITCallback(plan,
+                                     load_jit_cb_state->symbol,
+                                     load_jit_cb_state->func.data(),
+                                     load_jit_cb_state->func.size(),
+                                     cbtype,
+                                     load_jit_cb_state->data.empty()
+                                         ? nullptr
+                                         : load_jit_cb_state->get_raw_data_ptrs().data());
+        if(ret != HIPFFT_SUCCESS)
+            return ret;
+
+        switch(otype)
+        {
+        case fft_array_type_complex_interleaved:
+        case fft_array_type_hermitian_interleaved:
+        {
+            switch(precision)
+            {
+            case fft_precision_single:
+                cbtype = HIPFFT_CB_ST_COMPLEX;
+                break;
+            case fft_precision_double:
+                cbtype = HIPFFT_CB_ST_COMPLEX_DOUBLE;
+                break;
+            case fft_precision_half:
+                throw std::runtime_error("half-precision callbacks are not supported");
+            }
+            break;
+        }
+        case fft_array_type_real:
+        {
+            switch(precision)
+            {
+            case fft_precision_single:
+                cbtype = HIPFFT_CB_ST_REAL;
+                break;
+            case fft_precision_double:
+                cbtype = HIPFFT_CB_ST_REAL_DOUBLE;
+                break;
+            case fft_precision_half:
+                throw std::runtime_error("half-precision callbacks are not supported");
+            }
+            break;
+        }
+        case fft_array_type_complex_planar:
+        case fft_array_type_hermitian_planar:
+        case fft_array_type_unset:
+        {
+            throw std::runtime_error("unsupported data type for store callback");
+        }
+        }
+        ret = hipfftXtSetJITCallback(plan,
+                                     store_jit_cb_state->symbol,
+                                     store_jit_cb_state->func.data(),
+                                     store_jit_cb_state->func.size(),
+                                     cbtype,
+                                     store_jit_cb_state->data.empty()
+                                         ? nullptr
+                                         : store_jit_cb_state->get_raw_data_ptrs().data());
+        return ret;
+#endif
     }
 
     // call hipfftCreate + hipfftMake* functions, inserting calls to
@@ -1413,6 +1592,9 @@ private:
             if(ret != HIPFFT_SUCCESS)
                 return ret;
         }
+        ret = set_jit_callbacks();
+        if(ret != HIPFFT_SUCCESS)
+            return ret;
         if(is_preventing_auto_allocation_at_generation())
         {
             ret = hipfftSetAutoAllocation(plan, 0);
@@ -1561,6 +1743,7 @@ private:
     }
     static constexpr size_t absurd_init_worksize_estimate  = std::numeric_limits<size_t>::max();
     bool                    final_attempt_at_plan_creation = false;
+    bool                    vram_footprint_workspace_probe_mode = false;
 
     size_t get_num_used_gpus() const
     {

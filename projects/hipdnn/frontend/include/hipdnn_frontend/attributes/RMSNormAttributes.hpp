@@ -13,7 +13,6 @@
 
 #include "Attributes.hpp"
 #include "TensorAttributes.hpp"
-#include <hipdnn_data_sdk/data_objects/rmsnorm_attributes_generated.h>
 #include <memory>
 #include <unordered_map>
 
@@ -63,6 +62,8 @@ namespace hipdnn_frontend::graph
 class RMSNormAttributes : public Attributes<RMSNormAttributes>
 {
 public:
+    RMSNormAttributes() = default;
+
     enum class InputNames
     {
         X = 0,
@@ -186,49 +187,6 @@ public:
     {
         forward_phase = phase;
         return *this;
-    }
-
-    flatbuffers::Offset<hipdnn_data_sdk::data_objects::RMSNormAttributes>
-        pack_attributes(flatbuffers::FlatBufferBuilder& builder) const // NOLINT
-    {
-        auto invRms = get_inv_rms();
-        auto bias = get_bias();
-
-        return hipdnn_data_sdk::data_objects::CreateRMSNormAttributes(
-            builder,
-            get_x()->get_uid(),
-            get_scale()->get_uid(),
-            get_epsilon()->get_uid(),
-            get_y()->get_uid(),
-            bias ? flatbuffers::Optional<int64_t>(bias->get_uid()) : flatbuffers::nullopt,
-            invRms ? flatbuffers::Optional<int64_t>(invRms->get_uid()) : flatbuffers::nullopt,
-            toSdkType(forward_phase));
-    }
-
-    static RMSNormAttributes fromFlatBuffer(
-        const hipdnn_data_sdk::data_objects::RMSNormAttributes* fb,
-        const std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>>& tensorMap)
-    {
-        RMSNormAttributes attr;
-
-        attr.set_x(tensorMap.at(fb->x_tensor_uid()));
-        attr.set_scale(tensorMap.at(fb->scale_tensor_uid()));
-        attr.set_epsilon(tensorMap.at(fb->epsilon_tensor_uid()));
-        attr.set_y(tensorMap.at(fb->y_tensor_uid()));
-
-        if(fb->inv_rms_tensor_uid().has_value())
-        {
-            attr.set_inv_rms(tensorMap.at(fb->inv_rms_tensor_uid().value()));
-        }
-
-        if(fb->bias_tensor_uid().has_value())
-        {
-            attr.set_bias(tensorMap.at(fb->bias_tensor_uid().value()));
-        }
-
-        attr.set_forward_phase(fromSdkType(fb->forward_phase()));
-
-        return attr;
     }
 };
 

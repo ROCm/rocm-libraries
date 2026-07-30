@@ -1,0 +1,132 @@
+operation:
+  name: "BatchnormInferenceVarianceExt"
+  class_name: "BatchnormInferenceVarianceExtOperationDescriptor"
+  fbs_table: "BatchnormInferenceAttributesVarianceExt"
+  fbs_generated_header: "batchnorm_inference_attributes_variance_ext_generated.h"
+
+  descriptor_type:
+    enum_name: "HIPDNN_BACKEND_OPERATION_BATCHNORM_INFERENCE_VARIANCE_DESCRIPTOR_EXT"
+
+  operation_attr_prefix: "HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_VARIANCE"
+
+  frontend:
+    packer_function: "createBatchnormInferenceVarianceExtOperation"
+    unpacker_function: "unpackBatchnormInferenceVarianceExtOperation"
+    node_class: "BatchnormInferenceNodeVarianceExt"
+    attributes_class: "BatchnormInferenceAttributesVarianceExt"
+    attributes_filename: "BatchnormInferenceAttributesVarianceExt"
+
+    inputs:
+      - name: "x"
+        enum_name: "X"
+        required: true
+        getter_name: "get_x"
+        setter_name: "set_x"
+      - name: "mean"
+        enum_name: "MEAN"
+        required: true
+        getter_name: "get_mean"
+        setter_name: "set_mean"
+      - name: "variance"
+        enum_name: "VARIANCE"
+        required: true
+        getter_name: "get_variance"
+        setter_name: "set_variance"
+      - name: "scale"
+        enum_name: "SCALE"
+        required: true
+        getter_name: "get_scale"
+        setter_name: "set_scale"
+      - name: "bias"
+        enum_name: "BIAS"
+        required: true
+        getter_name: "get_bias"
+        setter_name: "set_bias"
+      - name: "epsilon"
+        enum_name: "EPSILON"
+        required: true
+        getter_name: "get_epsilon"
+        setter_name: "set_epsilon"
+    outputs:
+      - name: "y"
+        enum_name: "Y"
+        required: true
+        getter_name: "get_y"
+        setter_name: "set_y"
+    graph_method_name: "batchnorm_inference_variance_ext"
+    graph_method_params:
+      - name: "x"
+        tensor_name: "x"
+      - name: "mean"
+        tensor_name: "mean"
+      - name: "variance"
+        tensor_name: "variance"
+      - name: "scale"
+        tensor_name: "scale"
+      - name: "bias"
+        tensor_name: "bias"
+      - name: "epsilon"
+        tensor_name: "epsilon"
+    graph_return_type: "single"
+    graph_return_outputs:
+      - "y"
+    node_type_enum: "NodeType::BATCHNORM_INFERENCE_VARIANCE_EXT"
+
+  tensor_fields:
+    - name: "x"
+      fbs_field: "x_tensor_uid"
+      attr_suffix: "X_EXT"
+      required: true
+
+    - name: "mean"
+      fbs_field: "mean_tensor_uid"
+      attr_suffix: "MEAN_EXT"
+      required: true
+
+    - name: "variance"
+      fbs_field: "variance_tensor_uid"
+      attr_suffix: "VARIANCE_EXT"
+      required: true
+
+    - name: "scale"
+      fbs_field: "scale_tensor_uid"
+      attr_suffix: "SCALE_EXT"
+      required: true
+
+    - name: "bias"
+      fbs_field: "bias_tensor_uid"
+      attr_suffix: "BIAS_EXT"
+      required: true
+
+    - name: "y"
+      fbs_field: "y_tensor_uid"
+      attr_suffix: "Y_EXT"
+      required: true
+
+    - name: "epsilon"
+      fbs_field: "epsilon_tensor_uid"
+      attr_suffix: "EPSILON_EXT"
+      required: true
+
+  data_fields: []
+
+  tensor_array_fields: []
+
+  has_compute_data_type: true
+  compute_data_type_attr: "HIPDNN_ATTR_BATCHNORM_INF_VAR_COMP_TYPE_EXT"
+
+  operation_type_enum: "HIPDNN_OPERATION_TYPE_BATCHNORM_INFERENCE_VARIANCE_EXT"
+
+  test_data:
+    constants_include: "BnInfVarExtConstants"
+    tensor_const_prefix: "K_BN_INF_VAR_EXT_"
+    tensor_uids: { x: 80, mean: 81, variance: 82, scale: 83, bias: 84, y: 85, epsilon: 86 }
+    tensor_configs:
+      x: { dims: [1, 64, 32, 32], strides: [65536, 1024, 32, 1] }
+      mean: { dims: [1, 64, 1, 1], strides: [64, 1, 1, 1] }
+      variance: { dims: [1, 64, 1, 1], strides: [64, 1, 1, 1] }
+      scale: { dims: [1, 64, 1, 1], strides: [64, 1, 1, 1] }
+      bias: { dims: [1, 64, 1, 1], strides: [64, 1, 1, 1] }
+      y: { dims: [1, 64, 32, 32], strides: [65536, 1024, 32, 1] }
+      epsilon: { dims: [1, 1, 1, 1], strides: [1, 1, 1, 1] }
+    field_values: {}

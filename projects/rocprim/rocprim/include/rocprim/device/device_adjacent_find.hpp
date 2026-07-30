@@ -37,6 +37,9 @@
 
 #include <cstring>
 
+/// \addtogroup devicemodule
+/// @{
+
 BEGIN_ROCPRIM_NAMESPACE
 
 #ifndef DOXYGEN_DOCUMENTATION_BUILD // Do not document
@@ -200,9 +203,6 @@ hipError_t adjacent_find_impl(void* const       temporary_storage,
 
 #endif // DOXYGEN_DOCUMENTATION_BUILD
 
-/// \addtogroup devicemodule
-/// @{
-
 /// \brief Searches the input sequence for the first appearance of a consecutive pair of equal elements.
 ///
 /// The returned index is either: the index within the input array of the first element of the first
@@ -259,31 +259,32 @@ hipError_t adjacent_find_impl(void* const       temporary_storage,
 /// \parblock
 /// In this example a device-level adjacent_find operation is performed on integer values.
 ///
+/// The full example is [on GitHub](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocprim/example/rocprim/device/example_device_adjacent_find.cpp).
+///
 /// \code{.cpp}
 /// #include <rocprim/rocprim.hpp> //or <rocprim/device/device_adjacent_find.hpp>
 ///
 /// // Custom boolean binary function
-/// auto equal_op = [](int a, int b) -> bool { return (a - b == 2); };
+/// auto diff_is_two = [](int a, int b) -> bool { return (a - b == 2); };
 ///
 /// // Prepare input and output (declare pointers, allocate device memory etc.)
 /// std::size_t  size;   // e.g., 8
 /// int*         input;  // e.g., [8, 7, 5, 4, 3, 2, 1, 0]
 /// std::size_t* output; // output index
-/// auto         custom_op = equal_op{};
 ///
 /// std::size_t  temporary_storage_size_bytes;
 /// void*        temporary_storage_ptr = nullptr;
 ///
 /// // Get required size of the temporary storage
 /// rocprim::adjacent_find(
-///     temporary_storage_ptr, temporary_storage_size_bytes, input, output, size, custom_op);
+///     temporary_storage_ptr, temporary_storage_size_bytes, input, output, size, diff_is_two);
 ///
 /// // Allocate temporary storage
 /// hipMalloc(&temporary_storage_ptr, temporary_storage_size_bytes);
 ///
 /// // Perform adjacent find
 /// rocprim::adjacent_find(
-///     temporary_storage_ptr, temporary_storage_size_bytes, input, output, size, custom_op);
+///     temporary_storage_ptr, temporary_storage_size_bytes, input, output, size, diff_is_two);
 /// // output: 1
 /// \endcode
 /// \endparblock
@@ -312,9 +313,9 @@ hipError_t adjacent_find(void* const       temporary_storage,
                                               debug_synchronous);
 }
 
+END_ROCPRIM_NAMESPACE
+
 /// @}
 // end of group devicemodule
-
-END_ROCPRIM_NAMESPACE
 
 #endif // ROCPRIM_DEVICE_DEVICE_ADJACENT_FIND_HPP_

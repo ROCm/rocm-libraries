@@ -36,6 +36,8 @@
 #include <sstream>
 #include <vector>
 
+#include <tensilelitehost/export.h>
+
 namespace TensileLite
 {
     namespace Predicates
@@ -192,3 +194,4 @@ namespace TensileLite
  */
     } // namespace Predicates
 } // namespace TensileLite
+

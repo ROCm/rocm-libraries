@@ -126,6 +126,7 @@ namespace rocRoller::Serialization
             iot::mapRequired(io, "scalePreTileA", params.scalePretileA);
             iot::mapRequired(io, "scalePreTileB", params.scalePretileB);
 
+            iot::mapRequired(io, "pretileA", params.pretileA);
             iot::mapRequired(io, "pretileB", params.pretileB);
         }
 
@@ -256,6 +257,9 @@ namespace rocRoller::Serialization
             iot::mapRequired(io, "workgroupMappingDim", params.workgroupMappingDim);
             iot::mapRequired(io, "workgroupRemapXCC", params.workgroupRemapXCC);
             iot::mapRequired(io, "workgroupRemapXCCValue", params.workgroupRemapXCCValue);
+            iot::mapRequired(io, "workgroup_cluster_size_x", params.workgroupClusterSizeX);
+            iot::mapRequired(io, "workgroup_cluster_size_y", params.workgroupClusterSizeY);
+            iot::mapRequired(io, "workgroup_cluster_size_z", params.workgroupClusterSizeZ);
             iot::mapRequired(io, "load_A", params.loadPathA);
             iot::mapRequired(io, "load_B", params.loadPathB);
             iot::mapRequired(io, "padLDS_A", params.padLDSA);

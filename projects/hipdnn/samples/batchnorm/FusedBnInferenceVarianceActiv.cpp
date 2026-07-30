@@ -1,6 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <cstdio>
 #include <iostream>
 #include <string>
 #include <unordered_map>
@@ -10,6 +11,7 @@
 #include <hipdnn_data_sdk/utilities/Workspace.hpp>
 #include <hipdnn_frontend.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/TensorDiff.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
 
@@ -30,15 +32,18 @@ bool SampleRunner::operator()(const TensorLayout& layout)
               << inputType << " [" << layout << "]"
               << (config.cpuValidation ? " (with CPU validation)" : "") << "...\n";
 
-    int64_t n = 16; // BATCH SIZE
-    int64_t c = 16; // CHANNELS (FEATURES)
-    int64_t h = 16; // HEIGHT (SPATIAL DIMENSION)
-    int64_t w = 16; // WIDTH (SPATIAL DIMENSION)
+    // Input dimensions
+    const int64_t n = config.dims.size() > 0 ? config.dims[0] : 16; // BATCH SIZE
+    const int64_t c = config.dims.size() > 1 ? config.dims[1] : 16; // CHANNELS (FEATURES)
+    const int64_t h = config.dims.size() > 2 ? config.dims[2] : 16; // HEIGHT (SPATIAL DIMENSION)
+    const int64_t w = config.dims.size() > 3 ? config.dims[3] : 16; // WIDTH (SPATIAL DIMENSION)
 
     auto graph = std::make_shared<graph::Graph>();
     graph->set_io_data_type(inputType)
         .set_intermediate_data_type(computeType)
         .set_compute_data_type(computeType);
+
+    setPreferredEngine(graph, config);
 
     auto x = createTensor({n, c, h, w}, inputType, layout);
     auto scale = createTensor({1, c, 1, 1}, computeType);
@@ -66,7 +71,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     activatedY->set_name("activated_y");
     activatedY->set_output(true);
 
-    HIPDNN_FE_CHECK(graph->build(handle));
+    HIPDNN_FE_CHECK_SKIPPABLE(graph->build(handle));
     std::cout << "Graph build successful.\n";
 
     // Allocate tensors
@@ -95,9 +100,9 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     variantPack[variance->get_uid()] = varianceTensor.memory().deviceData();
     variantPack[activatedY->get_uid()] = activatedYTensor.memory().deviceData();
 
-    int64_t workspaceSize;
+    int64_t workspaceSize = 0;
     HIPDNN_FE_CHECK(graph->get_workspace_size(workspaceSize));
-    utilities::Workspace workspace(static_cast<size_t>(workspaceSize));
+    const utilities::Workspace workspace(static_cast<size_t>(workspaceSize));
 
     HIPDNN_FE_CHECK(graph->execute(handle, variantPack, workspace.get()));
 
@@ -114,28 +119,39 @@ bool SampleRunner::operator()(const TensorLayout& layout)
         utilities::Tensor<OutputType> activatedYRefTensor(activatedY->get_dim(), layout);
 
         // Build variant pack for CPU execution (using host pointers)
-        std::unordered_map<int64_t, void*> cpuVariantPack;
-        cpuVariantPack[x->get_uid()] = xTensor.memory().hostData();
-        cpuVariantPack[scale->get_uid()] = scaleTensor.memory().hostData();
-        cpuVariantPack[bias->get_uid()] = biasTensor.memory().hostData();
-        cpuVariantPack[mean->get_uid()] = meanTensor.memory().hostData();
-        cpuVariantPack[variance->get_uid()] = varianceTensor.memory().hostData();
-        cpuVariantPack[activatedY->get_uid()] = activatedYRefTensor.memory().hostData();
+        const std::unordered_map<int64_t, void*> cpuVariantPack{
+            {x->get_uid(), xTensor.memory().hostData()},
+            {scale->get_uid(), scaleTensor.memory().hostData()},
+            {bias->get_uid(), biasTensor.memory().hostData()},
+            {mean->get_uid(), meanTensor.memory().hostData()},
+            {variance->get_uid(), varianceTensor.memory().hostData()},
+            {activatedY->get_uid(), activatedYRefTensor.memory().hostData()}};
 
         // Execute on CPU using graph executor
-        auto serializedGraph = graph->buildFlatbufferOperationGraph();
+        auto [serializedGraph, serErr] = graph->to_binary();
+        if(serErr.is_bad())
+        {
+            std::cerr << "Failed to serialize graph: " << serErr.get_message() << '\n';
+            return false;
+        }
         hipdnn_test_sdk::utilities::CpuReferenceGraphExecutor cpuExecutor;
         cpuExecutor.execute(serializedGraph.data(), serializedGraph.size(), cpuVariantPack);
 
         auto tolerance = hipdnn_test_sdk::utilities::batchnorm::getToleranceInferenceWithVariance<
             OutputType>();
+
         auto yValidator = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<OutputType>(
             tolerance, tolerance);
 
-        bool yValid = yValidator.allClose(activatedYRefTensor, activatedYTensor);
-
         std::cout << "CPU reference validation:\n";
-        std::cout << "  activated_y: " << (yValid ? "successful" : "failed") << "\n";
+        const bool yValid
+            = hipdnn_test_sdk::utilities::validateAndReport<OutputType>(std::cout,
+                                                                        "activated_y",
+                                                                        yValidator,
+                                                                        activatedYRefTensor,
+                                                                        activatedYTensor,
+                                                                        tolerance,
+                                                                        tolerance);
 
         validationPassed = yValid;
     }
@@ -149,28 +165,37 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     std::cout << "\nBatch normalization inference with variance + activation graph execution "
                  "complete for "
               << inputType << ".\n\n";
+
     return validationPassed;
 }
 
 int main(int argc, char* argv[])
 {
-    auto config = parseCommandLineArgs(argc, argv);
-
-    auto [handle, handleError] = createHipdnnHandle();
-    HIPDNN_FE_CHECK(handleError);
-
-    bool allPassed = run(SampleRunner{*handle, config});
-
-    if(allPassed)
+    try
     {
-        std::cout << "All batch normalization inference with variance + activation runs completed "
-                     "successfully.\n";
-        return 0;
-    }
-    else
-    {
+        RETURN_SUCCESS_IF_NO_DEVICE();
+
+        auto config = parseCommandLineArgs(argc, argv);
+
+        auto [handle, handleError] = createHipdnnHandle();
+        HIPDNN_FE_CHECK(handleError);
+
+        const bool allPassed = run(SampleRunner{*handle, config});
+
+        if(allPassed)
+        {
+            std::cout
+                << "All batch normalization inference with variance + activation runs completed "
+                   "successfully.\n";
+            return 0;
+        }
         std::cout << "One or more batch normalization inference with variance + activation runs "
                      "failed validation.\n";
+        return 1;
+    }
+    catch(const std::exception& e)
+    {
+        std::fprintf(stderr, "Unhandled exception: %s\n", e.what());
         return 1;
     }
 }

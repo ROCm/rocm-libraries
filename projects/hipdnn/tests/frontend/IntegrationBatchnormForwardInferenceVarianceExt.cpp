@@ -201,7 +201,7 @@ protected:
 
         // Epsilon (pass-by-value)
         auto epsilon = std::make_shared<TensorAttributes>();
-        epsilon->set_name("epsilon").set_value(1e-5f);
+        epsilon->set_name("epsilon").set_compile_time_constant(1e-5f);
         if(useManualUids)
         {
             epsilon->set_uid(uid++);
@@ -297,7 +297,7 @@ protected:
         _handle = setupEnvironmentWithPlugin(testCase.pluginPath);
 
         // Create tensor bundle
-        std::vector<int64_t> const dims = {2, 3, 14, 14}; // n=2, c=3, h=14, w=14
+        const std::vector<int64_t> dims = {2, 3, 14, 14}; // n=2, c=3, h=14, w=14
         SimpleBatchnorm2DTensorBundle<float, float> tensorBundle(dims);
 
         // Create graph and tensors using the unified function

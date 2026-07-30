@@ -6,6 +6,7 @@
 #ifdef _WIN32
 
 #include "HipdnnException.hpp"
+#include <array>
 #include <spdlog/fmt/fmt.h>
 #include <winternl.h>
 
@@ -23,10 +24,9 @@ std::filesystem::path getCurrentModuleDirectory()
                           &moduleHandle)
        == TRUE)
     {
-        char* dst = new char[MAX_PATH];
-        DWORD len = GetModuleFileNameA(moduleHandle, dst, MAX_PATH);
-        std::string modulePathStr(dst);
-        delete[] dst;
+        std::array<char, MAX_PATH> dst{};
+        DWORD len = GetModuleFileNameA(moduleHandle, dst.data(), MAX_PATH);
+        std::string modulePathStr(dst.data());
 
         if(len > 0 && len < MAX_PATH)
         {
@@ -47,26 +47,24 @@ std::filesystem::path getCurrentModuleDirectory()
 
 PluginLibHandle openLibrary(const std::filesystem::path& libraryPath)
 {
-    PluginLibHandle handle = LoadLibraryW(libraryPath.wstring().c_str());
-    if(handle == nullptr)
+    try
     {
-        auto errorCode = GetLastError();
-        throw HipdnnException(HIPDNN_STATUS_BAD_PARAM,
-                              "Failed to load library: " + libraryPath.string()
-                                  + " (Error Code: " + std::to_string(errorCode) + ")");
+        return hipdnn_data_sdk::utilities::openLibrary(libraryPath);
     }
-
-    return handle;
+    catch(const std::runtime_error& ex)
+    {
+        throw HipdnnException(HIPDNN_STATUS_BAD_PARAM, ex.what());
+    }
 }
 
 void closeLibrary(PluginLibHandle handle)
 {
-    FreeLibrary(handle);
+    hipdnn_data_sdk::utilities::closeLibrary(handle);
 }
 
 void* getSymbol(PluginLibHandle handle, const char* symbolName)
 {
-    void* symbol = reinterpret_cast<void*>(GetProcAddress(handle, symbolName));
+    void* symbol = hipdnn_data_sdk::utilities::getSymbol(handle, symbolName);
     if(symbol == nullptr)
     {
         auto errorCode = GetLastError();
@@ -82,9 +80,10 @@ std::string getSystemInfo()
 {
     // Get Windows version using RtlGetVersion (more reliable than deprecated GetVersionEx)
     typedef LONG(WINAPI * RtlGetVersionPtr)(PRTL_OSVERSIONINFOW);
-    RTL_OSVERSIONINFOW versionInfo;
+    RTL_OSVERSIONINFOW versionInfo = {};
     versionInfo.dwOSVersionInfoSize = sizeof(versionInfo);
 
+    bool versionInfoValid = false;
     HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
     if(ntdll != nullptr)
     {
@@ -92,7 +91,7 @@ std::string getSystemInfo()
             = reinterpret_cast<RtlGetVersionPtr>(GetProcAddress(ntdll, "RtlGetVersion"));
         if(rtlGetVersion != nullptr)
         {
-            rtlGetVersion(&versionInfo);
+            versionInfoValid = (rtlGetVersion(&versionInfo) == 0);
         }
     }
 
@@ -124,13 +123,23 @@ std::string getSystemInfo()
         architecture = "Unknown";
     }
 
-    return fmt::format("System Information: {{System Name: Windows, Node Name: {}, Release: {}.{}, "
-                       "Version: {}, Machine: {}}}",
-                       computerName.data(),
-                       versionInfo.dwMajorVersion,
-                       versionInfo.dwMinorVersion,
-                       versionInfo.dwBuildNumber,
-                       architecture);
+    if(versionInfoValid)
+    {
+        return fmt::format(
+            "System Information: {{System Name: Windows, Node Name: {}, Release: {}.{}, "
+            "Version: {}, Machine: {}}}",
+            computerName.data(),
+            versionInfo.dwMajorVersion,
+            versionInfo.dwMinorVersion,
+            versionInfo.dwBuildNumber,
+            architecture);
+    }
+
+    return fmt::format(
+        "System Information: {{System Name: Windows, Node Name: {}, Release: unknown, "
+        "Version: unknown, Machine: {}}}",
+        computerName.data(),
+        architecture);
 }
 
 }

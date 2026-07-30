@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright 2019-2025 Advanced Micro Devices, Inc.
+# Copyright 2019-2026 Advanced Micro Devices, Inc.
 # ########################################################################
 
 set(INSTALL_TEST_FILE "${CMAKE_CURRENT_BINARY_DIR}/install_CTestTestfile.cmake")
@@ -98,6 +98,7 @@ function(add_rocthrust_test TEST)
         PROPERTIES
             RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test/"
     )
+
     if(AMDGPU_TEST_TARGETS)
         foreach(AMDGPU_TARGET IN LISTS AMDGPU_TEST_TARGETS)
             add_test("${AMDGPU_TARGET}-${TEST_TARGET}" ${TEST_TARGET})
@@ -106,6 +107,9 @@ function(add_rocthrust_test TEST)
                     RESOURCE_GROUPS "1,${AMDGPU_TARGET}:1"
                     LABELS "hip;${AMDGPU_TARGET}"
             )
+            # Pair the target with this resource so the shared CTest
+            # categorization can pin its category suites to the same GPU.
+            set_property(GLOBAL APPEND PROPERTY ROCTHRUST_TEST_TARGET_RESOURCE_PAIRS "${TEST_TARGET}|${AMDGPU_TARGET}")
         endforeach()
     else()
         add_relative_test(${TEST_TARGET} ${TEST_TARGET} ${DEFAULT_GPU_RESOURCE})
@@ -114,6 +118,7 @@ function(add_rocthrust_test TEST)
                 RESOURCE_GROUPS "1,${DEFAULT_GPU_RESOURCE}:1"
                 LABELS "hip"
         )
+        set_property(GLOBAL APPEND PROPERTY ROCTHRUST_TEST_TARGET_RESOURCE_PAIRS "${TEST_TARGET}|${DEFAULT_GPU_RESOURCE}")
     endif()
     rocm_install(TARGETS ${TEST_TARGET} COMPONENT tests)
     if (WIN32 AND NOT DEFINED DLLS_COPIED)
@@ -156,13 +161,6 @@ if(BUILD_TEST)
     add_rocthrust_test("alignment")
     add_rocthrust_test("allocator")
     add_rocthrust_test("allocator_aware_policies")
-    add_rocthrust_test("async_copy")
-    add_rocthrust_test("async_for_each")
-    add_rocthrust_test("async_reduce")
-    add_rocthrust_test("async_reduce_into")
-    add_rocthrust_test("async_scan")
-    add_rocthrust_test("async_sort")
-    add_rocthrust_test("async_transform")
     add_rocthrust_test("binary_search")
     add_rocthrust_test("binary_search_descending")
     add_rocthrust_test("binary_search_vector")
@@ -177,7 +175,6 @@ if(BUILD_TEST)
     add_rocthrust_test("count")
     add_rocthrust_test("counting_iterator")
     add_rocthrust_test("decompose")
-    add_rocthrust_test("dependencies_aware_policies")
     add_rocthrust_test("dereference")
     add_rocthrust_test("device_delete")
     add_rocthrust_test("device_ptr")
@@ -185,7 +182,6 @@ if(BUILD_TEST)
     add_rocthrust_test("discard_iterator")
     add_rocthrust_test("distance")
     add_rocthrust_test("equal")
-    add_rocthrust_test("event")
     add_rocthrust_test("fill")
     add_rocthrust_test("find")
     add_rocthrust_test("for_each")
@@ -199,10 +195,8 @@ if(BUILD_TEST)
     add_rocthrust_test("functional_placeholders_logical")
     add_rocthrust_test("functional_placeholders_miscellaneous")
     add_rocthrust_test("functional_placeholders_relational")
-    add_rocthrust_test("future")
     add_rocthrust_test("gather")
     add_rocthrust_test("generate")
-    # add_rocthrust_test("generate_const_iterators") # not been added
     add_rocthrust_test("inner_product")
     add_rocthrust_test("is_contiguous_iterator")
     add_rocthrust_test("is_operator_function_object")
@@ -224,6 +218,7 @@ if(BUILD_TEST)
     add_rocthrust_test("mr_new")
     add_rocthrust_test("mr_pool")
     add_rocthrust_test("mr_pool_options")
+    add_rocthrust_test("offset_iterator")
     add_rocthrust_test("out_of_memory_recovery")
     add_rocthrust_test("pair")
     add_rocthrust_test("pair_reduce")
@@ -238,6 +233,7 @@ if(BUILD_TEST)
     add_rocthrust_test("permutation_iterator")
     add_rocthrust_test("preprocessor")
     add_rocthrust_test("random")
+    add_rocthrust_test("raw_reference_cast")
     add_rocthrust_test("reduce")
     add_rocthrust_test("reduce_by_key")
     add_rocthrust_test("reduce_large")
@@ -297,7 +293,6 @@ if(BUILD_TEST)
     add_rocthrust_test("transform_scan")
     add_rocthrust_test("trivial_sequence")
     add_rocthrust_test("tuple")
-    add_rocthrust_test("tuple_algorithms")
     add_rocthrust_test("tuple_reduce")
     add_rocthrust_test("tuple_scan")
     add_rocthrust_test("tuple_sort")
@@ -341,6 +336,34 @@ if(BUILD_HIPSTDPAR_TEST)
             )
         endif()
     endif()
+endif()
+
+# ****************************************************************************
+# Test Filter Standardization
+# ****************************************************************************
+
+if(EXISTS "${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
+    include("${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
+
+    message(STATUS "Applying test categories for rocthrust")
+    get_property(_rt_pairs GLOBAL PROPERTY ROCTHRUST_TEST_TARGET_RESOURCE_PAIRS)
+    list(REMOVE_DUPLICATES _rt_pairs)
+    foreach(_rt_pair IN LISTS _rt_pairs)
+        string(REPLACE "|" ";" _rt_parts "${_rt_pair}")
+        list(GET _rt_parts 0 _rt_t)
+        list(GET _rt_parts 1 _rt_rg)
+        get_target_property(_rt_dir ${_rt_t} RUNTIME_OUTPUT_DIRECTORY)
+        apply_test_category_labels(${_rt_t}
+            "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml"
+            "${_rt_dir}" "${INSTALL_TEST_FILE}" "${_rt_rg}")
+    endforeach()
+else()
+    message(
+        STATUS
+        "Shared CTest categories not found at "
+        "${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake - "
+        "skipping rocthrust test category labels"
+    )
 endif()
 
 rocm_install(

@@ -48,6 +48,11 @@ set( CMAKE_EXPORT_COMPILE_COMMANDS ON CACHE BOOL "" FORCE )
 ### Project ROCWMMA
 project( rocwmma LANGUAGES CXX )
 set(CMAKE_CXX_STANDARD 17)
+
+# Set ROCM_LIBRARIES_ROOT if not already set (for monorepo builds vs standalone)
+if(NOT DEFINED ROCM_LIBRARIES_ROOT)
+    set(ROCM_LIBRARIES_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
+endif()
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
@@ -60,6 +65,7 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} --driver-mode=g++ -Xclang -fallow-half-a
 if( CMAKE_PROJECT_NAME STREQUAL "rocwmma" )
   option( ROCWMMA_BUILD_TESTS "Build rocWMMA tests" ON )
   option( ROCWMMA_BUILD_SAMPLES "Build rocWMMA samples" ON )
+  option( ROCWMMA_BUILD_COMMUNITY_SAMPLES "Build community-contributed rocWMMA samples" OFF )
   option( ROCWMMA_BUILD_ASSEMBLY "Output assembly files" OFF )
   option( BUILD_OFFLOAD_COMPRESS "Build rocWMMA with offload compression" ON )
   option( ROCWMMA_CODE_COVERAGE "Build with code coverage flags (clang only)" OFF)
@@ -88,7 +94,7 @@ include(ROCMCheckTargetIds)
 include(ROCMClients)
 
 # Versioning via rocm-cmake
-set ( VERSION_STRING "2.2.0" )
+set ( VERSION_STRING "2.2.1" )
 rocm_setup_version( VERSION ${VERSION_STRING} )
 
 # configure a header file to pass the CMake version settings to the source
@@ -111,7 +117,7 @@ if (ADDRESS_SANITIZER_ENABLED)
         TARGETS "gfx90a:xnack+;gfx942:xnack+;gfx950:xnack+" )
 else()
     rocm_check_target_ids(DEFAULT_GPU_TARGETS
-        TARGETS "gfx908;gfx90a;gfx942;gfx950;gfx1100;gfx1101;gfx1102;gfx1150;gfx1151;gfx1152;gfx1153;gfx1200;gfx1201" )
+        TARGETS "gfx908;gfx90a;gfx942;gfx950;gfx1100;gfx1101;gfx1102;gfx1150;gfx1151;gfx1152;gfx1153;gfx1200;gfx1201;gfx1250" )
 endif()
 
 # check if ROCm supports `__hip_fp8_e5m2` and `__hip_fp8_e4m3`
@@ -206,6 +212,9 @@ endif()
 if(ROCWMMA_BUILD_SAMPLES)
   rocm_package_setup_component(samples PARENT clients)
   add_subdirectory(samples)
+elseif(ROCWMMA_BUILD_COMMUNITY_SAMPLES)
+  rocm_package_setup_component(community_samples PARENT clients)
+  add_subdirectory(samples/community)
 endif()
 
 

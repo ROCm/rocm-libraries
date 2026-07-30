@@ -3,6 +3,9 @@ name: Merge CODEOWNERS Files
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   merge-codeowners:
     runs-on: ubuntu-latest
@@ -12,7 +15,7 @@ jobs:
 
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6.0.2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 

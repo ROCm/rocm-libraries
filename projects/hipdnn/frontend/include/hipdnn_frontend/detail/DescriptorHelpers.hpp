@@ -3,15 +3,18 @@
 
 #pragma once
 
-#include <flatbuffers/flatbuffers.h>
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/Types.hpp>
 #include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 #include <hipdnn_frontend/detail/BackendWrapper.hpp>
 #include <hipdnn_frontend/detail/ScopedHipdnnBackendDescriptor.hpp>
+#include <hipdnn_frontend/detail/TensorConstants.hpp>
+#include <memory>
+#include <optional>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <variant>
 #include <vector>
 
@@ -37,10 +40,11 @@ inline Error setDescriptorAttrString(hipdnnBackendDescriptor_t desc,
 }
 
 // Sets a vector-valued attribute on a backend descriptor.
+template <typename T>
 inline Error setDescriptorAttrVec(hipdnnBackendDescriptor_t desc,
                                   hipdnnBackendAttributeName_t attrName,
                                   hipdnnBackendAttributeType_t attrType,
-                                  const std::vector<int64_t>& values,
+                                  const std::vector<T>& values,
                                   const std::string& errorContext)
 {
     HIPDNN_RETURN_ON_BACKEND_FAILURE(
@@ -59,13 +63,14 @@ inline Error setDescriptorAttrScalar(hipdnnBackendDescriptor_t desc,
                                      const std::string& errorContext)
 {
     HIPDNN_RETURN_ON_BACKEND_FAILURE(
-        hipdnnBackend()->backendSetAttribute(desc, attrName, attrType, 1, &value),
+        hipdnnBackend()->backendSetAttribute(
+            desc, attrName, attrType, 1, static_cast<const void*>(&value)),
         "Failed to set " + errorContext);
     return {};
 }
 
 // Overload for std::monostate — this is unreachable when guarded by
-// get_pass_by_value(), but required for std::visit to compile.
+// a value-presence check, but required for std::visit to compile.
 inline Error setDescriptorAttrTensorValue(hipdnnBackendDescriptor_t /*desc*/,
                                           std::monostate /*value*/,
                                           const std::string& errorContext)
@@ -113,7 +118,7 @@ template <typename T>
 inline Error setDescriptorAttrOptionalScalar(hipdnnBackendDescriptor_t desc,
                                              hipdnnBackendAttributeName_t attrName,
                                              hipdnnBackendAttributeType_t attrType,
-                                             const flatbuffers::Optional<T>& value,
+                                             const std::optional<T>& value,
                                              const std::string& errorContext)
 {
     if(!value.has_value())
@@ -202,20 +207,62 @@ inline Error
                                             tensor->get_stride(),
                                             "tensor strides"));
 
-    bool const isVirtual = tensor->get_is_virtual();
+    const bool isVirtual = tensor->get_is_virtual();
     HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(desc.get(),
                                                HIPDNN_ATTR_TENSOR_IS_VIRTUAL,
                                                HIPDNN_TYPE_BOOLEAN,
                                                isVirtual,
                                                "tensor is_virtual"));
 
-    if(tensor->get_pass_by_value())
+    // Only send the byte-alignment attribute when the tensor carries a
+    // non-default alignment. Sending it unconditionally would break lowering against
+    // a pre-1.3.0 backend that doesn't recognize HIPDNN_ATTR_TENSOR_BYTE_ALIGNMENT.
+    if(tensor->get_alignment() != DEFAULT_TENSOR_ALIGNMENT)
+    {
+        HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(desc.get(),
+                                                   HIPDNN_ATTR_TENSOR_BYTE_ALIGNMENT,
+                                                   HIPDNN_TYPE_INT64,
+                                                   tensor->get_alignment(),
+                                                   "tensor byte alignment"));
+    }
+
+    // Link the ragged-offset aux tensor by UID so the lowered graph carries the
+    // ragged-tensor relationship. The aux tensor is gathered alongside node I/O
+    // (see BaseNode::gather_hipdnn_tensors), so its UID is assigned before
+    // lowering begins.
+    if(tensor->has_ragged_offset())
+    {
+        const auto raggedOffset = tensor->get_ragged_offset();
+        HIPDNN_CHECK_ERROR(
+            setDescriptorAttrScalar(desc.get(),
+                                    HIPDNN_ATTR_TENSOR_RAGGED_OFFSET_DESC,
+                                    HIPDNN_TYPE_INT64,
+                                    raggedOffset->get_uid(),
+                                    "tensor ragged offset UID " + std::to_string(uid)));
+    }
+
+    if(!std::holds_alternative<std::monostate>(tensor->get_value_variant()))
     {
         HIPDNN_CHECK_ERROR(std::visit(
             [&](auto&& arg) -> Error {
                 return setDescriptorAttrTensorValue(desc.get(), arg, "tensor value");
             },
             tensor->get_value_variant()));
+    }
+
+    // Only send the runtime pass-by-value extension attribute when the flag is
+    // actually set. A non-pass-by-value tensor never needs it, and sending it
+    // unconditionally would break lowering against a pre-1.2.0 backend that
+    // does not recognize HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE_EXT.
+    // This mirrors the guarded tensor-value send above: extension attributes
+    // floor the backend only for graphs that actually use them.
+    if(tensor->get_is_runtime_pass_by_value())
+    {
+        HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(desc.get(),
+                                                   HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE_EXT,
+                                                   HIPDNN_TYPE_BOOLEAN,
+                                                   true,
+                                                   "tensor is_runtime_pass_by_value"));
     }
 
     HIPDNN_CHECK_ERROR(finalizeDescriptor(desc.get(), "tensor descriptor"));

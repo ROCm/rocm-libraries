@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2022-2025 Advanced Micro Devices, Inc.
+ * Copyright (c) 2022-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -106,7 +106,11 @@ void _rocsparselt_handle::init()
 #endif
 
 #if HIP_FP8_TYPE_OCP
-    has_fp8_ocp = gpu_arch_match(rocsparselt_internal_get_arch_name(properties), "950");
+    has_fp8_ocp = gpu_arch_match(rocsparselt_internal_get_arch_name(properties), "950")
+                  || gpu_arch_match(rocsparselt_internal_get_arch_name(properties), "1250");
+#endif
+#if HIP_FP8_TYPE_FNUZ
+    has_fp8_fnuz = gpu_arch_match(rocsparselt_internal_get_arch_name(properties), "942");
 #endif
 
     is_init = (uintptr_t)(this);
@@ -163,7 +167,11 @@ std::ostream& operator<<(std::ostream& stream, const _rocsparselt_matmul_descr& 
            << ", activation_tanh_beta=" << t.activation_tanh_beta
            << ", activation_gelu_scaling=" << t.activation_gelu_scaling
            << ", bias_pointer=" << t.bias_pointer << ", bias_stride=" << t.bias_stride
-           << ", bias_type=" << hip_datatype_to_string(t.bias_type) << ", m=" << t.m << ", n=" << t.n
+           << ", bias_type=" << hip_datatype_to_string(t.bias_type) 
+           << ", gate_pointer=" << t.gate_residual_mat_pointer;
+    if(t.gate_residual_desc != nullptr)
+        stream << ", gate="  << *(t.gate_residual_desc);
+    stream << ", m=" << t.m << ", n=" << t.n
            << ", k=" << t.k << ", is_sparse_a=" << t.is_sparse_a << "}";
     return stream;
 }
@@ -205,7 +213,7 @@ bool check_is_init_matmul_descr(const _rocsparselt_matmul_descr* matmul)
 
 bool check_is_init_matmul_alg_selection(const _rocsparselt_matmul_alg_selection* alg_selection)
 {
-    return alg_selection->is_init != 0
+    return alg_selection != nullptr && alg_selection->is_init != 0
            && alg_selection->is_init == (uintptr_t)alg_selection->handle;
 }
 

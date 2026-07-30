@@ -20,6 +20,7 @@
 # CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ################################################################################
 
+from typing import Any, Optional
 from Tensile.Components.CMSValidator import add_gr_not_too_early_constraints
 from rocisa.instruction import SBarrier, SWaitCnt
 from cms_validation_base import CMSValidationTestBase
@@ -36,9 +37,6 @@ class TestValidateGlobalReadsNotTooEarly(CMSValidationTestBase):
     buffer_loads. For example, GRA: [[3, 5]] means m0-update at 3, load at 5.
     """
     validator_passes = [add_gr_not_too_early_constraints]
-
-    def setUp(self):
-        super().setUp()
 
     def test_basic(self):
         """
@@ -307,7 +305,7 @@ class TestValidateGlobalReadsNotTooEarly(CMSValidationTestBase):
         GRB loads A -> must start after LRA0.
         """
         assert self.num_vmfma == 8
-        self.kernel["SwapGlobalReadOrder"] = True
+        self.kernel["SwapGlobalReadOrder"] = 1
         optSchedule = {
             "SYNC": [[1, 2, 5, 6]],
             "GRA": [[6, 7]],
@@ -330,7 +328,7 @@ class TestValidateGlobalReadsNotTooEarly(CMSValidationTestBase):
         GRA load at 3 is before LRB0 is guaranteed done (done at 5).
         """
         assert self.num_vmfma == 8
-        self.kernel["SwapGlobalReadOrder"] = True
+        self.kernel["SwapGlobalReadOrder"] = 1
         optSchedule = {
             "SYNC": [[1, 2, 5, 6]],
             "GRA": [[3, 3]],
@@ -729,9 +727,10 @@ class TestValidateGlobalReadsNotTooEarlyDtlPlusLdsBuf(CMSValidationTestBase):
     """
     validator_passes = [add_gr_not_too_early_constraints]
 
-    def setUp(self):
-        super().setUp()
-        self.kernel["DtlPlusLdsBuf"] = True
+    def setup_method(self, method=None, *, kernel_updates: Optional[dict[str, Any]] = None):
+        kernel_updates = kernel_updates.copy() if kernel_updates else {}
+        kernel_updates.update({"DtlPlusLdsBuf": True})
+        super().setup_method(method, kernel_updates=kernel_updates)
 
     def test_basic(self):
         """
@@ -802,7 +801,7 @@ class TestValidateGlobalReadsNotTooEarlyDtlPlusLdsBuf(CMSValidationTestBase):
         Both are guaranteed within ML-1. Should pass.
         """
         assert self.num_vmfma == 8
-        self.kernel["SwapGlobalReadOrder"] = True
+        self.kernel["SwapGlobalReadOrder"] = 1
         optSchedule = {
             "SYNC": [[1,2, 5, 6]],
             "GRA": [[6, 7]],
@@ -826,7 +825,7 @@ class TestValidateGlobalReadsNotTooEarlyDtlPlusLdsBuf(CMSValidationTestBase):
         GRA at (loop=1, vmfma=2) < (loop=1, vmfma=3) -> too early.
         """
         assert self.num_vmfma == 8
-        self.kernel["SwapGlobalReadOrder"] = True
+        self.kernel["SwapGlobalReadOrder"] = 1
         optSchedule = {
             "LRA0": [[0]],
             "LRB0": [[5]],

@@ -99,30 +99,11 @@ struct MIOpenBatchNormActivFwdTrainSpatialHIPImpl<0, FpType, FpPrecType, FpAccum
 
         __syncthreads();
 
-        constexpr auto lcl_data_size =
-            mio_bn_config::use_amdgcn ? mio_bn_config::lds_gcn_size : mio_bn_config::lds_size;
-        __shared__ FpAccumType lcl_data_x[lcl_data_size];
-        __shared__ FpAccumType lcl_data_y[lcl_data_size];
-        if constexpr(mio_bn_config::use_amdgcn)
-        {
-            miopen::reduction::gcn_reduce2<FpAccumType, lcl_data_size>(
-                reinterpret_cast<FpAccumType&>(mean),
-                reinterpret_cast<FpAccumType&>(variance),
-                static_cast<FpAccumType>(INHW),
-                lcl_data_x,
-                lcl_data_y,
-                lid);
-        }
-        else
-        {
-            miopen::reduction::lds_reduce2<FpAccumType, lcl_data_size>(
-                reinterpret_cast<FpAccumType&>(mean),
-                reinterpret_cast<FpAccumType&>(variance),
-                static_cast<FpAccumType>(INHW),
-                lcl_data_x,
-                lcl_data_y,
-                lid);
-        }
+        miopen::reduction::reduce2<FpAccumType, mio_bn_config::lds_size>(
+            reinterpret_cast<FpAccumType&>(mean),
+            reinterpret_cast<FpAccumType&>(variance),
+            static_cast<FpAccumType>(INHW),
+            lid);
 
         variance           = fma(-mean, mean, variance);
         invVariance        = miopen::rsqrt(variance + static_cast<FpPrecType>(epsilon));
@@ -235,7 +216,6 @@ struct MIOpenBatchNormActivFwdTrainSpatialHIPImpl<1, FpType, FpPrecType, FpAccum
             using fp_type4 = typename mapped_vector_type<FpType, 4>::type;
             fp_type4 read4;
 
-            /*__attribute__((opencl_unroll_hint(2)))*/
             // TODO: Loop start / and / stride must be constexprs to unroll
             for(unsigned int k = lid << 2; k < less4; k += grprd)
             {
@@ -263,7 +243,6 @@ struct MIOpenBatchNormActivFwdTrainSpatialHIPImpl<1, FpType, FpPrecType, FpAccum
         }
         else
         {
-            /*__attribute__((opencl_unroll_hint(4))) */
             // TODO: Loop start / and / stride must be constexprs to unroll
             for(unsigned int k = lid; k < less; k += mio_bn_config::launch_dim.grp0)
             {
@@ -293,30 +272,11 @@ struct MIOpenBatchNormActivFwdTrainSpatialHIPImpl<1, FpType, FpPrecType, FpAccum
         __syncthreads();
 
         // REDUCE MEAN AND VARIANCE -----------------------
-        constexpr auto lcl_data_size =
-            mio_bn_config::use_amdgcn ? mio_bn_config::lds_gcn_size : mio_bn_config::lds_size;
-        __shared__ FpAccumType lcl_data_x[lcl_data_size];
-        __shared__ FpAccumType lcl_data_y[lcl_data_size];
-        if constexpr(mio_bn_config::use_amdgcn)
-        {
-            miopen::reduction::gcn_reduce2<FpAccumType, lcl_data_size>(
-                reinterpret_cast<FpAccumType&>(mean),
-                reinterpret_cast<FpAccumType&>(variance),
-                static_cast<FpAccumType>(INHW),
-                lcl_data_x,
-                lcl_data_y,
-                lid);
-        }
-        else
-        {
-            miopen::reduction::lds_reduce2<FpAccumType, lcl_data_size>(
-                reinterpret_cast<FpAccumType&>(mean),
-                reinterpret_cast<FpAccumType&>(variance),
-                static_cast<FpAccumType>(INHW),
-                lcl_data_x,
-                lcl_data_y,
-                lid);
-        }
+        miopen::reduction::reduce2<FpAccumType, mio_bn_config::lds_size>(
+            reinterpret_cast<FpAccumType&>(mean),
+            reinterpret_cast<FpAccumType&>(variance),
+            static_cast<FpAccumType>(INHW),
+            lid);
 
         // REDUCTION COMPLETE ---------------------------
         variance    = fma(-mean, mean, variance);
@@ -330,7 +290,6 @@ struct MIOpenBatchNormActivFwdTrainSpatialHIPImpl<1, FpType, FpPrecType, FpAccum
 
         if constexpr(mio_config::layout_nhwc || rem == 0)
         {
-            /*__attribute__((opencl_unroll_hint(2)))*/
             // TODO: Loop start / and / stride must be constexprs to unroll
             for(unsigned int k = lid; k < less; k += mio_bn_config::launch_dim.grp0)
             {
@@ -348,7 +307,6 @@ struct MIOpenBatchNormActivFwdTrainSpatialHIPImpl<1, FpType, FpPrecType, FpAccum
         }
         else
         {
-            /*__attribute__((opencl_unroll_hint(2)))*/
             // TODO: Loop start / and / stride must be constexprs to unroll
             for(unsigned int k = max_read * lid; k < lessout; k += chunk)
             {
@@ -489,32 +447,11 @@ struct MIOpenBatchNormActivFwdTrainSpatialHIPImpl<3, FpType, FpPrecType, FpAccum
         __syncthreads();
 
         // REDUCE MEAN AND VARIANCE -----------------------
-        constexpr auto lcl_data_size =
-            mio_bn_config::use_amdgcn ? mio_bn_config::lds_gcn_size : mio_bn_config::lds_size;
-        __shared__ FpAccumType lcl_data_x[lcl_data_size];
-        __shared__ FpAccumType lcl_data_y[lcl_data_size];
-        if constexpr(mio_bn_config::use_amdgcn)
-        {
-            miopen::reduction::gcn_reduce2<FpAccumType, lcl_data_size>(
-                reinterpret_cast<FpAccumType&>(mean),
-                reinterpret_cast<FpAccumType&>(variance),
-                static_cast<FpAccumType>(INHW),
-                lcl_data_x,
-                lcl_data_y,
-                lid);
-        }
-        else
-        {
-            miopen::reduction::lds_reduce2<FpAccumType, lcl_data_size>(
-                reinterpret_cast<FpAccumType&>(mean),
-                reinterpret_cast<FpAccumType&>(variance),
-                static_cast<FpAccumType>(INHW),
-                lcl_data_x,
-                lcl_data_y,
-                lid);
-        }
-
-        __syncthreads();
+        miopen::reduction::reduce2<FpAccumType, mio_bn_config::lds_size>(
+            reinterpret_cast<FpAccumType&>(mean),
+            reinterpret_cast<FpAccumType&>(variance),
+            static_cast<FpAccumType>(INHW),
+            lid);
 
         variance    = fma(-mean, mean, variance);
         invVariance = miopen::rsqrt(variance + static_cast<FpPrecType>(epsilon));

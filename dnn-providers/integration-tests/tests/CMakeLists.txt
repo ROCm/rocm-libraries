@@ -1,0 +1,82 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
+
+add_executable(hipdnn_integration_tests_unit_tests
+    main.cpp
+    ../src/harness/bundle/IntegrationBundleVerificationHarness.cpp
+    ../src/harness/input-init/SynthesizeInputs.cpp
+    TestArchMatch.cpp
+    TestBundleMetadata.cpp
+    TestGraphDescription.cpp
+    TestNodeTypeToString.cpp
+    TestPlatformUtils.cpp
+    TestSupportMatrixCollector.cpp
+    TestTestConfig.cpp
+    TestTestSettings.cpp
+    TestTomlGuards.cpp
+    TestGpuReferenceGraphExecutor.cpp
+    TestGpuConvolutionFwdSignatureKey.cpp
+    TestGpuConvolutionFwdPlan.cpp
+    TestReferenceGraphExecutorFactory.cpp
+    TestBundleDiscovery.cpp
+    TestVerificationPaths.cpp
+    TestBundleVerificationHarness.cpp
+    TestSynthesisConfig.cpp
+    TestSynthesizeInputs.cpp
+    TestToleranceResolver.cpp
+    TestVerificationModePaths.cpp
+    TestErrorPaths.cpp
+)
+
+target_include_directories(hipdnn_integration_tests_unit_tests
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../src)
+target_include_directories(hipdnn_integration_tests_unit_tests SYSTEM PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/third-party/tomlplusplus)
+
+target_link_libraries(hipdnn_integration_tests_unit_tests
+    PRIVATE
+        hip::host
+        hipdnn_gpu_ref
+        hipdnn_test_sdk
+        hipdnn_plugin_sdk
+        GTest::gtest
+        Threads::Threads
+        $<$<PLATFORM_ID:Windows>:shlwapi>
+)
+
+target_compile_options(hipdnn_integration_tests_unit_tests
+    PRIVATE ${INTEGRATION_TESTS_WARNING_COMPILE_OPTIONS})
+
+clang_tidy_check(hipdnn_integration_tests_unit_tests)
+
+add_unit_test_target(hipdnn_integration_tests_unit_tests ${CMAKE_CURRENT_BINARY_DIR})
+
+add_executable(hipdnn_gpu_ref_tests
+    gpu-ref/main.cpp
+    gpu-ref/TestGpuFpReferenceConvolution.cpp
+    gpu-ref/TestGpuFpReferenceRMSNorm.cpp
+    gpu-ref/TestGpuFpReferenceDgrad.cpp
+    gpu-ref/TestGpuFpReferenceWgrad.cpp
+    gpu-ref/TestGpuFpReferenceValidation.cpp
+    gpu-ref/TestGpuRefHipError.cpp
+    gpu-ref/TestGpuRefKernelCompiler.cpp
+    gpu-ref/TestShallowDeviceOnlyMigratableMemory.cpp
+    gpu-ref/TestShallowGpuTensor.cpp
+)
+
+target_link_libraries(hipdnn_gpu_ref_tests
+    PRIVATE
+        hipdnn_gpu_ref
+        hipdnn_test_sdk
+        hipdnn_plugin_sdk
+        GTest::gtest
+        Threads::Threads
+        hip::host
+)
+
+target_compile_options(hipdnn_gpu_ref_tests
+    PRIVATE ${INTEGRATION_TESTS_WARNING_COMPILE_OPTIONS})
+
+clang_tidy_check(hipdnn_gpu_ref_tests)
+
+add_tiered_test_target(hipdnn_gpu_ref_tests ${CMAKE_CURRENT_BINARY_DIR})

@@ -76,7 +76,7 @@ class GPU_conv3d_FP32 : public testing::TestWithParam<std::vector<TestCase>>
 bool IsTestSupportedForDevice()
 {
     using namespace miopen::debug;
-    using e_mask = enabled<Gpu::gfx94X, Gpu::gfx103X, Gpu::gfx110X>;
+    using e_mask = enabled<Gpu::gfx94X, Gpu::gfx103X, Gpu::gfx110X, Gpu::gfx115X>;
     using d_mask = disabled<Gpu::Default>;
     return ::IsTestSupportedForDevMask<d_mask, e_mask>();
 }

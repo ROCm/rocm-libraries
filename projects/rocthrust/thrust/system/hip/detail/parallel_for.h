@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019-2025, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2019-2026, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -37,15 +37,13 @@
 #  pragma system_header
 #endif // no system header
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
+#if THRUST_HAS_HIP_COMPILER()
 
 #  include <thrust/system/hip/config.h>
 
-#  include <thrust/system/hip/detail/util.h>
+#  include <rocprim/config.hpp>
 
-#  include <new>
-#  include <type_traits>
-#  include <utility>
+#  include <thrust/system/hip/detail/util.h>
 
 THRUST_NAMESPACE_BEGIN
 
@@ -75,7 +73,7 @@ ROCPRIM_KERNEL THRUST_HIP_LAUNCH_BOUNDS(BlockSize) void kernel(F f, Size num_ite
 
   if (items_in_tile == items_per_block)
   {
-#  pragma unroll
+    THRUST_PRAGMA_UNROLL_FULL()
     for (unsigned int i = 0; i < ItemsPerThread; i++)
     {
       unsigned int idx = BlockSize * i + threadIdx.x;
@@ -84,7 +82,7 @@ ROCPRIM_KERNEL THRUST_HIP_LAUNCH_BOUNDS(BlockSize) void kernel(F f, Size num_ite
   }
   else
   {
-#  pragma unroll
+    THRUST_PRAGMA_UNROLL_FULL()
     for (unsigned int i = 0; i < ItemsPerThread; i++)
     {
       unsigned int idx = BlockSize * i + threadIdx.x;
@@ -136,49 +134,6 @@ hipError_t THRUST_HIP_RUNTIME_FUNCTION parallel_for(Size num_items, F f, hipStre
   return hipSuccess;
 }
 
-template <class F>
-class managed_callable_guard
-{
-public:
-  explicit managed_callable_guard(F&& f)
-  {
-    hipError_t status = ::hipMallocManaged(reinterpret_cast<void**>(&f_ptr_), sizeof(F));
-    hip_rocprim::throw_on_error(status, "parallel_for: failed to allocate managed callable");
-    ::new (static_cast<void*>(f_ptr_)) F(::std::move(f));
-  }
-
-  managed_callable_guard(const managed_callable_guard&)            = delete;
-  managed_callable_guard& operator=(const managed_callable_guard&) = delete;
-
-  ~managed_callable_guard()
-  {
-    if (f_ptr_ != nullptr)
-    {
-      f_ptr_->~F();
-      (void) ::hipFree(f_ptr_);
-    }
-  }
-
-  F* get() const noexcept
-  {
-    return f_ptr_;
-  }
-
-private:
-  F* f_ptr_ = nullptr;
-};
-
-template <class F>
-struct callable_proxy
-{
-  F* f_ptr;
-
-  template <class... Args>
-  THRUST_HIP_FUNCTION auto operator()(Args&&... args) const -> decltype((*f_ptr)(::std::forward<Args>(args)...))
-  {
-    return (*f_ptr)(::std::forward<Args>(args)...);
-  }
-};
 } // namespace __parallel_for
 
 THRUST_EXEC_CHECK_DISABLE
@@ -197,22 +152,12 @@ void THRUST_HOST_DEVICE parallel_for(execution_policy<Derived>& policy, F f, Siz
     THRUST_HOST static void par(execution_policy<Derived>& policy, F f, Size count)
     {
       hipStream_t stream = hip_rocprim::stream(policy);
-      if constexpr (!::std::is_trivially_destructible_v<F>)
-      {
-        __parallel_for::managed_callable_guard<F> guard(::std::move(f));
-        hipError_t status = __parallel_for::parallel_for(count, __parallel_for::callable_proxy<F>{guard.get()}, stream);
-        hip_rocprim::throw_on_error(status, "parallel_for failed");
-        status = hip_rocprim::synchronize_optional(policy);
-        hip_rocprim::throw_on_error(status, "parallel_for: failed to synchronize");
-        return;
-      }
-
-      hipError_t status = __parallel_for::parallel_for(count, f, stream);
+      hipError_t status  = __parallel_for::parallel_for(count, f, stream);
       hip_rocprim::throw_on_error(status, "parallel_for failed");
       status = hip_rocprim::synchronize_optional(policy);
       hip_rocprim::throw_on_error(status, "parallel_for: failed to synchronize");
     }
-#  if !__THRUST_HAS_HIPRT__
+#  if defined(__HIP_DEVICE_COMPILE__)
     THRUST_DEVICE static void seq(execution_policy<Derived>& policy, F f, Size count)
     {
       (void) policy;
@@ -225,7 +170,7 @@ void THRUST_HOST_DEVICE parallel_for(execution_policy<Derived>& policy, F f, Siz
   };
   // clang-format on
 
-#  if __THRUST_HAS_HIPRT__
+#  if !defined(__HIP_DEVICE_COMPILE__)
   workaround::par(policy, f, count);
 #  else
   workaround::seq(policy, f, count);

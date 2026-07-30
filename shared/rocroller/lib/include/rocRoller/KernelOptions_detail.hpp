@@ -4,6 +4,7 @@
 #pragma once
 
 #include "KernelOptions.hpp"
+#include <rocRoller/Parameters/Solution/LDSBankSwizzleMode.hpp>
 #include <rocRoller/Parameters/Solution/ScaleSkipPermlaneMode.hpp>
 
 namespace rocRoller
@@ -123,6 +124,24 @@ namespace rocRoller
          * Enable/Disable the RemoveSetCoordinate transformation
          */
         bool removeSetCoordinate = false;
+
+        /**
+         * LDS bank conflict elimination via intra-wave column rotation + pair-swap swizzle.
+         * When set to Swizzle, remaps K-column indices on
+         * both the LoadTiled (write) and LoadLDSTile (read) sides to eliminate ds_read_b128 bank conflicts.
+         */
+        LDSBankSwizzleMode ldsSwizzleMode = LDSBankSwizzleMode::None;
+
+        bool coexecutionEnabled = true;
+
+        std::optional<std::array<unsigned int, 3>> workgroupClusterSize;
+
+        /**
+         * By default, v_(mfma|wmma)_*_f8f6f4 instructions are used for F8 datatypes
+         * with compatible wavetile sizes. Setting this option to false generates
+         * v_(mfma|wmma)_*_(fp8|bf8)_(fp8|bf8) instead when available.
+         */
+        bool favourF8F6F4OverF8MatrixInstruction = true;
 
         std::string toString() const;
     };

@@ -14,7 +14,12 @@
 #endif
 #include "amd_transpose_load.hpp"
 #include "generic_memory_space_atomic.hpp"
+#include "data_cache_prefetch.hpp"
 
+#if __clang_major__ >= 23
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
+#endif
 namespace ck {
 
 // T may be scalar or vector
@@ -46,7 +51,8 @@ struct DynamicBuffer
             return 1;
     }();
 
-    __host__ __device__ constexpr DynamicBuffer(T* p_data, ElementSpaceSize element_space_size)
+    __host__ __device__ constexpr DynamicBuffer([[clang::lifetimebound]] T* p_data,
+                                                ElementSpaceSize element_space_size)
         : p_data_{p_data}, element_space_size_{element_space_size}
     {
     }
@@ -151,6 +157,29 @@ struct DynamicBuffer
         }
     }
 
+    template <typename X,
+              AmdBufferCoherenceEnum Coherence_ = coherence,
+              typename enable_if<is_same<typename scalar_type<remove_cvref_t<X>>::type,
+                                         typename scalar_type<remove_cvref_t<T>>::type>::value ||
+                                     !is_native_type<X>(),
+                                 bool>::type    = false>
+    __host__ __device__ constexpr void Prefetch(IndexType i, bool is_valid_element) const
+    {
+        // X contains multiple T
+        constexpr index_t scalar_per_t_vector = scalar_type<remove_cvref_t<T>>::vector_size;
+
+        constexpr index_t scalar_per_x_vector = scalar_type<remove_cvref_t<X>>::vector_size;
+
+        static_assert(scalar_per_x_vector % scalar_per_t_vector == 0,
+                      "wrong! X should contain multiple T");
+
+        if(is_valid_element) // if not valid element then do not prefetch
+        {
+            // call prefetch here
+            GlobalPrefetchDataOp<Coherence_>{}(c_style_pointer_cast<const void*>(&(p_data_[i])));
+        }
+    }
+
     template <InMemoryDataOperationEnum Op,
               typename X,
               typename enable_if<is_same<typename scalar_type<remove_cvref_t<X>>::type,
@@ -223,6 +252,29 @@ struct DynamicBuffer
                                                             dst_offset,
                                                             is_valid_element,
                                                             element_space_size_ / PackedSize);
+    }
+
+    template <typename DstBuffer, index_t NumElemsPerThread, index_t static_dst_offset>
+    __host__ __device__ void AsyncCopyToLds(DstBuffer& dst_buf,
+                                            IndexType src_offset,
+                                            IndexType dst_offset,
+                                            bool is_valid_element) const
+    {
+        // Copy data from global to LDS memory using direct loads.
+        static_assert(GetAddressSpace() == AddressSpaceEnum::Global,
+                      "Source data must come from a global memory buffer.");
+        static_assert(DstBuffer::GetAddressSpace() == AddressSpaceEnum::Lds,
+                      "Destination data must be stored in an LDS memory buffer.");
+        static_assert(is_same_v<remove_cvref_t<typename DstBuffer::type>, remove_cvref_t<T>>,
+                      "Source and destination buffer must have the same data type.");
+
+        auto p_uniform_ptr = amd_wave_read_first_lane(p_data_);
+        amd_async_load_global_to_lds<remove_cvref_t<typename DstBuffer::type>,
+                                     NumElemsPerThread,
+                                     static_dst_offset,
+                                     true,
+                                     coherence>(
+            p_uniform_ptr, src_offset, dst_buf.p_data_, dst_offset, is_valid_element);
     }
 
     template <typename X,
@@ -361,14 +413,8 @@ struct DynamicBuffer
         {
             if(is_valid_element)
             {
-#if 0
-                X tmp = x;
-
-                __builtin_memcpy(&(p_data_[i]), &tmp, sizeof(X));
-#else
                 // if(i >= 2169041600)
                 *c_style_pointer_cast<X*>(&p_data_[i]) = x;
-#endif
             }
         }
     }
@@ -470,28 +516,19 @@ struct DynamicBuffer
 
 template <AddressSpaceEnum BufferAddressSpace,
           AmdBufferCoherenceEnum coherence = AmdBufferCoherenceEnum::DefaultCoherence,
+          typename IndexType               = index_t,
           typename T,
           typename ElementSpaceSize>
 __host__ __device__ constexpr auto make_dynamic_buffer(T* p, ElementSpaceSize element_space_size)
 {
-    return DynamicBuffer<BufferAddressSpace, T, ElementSpaceSize, true, coherence>{
-        p, element_space_size};
-}
-
-template <AddressSpaceEnum BufferAddressSpace,
-          AmdBufferCoherenceEnum coherence = AmdBufferCoherenceEnum::DefaultCoherence,
-          typename T,
-          typename ElementSpaceSize>
-__host__ __device__ constexpr auto make_long_dynamic_buffer(T* p,
-                                                            ElementSpaceSize element_space_size)
-{
-    return DynamicBuffer<BufferAddressSpace, T, ElementSpaceSize, true, coherence, long_index_t>{
+    return DynamicBuffer<BufferAddressSpace, T, ElementSpaceSize, true, coherence, IndexType>{
         p, element_space_size};
 }
 
 template <
     AddressSpaceEnum BufferAddressSpace,
     AmdBufferCoherenceEnum coherence = AmdBufferCoherenceEnum::DefaultCoherence,
+    typename IndexType               = index_t,
     typename T,
     typename ElementSpaceSize,
     typename X,
@@ -499,8 +536,12 @@ template <
 __host__ __device__ constexpr auto
 make_dynamic_buffer(T* p, ElementSpaceSize element_space_size, X invalid_element_value)
 {
-    return DynamicBuffer<BufferAddressSpace, T, ElementSpaceSize, false, coherence>{
+    return DynamicBuffer<BufferAddressSpace, T, ElementSpaceSize, false, coherence, IndexType>{
         p, element_space_size, invalid_element_value};
 }
 
 } // namespace ck
+
+#if __clang_major__ >= 23
+#pragma clang diagnostic pop
+#endif
