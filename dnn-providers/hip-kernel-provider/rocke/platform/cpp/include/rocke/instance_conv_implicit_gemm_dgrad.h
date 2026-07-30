@@ -75,10 +75,10 @@ typedef struct rocke_dgrad_conv_spec
     const char* name; /* default "conv_igemm_dgrad" */
 
     /* dtype fields (ConvDataSpec) */
-    const char* dtype_a;   /* default "fp16" */
-    const char* dtype_b;   /* default "fp16" */
-    const char* dtype_d;   /* default "fp16" */
-    const char* dtype_acc;  /* default "fp32" */
+    const char* dtype_a; /* default "fp16" */
+    const char* dtype_b; /* default "fp16" */
+    const char* dtype_d; /* default "fp16" */
+    const char* dtype_acc; /* default "fp32" */
 
     int tile_m; /* default 64 */
     int tile_n; /* default 64 */
@@ -95,17 +95,17 @@ typedef struct rocke_dgrad_conv_spec
 
     const char* pipeline; /* default "mem"     */
     const char* epilogue; /* default "default" */
-    bool async_dma;       /* default false */
-    bool unroll_k;        /* default false */
+    bool async_dma; /* default false */
+    bool unroll_k; /* default false */
 
     bool has_lds_k_pad; /* false => Python None */
     int lds_k_pad;
     void* lds_layout; /* NULL => Python None */
 
-    bool chiplet_swizzle;    /* default false */
-    int chiplet_wgm;         /* default 8  */
-    int chiplet_num_xcds;    /* default 8  */
-    int chiplet_chunk_size;  /* default 64 */
+    bool chiplet_swizzle; /* default false */
+    int chiplet_wgm; /* default 8  */
+    int chiplet_num_xcds; /* default 8  */
+    int chiplet_chunk_size; /* default 64 */
 
     bool has_waves_per_eu; /* false => Python None */
     int waves_per_eu;
@@ -159,9 +159,8 @@ bool rocke_dgrad_conv_spec_is_strided(const rocke_dgrad_conv_spec_t* s);
 bool rocke_dgrad_conv_spec_needs_atomic(const rocke_dgrad_conv_spec_t* s);
 
 /* spec.kernel_name() -> NUL-terminated into out (capacity out_cap). */
-rocke_status_t rocke_dgrad_conv_spec_kernel_name(const rocke_dgrad_conv_spec_t* s,
-                                                 char* out,
-                                                 size_t out_cap);
+rocke_status_t
+    rocke_dgrad_conv_spec_kernel_name(const rocke_dgrad_conv_spec_t* s, char* out, size_t out_cap);
 
 /* is_valid_dgrad_spec(spec, arch) -> (ok, reason).
  * arch NULL => "gfx950".  Returns false + reason string on reject. */
@@ -205,9 +204,9 @@ typedef struct rocke_sub_gemm_params
     int h_tilde_slice;
     int w_tilde_slice_begin;
     int w_tilde_slice;
-    int gemm_m;   /* N * HTildeSlice * WTildeSlice */
-    int gemm_n;   /* C per group */
-    int gemm_k;   /* YDotSlice * XDotSlice * K per group */
+    int gemm_m; /* N * HTildeSlice * WTildeSlice */
+    int gemm_n; /* C per group */
+    int gemm_k; /* YDotSlice * XDotSlice * K per group */
     int block_start; /* cumulative tile offset */
     int block_end;
 
@@ -279,25 +278,22 @@ struct rocke_tensor_descriptor* rocke_dgrad_make_dx_descriptor(rocke_ir_builder_
  * arch NULL => "gfx950". Returns the kernel or NULL with b's sticky
  * error set.
  */
-rocke_kernel_def_t* rocke_build_implicit_gemm_conv_dgrad(
-    rocke_ir_builder_t* b,
-    const rocke_dgrad_conv_spec_t* spec,
-    const char* arch);
+rocke_kernel_def_t* rocke_build_implicit_gemm_conv_dgrad(rocke_ir_builder_t* b,
+                                                         const rocke_dgrad_conv_spec_t* spec,
+                                                         const char* arch);
 
 /* Convenience: init `b` from spec.kernel_name() then build. */
-rocke_kernel_def_t* rocke_build_implicit_gemm_conv_dgrad_new(
-    rocke_ir_builder_t* b,
-    const rocke_dgrad_conv_spec_t* spec,
-    const char* arch);
+rocke_kernel_def_t* rocke_build_implicit_gemm_conv_dgrad_new(rocke_ir_builder_t* b,
+                                                             const rocke_dgrad_conv_spec_t* spec,
+                                                             const char* arch);
 
 /* Convenience: build + lower to LLVM .ll text in one shot. */
-rocke_status_t
-    rocke_dgrad_conv_implicit_gemm_lower_to_llvm(const rocke_dgrad_conv_spec_t* spec,
-                                                 const char* arch,
-                                                 rocke_llvm_flavor_t flavor,
-                                                 char** out_ll,
-                                                 char* err,
-                                                 size_t err_cap);
+rocke_status_t rocke_dgrad_conv_implicit_gemm_lower_to_llvm(const rocke_dgrad_conv_spec_t* spec,
+                                                            const char* arch,
+                                                            rocke_llvm_flavor_t flavor,
+                                                            char** out_ll,
+                                                            char* err,
+                                                            size_t err_cap);
 
 #ifdef __cplusplus
 } /* extern "C" */

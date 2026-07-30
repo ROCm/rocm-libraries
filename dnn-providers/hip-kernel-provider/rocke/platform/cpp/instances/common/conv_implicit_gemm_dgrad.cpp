@@ -17,8 +17,8 @@
  */
 #include "rocke/instance_conv_implicit_gemm_dgrad.h"
 
-#include <cmath>   /* ceil, log2 */
-#include <cstdio>  /* snprintf */
+#include <cmath> /* ceil, log2 */
+#include <cstdio> /* snprintf */
 #include <cstdlib> /* malloc, free */
 #include <cstring> /* strcmp, memset */
 
@@ -44,8 +44,14 @@
 // Pure-arithmetic helpers
 // ---------------------------------------------------------------------------
 
-static int _ceil_div(int a, int b) { return (a + b - 1) / b; }
-static int _floor_div(int a, int b) { return a / b; }
+static int _ceil_div(int a, int b)
+{
+    return (a + b - 1) / b;
+}
+static int _floor_div(int a, int b)
+{
+    return a / b;
+}
 static int _gcd(int a, int b)
 {
     while(b)
@@ -56,8 +62,14 @@ static int _gcd(int a, int b)
     }
     return a;
 }
-static int _max(int a, int b) { return a > b ? a : b; }
-static int _min(int a, int b) { return a < b ? a : b; }
+static int _max(int a, int b)
+{
+    return a > b ? a : b;
+}
+static int _min(int a, int b)
+{
+    return a < b ? a : b;
+}
 
 // ---------------------------------------------------------------------------
 // Spec default + property accessors  (Python DgradConvSpec @property)
@@ -151,9 +163,8 @@ bool rocke_dgrad_conv_spec_needs_atomic(const rocke_dgrad_conv_spec_t* s)
     return (t.y_tilde * t.x_tilde) > 1;
 }
 
-rocke_status_t rocke_dgrad_conv_spec_kernel_name(const rocke_dgrad_conv_spec_t* s,
-                                                 char* out,
-                                                 size_t out_cap)
+rocke_status_t
+    rocke_dgrad_conv_spec_kernel_name(const rocke_dgrad_conv_spec_t* s, char* out, size_t out_cap)
 {
     if(!out || out_cap < 16)
         return ROCKE_ERR_VALUE;
@@ -410,8 +421,8 @@ struct rocke_tensor_descriptor* rocke_dgrad_make_dy_descriptor(rocke_ir_builder_
 
     const int lengths[] = {p->N, Ho, Wo, p->K};
     const char* coord_names[] = {"n", "ho", "wo", "k_out"};
-    rocke_tensor_descriptor_t* desc =
-        rocke_tensor_descriptor_naive(b, "dY_nhwk", lengths, 4, NULL, coord_names, 4);
+    rocke_tensor_descriptor_t* desc
+        = rocke_tensor_descriptor_naive(b, "dY_nhwk", lengths, 4, NULL, coord_names, 4);
     if(!desc)
         return NULL;
 
@@ -451,8 +462,8 @@ struct rocke_tensor_descriptor* rocke_dgrad_make_w_descriptor(rocke_ir_builder_t
     (void)dtype;
     const int lengths[] = {p->K, p->Y, p->X, p->C};
     const char* coord_names[] = {"k_out", "y", "x", "c"};
-    rocke_tensor_descriptor_t* desc =
-        rocke_tensor_descriptor_naive(b, "W_kyxc", lengths, 4, NULL, coord_names, 4);
+    rocke_tensor_descriptor_t* desc
+        = rocke_tensor_descriptor_naive(b, "W_kyxc", lengths, 4, NULL, coord_names, 4);
     if(!desc)
         return NULL;
 
@@ -474,8 +485,8 @@ struct rocke_tensor_descriptor* rocke_dgrad_make_dx_descriptor(rocke_ir_builder_
     (void)dtype;
     const int lengths[] = {p->N, p->Hi, p->Wi, p->C};
     const char* coord_names[] = {"n", "hi", "wi", "c"};
-    rocke_tensor_descriptor_t* desc =
-        rocke_tensor_descriptor_naive(b, "dX_nhwc", lengths, 4, NULL, coord_names, 4);
+    rocke_tensor_descriptor_t* desc
+        = rocke_tensor_descriptor_naive(b, "dX_nhwc", lengths, 4, NULL, coord_names, 4);
     if(!desc)
         return NULL;
 
@@ -499,9 +510,8 @@ static const char* _dgrad_mma_family(const char* arch)
     return "mma";
 }
 
-static const rocke_mmaop_t* _resolve_dgrad_op(rocke_ir_builder_t* b,
-                                               const rocke_dgrad_conv_spec_t* spec,
-                                               const char* arch)
+static const rocke_mmaop_t*
+    _resolve_dgrad_op(rocke_ir_builder_t* b, const rocke_dgrad_conv_spec_t* spec, const char* arch)
 {
     const rocke_archtarget_t* target = rocke_archtarget_from_gfx(arch);
     if(!target)
@@ -509,15 +519,14 @@ static const rocke_mmaop_t* _resolve_dgrad_op(rocke_ir_builder_t* b,
         rocke_i_set_err(b, ROCKE_ERR_VALUE, "dgrad: unknown arch '%s'", arch);
         return NULL;
     }
-    const rocke_mmaop_t* op = rocke_archtarget_op_for_shape(
-        target,
-        _dgrad_mma_family(arch),
-        spec->dtype_a,
-        spec->dtype_b,
-        "fp32",
-        spec->warp_tile_m,
-        spec->warp_tile_n,
-        spec->warp_tile_k);
+    const rocke_mmaop_t* op = rocke_archtarget_op_for_shape(target,
+                                                            _dgrad_mma_family(arch),
+                                                            spec->dtype_a,
+                                                            spec->dtype_b,
+                                                            "fp32",
+                                                            spec->warp_tile_m,
+                                                            spec->warp_tile_n,
+                                                            spec->warp_tile_k);
     if(!op)
     {
         rocke_i_set_err(b,
@@ -566,8 +575,7 @@ static void _emit_dgrad_direct_epilogue(rocke_ir_builder_t* b,
                                         rocke_value_t* dx_rsrc)
 {
     const rocke_conv_problem_t* p = &spec->problem;
-    rocke_tensor_descriptor_t* dX_desc
-        = rocke_dgrad_make_dx_descriptor(b, p, spec->dtype_d);
+    rocke_tensor_descriptor_t* dX_desc = rocke_dgrad_make_dx_descriptor(b, p, spec->dtype_d);
 
     struct dgrad_dx_addr_ctx addr_ctx;
     addr_ctx.desc = dX_desc;
@@ -619,8 +627,7 @@ static void _emit_dgrad_direct_epilogue_wmma(rocke_ir_builder_t* b,
     rocke_value_t* c_M = rocke_b_const_i32(b, dg_M);
     rocke_value_t* c_N = rocke_b_const_i32(b, dg_N);
 
-    rocke_tensor_descriptor_t* dX_desc
-        = rocke_dgrad_make_dx_descriptor(b, p, spec->dtype_d);
+    rocke_tensor_descriptor_t* dX_desc = rocke_dgrad_make_dx_descriptor(b, p, spec->dtype_d);
 
     int flat = 0;
     for(int mi = 0; mi < mfmas_m; mi++)
@@ -629,9 +636,11 @@ static void _emit_dgrad_direct_epilogue_wmma(rocke_ir_builder_t* b,
         {
             rocke_value_t* acc = accs[flat++];
             rocke_value_t* _bwm = rocke_b_add(b, block_m_off, warp_m_off);
-            rocke_value_t* atom_m_off = rocke_b_add(b, _bwm, rocke_b_const_i32(b, mi * spec->warp_tile_m));
+            rocke_value_t* atom_m_off
+                = rocke_b_add(b, _bwm, rocke_b_const_i32(b, mi * spec->warp_tile_m));
             rocke_value_t* _bwn = rocke_b_add(b, block_n_off, warp_n_off);
-            rocke_value_t* atom_n_off = rocke_b_add(b, _bwn, rocke_b_const_i32(b, ni * spec->warp_tile_n));
+            rocke_value_t* atom_n_off
+                = rocke_b_add(b, _bwn, rocke_b_const_i32(b, ni * spec->warp_tile_n));
 
             const rocke_arch_layout_map_t* c_map = rocke_mmaop_c_layout(op, b);
             for(int i = 0; i < op->c_frag_len; i++)
@@ -655,8 +664,8 @@ static void _emit_dgrad_direct_epilogue_wmma(rocke_ir_builder_t* b,
                     b, dX_desc, dx_names, dx_vals, 2, &dx_off_elems, &dx_valid);
                 rocke_value_t* dx_off_bytes
                     = rocke_b_mul(b, dx_off_elems, rocke_b_const_i32(b, elem_bytes));
-                rocke_value_t* safe_off = rocke_b_select(
-                    b, ok, dx_off_bytes, rocke_b_const_i32(b, 0x7FFFFFFF));
+                rocke_value_t* safe_off
+                    = rocke_b_select(b, ok, dx_off_bytes, rocke_b_const_i32(b, 0x7FFFFFFF));
 
                 if(is_fp32_out)
                     rocke_b_buffer_store_f32(b, dx_rsrc, safe_off, c0, v_f32);
@@ -724,7 +733,8 @@ static rocke_value_t* _emit_load_record_field(rocke_ir_builder_t* b,
                                               rocke_value_t* sg_idx,
                                               int field_idx)
 {
-    rocke_value_t* base = rocke_b_mul(b, sg_idx, rocke_b_const_i32(b, ROCKE_DGRAD_SUB_GEMM_RECORD_FIELDS));
+    rocke_value_t* base
+        = rocke_b_mul(b, sg_idx, rocke_b_const_i32(b, ROCKE_DGRAD_SUB_GEMM_RECORD_FIELDS));
     rocke_value_t* offset = rocke_b_add(b, base, rocke_b_const_i32(b, field_idx));
     return rocke_b_global_load_i32(b, sub_gemm_buf, offset, 4);
 }
@@ -733,30 +743,29 @@ static rocke_value_t* _emit_load_record_field(rocke_ir_builder_t* b,
 // Tilde atomic epilogue (Python _emit_dgrad_tilde_atomic_epilogue)
 // ===========================================================================
 
-static void _emit_dgrad_tilde_atomic_epilogue(
-    rocke_ir_builder_t* b,
-    const rocke_dgrad_conv_spec_t* spec,
-    const rocke_mfma_atom_t* atom,
-    rocke_value_t* const* accs,
-    int num_accs,
-    rocke_value_t* warp_m_idx,
-    rocke_value_t* warp_n_idx,
-    rocke_value_t* lane,
-    rocke_value_t* block_m_off,
-    rocke_value_t* block_n_off,
-    rocke_value_t* dx_ptr,
-    int c_per_lane,
-    rocke_value_t* gemm_m,
-    rocke_value_t* gemm_n,
-    rocke_value_t* h_tilde_slice,
-    rocke_value_t* w_tilde_slice,
-    rocke_value_t* d_h_stride,
-    rocke_value_t* d_h_offset,
-    rocke_value_t* d_w_stride,
-    rocke_value_t* d_w_offset,
-    rocke_value_t* c_Hi,
-    rocke_value_t* c_Wi,
-    rocke_value_t* c_C)
+static void _emit_dgrad_tilde_atomic_epilogue(rocke_ir_builder_t* b,
+                                              const rocke_dgrad_conv_spec_t* spec,
+                                              const rocke_mfma_atom_t* atom,
+                                              rocke_value_t* const* accs,
+                                              int num_accs,
+                                              rocke_value_t* warp_m_idx,
+                                              rocke_value_t* warp_n_idx,
+                                              rocke_value_t* lane,
+                                              rocke_value_t* block_m_off,
+                                              rocke_value_t* block_n_off,
+                                              rocke_value_t* dx_ptr,
+                                              int c_per_lane,
+                                              rocke_value_t* gemm_m,
+                                              rocke_value_t* gemm_n,
+                                              rocke_value_t* h_tilde_slice,
+                                              rocke_value_t* w_tilde_slice,
+                                              rocke_value_t* d_h_stride,
+                                              rocke_value_t* d_h_offset,
+                                              rocke_value_t* d_w_stride,
+                                              rocke_value_t* d_w_offset,
+                                              rocke_value_t* c_Hi,
+                                              rocke_value_t* c_Wi,
+                                              rocke_value_t* c_C)
 {
     (void)num_accs;
     int mfmas_m = rocke_dgrad_conv_spec_mfmas_per_warp_m(spec);
@@ -785,8 +794,7 @@ static void _emit_dgrad_tilde_atomic_epilogue(
     rocke_value_t* cols[ROCKE_CONV_MAX_ACCS];
     for(int i = 0; i < c_per_lane; i++)
     {
-        rocke_value_t* ys[2] = {rocke_b_const_i32(b, i / kc_m1),
-                                rocke_b_const_i32(b, i % kc_m1)};
+        rocke_value_t* ys[2] = {rocke_b_const_i32(b, i / kc_m1), rocke_b_const_i32(b, i % kc_m1)};
         rocke_value_t* p_lane_arr[2] = {m_blk, n_in_atom};
         rocke_value_t* const* ps_arr[1] = {p_lane_arr};
         int ps_counts[1] = {2};
@@ -856,15 +864,12 @@ static void _emit_dgrad_tilde_atomic_epilogue(
                     }
                     else
                     {
-                        rocke_value_t* val_cvt
-                            = is_bf16 ? rocke_b_trunc_f32_to_bf16(b, val_f32)
-                                      : rocke_b_trunc_f32_to_f16(b, val_f32);
+                        rocke_value_t* val_cvt = is_bf16 ? rocke_b_trunc_f32_to_bf16(b, val_f32)
+                                                         : rocke_b_trunc_f32_to_f16(b, val_f32);
                         rocke_value_t* zero_f32 = rocke_b_const_f32(b, 0.0f);
-                        rocke_value_t* zero_cvt
-                            = is_bf16 ? rocke_b_trunc_f32_to_bf16(b, zero_f32)
-                                      : rocke_b_trunc_f32_to_f16(b, zero_f32);
-                        rocke_value_t* c_n_is_odd
-                            = rocke_b_mod(b, c_n, rocke_b_const_i32(b, 2));
+                        rocke_value_t* zero_cvt = is_bf16 ? rocke_b_trunc_f32_to_bf16(b, zero_f32)
+                                                          : rocke_b_trunc_f32_to_f16(b, zero_f32);
+                        rocke_value_t* c_n_is_odd = rocke_b_mod(b, c_n, rocke_b_const_i32(b, 2));
                         rocke_value_t* is_odd
                             = rocke_b_cmp_ne(b, c_n_is_odd, rocke_b_const_i32(b, 0));
                         rocke_value_t* c_n_even = rocke_b_sub(b, c_n, c_n_is_odd);
@@ -1018,9 +1023,8 @@ static rocke_value_t* _tilde_w_descriptor(rocke_ir_builder_t* b_,
 // Tilde dgrad kernel builder (Python _build_tilde_dgrad, lines 1366-1757)
 // ===========================================================================
 
-static rocke_kernel_def_t* _build_tilde_dgrad(rocke_ir_builder_t* b,
-                                              const rocke_dgrad_conv_spec_t* spec,
-                                              const char* arch)
+static rocke_kernel_def_t*
+    _build_tilde_dgrad(rocke_ir_builder_t* b, const rocke_dgrad_conv_spec_t* spec, const char* arch)
 {
     const rocke_conv_problem_t* p = &spec->problem;
     rocke_tilde_decomposition_t tilde = rocke_compute_tilde(p);
@@ -1104,8 +1108,7 @@ static rocke_kernel_def_t* _build_tilde_dgrad(rocke_ir_builder_t* b,
     rocke_value_t* flat_block_id = rocke_b_block_id_x(b);
 
     // ---- binary search ----
-    rocke_value_t* sg_idx
-        = _emit_binary_search(b, flat_block_id, sub_gemm_buf, num_sub_gemms);
+    rocke_value_t* sg_idx = _emit_binary_search(b, flat_block_id, sub_gemm_buf, num_sub_gemms);
 
     // ---- load all record fields ----
     rocke_value_t* rec_block_start = _emit_load_record_field(b, sub_gemm_buf, sg_idx, 0);
@@ -1193,8 +1196,7 @@ static rocke_kernel_def_t* _build_tilde_dgrad(rocke_ir_builder_t* b,
     rocke_value_t* k_hi;
     if(is_split_k)
     {
-        rocke_value_t* rec_gemm_k_padded
-            = _emit_load_record_field(b, sub_gemm_buf, sg_idx, 21);
+        rocke_value_t* rec_gemm_k_padded = _emit_load_record_field(b, sub_gemm_buf, sg_idx, 21);
         rocke_value_t* c_split_k = rocke_b_const_i32(b, spec->split_k);
         rocke_value_t* k_slice = rocke_b_div(b, rec_gemm_k_padded, c_split_k);
         k_lo = rocke_b_mul(b, rocke_b_block_id_z(b), k_slice);
@@ -1303,8 +1305,8 @@ static rocke_kernel_def_t* _build_tilde_dgrad(rocke_ir_builder_t* b,
     rocke_schedule_policy_emit_prologue(&schedule, b);
 
     // ---- K loop (simple scf.for_iter) ----
-    rocke_for_t for_op = rocke_b_scf_for_iter(
-        b, k_lo, k_hi, c_block_k, iter_args, num_accs, "k0", false, true);
+    rocke_for_t for_op
+        = rocke_b_scf_for_iter(b, k_lo, k_hi, c_block_k, iter_args, num_accs, "k0", false, true);
 
     rocke_value_t* k0 = for_op.iv;
     rocke_value_t* iter_vars[ROCKE_CONV_MAX_ACCS];
@@ -1318,11 +1320,9 @@ static rocke_kernel_def_t* _build_tilde_dgrad(rocke_ir_builder_t* b,
         w_tctx.k_off = k0;
 
         rocke_coalesced_tile_loader_load(
-            b, &a_sync_loader, tid, A_smem,
-            _tilde_dy_descriptor, &dy_tctx, dy_rsrc, NULL);
+            b, &a_sync_loader, tid, A_smem, _tilde_dy_descriptor, &dy_tctx, dy_rsrc, NULL);
         rocke_coalesced_tile_loader_load(
-            b, &b_sync_loader, tid, B_smem,
-            _tilde_w_descriptor, &w_tctx, w_rsrc, NULL);
+            b, &b_sync_loader, tid, B_smem, _tilde_w_descriptor, &w_tctx, w_rsrc, NULL);
         rocke_b_sync(b);
 
         // MFMA phase
@@ -1342,7 +1342,8 @@ static rocke_kernel_def_t* _build_tilde_dgrad(rocke_ir_builder_t* b,
             for(int kk = 0; kk < k_atoms; kk++)
             {
                 rocke_value_t* _cb_mul = rocke_b_mul(b, k_blk, rocke_b_const_i32(b, a_per_lane));
-                rocke_value_t* col_base = rocke_b_add(b, _cb_mul, rocke_b_const_i32(b, kk * spec->warp_tile_k));
+                rocke_value_t* col_base
+                    = rocke_b_add(b, _cb_mul, rocke_b_const_i32(b, kk * spec->warp_tile_k));
 
                 rocke_value_t* a_rows[ROCKE_CONV_MAX_ACCS];
                 for(int mi = 0; mi < mfmas_m; mi++)
@@ -1350,10 +1351,8 @@ static rocke_kernel_def_t* _build_tilde_dgrad(rocke_ir_builder_t* b,
                     rocke_value_t* a_row = rocke_b_add(
                         b,
                         warp_m_off,
-                        rocke_b_add(
-                            b, rocke_b_const_i32(b, mi * spec->warp_tile_m), m_in_atom));
-                    a_rows[mi]
-                        = rocke_conv_emit_smem_load(b, A_smem, a_row, col_base, a_per_lane);
+                        rocke_b_add(b, rocke_b_const_i32(b, mi * spec->warp_tile_m), m_in_atom));
+                    a_rows[mi] = rocke_conv_emit_smem_load(b, A_smem, a_row, col_base, a_per_lane);
                 }
 
                 rocke_value_t* b_cols[ROCKE_CONV_MAX_ACCS];
@@ -1362,10 +1361,8 @@ static rocke_kernel_def_t* _build_tilde_dgrad(rocke_ir_builder_t* b,
                     rocke_value_t* b_row = rocke_b_add(
                         b,
                         warp_n_off,
-                        rocke_b_add(
-                            b, rocke_b_const_i32(b, ni * spec->warp_tile_n), n_in_atom));
-                    b_cols[ni]
-                        = rocke_conv_emit_smem_load(b, B_smem, b_row, col_base, b_per_lane);
+                        rocke_b_add(b, rocke_b_const_i32(b, ni * spec->warp_tile_n), n_in_atom));
+                    b_cols[ni] = rocke_conv_emit_smem_load(b, B_smem, b_row, col_base, b_per_lane);
                 }
 
                 int flat = 0;
@@ -1373,8 +1370,8 @@ static rocke_kernel_def_t* _build_tilde_dgrad(rocke_ir_builder_t* b,
                 {
                     for(int ni = 0; ni < mfmas_n; ni++)
                     {
-                        new_accs[flat] = rocke_conv_emit_mfma(
-                            b, atom, a_rows[mi], b_cols[ni], new_accs[flat]);
+                        new_accs[flat]
+                            = rocke_conv_emit_mfma(b, atom, a_rows[mi], b_cols[ni], new_accs[flat]);
                         flat++;
                     }
                 }
@@ -1404,15 +1401,15 @@ static rocke_kernel_def_t* _build_tilde_dgrad(rocke_ir_builder_t* b,
                 rocke_value_t* k_tile_base = rocke_b_const_i32(b, kk * spec->warp_tile_k);
                 for(int mi = 0; mi < mfmas_m; mi++)
                 {
-                    rocke_value_t* atom_row = rocke_b_add(
-                        b, warp_m_off, rocke_b_const_i32(b, mi * spec->warp_tile_m));
+                    rocke_value_t* atom_row
+                        = rocke_b_add(b, warp_m_off, rocke_b_const_i32(b, mi * spec->warp_tile_m));
                     a_rows[mi] = rocke_conv_emit_frag_smem_load(
                         b, A_smem, a_row_in_atom, a_k_in_atom, atom_row, k_tile_base, a_per_lane);
                 }
                 for(int ni = 0; ni < mfmas_n; ni++)
                 {
-                    rocke_value_t* atom_row = rocke_b_add(
-                        b, warp_n_off, rocke_b_const_i32(b, ni * spec->warp_tile_n));
+                    rocke_value_t* atom_row
+                        = rocke_b_add(b, warp_n_off, rocke_b_const_i32(b, ni * spec->warp_tile_n));
                     b_wma_cols[ni] = rocke_conv_emit_frag_smem_load(
                         b, B_smem, b_col_in_atom, b_k_in_atom, atom_row, k_tile_base, b_per_lane);
                 }
@@ -1445,33 +1442,54 @@ static rocke_kernel_def_t* _build_tilde_dgrad(rocke_ir_builder_t* b,
 
     // ---- accumulator epilogue ----
     rocke_value_t* epi_accs[ROCKE_CONV_MAX_ACCS];
-    rocke_conv_apply_accumulator_epilogue(
-        b, &spec->acc_epilogue, final_accs, num_final, epi_accs);
+    rocke_conv_apply_accumulator_epilogue(b, &spec->acc_epilogue, final_accs, num_final, epi_accs);
 
     // ---- epilogue dispatch (mirrors Python _build_tilde_dgrad) ----
     if(!needs_atomic)
     {
         // Single sub-GEMM, split_k=1: direct buffer_store (no atomics needed).
         if(is_wmma)
-            _emit_dgrad_direct_epilogue_wmma(
-                b, spec, op, epi_accs, num_final,
-                warp_m_idx, warp_n_idx, lane,
-                block_m_off_v, block_n_off_v, dx_rsrc, c0);
+            _emit_dgrad_direct_epilogue_wmma(b,
+                                             spec,
+                                             op,
+                                             epi_accs,
+                                             num_final,
+                                             warp_m_idx,
+                                             warp_n_idx,
+                                             lane,
+                                             block_m_off_v,
+                                             block_n_off_v,
+                                             dx_rsrc,
+                                             c0);
         else
             _emit_dgrad_direct_epilogue(b, spec, epi_accs, num_final, &grid, dx_rsrc);
     }
     else
     {
         // Multiple sub-GEMMs or split_k>1: overlapping writes require atomics.
-        _emit_dgrad_tilde_atomic_epilogue(
-            b, spec, atom, epi_accs, num_final,
-            warp_m_idx, warp_n_idx, lane,
-            block_m_off_v, block_n_off_v, dX, c_per_lane,
-            rec_gemm_m, c_dg_N,
-            rec_h_tilde_slice, rec_w_tilde_slice,
-            rec_d_h_stride, rec_d_h_offset,
-            rec_d_w_stride, rec_d_w_offset,
-            c_Hi, c_Wi, c_C);
+        _emit_dgrad_tilde_atomic_epilogue(b,
+                                          spec,
+                                          atom,
+                                          epi_accs,
+                                          num_final,
+                                          warp_m_idx,
+                                          warp_n_idx,
+                                          lane,
+                                          block_m_off_v,
+                                          block_n_off_v,
+                                          dX,
+                                          c_per_lane,
+                                          rec_gemm_m,
+                                          c_dg_N,
+                                          rec_h_tilde_slice,
+                                          rec_w_tilde_slice,
+                                          rec_d_h_stride,
+                                          rec_d_h_offset,
+                                          rec_d_w_stride,
+                                          rec_d_w_offset,
+                                          c_Hi,
+                                          c_Wi,
+                                          c_C);
     }
 
     return b->kernel;
@@ -1517,8 +1535,8 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv_dgrad(rocke_ir_builder_t* b,
 // ===========================================================================
 
 rocke_kernel_def_t* rocke_build_implicit_gemm_conv_dgrad_new(rocke_ir_builder_t* b,
-                                                              const rocke_dgrad_conv_spec_t* spec,
-                                                              const char* arch)
+                                                             const rocke_dgrad_conv_spec_t* spec,
+                                                             const char* arch)
 {
     return ckc::guard_builder(b, [&]() -> rocke_kernel_def_t* {
         char name[256];
@@ -1549,13 +1567,12 @@ static void _dgrad_set_err(char* err, size_t err_cap, const char* msg)
     err[n] = '\0';
 }
 
-rocke_status_t
-    rocke_dgrad_conv_implicit_gemm_lower_to_llvm(const rocke_dgrad_conv_spec_t* spec,
-                                                 const char* arch,
-                                                 rocke_llvm_flavor_t flavor,
-                                                 char** out_ll,
-                                                 char* err,
-                                                 size_t err_cap)
+rocke_status_t rocke_dgrad_conv_implicit_gemm_lower_to_llvm(const rocke_dgrad_conv_spec_t* spec,
+                                                            const char* arch,
+                                                            rocke_llvm_flavor_t flavor,
+                                                            char** out_ll,
+                                                            char* err,
+                                                            size_t err_cap)
 {
     rocke_ir_builder_t b;
     rocke_kernel_def_t* kernel;

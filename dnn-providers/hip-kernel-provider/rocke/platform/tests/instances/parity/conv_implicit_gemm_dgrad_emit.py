@@ -17,8 +17,9 @@ from _emit_common import run_emit
 
 
 def _cp(N, Hi, Wi, C, K, Y, X, sH=1, sW=1, pH=0, pW=0, dH=1, dW=1):
-    return ConvProblem(N=N, Hi=Hi, Wi=Wi, C=C, K=K, Y=Y, X=X,
-                       sH=sH, sW=sW, pH=pH, pW=pW, dH=dH, dW=dW)
+    return ConvProblem(
+        N=N, Hi=Hi, Wi=Wi, C=C, K=K, Y=Y, X=X, sH=sH, sW=sW, pH=pH, pW=pW, dH=dH, dW=dW
+    )
 
 
 def _spec(idx: int):

@@ -150,10 +150,14 @@ def compute_tilde(p: ConvProblem) -> TildeDecomposition:
     h_tilde = p.Ho + _ceil_div(p.dH * (p.Y - 1), p.sH) if p.Y > 1 else p.Ho
     w_tilde = p.Wo + _ceil_div(p.dW * (p.X - 1), p.sW) if p.X > 1 else p.Wo
     return TildeDecomposition(
-        gcd_h=gcd_h, gcd_w=gcd_w,
-        y_tilde=y_tilde, x_tilde=x_tilde,
-        y_dot=y_dot, x_dot=x_dot,
-        h_tilde=h_tilde, w_tilde=w_tilde,
+        gcd_h=gcd_h,
+        gcd_w=gcd_w,
+        y_tilde=y_tilde,
+        x_tilde=x_tilde,
+        y_dot=y_dot,
+        x_dot=x_dot,
+        h_tilde=h_tilde,
+        w_tilde=w_tilde,
     )
 
 
@@ -323,9 +327,7 @@ def pack_sub_gemm_buffer(
 # ---------------------------------------------------------------------
 
 
-def make_dgrad_dy_descriptor(
-    p: ConvProblem, dtype: str = "fp16"
-) -> TensorDescriptor:
+def make_dgrad_dy_descriptor(p: ConvProblem, dtype: str = "fp16") -> TensorDescriptor:
     """Build the (m, k_dg) -> NHWK offset descriptor for dY (output gradient).
 
     dY is stored in NHWK layout.  In the dgrad GEMM:
@@ -388,9 +390,7 @@ def make_dgrad_dy_descriptor(
     )
 
 
-def make_dgrad_w_descriptor(
-    p: ConvProblem, dtype: str = "fp16"
-) -> TensorDescriptor:
+def make_dgrad_w_descriptor(p: ConvProblem, dtype: str = "fp16") -> TensorDescriptor:
     """Build the (c, k_dg) -> KYXC offset descriptor for W (weights).
 
     W is stored in KYXC layout.  In the dgrad GEMM:
@@ -419,9 +419,7 @@ def make_dgrad_w_descriptor(
     )
 
 
-def make_dgrad_dx_descriptor(
-    p: ConvProblem, dtype: str = "fp16"
-) -> TensorDescriptor:
+def make_dgrad_dx_descriptor(p: ConvProblem, dtype: str = "fp16") -> TensorDescriptor:
     """Build the (m, c) -> NHWC offset descriptor for dX (input gradient).
 
     dX is stored in NHWC layout.  In the dgrad GEMM:
@@ -556,8 +554,12 @@ class DgradConvSpec:
         """Return the list of sub-GEMMs for the tilde decomposition."""
         tilde = compute_tilde(self.problem)
         return enumerate_sub_gemms(
-            self.problem, tilde, self.tile_m, self.tile_n,
-            tile_k=self.tile_k, split_k=max(1, self.split_k),
+            self.problem,
+            tilde,
+            self.tile_m,
+            self.tile_n,
+            tile_k=self.tile_k,
+            split_k=max(1, self.split_k),
         )
 
     @property
@@ -669,9 +671,7 @@ class DgradConvSpec:
 # ---------------------------------------------------------------------
 
 
-def is_valid_dgrad_spec(
-    spec: DgradConvSpec, arch: str = "gfx950"
-) -> Tuple[bool, str]:
+def is_valid_dgrad_spec(spec: DgradConvSpec, arch: str = "gfx950") -> Tuple[bool, str]:
     """Return ``(ok, reason)`` for ``spec`` on ``arch``."""
     from ...core.arch import ArchTarget
 
@@ -750,9 +750,7 @@ def is_valid_dgrad_spec(
     _ab_lds = _ab_bytes * (2 if _double else 1)
     _c_dtype_bytes = 4 if spec.data.dtype_d == "fp32" else 2
     _c_lds = (
-        spec.tile_m * spec.tile_n * _c_dtype_bytes
-        if spec.epilogue == "cshuffle"
-        else 0
+        spec.tile_m * spec.tile_n * _c_dtype_bytes if spec.epilogue == "cshuffle" else 0
     )
     _total_lds = _ab_lds + _c_lds
     if not target.fits_lds(_total_lds):
@@ -868,6 +866,7 @@ def build_implicit_gemm_conv_dgrad(
 
     return _build_tilde_dgrad(spec, arch)
 
+
 _RECORD_FIELDS = 22  # number of i32 fields per SubGemmRecord
 
 
@@ -892,9 +891,7 @@ def _emit_binary_search(
     for _ in range(max_iters):
         mid = b.div(b.add(lo, hi), b.const_i32(2))
         mid_block_start_offset = b.mul(mid, c_record_stride)
-        mid_block_start = b.global_load_i32(
-            sub_gemm_buf, mid_block_start_offset
-        )
+        mid_block_start = b.global_load_i32(sub_gemm_buf, mid_block_start_offset)
         take_lo = b.cmp_le(mid_block_start, flat_block_id)
         lo = b.select(take_lo, mid, lo)
         hi = b.select(take_lo, hi, mid)
@@ -1080,9 +1077,7 @@ def _build_tilde_dgrad(
 
     acc_init = b.zero_vec_f32(c_per_lane)
     accs = [
-        (f"acc_m{mi}_n{ni}", acc_init)
-        for mi in range(mfmas_m)
-        for ni in range(mfmas_n)
+        (f"acc_m{mi}_n{ni}", acc_init) for mi in range(mfmas_m) for ni in range(mfmas_n)
     ]
 
     threads = spec.block_size
@@ -1121,10 +1116,12 @@ def _build_tilde_dgrad(
         wtl = b_.mod(m_rem, rec_w_tilde_slice)
 
         # ho = htl + h_tilde_slice_begin + ydot * a_embed_h_coeff
-        ho = b_.add(b_.add(htl, rec_h_tilde_slice_begin),
-                     b_.mul(ydot, rec_a_embed_h_coeff))
-        wo = b_.add(b_.add(wtl, rec_w_tilde_slice_begin),
-                     b_.mul(xdot, rec_a_embed_w_coeff))
+        ho = b_.add(
+            b_.add(htl, rec_h_tilde_slice_begin), b_.mul(ydot, rec_a_embed_h_coeff)
+        )
+        wo = b_.add(
+            b_.add(wtl, rec_w_tilde_slice_begin), b_.mul(xdot, rec_a_embed_w_coeff)
+        )
 
         # Bounds check: 0 <= ho < Ho, 0 <= wo < Wo, k_out < K
         ho_ok = b_.land(b_.cmp_ge(ho, c0), b_.cmp_lt(ho, c_Ho))
@@ -1156,8 +1153,9 @@ def _build_tilde_dgrad(
         x = b_.add(b_.mul(xdot, rec_b_x_stride), rec_b_x_offset)
 
         # Bounds check: y < Y, x < X, k_out < K
-        valid = b_.land(b_.land(b_.cmp_lt(y, c_Y), b_.cmp_lt(x, c_X)),
-                        b_.cmp_lt(k_out, c_K))
+        valid = b_.land(
+            b_.land(b_.cmp_lt(y, c_Y), b_.cmp_lt(x, c_X)), b_.cmp_lt(k_out, c_K)
+        )
 
         # KYXC linear offset: ((k_out * Y + y) * X + x) * C + c
         offset = b_.add(
@@ -1213,8 +1211,13 @@ def _build_tilde_dgrad(
                     atom_row = b.add(warp_m_off, b.const_i32(mi * spec.warp_tile_m))
                     a_rows.append(
                         _emit_frag_smem_load(
-                            b, A_src, a_row_in_atom, a_k_in_atom,
-                            atom_row, k_tile_base, a_per_lane,
+                            b,
+                            A_src,
+                            a_row_in_atom,
+                            a_k_in_atom,
+                            atom_row,
+                            k_tile_base,
+                            a_per_lane,
                             smem_dtype=_smem_dtype,
                         )
                     )
@@ -1223,15 +1226,22 @@ def _build_tilde_dgrad(
                     atom_row = b.add(warp_n_off, b.const_i32(ni * spec.warp_tile_n))
                     b_cols.append(
                         _emit_frag_smem_load(
-                            b, B_src, b_col_in_atom, b_k_in_atom,
-                            atom_row, k_tile_base, b_per_lane,
+                            b,
+                            B_src,
+                            b_col_in_atom,
+                            b_k_in_atom,
+                            atom_row,
+                            k_tile_base,
+                            b_per_lane,
                             smem_dtype=_smem_dtype,
                         )
                     )
                 flat = 0
                 for mi in range(mfmas_m):
                     for ni in range(mfmas_n):
-                        new_accs[flat] = b.mma(op, a_rows[mi], b_cols[ni], new_accs[flat])
+                        new_accs[flat] = b.mma(
+                            op, a_rows[mi], b_cols[ni], new_accs[flat]
+                        )
                         flat += 1
             return new_accs
 
@@ -1300,10 +1310,17 @@ def _build_tilde_dgrad(
         # CTA, so a direct buffer_store is safe and avoids the atomic overhead.
         if op.family == "wmma":
             _emit_dgrad_direct_epilogue_wmma(
-                b, spec, op, final_accs,
-                warp_m_idx, warp_n_idx, lane,
-                block_m_off_v, block_n_off_v,
-                dx_rsrc, c0,
+                b,
+                spec,
+                op,
+                final_accs,
+                warp_m_idx,
+                warp_n_idx,
+                lane,
+                block_m_off_v,
+                block_n_off_v,
+                dx_rsrc,
+                c0,
             )
         else:
             _emit_dgrad_direct_epilogue(b, spec, final_accs, grid, dx_rsrc)
@@ -1311,15 +1328,28 @@ def _build_tilde_dgrad(
         # Multiple sub-GEMMs or split_k>1: CTAs write to overlapping dX cells
         # and must use atomic accumulation.
         _emit_dgrad_tilde_atomic_epilogue(
-            b, spec, atom, final_accs,
-            warp_m_idx, warp_n_idx, lane,
-            block_m_off_v, block_n_off_v,
-            dX, c_per_lane,
-            rec_gemm_m, c_dg_N,
-            rec_h_tilde_slice, rec_w_tilde_slice,
-            rec_d_h_stride, rec_d_h_offset,
-            rec_d_w_stride, rec_d_w_offset,
-            c_Hi, c_Wi, c_C,
+            b,
+            spec,
+            atom,
+            final_accs,
+            warp_m_idx,
+            warp_n_idx,
+            lane,
+            block_m_off_v,
+            block_n_off_v,
+            dX,
+            c_per_lane,
+            rec_gemm_m,
+            c_dg_N,
+            rec_h_tilde_slice,
+            rec_w_tilde_slice,
+            rec_d_h_stride,
+            rec_d_h_offset,
+            rec_d_w_stride,
+            rec_d_w_offset,
+            c_Hi,
+            c_Wi,
+            c_C,
         )
 
     return b.kernel
@@ -1392,9 +1422,7 @@ def _emit_dgrad_tilde_atomic_epilogue(
         for ni in range(mfmas_n):
             acc = accs[flat]
             flat += 1
-            atom_n_base = b.add(
-                block_warp_n_off, b.const_i32(ni * spec.warp_tile_n)
-            )
+            atom_n_base = b.add(block_warp_n_off, b.const_i32(ni * spec.warp_tile_n))
 
             for i in range(c_per_lane):
                 c_m = b.add(atom_m_base, rows[i])
@@ -1434,7 +1462,10 @@ def _emit_dgrad_tilde_atomic_epilogue(
                         is_odd = b.cmp_ne(c_n_is_odd, b.const_i32(0))
                         c_n_even = b.sub(c_n, c_n_is_odd)
                         off_even = b.add(
-                            b.mul(b.add(b.mul(b.add(b.mul(n_val, c_Hi), hi), c_Wi), wi), c_C),
+                            b.mul(
+                                b.add(b.mul(b.add(b.mul(n_val, c_Hi), hi), c_Wi), wi),
+                                c_C,
+                            ),
                             c_n_even,
                         )
                         v_even = b.select(is_odd, zero, val_cvt)
@@ -1448,7 +1479,10 @@ def _emit_dgrad_tilde_atomic_epilogue(
                         is_odd = b.cmp_ne(c_n_is_odd, b.const_i32(0))
                         c_n_even = b.sub(c_n, c_n_is_odd)
                         off_even = b.add(
-                            b.mul(b.add(b.mul(b.add(b.mul(n_val, c_Hi), hi), c_Wi), wi), c_C),
+                            b.mul(
+                                b.add(b.mul(b.add(b.mul(n_val, c_Hi), hi), c_Wi), wi),
+                                c_C,
+                            ),
                             c_n_even,
                         )
                         v_even = b.select(is_odd, zero, val_cvt)
@@ -1533,9 +1567,7 @@ def _emit_dgrad_direct_epilogue_wmma(
                 v_f32 = b.vec_extract(acc, i)
                 dx_off_elems, _ = dX_desc.offset(b, m=m_val, c=n_val)
                 dx_off_bytes = b.mul(dx_off_elems, b.const_i32(_elem_bytes))
-                safe_off = b.select(
-                    ok, dx_off_bytes, b.const_i32((1 << 31) - 1)
-                )
+                safe_off = b.select(ok, dx_off_bytes, b.const_i32((1 << 31) - 1))
                 if _fp32_out:
                     b.buffer_store_f32(dx_rsrc, safe_off, c0, v_f32)
                 elif _bf16_out:
@@ -1543,9 +1575,7 @@ def _emit_dgrad_direct_epilogue_wmma(
                         dx_rsrc, safe_off, c0, b.trunc_f32_to_bf16(v_f32)
                     )
                 else:
-                    b.buffer_store_f16(
-                        dx_rsrc, safe_off, c0, b.trunc_f32_to_f16(v_f32)
-                    )
+                    b.buffer_store_f16(dx_rsrc, safe_off, c0, b.trunc_f32_to_f16(v_f32))
 
 
 def _emit_dgrad_cshuffle_epilogue(
@@ -1565,9 +1595,7 @@ def _emit_dgrad_cshuffle_epilogue(
     _cshuffle_kwargs: dict = {"out_dtype": spec.data.dtype_d}
     if spec.vector_size_c is not None:
         _cshuffle_kwargs["max_store_vec"] = spec.vector_size_c
-    CShuffleEpilogue.from_grid(
-        atom=spec.atom, grid=grid, **_cshuffle_kwargs
-    ).store(
+    CShuffleEpilogue.from_grid(atom=spec.atom, grid=grid, **_cshuffle_kwargs).store(
         b,
         accs=accs,
         addr_fn=dx_addr,

@@ -68,16 +68,16 @@ CONV_DGRAD_ABI_VERSION = "hipkg-conv-implicit-gemm-dgrad/v1"
 # The dtype placeholder 'f16' is fine here — only the ptr width (8 bytes) and
 # i32 sizes matter for ABI packing; the actual element type is in the kernel IR.
 _DGRAD_SIGNATURE_FP16 = conv_args_signature("fp16") + [
-    {"name": "sub_gemm_buf",  "type": "ptr<i32, global>", "size_bytes": 8},
-    {"name": "num_sub_gemms", "type": "i32",              "size_bytes": 4},
+    {"name": "sub_gemm_buf", "type": "ptr<i32, global>", "size_bytes": 8},
+    {"name": "num_sub_gemms", "type": "i32", "size_bytes": 4},
 ]
 _DGRAD_SIGNATURE_BF16 = conv_args_signature("bf16") + [
-    {"name": "sub_gemm_buf",  "type": "ptr<i32, global>", "size_bytes": 8},
-    {"name": "num_sub_gemms", "type": "i32",              "size_bytes": 4},
+    {"name": "sub_gemm_buf", "type": "ptr<i32, global>", "size_bytes": 8},
+    {"name": "num_sub_gemms", "type": "i32", "size_bytes": 4},
 ]
 _DGRAD_SIGNATURE_FP32 = conv_args_signature("fp32") + [
-    {"name": "sub_gemm_buf",  "type": "ptr<i32, global>", "size_bytes": 8},
-    {"name": "num_sub_gemms", "type": "i32",              "size_bytes": 4},
+    {"name": "sub_gemm_buf", "type": "ptr<i32, global>", "size_bytes": 8},
+    {"name": "num_sub_gemms", "type": "i32", "size_bytes": 4},
 ]
 
 
@@ -180,7 +180,9 @@ def _arch_family_supported(req: ConvDgradRequest, arch_family: str) -> Tuple[boo
     return True, "ok"
 
 
-def _selector_matches(req: ConvDgradRequest, candidate: KernelCandidate) -> Tuple[bool, str]:
+def _selector_matches(
+    req: ConvDgradRequest, candidate: KernelCandidate
+) -> Tuple[bool, str]:
     algorithm = req.algorithm.strip().lower()
     spec_id = req.spec_id.strip().lower()
     if algorithm not in ("auto", candidate.algorithm):
@@ -200,11 +202,17 @@ def _spec_cdna_mem(req: ConvDgradRequest, name: str) -> DgradConvSpec:
         problem=_problem(req),
         name=name,
         data=ConvDataSpec(dtype_a=dtype, dtype_b=dtype, dtype_d=dtype),
-        tile_m=64, tile_n=64, tile_k=32,
-        warp_m=2, warp_n=2,
-        warp_tile_m=16, warp_tile_n=16, warp_tile_k=16,
+        tile_m=64,
+        tile_n=64,
+        tile_k=32,
+        warp_m=2,
+        warp_n=2,
+        warp_tile_m=16,
+        warp_tile_n=16,
+        warp_tile_k=16,
         wave_size=ArchTarget.from_gfx(req.arch).wave_size,
-        pipeline="mem", epilogue="default",
+        pipeline="mem",
+        epilogue="default",
     )
 
 
@@ -215,11 +223,17 @@ def _spec_cdna_hiperf(req: ConvDgradRequest, name: str) -> DgradConvSpec:
         problem=_problem(req),
         name=name,
         data=ConvDataSpec(dtype_a=dtype, dtype_b=dtype, dtype_d=dtype),
-        tile_m=64, tile_n=64, tile_k=64,
-        warp_m=2, warp_n=2,
-        warp_tile_m=32, warp_tile_n=32, warp_tile_k=8,
+        tile_m=64,
+        tile_n=64,
+        tile_k=64,
+        warp_m=2,
+        warp_n=2,
+        warp_tile_m=32,
+        warp_tile_n=32,
+        warp_tile_k=8,
         wave_size=ArchTarget.from_gfx(req.arch).wave_size,
-        pipeline="mem", epilogue="default",
+        pipeline="mem",
+        epilogue="default",
     )
 
 
@@ -230,11 +244,17 @@ def _spec_cdna_hiperf_gfx950(req: ConvDgradRequest, name: str) -> DgradConvSpec:
         problem=_problem(req),
         name=name,
         data=ConvDataSpec(dtype_a=dtype, dtype_b=dtype, dtype_d=dtype),
-        tile_m=64, tile_n=64, tile_k=64,
-        warp_m=2, warp_n=2,
-        warp_tile_m=32, warp_tile_n=32, warp_tile_k=16,
+        tile_m=64,
+        tile_n=64,
+        tile_k=64,
+        warp_m=2,
+        warp_n=2,
+        warp_tile_m=32,
+        warp_tile_n=32,
+        warp_tile_k=16,
         wave_size=ArchTarget.from_gfx(req.arch).wave_size,
-        pipeline="mem", epilogue="default",
+        pipeline="mem",
+        epilogue="default",
     )
 
 
@@ -245,11 +265,17 @@ def _spec_cdna_fp32(req: ConvDgradRequest, name: str) -> DgradConvSpec:
         problem=_problem(req),
         name=name,
         data=ConvDataSpec(dtype_a=dtype, dtype_b=dtype, dtype_d=dtype),
-        tile_m=64, tile_n=64, tile_k=16,
-        warp_m=2, warp_n=2,
-        warp_tile_m=16, warp_tile_n=16, warp_tile_k=4,
+        tile_m=64,
+        tile_n=64,
+        tile_k=16,
+        warp_m=2,
+        warp_n=2,
+        warp_tile_m=16,
+        warp_tile_n=16,
+        warp_tile_k=4,
         wave_size=ArchTarget.from_gfx(req.arch).wave_size,
-        pipeline="mem", epilogue="default",
+        pipeline="mem",
+        epilogue="default",
     )
 
 
@@ -260,11 +286,17 @@ def _spec_rdna_wmma(req: ConvDgradRequest, name: str) -> DgradConvSpec:
         problem=_problem(req),
         name=name,
         data=ConvDataSpec(dtype_a=dtype, dtype_b=dtype, dtype_d=dtype),
-        tile_m=32, tile_n=32, tile_k=16,
-        warp_m=2, warp_n=2,
-        warp_tile_m=16, warp_tile_n=16, warp_tile_k=16,
+        tile_m=32,
+        tile_n=32,
+        tile_k=16,
+        warp_m=2,
+        warp_n=2,
+        warp_tile_m=16,
+        warp_tile_n=16,
+        warp_tile_k=16,
         wave_size=ArchTarget.from_gfx(req.arch).wave_size,
-        pipeline="mem", epilogue="default",
+        pipeline="mem",
+        epilogue="default",
     )
 
 

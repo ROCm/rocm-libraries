@@ -15,8 +15,16 @@ from rocke.dispatch.families.conv_dgrad import (
 
 def _dgrad(arch, **kw):
     base = dict(
-        N=4, C=64, K=64, Hi=56, Wi=56, Y=3, X=3,
-        pad_h=1, pad_w=1, arch=arch,
+        N=4,
+        C=64,
+        K=64,
+        Hi=56,
+        Wi=56,
+        Y=3,
+        X=3,
+        pad_h=1,
+        pad_w=1,
+        arch=arch,
     )
     base.update(kw)
     return ConvDgradRequest(**base)
@@ -41,12 +49,14 @@ class TestConvDgradDispatch(unittest.TestCase):
     def test_rejects_degenerate_output(self):
         # 5×5 filter on 3×3 input, no pad → Ho ≤ 0.
         with self.assertRaises(ValueError):
-            dispatch_conv_dgrad(_dgrad("gfx950", Hi=3, Wi=3, Y=5, X=5,
-                                       pad_h=0, pad_w=0))
+            dispatch_conv_dgrad(
+                _dgrad("gfx950", Hi=3, Wi=3, Y=5, X=5, pad_h=0, pad_w=0)
+            )
 
     def test_wrong_op_rejected(self):
-        req = ConvDgradRequest(N=4, C=64, K=64, Hi=56, Wi=56, Y=3, X=3,
-                               arch="gfx950", op="conv")
+        req = ConvDgradRequest(
+            N=4, C=64, K=64, Hi=56, Wi=56, Y=3, X=3, arch="gfx950", op="conv"
+        )
         with self.assertRaises(ValueError):
             dispatch_conv_dgrad(req)
 
@@ -80,15 +90,13 @@ class TestConvDgradDispatch(unittest.TestCase):
 
     def test_rdna_gfx1151_selects_wmma(self):
         r = dispatch_conv_dgrad(
-            ConvDgradRequest(N=2, C=32, K=32, Hi=16, Wi=16, Y=1, X=1,
-                             arch="gfx1151")
+            ConvDgradRequest(N=2, C=32, K=32, Hi=16, Wi=16, Y=1, X=1, arch="gfx1151")
         )
         self.assertEqual(r.candidate.spec_id, "rdna_wmma_32x32")
 
     def test_rdna_gfx1201_selects_wmma(self):
         r = dispatch_conv_dgrad(
-            ConvDgradRequest(N=2, C=32, K=32, Hi=16, Wi=16, Y=1, X=1,
-                             arch="gfx1201")
+            ConvDgradRequest(N=2, C=32, K=32, Hi=16, Wi=16, Y=1, X=1, arch="gfx1201")
         )
         self.assertEqual(r.candidate.spec_id, "rdna_wmma_32x32")
 
@@ -101,8 +109,7 @@ class TestConvDgradDispatch(unittest.TestCase):
                 self.assertIn("family", why)
 
     def test_cdna_candidates_unsupported_on_rdna(self):
-        req = ConvDgradRequest(N=2, C=32, K=32, Hi=16, Wi=16, Y=1, X=1,
-                               arch="gfx1151")
+        req = ConvDgradRequest(N=2, C=32, K=32, Hi=16, Wi=16, Y=1, X=1, arch="gfx1151")
         for c in conv_dgrad_candidates():
             if "cdna" in c.name:
                 ok, why = c.supports(req)

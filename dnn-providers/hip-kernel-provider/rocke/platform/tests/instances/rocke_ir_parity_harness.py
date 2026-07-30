@@ -869,7 +869,7 @@ def cases():
     # (multi-sub-GEMM) path; stride=1 exercises the direct-store epilogue.
     #
     # ConvProblem positional args: (N, Hi, Wi, C, K, Y, X, sH, sW, pH, pW, dH, dW)
-    dgrad1 = (1, 8, 8, 16, 32, 3, 3, 1, 1, 1, 1, 1, 1)   # stride=1
+    dgrad1 = (1, 8, 8, 16, 32, 3, 3, 1, 1, 1, 1, 1, 1)  # stride=1
     dgrad2 = (2, 16, 16, 32, 32, 3, 3, 2, 2, 1, 1, 1, 1)  # stride=2, 4 sub-GEMMs
     add(
         "conv_dgrad",
