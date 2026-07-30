@@ -54,6 +54,9 @@ struct STINKYTOFU_EXPORT StinkyInstruction : public IRBase {
     const HwInstDesc* hwInstDesc;
     int issueCycles;
     int latencyCycles;
+    // VALU co-issue window (bit i = VALU may co-issue at cycle i after issue).
+    // Resolved from hwInstDesc, then possibly overridden by matrix data format.
+    uint16_t coIssueWindow;
 
    private:
     // Def-use chain:
@@ -80,7 +83,8 @@ struct STINKYTOFU_EXPORT StinkyInstruction : public IRBase {
         : IRBase(IRType::StinkyTofu),
           hwInstDesc(mcid),
           issueCycles(mcid->issue),
-          latencyCycles(mcid->latency) {}
+          latencyCycles(mcid->latency),
+          coIssueWindow(mcid->coIssueWindow) {}
 
     ~StinkyInstruction() override = default;
 
@@ -150,8 +154,16 @@ struct STINKYTOFU_EXPORT StinkyInstruction : public IRBase {
             hwInstDesc = newDesc;
             issueCycles = newDesc->issue;
             latencyCycles = newDesc->latency;
+            coIssueWindow = newDesc->coIssueWindow;
+            resolveMatrixFmtOverrides();
         }
     }
+
+    // Apply matrix-data-format-keyed hardware overrides (issue/latency cycles
+    // and co-issue window) once the MatrixFmtModifiers is known. These are
+    // hardware properties of the instruction, so they are baked onto the
+    // instruction's own fields and every pass reads the corrected values.
+    void resolveMatrixFmtOverrides();
 
     bool is(InstFlag flag) const {
         return hwInstDesc->has(flag);
@@ -236,9 +248,10 @@ struct STINKYTOFU_EXPORT StinkyInstruction : public IRBase {
         cloned->destRegs = destRegs;
         cloned->srcRegs = srcRegs;
 
-        // Copy issue/latency cycles
+        // Copy issue/latency cycles and co-issue window
         cloned->issueCycles = issueCycles;
         cloned->latencyCycles = latencyCycles;
+        cloned->coIssueWindow = coIssueWindow;
 
         // Deep copy modifiers via virtual clone() (TypedModifier implements it per type).
         for (const auto& mod : modifiers) {
