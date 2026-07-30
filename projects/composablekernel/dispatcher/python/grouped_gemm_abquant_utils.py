@@ -632,6 +632,10 @@ def default_fp8_compv3_config(
     """fp8 ABQuant non-gfx950 config (GemmConfigABQuantPrefill<fp8_t>, TransposeC=False).
 
     Tile: 128x128x128, warp 1x4x1. kPadK=false (ABQuant prefill tiles).
+
+    warp_tile_k=32 selects mfma_f32_16x16x32_fp8_fp8, valid on gfx942 and gfx950.
+    warp_tile_k=16 would select the gfx12-only WMMA instruction which silently returns
+    zeros on gfx9 hardware.
     """
     return ABQuantKernelConfig(
         variant_key="fp8",
@@ -641,7 +645,7 @@ def default_fp8_compv3_config(
         scheduler="intrawave",
         tile_m=128, tile_n=128, tile_k=128,
         warp_m=1, warp_n=4, warp_k=1,
-        warp_tile_m=16, warp_tile_n=16, warp_tile_k=16,
+        warp_tile_m=16, warp_tile_n=16, warp_tile_k=32,
         aquant_group_m=1, aquant_group_n=1, aquant_group_k=quant_group_k,
         bquant_group_m=1, bquant_group_n=bquant_group_n, bquant_group_k=quant_group_k,
         preshuffle_b=False, preshuffle_aq=False, preshuffle_bq=False,
@@ -655,7 +659,12 @@ def default_bf8_compv3_config(
     bquant_group_n: int = 1,
     gfx_arch: str = _DEFAULT_GFX_ARCH,
 ) -> ABQuantKernelConfig:
-    """bf8 ABQuant non-gfx950 config (GemmConfigABQuantPrefill<bf8_t>, TransposeC=False)."""
+    """bf8 ABQuant non-gfx950 config (GemmConfigABQuantPrefill<bf8_t>, TransposeC=False).
+
+    warp_tile_k=32 selects mfma_f32_16x16x32_bf8_bf8, valid on gfx942 and gfx950.
+    warp_tile_k=16 would select the gfx12-only WMMA instruction which silently returns
+    zeros on gfx9 hardware.
+    """
     return ABQuantKernelConfig(
         variant_key="bf8",
         layout="rcr",
@@ -664,7 +673,7 @@ def default_bf8_compv3_config(
         scheduler="intrawave",
         tile_m=128, tile_n=128, tile_k=128,
         warp_m=1, warp_n=4, warp_k=1,
-        warp_tile_m=16, warp_tile_n=16, warp_tile_k=16,
+        warp_tile_m=16, warp_tile_n=16, warp_tile_k=32,
         aquant_group_m=1, aquant_group_n=1, aquant_group_k=quant_group_k,
         bquant_group_m=1, bquant_group_n=bquant_group_n, bquant_group_k=quant_group_k,
         preshuffle_b=False, preshuffle_aq=False, preshuffle_bq=False,
@@ -681,9 +690,12 @@ def default_fp8_eightwaves_config(
     """fp8 ABQuant gfx950 EightWaves config (GemmConfigEightWaves<fp8_t>, TransposeC=True).
 
     Tile: 192x256x128, warp 4x2x1 — 8-wave configuration for MI350X.
-    warp_tile_k=16: get_k_warp_tile<fp8_t, 16, IsFlatMM=false> on gfx950 = 128 for 8-bit floats,
-    but GemmConfigEightWaves inherits GemmConfigABQuantPrefill whose warp_tile_k uses
-    get_k_warp_tile without IsFlatMM — use 16 as concrete value for now.
+    warp_tile_k=32 selects mfma_f32_16x16x32_fp8_fp8, valid on gfx942 and gfx950.
+    GemmConfigEightWaves inherits GemmConfigABQuantPrefill which uses
+    get_k_warp_tile<fp8_t, 16, IsFlatMM=false>: gfx950 returns 128, gfx942 returns 32.
+    We use 32 (= gfx942 value) as the cross-arch safe choice — it is 4 MFMA iterations
+    on gfx942 and also valid on gfx950 (128 % 32 == 0). warp_tile_k=16 would select
+    the gfx12-only WMMA instruction which silently returns zeros on gfx9 hardware.
     """
     return ABQuantKernelConfig(
         variant_key="fp8",
@@ -693,7 +705,7 @@ def default_fp8_eightwaves_config(
         scheduler="intrawave",
         tile_m=192, tile_n=256, tile_k=128,
         warp_m=4, warp_n=2, warp_k=1,
-        warp_tile_m=16, warp_tile_n=16, warp_tile_k=16,
+        warp_tile_m=16, warp_tile_n=16, warp_tile_k=32,
         aquant_group_m=1, aquant_group_n=1, aquant_group_k=quant_group_k,
         bquant_group_m=1, bquant_group_n=bquant_group_n, bquant_group_k=quant_group_k,
         preshuffle_b=False, preshuffle_aq=False, preshuffle_bq=False,
@@ -708,7 +720,11 @@ def default_bf8_eightwaves_config(
     bquant_group_n: int = 128,
     gfx_arch: str = _DEFAULT_GFX_ARCH,
 ) -> ABQuantKernelConfig:
-    """bf8 ABQuant gfx950 EightWaves config (GemmConfigEightWaves<bf8_t>, TransposeC=True)."""
+    """bf8 ABQuant gfx950 EightWaves config (GemmConfigEightWaves<bf8_t>, TransposeC=True).
+
+    warp_tile_k=32 selects mfma_f32_16x16x32_bf8_bf8, valid on gfx942 and gfx950.
+    See default_fp8_eightwaves_config for the full rationale.
+    """
     return ABQuantKernelConfig(
         variant_key="bf8",
         layout="rcr",
@@ -717,7 +733,7 @@ def default_bf8_eightwaves_config(
         scheduler="intrawave",
         tile_m=192, tile_n=256, tile_k=128,
         warp_m=4, warp_n=2, warp_k=1,
-        warp_tile_m=16, warp_tile_n=16, warp_tile_k=16,
+        warp_tile_m=16, warp_tile_n=16, warp_tile_k=32,
         aquant_group_m=1, aquant_group_n=1, aquant_group_k=quant_group_k,
         bquant_group_m=1, bquant_group_n=bquant_group_n, bquant_group_k=quant_group_k,
         preshuffle_b=False, preshuffle_aq=False, preshuffle_bq=False,
@@ -735,6 +751,12 @@ def default_fp8_preshuffleb_config(
     """fp8 ABQuant PreshuffleB config (GemmConfigPreshuffleB_ABQuant_Prefill<fp8_t>).
 
     Tile: 128x128x128, warp 2x2x1 (vs 1x4x1 for compv3). DoubleSmemBuffer=True.
+
+    warp_tile_k=32 selects mfma_f32_16x16x32_fp8_fp8, valid on gfx942 and gfx950.
+    GemmConfigPreshuffleB_ABQuant_Prefill uses get_k_warp_tile<fp8_t, 16, IsFlatMM=true>:
+    gfx950 returns 128, gfx942 returns 64. We use 32 as the cross-arch safe choice
+    (128 % 32 == 0 and 64 % 32 == 0). warp_tile_k=16 would select the gfx12-only WMMA
+    instruction which silently returns zeros on gfx9 hardware.
     """
     return ABQuantKernelConfig(
         variant_key="fp8",
@@ -744,7 +766,7 @@ def default_fp8_preshuffleb_config(
         scheduler="intrawave",
         tile_m=128, tile_n=128, tile_k=128,
         warp_m=2, warp_n=2, warp_k=1,
-        warp_tile_m=16, warp_tile_n=16, warp_tile_k=16,
+        warp_tile_m=16, warp_tile_n=16, warp_tile_k=32,
         aquant_group_m=1, aquant_group_n=1, aquant_group_k=quant_group_k,
         bquant_group_m=1, bquant_group_n=bquant_group_n, bquant_group_k=quant_group_k,
         preshuffle_b=True, preshuffle_aq=False, preshuffle_bq=False,
@@ -760,7 +782,11 @@ def default_bf8_preshuffleb_config(
     bquant_group_n: int = 1,
     gfx_arch: str = _DEFAULT_GFX_ARCH,
 ) -> ABQuantKernelConfig:
-    """bf8 ABQuant PreshuffleB config (GemmConfigPreshuffleB_ABQuant_Prefill<bf8_t>)."""
+    """bf8 ABQuant PreshuffleB config (GemmConfigPreshuffleB_ABQuant_Prefill<bf8_t>).
+
+    warp_tile_k=32 selects mfma_f32_16x16x32_bf8_bf8, valid on gfx942 and gfx950.
+    See default_fp8_preshuffleb_config for the full rationale.
+    """
     return ABQuantKernelConfig(
         variant_key="bf8",
         layout="rcr",
@@ -769,7 +795,7 @@ def default_bf8_preshuffleb_config(
         scheduler="intrawave",
         tile_m=128, tile_n=128, tile_k=128,
         warp_m=2, warp_n=2, warp_k=1,
-        warp_tile_m=16, warp_tile_n=16, warp_tile_k=16,
+        warp_tile_m=16, warp_tile_n=16, warp_tile_k=32,
         aquant_group_m=1, aquant_group_n=1, aquant_group_k=quant_group_k,
         bquant_group_m=1, bquant_group_n=bquant_group_n, bquant_group_k=quant_group_k,
         preshuffle_b=True, preshuffle_aq=False, preshuffle_bq=False,
