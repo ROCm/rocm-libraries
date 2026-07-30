@@ -65,8 +65,6 @@ namespace rocsparse
 
         if(alpha != static_cast<T>(0))
         {
-            // Grid-stride loop over the batch dimension (grid z). This allows the
-            // batch count to exceed the maximum grid z dimension of 65536.
             for(int64_t batch = hipBlockIdx_z; batch < batch_count; batch += hipGridDim_z)
             {
                 rocsparse::coommnn_segmented_main_device<BLOCKSIZE, WF_SIZE, LOOPS, TRANSB>(
@@ -136,8 +134,6 @@ namespace rocsparse
 
         if(alpha != static_cast<T>(0))
         {
-            // Grid-stride loop over the batch dimension (grid z). This allows the
-            // batch count to exceed the maximum grid z dimension of 65536.
             for(int64_t batch = hipBlockIdx_z; batch < batch_count; batch += hipGridDim_z)
             {
                 rocsparse::coommnn_segmented_remainder_device<BLOCKSIZE, WF_SIZE, LOOPS, TRANSB>(

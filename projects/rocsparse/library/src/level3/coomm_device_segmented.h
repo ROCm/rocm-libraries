@@ -500,8 +500,6 @@ namespace rocsparse
 
         const I col = hipBlockIdx_x;
 
-        // Grid-stride loop over the batch dimension (grid z). This allows the
-        // batch count to exceed the maximum grid z dimension of 65536.
         for(int64_t batch = hipBlockIdx_z; batch < batch_count; batch += hipGridDim_z)
         {
             for(I i = 0; i < nblocks; i += BLOCKSIZE)
