@@ -288358,7 +288358,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 16
     GlobalReadVectorWidthB: 16
     GlobalSplitU: 0
@@ -288692,7 +288692,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 16
     GlobalReadVectorWidthB: 16
     GlobalSplitU: 0
@@ -289026,7 +289026,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 16
     GlobalReadVectorWidthB: 16
     GlobalSplitU: 0
@@ -289360,7 +289360,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 16
     GlobalSplitU: 0
@@ -289694,7 +289694,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 16
     GlobalReadVectorWidthB: 16
     GlobalSplitU: 0
@@ -290028,7 +290028,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 16
     GlobalReadVectorWidthB: 16
     GlobalSplitU: 0
@@ -290362,7 +290362,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 16
     GlobalReadVectorWidthB: 16
     GlobalSplitU: 0
@@ -290696,7 +290696,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -291030,7 +291030,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 16
     GlobalReadVectorWidthB: 16
     GlobalSplitU: 0
@@ -291364,7 +291364,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 16
     GlobalReadVectorWidthB: 16
     GlobalSplitU: 0
@@ -291698,7 +291698,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 16
     GlobalReadVectorWidthB: 16
     GlobalSplitU: 0
@@ -292032,7 +292032,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 16
     GlobalReadVectorWidthB: 16
     GlobalSplitU: 0
@@ -292366,7 +292366,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 16
     GlobalReadVectorWidthB: 16
     GlobalSplitU: 0
@@ -292700,7 +292700,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 16
     GlobalReadVectorWidthB: 16
     GlobalSplitU: 0
@@ -293034,7 +293034,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 16
     GlobalReadVectorWidthB: 16
     GlobalSplitU: 0
@@ -293368,7 +293368,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 16
     GlobalReadVectorWidthB: 16
     GlobalSplitU: 0
@@ -293702,7 +293702,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 16
     GlobalReadVectorWidthB: 16
     GlobalSplitU: 0
@@ -294036,7 +294036,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 16
     GlobalReadVectorWidthB: 16
     GlobalSplitU: 0
@@ -294370,7 +294370,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 16
     GlobalReadVectorWidthB: 16
     GlobalSplitU: 0
@@ -294704,7 +294704,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 16
     GlobalReadVectorWidthB: 16
     GlobalSplitU: 0
@@ -295038,7 +295038,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 16
     GlobalReadVectorWidthB: 16
     GlobalSplitU: 0
@@ -295372,7 +295372,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 16
     GlobalReadVectorWidthB: 16
     GlobalSplitU: 0
@@ -295706,7 +295706,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 16
     GlobalReadVectorWidthB: 16
     GlobalSplitU: 0
@@ -296040,7 +296040,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 16
     GlobalReadVectorWidthB: 16
     GlobalSplitU: 0
@@ -296374,7 +296374,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 16
     GlobalReadVectorWidthB: 16
     GlobalSplitU: 0
@@ -296708,7 +296708,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 16
     GlobalReadVectorWidthB: 16
     GlobalSplitU: 0
@@ -297042,7 +297042,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 16
     GlobalReadVectorWidthB: 16
     GlobalSplitU: 0
@@ -297376,7 +297376,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 16
     GlobalReadVectorWidthB: 16
     GlobalSplitU: 0
@@ -297710,7 +297710,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 16
     GlobalReadVectorWidthB: 16
     GlobalSplitU: 0
@@ -298044,7 +298044,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 16
     GlobalReadVectorWidthB: 16
     GlobalSplitU: 0
@@ -298378,7 +298378,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 16
     GlobalSplitU: 0
@@ -298712,7 +298712,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 16
     GlobalSplitU: 0
@@ -299046,7 +299046,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 16
     GlobalReadVectorWidthB: 16
     GlobalSplitU: 0
@@ -299380,7 +299380,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 16
     GlobalReadVectorWidthB: 16
     GlobalSplitU: 0
@@ -299714,7 +299714,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 16
     GlobalReadVectorWidthB: 16
     GlobalSplitU: 0
@@ -300048,7 +300048,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 16
     GlobalReadVectorWidthB: 16
     GlobalSplitU: 0
@@ -300382,7 +300382,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 16
     GlobalReadVectorWidthB: 16
     GlobalSplitU: 0
@@ -300716,7 +300716,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 16
     GlobalReadVectorWidthB: 16
     GlobalSplitU: 0
@@ -301050,7 +301050,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 16
     GlobalReadVectorWidthB: 16
     GlobalSplitU: 0
@@ -301384,7 +301384,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 16
     GlobalReadVectorWidthB: 16
     GlobalSplitU: 0
@@ -301718,7 +301718,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 16
     GlobalReadVectorWidthB: 16
     GlobalSplitU: 0
@@ -302052,7 +302052,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 16
     GlobalReadVectorWidthB: 16
     GlobalSplitU: 0
@@ -302386,7 +302386,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 16
     GlobalReadVectorWidthB: 16
     GlobalSplitU: 0
@@ -302720,7 +302720,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 16
     GlobalReadVectorWidthB: 16
     GlobalSplitU: 0
@@ -303054,7 +303054,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 16
     GlobalReadVectorWidthB: 16
     GlobalSplitU: 0
@@ -303388,7 +303388,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 16
     GlobalReadVectorWidthB: 16
     GlobalSplitU: 0
@@ -303722,7 +303722,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 16
     GlobalReadVectorWidthB: 16
     GlobalSplitU: 0
@@ -304056,7 +304056,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 16
     GlobalReadVectorWidthB: 16
     GlobalSplitU: 0
@@ -304390,7 +304390,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 16
     GlobalReadVectorWidthB: 16
     GlobalSplitU: 0
@@ -304724,7 +304724,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 16
     GlobalReadVectorWidthB: 16
     GlobalSplitU: 0
@@ -305058,7 +305058,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 16
     GlobalReadVectorWidthB: 16
     GlobalSplitU: 0
@@ -305392,7 +305392,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 16
     GlobalReadVectorWidthB: 16
     GlobalSplitU: 0
@@ -305726,7 +305726,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 16
     GlobalReadVectorWidthB: 16
     GlobalSplitU: 0
@@ -306060,7 +306060,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 16
     GlobalReadVectorWidthB: 16
     GlobalSplitU: 0
@@ -306394,7 +306394,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 16
     GlobalReadVectorWidthB: 16
     GlobalSplitU: 0
@@ -306728,7 +306728,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 16
     GlobalReadVectorWidthB: 16
     GlobalSplitU: 0
@@ -307062,7 +307062,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 16
     GlobalReadVectorWidthB: 16
     GlobalSplitU: 0
@@ -307396,7 +307396,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 16
     GlobalReadVectorWidthB: 16
     GlobalSplitU: 0
@@ -307730,7 +307730,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 16
     GlobalReadVectorWidthB: 16
     GlobalSplitU: 0
@@ -308064,7 +308064,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 16
     GlobalReadVectorWidthB: 16
     GlobalSplitU: 0
@@ -308398,7 +308398,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 16
     GlobalReadVectorWidthB: 16
     GlobalSplitU: 0
@@ -308732,7 +308732,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 16
     GlobalReadVectorWidthB: 16
     GlobalSplitU: 0
@@ -309066,7 +309066,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 16
     GlobalReadVectorWidthB: 16
     GlobalSplitU: 0
@@ -309400,7 +309400,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 16
     GlobalReadVectorWidthB: 16
     GlobalSplitU: 0
@@ -309574,7 +309574,7 @@
     SpaceFillingAlgo: []
     StaggerU: 8
     StaggerUMapping: 0
-    StaggerUStride: 512.0
+    StaggerUStride: 512
     StorePriorityOpt: false
     StoreRemapVectorWidth: 0
     StoreSwapAddr: false
@@ -309734,7 +309734,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 16
     GlobalReadVectorWidthB: 16
     GlobalSplitU: 0
@@ -310068,7 +310068,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 16
     GlobalReadVectorWidthB: 16
     GlobalSplitU: 0
@@ -310402,7 +310402,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 16
     GlobalReadVectorWidthB: 16
     GlobalSplitU: 0
@@ -310736,7 +310736,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 16
     GlobalReadVectorWidthB: 16
     GlobalSplitU: 0
@@ -311070,7 +311070,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 16
     GlobalReadVectorWidthB: 16
     GlobalSplitU: 0
@@ -311404,7 +311404,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 16
     GlobalReadVectorWidthB: 16
     GlobalSplitU: 0
@@ -311738,7 +311738,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 16
     GlobalReadVectorWidthB: 16
     GlobalSplitU: 0
