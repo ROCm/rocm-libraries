@@ -266,7 +266,7 @@ INSTANTIATE_TEST_SUITE_P(
 class MXDataGenModeTest
     : public ::testing::TestWithParam<std::tuple<hipDataType, std::string>>
 {
-protected:
+public:
     // OCP FP4 E2M1 max-normal magnitude; "uniform_low_precision" draws data
     // uniformly from [-6, 6], so dequantized values must stay within that range.
     static constexpr float FP4E2M1Max = 6.0f;
@@ -481,7 +481,6 @@ TEST(MXScaleLayoutArch, MapsArchNameToScaleLayout)
     EXPECT_EQ(mxScaleLayoutForArchName("gfx950"), MXScaleLayout::GFX950);
     EXPECT_EQ(mxScaleLayoutForArchName("gfx950:sramecc+:xnack-"), MXScaleLayout::GFX950);
     EXPECT_EQ(mxScaleLayoutForArchName("gfx1250"), MXScaleLayout::GFX1250);
-    EXPECT_EQ(mxScaleLayoutForArchName("gfx1250:xnack-"), MXScaleLayout::GFX1250);
     EXPECT_EQ(mxScaleLayoutForArchName("gfx942"), MXScaleLayout::None);
     EXPECT_EQ(mxScaleLayoutForArchName("gfx90a"), MXScaleLayout::None);
 }

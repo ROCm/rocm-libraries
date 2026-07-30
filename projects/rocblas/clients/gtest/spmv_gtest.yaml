@@ -298,4 +298,23 @@ Tests:
   iters: 5
   devices: 4
   repeatability_check: true
+
+# per-batch alpha/beta (rocblas_set_batch_alpha_stride / rocblas_set_batch_beta_stride)
+# coverage, device pointer mode only
+- name: spmv_stride_alpha_beta
+  category: pre_checkin
+  function:
+    - spmv_batched
+    - spmv_strided_batched
+  precision: *single_double_precisions
+  uplo: [ U, L ]
+  matrix_size: *medium_matrix_size_range
+  incx_incy: *incx_incy_range
+  alpha_beta: *alpha_beta_range_small
+  stride_scale: [ 1 ]
+  batch_count: [ 3 ]
+  alpha_beta_stride: true
+  stride_c: 2 # alpha stride
+  stride_d: 2 # beta stride
+  pointer_mode_host: false
 ...

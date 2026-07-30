@@ -32,11 +32,7 @@ namespace rocalution
 
     /** \ingroup solver_module
   * \class BiCGStab
-  * \brief Bi-Conjugate Gradient Stabilized Method
-  * \details
-  * The Bi-Conjugate Gradient Stabilized method is a variation of CGS and solves sparse
-  * (non) symmetric linear systems \f$Ax=b\f$.
-  * \cite SAAD
+  * \brief Bi-Conjugate Gradient Stabilized method.
   *
   * \tparam OperatorType - can be LocalMatrix, GlobalMatrix or LocalStencil
   * \tparam VectorType - can be LocalVector or GlobalVector

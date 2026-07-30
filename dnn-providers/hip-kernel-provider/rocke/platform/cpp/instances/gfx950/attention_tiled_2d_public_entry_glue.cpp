@@ -492,18 +492,28 @@ static bool rocke_g950_build_ctx_init_local(rocke_gfx950_attn2d_build_ctx_t* ctx
             ROCKE_ERR_NOTIMPL,
             "use_q_direct_reg: gfx950 C twin does not yet port the direct-register Q gather");
     }
-    if(spec->use_softmax_mfma_interleave)
+    if(spec->use_softmax_mfma_interleave && spec->softmax_interleave_mode == 2)
     {
-        /* the softmax-window MFMA interleave (iglp_opt / sched_group_barrier
-         * at the loop top) rides on the use_q_direct_reg BLOCK_M=128 body, which
-         * the gfx950 C twin does not yet emit. Carried in the spec for
-         * byte-identity with the Python dataclass; reject (do not silently
-         * ignore), matching the Python __post_init__ contract. */
-        rocke_g950_fail(
-            b,
-            ROCKE_ERR_NOTIMPL,
-            "use_softmax_mfma_interleave: gfx950 C twin does not yet port the "
-            "softmax-window MFMA interleave (its host body use_q_direct_reg is unported)");
+        /* Modes 0/1 (iglp_opt at the loop top) ARE ported below -- a single
+         * iglp_opt call after the iter-start K drain (mirrors Python 3093-3094).
+         * Mode 2 (alternating sched_group_barrier grouping at the QK->softmax
+         * boundary) is a distinct emission the gfx950 C twin does not yet port;
+         * reject it (do not silently ignore) to match the Python contract. */
+        rocke_g950_fail(b,
+                        ROCKE_ERR_NOTIMPL,
+                        "use_softmax_mfma_interleave mode 2 (sched_group_barrier grouping): "
+                        "gfx950 C twin ports iglp_opt modes 0/1 only");
+    }
+    if(spec->use_softmax_mfma_interleave && spec->use_sched_barrier)
+    {
+        /* Mirror the Python __post_init__ ValueError: the two levers steer the
+         * post-RA scheduler in opposite directions, so enabling both is a
+         * contract violation. Guard here before the ctx copy so C emission
+         * cannot diverge from the Python contract. */
+        rocke_g950_fail(b,
+                        ROCKE_ERR_VALUE,
+                        "use_softmax_mfma_interleave and use_sched_barrier are mutually "
+                        "exclusive (they steer the post-RA scheduler in opposite directions)");
     }
     /* K single-buffer IS ported in the gfx950 C twin (it shares the
      * depth-2 V-single `else` schedule). Mirror Python __post_init__ guards so
@@ -581,6 +591,8 @@ static bool rocke_g950_build_ctx_init_local(rocke_gfx950_attn2d_build_ctx_t* ctx
     ctx->K_SINGLE_BUFFER = spec->use_k_single_buffer; /* K single-buffer */
     ctx->USE_SCHED_BARRIER = spec->use_sched_barrier;
     ctx->SCHED_BARRIER_MASK = spec->sched_barrier_mask;
+    ctx->USE_SOFTMAX_INTERLEAVE = spec->use_softmax_mfma_interleave;
+    ctx->SOFTMAX_INTERLEAVE_MODE = spec->softmax_interleave_mode;
 
     /* ---- fp8 K/V cache predicates (Py783-797) ---- */
     const bool KV_FP8 = rocke_g950_streq(spec->kv_storage_dtype, "fp8e4m3");
@@ -1008,7 +1020,7 @@ static rocke_status_t rocke_g950_attn2d_kernel_name(const rocke_attention_tiled_
                                                     size_t out_cap)
 {
     char d_buf[32], b_buf[32], t_buf[32], hkv_buf[64], kv_buf[64];
-    char sw_buf[32], w_buf[32], mw_buf[32], schedb_buf[32];
+    char sw_buf[32], w_buf[32], mw_buf[32], schedb_buf[32], smxil_buf[32];
     int nqh, nkv;
 
     if(s == NULL || out == NULL)
@@ -1044,6 +1056,20 @@ static rocke_status_t rocke_g950_attn2d_kernel_name(const rocke_attention_tiled_
         snprintf(schedb_buf, sizeof(schedb_buf), "schedb%d", s->sched_barrier_mask);
     else
         schedb_buf[0] = '\0';
+    /* smxil<mode>[g<groups> for mode 2] -- mirrors Python kernel_name(). */
+    if(s->use_softmax_mfma_interleave)
+    {
+        if(s->softmax_interleave_mode == 2)
+            snprintf(smxil_buf,
+                     sizeof(smxil_buf),
+                     "smxil%dg%d",
+                     s->softmax_interleave_mode,
+                     s->softmax_interleave_groups);
+        else
+            snprintf(smxil_buf, sizeof(smxil_buf), "smxil%d", s->softmax_interleave_mode);
+    }
+    else
+        smxil_buf[0] = '\0';
 
     {
         const char* parts[] = {
@@ -1075,6 +1101,7 @@ static rocke_status_t rocke_g950_attn2d_kernel_name(const rocke_attention_tiled_
             s->use_k_single_buffer ? "ksb" : "", /* K single-buffer */
             s->use_staggered_iter_wait ? "stgw" : "",
             schedb_buf,
+            smxil_buf,
             s->use_q_reread ? "qrr" : "",
             s->use_q_direct_reg ? "qdreg" : "", /* Q direct-reg */
             s->use_agpr_alloc_zero ? "agpr0" : "",
