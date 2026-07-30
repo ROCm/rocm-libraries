@@ -3,6 +3,11 @@
 Documentation for rocSPARSE is available at
 [https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/](https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/).
 
+## (Unreleased) rocSPARSE 5.1.0
+
+### Resolved issues
+* Fixed `rocsparse_spmm` with the segmented atomic COO algorithm, which failed with `hipErrorInvalidConfiguration` for batch counts exceeding 65535 because the batch dimension of the kernel launch grid exceeded the maximum grid dimension.
+
 ## (Unreleased) rocSPARSE 5.0.0
 
 ### Added
