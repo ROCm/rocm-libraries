@@ -30,6 +30,7 @@ Usage:
 
 import argparse
 import logging
+import math
 import sys
 import tempfile
 from pathlib import Path
@@ -59,13 +60,17 @@ log = logging.getLogger(__name__)
 
 
 def _float32_to_fp8(arr: np.ndarray, dtype: str) -> np.ndarray:
+    """Encode float32 values as fp8 bytes (uint8 view of the fp8 bit pattern).
+
+    dtype: "fp8" -> float8_e4m3fn, "bf8" -> float8_e5m2.
+    Falls back to software conversion when ml_dtypes is not installed.
+    """
     try:
         import ml_dtypes
         ml_t = ml_dtypes.float8_e4m3fn if dtype == "fp8" else ml_dtypes.float8_e5m2
         return arr.astype(ml_t).view(np.uint8)
     except ImportError:
-        clamped = np.clip(arr, -2.0, 2.0)
-        return (clamped * 64).astype(np.int8).view(np.uint8)
+        return _soft_f32_to_fp8(arr, dtype)
 
 
 def _fp8_to_float32(arr: np.ndarray, dtype: str) -> np.ndarray:
@@ -74,7 +79,73 @@ def _fp8_to_float32(arr: np.ndarray, dtype: str) -> np.ndarray:
         ml_t = ml_dtypes.float8_e4m3fn if dtype == "fp8" else ml_dtypes.float8_e5m2
         return arr.view(ml_t).astype(np.float32)
     except ImportError:
-        return arr.view(np.int8).astype(np.float32) / 64.0
+        return _soft_fp8_to_f32(arr, dtype)
+
+
+def _soft_f32_to_fp8(arr: np.ndarray, dtype: str) -> np.ndarray:
+    """Software float32 → fp8 conversion (no ml_dtypes dependency)."""
+    flat = arr.astype(np.float32).ravel()
+    if dtype == "fp8":
+        ebits, mbits, max_val = 4, 3, 448.0  # e4m3fn: bias=7, no inf, NaN=0x7F
+    else:
+        ebits, mbits, max_val = 5, 2, 57344.0  # e5m2: bias=15
+    bias = (1 << (ebits - 1)) - 1
+    out = np.zeros(flat.shape, dtype=np.uint8)
+    for i, v in enumerate(flat):
+        sign = 0
+        if v < 0:
+            sign = 1
+            v = -v
+        v = min(v, max_val)
+        if v == 0:
+            out[i] = sign << 7
+            continue
+        exp = int(math.floor(math.log2(v))) if v > 0 else 0
+        biased_exp = exp + bias
+        if biased_exp <= 0:
+            # subnormal
+            frac = v / (2.0 ** (1 - bias))
+            mant = int(round(frac * (1 << mbits)))
+            mant = min(mant, (1 << mbits) - 1)
+            out[i] = (sign << 7) | mant
+        else:
+            max_exp = (1 << ebits) - 2 if dtype == "fp8" else (1 << ebits) - 1
+            biased_exp = min(biased_exp, max_exp)
+            frac = v / (2.0 ** (biased_exp - bias)) - 1.0
+            mant = int(round(frac * (1 << mbits)))
+            if mant >= (1 << mbits):
+                mant = 0
+                biased_exp += 1
+                biased_exp = min(biased_exp, max_exp)
+            out[i] = (sign << 7) | (biased_exp << mbits) | mant
+    return out.reshape(arr.shape)
+
+
+def _soft_fp8_to_f32(arr: np.ndarray, dtype: str) -> np.ndarray:
+    """Software fp8 → float32 conversion (no ml_dtypes dependency)."""
+    flat = arr.ravel().astype(np.uint8)
+    if dtype == "fp8":
+        ebits, mbits = 4, 3  # e4m3fn: bias=7
+    else:
+        ebits, mbits = 5, 2  # e5m2: bias=15
+    bias = (1 << (ebits - 1)) - 1
+    max_exp_bits = (1 << ebits) - 1
+    out = np.zeros(flat.shape, dtype=np.float32)
+    for i, byte in enumerate(flat):
+        sign = (byte >> 7) & 1
+        exp_bits = (byte >> mbits) & ((1 << ebits) - 1)
+        mant_bits = byte & ((1 << mbits) - 1)
+        if dtype == "fp8" and exp_bits == max_exp_bits and mant_bits == (1 << mbits) - 1:
+            out[i] = float('nan')
+        elif dtype == "bf8" and exp_bits == max_exp_bits:
+            out[i] = float('nan') if mant_bits != 0 else float('inf') * (-1 if sign else 1)
+        elif exp_bits == 0:
+            val = (mant_bits / (1 << mbits)) * (2.0 ** (1 - bias))
+            out[i] = -val if sign else val
+        else:
+            val = (1.0 + mant_bits / (1 << mbits)) * (2.0 ** (exp_bits - bias))
+            out[i] = -val if sign else val
+    return out.reshape(arr.shape)
 
 
 # =============================================================================
@@ -247,6 +318,11 @@ def main():
             log.info("PASSED (max_rel=%.4f, tol=%.4f)", max_rel, tolerance)
         else:
             log.error("FAILED (max_rel=%.4f > tol=%.4f)", max_rel, tolerance)
+            C_gpu_f32 = result.C.astype(np.float32)
+            C_ref_f32 = C_ref.astype(np.float32)
+            log.error("C_gpu[:2,:4] = %s", C_gpu_f32[:2, :4])
+            log.error("C_ref[:2,:4] = %s", C_ref_f32[:2, :4])
+            log.error("C_gpu nonzero count: %d / %d", int(np.count_nonzero(C_gpu_f32)), C_gpu_f32.size)
             return 1
     else:
         log.info("Verification skipped (--no-verify)")
