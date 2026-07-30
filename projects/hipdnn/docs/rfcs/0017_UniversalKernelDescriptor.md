@@ -1166,12 +1166,12 @@ it is. The catalog is per-engine, so a key without it would let one engine's cat
 in the same provider. The handle is absent from the key because the caller may swap it between calls.
 
 **The graph id is a small addition to hipDNN, and this RFC owns it.** A graph does not carry an
-identity today, so one is added: an id minted when a graph descriptor is finalized and invalidated
-when its operations are mutated. This mirrors existing `GraphDescriptor` machinery, where the
-serialized-graph buffer builds at finalize and clears on mutation, and follows the precedent of
-the cached runtime-pass-by-value flag, which turns a later query into a read instead of a rescan of
-every tensor. The id is an additive schema field, so an older reader sees its default and is
-unaffected.
+identity today, so one is added: an id minted when a graph descriptor is finalized. A finalized
+graph is immutable, so the id is stable for the graph's lifetime. This mirrors existing
+`GraphDescriptor` machinery, where the serialized-graph buffer builds at finalize, and follows the
+precedent of the cached runtime-pass-by-value flag, which turns a later query into a read instead of
+a rescan of every tensor. The id is an additive schema field, so an older reader sees its default
+and is unaffected.
 
 Hashing the serialized bytes was the rejected alternative: it hashes the whole graph on a call that
 arrives once per engine per graph, obliges the provider to retain a copy of those bytes to confirm a
@@ -2762,8 +2762,8 @@ choices; none is a dependency.
 - **Bound token state:** the field values the match sequence binds for one graph (`$kernel`, `$graph`,
   `$device`, node attributes, tensor fields), cached alongside the catalog so matching, ranking, and
   dispatch all read them without recomputing ([Section 8](#8-end-to-end-flow)).
-- **Graph id:** the identity of one graph, minted when its descriptor is finalized and invalidated
-  when its operations are mutated. It is what lets a provider cache per-graph work without
+- **Graph id:** the identity of one graph, minted when its descriptor is finalized and stable for the
+  graph's lifetime. It is what lets a provider cache per-graph work without
   reconstructing an identity of its own, and it keys the applicability cache alongside the engine and
   device ([Section 8](#8-end-to-end-flow)).
 - **Inventory generation:** a counter the provider advances whenever a discovery scan changes the set
