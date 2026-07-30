@@ -102,7 +102,7 @@ inline static const bool __initialised{hipInit(0) == hipSuccess};
             if (rlimit l{}; getrlimit(RLIMIT_STACK, &l)) {
                 throw ::std::runtime_error("Failed to query stack limits.");
             }
-            else if (l.rlim_cur == UINT64_MAX) { // Unlimited stack, cap it.
+            else if (l.rlim_cur == RLIM_INFINITY) { // Unlimited stack, cap it.
                 n_ = PTHREAD_STACK_MIN;
             }
             if (touch_stack_() &&
