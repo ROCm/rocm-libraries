@@ -334,6 +334,19 @@ message(STATUS "Hip compiler flags: ${HIP_COMPILER_FLAGS}")
 
 add_compile_definitions($<$<COMPILE_LANGUAGE:CXX>:HIP_COMPILER_FLAGS=${HIP_COMPILER_FLAGS}>)
 
+# Host-only ASAN: keep host -fsanitize=address but disable device-side instrumentation.
+# HIP sources would otherwise apply ASAN to the device pass, which is unsupported on non-xnack
+# targets and, with -Werror, fails the build. Full ASAN uses xnack+ targets, so this is skipped.
+if(THEROCK_SANITIZER STREQUAL "HOST_ASAN")
+    check_cxx_compiler_flag("-fno-gpu-sanitize" MIOPEN_HIP_COMPILER_HAS_OPTION_NO_GPU_SANITIZE)
+    if(MIOPEN_HIP_COMPILER_HAS_OPTION_NO_GPU_SANITIZE)
+        add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-fno-gpu-sanitize>)
+    else()
+        message(WARNING "THEROCK_SANITIZER=HOST_ASAN is set but the compiler does not accept "
+                        "-fno-gpu-sanitize; device-side ASAN may fail on non-xnack targets.")
+    endif()
+endif()
+
 # HIP
 if( MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIPNOGPU")
     if(MIOPEN_USE_COMPOSABLEKERNEL)
