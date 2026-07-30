@@ -129,15 +129,15 @@ set(INTEGRATION_TESTS_EXE hipdnn_integration_tests)
 add_executable(${INTEGRATION_TESTS_EXE}
     src/main.cpp
     src/harness/bundle/IntegrationBundleVerificationHarness.cpp
-    src/harness/input_init/SynthesizeInputs.cpp
+    src/harness/input-init/SynthesizeInputs.cpp
 )
 
-add_subdirectory(src/integration_tests)
+add_subdirectory(src/integration-tests)
 
 target_include_directories(${INTEGRATION_TESTS_EXE} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_include_directories(${INTEGRATION_TESTS_EXE} SYSTEM PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/third_party/argparse
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/third_party/tomlplusplus
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/third-party/argparse
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/third-party/tomlplusplus
 )
 
 target_link_libraries(${INTEGRATION_TESTS_EXE}
@@ -155,7 +155,13 @@ target_compile_options(${INTEGRATION_TESTS_EXE} PRIVATE ${INTEGRATION_TESTS_WARN
 
 clang_tidy_check(${INTEGRATION_TESTS_EXE})
 
-add_subdirectory(gpu_ref)
+# NOTE: hipdnn_integration_tests is intentionally NOT registered as a tiered
+# ctest target here. The bundle sweep tests it carries exercise the plugin, so
+# they are driven by each provider's add_external_integration_test_target()
+# (see dnn-providers/miopen-provider) which runs this binary against a specific
+# engine and selects tests via that provider's test_categories_integration.yaml.
+
+add_subdirectory(gpu-ref)
 add_subdirectory(tests)
 
 # Finalize test targets with prefix to avoid collisions in superbuild mode
@@ -163,9 +169,20 @@ add_subdirectory(tests)
 # using add_*_test_target()
 finalize_test_targets("${PROJECT_NAME}")
 
+# Optional YAML-driven CTest categorization. Guarded so standalone / sparse
+# checkouts without shared/ctest still build (falls back to unlabeled install).
+set(_HIPDNN_IT_TEST_CATEGORIES_YAML "")
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml"
+   AND EXISTS "${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
+    include("${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
+    set(_HIPDNN_IT_TEST_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml")
+endif()
+
 # For standalone builds we need to install the ctest files
 if(NOT ROCM_LIBS_SUPERBUILD)
-    install_provider_ctest_files("hipdnn_integration_tests_ctest")
+    install_provider_ctest_files("hipdnn_integration_tests_ctest"
+        TEST_CATEGORIES_YAML "${_HIPDNN_IT_TEST_CATEGORIES_YAML}"
+    )
 endif()
 
 include(CMakePackageConfigHelpers)

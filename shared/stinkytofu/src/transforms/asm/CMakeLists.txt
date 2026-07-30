@@ -4,7 +4,11 @@
 target_sources(stinkytofu_objs PRIVATE
     InstructionSizeCosting.cpp
     AccumulateInstructionSizePass.cpp
-    SwPrefetchInsertionPass.cpp
+    SwPrefetchRelCommon.cpp
+    SwInstructionPrefetchRelStaticPass.cpp
+    SwInstructionPrefetchRelDynamicPass.cpp
+    SwInstructionPrefetchAbsStaticPass.cpp
+    SwInstructionPrefetchAbsDynamicPass.cpp
     PhiPlacement.cpp
     BuildDefUseChain.cpp
     CFGBuilderPass.cpp
@@ -13,6 +17,7 @@ target_sources(stinkytofu_objs PRIVATE
     DeadCodeEliminationPass.cpp
     RedundantMovEliminationPass.cpp
     LegalizationUtils.cpp
+    ExecMaskGrouping.cpp
     StinkyDAGSchedulerPass.cpp
     SetMatrixReusePass.cpp
     StinkyWaitCntInsertionPass.cpp
@@ -24,6 +29,7 @@ target_sources(stinkytofu_objs PRIVATE
     RegionClonePass.cpp
     MemTokenConsistencyCheckPass.cpp
     InsertVgprMsbPass.cpp
+    InsertInitialUnclausedVmemPass.cpp
     InsertClusterBarrierPass.cpp
     RaiseVgprMsbPass.cpp
     RemoveDelayAluPass.cpp

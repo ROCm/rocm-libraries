@@ -64,6 +64,7 @@ def gemm_spec(
     pipeline,
     epilogue,
     wave_size,
+    cshuffle_no_alias=False,
 ):
     from rocke.instances.common.gemm_universal import (
         DataSpec,
@@ -92,17 +93,18 @@ def gemm_spec(
             pad_m=True,
             pad_n=True,
             pad_k=True,
+            cshuffle_no_alias=cshuffle_no_alias,
         ),
         data=DataSpec(dtype_a="fp16", dtype_b="fp16", dtype_c="fp16"),
         wave_size=wave_size,
     )
 
 
-def build_gemm(name, arch, *args):
+def build_gemm(name, arch, *args, **kwargs):
     def _build():
         from rocke.instances.common.gemm_universal import build_universal_gemm
 
-        return build_universal_gemm(gemm_spec(name, arch, *args), arch=arch)
+        return build_universal_gemm(gemm_spec(name, arch, *args, **kwargs), arch=arch)
 
     return _build
 
@@ -148,6 +150,56 @@ def build_conv(
             groups=groups,
         )
         return build_implicit_gemm_conv(spec, arch=arch)
+
+    return _build
+
+
+def build_conv_wgrad(
+    name,
+    arch,
+    problem_args,
+    *,
+    wave_size,
+    wtm,
+    wtn,
+    wtk,
+    tile_m,
+    tile_n,
+    tile_k,
+    pipeline="mem",
+    epilogue="default",
+    split_k=1,
+    dtype_d="fp16",
+):
+    def _build():
+        from rocke.instances.common.conv_implicit_gemm_wgrad import (
+            WgradConvSpec,
+            build_implicit_gemm_conv_wgrad,
+        )
+        from rocke.instances.common._conv_implicit_gemm_common import (
+            ConvDataSpec,
+            ConvProblem,
+        )
+
+        p = ConvProblem(*problem_args)
+        spec = WgradConvSpec(
+            problem=p,
+            name=name,
+            data=ConvDataSpec(dtype_a="fp16", dtype_b="fp16", dtype_d=dtype_d),
+            tile_m=tile_m,
+            tile_n=tile_n,
+            tile_k=tile_k,
+            warp_m=2,
+            warp_n=1 if wave_size == 32 else 2,
+            warp_tile_m=wtm,
+            warp_tile_n=wtn,
+            warp_tile_k=wtk,
+            wave_size=wave_size,
+            pipeline=pipeline,
+            epilogue=epilogue,
+            split_k=split_k,
+        )
+        return build_implicit_gemm_conv_wgrad(spec, arch=arch)
 
     return _build
 
@@ -202,97 +254,6 @@ def build_fused_moe(phase, tokens, experts, topk, hidden, intermediate, dtype="f
             "silu": build_moe_silu_mul,
             "reduce": build_moe_topk_weighted_reduce,
         }[phase](spec)
-
-    return _build
-
-
-def build_attention_2d(
-    name,
-    arch,
-    *,
-    head_size,
-    block_size,
-    num_query_heads,
-    num_kv_heads,
-    dtype,
-    sliding_window=0,
-    has_softcap=False,
-    use_alibi=False,
-    **kw,
-):
-    def _build():
-        from kernels.common.attention_unified import _tiled_2d_impl
-
-        SpecCls, _build_fn, _ = _tiled_2d_impl(arch)
-        spec = SpecCls(
-            head_size=head_size,
-            block_size=block_size,
-            num_query_heads=num_query_heads,
-            num_kv_heads=num_kv_heads,
-            dtype=dtype,
-            use_sinks=False,
-            sliding_window=sliding_window,
-            has_softcap=has_softcap,
-            use_alibi=use_alibi,
-            **kw,
-        )
-        return _build_fn(spec, arch=arch)
-
-    return _build
-
-
-def build_attention_3d(
-    name,
-    arch,
-    *,
-    head_size,
-    block_size,
-    num_query_heads,
-    num_kv_heads,
-    dtype,
-    num_segments,
-    sliding_window=0,
-    has_softcap=False,
-):
-    def _build():
-        from kernels import (
-            UnifiedAttention3DTiledSpec,
-            build_unified_attention_3d_tiled,
-        )
-
-        spec = UnifiedAttention3DTiledSpec(
-            head_size=head_size,
-            block_size=block_size,
-            num_query_heads=num_query_heads,
-            num_kv_heads=num_kv_heads,
-            dtype=dtype,
-            use_sinks=False,
-            sliding_window=sliding_window,
-            has_softcap=has_softcap,
-            num_segments=num_segments,
-        )
-        return build_unified_attention_3d_tiled(spec)
-
-    return _build
-
-
-def build_attention_reduce(
-    name, arch, *, head_size, num_query_heads, num_kv_heads, dtype, num_segments
-):
-    def _build():
-        from kernels import (
-            UnifiedAttentionReduceTiledSpec,
-            build_unified_attention_reduce_tiled,
-        )
-
-        spec = UnifiedAttentionReduceTiledSpec(
-            head_size=head_size,
-            num_query_heads=num_query_heads,
-            num_kv_heads=num_kv_heads,
-            dtype=dtype,
-            num_segments=num_segments,
-        )
-        return build_unified_attention_reduce_tiled(spec)
 
     return _build
 
@@ -391,6 +352,27 @@ def cases():
             "compv4",
             "cshuffle",
             64,
+        ),
+    )
+    add(
+        "gemm",
+        "gemm/gfx950/t128x128x32/cshuffle_no_alias",
+        "gfx950",
+        build_gemm(
+            "irhash_gemm_950_a_noalc",
+            "gfx950",
+            128,
+            128,
+            32,
+            2,
+            2,
+            32,
+            32,
+            16,
+            "compv4",
+            "cshuffle",
+            64,
+            cshuffle_no_alias=True,
         ),
     )
     add(
@@ -708,6 +690,135 @@ def cases():
         ),
     )
 
+    # Conv wgrad: implicit-GEMM backward-weight direction (NHWK x NHWC -> KYXC).
+    # wgrad1: small 3x3 conv (N8 H8 W8 C16 K32 Y3 X3, stride/pad=defaults).
+    # wgrad2: 1x1 conv (N2 H16 W16 C32 K32, no filter spatial).
+    wgrad1 = (1, 8, 8, 16, 32, 3, 3, 1, 1, 1, 1, 1, 1)
+    wgrad2 = (2, 16, 16, 32, 32, 1, 1, 1, 1, 0, 0, 1, 1)
+    add(
+        "conv_wgrad",
+        "conv_wgrad/gfx942/n1h8c16k32r3",
+        "gfx942",
+        build_conv_wgrad(
+            "irhash_wgrad_942_a",
+            "gfx942",
+            wgrad1,
+            wave_size=64,
+            wtm=16,
+            wtn=16,
+            wtk=16,
+            tile_m=64,
+            tile_n=32,
+            tile_k=16,
+        ),
+    )
+    add(
+        "conv_wgrad",
+        "conv_wgrad/gfx950/n1h8c16k32r3",
+        "gfx950",
+        build_conv_wgrad(
+            "irhash_wgrad_950_a",
+            "gfx950",
+            wgrad1,
+            wave_size=64,
+            wtm=32,
+            wtn=32,
+            wtk=16,
+            tile_m=64,
+            tile_n=64,
+            tile_k=32,
+            pipeline="mem",
+            epilogue="default",
+        ),
+    )
+    add(
+        "conv_wgrad",
+        "conv_wgrad/gfx950/n2h16c32k32r1",
+        "gfx950",
+        build_conv_wgrad(
+            "irhash_wgrad_950_b",
+            "gfx950",
+            wgrad2,
+            wave_size=64,
+            wtm=16,
+            wtn=16,
+            wtk=16,
+            tile_m=64,
+            tile_n=32,
+            tile_k=16,
+        ),
+    )
+    add(
+        "conv_wgrad",
+        "conv_wgrad/gfx950/n1h8c16k32r3_spk4",
+        "gfx950",
+        build_conv_wgrad(
+            "irhash_wgrad_950_spk4",
+            "gfx950",
+            wgrad1,
+            wave_size=64,
+            wtm=16,
+            wtn=16,
+            wtk=16,
+            tile_m=64,
+            tile_n=32,
+            tile_k=16,
+            split_k=4,
+        ),
+    )
+    add(
+        "conv_wgrad",
+        "conv_wgrad/gfx1151/n1h8c16k32r3",
+        "gfx1151",
+        build_conv_wgrad(
+            "irhash_wgrad_1151_a",
+            "gfx1151",
+            wgrad1,
+            wave_size=32,
+            wtm=16,
+            wtn=16,
+            wtk=16,
+            tile_m=32,
+            tile_n=32,
+            tile_k=16,
+        ),
+    )
+    add(
+        "conv_wgrad",
+        "conv_wgrad/gfx1201/n1h8c16k32r3",
+        "gfx1201",
+        build_conv_wgrad(
+            "irhash_wgrad_1201_a",
+            "gfx1201",
+            wgrad1,
+            wave_size=32,
+            wtm=16,
+            wtn=16,
+            wtk=16,
+            tile_m=32,
+            tile_n=32,
+            tile_k=16,
+        ),
+    )
+    # gfx90a wgrad mirrors the gfx942 MFMA path.
+    add(
+        "conv_wgrad",
+        "conv_wgrad/gfx90a/n1h8c16k32r3",
+        "gfx90a",
+        build_conv_wgrad(
+            "irhash_wgrad_90a_a",
+            "gfx90a",
+            wgrad1,
+            wave_size=64,
+            wtm=16,
+            wtn=16,
+            wtk=16,
+            tile_m=64,
+            tile_n=32,
+            tile_k=16,
+        ),
+    )
+
     # MoE: sorting phases and fused-MoE streaming phases.
     for arch in ("gfx942", "gfx950", "gfx1151", "gfx1201"):
         add(
@@ -901,211 +1012,6 @@ def cases():
             pool_tile_h=4,
             pool_tile_w=4,
             native_int=True,
-        ),
-    )
-
-    # Attention: 2D tiled (gfx950 wide-K), 3D tiled + reduce (gfx950),
-    # and 2D tiled narrow (gfx942 MFMA-16x16x16 path).
-    add(
-        "attention",
-        "attention/gfx950/2d_fp16_d128_b64",
-        "gfx950",
-        build_attention_2d(
-            "irhash_attn_950_2d_fp16",
-            "gfx950",
-            head_size=128,
-            block_size=64,
-            num_query_heads=4,
-            num_kv_heads=2,
-            dtype="fp16",
-        ),
-    )
-    add(
-        "attention",
-        "attention/gfx950/2d_bf16_d128_b64",
-        "gfx950",
-        build_attention_2d(
-            "irhash_attn_950_2d_bf16",
-            "gfx950",
-            head_size=128,
-            block_size=64,
-            num_query_heads=4,
-            num_kv_heads=2,
-            dtype="bf16",
-        ),
-    )
-    add(
-        "attention",
-        "attention/gfx950/2d_fp16_d128_b64_softcap",
-        "gfx950",
-        build_attention_2d(
-            "irhash_attn_950_2d_fp16_sc",
-            "gfx950",
-            head_size=128,
-            block_size=64,
-            num_query_heads=4,
-            num_kv_heads=2,
-            dtype="fp16",
-            has_softcap=True,
-        ),
-    )
-    add(
-        "attention",
-        "attention/gfx950/2d_fp16_d128_b64_alibi",
-        "gfx950",
-        build_attention_2d(
-            "irhash_attn_950_2d_fp16_alibi",
-            "gfx950",
-            head_size=128,
-            block_size=64,
-            num_query_heads=4,
-            num_kv_heads=2,
-            dtype="fp16",
-            use_alibi=True,
-        ),
-    )
-    add(
-        "attention",
-        "attention/gfx950/3d_fp16_d128_b64",
-        "gfx950",
-        build_attention_3d(
-            "irhash_attn_950_3d_fp16",
-            "gfx950",
-            head_size=128,
-            block_size=64,
-            num_query_heads=4,
-            num_kv_heads=2,
-            dtype="fp16",
-            num_segments=4,
-        ),
-    )
-    add(
-        "attention",
-        "attention/gfx950/3d_bf16_d128_b64",
-        "gfx950",
-        build_attention_3d(
-            "irhash_attn_950_3d_bf16",
-            "gfx950",
-            head_size=128,
-            block_size=64,
-            num_query_heads=4,
-            num_kv_heads=2,
-            dtype="bf16",
-            num_segments=4,
-        ),
-    )
-    add(
-        "attention",
-        "attention/gfx950/reduce_fp16_d128",
-        "gfx950",
-        build_attention_reduce(
-            "irhash_attn_950_reduce_fp16",
-            "gfx950",
-            head_size=128,
-            num_query_heads=4,
-            num_kv_heads=2,
-            dtype="fp16",
-            num_segments=4,
-        ),
-    )
-    add(
-        "attention",
-        "attention/gfx950/reduce_bf16_d128",
-        "gfx950",
-        build_attention_reduce(
-            "irhash_attn_950_reduce_bf16",
-            "gfx950",
-            head_size=128,
-            num_query_heads=4,
-            num_kv_heads=2,
-            dtype="bf16",
-            num_segments=4,
-        ),
-    )
-    add(
-        "attention",
-        "attention/gfx942/2d_fp16_d128_b64",
-        "gfx942",
-        build_attention_2d(
-            "irhash_attn_942_2d_fp16",
-            "gfx942",
-            head_size=128,
-            block_size=64,
-            num_query_heads=4,
-            num_kv_heads=2,
-            dtype="fp16",
-        ),
-    )
-    add(
-        "attention",
-        "attention/gfx942/2d_bf16_d128_b64",
-        "gfx942",
-        build_attention_2d(
-            "irhash_attn_942_2d_bf16",
-            "gfx942",
-            head_size=128,
-            block_size=64,
-            num_query_heads=4,
-            num_kv_heads=2,
-            dtype="bf16",
-        ),
-    )
-    add(
-        "attention",
-        "attention/gfx942/3d_fp16_d128_b64",
-        "gfx942",
-        build_attention_3d(
-            "irhash_attn_942_3d_fp16",
-            "gfx942",
-            head_size=128,
-            block_size=64,
-            num_query_heads=4,
-            num_kv_heads=2,
-            dtype="fp16",
-            num_segments=4,
-        ),
-    )
-    add(
-        "attention",
-        "attention/gfx942/3d_bf16_d128_b64",
-        "gfx942",
-        build_attention_3d(
-            "irhash_attn_942_3d_bf16",
-            "gfx942",
-            head_size=128,
-            block_size=64,
-            num_query_heads=4,
-            num_kv_heads=2,
-            dtype="bf16",
-            num_segments=4,
-        ),
-    )
-    add(
-        "attention",
-        "attention/gfx942/reduce_fp16_d128",
-        "gfx942",
-        build_attention_reduce(
-            "irhash_attn_942_reduce_fp16",
-            "gfx942",
-            head_size=128,
-            num_query_heads=4,
-            num_kv_heads=2,
-            dtype="fp16",
-            num_segments=4,
-        ),
-    )
-    add(
-        "attention",
-        "attention/gfx942/reduce_bf16_d128",
-        "gfx942",
-        build_attention_reduce(
-            "irhash_attn_942_reduce_bf16",
-            "gfx942",
-            head_size=128,
-            num_query_heads=4,
-            num_kv_heads=2,
-            dtype="bf16",
-            num_segments=4,
         ),
     )
     return out

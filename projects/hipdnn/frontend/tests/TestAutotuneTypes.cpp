@@ -9,6 +9,7 @@
 #include <hipdnn_frontend/autotune/KnobConstants.hpp>
 #include <hipdnn_frontend/autotune/PlanSpec.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <string>
 #include <vector>
@@ -307,6 +308,21 @@ TEST(TestAutotuneTypes, MeanThrowsOnEmpty)
 {
     const std::vector<float> values;
     EXPECT_THROW(autotune::detail::computeMean(values), std::invalid_argument);
+}
+
+TEST(TestAutotuneTypes, MeanStaysWithinSampleRange)
+{
+    // Float summation and division can round the mean a few ULP outside the
+    // sample [min, max] range when values are near-identical. This was observed
+    // in the autotune smoke test as avg < min. computeMean clamps to the range,
+    // so the mean must never fall outside it. Without the clamp these samples
+    // round above max.
+    const std::vector<float> values = {7.527535438537598f, 7.5275349617004395f, 7.527535438537598f};
+    const float lo = *std::min_element(values.begin(), values.end());
+    const float hi = *std::max_element(values.begin(), values.end());
+    const float mean = autotune::detail::computeMean(values);
+    EXPECT_GE(mean, lo);
+    EXPECT_LE(mean, hi);
 }
 
 TEST(TestAutotuneTypes, StddevUniformValues)
