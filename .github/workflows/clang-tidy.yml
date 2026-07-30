@@ -183,11 +183,13 @@ jobs:
           pip install 'cmake<4' \
             https://github.com/pfultz2/cget/archive/b5dd36cafa2804e6146c5021eb2469c4b2d3ad42.tar.gz \
             https://github.com/RadeonOpenCompute/rbuild/archive/c33b1a7e74ae7f72379364b523f73d30fd4d765c.tar.gz
-          # Install clang-tidy-21 from the LLVM apt repo, matching projects/miopen/Dockerfile.
+          # Install clang-tidy-22 from the LLVM apt repo. Bumped from 21 to move one
+          # major closer to the nightly ROCm/TheRock Clang (23.0.0), whose HIP headers
+          # clang-tidy-21 cannot parse ('builtin functions must be directly called').
           wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
-          echo "deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-21 main" | sudo tee /etc/apt/sources.list.d/llvm21.list
+          echo "deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-22 main" | sudo tee /etc/apt/sources.list.d/llvm22.list
           sudo apt-get update
-          sudo apt-get install -y clang-tidy-21
+          sudo apt-get install -y clang-tidy-22
           cp projects/miopen/requirements.txt     /tmp/requirements.txt
           cp projects/miopen/rbuild.ini           /tmp/rbuild.ini
           cp projects/miopen/dev-requirements.txt /tmp/dev-requirements.txt
@@ -215,7 +217,7 @@ jobs:
             -DMIOPEN_BACKEND=HIP \
             -DBUILD_DEV=ON \
             -DMIOPEN_USE_MLIR=OFF \
-            -DCLANG_TIDY_EXE=/usr/bin/clang-tidy-21 \
+            -DCLANG_TIDY_EXE=/usr/bin/clang-tidy-22 \
             -DCMAKE_PREFIX_PATH="/opt/rocm;/tmp/miopen-deps" \
             -DROCM_PATH=/opt/rocm
           ninja -C build-miopen analyze
