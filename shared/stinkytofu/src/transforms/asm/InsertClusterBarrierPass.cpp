@@ -65,16 +65,17 @@ constexpr const char* kTailLoopMarker = "Tail Loop";
 /// handshake. When true, `insertClusterBarrierHandshakeBefore` emits a
 /// WaveIdx-gated `s_barrier_signal -3` followed by a bare `s_barrier_wait -3`
 /// for EVERY trigger; the cluster signal is never wrapped in an LCL skip
-/// branch (unlike inherited-SCC mode (a) or drain-gated mode (b)). When
-/// false, the original mode-selection logic stays in effect: inherited-SCC
-/// mode (a) for `liveLclCmp != nullptr`, drain-gated mode (b) otherwise.
+/// branch (unlike the drain-gated path). When false, the drain-gated path
+/// runs for every trigger: both the WAIT and the SIGNAL are gated at
+/// `LCL <= pgr`, and each anchor INDEPENDENTLY rebuilds a live upstream SCC
+/// after its own gate when needed (see `insertClusterBarrierHandshakeBefore`).
 ///
-/// Mode (c) still detects `liveLclCmp`: if SIA hoisted a loop-exit
-/// `s_cmp_eq LCL, imm` whose SCC a downstream `s_cbranch_scc0 LoopBeginL`
-/// consumes, the inner `s_cmp_eq_u32 s[sgprWaveIdx], 0` would clobber that
-/// SCC, so a clone of the cmp is re-emitted AFTER the bare wait to rebuild
-/// it for the loop-back branch.
-constexpr bool kRule4ForceUngatedSignalMode = true;
+/// Mode (c) still detects a live upstream cmp per anchor: if SIA hoisted a
+/// loop-exit `s_cmp_eq LCL, imm` whose SCC a downstream `s_cbranch_scc0
+/// LoopBeginL` consumes, the inner `s_cmp_eq_u32 s[sgprWaveIdx], 0` in the
+/// signal block would clobber it, so a clone of the cmp is re-emitted AFTER
+/// the signal block to rebuild it for the loop-back branch.
+constexpr bool kRule4ForceUngatedSignalMode = false;
 
 /// How many estimated cycles EARLIER than its paired WAIT (Rule 4(b)) the
 /// cluster SIGNAL (Rule 4(a)) should be planted. The signal anchor is walked
@@ -273,15 +274,17 @@ bool isLoopCounterLSelfDecrement(const StinkyInstruction& inst, int* outImm) {
 /// \p segmentBegin (inclusive) and \p anchor (exclusive), scanning backward
 /// and stopping at the first segment boundary (label / branch).
 ///
-/// Rule 4's drain-gated mode (b) thresholds (`pgrValue` for the WAIT,
-/// `pgrValue+1` for the SIGNAL) are calibrated against the loop counter value
-/// at segment entry. Different `ScheduleIterAlg` settings may hoist the
-/// per-iteration `s_sub LCL, LCL, 1` ABOVE the workgroup-wait anchor, so the
-/// gate then reads an already-decremented LCL. To keep the gate firing on the
-/// identical absolute iteration regardless of where the decrement landed, mode
-/// (b) subtracts this sum from both thresholds. Decrements that remain BELOW
-/// the anchor (the default schedule) are not seen by the backward scan, so the
-/// sum is 0 and the thresholds are left untouched. (Not consulted when
+/// Rule 4's drain-gated mode (b) uses the SAME threshold `pgrValue` for both
+/// the WAIT and the SIGNAL, calibrated against the loop counter value at
+/// segment entry. Different `ScheduleIterAlg` settings may hoist the
+/// per-iteration `s_sub LCL, LCL, 1` ABOVE an anchor, so the gate then reads an
+/// already-decremented LCL. To keep the gate firing on the identical absolute
+/// iteration regardless of where the decrement landed, mode (b) subtracts the
+/// sum seen at each anchor from that anchor's threshold. Because the signal
+/// anchor sits at or before the wait anchor (cycle-lead), the two anchors may
+/// see different sums; each is scanned independently. Decrements that remain
+/// BELOW an anchor (the default schedule) are not seen by that backward scan,
+/// so the sum is 0 and the threshold is left untouched. (Not consulted when
 /// `kRule4ForceUngatedSignalMode` is on, i.e. mode (c).)
 int sumLoopCounterLDecrementsBeforeInSegment(BasicBlock::iterator segmentBegin,
                                              StinkyInstruction* anchor) {
@@ -457,16 +460,13 @@ void insertWorkgroupBarrierSyncBefore(IRBase* anchor, AsmIRBuilder& irBuilder, G
 ///             fires)
 ///   - Rule 4: uses this helper only in its drain-gated fallback mode (b)
 ///             (when `kRule4ForceUngatedSignalMode` is off): `s_cmp_le_i32`
-///             / imm=pgr+1 (minus any LCL pre-decrement), so the SIGNAL is
-///             skipped one drain stage earlier than the paired WAIT (gated
-///             at imm=pgr via
-///             `insertLoopCounterLGatedClusterBarrierWaitBefore`). The
-///             active mode (c) and the inherited-SCC mode (a) do NOT use
-///             this helper: mode (c) emits via
+///             / imm=pgr (minus the LCL pre-decrement seen at the SIGNAL
+///             anchor), matching the paired WAIT's threshold (gated at imm=pgr
+///             minus the WAIT anchor's own pre-decrement via
+///             `insertLoopCounterLGatedClusterBarrierWaitBefore`). Mode (c)
+///             does NOT use this helper: it emits via
 ///             `insertClusterBarrierSignalOnlyBefore` (WaveIdx-gated, no
-///             LoopCounterL gate) and mode (a) via
-///             `insertRule4InheritedSccSignalBlockBefore`. See
-///             `insertClusterBarrierHandshakeBefore`.
+///             LoopCounterL gate). See `insertClusterBarrierHandshakeBefore`.
 void insertLoopCounterLGatedClusterBarrierSignalBefore(
     IRBase* anchor, AsmIRBuilder& irBuilder, GfxArchID archId, GFX cmpUOp, int skipWhenScc1Imm,
     const std::string& cmpComment, const std::string& branchComment,
@@ -497,74 +497,6 @@ void insertLoopCounterLGatedClusterBarrierSignalBefore(
         GFX::LABEL, GFX::LABEL, 0, 0, 0, "LABEL", makeFlagSet({InstFlag::IF_HasSideEffect})};
     StinkyInstruction* lclLblInst = irBuilder.create(&labelMCID, anchor);
     lclLblInst->addModifier<LabelData>(LabelData{lclLabelName, /*alignment=*/1});
-}
-
-/// Rule 4's "inherited SCC" emission: the outer `s_cbranch_scc1`
-/// consumes SCC from an upstream live `s_cmp_eq LCL, imm` (`liveLclCmp`)
-/// that SIA hoisted above this anchor -- no fresh gate cmp is emitted
-/// (it would clobber the SCC the downstream cbranch still needs). A
-/// clone of `liveLclCmp` is then re-emitted between the inner and outer
-/// skip labels to rebuild SCC for that downstream cbranch. Emitted
-/// shape:
-///
-///     s_cbranch_scc1 label_skipCBPreSignal_LCL_<H2> // SCC inherited
-///     s_cmp_eq_u32 s[sgprWaveIdx], 0                // inner wave gate
-///     s_cbranch_scc0 label_skipCBPreSignal_<H1>
-///     s_barrier_signal -3
-///   label_skipCBPreSignal_<H1>:
-///     <clone of liveLclCmp>                          // restore SCC
-///   label_skipCBPreSignal_LCL_<H2>:
-///
-/// The restore sits between the inner and outer labels so the LCL-skip
-/// path bypasses it (its inherited SCC=1 is already what the downstream
-/// cbranch expects), while both wave paths (fall-through and wave-skip)
-/// land at or past the inner label and re-evaluate the cmp.
-void insertRule4InheritedSccSignalBlockBefore(IRBase* anchor, AsmIRBuilder& irBuilder,
-                                              GfxArchID archId, StinkyInstruction* liveLclCmp) {
-    const std::string innerLabel = std::string(kSkipLabelPrefix) + makeRandomHash();
-    const std::string outerLabel = std::string(kSkipLabelPrefixLCL) + makeRandomHash();
-
-    const HwInstDesc* brSccDesc1 = getMCIDByUOp(GFX::s_cbranch_scc1, archId);
-    const HwInstDesc* cmpEqU32Desc = getMCIDByUOp(GFX::s_cmp_eq_u32, archId);
-    const HwInstDesc* brSccDesc0 = getMCIDByUOp(GFX::s_cbranch_scc0, archId);
-    const HwInstDesc* signalDesc = getMCIDByUOp(GFX::s_barrier_signal, archId);
-    assert(brSccDesc1 && cmpEqU32Desc && brSccDesc0 && signalDesc &&
-           "Rule 4 cluster-barrier opcodes are not supported on this architecture");
-
-    StinkyInstruction* outerBr = irBuilder.create(brSccDesc1, anchor);
-    outerBr->addSrcReg(StinkyRegister(outerLabel));
-    outerBr->addModifier<LabelData>(LabelData{outerLabel});
-    outerBr->addModifier<CommentData>(
-        CommentData{"skip cluster barrier (SCC inherited from upstream LCL cmp)"});
-
-    StinkyInstruction* innerCmp = irBuilder.create(cmpEqU32Desc, anchor);
-    innerCmp->addSrcReg(makeSymbolicSgpr(kWaveIdxSymbol));
-    innerCmp->addSrcReg(StinkyRegister(0));
-    innerCmp->addModifier<CommentData>(CommentData{"Check for waveID 0"});
-
-    StinkyInstruction* innerBr = irBuilder.create(brSccDesc0, anchor);
-    innerBr->addSrcReg(StinkyRegister(innerLabel));
-    innerBr->addModifier<LabelData>(LabelData{innerLabel});
-    innerBr->addModifier<CommentData>(CommentData{"Execute cluster barrier signal for waveID 0"});
-
-    StinkyInstruction* signalInst = irBuilder.create(signalDesc, anchor);
-    signalInst->addSrcReg(StinkyRegister(kClusterBarrierId));
-    signalInst->addModifier<CommentData>(CommentData{"cluster_barrier signal"});
-
-    static const HwInstDesc labelMCID{
-        GFX::LABEL, GFX::LABEL, 0, 0, 0, "LABEL", makeFlagSet({InstFlag::IF_HasSideEffect})};
-
-    StinkyInstruction* innerLbl = irBuilder.create(&labelMCID, anchor);
-    innerLbl->addModifier<LabelData>(LabelData{innerLabel, /*alignment=*/1});
-
-    const HwInstDesc* restoreDesc = liveLclCmp->getHwInstDesc();
-    StinkyInstruction* restoreInst = irBuilder.create(restoreDesc, anchor);
-    for (const auto& src : liveLclCmp->getSrcRegs()) restoreInst->addSrcReg(src);
-    restoreInst->addModifier<CommentData>(
-        CommentData{"restore SCC for downstream cbranch (Rule 4 inherit)"});
-
-    StinkyInstruction* outerLbl = irBuilder.create(&labelMCID, anchor);
-    outerLbl->addModifier<LabelData>(LabelData{outerLabel, /*alignment=*/1});
 }
 
 /// Wrap a cluster-barrier WAIT in an outer `s[sgprLoopCounterL] <cmp> <imm>`
@@ -675,85 +607,82 @@ void insertRule4ClusterBarrierWait(IRBase* waitAnchor, AsmIRBuilder& irBuilder, 
 ///     (via `insertRule4ClusterBarrierSignal`).
 ///   - Rule 4(b): a bare `s_barrier_wait -3` before `waitAnchor` (via
 ///     `insertRule4ClusterBarrierWait`).
-/// The signal is never wrapped in an LCL skip branch. `liveLclCmp` (if present)
-/// drives an SCC restore that ALWAYS rides with Rule 4(a), right after the
+/// The signal is never wrapped in an LCL skip branch. `signalSccRestoreCmp` (if
+/// present) drives an SCC restore that rides with Rule 4(a), right after the
 /// signal block, so the SCC the downstream `s_cbranch_scc0 LoopBeginL` consumes
 /// is rebuilt locally before any instruction between the (possibly far-apart)
-/// signal and wait; Rule 4(b) emits a bare, SCC-neutral wait. The caller decides
-/// `liveLclCmp` at scan time (null when an intervening SCC writer masks the
-/// clobber). It returns before the mode (a)/(b) selection below, so those paths
-/// are left untouched.
+/// signal and wait; Rule 4(b) emits a bare, SCC-neutral wait (so
+/// `waitSccRestoreCmp` is unused in mode (c)). The caller decides each restore
+/// cmp per anchor at scan time (null when nothing live needs rebuilding). It
+/// returns before the drain-gated path below.
 ///
-/// When the mode (c) switch is false, two emission modes are selected by the
-/// caller via `findLiveRestorableSccCmpUpstream`:
+/// When the mode (c) switch is false, the drain-gated path always runs (there is
+/// no longer a separate inherited-SCC "mode (a)"): the paired
+/// `tensor_load_to_lds` is disabled (TDM enable dword = 0) on the last PGR
+/// iterations (`LCL <= pgrValue`), so the handshake is unnecessary there. Both
+/// the WAIT and the SIGNAL use the SAME gate threshold `LCL <= pgrValue`; each
+/// threshold is compensated by the LCL pre-decrement seen at its OWN anchor
+/// (\p signalPreDecrement for the cycle-lead signal, \p waitPreDecrement for the
+/// wait) so both fire on the identical absolute iteration even when the schedule
+/// decremented LCL before one anchor but not the other. Gating both halves at
+/// the same threshold keeps cluster signal/wait balanced every trip.
 ///
-///   (a) `liveLclCmp != nullptr` -- SIA=4 inherited-SCC path. Tensile hoisted
-///       the loop-exit `s_cmp_eq_i32 LCL, imm` above this anchor and a
-///       downstream `s_cbranch_scc0 LoopBeginL` consumes its SCC. Emit an
-///       ungated leading `s_barrier_wait -3` followed by the inherited-SCC
-///       signal block (the signal is single-iter skipped via the inherited
-///       SCC; a clone of the upstream cmp is re-emitted between the inner and
-///       outer skip labels to restore SCC). Emitting fresh relational gates
-///       here would clobber the live SCC, so this mode is left as-is.
+/// Because BOTH halves now emit their own `s_cmp_le_i32 LCL, imm` (each clobbers
+/// SCC), the SCC restore is decided INDEPENDENTLY per anchor. When SIA hoisted a
+/// loop-exit `s_cmp_eq LCL, imm` whose SCC a downstream `s_cbranch` still
+/// consumes, a clone is re-emitted right after that half's gate:
+/// `waitSccRestoreCmp` after the wait gate (the last SCC write before
+/// `waitAnchor`, covering the loop-back branch) and `signalSccRestoreCmp` after
+/// the signal gate (covering any consumer between the two anchors). Either is
+/// null when its anchor exposes no live restorable cmp. This replaces the old
+/// inherited-SCC mode, which left the wait ungated and single-iter-skipped the
+/// signal -- an imbalance that stranded a drain waiter and deadlocked.
 ///
-///   (b) `liveLclCmp == nullptr` -- drain-gated path. The paired
-///       `tensor_load_to_lds` is disabled (TDM enable dword = 0) on the last
-///       PGR iterations (`LCL <= pgrValue`), so the handshake is unnecessary
-///       there. Because the ping-pong pairing is offset (each wait consumes the
-///       PREVIOUS signal), dropping a drain wait would orphan the last real
-///       signal. We therefore use ASYMMETRIC gates: skip the WAIT at
-///       `LCL <= pgrValue` and the SIGNAL one stage earlier at
-///       `LCL <= pgrValue+1`. Both thresholds drop by \p lclPreDecrement so the
-///       gate keys off the same absolute iteration even when the schedule
-///       decremented LCL before the anchor.
-///
-/// \p pgrValue and \p lclPreDecrement are consulted by mode (b) only. In modes
-/// (a)/(b) `signalAnchor` and `waitAnchor` currently resolve to the same
-/// position, so their historical single-anchor behavior is preserved: mode (a)
-/// keeps its intricate inherited-SCC block on `waitAnchor`, while mode (b)
-/// naturally maps its WAIT gate to `waitAnchor` and its SIGNAL gate to
-/// `signalAnchor`.
+/// \p pgrValue, \p signalPreDecrement and \p waitPreDecrement map the WAIT gate
+/// to `waitAnchor` and the SIGNAL gate to `signalAnchor`, each with its
+/// locally-scanned pre-decrement.
 void insertClusterBarrierHandshakeBefore(IRBase* signalAnchor, IRBase* waitAnchor,
                                          AsmIRBuilder& irBuilder, GfxArchID archId, int pgrValue,
-                                         StinkyInstruction* liveLclCmp, int lclPreDecrement) {
+                                         StinkyInstruction* signalSccRestoreCmp,
+                                         StinkyInstruction* waitSccRestoreCmp,
+                                         int signalPreDecrement, int waitPreDecrement) {
     if (kRule4ForceUngatedSignalMode) {
         // Mode (c): always-ungated signal, split into two independently
         // anchored halves. The cluster signal is NEVER wrapped in an LCL skip
-        // branch (unlike mode (a)).
+        // branch (unlike the drain-gated path below).
         //
-        // SCC restore always rides with Rule 4(a): the WaveIdx `s_cmp_eq_u32` in
-        // the signal block clobbers SCC at the SIGNAL anchor, so the restore is
+        // SCC restore rides with Rule 4(a): the WaveIdx `s_cmp_eq_u32` in the
+        // signal block clobbers SCC at the SIGNAL anchor, so the restore is
         // rebuilt locally -- right after the signal block -- ahead of any
         // downstream consumer (even when the signal leads the wait by many
-        // cycles). `liveLclCmp` already carries the caller's restore decision
-        // (null when an existing SCC writer between the anchors masks the
-        // clobber). Rule 4(b) emits a bare, SCC-neutral wait.
+        // cycles). `signalSccRestoreCmp` carries the caller's per-anchor restore
+        // decision (null when nothing live needs rebuilding there). Rule 4(b)
+        // emits a bare, SCC-neutral wait, so it needs no restore.
         insertRule4ClusterBarrierSignal(signalAnchor, irBuilder, archId,
-                                        liveLclCmp);  // Rule 4(a)
+                                        signalSccRestoreCmp);  // Rule 4(a)
         insertRule4ClusterBarrierWait(waitAnchor, irBuilder, archId,
                                       /*sccRestoreCmp=*/nullptr);  // Rule 4(b)
         return;
     }
-    if (liveLclCmp != nullptr) {
-        // Mode (a) inherited-SCC: ungated leading wait + a single-iter
-        // inherited signal skip. Kept on a single anchor (`waitAnchor`) because
-        // the inherited-SCC block interleaves the wait, signal, and SCC restore.
-        const HwInstDesc* waitDesc = getMCIDByUOp(GFX::s_barrier_wait, archId);
-        assert(waitDesc && "Cluster-barrier wait opcode is not supported on this architecture");
-        StinkyInstruction* waitInst = irBuilder.create(waitDesc, waitAnchor);
-        waitInst->addSrcReg(StinkyRegister(kClusterBarrierId));
-        waitInst->addModifier<CommentData>(CommentData{"cluster barrier wait"});
-        insertRule4InheritedSccSignalBlockBefore(waitAnchor, irBuilder, archId, liveLclCmp);
-        return;
-    }
-
-    // Mode (b) drain-gated: gate the WAIT (Rule 4(b)) at `LCL <= pgr` (drain
-    // iters, load disabled) and the SIGNAL (Rule 4(a)) at `LCL <= pgr+1` (one
-    // stage earlier so the trailing leftover signal is dropped too). Both
-    // thresholds drop by `lclPreDecrement` so the gate keys off the same
-    // absolute iteration even when the schedule decremented LCL before the
-    // anchor.
-    const int waitImm = pgrValue - lclPreDecrement;
+    // Drain-gated handshake: gate BOTH the WAIT (Rule 4(b)) and the SIGNAL
+    // (Rule 4(a)) at the SAME threshold `LCL <= pgr` -- the drain iterations
+    // where Tensile disables the paired `tensor_load_to_lds`. Applying the
+    // identical gate to both halves keeps cluster signal/wait balanced on every
+    // trip: each absolute iteration either runs BOTH or skips BOTH. This is what
+    // the old inherited-SCC path got wrong -- it left the wait ungated while
+    // single-iter-skipping the signal, so the last drain iteration issued a
+    // wait with no matching signal and stranded that waiter (deadlock).
+    //
+    // Each threshold independently drops by the LCL pre-decrement observed at
+    // its OWN anchor (`signalPreDecrement` for the cycle-lead hoisted signal,
+    // `waitPreDecrement` for the wait). The signal anchor sits at or before the
+    // wait anchor, so it may see fewer hoisted `s_sub LCL, LCL, 1` -- keying
+    // each gate to its local decrement count makes both fire on the identical
+    // absolute iteration even when a decrement landed between the two anchors.
+    // Each gate's `s_cmp_le_i32 LCL, imm` clobbers SCC, so each anchor rebuilds
+    // its OWN live SCC independently, right after its block (see below). The
+    // caller decides `signalSccRestoreCmp` / `waitSccRestoreCmp` per anchor.
+    const int waitImm = pgrValue - waitPreDecrement;
     const std::string waitImmStr = std::to_string(waitImm);
     insertLoopCounterLGatedClusterBarrierWaitBefore(
         waitAnchor, irBuilder, archId,
@@ -761,8 +690,15 @@ void insertClusterBarrierHandshakeBefore(IRBase* signalAnchor, IRBase* waitAncho
         /*skipWhenScc1Imm=*/waitImm,
         /*cmpComment=*/"drain iter? LoopCounter <= " + waitImmStr,
         /*branchComment=*/"skip cluster wait when LoopCounterL <= " + waitImmStr);
+    // WAIT-side restore: the wait gate above is the LAST SCC write before
+    // `waitAnchor`, so a clone re-emitted here rebuilds SCC for the downstream
+    // `s_cbranch` (e.g. the loop-back branch) that consumes the hoisted
+    // loop-exit cmp. Emitted after the gate block, before `waitAnchor`.
+    if (waitSccRestoreCmp != nullptr) {
+        insertRule4SccRestore(waitAnchor, irBuilder, waitSccRestoreCmp);
+    }
 
-    const int sigImm = pgrValue + 1 - lclPreDecrement;
+    const int sigImm = pgrValue - signalPreDecrement;
     const std::string sigImmStr = std::to_string(sigImm);
     insertLoopCounterLGatedClusterBarrierSignalBefore(
         signalAnchor, irBuilder, archId,
@@ -770,6 +706,12 @@ void insertClusterBarrierHandshakeBefore(IRBase* signalAnchor, IRBase* waitAncho
         /*skipWhenScc1Imm=*/sigImm,
         /*cmpComment=*/"LoopCounter <= " + sigImmStr + "?",
         /*branchComment=*/"skip cluster barrier when LoopCounterL <= " + sigImmStr);
+    // SIGNAL-side restore: independent of the wait side. The signal gate clobbers
+    // SCC at the (cycle-lead) signal anchor, so if a consumer sits between the
+    // two anchors, its live SCC is rebuilt here right after the signal block.
+    if (signalSccRestoreCmp != nullptr) {
+        insertRule4SccRestore(signalAnchor, irBuilder, signalSccRestoreCmp);
+    }
 }
 
 /// True if `inst` is a `LABEL` pseudo whose `LabelData.label` matches `name`
@@ -891,25 +833,6 @@ IRBase* findRule4SignalAnchorByCycleLead(
     return segBegin.getNodePtr();
 }
 
-/// True if any instruction in the half-open program-order range
-/// [`fromInclusive`, `toExclusive`) implicitly writes SCC. Rule 4(a) uses this
-/// to decide whether its signal block's WaveIdx `s_cmp_eq_u32` SCC clobber
-/// matters: if an existing instruction between the SIGNAL anchor and the WAIT
-/// anchor already redefines SCC, the clobber is masked before any downstream
-/// consumer sees it, so no SCC restore is needed. Scans only the pre-mutation
-/// IR (called at scan time, before any handshake is inserted).
-bool anySccWriterInRange(StinkyInstruction* fromInclusive, const IRBase* toExclusive) {
-    BasicBlock* parent = fromInclusive->getParent();
-    if (parent == nullptr) return false;
-    for (auto it = BasicBlock::iterator(fromInclusive); it != parent->end(); ++it) {
-        if (it.getNodePtr() == toExclusive) break;
-        auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
-        if (inst == nullptr) continue;
-        if (inst->is(InstFlag::IF_ImplicitWriteSCC)) return true;
-    }
-    return false;
-}
-
 /// Function-wide scan: returns the first `tensor_load_to_lds` encountered
 /// when walking every BB in order, or nullptr if the function has none.
 StinkyInstruction* findFirstTensorLoadInFunc(Function& func) {
@@ -1007,17 +930,18 @@ class InsertClusterBarrierPassImpl : public Pass {
         for (BasicBlock& bb : func) {
             // Tuple: (trigger workgroup signal, resolved Rule 4(a) signal anchor,
             //         resolved Rule 4(b) wait anchor, live upstream LCL cmp at
-            //         the SIGNAL anchor or nullptr, cumulative LCL pre-decrement
-            //         before the trigger). Everything is resolved at scan time
+            //         the SIGNAL anchor or nullptr, live upstream LCL cmp at the
+            //         WAIT anchor or nullptr, cumulative LCL pre-decrement
+            //         before the SIGNAL anchor, cumulative LCL pre-decrement
+            //         before the WAIT anchor). Everything is resolved at scan time
             //         -- i.e. against the pre-mutation IR -- so a later `pending`
             //         entry's emission cannot influence an earlier one's anchor
-            //         resolution, SCC analysis, or decrement count. Crucially the
-            //         live-cmp is scanned backward from the SIGNAL anchor (the
-            //         actual `s_cmp_eq_u32 sgprWaveIdx` SCC-clobber point), not
-            //         from the trigger, so the SCC restore decision reflects
-            //         where Rule 4(a) really lands.
-            std::vector<
-                std::tuple<StinkyInstruction*, IRBase*, IRBase*, StinkyInstruction*, int>>
+            //         resolution, SCC analysis, or decrement count. The live-cmp
+            //         is scanned backward from EACH anchor independently (each
+            //         anchor's gate has its own SCC-clobber point), so the two
+            //         halves' restore decisions are made separately.
+            std::vector<std::tuple<StinkyInstruction*, IRBase*, IRBase*, StinkyInstruction*,
+                                   StinkyInstruction*, int, int>>
                 pending;
             std::unordered_set<StinkyInstruction*> seenTriggers;
 
@@ -1071,26 +995,35 @@ class InsertClusterBarrierPassImpl : public Pass {
                 StinkyInstruction* signalAnchorInst =
                     (signalAnchor != nullptr) ? dyn_cast<StinkyInstruction>(signalAnchor) : nullptr;
 
-                // SCC restore decision (all against the pre-mutation IR):
-                //   * If any instruction in [signalAnchor, waitAnchor) already
-                //     writes SCC, that write masks the signal block's WaveIdx
-                //     `s_cmp_eq_u32` clobber before any downstream consumer sees
-                //     it -- no restore needed.
-                //   * Otherwise scan backward from the SIGNAL anchor for a live
-                //     upstream LCL cmp whose SCC a downstream cbranch consumes; if
-                //     found, Rule 4(a) re-emits it after the signal block.
-                StinkyInstruction* sccRestoreCmp = nullptr;
-                if (signalAnchorInst != nullptr &&
-                    !anySccWriterInRange(signalAnchorInst, waitAnchor)) {
-                    sccRestoreCmp = findLiveRestorableSccCmpUpstream(signalAnchorInst);
-                }
+                // SCC restore decision (all against the pre-mutation IR).
+                // Because the drain-gated handshake now gates BOTH halves, the
+                // WAIT and the SIGNAL each emit their own `s_cmp_le_i32 LCL, imm`
+                // that clobbers SCC. So each anchor decides its restore
+                // INDEPENDENTLY: scan backward from that anchor for a live
+                // upstream LCL cmp whose SCC a downstream cbranch consumes; if
+                // found, the corresponding gate re-emits it right after its
+                // block (mode (c) leaves the wait bare, so only the signal side
+                // applies there). Nullptr means no live SCC needs rebuilding at
+                // that anchor.
+                StinkyInstruction* signalSccRestoreCmp =
+                    (signalAnchorInst != nullptr)
+                        ? findLiveRestorableSccCmpUpstream(signalAnchorInst)
+                        : nullptr;
+                StinkyInstruction* waitSccRestoreCmp =
+                    findLiveRestorableSccCmpUpstream(waitAnchorInst);
                 // Count any `s_sub LCL, LCL, imm` the schedule hoisted above
-                // the trigger so the drain-gated mode (b) thresholds can be
-                // compensated. (Unused when mode (c) is active.)
-                const int lclPreDecrement =
-                    sumLoopCounterLDecrementsBeforeInSegment(segBegin, trigger);
-                pending.emplace_back(trigger, signalAnchor, waitAnchor, sccRestoreCmp,
-                                     lclPreDecrement);
+                // EACH anchor independently, so the drain-gated mode (b)
+                // thresholds can be compensated per-anchor. The signal anchor
+                // sits at or before the wait anchor (cycle-lead), so it may see
+                // fewer decrements. (Unused when mode (c) is active.)
+                const int waitPreDecrement =
+                    sumLoopCounterLDecrementsBeforeInSegment(segBegin, waitAnchorInst);
+                const int signalPreDecrement =
+                    (signalAnchorInst != nullptr)
+                        ? sumLoopCounterLDecrementsBeforeInSegment(segBegin, signalAnchorInst)
+                        : waitPreDecrement;
+                pending.emplace_back(trigger, signalAnchor, waitAnchor, signalSccRestoreCmp,
+                                     waitSccRestoreCmp, signalPreDecrement, waitPreDecrement);
             }
 
             // Rule 1: signal-only handshake immediately AFTER each
@@ -1174,7 +1107,7 @@ class InsertClusterBarrierPassImpl : public Pass {
                 StinkyInstruction* tailPairedSignal =
                     findPrecedingWorkgroupBarrierSignalInSegment(bb.begin(), tailWait);
                 bool conflictsWithRule4 = false;
-                for (const auto& [trigger, _sig, _wait, _live, _dec] : pending) {
+                for (const auto& [trigger, _sig, _wait, _slive, _wlive, _sdec, _wdec] : pending) {
                     if (tailPairedSignal != nullptr && trigger == tailPairedSignal) {
                         conflictsWithRule4 = true;
                         break;
@@ -1189,18 +1122,20 @@ class InsertClusterBarrierPassImpl : public Pass {
                 tailWait == nullptr)
                 continue;
             AsmIRBuilder irBuilder(bb, archId);
-            for (const auto& [trigger, signalAnchor, waitAnchor, liveLclCmp, lclPreDecrement] :
-                 pending) {
+            for (const auto& [trigger, signalAnchor, waitAnchor, signalSccRestoreCmp,
+                              waitSccRestoreCmp, signalPreDecrement, waitPreDecrement] : pending) {
                 // Rule 4 is split into two independently-anchored halves, both
                 // resolved at scan time (see the `pending` tuple comment):
                 //   - Rule 4(b) wait at `waitAnchor` (before the trigger workgroup
-                //     signal).
+                //     signal). It owns `waitSccRestoreCmp`.
                 //   - Rule 4(a) signal at `signalAnchor` (cycle-lead backward from
-                //     the wait anchor). It owns the SCC restore `liveLclCmp`,
-                //     which is null unless an SCC-writer-free window between the
-                //     two anchors left a live upstream LCL cmp exposed.
+                //     the wait anchor). It owns `signalSccRestoreCmp`.
+                //   Each is null unless a live upstream LCL cmp is exposed at that
+                //   anchor, so the two gates rebuild SCC independently.
                 insertClusterBarrierHandshakeBefore(signalAnchor, waitAnchor, irBuilder, archId,
-                                                    pgrValue_, liveLclCmp, lclPreDecrement);
+                                                    pgrValue_, signalSccRestoreCmp,
+                                                    waitSccRestoreCmp, signalPreDecrement,
+                                                    waitPreDecrement);
                 (void)trigger;  // the workgroup signal; used by the conflict guards above
             }
             for (IRBase* anchor : gsu1Anchors) {
