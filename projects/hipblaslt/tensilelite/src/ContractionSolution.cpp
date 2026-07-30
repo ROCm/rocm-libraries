@@ -1924,7 +1924,18 @@ namespace TensileLite
             }
             else
             {
-                rv.numWorkGroups.x = sk.grid;
+                // 1-D [C,1] pure-multicast (and the non-cluster [1,1]) linear
+                // Stream-K launch. The HIP cluster launch requires gridX % Cs == 0,
+                // so round the launch UP to the cluster width; the padded peers
+                // pad-exit in the kernel prologue. sk.grid is normally already
+                // ceil(tiles/Cs)*Cs (round-up is a no-op), but on the degenerate
+                // partial-tail fallback (sk.grid == tiles, one real contributor per
+                // tile -- see solve()) this round-up is what keeps the launch legal
+                // while the K-split stays at sk.grid so no lone peer is handed only a
+                // sub-DepthU partial-tail iteration. No-op for [1,1] (Cs == 1).
+                rv.numWorkGroups.x = RoundUpToMultiple<uint32_t>(
+                    static_cast<uint32_t>(sk.grid),
+                    static_cast<uint32_t>(sizeMapping.clusterDim.x));
                 rv.numWorkGroups.y = 1;
                 rv.numWorkGroups.z = 1;
             }
@@ -3502,7 +3513,44 @@ namespace TensileLite
                && sizeMapping.clusterDim.y == 1)
             {
                 size_t c = sizeMapping.clusterDim.x;
-                sk.grid  = ((sk.grid + c - 1) / c) * c;
+                // 1-D [C,1] pure-multicast degenerate-K-split liveness guard
+                // (gfx1250). A boundary cluster whose real tile count is below the
+                // cluster width rounds the launch grid up past `tiles` (sk.grid >
+                // tiles), so the lone tile's summation is K-split across the Cs
+                // peers. When that tile's trailing chunk is a SUB-DepthU partial
+                // (K % DepthU != 0) AND the split is fine enough that the LAST peer
+                // would receive ONLY that partial (per-peer iters
+                // tiles*itersPerTile/sk.grid <= 1), that peer runs zero full DepthU
+                // iterations (numIterL == 0) and therefore skips the per-iteration
+                // cluster split-barrier (-3) rounds its full-iter peers execute --
+                // the surviving peers' `s_barrier_wait -3` then never completes
+                // (HW/FFM-observed livelock at MT256x256, ClusterDim [8,1],
+                // 256x256x1920). Cap the effective per-tile split at floor(K/DepthU)
+                // by NOT K-splitting the degenerate tile: keep sk.grid == tiles (the
+                // real contributor count -- one WG per tile owning the whole K-range
+                // incl. its own partial tail). The launch is still padded up to a
+                // legal Cs-multiple cluster in generateSingleCall (numWorkGroups.x
+                // round-up) and the now-idle peers pad-exit via the normal
+                // StreamKIter work-check, exactly like the already-validated
+                // shallower/divisible degenerate clusters (e.g. MT256x256 @
+                // 256x256x256, and CD2_1/CD4_1 which split evenly with >= 1 full iter
+                // per peer). Guarded to this boundary case so non-degenerate 1-D,
+                // divisible-K, ForceDPOnly, 2-D dual and reduction paths keep
+                // sk.grid == ceil(tiles/Cs)*Cs byte-identical (host-only: no
+                // kernel/codegen change, no golden movement).
+                size_t itersPerTile
+                    = std::max(size_t{1}, problem.getItersPerTile(sizeMapping));
+                size_t depthU     = static_cast<size_t>(sizeMapping.depthU);
+                size_t kSize       = static_cast<size_t>(problem.boundSize(0));
+                bool   hasPartial  = depthU > 0 && (kSize % depthU) != 0;
+                bool   degenPartialTail
+                    = sk.reduction == origami::reduction_t::tree && !forceDPOnly
+                      && sk.grid > tiles && hasPartial
+                      && (tiles * itersPerTile / sk.grid) <= 1;
+                if(degenPartialTail)
+                    sk.grid = tiles;
+                else
+                    sk.grid = ((sk.grid + c - 1) / c) * c;
             }
         }
 
