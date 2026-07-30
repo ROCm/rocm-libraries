@@ -15,6 +15,7 @@
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
+#include "stinkytofu/ir/asm/RegisterKey.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 
 namespace {
@@ -41,7 +42,7 @@ struct GroupState {
     MemoryGroupKind kind = MemoryGroupKind::None;
     bool hasMemory = false;
     bool hasNonAtomic = false;
-    std::vector<StinkyRegister> sources;
+    RegKeySet sources;
 
     void clear() {
         kind = MemoryGroupKind::None;
@@ -72,18 +73,24 @@ bool isFlat(const StinkyInstruction& inst) {
     return isFLATLoad(inst) || isFLATStore(inst) || isFLATAtomic(inst);
 }
 
-bool hasDestSourceOverlap(const StinkyInstruction& inst,
-                          const std::vector<StinkyRegister>& sources) {
+bool hasDestSourceOverlap(const StinkyInstruction& inst, const RegKeySet& sources) {
     for (const StinkyRegister& dest : inst.getDestRegs()) {
-        if (!dest.isRegister()) continue;
-        for (const StinkyRegister& src : sources)
-            if (dest.isOverlap(src)) return true;
+        bool overlaps = false;
+        forEachRegUnit(dest, [&](RegKey key) { overlaps |= sources.contains(key); });
+        if (overlaps) return true;
     }
     return false;
 }
 
+void addSources(RegKeySet& sources, const StinkyInstruction& inst) {
+    for (const StinkyRegister& src : inst.getSrcRegs())
+        forEachRegUnit(src, [&](RegKey key) { sources.insert(key); });
+}
+
 bool hasSelfDestSourceOverlap(const StinkyInstruction& inst) {
-    return hasDestSourceOverlap(inst, inst.getSrcRegs());
+    RegKeySet sources;
+    addSources(sources, inst);
+    return hasDestSourceOverlap(inst, sources);
 }
 
 bool isFullXcntDrain(const StinkyInstruction& inst) {
@@ -110,8 +117,7 @@ bool isImmediateMemorySuccessor(BasicBlock::iterator it, BasicBlock& bb, ReplayM
 }
 
 void addSources(GroupState& state, const StinkyInstruction& inst) {
-    for (const StinkyRegister& src : inst.getSrcRegs())
-        if (src.isRegister()) state.sources.push_back(src);
+    addSources(state.sources, inst);
 }
 
 void assertFallthrough(const BasicBlock& previous, const BasicBlock& next) {
