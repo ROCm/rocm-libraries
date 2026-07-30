@@ -2472,7 +2472,10 @@ def _num_segments(problem: UnifiedAttentionProblem) -> int:
     if _resolve_attention_arch() == "gfx942" and problem.sliding_window == 0:
         num_2d = problem.total_num_q_blocks_upper_bound * problem.num_kv_heads
         min_seg = 16 if problem.block_size <= 16 else 8
-        pre_bump = max(min(_next_power_of_2((_PRE_BUMP_SMS * 4 + num_2d - 1) // num_2d), 128), min_seg)
+        pre_bump = max(
+            min(_next_power_of_2((_PRE_BUMP_SMS * 4 + num_2d - 1) // num_2d), 128),
+            min_seg,
+        )
         if problem.max_seqlen_q == 1:
             # DECODE: boundaries measured on MI300X (Level 1, fp32-gated).
             if problem.max_seqlen_k <= 2048:

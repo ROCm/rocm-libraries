@@ -78,7 +78,9 @@ class AttentionRequest(OperatorRequest):
     use_sinks: bool = False
     sliding_window: int = 0
     kv_block_size: int = 16  # paged KV block_size (modulus); {16,32,64}
-    num_sms: int = 0  # 0 => auto-resolve to the device CU count at dispatch (_resolve_num_sms)
+    num_sms: int = (
+        0  # 0 => auto-resolve to the device CU count at dispatch (_resolve_num_sms)
+    )
     op: str = "attention"
     dtype: str = "fp16"
     algorithm: str = "auto"

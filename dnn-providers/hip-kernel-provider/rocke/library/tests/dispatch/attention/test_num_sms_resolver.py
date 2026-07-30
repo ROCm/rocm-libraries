@@ -22,8 +22,17 @@ import rocke.runtime.hip_module as hipm
 
 
 def _req(**kw):
-    d = dict(batch=64, nhead_q=32, nhead_k=8, seqlen_q=1, seqlen_k=8192,
-             hdim_q=128, hdim_v=128, arch="gfx942", dtype="bf16")
+    d = dict(
+        batch=64,
+        nhead_q=32,
+        nhead_k=8,
+        seqlen_q=1,
+        seqlen_k=8192,
+        hdim_q=128,
+        hdim_v=128,
+        arch="gfx942",
+        dtype="bf16",
+    )
     d.update(kw)
     return AttentionRequest(**d)
 
@@ -75,9 +84,9 @@ def test_gfx942_fallback_off_box():
     p = _Patch()
     try:
         p.env("ROCKE_NUM_SMS", None)
-        p.attr(hipm, "get_device_arch", lambda *a, **k: None)      # no gfx942 device
-        p.attr(A, "_device_num_cus", lambda: 256)                  # e.g. a gfx950 box
-        assert _resolve_num_sms(_req(num_sms=0)) == 304            # constant, not 256
+        p.attr(hipm, "get_device_arch", lambda *a, **k: None)  # no gfx942 device
+        p.attr(A, "_device_num_cus", lambda: 256)  # e.g. a gfx950 box
+        assert _resolve_num_sms(_req(num_sms=0)) == 304  # constant, not 256
     finally:
         p.restore()
 
@@ -130,7 +139,7 @@ def test_ignores_bad_env():
         p.attr(hipm, "get_device_arch", lambda *a, **k: None)
         p.attr(A, "_device_num_cus", lambda: None)
         p.env("ROCKE_NUM_SMS", "garbage")
-        assert _resolve_num_sms(_req(num_sms=0)) == 304   # gfx942 fallback
+        assert _resolve_num_sms(_req(num_sms=0)) == 304  # gfx942 fallback
         p.env("ROCKE_NUM_SMS", "0")
         assert _resolve_num_sms(_req(num_sms=0)) == 304
     finally:
@@ -139,9 +148,19 @@ def test_ignores_bad_env():
 
 def _prob(nsms, *, nq=64, nk=8, D=64, kv=8192, batch=64):
     return UnifiedAttentionProblem(
-        total_q=batch, num_seqs=batch, num_query_heads=nq, num_kv_heads=nk,
-        head_size=D, block_size=16, max_seqlen_q=1, max_seqlen_k=kv,
-        dtype="bf16", sliding_window=0, use_sinks=False, num_sms=nsms)
+        total_q=batch,
+        num_seqs=batch,
+        num_query_heads=nq,
+        num_kv_heads=nk,
+        head_size=D,
+        block_size=16,
+        max_seqlen_q=1,
+        max_seqlen_k=kv,
+        dtype="bf16",
+        sliding_window=0,
+        use_sinks=False,
+        num_sms=nsms,
+    )
 
 
 def test_routing_scales_with_num_sms():
@@ -170,13 +189,26 @@ def test_segments_bounded_after_bump():
         u120 = au._num_segments(_prob(120, nq=32, nk=8, D=128, kv=32768, batch=1))
         u304 = au._num_segments(_prob(304, nq=32, nk=8, D=128, kv=32768, batch=1))
         assert u304 > u120, f"kv32768 should scale: {u120} -> {u304}"
+
         # q>1 (prefill / spec-decode) D128: the else-branch clamp also holds
         def qprob(nsms):
             return UnifiedAttentionProblem(
-                total_q=4, num_seqs=1, num_query_heads=32, num_kv_heads=8,
-                head_size=128, block_size=16, max_seqlen_q=4, max_seqlen_k=8192,
-                dtype="bf16", sliding_window=0, use_sinks=False, num_sms=nsms)
-        q120 = au._num_segments(qprob(120)); q304 = au._num_segments(qprob(304))
+                total_q=4,
+                num_seqs=1,
+                num_query_heads=32,
+                num_kv_heads=8,
+                head_size=128,
+                block_size=16,
+                max_seqlen_q=4,
+                max_seqlen_k=8192,
+                dtype="bf16",
+                sliding_window=0,
+                use_sinks=False,
+                num_sms=nsms,
+            )
+
+        q120 = au._num_segments(qprob(120))
+        q304 = au._num_segments(qprob(304))
         assert q120 == q304, f"q>1 clamp must hold: {q120} -> {q304}"
     finally:
         au._RESOLVED_ATTENTION_ARCH = None
