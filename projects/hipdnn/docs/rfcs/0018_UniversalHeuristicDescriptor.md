@@ -351,10 +351,25 @@ launch, and selection share one binding:
 | **Device** | `$device.*` | `$device.cu_count`, `$device.lds_size` | Shared across candidates |
 | **Kernel** | `$kernel.*` | `$kernel.tile_m`, `$kernel.split_k` | Per-candidate (from UKD `metadata`) |
 
-Problem features are dims, dtypes, stride order, and op attributes bound by the matcher set. Device
-features come from the same device-facts path [RFC 0007 §6](0007_EngineSelectionHeuristicsFramework.md#6-device-properties)
+Problem features are dims, dtypes, stride order, and op attributes bound by the matcher set.
+
+> **Implementation note — `$q.*` is op-specific.** The problem namespace differs per operation: SDPA
+> exposes `batch`, `seqlen_q`, `seqlen_k`, `num_heads`, `head_dim`; convolution exposes `n`, `c`, `h`,
+> `w`, `k`, `r`, `s`, `pad`, `stride`, `dilation`; MoE exposes `num_experts`, `top_k`, `hidden_dim`,
+> etc. The engine is op-scoped, so its UHD's `$q.*` references are implicitly valid for that op. The
+> extractor evaluates whatever fields the signature names; the caller provides them from the bound
+> match variables.
+
+Device features come from the same device-facts path [RFC 0007 §6](0007_EngineSelectionHeuristicsFramework.md#6-device-properties)
 defines. Kernel features are the compilation knobs the pack's KMD declares ([Section 4.2](#42-two-kinds-of-knobs)) —
 these distinguish candidates within a pack and are what make argmax meaningful.
+
+> **Implementation note — `$device.*` fields.** The device namespace exposes what rocminfo (or
+> equivalent HIP runtime queries) provides and what proves predictive for kernel selection. Expected
+> fields include: `arch` (e.g., `gfx942`, `gfx950`), `cu_count`, `lds_size`, `sgpr_count`, `vgpr_count`,
+> `max_waves_per_cu`, `memory_clock_mhz`, `memory_bus_width`, `peak_bandwidth_gbps`. The exact set will
+> be finalized against rocKE's existing device-feature vocabulary and extended as real sweeps reveal
+> additional predictive properties.
 
 ### 7.2 The `features_signature`
 
@@ -631,6 +646,13 @@ rank engines without enumerating candidates — cheaper at selection time. If A 
 predicted score over candidates), there's one fewer model to train and maintain, but the quick policy
 must evaluate B to get A. The tradeoff is selection-time cost vs. training/maintenance complexity.
 **OPEN:** See [Open Question 6](#structural).
+
+> **Suggestion:** The two-policy design implicitly requires A to be distinct. The quick policy's value
+> is that only the winning engine runs B — losers never enumerate candidates. If A is derived from B,
+> every engine must run B to produce A, collapsing quick and thorough into the same operation. The
+> "cheap (no config enumeration)" property of A ([Section 12.1](#121-two-heuristics) table) depends on
+> A being a separate model trained on `f(graph)` alone, not `f(graph, candidates)`. See
+> [Open Question 6](#structural).
 
 ### 12.2 Two Engine-Selection Policies (RFC 0007)
 
