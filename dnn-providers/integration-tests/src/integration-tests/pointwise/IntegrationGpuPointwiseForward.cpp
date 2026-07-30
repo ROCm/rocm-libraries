@@ -88,25 +88,12 @@ public:
 protected:
     void runGraphTest() override
     {
-        runGraphTest(1e-5f);
-    }
-
-    // Tolerance is a fixed per-dtype constant rather than resolved via
-    // this->getTolerance(). That helper determines tolerance by walking the graph
-    // for a "root op" other than PointwiseNode (so that, e.g., a Conv+ReLU fused
-    // graph is toleranced based on Conv, not the fused activation). These tests
-    // build graphs whose only node is the PointwiseNode itself, so no such root op
-    // exists and getTolerance() would fail to resolve a tolerance. Once the harness
-    // supports a standalone PointwiseNode as its own root, this should switch to
-    // this->getTolerance(graphObj, outputs.y) like the other suites.
-    void runGraphTest(float tolerance)
-    {
         const auto& testCase = this->GetParam();
         const auto& [layout, pwTestCase, activTestCase] = testCase;
 
         auto [graphObj, outputs] = buildGraph(getSharedHandle(), testCase);
 
-        this->registerValidator(outputs.y, tolerance);
+        this->registerValidator(outputs.y, this->getTolerance(graphObj, outputs.y));
 
         this->setTestCaseLayout(layout.name);
         this->setTestCaseNote(activTestCase.note);
@@ -123,13 +110,13 @@ using IntegrationGpuPointwiseForwardFp16 = PointwiseForward<half>;
 GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuPointwiseForwardFp32);
 TEST_P(IntegrationGpuPointwiseForwardFp32, Correctness)
 {
-    runGraphTest(1e-5f);
+    runGraphTest();
 }
 
 GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuPointwiseForwardFp16);
 TEST_P(IntegrationGpuPointwiseForwardFp16, Correctness)
 {
-    runGraphTest(1e-3f);
+    runGraphTest();
 }
 
 INSTANTIATE_TEST_SUITE_P(
