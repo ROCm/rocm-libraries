@@ -183,7 +183,14 @@ def _assert_resources_fit(art, *, arch: str, kernel_name: str = ""):
 # instead of a hand-guessed geometry (each arch's spec class carries different
 # fields). Kept curated, not a cartesian product: one compile per shipped variant.
 def _budget_problem(
-    *, head_size, num_query_heads, num_kv_heads, dtype, seq=2048, block_size=64
+    *,
+    head_size,
+    num_query_heads,
+    num_kv_heads,
+    dtype,
+    seq=2048,
+    block_size=64,
+    sliding_window=0,
 ):
     return UnifiedAttentionProblem(
         total_q=seq,
@@ -195,6 +202,7 @@ def _budget_problem(
         max_seqlen_q=seq,
         max_seqlen_k=seq,
         dtype=dtype,
+        sliding_window=sliding_window,
     )
 
 
@@ -224,6 +232,31 @@ _TILED_2D_BUDGET_GEOMETRIES = [
         "fp16_d64_gqa64x8",
         "gfx942",
         dict(head_size=64, num_query_heads=64, num_kv_heads=8, dtype="fp16"),
+    ),
+    # Sliding-window D128 takes a SEPARATE non-ring geometry (the flash/ring
+    # paths gate on ``sliding_window == 0``; SW picks its own tile), so LDS/reg
+    # pressure changes there are not covered by the plain-causal rows above.
+    (
+        "fp16_d128_sw_gqa32x8",
+        "gfx942",
+        dict(
+            head_size=128,
+            num_query_heads=32,
+            num_kv_heads=8,
+            dtype="fp16",
+            sliding_window=128,
+        ),
+    ),
+    (
+        "bf16_d128_sw_gqa32x8",
+        "gfx942",
+        dict(
+            head_size=128,
+            num_query_heads=32,
+            num_kv_heads=8,
+            dtype="bf16",
+            sliding_window=128,
+        ),
     ),
 ]
 
