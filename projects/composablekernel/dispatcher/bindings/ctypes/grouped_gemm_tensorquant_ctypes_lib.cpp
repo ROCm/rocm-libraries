@@ -186,7 +186,7 @@ int dispatcher_run_tensorquant_gemm(const void* A,
     // Allocate device buffers.
     HIP_CHECK(hipMalloc(&A_dev, elements_to_bytes<ADataType>(M * K)));
     HIP_CHECK(hipMalloc(&B_dev, elements_to_bytes<BDataType>(K * N)));
-    // TensorQuant: single scalar scale per tensor — 1 element each
+    // TensorQuant: single scalar scale per tensor -- 1 element each
     HIP_CHECK(hipMalloc(&AQ_dev, elements_to_bytes<AQDataType>(1)));
     HIP_CHECK(hipMalloc(&BQ_dev, elements_to_bytes<BQDataType>(1)));
     HIP_CHECK(hipMalloc(&C_dev, elements_to_bytes<CDataType>(M * N)));

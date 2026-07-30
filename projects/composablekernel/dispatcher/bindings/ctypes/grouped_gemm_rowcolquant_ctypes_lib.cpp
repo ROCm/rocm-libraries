@@ -182,9 +182,9 @@ int dispatcher_run_rowcolquant_gemm(const void* A,
     // Allocate device buffers.
     HIP_CHECK(hipMalloc(&A_dev, elements_to_bytes<ADataType>(M * K)));
     HIP_CHECK(hipMalloc(&B_dev, elements_to_bytes<BDataType>(K * N)));
-    // AQ: per-row scale [M, 1] — QK_A rows, 1 col
+    // AQ: per-row scale [M, 1] -- QK_A rows, 1 col
     HIP_CHECK(hipMalloc(&AQ_dev, elements_to_bytes<AQDataType>(QK_A)));
-    // BQ: per-col scale [1, N] — 1 row, QK_B cols
+    // BQ: per-col scale [1, N] -- 1 row, QK_B cols
     HIP_CHECK(hipMalloc(&BQ_dev, elements_to_bytes<BQDataType>(QK_B)));
     HIP_CHECK(hipMalloc(&C_dev, elements_to_bytes<CDataType>(M * N)));
 
