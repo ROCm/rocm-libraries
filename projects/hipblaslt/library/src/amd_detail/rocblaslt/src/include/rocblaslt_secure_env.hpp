@@ -88,6 +88,10 @@ inline bool rocblaslt_env_suppressed_for_security_impl(const char* name, bool is
 // Like std::getenv, but returns nullptr when the process is privileged (see
 // rocblaslt_process_is_privileged). Use this for any environment variable that
 // selects a filesystem path from which code objects or libraries are loaded.
+//
+// A call site that also emits the suppression diagnostic should instead probe
+// once with rocblaslt_process_is_privileged() and pass the result to both
+// _impl helpers, so the common (override unset) path does not repeat the probe.
 inline const char* rocblaslt_secure_getenv(const char* name)
 {
     return rocblaslt_secure_getenv_impl(name, rocblaslt_process_is_privileged());

@@ -39,17 +39,21 @@ std::shared_ptr<GemmKernel> createWaveGemmKernel(const std::string&           cu
 
 std::filesystem::path getCoPath()
 {
-    // ROCM-26729 / SEC-00896: use the privilege-aware accessor so a
-    // set-uid/set-gid process cannot be redirected to an attacker-controlled
-    // code-object directory via inherited environment.
-    if(const char* env = rocblaslt_secure_getenv("HIPBLASLT_TENSILE_LIBPATH"))
+    // ROCM-26729 / SEC-00896: use the privilege-aware accessor so a process in a
+    // secure execution context cannot be redirected to an attacker-controlled
+    // code-object directory via inherited environment. Probe the privilege state
+    // once and reuse it for both the lookup and the suppression diagnostic.
+    const bool is_privileged = rocblaslt_process_is_privileged();
+
+    if(const char* env = rocblaslt_secure_getenv_impl("HIPBLASLT_TENSILE_LIBPATH", is_privileged))
         return env;
 
-    if(rocblaslt_env_suppressed_for_security("HIPBLASLT_TENSILE_LIBPATH"))
+    if(rocblaslt_env_suppressed_for_security_impl("HIPBLASLT_TENSILE_LIBPATH", is_privileged))
     {
         std::cerr << "rocblaslt warning: ignoring HIPBLASLT_TENSILE_LIBPATH because the "
-                     "process is running with elevated privileges (set-uid/set-gid); "
-                     "falling back to the default library location."
+                     "process is running in a secure execution context (set-uid/set-gid or "
+                     "another credential-changing exec, such as file capabilities); falling "
+                     "back to the default library location."
                   << std::endl;
     }
 

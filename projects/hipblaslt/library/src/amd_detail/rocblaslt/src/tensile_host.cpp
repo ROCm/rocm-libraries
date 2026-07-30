@@ -2781,9 +2781,13 @@ namespace
             std::string processor = rocblaslt_internal_get_arch_name();
 
             // ROCM-26729 / SEC-00896: use the privilege-aware accessor so a
-            // set-uid/set-gid process cannot be redirected to an attacker-
-            // controlled code-object directory via inherited environment.
-            const char* env = rocblaslt_secure_getenv("HIPBLASLT_TENSILE_LIBPATH");
+            // process in a secure execution context cannot be redirected to an
+            // attacker-controlled code-object directory via inherited
+            // environment. Probe the privilege state once and reuse it for both
+            // the lookup and the suppression diagnostic.
+            const bool  is_privileged = rocblaslt_process_is_privileged();
+            const char* env
+                = rocblaslt_secure_getenv_impl("HIPBLASLT_TENSILE_LIBPATH", is_privileged);
             if(env)
             {
                 if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)
@@ -2796,12 +2800,14 @@ namespace
             }
             else
             {
-                if(rocblaslt_env_suppressed_for_security("HIPBLASLT_TENSILE_LIBPATH"))
+                if(rocblaslt_env_suppressed_for_security_impl("HIPBLASLT_TENSILE_LIBPATH",
+                                                              is_privileged))
                 {
                     std::ostringstream msg;
                     msg << "Ignoring HIPBLASLT_TENSILE_LIBPATH because the process is running "
-                           "with elevated privileges (set-uid/set-gid); falling back to the "
-                           "default library location."
+                           "in a secure execution context (set-uid/set-gid or another "
+                           "credential-changing exec, such as file capabilities); falling back "
+                           "to the default library location."
                         << std::endl;
                     log_error(__func__, msg.str());
                 }
