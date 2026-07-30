@@ -163,6 +163,12 @@ target_compile_options(${INTEGRATION_TESTS_EXE} PRIVATE ${INTEGRATION_TESTS_WARN
 
 clang_tidy_check(${INTEGRATION_TESTS_EXE})
 
+# NOTE: hipdnn_integration_tests is intentionally NOT registered as a tiered
+# ctest target here. The bundle sweep tests it carries exercise the plugin, so
+# they are driven by each provider's add_external_integration_test_target()
+# (see dnn-providers/miopen-provider) which runs this binary against a specific
+# engine and selects tests via that provider's test_categories_integration.yaml.
+
 add_subdirectory(gpu-ref)
 add_subdirectory(tests)
 
