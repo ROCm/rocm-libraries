@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cstdint>
+#include <iostream>
 #include <iterator>
 #include <memory>
 #include <utility>
@@ -38,6 +39,10 @@ enum class ReplayMode {
 // multi-group mode.
 constexpr ReplayMode kReplayMode = ReplayMode::SingleGroup;
 
+// A group is consecutive memory instructions of the same hardware type:
+// SMEM, VMEM (global/flat/scratch/buffer), or Other (TDM in single-group
+// mode). GroupState records the type, whether the group has non-atomic memory,
+// and source register DWORDs that must remain intact until it drains.
 struct GroupState {
     MemoryGroupKind kind = MemoryGroupKind::None;
     bool hasMemory = false;
@@ -93,6 +98,11 @@ bool hasSelfDestSourceOverlap(const StinkyInstruction& inst) {
     return hasDestSourceOverlap(inst, sources);
 }
 
+bool violatesFlatSourceRule(const StinkyInstruction& inst, const GroupState& state) {
+    if (!state.hasMemory) return false;  // A single-instruction group may self-overlap.
+    return hasDestSourceOverlap(inst, state.sources) || hasSelfDestSourceOverlap(inst);
+}
+
 bool isFullXcntDrain(const StinkyInstruction& inst) {
     if (inst.getUnifiedOpcode() != GFX::s_wait_xcnt) return false;
     const auto& srcs = inst.getSrcRegs();
@@ -107,6 +117,10 @@ bool isForeverSleep(const StinkyInstruction& inst) {
     return (static_cast<uint16_t>(srcs.front().getLiteralInt()) & 0x8000U) != 0;
 }
 
+bool isScalarPrefetch(const StinkyInstruction& inst) {
+    return inst.getUnifiedOpcode() == GFX::s_prefetch_inst_pc_rel;
+}
+
 bool isImmediateMemorySuccessor(BasicBlock::iterator it, BasicBlock& bb, ReplayMode replayMode) {
     for (auto next = std::next(it); next != bb.end(); ++next) {
         auto* inst = dyn_cast<StinkyInstruction>(next.getNodePtr());
@@ -118,6 +132,13 @@ bool isImmediateMemorySuccessor(BasicBlock::iterator it, BasicBlock& bb, ReplayM
 
 void addSources(GroupState& state, const StinkyInstruction& inst) {
     addSources(state.sources, inst);
+}
+
+void warnUnrepairableSmemSelfOverlap(const BasicBlock& bb, const StinkyInstruction& inst) {
+    std::cerr << "[Gfx1250HazardPass] warning: SMEM instruction \""
+              << inst.getHwInstDesc()->mnemonic << "\" in block \"" << bb.getLabel()
+              << "\" overwrites one of its own source registers; "
+                 "s_wait_xcnt cannot repair this register allocation\n";
 }
 
 void assertFallthrough(const BasicBlock& previous, const BasicBlock& next) {
@@ -197,6 +218,12 @@ class Gfx1250HazardPass : public Pass {
                     continue;
                 }
 
+                if (isScalarPrefetch(*inst)) {
+                    if (state.hasMemory) insertXcntDrain(builder, archId, inst, state);
+                    state.clear();
+                    continue;
+                }
+
                 if (inst->getUnifiedOpcode() == GFX::s_set_vgpr_msb) {
                     if (!isImmediateMemorySuccessor(it, bb, kReplayMode) && state.hasMemory)
                         insertXcntDrain(builder, archId, inst, state);
@@ -213,33 +240,49 @@ class Gfx1250HazardPass : public Pass {
                     continue;
                 }
 
+                // Single-group hardware drains XCNT at an SMEM/VMEM/Other
+                // type switch, so no replay sources survive into the new
+                // group.
+                //
+                // Note: Multi-group only fences VMEM <-> SMEM and needs
+                //       cross-group dataflow analysis (Future TODO if frontend
+                //       enables Multi-group mode).
                 if (state.hasMemory && state.kind != kind) state.clear();
 
                 const bool atomic = isAtomic(*inst);
                 if (atomic && state.hasNonAtomic) insertXcntDrain(builder, archId, inst, state);
 
-                // SMEM groups replay as a unit. An individual SMEM instruction
-                // with a self-overlapping destination is not repairable here:
-                // its register allocation must already be valid. We can repair
-                // only an overwrite of an earlier group member's source.
+                // Single-group replay-source rules:
+                //
+                // 1. Global / Buffer / Scratch / Image:
+                //    (a) in order; an op may overwrite its own or a peer's source.
+                // 2. FLAT:
+                //    (a) must not overwrite a group source;
+                //    (b) a single instruction FLAT group may overwrite its own source.
+                // 3. SMEM:
+                //    (a) no instruction may overwrite any group source.
+                // 4. Atomic / RMW:
+                //    (a) drain before the first atomic after non-atomic memory;
+                //    (b) consecutive atomics need no intervening drain due to the
+                //        XNACK scoreboard.
+
+                // Apply rule 3:
+                if (kind == MemoryGroupKind::SMEM && hasSelfDestSourceOverlap(*inst))
+                    warnUnrepairableSmemSelfOverlap(bb, *inst);
+
                 if (kind == MemoryGroupKind::SMEM && state.hasMemory &&
                     hasDestSourceOverlap(*inst, state.sources)) {
                     insertXcntDrain(builder, archId, inst, state);
                 }
 
-                // A FLAT in a multi-instruction VMEM group must not overwrite
-                // any group source, including its own source. Consecutive
-                // atomics are exempt: the XNACK scoreboard guarantees their
-                // exactly-once execution after the drain before the first one.
-                const bool atomicOnlyGroup = state.hasMemory && !state.hasNonAtomic;
-                if (kind == MemoryGroupKind::VMEM && isFlat(*inst) &&
-                    !(atomic && atomicOnlyGroup)) {
-                    const bool overwritesPriorSource =
-                        state.hasMemory && hasDestSourceOverlap(*inst, state.sources);
-                    const bool overwritesOwnSource =
-                        state.hasMemory && hasSelfDestSourceOverlap(*inst);
-                    if (overwritesPriorSource || overwritesOwnSource)
-                        insertXcntDrain(builder, archId, inst, state);
+                // Rule 2: a FLAT must not clobber a source in a multi-op group.
+                const bool violatesRule2 = kind == MemoryGroupKind::VMEM && isFlat(*inst) &&
+                                           violatesFlatSourceRule(*inst, state);
+
+                // Rule 4(b): do not drain between consecutive atomics.
+                const bool exemptByRule4b = atomic && state.hasMemory && !state.hasNonAtomic;
+                if (violatesRule2 && !exemptByRule4b) {
+                    insertXcntDrain(builder, archId, inst, state);
                 }
 
                 state.kind = kind;

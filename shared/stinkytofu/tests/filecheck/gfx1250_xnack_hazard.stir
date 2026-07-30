@@ -83,3 +83,38 @@ st.func @single_group_tensor_is_other() {
   "st.tensor_load_to_lds"(s[0:3], s[4:11]) { mod.memtoken = { tokens = [0] } }
   v3 = "st.global_atomic_inc_u32"(v1, v2, s[14:15])
 }
+
+# A self-overlapping SMEM load is not repairable with a drain. The pass emits
+# a warning and leaves register allocation unchanged.
+# CHECK-LABEL: @smem_self_overlap
+# CHECK: s_load_b32
+# CHECK-NOT: s_wait_xcnt
+st.func @smem_self_overlap() {
+^entry:
+  s0 = "st.s_load_b32"(s[0:1])
+}
+
+# Existing prefetches run before the later SW-prefetch pass and need their own
+# XCnt drain when a memory group is still outstanding.
+# CHECK-LABEL: @existing_scalar_prefetch
+# CHECK: buffer_load_b32
+# CHECK-NEXT: s_wait_xcnt"(0)
+# CHECK-NEXT: s_prefetch_inst_pc_rel
+st.func @existing_scalar_prefetch() {
+^entry:
+  v9 = "st.buffer_load_b32"(v0)
+  "st.s_prefetch_inst_pc_rel"(0, s0, 0)
+}
+
+# A single drain covers a consecutive prefetch sequence.
+# CHECK-LABEL: @consecutive_scalar_prefetches
+# CHECK: buffer_load_b32
+# CHECK-NEXT: s_wait_xcnt"(0)
+# CHECK-NEXT: s_prefetch_inst_pc_rel
+# CHECK-NEXT: s_prefetch_inst_pc_rel
+st.func @consecutive_scalar_prefetches() {
+^entry:
+  v9 = "st.buffer_load_b32"(v0)
+  "st.s_prefetch_inst_pc_rel"(0, s0, 0)
+  "st.s_prefetch_inst_pc_rel"(4, s0, 0)
+}

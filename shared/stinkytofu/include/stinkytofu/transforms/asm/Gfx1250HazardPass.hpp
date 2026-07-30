@@ -14,9 +14,10 @@ class Pass;
 /// Insert gfx1250 / MI450 assembly hazards that cannot be left to hardware.
 ///
 /// The initial policy implements XNACK replay protection for FLAT and SMEM
-/// source clobbers, atomics/RMW operations, forever s_sleep, and non-adjacent
-/// s_set_vgpr_msb. Future gfx1250 hazards belong here when they require a
-/// late whole-kernel view of the final instruction order.
+/// source clobbers, atomics/RMW operations, existing s_prefetch instructions,
+/// forever s_sleep, and non-adjacent s_set_vgpr_msb. Future gfx1250 hazards
+/// belong here when they require a late whole-kernel view of the final
+/// instruction order.
 ///
 /// Requires a correctly built CFG. In particular, a replay group that crosses
 /// a physical basic-block boundary must have the corresponding fall-through
