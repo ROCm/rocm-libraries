@@ -3686,14 +3686,18 @@ class TestBothBackendDifferentialGate(unittest.TestCase):
         from rocke.core.backend import BackendError, _lower_via_cpp_engine, _text_diff
         from rocke.core.ir_serialize import serialize
         from rocke.core.isa.backend import wired_arches
-        from rocke.core.lower_llvm import lower_kernel_to_llvm
+        from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
 
         arches = wired_arches()
         self.assertIn("gfx1250", arches)
         for arch in arches:
             with self.subTest(arch=arch):
                 kernel = self._kernel()
-                py_ir = lower_kernel_to_llvm(kernel, arch=arch)
+                # The reference side is the native lowerer, not the dispatching
+                # chokepoint: setUp puts the class in backend="both", so going
+                # through it here would demand the C++ extension before the
+                # skip below can excuse its absence.
+                py_ir = _lower_kernel_to_llvm_python(kernel, arch=arch)
                 try:
                     cpp_ir = _lower_via_cpp_engine(serialize(kernel), arch, None)
                 except BackendError as e:

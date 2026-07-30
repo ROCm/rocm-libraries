@@ -280,7 +280,12 @@ static bool ll_climb_rocm_version(const char* start_dir, int* out_major, int* ou
 /* Python runtime_coexistence._version_key, as a comparison: compare the runs of
  * digits in each name as an integer sequence so "rocm-7.10" sorts NEWER than
  * "rocm-7.2" (a plain strcmp gets this backwards, because '1' < '2'). Returns
- * >0 when `a` is newer than `b`. A name with no digits sorts oldest. */
+ * >0 when `a` is newer than `b`. A name with no digits sorts oldest.
+ *
+ * Only the two dirent scans below order names, and both are POSIX-only, so the
+ * definition carries their guard: unguarded it is dead code on Windows, which
+ * that build rejects (-Werror,-Wunused-function). */
+#ifndef _WIN32
 static int ll_rocm_name_newer(const char* a, const char* b)
 {
     const char* pa = a;
@@ -310,6 +315,7 @@ static int ll_rocm_name_newer(const char* a, const char* b)
             return (va > vb) ? 1 : -1;
     }
 }
+#endif /* !_WIN32 */
 
 /* Does <libdir>/libamd_comgr.so[.3] exist? Python's _candidate_lib_paths gives
  * each discovered libdir the bare .so plus the SONAME-suffixed variants; we
