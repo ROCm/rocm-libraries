@@ -15,6 +15,7 @@ on:
   push:
     branches:
       - develop
+      - users/danielsu/miopen-host-asan   # TEMP: exercise host-asan path on this branch; revert before merge
   workflow_dispatch:
     inputs:
       linux_amdgpu_families:
