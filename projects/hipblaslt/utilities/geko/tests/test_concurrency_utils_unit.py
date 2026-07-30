@@ -6,6 +6,7 @@ from __future__ import annotations
 import os
 import signal
 import subprocess
+import pytest
 
 from geko.concurrency import utils as cutils
 
