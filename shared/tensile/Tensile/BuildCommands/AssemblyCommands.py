@@ -31,7 +31,7 @@ from pathlib import Path
 from typing import List, Optional, Union
 
 from .. import Utils
-from ..Common import ensurePath, gfxName, globalParameters, printWarning, tPrint
+from ..Common import assemblyTarget, ensurePath, gfxName, globalParameters, printWarning, tPrint
 from ..KernelWriterAssembly import KernelWriterAssembly
 from ..SolutionStructs import Solution
 from .SharedCommands import compressCodeObject
@@ -113,6 +113,7 @@ def buildAssemblyCodeObjectFiles(
     coFiles = []
     for arch, archKernels in archKernelMap.items():
         gfx = gfxName(arch)
+        target = assemblyTarget(arch)
         objectFiles = [
             str(asmDir / (writer.getKernelFileBase(k) + extObj))
             for k in archKernels
@@ -145,7 +146,7 @@ def buildAssemblyCodeObjectFiles(
 
                 _linkIntoCodeObject(objFiles, coFileRaw, writer, maxLineLength)
                 coFile = destDir / coFileRaw.name.replace(extCoRaw, extCo)
-                compressCodeObject(coFileRaw, coFile, gfx, bundler)
+                compressCodeObject(coFileRaw, coFile, target, bundler)
                 coFiles.append(coFile)
 
         else:

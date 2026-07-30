@@ -23,7 +23,7 @@
 ################################################################################
 
 from . import Code
-from .Common import gfxName, globalParameters, getCOVFromParam, isGfx12, tPrint, printExit, printWarning, roundUp
+from .Common import assemblyTarget, gfxName, globalParameters, getCOVFromParam, isGfx12, tPrint, printExit, printWarning, roundUp
 from .Component import Component
 from .KernelWriter import KernelWriter
 from .SolutionStructs import isPackedIndex
@@ -283,7 +283,7 @@ class KernelWriterAssembly(KernelWriter):
     cov = getCOVFromParam(globalParameters["CodeObjectVersion"])
     rv += ['-mcode-object-version=%s' % (cov)]
 
-    rv += ['-mcpu=' + gfxName(isa)]
+    rv += ['-mcpu=' + assemblyTarget(isa)]
 
     if wavefrontSize == 64:
       rv += ['-mwavefrontsize64']

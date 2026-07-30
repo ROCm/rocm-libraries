@@ -23,9 +23,14 @@
 ################################################################################
 
 from ..Component import Signature
-from ..Common import globalParameters, getCOVFromParam, gfxName
+from ..Common import assemblyTarget, globalParameters, getCOVFromParam, gfxName
 
 from math import ceil
+
+
+def assemblyTargetDirective(isa, endLine):
+    return '.amdgcn_target "amdgcn-amd-amdhsa--%s"%s' % (assemblyTarget(isa), endLine)
+
 
 def getSrcValueType(kernel, isTypeA):
     # special cases for F8 datatypes
@@ -80,8 +85,7 @@ class SignatureDefault(Signature):
         kStr = self.commentHeader()
 
         # begin kernel descriptor
-        kStr += ".amdgcn_target \"amdgcn-amd-amdhsa--%s\"%s" \
-            % (gfxName(writer.version), writer.endLine)
+        kStr += assemblyTargetDirective(writer.version, writer.endLine)
 
         kStr += ".text%s" % writer.endLine
         kStr += ".protected %s%s" % (writer.kernelName, writer.endLine)
@@ -201,7 +205,7 @@ class SignatureDefault(Signature):
         elif cov == 5:
             kStr += "  - 2\n"
         kStr += "amdhsa.target: amdgcn-amd-amdhsa--%s%s" \
-            % (gfxName(writer.version), writer.endLine)
+            % (assemblyTarget(writer.version), writer.endLine)
         kStr += "amdhsa.kernels:\n"
         kStr += "  - .name: %s%s" % (writer.kernelName, writer.endLine)
         kStr += "    .symbol: '%s.kd'%s" % (writer.kernelName, writer.endLine)

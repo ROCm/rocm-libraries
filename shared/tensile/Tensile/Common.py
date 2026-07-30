@@ -2344,6 +2344,18 @@ def splitArchs():
     return archs, cmdlineArchs
 
 
+def assemblyTarget(isaVersion):
+  """Return the full requested target ID for an assembly ISA when unambiguous."""
+  architecture = globalParameters["Architecture"]
+  requested = architecture.split(";") if ";" in architecture else architecture.split("_")
+  matches = sorted({target for target in requested if gfxArch(target) == isaVersion})
+  if len(matches) == 1:
+    return matches[0]
+  if len(matches) > 1 and isaVersion == (9, 0, 12):
+    raise ValueError("classic Tensile cannot assemble multiple gfx90c XNACK variants in one invocation")
+  return gfxName(isaVersion)
+
+
 def populateCapabilities(
     globalParameters: Dict[str, Any], cachedAsmCaps: Dict[IsaVersion, dict], hipVer: SemanticVersion
 ):

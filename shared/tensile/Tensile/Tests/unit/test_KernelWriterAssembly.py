@@ -26,13 +26,86 @@ from Tensile.KernelWriterAssembly import KernelWriterAssembly
 from Tensile.AsmRegisterPool import RegisterPool
 from Tensile.KernelWriter import KernelWriter
 from Tensile.Common import globalParameters
+from Tensile.Components.Signature import assemblyTargetDirective
 import collections
 import inspect
+import shutil
+import subprocess
 from types import SimpleNamespace
+
+import pytest
 
 class KernelDict(dict):
     def __getattr__(self, name):
         return self[name]
+
+
+def test_gfx90c_assembly_compile_and_directive_preserve_xnack():
+    old_architecture = globalParameters["Architecture"]
+    old_assembler = globalParameters["AssemblerPath"]
+    old_code_object = globalParameters["CodeObjectVersion"]
+    try:
+        globalParameters["Architecture"] = "gfx90c:xnack+"
+        globalParameters["AssemblerPath"] = "/opt/rocm/bin/amdclang++"
+        globalParameters["CodeObjectVersion"] = "V4"
+        writer = object.__new__(KernelWriterAssembly)
+        writer.version = (9, 0, 12)
+        writer.kernel = {"WavefrontSize": 64}
+
+        args = writer.getCompileArgs("kernel.s", "kernel.o")
+
+        assert "-mcpu=gfx90c:xnack+" in args
+        assert assemblyTargetDirective((9, 0, 12), "\n") == \
+            '.amdgcn_target "amdgcn-amd-amdhsa--gfx90c:xnack+"\n'
+    finally:
+        globalParameters["Architecture"] = old_architecture
+        globalParameters["AssemblerPath"] = old_assembler
+        globalParameters["CodeObjectVersion"] = old_code_object
+
+
+def test_gfx90c_classic_assembly_has_xnack_on_elf_feature(tmp_path):
+    assembler = shutil.which("amdclang++")
+    readobj = shutil.which("llvm-readobj")
+    if assembler is None or readobj is None:
+        pytest.skip("an AMDGPU assembler and llvm-readobj are required")
+
+    old_architecture = globalParameters["Architecture"]
+    old_assembler = globalParameters["AssemblerPath"]
+    old_code_object = globalParameters["CodeObjectVersion"]
+    try:
+        globalParameters["Architecture"] = "gfx90c:xnack+"
+        globalParameters["AssemblerPath"] = assembler
+        globalParameters["CodeObjectVersion"] = "V4"
+        writer = object.__new__(KernelWriterAssembly)
+        writer.version = (9, 0, 12)
+        writer.kernel = {"WavefrontSize": 64}
+        source = tmp_path / "target.s"
+        obj = tmp_path / "target.o"
+        source.write_text(
+            ".text\n"
+            + assemblyTargetDirective((9, 0, 12), "\n")
+            + ".globl classic_gfx90c_target_test\n"
+            + ".p2align 8\n"
+            + ".type classic_gfx90c_target_test,@function\n"
+            + "classic_gfx90c_target_test:\n"
+            + "  s_endpgm\n",
+            encoding="utf-8",
+        )
+
+        subprocess.run(writer.getCompileArgs(str(source), str(obj)), check=True)
+        inspected = subprocess.run(
+            [readobj, "--file-headers", str(obj)],
+            text=True,
+            capture_output=True,
+            check=True,
+        ).stdout
+
+        assert "EF_AMDGPU_MACH_AMDGCN_GFX90C" in inspected
+        assert "EF_AMDGPU_FEATURE_XNACK_ON_V4" in inspected
+    finally:
+        globalParameters["Architecture"] = old_architecture
+        globalParameters["AssemblerPath"] = old_assembler
+        globalParameters["CodeObjectVersion"] = old_code_object
 
 def test_gfx12_compatibility_checks_do_not_apply_to_future_isa():
     kw = KernelWriterAssembly("","")

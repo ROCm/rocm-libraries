@@ -27,6 +27,7 @@ from __future__ import print_function
 import Tensile.Common as Common
 
 import os
+import pytest
 
 def test_gfxArch():
     assert Common.gfxArch('gfx9') is None
@@ -72,3 +73,28 @@ def test_paths():
 def test_architectureMap():
     assert Common.architectureMap["gfx90c"] == "vega10"
     assert Common.architectureMap["gfx90c:xnack+"] == "vega10"
+
+
+def test_gfx90c_assembly_target_preserves_xnack():
+    old_architecture = Common.globalParameters["Architecture"]
+    try:
+        Common.globalParameters["Architecture"] = "gfx90c:xnack+"
+        assert Common.assemblyTarget((9, 0, 12)) == "gfx90c:xnack+"
+
+        Common.globalParameters["Architecture"] = "gfx90c:xnack-"
+        assert Common.assemblyTarget((9, 0, 12)) == "gfx90c:xnack-"
+
+        Common.globalParameters["Architecture"] = "gfx90c"
+        assert Common.assemblyTarget((9, 0, 12)) == "gfx90c"
+    finally:
+        Common.globalParameters["Architecture"] = old_architecture
+
+
+def test_gfx90c_assembly_target_rejects_multiple_xnack_variants():
+    old_architecture = Common.globalParameters["Architecture"]
+    try:
+        Common.globalParameters["Architecture"] = "gfx90c:xnack+;gfx90c:xnack-"
+        with pytest.raises(ValueError, match="multiple gfx90c XNACK variants"):
+            Common.assemblyTarget((9, 0, 12))
+    finally:
+        Common.globalParameters["Architecture"] = old_architecture
