@@ -132,9 +132,9 @@ def _soft_fp8_to_f32(arr: np.ndarray, dtype: str) -> np.ndarray:
     max_exp_bits = (1 << ebits) - 1
     out = np.zeros(flat.shape, dtype=np.float32)
     for i, byte in enumerate(flat):
-        sign = (byte >> 7) & 1
-        exp_bits = (byte >> mbits) & ((1 << ebits) - 1)
-        mant_bits = byte & ((1 << mbits) - 1)
+        sign = int((byte >> 7) & 1)
+        exp_bits = int((byte >> mbits) & ((1 << ebits) - 1))
+        mant_bits = int(byte & ((1 << mbits) - 1))
         if dtype == "fp8" and exp_bits == max_exp_bits and mant_bits == (1 << mbits) - 1:
             out[i] = float('nan')
         elif dtype == "bf8" and exp_bits == max_exp_bits:
