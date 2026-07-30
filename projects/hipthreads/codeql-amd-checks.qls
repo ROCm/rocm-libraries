@@ -1,0 +1,52 @@
+- description: AMD selection of C++ checks
+
+- query: Likely Bugs/Arithmetic/BadAdditionOverflowCheck.ql
+  from: codeql/cpp-queries
+- query: Likely Bugs/Memory Management/PointerOverflow.ql
+  from: codeql/cpp-queries
+- query: Likely Bugs/Underspecified Functions/TooFewArguments.ql
+  from: codeql/cpp-queries
+- query: Security/CWE/CWE-190/ComparisonWithWiderType.ql
+  from: codeql/cpp-queries
+- query: Security/CWE/CWE-253/HResultBooleanConversion.ql
+  from: codeql/cpp-queries
+- query: Security/CWE/CWE-704/WcharCharConversion.ql
+  from: codeql/cpp-queries
+- query: Critical/OverflowCalculated.ql
+  from: codeql/cpp-queries
+- query: Critical/OverflowStatic.ql
+  from: codeql/cpp-queries
+- query: Critical/SizeCheck.ql
+  from: codeql/cpp-queries
+- query: Security/CWE/CWE-311/CleartextFileWrite.ql
+  from: codeql/cpp-queries
+- query: Security/CWE/CWE-327/OpenSslHeartbleed.ql
+  from: codeql/cpp-queries
+- query: Critical/DescriptorMayNotBeClosed.ql
+  from: codeql/cpp-queries
+- query: Critical/DescriptorNeverClosed.ql
+  from: codeql/cpp-queries
+- query: Critical/FileMayNotBeClosed.ql
+  from: codeql/cpp-queries
+- query: Critical/FileNeverClosed.ql
+  from: codeql/cpp-queries
+- query: Critical/MemoryMayNotBeFreed.ql
+  from: codeql/cpp-queries
+- query: Critical/MemoryNeverFreed.ql
+  from: codeql/cpp-queries
+- query: Critical/NewFreeMismatch.ql
+  from: codeql/cpp-queries
+- query: Likely Bugs/Memory Management/AllocaInLoop.ql
+  from: codeql/cpp-queries
+- query: Security/CWE/CWE-190/TaintedAllocationSize.ql
+  from: codeql/cpp-queries
+- query: experimental/Security/CWE/CWE-401/MemoryLeakOnFailedCallToRealloc.ql
+  from: codeql/cpp-queries
+- query: Critical/InconsistentNullnessTesting.ql
+  from: codeql/cpp-queries
+- query: Critical/MissingNullTest.ql
+  from: codeql/cpp-queries
+- query: Likely Bugs/InconsistentCheckReturnNull.ql
+  from: codeql/cpp-queries
+- query: Likely Bugs/RedundantNullCheckSimple.ql
+  from: codeql/cpp-queries

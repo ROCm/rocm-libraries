@@ -64,6 +64,7 @@ set(CK_IMPL_SOURCES
     ck_fused_grp_activ_impl.cpp
     ck_fused_grp_bias_activ_impl.cpp
     ck_depthwise_fwd_impl.cpp
+    ck_depthwise_bwd_data_impl.cpp
 )
 
 # Collect plugin target names for the MIOpen_with_plugins proxy (see src/CMakeLists.txt).
