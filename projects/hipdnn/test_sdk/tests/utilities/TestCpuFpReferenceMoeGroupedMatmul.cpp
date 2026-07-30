@@ -26,12 +26,6 @@ Tensor<Type> createTensor(const std::vector<int64_t>& dims)
 }
 
 template <typename Type>
-Tensor<Type> createTensor(const std::vector<int64_t>& dims, const std::vector<int64_t>& strides)
-{
-    return Tensor<Type>(dims, strides);
-}
-
-template <typename Type>
 void setValues(Tensor<Type>& tensor, const std::vector<float>& values)
 {
     ASSERT_EQ(static_cast<size_t>(tensor.elementCount()), values.size());
@@ -60,7 +54,7 @@ void expectTensorValues(const Tensor<Type>& tensor, const std::vector<float>& ex
 template <typename Type>
 Tensor<Type> makeIdentitySwapWeight(bool columnMajor = false)
 {
-    auto weight = columnMajor ? createTensor<Type>({2, 2, 2}, {4, 1, 2})
+    auto weight = columnMajor ? Tensor<Type>({2, 2, 2}, {4, 1, 2})
                               : createTensor<Type>({2, 2, 2});
     setValues(weight, {1.0F, 0.0F, 0.0F, 1.0F, 0.0F, 1.0F, 1.0F, 0.0F});
     return weight;

@@ -21,8 +21,7 @@ namespace hipdnn_sdk_test_utils
 /// Owns every tensor a forward MoE grouped matmul graph needs, sized for one
 /// mode/shape configuration. Routing tensors (`tokenIndex`/`tokenKs`) are only
 /// allocated for the modes that use them. `setDefaultRouting()` (called by the
-/// constructor) fills a deterministic, always-valid routing; `setRouting()`
-/// overwrites it with caller-supplied values for hand-computed test cases.
+/// constructor) fills a deterministic, always-valid routing.
 template <typename InputType>
 struct MoeGroupedMatmulTensorBundle
 {
@@ -34,19 +33,14 @@ struct MoeGroupedMatmulTensorBundle
         int64_t routedRowsIn, // == tokenRows for NONE
         hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulMode modeIn,
         int32_t topKIn,
-        int64_t batch = 1,
-        bool columnMajorWeight = false,
         unsigned int seed = hipdnn_test_sdk::utilities::getGlobalTestSeed())
         : tokenTensor({1, tokenRowsIn, hiddenK},
                       hipdnn_data_sdk::utilities::generateStrides({1, tokenRowsIn, hiddenK}))
-        , weightTensor(
-              {experts, hiddenK, weightN},
-              columnMajorWeight
-                  ? std::vector<int64_t>{hiddenK * weightN, 1, hiddenK}
-                  : hipdnn_data_sdk::utilities::generateStrides({experts, hiddenK, weightN}))
+        , weightTensor({experts, hiddenK, weightN},
+                       hipdnn_data_sdk::utilities::generateStrides({experts, hiddenK, weightN}))
         , firstTokenOffsetTensor(
-              {batch * experts, 1, 1},
-              hipdnn_data_sdk::utilities::generateStrides({batch * experts, 1, 1}))
+              {experts, 1, 1},
+              hipdnn_data_sdk::utilities::generateStrides({experts, 1, 1}))
         , tokenIndexTensor(modeIn != Mode::NONE
                                ? std::make_optional(hipdnn_data_sdk::utilities::Tensor<int32_t>(
                                      {1, routedRowsIn, 1},
@@ -105,30 +99,6 @@ struct MoeGroupedMatmulTensorBundle
             {
                 tokenIndexTensor->setHostValue(static_cast<int32_t>(r / topK), {0, r, 0});
                 tokenKsTensor->setHostValue(static_cast<int32_t>(r % topK), {0, r, 0});
-            }
-        }
-    }
-
-    /// Overwrites the routing tensors with caller-supplied values (e.g. the
-    /// hand-computed vectors used by the direct-kernel tests).
-    void setRouting(std::vector<int32_t> offsets, std::vector<int32_t> index, std::vector<int32_t> ks)
-    {
-        for(size_t i = 0; i < offsets.size(); ++i)
-        {
-            firstTokenOffsetTensor.setHostValue(offsets[i], {static_cast<int64_t>(i), 0, 0});
-        }
-        if(tokenIndexTensor.has_value())
-        {
-            for(size_t i = 0; i < index.size(); ++i)
-            {
-                tokenIndexTensor->setHostValue(index[i], {0, static_cast<int64_t>(i), 0});
-            }
-        }
-        if(tokenKsTensor.has_value())
-        {
-            for(size_t i = 0; i < ks.size(); ++i)
-            {
-                tokenKsTensor->setHostValue(ks[i], {0, static_cast<int64_t>(i), 0});
             }
         }
     }

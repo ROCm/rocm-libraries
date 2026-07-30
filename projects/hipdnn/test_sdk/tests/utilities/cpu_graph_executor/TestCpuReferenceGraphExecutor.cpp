@@ -296,9 +296,9 @@ public:
         const int32_t topK = (mode == MoeMode::SCATTER) ? 2 : 0;
 
         MoeGroupedMatmulTensorBundle<InputType> execBundle(
-            experts, hiddenK, weightN, tokenRows, routedRows, mode, topK, 1, false, seed);
+            experts, hiddenK, weightN, tokenRows, routedRows, mode, topK, seed);
         MoeGroupedMatmulTensorBundle<InputType> directBundle(
-            experts, hiddenK, weightN, tokenRows, routedRows, mode, topK, 1, false, seed);
+            experts, hiddenK, weightN, tokenRows, routedRows, mode, topK, seed);
 
         auto graphTuple
             = buildMoeGroupedMatmulGraph(execBundle, inputDataType, outputDataType, computeDataType);

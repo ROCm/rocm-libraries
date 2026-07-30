@@ -64,9 +64,6 @@ public:
         std::shared_ptr<graph::TensorAttributes> firstTokenOffset;
         std::shared_ptr<graph::TensorAttributes> tokenIndex;
         std::shared_ptr<graph::TensorAttributes> tokenKs;
-        MoeGroupedMatmulMode mode = MoeGroupedMatmulMode::NONE;
-        int32_t topK = 0;
-        int64_t tokenRows = 0;
     };
 
     static std::pair<graph::Graph, GraphOutputs> buildGraph(hipdnnHandle_t handle,
@@ -142,9 +139,7 @@ public:
 
         return std::make_pair(
             std::move(graphObj),
-            GraphOutputs{
-                outputAttr, firstTokenOffsetAttr, tokenIndexAttr, tokenKsAttr, tc.mode, tc.topK,
-                tc.tokenRows});
+            GraphOutputs{outputAttr, firstTokenOffsetAttr, tokenIndexAttr, tokenKsAttr});
     }
 
 protected:
@@ -159,9 +154,6 @@ protected:
                                             : std::nullopt;
         _tokenKsUid
             = outputs.tokenKs ? std::optional<int64_t>(outputs.tokenKs->get_uid()) : std::nullopt;
-        _mode = outputs.mode;
-        _topK = outputs.topK;
-        _tokenRows = outputs.tokenRows;
 
         this->registerValidator(outputs.output, this->getTolerance(graphObj, outputs.output));
 
@@ -186,13 +178,15 @@ protected:
             return result;
         }
 
+        const auto& testCase = this->GetParam();
+
         auto& offsetTensor
             = static_cast<hipdnn_data_sdk::utilities::TensorBase<int32_t>&>(
                 bundle.getTensor(_firstTokenOffsetUid));
         const int64_t groupCount = offsetTensor.dims()[0];
         for(int64_t g = 0; g < groupCount; ++g)
         {
-            offsetTensor.setHostValue(static_cast<int32_t>((g * _tokenRows) / groupCount),
+            offsetTensor.setHostValue(static_cast<int32_t>((g * testCase.tokenRows) / groupCount),
                                       {g, 0, 0});
         }
         offsetTensor.markHostModified();
@@ -201,11 +195,11 @@ protected:
         {
             auto& tokenIndexTensor = static_cast<hipdnn_data_sdk::utilities::TensorBase<int32_t>&>(
                 bundle.getTensor(*_tokenIndexUid));
-            for(int64_t r = 0; r < _tokenRows; ++r)
+            for(int64_t r = 0; r < testCase.tokenRows; ++r)
             {
-                const int32_t value = (_mode == MoeGroupedMatmulMode::GATHER)
-                                          ? static_cast<int32_t>(r % _tokenRows)
-                                          : static_cast<int32_t>(r / _topK);
+                const int32_t value = (testCase.mode == MoeGroupedMatmulMode::GATHER)
+                                          ? static_cast<int32_t>(r)
+                                          : static_cast<int32_t>(r / testCase.topK);
                 tokenIndexTensor.setHostValue(value, {0, r, 0});
             }
             tokenIndexTensor.markHostModified();
@@ -215,9 +209,9 @@ protected:
         {
             auto& tokenKsTensor = static_cast<hipdnn_data_sdk::utilities::TensorBase<int32_t>&>(
                 bundle.getTensor(*_tokenKsUid));
-            for(int64_t r = 0; r < _tokenRows; ++r)
+            for(int64_t r = 0; r < testCase.tokenRows; ++r)
             {
-                tokenKsTensor.setHostValue(static_cast<int32_t>(r % _topK), {0, r, 0});
+                tokenKsTensor.setHostValue(static_cast<int32_t>(r % testCase.topK), {0, r, 0});
             }
             tokenKsTensor.markHostModified();
         }
@@ -229,9 +223,6 @@ private:
     int64_t _firstTokenOffsetUid = -1;
     std::optional<int64_t> _tokenIndexUid;
     std::optional<int64_t> _tokenKsUid;
-    MoeGroupedMatmulMode _mode = MoeGroupedMatmulMode::NONE;
-    int32_t _topK = 0;
-    int64_t _tokenRows = 0;
 };
 
 using IntegrationGpuMoeGroupedMatmulFp32 = Moe<float>;

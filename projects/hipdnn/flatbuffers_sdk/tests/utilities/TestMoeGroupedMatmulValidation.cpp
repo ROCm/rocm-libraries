@@ -3,6 +3,9 @@
 
 #include <gtest/gtest.h>
 
+#include <string>
+#include <vector>
+
 #include <hipdnn_flatbuffers_sdk/utilities/MoeGroupedMatmulValidation.hpp>
 
 using namespace hipdnn_flatbuffers_sdk::utilities;
@@ -11,8 +14,8 @@ using namespace hipdnn_flatbuffers_sdk::data_objects;
 namespace
 {
 
-// A routing configuration that satisfies the contract for NONE mode, used as the
-// baseline that individual test cases perturb.
+// Routing configurations that satisfy the contract, used as the baselines that
+// individual cases perturb.
 MoeGroupedMatmulRouting validNone()
 {
     MoeGroupedMatmulRouting routing;
@@ -48,140 +51,129 @@ MoeGroupedMatmulRouting validScatter()
     return routing;
 }
 
+struct RoutingCase
+{
+    const char* name;
+    MoeGroupedMatmulRouting routing;
+    const char* expectedReason; ///< nullptr when the configuration must be accepted
+};
+
+template <typename Perturbation>
+MoeGroupedMatmulRouting with(MoeGroupedMatmulRouting routing, Perturbation perturbation)
+{
+    perturbation(routing);
+    return routing;
+}
+
+std::vector<RoutingCase> getRoutingCases()
+{
+    return {
+        RoutingCase{"AcceptsValidNoneMode", validNone(), nullptr},
+        RoutingCase{"AcceptsValidGatherMode", validGather(), nullptr},
+        RoutingCase{"AcceptsValidScatterMode", validScatter(), nullptr},
+        RoutingCase{"Rule1FirstTokenOffsetMustBeInt32",
+                    with(validNone(),
+                         [](auto& r) { r.firstTokenOffsetDataType = DataType::FLOAT; }),
+                    "FIRST_TOKEN_OFFSET tensor must have INT32 data type"},
+        RoutingCase{"Rule2NoneForbidsTokenIndex",
+                    with(validNone(),
+                         [](auto& r) {
+                             r.hasTokenIndex = true;
+                             r.tokenIndexDataType = DataType::INT32;
+                         }),
+                    "NONE mode forbids the TOKEN_INDEX tensor"},
+        RoutingCase{"Rule3NoneForbidsTokenKs",
+                    with(validNone(),
+                         [](auto& r) {
+                             r.hasTokenKs = true;
+                             r.tokenKsDataType = DataType::INT32;
+                         }),
+                    "NONE mode forbids the TOKEN_KS tensor"},
+        RoutingCase{"Rule4NoneRequiresZeroTopK",
+                    with(validNone(), [](auto& r) { r.topK = 1; }),
+                    "NONE mode requires top_k to equal 0"},
+        RoutingCase{"Rule5GatherRequiresTokenIndex",
+                    with(validGather(),
+                         [](auto& r) {
+                             r.hasTokenIndex = false;
+                             r.tokenIndexDataType = DataType::UNSET;
+                         }),
+                    "GATHER mode requires the TOKEN_INDEX tensor"},
+        RoutingCase{"Rule6GatherForbidsTokenKs",
+                    with(validGather(),
+                         [](auto& r) {
+                             r.hasTokenKs = true;
+                             r.tokenKsDataType = DataType::INT32;
+                         }),
+                    "GATHER mode forbids the TOKEN_KS tensor"},
+        RoutingCase{"Rule7GatherRequiresZeroTopK",
+                    with(validGather(), [](auto& r) { r.topK = 1; }),
+                    "GATHER mode requires top_k to equal 0"},
+        RoutingCase{"Rule8ScatterRequiresTokenIndex",
+                    with(validScatter(),
+                         [](auto& r) {
+                             r.hasTokenIndex = false;
+                             r.tokenIndexDataType = DataType::UNSET;
+                         }),
+                    "SCATTER mode requires the TOKEN_INDEX tensor"},
+        RoutingCase{"Rule9ScatterRequiresTokenKs",
+                    with(validScatter(),
+                         [](auto& r) {
+                             r.hasTokenKs = false;
+                             r.tokenKsDataType = DataType::UNSET;
+                         }),
+                    "SCATTER mode requires the TOKEN_KS tensor"},
+        RoutingCase{"Rule10ScatterRequiresPositiveTopK",
+                    with(validScatter(), [](auto& r) { r.topK = 0; }),
+                    "SCATTER mode requires top_k to be at least 1"},
+        RoutingCase{"Rule11ScatterRequiresPositiveExpertCount",
+                    with(validScatter(), [](auto& r) { r.expertCount = 0; }),
+                    "expert count must be positive to bound top_k"},
+        RoutingCase{"Rule12ScatterTopKMustNotExceedExpertCount",
+                    with(validScatter(),
+                         [](auto& r) {
+                             r.expertCount = 1;
+                             r.topK = 2;
+                         }),
+                    "top_k must not exceed the number of experts"},
+        RoutingCase{"Rule13TokenIndexMustBeInt32",
+                    with(validGather(), [](auto& r) { r.tokenIndexDataType = DataType::FLOAT; }),
+                    "TOKEN_INDEX tensor must have INT32 data type"},
+        RoutingCase{"Rule14TokenKsMustBeInt32",
+                    with(validScatter(), [](auto& r) { r.tokenKsDataType = DataType::FLOAT; }),
+                    "TOKEN_KS tensor must have INT32 data type"},
+        RoutingCase{"Rule15UnknownModeIsRejected",
+                    with(validNone(),
+                         [](auto& r) { r.mode = static_cast<MoeGroupedMatmulMode>(-1); }),
+                    "unknown routing mode"},
+    };
+}
+
 } // namespace
 
-TEST(TestMoeGroupedMatmulValidation, AcceptsValidNoneMode)
+class TestMoeGroupedMatmulValidation : public ::testing::TestWithParam<RoutingCase>
 {
-    EXPECT_EQ(checkMoeGroupedMatmulRouting(validNone()), nullptr);
+};
+
+TEST_P(TestMoeGroupedMatmulValidation, MatchesRoutingContract)
+{
+    const auto& testCase = GetParam();
+    const char* reason = checkMoeGroupedMatmulRouting(testCase.routing);
+
+    if(testCase.expectedReason == nullptr)
+    {
+        EXPECT_EQ(reason, nullptr) << "unexpected rejection: " << (reason != nullptr ? reason : "");
+    }
+    else
+    {
+        ASSERT_NE(reason, nullptr) << "expected rejection: " << testCase.expectedReason;
+        EXPECT_STREQ(reason, testCase.expectedReason);
+    }
 }
 
-TEST(TestMoeGroupedMatmulValidation, AcceptsValidGatherMode)
-{
-    EXPECT_EQ(checkMoeGroupedMatmulRouting(validGather()), nullptr);
-}
-
-TEST(TestMoeGroupedMatmulValidation, AcceptsValidScatterMode)
-{
-    EXPECT_EQ(checkMoeGroupedMatmulRouting(validScatter()), nullptr);
-}
-
-TEST(TestMoeGroupedMatmulValidation, Rule1FirstTokenOffsetMustBeInt32)
-{
-    auto routing = validNone();
-    routing.firstTokenOffsetDataType = DataType::FLOAT;
-    EXPECT_STREQ(checkMoeGroupedMatmulRouting(routing),
-                 "FIRST_TOKEN_OFFSET tensor must have INT32 data type");
-}
-
-TEST(TestMoeGroupedMatmulValidation, Rule2NoneForbidsTokenIndex)
-{
-    auto routing = validNone();
-    routing.hasTokenIndex = true;
-    routing.tokenIndexDataType = DataType::INT32;
-    EXPECT_STREQ(checkMoeGroupedMatmulRouting(routing), "NONE mode forbids the TOKEN_INDEX tensor");
-}
-
-TEST(TestMoeGroupedMatmulValidation, Rule3NoneForbidsTokenKs)
-{
-    auto routing = validNone();
-    routing.hasTokenKs = true;
-    routing.tokenKsDataType = DataType::INT32;
-    EXPECT_STREQ(checkMoeGroupedMatmulRouting(routing), "NONE mode forbids the TOKEN_KS tensor");
-}
-
-TEST(TestMoeGroupedMatmulValidation, Rule4NoneRequiresZeroTopK)
-{
-    auto routing = validNone();
-    routing.topK = 1;
-    EXPECT_STREQ(checkMoeGroupedMatmulRouting(routing), "NONE mode requires top_k to equal 0");
-}
-
-TEST(TestMoeGroupedMatmulValidation, Rule5GatherRequiresTokenIndex)
-{
-    auto routing = validGather();
-    routing.hasTokenIndex = false;
-    routing.tokenIndexDataType = DataType::UNSET;
-    EXPECT_STREQ(checkMoeGroupedMatmulRouting(routing),
-                 "GATHER mode requires the TOKEN_INDEX tensor");
-}
-
-TEST(TestMoeGroupedMatmulValidation, Rule6GatherForbidsTokenKs)
-{
-    auto routing = validGather();
-    routing.hasTokenKs = true;
-    routing.tokenKsDataType = DataType::INT32;
-    EXPECT_STREQ(checkMoeGroupedMatmulRouting(routing), "GATHER mode forbids the TOKEN_KS tensor");
-}
-
-TEST(TestMoeGroupedMatmulValidation, Rule7GatherRequiresZeroTopK)
-{
-    auto routing = validGather();
-    routing.topK = 1;
-    EXPECT_STREQ(checkMoeGroupedMatmulRouting(routing), "GATHER mode requires top_k to equal 0");
-}
-
-TEST(TestMoeGroupedMatmulValidation, Rule8ScatterRequiresTokenIndex)
-{
-    auto routing = validScatter();
-    routing.hasTokenIndex = false;
-    routing.tokenIndexDataType = DataType::UNSET;
-    EXPECT_STREQ(checkMoeGroupedMatmulRouting(routing),
-                 "SCATTER mode requires the TOKEN_INDEX tensor");
-}
-
-TEST(TestMoeGroupedMatmulValidation, Rule9ScatterRequiresTokenKs)
-{
-    auto routing = validScatter();
-    routing.hasTokenKs = false;
-    routing.tokenKsDataType = DataType::UNSET;
-    EXPECT_STREQ(checkMoeGroupedMatmulRouting(routing),
-                 "SCATTER mode requires the TOKEN_KS tensor");
-}
-
-TEST(TestMoeGroupedMatmulValidation, Rule10ScatterRequiresPositiveTopK)
-{
-    auto routing = validScatter();
-    routing.topK = 0;
-    EXPECT_STREQ(checkMoeGroupedMatmulRouting(routing),
-                 "SCATTER mode requires top_k to be at least 1");
-}
-
-TEST(TestMoeGroupedMatmulValidation, Rule11ScatterRequiresPositiveExpertCount)
-{
-    auto routing = validScatter();
-    routing.expertCount = 0;
-    EXPECT_STREQ(checkMoeGroupedMatmulRouting(routing),
-                 "expert count must be positive to bound top_k");
-}
-
-TEST(TestMoeGroupedMatmulValidation, Rule12ScatterTopKMustNotExceedExpertCount)
-{
-    auto routing = validScatter();
-    routing.expertCount = 1;
-    routing.topK = 2;
-    EXPECT_STREQ(checkMoeGroupedMatmulRouting(routing),
-                 "top_k must not exceed the number of experts");
-}
-
-TEST(TestMoeGroupedMatmulValidation, Rule13TokenIndexMustBeInt32)
-{
-    auto routing = validGather();
-    routing.tokenIndexDataType = DataType::FLOAT;
-    EXPECT_STREQ(checkMoeGroupedMatmulRouting(routing),
-                 "TOKEN_INDEX tensor must have INT32 data type");
-}
-
-TEST(TestMoeGroupedMatmulValidation, Rule14TokenKsMustBeInt32)
-{
-    auto routing = validScatter();
-    routing.tokenKsDataType = DataType::FLOAT;
-    EXPECT_STREQ(checkMoeGroupedMatmulRouting(routing),
-                 "TOKEN_KS tensor must have INT32 data type");
-}
-
-TEST(TestMoeGroupedMatmulValidation, Rule15UnknownModeIsRejected)
-{
-    auto routing = validNone();
-    routing.mode = static_cast<MoeGroupedMatmulMode>(-1);
-    EXPECT_STREQ(checkMoeGroupedMatmulRouting(routing), "unknown routing mode");
-}
+INSTANTIATE_TEST_SUITE_P(Contract,
+                         TestMoeGroupedMatmulValidation,
+                         testing::ValuesIn(getRoutingCases()),
+                         [](const testing::TestParamInfo<RoutingCase>& info) {
+                             return std::string(info.param.name);
+                         });

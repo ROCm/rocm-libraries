@@ -97,7 +97,7 @@ TEST(TestMoeGroupedMatmulSignatureKey, CreateFromNodeAndTensorMap)
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
 
     MoeGroupedMatmulTensorBundle<float> tensorBundle(
-        2, 3, 4, 6, 6, MoeGroupedMatmulMode::NONE, 0, 1, false, 1);
+        2, 3, 4, 6, 6, MoeGroupedMatmulMode::NONE, 0, 1);
     auto graphTuple = buildMoeGroupedMatmulGraph(tensorBundle, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT);
 
     auto& graph = std::get<0>(graphTuple);

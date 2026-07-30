@@ -11,6 +11,7 @@
 
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/utilities/MoeGroupedMatmulValidation.hpp>
 #include <hipdnn_test_sdk/utilities/detail/CpuFpReferenceUtilities.hpp>
 
 namespace hipdnn_test_sdk::utilities
@@ -288,42 +289,22 @@ private:
                 prefix + "first_token_offset row count must be a multiple of the expert count");
         }
 
-        switch(mode)
+        // Presence/top_k rules are exactly the shared FlatBuffers routing contract
+        // (backend descriptor and CPU plan builder evaluate the same function).
+        // Routing tensors are statically int32_t here, so their dtype fields hold.
+        namespace fbUtilities = hipdnn_flatbuffers_sdk::utilities;
+        using FbDataType = hipdnn_flatbuffers_sdk::data_objects::DataType;
+        const fbUtilities::MoeGroupedMatmulRouting routing{mode,
+                                                           tokenIndex != nullptr,
+                                                           tokenKs != nullptr,
+                                                           FbDataType::INT32,
+                                                           FbDataType::INT32,
+                                                           FbDataType::INT32,
+                                                           topK,
+                                                           expertCount};
+        if(const char* reason = fbUtilities::checkMoeGroupedMatmulRouting(routing))
         {
-        case Mode::NONE:
-            if(tokenIndex != nullptr)
-            {
-                throw std::runtime_error(prefix + "NONE mode forbids the token-index tensor");
-            }
-            if(tokenKs != nullptr)
-            {
-                throw std::runtime_error(prefix + "NONE mode forbids the token-ks tensor");
-            }
-            break;
-        case Mode::GATHER:
-            if(tokenIndex == nullptr)
-            {
-                throw std::runtime_error(prefix
-                                         + "GATHER mode requires the token-index tensor");
-            }
-            if(tokenKs != nullptr)
-            {
-                throw std::runtime_error(prefix + "GATHER mode forbids the token-ks tensor");
-            }
-            break;
-        case Mode::SCATTER:
-            if(tokenIndex == nullptr)
-            {
-                throw std::runtime_error(prefix
-                                         + "SCATTER mode requires the token-index tensor");
-            }
-            if(tokenKs == nullptr)
-            {
-                throw std::runtime_error(prefix + "SCATTER mode requires the token-ks tensor");
-            }
-            break;
-        default:
-            throw std::runtime_error(prefix + "unknown routing mode");
+            throw std::runtime_error(prefix + reason);
         }
 
         const auto validateRoutingTensorShape =
@@ -349,15 +330,6 @@ private:
             {
                 throw std::runtime_error(
                     prefix + "token-index and token-ks tensors must have equal length");
-            }
-            if(topK < 1)
-            {
-                throw std::runtime_error(prefix + "SCATTER mode requires top_k to be at least 1");
-            }
-            if(topK > expertCount)
-            {
-                throw std::runtime_error(prefix
-                                         + "top_k must not exceed the number of experts");
             }
         }
 

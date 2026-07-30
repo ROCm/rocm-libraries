@@ -169,9 +169,10 @@ protected:
 TEST_F(TestMoeGroupedMatmulPlan, ExecutePlanNoneMode)
 {
     const unsigned int seed = getGlobalTestSeed();
-    MoeGroupedMatmulTensorBundle<float> planBundle(2, 3, 4, 6, 6, MoeGroupedMatmulMode::NONE, 0, 1, false, seed);
+    MoeGroupedMatmulTensorBundle<float> planBundle(
+        2, 3, 4, 6, 6, MoeGroupedMatmulMode::NONE, 0, seed);
     MoeGroupedMatmulTensorBundle<float> directBundle(
-        2, 3, 4, 6, 6, MoeGroupedMatmulMode::NONE, 0, 1, false, seed);
+        2, 3, 4, 6, 6, MoeGroupedMatmulMode::NONE, 0, seed);
 
     MoeGroupedMatmulParams params;
     initTensorValues(params.tokenTensor, DataType::FLOAT, planBundle.tokenTensor, 1);
@@ -207,9 +208,9 @@ TEST_F(TestMoeGroupedMatmulPlan, ExecutePlanGatherMode)
 {
     const unsigned int seed = getGlobalTestSeed();
     MoeGroupedMatmulTensorBundle<float> planBundle(
-        2, 3, 4, 5, 7, MoeGroupedMatmulMode::GATHER, 0, 1, false, seed);
+        2, 3, 4, 5, 7, MoeGroupedMatmulMode::GATHER, 0, seed);
     MoeGroupedMatmulTensorBundle<float> directBundle(
-        2, 3, 4, 5, 7, MoeGroupedMatmulMode::GATHER, 0, 1, false, seed);
+        2, 3, 4, 5, 7, MoeGroupedMatmulMode::GATHER, 0, seed);
 
     MoeGroupedMatmulParams params;
     initTensorValues(params.tokenTensor, DataType::FLOAT, planBundle.tokenTensor, 1);
@@ -250,9 +251,9 @@ TEST_F(TestMoeGroupedMatmulPlan, ExecutePlanScatterMode)
 {
     const unsigned int seed = getGlobalTestSeed();
     MoeGroupedMatmulTensorBundle<float> planBundle(
-        2, 3, 4, 6, 6, MoeGroupedMatmulMode::SCATTER, 2, 1, false, seed);
+        2, 3, 4, 6, 6, MoeGroupedMatmulMode::SCATTER, 2, seed);
     MoeGroupedMatmulTensorBundle<float> directBundle(
-        2, 3, 4, 6, 6, MoeGroupedMatmulMode::SCATTER, 2, 1, false, seed);
+        2, 3, 4, 6, 6, MoeGroupedMatmulMode::SCATTER, 2, seed);
 
     MoeGroupedMatmulParams params;
     initTensorValues(params.tokenTensor, DataType::FLOAT, planBundle.tokenTensor, 1);
@@ -455,208 +456,152 @@ TEST(TestMoeGroupedMatmulPlanBuilder, PlanConstruction)
 // The teeth behind Step 0's "keep in sync" note: for every rule the frontend node
 // and the FlatBuffers-side contract both express, they must reach the same
 // verdict; the two configurations where they intentionally diverge are pinned
-// explicitly below.
+// with differing `nodeAccepts`/`contractAccepts`.
 TEST(TestMoeGroupedMatmulPlanBuilder, RoutingContractMatchesFrontendNode)
 {
     using hipdnn_flatbuffers_sdk::utilities::checkMoeGroupedMatmulRouting;
     using hipdnn_flatbuffers_sdk::utilities::MoeGroupedMatmulRouting;
+    using FrontendMode = hipdnn_frontend::MoeGroupedMatmulMode;
+
+    // validFrontendAttributes() carries a weight of {E=2, K=3, N=5}, so the
+    // contract side always sees expertCount == 2.
+    constexpr int64_t expertCount = 2;
+
+    struct ParityCase
+    {
+        const char* name;
+        void (*configure)(hipdnn_frontend::graph::MoeGroupedMatmulAttributes&);
+        MoeGroupedMatmulRouting routing;
+        bool nodeAccepts;
+        bool contractAccepts;
+    };
+
+    const auto routingOf = [](MoeGroupedMatmulMode mode,
+                              bool hasTokenIndex,
+                              bool hasTokenKs,
+                              int32_t topK,
+                              DataType firstTokenOffsetDataType = DataType::INT32,
+                              DataType tokenIndexDataType = DataType::INT32) {
+        return MoeGroupedMatmulRouting{mode,
+                                       hasTokenIndex,
+                                       hasTokenKs,
+                                       firstTokenOffsetDataType,
+                                       hasTokenIndex ? tokenIndexDataType : DataType::UNSET,
+                                       hasTokenKs ? DataType::INT32 : DataType::UNSET,
+                                       topK,
+                                       expertCount};
+    };
+
+    const std::vector<ParityCase> cases = {
+        {"ValidNone",
+         [](auto& attrs) { attrs.set_mode(FrontendMode::NONE); },
+         routingOf(MoeGroupedMatmulMode::NONE, false, false, 0),
+         true,
+         true},
+        {"ValidGather",
+         [](auto& attrs) {
+             attrs.set_mode(FrontendMode::GATHER);
+             attrs.set_token_index(makeRoutingTensor(4));
+         },
+         routingOf(MoeGroupedMatmulMode::GATHER, true, false, 0),
+         true,
+         true},
+        {"ValidScatter",
+         [](auto& attrs) {
+             attrs.set_mode(FrontendMode::SCATTER);
+             attrs.set_token_index(makeRoutingTensor(4));
+             attrs.set_token_ks(makeRoutingTensor(5));
+             attrs.set_top_k(2);
+         },
+         routingOf(MoeGroupedMatmulMode::SCATTER, true, true, 2),
+         true,
+         true},
+        {"GatherWithoutTokenIndex",
+         [](auto& attrs) { attrs.set_mode(FrontendMode::GATHER); },
+         routingOf(MoeGroupedMatmulMode::GATHER, false, false, 0),
+         false,
+         false},
+        {"GatherWithFloatTokenIndex",
+         [](auto& attrs) {
+             attrs.set_mode(FrontendMode::GATHER);
+             attrs.set_token_index(makeRoutingTensor(4, hipdnn_frontend::DataType::FLOAT));
+         },
+         routingOf(MoeGroupedMatmulMode::GATHER, true, false, 0, DataType::INT32, DataType::FLOAT),
+         false,
+         false},
+        {"ScatterWithoutTokenKs",
+         [](auto& attrs) {
+             attrs.set_mode(FrontendMode::SCATTER);
+             attrs.set_token_index(makeRoutingTensor(4));
+             attrs.set_top_k(2);
+         },
+         routingOf(MoeGroupedMatmulMode::SCATTER, true, false, 2),
+         false,
+         false},
+        {"ScatterWithZeroTopK",
+         [](auto& attrs) {
+             attrs.set_mode(FrontendMode::SCATTER);
+             attrs.set_token_index(makeRoutingTensor(4));
+             attrs.set_token_ks(makeRoutingTensor(5));
+         },
+         routingOf(MoeGroupedMatmulMode::SCATTER, true, true, 0),
+         false,
+         false},
+        {"ScatterWithTopKAboveExpertCount",
+         [](auto& attrs) {
+             attrs.set_mode(FrontendMode::SCATTER);
+             attrs.set_token_index(makeRoutingTensor(4));
+             attrs.set_token_ks(makeRoutingTensor(5));
+             attrs.set_top_k(3);
+         },
+         routingOf(MoeGroupedMatmulMode::SCATTER, true, true, 3),
+         false,
+         false},
+        {"FloatFirstTokenOffset",
+         [](auto& attrs) {
+             attrs.set_mode(FrontendMode::NONE);
+             attrs.get_first_token_offset()->set_data_type(hipdnn_frontend::DataType::FLOAT);
+         },
+         routingOf(MoeGroupedMatmulMode::NONE, false, false, 0, DataType::FLOAT),
+         false,
+         false},
+        // Intentional divergence 1: NONE mode carrying a token_index -- the node
+        // accepts (the packer canonicalizes the stray tensor away before a
+        // descriptor exists), the shared contract rejects (a hand-built
+        // FlatBuffers graph can still express it).
+        {"NoneCarryingTokenIndex",
+         [](auto& attrs) {
+             attrs.set_mode(FrontendMode::NONE);
+             attrs.set_token_index(makeRoutingTensor(4));
+         },
+         routingOf(MoeGroupedMatmulMode::NONE, true, false, 0),
+         true,
+         false},
+        // Intentional divergence 2: GATHER mode with top_k == 1 -- the node
+        // accepts (top_k is meaningless for GATHER and the packer drops it), the
+        // shared contract rejects (GATHER requires top_k == 0).
+        {"GatherWithTopKOne",
+         [](auto& attrs) {
+             attrs.set_mode(FrontendMode::GATHER);
+             attrs.set_token_index(makeRoutingTensor(4));
+             attrs.set_top_k(1);
+         },
+         routingOf(MoeGroupedMatmulMode::GATHER, true, false, 1),
+         true,
+         false},
+    };
 
     const hipdnn_frontend::graph::GraphAttributes graphAttrs{};
-
-    // Valid NONE / GATHER / SCATTER: both layers accept.
+    for(const auto& testCase : cases)
     {
+        SCOPED_TRACE(testCase.name);
+
         auto attrs = validFrontendAttributes();
-        attrs.set_mode(hipdnn_frontend::MoeGroupedMatmulMode::NONE);
+        testCase.configure(attrs);
         hipdnn_frontend::graph::MoeGroupedMatmulNode node(std::move(attrs), graphAttrs);
-        EXPECT_TRUE(node.pre_validate_node().is_good());
+        EXPECT_EQ(node.pre_validate_node().is_good(), testCase.nodeAccepts);
 
-        const MoeGroupedMatmulRouting routing{
-            MoeGroupedMatmulMode::NONE, false, false, DataType::INT32, DataType::UNSET, DataType::UNSET, 0, 2};
-        EXPECT_EQ(checkMoeGroupedMatmulRouting(routing), nullptr);
-    }
-    {
-        auto attrs = validFrontendAttributes();
-        attrs.set_mode(hipdnn_frontend::MoeGroupedMatmulMode::GATHER);
-        attrs.set_token_index(makeRoutingTensor(4));
-        hipdnn_frontend::graph::MoeGroupedMatmulNode node(std::move(attrs), graphAttrs);
-        EXPECT_TRUE(node.pre_validate_node().is_good());
-
-        const MoeGroupedMatmulRouting routing{MoeGroupedMatmulMode::GATHER,
-                                              true,
-                                              false,
-                                              DataType::INT32,
-                                              DataType::INT32,
-                                              DataType::UNSET,
-                                              0,
-                                              2};
-        EXPECT_EQ(checkMoeGroupedMatmulRouting(routing), nullptr);
-    }
-    {
-        auto attrs = validFrontendAttributes();
-        attrs.set_mode(hipdnn_frontend::MoeGroupedMatmulMode::SCATTER);
-        attrs.set_token_index(makeRoutingTensor(4));
-        attrs.set_token_ks(makeRoutingTensor(5));
-        attrs.set_top_k(2);
-        hipdnn_frontend::graph::MoeGroupedMatmulNode node(std::move(attrs), graphAttrs);
-        EXPECT_TRUE(node.pre_validate_node().is_good());
-
-        const MoeGroupedMatmulRouting routing{MoeGroupedMatmulMode::SCATTER,
-                                              true,
-                                              true,
-                                              DataType::INT32,
-                                              DataType::INT32,
-                                              DataType::INT32,
-                                              2,
-                                              2};
-        EXPECT_EQ(checkMoeGroupedMatmulRouting(routing), nullptr);
-    }
-
-    // GATHER without token_index: both layers reject.
-    {
-        auto attrs = validFrontendAttributes();
-        attrs.set_mode(hipdnn_frontend::MoeGroupedMatmulMode::GATHER);
-        hipdnn_frontend::graph::MoeGroupedMatmulNode node(std::move(attrs), graphAttrs);
-        EXPECT_FALSE(node.pre_validate_node().is_good());
-
-        const MoeGroupedMatmulRouting routing{MoeGroupedMatmulMode::GATHER,
-                                              false,
-                                              false,
-                                              DataType::INT32,
-                                              DataType::UNSET,
-                                              DataType::UNSET,
-                                              0,
-                                              2};
-        EXPECT_NE(checkMoeGroupedMatmulRouting(routing), nullptr);
-    }
-
-    // GATHER with FLOAT token_index: both layers reject.
-    {
-        auto attrs = validFrontendAttributes();
-        attrs.set_mode(hipdnn_frontend::MoeGroupedMatmulMode::GATHER);
-        attrs.set_token_index(makeRoutingTensor(4, hipdnn_frontend::DataType::FLOAT));
-        hipdnn_frontend::graph::MoeGroupedMatmulNode node(std::move(attrs), graphAttrs);
-        EXPECT_FALSE(node.pre_validate_node().is_good());
-
-        const MoeGroupedMatmulRouting routing{MoeGroupedMatmulMode::GATHER,
-                                              true,
-                                              false,
-                                              DataType::INT32,
-                                              DataType::FLOAT,
-                                              DataType::UNSET,
-                                              0,
-                                              2};
-        EXPECT_NE(checkMoeGroupedMatmulRouting(routing), nullptr);
-    }
-
-    // SCATTER without token_ks: both layers reject.
-    {
-        auto attrs = validFrontendAttributes();
-        attrs.set_mode(hipdnn_frontend::MoeGroupedMatmulMode::SCATTER);
-        attrs.set_token_index(makeRoutingTensor(4));
-        attrs.set_top_k(2);
-        hipdnn_frontend::graph::MoeGroupedMatmulNode node(std::move(attrs), graphAttrs);
-        EXPECT_FALSE(node.pre_validate_node().is_good());
-
-        const MoeGroupedMatmulRouting routing{MoeGroupedMatmulMode::SCATTER,
-                                              true,
-                                              false,
-                                              DataType::INT32,
-                                              DataType::INT32,
-                                              DataType::UNSET,
-                                              2,
-                                              2};
-        EXPECT_NE(checkMoeGroupedMatmulRouting(routing), nullptr);
-    }
-
-    // SCATTER with top_k == 0: both layers reject.
-    {
-        auto attrs = validFrontendAttributes();
-        attrs.set_mode(hipdnn_frontend::MoeGroupedMatmulMode::SCATTER);
-        attrs.set_token_index(makeRoutingTensor(4));
-        attrs.set_token_ks(makeRoutingTensor(5));
-        hipdnn_frontend::graph::MoeGroupedMatmulNode node(std::move(attrs), graphAttrs);
-        EXPECT_FALSE(node.pre_validate_node().is_good());
-
-        const MoeGroupedMatmulRouting routing{MoeGroupedMatmulMode::SCATTER,
-                                              true,
-                                              true,
-                                              DataType::INT32,
-                                              DataType::INT32,
-                                              DataType::INT32,
-                                              0,
-                                              2};
-        EXPECT_NE(checkMoeGroupedMatmulRouting(routing), nullptr);
-    }
-
-    // SCATTER with top_k == E + 1: both layers reject.
-    {
-        auto attrs = validFrontendAttributes();
-        attrs.set_mode(hipdnn_frontend::MoeGroupedMatmulMode::SCATTER);
-        attrs.set_token_index(makeRoutingTensor(4));
-        attrs.set_token_ks(makeRoutingTensor(5));
-        attrs.set_top_k(3);
-        hipdnn_frontend::graph::MoeGroupedMatmulNode node(std::move(attrs), graphAttrs);
-        EXPECT_FALSE(node.pre_validate_node().is_good());
-
-        const MoeGroupedMatmulRouting routing{MoeGroupedMatmulMode::SCATTER,
-                                              true,
-                                              true,
-                                              DataType::INT32,
-                                              DataType::INT32,
-                                              DataType::INT32,
-                                              3,
-                                              2};
-        EXPECT_NE(checkMoeGroupedMatmulRouting(routing), nullptr);
-    }
-
-    // FLOAT first_token_offset: both layers reject.
-    {
-        auto attrs = validFrontendAttributes();
-        attrs.set_mode(hipdnn_frontend::MoeGroupedMatmulMode::NONE);
-        attrs.get_first_token_offset()->set_data_type(hipdnn_frontend::DataType::FLOAT);
-        hipdnn_frontend::graph::MoeGroupedMatmulNode node(std::move(attrs), graphAttrs);
-        EXPECT_FALSE(node.pre_validate_node().is_good());
-
-        const MoeGroupedMatmulRouting routing{
-            MoeGroupedMatmulMode::NONE, false, false, DataType::FLOAT, DataType::UNSET, DataType::UNSET, 0, 2};
-        EXPECT_NE(checkMoeGroupedMatmulRouting(routing), nullptr);
-    }
-
-    // Intentional divergence 1: NONE mode carrying a token_index -- the node
-    // accepts (the packer canonicalizes the stray tensor away before a
-    // descriptor exists), the shared contract rejects (a hand-built FlatBuffers
-    // graph can still express it).
-    {
-        auto attrs = validFrontendAttributes();
-        attrs.set_mode(hipdnn_frontend::MoeGroupedMatmulMode::NONE);
-        attrs.set_token_index(makeRoutingTensor(4));
-        hipdnn_frontend::graph::MoeGroupedMatmulNode node(std::move(attrs), graphAttrs);
-        EXPECT_TRUE(node.pre_validate_node().is_good());
-
-        const MoeGroupedMatmulRouting routing{
-            MoeGroupedMatmulMode::NONE, true, false, DataType::INT32, DataType::INT32, DataType::UNSET, 0, 2};
-        EXPECT_NE(checkMoeGroupedMatmulRouting(routing), nullptr);
-    }
-
-    // Intentional divergence 2: GATHER mode with top_k == 1 -- the node accepts
-    // (top_k is meaningless for GATHER and the packer drops it), the shared
-    // contract rejects (GATHER requires top_k == 0).
-    {
-        auto attrs = validFrontendAttributes();
-        attrs.set_mode(hipdnn_frontend::MoeGroupedMatmulMode::GATHER);
-        attrs.set_token_index(makeRoutingTensor(4));
-        attrs.set_top_k(1);
-        hipdnn_frontend::graph::MoeGroupedMatmulNode node(std::move(attrs), graphAttrs);
-        EXPECT_TRUE(node.pre_validate_node().is_good());
-
-        const MoeGroupedMatmulRouting routing{MoeGroupedMatmulMode::GATHER,
-                                              true,
-                                              false,
-                                              DataType::INT32,
-                                              DataType::INT32,
-                                              DataType::UNSET,
-                                              1,
-                                              2};
-        EXPECT_NE(checkMoeGroupedMatmulRouting(routing), nullptr);
+        EXPECT_EQ(checkMoeGroupedMatmulRouting(testCase.routing) == nullptr,
+                  testCase.contractAccepts);
     }
 }
