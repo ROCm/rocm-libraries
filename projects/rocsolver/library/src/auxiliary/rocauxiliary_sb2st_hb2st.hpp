@@ -726,7 +726,7 @@ rocblas_status rocsolver_sb2st_hb2st_argCheck(rocblas_handle handle,
         return rocblas_status_not_implemented;
 
     // 2. invalid size
-    if(n < 0 || kd < 1 || ldab < 3 * kd - 1 || ldv < 2 * kd - 1)
+    if(n < 0 || kd < 1 || ldab < 3 * kd - 1 || ldv < 2 * kd - 1 || batch_count < 0)
         return rocblas_status_invalid_size;
 
     // skip pointer check if querying memory size
