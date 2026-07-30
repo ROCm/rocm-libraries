@@ -72,6 +72,14 @@ int clusterBarrierKind(const StinkyInstruction& inst) {
     return sig ? 1 : -1;
 }
 
+// Count the cluster (`-3`) signals in a sequence of +1/-1 events.
+int countClusterSignals(const std::vector<int>& seq) {
+    int n = 0;
+    for (int e : seq)
+        if (e == 1) ++n;
+    return n;
+}
+
 }  // namespace
 
 class InsertClusterBarrierPassTest : public ::testing::Test {
@@ -146,11 +154,36 @@ class InsertClusterBarrierPassTest : public ::testing::Test {
         createTensorLoadInBlock(bb, arch, loadS0, loadS1);
     }
 
-    void runPass() {
+    void runPass(int pgrValue = 1) {
         PassContext ctx;
         ctx.setGemmTileConfig(config);
-        auto pass = createInsertClusterBarrierPass(/*pgrValue=*/1, /*plrValue=*/1);
+        auto pass = createInsertClusterBarrierPass(pgrValue);
         pass->run(*func, ctx, am);
+    }
+
+    /// Build the two-handshake loop body used by the no-overlap tests.
+    void buildTwoHandshakeBody() {
+        createWMMA(24, 0, 8);
+        appendHandshake(/*loadS0=*/0, /*loadS1=*/4);
+        createWMMA(32, 8, 16);
+        createWMMA(40, 16, 8);
+        appendHandshake(/*loadS0=*/48, /*loadS1=*/52);
+        createWMMA(56, 24, 32);
+    }
+
+    /// Assert the Rule 4 no-overlap invariant on the current block: one cluster
+    /// signal per handshake and at most one signal in flight before its wait.
+    void expectNoClusterPhaseOverlap(int expectedSignals) {
+        const std::vector<int> seq = clusterBarrierSequence();
+        EXPECT_EQ(countClusterSignals(seq), expectedSignals)
+            << "exactly one Rule 4 signal -3 per handshake";
+        int outstanding = 0;
+        for (size_t i = 0; i < seq.size(); ++i) {
+            outstanding += seq[i];
+            EXPECT_LE(outstanding, 1)
+                << "two cluster signals in flight before a wait at index " << i
+                << " -- overlapping barrier phases will deadlock";
+        }
     }
 
     /// Cluster-barrier events (+1 signal / -1 wait) in program order.
@@ -164,14 +197,6 @@ class InsertClusterBarrierPassTest : public ::testing::Test {
         return seq;
     }
 };
-
-// Count the cluster (`-3`) signals in a sequence of +1/-1 events.
-static int countClusterSignals(const std::vector<int>& seq) {
-    int n = 0;
-    for (int e : seq)
-        if (e == 1) ++n;
-    return n;
-}
 
 // A single handshake produces exactly one Rule 4 cluster `signal -3`, and it is
 // hoisted ahead of every cluster `wait -3` (its own Rule 4b wait plus Rule 2's
@@ -201,33 +226,18 @@ TEST_F(InsertClusterBarrierPassTest, SingleHandshakeEmitsOneSignalBeforeItsWaits
 // loop iteration's signal across the backedge -- in this straight-line body it
 // simply shows up as an extra leading-ish wait, which is harmless.)
 TEST_F(InsertClusterBarrierPassTest, TwoHandshakesDoNotOverlapClusterPhases) {
-    // a little body before handshake 1 too, so its cycle-lead signal hoist has
-    // somewhere to land ahead of its own wait.
-    createWMMA(24, 0, 8);
-    // handshake 1
-    appendHandshake(/*loadS0=*/0, /*loadS1=*/4);
-    // a little loop body between the two handshakes (well under the cycle lead,
-    // so the backward walk for handshake 2 would reach handshake 1 if unguarded)
-    createWMMA(32, 8, 16);
-    createWMMA(40, 16, 8);
-    // handshake 2
-    appendHandshake(/*loadS0=*/48, /*loadS1=*/52);
-    createWMMA(56, 24, 32);
+    buildTwoHandshakeBody();
+    runPass(/*pgrValue=*/1);
+    expectNoClusterPhaseOverlap(/*expectedSignals=*/2);
+}
 
-    runPass();
-
-    const std::vector<int> seq = clusterBarrierSequence();
-    EXPECT_EQ(countClusterSignals(seq), 2) << "exactly one Rule 4 signal -3 per handshake";
-
-    // The deadlock condition is precisely "two cluster signals in flight": the
-    // running signal-minus-wait balance reaching 2. The fix keeps it <= 1.
-    int outstanding = 0;
-    for (size_t i = 0; i < seq.size(); ++i) {
-        outstanding += seq[i];
-        EXPECT_LE(outstanding, 1)
-            << "two cluster signals in flight before a wait at index " << i
-            << " -- overlapping barrier phases will deadlock";
-    }
+// Same no-overlap invariant with PrefetchGlobalRead=2. `pgrValue` feeds the
+// Rule 4 drain/skip gates, so exercise a non-default value to make sure the
+// signal/wait pairing (and the cycle-lead hoist boundary) is unaffected by it.
+TEST_F(InsertClusterBarrierPassTest, TwoHandshakesDoNotOverlapClusterPhasesPgr2) {
+    buildTwoHandshakeBody();
+    runPass(/*pgrValue=*/2);
+    expectNoClusterPhaseOverlap(/*expectedSignals=*/2);
 }
 
 // Sanity: the pass leaves the workgroup (`-1`) barriers in place -- Rule 4

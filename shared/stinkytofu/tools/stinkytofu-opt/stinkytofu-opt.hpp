@@ -138,7 +138,7 @@ const std::vector<PassInfo> availablePasses = {
      [](const auto&) { return createInsertInitialUnclausedVmemPass(); }},
     {"LongBranchLoweringPass", [](const auto&) { return createLongBranchLoweringPass(); }},
     // InsertClusterBarrierPass accepts:
-    //   --InsertClusterBarrierPass=PrefetchGlobalRead=<n>,PrefetchLocalRead=<n>
+    //   --InsertClusterBarrierPass=PrefetchGlobalRead=<n>
     {"InsertClusterBarrierPass",
      [](const std::vector<std::string>& args) {
          auto getArgInt = [&args](const char* k, int d) {
@@ -147,8 +147,7 @@ const std::vector<PassInfo> availablePasses = {
                  if (a.starts_with(prefix)) return std::atoi(a.substr(prefix.size()).c_str());
              return d;
          };
-         return createInsertClusterBarrierPass(getArgInt("PrefetchGlobalRead", 1),
-                                               getArgInt("PrefetchLocalRead", 1));
+         return createInsertClusterBarrierPass(getArgInt("PrefetchGlobalRead", 1));
      }},
     {"RemoveWaitAluPass", [](const auto&) { return createRemoveWaitAluPass(); }},
     {"InsertWaitAluPass",

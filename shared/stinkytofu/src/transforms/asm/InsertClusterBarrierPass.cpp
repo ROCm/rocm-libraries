@@ -56,23 +56,10 @@ constexpr size_t kHashLen = 16;
 /// guard. Rule 1 anchors on the `LABEL` instruction with this name and
 /// emits the signal-only handshake immediately after it.
 constexpr const char* kGSU1LabelName = "label_GSU_1";
-/// Exact label name emitted by Tensile right before the unrolled
-/// summation loop opens. Rule 3 anchors here (both for the
-/// PrefetchLocalRead>0 backward scan that finds the workgroup sync
-/// `s_barrier_wait -1` and for the
-/// PrefetchLocalRead=0 fallback that inserts directly before the label).
-/// Internal labels inside the prefetch prologue (e.g. `label_skipPGR2_1`)
-/// do not match by exact-name comparison and are walked through.
-constexpr const char* kOpenLoopLLabelName = "label_openLoopL";
 /// Substring used to identify the Tensile comment that opens the tail-loop
 /// section. Matches the TEXTBLOCK `/* Tail Loop                       */`.
 /// Rule 5 (5a + 5b) uses this as its section anchor.
 constexpr const char* kTailLoopMarker = "Tail Loop";
-
-/// Master switch for Rule 3 (the LoopCounterL-gated signal at the LDS
-/// publication point before `label_openLoopL:`). Temporarily disabled while
-/// Rule 4 owns the per-load handshake emission.
-constexpr bool kRule3Enabled = false;
 
 /// Master switch for Rule 4's "mode (c)" -- the always-ungated signal
 /// handshake. When true, `insertClusterBarrierHandshakeBefore` emits a
@@ -166,13 +153,6 @@ bool isClusterBarrierWait(const StinkyInstruction& inst) {
                                   /*rejectMemToken=*/true);
 }
 
-/// True if `inst` is `s_barrier_signal -3`. Mirror of `isClusterBarrierWait`
-/// used by Rule 3's anchor-mode (b) path for section-level idempotency.
-bool isClusterBarrierSignal(const StinkyInstruction& inst) {
-    return isBarrierWithLiteralId(inst, /*wantSignal=*/true, kClusterBarrierId,
-                                  /*rejectMemToken=*/false);
-}
-
 /// A segment boundary is either a label (control-flow entry point) or a
 /// branch instruction (control-flow exit point). Treating both as boundaries
 /// gives us per-CFG-basic-block segmentation even on Tensile's flat IR,
@@ -187,7 +167,7 @@ bool isSegmentBoundary(const StinkyInstruction& inst) {
 /// barrier). Stops at a segment boundary. Used by Rule 4 both to resolve each
 /// load's trigger signal (the cluster `s_barrier_wait -3` is anchored
 /// immediately BEFORE it, so it precedes the whole workgroup barrier pair, and
-/// hence the tensor load) and by the Rule 3/5 conflict guards to bridge a
+/// hence the tensor load) and by the Rule 5 conflict guards to bridge a
 /// workgroup wait to its paired signal for identity comparison.
 StinkyInstruction* findPrecedingWorkgroupBarrierSignalInSegment(BasicBlock::iterator segmentBegin,
                                                                 StinkyInstruction* anchor) {
@@ -414,12 +394,6 @@ void insertClusterBarrierSignalOnlyBefore(IRBase* anchor, AsmIRBuilder& irBuilde
 ///   - Rule 1: workgroup pair gates the post-GSU==1 cluster signal so
 ///     all waves reach the join before any wave publishes (comment:
 ///     `"sync workgroup before cluster signal"`).
-///   - Rule 3's PrefetchLocalRead=0 anchor-mode (b): when the backward scan from
-///     `label_openLoopL:` finds no `s_barrier_wait -1` before crossing
-///     the prefetch boundary, we synthesize the LDS publication point
-///     here (comment: `"workgroup sync"`) so the cluster signal
-///     that immediately follows still sits at a valid LDS-coherence
-///     point.
 void insertWorkgroupBarrierSyncBefore(IRBase* anchor, AsmIRBuilder& irBuilder, GfxArchID archId,
                                       const char* waitComment) {
     const HwInstDesc* signalDesc = getMCIDByUOp(GFX::s_barrier_signal, archId);
@@ -481,17 +455,6 @@ void insertWorkgroupBarrierSyncBefore(IRBase* anchor, AsmIRBuilder& irBuilder, G
 ///             cluster signal" -- the post-GSU==1 join needs the
 ///             workgroup to be in lockstep before the cluster signal
 ///             fires)
-///   - Rule 3 (call site present but currently gated off by
-///             `kRule3Enabled`): `s_cmp_le_u32` / imm=pgr  (skip when
-///             LCL <= pgr; the
-///             same gate is used by both Rule 3 anchor modes -- existing
-///             workgroup wait (mode a) or synthesized (mode b) -- so
-///             cluster signal/wait pairing stays balanced when the
-///             unrolled loop body is bypassed. Mode (b) passes
-///             workgroupSyncWaitComment = "workgroup sync" to
-///             synthesize the LDS publication point inside the LCL
-///             skip region; mode (a) passes nullptr because the wait
-///             already exists in the IR.)
 ///   - Rule 4: uses this helper only in its drain-gated fallback mode (b)
 ///             (when `kRule4ForceUngatedSignalMode` is off): `s_cmp_le_i32`
 ///             / imm=pgr+1 (minus any LCL pre-decrement), so the SIGNAL is
@@ -812,7 +775,6 @@ void insertClusterBarrierHandshakeBefore(IRBase* signalAnchor, IRBase* waitAncho
 /// True if `inst` is a `LABEL` pseudo whose `LabelData.label` matches `name`
 /// exactly. Anchors:
 ///   - Rule 1: `kGSU1LabelName` (`label_GSU_1:`)
-///   - Rule 3 anchor mode (b): `kOpenLoopLLabelName` (`label_openLoopL:`)
 /// Internal control-flow labels (e.g. `label_skipPGR2_1`) do not match by
 /// exact-name comparison and are scanned through.
 bool isLabelNamed(const StinkyInstruction& inst, const char* name) {
@@ -838,7 +800,6 @@ bool isTextblockContaining(IRBase* ir, const char* marker) {
 ///   - `s_cmp_eq_u32 s[sgprWaveIdx], 0` (Rule 5a signal-only AND Rule 4's
 ///     current emission, whose first instruction is this WaveIdx gate)
 ///   - `s_cmp_eq_u32 s[sgprLoopCounterL], <imm>` (Rule 1's `LCL == 0` gate)
-///   - `s_cmp_le_u32 s[sgprLoopCounterL], <imm>` (Rule 3's `LCL <= pgr` gate)
 ///   - `s_cmp_le_i32 s[sgprLoopCounterL], <imm>` (Rule 4 drain-gated mode (b) gate)
 ///   - `s_cmp_eq_i32 s[sgprLoopCounterL], <imm>` (Rule 4 inherited-SCC clone)
 /// The imm operand is not checked, only the symbolic name, so the predicate
@@ -1000,8 +961,7 @@ class InsertClusterBarrierPassImpl : public Pass {
    public:
     static char ID;
 
-    InsertClusterBarrierPassImpl(int pgrValue, int plrValue)
-        : pgrValue_(pgrValue), plrValue_(plrValue) {}
+    explicit InsertClusterBarrierPassImpl(int pgrValue) : pgrValue_(pgrValue) {}
 
     const char* getName() const override {
         return "Insert Cluster Barrier";
@@ -1076,8 +1036,8 @@ class InsertClusterBarrierPassImpl : public Pass {
 
                 // Rule 4's trigger IS the workgroup `s_barrier_signal -1` paired
                 // with the load's barrier, found directly by walking back from the
-                // load (the nearest preceding signal in the segment). Rule 3/5 keep
-                // using the workgroup-WAIT finder; their conflict guards bridge to
+                // load (the nearest preceding signal in the segment). Rule 5 keeps
+                // using the workgroup-WAIT finder; its conflict guards bridge to
                 // this signal via each wait's paired signal.
                 StinkyInstruction* trigger =
                     findPrecedingWorkgroupBarrierSignalInSegment(segBegin, inst);
@@ -1165,125 +1125,6 @@ class InsertClusterBarrierPassImpl : public Pass {
                 gsu1Anchors.push_back(anchor);
             }
 
-            // Rule 3: LoopCounterL-gated signal-only handshake at the
-            // LDS publication point that precedes `label_openLoopL:`.
-            // Currently disabled via `kRule3Enabled` (the detection block
-            // below is gated off); the description is retained for when it
-            // is re-enabled.
-            // The gate is `LCL <= pgrValue_` skip (matches Tensile's own
-            // `s_cmp_le_u32 LCL, pgrValue / s_cbranch_scc1 LoopEndL` entry
-            // guard, so the cluster signal is suppressed on the exact
-            // same control-flow paths where the corresponding
-            // `s_barrier_wait -3` inside the unrolled loop body is
-            // skipped -- keeping `signal -3` / `wait -3` paired
-            // everywhere).
-            //
-            // Anchor selection (backward scan from `label_openLoopL:`):
-            //   (a) `s_barrier_wait -1` -- publication point already
-            //       exists (typical for PrefetchLocalRead > 0 schedules). Anchor at
-            //       the successor of that wait. No new workgroup sync
-            //       is synthesized. The scan stops if a
-            //       `tensor_load_to_lds` is reached first: that
-            //       instruction marks the prefetch section, before any
-            //       workgroup sync could sit, so an earlier workgroup
-            //       wait (if one existed) would be unrelated and must
-            //       not be re-used as the publication point.
-            //   (b) No `s_barrier_wait -1` between the prefetch tail
-            //       and `label_openLoopL:` (typical for PrefetchLocalRead == 0
-            //       schedules where the prologue has no local-read
-            //       preamble barrier). Only act when `plrValue_ == 0`;
-            //       anchor at the label and synthesize an
-            //       `s_barrier_signal -1` / `s_barrier_wait -1` pair
-            //       INSIDE the LCL skip region (between the outer LCL
-            //       skip-branch and the inner WaveIdx gate) by passing
-            //       `workgroupSyncWaitComment = "workgroup sync"`
-            //       to the LCL-gated helper. The pair therefore sits
-            //       on the same control-flow path as the cluster
-            //       signal: it is bypassed together with the signal on
-            //       the `LCL <= pgrValue` skip path, which mirrors
-            //       Tensile's own loop-entry guard (the unrolled loop
-            //       body -- and hence the LDS reads -- is also bypassed
-            //       there, so no LDS publication is needed).
-            //
-            // Internal control-flow labels inside the prefetch prologue
-            // (e.g. `label_skipPGR2_*`) do not match `label_openLoopL`
-            // by exact-name comparison and are walked through.
-            //
-            // The label/instruction-based anchor does not depend on
-            // TEXTBLOCK directives (and so survives
-            // `ScopeAdaptor::moveIRToBlock`, which erases them), so this
-            // rule keeps working under the single kernel-scope run that
-            // `Gfx1250Backend::buildGfx1250Pipeline` performs when
-            // `moduleOptions.ClusterBarrier == true`.
-            // Idempotency:
-            //   - Section-level: the backward scan also flags whether a
-            //     cluster-scope signal/wait already sits in the
-            //     section. If so (e.g. a prior pass run already emitted
-            //     Rule 3), Rule 3 self-disables.
-            //   - Anchor-level (mode a): skip if the existing workgroup
-            //     wait is already followed by a cluster handshake, or
-            //     if Rule 4 has already queued the same wait as a
-            //     trigger (Rule 4 emits the full wait+signal handshake
-            //     and supersedes Rule 3 at the same anchor).
-            BasicBlock::iterator setupNewTileAnchorIt = bb.end();
-            bool setupNewTileNeedsWorkgroupSync = false;
-            StinkyInstruction* setupNewTileExistingWait = nullptr;
-            if (kRule3Enabled) {
-                StinkyInstruction* openLoopLLabel = nullptr;
-                for (auto it = bb.begin(); it != bb.end(); ++it) {
-                    auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
-                    if (inst != nullptr && isLabelNamed(*inst, kOpenLoopLLabelName)) {
-                        openLoopLLabel = inst;
-                        break;
-                    }
-                }
-                if (openLoopLLabel != nullptr) {
-                    bool sectionAlreadyHasClusterBarrier = false;
-                    StinkyInstruction* foundWait = nullptr;
-                    auto it = BasicBlock::iterator(openLoopLLabel);
-                    while (it != bb.begin()) {
-                        --it;
-                        auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
-                        if (inst == nullptr) continue;
-                        if (isTensorLoad(*inst)) break;
-                        if (isClusterBarrierWait(*inst) || isClusterBarrierSignal(*inst)) {
-                            sectionAlreadyHasClusterBarrier = true;
-                        }
-                        if (isWorkgroupBarrierWait(*inst)) {
-                            foundWait = inst;
-                            break;
-                        }
-                    }
-                    if (!sectionAlreadyHasClusterBarrier) {
-                        if (foundWait != nullptr) {
-                            setupNewTileExistingWait = foundWait;
-                            setupNewTileAnchorIt = std::next(BasicBlock::iterator(foundWait));
-                        } else if (plrValue_ == 0) {
-                            setupNewTileAnchorIt = BasicBlock::iterator(openLoopLLabel);
-                            setupNewTileNeedsWorkgroupSync = true;
-                        }
-                    }
-                }
-            }
-            if (setupNewTileExistingWait != nullptr) {
-                // Rule 4's triggers are workgroup SIGNALs; bridge this wait to its
-                // paired signal so the identity comparison still detects overlap.
-                StinkyInstruction* setupPairedSignal =
-                    findPrecedingWorkgroupBarrierSignalInSegment(bb.begin(),
-                                                                 setupNewTileExistingWait);
-                bool conflictsWithRule4 = false;
-                for (const auto& [trigger, _sig, _wait, _live, _dec] : pending) {
-                    if (setupPairedSignal != nullptr && trigger == setupPairedSignal) {
-                        conflictsWithRule4 = true;
-                        break;
-                    }
-                }
-                if (conflictsWithRule4 ||
-                    isFollowedByClusterBarrierHandshakeOrSignal(setupNewTileExistingWait)) {
-                    setupNewTileAnchorIt = bb.end();
-                }
-            }
-
             // Rule 5 -- tail-loop cluster handshake (paired, kernel scope
             // effectively). Two emission sites because the workgroup wait
             // and the tail load are in different label/branch-delimited
@@ -1344,9 +1185,8 @@ class InsertClusterBarrierPassImpl : public Pass {
                 }
             }
 
-            const bool setupNewTileEnabled = (setupNewTileAnchorIt != bb.end());
-            if (pending.empty() && gsu1Anchors.empty() && !setupNewTileEnabled &&
-                tailTL == nullptr && tailWait == nullptr)
+            if (pending.empty() && gsu1Anchors.empty() && tailTL == nullptr &&
+                tailWait == nullptr)
                 continue;
             AsmIRBuilder irBuilder(bb, archId);
             for (const auto& [trigger, signalAnchor, waitAnchor, liveLclCmp, lclPreDecrement] :
@@ -1371,18 +1211,6 @@ class InsertClusterBarrierPassImpl : public Pass {
                     /*cmpComment=*/"gate: only signal when LoopCounterL != 0",
                     /*branchComment=*/"skip cluster barrier when LoopCounterL == 0",
                     /*workgroupSyncWaitComment=*/"sync workgroup before cluster signal");
-            }
-            if (setupNewTileEnabled) {
-                IRBase* anchor = setupNewTileAnchorIt.getNodePtr();
-                const std::string immStr = std::to_string(pgrValue_);
-                insertLoopCounterLGatedClusterBarrierSignalBefore(
-                    anchor, irBuilder, archId,
-                    /*cmpUOp=*/GFX::s_cmp_le_u32,
-                    /*skipWhenScc1Imm=*/pgrValue_,
-                    /*cmpComment=*/"LoopCounter <= " + immStr + "?",
-                    /*branchComment=*/"skip cluster barrier when LoopCounterL <= " + immStr,
-                    /*workgroupSyncWaitComment=*/
-                    setupNewTileNeedsWorkgroupSync ? "workgroup sync" : nullptr);
             }
             // Rule 5a -- signal-only after the tail loop's preceding workgroup wait.
             if (tailWait != nullptr) {
@@ -1414,15 +1242,14 @@ class InsertClusterBarrierPassImpl : public Pass {
 
    private:
     const int pgrValue_;
-    const int plrValue_;
 };
 
 char InsertClusterBarrierPassImpl::ID = 0;
 
 }  // namespace
 
-std::unique_ptr<Pass> createInsertClusterBarrierPass(int pgrValue, int plrValue) {
-    return std::make_unique<InsertClusterBarrierPassImpl>(pgrValue, plrValue);
+std::unique_ptr<Pass> createInsertClusterBarrierPass(int pgrValue) {
+    return std::make_unique<InsertClusterBarrierPassImpl>(pgrValue);
 }
 
 }  // namespace stinkytofu
