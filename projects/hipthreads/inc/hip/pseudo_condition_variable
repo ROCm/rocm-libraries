@@ -46,7 +46,7 @@
  *   spin_condition_variable stays pure tight spin specialized to spin_mutex.
  *
  * @note pseudo_yield() has important limitations: it prevents the yielding
- *       thread from resuming until the yieldee completes execution. This means
+ *       wthread from resuming until the yieldee completes execution. This means
  *       yield-loops (A yields to B, B tries to acquire a lock held by A) will
  *       deadlock. Exercise caution when using pseudo_condition_variable in
  *       scenarios where threads may yield to each other.

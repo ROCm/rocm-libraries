@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2021 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -44,29 +44,15 @@
 #include <ostream>
 
 THRUST_NAMESPACE_BEGIN
-
 template <typename Element, typename Tag, typename Reference = use_default, typename Derived = use_default>
 class pointer;
-
-// Specialize `thrust::iterator_traits` to avoid problems with the name of
-// pointer's constructor shadowing its nested pointer type. We do this before
-// pointer is defined so the specialization is correctly used inside the
-// definition.
-template <typename Element, typename Tag, typename Reference, typename Derived>
-struct iterator_traits<thrust::pointer<Element, Tag, Reference, Derived>>
-{
-  using pointer           = thrust::pointer<Element, Tag, Reference, Derived>;
-  using iterator_category = typename pointer::iterator_category;
-  using value_type        = typename pointer::value_type;
-  using difference_type   = typename pointer::difference_type;
-  using reference         = typename pointer::reference;
-};
-
 THRUST_NAMESPACE_END
 
+// Specialize `std::iterator_traits` (picked up by _THRUST_STD::iterator_traits) to avoid problems with the name of
+// pointer's constructor shadowing its nested pointer type. We do this before pointer is defined so the specialization
+// is correctly used inside the definition.
 namespace std
 {
-
 template <typename Element, typename Tag, typename Reference, typename Derived>
 struct iterator_traits<THRUST_NS_QUALIFIER::pointer<Element, Tag, Reference, Derived>>
 {
@@ -76,7 +62,6 @@ struct iterator_traits<THRUST_NS_QUALIFIER::pointer<Element, Tag, Reference, Der
   using difference_type   = typename pointer::difference_type;
   using reference         = typename pointer::reference;
 };
-
 } // namespace std
 
 THRUST_NAMESPACE_BEGIN
@@ -162,8 +147,9 @@ public:
   template <typename OtherElement>
   THRUST_HOST_DEVICE explicit pointer(OtherElement* ptr);
 
-  // Fixes hipcc linkage error
+#if THRUST_HAS_HIP_COMPILER() // Fixes hipcc linkage error
   THRUST_HOST_DEVICE explicit pointer(Element* ptr);
+#endif
 
   // OtherPointer's element_type shall be convertible to Element
   // OtherPointer's system shall be convertible to Tag

@@ -30,7 +30,7 @@ int main(int, char**)
   assert(!s.try_acquire_until(start + cuda::std::chrono::milliseconds(250)));
   assert(!s.try_acquire_for(cuda::std::chrono::milliseconds(250)));
 
-  hip::thread t = support::make_test_thread([&](){
+  hip::wthread t = support::make_test_thread([&](){
     hip::this_thread::sleep_for(cuda::std::chrono::milliseconds(250));
     s.release();
     hip::this_thread::sleep_for(cuda::std::chrono::milliseconds(250));

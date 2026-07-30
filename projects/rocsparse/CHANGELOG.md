@@ -19,16 +19,19 @@ Documentation for rocSPARSE is available at
 ### Removed
 * The deprecated `rocsparse_indextype_u16` enum.
 
+### Deprecated
+* Deprecated the `rocsparse_spildlt0_input_diag` enum value. It was used to dump the diagonal `D` of the ILDLT(0) factorization, which is now stored in-place on the diagonal entries of the `L` factor. 
+
 ## rocSPARSE 4.7.0 for ROCm 7.14
 
 ### Added
 * Added the `rocsparse_spildlt0` routine for incomplete LDL' factorization with zero fill-in (ILDLT(0)) for symmetric (real) or hermitian (complex) sparse matrices in CSR format, with strided batched computations enabled.
 
-### Upcoming changes
-* Deprecated the `rocsparse_indextype_u16` index type. It is  no longer supported and will be removed in a future release. Users should use `rocsparse_indextype_i32` or `rocsparse_indextype_i64` going forward.
-
 ### Known issues
 * The HIP graph capture/launch path for the factorization routines `bsric0`, `bsrilu0`, `csric0` and `csrilu0` can fail with `hipErrorOutOfMemory` at `hipGraphLaunch` on memory-constrained GPUs such as the gfx110X family. The corresponding `graph_test` cases are marked `known_bug` and excluded from the standard test suites until the fix lands.
+
+### Upcoming changes
+* Deprecated the `rocsparse_indextype_u16` index type. It will be removed in a future release. Users should use `rocsparse_indextype_i32` or `rocsparse_indextype_i64` going forward.
 
 ## rocSPARSE 4.6.0 for ROCm 7.13.0
 

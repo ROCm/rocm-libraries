@@ -397,6 +397,10 @@ inline bool isGLOBALAtomic(const StinkyInstruction& inst) {
     return inst.is(InstFlag::IF_GLOBALAtomic);
 }
 
+inline bool isGlobalPrefetch(const StinkyInstruction& inst) {
+    return inst.is(InstFlag::IF_GLOBALPrefetch);
+}
+
 inline bool isGLOBAL(const StinkyInstruction& inst) {
     return isGLOBALLoad(inst) || isGLOBALStore(inst);
 }
@@ -749,6 +753,11 @@ inline bool isScalarALU(const StinkyInstruction& inst) {
 /// Excludes FP32-input WMMA (v_wmma_f32_16x16x4_f32).
 inline bool isXDLWMMA(const StinkyInstruction& inst) {
     return inst.is(InstFlag::IF_WMMA_XDL);
+}
+
+/// Check if instruction is a Tensor-LUT op (v_perm_pk16*).
+inline bool isTensorLUT(const StinkyInstruction& inst) {
+    return inst.is(InstFlag::IF_TensorLUT);
 }
 
 /// Check if instruction is a 64-bit transcendental.

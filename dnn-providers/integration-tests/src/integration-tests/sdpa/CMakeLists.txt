@@ -5,5 +5,11 @@ target_sources(${INTEGRATION_TESTS_EXE}
     PRIVATE
         IntegrationCpuSdpaFwdBwdChained.cpp
         IntegrationGoldenRefSdpaFwdInference.cpp
-        IntegrationGpuSdpaFwdInference.cpp
 )
+
+if(BUILD_CPP_GRAPH_TESTS)
+    target_sources(${INTEGRATION_TESTS_EXE}
+        PRIVATE
+            IntegrationGpuSdpaFwdInference.cpp
+    )
+endif()

@@ -142,7 +142,7 @@ DEF_BATCH(.format = FLAT_ATOMIC,
     FlatAtomicPkAddF16Inst, "flat_atomic_pk_add_f16",
     FlatAtomicPkAddBf16Inst, "flat_atomic_pk_add_bf16",
     FlatAtomicIncU32Inst, "flat_atomic_inc_u32",
-    FlatAtomicDecU32Inst, "flat_atomic_dec_u32",
+    FlatAtomicDecU32Inst, "flat_atomic_dec_u32", .logical = "FlatAtomicDecU32",
     FlatAtomicMinF64Inst, "flat_atomic_min_num_f64",
         .operand_fields = { {D0, .size=64}, {S1, .size=64} },
     FlatAtomicMaxF64Inst, "flat_atomic_max_num_f64",
@@ -423,7 +423,8 @@ DEF_T(GlobalAtomicIncU32SaddrInst, "global_atomic_inc_u32", .format = VGLOBAL_AT
 // so reordering it affects performance but not correctness.
 // Support null saddr + 64-bit vaddr or 64-bit saddr + 32-bit vaddr.
 // temporal hint / cache scope (e.g."th:TH_LOAD_NT scope:SCOPE_SE") are carried as GLOBALModifiers.
-DEF_T(GlobalPrefetchB8Inst, "global_prefetch_b8", .format = VGLOBAL, .logical = "GlobalPrefetchB8",
+DEF_T(GlobalPrefetchB8Inst, "global_prefetch_b8", .format = VGLOBAL, .flags = {GLOBALPrefetch},
+    .logical = "GlobalPrefetchB8",
     .operand_fields = { {S0, vaddr, vgpr, 64}, {S1, saddr, sreg, 64} })
 
 // Global load with transpose-read (TR) — gfx1250 only.
@@ -542,6 +543,36 @@ DEF_BATCH(.format = SMRD_LOAD,
     SLoadDwordx16Inst, "s_load_dwordx16",
         .operand_fields = { {D0, .size=512} },
 )
+
+// SMRD / SMEM — S_PREFETCH_INST  §5.7
+// Prefetch instructions into the shader instruction cache, relative to a base address.
+// No-op when MODE.SCALAR_PREFETCH_EN == 0. No completion / error status returned.
+//
+// Hardware semantics (from ISA spec):
+//   mem_addr = (S0 + sign_extend24(koffset)) & ~0x7F  // 128 B aligned base
+//   length   = (S2 + klength) & 31                    // S2=slength SGPR/M0 + klength simm5
+//   PrefetchScalarInst(mem_addr, (length + 1) * 128)  // 128-4096 bytes (1-32 cache lines)
+//
+// Pass usage: null for S2 (slength=0) + klength=31 → (0+31)&31+1=32 lines = 4096 bytes/insn.
+//
+// Field map (ISA column: POS (INSTFIELD) = operand_name : type):
+//   S0 (sbase)   = sbase   : sreg           B64 — 64-bit aligned SGPR pair
+//   S1 (ioffset) = koffset : simm24         B32 — byte offset added to sbase
+//   S2 (soffset) = slength : smem_offset_nok B32 — SGPR/M0/null length addend
+//   S3 (sdata)   = klength : simm5          B32 — simm5 immediate length addend
+//
+// Note: ISA names the S2 encoding field "soffset" (hardware) and its semantic role "slength".
+// Note: ISA names the S0 encoding field "sbase". StinkyTofu uses ssrc0 (same 64-bit sreg
+//       constraint); the assembly emitter prints the SGPR pair correctly regardless.
+DEF_T(SPrefetchInstInst, "s_prefetch_inst",
+    .format = SMRD,
+    .flags = {ScalarInstPrefetch},
+    .operand_fields = {
+        {S0, ssrc0, sreg, 64},
+        {S1, ioffset, simm24, 32},
+        {S2, soffset, smem_offset_nok, 32},
+        {S3, sdata, simm5, 32},
+    })
 
 // SMRD / SMEM — S_PREFETCH_INST_PC_REL (PC-relative; koffset simm24, slength, klength simm5)
 DEF_T(SPrefetchInstPcRelInst, "s_prefetch_inst_pc_rel",
@@ -731,14 +762,20 @@ DEF_BATCH(.format = VOP2,
 DEF_BATCH(.format = VOP3,
     VLshlAddU32Inst, "v_lshl_add_u32", .logical = {"VLShiftLeftAddU32", "_VLShiftLeftAddU32"},
     VLshlOrB32Inst, "v_lshl_or_b32", .logical = {"VLShiftLeftOrB32", "_VLShiftLeftOrB32"},
-    VLshlrevB16Inst, "v_lshlrev_b16", .logical = "VLShiftLeftB16",
-        .operand_fields = { {D0, .size=16}, {S0, .size=16}, {S1, .size=16} },
-    VLshrrevB64Inst, "v_lshrrev_b64", .logical = "VLShiftRightB64",
-        .operand_fields = { {D0, .size=64}, {S1, .size=64} },
     VMadI32I24Inst, "v_mad_i32_i24", .logical = "VMadI32I24",
         .operand_fields = { {S0, .size=24}, {S1, .size=24} },
     VMadU32U24Inst, "v_mad_u32_u24", .logical = "VMadU32U24",
         .operand_fields = { {S0, .size=24}, {S1, .size=24} },
+)
+
+// Vector ALU — VOP3-only shifts (2 sources: dst, shiftAmount, value).
+// Must use VOP3_2SRC (dst+src0+src1); the 4-field VOP3 format leaves a phantom
+// src2 that the StinkyIRVerifier reports as a missing operand.
+DEF_BATCH(.format = VOP3_2SRC,
+    VLshlrevB16Inst, "v_lshlrev_b16", .logical = "VLShiftLeftB16",
+        .operand_fields = { {D0, .size=16}, {S0, .size=16}, {S1, .size=16} },
+    VLshrrevB64Inst, "v_lshrrev_b64", .logical = "VLShiftRightB64",
+        .operand_fields = { {D0, .size=64}, {S1, .size=64} },
 )
 
 // Vector ALU — VOP1 (dual VOP1/VOP3 encoding)
@@ -769,6 +806,7 @@ DEF_T(VSwapB32Inst, "v_swap_b32", .format = VOP1, .logical = "VSwapB32",
 // v_movrelsd_2_b32: like v_mov_b32 but the dst VGPR index is offset by M0 at
 // runtime (indirect VGPR write).
 DEF_T(VMovRelsD2B32Inst, "v_movrelsd_2_b32", .format = VOP1,
+    .logical = "VMovRelsD2B32",
     .operand_fields = {
         {D0, vdst, vgpr, 32},
         {S0, src0, vgpr, 32},
@@ -812,6 +850,16 @@ DEF_BATCH(.format = VOP3,
     VPackB32F16Inst, "v_pack_b32_f16", .logical = "VPackF16toB32",
         .operand_fields = { {S0, .size=16}, {S1, .size=16} },
     VPermB32Inst, "v_perm_b32", .logical = "VPermB32",
+)
+
+// Tensor-LUT (v_perm_pk16).
+DEF_BATCH(.format = VOP3, .flags = {TensorLUT},
+    VPermPk16B4U4Inst, "v_perm_pk16_b4_u4", .coissue = 0x000E,
+        .operand_fields = { {D0, .size=64}, {S0, .size=32}, {S1, .size=32}, {S2, .size=64} },
+    VPermPk16B6U4Inst, "v_perm_pk16_b6_u4", .coissue = 0x000E,
+        .operand_fields = { {D0, .size=96}, {S0, .size=32}, {S1, .size=64}, {S2, .size=64} },
+    VPermPk16B8U4Inst, "v_perm_pk16_b8_u4", .coissue = 0x000E,
+        .operand_fields = { {D0, .size=128}, {S0, .size=64}, {S1, .size=64}, {S2, .size=64} },
 )
 
 // Vector ALU — VOP3P packed
@@ -1242,6 +1290,7 @@ DEF_T(VCvtScalePk8F16Fp8Inst, "v_cvt_scale_pk8_f16_fp8",
 // Pack-of-8 conversion (8x F32 -> 8x FP8/BF8) with F32 scale.
 DEF_T(VCvtScalef32Pk8Fp8F32Inst, "v_cvt_scalef32_pk8_fp8_f32",
     .format = VOP3,
+    .logical = "VCvtScalePk8F32toFP8",
     .operand_fields = {
         {D0, vdst, vgpr, 64},
         {S0, src0, src_vgpr, 256},
@@ -1250,6 +1299,7 @@ DEF_T(VCvtScalef32Pk8Fp8F32Inst, "v_cvt_scalef32_pk8_fp8_f32",
 )
 DEF_T(VCvtScalef32Pk8Bf8F32Inst, "v_cvt_scalef32_pk8_bf8_f32",
     .format = VOP3,
+    .logical = "VCvtScalePk8F32toBF8",
     .operand_fields = {
         {D0, vdst, vgpr, 64},
         {S0, src0, src_vgpr, 256},
@@ -1259,6 +1309,7 @@ DEF_T(VCvtScalef32Pk8Bf8F32Inst, "v_cvt_scalef32_pk8_bf8_f32",
 // Stochastic-rounding pack-of-8 conversion (8x F32 -> 8x FP8) with F32 scale.
 DEF_T(VCvtScalef32SrPk8Fp8F32Inst, "v_cvt_scalef32_sr_pk8_fp8_f32",
     .format = VOP3,
+    .logical = "VCvtScaleSRPkF32toFP8",
     .operand_fields = {
         {D0, vdst, vgpr, 64},
         {S0, src0, src_vgpr, 256},
