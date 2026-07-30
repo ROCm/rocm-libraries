@@ -28,25 +28,16 @@
 
 namespace stinkytofu {
 class Pass;
+class StinkyAsmModule;
 
 /// Insert s_wait_alu instructions for SCHED_MODE 2 (VA_VDST + VM_VSRC).
 ///
-/// Operates on whatever Function it is given — a real kernel function, or a
-/// region extracted by ScopeAdaptor. Owns the mode2 lifecycle within that
-/// scope: enables mode2 at the entry block, disables it before calls/returns,
-/// emits s_wait_alu wherever the VA_VDST / VM_VSRC scoreboard requires.
-/// Tracks only VA_VDST and VM_VSRC counters — memory completion counters
-/// are owned by the memory waitcnt pass.
-///
-/// Caller responsibilities when running on a sub-region (ScopeAdaptor):
-///   1. Mode state at the region boundary is the caller's concern. The pass
-///      flips mode2 on/off inside its own scope; redundant flips on splice-back
-///      are not removed here.
-///   2. The scope must contain every producer of every VGPR consumed inside
-///      it. Producers outside the scope (e.g. pre-loop preloads) are invisible
-///      to the scoreboard and will not generate waits.
-///
-/// RemoveWaitAluPass must run first to strip any pre-existing wait_alu state.
-STINKYTOFU_EXPORT std::unique_ptr<Pass> createInsertWaitAluPass();
+/// The module overload reaches callee Functions for their conservative entry
+/// drain. The no-argument overload (stinkytofu-opt single-pass mode, unit tests)
+/// processes just the Function it is given and skips callee iteration.
+STINKYTOFU_EXPORT std::unique_ptr<Pass> createInsertWaitAluPass(
+    StinkyAsmModule& module, bool enableESM2TrackValuVsrc = false);
+STINKYTOFU_EXPORT std::unique_ptr<Pass> createInsertWaitAluPass(
+    bool enableESM2TrackValuVsrc = false);
 
 }  // namespace stinkytofu

@@ -947,6 +947,446 @@ const char* rocke_ll_smem_global_name(rocke_lower_t* L,
 }
 
 /* ====================================================================== */
+/* smem live-interval analysis + pool layout (_compute_smem_layout)       */
+/* ====================================================================== */
+
+/* Live-interval entry: (first_seq, last_seq) for one smem global. `used` is
+ * set when the global appears as an operand of some op (i.e. is actually read,
+ * written or address-taken); an allocation that is only defined but never used
+ * is dead and must not consume pool space (mirrors Python's `used` set). */
+typedef struct ll_live_interval
+{
+    const char* gname;
+    int first_seq;
+    int last_seq;
+    int used;
+} ll_live_interval_t;
+
+/* Mutable state threaded through the DFS walk (mirrors Python closures). */
+typedef struct ll_liveness_walk_ctx
+{
+    rocke_lower_t* L;
+    ll_live_interval_t* intervals; /* flat array, len == smem_globals.len */
+    size_t num_intervals;
+    int counter; /* preorder sequence counter */
+} ll_liveness_walk_ctx_t;
+
+/* Return the index into intervals[] for gname, or -1 if not found. */
+static int ll_interval_index(const ll_liveness_walk_ctx_t* ctx, const char* gname)
+{
+    for(size_t i = 0; i < ctx->num_intervals; i++)
+    {
+        if(strcmp(ctx->intervals[i].gname, gname) == 0)
+            return (int)i;
+    }
+    return -1;
+}
+
+/* Look up the global name for an IR value name (%foo) via smem_names. */
+static const char* ll_val_to_gname(const rocke_lower_t* L, const char* value_name)
+{
+    if(!value_name)
+        return NULL;
+    for(size_t i = 0; i < L->smem_names.len; i++)
+    {
+        if(L->smem_names.data[i].value_name
+           && strcmp(L->smem_names.data[i].value_name, value_name) == 0)
+            return L->smem_names.data[i].gname;
+    }
+    return NULL;
+}
+
+/* Number of preorder counter ticks for `op` and its descendants -- mirrors
+ * Python `_subtree_size`.  Matches ll_liveness_walk exactly: one tick per op
+ * slot (a NULL op still ticks the counter but does not recurse), plus every
+ * op in each sub-region.  The subtree rooted at index `idx` therefore occupies
+ * contiguous sequence indices [idx, idx + ll_subtree_size(op) - 1]. */
+static int ll_subtree_size(const rocke_op_t* op)
+{
+    int n = 1;
+    if(!op)
+        return n;
+    for(int r = 0; r < op->num_regions; r++)
+    {
+        const rocke_region_t* reg = op->regions[r];
+        if(!reg)
+            continue;
+        for(int i = 0; i < reg->num_ops; i++)
+            n += ll_subtree_size(reg->ops[i]);
+    }
+    return n;
+}
+
+/* DFS preorder walk -- mirrors Python `walk(ops, loop_end)`. */
+static void
+    ll_liveness_walk(ll_liveness_walk_ctx_t* ctx, const rocke_region_t* region, int loop_end)
+{
+    if(!region)
+        return;
+    for(int i = 0; i < region->num_ops; i++)
+    {
+        const rocke_op_t* op = region->ops[i];
+        if(!op)
+        {
+            ctx->counter++;
+            continue;
+        }
+        int idx = ctx->counter++;
+
+        /* Definition point: tile.smem_alloc */
+        if(op->opcode == ROCKE_OP_TILE_SMEM_ALLOC && op->num_results > 0)
+        {
+            const rocke_value_t* res = op->results[0];
+            const char* gn = ll_val_to_gname(ctx->L, res ? res->name : NULL);
+            if(gn)
+            {
+                int ii = ll_interval_index(ctx, gn);
+                if(ii >= 0 && ctx->intervals[ii].first_seq < 0)
+                {
+                    ctx->intervals[ii].first_seq = idx;
+                    ctx->intervals[ii].last_seq = idx;
+                }
+            }
+        }
+
+        /* Any operand that is an smem value extends its live range. */
+        for(int j = 0; j < op->num_operands; j++)
+        {
+            const rocke_value_t* v = op->operands[j];
+            if(!v || !v->name)
+                continue;
+            const char* gn = ll_val_to_gname(ctx->L, v->name);
+            if(!gn)
+                continue;
+            int ii = ll_interval_index(ctx, gn);
+            if(ii < 0)
+                continue;
+            ctx->intervals[ii].used = 1;
+            int first = (ctx->intervals[ii].first_seq < 0) ? idx : ctx->intervals[ii].first_seq;
+            int new_last = (loop_end >= 0) ? loop_end : idx;
+            int last = ctx->intervals[ii].last_seq;
+            ctx->intervals[ii].first_seq = (first < idx) ? first : idx;
+            ctx->intervals[ii].last_seq = (last > new_last) ? last : new_last;
+        }
+
+        /* Recurse into sub-regions. scf.for gets a conservative loop_end: the
+         * last preorder index of the loop subtree (idx + size - 1), not the
+         * for-op's own (earlier) index, so allocations defined inside the loop
+         * are extended across the whole loop and interfere as they must.
+         *
+         * For a nested loop, an allocation used only in the inner loop can be
+         * re-read on a later outer iteration, so its live range must reach the
+         * enclosing loop's end too -- take the max with any enclosing loop_end
+         * (loop_end < 0 means "no enclosing loop", i.e. Python's None). */
+        for(int r = 0; r < op->num_regions; r++)
+        {
+            int child_loop_end;
+            if(op->opcode == ROCKE_OP_SCF_FOR)
+            {
+                int own_last = idx + ll_subtree_size(op) - 1;
+                child_loop_end
+                    = (loop_end < 0) ? own_last : (own_last > loop_end ? own_last : loop_end);
+            }
+            else
+            {
+                child_loop_end = loop_end;
+            }
+            ll_liveness_walk(ctx, op->regions[r], child_loop_end);
+        }
+    }
+}
+
+/* Size of one smem allocation in bytes (Python _seg_size). */
+static int ll_smem_seg_size(const rocke_type_t* stype)
+{
+    if(!stype || !stype->elem || !stype->elem->name)
+        return 0;
+    const char* n = stype->elem->name;
+    int eb;
+    if(strcmp(n, "i8") == 0 || strcmp(n, "fp8e4m3") == 0 || strcmp(n, "bf8e5m2") == 0)
+        eb = 1;
+    else if(strcmp(n, "f16") == 0 || strcmp(n, "bf16") == 0)
+        eb = 2;
+    else if(strcmp(n, "i32") == 0 || strcmp(n, "f32") == 0)
+        eb = 4;
+    else if(strcmp(n, "i64") == 0)
+        eb = 8;
+    else
+        eb = 2; /* default */
+    int seg = eb;
+    for(int d = 0; d < stype->rank; d++)
+        seg *= stype->shape[d];
+    return seg;
+}
+
+/* Alignment for one smem allocation (Python _align). */
+static int ll_smem_align(const rocke_type_t* stype)
+{
+    if(!stype || !stype->elem || !stype->elem->name)
+        return 4;
+    const char* n = stype->elem->name;
+    if(strcmp(n, "i8") == 0 || strcmp(n, "fp8e4m3") == 0 || strcmp(n, "bf8e5m2") == 0)
+        return 16;
+    return 4;
+}
+
+void rocke_ll_compute_smem_layout(rocke_lower_t* L)
+{
+    if(!L)
+        return;
+
+    /* Build the pool name unconditionally (needed even when empty). */
+    const char* kname = L->kernel ? L->kernel->name : "";
+    L->smem_pool_name = rocke_arena_printf(&L->arena, "@smem_pool.%s", kname ? kname : "");
+    L->smem_pool_size = 0;
+
+    /* Initialize offset vector to zero. */
+    rocke_vec_init(&L->smem_offsets);
+
+    size_t n = L->smem_globals.len;
+    if(n == 0)
+        return;
+
+    /* ---- live-interval analysis ---- */
+    ll_live_interval_t* intervals
+        = (ll_live_interval_t*)rocke_arena_calloc(&L->arena, n * sizeof(*intervals));
+    if(!intervals)
+        rocke_ll_fail(L, ROCKE_ERR_OOM, "smem_layout: intervals alloc");
+
+    for(size_t i = 0; i < n; i++)
+    {
+        intervals[i].gname = L->smem_globals.data[i].gname;
+        intervals[i].first_seq = -1; /* unset */
+        intervals[i].last_seq = -1;
+        intervals[i].used = 0;
+    }
+
+    ll_liveness_walk_ctx_t ctx;
+    ctx.L = L;
+    ctx.intervals = intervals;
+    ctx.num_intervals = n;
+    ctx.counter = 0;
+    ll_liveness_walk(&ctx, L->kernel ? L->kernel->body : NULL, -1);
+
+    /* Fix up allocations with no uses: first_seq = last_seq = 0. */
+    for(size_t i = 0; i < n; i++)
+    {
+        if(intervals[i].first_seq < 0)
+        {
+            intervals[i].first_seq = 0;
+            intervals[i].last_seq = 0;
+        }
+    }
+
+    /* ---- sort by live-interval start (stable: preserve declaration order for
+     *      ties, like Python's sorted key) ---- */
+    /* Build an index array and sort it. Simple insertion sort (few allocs). */
+    int* order = (int*)rocke_arena_calloc(&L->arena, n * sizeof(int));
+    if(!order)
+        rocke_ll_fail(L, ROCKE_ERR_OOM, "smem_layout: order alloc");
+    for(size_t i = 0; i < n; i++)
+        order[i] = (int)i;
+    /* Insertion sort by first_seq. */
+    for(size_t i = 1; i < n; i++)
+    {
+        int key = order[i];
+        int key_first = intervals[key].first_seq;
+        int j = (int)i - 1;
+        while(j >= 0 && intervals[order[j]].first_seq > key_first)
+        {
+            order[j + 1] = order[j];
+            j--;
+        }
+        order[j + 1] = key;
+    }
+
+    /* ---- greedy interval packing ---- */
+    /* Each slot: (offset, size, last_seq). */
+    typedef struct ll_slot
+    {
+        int offset;
+        int size;
+        int last_seq;
+    } ll_slot_t;
+
+    ll_slot_t* slots = (ll_slot_t*)rocke_arena_calloc(&L->arena, n * sizeof(*slots));
+    if(!slots)
+        rocke_ll_fail(L, ROCKE_ERR_OOM, "smem_layout: slots alloc");
+    int num_slots = 0;
+
+    /* Offset array in declaration order (parallel to smem_globals). */
+    int* offsets = (int*)rocke_arena_calloc(&L->arena, n * sizeof(int));
+    if(!offsets)
+        rocke_ll_fail(L, ROCKE_ERR_OOM, "smem_layout: offsets alloc");
+
+    for(size_t si = 0; si < n; si++)
+    {
+        int gi = order[si]; /* smem_globals index */
+        /* Dead allocations (never read/written/address-taken) consume no pool
+         * space: the pre-pool lowering emitted them as their own addrspace(3)
+         * globals that the AMDGPU backend dead-strips. Folding them into the
+         * single referenced pool would make their bytes count and can overflow
+         * the 64 KB LDS limit (the fp16 D128 nw=4 attention Acc_lds regression).
+         * offsets[] is calloc'd to 0, so a dead alloc keeps a harmless offset 0
+         * and is simply not given a slot. Mirrors Python's `used` filter. */
+        if(!intervals[gi].used)
+            continue;
+        const rocke_type_t* stype = L->smem_globals.data[gi].stype;
+        int seg = ll_smem_seg_size(stype);
+        int aln = ll_smem_align(stype);
+        int first_seq = intervals[gi].first_seq;
+        int last_seq = intervals[gi].last_seq;
+        /* Exclusive (cshuffle no-alias) allocations must not reuse another
+         * allocation's slot and must never be reused, so they occupy their own
+         * byte range. Skipping the reuse search forces a fresh slot; recording
+         * it with the sentinel last_seq below keeps it permanently "live" so
+         * nothing else packs onto it. (Mirrors Python's _EXCL_LAST_SEQ.) */
+        int excl = stype ? stype->smem_exclusive : 0;
+        const int ROCKE_LL_EXCL_LAST_SEQ = 1 << 30;
+
+        /* Find the best (lowest aligned-offset) free slot. */
+        int best = -1;
+        int best_aligned = -1;
+        for(int k = 0; excl ? 0 : (k < num_slots); k++)
+        {
+            if(slots[k].last_seq >= first_seq)
+                continue; /* still live, interference */
+            int aligned_off = (slots[k].offset + aln - 1) & ~(aln - 1);
+            /* Reusing slot k places this allocation at [aligned_off,
+             * aligned_off+seg). Because it may be larger than slot k's original
+             * footprint, that range can spill upward into a DIFFERENT slot that
+             * is still live while this allocation is live -- which would alias
+             * two simultaneously-live allocations and corrupt data. Reject any
+             * candidate whose placed range overlaps a still-live slot; slots
+             * already dead before first_seq are safe to overlap. */
+            int placed_end = aligned_off + seg;
+            int conflict = 0;
+            for(int j = 0; j < num_slots; j++)
+            {
+                if(j == k || slots[j].last_seq < first_seq)
+                    continue;
+                if(aligned_off < slots[j].offset + slots[j].size && slots[j].offset < placed_end)
+                {
+                    conflict = 1;
+                    break;
+                }
+            }
+            if(conflict)
+                continue;
+            if(best < 0 || aligned_off < best_aligned)
+            {
+                best = k;
+                best_aligned = aligned_off;
+            }
+        }
+
+        if(best >= 0)
+        {
+            int aligned_off = best_aligned;
+            offsets[gi] = aligned_off;
+            int new_size = slots[best].size;
+            int end_needed = aligned_off - slots[best].offset + seg;
+            if(end_needed > new_size)
+                new_size = end_needed;
+            slots[best].size = new_size;
+            slots[best].last_seq = last_seq;
+        }
+        else
+        {
+            /* No reusable slot; open a new one at the end of the pool. */
+            int current_end = 0;
+            for(int k = 0; k < num_slots; k++)
+            {
+                int e = slots[k].offset + slots[k].size;
+                if(e > current_end)
+                    current_end = e;
+            }
+            int aligned_off = (current_end + aln - 1) & ~(aln - 1);
+            offsets[gi] = aligned_off;
+            slots[num_slots].offset = aligned_off;
+            slots[num_slots].size = seg;
+            slots[num_slots].last_seq = excl ? ROCKE_LL_EXCL_LAST_SEQ : last_seq;
+            num_slots++;
+        }
+    }
+
+    /* Compute pool size (max slot end, rounded to 16). */
+    int pool_size = 0;
+    for(int k = 0; k < num_slots; k++)
+    {
+        int e = slots[k].offset + slots[k].size;
+        if(e > pool_size)
+            pool_size = e;
+    }
+    L->smem_pool_size = (pool_size + 15) & ~15;
+
+    /* Populate L->smem_offsets in declaration order. */
+    for(size_t i = 0; i < n; i++)
+    {
+        int rc;
+        rocke_vec_push(&L->arena, &L->smem_offsets, offsets[i], rc);
+        if(rc != 0)
+            rocke_ll_fail(L, ROCKE_ERR_OOM, "smem_layout: offsets push");
+    }
+}
+
+const char*
+    rocke_ll_emit_smem_base_ptr(rocke_lower_t* L, const char* gname, const rocke_type_t* stype)
+{
+    if(!L)
+        return "";
+    if(!gname)
+        return L->smem_pool_name ? L->smem_pool_name : "";
+
+    /* Find the offset for this global. */
+    int offset = 0;
+    for(size_t i = 0; i < L->smem_globals.len; i++)
+    {
+        if(L->smem_globals.data[i].gname && strcmp(L->smem_globals.data[i].gname, gname) == 0)
+        {
+            if(i < L->smem_offsets.len)
+                offset = L->smem_offsets.data[i];
+            break;
+        }
+    }
+
+    if(offset == 0)
+        return L->smem_pool_name;
+
+    /* Reuse a base pointer already computed for this allocation in the current
+     * block: the byte offset is a compile-time constant, so one GEP per
+     * (block, allocation) suffices and dominates all later same-block uses
+     * (instructions within a block execute sequentially). Mirrors Python
+     * _smem_base_cache. */
+    const rocke_ll_block_t* blk = rocke_ll_current(L);
+    for(size_t i = 0; i < L->smem_base_cache.len; i++)
+    {
+        if(L->smem_base_cache.data[i].block == blk && L->smem_base_cache.data[i].gname
+           && strcmp(L->smem_base_cache.data[i].gname, gname) == 0)
+            return L->smem_base_cache.data[i].base;
+    }
+
+    const char* agg_ty = rocke_ll_smem_storage_type(L, stype);
+    (void)agg_ty; /* not needed for the byte-GEP */
+    const char* base = rocke_ll_fresh(L, "smem_base");
+    rocke_ll_emitf(L,
+                   "  %s = getelementptr inbounds i8, ptr addrspace(3) %s, i32 %d",
+                   base,
+                   L->smem_pool_name,
+                   offset);
+
+    rocke_ll_smem_base_cache_t ent;
+    ent.block = blk;
+    ent.gname = gname;
+    ent.base = base;
+    int rc;
+    rocke_vec_push(&L->arena, &L->smem_base_cache, ent, rc);
+    if(rc != 0)
+        rocke_ll_fail(L, ROCKE_ERR_OOM, "smem_base_cache push");
+    return base;
+}
+
+/* ====================================================================== */
 /* yield-stack helpers DEFINED IN CONTROL bucket -- not here.             */
 /* ====================================================================== */
 
@@ -1159,24 +1599,16 @@ void rocke_ll_finalize(rocke_lower_t* L, rocke_strbuf_t* out)
     rocke_strbuf_appendf(out, "target triple = \"%s\"\n", tr ? tr : "");
     rocke_strbuf_append(out, "\n");
 
-    /* smem globals. */
-    for(size_t i = 0; i < L->smem_globals.len; i++)
+    /* smem pool: a single unified addrspace(3) global backing all smem allocations.
+     * align 16 satisfies all segment alignments (strictest: 16 B for ds_read_b64_tr_b8
+     * on i8/fp8 tiles). */
+    if(L->smem_globals.len > 0 && L->smem_pool_name && L->smem_pool_size > 0)
     {
-        const rocke_ll_smem_global_t* g = &L->smem_globals.data[i];
-        const char* agg = rocke_ll_smem_storage_type(L, g->stype);
-        const char* elem_name = (g->stype && g->stype->elem) ? g->stype->elem->name : NULL;
-        bool elem_is_byte = elem_name
-                            && (strcmp(elem_name, "i8") == 0 || strcmp(elem_name, "fp8e4m3") == 0
-                                || strcmp(elem_name, "bf8e5m2") == 0);
-        int align = elem_is_byte ? 16 : 4;
         rocke_strbuf_appendf(out,
-                             "%s = internal unnamed_addr addrspace(3) global %s poison, align %d\n",
-                             g->gname,
-                             agg,
-                             align);
-    }
-    if(L->smem_globals.len > 0)
-    {
+                             "%s = internal unnamed_addr addrspace(3) "
+                             "global [%d x i8] poison, align 16\n",
+                             L->smem_pool_name,
+                             L->smem_pool_size);
         rocke_strbuf_append(out, "\n");
     }
 
@@ -1369,6 +1801,7 @@ static void ll_lower_into(rocke_lower_t* L,
 
     /* Pre-pass + lowering. */
     rocke_ll_collect_smem(L, kernel->body);
+    rocke_ll_compute_smem_layout(L);
     rocke_ll_lower_region(L, kernel->body);
 
     rocke_strbuf_t sb;
@@ -1446,6 +1879,9 @@ static rocke_status_t ll_lower_kernel_to_llvm_ex_impl(const rocke_kernel_def_t* 
     rocke_vec_init(&L.dyn_decls);
     rocke_vec_init(&L.smem_globals);
     rocke_vec_init(&L.smem_names);
+    rocke_vec_init(&L.smem_offsets);
+    L.smem_pool_size = 0;
+    L.smem_pool_name = NULL;
     rocke_vec_init(&L.yield_stack);
 
     /* A failure anywhere in lowering raises a ckc::Error; catch it here so the
