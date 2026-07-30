@@ -164,7 +164,13 @@ class SignatureDefault(Signature):
         if kernel["ProblemType"]["Sparse"]:
             signature.addArg("MetaData", SVK.SIG_GLOBALBUFFER, "void" , "generic")
 
-        if kernel["StreamK"] > 0 and kernel["StreamKAtomic"] == 0:
+        # StreamKForceDPOnly (SK3 DP-first, gfx1250) never touches the workspace
+        # partials/fixup path, so AddressWS/AddressFlags are dead: they are dropped
+        # from the SGPR define (KernelWriter.py) and here from the .kd metadata. The
+        # host (ContractionSolution.cpp singleCallArgs) matches by not appending
+        # ws/Flags under streamKForceDPOnly, so the positional kernarg layout stays
+        # consistent host<->device.
+        if kernel["StreamK"] > 0 and kernel["StreamKAtomic"] == 0 and not kernel["StreamKForceDPOnly"]:
             signature.addArg("AddressWS", SVK.SIG_GLOBALBUFFER, cptValueType, "generic")
             signature.addArg("AddressFlags", SVK.SIG_GLOBALBUFFER, dstValueType, "generic")
 
