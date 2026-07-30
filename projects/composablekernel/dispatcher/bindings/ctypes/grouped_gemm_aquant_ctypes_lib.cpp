@@ -16,6 +16,10 @@
  *   AQ[ceil(M/gM), ceil(K/gK)] is the A-side scale tensor (RowMajor).
  *   BQ is unused (bq_ptr=nullptr, QK_B=0, stride_BQ=0 in QuantGemmHostArgs).
  *
+ * APreshuffleQuant: when SelectedKernel::APreshuffleQuant==true (pipeline=compv3),
+ *   AQ is reordered in host memory via shuffle_aq() before the device copy, matching
+ *   the interleaved layout the kernel's block tile expects.
+ *
  * Design: direct launch -- SelectedKernel::launch(QuantGemmHostArgs, stream_config) is
  * called directly. No dispatcher registry is used: AQuant kernels take QuantGemmHostArgs,
  * which is incompatible with the GeneratedTileKernelInstance::run() signature used by
@@ -25,11 +29,10 @@
  */
 
 #include <hip/hip_runtime.h>
+#include "ck_tile/host/tensor_shuffle_utils.hpp"
 #include <cstdint>
-#include <cstring>
 #include <iostream>
 #include <string>
-#include <type_traits>
 
 // Kernel header force-included via -include compiler flag.
 // Defines: ADataType, BDataType, CDataType, QDataType (AQDataType), AccDataType,
@@ -48,34 +51,38 @@ static constexpr std::size_t elements_to_bytes(std::size_t n)
 // assumed at compile time -- do not hardcode a default architecture here.
 
 static bool g_initialized = false;
-
-#define HIP_CHECK(call)                                                                        \
-    {                                                                                          \
-        hipError_t _err = (call);                                                              \
-        if(_err != hipSuccess)                                                                 \
-        {                                                                                      \
-            std::cerr << "HIP error: " << hipGetErrorString(_err) << " at " << __FILE__ << ":" \
-                      << __LINE__ << "\n";                                                     \
-            return -1;                                                                         \
-        }                                                                                      \
-    }
+static std::string g_gfx_arch;
 
 extern "C" {
 
 /**
  * Initialize the ctypes lib. Must be called before dispatcher_run_aquant_gemm.
  *
- * This library uses a single-kernel-per-.so model: SelectedKernel is
- * force-included at compile time and invoked directly via SelectedKernel::launch().
- * No dispatcher registry is involved -- AQuant kernels require QuantGemmHostArgs
- * which is incompatible with the GeneratedTileKernelInstance::run() signature.
+ * Queries and caches the GPU architecture so subsequent run calls avoid the
+ * per-call hipGetDeviceProperties overhead.
  *
- * Returns 0 on success.
+ * Returns 0 on success, -1 if device query fails or arch is unsupported.
  */
 int dispatcher_initialize()
 {
     if(g_initialized)
         return 0;
+
+    int dev = 0;
+    hipDeviceProp_t props{};
+    if(hipGetDevice(&dev) != hipSuccess || hipGetDeviceProperties(&props, dev) != hipSuccess)
+    {
+        std::cerr << "dispatcher_initialize: could not query device architecture\n";
+        return -1;
+    }
+    g_gfx_arch = props.gcnArchName;
+    if(g_gfx_arch.rfind("gfx950", 0) != 0 && g_gfx_arch.rfind("gfx942", 0) != 0 &&
+       g_gfx_arch.rfind("gfx90a", 0) != 0)
+    {
+        std::cerr << "dispatcher_initialize: unsupported GPU architecture '" << g_gfx_arch
+                  << "' (supported: gfx90a, gfx942, gfx950)\n";
+        return -1;
+    }
     g_initialized = true;
     return 0;
 }
@@ -131,25 +138,6 @@ int dispatcher_run_aquant_gemm(const void* A,
         return -1;
     }
 
-    // Derive the GPU architecture from the running device and reject unsupported archs.
-    {
-        int dev = 0;
-        hipDeviceProp_t props{};
-        if(hipGetDevice(&dev) != hipSuccess || hipGetDeviceProperties(&props, dev) != hipSuccess)
-        {
-            std::cerr << "dispatcher_run_aquant_gemm: could not query device architecture\n";
-            return -1;
-        }
-        const std::string arch(props.gcnArchName);
-        if(arch.rfind("gfx950", 0) != 0 && arch.rfind("gfx942", 0) != 0 &&
-           arch.rfind("gfx90a", 0) != 0)
-        {
-            std::cerr << "dispatcher_run_aquant_gemm: unsupported GPU architecture '" << arch
-                      << "' (supported: gfx90a, gfx942, gfx950)\n";
-            return -1;
-        }
-    }
-
     // Validate that the caller's QK_A/QM_A match the compile-time quant group sizes.
     {
         const int64_t expected_QK_A =
@@ -201,12 +189,12 @@ int dispatcher_run_aquant_gemm(const void* A,
 
     // Allocate device buffers.
     // B may be a packed type (pk_int4_t): elements_to_bytes<T>(n) handles PackedSize correctly.
-    if(hipMalloc(&A_dev, elements_to_bytes<ADataType>(M * K)) != hipSuccess)
+    if(hipMalloc(&A_dev, elements_to_bytes<ADataType>(static_cast<std::size_t>(M) * static_cast<std::size_t>(K))) != hipSuccess)
     {
         cleanup();
         return -1;
     }
-    if(hipMalloc(&B_dev, elements_to_bytes<BDataType>(K * N)) != hipSuccess)
+    if(hipMalloc(&B_dev, elements_to_bytes<BDataType>(static_cast<std::size_t>(K) * static_cast<std::size_t>(N))) != hipSuccess)
     {
         cleanup();
         return -1;
@@ -216,33 +204,60 @@ int dispatcher_run_aquant_gemm(const void* A,
         cleanup();
         return -1;
     }
-    if(hipMalloc(&C_dev, elements_to_bytes<CDataType>(M * N)) != hipSuccess)
+    if(hipMalloc(&C_dev, elements_to_bytes<CDataType>(static_cast<std::size_t>(M) * static_cast<std::size_t>(N))) != hipSuccess)
     {
         cleanup();
         return -1;
     }
 
     // Copy inputs to device
-    if(hipMemcpy(A_dev, A_host, elements_to_bytes<ADataType>(M * K), hipMemcpyHostToDevice) !=
+    if(hipMemcpy(A_dev, A_host, elements_to_bytes<ADataType>(static_cast<std::size_t>(M) * static_cast<std::size_t>(K)), hipMemcpyHostToDevice) !=
        hipSuccess)
     {
         cleanup();
         return -1;
     }
-    if(hipMemcpy(B_dev, B_host, elements_to_bytes<BDataType>(K * N), hipMemcpyHostToDevice) !=
+    if(hipMemcpy(B_dev, B_host, elements_to_bytes<BDataType>(static_cast<std::size_t>(K) * static_cast<std::size_t>(N)), hipMemcpyHostToDevice) !=
        hipSuccess)
     {
         cleanup();
         return -1;
     }
-    if(hipMemcpy(
-           AQ_dev, AQ_host, elements_to_bytes<QDataType>(QM_A * QK_A), hipMemcpyHostToDevice) !=
-       hipSuccess)
+    // Copy AQ to device, preshuffling when the kernel requires it.
+    // APreshuffleQuant=true (pipeline=compv3): AQ is reordered so the kernel's block tile
+    // finds scale values in the interleaved layout it expects.
+    if constexpr(SelectedKernel::APreshuffleQuant)
     {
-        cleanup();
-        return -1;
+        constexpr int block_aq_k =
+            static_cast<int>(SelectedKernel::TileK) / static_cast<int>(QuantGroupSize::kK);
+        ck_tile::HostTensor<QDataType> aq_h(
+            ck_tile::host_tensor_descriptor(static_cast<int>(QM_A),
+                                            static_cast<int>(QK_A),
+                                            static_cast<int>(QK_A),
+                                            ck_tile::bool_constant<true>{} /*row-major*/));
+        std::copy(AQ_host, AQ_host + QM_A * QK_A, aq_h.begin());
+        auto aq_shuffled = ck_tile::shuffle_aq(&aq_h, block_aq_k);
+        if(hipMemcpy(AQ_dev,
+                     aq_shuffled.data(),
+                     elements_to_bytes<QDataType>(QM_A * QK_A),
+                     hipMemcpyHostToDevice) != hipSuccess)
+        {
+            cleanup();
+            return -1;
+        }
     }
-    if(hipMemset(C_dev, 0, elements_to_bytes<CDataType>(M * N)) != hipSuccess)
+    else
+    {
+        if(hipMemcpy(AQ_dev,
+                     AQ_host,
+                     elements_to_bytes<QDataType>(QM_A * QK_A),
+                     hipMemcpyHostToDevice) != hipSuccess)
+        {
+            cleanup();
+            return -1;
+        }
+    }
+    if(hipMemset(C_dev, 0, elements_to_bytes<CDataType>(static_cast<std::size_t>(M) * static_cast<std::size_t>(N))) != hipSuccess)
     {
         cleanup();
         return -1;
@@ -289,7 +304,7 @@ int dispatcher_run_aquant_gemm(const void* A,
     }
 
     // Copy result back
-    if(hipMemcpy(C_host, C_dev, elements_to_bytes<CDataType>(M * N), hipMemcpyDeviceToHost) !=
+    if(hipMemcpy(C_host, C_dev, elements_to_bytes<CDataType>(static_cast<std::size_t>(M) * static_cast<std::size_t>(N)), hipMemcpyDeviceToHost) !=
        hipSuccess)
     {
         cleanup();
@@ -321,6 +336,10 @@ int dispatcher_get_kernel_count() { return 1; }
 /**
  * Release dispatcher resources.
  */
-void dispatcher_cleanup() { g_initialized = false; }
+void dispatcher_cleanup()
+{
+    g_initialized = false;
+    g_gfx_arch.clear();
+}
 
 } // extern "C"
