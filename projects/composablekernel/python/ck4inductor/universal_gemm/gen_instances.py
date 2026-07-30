@@ -212,6 +212,73 @@ def _substitute_scheduler_spec(
 
 
 @lru_cache(None)
+def gen_ops_library_wmma() -> List[CKGemmOperation]:
+    """
+    Parse the gfx1250 WMMA Universal Gemm instances (`DeviceGemm_Wmma_CShuffleV3`) shipped in
+    the composable kernel library folder. These are the fat-tile 16x16-warp WMMA instances the
+    CKWMMA PyTorch backend renders through `DeviceGemmMultipleD_Wmma_CShuffleV3`.
+
+    Structurally identical to `gen_ops_library` except for the grepped class name, an `is_wmma`
+    tag on every op, and a dtype filter to {F16, BF16} (the only WMMA dtypes the CKWMMA addmm
+    path targets; also bounds enumeration robustly against library dir renames).
+    """
+    ck_library_dir = _ck_library_dir()
+    if not ck_library_dir:
+        return []
+
+    grep_result = subprocess.run(
+        [
+            "grep",
+            "-inR",
+            "DeviceGemm_Wmma_CShuffleV3",
+            ck_library_dir,
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+    op_instances = parse_instances(
+        grep_result.stdout.strip().split("\n"),
+        class_name="DeviceGemm_Wmma_CShuffleV3",
+    )
+
+    # Keep only fp16/bf16 instances (a/b/c all in {F16, BF16}); WMMA also ships fp8/i4
+    # variants that are out of scope for the CKWMMA addmm path.
+    allowed_dtypes = {"F16", "BF16"}
+    op_instances = [
+        op
+        for op in op_instances
+        if op.a_element_dtype in allowed_dtypes
+        and op.b_element_dtype in allowed_dtypes
+        and op.c_element_dtype in allowed_dtypes
+    ]
+
+    # The WMMA instance sources spell the scheduler as a bare `Intrawave`/`Interwave`
+    # (resolved by a file-local `static constexpr auto` in the instance header), while
+    # the XDL sources use the `BlkGemmPipeSched` placeholder that expands to the
+    # fully-qualified enumerator. The rendered standalone kernel has no such local
+    # alias, so the bare token would not resolve -- qualify it here.
+    op_instances = [
+        replace(
+            op,
+            is_wmma=True,
+            block_gemm_pipeline_scheduler=(
+                f"BlockGemmPipelineScheduler::{op.block_gemm_pipeline_scheduler}"
+                if not str(op.block_gemm_pipeline_scheduler).startswith(
+                    "BlockGemmPipelineScheduler::"
+                )
+                else op.block_gemm_pipeline_scheduler
+            ),
+        )
+        for op in op_instances
+    ]
+
+    log.debug("ck WMMA instances from library: %d", len(op_instances))
+
+    return _substitute_scheduler_spec(op_instances)
+
+
+@lru_cache(None)
 def gen_ops_preselected() -> List[CKGemmOperation]:
     """
     Manually selected (through benchmarking) F16/F16/F16 Row/Col/Row instances
