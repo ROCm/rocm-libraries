@@ -121,7 +121,7 @@ def _request_errors(req: OperatorRequest) -> list[str]:
     return errors
 
 
-# gfx942 (MI300X) fallback CU count, used only when the live gfx942 query is
+# gfx942 fallback CU count, used only when the live gfx942 query is
 # unavailable (torch-less lowering / no visible GPU). Matches the StreamK
 # ``num_cus`` convention. Other archs are intentionally NOT resolved yet
 # (Future Scope) -- they keep the legacy 120 default.
@@ -134,7 +134,7 @@ def _device_num_cus() -> "int | None":
     Uses torch, present on the Python dispatch / benchmark path. NOTE: this
     resolver covers the Python dispatch path only -- the C++ C-ABI engine keeps
     its own num_sms default (attention_unified_entry.cpp) and requires the mirror
-    resolver there for production (AICK-1722 companion change).
+    resolver there for production (companion change).
     """
     try:
         import torch
@@ -152,16 +152,16 @@ def _resolve_num_sms(req: AttentionRequest) -> int:
 
     ``num_sms`` is the dispatcher's "how many CUs does this device have" knob; it
     drives 2D<->3D routing (``select_path``) and the 3D segment count. It defaulted
-    to a stale ``120``, under-subscribing gfx942 (MI300X = 304 CUs). Resolution:
+    to a stale ``120``, under-subscribing gfx942 (304 CUs). Resolution:
       1. ``ROCKE_NUM_SMS`` env pin (deterministic across CI boxes),
       2. an explicit caller value (benchmarks pass a real count),
       3. **gfx942 only** -- the live device CU count (guarded so a gfx942 *request*
          on a non-gfx942 *box* falls back to the constant instead of that box's
-         count; correctly yields 228 on MI300A / 304 on MI300X),
+         count; correctly yields the device's real CU count within gfx942),
       4. gfx942 fallback constant.
     Other archs keep the legacy ``120`` (Future Scope -- not validated yet).
     NOTE: because this feeds the 3D ``num_segments`` (a compiled-kernel constant),
-    the resolved value is device-dependent within gfx942 (228 MI300A / 304 MI300X).
+    the resolved value is device-dependent within gfx942 (varies by device).
     Kernel goldens are safe (they pin ``num_segments`` directly), but any NEW perf
     snapshot captured on the resolved path must pin ``ROCKE_NUM_SMS`` to stay
     reproducible across CI boxes.
