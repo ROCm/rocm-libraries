@@ -127,7 +127,7 @@
           "bytes": 596490,
           "family": "attention_d256",
           "kernel_name": "rocke_uattn2d_tiled_d256_b16_t64_h16kv2_bf16_w2_mw32_mfma32_stqk_s1_mask1_hlpv_mlim_ksb_mphsplit_smxil2g4_qdreg",
-          "sha256": "00b56c3a71e9460588375ea3c972e921e75cc627f8ee21ba3632c260c1abe867",
+          "sha256": "82882e1ae3bd102a32d47417d63662cf03e07b82c6d1ff552dc94c93d30345aa",
           "status": "ok"
         },
         "attention_dense/gfx950/bn128_sq512": {
@@ -787,7 +787,7 @@
           "bytes": 596590,
           "family": "attention_d256",
           "kernel_name": "rocke_uattn2d_tiled_d256_b16_t64_h16kv2_bf16_w2_mw32_mfma32_stqk_s1_mask1_hlpv_mlim_ksb_mphsplit_smxil2g4_qdreg",
-          "sha256": "4a35e9ce10e745f20be761ff7c0d3499472128df8f54d1e9b89ee797273de271",
+          "sha256": "5b214f97efdfe8ca290bab32639c380ebef25c1a67dda1eab55871e2dbe28e43",
           "status": "ok"
         },
         "attention_dense/gfx950/bn128_sq512": {
