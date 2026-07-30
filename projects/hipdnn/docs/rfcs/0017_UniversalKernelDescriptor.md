@@ -101,12 +101,14 @@ description of when and how to run it is ingested the same way.
 
 **Vision.** The goal is to let kernel authors own delivery end to end: hipDNN provides the tools and
 platform to describe, package, and release a kernel, and the author takes it from there without
-waiting on a provider change or someone else's release train. That is furthest along for a new
-variant of an existing kernel family, where the work is a single descriptor; standing up a new family
-still means authoring its matcher, engine, heuristic, and metadata schema, with tooling built
-alongside the format ([Section 11](#11-tooling)). The end state covers both AOT and just-in-time
-(JIT) kernels; AOT is the focus here, JIT a future follow-on
-([Section 9.3](#93-future-jit-and-normalized-providers)).
+waiting on a provider change or someone else's release train. How close a given kernel comes to that
+depends on whether its family already exists. Adding a variant to an established family reaches it
+fully: the author writes one descriptor and ships. Standing up a new family costs more, because the
+matcher, engine, heuristic, and metadata schema have to be authored first, after which every later
+kernel in that family is a single descriptor. Both cases follow a defined path, and tooling to make
+that path comfortable is built alongside the format ([Section 11](#11-tooling)). The end state is one
+generalized description covering both AOT and just-in-time (JIT) kernels; AOT is the focus here, JIT
+a future follow-on ([Section 9.3](#93-future-jit-and-normalized-providers)).
 
 **Scope.** This document frames the system and its direction; each descriptor format (match,
 dispatch, engine, heuristic) and subsystem (the matcher, expression language, packaging, and drop-in
