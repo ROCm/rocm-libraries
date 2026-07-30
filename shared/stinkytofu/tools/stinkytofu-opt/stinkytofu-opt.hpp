@@ -36,6 +36,7 @@
 #include "stinkytofu/transforms/asm/CFGBuilderPass.hpp"
 #include "stinkytofu/transforms/asm/DeadCodeEliminationPass.hpp"
 #include "stinkytofu/transforms/asm/InsertClusterBarrierPass.hpp"
+#include "stinkytofu/transforms/asm/InsertCoexecHazardPass.hpp"
 #include "stinkytofu/transforms/asm/InsertDelayAluPass.hpp"
 #include "stinkytofu/transforms/asm/InsertInitialUnclausedVmemPass.hpp"
 #include "stinkytofu/transforms/asm/InsertVgprMsbPass.hpp"
@@ -155,6 +156,7 @@ const std::vector<PassInfo> availablePasses = {
      [](const std::vector<std::string>& args) {
          return createInsertWaitAluPass(hasPassArg(args, "enableESM2TrackValuVsrc"));
      }},
+    {"InsertCoexecHazardPass", [](const auto&) { return createInsertCoexecHazardPass(); }},
     {"RegionClonePass",
      [](const auto&) {
          return createRegionClonePass({CloneSpec{"InitCIterWmma", "label_LoopBeginL"}});

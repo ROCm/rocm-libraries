@@ -851,6 +851,16 @@ DEF_BATCH(.format = VOP3,
     VPermB32Inst, "v_perm_b32", .logical = "VPermB32",
 )
 
+// Tensor-LUT (v_perm_pk16).
+DEF_BATCH(.format = VOP3, .flags = {TensorLUT},
+    VPermPk16B4U4Inst, "v_perm_pk16_b4_u4", .coissue = 0x000E,
+        .operand_fields = { {D0, .size=64}, {S0, .size=32}, {S1, .size=32}, {S2, .size=64} },
+    VPermPk16B6U4Inst, "v_perm_pk16_b6_u4", .coissue = 0x000E,
+        .operand_fields = { {D0, .size=96}, {S0, .size=32}, {S1, .size=64}, {S2, .size=64} },
+    VPermPk16B8U4Inst, "v_perm_pk16_b8_u4", .coissue = 0x000E,
+        .operand_fields = { {D0, .size=128}, {S0, .size=64}, {S1, .size=64}, {S2, .size=64} },
+)
+
 // Vector ALU — VOP3P packed
 DEF_BATCH(.format = VOP3P,
     VPkAddF16Inst, "v_pk_add_f16", .logical = "VAddPKF16", .flags = {Commutative},
