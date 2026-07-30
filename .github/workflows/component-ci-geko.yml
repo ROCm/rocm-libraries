@@ -46,11 +46,8 @@ jobs:
       - name: Run GEKO coverage gate
         env:
           HIPBLASLT_PATH: ${{ github.workspace }}/projects/hipblaslt
-          PYTHONFAULTHANDLER: "1"
         run: |
-          python -m tox -e coverage -- \
-            --skip-slow --skip-geko-bin \
-            --maxfail=1 --durations=20 --faulthandler-timeout=300
+          python -m tox -e coverage -- --skip-slow --skip-geko-bin
 
       - name: Test pip install
         uses: ./.github/actions/pip-install-test
