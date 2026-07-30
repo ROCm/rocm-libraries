@@ -15,11 +15,16 @@ SCRIPT_PATH = Path(__file__).resolve().parent.parent / "verify_golden_bundles.py
 
 class TestVerifyGoldenBundlesCli(unittest.TestCase):
     def run_verifier(
-        self, *roots: Path, default_tier: str | None = None
+        self,
+        *roots: Path,
+        default_tier: str | None = None,
+        require_data: bool = False,
     ) -> subprocess.CompletedProcess[str]:
         command = [sys.executable, str(SCRIPT_PATH)]
         if default_tier is not None:
             command.extend(["--default-tier", default_tier])
+        if require_data:
+            command.append("--require-data")
         command.extend(str(root) for root in roots)
         return subprocess.run(command, capture_output=True, text=True, check=False)
 
@@ -267,6 +272,21 @@ class TestVerifyGoldenBundlesCli(unittest.TestCase):
             self.assertIn("tensor uid 1", completed.stderr)
             self.assertIn("output tensor contains NaN/Inf", completed.stderr)
 
+    def test_nan_input_tensor_fails(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            self.write_bundle(
+                root,
+                Path("quick/BatchnormFwdInference/nchw/fp32/Small"),
+                input_bytes=struct.pack("<f", float("nan")),
+            )
+
+            completed = self.run_verifier(root)
+
+            self.assertEqual(completed.returncode, 1)
+            self.assertIn("tensor uid 0", completed.stderr)
+            self.assertIn("input tensor contains NaN/Inf", completed.stderr)
+
     def test_flat_output_uid_node_type_is_valid(self) -> None:
         # ReductionAttributes puts "out_tensor_uid" directly on the node instead
         # of nesting it under an "outputs" object like every other node type.
@@ -384,7 +404,7 @@ class TestVerifyGoldenBundlesCli(unittest.TestCase):
             self.assertEqual(completed.returncode, 0, completed.stderr)
             self.assertNotIn("missing tensor file", completed.stderr)
 
-    def test_missing_output_tensor_file_fails_with_tensor_manifest(self) -> None:
+    def test_missing_output_tensor_file_warns_without_require_data(self) -> None:
         with TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             self.write_bundle(
@@ -395,6 +415,22 @@ class TestVerifyGoldenBundlesCli(unittest.TestCase):
             )
 
             completed = self.run_verifier(root)
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            self.assertIn("tensor uid 1", completed.stderr)
+            self.assertIn("tensor data not pulled locally", completed.stderr)
+
+    def test_missing_output_tensor_file_fails_with_tensor_manifest(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            self.write_bundle(
+                root,
+                Path("quick/BatchnormFwdInference/nchw/fp32/Small"),
+                write_output_tensor=False,
+                write_tensor_manifest=True,
+            )
+
+            completed = self.run_verifier(root, require_data=True)
 
             self.assertEqual(completed.returncode, 1)
             self.assertIn("tensor uid 1", completed.stderr)
@@ -646,7 +682,7 @@ class TestVerifyGoldenBundlesCli(unittest.TestCase):
                 write_output_tensor=False,
             )
 
-            completed = self.run_verifier(root)
+            completed = self.run_verifier(root, require_data=True)
 
             self.assertEqual(completed.returncode, 1)
             self.assertIn("tensor uid 1", completed.stderr)
@@ -672,6 +708,27 @@ class TestVerifyGoldenBundlesCli(unittest.TestCase):
             self.assertEqual(completed.returncode, 1)
             self.assertIn("tensor uid 1", completed.stderr)
             self.assertIn("output tensor contains NaN/Inf", completed.stderr)
+
+    def test_sweep_nan_input_tensor_fails(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            template_path, sweep_path = self.write_sweep_bundle(
+                root,
+                Path("quick/TestOp/Topology"),
+                [self.sweep_case("small_fp32")],
+            )
+            self.write_sweep_golden_case(
+                sweep_path.parent,
+                "small_fp32",
+                input_bytes=struct.pack("<f", float("nan")),
+                output_bytes=self.default_bytes("float"),
+            )
+
+            completed = self.run_verifier(root)
+
+            self.assertEqual(completed.returncode, 1)
+            self.assertIn("tensor uid 0", completed.stderr)
+            self.assertIn("input tensor contains NaN/Inf", completed.stderr)
 
     def test_sweep_case_metadata_missing_reference_source_fails(self) -> None:
         with TemporaryDirectory() as tmpdir:

@@ -143,6 +143,15 @@ def parse_args() -> argparse.Namespace:
         help="Fallback tier for advisory output when no tier directory is present",
     )
     parser.add_argument(
+        "--require-data",
+        action="store_true",
+        help=(
+            "Treat missing tensor payloads as errors instead of warnings. "
+            "Enable in CI after `dvc pull`; leave off for local structure-only "
+            "checks before pulling golden tensor data."
+        ),
+    )
+    parser.add_argument(
         "roots",
         metavar="ROOT",
         nargs="+",
@@ -248,6 +257,11 @@ def element_space(dims: list[int], strides: list[int]) -> int:
     return 1 + sum((dim - 1) * stride for dim, stride in zip(dims, strides))
 
 
+# TODO(ALMIOPEN-1971 follow-up): RFC 0011 4.3 also calls for an aggregate DVC
+# payload budget check (fail when the whole tree's committed golden tensor
+# payload exceeds 800 MB) in addition to the per-bundle checks below. Track
+# and implement as an opt-in flag (CI-only by default; a full local run
+# shouldn't force scanning every pulled tensor) in a follow-up story.
 def validate_directory_size(
     scan_root: Path, report_path: Path, result: VerificationResult
 ) -> None:
@@ -362,6 +376,7 @@ def validate_tensor_payloads(
     tensor_specs: dict[int, dict[str, object]],
     tensor_path_for: Callable[[int], Path],
     bundle_has_manifest: bool,
+    require_data: bool,
     output_tensor_uids: set[int],
     report_path: Path,
     result: VerificationResult,
@@ -384,9 +399,20 @@ def validate_tensor_payloads(
 
         if not tensor_path.exists():
             if bundle_has_manifest:
-                result.error(
-                    tensor_path, f"missing tensor file; expected {tensor_path}", uid
-                )
+                if require_data:
+                    result.error(
+                        tensor_path,
+                        f"missing tensor file; expected {tensor_path}",
+                        uid,
+                    )
+                else:
+                    result.warning(
+                        tensor_path,
+                        "tensor data not pulled locally; expected "
+                        f"{tensor_path} (run `dvc pull` or pass --require-data "
+                        "to enforce in CI)",
+                        uid,
+                    )
             continue
 
         try:
@@ -406,7 +432,7 @@ def validate_tensor_payloads(
             )
             continue
 
-        if uid not in output_tensor_uids or dtype_key not in FLOAT_DTYPES:
+        if dtype_key not in FLOAT_DTYPES:
             continue
 
         try:
@@ -417,9 +443,10 @@ def validate_tensor_payloads(
 
         bad_index = find_nonfinite_index(dtype_key, data)
         if bad_index is not None:
+            tensor_role = "output" if uid in output_tensor_uids else "input"
             result.error(
                 tensor_path,
-                f"output tensor contains NaN/Inf at element index {bad_index}",
+                f"{tensor_role} tensor contains NaN/Inf at element index {bad_index}",
                 uid,
             )
 
@@ -513,7 +540,7 @@ def derive_sweep_advisory(
 
 
 def validate_graph_bundle(
-    path: Path, result: VerificationResult, default_tier: str
+    path: Path, result: VerificationResult, default_tier: str, require_data: bool
 ) -> None:
     advisory = derive_advisory(path, result, default_tier)
     if advisory is not None:
@@ -600,6 +627,7 @@ def validate_graph_bundle(
         tensor_specs,
         lambda uid: Path(f"{base_path}.tensor{uid}.bin"),
         bundle_has_manifest,
+        require_data,
         output_tensor_uids,
         path,
         result,
@@ -845,6 +873,7 @@ def validate_sweep_case(
     output_tensor_uids: set[int],
     seen_case_ids: set[str],
     default_tier: str,
+    require_data: bool,
     result: VerificationResult,
 ) -> None:
     if not isinstance(case, dict):
@@ -968,6 +997,7 @@ def validate_sweep_case(
             validated_specs,
             lambda uid, golden_dir=golden_dir: golden_dir / f"tensor{uid}.bin",
             bundle_has_manifest,
+            require_data,
             output_tensor_uids,
             sweep_path,
             result,
@@ -975,7 +1005,11 @@ def validate_sweep_case(
 
 
 def validate_sweep_bundle(
-    template_path: Path, sweep_path: Path, result: VerificationResult, default_tier: str
+    template_path: Path,
+    sweep_path: Path,
+    result: VerificationResult,
+    default_tier: str,
+    require_data: bool,
 ) -> None:
     try:
         template = json.loads(template_path.read_text())
@@ -1047,11 +1081,14 @@ def validate_sweep_bundle(
             output_tensor_uids,
             seen_case_ids,
             default_tier,
+            require_data,
             result,
         )
 
 
-def verify_root(root: Path, default_tier: str) -> VerificationResult:
+def verify_root(
+    root: Path, default_tier: str, require_data: bool
+) -> VerificationResult:
     result = VerificationResult()
 
     if not root.exists():
@@ -1073,7 +1110,9 @@ def verify_root(root: Path, default_tier: str) -> VerificationResult:
             handled_paths.add(sweep_path)
 
         if has_template and has_sweep:
-            validate_sweep_bundle(template_path, sweep_path, result, default_tier)
+            validate_sweep_bundle(
+                template_path, sweep_path, result, default_tier, require_data
+            )
         elif has_template:
             result.error(template_path, "template-sweep bundle is missing sweep.json")
         elif has_sweep:
@@ -1090,7 +1129,7 @@ def verify_root(root: Path, default_tier: str) -> VerificationResult:
             continue
 
         if is_graph_candidate(path):
-            validate_graph_bundle(path, result, default_tier)
+            validate_graph_bundle(path, result, default_tier, require_data)
             continue
 
         result.warning(
@@ -1101,10 +1140,12 @@ def verify_root(root: Path, default_tier: str) -> VerificationResult:
     return result
 
 
-def verify_roots(roots: list[Path], default_tier: str) -> VerificationResult:
+def verify_roots(
+    roots: list[Path], default_tier: str, require_data: bool
+) -> VerificationResult:
     result = VerificationResult()
     for root in roots:
-        root_result = verify_root(root, default_tier)
+        root_result = verify_root(root, default_tier, require_data)
         result.diagnostics.extend(root_result.diagnostics)
         result.advisories.extend(root_result.advisories)
     return result
@@ -1112,7 +1153,7 @@ def verify_roots(roots: list[Path], default_tier: str) -> VerificationResult:
 
 def main() -> int:
     args = parse_args()
-    result = verify_roots(args.roots, args.default_tier)
+    result = verify_roots(args.roots, args.default_tier, args.require_data)
     result.print_advisories()
     result.print_diagnostics()
     return 1 if result.has_errors() else 0

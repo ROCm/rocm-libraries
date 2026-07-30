@@ -11,6 +11,7 @@ From the `rocm-libraries/` repo root:
 ```bash
 python dnn-providers/integration-tests/reference_data_scripts/verify_golden_bundles.py \
   [--default-tier quick|standard|comprehensive|full] \
+  [--require-data] \
   ROOT [ROOT ...]
 ```
 
@@ -29,9 +30,9 @@ Hard errors, single-graph bundles (`{Name}.json`):
 - graph JSON must parse and include non-empty `nodes` and `tensors`
 - tensor entries must declare valid `uid`, `dims`, `strides`, and `data_type`
 - duplicate tensor UIDs are rejected
-- when a bundle carries a companion `<Name>.tensors.dvc`, every declared tensor must have a matching `<Name>.tensor<uid>.bin`
+- when a bundle carries a companion `<Name>.tensors.dvc`, every declared tensor must have a matching `<Name>.tensor<uid>.bin` when `--require-data` is passed
 - present tensor files must match `element_space * element_size`
-- present output tensors with floating dtypes must not contain NaN or Inf
+- present tensors (input or output) with floating dtypes must not contain NaN or Inf
 - bundle total size must not exceed 2 MiB; larger bundles fail because they would quickly explode test artifact sizes
 - discovered metadata sidecars (`meta.json` or `*.meta.json`) must parse and contain non-empty string fields `generator` and `reference_source`
 - advisory naming must be derivable as `{Tier}/{Operation}/{Layout}/{DataType}/{Name}/{Name}.json`
@@ -45,13 +46,14 @@ Hard errors, template-sweep bundles (`graph.template.json` + `sweep.json`):
 - resolved per-case tensor `dims`/`strides`/`data_type` are validated the same way as single-graph bundles
 - each case's `metadata` object must contain non-empty string fields `generator` and `reference_source`
 - a non-null `golden` requires a `path` pointing at a `tensors.dvc` file
-- when a case has golden data, tensor files are expected at `golden/{CaseId}/tensor<uid>.bin` (not the template's directory) and validated the same as single-graph tensors (byte-size, NaN/Inf, per-case 2 MiB budget)
+- when a case has golden data, tensor files are expected at `golden/{CaseId}/tensor<uid>.bin` (not the template's directory) and validated the same as single-graph tensors (byte-size, NaN/Inf for both input and output tensors, per-case 2 MiB budget)
 - advisory naming must be derivable as `{Tier}/{Operation}/{TopologyName}/sweep.json`
 
 Warnings only:
 - stray non-graph `.json` files are ignored
 - unexpected top-level directories under an `integration_test_bundles/`-style root are reported
 - bundle total size above 1 MiB emits a warning
+- a `.tensors.dvc`-backed tensor file that is missing locally and `--require-data` was not passed (default): warns that the payload hasn't been pulled yet instead of failing
 - missing tier segment falls back to `--default-tier`
 
 ### Output
@@ -81,9 +83,11 @@ full_test_name: quick_BatchnormFwdInference_Inference.small_fp32_nchw
 
 Real `.bin` tensor payloads are optional unless the bundle carries a companion
 `<Name>.tensors.dvc` (single-graph) or a case's `golden.path` points at a
-`tensors.dvc` (template sweep). When that pointer exists, the payloads must
-also be present locally for byte-size and NaN/Inf checks; run `dvc pull` if
-only the pointer file is present.
+`tensors.dvc` (template sweep). When that pointer exists but the payload isn't
+present locally, the default run only warns (run `dvc pull` to fetch it); pass
+`--require-data` to make the missing payload a hard error, which is how CI
+enforces full validation after pulling. Whenever a payload *is* present,
+byte-size and NaN/Inf checks always run regardless of `--require-data`.
 
 ### Tests
 
@@ -101,9 +105,9 @@ ctest -R hipdnn_bundle_verifier_python_tests --output-on-failure
 
 The unittest file covers, for single-graph bundles:
 - valid advisory output
-- output NaN rejection
+- output and input NaN rejection
 - size mismatch detection
-- missing tensor file detection
+- missing tensor file detection (warning by default, error with `--require-data`)
 - metadata field validation
 - stray JSON warning
 - unexpected top-level directory warning
@@ -117,6 +121,6 @@ and for template-sweep bundles:
 - missing/unknown tensor UID rejection against the template's tensor set
 - missing placeholder value detection
 - unused `values` entry warnings
-- `golden.path` validation and per-case tensor file/NaN/size checks
+- `golden.path` validation and per-case tensor file/NaN/size checks (input and output tensors)
 - per-case metadata field validation
 - a directory with only one of `graph.template.json`/`sweep.json`
