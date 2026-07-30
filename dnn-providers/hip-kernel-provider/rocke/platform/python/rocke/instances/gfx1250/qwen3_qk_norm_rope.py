@@ -190,7 +190,7 @@ def build_qwen3_qk_norm_rope(
         # ---- normalize: xn[d] = x[d] * inv * weight[d] ----
         xn = []
         for d in range(H):
-            wd = b.global_load(weight, b.const_i32(d), F32, align=4)
+            wd = b.global_load_f32(weight, b.const_i32(d))
             xn.append(b.fmul(b.fmul(xs[d], inv), wd))
 
         # ---- RoPE (half / interleaved) ----
@@ -198,8 +198,8 @@ def build_qwen3_qk_norm_rope(
         trig_base = b.mul(pos, c_half)
         for i in range(half):
             lo_i, hi_i = spec._pair(i)
-            c = b.global_load(cos, b.add(trig_base, b.const_i32(i)), F32, align=4)
-            s = b.global_load(sin, b.add(trig_base, b.const_i32(i)), F32, align=4)
+            c = b.global_load_f32(cos, b.add(trig_base, b.const_i32(i)))
+            s = b.global_load_f32(sin, b.add(trig_base, b.const_i32(i)))
             lo = xn[lo_i]
             hi = xn[hi_i]
             out[lo_i] = b.fsub(b.fmul(lo, c), b.fmul(hi, s))
