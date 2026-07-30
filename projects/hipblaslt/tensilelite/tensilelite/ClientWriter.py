@@ -282,8 +282,7 @@ def runClient(libraryLogicPath, forBenchmark, enableTileSelection, cxxCompiler: 
     # --cpu-only plumbing: short-circuit the device boundary. The client-config writing
     # (writeClientConfigIni / writeClientConfig) ran upstream in the benchmark flow and is
     # real coverage we keep. The remaining steps -- writeRunScript (which embeds the
-    # device-bound client executable path via getClientExecutablePath, raising GPU-less
-    # when PrebuiltClient is absent) and the subprocess.Popen launch -- both require a GPU,
+    # device-bound client executable path) and the subprocess.Popen launch -- both require a GPU,
     # so we skip them and return a 0 returncode. The synthetic results CSV is written by
     # the call site (BenchmarkProblems.py) under the same flag.
     if globalParameters["CpuOnly"]:
@@ -862,13 +861,11 @@ def CreateBenchmarkClientParametersForSizes(libraryRootPath, problemSizes, dataF
     writeClientConfigIni(True, problemSizes, "", "", "", "", problemType, libraryRootPath, codeObjectFiles, dataFilePath, configFile, deviceId, gfxName, libraryFile=libraryFile)
 
 def getClientExecutablePath():
-  clientExe = globalParameters.get("PrebuiltClient")
+  clientExe = globalParameters.get("ClientExecutable")
 
-  if not os.path.isfile(clientExe):
+  if not clientExe or not os.path.isfile(clientExe):
     raise FileNotFoundError(
         f"Tensile client executable not found at '{clientExe}'.\n"
-        "Please ensure the client is built or provide a valid path using the --prebuilt-client flag.\n"
-        "To build, run: `invoke build-client` (you may need to `pip3 install invoke` first).\n"
-        "For custom cmake build instructions, please refer to the README in next-cmake."
+        "Reinstall the matching ROCm hipBLASLt/TensileLite runtime artifact."
     )
   return clientExe

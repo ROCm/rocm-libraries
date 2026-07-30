@@ -46,7 +46,7 @@ import pytest
 
 pytestmark = pytest.mark.unit
 
-from tensilelite import tensilelite
+from tensilelite import Tensile as tensilelite
 from tensilelite.Common.GlobalParameters import (
     globalParameters,
     restoreDefaultGlobalParameters,
@@ -271,9 +271,9 @@ def test_frequency_probe_skipped(monkeypatch, _restore_gp):
         calls["user"] += 1
         raise AssertionError("get_user_max_frequency called under CpuOnly")
 
-    monkeypatch.setattr(Tensile, "get_gpu_max_frequency", _hip)
-    monkeypatch.setattr(Tensile, "get_gpu_max_frequency_smi", _smi)
-    monkeypatch.setattr(Tensile, "get_user_max_frequency", _user)
+    monkeypatch.setattr(tensilelite, "get_gpu_max_frequency", _hip)
+    monkeypatch.setattr(tensilelite, "get_gpu_max_frequency_smi", _smi)
+    monkeypatch.setattr(tensilelite, "get_user_max_frequency", _user)
 
     # --- CpuOnly ON: entire block skipped, no probe reached ---
     globalParameters["CpuOnly"] = True
@@ -289,7 +289,7 @@ def test_frequency_probe_skipped(monkeypatch, _restore_gp):
         seen["hip"] += 1
         return 1700  # deterministic non-zero -> smi/user never needed
 
-    monkeypatch.setattr(Tensile, "get_gpu_max_frequency", _hip_ok)
+    monkeypatch.setattr(tensilelite, "get_gpu_max_frequency", _hip_ok)
     # smi/user remain the raising spies: a valid first probe must short-circuit them.
     ran = _run_freq_block()
     assert ran is True
@@ -644,7 +644,7 @@ def test_off_path_real_branches(monkeypatch, _restore_gp):
         freq_calls["hip"] += 1
         return 1700  # deterministic non-zero -> smi/user not needed
 
-    monkeypatch.setattr(Tensile, "get_gpu_max_frequency", _hip_ok)
+    monkeypatch.setattr(tensilelite, "get_gpu_max_frequency", _hip_ok)
     ran = _run_freq_block()
     assert ran is True, "CpuOnly OFF must enter the real frequency-probe block"
     assert (

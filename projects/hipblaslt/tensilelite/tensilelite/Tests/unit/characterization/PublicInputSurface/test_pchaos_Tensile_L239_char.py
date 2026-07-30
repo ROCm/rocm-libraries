@@ -46,7 +46,6 @@ def _make_args(**overrides):
         CodeObjectVersion=None,
         debug=False,
         client_lock=None,
-        prebuilt_client=None,
         MXScaleFormat=0,
         global_parameters=[],
     )

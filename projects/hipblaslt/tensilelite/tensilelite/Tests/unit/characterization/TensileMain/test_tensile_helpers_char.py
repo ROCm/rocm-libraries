@@ -47,7 +47,7 @@ def test_add_common_arguments_global_parameters_eval():
 def _args(**over):
     base = dict(
         platform=None, RuntimeLanguage=None, CodeObjectVersion=None, debug=False,
-        client_lock=None, prebuilt_client=None, MXScaleFormat=0, global_parameters=[],
+        client_lock=None, MXScaleFormat=0, global_parameters=[],
     )
     base.update(over)
     return SimpleNamespace(**base)
@@ -57,7 +57,7 @@ def test_arg_updated_global_parameters_all_overrides(monkeypatch):
     monkeypatch.delenv("PyTestBuildArchNames", raising=False)
     args = _args(
         platform=2, RuntimeLanguage="HIP", CodeObjectVersion="5", debug=True,
-        client_lock="/lock", prebuilt_client="/client", MXScaleFormat=1,
+        client_lock="/lock", MXScaleFormat=1,
         global_parameters=[("K", "V")],
     )
     rv = M.argUpdatedGlobalParameters(args)
@@ -66,7 +66,6 @@ def test_arg_updated_global_parameters_all_overrides(monkeypatch):
     assert rv["CodeObjectVersion"] == "5"
     assert rv["CMakeBuildType"] == "Debug"
     assert rv["ClientExecutionLockPath"] == "/lock"
-    assert rv["PrebuiltClient"] == "/client"
     assert rv["MXScaleFormat"] == 1
     assert rv["K"] == "V"
 

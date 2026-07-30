@@ -38,7 +38,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from tensilelite import __version__
+from tensilelite import GENERATOR_VERSION as __version__, TENSILELITE_CLIENT_PATH
 from tensilelite.Common import print1, printExit, printWarning, ensurePath, HR, isRhel8, \
                            LIBRARY_LOGIC_DIR, setVerbosity, IsaInfo, makeDebugConfig, \
                            DebugConfig, IsaVersion, coVersionMap
@@ -58,10 +58,6 @@ from tensilelite import ClientWriter
 from tensilelite import LibraryIO
 from tensilelite.backends.config import parse_backend_config
 from tensilelite import LibraryLogic
-
-TENSILE_SCRIPT_DIR = Path(os.path.dirname(os.path.abspath(__file__)))
-TENSILE_CLIENT_PATH = Path('build_tmp') / 'tensilelite' / 'client' / 'tensilelite-client'
-TENSILE_CLIENT_PATH = TENSILE_SCRIPT_DIR.parent / TENSILE_CLIENT_PATH
 
 ###############################################################################
 # Execute Steps in Config
@@ -247,8 +243,6 @@ def addCommonArguments(argParser):
     argParser.add_argument("--library-format", dest="LibraryFormat", choices=["yaml", "msgpack"], \
         action="store", default="yaml", help="select which library format to use")
     argParser.add_argument("--client-lock", default=None)
-    argParser.add_argument("--prebuilt-client", default=str(TENSILE_CLIENT_PATH), \
-        type=os.path.abspath, help="Specify the full path to a pre-built tensilelite-client executable")
     argParser.add_argument("--mx-scale-format", dest="MXScaleFormat", type=int, default=0, \
         help="MX scale data format (0=none, 1=pre-swizzle for GPU kernel layout)")
     argParser.add_argument("--rocm-agent-enumerator", default=None, action="store", dest="rocm_agent_enumerator")
@@ -279,8 +273,6 @@ def argUpdatedGlobalParameters(args):
         rv["CMakeBuildType"] = "Debug"
     if args.client_lock:
         rv["ClientExecutionLockPath"] = args.client_lock
-    if args.prebuilt_client:
-        rv["PrebuiltClient"] = args.prebuilt_client
     if args.MXScaleFormat:
         print1("# Command-line override: MXScaleFormat")
         rv["MXScaleFormat"] = args.MXScaleFormat
@@ -591,6 +583,7 @@ def Tensile(userArgs):
     # restoreDefaultGlobalParameters() (which would otherwise clobber it back to the
     # default False). Kept out of the documented --global-parameters surface.
     globalParameters["CpuOnly"] = args.cpuOnly
+    globalParameters["ClientExecutable"] = str(TENSILELITE_CLIENT_PATH)
 
     if args.LogicFormat:
         globalParameters['LogicFormat'] = args.LogicFormat
