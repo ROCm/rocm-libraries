@@ -1185,7 +1185,7 @@ if cross-construction reuse proves worth having.
 
 **3. Resolve this engine's UED and KMD.** The UED gives the engine identity, the KMD fields it exposes
 as knobs, and the ids of its one heuristic (UHD) and one metadata schema (KMD). The KMD loads with it,
-because its fields key the catalog and name the `$kernel.*` references step 5 must validate. The UHD is
+because its fields key the catalog and name the `$kernel.*` references the matchers validate. The UHD is
 named but **not** loaded; nothing ranks yet.
 *Stored:* parsed UED and KMD, in the provider's descriptor cache, reused by every later graph.
 
@@ -1198,9 +1198,9 @@ loaded; nothing dispatches yet.
 node-attribute, and tensor fields; `$kernel.*` matchers last ([Section 5](#5-matching-and-the-umd)). A
 graph-level failure disqualifies every kernel in every pack that lists it, so the broadly shared checks
 prune before the per-kernel pass runs.
-*Produces two things, cached together under step 2's key:* the **catalog**, the UKDs whose full matcher
-set passed, keyed by each kernel's KMD value tuple ([Section 4](#4-descriptor-formats)); and the
-**bound token state**, the values bound while matching.
+*Produces two things, cached together under the applicability key:* the **catalog**, the UKDs whose
+full matcher set passed, keyed by each kernel's KMD value tuple
+([Section 4](#4-descriptor-formats)); and the **bound token state**, the values bound while matching.
 
 **6. Return.** True if and only if the catalog is non-empty: applicability is whether any kernel
 survived matching.
@@ -1253,7 +1253,7 @@ survivor. If a knob query never ran, the UHD loads here.
 
 **11. Build the plan.** The engine's one plan builder produces a plan for the kernels it needs to be
 able to launch, loading each one's `kernel_source` and evaluating its pack's UDD grid, block,
-shared-memory, and argument formulas over the bound token state from step 5. Ordinarily that is the
+shared-memory, and argument formulas over the bound token state from matching. Ordinarily that is the
 single chosen kernel; under measurement it is the candidates being sampled, prepared the same way in
 the same plan ([Section 3](#3-how-it-works)). Candidates can come from different packs, so a plan may
 hold several UDDs, each bound to the kernels from its own pack.
@@ -1264,42 +1264,26 @@ re-scanned; every decision was made before this step.
 flat array pairing each tensor uid with a device pointer, built from the caller's variant pack, and the
 launcher resolves each UDD argument against it by uid.
 
-### 8.6 What Each Step Loads and Keeps
+### 8.6 The Base-Path Invariant
 
-| Step | Loads | Why then | Stored where |
-|---|---|---|---|
-| 1 | nothing | the host call arrives | nothing |
-| 2 | nothing | cache probe before any parsing | reads the provider cache |
-| 3 | UED, KMD | engine identity; the KMD keys the catalog and names the `$kernel.*` fields | descriptor cache, reused across graphs |
-| 4 | KDPs, UMDs, UKD metadata | the matchers are the applicability test | descriptor cache, reused across graphs |
-| 5 | nothing new | evaluates what 3 and 4 loaded | catalog + bound token state, keyed per graph and device |
-| 6 | nothing | reports whether the catalog is non-empty | nothing |
-| 7 | nothing | hipDNN selects among engines; no descriptor is read | nothing |
-| 8 | UHD | first call needing an order, not a membership test | ranked catalog, cached with the catalog |
-| 9 | UDD of each surviving kernel's pack | first question whose answer is a dispatch property | descriptor cache |
-| 10 | UHD, if step 8 never ran | the plan needs an order too | execution context |
-| 11 | `kernel_source` and pack UDD of each kernel the plan must launch | only kernels the plan dispatches are loaded | plan, held by the execution context |
-| 12 | nothing | the plan holds everything the launch needs | nothing |
-
-**Base-path invariant: accept implies a launchable kernel.** Returning true from `isApplicable` means
-at least one UKD passed every matcher in some KDP, and it is a promise the engine keeps for the rest of
-the flow. Applicability is the only stage where declining is free: an empty catalog at step 5
-returns false, and hipDNN moves on to the next engine having lost nothing.
+**Accept implies a launchable kernel.** Returning true from `isApplicable` means at least one UKD
+passed every matcher in some KDP, and it is a promise the engine keeps for the rest of the flow.
+Applicability is the only stage where declining is free: an empty catalog answers false, and hipDNN
+moves on to the next engine having lost nothing.
 
 After that the promise is binding. hipDNN has already chosen this engine on the strength of it, so a
-failure at step 8, 9, or 11 (a UHD that ranks nothing, a source that fails to resolve, a descriptor
-that fails validation) is not a fallback to another engine; it surfaces to the caller as a failed plan
-build. The catalog is settled during applicability and every later stage is a read, so the cost of
-being wrong is paid by the user, not absorbed by the framework. Producing no launchable kernel
-after accepting is a bug, not a legal outcome.
+later failure (a UHD that ranks nothing, a source that fails to resolve, a descriptor that fails
+validation) is not a fallback to another engine; it surfaces to the caller as a failed plan build.
+The catalog is settled during applicability and every later stage is a read, so the cost of being
+wrong is paid by the user, not absorbed by the framework. Producing no launchable kernel after
+accepting is a bug, not a legal outcome.
 
 The invariant is scoped to a stable inventory, which is the one thing the engine does not control. A
 drop-in pack may be deleted between the applicability that accepted it and the plan build that needs
-it, and the kernel source is not loaded until the plan build
-([Section 8.6](#86-what-each-step-loads-and-keeps)). Inventory mutation is therefore a legal cause of
-a failed plan build rather than a bug, and it is reported as such. It is not a silent wrong answer:
-the generation counter below retires the cached verdict, so the next query re-decides against the
-inventory that exists.
+it, and a kernel's source is not loaded until that plan build. Inventory mutation is therefore a
+legal cause of a failed plan build rather than a bug, and it is reported as such. It is not a silent
+wrong answer: the generation counter below retires the cached verdict, so the next query re-decides
+against the inventory that exists.
 
 [Section 15.4](#154-execution-and-selection) applies this same invariant to a composite's mandatory
 stage.
