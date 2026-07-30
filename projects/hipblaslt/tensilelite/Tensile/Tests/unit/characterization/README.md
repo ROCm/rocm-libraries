@@ -125,9 +125,30 @@ TensileLite coverage GitHub Actions lane invokes.
   combined total drops below it. The number is not duplicated in `tox.ini` or in CI YAML.
 - **Per-file floors** (AIHPBLAS-3878). `coverage-baseline.json` (in this directory) holds each
   file's floor. `tools/coverage_ratchet.py check` (also in the env's `commands_post`) fails the run
-  if any file drops below its floor by more than a small tolerance (the tolerance absorbs
-  floating-point and test-ordering noise, not real regressions). The failure message names every
-  file that dropped and prints the one command that raises the floors on purpose.
+  if any file drops below its floor by more than the tolerance (see below). The failure message
+  names every file that dropped and prints the one command that raises the floors on purpose.
+
+#### The tolerance (noise buffer)
+
+The tolerance is how far a file may slip below its floor before the run fails. It exists to absorb
+measurement noise rather than real coverage loss, and there is more of that noise than you might
+expect:
+
+- **A merge that deletes covered code lowers the ratio** even though nothing became less tested.
+  A real example: `develop` removed 7 covered statements from `Contractions.py`, moving it
+  88.16% → 88.05% with identical missed statements and identical branch coverage.
+- **Worker scheduling and toolchain differences** flip individual branch arcs between otherwise
+  identical runs, because the suite runs under `pytest-xdist`.
+- **A percentage-point tolerance does not scale with file size.** One branch arc in a 770-unit file
+  is worth about 0.13 pp, so a 0.1 pp budget cannot absorb even a single-arc wobble in any file
+  smaller than roughly 1000 measurable units.
+
+It is therefore set deliberately wide, **1 pp**, while the gate first lands, so it fails on real
+regressions instead of on noise. Both the committed baseline's `tolerance` field and
+`DEFAULT_TOLERANCE` in `tools/coverage_ratchet.py` carry that value, and a unit test pins them
+together: `check` reads the baseline's value while `update` writes the default, so if they drift
+apart the next ratchet click would silently retune the gate. Tighten the buffer once the numbers
+prove stable across a few `develop` merges; the whole-project floor is the backstop meanwhile.
 
 ### Raising the floors (the ratchet)
 

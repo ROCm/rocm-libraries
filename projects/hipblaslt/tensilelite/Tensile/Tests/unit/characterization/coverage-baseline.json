@@ -1,6 +1,6 @@
 {
-  "_comment": "Per-file coverage ratchet baseline for the TensileLite characterization suite (AIHPBLAS-3878). Coverage may rise but not fall. Regenerate with coverage_ratchet.py update; review the diff.",
-  "tolerance": 0.1,
+  "_comment": "Per-file coverage ratchet baseline for the TensileLite characterization suite (AIHPBLAS-3878). Coverage may rise but not fall. Regenerate with coverage_ratchet.py update; review the diff. Tolerance is the noise buffer in percentage points, set wide (1 pp) while the gate first lands; see DEFAULT_TOLERANCE in tools/coverage_ratchet.py for why, and tighten it once the numbers prove stable.",
+  "tolerance": 1.0,
   "files": {
     "Tensile/Activation.py": 78.74,
     "Tensile/AsmAddressCalculation.py": 65.06,

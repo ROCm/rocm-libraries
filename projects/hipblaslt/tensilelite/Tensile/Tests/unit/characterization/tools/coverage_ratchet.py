@@ -21,7 +21,8 @@ Two modes:
 
 * ``check``  - enforce the floors: compare a fresh ``coverage.json`` against the
   committed per-file floors and fail (exit 1) if any file dropped below its floor
-  by more than ``--tolerance`` percentage points. This runs in CI on every
+  by more than ``--tolerance`` percentage points (see ``DEFAULT_TOLERANCE`` for
+  why that buffer is deliberately wide for now). This runs in CI on every
   coverage run. Prints exactly which files dropped and the one command to fix it.
 * ``update`` - the ratchet click: rewrite the baseline from the current
   ``coverage.json``, raising each file's floor to the new level (or, for a
@@ -44,9 +45,23 @@ import json
 import sys
 from pathlib import Path
 
-# Small guard against floating-point / xdist-ordering noise: a file must drop by
-# more than this many percentage points to count as a regression.
-DEFAULT_TOLERANCE = 0.1
+# A file must drop by more than this many percentage points to count as a
+# regression. This absorbs measurement noise rather than real coverage loss, and
+# there is more of that noise than a tight budget can hold:
+#
+# * A merge that *deletes covered* code lowers the ratio without anything
+#   becoming less tested. Removing 7 covered statements from a 770-unit file
+#   moved it 88.16 -> 88.05 with identical missed statements and branches.
+# * xdist worker scheduling and toolchain differences flip individual branch
+#   arcs between otherwise identical runs.
+# * A tolerance in percentage points does not scale with file size. One arc in a
+#   770-unit file is worth ~0.13 pp, so a 0.1 pp budget cannot absorb even a
+#   single-arc wobble in any file smaller than ~1000 measurable units.
+#
+# Set deliberately wide (1 pp) while the gate first lands, so it fails on real
+# regressions instead of on noise. Tighten it once the numbers have proven stable
+# across a few develop merges; the whole-project floor is the backstop meanwhile.
+DEFAULT_TOLERANCE = 1.0
 
 # Printed verbatim so a failing CI log tells the developer exactly how to move
 # the baseline on purpose (never a blanket "just regenerate everything").

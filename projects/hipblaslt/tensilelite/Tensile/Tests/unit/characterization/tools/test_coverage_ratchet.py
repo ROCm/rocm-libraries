@@ -117,6 +117,40 @@ def test_multiple_regressions_sorted_biggest_drop_first():
 
 
 # --------------------------------------------------------------------------- #
+# DEFAULT_TOLERANCE (the noise buffer)                                        #
+# --------------------------------------------------------------------------- #
+def test_default_tolerance_absorbs_sub_arc_noise():
+    # The real case this buffer exists for: develop deleted 7 covered statements
+    # from a 770-unit file, moving it 88.16 -> 88.05 with identical missed
+    # statements and branch coverage. Nothing became less tested, so it must not
+    # fail the gate.
+    baseline = {"Tensile/Contractions.py": 88.16}
+    current = {"Tensile/Contractions.py": 88.05}
+    assert (
+        ratchet.find_regressions(baseline, current, ratchet.DEFAULT_TOLERANCE) == []
+    )
+
+
+def test_default_tolerance_still_catches_a_real_regression():
+    # The buffer is wide, not absent: a drop past it is still a failure.
+    baseline = {"a.py": 90.0}
+    current = {"a.py": 88.5}  # 1.5 pp, past the 1 pp buffer
+    assert ratchet.find_regressions(
+        baseline, current, ratchet.DEFAULT_TOLERANCE
+    ) == [("a.py", 90.0, 88.5)]
+
+
+def test_committed_baseline_tolerance_matches_the_default():
+    # cmd_check reads the tolerance from the baseline while cmd_update writes
+    # DEFAULT_TOLERANCE. If the two drift apart, the next `update` silently
+    # retunes the gate, so pin them together.
+    committed = json.loads(
+        (_TOOLS_DIR.parent / "coverage-baseline.json").read_text(encoding="utf-8")
+    )
+    assert committed["tolerance"] == ratchet.DEFAULT_TOLERANCE
+
+
+# --------------------------------------------------------------------------- #
 # write_baseline / round-trip                                                 #
 # --------------------------------------------------------------------------- #
 def test_write_baseline_round_trips_and_rounds(tmp_path):
