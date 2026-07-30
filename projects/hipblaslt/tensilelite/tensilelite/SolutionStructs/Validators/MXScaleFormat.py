@@ -25,7 +25,7 @@
 """MX scale-format combination validator for gfx1250's
 ``v_wmma_scale_f32_16x16x128_f8f6f4`` MX path.
 
-Lives under ``Tensile/SolutionStructs/Validators/`` so other Solution-level
+Lives under ``tensilelite/SolutionStructs/Validators/`` so other Solution-level
 validators can join it.
 
 Public entry point: :func:`validateMXScaleFormatCombination`.

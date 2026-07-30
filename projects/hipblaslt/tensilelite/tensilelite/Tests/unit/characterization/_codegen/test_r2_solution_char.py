@@ -9,7 +9,7 @@ Drives the R2 designed BenchmarkProblems config
 harness (``emit_kernels_from_config``) to exercise the wide ForkParameters
 cartesian sweeping DepthU, VectorWidthA, GlobalSplitU, and PrefetchGlobalRead.
 
-Target lines in Tensile/SolutionStructs/Solution.py:
+Target lines in tensilelite/SolutionStructs/Solution.py:
   - 500-680 : assignProblemIndependentDerivedParameters (MIBlock tile assignment,
     MacroTile, UseDotInstruction, EnableMatrixInstruction branch arms)
   - 702-900 : tailLoopOpt paths, MX/NonDTL guard gates, TransposeLDS/UnrollMajorLDS

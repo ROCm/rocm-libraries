@@ -539,7 +539,7 @@ namespace TensileLite
                                       KA&                      args,
                                       StreamKSettings const&   sk,
                                       uint32_t                 autoGsuVal,
-                                      uint32_t                 additionalPaddingPerBatchGeneralBatch=0) const;
+                                      uint32_t                 additionalPaddingPerBatchGeneralBatch=0) const;                                      
 
         template <typename KA>
         inline void calculateConversionCallWorkGroupItems(
@@ -643,7 +643,7 @@ namespace TensileLite
             rocisa::DataType mxTypeB        = rocisa::DataType::E8;
 
             // In-device MX scale layout expected by the kernel. Mirrors the
-            // MXScaleFormat solution parameter (see Tensile/Common/ValidParameters.py).
+            // MXScaleFormat solution parameter (see tensilelite/Common/ValidParameters.py).
             // Encoded as a small int so it round-trips through msgpack and YAML
             // logic files without an explicit enum schema:
             //   0 = NoSwizzle       (default; canonical row/column layout)
@@ -730,4 +730,3 @@ namespace TensileLite
                              ContractionSolution::ProjectedPerformance const& spm);
     TENSILELITEHOST_EXPORT std::ostream& operator<<(std::ostream& stream, BufferLoadCheckPacket const& st);
 } // namespace TensileLite
-

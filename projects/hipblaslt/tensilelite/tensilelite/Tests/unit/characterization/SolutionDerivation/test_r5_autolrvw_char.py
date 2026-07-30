@@ -4,7 +4,7 @@
 ################################################################################
 """R5 characterization — gfx950 AUTO-LRVW derivation + UseSubtileImpl VW/storeD forcing.
 
-Target uncovered ranges in Tensile/SolutionStructs/Solution.py:
+Target uncovered ranges in tensilelite/SolutionStructs/Solution.py:
   819-882   UseSubtileImpl block: forces VectorWidthA/B=1, BufferStore=1,
             SourceSwap=False, Use64bShadowLimit=False, DepthU/duUnit logic,
             _ABTilePair assignment, MX scale load checks, StreamK/MI guards.
