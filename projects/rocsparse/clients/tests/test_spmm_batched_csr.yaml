@@ -497,9 +497,6 @@ Tests:
   orderC: [rocsparse_order_row, rocsparse_order_column]
   filename: [mac_econ_fwd500]
 
-# Large batch count exercising the row-split batch grid-stride loop.
-# Covers the nn/nt/tn/tt kernels via the transA x transB combinations and
-# both the shared (n <= 32) and looped (n > 32) column tilings via N.
 - name: spmm_batched_csr_file
   category: stress
   function: spmm_batched_csr
