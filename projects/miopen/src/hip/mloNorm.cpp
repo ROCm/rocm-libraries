@@ -205,8 +205,8 @@ void mlo_construct_norm::mloConstructFwd()
     _g_wk.clear();
     if(_norm_region == MLO_LRN_ACROSS_CHANNELS)
     {
-
-        _g_wk.push_back(map_size_4);
+        _g_wk.push_back(AlignUp(static_cast<size_t>(map_size_4),
+                                static_cast<size_t>(_grp_tile0)));
         _g_wk.push_back(1);
         _g_wk.push_back(_problem.GetBatchSize());
     }
