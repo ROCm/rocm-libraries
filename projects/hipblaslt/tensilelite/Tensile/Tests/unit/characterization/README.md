@@ -104,6 +104,18 @@ the migration debt (lines still protected only by scaffolding, which should fall
 tests take over), and the *no test coverage* count is the untested surface behind the whole-project
 floor.
 
+Those buckets say how far the migration has come overall; the card's second table says **where** the
+remaining work is. It lists the largest files by measurable statement count (biggest first, whether
+or not the PR touched them) with each file's unit-suite and characterization-suite coverage side by
+side, plus that file's characterization-only statement count. Ranking by size rather than by worst
+percentage is deliberate: a 500-statement file at 60% hides far more untested code than a
+20-statement file at 30%, so size is what picks the next refactor target. Read a row as one file's
+migration state: a high *Char %* with a low *Unit %* is a file still leaning on scaffolding, and its
+*Char only* number is the debt to convert. These percentages are statement-level shares of the
+file's own statements, matching the bucket table above, so they run slightly higher than the
+branch-inclusive whole-project numbers in the card's headline. The row count is adjustable via
+`--top-files N` on `tools/coverage_split_summary.py` (default 20; `0` omits the table).
+
 Both floors are enforced in the `coverage-unit` tox environment (`tox -e coverage-unit`), which the
 TensileLite coverage GitHub Actions lane invokes.
 

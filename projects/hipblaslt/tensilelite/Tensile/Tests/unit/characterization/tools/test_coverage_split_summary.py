@@ -5,8 +5,11 @@
 These pin the card's data handling so a green run cannot silently start
 reporting wrong numbers: JUnit counts exclude skips (and degrade to ``None``
 rather than crash on bad input), the line-level "who covers what" split is set
-arithmetic (both / char-only / unit-only / union), the aligned table stays valid
-Markdown with right-aligned numeric columns, and ``main`` wires JUnit counts and
+arithmetic (both / char-only / unit-only / union), the largest-files leaderboard
+ranks by measurable statements and reports statement-level per-suite percentages
+(skipping files with no honest denominator, and degrading to no table at all
+rather than failing), the aligned table stays valid Markdown with right-aligned
+numeric columns, and ``main`` wires JUnit counts, the ``--top-files`` limit, and
 the ``$GITHUB_STEP_SUMMARY`` sink together.
 """
 
@@ -41,21 +44,33 @@ pytestmark = pytest.mark.unit
 
 
 def _cov(
-    files: dict[str, list[int]], total: float, num_statements: int | None = None
+    files: dict[str, list[int]],
+    total: float,
+    num_statements: int | None = None,
+    file_stmts: dict[str, int] | None = None,
 ) -> dict:
     """coverage.py-shaped report from {path: executed_lines} plus a total pct.
 
     ``num_statements`` populates ``totals.num_statements`` (covered + uncovered),
     which the card needs from the combined report to compute the untested surface.
+
+    ``file_stmts`` populates each file's ``summary.num_statements``, the per-file
+    denominator the largest-files leaderboard ranks and divides by. A path left
+    out of it gets no ``summary`` at all, which is how a report that does not know
+    a file's size is represented.
     """
     totals: dict = {"percent_covered": total}
     if num_statements is not None:
         totals["num_statements"] = num_statements
+    file_entries: dict[str, dict] = {}
+    for path, lines in files.items():
+        entry: dict = {"executed_lines": lines}
+        if file_stmts and path in file_stmts:
+            entry["summary"] = {"num_statements": file_stmts[path]}
+        file_entries[path] = entry
     return {
         "meta": {"format": 3},
-        "files": {
-            path: {"executed_lines": lines} for path, lines in files.items()
-        },
+        "files": file_entries,
         "totals": totals,
     }
 
@@ -120,6 +135,100 @@ def test_pct_reads_totals():
 
 
 # --------------------------------------------------------------------------- #
+# _file_stmts / top_files_rows (largest-files leaderboard)                      #
+# --------------------------------------------------------------------------- #
+def test_file_stmts_reads_per_file_num_statements():
+    report = _cov({"a.py": [1], "b.py": [2]}, 50.0, file_stmts={"a.py": 10, "b.py": 4})
+    assert css._file_stmts(report) == {"a.py": 10, "b.py": 4}
+
+
+def test_file_stmts_takes_largest_known_and_skips_unknown():
+    # Only the second report knows a.py's size; b.py's size is nowhere.
+    without = _cov({"a.py": [1], "b.py": [2]}, 50.0)
+    with_size = _cov({"a.py": [1]}, 50.0, file_stmts={"a.py": 12})
+    assert css._file_stmts(without, with_size) == {"a.py": 12}
+
+
+def test_file_stmts_ignores_none_reports_and_null_summary():
+    report = _cov({"a.py": [1]}, 50.0)
+    report["files"]["a.py"]["summary"] = None
+    assert css._file_stmts(None, report) == {}
+
+
+def test_top_files_rows_ranks_by_statements_descending():
+    stmts = {"small.py": 10, "big.py": 100, "mid.py": 50}
+    char = _cov({p: [] for p in stmts}, 0.0, file_stmts=stmts)
+    unit = _cov({p: [] for p in stmts}, 0.0, file_stmts=stmts)
+    rows = css.top_files_rows(char, unit, None, limit=10)
+    assert [r[0] for r in rows] == ["big.py", "mid.py", "small.py"]
+
+
+def test_top_files_rows_honors_limit():
+    stmts = {"a.py": 30, "b.py": 20, "c.py": 10}
+    char = _cov({p: [] for p in stmts}, 0.0, file_stmts=stmts)
+    rows = css.top_files_rows(char, char, None, limit=2)
+    assert [r[0] for r in rows] == ["a.py", "b.py"]
+
+
+def test_top_files_rows_percentages_are_statement_level():
+    # 10 statements; unit reaches 4 of them, characterization reaches 7.
+    char = _cov({"a.py": [1, 2, 3, 4, 5, 6, 7]}, 70.0, file_stmts={"a.py": 10})
+    unit = _cov({"a.py": [1, 2, 3, 4]}, 40.0, file_stmts={"a.py": 10})
+    (row,) = css.top_files_rows(char, unit, None, limit=10)
+    path, stmts, unit_pct, char_pct, char_only = row
+    assert (path, stmts) == ("a.py", "10")
+    assert (unit_pct, char_pct) == ("40.0%", "70.0%")
+    # char-only is per-file set arithmetic: {5,6,7} reached by char but not unit
+    assert char_only == "3"
+
+
+def test_top_files_rows_char_only_is_zero_when_unit_covers_everything():
+    char = _cov({"a.py": [1, 2]}, 20.0, file_stmts={"a.py": 10})
+    unit = _cov({"a.py": [1, 2, 3]}, 30.0, file_stmts={"a.py": 10})
+    (row,) = css.top_files_rows(char, unit, None, limit=10)
+    assert row[4] == "0"
+
+
+def test_top_files_rows_file_missing_from_one_suite_counts_as_zero():
+    # b.py exists only in the characterization report.
+    char = _cov({"b.py": [1, 2, 3, 4, 5]}, 50.0, file_stmts={"b.py": 10})
+    unit = _cov({"a.py": [1]}, 10.0, file_stmts={"a.py": 4})
+    rows = {r[0]: r for r in css.top_files_rows(char, unit, None, limit=10)}
+    assert rows["b.py"][2] == "0.0%"  # no unit coverage at all
+    assert rows["b.py"][3] == "50.0%"
+    assert rows["b.py"][4] == "5"  # all 5 char lines are char-only
+    assert rows["a.py"][3] == "0.0%"  # and the reverse direction
+
+
+def test_top_files_rows_skips_files_with_unknown_or_zero_statements():
+    char = _cov(
+        {"known.py": [1], "unknown.py": [1], "empty.py": [1]},
+        50.0,
+        file_stmts={"known.py": 5, "empty.py": 0},
+    )
+    rows = css.top_files_rows(char, char, None, limit=10)
+    # unknown.py has no summary and empty.py has no statements, so neither has an
+    # honest denominator; only known.py is rankable.
+    assert [r[0] for r in rows] == ["known.py"]
+
+
+def test_top_files_rows_breaks_ties_by_path_for_stable_output():
+    stmts = {"z.py": 20, "a.py": 20}
+    char = _cov({p: [] for p in stmts}, 0.0, file_stmts=stmts)
+    rows = css.top_files_rows(char, char, None, limit=10)
+    assert [r[0] for r in rows] == ["a.py", "z.py"]
+
+
+def test_top_files_rows_takes_statements_from_combined_report():
+    # Neither per-suite report knows the size; the combined one does.
+    char = _cov({"a.py": [1, 2]}, 20.0)
+    unit = _cov({"a.py": [3]}, 10.0)
+    combined = _cov({"a.py": [1, 2, 3]}, 30.0, file_stmts={"a.py": 10})
+    (row,) = css.top_files_rows(char, unit, combined, limit=10)
+    assert row[1] == "10" and row[2] == "10.0%" and row[3] == "20.0%"
+
+
+# --------------------------------------------------------------------------- #
 # _aligned_table                                                               #
 # --------------------------------------------------------------------------- #
 def test_aligned_table_columns_line_up_and_separator_marks_right():
@@ -177,6 +286,36 @@ def test_build_markdown_all_statements_split_shows_untested_surface():
     assert "Characterization only" in md and "Unit only" in md
 
 
+def test_build_markdown_renders_leaderboard_when_file_sizes_are_known():
+    stmts = {"big.py": 100, "small.py": 10}
+    char = _cov({"big.py": [1, 2], "small.py": [1]}, 40.0, file_stmts=stmts)
+    unit = _cov({"big.py": [1], "small.py": [1, 2]}, 30.0, file_stmts=stmts)
+    combined = _cov(
+        {"big.py": [1, 2], "small.py": [1, 2]}, 60.0, num_statements=110,
+        file_stmts=stmts,
+    )
+    md = css.build_markdown(char, unit, combined, 10, 20, top_files=20)
+
+    # Header names the actual row count, and the biggest file leads.
+    assert "Largest 2 files: unit vs characterization coverage" in md
+    assert md.index("big.py") < md.index("small.py")
+    assert _has_cell(md, "big.py") and _has_cell(md, "100")
+    # big.py: unit reaches 1/100, char reaches 2/100, char-only is line 2.
+    assert _has_cell(md, "1.0%") and _has_cell(md, "2.0%")
+
+
+def test_build_markdown_leaderboard_omitted_when_disabled_or_sizeless():
+    stmts = {"a.py": 10}
+    char = _cov({"a.py": [1]}, 10.0, file_stmts=stmts)
+    unit = _cov({"a.py": [2]}, 10.0, file_stmts=stmts)
+
+    # Explicitly disabled.
+    assert "Largest" not in css.build_markdown(char, unit, None, 1, 1, top_files=0)
+    # No per-file sizes anywhere, so there is no honest denominator to rank by.
+    sizeless = _cov({"a.py": [1]}, 10.0)
+    assert "Largest" not in css.build_markdown(sizeless, sizeless, None, 1, 1)
+
+
 def test_build_markdown_includes_combined_and_dashes_for_missing_counts():
     char = _cov({"a.py": [1]}, 40.0)
     unit = _cov({"a.py": [1]}, 40.0)
@@ -211,6 +350,43 @@ def test_main_derives_counts_from_junit_and_writes_step_summary(tmp_path, capsys
     assert "12" in out and "34" in out
     # the same card is appended to the job-summary sink
     assert summary.read_text(encoding="utf-8").strip() == out.strip()
+
+
+def test_main_top_files_flag_limits_the_leaderboard(tmp_path, capsys, monkeypatch):
+    stmts = {"big.py": 100, "small.py": 10}
+    char = _write(
+        tmp_path / "char.json", _cov({"big.py": [1]}, 10.0, file_stmts=stmts)
+    )
+    unit = _write(
+        tmp_path / "unit.json", _cov({"small.py": [1]}, 10.0, file_stmts=stmts)
+    )
+    monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
+
+    rc = css.main([
+        "--characterization", str(char),
+        "--unit", str(unit),
+        "--top-files", "1",
+    ])
+    assert rc == 0
+    out = capsys.readouterr().out
+    # Only the largest file makes the cut.
+    assert "Largest 1 files" in out
+    assert "big.py" in out and "small.py" not in out
+
+
+def test_main_top_files_zero_omits_the_leaderboard(tmp_path, capsys, monkeypatch):
+    stmts = {"a.py": 10}
+    char = _write(tmp_path / "char.json", _cov({"a.py": [1]}, 10.0, file_stmts=stmts))
+    unit = _write(tmp_path / "unit.json", _cov({"a.py": [2]}, 10.0, file_stmts=stmts))
+    monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
+
+    rc = css.main([
+        "--characterization", str(char),
+        "--unit", str(unit),
+        "--top-files", "0",
+    ])
+    assert rc == 0
+    assert "Largest" not in capsys.readouterr().out
 
 
 def test_main_explicit_counts_override_junit(tmp_path, capsys, monkeypatch):

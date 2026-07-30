@@ -77,11 +77,13 @@ jobs:
 
       # Informational (non-gating): attribute coverage to the two suites that
       # make up the unit lane - characterization tests (the characterization/
-      # subtree) vs the pure unit tests. The gating step above already runs each
-      # suite exactly once and drops char.json / unit.json (plus their JUnit
-      # reports) alongside the combined coverage.json, so this step only renders
-      # the job-summary card from those artifacts - no extra test runs. Never
-      # fails the job.
+      # subtree) vs the pure unit tests - and rank the largest source files by
+      # each suite's coverage of them, so the card names the next refactor
+      # targets and their characterization-only debt. The gating step above
+      # already runs each suite exactly once and drops char.json / unit.json
+      # (plus their JUnit reports) alongside the combined coverage.json, so this
+      # step only renders the job-summary card from those artifacts - no extra
+      # test runs. Never fails the job.
       - name: Coverage split summary (characterization vs unit)
         if: always()
         shell: bash

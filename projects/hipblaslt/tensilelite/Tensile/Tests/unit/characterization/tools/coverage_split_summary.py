@@ -16,14 +16,20 @@ take over.
 
 This produces:
 
-* a headline table of each suite's whole-project coverage percentage, and
+* a headline table of each suite's whole-project coverage percentage,
 * a line-level breakdown, as a share of every measurable statement, of what each
   suite reaches: both suites, characterization only, unit only, or no test at
   all (the untested surface). Those rows sum to 100% of the project, so the
   breakdown, not the two overlapping percentages, is what shows each suite's
   unique contribution and how much code no test touches yet. (When no combined
   report is passed the total-statement count is unknown, so this falls back to
-  shares of the union of executed lines and omits the untested-surface row.)
+  shares of the union of executed lines and omits the untested-surface row.), and
+* a leaderboard of the largest files by measurable statement count, with each
+  file's unit-suite and characterization-suite coverage side by side plus its
+  characterization-only statement count. The whole-project numbers above say how
+  far the migration has come; this says *where* the work is. Big files dominate
+  the untested surface, so ranking by size names the refactor targets, and the
+  per-file characterization-only count is the debt to convert in each one.
 
 The per-suite attribution is only meaningful because the two selections are
 disjoint. If the pure-unit run re-ran the characterization tests, every
@@ -84,6 +90,80 @@ def _fmt_int(n: int) -> str:
     return f"{n:,}"
 
 
+def _per_file_lines(report: dict) -> dict[str, set[int]]:
+    """``{file: set of executed line numbers}`` for one report."""
+    return {
+        path: set(info.get("executed_lines", []))
+        for path, info in report.get("files", {}).items()
+    }
+
+
+def _file_stmts(*reports: dict | None) -> dict[str, int]:
+    """``{file: measurable statement count}`` gathered from any report that has it.
+
+    coverage.py records this per file as ``summary.num_statements``. It is a
+    property of the source, not of the test selection, so every report that
+    measured a file agrees on it; taking the largest value seen is only a guard
+    for a report that omits the field for some file.
+    """
+    stmts: dict[str, int] = {}
+    for report in reports:
+        if not report:
+            continue
+        for path, info in report.get("files", {}).items():
+            n = (info.get("summary") or {}).get("num_statements")
+            if isinstance(n, (int, float)) and int(n) > stmts.get(path, 0):
+                stmts[path] = int(n)
+    return stmts
+
+
+def top_files_rows(
+    char: dict, unit: dict, combined: dict | None, limit: int
+) -> list[list[str]]:
+    """Leaderboard rows for the largest files, biggest first.
+
+    "Largest" is measurable statements rather than worst percentage, because a
+    500-statement file at 60% hides far more untested code than a 20-statement
+    file at 30%, and the point of this table is to name the refactor targets.
+
+    The percentages are statement-level (executed statements over that file's
+    measurable statements), which is deliberately the same metric as the
+    line-level breakdown above rather than coverage.py's per-file
+    ``percent_covered``. That keeps the unit, characterization, and
+    characterization-only figures on one shared denominator, so each row reads as
+    a single set breakdown of the same file. It also means these percentages run
+    a little higher than the branch-inclusive whole-project numbers in the
+    headline table.
+
+    Files whose statement count is unknown or zero are skipped: there is no
+    honest denominator for them. Ties are broken by path so the table is stable
+    across runs.
+    """
+    stmts = _file_stmts(combined, char, unit)
+    char_lines = _per_file_lines(char)
+    unit_lines = _per_file_lines(unit)
+
+    ranked = sorted(
+        ((path, n) for path, n in stmts.items() if n > 0),
+        key=lambda row: (-row[1], row[0]),
+    )[:limit]
+
+    rows: list[list[str]] = []
+    for path, n in ranked:
+        reached_by_char = char_lines.get(path, set())
+        reached_by_unit = unit_lines.get(path, set())
+        rows.append(
+            [
+                path,
+                _fmt_int(n),
+                f"{len(reached_by_unit) / n * 100:.1f}%",
+                f"{len(reached_by_char) / n * 100:.1f}%",
+                _fmt_int(len(reached_by_char - reached_by_unit)),
+            ]
+        )
+    return rows
+
+
 def _aligned_table(
     headers: list[str], rows: list[list[str]], right: set[int]
 ) -> list[str]:
@@ -112,9 +192,45 @@ def _aligned_table(
     return [fmt(headers), "| " + " | ".join(sep) + " |"] + [fmt(r) for r in rows]
 
 
+def _top_files_section(
+    char: dict, unit: dict, combined: dict | None, limit: int
+) -> list[str]:
+    """The largest-files leaderboard, or nothing when it cannot be built.
+
+    Returns an empty list when disabled (``limit <= 0``) or when no file has a
+    known statement count, so an older or partial report degrades to the rest of
+    the card instead of failing the step.
+    """
+    if limit <= 0:
+        return []
+    table_rows = top_files_rows(char, unit, combined, limit)
+    if not table_rows:
+        return []
+    return [
+        f"### Largest {len(table_rows)} files: unit vs characterization coverage",
+        "",
+        "Ranked by measurable statements, biggest first, whether or not this PR "
+        "touched them. These files hold most of the untested surface, so they are "
+        "the refactor targets. Percentages are statement-level shares of each "
+        'file\'s own statements: "Unit %" is what the pure unit tests reach, '
+        '"Char %" what the characterization suite reaches. The two overlap and do '
+        'not sum. "Char only" is the statements reached by characterization but by '
+        "no unit test, which is that file's migration debt: the work left to "
+        "convert scaffolding into real unit tests.",
+        "",
+        *_aligned_table(
+            ["File", "Stmts", "Unit %", "Char %", "Char only"],
+            table_rows,
+            right={1, 2, 3, 4},
+        ),
+        "",
+    ]
+
+
 def build_markdown(
     char: dict, unit: dict, combined: dict | None,
     char_tests: int | None, unit_tests: int | None,
+    top_files: int = 20,
 ) -> str:
     char_lines = _executed_line_set(char)
     unit_lines = _executed_line_set(unit)
@@ -203,6 +319,8 @@ def build_markdown(
             ),
             "",
         ]
+
+    rows += _top_files_section(char, unit, combined, top_files)
     return "\n".join(rows)
 
 
@@ -217,6 +335,9 @@ def main(argv: list[str] | None = None) -> int:
                    help="char JUnit xml; test count derived when --characterization-tests omitted")
     p.add_argument("--unit-junit", default=None,
                    help="unit JUnit xml; test count derived when --unit-tests omitted")
+    p.add_argument("--top-files", type=int, default=20, metavar="N",
+                   help="rows in the largest-files leaderboard, 0 to omit it "
+                        "(default: %(default)s)")
     args = p.parse_args(argv)
 
     char_tests = args.characterization_tests
@@ -232,6 +353,7 @@ def main(argv: list[str] | None = None) -> int:
         _load(args.combined) if args.combined else None,
         char_tests,
         unit_tests,
+        args.top_files,
     )
     print(md)
 
