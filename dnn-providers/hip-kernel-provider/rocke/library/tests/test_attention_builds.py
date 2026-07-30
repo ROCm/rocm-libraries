@@ -87,6 +87,181 @@ class _MultiPatch:
 
 
 # ---------------------------------------------------------------------
+# comgr build + resource-budget smoke (no torch, no GPU launch)
+# ---------------------------------------------------------------------
+#
+# The IR-text asserts elsewhere in this file stop at ``lower_kernel_to_llvm`` and
+# never invoke comgr -- so a kernel that lowers to valid-looking IR but is
+# rejected at codegen (e.g. LDS over the arch cap, register overflow, an ISA
+# intrinsic invalid for the target) sails through. That is exactly the gap that
+# let the fp16 D128 prefill LDS-overflow regression reach ``develop`` and 8 perf
+# sweeps (81920 B > the gfx942 64 KB cap) before the dashboard caught it.
+#
+# ``compile_kernel`` runs the full comgr pipeline (IR -> BC -> relocatable ->
+# HSACO) and needs NEITHER torch NOR a GPU, and can target any arch from any box
+# via the ``arch=`` triple -- so it is CI-able on a plain comgr/LLVM host. The
+# helpers below reach comgr and additionally assert the emitted kernel fits the
+# arch resource budget (LDS today; the readelf-parsed HSACO also carries VGPR/
+# SGPR for future soft-occupancy checks).
+
+
+def _compile_or_skip(kernel, *, arch: str):
+    """Compile ``kernel`` through comgr for ``arch``; skip (not fail) when the
+    comgr toolchain is unavailable so the test is a no-op on hosts without it.
+
+    A failed *compile* (raised ``ComgrError``) is a real defect and propagates.
+    Only a missing/broken toolchain skips."""
+    try:
+        from rocke.helpers.compile import compile_kernel
+    except Exception as e:  # pragma: no cover - env-dependent
+        pytest.skip(f"comgr toolchain unavailable: {e}")
+    try:
+        return compile_kernel(kernel, arch=arch, capture_ir_text=False)
+    except ImportError as e:  # pragma: no cover - env-dependent
+        pytest.skip(f"comgr toolchain unavailable: {e}")
+
+
+def _assert_resources_fit(art, *, arch: str, kernel_name: str = ""):
+    """Assert the emitted HSACO fits ``arch``'s resource budget.
+
+    Two distinct failure modes, because comgr treats them differently:
+
+    - **LDS over the arch cap** -- comgr *hard-errors* at codegen (no fallback),
+      so the bare compile already catches it; the explicit cap check here fires
+      one step earlier with a readable diagnostic instead of a raw ComgrError,
+      and catches the *soft* case (fits the hard cap but a change grew it toward
+      the ceiling).
+    - **Register (VGPR) over-subscription** -- the compiler does NOT fail; it
+      *spills to scratch* and the kernel still compiles, then runs at reduced
+      occupancy with scratch traffic. A pass/fail compile check is blind to this,
+      so we assert ``scratch_bytes == 0`` as the arch-agnostic no-spill signal.
+
+    Resource fields come from ``group_segment_fixed_size`` /
+    ``private_segment_fixed_size`` in the code object, read via ``llvm-readelf``
+    (present in any ROCm image; no GPU). Skips only if readelf is unavailable."""
+    import tempfile
+    from pathlib import Path
+
+    from rocke.analysis.isa import analyze_hsaco
+    from rocke.core.arch.target import ArchTarget
+
+    cap = ArchTarget.from_gfx(arch).lds_capacity_bytes
+    hsaco = bytes(art.hsaco)
+    with tempfile.NamedTemporaryFile(suffix=".hsaco", delete=True) as fh:
+        fh.write(hsaco)
+        fh.flush()
+        try:
+            res = analyze_hsaco(Path(fh.name)).resources
+        except (FileNotFoundError, RuntimeError) as e:  # pragma: no cover
+            pytest.skip(f"HSACO introspection tool unavailable: {e}")
+
+    name = kernel_name or "kernel"
+    lds = res.lds_bytes
+    if lds is None:  # pragma: no cover - metadata shape drift
+        pytest.skip("could not parse group_segment_fixed_size from HSACO")
+    assert lds <= cap, (
+        f"{name} LDS {lds} B exceeds {arch} cap {cap} B (over by {lds - cap} B) "
+        f"-- comgr codegen rejection at larger tiles / seq"
+    )
+    # Register overflow does not fail the compile -- it spills. Any scratch use is
+    # a register-budget regression (occupancy cliff), so treat it as a failure.
+    scratch = res.scratch_bytes
+    if scratch is not None:
+        assert scratch == 0, (
+            f"{name} spills {scratch} B to scratch on {arch} (VGPR {res.vgpr_count}) "
+            f"-- register over-subscription; kernel compiles but loses occupancy"
+        )
+
+
+# The shipped 2D-tiled attention geometries the provider dispatches, spanning the
+# regressed axes: (arch x dtype x head_dim), at a prefill seq large enough to
+# exercise the flash path that overflowed LDS in the fp16 D128 prefill regression.
+#
+# Specs are built via the REAL selector (``au._tiled_spec_from_problem``) from a
+# ``UnifiedAttentionProblem`` -- the same path the provider ships -- so the test
+# exercises the actual dispatch decision and picks up arch-correct spec fields
+# instead of a hand-guessed geometry (each arch's spec class carries different
+# fields). Kept curated, not a cartesian product: one compile per shipped variant.
+def _budget_problem(
+    *,
+    head_size,
+    num_query_heads,
+    num_kv_heads,
+    dtype,
+    seq=2048,
+    block_size=64,
+    sliding_window=0,
+):
+    return UnifiedAttentionProblem(
+        total_q=seq,
+        num_seqs=1,
+        num_query_heads=num_query_heads,
+        num_kv_heads=num_kv_heads,
+        head_size=head_size,
+        block_size=block_size,
+        max_seqlen_q=seq,
+        max_seqlen_k=seq,
+        dtype=dtype,
+        sliding_window=sliding_window,
+    )
+
+
+_TILED_2D_BUDGET_GEOMETRIES = [
+    # (label, arch, problem_kwargs)
+    (
+        "fp16_d128_gqa32x8",
+        "gfx942",
+        dict(head_size=128, num_query_heads=32, num_kv_heads=8, dtype="fp16"),
+    ),
+    (
+        "bf16_d128_gqa32x8",
+        "gfx942",
+        dict(head_size=128, num_query_heads=32, num_kv_heads=8, dtype="bf16"),
+    ),
+    (
+        "fp16_d128_gqa32x8",
+        "gfx950",
+        dict(head_size=128, num_query_heads=32, num_kv_heads=8, dtype="fp16"),
+    ),
+    (
+        "bf16_d128_gqa32x8",
+        "gfx950",
+        dict(head_size=128, num_query_heads=32, num_kv_heads=8, dtype="bf16"),
+    ),
+    (
+        "fp16_d64_gqa64x8",
+        "gfx942",
+        dict(head_size=64, num_query_heads=64, num_kv_heads=8, dtype="fp16"),
+    ),
+    # Sliding-window D128 takes a SEPARATE non-ring geometry (the flash/ring
+    # paths gate on ``sliding_window == 0``; SW picks its own tile), so LDS/reg
+    # pressure changes there are not covered by the plain-causal rows above.
+    (
+        "fp16_d128_sw_gqa32x8",
+        "gfx942",
+        dict(
+            head_size=128,
+            num_query_heads=32,
+            num_kv_heads=8,
+            dtype="fp16",
+            sliding_window=128,
+        ),
+    ),
+    (
+        "bf16_d128_sw_gqa32x8",
+        "gfx942",
+        dict(
+            head_size=128,
+            num_query_heads=32,
+            num_kv_heads=8,
+            dtype="bf16",
+            sliding_window=128,
+        ),
+    ),
+]
+
+
+# ---------------------------------------------------------------------
 # Shared problem matrix
 # ---------------------------------------------------------------------
 
@@ -619,6 +794,11 @@ class TestAttentionHelpers(unittest.TestCase):
         # MFMA atoms for QK (16x16x32) and PV (16x16x16 since T=16 < 32).
         self.assertIn("@llvm.amdgcn.mfma.f32.16x16x32.f16", ll)
         self.assertIn("@llvm.amdgcn.mfma.f32.16x16x16f16", ll)
+        # Reach comgr: valid IR is not enough -- assert it actually codegens and
+        # fits the LDS cap (the step the IR-text asserts above never exercise).
+        art = _compile_or_skip(k, arch="gfx950")
+        self.assertGreater(art.hsaco_bytes, 0)
+        _assert_resources_fit(art, arch="gfx950", kernel_name=k.name)
         # Cross-lane softmax reduction. The 16-lane intra-row-group
         # butterfly lowers to ``ds_swizzle`` SWAP mode rather than
         # ``ds_bpermute`` for the row-group masks ≤ 16. (Larger butterfly
@@ -824,6 +1004,13 @@ class TestAttentionHelpers(unittest.TestCase):
         # factor (`-inf - overall_max -> 0`).
         self.assertIn("@llvm.exp2.f32", red_ll)
         self.assertIn("fcmp ogt", red_ll)
+        # Reach comgr for both the segment and reduce kernels + LDS budget.
+        seg_art = _compile_or_skip(seg, arch="gfx950")
+        self.assertGreater(seg_art.hsaco_bytes, 0)
+        _assert_resources_fit(seg_art, arch="gfx950", kernel_name=seg.name)
+        red_art = _compile_or_skip(red, arch="gfx950")
+        self.assertGreater(red_art.hsaco_bytes, 0)
+        _assert_resources_fit(red_art, arch="gfx950", kernel_name=red.name)
 
     def test_unified_attention_3d_tiled_alibi_qq_bias(self):
         """ALiBi/QQ-bias on the 3D segment kernel emit the same primitives."""
@@ -856,6 +1043,71 @@ class TestAttentionHelpers(unittest.TestCase):
         # Both ALiBi and QQ-bias kernel-name suffixes show up.
         self.assertIn("_alibi", ll)
         self.assertIn("_qqb", ll)
+
+    def test_tiled_2d_shipped_geometries_compile_and_fit_budget(self):
+        """comgr build + resource-budget net over the shipped 2D-tiled geometries.
+
+        Regression net for codegen failures that IR-text lowering misses. Each
+        shipped (arch, dtype, D) flash variant must actually codegen through comgr
+        and fit its arch resource budget. Catches, in one pass:
+
+        - hard codegen rejections (LDS over the arch cap -- the fp16 D128 prefill
+          regression, 81920 B > gfx942's 64 KB cap; invalid ISA; malformed IR):
+          the compile step itself raises.
+        - LDS growth toward the cap: the explicit cap assert.
+        - register over-subscription: comgr does NOT fail on this -- it spills to
+          scratch and compiles anyway -- so ``_assert_resources_fit`` asserts no
+          scratch spill.
+
+        No torch, no GPU launch -- comgr targets each arch via its triple, so
+        this runs on any comgr/LLVM host regardless of the box's own GPU.
+        """
+        import kernels.common.attention_unified as au
+        from kernels import build_unified_attention_2d_tiled
+
+        for label, arch, problem_kwargs in _TILED_2D_BUDGET_GEOMETRIES:
+            with self.subTest(geometry=label, arch=arch):
+                with _patch_resolved_arch(arch):
+                    problem = _budget_problem(**problem_kwargs)
+                    spec = au._tiled_spec_from_problem(problem)
+                    k = build_unified_attention_2d_tiled(spec, arch=arch)
+                    art = _compile_or_skip(k, arch=arch)
+                    self.assertGreater(art.hsaco_bytes, 0)
+                    _assert_resources_fit(art, arch=arch, kernel_name=k.name)
+
+    def test_gfx950_dense_prefill_compiles_and_fits_budget(self):
+        """comgr build + resource-budget net for the gfx950 dense flash-attn
+        prefill kernel (``build_attention_dense``, its own builder / ABI -- NOT
+        routed through the unified 2D-tiled path the matrix above covers).
+
+        Dense bakes shape in at build time and is LDS-heavy (tunable V pad via
+        ``ROCKE_DENSE_VPAD``), so it is a live over-budget risk on its own. Covers
+        both the default and persistent (grid-stride) variants. gfx950-only,
+        torch-free -- comgr targets gfx950 via its triple.
+        """
+        from dataclasses import replace
+
+        from kernels import AttentionDenseSpec, build_attention_dense
+
+        base = AttentionDenseSpec(
+            batch=1,
+            seqlen_q=2048,
+            seqlen_kv=2048,
+            num_query_heads=32,
+            num_kv_heads=8,
+            head_size=128,
+            causal=True,
+            dtype="bf16",
+        )
+        for label, spec in (
+            ("default", base),
+            ("persistent", replace(base, persistent=True)),
+        ):
+            with self.subTest(variant=label):
+                k = build_attention_dense(spec, arch="gfx950")
+                art = _compile_or_skip(k, arch="gfx950")
+                self.assertGreater(art.hsaco_bytes, 0)
+                _assert_resources_fit(art, arch="gfx950", kernel_name=k.name)
 
     def test_attention_3d_workspace_size_matches_shapes(self):
         p = UnifiedAttentionProblem(
