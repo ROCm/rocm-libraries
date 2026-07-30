@@ -2067,7 +2067,7 @@ rocKE adapter invocation: the builder, plus the exact build values for that inst
     // so a UKD that omits one gets the same binary the builder would have produced anyway.
     {"name": "persistent",     "type": "bool",    "optional": true, "default": false},
     {"name": "num_persistent", "type": "int",     "optional": true, "default": 256},
-    {"name": "persist_decode", "type": "string",  "optional": true, "default": "qb_major"},
+    {"name": "persist_decode", "type": "string",  "optional": true, "default": "qb_major"},  // resolved, never "auto"
     {"name": "interleave",     "type": "bool",    "optional": true, "default": false},
     {"name": "block_n",        "type": "int",     "optional": true, "default": 64},
     {"name": "waves_per_eu",   "type": "int",     "optional": true, "default": 2},
@@ -2161,11 +2161,14 @@ rocKE adapter invocation: the builder, plus the exact build values for that inst
         "kind":   "rocke",
         "source": "kernels/gfx950/attention_dense.py",
         "entry":  "build_attention_dense",
-        // persist_decode is pinned rather than left at "auto": the resolution rule
-        // (resolved_persist_decode, attention_dense.py:277-290) reads batch, which the build
-        // values fix, and a descriptor that names the decode explicitly builds the same binary
-        // whether or not that rule changes. For this instance (gqa=8, nqb=8, batch=1) "auto"
-        // resolves to qb_major anyway, since 8*8*1 < 2*256.
+        // persist_decode carries the RESOLVED decode, never "auto". "auto" is not a third
+        // configuration, it is a host-side request to compute one (resolved_persist_decode,
+        // attention_dense.py:277-290). The KMD is both the catalog key and the heuristic's
+        // feature space, so it has to record what the binary does: two UKDs both saying "auto"
+        // but resolving differently would collide on the key (Section 4) and would rank on a
+        // string rather than on the decode they were built with. Resolving at descriptor-authoring
+        // time is the same move this whole example makes with the host's cohort rule. For this
+        // instance (gqa=8, nqb=8, batch=1) "auto" would resolve to qb_major: 8*8*1 < 2*256.
         "build":  {"batch": 1, "seqlen_q": 2048, "seqlen_kv": 2048,
                    "num_query_heads": 16, "num_kv_heads": 2, "head_size": 128,
                    "causal": true, "dtype": "bf16", "block_n": 64,
