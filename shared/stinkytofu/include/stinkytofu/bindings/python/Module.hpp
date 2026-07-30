@@ -80,6 +80,7 @@
     X(EnableWaitCntInsertion, bool)               \
     X(EnableLoopCarriedTokenDeps, bool)           \
     X(EnableESM2, bool)                           \
+    X(EnableESM2TrackValuVsrc, bool)              \
     X(VgprMsbMode, int)                           \
     X(EnableSwInstructionPrefetchRelStatic, bool) \
     X(EnableSwInstructionPrefetchAbs, bool)       \

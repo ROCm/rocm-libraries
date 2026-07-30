@@ -80,11 +80,18 @@ static inline bool isSaluHazardConsumer(const StinkyInstruction& inst) {
     return isGlobalMemLoad(inst) || isTensorLoad(inst);
 }
 
+// VMEM vgpr-address consumers: buffer/flat/global loads plus global_prefetch_b8, whose
+// vaddr is a vgpr. The prefetch is not a load (no dest, not IF_GLOBALLoad), so it is
+// listed explicitly rather than folded into isBufferMemLoad.
+static inline bool isVmemAddrHazardConsumer(const StinkyInstruction& inst) {
+    return isBufferMemLoad(inst) || isGlobalPrefetch(inst);
+}
+
 static constexpr HazardRule kCdna5HazardRules[] = {
     {"SaluSgprToMemAddr", isScalarALU, isSaluHazardConsumer, RegType::S, 8},
     // VALU vgpr -> VMEM address (global_read/MUBUF/FLAT/GLOBAL). Excludes SMEM/tensor_load:
     // those addresses are sgpr-only, never vgpr.
-    {"ValuVgprToVmemAddr", isVectorALU, isBufferMemLoad, RegType::V, 16},
+    {"ValuVgprToVmemAddr", isVectorALU, isVmemAddrHazardConsumer, RegType::V, 32},
 };
 constexpr int kNumCdna5HazardRules =
     static_cast<int>(sizeof(kCdna5HazardRules) / sizeof(kCdna5HazardRules[0]));
@@ -337,6 +344,8 @@ class CDNA5ReadyQueue : public ReadyQueue {
     // --- Per-WMMA-window DS cap (dagFeatures.dsReadPerWmma) ---
     int maxDsPerWmmaWindow_ = 0;
     int dsInsertedSinceLastWmma_ = 0;
+    // Per-window override for maxDsPerWmmaWindow_; empty => use the flat value.
+    std::vector<int> dsTargetPerWindow_;
 
     // (A) RAW data-ready gate. Per reg index: remaining modeled latency until a
     // producer's result is safe to consume (e.g. ds_load LDS->VGPR, 56 cyc). Any
@@ -748,7 +757,7 @@ DAGNode* CDNA5ReadyQueue::pickOneFromWMMA(DAGNode* pick) {
     // consume the time that is not used by the WMMA
     if (coIssueCyclePos_ < activeWmmaLatency_) advanceTime(activeWmmaLatency_ - coIssueCyclePos_);
 
-    activeCoIssueWindow_ = node->inst->hwInstDesc->coIssueWindow;
+    activeCoIssueWindow_ = node->inst->coIssueWindow;
     coIssueCyclePos_ = 0;
     activeWmmaLatency_ = node->inst->latencyCycles;
     activeWmmaNode_ = node;
@@ -815,7 +824,12 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
     // co-issue window; it is meaningless when no WMMA is available to issue, so it
     // is applied only while a WMMA is pending. Otherwise ds_loads drain freely,
     // bounded only by the real hardware limiter dsReadQueueFull().
-    const bool dsCapReached = !wmmaQueue.empty() && dsInsertedSinceLastWmma_ >= maxDsPerWmmaWindow_;
+    int windowCap = maxDsPerWmmaWindow_;
+    if (!dsTargetPerWindow_.empty()) {
+        const int w = std::min((int)wmmaIssuedCountThisRegion_, (int)dsTargetPerWindow_.size() - 1);
+        windowCap = dsTargetPerWindow_[w];
+    }
+    const bool dsCapReached = !wmmaQueue.empty() && dsInsertedSinceLastWmma_ >= windowCap;
     bool dsWindowOk =
         pickedDS && !dsCapReached && !dsReadQueueFull() && !destOverlapsActiveWmmaSrc(pickedDS);
 
@@ -1652,6 +1666,9 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
             hasWMMAInRegion_ = true;
         }
     }
+
+    // Flat fill (one entry per window); a later commit computes per-window targets.
+    dsTargetPerWindow_.assign(wmmaIssueConfig.issuedCount + 1, dsReadPerWmma());
 
     barrierWmmaThresholds_.clear();
     barrierDsLoadCounts_.clear();

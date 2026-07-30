@@ -5336,6 +5336,50 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if isinstance(nameOrIdx, int):
       self.sgprPool.checkIn(nameOrIdx)
 
+  def skUsesRawQueueRank(self, kernel):
+    """True when the per-XCD work-queue index must come from the RAW pre-remap
+    launch WG rank, captured once into the reused persistent ``StreamKTileIdx``
+    carrier (KernelWriterAssembly prologue) and read back in
+    StreamK.graWorkGroup.
+
+    The auto-reset wrap bound (tiles_q + W_q) assumes each queue's home-workgroup
+    count equals distribute(skGrid, q), i.e. that the value feeding % numQueues
+    densely covers [0, skGrid). Once WorkGroup0 has been remapped, its
+    % numQueues is NOT count-preserving when the grid does not block evenly, so
+    it skews the per-queue count and the counter drifts off 0. We therefore
+    snapshot the raw launch id (== physical XCD rank) BEFORE any remap.
+
+    ZERO additional persistent SGPRs are spent: the raw rank is stashed in the
+    already-allocated ``StreamKTileIdx`` slot, which is provably dead in the
+    [prologue, queue-read) window (see StreamK.usesRawQueueRank). A dedicated
+    ``StreamKQueue`` SGPR was rejected because these SK4/SK5 kernels sit at the
+    register ceiling and it overflowed the SGPR file on the tuned high-register
+    SKXCC kernels (the unaligned-pool parity shift can cost up to 4 SGPRs).
+
+    Two disjoint remap regimes need the raw rank:
+
+      * WorkGroupMappingXCC == -1 -- the dynamic auto-WGM path, where the host
+        picks WGMXCC = NUM_XCD > 1 at runtime and the wgmXCC CU-count remap skews
+        the per-queue count.
+      * StreamKXCCMapping != 0 with WorkGroupMappingXCC > 1 -- the SKXCC path,
+        where the StreamKXCCMapping chiplet remap (plus the fixed WGMXCC > 1
+        remap) rewrites WorkGroup0 non-count-preservingly. (SKXCC with WGMXCC ==
+        1 is already count-preserving -- it stays on the cheap StreamKIdx %
+        numQueues else-branch -- and WGMXCC == -1 is mutually exclusive with
+        SKXCC, so the two disjuncts never overlap.)
+
+    Fixed non-SKXCC WGMXCC solutions (== 1 no-op, or a tuned power-of-two > 1
+    without SKXCC) are excluded: == 1 needs no fix (StreamKIdx already equals the
+    raw rank). Single-XCD arches are trivially balanced; gfx12
+    (WorkGroupIdFromTTM) re-reads the raw id from ttmp9. Kept in sync with
+    StreamK.usesRawQueueRank."""
+    return (kernel["StreamK"] in (4, 5)
+            and self.states.archCaps["NumXCD"] > 1
+            and not self.states.archCaps["WorkGroupIdFromTTM"]
+            and (kernel["WorkGroupMappingXCC"] == -1
+                 or (kernel["StreamKXCCMapping"] != 0
+                     and kernel["WorkGroupMappingXCC"] > 1)))
+
   ##############################################################################
   # Move StreamK Constants to VGPRs
   ##############################################################################
@@ -6699,6 +6743,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
                                "EnableWaitCntInsertion": True if stinky_opt_level != 0 else not globalParameters.get("DisableSTWaitCnt", True),
                                # True: expert scheduling mode2; False: mode 0. Independent of ScheduleIterAlg/OptLevel.
                                "EnableESM2": kernel["EnableStinkyTofuESM2"],
+                               "EnableESM2TrackValuVsrc": kernel["EnableESM2TrackValuVsrc"],
                                "TileA0": kernel["ThreadTile0"],
                                "TileB0": kernel["ThreadTile1"],
                                "TileM0": kernel["MacroTile0"],
@@ -9519,6 +9564,14 @@ class KernelWriter(metaclass=abc.ABCMeta):
     requiredUnalignedSgprVar = []
     requiredAligned4SgprVar = []
 
+    # Per-XCD work-queue index comes from the RAW pre-remap launch WG rank
+    # (see skUsesRawQueueRank). It is snapshotted once, before wgmXCC / the
+    # SKXCC XCCMapping rewrite WorkGroup0, into the ALREADY-allocated persistent
+    # StreamKTileIdx SGPR (provably dead in the [prologue, queue-read) window)
+    # and read back in StreamK.graWorkGroup. Reusing that slot as the raw-rank
+    # carrier costs ZERO additional persistent SGPRs -- a dedicated StreamKQueue
+    # SGPR overflowed the SGPR file on tuned high-register SKXCC kernels -- so no
+    # dedicated queue SGPR is declared here.
     if kernel["StreamK"] == 4:
       requiredUnalignedSgprVar += [
         "StreamKIdx",
@@ -9553,6 +9606,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
         "StreamKLocalEnd",
         "StreamKHybridMode",
       ]
+      # SK5 keeps StreamKHybridMode holding ONLY the mode bit (its SCmpEQU32==0
+      # dispatch must stay a plain compare). The per-XCD queue index reuses the
+      # already-allocated persistent StreamKTileIdx slot as the raw-rank carrier
+      # (dead in the [prologue, queue-read) window: for SK5 it aliases
+      # StreamKIter, whose only in-window writes live on the mutually-exclusive
+      # SK3-static path), so no dedicated queue SGPR is declared.
       # Work stealing: per-WG sticky-empty flag (see SK4 note above). Only the
       # SK4 sub-path uses it, but it must persist for the whole persistent loop.
       if kernel["StreamKWorkStealing"]:
