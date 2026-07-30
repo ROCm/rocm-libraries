@@ -132,7 +132,7 @@ exception). This complements build-time codegen rather than replacing it.
 | Fusion **matching**: one UMD matches a bounded multi-op subgraph that is the entire graph, run as one kernel | Yes ([§5](#5-matching-and-the-umd)) | matching a fused pattern *inside* a larger graph: JIT ([§9.3](#93-future-jit-and-normalized-providers)) |
 | Match criteria: opcode, dtype, shape/rank, stride order, packed, divisibility, range, attribute, graph-structure, cross-tensor, per-element `all`, bounded `or` | Yes ([§5](#5-matching-and-the-umd)) | None |
 | General matching: N-ary commutative, unbounded chains, optional/variadic operands | None | JIT ([§9.3](#93-future-jit-and-normalized-providers)) |
-| Kernel sources | `kpack`, `hsaco`, and the rocKE adapter (build-only, lowers to `hsaco`) first; `hip` follows | new authoring adapters, DSLs ([§9.1](#91-kernel-source-adapters)) |
+| Kernel sources | `kpack`, `hsaco`, and `rocke` (build-only, runs the rocKE AOT build) first; `hip` follows | new authoring adapters, DSLs ([§9.1](#91-kernel-source-adapters)) |
 | Heuristic sources | LightGBM model; custom C-API library | other model formats, static tables ([§9.2](#92-heuristic-adapters)) |
 | Runtime drop-in | prebuilt code objects, opt-in, off by default | JIT-compiled sources ([§12](#12-packaging-and-delivery)) |
 | Multi-kernel launch program (e.g. SDPA backward) | None | composition ([§15.1](#151-several-kernels-for-one-operation)) |
@@ -651,9 +651,12 @@ depends on a knob, such as a split-K GEMM whose scratch is the larger of its par
 reduction, or one floored at a minimum ([Section 6](#6-dispatch-and-workspace)); and `rsqrt`
 expresses the SDPA convention's implicit
 default scale (`1/sqrt(head_size)`), which two separate real kernel families in this repository
-compute today. `value_or_default(["$field", <literal>])` reads a possibly-absent optional field,
-substituting the literal when the graph does not set it; it is what lets a matcher treat an unset
-field and an explicitly-defaulted one alike, the way hand-written applicability code already does.
+compute today. `value_or_default(["$field", <fallback>])` reads a possibly-absent optional field and
+substitutes the fallback when the graph does not set it; it is what lets a matcher treat an unset
+field and an explicitly-defaulted one alike, the way hand-written applicability code already does. The
+fallback is a literal in the common case, but it may be any expression of the same type, including a
+second field reference, so "this field, else that one" is one operator rather than a branch. Both
+arms must be type-compatible, which the loader checks against the schema's declared field types.
 
 Operators nest to any depth, and a left-hand side
 can itself be a computed expression rather than a raw field. A leaf is a literal or a `$`-prefixed field
@@ -670,10 +673,12 @@ vocabulary up front and the interpreter fails closed on anything undeclared. The
 namespaces, and every criteria and dispatch expression draws from the same set:
 
 - **Tensor:** a bound operand's fields: `$q.dtype`, `$q.rank`, its named dims (`$q.seqlen_q`, `$w.c`),
-  evaluated flags (`$q.stride_order`, `$q.packed`), and `$q.virtual` (an internal intermediate between
-  matched nodes, not a graph input or output).
-- **Graph:** structural facts of the matched graph, e.g. `$graph.node_count`, which pins an exact match
-  (the graph has exactly this many nodes).
+  evaluated flags (`$q.stride_order`, `$q.packed`), `$q.is_runtime_pass_by_value` (the value arrives
+  per execution rather than at plan build, RFC 0016), the precomputed scalar `$q.value_f32` (below),
+  and `$q.virtual` (an internal intermediate between matched nodes, not a graph input or output).
+- **Graph:** structural facts and graph-level flags of the matched graph, e.g. `$graph.node_count`,
+  which pins an exact match (the graph has exactly this many nodes), and
+  `$graph.is_override_shape_enabled`, the graph's opt-in to execute-time override shapes.
 - **Attributes:** a matched op node's attributes, named by the node's pattern `id`: an SDPA node
   `{"id": "sdpa_fwd"}` exposes `$sdpa_fwd.head_size`, a conv node `{"id": "conv"}` exposes `$conv.dilation`.
 - **Kernel metadata:** `$kernel.<field>`, the values a UKD supplies for the fields its engine's KMD
@@ -827,8 +832,12 @@ symbol name and typed arguments, never inline code. It is a deliberate last reso
 the validated catalog of MIOpen CK convolution and rocKE SDPA applicability needed no custom
 operation. It did rely on a third mechanism between the built-ins and the escape hatch:
 **precomputed fields**, values the schema layer derives once and exposes as ordinary tokens, so a
-matcher compares them instead of re-deriving them. `$q.packed` and `$q.stride_order` are the examples
-in this document, standing in for `inferLayout`'s contiguous-stride arithmetic. A precomputed field is
+matcher compares them instead of re-deriving them. `$q.packed` and `$q.stride_order` are the layout
+examples in this document, standing in for `inferLayout`'s contiguous-stride arithmetic. `$q.value_f32`
+is the other kind: a tensor's compile-time `value` is a tagged union over eight differently-typed
+arms in the schema, and the expression language has no discriminator syntax to unwrap one, so the
+schema layer coerces whichever arm is set to `f32` once and publishes the result as a single typed
+token, present only when the tensor carries a compile-time value at all. A precomputed field is
 declared in the hipDNN schema like any other field and versioned with
 it, so adding one is an additive schema change, not a per-pack extension point. A file that names a
 predicate the provider does not ship
@@ -1121,7 +1130,7 @@ initial variants:
 
 ```jsonc
 "kernel_source": {
-  "kind": "kpack" | "hsaco" | "hip",
+  "kind": "kpack" | "hsaco" | "hip" | "rocke",
   // kind-specific fields point at a compiled kernel, or say how to build one; each yields one loadable handle:
   // kpack:  {"library": "rocke_attn.kpack", "symbol": "sdpa_fwd_d128_bf16_gfx942"}
   //           a function symbol resolved from a packed multi-arch library artifact (build-time)
@@ -1129,12 +1138,19 @@ initial variants:
   //           a prebuilt code-object file (runtime drop-in)
   // hip:    {"source": "sdpa_fwd.hip", "entry": "sdpa_fwd_kernel"}
   //           a HIP source file, compiled ahead of time and packaged (build-time; covers hipRTC too)
+  // rocke:  {"source": "kernels/gfx950/attention_dense.py", "entry": "build_attention_dense",
+  //          "build": {"head_size": 128, ...}}
+  //           a rocKE builder plus the build values for this one instance; the adapter runs the
+  //           rocKE AOT build and packs the resulting code object (build-time, Section 9.1)
 }
 ```
 
 The set is deliberately open. Every source, however authored, terminates in a single loadable kernel
 handle, and each source kind is reached through an adapter, so growing the set never adds a new launcher
-or dispatch path. [Section 9](#9-adapters-and-extensibility) covers the adapter model and the order in
+or dispatch path. A `build`-carrying source kind is *not* a second heuristic surface: its values are
+the fixed build parameters of one instance, chosen by the author, and the same values reappear as that
+UKD's KMD metadata so selection and matching can read them ([Section 4](#4-descriptor-formats)).
+[Section 9](#9-adapters-and-extensibility) covers the adapter model and the order in
 which sources arrive.
 
 ---
@@ -1378,10 +1394,17 @@ adapter; a self-contained generator can be build-and-runtime. Runtime JIT of sou
 direction ([Section 9.3](#93-future-jit-and-normalized-providers)).
 
 The rocKE prototype ([PR #9207](https://github.com/ROCm/rocm-libraries/pull/9207)) is the first
-concrete case and gets its own **build-only** kernel-source adapter: rocKE sources are not directly
-loadable, so the adapter runs the rocKE build step to lower them into `hsaco` code objects ahead of
-time, which the runtime then loads like any other prebuilt code object. This is the adapter migrated in
-the first implementation work ([Section 14](#14-phased-delivery)).
+concrete case and gets its own **build-only** kernel-source adapter, the `rocke` source kind of
+[Section 7](#7-kernel-source). A rocKE kernel is a Python builder function that emits IR from a
+frozen spec, so it is not directly loadable and it is not one artifact either: one builder yields a
+different code object for every spec it is called with. The adapter therefore takes both halves, the
+builder (`source` plus `entry`) and the explicit `build` values for one instance, calls the builder,
+runs the rocKE AOT compile, and packs the resulting code object. Every UKD in a pack names the same
+builder and differs only in its `build` values, so the pack's kernel vector *is* the AOT build list:
+the set of instances to compile is derived from the descriptors rather than maintained beside them,
+and a kernel that is catalogued but never built is a build-time error rather than a load-time
+surprise. The artifact's name is the adapter's business, not the author's. This is the adapter
+migrated in the first implementation work ([Section 14](#14-phased-delivery)).
 
 ### 9.2 Heuristic Adapters
 
@@ -1428,7 +1451,7 @@ build, so the heuristic ranks over that space.
 
 Because JIT is bound to a JIT engine and its source technology, it belongs in the **provider SDK**:
 each provider reuses this same descriptor system to describe its own provider matches, so a JIT source
-may be custom function sources or a specific technology (rocKE, a provider-specific DSL). JIT sources
+may be custom function sources, a kernel-authoring framework such as rocKE, or a DSL. JIT sources
 need their own extensible adapters to register and describe them. For rocKE, for example, a template
 spec plus a builder maps the matched graph's details onto the final spec and build. That is complex
 enough to warrant the dedicated follow-up.
@@ -1679,9 +1702,8 @@ gated modes of the same kernel file and are called out as an extension point in 
   ],
   "criteria": {"and": [
     // --- graph-level: a prebuilt kernel serves one fixed compile-time shape ---
-    {"!": ["$graph.override_shape"]},
+    {"!": ["$graph.is_override_shape_enabled"]},
     {"==": ["$graph.node_count", 1]},
-    {"==": ["$graph.node_kind", "sdpa_fwd"]},
 
     // --- 23 of the 24 optional tensors are refused outright. The 24th, the scale tensor, is the
     //     one this family can serve in a restricted form, so it is handled below rather than here:
@@ -1711,9 +1733,14 @@ gated modes of the same kernel file and are called out as an extension point in 
     //     binary, so the family-level gates above are not sufficient on their own. Each candidate
     //     kernel must also agree with the graph on every quantity it baked, or a d64 fp16 graph
     //     would launch a d128 bf16 code object. These are the `$kernel.*` clauses the matcher is
-    //     re-evaluated on per candidate (Section 5), and every one of them names a KMD field. ---
+    //     re-evaluated on per candidate (Section 5), and every one of them names a KMD field.
+    //     `batch` is pinned for the same reason as the rest: it is baked (attention_dense.py:107),
+    //     it sizes the K/V buffer-resource bounds, and in the persistent cohort it sets the
+    //     grid-stride trip count, so a graph agreeing on every other dim but differing in batch
+    //     must not reach this binary. ---
     {"==": ["$q.dtype",     "$kernel.dtype"]},
     {"==": ["$q.head_size", "$kernel.head_size"]},
+    {"==": ["$q.batch",     "$kernel.batch"]},
     {"==": ["$q.num_heads", "$kernel.num_heads"]},
     {"==": ["$k.num_kv_heads", "$kernel.num_kv_heads"]},
     {"==": ["$q.seqlen_q",  "$kernel.seqlen_q"]},
@@ -1730,8 +1757,8 @@ gated modes of the same kernel file and are called out as an extension point in 
     //     logical axis order (batch, num_heads, seqlen, head_size) this pattern names. A
     //     family whose kernel genuinely accepted either BHSD or BSHD (like the retired
     //     adapter's inferLayout) would anchor with `{"in": [..., [[0,1,2,3],[0,2,1,3]]]}`
-    //     instead; the fix is anchoring to the literal set the real kernel accepts, whatever
-    //     its size, not leaving it open. ---
+    //     instead: anchor to the literal set the real kernel accepts, whatever its size, rather
+    //     than leaving the layout open. ---
     "$q.packed", "$k.packed", "$v.packed", "$o.packed",
     {"==": ["$q.stride_order", [0, 2, 1, 3]]},
     {"==": ["$k.stride_order", "$q.stride_order"]},
@@ -1765,7 +1792,9 @@ gated modes of the same kernel file and are called out as an extension point in 
     //     what this pack requires is that the scale be *knowable before the launch*, not that it
     //     arrive by one particular route:
     //       - as the `attn_scale_value` attribute, a plain constant on the node;
-    //       - as a scale tensor holding a compile-time `value`;
+    //       - as a scale tensor carrying a compile-time value, read as `$scale.value_f32`, the
+    //         precomputed scalar the schema layer derives from the tensor's tagged-union `value`
+    //         (Section 5). The raw union is not readable from an expression; the coerced field is.
     //       - as a scale tensor marked `is_runtime_pass_by_value`, whose value the host supplies
     //         per execution (RFC 0016). That one this pack declines: the kernel takes `scale` as a
     //         kernarg the UDD fills at plan build, so a value that only exists at execute time
@@ -1779,7 +1808,8 @@ gated modes of the same kernel file and are called out as an extension point in 
                {"not_present": ["$scale"]}]},
       {"and": [{"not_present": ["$sdpa_fwd.attn_scale_value"]},
                {"present":     ["$scale"]},
-               {"present":     ["$scale.value"]},
+               {"present":     ["$scale.value_f32"]},
+               {"==": ["$scale.dtype", "FLOAT"]},
                {"!": ["$scale.is_runtime_pass_by_value"]}]}
     ]},
 
@@ -1788,8 +1818,8 @@ gated modes of the same kernel file and are called out as an extension point in 
     //     mode disjunction together, is one element of this outer `and`; splicing only the
     //     inner `or` would turn the contradiction check into a sibling
     //     disjunct rather than a conjunct, so a graph with both deprecated causal booleans set
-    //     could pass by satisfying any other arm of the `or`. Pasting the WHOLE Section 13.3
-    //     block here, not just its `or`, is the fix; see 13.3 for why. ---
+    //     could pass by satisfying any other arm of the `or`. The WHOLE Section 13.3 block belongs
+    //     here, not just its `or`; see 13.3 for why. ---
     "... Section 13.3, the full {\"and\": [contradiction, {\"or\": [...]}]} block, in one piece ..."
   ]}
 }
@@ -1832,7 +1862,7 @@ it means "left unbounded". That is correct but unreadable six times over, so the
 ([Section 5](#5-matching-and-the-umd)). The two spellings are equivalent; this one is legible.
 
 ```jsonc
-// The full contradiction-check-plus-classifier block. Spliced into 13.2 in one piece (the fix):
+// The full contradiction-check-plus-classifier block. It is spliced into 13.2 in one piece:
 // pasting only the inner `or` there would let the contradiction check become a disjunct instead
 // of a conjunct, so a graph with both deprecated causal booleans set could pass by satisfying any
 // other arm.
@@ -1886,8 +1916,9 @@ alibi/padding/dropout, `attn_scale_value=0.08838834764831845` (`1/sqrt(128)`) an
 They differ only in the field named.
 
 **Case A: accept.** `causal_mask=true`. Every §13.2 gate passes, `mask_mode` resolves to
-`causal_top_left`, and §13.6's non-persistent UKD declares exactly that alongside `head_size=128`
-and `dtype="BFLOAT16"`. `nqb = ceil(2048/256) = 8`; `work = nqb * num_heads * batch = 8*16*1 = 128`,
+`causal_top_left`, and §13.6's non-persistent UKD declares exactly that alongside `head_size=128`,
+`batch=1`, and `dtype="BFLOAT16"`, so every `$kernel.*` pin agrees with the graph.
+`nqb = ceil(2048/256) = 8`; `work = nqb * num_heads * batch = 8*16*1 = 128`,
 below `num_persistent`'s default of 256, so the real host-side rule in
 `_dense_spec` (`dispatch/attention.py:329-372`, `persistent = work >= num_persistent` in `"auto"`
 mode) would itself pick the non-persistent cohort for this exact shape. Applicable.
@@ -1895,7 +1926,7 @@ mode) would itself pick the non-persistent cohort for this exact shape. Applicab
 **Case B: matcher decline.** Same graph plus an additive attention bias, so `$attn_mask` is bound.
 The `not_present` list fails the moment that operand is bound, before mask mode, dtype,
 or layout are considered. Any of the other 22 refused-outright operands declines identically, and so does
-`$graph.override_shape`, which rejects before any tensor is bound because this kernel bakes its
+`$graph.is_override_shape_enabled`, which rejects before any tensor is bound because this kernel bakes its
 shape at compile time and cannot serve a runtime-overridden one.
 
 **Case C: catalog decline.** Same graph, but `causal_mask=false` and both bounds unbounded
@@ -1947,7 +1978,7 @@ The persistent UDD, the measured ~940-970 TFLOPS path (PR #9480):
     {"name": "o_ptr", "kind": "pointer", "source": {"from": "tensor", "ref": "$o"}},
     {"name": "scale", "kind": "scalar", "type": "f32",
       "source": {"from": "expr", "expr": {"value_or_default": ["$sdpa_fwd.attn_scale_value",
-                                                               "$scale.value"]}}}
+                                                               "$scale.value_f32"]}}}
   ]
 }
 ```
@@ -1983,15 +2014,18 @@ formula over graph dims instead of a `$kernel.*` constant) and shares the identi
     {"name": "o_ptr", "kind": "pointer", "source": {"from": "tensor", "ref": "$o"}},
     {"name": "scale", "kind": "scalar", "type": "f32",
       "source": {"from": "expr", "expr": {"value_or_default": ["$sdpa_fwd.attn_scale_value",
-                                                               "$scale.value"]}}}
+                                                               "$scale.value_f32"]}}}
   ]
 }
 ```
 
 **What the scale binding shows.** Both UDDs resolve `scale` from whichever of the two accepted forms
 the graph supplied, the node attribute or the compile-time tensor value, with no branch in the
-dispatch: `value_or_default` reads the attribute and falls back to the tensor's value, and the
-matcher has already guaranteed that exactly one of them is there. A form the kernel cannot take, a
+dispatch: `value_or_default` reads the attribute and falls back to `$scale.value_f32`, the schema's
+precomputed coercion of the tensor's tagged-union value ([Section 5](#5-matching-and-the-umd)), and
+the matcher has already guaranteed that exactly one of them is there and that the tensor is `FLOAT`.
+This is the field-reference fallback form of `value_or_default`, not the literal one §13.3 uses;
+both arms are `f32`, which is what the operator requires. A form the kernel cannot take, a
 scale whose value only exists at execute time, was excluded at match time rather than handled here,
 which is the division of labour the two descriptors are for: the matcher decides what the pack
 accepts, the UDD only says how to fill a kernarg.
@@ -2007,7 +2041,9 @@ pack makes, not a limit the language imposes.
 One matcher (§13.2), one engine, one KMD, shared across two KDPs because the two cohorts need
 different UDDs (§13.5). The KMD carries `persistent` as a field precisely so the two UKDs' metadata
 values are genuinely distinct, not just their `id`s, satisfying the RFC's own KMD-uniqueness rule
-(§4: "every kernel in the engine must produce a distinct key").
+(§4: "every kernel in the engine must produce a distinct key"). Each UKD's `kernel_source` is a
+rocKE adapter invocation: the builder, plus the exact build values for that instance
+([Section 7](#7-kernel-source), [Section 9.1](#91-kernel-source-adapters)).
 
 ```jsonc
 // --- KMD: the engine-wide metadata schema, shared by both KDPs below ---
@@ -2016,9 +2052,10 @@ values are genuinely distinct, not just their `id`s, satisfying the RFC's own KM
   "id":     "9c53b6b0-9a1e-4b1d-8b5c-7e2d9a6f3c40",
   "name":   "attention_dense variant fields",
   "fields": [
-    // every field the compiled binary bakes, so a matcher can pin the graph to it
-    {"name": "head_size",      "type": "int",    "optional": false},
+    // every graph quantity the compiled binary bakes, so the matcher can pin the graph to it
+    {"name": "head_size",      "type": "int",     "optional": false},
     {"name": "dtype",          "type": "string",  "optional": false},
+    {"name": "batch",          "type": "int",     "optional": false},
     {"name": "num_heads",      "type": "int",     "optional": false},
     {"name": "num_kv_heads",   "type": "int",     "optional": false},
     {"name": "seqlen_q",       "type": "int",     "optional": false},
@@ -2027,21 +2064,35 @@ values are genuinely distinct, not just their `id`s, satisfying the RFC's own KM
     // and the tuning axes that vary independently of the graph
     {"name": "persistent",     "type": "bool",    "optional": true, "default": false},
     {"name": "num_persistent", "type": "int",     "optional": true, "default": 256},
+    {"name": "persist_decode", "type": "string",  "optional": true, "default": "qb_major"},
     {"name": "block_n",        "type": "int",     "optional": true, "default": 64}
   ]
 }
 
-// --- UHD: a named, registered rule, not a trained model. attention_dense's real preference
-//     between the two cohorts is a small host-computed threshold check today
-//     (_dense_spec's `persistent = work >= num_persistent`, dispatch/attention.py:329-357), not
-//     a LightGBM-style scorer; "custom_library" is the honest kind for porting that rule
-//     verbatim rather than overclaiming a trained model that does not exist. ---
+// --- UHD: the engine's selection model, ranking the whole catalog. The two cohorts are one
+//     axis of that catalog, not a special case: `persistent` and `num_persistent` are ordinary
+//     features alongside the shape the graph supplies, so the model that picks between the
+//     cohorts is the same model that will pick among the block_n and decode variants a sweep
+//     adds later. The training data is the sweep that produced the cohort split in the first
+//     place; the host-side `work >= num_persistent` threshold that predates the integration is
+//     one decision boundary in that data, not a rule the descriptors carry. ---
 {
   "schema": "hipdnn.uhd/v1",
   "id":     "2b7a4e1c-6f3d-4a8e-9c2b-5d1f0a7e8b93",
-  "name":   "attention_dense persistent-vs-default selector",
-  "kind":   "custom_library",
-  "custom_library": {"symbol": "rocke.attention_dense.persistent_threshold"},
+  "name":   "attention_dense forward selector",
+  "kind":   "model",
+  "model":  {"framework": "lightgbm", "artifact": "attention_dense/gfx950_fwd.bin"},
+  "features_signature": [
+    "$device.cu_count",
+    "$kernel.persistent",
+    "$kernel.num_persistent",
+    "$kernel.block_n",
+    "$q.seqlen_q",
+    "$q.num_heads",
+    "$q.batch",
+    // the work term the retired host rule thresholded on, as an ordinary derived feature
+    {"*": [{"ceil_div": ["$q.seqlen_q", 256]}, {"*": ["$q.num_heads", "$q.batch"]}]}
+  ],
   "objective": "max"
 }
 
@@ -2066,16 +2117,23 @@ values are genuinely distinct, not just their `id`s, satisfying the RFC's own KM
       "schema": "hipdnn.ukd/v1",
       "id":   "3f8a6c1d-2e5b-4a9c-8d7e-1b6f4a3c9e02",
       "name": "attention_dense d128 bf16 causal (default grid, gfx950)",
-      // No AOT artifact for this family exists today: the kernel is
-      // built from IRBuilder DSL and JIT-compiled at first use via compile_kernel(), cached
-      // in-process by kernel_name() (attention_dense.py:1600-1657), never written to a shipped
-      // .hsaco/.co. "hsaco" below is the shape this UKD would take once a build-time compile
-      // step is added to produce that artifact; that step does not exist yet.
-      "kernel_source": {"kind": "hsaco",
-                        "file": "rocke_attention_dense_d128_hq16_kv2_bn64_bf16_sq2048_sk2048_causal_lazyrs.co"},
-      "metadata": {"head_size": 128, "dtype": "BFLOAT16", "num_heads": 16, "num_kv_heads": 2,
-                   "seqlen_q": 2048, "seqlen_kv": 2048, "mask_mode": "causal_top_left",
-                   "persistent": false, "block_n": 64},
+      // The rocKE source kind (Section 7): the builder plus the build values for this one
+      // instance. The adapter calls build_attention_dense with exactly these values, runs the
+      // rocKE AOT compile, and packs the code object (Section 9.1). The build keys are
+      // AttentionDenseSpec's own field names and its own dtype spelling; the metadata below
+      // restates the same instance in the KMD's vocabulary, which is what the matcher and the
+      // heuristic read.
+      "kernel_source": {
+        "kind":   "rocke",
+        "source": "kernels/gfx950/attention_dense.py",
+        "entry":  "build_attention_dense",
+        "build":  {"batch": 1, "seqlen_q": 2048, "seqlen_kv": 2048,
+                   "num_query_heads": 16, "num_kv_heads": 2, "head_size": 128,
+                   "causal": true, "dtype": "bf16", "block_n": 64, "persistent": false}
+      },
+      "metadata": {"head_size": 128, "dtype": "BFLOAT16", "batch": 1, "num_heads": 16,
+                   "num_kv_heads": 2, "seqlen_q": 2048, "seqlen_kv": 2048,
+                   "mask_mode": "causal_top_left", "persistent": false, "block_n": 64},
       "priority":  0
     }
   ]
@@ -2093,64 +2151,72 @@ values are genuinely distinct, not just their `id`s, satisfying the RFC's own KM
       "schema": "hipdnn.ukd/v1",
       "id":   "b1e7d4a0-9c3f-4e6b-8a1d-2f5c9b7e0a44",
       "name": "attention_dense d128 bf16 causal (persistent grid-stride, gfx950)",
-      "kernel_source": {"kind": "hsaco",
-                        "file": "rocke_attention_dense_d128_hq16_kv2_bn64_bf16_sq2048_sk2048_causal_lazyrs_persist256_hkvmaj.co"},
-      "metadata": {"head_size": 128, "dtype": "BFLOAT16", "num_heads": 16, "num_kv_heads": 2,
-                   "seqlen_q": 2048, "seqlen_kv": 2048, "mask_mode": "causal_top_left",
-                   "persistent": true, "num_persistent": 256, "block_n": 64},
+      "kernel_source": {
+        "kind":   "rocke",
+        "source": "kernels/gfx950/attention_dense.py",
+        "entry":  "build_attention_dense",
+        // persist_decode is pinned rather than left at "auto": the resolution rule
+        // (resolved_persist_decode, attention_dense.py:277-290) reads batch, which the build
+        // values fix, and a descriptor that names the decode explicitly builds the same binary
+        // whether or not that rule changes. For this instance (gqa=8, nqb=8, batch=1) "auto"
+        // resolves to qb_major anyway, since 8*8*1 < 2*256.
+        "build":  {"batch": 1, "seqlen_q": 2048, "seqlen_kv": 2048,
+                   "num_query_heads": 16, "num_kv_heads": 2, "head_size": 128,
+                   "causal": true, "dtype": "bf16", "block_n": 64,
+                   "persistent": true, "num_persistent": 256, "persist_decode": "qb_major"}
+      },
+      "metadata": {"head_size": 128, "dtype": "BFLOAT16", "batch": 1, "num_heads": 16,
+                   "num_kv_heads": 2, "seqlen_q": 2048, "seqlen_kv": 2048,
+                   "mask_mode": "causal_top_left", "persistent": true, "num_persistent": 256,
+                   "persist_decode": "qb_major", "block_n": 64},
       // Given a genuine, measured preference (512 -> 853 TFLOPS, +70%, attention_dense.py:162)
-      // for the persistent cohort wherever the custom_library heuristic's threshold call is not
-      // decisive, priority is set higher than the default cohort's, not left at the same value,
-      // so the choice never falls through to the meaningless id-byte tie-break
-      // ([Section 5](#5-matching-and-the-umd)).
+      // for the persistent cohort wherever the UHD's score is not decisive, priority is set
+      // higher than the default cohort's, not left at the same value, so the choice never falls
+      // through to the meaningless id-byte tie-break ([Section 5](#5-matching-and-the-umd)).
       "priority":  10
     }
   ]
 }
 ```
 
-`kernel_source.file` names above are illustrative, following the real `kernel_name_join` convention
-this family actually uses (`attention_dense.py:292-318`; `kernel_name()` produces
-`rocke_attention_dense_d{head}_hq{q}_kv{kv}_bn{block_n}_{dtype}_sq{sq}_sk{sk}_{causal|full}...`), not
-copied from any real `aot_list.json` entry, because no such entry exists for this family.
+Neither UKD names an artifact file, because neither author chooses one: the adapter builds the code
+object from the `build` values and owns its name. The two `kernelDescriptors` vectors above *are* the
+AOT build list for this pack, so what gets compiled is exactly what is catalogued
+([Section 9.1](#91-kernel-source-adapters)).
 
 ### 13.7 What Maps to What
 
 | Hand-written today | Becomes | In this example |
 |---|---|---|
 | `_make_gfx950_attention_dense_candidate.support` + `supports_attention_dense` | UMD `criteria` | §13.2 |
-| the in-process JIT compile-and-cache in `run_attention_dense_torch` | `kernel_source: hsaco`, once a build-time compile step exists (§13.8) | §13.6 |
+| the in-process JIT compile-and-cache in `run_attention_dense_torch` | `kernel_source: rocke`, built AOT by the adapter | §13.6, §9.1 |
 | `causal_mask`/`causal_mask_bottom_right`/bounds contradiction and classification | one spliced `and`/`or` block over `$kernel.mask_mode` | §13.3 |
 | `inferLayout`-style physical-layout check (proposed for this family; none exists yet) | `$q.stride_order == [0,2,1,3]` plus cross-tensor equality | gate fix, §13.2 |
 | `AttentionDenseSpec.head_size in (64,128)` | `in` membership | §13.2 |
 | `AttentionDenseSpec` GQA constraint | `divisible($q.num_heads, $k.num_kv_heads)` | §13.2 |
-| `_dense_spec`'s `work >= num_persistent` host rule | a `custom_library` UHD | §13.6 |
+| `_dense_spec`'s `work >= num_persistent` host rule | a UHD ranking on `$kernel.persistent` plus the same work term as a feature | §13.6 |
 | `attention_dense_grid`/`attention_dense_block` (two structurally different formulas) | two UDDs, one per KDP | §13.5 |
-| `attention_dense_signature` (5 real args, baked shape) | `args_signature`, no computed sources needed | §13.5 |
+| `attention_dense_signature` (5 real args, baked shape) | `args_signature`: 4 tensor-pointer sources plus one `expr`-computed `scale` | §13.5 |
 | catalog coverage (which causal modes this pack ships) | the KDPs' `kernelDescriptors` vectors | §13.4, case C |
 | measured `persistent` tradeoff | KMD field plus distinct `priority` | §13.6 |
 
-The generic launcher runs either KDP's kernel with no SDPA-specific code once its kernel is actually
-compiled ahead of time; decline is handled the same way whether it happens on the matcher's graph-only
-clauses or its `$kernel.*`-referencing clauses.
+The generic launcher runs either KDP's kernel with no SDPA-specific code; decline is handled the same
+way whether it happens on the matcher's graph-only clauses or its `$kernel.*`-referencing clauses.
 
 ### 13.8 What an Author Actually Writes
 
 The example above is the whole system; this is the slice a kernel author touches. Adding one kernel
 to an **existing** engine, the common case, is a single UKD:
 
-1. Build the kernel into a loadable artifact the provider can load ([Section 7](#7-kernel-source)).
-   For `attention_dense` specifically, no day-one `kernel_source.kind` fits today: the kernel is
-   compiled JIT-from-DSL and memoized in-process (`_DENSE_LAUNCHER_CACHE`, keyed by
-   `spec.kernel_name()`, `attention_dense.py:1592-1657`), and nothing under `rocke/` on `develop`
-   ships a checked-in `aot_list.json`, `.co`, or `.hsaco` for it (the AOT content and kpack
-   packaging lived in the now-retired `rocke/library/api/` tree). Ingesting this kernel needs
-   exactly the bridge [Section 9.1](#91-kernel-source-adapters) already names: the build-only
-   rocKE adapter that lowers the DSL to `hsaco` code objects ahead of time. That adapter does not
-   exist yet; this is new build tooling, not a kernel change, and not a new descriptor kind.
-2. Write one UKD: an `id`, a `name`, a `kernel_source` naming that artifact, and a value for each
-   field the engine's KMD declares, distinct from every existing kernel's
-   ([Section 4](#4-descriptor-formats)).
+1. Pick the build values for the instance. For a rocKE family that is one `AttentionDenseSpec`
+   worth of fields: the shape and dtype it bakes, plus the tuning knobs. Nothing is compiled by
+   hand; the build-only rocKE adapter ([Section 9.1](#91-kernel-source-adapters)) runs the AOT
+   build for every UKD in the pack and produces the code object the runtime loads.
+2. Write one UKD: an `id`, a `name`, a `kernel_source` carrying the builder and those build values,
+   and a value for each field the engine's KMD declares, distinct from every existing kernel's
+   ([Section 4](#4-descriptor-formats)). The build values and the metadata describe the same
+   instance in two vocabularies, the builder's and the engine's, and the loader checks the
+   metadata against the KMD.
 3. Add it to a KDP's `kernelDescriptors`, or ship it as a drop-in pack
    ([Section 12](#12-packaging-and-delivery)). **This step alone does not make the kernel the
    default choice.** Under an unchanged KMD, the new UKD is loaded, catalogued, and immediately
@@ -2194,7 +2260,7 @@ defend a matcher, not just fill in metadata. Tooling is aimed squarely at this c
 | A kernel with a different launch ABI or grid-formula shape (the persistent/default split above) | a new UDD, and its own KDP |
 | A kernel with a variant field the schema lacks | a KMD field, additive ([Section 16](#16-risks)) |
 | A new family with its own ranking | a UED, a UHD, and a KMD, plus the pack |
-| Packaging this exact kernel as a real AOT artifact for the first time | new build tooling, not a new descriptor kind |
+| A kernel built from a source kind with no adapter yet | a new kernel-source adapter ([Section 9.1](#91-kernel-source-adapters)), not a new descriptor kind |
 
 ---
 
