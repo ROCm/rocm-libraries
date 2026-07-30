@@ -2029,32 +2029,32 @@ public:
     {
         using lli = long long int;
 
-        lli* d_time;
-        PRIMBENCH_CHECK(hipMalloc(&d_time, sizeof(lli)));
+        lli* d_tick;
+        PRIMBENCH_CHECK(hipMalloc(&d_tick, sizeof(lli)));
 
-        lli h_time_0;
-        read_clock<<<dim3(1), dim3(1)>>>(d_time);
+        lli h_tick_0;
+        read_clock<<<dim3(1), dim3(1)>>>(d_tick);
         PRIMBENCH_CHECK(hipDeviceSynchronize());
-        PRIMBENCH_CHECK(hipMemcpy(&h_time_0, d_time, sizeof(lli), hipMemcpyDeviceToHost));
+        PRIMBENCH_CHECK(hipMemcpy(&h_tick_0, d_tick, sizeof(lli), hipMemcpyDeviceToHost));
         const auto h_curr_time_0 = std::chrono::steady_clock::now();
 
         std::this_thread::sleep_for(std::chrono::milliseconds(1000));
 
-        lli h_time_1;
-        read_clock<<<dim3(1), dim3(1)>>>(d_time);
+        lli h_tick_1;
+        read_clock<<<dim3(1), dim3(1)>>>(d_tick);
         PRIMBENCH_CHECK(hipDeviceSynchronize());
-        PRIMBENCH_CHECK(hipMemcpy(&h_time_1, d_time, sizeof(lli), hipMemcpyDeviceToHost));
+        PRIMBENCH_CHECK(hipMemcpy(&h_tick_1, d_tick, sizeof(lli), hipMemcpyDeviceToHost));
         const auto h_curr_time_1 = std::chrono::steady_clock::now();
 
-        const double elapsed_time
+        PRIMBENCH_CHECK(hipFree(d_tick));
+
+        const double elapsed_time_s
             = std::chrono::duration<double>(h_curr_time_1 - h_curr_time_0).count();
-        const lli ticks = h_time_1 - h_time_0;
+        const lli tot_ticks = h_tick_1 - h_tick_0;
 
-        const auto hz = ticks / elapsed_time;
+        const double hz = static_cast<double>(tot_ticks) / elapsed_time_s;
         // + 0.5 for rounding correctness i.e 9999.7 will get rounded to 9999. 9999.7 + 0.5 will get rounded to 10000
-        const auto k_hz = (hz / 1000) + 0.5;
-
-        PRIMBENCH_CHECK(hipFree(d_time));
+        const double k_hz = (hz / 1000) + 0.5;
 
         return static_cast<lli>(k_hz);
     }
