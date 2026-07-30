@@ -24,16 +24,6 @@ public:
             = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper::fromSerializedBlob(
                 graphBuffer, size);
 
-        // GPU reference does not support runtime pass-by-value scalars; route
-        // any such graph to the CPU reference (which resolves them from the pack).
-        for(const auto& [uid, attr] : graphWrap.getTensorMap())
-        {
-            if(hipdnn_flatbuffers_sdk::utilities::isTensorRuntimePassByValue(attr))
-            {
-                return false;
-            }
-        }
-
         for(uint32_t i = 0; i < graphWrap.nodeCount(); i++)
         {
             auto& node = graphWrap.getNode(i);
@@ -146,13 +136,11 @@ private:
 
         switch(node.attributes_type())
         {
-        case NodeAttrs::PointwiseAttributes:
-            return detail::GpuPointwiseDummySignatureKey(node, tensorMap);
-
         case NodeAttrs::ConvolutionFwdAttributes:
             return detail::GpuConvolutionFwdSignatureKey(node, tensorMap, node.compute_data_type());
 
         // Node types with no GPU plan yet - throw descriptive error
+        case NodeAttrs::PointwiseAttributes:
         case NodeAttrs::BatchnormInferenceAttributes:
         case NodeAttrs::BatchnormInferenceAttributesVarianceExt:
         case NodeAttrs::BatchnormBackwardAttributes:
