@@ -40,7 +40,6 @@
 #if THRUST_HAS_HIP_COMPILER()
 #  include <thrust/system/hip/config.h>
 
-#  include <thrust/detail/libcxx_wrapper/__functional/address_stability.h>
 #  include <thrust/distance.h>
 #  include <thrust/iterator/zip_iterator.h>
 #  include <thrust/system/hip/detail/dispatch.h>
@@ -48,6 +47,7 @@
 #  include <thrust/system/hip/detail/util.h>
 #  include <thrust/zip_function.h>
 
+#  include _THRUST_LIBCXX_INCLUDE(functional)
 #  include _THRUST_STD_INCLUDE(cstdint)
 
 THRUST_NAMESPACE_BEGIN
