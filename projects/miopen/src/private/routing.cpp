@@ -6,6 +6,11 @@
 // MIOPEN_HIPDNN_FORWARDING environment variable, emits the one-time
 // configuration banner, and answers the per-call routing decision by consulting
 // the compile-time forwarding set.
+//
+// The decision logic is split into pure, side-effect-free helpers
+// (ParseForwardingMode, IsInForwardingSet, ResolveRoute) so it can be unit
+// tested directly, and the process-global parts (env read, one-time banner,
+// cached mode) live in GetForwardingMode()/Dispatch().
 
 #include "routing.hpp"
 
@@ -23,24 +28,6 @@ namespace {
 
 const char* const kForwardingEnvVar = "MIOPEN_HIPDNN_FORWARDING";
 
-ForwardingMode ParseForwardingEnv()
-{
-    const char* raw = std::getenv(kForwardingEnvVar);
-    if(raw == nullptr)
-        return ForwardingMode::Disabled;
-
-    std::string value(raw);
-    for(char& c : value)
-        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-
-    if(value == "enabled" || value == "1" || value == "on" || value == "true" || value == "yes")
-        return ForwardingMode::Enabled;
-
-    // Unset, "disabled", and any unrecognized value all resolve to disabled so
-    // that forwarding is never turned on by accident.
-    return ForwardingMode::Disabled;
-}
-
 void EmitBanner(ForwardingMode mode)
 {
     if(mode == ForwardingMode::Enabled)
@@ -57,11 +44,38 @@ void EmitBanner(ForwardingMode mode)
     }
 }
 
-// The compile-time forwarding set (RFC 0001 routing policy): entry points listed
-// here are redirected to hipDNN when forwarding is enabled. Adding an entry point
-// is a one-line change.
+ForwardingMode ParseAndAnnounce()
+{
+    const ForwardingMode mode = ParseForwardingMode(std::getenv(kForwardingEnvVar));
+    EmitBanner(mode);
+    return mode;
+}
+
+} // namespace
+
+ForwardingMode ParseForwardingMode(const char* value)
+{
+    if(value == nullptr)
+        return ForwardingMode::Disabled;
+
+    std::string lowered(value);
+    for(char& c : lowered)
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+
+    if(lowered == "enabled" || lowered == "1" || lowered == "on" || lowered == "true" ||
+       lowered == "yes")
+        return ForwardingMode::Enabled;
+
+    // Unset, "disabled", and any unrecognized value all resolve to disabled so
+    // that forwarding is never turned on by accident.
+    return ForwardingMode::Disabled;
+}
+
 bool IsInForwardingSet(const char* entryPoint)
 {
+    // The compile-time forwarding set (RFC 0001 routing policy): entry points
+    // listed here are redirected to hipDNN when forwarding is enabled. Adding an
+    // entry point is a one-line change.
     for(const char* name : std::initializer_list<const char*>{
             // Add public entry-point names to forward them to hipDNN, e.g.
             // "miopenConvolutionForward".
@@ -73,14 +87,12 @@ bool IsInForwardingSet(const char* entryPoint)
     return false;
 }
 
-ForwardingMode ParseAndAnnounce()
+Route ResolveRoute(ForwardingMode mode, const char* entryPoint)
 {
-    const ForwardingMode mode = ParseForwardingEnv();
-    EmitBanner(mode);
-    return mode;
+    if(mode == ForwardingMode::Enabled && IsInForwardingSet(entryPoint))
+        return Route::Hipdnn;
+    return Route::Miopen;
 }
-
-} // namespace
 
 ForwardingMode GetForwardingMode()
 {
@@ -93,12 +105,7 @@ ForwardingMode GetForwardingMode()
     return mode;
 }
 
-Route Dispatch(const char* entryPoint)
-{
-    if(GetForwardingMode() == ForwardingMode::Enabled && IsInForwardingSet(entryPoint))
-        return Route::Hipdnn;
-    return Route::Miopen;
-}
+Route Dispatch(const char* entryPoint) { return ResolveRoute(GetForwardingMode(), entryPoint); }
 
 } // namespace wrapper
 } // namespace miopen

@@ -106,6 +106,8 @@ function(add_gtest TEST_NAME TEST_CPP)
     # _impl suffix and MIOPEN_LOG_FUNCTION runs inside the renamed definition,
     # so the logged name carries that suffix.
     target_compile_definitions(${TEST_NAME} PRIVATE MIOPEN_ENABLE_HIPDNN_WRAPPER)
+    # wrapper_routing.cpp includes the wrapper's internal routing seam header.
+    target_include_directories(${TEST_NAME} PRIVATE ${PROJECT_SOURCE_DIR}/src/private)
   endif()
 
   add_dependencies(miopen-tests ${TEST_NAME})
@@ -314,6 +316,15 @@ endforeach()
 add_library(miopen_gtest_common STATIC ${SOURCES})
 target_include_directories(miopen_gtest_common PRIVATE ../ ../../src/kernels)
 target_link_libraries(miopen_gtest_common PRIVATE GTest::gtest GTest::gmock MIOpen)
+
+# The routing seam (src/private/routing.cpp) is compiled into libMIOpen.so with
+# hidden visibility, so its symbols are not exported and cannot be linked from a
+# test. Compile it into the test-common library so wrapper_routing.cpp can test
+# the seam directly. Only built when the wrapper (and thus the seam) exists.
+if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
+  target_sources(miopen_gtest_common PRIVATE ${PROJECT_SOURCE_DIR}/src/private/routing.cpp)
+  target_include_directories(miopen_gtest_common PRIVATE ${PROJECT_SOURCE_DIR}/src/private)
+endif()
 if(WIN32)
   # Refer to https://en.cppreference.com/w/cpp/language/types for details.
   target_compile_options(miopen_gtest_common PRIVATE $<BUILD_INTERFACE:$<$<CXX_COMPILER_ID:Clang>:-U__LP64__>>)

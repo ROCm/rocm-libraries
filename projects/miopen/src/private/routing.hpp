@@ -33,13 +33,31 @@ enum class Route
     Hipdnn, // forwarded to hipDNN
 };
 
+// Pure mapping from a raw MIOPEN_HIPDNN_FORWARDING value to a ForwardingMode.
+// value may be null (variable unset). Recognizes (case-insensitively) "enabled",
+// "1", "on", "true", and "yes" as ForwardingMode::Enabled; null, "disabled", and
+// every other value map to ForwardingMode::Disabled so that forwarding is never
+// enabled by accident. Reads no environment, caches nothing, and emits no banner.
+ForwardingMode ParseForwardingMode(const char* value);
+
+// True when entryPoint is in the compile-time forwarding set: the entry points
+// redirected to hipDNN when forwarding is enabled.
+bool IsInForwardingSet(const char* entryPoint);
+
+// Pure routing decision for an already-resolved mode: Route::Hipdnn only when
+// mode is ForwardingMode::Enabled AND entryPoint is in the forwarding set,
+// otherwise Route::Miopen. This is the decision Dispatch() applies on top of the
+// process-wide GetForwardingMode().
+Route ResolveRoute(ForwardingMode mode, const char* entryPoint);
+
 // The process-wide forwarding mode, parsed once from MIOPEN_HIPDNN_FORWARDING on
 // first use and cached for the lifetime of the process. The first call also
 // emits the one-time configuration banner to stderr.
 ForwardingMode GetForwardingMode();
 
 // Routing decision for a single wrapped call. entryPoint is the public function
-// name, e.g. "miopenConvolutionForward". Returns Route::Hipdnn when forwarding is
+// name, e.g. "miopenConvolutionForward". Equivalent to
+// ResolveRoute(GetForwardingMode(), entryPoint): Route::Hipdnn when forwarding is
 // enabled AND entryPoint is in the compile-time forwarding set, otherwise
 // Route::Miopen.
 Route Dispatch(const char* entryPoint);
