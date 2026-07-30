@@ -126,8 +126,8 @@ namespace rocsparse
     }
 
     template <uint32_t BLOCKSIZE, typename I, typename A, typename T>
-    ROCSPARSE_DEVICE_ILF void scale_2d_device(
-        I m, I n, int64_t ld, T value, A* __restrict__ array, rocsparse_order order)
+    ROCSPARSE_DEVICE_ILF void
+        scale_2d_device(I m, I n, int64_t ld, T value, A* __restrict__ array, rocsparse_order order)
     {
         I gid = hipBlockIdx_x * BLOCKSIZE + hipThreadIdx_x;
 
@@ -324,7 +324,7 @@ rocsparse_status rocsparse::scale_2d_array(rocsparse_handle handle,
     {
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
             (rocsparse::scale_2d_kernel<256>),
-            dim3((int64_t(m) * n - 1) / 256 + 1, (batch_count > 65536) ? 65536 : batch_count),
+            dim3((int64_t(m) * n - 1) / 256 + 1, (batch_count > 65535) ? 65535 : batch_count),
             dim3(256),
             0,
             handle->stream,
