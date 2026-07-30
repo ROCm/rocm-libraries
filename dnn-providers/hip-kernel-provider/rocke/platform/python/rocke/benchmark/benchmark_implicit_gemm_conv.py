@@ -31,6 +31,10 @@ Run (wgrad):
       --N 8 --Hi 56 --Wi 56 --C 64 --K 64 --Y 3 --X 3 \\
       --dtype fp16 --top 10
 
+  # Run from bench_cases_conv.json or bench_cases_conv_bwd.json:
+  python benchmark_implicit_gemm_conv.py --json-file bench_cases_conv.json
+  python benchmark_implicit_gemm_conv.py --json-file bench_cases_conv_bwd.json
+
 Shape / dtype parameters mirror bake_off_implicit_gemm.py exactly.
 """
 
@@ -230,6 +234,166 @@ _MIOPEN_DTYPE_MAP = {
 }
 
 
+def parse_json_case(entry: dict):
+    """Parse a single JSON benchmark-case entry into a ``(ConvProblem, dtype)`` tuple.
+
+    Supports entries from bench_cases_conv.json and bench_cases_conv_bwd.json.
+    Fields: N, Cin, Cout, H, W, Kh, Kw, stride (int or [sH,sW]), pad (int or [pH,pW]),
+    dilation (int or [dH,dW]), groups, dtype, layout, Di/D/Kd for 3-D.
+
+    Raises ``ValueError`` for unsupported layouts (NCHW) or unsupported op types.
+    """
+    op = entry.get("op", "conv2d")
+    layout = entry.get("layout", "NHWC").upper()
+
+    if op not in ("conv2d", "conv3d", "conv1d"):
+        raise ValueError(f"op={op!r} is not supported")
+
+    dtype = entry.get("dtype", "fp16")
+    if dtype not in ("fp16", "bf16", "fp32"):
+        raise ValueError(f"dtype={dtype!r} is not supported (only fp16, bf16, fp32)")
+
+    from rocke.instances.common.conv_implicit_gemm import ConvProblem
+
+    def _scalar_or_pair(val, idx_h=0, idx_w=1):
+        if isinstance(val, (list, tuple)):
+            return int(val[idx_h]), int(val[idx_w])
+        return int(val), int(val)
+
+    if op == "conv1d":
+        N = int(entry.get("N", 1))
+        C = int(entry.get("Cin", entry.get("C", 1)))
+        K = int(entry.get("Cout", entry.get("K", 1)))
+        L = int(entry.get("L", 1))
+        Kl = int(entry.get("Kl", 1))
+        stride = int(entry.get("stride", 1))
+        pad = int(entry.get("pad", 0))
+        dilation = int(entry.get("dilation", 1))
+        groups = int(entry.get("groups", 1))
+        problem = ConvProblem(
+            N=N,
+            Hi=1,
+            Wi=L,
+            C=C,
+            K=K,
+            Y=1,
+            X=Kl,
+            sH=1,
+            sW=stride,
+            pH=0,
+            pW=pad,
+            dH=1,
+            dW=dilation,
+            groups=groups,
+        )
+        return problem, dtype
+
+    if op == "conv3d":
+        N = int(entry.get("N", 1))
+        C = int(entry.get("Cin", entry.get("C", 1)))
+        K = int(entry.get("Cout", entry.get("K", 1)))
+        Di = int(entry.get("D", entry.get("Di", 1)))
+        Hi = int(entry.get("H", entry.get("Hi", 1)))
+        Wi = int(entry.get("W", entry.get("Wi", 1)))
+        Kd = int(entry.get("Kd", entry.get("Z", 1)))
+        Kh = int(entry.get("Kh", entry.get("Y", 1)))
+        Kw = int(entry.get("Kw", entry.get("X", 1)))
+        strides = entry.get("strides", entry.get("stride", 1))
+        if isinstance(strides, (list, tuple)):
+            sD, sH, sW = int(strides[0]), int(strides[1]), int(strides[2])
+        else:
+            sD = sH = sW = int(strides)
+        pads_before = entry.get("pads_before", entry.get("pad", 0))
+        if isinstance(pads_before, (list, tuple)):
+            pD, pH, pW = int(pads_before[0]), int(pads_before[1]), int(pads_before[2])
+        else:
+            pD = pH = pW = int(pads_before)
+        dilations = entry.get("dilations", entry.get("dilation", 1))
+        if isinstance(dilations, (list, tuple)):
+            dD, dH, dW = int(dilations[0]), int(dilations[1]), int(dilations[2])
+        else:
+            dD = dH = dW = int(dilations)
+        groups = int(entry.get("groups", 1))
+        problem = ConvProblem(
+            N=N,
+            Di=Di,
+            Hi=Hi,
+            Wi=Wi,
+            C=C,
+            K=K,
+            Z=Kd,
+            Y=Kh,
+            X=Kw,
+            sD=sD,
+            sH=sH,
+            sW=sW,
+            pD=pD,
+            pH=pH,
+            pW=pW,
+            dD=dD,
+            dH=dH,
+            dW=dW,
+            groups=groups,
+        )
+        return problem, dtype
+
+    # conv2d
+    if layout not in ("NHWC", "NWC"):
+        raise ValueError(
+            f"layout={layout!r} is not supported; only NHWC/NWC inputs are accepted"
+        )
+    N = int(entry.get("N", 1))
+    C = int(entry.get("Cin", entry.get("C", 1)))
+    K = int(entry.get("Cout", entry.get("K", 1)))
+    Hi = int(entry.get("H", entry.get("Hi", 1)))
+    Wi = int(entry.get("W", entry.get("Wi", 1)))
+    Kh = int(entry.get("Kh", entry.get("Y", 1)))
+    Kw = int(entry.get("Kw", entry.get("X", 1)))
+
+    stride = entry.get("stride", 1)
+    sH, sW = _scalar_or_pair(stride)
+
+    # Support both symmetric pad and pads_before/pads_after
+    if "pads_before" in entry:
+        pads_before = entry["pads_before"]
+        pH = (
+            int(pads_before[0])
+            if isinstance(pads_before, (list, tuple))
+            else int(pads_before)
+        )
+        pW = (
+            int(pads_before[1])
+            if isinstance(pads_before, (list, tuple))
+            else int(pads_before)
+        )
+    else:
+        pad = entry.get("pad", 0)
+        pH, pW = _scalar_or_pair(pad)
+
+    dilation = entry.get("dilation", 1)
+    dH, dW = _scalar_or_pair(dilation)
+
+    groups = int(entry.get("groups", 1))
+
+    problem = ConvProblem(
+        N=N,
+        Hi=Hi,
+        Wi=Wi,
+        C=C,
+        K=K,
+        Y=Kh,
+        X=Kw,
+        sH=sH,
+        sW=sW,
+        pH=pH,
+        pW=pW,
+        dH=dH,
+        dW=dW,
+        groups=groups,
+    )
+    return problem, dtype
+
+
 def parse_miopen_cmd(cmd: str):
     """Parse a MIOpenDriver command string into a ``(ConvProblem, dtype)`` tuple.
 
@@ -323,6 +487,81 @@ def parse_miopen_cmd(cmd: str):
         groups=miopen_args.groups,
     )
     return problem, dtype
+
+
+# ---------------------------------------------------------------------------
+# CK Profiler comparison
+# ---------------------------------------------------------------------------
+
+_CK_DTYPE_STR = {"fp32": "fp32", "fp16": "fp16", "bf16": "bfp16"}
+
+
+def _run_ckprofiler(
+    problem, dtype: str, ckprofiler: str, converter_script: str, forw: int, verify: int
+) -> None:
+    """Delegate to convert_miopen_driver_to_profiler.py for the given ConvProblem.
+
+    Builds a synthetic args namespace that mirrors what the converter script's
+    argparse produces, then calls its init_const_args / run_ck_profiler functions
+    directly — no logic is duplicated here.
+
+    ``forw`` follows MIOpenDriver -F convention:
+      0 fwd+bwd_data+bwd_weight   1 fwd   2 bwd_data   4 bwd_weight
+      3 fwd+bwd_data   5 fwd+bwd_weight   6 bwd_data+bwd_weight
+    """
+    import importlib.util
+    import types
+
+    ck_dtype_str = _CK_DTYPE_STR.get(dtype)
+    if ck_dtype_str is None:
+        print(
+            f"[ckprofiler] dtype={dtype!r} is not supported by ckProfiler; skipping",
+            file=sys.stderr,
+        )
+        return
+
+    # Load the converter script as a module without executing its __main__ block.
+    spec = importlib.util.spec_from_file_location("_ck_converter", converter_script)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    p = problem
+
+    # Build a namespace that matches the attributes the converter's argparse produces.
+    args = types.SimpleNamespace(
+        ck_profiler_cmd=ckprofiler,
+        data_type=ck_dtype_str,
+        in_layout="NHWC" if not p.is_3d else "NDHWC",
+        spatial_dim=3 if p.is_3d else 2,
+        batchsize=p.N,
+        in_channels=p.C,
+        out_channels=p.K,
+        group_count=p.groups,
+        in_h=p.Hi,
+        in_w=p.Wi,
+        fil_h=p.Y,
+        fil_w=p.X,
+        conv_stride_h=p.sH,
+        conv_stride_w=p.sW,
+        pad_h=p.pH,
+        pad_w=p.pW,
+        dilation_h=p.dH,
+        dilation_w=p.dW,
+        # 3-D fields
+        in_d=p.Di if p.is_3d else 1,
+        fil_d=p.Z if p.is_3d else 1,
+        conv_stride_d=p.sD if p.is_3d else 1,
+        pad_d=p.pD if p.is_3d else 0,
+        dilation_d=p.dD if p.is_3d else 1,
+        forw=forw,
+        verify=verify,
+        time=1,
+        instance=-1,
+        list_instances=False,
+    )
+
+    mod.init_const_args(args)
+    mod.run_ck_profiler(args)
 
 
 # ---------------------------------------------------------------------------
@@ -425,6 +664,27 @@ def main() -> int:
         ).replace("%(auto)s", str(list(_SPLIT_K_AUTO))),
     )
 
+    ck_grp = parser.add_argument_group(
+        "ckProfiler comparison",
+        "Run ckProfiler on the same conv problem(s) for side-by-side comparison "
+        "via convert_miopen_driver_to_profiler.py. "
+        "Uses --direction and --verify to control direction and verification. "
+        "Requires a built ckProfiler binary.",
+    )
+    ck_grp.add_argument(
+        "--ckprofiler",
+        default=None,
+        metavar="PATH",
+        help="Path to the ckProfiler binary. When set, ckProfiler is run for each case "
+        "before the rocke sweep.",
+    )
+    ck_grp.add_argument(
+        "--ckprofiler-script",
+        default=None,
+        metavar="PATH",
+        help="Path to convert_miopen_driver_to_profiler.py (default: auto-detected from CK repo).",
+    )
+
     miopen_grp = parser.add_argument_group(
         "MIOpen input",
         "Load the conv problem from a MIOpenDriver command instead of explicit shape flags. "
@@ -445,6 +705,37 @@ def main() -> int:
         metavar="FILE",
         help="Path to a file containing one MIOpenDriver command per line; "
         "the benchmark is run once per line (blank lines and # comments ignored).",
+    )
+
+    json_grp = parser.add_argument_group(
+        "JSON input",
+        "Load benchmark cases from a JSON file (bench_cases_conv.json or "
+        "bench_cases_conv_bwd.json). Each entry in the array becomes one sweep. "
+        "When set, --dtype / shape flags and MIOpen flags are ignored.",
+    )
+    json_grp.add_argument(
+        "--json-file",
+        default=None,
+        metavar="FILE",
+        help="Path to a JSON file containing an array of benchmark case objects, "
+        "e.g. bench_cases_conv.json or bench_cases_conv_bwd.json. "
+        "Supported fields: N, Cin, Cout, H, W, Kh, Kw, stride, pad, dilation, "
+        "groups, dtype, layout, op (conv2d/conv3d/conv1d). "
+        "Entries with unsupported dtypes or layouts are skipped with a warning.",
+    )
+    json_grp.add_argument(
+        "--json-filter-suite",
+        default=None,
+        metavar="SUITE",
+        help='Only run JSON entries whose "suite" field matches SUITE '
+        '(e.g. "regular", "extended").',
+    )
+    json_grp.add_argument(
+        "--json-filter-priority",
+        default=None,
+        metavar="PRIORITY",
+        help='Only run JSON entries whose "priority" field matches PRIORITY '
+        '(e.g. "P0", "P1").',
     )
 
     conv = parser.add_argument_group("ConvProblem", "convolution shape parameters")
@@ -476,7 +767,7 @@ def main() -> int:
 
     args = parser.parse_args()
 
-    if args.miopen_cmd is None and args.miopen_file is None:
+    if args.miopen_cmd is None and args.miopen_file is None and args.json_file is None:
         if args.Di is not None and args.Z is None:
             print("--Z (filter depth) is required when --Di is set", file=sys.stderr)
             return 2
@@ -513,7 +804,37 @@ def main() -> int:
 
     # Build the list of (problem, dtype) cases to sweep.
     cases: list  # List[Tuple[ConvProblem, str]]
-    if args.miopen_file is not None:
+    if args.json_file is not None:
+        import json
+
+        path = args.json_file
+        with open(path) as f:
+            entries = json.load(f)
+        if not isinstance(entries, list):
+            print(f"error: {path}: expected a JSON array at top level", file=sys.stderr)
+            return 2
+        cases = []
+        for idx, entry in enumerate(entries):
+            case_id = entry.get("case_id", f"#{idx + 1}")
+            if args.json_filter_suite is not None:
+                if entry.get("suite") != args.json_filter_suite:
+                    continue
+            if args.json_filter_priority is not None:
+                if entry.get("priority") != args.json_filter_priority:
+                    continue
+            try:
+                prob, dt = parse_json_case(entry)
+                cases.append((prob, dt))
+            except ValueError as e:
+                print(f"[warn] {path} case {case_id}: skipping — {e}", file=sys.stderr)
+        if not cases:
+            print(
+                f"error: {path}: no valid cases found "
+                f"(check --json-filter-suite / --json-filter-priority)",
+                file=sys.stderr,
+            )
+            return 2
+    elif args.miopen_file is not None:
         path = args.miopen_file
         lines = open(path).readlines()
         cases = []
@@ -563,6 +884,17 @@ def main() -> int:
                 flush=True,
             )
             print(f"{'#'*72}", flush=True)
+
+        if args.ckprofiler is not None:
+            _ck_forw = {"fwd": 1, "wgrad": 4}[args.direction]
+            _run_ckprofiler(
+                problem=problem,
+                dtype=dtype,
+                ckprofiler=args.ckprofiler,
+                converter_script=args.ckprofiler_script,
+                forw=_ck_forw,
+                verify=int(args.verify),
+            )
 
         _common = dict(
             args=args,
