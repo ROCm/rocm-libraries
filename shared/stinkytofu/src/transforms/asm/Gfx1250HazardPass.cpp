@@ -191,6 +191,101 @@ class Gfx1250HazardPass : public Pass {
         state.clear();
     }
 
+    // UTC translates virtual addresses to physical addresses. During page
+    // migration, an unavailable translation may stall or return XNACK-Retry.
+    // Retry lets the wave keep issuing instructions before earlier memory
+    // translations finish, then replays the faulting instruction. This fix
+    // preserves replay sources and inserts required drains.
+    static void applySingleGroupXnackReplayFix(BasicBlock& bb, BasicBlock::iterator it,
+                                               AsmIRBuilder& builder, GfxArchID archId,
+                                               GroupState& state) {
+        auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+        if (inst == nullptr || isPseudoInst(inst)) return;
+
+        if (isFullXcntDrain(*inst)) {
+            state.clear();
+            return;
+        }
+
+        if (isForeverSleep(*inst)) {
+            if (state.hasMemory) insertXcntDrain(builder, archId, inst, state);
+            // s_sleep is a non-memory single-group boundary.
+            state.clear();
+            return;
+        }
+
+        if (isScalarPrefetch(*inst)) {
+            if (state.hasMemory) insertXcntDrain(builder, archId, inst, state);
+            state.clear();
+            return;
+        }
+
+        if (inst->getUnifiedOpcode() == GFX::s_set_vgpr_msb) {
+            if (!isImmediateMemorySuccessor(it, bb, kReplayMode) && state.hasMemory)
+                insertXcntDrain(builder, archId, inst, state);
+            // s_set_vgpr_msb is a non-memory single-group boundary.
+            state.clear();
+            return;
+        }
+
+        const MemoryGroupKind kind = getMemoryGroupKind(*inst, kReplayMode);
+        if (kind == MemoryGroupKind::None) {
+            // In single-group mode hardware drains XCNT before every real
+            // non-memory instruction, including control flow.
+            state.clear();
+            return;
+        }
+
+        // Single-group hardware drains XCNT at an SMEM/VMEM/Other type
+        // switch, so no replay sources survive into the new group.
+        //
+        // Note: Multi-group only fences VMEM <-> SMEM and needs cross-group
+        //       dataflow analysis (Future TODO if frontend enables
+        //       Multi-group mode).
+        if (state.hasMemory && state.kind != kind) state.clear();
+
+        const bool atomic = isAtomic(*inst);
+        if (atomic && state.hasNonAtomic) insertXcntDrain(builder, archId, inst, state);
+
+        // Single-group replay-source rules:
+        //
+        // 1. Global / Buffer / Scratch / Image:
+        //    (a) in order; an op may overwrite its own or a peer's source.
+        // 2. FLAT:
+        //    (a) must not overwrite a group source;
+        //    (b) a single instruction FLAT group may overwrite its own source.
+        // 3. SMEM:
+        //    (a) no instruction may overwrite any group source.
+        // 4. Atomic / RMW:
+        //    (a) drain before the first atomic after non-atomic memory;
+        //    (b) consecutive atomics need no intervening drain due to the
+        //        XNACK scoreboard.
+
+        // Apply rule 3:
+        if (kind == MemoryGroupKind::SMEM && hasSelfDestSourceOverlap(*inst))
+            warnUnrepairableSmemSelfOverlap(bb, *inst);
+
+        if (kind == MemoryGroupKind::SMEM && state.hasMemory &&
+            hasDestSourceOverlap(*inst, state.sources)) {
+            insertXcntDrain(builder, archId, inst, state);
+        }
+
+        // Rule 2: a FLAT must not clobber a source in a multi-op group.
+        const bool violatesRule2 =
+            kind == MemoryGroupKind::VMEM && isFlat(*inst) && violatesFlatSourceRule(*inst, state);
+
+        // Rule 4(b): do not drain between consecutive atomics.
+        const bool exemptByRule4b = atomic && state.hasMemory && !state.hasNonAtomic;
+        if (violatesRule2 && !exemptByRule4b) {
+            insertXcntDrain(builder, archId, inst, state);
+        }
+
+        state.kind = kind;
+        state.hasMemory = true;
+        state.hasNonAtomic |= !atomic;
+        addSources(state, *inst);
+    }
+
     static void runOnFunction(Function& func, GfxArchID archId) {
         GroupState state;
         BasicBlock* previous = nullptr;
@@ -203,92 +298,7 @@ class Gfx1250HazardPass : public Pass {
 
             AsmIRBuilder builder(bb, archId);
             for (auto it = bb.begin(); it != bb.end(); ++it) {
-                auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
-                if (inst == nullptr || isPseudoInst(inst)) continue;
-
-                if (isFullXcntDrain(*inst)) {
-                    state.clear();
-                    continue;
-                }
-
-                if (isForeverSleep(*inst)) {
-                    if (state.hasMemory) insertXcntDrain(builder, archId, inst, state);
-                    // s_sleep is a non-memory single-group boundary.
-                    state.clear();
-                    continue;
-                }
-
-                if (isScalarPrefetch(*inst)) {
-                    if (state.hasMemory) insertXcntDrain(builder, archId, inst, state);
-                    state.clear();
-                    continue;
-                }
-
-                if (inst->getUnifiedOpcode() == GFX::s_set_vgpr_msb) {
-                    if (!isImmediateMemorySuccessor(it, bb, kReplayMode) && state.hasMemory)
-                        insertXcntDrain(builder, archId, inst, state);
-                    // s_set_vgpr_msb is a non-memory single-group boundary.
-                    state.clear();
-                    continue;
-                }
-
-                const MemoryGroupKind kind = getMemoryGroupKind(*inst, kReplayMode);
-                if (kind == MemoryGroupKind::None) {
-                    // In single-group mode hardware drains XCNT before every
-                    // real non-memory instruction, including control flow.
-                    state.clear();
-                    continue;
-                }
-
-                // Single-group hardware drains XCNT at an SMEM/VMEM/Other
-                // type switch, so no replay sources survive into the new
-                // group.
-                //
-                // Note: Multi-group only fences VMEM <-> SMEM and needs
-                //       cross-group dataflow analysis (Future TODO if frontend
-                //       enables Multi-group mode).
-                if (state.hasMemory && state.kind != kind) state.clear();
-
-                const bool atomic = isAtomic(*inst);
-                if (atomic && state.hasNonAtomic) insertXcntDrain(builder, archId, inst, state);
-
-                // Single-group replay-source rules:
-                //
-                // 1. Global / Buffer / Scratch / Image:
-                //    (a) in order; an op may overwrite its own or a peer's source.
-                // 2. FLAT:
-                //    (a) must not overwrite a group source;
-                //    (b) a single instruction FLAT group may overwrite its own source.
-                // 3. SMEM:
-                //    (a) no instruction may overwrite any group source.
-                // 4. Atomic / RMW:
-                //    (a) drain before the first atomic after non-atomic memory;
-                //    (b) consecutive atomics need no intervening drain due to the
-                //        XNACK scoreboard.
-
-                // Apply rule 3:
-                if (kind == MemoryGroupKind::SMEM && hasSelfDestSourceOverlap(*inst))
-                    warnUnrepairableSmemSelfOverlap(bb, *inst);
-
-                if (kind == MemoryGroupKind::SMEM && state.hasMemory &&
-                    hasDestSourceOverlap(*inst, state.sources)) {
-                    insertXcntDrain(builder, archId, inst, state);
-                }
-
-                // Rule 2: a FLAT must not clobber a source in a multi-op group.
-                const bool violatesRule2 = kind == MemoryGroupKind::VMEM && isFlat(*inst) &&
-                                           violatesFlatSourceRule(*inst, state);
-
-                // Rule 4(b): do not drain between consecutive atomics.
-                const bool exemptByRule4b = atomic && state.hasMemory && !state.hasNonAtomic;
-                if (violatesRule2 && !exemptByRule4b) {
-                    insertXcntDrain(builder, archId, inst, state);
-                }
-
-                state.kind = kind;
-                state.hasMemory = true;
-                state.hasNonAtomic |= !atomic;
-                addSources(state, *inst);
+                applySingleGroupXnackReplayFix(bb, it, builder, archId, state);
             }
             previous = &bb;
         }
