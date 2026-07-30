@@ -412,8 +412,8 @@ namespace rocsparse
     // Do the final block reduction of the block reduction buffers back into global memory
     template <unsigned int BLOCKSIZE, typename I, typename J, typename C, typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
-    void csrmmnn_general_block_reduce(I nblocks,
-                                      int64_t         batch_count,
+    void csrmmnn_general_block_reduce(I       nblocks,
+                                      int64_t batch_count,
                                       const J* __restrict__ row_block_red,
                                       const T* __restrict__ val_block_red,
                                       C*              dense_C,

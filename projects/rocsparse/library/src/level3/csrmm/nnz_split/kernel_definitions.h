@@ -37,26 +37,26 @@ namespace rocsparse
               typename C,
               typename T>
     __launch_bounds__(BLOCKSIZE) __global__
-        void csrmmnn_nnz_split_main_kernel(bool conj_A,
-                                           bool conj_B,
-                                           J    ncol,
-                                           J    m,
-                                           J    n,
-                                           J    k,
-                                           I    nnz,
-                                           int64_t              batch_count,
+        void csrmmnn_nnz_split_main_kernel(bool    conj_A,
+                                           bool    conj_B,
+                                           J       ncol,
+                                           J       m,
+                                           J       n,
+                                           J       k,
+                                           I       nnz,
+                                           int64_t batch_count,
                                            ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
                                            J* __restrict__ row_block_red,
                                            T* __restrict__ val_block_red,
                                            const J* __restrict__ row_limits,
-                                           int64_t              offsets_batch_stride_A,
-                                           int64_t              columns_values_batch_stride_A,
+                                           int64_t offsets_batch_stride_A,
+                                           int64_t columns_values_batch_stride_A,
                                            const I* __restrict__ csr_row_ptr,
                                            const J* __restrict__ csr_col_ind,
                                            const A* __restrict__ csr_val,
                                            const B* __restrict__ dense_B,
                                            int64_t ldb,
-                                           int64_t              batch_stride_B,
+                                           int64_t batch_stride_B,
                                            ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, beta),
                                            C* __restrict__ dense_C,
                                            int64_t              ldc,
@@ -119,26 +119,26 @@ namespace rocsparse
               typename C,
               typename T>
     __launch_bounds__(BLOCKSIZE) __global__
-        void csrmmnn_nnz_split_remainder_kernel(bool conj_A,
-                                                bool conj_B,
-                                                J    offset,
-                                                J    m,
-                                                J    n,
-                                                J    k,
-                                                I    nnz,
-                                                int64_t              batch_count,
+        void csrmmnn_nnz_split_remainder_kernel(bool    conj_A,
+                                                bool    conj_B,
+                                                J       offset,
+                                                J       m,
+                                                J       n,
+                                                J       k,
+                                                I       nnz,
+                                                int64_t batch_count,
                                                 ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
                                                 J* __restrict__ row_block_red,
                                                 T* __restrict__ val_block_red,
                                                 const J* __restrict__ row_limits,
-                                                int64_t              offsets_batch_stride_A,
-                                                int64_t              columns_values_batch_stride_A,
+                                                int64_t offsets_batch_stride_A,
+                                                int64_t columns_values_batch_stride_A,
                                                 const I* __restrict__ csr_row_ptr,
                                                 const J* __restrict__ csr_col_ind,
                                                 const A* __restrict__ csr_val,
                                                 const B* __restrict__ dense_B,
                                                 int64_t ldb,
-                                                int64_t              batch_stride_B,
+                                                int64_t batch_stride_B,
                                                 ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, beta),
                                                 C* __restrict__ dense_C,
                                                 int64_t              ldc,
@@ -197,24 +197,24 @@ namespace rocsparse
               typename B,
               typename C>
     __launch_bounds__(BLOCKSIZE) __global__
-        void csrmmnt_nnz_split_main_kernel(bool conj_A,
-                                           bool conj_B,
-                                           J    ncol,
-                                           J    m,
-                                           J    n,
-                                           J    k,
-                                           I    nnz,
-                                           int64_t              batch_count,
+        void csrmmnt_nnz_split_main_kernel(bool    conj_A,
+                                           bool    conj_B,
+                                           J       ncol,
+                                           J       m,
+                                           J       n,
+                                           J       k,
+                                           I       nnz,
+                                           int64_t batch_count,
                                            ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
                                            const J* __restrict__ row_limits,
-                                           int64_t              offsets_batch_stride_A,
-                                           int64_t              columns_values_batch_stride_A,
+                                           int64_t offsets_batch_stride_A,
+                                           int64_t columns_values_batch_stride_A,
                                            const I* __restrict__ csr_row_ptr,
                                            const J* __restrict__ csr_col_ind,
                                            const A* __restrict__ csr_val,
                                            const B* __restrict__ dense_B,
                                            int64_t ldb,
-                                           int64_t              batch_stride_B,
+                                           int64_t batch_stride_B,
                                            C* __restrict__ dense_C,
                                            int64_t              ldc,
                                            int64_t              batch_stride_C,
@@ -259,24 +259,24 @@ namespace rocsparse
               typename B,
               typename C>
     __launch_bounds__(BLOCKSIZE) __global__
-        void csrmmnt_nnz_split_remainder_kernel(bool conj_A,
-                                                bool conj_B,
-                                                J    offset,
-                                                J    m,
-                                                J    n,
-                                                J    k,
-                                                I    nnz,
-                                                int64_t              batch_count,
+        void csrmmnt_nnz_split_remainder_kernel(bool    conj_A,
+                                                bool    conj_B,
+                                                J       offset,
+                                                J       m,
+                                                J       n,
+                                                J       k,
+                                                I       nnz,
+                                                int64_t batch_count,
                                                 ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
                                                 const J* __restrict__ row_limits,
-                                                int64_t              offsets_batch_stride_A,
-                                                int64_t              columns_values_batch_stride_A,
+                                                int64_t offsets_batch_stride_A,
+                                                int64_t columns_values_batch_stride_A,
                                                 const I* __restrict__ csr_row_ptr,
                                                 const J* __restrict__ csr_col_ind,
                                                 const A* __restrict__ csr_val,
                                                 const B* __restrict__ dense_B,
                                                 int64_t ldb,
-                                                int64_t              batch_stride_B,
+                                                int64_t batch_stride_B,
                                                 C* __restrict__ dense_C,
                                                 int64_t              ldc,
                                                 int64_t              batch_stride_C,
@@ -315,26 +315,26 @@ namespace rocsparse
 #define CSRMMNN_NNZ_SPLIT_MAIN_KERNEL(T, I, J, A, B, C, BLOCKSIZE, WFSIZE) \
     template __launch_bounds__(BLOCKSIZE) __global__ void                  \
         rocsparse::csrmmnn_nnz_split_main_kernel<BLOCKSIZE, WFSIZE>(       \
-            bool conj_A,                                                   \
-            bool conj_B,                                                   \
-            J    ncol,                                                     \
-            J    m,                                                        \
-            J    n,                                                        \
-            J    k,                                                        \
-            I    nnz,                                                      \
-            int64_t              batch_count,                              \
+            bool    conj_A,                                                \
+            bool    conj_B,                                                \
+            J       ncol,                                                  \
+            J       m,                                                     \
+            J       n,                                                     \
+            J       k,                                                     \
+            I       nnz,                                                   \
+            int64_t batch_count,                                           \
             ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),                 \
             J* __restrict__ row_block_red,                                 \
             T* __restrict__ val_block_red,                                 \
             const J* __restrict__ row_limits,                              \
-            int64_t              offsets_batch_stride_A,                   \
-            int64_t              columns_values_batch_stride_A,            \
+            int64_t offsets_batch_stride_A,                                \
+            int64_t columns_values_batch_stride_A,                         \
             const I* __restrict__ csr_row_ptr,                             \
             const J* __restrict__ csr_col_ind,                             \
             const A* __restrict__ csr_val,                                 \
             const B* __restrict__ dense_B,                                 \
             int64_t ldb,                                                   \
-            int64_t              batch_stride_B,                           \
+            int64_t batch_stride_B,                                        \
             ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, beta),                  \
             C* __restrict__ dense_C,                                       \
             int64_t              ldc,                                      \
@@ -346,26 +346,26 @@ namespace rocsparse
 #define CSRMMNN_NNZ_SPLIT_REMAINDER_KERNEL(T, I, J, A, B, C, BLOCKSIZE, WFSIZE) \
     template __launch_bounds__(BLOCKSIZE) __global__ void                       \
         rocsparse::csrmmnn_nnz_split_remainder_kernel<BLOCKSIZE, WFSIZE>(       \
-            bool conj_A,                                                        \
-            bool conj_B,                                                        \
-            J    offset,                                                        \
-            J    m,                                                             \
-            J    n,                                                             \
-            J    k,                                                             \
-            I    nnz,                                                           \
-            int64_t              batch_count,                                   \
+            bool    conj_A,                                                     \
+            bool    conj_B,                                                     \
+            J       offset,                                                     \
+            J       m,                                                          \
+            J       n,                                                          \
+            J       k,                                                          \
+            I       nnz,                                                        \
+            int64_t batch_count,                                                \
             ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),                      \
             J* __restrict__ row_block_red,                                      \
             T* __restrict__ val_block_red,                                      \
             const J* __restrict__ row_limits,                                   \
-            int64_t              offsets_batch_stride_A,                        \
-            int64_t              columns_values_batch_stride_A,                 \
+            int64_t offsets_batch_stride_A,                                     \
+            int64_t columns_values_batch_stride_A,                              \
             const I* __restrict__ csr_row_ptr,                                  \
             const J* __restrict__ csr_col_ind,                                  \
             const A* __restrict__ csr_val,                                      \
             const B* __restrict__ dense_B,                                      \
             int64_t ldb,                                                        \
-            int64_t              batch_stride_B,                                \
+            int64_t batch_stride_B,                                             \
             ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, beta),                       \
             C* __restrict__ dense_C,                                            \
             int64_t              ldc,                                           \
@@ -377,24 +377,24 @@ namespace rocsparse
 #define CSRMMNT_NNZ_SPLIT_MAIN_KERNEL(T, I, J, A, B, C, BLOCKSIZE, WFSIZE, LOOPS) \
     template __launch_bounds__(BLOCKSIZE) __global__ void                         \
         rocsparse::csrmmnt_nnz_split_main_kernel<BLOCKSIZE, WFSIZE, LOOPS>(       \
-            bool conj_A,                                                          \
-            bool conj_B,                                                          \
-            J    ncol,                                                            \
-            J    m,                                                               \
-            J    n,                                                               \
-            J    k,                                                               \
-            I    nnz,                                                             \
-            int64_t              batch_count,                                     \
+            bool    conj_A,                                                       \
+            bool    conj_B,                                                       \
+            J       ncol,                                                         \
+            J       m,                                                            \
+            J       n,                                                            \
+            J       k,                                                            \
+            I       nnz,                                                          \
+            int64_t batch_count,                                                  \
             ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),                        \
             const J* __restrict__ row_limits,                                     \
-            int64_t              offsets_batch_stride_A,                          \
-            int64_t              columns_values_batch_stride_A,                   \
+            int64_t offsets_batch_stride_A,                                       \
+            int64_t columns_values_batch_stride_A,                                \
             const I* __restrict__ csr_row_ptr,                                    \
             const J* __restrict__ csr_col_ind,                                    \
             const A* __restrict__ csr_val,                                        \
             const B* __restrict__ dense_B,                                        \
             int64_t ldb,                                                          \
-            int64_t              batch_stride_B,                                  \
+            int64_t batch_stride_B,                                               \
             C* __restrict__ dense_C,                                              \
             int64_t              ldc,                                             \
             int64_t              batch_stride_C,                                  \
@@ -405,24 +405,24 @@ namespace rocsparse
 #define CSRMMNT_NNZ_SPLIT_REMAINDER_KERNEL(T, I, J, A, B, C, BLOCKSIZE, WFSIZE) \
     template __launch_bounds__(BLOCKSIZE) __global__ void                       \
         rocsparse::csrmmnt_nnz_split_remainder_kernel<BLOCKSIZE, WFSIZE>(       \
-            bool conj_A,                                                        \
-            bool conj_B,                                                        \
-            J    offset,                                                        \
-            J    m,                                                             \
-            J    n,                                                             \
-            J    k,                                                             \
-            I    nnz,                                                           \
-            int64_t              batch_count,                                   \
+            bool    conj_A,                                                     \
+            bool    conj_B,                                                     \
+            J       offset,                                                     \
+            J       m,                                                          \
+            J       n,                                                          \
+            J       k,                                                          \
+            I       nnz,                                                        \
+            int64_t batch_count,                                                \
             ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),                      \
             const J* __restrict__ row_limits,                                   \
-            int64_t              offsets_batch_stride_A,                        \
-            int64_t              columns_values_batch_stride_A,                 \
+            int64_t offsets_batch_stride_A,                                     \
+            int64_t columns_values_batch_stride_A,                              \
             const I* __restrict__ csr_row_ptr,                                  \
             const J* __restrict__ csr_col_ind,                                  \
             const A* __restrict__ csr_val,                                      \
             const B* __restrict__ dense_B,                                      \
             int64_t ldb,                                                        \
-            int64_t              batch_stride_B,                                \
+            int64_t batch_stride_B,                                             \
             C* __restrict__ dense_C,                                            \
             int64_t              ldc,                                           \
             int64_t              batch_stride_C,                                \
