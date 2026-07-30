@@ -2975,9 +2975,49 @@ class GlobalWriteBatchWriter:
     pendingInc = None
     prevN = -1
 
+    # SubtileBpermutePipelining (quest): depth-2 double-buffered transpose pipeline.
+    #
+    # The single-buffer path fully exposes each group's ds_bpermute LDS round-trip
+    # (s_waitcnt lgkmcnt(0), ~50-70 cyc/group).  Here we rotate the 4-VGPR pack buffer
+    # and the address scratch across 2 copies so that, in steady state, we ISSUE group
+    # N+1 (pack + ds_bpermute) BEFORE we COMMIT group N (wait + permlane + store).
+    # Group N's wait is then hidden behind N+1's issue, and the wait drains only to
+    # dscnt=4 (N+1's four ds_bpermute still in flight) instead of 0.
+    #
+    # Buffer 0 reuses the pre-allocated cvtVgprStruct scratch (also used by the guarded
+    # boundary body and scalar stores, which are mutually exclusive with this interior
+    # body at runtime).  Buffer 1 is drawn from the STORE-phase dead VGPR pool.
+    pipePack1 = self.parentWriter.vgprPool.checkOutAligned(4, 2, tag="subtilePipePack1")
+    pipeAddr1 = self.parentWriter.vgprPool.checkOut(1, tag="subtilePipeAddr1")
+    packBuf = [self.cvtVgprStruct.vgprBf16Temp, pipePack1]
+    addrBuf = [self.cvtVgprStruct.vgprAddrScratch, pipeAddr1]
+    pipeK = 0
+    pending = None  # (packVgpr, addrVgpr, globalOffset, tt0) issued but not yet committed
+
+    def commitPending(dscnt):
+      nonlocal pending
+      if pending is not None:
+        mod.add(self._emitPairedStoreCommit(pending[0], pending[1], pending[2], pending[3], dscnt))
+        pending = None
+
+    def issuePaired(pairAddrCalc, sumIdx0, sumIdx1, tt0):
+      nonlocal pipeK, pending
+      buf = pipeK % 2
+      issueMod, globalOffset = self._emitPairedStoreIssue(packBuf[buf], addrBuf[buf],
+                                                          pairAddrCalc, sumIdx0, sumIdx1, prefixOffset, tt0)
+      mod.add(issueMod)
+      # Commit the group issued on the previous iteration: its ds_bpermute overlapped
+      # this issue.  Leave dscnt=4 (this group's four ds_bpermute) still in flight.
+      commitPending(dscnt=4)
+      pending = (packBuf[buf], addrBuf[buf], globalOffset, tt0)
+      pipeK += 1
+
     def flushAtTransition(blockIdxN):
       nonlocal pendingInc, prevN
       if nGuardSet and blockIdxN != prevN:
+        # Drain the pipeline before the SRD row increment: deferred stores use the
+        # current SrdD, so no store may cross the increment.
+        commitPending(dscnt=0)
         if pendingInc is not None:
           mod.add(pendingInc)
           pendingInc = None
@@ -2997,10 +3037,11 @@ class GlobalWriteBatchWriter:
           partnerAddrCalc = self.ss.elementAddr[partnerElementIdx]
           sumIdx0 = self.ss.elementSumIdx[partnerElementIdx]
           sumIdx1 = self.ss.elementSumIdx[elementIdx]
-          mod.add(self._emit16bitSubtilePairedStore(partnerAddrCalc, sumIdx0, sumIdx1,
-                    prefixOffset, tt0 - 1, blockIdxM=tt0 - 1, blockIdxN=blockIdxN, interior=True))
+          issuePaired(partnerAddrCalc, sumIdx0, sumIdx1, tt0 - 1)
         else:
           flushAtTransition(blockIdxN)
+          # Scalar store reuses buffer 0 (cvtVgprStruct scratch); drain the pipeline first.
+          commitPending(dscnt=0)
           sumIdx0 = self.ss.elementSumIdx[elementIdx]
           mod.add(self._emit16bitSubtileScalarStore(addrCalc, sumIdx0, prefixOffset, tt0,
                     blockIdxM=tt0, blockIdxN=blockIdxN, interior=True))
@@ -3013,11 +3054,17 @@ class GlobalWriteBatchWriter:
                          self.batchElements[partnerElementIdx][1] == tt0 + 1)
         if not partnerExists:
           flushAtTransition(blockIdxN)
+          commitPending(dscnt=0)
           sumIdx0 = self.ss.elementSumIdx[elementIdx]
           mod.add(self._emit16bitSubtileScalarStore(addrCalc, sumIdx0, prefixOffset, tt0,
                     blockIdxM=tt0, blockIdxN=blockIdxN, interior=True))
+    # Drain the final pipelined group, then flush any deferred SRD increment.
+    commitPending(dscnt=0)
     if pendingInc is not None:
       mod.add(pendingInc)
+
+    self.parentWriter.vgprPool.checkIn(pipePack1)
+    self.parentWriter.vgprPool.checkIn(pipeAddr1)
     return mod
 
   def _emit16bitSubtilePairedStore(self, addrCalc, sumIdx0: int, sumIdx1: int, prefixOffset: int, tt0: int = 0, blockIdxM: int = 0, blockIdxN: int = 0, interior: bool = False) -> Module:
@@ -3235,6 +3282,82 @@ class GlobalWriteBatchWriter:
 
     assert not any(isinstance(i, SBarrier) for i in module.flatitems()), \
       "PostLoopStoreInNll Phase2 must be barrier-free (no s_barrier in the MFMA-interleaved store)"
+    return module
+
+  # -------------------------------------------------------------------------
+  # SubtileBpermutePipelining (quest): split the paired-store transpose into an
+  # ISSUE phase (pack + ds_bpermute + address) and a COMMIT phase (wait + permlane
+  # + store), so a depth-2 double-buffered driver can overlap group N+1's issue
+  # with group N's ds_bpermute LDS round-trip — collapsing the per-group
+  # s_waitcnt lgkmcnt(0) stall that dominates the interior STORE phase.  Only used
+  # on the guard-free/mask-free interior fast-path (interior=True), where the store
+  # sequence is homogeneous (no exec mask, no OOB branches).
+  # -------------------------------------------------------------------------
+  def _emitPairedStoreIssue(self, vPack: int, vAddrScratch: int, addrCalc, sumIdx0: int, sumIdx1: int, prefixOffset: int, tt0: int):
+    """ISSUE half of the pipelined paired store: pack 8 f32 -> 4 dwords into vPack,
+    post the 4 in-place ds_bpermute, and compute the adjusted D address into
+    vAddrScratch (overlaps the in-flight bpermute).  Does NOT wait/permute/store.
+    Returns (module, globalOffset) — globalOffset is carried to the COMMIT half."""
+    module = Module("pairedStoreIssue")
+    isFp16 = self.kernel["ProblemType"]["DestDataType"].isHalf()
+    VCvtPkF32to16 = VCvtPkF32toFP16 if isFp16 else VCvtPkF32toBF16
+    typeStr = "fp16" if isFp16 else "bf16"
+    vPermAddr = self.cvtVgprStruct.vgprPermAddr
+    vLGDelta  = self.cvtVgprStruct.vgprLaneGroupDelta
+    addrDVgpr = addrCalc.addrDVgpr
+
+    def vc(sumIdx, vi):
+      return vgpr("ValuC+" + str(sumIdx + vi - prefixOffset))
+
+    module.addComment1(f"[pipeline] ISSUE tt0={tt0}: pack 8 f32 -> 4 {typeStr} dwords + ds_bpermute (buf v{vPack})")
+    module.add(VCvtPkF32to16(dst=vgpr(vPack+0), src0=vc(sumIdx0, 0), src1=vc(sumIdx0, 1), comment=f"sba=0 tt0={tt0}[0:1] -> {typeStr}"))
+    module.add(VCvtPkF32to16(dst=vgpr(vPack+1), src0=vc(sumIdx0, 2), src1=vc(sumIdx0, 3), comment=f"sba=0 tt0={tt0}[2:3] -> {typeStr}"))
+    module.add(VCvtPkF32to16(dst=vgpr(vPack+2), src0=vc(sumIdx1, 0), src1=vc(sumIdx1, 1), comment=f"sba=1 tt0={tt0}[0:1] -> {typeStr}"))
+    module.add(VCvtPkF32to16(dst=vgpr(vPack+3), src0=vc(sumIdx1, 2), src1=vc(sumIdx1, 3), comment=f"sba=1 tt0={tt0}[2:3] -> {typeStr}"))
+
+    module.addComment1("ds_bpermute in-place: gather packed dwords from partner lane-group")
+    for k in range(4):
+      module.add(DSBPermuteB32(dst=vgpr(vPack+k), src0=vgpr(vPermAddr), src1=vgpr(vPack+k), comment=f"perm dword {k}"))
+
+    bpeCurr = self.parentWriter.states.bpeCexternal
+    bpeDest = self.parentWriter.states.bpeCexternalGSU1
+    globalOffset = addrCalc.globalOffset * bpeDest // bpeCurr
+    addrScaleShift = int(log2(bpeCurr // bpeDest)) if bpeCurr > bpeDest else 0
+    if addrScaleShift:
+      module.add(VLShiftRightB32(dst=vgpr(vAddrScratch), shiftHex=addrScaleShift, src=vgpr(addrDVgpr),
+                                 comment=f"scale addrDVgpr bpe {bpeCurr}->{bpeDest}"))
+      module.add(VAddU32(dst=vgpr(vAddrScratch), src0=vgpr(vAddrScratch), src1=vgpr(vLGDelta),
+                         comment="adjusted D addr = scaled addrDVgpr + lane_group*8"))
+    else:
+      module.add(VAddU32(dst=vgpr(vAddrScratch), src0=vgpr(addrDVgpr), src1=vgpr(vLGDelta),
+                         comment="adjusted D addr = addrDVgpr + lane_group*8"))
+    return module, globalOffset
+
+  def _emitPairedStoreCommit(self, vPack: int, vAddrScratch: int, globalOffset: int, tt0: int, dscnt: int):
+    """COMMIT half of the pipelined paired store: wait for this group's ds_bpermute
+    (leaving `dscnt` younger ds ops in flight), do the 2 permlane swaps, and emit the
+    dwordx4 store.  `dscnt` = number of ds_bpermute from LATER groups still in flight
+    (4 per pipelined group; 0 at the pipeline drain)."""
+    module = Module("pairedStoreCommit")
+    ntd = self.kernel["NonTemporalD"]
+    isGlc = bool(ntd & 0x1)
+    isSlc = bool(ntd & 0x2)
+    isNT  = bool(ntd & 0x4)
+    module.add(SWaitCnt(dscnt=dscnt, comment=f"[pipeline] wait this group's ds_bpermute; {dscnt} younger ds in flight (tt0={tt0})"))
+    module.addComment1("v_permlane32_swap_b32: swap across lane-32 boundary")
+    module.add(VPermlane32SwapB32(dst=vgpr(vPack+0), src=vgpr(vPack+2), comment="swap dwords 0<->2"))
+    module.add(VPermlane32SwapB32(dst=vgpr(vPack+1), src=vgpr(vPack+3), comment="swap dwords 1<->3"))
+    module.addComment1("buffer_store_dwordx4: write 8 16bit values (4 dwords, 2-aligned src)")
+    module.add(BufferStoreB128(
+      src=vgpr(vPack, 4),
+      vaddr=vgpr(vAddrScratch),
+      saddr=sgpr("SrdD", 4),
+      soffset=0,
+      mubuf=MUBUFModifiers(offen=True, offset12=globalOffset, glc=isGlc, slc=isSlc, nt=isNT),
+      comment=f"[pipeline] 16bit paired dwordx4 store tt0={tt0},{tt0+1}"
+    ))
+    # WAR: the store reads vPack; the next same-buffer pack (2 groups later) overwrites it.
+    module.add(SNop(waitState=0, comment="1 wait state: WAR store src -> next same-buffer pack dst"))
     return module
 
   def _emit16bitSubtileScalarStore(self, addrCalc, sumIdx0: int, prefixOffset: int, tt0: int = 0, blockIdxM: int = 0, blockIdxN: int = 0, interior: bool = False) -> Module:
