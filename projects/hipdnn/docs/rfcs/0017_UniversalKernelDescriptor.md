@@ -659,8 +659,9 @@ namespaces, and every criteria and dispatch expression draws from the same set:
 
 - **Tensor:** a bound operand's fields: `$q.dtype`, `$q.rank`, its named dims (`$q.seqlen_q`, `$w.c`),
   evaluated flags (`$q.stride_order`, `$q.packed`), `$q.is_runtime_pass_by_value` (the value arrives
-  per execution rather than at plan build, RFC 0016), the precomputed scalar `$q.value_f32` (below),
-  and `$q.virtual` (an internal intermediate between matched nodes, not a graph input or output).
+  per execution rather than being baked into the graph, [RFC 0016](0016_RuntimePassByValueTensors.md)),
+  the precomputed scalar `$q.value_f32` (below), and `$q.virtual` (an internal intermediate between
+  matched nodes, not a graph input or output).
 - **Graph:** structural facts and graph-level flags of the matched graph, e.g. `$graph.node_count`,
   which pins an exact match (the graph has exactly this many nodes), and
   `$graph.is_override_shape_enabled`, the graph's opt-in to execute-time override shapes.
@@ -872,7 +873,7 @@ Without a presence operator that second form cannot be written: a bare field che
 the operand is absent, so "absent, or present and constrained" collapses into "present and
 constrained or nothing at all" and the pack silently accepts graphs it cannot serve. Presence is
 also how a pack refuses a feature outright, which is how the worked example declines 23 of the 24
-optional operands its kernel does not implement, admitting the 24th only in a restricted form
+optional operands its kernel does not implement, admitting only the 24th
 ([Section 13.2](#132-the-matcher)).
 
 **Out of scope for v1.** General N-ary commutative matching, unbounded variadic operands, and unbounded
@@ -970,6 +971,7 @@ generic launcher assembles the call directly from the matched graph:
     {"name": "Q",          "kind": "pointer", "source": {"from": "tensor", "ref": "$q"}},
     {"name": "seqlen_q",   "kind": "scalar", "type": "i64", "source": {"from": "dim",    "ref": "$q", "axis": 2}},
     {"name": "stride_q",   "kind": "scalar", "type": "i64", "source": {"from": "stride", "ref": "$q", "axis": 2}},
+    {"name": "epsilon",    "kind": "scalar", "type": "f32", "source": {"from": "scalar", "ref": "$eps"}},
     {"name": "scale_log2", "kind": "scalar", "type": "f32",
        "source": {"from": "expr",
                   "expr": {"*": [{"rsqrt": ["$q.head_size"]}, 1.4426950408889634]}}},
@@ -979,11 +981,22 @@ generic launcher assembles the call directly from the matched graph:
 ```
 
 Each argument's `source` is one of a small set: a tensor pointer, a dim or stride read off a bound
-tensor, an attribute, a computed expression, or the plan-allocated workspace. These name the same
+tensor, an attribute, a scalar operand's value, a computed expression, or the plan-allocated
+workspace. These name the same
 schema fields the criteria use: a `dim` source is the field `$q.seqlen_q`, an `expr` source is a
 formula in the same token language, and together they describe the full kernel call as data, letting
 the launcher assemble it without per-kernel code. In `dim` and `stride` sources, `axis` indexes the
 tensor's logical dimension order (as listed in `shape`), independent of its physical `stride_order`.
+
+**A `scalar` source resolves whenever its value exists.** A scalar operand carries its value one of
+two ways ([RFC 0016](0016_RuntimePassByValueTensors.md)): baked into the graph at build time, or
+marked `is_runtime_pass_by_value` and supplied per execution through the variant pack, where its
+entry is a host pointer to the scalar. A baked value folds into the packed argument buffer once at
+plan build; a runtime one is read from the variant pack on each launch, through the same uid lookup
+the launcher already performs for every tensor pointer. Arguments are packed per launch, so the
+runtime case costs a read and the UDD does not name which case it is getting. The argument's
+declared `type` governs: the launcher coerces the supplied scalar to it, so a kernel taking an
+`f32` accepts any scalar operand hipDNN can carry.
 
 The generic launcher runs the same steps for every kernel: resolve the argument sources against the
 bound variables, evaluate the grid/block/shared/workspace formulas, pack the arguments, load the
@@ -1605,7 +1618,7 @@ gated modes of the same kernel file and are called out as an extension point in 
        // Every optional tensor the schema declares, bound here and declined below. The set is
        // generic hipDNN SDPA vocabulary; none of it appears in AttentionDenseSpec.
        "attn_mask":     "$attn_mask?",
-       "scale":         "$scale?",           // the scale-tensor form; this pack takes a scalar
+       "scale":         "$scale?",           // the scale-tensor form; served, see the gate below
        "seq_len_q":     "$seq_len_q?",       // varlen: a real AttentionDenseSpec.varlen mode, not
        "seq_len_kv":    "$seq_len_kv?",      // wired into this candidate; see Section 13.8.
        "seed":          "$seed?",
@@ -1701,23 +1714,17 @@ gated modes of the same kernel file and are called out as an extension point in 
     {"!": [{"value_or_default": ["$sdpa_fwd.generate_stats", false]}]},
     {"not_present": ["$sdpa_fwd.max_seq_len_kv"]},
 
-    // --- scale. hipDNN carries this three ways and the kernel needs the value at launch, so the
-    //     requirement is that it be knowable before the launch:
-    //       - `attn_scale_value`, a constant on the node: accepted;
-    //       - a scale tensor with a compile-time value, read as `$scale.value_f32`, since the
-    //         raw tagged union is not readable from an expression: accepted;
-    //       - a scale tensor marked `is_runtime_pass_by_value`, supplied per execution
-    //         (RFC 0016): declined, since the UDD fills this kernarg at plan build.
-    //     Exactly one of the two accepted forms may be supplied; a graph carrying both has said
-    //     two different things. ---
+    // --- scale. hipDNN carries this three ways and this pack takes all three: the
+    //     `attn_scale_value` attribute, a scale tensor holding a compile-time value, or a scale
+    //     tensor marked `is_runtime_pass_by_value` whose value arrives per execution (RFC 0016).
+    //     The UDD's `scalar` source reads whichever one the graph supplied, so the matcher
+    //     constrains how many were supplied, not which: exactly one of the attribute and the
+    //     tensor, since a graph carrying both has said two different things. ---
     {"or": [
       {"and": [{"present":     ["$sdpa_fwd.attn_scale_value"]},
                {"not_present": ["$scale"]}]},
       {"and": [{"not_present": ["$sdpa_fwd.attn_scale_value"]},
-               {"present":     ["$scale"]},
-               {"present":     ["$scale.value_f32"]},
-               {"==": ["$scale.dtype", "FLOAT"]},
-               {"!": ["$scale.is_runtime_pass_by_value"]}]}
+               {"present":     ["$scale"]}]}
     ]},
 
     // --- the mask-mode classifier, written out in full in Section 13.3. The whole block goes
@@ -1876,7 +1883,7 @@ The persistent UDD, the measured ~940-970 TFLOPS path (PR #9480):
     {"name": "o_ptr", "kind": "pointer", "source": {"from": "tensor", "ref": "$o"}},
     {"name": "scale", "kind": "scalar", "type": "f32",
       "source": {"from": "expr", "expr": {"value_or_default": ["$sdpa_fwd.attn_scale_value",
-                                                               "$scale.value_f32"]}}}
+                                                               "$scale"]}}}
   ]
 }
 ```
@@ -1909,20 +1916,19 @@ over graph dims instead of a `$kernel.*` constant) and shares the identical `arg
     {"name": "o_ptr", "kind": "pointer", "source": {"from": "tensor", "ref": "$o"}},
     {"name": "scale", "kind": "scalar", "type": "f32",
       "source": {"from": "expr", "expr": {"value_or_default": ["$sdpa_fwd.attn_scale_value",
-                                                               "$scale.value_f32"]}}}
+                                                               "$scale"]}}}
   ]
 }
 ```
 
-**What the scale binding shows.** Both UDDs resolve `scale` from whichever of the two accepted
-forms the graph supplied, the node attribute or the compile-time tensor value, with no branch in
-the dispatch. `value_or_default` reads the attribute and falls back to `$scale.value_f32`, the
-schema's precomputed coercion of the tensor's tagged-union value ([Section
-5](#5-matching-and-the-umd)); the matcher has already guaranteed that exactly one of them is there
-and that the tensor is `FLOAT`. This is the field-reference fallback form of `value_or_default`,
-distinct from the literal one §13.3 uses; both arms are `f32`, matching what the operator
-requires. A form the kernel cannot take, a scale whose value only exists at execute time, is
-excluded at match time: the matcher decides what the pack accepts, the UDD only fills a kernarg.
+**What the scale binding shows.** Both UDDs resolve `scale` from whichever form the graph
+supplied, with no branch in the dispatch: `value_or_default` reads the node attribute and falls
+back to the scale operand, and the matcher has already guaranteed exactly one of them is there.
+Whether that operand carries a baked value or a runtime one supplied through the variant pack is
+the launcher's business, not the descriptor's ([Section 6](#6-dispatch-and-workspace)), so a
+runtime scale costs this pack nothing: the same kernarg is filled from a different place. This is
+the field-reference fallback form of `value_or_default`, distinct from the literal one §13.3
+uses.
 
 The pack could accept more. The SDPA convention's implicit default (`1/sqrt(head_size)`, matching
 what both `asm_sdpa_engine`'s `SdpaFwdPlanBuilder::buildPlan` and `attention_unified`'s dispatch
