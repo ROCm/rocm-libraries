@@ -1,17 +1,26 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
 #include <hipdnn_frontend/attributes/MoeGroupedMatmulBwdAttributes.hpp>
 #include <hipdnn_frontend/node/MoeGroupedMatmulBwdNode.hpp>
 
+#include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
+
+#include "fake_backend/MockHipdnnBackend.hpp"
+
+#include <array>
 #include <memory>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
+using namespace hipdnn_frontend::detail;
+using namespace ::testing;
 
 // NOLINTBEGIN(misc-const-correctness)
 
@@ -50,6 +59,40 @@ MoeGroupedMatmulBwdAttributes createValidAttributes()
 
     return attrs;
 }
+
+class TestMoeGroupedMatmulBwdNodeCreateOperation : public ::testing::Test
+{
+protected:
+    std::shared_ptr<Mock_hipdnn_backend> _mockBackend;
+    std::array<char, 5> _fakeDescriptors{};
+    size_t _nextDescriptor = 0;
+
+    void SetUp() override
+    {
+        _mockBackend = std::make_shared<Mock_hipdnn_backend>();
+        IHipdnnBackend::setInstance(_mockBackend);
+    }
+
+    void TearDown() override
+    {
+        IHipdnnBackend::resetInstance();
+        _mockBackend.reset();
+    }
+
+    static MoeGroupedMatmulBwdNode makeNode()
+    {
+        auto attrs = createValidAttributes();
+        attrs.set_compute_data_type(DataType::FLOAT);
+        return {std::move(attrs), GraphAttributes{}};
+    }
+
+    hipdnnStatus_t createFakeDescriptor(hipdnnBackendDescriptor_t* descriptor)
+    {
+        *descriptor = reinterpret_cast<hipdnnBackendDescriptor_t>(
+            std::addressof(_fakeDescriptors[_nextDescriptor++]));
+        return HIPDNN_STATUS_SUCCESS;
+    }
+};
 
 } // namespace
 
@@ -259,6 +302,22 @@ TEST(TestMoeGroupedMatmulBwdNode, InferPropertiesNode)
     EXPECT_EQ(error.code, error_code_t::OK) << error.err_msg;
 }
 
+TEST(TestMoeGroupedMatmulBwdNode, InferPropertiesNodeGeneratesDweightStrides)
+{
+    auto attrs = createValidAttributes();
+    attrs.get_dweight()->set_stride({});
+
+    const GraphAttributes graphAttributes;
+    MoeGroupedMatmulBwdNode node(std::move(attrs), graphAttributes);
+
+    auto error = node.infer_properties_node();
+    ASSERT_EQ(error.code, error_code_t::OK) << error.err_msg;
+
+    const auto dweightDim = node.attributes.get_dweight()->get_dim();
+    EXPECT_EQ(node.attributes.get_dweight()->get_stride(),
+              hipdnn_data_sdk::utilities::generateStrides(dweightDim));
+}
+
 TEST(TestMoeGroupedMatmulBwdNode, InferPropertiesNodeRejectsUnsetDweightDims)
 {
     auto attrs = createValidAttributes();
@@ -304,6 +363,53 @@ TEST(TestMoeGroupedMatmulBwdNode, GatherHipdnnTensor)
     EXPECT_TRUE(allTensors.find(firstTokenOffsetTensor) != allTensors.end());
     EXPECT_TRUE(allTensors.find(dweightTensor) != allTensors.end());
     EXPECT_EQ(allTensors.size(), 4u);
+}
+
+// --- CreateOperation ---
+
+TEST_F(TestMoeGroupedMatmulBwdNodeCreateOperation, PropagatesBackendError)
+{
+    EXPECT_CALL(
+        *_mockBackend,
+        backendCreateDescriptor(HIPDNN_BACKEND_OPERATION_MOE_GROUPED_MATMUL_BWD_DESCRIPTOR, _))
+        .WillOnce(Return(HIPDNN_STATUS_INTERNAL_ERROR));
+    EXPECT_CALL(*_mockBackend, getLastErrorString(_, _)).Times(AnyNumber());
+
+    auto node = makeNode();
+    std::unordered_map<int64_t, ScopedHipdnnBackendDescriptor> tensorDescs;
+    std::vector<ScopedHipdnnBackendDescriptor> operations;
+    const auto error = node.create_operation(tensorDescs, operations);
+
+    EXPECT_EQ(error.code, ErrorCode::HIPDNN_BACKEND_ERROR);
+    EXPECT_TRUE(tensorDescs.empty());
+    EXPECT_TRUE(operations.empty());
+}
+
+TEST_F(TestMoeGroupedMatmulBwdNodeCreateOperation, SuccessCreatesFourTensorsAndOneOperation)
+{
+    EXPECT_CALL(*_mockBackend, backendCreateDescriptor(_, _))
+        .Times(5)
+        .WillRepeatedly(
+            [this](hipdnnBackendDescriptorType_t, hipdnnBackendDescriptor_t* descriptor) {
+                return createFakeDescriptor(descriptor);
+            });
+    EXPECT_CALL(*_mockBackend, backendSetAttribute(_, _, _, _, _))
+        .WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
+    EXPECT_CALL(*_mockBackend, backendFinalize(_))
+        .Times(5)
+        .WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
+    EXPECT_CALL(*_mockBackend, backendDestroyDescriptor(_))
+        .Times(5)
+        .WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
+
+    auto node = makeNode();
+    std::unordered_map<int64_t, ScopedHipdnnBackendDescriptor> tensorDescs;
+    std::vector<ScopedHipdnnBackendDescriptor> operations;
+    const auto error = node.create_operation(tensorDescs, operations);
+
+    EXPECT_TRUE(error.is_good()) << error.err_msg;
+    EXPECT_EQ(tensorDescs.size(), 4u);
+    EXPECT_EQ(operations.size(), 1u);
 }
 
 // NOLINTEND(misc-const-correctness)

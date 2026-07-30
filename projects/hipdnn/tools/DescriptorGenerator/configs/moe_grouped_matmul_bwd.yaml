@@ -56,6 +56,9 @@ operation:
     node_type_enum: "NodeType::MOE_GROUPED_MATMUL_BWD"
     node_attributes_union_type: "MoeGroupedMatmulBwdAttributes"
 
+  # NOTE: node is hand-maintained at
+  # frontend/include/hipdnn_frontend/node/MoeGroupedMatmulBwdNode.hpp; do not run
+  # `--mode frontend` for this op.
   infer_properties:
     strategy: "stub"
     dimension_formula: "dweight = [experts, token.dim[2], doutput.dim[2]] (caller-supplied; validated, not inferred)"

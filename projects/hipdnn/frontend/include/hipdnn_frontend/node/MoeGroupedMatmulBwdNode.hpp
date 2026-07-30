@@ -14,6 +14,8 @@
 
 namespace hipdnn_frontend::graph
 {
+// Hand-maintained; do not regenerate with --mode frontend (node.hpp.j2's stub/
+// custom_checks paths would overwrite this with TODO placeholders).
 class MoeGroupedMatmulBwdNode
     : public BaseNode<MoeGroupedMatmulBwdNode, NodeType::MOE_GROUPED_MATMUL_BWD>
 {
@@ -94,6 +96,18 @@ public:
             tokenTensor, K_TENSOR_RANK, "MoE token tensor"));
         HIPDNN_CHECK_ERROR(detail::validateMinimumTensorDimensions(
             firstTokenOffsetTensor, K_TENSOR_RANK, "MoE first_token_offset tensor"));
+
+        // Validate doutput and token have exact rank 3 (minimum-rank checks above only
+        // reject rank < 3; without these, a rank 4+ tensor would pass here and only be
+        // caught later, at backend finalize()).
+        HIPDNN_RETURN_IF_NE(doutputTensor->get_dim().size(),
+                            K_TENSOR_RANK,
+                            ErrorCode::INVALID_VALUE,
+                            "MoE doutput tensor must have rank 3");
+        HIPDNN_RETURN_IF_NE(tokenTensor->get_dim().size(),
+                            K_TENSOR_RANK,
+                            ErrorCode::INVALID_VALUE,
+                            "MoE token tensor must have rank 3");
 
         // Validate dweight has rank 3 [experts, K, N] - reject rather than infer, the expert
         // count is not derivable from any input.
