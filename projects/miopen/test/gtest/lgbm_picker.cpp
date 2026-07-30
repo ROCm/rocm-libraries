@@ -86,6 +86,18 @@ TEST_F(CPU_LgbmMetadata_NONE, SolverCodeMatchesVocabIndex)
         EXPECT_EQ(meta.SolverCode(solvers[i]), i);
 }
 
+TEST_F(CPU_LgbmMetadata_NONE, UnseenArchSupportIsConsistent)
+{
+    // The unseen-arch code is only meaningful when the model was trained for it;
+    // when unsupported, the picker abstains on unknown arch. Either way the code
+    // is a valid sentinel (default -1 = the model's missing branch).
+    if(meta.AllowUnseenArch())
+        EXPECT_LT(meta.UnseenArchCode(), meta.CategoricalCode("gfx_id", "gfx942"))
+            << "unseen code should be a sentinel below any real vocab code";
+    else
+        EXPECT_EQ(meta.UnseenArchCode(), -1);
+}
+
 // ---------------------------------------------------------------------------
 // Scoring seam
 // ---------------------------------------------------------------------------

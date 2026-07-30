@@ -13,8 +13,14 @@
 
 #include <miopen/conv/problem_description.hpp>
 #include <miopen/conv_algo_name.hpp>
+#include <miopen/env.hpp>
 #include <miopen/handle.hpp>
 #include <miopen/logger.hpp>
+
+// Force-disable unseen-architecture routing even when the model supports it,
+// reverting to abstain-on-unknown-arch. Enabled by default when the loaded
+// model was trained for it (LgbmMetadata::AllowUnseenArch()).
+MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_LGBM_DISABLE_OOD_ARCH)
 
 #include <algorithm>
 #include <array>
@@ -256,15 +262,29 @@ std::vector<uint64_t> PickSolverRanked(const conv::ProblemDescription& problem,
     // :sramecc+:xnack- suffix).
     const std::string gfx_id = handle.GetDeviceName();
 
-    // Architecture gating: only run on gfx_ids the model was trained on;
-    // otherwise fall through to TunaNet.
+    // Architecture gating. For a gfx_id in the model's vocab we score normally.
+    // For an unknown arch, a model trained with gfx_id feature-dropout
+    // (AllowUnseenArch()) can still predict from the continuous GPU-numeric
+    // features by routing gfx_id through the missing branch -- so we score with
+    // gfx_id fed as the unseen sentinel rather than abstaining. FillGpuFeatures
+    // already encodes an out-of-vocab gfx_id as the missing marker (-1), which is
+    // the sentinel the model was trained to expect, so no special filling is
+    // needed here. Set MIOPEN_DEBUG_LGBM_DISABLE_OOD_ARCH=1 to force the old
+    // abstain-on-unknown behavior. Older models (no unseen support) always
+    // abstain and fall through to TunaNet.
     const int gfx_code = meta.CategoricalCode("gfx_id", gfx_id);
     MIOPEN_LOG_I2("lgbm: engaged for gfx_id=\"" << gfx_id << "\" (vocab code " << gfx_code
                                                 << "), groups=" << problem.GetGroupCount());
     if(gfx_code < 0)
     {
-        MIOPEN_LOG_I2("lgbm: abstain (gfx_id \"" << gfx_id << "\" not in model vocab)");
-        return {};
+        const bool ood_ok =
+            meta.AllowUnseenArch() && !env::enabled(MIOPEN_DEBUG_LGBM_DISABLE_OOD_ARCH);
+        if(!ood_ok)
+        {
+            MIOPEN_LOG_I2("lgbm: abstain (gfx_id \"" << gfx_id << "\" not in model vocab)");
+            return {};
+        }
+        MIOPEN_LOG_I2("lgbm: unseen arch \"" << gfx_id << "\"; scoring via gfx_id missing branch");
     }
 
     // Build the constant problem + derived + GPU prefix once; only solver_name

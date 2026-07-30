@@ -69,6 +69,18 @@ public:
     // 64 when the key is absent.
     int NaiveGuardMaxGroups() const { return naive_guard_max_groups; }
 
+    // True if the model was trained to handle architectures outside its gfx_id
+    // vocab (rank.gfx_id_unseen_code present). Such a model was trained with
+    // gfx_id feature-dropout, so routing an unknown arch through the missing
+    // branch is meaningful: the continuous GPU-numeric features carry the arch
+    // signal. When false, the picker abstains on an unknown arch instead.
+    bool AllowUnseenArch() const { return allow_unseen_arch; }
+
+    // Categorical code the model expects for an unseen gfx_id
+    // (rank.gfx_id_unseen_code; -1 = the missing/NaN branch). Only meaningful
+    // when AllowUnseenArch() is true.
+    int UnseenArchCode() const { return unseen_arch_code; }
+
 private:
     LgbmMetadata();
 
@@ -78,6 +90,8 @@ private:
     std::unordered_map<std::string, int> solver_index;
     std::unordered_set<std::string> naive_fallback;
     int naive_guard_max_groups = 64;
+    bool allow_unseen_arch     = false;
+    int unseen_arch_code       = -1;
 };
 
 } // namespace lgbm

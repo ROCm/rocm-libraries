@@ -56,6 +56,17 @@ LgbmMetadata::LgbmMetadata()
         if(rank.contains("naive_guard_max_groups"))
             naive_guard_max_groups = rank.at("naive_guard_max_groups").get<int>();
 
+        // Unseen-architecture support: a model trained with gfx_id feature
+        // dropout ships rank.gfx_id_unseen_code (the code to feed for an arch
+        // outside the vocab; -1 = the missing branch). Its presence is the
+        // signal that routing unknown arches through the model is meaningful
+        // rather than an abstain. Absent -> older model, keep abstaining.
+        if(rank.contains("gfx_id_unseen_code"))
+        {
+            allow_unseen_arch = true;
+            unseen_arch_code  = rank.at("gfx_id_unseen_code").get<int>();
+        }
+
         ready = true;
         MIOPEN_LOG_I2("LGBM metadata loaded: " << solvers.size() << " solvers");
     }

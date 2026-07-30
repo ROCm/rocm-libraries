@@ -179,6 +179,7 @@
         "ConvBinWinogradRxSf2x3",
         "ConvBinWinogradRxSf2x3g1",
         "ConvBinWinogradRxSf3x2",
+        "ConvDepthwiseBwdData2D",
         "ConvDepthwiseFwd2D",
         "ConvDirectNaiveConvBwd",
         "ConvDirectNaiveConvFwd",
@@ -254,6 +255,7 @@
       "ConvBinWinogradRxSf2x3",
       "ConvBinWinogradRxSf2x3g1",
       "ConvBinWinogradRxSf3x2",
+      "ConvDepthwiseBwdData2D",
       "ConvDepthwiseFwd2D",
       "ConvDirectNaiveConvBwd",
       "ConvDirectNaiveConvFwd",
@@ -360,7 +362,8 @@
       "ConvDirectNaiveConvFwd",
       "ConvDirectNaiveConvWrw"
     ],
-    "naive_guard_max_groups": 64
+    "gfx_id_unseen_code": -1,
+    "gfxid_mask_p": 0.2
   },
   "per_spec_vocab": {
     "gfx1100": [
@@ -562,6 +565,7 @@
       "ConvOclDirectFwd11x11",
       "ConvOclDirectFwd1x1",
       "ConvOclDirectFwdGen",
+      "ConvWinoRageRxS<2-3>",
       "ConvWinograd3x3MultipassWrW<3-2>",
       "ConvWinograd3x3MultipassWrW<3-3>",
       "ConvWinograd3x3MultipassWrW<3-4>",
@@ -615,6 +619,7 @@
       "ConvBinWinogradRxSf2x3",
       "ConvBinWinogradRxSf2x3g1",
       "ConvBinWinogradRxSf3x2",
+      "ConvDepthwiseBwdData2D",
       "ConvDepthwiseFwd2D",
       "ConvDirectNaiveConvBwd",
       "ConvDirectNaiveConvFwd",
@@ -670,13 +675,13 @@
       "fft"
     ],
     "gfx942-mi325x": [
-      "ConvAsm1x1U",
       "ConvAsmImplicitGemmGTCDynamicBwdXdlopsNHWC",
       "ConvAsmImplicitGemmGTCDynamicFwdXdlopsNHWC",
       "ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC",
       "ConvBinWinogradRxSf2x3",
       "ConvBinWinogradRxSf2x3g1",
       "ConvBinWinogradRxSf3x2",
+      "ConvDepthwiseBwdData2D",
       "ConvDepthwiseFwd2D",
       "ConvDirectNaiveConvBwd",
       "ConvDirectNaiveConvFwd",
@@ -685,16 +690,9 @@
       "ConvHipImplicitGemm3DGroupBwdXdlops",
       "ConvHipImplicitGemm3DGroupFwdXdlops",
       "ConvHipImplicitGemm3DGroupWrwXdlops",
-      "ConvHipImplicitGemmForwardV4R4Xdlops",
-      "ConvHipImplicitGemmForwardV4R4Xdlops_Padded_Gemm",
-      "ConvHipImplicitGemmForwardV4R5Xdlops",
       "ConvHipImplicitGemmGroupBwdXdlops",
       "ConvHipImplicitGemmGroupFwdXdlops",
       "ConvHipImplicitGemmGroupWrwXdlops",
-      "ConvMlirIgemmFwdXdlops",
-      "ConvOclDirectFwd",
-      "ConvOclDirectFwd1x1",
-      "ConvOclDirectFwdGen",
       "ConvWinoRageRxS<2-3>",
       "GemmBwd1x1_stride1",
       "GemmBwd1x1_stride2",
@@ -714,6 +712,7 @@
       "ConvBinWinogradRxSf2x3",
       "ConvBinWinogradRxSf2x3g1",
       "ConvBinWinogradRxSf3x2",
+      "ConvDepthwiseBwdData2D",
       "ConvDepthwiseFwd2D",
       "ConvDirectNaiveConvBwd",
       "ConvDirectNaiveConvFwd",
@@ -742,6 +741,7 @@
       "ConvBinWinogradRxSf2x3",
       "ConvBinWinogradRxSf2x3g1",
       "ConvBinWinogradRxSf3x2",
+      "ConvDepthwiseBwdData2D",
       "ConvDepthwiseFwd2D",
       "ConvDirectNaiveConvBwd",
       "ConvDirectNaiveConvFwd",
@@ -1158,6 +1158,7 @@
     ],
     "gfx1201|1|bf16": [
       "ConvDirectNaiveConvFwd",
+      "ConvHipDirectFwd11x11",
       "ConvHipImplicitGemm3DGroupFwdXdlops",
       "ConvHipImplicitGemmGroupFwdXdlops",
       "GemmFwd1x1_0_1",
@@ -1258,6 +1259,7 @@
     ],
     "gfx90a-mi210x|1|bf16": [
       "ConvAsmImplicitGemmGTCDynamicFwdXdlopsNHWC",
+      "ConvDepthwiseFwd2D",
       "ConvDirectNaiveConvFwd",
       "ConvHipDirectFwd",
       "ConvHipImplicitGemm3DGroupFwdXdlops",
@@ -1294,6 +1296,7 @@
       "ConvOclDirectFwd",
       "ConvOclDirectFwd1x1",
       "ConvOclDirectFwdGen",
+      "ConvWinoRageRxS<2-3>",
       "GemmFwd1x1_0_1",
       "GemmFwd1x1_0_2",
       "GemmFwdRest"
@@ -1321,6 +1324,7 @@
       "ConvOclDirectFwd11x11",
       "ConvOclDirectFwd1x1",
       "ConvOclDirectFwdGen",
+      "ConvWinoRageRxS<2-3>",
       "GemmFwd1x1_0_1",
       "GemmFwd1x1_0_2",
       "GemmFwdRest",
@@ -1614,6 +1618,7 @@
       "ConvBinWinogradRxSf2x3",
       "ConvBinWinogradRxSf2x3g1",
       "ConvBinWinogradRxSf3x2",
+      "ConvDepthwiseBwdData2D",
       "ConvDirectNaiveConvBwd",
       "ConvHipImplicitGemm3DGroupBwdXdlops",
       "ConvHipImplicitGemmGroupBwdXdlops",
@@ -1787,6 +1792,7 @@
     ],
     "gfx942-mi325x|1|bf16": [
       "ConvAsmImplicitGemmGTCDynamicFwdXdlopsNHWC",
+      "ConvDepthwiseFwd2D",
       "ConvDirectNaiveConvFwd",
       "ConvHipDirectFwd11x11",
       "ConvHipImplicitGemm3DGroupFwdXdlops",
@@ -1798,7 +1804,6 @@
       "TransposedConvWinoRageRxS<2-3>"
     ],
     "gfx942-mi325x|1|fp16": [
-      "ConvAsm1x1U",
       "ConvAsmImplicitGemmGTCDynamicFwdXdlopsNHWC",
       "ConvBinWinogradRxSf2x3",
       "ConvBinWinogradRxSf2x3g1",
@@ -1807,14 +1812,7 @@
       "ConvDirectNaiveConvFwd",
       "ConvHipDirectFwd11x11",
       "ConvHipImplicitGemm3DGroupFwdXdlops",
-      "ConvHipImplicitGemmForwardV4R4Xdlops",
-      "ConvHipImplicitGemmForwardV4R4Xdlops_Padded_Gemm",
-      "ConvHipImplicitGemmForwardV4R5Xdlops",
       "ConvHipImplicitGemmGroupFwdXdlops",
-      "ConvMlirIgemmFwdXdlops",
-      "ConvOclDirectFwd",
-      "ConvOclDirectFwd1x1",
-      "ConvOclDirectFwdGen",
       "ConvWinoRageRxS<2-3>",
       "GemmFwd1x1_0_1",
       "GemmFwd1x1_0_2",
@@ -1856,6 +1854,7 @@
       "ConvBinWinogradRxSf2x3",
       "ConvBinWinogradRxSf2x3g1",
       "ConvBinWinogradRxSf3x2",
+      "ConvDepthwiseBwdData2D",
       "ConvDirectNaiveConvBwd",
       "ConvHipImplicitGemm3DGroupBwdXdlops",
       "ConvHipImplicitGemmGroupBwdXdlops",
@@ -1918,6 +1917,7 @@
     ],
     "gfx950-mi350x|1|bf16": [
       "ConvAsmImplicitGemmGTCDynamicFwdXdlopsNHWC",
+      "ConvDepthwiseFwd2D",
       "ConvDirectNaiveConvFwd",
       "ConvHipImplicitGemm3DGroupFwdXdlops",
       "ConvHipImplicitGemmGroupFwdXdlops",
@@ -1969,6 +1969,7 @@
       "ConvBinWinogradRxSf2x3",
       "ConvBinWinogradRxSf2x3g1",
       "ConvBinWinogradRxSf3x2",
+      "ConvDepthwiseBwdData2D",
       "ConvDirectNaiveConvBwd",
       "ConvHipImplicitGemm3DGroupBwdXdlops",
       "ConvHipImplicitGemmGroupBwdXdlops",
@@ -2020,6 +2021,7 @@
     ],
     "gfx950-mi355x|1|bf16": [
       "ConvAsmImplicitGemmGTCDynamicFwdXdlopsNHWC",
+      "ConvDepthwiseFwd2D",
       "ConvDirectNaiveConvFwd",
       "ConvHipImplicitGemm3DGroupFwdXdlops",
       "ConvHipImplicitGemmGroupFwdXdlops",
@@ -2072,6 +2074,7 @@
       "ConvBinWinogradRxSf2x3",
       "ConvBinWinogradRxSf2x3g1",
       "ConvBinWinogradRxSf3x2",
+      "ConvDepthwiseBwdData2D",
       "ConvDirectNaiveConvBwd",
       "ConvHipImplicitGemm3DGroupBwdXdlops",
       "ConvHipImplicitGemmGroupBwdXdlops",
@@ -2122,7 +2125,7 @@
       "GemmWrwUniversal"
     ]
   },
-  "_note_naive_guard": "DEPLOYMENT GUARD (GetSolutionsFallback/PredictSolver lazy walk), GROUP-AWARE: demote rank.naive_fallback_solvers (ConvDirectNaiveConv*) -- pick one only if no non-naive applicable solver exists -- ONLY when groups < rank.naive_guard_max_groups (default 64). For groups >= threshold, let the raw ranked walk stand (naive competes on merit; it is the true-best solver 17-40% of the time at high group counts). Rationale: an UNCONDITIONAL guard cures the OOD naive-#1 over-selection on low-group shapes (gold-val: naive pick 51.6%->0.09%, geomean on non-naive-best unchanged 1.0136->1.0132) but INTRODUCES a group-conv regression -- geomean on groups>=64 blows up 1.02->1.36 because it forces a slow grouped-XDLOPS solver where naive is correct. Group-aware guard recovers this: groups>=64 geomean 1.36->1.03, low-group stays 1.02. Threshold 64 is a starting default; tune from the OOD group-conv loss set. ConvDepthwiseFwd2D is a REAL kernel, NOT a fallback -- never demote it. NOT a perf-config (lgbm_pcfg/PickConfig) bug.",
-  "_note_v18": "v18 gold-only (255lv/800t, 41 feat). Trained on exhaustively-tuned (mode1/enforce4) labels only. oracle gold-val geo 1.0147 top1 94.35%. See results/2026-06-24_v18_tier_AB.md.",
-  "_note_candidate": "expanded-data retrain 2026-07-21: 866k gold rows, 13 specs incl gfx942-mi300a, 72 solvers, 61 feats (device-derivable only, curated GPUInfo dropped). oracle gold-val 1.0124/93.2%. NOT promoted."
+  "_note_unseen_arch": "UNSEEN-ARCHITECTURE PATH (DESIGN Change 2, layer 1). When the live GPU's gfx_id is not in rank.categorical_vocab.gfx_id (a new/untrained arch), the C++ picker (lgbm_pick.cpp) MUST encode the gfx_id cell as rank.gfx_id_unseen_code (-1 == missing -> LightGBM default branch) and score normally, instead of the legacy hard-gate 'if(gfx_code < 0) return {}'. The model is trained with gfx_id masked on rank.gfxid_mask_p of train rows, so the default branch predicts from the physical GPU-numeric features (cu_count, wave_size, lds_size_per_workgroup_kb, l2_cache_total_kb, boost_clock_mhz, vram_bytes). All other categoricals already follow the same unknown->-1->missing rule (see the .so parity encoding). Mirrors the layer-2 pcfg gfx_code .fillna(-1) behavior.",
+  "_note_naive_guard": "DEPLOYMENT GUARD (GetSolutionsFallback/PredictSolver lazy walk): the ranked walk MUST skip rank.naive_fallback_solvers (ConvDirectNaiveConv*) and select one ONLY when no non-naive applicable solver exists. These are always-applicable universal fallbacks; without the guard the model ranks one #1 on OOD shapes and the first-applicable walk executes it (~4-20x slowdown; log7-confirmed gfx950/gfx942). Matches develop ND TunaNet (ranks naive last). Offline gold-val: naive pick 51.6%->0.09%, coverage 0.51->1.00, geomean on non-naive-best shapes unchanged (1.0136 oracle vs 1.0132 guarded). ConvDepthwiseFwd2D is a real optimized kernel, NOT a fallback -- do NOT demote it.",
+  "_note_v18": "v18 gold-only (255lv/800t, 41 feat). Trained on exhaustively-tuned (mode1/enforce4) labels only. oracle gold-val geo 1.0147 top1 94.35%. See results/2026-06-24_v18_tier_AB.md."
 }
