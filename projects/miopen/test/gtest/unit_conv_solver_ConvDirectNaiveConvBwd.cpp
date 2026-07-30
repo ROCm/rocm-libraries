@@ -152,6 +152,24 @@ const auto& GetTestParams()
     return params;
 }
 
+// Regression case for backward-data grid sizing.
+//
+// The backward grid is n * c work groups (NCHW), each launching 256 work items, so the
+// global work size passes 2^32 for large batch and channel counts. Chunking the batch
+// keeps every launch representable.
+//
+// n * c here is exactly 2^24, which previously produced a global work size of exactly
+// 2^32 and truncated to a zero grid. Only the grid is large; the tensors are small.
+auto GetBatchChunkingTestCase()
+{
+    using TestCase = miopen::unit_tests::ConvTestCase;
+    return std::vector{
+        // clang-format off
+        TestCase{{65536, 256, 1, 1}, {256, 256, 1, 1}, {0, 0}, {1, 1}, {1, 1}, miopenHalf},
+        // clang-format on
+    };
+}
+
 } // namespace
 
 using GPU_UnitTestConvSolverDirectNaiveBwd_FP16  = GPU_UnitTestConvSolverBwd_FP16;
@@ -224,3 +242,10 @@ INSTANTIATE_TEST_SUITE_P(Full,
                          testing::Combine(testing::Values(GetTestParams()),
                                           testing::Values(miopenConvolutionAlgoDirect),
                                           testing::ValuesIn(GetConvTestCasesFull(miopenFloat))));
+
+// Full: batch chunking at the 32-bit launch limit
+INSTANTIATE_TEST_SUITE_P(FullBatchChunking,
+                         GPU_UnitTestConvSolverDirectNaiveBwd_FP16,
+                         testing::Combine(testing::Values(GetTestParams()),
+                                          testing::Values(miopenConvolutionAlgoDirect),
+                                          testing::ValuesIn(GetBatchChunkingTestCase())));

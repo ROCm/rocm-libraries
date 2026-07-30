@@ -211,6 +211,27 @@ auto GetSubbatchTestCase2D()
     };
 }
 
+// Regression case for the grid-size bound being inclusive.
+//
+// The naive solver launches grid_size * 256 work items, with grid_size bounded by
+// MAX_GRID_SIZE. grid_size = k * floor(MAX_GRID_SIZE / k) reaches MAX_GRID_SIZE exactly
+// whenever k divides it, so an inclusive bound of 2^24 produces a global work size of
+// exactly 2^32, which is not representable in the uint32_t launch parameter and
+// truncates to zero.
+//
+// k = 1024 divides 2^24, and n exceeds the resulting chunk size, so this both pins the
+// boundary and exercises the multi-chunk path. Tensors stay small (~32 MiB output) since
+// only the grid is large.
+auto GetMaxGridSizeBoundaryTestCase()
+{
+    using TestCase = miopen::unit_tests::ConvTestCase;
+    return std::vector{
+        // clang-format off
+        TestCase{{16384, 1, 1, 1}, {1024, 1, 1, 1}, {0, 0}, {1, 1}, {1, 1}, miopenHalf},
+        // clang-format on
+    };
+}
+
 } // namespace
 
 using GPU_UnitTestConvSolverDirectNaiveFwd_FP16  = GPU_UnitTestConvSolverFwd_FP16;
@@ -314,3 +335,10 @@ INSTANTIATE_TEST_SUITE_P(FullSubbatch2D,
                          testing::Combine(testing::Values(GetTestParams()),
                                           testing::Values(miopenConvolutionAlgoDirect),
                                           testing::ValuesIn(GetSubbatchTestCase2D())));
+
+// Full: grid size exactly at the MAX_GRID_SIZE bound
+INSTANTIATE_TEST_SUITE_P(FullMaxGridSizeBoundary,
+                         GPU_UnitTestConvSolverDirectNaiveFwd_FP16,
+                         testing::Combine(testing::Values(GetTestParams()),
+                                          testing::Values(miopenConvolutionAlgoDirect),
+                                          testing::ValuesIn(GetMaxGridSizeBoundaryTestCase())));
