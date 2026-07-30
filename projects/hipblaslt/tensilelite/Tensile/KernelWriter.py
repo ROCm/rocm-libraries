@@ -6763,17 +6763,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
                                # Cluster-barrier handshake insertion in Gfx1250Backend
                                # (kernel-scope at every OptLevel when set).
                                "ClusterBarrier": bool(kernel.get("ClusterBarrier", False)),
-                               # PrefetchGlobalRead (PGR) passed to InsertClusterBarrierPass.
-                               # Gates Rule 3 (`LCL <= PGR` skip) and Rule 4 (`LCL == PGR+1`
-                               # skip in fresh-gate mode; inherits upstream `LCL == PGR` cmp
-                               # in inherited-SCC mode). Rule 1 uses `LCL == 0`, not PGR.
-                               # Defaults to 1 when unset.
+                               # PrefetchGlobalRead (PGR) for Tensile scheduling. Defaults to 1.
                                "PrefetchGlobalRead": int(kernel.get("PrefetchGlobalRead", 1)),
-                               # PrefetchLocalRead (PLR) passed to InsertClusterBarrierPass.
-                               # When PLR == 0, enables Rule 3 anchor mode (b): if no
-                               # `s_barrier_wait -1` precedes `label_openLoopL:`, synthesize
-                               # a workgroup sync inside the LCL-gated signal block.
-                               # Defaults to 1 (fallback off) when unset.
+                               # PrefetchLocalRead (PLR) for Tensile scheduling. Defaults to 1.
                                "PrefetchLocalRead": int(kernel.get("PrefetchLocalRead", 1)),
                                # Abs SW prefetch: mutually exclusive with PC-rel.
                                # Abs takes priority when both are True (backend enforces via else-if).

@@ -21,23 +21,7 @@
  *
  * ************************************************************************ */
 //
-// Unit tests for InsertClusterBarrierPass (gfx1250), Rule 4.
-//
-// Rule 4 turns each `tensor_load_to_lds` (paired with a workgroup barrier
-// `s_barrier_signal -1` / `s_barrier_wait -1`) into a cluster-scope handshake:
-// a WaveIdx-gated `s_barrier_signal -3` (Rule 4a) plus a `s_barrier_wait -3`
-// (Rule 4b). To hide cross-CU latency, Rule 4a is walked backward from its
-// paired wait by up to `kRule4SignalLeadCycles` estimated cycles.
-//
-// The invariant these tests lock down is that the cluster barrier is a COUNTING
-// barrier: it can only track one outstanding generation at a time, so at most
-// ONE `signal -3` may be in flight before its `wait -3`. The cycle-lead hoist
-// must therefore never move a signal into or above a PRECEDING handshake --
-// otherwise two signals go in flight, the generations overlap and the cluster
-// deadlocks (observed as a tuning hang on hardware).
-//
-// These tests build a minimal `label_LoopBeginL` region so the cycle estimator
-// populates per-instruction cycles and the cycle-lead hoist is actually active.
+// Unit tests for InsertClusterBarrierPass (gfx1250).
 //
 #include <gtest/gtest.h>
 
@@ -57,10 +41,9 @@ namespace {
 
 constexpr int kClusterBarrierId = -3;
 constexpr int kWorkgroupBarrierId = -1;
+constexpr const char* kGSU1LabelName = "label_GSU_1";
+constexpr const char* kLoopCounterLSymbol = "sgprLoopCounterL";
 
-/// Classify a cluster-scope (`-3`) barrier: +1 for `s_barrier_signal -3`,
-/// -1 for `s_barrier_wait -3`, 0 for anything else (incl. the `-1` workgroup
-/// barriers the handshake reuses).
 int clusterBarrierKind(const StinkyInstruction& inst) {
     const bool sig = isBarrierSignal(inst);
     const bool wait = isBarrierWait(inst);
@@ -72,12 +55,52 @@ int clusterBarrierKind(const StinkyInstruction& inst) {
     return sig ? 1 : -1;
 }
 
-// Count the cluster (`-3`) signals in a sequence of +1/-1 events.
 int countClusterSignals(const std::vector<int>& seq) {
     int n = 0;
     for (int e : seq)
         if (e == 1) ++n;
     return n;
+}
+
+int countClusterWaits(const std::vector<int>& seq) {
+    int n = 0;
+    for (int e : seq)
+        if (e == -1) ++n;
+    return n;
+}
+
+bool isClusterBarrierWithLiteral(const StinkyInstruction& inst, bool wantSignal) {
+    const bool sig = isBarrierSignal(inst);
+    const bool wait = isBarrierWait(inst);
+    if (wantSignal ? !sig : !wait) return false;
+    const auto& srcs = inst.getSrcRegs();
+    return !srcs.empty() && srcs[0].dataType == StinkyRegister::Type::LiteralInt &&
+           srcs[0].getLiteralInt() == kClusterBarrierId;
+}
+
+bool isImmediatelyPrecededByClusterBarrierWait(StinkyInstruction* anchor) {
+    BasicBlock* parent = anchor->getParent();
+    if (parent == nullptr) return false;
+    auto it = BasicBlock::iterator(anchor);
+    while (it != parent->begin()) {
+        --it;
+        auto* prev = dyn_cast<StinkyInstruction>(it.getNodePtr());
+        if (prev == nullptr) continue;
+        if (isPseudoInst(prev)) continue;
+        return isClusterBarrierWithLiteral(*prev, /*wantSignal=*/false);
+    }
+    return false;
+}
+
+StinkyInstruction* firstRealInstAfter(StinkyInstruction* anchor) {
+    BasicBlock* parent = anchor->getParent();
+    if (parent == nullptr) return nullptr;
+    for (auto it = std::next(BasicBlock::iterator(anchor)); it != parent->end(); ++it) {
+        auto* next = dyn_cast<StinkyInstruction>(it.getNodePtr());
+        if (next == nullptr || isPseudoInst(next)) continue;
+        return next;
+    }
+    return nullptr;
 }
 
 }  // namespace
@@ -94,7 +117,6 @@ class InsertClusterBarrierPassTest : public ::testing::Test {
         config.arch[0] = 12;
         config.arch[1] = 5;
         config.arch[2] = 0;
-        // Fields the cycle estimator reads while modeling the loop region.
         config.TileA0 = 16;
         config.TileB0 = 16;
         config.TileM0 = 16;
@@ -105,8 +127,6 @@ class InsertClusterBarrierPassTest : public ::testing::Test {
 
         func = std::make_unique<Function>("cluster_barrier_test");
         setFunctionArch(*func, arch);
-        // The estimator only models the block literally named `label_LoopBeginL`;
-        // this is what makes the cycle-lead hoist active in Rule 4.
         bb = func->createBasicBlock("label_LoopBeginL");
         func->setGemmTileConfig(config);
         registerAllAnalyses(am);
@@ -131,8 +151,6 @@ class InsertClusterBarrierPassTest : public ::testing::Test {
         return inst;
     }
 
-    /// A WMMA to give the loop body some estimated-cycle length between the
-    /// handshakes (so the cycle-lead hoist has room to move).
     StinkyInstruction* createWMMA(int destStart, int src0Start, int src1Start) {
         AsmIRBuilder builder(*bb, arch);
         const HwInstDesc* desc = getMCIDByUOp(GFX::v_wmma_f32_16x16x32_bf16, arch);
@@ -141,27 +159,48 @@ class InsertClusterBarrierPassTest : public ::testing::Test {
         inst->addDestReg(StinkyRegister("a", destStart, 8));
         inst->addSrcReg(StinkyRegister("v", src0Start, 8));
         inst->addSrcReg(StinkyRegister("v", src1Start, 8));
-        inst->addSrcReg(StinkyRegister("a", destStart, 8));  // acc
+        inst->addSrcReg(StinkyRegister("a", destStart, 8));
         return inst;
     }
 
-    /// Emit one workgroup-barrier + tensor-load "handshake" -- the exact shape
-    /// Rule 4 triggers on: `s_barrier_signal -1`, `s_barrier_wait -1`, then a
-    /// `tensor_load_to_lds`.
     void appendHandshake(int loadS0, int loadS1) {
         createBarrierSignal(kWorkgroupBarrierId);
         createBarrierWait(kWorkgroupBarrierId);
         createTensorLoadInBlock(bb, arch, loadS0, loadS1);
     }
 
-    void runPass(int pgrValue = 1) {
+    void createLabel(const char* name) {
+        AsmIRBuilder builder(*bb, arch);
+        builder.createLabel(name);
+    }
+
+    StinkyInstruction* findFirstTensorLoad() {
+        for (IRBase& ir : *bb) {
+            if (ir.getType() != IRBase::IRType::StinkyTofu) continue;
+            auto* inst = cast<StinkyInstruction>(&ir);
+            if (isTensorLoad(*inst)) return inst;
+        }
+        return nullptr;
+    }
+
+    StinkyInstruction* findLabelNamed(const char* name) {
+        for (IRBase& ir : *bb) {
+            if (ir.getType() != IRBase::IRType::StinkyTofu) continue;
+            auto* inst = cast<StinkyInstruction>(&ir);
+            if (!isLabel(*inst)) continue;
+            const auto* labelData = inst->getModifier<LabelData>();
+            if (labelData != nullptr && labelData->label == name) return inst;
+        }
+        return nullptr;
+    }
+
+    void runPass() {
         PassContext ctx;
         ctx.setGemmTileConfig(config);
-        auto pass = createInsertClusterBarrierPass(pgrValue);
+        auto pass = createInsertClusterBarrierPass();
         pass->run(*func, ctx, am);
     }
 
-    /// Build the two-handshake loop body used by the no-overlap tests.
     void buildTwoHandshakeBody() {
         createWMMA(24, 0, 8);
         appendHandshake(/*loadS0=*/0, /*loadS1=*/4);
@@ -171,22 +210,18 @@ class InsertClusterBarrierPassTest : public ::testing::Test {
         createWMMA(56, 24, 32);
     }
 
-    /// Assert the Rule 4 no-overlap invariant on the current block: one cluster
-    /// signal per handshake and at most one signal in flight before its wait.
     void expectNoClusterPhaseOverlap(int expectedSignals) {
         const std::vector<int> seq = clusterBarrierSequence();
         EXPECT_EQ(countClusterSignals(seq), expectedSignals)
-            << "exactly one Rule 4 signal -3 per handshake";
+            << "exactly one Rule 3 signal -3 per handshake";
         int outstanding = 0;
         for (size_t i = 0; i < seq.size(); ++i) {
             outstanding += seq[i];
             EXPECT_LE(outstanding, 1)
-                << "two cluster signals in flight before a wait at index " << i
-                << " -- overlapping barrier phases will deadlock";
+                << "two cluster signals in flight before a wait at index " << i;
         }
     }
 
-    /// Cluster-barrier events (+1 signal / -1 wait) in program order.
     std::vector<int> clusterBarrierSequence() const {
         std::vector<int> seq;
         for (const IRBase& ir : *bb) {
@@ -196,11 +231,13 @@ class InsertClusterBarrierPassTest : public ::testing::Test {
         }
         return seq;
     }
+
+    std::pair<int, int> clusterBarrierCounts() const {
+        const std::vector<int> seq = clusterBarrierSequence();
+        return {countClusterSignals(seq), countClusterWaits(seq)};
+    }
 };
 
-// A single handshake produces exactly one Rule 4 cluster `signal -3`, and it is
-// hoisted ahead of every cluster `wait -3` (its own Rule 4b wait plus Rule 2's
-// kernel-opening wait), so no wait ever precedes the signal in flight.
 TEST_F(InsertClusterBarrierPassTest, SingleHandshakeEmitsOneSignalBeforeItsWaits) {
     createWMMA(32, 0, 8);
     appendHandshake(/*loadS0=*/0, /*loadS1=*/4);
@@ -210,38 +247,16 @@ TEST_F(InsertClusterBarrierPassTest, SingleHandshakeEmitsOneSignalBeforeItsWaits
 
     const std::vector<int> seq = clusterBarrierSequence();
     ASSERT_FALSE(seq.empty()) << "expected at least one cluster barrier";
-    EXPECT_EQ(countClusterSignals(seq), 1) << "exactly one Rule 4 signal -3 per handshake";
+    EXPECT_EQ(countClusterSignals(seq), 1) << "exactly one Rule 3 signal -3 per handshake";
     EXPECT_EQ(seq.front(), 1) << "the signal must come before any cluster wait";
 }
 
-// The core regression: with two back-to-back handshakes, the cycle-lead hoist of
-// the SECOND `signal -3` must stop at the first handshake instead of crossing it.
-// If it crosses, both signals go in flight before the first wait (signal, signal,
-// ...), overlapping the two counting-barrier generations and deadlocking.
-//
-// A cluster counting barrier can only track ONE outstanding generation at a
-// time, so the running (signals - waits) balance must never exceed 1. (It MAY
-// dip below 0 here: Rule 2 plants one kernel-opening `wait -3` before the
-// function's first tensor load, which on real hardware pairs with the previous
-// loop iteration's signal across the backedge -- in this straight-line body it
-// simply shows up as an extra leading-ish wait, which is harmless.)
 TEST_F(InsertClusterBarrierPassTest, TwoHandshakesDoNotOverlapClusterPhases) {
     buildTwoHandshakeBody();
-    runPass(/*pgrValue=*/1);
+    runPass();
     expectNoClusterPhaseOverlap(/*expectedSignals=*/2);
 }
 
-// Same no-overlap invariant with PrefetchGlobalRead=2. `pgrValue` feeds the
-// Rule 4 drain/skip gates, so exercise a non-default value to make sure the
-// signal/wait pairing (and the cycle-lead hoist boundary) is unaffected by it.
-TEST_F(InsertClusterBarrierPassTest, TwoHandshakesDoNotOverlapClusterPhasesPgr2) {
-    buildTwoHandshakeBody();
-    runPass(/*pgrValue=*/2);
-    expectNoClusterPhaseOverlap(/*expectedSignals=*/2);
-}
-
-// Sanity: the pass leaves the workgroup (`-1`) barriers in place -- Rule 4
-// reuses them, it does not delete or convert them.
 TEST_F(InsertClusterBarrierPassTest, WorkgroupBarriersArePreserved) {
     appendHandshake(/*loadS0=*/0, /*loadS1=*/4);
     createWMMA(32, 8, 16);
@@ -264,4 +279,55 @@ TEST_F(InsertClusterBarrierPassTest, WorkgroupBarriersArePreserved) {
     }
     EXPECT_EQ(wgSignals, 2) << "both workgroup s_barrier_signal -1 must survive";
     EXPECT_EQ(wgWaits, 2) << "both workgroup s_barrier_wait -1 must survive";
+}
+
+TEST_F(InsertClusterBarrierPassTest, Rule1PostGsu1InsertsLclGatedClusterSignal) {
+    createLabel(kGSU1LabelName);
+    createVAddInBlock(bb, arch, /*destReg=*/0, /*src0Reg=*/4, /*src1Reg=*/8);
+
+    runPass();
+
+    StinkyInstruction* gsu1 = findLabelNamed(kGSU1LabelName);
+    ASSERT_NE(gsu1, nullptr);
+    StinkyInstruction* next = firstRealInstAfter(gsu1);
+    ASSERT_NE(next, nullptr);
+    EXPECT_EQ(next->getUnifiedOpcode(), GFX::s_cmp_eq_u32);
+    ASSERT_GE(next->getSrcRegs().size(), 1u);
+    EXPECT_EQ(next->getSrcRegs()[0].getSymbolicName(), kLoopCounterLSymbol);
+
+    bool sawClusterSignal = false;
+    for (const IRBase& ir : *bb) {
+        if (ir.getType() != IRBase::IRType::StinkyTofu) continue;
+        const auto* inst = cast<StinkyInstruction>(&ir);
+        if (isClusterBarrierWithLiteral(*inst, /*wantSignal=*/true)) {
+            sawClusterSignal = true;
+            break;
+        }
+    }
+    EXPECT_TRUE(sawClusterSignal) << "Rule 1 must emit a cluster signal -3";
+}
+
+TEST_F(InsertClusterBarrierPassTest, Rule2InsertsWaitBeforeFirstTensorLoad) {
+    appendHandshake(/*loadS0=*/0, /*loadS1=*/4);
+
+    runPass();
+
+    StinkyInstruction* firstLoad = findFirstTensorLoad();
+    ASSERT_NE(firstLoad, nullptr);
+    EXPECT_TRUE(isImmediatelyPrecededByClusterBarrierWait(firstLoad))
+        << "Rule 2 must insert s_barrier_wait -3 immediately before the first load";
+}
+
+TEST_F(InsertClusterBarrierPassTest, IdempotencySecondRunIsNoOp) {
+    buildTwoHandshakeBody();
+    runPass();
+    const auto [signalsAfterFirst, waitsAfterFirst] = clusterBarrierCounts();
+
+    runPass();
+    const auto [signalsAfterSecond, waitsAfterSecond] = clusterBarrierCounts();
+
+    EXPECT_EQ(signalsAfterSecond, signalsAfterFirst)
+        << "a second pass must not insert additional cluster signals";
+    EXPECT_EQ(waitsAfterSecond, waitsAfterFirst)
+        << "a second pass must not insert additional cluster waits";
 }

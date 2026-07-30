@@ -259,7 +259,7 @@ TEST(ApiExport, PassFactories) {
     EXPECT_NE(createRaiseVgprMsbPass(), nullptr);
     EXPECT_NE(createInsertVgprMsbPass(), nullptr);
     EXPECT_NE(createLongBranchLoweringPass(), nullptr);
-    EXPECT_NE(createInsertClusterBarrierPass(2), nullptr);
+    EXPECT_NE(createInsertClusterBarrierPass(), nullptr);
     EXPECT_NE(createRemoveWaitAluPass(), nullptr);
     EXPECT_NE(createInsertWaitAluPass(), nullptr);
 }
