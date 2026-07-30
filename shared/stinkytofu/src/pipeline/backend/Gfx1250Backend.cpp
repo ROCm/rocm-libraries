@@ -201,11 +201,7 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBu
     // each in isolation (reuse never chains across a call site or a function boundary).
     pm.addPass(createSetMatrixReusePass(module.getFunctions()));
 
-    // MI450 XNACK replay protection must see the final per-function instruction
-    // order, including VGPR-MSB materialization and any scheduling changes.
-    // Keep this before flattening: calls are hardware replay boundaries, while
-    // each callable function retains an independent physical instruction stream.
-    pm.addPass(createGfx1250HazardPass(module.getFunctions()));
+    pm.addPass(createGfx1250HazardPass(module.getFunctions(), &module));
 
     // Re-merge callable functions into the entry at their ASM placement markers so
     // SwInstructionPrefetchRelStaticPass sees a single linear stream / legacy emission

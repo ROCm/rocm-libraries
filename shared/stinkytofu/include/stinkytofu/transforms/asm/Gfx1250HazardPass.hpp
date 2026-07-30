@@ -10,6 +10,7 @@
 namespace stinkytofu {
 class Function;
 class Pass;
+class StinkyAsmModule;
 
 /// Insert gfx1250 / MI450 assembly hazards that cannot be left to hardware.
 ///
@@ -27,7 +28,10 @@ class Pass;
 /// \p functions is non-empty, the pass walks the whole kernel (entry plus
 /// callable functions); otherwise it processes the single Function given to
 /// the pipeline.
+///
+/// Define @c STINKYTOFU_GFX1250_HAZARD_PROFILE=1 at build time to emit an
+/// stderr summary of inserted drains by rule and source region.
 STINKYTOFU_EXPORT std::unique_ptr<Pass> createGfx1250HazardPass(
-    std::vector<Function*> functions = {});
+    std::vector<Function*> functions = {}, StinkyAsmModule* module = nullptr);
 
 }  // namespace stinkytofu

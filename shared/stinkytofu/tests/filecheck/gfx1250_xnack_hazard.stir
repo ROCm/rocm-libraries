@@ -94,8 +94,7 @@ st.func @smem_self_overlap() {
   s0 = "st.s_load_b32"(s[0:1])
 }
 
-# Existing prefetches run before the later SW-prefetch pass and need their own
-# XCnt drain when a memory group is still outstanding.
+# prefetch needs XCnt drain when a memory group is still outstanding.
 # CHECK-LABEL: @existing_scalar_prefetch
 # CHECK: buffer_load_b32
 # CHECK-NEXT: s_wait_xcnt"(0)
