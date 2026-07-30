@@ -1601,7 +1601,7 @@ second phase.
 Grounded in `AttentionDenseSpec.__post_init__` and the dispatch candidate's `support` function.
 This pack targets
 the aligned (non-ragged, non-varlen) dense causal path; ragged and varlen inputs are real, separately
-gated modes of the same kernel file and are called out as an extension point in §13.8.
+gated modes of the same kernel file and are called out as an extension point in §13.7.
 
 ```jsonc
 {
@@ -1618,9 +1618,9 @@ gated modes of the same kernel file and are called out as an extension point in 
        // Every optional tensor the schema declares, bound here and declined below. The set is
        // generic hipDNN SDPA vocabulary; none of it appears in AttentionDenseSpec.
        "attn_mask":     "$attn_mask?",
-       "scale":         "$scale?",           // the scale-tensor form; served, see the gate below
+       "scale":         "$scale?",           // the scale-tensor form; accepted, see the scale gate
        "seq_len_q":     "$seq_len_q?",       // varlen: a real AttentionDenseSpec.varlen mode, not
-       "seq_len_kv":    "$seq_len_kv?",      // wired into this candidate; see Section 13.8.
+       "seq_len_kv":    "$seq_len_kv?",      // wired into this candidate; see Section 13.7.
        "seed":          "$seed?",
        "offset":        "$offset?",
        "dropout_mask":  "$dropout_mask?",
@@ -1650,7 +1650,7 @@ gated modes of the same kernel file and are called out as an extension point in 
     {"==": ["$graph.node_count", 1]},
 
     // --- 23 of the 24 optional tensors are refused outright. The 24th, the scale tensor, is
-    //     served in a restricted form and handled further down. ---
+    //     served, and its gate is further down. ---
     {"not_present": ["$attn_mask", "$seq_len_q", "$seq_len_kv", "$seed", "$offset",
                      "$dropout_mask", "$dropout_scale", "$page_table_k", "$page_table_v",
                      "$block_mask", "$sink_token", "$descale_q", "$descale_k", "$descale_v",
@@ -2085,26 +2085,11 @@ code object from the `build` values and owns its name. The two `kernelDescriptor
 *are* the AOT build list for this pack, so what gets compiled matches what is catalogued
 ([Section 9.1](#91-kernel-source-adapters)).
 
-### 13.7 What Maps to What
-
-| Hand-written today | Becomes | In this example |
-|---|---|---|
-| the dispatch candidate's `support` + `supports_attention_dense` | UMD `criteria` | §13.2 |
-| `causal_mask`/`causal_mask_bottom_right`/bounds contradiction and classification | one spliced `and`/`or` block over `$kernel.mask_mode` | §13.3 |
-| `inferLayout`-style physical-layout check (proposed for this family; none exists yet) | `$q.stride_order == [0,2,1,3]` plus cross-tensor equality | gate fix, §13.2 |
-| `AttentionDenseSpec.head_size in (64,128)` | `in` membership | §13.2 |
-| `AttentionDenseSpec` GQA constraint | `divisible($q.num_heads, $k.num_kv_heads)` | §13.2 |
-| `_dense_spec`'s `work >= num_persistent` host rule | a UHD ranking on `$kernel.persistent` plus the same work term as a feature | §13.6 |
-| `attention_dense_grid`/`attention_dense_block` (two structurally different formulas) | two UDDs, one per KDP | §13.5 |
-| `attention_dense_signature` (5 real args, baked shape) | `args_signature`: 4 tensor-pointer sources plus one `expr`-computed `scale` | §13.5 |
-| catalog coverage (which causal modes this pack ships) | the KDPs' `kernelDescriptors` vectors | §13.4, case C |
-| measured `persistent` tradeoff | KMD field plus distinct `priority` | §13.6 |
-
-The generic launcher runs either KDP's kernel with no SDPA-specific code; decline is handled the
-same way whether it happens on the matcher's graph-only clauses or its `$kernel.*`-referencing
+The generic launcher runs either KDP's kernel with no SDPA-specific code, and decline is handled
+the same way whether it lands on the matcher's graph-only clauses or its `$kernel.*`-referencing
 clauses.
 
-### 13.8 What an Author Actually Writes
+### 13.7 What an Author Actually Writes
 
 The example above is the whole system; this is the slice a kernel author touches. Adding one kernel
 to an **existing** engine, the common case, is a single UKD:
