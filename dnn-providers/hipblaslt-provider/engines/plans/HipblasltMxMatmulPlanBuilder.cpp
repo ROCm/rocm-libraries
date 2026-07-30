@@ -175,8 +175,8 @@ void checkVirtualTensors(const BlockScaleDequantizeAttributes& deqAttrA,
         }
     };
 
-    requireNonVirtual(deqAttrA.x_tensor_uid(), "A (FP8 input)");
-    requireNonVirtual(deqAttrB.x_tensor_uid(), "B (FP8 input)");
+    requireNonVirtual(deqAttrA.x_tensor_uid(), "A (MX input)");
+    requireNonVirtual(deqAttrB.x_tensor_uid(), "B (MX input)");
     requireNonVirtual(deqAttrA.scale_tensor_uid(), "A scale");
     requireNonVirtual(deqAttrB.scale_tensor_uid(), "B scale");
     requireNonVirtual(matmulAttr.c_tensor_uid(), "matmul output");
@@ -346,7 +346,7 @@ void checkHipblasltConstraints(const BlockScaleDequantizeAttributes& deqAttrA,
     checkNoBatch(dimsB, "B");
     checkNoBatch(dimsC, "C");
 
-    // opA = T, opB = N — inferred from FP8 X tensor strides.
+    // opA = T, opB = N — inferred from the MX X tensor strides.
     // Rule: row-major (stride[-1]==1) → HIPBLAS_OP_N; col-major (stride[-2]==1) → HIPBLAS_OP_T
     const auto& stridesA = tXA.strides();
     const auto& stridesB = tXB.strides();
@@ -362,13 +362,13 @@ void checkHipblasltConstraints(const BlockScaleDequantizeAttributes& deqAttrA,
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "MX matmul: A (FP8) must have opA=T (column-major strides, stride[-2]==1)");
+            "MX matmul: A (MX) must have opA=T (column-major strides, stride[-2]==1)");
     }
     if(stridesB[stridesB.size() - 1] != 1)
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "MX matmul: B (FP8) must have opB=N (row-major strides, stride[-1]==1)");
+            "MX matmul: B (MX) must have opB=N (row-major strides, stride[-1]==1)");
     }
 
     // Alignment: m % 16 == 0, n % 16 == 0, K % 128 == 0.

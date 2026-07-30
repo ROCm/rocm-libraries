@@ -296,8 +296,8 @@ TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, IsApplicableMxFp4OutputFp32)
     EXPECT_TRUE(_builder.isApplicable(_handle, graph));
 }
 
-// Mixed A/B input types: hipBLASLt supports FP8 OCP + FP4 in either order. The
-// trailing argument is x_b's type; x_a's stays FP8_E4M3 (FP4_E2M1) here.
+// Mixed A/B input types: hipBLASLt supports FP8 OCP + FP4 in either order. Each
+// test sets x_a to one MX type and x_b (the trailing argument) to the other.
 TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, IsApplicableMixedFp8AFp4B)
 {
     auto fb = createValidMxMatmulGraph({32, 128},
