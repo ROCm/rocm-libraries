@@ -81,9 +81,15 @@ BenchmarkProblems:
         - StreamK: [3]
         - StreamKAtomic: [0]
         - StreamKXCCMapping: [0]
-        # Pure multicast is derived from ClusterDim = [C, 1] (Cs = ClusterDim[0] > 1);
-        # reduction is derived from the shape (here Ck==1 -> off), not a user param.
-        - ClusterDim: [[2, 1], [4, 1], [8, 1]]
+        # Unified 1-D + 2-D cluster multicast sweep (one file, one size sweep):
+        #   [C,1] = 1-D B-multicast (Cs=C X-peers on M-adjacent tiles reuse B);
+        #   [Cs,Ck] both>1 = 2-D DUAL-multicast (Cs reuse B on M-adjacent tiles,
+        #     Ck Y-peers reuse A on N-adjacent tiles). Detected PURELY on ClusterDim
+        #     (streamKDual2DMulticast, both axes>1) -- no StreamKDualMulticast knob
+        #     needed (no factored K-split on this PR). Non-divisible sizes are legal
+        #     for every shape (dropped ClusterDimCheck + runtime pad-exit), so ONE
+        #     size sweep covers all shapes with zero skips.
+        - ClusterDim: [[2, 1], [4, 1], [8, 1], [2, 2], [2, 4], [4, 2]]
         - StaggerU: [0]
         - DirectToVgprA: [False]
         - DirectToVgprB: [False]

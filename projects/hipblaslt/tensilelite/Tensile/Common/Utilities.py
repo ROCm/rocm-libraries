@@ -378,7 +378,7 @@ def streamKMulticast(d):
     ``d`` may be a kernel or a solution ``state`` dict; both expose "StreamK"
     and "ClusterDim". Uses ``.get`` for partial-state derivation call sites that
     construct a dict without a StreamK / ClusterDim key.
-    See docs/design/streamk-wg-clusters.md.
+    See docs/design/cluster-load-component-and-streamk-multicast.md.
     """
     return d.get("StreamK", 0) == 3 and d.get("ClusterDim", [1, 1])[0] > 1
 
@@ -424,23 +424,31 @@ def streamKForceDP2DMulticast(d):
         and d["ClusterDim"][0] > 1 and d["ClusterDim"][1] > 1
 
 def streamKDual2DMulticast(d):
-    """True for a 2-D DUAL-operand multicast cluster (generalized detector).
+    """True for a 2-D DUAL-operand multicast cluster (ClusterDim-derived).
 
-    Covers BOTH the ForceDPOnly 2-D dual-operand multicast (``StreamKForceDPOnly``
-    + 2-D cluster) and the STANDARD two-tile StreamK path
-    (``StreamKForceDPOnly == 0``) opted in via ``StreamKDualMulticast``. In both
-    the DP (full-tile) round does the 2-D dual multicast (Cs/X peers share B on
-    M-adjacent tiles, Ck/Y peers share A on N-adjacent tiles); the standard path's
-    SK (partial-tile) round reduces 1-D via the workspace as today.
+    A GENUINE 2-D cluster ClusterDim = [Cs, Ck] with BOTH axes > 1 on the StreamK
+    DP multicast path: the DP (full-tile) round does the 2-D dual multicast (Cs/X
+    peers share B on M-adjacent tiles, Ck/Y peers share A on N-adjacent tiles); the
+    standard (StreamKForceDPOnly=0) path's SK (partial-tile) round reduces 1-D via
+    the workspace as today, while ForceDPOnly=1 is a single dense DP round.
 
-    Both cases require a GENUINE 2-D cluster ClusterDim = [Cs, Ck] (both axes > 1)
-    where Ck (Y) is an N-tiling / A-multicast axis, NOT a K-split reduction axis.
-    ``d`` may be a kernel or a solution ``state`` dict.
+    The 1-D-vs-2-D DISTINCTION is made PURELY on ClusterDim (Ck = ClusterDim[1] > 1),
+    NOT on the StreamKForceDPOnly / StreamKDualMulticast knobs: on the multicast PR
+    (#9603) there is no factored K-split cluster, so a [Cs, Ck] with both axes > 1
+    is unambiguously the dual-operand multicast. On the reduction PR (#9611) the
+    K-split cluster is expressed as [1, Ck] (Cs == 1), which is likewise NOT caught
+    here. (The factored-vs-dual disambiguation via the StreamKDualMulticast knob --
+    where a 2-D [Cs, Ck] cluster CAN be a K-split reduction with Ck a reduction axis
+    -- is re-introduced by the factored PR #9612; StreamKForceDPOnly stays a MODE
+    axis distinguishing the dense DP-only schedule from the two-tile DP+SK schedule,
+    not a dimensionality gate.)
+
+    ``d`` may be a kernel or a solution ``state`` dict; uses ``.get`` for
+    partial-state derivation call sites.
     See docs/design/streamk-wg-clusters.md.
     """
-    if not (d["ClusterDim"][0] > 1 and d["ClusterDim"][1] > 1):
-        return False
-    return bool(d.get("StreamKForceDPOnly", 0)) or bool(d.get("StreamKDualMulticast", 0))
+    clusterDim = d.get("ClusterDim", [1, 1])
+    return clusterDim[0] > 1 and clusterDim[1] > 1
 
 def log2(x):
     return int(log(x, 2) + 0.5)

@@ -64,7 +64,13 @@ BenchmarkProblems:
         - StreamK: [3]
         - StreamKAtomic: [0]
         - StreamKXCCMapping: [0]
-        - ClusterDim: [[4, 1]]
+        # Unified 1-D + 2-D cluster multicast char coverage (folds the former
+        # streamk_dual_2d_multicast.yaml). [C,1] = 1-D B-multicast; [2,2] = 2-D
+        # DUAL-multicast (FDPO=0 standard two-tile: DP dual round + SK partial
+        # round), auto-derived as dual PURELY from ClusterDim (both axes>1), no
+        # StreamKDualMulticast knob. The codegen char tests dispatch per kernel on
+        # the "2-D DP:" fold marker (1-D vs 2-D assertions).
+        - ClusterDim: [[4, 1], [2, 2]]
         - StaggerU: [0]
         - DirectToVgprA: [False]
         - DirectToVgprB: [False]

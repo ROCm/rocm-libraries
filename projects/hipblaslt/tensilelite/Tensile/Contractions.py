@@ -27,7 +27,7 @@ from typing import Dict
 from .Activation import ActivationType
 from . import Hardware
 from . import Properties
-from Tensile.Common import state, state_key_ordering, IsaInfo, streamKDual2DMulticast
+from Tensile.Common import state, state_key_ordering, IsaInfo
 from Tensile.Common.Architectures import gfxToIsa
 from Tensile.Common.DataType import DataType
 from Tensile.Common.GlobalParameters import internalParameters
@@ -601,29 +601,6 @@ class ProblemPredicate(Properties.Predicate):
         if state['ProblemType']['SwizzleTensorB']:
             rv += [cls('SwizzleTensorB', value=state['ProblemType']['SwizzleTensorB'])]
 
-        valuepredicates = []
-        valuepredicates.append(state["MacroTile0"])
-        valuepredicates.append(state["MacroTile1"])
-        valuepredicates.append(state["GlobalSplitU"])
-        # value[3] is the M-adjacency (shared-B) alignment axis Cs = ClusterDim[0].
-        # Pure multicast [C,1]: Cs = C. Pure reduction [1,C]: Cs = 1 (no
-        # M-alignment constraint).
-        valuepredicates.append(state["ClusterDim"][0])
-        # value[4] is the N-tile divisor. For a genuine K-SPLIT reduction StreamK
-        # cluster (Ck = ClusterDim[1] > 1 WITHOUT a dual flag, e.g. pure reduction
-        # [1,C]) the Y-extent is the reduction / index-generation axis, NOT an
-        # N-tiling axis, so it must NOT constrain the N-tile grid -> pin to 1.
-        # For a 2-D DUAL-multicast cluster (ForceDPOnly-2D or StreamKDualMulticast)
-        # Ck IS a spatial N-tiling / A-multicast axis, so it must remain the N-tile
-        # divisor (nWG1 % Ck == 0). 1-D StreamK ([C,1]) and dense (non-StreamK)
-        # clusters keep ClusterDim[1].
-        if state.get("StreamK", 0) == 3 and state["ClusterDim"][1] > 1 \
-                and not streamKDual2DMulticast(state):
-            valuepredicates.append(1)
-        else:
-            valuepredicates.append(state["ClusterDim"][1])
-        rv += [cls('ClusterDimCheck', value=valuepredicates)]
-
         # StreamK cluster-reduction split-barrier safety (gfx1250). The Ck =
         # ClusterDim[1] reduction peers split a tile's itersPerTile = ceil(K/DepthU)
         # K-iterations and hand off through an intra-cluster split barrier; if
@@ -631,8 +608,9 @@ class ProblemPredicate(Properties.Predicate):
         # over-signals -> hang. itersPerTile depends on runtime K, so this is a
         # per-problem HARD REJECT (not a build-time reject, not a silent fallback).
         # Reduction is derived from the cluster shape: pure reduction is [1, C]
-        # (Ck = ClusterDim[1] = C > 1). Pure multicast (no K-split) relies on
-        # ClusterDimCheck instead.
+        # (Ck = ClusterDim[1] = C > 1). Non-multiple cluster launches are otherwise
+        # handled by the kernel's runtime pad-exit / cluster-valid guards (#9690),
+        # not a static ClusterDimCheck predicate.
         if state.get("StreamKClusterReduction", 0) and state["ClusterDim"][1] > 1:
             rv += [cls('ClusterReductionIterCheck',
                        value=[state["DepthU"], state["ClusterDim"][1]])]

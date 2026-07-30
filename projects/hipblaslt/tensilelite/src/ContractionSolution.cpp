@@ -745,7 +745,16 @@ namespace TensileLite
 
         // Additional check for General Batched GEMM until GSU and StreamK are supported
         // in General Batched GEMM
-        if(sizeMapping.streamK > 0 && sizeMapping.streamKAtomic == 0)
+        //
+        // StreamKForceDPOnly (SK3 DP-first, gfx1250) always reduces via the tree path
+        // (getSKReduction returns tree, Flags == Synchronizer, never parallel) and never
+        // touches the workspace partials/fixup path, so AddressWS/AddressFlags are dead.
+        // The device kernel drops them from the SGPR define and .kd metadata, so we must
+        // not append ws/Flags here or the positional kernarg layout would corrupt the
+        // downstream (StridesD/Alpha/...) offsets. Keep appending for every other
+        // streamK>0 && atomic==0 kernel (layout unchanged).
+        if(sizeMapping.streamK > 0 && sizeMapping.streamKAtomic == 0
+           && sizeMapping.streamKForceDPOnly == 0)
         {
             // Assert hardware is not null
             // For now grouped gemm is not supported and passes nullptr
@@ -1926,38 +1935,54 @@ namespace TensileLite
                 rv.numWorkGroups.x = problemNumGroupTiles.x; // nWG0 (M-tiles)
                 // rv.numWorkGroups.y already = nWG1 * gsu (N-tiles); z stays batch.
             }
-            else if(sizeMapping.streamKDualMulticast != 0 && sizeMapping.clusterDim.y > 1)
+            else if(sizeMapping.streamKClusterReduction != 0 && sizeMapping.clusterDim.y > 1)
             {
-                // STANDARD two-tile StreamK 2-D DUAL-multicast (StreamKDualMulticast).
-                // Launch a PERSISTENT 2-D cluster grid [nWG0, gridY, batch]: gridX is
-                // PINNED to nWG0 so the kernel's dense DP fold StreamKIdx =
-                // WorkGroup1*nWG0 + WorkGroup0 (StreamK.preLoop) is dense in
-                // [0, skGrid) and its Cs X-peers are M-ADJACENT (share B) / Ck Y-peers
-                // are N-ADJACENT (share A). gridY = sk.grid / nWG0 is a multiple of Ck
-                // (getSKGridImpl), so gridDimY % Ck == 0 and gridDimX (== nWG0) % Cs ==
-                // 0 (ClusterDimCheck) -- a legal cluster launch. When gridY < nWG1 the
-                // leftover tiles form the SK partial round (standard two-tile
-                // accounting). See docs/design/streamk-wg-clusters.md.
-                rv.numWorkGroups.x = problemNumGroupTiles.x;           // nWG0
-                rv.numWorkGroups.y = sk.grid / problemNumGroupTiles.x; // gridY (mult of Ck)
-                // rv.numWorkGroups.z stays batch.
-            }
-            else if(sizeMapping.clusterDim.y > 1)
-            {
-                // Genuine 2-D StreamK cluster with Ck = clusterDim.y > 1 that is NOT
-                // dual multicast: the pure K-split reduction [1, C]. Launch a 2-D grid
-                // so the cluster Y-extent is legal (gridDimY % Ck == 0) and every WG
-                // gets a unique index via StreamKIdx = WorkGroup0*Ck + WorkGroup1
-                // (kernel preLoop). sk.grid is rounded to a multiple of C = Cs*Ck
-                // (getSKGridImpl), so gridDimX = skGrid/Ck is a whole number.
+                // Genuine 1-D K-split StreamK cluster-REDUCTION [1, Ck] (Cs == 1,
+                // Ck = clusterDim.y > 1). Launch a 2-D grid so the cluster Y-extent is
+                // legal (gridDimY % Ck == 0) and every WG gets a unique index via
+                // StreamKIdx = WorkGroup0*Ck + WorkGroup1 (kernel preLoop). sk.grid is
+                // rounded to a multiple of C = Cs*Ck (getSKGridImpl), so gridDimX =
+                // skGrid/Ck is a whole number. The Ck reduction peers K-split one tile
+                // and hand off through the symmetric intra-cluster split barrier.
                 uint32_t ck        = sizeMapping.clusterDim.y;
                 rv.numWorkGroups.x = sk.grid / ck;
                 rv.numWorkGroups.y = ck;
                 rv.numWorkGroups.z = 1;
             }
+            else if(sizeMapping.clusterDim.x > 1 && sizeMapping.clusterDim.y > 1)
+            {
+                // STANDARD two-tile StreamK 2-D DUAL-multicast (StreamKForceDPOnly==0,
+                // genuine 2-D cluster [Cs,Ck] both axes > 1). Gate PURELY on ClusterDim
+                // (both > 1), matching the kernel-side detector streamKDual2DMulticast
+                // and the round-up gate below -- NOT on the StreamKDualMulticast knob,
+                // which the unified ClusterDim-driven config leaves unset (0). (The
+                // ForceDPOnly-2D case is handled by the branch above.)
+                // Launch a PERSISTENT 2-D cluster grid [nWG0, gridY, batch]: gridX is
+                // PINNED to nWG0 so the kernel's dense DP fold StreamKIdx =
+                // WorkGroup1*nWG0 + WorkGroup0 (StreamK.preLoop) is dense in
+                // [0, skGrid) and its Cs X-peers are M-ADJACENT (share B) / Ck Y-peers
+                // are N-ADJACENT (share A). gridY = sk.grid / nWG0 is a multiple of Ck
+                // (getSKGridImpl). When gridY < nWG1 the leftover tiles form the SK
+                // partial round (standard two-tile accounting). See
+                // docs/design/streamk-wg-clusters.md.
+                rv.numWorkGroups.x = problemNumGroupTiles.x;           // nWG0
+                rv.numWorkGroups.y = sk.grid / problemNumGroupTiles.x; // gridY (mult of Ck)
+                // rv.numWorkGroups.z stays batch.
+            }
             else
             {
-                rv.numWorkGroups.x = sk.grid;
+                // 1-D [C,1] pure-multicast (and the non-cluster [1,1]) linear
+                // Stream-K launch. The HIP cluster launch requires gridX % Cs == 0,
+                // so round the launch UP to the cluster width; the padded peers
+                // pad-exit in the kernel prologue. sk.grid is normally already
+                // ceil(tiles/Cs)*Cs (round-up is a no-op), but on the degenerate
+                // partial-tail fallback (sk.grid == tiles, one real contributor per
+                // tile -- see solve()) this round-up is what keeps the launch legal
+                // while the K-split stays at sk.grid so no lone peer is handed only a
+                // sub-DepthU partial-tail iteration. No-op for [1,1] (Cs == 1).
+                rv.numWorkGroups.x = RoundUpToMultiple<uint32_t>(
+                    static_cast<uint32_t>(sk.grid),
+                    static_cast<uint32_t>(sizeMapping.clusterDim.x));
                 rv.numWorkGroups.y = 1;
                 rv.numWorkGroups.z = 1;
             }
@@ -1975,6 +2000,39 @@ namespace TensileLite
         }
 
         rv.clusterDim = sizeMapping.clusterDim;
+
+        // The HIP driver rejects a cluster launch whose grid is not divisible by
+        // clusterDim, so round up. The extra padded WGs early-exit in the kernel
+        // prologue; their WAVEDONE decrements the barrier's live member count.
+        // The 1-D [C,1] Stream-K grid has its own cluster-aware 1-D grid (sk.grid,
+        // already rounded to a Cs multiple in getSKGridImpl) and a scalar WG-id
+        // decode with a self-only fallback for boundary clusters, so leave it
+        // untouched.
+        if(enableCluster && sizeMapping.streamK == 0)
+        {
+            rv.numWorkGroups.x = RoundUpToMultiple(rv.numWorkGroups.x, rv.clusterDim.x);
+            rv.numWorkGroups.y = RoundUpToMultiple(rv.numWorkGroups.y, rv.clusterDim.y);
+        }
+        // 2-D DUAL-multicast Stream-K: a genuine 2-D cluster [Cs, Ck] (both axes
+        // > 1). On the multicast PR there is no factored K-split, so both-axes>1 is
+        // unambiguously the dual-operand multicast -- gate PURELY on ClusterDim
+        // (clusterDim.x > 1 && clusterDim.y > 1), not on the ForceDPOnly /
+        // StreamKDualMulticast knobs (StreamKForceDPOnly stays a mode axis).
+        // gridX=nWG0 / gridY (above) are the REAL tile extents, which -- now that
+        // ClusterDimCheck is dropped -- need not be multiples of Cs/Ck. Round the
+        // 2-D grid up to the cluster dims so the launch is legal; the padded
+        // boundary WGs (WorkGroup0>=nWG0 or WorkGroup1>=nWG1*gsu) early-exit in
+        // StreamK.preLoop (streamKClusterPadEarlyExit) BEFORE the -3 cluster
+        // barrier (their WAVEDONE frees the barrier slot), and the surviving
+        // peers' broadcast masks are trimmed to the present lanes
+        // (computeMulticastMaskReduction). sk.grid / the SK tile accounting keep
+        // using the real nWG0*gridY, so the padded WGs carry no work.
+        else if(enableCluster && sizeMapping.streamK == 3
+                && sizeMapping.clusterDim.x > 1 && sizeMapping.clusterDim.y > 1)
+        {
+            rv.numWorkGroups.x = RoundUpToMultiple(rv.numWorkGroups.x, rv.clusterDim.x);
+            rv.numWorkGroups.y = RoundUpToMultiple(rv.numWorkGroups.y, rv.clusterDim.y);
+        }
 
         rv.numWorkItems.x = rv.workGroupSize.x * rv.numWorkGroups.x;
         rv.numWorkItems.y = rv.workGroupSize.y * rv.numWorkGroups.y;
@@ -3478,24 +3536,83 @@ namespace TensileLite
                                          "StreamK kernel with splitting factor < 2\n");
             }
 
-            // Keep the StreamK cluster launch grid a multiple of the cluster size C
-            // even if a workspace/DP fallback above changed sk.grid, so the clustered
-            // launch (gridDimX % C == 0) stays valid. In the common case sk.grid is
-            // already a multiple of C -- ceil(tiles/C)*C for multicast, C*tiles for
-            // cluster reduction -- so this is a no-op; when a fallback fired (e.g.
-            // sk.grid = tiles), per-tile correctness on any partially-filled cluster
-            // is handled by the kernel's runtime guard (clusterMulticastValid for
-            // multicast, intra_cluster for cluster reduction) + global-flag fallback.
-            if(sizeMapping.streamK == 3
-               && (static_cast<size_t>(sizeMapping.clusterDim.x)
-                   * static_cast<size_t>(sizeMapping.clusterDim.y))
-                      > 1)
+            // 1-D [C,1] pure-multicast ONLY: keep the linear StreamK cluster launch
+            // grid a multiple of the cluster size Cs (= clusterDim.x) even if a
+            // workspace/DP fallback above changed sk.grid, so the clustered 1-D launch
+            // (gridDimX % Cs == 0) stays valid. In the common case sk.grid is already
+            // ceil(tiles/Cs)*Cs (multicast) -- a multiple of Cs -- so this is a no-op;
+            // when a fallback fired (e.g. sk.grid = tiles), per-tile correctness on any
+            // partially-filled cluster is handled by the kernel's clusterMulticastValid
+            // runtime guard + the normal (non-cooperative) load fallback.
+            //
+            // MUST be gated to the 1-D path (clusterDim.y == 1). The genuine 2-D
+            // DUAL-multicast path ([Cs,Ck] both > 1) instead carries sk.grid ==
+            // nWG0*gridY (getSKGridImpl) as its REAL contributor count, and
+            // generateSingleCall derives numWorkGroups.y = sk.grid / nWG0 from it while
+            // rounding the 2-D launch grid up to [Cs,Ck] SEPARATELY (padded peers
+            // early-exit in StreamK.preLoop). Rounding sk.grid up to Cs here would
+            // (a) break that numWorkGroups.y invariant when Cs does not divide
+            // nWG0*gridY, and (b) in the degenerate nWG1 < Ck case re-inflate sk.grid
+            // above `tiles`, splitting the lone tile's K across a phantom peer that is
+            // itself pad-exited -> the surviving peer waits forever on a partial
+            // reduction that never arrives (HW-observed hang / strict-barrier SIGABRT).
+            if(sizeMapping.streamK == 3 && sizeMapping.clusterDim.x > 1
+               && sizeMapping.clusterDim.y == 1)
             {
-                // C = Cs*Ck. Pure multicast [C,1]: c = clusterDim.x (byte-identical).
-                // Pure reduction [1,C]: c = clusterDim.y.
-                size_t c = static_cast<size_t>(sizeMapping.clusterDim.x)
-                           * static_cast<size_t>(sizeMapping.clusterDim.y);
-                sk.grid  = ((sk.grid + c - 1) / c) * c;
+                size_t c = sizeMapping.clusterDim.x;
+                // 1-D [C,1] pure-multicast degenerate-K-split liveness guard
+                // (gfx1250). A boundary cluster whose real tile count is below the
+                // cluster width rounds the launch grid up past `tiles` (sk.grid >
+                // tiles), so the lone tile's summation is K-split across the Cs
+                // peers. When that tile's trailing chunk is a SUB-DepthU partial
+                // (K % DepthU != 0) AND the split is fine enough that the LAST peer
+                // would receive ONLY that partial (per-peer iters
+                // tiles*itersPerTile/sk.grid <= 1), that peer runs zero full DepthU
+                // iterations (numIterL == 0) and therefore skips the per-iteration
+                // cluster split-barrier (-3) rounds its full-iter peers execute --
+                // the surviving peers' `s_barrier_wait -3` then never completes
+                // (HW/FFM-observed livelock at MT256x256, ClusterDim [8,1],
+                // 256x256x1920). Cap the effective per-tile split at floor(K/DepthU)
+                // by NOT K-splitting the degenerate tile: keep sk.grid == tiles (the
+                // real contributor count -- one WG per tile owning the whole K-range
+                // incl. its own partial tail). The launch is still padded up to a
+                // legal Cs-multiple cluster in generateSingleCall (numWorkGroups.x
+                // round-up) and the now-idle peers pad-exit via the normal
+                // StreamKIter work-check, exactly like the already-validated
+                // shallower/divisible degenerate clusters (e.g. MT256x256 @
+                // 256x256x256, and CD2_1/CD4_1 which split evenly with >= 1 full iter
+                // per peer). Guarded to this boundary case so non-degenerate 1-D,
+                // divisible-K, ForceDPOnly, 2-D dual and reduction paths keep
+                // sk.grid == ceil(tiles/Cs)*Cs byte-identical (host-only: no
+                // kernel/codegen change, no golden movement).
+                size_t itersPerTile
+                    = std::max(size_t{1}, problem.getItersPerTile(sizeMapping));
+                size_t depthU     = static_cast<size_t>(sizeMapping.depthU);
+                size_t kSize       = static_cast<size_t>(problem.boundSize(0));
+                bool   hasPartial  = depthU > 0 && (kSize % depthU) != 0;
+                bool   degenPartialTail
+                    = sk.reduction == origami::reduction_t::tree && !forceDPOnly
+                      && sk.grid > tiles && hasPartial
+                      && (tiles * itersPerTile / sk.grid) <= 1;
+                if(degenPartialTail)
+                    sk.grid = tiles;
+                else
+                    sk.grid = ((sk.grid + c - 1) / c) * c;
+            }
+            else if(sizeMapping.streamK == 3 && sizeMapping.streamKClusterReduction != 0
+                    && sizeMapping.clusterDim.y > 1)
+            {
+                // 1-D K-split cluster-REDUCTION [1, Ck]: round the StreamK grid up to a
+                // multiple of Ck (= clusterDim.y) so the 2-D reduction launch
+                // gridX = sk.grid / Ck (generateSingleCall) is a whole number and every
+                // Ck-peer cluster is full. sk.grid is normally already a multiple of Ck
+                // (getSKGridImpl rounds to C = Cs*Ck), so this is a no-op; when a
+                // workspace/DP fallback fired (sk.grid = tiles) it re-legalizes the
+                // launch. The ClusterReductionIterCheck predicate independently
+                // hard-rejects itersPerTile % Ck != 0 at solve time, so no reduction
+                // peer is ever handed a short (sub-DepthU) K-split.
+                size_t ck = static_cast<size_t>(sizeMapping.clusterDim.y);
+                sk.grid   = ((sk.grid + ck - 1) / ck) * ck;
             }
         }
 
@@ -4443,10 +4560,16 @@ namespace TensileLite
                     // (generateSingleCall). See docs/design/streamk-wg-clusters.md.
                     skGrid = tiles;
                 }
-                else if(self.sizeMapping.streamKDualMulticast)
+                else if(self.sizeMapping.clusterDim.x > 1 && self.sizeMapping.clusterDim.y > 1)
                 {
-                    // STANDARD two-tile StreamK (streamKForceDPOnly==0,
-                    // StreamKDualMulticast) 2-D DUAL-multicast. UNLIKE ForceDPOnly
+                    // STANDARD two-tile StreamK (streamKForceDPOnly==0), genuine 2-D
+                    // cluster [Cs,Ck] both axes > 1. Gate PURELY on ClusterDim (both >
+                    // 1) to match the kernel-side detector streamKDual2DMulticast and
+                    // getSolutionRuntimeArgs's numWorkGroups reshape -- NOT on the
+                    // StreamKDualMulticast knob, which the unified ClusterDim-driven
+                    // config leaves unset (0). Falling to the else below would compute a
+                    // 1-D-shaped skGrid the kernel's 2-D fold never launches, leaving
+                    // most output tiles unwritten. 2-D DUAL-multicast. UNLIKE ForceDPOnly
                     // (skGrid==tiles, no SK round), the standard schedule keeps a real
                     // DP + SK split, so we RESHAPE the base DP grid (skGrid computed
                     // above from the CU budget / origami) into a 2-D cluster grid
@@ -4477,14 +4600,33 @@ namespace TensileLite
                     size_t nwg1 = static_cast<size_t>(nWGTmp.y);
                     size_t nwg1Ck = (nwg1 / ck) * ck; // largest multiple of Ck <= nWG1
                     if(nwg1Ck < ck)
-                        nwg1Ck = ck; // at least one full cluster row
-                    size_t gridY = nwg0 > 0 ? (skGrid + nwg0 - 1) / nwg0 : ck; // base rows
-                    gridY = ((gridY + ck - 1) / ck) * ck; // round up to a multiple of Ck
-                    if(gridY < ck)
-                        gridY = ck;
-                    if(gridY > nwg1Ck)
-                        gridY = nwg1Ck; // clamp to full N-extent
-                    skGrid = nwg0 * gridY;
+                    {
+                        // Fewer real N-tile rows than Ck: a full Ck A-multicast
+                        // cluster row cannot be formed out of real output tiles, so
+                        // the 2-D dual multicast degenerates. We must NOT round the
+                        // reshaped grid up to a phantom Ck-row here: skGrid feeds the
+                        // SK K-partition (itersPerWG = tiles*itersPerTile/skGrid), and
+                        // any WG on a row >= nWG1 is pad-exited (WorkGroup1 >= nWG1,
+                        // streamKClusterPadEarlyExit) yet the partition would still
+                        // expect its partial -> the surviving peer waits forever on a
+                        // reduction that never arrives (HW-observed hang). Fall back to
+                        // one WG per tile (skGrid == tiles, like ForceDPOnly): the
+                        // launch round-up (generateSingleCall) still pads gridY up to
+                        // Ck for the legal cluster launch and pad-exit drops the padded
+                        // row, but no real K-split is scheduled across missing peers.
+                        skGrid = tiles;
+                    }
+                    else
+                    {
+                        size_t gridY
+                            = nwg0 > 0 ? (skGrid + nwg0 - 1) / nwg0 : ck; // base rows
+                        gridY = ((gridY + ck - 1) / ck) * ck; // round up to a multiple of Ck
+                        if(gridY < ck)
+                            gridY = ck;
+                        if(gridY > nwg1Ck)
+                            gridY = nwg1Ck; // clamp to full N-extent
+                        skGrid = nwg0 * gridY;
+                    }
                 }
                 else
                 {
@@ -4493,27 +4635,6 @@ namespace TensileLite
                     size_t ck = static_cast<size_t>(self.sizeMapping.clusterDim.y);
                     skGrid = ((ck * tiles + c - 1) / c) * c;
                 }
-            }
-
-            // StreamKClusterReduction (gfx1250): fixed even split / one-tile-per-cluster
-            // (design docs/design/streamk-wg-clusters.md, section 2.3). Pure reduction is
-            // expressed as ClusterDim = [1, C] (Cs=1, Ck=clusterDim.y=C), so the whole
-            // cluster C = clusterDim.x * clusterDim.y. Each of the `tiles` output tiles is
-            // owned by exactly one cluster of C peer WGs, so the launched grid is C * tiles.
-            // The 2-D launch [skGrid/Ck, Ck, 1] + the kernel index fold gives
-            // StreamKIdx = WorkGroup0*Ck + WorkGroup1, so the C WGs of cluster c occupy the
-            // contiguous StreamK index range [c*C, c*C + C) -- exactly the consecutive
-            // fixup peers of tile c. C * tiles is inherently a multiple of C, satisfying
-            // the clustered-launch requirement that gridDimX*gridDimY be a multiple of the
-            // cluster size. This override intentionally supersedes the grid-selection
-            // heuristics above so the alignment invariant always holds; residual/partial
-            // clusters fall back to the global-flag path via the kernel's intra_cluster
-            // runtime guard.
-            size_t cReduction = static_cast<size_t>(self.sizeMapping.clusterDim.x)
-                                * static_cast<size_t>(self.sizeMapping.clusterDim.y);
-            if(self.sizeMapping.streamKClusterReduction && cReduction > 1)
-            {
-                skGrid = cReduction * tiles;
             }
 
             return skGrid;

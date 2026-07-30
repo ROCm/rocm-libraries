@@ -111,13 +111,13 @@ class TestDerivation:
 
     def test_streamk_cluster_auto_multicast(self, tmp_path):
         # Collapse: -1 (omitted Multicast) + StreamK=3 + ClusterDim != [1,1] now
-        # AUTO-ENABLES the cooperative-load path. StreamKMulticast is derived to
-        # 1 and Multicast to True -- the bare index-only StreamK cluster state no
-        # longer exists.
+        # AUTO-ENABLES the cooperative-load path. The DP B-multicast is derived on
+        # demand from ClusterDim (streamKMulticast helper) and Multicast to True --
+        # the bare index-only StreamK cluster state no longer exists.
+        from Tensile.Common import streamKMulticast
         cfg = _write_variant(tmp_path, _STREAMK_CLUSTER, "sk_auto_mc.yaml")
         states = _derive_states(cfg)
         assert states, "expected >=1 derived solution"
-        from Tensile.Common import streamKMulticast
         assert all(streamKMulticast(st) for st in states), (
             [(st.get("StreamK"), st.get("ClusterDim")) for st in states])
         assert all(st["Multicast"] == 1 for st in states), (
