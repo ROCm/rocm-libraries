@@ -145,10 +145,9 @@ int dispatcher_run_rowcolquant_gemm(const void* A,
     {
         std::cerr << "dispatcher_run_rowcolquant_gemm: non-packed strides are not supported. "
                   << "Expected stride_A=" << K << " stride_B=" << K << " stride_AQ=1"
-                  << " stride_BQ=" << N << " stride_C=" << N
-                  << ", got stride_A=" << stride_A << " stride_B=" << stride_B
-                  << " stride_AQ=" << stride_AQ << " stride_BQ=" << stride_BQ
-                  << " stride_C=" << stride_C << "\n";
+                  << " stride_BQ=" << N << " stride_C=" << N << ", got stride_A=" << stride_A
+                  << " stride_B=" << stride_B << " stride_AQ=" << stride_AQ
+                  << " stride_BQ=" << stride_BQ << " stride_C=" << stride_C << "\n";
         return -1;
     }
 
@@ -195,28 +194,29 @@ int dispatcher_run_rowcolquant_gemm(const void* A,
     // Copy inputs to device
     HIP_CHECK(hipMemcpy(A_dev, A_host, elements_to_bytes<ADataType>(M * K), hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(B_dev, B_host, elements_to_bytes<BDataType>(K * N), hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(AQ_dev, AQ_host, elements_to_bytes<AQDataType>(QK_A), hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(BQ_dev, BQ_host, elements_to_bytes<BQDataType>(QK_B), hipMemcpyHostToDevice));
+    HIP_CHECK(
+        hipMemcpy(AQ_dev, AQ_host, elements_to_bytes<AQDataType>(QK_A), hipMemcpyHostToDevice));
+    HIP_CHECK(
+        hipMemcpy(BQ_dev, BQ_host, elements_to_bytes<BQDataType>(QK_B), hipMemcpyHostToDevice));
     HIP_CHECK(hipMemset(C_dev, 0, elements_to_bytes<CDataType>(M * N)));
 
     // Build QuantGroupedGemmHostArgs for single-group launch
-    ck_tile::QuantGroupedGemmHostArgs args(
-        A_dev,
-        B_dev,
-        C_dev,
-        AQ_dev,
-        BQ_dev,
-        static_cast<ck_tile::index_t>(k_batch),
-        static_cast<ck_tile::index_t>(M),
-        static_cast<ck_tile::index_t>(N),
-        static_cast<ck_tile::index_t>(K),
-        static_cast<ck_tile::index_t>(QK_A),
-        static_cast<ck_tile::index_t>(QK_B),
-        static_cast<ck_tile::index_t>(stride_A),
-        static_cast<ck_tile::index_t>(stride_B),
-        static_cast<ck_tile::index_t>(stride_C),
-        static_cast<ck_tile::index_t>(stride_AQ),
-        static_cast<ck_tile::index_t>(stride_BQ));
+    ck_tile::QuantGroupedGemmHostArgs args(A_dev,
+                                           B_dev,
+                                           C_dev,
+                                           AQ_dev,
+                                           BQ_dev,
+                                           static_cast<ck_tile::index_t>(k_batch),
+                                           static_cast<ck_tile::index_t>(M),
+                                           static_cast<ck_tile::index_t>(N),
+                                           static_cast<ck_tile::index_t>(K),
+                                           static_cast<ck_tile::index_t>(QK_A),
+                                           static_cast<ck_tile::index_t>(QK_B),
+                                           static_cast<ck_tile::index_t>(stride_A),
+                                           static_cast<ck_tile::index_t>(stride_B),
+                                           static_cast<ck_tile::index_t>(stride_C),
+                                           static_cast<ck_tile::index_t>(stride_AQ),
+                                           static_cast<ck_tile::index_t>(stride_BQ));
 
     const std::vector<ck_tile::QuantGroupedGemmHostArgs> gemm_descs = {args};
 
