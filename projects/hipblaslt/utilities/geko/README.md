@@ -305,6 +305,7 @@ From the GEKO package root you can also run the driver without installing (same 
 For the full flag list with descriptions and defaults, see [CLI Reference](#cli-reference).
 
 Required packages (see `requirements.txt` for pinned versions):
+- `tensilelite` - Kernel generation and library manipulation APIs
 - `pyyaml` - YAML parsing
 - `pandas` - Data manipulation and tabular data operations
 - `numpy` - Numerical array operations
@@ -1214,7 +1215,7 @@ If the benchmark fails, check for:
 
 **Invalid GEMM Types:**
 Check the supported data types in hipBLASLt:
-- Visit the [tensilelite DataType definitions](https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipblaslt/tensilelite/Tensile/Common/DataType.py)
+- Visit the [tensilelite DataType definitions](https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipblaslt/tensilelite/tensilelite/Common/DataType.py)
 - Verify your log file contains valid `a_type`, `b_type`, `c_type`, and `compute_type` combinations
 - Example valid types: `f16_r`, `bf16_r`, `f32_r`, `f8_r`, `bf8_r`
 

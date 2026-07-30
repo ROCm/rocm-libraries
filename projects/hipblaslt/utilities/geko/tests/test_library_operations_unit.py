@@ -142,12 +142,25 @@ def test_create_invokes_tensile_create_library(monkeypatch: pytest.MonkeyPatch, 
 
     called = {}
 
-    def _fake_run(cmd):
-        called["cmd"] = cmd
+    from tensilelite import TensileCreateLibrary
 
-    monkeypatch.setattr(operations, "run_silent_command", _fake_run)
-    operations.create(hip, libs, tmp_path / "out")
-    assert called["cmd"][1:4] == ["-m", "tensilelite", "create-library"]
+    def _fake_create(args):
+        called["args"] = args
+
+    monkeypatch.setattr(TensileCreateLibrary, "run", _fake_create)
+    output = tmp_path / "out"
+    operations.create(hip, libs, output)
+    assert called["args"] == [
+        "--code-object-version",
+        "5",
+        "--library-format",
+        "msgpack",
+        "--architecture",
+        "gfx950",
+        str(libs.resolve()),
+        str(output),
+        "HIP",
+    ]
 
 
 def test_from_dataframe_requires_lib_column(tmp_path: Path) -> None:

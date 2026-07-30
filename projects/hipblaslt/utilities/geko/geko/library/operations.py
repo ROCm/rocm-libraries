@@ -43,13 +43,12 @@ import logging
 import copy
 import pandas as pd
 import glob
-import sys
 
 from pathlib import Path
 from typing import List, Tuple, Sequence
 from threading import Lock
 
-from geko.utils import run_silent_command, parse_devices
+from geko.utils import parse_devices
 from geko.concurrency import parallel_for
 from geko.concurrency.runner import Runner, Worker
 from geko.library import Library, LibraryCollection
@@ -348,21 +347,19 @@ def create(hipblaslt_path: str | Path, library_dir: str | Path, output_dir: str 
 
     arch = load_library(lib_paths[0]).arch
 
-    logger.info(f"Calling tensilelite create-library on '{library_dir}'")
-    run_silent_command(
+    logger.info(f"Creating TensileLite library from '{library_dir}'")
+    from tensilelite.TensileCreateLibrary import run as create_library
+
+    create_library(
         [
-            sys.executable,
-            "-m",
-            "tensilelite",
-            "create-library",
             "--code-object-version",
             version,
             "--library-format",
             "msgpack",
             "--architecture",
             arch,
-            library_dir.resolve(),
-            output_dir,
+            str(library_dir.resolve()),
+            str(output_dir),
             "HIP",
         ]
     )
