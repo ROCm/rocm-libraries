@@ -75,6 +75,10 @@ _DGRAD_SIGNATURE_BF16 = conv_args_signature("bf16") + [
     {"name": "sub_gemm_buf",  "type": "ptr<i32, global>", "size_bytes": 8},
     {"name": "num_sub_gemms", "type": "i32",              "size_bytes": 4},
 ]
+_DGRAD_SIGNATURE_FP32 = conv_args_signature("fp32") + [
+    {"name": "sub_gemm_buf",  "type": "ptr<i32, global>", "size_bytes": 8},
+    {"name": "num_sub_gemms", "type": "i32",              "size_bytes": 4},
+]
 
 
 @dataclass(frozen=True)
@@ -113,6 +117,8 @@ def _dgrad_dtype(dtype: str) -> str:
     d = dtype.lower()
     if d == "fp16":
         return "f16"
+    if d in ("fp32", "f32"):
+        return "fp32"
     return d
 
 
@@ -145,8 +151,8 @@ def _request_errors(req: OperatorRequest) -> List[str]:
             errors.append(f"{f} must be positive")
     if int(req.G) != 1:
         errors.append("only groups=1 (G=1) dgrad is implemented")
-    if _dgrad_dtype(req.dtype) not in ("f16", "bf16"):
-        errors.append(f"unsupported dtype {req.dtype!r}; fp16/bf16 only")
+    if _dgrad_dtype(req.dtype) not in ("f16", "bf16", "fp32"):
+        errors.append(f"unsupported dtype {req.dtype!r}; fp16/bf16/fp32 only")
     if req.layout.upper() != "NHWC":
         errors.append(f"unsupported layout {req.layout!r}; NHWC only")
     try:
@@ -232,6 +238,21 @@ def _spec_cdna_hiperf_gfx950(req: ConvDgradRequest, name: str) -> DgradConvSpec:
     )
 
 
+def _spec_cdna_fp32(req: ConvDgradRequest, name: str) -> DgradConvSpec:
+    """64x64x16, mfma16x16x4 — fp32 CDNA path (gfx942/gfx950)."""
+    dtype = _dgrad_dtype(req.dtype)
+    return DgradConvSpec(
+        problem=_problem(req),
+        name=name,
+        data=ConvDataSpec(dtype_a=dtype, dtype_b=dtype, dtype_d=dtype),
+        tile_m=64, tile_n=64, tile_k=16,
+        warp_m=2, warp_n=2,
+        warp_tile_m=16, warp_tile_n=16, warp_tile_k=4,
+        wave_size=ArchTarget.from_gfx(req.arch).wave_size,
+        pipeline="mem", epilogue="default",
+    )
+
+
 def _spec_rdna_wmma(req: ConvDgradRequest, name: str) -> DgradConvSpec:
     """32x32x16, wmma16x16x16 — RDNA wave32 targets (gfx1151, gfx1201)."""
     dtype = _dgrad_dtype(req.dtype)
@@ -261,6 +282,8 @@ def _signature(spec: DgradConvSpec) -> Sequence[dict]:
     dtype = spec.data.dtype_a
     if dtype == "bf16":
         return _DGRAD_SIGNATURE_BF16
+    if dtype == "fp32":
+        return _DGRAD_SIGNATURE_FP32
     return _DGRAD_SIGNATURE_FP16
 
 
@@ -274,6 +297,7 @@ def _make_candidate(
     priority: int,
     spec_fn: Callable[[ConvDgradRequest, str], DgradConvSpec],
     arch_family: str,
+    dtype_filter: tuple = ("f16", "bf16"),
 ) -> KernelCandidate:
     def support(req: OperatorRequest) -> Tuple[bool, str]:
         errors = _request_errors(req)
@@ -283,6 +307,11 @@ def _make_candidate(
         ok, why = _arch_family_supported(req, arch_family)
         if not ok:
             return False, why
+        if _dgrad_dtype(req.dtype) not in dtype_filter:
+            return False, (
+                f"candidate {name!r} only supports dtypes {dtype_filter}, "
+                f"got {req.dtype!r}"
+            )
         ok, why = _selector_matches(req, candidate)
         if not ok:
             return False, why
@@ -322,6 +351,7 @@ CONV_DGRAD_REGISTRY.extend(
             priority=10,
             spec_fn=_spec_cdna_hiperf_gfx950,
             arch_family="cdna",
+            dtype_filter=("f16", "bf16"),
         ),
         _make_candidate(
             name="conv_dgrad_igemm_cdna_hiperf",
@@ -329,6 +359,7 @@ CONV_DGRAD_REGISTRY.extend(
             priority=20,
             spec_fn=_spec_cdna_hiperf,
             arch_family="cdna",
+            dtype_filter=("f16", "bf16"),
         ),
         _make_candidate(
             name="conv_dgrad_igemm_cdna_mem",
@@ -336,6 +367,15 @@ CONV_DGRAD_REGISTRY.extend(
             priority=30,
             spec_fn=_spec_cdna_mem,
             arch_family="cdna",
+            dtype_filter=("f16", "bf16"),
+        ),
+        _make_candidate(
+            name="conv_dgrad_igemm_cdna_fp32",
+            spec_id="cdna_fp32_64x64",
+            priority=10,
+            spec_fn=_spec_cdna_fp32,
+            arch_family="cdna",
+            dtype_filter=("fp32",),
         ),
         _make_candidate(
             name="conv_dgrad_igemm_rdna_wmma",
@@ -343,6 +383,7 @@ CONV_DGRAD_REGISTRY.extend(
             priority=10,
             spec_fn=_spec_rdna_wmma,
             arch_family="rdna",
+            dtype_filter=("f16", "bf16"),
         ),
     )
 )
