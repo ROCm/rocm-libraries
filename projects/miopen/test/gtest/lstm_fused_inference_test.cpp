@@ -114,13 +114,14 @@ protected:
         this->nocy       = false;
     }
 
-    // One forward-inference pass. Returns {output, hy, cy} read back to host.
-    std::tuple<std::vector<T>, std::vector<T>, std::vector<T>>
-    RunInference(miopenRNNDescriptor_t rnnDesc,
-                 const std::vector<T>& input,
-                 const std::vector<T>& hx,
-                 const std::vector<T>& cx,
-                 const std::vector<T>& weights)
+    using InferenceResult = std::tuple<std::vector<T>, std::vector<T>, std::vector<T>>;
+
+    void RunInference(miopenRNNDescriptor_t rnnDesc,
+                      const std::vector<T>& input,
+                      const std::vector<T>& hx,
+                      const std::vector<T>& cx,
+                      const std::vector<T>& weights,
+                      InferenceResult& result)
     {
         auto&& handle = get_handle();
 
@@ -139,12 +140,15 @@ protected:
                               this->dataType);
 
         size_t workspace_size = 0;
-        miopenGetRNNWorkspaceSize(
-            &handle, rnnDesc, this->seqLength, inputDescs.data(), &workspace_size);
+        ASSERT_EQ(miopenStatusSuccess,
+                  miopenGetRNNWorkspaceSize(
+                      &handle, rnnDesc, this->seqLength, inputDescs.data(), &workspace_size));
         Workspace wspace{workspace_size};
 
         size_t out_sz = 0;
-        miopenGetRNNInputTensorSize(&handle, rnnDesc, this->seqLength, outputDescs.data(), &out_sz);
+        ASSERT_EQ(miopenStatusSuccess,
+                  miopenGetRNNInputTensorSize(
+                      &handle, rnnDesc, this->seqLength, outputDescs.data(), &out_sz));
         std::vector<T> output(out_sz / sizeof(T));
 
         std::vector<int> hlens{
@@ -165,46 +169,50 @@ protected:
         auto hy_dev      = handle.Write(hy);
         auto cy_dev      = handle.Write(cy);
 
-        miopenRNNForwardInference(&handle,
-                                  rnnDesc,
-                                  this->seqLength,
-                                  inputDescs.data(),
-                                  input_dev.get(),
-                                  &hiddenDesc,
-                                  hx_dev.get(),
-                                  &hiddenDesc,
-                                  cx_dev.get(),
-                                  &weightDesc,
-                                  weights_dev.get(),
-                                  outputDescs.data(),
-                                  output_dev.get(),
-                                  &hiddenDesc,
-                                  hy_dev.get(),
-                                  &hiddenDesc,
-                                  cy_dev.get(),
-                                  wspace.ptr(),
-                                  wspace.size());
+        ASSERT_EQ(miopenStatusSuccess,
+                  miopenRNNForwardInference(&handle,
+                                            rnnDesc,
+                                            this->seqLength,
+                                            inputDescs.data(),
+                                            input_dev.get(),
+                                            &hiddenDesc,
+                                            hx_dev.get(),
+                                            &hiddenDesc,
+                                            cx_dev.get(),
+                                            &weightDesc,
+                                            weights_dev.get(),
+                                            outputDescs.data(),
+                                            output_dev.get(),
+                                            &hiddenDesc,
+                                            hy_dev.get(),
+                                            &hiddenDesc,
+                                            cy_dev.get(),
+                                            wspace.ptr(),
+                                            wspace.size()));
 
-        return {handle.Read<T>(output_dev, output.size()),
-                handle.Read<T>(hy_dev, hy.size()),
-                handle.Read<T>(cy_dev, cy.size())};
+        result = {handle.Read<T>(output_dev, output.size()),
+                  handle.Read<T>(hy_dev, hy.size()),
+                  handle.Read<T>(cy_dev, cy.size())};
     }
 
     void RunFusedInference()
     {
         auto&& handle = get_handle();
+        if(!handle.CooperativeLaunchSupported())
+            GTEST_SKIP() << "Cooperative launch is not supported";
 
         RNNDescGuard rnnDesc;
         DestroyInternalRnnDropoutDesc(rnnDesc);
-        miopenSetRNNDescriptor(rnnDesc,
-                               this->hiddenSize,
-                               this->numLayers,
-                               miopenRNNInputMode_t(this->inputMode),
-                               miopenRNNDirectionMode_t(this->dirMode),
-                               miopenLSTM,
-                               miopenRNNBiasMode_t(this->biasMode),
-                               miopenRNNAlgo_t(this->algoMode),
-                               this->dataType);
+        ASSERT_EQ(miopenStatusSuccess,
+                  miopenSetRNNDescriptor(rnnDesc,
+                                         this->hiddenSize,
+                                         this->numLayers,
+                                         miopenRNNInputMode_t(this->inputMode),
+                                         miopenRNNDirectionMode_t(this->dirMode),
+                                         miopenLSTM,
+                                         miopenRNNBiasMode_t(this->biasMode),
+                                         miopenRNNAlgo_t(this->algoMode),
+                                         this->dataType));
 
         const auto inVecReal = (this->inputMode != 0) ? this->hiddenSize : this->inVecLen;
 
@@ -232,24 +240,34 @@ protected:
         std::vector<int> inlens{this->batchSeq.at(0), inVecReal};
         auto firstInputDesc = miopen::TensorDescriptor(this->dataType, inlens);
         size_t wei_bytes    = 0;
-        miopenGetRNNParamsSize(&handle, rnnDesc, &firstInputDesc, &wei_bytes, this->dataType);
+        ASSERT_EQ(
+            miopenStatusSuccess,
+            miopenGetRNNParamsSize(&handle, rnnDesc, &firstInputDesc, &wei_bytes, this->dataType));
         std::vector<T> weights(wei_bytes / sizeof(T));
         for(auto& v : weights)
             v = prng::gen_descreet_uniform_sign<T>(this->dataScale, 100);
 
+        const auto fused_kernel_name = "RNNFusedLSTMInfer";
+        const auto network_config = "rnnfusedinf-fp32-h" + std::to_string(this->hiddenSize) + "-b" +
+                                    std::to_string(handle.GetMaxComputeUnits()) + "-bi" +
+                                    std::to_string(this->dirMode != 0 ? 2 : 1);
+        handle.ClearKernels(fused_kernel_name, network_config);
+
         // Reference: stock per-timestep path (flag explicitly off).
-        std::tuple<std::vector<T>, std::vector<T>, std::vector<T>> ref;
+        InferenceResult ref;
         {
             ScopedEnvironment<bool> fused_env(MIOPEN_DEBUG_RNN_FUSED_INFERENCE, false);
-            ref = RunInference(rnnDesc, input, hx, cx, weights);
+            RunInference(rnnDesc, input, hx, cx, weights, ref);
         }
+        ASSERT_TRUE(handle.GetKernelsImpl(fused_kernel_name, network_config).empty());
 
         // Under test: fused cooperative-grid path (flag on).
-        std::tuple<std::vector<T>, std::vector<T>, std::vector<T>> fused;
+        InferenceResult fused;
         {
             ScopedEnvironment<bool> fused_env(MIOPEN_DEBUG_RNN_FUSED_INFERENCE, true);
-            fused = RunInference(rnnDesc, input, hx, cx, weights);
+            RunInference(rnnDesc, input, hx, cx, weights, fused);
         }
+        ASSERT_FALSE(handle.GetKernelsImpl(fused_kernel_name, network_config).empty());
 
         DestroyInternalRnnDropoutDesc(rnnDesc);
 

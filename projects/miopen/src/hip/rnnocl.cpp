@@ -82,18 +82,18 @@ bool RNNForwardMSIsFast(const int seqLen)
 // validated for: single layer, LSTM/default algo, no dropout, packed inputs,
 // linear input mode, fp32. The kernel handles uniform batch (constant batch
 // across timesteps); per-timestep uniformity of in_n is checked at dispatch.
-bool RNNFusedInferenceIsSupported(const RNNDescriptor& desc,
-                                  miopenDataType_t dtype,
-                                  bool use_dropout)
+bool RNNFusedInferenceIsSupported(const Handle& handle,
+                                  const RNNDescriptor& desc,
+                                  miopenDataType_t dtype)
 {
 #if MIOPEN_BACKEND_HIP
-    return env::enabled(MIOPEN_DEBUG_RNN_FUSED_INFERENCE) && desc.rnnMode == miopenLSTM &&
-           desc.algoMode == miopenRNNdefault && desc.nLayers == 1 && !use_dropout &&
+    return env::enabled(MIOPEN_DEBUG_RNN_FUSED_INFERENCE) && handle.CooperativeLaunchSupported() &&
+           desc.rnnMode == miopenLSTM && desc.algoMode == miopenRNNdefault && desc.nLayers == 1 &&
            desc.inputMode != miopenRNNskip && dtype == miopenFloat;
 #else
+    std::ignore = handle;
     std::ignore = desc;
     std::ignore = dtype;
-    std::ignore = use_dropout;
     return false;
 #endif
 }
@@ -1851,41 +1851,46 @@ void RNNDescriptor::RNNForwardInferencePacked(const Handle& handle,
         // adds W_hh*h_{t-1} and the LSTM cell update. cx carry handled in-kernel.
         // The fused kernel assumes UNIFORM batch (constant in_n across timesteps);
         // packed variable-length sequences (decreasing in_n) fall back to the loop.
-        const bool uniform_batch =
-            std::all_of(in_n.begin(), in_n.end(), [&](int v) { return v == in_n.at(0); });
-        if(uniform_batch && RNNFusedInferenceIsSupported(*this, wDesc.GetType(), false))
+        if(RNNFusedInferenceIsSupported(handle, *this, wDesc.GetType()))
         {
-            const int max_batch        = in_n.at(0);
-            const size_t wei_shift_dir = static_cast<size_t>(in_h) * wei_stride +
-                                         static_cast<size_t>(li) * (bi * hy_h + hy_h) * wei_stride;
-            for(int ri = 0; ri < bi; ri++)
+            const bool uniform_batch =
+                std::all_of(in_n.begin(), in_n.end(), [&](int v) { return v == in_n.at(0); });
+            if(uniform_batch)
             {
-                const size_t hcx_off = hx_shift + static_cast<size_t>(ri) * hy_n * hy_h;
-                RNNFusedLSTMInferenceLoop(handle,
-                                          workSpace,
-                                          w,
-                                          cx,
-                                          hx,
-                                          hy,
-                                          cy,
-                                          seqLen,
-                                          max_batch,
-                                          hy_h,
-                                          hy_stride,
-                                          wei_len,
-                                          static_cast<int>(hid_off),
-                                          uni_stride,
-                                          bi,
-                                          ri,
-                                          /*reverse=*/ri,
-                                          wei_shift_dir,
-                                          hcx_off,
-                                          cx != nullptr,
-                                          hx != nullptr,
-                                          hy != nullptr,
-                                          cy != nullptr);
+                const int max_batch = in_n.at(0);
+                const size_t wei_shift_dir =
+                    static_cast<size_t>(in_h) * wei_stride +
+                    static_cast<size_t>(li) * (bi * hy_h + hy_h) * wei_stride;
+                for(int ri = 0; ri < bi; ri++)
+                {
+                    const size_t hcx_off = hx_shift + static_cast<size_t>(ri) * hy_n * hy_h;
+                    RNNFusedLSTMInferenceLoop(handle,
+                                              workSpace,
+                                              w,
+                                              cx,
+                                              hx,
+                                              hy,
+                                              cy,
+                                              seqLen,
+                                              max_batch,
+                                              hy_h,
+                                              hy_stride,
+                                              wei_len,
+                                              static_cast<int>(hid_off),
+                                              uni_stride,
+                                              bi,
+                                              ri,
+                                              /*reverse=*/ri,
+                                              wei_shift_dir,
+                                              hcx_off,
+                                              cx != nullptr,
+                                              hx != nullptr,
+                                              hy != nullptr,
+                                              cy != nullptr);
+                    profileRNNkernels(handle, 1, ctime);
+                }
+                continue;
             }
-            continue;
         }
         // from hidden state
         int bacc   = 0;
