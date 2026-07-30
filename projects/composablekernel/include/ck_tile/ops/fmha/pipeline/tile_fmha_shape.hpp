@@ -17,7 +17,7 @@ static CK_TILE_HOST_DEVICE constexpr index_t ceil_to_qualified_tile_length()
     else if constexpr(Headdim == 96)
         return 128;
     else if constexpr(Headdim == 160)
-        return 256;
+        return 160;
     else if constexpr(Headdim == 192)
         return 192;
     else if constexpr(is_power_of_two_integer(Headdim))
