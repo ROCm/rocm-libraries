@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import sys
+import types
 from pathlib import Path
 
 import pandas as pd
@@ -415,3 +417,246 @@ def test_prune_library_raises_when_merge_returns_multiple(monkeypatch: pytest.Mo
 
     with pytest.raises(RuntimeError, match="Found 2 libraries"):
         operations.prune_library(hip, lib, workdir=tmp_path / "w", cluster=False, devices=[0])
+
+
+# ---------------------------------------------------------------------------
+# normalize tests
+# ---------------------------------------------------------------------------
+
+def _make_tensile_mocks(calls: dict):
+    """Return (sys.modules patch dict, mock modules) for Tensile imports."""
+    tensile_mod = types.ModuleType("Tensile")
+    library_io_mod = types.ModuleType("Tensile.LibraryIO")
+    custom_yaml_mod = types.ModuleType("Tensile.CustomYamlLoader")
+    merge_lib_mod = types.ModuleType("Tensile.TensileMergeLibrary")
+
+    def _load_yaml_stream(path, loader):
+        calls["load"] = path
+        return [None, None, "gfx950"]  # must be a list – function validates this
+
+    def _convert_to_dict(data, path):
+        calls["convert"] = path
+        return {"converted": True}
+
+    def _normalize_dict(data):
+        calls["normalize"] = data
+
+    def _write_yaml(path, data, **kwargs):
+        calls["write"] = (path, data)
+
+    library_io_mod.writeYAML = _write_yaml
+    custom_yaml_mod.load_yaml_stream = _load_yaml_stream
+    merge_lib_mod.convertToDict = _convert_to_dict
+    merge_lib_mod.normalizeDictLibraryLayout = _normalize_dict
+    tensile_mod.LibraryIO = library_io_mod
+
+    patch = {
+        "Tensile": tensile_mod,
+        "Tensile.LibraryIO": library_io_mod,
+        "Tensile.CustomYamlLoader": custom_yaml_mod,
+        "Tensile.TensileMergeLibrary": merge_lib_mod,
+    }
+    return patch
+
+
+def test_normalize_raises_if_library_not_found(tmp_path: Path) -> None:
+    with pytest.raises(FileNotFoundError, match="Library path not found"):
+        operations.normalize(tmp_path / "missing.yaml", tmp_path / "out.yaml")
+
+
+def test_normalize_raises_if_hipblaslt_path_not_found(tmp_path: Path) -> None:
+    lib = tmp_path / "lib.yaml"
+    lib.touch()
+    with pytest.raises(FileNotFoundError, match="hipBLASLt path not found"):
+        operations.normalize(lib, tmp_path / "out.yaml", hipblaslt_path=tmp_path / "missing")
+
+
+def test_normalize_raises_if_data_not_list(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    lib = tmp_path / "lib.yaml"
+    lib.touch()
+
+    calls: dict = {}
+    mocks = _make_tensile_mocks(calls)
+    # Override load to return a non-list (dict format is unsupported as input)
+    mocks["Tensile.CustomYamlLoader"].load_yaml_stream = lambda *_a, **_k: {"dict": "format"}
+    for mod_name, mod in mocks.items():
+        monkeypatch.setitem(sys.modules, mod_name, mod)
+
+    with pytest.raises(ValueError, match="not in list format"):
+        operations.normalize(lib, tmp_path / "out.yaml")
+
+
+def test_normalize_calls_tensile_pipeline(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    lib = tmp_path / "lib.yaml"
+    yaml.safe_dump([None, None, "gfx950"], lib.open("w"))
+    out = tmp_path / "out.yaml"
+
+    calls: dict = {}
+    for mod_name, mod in _make_tensile_mocks(calls).items():
+        monkeypatch.setitem(sys.modules, mod_name, mod)
+
+    operations.normalize(lib, out)
+
+    assert calls["load"] == lib
+    assert calls["convert"] == str(lib)
+    assert calls["normalize"] == {"converted": True}
+    assert calls["write"] == (str(out), {"converted": True})
+
+
+def test_normalize_appends_tensile_to_sys_path_when_hipblaslt_given(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    lib = tmp_path / "lib.yaml"
+    lib.touch()
+    hip = tmp_path / "hip"
+    hip.mkdir()
+    expected = str(hip / "tensilelite")
+
+    calls: dict = {}
+    for mod_name, mod in _make_tensile_mocks(calls).items():
+        monkeypatch.setitem(sys.modules, mod_name, mod)
+
+    original_path = list(sys.path)
+    operations.normalize(lib, tmp_path / "out.yaml", hipblaslt_path=hip)
+
+    assert expected in sys.path
+    # cleanup to avoid polluting other tests
+    if expected not in original_path:
+        sys.path.remove(expected)
+
+
+# ---------------------------------------------------------------------------
+# Helpers for default_solution mismatch tests
+# ---------------------------------------------------------------------------
+
+def _write_library_yaml_with_default(path: Path, lib_name: str, default_solution) -> Path:
+    """Write a minimal library YAML, optionally setting DefaultSolution (index 12)."""
+    data = [
+        None,
+        None,
+        "gfx950",
+        None,
+        {
+            "TransposeA": 0,
+            "TransposeB": 0,
+            "DataType": 0,
+            "DestDataType": 0,
+            "ComputeDataType": 0,
+        },
+        [{"SolutionIndex": 0, "StaggerU": 0}],
+        [2, 3, 0, 1],
+        [[[16, 16, 1, 16], [0, 100.0]]],
+        None,
+        None,
+        "DeviceEfficiency",
+        "Equality",
+        default_solution,  # index 12 – DefaultSolution
+    ]
+    p = path / lib_name
+    yaml.safe_dump(data, p.open("w"), sort_keys=False)
+    return p
+
+
+# ---------------------------------------------------------------------------
+# merge_solutions – default_solution mismatch checks (line 181)
+# ---------------------------------------------------------------------------
+
+def test_merge_solutions_raises_on_default_solution_mismatch(tmp_path: Path) -> None:
+    ldir1 = tmp_path / "b1" / "3_LibraryLogic"
+    ldir2 = tmp_path / "b2" / "3_LibraryLogic"
+    ldir1.mkdir(parents=True)
+    ldir2.mkdir(parents=True)
+    _write_library_yaml_with_default(ldir1, "x.yaml", {"StaggerU": 0})
+    _write_library_yaml_with_default(ldir2, "x.yaml", {"StaggerU": 1})
+
+    with pytest.raises(NotImplementedError, match="Default solution mismatch"):
+        operations.merge_solutions(tmp_path, epilogues=False)
+
+
+def test_merge_solutions_ok_with_matching_default_solution(tmp_path: Path) -> None:
+    ldir1 = tmp_path / "b1" / "3_LibraryLogic"
+    ldir2 = tmp_path / "b2" / "3_LibraryLogic"
+    ldir1.mkdir(parents=True)
+    ldir2.mkdir(parents=True)
+    _write_library_yaml_with_default(ldir1, "x.yaml", {"StaggerU": 0})
+    _write_library_yaml_with_default(ldir2, "x.yaml", {"StaggerU": 0})
+
+    merged = operations.merge_solutions(tmp_path, epilogues=False)
+    assert len(merged) == 1
+
+
+def test_merge_solutions_ok_when_both_default_solution_none(tmp_path: Path) -> None:
+    ldir1 = tmp_path / "b1" / "3_LibraryLogic"
+    ldir2 = tmp_path / "b2" / "3_LibraryLogic"
+    ldir1.mkdir(parents=True)
+    ldir2.mkdir(parents=True)
+    _write_library_yaml_with_default(ldir1, "x.yaml", None)
+    _write_library_yaml_with_default(ldir2, "x.yaml", None)
+
+    merged = operations.merge_solutions(tmp_path, epilogues=False)
+    assert len(merged) == 1
+
+
+# ---------------------------------------------------------------------------
+# extract_solutions – default_solution mismatch checks (line 268)
+# ---------------------------------------------------------------------------
+
+def test_extract_solutions_raises_on_default_solution_mismatch(tmp_path: Path) -> None:
+    lib_dir1 = tmp_path / "libs1"
+    lib_dir2 = tmp_path / "libs2"
+    lib_dir1.mkdir()
+    lib_dir2.mkdir()
+    p1 = _write_library_yaml_with_default(lib_dir1, "a.yaml", {"StaggerU": 0})
+    p2 = _write_library_yaml_with_default(lib_dir2, "a.yaml", {"StaggerU": 1})
+
+    # Two match-table entries pointing to different paths but same filename
+    mt = _write_match_table(tmp_path, [[str(p1), 0], [str(p2), 0]])
+    df = pd.DataFrame(
+        [
+            {"m": 16, "n": 16, "batch_count": 1, "k": 16, "solutionIdx": 0},
+            {"m": 32, "n": 32, "batch_count": 1, "k": 32, "solutionIdx": 1},
+        ]
+    )
+
+    with pytest.raises(NotImplementedError, match="Default solution mismatch"):
+        operations.extract_solutions(df, mt)
+
+
+def test_extract_solutions_ok_with_matching_default_solution(tmp_path: Path) -> None:
+    lib_dir1 = tmp_path / "libs1"
+    lib_dir2 = tmp_path / "libs2"
+    lib_dir1.mkdir()
+    lib_dir2.mkdir()
+    p1 = _write_library_yaml_with_default(lib_dir1, "a.yaml", {"StaggerU": 0})
+    p2 = _write_library_yaml_with_default(lib_dir2, "a.yaml", {"StaggerU": 0})
+
+    mt = _write_match_table(tmp_path, [[str(p1), 0], [str(p2), 0]])
+    df = pd.DataFrame(
+        [
+            {"m": 16, "n": 16, "batch_count": 1, "k": 16, "solutionIdx": 0},
+            {"m": 32, "n": 32, "batch_count": 1, "k": 32, "solutionIdx": 1},
+        ]
+    )
+
+    libs = operations.extract_solutions(df, mt)
+    assert len(libs) == 1
+
+
+def test_extract_solutions_ok_when_both_default_solution_none(tmp_path: Path) -> None:
+    lib_dir1 = tmp_path / "libs1"
+    lib_dir2 = tmp_path / "libs2"
+    lib_dir1.mkdir()
+    lib_dir2.mkdir()
+    p1 = _write_library_yaml_with_default(lib_dir1, "a.yaml", None)
+    p2 = _write_library_yaml_with_default(lib_dir2, "a.yaml", None)
+
+    mt = _write_match_table(tmp_path, [[str(p1), 0], [str(p2), 0]])
+    df = pd.DataFrame(
+        [
+            {"m": 16, "n": 16, "batch_count": 1, "k": 16, "solutionIdx": 0},
+            {"m": 32, "n": 32, "batch_count": 1, "k": 32, "solutionIdx": 1},
+        ]
+    )
+
+    libs = operations.extract_solutions(df, mt)
+    assert len(libs) == 1

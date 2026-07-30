@@ -123,12 +123,16 @@ class Library:
     def _get(self, idx: int, dict_key: str):
         if self.format == "dict":
             return self.data.get(dict_key)
+        if len(self.data) <= idx:
+            return None
         return self.data[idx]
 
     def _set(self, idx: int, dict_key: str, value) -> None:
         if self.format == "dict":
             self.data[dict_key] = value
         else:
+            if len(self.data) <= idx:
+                self.data.extend([None] * (idx - len(self.data) + 1))
             self.data[idx] = value
 
     @property
@@ -141,7 +145,7 @@ class Library:
         if self.format == "dict":
             return self.data.get("ArchitectureName")
         if isinstance(self.data[2], dict):
-            return self.data[2].get("Architecture", None)
+            return self.data[2].get("Architecture")
         return self.data[2]
 
     @property
@@ -267,6 +271,29 @@ class Library:
         if not isinstance(val, str):
             raise TypeError("Must be a string")
         self._set(11, "LibraryType", val)
+    
+    @property
+    def default_solution(self) -> str:
+        """Get the library default solution.
+
+        Returns:
+            dict: Library default solution.
+        """
+        return self._get(12, "DefaultSolution")
+
+    @default_solution.setter
+    def default_solution(self, val: dict) -> None:
+        """Set the default solution of the library.
+
+        Args:
+            val (dict): New default solution.
+
+        Raises:
+            TypeError: If 'val' is not a dict.
+        """
+        if not isinstance(val, dict):
+            raise TypeError("Must be a dict")
+        self._set(12, "DefaultSolution", val)
 
     def add_epilogues(self) -> None:
         """Add epilogue support (bias, activation, scaling) to a library.
