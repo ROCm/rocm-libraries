@@ -151,6 +151,34 @@ or `select_spec()` output. This is an executable invariant in
 engine into that copy (never the shipped singleton), and asserts every
 pre-existing candidate's behavior is byte-identical with and without it.
 
+## Per-engine spec_fn (geometry ownership)
+
+The long-run goal is the GEMM shape: each engine builds its own kernel spec
+(`platform/python/rocke/dispatch/gemm/bf16_rcr.py` — one `_spec_*` per candidate),
+instead of one shared `_tiled_spec_from_problem` cascade of `if` branches.
+
+Migration is incremental — one cohort at a time. The pattern (first brick:
+`_spec_gfx942_fp16_flash`, owned by `attention_gfx942_dense_pipe`):
+
+1. **Extract** the cohort's branch from `_tiled_spec_from_problem`
+   (`builders/common/attention_spec_builder.py`) into a named
+   `_spec_<engine>(problem)` — a self-contained builder (resolves its own arch /
+   spec class). Pure move: byte-identical, no value change.
+2. The cascade branch **delegates** to it (`return _spec_<engine>(problem)`), so
+   the shared function shrinks by one branch.
+3. The dispatch candidate **documents ownership** of that `spec_fn` (a docstring
+   linkage). Geometry stays in the **builder layer** — do NOT move it into the
+   candidate. The dispatcher still decides only `(path, head_size, block_size)`,
+   and the C++ parity identity is unchanged (see the top of this doc).
+4. **Test** byte-identity + non-interference (see
+   `tests/dispatch/attention/test_gfx942_fp16_flash_spec_fn.py`), then GPU-verify
+   the cohort's arch (latencies within noise of pre-change).
+
+Remaining cohorts to migrate this way (each needs its own engine + arch GPU
+verify): gfx942 bf16 flash, gfx950 combo / single-batch schedule, gfx1250. The
+D256 override is a related but distinct single-sourcing case (see
+`_d256_gfx950_spec_overrides`).
+
 ## Multi-engine benchmarking: `attention_sweep_space`
 
 `attention_sweep_space(req)` returns the deduped `select_spec` of every candidate
