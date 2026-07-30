@@ -1,6 +1,6 @@
 # RUN: %stinkytofu-opt --arch gfx1250 %s --CFGBuilderPass --Gfx1250HazardPass --print-output
 #
-# Gfx1250HazardPass initially implements MI450 single-group replay protection
+# Gfx1250HazardPass initially implements single-group replay protection
 # that hardware does not insert itself. It must:
 #   * split unsafe SMEM and FLAT groups with s_wait_xcnt 0;
 #   * drain VMEM before the first atomic, but not between atomics;

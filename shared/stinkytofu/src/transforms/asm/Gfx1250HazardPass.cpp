@@ -282,6 +282,9 @@ class Gfx1250HazardPass : public Pass {
         // 2. FLAT:
         //    (a) must not overwrite a group source;
         //    (b) a single instruction FLAT group may overwrite its own source.
+        //        Otherwise, XNACK replay may re-execute a successful FLAT after its
+        //        source has been overwritten. The XNACKed FLAT is safe because its
+        //        source is still intact.
         // 3. SMEM:
         //    (a) no instruction may overwrite any group source.
         // 4. Atomic / RMW:

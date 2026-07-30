@@ -12,7 +12,7 @@ class Function;
 class Pass;
 class StinkyAsmModule;
 
-/// Insert gfx1250 / MI450 assembly hazards that cannot be left to hardware.
+/// Insert gfx1250 assembly hazards that cannot be left to hardware.
 ///
 /// The initial policy implements XNACK replay protection for FLAT and SMEM
 /// source clobbers, atomics/RMW operations, existing s_prefetch instructions,

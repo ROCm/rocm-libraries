@@ -10,9 +10,12 @@
 #include <cstdint>
 #include <iostream>
 #include <string>
+#include <unordered_set>
 
 #include "stinkytofu/bindings/python/Module.hpp"
+#include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/core/IRBase.hpp"
+#include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #endif
 
 namespace stinkytofu {
@@ -32,7 +35,10 @@ enum class XcntDrainReason {
 #if STINKYTOFU_GFX1250_HAZARD_PROFILE
 class XcntDrainProfile {
    public:
-    explicit XcntDrainProfile(const StinkyAsmModule* module) : module(module) {}
+    explicit XcntDrainProfile(const StinkyAsmModule* module) {
+        collectGroupAnchors(module, "loopWithPrefetch", loopWithPrefetchAnchors);
+        collectGroupAnchors(module, "noLoadLoopBody", noLoadLoopBodyAnchors);
+    }
 
     void noteTensorLoad() {
         usesTensorLoad = true;
@@ -61,9 +67,9 @@ class XcntDrainProfile {
                 break;
         }
 
-        if (isInGroup("loopWithPrefetch", anchor)) {
+        if (loopWithPrefetchAnchors.contains(anchor)) {
             ++loopWithPrefetch;
-        } else if (isInGroup("noLoadLoopBody", anchor)) {
+        } else if (noLoadLoopBodyAnchors.contains(anchor)) {
             ++noLoadLoopBody;
         } else {
             ++outsideRegions;
@@ -84,16 +90,36 @@ class XcntDrainProfile {
     }
 
    private:
-    bool isInGroup(const std::string& name, const IRBase* anchor) const {
-        if (module == nullptr) return false;
+    static void collectGroupAnchors(const StinkyAsmModule* module, const std::string& name,
+                                    std::unordered_set<const IRBase*>& anchors) {
+        if (module == nullptr) return;
         auto range = module->findGroupRange(name);
-        if (!range) return false;
-        for (auto it = range->first; it != range->second; ++it)
-            if (it.getNodePtr() == anchor) return true;
-        return false;
+        if (!range) return;
+        auto [begin, end] = range.value();
+
+        IRBase* beginAnchor = begin.getNodePtr();
+        IRBase* endAnchor = end.getNodePtr();  // Exclusive; null means function end.
+        if (beginAnchor == nullptr) return;
+
+        BasicBlock* beginBB = beginAnchor->getParent();
+        Function* function = beginBB ? beginBB->getParent() : nullptr;
+        if (function == nullptr) return;
+
+        // CFG construction can split the original range across physical basic
+        // blocks. Walk them in layout order until reaching the exclusive end.
+        for (auto bbIt = BasicBlockList::iterator(beginBB); bbIt != function->end(); ++bbIt) {
+            BasicBlock& bb = *bbIt;
+            auto irIt = (&bb == beginBB) ? BasicBlock::iterator(beginAnchor) : bb.begin();
+            for (; irIt != bb.end(); ++irIt) {
+                IRBase* ir = irIt.getNodePtr();
+                if (ir == endAnchor) return;
+                if (dyn_cast<StinkyInstruction>(ir)) anchors.insert(ir);
+            }
+        }
     }
 
-    const StinkyAsmModule* module = nullptr;
+    std::unordered_set<const IRBase*> loopWithPrefetchAnchors;
+    std::unordered_set<const IRBase*> noLoadLoopBodyAnchors;
     uint64_t total = 0;
     uint64_t atomicRule4a = 0;
     uint64_t smemRule3 = 0;
