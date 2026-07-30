@@ -50,10 +50,13 @@ pass `None` to skip the mask.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, Optional, Sequence, Tuple
+from typing import TYPE_CHECKING, Callable, Optional, Sequence, Tuple, Union
 
 from ..core.ir import BF16, F16, F32, IRBuilder, Value
 from .atoms import MfmaAtom
+
+if TYPE_CHECKING:
+    from ..core.arch.target import MmaOp
 from .distribution import (
     LoadStoreTraits,
     TileDistribution,
@@ -354,7 +357,6 @@ class CShuffleEpilogue:
          output rows.
     """
 
-    atom: MfmaAtom
     grid: WarpGrid
     store_vec: int = 8  # halves per wide store
     smem_name_hint: str = "C_smem"
@@ -365,6 +367,44 @@ class CShuffleEpilogue:
     # 1-byte stores via ``global_store_vN`` (no buffer-store fp8
     # intrinsic exists today on the AMDGPU LLVM target).
     out_dtype: str = "f16"
+    # cshuffle "no-alias" mode: when True the C staging tile gets its own
+    # exclusive LDS bytes (not aliased onto the A/B pool) and the step-0 reuse
+    # barrier is elided -> lower small-tile latency, more LDS. Default False
+    # keeps the aliased/low-LDS behavior (byte-identical).
+    no_alias: bool = False
+    # MFMA path: set by from_grid(); drives lane_to_output in store().
+    atom: Optional[MfmaAtom] = None
+    # WMMA path: set by from_grid_op(); uses c_frag_len / c_layout().coord() instead.
+    mma_op: Optional["MmaOp"] = None
+
+    @classmethod
+    def from_grid_op(
+        cls,
+        *,
+        op: "MmaOp",
+        grid: WarpGrid,
+        max_store_vec: int = 8,
+        out_dtype: str = "f16",
+    ) -> "CShuffleEpilogue":
+        """Construct for a WMMA (``MmaOp``) accumulator layout.
+
+        Uses ``op.c_frag_len`` / ``op.c_layout()`` for the LDS scatter in
+        place of the MFMA-specific ``atom.lane_to_output``.
+        """
+        _fp32_out = out_dtype == "fp32"
+        _max_sv = min(max_store_vec, 4) if _fp32_out else min(max_store_vec, 8)
+        v = _max_sv
+        block_size = grid.block_size
+        while v > 1:
+            ok = (
+                grid.tile_n % v == 0
+                and (grid.tile_m * grid.tile_n) // v >= block_size
+                and ((grid.tile_m * grid.tile_n) // v) % block_size == 0
+            )
+            if ok:
+                break
+            v //= 2
+        return cls(grid=grid, store_vec=v, out_dtype=out_dtype, mma_op=op)
 
     @classmethod
     def from_grid(
@@ -374,6 +414,7 @@ class CShuffleEpilogue:
         grid: WarpGrid,
         max_store_vec: int = 8,
         out_dtype: str = "f16",
+        no_alias: bool = False,
     ) -> "CShuffleEpilogue":
         """Pick the widest `store_vec` that distributes the tile evenly.
 
@@ -394,7 +435,9 @@ class CShuffleEpilogue:
             if ok:
                 break
             v //= 2
-        return cls(atom=atom, grid=grid, store_vec=v, out_dtype=out_dtype)
+        return cls(
+            atom=atom, grid=grid, store_vec=v, out_dtype=out_dtype, no_alias=no_alias
+        )
 
     def store(
         self,
@@ -406,9 +449,26 @@ class CShuffleEpilogue:
         bounds: Optional[Tuple[Value, Value]] = None,
     ) -> None:
         atom = self.atom
+        op = self.mma_op
         grid = self.grid
         if not grid.is_bound:
             raise RuntimeError("CShuffleEpilogue: grid must be bound first")
+        if atom is None and op is None:
+            raise RuntimeError(
+                "CShuffleEpilogue: must set either atom (MFMA) or mma_op (WMMA)"
+            )
+
+        # Resolve per-lane count and atom tile size from whichever ISA is active.
+        if op is not None:
+            _c_per_lane = op.c_frag_len
+            _atom_m = op.m
+            _atom_n = op.n
+            _c_layout = op.c_layout()
+        else:
+            _c_per_lane = atom.c_per_lane
+            _atom_m = atom.m
+            _atom_n = atom.n
+            _c_layout = None
 
         mfmas_m = grid.mfmas_per_warp_m
         mfmas_n = grid.mfmas_per_warp_n
@@ -423,20 +483,19 @@ class CShuffleEpilogue:
         _bf16_out = self.out_dtype == "bf16"
         _lds_dtype = F32 if _fp32_out else (BF16 if _bf16_out else F16)
 
-        # ---- step 1: publish accs to LDS at the MFMA output layout. ----
+        # ---- step 1: publish accs to LDS at the MMA output layout. ----
         #
         # The LDS staging region is a plain ``[tile_m, tile_n]`` row-major
         # buffer (``LdsLayout.cshuffle``); each lane writes its
-        # ``c_per_lane`` accumulator elements at the exact MFMA *output*
-        # coordinate the atom dictates, so the subsequent row-major
+        # ``c_per_lane`` accumulator elements at the exact MMA *output*
+        # coordinate the atom/op dictates, so the subsequent row-major
         # stage-3 read reconstructs the global tile. The per-warp-tile
         # accumulator is carried in a :class:`StaticDistributedTensor`
         # and published through :func:`store_tile_cshuffle`.
         #
-        # The MFMA output layout (``atom.lane_to_output``) is not a clean
-        # ``unmerge`` of the lane id (the 32x32 row formula interleaves
-        # register and lane bits), so the LDS coordinate is supplied via
-        # an explicit ``coord_fn`` rather than ``calculate_x``.
+        # The MMA output layout (``atom.lane_to_output`` / ``op.c_layout().coord()``)
+        # is not a clean ``unmerge`` of the lane id, so the LDS coordinate is
+        # supplied via an explicit ``coord_fn`` rather than ``calculate_x``.
         lds_layout = LdsLayout.cshuffle(tile_m=grid.tile_m, tile_n=grid.tile_n)
         lds_layout.validate()
         c_view = make_lds_view(
@@ -444,6 +503,7 @@ class CShuffleEpilogue:
             dtype=_lds_dtype,
             shape=lds_layout.storage_shape(grid.tile_m),
             name_hint=self.smem_name_hint,
+            exclusive=self.no_alias,
         )
         c_smem = c_view.base
         # A full-extent LDS window; per-(mi, ni) origins move within it.
@@ -457,8 +517,23 @@ class CShuffleEpilogue:
         # outer Y enumerates the ``c_per_lane`` register slots and the
         # inner (vector) Y is the scalar publish unit. ``y_to_linear`` of
         # ``(i, 0)`` is exactly the accumulator index ``i``.
-        dist = _cshuffle_acc_distribution(atom.c_per_lane)
+        dist = _cshuffle_acc_distribution(_c_per_lane)
         traits = LoadStoreTraits(distribution=dist, vector_dim_y=1, scalar_per_vector=1)
+
+        # ---- step 0: reuse barrier. ----
+        # The common-LDS packer aliases this C staging tile onto the A/B
+        # staging bytes (non-interfering in program order). Double-buffered /
+        # prefetched (compv4 / async_dma) mainloops end with the tail-tile MFMA
+        # reading A/B from LDS *after* their last drain barrier and emit no
+        # trailing barrier, so without a barrier here a fast wave's first C
+        # ``ds_write`` would clobber A/B bytes a slow wave is still reading for
+        # its tail MFMA -- a cross-wave WAR on the aliased pool region.
+        #
+        # With ``no_alias`` the C tile has its own exclusive LDS bytes that never
+        # overlap A/B, so this WAR cannot occur and the barrier is elided. The
+        # step-2 C-write->C-read barrier below is a genuine RAW and always stays.
+        if not self.no_alias:
+            b.sync()
 
         for mi in range(mfmas_m):
             for ni in range(mfmas_n):
@@ -473,19 +548,43 @@ class CShuffleEpilogue:
                 else:
                     acc_staged = b.vec_trunc_f32_to_f16(acc)
                     dt = make_static_distributed_tensor(dist, dtype=F16)
-                for i in range(atom.c_per_lane):
+                for i in range(_c_per_lane):
                     dt.set([i, 0], b.vec_extract(acc_staged, i))
 
-                tile_m_base = b.add(warp_m_off, b.const_i32(mi * atom.m))
-                tile_n_base = b.add(warp_n_off, b.const_i32(ni * atom.n))
+                tile_m_base = b.add(warp_m_off, b.const_i32(mi * _atom_m))
+                tile_n_base = b.add(warp_n_off, b.const_i32(ni * _atom_n))
 
-                def coord_fn(b_, y_base, k, *, _mb=tile_m_base, _nb=tile_n_base):
-                    # y_base = (i, 0); k = 0 (vector dim length 1).
-                    i = int(y_base[0])
-                    row_in_atom, col_in_atom = atom.lane_to_output(b_, grid.lane, i)
-                    ld_m = b_.add(_mb, row_in_atom)
-                    ld_n = b_.add(_nb, col_in_atom)
-                    return [ld_m, ld_n]
+                if _c_layout is not None:
+                    # WMMA path: use op.c_layout().coord() for the LDS scatter.
+                    def coord_fn(
+                        b_,
+                        y_base,
+                        k,
+                        *,
+                        _mb=tile_m_base,
+                        _nb=tile_n_base,
+                        _layout=_c_layout,
+                        _lane=grid.lane,
+                    ):
+                        i = int(y_base[0])
+                        row_in_atom, col_in_atom = _layout.coord(b_, _lane, i)
+                        return [b_.add(_mb, row_in_atom), b_.add(_nb, col_in_atom)]
+
+                else:
+                    # MFMA path: use atom.lane_to_output().
+                    def coord_fn(
+                        b_,
+                        y_base,
+                        k,
+                        *,
+                        _mb=tile_m_base,
+                        _nb=tile_n_base,
+                        _atom=atom,
+                        _lane=grid.lane,
+                    ):
+                        i = int(y_base[0])
+                        row_in_atom, col_in_atom = _atom.lane_to_output(b_, _lane, i)
+                        return [b_.add(_mb, row_in_atom), b_.add(_nb, col_in_atom)]
 
                 store_tile_cshuffle(b, c_window, dt, traits=traits, coord_fn=coord_fn)
 
