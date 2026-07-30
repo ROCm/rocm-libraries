@@ -500,12 +500,25 @@ mini; see `README.md` for the ledger):
   not re-anchor $m_i$ (a wave-uniform predicate gates a 0/1-trip `scf.for`).
 - **fast exp2** — the softmax argument is $\le 0$, so the IEEE `exp2`
   overflow guard is dead; the raw `v_exp_f32` is safe (+2.7%).
+- **transposed $V$ layout** — take $V$ as $[B, H, D, S]$ so a lane's 16 keys are
+  contiguous and read as 2 `dwordx4` instead of 16 strided d16 loads (256→32
+  vector-memory instructions per iteration). Costs address divergence across the
+  32 lanes, which a standalone bandwidth probe settles in favour of the
+  transposed form: 1685 GB/s vs 850 GB/s. Worth −20.3% cycles at $L=4096$,
+  −5.9% at $L=8192$, and nothing at $L=16384$ where the memory unit is
+  latency-saturated rather than throughput-saturated.
+- **d-outer QK loop** (`qk_douter`) — restructure the QK loop to iterate $d$
+  outside the kv sub-tiles (+3.3%). Note the mechanism is *not* the one it was
+  built for: $Q$ is loop-invariant and LLVM already hoisted it, so no loads were
+  removed. The gain is duplicate-address elimination in the texture unit, visible
+  only in `TA_TA_BUSY` — which is why the ISA is worth checking before crediting
+  a mechanism.
 
-The result is **~23 TF dense** (peak ~24.7 TF at $L=1024$), roughly **2×** the
-single-wave record. The reformulation, not any single micro-op, is what unlocked
-it: putting the query on the lane made the softmax in-lane, the P-transpose
-LDS-free, and the rescale a register op — removing the three structural taxes the
-untransposed kernel pays every K-tile.
+The result is **22.80 TF at $L=16384$** and a peak of **~24.7 TF at $L=1024$**,
+roughly **2×** the single-wave record. The reformulation, not any single micro-op,
+is what unlocked it: putting the query on the lane made the softmax in-lane, the
+P-transpose LDS-free, and the rescale a register op — removing the three
+structural taxes the untransposed kernel pays every K-tile.
 
 - `kernels/gfx1151/wmma_fmha_swapqk.py` — the production kernel (this section).
   Ref: CK `ck_tile/.../warp_wmma_gemm_gfx11_utils.hpp::PermuteWarpGemmCToA` and

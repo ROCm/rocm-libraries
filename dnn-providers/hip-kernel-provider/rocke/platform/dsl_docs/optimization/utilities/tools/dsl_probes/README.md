@@ -149,6 +149,62 @@ kernel and not for the warmup.
 Useful for: pairing with the rocprof-based tools under
 `utilities/tools/stage4_analyze/` and `stage5_compare/`.
 
+### `probe_roofline_peaks.py` (+ `.hip`)
+**Input**: `--cus`, `--arch`, `--build`.
+**Output**: cycles per instruction per SIMD, ops/clk/CU and the implied
+TFLOPS ceiling, for the matrix, VALU and transcendental ports — each at
+one wave/SIMD and saturated.
+
+How it works: the companion `.hip` runs `NACC=8` independent
+accumulator chains of a single instruction class per dispatch, so the
+measurement is issue-limited rather than dependency-limited. Cycles come
+from `rocprofv3 GRBM_GUI_ACTIVE`, not wall time, because parts that
+power-throttle swing 20–40% within seconds — larger than most effects
+worth measuring.
+
+Useful for: producing the anchors `probe_cycle_budget.py` needs, and for
+answering "how far off the port ceiling am I?" in absolute terms.
+
+### `probe_cycle_budget.py`
+**Input**: a workload command after `--`, `--simds`, the three
+`--anchor-*` issue costs, and optionally the exact `--mma-count` /
+`--transcendental-count` derived from the problem shape.
+**Output**: cycles split into matrix issue, transcendental issue, other
+VALU issue, total issue, and stall / unaccounted — plus L2 hit rate and
+memory-unit busy.
+
+How it works: runs the workload under `rocprofv3` once per small counter
+group (many parts cannot collect more than a handful per pass; asking for
+too many makes rocprofv3 replay the dispatch until it times out), then
+prices the retired instruction mix against the anchors. The MMA and
+transcendental counts must be supplied because `SQ_INSTS_VALU` on RDNA3
+lumps them in with plain VALU.
+
+Useful for: deciding whether the next lever should remove instructions or
+remove stalls. If issue is already ~70% of the budget, cutting
+instruction count buys little — the freed slots just become stall.
+
+### `probe_l2_residency.py`
+**Input**: a workload command after `--`, `--target`.
+**Output**: `GL2C_HIT_sum` / `GL2C_MISS_sum`, hit rate, and a
+pass/fail against the target (non-zero exit on failure).
+
+How it works: one `rocprofv3` pass around the workload.
+
+Useful for: catching the point where a reused working set outgrows
+L2/MALL and the kernel turns residency-bound. Because it exits non-zero
+it works as a bisect or CI gate, not just a diagnostic.
+
+### `probe_counter_aggregate.py`
+**Input**: `--csv-dir` holding one or more rocprofv3 runs, `--drop-cold`.
+**Output**: mean / stddev / min / max / N per counter across every
+`*counter_collection.csv` found recursively.
+
+How it works: pure CSV post-processing, no GPU needed.
+
+Useful for: stitching multi-pass counter collection back together, and
+for seeing the run-to-run variance before trusting a single number.
+
 ## Layout summary
 
 ```text
@@ -160,7 +216,11 @@ dsl_probes/
 ├── probe_lowering_compare.py         # LLVM-direct vs HIP-debug HSACO compare
 ├── probe_config_sweep.py             # dataclasses.replace sweep over a spec
 ├── probe_targeted_bench.py           # one-window CUDA-event bench across shapes
-└── probe_rocprof_single.py           # single-process rocprof-friendly harness
+├── probe_rocprof_single.py           # single-process rocprof-friendly harness
+├── probe_roofline_peaks.py / .hip    # measured per-instruction issue costs
+├── probe_cycle_budget.py             # counters → issue vs stall split
+├── probe_l2_residency.py             # L2 hit rate as a pass/fail gate
+└── probe_counter_aggregate.py        # multi-pass counter CSV summary
 ```
 
 ## Conventions
@@ -171,8 +231,11 @@ dsl_probes/
   before invoking.
 - **No GPU launch in the smoke `--demo`.** Demos only need `compile_kernel`
   and inspection. This makes the probes safe to run in CI without a
-  device attached (other than `probe_rocprof_single.py`, which by
-  definition requires a GPU).
+  device attached. The counter-driven probes are the exception and
+  require a device plus `rocprofv3`: `probe_rocprof_single.py`,
+  `probe_roofline_peaks.py`, `probe_cycle_budget.py` and
+  `probe_l2_residency.py`. `probe_counter_aggregate.py` post-processes
+  their output and needs neither.
 - **One probe per question.** Composable Python entry points
   (`probe_occupancy(entries)`, `probe_isa_inspect(entries)`,
   `count_intrinsics(ir_text)`, `bench_shapes(shapes, …)`,

@@ -2,14 +2,19 @@
 # SPDX-License-Identifier: MIT
 """Transposed-QK WMMA FMHA-forward kernel for gfx1151 (CK gfx11 `qr_ks_vs` design).
 
-PRODUCTION kernel (the campaign winner, ~23 TF dense @ L2048, H24 B1 D128, gfx1151
-Strix Halo). The clean production entry point is :class:`WmmaFmhaSwapQKSpec` +
-:func:`build_wmma_fmha_swapqk_fwd` / :func:`wmma_fmha_swapqk_fwd_grid`, which bake
-the swept + hardware-validated knobs: wave2, pingpong ``s_setprio`` scheduling,
-buffer-descriptor D16 V-gather, dual-subtile gather, lazy online-softmax rescale,
-and fast (raw) exp2. The lower-level :class:`SwapQKCfg` / :func:`build_wmma_fmha_swapqk`
-expose every knob (including the documented dead-ends) for the tuning harness in
-``builders/gfx1151/attention`` (``sq_tune``). See ``ALGORITHM.md`` / ``README.md``.
+PRODUCTION kernel (the campaign winner: 22.80 TF dense @ L16384, 24.7 TF @ L1024,
+H24 B1 D128, gfx1151 Strix Halo). The clean production entry point is
+:class:`WmmaFmhaSwapQKSpec` + :func:`build_wmma_fmha_swapqk_fwd` /
+:func:`wmma_fmha_swapqk_fwd_grid`, which bake the swept + hardware-validated
+knobs: wave2, pingpong ``s_setprio`` scheduling, buffer-descriptor D16 V-gather,
+dual-subtile gather, the transposed V layout, the d-outer QK loop, lazy
+online-softmax rescale, and fast (raw) exp2. Note that the transposed V layout
+means callers pass V as ``[B, H, D, S]`` -- see :func:`swapqk_transpose_v`.
+
+The lower-level :class:`SwapQKCfg` / :func:`build_wmma_fmha_swapqk` expose every
+knob for A/B work. Each field's docstring records what it measured, including the
+dead-ends, so the negative results stay attached to the code they describe rather
+than living only in a design doc. See ``ALGORITHM.md`` / ``README.md``.
 
 This is the structural change the register-transpose investigation pointed at. The
 gather winner (``fmha_multiwave``) computes ``S = Q*K^T`` (query on the accumulator
@@ -71,6 +76,8 @@ from rocke.helpers.attention import apply_attention_mask
 __all__ = [
     # production API (clean spec, winning knobs baked in)
     "WmmaFmhaSwapQKSpec",
+    "swapqk_num_work_items",
+    "swapqk_persistent_grid",
     "build_wmma_fmha_swapqk_fwd",
     "wmma_fmha_swapqk_fwd_grid",
     "is_valid_spec",
@@ -542,6 +549,23 @@ class SwapQKCfg:
     # MQ>1 has its own QK loop that already hoists K across query groups; this
     # knob is rejected there rather than silently doing nothing.
     qk_douter: bool = False
+    # A NOTE on the register peak, since it is what caps this kernel. qk_douter
+    # keeps all n_kv_sub score accumulators AND all n_kv_sub K fragments live (at
+    # bn64: 32 + 32 VGPR), which pins it at 199 VGPR = 7 waves/SIMD. The 8th wave is
+    # worth +3.9% MEASURED IN ISOLATION (qkdo=0 ilp1: 192 VGPR/8 waves 22.12 TF vs
+    # the same code at 193 VGPR/7 waves 21.30), and qk_douter itself is worth +7.1%,
+    # so having both would be ~23.7 TF. They do not compose: waves_per_eu=8 on the
+    # qkdo path gives 190 VGPR but 24 IN-LOOP spills (22.47 TF, i.e. the wave nearly
+    # pays for the spills but not quite).
+    #
+    # Source-level grouping does NOT fix this -- tried and reverted: running the d
+    # loop over groups of 2 kv sub-tiles (so only 2 accumulators + 2 K fragments are
+    # live) left the count at exactly 199, because the scheduler is free to
+    # re-interleave the groups and does. Group size 1 degenerates to the kv-outer
+    # form (193 VGPR) and loses qk_douter. The peak is set by the scheduler's load
+    # batching, not by the source order, so only a real constraint (waves_per_eu) or
+    # removing address registers (see buffer_gather, which does this for V) can move
+    # it.
     # bcast_group: emit dual_gather_finish's lane broadcast in groups of N dwords
     # (all permlanes of the group, then its d selects, then its d+1 selects).
     # 0/1 = today's per-dword interleave. See the VOPD note above: the two selects
@@ -576,13 +600,92 @@ class SwapQKCfg:
     #     in stall shadow. Cutting VALU issue is not a lever for this kernel at
     #     long L; the memory path is.
     #
-    # NOTE on measuring this: prof_full.py's reduced single-head dispatch reported
-    # merely +8% cycles for N=4 at L16384 and completely masked the 11x cliff,
-    # which only appears in the 24-chunk shape. Use profiling/sum_counters.py to
-    # point rocprofv3 at chunk_sweep itself before trusting a long-L verdict. The
-    # o_f16 L16384 cliff is probably the same effect and is worth re-checking that
-    # way.
+    # NOTE on measuring this: a reduced single-head dispatch reported merely +8%
+    # cycles for N=4 at L16384 and completely masked the 11x cliff, which only
+    # appears in the full 24-head-chunk shape. Point rocprofv3 at the real
+    # head-chunked launch before trusting any long-L verdict. The o_f16 L16384
+    # cliff is probably the same effect and is worth re-checking that way.
     bcast_group: int = 0
+    # k_dual: the K-side twin of dual_gather. load_wmma_fragment takes the WMMA
+    # A-operand row from lane%16, so lanes l and l+16 issue the SAME address and
+    # every K load runs at HALF lane efficiency -- at bn64 the 64 K load
+    # instructions move 32 KB of traffic for a 16 KB tile. Indexing by the full
+    # lane makes the upper half fetch the next sub-tile's 16 keys, so one load
+    # covers a kv PAIR, and the existing permlanex16+select broadcast splits it
+    # back into two duplicated fragments.
+    #
+    # Why this is the lever: requests-per-WMMA is pinned at 1.5 for every block_n
+    # (32/64/96/128 all measure 1.5), so tiling cannot improve the memory-to-
+    # compute ratio -- only reuse can, and MQ=2 does not fit at D=128 (spills 246
+    # at bn64, still 40 at bn16+o_f16, because O alone is MQ*n_dk*8 = 128 VGPR).
+    # k_dual is the one remaining way to cut requests without more registers: it
+    # halves the FLAT loads, taking total in-loop memory instructions from 96 to 64
+    # at bn64. It trades the identical 24 VALU per 2 saved loads that dual_gather
+    # trades for V, and that trade measured +34% there; bcast_group separately
+    # showed this kernel's VALU is issued in stall shadow, so the added broadcast
+    # should be closer to free than the arithmetic suggests.
+    #
+    # Requires qk_douter (the pair-wise kv iteration lives in its d-outer loop) and
+    # an even n_kv_sub, i.e. block_n >= 32.
+    #
+    # MEASURED: correct (max_abs 1.53e-05) and a win at L=2048 (9.12 vs 8.41 TF),
+    # but 2.1 TF vs 22.5 TF at L=16384 (3 interleaved reps). The codegen did exactly
+    # what it was built to do -- FLAT loads 16.9M -> 8.5M, spill-free, occupancy
+    # held, and the doubled broadcast even self-packed into VOPD (42 -> 164 pairs) --
+    # yet TA_TA_BUSY went UP 13% (435.8M -> 493.4M) and DRAM read 13x (19.4 ->
+    # 256.4 MiB).
+    #
+    # WHY, and the general rule: duplicate LANES are free, duplicate INSTRUCTIONS
+    # are not. The address unit coalesces the 16 identical addresses inside one
+    # global_load_b128 at no cost, so the lane%16 duplication was never costing
+    # requests -- halving the instructions bought nothing while making each one span
+    # 32 cache lines instead of 16, which costs the residency this kernel lives on.
+    # dual_gather is NOT the same case and the symmetry argument was wrong:
+    # gather_v_a_frag issues 16 separate load_scalar instructions per V fragment, so
+    # V's redundancy is duplicate instructions (uncoalescable, worth 34% to remove).
+    # Do not re-attack A-operand lane duplication on a vector-load path.
+    k_dual: bool = False
+    # num_persistent: >0 replaces the (q_blocks, H, B) grid with a FIXED 1-D grid of
+    # this many long-lived CTAs that pull (q_block, head, batch) work-items from a
+    # global atomic counter until they are exhausted. 0 = today's one-shot grid.
+    #
+    # Why this and not another in-loop knob. Three separate in-loop levers
+    # (bcast_group, o_f16, k_dual) all won at L=2048 and collapsed at L=16384 via an
+    # L2-miss/DRAM explosion, and mem-instructions-per-WMMA is pinned at 1.5 for
+    # every block_n, so the binding constraint is CACHE RESIDENCY, not issue slots
+    # or request count. A work queue is the first lever that changes *what is
+    # resident* rather than trading locality for fewer instructions: with
+    # persist_decode="qb_major" a CTA draining adjacent tile ids stays on ONE
+    # (head, batch) and reuses that head's K/V out of L2, and deep oversubscription
+    # (~24x the 40 CUs) keeps the queue full enough to hide the fetch latency.
+    #
+    # MQ>1 / q_lds / kv_lds are rejected here: MQ=2 does not fit at D=128 and the
+    # LDS paths allocate inside what would become the work-item loop.
+    # MEASURED (D128 H24 B1, mq1 of32 bn64 w2 vt dual qkdo): correct (1.53e-05).
+    #   L=2048  : pers960 + waves_per_eu=8... 22.44 TF vs 18.04 one-shot (+24%)
+    #   L=16384 : pers1920 + waves_per_eu=8 . 22.49 TF vs 22.55 one-shot (parity,
+    #             3 interleaved reps; pers960 WITHOUT wpe is 18.8 -- see below)
+    # Depth is not optional and the curve is monotone: 40 CTAs 6.17 TF, 120 15.28,
+    # 240 15.34, 480 17.98, 960 20.04, 1920 20.23. One CTA per CU starves the queue.
+    #
+    # COST: the work-item loop is +55 VGPR (199 -> 254, spill-free) because
+    # loop-invariant setup hoisted out of it stays live across the whole body, which
+    # drops 7 -> 6 waves/SIMD. waves_per_eu=8 buys the wave back (192 VGPR, 19
+    # spills, 80 B scratch) and recovers ~3 TF; this is the one config where wpe=8
+    # helps, since it corrects that regression rather than pushing past a real peak.
+    #
+    # The schedule itself is emphatically the right idea -- persist_decode alone is
+    # worth 21x at L=16K (qb_major 20.24 TF vs batch_major 0.94) -- but the one-shot
+    # grid's in-order dispatch already approximates qb_major, so L2 hit only moves
+    # 66.0% -> 67.8% and the net is parity. Default off; use it for short L, or when
+    # run-to-run stability matters (pers1920 wpe8 spread 0.08 TF vs one-shot 1.30).
+    num_persistent: int = 0
+    # persist_decode: work-item -> (q_group, head, batch) unpack order.
+    #   "qb_major"    : q_group fastest -> a CTA stays on one (head,batch): K/V reuse
+    #   "batch_major" : spreads batch; only for the reproducible A/B (and it is 21x
+    #                   slower at L=16K, which is the measurement that proves the
+    #                   schedule's locality is what matters)
+    persist_decode: str = "qb_major"
     name: str = "wmma_fmha_swapqk"
 
     @property
@@ -634,6 +737,12 @@ class SwapQKCfg:
             f"vpf{self.v_prefetch}" if self.v_prefetch else "novpf",
             "qkdo" if self.qk_douter else "qkno",
             f"bg{self.bcast_group}" if self.bcast_group else "bgoff",
+            "kdual" if self.k_dual else "ksingle",
+            (
+                f"pers{self.num_persistent}_{self.persist_decode}"
+                if self.num_persistent
+                else "oneshot"
+            ),
             f"iglp{self.iglp}" if self.iglp >= 0 else "noiglp",
         )
 
@@ -664,7 +773,20 @@ def swapqk_grid(cfg: SwapQKCfg, *, seqlen_q: int, batch: int):
     return (seqlen_q // q_per, cfg.num_query_heads, batch)
 
 
-def _declare_params(b: IRBuilder):
+def swapqk_num_work_items(cfg: SwapQKCfg, *, seqlen_q: int, batch: int) -> int:
+    """Total (query-block, head, batch) work-items for a persistent launch."""
+    q_per = cfg.q_rows_per_cta
+    if seqlen_q % q_per != 0:
+        raise ValueError(f"seqlen_q {seqlen_q} must be a multiple of {q_per}")
+    return (seqlen_q // q_per) * cfg.num_query_heads * batch
+
+
+def swapqk_persistent_grid(cfg: SwapQKCfg):
+    """Fixed 1-D launch grid for num_persistent>0 (independent of problem size)."""
+    return (cfg.num_persistent, 1, 1)
+
+
+def _declare_params(b: IRBuilder, *, persistent: bool = False):
     P = {}
     P["Q"] = b.param("Q", PtrType(F16, "global"), noalias=True, readonly=True, align=16)
     P["K"] = b.param("K", PtrType(F16, "global"), noalias=True, readonly=True, align=16)
@@ -672,6 +794,13 @@ def _declare_params(b: IRBuilder):
     P["O"] = b.param(
         "O", PtrType(F16, "global"), noalias=True, writeonly=True, align=16
     )
+    if persistent:
+        # Work-queue counter: one i32 global slot the host pre-clears to 0 before
+        # EACH launch. Declared only when persistent, so the non-persistent arg
+        # pack (and every existing harness) keeps its ABI.
+        P["Counter"] = b.param(
+            "Counter", PtrType(I32, "global"), noalias=True, align=16
+        )
     P["scale_log2"] = b.param("scale_log2", F32)
     P["seqlen_q"] = b.param("seqlen_q", I32)
     P["seqlen_k"] = b.param("seqlen_k", I32)
@@ -689,7 +818,15 @@ def _declare_params(b: IRBuilder):
     return P
 
 
-def build_wmma_fmha_swapqk(cfg: SwapQKCfg, arch: str = "gfx1151") -> KernelDef:
+def build_wmma_fmha_swapqk(
+    cfg: SwapQKCfg,
+    arch: str = "gfx1151",
+    *,
+    seqlen_q: Optional[int] = None,
+    batch: int = 1,
+) -> KernelDef:
+    """``seqlen_q``/``batch`` are only needed when ``cfg.num_persistent > 0``: the
+    work-item count and the per-CTA drain bound are compile-time constants there."""
     atom = WmmaAtom.f16_16x16x16()
     wave = atom.wave_size  # 32
     c_map = atom.c_layout(arch)
@@ -699,12 +836,37 @@ def build_wmma_fmha_swapqk(cfg: SwapQKCfg, arch: str = "gfx1151") -> KernelDef:
     hs = cfg.head_size
     W = cfg.n_waves
     dtype_ir = F16
+    PERS = cfg.num_persistent > 0  # needed before the params are declared
+    if PERS:
+        if cfg.persist_decode not in ("qb_major", "batch_major"):
+            raise ValueError(f"bad persist_decode {cfg.persist_decode!r}")
+        if cfg.q_block > 1:
+            raise ValueError(
+                "num_persistent is implemented on the MQ==1 path (the q_block>1 path "
+                "builds its own kernel and returns early); MQ=2 does not fit at D=128"
+            )
+        if cfg.q_lds or cfg.kv_lds:
+            raise ValueError(
+                "num_persistent is incompatible with q_lds/kv_lds: those allocate LDS "
+                "inside what becomes the work-item loop"
+            )
+        if seqlen_q is None:
+            raise ValueError(
+                "num_persistent>0 needs seqlen_q at build time (work-item count and "
+                "the per-CTA drain bound are baked in)"
+            )
+        if batch < 1:
+            raise ValueError(f"batch must be >= 1, got {batch}")
+        _n_batch = batch
+        _num_tiles = swapqk_num_work_items(cfg, seqlen_q=seqlen_q, batch=batch)
+        # worst-case per-CTA drain count; the in_range guard makes over-counting safe
+        _max_iters = (_num_tiles + cfg.num_persistent - 1) // cfg.num_persistent
 
     b = IRBuilder(cfg.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = cfg.block_size
     if cfg.waves_per_eu is not None:
         b.kernel.attrs["waves_per_eu"] = cfg.waves_per_eu
-    p = _declare_params(b)
+    p = _declare_params(b, persistent=PERS)
 
     c0 = b.const_i32(0)
     c16 = b.const_i32(16)
@@ -715,9 +877,79 @@ def build_wmma_fmha_swapqk(cfg: SwapQKCfg, arch: str = "gfx1151") -> KernelDef:
     col = b.mod(lane, c16)  # lane % 16  == query row within the 16-tile
     lane_lt16 = b.cmp_lt(lane, c16)
 
-    q_group = b.block_id_x()
-    head = b.block_id_y()
-    batch = b.block_id_z()
+    if PERS:
+        # ---- persistent work-queue (TOP-FETCH) ----
+        # Each of the max_iters iterations does exactly ONE cooperative
+        # atomic_add(1) at the TOP and processes the fetched tile iff it is in
+        # range. Every CTA fetches exactly max_iters times, so total fetches =
+        # num_persistent*max_iters >= num_tiles, and the counter is monotonic:
+        # every id in [0, num_tiles) is handed to some iteration and processed
+        # exactly once, REGARDLESS of load imbalance. Do not switch to
+        # helpers.persistent.persistent_tile_loop, which fetches the NEXT tile at
+        # the BOTTOM -- its final fetch per CTA is consumed-but-never-processed,
+        # which under imbalance steals a live tile id and silently drops that
+        # output tile.
+        Counter = p["Counter"]
+        c_one = b.const_i32(1)
+        _multiwave = cfg.block_size > wave
+        _brd = b.smem_alloc(I32, [1], name_hint="pers_brd") if _multiwave else None
+
+        def _fetch_tile():
+            """Cooperative atomic tile fetch, broadcast to every thread in the CTA."""
+            is_lead = b.cmp_eq(tid, c0)
+            if not _multiwave:
+                # every lane issues the atomic (only lane 0 increments); ds_bpermute
+                # broadcasts lane 0's result wave-internally, so no LDS/barrier and
+                # no race (the optimiser elides a single-wave s_barrier).
+                inc = b.select(is_lead, c_one, c0)
+                return b.ds_bpermute(c0, b.global_atomic_add(Counter, c0, inc))
+            with b.scf_if(is_lead):
+                v = b.global_atomic_add(Counter, c0, c_one)
+                b.smem_store_vN(_brd, [c0], v, 1)
+            # LDS-only barrier publishes brd without a full vmcnt drain, so the
+            # previous work-item's V-gathers / O-stores keep flowing across the
+            # boundary instead of stalling the memory pipeline once per work-item.
+            b.sync_lds_only()
+            return b.vec_extract(b.smem_load_vN(_brd, c0, dtype=I32, n=1), 0)
+
+        # The work-item body is the ENTIRE rest of the kernel (~1100 lines), so
+        # these two scf regions are entered and exited MANUALLY instead of with
+        # `with`: the equivalent `with` would re-indent the whole body and make the
+        # diff unreviewable. _pers_close() at the bottom is the matching exit.
+        _ploop = b.scf_for_iter(
+            c0, b.const_i32(_max_iters), c_one, iter_args=[], iv_name="pers_iter"
+        )
+        _ploop.__enter__()
+        _tile = _fetch_tile()
+        _pif = b.scf_if(b.cmp_lt(_tile, b.const_i32(_num_tiles)))
+        _pif.__enter__()
+
+        c_nqb = b.const_i32(seqlen_q // cfg.q_rows_per_cta)
+        c_qh = b.const_i32(cfg.num_query_heads)
+        if cfg.persist_decode == "qb_major":
+            # q_group fastest: a CTA draining adjacent ids stays on one
+            # (head, batch) and reuses that head's K/V out of L2.
+            q_group = b.mod(_tile, c_nqb)
+            _hb = b.div(_tile, c_nqb)
+            head = b.mod(_hb, c_qh)
+            batch = b.div(_hb, c_qh)
+        else:
+            batch = b.mod(_tile, b.const_i32(_n_batch))
+            _hq = b.div(_tile, b.const_i32(_n_batch))
+            head = b.mod(_hq, c_qh)
+            q_group = b.div(_hq, c_qh)
+
+        def _pers_close():
+            _pif.__exit__(None, None, None)
+            _ploop.__exit__(None, None, None)
+
+    else:
+        q_group = b.block_id_x()
+        head = b.block_id_y()
+        batch = b.block_id_z()
+
+        def _pers_close():
+            return None
 
     qh, kvh = cfg.num_query_heads, cfg.kv_heads
     kv_head = head if kvh == qh else b.div(head, b.const_i32(qh // kvh))
@@ -777,6 +1009,16 @@ def build_wmma_fmha_swapqk(cfg: SwapQKCfg, arch: str = "gfx1151") -> KernelDef:
             "bcast_group reorders the dual_gather broadcast; it is a no-op "
             "without dual_gather"
         )
+    if cfg.k_dual:
+        if not cfg.qk_douter:
+            raise ValueError("k_dual requires qk_douter (pairs kv in its d-outer loop)")
+        if (cfg.block_n // 16) % 2:
+            raise ValueError(
+                f"k_dual needs an even n_kv_sub (block_n>=32), got n_kv_sub="
+                f"{cfg.block_n // 16} at block_n={cfg.block_n}"
+            )
+        if cfg.kv_lds:
+            raise ValueError("k_dual reads K from global; incompatible with kv_lds")
     if cfg.qk_douter and MQ > 1:
         raise ValueError(
             "qk_douter applies to the MQ==1 QK loop; the q_block>1 path has its "
@@ -861,6 +1103,12 @@ def build_wmma_fmha_swapqk(cfg: SwapQKCfg, arch: str = "gfx1151") -> KernelDef:
     def k_window(k_tile_base):
         return make_tile_window(
             K_view, (1, 16, hs), origin=(kv_head, b.add(batch_tok_k, k_tile_base), c0)
+        )
+
+    def k_window32(k_tile_base):
+        """32-key K window: one 32-lane load spans TWO kv sub-tiles (see k_dual)."""
+        return make_tile_window(
+            K_view, (1, 32, hs), origin=(kv_head, b.add(batch_tok_k, k_tile_base), c0)
         )
 
     def v_window(k_tile_base):
@@ -1182,6 +1430,22 @@ def build_wmma_fmha_swapqk(cfg: SwapQKCfg, arch: str = "gfx1151") -> KernelDef:
             return k_lds_read(ns, d)  # K from shared LDS (2x vec8)
         return load_wmma_tile(b, kwin, atom, lane, role="a", k_offset=d * 16, lead=[c0])
 
+    def _k_frag_dual(k_block_base, ns, d):
+        """K for kv sub-tiles (ns, ns+1) out of ONE 32-lane load.
+
+        load_wmma_fragment takes the A-operand row from lane%16, so lanes l and
+        l+16 issue the SAME address: every K load runs at half lane efficiency,
+        moving 32 KB of traffic for a 16 KB tile at bn64. Indexing by the full lane
+        instead makes the upper half fetch the NEXT sub-tile's 16 keys, and the
+        same permlanex16+select broadcast dual_gather already uses for V splits the
+        pair back into two duplicated fragments. This is the K-side twin of
+        dual_gather, and it trades the identical 24 VALU per 2 saved loads.
+        """
+        kwin = k_window32(b.add(k_block_base, b.const_i32(ns * 16)))
+        raw = kwin.load_vec(b, c0, lane, b.const_i32(d * 16), n=a_frag)
+        f0, f1 = dual_gather_finish(raw)
+        return WmmaTensor(atom, "a", f0, arch), WmmaTensor(atom, "a", f1, arch)
+
     def _q_frag(d):
         if cfg.q_hoist:
             return q_hoisted[d]
@@ -1211,7 +1475,7 @@ def build_wmma_fmha_swapqk(cfg: SwapQKCfg, arch: str = "gfx1151") -> KernelDef:
             # and no separate acc_ilp / tail reduction is needed.
             kwins = (
                 [None] * n_kv_sub
-                if cfg.kv_lds
+                if cfg.kv_lds or cfg.k_dual
                 else [
                     k_window(b.add(k_block_base, b.const_i32(ns * 16)))
                     for ns in range(n_kv_sub)
@@ -1220,6 +1484,13 @@ def build_wmma_fmha_swapqk(cfg: SwapQKCfg, arch: str = "gfx1151") -> KernelDef:
             subs = [WmmaTensor.zero_acc(b, atom, arch=arch) for _ in range(n_kv_sub)]
             for d in range(n_dk):
                 q_tile = _q_frag(d)
+                if cfg.k_dual:
+                    # one load per kv PAIR instead of one per sub-tile
+                    for ns in range(0, n_kv_sub, 2):
+                        k0, k1 = _k_frag_dual(k_block_base, ns, d)
+                        subs[ns] = wmma_mma(b, k0, q_tile, subs[ns])
+                        subs[ns + 1] = wmma_mma(b, k1, q_tile, subs[ns + 1])
+                    continue
                 for ns in range(n_kv_sub):
                     subs[ns] = wmma_mma(b, _k_frag(kwins[ns], ns, d), q_tile, subs[ns])
         else:
@@ -1794,6 +2065,7 @@ def build_wmma_fmha_swapqk(cfg: SwapQKCfg, arch: str = "gfx1151") -> KernelDef:
             transform=_rescale,
             nontemporal=cfg.o_nt,
         )
+    _pers_close()
     b.ret()
     return b.kernel
 
@@ -1802,14 +2074,29 @@ def build_wmma_fmha_swapqk(cfg: SwapQKCfg, arch: str = "gfx1151") -> KernelDef:
 # Production entry point
 # ============================================================================
 # A frozen spec over the swept + hardware-validated production knobs. Everything
-# experimental / dead-end (pipeline, q_hoist, q_lds, o_f16, d16hi, iglp,
-# static_shape, prefetch_v) is OFF and not reachable from here -- use SwapQKCfg
-# directly (via the builders/ harness) to explore those. The only production
-# tunables are the kv tile (block_n) and the wave count (n_waves); defaults are
-# the L~2048 winner. Per-L guidance from the sweep (gfx1151 stx-halo, dense):
-#   L<=1024, L>=4096 -> block_n=64 ;  L~2048 -> block_n=32  (both wave2/ilp2).
-# Throughput peaks ~24.7 TF at L=1024 and is cache/bandwidth-bound past ~4K
-# (see the long-sequence candidates wmma_fmha_swapqk_persistent / _multiwave).
+# experimental / dead-end (pipeline, q_hoist, q_lds, kv_lds, o_f16, d16hi, iglp,
+# static_shape, prefetch_v, bcast_group, k_dual, num_persistent) is OFF and not
+# reachable from here -- use SwapQKCfg directly to explore those; each field
+# carries its own measurement. The production tunables are the kv tile
+# (block_n), the wave count (n_waves), the QK ILP (qk_ilp) and the non-temporal
+# O store (o_nt); everything else is pinned at the measured winner.
+#
+# Defaults are the L=16384 winner measured on gfx1151 stx-halo-mini (Radeon
+# 8060S, 40 CU, 32 MB MALL), dense D=128 H=24 B=1 fp16: 22.80 TF as the mean of
+# 3 interleaved reps (22.61 / 22.81 / 22.97, peak 23.39), 15.16 Mcyc of
+# GRBM_GUI_ACTIVE, 199 VGPR with 0 spill (208 granule -> 7 waves/SIMD). That
+# config is `block_n=64, n_waves=2, qk_ilp=2, v_transposed, dual_gather,
+# qk_douter` with the f32 O-carry and q_block=1. Per-L guidance from the sweep:
+# throughput peaks ~24.7 TF at L=1024 and is cache-residency-bound past ~4K;
+# `o_nt=True` is worth +3-14% for large-L head-chunked launches, where the
+# write-once O output would otherwise evict the reused KV from the MALL.
+#
+# NOTE: the default carries `v_transposed=True`, so callers must supply V as
+# [B, H, D, S] rather than [B, S, H, D] -- see swapqk_transpose_v(). This is the
+# layout the winning config needs (it collapses the PV V-gather from 16 strided
+# d16 loads to 2 dwordx4, 256 -> 32 vector-memory instructions per iteration).
+# Pass `v_transposed=False` to build against the row-major layout instead, at
+# the cost of ~20% more cycles at L=4096.
 
 
 @dataclass(frozen=True)
@@ -1820,10 +2107,14 @@ class WmmaFmhaSwapQKSpec:
     num_query_heads: int
     num_kv_heads: int = 0  # 0 -> MHA (== num_query_heads); else GQA/MQA
     mask_mode: str = "none"  # "none" | "causal"
-    # tunables (defaults = L~2048 winner); everything else is baked.
+    # tunables (defaults = the L=16384 winner); everything else is baked.
     n_waves: int = 2
-    block_n: int = 32
+    block_n: int = 64
     qk_ilp: int = 2
+    # V arrives pre-transposed as [B, H, D, S]; see swapqk_transpose_v().
+    v_transposed: bool = True
+    # Stream the write-once O store past the MALL. Large-L lever (+3-14%).
+    o_nt: bool = False
 
     def to_cfg(self) -> SwapQKCfg:
         """Lower the spec to the full research config with production knobs on."""
@@ -1840,6 +2131,9 @@ class WmmaFmhaSwapQKSpec:
             dual_gather=True,
             lazy_rescale=True,
             fast_exp2=True,
+            v_transposed=self.v_transposed,
+            qk_douter=True,
+            o_nt=self.o_nt,
         )
 
 
@@ -1849,13 +2143,19 @@ def is_valid_spec(
     """Cheap static validity gate (mirrors ``wmma_fmha_fwd.is_valid_spec``)."""
     if arch != "gfx1151":
         return False, f"swapqk is a gfx1151 (RDNA3.5) kernel; got arch={arch!r}"
-    if spec.head_size <= 0 or spec.head_size % 16 != 0:
+    # dual_gather is baked on and pairs adjacent d-subtiles, so n_dk must be even.
+    if spec.head_size <= 0 or spec.head_size % 32 != 0:
         return (
             False,
-            f"head_size must be a positive multiple of 16 (got {spec.head_size})",
+            f"head_size must be a positive multiple of 32 (got {spec.head_size})",
         )
-    if spec.block_n <= 0 or spec.block_n % 16 != 0:
-        return False, f"block_n must be a positive multiple of 16 (got {spec.block_n})"
+    # buffer_gather is baked on and the backend stops batching its loads below
+    # block_n=32, which collapses throughput to ~8 TF.
+    if spec.block_n < 32 or spec.block_n % 16 != 0:
+        return (
+            False,
+            f"block_n must be a multiple of 16 and at least 32 (got {spec.block_n})",
+        )
     if spec.n_waves not in (1, 2):
         return False, f"n_waves must be 1 or 2 (got {spec.n_waves})"
     if spec.mask_mode not in ("none", "causal"):
