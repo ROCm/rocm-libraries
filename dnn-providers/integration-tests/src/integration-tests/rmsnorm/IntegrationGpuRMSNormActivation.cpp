@@ -80,7 +80,7 @@ public:
 
         auto [yTensorAttr, invRmsOut]
             = graphObj.rmsnorm(xTensorAttr, scaleTensorAttr, rmsnormAttrs);
-        yTensorAttr->set_data_type(intermediateDataType);
+        yTensorAttr->set_data_type(yType);
 
         if(testCase.isTraining)
         {
@@ -154,9 +154,9 @@ protected:
     }
 };
 
-using IntegrationGpuRMSNormActivationFp32 = RMSNormActivation<float, float, float>;
-using IntegrationGpuRMSNormActivationBfp16 = RMSNormActivation<bfloat16, bfloat16, bfloat16>;
-using IntegrationGpuRMSNormActivationFp16 = RMSNormActivation<half, half, half>;
+using IntegrationGpuRMSNormActivationPureFp32 = RMSNormActivation<float, float, float>;
+using IntegrationGpuRMSNormActivationPureBfp16 = RMSNormActivation<bfloat16, bfloat16, bfloat16>;
+using IntegrationGpuRMSNormActivationPureFp16 = RMSNormActivation<half, half, half>;
 
 // "Mixed" = input (X) is lower precision while scale/output stay FP32, exercising the
 // upcast IO path that the pure same-precision configs above don't cover.
@@ -165,62 +165,62 @@ using IntegrationGpuRMSNormActivationMixedBfp16 = RMSNormActivation<bfloat16, fl
 
 } // namespace
 
-GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuRMSNormActivationFp32);
-TEST_P(IntegrationGpuRMSNormActivationFp32, Correctness)
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuRMSNormActivationPureFp32);
+TEST_P(IntegrationGpuRMSNormActivationPureFp32, Correctness)
 {
     runGraphTest();
 }
 
-GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuRMSNormActivationBfp16);
-TEST_P(IntegrationGpuRMSNormActivationBfp16, Correctness)
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuRMSNormActivationPureBfp16);
+TEST_P(IntegrationGpuRMSNormActivationPureBfp16, Correctness)
 {
     runGraphTest();
 }
 
-GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuRMSNormActivationFp16);
-TEST_P(IntegrationGpuRMSNormActivationFp16, Correctness)
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuRMSNormActivationPureFp16);
+TEST_P(IntegrationGpuRMSNormActivationPureFp16, Correctness)
 {
     runGraphTest();
 }
 
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
-    IntegrationGpuRMSNormActivationFp32,
+    IntegrationGpuRMSNormActivationPureFp32,
     testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
                      testing::ValuesIn(test_rmsnorm_common::getRMSNormTestCases()),
                      testing::ValuesIn(test_activation_common::createFwdActivationSmokeCases())));
 
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
-    IntegrationGpuRMSNormActivationBfp16,
+    IntegrationGpuRMSNormActivationPureBfp16,
     testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
                      testing::ValuesIn(test_rmsnorm_common::getRMSNormTestCases()),
                      testing::ValuesIn(test_activation_common::createFwdActivationSmokeCases())));
 
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
-    IntegrationGpuRMSNormActivationFp16,
+    IntegrationGpuRMSNormActivationPureFp16,
     testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
                      testing::ValuesIn(test_rmsnorm_common::getRMSNormTestCases()),
                      testing::ValuesIn(test_activation_common::createFwdActivationSmokeCases())));
 
 INSTANTIATE_TEST_SUITE_P(
     Full,
-    IntegrationGpuRMSNormActivationFp32,
+    IntegrationGpuRMSNormActivationPureFp32,
     testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
                      testing::ValuesIn(test_rmsnorm_common::getRMSNormFullTestCases()),
                      testing::ValuesIn(test_activation_common::createFwdActivationFullCases())));
 
 INSTANTIATE_TEST_SUITE_P(
     Full,
-    IntegrationGpuRMSNormActivationBfp16,
+    IntegrationGpuRMSNormActivationPureBfp16,
     testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
                      testing::ValuesIn(test_rmsnorm_common::getRMSNormFullTestCases()),
                      testing::ValuesIn(test_activation_common::createFwdActivationFullCases())));
 
 INSTANTIATE_TEST_SUITE_P(
     Full,
-    IntegrationGpuRMSNormActivationFp16,
+    IntegrationGpuRMSNormActivationPureFp16,
     testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
                      testing::ValuesIn(test_rmsnorm_common::getRMSNormFullTestCases()),
                      testing::ValuesIn(test_activation_common::createFwdActivationFullCases())));
@@ -266,9 +266,9 @@ INSTANTIATE_TEST_SUITE_P(
                      testing::ValuesIn(test_activation_common::createFwdActivationFullCases())));
 
 // 3D layout tests (NCDHW, NDHWC)
-using IntegrationGpuRMSNormActivation3dFp32 = IntegrationGpuRMSNormActivationFp32;
-using IntegrationGpuRMSNormActivation3dBfp16 = IntegrationGpuRMSNormActivationBfp16;
-using IntegrationGpuRMSNormActivation3dFp16 = IntegrationGpuRMSNormActivationFp16;
+using IntegrationGpuRMSNormActivation3dFp32 = IntegrationGpuRMSNormActivationPureFp32;
+using IntegrationGpuRMSNormActivation3dBfp16 = IntegrationGpuRMSNormActivationPureBfp16;
+using IntegrationGpuRMSNormActivation3dFp16 = IntegrationGpuRMSNormActivationPureFp16;
 
 GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuRMSNormActivation3dFp32);
 TEST_P(IntegrationGpuRMSNormActivation3dFp32, Correctness)
