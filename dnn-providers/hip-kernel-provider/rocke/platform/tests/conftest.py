@@ -10,6 +10,8 @@
 import sys
 from pathlib import Path
 
+import pytest
+
 _HERE = Path(__file__).resolve().parent
 _ROCKE = _HERE.parent  # tests -> rocke/platform
 _PYROOT = _ROCKE / "python"
@@ -48,8 +50,8 @@ def pytest_runtest_makereport(item, call):
     report = outcome.get_result()
     report.outcome = "skipped"
     report.longrepr = (str(item.path), item.location[1] + 1, str(call.excinfo.value))
-    
-    
+
+
 # The IR parity harness' attention families are the one sanctioned platform ->
 # library reach, so `kernels`/`builders` must resolve here as well. Probed
 # against both layouts this tree runs in: staged under tests/library/ in an
