@@ -15,12 +15,14 @@
  *  limitations under the License.
  */
 
-#include <thrust/detail/libcxx_wrapper/__functional/address_stability.h>
-
 #include "test_param_fixtures.hpp"
 #include "test_utils.hpp"
 
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+#  include _THRUST_LIBCXX_INCLUDE(functional)
+#else
+#  include <thrust/detail/libcxx_wrapper/__functional/address_stability.h>
+
 #  include <functional>
 #endif
 
@@ -38,8 +40,8 @@ TEST(AddressStabilityTests, TestAddressStabilityLibcuxx)
 {
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  using ::internal::proclaim_copyable_arguments;
-  using ::internal::proclaims_copyable_arguments;
+  using _THRUST_LIBCXX::proclaim_copyable_arguments;
+  using _THRUST_LIBCXX::proclaims_copyable_arguments;
 
   // libcu++ function objects with known types
   static_assert(proclaims_copyable_arguments<_THRUST_STD::plus<int>>::value, "");
@@ -59,8 +61,8 @@ TEST(AddressStabilityTests, TestAddressStabilityThrust)
 {
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  using ::internal::proclaim_copyable_arguments;
-  using ::internal::proclaims_copyable_arguments;
+  using _THRUST_LIBCXX::proclaim_copyable_arguments;
+  using _THRUST_LIBCXX::proclaims_copyable_arguments;
 
   // thrust function objects with known types
   static_assert(proclaims_copyable_arguments<_THRUST_STD::plus<int>>::value, "");
@@ -89,8 +91,8 @@ TEST(AddressStabilityTests, TestAddressStabilityUserDefinedFunctionObject)
 {
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  using ::internal::proclaim_copyable_arguments;
-  using ::internal::proclaims_copyable_arguments;
+  using _THRUST_LIBCXX::proclaim_copyable_arguments;
+  using _THRUST_LIBCXX::proclaims_copyable_arguments;
 
   // by-value overload
   static_assert(!proclaims_copyable_arguments<my_plus<int>>::value, "");
@@ -115,8 +117,8 @@ TEST(AddressStabilityTests, TestAddressStabilityLambda)
 {
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  using ::internal::proclaim_copyable_arguments;
-  using ::internal::proclaims_copyable_arguments;
+  using _THRUST_LIBCXX::proclaim_copyable_arguments;
+  using _THRUST_LIBCXX::proclaims_copyable_arguments;
 
   {
     auto l = [](const int& i) {

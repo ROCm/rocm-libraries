@@ -33,7 +33,6 @@
 #include <thrust/copy.h>
 #include <thrust/count.h>
 #include <thrust/detail/config/namespace.h>
-#include <thrust/detail/libcxx_wrapper/__functional/address_stability.h>
 #include <thrust/device_vector.h>
 #include <thrust/execution_policy.h>
 #include <thrust/iterator/zip_iterator.h>
@@ -47,7 +46,12 @@
 #include <cstddef>
 #include <string>
 #include <vector>
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
+
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+#  include _THRUST_LIBCXX_INCLUDE(functional)
+#else
+#  include <thrust/detail/libcxx_wrapper/__functional/address_stability.h>
+
 #  include <utility>
 #endif
 
@@ -187,7 +191,7 @@ struct mul
   {
     const T scalar = startScalar;
     return bench_transform(
-      c.begin(), c.end(), b.begin(), ::internal::proclaim_copyable_arguments([=] THRUST_DEVICE(const T& ci) {
+      c.begin(), c.end(), b.begin(), _THRUST_LIBCXX::proclaim_copyable_arguments([=] THRUST_DEVICE(const T& ci) {
         return ci * scalar;
       }));
   }
@@ -205,7 +209,7 @@ struct add
       a.end(),
       b.begin(),
       c.begin(),
-      ::internal::proclaim_copyable_arguments([] THRUST_DEVICE(const T& ai, const T& bi) -> T {
+      _THRUST_LIBCXX::proclaim_copyable_arguments([] THRUST_DEVICE(const T& ai, const T& bi) -> T {
         return ai + bi;
       }));
   }
@@ -225,7 +229,7 @@ struct triad
       b.end(),
       c.begin(),
       a.begin(),
-      ::internal::proclaim_copyable_arguments([=] THRUST_DEVICE(const T& bi, const T& ci) {
+      _THRUST_LIBCXX::proclaim_copyable_arguments([=] THRUST_DEVICE(const T& bi, const T& ci) {
         return bi + scalar * ci;
       }));
   }
@@ -245,7 +249,7 @@ struct nstream
       thrust::make_zip_iterator(a.end(), b.end(), c.end()),
       a.begin(),
       thrust::make_zip_function(
-        ::internal::proclaim_copyable_arguments([=] THRUST_DEVICE(const T& ai, const T& bi, const T& ci) {
+        _THRUST_LIBCXX::proclaim_copyable_arguments([=] THRUST_DEVICE(const T& ai, const T& bi, const T& ci) {
           return ai + bi + scalar * ci;
         })));
   }
