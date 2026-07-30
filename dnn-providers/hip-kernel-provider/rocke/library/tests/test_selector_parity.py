@@ -339,10 +339,15 @@ class TestSingleBatchCombo(unittest.TestCase):
         self.assertTrue(s["use_v_double_buffer"])
 
     def test_single_batch_d128_no_v_schedule(self):
-        # d128 single-batch: neither early-V nor v-double-buffer
-        s = _spec(_prob(128, 32, 32, 32, num_seqs=1, max_seqlen_q=512))
-        self.assertFalse(s["use_early_v_schedule"])
-        self.assertFalse(s["use_v_double_buffer"])
+        # d128 single-batch now triggers softmax-MFMA interleave (PR #9403)
+        # which sets num_warps=4 → block_m=128. Combined with use_k_single_buffer
+        # and tile_size=64, this violates "block_m <= tile_size" until
+        # use_q_direct_reg is wired for this path.
+        with self.assertRaises(ValueError) as ctx:
+            _spec(_prob(128, 32, 32, 32, num_seqs=1, max_seqlen_q=512))
+        self.assertIn(
+            "use_k_single_buffer requires block_m <= tile_size", str(ctx.exception)
+        )
 
 
 # ---------------------------------------------------------------------------
