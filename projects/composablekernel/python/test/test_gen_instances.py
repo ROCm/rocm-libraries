@@ -7,6 +7,9 @@ from ck4inductor.universal_gemm.gen_instances import (
     gen_ops_library as gen_gemm_ops_library,
 )
 from ck4inductor.universal_gemm.gen_instances import (
+    gen_ops_library_wmma as gen_gemm_ops_library_wmma,
+)
+from ck4inductor.universal_gemm.gen_instances import (
     gen_ops_preselected as gen_gemm_ops_preselected,
 )
 from ck4inductor.grouped_conv_fwd.gen_instances import (
@@ -53,6 +56,20 @@ class TestGenInstances(unittest.TestCase):
 
         log.debug("%d ck-tile gemm instances from library" % len(instances))
         self.assertTrue(instances)
+
+    def test_gen_gemm_wmma_instances(self):
+        # gfx1250 fat-tile WMMA enumerator. All shipped WMMA universal-gemm
+        # instances are 16x16 warp, fp16/bf16.
+        instances = gen_gemm_ops_library_wmma()
+
+        log.debug("%d wmma gemm instances from library" % len(instances))
+        self.assertTrue(instances)
+        for op in instances:
+            self.assertTrue(op.is_wmma)
+            self.assertEqual((op.m_per_xdl, op.n_per_xdl), (16, 16))
+            self.assertIn(op.a_element_dtype, ("F16", "BF16"))
+            self.assertIn(op.b_element_dtype, ("F16", "BF16"))
+            self.assertIn(op.c_element_dtype, ("F16", "BF16"))
 
 
 class TestCheckHeaders(unittest.TestCase):
