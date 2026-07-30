@@ -1304,17 +1304,14 @@ across handles; reaching it through a handle works even when a call receives tha
 reference, since the container is shared, not owned by the handle. Access is synchronized, and a hit
 on the applicability path takes no more than a short read-side lock.
 
-**Descriptor inventory is part of the key.** The runtime drop-in path exists so a pack can appear or
-disappear while the process runs ([Section 12](#12-packaging-and-delivery)), and an entry computed
-before that change describes an inventory that no longer exists. The provider therefore keeps a
-generation counter that advances whenever a discovery scan changes the inventory, and folds it into
-the key, so every entry from a prior generation is dead on arrival rather than stale but reachable.
-Without this, a dropped-in kernel would never be picked up for a graph shape the process had already
-seen, the common case in a long-running server, defeating the purpose of the drop-in path.
+**Descriptor inventory is part of the key.** A drop-in pack can appear or disappear while the process
+runs ([Section 12](#12-packaging-and-delivery)), so the provider keeps a generation counter that
+advances whenever a discovery scan changes the inventory and folds it into the key. Entries from a
+prior generation become unreachable, so a newly dropped-in kernel is picked up even for a graph shape
+the process has already seen.
 
-It is an LRU cache with a bounded entry count, sized generously since entries hold ids and bound field
-values rather than kernels or graphs. Eviction only costs a rematch on the next query, never a wrong
-answer.
+The cache is LRU with a bounded entry count, sized generously because entries hold ids and bound
+field values, not kernels or graphs. Eviction costs a rematch, never a wrong answer.
 
 ---
 
