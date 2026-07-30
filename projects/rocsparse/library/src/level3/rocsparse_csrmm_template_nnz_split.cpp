@@ -59,7 +59,8 @@ namespace rocsparse
             *buffer_size = 0;
             *buffer_size += sizeof(J) * ((nblocks + 1 - 1) / 256 + 1) * 256; // row limits
             *buffer_size += sizeof(J) * ((nblocks - 1) / 256 + 1) * 256; // row block red
-            *buffer_size += sizeof(T) * ((nblocks * n - 1) / 256 + 1) * 256; // val block red
+            *buffer_size
+                += sizeof(T) * ((int64_t(nblocks) * n - 1) / 256 + 1) * 256; // val block red
 
             return rocsparse_status_success;
         }
