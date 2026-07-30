@@ -1,10 +1,10 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""CPU-only tests for the dispatch-layer num_sms resolver (AICK-1722).
+"""CPU-only tests for the dispatch-layer num_sms resolver.
 
 ``num_sms`` drives 2D<->3D routing and the 3D segment count. It historically
-defaulted to a stale 120, under-subscribing gfx942 (MI300X = 304 CUs). The
+defaulted to a stale 120, under-subscribing gfx942 (304 CUs). The
 resolver turns the sentinel default into the live gfx942 CU count behind an
 override seam. Auto-resolution is scoped to gfx942 for now; other archs keep the
 legacy 120 (Future Scope). These tests mock the device query/arch (no GPU) and
@@ -66,14 +66,14 @@ class _Patch:
 
 
 def test_gfx942_device_query():
-    """gfx942 on a gfx942 box -> the live CU count (228 MI300A / 304 MI300X)."""
+    """gfx942 on a gfx942 box -> the live CU count (device-dependent within gfx942)."""
     p = _Patch()
     try:
         p.env("ROCKE_NUM_SMS", None)
         p.attr(hipm, "get_device_arch", lambda *a, **k: "gfx942")
         p.attr(A, "_device_num_cus", lambda: 304)
         assert _resolve_num_sms(_req(num_sms=0)) == 304
-        p.attr(A, "_device_num_cus", lambda: 228)  # MI300A
+        p.attr(A, "_device_num_cus", lambda: 228)  # smaller-CU gfx942 variant
         assert _resolve_num_sms(_req(num_sms=0)) == 228
     finally:
         p.restore()

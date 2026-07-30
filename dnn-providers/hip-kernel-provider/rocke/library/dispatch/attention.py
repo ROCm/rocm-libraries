@@ -131,20 +131,18 @@ _GFX942_NUM_CUS = 304
 def _device_num_cus() -> "int | None":
     """Live device multiprocessor (CU) count, or None if unqueryable.
 
-    Uses torch, present on the Python dispatch / benchmark path. NOTE: this
-    resolver covers the Python dispatch path only -- the C++ C-ABI engine keeps
-    its own num_sms default (attention_unified_entry.cpp) and requires the mirror
-    resolver there for production (companion change).
+    Torch-free: delegates to the ctypes ``libamdhip64`` wrapper
+    (``rocke.runtime.hip_module``) so the library layer stays off torch. NOTE:
+    this resolver covers the Python dispatch path only -- the C++ C-ABI engine
+    keeps its own num_sms default (attention_unified_entry.cpp) and requires the
+    mirror resolver there for production (companion change).
     """
     try:
-        import torch
+        from rocke.runtime.hip_module import get_device_num_cus
 
-        if torch.cuda.is_available():
-            dev = torch.cuda.current_device()
-            return int(torch.cuda.get_device_properties(dev).multi_processor_count)
+        return get_device_num_cus()
     except Exception:
-        pass
-    return None
+        return None
 
 
 def _resolve_num_sms(req: AttentionRequest) -> int:
