@@ -1385,9 +1385,9 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
             # qr_tdm: gfx1250 TDM pipeline, preferred for d=128.
             # Emitted first so runtime dispatcher selects qr_tdm over qr
             # when both match (dispatch order = list order in generated code).
-            # NOTE: dropout is not yet implemented in qr_tdm — only emit
+            # NOTE: dropout is not yet implemented in qr_tdm - only emit
             # dropout="f" so dropout workloads fall through to qr.
-            if (hdim, hdim_v) in {(128, 128), (192, 128), (160, 160)}:
+            if (hdim, hdim_v) in {(32, 32), (64, 64), (128, 128), (192, 128), (160, 160)}:
                 for logits, mask, bias, lse, sink in itertools.product(
                     ["t", "f"],
                     get_mask_map(mask_impl).keys(),
