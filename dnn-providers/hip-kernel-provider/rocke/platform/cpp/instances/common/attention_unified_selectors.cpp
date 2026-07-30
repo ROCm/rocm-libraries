@@ -773,12 +773,13 @@ rocke_attention_tiled_2d_spec_t
     rocke_unified_attn_tiled_spec_from_problem(const rocke_unified_attn_problem_t* p,
                                                const char* arch)
 {
-    /* Temporarily override the resolved arch so all predicates see the caller's
-     * arch; restore on exit (the global is process-wide). */
-    const char* prev_arch = g_resolved_attention_arch;
-    g_resolved_attention_arch = (arch != NULL) ? arch : "gfx950";
-
     rocke_attention_tiled_2d_spec_t s = rocke_attention_tiled_2d_spec_default();
+
+    /* Default spec is returned for non-gfx950 architectures */
+    if(arch == NULL || strcmp(arch, "gfx950") != 0)
+    {
+        return s;
+    }
 
     /* Mirror the Python field assignments. */
     s.head_size = p->head_size;
@@ -848,10 +849,11 @@ rocke_attention_tiled_2d_spec_t
      * cache exceeds 2 GiB (num_kv_blocks * block_stride > 0x80000000). */
     if(p->num_kv_blocks > 0)
     {
-        int elem_bytes = p->use_fp8 ? 1 : 2;
-        long block_stride = (long)p->block_size * p->num_kv_heads * p->head_size * elem_bytes;
-        long cache_bytes = (long)p->num_kv_blocks * block_stride;
-        s.use_i64_kv_addr = (cache_bytes > 0x80000000L);
+        uint64_t elem_bytes = p->use_fp8 ? 1u : 2u;
+        uint64_t block_stride = (uint64_t)p->block_size * (uint64_t)p->num_kv_heads
+                                * (uint64_t)p->head_size * elem_bytes;
+        uint64_t cache_bytes = (uint64_t)p->num_kv_blocks * block_stride;
+        s.use_i64_kv_addr = (cache_bytes > 0x80000000ULL);
     }
 
     /* k_single_buffer: mirrors Python _enable_k_single_buffer --
@@ -864,8 +866,6 @@ rocke_attention_tiled_2d_spec_t
      * from the comparison until the predicate is fully ported.
      * NOTE: this is the only field not fully implemented; all non-fp8 problems in the
      * problem matrix will have correct selector parity. */
-
-    g_resolved_attention_arch = prev_arch;
     return s;
 }
 
