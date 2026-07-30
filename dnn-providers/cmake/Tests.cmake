@@ -256,14 +256,21 @@ endfunction()
 # - YAML-driven category labels when DNN_PROVIDER_CTEST_CATEGORIES_YAML is set,
 #   otherwise legacy labels such as unit_test/integration_test
 #
-# Parameters:
 #   APPEND_FUNCTION_SUFFIX - Legacy grouping name retained by add_unit_test_target/add_integration_test_target
 #   TARGET - Name of the test executable target (must already exist)
 #   WORKING_DIR - Working directory for test execution
-#   EXTRA_LABELS - (Optional) Additional labels to apply in legacy label mode
+#   LABELS - (Optional) Additional labels to apply in legacy label mode
+#   ENVIRONMENT - (Optional) Extra ENVIRONMENT entries (KEY=VALUE) for this
+#       target, merged with the ambient TEST_ENVIRONMENT. Applied directly
+#       via set_tests_properties() in legacy label mode. When YAML-driven
+#       categorization is active, this function never reaches add_test()
+#       (see below), so the merged result is instead published as
+#       <TARGET>_TEST_ENVIRONMENT (PARENT_SCOPE) for the caller to forward
+#       into whichever suites actually get registered later.
 # ~~~
 function(_add_test_target_internal APPEND_FUNCTION_SUFFIX TARGET WORKING_DIR)
-    set(EXTRA_LABELS ${ARGN})
+    cmake_parse_arguments(ARG "" "" "LABELS;ENVIRONMENT" ${ARGN})
+    set(EXTRA_LABELS ${ARG_LABELS})
     set(TARGET_EXE ${TARGET})
 
     if(CMAKE_EXECUTABLE_SUFFIX)
@@ -296,12 +303,21 @@ function(_add_test_target_internal APPEND_FUNCTION_SUFFIX TARGET WORKING_DIR)
 
     install(TARGETS ${TARGET} RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 
+    set(_MERGED_TEST_ENVIRONMENT ${TEST_ENVIRONMENT} ${ARG_ENVIRONMENT})
+
     # YAML-driven categorization (currently miopen-provider only) generates
     # its own tiered suites via apply_test_category_labels() after this
     # function returns; registering the raw, unfiltered ${TARGET} test here
     # would just duplicate the *_full_suite entry with zero labels (never
     # selectable via `ctest -L`, always run by a bare `ctest`).
+    #
+    # Callers cannot set properties on ${TARGET} below since it was never
+    # registered as a CTest test in this mode -- publish the merged
+    # environment instead so the caller can forward it explicitly to
+    # whichever suites apply_test_category_labels()/apply_ctest_category_labels()
+    # actually creates.
     if(DNN_PROVIDER_CTEST_CATEGORIES_YAML)
+        set(${TARGET}_TEST_ENVIRONMENT "${_MERGED_TEST_ENVIRONMENT}" PARENT_SCOPE)
         return()
     endif()
 
@@ -312,8 +328,8 @@ function(_add_test_target_internal APPEND_FUNCTION_SUFFIX TARGET WORKING_DIR)
     endif()
     set_tests_properties(${TARGET} PROPERTIES LABELS "${ALL_LABELS}")
 
-    if(TEST_ENVIRONMENT)
-        set_tests_properties(${TARGET} PROPERTIES ENVIRONMENT "${TEST_ENVIRONMENT}")
+    if(_MERGED_TEST_ENVIRONMENT)
+        set_tests_properties(${TARGET} PROPERTIES ENVIRONMENT "${_MERGED_TEST_ENVIRONMENT}")
     endif()
 endfunction()
 
@@ -321,22 +337,38 @@ endfunction()
 # Adds a unit test target
 #
 # Usage:
-#   add_unit_test_target(TARGET WORKING_DIR [LABELS label1 label2 ...])
+#   add_unit_test_target(TARGET WORKING_DIR [LABELS label1 label2 ...]
+#                         [ENVIRONMENT KEY=VALUE ...])
+#
+# ENVIRONMENT is forwarded to _add_test_target_internal(); see its
+# ENVIRONMENT parameter doc for how it is applied and, in YAML-categorized
+# builds, published back as <TARGET>_TEST_ENVIRONMENT.
 # ~~~
 function(add_unit_test_target TARGET WORKING_DIR)
-    cmake_parse_arguments(ARG "" "" "LABELS" ${ARGN})
-    _add_test_target_internal(unit_test ${TARGET} ${WORKING_DIR} ${ARG_LABELS})
+    cmake_parse_arguments(ARG "" "" "LABELS;ENVIRONMENT" ${ARGN})
+    _add_test_target_internal(unit_test ${TARGET} ${WORKING_DIR} LABELS ${ARG_LABELS} ENVIRONMENT ${ARG_ENVIRONMENT})
+    if(DEFINED ${TARGET}_TEST_ENVIRONMENT)
+        set(${TARGET}_TEST_ENVIRONMENT "${${TARGET}_TEST_ENVIRONMENT}" PARENT_SCOPE)
+    endif()
 endfunction()
 
 # ~~~
 # Adds an integration test target
 #
 # Usage:
-#   add_integration_test_target(TARGET WORKING_DIR [LABELS label1 label2 ...])
+#   add_integration_test_target(TARGET WORKING_DIR [LABELS label1 label2 ...]
+#                                [ENVIRONMENT KEY=VALUE ...])
+#
+# ENVIRONMENT is forwarded to _add_test_target_internal(); see its
+# ENVIRONMENT parameter doc for how it is applied and, in YAML-categorized
+# builds, published back as <TARGET>_TEST_ENVIRONMENT.
 # ~~~
 function(add_integration_test_target TARGET WORKING_DIR)
-    cmake_parse_arguments(ARG "" "" "LABELS" ${ARGN})
-    _add_test_target_internal(integration_test ${TARGET} ${WORKING_DIR} ${ARG_LABELS})
+    cmake_parse_arguments(ARG "" "" "LABELS;ENVIRONMENT" ${ARGN})
+    _add_test_target_internal(integration_test ${TARGET} ${WORKING_DIR} LABELS ${ARG_LABELS} ENVIRONMENT ${ARG_ENVIRONMENT})
+    if(DEFINED ${TARGET}_TEST_ENVIRONMENT)
+        set(${TARGET}_TEST_ENVIRONMENT "${${TARGET}_TEST_ENVIRONMENT}" PARENT_SCOPE)
+    endif()
 endfunction()
 
 # ~~~
