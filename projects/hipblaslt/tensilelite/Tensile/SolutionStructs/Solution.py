@@ -2784,12 +2784,6 @@ class Solution(collections.abc.Mapping):
       if (state["MacroTile0"] == 16 and state["MacroTile1"] == 16 and state["DepthU"] == 512):
         state["UseDirect32XEmulation"] = False
 
-    # workaround for TF32 Emu Inf support:
-    # disable CMS for now (Inf-guard code scheduling not yet handled under CMS)
-    # TODO: re-enable CMS with Inf support
-    if state["UseF32XEmulation"]:
-      state["UseCustomMainLoopSchedule"] = 0
-
     # backup UsePLRPack from yaml before calling hasCustomSchedule
     backup_UsePLRPack = state["UsePLRPack"]
     # Check if CMS is available for this solution
