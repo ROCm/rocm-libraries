@@ -1637,7 +1637,10 @@ class TestLlvmFlavorEnumeration(unittest.TestCase):
         root = Path(rocke.__file__).parent
         offenders = []
         for path in sorted(root.rglob("*.py")):
-            tree = ast.parse(path.read_text())
+            # Sources are UTF-8 regardless of the host locale; on Windows the
+            # default codec is cp1252 and chokes on the non-ASCII in a few
+            # example/heuristics modules.
+            tree = ast.parse(path.read_text(encoding="utf-8"))
             allowed_spans = []
             for node in ast.walk(tree):
                 if not isinstance(node, (ast.Assign, ast.AnnAssign)):

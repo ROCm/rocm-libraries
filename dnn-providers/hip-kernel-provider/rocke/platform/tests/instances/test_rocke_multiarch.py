@@ -633,8 +633,10 @@ class TestDeviceQueryParsing(unittest.TestCase):
 class TestArchitecturalIsolation(unittest.TestCase):
     """Review-rule gates from the design doc."""
 
+    # Sources are UTF-8 whatever the host locale is: reading them with the
+    # Windows default (cp1252) fails on the non-ASCII a few modules carry.
     def _read(self, rel):
-        return (_ROCKE_ROOT / rel).read_text()
+        return (_ROCKE_ROOT / rel).read_text(encoding="utf-8")
 
     def test_core_arch_no_dispatcher_import(self):
         # Catch real imports of dispatcher, not the word in docstrings/comments.
@@ -643,20 +645,23 @@ class TestArchitecturalIsolation(unittest.TestCase):
         pat = re.compile(r"^\s*(from|import)\s+\S*dispatcher", re.MULTILINE)
         for p in (_ROCKE_ROOT / "core" / "arch").rglob("*.py"):
             self.assertIsNone(
-                pat.search(p.read_text()), f"{p} must not import from dispatcher/"
+                pat.search(p.read_text(encoding="utf-8")),
+                f"{p} must not import from dispatcher/",
             )
 
     def test_core_arch_no_pipeline_vocabulary(self):
         # Pipeline/scheduler names are instance-side policy, never in core/arch.
         blob = "\n".join(
-            p.read_text() for p in (_ROCKE_ROOT / "core" / "arch").rglob("*.py")
+            p.read_text(encoding="utf-8")
+            for p in (_ROCKE_ROOT / "core" / "arch").rglob("*.py")
         )
         for tok in ("compv4", "compv3", "intrawave", "interwave", "qr_ks_vs"):
             self.assertNotIn(tok, blob, f"pipeline token {tok!r} leaked into core/arch")
 
     def test_core_arch_no_llvm_intrinsic_text(self):
         blob = "\n".join(
-            p.read_text() for p in (_ROCKE_ROOT / "core" / "arch").rglob("*.py")
+            p.read_text(encoding="utf-8")
+            for p in (_ROCKE_ROOT / "core" / "arch").rglob("*.py")
         )
         self.assertNotIn(
             "llvm.amdgcn", blob, "core/arch must not contain intrinsic text"
