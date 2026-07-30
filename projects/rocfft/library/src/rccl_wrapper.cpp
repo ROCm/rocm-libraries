@@ -31,6 +31,7 @@
 #include <map>
 #include <mutex>
 #include <stdexcept>
+#include <utility>
 
 // map a rocFFT precision to the corresponding NCCL datatype.
 // rocFFT half/float/double map to ncclFloat16/32/64.
@@ -63,8 +64,16 @@ struct rocfft_rccl_comm_t::Impl
     // stay plan-side and are recorded onto this stream.
     struct device_state_t
     {
-        ncclComm_t          comm = nullptr;
+        ncclComm_t          comm;
         hipStream_wrapper_t stream;
+
+        // adopt a created comm + its allocated stream, so every entry is
+        // fully initialized (comm never null, stream always allocated)
+        device_state_t(ncclComm_t comm, hipStream_wrapper_t&& stream)
+            : comm(comm)
+            , stream(std::move(stream))
+        {
+        }
     };
 
     // keyed by device_id.
@@ -82,12 +91,10 @@ struct rocfft_rccl_comm_t::Impl
         for(auto& [dev, state] : device_to_state)
         {
             (void)hipSetDevice(dev);
-            // destroy the comm before its stream so RCCL is done with it
-            if(state.comm)
-            {
-                ncclCommFinalize(state.comm);
-                ncclCommDestroy(state.comm);
-            }
+            // comm is always valid (see device_state_t ctor); destroy it
+            // before its stream so RCCL is done with it
+            ncclCommFinalize(state.comm);
+            ncclCommDestroy(state.comm);
             state.stream.free();
         }
         (void)hipSetDevice(orig_device);
@@ -147,28 +154,26 @@ rocfft_rccl_comm_t rocfft_rccl_comm_t::create(const std::set<int>& devices)
         for(int dev : devices)
         {
             rocfft_scoped_device set_dev(dev);
-            ncclComm_t           comm = nullptr;
-            result = ncclCommInitRank(&comm, ndevices, new_comm.pimpl->uniqueId, rank);
+
+            // allocate the stream before the comm so a comm never exists
+            // without its paired stream
+            hipStream_wrapper_t stream;
+            stream.alloc();
+
+            ncclComm_t comm = nullptr;
+            result          = ncclCommInitRank(&comm, ndevices, new_comm.pimpl->uniqueId, rank);
             if(result != ncclSuccess)
             {
-                // log and return empty so the caller falls back to P2P/A2A
+                // return empty so the caller falls back to P2P/A2A
                 log_trace(__func__, "ncclCommInitRank failed on device", dev, result);
                 return {};
             }
-            new_comm.pimpl->device_to_state[dev].comm = comm;
+
+            new_comm.pimpl->device_to_state.try_emplace(dev, comm, std::move(stream));
             ++rank;
         }
 
         group.end();
-
-        // allocate the comm-owned launch stream per device (on that
-        // device) so the comm always uses the same stream. The alloc()
-        // call throws on failure; caught below to fall back.
-        for(int dev : devices)
-        {
-            rocfft_scoped_device set_dev(dev);
-            new_comm.pimpl->device_to_state[dev].stream.alloc();
-        }
     }
     catch(const rocfft_rccl_exception_t& e)
     {
