@@ -63,8 +63,6 @@ namespace rocsparse
         ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
         if(alpha != static_cast<T>(0))
         {
-            // Grid-stride loop over the batch dimension (grid y). This allows the
-            // batch count to exceed the maximum grid y dimension of 65536.
             for(int64_t batch = hipBlockIdx_y; batch < batch_count; batch += hipGridDim_y)
             {
                 rocsparse::coommnn_atomic_main_device<BLOCKSIZE, WF_SIZE, LOOPS, TRANSB>(
@@ -122,8 +120,6 @@ namespace rocsparse
         ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
         if(alpha != static_cast<T>(0))
         {
-            // Grid-stride loop over the batch dimension (grid y). This allows the
-            // batch count to exceed the maximum grid y dimension of 65536.
             for(int64_t batch = hipBlockIdx_y; batch < batch_count; batch += hipGridDim_y)
             {
                 rocsparse::coommnn_atomic_remainder_device<BLOCKSIZE, WF_SIZE, TRANSB>(
@@ -179,8 +175,6 @@ namespace rocsparse
         ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
         if(alpha != static_cast<T>(0))
         {
-            // Grid-stride loop over the batch dimension (grid z). This allows the
-            // batch count to exceed the maximum grid z dimension of 65536.
             for(int64_t batch = hipBlockIdx_z; batch < batch_count; batch += hipGridDim_z)
             {
                 rocsparse::coommtn_atomic_device<BLOCKSIZE, TRANSB>(

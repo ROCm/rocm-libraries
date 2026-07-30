@@ -31,10 +31,16 @@
 
 namespace rocsparse
 {
+    template <typename J>
+    static uint16_t get_y_grid_size(J batch_count)
+    {
+        return (batch_count > 65535) ? 32768 : batch_count;
+    }
+
 #define LAUNCH_COOMMNN_ATOMIC_MAIN_KERNEL(COOMMNN_DIM, WF_SIZE, LOOPS, TRANSB)              \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                                     \
         (rocsparse::coommnn_atomic_main<COOMMNN_DIM, WF_SIZE, LOOPS, TRANSB, T>),           \
-        dim3((nnz - 1) / COOMMNN_DIM + 1, (batch_count_C > 65536) ? 65536 : batch_count_C), \
+        dim3((nnz - 1) / COOMMNN_DIM + 1, get_y_grid_size<I>(batch_count_C)),               \
         dim3(COOMMNN_DIM),                                                                  \
         0,                                                                                  \
         handle->stream,                                                                     \
@@ -63,7 +69,7 @@ namespace rocsparse
 #define LAUNCH_COOMMNN_ATOMIC_REMAINDER_KERNEL(COOMMNN_DIM, WF_SIZE, TRANSB)                \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                                     \
         (rocsparse::coommnn_atomic_remainder<COOMMNN_DIM, WF_SIZE, TRANSB, T>),             \
-        dim3((nnz - 1) / COOMMNN_DIM + 1, (batch_count_C > 65536) ? 65536 : batch_count_C), \
+        dim3((nnz - 1) / COOMMNN_DIM + 1, get_y_grid_size<I>(batch_count_C)),               \
         dim3(COOMMNN_DIM),                                                                  \
         0,                                                                                  \
         handle->stream,                                                                     \
@@ -369,7 +375,7 @@ namespace rocsparse
             {
                 RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                     (rocsparse::coommtn_atomic_main<256, false, T>),
-                    dim3((nnz - 1) / 256 + 1, n, (batch_count_C > 65536) ? 65536 : batch_count_C),
+                    dim3((nnz - 1) / 256 + 1, n, get_y_grid_size<I>(batch_count_C)),
                     dim3(256),
                     0,
                     handle->stream,
@@ -402,7 +408,7 @@ namespace rocsparse
             {
                 RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                     (rocsparse::coommtn_atomic_main<256, true, T>),
-                    dim3((nnz - 1) / 256 + 1, n, (batch_count_C > 65536) ? 65536 : batch_count_C),
+                    dim3((nnz - 1) / 256 + 1, n, get_y_grid_size<I>(batch_count_C)),
                     dim3(256),
                     0,
                     handle->stream,
