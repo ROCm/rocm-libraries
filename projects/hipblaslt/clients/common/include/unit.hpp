@@ -699,8 +699,47 @@ inline void unit_check_general(int64_t     M,
     }
 }
 
-/*! \brief Check that CPU and GPU agree on Inf/NaN: where CPU is Inf, GPU must be Inf with the same sign;
- *  where CPU is NaN, GPU must be NaN. Fails with a clear message (e.g. "CPU is Inf but GPU is NaN").
+/*! \brief IEEE classification of a value for special-value comparison. */
+enum class special_value_class
+{
+    finite,
+    positive_inf,
+    negative_inf,
+    not_a_number
+};
+
+inline special_value_class classify_special_value(double v)
+{
+    if(std::isnan(v))
+        return special_value_class::not_a_number;
+    if(std::isinf(v))
+        return std::signbit(v) ? special_value_class::negative_inf
+                               : special_value_class::positive_inf;
+    return special_value_class::finite;
+}
+
+inline const char* special_value_class_name(special_value_class c)
+{
+    switch(c)
+    {
+    case special_value_class::positive_inf:
+        return "+Inf";
+    case special_value_class::negative_inf:
+        return "-Inf";
+    case special_value_class::not_a_number:
+        return "NaN";
+    case special_value_class::finite:
+        break;
+    }
+    return "finite";
+}
+
+/*! \brief Check that CPU and GPU agree on the IEEE class of every element: an element must be
+ *  finite on both sides, +Inf on both, -Inf on both, or NaN on both. Any other combination fails
+ *  with a clear message (e.g. "CPU is +Inf but GPU is NaN"). Finite pairs are left to the
+ *  unit/norm checks. The comparison is symmetric on purpose: a finite reference paired with a
+ *  non-finite result must fail here, because GoogleTest's ULP-based FLOAT_EQ/DOUBLE_EQ treat the
+ *  largest finite value as almost equal to Inf and would otherwise accept that overflow.
  *  Only for FP types that can have Inf/NaN; no-op for others. Run before unit_check so Inf->NaN bugs are reported clearly. */
 #ifdef GOOGLE_TEST
 template <typename T>
@@ -721,18 +760,15 @@ inline void check_special_value_consistency_impl(int64_t M,
                 T      g   = hGPU[idx];
                 double cd = double(c);
                 double gd = double(g);
-                if(std::isinf(cd))
+
+                special_value_class cclass = classify_special_value(cd);
+                special_value_class gclass = classify_special_value(gd);
+                if(cclass != gclass)
                 {
-                    ASSERT_TRUE(std::isinf(gd) && (std::signbit(cd) == std::signbit(gd)))
-                        << "Special value mismatch: CPU is " << (std::signbit(cd) ? "-Inf" : "+Inf")
-                        << " but GPU is " << gd << " at (i=" << i << ", j=" << j << ", batch=" << k
-                        << ")";
-                }
-                else if(std::isnan(cd))
-                {
-                    ASSERT_TRUE(std::isnan(gd))
-                        << "Special value mismatch: CPU is NaN but GPU is " << gd << " at (i=" << i
-                        << ", j=" << j << ", batch=" << k << ")";
+                    FAIL() << "Special value mismatch: CPU is " << special_value_class_name(cclass)
+                           << " (" << cd << ") but GPU is " << special_value_class_name(gclass)
+                           << " (" << gd << ") at (i=" << i << ", j=" << j << ", batch=" << k
+                           << ")";
                 }
             }
 }
