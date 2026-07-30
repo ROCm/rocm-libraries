@@ -756,10 +756,7 @@ for Conv-Bias-ReLU, say) and its unfused counterpart (`node_count == 1`) are mut
 node count and never share a candidate set, so nothing in the UHD's ranking can compare a fused
 kernel against its decomposed equivalent. The decision of whether to fuse belongs to the host,
 through ordinary engine selection ([Section 2](#2-the-descriptors)); there is no fusion cost model
-anywhere in this design. If one engine offers both the fused and the sequential form, its heuristic
-carries a metadata field distinguishing the two and ranks on it directly, using the same mechanism as
-any other engine choice: explicit selection, policy heuristics, or auto-tuning. Fusion is distinct
-from composition, running one graph as several kernels
+anywhere in this design. Fusion is distinct from composition, running one graph as several kernels
 ([Section 15](#15-multiple-kernels-and-composition)), which goes the opposite direction and is future
 work.
 
