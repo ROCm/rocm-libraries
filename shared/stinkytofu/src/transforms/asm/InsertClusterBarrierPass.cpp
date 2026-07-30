@@ -1000,8 +1000,8 @@ class InsertClusterBarrierPassImpl : public Pass {
    public:
     static char ID;
 
-    InsertClusterBarrierPassImpl(bool isKernelScope, int pgrValue, int plrValue)
-        : isKernelScope_(isKernelScope), pgrValue_(pgrValue), plrValue_(plrValue) {}
+    InsertClusterBarrierPassImpl(int pgrValue, int plrValue)
+        : pgrValue_(pgrValue), plrValue_(plrValue) {}
 
     const char* getName() const override {
         return "Insert Cluster Barrier";
@@ -1396,14 +1396,11 @@ class InsertClusterBarrierPassImpl : public Pass {
             }
         }
 
-        // Rule 2 (kernel scope only): a single `s_barrier_wait -3` planted
-        // immediately before the first `tensor_load_to_lds` of the whole
-        // function. Region-scope invocations skip this rule because their
-        // notion of "first tensor_load" is the region's local first, not
-        // the kernel's. Idempotency: skip when the load is already gated
-        // by a cluster-scope wait (whether ours, Rule 4's, or one already
-        // present in the source IR).
-        if (isKernelScope_) {
+        // Rule 2: a single `s_barrier_wait -3` planted immediately before the
+        // first `tensor_load_to_lds` of the whole function. Idempotency: skip
+        // when the load is already gated by a cluster-scope wait (whether ours,
+        // Rule 4's, or one already present in the source IR).
+        {
             StinkyInstruction* firstTL = findFirstTensorLoadInFunc(func);
             if (firstTL != nullptr && !isImmediatelyPrecededByClusterBarrierWait(firstTL)) {
                 BasicBlock* parent = firstTL->getParent();
@@ -1416,7 +1413,6 @@ class InsertClusterBarrierPassImpl : public Pass {
     }
 
    private:
-    const bool isKernelScope_;
     const int pgrValue_;
     const int plrValue_;
 };
@@ -1425,9 +1421,8 @@ char InsertClusterBarrierPassImpl::ID = 0;
 
 }  // namespace
 
-std::unique_ptr<Pass> createInsertClusterBarrierPass(bool isKernelScope, int pgrValue,
-                                                     int plrValue) {
-    return std::make_unique<InsertClusterBarrierPassImpl>(isKernelScope, pgrValue, plrValue);
+std::unique_ptr<Pass> createInsertClusterBarrierPass(int pgrValue, int plrValue) {
+    return std::make_unique<InsertClusterBarrierPassImpl>(pgrValue, plrValue);
 }
 
 }  // namespace stinkytofu
