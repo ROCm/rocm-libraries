@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: MIT
 """gfx950 GPU smoke tests for the implicit-GEMM convolution benchmark.
 
-Tests bf16 and fp32 dtypes for forward (fwd) and backward-data (dgrad)
+Tests bf16 and fp32 dtypes for forward (fwd), backward-data (dgrad),
+and backward-weight (wgrad)
 directions. Each test method runs the benchmark sweep with --verify (the
 benchmark itself prints PASS/FAIL per kernel) and checks TFLOPS against the
 committed baseline in rocke_gfx950_smoke_perf.json.
@@ -87,9 +88,7 @@ class TestGfx950ConvSmoke(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, out[-3500:])
         return out
 
-    def _verify_and_sweep(
-        self, dtype: str, baseline_key: str, direction: str = "fwd"
-    ):
+    def _verify_and_sweep(self, dtype: str, baseline_key: str, direction: str = "fwd"):
         out = self._run_benchmark(dtype, direction=direction)
 
         self.assertNotIn(
@@ -128,6 +127,16 @@ class TestGfx950ConvSmoke(unittest.TestCase):
             "fp32",
             "conv_dgrad_fp32_gfx950_N8H56W56C64K64R3S3",
             direction="dgrad",
+        )
+
+    def test_conv_wgrad_bf16(self):
+        self._verify_and_sweep(
+            "bf16", "conv_wgrad_bf16_gfx950_N8H56W56C64K64R3S3", direction="wgrad"
+        )
+
+    def test_conv_wgrad_fp32(self):
+        self._verify_and_sweep(
+            "fp32", "conv_wgrad_fp32_gfx950_N8H56W56C64K64R3S3", direction="wgrad"
         )
 
 
