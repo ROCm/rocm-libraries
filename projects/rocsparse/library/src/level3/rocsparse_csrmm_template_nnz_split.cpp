@@ -123,12 +123,18 @@ namespace rocsparse
         }
         }
     }
+
+    template <typename J>
+    static uint16_t get_y_grid_size(J batch_count)
+    {
+        return (batch_count > 65535) ? 32768 : batch_count;
+    }
 }
 
 #define LAUNCH_CSRMMNN_NNZ_SPLIT_MAIN_KERNEL(CSRMMNT_DIM, WF_SIZE)        \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                   \
         (rocsparse::csrmmnn_nnz_split_main_kernel<CSRMMNT_DIM, WF_SIZE>), \
-        dim3(nblocks, (batch_count_C > 65536) ? 65536 : batch_count_C),   \
+        dim3(nblocks, get_y_grid_size<J>(batch_count_C)),                 \
         dim3(CSRMMNT_DIM),                                                \
         0,                                                                \
         handle->stream,                                                   \
@@ -163,7 +169,7 @@ namespace rocsparse
 #define LAUNCH_CSRMMNN_NNZ_SPLIT_REMAINDER_KERNEL(CSRMMNT_DIM, WF_SIZE)        \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                        \
         (rocsparse::csrmmnn_nnz_split_remainder_kernel<CSRMMNT_DIM, WF_SIZE>), \
-        dim3(nblocks, (batch_count_C > 65536) ? 65536 : batch_count_C),        \
+        dim3(nblocks, get_y_grid_size<J>(batch_count_C)),                      \
         dim3(CSRMMNT_DIM),                                                     \
         0,                                                                     \
         handle->stream,                                                        \
@@ -204,28 +210,28 @@ namespace rocsparse
               typename A,
               typename B,
               typename C>
-    static rocsparse_status csrmmnn_nnz_split_dispatch(rocsparse_handle          handle,
-                                                       bool                      conj_A,
-                                                       bool                      conj_B,
-                                                       J                         m,
-                                                       J                         n,
-                                                       J                         k,
-                                                       I                         nnz,
-                                                       int64_t                   offsets_batch_stride_A,
-                                                       int64_t     columns_values_batch_stride_A,
-                                                       const T*    alpha_device_host,
+    static rocsparse_status csrmmnn_nnz_split_dispatch(rocsparse_handle handle,
+                                                       bool             conj_A,
+                                                       bool             conj_B,
+                                                       J                m,
+                                                       J                n,
+                                                       J                k,
+                                                       I                nnz,
+                                                       int64_t          offsets_batch_stride_A,
+                                                       int64_t  columns_values_batch_stride_A,
+                                                       const T* alpha_device_host,
                                                        const rocsparse_mat_descr descr,
                                                        const A*                  csr_val,
                                                        const I*                  csr_row_ptr,
                                                        const J*                  csr_col_ind,
                                                        const B*                  dense_B,
                                                        int64_t                   ldb,
-                                                       int64_t     batch_stride_B,
+                                                       int64_t                   batch_stride_B,
                                                        const T*                  beta_device_host,
                                                        C*                        dense_C,
                                                        int64_t                   ldc,
                                                        J                         batch_count_C,
-                                                       int64_t     batch_stride_C,
+                                                       int64_t                   batch_stride_C,
                                                        rocsparse_order           order_C,
                                                        void*                     temp_buffer)
     {
@@ -300,7 +306,7 @@ namespace rocsparse
         }
 
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::csrmmnn_general_block_reduce<1024>),
-                                           dim3(n, (batch_count_C > 65536) ? 65536 : batch_count_C),
+                                           dim3(n, get_y_grid_size<J>(batch_count_C)),
                                            dim3(1024),
                                            0,
                                            handle->stream,
@@ -320,8 +326,7 @@ namespace rocsparse
 #define LAUNCH_CSRMMNT_NNZ_SPLIT_MAIN_KERNEL(CSRMMNT_DIM, WF_SIZE, LOOPS)        \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                          \
         (rocsparse::csrmmnt_nnz_split_main_kernel<CSRMMNT_DIM, WF_SIZE, LOOPS>), \
-        dim3((nnz - 1) / CSRMMNT_DIM + 1,                                        \
-             (batch_count_C > 65536) ? 65536 : batch_count_C),                   \
+        dim3((nnz - 1) / CSRMMNT_DIM + 1, get_y_grid_size<J>(batch_count_C)),    \
         dim3(CSRMMNT_DIM),                                                       \
         0,                                                                       \
         handle->stream,                                                          \
@@ -353,8 +358,7 @@ namespace rocsparse
 #define LAUNCH_CSRMMNT_NNZ_SPLIT_REMAINDER_KERNEL(CSRMMNT_DIM, WF_SIZE)        \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                        \
         (rocsparse::csrmmnt_nnz_split_remainder_kernel<CSRMMNT_DIM, WF_SIZE>), \
-        dim3((nnz - 1) / CSRMMNT_DIM + 1,                                      \
-             (batch_count_C > 65536) ? 65536 : batch_count_C),                 \
+        dim3((nnz - 1) / CSRMMNT_DIM + 1, get_y_grid_size<J>(batch_count_C)),  \
         dim3(CSRMMNT_DIM),                                                     \
         0,                                                                     \
         handle->stream,                                                        \
@@ -394,28 +398,28 @@ namespace rocsparse
               typename A,
               typename B,
               typename C>
-    rocsparse_status csrmmnt_nnz_split_dispatch(rocsparse_handle          handle,
-                                                bool                      conj_A,
-                                                bool                      conj_B,
-                                                J                         m,
-                                                J                         n,
-                                                J                         k,
-                                                I                         nnz,
-                                                int64_t                   offsets_batch_stride_A,
-                                                int64_t     columns_values_batch_stride_A,
-                                                const T*    alpha_device_host,
+    rocsparse_status csrmmnt_nnz_split_dispatch(rocsparse_handle handle,
+                                                bool             conj_A,
+                                                bool             conj_B,
+                                                J                m,
+                                                J                n,
+                                                J                k,
+                                                I                nnz,
+                                                int64_t          offsets_batch_stride_A,
+                                                int64_t          columns_values_batch_stride_A,
+                                                const T*         alpha_device_host,
                                                 const rocsparse_mat_descr descr,
                                                 const A*                  csr_val,
                                                 const I*                  csr_row_ptr,
                                                 const J*                  csr_col_ind,
                                                 const B*                  dense_B,
                                                 int64_t                   ldb,
-                                                int64_t     batch_stride_B,
+                                                int64_t                   batch_stride_B,
                                                 const T*                  beta_device_host,
                                                 C*                        dense_C,
                                                 int64_t                   ldc,
                                                 J                         batch_count_C,
-                                                int64_t     batch_stride_C,
+                                                int64_t                   batch_stride_C,
                                                 rocsparse_order           order_C,
                                                 void*                     temp_buffer)
     {
@@ -518,16 +522,16 @@ namespace rocsparse
          temp_buffer);
 
     template <typename T, typename I, typename J, typename A, typename B, typename C>
-    rocsparse_status csrmm_template_nnz_split(rocsparse_handle          handle,
-                                              rocsparse_operation       trans_A,
-                                              rocsparse_operation       trans_B,
-                                              J                         m,
-                                              J                         n,
-                                              J                         k,
-                                              I                         nnz,
-                                              int64_t                   offsets_batch_stride_A,
-                                              int64_t                   columns_values_batch_stride_A,
-                                              const T*                  alpha_device_host,
+    rocsparse_status csrmm_template_nnz_split(rocsparse_handle    handle,
+                                              rocsparse_operation trans_A,
+                                              rocsparse_operation trans_B,
+                                              J                   m,
+                                              J                   n,
+                                              J                   k,
+                                              I                   nnz,
+                                              int64_t             offsets_batch_stride_A,
+                                              int64_t             columns_values_batch_stride_A,
+                                              const T*            alpha_device_host,
                                               const rocsparse_mat_descr descr,
                                               const A*                  csr_val,
                                               const I*                  csr_row_ptr,
@@ -673,33 +677,34 @@ INSTANTIATE_ANALYSIS(int64_t, int32_t, int8_t);
 INSTANTIATE_ANALYSIS(int64_t, int64_t, int8_t);
 #undef INSTANTIATE_ANALYSIS
 
-#define INSTANTIATE(TTYPE, ITYPE, JTYPE, ATYPE, BTYPE, CTYPE)                                        \
-    template rocsparse_status rocsparse::csrmm_template_nnz_split(rocsparse_handle    handle,        \
-                                                                  rocsparse_operation trans_A,       \
-                                                                  rocsparse_operation trans_B,       \
-                                                                  JTYPE               m,             \
-                                                                  JTYPE               n,             \
-                                                                  JTYPE               k,             \
-                                                                  ITYPE               nnz,           \
-                                                                  int64_t     offsets_batch_stride_A,        \
-                                                                  int64_t     columns_values_batch_stride_A, \
-                                                                  const TTYPE* alpha_device_host,    \
-                                                                  const rocsparse_mat_descr descr,   \
-                                                                  const ATYPE*              csr_val, \
-                                                                  const ITYPE*    csr_row_ptr,       \
-                                                                  const JTYPE*    csr_col_ind,       \
-                                                                  const BTYPE*    dense_B,           \
-                                                                  int64_t         ldb,               \
-                                                                  int64_t     batch_stride_B,                \
-                                                                  rocsparse_order order_B,           \
-                                                                  const TTYPE*    beta_device_host,  \
-                                                                  CTYPE*          dense_C,           \
-                                                                  int64_t         ldc,               \
-                                                                  JTYPE       batch_count_C,         \
-                                                                  int64_t     batch_stride_C,                \
-                                                                  rocsparse_order order_C,           \
-                                                                  void*           temp_buffer,       \
-                                                                  bool            force_conj_A)
+#define INSTANTIATE(TTYPE, ITYPE, JTYPE, ATYPE, BTYPE, CTYPE)      \
+    template rocsparse_status rocsparse::csrmm_template_nnz_split( \
+        rocsparse_handle          handle,                          \
+        rocsparse_operation       trans_A,                         \
+        rocsparse_operation       trans_B,                         \
+        JTYPE                     m,                               \
+        JTYPE                     n,                               \
+        JTYPE                     k,                               \
+        ITYPE                     nnz,                             \
+        int64_t                   offsets_batch_stride_A,          \
+        int64_t                   columns_values_batch_stride_A,   \
+        const TTYPE*              alpha_device_host,               \
+        const rocsparse_mat_descr descr,                           \
+        const ATYPE*              csr_val,                         \
+        const ITYPE*              csr_row_ptr,                     \
+        const JTYPE*              csr_col_ind,                     \
+        const BTYPE*              dense_B,                         \
+        int64_t                   ldb,                             \
+        int64_t                   batch_stride_B,                  \
+        rocsparse_order           order_B,                         \
+        const TTYPE*              beta_device_host,                \
+        CTYPE*                    dense_C,                         \
+        int64_t                   ldc,                             \
+        JTYPE                     batch_count_C,                   \
+        int64_t                   batch_stride_C,                  \
+        rocsparse_order           order_C,                         \
+        void*                     temp_buffer,                     \
+        bool                      force_conj_A)
 
 // Uniform precisions
 INSTANTIATE(float, int32_t, int32_t, float, float, float);

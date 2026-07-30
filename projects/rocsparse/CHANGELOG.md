@@ -3,6 +3,11 @@
 Documentation for rocSPARSE is available at
 [https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/](https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/).
 
+## (Unreleased) rocSPARSE 5.1.0
+
+### Added
+* Added batched support to the SpMM algorithm `rocsparse_spmm_alg_csr_nnz_split`.
+
 ## (Unreleased) rocSPARSE 5.0.0
 
 ### Added
