@@ -33,7 +33,8 @@ def test_normalize_logic_relative_path():
 
 
 def test_load_known_bugs_missing_file(tmp_path):
-    assert load_known_bugs(tmp_path / "none.yaml") == frozenset()
+    with pytest.raises(ValueError, match="does not exist"):
+        load_known_bugs(tmp_path / "none.yaml")
 
 
 def test_load_known_bugs_none_does_not_read_bundled_resource(monkeypatch):
