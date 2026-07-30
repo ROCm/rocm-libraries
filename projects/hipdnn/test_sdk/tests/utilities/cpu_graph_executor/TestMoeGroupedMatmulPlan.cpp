@@ -465,7 +465,7 @@ TEST(TestMoeGroupedMatmulPlanBuilder, RoutingContractMatchesFrontendNode)
 
     // validFrontendAttributes() carries a weight of {E=2, K=3, N=5}, so the
     // contract side always sees expertCount == 2.
-    constexpr int64_t expertCount = 2;
+    constexpr int64_t EXPERT_COUNT = 2;
 
     struct ParityCase
     {
@@ -489,7 +489,7 @@ TEST(TestMoeGroupedMatmulPlanBuilder, RoutingContractMatchesFrontendNode)
                                        hasTokenIndex ? tokenIndexDataType : DataType::UNSET,
                                        hasTokenKs ? DataType::INT32 : DataType::UNSET,
                                        topK,
-                                       expertCount};
+                                       EXPERT_COUNT};
     };
 
     const std::vector<ParityCase> cases = {
@@ -598,7 +598,7 @@ TEST(TestMoeGroupedMatmulPlanBuilder, RoutingContractMatchesFrontendNode)
 
         auto attrs = validFrontendAttributes();
         testCase.configure(attrs);
-        hipdnn_frontend::graph::MoeGroupedMatmulNode node(std::move(attrs), graphAttrs);
+        const hipdnn_frontend::graph::MoeGroupedMatmulNode node(std::move(attrs), graphAttrs);
         EXPECT_EQ(node.pre_validate_node().is_good(), testCase.nodeAccepts);
 
         EXPECT_EQ(checkMoeGroupedMatmulRouting(testCase.routing) == nullptr,

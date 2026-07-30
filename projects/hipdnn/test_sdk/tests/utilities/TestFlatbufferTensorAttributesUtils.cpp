@@ -56,7 +56,7 @@ TEST(TestFlatbufferTensorAttributesUtils, BindShallowTensorReturnsMatchingTensor
     attr.strides = {2, 1};
 
     std::array<float, 4> data = {1.0f, 2.0f, 3.0f, 4.0f};
-    std::unordered_map<int64_t, void*> variantPack{{7, data.data()}};
+    const std::unordered_map<int64_t, void*> variantPack{{7, data.data()}};
 
     auto tensor = bindShallowTensor<float>(attr, variantPack);
 
@@ -74,15 +74,15 @@ TEST(TestFlatbufferTensorAttributesUtils, BindShallowTensorThrowsOnMissingUid)
     attr.dims = {2, 2};
     attr.strides = {2, 1};
 
-    std::unordered_map<int64_t, void*> variantPack; // uid 8 absent
+    const std::unordered_map<int64_t, void*> variantPack; // uid 8 absent
 
     EXPECT_THROW(bindShallowTensor<float>(attr, variantPack), std::out_of_range);
 }
 
 TEST(TestFlatbufferTensorAttributesUtils, BindOptionalShallowTensorNulloptYieldsNullptr)
 {
-    std::optional<TensorAttributesT> attr = std::nullopt;
-    std::unordered_map<int64_t, void*> variantPack;
+    const std::optional<TensorAttributesT> attr = std::nullopt;
+    const std::unordered_map<int64_t, void*> variantPack;
 
     auto tensor = bindOptionalShallowTensor<float>(attr, variantPack);
 
@@ -98,7 +98,7 @@ TEST(TestFlatbufferTensorAttributesUtils, BindOptionalShallowTensorPresentBinds)
     attr.strides = {1};
 
     std::array<float, 3> data = {1.0f, 2.0f, 3.0f};
-    std::unordered_map<int64_t, void*> variantPack{{9, data.data()}};
+    const std::unordered_map<int64_t, void*> variantPack{{9, data.data()}};
 
     auto tensor = bindOptionalShallowTensor<float>(std::optional<TensorAttributesT>(attr),
                                                    variantPack);

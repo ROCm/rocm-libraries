@@ -203,8 +203,8 @@ public:
                 // scratch row. thread_local keeps that off the per-row allocation
                 // path - this functor body runs once per output row, on every worker
                 // thread.
-                thread_local std::vector<ComputeDataType> acc;
-                acc.assign(static_cast<size_t>(outputN), ComputeDataType{0});
+                thread_local std::vector<ComputeDataType> s_acc;
+                s_acc.assign(static_cast<size_t>(outputN), ComputeDataType{0});
 
                 for(int64_t kIdx = 0; kIdx < hiddenK; ++kIdx)
                 {
@@ -212,7 +212,7 @@ public:
                     const WeightDataType* wRow = wExpert + kIdx * weightStride1;
                     for(int64_t nIdx = 0; nIdx < outputN; ++nIdx)
                     {
-                        acc[static_cast<size_t>(nIdx)]
+                        s_acc[static_cast<size_t>(nIdx)]
                             += a * static_cast<ComputeDataType>(wRow[nIdx]);
                     }
                 }
@@ -221,7 +221,7 @@ public:
                 {
                     outRow[nIdx * outputStride2]
                         = hipdnn_test_sdk::detail::safeConvert<OutputDataType>(
-                            acc[static_cast<size_t>(nIdx)]);
+                            s_acc[static_cast<size_t>(nIdx)]);
                 }
             }
             else
@@ -308,17 +308,17 @@ private:
         // Presence/top_k rules are exactly the shared FlatBuffers routing contract
         // (backend descriptor and CPU plan builder evaluate the same function).
         // Routing tensors are statically int32_t here, so their dtype fields hold.
-        namespace fbUtilities = hipdnn_flatbuffers_sdk::utilities;
+        namespace fb_utilities = hipdnn_flatbuffers_sdk::utilities;
         using FbDataType = hipdnn_flatbuffers_sdk::data_objects::DataType;
-        const fbUtilities::MoeGroupedMatmulRouting routing{mode,
-                                                           tokenIndex != nullptr,
-                                                           tokenKs != nullptr,
-                                                           FbDataType::INT32,
-                                                           FbDataType::INT32,
-                                                           FbDataType::INT32,
-                                                           topK,
-                                                           expertCount};
-        if(const char* reason = fbUtilities::checkMoeGroupedMatmulRouting(routing))
+        const fb_utilities::MoeGroupedMatmulRouting routing{mode,
+                                                            tokenIndex != nullptr,
+                                                            tokenKs != nullptr,
+                                                            FbDataType::INT32,
+                                                            FbDataType::INT32,
+                                                            FbDataType::INT32,
+                                                            topK,
+                                                            expertCount};
+        if(const char* reason = fb_utilities::checkMoeGroupedMatmulRouting(routing))
         {
             throw std::runtime_error(prefix + reason);
         }

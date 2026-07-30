@@ -168,7 +168,7 @@ public:
             tokenIndexDataTypeOrUnset,
             tokenKsDataTypeOrUnset,
             nodeAttributes->top_k(),
-            weightTensor->dims() == nullptr || weightTensor->dims()->size() == 0
+            weightTensor->dims() == nullptr || weightTensor->dims()->empty()
                 ? 0
                 : weightTensor->dims()->Get(0)};
         if(hipdnn_flatbuffers_sdk::utilities::checkMoeGroupedMatmulRouting(routing) != nullptr)

@@ -458,47 +458,47 @@ TEST(TestCpuFpReferenceMoeGroupedMatmul, GatherOffsetPastRoutedRowsThrows)
 
 TEST(TestCpuFpReferenceMoeGroupedMatmul, LargeRandomMatchesNaiveLoop)
 {
-    constexpr int64_t experts = 4;
-    constexpr int64_t batch = 2;
-    constexpr int64_t hiddenK = 17;
-    constexpr int64_t outputN = 13;
-    constexpr int64_t tokenRows = 64;
-    constexpr int32_t topK = 2;
-    constexpr int64_t groupCount = batch * experts;
-    constexpr int64_t rowsPerGroup = tokenRows / groupCount;
+    constexpr int64_t EXPERTS = 4;
+    constexpr int64_t BATCH = 2;
+    constexpr int64_t HIDDEN_K = 17;
+    constexpr int64_t OUTPUT_N = 13;
+    constexpr int64_t TOKEN_ROWS = 64;
+    constexpr int32_t TOP_K = 2;
+    constexpr int64_t GROUP_COUNT = BATCH * EXPERTS;
+    constexpr int64_t ROWS_PER_GROUP = TOKEN_ROWS / GROUP_COUNT;
 
-    auto token = createTensor<float>({1, tokenRows, hiddenK});
-    auto weight = createTensor<float>({experts, hiddenK, outputN});
+    auto token = createTensor<float>({1, TOKEN_ROWS, HIDDEN_K});
+    auto weight = createTensor<float>({EXPERTS, HIDDEN_K, OUTPUT_N});
     token.fillWithRandomValues(0.0F, 1.0F, 42);
     weight.fillWithRandomValues(0.0F, 1.0F, 43);
 
-    auto offsets = createTensor<int32_t>({groupCount, 1, 1});
-    auto tokenIndex = createTensor<int32_t>({1, tokenRows, 1});
-    auto tokenKs = createTensor<int32_t>({1, tokenRows, 1});
-    for(int64_t g = 0; g < groupCount; ++g)
+    auto offsets = createTensor<int32_t>({GROUP_COUNT, 1, 1});
+    auto tokenIndex = createTensor<int32_t>({1, TOKEN_ROWS, 1});
+    auto tokenKs = createTensor<int32_t>({1, TOKEN_ROWS, 1});
+    for(int64_t g = 0; g < GROUP_COUNT; ++g)
     {
-        offsets.setHostValue(static_cast<int32_t>(g * tokenRows / groupCount), {g, 0, 0});
+        offsets.setHostValue(static_cast<int32_t>(g * TOKEN_ROWS / GROUP_COUNT), {g, 0, 0});
     }
-    for(int64_t r = 0; r < tokenRows; ++r)
+    for(int64_t r = 0; r < TOKEN_ROWS; ++r)
     {
-        tokenIndex.setHostValue(static_cast<int32_t>(r / topK), {0, r, 0});
-        tokenKs.setHostValue(static_cast<int32_t>(r % topK), {0, r, 0});
+        tokenIndex.setHostValue(static_cast<int32_t>(r / TOP_K), {0, r, 0});
+        tokenKs.setHostValue(static_cast<int32_t>(r % TOP_K), {0, r, 0});
     }
 
-    auto output = createTensor<float>({1, tokenRows, outputN});
+    auto output = createTensor<float>({1, TOKEN_ROWS, OUTPUT_N});
     CpuFpReferenceMoeGroupedMatmul::forward<float, float, float, float>(
-        token, weight, offsets, output, Mode::SCATTER, topK, &tokenIndex, &tokenKs);
+        token, weight, offsets, output, Mode::SCATTER, TOP_K, &tokenIndex, &tokenKs);
 
     // Independent naive reference: with this deterministic identity-permutation
-    // routing, dst == r always, and expert(r) == (r / rowsPerGroup) % experts.
-    auto naiveOutput = createTensor<float>({1, tokenRows, outputN});
-    for(int64_t r = 0; r < tokenRows; ++r)
+    // routing, dst == r always, and expert(r) == (r / ROWS_PER_GROUP) % EXPERTS.
+    auto naiveOutput = createTensor<float>({1, TOKEN_ROWS, OUTPUT_N});
+    for(int64_t r = 0; r < TOKEN_ROWS; ++r)
     {
-        const int64_t expert = (r / rowsPerGroup) % experts;
-        for(int64_t n = 0; n < outputN; ++n)
+        const int64_t expert = (r / ROWS_PER_GROUP) % EXPERTS;
+        for(int64_t n = 0; n < OUTPUT_N; ++n)
         {
             double acc = 0.0;
-            for(int64_t k = 0; k < hiddenK; ++k)
+            for(int64_t k = 0; k < HIDDEN_K; ++k)
             {
                 acc += static_cast<double>(token.getHostValue({0, r, k}))
                        * static_cast<double>(weight.getHostValue({expert, k, n}));
@@ -507,6 +507,6 @@ TEST(TestCpuFpReferenceMoeGroupedMatmul, LargeRandomMatchesNaiveLoop)
         }
     }
 
-    CpuFpReferenceValidation<float> validator(1e-5F, 1e-5F);
+    const CpuFpReferenceValidation<float> validator(1e-5F, 1e-5F);
     EXPECT_TRUE(validator.allClose(naiveOutput, output));
 }

@@ -288,17 +288,17 @@ public:
         using MoeMode = hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulMode;
         const unsigned int seed = getGlobalTestSeed();
 
-        constexpr int64_t experts = 2;
-        constexpr int64_t hiddenK = 3;
-        constexpr int64_t weightN = 4;
-        constexpr int64_t tokenRows = 6;
-        const int64_t routedRows = (mode == MoeMode::GATHER) ? 7 : tokenRows;
+        constexpr int64_t EXPERTS = 2;
+        constexpr int64_t HIDDEN_K = 3;
+        constexpr int64_t WEIGHT_N = 4;
+        constexpr int64_t TOKEN_ROWS = 6;
+        const int64_t routedRows = (mode == MoeMode::GATHER) ? 7 : TOKEN_ROWS;
         const int32_t topK = (mode == MoeMode::SCATTER) ? 2 : 0;
 
         MoeGroupedMatmulTensorBundle<InputType> execBundle(
-            experts, hiddenK, weightN, tokenRows, routedRows, mode, topK, seed);
+            EXPERTS, HIDDEN_K, WEIGHT_N, TOKEN_ROWS, routedRows, mode, topK, seed);
         MoeGroupedMatmulTensorBundle<InputType> directBundle(
-            experts, hiddenK, weightN, tokenRows, routedRows, mode, topK, seed);
+            EXPERTS, HIDDEN_K, WEIGHT_N, TOKEN_ROWS, routedRows, mode, topK, seed);
 
         auto graphTuple
             = buildMoeGroupedMatmulGraph(execBundle, inputDataType, outputDataType, computeDataType);
