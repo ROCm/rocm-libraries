@@ -2073,17 +2073,17 @@ def _select_gfx942_flash_k_slice_hd(problem: UnifiedAttentionProblem) -> int:
     degree but doubles the per-tile barrier and partial-wait count, so the best
     width is a knee rather than the smallest legal value.
 
-    Returns the shipped 32 for every problem: this makes the width expressible
-    without changing any kernel. Selecting a narrower width is a separate change,
-    and one that has to mirror the width into the C++ engine first -- the C++ twin
-    of this builder hardcodes ``K_SLICE_HD`` (and ``K_SLICE_SLOTS``), so a Python
-    selector that returned anything else would make the two engines disagree for
-    ring specs. The parity corpus enumerates no ring config, so the byte-identity
-    gate would not catch it.
+    D64 takes 16 (k_groups=4) and D128 keeps the shipped 32 (k_groups=4). The two
+    head sizes land on opposite sides of the trade because the barrier count the
+    narrower width buys follows k_groups, not the width: at D64 width 16 reaches
+    the same k_groups D128 already runs at, so it halves the conflict degree at a
+    group count the schedule is known to carry, while the same step at D128 would
+    double it again. The widths are otherwise interchangeable to the schedule --
+    slot reuse and the drain-on-reuse fence are width-independent (see the
+    ``k_slice_hd`` field docstring), so no new fence analysis rides on this.
 
-    ``HIPDNN_GFX942_K_SLICE_HD`` overrides the width for measurement. It is a
-    diagnostic knob and carries that same engine-divergence caveat, which is why
-    the default path does not use it. Only meaningful when the ring is active."""
+    ``HIPDNN_GFX942_K_SLICE_HD`` overrides the width for measurement. Only
+    meaningful when the ring is active."""
     env = __import__("os").environ.get("HIPDNN_GFX942_K_SLICE_HD", "").strip()
     # isdecimal rather than isdigit: isdigit accepts characters such as
     # superscripts that int() then rejects, turning a typo into a ValueError on
@@ -2100,6 +2100,8 @@ def _select_gfx942_flash_k_slice_hd(problem: UnifiedAttentionProblem) -> int:
         # ``_GFX942_K_SLICE_HD_CHOICES``, so it cannot fail here.
         if problem.head_size % width == 0 and problem.head_size // width >= 2:
             return width
+    if problem.head_size == 64:
+        return 16
     return 32
 
 

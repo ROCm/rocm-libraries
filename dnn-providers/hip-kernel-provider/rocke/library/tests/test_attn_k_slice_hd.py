@@ -176,18 +176,52 @@ def _nonring_spec(dtype="bf16", d=128, k_slice_hd=32, nw=2, t=64):
 
 
 # ---------------------------------------------------------------------------
-# Default is the shipped width -- nothing moves without a selector change
+# What the selector routes
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("dtype", ["bf16", "fp16"])
-@pytest.mark.parametrize("d,bs", [(128, 64), (64, 16)])
-def test_selector_returns_the_shipped_width(gfx942, dtype, d, bs):
-    # Nothing narrows yet. This change only makes the width expressible; selecting
-    # a narrower one requires mirroring it into the C++ engine first.
+@pytest.mark.parametrize("d,bs,width", [(128, 64, 32), (64, 16, 16)])
+def test_selector_routes_the_width_by_head_size(gfx942, dtype, d, bs, width):
     p = _problem(dtype, d=d, bs=bs)
-    assert au._select_gfx942_flash_k_slice_hd(p) == 32
-    assert au._tiled_spec_from_problem(p).k_slice_hd == 32
+    assert au._select_gfx942_flash_k_slice_hd(p) == width
+    assert au._tiled_spec_from_problem(p).k_slice_hd == width
+
+
+@pytest.mark.parametrize("dtype", ["bf16", "fp16"])
+@pytest.mark.parametrize("d,bs", [(128, 64), (64, 16)])
+def test_routed_width_puts_both_head_sizes_on_four_slices(gfx942, dtype, d, bs):
+    """The reason the routing is head-size dependent, pinned as an assertion.
+
+    The narrower width halves the QK read's bank-conflict degree and doubles the
+    slice count, and it is the slice count the per-tile barrier and partial-wait
+    traffic follows. Routing D64 to 16 and D128 to 32 puts both on four slices --
+    the group count the shipped D128 ring already runs.
+    """
+    spec = au._tiled_spec_from_problem(_problem(dtype, d=d, bs=bs))
+    assert spec.head_size // spec.k_slice_hd == 4
+
+
+@pytest.mark.parametrize("dtype", ["bf16", "fp16"])
+def test_routed_ring_never_reserves_a_slot_it_cannot_reach(gfx942, dtype):
+    """Every slot the ring allocates must be reachable by the slot map.
+
+    The map is ``kg % ring_depth``, so with fewer slices than slots the top slots
+    are never written while their LDS stays reserved -- the same shape of waste the
+    validator already rejects at one slice, one step further along.
+    """
+    spec = au._tiled_spec_from_problem(_problem(dtype, d=64, bs=16))
+    if not spec.use_k_sliced_ring:
+        pytest.skip("D64 is not routed onto the ring")
+    assert spec.head_size // spec.k_slice_hd >= spec.ring_depth
+
+
+def test_narrowed_d64_ring_is_a_distinct_kernel(gfx942):
+    # A narrowed ring is a different schedule and a different K_lds extent, so it
+    # must not collide with the width-32 kernel in the name or the HSACO cache.
+    spec = au._tiled_spec_from_problem(_problem("bf16", d=64, bs=16))
+    assert spec.use_k_sliced_ring, "D64 is expected to route onto the ring"
+    assert "ks16" in spec.kernel_name()
 
 
 @pytest.mark.parametrize("arch", ["gfx950", "gfx1250", "gfx1151", "gfx1201"])
