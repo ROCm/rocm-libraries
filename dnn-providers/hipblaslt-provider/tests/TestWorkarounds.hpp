@@ -19,20 +19,22 @@
 // includes, and remove the call sites.
 // ----------------------------------------------------------------------------
 
-#include "HipblasltUtils.hpp"
+#include <hipdnn_plugin_sdk/ArchMatch.hpp>
+#include <hipdnn_plugin_sdk/DeviceQuery.hpp>
 
 #include <gtest/gtest.h>
 
 #ifdef _WIN32
-#define SKIP_IF_WORKAROUND_ISSUE_9962(handle)                                       \
-    do                                                                              \
-    {                                                                               \
-        if(::hipblaslt_plugin::hipblaslt_utils::getDeviceArch((handle).getStream()) \
-               .rfind("gfx115", 0)                                                  \
-           == 0)                                                                    \
-        {                                                                           \
-            GTEST_SKIP() << "[#9962] hipBLASLt GEMM crashes on gfx115x (Windows)";  \
-        }                                                                           \
+#define SKIP_IF_WORKAROUND_ISSUE_9962(handle)                                      \
+    do                                                                             \
+    {                                                                              \
+        if(::hipdnn_plugin_sdk::archMatches(                                       \
+               ::hipdnn_plugin_sdk::getDeviceArch((handle).getStream()),           \
+               "gfx115",                                                           \
+               ::hipdnn_plugin_sdk::ArchMatchMode::SUBSTRING))                     \
+        {                                                                          \
+            GTEST_SKIP() << "[#9962] hipBLASLt GEMM crashes on gfx115x (Windows)"; \
+        }                                                                          \
     } while(0)
 #else
 #define SKIP_IF_WORKAROUND_ISSUE_9962(handle) \

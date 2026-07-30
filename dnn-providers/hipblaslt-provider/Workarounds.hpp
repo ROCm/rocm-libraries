@@ -29,8 +29,8 @@
 // finds them all.
 // ----------------------------------------------------------------------------
 
-#include "HipblasltUtils.hpp"
-
+#include <hipdnn_plugin_sdk/ArchMatch.hpp>
+#include <hipdnn_plugin_sdk/DeviceQuery.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
 #include <exception>
@@ -41,9 +41,10 @@
     {                                                                                              \
         try                                                                                        \
         {                                                                                          \
-            if(::hipblaslt_plugin::hipblaslt_utils::getDeviceArch((handle).getStream())            \
-                   .rfind("gfx115", 0)                                                             \
-               == 0)                                                                               \
+            if(::hipdnn_plugin_sdk::archMatches(                                                   \
+                   ::hipdnn_plugin_sdk::getDeviceArch((handle).getStream()),                       \
+                   "gfx115",                                                                       \
+                   ::hipdnn_plugin_sdk::ArchMatchMode::SUBSTRING))                                 \
             {                                                                                      \
                 HIPDNN_PLUGIN_LOG_INFO(                                                            \
                     "[#9962] hipBLASLt matmul not applicable: GEMM crashes on gfx115x (Windows)"); \
