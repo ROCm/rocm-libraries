@@ -39,6 +39,17 @@ void checkReluModeSupported(const PointwiseAttributes& attrs)
     }
     if(lowerClipSlope)
     {
+        // Leaky ReLU. MIOpen's LEAKYRELU is parameterized by slope alone, with the knee fixed
+        // at 0; it cannot represent a non-zero lower_clip (a shifted knee). Accepting such a
+        // combination here would silently drop the lower_clip and produce incorrect results, so
+        // decline it instead.
+        if(lowerClip && *lowerClip != 0.f)
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                "Relu plan builder: leaky relu (relu_lower_clip_slope) with a non-zero "
+                "lower_clip is not supported");
+        }
         return; // Leaky ReLU
     }
     if(lowerClip && *lowerClip != 0.f)

@@ -457,6 +457,25 @@ TEST_F(TestMiopenReluPlanBuilder, IsApplicableReturnsTrueForReluWithLowerClipSlo
     EXPECT_TRUE(_planBuilder.isApplicable(*_dummyHandle, graph));
 }
 
+TEST_F(TestMiopenReluPlanBuilder, IsApplicableReturnsFalseForReluWithNonZeroLowerClipAndSlope)
+{
+    // MIOpen's LEAKYRELU is slope-only (knee fixed at 0) and cannot represent a non-zero
+    // lower_clip; accepting this would silently drop the lower_clip and miscompute the op.
+    auto builder = createReluGraphWithParams(0.3f, flatbuffers::nullopt, 0.01f);
+    const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(_planBuilder.isApplicable(*_dummyHandle, graph));
+}
+
+TEST_F(TestMiopenReluPlanBuilder, IsApplicableReturnsTrueForReluWithZeroLowerClipAndSlope)
+{
+    // A zero lower_clip is a no-op knee, so slope-only leaky ReLU is faithfully representable.
+    auto builder = createReluGraphWithParams(0.0f, flatbuffers::nullopt, 0.01f);
+    const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_TRUE(_planBuilder.isApplicable(*_dummyHandle, graph));
+}
+
 TEST_F(TestMiopenReluPlanBuilder, IsApplicableReturnsTrueForReluWithLowerAndUpperClip)
 {
     auto builder = createReluGraphWithParams(-1.0f, 1.0f, flatbuffers::nullopt);
