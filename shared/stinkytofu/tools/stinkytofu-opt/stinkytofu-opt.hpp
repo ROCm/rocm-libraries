@@ -158,7 +158,10 @@ const std::vector<PassInfo> availablePasses = {
      }},
     {"TDMLoadWaveSyncPass", [](const auto&) { return createTDMLoadWaveSyncPass(); }},
     {"RemoveWaitAluPass", [](const auto&) { return createRemoveWaitAluPass(); }},
-    {"InsertWaitAluPass", [](const auto&) { return createInsertWaitAluPass(); }},
+    {"InsertWaitAluPass",
+     [](const std::vector<std::string>& args) {
+         return createInsertWaitAluPass(hasPassArg(args, "enableESM2TrackValuVsrc"));
+     }},
     {"RegionClonePass",
      [](const auto&) {
          return createRegionClonePass({CloneSpec{"InitCIterWmma", "label_LoopBeginL"}});

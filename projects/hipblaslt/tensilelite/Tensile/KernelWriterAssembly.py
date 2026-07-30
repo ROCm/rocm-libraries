@@ -2900,6 +2900,30 @@ class KernelWriterAssembly(KernelWriter):
       module.add(moduleArgs)
       module.add(moduleRegInit)
 
+      # Zero-overhead StreamK work-queue accounting: snapshot the RAW launch WG
+      # rank BEFORE wgmXCC (and, for SKXCC, before the preLoop XCCMapping remap)
+      # rewrites WorkGroup0. The per-XCD queue counter self-resets purely by
+      # atomic wrap only if every queue receives exactly tiles_q + W_q
+      # increments per launch, where W_q = distribute(skGrid, q) assumes the
+      # queue index densely covers [0, skGrid). Both the wgmXCC CU-count remap
+      # (WGMXCC == -1 auto path) and the StreamKXCCMapping chiplet remap
+      # (SKXCC + WGMXCC > 1) rewrite WorkGroup0 with a permutation that is NOT
+      # % numQueues-count-preserving when the grid does not block evenly, so the
+      # remapped StreamKIdx % numQueues skews the per-queue home-workgroup count
+      # and the counter drifts off 0. We snapshot the raw id (== physical XCD
+      # rank) into the persistent StreamKTileIdx SGPR -- an ALREADY-allocated
+      # slot that is provably dead in the [prologue, queue-read) window on both
+      # the SK4 and SK5 dynamic paths (its first real write is after the queue
+      # read in graWorkGroup; for SK5 it aliases StreamKIter, whose only
+      # in-window writes live on the mutually-exclusive SK3-static path). Reusing
+      # it costs ZERO additional persistent SGPRs (unlike a dedicated StreamKQueue
+      # SGPR, which overflows the SGPR file on tuned high-register SKXCC kernels).
+      # The queue index reads it, masked % numQueues, in StreamK.graWorkGroup.
+      # Once-per-workgroup setup only -- no steady-state instructions added.
+      if self.skUsesRawQueueRank(kernel):
+        module.add(SMovB32(dst=sgpr("StreamKTileIdx"), src=sgpr("WorkGroup0"),
+                           comment="StreamK: snapshot raw pre-remap launch WG id -> dead-in-window StreamKTileIdx carrier (queue = rawWG %% numQueues)"))
+
       # Reorder WGIDs
       module.add(wgmXCC(self, kernel, tmpSgprNumWorkGroups))
 
