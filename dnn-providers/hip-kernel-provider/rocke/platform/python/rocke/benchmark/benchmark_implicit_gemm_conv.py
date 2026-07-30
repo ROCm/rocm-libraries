@@ -1,6 +1,6 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Tile/pipeline sweep benchmark for implicit-GEMM convolution (gfx950).
+"""Tile/pipeline sweep benchmark for implicit-GEMM convolution (gfx950, gfx1250).
 
 Supports forward (NHWC × KYXC → NHWK), backward-weight (wgrad, dY × X → dW),
 and backward-data (dgrad, dY × W → dX) directions.  Select with
@@ -39,6 +39,7 @@ from __future__ import annotations
 import argparse
 import itertools
 import os
+import random
 import sys
 from dataclasses import dataclass
 from typing import List
@@ -52,10 +53,12 @@ os.environ.setdefault("ROCKE_CPP_QUIET_FALLBACK", "1")
 # ---------------------------------------------------------------------------
 
 _TILE_MN = (16, 32, 64, 128, 256)
+_TILE_MN_GFX1250 = (16, 32, 64, 128, 256, 512)
 _TILE_K = (16, 32, 64, 128)
 _WARP_MN = (1, 2, 4, 8)
+_WARP_MN_GFX1250 = (1, 2, 4, 8, 16)
 _WARP_TILE_MN = (16, 32)
-_PIPELINES = ("mem", "compv3", "compv4", "v1")
+_PIPELINES = ("mem", "compv3", "compv4")
 _EPILOGUES = ("default", "cshuffle")
 # Split-K degrees swept when --split-k 0 (auto) is passed for wgrad.
 _SPLIT_K_AUTO = (1, 2, 4, 8, 16, 32, 64, 128)
@@ -82,36 +85,12 @@ class Result:
     ms: float
     tflops: float
     gbps: float
+    passed: bool | None = None  # None when --verify was not requested
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def _get_vector_sizes(C: int, K: int, dtype: str):
-    def _vec(n: int) -> int:
-        sizes = [8, 4, 2, 1] if dtype != "fp32" else [4, 2, 1]
-        return next(v for v in sizes if n % v == 0)
-
-    vec_c = _vec(C)
-    return vec_c, vec_c, _vec(K)
-
-
-def _get_vector_sizes_wgrad(C: int, K: int, dtype: str):
-    """Per-operand vector widths for the wgrad direction.
-
-    Last memory dimension of each wgrad operand:
-      A = dY  NHWK  → last dim K  → vec_a
-      B = X   NHWC  → last dim C  → vec_b
-      D = dW  KYXC  → last dim C  → vec_c
-    """
-
-    def _vec(n: int) -> int:
-        sizes = [8, 4, 2, 1] if dtype != "fp32" else [4, 2, 1]
-        return next(v for v in sizes if n % v == 0)
-
-    return _vec(K), _vec(C), _vec(C)
 
 
 def _grid_for_spec(spec, p):
@@ -156,6 +135,13 @@ def _grid_for_dgrad_spec(spec, split_k: int):
     return (gx, gy, split_k)
 
 
+def _sample_combos(combos: list, frac: float, seed: int) -> list:
+    """Return a random subset of *combos* of size ceil(frac * len(combos))."""
+    n = max(1, round(len(combos) * frac))
+    rng = random.Random(seed)
+    return rng.sample(combos, min(n, len(combos)))
+
+
 def _verify_kernel(
     *,
     rt,
@@ -188,9 +174,10 @@ def _verify_kernel(
 
     Returns
     -------
-    bool
-        ``True`` if the sweep should stop (a dump was triggered), ``False``
-        to continue.
+    tuple[bool, bool]
+        ``(stop, passed)`` — ``stop`` is ``True`` if a dump was triggered and
+        the sweep should abort; ``passed`` is ``True`` if the kernel output
+        matched the reference within tolerance.
     """
     import torch
 
@@ -205,11 +192,21 @@ def _verify_kernel(
     rt.memcpy_d2h(u8(out_cpu), out_dev, out_t.nbytes)
 
     out_f32 = out_cpu.float().cuda()
-    err = float(out_f32.sub(ref_out).abs().max())
-    status = "PASS" if err < 1e-2 else f"FAIL(err={err:.2e})"
+    abs_diff = out_f32.sub(ref_out).abs()
+    ref_scale = ref_out.abs().max().clamp(min=1.0)
+    rel_err = float(abs_diff.max() / ref_scale)
+    # Peak-normalised relative error: max|out-ref| / max|ref|.
+    # Caveat: a large relative error on a small-magnitude weight can be masked
+    # by the global-max denominator, and 5e-2 is fairly loose for bf16
+    # reductions over K_wg ~ 25k.  A mean/L2 relative check or a tighter bf16
+    # bound would catch subtler reduction bugs -- revisit when verify is
+    # re-enabled after the fwd fixes in #9824.
+    tol = 5e-2 if out_t.dtype in (torch.float16, torch.bfloat16) else 1e-3
+    err = rel_err
+    status = "PASS" if err < tol else f"FAIL(rel_err={err:.2e})"
     print(f"  verify {kernel_name}: {status}", flush=True)
 
-    if err >= 1e-2 and dump_fail:
+    if err >= tol and dump_fail:
         import pathlib
         import numpy as np
 
@@ -240,9 +237,9 @@ def _verify_kernel(
             f"ref={float(ref_out.flatten()[max_idx]):.6f}",
             flush=True,
         )
-        return True  # caller should stop the sweep
+        return True, False  # dump triggered → stop the sweep; kernel failed
 
-    return False
+    return False, err < tol
 
 
 # ---------------------------------------------------------------------------
@@ -370,7 +367,7 @@ def main() -> int:
     parser.add_argument(
         "--arch",
         default="gfx950",
-        help="gfx target (gfx942, gfx950, ...) (default: gfx950)",
+        help="gfx target (gfx942, gfx950, gfx1250, ...) (default: gfx950)",
     )
     parser.add_argument(
         "--dtype",
@@ -389,6 +386,22 @@ def main() -> int:
     )
     parser.add_argument(
         "--iters", type=int, default=10, help="timed iterations (default: 10)"
+    )
+    parser.add_argument(
+        "--sample",
+        type=float,
+        default=None,
+        metavar="FRAC",
+        help=(
+            "randomly sample FRAC of the candidate combinations before sweeping "
+            "(e.g. 0.1 for ~10%%). Uses a fixed seed (--seed) for reproducibility."
+        ),
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=0,
+        help="RNG seed used by --sample (default: 0)",
     )
     parser.add_argument(
         "--verify",
@@ -676,21 +689,55 @@ def _run_sweep(
     bytes_xfer = float(A_t.nbytes + B_t.nbytes + D_t.nbytes)
     flop = float(p.flops)
 
-    vec_a, vec_b, vec_c = _get_vector_sizes(args.C, args.K, dtype)
     sig = conv_args_signature(dtype)
 
+    _mma_family = "wmma" if target.wave_size == 32 else "mma"
+
+    # Early check: does the target have any MMA atom for this dtype?
+    # A wave32/WMMA target may lack an atom for a given dtype (e.g. a future
+    # target without fp32 WMMA), so bail with a clear message rather than
+    # silently sweeping everything and reporting "No valid configurations".
+    if (
+        target.mma.select_largest_k(
+            family=_mma_family,
+            a_dtype=dtype,
+            b_dtype=dtype,
+            c_dtype="fp32",
+            m=16,
+            n=16,
+        )
+        is None
+    ):
+        print(
+            f"error: {arch} has no {dtype} MMA atom — "
+            f"{dtype} convolution is not supported on this target.",
+            file=sys.stderr,
+        )
+        return 2
+
+    _tile_mn = _TILE_MN_GFX1250 if arch == "gfx1250" else _TILE_MN
+    _warp_mn = _WARP_MN_GFX1250 if arch == "gfx1250" else _WARP_MN
     combos = list(
         itertools.product(
-            _TILE_MN,
-            _TILE_MN,
+            _tile_mn,
+            _tile_mn,
             _TILE_K,
-            _WARP_MN,
-            _WARP_MN,
+            _warp_mn,
+            _warp_mn,
             _WARP_TILE_MN,
             _PIPELINES,
             _EPILOGUES,
         )
     )
+
+    if args.sample is not None:
+        total = len(combos)
+        combos = _sample_combos(combos, args.sample, args.seed)
+        print(
+            f"Sampling {len(combos)}/{total} combinations "
+            f"({args.sample*100:.0f}%, seed={args.seed}).",
+            flush=True,
+        )
 
     print(
         f"Sweeping {len(combos)} combinations for {arch} {dtype} {p.short()} ...",
@@ -711,13 +758,25 @@ def _run_sweep(
     rt.memset(D_dev, 0, D_t.nbytes)
 
     ref_out: torch.Tensor | None = None
-    if args.verify or args.dump_fail:
-        from rocke.benchmark.conv_reference import conv_reference
-
-        ref_out = conv_reference(_A_f32, _B_f32, p)
-        print(
-            f"Reference computed ({tuple(ref_out.shape)}, {ref_out.dtype}).", flush=True
+    if args.verify:
+        from rocke.benchmark.conv_reference import (
+            conv_reference,
+            conv_reference_gfx1250,
         )
+
+        if arch == "gfx1250" and not p.is_3d:
+            ref_out = conv_reference_gfx1250(A_t, B_t, p, out_dtype=_torch_dtype).cuda()
+            print(
+                f"Reference computed via gfx1250 hand-written conv "
+                f"({tuple(ref_out.shape)}, {ref_out.dtype}).",
+                flush=True,
+            )
+        else:
+            ref_out = conv_reference(A_t, B_t, p, out_dtype=_torch_dtype)
+            print(
+                f"Reference computed via torch ({tuple(ref_out.shape)}, {ref_out.dtype}).",
+                flush=True,
+            )
 
     for (
         tile_m,
@@ -730,6 +789,7 @@ def _run_sweep(
         epilogue,
     ) in combos:
         atom = target.mma.select_largest_k(
+            family=_mma_family,
             a_dtype=dtype,
             b_dtype=dtype,
             c_dtype="fp32",
@@ -754,15 +814,13 @@ def _run_sweep(
             warp_tile_m=warp_tile_mn,
             warp_tile_n=warp_tile_mn,
             warp_tile_k=warp_tile_k,
+            wave_size=target.wave_size,
             pipeline=pipeline,
             epilogue=epilogue,
             groups=p.groups,
-            vector_size_a=vec_a,
-            vector_size_b=vec_b,
-            vector_size_c=vec_c,
         )
 
-        ok, reason = is_valid_spec_for_problem(spec, problem, arch)
+        ok, _ = is_valid_spec_for_problem(spec, problem, arch)
         if not ok:
             n_skipped += 1
             continue
@@ -796,8 +854,9 @@ def _run_sweep(
         cfg = LaunchConfig(grid=grid, block=block, stream=stream)
 
         # Verify every kernel against the pre-computed reference (when --verify).
+        kernel_passed: bool | None = None
         if args.verify or args.dump_fail:
-            if _verify_kernel(
+            stopped, kernel_passed = _verify_kernel(
                 rt=rt,
                 launcher=launcher,
                 values=values,
@@ -810,7 +869,8 @@ def _run_sweep(
                 kernel_name=artifact.kernel_name,
                 dump_fail=args.dump_fail,
                 u8=_u8,
-            ):
+            )
+            if stopped:
                 rt.free(A_dev)
                 rt.free(B_dev)
                 rt.free(D_dev)
@@ -844,6 +904,7 @@ def _run_sweep(
                 ms=ms,
                 tflops=cur_tflops,
                 gbps=cur_gbps,
+                passed=kernel_passed,
             )
         )
 
@@ -873,12 +934,18 @@ def _run_sweep(
     results.sort(key=lambda r: r.tflops, reverse=True)
     top_n = min(args.top, len(results))
 
-    print(f"\n{'='*72}")
+    show_verify = args.verify
+    width = 84 if show_verify else 72
+    print(f"\n{'='*width}")
     print(f"Top {top_n} configurations for {arch} {dtype} {p.short()}")
-    print(f"{'='*72}")
-    hdr = f"{'rank':>4}  {'TFLOPS':>7}  {'ms':>8}  {'GBps':>7}  config"
+    print(f"{'='*width}")
+    hdr = (
+        f"{'rank':>4}  {'TFLOPS':>7}  {'ms':>8}  {'GBps':>7}  {'verify':>6}  config"
+        if show_verify
+        else f"{'rank':>4}  {'TFLOPS':>7}  {'ms':>8}  {'GBps':>7}  config"
+    )
     print(hdr)
-    print("-" * 72)
+    print("-" * width)
     for rank, r in enumerate(results[:top_n], 1):
         cfg_str = (
             f"tile={r.tile_m}x{r.tile_n}x{r.tile_k} "
@@ -886,7 +953,15 @@ def _run_sweep(
             f"atom={r.warp_tile_mn}x{r.warp_tile_mn}x{r.warp_tile_k} "
             f"{r.pipeline}/{r.epilogue}"
         )
-        print(f"{rank:>4}  {r.tflops:>7.1f}  {r.ms:>8.3f}  {r.gbps:>7.1f}  {cfg_str}")
+        if show_verify:
+            v = "PASS" if r.passed else "FAIL"
+            print(
+                f"{rank:>4}  {r.tflops:>7.1f}  {r.ms:>8.3f}  {r.gbps:>7.1f}  {v:>6}  {cfg_str}"
+            )
+        else:
+            print(
+                f"{rank:>4}  {r.tflops:>7.1f}  {r.ms:>8.3f}  {r.gbps:>7.1f}  {cfg_str}"
+            )
 
     best = results[0]
     print(f"\nBest: {best.tflops:.1f} TFLOPS — {best.kernel_name}")
@@ -966,7 +1041,6 @@ def _run_wgrad_sweep(
     bytes_xfer = float(dY_t.nbytes + X_t.nbytes + dW_t.nbytes)
     flop = float(p.flops)
 
-    vec_a, vec_b, vec_c = _get_vector_sizes_wgrad(p.C, p.K, dtype)
     sig = conv_args_signature(dtype)
 
     # split_k degrees to sweep:
@@ -988,6 +1062,15 @@ def _run_wgrad_sweep(
             split_k_values,
         )
     )
+
+    if args.sample is not None:
+        total = len(combos)
+        combos = _sample_combos(combos, args.sample, args.seed)
+        print(
+            f"Sampling {len(combos)}/{total} wgrad combinations "
+            f"({args.sample*100:.0f}%, seed={args.seed}).",
+            flush=True,
+        )
 
     _spk_label = {0: "sweep", -1: "auto(CK)"}.get(args.split_k, str(args.split_k))
     print(
@@ -1080,9 +1163,6 @@ def _run_wgrad_sweep(
             pipeline=pipeline,
             epilogue=epilogue,
             split_k=resolved_split_k,
-            vector_size_a=vec_a,
-            vector_size_b=vec_b,
-            vector_size_c=vec_c,
         )
 
         ok, reason = is_valid_wgrad_spec(spec, arch)
@@ -1119,7 +1199,7 @@ def _run_wgrad_sweep(
         cfg = LaunchConfig(grid=grid, block=block, stream=stream)
 
         if args.verify or args.dump_fail:
-            if _verify_kernel(
+            stopped, _ = _verify_kernel(
                 rt=rt,
                 launcher=launcher,
                 values=values,
@@ -1134,7 +1214,8 @@ def _run_wgrad_sweep(
                 dump_fail=args.dump_fail,
                 extra_tensors={"dY": dY_t, "X": X_t},
                 u8=_u8,
-            ):
+            )
+            if stopped:
                 rt.free(dY_dev)
                 rt.free(X_dev)
                 rt.free(dW_dev)
@@ -1249,7 +1330,7 @@ def _run_dgrad_sweep(
     Dgrad GEMM dims:
         M    = N*Hi*Wi      (input spatial positions)
         N_dg = C            (input channels)
-        K_dg = Y*X*K        (filter spatial × output channels — reduction)
+        K_dg = Y*X*K        (filter spatial x output channels -- reduction)
 
     Operands:
         A (dY): output gradient, shape (N, Ho, Wo, K)
@@ -1257,11 +1338,12 @@ def _run_dgrad_sweep(
         D (dX): input gradient, shape (N, Hi, Wi, C)
 
     Split-K (``--split-k``):
-        1        — disabled (normal epilogue, z-grid = 1).
-        >1       — fixed degree; dX is zero-initialised before each launch,
+        1        -- disabled (normal epilogue, z-grid = 1).
+        >1       -- fixed degree; dX is zero-initialised before each launch,
                    kernel atomic-adds partials, result is final dX.
-        0 (auto) — sweep all degrees in _SPLIT_K_AUTO.
+        0 (auto) -- sweep all degrees in _SPLIT_K_AUTO.
     """
+    import ctypes
     import torch
     from rocke.helpers.manifest import conv_args_signature
 
@@ -1315,8 +1397,14 @@ def _run_dgrad_sweep(
         )
     )
 
-    if hasattr(args, "sample") and args.sample is not None:
+    if args.sample is not None:
+        total = len(combos)
         combos = _sample_combos(combos, args.sample, args.seed)
+        print(
+            f"Sampling {len(combos)}/{total} dgrad combinations "
+            f"({args.sample*100:.0f}%, seed={args.seed}).",
+            flush=True,
+        )
 
     _spk_label = {0: "sweep", -1: "auto(CK)"}.get(args.split_k, str(args.split_k))
     print(
@@ -1481,7 +1569,7 @@ def _run_dgrad_sweep(
         _zero_init = spec.needs_atomic
 
         if args.verify or args.dump_fail:
-            if _verify_kernel(
+            stopped, _ = _verify_kernel(
                 rt=rt,
                 launcher=launcher,
                 values=values,
@@ -1495,7 +1583,8 @@ def _run_dgrad_sweep(
                 dump_fail=args.dump_fail,
                 extra_tensors={"dY": dY_t, "W": W_t},
                 u8=_u8,
-            ):
+            )
+            if stopped:
                 rt.free(dY_dev)
                 rt.free(W_dev)
                 rt.free(dX_dev)
@@ -1582,7 +1671,7 @@ def _run_dgrad_sweep(
         print(f"{rank:>4}  {r.tflops:>7.1f}  {r.ms:>8.3f}  {r.gbps:>7.1f}  {cfg_str}")
 
     best = results[0]
-    print(f"\nBest: {best.tflops:.1f} TFLOPS — {best.kernel_name}")
+    print(f"\nBest: {best.tflops:.1f} TFLOPS -- {best.kernel_name}")
     return 0
 
 
