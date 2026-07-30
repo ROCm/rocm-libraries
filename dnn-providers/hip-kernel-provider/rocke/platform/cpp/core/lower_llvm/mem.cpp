@@ -270,6 +270,27 @@ static void op_memref_global_atomic_add_pk_bf16(rocke_lower_t* L, const rocke_op
                    rocke_ll_operand(L, val));
 }
 
+static void op_memref_global_atomic_add_pk_f16(rocke_lower_t* L, const rocke_op_t* op)
+{
+    const rocke_value_t* ptr = op->operands[0];
+    const rocke_value_t* idx = op->operands[1];
+    const rocke_value_t* val = op->operands[2];
+    const char* gep;
+    rocke_ll_need(L, "global.atomic.fadd.v2f16");
+    gep = rocke_ll_fresh(L, "gep");
+    rocke_ll_emitf(L,
+                   "  %s = getelementptr inbounds half, ptr addrspace(1) %s, i32 %s",
+                   gep,
+                   rocke_ll_operand(L, ptr),
+                   rocke_ll_operand(L, idx));
+    rocke_ll_emitf(L,
+                   "  %s = call <2 x half> @llvm.amdgcn.global.atomic.fadd.v2f16.p1("
+                   "ptr addrspace(1) %s, <2 x half> %s)",
+                   ll_res(op),
+                   gep,
+                   rocke_ll_operand(L, val));
+}
+
 static void op_memref_global_load_vN(rocke_lower_t* L, const rocke_op_t* op)
 {
     const rocke_value_t* ptr = op->operands[0];
@@ -1297,6 +1318,8 @@ void rocke_ll_register_mem(void)
     rocke_ll_set_handler(ROCKE_OP_MEMREF_GLOBAL_ATOMIC_ADD_F32, op_memref_global_atomic_add_f32);
     rocke_ll_set_handler(ROCKE_OP_MEMREF_GLOBAL_ATOMIC_ADD_PK_BF16,
                          op_memref_global_atomic_add_pk_bf16);
+    rocke_ll_set_handler(ROCKE_OP_MEMREF_GLOBAL_ATOMIC_ADD_PK_F16,
+                         op_memref_global_atomic_add_pk_f16);
     rocke_ll_set_handler(ROCKE_OP_MEMREF_COOPERATIVE_GLOBAL_STORE,
                          op_memref_cooperative_global_store);
 

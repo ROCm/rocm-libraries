@@ -33,8 +33,8 @@
 #include <tuple>
 #include <vector>
 
+#include <amd_smi/amdsmi.h>
 #include <hip/hip_runtime.h>
-#include <rocm_smi/rocm_smi.h>
 
 #include "HardwareMonitorType.hpp"
 
@@ -54,7 +54,7 @@ namespace Tensile
         {
         public:
             /** Translates the Hip device index into the corresponding device index for
-   * ROCm-SMI. */
+   * AMD-SMI. */
 
             using clock = std::chrono::steady_clock;
 
@@ -118,8 +118,12 @@ namespace Tensile
             void wait();
 
         private:
-            static uint32_t GetROCmSMIIndex(int hipDeviceIndex);
-            static void     InitROCmSMI();
+            static void InitAMDSMI();
+
+            uint32_t GetAMDSMIIndex(int hipDeviceIndex);
+
+            std::vector<amdsmi_socket_handle>    m_socketHandles;
+            std::vector<amdsmi_processor_handle> m_processorHandles;
 
             void assertActive();
             void assertNotActive();
@@ -150,17 +154,17 @@ namespace Tensile
             std::atomic<bool> m_stop;
             bool              m_hasStopEvent = false;
 
-            int      m_hipDeviceIndex;
-            uint32_t m_smiDeviceIndex;
+            int      m_hipDeviceIndex{};
+            uint32_t m_smiDeviceIndex{};
 
-            size_t m_dataPoints;
+            size_t m_dataPoints{};
 
-            std::vector<std::tuple<rsmi_temperature_type_t, rsmi_temperature_metric_t>>
+            std::vector<std::tuple<amdsmi_temperature_type_t, amdsmi_temperature_metric_t>>
                                  m_tempMetrics;
             std::vector<int64_t> m_tempValues;
 
-            std::vector<rsmi_clk_type_t> m_clockMetrics;
-            std::vector<uint64_t>        m_clockValues;
+            std::vector<amdsmi_clk_type_t> m_clockMetrics;
+            std::vector<uint64_t>          m_clockValues;
 
             std::vector<uint32_t> m_fanMetrics;
             std::vector<int64_t>  m_fanValues;
@@ -170,7 +174,7 @@ namespace Tensile
             // add**Monitor functions to monitor and store multiple HW types information in the vectors for the same device.
             // (ie)Existing metric implementation represent different HW type and uses ROCm API to get multiple
             // HW type(like different sensor, different clock). Hence it uses add**Monitor functions to store in to multiple vectors.
-            // each new HW type requires an invocation of ROCm API. but below vectors uses ROCm API (rsmi_dev_gpu_metrics_info_get)
+            // each new HW type requires an invocation of ROCm API. but below vectors uses ROCm API (amdsmi_get_gpu_metrics_info)
             // through single invocation gets all the HW type details, hence it does not need existing type of implementation.
             // if we need to store different HW type in the future, new additional vector type or vector<vector>> would be appropriate.
             std::vector<uint16_t> m_freqValues;

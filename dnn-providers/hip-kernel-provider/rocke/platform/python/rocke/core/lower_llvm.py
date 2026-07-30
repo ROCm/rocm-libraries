@@ -35,7 +35,7 @@ from __future__ import annotations
 import os
 import sys
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 from .ir import (
     KernelDef,
@@ -55,6 +55,10 @@ from .ir import (
 # wired arch shares one datalayout, but two fields drift between LLVM 20
 # (ROCm 7.0/7.1) and LLVM 21+ (ROCm 7.2 ships LLVM 22):
 #
+#   * LLVM 20 and LLVM 22 both omit the ELF symbol-mangling spec ``m:e``
+#     from the AMDGPU datalayout on this toolchain:
+#         LLVM 20:  e-p:64:64-...
+#         LLVM 22:  e-p:64:64-...
 #   * the buffer-fat-pointer address space (``p8``) gained an index-width
 #     field:
 #         LLVM 20:  ...-p8:128:128-...
@@ -114,10 +118,11 @@ def _flavor_for_rocm(major: int, minor: int) -> str:
 def _datalayout_for_flavor(flavor: str) -> str:
     """Module ``target datalayout`` string for an LLVM flavor.
 
-    Two fields drift between flavors: the ELF mangling spec ``m:e`` (added
-    under LLVM 21+) and the buffer-fat-pointer address space ``p8`` (see
-    :data:`_DATALAYOUT_LLVM20` / :data:`_DATALAYOUT_LLVM22`). LLVM22 is the
-    default for unknown values so a typo'd override degrades to the modern
+    One field drifts between flavors: the buffer-fat-pointer address space
+    ``p8`` gained an index-width field in LLVM 22 (see :data:`_DATALAYOUT_LLVM20`
+    / :data:`_DATALAYOUT_LLVM22`).  The ELF symbol-mangling spec ``m:e`` is
+    omitted by both LLVM 20 and LLVM 22 on the AMDGPU datalayout.  LLVM22 is
+    the default for unknown values so a typo'd override degrades to the modern
     layout rather than the legacy one.
     """
     return _DATALAYOUT_LLVM20 if flavor == LLVM_FLAVOR_LLVM20 else _DATALAYOUT_LLVM22
@@ -509,6 +514,11 @@ _INTRINSIC_DECLS: Dict[str, str] = {
     "global.atomic.fadd.v2bf16": (
         "declare <2 x bfloat> @llvm.amdgcn.global.atomic.fadd.v2bf16.p1("
         "ptr addrspace(1), <2 x bfloat>)"
+    ),
+    # Packed fp16 atomic add (gfx940+). Two fp16 lanes per atomic transaction.
+    "global.atomic.fadd.v2f16": (
+        "declare <2 x half> @llvm.amdgcn.global.atomic.fadd.v2f16.p1("
+        "ptr addrspace(1), <2 x half>)"
     ),
     "mbcnt.lo": ("declare i32 @llvm.amdgcn.mbcnt.lo(i32, i32)"),
     "mbcnt.hi": ("declare i32 @llvm.amdgcn.mbcnt.hi(i32, i32)"),
@@ -978,21 +988,27 @@ class _Lowerer:
             for r in op.regions:
                 self._collect_smem(r)
 
-    def _collect_smem_liveness(self, region: Region) -> Dict[str, Tuple[int, int]]:
+    def _collect_smem_liveness(
+        self, region: Region
+    ) -> Tuple[Dict[str, Tuple[int, int]], Set[str]]:
         """Compute live intervals for smem allocations via a DFS preorder walk.
 
-        Returns a dict mapping global-name -> (first_seq, last_seq) where
-        seq is the preorder index of the op that defines / last-uses the
-        allocation.  Uses inside a loop body (``scf.for``) are conservatively
-        extended to the *last* sequence index of the enclosing ``scf.for``
-        subtree so that two allocations that are both live inside the loop
-        always interfere (they may be read on any iteration).
+        Returns ``(intervals, used)`` where ``intervals`` maps global-name ->
+        (first_seq, last_seq) (seq is the preorder index of the op that defines
+        / last-uses the allocation) and ``used`` is the set of global-names that
+        appear as an operand of at least one op (i.e. are actually read, written
+        or address-taken -- as opposed to allocated but never referenced).
+        Uses inside a loop body (``scf.for``) are conservatively extended to the
+        *last* sequence index of the enclosing ``scf.for`` subtree so that two
+        allocations that are both live inside the loop always interfere (they
+        may be read on any iteration).
         """
         # Map from IR value name (%foo) -> global name (@foo.kernel)
         val_to_gname: Dict[str, str] = {
             v: g for v, g in self._smem_storage_name.items()
         }
         intervals: Dict[str, Tuple[int, int]] = {}  # gname -> (first, last)
+        used: Set[str] = set()  # gnames referenced by some op operand
         counter = [0]  # mutable int for nested closures
 
         def _subtree_size(op) -> int:
@@ -1021,6 +1037,7 @@ class _Lowerer:
                 for v in op.operands:
                     gname = val_to_gname.get(v.name)
                     if gname is not None:
+                        used.add(gname)
                         first, last = intervals.get(gname, (idx, idx))
                         new_last = loop_end if loop_end is not None else idx
                         intervals[gname] = (min(first, idx), max(last, new_last))
@@ -1053,7 +1070,7 @@ class _Lowerer:
                         walk(r.ops, loop_end=loop_end)
 
         walk(region.ops, loop_end=None)
-        return intervals
+        return intervals, used
 
     def _compute_smem_layout(self) -> None:
         """Compute byte offsets for all smem allocations in a single pool.
@@ -1108,7 +1125,24 @@ class _Lowerer:
             return 16 if stype.elem.name in ("i8", "fp8e4m3", "bf8e5m2") else 4
 
         # ---- live intervals from the kernel body ----
-        live = self._collect_smem_liveness(self.kernel.body)
+        live, used = self._collect_smem_liveness(self.kernel.body)
+
+        # Never-referenced allocations (allocated but never read, written or
+        # address-taken) must not consume pool space. The pre-pool lowering
+        # emitted every allocation as its own addrspace(3) global, and the
+        # AMDGPU backend dead-strips the ones nothing references, so a kernel
+        # that unconditionally allocates a scratch tile it does not use in a
+        # given spec paid zero LDS for it. Folding those dead tiles into the
+        # single referenced pool would make their bytes count -- e.g. the
+        # transposed/cfvst attention epilogue allocates ``Acc_lds`` (32 KB) but
+        # writes the output straight from registers, leaving it unreferenced;
+        # pooling it pushes the fp16 D128 nw=4 kernel from 50 KB to 82 KB and it
+        # then fails codegen with "local memory exceeds limit (65536)". Exclude
+        # dead allocations here to preserve the backend's dead-strip behaviour;
+        # give them a harmless offset 0 so any unexpected access stays in-bounds.
+        dead = [item for item in self._smem_globals if item[0] not in used]
+        for gname, _stype in dead:
+            self._smem_offsets.setdefault(gname, 0)
 
         # Sort allocations by live-interval start (definition order is a good
         # proxy; fall back to declaration order for allocations with no uses).
@@ -1116,7 +1150,20 @@ class _Lowerer:
             gname, _ = item
             return live.get(gname, (0, 0))[0]
 
-        sorted_allocs = sorted(self._smem_globals, key=_sort_key)
+        sorted_allocs = sorted(
+            (item for item in self._smem_globals if item[0] in used),
+            key=_sort_key,
+        )
+        if not sorted_allocs:
+            # Every allocation was dead -> empty pool (and no pool global
+            # needed). Clear _smem_globals so finalize() emits no pool global:
+            # otherwise Python would emit a zero-length `[0 x i8]` addrspace(3)
+            # global while the C++ engine (which gates emission on
+            # smem_pool_size > 0) emits nothing -- a byte-identity divergence,
+            # and some LLVM/AMDGPU pipelines reject a zero-length global.
+            self._smem_pool_size = 0
+            self._smem_globals = []
+            return
 
         # ---- greedy interval packing ----
         # Each "slot" is (offset, size, last_seq) – the byte range it occupies
@@ -2115,6 +2162,26 @@ class _Lowerer:
             f"  {op.result.name} = call <2 x bfloat> "
             f"@llvm.amdgcn.global.atomic.fadd.v2bf16.p1("
             f"ptr addrspace(1) {gep}, <2 x bfloat> {self._operand(val)})"
+        )
+
+    def _op_memref_global_atomic_add_pk_f16(self, op: Op) -> None:
+        """Lower the packed-fp16 atomic add to its AMDGCN intrinsic.
+
+        Mirrors ``_op_memref_global_atomic_add_pk_bf16`` for fp16.
+        GEPs into the fp16 buffer at ``idx`` and calls
+        ``llvm.amdgcn.global.atomic.fadd.v2f16.p1`` (gfx940+).
+        """
+        ptr, idx, val = op.operands
+        self._needs_intrin["global.atomic.fadd.v2f16"] = True
+        gep = self._fresh("gep")
+        self._current().emit(
+            f"  {gep} = getelementptr inbounds half, ptr addrspace(1) "
+            f"{self._operand(ptr)}, i32 {self._operand(idx)}"
+        )
+        self._current().emit(
+            f"  {op.result.name} = call <2 x half> "
+            f"@llvm.amdgcn.global.atomic.fadd.v2f16.p1("
+            f"ptr addrspace(1) {gep}, <2 x half> {self._operand(val)})"
         )
 
     def _op_memref_global_load_vN(self, op: Op) -> None:
