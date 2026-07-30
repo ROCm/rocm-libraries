@@ -103,11 +103,29 @@ bool violatesFlatSourceRule(const StinkyInstruction& inst, const GroupState& sta
     return hasDestSourceOverlap(inst, state.sources) || hasSelfDestSourceOverlap(inst);
 }
 
-bool isFullXcntDrain(const StinkyInstruction& inst) {
-    if (inst.getUnifiedOpcode() != GFX::s_wait_xcnt) return false;
+bool hasZeroWaitImmediate(const StinkyInstruction& inst) {
     const auto& srcs = inst.getSrcRegs();
     return srcs.size() == 1 && srcs.front().dataType == StinkyRegister::Type::LiteralInt &&
            srcs.front().getLiteralInt() == 0;
+}
+
+// A zero-count data wait guarantees translation for the corresponding memory
+// operations. Nonzero waits leave work in flight and are not full drains.
+bool isFullTranslationDrain(const StinkyInstruction& inst) {
+    switch (inst.getUnifiedOpcode()) {
+        case GFX::s_wait_xcnt:
+        case GFX::s_wait_loadcnt:
+        case GFX::s_wait_kmcnt:
+        case GFX::s_wait_dscnt:
+        case GFX::s_wait_loadcnt_dscnt:
+        case GFX::s_wait_tensorcnt:
+        case GFX::s_wait_storecnt:
+        case GFX::s_wait_storecnt_dscnt:
+        case GFX::s_wait_asynccnt:
+            return hasZeroWaitImmediate(inst);
+        default:
+            return false;
+    }
 }
 
 bool isForeverSleep(const StinkyInstruction& inst) {
@@ -202,7 +220,7 @@ class Gfx1250HazardPass : public Pass {
         auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
         if (inst == nullptr || isPseudoInst(inst)) return;
 
-        if (isFullXcntDrain(*inst)) {
+        if (isFullTranslationDrain(*inst)) {
             state.clear();
             return;
         }
@@ -242,10 +260,9 @@ class Gfx1250HazardPass : public Pass {
         // Note: Multi-group only fences VMEM <-> SMEM and needs cross-group
         //       dataflow analysis (Future TODO if frontend enables
         //       Multi-group mode).
-        if (state.hasMemory && state.kind != kind) state.clear();
-
-        const bool atomic = isAtomic(*inst);
-        if (atomic && state.hasNonAtomic) insertXcntDrain(builder, archId, inst, state);
+        if (state.hasMemory && state.kind != kind) {
+            state.clear();
+        }
 
         // Single-group replay-source rules:
         //
@@ -261,6 +278,15 @@ class Gfx1250HazardPass : public Pass {
         //    (b) consecutive atomics need no intervening drain due to the
         //        XNACK scoreboard.
 
+        const bool atomic = isAtomic(*inst);
+
+        // Rule 4(a): the first atomic after non-atomic memory must start
+        // with XCNT == 0. This drain clears state before Rule 2 runs below.
+        const bool needsRule4aDrain = atomic && state.hasNonAtomic;
+        if (needsRule4aDrain) {
+            insertXcntDrain(builder, archId, inst, state);
+        }
+
         // Apply rule 3:
         if (kind == MemoryGroupKind::SMEM && hasSelfDestSourceOverlap(*inst))
             warnUnrepairableSmemSelfOverlap(bb, *inst);
@@ -270,13 +296,11 @@ class Gfx1250HazardPass : public Pass {
             insertXcntDrain(builder, archId, inst, state);
         }
 
-        // Rule 2: a FLAT must not clobber a source in a multi-op group.
-        const bool violatesRule2 =
-            kind == MemoryGroupKind::VMEM && isFlat(*inst) && violatesFlatSourceRule(*inst, state);
-
-        // Rule 4(b): do not drain between consecutive atomics.
-        const bool exemptByRule4b = atomic && state.hasMemory && !state.hasNonAtomic;
-        if (violatesRule2 && !exemptByRule4b) {
+        // Rule 2 applies only to non-atomic FLAT. Rule 4 already handled the
+        // first atomic and permits a consecutive atomic run.
+        const bool violatesRule2 = kind == MemoryGroupKind::VMEM && isFlat(*inst) && !atomic &&
+                                   violatesFlatSourceRule(*inst, state);
+        if (violatesRule2) {
             insertXcntDrain(builder, archId, inst, state);
         }
 
