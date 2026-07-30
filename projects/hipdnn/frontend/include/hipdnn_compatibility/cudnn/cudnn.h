@@ -27,6 +27,7 @@
 #include <hipdnn_compatibility/cudnn/cudnn_frontend_version.h>
 #include <hipdnn_compatibility/cudnn/cudnn_runtime_version.h>
 #include <hipdnn_compatibility/cudnn/cudnn_status.h>
+#include <hipdnn_compatibility/cudnn/detail/logging_bridge.h>
 #include <hipdnn_frontend/Logging.hpp>
 #include <hipdnn_frontend/detail/BackendWrapper.hpp>
 
@@ -68,6 +69,7 @@ extern "C" {
 /// @brief Create a cuDNN/hipDNN handle. Mirrors NVIDIA `cudnnCreate`.
 inline cudnnStatus_t cudnnCreate(cudnnHandle_t* handle)
 {
+    hipdnn_frontend::compatibility::cudnn_frontend::detail::configureHipdnnLoggingFromCudnnEnv();
     return hipdnn_frontend::compatibility::cudnn_frontend::detail::toCudnnStatus(
         hipdnn_frontend::detail::hipdnnBackend()->create(handle));
 }
