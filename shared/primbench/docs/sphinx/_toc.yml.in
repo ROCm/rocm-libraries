@@ -1,0 +1,33 @@
+root: index
+subtrees:
+  - caption: Install
+    entries:
+      - file: install/install
+  - caption: Conceptual
+    entries:
+      - file: conceptual/noise-reduction
+      - file: conceptual/output-format
+  - caption: How to
+    entries:
+      - file: how-to/configure-settings
+      - file: how-to/validate-output
+      - file: how-to/use-primbench
+        title: Use primbench
+  - caption: Tutorials
+    entries:
+      - file: tutorials/copy-benchmark
+  - caption: Reference
+    entries:
+      - file: reference/primbench-api
+        title: Primbench API
+      - file: reference/json-output-format
+        title: JSON output format
+      - file: reference/api-benchmark-interface
+      - file: reference/api-benchmark-state
+      - file: reference/api-json-and-utilities
+      - file: reference/cli-options
+      - file: reference/api-json-output
+      - file: reference/api-macros-and-utilities
+  - caption: About
+    entries:
+      - file: license
