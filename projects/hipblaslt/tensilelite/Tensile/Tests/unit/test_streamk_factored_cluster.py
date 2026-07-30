@@ -23,8 +23,8 @@
 #     exclusion of a factored [Cs,Ck];
 #   * the validation matrix (Cs, Ck each power-of-two with C=Cs*Ck in [2,16];
 #     both degenerate 1-D shapes accepted; non-pow2 / C>16 rejected);
-#   * the selection predicates: ClusterDimCheck uses Cs (value[3]) and pins the
-#     N-divisor value[4]=1 for a genuine 2-D cluster; ClusterReductionIterCheck
+#   * the selection predicates: ClusterDimCheck is DROPPED (non-multiple sizes are
+#     legal, guarded by the runtime pad-early-exit); ClusterReductionIterCheck
 #     uses Ck (value[1]); and
 #   * clean emission of the genuine 2-D factored [2,2] path.
 #
@@ -170,20 +170,18 @@ class TestFactoring:
 # --- selection predicates --------------------------------------------------
 
 class TestPredicates:
-    def test_cluster_dim_check_uses_cs(self):
-        """ClusterDimCheck's M-adjacency divisor is Cs = ClusterDim[0]: value[3]
-        == Cs. For the factored point [2,2] => Cs=2. The N-tile divisor value[4]
-        is pinned to 1 for a genuine 2-D cluster (Ck>1)."""
+    def test_cluster_dim_check_dropped(self):
+        """ClusterDimCheck (the static nWG0 % Cs / nWG_y % Ck divisibility gate)
+        was DROPPED for the gfx1250 cluster paths: non-multiple problem sizes are
+        legal for every shape, guarded at runtime by the pad-early-exit (padded
+        boundary-cluster peers s_endpgm before the first cluster split-barrier)
+        plus the ClusterReductionIterCheck hard reject. No ClusterDimCheck
+        predicate is emitted for the factored point [2,2]."""
         states = _derive_states(_FACTORED)
         assert states
         st = states[0]
         preds = _compound_preds(st)
-        p = _pred(preds, "ClusterDimCheck")
-        assert p is not None
-        cs = st["ClusterDim"][0]
-        assert cs == 2
-        assert p.value[3] == cs, p.value
-        assert p.value[4] == 1, p.value
+        assert _pred(preds, "ClusterDimCheck") is None
 
     def test_cluster_reduction_iter_check_uses_ck(self):
         """ClusterReductionIterCheck balances the Ck reduction peers' mainloops:

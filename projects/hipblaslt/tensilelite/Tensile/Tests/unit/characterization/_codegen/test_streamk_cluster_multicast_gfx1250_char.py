@@ -45,12 +45,17 @@ _CONFIG = os.path.join(
 )
 
 
-# The unified config also folds in the 2-D [2,2] dual shape; the 1-D-specific
-# assertions below (split B-broadcast, clusterMulticastValid predicate, DP->SK
-# "drop B" clear) apply only to the 1-D [C,1] kernels, dispatched on the ABSENCE of
-# the 2-D fold marker. The 2-D dual kernels are covered by
-# test_streamk_dual_2d_multicast_gfx1250_char.py.
-_TWO_D_MARKER = "2-D DP: StreamKIdx = batch*(nWG0*nWG1) + N*nWG0 + M"
+# The unified config also sweeps the 2-D [2,2] shape. In the merged (factored)
+# world a knobless [2,2] no longer derives as dual-2D but as the FACTORED
+# multicast+reduction path (Cs=2 broadcast + Ck=2 K-split), which -- like the
+# dual fold -- carries NO 1-D M-alignment predicate, so a NEGATIVE "not 2-D
+# marker" filter no longer isolates the 1-D path. The 1-D-specific assertions
+# below (split B-broadcast, clusterMulticastValid predicate, DP->SK "drop B"
+# clear) apply only to the 1-D [C,1] kernels, dispatched on the PRESENCE of the
+# 1-D multicast M-alignment predicate. The 2-D dual kernels are covered by
+# test_streamk_dual_2d_multicast_gfx1250_char.py and the factored [2,2] path by
+# test_streamk_factored_cluster.py.
+_ONE_D_MARKER = "nWG0 aligned to C?"
 
 
 def test_streamk_cluster_multicast_gfx1250_emits_assembly():
@@ -62,7 +67,7 @@ def test_streamk_cluster_multicast_gfx1250_emits_assembly():
     assert all(err == 0 for (_b, _s, err) in results), (
         f"Expected all err==0, got: {[(b, e) for b, _s, e in results if e != 0]}"
     )
-    one_d = [(b, s, e) for (b, s, e) in results if _TWO_D_MARKER not in s]
+    one_d = [(b, s, e) for (b, s, e) in results if _ONE_D_MARKER in s]
     assert one_d, "Unified cluster_multicast config emitted no 1-D [C,1] kernel"
     for base, src, _err in one_d:
         assert src and len(src.splitlines()) > 50, (

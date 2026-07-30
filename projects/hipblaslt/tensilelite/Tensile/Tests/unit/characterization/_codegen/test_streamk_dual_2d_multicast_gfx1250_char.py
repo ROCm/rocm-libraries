@@ -18,7 +18,7 @@ SK round, so it additionally asserts:
   * the DP->SK boundary drops BOTH masks to self-only (not just B); and
   * the SK partial-tile workspace/reduction machinery is intact.
 
-Asserts (2-D [2,2] kernels of the unified ``_designed/gfx1250/streamk_cluster_multicast.yaml``):
+Asserts (2-D [2,2] kernels of ``_designed/gfx1250/streamk_dual_2d_multicast.yaml``):
   * err == 0, real gfx1250 assembly;
   * DP round binds BOTH MulticastMaskA (0x5) and MulticastMaskB (0x3) -- A is
     genuinely multicast -- via the dense 2-D masks (keep-dense short-circuit);
@@ -27,9 +27,9 @@ Asserts (2-D [2,2] kernels of the unified ``_designed/gfx1250/streamk_cluster_mu
   * the SK partial round + cluster split-barrier arrive/wait are present; and
   * the factored K-split decode/shift are ABSENT (Ck is a spatial N-axis).
 
-CPU-only. The on-device correctness check is the user's HW run of the 2-D
-ClusterDim entries ([2,2]/[2,4]/[4,2]) now folded into
-``Tests/common/streamk/gfx1250/core/sk_mxf4gemm_cluster_multicast.yaml``.
+CPU-only. The on-device correctness check is the user's HW run of the knob-gated
+2-D dual ClusterDim entries in
+``Tests/common/streamk/gfx1250/core/sk_mxf4_2d_dual_multicast.yaml``.
 """
 
 import os
@@ -42,17 +42,19 @@ pytestmark = pytest.mark.unit
 
 _ARCH = "gfx1250"
 
-# The 1-D and 2-D multicast configs were unified into ONE cluster_multicast set
-# (former streamk_dual_2d_multicast.yaml folded in), so this config now emits both
-# 1-D [C,1] and 2-D [2,2] kernels; this test dispatches on the "2-D DP:" fold marker
-# and asserts the dual-2D properties on the 2-D kernels only.
+# Dual-2D is now KNOB-GATED: in the merged (factored) world a knobless [2,2]
+# derives as the FACTORED multicast+reduction path, so the genuine dual-2D shape
+# (Ck as a spatial A-multicast N-axis, NOT a reduction axis) is selected only via
+# StreamKDualMulticast=1. That opt-in lives in the dedicated designed config
+# streamk_dual_2d_multicast.yaml (the unified streamk_cluster_multicast.yaml now
+# emits 1-D [C,1] + factored [2,2], not dual). Read the dedicated dual config here.
 _CONFIG = os.path.join(
     os.path.dirname(__file__),
     "data",
     "test_data",
     "_designed",
     "gfx1250",
-    "streamk_cluster_multicast.yaml",
+    "streamk_dual_2d_multicast.yaml",
 )
 
 _TWO_D_MARKER = "2-D DP: StreamKIdx = batch*(nWG0*nWG1) + N*nWG0 + M"
@@ -61,8 +63,9 @@ _TWO_D_MARKER = "2-D DP: StreamKIdx = batch*(nWG0*nWG1) + N*nWG0 + M"
 def test_streamk_dual_2d_multicast_gfx1250_emits_assembly():
     """gfx1250 standard-StreamK [2,2] dual-2D emits real assembly, err==0,
     with dual DP masks (A on Ck/Y, B on Cs/X), the 2-D DP fold, a DP->SK BOTH-mask
-    clear, an intact SK partial round, and NO factored K-split decode. The unified
-    cluster_multicast config also emits 1-D [C,1] kernels, which are skipped here."""
+    clear, an intact SK partial round, and NO factored K-split decode. The dedicated
+    streamk_dual_2d_multicast.yaml (StreamKDualMulticast=1) emits the genuine dual
+    kernel; any non-dual kernel is skipped via the 2-D fold marker."""
     results = emit_kernels_from_config(_CONFIG, limit=8, arch=_ARCH)
     assert len(results) >= 1, "Expected >=1 kernel, got 0"
     assert all(err == 0 for (_b, _s, err) in results), (

@@ -25,6 +25,7 @@
 ################################################################################
 
 import copy
+import functools
 import os
 import sys
 
@@ -111,8 +112,10 @@ class TestValidation:
     def test_accepted_baseline(self, tmp_path):
         """The designed SK3 cluster config (ClusterDim=[4,1]) derives valid
         solutions with the internal StreamKMulticast auto-derived to 1 and
-        Multicast on."""
-        cfg = _write_variant(tmp_path, "ok.yaml")
+        Multicast on. The unified cluster_multicast config also sweeps the 2-D
+        [2,2] shape, so pin ClusterDim=[4,1] to isolate the 1-D B-multicast path."""
+        cfg = _write_variant(tmp_path, "ok.yaml",
+                             fork_overrides={"ClusterDim": [[4, 1]]})
         states = _derive_states(cfg)
         assert states, "expected >=1 derived solution for the valid config"
         for st in states:
@@ -349,9 +352,40 @@ class TestTDMInstValidation:
 
 # --- emitted assembly ------------------------------------------------------
 
+@functools.lru_cache(maxsize=1)
+def _one_d_multicast_config():
+    """Materialize a ClusterDim=[4,1]-only variant of the unified multicast config.
+
+    The unified cluster_multicast config sweeps BOTH the 1-D [C,1] B-multicast
+    shape and the 2-D [2,2] shape. In the merged (factored) world a knobless
+    [2,2] no longer derives as dual-2D but as the FACTORED multicast+reduction
+    path (Cs=2 broadcast maskB=0x3 + Ck=2 K-split), which shares no distinctive
+    on-kernel marker with the dual fold, so post-filtering the emitted mix is
+    unreliable. These emit tests pin the 1-D [C,1] B-multicast path, so emit from
+    a [4,1]-only variant (mirroring TestValidation.test_accepted_baseline)."""
+    from Tensile import LibraryIO
+    import tempfile
+    import yaml
+
+    cfg = copy.deepcopy(LibraryIO.read(_STREAMK_MULTICAST))
+    fork = cfg["BenchmarkProblems"][0][1]["ForkParameters"]
+    for entry in fork:
+        if "ClusterDim" in entry:
+            entry["ClusterDim"] = [[4, 1]]
+            break
+    else:
+        fork.append({"ClusterDim": [[4, 1]]})
+    fd, path = tempfile.mkstemp(suffix="_1d_multicast.yaml")
+    with os.fdopen(fd, "w") as f:
+        yaml.safe_dump(cfg, f, default_flow_style=None)
+    return path
+
+
 class TestEmit:
-    def _emit(self, cfg=_STREAMK_MULTICAST):
+    def _emit(self, cfg=None):
         from config_harness import emit_kernels_from_config
+        if cfg is None:
+            cfg = _one_d_multicast_config()
         return emit_kernels_from_config(cfg, limit=8, arch=_ARCH)
 
     def test_emits_assembly(self):
