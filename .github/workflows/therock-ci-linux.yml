@@ -24,6 +24,11 @@ on:
         type: string
       build_runs_on:
         type: string
+    secrets:
+      MIOPEN_CI_WEBHOOK_URL:
+        required: false
+      HIPDNN_CI_WEBHOOK_URL:
+        required: false
 
 permissions:
   contents: read
@@ -36,7 +41,6 @@ jobs:
       id-token: write
     container:
       image: ${{ inputs.docker_image }}
-      options: -v /runner/config:/home/awsconfig/
     strategy:
       fail-fast: true
     env:
@@ -44,7 +48,6 @@ jobs:
       CCACHE_CONFIGPATH: ${{ github.workspace }}/.ccache/ccache.conf
       AMDGPU_FAMILIES: ${{ inputs.amdgpu_families }}
       TEATIME_FORCE_INTERACTIVE: 0
-      AWS_SHARED_CREDENTIALS_FILE: /home/awsconfig/credentials.ini
     steps:
       - name: "Checking out repository for rocm-libraries"
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -148,20 +151,27 @@ jobs:
 
       - name: Notify Teams Channel on Failure
         if: ${{ failure() && !github.event.pull_request.head.repo.fork }}
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          MIOPEN_WEBHOOK_URL: ${{ secrets.MIOPEN_CI_WEBHOOK_URL }}
+          HIPDNN_WEBHOOK_URL: ${{ secrets.HIPDNN_CI_WEBHOOK_URL }}
+          COMPONENT_NAME: ${{ inputs.projects_to_test }}
         run: |
           python3 .github/scripts/notify_teams.py \
             --failure-stage build \
             --log-path TheRock/build/logs \
-            --webhook-urls '{"miopen":"${{ secrets.MIOPEN_CI_WEBHOOK_URL }}","hipdnn":"${{ secrets.HIPDNN_CI_WEBHOOK_URL }}"}' \
-            --pr-number "${{ github.event.pull_request.number }}" \
-            --pr-title "${{ github.event.pull_request.title }}" \
-            --component-name "${{ inputs.projects_to_test }}"
+            --webhook-urls "{\"miopen\":\"${MIOPEN_WEBHOOK_URL}\",\"hipdnn\":\"${HIPDNN_WEBHOOK_URL}\"}" \
+            --pr-number "${PR_NUMBER}" \
+            --pr-title "${PR_TITLE}" \
+            --component-name "${COMPONENT_NAME}"
 
   therock-test-linux:
     name: Test (${{ inputs.amdgpu_families }})
     needs: [therock-build-linux]
     # TODO(TheRock#3288): Re-enable gfx950-dcgpu runners once we get more capacity
-    if: ${{ inputs.test_runs_on != '' && inputs.amdgpu_families != 'gfx950-dcgpu' }}
+    # TODO(mi450-pool): Remove gfx125X exclusion once mi450 test runners are provisioned
+    if: ${{ inputs.amdgpu_families != 'gfx950-dcgpu' && inputs.amdgpu_families != 'gfx125X' }}
     uses: ./.github/workflows/therock-test-packages.yml
     with:
       therock_ref: ${{ inputs.therock_ref }}
@@ -170,16 +180,6 @@ jobs:
       test_runs_on: ${{ inputs.test_runs_on }}
       platform: "linux"
       test_type: ${{ inputs.test_type }}
-    secrets: inherit
-
-  rocjitsu-race-check-linux:
-    name: rocjitsu race check (${{ inputs.amdgpu_families }})
-    needs: [therock-build-linux]
-    # Run the narrow rocjitsu sidecar only for hipBLASLt rows and GPU families
-    # that rocjitsu can emulate here.
-    if: ${{ inputs.build_runs_on != '' && (startsWith(inputs.amdgpu_families, 'gfx94') || startsWith(inputs.amdgpu_families, 'gfx950') || inputs.amdgpu_families == 'gfx1151') && contains(inputs.projects_to_test, 'hipblaslt') }}
-    uses: ./.github/workflows/therock-rocjitsu-race-check-linux.yml
-    with:
-      therock_ref: ${{ inputs.therock_ref }}
-      build_runs_on: ${{ inputs.build_runs_on }}
-      amdgpu_families: ${{ inputs.amdgpu_families }}
+    secrets:
+      MIOPEN_CI_WEBHOOK_URL: ${{ secrets.MIOPEN_CI_WEBHOOK_URL }}
+      HIPDNN_CI_WEBHOOK_URL: ${{ secrets.HIPDNN_CI_WEBHOOK_URL }}

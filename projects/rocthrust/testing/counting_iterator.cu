@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -16,9 +16,9 @@
  */
 
 #include <thrust/binary_search.h>
+#include <thrust/detail/libcxx_wrapper/std/__iterator/iterator_traits.h>
 #include <thrust/distance.h>
 #include <thrust/iterator/counting_iterator.h>
-#include <thrust/iterator/detail/iterator_traits.h>
 #include <thrust/sort.h>
 
 #include <cstdint>
@@ -28,25 +28,67 @@
 #include _THRUST_STD_INCLUDE(iterator)
 #include _THRUST_STD_INCLUDE(type_traits)
 
+template <typename ValueType, typename DifferenceType>
+inline constexpr bool diff_type_is =
+  _THRUST_STD::is_same_v<typename thrust::counting_iterator<ValueType>::difference_type, DifferenceType>;
+
+static_assert(diff_type_is<int8_t, int>);
+static_assert(diff_type_is<uint8_t, int>);
+static_assert(diff_type_is<int16_t, int>);
+static_assert(diff_type_is<uint16_t, int>);
+static_assert(diff_type_is<int32_t, ptrdiff_t>);
+static_assert(diff_type_is<uint32_t, ptrdiff_t>);
+static_assert(diff_type_is<int64_t, ptrdiff_t>);
+static_assert(diff_type_is<uint64_t, ptrdiff_t>);
+#if !defined(THRUST_DISABLE_INT128_SUPPORT) && (defined(__linux__) || defined(__LP64__)) \
+  && ((THRUST_COMPILER(NVRTC) && defined(__CUDACC_RTC_INT128__)) || defined(__SIZEOF_INT128__))
+static_assert(diff_type_is<__int128_t, ptrdiff_t>);
+static_assert(diff_type_is<__uint128_t, ptrdiff_t>);
+#endif
+static_assert(diff_type_is<float, ptrdiff_t>);
+static_assert(diff_type_is<double, ptrdiff_t>);
+
+struct custom_int
+{
+  THRUST_HOST_DEVICE custom_int(int) {}
+  THRUST_HOST_DEVICE operator int() const;
+};
+static_assert(thrust::detail::is_numeric<custom_int>::value);
+
+static_assert(diff_type_is<custom_int, ptrdiff_t>);
+
 THRUST_DIAG_PUSH
 THRUST_DIAG_SUPPRESS_MSVC(4244 4267) // possible loss of data
 
 // ensure that we properly support thrust::counting_iterator from _THRUST_STD
-void test_iterator_traits()
+void TestCountingIteratorTraits()
 {
-  using It       = _THRUST_STD::iterator_traits<thrust::counting_iterator<int>>;
-  using category = thrust::detail::iterator_category_with_system_and_traversal<::std::random_access_iterator_tag,
+  using it       = thrust::counting_iterator<int>;
+  using traits   = _THRUST_STD::iterator_traits<it>;
+  using category = thrust::detail::iterator_category_with_system_and_traversal<_THRUST_STD::random_access_iterator_tag,
                                                                                thrust::any_system_tag,
                                                                                thrust::random_access_traversal_tag>;
 
-  static_assert(_THRUST_STD::is_same<It::difference_type, ptrdiff_t>::value, "");
-  static_assert(_THRUST_STD::is_same<It::value_type, int>::value, "");
-  static_assert(_THRUST_STD::is_same<It::pointer, void>::value, "");
-  static_assert(_THRUST_STD::is_same<It::reference, signed int>::value, "");
-  static_assert(_THRUST_STD::is_same<It::iterator_category, category>::value, "");
+  static_assert(_THRUST_STD::is_same_v<traits::difference_type, ptrdiff_t>);
+  static_assert(_THRUST_STD::is_same_v<traits::value_type, int>);
+  static_assert(_THRUST_STD::is_same_v<traits::pointer, void>);
+  static_assert(_THRUST_STD::is_same_v<traits::reference, signed int>);
+  static_assert(_THRUST_STD::is_same_v<traits::iterator_category, category>);
 
-  static_assert(::thrust::detail::is_cpp17_random_access_iterator<thrust::counting_iterator<int>>::value, "");
+  static_assert(_THRUST_STD::is_same_v<thrust::iterator_traversal_t<it>, thrust::random_access_traversal_tag>);
+
+  static_assert(::internal::is_cpp17_random_access_iterator<it>::value);
+
+#if _THRUST_HAS_DEVICE_SYSTEM_STD || THRUST_STD_VER >= 2020
+  static_assert(!_THRUST_STD::output_iterator<it, int>);
+  static_assert(_THRUST_STD::input_iterator<it>);
+  static_assert(_THRUST_STD::forward_iterator<it>);
+  static_assert(_THRUST_STD::bidirectional_iterator<it>);
+  static_assert(_THRUST_STD::random_access_iterator<it>);
+  static_assert(!_THRUST_STD::contiguous_iterator<it>);
+#endif
 }
+DECLARE_UNITTEST(TestCountingIteratorTraits);
 
 template <typename T>
 void TestCountingDefaultConstructor()
@@ -253,7 +295,7 @@ DECLARE_UNITTEST(TestCountingIteratorLowerBound);
 void TestCountingIteratorDifference()
 {
   using Iterator   = thrust::counting_iterator<std::uint64_t>;
-  using Difference = thrust::iterator_difference<Iterator>::type;
+  using Difference = thrust::detail::it_difference_t<Iterator>;
 
   Difference diff = std::numeric_limits<std::uint32_t>::max() + 1;
 
