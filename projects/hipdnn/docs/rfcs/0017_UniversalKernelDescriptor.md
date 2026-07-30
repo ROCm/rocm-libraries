@@ -105,10 +105,14 @@ waiting on a provider change or someone else's release train. How close a given 
 depends on whether its family already exists. Adding a variant to an established family reaches it
 fully: the author writes one descriptor and ships. Standing up a new family costs more, because the
 matcher, engine, heuristic, and metadata schema have to be authored first, after which every later
-kernel in that family is a single descriptor. Both cases follow a defined path, and tooling to make
-that path comfortable is built alongside the format ([Section 11](#11-tooling)). The end state is one
-generalized description covering both AOT and just-in-time (JIT) kernels; AOT is the focus here, JIT
-a future follow-on ([Section 9.3](#93-future-jit-and-normalized-providers)).
+kernel in that family is a single descriptor. Neither path is meant to be walked by hand. The
+descriptor formats are precise and machine-checkable so that agents can author them: the intended
+workflow is a kernel author describing intent to an agentic skill that drafts the descriptors,
+validates them against the schema, and reports what is wrong in the author's terms. Hand-authoring
+stays available and the format is readable enough for it, but the agentic skills ship with the
+capability and are the path a kernel author is expected to take ([Section 11](#11-tooling)). The end
+state is one generalized description covering both AOT and just-in-time (JIT) kernels; AOT is the
+focus here, JIT a future follow-on ([Section 9.3](#93-future-jit-and-normalized-providers)).
 
 **Scope.** This document frames the system and its direction; each descriptor format (match,
 dispatch, engine, heuristic) and subsystem (the matcher, expression language, packaging, and drop-in
@@ -134,6 +138,7 @@ This complements build-time codegen.
 | Multi-kernel launch program (e.g. SDPA backward) | None | composition ([§15.1](#151-several-kernels-for-one-operation)) |
 | Selection composition: UCD (Universal Composite Descriptor) decomposition | None | composition ([§15.2](#152-one-graph-split-across-several-engines)) |
 | JIT compilation; normalized providers | None | JIT ([§9.3](#93-future-jit-and-normalized-providers)) |
+| Authoring workflow | agentic skills that draft, validate, and inspect descriptors ([§11](#11-tooling)) | further skills for retraining, packaging, and migration ([§11](#11-tooling)) |
 
 ### 1.2 Provider or Kernel Pack
 
