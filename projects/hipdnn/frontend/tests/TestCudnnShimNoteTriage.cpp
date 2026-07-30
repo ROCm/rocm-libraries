@@ -6,6 +6,7 @@
 // contracts, not helper internals.
 #include <hipdnn_compatibility/cudnn/cudnn_frontend.h>
 
+#include <cstdint>
 #include <gtest/gtest.h>
 
 #include <string>
@@ -60,25 +61,69 @@ TEST(TestCudnnShimNoteTriage, DeselectAdvisoryNumericNotesLeavesGraphUsable)
     EXPECT_TRUE(graph.validate().is_good());
 }
 
-TEST(TestCudnnShimNoteTriage, BehaviorNoteFiltersNeverPoisonTheGraph)
+TEST(TestCudnnShimNoteTriage, KnownBehaviorNoteFiltersLeaveEmptyGraphValid)
 {
     const std::vector<BehNote> notes = {BehNote::RUNTIME_COMPILATION,
                                         BehNote::REQUIRES_LAYOUT_TRANSFORM,
                                         BehNote::SUPPORTS_GRAPH_CAPTURE,
                                         BehNote::EXTERNAL_LIBRARY_DEPENDENCY,
-                                        BehNote::SUPPORTS_EXECUTION_PLAN_SERIALIZATION,
-                                        BehNote::REQUIRES_FILTER_INT8x32_REORDER,
+                                        BehNote::SUPPORTS_EXECUTION_PLAN_SERIALIZATION};
+
+    fe::graph::Graph selectGraph;
+    EXPECT_EQ(&selectGraph.select_behavior_notes(notes), &selectGraph);
+    EXPECT_TRUE(selectGraph.validate().is_good());
+
+    fe::graph::Graph deselectGraph;
+    EXPECT_EQ(&deselectGraph.deselect_behavior_notes(notes), &deselectGraph);
+    EXPECT_TRUE(deselectGraph.validate().is_good());
+}
+
+TEST(TestCudnnShimNoteTriage, CudnnOnlyBehaviorNoteFiltersLeaveEmptyGraphValid)
+{
+    const std::vector<BehNote> notes = {BehNote::REQUIRES_FILTER_INT8x32_REORDER,
                                         BehNote::REQUIRES_BIAS_INT8x32_REORDER,
                                         BehNote::SUPPORTS_CUDA_GRAPH_NATIVE_API,
                                         BehNote::CUBLASLT_DEPENDENCY};
 
     fe::graph::Graph selectGraph;
-    selectGraph.select_behavior_notes(notes);
+    EXPECT_EQ(&selectGraph.select_behavior_notes(notes), &selectGraph);
     EXPECT_TRUE(selectGraph.validate().is_good());
 
     fe::graph::Graph deselectGraph;
-    deselectGraph.deselect_behavior_notes(notes);
+    EXPECT_EQ(&deselectGraph.deselect_behavior_notes(notes), &deselectGraph);
     EXPECT_TRUE(deselectGraph.validate().is_good());
+}
+
+TEST(TestCudnnShimNoteTriage, ResourceFiltersChainWithoutPoisoningEmptyGraph)
+{
+    fe::graph::Graph graph;
+
+    EXPECT_EQ(&graph.deselect_workspace_greater_than(1024), &graph);
+    EXPECT_EQ(&graph.deselect_engines(std::vector<std::string>{"MIOPEN_ENGINE"}), &graph);
+    EXPECT_EQ(&graph.deselect_engines(std::vector<int64_t>{1, 2}), &graph);
+
+    EXPECT_TRUE(graph.validate().is_good());
+}
+
+TEST(TestCudnnShimNoteTriage, ZeroSharedMemoryFilterIsNoOp)
+{
+    fe::graph::Graph graph;
+
+    EXPECT_EQ(&graph.deselect_shared_mem_greater_than(0), &graph);
+
+    EXPECT_TRUE(graph.validate().is_good());
+}
+
+TEST(TestCudnnShimNoteTriage, NonzeroSharedMemoryFilterPoisonsValidate)
+{
+    fe::graph::Graph graph;
+
+    EXPECT_EQ(&graph.deselect_shared_mem_greater_than(1), &graph);
+    auto err = graph.validate();
+
+    EXPECT_TRUE(err.is_bad());
+    EXPECT_EQ(err.get_code(), fe::error_code_t::GRAPH_NOT_SUPPORTED);
+    EXPECT_NE(err.get_message().find("shared-memory metadata"), std::string::npos);
 }
 
 TEST(TestCudnnShimNoteTriage, EmptyAndNotSetNoteVectorsAreNoOps)

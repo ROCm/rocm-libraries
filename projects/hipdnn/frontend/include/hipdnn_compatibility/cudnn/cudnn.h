@@ -43,6 +43,13 @@ using cudnnHandle_t = ::hipdnnHandle_t;
 static_assert(std::is_same_v<cudnnHandle_t, ::hipdnnHandle_t>,
               "cudnnHandle_t must alias the hipDNN handle type");
 
+/// @brief Opaque CUDA-graph handle placeholder for compile-only error stubs.
+///
+/// The cuDNN-shim graph-capture methods are unsupported at runtime; this alias
+/// exists only so v9 source naming `cudaGraph_t` compiles without pulling CUDA
+/// runtime headers into the shim umbrella.
+using cudaGraph_t = void*;
+
 // Only the C-API types the v9 graph API actually references are declared here
 // (cudnnHandle_t, plus cudnnStatus_t from cudnn_status.h). Other cuDNN C-API
 // enums are intentionally omitted: the v9 graph surface uses the FE-namespace
