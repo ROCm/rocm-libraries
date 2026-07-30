@@ -251,7 +251,7 @@ namespace rocsparse
         J*    row_limits = reinterpret_cast<J*>(ptr);
         ptr += sizeof(J) * ((nblocks + 1 - 1) / 256 + 1) * 256;
         J* row_block_red = reinterpret_cast<J*>(ptr);
-        ptr += sizeof(J) * ((nblocks * batch_count_C - 1) / 256 + 1) * 256;
+        ptr += sizeof(J) * ((int64_t(nblocks) * batch_count_C - 1) / 256 + 1) * 256;
         T* val_block_red = reinterpret_cast<T*>(ptr);
 
         J main      = 0;
