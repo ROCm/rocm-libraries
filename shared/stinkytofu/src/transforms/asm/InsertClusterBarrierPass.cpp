@@ -871,6 +871,15 @@ bool isFollowedByClusterBarrierHandshakeOrSignal(StinkyInstruction* anchor) {
 /// boundary), clamping the signal to the segment start so the SIGNAL stays on
 /// the same control-flow path as its paired WAIT.
 ///
+/// The walk also stops if it reaches a preceding handshake's WAIT anchor --
+/// another workgroup `s_barrier_signal -1` (every Rule-4 trigger is one):
+/// hoisting this signal into or above that handshake would let the two cluster
+/// `signal -3`/`wait -3` pairs overlap and deadlock. In that case the signal is
+/// clamped to just AFTER that handshake's workgroup `s_barrier_wait -1` (the
+/// first real instruction following it). The prior handshake is detected via
+/// its workgroup signal rather than its cluster `wait -3`, because at
+/// anchor-resolution time the cluster waits have not been emitted yet.
+///
 /// Falls back to `defaultAnchor` (the WAIT anchor, i.e. co-located) when:
 ///   - `leadCycles <= 0` (feature disabled), or
 ///   - the reference has no cycle estimate (non-Gfx1250, or outside the modeled
@@ -891,6 +900,27 @@ IRBase* findRule4SignalAnchorByCycleLead(
         --it;
         auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
         if (inst == nullptr) continue;
+        // Boundary: a PRECEDING handshake's WAIT anchor -- another workgroup
+        // `s_barrier_signal -1` (each Rule-4 trigger is one). Never hoist this
+        // signal into or above that prior handshake, or the two cluster
+        // `signal -3`/`wait -3` pairs overlap and can deadlock. Clamp instead to
+        // just AFTER that handshake's workgroup `s_barrier_wait -1` (the tail of
+        // its barrier block). NOTE: this is detected via the workgroup signal,
+        // not the cluster `wait -3`, because at anchor-resolution time the
+        // cluster waits have not been emitted yet -- only the original workgroup
+        // barriers exist.
+        if (isWorkgroupBarrierSignal(*inst)) {
+            for (StinkyInstruction* fwd = firstRealInstAfter(inst);
+                 fwd != nullptr && fwd != referenceAnchor; fwd = firstRealInstAfter(fwd)) {
+                if (isWorkgroupBarrierWait(*fwd)) {
+                    StinkyInstruction* after = firstRealInstAfter(fwd);
+                    return (after != nullptr) ? static_cast<IRBase*>(after) : defaultAnchor;
+                }
+            }
+            // No paired workgroup wait below it (unexpected): co-locate the
+            // signal with its wait rather than crossing the prior handshake.
+            return defaultAnchor;
+        }
         auto cycleIt = cycleMap.find(inst);
         if (cycleIt == cycleMap.end()) continue;
         if (static_cast<int64_t>(cycleIt->second) <= target) return inst;
