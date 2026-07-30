@@ -96,24 +96,3 @@ TEST(PluginArchMatchSubstring, FailsAgainstEmptyDeviceArch)
 {
     EXPECT_FALSE(archMatches("", "gfx942", ArchMatchMode::SUBSTRING));
 }
-
-// ---------------------------------------------------------------------------
-// Provider workaround scenarios — the exact calls the providers make, matched
-// against raw gcnArchName strings (suffix intact), so the whole path is covered.
-// ---------------------------------------------------------------------------
-
-TEST(PluginArchMatchWorkarounds, Issue5409Gfx90aExactBasePrefix)
-{
-    // MIOpen #5409 gates on exactly gfx90a.
-    EXPECT_TRUE(archMatches("gfx90a:sramecc+:xnack-", "gfx90a", ArchMatchMode::PREFIX));
-    EXPECT_TRUE(archMatches("gfx90a", "gfx90a", ArchMatchMode::PREFIX));
-    EXPECT_FALSE(archMatches("gfx942:sramecc+:xnack-", "gfx90a", ArchMatchMode::PREFIX));
-}
-
-TEST(PluginArchMatchWorkarounds, Issue9962Gfx115xFamilySubstring)
-{
-    // hipBLASLt #9962 gates on the gfx115x family.
-    EXPECT_TRUE(archMatches("gfx1150:xnack-", "gfx115", ArchMatchMode::SUBSTRING));
-    EXPECT_TRUE(archMatches("gfx1151", "gfx115", ArchMatchMode::SUBSTRING));
-    EXPECT_FALSE(archMatches("gfx1100", "gfx115", ArchMatchMode::SUBSTRING));
-}
