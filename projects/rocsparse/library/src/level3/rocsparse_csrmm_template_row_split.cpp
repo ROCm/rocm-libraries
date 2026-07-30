@@ -29,6 +29,12 @@
 
 namespace rocsparse
 {
+    template <typename J>
+    static uint16_t get_y_grid_size(J batch_count)
+    {
+        return (batch_count > 65535) ? 32768 : batch_count;
+    }
+
 #define LAUNCH_CSRMMNT_ROW_SPLIT_SHARED_SUBWFSIZE_X_LOOP_COLUMNS(                      \
     CSRMMNT_DIM, WFSIZE, SUBWFSIZE, LOOPS)                                             \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                                \
@@ -586,12 +592,6 @@ namespace rocsparse
         }
 
         return rocsparse_status_success;
-    }
-
-    template <typename J>
-    static uint16_t get_y_grid_size(J batch_count)
-    {
-        return (batch_count > 65535) ? 32768 : batch_count;
     }
 
     template <typename I, typename J, typename A, typename B, typename C, typename T>
