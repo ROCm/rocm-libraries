@@ -2,6 +2,27 @@
 
 Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projects/rocPRIM/en/latest/](https://rocm.docs.amd.com/projects/rocPRIM/en/latest/).
 
+## rocPRIM 5.0.0 for ROCm 10.0
+
+### Added
+
+* Added a parallel `device_topk`, which finds the largest/smallest K elements from an input array of keys.
+* Added a parallel `device_segmented_topk`, which finds the largest/smallest K elements from segmented groups.
+* `device_topk` and `device_segmented_topk` are controlled by cmake flag `ROCPRIM_ENABLE_TOPK`. Passing `-DROCPRIM_ENABLE_TOPK=ON` to enable these features
+* Added C++ 17 style type_traits utilities
+ * is_floating_point_v
+ * is_integral_v
+ * is_arithmetic_v
+ * is_fundamental_v
+ * is_unsigned_v
+ * is_signed_v
+ * is_scalar_v
+ * is_compound_v
+
+### Changed
+
+* Combined and simplified separate assertion templates using `std::is_floating_point`, `rocprim::half`, and `rocprim::bfloat16` to use `rocprim::is_floating_point`
+
 ## rocPRIM 4.5.0 for ROCm 7.14
 
 ### Added
@@ -10,6 +31,10 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 * gfx1250 support
 
 * Added a parallel `device_topk`, which finds the largest/smallest K elements from an input array of keys.
+
+### Optimizations
+
+* Improved performance for the fallback path of lookback scan where the flag can't be fit into the same atomic load/store.
 
 ### Changed
 
@@ -52,10 +77,6 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 
 * Updated config system to pick better fallback configs for untuned GPUs.
 
-### Upcoming changes
-
-* Deprecated the `ROCPRIM_PRINT_ERROR_ONCE` macro.
-
 ### Changed
 
 * Changed various APIs with undefined behaviors to abort with a trap instead of printing a runtime error with `ROCPRIM_PRINT_ERROR_ONCE` 
@@ -70,8 +91,13 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 
 ### Removed
 
+* Removed deprecated `zip_iterator::operator->`, `invoke_result_binary_op_t`.
 * Removed unused `equality`, `inequality`, `sum`, `max`, `min` from thread_operator.hpp.
 * Removed duplicate `inequality_operator` from binary_op_warpper.hpp
+
+### Upcoming changes
+
+* Deprecated the `ROCPRIM_PRINT_ERROR_ONCE` macro.
 
 ## rocPRIM 4.2.0 for ROCm 7.2
 

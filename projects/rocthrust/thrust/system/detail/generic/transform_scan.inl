@@ -26,10 +26,13 @@
 #  pragma system_header
 #endif // no system header
 #include <thrust/detail/type_traits.h>
-#include <thrust/detail/type_traits/iterator/is_output_iterator.h>
 #include <thrust/iterator/transform_iterator.h>
 #include <thrust/scan.h>
 #include <thrust/system/detail/generic/transform_scan.h>
+
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+#  include _THRUST_STD_INCLUDE(type_traits)
+#endif
 
 THRUST_NAMESPACE_BEGIN
 namespace system
@@ -53,7 +56,7 @@ THRUST_HOST_DEVICE OutputIterator transform_inclusive_scan(
   BinaryFunction binary_op)
 {
   // Use the input iterator's value type per https://wg21.link/P0571
-  using InputType  = typename thrust::iterator_value<InputIterator>::type;
+  using InputType  = thrust::detail::it_value_t<InputIterator>;
   using ResultType = thrust::detail::invoke_result_t<UnaryFunction, InputType>;
   using ValueType  = ::internal::remove_cvref_t<ResultType>;
 
@@ -78,7 +81,7 @@ THRUST_HOST_DEVICE OutputIterator transform_inclusive_scan(
   InitialValueType init,
   BinaryFunction binary_op)
 {
-  using InputType  = typename thrust::iterator_value<InputIterator>::type;
+  using InputType  = thrust::detail::it_value_t<InputIterator>;
   using ResultType = thrust::detail::invoke_result_t<UnaryFunction, InputType>;
   using ValueType  = ::internal::remove_cvref_t<ResultType>;
 

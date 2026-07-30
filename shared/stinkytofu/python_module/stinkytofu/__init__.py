@@ -117,4 +117,4 @@ if _bi is not None:
             f"  Modified: {', '.join(_preview)}\n"
             "  Rebuild:  cmake --build <build_dir> --target stinkytofu_python"
         )
-    del _bi, _so, _so_mtime, _stale, _build_dirs, _source_root, Path
+    del _bi, _so, _so_mtime, _stale, _build_dirs, _source_root, _scan_dirs, Path
