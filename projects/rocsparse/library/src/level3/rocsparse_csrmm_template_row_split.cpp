@@ -29,40 +29,39 @@
 
 namespace rocsparse
 {
-#define LAUNCH_CSRMMNT_ROW_SPLIT_SHARED_SUBWFSIZE_X_LOOP_COLUMNS(                  \
-    CSRMMNT_DIM, WFSIZE, SUBWFSIZE, LOOPS)                                         \
-    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                            \
-        (rocsparse::csrmmnt_row_split_subwfsize_x_loop_columns_kernel<CSRMMNT_DIM, \
-                                                                      WFSIZE,      \
-                                                                      SUBWFSIZE,   \
-                                                                      LOOPS>),     \
-        dim3((m - 1) / (CSRMMNT_DIM / WFSIZE) + 1,                                 \
-             (batch_count_C > 65536) ? 65536 : batch_count_C),                     \
-        dim3(CSRMMNT_DIM),                                                         \
-        0,                                                                         \
-        handle->stream,                                                            \
-        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),              \
-        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),               \
-        handle->pointer_mode == rocsparse_pointer_mode_host,                       \
-        start,                                                                     \
-        end,                                                                       \
-        m,                                                                         \
-        n,                                                                         \
-        batch_count_C,                                                             \
-        offsets_batch_stride_A,                                                    \
-        columns_values_batch_stride_A,                                             \
-        ldb,                                                                       \
-        batch_stride_B,                                                            \
-        ldc,                                                                       \
-        batch_stride_C,                                                            \
-        csr_row_ptr,                                                               \
-        csr_col_ind,                                                               \
-        csr_val,                                                                   \
-        dense_B,                                                                   \
-        dense_C,                                                                   \
-        order_C,                                                                   \
-        descr->base,                                                               \
-        conj_A,                                                                    \
+#define LAUNCH_CSRMMNT_ROW_SPLIT_SHARED_SUBWFSIZE_X_LOOP_COLUMNS(                      \
+    CSRMMNT_DIM, WFSIZE, SUBWFSIZE, LOOPS)                                             \
+    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                                \
+        (rocsparse::csrmmnt_row_split_subwfsize_x_loop_columns_kernel<CSRMMNT_DIM,     \
+                                                                      WFSIZE,          \
+                                                                      SUBWFSIZE,       \
+                                                                      LOOPS>),         \
+        dim3((m - 1) / (CSRMMNT_DIM / WFSIZE) + 1, get_y_grid_size<J>(batch_count_C)), \
+        dim3(CSRMMNT_DIM),                                                             \
+        0,                                                                             \
+        handle->stream,                                                                \
+        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),                  \
+        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),                   \
+        handle->pointer_mode == rocsparse_pointer_mode_host,                           \
+        start,                                                                         \
+        end,                                                                           \
+        m,                                                                             \
+        n,                                                                             \
+        batch_count_C,                                                                 \
+        offsets_batch_stride_A,                                                        \
+        columns_values_batch_stride_A,                                                 \
+        ldb,                                                                           \
+        batch_stride_B,                                                                \
+        ldc,                                                                           \
+        batch_stride_C,                                                                \
+        csr_row_ptr,                                                                   \
+        csr_col_ind,                                                                   \
+        csr_val,                                                                       \
+        dense_B,                                                                       \
+        dense_C,                                                                       \
+        order_C,                                                                       \
+        descr->base,                                                                   \
+        conj_A,                                                                        \
         conj_B);
 
 #define LAUNCH_CSRMMNT_ROW_SPLIT_SUBWFSIZE_X_LOOP_PLUS_SWFS_COLUMNS(                           \
@@ -73,8 +72,7 @@ namespace rocsparse
                                                                                 SUBWFSIZE,     \
                                                                                 LOOPS,         \
                                                                                 __VA_ARGS__>), \
-        dim3((m - 1) / (CSRMMNT_DIM / WFSIZE) + 1,                                             \
-             (batch_count_C > 65536) ? 65536 : batch_count_C),                                 \
+        dim3((m - 1) / (CSRMMNT_DIM / WFSIZE) + 1, get_y_grid_size<J>(batch_count_C)),         \
         dim3(CSRMMNT_DIM),                                                                     \
         0,                                                                                     \
         handle->stream,                                                                        \
@@ -105,8 +103,7 @@ namespace rocsparse
 #define LAUNCH_CSRMMNT_ROW_SPLIT_REMAINDER(CSRMMNT_DIM, WFSIZE, SUBWFSIZE)                      \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                                         \
         (rocsparse::csrmmnt_row_split_shared_remainder_kernel<CSRMMNT_DIM, WFSIZE, SUBWFSIZE>), \
-        dim3((m - 1) / (CSRMMNT_DIM / WFSIZE) + 1,                                              \
-             (batch_count_C > 65536) ? 65536 : batch_count_C),                                  \
+        dim3((m - 1) / (CSRMMNT_DIM / WFSIZE) + 1, get_y_grid_size<J>(batch_count_C)),          \
         dim3(CSRMMNT_DIM),                                                                      \
         0,                                                                                      \
         handle->stream,                                                                         \
@@ -171,7 +168,7 @@ namespace rocsparse
                 (rocsparse::csrmmnn_row_split_shared_kernel<CSRMMNN_DIM, WF_SIZE>),
                 dim3((m - 1) / (CSRMMNN_DIM / WF_SIZE) + 1,
                      (n - 1) / WF_SIZE + 1,
-                     (batch_count_C > 65536) ? 65536 : batch_count_C),
+                     get_y_grid_size<J>(batch_count_C)),
                 dim3(CSRMMNN_DIM),
                 0,
                 handle->stream,
@@ -212,7 +209,7 @@ namespace rocsparse
                     (rocsparse::csrmmnn_row_split_kernel<CSRMMNN_DIM, SUB_WF_SIZE, 8>),
                     dim3((m - 1) / (CSRMMNN_DIM / SUB_WF_SIZE) + 1,
                          ((end - start) - 1) / 8 + 1,
-                         (batch_count_C > 65536) ? 65536 : batch_count_C),
+                         get_y_grid_size<J>(batch_count_C)),
                     dim3(CSRMMNN_DIM),
                     0,
                     handle->stream,
@@ -249,7 +246,7 @@ namespace rocsparse
                     (rocsparse::csrmmnn_row_split_kernel<CSRMMNN_DIM, SUB_WF_SIZE, 1>),
                     dim3((m - 1) / (CSRMMNN_DIM / SUB_WF_SIZE) + 1,
                          ((end - start) - 1) / 1 + 1,
-                         (batch_count_C > 65536) ? 65536 : batch_count_C),
+                         get_y_grid_size<J>(batch_count_C)),
                     dim3(CSRMMNN_DIM),
                     0,
                     handle->stream,
@@ -591,6 +588,12 @@ namespace rocsparse
         return rocsparse_status_success;
     }
 
+    template <typename J>
+    static uint16_t get_y_grid_size(J batch_count)
+    {
+        return (batch_count > 65535) ? 32768 : batch_count;
+    }
+
     template <typename I, typename J, typename A, typename B, typename C, typename T>
     rocsparse_status csrmmtn_template_row_split(rocsparse_handle handle,
                                                 bool             conj_A,
@@ -630,7 +633,7 @@ namespace rocsparse
             (rocsparse::csrmmtn_row_split_kernel<CSRMMTN_DIM, WF_SIZE>),
             dim3((m - 1) / (CSRMMTN_DIM / WF_SIZE) + 1,
                  (n - 1) / WF_SIZE + 1,
-                 (batch_count_C > 65536) ? 65536 : batch_count_C),
+                 get_y_grid_size<J>(batch_count_C)),
             dim3(CSRMMTN_DIM),
             0,
             handle->stream,
@@ -701,7 +704,7 @@ namespace rocsparse
             (rocsparse::csrmmtt_row_split_kernel<CSRMMTT_DIM, WF_SIZE>),
             dim3((m - 1) / (CSRMMTT_DIM / WF_SIZE) + 1,
                  (n - 1) / WF_SIZE + 1,
-                 (batch_count_C > 65536) ? 65536 : batch_count_C),
+                 get_y_grid_size<J>(batch_count_C)),
             dim3(CSRMMTT_DIM),
             0,
             handle->stream,
