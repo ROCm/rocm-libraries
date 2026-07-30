@@ -121,7 +121,7 @@ struct TestConfigOptions
     bool skipGraphValidation = false;
     std::optional<std::filesystem::path> configPath;
     std::optional<ReferenceExecutorType> referenceExecutorType;
-    bool allowBundles = false;
+    bool allowBundles = true;
     std::optional<std::filesystem::path> goldenDataDir;
     std::optional<VerificationMode> verificationMode;
     std::optional<std::filesystem::path> captureDir;
@@ -191,15 +191,16 @@ public:
             instance._testSettings.emplace(*opts.configPath);
         }
 
-        // Golden bundle configuration
+        // Golden bundle configuration — default is ON; env var can override.
         instance._allowBundles = opts.allowBundles;
-        if(!instance._allowBundles)
+        auto envVal = hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_ALLOW_BUNDLES");
+        if(envVal == "0" || envVal == "false")
         {
-            auto envVal = hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_ALLOW_BUNDLES");
-            if(envVal == "1" || envVal == "true")
-            {
-                instance._allowBundles = true;
-            }
+            instance._allowBundles = false;
+        }
+        else if(envVal == "1" || envVal == "true")
+        {
+            instance._allowBundles = true;
         }
 
         instance._goldenDataDir = resolveGoldenDataDir(std::move(opts.goldenDataDir));
