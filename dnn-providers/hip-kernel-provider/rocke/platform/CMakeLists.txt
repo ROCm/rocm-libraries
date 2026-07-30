@@ -261,16 +261,24 @@ if(ROCKE_INSTALL_TESTS)
 
     # The harness above builds LIBRARY kernels for its attention, attention_dense
     # and attention_d256 families (the one platform -> library exception), so the
-    # `kernels` and `builders` packages must be importable next to the installed
-    # rocke package. Without them every attention case degrades to an
-    # expected-failure and rocke_golden_static reports drift instead of passing.
+    # `kernels` and `builders` packages must be importable by both runners.
+    # Without them every attention case degrades to an expected-failure and
+    # rocke_golden_static reports drift instead of passing.
+    #
+    # Destination matters: TheRock's artifact-hipkernelprovider.toml captures the
+    # test component through a fixed glob list whose only recursive entry for this
+    # subtree is bin/hip_kernel_provider/tests/**. Staging the packages one level
+    # down under tests/ therefore gets them into the CI test artifact with no
+    # change to that manifest; installing them at the test root would match no
+    # glob and they would be silently dropped from the artifact.
+    #
     # Guarded on the sibling library tree so a platform-only copy of this directory
     # still configures; keep the guard, it is the copy-able contract.
     set(_ROCKE_LIBRARY_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../library")
     if(EXISTS "${_ROCKE_LIBRARY_DIR}/kernels")
       foreach(_rocke_lib_pkg kernels builders)
         install(DIRECTORY "${_ROCKE_LIBRARY_DIR}/${_rocke_lib_pkg}"
-                DESTINATION "${ROCKE_TEST_INSTALL_DIR}"
+                DESTINATION "${ROCKE_TEST_INSTALL_DIR}/tests/library"
                 PATTERN "__pycache__" EXCLUDE
                 REGEX "\\.pyc$" EXCLUDE)
       endforeach()
