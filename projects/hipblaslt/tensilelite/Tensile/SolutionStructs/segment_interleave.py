@@ -8,6 +8,8 @@ split its A/B halves across LDS segments (so the two MFMA read ports hit differe
 segments), and returns the offsets the emit sites consume.
 """
 
+import os
+
 # gfx1250 LDS segment size (5 x 64 KiB segments).
 SEG = 65536
 
@@ -45,20 +47,28 @@ def _mx_scale_bases(state, mxsaStart):
     szB = int(state.get("LdsNumElementsAlignedMXSB", 0)) if hasB else 0
     return (baseA if hasA else None), (baseB if hasB else None), baseB + szB
 
-def _coarse_vw(state):
-    # A must cover a full component (never crosses one). B may be narrower, as long as its column
-    # span (vIdxColsB below) divides compColsB evenly so B reads split on component boundaries.
+def _coarse_a(state):
+    # A must cover a full component (never crosses one) so each A read lands entirely within one
+    # segment. Equivalent to VWA == WaveTileA.
     numComp = state["NumWaves"] // 2
     mi_threads = min(state["MatrixInstM"], state["MatrixInstN"])
-    coarseA = mi_threads * state["VectorWidthA"] >= state["MacroTile0"] // numComp
-    if not coarseA:
-        return False
-    coarseB = mi_threads * state["VectorWidthB"] >= state["MacroTile1"] // numComp
-    if coarseB:
+    return mi_threads * state["VectorWidthA"] >= state["MacroTile0"] // numComp
+
+def _b_readable(state):
+    # True if B can be split across segments and still read correctly: either B covers a full
+    # component (coarse), or its per-vIdx column span (vIdxColsB) divides compColsB evenly so no
+    # single ds_load straddles the component boundary. WaveTileB=7 -> 112 % 32 != 0 -> False.
+    numComp = state["NumWaves"] // 2
+    mi_threads = min(state["MatrixInstM"], state["MatrixInstN"])
+    if mi_threads * state["VectorWidthB"] >= state["MacroTile1"] // numComp:
         return True
     compColsB = state["MacroTile1"] // numComp
     vIdxColsB = state["MatrixInstN"] * state.get("MatrixInstBN", 1) * state["MIWaveGroup"][1] * state["VectorWidthB"]
     return vIdxColsB > 0 and compColsB % vIdxColsB == 0
+
+def _coarse_vw(state):
+    # Both A coarse and B readable -> the interleave can split BOTH operands (tight/aligned path).
+    return _coarse_a(state) and _b_readable(state)
 
 def _no(reason):
     return {"applicable": False, "aligned": False, "offsets": None,
@@ -110,11 +120,61 @@ def evaluate(state):
     # fp8 covers mxf8; its MX scales are relocated as a trailing block (see _mx_scale_bases).
     if not (_dt.isBFloat16() or _dt.isHalf() or _dt.is8bitFloat()):
         return _no("bf16/fp16/fp8 only")
-    if not _coarse_vw(state):                                   return _no("fine VW")
+    if not _coarse_a(state):                                   return _no("A not coarse (VWA<WaveTileA)")
 
     fA, fB = _footprint(state, "A"), _footprint(state, "B")
     base = state["LdsOffsetA"]
     bpe = _bpe(state)
+
+    # LDSSegmentInterleave==2 (or env TENSILE_LDS_BCONTIG_FORCE=1) forces the bcontig layout even on
+    # shapes where split would normally run, so both can be built and compared in one run.
+    _force_bcontig = os.environ.get("TENSILE_LDS_BCONTIG_FORCE") == "1" or mode == 2
+    if _force_bcontig or not _b_readable(state):
+        # bcontig layout [A0][B0][B1][A1]: B stays in one piece with normal addressing and acts as the
+        # gap that pushes A1 into a different segment. Used when B cannot be split correctly (odd
+        # WaveTileB) or when forced. Only A moves to a separate segment; B keeps its normal layout.
+        strideA = fA + 2 * fB                       # distance A0 -> A1: skip A0 and the whole B block
+        a0 = base // SEG
+        a1 = (base + strideA) // SEG
+        if a1 != a0:
+            # The B block already pushes A1 into the next segment, so this uses no extra LDS.
+            offsets = {
+                "ldsBaseB":         base + fA,      # B starts right after A0
+                "writeStrideBytes": strideA,        # A0 -> A1 distance (pad already included)
+                "readWaveStride":   strideA // bpe,  # same distance in elements (A only)
+                "footprintPacked":  True,
+                "bBaseline":        True,           # B uses its normal (non-interleaved) addressing
+            }
+            # mxf8: put the scale block after A1 (bf16/fp16 have no scales).
+            bMXSA, bMXSB, _ = _mx_scale_bases(state, base + 2 * fA + 2 * fB)
+            if bMXSA is not None: offsets["ldsBaseMXSA"] = bMXSA
+            if bMXSB is not None: offsets["ldsBaseMXSB"] = bMXSB
+            return {"applicable": True, "aligned": False, "offsets": offsets,
+                    "blockSpan": 0, "reason": "bcontig",
+                    "segmentMap": "BCONTIG seg%d={A0,B0,B1} seg%d={A1}" % (a0, a1)}
+
+        # Small tile: A0+B0+B1 all fit in one segment, so A1 would stay with A0. Pad the A0 -> A1
+        # distance up to the next segment boundary so A1 lands in a different segment. Uses more LDS
+        # (checked in Solution.py) and needs PrefetchGlobalRead=2 -- same idea as the split branch below.
+        if state.get("PrefetchGlobalRead") != 2:   return _no("small MT: PGR!=2")
+        if mode == -1:                             return _no("auto: skip aligned (LDS growth)")
+        pre = _ceil_seg(base + strideA) - base      # round A0 -> A1 distance up to a segment boundary
+        offsets = {
+            "ldsBaseB":         base + fA,          # B starts right after A0
+            "writeStrideBytes": pre,                # A0 -> A1 distance (rounded to a segment)
+            "readWaveStride":   pre // bpe,
+            "footprintPacked":  True,
+            "bBaseline":        True,
+        }
+        blockSpan = base + pre + fA                 # A1 ends here (past the B block, with a gap)
+        bMXSA, bMXSB, mxEnd = _mx_scale_bases(state, blockSpan)
+        if bMXSA is not None: offsets["ldsBaseMXSA"] = bMXSA
+        if bMXSB is not None: offsets["ldsBaseMXSB"] = bMXSB
+        blockSpan = max(blockSpan, mxEnd)
+        return {"applicable": True, "aligned": True, "offsets": offsets,
+                "blockSpan": blockSpan, "reason": "bcontig-aligned",
+                "segmentMap": "BCONTIG-ALIGNED seg%d={A0,B0,B1} seg%d={A1}"
+                              % (base // SEG, (base + pre) // SEG)}
 
     if (base % SEG) + fA + fB < SEG:
         # Small MacroTile: A0,B0 fit one segment, so push component 1 to the next segment boundary

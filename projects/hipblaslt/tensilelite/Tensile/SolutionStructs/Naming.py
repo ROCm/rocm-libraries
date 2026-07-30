@@ -220,9 +220,10 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
   if "SpaceFillingAlgo" in requiredParametersTemp and len(state["SpaceFillingAlgo"]) == 0:
     requiredParametersTemp.discard("SpaceFillingAlgo")
 
-  # Only name LDSSegmentInterleave when applied (==1), so the applied kernel is distinct from its
-  # baseline twin without tagging every other kernel. Same idiom as WorkGroupMappingXCC above.
-  if state.get("LDSSegmentInterleave") == 1:
+  # Name LDSSegmentInterleave when applied (1=split, 2=bcontig): keeps each applied kernel distinct
+  # from its baseline twin AND gives split/bcontig distinct names so they coexist in one build (the
+  # value encodes the layout -> LDSSI1 vs LDSSI2). Same idiom as WorkGroupMappingXCC above.
+  if state.get("LDSSegmentInterleave") in (1, 2):
     requiredParametersTemp.add("LDSSegmentInterleave")
 
   for key in sorted(requiredParametersTemp):

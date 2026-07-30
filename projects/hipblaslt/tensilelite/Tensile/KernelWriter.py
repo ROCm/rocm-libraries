@@ -8158,9 +8158,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
           maxOffsetMXSB += kernel["LdsOffsetA_Blk"]
           maxOffsetMetadata += kernel["LdsOffsetA_Blk"]
 
-        # Interleave puts B's component 1 far past B's own region, so a narrow B needs an extra
-        # LocalReadAddr register to reach it. (A wide B reaches it through the base address instead.)
-        if kernel.get("LDSSegmentInterleave") == 1:
+        # Split interleave relocates B's component 1 into a separate segment (offset >= 64K), so a
+        # narrow B needs an extra LocalReadAddr register to reach it. bcontig keeps B contiguous and
+        # A's segment jump lives in the base-register value (reg+0, small immediates), so neither A
+        # nor B needs a forced extra register there -- the baseline reach reservation already covers it.
+        if kernel.get("LDSSegmentInterleave") in (1, 2) and not kernel["LDSSegInterleaveOffsets"].get("bBaseline", False):
           numComp = kernel["NumWaves"] // 2
           compColsB = kernel["MacroTile1"] // numComp
           segILWaveSpansCompB = min(kernel["MatrixInstM"], kernel["MatrixInstN"]) * kernel["VectorWidthB"] >= compColsB

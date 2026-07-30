@@ -39,8 +39,9 @@ def test_vw8_applies_with_handedit_values():
                             "readWaveStride": 33024, "footprintPacked": True}
 
 def test_vw4_skips_fine_vw():
+    # VWA=4 < WaveTileA -> A would cross a component; A must stay coarse (also required by bcontig).
     r = evaluate(_vw8_state(VectorWidthA=4))
-    assert r["applicable"] is False and "fine VW" in r["reason"]
+    assert r["applicable"] is False and "not coarse" in r["reason"]
 
 def test_non_gfx1250_skips():
     # SEG=64KiB layout is gfx1250-specific; other ISAs must not apply the interleave.
@@ -57,18 +58,46 @@ def test_vwb_fine_aligned_applies():
         r = evaluate(_vw8_state(VectorWidthB=vwb))
         assert r["applicable"] is True, f"VWB={vwb} should apply"
 
-def test_vwb_fine_unaligned_skips():
-    # When a single vIdx would straddle a component (component span not a multiple of the
-    # vIdx column advance), the per-vIdx fix can't place it -> must skip. MT*x224 VWB1:
-    # compCols=112, vIdxCols=32, 112 % 32 != 0. (GPU-confirmed MT128x224 was wrong.)
+def test_vwb_fine_unaligned_uses_bcontig():
+    # When a single vIdx would straddle a component (component span not a multiple of the vIdx
+    # column advance), B cannot be split -> fall back to the bcontig layout [A0][B0][B1][A1]:
+    # B stays whole (baseline reads, WaveTileB unrestricted), only A moves to a separate segment. MT*x224
+    # VWB1: compCols=112, vIdxCols=32, 112 % 32 != 0. Span-neutral (blockSpan 0), B relocated.
     r = evaluate(_vw8_state(MacroTile1=224, VectorWidthB=1))
-    assert r["applicable"] is False and "fine VW" in r["reason"]
+    assert r["applicable"] is True and r["reason"] == "bcontig"
+    o = r["offsets"]
+    # fA=33024, fB=28896 -> ldsBaseB=fA, A stride=fA+2fB, B not interleaved.
+    assert o["ldsBaseB"] == 33024 and o["writeStrideBytes"] == 33024 + 2 * 28896
+    assert o["bBaseline"] is True and r["blockSpan"] == 0
+    assert "BCONTIG" in r["segmentMap"]
+
+def test_bcontig_small_mt_aligned_applies():
+    # Small MT where fA+2fB stays in one segment: bcontig pushes A1 to the next segment boundary
+    # (bcontig-aligned, grows LDS). Needs PGR2 + forced (LDSSI=1); B stays whole/baseline.
+    r = evaluate(_vw8_state(MacroTile0=128, MacroTile1=120, VectorWidthB=1,
+                            PrefetchGlobalRead=2, LDSSegmentInterleave=1))
+    assert r["applicable"] is True and r["reason"] == "bcontig-aligned" and r["aligned"] is True
+    o = r["offsets"]
+    # fA=16512; A stride pushed to the segment boundary; B (fB=15472) stays contiguous/baseline.
+    assert o["ldsBaseB"] == 16512 and o["writeStrideBytes"] == SEG and o["bBaseline"] is True
+    assert r["blockSpan"] == SEG + 16512               # A1 ends at base+pre+fA
+    assert "BCONTIG-ALIGNED" in r["segmentMap"]
+
+def test_bcontig_small_mt_auto_skips():
+    # Auto (-1) refuses the LDS-growing bcontig-aligned branch (like split aligned).
+    r = evaluate(_vw8_state(MacroTile0=128, MacroTile1=120, VectorWidthB=1, PrefetchGlobalRead=2))
+    assert r["applicable"] is False and "auto: skip aligned" in r["reason"]
+
+def test_bcontig_small_mt_needs_pgr2():
+    r = evaluate(_vw8_state(MacroTile0=128, MacroTile1=120, VectorWidthB=1,
+                            PrefetchGlobalRead=1, LDSSegmentInterleave=1))
+    assert r["applicable"] is False and "PGR" in r["reason"]
 
 def test_vwa_fine_always_skips():
-    # A is the de-conflicted operand; its own read must never cross a component -> coarseA
-    # stays mandatory regardless of B.
+    # A's own read must never cross a component -> coarseA stays mandatory regardless of B
+    # (bcontig also requires coarse A).
     r = evaluate(_vw8_state(VectorWidthA=4))
-    assert r["applicable"] is False and "fine VW" in r["reason"]
+    assert r["applicable"] is False and "not coarse" in r["reason"]
 
 def test_small_mt_skips_without_pgr2():
     # Small MT is the aligned candidate, but it requires PGR2 double-buffer; with no

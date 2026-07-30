@@ -5075,15 +5075,17 @@ class Solution(collections.abc.Mapping):
       ldsNumBytesAB = state["LdsOffsetB"] + ldsNumBytesB
     state["NumLdsBlk"] = numLdsBlk
 
-    # Resolve the -1/0/1 knob to the applied 0/1 (LDSSI1 always means "applied"; identical
-    # variants dedup). Defer the one case whose applicability isn't known yet: an unresolved
-    # 1LDSBuffer (-1) whose only blocker is "needs 1LDSBuffer==0" -- re-decided after it resolves.
+    # Resolve the -1/0/1/2 knob to the applied LAYOUT: 0=off, 1=split(tight/aligned), 2=bcontig.
+    # Naming keys off the value, so split(LDSSI1) and bcontig(LDSSI2) get distinct kernel names and
+    # can coexist in one build (fork [0,1,2]). Requested 1=auto, 2=force-bcontig. Defer the one case
+    # whose applicability isn't known yet: unresolved 1LDSBuffer(-1) blocked only on "needs 1LDSBuffer==0".
     _segRequested = state["LDSSegmentInterleave"]
     _segDeferForBuf = _oneLdsBufAtEval == -1 and _segReason == "needs 1LDSBuffer==0"
     if not _segDeferForBuf:
-      state["LDSSegmentInterleave"] = 1 if _segApplicable else 0
-      if _segRequested == 1 and not _segApplicable:
-        reject(state, printRejectionReason, "LDSSegmentInterleave=1 requested but not applicable: %s" % _segReason)
+      _segIsBcontig = _segApplicable and state["LDSSegInterleaveOffsets"].get("bBaseline", False)
+      state["LDSSegmentInterleave"] = (2 if _segIsBcontig else 1) if _segApplicable else 0
+      if _segRequested in (1, 2) and not _segApplicable:
+        reject(state, printRejectionReason, "LDSSegmentInterleave=%d requested but not applicable: %s" % (_segRequested, _segReason))
 
     # lds buffer size for reduction
     # if User want to control the LDS usage, we may open this para in the future
@@ -5118,13 +5120,13 @@ class Solution(collections.abc.Mapping):
       _segRes2 = segIntEval(state)
       if _segRes2["applicable"] and not _segRes2["aligned"]:
         state["LDSSegInterleaveOffsets"] = _segRes2["offsets"]
-        state["LDSSegmentInterleave"] = 1
+        state["LDSSegmentInterleave"] = 2 if _segRes2["offsets"].get("bBaseline", False) else 1
       else:
         state["LDSSegmentInterleave"] = 0
-        if _segRequested == 1:
+        if _segRequested in (1, 2):
           _segReason2 = "aligned needs LDS reserved before 1LDSBuffer resolution" \
             if _segRes2["applicable"] else _segRes2["reason"]
-          reject(state, printRejectionReason, "LDSSegmentInterleave=1 requested but not applicable: %s" % _segReason2)
+          reject(state, printRejectionReason, "LDSSegmentInterleave=%d requested but not applicable: %s" % (_segRequested, _segReason2))
 
     if state["1LDSBuffer"]:
       if not state["PrefetchGlobalRead"]:

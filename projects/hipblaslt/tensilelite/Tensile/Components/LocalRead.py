@@ -1652,9 +1652,10 @@ class LocalReadMFMA(LocalRead):
                                 # (segCompByteOff, added post-pad below).
                                 segCompByteOff = 0
                                 vCols = (vIdx * numOffsets + oIdx) * MIWaveGroupShape[tile01]
-                                if (kernel.get("LDSSegmentInterleave") == 1
+                                if (kernel.get("LDSSegmentInterleave") in (1, 2)
                                         and kernel["LDSSegInterleaveOffsets"].get("footprintPacked")
-                                        and tc in ("A", "B")):
+                                        and (tc == "A" or (tc == "B"
+                                             and not kernel["LDSSegInterleaveOffsets"].get("bBaseline", False)))):
                                     numComp  = kernel["NumWaves"] // 2
                                     compCols = kernel["MacroTile%u" % tile01] // numComp
                                     if compCols > 0 and MIWaveGroupShape[tile01] > 0:

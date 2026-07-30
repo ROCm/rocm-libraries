@@ -6073,9 +6073,9 @@ class KernelWriterAssembly(KernelWriter):
     if (tc in ("A", "B", "MXSA", "MXSB")) and kernel["DirectToVgpr%s"%tc]:
       module = Module("lraDeclareAddresses (Empty)")
     elif (kernel["LdsOffset%s"%tc] != 0) or \
-         (kernel.get("LDSSegmentInterleave") == 1 and tc in ("B", "MXSA", "MXSB")):
-      _segOff = kernel["LDSSegInterleaveOffsets"] if kernel.get("LDSSegmentInterleave") == 1 else {}
-      if tc == "B" and kernel.get("LDSSegmentInterleave") == 1:
+         (kernel.get("LDSSegmentInterleave") in (1, 2) and tc in ("B", "MXSA", "MXSB")):
+      _segOff = kernel["LDSSegInterleaveOffsets"] if kernel.get("LDSSegmentInterleave") in (1, 2) else {}
+      if tc == "B" and kernel.get("LDSSegmentInterleave") in (1, 2):
         _ldsBase = _segOff["ldsBaseB"]
       elif tc in ("MXSA", "MXSB") and _segOff.get("ldsBase" + tc) is not None:
         _ldsBase = _segOff["ldsBase" + tc]   # relocated MX scale base
@@ -19430,7 +19430,9 @@ class KernelWriterAssembly(KernelWriter):
       mod.add(SLShiftRightB32(sgpr(waveOffsetSgprIdx), 1, sgpr(waveIdxSgpr), "wId=WaveIdx // 2 (each component covers 2 waves: numComp = numWaves // 2)"))
       dataBytes = mt // numComp * du * int(bpe * 4) // (4 * dim1Divisor)
       # Interleave rewrites only A/B; MX scales keep their own stride, relocated via ldsBaseMXS*.
-      _segAB = bool(kernel.get("LDSSegmentInterleave") == 1) and tc in ("A", "B")
+      # bcontig layout: B is NOT interleaved (baseline stride, only relocated via ldsBaseB) -> exclude it.
+      _segAB = bool(kernel.get("LDSSegmentInterleave") in (1, 2)) and (
+          tc == "A" or (tc == "B" and not kernel["LDSSegInterleaveOffsets"].get("bBaseline", False)))
       _segFootprint = _segAB and kernel["LDSSegInterleaveOffsets"].get("footprintPacked", False)
       if _segAB:
           dataBytes = kernel["LDSSegInterleaveOffsets"]["writeStrideBytes"]
@@ -19444,9 +19446,9 @@ class KernelWriterAssembly(KernelWriter):
                 f"padBytes = numPadBlocks * ({ldsPadSize=})"))
         mod.add(SAddU32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), sgpr(tmpPadSgprIdx), \
                 "woffset += padBytes"))
-      if kernel.get("LDSSegmentInterleave") == 1 and tc == "B":
+      if kernel.get("LDSSegmentInterleave") in (1, 2) and tc == "B":
           ldsConstOffset = kernel["LDSSegInterleaveOffsets"]["ldsBaseB"]
-      elif kernel.get("LDSSegmentInterleave") == 1 and tc in ("MXSA", "MXSB"):
+      elif kernel.get("LDSSegmentInterleave") in (1, 2) and tc in ("MXSA", "MXSB"):
           _mxBase = kernel["LDSSegInterleaveOffsets"].get("ldsBase" + tc)
           if _mxBase is not None:
               ldsConstOffset = _mxBase   # relocated MX scale base
