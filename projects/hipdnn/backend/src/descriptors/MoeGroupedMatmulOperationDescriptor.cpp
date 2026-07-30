@@ -12,6 +12,13 @@
 namespace hipdnn_backend
 {
 
+// This file is DescriptorGenerator output (configs/moe_grouped_matmul.yaml), with
+// one deliberate divergence: finalize() delegates the routing presence/top_k rules
+// to the shared contract below instead of the per-mode switch that
+// descriptor.cpp.j2 renders from `mode_rules:`. The CPU reference plan builder
+// evaluates the same function, so the two cannot drift. Regenerating this op emits
+// the inline switch again - keep this body. See DescriptorGenerator/CLAUDE.md,
+// "Hand-maintained ops".
 void MoeGroupedMatmulOperationDescriptor::finalize()
 {
     THROW_IF_NULL(

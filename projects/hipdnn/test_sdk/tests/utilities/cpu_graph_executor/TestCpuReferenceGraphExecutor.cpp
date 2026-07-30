@@ -713,6 +713,16 @@ TEST(TestCpuReferenceGraphExecutor, MoeGroupedMatmulNoneBFloat16InputFloatOutput
     TestCpuReferenceGraphExecutor::runMoeGroupedMatmulTest<bfloat16, float, float>(
         MoeGroupedMatmulMode::NONE, DataType::BFLOAT16, DataType::FLOAT, DataType::FLOAT);
 }
+TEST(TestCpuReferenceGraphExecutor, MoeGroupedMatmulNoneFloatInputHalfOutput)
+{
+    TestCpuReferenceGraphExecutor::runMoeGroupedMatmulTest<float, half, float>(
+        MoeGroupedMatmulMode::NONE, DataType::FLOAT, DataType::HALF, DataType::FLOAT);
+}
+TEST(TestCpuReferenceGraphExecutor, MoeGroupedMatmulNoneFloatInputBFloat16Output)
+{
+    TestCpuReferenceGraphExecutor::runMoeGroupedMatmulTest<float, bfloat16, float>(
+        MoeGroupedMatmulMode::NONE, DataType::FLOAT, DataType::BFLOAT16, DataType::FLOAT);
+}
 
 TEST(TestCpuReferenceGraphExecutor, MoeGroupedMatmulGatherAllFloats)
 {
@@ -739,6 +749,16 @@ TEST(TestCpuReferenceGraphExecutor, MoeGroupedMatmulGatherBFloat16InputFloatOutp
     TestCpuReferenceGraphExecutor::runMoeGroupedMatmulTest<bfloat16, float, float>(
         MoeGroupedMatmulMode::GATHER, DataType::BFLOAT16, DataType::FLOAT, DataType::FLOAT);
 }
+TEST(TestCpuReferenceGraphExecutor, MoeGroupedMatmulGatherFloatInputHalfOutput)
+{
+    TestCpuReferenceGraphExecutor::runMoeGroupedMatmulTest<float, half, float>(
+        MoeGroupedMatmulMode::GATHER, DataType::FLOAT, DataType::HALF, DataType::FLOAT);
+}
+TEST(TestCpuReferenceGraphExecutor, MoeGroupedMatmulGatherFloatInputBFloat16Output)
+{
+    TestCpuReferenceGraphExecutor::runMoeGroupedMatmulTest<float, bfloat16, float>(
+        MoeGroupedMatmulMode::GATHER, DataType::FLOAT, DataType::BFLOAT16, DataType::FLOAT);
+}
 
 TEST(TestCpuReferenceGraphExecutor, MoeGroupedMatmulScatterAllFloats)
 {
@@ -764,6 +784,16 @@ TEST(TestCpuReferenceGraphExecutor, MoeGroupedMatmulScatterBFloat16InputFloatOut
 {
     TestCpuReferenceGraphExecutor::runMoeGroupedMatmulTest<bfloat16, float, float>(
         MoeGroupedMatmulMode::SCATTER, DataType::BFLOAT16, DataType::FLOAT, DataType::FLOAT);
+}
+TEST(TestCpuReferenceGraphExecutor, MoeGroupedMatmulScatterFloatInputHalfOutput)
+{
+    TestCpuReferenceGraphExecutor::runMoeGroupedMatmulTest<float, half, float>(
+        MoeGroupedMatmulMode::SCATTER, DataType::FLOAT, DataType::HALF, DataType::FLOAT);
+}
+TEST(TestCpuReferenceGraphExecutor, MoeGroupedMatmulScatterFloatInputBFloat16Output)
+{
+    TestCpuReferenceGraphExecutor::runMoeGroupedMatmulTest<float, bfloat16, float>(
+        MoeGroupedMatmulMode::SCATTER, DataType::FLOAT, DataType::BFLOAT16, DataType::FLOAT);
 }
 
 TEST(TestCpuReferenceGraphExecutor, PointwiseBinaryAdd)

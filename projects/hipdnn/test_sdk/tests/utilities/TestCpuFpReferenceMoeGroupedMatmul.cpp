@@ -9,6 +9,7 @@
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceMoeGroupedMatmul.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 
+#include <string>
 #include <vector>
 
 using namespace hipdnn_test_sdk::utilities;
@@ -36,6 +37,23 @@ void setValues(Tensor<Type>& tensor, const std::vector<float>& values)
     }
 }
 
+/// Asserts `call` is rejected with a message containing `needle`. The routing
+/// bound checks these tests cover also have a read-past-the-end failure mode that
+/// happens to throw on garbage data, so asserting only the exception type would
+/// not distinguish a diagnosed rejection from an out-of-bounds read.
+template <typename Callable>
+void expectRejectedWith(Callable&& call, const std::string& needle)
+{
+    try
+    {
+        call();
+        ADD_FAILURE() << "expected std::runtime_error containing \"" << needle << "\"";
+    }
+    catch(const std::runtime_error& error)
+    {
+        EXPECT_NE(std::string(error.what()).find(needle), std::string::npos) << error.what();
+    }
+}
 
 template <typename Type>
 void expectTensorValues(const Tensor<Type>& tensor, const std::vector<float>& expected)
@@ -364,6 +382,51 @@ TEST(TestCpuFpReferenceMoeGroupedMatmul, RankTwoTokenThrows)
     EXPECT_THROW((CpuFpReferenceMoeGroupedMatmul::forward<float, float, float, float>(
                      token, weight, offsets, output, Mode::NONE, 0)),
                 std::runtime_error);
+}
+
+// SCATTER indexes both routing tensors by token row, so a shorter routing tensor
+// is an out-of-bounds read, not a smaller workload.
+TEST(TestCpuFpReferenceMoeGroupedMatmul, ScatterRoutingShorterThanTokenRowsThrows)
+{
+    auto token = createTensor<float>({1, 4, 2});
+    setValues(token, {1.0F, 2.0F, 3.0F, 4.0F, 5.0F, 6.0F, 7.0F, 8.0F});
+    auto weight = createTensor<float>({1, 2, 2});
+    setValues(weight, {1.0F, 0.0F, 0.0F, 1.0F});
+    auto offsets = createTensor<int32_t>({1, 1, 1});
+    setValues(offsets, {0});
+    auto tokenIndex = createTensor<int32_t>({1, 2, 1});
+    setValues(tokenIndex, {0, 1});
+    auto tokenKs = createTensor<int32_t>({1, 2, 1});
+    setValues(tokenKs, {0, 0});
+    auto output = createTensor<float>({1, 4, 2});
+
+    expectRejectedWith(
+        [&] {
+            CpuFpReferenceMoeGroupedMatmul::forward<float, float, float, float>(
+                token, weight, offsets, output, Mode::SCATTER, 1, &tokenIndex, &tokenKs);
+        },
+        "routed row count");
+}
+
+// A group's end offset is consumed by the inner loop before the next iteration
+// would range-check it, so it must be validated up front.
+TEST(TestCpuFpReferenceMoeGroupedMatmul, GatherOffsetPastRoutedRowsThrows)
+{
+    auto token = createTensor<float>({1, 4, 2});
+    setValues(token, {1.0F, 2.0F, 3.0F, 4.0F, 5.0F, 6.0F, 7.0F, 8.0F});
+    auto weight = makeIdentitySwapWeight<float>();
+    auto offsets = createTensor<int32_t>({2, 1, 1});
+    setValues(offsets, {0, 64});
+    auto tokenIndex = createTensor<int32_t>({1, 4, 1});
+    setValues(tokenIndex, {0, 1, 2, 3});
+    auto output = createTensor<float>({1, 4, 2});
+
+    expectRejectedWith(
+        [&] {
+            CpuFpReferenceMoeGroupedMatmul::forward<float, float, float, float>(
+                token, weight, offsets, output, Mode::GATHER, 0, &tokenIndex);
+        },
+        "FirstTokenOffset[1]");
 }
 
 /* ============================= Randomized cross-check ============================= */

@@ -65,29 +65,37 @@ public:
         std::vector<int64_t> sourceRow(static_cast<size_t>(outputRows), -1);
         std::vector<int64_t> expertOfRow(static_cast<size_t>(outputRows), -1);
 
+        // Validate the whole offset table before consuming any of it: the mapping
+        // loop below reads routing rows across [start, end), but `end` is otherwise
+        // only range-checked on the next iteration, as that iteration's `start` -
+        // after the inner loop has already read past it.
         int64_t previousOffset = 0;
         for(int64_t group = 0; group < groupCount; ++group)
         {
-            const int64_t start = firstTokenOffset.getHostValue({group, 0, 0});
-            const int64_t end = (group + 1 < groupCount)
-                                     ? firstTokenOffset.getHostValue({group + 1, 0, 0})
-                                     : rowsTotal;
-
-            if(start < 0 || start > rowsTotal)
+            const int64_t offset = firstTokenOffset.getHostValue({group, 0, 0});
+            if(offset < 0 || offset > rowsTotal)
             {
                 throw std::runtime_error("CpuFpReferenceMoeGroupedMatmul: FirstTokenOffset["
-                                         + std::to_string(group) + "] = " + std::to_string(start)
+                                         + std::to_string(group) + "] = " + std::to_string(offset)
                                          + " is out of range [0, " + std::to_string(rowsTotal)
                                          + "]");
             }
-            if(group > 0 && previousOffset > start)
+            if(group > 0 && offset < previousOffset)
             {
                 throw std::runtime_error(
                     "CpuFpReferenceMoeGroupedMatmul: FirstTokenOffset must be non-decreasing "
                     "(violated at group "
                     + std::to_string(group) + ")");
             }
-            previousOffset = start;
+            previousOffset = offset;
+        }
+
+        for(int64_t group = 0; group < groupCount; ++group)
+        {
+            const int64_t start = firstTokenOffset.getHostValue({group, 0, 0});
+            const int64_t end = (group + 1 < groupCount)
+                                     ? firstTokenOffset.getHostValue({group + 1, 0, 0})
+                                     : rowsTotal;
 
             const int64_t expert = group % expertCount;
 
@@ -330,6 +338,14 @@ private:
             {
                 throw std::runtime_error(
                     prefix + "token-index and token-ks tensors must have equal length");
+            }
+            // SCATTER walks r over [0, tokenRows) and indexes both routing tensors
+            // at r, so their length is a memory bound, not a formality.
+            if(tokenIndex->dims()[1] != tokenRows)
+            {
+                throw std::runtime_error(
+                    prefix
+                    + "SCATTER mode requires the routed row count to equal the token row count");
             }
         }
 
