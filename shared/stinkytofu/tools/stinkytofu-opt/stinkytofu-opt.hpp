@@ -57,9 +57,9 @@
 #include "stinkytofu/transforms/asm/StinkyRemoveNopPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyRemoveWaitCntPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyWaitCntInsertionPass.hpp"
-#include "stinkytofu/transforms/asm/TDMLoadWaveSyncPass.hpp"
 #include "stinkytofu/transforms/asm/SwInstructionPrefetchRelDynamicPass.hpp"
 #include "stinkytofu/transforms/asm/SwInstructionPrefetchRelStaticPass.hpp"
+#include "stinkytofu/transforms/asm/TDMLoadWaveSyncPass.hpp"
 
 using namespace stinkytofu;
 
