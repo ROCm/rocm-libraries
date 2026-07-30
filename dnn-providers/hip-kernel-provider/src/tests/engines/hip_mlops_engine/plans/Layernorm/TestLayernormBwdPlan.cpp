@@ -10,6 +10,7 @@
 #include <gtest/gtest.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
+#include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 using namespace hip_kernel_provider;
 using namespace hip_kernel_provider::layernorm;
@@ -142,6 +143,8 @@ TEST(TestLayernormBwdPlan, ExecuteWithoutCompileThrows)
 
 TEST(TestLayernormBwdPlan, GetWorkspaceSizeReturnsZero)
 {
+    SKIP_IF_NO_DEVICES(); // getWorkspaceSize requires a device
+
     auto [fbb, plan] = createPlanFromGraph();
     const Handle handle;
     EXPECT_EQ(plan.getWorkspaceSize(handle), 0u);
@@ -153,6 +156,9 @@ TEST(TestLayernormBwdPlan, IsMoveConstructible)
 
     const LayernormBwdPlan moved(std::move(plan));
     const Handle handle;
+
+    SKIP_IF_NO_DEVICES(); // getWorkspaceSize requires a device
+
     EXPECT_EQ(moved.getWorkspaceSize(handle), 0u);
 }
 
