@@ -14,6 +14,7 @@
 #include <hip_kernel_provider_common/SdpaConfigEnumerations.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
+#include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
 namespace asm_sdpa_engine
@@ -170,6 +171,12 @@ bool SdpaFwdPlanBuilder::isApplicable(
     using namespace hipdnn_flatbuffers_sdk::data_objects;
     // NOLINTNEXTLINE(readability-identifier-naming)
     static const char* HIP_KERNEL_LOG_PREFIX = "[SdpaFwdPlanBuilder::isApplicable] ";
+
+    // Execute-time override shapes can diverge from the compile-time dims this
+    // builder matched exactly; the family serves fixed prebuilt shapes, so decline
+    // rather than risk a mismatch (RFC 0008 §4.6).
+    HIP_KERNEL_RETURN_FALSE_IF(opGraph.getGraph().is_override_shape_enabled(),
+                               "Graph has override shapes enabled");
 
     auto& nodeWrappers = opGraph.nodeWrappers();
 
@@ -453,7 +460,13 @@ void SdpaFwdPlanBuilder::buildPlan(
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-            "SdpaFwdPlanBuilder::buildPlan: failed to find matching kernel");
+            "SdpaFwdPlanBuilder::buildPlan: failed to find matching kernel for arch=" + deviceString
+                + " dtype="
+                + getDataTypeIdentifier(qTensor->data_type(),
+                                        kTensor->data_type(),
+                                        vTensor->data_type(),
+                                        oTensor->data_type())
+                + " hdim_q=" + std::to_string(headDimQk) + " hdim_v=" + std::to_string(headDimV));
     }
     config = cfg_fmha_fwd.at(kernelKey);
 
@@ -469,7 +482,7 @@ void SdpaFwdPlanBuilder::buildPlan(
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-            "SdpaFwdPlanBuilder::buildPlan: failed to load kernel module: " + coPath);
+            "SdpaFwdPlanBuilder::buildPlan: failed to load kernel module from " + coPath);
     }
 
     executionContext.setPlan(std::make_unique<SdpaFwdPlan>(std::move(kernel), params));
