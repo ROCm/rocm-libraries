@@ -107,7 +107,8 @@ rocblas_status rocsolver_ormtr_unmtr_hb2st_argCheck(rocblas_handle handle,
                                                     const I ldv,
                                                     U tau,
                                                     T C,
-                                                    const I ldc)
+                                                    const I ldc,
+                                                    const I batch_count = 1)
 {
     // order is important for unit tests:
 
@@ -131,7 +132,7 @@ rocblas_status rocsolver_ormtr_unmtr_hb2st_argCheck(rocblas_handle handle,
     }
 
     // 2. invalid size
-    if(m < 0 || n < 0 || kd < 1 || ldv < 2 * kd - 1 || ldc < m)
+    if(m < 0 || n < 0 || kd < 1 || ldv < 2 * kd - 1 || ldc < m || batch_count < 0)
     {
         return rocblas_status_invalid_size;
     }
@@ -140,8 +141,12 @@ rocblas_status rocsolver_ormtr_unmtr_hb2st_argCheck(rocblas_handle handle,
     if(rocblas_is_device_memory_size_query(handle))
         return rocblas_status_continue;
 
+    // skip pointer check if quick return
+    if(m == 0 || n == 0 || batch_count == 0)
+        return rocblas_status_continue;
+
     // 3. invalid pointers
-    if((m && n && !V) || (m && n && !tau) || (m && n && !C))
+    if(!V || !tau || !C)
     {
         return rocblas_status_invalid_pointer;
     }
