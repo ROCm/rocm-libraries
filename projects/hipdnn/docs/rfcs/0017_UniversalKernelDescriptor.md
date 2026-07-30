@@ -1209,8 +1209,7 @@ survived matching.
 
 **7. hipDNN picks the engine.** Its existing engine-selection heuristic, unchanged by this proposal
 ([Section 2](#2-the-descriptors)), decides among the engines that answered true. An engine that
-answered true but was not selected does no further work, and its cached catalog is kept in case a
-later graph and device match it.
+answered true but was not selected does no further work.
 
 ### 8.3 Knobs, If The Caller Asks
 
