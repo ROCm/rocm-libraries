@@ -4,10 +4,14 @@
 // Public pass-through wrapper for the MIOpen public/private library split. This
 // translation unit is compiled into the public wrapper library libMIOpen.so.
 // Each public C entry point declared in <miopen/miopen.h> has a matching
-// extern "C" stub here that forwards to the corresponding _impl symbol in the
-// private implementation library (libMIOpen_private.so), declared in
-// miopen_impl.h. The private library's definitions are renamed to their _impl
-// form at build time by force-including miopen_private_rename.h into every
+// extern "C" stub here. Every stub consults the runtime dispatch seam
+// (miopen::wrapper::Dispatch, routing.hpp): when the call routes to hipDNN it is
+// handed to the hipDNN forwarding path, otherwise it forwards to the
+// corresponding _impl symbol in the private implementation library
+// (libMIOpen_private.so), declared in miopen_impl.h. Dispatch reads
+// MIOPEN_HIPDNN_FORWARDING and the compile-time forwarding set to make that
+// decision per call. The private library's definitions are renamed to their
+// _impl form at build time by force-including miopen_private_rename.h into every
 // private source, so these stubs are the only definitions of the public
 // miopenFoo names. This file is compiled WITHOUT that rename header, so it sees
 // the public names from <miopen/miopen.h>.
@@ -31,41 +35,72 @@
 #include <miopen/miopen.h>
 
 #include "miopen_impl.h"
+#include "routing.hpp"
 
 #ifdef miopenCreate
 #error "miopen_private_rename.h leaked into the public wrapper"
 #endif
 
+namespace {
+// hipDNN forwarding path for entry points that route to Route::Hipdnn. The
+// hipDNN call for a given entry point is implemented by replacing this call in
+// that entry point's stub with the op-specific forwarding function. Until an
+// entry point's hipDNN path is implemented it lands here and reports
+// miopenStatusNotImplemented, so enabling forwarding for an op that has been
+// added to the forwarding set without an implementation fails loudly rather than
+// silently running the MIOpen implementation.
+miopenStatus_t forward_to_hipdnn(const char* /*entryPoint*/) { return miopenStatusNotImplemented; }
+} // namespace
+
 extern "C" const char* miopenGetErrorString(miopenStatus_t error)
 {
+    // miopenGetErrorString returns a string, not a status, and is never in the
+    // forwarding set; consult the dispatcher only so the configuration banner is
+    // emitted if this is the first wrapped call in the process.
+    (void)miopen::wrapper::Dispatch("miopenGetErrorString");
     return miopenGetErrorString_impl(error);
 }
 
 extern "C" miopenStatus_t miopenGetVersion(size_t* major, size_t* minor, size_t* patch)
 {
+    if(miopen::wrapper::Dispatch("miopenGetVersion") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenGetVersion");
     return miopenGetVersion_impl(major, minor, patch);
 }
 
-extern "C" miopenStatus_t miopenCreate(miopenHandle_t* handle) { return miopenCreate_impl(handle); }
+extern "C" miopenStatus_t miopenCreate(miopenHandle_t* handle)
+{
+    if(miopen::wrapper::Dispatch("miopenCreate") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenCreate");
+    return miopenCreate_impl(handle);
+}
 
 extern "C" miopenStatus_t miopenCreateWithStream(miopenHandle_t* handle,
                                                  miopenAcceleratorQueue_t stream)
 {
+    if(miopen::wrapper::Dispatch("miopenCreateWithStream") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenCreateWithStream");
     return miopenCreateWithStream_impl(handle, stream);
 }
 
 extern "C" miopenStatus_t miopenDestroy(miopenHandle_t handle)
 {
+    if(miopen::wrapper::Dispatch("miopenDestroy") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenDestroy");
     return miopenDestroy_impl(handle);
 }
 
 extern "C" miopenStatus_t miopenSetStream(miopenHandle_t handle, miopenAcceleratorQueue_t streamID)
 {
+    if(miopen::wrapper::Dispatch("miopenSetStream") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenSetStream");
     return miopenSetStream_impl(handle, streamID);
 }
 
 extern "C" miopenStatus_t miopenGetStream(miopenHandle_t handle, miopenAcceleratorQueue_t* streamID)
 {
+    if(miopen::wrapper::Dispatch("miopenGetStream") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenGetStream");
     return miopenGetStream_impl(handle, streamID);
 }
 
@@ -74,27 +109,37 @@ extern "C" miopenStatus_t miopenSetAllocator(miopenHandle_t handle,
                                              miopenDeallocatorFunction deallocator,
                                              void* allocatorContext)
 {
+    if(miopen::wrapper::Dispatch("miopenSetAllocator") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenSetAllocator");
     return miopenSetAllocator_impl(handle, allocator, deallocator, allocatorContext);
 }
 
 extern "C" miopenStatus_t miopenGetKernelTime(miopenHandle_t handle, float* time)
 {
+    if(miopen::wrapper::Dispatch("miopenGetKernelTime") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenGetKernelTime");
     return miopenGetKernelTime_impl(handle, time);
 }
 
 extern "C" miopenStatus_t miopenEnableProfiling(miopenHandle_t handle, bool enable)
 {
+    if(miopen::wrapper::Dispatch("miopenEnableProfiling") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenEnableProfiling");
     return miopenEnableProfiling_impl(handle, enable);
 }
 
 extern "C" miopenStatus_t miopenCreateTensorDescriptor(miopenTensorDescriptor_t* tensorDesc)
 {
+    if(miopen::wrapper::Dispatch("miopenCreateTensorDescriptor") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenCreateTensorDescriptor");
     return miopenCreateTensorDescriptor_impl(tensorDesc);
 }
 
 extern "C" miopenStatus_t miopenSet4dTensorDescriptor(
     miopenTensorDescriptor_t tensorDesc, miopenDataType_t dataType, int n, int c, int h, int w)
 {
+    if(miopen::wrapper::Dispatch("miopenSet4dTensorDescriptor") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenSet4dTensorDescriptor");
     return miopenSet4dTensorDescriptor_impl(tensorDesc, dataType, n, c, h, w);
 }
 
@@ -104,6 +149,9 @@ extern "C" miopenStatus_t miopenSetNdTensorDescriptorWithLayout(miopenTensorDesc
                                                                 const int* lens,
                                                                 int num_lens)
 {
+    if(miopen::wrapper::Dispatch("miopenSetNdTensorDescriptorWithLayout") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenSetNdTensorDescriptorWithLayout");
     return miopenSetNdTensorDescriptorWithLayout_impl(
         tensorDesc, dataType, tensorLayout, lens, num_lens);
 }
@@ -119,6 +167,8 @@ extern "C" miopenStatus_t miopenSet4dTensorDescriptorEx(miopenTensorDescriptor_t
                                                         int hStride,
                                                         int wStride)
 {
+    if(miopen::wrapper::Dispatch("miopenSet4dTensorDescriptorEx") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenSet4dTensorDescriptorEx");
     return miopenSet4dTensorDescriptorEx_impl(
         tensorDesc, dataType, n, c, h, w, nStride, cStride, hStride, wStride);
 }
@@ -134,6 +184,8 @@ extern "C" miopenStatus_t miopenGet4dTensorDescriptor(miopenTensorDescriptor_t t
                                                       int* hStride,
                                                       int* wStride)
 {
+    if(miopen::wrapper::Dispatch("miopenGet4dTensorDescriptor") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenGet4dTensorDescriptor");
     return miopenGet4dTensorDescriptor_impl(
         tensorDesc, dataType, n, c, h, w, nStride, cStride, hStride, wStride);
 }
@@ -144,6 +196,8 @@ extern "C" miopenStatus_t miopenSetTensorDescriptor(miopenTensorDescriptor_t ten
                                                     const int* dimsA,
                                                     const int* stridesA)
 {
+    if(miopen::wrapper::Dispatch("miopenSetTensorDescriptor") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenSetTensorDescriptor");
     return miopenSetTensorDescriptor_impl(tensorDesc, dataType, nbDims, dimsA, stridesA);
 }
 
@@ -153,18 +207,24 @@ extern "C" miopenStatus_t miopenSetTensorDescriptorV2(miopenTensorDescriptor_t t
                                                       const size_t* dimsA,
                                                       const size_t* stridesA)
 {
+    if(miopen::wrapper::Dispatch("miopenSetTensorDescriptorV2") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenSetTensorDescriptorV2");
     return miopenSetTensorDescriptorV2_impl(tensorDesc, dataType, nbDims, dimsA, stridesA);
 }
 
 extern "C" miopenStatus_t miopenSetTensorCastType(miopenTensorDescriptor_t tensorDesc,
                                                   miopenDataType_t cast_type)
 {
+    if(miopen::wrapper::Dispatch("miopenSetTensorCastType") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenSetTensorCastType");
     return miopenSetTensorCastType_impl(tensorDesc, cast_type);
 }
 
 extern "C" miopenStatus_t miopenGetTensorDescriptorSize(miopenTensorDescriptor_t tensorDesc,
                                                         int* size)
 {
+    if(miopen::wrapper::Dispatch("miopenGetTensorDescriptorSize") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenGetTensorDescriptorSize");
     return miopenGetTensorDescriptorSize_impl(tensorDesc, size);
 }
 
@@ -173,21 +233,31 @@ extern "C" miopenStatus_t miopenGetTensorDescriptor(miopenTensorDescriptor_t ten
                                                     int* dimsA,
                                                     int* stridesA)
 {
+    if(miopen::wrapper::Dispatch("miopenGetTensorDescriptor") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenGetTensorDescriptor");
     return miopenGetTensorDescriptor_impl(tensorDesc, dataType, dimsA, stridesA);
 }
 
 extern "C" miopenStatus_t miopenDestroyTensorDescriptor(miopenTensorDescriptor_t tensorDesc)
 {
+    if(miopen::wrapper::Dispatch("miopenDestroyTensorDescriptor") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenDestroyTensorDescriptor");
     return miopenDestroyTensorDescriptor_impl(tensorDesc);
 }
 
 extern "C" miopenStatus_t miopenCreateSeqTensorDescriptor(miopenSeqTensorDescriptor_t* tensorDesc)
 {
+    if(miopen::wrapper::Dispatch("miopenCreateSeqTensorDescriptor") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenCreateSeqTensorDescriptor");
     return miopenCreateSeqTensorDescriptor_impl(tensorDesc);
 }
 
 extern "C" miopenStatus_t miopenDestroySeqTensorDescriptor(miopenSeqTensorDescriptor_t tensorDesc)
 {
+    if(miopen::wrapper::Dispatch("miopenDestroySeqTensorDescriptor") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenDestroySeqTensorDescriptor");
     return miopenDestroySeqTensorDescriptor_impl(tensorDesc);
 }
 
@@ -203,6 +273,8 @@ extern "C" miopenStatus_t miopenOpTensor(miopenHandle_t handle,
                                          const miopenTensorDescriptor_t cDesc,
                                          void* C)
 {
+    if(miopen::wrapper::Dispatch("miopenOpTensor") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenOpTensor");
     return miopenOpTensor_impl(
         handle, tensorOp, alpha1, aDesc, A, alpha2, bDesc, B, beta, cDesc, C);
 }
@@ -212,6 +284,8 @@ extern "C" miopenStatus_t miopenSetTensor(miopenHandle_t handle,
                                           void* y,
                                           const void* alpha)
 {
+    if(miopen::wrapper::Dispatch("miopenSetTensor") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenSetTensor");
     return miopenSetTensor_impl(handle, yDesc, y, alpha);
 }
 
@@ -220,12 +294,16 @@ extern "C" miopenStatus_t miopenScaleTensor(miopenHandle_t handle,
                                             void* y,
                                             const void* alpha)
 {
+    if(miopen::wrapper::Dispatch("miopenScaleTensor") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenScaleTensor");
     return miopenScaleTensor_impl(handle, yDesc, y, alpha);
 }
 
 extern "C" miopenStatus_t miopenGetTensorNumBytes(miopenTensorDescriptor_t tensorDesc,
                                                   size_t* numBytes)
 {
+    if(miopen::wrapper::Dispatch("miopenGetTensorNumBytes") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenGetTensorNumBytes");
     return miopenGetTensorNumBytes_impl(tensorDesc, numBytes);
 }
 
@@ -237,11 +315,16 @@ extern "C" miopenStatus_t miopenTransformTensor(miopenHandle_t handle,
                                                 const miopenTensorDescriptor_t yDesc,
                                                 void* y)
 {
+    if(miopen::wrapper::Dispatch("miopenTransformTensor") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenTransformTensor");
     return miopenTransformTensor_impl(handle, alpha, xDesc, x, beta, yDesc, y);
 }
 
 extern "C" miopenStatus_t miopenCreateConvolutionDescriptor(miopenConvolutionDescriptor_t* convDesc)
 {
+    if(miopen::wrapper::Dispatch("miopenCreateConvolutionDescriptor") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenCreateConvolutionDescriptor");
     return miopenCreateConvolutionDescriptor_impl(convDesc);
 }
 
@@ -254,6 +337,9 @@ extern "C" miopenStatus_t miopenInitConvolutionDescriptor(miopenConvolutionDescr
                                                           int dilation_h,
                                                           int dilation_w)
 {
+    if(miopen::wrapper::Dispatch("miopenInitConvolutionDescriptor") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenInitConvolutionDescriptor");
     return miopenInitConvolutionDescriptor_impl(
         convDesc, c_mode, pad_h, pad_w, stride_h, stride_w, dilation_h, dilation_w);
 }
@@ -265,6 +351,9 @@ extern "C" miopenStatus_t miopenInitConvolutionNdDescriptor(miopenConvolutionDes
                                                             const int* dilationA,
                                                             miopenConvolutionMode_t c_mode)
 {
+    if(miopen::wrapper::Dispatch("miopenInitConvolutionNdDescriptor") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenInitConvolutionNdDescriptor");
     return miopenInitConvolutionNdDescriptor_impl(
         convDesc, spatialDim, padA, strideA, dilationA, c_mode);
 }
@@ -272,6 +361,9 @@ extern "C" miopenStatus_t miopenInitConvolutionNdDescriptor(miopenConvolutionDes
 extern "C" miopenStatus_t miopenGetConvolutionSpatialDim(miopenConvolutionDescriptor_t convDesc,
                                                          int* spatialDim)
 {
+    if(miopen::wrapper::Dispatch("miopenGetConvolutionSpatialDim") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenGetConvolutionSpatialDim");
     return miopenGetConvolutionSpatialDim_impl(convDesc, spatialDim);
 }
 
@@ -284,6 +376,9 @@ extern "C" miopenStatus_t miopenGetConvolutionDescriptor(miopenConvolutionDescri
                                                          int* dilation_h,
                                                          int* dilation_w)
 {
+    if(miopen::wrapper::Dispatch("miopenGetConvolutionDescriptor") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenGetConvolutionDescriptor");
     return miopenGetConvolutionDescriptor_impl(
         convDesc, c_mode, pad_h, pad_w, stride_h, stride_w, dilation_h, dilation_w);
 }
@@ -296,6 +391,9 @@ extern "C" miopenStatus_t miopenGetConvolutionNdDescriptor(miopenConvolutionDesc
                                                            int* dilationA,
                                                            miopenConvolutionMode_t* c_mode)
 {
+    if(miopen::wrapper::Dispatch("miopenGetConvolutionNdDescriptor") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenGetConvolutionNdDescriptor");
     return miopenGetConvolutionNdDescriptor_impl(
         convDesc, requestedSpatialDim, spatialDim, padA, strideA, dilationA, c_mode);
 }
@@ -303,24 +401,36 @@ extern "C" miopenStatus_t miopenGetConvolutionNdDescriptor(miopenConvolutionDesc
 extern "C" miopenStatus_t miopenGetConvolutionGroupCount(miopenConvolutionDescriptor_t convDesc,
                                                          int* groupCount)
 {
+    if(miopen::wrapper::Dispatch("miopenGetConvolutionGroupCount") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenGetConvolutionGroupCount");
     return miopenGetConvolutionGroupCount_impl(convDesc, groupCount);
 }
 
 extern "C" miopenStatus_t miopenSetConvolutionGroupCount(miopenConvolutionDescriptor_t convDesc,
                                                          int groupCount)
 {
+    if(miopen::wrapper::Dispatch("miopenSetConvolutionGroupCount") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenSetConvolutionGroupCount");
     return miopenSetConvolutionGroupCount_impl(convDesc, groupCount);
 }
 
 extern "C" miopenStatus_t
 miopenSetTransposeConvOutputPadding(miopenConvolutionDescriptor_t convDesc, int adj_h, int adj_w)
 {
+    if(miopen::wrapper::Dispatch("miopenSetTransposeConvOutputPadding") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenSetTransposeConvOutputPadding");
     return miopenSetTransposeConvOutputPadding_impl(convDesc, adj_h, adj_w);
 }
 
 extern "C" miopenStatus_t miopenSetTransposeConvNdOutputPadding(
     miopenConvolutionDescriptor_t convDesc, int spatialDim, const int* adjA)
 {
+    if(miopen::wrapper::Dispatch("miopenSetTransposeConvNdOutputPadding") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenSetTransposeConvNdOutputPadding");
     return miopenSetTransposeConvNdOutputPadding_impl(convDesc, spatialDim, adjA);
 }
 
@@ -333,6 +443,9 @@ miopenGetConvolutionForwardOutputDim(miopenConvolutionDescriptor_t convDesc,
                                      int* h,
                                      int* w)
 {
+    if(miopen::wrapper::Dispatch("miopenGetConvolutionForwardOutputDim") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenGetConvolutionForwardOutputDim");
     return miopenGetConvolutionForwardOutputDim_impl(
         convDesc, inputTensorDesc, filterDesc, n, c, h, w);
 }
@@ -344,12 +457,18 @@ miopenGetConvolutionNdForwardOutputDim(miopenConvolutionDescriptor_t convDesc,
                                        int* nDim,
                                        int* outputTensorDimA)
 {
+    if(miopen::wrapper::Dispatch("miopenGetConvolutionNdForwardOutputDim") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenGetConvolutionNdForwardOutputDim");
     return miopenGetConvolutionNdForwardOutputDim_impl(
         convDesc, inputTensorDesc, filterDesc, nDim, outputTensorDimA);
 }
 
 extern "C" miopenStatus_t miopenDestroyConvolutionDescriptor(miopenConvolutionDescriptor_t convDesc)
 {
+    if(miopen::wrapper::Dispatch("miopenDestroyConvolutionDescriptor") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenDestroyConvolutionDescriptor");
     return miopenDestroyConvolutionDescriptor_impl(convDesc);
 }
 
@@ -357,6 +476,8 @@ extern "C" miopenStatus_t miopenSetConvolutionAttribute(miopenConvolutionDescrip
                                                         const miopenConvolutionAttrib_t attr,
                                                         int value)
 {
+    if(miopen::wrapper::Dispatch("miopenSetConvolutionAttribute") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenSetConvolutionAttribute");
     return miopenSetConvolutionAttribute_impl(convDesc, attr, value);
 }
 
@@ -364,18 +485,24 @@ extern "C" miopenStatus_t miopenGetConvolutionAttribute(miopenConvolutionDescrip
                                                         const miopenConvolutionAttrib_t attr,
                                                         int* value)
 {
+    if(miopen::wrapper::Dispatch("miopenGetConvolutionAttribute") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenGetConvolutionAttribute");
     return miopenGetConvolutionAttribute_impl(convDesc, attr, value);
 }
 
 extern "C" miopenStatus_t miopenSetConvolutionFindMode(miopenConvolutionDescriptor_t convDesc,
                                                        miopenConvolutionFindMode_t findMode)
 {
+    if(miopen::wrapper::Dispatch("miopenSetConvolutionFindMode") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenSetConvolutionFindMode");
     return miopenSetConvolutionFindMode_impl(convDesc, findMode);
 }
 
 extern "C" miopenStatus_t miopenGetConvolutionFindMode(const miopenConvolutionDescriptor_t convDesc,
                                                        miopenConvolutionFindMode_t* findMode)
 {
+    if(miopen::wrapper::Dispatch("miopenGetConvolutionFindMode") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenGetConvolutionFindMode");
     return miopenGetConvolutionFindMode_impl(convDesc, findMode);
 }
 
@@ -387,6 +514,9 @@ miopenConvolutionForwardGetSolutionCount(miopenHandle_t handle,
                                          const miopenTensorDescriptor_t yDesc,
                                          size_t* solutionCount)
 {
+    if(miopen::wrapper::Dispatch("miopenConvolutionForwardGetSolutionCount") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenConvolutionForwardGetSolutionCount");
     return miopenConvolutionForwardGetSolutionCount_impl(
         handle, wDesc, xDesc, convDesc, yDesc, solutionCount);
 }
@@ -401,6 +531,9 @@ miopenConvolutionForwardGetSolution(miopenHandle_t handle,
                                     size_t* solutionCount,
                                     miopenConvSolution_t* solutions)
 {
+    if(miopen::wrapper::Dispatch("miopenConvolutionForwardGetSolution") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenConvolutionForwardGetSolution");
     return miopenConvolutionForwardGetSolution_impl(
         handle, wDesc, xDesc, convDesc, yDesc, maxSolutionCount, solutionCount, solutions);
 }
@@ -414,6 +547,9 @@ miopenConvolutionForwardGetSolutionWorkspaceSize(miopenHandle_t handle,
                                                  const uint64_t solution_id,
                                                  size_t* workSpaceSize)
 {
+    if(miopen::wrapper::Dispatch("miopenConvolutionForwardGetSolutionWorkspaceSize") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenConvolutionForwardGetSolutionWorkspaceSize");
     return miopenConvolutionForwardGetSolutionWorkspaceSize_impl(
         handle, wDesc, xDesc, convDesc, yDesc, solution_id, workSpaceSize);
 }
@@ -426,6 +562,9 @@ miopenConvolutionForwardCompileSolution(miopenHandle_t handle,
                                         const miopenTensorDescriptor_t yDesc,
                                         const uint64_t solution_id)
 {
+    if(miopen::wrapper::Dispatch("miopenConvolutionForwardCompileSolution") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenConvolutionForwardCompileSolution");
     return miopenConvolutionForwardCompileSolution_impl(
         handle, wDesc, xDesc, convDesc, yDesc, solution_id);
 }
@@ -443,6 +582,9 @@ miopenConvolutionForwardImmediate(miopenHandle_t handle,
                                   size_t workSpaceSize,
                                   const uint64_t solution_id)
 {
+    if(miopen::wrapper::Dispatch("miopenConvolutionForwardImmediate") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenConvolutionForwardImmediate");
     return miopenConvolutionForwardImmediate_impl(
         handle, wDesc, w, xDesc, x, convDesc, yDesc, y, workSpace, workSpaceSize, solution_id);
 }
@@ -455,6 +597,9 @@ miopenConvolutionBackwardDataGetSolutionCount(miopenHandle_t handle,
                                               const miopenTensorDescriptor_t dxDesc,
                                               size_t* solutionCount)
 {
+    if(miopen::wrapper::Dispatch("miopenConvolutionBackwardDataGetSolutionCount") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenConvolutionBackwardDataGetSolutionCount");
     return miopenConvolutionBackwardDataGetSolutionCount_impl(
         handle, dyDesc, wDesc, convDesc, dxDesc, solutionCount);
 }
@@ -469,6 +614,9 @@ miopenConvolutionBackwardDataGetSolution(miopenHandle_t handle,
                                          size_t* solutionCount,
                                          miopenConvSolution_t* solutions)
 {
+    if(miopen::wrapper::Dispatch("miopenConvolutionBackwardDataGetSolution") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenConvolutionBackwardDataGetSolution");
     return miopenConvolutionBackwardDataGetSolution_impl(
         handle, dyDesc, wDesc, convDesc, dxDesc, maxSolutionCount, solutionCount, solutions);
 }
@@ -482,6 +630,9 @@ miopenConvolutionBackwardDataGetSolutionWorkspaceSize(miopenHandle_t handle,
                                                       const uint64_t solution_id,
                                                       size_t* workSpaceSize)
 {
+    if(miopen::wrapper::Dispatch("miopenConvolutionBackwardDataGetSolutionWorkspaceSize") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenConvolutionBackwardDataGetSolutionWorkspaceSize");
     return miopenConvolutionBackwardDataGetSolutionWorkspaceSize_impl(
         handle, dyDesc, wDesc, convDesc, dxDesc, solution_id, workSpaceSize);
 }
@@ -494,6 +645,9 @@ miopenConvolutionBackwardDataCompileSolution(miopenHandle_t handle,
                                              const miopenTensorDescriptor_t dxDesc,
                                              const uint64_t solution_id)
 {
+    if(miopen::wrapper::Dispatch("miopenConvolutionBackwardDataCompileSolution") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenConvolutionBackwardDataCompileSolution");
     return miopenConvolutionBackwardDataCompileSolution_impl(
         handle, dyDesc, wDesc, convDesc, dxDesc, solution_id);
 }
@@ -511,6 +665,9 @@ miopenConvolutionBackwardDataImmediate(miopenHandle_t handle,
                                        size_t workSpaceSize,
                                        const uint64_t solution_id)
 {
+    if(miopen::wrapper::Dispatch("miopenConvolutionBackwardDataImmediate") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenConvolutionBackwardDataImmediate");
     return miopenConvolutionBackwardDataImmediate_impl(
         handle, dyDesc, dy, wDesc, w, convDesc, dxDesc, dx, workSpace, workSpaceSize, solution_id);
 }
@@ -523,6 +680,9 @@ miopenConvolutionBackwardWeightsGetSolutionCount(miopenHandle_t handle,
                                                  const miopenTensorDescriptor_t dwDesc,
                                                  size_t* solutionCount)
 {
+    if(miopen::wrapper::Dispatch("miopenConvolutionBackwardWeightsGetSolutionCount") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenConvolutionBackwardWeightsGetSolutionCount");
     return miopenConvolutionBackwardWeightsGetSolutionCount_impl(
         handle, dyDesc, xDesc, convDesc, dwDesc, solutionCount);
 }
@@ -537,6 +697,9 @@ miopenConvolutionBackwardWeightsGetSolution(miopenHandle_t handle,
                                             size_t* solutionCount,
                                             miopenConvSolution_t* solutions)
 {
+    if(miopen::wrapper::Dispatch("miopenConvolutionBackwardWeightsGetSolution") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenConvolutionBackwardWeightsGetSolution");
     return miopenConvolutionBackwardWeightsGetSolution_impl(
         handle, dyDesc, xDesc, convDesc, dwDesc, maxSolutionCount, solutionCount, solutions);
 }
@@ -550,6 +713,9 @@ extern "C" miopenStatus_t miopenConvolutionBackwardWeightsGetSolutionWorkspaceSi
     const uint64_t solution_id,
     size_t* workSpaceSize)
 {
+    if(miopen::wrapper::Dispatch("miopenConvolutionBackwardWeightsGetSolutionWorkspaceSize") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenConvolutionBackwardWeightsGetSolutionWorkspaceSize");
     return miopenConvolutionBackwardWeightsGetSolutionWorkspaceSize_impl(
         handle, dyDesc, xDesc, convDesc, dwDesc, solution_id, workSpaceSize);
 }
@@ -562,6 +728,9 @@ miopenConvolutionBackwardWeightsCompileSolution(miopenHandle_t handle,
                                                 const miopenTensorDescriptor_t dwDesc,
                                                 const uint64_t solution_id)
 {
+    if(miopen::wrapper::Dispatch("miopenConvolutionBackwardWeightsCompileSolution") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenConvolutionBackwardWeightsCompileSolution");
     return miopenConvolutionBackwardWeightsCompileSolution_impl(
         handle, dyDesc, xDesc, convDesc, dwDesc, solution_id);
 }
@@ -579,6 +748,9 @@ miopenConvolutionBackwardWeightsImmediate(miopenHandle_t handle,
                                           size_t workSpaceSize,
                                           const uint64_t solution_id)
 {
+    if(miopen::wrapper::Dispatch("miopenConvolutionBackwardWeightsImmediate") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenConvolutionBackwardWeightsImmediate");
     return miopenConvolutionBackwardWeightsImmediate_impl(
         handle, dyDesc, dy, xDesc, x, convDesc, dwDesc, dw, workSpace, workSpaceSize, solution_id);
 }
@@ -591,6 +763,9 @@ miopenConvolutionForwardGetWorkSpaceSize(miopenHandle_t handle,
                                          const miopenTensorDescriptor_t yDesc,
                                          size_t* workSpaceSize)
 {
+    if(miopen::wrapper::Dispatch("miopenConvolutionForwardGetWorkSpaceSize") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenConvolutionForwardGetWorkSpaceSize");
     return miopenConvolutionForwardGetWorkSpaceSize_impl(
         handle, wDesc, xDesc, convDesc, yDesc, workSpaceSize);
 }
@@ -611,6 +786,9 @@ miopenFindConvolutionForwardAlgorithm(miopenHandle_t handle,
                                       size_t workSpaceSize,
                                       bool exhaustiveSearch)
 {
+    if(miopen::wrapper::Dispatch("miopenFindConvolutionForwardAlgorithm") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenFindConvolutionForwardAlgorithm");
     return miopenFindConvolutionForwardAlgorithm_impl(handle,
                                                       xDesc,
                                                       x,
@@ -641,6 +819,8 @@ extern "C" miopenStatus_t miopenConvolutionForward(miopenHandle_t handle,
                                                    void* workSpace,
                                                    size_t workSpaceSize)
 {
+    if(miopen::wrapper::Dispatch("miopenConvolutionForward") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenConvolutionForward");
     return miopenConvolutionForward_impl(handle,
                                          alpha,
                                          xDesc,
@@ -664,6 +844,8 @@ extern "C" miopenStatus_t miopenConvolutionForwardBias(miopenHandle_t handle,
                                                        const miopenTensorDescriptor_t yDesc,
                                                        void* y)
 {
+    if(miopen::wrapper::Dispatch("miopenConvolutionForwardBias") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenConvolutionForwardBias");
     return miopenConvolutionForwardBias_impl(handle, alpha, bDesc, b, beta, yDesc, y);
 }
 
@@ -675,6 +857,9 @@ miopenConvolutionBackwardDataGetWorkSpaceSize(miopenHandle_t handle,
                                               const miopenTensorDescriptor_t dxDesc,
                                               size_t* workSpaceSize)
 {
+    if(miopen::wrapper::Dispatch("miopenConvolutionBackwardDataGetWorkSpaceSize") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenConvolutionBackwardDataGetWorkSpaceSize");
     return miopenConvolutionBackwardDataGetWorkSpaceSize_impl(
         handle, dyDesc, wDesc, convDesc, dxDesc, workSpaceSize);
 }
@@ -695,6 +880,9 @@ miopenFindConvolutionBackwardDataAlgorithm(miopenHandle_t handle,
                                            size_t workSpaceSize,
                                            bool exhaustiveSearch)
 {
+    if(miopen::wrapper::Dispatch("miopenFindConvolutionBackwardDataAlgorithm") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenFindConvolutionBackwardDataAlgorithm");
     return miopenFindConvolutionBackwardDataAlgorithm_impl(handle,
                                                            dyDesc,
                                                            dy,
@@ -726,6 +914,8 @@ miopenConvolutionBackwardData(miopenHandle_t handle,
                               void* workSpace,
                               size_t workSpaceSize)
 {
+    if(miopen::wrapper::Dispatch("miopenConvolutionBackwardData") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenConvolutionBackwardData");
     return miopenConvolutionBackwardData_impl(handle,
                                               alpha,
                                               dyDesc,
@@ -749,6 +939,9 @@ miopenConvolutionBackwardWeightsGetWorkSpaceSize(miopenHandle_t handle,
                                                  const miopenTensorDescriptor_t dwDesc,
                                                  size_t* workSpaceSize)
 {
+    if(miopen::wrapper::Dispatch("miopenConvolutionBackwardWeightsGetWorkSpaceSize") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenConvolutionBackwardWeightsGetWorkSpaceSize");
     return miopenConvolutionBackwardWeightsGetWorkSpaceSize_impl(
         handle, dyDesc, xDesc, convDesc, dwDesc, workSpaceSize);
 }
@@ -769,6 +962,9 @@ miopenFindConvolutionBackwardWeightsAlgorithm(miopenHandle_t handle,
                                               size_t workSpaceSize,
                                               bool exhaustiveSearch)
 {
+    if(miopen::wrapper::Dispatch("miopenFindConvolutionBackwardWeightsAlgorithm") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenFindConvolutionBackwardWeightsAlgorithm");
     return miopenFindConvolutionBackwardWeightsAlgorithm_impl(handle,
                                                               dyDesc,
                                                               dy,
@@ -800,6 +996,9 @@ miopenConvolutionBackwardWeights(miopenHandle_t handle,
                                  void* workSpace,
                                  size_t workSpaceSize)
 {
+    if(miopen::wrapper::Dispatch("miopenConvolutionBackwardWeights") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenConvolutionBackwardWeights");
     return miopenConvolutionBackwardWeights_impl(handle,
                                                  alpha,
                                                  dyDesc,
@@ -823,23 +1022,31 @@ extern "C" miopenStatus_t miopenConvolutionBackwardBias(miopenHandle_t handle,
                                                         const miopenTensorDescriptor_t dbDesc,
                                                         void* db)
 {
+    if(miopen::wrapper::Dispatch("miopenConvolutionBackwardBias") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenConvolutionBackwardBias");
     return miopenConvolutionBackwardBias_impl(handle, alpha, dyDesc, dy, beta, dbDesc, db);
 }
 
 extern "C" miopenStatus_t miopenCreatePoolingDescriptor(miopenPoolingDescriptor_t* poolDesc)
 {
+    if(miopen::wrapper::Dispatch("miopenCreatePoolingDescriptor") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenCreatePoolingDescriptor");
     return miopenCreatePoolingDescriptor_impl(poolDesc);
 }
 
 extern "C" miopenStatus_t miopenSetPoolingIndexType(miopenPoolingDescriptor_t poolDesc,
                                                     miopenIndexType_t index_type)
 {
+    if(miopen::wrapper::Dispatch("miopenSetPoolingIndexType") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenSetPoolingIndexType");
     return miopenSetPoolingIndexType_impl(poolDesc, index_type);
 }
 
 extern "C" miopenStatus_t miopenGetPoolingIndexType(miopenPoolingDescriptor_t poolDesc,
                                                     miopenIndexType_t* index_type)
 {
+    if(miopen::wrapper::Dispatch("miopenGetPoolingIndexType") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenGetPoolingIndexType");
     return miopenGetPoolingIndexType_impl(poolDesc, index_type);
 }
 
@@ -847,6 +1054,9 @@ extern "C" miopenStatus_t
 miopenSetPoolingWorkSpaceIndexMode(miopenPoolingDescriptor_t poolDesc,
                                    miopenPoolingWorkspaceIndexMode_t workspace_index)
 {
+    if(miopen::wrapper::Dispatch("miopenSetPoolingWorkSpaceIndexMode") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenSetPoolingWorkSpaceIndexMode");
     return miopenSetPoolingWorkSpaceIndexMode_impl(poolDesc, workspace_index);
 }
 
@@ -854,6 +1064,9 @@ extern "C" miopenStatus_t
 miopenGetPoolingWorkSpaceIndexMode(miopenPoolingDescriptor_t poolDesc,
                                    miopenPoolingWorkspaceIndexMode_t* workspace_index)
 {
+    if(miopen::wrapper::Dispatch("miopenGetPoolingWorkSpaceIndexMode") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenGetPoolingWorkSpaceIndexMode");
     return miopenGetPoolingWorkSpaceIndexMode_impl(poolDesc, workspace_index);
 }
 
@@ -866,6 +1079,8 @@ extern "C" miopenStatus_t miopenSet2dPoolingDescriptor(miopenPoolingDescriptor_t
                                                        int stride_h,
                                                        int stride_w)
 {
+    if(miopen::wrapper::Dispatch("miopenSet2dPoolingDescriptor") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenSet2dPoolingDescriptor");
     return miopenSet2dPoolingDescriptor_impl(
         poolDesc, mode, windowHeight, windowWidth, pad_h, pad_w, stride_h, stride_w);
 }
@@ -879,6 +1094,8 @@ extern "C" miopenStatus_t miopenGet2dPoolingDescriptor(const miopenPoolingDescri
                                                        int* stride_h,
                                                        int* stride_w)
 {
+    if(miopen::wrapper::Dispatch("miopenGet2dPoolingDescriptor") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenGet2dPoolingDescriptor");
     return miopenGet2dPoolingDescriptor_impl(
         poolDesc, mode, windowHeight, windowWidth, pad_h, pad_w, stride_h, stride_w);
 }
@@ -891,6 +1108,9 @@ miopenGetPoolingForwardOutputDim(const miopenPoolingDescriptor_t poolDesc,
                                  int* h,
                                  int* w)
 {
+    if(miopen::wrapper::Dispatch("miopenGetPoolingForwardOutputDim") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenGetPoolingForwardOutputDim");
     return miopenGetPoolingForwardOutputDim_impl(poolDesc, tensorDesc, n, c, h, w);
 }
 
@@ -901,6 +1121,8 @@ extern "C" miopenStatus_t miopenSetNdPoolingDescriptor(miopenPoolingDescriptor_t
                                                        const int* padA,
                                                        const int* stridesA)
 {
+    if(miopen::wrapper::Dispatch("miopenSetNdPoolingDescriptor") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenSetNdPoolingDescriptor");
     return miopenSetNdPoolingDescriptor_impl(poolDesc, mode, nbDims, windowDimA, padA, stridesA);
 }
 
@@ -912,6 +1134,8 @@ extern "C" miopenStatus_t miopenGetNdPoolingDescriptor(const miopenPoolingDescri
                                                        int* padA,
                                                        int* stridesA)
 {
+    if(miopen::wrapper::Dispatch("miopenGetNdPoolingDescriptor") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenGetNdPoolingDescriptor");
     return miopenGetNdPoolingDescriptor_impl(
         poolDesc, nbDimsRequested, mode, nbDims, windowDimA, padA, stridesA);
 }
@@ -922,12 +1146,17 @@ miopenGetPoolingNdForwardOutputDim(const miopenPoolingDescriptor_t poolDesc,
                                    int dims,
                                    int* tensorDimArr)
 {
+    if(miopen::wrapper::Dispatch("miopenGetPoolingNdForwardOutputDim") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenGetPoolingNdForwardOutputDim");
     return miopenGetPoolingNdForwardOutputDim_impl(poolDesc, tensorDesc, dims, tensorDimArr);
 }
 
 extern "C" miopenStatus_t miopenPoolingGetWorkSpaceSize(const miopenTensorDescriptor_t yDesc,
                                                         size_t* workSpaceSize)
 {
+    if(miopen::wrapper::Dispatch("miopenPoolingGetWorkSpaceSize") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenPoolingGetWorkSpaceSize");
     return miopenPoolingGetWorkSpaceSize_impl(yDesc, workSpaceSize);
 }
 
@@ -935,6 +1164,9 @@ extern "C" miopenStatus_t miopenPoolingGetWorkSpaceSizeV2(const miopenPoolingDes
                                                           const miopenTensorDescriptor_t yDesc,
                                                           size_t* workSpaceSize)
 {
+    if(miopen::wrapper::Dispatch("miopenPoolingGetWorkSpaceSizeV2") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenPoolingGetWorkSpaceSizeV2");
     return miopenPoolingGetWorkSpaceSizeV2_impl(poolDesc, yDesc, workSpaceSize);
 }
 
@@ -950,6 +1182,8 @@ extern "C" miopenStatus_t miopenPoolingForward(miopenHandle_t handle,
                                                void* workSpace,
                                                size_t workSpaceSize)
 {
+    if(miopen::wrapper::Dispatch("miopenPoolingForward") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenPoolingForward");
     return miopenPoolingForward_impl(
         handle, poolDesc, alpha, xDesc, x, beta, yDesc, y, do_backward, workSpace, workSpaceSize);
 }
@@ -968,17 +1202,24 @@ extern "C" miopenStatus_t miopenPoolingBackward(miopenHandle_t handle,
                                                 void* dx,
                                                 void* workSpace)
 {
+    if(miopen::wrapper::Dispatch("miopenPoolingBackward") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenPoolingBackward");
     return miopenPoolingBackward_impl(
         handle, poolDesc, alpha, yDesc, y, dyDesc, dy, xDesc, x, beta, dxDesc, dx, workSpace);
 }
 
 extern "C" miopenStatus_t miopenDestroyPoolingDescriptor(miopenPoolingDescriptor_t poolDesc)
 {
+    if(miopen::wrapper::Dispatch("miopenDestroyPoolingDescriptor") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenDestroyPoolingDescriptor");
     return miopenDestroyPoolingDescriptor_impl(poolDesc);
 }
 
 extern "C" miopenStatus_t miopenCreateLRNDescriptor(miopenLRNDescriptor_t* lrnDesc)
 {
+    if(miopen::wrapper::Dispatch("miopenCreateLRNDescriptor") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenCreateLRNDescriptor");
     return miopenCreateLRNDescriptor_impl(lrnDesc);
 }
 
@@ -989,6 +1230,8 @@ extern "C" miopenStatus_t miopenSetLRNDescriptor(const miopenLRNDescriptor_t lrn
                                                  double lrnBeta,
                                                  double lrnK)
 {
+    if(miopen::wrapper::Dispatch("miopenSetLRNDescriptor") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenSetLRNDescriptor");
     return miopenSetLRNDescriptor_impl(lrnDesc, mode, lrnN, lrnAlpha, lrnBeta, lrnK);
 }
 
@@ -999,12 +1242,16 @@ extern "C" miopenStatus_t miopenGetLRNDescriptor(const miopenLRNDescriptor_t lrn
                                                  double* lrnBeta,
                                                  double* lrnK)
 {
+    if(miopen::wrapper::Dispatch("miopenGetLRNDescriptor") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenGetLRNDescriptor");
     return miopenGetLRNDescriptor_impl(lrnDesc, mode, lrnN, lrnAlpha, lrnBeta, lrnK);
 }
 
 extern "C" miopenStatus_t miopenLRNGetWorkSpaceSize(const miopenTensorDescriptor_t yDesc,
                                                     size_t* workSpaceSize)
 {
+    if(miopen::wrapper::Dispatch("miopenLRNGetWorkSpaceSize") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenLRNGetWorkSpaceSize");
     return miopenLRNGetWorkSpaceSize_impl(yDesc, workSpaceSize);
 }
 
@@ -1019,6 +1266,8 @@ extern "C" miopenStatus_t miopenLRNForward(miopenHandle_t handle,
                                            bool do_backward,
                                            void* workSpace)
 {
+    if(miopen::wrapper::Dispatch("miopenLRNForward") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenLRNForward");
     return miopenLRNForward_impl(
         handle, lrnDesc, alpha, xDesc, x, beta, yDesc, y, do_backward, workSpace);
 }
@@ -1037,12 +1286,16 @@ extern "C" miopenStatus_t miopenLRNBackward(miopenHandle_t handle,
                                             void* dx,
                                             const void* workSpace)
 {
+    if(miopen::wrapper::Dispatch("miopenLRNBackward") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenLRNBackward");
     return miopenLRNBackward_impl(
         handle, lrnDesc, alpha, yDesc, y, dyDesc, dy, xDesc, x, beta, dxDesc, dx, workSpace);
 }
 
 extern "C" miopenStatus_t miopenDestroyLRNDescriptor(miopenLRNDescriptor_t lrnDesc)
 {
+    if(miopen::wrapper::Dispatch("miopenDestroyLRNDescriptor") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenDestroyLRNDescriptor");
     return miopenDestroyLRNDescriptor_impl(lrnDesc);
 }
 
@@ -1063,6 +1316,8 @@ extern "C" miopenStatus_t miopenLayerNormForward(miopenHandle_t handle,
                                                  const miopenTensorDescriptor_t rstdDesc,
                                                  void* rstd)
 {
+    if(miopen::wrapper::Dispatch("miopenLayerNormForward") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenLayerNormForward");
     return miopenLayerNormForward_impl(handle,
                                        mode,
                                        xDesc,
@@ -1095,6 +1350,9 @@ miopenGetLayerNormBackwardWorkspaceSize(miopenHandle_t handle,
                                         const miopenTensorDescriptor_t dbDesc,
                                         size_t* sizeInBytes)
 {
+    if(miopen::wrapper::Dispatch("miopenGetLayerNormBackwardWorkspaceSize") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenGetLayerNormBackwardWorkspaceSize");
     return miopenGetLayerNormBackwardWorkspaceSize_impl(handle,
                                                         mode,
                                                         dyDesc,
@@ -1131,6 +1389,8 @@ extern "C" miopenStatus_t miopenLayerNormBackward(miopenHandle_t handle,
                                                   const miopenTensorDescriptor_t dbDesc,
                                                   void* db)
 {
+    if(miopen::wrapper::Dispatch("miopenLayerNormBackward") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenLayerNormBackward");
     return miopenLayerNormBackward_impl(handle,
                                         mode,
                                         workspace,
@@ -1162,6 +1422,8 @@ extern "C" miopenStatus_t miopenCatForward(miopenHandle_t handle,
                                            void* y,
                                            const int32_t dim)
 {
+    if(miopen::wrapper::Dispatch("miopenCatForward") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenCatForward");
     return miopenCatForward_impl(handle, xCount, xDescs, xs, yDesc, y, dim);
 }
 
@@ -1169,6 +1431,9 @@ extern "C" miopenStatus_t miopenDeriveBNTensorDescriptor(miopenTensorDescriptor_
                                                          const miopenTensorDescriptor_t xDesc,
                                                          miopenBatchNormMode_t bn_mode)
 {
+    if(miopen::wrapper::Dispatch("miopenDeriveBNTensorDescriptor") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenDeriveBNTensorDescriptor");
     return miopenDeriveBNTensorDescriptor_impl(derivedBnDesc, xDesc, bn_mode);
 }
 
@@ -1191,6 +1456,9 @@ miopenBatchNormalizationForwardTraining(miopenHandle_t handle,
                                         void* resultSaveMean,
                                         void* resultSaveInvVariance)
 {
+    if(miopen::wrapper::Dispatch("miopenBatchNormalizationForwardTraining") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenBatchNormalizationForwardTraining");
     return miopenBatchNormalizationForwardTraining_impl(handle,
                                                         bn_mode,
                                                         alpha,
@@ -1232,6 +1500,9 @@ miopenBatchNormalizationForwardTraining_V2(miopenHandle_t handle,
                                            void* resultSaveMean,
                                            void* resultSaveInvVariance)
 {
+    if(miopen::wrapper::Dispatch("miopenBatchNormalizationForwardTraining_V2") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenBatchNormalizationForwardTraining_V2");
     return miopenBatchNormalizationForwardTraining_V2_impl(handle,
                                                            bn_mode,
                                                            alpha,
@@ -1278,6 +1549,9 @@ miopenBatchNormalizationForwardTraining_V3(miopenHandle_t handle,
                                            void* resultSaveMean,
                                            void* resultSaveInvVariance)
 {
+    if(miopen::wrapper::Dispatch("miopenBatchNormalizationForwardTraining_V3") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenBatchNormalizationForwardTraining_V3");
     return miopenBatchNormalizationForwardTraining_V3_impl(handle,
                                                            bn_mode,
                                                            alpha,
@@ -1325,6 +1599,9 @@ miopenBatchNormForwardTrainingActivation(miopenHandle_t handle,
                                          void* resultSaveInvVariance,
                                          const miopenActivationDescriptor_t activDesc)
 {
+    if(miopen::wrapper::Dispatch("miopenBatchNormForwardTrainingActivation") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenBatchNormForwardTrainingActivation");
     return miopenBatchNormForwardTrainingActivation_impl(handle,
                                                          bn_mode,
                                                          alpha,
@@ -1373,6 +1650,9 @@ miopenBatchNormForwardTrainingActivation_V2(miopenHandle_t handle,
                                             void* resultSaveInvVariance,
                                             const miopenActivationDescriptor_t activDesc)
 {
+    if(miopen::wrapper::Dispatch("miopenBatchNormForwardTrainingActivation_V2") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenBatchNormForwardTrainingActivation_V2");
     return miopenBatchNormForwardTrainingActivation_V2_impl(handle,
                                                             bn_mode,
                                                             alpha,
@@ -1414,6 +1694,9 @@ miopenBatchNormalizationForwardInference(miopenHandle_t handle,
                                          void* estimatedVariance,
                                          double epsilon)
 {
+    if(miopen::wrapper::Dispatch("miopenBatchNormalizationForwardInference") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenBatchNormalizationForwardInference");
     return miopenBatchNormalizationForwardInference_impl(handle,
                                                          bn_mode,
                                                          alpha,
@@ -1449,6 +1732,9 @@ miopenBatchNormalizationForwardInference_V2(miopenHandle_t handle,
                                             void* estimatedVariance,
                                             double epsilon)
 {
+    if(miopen::wrapper::Dispatch("miopenBatchNormalizationForwardInference_V2") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenBatchNormalizationForwardInference_V2");
     return miopenBatchNormalizationForwardInference_V2_impl(handle,
                                                             bn_mode,
                                                             alpha,
@@ -1486,6 +1772,9 @@ extern "C" miopenStatus_t miopenBatchNormalizationForwardInferenceInvVariance(
     void* estimatedMean,
     void* estimatedInvVariance)
 {
+    if(miopen::wrapper::Dispatch("miopenBatchNormalizationForwardInferenceInvVariance") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenBatchNormalizationForwardInferenceInvVariance");
     return miopenBatchNormalizationForwardInferenceInvVariance_impl(handle,
                                                                     bn_mode,
                                                                     alpha,
@@ -1523,6 +1812,9 @@ extern "C" miopenStatus_t miopenBatchNormForwardInferenceActivationInvVariance(
     void* estimatedInvVariance,
     const miopenActivationDescriptor_t activDesc)
 {
+    if(miopen::wrapper::Dispatch("miopenBatchNormForwardInferenceActivationInvVariance") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenBatchNormForwardInferenceActivationInvVariance");
     return miopenBatchNormForwardInferenceActivationInvVariance_impl(handle,
                                                                      bn_mode,
                                                                      alpha,
@@ -1562,6 +1854,9 @@ miopenBatchNormForwardInferenceActivation(miopenHandle_t handle,
                                           double epsilon,
                                           const miopenActivationDescriptor_t activDesc)
 {
+    if(miopen::wrapper::Dispatch("miopenBatchNormForwardInferenceActivation") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenBatchNormForwardInferenceActivation");
     return miopenBatchNormForwardInferenceActivation_impl(handle,
                                                           bn_mode,
                                                           alpha,
@@ -1603,6 +1898,9 @@ miopenBatchNormalizationBackward(miopenHandle_t handle,
                                  const void* savedMean,
                                  const void* savedInvVariance)
 {
+    if(miopen::wrapper::Dispatch("miopenBatchNormalizationBackward") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenBatchNormalizationBackward");
     return miopenBatchNormalizationBackward_impl(handle,
                                                  bn_mode,
                                                  alphaDataDiff,
@@ -1648,6 +1946,9 @@ miopenBatchNormalizationBackward_V2(miopenHandle_t handle,
                                     const void* savedMean,
                                     const void* savedInvVariance)
 {
+    if(miopen::wrapper::Dispatch("miopenBatchNormalizationBackward_V2") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenBatchNormalizationBackward_V2");
     return miopenBatchNormalizationBackward_V2_impl(handle,
                                                     bn_mode,
                                                     alphaDataDiff,
@@ -1698,6 +1999,9 @@ miopenBatchNormBackwardActivation(miopenHandle_t handle,
                                   const void* savedInvVariance,
                                   const miopenActivationDescriptor_t activDesc)
 {
+    if(miopen::wrapper::Dispatch("miopenBatchNormBackwardActivation") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenBatchNormBackwardActivation");
     return miopenBatchNormBackwardActivation_impl(handle,
                                                   bn_mode,
                                                   alphaDataDiff,
@@ -1726,6 +2030,9 @@ miopenBatchNormBackwardActivation(miopenHandle_t handle,
 
 extern "C" miopenStatus_t miopenCreateActivationDescriptor(miopenActivationDescriptor_t* activDesc)
 {
+    if(miopen::wrapper::Dispatch("miopenCreateActivationDescriptor") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenCreateActivationDescriptor");
     return miopenCreateActivationDescriptor_impl(activDesc);
 }
 
@@ -1736,6 +2043,8 @@ miopenSetActivationDescriptor(const miopenActivationDescriptor_t activDesc,
                               double activBeta,
                               double activGamma)
 {
+    if(miopen::wrapper::Dispatch("miopenSetActivationDescriptor") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenSetActivationDescriptor");
     return miopenSetActivationDescriptor_impl(activDesc, mode, activAlpha, activBeta, activGamma);
 }
 
@@ -1746,6 +2055,8 @@ miopenGetActivationDescriptor(const miopenActivationDescriptor_t activDesc,
                               double* activBeta,
                               double* activGamma)
 {
+    if(miopen::wrapper::Dispatch("miopenGetActivationDescriptor") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenGetActivationDescriptor");
     return miopenGetActivationDescriptor_impl(activDesc, mode, activAlpha, activBeta, activGamma);
 }
 
@@ -1758,6 +2069,8 @@ extern "C" miopenStatus_t miopenActivationForward(miopenHandle_t handle,
                                                   const miopenTensorDescriptor_t yDesc,
                                                   void* y)
 {
+    if(miopen::wrapper::Dispatch("miopenActivationForward") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenActivationForward");
     return miopenActivationForward_impl(handle, activDesc, alpha, xDesc, x, beta, yDesc, y);
 }
 
@@ -1774,12 +2087,17 @@ extern "C" miopenStatus_t miopenActivationBackward(miopenHandle_t handle,
                                                    const miopenTensorDescriptor_t dxDesc,
                                                    void* dx)
 {
+    if(miopen::wrapper::Dispatch("miopenActivationBackward") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenActivationBackward");
     return miopenActivationBackward_impl(
         handle, activDesc, alpha, yDesc, y, dyDesc, dy, xDesc, x, beta, dxDesc, dx);
 }
 
 extern "C" miopenStatus_t miopenDestroyActivationDescriptor(miopenActivationDescriptor_t activDesc)
 {
+    if(miopen::wrapper::Dispatch("miopenDestroyActivationDescriptor") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenDestroyActivationDescriptor");
     return miopenDestroyActivationDescriptor_impl(activDesc);
 }
 
@@ -1790,6 +2108,8 @@ extern "C" miopenStatus_t miopenGLUForward(miopenHandle_t handle,
                                            void* output,
                                            const uint32_t dim)
 {
+    if(miopen::wrapper::Dispatch("miopenGLUForward") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenGLUForward");
     return miopenGLUForward_impl(handle, inputDesc, input, outputDesc, output, dim);
 }
 
@@ -1802,6 +2122,8 @@ extern "C" miopenStatus_t miopenGLUBackward(miopenHandle_t handle,
                                             void* inputGrad,
                                             const uint32_t dim)
 {
+    if(miopen::wrapper::Dispatch("miopenGLUBackward") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenGLUBackward");
     return miopenGLUBackward_impl(
         handle, inputDesc, input, outputGradDesc, outputGrad, inputGradDesc, inputGrad, dim);
 }
@@ -1814,6 +2136,8 @@ extern "C" miopenStatus_t miopenSoftmaxForward(miopenHandle_t handle,
                                                const miopenTensorDescriptor_t yDesc,
                                                void* y)
 {
+    if(miopen::wrapper::Dispatch("miopenSoftmaxForward") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenSoftmaxForward");
     return miopenSoftmaxForward_impl(handle, alpha, xDesc, x, beta, yDesc, y);
 }
 
@@ -1827,6 +2151,8 @@ extern "C" miopenStatus_t miopenSoftmaxBackward(miopenHandle_t handle,
                                                 const miopenTensorDescriptor_t dxDesc,
                                                 void* dx)
 {
+    if(miopen::wrapper::Dispatch("miopenSoftmaxBackward") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenSoftmaxBackward");
     return miopenSoftmaxBackward_impl(handle, alpha, yDesc, y, dyDesc, dy, beta, dxDesc, dx);
 }
 
@@ -1840,6 +2166,8 @@ extern "C" miopenStatus_t miopenSoftmaxForward_V2(miopenHandle_t handle,
                                                   miopenSoftmaxAlgorithm_t algorithm,
                                                   miopenSoftmaxMode_t mode)
 {
+    if(miopen::wrapper::Dispatch("miopenSoftmaxForward_V2") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenSoftmaxForward_V2");
     return miopenSoftmaxForward_V2_impl(handle, alpha, xDesc, x, beta, yDesc, y, algorithm, mode);
 }
 
@@ -1855,6 +2183,8 @@ extern "C" miopenStatus_t miopenSoftmaxBackward_V2(miopenHandle_t handle,
                                                    miopenSoftmaxAlgorithm_t algorithm,
                                                    miopenSoftmaxMode_t mode)
 {
+    if(miopen::wrapper::Dispatch("miopenSoftmaxBackward_V2") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenSoftmaxBackward_V2");
     return miopenSoftmaxBackward_V2_impl(
         handle, alpha, yDesc, y, dyDesc, dy, beta, dxDesc, dx, algorithm, mode);
 }
@@ -1863,17 +2193,23 @@ extern "C" miopenStatus_t miopenCreateFusionPlan(miopenFusionPlanDescriptor_t* f
                                                  const miopenFusionDirection_t fuseDirection,
                                                  const miopenTensorDescriptor_t inputDesc)
 {
+    if(miopen::wrapper::Dispatch("miopenCreateFusionPlan") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenCreateFusionPlan");
     return miopenCreateFusionPlan_impl(fusePlanDesc, fuseDirection, inputDesc);
 }
 
 extern "C" miopenStatus_t miopenDestroyFusionPlan(miopenFusionPlanDescriptor_t fusePlanDesc)
 {
+    if(miopen::wrapper::Dispatch("miopenDestroyFusionPlan") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenDestroyFusionPlan");
     return miopenDestroyFusionPlan_impl(fusePlanDesc);
 }
 
 extern "C" miopenStatus_t miopenCompileFusionPlan(miopenHandle_t handle,
                                                   miopenFusionPlanDescriptor_t fusePlanDesc)
 {
+    if(miopen::wrapper::Dispatch("miopenCompileFusionPlan") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenCompileFusionPlan");
     return miopenCompileFusionPlan_impl(handle, fusePlanDesc);
 }
 
@@ -1881,6 +2217,8 @@ extern "C" miopenStatus_t miopenFusionPlanGetOp(miopenFusionPlanDescriptor_t fus
                                                 const int op_idx,
                                                 miopenFusionOpDescriptor_t* op)
 {
+    if(miopen::wrapper::Dispatch("miopenFusionPlanGetOp") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenFusionPlanGetOp");
     return miopenFusionPlanGetOp_impl(fusePlanDesc, op_idx, op);
 }
 
@@ -1890,6 +2228,9 @@ miopenFusionPlanGetWorkSpaceSize(miopenHandle_t handle,
                                  size_t* workSpaceSize,
                                  miopenConvFwdAlgorithm_t algo)
 {
+    if(miopen::wrapper::Dispatch("miopenFusionPlanGetWorkSpaceSize") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenFusionPlanGetWorkSpaceSize");
     return miopenFusionPlanGetWorkSpaceSize_impl(handle, fusePlanDesc, workSpaceSize, algo);
 }
 
@@ -1899,6 +2240,9 @@ miopenFusionPlanConvolutionGetAlgo(miopenFusionPlanDescriptor_t fusePlanDesc,
                                    int* returnedAlgoCount,
                                    miopenConvFwdAlgorithm_t* returnedAlgos)
 {
+    if(miopen::wrapper::Dispatch("miopenFusionPlanConvolutionGetAlgo") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenFusionPlanConvolutionGetAlgo");
     return miopenFusionPlanConvolutionGetAlgo_impl(
         fusePlanDesc, requestAlgoCount, returnedAlgoCount, returnedAlgos);
 }
@@ -1907,6 +2251,9 @@ extern "C" miopenStatus_t
 miopenFusionPlanConvolutionSetAlgo(miopenFusionPlanDescriptor_t fusePlanDesc,
                                    miopenConvFwdAlgorithm_t algo)
 {
+    if(miopen::wrapper::Dispatch("miopenFusionPlanConvolutionSetAlgo") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenFusionPlanConvolutionSetAlgo");
     return miopenFusionPlanConvolutionSetAlgo_impl(fusePlanDesc, algo);
 }
 
@@ -1915,6 +2262,8 @@ extern "C" miopenStatus_t miopenCreateOpConvForward(miopenFusionPlanDescriptor_t
                                                     miopenConvolutionDescriptor_t convDesc,
                                                     const miopenTensorDescriptor_t wDesc)
 {
+    if(miopen::wrapper::Dispatch("miopenCreateOpConvForward") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenCreateOpConvForward");
     return miopenCreateOpConvForward_impl(fusePlanDesc, convOp, convDesc, wDesc);
 }
 
@@ -1922,6 +2271,9 @@ extern "C" miopenStatus_t miopenCreateOpActivationForward(miopenFusionPlanDescri
                                                           miopenFusionOpDescriptor_t* activFwdOp,
                                                           miopenActivationMode_t mode)
 {
+    if(miopen::wrapper::Dispatch("miopenCreateOpActivationForward") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenCreateOpActivationForward");
     return miopenCreateOpActivationForward_impl(fusePlanDesc, activFwdOp, mode);
 }
 
@@ -1930,6 +2282,9 @@ miopenCreateOpActivationBackward(miopenFusionPlanDescriptor_t fusePlanDesc,
                                  miopenFusionOpDescriptor_t* activBwdOp,
                                  miopenActivationMode_t mode)
 {
+    if(miopen::wrapper::Dispatch("miopenCreateOpActivationBackward") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenCreateOpActivationBackward");
     return miopenCreateOpActivationBackward_impl(fusePlanDesc, activBwdOp, mode);
 }
 
@@ -1937,6 +2292,8 @@ extern "C" miopenStatus_t miopenCreateOpBiasForward(miopenFusionPlanDescriptor_t
                                                     miopenFusionOpDescriptor_t* biasOp,
                                                     const miopenTensorDescriptor_t bDesc)
 {
+    if(miopen::wrapper::Dispatch("miopenCreateOpBiasForward") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenCreateOpBiasForward");
     return miopenCreateOpBiasForward_impl(fusePlanDesc, biasOp, bDesc);
 }
 
@@ -1946,6 +2303,9 @@ miopenCreateOpBatchNormInference(miopenFusionPlanDescriptor_t fusePlanDesc,
                                  const miopenBatchNormMode_t bn_mode,
                                  const miopenTensorDescriptor_t bnScaleBiasMeanVarDesc)
 {
+    if(miopen::wrapper::Dispatch("miopenCreateOpBatchNormInference") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenCreateOpBatchNormInference");
     return miopenCreateOpBatchNormInference_impl(
         fusePlanDesc, bnOp, bn_mode, bnScaleBiasMeanVarDesc);
 }
@@ -1955,6 +2315,9 @@ extern "C" miopenStatus_t miopenCreateOpBatchNormForward(miopenFusionPlanDescrip
                                                          const miopenBatchNormMode_t bn_mode,
                                                          bool runningMeanVariance)
 {
+    if(miopen::wrapper::Dispatch("miopenCreateOpBatchNormForward") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenCreateOpBatchNormForward");
     return miopenCreateOpBatchNormForward_impl(fusePlanDesc, bnFwdOp, bn_mode, runningMeanVariance);
 }
 
@@ -1962,16 +2325,23 @@ extern "C" miopenStatus_t miopenCreateOpBatchNormBackward(miopenFusionPlanDescri
                                                           miopenFusionOpDescriptor_t* bnBwdOp,
                                                           const miopenBatchNormMode_t bn_mode)
 {
+    if(miopen::wrapper::Dispatch("miopenCreateOpBatchNormBackward") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenCreateOpBatchNormBackward");
     return miopenCreateOpBatchNormBackward_impl(fusePlanDesc, bnBwdOp, bn_mode);
 }
 
 extern "C" miopenStatus_t miopenCreateOperatorArgs(miopenOperatorArgs_t* args)
 {
+    if(miopen::wrapper::Dispatch("miopenCreateOperatorArgs") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenCreateOperatorArgs");
     return miopenCreateOperatorArgs_impl(args);
 }
 
 extern "C" miopenStatus_t miopenDestroyOperatorArgs(miopenOperatorArgs_t args)
 {
+    if(miopen::wrapper::Dispatch("miopenDestroyOperatorArgs") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenDestroyOperatorArgs");
     return miopenDestroyOperatorArgs_impl(args);
 }
 
@@ -1981,6 +2351,8 @@ extern "C" miopenStatus_t miopenSetOpArgsConvForward(miopenOperatorArgs_t args,
                                                      const void* beta,
                                                      const void* w)
 {
+    if(miopen::wrapper::Dispatch("miopenSetOpArgsConvForward") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenSetOpArgsConvForward");
     return miopenSetOpArgsConvForward_impl(args, convOp, alpha, beta, w);
 }
 
@@ -1992,6 +2364,8 @@ extern "C" miopenStatus_t miopenSetOpArgsActivForward(miopenOperatorArgs_t args,
                                                       double activBeta,
                                                       double activGamma)
 {
+    if(miopen::wrapper::Dispatch("miopenSetOpArgsActivForward") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenSetOpArgsActivForward");
     return miopenSetOpArgsActivForward_impl(
         args, activFwdOp, alpha, beta, activAlpha, activBeta, activGamma);
 }
@@ -2006,6 +2380,8 @@ extern "C" miopenStatus_t miopenSetOpArgsActivBackward(miopenOperatorArgs_t args
                                                        double activBeta,
                                                        double activGamma)
 {
+    if(miopen::wrapper::Dispatch("miopenSetOpArgsActivBackward") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenSetOpArgsActivBackward");
     return miopenSetOpArgsActivBackward_impl(
         args, activBwdOp, alpha, beta, y, reserved, activAlpha, activBeta, activGamma);
 }
@@ -2020,6 +2396,9 @@ extern "C" miopenStatus_t miopenSetOpArgsBatchNormInference(miopenOperatorArgs_t
                                                             const void* estimatedVariance,
                                                             double epsilon)
 {
+    if(miopen::wrapper::Dispatch("miopenSetOpArgsBatchNormInference") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenSetOpArgsBatchNormInference");
     return miopenSetOpArgsBatchNormInference_impl(
         args, bnOp, alpha, beta, bnScale, bnBias, estimatedMean, estimatedVariance, epsilon);
 }
@@ -2037,6 +2416,9 @@ extern "C" miopenStatus_t miopenSetOpArgsBatchNormForward(miopenOperatorArgs_t a
                                                           double expAvgFactor,
                                                           double epsilon)
 {
+    if(miopen::wrapper::Dispatch("miopenSetOpArgsBatchNormForward") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenSetOpArgsBatchNormForward");
     return miopenSetOpArgsBatchNormForward_impl(args,
                                                 bnOp,
                                                 alpha,
@@ -2063,6 +2445,9 @@ extern "C" miopenStatus_t miopenSetOpArgsBatchNormBackward(miopenOperatorArgs_t 
                                                            const void* savedMean,
                                                            const void* savedInvVariance)
 {
+    if(miopen::wrapper::Dispatch("miopenSetOpArgsBatchNormBackward") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenSetOpArgsBatchNormBackward");
     return miopenSetOpArgsBatchNormBackward_impl(args,
                                                  bnOp,
                                                  alpha,
@@ -2082,6 +2467,8 @@ extern "C" miopenStatus_t miopenSetOpArgsBiasForward(miopenOperatorArgs_t args,
                                                      const void* beta,
                                                      const void* bias)
 {
+    if(miopen::wrapper::Dispatch("miopenSetOpArgsBiasForward") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenSetOpArgsBiasForward");
     return miopenSetOpArgsBiasForward_impl(args, biasOp, alpha, beta, bias);
 }
 
@@ -2093,6 +2480,8 @@ extern "C" miopenStatus_t miopenExecuteFusionPlan(const miopenHandle_t handle,
                                                   void* output,
                                                   miopenOperatorArgs_t args)
 {
+    if(miopen::wrapper::Dispatch("miopenExecuteFusionPlan") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenExecuteFusionPlan");
     return miopenExecuteFusionPlan_impl(
         handle, fusePlanDesc, inputDesc, input, outputDesc, output, args);
 }
@@ -2108,6 +2497,8 @@ miopenExecuteFusionPlan_v2(const miopenHandle_t handle,
                            void* workspace,
                            size_t workspaceSize)
 {
+    if(miopen::wrapper::Dispatch("miopenExecuteFusionPlan_v2") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenExecuteFusionPlan_v2");
     return miopenExecuteFusionPlan_v2_impl(
         handle, fusePlanDesc, inputDesc, input, outputDesc, output, args, workspace, workspaceSize);
 }
@@ -2132,6 +2523,9 @@ miopenConvolutionBiasActivationForward(miopenHandle_t handle,
                                        const miopenTensorDescriptor_t yDesc,
                                        void* y)
 {
+    if(miopen::wrapper::Dispatch("miopenConvolutionBiasActivationForward") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenConvolutionBiasActivationForward");
     return miopenConvolutionBiasActivationForward_impl(handle,
                                                        alpha1,
                                                        xDesc,
@@ -2154,6 +2548,8 @@ miopenConvolutionBiasActivationForward(miopenHandle_t handle,
 
 extern "C" miopenStatus_t miopenCreateRNNDescriptor(miopenRNNDescriptor_t* rnnDesc)
 {
+    if(miopen::wrapper::Dispatch("miopenCreateRNNDescriptor") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenCreateRNNDescriptor");
     return miopenCreateRNNDescriptor_impl(rnnDesc);
 }
 
@@ -2166,6 +2562,8 @@ extern "C" miopenStatus_t miopenGetRNNDescriptor(miopenRNNDescriptor_t rnnDesc,
                                                  int* hiddenSize,
                                                  int* layer)
 {
+    if(miopen::wrapper::Dispatch("miopenGetRNNDescriptor") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenGetRNNDescriptor");
     return miopenGetRNNDescriptor_impl(
         rnnDesc, rnnMode, algoMode, inputMode, dirMode, biasMode, hiddenSize, layer);
 }
@@ -2181,6 +2579,8 @@ extern "C" miopenStatus_t miopenGetRNNDescriptor_V2(miopenRNNDescriptor_t rnnDes
                                                     miopenRNNAlgo_t* algoMode,
                                                     miopenDataType_t* dataType)
 {
+    if(miopen::wrapper::Dispatch("miopenGetRNNDescriptor_V2") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenGetRNNDescriptor_V2");
     return miopenGetRNNDescriptor_V2_impl(rnnDesc,
                                           hiddenSize,
                                           layer,
@@ -2195,6 +2595,8 @@ extern "C" miopenStatus_t miopenGetRNNDescriptor_V2(miopenRNNDescriptor_t rnnDes
 
 extern "C" miopenStatus_t miopenDestroyRNNDescriptor(miopenRNNDescriptor_t rnnDesc)
 {
+    if(miopen::wrapper::Dispatch("miopenDestroyRNNDescriptor") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenDestroyRNNDescriptor");
     return miopenDestroyRNNDescriptor_impl(rnnDesc);
 }
 
@@ -2208,6 +2610,8 @@ extern "C" miopenStatus_t miopenSetRNNDescriptor(miopenRNNDescriptor_t rnnDesc,
                                                  miopenRNNAlgo_t algo,
                                                  miopenDataType_t dataType)
 {
+    if(miopen::wrapper::Dispatch("miopenSetRNNDescriptor") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenSetRNNDescriptor");
     return miopenSetRNNDescriptor_impl(
         rnnDesc, hsize, nlayers, inMode, direction, rnnMode, biasMode, algo, dataType);
 }
@@ -2223,6 +2627,8 @@ extern "C" miopenStatus_t miopenSetRNNDescriptor_V2(miopenRNNDescriptor_t rnnDes
                                                     miopenRNNAlgo_t algo,
                                                     miopenDataType_t dataType)
 {
+    if(miopen::wrapper::Dispatch("miopenSetRNNDescriptor_V2") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenSetRNNDescriptor_V2");
     return miopenSetRNNDescriptor_V2_impl(
         rnnDesc, hsize, nlayers, dropoutDesc, inMode, direction, rnnMode, biasMode, algo, dataType);
 }
@@ -2237,6 +2643,9 @@ miopenSetRNNDataSeqTensorDescriptor(miopenSeqTensorDescriptor_t seqTensorDesc,
                                     const int* sequenceLenArray,
                                     void* paddingMarker)
 {
+    if(miopen::wrapper::Dispatch("miopenSetRNNDataSeqTensorDescriptor") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenSetRNNDataSeqTensorDescriptor");
     return miopenSetRNNDataSeqTensorDescriptor_impl(seqTensorDesc,
                                                     dataType,
                                                     layout,
@@ -2258,6 +2667,9 @@ miopenGetRNNDataSeqTensorDescriptor(miopenSeqTensorDescriptor_t seqTensorDesc,
                                     int* sequenceLenArray,
                                     void* paddingMarker)
 {
+    if(miopen::wrapper::Dispatch("miopenGetRNNDataSeqTensorDescriptor") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenGetRNNDataSeqTensorDescriptor");
     return miopenGetRNNDataSeqTensorDescriptor_impl(seqTensorDesc,
                                                     dataType,
                                                     layout,
@@ -2275,6 +2687,8 @@ extern "C" miopenStatus_t miopenGetRNNWorkspaceSize(miopenHandle_t handle,
                                                     const miopenTensorDescriptor_t* xDesc,
                                                     size_t* numBytes)
 {
+    if(miopen::wrapper::Dispatch("miopenGetRNNWorkspaceSize") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenGetRNNWorkspaceSize");
     return miopenGetRNNWorkspaceSize_impl(handle, rnnDesc, sequenceLen, xDesc, numBytes);
 }
 
@@ -2284,6 +2698,9 @@ extern "C" miopenStatus_t miopenGetRNNTrainingReserveSize(miopenHandle_t handle,
                                                           const miopenTensorDescriptor_t* xDesc,
                                                           size_t* numBytes)
 {
+    if(miopen::wrapper::Dispatch("miopenGetRNNTrainingReserveSize") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenGetRNNTrainingReserveSize");
     return miopenGetRNNTrainingReserveSize_impl(handle, rnnDesc, sequenceLen, xDesc, numBytes);
 }
 
@@ -2294,6 +2711,8 @@ extern "C" miopenStatus_t miopenGetRNNTempSpaceSizes(miopenHandle_t handle,
                                                      size_t* workSpaceSize,
                                                      size_t* reserveSpaceSize)
 {
+    if(miopen::wrapper::Dispatch("miopenGetRNNTempSpaceSizes") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenGetRNNTempSpaceSizes");
     return miopenGetRNNTempSpaceSizes_impl(
         handle, rnnDesc, xDesc, fwdMode, workSpaceSize, reserveSpaceSize);
 }
@@ -2304,6 +2723,8 @@ extern "C" miopenStatus_t miopenGetRNNParamsSize(miopenHandle_t handle,
                                                  size_t* numBytes,
                                                  miopenDataType_t dtype)
 {
+    if(miopen::wrapper::Dispatch("miopenGetRNNParamsSize") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenGetRNNParamsSize");
     return miopenGetRNNParamsSize_impl(handle, rnnDesc, xDesc, numBytes, dtype);
 }
 
@@ -2313,6 +2734,8 @@ extern "C" miopenStatus_t miopenGetRNNParamsDescriptor(miopenHandle_t handle,
                                                        miopenTensorDescriptor_t wDesc,
                                                        miopenDataType_t dtype)
 {
+    if(miopen::wrapper::Dispatch("miopenGetRNNParamsDescriptor") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenGetRNNParamsDescriptor");
     return miopenGetRNNParamsDescriptor_impl(handle, rnnDesc, xDesc, wDesc, dtype);
 }
 
@@ -2322,6 +2745,8 @@ extern "C" miopenStatus_t miopenGetRNNInputTensorSize(miopenHandle_t handle,
                                                       miopenTensorDescriptor_t* xDesc,
                                                       size_t* numBytes)
 {
+    if(miopen::wrapper::Dispatch("miopenGetRNNInputTensorSize") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenGetRNNInputTensorSize");
     return miopenGetRNNInputTensorSize_impl(handle, rnnDesc, seqLen, xDesc, numBytes);
 }
 
@@ -2331,6 +2756,8 @@ extern "C" miopenStatus_t miopenGetRNNHiddenTensorSize(miopenHandle_t handle,
                                                        miopenTensorDescriptor_t* xDesc,
                                                        size_t* numBytes)
 {
+    if(miopen::wrapper::Dispatch("miopenGetRNNHiddenTensorSize") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenGetRNNHiddenTensorSize");
     return miopenGetRNNHiddenTensorSize_impl(handle, rnnDesc, seqLen, xDesc, numBytes);
 }
 
@@ -2341,6 +2768,8 @@ extern "C" miopenStatus_t miopenGetRNNLayerParamSize(miopenHandle_t handle,
                                                      const int paramID,
                                                      size_t* numBytes)
 {
+    if(miopen::wrapper::Dispatch("miopenGetRNNLayerParamSize") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenGetRNNLayerParamSize");
     return miopenGetRNNLayerParamSize_impl(handle, rnnDesc, layer, xDesc, paramID, numBytes);
 }
 
@@ -2350,6 +2779,8 @@ extern "C" miopenStatus_t miopenGetRNNLayerBiasSize(miopenHandle_t handle,
                                                     const int biasID,
                                                     size_t* numBytes)
 {
+    if(miopen::wrapper::Dispatch("miopenGetRNNLayerBiasSize") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenGetRNNLayerBiasSize");
     return miopenGetRNNLayerBiasSize_impl(handle, rnnDesc, layer, biasID, numBytes);
 }
 
@@ -2363,6 +2794,8 @@ extern "C" miopenStatus_t miopenGetRNNLayerParam(miopenHandle_t handle,
                                                  miopenTensorDescriptor_t paramDesc,
                                                  void* layerParam)
 {
+    if(miopen::wrapper::Dispatch("miopenGetRNNLayerParam") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenGetRNNLayerParam");
     return miopenGetRNNLayerParam_impl(
         handle, rnnDesc, layer, xDesc, wDesc, w, paramID, paramDesc, layerParam);
 }
@@ -2377,6 +2810,8 @@ extern "C" miopenStatus_t miopenGetRNNLayerBias(miopenHandle_t handle,
                                                 miopenTensorDescriptor_t biasDesc,
                                                 void* layerBias)
 {
+    if(miopen::wrapper::Dispatch("miopenGetRNNLayerBias") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenGetRNNLayerBias");
     return miopenGetRNNLayerBias_impl(
         handle, rnnDesc, layer, xDesc, wDesc, w, biasID, biasDesc, layerBias);
 }
@@ -2388,6 +2823,8 @@ extern "C" miopenStatus_t miopenGetRNNLayerParamOffset(miopenRNNDescriptor_t rnn
                                                        miopenTensorDescriptor_t paramDesc,
                                                        size_t* layerParamOffset)
 {
+    if(miopen::wrapper::Dispatch("miopenGetRNNLayerParamOffset") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenGetRNNLayerParamOffset");
     return miopenGetRNNLayerParamOffset_impl(
         rnnDesc, layer, xDesc, paramID, paramDesc, layerParamOffset);
 }
@@ -2399,6 +2836,8 @@ extern "C" miopenStatus_t miopenGetRNNLayerBiasOffset(miopenRNNDescriptor_t rnnD
                                                       miopenTensorDescriptor_t biasDesc,
                                                       size_t* layerBiasOffset)
 {
+    if(miopen::wrapper::Dispatch("miopenGetRNNLayerBiasOffset") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenGetRNNLayerBiasOffset");
     return miopenGetRNNLayerBiasOffset_impl(
         rnnDesc, layer, xDesc, biasID, biasDesc, layerBiasOffset);
 }
@@ -2413,6 +2852,8 @@ extern "C" miopenStatus_t miopenSetRNNLayerParam(miopenHandle_t handle,
                                                  miopenTensorDescriptor_t paramDesc,
                                                  const void* layerParam)
 {
+    if(miopen::wrapper::Dispatch("miopenSetRNNLayerParam") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenSetRNNLayerParam");
     return miopenSetRNNLayerParam_impl(
         handle, rnnDesc, layer, xDesc, wDesc, w, paramID, paramDesc, layerParam);
 }
@@ -2427,6 +2868,8 @@ extern "C" miopenStatus_t miopenSetRNNLayerBias(miopenHandle_t handle,
                                                 miopenTensorDescriptor_t biasDesc,
                                                 const void* layerBias)
 {
+    if(miopen::wrapper::Dispatch("miopenSetRNNLayerBias") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenSetRNNLayerBias");
     return miopenSetRNNLayerBias_impl(
         handle, rnnDesc, layer, xDesc, wDesc, w, biasID, biasDesc, layerBias);
 }
@@ -2434,12 +2877,16 @@ extern "C" miopenStatus_t miopenSetRNNLayerBias(miopenHandle_t handle,
 extern "C" miopenStatus_t miopenSetRNNPaddingMode(miopenRNNDescriptor_t rnnDesc,
                                                   miopenRNNPaddingMode_t paddingMode)
 {
+    if(miopen::wrapper::Dispatch("miopenSetRNNPaddingMode") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenSetRNNPaddingMode");
     return miopenSetRNNPaddingMode_impl(rnnDesc, paddingMode);
 }
 
 extern "C" miopenStatus_t miopenGetRNNPaddingMode(miopenRNNDescriptor_t rnnDesc,
                                                   miopenRNNPaddingMode_t* paddingMode)
 {
+    if(miopen::wrapper::Dispatch("miopenGetRNNPaddingMode") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenGetRNNPaddingMode");
     return miopenGetRNNPaddingMode_impl(rnnDesc, paddingMode);
 }
 
@@ -2463,6 +2910,8 @@ extern "C" miopenStatus_t miopenRNNForward(miopenHandle_t handle,
                                            void* reserveSpace,
                                            size_t reserveSpaceNumBytes)
 {
+    if(miopen::wrapper::Dispatch("miopenRNNForward") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenRNNForward");
     return miopenRNNForward_impl(handle,
                                  rnnDesc,
                                  fwdMode,
@@ -2506,6 +2955,8 @@ extern "C" miopenStatus_t miopenRNNBackwardSeqData(miopenHandle_t handle,
                                                    void* reserveSpace,
                                                    size_t reserveSpaceNumBytes)
 {
+    if(miopen::wrapper::Dispatch("miopenRNNBackwardSeqData") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenRNNBackwardSeqData");
     return miopenRNNBackwardSeqData_impl(handle,
                                          rnnDesc,
                                          yDesc,
@@ -2544,6 +2995,9 @@ extern "C" miopenStatus_t miopenRNNBackwardWeightsSeqTensor(miopenHandle_t handl
                                                             const void* reserveSpace,
                                                             size_t reserveSpaceNumBytes)
 {
+    if(miopen::wrapper::Dispatch("miopenRNNBackwardWeightsSeqTensor") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenRNNBackwardWeightsSeqTensor");
     return miopenRNNBackwardWeightsSeqTensor_impl(handle,
                                                   rnnDesc,
                                                   xDesc,
@@ -2582,6 +3036,8 @@ extern "C" miopenStatus_t miopenRNNForwardTraining(miopenHandle_t handle,
                                                    void* reserveSpace,
                                                    size_t reserveSpaceNumBytes)
 {
+    if(miopen::wrapper::Dispatch("miopenRNNForwardTraining") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenRNNForwardTraining");
     return miopenRNNForwardTraining_impl(handle,
                                          rnnDesc,
                                          sequenceLen,
@@ -2633,6 +3089,8 @@ extern "C" miopenStatus_t miopenRNNBackwardData(miopenHandle_t handle,
                                                 void* reserveSpace,
                                                 size_t reserveSpaceNumBytes)
 {
+    if(miopen::wrapper::Dispatch("miopenRNNBackwardData") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenRNNBackwardData");
     return miopenRNNBackwardData_impl(handle,
                                       rnnDesc,
                                       sequenceLen,
@@ -2678,6 +3136,8 @@ extern "C" miopenStatus_t miopenRNNBackwardWeights(miopenHandle_t handle,
                                                    const void* reserveSpace,
                                                    size_t reserveSpaceNumBytes)
 {
+    if(miopen::wrapper::Dispatch("miopenRNNBackwardWeights") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenRNNBackwardWeights");
     return miopenRNNBackwardWeights_impl(handle,
                                          rnnDesc,
                                          sequenceLen,
@@ -2715,6 +3175,8 @@ extern "C" miopenStatus_t miopenRNNForwardInference(miopenHandle_t handle,
                                                     void* workSpace,
                                                     size_t workSpaceNumBytes)
 {
+    if(miopen::wrapper::Dispatch("miopenRNNForwardInference") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenRNNForwardInference");
     return miopenRNNForwardInference_impl(handle,
                                           rnnDesc,
                                           sequenceLen,
@@ -2738,6 +3200,8 @@ extern "C" miopenStatus_t miopenRNNForwardInference(miopenHandle_t handle,
 
 extern "C" miopenStatus_t miopenCreateCTCLossDescriptor(miopenCTCLossDescriptor_t* ctcLossDesc)
 {
+    if(miopen::wrapper::Dispatch("miopenCreateCTCLossDescriptor") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenCreateCTCLossDescriptor");
     return miopenCreateCTCLossDescriptor_impl(ctcLossDesc);
 }
 
@@ -2746,12 +3210,17 @@ extern "C" miopenStatus_t miopenGetCTCLossDescriptor(miopenCTCLossDescriptor_t c
                                                      int* blank_label_id,
                                                      bool* apply_softmax_layer)
 {
+    if(miopen::wrapper::Dispatch("miopenGetCTCLossDescriptor") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenGetCTCLossDescriptor");
     return miopenGetCTCLossDescriptor_impl(
         ctcLossDesc, dataType, blank_label_id, apply_softmax_layer);
 }
 
 extern "C" miopenStatus_t miopenDestroyCTCLossDescriptor(miopenCTCLossDescriptor_t ctcLossDesc)
 {
+    if(miopen::wrapper::Dispatch("miopenDestroyCTCLossDescriptor") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenDestroyCTCLossDescriptor");
     return miopenDestroyCTCLossDescriptor_impl(ctcLossDesc);
 }
 
@@ -2760,6 +3229,8 @@ extern "C" miopenStatus_t miopenSetCTCLossDescriptor(miopenCTCLossDescriptor_t c
                                                      const int blank_label_id,
                                                      bool apply_softmax_layer)
 {
+    if(miopen::wrapper::Dispatch("miopenSetCTCLossDescriptor") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenSetCTCLossDescriptor");
     return miopenSetCTCLossDescriptor_impl(
         ctcLossDesc, dataType, blank_label_id, apply_softmax_layer);
 }
@@ -2775,6 +3246,8 @@ miopenGetCTCLossWorkspaceSize(miopenHandle_t handle,
                               const miopenCTCLossDescriptor_t ctcLossDesc,
                               size_t* workSpaceSize)
 {
+    if(miopen::wrapper::Dispatch("miopenGetCTCLossWorkspaceSize") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenGetCTCLossWorkspaceSize");
     return miopenGetCTCLossWorkspaceSize_impl(handle,
                                               probsDesc,
                                               gradientsDesc,
@@ -2800,6 +3273,8 @@ extern "C" miopenStatus_t miopenCTCLoss(miopenHandle_t handle,
                                         void* workSpace,
                                         size_t workSpaceSize)
 {
+    if(miopen::wrapper::Dispatch("miopenCTCLoss") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenCTCLoss");
     return miopenCTCLoss_impl(handle,
                               probsDesc,
                               probs,
@@ -2817,23 +3292,33 @@ extern "C" miopenStatus_t miopenCTCLoss(miopenHandle_t handle,
 
 extern "C" miopenStatus_t miopenCreateDropoutDescriptor(miopenDropoutDescriptor_t* dropoutDesc)
 {
+    if(miopen::wrapper::Dispatch("miopenCreateDropoutDescriptor") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenCreateDropoutDescriptor");
     return miopenCreateDropoutDescriptor_impl(dropoutDesc);
 }
 
 extern "C" miopenStatus_t miopenDestroyDropoutDescriptor(miopenDropoutDescriptor_t dropoutDesc)
 {
+    if(miopen::wrapper::Dispatch("miopenDestroyDropoutDescriptor") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenDestroyDropoutDescriptor");
     return miopenDestroyDropoutDescriptor_impl(dropoutDesc);
 }
 
 extern "C" miopenStatus_t miopenDropoutGetReserveSpaceSize(const miopenTensorDescriptor_t xDesc,
                                                            size_t* reserveSpaceSizeInBytes)
 {
+    if(miopen::wrapper::Dispatch("miopenDropoutGetReserveSpaceSize") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenDropoutGetReserveSpaceSize");
     return miopenDropoutGetReserveSpaceSize_impl(xDesc, reserveSpaceSizeInBytes);
 }
 
 extern "C" miopenStatus_t miopenDropoutGetStatesSize(miopenHandle_t handle,
                                                      size_t* stateSizeInBytes)
 {
+    if(miopen::wrapper::Dispatch("miopenDropoutGetStatesSize") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenDropoutGetStatesSize");
     return miopenDropoutGetStatesSize_impl(handle, stateSizeInBytes);
 }
 
@@ -2846,6 +3331,8 @@ extern "C" miopenStatus_t miopenGetDropoutDescriptor(miopenDropoutDescriptor_t d
                                                      bool* state_evo,
                                                      miopenRNGType_t* rng_mode)
 {
+    if(miopen::wrapper::Dispatch("miopenGetDropoutDescriptor") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenGetDropoutDescriptor");
     return miopenGetDropoutDescriptor_impl(
         dropoutDesc, handle, dropout, states, seed, use_mask, state_evo, rng_mode);
 }
@@ -2860,6 +3347,9 @@ extern "C" miopenStatus_t miopenRestoreDropoutDescriptor(miopenDropoutDescriptor
                                                          bool state_evo,
                                                          miopenRNGType_t rng_mode)
 {
+    if(miopen::wrapper::Dispatch("miopenRestoreDropoutDescriptor") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenRestoreDropoutDescriptor");
     return miopenRestoreDropoutDescriptor_impl(dropoutDesc,
                                                handle,
                                                dropout,
@@ -2881,6 +3371,8 @@ extern "C" miopenStatus_t miopenSetDropoutDescriptor(miopenDropoutDescriptor_t d
                                                      bool state_evo,
                                                      miopenRNGType_t rng_mode)
 {
+    if(miopen::wrapper::Dispatch("miopenSetDropoutDescriptor") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenSetDropoutDescriptor");
     return miopenSetDropoutDescriptor_impl(dropoutDesc,
                                            handle,
                                            dropout,
@@ -2902,6 +3394,8 @@ extern "C" miopenStatus_t miopenDropoutForward(miopenHandle_t handle,
                                                void* reserveSpace,
                                                size_t reserveSpaceSizeInBytes)
 {
+    if(miopen::wrapper::Dispatch("miopenDropoutForward") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenDropoutForward");
     return miopenDropoutForward_impl(handle,
                                      dropoutDesc,
                                      noise_shape,
@@ -2923,6 +3417,8 @@ extern "C" miopenStatus_t miopenDropoutBackward(miopenHandle_t handle,
                                                 void* reserveSpace,
                                                 size_t reserveSpaceSizeInBytes)
 {
+    if(miopen::wrapper::Dispatch("miopenDropoutBackward") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenDropoutBackward");
     return miopenDropoutBackward_impl(handle,
                                       dropoutDesc,
                                       noise_shape,
@@ -2937,12 +3433,18 @@ extern "C" miopenStatus_t miopenDropoutBackward(miopenHandle_t handle,
 extern "C" miopenStatus_t
 miopenCreateReduceTensorDescriptor(miopenReduceTensorDescriptor_t* reduceTensorDesc)
 {
+    if(miopen::wrapper::Dispatch("miopenCreateReduceTensorDescriptor") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenCreateReduceTensorDescriptor");
     return miopenCreateReduceTensorDescriptor_impl(reduceTensorDesc);
 }
 
 extern "C" miopenStatus_t
 miopenDestroyReduceTensorDescriptor(miopenReduceTensorDescriptor_t reduceTensorDesc)
 {
+    if(miopen::wrapper::Dispatch("miopenDestroyReduceTensorDescriptor") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenDestroyReduceTensorDescriptor");
     return miopenDestroyReduceTensorDescriptor_impl(reduceTensorDesc);
 }
 
@@ -2954,6 +3456,9 @@ miopenSetReduceTensorDescriptor(miopenReduceTensorDescriptor_t reduceTensorDesc,
                                 miopenReduceTensorIndices_t reduceTensorIndices,
                                 miopenIndicesType_t reduceTensorIndicesType)
 {
+    if(miopen::wrapper::Dispatch("miopenSetReduceTensorDescriptor") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenSetReduceTensorDescriptor");
     return miopenSetReduceTensorDescriptor_impl(reduceTensorDesc,
                                                 reduceTensorOp,
                                                 reduceTensorCompType,
@@ -2970,6 +3475,9 @@ miopenGetReduceTensorDescriptor(const miopenReduceTensorDescriptor_t reduceTenso
                                 miopenReduceTensorIndices_t* reduceTensorIndices,
                                 miopenIndicesType_t* reduceTensorIndicesType)
 {
+    if(miopen::wrapper::Dispatch("miopenGetReduceTensorDescriptor") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenGetReduceTensorDescriptor");
     return miopenGetReduceTensorDescriptor_impl(reduceTensorDesc,
                                                 reduceTensorOp,
                                                 reduceTensorCompType,
@@ -2985,6 +3493,8 @@ miopenGetReductionIndicesSize(miopenHandle_t handle,
                               const miopenTensorDescriptor_t cDesc,
                               size_t* sizeInBytes)
 {
+    if(miopen::wrapper::Dispatch("miopenGetReductionIndicesSize") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenGetReductionIndicesSize");
     return miopenGetReductionIndicesSize_impl(handle, reduceTensorDesc, aDesc, cDesc, sizeInBytes);
 }
 
@@ -2995,6 +3505,9 @@ miopenGetReductionWorkspaceSize(miopenHandle_t handle,
                                 const miopenTensorDescriptor_t cDesc,
                                 size_t* sizeInBytes)
 {
+    if(miopen::wrapper::Dispatch("miopenGetReductionWorkspaceSize") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenGetReductionWorkspaceSize");
     return miopenGetReductionWorkspaceSize_impl(
         handle, reduceTensorDesc, aDesc, cDesc, sizeInBytes);
 }
@@ -3012,6 +3525,8 @@ extern "C" miopenStatus_t miopenReduceTensor(miopenHandle_t handle,
                                              const miopenTensorDescriptor_t cDesc,
                                              void* C)
 {
+    if(miopen::wrapper::Dispatch("miopenReduceTensor") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenReduceTensor");
     return miopenReduceTensor_impl(handle,
                                    reduceTensorDesc,
                                    indices,
@@ -3030,6 +3545,8 @@ extern "C" miopenStatus_t miopenCreateConvProblem(miopenProblem_t* problem,
                                                   miopenConvolutionDescriptor_t operatorDesc,
                                                   miopenProblemDirection_t direction)
 {
+    if(miopen::wrapper::Dispatch("miopenCreateConvProblem") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenCreateConvProblem");
     return miopenCreateConvProblem_impl(problem, operatorDesc, direction);
 }
 
@@ -3037,26 +3554,36 @@ extern "C" miopenStatus_t miopenCreateMhaProblem(miopenProblem_t* problem,
                                                  miopenMhaDescriptor_t operatorDesc,
                                                  miopenProblemDirection_t direction)
 {
+    if(miopen::wrapper::Dispatch("miopenCreateMhaProblem") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenCreateMhaProblem");
     return miopenCreateMhaProblem_impl(problem, operatorDesc, direction);
 }
 
 extern "C" miopenStatus_t miopenCreateMhaDescriptor(miopenMhaDescriptor_t* mhaDesc)
 {
+    if(miopen::wrapper::Dispatch("miopenCreateMhaDescriptor") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenCreateMhaDescriptor");
     return miopenCreateMhaDescriptor_impl(mhaDesc);
 }
 
 extern "C" miopenStatus_t miopenSetMhaDescriptor(miopenMhaDescriptor_t mhaDesc, float scale)
 {
+    if(miopen::wrapper::Dispatch("miopenSetMhaDescriptor") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenSetMhaDescriptor");
     return miopenSetMhaDescriptor_impl(mhaDesc, scale);
 }
 
 extern "C" miopenStatus_t miopenGetMhaDescriptor(miopenMhaDescriptor_t mhaDesc, float* scale)
 {
+    if(miopen::wrapper::Dispatch("miopenGetMhaDescriptor") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenGetMhaDescriptor");
     return miopenGetMhaDescriptor_impl(mhaDesc, scale);
 }
 
 extern "C" miopenStatus_t miopenCreateSoftmaxDescriptor(miopenSoftmaxDescriptor_t* softmaxDesc)
 {
+    if(miopen::wrapper::Dispatch("miopenCreateSoftmaxDescriptor") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenCreateSoftmaxDescriptor");
     return miopenCreateSoftmaxDescriptor_impl(softmaxDesc);
 }
 
@@ -3066,6 +3593,8 @@ extern "C" miopenStatus_t miopenSetSoftmaxDescriptor(miopenSoftmaxDescriptor_t s
                                                      miopenSoftmaxAlgorithm_t algorithm,
                                                      miopenSoftmaxMode_t mode)
 {
+    if(miopen::wrapper::Dispatch("miopenSetSoftmaxDescriptor") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenSetSoftmaxDescriptor");
     return miopenSetSoftmaxDescriptor_impl(softmaxDesc, alpha, beta, algorithm, mode);
 }
 
@@ -3075,50 +3604,72 @@ extern "C" miopenStatus_t miopenGetSoftmaxDescriptor(const miopenSoftmaxDescript
                                                      miopenSoftmaxAlgorithm_t* algorithm,
                                                      miopenSoftmaxMode_t* mode)
 {
+    if(miopen::wrapper::Dispatch("miopenGetSoftmaxDescriptor") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenGetSoftmaxDescriptor");
     return miopenGetSoftmaxDescriptor_impl(softmaxDesc, alpha, beta, algorithm, mode);
 }
 
 extern "C" miopenStatus_t miopenDestroyProblem(miopenProblem_t problem)
 {
+    if(miopen::wrapper::Dispatch("miopenDestroyProblem") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenDestroyProblem");
     return miopenDestroyProblem_impl(problem);
 }
 
 extern "C" miopenStatus_t miopenSetProblemTensorDescriptor(
     miopenProblem_t problem, miopenTensorArgumentId_t id, const miopenTensorDescriptor_t descriptor)
 {
+    if(miopen::wrapper::Dispatch("miopenSetProblemTensorDescriptor") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenSetProblemTensorDescriptor");
     return miopenSetProblemTensorDescriptor_impl(problem, id, descriptor);
 }
 
 extern "C" miopenStatus_t miopenCreateFindOptions(miopenFindOptions_t* options)
 {
+    if(miopen::wrapper::Dispatch("miopenCreateFindOptions") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenCreateFindOptions");
     return miopenCreateFindOptions_impl(options);
 }
 
 extern "C" miopenStatus_t miopenDestroyFindOptions(miopenFindOptions_t options)
 {
+    if(miopen::wrapper::Dispatch("miopenDestroyFindOptions") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenDestroyFindOptions");
     return miopenDestroyFindOptions_impl(options);
 }
 
 extern "C" miopenStatus_t miopenSetFindOptionTuning(miopenFindOptions_t options, int value)
 {
+    if(miopen::wrapper::Dispatch("miopenSetFindOptionTuning") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenSetFindOptionTuning");
     return miopenSetFindOptionTuning_impl(options, value);
 }
 
 extern "C" miopenStatus_t miopenSetFindOptionResultsOrder(miopenFindOptions_t options,
                                                           miopenFindResultsOrder_t value)
 {
+    if(miopen::wrapper::Dispatch("miopenSetFindOptionResultsOrder") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenSetFindOptionResultsOrder");
     return miopenSetFindOptionResultsOrder_impl(options, value);
 }
 
 extern "C" miopenStatus_t miopenSetFindOptionWorkspaceLimit(miopenFindOptions_t options,
                                                             size_t value)
 {
+    if(miopen::wrapper::Dispatch("miopenSetFindOptionWorkspaceLimit") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenSetFindOptionWorkspaceLimit");
     return miopenSetFindOptionWorkspaceLimit_impl(options, value);
 }
 
 extern "C" miopenStatus_t
 miopenSetFindOptionPreallocatedWorkspace(miopenFindOptions_t options, void* buffer, size_t size)
 {
+    if(miopen::wrapper::Dispatch("miopenSetFindOptionPreallocatedWorkspace") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenSetFindOptionPreallocatedWorkspace");
     return miopenSetFindOptionPreallocatedWorkspace_impl(options, buffer, size);
 }
 
@@ -3126,12 +3677,18 @@ extern "C" miopenStatus_t miopenSetFindOptionPreallocatedTensor(miopenFindOption
                                                                 miopenTensorArgumentId_t id,
                                                                 void* buffer)
 {
+    if(miopen::wrapper::Dispatch("miopenSetFindOptionPreallocatedTensor") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenSetFindOptionPreallocatedTensor");
     return miopenSetFindOptionPreallocatedTensor_impl(options, id, buffer);
 }
 
 extern "C" miopenStatus_t miopenSetFindOptionAttachBinaries(miopenFindOptions_t options,
                                                             unsigned attach)
 {
+    if(miopen::wrapper::Dispatch("miopenSetFindOptionAttachBinaries") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenSetFindOptionAttachBinaries");
     return miopenSetFindOptionAttachBinaries_impl(options, attach);
 }
 
@@ -3142,6 +3699,8 @@ extern "C" miopenStatus_t miopenFindSolutions(miopenHandle_t handle,
                                               size_t* numSolutions,
                                               size_t maxSolutions)
 {
+    if(miopen::wrapper::Dispatch("miopenFindSolutions") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenFindSolutions");
     return miopenFindSolutions_impl(
         handle, problem, options, solutions, numSolutions, maxSolutions);
 }
@@ -3153,49 +3712,69 @@ extern "C" miopenStatus_t miopenRunSolution(miopenHandle_t handle,
                                             void* workspace,
                                             size_t workspaceSize)
 {
+    if(miopen::wrapper::Dispatch("miopenRunSolution") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenRunSolution");
     return miopenRunSolution_impl(handle, solution, nInputs, tensors, workspace, workspaceSize);
 }
 
 extern "C" miopenStatus_t miopenDestroySolution(miopenSolution_t solution)
 {
+    if(miopen::wrapper::Dispatch("miopenDestroySolution") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenDestroySolution");
     return miopenDestroySolution_impl(solution);
 }
 
 extern "C" miopenStatus_t
 miopenLoadSolution(miopenSolution_t* solution, const char* data, size_t size)
 {
+    if(miopen::wrapper::Dispatch("miopenLoadSolution") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenLoadSolution");
     return miopenLoadSolution_impl(solution, data, size);
 }
 
 extern "C" miopenStatus_t miopenSaveSolution(miopenSolution_t solution, char* data)
 {
+    if(miopen::wrapper::Dispatch("miopenSaveSolution") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenSaveSolution");
     return miopenSaveSolution_impl(solution, data);
 }
 
 extern "C" miopenStatus_t miopenGetSolutionSize(miopenSolution_t solution, size_t* size)
 {
+    if(miopen::wrapper::Dispatch("miopenGetSolutionSize") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenGetSolutionSize");
     return miopenGetSolutionSize_impl(solution, size);
 }
 
 extern "C" miopenStatus_t miopenGetSolutionWorkspaceSize(miopenSolution_t solution,
                                                          size_t* workspaceSize)
 {
+    if(miopen::wrapper::Dispatch("miopenGetSolutionWorkspaceSize") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenGetSolutionWorkspaceSize");
     return miopenGetSolutionWorkspaceSize_impl(solution, workspaceSize);
 }
 
 extern "C" miopenStatus_t miopenGetSolutionTime(miopenSolution_t solution, float* time)
 {
+    if(miopen::wrapper::Dispatch("miopenGetSolutionTime") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenGetSolutionTime");
     return miopenGetSolutionTime_impl(solution, time);
 }
 
 extern "C" miopenStatus_t miopenGetSolutionSolverId(miopenSolution_t solution, uint64_t* solverId)
 {
+    if(miopen::wrapper::Dispatch("miopenGetSolutionSolverId") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenGetSolutionSolverId");
     return miopenGetSolutionSolverId_impl(solution, solverId);
 }
 
 extern "C" miopenStatus_t miopenGetSolverIdConvAlgorithm(uint64_t solverId,
                                                          miopenConvAlgorithm_t* result)
 {
+    if(miopen::wrapper::Dispatch("miopenGetSolverIdConvAlgorithm") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenGetSolverIdConvAlgorithm");
     return miopenGetSolverIdConvAlgorithm_impl(solverId, result);
 }
 
@@ -3203,6 +3782,8 @@ extern "C" miopenStatus_t miopenCreateActivationProblem(miopenProblem_t* problem
                                                         miopenActivationDescriptor_t operatorDesc,
                                                         miopenProblemDirection_t direction)
 {
+    if(miopen::wrapper::Dispatch("miopenCreateActivationProblem") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenCreateActivationProblem");
     return miopenCreateActivationProblem_impl(problem, operatorDesc, direction);
 }
 
@@ -3211,17 +3792,23 @@ extern "C" miopenStatus_t miopenCreateBatchnormProblem(miopenProblem_t* problem,
                                                        bool runningMeanVariance,
                                                        miopenProblemDirection_t direction)
 {
+    if(miopen::wrapper::Dispatch("miopenCreateBatchnormProblem") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenCreateBatchnormProblem");
     return miopenCreateBatchnormProblem_impl(problem, mode, runningMeanVariance, direction);
 }
 
 extern "C" miopenStatus_t miopenFuseProblems(miopenProblem_t problem1, miopenProblem_t problem2)
 {
+    if(miopen::wrapper::Dispatch("miopenFuseProblems") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenFuseProblems");
     return miopenFuseProblems_impl(problem1, problem2);
 }
 
 extern "C" miopenStatus_t miopenCreateBiasProblem(miopenProblem_t* problem,
                                                   miopenProblemDirection_t direction)
 {
+    if(miopen::wrapper::Dispatch("miopenCreateBiasProblem") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenCreateBiasProblem");
     return miopenCreateBiasProblem_impl(problem, direction);
 }
 
@@ -3229,6 +3816,8 @@ extern "C" miopenStatus_t miopenCreateSoftmaxProblem(miopenProblem_t* problem,
                                                      miopenSoftmaxDescriptor_t operatorDesc,
                                                      miopenProblemDirection_t direction)
 {
+    if(miopen::wrapper::Dispatch("miopenCreateSoftmaxProblem") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenCreateSoftmaxProblem");
     return miopenCreateSoftmaxProblem_impl(problem, operatorDesc, direction);
 }
 
@@ -3240,6 +3829,9 @@ miopenGetReduceCalculationWorkspaceSize(miopenHandle_t handle,
                                         const miopenTensorDescriptor_t reduceDesc,
                                         size_t* sizeInBytes)
 {
+    if(miopen::wrapper::Dispatch("miopenGetReduceCalculationWorkspaceSize") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenGetReduceCalculationWorkspaceSize");
     return miopenGetReduceCalculationWorkspaceSize_impl(
         handle, xDesc, dim, reduceCalculationOp, reduceDesc, sizeInBytes);
 }
@@ -3256,6 +3848,9 @@ miopenReduceCalculationForward(miopenHandle_t handle,
                                const miopenTensorDescriptor_t reduceDesc,
                                void* y)
 {
+    if(miopen::wrapper::Dispatch("miopenReduceCalculationForward") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenReduceCalculationForward");
     return miopenReduceCalculationForward_impl(handle,
                                                nanPropagation,
                                                workspace,
@@ -3278,6 +3873,8 @@ extern "C" miopenStatus_t miopenReduceExtremeForward(miopenHandle_t handle,
                                                      const miopenTensorDescriptor_t indiceDesc,
                                                      void* indice)
 {
+    if(miopen::wrapper::Dispatch("miopenReduceExtremeForward") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenReduceExtremeForward");
     return miopenReduceExtremeForward_impl(
         handle, xDesc, x, dim, reduceExtremeOp, yDesc, y, indiceDesc, indice);
 }
@@ -3299,6 +3896,8 @@ extern "C" miopenStatus_t miopenGroupNormForward(miopenHandle_t handle,
                                                  const miopenTensorDescriptor_t rstdDesc,
                                                  void* rstd)
 {
+    if(miopen::wrapper::Dispatch("miopenGroupNormForward") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenGroupNormForward");
     return miopenGroupNormForward_impl(handle,
                                        mode,
                                        xDesc,
@@ -3336,6 +3935,8 @@ extern "C" miopenStatus_t miopenAddLayerNormForward(miopenHandle_t handle,
                                                     const miopenTensorDescriptor_t rstdDesc,
                                                     void* rstd)
 {
+    if(miopen::wrapper::Dispatch("miopenAddLayerNormForward") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenAddLayerNormForward");
     return miopenAddLayerNormForward_impl(handle,
                                           mode,
                                           xDesc,
@@ -3368,6 +3969,8 @@ extern "C" miopenStatus_t miopenT5LayerNormForward(miopenHandle_t handle,
                                                    const miopenTensorDescriptor_t rstdDesc,
                                                    void* rstd)
 {
+    if(miopen::wrapper::Dispatch("miopenT5LayerNormForward") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenT5LayerNormForward");
     return miopenT5LayerNormForward_impl(
         handle, mode, xDesc, x, weightDesc, weight, epsilon, yDesc, y, rstdDesc, rstd);
 }
@@ -3383,6 +3986,9 @@ miopenGetT5LayerNormBackwardWorkspaceSize(miopenHandle_t handle,
                                           const miopenTensorDescriptor_t dwDesc,
                                           size_t* sizeInBytes)
 {
+    if(miopen::wrapper::Dispatch("miopenGetT5LayerNormBackwardWorkspaceSize") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenGetT5LayerNormBackwardWorkspaceSize");
     return miopenGetT5LayerNormBackwardWorkspaceSize_impl(
         handle, mode, dyDesc, xDesc, weightDesc, rstdDesc, dxDesc, dwDesc, sizeInBytes);
 }
@@ -3404,6 +4010,8 @@ extern "C" miopenStatus_t miopenT5LayerNormBackward(miopenHandle_t handle,
                                                     const miopenTensorDescriptor_t dwDesc,
                                                     void* dw)
 {
+    if(miopen::wrapper::Dispatch("miopenT5LayerNormBackward") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenT5LayerNormBackward");
     return miopenT5LayerNormBackward_impl(handle,
                                           mode,
                                           workspace,
@@ -3449,6 +4057,8 @@ extern "C" miopenStatus_t miopenFusedAdam(miopenHandle_t handle,
                                           const miopenTensorDescriptor_t foundInfDesc,
                                           const void* foundInf)
 {
+    if(miopen::wrapper::Dispatch("miopenFusedAdam") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenFusedAdam");
     return miopenFusedAdam_impl(handle,
                                 paramDesc,
                                 param,
@@ -3517,6 +4127,8 @@ miopenFusedAdamWithOutput(miopenHandle_t handle,
                           const miopenTensorDescriptor_t foundInfDesc,
                           const void* foundInf)
 {
+    if(miopen::wrapper::Dispatch("miopenFusedAdamWithOutput") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenFusedAdamWithOutput");
     return miopenFusedAdamWithOutput_impl(handle,
                                           paramInDesc,
                                           paramIn,
@@ -3580,6 +4192,8 @@ extern "C" miopenStatus_t miopenTransformersAdamW(miopenHandle_t handle,
                                                   const miopenTensorDescriptor_t foundInfDesc,
                                                   const void* foundInf)
 {
+    if(miopen::wrapper::Dispatch("miopenTransformersAdamW") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenTransformersAdamW");
     return miopenTransformersAdamW_impl(handle,
                                         paramDesc,
                                         param,
@@ -3639,6 +4253,9 @@ miopenTransformersAdamWWithOutput(miopenHandle_t handle,
                                   const miopenTensorDescriptor_t foundInfDesc,
                                   const void* foundInf)
 {
+    if(miopen::wrapper::Dispatch("miopenTransformersAdamWWithOutput") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenTransformersAdamWWithOutput");
     return miopenTransformersAdamWWithOutput_impl(handle,
                                                   paramInDesc,
                                                   paramIn,
@@ -3679,6 +4296,8 @@ extern "C" miopenStatus_t miopenGetGetitemWorkspaceSize(miopenHandle_t handle,
                                                         const miopenTensorDescriptor_t* indexDescs,
                                                         size_t* sizeInBytes)
 {
+    if(miopen::wrapper::Dispatch("miopenGetGetitemWorkspaceSize") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenGetGetitemWorkspaceSize");
     return miopenGetGetitemWorkspaceSize_impl(handle, indexCount, indexDescs, sizeInBytes);
 }
 
@@ -3700,6 +4319,8 @@ extern "C" miopenStatus_t miopenGetitemBackward(miopenHandle_t handle,
                                                 const int32_t* slices,
                                                 uint32_t offset)
 {
+    if(miopen::wrapper::Dispatch("miopenGetitemBackward") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenGetitemBackward");
     return miopenGetitemBackward_impl(handle,
                                       workspace,
                                       workspaceSizeInBytes,
@@ -3729,6 +4350,8 @@ extern "C" miopenStatus_t miopenRoPEForward(miopenHandle_t handle,
                                             const miopenTensorDescriptor_t yDesc,
                                             void* y)
 {
+    if(miopen::wrapper::Dispatch("miopenRoPEForward") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenRoPEForward");
     return miopenRoPEForward_impl(handle, xDesc, x, cosDesc, cos, sinDesc, sin, yDesc, y);
 }
 
@@ -3742,6 +4365,8 @@ extern "C" miopenStatus_t miopenRoPEBackward(miopenHandle_t handle,
                                              const miopenTensorDescriptor_t dxDesc,
                                              void* dx)
 {
+    if(miopen::wrapper::Dispatch("miopenRoPEBackward") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenRoPEBackward");
     return miopenRoPEBackward_impl(handle, dyDesc, dy, cosDesc, cos, sinDesc, sin, dxDesc, dx);
 }
 
@@ -3756,6 +4381,8 @@ extern "C" miopenStatus_t miopenKthvalueForward(miopenHandle_t handle,
                                                 int32_t dim,
                                                 bool keepDim)
 {
+    if(miopen::wrapper::Dispatch("miopenKthvalueForward") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenKthvalueForward");
     return miopenKthvalueForward_impl(
         handle, inputDesc, input, outputDesc, output, indicesDesc, indices, k, dim, keepDim);
 }
@@ -3765,6 +4392,9 @@ extern "C" miopenStatus_t miopenGetPReLUBackwardWorkspaceSize(miopenHandle_t han
                                                               miopenTensorDescriptor_t weightDesc,
                                                               size_t* sizeInBytes)
 {
+    if(miopen::wrapper::Dispatch("miopenGetPReLUBackwardWorkspaceSize") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenGetPReLUBackwardWorkspaceSize");
     return miopenGetPReLUBackwardWorkspaceSize_impl(handle, inputDesc, weightDesc, sizeInBytes);
 }
 
@@ -3782,6 +4412,8 @@ extern "C" miopenStatus_t miopenPReLUBackward(miopenHandle_t handle,
                                               miopenTensorDescriptor_t dweightDesc,
                                               void* dweight)
 {
+    if(miopen::wrapper::Dispatch("miopenPReLUBackward") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenPReLUBackward");
     return miopenPReLUBackward_impl(handle,
                                     workspace,
                                     workspaceSizeInBytes,
@@ -3805,6 +4437,9 @@ miopenGetSoftMarginLossForwardWorkspaceSize(miopenHandle_t handle,
                                             miopenLossReductionMode_t reduction,
                                             size_t* sizeInBytes)
 {
+    if(miopen::wrapper::Dispatch("miopenGetSoftMarginLossForwardWorkspaceSize") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenGetSoftMarginLossForwardWorkspaceSize");
     return miopenGetSoftMarginLossForwardWorkspaceSize_impl(
         handle, inputDesc, targetDesc, outputDesc, reduction, sizeInBytes);
 }
@@ -3820,6 +4455,8 @@ extern "C" miopenStatus_t miopenSoftMarginLossForward(miopenHandle_t handle,
                                                       void* workspace,
                                                       size_t workspaceSizeInBytes)
 {
+    if(miopen::wrapper::Dispatch("miopenSoftMarginLossForward") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenSoftMarginLossForward");
     return miopenSoftMarginLossForward_impl(handle,
                                             inputDesc,
                                             input,
@@ -3843,6 +4480,8 @@ extern "C" miopenStatus_t miopenSoftMarginLossBackward(miopenHandle_t handle,
                                                        void* dinput,
                                                        miopenLossReductionMode_t reduction)
 {
+    if(miopen::wrapper::Dispatch("miopenSoftMarginLossBackward") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenSoftMarginLossBackward");
     return miopenSoftMarginLossBackward_impl(handle,
                                              inputDesc,
                                              input,
@@ -3866,6 +4505,9 @@ miopenGetMultiMarginLossForwardWorkspaceSize(miopenHandle_t handle,
                                              miopenLossReductionMode_t reduction,
                                              size_t* sizeInBytes)
 {
+    if(miopen::wrapper::Dispatch("miopenGetMultiMarginLossForwardWorkspaceSize") ==
+       miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenGetMultiMarginLossForwardWorkspaceSize");
     return miopenGetMultiMarginLossForwardWorkspaceSize_impl(
         handle, inputDesc, targetDesc, weightDesc, outputDesc, p, margin, reduction, sizeInBytes);
 }
@@ -3885,6 +4527,8 @@ extern "C" miopenStatus_t miopenMultiMarginLossForward(miopenHandle_t handle,
                                                        void* workspace,
                                                        size_t workspaceSizeInBytes)
 {
+    if(miopen::wrapper::Dispatch("miopenMultiMarginLossForward") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenMultiMarginLossForward");
     return miopenMultiMarginLossForward_impl(handle,
                                              inputDesc,
                                              input,
@@ -3904,10 +4548,14 @@ extern "C" miopenStatus_t miopenMultiMarginLossForward(miopenHandle_t handle,
 extern "C" miopenStatus_t miopenSetTuningPolicy(miopenHandle_t handle,
                                                 miopenTuningPolicy_t newValue)
 {
+    if(miopen::wrapper::Dispatch("miopenSetTuningPolicy") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenSetTuningPolicy");
     return miopenSetTuningPolicy_impl(handle, newValue);
 }
 
 extern "C" miopenStatus_t miopenGetTuningPolicy(miopenHandle_t handle, miopenTuningPolicy_t* value)
 {
+    if(miopen::wrapper::Dispatch("miopenGetTuningPolicy") == miopen::wrapper::Route::Hipdnn)
+        return forward_to_hipdnn("miopenGetTuningPolicy");
     return miopenGetTuningPolicy_impl(handle, value);
 }

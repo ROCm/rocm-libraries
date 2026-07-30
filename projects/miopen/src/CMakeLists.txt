@@ -889,12 +889,15 @@ if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
 
     # Public wrapper library. src/private/wrapper.cpp defines extern "C"
     # pass-through stubs for every MIOPEN_EXPORT entry point in <miopen/miopen.h>,
-    # each forwarding to its renamed _impl symbol in MIOpen_private. PUBLIC
-    # linkage propagates the implementation's include directories and link
-    # interface to consumers of the wrapper, so existing consumers (driver,
-    # tests, CK plugins) that link MIOpen keep resolving MIOpen's internal C++
-    # symbols against libMIOpen_private.so.
-    add_library(MIOpen ${PROJECT_SOURCE_DIR}/src/private/wrapper.cpp)
+    # each consulting the runtime dispatch seam (src/private/routing.cpp) and
+    # forwarding to its renamed _impl symbol in MIOpen_private. PUBLIC linkage
+    # propagates the implementation's include directories and link interface to
+    # consumers of the wrapper, so existing consumers (driver, tests, CK plugins)
+    # that link MIOpen keep resolving MIOpen's internal C++ symbols against
+    # libMIOpen_private.so.
+    add_library(MIOpen
+        ${PROJECT_SOURCE_DIR}/src/private/wrapper.cpp
+        ${PROJECT_SOURCE_DIR}/src/private/routing.cpp)
     target_link_libraries(MIOpen PUBLIC ${_MIOPEN_IMPL_TARGET})
 
     # Deliberately excludes src/include: the wrapper must see only the public
