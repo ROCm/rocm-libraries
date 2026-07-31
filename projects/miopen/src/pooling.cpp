@@ -344,9 +344,9 @@ miopenStatus_t PoolingDescriptor::Forward(const Handle& handle,
            ||                                                                                     //
            (workspaceIndexMode == miopenPoolingWorkspaceIndexImage                                //
             && index_max <= static_cast<int>(std::accumulate(xDesc.GetLengths().begin() + 2,
-                                                              xDesc.GetLengths().end(),
-                                                              1,
-                                                              std::multiplies<int>()))))
+                                                             xDesc.GetLengths().end(),
+                                                             1,
+                                                             std::multiplies<int>()))))
         {
             MIOPEN_THROW("Index range not enough for max pooling bwd");
         }
