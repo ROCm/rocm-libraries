@@ -39,6 +39,42 @@
 #define HIPTHREADS_DEFAULT_VCORES_PER_WGP 16
 #endif
 
+// ==========================================================================
+// TEMPORARY DEBUG INSTRUMENTATION - DO NOT MERGE. Remove before opening PR.
+//
+// Purpose: diagnose the Windows on-prem crashes in both test_hipthreads
+// (lit harness) and test_hipthreads_examples (saxpy). This lib is statically
+// linked into every test exe, so this initializer runs before main() and,
+// crucially, before the HIP driver initializes lazily on the first hip* call.
+// That lets us (a) force driver logging into a process whose environment the
+// lit run.py harness otherwise strips, and (b) make launches synchronous so a
+// fault reports at its true call site instead of later on a worker thread.
+// ==========================================================================
+#ifdef _WIN32
+    #include <cstdio>
+    #include <cstdlib>
+    #include <exception>
+namespace {
+struct HipthreadsDebugInit {
+    HipthreadsDebugInit() {
+        // Runs at library load, before main() and before hipInit().
+        _putenv_s("AMD_LOG_LEVEL", "3");        // driver dispatch/fault logging -> stderr
+        _putenv_s("HIP_LAUNCH_BLOCKING", "1");  // synchronous launches: fault at real call site
+        // If a C++ exception escapes any thread, report it with a distinct exit
+        // code so we can tell "terminate ran" apart from a raw SEH access violation.
+        ::std::set_terminate([]{
+            ::std::fprintf(stderr, "[dbg] std::terminate reached (uncaught exception)\n");
+            ::std::fflush(stderr);
+            ::_Exit(42);
+        });
+        ::std::fprintf(stderr, "[dbg] hipthreads debug init installed\n");
+        ::std::fflush(stderr);
+    }
+} _hipthreads_debug_init;
+} // namespace
+#endif
+// ==================== END TEMPORARY DEBUG INSTRUMENTATION ==================
+
 namespace cuda {
 
 enum {
