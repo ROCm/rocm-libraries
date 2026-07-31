@@ -37,6 +37,7 @@
 #include "include/check_numerics_matrix.hpp"
 #include "rocblaslt-types.h"
 #include "rocblaslt_mat_utils.hpp"
+#include "rocblaslt_secure_env.hpp"
 #include "tensile_host.hpp"
 
 #ifdef HIPBLASLT_USE_ROCROLLER
@@ -2779,7 +2780,14 @@ namespace
             // The name of the current GPU platform
             std::string processor = rocblaslt_internal_get_arch_name();
 
-            const char* env = getenv("HIPBLASLT_TENSILE_LIBPATH");
+            // ROCM-26729 / SEC-00896: use the privilege-aware accessor so a
+            // process in a secure execution context cannot be redirected to an
+            // attacker-controlled code-object directory via inherited
+            // environment. Probe the privilege state once and reuse it for both
+            // the lookup and the suppression diagnostic.
+            const bool  is_privileged = rocblaslt_process_is_privileged();
+            const char* env
+                = rocblaslt_secure_getenv_impl("HIPBLASLT_TENSILE_LIBPATH", is_privileged);
             if(env)
             {
                 if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)
@@ -2792,6 +2800,17 @@ namespace
             }
             else
             {
+                if(rocblaslt_env_suppressed_for_security_impl("HIPBLASLT_TENSILE_LIBPATH",
+                                                              is_privileged))
+                {
+                    std::ostringstream msg;
+                    msg << "Ignoring HIPBLASLT_TENSILE_LIBPATH because the process is running "
+                           "in a secure execution context (set-uid/set-gid or another "
+                           "credential-changing exec, such as file capabilities); falling back "
+                           "to the default library location."
+                        << std::endl;
+                    log_error(__func__, msg.str());
+                }
                 // Find the location of librocblaslt.so
                 // Fall back on hard-coded path if static library or not found
                 std::optional<std::filesystem::path> default_lib_path;
