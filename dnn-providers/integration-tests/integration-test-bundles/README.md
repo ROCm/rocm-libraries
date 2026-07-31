@@ -83,25 +83,28 @@ workflow file every consumer must remember to flag.
 
 ## Folder Convention
 
-Single-graph bundle:
+Single-graph bundle (the `.tensors.dvc`/`.bin` files are optional — a
+`{Name}.json` with no tensor files is a valid graph-only bundle, verified
+against a live GPU/CPU reference executor instead of golden comparison):
 
 ```
 integration-test-bundles/{Tier}/{Operation}/{Layout}/{DataType}/{Name}/
     {Name}.json              # graph description (committed to git)
-    {Name}.tensors.dvc       # optional DVC pointer when the bundle tracks .bin files
-    {Name}.tensor0.bin       # optional binary tensor data (DVC-tracked when present)
+    {Name}.tensors.dvc       # optional — DVC pointer for this bundle's .bin files
+    {Name}.tensor0.bin       # optional — binary tensor data (DVC-tracked)
     {Name}.tensor1.bin
     ...
 ```
 
-Template-sweep bundle:
+Template-sweep bundle (each case's `golden/{CaseId}/` directory is likewise
+optional per case):
 
 ```
 integration-test-bundles/{Tier}/{Operation}/{TopologyName}/
     graph.template.json      # invariant graph topology with ${case.*} placeholders
-    sweep.json               # case matrix + per-case metadata/golden paths
-    golden/{CaseId}/tensors.dvc
-    golden/{CaseId}/tensor0.bin
+    sweep.json               # case matrix + per-case metadata/optional golden paths
+    golden/{CaseId}/tensors.dvc   # optional
+    golden/{CaseId}/tensor0.bin   # optional
     golden/{CaseId}/tensor1.bin
     ...
 ```
@@ -150,8 +153,8 @@ own `remote: golden-data` key (see the DVC Remote Layout section above).
 ## Verify Bundles
 
 ```bash
-python dnn-providers/integration-tests/reference_data_scripts/verify_golden_bundles.py \
-  dnn-providers/integration-tests/integration_test_bundles
+python dnn-providers/integration-tests/reference-data-scripts/verify_golden_bundles.py \
+  dnn-providers/integration-tests/integration-test-bundles
 ```
 
 The verifier checks graph JSON parsing, tensor byte sizes, metadata sidecars, and
