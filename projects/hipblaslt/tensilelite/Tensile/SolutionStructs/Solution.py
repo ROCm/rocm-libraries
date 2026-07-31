@@ -5079,9 +5079,9 @@ class Solution(collections.abc.Mapping):
     _segRequested = state["LDSSegmentInterleave"]
     _segDeferForBuf = _oneLdsBufAtEval == -1 and _segReason == "needs 1LDSBuffer==0"
     if not _segDeferForBuf:
-      _segIsBcontig = _segApplicable and state["LDSSegInterleaveOffsets"].get("bBaseline", False)
-      state["LDSSegmentInterleave"] = (2 if _segIsBcontig else 1) if _segApplicable else 0
-      if _segRequested in (1, 2) and not _segApplicable:
+      # 1 = applied, 0 = not; split vs bcontig is read from the offsets, not this value.
+      state["LDSSegmentInterleave"] = 1 if _segApplicable else 0
+      if _segRequested == 1 and not _segApplicable:
         reject(state, printRejectionReason, "LDSSegmentInterleave=%d requested but not applicable: %s" % (_segRequested, _segReason))
 
     # lds buffer size for reduction
@@ -5117,10 +5117,10 @@ class Solution(collections.abc.Mapping):
       _segRes2 = segIntEval(state)
       if _segRes2["applicable"] and not _segRes2["aligned"]:
         state["LDSSegInterleaveOffsets"] = _segRes2["offsets"]
-        state["LDSSegmentInterleave"] = 2 if _segRes2["offsets"].get("bBaseline", False) else 1
+        state["LDSSegmentInterleave"] = 1
       else:
         state["LDSSegmentInterleave"] = 0
-        if _segRequested in (1, 2):
+        if _segRequested == 1:
           _segReason2 = "aligned needs LDS reserved before 1LDSBuffer resolution" \
             if _segRes2["applicable"] else _segRes2["reason"]
           reject(state, printRejectionReason, "LDSSegmentInterleave=%d requested but not applicable: %s" % (_segRequested, _segReason2))

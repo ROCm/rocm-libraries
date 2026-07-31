@@ -1651,7 +1651,7 @@ class LocalReadMFMA(LocalRead):
                                 # boundary. Split it into within-component (vCols) + component jump
                                 # (segCompByteOff, added post-pad below).
                                 segCompByteOff = 0
-                                _portSplitA = (kernel.get("LDSSegmentInterleave") in (1, 2) and tc == "A"
+                                _portSplitA = (kernel.get("LDSSegmentInterleave") == 1 and tc == "A"
                                                and kernel["LDSSegInterleaveOffsets"].get("portSplitA", False))
                                 if _portSplitA:
                                     # Fine A: drop the wave-group factor from the per-vIdx column stride so
@@ -1661,7 +1661,7 @@ class LocalReadMFMA(LocalRead):
                                     vCols = (vIdx * numOffsets + oIdx) * _shape
                                 else:
                                     vCols = (vIdx * numOffsets + oIdx) * MIWaveGroupShape[tile01]
-                                    if (kernel.get("LDSSegmentInterleave") in (1, 2)
+                                    if (kernel.get("LDSSegmentInterleave") == 1
                                             and kernel["LDSSegInterleaveOffsets"].get("footprintPacked")
                                             and (tc == "A" or (tc == "B"
                                                  and not kernel["LDSSegInterleaveOffsets"].get("bBaseline", False)))):

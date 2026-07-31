@@ -871,7 +871,7 @@ class LraTileAssignmentMFMA(LraTileAssignment):
         # keep the baseline wave stride. A/B only: MX scales keep their own stride (relocated, not split).
         segILWaveSpansComp = False
         # bcontig: B keeps its baseline wave stride (not interleaved) -> only A gets the override.
-        if kernel.get("LDSSegmentInterleave") in (1, 2) and (
+        if kernel.get("LDSSegmentInterleave") == 1 and (
                 tc == "A" or (tc == "B" and not kernel["LDSSegInterleaveOffsets"].get("bBaseline", False))):
             _compCols  = kernel["MacroTile%u" % tile01] // (kernel["NumWaves"] // 2)
             segILWaveSpansComp = min(kernel["MatrixInstM"], kernel["MatrixInstN"]) * vectorWidth >= _compCols
@@ -1019,7 +1019,7 @@ class LraTileAssignmentMFMA(LraTileAssignment):
                     "7. wave offset in N dimen: wtid = tid / dividedForWaveId(%u)" % dividedForWaveId))
                 module.add(vectorStaticRemainder(dummy, dummy, dummy, num1DWaves, tmpVgprRes, tmpSgprInfo, \
                     "7. wave offset in M dimen: wtid0 = wtid / num1DWaves(%u)" % num1DWaves))
-                if kernel.get("LDSSegmentInterleave") in (1, 2) and kernel["LDSSegInterleaveOffsets"].get("footprintPacked") and segILWaveSpansComp:
+                if kernel.get("LDSSegmentInterleave") == 1 and kernel["LDSSegInterleaveOffsets"].get("footprintPacked") and segILWaveSpansComp:
                     # wave spans a whole component: stash its component jump; added post-pad in lraFinalOffset.
                     segOff = writer.vgprPool.checkOut(1, tag="segWaveByteOff")
                     module.add(vectorStaticMultiply(vgpr(segOff), vgpr(dummy), kernel["LDSSegInterleaveOffsets"]["writeStrideBytes"], tmpSgprInfo, \

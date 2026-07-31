@@ -8162,7 +8162,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         # narrow B needs an extra LocalReadAddr register to reach it. bcontig keeps B contiguous and
         # A's segment jump lives in the base-register value (reg+0, small immediates), so neither A
         # nor B needs a forced extra register there -- the baseline reach reservation already covers it.
-        if kernel.get("LDSSegmentInterleave") in (1, 2) and not kernel["LDSSegInterleaveOffsets"].get("bBaseline", False):
+        if kernel.get("LDSSegmentInterleave") == 1 and not kernel["LDSSegInterleaveOffsets"].get("bBaseline", False):
           numComp = kernel["NumWaves"] // 2
           compColsB = kernel["MacroTile1"] // numComp
           segILWaveSpansCompB = min(kernel["MatrixInstM"], kernel["MatrixInstN"]) * kernel["VectorWidthB"] >= compColsB
