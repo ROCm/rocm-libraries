@@ -266,49 +266,37 @@ cmake --build build/release --target coverage
 
 ### Address Sanitizer Build
 
-> [!IMPORTANT]
-> ASAN builds require a ROCm / TheRock build that was itself compiled with address-sanitizer support. Most developers do not have one; obtaining it means rebuilding TheRock/ROCm, which is out of scope here. ASAN checks are currently a manual process run by developers who have such a build; there is no ASAN coverage in CI yet (planned for the future).
+Build with `-DBUILD_ADDRESS_SANITIZER=ON` to compile hipDNN and its tests with AddressSanitizer instrumentation.
 
-#### Linux
+> [!IMPORTANT]
+> ASAN is a manual process; there is no ASAN coverage in CI yet (planned). The ROCm build requirement differs by platform:
+> - **Linux** requires an ASAN-enabled ROCm / TheRock build, so ASAN coverage extends into the shipped ROCm code, not just hipDNN and providers. Building TheRock with ASAN is possible but a large effort, so the Linux ASAN tests are only expected when an ASAN-enabled ROCm build is already available; building ROCm solely for ASAN testing is not expected.
+> - **Windows** does not require (or use) an ASAN-enabled ROCm build; ASAN covers only the code compiled during this build, not the installed ROCm libraries.
+
+Configure with ASAN enabled, build, then run the tests. `standard` is the recommended tier to run as the ASAN check:
+
 ```bash
 cmake --preset release -DBUILD_ADDRESS_SANITIZER=ON
 cmake --build build/release
-ctest --test-dir build/release
-# Note: Some HIP-related tests may be skipped due to AddressSanitizer incompatibility
+ctest --test-dir build/release -L standard
 ```
 
-#### Windows (Clang)
+> [!NOTE]
+> Any of the `quick`, `standard`, `comprehensive`, and `full` tiers is expected to run cleanly (no ASAN errors) under an ASAN build; `standard` is simply the default check. See [Testing § Test Categories](./Testing.md#test-categories) for what each tier covers.
 
-> [!WARNING]
-> ASAN builds on Windows are currently unsupported. The instructions below predate the wheel-based ROCm SDK install and will need to be adapted to your environment. This section will be revised once Windows ASAN support is settled.
+**Not every GPU architecture supports ASAN** on both Linux and Windows. Tests that cannot run under ASAN on the target are excluded one of two ways: individual tests guard themselves with the `SKIP_IF_ASAN()` GTest macro (so they skip at runtime under an ASAN build), or their ctest registration is disabled when configuring with `-DBUILD_ADDRESS_SANITIZER=ON`. Either way, an ASAN run reports the excluded tests as skipped rather than failing.
 
-Before configuring, ensure the following are on your `PATH` (in addition to the
-[standard Windows setup](#8-setup-environment-variables)):
+**Current status:**
 
-- **TheRock `bin`** (for `hipconfig`): e.g. `C:\dist\therock\bin`
+- **Linux** - the ASAN test suite runs cleanly; all tests that are problematic under ASAN have been skipped, so a green run is expected.
+- **Windows** - ASAN is supported and builds/runs, but a few issues remain that are expected to be resolved soon, so a fully clean ASAN run is not yet available on Windows.
 
-Also set `HIP_PLATFORM=amd` if not already in your environment. See the [Windows](#windows) setup section for the optional resource compiler used to embed version metadata.
+#### Windows notes
 
-```cmd
-set PATH=C:\dist\therock\bin;%PATH%
-set HIP_PLATFORM=amd
+The ASAN configure/build/test commands above apply on Windows as well (run from your Windows build environment; see the [Windows](#windows) setup section). Two Windows specifics:
 
-cmake --preset release -DBUILD_ADDRESS_SANITIZER=ON -DGPU_TARGETS=<target> -DENABLE_CLANG_TIDY=OFF -DENABLE_CLANG_FORMAT=OFF
-cmake --build build/release
-```
-
-The Clang ASAN runtime DLL (`clang_rt.asan_dynamic-x86_64.dll`) must be on your `PATH` when
-running test executables. With a TheRock installation, add its `lib/windows` directory to `PATH`:
-```cmd
-REM TheRock installs the ASAN DLL here (adjust the clang version number as needed):
-set PATH=C:\dist\therock\lib\llvm\lib\clang\22\lib\windows;%PATH%
-ctest --test-dir build/release
-```
-
-To find the exact resource directory path for your installation:
-```cmd
-C:\dist\therock\lib\llvm\bin\clang++.exe -print-resource-dir
-```
+- ctest sets up ASAN runtime discovery for you: the AddressSanitizer runtime DLL, the build's `bin` directory, and the ROCm `bin` directory are prepended to `PATH` for each test via CTest, so you do not need to add the Clang resource `lib/windows` directory to `PATH` by hand.
+- To reduce build time you may add `-DENABLE_CLANG_TIDY=OFF -DENABLE_CLANG_FORMAT=OFF` to the configure step, and set `-DGPU_TARGETS=<target>` for your GPU (auto-detection is not supported on Windows).
 
 ### Disabling JSON Support
 By default, hipDNN includes JSON serialization support via [nlohmann_json](https://github.com/nlohmann/json). To build without the nlohmann_json dependency:

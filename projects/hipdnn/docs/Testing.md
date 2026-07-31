@@ -68,10 +68,10 @@ Standalone creates **unprefixed** aliases in addition to the prefixed targets:
 
 ### Address Sanitizer
 
-Add `-DBUILD_ADDRESS_SANITIZER=ON` to the configure step, then run the check target or `ctest` as usual. ASAN requires an ASAN-capable ROCm build and is a manual process today (not yet in CI); see [Building § Address Sanitizer Build](./Building.md#address-sanitizer-build) for the prerequisites and full instructions.
+Add `-DBUILD_ADDRESS_SANITIZER=ON` to the configure step, then run `ctest -L standard` (the recommended ASAN check; any tier is expected to be error-free under ASAN). ASAN requires an ASAN-capable ROCm build and is a manual process today (not yet in CI); see [Building § Address Sanitizer Build](./Building.md#address-sanitizer-build) for prerequisites, the per-architecture skip behavior, and current Linux/Windows status.
 
 > [!NOTE]
-> Some HIP-related tests may be skipped due to AddressSanitizer incompatibility.
+> Tests that cannot run under ASAN on a given architecture are skipped (via the `SKIP_IF_ASAN()` macro or by disabling their ctest registration in an ASAN build), not failed.
 
 ## ctest vs. check targets
 

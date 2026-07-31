@@ -171,11 +171,16 @@ ctest --test-dir build/release
 ### Test Case 1: Build and Run the Automated Tests with ASAN Enabled 🚨
 
 > [!NOTE]
-> This requires a ROCm / TheRock build compiled with address-sanitizer support (see [Testing § Address Sanitizer](../Testing.md#address-sanitizer)). ASAN is a manual check today (not yet in CI), so it can only be performed by a qualifier who has such a build.
+> ASAN is a manual check today (not yet in CI). The ROCm build requirement differs by platform:
+> - **Linux**: requires an ASAN-enabled ROCm / TheRock build, so ASAN coverage extends into the shipped ROCm code, not just hipDNN and providers. Building TheRock with ASAN is possible but a large effort, so the Linux ASAN tests are only expected when an ASAN-enabled ROCm build is already available; building ROCm solely for ASAN testing is not expected.
+> - **Windows**: does not require (or use) an ASAN-enabled ROCm build; ASAN covers only the code compiled during this build, not the installed ROCm libraries.
+>
+> See [Testing § Address Sanitizer](../Testing.md#address-sanitizer) for more.
 
-Build with address sanitizer enabled following the [Address Sanitizer Build](../Building.md#address-sanitizer-build) instructions, then run the tests as in Test Case 1 above.
+Build with address sanitizer enabled following the [Address Sanitizer Build](../Building.md#address-sanitizer-build) instructions, then run the `standard` tier (`ctest --test-dir <build> -L standard`).
 
 #### Expected Results
 
-- **Test Status**: All tests should pass or explicitly skipped (known ASAN incompatibility).
-- **Memory Safety**: No memory leaks or violations should be detected
+- **Test Status**: All tests either pass or are explicitly skipped (architectures that do not support ASAN are skipped via `SKIP_IF_ASAN()` or a disabled ctest registration).
+- **Memory Safety**: No memory leaks or violations should be detected.
+- **Platform**: On Linux the suite is expected to complete cleanly. On Windows a fully clean ASAN run is not yet available (known issues being resolved); do not treat the remaining Windows failures as a release blocker until that work lands.
