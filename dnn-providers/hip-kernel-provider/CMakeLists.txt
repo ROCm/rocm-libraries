@@ -145,6 +145,45 @@ message(STATUS "Plugin build directory: ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}")
 message(STATUS "Plugin install directory: ${HIPDNN_INSTALL_PLUGIN_ENGINE_DIR}")
 file(MAKE_DIRECTORY ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR})
 
+# ============================================================================
+# YAML-based CTest categorization detection
+# ============================================================================
+# Hoisted here (rather than src/CMakeLists.txt) so it is available before
+# add_subdirectory(rocke) below: rocke/platform/tests/CMakeLists.txt applies
+# ROCKE_ENGINE_CTEST_CATEGORIES_YAML to its own pre-registered CTest tests in
+# its own directory scope (CMake's set_property(TEST ...) predates 3.28's
+# cross-directory support, so this project's 3.25.2 floor requires it run
+# where the tests were add_test()'d).
+if(HIPKERNELPROVIDER_ENABLE_TESTS)
+    set(HIPKERNELPROVIDER_GTEST_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/HIP_MLOPS_ENGINE_test_categories.yaml")
+    set(HIPKERNELPROVIDER_CTEST_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/HIP_MLOPS_ENGINE_test_categories_external.yaml")
+    set(HIPKERNELPROVIDER_INTEGRATION_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/HIP_MLOPS_ENGINE_test_categories_integration.yaml")
+    set(HIPKERNELPROVIDER_ASM_SDPA_INTEGRATION_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/ASM_SDPA_ENGINE_test_categories_integration.yaml")
+    set(ROCKE_ENGINE_CTEST_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/ROCKE_ENGINE_test_categories_external.yaml")
+    set(HIPKERNELPROVIDER_CTEST_INSTALL_FILE "")
+    set(HIPKERNELPROVIDER_YAML_CATEGORIZATION_ENABLED FALSE)
+    if(EXISTS "${HIPKERNELPROVIDER_GTEST_CATEGORIES_YAML}"
+       AND EXISTS "${HIPKERNELPROVIDER_CTEST_CATEGORIES_YAML}"
+       AND EXISTS "${HIPKERNELPROVIDER_INTEGRATION_CATEGORIES_YAML}"
+       AND EXISTS "${HIPKERNELPROVIDER_ASM_SDPA_INTEGRATION_CATEGORIES_YAML}"
+       AND EXISTS "${ROCKE_ENGINE_CTEST_CATEGORIES_YAML}"
+       AND EXISTS "${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
+        include("${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
+        set(DNN_PROVIDER_CTEST_CATEGORIES_YAML "${HIPKERNELPROVIDER_CTEST_CATEGORIES_YAML}")
+        set(DNN_PROVIDER_TEST_CATEGORY_YAMLS
+            "${HIPKERNELPROVIDER_GTEST_CATEGORIES_YAML}"
+            "${HIPKERNELPROVIDER_INTEGRATION_CATEGORIES_YAML}"
+            "${HIPKERNELPROVIDER_ASM_SDPA_INTEGRATION_CATEGORIES_YAML}"
+            "${ROCKE_ENGINE_CTEST_CATEGORIES_YAML}"
+            "${HIPKERNELPROVIDER_CTEST_CATEGORIES_YAML}"
+        )
+        set(HIPKERNELPROVIDER_YAML_CATEGORIZATION_ENABLED TRUE)
+        message(STATUS "hip-kernel-provider: YAML-based CTest categorization enabled")
+    else()
+        message(STATUS "hip-kernel-provider: shared/ctest or test category YAML not found, using legacy CTest labels")
+    endif()
+endif()
+
 if(HIPKERNELPROVIDER_ENABLE_ROCKE)
     message(STATUS "rocKE features enabled")
 
