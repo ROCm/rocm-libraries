@@ -3,12 +3,14 @@
 
 #include <gtest/gtest.h>
 #include <hipdnn_data_sdk/types.hpp>
+#include <hipdnn_data_sdk/utilities/RaggedTensor.hpp>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceMoeGroupedMatmul.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -448,6 +450,24 @@ TEST(TestCpuFpReferenceMoeGroupedMatmul, InvalidCoreShapesThrow)
     }
 }
 
+TEST(TestCpuFpReferenceMoeGroupedMatmul, RaggedWeightThrows)
+{
+    auto token = createTensor<float>({1, 1, 1});
+    auto raggedOffset = std::make_shared<Tensor<int32_t>>(std::vector<int64_t>{3, 1, 1, 1},
+                                                          std::vector<int64_t>{1, 1, 1, 1});
+    setValues(*raggedOffset, {0.0F, 1.0F, 1.0F});
+    RaggedTensor<float> weight({2, 1, 1}, {1, 1, 1}, 1, raggedOffset);
+    auto offsets = createTensor<int32_t>({2, 1, 1});
+    auto output = createTensor<float>({1, 1, 1});
+
+    expectRejectedWith(
+        [&] {
+            CpuFpReferenceMoeGroupedMatmul::forward<float, float, float, float>(
+                token, weight, offsets, output, Mode::NONE, 0);
+        },
+        "ragged weight tensor");
+}
+
 TEST(TestCpuFpReferenceMoeGroupedMatmul, InvalidRoutingShapesThrow)
 {
     struct RoutingShapeCase
@@ -599,7 +619,7 @@ TEST(TestCpuFpReferenceMoeGroupedMatmul, GatherOffsetPastRoutedRowsThrows)
 
 /* ============================= Randomized cross-check ============================= */
 
-TEST(TestCpuFpReferenceMoeGroupedMatmul, LargeRandomMatchesNaiveLoop)
+TEST(TestCpuFpReferenceMoeGroupedMatmul, LargeRandomScatterPermutationMatchesNaiveLoop)
 {
     constexpr int64_t EXPERTS = 4;
     constexpr int64_t BATCH = 2;
@@ -609,6 +629,8 @@ TEST(TestCpuFpReferenceMoeGroupedMatmul, LargeRandomMatchesNaiveLoop)
     constexpr int32_t TOP_K = 2;
     constexpr int64_t GROUP_COUNT = BATCH * EXPERTS;
     constexpr int64_t ROWS_PER_GROUP = TOKEN_ROWS / GROUP_COUNT;
+    constexpr int64_t PERMUTATION_MULTIPLIER = 13; // Coprime with TOKEN_ROWS.
+    constexpr int64_t PERMUTATION_OFFSET = 7;
 
     auto token = createTensor<float>({1, TOKEN_ROWS, HIDDEN_K});
     auto weight = createTensor<float>({EXPERTS, HIDDEN_K, OUTPUT_N});
@@ -624,19 +646,19 @@ TEST(TestCpuFpReferenceMoeGroupedMatmul, LargeRandomMatchesNaiveLoop)
     }
     for(int64_t r = 0; r < TOKEN_ROWS; ++r)
     {
-        tokenIndex.setHostValue(static_cast<int32_t>(r / TOP_K), {0, r, 0});
-        tokenKs.setHostValue(static_cast<int32_t>(r % TOP_K), {0, r, 0});
+        const int64_t destination = (r * PERMUTATION_MULTIPLIER + PERMUTATION_OFFSET) % TOKEN_ROWS;
+        tokenIndex.setHostValue(static_cast<int32_t>(destination / TOP_K), {0, r, 0});
+        tokenKs.setHostValue(static_cast<int32_t>(destination % TOP_K), {0, r, 0});
     }
 
     auto output = createTensor<float>({1, TOKEN_ROWS, OUTPUT_N});
     CpuFpReferenceMoeGroupedMatmul::forward<float, float, float, float>(
         token, weight, offsets, output, Mode::SCATTER, TOP_K, &tokenIndex, &tokenKs);
 
-    // Independent naive reference: with this deterministic identity-permutation
-    // routing, dst == r always, and expert(r) == (r / ROWS_PER_GROUP) % EXPERTS.
     auto naiveOutput = createTensor<float>({1, TOKEN_ROWS, OUTPUT_N});
     for(int64_t r = 0; r < TOKEN_ROWS; ++r)
     {
+        const int64_t destination = (r * PERMUTATION_MULTIPLIER + PERMUTATION_OFFSET) % TOKEN_ROWS;
         const int64_t expert = (r / ROWS_PER_GROUP) % EXPERTS;
         for(int64_t n = 0; n < OUTPUT_N; ++n)
         {
@@ -644,6 +666,60 @@ TEST(TestCpuFpReferenceMoeGroupedMatmul, LargeRandomMatchesNaiveLoop)
             for(int64_t k = 0; k < HIDDEN_K; ++k)
             {
                 acc += static_cast<double>(token.getHostValue({0, r, k}))
+                       * static_cast<double>(weight.getHostValue({expert, k, n}));
+            }
+            naiveOutput.setHostValue(static_cast<float>(acc), {0, destination, n});
+        }
+    }
+
+    const CpuFpReferenceValidation<float> validator(1e-5F, 1e-5F);
+    EXPECT_TRUE(validator.allClose(naiveOutput, output));
+}
+
+TEST(TestCpuFpReferenceMoeGroupedMatmul, LargeRandomGatherWithLeadingSourceGapMatchesNaiveLoop)
+{
+    constexpr int64_t EXPERTS = 4;
+    constexpr int64_t BATCH = 2;
+    constexpr int64_t HIDDEN_K = 17;
+    constexpr int64_t OUTPUT_N = 13;
+    constexpr int64_t TOKEN_ROWS = 64;
+    constexpr int64_t ROUTED_ROWS = 48;
+    constexpr int64_t LEADING_SOURCE_GAP = TOKEN_ROWS - ROUTED_ROWS;
+    constexpr int64_t GROUP_COUNT = BATCH * EXPERTS;
+    constexpr int64_t ROWS_PER_GROUP = ROUTED_ROWS / GROUP_COUNT;
+
+    auto token = createTensor<float>({1, TOKEN_ROWS, HIDDEN_K});
+    auto weight = createTensor<float>({EXPERTS, HIDDEN_K, OUTPUT_N});
+    token.fillWithRandomValues(0.0F, 1.0F, 44);
+    weight.fillWithRandomValues(0.0F, 1.0F, 45);
+
+    auto offsets = createTensor<int32_t>({GROUP_COUNT, 1, 1});
+    auto tokenIndex = createTensor<int32_t>({1, ROUTED_ROWS, 1});
+    for(int64_t g = 0; g < GROUP_COUNT; ++g)
+    {
+        offsets.setHostValue(static_cast<int32_t>(g * ROUTED_ROWS / GROUP_COUNT), {g, 0, 0});
+    }
+    for(int64_t r = 0; r < ROUTED_ROWS; ++r)
+    {
+        tokenIndex.setHostValue(static_cast<int32_t>(TOKEN_ROWS - 1 - r), {0, r, 0});
+    }
+
+    auto output = createTensor<float>({1, ROUTED_ROWS, OUTPUT_N});
+    CpuFpReferenceMoeGroupedMatmul::forward<float, float, float, float>(
+        token, weight, offsets, output, Mode::GATHER, 0, &tokenIndex);
+
+    auto naiveOutput = createTensor<float>({1, ROUTED_ROWS, OUTPUT_N});
+    for(int64_t r = 0; r < ROUTED_ROWS; ++r)
+    {
+        const int64_t source = TOKEN_ROWS - 1 - r;
+        ASSERT_GE(source, LEADING_SOURCE_GAP);
+        const int64_t expert = (r / ROWS_PER_GROUP) % EXPERTS;
+        for(int64_t n = 0; n < OUTPUT_N; ++n)
+        {
+            double acc = 0.0;
+            for(int64_t k = 0; k < HIDDEN_K; ++k)
+            {
+                acc += static_cast<double>(token.getHostValue({0, source, k}))
                        * static_cast<double>(weight.getHostValue({expert, k, n}));
             }
             naiveOutput.setHostValue(static_cast<float>(acc), {0, r, n});

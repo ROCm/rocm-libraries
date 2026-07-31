@@ -35,15 +35,14 @@ public:
               class WeightDataType,
               class OutputDataType,
               class ComputeDataType = float>
-    static void forward(
-        const hipdnn_data_sdk::utilities::TensorBase<TokenDataType>& token,
-        const hipdnn_data_sdk::utilities::TensorBase<WeightDataType>& weight,
-        const hipdnn_data_sdk::utilities::TensorBase<int32_t>& firstTokenOffset,
-        hipdnn_data_sdk::utilities::TensorBase<OutputDataType>& output,
-        hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulMode mode,
-        int32_t topK,
-        const hipdnn_data_sdk::utilities::TensorBase<int32_t>* tokenIndex = nullptr,
-        const hipdnn_data_sdk::utilities::TensorBase<int32_t>* tokenKs = nullptr)
+    static void forward(const hipdnn_data_sdk::utilities::TensorBase<TokenDataType>& token,
+                        const hipdnn_data_sdk::utilities::TensorBase<WeightDataType>& weight,
+                        const hipdnn_data_sdk::utilities::TensorBase<int32_t>& firstTokenOffset,
+                        hipdnn_data_sdk::utilities::TensorBase<OutputDataType>& output,
+                        hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulMode mode,
+                        int32_t topK,
+                        const hipdnn_data_sdk::utilities::TensorBase<int32_t>* tokenIndex = nullptr,
+                        const hipdnn_data_sdk::utilities::TensorBase<int32_t>* tokenKs = nullptr)
     {
         using Mode = hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulMode;
 
@@ -94,8 +93,8 @@ public:
         {
             const int64_t start = firstTokenOffset.getHostValue({group, 0, 0});
             const int64_t end = (group + 1 < groupCount)
-                                     ? firstTokenOffset.getHostValue({group + 1, 0, 0})
-                                     : rowsTotal;
+                                    ? firstTokenOffset.getHostValue({group + 1, 0, 0})
+                                    : rowsTotal;
 
             const int64_t expert = group % expertCount;
 
@@ -253,18 +252,39 @@ public:
 
 private:
     template <class TokenDataType, class WeightDataType, class OutputDataType>
-    static void validateInput(
-        const hipdnn_data_sdk::utilities::TensorBase<TokenDataType>& token,
-        const hipdnn_data_sdk::utilities::TensorBase<WeightDataType>& weight,
-        const hipdnn_data_sdk::utilities::TensorBase<int32_t>& firstTokenOffset,
-        const hipdnn_data_sdk::utilities::TensorBase<OutputDataType>& output,
-        hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulMode mode,
-        int32_t topK,
-        const hipdnn_data_sdk::utilities::TensorBase<int32_t>* tokenIndex,
-        const hipdnn_data_sdk::utilities::TensorBase<int32_t>* tokenKs)
+    static void
+        validateInput(const hipdnn_data_sdk::utilities::TensorBase<TokenDataType>& token,
+                      const hipdnn_data_sdk::utilities::TensorBase<WeightDataType>& weight,
+                      const hipdnn_data_sdk::utilities::TensorBase<int32_t>& firstTokenOffset,
+                      const hipdnn_data_sdk::utilities::TensorBase<OutputDataType>& output,
+                      hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulMode mode,
+                      int32_t topK,
+                      const hipdnn_data_sdk::utilities::TensorBase<int32_t>* tokenIndex,
+                      const hipdnn_data_sdk::utilities::TensorBase<int32_t>* tokenKs)
     {
         using Mode = hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulMode;
         const std::string prefix = "CpuFpReferenceMoeGroupedMatmul: ";
+
+        const auto validateNoRaggedTensor
+            = [&prefix](const hipdnn_data_sdk::utilities::ITensor& tensor, const char* name) {
+                  if(tensor.raggedIterationInfo().has_value())
+                  {
+                      throw std::runtime_error(prefix + "ragged " + name
+                                               + " tensor is not supported");
+                  }
+              };
+        validateNoRaggedTensor(token, "token");
+        validateNoRaggedTensor(weight, "weight");
+        validateNoRaggedTensor(firstTokenOffset, "first_token_offset");
+        validateNoRaggedTensor(output, "output");
+        if(tokenIndex != nullptr)
+        {
+            validateNoRaggedTensor(*tokenIndex, "token-index");
+        }
+        if(tokenKs != nullptr)
+        {
+            validateNoRaggedTensor(*tokenKs, "token-ks");
+        }
 
         if(token.dims().size() != 3 || weight.dims().size() != 3
            || firstTokenOffset.dims().size() != 3 || output.dims().size() != 3)
@@ -323,18 +343,18 @@ private:
             throw std::runtime_error(prefix + reason);
         }
 
-        const auto validateRoutingTensorShape =
-            [&prefix](const hipdnn_data_sdk::utilities::TensorBase<int32_t>* tensor,
-                     const char* name) {
-                if(tensor == nullptr)
-                {
-                    return;
-                }
-                if(tensor->dims().size() != 3 || tensor->dims()[0] != 1 || tensor->dims()[2] != 1)
-                {
-                    throw std::runtime_error(prefix + name + " must have shape [1, rows, 1]");
-                }
-            };
+        const auto validateRoutingTensorShape
+            = [&prefix](const hipdnn_data_sdk::utilities::TensorBase<int32_t>* tensor,
+                        const char* name) {
+                  if(tensor == nullptr)
+                  {
+                      return;
+                  }
+                  if(tensor->dims().size() != 3 || tensor->dims()[0] != 1 || tensor->dims()[2] != 1)
+                  {
+                      throw std::runtime_error(prefix + name + " must have shape [1, rows, 1]");
+                  }
+              };
         validateRoutingTensorShape(tokenIndex, "token-index tensor");
         validateRoutingTensorShape(tokenKs, "token-ks tensor");
 
