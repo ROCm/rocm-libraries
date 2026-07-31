@@ -1,5 +1,5 @@
 [![MIT licensed](https://img.shields.io/badge/license-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-[![doc](https://img.shields.io/badge/doc-readthedocs-blueviolet)](https://gpuopen-professionalcompute-libraries.github.io/rpp/)
+[![doc](https://img.shields.io/badge/doc-rocm.docs.amd.com-blueviolet)](https://rocm.docs.amd.com/projects/rpp/en/latest/index.html)
 
 <p align="center"><img width="70%" src="docs/data/AMD_RPP_logo.png" /></p>
 
@@ -12,8 +12,14 @@ vision library for AMD processors that have `HIP`, or `CPU` backends.
 
 <p align="center"><img width="35%" src="docs/data/rpp_structure_4.png" /></p>
 
-#### Latest release
-[![GitHub tag (latest SemVer)](https://img.shields.io/github/v/tag/GPUOpen-ProfessionalCompute-Libraries/rpp?style=for-the-badge)](https://github.com/ROCm/rpp/releases)
+> [!NOTE]
+> Starting with ROCm 7.15, RPP is built and delivered as part of
+> [TheRock](https://github.com/ROCm/TheRock), the unified ROCm build system.
+> Earlier standalone RPP releases were delivered with ROCm 7.2.x and prior.
+>
+> RPP source now lives in the [ROCm/rocm-libraries](https://github.com/ROCm/rocm-libraries)
+> monorepo under [`projects/rpp`](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rpp).
+> It was previously developed in the standalone `ROCm/rpp` repository.
 
 ## Supported Augmentations / Primitives
 
@@ -66,11 +72,11 @@ Spectrogram functionality output represented as an image:
 > * [ROCm-supported hardware required for HIP backend](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/system-requirements.html)
 > * `gfx908` or higher GPU required
 
-rpp is also built and installed as part of
+RPP is built and installed as part of
 [TheRock](https://github.com/ROCm/TheRock), which is the recommended path for
 source builds and nightly/CI artifacts.
 
-### Dependancies
+### Dependencies
 * AMD Clang++ compiler (C++17 or higher) - installed with ROCm
 * CMake Version `3.10` or later - installed with ROCm
 * OpenMP - installed with ROCm llvm
@@ -91,7 +97,7 @@ The installation process uses the following steps:
 
 * RPP is included with the ROCm Core SDK on Linux. A standard ROCm
 installation using the `amdrocm-core-sdk` meta package installs the RPP
-runtime and development hpackage by default. Follow the official
+runtime and development package by default. Follow the official
 [Install AMD ROCm](https://rocm.docs.amd.com/en/latest/install/rocm.html) guide
 and use the selector to choose your GPU, operating system, and install method.
 > [!IMPORTANT]
@@ -127,20 +133,21 @@ sudo zypper install rpp rpp-devel rpp-test
 
 ### Source build and install
 
-* Clone RPP git repository
+* Clone the ROCm libraries git repository and change into the RPP project directory
 
   ```shell
-  git clone https://github.com/ROCm/rpp.git
+  git clone https://github.com/ROCm/rocm-libraries.git
+  cd rocm-libraries/projects/rpp
   ```
 
 #### HIP/HOST Backend
 
   ```shell
   mkdir build && cd build
-cmake ../
-make -j$(nproc)
-sudo make install
-```
+  cmake ../
+  make -j$(nproc)
+  sudo make install
+  ```
 > [!NOTE]
 > RPP has both GPU and CPU backends. Building it with HIP backend enables both backends.
 
@@ -211,25 +218,18 @@ HIP backend support is automatic: `rpp::rpp` transitively propagates the HIP inc
 For RPP questions and feedback, you can contact us at `mivisionx.support@amd.com`.
 
 To submit feature requests and bug reports, use our
-[GitHub issues](https://github.com/ROCm/rpp/issues) page.
+[GitHub issues](https://github.com/ROCm/rocm-libraries/issues) page.
 
 ## Documentation
 
-You can build our documentation locally using the following code:
+You can build our documentation locally using the following code. The Sphinx
+build also runs Doxygen to generate the API reference.
 
-* Sphinx
-
-  ```bash
-  cd docs
-  pip3 install -r .sphinx/requirements.txt
-  python3 -m sphinx -T -E -b html -d _build/doctrees -D language=en . _build/html
-  ```
-
-* Doxygen
-
-  ```bash
-  doxygen .Doxyfile
-  ```
+```bash
+cd docs
+pip3 install -r sphinx/requirements.txt
+python3 -m sphinx -T -E -b html -d _build/doctrees -D language=en . _build/html
+```
 
 ## Release notes
 
