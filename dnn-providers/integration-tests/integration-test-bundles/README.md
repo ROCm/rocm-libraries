@@ -32,15 +32,15 @@ s3://therock-dvc/rocm-libraries/hipdnn/golden-data/files/md5/<ab>/<rest...>
 ```
 
 **Per-op organization is in the git tree, not in S3.** Each op is a top-level
-folder under `integration_test_bundles/{Tier}/` (e.g. `SdpaFwd`, `BatchnormFwdInference`).
+folder under `integration-test-bundles/{Tier}/` (e.g. `SdpaFwd`, `BatchnormFwdInference`).
 Push/pull is **scoped by repo path** so you operate on one op at a time, even
 though the bytes all land in the same content-addressed S3 store:
 
 ```bash
 # push only SDPA-forward bundles, to the golden-data remote:
 dvc push -r golden-data --recursive \
-  dnn-providers/integration-tests/integration_test_bundles/quick/SdpaFwd \
-  dnn-providers/integration-tests/integration_test_bundles/standard/SdpaFwd
+  dnn-providers/integration-tests/integration-test-bundles/quick/SdpaFwd \
+  dnn-providers/integration-tests/integration-test-bundles/standard/SdpaFwd
 ```
 
 **Each pointer declares its own remote (so the default `dvc pull` just works).**
@@ -86,7 +86,7 @@ workflow file every consumer must remember to flag.
 Single-graph bundle:
 
 ```
-integration_test_bundles/{Tier}/{Operation}/{Layout}/{DataType}/{Name}/
+integration-test-bundles/{Tier}/{Operation}/{Layout}/{DataType}/{Name}/
     {Name}.json              # graph description (committed to git)
     {Name}.tensors.dvc       # DVC pointer tracking all of this bundle's .bin files
     {Name}.tensor0.bin       # binary tensor data (DVC-tracked)
@@ -97,7 +97,7 @@ integration_test_bundles/{Tier}/{Operation}/{Layout}/{DataType}/{Name}/
 Template-sweep bundle:
 
 ```
-integration_test_bundles/{Tier}/{Operation}/{TopologyName}/
+integration-test-bundles/{Tier}/{Operation}/{TopologyName}/
     graph.template.json      # invariant graph topology with ${case.*} placeholders
     sweep.json               # case matrix + per-case metadata/golden paths
     golden/{CaseId}/tensors.dvc
@@ -138,7 +138,7 @@ verification.
 dvc pull
 
 # Pull only one op's quick-tier bundles (sufficient for smoke tests)
-dvc pull dnn-providers/integration-tests/integration_test_bundles/quick/SdpaFwd
+dvc pull dnn-providers/integration-tests/integration-test-bundles/quick/SdpaFwd
 ```
 
 CI needs no special flag: the existing `dvc pull` step in `therock-ci-linux.yml`
@@ -151,17 +151,17 @@ own `remote: golden-data` key (see the DVC Remote Layout section above).
 
 ```bash
 # 1. Create the bundle directory
-mkdir -p dnn-providers/integration-tests/integration_test_bundles/quick/ConvFwd/nhwc/fp16/resnet50_layer3/
+mkdir -p dnn-providers/integration-tests/integration-test-bundles/quick/ConvFwd/nhwc/fp16/resnet50_layer3/
 
 # 2. Copy your files in
-cp resnet50_layer3.json        dnn-providers/integration-tests/integration_test_bundles/quick/ConvFwd/nhwc/fp16/resnet50_layer3/
-cp resnet50_layer3.tensor*.bin dnn-providers/integration-tests/integration_test_bundles/quick/ConvFwd/nhwc/fp16/resnet50_layer3/
+cp resnet50_layer3.json        dnn-providers/integration-tests/integration-test-bundles/quick/ConvFwd/nhwc/fp16/resnet50_layer3/
+cp resnet50_layer3.tensor*.bin dnn-providers/integration-tests/integration-test-bundles/quick/ConvFwd/nhwc/fp16/resnet50_layer3/
 
 # 3. Author a single per-bundle DVC pointer listing every .bin, then let DVC fill in the hashes.
 #    DVC cannot generate a multi-file pointer itself, so we write the `outs:` list and `dvc commit`.
 #    For NEW hipDNN ops, tag each output with `remote: golden-data` so a bare
 #    `dvc pull` (and CI) fetches it from the golden-data remote.
-BUNDLE=dnn-providers/integration-tests/integration_test_bundles/quick/ConvFwd/nhwc/fp16/resnet50_layer3
+BUNDLE=dnn-providers/integration-tests/integration-test-bundles/quick/ConvFwd/nhwc/fp16/resnet50_layer3
 { echo "outs:"; for f in "$BUNDLE"/*.tensor*.bin; do
     echo "- path: $(basename "$f")"; echo "  remote: golden-data"; done; } \
     > "$BUNDLE/resnet50_layer3.tensors.dvc"
@@ -184,7 +184,7 @@ record pointers, and push to `golden-data`:
 
 ```bash
 # 1. Regenerate all SDPA-fwd bundles (quick + standard tiers)
-cd dnn-providers/integration-tests/integration_test_bundles/quick/SdpaFwd
+cd dnn-providers/integration-tests/integration-test-bundles/quick/SdpaFwd
 bash generate_golden_data.sh                 # Tier A (bf16/fp16, nomask/causal, hd128/hd192)
 GENERATE_TIER_B=1 bash generate_golden_data.sh   # + FP8/GROUP (not yet CI-validated)
 cd -
@@ -194,16 +194,16 @@ cd -
 #    pointers stay routed to golden-data across regenerations. (For a brand-new
 #    bundle dir, add the key once — see step 3 of "Add a New Bundle".)
 dvc commit -f --recursive \
-  dnn-providers/integration-tests/integration_test_bundles/quick/SdpaFwd \
-  dnn-providers/integration-tests/integration_test_bundles/standard/SdpaFwd
+  dnn-providers/integration-tests/integration-test-bundles/quick/SdpaFwd \
+  dnn-providers/integration-tests/integration-test-bundles/standard/SdpaFwd
 
 # 3. Push tensor data to the golden-data remote
 dvc push -r golden-data --recursive \
-  dnn-providers/integration-tests/integration_test_bundles/quick/SdpaFwd \
-  dnn-providers/integration-tests/integration_test_bundles/standard/SdpaFwd
+  dnn-providers/integration-tests/integration-test-bundles/quick/SdpaFwd \
+  dnn-providers/integration-tests/integration-test-bundles/standard/SdpaFwd
 
 # 4. Stage .json + .meta.json + .tensors.dvc (NOT .bin — gitignored), commit, git push
-git add dnn-providers/integration-tests/integration_test_bundles/{quick,standard}/SdpaFwd
+git add dnn-providers/integration-tests/integration-test-bundles/{quick,standard}/SdpaFwd
 git commit -m "Update SDPA forward golden bundles"
 git push
 ```
@@ -215,7 +215,7 @@ git push
 ## Update an Existing Bundle
 
 ```bash
-BUNDLE=dnn-providers/integration-tests/integration_test_bundles/quick/ConvFwd/nhwc/fp16/resnet50_layer3
+BUNDLE=dnn-providers/integration-tests/integration-test-bundles/quick/ConvFwd/nhwc/fp16/resnet50_layer3
 
 # 1. Overwrite the files in the bundle directory
 cp new_tensors/*.bin "$BUNDLE/"
@@ -240,10 +240,10 @@ old `.dvc` pointer, and `dvc pull` fetches the previous version.
 
 ```bash
 # 1. Remove DVC tracking for the bundle
-dvc remove dnn-providers/integration-tests/integration_test_bundles/quick/ConvFwd/nhwc/fp16/resnet50_layer3/resnet50_layer3.tensors.dvc
+dvc remove dnn-providers/integration-tests/integration-test-bundles/quick/ConvFwd/nhwc/fp16/resnet50_layer3/resnet50_layer3.tensors.dvc
 
 # 2. Delete the bundle directory
-rm -rf dnn-providers/integration-tests/integration_test_bundles/quick/ConvFwd/nhwc/fp16/resnet50_layer3/
+rm -rf dnn-providers/integration-tests/integration-test-bundles/quick/ConvFwd/nhwc/fp16/resnet50_layer3/
 
 # 3. Commit
 git commit -m "Remove ConvFwd resnet50_layer3 bundle"
@@ -258,9 +258,9 @@ If DVC tracking needs to be rolled back:
 
 ```bash
 # Pull the data if not on disk, then remove DVC tracking and re-add to git
-dvc pull dnn-providers/integration-tests/integration_test_bundles/quick/BatchnormFwdInference/nchw/fp32/Small/Small.tensors.dvc
-dvc remove dnn-providers/integration-tests/integration_test_bundles/quick/BatchnormFwdInference/nchw/fp32/Small/Small.tensors.dvc
-git add -f dnn-providers/integration-tests/integration_test_bundles/quick/BatchnormFwdInference/nchw/fp32/Small/*.bin
+dvc pull dnn-providers/integration-tests/integration-test-bundles/quick/BatchnormFwdInference/nchw/fp32/Small/Small.tensors.dvc
+dvc remove dnn-providers/integration-tests/integration-test-bundles/quick/BatchnormFwdInference/nchw/fp32/Small/Small.tensors.dvc
+git add -f dnn-providers/integration-tests/integration-test-bundles/quick/BatchnormFwdInference/nchw/fp32/Small/*.bin
 git commit -m "Revert Small bundle from DVC to git tracking"
 ```
 

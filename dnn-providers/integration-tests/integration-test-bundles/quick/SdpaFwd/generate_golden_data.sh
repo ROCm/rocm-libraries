@@ -6,7 +6,7 @@
 # Requires PyTorch with ROCm support.
 #
 # Usage:
-#   cd <repo-root>/dnn-providers/integration-tests/integration_test_bundles/quick/SdpaFwd
+#   cd <repo-root>/dnn-providers/integration-tests/integration-test-bundles/quick/SdpaFwd
 #   bash generate_golden_data.sh              # Generate all tiers
 #   bash generate_golden_data.sh quick        # Generate quick tier only
 #   bash generate_golden_data.sh standard     # Generate standard tier only
@@ -15,7 +15,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 GOLDEN_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-GENERATOR="$(cd "$GOLDEN_ROOT/../reference_data_scripts" && pwd)/generate_sdpa_fwd_golden.py"
+GENERATOR="$(cd "$GOLDEN_ROOT/../reference-data-scripts" && pwd)/generate_sdpa_fwd_golden.py"
 
 if [[ ! -f "$GENERATOR" ]]; then
     echo "ERROR: Generator script not found at: $GENERATOR"

@@ -12,12 +12,13 @@
 #include <flatbuffers/flatbuffers.h>
 #include <nlohmann/json.hpp>
 
-#include "harness/input-init/InputInitSpec.hpp"
+#include "harness/input-init/FillRecipe.hpp"
 
 namespace hipdnn_integration_tests
 {
 
-// Configuration for input tensor synthesis.
+// The fill recipes for a graph's input tensors: one FillRecipe per tensor,
+// plus seed overrides. fillInputs() consults this to fill each input.
 //
 // Two maps for two independent concerns:
 //   _fills  — how to fill each tensor (kind + params)
@@ -35,20 +36,20 @@ namespace hipdnn_integration_tests
 //
 // Seeds are independent of fills — setting a seed never creates a fill entry,
 // and setting a fill never touches the seed map.
-class SynthesisConfig
+class InputFillRecipes
 {
 public:
     static constexpr unsigned int K_DEFAULT_GLOBAL_SEED = 42;
 
     // ── Write (override) — tests and metadata ───────────────────────────
 
-    SynthesisConfig& set(int64_t uid, FillSpec f)
+    InputFillRecipes& set(int64_t uid, FillRecipe f)
     {
         _fills[uid] = f;
         return *this;
     }
 
-    SynthesisConfig& set(flatbuffers::Optional<int64_t> uid, FillSpec f)
+    InputFillRecipes& set(flatbuffers::Optional<int64_t> uid, FillRecipe f)
     {
         if(uid.has_value())
         {
@@ -57,25 +58,25 @@ public:
         return *this;
     }
 
-    SynthesisConfig& setRange(int64_t uid, float lo, float hi)
+    InputFillRecipes& setRange(int64_t uid, float lo, float hi)
     {
-        return set(uid, FillSpec::free(lo, hi));
+        return set(uid, FillRecipe::free(lo, hi));
     }
 
-    SynthesisConfig& setFixed(int64_t uid, float value)
+    InputFillRecipes& setFixed(int64_t uid, float value)
     {
-        return set(uid, FillSpec::fixed(value));
+        return set(uid, FillRecipe::fixed(value));
     }
 
     // ── Write (default) — declaration functions ─────────────────────────
 
-    SynthesisConfig& setDefault(int64_t uid, FillSpec f)
+    InputFillRecipes& setDefault(int64_t uid, FillRecipe f)
     {
         _fills.try_emplace(uid, f);
         return *this;
     }
 
-    SynthesisConfig& setDefault(flatbuffers::Optional<int64_t> uid, FillSpec f)
+    InputFillRecipes& setDefault(flatbuffers::Optional<int64_t> uid, FillRecipe f)
     {
         if(uid.has_value())
         {
@@ -86,15 +87,15 @@ public:
 
     // ── Read ────────────────────────────────────────────────────────────
 
-    const std::unordered_map<int64_t, FillSpec>& fills() const
+    const std::unordered_map<int64_t, FillRecipe>& fills() const
     {
         return _fills;
     }
 
-    FillSpec fill(int64_t uid) const
+    FillRecipe fill(int64_t uid) const
     {
         auto it = _fills.find(uid);
-        return it != _fills.end() ? it->second : FillSpec{};
+        return it != _fills.end() ? it->second : FillRecipe{};
     }
 
     std::vector<int64_t> unfilled(const std::vector<int64_t>& ownedUids) const
@@ -103,7 +104,7 @@ public:
         for(const int64_t uid : ownedUids)
         {
             const auto f = fill(uid);
-            if(f.kind != FillSpec::Kind::FREE && f.kind != FillSpec::Kind::FIXED)
+            if(f.kind != FillRecipe::Kind::FREE && f.kind != FillRecipe::Kind::FIXED)
             {
                 result.push_back(uid);
             }
@@ -113,13 +114,13 @@ public:
 
     // ── Seed config ─────────────────────────────────────────────────────
 
-    SynthesisConfig& setSeed(int64_t uid, unsigned int value)
+    InputFillRecipes& setSeed(int64_t uid, unsigned int value)
     {
         _seeds[uid] = value;
         return *this;
     }
 
-    SynthesisConfig& setGlobalSeed(unsigned int s)
+    InputFillRecipes& setGlobalSeed(unsigned int s)
     {
         _globalSeed = s;
         return *this;
@@ -148,12 +149,12 @@ public:
         {
             nlohmann::json j;
             j["kind"] = kindToString(fill.kind);
-            if(fill.kind == FillSpec::Kind::FREE)
+            if(fill.kind == FillRecipe::Kind::FREE)
             {
                 j["lo"] = fill.lo;
                 j["hi"] = fill.hi;
             }
-            if(fill.kind == FillSpec::Kind::FIXED)
+            if(fill.kind == FillRecipe::Kind::FIXED)
             {
                 j["value"] = fill.value;
             }
@@ -180,7 +181,7 @@ public:
         {
             if(j.contains("kind") && j["kind"].is_string())
             {
-                FillSpec f;
+                FillRecipe f;
                 f.kind = kindFromString(j["kind"].get<std::string>());
                 if(j.contains("lo") && j["lo"].is_number())
                 {
@@ -205,42 +206,42 @@ public:
     }
 
 private:
-    std::unordered_map<int64_t, FillSpec> _fills;
+    std::unordered_map<int64_t, FillRecipe> _fills;
     std::unordered_map<int64_t, unsigned int> _seeds;
     unsigned int _globalSeed = K_DEFAULT_GLOBAL_SEED;
 
-    static const char* kindToString(FillSpec::Kind k)
+    static const char* kindToString(FillRecipe::Kind k)
     {
         switch(k)
         {
-        case FillSpec::Kind::FREE:
+        case FillRecipe::Kind::FREE:
             return "free";
-        case FillSpec::Kind::FIXED:
+        case FillRecipe::Kind::FIXED:
             return "fixed";
-        case FillSpec::Kind::STRUCTURED:
+        case FillRecipe::Kind::STRUCTURED:
             return "structured";
-        case FillSpec::Kind::DERIVED:
+        case FillRecipe::Kind::DERIVED:
             return "derived";
         default:
             return "free";
         }
     }
 
-    static FillSpec::Kind kindFromString(const std::string& s)
+    static FillRecipe::Kind kindFromString(const std::string& s)
     {
         if(s == "fixed")
         {
-            return FillSpec::Kind::FIXED;
+            return FillRecipe::Kind::FIXED;
         }
         if(s == "structured")
         {
-            return FillSpec::Kind::STRUCTURED;
+            return FillRecipe::Kind::STRUCTURED;
         }
         if(s == "derived")
         {
-            return FillSpec::Kind::DERIVED;
+            return FillRecipe::Kind::DERIVED;
         }
-        return FillSpec::Kind::FREE;
+        return FillRecipe::Kind::FREE;
     }
 };
 

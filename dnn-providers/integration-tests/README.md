@@ -124,7 +124,7 @@ Existing `INSTANTIATE_TEST_SUITE_P` calls pick up new shapes automatically.
 
 Bundle tests are data-driven: each test is a graph JSON + sweep of
 shapes/dtypes/layouts — no C++ needed. The bundle runner discovers them
-automatically from `integration_test_bundles/`.
+automatically from `integration-test-bundles/`.
 
 ### Searching cases
 
@@ -147,7 +147,7 @@ python3 migration_scripts/find_case.py --id f446b9 --detail
 ```bash
 python3 migration_scripts/import_graph.py \
     --graph new_conv.json \
-    --bundle-dir integration_test_bundles/
+    --bundle-dir integration-test-bundles/
 ```
 
 The case id is auto-generated and printed to stderr. No manual naming
