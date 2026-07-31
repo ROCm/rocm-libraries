@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,25 +24,17 @@
 
 #pragma once
 
-#include "rocsparse-types.h"
+#include <cstdint>
 
 /********************************************************************************
- * \brief rocsparse_mat_descr is a structure holding the rocsparse matrix
- * descriptor. It must be initialized using rocsparse_create_mat_descr()
- * and the retured handle must be passed to all subsequent library function
- * calls that involve the matrix.
- * It should be destroyed at the end using rocsparse_destroy_mat_descr().
+ * \brief rocsparse_coomv_info is a structure holding the rocsparse coomv info
+ * data gathered during coomv_analysis. It caches the maximum number of
+ * non-zeros per row, which the atomic coomv algorithm uses to select its
+ * kernel launch configuration.
  *******************************************************************************/
-struct _rocsparse_mat_descr
+typedef struct _rocsparse_coomv_info
 {
-    // matrix type
-    rocsparse_matrix_type type = rocsparse_matrix_type_general;
-    // fill mode
-    rocsparse_fill_mode fill_mode = rocsparse_fill_mode_lower;
-    // diagonal type
-    rocsparse_diag_type diag_type = rocsparse_diag_type_non_unit;
-    // index base
-    rocsparse_index_base base = rocsparse_index_base_zero;
-    // storage mode
-    rocsparse_storage_mode storage_mode = rocsparse_storage_mode_sorted;
-};
+    // maximum nnz per row (computed during analysis)
+    int64_t max_nnz_per_row = 0;
+
+} * rocsparse_coomv_info;

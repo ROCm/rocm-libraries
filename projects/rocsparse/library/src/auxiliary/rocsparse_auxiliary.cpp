@@ -1433,6 +1433,19 @@ try
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::copy_bsrmv_info(dest_bsrmv_info, src_bsrmv_info));
     }
 
+    rocsparse_coomv_info src_coomv_info  = src->get_coomv_info();
+    rocsparse_coomv_info dest_coomv_info = dest->get_coomv_info();
+    if(src_coomv_info != nullptr)
+    {
+        if(dest_coomv_info == nullptr)
+        {
+            dest_coomv_info = new _rocsparse_coomv_info();
+            dest->set_coomv_info(dest_coomv_info);
+        }
+
+        dest_coomv_info->max_nnz_per_row = src_coomv_info->max_nnz_per_row;
+    }
+
     if(src->csrgemm_info != nullptr)
     {
         if(dest->csrgemm_info == nullptr)
@@ -1855,7 +1868,6 @@ catch(...)
 // LCOV_EXCL_STOP
 
 _rocsparse_spmat_descr::_rocsparse_spmat_descr(rocsparse_format     format_,
-                                               bool                 analysed_,
                                                int64_t              batch_count_,
                                                int64_t              m_,
                                                int64_t              n_,
@@ -1876,7 +1888,6 @@ _rocsparse_spmat_descr::_rocsparse_spmat_descr(rocsparse_format     format_,
                                                rocsparse_mat_descr  descr_,
                                                rocsparse_mat_info   info_)
     : init(true)
-    , analysed(analysed_)
     ,
 
     rows(m_)
@@ -1924,7 +1935,6 @@ _rocsparse_spmat_descr::_rocsparse_spmat_descr(rocsparse_format     format_,
 }
 
 _rocsparse_spmat_descr::_rocsparse_spmat_descr(rocsparse_format     format_,
-                                               bool                 analysed_,
                                                int64_t              batch_count_,
                                                int64_t              m_,
                                                int64_t              n_,
@@ -1947,7 +1957,6 @@ _rocsparse_spmat_descr::_rocsparse_spmat_descr(rocsparse_format     format_,
                                                rocsparse_mat_descr  descr_,
                                                rocsparse_mat_info   info_)
     : init(true)
-    , analysed(analysed_)
     ,
 
     rows(m_)
@@ -4043,9 +4052,6 @@ try
     ROCSPARSE_CHECKARG(
         3, csr_val, descr->nnz > 0 && csr_val == nullptr, rocsparse_status_invalid_pointer);
 
-    // Sparsity structure might have changed, analysis is required before calling SpMV
-    descr->analysed = false;
-
     // The row pointer is being reassigned, so the cached line-length profile
     // (used by the default SpMM/SpMV algorithm selection) is now stale.
     descr->line_profile.known = false;
@@ -4086,9 +4092,6 @@ try
         2, csc_row_ind, descr->nnz > 0 && csc_row_ind == nullptr, rocsparse_status_invalid_pointer);
     ROCSPARSE_CHECKARG(
         3, csc_val, descr->nnz > 0 && csc_val == nullptr, rocsparse_status_invalid_pointer);
-
-    // Sparsity structure might have changed, analysis is required before calling SpMV
-    descr->analysed = false;
 
     // The column pointer is being reassigned, so the cached line-length profile
     // (used by the default SpMM/SpMV algorithm selection) is now stale.
@@ -4158,9 +4161,6 @@ try
     ROCSPARSE_CHECKARG(
         3, bsr_val, descr->nnz > 0 && bsr_val == nullptr, rocsparse_status_invalid_pointer);
 
-    // Sparsity structure might have changed, analysis is required before calling SpMV
-    descr->analysed = false;
-
     descr->row_data = bsr_row_ptr;
     descr->col_data = bsr_col_ind;
     descr->val_data = bsr_val;
@@ -4199,9 +4199,6 @@ try
                        bell_val,
                        brows * descr->ell_cols > 0 && bell_val == nullptr,
                        rocsparse_status_invalid_pointer);
-
-    // Sparsity structure might have changed, analysis is required before calling SpMV
-    descr->analysed = false;
 
     descr->col_data = bell_col_ind;
     descr->val_data = bell_val;
