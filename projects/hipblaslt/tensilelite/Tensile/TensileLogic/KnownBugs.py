@@ -39,7 +39,7 @@ argument), using forward slashes — the same form as validation error messages.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import FrozenSet, Optional, Tuple
+from typing import Callable, FrozenSet, Optional, Tuple
 
 from Tensile.Resources import known_bugs_text
 
@@ -58,31 +58,17 @@ def normalize_logic_relative_path(path: Path) -> str:
     return "/".join(Path(path).parts)
 
 
-def load_known_bugs(config_path: Optional[Path]) -> FrozenSet[KnownBugKey]:
-    """Parse known-bugs YAML into (relative_path, solution_name) pairs.
-
-    If config_path is None, load the bundled package resource. An explicit file
-    overrides that resource; a missing explicit file returns an empty frozenset.
-    If PyYAML is not installed, raises RuntimeError.
-    """
-    if config_path is not None:
-        config_path = Path(config_path)
-        if not config_path.is_file():
-            return frozenset()
-
-    source = str(config_path) if config_path is not None else _BUNDLED_SOURCE
+def _load_known_bugs(
+    read_text: Callable[[], str], source: str
+) -> FrozenSet[KnownBugKey]:
+    """Read and parse known-bugs YAML from a named source."""
     if yaml is None:
         raise RuntimeError(
             "Known-bugs YAML requires PyYAML. Install with: pip install PyYAML\n"
             f"  (source was: {source})"
         )
 
-    text = (
-        config_path.read_text(encoding="utf-8")
-        if config_path is not None
-        else known_bugs_text()
-    )
-    raw = yaml.safe_load(text)
+    raw = yaml.safe_load(read_text())
 
     if raw is None:
         return frozenset()
@@ -117,6 +103,29 @@ def load_known_bugs(config_path: Optional[Path]) -> FrozenSet[KnownBugKey]:
         out.add(key)
 
     return frozenset(out)
+
+
+def load_known_bugs(config_path: Optional[Path]) -> FrozenSet[KnownBugKey]:
+    """Read known-bug pairs from an explicit YAML file, if it exists.
+
+    If config_path is None or the file is missing, returns an empty frozenset.
+    If a file path is given but PyYAML is not installed, raises RuntimeError.
+    """
+    if config_path is None:
+        return frozenset()
+
+    config_path = Path(config_path)
+    if not config_path.is_file():
+        return frozenset()
+
+    return _load_known_bugs(
+        lambda: config_path.read_text(encoding="utf-8"), str(config_path)
+    )
+
+
+def load_bundled_known_bugs() -> FrozenSet[KnownBugKey]:
+    """Load known-bug pairs from the bundled package resource."""
+    return _load_known_bugs(known_bugs_text, _BUNDLED_SOURCE)
 
 
 def is_known_bug(
