@@ -1,0 +1,676 @@
+#!/usr/bin/env python3
+
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+"""
+Batched Contraction Multiple ABD Code Generator
+
+Generates one .hpp per kernel config for the dispatcher's ctypes path.
+Each header defines a SelectedKernel struct with a static launch() method
+taking BatchedContractionMultiABDHostArgs — compiled per-kernel via force-include:
+
+    hipcc -include <kernel.hpp> -DCK_TILE_SINGLE_KERNEL_INCLUDE \\
+          batched_contraction_multi_abd_ctypes_lib.cpp
+
+Naming convention (byte-exact with ContractionMultiABDKernelConfig.name
+in contraction_multi_abd_utils.py):
+
+    contraction_multi_abd_{dtype}_{layout}_{pipeline}_{epilogue}_{scheduler}_
+    {pad_m}_{pad_n}_{pad_k}_{persistent}_
+    {TileM}x{TileN}x{TileK}_{WarpM}x{WarpN}x{WarpK}_{WtM}x{WtN}x{WtK}_
+    na{NumA}_nb{NumB}_nd{NumD}_g{NumDimG}_m{NumDimM}_n{NumDimN}_k{NumDimK}
+
+Reference:
+    include/ck_tile/ops/batched_contraction/kernel/batched_contraction_multi_abd_kernel.hpp
+    example/ck_tile/53_contraction_multi_abd/
+"""
+
+import argparse
+import itertools
+import logging
+import os
+import sys
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple
+
+# Allow running this script from anywhere by ensuring codegen dir is on the path
+_CODEGEN_DIR = Path(__file__).parent
+if str(_CODEGEN_DIR) not in sys.path:
+    sys.path.insert(0, str(_CODEGEN_DIR))
+
+from codegen_common import TileConfig, parallel_generate  # noqa: E402
+
+logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+log = logging.getLogger(__name__)
+
+
+# =============================================================================
+# Dtype mappings
+# =============================================================================
+
+_DTYPE_TO_CK: Dict[str, str] = {
+    "fp16": "ck_tile::half_t",
+    "bf16": "ck_tile::bf16_t",
+    "fp32": "float",
+    "fp8":  "ck_tile::fp8_t",
+    "bf8":  "ck_tile::bf8_t",
+}
+
+_LAYOUT_TO_CK: Dict[str, str] = {
+    "r": "ck_tile::tensor_layout::gemm::RowMajor",
+    "c": "ck_tile::tensor_layout::gemm::ColumnMajor",
+}
+
+_PIPELINE_TO_CK: Dict[str, str] = {
+    "mem":    "ck_tile::GemmPipelineAgBgCrMem",
+    "compv3": "ck_tile::GemmPipelineAgBgCrCompV3",
+    "compv4": "ck_tile::GemmPipelineAgBgCrCompV4",
+}
+
+_SCHEDULER_TO_CK: Dict[str, str] = {
+    "intrawave": "ck_tile::GemmPipelineScheduler::Intrawave",
+    "interwave": "ck_tile::GemmPipelineScheduler::Interwave",
+    "default":   "ck_tile::GemmPipelineScheduler::Default",
+}
+
+# Unsupported (pipeline, scheduler) combos — compute pipelines only support intrawave
+_UNSUPPORTED_PIPELINE_SCHEDULER = frozenset({
+    ("compv3", "interwave"),
+    ("compv4", "interwave"),
+    ("comp_async", "interwave"),
+})
+
+
+# =============================================================================
+# Kernel name construction (byte-exact with Python utils side)
+# =============================================================================
+
+
+def make_contraction_multi_abd_kernel_name(
+    *,
+    dtype: str,
+    layout: str,
+    pipeline: str,
+    epilogue: str,
+    scheduler: str,
+    pad_m: bool,
+    pad_n: bool,
+    pad_k: bool,
+    persistent: bool,
+    tile_m: int,
+    tile_n: int,
+    tile_k: int,
+    warp_m: int,
+    warp_n: int,
+    warp_k: int,
+    warp_tile_m: int,
+    warp_tile_n: int,
+    warp_tile_k: int,
+    num_a_tensor: int,
+    num_b_tensor: int,
+    num_d_tensor: int,
+    num_dim_g: int,
+    num_dim_m: int,
+    num_dim_n: int,
+    num_dim_k: int,
+) -> str:
+    """
+    Construct the canonical kernel name.
+
+    This function is the single source of truth for the kernel name string.
+    It is imported by contraction_multi_abd_utils.py so both sides stay byte-exact.
+    """
+    pad_m_str = "True" if pad_m else "False"
+    pad_n_str = "True" if pad_n else "False"
+    pad_k_str = "True" if pad_k else "False"
+    pers_str  = "True" if persistent else "False"
+
+    tile_str = (
+        f"{tile_m}x{tile_n}x{tile_k}_"
+        f"{warp_m}x{warp_n}x{warp_k}_"
+        f"{warp_tile_m}x{warp_tile_n}x{warp_tile_k}"
+    )
+
+    return (
+        f"contraction_multi_abd_{dtype}_{layout}"
+        f"_{pipeline}_{epilogue}_{scheduler}"
+        f"_{pad_m_str}_{pad_n_str}_{pad_k_str}_{pers_str}"
+        f"_{tile_str}"
+        f"_na{num_a_tensor}_nb{num_b_tensor}_nd{num_d_tensor}"
+        f"_g{num_dim_g}_m{num_dim_m}_n{num_dim_n}_k{num_dim_k}"
+    )
+
+
+# =============================================================================
+# Kernel spec dataclass
+# =============================================================================
+
+
+@dataclass
+class ContractionMultiABDKernelSpec:
+    dtype: str
+    layout: str           # 3-char: e.g. "rcr"
+    pipeline: str
+    epilogue: str         # "cshuffle" or "default2d"
+    scheduler: str
+
+    tile_m: int
+    tile_n: int
+    tile_k: int
+    warp_m: int
+    warp_n: int
+    warp_k: int
+    warp_tile_m: int
+    warp_tile_n: int
+    warp_tile_k: int
+
+    pad_m: bool = False
+    pad_n: bool = False
+    pad_k: bool = False
+    persistent: bool = False
+
+    num_a_tensor: int = 1
+    num_b_tensor: int = 1
+    num_d_tensor: int = 1
+    num_dim_g: int = 1
+    num_dim_m: int = 2
+    num_dim_n: int = 2
+    num_dim_k: int = 1
+
+    a_elementwise: str = "PassThrough"
+    b_elementwise: str = "PassThrough"
+    cde_elementwise: str = "AddDs"
+
+    @property
+    def name(self) -> str:
+        return make_contraction_multi_abd_kernel_name(
+            dtype=self.dtype,
+            layout=self.layout,
+            pipeline=self.pipeline,
+            epilogue=self.epilogue,
+            scheduler=self.scheduler,
+            pad_m=self.pad_m,
+            pad_n=self.pad_n,
+            pad_k=self.pad_k,
+            persistent=self.persistent,
+            tile_m=self.tile_m,
+            tile_n=self.tile_n,
+            tile_k=self.tile_k,
+            warp_m=self.warp_m,
+            warp_n=self.warp_n,
+            warp_k=self.warp_k,
+            warp_tile_m=self.warp_tile_m,
+            warp_tile_n=self.warp_tile_n,
+            warp_tile_k=self.warp_tile_k,
+            num_a_tensor=self.num_a_tensor,
+            num_b_tensor=self.num_b_tensor,
+            num_d_tensor=self.num_d_tensor,
+            num_dim_g=self.num_dim_g,
+            num_dim_m=self.num_dim_m,
+            num_dim_n=self.num_dim_n,
+            num_dim_k=self.num_dim_k,
+        )
+
+
+# =============================================================================
+# Header generator
+# =============================================================================
+
+
+class ContractionMultiABDHeaderGenerator:
+    """Generates a self-contained .hpp file for one ContractionMultiABDKernelSpec."""
+
+    def generate(self, spec: ContractionMultiABDKernelSpec) -> str:
+        dtype_ck = _DTYPE_TO_CK.get(spec.dtype)
+        if dtype_ck is None:
+            raise ValueError(f"Unsupported dtype: {spec.dtype!r}")
+
+        if len(spec.layout) != 3:
+            raise ValueError(f"Layout must be 3 chars (e.g. 'rcr'), got {spec.layout!r}")
+        a_layout_ck = _LAYOUT_TO_CK[spec.layout[0]]
+        b_layout_ck = _LAYOUT_TO_CK[spec.layout[1]]
+        e_layout_ck = _LAYOUT_TO_CK[spec.layout[2]]
+
+        pipeline_ck  = _PIPELINE_TO_CK.get(spec.pipeline)
+        scheduler_ck = _SCHEDULER_TO_CK.get(spec.scheduler)
+        if pipeline_ck is None:
+            raise ValueError(f"Unsupported pipeline: {spec.pipeline!r}")
+        if scheduler_ck is None:
+            raise ValueError(f"Unsupported scheduler: {spec.scheduler!r}")
+
+        if (spec.pipeline, spec.scheduler) in _UNSUPPORTED_PIPELINE_SCHEDULER:
+            raise ValueError(
+                f"Unsupported (pipeline, scheduler) combo: ({spec.pipeline}, {spec.scheduler})"
+            )
+
+        kernel_name = spec.name
+
+        # Build A/B/D type alias lists
+        as_types  = ", ".join(f"A{i}DataType" for i in range(spec.num_a_tensor))
+        bs_types  = ", ".join(f"B{i}DataType" for i in range(spec.num_b_tensor))
+        ds_types  = ", ".join(f"D{i}DataType" for i in range(spec.num_d_tensor))
+
+        as_dtype_defs  = "\n".join(
+            f"using A{i}DataType = {dtype_ck};" for i in range(spec.num_a_tensor)
+        )
+        bs_dtype_defs  = "\n".join(
+            f"using B{i}DataType = {dtype_ck};" for i in range(spec.num_b_tensor)
+        )
+        ds_dtype_defs  = "\n".join(
+            f"using D{i}DataType = {dtype_ck};" for i in range(spec.num_d_tensor)
+        )
+        ds_layout_defs = "\n".join(
+            f"using D{i}Layout = {e_layout_ck};" for i in range(spec.num_d_tensor)
+        )
+        ds_layout_list = ", ".join(f"D{i}Layout" for i in range(spec.num_d_tensor))
+
+        pad_m_str = "true"  if spec.pad_m      else "false"
+        pad_n_str = "true"  if spec.pad_n      else "false"
+        pad_k_str = "true"  if spec.pad_k      else "false"
+        dbl_smem  = "true"  if spec.pipeline == "compv4" else "false"
+
+        # Epilogue block
+        if spec.epilogue == "cshuffle":
+            epilogue_block = f"""\
+    using CDEElementWise = ck_tile::element_wise::{spec.cde_elementwise};
+
+    using EpilogueProblem = ck_tile::CShuffleEpilogueProblem<
+        AsDataType,
+        BsDataType,
+        DsDataType,
+        AccDataType,
+        EDataType,
+        DsLayout,
+        ELayout,
+        CDEElementWise,
+        TileM,
+        TileN,
+        WarpPerBlock_M,
+        WarpPerBlock_N,
+        WarpTileM,
+        WarpTileN,
+        WarpTileK,
+        TransposeC>;
+
+    using GemmEpilogue = ck_tile::CShuffleEpilogue<EpilogueProblem>;"""
+        else:  # default2d
+            epilogue_block = f"""\
+    using CDEElementWise = ck_tile::element_wise::{spec.cde_elementwise};
+
+    using EpilogueProblem = ck_tile::DefaultGemm2DEpilogueProblem<
+        AsDataType,
+        BsDataType,
+        DsDataType,
+        AccDataType,
+        EDataType,
+        DsLayout,
+        ELayout,
+        CDEElementWise,
+        TileM,
+        TileN,
+        kPadM,
+        kPadN,
+        WarpTileM,
+        WarpTileN,
+        WarpTileK,
+        TransposeC>;
+
+    using GemmEpilogue = ck_tile::DefaultGemm2DEpilogue<EpilogueProblem>;"""
+
+        code = f"""\
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+// AUTO-GENERATED by contraction_multi_abd_codegen.py — do not edit manually.
+// Force-include this file with -DCK_TILE_SINGLE_KERNEL_INCLUDE to expose
+// SelectedKernel and KERNEL_NAME at global scope for batched_contraction_multi_abd_ctypes_lib.cpp.
+
+#pragma once
+
+#include <array>
+#include <stdexcept>
+#include <tuple>
+#include <utility>
+#include <vector>
+
+#include "ck_tile/core.hpp"
+#include "ck_tile/host/kernel_launch.hpp"
+#include "ck_tile/ops/batched_contraction.hpp"
+#include "ck_tile/ops/batched_contraction_multi_abd.hpp"
+#include "ck_tile/ops/gemm.hpp"
+#include "ck_tile/ops/common/tensor_layout.hpp"
+#include "ck_tile/ops/epilogue/default_2d_epilogue.hpp"
+#include "ck_tile/ops/epilogue/cshuffle_epilogue.hpp"
+
+namespace ns_{kernel_name} {{
+
+// ---------------------------------------------------------------------------
+// Data type aliases
+// ---------------------------------------------------------------------------
+{as_dtype_defs}
+{bs_dtype_defs}
+{ds_dtype_defs}
+
+using EDataType   = {dtype_ck};
+using AccDataType = float;
+
+using AsDataType = ck_tile::tuple<{as_types}>;
+using BsDataType = ck_tile::tuple<{bs_types}>;
+using DsDataType = ck_tile::tuple<{ds_types}>;
+
+// ---------------------------------------------------------------------------
+// Tensor count constants
+// ---------------------------------------------------------------------------
+static constexpr ck_tile::index_t NumATensor = {spec.num_a_tensor};
+static constexpr ck_tile::index_t NumBTensor = {spec.num_b_tensor};
+static constexpr ck_tile::index_t NumDTensor = {spec.num_d_tensor};
+static constexpr ck_tile::index_t NumDimG    = {spec.num_dim_g};
+static constexpr ck_tile::index_t NumDimM    = {spec.num_dim_m};
+static constexpr ck_tile::index_t NumDimN    = {spec.num_dim_n};
+static constexpr ck_tile::index_t NumDimK    = {spec.num_dim_k};
+
+// ---------------------------------------------------------------------------
+// Layout aliases
+// ---------------------------------------------------------------------------
+using ALayout  = {a_layout_ck};
+using BLayout  = {b_layout_ck};
+using ELayout  = {e_layout_ck};
+using AsLayout = ALayout;
+using BsLayout = BLayout;
+{ds_layout_defs}
+using DsLayout = ck_tile::tuple<{ds_layout_list}>;
+
+// ---------------------------------------------------------------------------
+// Kernel name (byte-exact with ContractionMultiABDKernelConfig.name)
+// ---------------------------------------------------------------------------
+constexpr const char* KERNEL_NAME = "{kernel_name}";
+
+// ---------------------------------------------------------------------------
+// SelectedKernel — the single kernel baked into this .so
+// ---------------------------------------------------------------------------
+struct SelectedKernel
+{{
+    static constexpr ck_tile::index_t BlockSize      = 256;
+    static constexpr ck_tile::index_t TileM          = {spec.tile_m};
+    static constexpr ck_tile::index_t TileN          = {spec.tile_n};
+    static constexpr ck_tile::index_t TileK          = {spec.tile_k};
+    static constexpr ck_tile::index_t WarpPerBlock_M = {spec.warp_m};
+    static constexpr ck_tile::index_t WarpPerBlock_N = {spec.warp_n};
+    static constexpr ck_tile::index_t WarpPerBlock_K = {spec.warp_k};
+    static constexpr ck_tile::index_t WarpTileM      = {spec.warp_tile_m};
+    static constexpr ck_tile::index_t WarpTileN      = {spec.warp_tile_n};
+    static constexpr ck_tile::index_t WarpTileK      = {spec.warp_tile_k};
+
+    static constexpr bool kPadM            = {pad_m_str};
+    static constexpr bool kPadN            = {pad_n_str};
+    static constexpr bool kPadK            = {pad_k_str};
+    static constexpr bool TransposeC       = false;
+    static constexpr bool DoubleSmemBuffer = {dbl_smem};
+
+    using GemmShape = ck_tile::TileGemmShape<
+        ck_tile::sequence<TileM, TileN, TileK>,
+        ck_tile::sequence<WarpPerBlock_M, WarpPerBlock_N, WarpPerBlock_K>,
+        ck_tile::sequence<WarpTileM, WarpTileN, WarpTileK>>;
+
+    using TilePartitioner = ck_tile::GemmSpatiallyLocalTilePartitioner<GemmShape, 8, 4>;
+
+    using GemmUniversalTraits = ck_tile::TileGemmUniversalTraits<
+        kPadM, kPadN, kPadK,
+        DoubleSmemBuffer,
+        AsLayout, BsLayout, ELayout,
+        TransposeC>;
+
+    using Problem = ck_tile::BatchedContractionMultiABDProblem<
+        AsDataType, BsDataType, DsDataType, EDataType,
+        NumDimG, NumDimM, NumDimN, NumDimK>;
+
+    using AElementWise = ck_tile::element_wise::{spec.a_elementwise};
+    using BElementWise = ck_tile::element_wise::{spec.b_elementwise};
+
+    static constexpr auto scheduler = {scheduler_ck};
+
+    using UniversalGemmProblem = ck_tile::UniversalGemmPipelineProblem<
+        AsDataType, BsDataType, AccDataType,
+        GemmShape, GemmUniversalTraits,
+        scheduler, AElementWise, BElementWise>;
+
+    using GemmPipeline = {pipeline_ck}<UniversalGemmProblem>;
+
+{epilogue_block}
+
+    using Kernel = ck_tile::BatchedContractionMultiABDKernel<
+        Problem, TilePartitioner, GemmPipeline, GemmEpilogue>;
+
+    static float launch(
+        const ck_tile::BatchedContractionMultiABDHostArgs<
+            NumDimG, NumDimM, NumDimN, NumDimK,
+            NumATensor, NumBTensor, NumDTensor>& args,
+        const ck_tile::stream_config& stream)
+    {{
+        auto kargs = Kernel::MakeKernelArgs(args);
+
+        if(!Kernel::IsSupportedArguments(kargs))
+        {{
+            return -1.0f;
+        }}
+
+        const dim3 grids  = Kernel::GridSize(kargs);
+        const dim3 blocks = Kernel::GetBlockSize();
+
+        constexpr int kBlockPerCu = 1;
+        return ck_tile::launch_kernel(
+            stream, ck_tile::make_kernel<kBlockPerCu>(Kernel{{}}, grids, blocks, 0, kargs));
+    }}
+}};
+
+}} // namespace ns_{kernel_name}
+
+// ---------------------------------------------------------------------------
+// Re-export to global scope when force-included by the ctypes lib
+// ---------------------------------------------------------------------------
+#ifdef CK_TILE_SINGLE_KERNEL_INCLUDE
+
+using SelectedKernel = ns_{kernel_name}::SelectedKernel;
+constexpr const char* KERNEL_NAME = ns_{kernel_name}::KERNEL_NAME;
+
+// Tensor type/layout aliases (used by ctypes lib for validation and sizing)
+using AsDataType = ns_{kernel_name}::AsDataType;
+using BsDataType = ns_{kernel_name}::BsDataType;
+using DsDataType = ns_{kernel_name}::DsDataType;
+using EDataType  = ns_{kernel_name}::EDataType;
+
+using ALayout  = ns_{kernel_name}::ALayout;
+using BLayout  = ns_{kernel_name}::BLayout;
+using ELayout  = ns_{kernel_name}::ELayout;
+using DsLayout = ns_{kernel_name}::DsLayout;
+
+// Tensor count constants
+static constexpr ck_tile::index_t NumATensors = ns_{kernel_name}::NumATensor;
+static constexpr ck_tile::index_t NumBTensors = ns_{kernel_name}::NumBTensor;
+static constexpr ck_tile::index_t NumDTensors = ns_{kernel_name}::NumDTensor;
+
+// Dimension count constants
+static constexpr ck_tile::index_t NumDimsG = ns_{kernel_name}::NumDimG;
+static constexpr ck_tile::index_t NumDimsM = ns_{kernel_name}::NumDimM;
+static constexpr ck_tile::index_t NumDimsN = ns_{kernel_name}::NumDimN;
+static constexpr ck_tile::index_t NumDimsK = ns_{kernel_name}::NumDimK;
+
+#endif // CK_TILE_SINGLE_KERNEL_INCLUDE
+"""
+        return code
+
+
+# =============================================================================
+# Spec enumeration
+# =============================================================================
+
+
+def build_specs(config: dict) -> List[ContractionMultiABDKernelSpec]:
+    """Enumerate all specs from a config dict."""
+    dtypes     = config.get("dtypes",     ["fp16"])
+    layouts    = config.get("layouts",    ["rcr"])
+    pipelines  = config.get("pipelines",  ["compv3"])
+    epilogues  = config.get("epilogues",  ["cshuffle"])
+    schedulers = config.get("schedulers", ["intrawave"])
+
+    pad_options = config.get("pad_options", [{"pad_m": False, "pad_n": False, "pad_k": False}])
+
+    tile_cfgs  = config.get("tile_configs", [
+        {"tile_m": 256, "tile_n": 256, "tile_k": 64,
+         "warp_m": 2,   "warp_n": 2,   "warp_k": 1,
+         "warp_tile_m": 32, "warp_tile_n": 32, "warp_tile_k": 16},
+    ])
+
+    num_a_tensors = config.get("num_a_tensors", [1])
+    num_b_tensors = config.get("num_b_tensors", [1])
+    num_d_tensors = config.get("num_d_tensors", [1])
+    dim_combos    = config.get("dim_combos", [
+        {"num_dim_g": 1, "num_dim_m": 2, "num_dim_n": 2, "num_dim_k": 1}
+    ])
+
+    a_elementwise  = config.get("a_elementwise",  "PassThrough")
+    b_elementwise  = config.get("b_elementwise",  "PassThrough")
+    cde_elementwise = config.get("cde_elementwise", "AddDs")
+
+    specs = []
+    for (dtype, layout, pipeline, epilogue, scheduler,
+         pad_opt, tile_cfg,
+         na, nb, nd, dim_combo) in itertools.product(
+            dtypes, layouts, pipelines, epilogues, schedulers,
+            pad_options, tile_cfgs,
+            num_a_tensors, num_b_tensors, num_d_tensors, dim_combos):
+
+        if (pipeline, scheduler) in _UNSUPPORTED_PIPELINE_SCHEDULER:
+            continue
+
+        tc = TileConfig(
+            tile_m=tile_cfg["tile_m"], tile_n=tile_cfg["tile_n"], tile_k=tile_cfg["tile_k"],
+            warp_m=tile_cfg["warp_m"], warp_n=tile_cfg["warp_n"], warp_k=tile_cfg["warp_k"],
+            warp_tile_m=tile_cfg["warp_tile_m"],
+            warp_tile_n=tile_cfg["warp_tile_n"],
+            warp_tile_k=tile_cfg["warp_tile_k"],
+        )
+        if not tc.is_valid():
+            continue
+
+        specs.append(ContractionMultiABDKernelSpec(
+            dtype=dtype,
+            layout=layout,
+            pipeline=pipeline,
+            epilogue=epilogue,
+            scheduler=scheduler,
+            tile_m=tc.tile_m, tile_n=tc.tile_n, tile_k=tc.tile_k,
+            warp_m=tc.warp_m, warp_n=tc.warp_n, warp_k=tc.warp_k,
+            warp_tile_m=tc.warp_tile_m,
+            warp_tile_n=tc.warp_tile_n,
+            warp_tile_k=tc.warp_tile_k,
+            pad_m=pad_opt.get("pad_m", False),
+            pad_n=pad_opt.get("pad_n", False),
+            pad_k=pad_opt.get("pad_k", False),
+            num_a_tensor=na,
+            num_b_tensor=nb,
+            num_d_tensor=nd,
+            num_dim_g=dim_combo["num_dim_g"],
+            num_dim_m=dim_combo["num_dim_m"],
+            num_dim_n=dim_combo["num_dim_n"],
+            num_dim_k=dim_combo["num_dim_k"],
+            a_elementwise=a_elementwise,
+            b_elementwise=b_elementwise,
+            cde_elementwise=cde_elementwise,
+        ))
+
+    return specs
+
+
+# =============================================================================
+# Generation entry points
+# =============================================================================
+
+
+def generate_one(spec: ContractionMultiABDKernelSpec, output_dir: Path) -> Optional[Path]:
+    gen = ContractionMultiABDHeaderGenerator()
+    code = gen.generate(spec)
+    out_path = output_dir / f"{spec.name}.hpp"
+    out_path.write_text(code)
+    log.debug("Generated %s", out_path)
+    return out_path
+
+
+def generate_kernels(output_dir: Path, config: dict, *, max_workers: int = 8) -> List[Path]:
+    """Generate all kernel headers in parallel, return list of paths."""
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    specs = build_specs(config)
+    log.info("Generating %d kernel headers in %s", len(specs), output_dir)
+
+    def _gen(spec):
+        return generate_one(spec, output_dir)
+
+    return parallel_generate(_gen, specs)
+
+
+# =============================================================================
+# CLI
+# =============================================================================
+
+
+_DEFAULT_CONFIG: dict = {
+    "dtypes":     ["fp16"],
+    "layouts":    ["rcr"],
+    "pipelines":  ["compv3"],
+    "epilogues":  ["cshuffle"],
+    "schedulers": ["intrawave"],
+    "pad_options": [{"pad_m": False, "pad_n": False, "pad_k": False}],
+    "tile_configs": [
+        {"tile_m": 256, "tile_n": 256, "tile_k": 64,
+         "warp_m": 2,   "warp_n": 2,   "warp_k": 1,
+         "warp_tile_m": 32, "warp_tile_n": 32, "warp_tile_k": 16},
+    ],
+    "num_a_tensors": [1],
+    "num_b_tensors": [1],
+    "num_d_tensors": [1],
+    "dim_combos": [
+        {"num_dim_g": 1, "num_dim_m": 2, "num_dim_n": 2, "num_dim_k": 1}
+    ],
+    "a_elementwise":   "PassThrough",
+    "b_elementwise":   "PassThrough",
+    "cde_elementwise": "AddDs",
+}
+
+
+def _parse_args():
+    p = argparse.ArgumentParser(
+        description="Generate batched_contraction_multi_abd kernel headers."
+    )
+    p.add_argument("--output-dir", required=True, help="Directory to write .hpp files")
+    p.add_argument("--config",     default=None,  help="JSON config file (optional)")
+    p.add_argument("--list-name",  action="store_true",
+                   help="Print the kernel name for the default config (for --list-name use)")
+    p.add_argument("--max-workers", type=int, default=8, help="Codegen parallelism")
+    return p.parse_args()
+
+
+def main():
+    args = _parse_args()
+
+    config = dict(_DEFAULT_CONFIG)
+    if args.config:
+        import json
+        with open(args.config) as f:
+            config.update(json.load(f))
+
+    if args.list_name:
+        specs = build_specs(config)
+        for s in specs:
+            print(s.name)
+        return
+
+    paths = generate_kernels(Path(args.output_dir), config, max_workers=args.max_workers)
+    log.info("Wrote %d headers", len(paths))
+
+
+if __name__ == "__main__":
+    main()

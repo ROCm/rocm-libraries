@@ -337,6 +337,29 @@ if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/batched_gemm_ctypes_lib.cpp)
     endif()
 endif()
 
+# --- Batched-Contraction Multi-ABD (registry-bypass, multi-tensor + multi-dim ABI) ---
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/batched_contraction_multi_abd_ctypes_lib.cpp)
+    file(GLOB CMA_KERNEL_HEADERS
+        "${CMAKE_BINARY_DIR}/generated_kernels/contraction_multi_abd_*.hpp")
+    if(CMA_KERNEL_HEADERS)
+        list(SORT CMA_KERNEL_HEADERS)
+        list(GET CMA_KERNEL_HEADERS 0 CMA_KERNEL_HEADER)
+        message(STATUS "Found batched-contraction-multi-abd kernel for ctypes lib: ${CMA_KERNEL_HEADER}")
+        add_ctypes_library(dispatcher_batched_contraction_multi_abd_lib
+            batched_contraction_multi_abd_ctypes_lib.cpp
+            KERNEL_HEADER ${CMA_KERNEL_HEADER}
+        )
+        target_compile_definitions(dispatcher_batched_contraction_multi_abd_lib PRIVATE
+            CK_TILE_SINGLE_KERNEL_INCLUDE
+        )
+    else()
+        message(STATUS
+            "No batched-contraction-multi-abd kernel found for ctypes lib - skipping "
+            "dispatcher_batched_contraction_multi_abd_lib (built at runtime by the Python "
+            "bridge once a kernel header exists)")
+    endif()
+endif()
+
 # --- Batched-Contraction (registry-bypass, force-included kernel) ------------
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/batched_contraction_ctypes_lib.cpp)
     file(GLOB BC_KERNEL_HEADERS "${CMAKE_BINARY_DIR}/generated_kernels/batched_contraction_*.hpp")
