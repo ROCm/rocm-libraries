@@ -203,7 +203,7 @@ protected:
         bwdAttributes.set_name("SdpaBwdNode");
         if(testCase.attnScaleValue.has_value())
         {
-            bwdAttributes.set_attn_scale_value(testCase.attnScaleValue.value());
+            bwdAttributes.set_attn_scale(testCase.attnScaleValue.value());
         }
         if(testCase.leftBound >= 0)
         {
