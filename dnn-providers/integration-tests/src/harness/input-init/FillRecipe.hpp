@@ -6,7 +6,7 @@
 namespace hipdnn_integration_tests
 {
 
-struct FillSpec
+struct FillRecipe
 {
     enum class Kind
     {
@@ -24,30 +24,30 @@ struct FillSpec
     float hi = K_DEFAULT_HI;
     float value = 0.0f;
 
-    static FillSpec free(float lo, float hi)
+    static FillRecipe free(float lo, float hi)
     {
-        FillSpec f;
+        FillRecipe f;
         f.kind = Kind::FREE;
         f.lo = lo;
         f.hi = hi;
         return f;
     }
-    static FillSpec fixed(float v)
+    static FillRecipe fixed(float v)
     {
-        FillSpec f;
+        FillRecipe f;
         f.kind = Kind::FIXED;
         f.value = v;
         return f;
     }
-    static FillSpec structured()
+    static FillRecipe structured()
     {
-        FillSpec f;
+        FillRecipe f;
         f.kind = Kind::STRUCTURED;
         return f;
     }
-    static FillSpec derived()
+    static FillRecipe derived()
     {
-        FillSpec f;
+        FillRecipe f;
         f.kind = Kind::DERIVED;
         return f;
     }
