@@ -35,10 +35,10 @@ namespace hipdnn_frontend
 /// -fno-rtti public headers can downcast without dynamic_cast.
 enum class ConstraintKind
 {
-    Int,
-    Float,
-    String,
-    Empty
+    INT,
+    FLOAT,
+    STRING,
+    EMPTY
 };
 
 class IConstraint
@@ -95,7 +95,7 @@ public:
 
     ConstraintKind kind() const override
     {
-        return ConstraintKind::Int;
+        return ConstraintKind::INT;
     }
 
     Error validateKnobSetting(const KnobSetting& setting) const override
@@ -209,7 +209,7 @@ public:
 
     ConstraintKind kind() const override
     {
-        return ConstraintKind::Float;
+        return ConstraintKind::FLOAT;
     }
 
     Error validateKnobSetting(const KnobSetting& setting) const override
@@ -279,7 +279,7 @@ public:
 
     ConstraintKind kind() const override
     {
-        return ConstraintKind::String;
+        return ConstraintKind::STRING;
     }
 
     Error validateKnobSetting(const KnobSetting& setting) const override
@@ -359,7 +359,7 @@ public:
 
     ConstraintKind kind() const override
     {
-        return ConstraintKind::Empty;
+        return ConstraintKind::EMPTY;
     }
 
     Error validateKnobSetting(const KnobSetting& /*setting*/) const override

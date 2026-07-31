@@ -311,7 +311,9 @@ enum class BehaviorNote : int32_t
     // do not emit the cuDNN-only notes; they are advisory in the shim.
     NOT_SET = 0, ///< No behavior note set (cuDNN compatibility).
     RUNTIME_COMPILATION = 1, ///< Engine may compile kernels or other code at runtime.
+    // NOLINTNEXTLINE(readability-identifier-naming)
     REQUIRES_FILTER_INT8x32_REORDER = 2, ///< cuDNN INT8x32 filter reorder (advisory).
+    // NOLINTNEXTLINE(readability-identifier-naming)
     REQUIRES_BIAS_INT8x32_REORDER = 3, ///< cuDNN INT8x32 bias reorder (advisory).
     SUPPORTS_CUDA_GRAPH_NATIVE_API = 4, ///< cuDNN CUDA-graph native API (advisory).
     CUBLASLT_DEPENDENCY = 5, ///< cuDNN cuBLASLt dependency (advisory).
@@ -341,8 +343,11 @@ enum class NumericalNote : int32_t
     FFT = 4, ///< Engine uses an FFT-based algorithm.
     NONDETERMINISTIC = 5, ///< Engine may produce non-deterministic results.
     WINOGRAD = 6, ///< Engine uses a Winograd algorithm.
+    // NOLINTNEXTLINE(readability-identifier-naming)
     WINOGRAD_TILE_4x4 = 7, ///< Winograd with a 4x4 tile.
+    // NOLINTNEXTLINE(readability-identifier-naming)
     WINOGRAD_TILE_6x6 = 8, ///< Winograd with a 6x6 tile.
+    // NOLINTNEXTLINE(readability-identifier-naming)
     WINOGRAD_TILE_13x13 = 9, ///< Winograd with a 13x13 tile.
     STRICT_NAN_PROP = 10 ///< Engine strictly propagates NaNs.
 };

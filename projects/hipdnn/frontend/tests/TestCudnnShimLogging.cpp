@@ -55,7 +55,7 @@ protected:
         sdk_logging::resetLogLevelCache();
     }
 
-    void clearLoggingEnv()
+    static void clearLoggingEnv()
     {
         sdk_utilities::unsetEnv(CUDNN_LOG_INFO_ENV);
         sdk_utilities::unsetEnv(CUDNN_LOG_FILE_ENV);

@@ -12,8 +12,6 @@
 #include <string>
 #include <vector>
 
-namespace cudnn_frontend = hipdnn_frontend::compatibility::cudnn_frontend;
-
 namespace
 {
 namespace fe = hipdnn_frontend::compatibility::cudnn_frontend;

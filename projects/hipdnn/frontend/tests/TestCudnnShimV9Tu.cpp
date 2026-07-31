@@ -68,7 +68,7 @@ cudnnStatus_t statusFor(cudnnHandle_t /*handle*/)
 
 TEST(TestCudnnShimV9Tu, V9OnlyTranslationUnitCompilesAndLinks)
 {
-    cudnn_frontend::graph::Graph graph;
+    [[maybe_unused]] const cudnn_frontend::graph::Graph graph;
 
     EXPECT_TRUE(makeOk().is_good());
     EXPECT_EQ(K_IO_TYPE, cudnn_frontend::DataType_t::HALF);

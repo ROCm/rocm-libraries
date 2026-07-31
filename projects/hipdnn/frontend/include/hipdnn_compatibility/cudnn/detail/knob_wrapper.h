@@ -245,7 +245,7 @@ inline std::optional<Knob> projectNativeKnob(const hipdnn_frontend::Knob& native
     }
 
     const auto* rawConstraint = nativeKnob.constraint();
-    if(rawConstraint == nullptr || rawConstraint->kind() != hipdnn_frontend::ConstraintKind::Int)
+    if(rawConstraint == nullptr || rawConstraint->kind() != hipdnn_frontend::ConstraintKind::INT)
     {
         HIPDNN_FE_LOG_WARN("[cudnn_frontend] Omitting hipDNN knob '"
                            << nativeKnob.knobId()

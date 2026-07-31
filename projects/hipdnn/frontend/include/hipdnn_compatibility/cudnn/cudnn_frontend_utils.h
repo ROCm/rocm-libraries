@@ -46,6 +46,7 @@ using hipdnn_frontend::ResampleMode_t;
 // native knobs are open-ended string IDs with richer typed constraints, so the
 // shim intentionally owns a cuDNN-shaped type here and maps it explicitly when
 // forwarding to hipDNN.
+// NOLINTNEXTLINE(readability-identifier-naming)
 enum class KnobType_t
 {
     NOT_SET,
