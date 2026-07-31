@@ -503,13 +503,14 @@ TEST(TestMoeGroupedMatmulPlanBuilder, RoutingContractMatchesFrontendNode)
                               bool hasTokenKs,
                               int32_t topK,
                               DataType firstTokenOffsetDataType = DataType::INT32,
-                              DataType tokenIndexDataType = DataType::INT32) {
+                              DataType tokenIndexDataType = DataType::INT32,
+                              DataType tokenKsDataType = DataType::INT32) {
         return MoeGroupedMatmulRouting{mode,
                                        hasTokenIndex,
                                        hasTokenKs,
                                        firstTokenOffsetDataType,
                                        hasTokenIndex ? tokenIndexDataType : DataType::UNSET,
-                                       hasTokenKs ? DataType::INT32 : DataType::UNSET,
+                                       hasTokenKs ? tokenKsDataType : DataType::UNSET,
                                        topK,
                                        EXPERT_COUNT};
     };
@@ -549,6 +550,22 @@ TEST(TestMoeGroupedMatmulPlanBuilder, RoutingContractMatchesFrontendNode)
              attrs.set_token_index(makeRoutingTensor(4, hipdnn_frontend::DataType::FLOAT));
          },
          routingOf(MoeGroupedMatmulMode::GATHER, true, false, 0, DataType::INT32, DataType::FLOAT),
+         false,
+         false},
+        {"ScatterWithFloatTokenKs",
+         [](auto& attrs) {
+             attrs.set_mode(FrontendMode::SCATTER);
+             attrs.set_token_index(makeRoutingTensor(4));
+             attrs.set_token_ks(makeRoutingTensor(5, hipdnn_frontend::DataType::FLOAT));
+             attrs.set_top_k(2);
+         },
+         routingOf(MoeGroupedMatmulMode::SCATTER,
+                   true,
+                   true,
+                   2,
+                   DataType::INT32,
+                   DataType::INT32,
+                   DataType::FLOAT),
          false,
          false},
         {"ScatterWithoutTokenKs",

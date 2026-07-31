@@ -238,7 +238,7 @@ TEST(TestCpuFpReferenceMoeGroupedMatmul, DecreasingOffsetsThrows)
 
     EXPECT_THROW((CpuFpReferenceMoeGroupedMatmul::forward<float, float, float, float>(
                      token, weight, offsets, output, Mode::NONE, 0)),
-                std::runtime_error);
+                 std::runtime_error);
 }
 
 TEST(TestCpuFpReferenceMoeGroupedMatmul, FirstTokenOffsetExceedsRowsTotalThrows)
@@ -251,9 +251,12 @@ TEST(TestCpuFpReferenceMoeGroupedMatmul, FirstTokenOffsetExceedsRowsTotalThrows)
     setValues(offsets, {0, 5});
     auto output = createTensor<float>({1, 2, 1});
 
-    EXPECT_THROW((CpuFpReferenceMoeGroupedMatmul::forward<float, float, float, float>(
-                     token, weight, offsets, output, Mode::NONE, 0)),
-                std::runtime_error);
+    expectRejectedWith(
+        [&] {
+            CpuFpReferenceMoeGroupedMatmul::forward<float, float, float, float>(
+                token, weight, offsets, output, Mode::NONE, 0);
+        },
+        "FirstTokenOffset[1]");
 }
 
 TEST(TestCpuFpReferenceMoeGroupedMatmul, GatherTokenIndexEqualToTokenRowsThrows)
@@ -270,7 +273,7 @@ TEST(TestCpuFpReferenceMoeGroupedMatmul, GatherTokenIndexEqualToTokenRowsThrows)
 
     EXPECT_THROW((CpuFpReferenceMoeGroupedMatmul::forward<float, float, float, float>(
                      token, weight, offsets, output, Mode::GATHER, 0, &tokenIndex)),
-                std::runtime_error);
+                 std::runtime_error);
 }
 
 TEST(TestCpuFpReferenceMoeGroupedMatmul, GatherTokenIndexNegativeThrows)
@@ -287,7 +290,7 @@ TEST(TestCpuFpReferenceMoeGroupedMatmul, GatherTokenIndexNegativeThrows)
 
     EXPECT_THROW((CpuFpReferenceMoeGroupedMatmul::forward<float, float, float, float>(
                      token, weight, offsets, output, Mode::GATHER, 0, &tokenIndex)),
-                std::runtime_error);
+                 std::runtime_error);
 }
 
 TEST(TestCpuFpReferenceMoeGroupedMatmul, ScatterTokenKsEqualToTopKThrows)
@@ -306,7 +309,7 @@ TEST(TestCpuFpReferenceMoeGroupedMatmul, ScatterTokenKsEqualToTopKThrows)
 
     EXPECT_THROW((CpuFpReferenceMoeGroupedMatmul::forward<float, float, float, float>(
                      token, weight, offsets, output, Mode::SCATTER, 1, &tokenIndex, &tokenKs)),
-                std::runtime_error);
+                 std::runtime_error);
 }
 
 TEST(TestCpuFpReferenceMoeGroupedMatmul, ScatterDuplicateDestinationsThrows)
@@ -325,7 +328,7 @@ TEST(TestCpuFpReferenceMoeGroupedMatmul, ScatterDuplicateDestinationsThrows)
 
     EXPECT_THROW((CpuFpReferenceMoeGroupedMatmul::forward<float, float, float, float>(
                      token, weight, offsets, output, Mode::SCATTER, 1, &tokenIndex, &tokenKs)),
-                std::runtime_error);
+                 std::runtime_error);
 }
 
 TEST(TestCpuFpReferenceMoeGroupedMatmul, ScatterTopKExceedsExpertCountThrows)
@@ -344,7 +347,7 @@ TEST(TestCpuFpReferenceMoeGroupedMatmul, ScatterTopKExceedsExpertCountThrows)
 
     EXPECT_THROW((CpuFpReferenceMoeGroupedMatmul::forward<float, float, float, float>(
                      token, weight, offsets, output, Mode::SCATTER, 2, &tokenIndex, &tokenKs)),
-                std::runtime_error);
+                 std::runtime_error);
 }
 
 TEST(TestCpuFpReferenceMoeGroupedMatmul, MismatchedHiddenSizeThrows)
@@ -359,7 +362,7 @@ TEST(TestCpuFpReferenceMoeGroupedMatmul, MismatchedHiddenSizeThrows)
 
     EXPECT_THROW((CpuFpReferenceMoeGroupedMatmul::forward<float, float, float, float>(
                      token, weight, offsets, output, Mode::NONE, 0)),
-                std::runtime_error);
+                 std::runtime_error);
 }
 
 TEST(TestCpuFpReferenceMoeGroupedMatmul, MissingTokenIndexForGatherThrows)
@@ -374,7 +377,7 @@ TEST(TestCpuFpReferenceMoeGroupedMatmul, MissingTokenIndexForGatherThrows)
 
     EXPECT_THROW((CpuFpReferenceMoeGroupedMatmul::forward<float, float, float, float>(
                      token, weight, offsets, output, Mode::GATHER, 0, nullptr)),
-                std::runtime_error);
+                 std::runtime_error);
 }
 
 TEST(TestCpuFpReferenceMoeGroupedMatmul, MissingTokenKsForScatterThrows)
@@ -391,7 +394,7 @@ TEST(TestCpuFpReferenceMoeGroupedMatmul, MissingTokenKsForScatterThrows)
 
     EXPECT_THROW((CpuFpReferenceMoeGroupedMatmul::forward<float, float, float, float>(
                      token, weight, offsets, output, Mode::SCATTER, 1, &tokenIndex, nullptr)),
-                std::runtime_error);
+                 std::runtime_error);
 }
 
 TEST(TestCpuFpReferenceMoeGroupedMatmul, RankTwoTokenThrows)
@@ -406,7 +409,147 @@ TEST(TestCpuFpReferenceMoeGroupedMatmul, RankTwoTokenThrows)
 
     EXPECT_THROW((CpuFpReferenceMoeGroupedMatmul::forward<float, float, float, float>(
                      token, weight, offsets, output, Mode::NONE, 0)),
-                std::runtime_error);
+                 std::runtime_error);
+}
+
+TEST(TestCpuFpReferenceMoeGroupedMatmul, InvalidCoreShapesThrow)
+{
+    struct ShapeCase
+    {
+        const char* name;
+        std::vector<int64_t> tokenDims;
+        std::vector<int64_t> firstTokenOffsetDims;
+        std::vector<int64_t> outputDims;
+        const char* reason;
+    };
+
+    const std::vector<ShapeCase> cases = {
+        {"TokenLeadingDimension", {2, 2, 1}, {2, 1, 1}, {1, 2, 1}, "token must have"},
+        {"OutputLeadingDimension", {1, 2, 1}, {2, 1, 1}, {2, 2, 1}, "output must have"},
+        {"FirstTokenOffsetShape", {1, 2, 1}, {2, 2, 1}, {1, 2, 1}, "first_token_offset"},
+        {"OutputWidth", {1, 2, 1}, {2, 1, 1}, {1, 2, 2}, "output width"},
+        {"OffsetGroupCount", {1, 2, 1}, {3, 1, 1}, {1, 2, 1}, "multiple of the expert count"},
+    };
+
+    for(const auto& testCase : cases)
+    {
+        SCOPED_TRACE(testCase.name);
+        auto token = createTensor<float>(testCase.tokenDims);
+        auto weight = createTensor<float>({2, 1, 1});
+        auto offsets = createTensor<int32_t>(testCase.firstTokenOffsetDims);
+        auto output = createTensor<float>(testCase.outputDims);
+
+        expectRejectedWith(
+            [&] {
+                CpuFpReferenceMoeGroupedMatmul::forward<float, float, float, float>(
+                    token, weight, offsets, output, Mode::NONE, 0);
+            },
+            testCase.reason);
+    }
+}
+
+TEST(TestCpuFpReferenceMoeGroupedMatmul, InvalidRoutingShapesThrow)
+{
+    struct RoutingShapeCase
+    {
+        const char* name;
+        Mode mode;
+        std::vector<int64_t> tokenIndexDims;
+        std::vector<int64_t> tokenKsDims;
+    };
+
+    const std::vector<RoutingShapeCase> cases = {
+        {"GatherTokenIndexRank", Mode::GATHER, {2, 2}, {1, 2, 1}},
+        {"GatherTokenIndexLeadingDimension", Mode::GATHER, {2, 2, 1}, {1, 2, 1}},
+        {"GatherTokenIndexTrailingDimension", Mode::GATHER, {1, 2, 2}, {1, 2, 1}},
+        {"ScatterTokenKsRank", Mode::SCATTER, {1, 2, 1}, {2, 2}},
+    };
+
+    for(const auto& testCase : cases)
+    {
+        SCOPED_TRACE(testCase.name);
+        auto token = createTensor<float>({1, 2, 1});
+        auto weight = createTensor<float>({1, 1, 1});
+        auto offsets = createTensor<int32_t>({1, 1, 1});
+        auto tokenIndex = createTensor<int32_t>(testCase.tokenIndexDims);
+        auto tokenKs = createTensor<int32_t>(testCase.tokenKsDims);
+        auto output = createTensor<float>({1, 2, 1});
+
+        expectRejectedWith(
+            [&] {
+                CpuFpReferenceMoeGroupedMatmul::forward<float, float, float, float>(
+                    token,
+                    weight,
+                    offsets,
+                    output,
+                    testCase.mode,
+                    testCase.mode == Mode::SCATTER ? 1 : 0,
+                    &tokenIndex,
+                    testCase.mode == Mode::SCATTER ? &tokenKs : nullptr);
+            },
+            "must have shape [1, rows, 1]");
+    }
+}
+
+TEST(TestCpuFpReferenceMoeGroupedMatmul, ScatterRoutingLengthsMustMatch)
+{
+    auto token = createTensor<float>({1, 2, 1});
+    auto weight = createTensor<float>({1, 1, 1});
+    auto offsets = createTensor<int32_t>({1, 1, 1});
+    auto tokenIndex = createTensor<int32_t>({1, 2, 1});
+    auto tokenKs = createTensor<int32_t>({1, 1, 1});
+    auto output = createTensor<float>({1, 2, 1});
+
+    expectRejectedWith(
+        [&] {
+            CpuFpReferenceMoeGroupedMatmul::forward<float, float, float, float>(
+                token, weight, offsets, output, Mode::SCATTER, 1, &tokenIndex, &tokenKs);
+        },
+        "must have equal length");
+}
+
+TEST(TestCpuFpReferenceMoeGroupedMatmul, GatherOutputRowsMustMatchRoutingRows)
+{
+    auto token = createTensor<float>({1, 2, 1});
+    auto weight = createTensor<float>({1, 1, 1});
+    auto offsets = createTensor<int32_t>({1, 1, 1});
+    auto tokenIndex = createTensor<int32_t>({1, 2, 1});
+    auto output = createTensor<float>({1, 1, 1});
+
+    expectRejectedWith(
+        [&] {
+            CpuFpReferenceMoeGroupedMatmul::forward<float, float, float, float>(
+                token, weight, offsets, output, Mode::GATHER, 0, &tokenIndex);
+        },
+        "output row count to equal the routed row count");
+}
+
+TEST(TestCpuFpReferenceMoeGroupedMatmul, NonGatherOutputRowsMustMatchTokenRows)
+{
+    for(const Mode mode : {Mode::NONE, Mode::SCATTER})
+    {
+        SCOPED_TRACE(mode == Mode::NONE ? "NONE" : "SCATTER");
+        auto token = createTensor<float>({1, 2, 1});
+        auto weight = createTensor<float>({1, 1, 1});
+        auto offsets = createTensor<int32_t>({1, 1, 1});
+        auto tokenIndex = createTensor<int32_t>({1, 2, 1});
+        auto tokenKs = createTensor<int32_t>({1, 2, 1});
+        auto output = createTensor<float>({1, 1, 1});
+
+        expectRejectedWith(
+            [&] {
+                CpuFpReferenceMoeGroupedMatmul::forward<float, float, float, float>(
+                    token,
+                    weight,
+                    offsets,
+                    output,
+                    mode,
+                    mode == Mode::SCATTER ? 1 : 0,
+                    mode == Mode::SCATTER ? &tokenIndex : nullptr,
+                    mode == Mode::SCATTER ? &tokenKs : nullptr);
+            },
+            "output row count must equal the token row count");
+    }
 }
 
 // SCATTER indexes both routing tensors by token row, so a shorter routing tensor

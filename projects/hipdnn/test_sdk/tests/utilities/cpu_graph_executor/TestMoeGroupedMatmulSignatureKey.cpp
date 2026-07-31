@@ -4,7 +4,6 @@
 #include <gtest/gtest.h>
 #include <sstream>
 #include <unordered_map>
-#include <unordered_set>
 
 #include "MoeGroupedMatmulGraphUtils.hpp"
 #include "MoeGroupedMatmulTensorBundles.hpp"
@@ -57,25 +56,21 @@ TEST(TestMoeGroupedMatmulSignatureKey, EqualityOperator)
     EXPECT_FALSE(key11 == key12);
 }
 
-TEST(TestMoeGroupedMatmulSignatureKey, HashFunction)
+TEST(TestMoeGroupedMatmulSignatureKey, HashFunctionSupportsUnorderedLookup)
 {
-    const MoeGroupedMatmulSignatureKey key1{
+    const MoeGroupedMatmulSignatureKey key{
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
-    const MoeGroupedMatmulSignatureKey key2{
+    const MoeGroupedMatmulSignatureKey equalKey{
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
-    EXPECT_EQ(key1.hashSelf(), key2.hashSelf());
-
-    const MoeGroupedMatmulSignatureKey key3{
+    const MoeGroupedMatmulSignatureKey differentKey{
         DataType::HALF, DataType::FLOAT, DataType::FLOAT, DataType::HALF};
-    const MoeGroupedMatmulSignatureKey key4{
-        DataType::FLOAT, DataType::HALF, DataType::FLOAT, DataType::FLOAT};
-    const MoeGroupedMatmulSignatureKey key5{
-        DataType::FLOAT, DataType::FLOAT, DataType::HALF, DataType::FLOAT};
 
-    const auto hash3 = key3.hashSelf();
-    const auto hash4 = key4.hashSelf();
-    const auto hash5 = key5.hashSelf();
-    EXPECT_TRUE(hash3 != hash4 && hash3 != hash5 && hash4 != hash5);
+    EXPECT_EQ(key.hashSelf(), equalKey.hashSelf());
+
+    std::unordered_map<MoeGroupedMatmulSignatureKey, int, MoeGroupedMatmulSignatureKey> builders;
+    builders.emplace(key, 42);
+    EXPECT_EQ(builders.at(equalKey), 42);
+    EXPECT_EQ(builders.find(differentKey), builders.end());
 }
 
 TEST(TestMoeGroupedMatmulSignatureKey, Copy)
@@ -98,7 +93,8 @@ TEST(TestMoeGroupedMatmulSignatureKey, CreateFromNodeAndTensorMap)
 
     MoeGroupedMatmulTensorBundle<float> tensorBundle(
         2, 3, 4, 6, 6, MoeGroupedMatmulMode::NONE, 0, 1);
-    auto graphTuple = buildMoeGroupedMatmulGraph(tensorBundle, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT);
+    auto graphTuple = buildMoeGroupedMatmulGraph(
+        tensorBundle, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT);
 
     auto& graph = std::get<0>(graphTuple);
     auto [serializedGraph, serErr] = graph->to_binary();
@@ -131,7 +127,7 @@ TEST(TestMoeGroupedMatmulSignatureKey, CastFailureThrows)
 
     EXPECT_THROW(MoeGroupedMatmulSignatureKey(
                      graphWrap.getNode(0), graphWrap.getTensorMap(), DataType::FLOAT),
-                std::runtime_error);
+                 std::runtime_error);
 }
 
 TEST(TestMoeGroupedMatmulSignatureKey, GetPlanBuildersReturnsExactlySevenEntries)
