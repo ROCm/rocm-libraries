@@ -957,8 +957,16 @@ class Solution(collections.abc.Mapping):
       isa = state["ISA"]
       if isaInfoMap[isa].asmCaps.get("HasMFMA", False):
         state["UseMFMAF32XEmulation"] = True # MFMA version for gfx950 etc.
-      # TF32 Emu Inf support: enabled by default for F32X emulation
-      state["_UseTF32EmuInfSupport"] = True
+      # F32X emulation Inf support (v_cmp_class inf guard so inf*inf -> inf, not nan).
+      # Tri-state UseF32XEmulationInfSupport: -1 = arch default, 0 = force off, 1 = force on.
+      # Arch default: OFF for gfx950 (MFMA emulation; ~10%+ perf drop), ON for gfx1250+.
+      infSupport = state.get("UseF32XEmulationInfSupport", -1)
+      if infSupport == -1:
+        infSupport = 1 if tuple(isa[:2]) >= (12, 5) else 0
+      state["UseF32XEmulationInfSupport"] = infSupport
+    else:
+      # Inf support is meaningless without F32X emulation; pin to a concrete 0.
+      state["UseF32XEmulationInfSupport"] = 0
 
     state["MfmaInitCVgprs"] = False
 
@@ -2785,9 +2793,11 @@ class Solution(collections.abc.Mapping):
         state["UseDirect32XEmulation"] = False
 
     # workaround for TF32 Emu Inf support:
-    # disable CMS for now (Inf-guard code scheduling not yet handled under CMS)
+    # disable CMS only when the Inf-guard is actually active (its pack-path
+    # instruction scheduling is not yet handled under CMS). When inf support is
+    # off (e.g. gfx950 default), CMS is left untouched.
     # TODO: re-enable CMS with Inf support
-    if state["UseF32XEmulation"]:
+    if state["UseF32XEmulation"] and state.get("UseF32XEmulationInfSupport", 0):
       state["UseCustomMainLoopSchedule"] = 0
 
     # backup UsePLRPack from yaml before calling hasCustomSchedule
