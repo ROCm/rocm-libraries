@@ -4,7 +4,7 @@
 // Host-only unit tests for the client string<->enum helpers declared in
 // hipblaslt_datatype2string.hpp. Nothing here touches a device, so this file is
 // compiled into both hipblaslt-test (where it runs in the existing CI lane) and
-// the standalone hipblaslt-client-unit-tests binary (which needs no GPU).
+// the standalone hipblaslt-test-hostunit binary (which needs no GPU).
 //
 // The names carry two selectors. The `HostUnit` suite prefix is the one that
 // picks these cases up in PR CI: every tier in clients/tests/test_categories.yaml
