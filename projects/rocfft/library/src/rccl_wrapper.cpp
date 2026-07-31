@@ -58,20 +58,67 @@ static ncclDataType_t get_nccl_dtype(rocfft_precision precision)
 // implementation details shared by all copies of a handle via shared_ptr
 struct rocfft_rccl_comm_t::Impl
 {
+    // RAII owner for an ncclComm_t: finalizes/destroys on the comm's own
+    // device (stored here) and restores the caller's device, in a noexcept dtor
+    struct ncclComm_wrapper_t
+    {
+        ncclComm_wrapper_t() = default;
+        ncclComm_wrapper_t(ncclComm_t comm, int device)
+            : comm(comm)
+            , device(device)
+        {
+        }
+        ncclComm_wrapper_t(ncclComm_wrapper_t&& other) noexcept
+            : comm(other.comm)
+            , device(other.device)
+        {
+            other.comm = nullptr;
+        }
+        ncclComm_wrapper_t& operator=(ncclComm_wrapper_t&& other) noexcept
+        {
+            std::swap(comm, other.comm);
+            std::swap(device, other.device);
+            return *this;
+        }
+        ncclComm_wrapper_t(const ncclComm_wrapper_t&) = delete;
+        ncclComm_wrapper_t& operator=(const ncclComm_wrapper_t&) = delete;
+        ~ncclComm_wrapper_t()
+        {
+            if(!comm)
+                return;
+            // raw hipSetDevice (rocfft_scoped_device can throw)
+            int orig_device = 0;
+            (void)hipGetDevice(&orig_device);
+            (void)hipSetDevice(device);
+            ncclCommFinalize(comm);
+            ncclCommDestroy(comm);
+            (void)hipSetDevice(orig_device);
+        }
+        operator ncclComm_t() const
+        {
+            return comm;
+        }
+
+        ncclComm_t comm   = nullptr;
+        int        device = 0;
+    };
+
     // per-device state: comm + the stream it launches on. RCCL requires a
     // comm to always use the same stream (NCCL "CUDA Stream Semantics"), so
     // the stream is owned here, not borrowed from a plan. Completion events
     // stay plan-side and are recorded onto this stream.
     struct device_state_t
     {
-        ncclComm_t          comm;
+        // stream before comm so comm destroys first (RCCL must finish with
+        // the comm before its stream is freed)
         hipStream_wrapper_t stream;
+        ncclComm_wrapper_t  comm;
 
-        // adopt a created comm + its allocated stream, so every entry is
-        // fully initialized (comm never null, stream always allocated)
-        device_state_t(ncclComm_t comm, hipStream_wrapper_t&& stream)
-            : comm(comm)
-            , stream(std::move(stream))
+        // fully-initialized entry: adopts a created comm (on device) + its
+        // allocated stream (comm never null, stream always allocated)
+        device_state_t(ncclComm_t comm, int device, hipStream_wrapper_t&& stream)
+            : stream(std::move(stream))
+            , comm(comm, device)
         {
         }
     };
@@ -83,22 +130,8 @@ struct rocfft_rccl_comm_t::Impl
     // stored so it can be broadcast via MPI for multi-node in the future.
     ncclUniqueId uniqueId{};
 
-    ~Impl()
-    {
-        // noexcept: use raw hipSetDevice (rocfft_scoped_device can throw).
-        int orig_device = 0;
-        (void)hipGetDevice(&orig_device);
-        for(auto& [dev, state] : device_to_state)
-        {
-            (void)hipSetDevice(dev);
-            // comm is always valid (see device_state_t ctor); destroy it
-            // before its stream so RCCL is done with it
-            ncclCommFinalize(state.comm);
-            ncclCommDestroy(state.comm);
-            state.stream.free();
-        }
-        (void)hipSetDevice(orig_device);
-    }
+    // no explicit destructor: each device_state_t RAII-cleans its comm then
+    // stream when device_to_state is destroyed
 };
 
 // static cache definitions; placed after Impl so shared_ptr<Impl> is complete
@@ -169,7 +202,7 @@ rocfft_rccl_comm_t rocfft_rccl_comm_t::create(const std::set<int>& devices)
                 return {};
             }
 
-            new_comm.pimpl->device_to_state.try_emplace(dev, comm, std::move(stream));
+            new_comm.pimpl->device_to_state.try_emplace(dev, comm, dev, std::move(stream));
             ++rank;
         }
 
