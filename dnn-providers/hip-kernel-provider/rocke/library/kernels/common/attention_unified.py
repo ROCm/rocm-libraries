@@ -363,6 +363,29 @@ def _tiled_3d_impl(arch: str):
     )
 
 
+# --- Declared coverage of the unified backend -------------------------------
+#
+# The shape and dtype coverage below is DATA rather than literals inside the
+# predicate, because the dispatcher has to state the same coverage as a
+# ``Capability`` and must not restate it from memory. A capability that
+# disagrees with this predicate fails in one direction silently: the prefilter
+# rejects a problem the kernel would in fact have run, so new coverage added
+# here would simply never become reachable. Exporting the sets makes that
+# impossible by construction.
+UNIFIED_HEAD_SIZES: Tuple[int, ...] = (64, 128, 256)
+"""Head sizes the scalar 2D backend covers.
+
+The kernel loops over head_size with ``b.unroll(p.head_size)``, so any head
+size that divides cleanly through the online-softmax accumulator works; this
+tuple is the set that has actually been exercised.
+"""
+
+UNIFIED_BLOCK_SIZES: Tuple[int, ...] = (16, 32, 64)
+"""Paged-KV block sizes, used only as the modulus in PagedKvDescriptor."""
+
+UNIFIED_DTYPES: Tuple[str, ...] = ("fp16", "bf16")
+
+
 def supports_native_unified_attention(
     problem: UnifiedAttentionProblem,
 ) -> Tuple[bool, str]:
@@ -383,11 +406,11 @@ def supports_native_unified_attention(
     - sliding_window: yes
     - softcap: yes
     """
-    if problem.head_size not in (64, 128, 256):
+    if problem.head_size not in UNIFIED_HEAD_SIZES:
         return False, f"unsupported head_size {problem.head_size}"
-    if problem.block_size not in (16, 32, 64):
+    if problem.block_size not in UNIFIED_BLOCK_SIZES:
         return False, f"unsupported block_size {problem.block_size}"
-    if problem.dtype not in ("fp16", "bf16"):
+    if problem.dtype not in UNIFIED_DTYPES:
         return False, f"unsupported dtype {problem.dtype}"
     if problem.use_fp8:
         if problem.q_dtype is not None and problem.q_dtype not in ("fp16", "bf16"):

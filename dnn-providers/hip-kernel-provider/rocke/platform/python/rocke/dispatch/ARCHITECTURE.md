@@ -592,6 +592,33 @@ alone, which is what lets `DispatchResult` be executable instead of advisory.
 launch and verify it", so one benchmark harness can sweep every registered
 kernel — see section 7.5.
 
+**A capability restates coverage; it never redefines it.** Declaring coverage
+as data is the point of `Capability`, but there are two ways to obtain the
+data, and only one is safe. The numbers that describe *what a kernel can run* —
+its head sizes, its tile multiples, its dtypes — belong to the kernel, and the
+dispatcher must import them. Transcribing them into the capability produces a
+gate that agrees on the day it is written and then fails asymmetrically:
+
+| drift | consequence |
+|---|---|
+| kernel *loses* coverage | harmless — the capability admits, the residual predicate rejects, one redundant gate |
+| kernel *gains* coverage | silent — the prefilter turns down a shape the kernel now runs, and the new coverage is simply unreachable with nothing reporting it |
+
+The second is the dangerous one precisely because nothing fails. So
+`attention_unified` exports `UNIFIED_HEAD_SIZES` / `UNIFIED_BLOCK_SIZES` /
+`UNIFIED_DTYPES` and its own predicate consumes them, the gfx1250 WMMA kernel
+exports `WMMA_K` / `BLOCK_M` / `DTYPES`, and the candidates import both sets.
+Tests assert *identity* rather than equality — a copy compares equal today —
+and sweep shapes past the declared sets to confirm the prefilter never rejects
+what the backend accepts.
+
+This does not make every literal in a capability suspect. `dtypes=("fp16",)`
+on the fp16 GEMM family, or `hdim_q allowed=(256,)` on the D256 cohort, are the
+candidate's own *routing scope*: statements about which problems this candidate
+wants, not about what the kernel can compile. Those are dispatch's to own. The
+test is whether the kernel would still be correct if the number changed — if
+yes it is scope, if no it is kernel metadata and must be imported.
+
 **`build` is required everywhere; `bind` is a per-family ratchet.** Both are
 enforced the same way, at import time, by `CandidateRegistry(...,
 require_build=True, require_binding=True)`. They are separate flags because
@@ -1590,32 +1617,68 @@ five platform families now require it (section 5.2), the GEMM `build_kernel`
 helpers delegate to it, and the spec/builder agreement test dispatches and
 builds one request per family. **Done.**
 
-What remains is the registration itself. Begin with the mechanical move of the
-single `attention.py` into the per-arch layout of section 8 — no logic change —
-then register per arch module:
+The registration itself then followed, and is **done**:
 
-*Attention, gfx942 and gfx950.* The four arch-specialized candidates already
-written in `attention.py` — `gfx942_dense_pipe`, the gfx950 dense path,
-`gfx950_d256`, and `d256_decode` — move into their modules. They declared their
-`Capability` in phase 3, so this is the mechanical file move only.
+*Attention, the file move.* `attention.py` became the package of section 8:
+`common.py` (request, spec, shared gates), `generic.py`, `gfx942.py`,
+`gfx950.py`, `gfx1250.py`, with `__init__.py` holding only the assembly and the
+entry points. No logic changed — deliberately, including a shared-gate helper
+that was drafted and then dropped because it altered one rejection message.
+`d256_decode` lives in `generic.py` rather than under an arch, because it serves
+two and splitting it would duplicate the cohort gate. Candidate order is
+unaffected: `candidates()` sorts by `(priority, name)`, not registration order.
 
-*Attention, gfx1250.* Add `gfx1250.py` per section 9.1, which makes
-`build_wmma_attention_fwd` reachable for the first time.
-`builders/gfx1250/attention/wmma_attention_fwd_verify.py` becomes a thin caller
-of `dispatch_attention_by_id` rather than constructing the spec itself.
+*Attention, gfx1250.* `gfx1250.py` registers the WMMA FMHA forward kernel,
+which had a spec, validator, builder, and grid helper that nothing referenced.
+It is the first attention candidate to declare a real `grid`, a real
+`signature`, and a `build`: the unified candidates return an `AttentionSpec`
+naming a path, which no builder consumes, while this one returns its builder's
+own spec.
 
-*Convolution, gfx1250.* Onboard the target the conv registry still cannot serve.
-Phase 3 replaced conv's `arch_family` labels with explicit `arches`, which
-stopped gfx1250 from being admitted to the two wave64 MFMA candidates — but
-stopping a wrong answer is not the same as having a right one, and no conv
-candidate declares gfx1250 today. Add one over the portable
-`instances/common/conv_implicit_gemm.py` builder with WMMA atoms. There is no
-gfx1250-specific conv kernel, so this is onboarding an existing portable builder
-to a new target rather than registering something already written.
+*Convolution, gfx1250.* Onboarded over the portable
+`instances/common/conv_implicit_gemm.py` builder. It could not simply join the
+RDNA WMMA arch list: gfx1250's f16 WMMA atom is 16x16x**32** where gfx12's is
+16x16x16, so it needs `warp_tile_k=32` and gets its own spec factory. Tiles stay
+at 32x32 rather than following the CDNA candidates to 64x64, because these
+kernels do not pad — the tile size is also the divisibility gate, and there is
+no gfx1250 conv tuning data to justify trading coverage for a larger tile.
 
-Each of these points `build` at its real builder as it lands; the agreement test
-covers it by construction, since a family that registers without one is refused
-at import.
+Two phase-3 tests asserted that *no* conv candidate serves gfx1250. That was the
+right assertion when explicit arch lists had just stopped a misroute, but
+refusing a target is not covering it; both now pin that exactly one candidate
+serves it and the wave64 candidates still do not.
+
+*Exhaustive build coverage, and parity with the examples.* With `build` wired
+everywhere, "does every registered kernel compile?" became a question worth
+asking exhaustively rather than one request per family. Every candidate is now
+built on every arch it declares, over problem shapes taken from the examples:
+438 combinations, each built twice and compared, all deterministic, in about
+five seconds of CPU. Reachability is asserted per candidate, so a spec no
+request can reach is a failure rather than a silent gap — two `b1024_v8` norms
+and the bf16 decode candidate needed a second shape, which is the check earning
+its keep.
+
+The same harness answers the sharper question: does dispatch build *the same
+kernel* the hand-written path builds? For norm, conv, and MoE the answer is
+yes, exactly — `canonical_equal` on the serialized IR, not just a matching
+kernel name — so those example call sites can become dispatch call sites
+without changing a single instruction.
+
+GEMM is the deliberate exception, and it is asserted as one rather than left to
+look like an oversight. `universal_gemm_verify.py` is a portability harness: it
+asks the MMA catalog for the largest-K 16x16 atom and wraps a 2x2 warp grid
+around it with the plain `mem` pipeline — a config chosen to build anywhere,
+not to be fast. The registry does not carry it, and dispatch answers with the
+tuned `compv4` + `cshuffle` candidate at twice the tile. The test pins both the
+inequality and the specific knobs that differ.
+
+**Registering a kernel makes it reachable; it does not make it the default.**
+Both attention additions are opt-in, matching the `attention_gfx950_dense`
+precedent. gfx1250 fp16 prefill still routes to `unified_2d`, which is the path
+its benchmark exercises — flipping that on the strength of a registration would
+swap a measured path for an unmeasured one. Conv gfx1250 is the opposite case
+and is on by default: there was no conv candidate for that target at all, so
+there is no incumbent to displace.
 
 **Phase 6 — move routing policy into dispatch.** The large one, and the shape of
 the gfx942 example in section 9.2. Today the choice of kernel geometry is made
