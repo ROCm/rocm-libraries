@@ -878,8 +878,6 @@ class LraTileAssignmentMFMA(LraTileAssignment):
             # portSplitA (fine A): the A0->A1 segment jump is carried on the wave stride, so force it on.
             if tc == "A" and kernel["LDSSegInterleaveOffsets"].get("portSplitA", False):
                 segILWaveSpansComp = True
-            if segILWaveSpansComp:
-                strideWave = kernel["LDSSegInterleaveOffsets"]["readWaveStride"]
 
         lsu              = kernel["LocalSplitU"]
 

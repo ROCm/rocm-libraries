@@ -11,9 +11,10 @@ segments), and returns the offsets the emit sites consume.
 # gfx1250 LDS segment size (5 x 64 KiB segments).
 SEG = 65536
 
-def _bpe(state):
-    # float, not int: fp4 is 0.5 B/elem. Callers int() the final byte counts.
-    return state["ProblemType"]["DataType"].numBytes()
+def _bpe(state, tc):
+    # Float, not int -- fp4 is 0.5 B/elem; callers int() the byte counts.
+    pt = state["ProblemType"]
+    return pt.get("MacDataType%s" % tc, pt["DataType"]).numBytes()
 
 def _pad(x, blk, padElems, bpe):
     if blk == 0 or padElems == 0:
@@ -23,13 +24,13 @@ def _pad(x, blk, padElems, bpe):
 def _data_bytes(state, tc):
     numComp = state["NumWaves"] // 2
     mt = state["MacroTile0"] if tc == "A" else state["MacroTile1"]
-    return int((mt // numComp) * state["DepthU"] * _bpe(state))
+    return int((mt // numComp) * state["DepthU"] * _bpe(state, tc))
 
 def _footprint(state, tc):
     d = _data_bytes(state, tc)
     blk = state["LdsBlockSizePerPad%s" % tc]
     padElems = state["LdsPad%s" % tc]
-    return d + _pad(d, blk, padElems, _bpe(state))
+    return d + _pad(d, blk, padElems, _bpe(state, tc))
 
 def _mx_scale_bases(state, mxsaStart):
     """MX scale-block LDS bases, placed after the interleaved A/B region. Returns
@@ -128,7 +129,6 @@ def evaluate(state):
 
     fA, fB = _footprint(state, "A"), _footprint(state, "B")
     base = state["LdsOffsetA"]
-    bpe = _bpe(state)
 
     # bcontig fallback [A0][B0][B1][A1] (auto-only, not user-forceable): when B can't be split
     # (odd WaveTileB), keep B whole and use it as the gap that pushes A1 into the next segment.
@@ -141,7 +141,6 @@ def evaluate(state):
             offsets = {
                 "ldsBaseB":         base + fA,      # B starts right after A0
                 "writeStrideBytes": strideA,        # A0 -> A1 distance (pad already included)
-                "readWaveStride":   int(strideA / bpe),
                 "footprintPacked":  True,
                 "bBaseline":        True,           # B uses its normal (non-interleaved) addressing
             }
@@ -164,7 +163,6 @@ def evaluate(state):
         offsets = {
             "ldsBaseB":         base + fA,          # B starts right after A0
             "writeStrideBytes": pre,                # A0 -> A1 distance (rounded to a segment)
-            "readWaveStride":   int(pre / bpe),
             "footprintPacked":  True,
             "bBaseline":        True,
         }
@@ -189,7 +187,6 @@ def evaluate(state):
         offsets = {
             "ldsBaseB":         base + fA,              # B0 right after A0 in seg0
             "writeStrideBytes": pre,                    # segment stride; no re-pad on the jump
-            "readWaveStride":   int(pre / bpe),
             "footprintPacked":  True,
         }
         if _portSplit:
@@ -211,7 +208,6 @@ def evaluate(state):
     offsets = {
         "ldsBaseB":         base + fA,          # B0 right after A0
         "writeStrideBytes": fA + fB,            # footprint stride (post-pad), no re-pad on the jump
-        "readWaveStride":   int((fA + fB) / bpe),
         "footprintPacked":  True,
     }
     if _portSplit:

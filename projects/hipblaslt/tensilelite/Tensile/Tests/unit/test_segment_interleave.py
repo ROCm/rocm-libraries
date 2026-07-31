@@ -35,11 +35,11 @@ def _vw8_state(**ovr):
     s.update(ovr); return s
 
 def test_vw8_applies_with_handedit_values():
-    # Footprint-packed tight: writeStrideBytes = fA+fB (post-pad), readWaveStride = that//bpe.
+    # Footprint-packed tight: writeStrideBytes = fA+fB (post-pad).
     r = evaluate(_vw8_state())
     assert r["applicable"] is True
     assert r["offsets"] == {"ldsBaseB": 33024, "writeStrideBytes": 66048,
-                            "readWaveStride": 33024, "footprintPacked": True}
+                            "footprintPacked": True}
 
 def test_vw4_fine_uses_port_split():
     # VWA=4 == WaveTileA/2 + TDMSplit -> port-split; same tight footprint as coarse.
@@ -132,7 +132,7 @@ def test_aligned_applies_small_mt():
     r = evaluate(_vw8_state(MacroTile0=128, MacroTile1=128, PrefetchGlobalRead=2, LDSSegmentInterleave=1))
     assert r["applicable"] is True and r["aligned"] is True
     assert r["offsets"] == {"ldsBaseB": 16512, "writeStrideBytes": SEG,
-                            "readWaveStride": SEG // 2, "footprintPacked": True}
+                            "footprintPacked": True}
     assert r["blockSpan"] == SEG + 16512 + 16512    # base(0) + pre(SEG) + fA + fB
     assert _aligned_tiles_disjoint(r, 16512, 16512)
     assert "ALIGNED" in r["segmentMap"]
@@ -246,7 +246,7 @@ def test_fp16_applies_same_as_bf16():
     r = evaluate(_vw8_state(ProblemType={"DataType": _FakeDataType(bf16=False, half=True)}))
     assert r["applicable"] is True
     assert r["offsets"] == {"ldsBaseB": 33024, "writeStrideBytes": 66048,
-                            "readWaveStride": 33024, "footprintPacked": True}
+                            "footprintPacked": True}
 
 def test_fp8_tight_applies():
     # fp8 (bpe=1) is now supported. DepthU=256 -> fA+fB >= SEG -> tight branch.
@@ -254,7 +254,7 @@ def test_fp8_tight_applies():
                             ProblemType={"DataType": _FakeDataType(bf16=False, f8=True, nbytes=1)}))
     fA = 32768 + (32768 // 2048) * 8   # data + pad (LdsPadA=8, block=2048, bpe=1)
     assert r["applicable"] is True and r["reason"] == "tight"
-    assert r["offsets"]["writeStrideBytes"] == 2 * fA and r["offsets"]["readWaveStride"] == 2 * fA
+    assert r["offsets"]["writeStrideBytes"] == 2 * fA
     # No MX scales -> no relocation keys emitted.
     assert "ldsBaseMXSA" not in r["offsets"] and "ldsBaseMXSB" not in r["offsets"]
 
@@ -278,7 +278,6 @@ def test_fp4_tight_applies():
     fA = int(128 * 512 * 0.5) + (int(128 * 512 * 0.5) // 2048) * int(8 * 0.5)
     assert r["applicable"] is True and r["reason"] == "tight"
     assert r["offsets"]["writeStrideBytes"] == 2 * fA
-    assert r["offsets"]["readWaveStride"] == int(2 * fA / 0.5)
     assert "ldsBaseMXSA" not in r["offsets"] and "ldsBaseMXSB" not in r["offsets"]
 
 def test_mxf4_tight_relocates_scales():
@@ -296,3 +295,18 @@ def test_mxf4_tight_relocates_scales():
 def test_fp32_skips():
     r = evaluate(_vw8_state(ProblemType={"DataType": _FakeDataType(bf16=False, half=False, nbytes=4)}))
     assert r["applicable"] is False and ("bf16" in r["reason"] or "fp16" in r["reason"])
+
+def test_mixed_type_per_tensor_bpe():
+    # Mixed types: DataType=fp8 passes the gate, but MacDataTypeA=fp4 (0.5B) / MacDataTypeB=fp8 (1B).
+    # Footprints must use the per-tensor MacDataType, so fA != fB.
+    r = evaluate(_vw8_state(
+        DepthU=512,
+        ProblemType={"DataType": _FakeDataType(bf16=False, f8=True, nbytes=1),
+                     "MacDataTypeA": _FakeDataType(bf16=False, f4=True, nbytes=0.5),
+                     "MacDataTypeB": _FakeDataType(bf16=False, f8=True, nbytes=1)}))
+    fA = int(128 * 512 * 0.5) + (int(128 * 512 * 0.5) // 2048) * int(8 * 0.5)
+    fB = int(128 * 512 * 1.0) + (int(128 * 512 * 1.0) // 2048) * int(8 * 1.0)
+    assert fA != fB, "test setup must exercise asymmetric footprints"
+    assert r["applicable"] is True and r["reason"] == "tight"
+    assert r["offsets"]["ldsBaseB"] == fA
+    assert r["offsets"]["writeStrideBytes"] == fA + fB
