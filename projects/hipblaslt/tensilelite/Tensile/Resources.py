@@ -5,10 +5,15 @@
 
 from contextlib import ExitStack
 from importlib import resources
-from importlib.abc import Traversable
 from pathlib import Path, PureWindowsPath
 import shutil
+import sys
 from typing import List, Tuple
+
+if sys.version_info >= (3, 11):
+    from importlib.resources.abc import Traversable
+else:
+    from importlib.abc import Traversable
 
 
 _PACKAGE = __package__
