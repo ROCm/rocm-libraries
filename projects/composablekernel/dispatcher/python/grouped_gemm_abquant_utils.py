@@ -367,6 +367,30 @@ class ABQuantDispatcherLib:
 # =============================================================================
 
 
+def _shuffle_b_cdna(B: "np.ndarray", wt_n: int, wt_k: int) -> "np.ndarray":
+    """Apply ck_tile::shuffle_b (gfx9/CDNA path) to B in-Python.
+
+    Mirrors the gfx9 branch of tensor_shuffle_utils.hpp::shuffle_b<GemmConfig>:
+      KLane            = warp_size / wt_n  (64 / wt_n)
+      ItemsPerAccess   = min(16 / sizeof(fp8) = 16,  wt_k / KLane)
+      view shape       = [N/wt_n, wt_n, K/items, items]   (C++ row-major)
+      permute          = {0, 2, 1, 3}
+
+    B must be a numpy array with shape (K, N) and uint8 dtype (fp8/bf8 bytes).
+    The shuffle is applied before uploading to the device; the kernel reads
+    the shuffled layout as [N/wt_n, K/items, wt_n, items] (after permute).
+    """
+    import numpy as np
+    K, N = B.shape
+    kLane = 64 // wt_n
+    items = min(16, wt_k // kLane)
+    # C++ copies B col-major (HostTensor[K,N] with stride=[1,K]) into
+    # a row-major view [N/wt_n, wt_n, K/items, items], then permutes {0,2,1,3}.
+    flat = np.asfortranarray(B).flatten()           # col-major byte order
+    view = flat.reshape(N // wt_n, wt_n, K // items, items)
+    return np.ascontiguousarray(view.transpose(0, 2, 1, 3)).reshape(B.shape)
+
+
 class ABQuantGpuGemmRunner:
     """High-level runner for ABQuantGrouped GEMM."""
 
@@ -389,6 +413,7 @@ class ABQuantGpuGemmRunner:
                  Pass np.bfloat16 for MX variants whose CDataType is bf16.
         """
         import numpy as np
+        import re as _re
 
         M, N, K = problem.M, problem.N, problem.K
         QK_A = problem.QK_A
@@ -400,6 +425,17 @@ class ABQuantGpuGemmRunner:
             c_dtype = np.float16
 
         C = np.zeros((M, N), dtype=c_dtype)
+
+        # PreshuffleB kernels require B to be host-shuffled before upload.
+        # Mirrors ck_tile::shuffle_b (gfx9/CDNA path) used by the C++ test fixture.
+        # After shuffling, pass B as 1-D so the ctypes layer's asfortranarray(B)
+        # is a no-op (1-D arrays have only one memory order).
+        _name = self.kernel_name
+        if 'preshuffleb' in _name:
+            _pm = _re.search(r'_(\d+)x(\d+)x(\d+)_(\d+)x(\d+)x(\d+)_(\d+)x(\d+)x(\d+)_', _name)
+            if _pm:
+                _wt_n = int(_pm.group(8)); _wt_k = int(_pm.group(9))
+                B = _shuffle_b_cdna(B, wt_n=_wt_n, wt_k=_wt_k).ravel()
 
         # Stride layout:
         # AQ RowMajor [QM_A, QK_A]: stride_AQ = QK_A
