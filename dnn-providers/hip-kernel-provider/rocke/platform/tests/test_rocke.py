@@ -4953,6 +4953,81 @@ class TestPackArgsKernargABI(unittest.TestCase):
         with self.assertRaises(ValueError):
             pack_args([{"name": "x", "type": "f16"}], {"x": 1})
 
+    def test_as_ptr_accepts_devicemem_ptr_method(self):
+        import struct
+
+        from rocke.runtime.packing import pack_args
+
+        # DeviceMem exposes its raw device pointer via a ptr() method; the
+        # torch-free numpy path passes it straight into a launcher's values.
+        class _FakeDeviceMem:
+            def ptr(self):
+                return 0xDEAD
+
+        packed = pack_args(
+            [{"name": "p", "type": "ptr<f16,global>"}], {"p": _FakeDeviceMem()}
+        )
+        self.assertEqual(struct.unpack_from("<Q", packed, 0)[0], 0xDEAD)
+
+    def test_as_ptr_prefers_data_ptr_over_ptr(self):
+        import struct
+
+        from rocke.runtime.packing import pack_args
+
+        # A torch tensor exposes data_ptr(); if some object exposed both, the
+        # data_ptr() branch must win (it precedes the DeviceMem ptr() branch).
+        class _Both:
+            def data_ptr(self):
+                return 0xAAAA
+
+            def ptr(self):
+                return 0xBBBB
+
+        packed = pack_args([{"name": "p", "type": "ptr<f16,global>"}], {"p": _Both()})
+        self.assertEqual(struct.unpack_from("<Q", packed, 0)[0], 0xAAAA)
+
+    def test_as_ptr_none_encodes_null(self):
+        import struct
+
+        from rocke.runtime.packing import pack_args
+
+        packed = pack_args([{"name": "p", "type": "ptr<f16,global>"}], {"p": None})
+        self.assertEqual(struct.unpack_from("<Q", packed, 0)[0], 0)
+
+    def test_as_ptr_rejects_unconvertible(self):
+        from rocke.runtime.packing import pack_args
+
+        # A non-callable ptr attribute is not a device pointer -- the callable()
+        # guard must fall through to the TypeError, not silently use the attr.
+        class _NonCallablePtr:
+            ptr = 0x1234
+
+        with self.assertRaises(TypeError):
+            pack_args(
+                [{"name": "p", "type": "ptr<f16,global>"}], {"p": _NonCallablePtr()}
+            )
+        with self.assertRaises(TypeError):
+            pack_args(
+                [{"name": "p", "type": "ptr<f16,global>"}], {"p": "not a pointer"}
+            )
+
+
+class TestHostBufferReExportShim(unittest.TestCase):
+    """The manifest_runner.utils re-export shim over rocke.runtime.host_buffers.
+
+    The three host byte helpers moved to ``rocke.runtime.host_buffers``; the old
+    ``instances.common.manifest_runner.utils`` path re-exports them so existing
+    importers keep working. Pin the identity so a severed shim fails loudly.
+    """
+
+    def test_utils_reexports_host_buffer_helpers(self):
+        from rocke.instances.common.manifest_runner import utils
+        from rocke.runtime import host_buffers
+
+        self.assertIs(utils.as_u8_buffer, host_buffers.as_u8_buffer)
+        self.assertIs(utils.nbytes, host_buffers.nbytes)
+        self.assertIs(utils.require_numpy, host_buffers.require_numpy)
+
 
 class TestLibDiscoveryOrder(unittest.TestCase):
     """Shared-library resolution order in ``hip_module``.

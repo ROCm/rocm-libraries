@@ -190,7 +190,7 @@ def test_select_grid_size(hardware):
     config.workgroup_mapping = 6
 
     grid_size = origami.select_grid_size(
-        problem, hardware, config, origami.grid_selection_t.analytical, hardware.N_CU
+        problem, hardware, config, origami.grid_selection_t.analytical
     )
     assert grid_size > 0
 
@@ -253,7 +253,7 @@ def test_select_grid_size_algorithms(hardware, algorithm):
     config.occupancy = 1
     config.workgroup_mapping = 6
 
-    grid_size = origami.select_grid_size(problem, hardware, config, algorithm, hardware.N_CU)
+    grid_size = origami.select_grid_size(problem, hardware, config, algorithm)
     assert grid_size > 0
 
 
@@ -420,7 +420,7 @@ def test_simulation_mode_returns_valid_latency():
     config.tensile().prefetch_global_read = 2
     
     # Call compute_total_latency with simulation mode
-    latency = origami.compute_total_latency(problem, hardware, config, hardware.N_CU)
+    latency = origami.compute_total_latency(problem, hardware, config)
     
     assert latency > 0, f"Expected positive latency, got {latency}"
 
@@ -483,9 +483,9 @@ def test_simulation_mode_via_compute_total_latency():
     
     # Get latencies from both modes
     latency_estimation = origami.compute_total_latency(
-        problem, hardware, config_estimation, hardware.N_CU)
+        problem, hardware, config_estimation)
     latency_simulation = origami.compute_total_latency(
-        problem, hardware, config_simulation, hardware.N_CU)
+        problem, hardware, config_simulation)
     
     # Both should return positive values
     assert latency_estimation > 0, f"Estimation latency should be positive: {latency_estimation}"
@@ -538,5 +538,5 @@ def test_simulation_mode_various_problem_sizes(m, n, k):
     config.tensile().wave_group_m = 2
     config.tensile().wave_group_n = 2
     
-    latency = origami.compute_total_latency(problem, hardware, config, hardware.N_CU)
+    latency = origami.compute_total_latency(problem, hardware, config)
     assert latency > 0, f"Expected positive latency for {m}x{n}x{k}, got {latency}"
