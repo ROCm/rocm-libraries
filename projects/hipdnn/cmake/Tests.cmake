@@ -127,6 +127,32 @@ endfunction() # _create_test_name_validation_target_internal
 
 enable_testing() # Cmake wont discover or run tests without this line
 
+# On ASAN builds (HIPDNN_TEST_MIOPEN_CACHE_DIR set by Sanitizers.cmake), a fixture wipes the build-local
+# MIOpen cache once per ctest run; tests opt in via FIXTURES_REQUIRED (see add_hipdnn_test). The
+# GLOBAL-property guard defines it once across the add_subdirectory'd build tree; CTest matches the
+# setup to requiring tests in any directory.
+# A scope block keeps the intermediate path variables out of the including project's scope; the
+# fixture registration (add_test / set_property GLOBAL) is not variable-scoped, so it escapes.
+block(SCOPE_FOR VARIABLES)
+    get_property(_fixture_added GLOBAL PROPERTY _hipdnn_clear_miopen_test_cache_fixture_added)
+    if(DEFINED HIPDNN_TEST_MIOPEN_CACHE_DIR AND NOT _fixture_added)
+        # Safety: this path is baked into a generated `rm -rf`, so require it to be strictly under the build tree.
+        get_filename_component(_cache_dir_abs "${HIPDNN_TEST_MIOPEN_CACHE_DIR}" ABSOLUTE)
+        get_filename_component(_binary_dir_abs "${CMAKE_BINARY_DIR}" ABSOLUTE)
+        string(FIND "${_cache_dir_abs}" "${_binary_dir_abs}/" _binary_dir_prefix_pos)
+        if(NOT _binary_dir_prefix_pos EQUAL 0)
+            message(FATAL_ERROR
+                "HIPDNN_TEST_MIOPEN_CACHE_DIR ('${HIPDNN_TEST_MIOPEN_CACHE_DIR}') must be a subdirectory "
+                "of the build tree ('${CMAKE_BINARY_DIR}'); abort during hipdnn miopen cache clear fixture registration.")
+        endif()
+        set_property(GLOBAL PROPERTY _hipdnn_clear_miopen_test_cache_fixture_added TRUE)
+        add_test(NAME hipdnn_clear_miopen_test_cache
+            COMMAND ${CMAKE_COMMAND} -E rm -rf "${HIPDNN_TEST_MIOPEN_CACHE_DIR}")
+        set_tests_properties(hipdnn_clear_miopen_test_cache
+            PROPERTIES FIXTURES_SETUP hipdnn_clear_miopen_test_cache)
+    endif()
+endblock()
+
 # Internal helper function to create a ctest target
 # ~~~
 # Parameters:
@@ -293,10 +319,27 @@ function(add_hipdnn_test TARGET WORKING_DIR)
     # Install test executables to bin directory
     install(TARGETS ${TARGET} RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 
+    # On Windows, stage the shadowed ROCm DLLs before this test binary is built so a
+    # partial build + manual ctest doesn't load the stale System32 amd_comgr.dll.
+    if(TARGET stage_shadowed_rocm_dlls)
+        add_dependencies(${TARGET} stage_shadowed_rocm_dlls)
+    endif()
+
     add_test(NAME ${TARGET} COMMAND ${TARGET} WORKING_DIRECTORY ${WORKING_DIR})
     _apply_hipdnn_test_category_labels(${TARGET})
     if(DEFINED TEST_ENVIRONMENT)
         set_tests_properties(${TARGET} PROPERTIES ENVIRONMENT "${TEST_ENVIRONMENT}")
+    endif()
+    # PATH prepends (e.g. the Windows ASAN runtime dir) are applied via ENVIRONMENT_MODIFICATION
+    # rather than ENVIRONMENT so the runtime PATH is extended, not replaced.
+    if(DEFINED TEST_ENVIRONMENT_MODIFICATION)
+        set_tests_properties(${TARGET} PROPERTIES
+            ENVIRONMENT_MODIFICATION "${TEST_ENVIRONMENT_MODIFICATION}")
+    endif()
+    # Require the build-local MIOpen cache to be cleared before this test runs (ASAN builds only;
+    # HIPDNN_TEST_MIOPEN_CACHE_DIR is unset otherwise). See the hipdnn_clear_miopen_test_cache fixture.
+    if(DEFINED HIPDNN_TEST_MIOPEN_CACHE_DIR)
+        set_tests_properties(${TARGET} PROPERTIES FIXTURES_REQUIRED hipdnn_clear_miopen_test_cache)
     endif()
 endfunction() # add_hipdnn_test
 
