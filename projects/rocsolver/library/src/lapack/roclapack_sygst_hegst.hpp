@@ -42,6 +42,8 @@ ROCSOLVER_BEGIN_NAMESPACE
 static bool constexpr use_sygs2_hegs2_alt = true;
 static bool constexpr use_recursion = true;
 
+static size_t constexpr byte_alignment = 128;
+
 template <typename I>
 static inline I split_n(I const n)
 {
@@ -204,6 +206,8 @@ void rocsolver_sygst_hegst_getMemorySize(const rocblas_fill uplo,
         return;
     }
 
+    auto ceildiv = [](auto m, auto b) { return ((m + b - 1) / b); };
+
     if(n < xxGST_BLOCKSIZE)
     {
         // requirements for calling a single SYGS2/HEGS2
@@ -216,7 +220,7 @@ void rocsolver_sygst_hegst_getMemorySize(const rocblas_fill uplo,
     else
     {
         I kb = xxGST_BLOCKSIZE;
-        size_t temp1, temp2, temp3, temp4, temp5, temp6, temp7, temp8;
+        size_t temp1{}, temp2{}, temp3{}, temp4{}, temp5{}, temp6{}, temp7{}, temp8{};
 
         // requirements for calling SYGS2/HEGS2 for the subblocks
         rocsolver_sygs2_hegs2_getMemorySize<BATCHED, T>(itype, kb, batch_count, size_scalars,
@@ -261,7 +265,9 @@ void rocsolver_sygst_hegst_getMemorySize(const rocblas_fill uplo,
         // extra requirements for calling TRSM
         // -----------------------------------
 
-        I const nn = xxGST_BLOCKSIZE;
+        I const nb = xxGST_BLOCKSIZE;
+        I const nn = std::min(n, nb);
+
         size_t temp1{}, temp2{}, temp3{}, temp4{}, temp5{}, temp6{}, temp7{}, temp8{};
 
         if(itype == rocblas_eform_ax)
@@ -401,10 +407,14 @@ void rocsolver_sygst_hegst_getMemorySize(const rocblas_fill uplo,
         // expand storage for work_x_temp
         //
         // NOTE: assume xxGST_BLOCKSIZE is a power of 2
-        // to maintain alignment
+        // use nT to maintain alignment
         // ----------------------------------------
-        I const nn = xxGST_BLOCKSIZE;
-        size_t const size_Asave = (sizeof(T) * nn * (nn - 1) / 2) * batch_count;
+        I const nb = xxGST_BLOCKSIZE;
+        I const nn = std::min(n, nb);
+        auto const nT = ceildiv(byte_alignment, sizeof(T));
+
+        auto const len_Asave = ceildiv(nn * (nn - 1) / 2, nT) * nT;
+        auto const size_Asave = (sizeof(T) * len_Asave) * batch_count;
         *size_work_x_temp += size_Asave;
     }
 }
@@ -437,30 +447,23 @@ rocblas_status rocsolver_sygst_hegst_template(rocblas_handle handle,
     if(n == 0 || batch_count == 0)
         return rocblas_status_success;
 
-    hipStream_t stream;
-    rocblas_get_stream(handle, &stream);
-
-    I nb = xxGST_BLOCKSIZE;
-
     // everything must be executed with scalars on the host
     rocblas_pointer_mode_saver saver(handle, rocblas_pointer_mode_host);
 
-    S s_one = 1;
-    T t_one = 1;
-    T t_half = 0.5;
-    T t_minone = -1;
-    T t_minhalf = -0.5;
+    auto ceildiv = [](auto m, auto b) { return ((m + b - 1) / b); };
 
     auto sygs2_hegs2_alt
-        = [](rocblas_handle handle, rocblas_eform const itype, rocblas_fill const uplo, I const n,
+        = [ceildiv](rocblas_handle handle, rocblas_eform const itype, rocblas_fill const uplo,
+                    I const n,
 
-             auto A, rocblas_stride const shiftA, I const lda, rocblas_stride const strideA,
+                    auto A, rocblas_stride const shiftA, I const lda, rocblas_stride const strideA,
 
-             auto B, rocblas_stride const shiftB, I const ldb, rocblas_stride const strideB,
+                    auto B, rocblas_stride const shiftB, I const ldb, rocblas_stride const strideB,
 
-             I const batch_count, T* const Asave,
+                    I const batch_count, T* const Asave,
 
-             bool const optim_mem, auto temp1, auto temp2, auto temp3, auto temp4) -> rocblas_status {
+                    bool const optim_mem, auto temp1, auto temp2, auto temp3,
+                    auto temp4) -> rocblas_status {
         // ------------------------------------------------------------------
         // Let B = R * R',   B = L * L', => R = L,   or B = U' * U => R = U'
         //
@@ -490,8 +493,10 @@ rocblas_status rocsolver_sygst_hegst_template(rocblas_handle handle,
 
         rocblas_status istat = rocblas_status_success;
 
-        auto const nb = xxGST_BLOCKSIZE;
-        rocblas_stride const strideAsave = rocblas_stride(nb) * (nb - 1) / 2;
+        I const nb = xxGST_BLOCKSIZE;
+        auto const nn = std::min(n, nb);
+        auto const nT = ceildiv(byte_alignment, sizeof(T));
+        rocblas_stride const strideAsave = ceildiv(rocblas_stride(nn) * (nn - 1) / 2, nT) * nT;
 
         // ---------------------------------------------------
         // symmetrize matrix and save strictly triangular part
@@ -639,8 +644,8 @@ rocblas_status rocsolver_sygst_hegst_template(rocblas_handle handle,
     }; // end sygs2_hegs2_alt
 
     auto call_sygs2_hegs2
-        = [sygs2_hegs2_alt, optim_mem, scalars, work_x_temp, workArr_temp_arr, store_wcs_invA,
-           invA_arr](
+        = [ceildiv, sygs2_hegs2_alt, optim_mem, scalars, work_x_temp, workArr_temp_arr,
+           store_wcs_invA, invA_arr](
 
               rocblas_handle handle, rocblas_eform const itype, rocblas_fill const uplo,
 
@@ -655,10 +660,12 @@ rocblas_status rocsolver_sygst_hegst_template(rocblas_handle handle,
         if(use_sygs2_hegs2_alt)
         {
             // ------------------------------------------
-            // note use nb to maintain alignment in temp1
+            // note nT to maintain alignment in temp1
             // ------------------------------------------
             auto const nb = xxGST_BLOCKSIZE;
-            size_t const len_Asave = size_t(nb * (nb - 1) / 2) * batch_count;
+            auto const nn = std::min(n, nb);
+            auto const nT = ceildiv(byte_alignment, sizeof(T));
+            size_t const len_Asave = (ceildiv((nn * (nn - 1) / 2), nT) * nT) * batch_count;
             T* const Asave = static_cast<T*>(work_x_temp);
 
             // ------------------------
