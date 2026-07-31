@@ -130,6 +130,9 @@ struct CBAInferBase : ConvBiasActivInferTest<T, TestCaseType>
 using GPU_ConvBiasActivInfer_FP32                  = CBAInferBase<float>;
 using GPU_ConvBiasActivInferFusionCompileStep_FP32 = CBAInferBase<float>;
 using GPU_ConvBiasActivInfer_FP16                  = CBAInferBase<half_float::half>;
+// Dedicated bf16 fixture: only the Rage fused test is registered on it, so no other
+// fusion solver is invoked with bf16.
+using GPU_ConvBiasActivInfer_BFP16 = CBAInferBase<bfloat16>;
 
 using GPU_ConvGrpBiasActivInfer_BFP16 = CBAInferBase<bfloat16, GroupConvTestConfig<2u>>;
 using GPU_ConvGrpBiasActivInfer_FP16  = CBAInferBase<float16, GroupConvTestConfig<2u>>;
@@ -194,6 +197,10 @@ TEST_P(GPU_ConvBiasActivInfer_FP16, ConvWinoFuryRxSf2x3Fused)
     RunSolver(miopen::solver::fusion::ConvWinoFuryRxSFused<2, 3>{});
 }
 TEST_P(GPU_ConvBiasActivInfer_FP16, ConvWinoRageRxSf2x3Fused)
+{
+    RunSolver(miopen::solver::fusion::ConvWinoRageRxSFused<2, 3>{});
+}
+TEST_P(GPU_ConvBiasActivInfer_BFP16, ConvWinoRageRxSf2x3Fused)
 {
     RunSolver(miopen::solver::fusion::ConvWinoRageRxSFused<2, 3>{});
 }
@@ -334,6 +341,36 @@ INSTANTIATE_TEST_SUITE_P(Standard,
                          CbaParamNameGenerator{});
 INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_ConvBiasActivInfer_FP16,
+                         testing::Combine(testing::Values(miopenActivationRELU),
+                                          testing::ValuesIn(CbaNetworkBeyond(10)),
+                                          testing::Values(miopenTensorNCHW, miopenTensorNHWC),
+                                          testing::Values(0.25f),
+                                          testing::Values(0.75f),
+                                          testing::Values(0.5f)),
+                         CbaParamNameGenerator{});
+
+// BFP16: Rage fused only (dedicated fixture; mirrors the FP16 Rage tiers). Non-applicable
+// devices/configs are skipped by ConvWinoRageRxSFused::IsApplicable.
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_ConvBiasActivInfer_BFP16,
+                         testing::Combine(testing::Values(miopenActivationRELU),
+                                          testing::ValuesIn(CbaNetworkSubset(3)),
+                                          testing::Values(miopenTensorNCHW),
+                                          testing::Values(0.25f),
+                                          testing::Values(0.75f),
+                                          testing::Values(0.5f)),
+                         CbaParamNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Standard,
+                         GPU_ConvBiasActivInfer_BFP16,
+                         testing::Combine(testing::Values(miopenActivationRELU),
+                                          testing::ValuesIn(CbaNetworkSubset(10)),
+                                          testing::Values(miopenTensorNCHW, miopenTensorNHWC),
+                                          testing::Values(0.25f),
+                                          testing::Values(0.75f),
+                                          testing::Values(0.5f)),
+                         CbaParamNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Full,
+                         GPU_ConvBiasActivInfer_BFP16,
                          testing::Combine(testing::Values(miopenActivationRELU),
                                           testing::ValuesIn(CbaNetworkBeyond(10)),
                                           testing::Values(miopenTensorNCHW, miopenTensorNHWC),

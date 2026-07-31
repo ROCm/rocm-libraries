@@ -34,7 +34,7 @@ auto GetConvTestCases(miopenDataType_t datatype)
 
     return std::vector{
         // clang-format off
-        // rage v4.6 and v4.9(bf16)
+        // rage v4.6 and v4.9 (bf16)
         TestCase{{1, 16, 135, 240}, {16, 16, 3, 3}, {1, 1}, {1, 1}, {1, 1}, datatype},
         TestCase{{2,  4,  64,  64}, {16,  4, 3, 3}, {1, 1}, {1, 1}, {1, 1}, datatype},
         // rage v4.9
@@ -75,6 +75,7 @@ const auto& GetTestParamsFP16()
     static const auto params = [] {
         auto p =
             miopen::unit_tests::UnitTestConvSolverParams(Gpu::gfx94X | Gpu::gfx950 | Gpu::gfx120X);
+        p.CheckXnackDisabled();
         return p;
     }();
     return params;
@@ -276,7 +277,7 @@ auto GetConvTestCasesNHWCWrw(miopenDataType_t datatype)
 using GPU_UnitTestConvSolverTransposedWinoRageRxSFwd_FP16 = GPU_UnitTestConvSolverFwd_FP16;
 using GPU_UnitTestConvSolverTransposedWinoRageRxSBwd_FP16 = GPU_UnitTestConvSolverBwd_FP16;
 using GPU_UnitTestConvSolverTransposedWinoRageRxSWrw_FP16 = GPU_UnitTestConvSolverWrw_FP16;
-using CPU_UnitTestConvSolverTransposedWinoRageRxSDevApplicabilityFwd_NONE =
+using CPU_UnitTestConvSolverTransposedWinoRageRxSDevApplicabilityFwd_FP16 =
     CPU_UnitTestConvSolverDevApplicabilityFwd_NONE;
 
 TEST_P(GPU_UnitTestConvSolverTransposedWinoRageRxSFwd_FP16, TransposedConvWinoRageRxSf2x3)
@@ -294,7 +295,7 @@ TEST_P(GPU_UnitTestConvSolverTransposedWinoRageRxSWrw_FP16, TransposedConvWinoRa
     this->RunTest(miopen::solver::conv::TransposedConvWinoRageRxS<2, 3>{});
 };
 
-TEST_P(CPU_UnitTestConvSolverTransposedWinoRageRxSDevApplicabilityFwd_NONE,
+TEST_P(CPU_UnitTestConvSolverTransposedWinoRageRxSDevApplicabilityFwd_FP16,
        TransposedConvWinoRageRxSf2x3)
 {
     this->RunTest(miopen::solver::conv::TransposedConvWinoRageRxS<2, 3>{});
@@ -321,7 +322,7 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
 
 // Device applicability test
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                         CPU_UnitTestConvSolverTransposedWinoRageRxSDevApplicabilityFwd_NONE,
+                         CPU_UnitTestConvSolverTransposedWinoRageRxSDevApplicabilityFwd_FP16,
                          testing::Combine(testing::Values(GetTestParamsFP16()),
                                           testing::Values(GetConvTestCasesNHWC(miopenHalf)[0])));
 
