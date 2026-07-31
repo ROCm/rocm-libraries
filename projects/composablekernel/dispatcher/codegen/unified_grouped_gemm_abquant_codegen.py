@@ -236,8 +236,9 @@ class ABQuantKernelHeaderGenerator:
         preshuffle_b  = str(spec.preshuffle_b).lower()
         preshuffle_aq = str(spec.preshuffle_aq).lower()
         preshuffle_bq = str(spec.preshuffle_bq).lower()
-        transpose_c   = str(spec.transpose_c).lower()
+        transpose_c       = str(spec.transpose_c).lower()
         double_smem_buffer = str(spec.double_smem_buffer).lower()
+        is_eight_waves    = str(spec.pipeline == "eightwaves").lower()
 
         # Epilogue selection — B-side tile geometry governs PermuteN (same logic as BQuant)
         use_permute_n_epilogue = (
@@ -342,6 +343,7 @@ struct {struct} {{
     static constexpr bool PreshuffleB     = {preshuffle_b};
     static constexpr bool TransposeC      = {transpose_c};
     static constexpr bool DoubleSmemBuffer = {double_smem_buffer};
+    static constexpr bool IsEightWaves    = {is_eight_waves};
 
     using TileShape = ck_tile::TileGemmShape<
         ck_tile::sequence<TileM, TileN, TileK>,
@@ -406,8 +408,10 @@ struct {struct} {{
 
             const dim3 grids  = Kernel::GridSize(args.M, args.N, args.k_batch);
             const dim3 blocks = Kernel::BlockSize();
+            // EightWaves pipeline requires no-packed-fp32-ops to co-execute matrix ops.
+            using KAttr = ck_tile::kernel_attr<IsEightWaves>;
             return ck_tile::launch_kernel(
-                s, ck_tile::make_kernel<kBlockPerCu>(Kernel{{}}, grids, blocks, 0, kargs));
+                s, ck_tile::make_kernel<kBlockPerCu, KAttr>(Kernel{{}}, grids, blocks, 0, kargs));
         }};
 
         return BaseGemmPipeline::TailHandler(Run, has_hot_loop, tail_num);
