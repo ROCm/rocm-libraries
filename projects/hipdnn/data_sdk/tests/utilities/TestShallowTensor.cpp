@@ -55,7 +55,7 @@ TEST(TestShallowTensor, FillWithRandomValuesThrows)
     EXPECT_THROW(tensor.fillWithRandomValues(-1.f, 1.f, 1337), std::runtime_error);
 }
 
-TEST(TestShallowTensor, FillWithValuesThrows)
+TEST(TestShallowTensor, FillWithValuesDeviceGeneratorThrows)
 {
     std::array<float, 5> backing = {0.f, 1.f, 2.f, 3.f, 4.f};
     ShallowTensor<float> tensor(backing.data(), {1, 1, 1, 5}, {5, 5, 5, 1});
@@ -64,8 +64,50 @@ TEST(TestShallowTensor, FillWithValuesThrows)
     {
         void operator()([[maybe_unused]] float* ptr, [[maybe_unused]] size_t count) const {}
     };
-    EXPECT_THROW(tensor.fillWithValues(DummyGenerator(), true), std::runtime_error);
     EXPECT_THROW(tensor.fillWithValues(DummyGenerator(), false), std::runtime_error);
+}
+
+TEST(TestShallowTensor, FillWithValuesHostGenerator)
+{
+    std::array<float, 5> backing = {0.f, 1.f, 2.f, 3.f, 4.f};
+    ShallowTensor<float> tensor(backing.data(), {1, 1, 1, 5}, {5, 5, 5, 1});
+
+    struct UniformCpuGenerator
+    {
+        explicit UniformCpuGenerator(float min, float max, unsigned int seed)
+            : _min(min)
+            , _max(max)
+            , _seed(seed)
+        {
+        }
+
+        void operator()(float* data, size_t count) const
+        {
+            std::mt19937 rng(_seed);
+            std::uniform_real_distribution<float> dist(_min, _max);
+
+            for(size_t i = 0; i < count; ++i)
+            {
+                data[i] = static_cast<float>(dist(rng));
+            }
+        }
+
+    private:
+        float _min;
+        float _max;
+        unsigned int _seed;
+    };
+
+    const float min = -4.0f;
+    const float max = -1.0f;
+    tensor.fillWithValues(UniformCpuGenerator(min, max, std::random_device{}()), true);
+
+    for(auto it{tensor.cbegin()}; it != tensor.cend(); ++it)
+    {
+        auto val{(*reinterpret_cast<const float*>((*it)))};
+        EXPECT_GE(val, min);
+        EXPECT_LE(val, max);
+    }
 }
 
 TEST(TestShallowTensor, DeviceAccessThrows)

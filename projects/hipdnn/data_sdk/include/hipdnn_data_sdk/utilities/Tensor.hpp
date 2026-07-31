@@ -558,13 +558,16 @@ protected:
     }
 };
 
-/// @brief A callable that fills a tensor with user defined values.
+/// @brief A callable that fills underlying tensor memory with user defined values.
 ///
 /// Signature: void(T* data, size_t count)
 /// The generator is called once per tensor fill and must fill `count` elements of
 /// the `data` pointer. If `fillWithValues` sets `hostFill` to true, then the data
 /// pointer will be a pointer to a host memory allocation. Otherwise, if `hostFill`
-/// was set to false, then this is a pointer to a device allocation.
+/// was set to false, then this is a pointer to a device allocation. `count` is
+/// the element space of the tensor, i.e. it will contain padding elements if the
+/// tensor is not packed.
+///
 /// It is not the responsibility of the generator to mark the tensor as host or
 /// device modified.
 template <typename T>
@@ -674,8 +677,28 @@ public:
     }
 
     virtual void fillWithValue(T value) = 0;
-    virtual void fillWithValues(const ValueGenerator<T>& generator, bool hostFill) = 0;
     virtual void fillWithRandomValues(T min, T max, unsigned int seed = std::random_device{}()) = 0;
+
+    void fillWithValues(const ValueGenerator<T>& generator, bool hostFill)
+    {
+        if(!generator)
+        {
+            throw std::invalid_argument(
+                "generator must not be nullptr when calling TensorBase::fillWithValues");
+        }
+
+        MigratableMemoryBase<T>& migratableMem = memory();
+        if(hostFill)
+        {
+            migratableMem.markHostModified();
+            generator(reinterpret_cast<T*>(migratableMem.hostData()), migratableMem.count());
+        }
+        else
+        {
+            migratableMem.markDeviceModified();
+            generator(reinterpret_cast<T*>(migratableMem.deviceData()), migratableMem.count());
+        }
+    }
 
     ITensorIterator<false> begin() override
     {
@@ -829,22 +852,9 @@ public:
         }
     }
 
-    void fillWithValues(const ValueGenerator<T>& generator, bool hostFill) override
-    {
-        if(hostFill)
-        {
-            _memory.markHostModified();
-            generator(reinterpret_cast<T*>(_memory.hostData()), _memory.count());
-        }
-        else
-        {
-            _memory.markDeviceModified();
-            generator(reinterpret_cast<T*>(_memory.deviceData()), _memory.count());
-        }
-    }
-
     void fillWithRandomValues(T min, T max, unsigned int seed = std::random_device{}()) override
     {
+
         std::mt19937 generator(seed);
         std::uniform_real_distribution<float> distribution(static_cast<float>(min),
                                                            static_cast<float>(max));
@@ -855,7 +865,6 @@ public:
             *static_cast<T*>(valuePtr) = static_cast<T>(distribution(generator));
         }
     }
-
     bool isPacked() const override
     {
         return _packed;
