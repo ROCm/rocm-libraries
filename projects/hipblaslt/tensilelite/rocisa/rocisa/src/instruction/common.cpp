@@ -1122,13 +1122,46 @@ void common_inst(nb::module_ m_common)
         .def(nb::init<const std::shared_ptr<rocisa::Container>&,
                       const InstructionInput&,
                       const InstructionInput&,
+                      std::optional<rocisa::VOP3PModifiers>,
                       const std::string&>(),
              nb::arg("dst"),
              nb::arg("src0"),
              nb::arg("src1"),
+             nb::arg("vop3")    = std::nullopt,
              nb::arg("comment") = "")
         .def("__deepcopy__",
              [](const rocisa::VAddPKF32& self, nb::dict&) { return new rocisa::VAddPKF32(self); });
+
+    nb::class_<rocisa::_VFmaPKF32, rocisa::CommonInstruction>(m_common, "_VFmaPKF32")
+        .def(nb::init<const std::shared_ptr<rocisa::Container>&,
+                      const InstructionInput&,
+                      const InstructionInput&,
+                      const InstructionInput&,
+                      std::optional<rocisa::VOP3PModifiers>,
+                      const std::string&>(),
+             nb::arg("dst"),
+             nb::arg("src0"),
+             nb::arg("src1"),
+             nb::arg("src2"),
+             nb::arg("vop3")    = std::nullopt,
+             nb::arg("comment") = "")
+        .def("__deepcopy__", [](const rocisa::_VFmaPKF32& self, nb::dict&) {
+            return new rocisa::_VFmaPKF32(self);
+        });
+
+    nb::class_<rocisa::VFmaPKF32, rocisa::CompositeInstruction>(m_common, "VFmaPKF32")
+        .def(nb::init<const std::shared_ptr<rocisa::Container>&,
+                      const InstructionInput&,
+                      const InstructionInput&,
+                      const InstructionInput&,
+                      const std::string&>(),
+             nb::arg("dst"),
+             nb::arg("src0"),
+             nb::arg("src1"),
+             nb::arg("src2"),
+             nb::arg("comment") = "")
+        .def("__deepcopy__",
+             [](const rocisa::VFmaPKF32& self, nb::dict&) { return new rocisa::VFmaPKF32(self); });
 
     nb::class_<rocisa::VAdd3U32, rocisa::CommonInstruction>(m_common, "VAdd3U32")
         .def(nb::init<const std::shared_ptr<rocisa::Container>&,
