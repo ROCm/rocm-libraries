@@ -107,16 +107,6 @@ const int entropy_reductions[] = {0, 2, 4, 6};
 
 namespace detail
 {
-// std::uniform_int_distribution is undefined for anything other than:
-// short, int, long, long long, unsigned short, unsigned int, unsigned long, or unsigned long long
-template <typename T>
-struct is_valid_for_int_distribution
-    : std::integral_constant<bool,
-                             std::is_same<short, T>::value || std::is_same<unsigned short, T>::value
-                               || std::is_same<int, T>::value || std::is_same<unsigned int, T>::value
-                               || std::is_same<long, T>::value || std::is_same<unsigned long, T>::value
-                               || std::is_same<long long, T>::value || std::is_same<unsigned long long, T>::value>
-{};
 
 template <class T, class Enable = void>
 struct random_to_item_t
