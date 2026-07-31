@@ -582,6 +582,57 @@ struct GPU_Softmax_BetaZeroNaN_FP32
     }
 };
 
+// Test that Softmax forward does not produce an illegal GPU memory access when
+// numel > INT_MAX (2^31 - 1).  The shape {2, 1024, 1024, 1024} has exactly
+// 2^31 = 2,147,483,648 elements.  A prior probe on gfx942 triggered an HSA
+// illegal-access fault (see ALMIOPEN-2151), so the test is disabled until the
+// kernel index-arithmetic is fixed to use 64-bit offsets throughout.
+// When ALMIOPEN-2151 is resolved, remove the DISABLED_ prefix and re-enable.
+struct GPU_Softmax_LargeNumel_FP32 : public testing::TestWithParam<miopenSoftmaxAlgorithm_t>
+{
+    void RunForward()
+    {
+        auto&& handle                  = get_handle();
+        const std::vector<size_t> dims = {2, 1024, 1024, 1024};
+        const float alpha = 1.0f, beta = 0.0f;
+
+        // Each tensor is 2^31 * sizeof(float) = 8 GiB; both input and output
+        // must fit on the device.  Check before allocating host-side data.
+        const size_t numel      = dims[0] * dims[1] * dims[2] * dims[3];
+        const size_t need_mem   = 2 * numel * sizeof(float); // input + output
+        const size_t device_mem = handle.GetGlobalMemorySize();
+        if(need_mem >= device_mem)
+        {
+            GTEST_SKIP() << "Insufficient GPU memory: need " << need_mem << " B, have "
+                         << device_mem << " B.";
+        }
+
+        auto input  = tensor<float>{miopenTensorNCHW, dims}.generate(tensor_elem_gen_integer{17});
+        auto output = tensor<float>{miopenTensorNCHW, dims};
+
+        auto in_dev  = handle.Write(input.data);
+        auto out_dev = handle.Write(output.data);
+        miopen::SoftmaxForward(handle,
+                               &alpha,
+                               &beta,
+                               input.desc,
+                               in_dev.get(),
+                               output.desc,
+                               out_dev.get(),
+                               GetParam(),
+                               MIOPEN_SOFTMAX_MODE_CHANNEL);
+
+        // Spot-check: read back a small prefix and verify values are finite
+        // and in (0, 1].  A GPU illegal-access fault would corrupt or crash
+        // the kernel before we reach this point.
+        constexpr size_t check_n = 1024;
+        auto result              = handle.Read<float>(out_dev, check_n);
+        for(std::size_t i = 0; i < result.size(); ++i)
+            EXPECT_TRUE(std::isfinite(result[i]) && result[i] > 0.0f && result[i] <= 1.0f)
+                << "Unexpected value " << result[i] << " at index " << i;
+    }
+};
+
 using GPU_Softmax_FP32  = SoftmaxCommon<float>;
 using GPU_Softmax_FP16  = SoftmaxCommon<half_float::half>;
 using GPU_Softmax_BFP16 = SoftmaxCommon<bfloat16>;
@@ -591,6 +642,8 @@ TEST_P(GPU_Softmax_FP16, TestFloat16) { this->Run(); }
 TEST_P(GPU_Softmax_BFP16, TestBFloat16) { this->Run(); }
 TEST_P(GPU_Softmax_BetaZeroNaN_FP32, ForwardTest) { RunForward(); }
 TEST_P(GPU_Softmax_BetaZeroNaN_FP32, BackwardTest) { RunBackward(); }
+// Disabled pending fix for ALMIOPEN-2151 (illegal GPU access at numel > INT_MAX).
+TEST_P(GPU_Softmax_LargeNumel_FP32, DISABLED_ForwardLargeNumel) { RunForward(); }
 
 INSTANTIATE_TEST_SUITE_P(Full, GPU_Softmax_FP32, GetCases<float>());
 INSTANTIATE_TEST_SUITE_P(Full, GPU_Softmax_FP16, GetCases<half_float::half>());
@@ -602,3 +655,8 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                                                           MIOPEN_SOFTMAX_LOG),
                                           testing::Values(MIOPEN_SOFTMAX_MODE_INSTANCE,
                                                           MIOPEN_SOFTMAX_MODE_CHANNEL)));
+INSTANTIATE_TEST_SUITE_P(Standard,
+                         GPU_Softmax_LargeNumel_FP32,
+                         testing::Values(MIOPEN_SOFTMAX_FAST,
+                                         MIOPEN_SOFTMAX_ACCURATE,
+                                         MIOPEN_SOFTMAX_LOG));
