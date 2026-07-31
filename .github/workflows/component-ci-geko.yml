@@ -48,9 +48,11 @@ jobs:
         run: python -m pip install -r requirements-dev.txt
 
       - name: Run GEKO coverage gate
+        env:
+          HIPBLASLT_PATH: ${GITHUB_WORKSPACE}/projects/hipblaslt
         run: |
           python -m tox -e coverage -- \
-            --hipblaslt-path "${GITHUB_WORKSPACE}/projects/hipblaslt" \
+            --hipblaslt-path "${HIPBLASLT_PATH}" \
             --config tests/test_data/config.yaml
 
       - name: Test pip install
@@ -98,9 +100,11 @@ jobs:
         run: python -m pip install -r requirements-dev.txt
 
       - name: Run GEKO coverage gate
+        env:
+          HIPBLASLT_PATH: ${GITHUB_WORKSPACE}/projects/hipblaslt
         run: |
           python -m tox -e coverage -- \
-            --hipblaslt-path "${GITHUB_WORKSPACE}/projects/hipblaslt" \
+            --hipblaslt-path "${HIPBLASLT_PATH}" \
             --config tests/test_data/config.yaml
 
       - name: Test pip install
