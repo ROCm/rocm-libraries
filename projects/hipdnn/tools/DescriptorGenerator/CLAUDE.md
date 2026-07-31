@@ -726,10 +726,8 @@ There is no `configs/sdpa_backward.yaml`, and that omission is intentional — n
 - `projects/hipdnn/frontend/include/hipdnn_frontend/attributes/SdpaAttributes.hpp` is hand-maintained: it exposes its data fields as **public `std::optional<T>` members** (e.g. `dropout_probability`) rather than getter methods. The `data_fields[].frontend_getter` entries in `sdpa.yaml` therefore use bare member-name syntax to match the existing class.
 - `--mode frontend` regeneration is **not supported** for SDPA — running it would emit an Attributes class with getter methods that does not match the hand-written class or the existing packer.
 
-**MoE grouped matmul** — fully codegen, with one hand-maintained region in the backend descriptor:
-
-- `configs/moe_grouped_matmul.yaml` drives backend and frontend generation for this op, `mode_rules:` included.
-- `MoeGroupedMatmulOperationDescriptor::finalize()` does **not** keep the per-mode `switch` that `descriptor.cpp.j2` renders from `mode_rules:`. It delegates to `checkMoeGroupedMatmulRouting()` in `flatbuffers_sdk/utilities/MoeGroupedMatmulValidation.hpp`, so the backend descriptor and the test-side CPU reference plan builder judge routing presence/`top_k` rules against one shared contract rather than two transcriptions of it.
-- Consequence: for this op `mode_rules:` no longer describes the code path the shipped descriptor executes — it only feeds the template. Editing `mode_rules:` alone changes nothing until the file is regenerated and re-integrated; the enforced rules live in `MoeGroupedMatmulValidation.hpp`. Change both, or neither.
-- Re-running `--mode backend` for this op emits the inline `switch` again. Keep the existing `finalize()` body per *Existing code takes precedence* above, and take the rest of the regenerated file normally.
-- The contract is pinned by `flatbuffers_sdk/tests/utilities/TestMoeGroupedMatmulValidation.cpp` (rule by rule) and by the `RoutingContract` cases in `test_sdk/tests/utilities/cpu_graph_executor/TestMoeGroupedMatmulPlan.cpp` (contract vs. frontend node parity).
+**MoE grouped matmul** — generated except for `MoeGroupedMatmulOperationDescriptor::finalize()`.
+The checked-in `finalize()` delegates routing validation to
+`MoeGroupedMatmulValidation.hpp` so the backend and CPU reference share one
+contract. Regenerating the backend descriptor emits the template's original
+routing switch; preserve the checked-in `finalize()` during integration.

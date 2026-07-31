@@ -128,15 +128,6 @@ public:
             return {};
         };
 
-        // NOTE: The routing contract below is also enforced, in FlatBuffers terms, by
-        // flatbuffers_sdk MoeGroupedMatmulValidation.hpp, which the backend descriptor
-        // and the CPU reference plan builder share. The frontend does not depend on
-        // flatbuffers_sdk, so keep both in sync when changing mode/top_k rules.
-        // NONE is intentionally permissive here: createMoeGroupedMatmulOperation()
-        // canonicalizes the optional descriptor footprint, so routing tensors and a
-        // nonzero top_k set on a NONE/GATHER node never reach a descriptor. That
-        // divergence is pinned by the RoutingContractMatchesFrontendNode test in
-        // test_sdk/tests/utilities/cpu_graph_executor/TestMoeGroupedMatmulPlan.cpp.
         switch(attributes.get_mode())
         {
         case MoeGroupedMatmulMode::NONE:

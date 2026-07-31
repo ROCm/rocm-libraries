@@ -123,10 +123,8 @@ hipdnn_frontend::graph::MoeGroupedMatmulAttributes validFrontendAttributes()
     attrs.set_weight(weight);
 
     auto firstTokenOffset = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
-    firstTokenOffset->set_uid(3)
-        .set_dim({2, 1, 1})
-        .set_stride({1, 1, 1})
-        .set_data_type(hipdnn_frontend::DataType::INT32);
+    firstTokenOffset->set_uid(3).set_dim({2, 1, 1}).set_stride({1, 1, 1}).set_data_type(
+        hipdnn_frontend::DataType::INT32);
     attrs.set_first_token_offset(firstTokenOffset);
 
     auto output = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
@@ -141,7 +139,8 @@ hipdnn_frontend::graph::MoeGroupedMatmulAttributes validFrontendAttributes()
 }
 
 std::shared_ptr<hipdnn_frontend::graph::TensorAttributes>
-    makeRoutingTensor(int64_t uid, hipdnn_frontend::DataType dataType = hipdnn_frontend::DataType::INT32)
+    makeRoutingTensor(int64_t uid,
+                      hipdnn_frontend::DataType dataType = hipdnn_frontend::DataType::INT32)
 {
     auto tensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     tensor->set_uid(uid).set_dim({1, 4, 1}).set_stride({4, 1, 1}).set_data_type(dataType);
@@ -154,10 +153,11 @@ class TestMoeGroupedMatmulPlan : public ::testing::Test
 {
 protected:
     template <typename T>
-    static void initTensorValues(hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT& tensorAttr,
-                                 DataType dataType,
-                                 const Tensor<T>& tensor,
-                                 int64_t uid)
+    static void
+        initTensorValues(hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT& tensorAttr,
+                         DataType dataType,
+                         const Tensor<T>& tensor,
+                         int64_t uid)
     {
         tensorAttr.data_type = dataType;
         tensorAttr.dims = tensor.dims();
@@ -177,7 +177,8 @@ TEST_F(TestMoeGroupedMatmulPlan, ExecutePlanNoneMode)
     MoeGroupedMatmulParams params;
     initTensorValues(params.tokenTensor, DataType::FLOAT, planBundle.tokenTensor, 1);
     initTensorValues(params.weightTensor, DataType::FLOAT, planBundle.weightTensor, 2);
-    initTensorValues(params.firstTokenOffsetTensor, DataType::INT32, planBundle.firstTokenOffsetTensor, 3);
+    initTensorValues(
+        params.firstTokenOffsetTensor, DataType::INT32, planBundle.firstTokenOffsetTensor, 3);
     initTensorValues(params.outputTensor, DataType::FLOAT, planBundle.outputTensor, 6);
     params.mode = MoeGroupedMatmulMode::NONE;
     params.topK = 0;
@@ -215,7 +216,8 @@ TEST_F(TestMoeGroupedMatmulPlan, ExecutePlanGatherMode)
     MoeGroupedMatmulParams params;
     initTensorValues(params.tokenTensor, DataType::FLOAT, planBundle.tokenTensor, 1);
     initTensorValues(params.weightTensor, DataType::FLOAT, planBundle.weightTensor, 2);
-    initTensorValues(params.firstTokenOffsetTensor, DataType::INT32, planBundle.firstTokenOffsetTensor, 3);
+    initTensorValues(
+        params.firstTokenOffsetTensor, DataType::INT32, planBundle.firstTokenOffsetTensor, 3);
     hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT tokenIndexAttr;
     initTensorValues(tokenIndexAttr, DataType::INT32, *planBundle.tokenIndexTensor, 4);
     params.tokenIndexTensor = tokenIndexAttr;
@@ -258,7 +260,8 @@ TEST_F(TestMoeGroupedMatmulPlan, ExecutePlanScatterMode)
     MoeGroupedMatmulParams params;
     initTensorValues(params.tokenTensor, DataType::FLOAT, planBundle.tokenTensor, 1);
     initTensorValues(params.weightTensor, DataType::FLOAT, planBundle.weightTensor, 2);
-    initTensorValues(params.firstTokenOffsetTensor, DataType::INT32, planBundle.firstTokenOffsetTensor, 3);
+    initTensorValues(
+        params.firstTokenOffsetTensor, DataType::INT32, planBundle.firstTokenOffsetTensor, 3);
     hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT tokenIndexAttr;
     initTensorValues(tokenIndexAttr, DataType::INT32, *planBundle.tokenIndexTensor, 4);
     params.tokenIndexTensor = tokenIndexAttr;
@@ -297,11 +300,14 @@ TEST_F(TestMoeGroupedMatmulPlan, ExecutePlanScatterMode)
 
 TEST(TestMoeGroupedMatmulPlanBuilder, IsApplicableAcceptsEveryValidMode)
 {
-    const MoeGroupedMatmulPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
+    const MoeGroupedMatmulPlanBuilder<DataType::FLOAT,
+                                      DataType::FLOAT,
+                                      DataType::FLOAT,
+                                      DataType::FLOAT>
         patient;
 
     for(auto mode :
-       {MoeGroupedMatmulMode::NONE, MoeGroupedMatmulMode::GATHER, MoeGroupedMatmulMode::SCATTER})
+        {MoeGroupedMatmulMode::NONE, MoeGroupedMatmulMode::GATHER, MoeGroupedMatmulMode::SCATTER})
     {
         auto builder = createValidMoeGroupedMatmulGraph(mode);
         const GraphWrapper graphWrap(builder.GetBufferPointer(), builder.GetSize());
@@ -312,25 +318,36 @@ TEST(TestMoeGroupedMatmulPlanBuilder, IsApplicableAcceptsEveryValidMode)
 
 TEST(TestMoeGroupedMatmulPlanBuilder, IsApplicableRejectsInvalidConfigurations)
 {
-    const MoeGroupedMatmulPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
+    const MoeGroupedMatmulPlanBuilder<DataType::FLOAT,
+                                      DataType::FLOAT,
+                                      DataType::FLOAT,
+                                      DataType::FLOAT>
         floatPatient;
 
     // Wrong compute type.
     {
         auto builder = createValidMoeGroupedMatmulGraph(MoeGroupedMatmulMode::NONE);
         const GraphWrapper graphWrap(builder.GetBufferPointer(), builder.GetSize());
-        const MoeGroupedMatmulPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::HALF>
+        const MoeGroupedMatmulPlanBuilder<DataType::FLOAT,
+                                          DataType::FLOAT,
+                                          DataType::FLOAT,
+                                          DataType::HALF>
             wrongComputePatient;
-        EXPECT_FALSE(wrongComputePatient.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap()));
+        EXPECT_FALSE(
+            wrongComputePatient.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap()));
     }
 
     // Wrong token/weight/output dtype tuple.
     {
         auto builder = createValidMoeGroupedMatmulGraph(MoeGroupedMatmulMode::NONE);
         const GraphWrapper graphWrap(builder.GetBufferPointer(), builder.GetSize());
-        const MoeGroupedMatmulPlanBuilder<DataType::HALF, DataType::HALF, DataType::HALF, DataType::FLOAT>
+        const MoeGroupedMatmulPlanBuilder<DataType::HALF,
+                                          DataType::HALF,
+                                          DataType::HALF,
+                                          DataType::FLOAT>
             mismatchedPatient;
-        EXPECT_FALSE(mismatchedPatient.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap()));
+        EXPECT_FALSE(
+            mismatchedPatient.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap()));
     }
 
     // Erased tensor UID.
@@ -411,7 +428,10 @@ TEST(TestMoeGroupedMatmulPlanBuilder, IsApplicableRejectsInvalidConfigurations)
 
 TEST(TestMoeGroupedMatmulPlanBuilder, BuildNodePlan)
 {
-    const MoeGroupedMatmulPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
+    const MoeGroupedMatmulPlanBuilder<DataType::FLOAT,
+                                      DataType::FLOAT,
+                                      DataType::FLOAT,
+                                      DataType::FLOAT>
         patient;
 
     // Correct case.
@@ -444,19 +464,21 @@ TEST(TestMoeGroupedMatmulPlanBuilder, PlanConstruction)
     auto builder = createValidMoeGroupedMatmulGraph(MoeGroupedMatmulMode::SCATTER);
     const GraphWrapper graphWrap(builder.GetBufferPointer(), builder.GetSize());
 
-    const MoeGroupedMatmulPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
+    const MoeGroupedMatmulPlanBuilder<DataType::FLOAT,
+                                      DataType::FLOAT,
+                                      DataType::FLOAT,
+                                      DataType::FLOAT>
         patient;
     auto builtPlan = patient.buildNodePlan(graphWrap, graphWrap.getNode(0));
 
     const bool result
-        = dynamic_cast<MoeGroupedMatmulPlan<float, float, float, float>*>(builtPlan.get()) != nullptr;
+        = dynamic_cast<MoeGroupedMatmulPlan<float, float, float, float>*>(builtPlan.get())
+          != nullptr;
     EXPECT_TRUE(result);
 }
 
-// The teeth behind Step 0's "keep in sync" note: for every rule the frontend node
-// and the FlatBuffers-side contract both express, they must reach the same
-// verdict; the two configurations where they intentionally diverge are pinned
-// with differing `nodeAccepts`/`contractAccepts`.
+// Compare frontend validation with the shared FlatBuffers routing contract.
+// `nodeAccepts` and `contractAccepts` record their intentional differences.
 TEST(TestMoeGroupedMatmulPlanBuilder, RoutingContractMatchesFrontendNode)
 {
     using hipdnn_flatbuffers_sdk::utilities::checkMoeGroupedMatmulRouting;
