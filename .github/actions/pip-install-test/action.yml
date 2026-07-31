@@ -8,6 +8,10 @@ inputs:
   test_path:
     description: "Pytest target directory relative to package_path (e.g. test/ or python_module/tests/)"
     required: true
+  pytest_args:
+    description: "Optional extra args passed to pytest (e.g. --foo bar)"
+    required: false
+    default: ""
 
 runs:
   using: "composite"
@@ -52,7 +56,7 @@ runs:
         fi
         TEST_DIR=$( cd ${{ inputs.package_path }}/${{ inputs.test_path }} && pwd )
         cd "$VENV_DIR"
-        pytest "$TEST_DIR"
+        pytest "$TEST_DIR" ${{ inputs.pytest_args }}
 
     - name: Cleanup venv
       shell: bash

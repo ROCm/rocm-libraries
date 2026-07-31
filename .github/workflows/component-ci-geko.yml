@@ -47,13 +47,16 @@ jobs:
         env:
           HIPBLASLT_PATH: ${{ github.workspace }}/projects/hipblaslt
         run: |
-          python -m tox -e coverage -- --skip-slow --skip-geko-bin
+          python -m tox -e coverage -- \
+            --hipblaslt-path "${HIPBLASLT_PATH}" \
+            --config tests/test_data/config.yaml
 
       - name: Test pip install
         uses: ./.github/actions/pip-install-test
         with:
           package_path: projects/hipblaslt/utilities/geko
           test_path: tests
+          pytest_args: --hipblaslt-path "${HIPBLASLT_PATH}" --config tests/test_data/config.yaml
 
   windows:
     name: Windows
@@ -92,10 +95,13 @@ jobs:
         env:
           HIPBLASLT_PATH: ${{ github.workspace }}/projects/hipblaslt
         run: |
-          python -m tox -e coverage -- --skip-slow --skip-geko-bin
+          python -m tox -e coverage -- \
+            --hipblaslt-path "${HIPBLASLT_PATH}" \
+            --config tests/test_data/config.yaml
 
       - name: Test pip install
         uses: ./.github/actions/pip-install-test
         with:
           package_path: projects/hipblaslt/utilities/geko
           test_path: tests
+          pytest_args: --hipblaslt-path "${HIPBLASLT_PATH}" --config tests/test_data/config.yaml
