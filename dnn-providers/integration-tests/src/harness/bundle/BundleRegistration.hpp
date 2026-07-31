@@ -70,9 +70,9 @@ inline void registerBundles(const std::vector<LoadedBundle>& bundles)
 
 // Resolves the bundle data root: an explicit CLI/env override from the shared
 // TestConfig singleton if one was provided, otherwise the conventional install
-// location next to the test binary (../lib/integration_test_bundles). This must
+// location next to the test binary (../lib/integration-test-bundles). This must
 // match where the top-level integration-tests/CMakeLists.txt copies and installs
-// the bundles (lib/integration_test_bundles).
+// the bundles (lib/integration-test-bundles).
 inline std::filesystem::path resolveDataDir()
 {
     auto& config = TestConfig::get();
@@ -81,7 +81,7 @@ inline std::filesystem::path resolveDataDir()
         return config.getGoldenDataDir();
     }
     return hipdnn_data_sdk::utilities::getCurrentExecutableDirectory()
-           / "../lib/integration_test_bundles";
+           / "../lib/integration-test-bundles";
 }
 
 inline void registerBundleTests()
@@ -160,7 +160,7 @@ inline void registerBundleTests()
 
     detail::registerBundles(bundles);
 
-    HIPDNN_PLUGIN_LOG_INFO("Registered " << bundles.size() << " golden bundle test(s)");
+    HIPDNN_PLUGIN_LOG_INFO("Registered " << bundles.size() << " bundle test(s)");
 }
 
 } // namespace hipdnn_integration_tests::bundle
