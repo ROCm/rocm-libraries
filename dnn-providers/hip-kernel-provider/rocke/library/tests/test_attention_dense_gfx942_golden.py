@@ -24,16 +24,20 @@ There is NO cpp/python byte-identity companion test: ``library/kernels/`` has no
 engine mirror (AICK-1664 plan §5 Q3), so the dual-engine parity gate does not apply to
 this kernel. The Python lowering IS the ground truth here.
 
-NOT WIRED INTO CI by default (mirrors the gfx950 golden): this file lives under
-``library/tests/``, which ``platform/tests/run_all.py`` does NOT collect. Run it and
+COLLECTION: this is a CPU lane (pure text lowering), collected by the library
+runner ``library/tests/run_all.py`` (default, non-``gpu`` lane) -- NOT by
+``platform/tests/run_all.py``, which cannot reach the library tree (the one-way
+library -> platform dependency rule). The actual CI pipeline invoking that runner
+is a CI-team registration step (see AICK-1664 plan Section 6.2). Run it and
 re-bless manually:
 
     cd rocke/library
-    PYTHONPATH=../platform/python:. python -m pytest tests/test_attention_dense_gfx942_golden.py
+    python tests/run_all.py --only dense_gfx942          # runs this + the build lane
     PYTHONPATH=../platform/python:. python tests/test_attention_dense_gfx942_golden.py --write
 
 Re-bless ONLY the gfx942 fixture; this test never reads or writes the gfx950 golden.
 """
+
 import hashlib
 import json
 import sys
