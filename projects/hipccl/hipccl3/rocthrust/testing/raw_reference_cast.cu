@@ -29,8 +29,7 @@
 #endif
 
 template <>
-struct thrust::detail::is_proxy_reference<std::vector<bool>::reference> : true_type
-{};
+inline constexpr bool thrust::detail::is_proxy_reference_v<std::vector<bool>::reference> = true;
 
 void TestRawReferenceCast()
 {
