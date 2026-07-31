@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -84,6 +84,8 @@ DECLARE_VECTOR_UNITTEST(TestSetDifferenceSimple);
 template <typename T>
 void TestSetDifference(const size_t n)
 {
+  CHECK_ASAN_ENABLEMENT();
+
   size_t sizes[]   = {0, 1, n / 2, n, n + 1, 2 * n};
   size_t num_sizes = sizeof(sizes) / sizeof(size_t);
 
@@ -123,6 +125,8 @@ DECLARE_VARIABLE_UNITTEST(TestSetDifference);
 template <typename T>
 void TestSetDifferenceEquivalentRanges(const size_t n)
 {
+  CHECK_ASAN_ENABLEMENT();
+  
   thrust::host_vector<T> temp = unittest::random_integers<T>(n);
   thrust::host_vector<T> h_a  = temp;
   thrust::sort(h_a.begin(), h_a.end());
@@ -151,6 +155,8 @@ DECLARE_VARIABLE_UNITTEST(TestSetDifferenceEquivalentRanges);
 template <typename T>
 void TestSetDifferenceMultiset(const size_t n)
 {
+  CHECK_ASAN_ENABLEMENT();
+  
   thrust::host_vector<T> vec = unittest::random_integers<int>(2 * n);
 
   // restrict elements to [min,13)
@@ -189,7 +195,7 @@ DECLARE_VARIABLE_UNITTEST(TestSetDifferenceMultiset);
 
 // FIXME: disabled on Windows, because it causes a failure on the internal CI system in one specific configuration.
 // That failure will be tracked in a new NVBug, this is disabled to unblock submitting all the other changes.
-#if THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_MSVC
+#if !THRUST_COMPILER(MSVC)
 void TestSetDifferenceWithBigIndexesHelper(int magnitude)
 {
   thrust::counting_iterator<long long> begin(0);
@@ -209,6 +215,8 @@ void TestSetDifferenceWithBigIndexesHelper(int magnitude)
 
 void TestSetDifferenceWithBigIndexes()
 {
+  CHECK_ASAN_ENABLEMENT();
+
 #  ifndef THRUST_FORCE_32_BIT_OFFSET_TYPE
   TestSetDifferenceWithBigIndexesHelper(30);
   TestSetDifferenceWithBigIndexesHelper(31);

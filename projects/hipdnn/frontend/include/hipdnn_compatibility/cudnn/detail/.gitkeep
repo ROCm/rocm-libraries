@@ -1,2 +1,0 @@
-# Reserved for shim-internal headers (namespaced <shim_ns>::detail) per RFC 0012 §4.1.
-# Placeholder so the directory is tracked; not installed (install matches *.h only).

@@ -94,18 +94,15 @@ struct heuristic_defaults_t {
 /**
  * @brief StreamK=5 hybrid-mode (SK3 static vs SK4 dynamic) selection thresholds.
  *
- * tiles_per_cu thresholds for MI350X (gfx950), derived from a regression over a
- * random sample of problem sizes. When tiles_per_cu >= the per-macrotile
- * threshold the dynamic (SK4) sub-path is selected, otherwise the static (SK3)
- * sub-path is used. Macrotiles not listed here always use the static sub-path.
- * Thresholds for other architectures will be added in a follow-up PR.
+ * Fit to measured SK5 on(SK4)/off(SK3) sweeps on MI350X (gfx950); see
+ * origami::streamk::select_hybrid_mode() for what each threshold gates and
+ * why. Other architectures keep the static (SK3) sub-path until they are
+ * tuned in a follow-up PR.
  */
 struct streamk_hybrid_defaults_t {
-  static constexpr double THRESHOLD_MT_64X64   = 7.22;
-  static constexpr double THRESHOLD_MT_128X128 = 2.08;
-  static constexpr double THRESHOLD_MT_128X256 = 2.58;
-  static constexpr double THRESHOLD_MT_256X128 = 0.87;
-  static constexpr double THRESHOLD_DEFAULT    = 2.0;
+  static constexpr size_t MIN_TILES_FOR_DYNAMIC                  = 480;
+  static constexpr int    MAX_OCCUPANCY_FOR_UNCONDITIONAL_DYNAMIC = 3;
+  static constexpr double TILES_PER_CU_THRESHOLD_HIGH_OCCUPANCY   = 8.41;
 };
 
 /**
@@ -162,6 +159,11 @@ struct ORIGAMI_EXPORT heuristic_params_t {
   // === Main Loop Efficiency ===
   double main_loop_efficiency = heuristic_defaults_t::MAIN_LOOP_EFFICIENCY;
 
+  // === Kernel Rejection ===
+  /// When true, the kernel is rejected: its predicted latency is forced to the
+  /// maximum so that rank_configs() drops it from selection entirely.
+  bool reject = false;
+
   /**
    * @brief Merge this parameter set with another (for hierarchical lookup).
    * Only non-default values from 'other' override values in 'this'.
@@ -186,6 +188,7 @@ struct ORIGAMI_EXPORT heuristic_key_t {
   std::optional<size_t> mt_n;
   std::optional<size_t> mt_k;
   std::optional<bool> hand_optimized_main_loop;
+  std::optional<bool> subtile;
 
   // For problem-size dependent heuristics
   std::optional<size_t> min_m;
@@ -289,6 +292,13 @@ class ORIGAMI_EXPORT heuristics_database_t {
    * @brief Add or update a heuristic entry.
    */
   void add_entry(const heuristic_key_t& key, const heuristic_params_t& params);
+
+  /**
+   * @brief Add or update a hand-optimized kernel efficiency entry.
+   *
+   * Writes directly to the fast lookup map. Intended for initialization only.
+   */
+  void add_hand_optimized_efficiency(hand_optimized_kernel_key_t key, double main_loop_efficiency);
 
   /**
    * @brief Return true if the database has a hand-optimized entry for the given (arch, dtype,

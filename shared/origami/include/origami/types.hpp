@@ -209,6 +209,18 @@ enum class prediction_modes_t : std::uint32_t {
 };
 
 /**
+ * @brief Origami model types for performance prediction.
+ *
+ * Specifies which analytical model to use for latency computation.
+ */
+enum class model_t : std::uint32_t {
+  gemm      = 0,      ///< GEMM model for matrix multiplication
+  attention = 1,      ///< Attention model for Flash Attention
+  count,              ///< Count of model types
+  none = 0xFFFFFFFFu  ///< Explicitly invalid
+};
+
+/**
  * @brief Target backend types for kernel execution.
  *
  * Different backends that kernels can target.
@@ -488,6 +500,9 @@ struct config_t {
   /// Main loop optimization flag (indicates use of any optimized kernel variant)
   bool hand_optimized_main_loop = false;
 
+  /// Whether this kernel uses the subtile implementation (UseSubtileImpl).
+  bool subtile = false;
+
   /// Occupancy (number of wavefronts resident per CU).
   int occupancy = -1;
 
@@ -553,7 +568,8 @@ struct config_t {
 
   bool operator==(const config_t& o) const noexcept {
     return mt == o.mt && mi == o.mi && hand_optimized_main_loop == o.hand_optimized_main_loop &&
-           cache_hints_a == o.cache_hints_a && cache_hints_b == o.cache_hints_b &&
+           subtile == o.subtile && cache_hints_a == o.cache_hints_a &&
+           cache_hints_b == o.cache_hints_b &&
            workgroup_mapping == o.workgroup_mapping && reduction_strategy == o.reduction_strategy &&
            prediction_mode == o.prediction_mode && target == o.target && grvw_a == o.grvw_a &&
            grvw_b == o.grvw_b && gwvw_d == o.gwvw_d && vector_width_a == o.vector_width_a &&
@@ -568,6 +584,7 @@ struct config_t {
                                           mi.n,
                                           mi.k,
                                           hand_optimized_main_loop,
+                                          subtile,
                                           cache_hints_a,
                                           cache_hints_b,
                                           workgroup_mapping,
@@ -623,6 +640,17 @@ struct problem_t {
 
   /// Batch size.
   std::size_t batch = 1;
+
+  /// Number of compute units the caller intends to use for this GEMM.
+  /// 0 (default) means "use all CUs" and preserves the legacy behaviour of
+  /// modelling against the full hardware CU count. When set to a non-zero
+  /// value, solution selection models the problem as if only this many CUs
+  /// were available (e.g. CU masking / partitioned execution), which changes
+  /// grid launch, timesteps, occupancy, and the ranked config.
+  std::size_t num_cus = 0;
+
+  /// Number of query heads (for attention workloads).
+  std::size_t q_heads = 32;
 
   /// Transpose types (TT, TN, NT, TT.)
   transpose_t a_transpose = transpose_t::N;
