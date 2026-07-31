@@ -48,7 +48,7 @@ RppStatus rppt_box_filter(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstP
     if (srcDescPtr->n != dstDescPtr->n) return RPP_ERROR_INVALID_ARGUMENTS;
 
     rpp::Handle& handle = rpp::deref(rppHandle);
-    RppBackend handleBackend = handle.GetBackend();
+    [[maybe_unused]] RppBackend handleBackend = handle.GetBackend();
 
     if (executionBackend == RppBackend::RPP_HOST_BACKEND) {
         RppLayoutParams layoutParams = get_layout_params(srcDescPtr->layout, srcDescPtr->c);
@@ -219,7 +219,7 @@ RppStatus rppt_median_filter(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t d
     if (srcDescPtr->n != dstDescPtr->n) return RPP_ERROR_INVALID_ARGUMENTS;
 
     rpp::Handle& handle = rpp::deref(rppHandle);
-    RppBackend handleBackend = handle.GetBackend();
+    [[maybe_unused]] RppBackend handleBackend = handle.GetBackend();
 
     if (executionBackend == RppBackend::RPP_HOST_BACKEND) {
         RppLayoutParams layoutParams = get_layout_params(srcDescPtr->layout, srcDescPtr->c);
@@ -391,7 +391,7 @@ RppStatus rppt_gaussian_filter(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t
     if (srcDescPtr->n != dstDescPtr->n) return RPP_ERROR_INVALID_ARGUMENTS;
 
     rpp::Handle& handle = rpp::deref(rppHandle);
-    RppBackend handleBackend = handle.GetBackend();
+    [[maybe_unused]] RppBackend handleBackend = handle.GetBackend();
 
     if (borderType != RpptImageBorderType::REPLICATE) return RPP_ERROR_NOT_IMPLEMENTED;
 
@@ -572,7 +572,7 @@ RppStatus rppt_sobel_filter(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t ds
     if (dstDescPtr->c == 3) return RPP_ERROR_INVALID_DST_CHANNELS;
 
     rpp::Handle& handle = rpp::deref(rppHandle);
-    RppBackend handleBackend = handle.GetBackend();
+    [[maybe_unused]] RppBackend handleBackend = handle.GetBackend();
 
     if (executionBackend == RppBackend::RPP_HOST_BACKEND) {
         // convert image to grey scale if input is RGB image
@@ -700,7 +700,7 @@ RppStatus rppt_emboss(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstPtr,
     if (borderType != RpptImageBorderType::REPLICATE) return RPP_ERROR_NOT_IMPLEMENTED;
 
     rpp::Handle& handle = rpp::deref(rppHandle);
-    RppBackend handleBackend = handle.GetBackend();
+    [[maybe_unused]] RppBackend handleBackend = handle.GetBackend();
 
     if (executionBackend == RppBackend::RPP_HOST_BACKEND) {
         RppLayoutParams layoutParams = get_layout_params(srcDescPtr->layout, srcDescPtr->c);
