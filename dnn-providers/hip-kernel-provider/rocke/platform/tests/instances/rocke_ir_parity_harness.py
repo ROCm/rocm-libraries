@@ -23,7 +23,8 @@ def safe(name: str) -> str:
 
 def current_flavor() -> str:
     """The llvm flavor this host would autodetect (llvm20 for ROCm < 7.2,
-    llvm22 otherwise). The golden stores both; the gate compares only this."""
+    llvm22 for 7.2-7.12, llvm23 for 7.13+). The golden stores all of them; the
+    gate compares only this one."""
     from rocke.core.lower_llvm import _resolve_llvm_flavor
 
     return _resolve_llvm_flavor()
@@ -1537,10 +1538,12 @@ def cases():
     return out
 
 
-# The golden stores one sub-document per llvm flavor under this key; the gate
-# (check_golden) compares only the flavor the running host autodetects, so the
-# same committed golden is valid on both ROCm < 7.2 (llvm20) and >= 7.2 (llvm22).
-GOLDEN_FLAVORS = ("llvm20", "llvm22")
+# The golden stores one sub-document per llvm flavor under this key, and the
+# gate (check_golden) verifies all of them from any host: the flavor is an
+# argument to lowering, so nothing about the running ROCm vintage limits which
+# sub-documents can be checked. The same committed golden is therefore valid,
+# and verified, on ROCm < 7.2 (llvm20), 7.2-7.12 (llvm22), and 7.13+ (llvm23).
+GOLDEN_FLAVORS = ("llvm20", "llvm22", "llvm23")
 GOLDEN_SCHEMA = "ck.dsl.ir_golden_sha256/v2"
 
 
@@ -1589,16 +1592,32 @@ def build_golden() -> dict:
 
 
 def check_golden(golden_path: Path, flavor: str | None = None) -> list[str]:
-    """Compare a fresh run against the golden sub-doc for ``flavor`` (defaults to
-    the host's autodetected flavor). Returns a list of drift strings; empty == OK.
+    """Compare a fresh run against the golden sub-doc(s). Empty list == OK.
+
+    With no ``flavor``, every flavor in :data:`GOLDEN_FLAVORS` is checked, not
+    just the one this host autodetects. Lowering takes the flavor as an
+    argument, so the extra runs cost a few hundred milliseconds -- whereas
+    checking only the host's flavor leaves the other sub-documents unverified
+    by any machine that does not happen to run that ROCm vintage. The llvm23
+    sub-document, for instance, is only reachable on ROCm >= 7.13, so it would
+    otherwise sit in the golden untested.
+
+    Drift strings are prefixed with the flavor when more than one is checked.
     """
-    flavor = flavor or current_flavor()
     doc = json.loads(golden_path.read_text())
-    base = doc.get("flavors", {}).get(flavor)
-    if base is None:
-        have = sorted(doc.get("flavors", {}))
-        return [f"golden has no entry for flavor {flavor!r} (have {have})"]
-    return compare(base, run(flavor=flavor))
+    have = doc.get("flavors", {})
+    wanted = [flavor] if flavor else list(GOLDEN_FLAVORS)
+    errors: list[str] = []
+    for fl in wanted:
+        base = have.get(fl)
+        if base is None:
+            errors.append(
+                f"golden has no entry for flavor {fl!r} (have {sorted(have)})"
+            )
+            continue
+        prefix = "" if len(wanted) == 1 else f"[{fl}] "
+        errors.extend(prefix + e for e in compare(base, run(flavor=fl)))
+    return errors
 
 
 def compare(base, cur):
@@ -1639,13 +1658,14 @@ def main():
     ap.add_argument(
         "--check",
         type=Path,
-        help="compare a fresh run against the golden sub-doc for THIS host's "
-        "autodetected llvm flavor; exit 1 on any drift.",
+        help="compare a fresh run against EVERY golden sub-doc (narrow it with "
+        "--flavor); exit 1 on any drift.",
     )
     ap.add_argument(
         "--flavor",
         choices=GOLDEN_FLAVORS,
-        help="override the autodetected llvm flavor (for --check / --ir-dir).",
+        help="check (or dump) just this llvm flavor instead of all of them; "
+        "for --ir-dir it overrides the autodetected flavor.",
     )
     ap.add_argument("--ir-dir", type=Path)
     ns = ap.parse_args()
@@ -1663,13 +1683,13 @@ def main():
         return
 
     if ns.check:
-        flavor = ns.flavor or current_flavor()
-        errors = check_golden(ns.check, flavor)
+        checked = ns.flavor or ", ".join(GOLDEN_FLAVORS)
+        errors = check_golden(ns.check, ns.flavor)
         if errors:
             for e in errors:
-                print(f"IR DRIFT [{flavor}]: {e}")
+                print(f"IR DRIFT: {e}")
             raise SystemExit(1)
-        print(f"IR parity OK [{flavor}] vs {ns.check}")
+        print(f"IR parity OK [{checked}] vs {ns.check}")
         return
 
     flavor = ns.flavor or current_flavor()
