@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2024 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -352,7 +352,7 @@ static void call_lartg(T& f, T& g, S& cs, T& sn, T& r)
 }
 
 template <typename T, typename S, typename I>
-static void call_scal(I n, S a, T& x_in, I incx)
+static void call_scal(I& n, S& a, T& x_in, I& incx)
 {
     bool const is_zero = (a == 0);
     T* const x = &x_in;
@@ -364,7 +364,7 @@ static void call_scal(I n, S a, T& x_in, I incx)
 }
 
 template <typename T, typename S, typename I>
-static void call_rot(I n, T& x_in, I incx, T& y_in, I incy, S c, S s)
+static void call_rot(I& n, T& x_in, I& incx, T& y_in, I& incy, S& c, S& s)
 {
     T* const x = &(x_in);
     T* const y = &(y_in);
