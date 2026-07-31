@@ -4,10 +4,9 @@
 // Host-only unit tests for the hipblaslt_scaling_format helpers in
 // hipblaslt_datatype2string.hpp: scaleDataType, isBlockScaling, blockSize, and
 // scaleBufferSize. All four are pure functions of their arguments, so they are
-// compiled into both hipblaslt-test and the standalone
-// hipblaslt-client-unit-tests binary. See parser_gtest.cpp for the dual-target
-// rationale and for why the names carry both a HostUnit suite prefix and a
-// smoke_ test prefix.
+// compiled into both hipblaslt-test and the standalone hipblaslt-test-hostunit
+// binary. See parser_gtest.cpp for the dual-target rationale and for why the
+// names carry both a HostUnit suite prefix and a smoke_ test prefix.
 //
 // scaleBufferSize is the interesting one: it applies two independent paddings
 // with integer division, so it gets explicit boundary cases rather than a
