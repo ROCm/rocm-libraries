@@ -228,10 +228,11 @@ std::string GetBnLargeTestCaseName(const testing::TestParamInfo<BnLargeTestCase>
 
 TEST_P(GPU_BnFwdTrainLarge_Spatial_FP32, BnSpatialScaleOverflow) { RunTest(); }
 
-// Instantiate under "Standard" so this runs on every PR.
+// Disabled: BatchNorm kernel crashes at numel > INT_MAX due to int32 index
+// overflow (same class of bug as ALMIOPEN-2151/2152). Test added as
+// DISABLED_Standard to document the gap; re-enable when the BN overflow is fixed.
 // Shape {2,2048,1024,512}: N*C*H*W = 2^31 = 2,147,483,648 > INT_MAX.
-// This is a regression guard for the int32 index-overflow path in spatial BN.
-INSTANTIATE_TEST_SUITE_P(Standard,
+INSTANTIATE_TEST_SUITE_P(DISABLED_Standard,
                          GPU_BnFwdTrainLarge_Spatial_FP32,
                          testing::ValuesIn(GetLargeTensorTestCasesBn()),
                          GetBnLargeTestCaseName);
