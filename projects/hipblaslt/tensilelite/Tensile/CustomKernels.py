@@ -22,14 +22,12 @@
 #
 ################################################################################
 
-from . import CUSTOM_KERNEL_PATH
 from .Resources import custom_kernel_names, custom_kernel_text
 from Tensile.Common.ValidParameters import checkParametersAreValid, validParameters, newMIValidParameters
 
 import yaml
 
 import os
-from pathlib import Path
 
 
 def isCustomKernelConfig(config):
@@ -52,13 +50,8 @@ def supportsUserSgprKernargPreload(rocmVersion):
     return rocmVersion.major > 6 or (
         rocmVersion.major == 6 and rocmVersion.patch >= 32650
     )
-def getCustomKernelFilepath(name, directory=None):
-    if directory is None:
-        directory = CUSTOM_KERNEL_PATH
-    return os.path.join(directory, (name + ".s"))
-
 def getAllCustomKernelNames(directory=None):
-    if _uses_bundled_custom_kernels(directory):
+    if directory is None:
         return custom_kernel_names()
     # Sorted in alphabetical order so that custom-kernel enumeration (notably the CustomKernels: ["*"]
     # wildcard) does not depend on os.listdir order, which varies with the
@@ -66,7 +59,7 @@ def getAllCustomKernelNames(directory=None):
     return sorted(fname[:-2] for fname in os.listdir(directory) if fname.endswith(".s"))
 
 def getCustomKernelContents(name, directory=None):
-    if _uses_bundled_custom_kernels(directory):
+    if directory is None:
         try:
             return custom_kernel_text(name)
         except ValueError:
@@ -74,7 +67,7 @@ def getCustomKernelContents(name, directory=None):
         except Exception as error:
             raise RuntimeError(f"Failed to find custom kernel: {name}") from error
     try:
-        with open(getCustomKernelFilepath(name, directory)) as f:
+        with open(os.path.join(directory, f"{name}.s")) as f:
             return f.read()
     except Exception as error:
         raise RuntimeError(
@@ -151,8 +144,3 @@ def getCustomKernelConfig(
     kernelConfig["CustomKernelName"] = kernelName
 
     return kernelConfig
-
-def _uses_bundled_custom_kernels(directory):
-    return directory is None or Path(directory).resolve(strict=False) == Path(
-        CUSTOM_KERNEL_PATH
-    ).resolve(strict=False)

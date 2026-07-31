@@ -29,14 +29,12 @@ from os import path
 # Hardcoded tensilelite version, also in Tensile/Source/TensileConfigVersion.cmake
 __version__ = "5.0.0"
 
-# Compatibility-only filesystem-style paths. These will be removed in a future
-# package cleanup. Production code that reads bundled resources should use
-# Tensile.Resources.
+# Compatibility-only filesystem-style paths. Production code that reads bundled
+# resources should use Tensile.Resources.
 ROOT_PATH: str = path.dirname(__file__)
 SOURCE_PATH: str = path.join(ROOT_PATH, "Source")
-CUSTOM_KERNEL_PATH: str = path.join(ROOT_PATH, "CustomKernels")
 
 def PrintTensileRoot():
     print(ROOT_PATH, end='')
 
-__all__ = ["__version__", "ROOT_PATH", "SOURCE_PATH", "CUSTOM_KERNEL_PATH"]
+__all__ = ["__version__", "ROOT_PATH", "SOURCE_PATH"]
