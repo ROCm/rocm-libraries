@@ -79,7 +79,7 @@ class AttentionRequest(OperatorRequest):
     sliding_window: int = 0
     kv_block_size: int = 16  # paged KV block_size (modulus); {16,32,64}
     num_sms: int = (
-        0  # 0 => auto-resolve to the device CU count at dispatch (_resolve_num_sms)
+        0  # 0 => auto-resolve to the device CU count at dispatch (_resolve_num_cus)
     )
     op: str = "attention"
     dtype: str = "fp16"
@@ -145,12 +145,11 @@ def _device_num_cus() -> "int | None":
         return None
 
 
-def _resolve_num_sms(req: AttentionRequest) -> int:
+def _resolve_num_cus(req: AttentionRequest) -> int:
     """Resolve the split-KV device-subscription target (``num_sms``).
 
     ``num_sms`` is the dispatcher's "how many CUs does this device have" knob; it
-    drives 2D<->3D routing (``select_path``) and the 3D segment count. It defaulted
-    to a stale ``120``, under-subscribing gfx942 (304 CUs). Resolution:
+    drives 2D<->3D routing (``select_path``) and the 3D segment count. Resolution:
       1. ``ROCKE_NUM_SMS`` env pin (deterministic across CI boxes),
       2. an explicit caller value (benchmarks pass a real count),
       3. **gfx942 only** -- the live device CU count (guarded so a gfx942 *request*
@@ -203,7 +202,7 @@ def _problem(req: AttentionRequest) -> UnifiedAttentionProblem:
         dtype=req.dtype.lower(),
         sliding_window=int(req.sliding_window),
         use_sinks=bool(req.use_sinks),
-        num_sms=_resolve_num_sms(req),
+        num_sms=_resolve_num_cus(req),
     )
 
 

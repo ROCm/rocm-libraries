@@ -15,7 +15,7 @@ from __future__ import annotations
 import os
 
 import dispatch.attention as A
-from dispatch.attention import AttentionRequest, _resolve_num_sms
+from dispatch.attention import AttentionRequest, _resolve_num_cus
 from kernels.common.attention_unified import UnifiedAttentionProblem
 import kernels.common.attention_unified as au
 import rocke.runtime.hip_module as hipm
@@ -72,9 +72,9 @@ def test_gfx942_device_query():
         p.env("ROCKE_NUM_SMS", None)
         p.attr(hipm, "get_device_arch", lambda *a, **k: "gfx942")
         p.attr(A, "_device_num_cus", lambda: 304)
-        assert _resolve_num_sms(_req(num_sms=0)) == 304
+        assert _resolve_num_cus(_req(num_sms=0)) == 304
         p.attr(A, "_device_num_cus", lambda: 228)  # smaller-CU gfx942 variant
-        assert _resolve_num_sms(_req(num_sms=0)) == 228
+        assert _resolve_num_cus(_req(num_sms=0)) == 228
     finally:
         p.restore()
 
@@ -86,7 +86,7 @@ def test_gfx942_fallback_off_box():
         p.env("ROCKE_NUM_SMS", None)
         p.attr(hipm, "get_device_arch", lambda *a, **k: None)  # no gfx942 device
         p.attr(A, "_device_num_cus", lambda: 256)  # e.g. a gfx950 box
-        assert _resolve_num_sms(_req(num_sms=0)) == 304  # constant, not 256
+        assert _resolve_num_cus(_req(num_sms=0)) == 304  # constant, not 256
     finally:
         p.restore()
 
@@ -98,9 +98,9 @@ def test_other_archs_keep_legacy_120():
         p.env("ROCKE_NUM_SMS", None)
         p.attr(hipm, "get_device_arch", lambda *a, **k: "gfx950")
         p.attr(A, "_device_num_cus", lambda: 256)
-        assert _resolve_num_sms(_req(num_sms=0, arch="gfx950")) == 120
-        assert _resolve_num_sms(_req(num_sms=0, arch="gfx90a")) == 120
-        assert _resolve_num_sms(_req(num_sms=0, arch="gfxZZZ")) == 120
+        assert _resolve_num_cus(_req(num_sms=0, arch="gfx950")) == 120
+        assert _resolve_num_cus(_req(num_sms=0, arch="gfx90a")) == 120
+        assert _resolve_num_cus(_req(num_sms=0, arch="gfxZZZ")) == 120
     finally:
         p.restore()
 
@@ -112,8 +112,8 @@ def test_explicit_caller_wins_any_arch():
         p.env("ROCKE_NUM_SMS", None)
         p.attr(hipm, "get_device_arch", lambda *a, **k: "gfx942")
         p.attr(A, "_device_num_cus", lambda: 999)  # must NOT be consulted
-        assert _resolve_num_sms(_req(num_sms=200)) == 200
-        assert _resolve_num_sms(_req(num_sms=200, arch="gfx950")) == 200
+        assert _resolve_num_cus(_req(num_sms=200)) == 200
+        assert _resolve_num_cus(_req(num_sms=200, arch="gfx950")) == 200
     finally:
         p.restore()
 
@@ -125,9 +125,9 @@ def test_env_pin_wins():
         p.env("ROCKE_NUM_SMS", "77")
         p.attr(hipm, "get_device_arch", lambda *a, **k: "gfx942")
         p.attr(A, "_device_num_cus", lambda: 304)
-        assert _resolve_num_sms(_req(num_sms=200)) == 77
-        assert _resolve_num_sms(_req(num_sms=0)) == 77
-        assert _resolve_num_sms(_req(num_sms=0, arch="gfx950")) == 77
+        assert _resolve_num_cus(_req(num_sms=200)) == 77
+        assert _resolve_num_cus(_req(num_sms=0)) == 77
+        assert _resolve_num_cus(_req(num_sms=0, arch="gfx950")) == 77
     finally:
         p.restore()
 
@@ -139,9 +139,9 @@ def test_ignores_bad_env():
         p.attr(hipm, "get_device_arch", lambda *a, **k: None)
         p.attr(A, "_device_num_cus", lambda: None)
         p.env("ROCKE_NUM_SMS", "garbage")
-        assert _resolve_num_sms(_req(num_sms=0)) == 304  # gfx942 fallback
+        assert _resolve_num_cus(_req(num_sms=0)) == 304  # gfx942 fallback
         p.env("ROCKE_NUM_SMS", "0")
-        assert _resolve_num_sms(_req(num_sms=0)) == 304
+        assert _resolve_num_cus(_req(num_sms=0)) == 304
     finally:
         p.restore()
 
