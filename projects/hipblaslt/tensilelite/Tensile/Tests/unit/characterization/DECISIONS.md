@@ -342,8 +342,93 @@ characterization assertion can distinguish mutant from original:
   message string.
 - `:367` — `print("ERROR: Divide by 0")`, a diagnostic message string.
 
-No other equivalent mutants are accepted yet; widening rounds append their
-accepted equivalents/pragmas here, each with its one-line reason.
+**M2 — accepted `# pragma: no mutate` (expanded mutation run).** These
+equivalent source forms are fenced so mutmut does not keep reporting them:
+- `Tensile.Common.ValidParameters.checkSpaceFillAlgoIsValid` — the
+  `range(0, maxOrderID + 1)` membership check carries `# pragma: no mutate`
+  because `range(0, n)` and `range(n)` produce the same values; the explicit
+  lower bound documents the valid OrderID interval.
+- `Tensile.Common.ValidParameters.checkSpaceFillAlgoWGMIsValid` — the
+  `range(0, 256)` membership check carries `# pragma: no mutate` because
+  `range(0, n)` and `range(n)` produce the same values; the explicit lower bound
+  documents the half-open GridDim interval `[0, 256)`.
+
+**M3 — accepted equivalent mutants (expanded mutation run).** These survivors
+are behaviorally equivalent on the specific public surface under test:
+- `Tensile.TensileLogic.ValidWorkGroupMappingXCC.x__cu_count_from_path__mutmut_9` —
+  changing `cu` to `CU` inside the regex literal is equivalent because the search
+  uses `re.IGNORECASE`.
+
+Two former survivors are intentionally no longer accepted equivalents:
+`Tensile.TensileLogic.ValidWorkGroupMappingXCC.x__validateWorkGroupMappingXCC__mutmut_14`
+is avoided by making the missing-key / `-1` sentinel branch explicit before
+reading the fixed `WorkGroupMappingXCC` value, and
+`Tensile.Common.Utilities.xǁSpinnyThingǁincrement__mutmut_1` is killable because
+`SpinnyThing.increment` now uses its `value` parameter to advance by caller
+selected steps.
+
+**M4 — widened mutation slice.** The `only_mutate` set in `[tool.mutmut]` was
+extended past the original five files to add `Common/DataType.py`,
+`Common/Types.py`, and `Common/ValidParameters.py`, with the matching
+characterization directories (`DataType`, `CommonTypes`, `ValidParameters`)
+added to `pytest_add_cli_args_test_selection`. Source-path mapping for the
+widened slice (recorded here because the shorthand names differ from the file
+paths): DataType → `Tensile/Common/DataType.py`; CommonTypes →
+`Tensile/Common/Types.py`; ValidParameters → `Tensile/Common/ValidParameters.py`
+(there is no `Tensile/SolutionStructs/ValidParameters.py`).
 
 ## D16 — BufferLoad/BufferStore promoted to Required Parameters
 **Context** kernel basename hash changes across all archs; assembly verified unchanged/correct; no err or kernel-count changes."
+
+## D17 — StreamKWorkStealing added to the required (min-naming) parameter set
+**Decision:** Promote `StreamKWorkStealing` to the required (min-naming) parameter set in
+`Common/RequiredParameters.py` and accept the regenerated `_codegen` / SolutionClass /
+ValidParameters goldens.
+**Why:** without it, two solutions differing only in `StreamKWorkStealing` would collide on the
+same kernel identity name/hash.
+**Verification:** only `basename` hashes + the `SKWS0` name token + the roster/valid-values entry
+change (`num_keys` 334→335); no `err`, instruction-count, or emitted-assembly changes.
+
+## D18 — LibraryIO dict-format raw logic snapshot addition
+**Context:** `rawLibraryLogic` historically unpacked only list-format logic. A
+dict-format input path was added to preserve the legacy tuple contract used by
+older call sites (`versionString`, `scheduleName`, `architectureName`,
+`deviceNames`, `problemTypeState`, `solutionStates`, `indexOrder`,
+`exactLogic`, `rangeLogic`, `otherFields`). Characterization gained a new test
+(`test_raw_library_logic_dict_format`) to pin this behavior.
+
+**Decision:** Add a new syrupy golden node for the new test in
+`LibraryIO/__snapshots__/test_logiccontract_char.ambr`.
+
+**Why:** This is a **new characterization case**, not a rewrite of an existing
+golden's meaning. The snapshot records the expected dict-format-to-legacy-tuple
+mapping (including optional-field ordering in `otherFields`) so future refactors
+cannot silently break backward compatibility.
+
+**Alternatives rejected:**
+- Avoid snapshot and assert piecemeal fields manually — rejected: weaker
+  protection for tuple ordering/shape regressions.
+- Update all snapshots wholesale — rejected by governance; only the single new
+  node was generated.
+
+## D19 — test_create_library_logic_dict_arch golden changed from list-shape to dict-shape
+**Context:** Diff vs `develop` shows the snapshot node
+`test_create_library_logic_dict_arch` in
+`LibraryIO/__snapshots__/test_logiccontract_char.ambr` moved from a legacy
+matching-table list representation to canonical dict-format library logic.
+
+**Decision:** Keep the new dict-format golden and document it as intentional.
+
+**Why:** The serialization contract being characterized is now dict-first for
+`createLibraryLogic`, with explicit root keys (`ArchitectureName`, `CUCount`,
+`DefaultSolution`, `Solutions`, `LibraryType`, etc.). The old list-shape golden
+encoded the prior format and would now mask the intended migration. The new
+golden also captures that for the gfx942 + CUCount!=304 branch, architecture is
+materialized as `ArchitectureName` + `CUCount` in dict logic rather than a list
+field tuple position.
+
+**Alternatives rejected:**
+- Revert to list-shaped snapshot for compatibility optics — rejected: it would
+  assert obsolete output and fight the dict-format migration.
+- Keep both shapes in one test — rejected: conflates two contracts; list-format
+  coverage is already pinned separately via parse-list roundtrip tests.

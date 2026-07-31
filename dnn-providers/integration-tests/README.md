@@ -120,6 +120,40 @@ Add to the appropriate function in
 [`tests/gpu_ref/ConvShapeCatalog.hpp`](tests/gpu_ref/ConvShapeCatalog.hpp).
 Existing `INSTANTIATE_TEST_SUITE_P` calls pick up new shapes automatically.
 
+## Bundle Tests
+
+Bundle tests are data-driven: each test is a graph JSON + sweep of
+shapes/dtypes/layouts — no C++ needed. The bundle runner discovers them
+automatically from `integration-test-bundles/`.
+
+### Searching cases
+
+```bash
+# Find all batchnorm bundle cases
+python3 migration_scripts/find_case.py --op Batchnorm
+
+# Find cases that have an epsilon input
+python3 migration_scripts/find_case.py --input epsilon
+
+# Find cases where epsilon is in [-1,1]
+python3 migration_scripts/find_case.py --input epsilon:-1,1
+
+# Full detail for a hashed case id
+python3 migration_scripts/find_case.py --id f446b9 --detail
+```
+
+### Adding a bundle test
+
+```bash
+python3 migration_scripts/import_graph.py \
+    --graph new_conv.json \
+    --bundle-dir integration-test-bundles/
+```
+
+The case id is auto-generated and printed to stderr. No manual naming
+needed. See [`migration_scripts/README.md`](migration_scripts/README.md)
+for the full workflow and tooling reference.
+
 ## Troubleshooting
 
 | Symptom | Fix |
