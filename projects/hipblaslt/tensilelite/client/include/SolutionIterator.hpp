@@ -176,6 +176,9 @@ namespace TensileLite
             double m_predictionThreshold;
             double m_currentPrediction;
 
+            // Set per problem; every m_qSolutionIdx branch must test this, not the threshold.
+            bool m_usePrediction = false;
+
             int m_firstSolutionIdx;
             int m_lastSolutionIdx;
 
@@ -236,6 +239,9 @@ namespace TensileLite
             int                                               m_currentSolutionIdx = 0;
             double                                            m_predictionThreshold;
             double                                            m_currentPrediction;
+
+            // See AllSolutionsIterator::m_usePrediction.
+            bool m_usePrediction = false;
         };
     } // namespace Client
 } // namespace TensileLite

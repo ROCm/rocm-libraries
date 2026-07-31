@@ -101,6 +101,32 @@ TEST_CASE("Formocast: Hardware constants retrieval", "[formocast]") {
     }
 }
 
+TEST_CASE("Formocast: isArchSupported agrees with getHardwareConstants", "[formocast]") {
+    // Anti-drift lock. Callers use isArchSupported() to decide whether calling
+    // setHardware() is safe, so the two must never disagree: adding an
+    // architecture to one without the other fails here.
+    //
+    // Iterate to Count rather than listing enumerators, so an architecture added
+    // to architecture_t is covered automatically instead of silently skipped.
+    Formocast simulator;
+
+    for(int i = 0; i < static_cast<int>(hardware_t::architecture_t::Count); ++i) {
+        const auto arch = static_cast<hardware_t::architecture_t>(i);
+        CAPTURE(std::string(hardware_t::arch_enum_to_name(arch)));
+
+        // Every value below Count must be a named enumerator; an "unknown" here
+        // means arch_enum_to_name() was not updated alongside architecture_t.
+        REQUIRE(hardware_t::arch_enum_to_name(arch) != "unknown");
+
+        if(Formocast::isArchSupported(arch)) {
+            REQUIRE_NOTHROW(simulator.getHardwareConstants(arch));
+            REQUIRE(simulator.getHardwareConstants(arch).architecture == arch);
+        } else {
+            REQUIRE_THROWS_AS(simulator.getHardwareConstants(arch), std::runtime_error);
+        }
+    }
+}
+
 TEST_CASE("Formocast: Basic problem and solution setup", "[formocast]") {
     Formocast simulator;
 

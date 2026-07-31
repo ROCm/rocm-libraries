@@ -73,6 +73,20 @@ namespace origami
         return hw;
     }
 
+    // Keep in sync with the architectures handled by getHardwareConstants below.
+    bool Formocast::isArchSupported(const hardware_t::architecture_t arch) noexcept
+    {
+        switch(arch)
+        {
+        case hardware_t::architecture_t::gfx950:
+        case hardware_t::architecture_t::gfx942:
+        case hardware_t::architecture_t::gfx1201:
+            return true;
+        default:
+            return false;
+        }
+    }
+
     Formocast::HardwareConstants
     Formocast::getHardwareConstants(const hardware_t::architecture_t arch) const
     {
