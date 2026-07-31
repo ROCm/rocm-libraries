@@ -43,10 +43,6 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install tox
 
-      - name: Install tensilelite dev requirements
-        working-directory: projects/hipblaslt/tensilelite
-        run: python -m pip install -r requirements-dev.txt
-
       - name: Run GEKO coverage gate
         run: |
           export HIPBLASLT_PATH="${GITHUB_WORKSPACE}/projects/hipblaslt"
@@ -59,7 +55,6 @@ jobs:
         with:
           package_path: projects/hipblaslt/utilities/geko
           test_path: tests
-          pytest_args: --hipblaslt-path "${GITHUB_WORKSPACE}/projects/hipblaslt" --config tests/test_data/config.yaml
 
   windows:
     name: Windows
@@ -94,10 +89,6 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install tox
 
-      - name: Install tensilelite dev requirements
-        working-directory: projects/hipblaslt/tensilelite
-        run: python -m pip install -r requirements-dev.txt
-
       - name: Run GEKO coverage gate
         run: |
           export HIPBLASLT_PATH="${GITHUB_WORKSPACE}/projects/hipblaslt"
@@ -110,4 +101,3 @@ jobs:
         with:
           package_path: projects/hipblaslt/utilities/geko
           test_path: tests
-          pytest_args: --hipblaslt-path "${GITHUB_WORKSPACE}/projects/hipblaslt" --config tests/test_data/config.yaml
