@@ -629,13 +629,13 @@ def default_fp8_compv3_config(
     bquant_group_n: int = 1,
     gfx_arch: str = _DEFAULT_GFX_ARCH,
 ) -> ABQuantKernelConfig:
-    """fp8 ABQuant non-gfx950 config (GemmConfigABQuantPrefill<fp8_t>, TransposeC=False).
+    """fp8 ABQuant CompV3 config (GemmConfigABQuantPrefill<fp8_t>, TransposeC=False).
 
     Tile: 128x128x128, warp 1x4x1. kPadK=false (ABQuant prefill tiles).
-
-    warp_tile_k=32 selects mfma_f32_16x16x32_fp8_fp8, valid on gfx942 and gfx950.
-    warp_tile_k=16 would select the gfx12-only WMMA instruction which silently returns
-    zeros on gfx9 hardware.
+    warp_tile_k mirrors get_k_warp_tile<fp8_t, 16, IsFlatMM=false>:
+      gfx950 (CK_GFX950_SUPPORT): 128
+      gfx942: 32
+    The value must match what the C++ kernel header computes at compile time.
     """
     return ABQuantKernelConfig(
         variant_key="fp8",
@@ -645,7 +645,7 @@ def default_fp8_compv3_config(
         scheduler="intrawave",
         tile_m=128, tile_n=128, tile_k=128,
         warp_m=1, warp_n=4, warp_k=1,
-        warp_tile_m=16, warp_tile_n=16, warp_tile_k=32,
+        warp_tile_m=16, warp_tile_n=16, warp_tile_k=_compv3_warp_tile_k(gfx_arch),
         aquant_group_m=1, aquant_group_n=1, aquant_group_k=quant_group_k,
         bquant_group_m=1, bquant_group_n=bquant_group_n, bquant_group_k=quant_group_k,
         preshuffle_b=False, preshuffle_aq=False, preshuffle_bq=False,
@@ -659,11 +659,10 @@ def default_bf8_compv3_config(
     bquant_group_n: int = 1,
     gfx_arch: str = _DEFAULT_GFX_ARCH,
 ) -> ABQuantKernelConfig:
-    """bf8 ABQuant non-gfx950 config (GemmConfigABQuantPrefill<bf8_t>, TransposeC=False).
+    """bf8 ABQuant CompV3 config (GemmConfigABQuantPrefill<bf8_t>, TransposeC=False).
 
-    warp_tile_k=32 selects mfma_f32_16x16x32_bf8_bf8, valid on gfx942 and gfx950.
-    warp_tile_k=16 would select the gfx12-only WMMA instruction which silently returns
-    zeros on gfx9 hardware.
+    warp_tile_k mirrors get_k_warp_tile<bf8_t, 16, IsFlatMM=false>:
+      gfx950: 128, gfx942: 32. See default_fp8_compv3_config for rationale.
     """
     return ABQuantKernelConfig(
         variant_key="bf8",
@@ -673,13 +672,23 @@ def default_bf8_compv3_config(
         scheduler="intrawave",
         tile_m=128, tile_n=128, tile_k=128,
         warp_m=1, warp_n=4, warp_k=1,
-        warp_tile_m=16, warp_tile_n=16, warp_tile_k=32,
+        warp_tile_m=16, warp_tile_n=16, warp_tile_k=_compv3_warp_tile_k(gfx_arch),
         aquant_group_m=1, aquant_group_n=1, aquant_group_k=quant_group_k,
         bquant_group_m=1, bquant_group_n=bquant_group_n, bquant_group_k=quant_group_k,
         preshuffle_b=False, preshuffle_aq=False, preshuffle_bq=False,
         transpose_c=False,
         gfx_arch=gfx_arch,
     )
+
+
+def _compv3_warp_tile_k(gfx_arch: str) -> int:
+    """Return the correct warp_tile_k for the CompV3 (ABQuantPrefill) pipeline.
+
+    Mirrors get_k_warp_tile<fp8_t/bf8_t, M_Warp_Tile=16, IsFlatMM=false>:
+      gfx950 (CK_GFX950_SUPPORT): 128
+      gfx942: 32
+    """
+    return 128 if gfx_arch.startswith("gfx950") else 32
 
 
 def _eightwaves_warp_tile_k(gfx_arch: str) -> int:
