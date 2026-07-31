@@ -18,6 +18,9 @@ from ck4inductor.grouped_conv_fwd.gen_instances import (
 from ck4inductor.batched_universal_gemm.gen_instances import (
     gen_ops_library as gen_batched_gemm_ops_library,
 )
+from ck4inductor.batched_universal_gemm.gen_instances import (
+    gen_ops_library_wmma as gen_batched_gemm_ops_library_wmma,
+)
 from ck4inductor.ck_tile_universal_gemm.gen_instances import (
     ops as gen_ck_tile_gemm_ops_library,
 )
@@ -70,6 +73,53 @@ class TestGenInstances(unittest.TestCase):
             self.assertIn(op.a_element_dtype, ("F16", "BF16"))
             self.assertIn(op.b_element_dtype, ("F16", "BF16"))
             self.assertIn(op.c_element_dtype, ("F16", "BF16"))
+
+    def test_gen_batched_gemm_wmma_instances(self):
+        # gfx1250 batched WMMA enumerator. Same 16x16-warp fp16/bf16 shape as the
+        # non-batched case, but parsed from a different folder and from a device op
+        # with no Ds template parameters.
+        instances = gen_batched_gemm_ops_library_wmma()
+
+        log.debug("%d wmma batched gemm instances from library" % len(instances))
+        self.assertTrue(instances)
+        for op in instances:
+            self.assertTrue(op.is_wmma)
+            self.assertEqual((op.m_per_xdl, op.n_per_xdl), (16, 16))
+            self.assertIn(op.a_element_dtype, ("F16", "BF16"))
+            self.assertIn(op.b_element_dtype, ("F16", "BF16"))
+            self.assertIn(op.c_element_dtype, ("F16", "BF16"))
+            # Ds slots are inserted, not parsed: a wrong ds_mode shifts every
+            # subsequent field by two and would leave these non-empty.
+            self.assertEqual(op.ds_layouts, ())
+            self.assertEqual(op.ds_element_dtypes, ())
+            # The instance sources spell the scheduler bare; it must be qualified
+            # or the rendered kernel will not compile.
+            self.assertTrue(
+                str(op.block_gemm_pipeline_scheduler).startswith(
+                    "BlockGemmPipelineScheduler::"
+                )
+            )
+            self.assertNotIn("is_wmma", dict(op.dict_items()))
+
+        # v1 is the pipeline the XDL batched instances lack on gfx1250; losing it
+        # would silently reintroduce the all-+inf autotune failure this enumerator
+        # exists to fix.
+        self.assertTrue(
+            any(
+                op.block_gemm_pipeline_version == "BlockGemmPipelineVersion::v1"
+                for op in instances
+            )
+        )
+
+    def test_batched_gemm_xdl_instances_are_not_wmma(self):
+        # The WMMA enumerator must not perturb the XDL one: same instances, and the
+        # emitted C++ alias must stay distinct so the two cannot collide.
+        instances = gen_batched_gemm_ops_library()
+
+        self.assertTrue(instances)
+        for op in instances:
+            self.assertFalse(op.is_wmma)
+        self.assertIn("_xdl_", instances[0].name())
 
 
 class TestCheckHeaders(unittest.TestCase):
