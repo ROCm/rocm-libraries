@@ -178,11 +178,21 @@ class TestConvDeclaredArches(unittest.TestCase):
             by_name["conv_igemm_rdna_wmma"]["capability"]["arches"],
             ["gfx11-generic", "gfx1151", "gfx1201"],
         )
+        self.assertEqual(
+            by_name["conv_igemm_gfx1250_wmma"]["capability"]["arches"], ["gfx1250"]
+        )
 
-    def test_gfx1250_is_declared_by_no_conv_candidate(self):
+    def test_gfx1250_is_declared_by_exactly_one_conv_candidate(self):
         """A 'cdna' gate admitted this wave32 target to both wave64 candidates
-        and denied it the WMMA one -- wrong in both directions from one label."""
-        self.assertEqual(CONV_REGISTRY.for_arch("gfx1250"), ())
+        and denied it the WMMA one -- wrong in both directions from one label.
+
+        Explicit arch lists first made gfx1250 serve *nothing*, which is a
+        correct refusal but not coverage. Now it has one candidate, and the
+        point of the assertion is that it is one: the wave64 candidates must
+        not have quietly picked it up again.
+        """
+        served = tuple(c.name for c in CONV_REGISTRY.for_arch("gfx1250"))
+        self.assertEqual(served, ("conv_igemm_gfx1250_wmma",))
 
 
 if __name__ == "__main__":

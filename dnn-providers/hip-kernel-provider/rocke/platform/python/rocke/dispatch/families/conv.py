@@ -273,6 +273,32 @@ def _spec_rdna_wmma(req: ConvRequest, name: str) -> ImplicitGemmConvSpec:
     )
 
 
+def _spec_gfx1250_wmma(req: ConvRequest, name: str) -> ImplicitGemmConvSpec:
+    """gfx1250: the RDNA WMMA shape, retargeted to the atom gfx1250 actually has.
+
+    gfx1250's f16 WMMA is 16x16x**32**, where gfx12's is 16x16x16, so
+    ``warp_tile_k`` doubles and ``tile_k`` with it. Tiles stay at 32x32 rather
+    than following the CDNA candidates to 64x64: these kernels do not pad, so
+    the tile size is also the divisibility gate, and there is no gfx1250 conv
+    tuning data to justify trading coverage for a larger tile.
+    """
+    return ImplicitGemmConvSpec(
+        problem=_problem(req),
+        name=name,
+        tile_m=32,
+        tile_n=32,
+        tile_k=32,
+        warp_m=2,
+        warp_n=2,
+        warp_tile_m=16,
+        warp_tile_n=16,
+        warp_tile_k=32,
+        wave_size=ArchTarget.from_gfx(req.arch).wave_size,
+        pipeline="mem",
+        epilogue="default",
+    )
+
+
 def _gemm_dims_divide(req: ConvRequest, spec: ImplicitGemmConvSpec) -> Tuple[bool, str]:
     """No-padding divisibility on the DERIVED implicit-GEMM dims.
 
@@ -359,6 +385,10 @@ def _grid(spec: ImplicitGemmConvSpec, req: OperatorRequest) -> Tuple[int, int, i
 _CDNA_CSHUFFLE = ("gfx950",)
 _CDNA_MEM = ("gfx90a", "gfx942", "gfx950")
 _RDNA_WMMA = ("gfx11-generic", "gfx1151", "gfx1201")
+# gfx1250 gets its own entry rather than joining _RDNA_WMMA: same WMMA family,
+# different atom shape (K=32 vs K=16), so sharing the list would mean sharing
+# a spec that does not fit.
+_GFX1250_WMMA = ("gfx1250",)
 
 CONV_REGISTRY = CandidateRegistry(
     _FAMILY, dim_vocabulary=CONV_DIM_VOCABULARY, require_build=True
@@ -385,6 +415,13 @@ CONV_REGISTRY.extend(
             priority=10,
             spec_fn=_spec_rdna_wmma,
             arches=_RDNA_WMMA,
+        ),
+        _make_candidate(
+            name="conv_igemm_gfx1250_wmma",
+            spec_id="gfx1250_wmma_32x32",
+            priority=10,
+            spec_fn=_spec_gfx1250_wmma,
+            arches=_GFX1250_WMMA,
         ),
     )
 )
