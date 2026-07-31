@@ -42,14 +42,6 @@ TEST(LibcxxIteratorTests, TestLibcxxDiscardIterator)
   }
 }
 
-struct plus_one
-{
-  [[nodiscard]] THRUST_HOST_DEVICE constexpr int operator()(const int val) const noexcept
-  {
-    return val + 1;
-  }
-};
-
 TEST(LibcxxIteratorTests, TestLibcxxCountingIterator)
 {
   { // device system
@@ -67,6 +59,36 @@ TEST(LibcxxIteratorTests, TestLibcxxCountingIterator)
     thrust::copy(_THRUST_LIBCXX::counting_iterator{0}, _THRUST_LIBCXX::counting_iterator{4}, vec.begin());
   }
 }
+
+TEST(LibcxxIteratorTests, TestLibcxxStridedIterator)
+{
+  auto discard = _THRUST_LIBCXX::discard_iterator{};
+  { // device system
+    thrust::device_vector<int> vec{1, 2, 3, 4, 5, 6};
+    thrust::copy(
+      _THRUST_LIBCXX::strided_iterator{vec.begin(), 2}, _THRUST_LIBCXX::strided_iterator{vec.end(), 2}, discard);
+  }
+
+  { // host system
+    thrust::host_vector<int> vec{1, 2, 3, 4, 5, 6};
+    thrust::copy(
+      _THRUST_LIBCXX::strided_iterator{vec.begin(), 2}, _THRUST_LIBCXX::strided_iterator{vec.end(), 2}, discard);
+  }
+
+  { // plain std::vector
+    std::vector<int> vec{1, 2, 3, 4, 5, 6};
+    thrust::copy(
+      _THRUST_LIBCXX::strided_iterator{vec.begin(), 2}, _THRUST_LIBCXX::strided_iterator{vec.end(), 2}, discard);
+  }
+}
+
+struct plus_one
+{
+  [[nodiscard]] THRUST_HOST_DEVICE constexpr int operator()(const int val) const noexcept
+  {
+    return val + 1;
+  }
+};
 
 TEST(LibcxxIteratorTests, TestLibcxxTransformIterator)
 {

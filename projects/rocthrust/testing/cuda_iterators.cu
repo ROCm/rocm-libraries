@@ -44,14 +44,6 @@ void TestCUDADiscardIterator()
 }
 DECLARE_UNITTEST(TestCUDADiscardIterator);
 
-struct plus_one
-{
-  [[nodiscard]] _CCCL_HOST_DEVICE constexpr int operator()(const int val) const noexcept
-  {
-    return val + 1;
-  }
-};
-
 void TestCUDACountingIterator()
 {
   { // device system
@@ -70,6 +62,34 @@ void TestCUDACountingIterator()
   }
 }
 DECLARE_UNITTEST(TestCUDACountingIterator);
+
+void TestCUDAStridedIterator()
+{
+  auto discard = cuda::discard_iterator{};
+  { // device system
+    thrust::device_vector<int> vec{1, 2, 3, 4, 5, 6};
+    thrust::copy(cuda::strided_iterator{vec.begin(), 2}, cuda::strided_iterator{vec.end(), 2}, discard);
+  }
+
+  { // host system
+    thrust::host_vector<int> vec{1, 2, 3, 4, 5, 6};
+    thrust::copy(cuda::strided_iterator{vec.begin(), 2}, cuda::strided_iterator{vec.end(), 2}, discard);
+  }
+
+  { // plain std::vector
+    std::vector<int> vec{1, 2, 3, 4, 5, 6};
+    thrust::copy(cuda::strided_iterator{vec.begin(), 2}, cuda::strided_iterator{vec.end(), 2}, discard);
+  }
+}
+DECLARE_UNITTEST(TestCUDAStridedIterator);
+
+struct plus_one
+{
+  [[nodiscard]] _CCCL_HOST_DEVICE constexpr int operator()(const int val) const noexcept
+  {
+    return val + 1;
+  }
+};
 
 void TestCUDATransformIterator()
 {
