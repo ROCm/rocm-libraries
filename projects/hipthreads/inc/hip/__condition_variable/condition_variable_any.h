@@ -78,7 +78,7 @@ class _LIBHIPTHREADS_TYPE_VIS condition_variable_any {
     ///@}
 
     /**
-     * @brief Wakes at most one waiting thread/work item (if any).
+     * @brief Wakes at most one waiting wthread/work item (if any).
      *
      * If no waiter is currently blocked, the call is a no-op (no "stored"
      * wake token).

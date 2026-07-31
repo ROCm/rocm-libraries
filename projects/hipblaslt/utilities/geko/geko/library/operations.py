@@ -73,6 +73,7 @@ __all__ = [
     "extract_solutions",
     "merge",
     "create",
+    "normalize",
     "from_dataframe",
     "prune_library",
 ]
@@ -178,6 +179,10 @@ def merge_solutions(
             libs[lib.name] = lib
             continue
 
+        if libs[lib.name].default_solution != lib.default_solution:
+            raise NotImplementedError(f"Default solution mismatch for library '{lib.name}'. "
+                                      f"Use TensileMergeLibrary instead.")
+
         base_sols = libs[lib.name].solutions
         base_sizes = libs[lib.name].sizes
         for i, sol in enumerate(lib.solutions):
@@ -261,6 +266,9 @@ def extract_solutions(df: pd.DataFrame, match_table_path: str | Path) -> Library
             new_sols = []
             new_sizes = []
         else:
+            if libs[lib.name].default_solution != lib.default_solution:
+                raise NotImplementedError(f"Default solution mismatch for library '{lib.name}'. "
+                                          f"Use TensileMergeLibrary instead.")
             new_sols = libs[lib.name].solutions
             new_sizes = libs[lib.name].sizes
 
@@ -355,6 +363,52 @@ def create(hipblaslt_path: str | Path, library_dir: str | Path, output_dir: str 
             "HIP",
         ]
     )
+
+def normalize(library_path: str | Path, output_path: str | Path, hipblaslt_path: ( str | Path) | None = None) -> None:
+    """Normalize a Tensile library using TensileNormalizeLibrary.
+
+    Args:
+        library_path (str | Path): Path to the input library.
+        output_path (str | Path): Path to the output normalized library.
+        hipblaslt_path (str | Path, optional): Path to hipBLASLt installation. 
+            If set, will append the path to sys.path to find Tensile.
+
+    Raises:
+        FileNotFoundError: If library path does not exist.
+    """
+    library_path = Path(library_path)
+    if not library_path.is_file():
+        raise FileNotFoundError(f"Library path not found: '{library_path}'")
+
+    if hipblaslt_path is not None:
+        hipblaslt_path = Path(hipblaslt_path)
+        if not hipblaslt_path.is_dir():
+            raise FileNotFoundError(f"hipBLASLt path not found: '{hipblaslt_path}'")
+        import sys
+        sys.path.append(str(hipblaslt_path / "tensilelite"))
+
+    try:
+        from Tensile import LibraryIO
+        from Tensile.CustomYamlLoader import load_yaml_stream
+        from Tensile.TensileMergeLibrary import convertToDict, normalizeDictLibraryLayout
+    except ImportError as e:
+        raise ImportError(f"Failed to import Tensile. Install it or pass the correct path to hipBLASLt. Error: {e}. ")
+    
+    data = load_yaml_stream(library_path, DEFAULT_YAML_LOADER)
+    if not isinstance(data, list):
+        raise ValueError(f"Library file '{library_path}' is not in list format.")
+
+    converted = convertToDict(copy.deepcopy(data), str(library_path))
+    normalizeDictLibraryLayout(converted)
+
+    LibraryIO.writeYAML(
+        str(output_path),
+        converted,
+        explicit_start=False,
+        explicit_end=False,
+        sort_keys=False,
+    )
+    logger.info(f"Library {library_path.name} normalized and saved to {output_path}")
 
 
 def from_dataframe(

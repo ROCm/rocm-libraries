@@ -4,7 +4,7 @@
 add_executable(hipdnn_integration_tests_unit_tests
     main.cpp
     ../src/harness/bundle/IntegrationBundleVerificationHarness.cpp
-    ../src/harness/input-init/SynthesizeInputs.cpp
+    ../src/harness/input-init/FillInputs.cpp
     TestArchMatch.cpp
     TestBundleMetadata.cpp
     TestGraphDescription.cpp
@@ -21,8 +21,8 @@ add_executable(hipdnn_integration_tests_unit_tests
     TestBundleDiscovery.cpp
     TestVerificationPaths.cpp
     TestBundleVerificationHarness.cpp
-    TestSynthesisConfig.cpp
-    TestSynthesizeInputs.cpp
+    TestInputFillRecipes.cpp
+    TestFillInputs.cpp
     TestToleranceResolver.cpp
     TestVerificationModePaths.cpp
     TestErrorPaths.cpp
@@ -54,6 +54,7 @@ add_unit_test_target(hipdnn_integration_tests_unit_tests ${CMAKE_CURRENT_BINARY_
 add_executable(hipdnn_gpu_ref_tests
     gpu-ref/main.cpp
     gpu-ref/TestGpuFpReferenceConvolution.cpp
+    gpu-ref/TestGpuFpReferenceRMSNorm.cpp
     gpu-ref/TestGpuFpReferenceDgrad.cpp
     gpu-ref/TestGpuFpReferenceWgrad.cpp
     gpu-ref/TestGpuFpReferenceValidation.cpp

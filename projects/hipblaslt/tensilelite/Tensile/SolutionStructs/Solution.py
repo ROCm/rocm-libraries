@@ -46,7 +46,10 @@ from Tensile.Common.GlobalParameters import defaultSolution, \
 from Tensile.Common.ValidParameters import validParameters, \
                                             _getExpectedTypes, \
                                             _expectedParamTypes, \
-                                            _skipTypeCheck
+                                            _skipTypeCheck, \
+                                            normalizeSwInstructionPrefetch, \
+                                            SW_INSTRUCTION_PREFETCH_ABSOLUTE, \
+                                            SW_INSTRUCTION_PREFETCH_AUTO
 from Tensile.SolutionStructs.Naming import getSolutionNameFull
 from Tensile.SolutionStructs.Problem import ProblemType
 from Tensile.SolutionStructs.segment_interleave import evaluate as segIntEval, aligned_budget_ok as segAlignedBudget
@@ -704,6 +707,33 @@ class Solution(collections.abc.Mapping):
     else:
       state["_ScheduleIterAlg"] = state["ScheduleIterAlg"]
       state["_StinkyTofuOptLevel"] = 0
+
+    # SwInstructionPrefetch (single-integer bitmask): explicit Absolute(2) is only supported on
+    # gfx1250 non-Stream-K. Auto(-1) already resolves to Relative on Stream-K / non-gfx1250, so it
+    # is never rejected; legacy bool aliases (True->Relative, False->Off) never request Absolute.
+    # Only an explicit Absolute request on an unsupported target is rejected here (users should
+    # pick Auto(-1) or Relative(1) instead).
+    swpMode = normalizeSwInstructionPrefetch(
+        state.get("SwInstructionPrefetch", SW_INSTRUCTION_PREFETCH_AUTO))
+    if swpMode == SW_INSTRUCTION_PREFETCH_ABSOLUTE:
+      if state.get("StreamK", 0) != 0:
+        reject(state, printRejectionReason,
+               "SwInstructionPrefetch=2 (Absolute) is not supported on Stream-K kernels; "
+               "use Auto(-1) or Relative(1)")
+        return
+      if state["ISA"] != (12, 5, 0):
+        reject(state, printRejectionReason,
+               f"SwInstructionPrefetch=2 (Absolute) is only supported on gfx1250, not {state['ISA']}; "
+               "use Auto(-1) or Off(0)")
+        return
+      if state["ProblemType"]["DataType"].isDouble():
+        # f64: OptNLL epilogue routinely exceeds the 64 KiB I-cache (bucket-c fleet-wide) so the
+        # abs cover/ladder yields no reliable benefit, and sgprAlpha is a 2-dword pair (the
+        # OptNLL-aware Case-B fp32 predicate does not apply). See design doc §16.8/§16.13.
+        reject(state, printRejectionReason,
+               "SwInstructionPrefetch=2 (Absolute) is not supported for f64 (double) kernels; "
+               "use Auto(-1) or Relative(1)")
+        return
 
     if (not state["ProblemType"]["StridedBatched"]) and (not state["ProblemType"]['Batched']):
       reject(state, printRejectionReason, "General Batched GEMM only support Batched Problem")
@@ -1705,7 +1735,10 @@ class Solution(collections.abc.Mapping):
         # StreamKXCCMapping remaps WorkGroup0 with no cluster awareness; disable it.
         state["StreamKXCCMapping"] = 0
       if not state["EnableMatrixInstruction"]:
-        reject(state, printRejectionReason, "Stream-K requires MatrixInstruction")
+        # Source/MAC (non-MI) Stream-K: partial-write + fixup are datapath-agnostic,
+        # so allow it for Assembly source kernels (other SK constraints still apply).
+        if state["KernelLanguage"] != "Assembly":
+          reject(state, printRejectionReason, "Stream-K (non-MatrixInstruction) requires Assembly source kernels")
       # if state["PersistentKernel"]:
       #   reject(state, printRejectionReason, "Cannot enable both Stream-K and PersistentKernel")
       if not state["ProblemType"]["StridedBatched"]:
@@ -1783,6 +1816,41 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason,
                "DebugPersistentKernelLoopForever requires StreamK=3 (got %d)"
                % state["StreamK"])
+      if state["StreamKWorkStealing"]:
+        # Codegen-time rejections only; there is no hardware context here
+        # (MI300A/MI300X both compile as gfx942). The kernel bakes a power-of-two
+        # per-XCD queue count from origami; the host (ContractionSolution.cpp)
+        # enforces the device's runtime NUM_XCD against that baked count and
+        # otherwise serves a non-work-stealing solution. Work stealing only exists
+        # in the dynamic-queue fetch (auto-mode SK4 and the SK4 sub-path of SK5).
+        if state["StreamK"] not in (4, 5):
+          reject(state, printRejectionReason,
+                 "StreamKWorkStealing requires StreamK in {4,5} (got %d)"
+                 % state["StreamK"])
+        # Stealing is only defined for the non-atomic partials+fixup path.
+        # Atomic SK4/SK5 is already rejected above; keep this explicit guard so
+        # the combination can never slip through.
+        if state["StreamKAtomic"]:
+          reject(state, printRejectionReason,
+                 "StreamKWorkStealing is not supported with StreamKAtomic")
+        # Reject DebugStreamK with work stealing: it can leave a tile-owning
+        # queue with no home workgroup, breaking the W_q>=1 auto-reset precondition.
+        if state["DebugStreamK"]:
+          reject(state, printRejectionReason,
+                 "StreamKWorkStealing requires DebugStreamK=0 (the per-queue "
+                 "auto-reset relies on W_q>=1 whenever tiles_q>=1); got %d"
+                 % state["DebugStreamK"])
+        # The steal path (streamKWorkStealingSteal) emits s_atomic_inc
+        # unconditionally, but the home fetch (_fetchNextWorkItem) only falls
+        # back to a returning vector atomic when scalar atomics are absent. On
+        # arches without scalar atomics (HasSAtomic=false, e.g. gfx1250) the
+        # steal would emit an unsupported s_atomic_inc with no vector fallback,
+        # so reject work stealing there.
+        if not isaInfoMap[isa].asmCaps["HasSAtomic"]:
+          reject(state, printRejectionReason,
+                 "StreamKWorkStealing requires scalar atomics (HasSAtomic); the "
+                 "work-stealing steal path emits s_atomic_inc with no vector "
+                 "fallback (e.g. gfx1250 has HasSAtomic=false)")
       if not state["Valid"]:
         print2("in assignDerivedParameters, state['Valid'] = False")
         return
@@ -1790,6 +1858,7 @@ class Solution(collections.abc.Mapping):
       # If not using StreamK, clear other stream-k settings to avoid duplicate kernels
       state["StreamKForceDPOnly"] = 0
       state["StreamKAtomic"] = 0
+      state["StreamKWorkStealing"] = 0
       state["StreamKXCCMapping"] = 0
       state["StreamKFixupTreeReduction"] = 0
       state["DebugStreamK"] = 0
@@ -2814,6 +2883,7 @@ class Solution(collections.abc.Mapping):
         "GroupLoadStore": not state["GroupLoadStore"],
         "StreamK": not state["StreamK"],
         "StreamKAtomic": not state["StreamKAtomic"],
+        "StreamKWorkStealing": not state["StreamKWorkStealing"],
         "StreamKXCCMapping": not state["StreamKXCCMapping"],
         "StreamKFixupTreeReduction": not state["StreamKFixupTreeReduction"],
         "DebugStreamK": not state["DebugStreamK"],
@@ -2842,8 +2912,14 @@ class Solution(collections.abc.Mapping):
       if state["ProblemType"]["ComputeDataType"].isDouble() or state["ProblemType"]["ComputeDataType"].isDoubleComplex(): return False
       return True
 
+    # Track VALU source operands on VA_VDST (src-operand WAR hazard). On only for
+    # sparse; non-sparse kernels skip the stamp. Pre-armed for when sparse enables ESM2.
+    def evaluateEnableESM2TrackValuVsrc() -> bool:
+      return bool(state["ProblemType"]["Sparse"])
+
     state["ExpertSchedulingMode"] = evaluateExpertSchedulingMode()
     state["EnableStinkyTofuESM2"] = evaluateStinkyTofuESM2()
+    state["EnableESM2TrackValuVsrc"] = evaluateEnableESM2TrackValuVsrc()
 
     state["ESMRuntimeGate"] = tuple(state["ISA"])[:2] == (12, 0)
     # Some restrictions for float4 and 6bitFloat:
@@ -5478,12 +5554,16 @@ class Solution(collections.abc.Mapping):
       if state["GlobalSplitU"] > 1 or state["GlobalSplitU"] == -1:
         reject(state, printRejectionReason, "Currently PrefetchGL2 does not support GSU")
         return
-      if state["StreamK"] != 0:
-        reject(state, printRejectionReason, "PrefetchGL2 does not support Stream-K")
+      if state["StreamK"] != 0 and state["StreamK"] != 3:
+        reject(state, printRejectionReason, "PrefetchGL2 only supports DP-first (StreamK==3) Stream-K")
         return
       if state["ProblemType"]["Batched"] and not state["ProblemType"]["StridedBatched"]:
         reject(state, printRejectionReason, "PrefetchGL2 does not support general batch")
         return
+      if state["ProblemType"]["Sparse"]:
+        if state["DirectToVgprSparseMetadata"]:
+          reject(state, printRejectionReason, "PrefetchGL2 with Sparse requires DirectToVgprSparseMetadata=0 (TDM metadata path)")
+          return
       
 
     # # reject conditions with lower performance

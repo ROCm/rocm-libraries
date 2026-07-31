@@ -382,6 +382,17 @@ namespace TensileLite
         // the launch grid and the packed args can never disagree.
         bool                 streamK5EffectiveDynamic(Problem const&  problem,
                                                       Hardware const& hardware) const;
+        // Selection-time predicate for the StreamK dynamic-queue / work-stealing
+        // path. The SK4 and dynamic sub-path of SK5 kernels hardcode a
+        // power-of-two per-XCD queue count and mask indices with (Q-1); that fast
+        // masking is only valid when the device exposes a power-of-two number of
+        // XCDs. Returns false (and warns once) when this solution would take the
+        // dynamic-queue path but the hardware's NUM_XCD is not a power of two
+        // (e.g. MI300A = 6), so the solution is EXCLUDED from selection rather
+        // than silently degraded to tree reduction. All other solutions return
+        // true. Wired into softwarePredicate() (SolutionLibrary.hpp).
+        bool                 streamKDynamicQueueSupported(Problem const&  problem,
+                                                          Hardware const& hardware) const;
         size_t               partialTileSize(size_t skGrid) const;
 
         static float computeGranularity(float x);
@@ -527,7 +538,7 @@ namespace TensileLite
                                       KA&                      args,
                                       StreamKSettings const&   sk,
                                       uint32_t                 autoGsuVal,
-                                      uint32_t                 additionalPaddingPerBatchGeneralBatch=0) const;                                      
+                                      uint32_t                 additionalPaddingPerBatchGeneralBatch=0) const;
 
         template <typename KA>
         inline void calculateConversionCallWorkGroupItems(
