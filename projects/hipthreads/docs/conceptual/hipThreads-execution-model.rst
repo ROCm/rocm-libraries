@@ -26,7 +26,7 @@ The scheduler kernel persists until the last ``hip::wthread`` object is destroye
 
 The scheduler manages a fixed grid of vcores. Each work-group processor (WGP) on the GPU hosts a configurable number of vcores.
 
-The logical thread executes across multiple SIMD lanes called fibers within a single GPU wavefront. All fibers in a thread execute in lockstep.
+The logical thread executes across multiple single instruction, multiple data (SIMD) lanes called fibers within a single GPU wavefront. All fibers in a thread execute in lockstep.
 
 A single ``hip::wthread`` can run as multiple fibers, with one fibre per hardware lane. Workload runs on each active lane, which enables cooperative, SIMD-style work partitioning within one ``hip::wthread``.
 
