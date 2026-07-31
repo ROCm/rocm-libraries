@@ -126,6 +126,18 @@ because it is easy to get wrong: **never run a blanket `pytest --snapshot-update
 every golden at once and produces a green run that proves nothing. Update the smallest node id you
 intend to change, read the resulting diff, and explain the behavior change in your PR description.
 
+**The goldens are enforced.** Any pull request touching `projects/hipblaslt/tensilelite/**` runs the
+`Component CI: TensileLite coverage` GitHub Actions lane, which executes `tox -e coverage-unit` over
+the characterization tree with syrupy installed. A stale golden fails that check. The same tox
+environment also runs in Math CI, so there are two independent lanes asserting the same snapshots.
+
+There is one place snapshots do *not* run: the installed-artifact lane, which re-runs the unit tree
+from the packaged `share/hipblaslt/tensilelite/` install. That environment does not ship syrupy, so
+the suite's `conftest.py` detects the missing plugin and skips the snapshot-using tests cleanly
+rather than erroring the whole run. Nothing is lost, because those goldens were already asserted in
+the source lanes before the artifact was built, but a reader scanning that run will see skips and
+should know they are deliberate.
+
 The suite also carries two enforced coverage floors: a whole-project floor and a per-file ratchet
 with a one percentage point tolerance, so per-file coverage can only move up over time. Both are
 enforced in CI (see [Coverage](#coverage)).
@@ -306,7 +318,7 @@ checks named `mci/rocm-libraries/...` onto the same PR. Both appear in the PR ch
 | Build (Linux and Windows) | Yes | CI / DevOps + TheRock | Maintain jobs, runners, and pipeline health |
 | Unit tests (TensileLite Python) | Yes | Component team | Create, maintain, review |
 | Integration / smoke tests (client GTest) | Yes | Component team | Validate behavior across key scenarios |
-| Characterization goldens | Yes, in Math CI only | Component team | Review every golden diff; never bulk-regenerate |
+| Characterization goldens | Yes, when `tensilelite/` is touched | Component team | Review every golden diff; never bulk-regenerate |
 | HOST_ASAN build and quick test | Yes, on gfx90a | Component team | Keep the sanitizer lane green |
 | Code coverage floor and ratchet (TensileLite) | Yes, when `tensilelite/` is touched | Component team / CI | Floors move up only |
 | Formatting and lint (`pre-commit`) | Yes | CI / DevOps | Maintain hooks |
@@ -598,8 +610,10 @@ Ordered by value per unit of effort, not by ambition.
 
 1. **Fix the tier filter in the TheRock test driver** so tiers above `quick` select their categories
    instead of running the whole binary. One-line fix; makes the documented taxonomy real.
-2. **Install syrupy in the TheRock TensileLite lane** so the characterization goldens are enforced
-   there instead of silently skipped. Defense in depth behind the Math CI gate.
+2. **Make the installed-artifact lane's snapshot behavior deliberate.** Either ship syrupy with the
+   installed test tree so the goldens are checked there too, or state in the lane that snapshot
+   coverage is intentionally left to the source lanes. Today it is a silent skip that reads like an
+   accident.
 3. **Publish the required-check list.** Document which checks actually block a merge, so contributors
    and reviewers stop guessing.
 4. **Split `known_bugs.yaml` semantics**: distinguish flaky from known-failing, and add an owner and
@@ -634,7 +648,7 @@ Stated plainly, so none of these are a surprise at release time.
 | --- | --- | --- | --- | --- |
 | No automated performance regression detection at any cadence | High | High | Manual before-and-after benchmarking by whoever suspects an impact | TBD |
 | gfx950 never runs the client suite on a PR | High | High | Postsubmit and nightly coverage; deliberate validation at release | TBD |
-| Characterization goldens are enforced in Math CI only; the GitHub Actions lane skips them silently | Medium | High | The Math CI gate does hold; the skip is a missing second line of defense | TBD |
+| The installed-artifact test lane silently skips the snapshot tests, because syrupy is not part of the installed tree's requirements | Low | Low | The goldens are already enforced upstream in the source lanes; the skip is stated in `conftest.py` rather than hidden, but it reads like an accident to anyone scanning the run | TBD |
 | Tiers above `quick` apply no filter in the TheRock lane, so the taxonomy is only half-real | Medium | Medium | CTest honors the tiers correctly when used | TBD |
 | Very little of the C++ library is unit-testable; the blockers are structural | Medium | Medium | Heavy integration coverage compensates for correctness, at the cost of slow feedback | TBD |
 | No flaky-test tagging, owner, or expiry convention | Medium | Medium | `known_bugs.yaml` quarantine with ticket references and removal notes | TBD |
