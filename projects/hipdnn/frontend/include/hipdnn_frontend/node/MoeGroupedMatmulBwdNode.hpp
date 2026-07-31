@@ -109,12 +109,26 @@ public:
                             ErrorCode::INVALID_VALUE,
                             "MoE token tensor must have rank 3");
 
+        // Real tokens are flattened into dim[1]; dim[0] is a singleton placeholder axis.
+        HIPDNN_RETURN_IF_NE(doutputTensor->get_dim()[0],
+                            1,
+                            ErrorCode::INVALID_VALUE,
+                            "MoE doutput tensor must have a singleton leading dimension");
+        HIPDNN_RETURN_IF_NE(tokenTensor->get_dim()[0],
+                            1,
+                            ErrorCode::INVALID_VALUE,
+                            "MoE token tensor must have a singleton leading dimension");
+
         // Validate dweight has rank 3 [experts, K, N] - reject rather than infer, the expert
         // count is not derivable from any input.
         HIPDNN_RETURN_IF_NE(dweightTensor->get_dim().size(),
                             K_TENSOR_RANK,
                             ErrorCode::INVALID_VALUE,
                             "MoE dweight tensor must have shape [experts, K, N]");
+
+        HIPDNN_RETURN_IF_TRUE(dweightTensor->get_dim()[0] <= 0,
+                              ErrorCode::INVALID_VALUE,
+                              "MoE dweight tensor must describe at least one expert");
 
         // Validate dweight dim[1] (K) matches token dim[2]
         HIPDNN_RETURN_IF_NE(dweightTensor->get_dim()[1],

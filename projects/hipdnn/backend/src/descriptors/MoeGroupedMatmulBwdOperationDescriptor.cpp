@@ -60,6 +60,25 @@ void MoeGroupedMatmulBwdOperationDescriptor::finalize()
         HIPDNN_STATUS_BAD_PARAM,
         "MoeGroupedMatmulBwdOperationDescriptor::finalize() failed: DOUTPUT_DESC tensor must "
         "have rank 3");
+
+    // Real tokens are flattened into dim[1]; dim[0] is a singleton placeholder axis.
+    THROW_IF_NE(_doutputDesc->getData().dims[0],
+                static_cast<int64_t>(1),
+                HIPDNN_STATUS_BAD_PARAM,
+                "MoeGroupedMatmulBwdOperationDescriptor::finalize() failed: DOUTPUT_DESC must "
+                "have a singleton leading dimension");
+    THROW_IF_NE(_tokenDesc->getData().dims[0],
+                static_cast<int64_t>(1),
+                HIPDNN_STATUS_BAD_PARAM,
+                "MoeGroupedMatmulBwdOperationDescriptor::finalize() failed: TOKEN_DESC must "
+                "have a singleton leading dimension");
+
+    THROW_IF_TRUE(
+        _dweightDesc->getData().dims[0] <= 0,
+        HIPDNN_STATUS_BAD_PARAM,
+        "MoeGroupedMatmulBwdOperationDescriptor::finalize() failed: DWEIGHT_DESC tensor must "
+        "describe at least one expert");
+
     THROW_IF_NE(
         _dweightDesc->getData().dims[1],
         _tokenDesc->getData().dims[2],

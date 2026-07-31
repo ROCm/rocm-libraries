@@ -275,12 +275,112 @@ TEST(TestMoeGroupedMatmulBwdNode, PreValidateNodeRejectsDweightNDimensionMismatc
     EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
 }
 
+TEST(TestMoeGroupedMatmulBwdNode, PreValidateNodeRejectsTokenCountMismatch)
+{
+    auto attrs = createValidAttributes();
+    // doutput token-count dimension (dim[1] == 8) no longer matches token's dim[1]
+    attrs.get_token()->set_dim({1, 4, 16});
+    attrs.get_token()->set_stride({64, 16, 1});
+
+    const GraphAttributes graphAttributes;
+    const MoeGroupedMatmulBwdNode node(std::move(attrs), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
+}
+
+TEST(TestMoeGroupedMatmulBwdNode, PreValidateNodeRejectsExpertCountMismatch)
+{
+    auto attrs = createValidAttributes();
+    // first_token_offset expert-count dimension (dim[0]) no longer matches dweight's dim[0] (== 2)
+    attrs.get_first_token_offset()->set_dim({3, 1, 1});
+    attrs.get_first_token_offset()->set_stride({1, 1, 1});
+
+    const GraphAttributes graphAttributes;
+    const MoeGroupedMatmulBwdNode node(std::move(attrs), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
+}
+
 TEST(TestMoeGroupedMatmulBwdNode, PreValidateNodeRejectsNonInt32FirstTokenOffset)
 {
     auto attrs = createValidAttributes();
     // first_token_offset must be INT32; this is a frontend-only check (the YAML's
     // expected_data_type only generates a backend finalize() check).
     attrs.get_first_token_offset()->set_data_type(DataType::FLOAT);
+
+    const GraphAttributes graphAttributes;
+    const MoeGroupedMatmulBwdNode node(std::move(attrs), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
+}
+
+TEST(TestMoeGroupedMatmulBwdNode, PreValidateNodeRejectsDoutputNonSingletonLeadingDimension)
+{
+    auto attrs = createValidAttributes();
+    // doutput dim[0] must be 1; real tokens are flattened into dim[1].
+    attrs.get_doutput()->set_dim({2, 8, 32});
+    attrs.get_doutput()->set_stride({256, 32, 1});
+
+    const GraphAttributes graphAttributes;
+    const MoeGroupedMatmulBwdNode node(std::move(attrs), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
+}
+
+TEST(TestMoeGroupedMatmulBwdNode, PreValidateNodeRejectsTokenNonSingletonLeadingDimension)
+{
+    auto attrs = createValidAttributes();
+    // token dim[0] must be 1; real tokens are flattened into dim[1].
+    attrs.get_token()->set_dim({2, 8, 16});
+    attrs.get_token()->set_stride({128, 16, 1});
+
+    const GraphAttributes graphAttributes;
+    const MoeGroupedMatmulBwdNode node(std::move(attrs), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
+}
+
+TEST(TestMoeGroupedMatmulBwdNode, PreValidateNodeRejectsDweightZeroExpertCount)
+{
+    auto attrs = createValidAttributes();
+    // dweight dim[0] (expert count) must describe at least one expert.
+    attrs.get_dweight()->set_dim({0, 16, 32});
+    attrs.get_dweight()->set_stride({512, 32, 1});
+
+    const GraphAttributes graphAttributes;
+    const MoeGroupedMatmulBwdNode node(std::move(attrs), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
+}
+
+TEST(TestMoeGroupedMatmulBwdNode, PreValidateNodeRejectsDoutputRankMismatch)
+{
+    auto attrs = createValidAttributes();
+    // doutput rank 4 passes the minimum-rank (>= 3) check but must still be rejected by the
+    // exact-rank-3 check.
+    attrs.get_doutput()->set_dim({1, 8, 32, 1});
+    attrs.get_doutput()->set_stride({256, 32, 1, 1});
+
+    const GraphAttributes graphAttributes;
+    const MoeGroupedMatmulBwdNode node(std::move(attrs), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
+}
+
+TEST(TestMoeGroupedMatmulBwdNode, PreValidateNodeRejectsTokenRankMismatch)
+{
+    auto attrs = createValidAttributes();
+    // token rank 4 passes the minimum-rank (>= 3) check but must still be rejected by the
+    // exact-rank-3 check.
+    attrs.get_token()->set_dim({1, 8, 16, 1});
+    attrs.get_token()->set_stride({128, 16, 1, 1});
 
     const GraphAttributes graphAttributes;
     const MoeGroupedMatmulBwdNode node(std::move(attrs), graphAttributes);
