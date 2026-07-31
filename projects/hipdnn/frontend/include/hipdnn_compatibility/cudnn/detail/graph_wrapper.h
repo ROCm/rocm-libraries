@@ -176,16 +176,9 @@ public:
         }
         HIPDNN_CUDNN_SHIM_RETURN_RECORDED_ERROR();
 
-        if(policy == BuildPlanPolicy_t::ALL)
-        {
-            recordError(error_code_t::INVALID_VALUE,
-                        "Building all execution plans is unsupported by this shim");
-            return getRecordedError();
-        }
-
         HIPDNN_CUDNN_SHIM_RETURN_OK_IF_NO_NATIVE_GRAPH();
 
-        auto err = _graph.build_plans();
+        auto err = _graph.build_plans(policy);
         if(err.is_good())
         {
             _stage = Stage::PlansBuilt;
@@ -207,21 +200,13 @@ public:
 
         HIPDNN_CUDNN_SHIM_RETURN_NO_PLAN_IF_NO_NATIVE_GRAPH();
 
-        if(index != 0)
-        {
-            return {error_code_t::INVALID_VALUE, "Execution plan index is invalid"};
-        }
-
-        if(stageAtLeast(Stage::PlansBuilt))
-        {
-            return {};
-        }
-
         if(!stageAtLeast(Stage::PlansCreated))
         {
             CHECK_CUDNN_FRONTEND_ERROR(create_execution_plans());
         }
-        return build_plans();
+        CHECK_CUDNN_FRONTEND_ERROR(_graph.build_plan_at_index(index));
+        _stage = Stage::PlansBuilt;
+        return {};
     }
 
     error_t build_plan_at_index(const cudnnHandle_t& handle, int64_t index)
@@ -539,9 +524,12 @@ public:
             }
             else
             {
-                HIPDNN_FE_LOG_WARN("[cudnn_frontend] Ignoring select_behavior_notes("
-                                   << hipdnn_frontend::to_string(note)
-                                   << "); hipDNN engines do not report this cuDNN behavior note.");
+                // Selecting a note no hipDNN engine can emit is unsatisfiable:
+                // record an error rather than return a plan that ignores the
+                // request. Deselecting the same note is a safe no-op (below).
+                recordError(error_code_t::GRAPH_NOT_SUPPORTED,
+                            "select_behavior_notes requested a behavior note that no hipDNN "
+                            "engine reports; the request cannot be satisfied");
             }
         }
         return *this;
@@ -599,20 +587,11 @@ public:
 
     Graph& deselect_engines(const std::vector<int64_t>& engineIndices)
     {
+        // Store cuDNN-shaped indices only. Translation to native engine IDs needs
+        // the ranked engine list, which does not exist until the operation graph
+        // is built, so it is deferred to applyPendingPlanFilters() after build.
         _barredEngineIndices.insert(
             _barredEngineIndices.end(), engineIndices.begin(), engineIndices.end());
-        if(hasOperationGraphState())
-        {
-            std::vector<int64_t> nativeEngineIds;
-            if(auto err = mapEngineIndices(engineIndices, nativeEngineIds); err.is_bad())
-            {
-                recordError(err);
-            }
-            else
-            {
-                _graph.deselect_engines(nativeEngineIds);
-            }
-        }
         return *this;
     }
 

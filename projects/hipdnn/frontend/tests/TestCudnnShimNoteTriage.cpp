@@ -78,20 +78,34 @@ TEST(TestCudnnShimNoteTriage, KnownBehaviorNoteFiltersLeaveEmptyGraphValid)
     EXPECT_TRUE(deselectGraph.validate().is_good());
 }
 
-TEST(TestCudnnShimNoteTriage, CudnnOnlyBehaviorNoteFiltersLeaveEmptyGraphValid)
+TEST(TestCudnnShimNoteTriage, SelectCudnnOnlyBehaviorNotePoisonsValidate)
 {
     const std::vector<BehNote> notes = {BehNote::REQUIRES_FILTER_INT8x32_REORDER,
                                         BehNote::REQUIRES_BIAS_INT8x32_REORDER,
                                         BehNote::SUPPORTS_CUDA_GRAPH_NATIVE_API,
                                         BehNote::CUBLASLT_DEPENDENCY};
 
-    fe::graph::Graph selectGraph;
-    EXPECT_EQ(&selectGraph.select_behavior_notes(notes), &selectGraph);
-    EXPECT_TRUE(selectGraph.validate().is_good());
+    for(const auto note : notes)
+    {
+        fe::graph::Graph graph;
+        EXPECT_EQ(&graph.select_behavior_notes({note}), &graph);
+        auto err = graph.validate();
 
-    fe::graph::Graph deselectGraph;
-    EXPECT_EQ(&deselectGraph.deselect_behavior_notes(notes), &deselectGraph);
-    EXPECT_TRUE(deselectGraph.validate().is_good());
+        EXPECT_TRUE(err.is_bad());
+        EXPECT_EQ(err.get_code(), fe::error_code_t::GRAPH_NOT_SUPPORTED);
+    }
+}
+
+TEST(TestCudnnShimNoteTriage, DeselectCudnnOnlyBehaviorNoteIsSafeNoOp)
+{
+    const std::vector<BehNote> notes = {BehNote::REQUIRES_FILTER_INT8x32_REORDER,
+                                        BehNote::REQUIRES_BIAS_INT8x32_REORDER,
+                                        BehNote::SUPPORTS_CUDA_GRAPH_NATIVE_API,
+                                        BehNote::CUBLASLT_DEPENDENCY};
+
+    fe::graph::Graph graph;
+    EXPECT_EQ(&graph.deselect_behavior_notes(notes), &graph);
+    EXPECT_TRUE(graph.validate().is_good());
 }
 
 TEST(TestCudnnShimNoteTriage, ResourceFiltersChainWithoutPoisoningEmptyGraph)
@@ -210,6 +224,48 @@ TEST(TestCudnnShimNoteTriage, CreateExecutionPlansStillSurfacesRecordedNoteError
     EXPECT_TRUE(err.is_bad());
     EXPECT_EQ(err.get_code(), fe::error_code_t::GRAPH_NOT_SUPPORTED);
     EXPECT_NE(err.get_message().find("NONDETERMINISTIC"), std::string::npos);
+}
+
+// T-U6 regression: index-based deselect_engines on a Native (unbuilt) graph must
+// only store the indices and defer translation until after the plan is built.
+// Pre-fix, it eagerly mapped indices via get_ranked_engine_ids on the unbuilt
+// graph — there is no ranked engine list before build — which recorded an error
+// that later poisoned validate(). Host-only: no build/create_execution_plans.
+TEST(TestCudnnShimNoteTriage, DeselectEngineIndicesBeforeBuildDoesNotPoisonNativeGraph)
+{
+    const int64_t n = 16;
+    const int64_t c = 128;
+    const int64_t h = 64;
+    const int64_t w = 64;
+    const int64_t k = 256;
+    const int64_t r = 1;
+    const int64_t s = 1;
+
+    fe::graph::Graph graph;
+    graph.set_io_data_type(fe::DataType_t::HALF).set_compute_data_type(fe::DataType_t::FLOAT);
+
+    auto x = graph.tensor(fe::graph::Tensor_attributes{}
+                              .set_name("image")
+                              .set_dim({n, c, h, w})
+                              .set_stride({c * h * w, 1, c * w, c})
+                              .set_uid(1));
+    auto weight = graph.tensor(fe::graph::Tensor_attributes{}
+                                   .set_name("filter")
+                                   .set_dim({k, c, r, s})
+                                   .set_stride({c * r * s, 1, c * s, c})
+                                   .set_uid(2));
+
+    // conv_fprop makes the graph Mode::Native.
+    auto y = graph.conv_fprop(
+        x,
+        weight,
+        fe::graph::Conv_fprop_attributes{}.set_padding({0, 0}).set_stride({1, 1}).set_dilation(
+            {1, 1}));
+    ASSERT_NE(y, nullptr);
+    y->set_output(true).set_uid(3);
+
+    EXPECT_EQ(&graph.deselect_engines(std::vector<int64_t>{0, 1}), &graph);
+    EXPECT_TRUE(graph.validate().is_good());
 }
 
 } // namespace

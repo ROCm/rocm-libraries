@@ -53,18 +53,28 @@ returning an unfiltered plan.
 hipDNN exposes some per-engine behavior notes, but not cuDNN's CUDA-specific
 behavior notes. The shim stores known hipDNN behavior-note filters and applies
 them after native plan creation by querying applicable engine behavior metadata.
-Unknown/cuDNN-only behavior notes are accepted, logged, and ignored.
 
-The following cuDNN-only behavior notes are not emitted by hipDNN engines and are
-therefore advisory in the shim:
+cuDNN-only behavior notes (below) are never emitted by hipDNN engines. The shim
+triages them by whether ignoring the filter can violate the caller's request:
+
+- `deselect_behavior_notes({<cuDNN-only note>})` asks to *exclude* engines that
+  report the note. No hipDNN engine reports it, so nothing is excluded — the
+  filter is a safe no-op. The shim logs a warning and continues.
+- `select_behavior_notes({<cuDNN-only note>})` asks to *require* the note. No
+  hipDNN engine can satisfy it, so the request is unsatisfiable. The shim records
+  `GRAPH_NOT_SUPPORTED` rather than returning a plan that silently ignores the
+  requirement.
+
+The cuDNN-only behavior notes handled this way:
 
 - `REQUIRES_FILTER_INT8x32_REORDER`
 - `REQUIRES_BIAS_INT8x32_REORDER`
 - `SUPPORTS_CUDA_GRAPH_NATIVE_API`
 - `CUBLASLT_DEPENDENCY`
 
-If known behavior-note filters remove every applicable hipDNN engine, plan
-creation returns `GRAPH_NOT_SUPPORTED`.
+For behavior notes hipDNN *does* expose, both filters apply after native plan
+creation. If known behavior-note filters remove every applicable hipDNN engine,
+plan creation returns `GRAPH_NOT_SUPPORTED`.
 
 ## Engine IDs
 

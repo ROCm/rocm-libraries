@@ -244,9 +244,16 @@ inline std::optional<Knob> projectNativeKnob(const hipdnn_frontend::Knob& native
         return std::nullopt;
     }
 
-    const auto* constraint
-        = dynamic_cast<const hipdnn_frontend::IntConstraint*>(nativeKnob.constraint());
-    if(constraint == nullptr || !constraint->getValidValues().empty())
+    const auto* rawConstraint = nativeKnob.constraint();
+    if(rawConstraint == nullptr || rawConstraint->kind() != hipdnn_frontend::ConstraintKind::Int)
+    {
+        HIPDNN_FE_LOG_WARN("[cudnn_frontend] Omitting hipDNN knob '"
+                           << nativeKnob.knobId()
+                           << "'; its constraint cannot be represented as cuDNN min/max/stride.");
+        return std::nullopt;
+    }
+    const auto* constraint = static_cast<const hipdnn_frontend::IntConstraint*>(rawConstraint);
+    if(!constraint->getValidValues().empty())
     {
         HIPDNN_FE_LOG_WARN("[cudnn_frontend] Omitting hipDNN knob '"
                            << nativeKnob.knobId()
