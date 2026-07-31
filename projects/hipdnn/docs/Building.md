@@ -116,16 +116,9 @@ git checkout develop # or the branch you are starting from
 
 For the **superbuild**, follow [Superbuild](#superbuild) instead. These steps build **standalone**, using the presets in `projects/hipdnn/CMakePresets.json`.
 
-Two build types are available: `release` (optimized) and `debug` (slower, but supports running under a debugger). The examples below use `release`; for a debug build, substitute `debug` for `release` throughout, including the `build/release` -> `build/debug` binary directory. By default the presets find your ROCm installation on your PATH; if ROCm is not on your PATH, add `-DROCM_CMAKE_PATH=<rocm-root>` (see [ROCM_PATH, ROCM_CMAKE_PATH, and CMAKE_INSTALL_PREFIX](#rocm_path-rocm_cmake_path-and-cmake_install_prefix)).
+Two build types are available: `release` (optimized) and `debug` (slower, but suited for a debugger). The examples below use `release`; for a debug build, substitute `debug` for `release` throughout, including the `build/release` -> `build/debug` binary directory. By default the presets find your ROCm installation on your PATH; if ROCm is not on your PATH, add `-DROCM_CMAKE_PATH=<rocm-root>` (see [ROCM_PATH, ROCM_CMAKE_PATH, and CMAKE_INSTALL_PREFIX](#rocm_path-rocm_cmake_path-and-cmake_install_prefix)).
 
-The `release-test` workflow preset configures, builds, and runs the tests in a single command:
-
-```bash
-cd rocm-libraries/projects/hipdnn
-cmake --workflow --preset release-test   # use debug-test for a debug build
-```
-
-To run the steps individually:
+Configure, build, and run the tests:
 
 ```bash
 cd rocm-libraries/projects/hipdnn
@@ -337,7 +330,7 @@ If both `ROCM_CMAKE_PATH` and `ROCM_PATH` are set, `ROCM_CMAKE_PATH` takes prece
 The HIP compiler is required to build some integration tests but is not required for the hipDNN library itself.
 
 Use the following CMake variable to control where the hipDNN library files will be installed when the `install` target is run:
-- **`CMAKE_INSTALL_PREFIX`**: Specifies where hipDNN will be installed (defaults to `ROCM_PATH` if `ROCM_PAth` is set, then `ROCM_CMAKE_PATH` if set, otherwise uses the CMake system default).
+- **`CMAKE_INSTALL_PREFIX`**: Specifies where hipDNN will be installed (defaults to `ROCM_PATH` if `ROCM_PATH` is set, then `ROCM_CMAKE_PATH` if set, otherwise uses the CMake system default).
 
 These variables can all be set independently by adding them to the preset:
 
@@ -466,7 +459,7 @@ hipdnn (added first)
 ├── hipdnn_flatbuffers_sdk (INTERFACE target)
 ├── hipdnn_plugin_sdk      (INTERFACE target)
 ├── hipdnn_test_sdk        (INTERFACE target)
-├── hipdnn_frontend        (shared library)
+├── hipdnn_frontend        (INTERFACE target)
 └── hipdnn_backend         (shared library)
          │
          ▼
@@ -706,7 +699,7 @@ On Windows the `bin` folder is typically added to `PATH` so the built executable
 
    The AMD toolchain should be discovered automatically. If not, refer to the [ROCM_PATH, ROCM_CMAKE_PATH, and CMAKE_INSTALL_PREFIX](#rocm_path-rocm_cmake_path-and-cmake_install_prefix) section for additional ways to locate the toolchain.
 
-* Set the HIP_PLATFORM environment varilable:
+* Set the HIP_PLATFORM environment variable:
    ```cmd
    set HIP_PLATFORM=amd
    ```

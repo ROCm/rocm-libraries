@@ -160,9 +160,9 @@ ctest --test-dir build/release
 - **Test Status**: All tests should pass
 - **GPU Test Behavior**:
   - **Without GPU**: All GPU tests should skip gracefully without failures
-  - **With GPU**: Plugin integration tests may skip if the GPU is not supported
+  - **With GPU**: hipDNN provider plugin integration tests may skip if the GPU is not supported
     - Skipped tests should provide clear messages indicating lack of ASIC support
-- **Plugin Support**: ASIC-specific coverage is determined by individual plugins and is not a global hipDNN requirement
+- **Provider Support**: ASIC-specific coverage is determined by individual providers and is not a global hipDNN requirement
 
 ---
 
