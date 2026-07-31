@@ -24,7 +24,7 @@ Each subsequent ``hip::wthread`` object is submitted to this persistent schedule
 
 The scheduler kernel persists until the last ``hip::wthread`` object is destroyed.
 
-The scheduler manages a fixed grid of vcores. Each work-group processor (WGP) on the GPU hosts a configurable number of vcores.
+The scheduler manages a fixed grid of vcores. Each workgroup processor (WGP) on the GPU hosts a configurable number of vcores.
 
 The logical thread executes across multiple single instruction, multiple data (SIMD) lanes called fibers within a single GPU wavefront. All fibers in a thread execute in lockstep.
 
