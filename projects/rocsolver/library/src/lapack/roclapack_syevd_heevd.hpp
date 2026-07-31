@@ -183,7 +183,7 @@ void rocsolver_syevd_heevd_getMemorySize(rocblas_handle handle,
             *size_he2hb_work = std::max(*size_he2hb_work,
                                         size_Tr + size_W2 + size_Z2 + size_work2 + size_workArr2);
 
-            // workspace for ormqr (he2hb back-transform): applies Q (n-kd x n-kd) to W[kd:n, :]
+            // workspace for unmqr (he2hb back-transform): applies Q (n-kd x n-kd) to W[kd:n, :]
             const I n_kd = std::max(n - kd, I(0));
             size_t size_AbyxORwork, size_diagORtmptr, size_trfact, size_workArr3;
             rocsolver_ormqr_unmqr_getMemorySize<BATCHED, T>(
@@ -192,10 +192,10 @@ void rocsolver_syevd_heevd_getMemorySize(rocblas_handle handle,
             *size_scalars = std::max(*size_scalars, size_scalars2);
             // workArr2 is needed by the adapter overload when BATCHED=true to build a pointer
             // array for the strided C matrix (tmptau_W); sizeof(T*) * batch_count bytes.
-            const size_t size_workArr2_ormqr = BATCHED ? sizeof(T*) * batch_count : 0;
+            const size_t size_workArr2_unmqr = BATCHED ? sizeof(T*) * batch_count : 0;
             *size_he2hb_work = std::max(*size_he2hb_work,
                                         size_AbyxORwork + size_diagORtmptr + size_trfact
-                                            + size_workArr3 + size_workArr2_ormqr);
+                                            + size_workArr3 + size_workArr2_unmqr);
         }
     }
 }
@@ -374,7 +374,7 @@ void rocsolver_syevd_heevd_getMemorySize(rocblas_handle handle,
             *size_he2hb_work = std::max(*size_he2hb_work,
                                         size_Tr + size_W2 + size_Z2 + size_work2 + size_workArr2);
 
-            // workspace for ormqr (he2hb back-transform): applies Q (n-kd x n-kd) to W[kd:n, :]
+            // workspace for unmqr (he2hb back-transform): applies Q (n-kd x n-kd) to W[kd:n, :]
             const I n_kd = std::max(n - kd, I(0));
             size_t size_AbyxORwork, size_diagORtmptr, size_trfact, size_workArr3;
             rocsolver_ormqr_unmqr_getMemorySize<BATCHED, T>(
@@ -383,10 +383,10 @@ void rocsolver_syevd_heevd_getMemorySize(rocblas_handle handle,
             *size_scalars = std::max(*size_scalars, size_scalars2);
             // workArr2 is needed by the adapter overload when BATCHED=true to build a pointer
             // array for the strided C matrix (tmptau_W); sizeof(T*) * batch_count bytes.
-            const size_t size_workArr2_ormqr = BATCHED ? sizeof(T*) * batch_count : 0;
+            const size_t size_workArr2_unmqr = BATCHED ? sizeof(T*) * batch_count : 0;
             *size_he2hb_work = std::max(*size_he2hb_work,
                                         size_AbyxORwork + size_diagORtmptr + size_trfact
-                                            + size_workArr3 + size_workArr2_ormqr);
+                                            + size_workArr3 + size_workArr2_unmqr);
         }
     }
 }
@@ -593,24 +593,24 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
                     batch_count, max_parallel_2stage, scalars, unmtr_Tr, unmtr_W, unmtr_Z,
                     unmtr_work, unmtr_workArr));
 
-                // Back-transform stage 1: apply Q_he2hb to eigenvector matrix (ormqr)
+                // Back-transform stage 1: apply Q_he2hb to eigenvector matrix (unmqr)
                 // Q_he2hb is stored in lower part of A (below diagonal kd) and in tau
-                // Partition he2hb_work for ormqr sub-workspaces
+                // Partition he2hb_work for unmqr sub-workspaces
                 const I n_kd = std::max(n - kd, I(0));
                 size_t size_AbyxORwork, size_diagORtmptr, size_trfact, size_workArr3;
                 rocsolver_ormqr_unmqr_getMemorySize<BATCHED, T>(
                     rocblas_side_left, n_kd, n, n_kd, batch_count, &size_scalars, &size_AbyxORwork,
                     &size_diagORtmptr, &size_trfact, &size_workArr3);
-                T* ormqr_AbyxORwork = he2hb_work;
-                T* ormqr_diagORtmptr = ormqr_AbyxORwork + size_AbyxORwork / sizeof(T);
-                T* ormqr_trfact = ormqr_diagORtmptr + size_diagORtmptr / sizeof(T);
-                T** ormqr_workArr = (T**)(ormqr_trfact + size_trfact / sizeof(T));
-                T** ormqr_workArr2 = ormqr_workArr + size_workArr3 / sizeof(T*);
+                T* unmqr_AbyxORwork = he2hb_work;
+                T* unmqr_diagORtmptr = unmqr_AbyxORwork + size_AbyxORwork / sizeof(T);
+                T* unmqr_trfact = unmqr_diagORtmptr + size_diagORtmptr / sizeof(T);
+                T** unmqr_workArr = (T**)(unmqr_trfact + size_trfact / sizeof(T));
+                T** unmqr_workArr2 = unmqr_workArr + size_workArr3 / sizeof(T*);
 
                 // Apply Q_he2hb on the left to W[kd:n, 0:n]:
                 //   V is in A[kd:n, 0:n-kd], Q is (n-kd) x (n-kd)
                 // When BATCHED=true, A is T* const* and tmptau_W is T*; use the adapter overload
-                // which builds a pointer array for C in ormqr_workArr2 before dispatching.
+                // which builds a pointer array for C in unmqr_workArr2 before dispatching.
                 // When BATCHED=false, both are T* and we call the strided overload directly.
                 if constexpr(BATCHED)
                 {
@@ -619,8 +619,8 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
                         A, shiftA + idx2D(kd, 0, lda), lda, strideA, // A
                         tau, n, // tau
                         tmptau_W, idx2D(kd, 0, ldw), ldw, strideW, // W
-                        batch_count, scalars, ormqr_AbyxORwork, ormqr_diagORtmptr, ormqr_trfact,
-                        ormqr_workArr, ormqr_workArr2);
+                        batch_count, scalars, unmqr_AbyxORwork, unmqr_diagORtmptr, unmqr_trfact,
+                        unmqr_workArr, unmqr_workArr2);
                 }
                 else
                 {
@@ -629,8 +629,8 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
                         A, shiftA + idx2D(kd, 0, lda), lda, strideA, // A
                         tau, n, // tau
                         tmptau_W, idx2D(kd, 0, ldw), ldw, strideW, // W
-                        batch_count, scalars, ormqr_AbyxORwork, ormqr_diagORtmptr, ormqr_trfact,
-                        ormqr_workArr));
+                        batch_count, scalars, unmqr_AbyxORwork, unmqr_diagORtmptr, unmqr_trfact,
+                        unmqr_workArr));
                 }
 
                 // copy matrix product into A
@@ -892,24 +892,24 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
                     batch_count, max_parallel_2stage, scalars, unmtr_Tr, unmtr_W, unmtr_Z,
                     unmtr_work, unmtr_workArr));
 
-                // Back-transform stage 1: apply Q_he2hb to eigenvector matrix (ormqr)
+                // Back-transform stage 1: apply Q_he2hb to eigenvector matrix (unmqr)
                 // Q_he2hb is stored in lower part of A (below diagonal kd) and in tau
-                // Partition he2hb_work for ormqr sub-workspaces
+                // Partition he2hb_work for unmqr sub-workspaces
                 const I n_kd = std::max(n - kd, I(0));
                 size_t size_AbyxORwork, size_diagORtmptr, size_trfact, size_workArr3;
                 rocsolver_ormqr_unmqr_getMemorySize<BATCHED, T>(
                     rocblas_side_left, n_kd, n, n_kd, batch_count, &size_scalars, &size_AbyxORwork,
                     &size_diagORtmptr, &size_trfact, &size_workArr3);
-                T* ormqr_AbyxORwork = he2hb_work;
-                T* ormqr_diagORtmptr = ormqr_AbyxORwork + size_AbyxORwork / sizeof(T);
-                T* ormqr_trfact = ormqr_diagORtmptr + size_diagORtmptr / sizeof(T);
-                T** ormqr_workArr = (T**)(ormqr_trfact + size_trfact / sizeof(T));
-                T** ormqr_workArr2 = ormqr_workArr + size_workArr3 / sizeof(T*);
+                T* unmqr_AbyxORwork = he2hb_work;
+                T* unmqr_diagORtmptr = unmqr_AbyxORwork + size_AbyxORwork / sizeof(T);
+                T* unmqr_trfact = unmqr_diagORtmptr + size_diagORtmptr / sizeof(T);
+                T** unmqr_workArr = (T**)(unmqr_trfact + size_trfact / sizeof(T));
+                T** unmqr_workArr2 = unmqr_workArr + size_workArr3 / sizeof(T*);
 
                 // Apply Q_he2hb on the left to W[kd:n, 0:n]:
                 //   V is in A[kd:n, 0:n-kd], Q is (n-kd) x (n-kd)
                 // When BATCHED=true, A is T* const* and tmptau_W is T*; use the adapter overload
-                // which builds a pointer array for C in ormqr_workArr2 before dispatching.
+                // which builds a pointer array for C in unmqr_workArr2 before dispatching.
                 // When BATCHED=false, both are T* and we call the strided overload directly.
                 if constexpr(BATCHED)
                 {
@@ -918,8 +918,8 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
                         shiftA + idx2D(kd, 0, lda), lda, strideA, // A
                         tau, n, // tau
                         tmptau_W, idx2D(kd, 0, ldw), ldw, strideW, // W
-                        batch_count, scalars, ormqr_AbyxORwork, ormqr_diagORtmptr, ormqr_trfact,
-                        ormqr_workArr, ormqr_workArr2);
+                        batch_count, scalars, unmqr_AbyxORwork, unmqr_diagORtmptr, unmqr_trfact,
+                        unmqr_workArr, unmqr_workArr2);
                 }
                 else
                 {
@@ -928,8 +928,8 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
                         A, shiftA + idx2D(kd, 0, lda), lda, strideA, // A
                         tau, n, // tau
                         tmptau_W, idx2D(kd, 0, ldw), ldw, strideW, // W
-                        batch_count, scalars, ormqr_AbyxORwork, ormqr_diagORtmptr, ormqr_trfact,
-                        ormqr_workArr));
+                        batch_count, scalars, unmqr_AbyxORwork, unmqr_diagORtmptr, unmqr_trfact,
+                        unmqr_workArr));
                 }
 
                 // copy matrix product into A
