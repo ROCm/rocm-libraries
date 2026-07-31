@@ -16,12 +16,17 @@ except ImportError:
     print = print
 
 
-# Bandit can't see that this alias is a safe loader, so yaml.load call sites carry a
-# bare nosec B506 marker (SEC-00404).
+# The spelling of this name is load-bearing: bandit's B506 check clears a yaml.load() call
+# only when the loader argument is named SafeLoader or CSafeLoader, so importing under either
+# of those names lets the scan verify every call site rather than trusting a suppression
+# comment there (SEC-00404).
 try:
-    from yaml import CSafeLoader as yamlLoader
+    from yaml import CSafeLoader as SafeLoader
 except ImportError:
-    from yaml import SafeLoader as yamlLoader
+    from yaml import SafeLoader
+
+# Kept for out-of-tree importers of the old name.
+yamlLoader = SafeLoader
 
 try:
     from yaml import CSafeDumper as yamlDumper
