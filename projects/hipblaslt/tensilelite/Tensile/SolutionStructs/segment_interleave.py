@@ -222,6 +222,6 @@ def evaluate(state):
     if bMXSB is not None: offsets["ldsBaseMXSB"] = bMXSB
     a0 = base // SEG
     a1 = (base + fA + fB) // SEG                 # tight branch guarantees a1 > a0
-    seg_map = "CLEAN seg%d={A0,B0} seg%d={A1,B1}" % (a0, a1)
+    seg_map = "TIGHT seg%d={A0,B0} seg%d={A1,B1}" % (a0, a1)
     return {"applicable": True, "aligned": False, "offsets": offsets,
             "blockSpan": 0, "reason": "tight", "segmentMap": seg_map}
