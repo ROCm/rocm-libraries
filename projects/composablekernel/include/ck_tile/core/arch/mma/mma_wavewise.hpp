@@ -236,16 +236,11 @@ struct WaveWiseMmaPipeline : public MmaPipelineBase<WaveWiseMmaPipeline<ADataTyp
     // NOTE: Here we have arrived at the Impl level. We know nothing about CTranspose here, we just
     // perform the intrinsic, potentially multiple times for K composition.
     template <typename... Params, typename ATensor, typename BTensor, typename CTensor>
-    CK_TILE_DEVICE static void execImpl(ATensor& a, BTensor& b, CTensor& c)
+    CK_TILE_DEVICE static void execImpl(const ATensor& a, const BTensor& b, CTensor& c)
     {
-        // Thread_buffer types allow us to select the ext_vectors for individual MmaOp calls.
-        using AThreadBufType = thread_buffer<typename MmaOp::AVecType, FragsM * FragsK>;
-        using BThreadBufType = thread_buffer<typename MmaOp::BVecType, FragsN * FragsK>;
-        using CThreadBufType = thread_buffer<typename MmaOp::CVecType, FragsM * FragsN>;
-
-        auto& a_buf = reinterpret_cast<const AThreadBufType&>(a);
-        auto& b_buf = reinterpret_cast<const BThreadBufType&>(b);
-        auto& c_buf = reinterpret_cast<CThreadBufType&>(c);
+        const auto& a_buf = a.get_thread_buffer().template get_as<typename MmaOp::AVecType>();
+        const auto& b_buf = b.get_thread_buffer().template get_as<typename MmaOp::BVecType>();
+        auto& c_buf       = c.get_thread_buffer().template get_as<typename MmaOp::CVecType>();
 
         if constexpr(AccumPolicy == MmaAccumPolicy::ROW_MAJOR)
         {

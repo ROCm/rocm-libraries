@@ -78,7 +78,7 @@ struct MmaPipelineBase
 
     // CAB = (C, A, B).
     template <typename... Params, typename CTensor, typename ATensor, typename BTensor>
-    CK_TILE_DEVICE void operator()(CTensor& c, ATensor& a, const BTensor& b) const
+    CK_TILE_DEVICE void operator()(CTensor& c, const ATensor& a, const BTensor& b) const
     {
         static_assert(detail::is_similiar_distributed_tensor_v<remove_cvref_t<CTensor>,
                                                                typename Derived::CWarpTensor> &&
