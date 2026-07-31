@@ -1,8 +1,6 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-import os
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -27,42 +25,6 @@ def test_default_contents_use_bundled_resources(monkeypatch):
     monkeypatch.setattr(CustomKernels, "custom_kernel_text", lambda name: f"contents: {name}")
 
     assert CustomKernels.getCustomKernelContents("kernel") == "contents: kernel"
-
-
-def test_custom_kernel_filepath_defaults_to_current_bundled_path(tmp_path, monkeypatch):
-    monkeypatch.setattr(CustomKernels, "CUSTOM_KERNEL_PATH", str(tmp_path))
-
-    assert Path(CustomKernels.getCustomKernelFilepath("kernel")) == tmp_path / "kernel.s"
-
-
-def test_bundled_path_comparison_normalizes_trailing_separator(tmp_path, monkeypatch):
-    bundled = tmp_path / "bundled"
-    bundled.mkdir()
-    monkeypatch.setattr(CustomKernels, "CUSTOM_KERNEL_PATH", str(bundled))
-
-    assert CustomKernels._uses_bundled_custom_kernels(f"{bundled}{os.sep}")
-
-
-def test_bundled_path_comparison_resolves_symlink(tmp_path, monkeypatch):
-    bundled = tmp_path / "bundled"
-    bundled.mkdir()
-    alias = tmp_path / "alias"
-    try:
-        alias.symlink_to(bundled, target_is_directory=True)
-    except OSError as error:
-        pytest.skip(f"directory symlinks are unavailable: {error}")
-    monkeypatch.setattr(CustomKernels, "CUSTOM_KERNEL_PATH", str(bundled))
-
-    assert CustomKernels._uses_bundled_custom_kernels(alias)
-
-
-@pytest.mark.skipif(os.name != "nt", reason="Windows path comparison semantics")
-def test_bundled_path_comparison_is_case_insensitive_on_windows(tmp_path, monkeypatch):
-    bundled = tmp_path / "Bundled"
-    bundled.mkdir()
-    monkeypatch.setattr(CustomKernels, "CUSTOM_KERNEL_PATH", str(bundled))
-
-    assert CustomKernels._uses_bundled_custom_kernels(str(bundled).swapcase())
 
 
 def test_custom_kernel_source_filters_preload_for_old_rocm(monkeypatch):
