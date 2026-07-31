@@ -6,6 +6,7 @@
 target_sources(hipblaslt
     PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/Debug.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/gemm_reject.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/handle.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocblaslt_auxiliary.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocblaslt_mat.cpp"

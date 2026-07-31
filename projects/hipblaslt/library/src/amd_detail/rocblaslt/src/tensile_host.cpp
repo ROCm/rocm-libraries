@@ -37,6 +37,7 @@
 #include "include/check_numerics_matrix.hpp"
 #include "rocblaslt-types.h"
 #include "rocblaslt_mat_utils.hpp"
+#include "gemm_reject.hpp"
 #include "rocblaslt_secure_env.hpp"
 #include "tensile_host.hpp"
 
@@ -3269,6 +3270,9 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
                                        const RocblasltContractionProblem& prob,
                                        std::shared_ptr<void>              gemmData)
 {
+    if(rocblaslt_gemm_is_rejected(prob))
+        return rocblaslt_status_not_implemented;
+
     rocblaslt_status status = rocblaslt_status_internal_error;
     try
     {
@@ -3498,6 +3502,9 @@ rocblaslt_status gemmCreate(RocblasltContractionProblem const& problem,
                             std::shared_ptr<void>&             gemmData,
                             size_t&                            gemmCount)
 {
+    if(rocblaslt_gemm_is_rejected(problem))
+        return rocblaslt_status_not_implemented;
+
     rocblaslt_status status = rocblaslt_status_internal_error;
     try
     {
@@ -3558,6 +3565,11 @@ rocblaslt_status groupedGemmCreate(std::vector<RocblasltContractionProblem>& pro
     gemmCount = probs.size();
     if(gemmCount == 0)
         return rocblaslt_status_success;
+
+    for(const auto& p : probs)
+        if(rocblaslt_gemm_is_rejected(p))
+            return rocblaslt_status_not_implemented;
+
     rocblaslt_status status = rocblaslt_status_internal_error;
     try
     {
