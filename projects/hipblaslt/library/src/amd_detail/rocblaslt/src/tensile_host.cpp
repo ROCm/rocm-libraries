@@ -4019,9 +4019,19 @@ rocblaslt_status getDeviceUserArgumentsValuesFromContractionProblem(rocblaslt_ha
             auto& problem  = data->problem.gemms[0];
             if(problem.activationComputeType() == rocisa::DataType::Float)
             {
-                setDeviceUserArgs(data->problem.gemms,
-                                  data->inputs,
-                                  (TensileLite::DeviceUserArguments<float>*)hostDeviceUserArgs);
+                bool hasMX = problem.mxBlockA() > 0 || problem.mxBlockB() > 0;
+                if(hasMX)
+                {
+                    setDeviceUserArgsMX(data->problem.gemms,
+                                        data->inputs,
+                                        (TensileLite::DeviceUserArgumentsMX<float>*)hostDeviceUserArgs);
+                }
+                else
+                {
+                    setDeviceUserArgs(data->problem.gemms,
+                                      data->inputs,
+                                      (TensileLite::DeviceUserArguments<float>*)hostDeviceUserArgs);
+                }
             }
             else
             {

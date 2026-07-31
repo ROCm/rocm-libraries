@@ -3327,4 +3327,187 @@ Tests:
   requested_solution_num: 10
   gpu_arch: '950'
 
+# Grouped GEMM tests for gfx950 — non-MX FP8 (NN)
+- name: matmul_groupedgemm_f8f8s_gfx950
+  category: pre_checkin
+  function:
+    matmul: *f8_precision_dst_f8
+  matrix_size:
+    - { M:  16,  N:  16,  K:  128 }
+    - { M:  64,  N:  64,  K:  256 }
+    - { M:  128, N:  128, K:  512 }
+    - { M:  255, N:  255, K:  256 }
+  transA: N
+  transB: N
+  grouped_gemm: [1]
+  use_user_args: 1
+  algo_method: [2]
+  alpha: 1
+  beta: 0.0
+  activation_type: none
+  unit_check: 0
+  norm_check: 1
+  gpu_arch: '950'
+
+# Grouped GEMM tests for gfx950 — BF16 variants (all orientations)
+- name: matmul_groupedgemm_bbs_gfx950
+  category: pre_checkin
+  function:
+    matmul: *hpa_bf16_precision
+  matrix_size:
+    - { M:  16,  N:  16,  K:  128 }
+    - { M:  64,  N:  64,  K:  256 }
+    - { M:  128, N:  128, K:  512 }
+    - { M:  255, N:  255, K:  256 }
+  transA_transB: *transA_transB_range
+  grouped_gemm: [1]
+  use_user_args: 1
+  algo_method: [2]
+  alpha: 1
+  beta: 0.0
+  unit_check: 1
+  gpu_arch: '950'
+
+- name: matmul_groupedgemm_bss_gfx950
+  category: pre_checkin
+  function:
+    matmul: *hpa_half_bf16_fp32dst_precision
+  matrix_size:
+    - { M:  16,  N:  16,  K:  128 }
+    - { M:  64,  N:  64,  K:  256 }
+    - { M:  128, N:  128, K:  512 }
+    - { M:  255, N:  255, K:  256 }
+  transA_transB: *transA_transB_range
+  grouped_gemm: [1]
+  use_user_args: 1
+  algo_method: [2]
+  alpha: 1
+  beta: 0.0
+  unit_check: 1
+  gpu_arch: '950'
+
+- name: matmul_groupedgemm_mxfp8_f8bs_kaligned_gfx950
+  category: pre_checkin
+  function:
+    matmul:
+    - { a_type: f8_r, b_type: f8_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r}
+  M: [64]
+  N: [64]
+  K: [256]
+  transA: T
+  transB: N
+  grouped_gemm: [1]
+  use_user_args: 1
+  alpha: 1.0
+  beta: 0.0
+  initialization: rand_int
+  unit_check: 1
+  gpu_arch: '950'
+
+- name: matmul_groupedgemm_mxfp8_f8hs_kaligned_gfx950
+  category: pre_checkin
+  function:
+    matmul:
+    - { a_type: f8_r, b_type: f8_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r}
+  M: [64]
+  N: [64]
+  K: [256]
+  transA: T
+  transB: N
+  grouped_gemm: [1]
+  use_user_args: 1
+  alpha: 1.0
+  beta: 0.0
+  initialization: rand_int
+  unit_check: 1
+  gpu_arch: '950'
+
+- name: matmul_groupedgemm_mxfp8_f8ss_kaligned_gfx950
+  category: pre_checkin
+  function:
+    matmul:
+    - { a_type: f8_r, b_type: f8_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r}
+  M: [64]
+  N: [64]
+  K: [256]
+  transA: T
+  transB: N
+  grouped_gemm: [1]
+  use_user_args: 1
+  alpha: 1.0
+  beta: 0.0
+  initialization: rand_int
+  unit_check: 1
+  gpu_arch: '950'
+
+- name: matmul_groupedgemm_mxfp4_f4bs_kaligned_gfx950
+  category: pre_checkin
+  function:
+    matmul:
+    - { a_type: f4_r, b_type: f4_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r}
+  M: [64]
+  N: [64]
+  K: [256]
+  transA: T
+  transB: N
+  grouped_gemm: [1]
+  use_user_args: 1
+  alpha: 1.0
+  beta: 0.0
+  initialization: rand_int
+  unit_check: 1
+  gpu_arch: '950'
+
+- name: matmul_groupedgemm_mxfp4_f4hs_kaligned_gfx950
+  category: pre_checkin
+  function:
+    matmul:
+    - { a_type: f4_r, b_type: f4_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r}
+  M: [64]
+  N: [64]
+  K: [256]
+  transA: T
+  transB: N
+  grouped_gemm: [1]
+  use_user_args: 1
+  alpha: 1.0
+  beta: 0.0
+  initialization: rand_int
+  unit_check: 1
+  gpu_arch: '950'
+
+- name: matmul_groupedgemm_mxfp4_f4ss_kaligned_gfx950
+  category: pre_checkin
+  function:
+    matmul:
+    - { a_type: f4_r, b_type: f4_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r}
+  M: [64]
+  N: [64]
+  K: [256]
+  transA: T
+  transB: N
+  grouped_gemm: [1]
+  use_user_args: 1
+  alpha: 1.0
+  beta: 0.0
+  initialization: rand_int
+  unit_check: 1
+  gpu_arch: '950'
+  category: pre_checkin
+  function:
+    matmul:
+    - { a_type: f4_r, b_type: f4_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r}
+  M: [64]
+  N: [64]
+  K: [256]
+  transA: T
+  transB: N
+  grouped_gemm: [0]
+  use_user_args: 1
+  alpha: 1.0
+  beta: 0.0
+  initialization: rand_int
+  unit_check: 1
+  gpu_arch: '950'
+
 ...

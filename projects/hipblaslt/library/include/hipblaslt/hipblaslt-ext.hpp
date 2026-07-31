@@ -390,6 +390,54 @@ namespace hipblaslt_ext
     } __attribute__((packed));
 
     /*! \ingroup types_module
+     *  \brief hipblasLt extension GPU inputs for MX (microscaling) grouped gemm problems.
+     *
+     * \details This structure matches the kernel's SGPR allocation order for MX kernels,
+     * with MXSA/MXSB pointers and strides interleaved inline after A/B.
+     */
+    struct UserArgumentsMX
+    {
+        uint32_t m;
+        uint32_t n;
+        uint32_t batch;
+        uint32_t k;
+        void*    d;
+        void*    c;
+        void*    a;
+        void*    mxsa; //!< MX scale A pointer (inline after A, matching kernel SGPR order)
+        void*    b;
+        void*    mxsb; //!< MX scale B pointer (inline after B, matching kernel SGPR order)
+        uint32_t strideD1;
+        uint32_t strideD2;
+        uint32_t strideC1;
+        uint32_t strideC2;
+        uint32_t strideA1;
+        uint32_t strideA2;
+        uint32_t strideMXSA1;
+        uint32_t strideMXSA2;
+        uint32_t strideB1;
+        uint32_t strideB2;
+        uint32_t strideMXSB1;
+        uint32_t strideMXSB2;
+        int8_t   alpha[16];
+        int8_t   beta[16];
+        void*    scaleA;
+        void*    scaleB;
+        void*    scaleC;
+        void*    scaleD;
+        void*    scaleAlphaVec;
+        void*    bias;
+        int      biasType;
+        uint32_t reserved;
+        void*    e;
+        uint32_t strideE1;
+        uint32_t strideE2;
+        float    act0;
+        float    act1;
+        int      activationType;
+    } __attribute__((packed));
+
+    /*! \ingroup types_module
      *  \brief hipBLASLt extension for an instance of a GEMM problem.
      */
     class GemmInstance

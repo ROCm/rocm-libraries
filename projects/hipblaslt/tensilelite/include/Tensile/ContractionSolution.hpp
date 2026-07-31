@@ -89,6 +89,49 @@ namespace TensileLite
         int      activationType;
     } __attribute__((packed));
 
+    template <typename TAct>
+    struct DeviceUserArgumentsMX
+    {
+        uint32_t m;
+        uint32_t n;
+        uint32_t batch;
+        uint32_t k;
+        void*    d;
+        void*    c;
+        void*    a;
+        void*    mxsa;
+        void*    b;
+        void*    mxsb;
+        uint32_t strideD1;
+        uint32_t strideD2;
+        uint32_t strideC1;
+        uint32_t strideC2;
+        uint32_t strideA1;
+        uint32_t strideA2;
+        uint32_t strideMXSA1;
+        uint32_t strideMXSA2;
+        uint32_t strideB1;
+        uint32_t strideB2;
+        uint32_t strideMXSB1;
+        uint32_t strideMXSB2;
+        int8_t   alpha[16];
+        int8_t   beta[16];
+        void*    scaleA;
+        void*    scaleB;
+        void*    scaleC;
+        void*    scaleD;
+        void*    scaleAlphaVec;
+        void*    bias;
+        int      biasType;
+        uint32_t reserved;
+        void*    e;
+        uint32_t strideE1;
+        uint32_t strideE2;
+        TAct     act0;
+        TAct     act1;
+        int      activationType;
+    } __attribute__((packed));
+
     struct PerfModel
     {
         double clock            = std::numeric_limits<double>::quiet_NaN();
@@ -722,6 +765,11 @@ namespace TensileLite
     TENSILELITEHOST_EXPORT void setDeviceUserArgs(std::vector<ContractionSolution::Problem> const& problems,
                            ContractionSolution::GroupedInputs const&        inputs,
                            DeviceUserArguments<TAct>*                       args);
+
+    template <typename TAct>
+    TENSILELITEHOST_EXPORT void setDeviceUserArgsMX(std::vector<ContractionSolution::Problem> const& problems,
+                           ContractionSolution::GroupedInputs const&        inputs,
+                           DeviceUserArgumentsMX<TAct>*                     args);
 
     TENSILELITEHOST_EXPORT std::ostream& operator<<(std::ostream&                                      stream,
                              ContractionSolution::StaticPerformanceModel const& spm);

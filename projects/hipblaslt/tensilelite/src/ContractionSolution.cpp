@@ -405,6 +405,137 @@ namespace TensileLite
         }
     }
 
+    template <typename TAct>
+    void setDeviceUserArgsMX(std::vector<ContractionSolution::Problem> const& problems,
+                             ContractionSolution::GroupedInputs const&        inputs,
+                             DeviceUserArgumentsMX<TAct>*                     args)
+    {
+        for(int i = 0; i < problems.size(); i++)
+        {
+            const TensorDescriptor& e    = problems[i].tensor(ContractionProblemGemm::TENSOR::E);
+            const TensorDescriptor& d    = problems[i].d();
+            const TensorDescriptor& c    = problems[i].c();
+            const TensorDescriptor& b    = problems[i].b();
+            const TensorDescriptor& a    = problems[i].a();
+            const TensorDescriptor& mxsa = problems[i].mxsa();
+            const TensorDescriptor& mxsb = problems[i].mxsb();
+
+            size_t startStrideCD = 1;
+            size_t startStrideAB = 1;
+
+            auto& arg    = args[i];
+            arg.m        = problems[i].problemSizes()[0];
+            arg.n        = problems[i].problemSizes()[1];
+            arg.batch    = problems[i].problemSizes()[2];
+            arg.k        = problems[i].problemSizes()[3];
+            arg.d        = const_cast<void*>(inputs.grouped[i].d);
+            arg.c        = const_cast<void*>(inputs.grouped[i].c);
+            arg.a        = const_cast<void*>(inputs.grouped[i].a);
+            arg.mxsa     = const_cast<void*>(inputs.grouped[i].mxsa);
+            arg.b        = const_cast<void*>(inputs.grouped[i].b);
+            arg.mxsb     = const_cast<void*>(inputs.grouped[i].mxsb);
+            arg.strideD1 = d.strides()[startStrideCD];
+            arg.strideD2 = d.strides()[startStrideCD + 1];
+            arg.strideC1 = c.strides()[startStrideCD];
+            arg.strideC2 = c.strides()[startStrideCD + 1];
+            arg.strideA1 = a.strides()[startStrideAB];
+            arg.strideA2 = a.strides()[startStrideAB + 1];
+            if(mxsa.dimensions() > startStrideAB)
+            {
+                arg.strideMXSA1 = mxsa.strides()[startStrideAB];
+                arg.strideMXSA2 = mxsa.strides()[startStrideAB + 1];
+            }
+            else
+            {
+                arg.strideMXSA1 = 0;
+                arg.strideMXSA2 = 0;
+            }
+            arg.strideB1 = b.strides()[startStrideAB];
+            arg.strideB2 = b.strides()[startStrideAB + 1];
+            if(mxsb.dimensions() > startStrideAB)
+            {
+                arg.strideMXSB1 = mxsb.strides()[startStrideAB];
+                arg.strideMXSB2 = mxsb.strides()[startStrideAB + 1];
+            }
+            else
+            {
+                arg.strideMXSB1 = 0;
+                arg.strideMXSB2 = 0;
+            }
+            setVariantToBuffer(
+                inputs.grouped[i].alpha, arg.alpha, sizeof(arg.alpha), problems[i].alphaType());
+            setVariantToBuffer(
+                inputs.grouped[i].beta, arg.beta, sizeof(arg.beta), problems[i].betaType());
+            arg.scaleA        = const_cast<void*>(inputs.grouped[i].scaleA);
+            arg.scaleB        = const_cast<void*>(inputs.grouped[i].scaleB);
+            arg.scaleC        = const_cast<void*>(inputs.grouped[i].scaleC);
+            arg.scaleD        = const_cast<void*>(inputs.grouped[i].scaleD);
+            arg.bias          = const_cast<void*>(inputs.grouped[i].bias);
+            arg.scaleAlphaVec = const_cast<void*>(inputs.grouped[i].scaleAlphaVec);
+            arg.e             = const_cast<void*>(inputs.grouped[i].e);
+            arg.biasType      = (uint32_t)problems[i].bias().dataType();
+            if(problems[i].useE())
+            {
+                arg.strideE1 = e.strides()[startStrideCD];
+                arg.strideE2 = e.strides()[startStrideCD + 1];
+            }
+            else
+            {
+                arg.strideE1 = 0;
+                arg.strideE2 = 0;
+            }
+            arg.act0           = (*std::get_if<TAct>(&inputs.grouped[i].activationArgs[0]));
+            arg.act1           = (*std::get_if<TAct>(&inputs.grouped[i].activationArgs[1]));
+            arg.activationType = (uint32_t)problems[i].getParams().activationEnum();
+        }
+
+        bool debug = Debug::Instance().printKernelArguments();
+        if(debug)
+        {
+            std::cout << "Grouped gemm MX argsPtr kernels: " << std::endl;
+            for(size_t i = 0; i < problems.size(); i++)
+            {
+                PrintBufferValueClass alphaPrint(
+                    (void*)args[i].alpha, sizeof(args[i].alpha), problems[i].alphaType());
+                PrintBufferValueClass betaPrint(
+                    (void*)args[i].beta, sizeof(args[i].beta), problems[i].betaType());
+                std::cout << "Gemm " << i << ":" << std::endl;
+                std::cout << "   " << "m: " << args[i].m << std::endl;
+                std::cout << "   " << "n: " << args[i].n << std::endl;
+                std::cout << "   " << "batch: " << args[i].batch << std::endl;
+                std::cout << "   " << "k: " << args[i].k << std::endl;
+                std::cout << "   " << "D: " << args[i].d << std::endl;
+                std::cout << "   " << "C: " << args[i].c << std::endl;
+                std::cout << "   " << "A: " << args[i].a << std::endl;
+                std::cout << "   " << "MXSA: " << args[i].mxsa << std::endl;
+                std::cout << "   " << "B: " << args[i].b << std::endl;
+                std::cout << "   " << "MXSB: " << args[i].mxsb << std::endl;
+                std::cout << "   " << "strideD1: " << args[i].strideD1 << std::endl;
+                std::cout << "   " << "strideD2: " << args[i].strideD2 << std::endl;
+                std::cout << "   " << "strideC1: " << args[i].strideC1 << std::endl;
+                std::cout << "   " << "strideC2: " << args[i].strideC2 << std::endl;
+                std::cout << "   " << "strideA1: " << args[i].strideA1 << std::endl;
+                std::cout << "   " << "strideA2: " << args[i].strideA2 << std::endl;
+                std::cout << "   " << "strideMXSA1: " << args[i].strideMXSA1 << std::endl;
+                std::cout << "   " << "strideMXSA2: " << args[i].strideMXSA2 << std::endl;
+                std::cout << "   " << "strideB1: " << args[i].strideB1 << std::endl;
+                std::cout << "   " << "strideB2: " << args[i].strideB2 << std::endl;
+                std::cout << "   " << "strideMXSB1: " << args[i].strideMXSB1 << std::endl;
+                std::cout << "   " << "strideMXSB2: " << args[i].strideMXSB2 << std::endl;
+                std::cout << "   " << "Alpha: " << alphaPrint << std::endl;
+                std::cout << "   " << "Beta: " << betaPrint << std::endl;
+                std::cout << "   " << "scaleAlphaVec: " << args[i].scaleAlphaVec << std::endl;
+                std::cout << "   " << "bias: " << args[i].bias << std::endl;
+                std::cout << "   " << "e: " << args[i].e << std::endl;
+                std::cout << "   " << "strideE1: " << args[i].strideE1 << std::endl;
+                std::cout << "   " << "strideE2: " << args[i].strideE2 << std::endl;
+                std::cout << "   " << "act0: " << args[i].act0 << std::endl;
+                std::cout << "   " << "act1: " << args[i].act1 << std::endl;
+                std::cout << "   " << "activationType: " << args[i].activationType << std::endl;
+            }
+        }
+    }
+
 #if defined(__GNUC__) || defined(__clang__)
 #pragma GCC visibility push(default)
 #endif
@@ -412,6 +543,10 @@ namespace TensileLite
         setDeviceUserArgs<float>(std::vector<ContractionSolution::Problem> const& problems,
                                  ContractionSolution::GroupedInputs const&        inputs,
                                  DeviceUserArguments<float>*                      args);
+    template void
+        setDeviceUserArgsMX<float>(std::vector<ContractionSolution::Problem> const& problems,
+                                   ContractionSolution::GroupedInputs const&        inputs,
+                                   DeviceUserArgumentsMX<float>*                    args);
 #if defined(__GNUC__) || defined(__clang__)
 #pragma GCC visibility pop
 #endif
@@ -3650,9 +3785,15 @@ namespace TensileLite
            || (problems[0].activationType() != ActivationType::None
                && problems[0].activationComputeType() == rocisa::DataType::Float))
         {
-            auto requiredSize = sizeof(DeviceUserArguments<float>) * problems.size();
+            bool hasMX = problems[0].mxBlockA() > 0 || problems[0].mxBlockB() > 0;
+            auto requiredSize = hasMX
+                ? sizeof(DeviceUserArgumentsMX<float>) * problems.size()
+                : sizeof(DeviceUserArguments<float>) * problems.size();
             static_cast<void>(hipHostMalloc(dUAHost, requiredSize, 0));
-            setDeviceUserArgs(problems, inputs, (DeviceUserArguments<float>*)(*dUAHost));
+            if(hasMX)
+                setDeviceUserArgsMX(problems, inputs, (DeviceUserArgumentsMX<float>*)(*dUAHost));
+            else
+                setDeviceUserArgs(problems, inputs, (DeviceUserArguments<float>*)(*dUAHost));
             static_cast<void>(hipMalloc(dUA, requiredSize));
             static_cast<void>(hipMemcpy(*dUA, *dUAHost, requiredSize, hipMemcpyHostToDevice));
             static_cast<void>(hipDeviceSynchronize());
