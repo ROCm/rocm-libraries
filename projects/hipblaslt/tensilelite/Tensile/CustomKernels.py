@@ -29,6 +29,7 @@ from Tensile.Common.ValidParameters import checkParametersAreValid, validParamet
 import yaml
 
 import os
+from pathlib import Path
 
 
 def isCustomKernelConfig(config):
@@ -51,7 +52,7 @@ def supportsUserSgprKernargPreload(rocmVersion):
     return rocmVersion.major > 6 or (
         rocmVersion.major == 6 and rocmVersion.patch >= 32650
     )
-def getCustomKernelFilepath(name, directory=CUSTOM_KERNEL_PATH):
+def getCustomKernelFilepath(name, directory=None):
     if directory is None:
         directory = CUSTOM_KERNEL_PATH
     return os.path.join(directory, (name + ".s"))
@@ -68,13 +69,17 @@ def getCustomKernelContents(name, directory=None):
     if _uses_bundled_custom_kernels(directory):
         try:
             return custom_kernel_text(name)
-        except:
-            raise RuntimeError("Failed to find custom kernel: {}".format(name))
+        except ValueError:
+            raise
+        except Exception as error:
+            raise RuntimeError(f"Failed to find custom kernel: {name}") from error
     try:
         with open(getCustomKernelFilepath(name, directory)) as f:
             return f.read()
-    except:
-        raise RuntimeError("Failed to find custom kernel: {}".format(os.path.join(directory, name)))
+    except Exception as error:
+        raise RuntimeError(
+            f"Failed to find custom kernel: {os.path.join(directory, name)}"
+        ) from error
 
 def getCustomKernelSource(name, rocmVersion, directory=None):
     contents = getCustomKernelContents(name, directory)
@@ -148,4 +153,6 @@ def getCustomKernelConfig(
     return kernelConfig
 
 def _uses_bundled_custom_kernels(directory):
-    return directory is None or os.fspath(directory) == CUSTOM_KERNEL_PATH
+    return directory is None or Path(directory).resolve(strict=False) == Path(
+        CUSTOM_KERNEL_PATH
+    ).resolve(strict=False)
