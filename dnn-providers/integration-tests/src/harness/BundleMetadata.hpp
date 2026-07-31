@@ -28,6 +28,14 @@ namespace hipdnn_integration_tests
 /// All fields are at the top level of the JSON object (RFC 0011 §4.1).
 /// Every field except `format_version` is optional. A missing field means
 /// "not recorded" — the system must behave correctly without it.
+/// How far up RFC 0015's enforcement ladder a bundle/case is checked.
+enum class EnforcementLevel
+{
+    Applicability, ///< engine must accept the graph
+    Buildable, ///< engine must additionally compile a plan
+    Full ///< engine must additionally execute and numeric-verify (default)
+};
+
 struct BundleMetadata
 {
     int formatVersion = 1;
@@ -46,6 +54,7 @@ struct BundleMetadata
     std::optional<int64_t> seed;
     std::optional<int64_t> minimumVramMb;
     std::optional<std::unordered_map<int64_t, nlohmann::json>> inputs;
+    EnforcementLevel enforcementLevel = EnforcementLevel::Full;
 };
 
 // ---------------------------------------------------------------------------
@@ -128,6 +137,42 @@ inline std::optional<BundleMetadata> parseBundleMetadataJson(const nlohmann::jso
     meta.notes = readString("notes");
     meta.seed = readInt64("seed");
     meta.minimumVramMb = readInt64("minimum_vram_mb");
+
+    // enforcement_level: absent leaves the default Full (set above). Present
+    // but not one of the three valid tokens rejects the whole metadata (like
+    // an invalid format_version) so a typo can't silently flip the level. The
+    // RFC §6.2 hard pre-commit error (a claim exists but enforcement_level is
+    // missing/invalid) is the claim-bearing cross-check against support.json;
+    // it belongs to the downstream enforcement/verifier ticket.
+    if(json.contains("enforcement_level"))
+    {
+        if(!json["enforcement_level"].is_string())
+        {
+            HIPDNN_SDK_LOG_WARN((source.empty() ? std::string("Metadata") : std::string(source))
+                                << " has invalid enforcement_level");
+            return std::nullopt;
+        }
+
+        const auto level = json["enforcement_level"].get<std::string>();
+        if(level == "applicability")
+        {
+            meta.enforcementLevel = EnforcementLevel::Applicability;
+        }
+        else if(level == "buildable")
+        {
+            meta.enforcementLevel = EnforcementLevel::Buildable;
+        }
+        else if(level == "full")
+        {
+            meta.enforcementLevel = EnforcementLevel::Full;
+        }
+        else
+        {
+            HIPDNN_SDK_LOG_WARN((source.empty() ? std::string("Metadata") : std::string(source))
+                                << " has invalid enforcement_level \"" << level << "\"");
+            return std::nullopt;
+        }
+    }
 
     if(json.contains("inputs") && json["inputs"].is_object())
     {
