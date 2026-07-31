@@ -6,7 +6,8 @@ from __future__ import annotations
 
 import unittest
 
-from rocke.dispatch.core import CandidateRegistry, KernelCandidate, OperatorRequest
+from rocke.core.arch import known_arches
+from rocke.dispatch.core import Capability, CandidateRegistry, KernelCandidate
 from rocke.dispatch.gemm import GemmRequest, gemm_fp16_candidates
 
 
@@ -18,6 +19,7 @@ def _dummy_candidate(name: str, family: str = "dummy") -> KernelCandidate:
         spec_id="dummy_spec",
         abi_version="dummy/v1",
         priority=0,
+        capability=Capability(arches=known_arches()),
         supports=lambda _req: (True, "ok"),
         select_spec=lambda _req: object(),
         signature=lambda _spec: (),
@@ -42,7 +44,10 @@ class TestCandidateRegistry(unittest.TestCase):
     def test_select_rejects_ranker_returning_unsupported_candidate(self):
         registry = CandidateRegistry("dummy")
         registry.register(_dummy_candidate("supported"))
-        req = OperatorRequest()
+        # A request carrying a real arch: the capability prefilter runs before
+        # the ranker, so a bare OperatorRequest would be filtered out first and
+        # the rogue-ranker path would never be exercised.
+        req = GemmRequest(M=128, N=128, K=32, arch="gfx950")
         rogue = _dummy_candidate("rogue")
 
         with self.assertRaisesRegex(ValueError, "unsupported candidate"):

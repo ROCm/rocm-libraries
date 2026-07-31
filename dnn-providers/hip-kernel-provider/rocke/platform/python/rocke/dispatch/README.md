@@ -10,7 +10,7 @@ rocke/dispatch/
   core.py                  # operator-agnostic request/candidate/registry/result contracts
   __init__.py              # public dispatch exports
   gemm/
-    common.py              # GEMM-family request/selector helpers + arch-family gate
+    common.py              # GEMM-family request/selector helpers
     support.py             # GEMM config and shape support predicates
     fp16_rcr.py            # UniversalGemm FP16 RCR dispatcher case
     bf16_rcr.py            # UniversalGemm BF16 RCR dispatcher case
@@ -18,20 +18,25 @@ rocke/dispatch/
       test_fp16_rcr.py
       test_bf16_rcr.py
       test_arch_family_gate.py
+      test_capability.py
       test_fp16_rcr_runtime.py
       test_parallel_runtime.py
       test_registry.py
       test_support.py
-  families/                # documented scaffolds for the remaining families
-    conv.py attention.py moe.py norm.py
+  families/                # conv / moe / norm
+    conv.py moe.py norm.py
 ```
+
+Attention lives outside this package, in `library/dispatch/attention.py`, because
+its cohort predicates import arch-specific kernel modules. It uses the same
+`core.py` contracts and is subject to the same coverage invariants.
 
 ## Current Scope
 
 Two GEMM cases are fully implemented: UniversalGemm FP16 RCR and BF16 RCR. The
-conv / attention / moe / norm families are scaffolded under `families/` (each
-defines its normalized request + registry and documents exactly which instance
-builder + validator a full implementation reuses).
+conv / moe / norm families under `families/` are implemented over the portable
+instance builders; each defines its normalized request, registry, and declared
+per-candidate coverage.
 
 ```python
 from rocke.dispatch import GemmRequest, dispatch_gemm_fp16, dispatch_gemm_bf16
@@ -48,20 +53,32 @@ print(result.grid, result.block)
 
 ### Declared coverage and the arch gate
 
-Every GEMM candidate declares a `Capability`: the exact `gfx` targets it was
-built for, its dtype and layout, and any shape bounds expressible as data. That
-declaration is the arch gate. Without one, an RDNA/WMMA candidate would report
+Every candidate declares a `Capability`: the exact `gfx` targets it was built
+for, its dtype and layout, and any shape bounds expressible as data. This is
+mandatory — `register()` rejects a candidate whose capability is `None`, since
+an undeclared candidate is invisible to `for_arch()` and `coverage()` and would
+make both answer by omission.
+
+That declaration is the arch gate. Without one, an RDNA/WMMA candidate would report
 support on a CDNA arch (its spec rebuilds wave64 and a 16x16x16 MFMA atom that
 also exists on CDNA), wrongly out-ranking the intended CDNA candidate. The
-regression is pinned by `tests/gemm/test_arch_family_gate.py`, and the
-family-wide invariants by `tests/gemm/test_capability.py`.
+regression is pinned by `tests/gemm/test_arch_family_gate.py`, the GEMM
+family-wide invariants by `tests/gemm/test_capability.py`, and the same
+invariants for conv / moe / norm by `tests/core/test_declared_coverage.py`.
 
 The gate is an explicit arch list rather than a `cdna`/`rdna` label, for two
 reasons. Family does not imply wave size — gfx1250 is CDNA at wave32 — so a
 family gate would admit a wave32 target into wave64 MFMA kernels. And the right
 list is per candidate, not per family: bf16's cshuffle path runs on gfx90a where
 fp16's does not, and the bf16 decode candidate needs a deep-K atom that exists
-only on gfx950.
+only on gfx950. Conv is where the label actively misled — `arch_family="cdna"`
+admitted wave32 gfx1250 to both wave64 MFMA candidates while denying it the WMMA
+one that suits it.
+
+A candidate's declared arches must agree on wave size, with two named
+exceptions: the 30 `norm2d` candidates and attention's two `unified_*` path
+candidates, neither of which bakes a wave size into its geometry. See
+ARCHITECTURE.md section 10.
 
 Capability is a prefilter, not the whole answer. Ask `candidate.admits(req)` for
 the complete verdict:

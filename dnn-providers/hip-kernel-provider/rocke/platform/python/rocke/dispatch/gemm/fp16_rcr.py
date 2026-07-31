@@ -28,6 +28,7 @@ from ..core import (
     Ranker,
     stable_json_hash,
 )
+from .binding import gemm_rcr_binding
 from .common import (
     GEMM_DIM_VOCABULARY,
     GemmRequest,
@@ -210,6 +211,7 @@ def _make_candidate(
         grid=_grid,
         block=lambda spec: (int(spec.block_size), 1, 1),
         sweep_space=lambda req: (select(req),) if candidate.admits(req)[0] else (),
+        bind=lambda result, verify: gemm_rcr_binding(result, verify, dtype="fp16"),
     )
     return candidate
 
@@ -229,7 +231,9 @@ def _grid(spec: UniversalGemmSpec, req: OperatorRequest) -> Tuple[int, int, int]
 _CDNA_MFMA_FP16 = ("gfx942", "gfx950")
 _RDNA_WMMA = ("gfx11-generic", "gfx1151", "gfx1201")
 
-GEMM_FP16_REGISTRY = CandidateRegistry(_FAMILY, dim_vocabulary=GEMM_DIM_VOCABULARY)
+GEMM_FP16_REGISTRY = CandidateRegistry(
+    _FAMILY, dim_vocabulary=GEMM_DIM_VOCABULARY, require_binding=True
+)
 GEMM_FP16_REGISTRY.extend(
     (
         _make_candidate(
