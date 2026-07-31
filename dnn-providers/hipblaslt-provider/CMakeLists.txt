@@ -271,6 +271,12 @@ if(NOT HIPDNN_SKIP_TESTS)
 # Tests are defined with relative paths to work in the installed location.
 ]=]
         )
+        # On ASAN builds, HIPDNN_TEST_MIOPEN_CACHE_DIR is set (see Sanitizers.cmake) and the generated
+        # suites require the cache-clearing fixture; empty otherwise.
+        set(_miopen_cache_fixture "")
+        if(HIPDNN_TEST_MIOPEN_CACHE_DIR)
+            set(_miopen_cache_fixture hipdnn_clear_miopen_test_cache)
+        endif()
         # The GTest YAML applies to both test binaries; each call appends its category suites
         # (e.g. hipblaslt_plugin_tests_quick_suite, hipblaslt_plugin_integration_tests_quick_suite)
         # to the same install-time CTestTestfile.cmake. ENVIRONMENT forwards the CMake-side
@@ -283,6 +289,8 @@ if(NOT HIPDNN_SKIP_TESTS)
             "${PROJECT_BINARY_DIR}/staging"
             "${HIPBLASLTPROVIDER_CTEST_INSTALL_FILE}"
             ENVIRONMENT ${TEST_ENVIRONMENT}
+            ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
+            FIXTURES_REQUIRED ${_miopen_cache_fixture}
         )
         apply_test_category_labels(
             hipblaslt_plugin_integration_tests
@@ -290,6 +298,8 @@ if(NOT HIPDNN_SKIP_TESTS)
             "${PROJECT_BINARY_DIR}/staging"
             "${HIPBLASLTPROVIDER_CTEST_INSTALL_FILE}"
             ENVIRONMENT ${TEST_ENVIRONMENT}
+            ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
+            FIXTURES_REQUIRED ${_miopen_cache_fixture}
         )
     endif()
 
@@ -300,6 +310,8 @@ if(NOT HIPDNN_SKIP_TESTS)
             INSTALL_TEST_FILE "${HIPBLASLTPROVIDER_CTEST_INSTALL_FILE}"
             TEST_NAME_PREFIX ${PROJECT_NAME}-external-integration
             ENVIRONMENT ${TEST_ENVIRONMENT}
+            ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
+            FIXTURES_REQUIRED ${_miopen_cache_fixture}
         )
     endif()
 
