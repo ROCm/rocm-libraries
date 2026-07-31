@@ -94,7 +94,7 @@ captured_bundles/{SuiteName}/{CaseName}/{CaseName}.meta.json
 ```bash
 python3 migration-scripts/place_bundles.py \
     --capture-dir captured_bundles \
-    --output-dir dnn-providers/integration-tests/integration_test_bundles
+    --output-dir dnn-providers/integration-tests/integration-test-bundles
 ```
 
 Groups captured graphs by **structure** (node types + wiring + tensor
@@ -107,7 +107,7 @@ Use `find_case.py` to query cases by any parameter (see below).
 python3 migration-scripts/verify_migration.py \
     --census census.json \
     --capture-dir captured_bundles \
-    --bundle-dir integration_test_bundles
+    --bundle-dir integration-test-bundles
 ```
 
 Three-way reconciliation: census count == captured count == placed count,
@@ -118,7 +118,7 @@ plus per-case byte-exact comparison of graph AND metadata (seed, inputs).
 ```bash
 python3 migration-scripts/import_graph.py \
     --graph path/to/graph.json \
-    --bundle-dir integration_test_bundles/ \
+    --bundle-dir integration-test-bundles/ \
     --meta reference_source="c++ integration suite: Suite.Case"
 ```
 
@@ -198,7 +198,7 @@ New tests should be added directly as bundle cases — no C++ needed.
 ```bash
 python3 migration-scripts/import_graph.py \
     --graph new_conv.json \
-    --bundle-dir integration_test_bundles/
+    --bundle-dir integration-test-bundles/
 ```
 
 What happens:
@@ -216,7 +216,7 @@ What happens:
 
 ```
   appended case '1_16_3_3_bfp16_nhwc_dil1x1_prepad1x1_postpad1x1' to
-    integration_test_bundles/quick/ConvolutionFwd/Default/sweep.json
+    integration-test-bundles/quick/ConvolutionFwd/Default/sweep.json
 ```
 
 That case id is the gtest name — it appears in CI logs, `--gtest_filter`,
@@ -249,7 +249,7 @@ integration tests provably loses no coverage for graph+GPU-plugin tests.
 ```bash
 python3 migration-scripts/diff_coverage.py \
     --cpp /tmp/cpp.json --bundle /tmp/bundle.json \
-    --bundle-dir integration_test_bundles
+    --bundle-dir integration-test-bundles
 ```
 
 ## Field Mapping — What Gets Bundled and Where
@@ -261,9 +261,9 @@ python3 migration-scripts/diff_coverage.py \
 | Tensor strides | `generateStrides()` | sweep `values.tensors[uid].strides` | Per-case |
 | data_type | `getDataTypeEnumFromType<T>()` | sweep `values.tensors[uid].data_type` | Per-case |
 | Node attrs | `ConvFpropAttributes` etc. | sweep `values.attributes.<key>` | Per-case, only if varies |
-| Seed | `synthesis().setGlobalSeed()` | sweep `case.metadata.seed` | Per-case metadata |
-| Distribution/range | `SynthesisConfig.fills()` | sweep `case.metadata.inputs.{uid}` | Per-case metadata |
-| Per-op defaults | `SynthesizeInputs.cpp` | **NOT stored** | Re-derived from topology |
+| Seed | `inputFillRecipes().setGlobalSeed()` | sweep `case.metadata.seed` | Per-case metadata |
+| Distribution/range | `InputFillRecipes.fills()` | sweep `case.metadata.inputs.{uid}` | Per-case metadata |
+| Per-op defaults | `FillInputs.cpp` | **NOT stored** | Re-derived from topology |
 | Provenance | (new) | sweep `case.metadata.reference_source` | Per-case metadata |
 
 ## Scripts

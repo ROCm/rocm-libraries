@@ -241,7 +241,7 @@ Defaults:
   bias_stride: -1
   bias_type: f32_r
   gate_residual: false
-  gate_type: f16_r
+  gate_type: f32_r
   ldg: -1
   stride_gate: -1
   search: false

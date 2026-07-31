@@ -48,7 +48,6 @@ if(ENABLE_ASM_SDPA_ENGINE)
         target_sources(hip_kernel_provider_integration_tests PRIVATE
             asm_sdpa_engine/AsmSdpaConfigHelpers.cpp
             asm_sdpa_engine/IntegrationGpuSdpaForward.cpp
-            asm_sdpa_engine/IntegrationGpuSdpaBackward.cpp
         )
         # Add include path for codegen-generated headers (e.g., asm_fmha_v3_fwd_configs.hpp)
         target_include_directories(hip_kernel_provider_integration_tests PRIVATE
