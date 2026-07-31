@@ -141,7 +141,8 @@ void rocsolver_syevd_heevd_getMemorySize(rocblas_handle handle,
     if(BATCHED)
         *size_workArr = std::max(*size_workArr, 2 * sizeof(T*) * batch_count);
 
-    // requirements for 2-stage path (he2hb does not support batch_count > 1)
+    // 2-stage path: he2hb + hb2st + unmtr_hb2st + unmqr
+    // 2-stage BATCHED not currently working. Also update use_2stage in implementation.
     const bool use_2stage = !BATCHED
         && (hetrd_mode == rocsolver_alg_mode_2stage
             || (hetrd_mode == rocsolver_alg_mode_auto && n >= SYEVD_2STAGE_SWITCHSIZE));
@@ -330,7 +331,8 @@ void rocsolver_syevd_heevd_getMemorySize(rocblas_handle handle,
     if(BATCHED)
         *size_workArr = std::max(*size_workArr, 2 * sizeof(T*) * batch_count);
 
-    // requirements for 2-stage path (he2hb does not support batch_count > 1)
+    // 2-stage path: he2hb + hb2st + unmtr_hb2st + unmqr
+    // 2-stage BATCHED not currently working. Also update use_2stage in implementation.
     const bool use_2stage = !BATCHED
         && (hetrd_mode == rocsolver_alg_mode_2stage
             || (hetrd_mode == rocsolver_alg_mode_auto && n >= SYEVD_2STAGE_SWITCHSIZE));
@@ -492,12 +494,11 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
 
     // TODO: Scale the matrix
 
-    // 2-stage path: he2hb + hb2st + unmtr_hb2st + ormqr
-    // When BATCHED=true, A is T* const*; the adapter overload of ormqr_unmqr_template handles
-    // the type mismatch between A (batched pointer array) and C (strided tmptau_W).
-    const bool use_2stage
-        = (hetrd_mode == rocsolver_alg_mode_2stage
-           || (hetrd_mode == rocsolver_alg_mode_auto && n >= SYEVD_2STAGE_SWITCHSIZE));
+    // 2-stage path: he2hb + hb2st + unmtr_hb2st + unmqr
+    // 2-stage BATCHED not currently working. Also update use_2stage in getMemorySize.
+    const bool use_2stage = !BATCHED
+        && (hetrd_mode == rocsolver_alg_mode_2stage
+            || (hetrd_mode == rocsolver_alg_mode_auto && n >= SYEVD_2STAGE_SWITCHSIZE));
     if(use_2stage)
     {
         const I kd = SYEVD_2STAGE_KD;
@@ -793,12 +794,11 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
 
     // TODO: Scale the matrix
 
-    // 2-stage path: he2hb + hb2st + unmtr_hb2st + ormqr
-    // When BATCHED=true, A is T* const*; the adapter overload of ormqr_unmqr_template handles
-    // the type mismatch between A (batched pointer array) and C (strided tmptau_W).
-    const bool use_2stage
-        = (hetrd_mode == rocsolver_alg_mode_2stage
-           || (hetrd_mode == rocsolver_alg_mode_auto && n >= SYEVD_2STAGE_SWITCHSIZE));
+    // 2-stage path: he2hb + hb2st + unmtr_hb2st + unmqr
+    // 2-stage BATCHED not currently working. Also update use_2stage in getMemorySize.
+    const bool use_2stage = !BATCHED
+        && (hetrd_mode == rocsolver_alg_mode_2stage
+            || (hetrd_mode == rocsolver_alg_mode_auto && n >= SYEVD_2STAGE_SWITCHSIZE));
     if(use_2stage)
     {
         const I kd = SYEVD_2STAGE_KD;
