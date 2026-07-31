@@ -44,11 +44,10 @@ jobs:
           python -m pip install tox
 
       - name: Run GEKO coverage gate
+        env:
+          HIPBLASLT_PATH: ${{ github.workspace }}/projects/hipblaslt
         run: |
-          export HIPBLASLT_PATH="${GITHUB_WORKSPACE}/projects/hipblaslt"
-          python -m tox -e coverage -- \
-            --hipblaslt-path "${HIPBLASLT_PATH}" \
-            --config tests/test_data/config.yaml
+          python -m tox -e coverage
 
       - name: Test pip install
         uses: ./.github/actions/pip-install-test
@@ -90,11 +89,10 @@ jobs:
           python -m pip install tox
 
       - name: Run GEKO coverage gate
+        env:
+          HIPBLASLT_PATH: ${{ github.workspace }}/projects/hipblaslt
         run: |
-          export HIPBLASLT_PATH="${GITHUB_WORKSPACE}/projects/hipblaslt"
-          python -m tox -e coverage -- \
-            --hipblaslt-path "${HIPBLASLT_PATH}" \
-            --config tests/test_data/config.yaml
+          python -m tox -e coverage
 
       - name: Test pip install
         uses: ./.github/actions/pip-install-test
