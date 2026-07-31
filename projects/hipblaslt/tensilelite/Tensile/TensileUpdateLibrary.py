@@ -40,12 +40,13 @@ import sys
 
 def UpdateLogic(filename, logicPath, outputPath):
     libYaml = LibraryIO.readYAML(filename)
+    isDictFormat = isinstance(libYaml, dict)
     # parseLibraryLogicData mutates the original data, so make a copy
     fields = LibraryIO.parseLibraryLogicData(copy.deepcopy(libYaml), filename)
     (_, _, problemType, solutions, _, _, _) = fields
 
     # problem type object to state
-    problemTypeState = problemType.state
+    problemTypeState = copy.deepcopy(problemType.state)
     problemTypeState["DataType"] = problemTypeState["DataType"].value
     problemTypeState["MacDataTypeA"] = problemTypeState["MacDataTypeA"].value
     problemTypeState["MacDataTypeB"] = problemTypeState["MacDataTypeB"].value
@@ -66,6 +67,8 @@ def UpdateLogic(filename, logicPath, outputPath):
     solutionList = []
     for solution in solutions:
         solutionState = solution.getAttributes()
+        if "ProblemType" not in solutionState:
+            solutionState["ProblemType"] = problemType
         solutionState["ProblemType"] = solutionState["ProblemType"].state
         solutionState["ProblemType"]["DataType"] = \
                 solutionState["ProblemType"]["DataType"].value
@@ -97,13 +100,21 @@ def UpdateLogic(filename, logicPath, outputPath):
             solutionState["ProblemType"]["DataTypeMetadata"] = \
                 solutionState["ProblemType"]["DataTypeMetadata"].value
 
+        if isDictFormat:
+            del solutionState["ProblemType"]
+
         solutionState["ISA"] = list(solutionState["ISA"])
         solutionList.append(solutionState)
 
-    # update yaml
-    libYaml[0] = {"MinimumRequiredVersion":__version__}
-    libYaml[4] = problemTypeState
-    libYaml[5] = solutionList
+    # update yaml (dict- or legacy list-format)
+    if isinstance(libYaml, dict):
+        libYaml["MinimumRequiredVersion"] = __version__
+        libYaml["ProblemType"] = problemTypeState
+        libYaml["Solutions"] = solutionList
+    else:
+        libYaml[0] = {"MinimumRequiredVersion":__version__}
+        libYaml[4] = problemTypeState
+        libYaml[5] = solutionList
 
     if outputPath != "":
         filename = filename.replace(logicPath, outputPath)

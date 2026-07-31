@@ -29,6 +29,7 @@
 #include <limits>
 #include <sstream>
 
+#include "stinkytofu/hardware/GfxIsa.hpp"
 #include "stinkytofu/hardware/HwRegHelpers.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmDirectives.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
@@ -529,6 +530,24 @@ static bool isImplicitSrc(const StinkyRegister& reg, const StinkyInstruction& in
     return false;
 }
 
+static FieldType fieldTypeForEmittedSrcOperand(const StinkyInstruction& inst, size_t emitSrcIndex) {
+    const HwInstDesc* desc = inst.getHwInstDesc();
+    if (desc == nullptr) return FieldType::None;
+    size_t srcIdx = 0;
+    for (const auto& f : desc->operandFields) {
+        if (f.isDest) continue;
+        if (srcIdx == emitSrcIndex) return f.fieldType;
+        srcIdx++;
+    }
+    return FieldType::None;
+}
+
+static bool isNullSmemOffsetNokOperand(const StinkyRegister& reg) {
+    if (reg.dataType == StinkyRegister::Type::LiteralString) return reg.literalValue == "null";
+    if (reg.dataType == StinkyRegister::Type::LiteralInt) return reg.literalInt == 0;
+    return false;
+}
+
 static void emitOperands(std::ostream& os, const StinkyInstruction& inst,
                          const AsmEmitterOptions& options) {
     bool firstOperand = true;
@@ -611,6 +630,14 @@ static void emitOperands(std::ostream& os, const StinkyInstruction& inst,
                 nonSkippedIndex++;
                 continue;
             }
+        }
+
+        if (fieldTypeForEmittedSrcOperand(inst, nonSkippedIndex) == FieldType::smem_offset_nok &&
+            isNullSmemOffsetNokOperand(srcRegs[i])) {
+            os << "null";
+            firstOperand = false;
+            nonSkippedIndex++;
+            continue;
         }
 
         bool needsNeg = false;

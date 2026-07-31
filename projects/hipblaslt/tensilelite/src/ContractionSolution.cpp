@@ -745,7 +745,16 @@ namespace TensileLite
 
         // Additional check for General Batched GEMM until GSU and StreamK are supported
         // in General Batched GEMM
-        if(sizeMapping.streamK > 0 && sizeMapping.streamKAtomic == 0)
+        //
+        // StreamKForceDPOnly (SK3 DP-first, gfx1250) always reduces via the tree path
+        // (getSKReduction returns tree, Flags == Synchronizer, never parallel) and never
+        // touches the workspace partials/fixup path, so AddressWS/AddressFlags are dead.
+        // The device kernel drops them from the SGPR define and .kd metadata, so we must
+        // not append ws/Flags here or the positional kernarg layout would corrupt the
+        // downstream (StridesD/Alpha/...) offsets. Keep appending for every other
+        // streamK>0 && atomic==0 kernel (layout unchanged).
+        if(sizeMapping.streamK > 0 && sizeMapping.streamKAtomic == 0
+           && sizeMapping.streamKForceDPOnly == 0)
         {
             // Assert hardware is not null
             // For now grouped gemm is not supported and passes nullptr
@@ -1145,6 +1154,27 @@ namespace TensileLite
             }
         }
 
+        if(problemType.useGateResidual)
+        {
+            if(problemType.stridedBatched)
+                args.template append<void const*>("gateResidual", inputs.gateResidual);
+            else
+                args.template append<void const* const*>("batchGateResidual",
+                                                         inputs.batchGateResidual);
+            bool hasGate = problem.useGateResidual();
+            args.template append<uint32_t>(
+                "gate_type",
+                static_cast<uint32_t>(
+                    hasGate ? problem.tensor(ContractionProblemGemm::TENSOR::GATE_RESIDUAL).dataType()
+                            : problemType.gateResidualDataTypeWhiteList.at(0)));
+
+            TensorDescriptor const& gate
+                = problem.tensor(ContractionProblemGemm::TENSOR::GATE_RESIDUAL);
+            for(size_t i = startStrideCD; i < d.dimensions(); i++)
+                args.template append<uint32_t>(concatenate_if<T_Debug>("strideGate", i),
+                                               hasGate ? gate.strides()[i] : 0);
+        }
+
         if(problemType.useScaleAlphaVec == 3 || problemType.useBias == 3)
         {
             args.template append<uint32_t>("factorDim",
@@ -1205,27 +1235,6 @@ namespace TensileLite
             args.template append<const void*>("AmaxWS",
                                               (uint8_t*)inputs.ws + workspaceOffsetInByte);
             args.template append<const void*>("AmaxSync", inputs.Synchronizer);
-        }
-
-        if(problemType.useGateResidual)
-        {
-            if(problemType.stridedBatched)
-                args.template append<void const*>("gateResidual", inputs.gateResidual);
-            else
-                args.template append<void const* const*>("batchGateResidual",
-                                                         inputs.batchGateResidual);
-            bool hasGate = problem.useGateResidual();
-            args.template append<uint32_t>(
-                "gate_type",
-                static_cast<uint32_t>(
-                    hasGate ? problem.tensor(ContractionProblemGemm::TENSOR::GATE_RESIDUAL).dataType()
-                            : problemType.gateResidualDataTypeWhiteList.at(0)));
-
-            TensorDescriptor const& gate
-                = problem.tensor(ContractionProblemGemm::TENSOR::GATE_RESIDUAL);
-            for(size_t i = startStrideCD; i < d.dimensions(); i++)
-                args.template append<uint32_t>(concatenate_if<T_Debug>("strideGate", i),
-                                               hasGate ? gate.strides()[i] : 0);
         }
     }
 
@@ -1894,6 +1903,17 @@ namespace TensileLite
         }
 
         rv.clusterDim = sizeMapping.clusterDim;
+
+        // The HIP driver rejects a cluster launch whose grid is not divisible by
+        // clusterDim, so round up. The extra padded WGs early-exit in the kernel
+        // prologue; their WAVEDONE decrements the barrier's live member count.
+        // Stream-K has its own cluster-aware 1-D grid (sk.grid) and WG-id decode,
+        // so leave it untouched.
+        if(enableCluster && sizeMapping.streamK == 0)
+        {
+            rv.numWorkGroups.x = RoundUpToMultiple(rv.numWorkGroups.x, rv.clusterDim.x);
+            rv.numWorkGroups.y = RoundUpToMultiple(rv.numWorkGroups.y, rv.clusterDim.y);
+        }
 
         rv.numWorkItems.x = rv.workGroupSize.x * rv.numWorkGroups.x;
         rv.numWorkItems.y = rv.workGroupSize.y * rv.numWorkGroups.y;
