@@ -121,7 +121,7 @@ protected:
         // error beyond plain matmul; use the MX-specific tolerance directly.
         this->registerValidator(outputs.c, matmul::getMxTolerance<OutputDataType>());
 
-        this->synthesis().setGlobalSeed(testCase.seed);
+        this->inputFillRecipes().setGlobalSeed(testCase.seed);
         this->verifyGraph(graphObj);
     }
 };

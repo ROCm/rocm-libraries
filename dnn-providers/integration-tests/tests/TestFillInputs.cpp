@@ -11,7 +11,7 @@
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 
-#include "harness/input-init/SynthesizeInputs.hpp"
+#include "harness/input-init/FillInputs.hpp"
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/detail/FlatbufferTensorAttributesUtils.hpp>
 
@@ -389,68 +389,68 @@ GraphResult buildSdpaFwdBwdFusedGraph()
     return r;
 }
 
-SynthesisResult runSynthesis(const GraphResult& gr, const std::set<int64_t>& outputUids)
+FillResult runFill(const GraphResult& gr, const std::set<int64_t>& outputUids)
 {
     const auto leafUids = gr.leafInputUids(outputUids);
     auto inputs = makeTensors(leafUids);
-    SynthesisConfig config;
+    InputFillRecipes recipes;
 
-    synthesizeInputs(*gr.graph, inputs, leafUids, config);
+    fillInputs(*gr.graph, inputs, leafUids, recipes);
 
-    auto missing = config.unfilled(leafUids);
+    auto missing = recipes.unfilled(leafUids);
     if(!missing.empty())
     {
-        std::string msg = "cannot synthesize:";
+        std::string msg = "cannot fill:";
         for(const int64_t uid : missing)
         {
-            const auto init = config.fill(uid);
-            const char* kind = init.kind == FillSpec::Kind::STRUCTURED ? "structured" : "derived";
+            const auto init = recipes.fill(uid);
+            const char* kind = init.kind == FillRecipe::Kind::STRUCTURED ? "structured" : "derived";
             msg += " uid=" + std::to_string(uid) + " (" + kind + ")";
         }
-        return SynthesisResult::unsupported(msg);
+        return FillResult::unsupported(msg);
     }
 
-    return SynthesisResult::ok();
+    return FillResult::ok();
 }
 
 } // namespace
 
 // ── Test cases ──────────────────────────────────────────────────────────────
 
-TEST(TestSynthesizeInputs, SingleConvFwd)
+TEST(TestFillInputs, SingleConvFwd)
 {
     const auto gr = buildConvFwdGraph();
-    const auto result = runSynthesis(gr, {3});
+    const auto result = runFill(gr, {3});
 
     EXPECT_TRUE(result.filled) << result.reason;
 }
 
-TEST(TestSynthesizeInputs, ConvPlusBiasFused)
+TEST(TestFillInputs, ConvPlusBiasFused)
 {
     const auto gr = buildConvBiasGraph();
-    const auto result = runSynthesis(gr, {5});
+    const auto result = runFill(gr, {5});
 
     EXPECT_TRUE(result.filled) << result.reason;
 }
 
-TEST(TestSynthesizeInputs, ConvPlusBiasPlusReluFused)
+TEST(TestFillInputs, ConvPlusBiasPlusReluFused)
 {
     const auto gr = buildConvBiasReluGraph();
-    const auto result = runSynthesis(gr, {6});
+    const auto result = runFill(gr, {6});
 
     EXPECT_TRUE(result.filled) << result.reason;
 }
 
-// Unit seam: verify the synthesis policy itself. Epsilon is the fixed-value
+// Unit seam: verify the fill policy itself. Epsilon is the fixed-value
 // path; momentum is the seeded random path and must reproduce across runs.
-TEST(TestSynthesizeInputs, RuntimePbvScalarsUseFixedAndDeterministicRandomFills)
+TEST(TestFillInputs, RuntimePbvScalarsUseFixedAndDeterministicRandomFills)
 {
     const auto graph = buildBatchnormTrainingRuntimePbvGraph();
     const std::vector<int64_t> leafUids = {1, 3, 4, 5, 8, 9, 10};
 
     auto firstInputs = makeTensorsFromGraph(graph, leafUids);
-    SynthesisConfig firstConfig;
-    const auto firstResult = synthesizeInputs(*graph.graph, firstInputs, leafUids, firstConfig);
+    InputFillRecipes firstRecipes;
+    const auto firstResult = fillInputs(*graph.graph, firstInputs, leafUids, firstRecipes);
     ASSERT_TRUE(firstResult.filled) << firstResult.reason;
 
     EXPECT_FLOAT_EQ(scalarValue(firstInputs, 5), 1e-5f);
@@ -459,43 +459,43 @@ TEST(TestSynthesizeInputs, RuntimePbvScalarsUseFixedAndDeterministicRandomFills)
     EXPECT_LE(firstMomentum, 1.0f);
 
     auto secondInputs = makeTensorsFromGraph(graph, leafUids);
-    SynthesisConfig secondConfig;
-    const auto secondResult = synthesizeInputs(*graph.graph, secondInputs, leafUids, secondConfig);
+    InputFillRecipes secondRecipes;
+    const auto secondResult = fillInputs(*graph.graph, secondInputs, leafUids, secondRecipes);
     ASSERT_TRUE(secondResult.filled) << secondResult.reason;
     EXPECT_FLOAT_EQ(scalarValue(secondInputs, 10), firstMomentum);
 }
 
-TEST(TestSynthesizeInputs, SdpaFwdNoStructuredOptionals)
+TEST(TestFillInputs, SdpaFwdNoStructuredOptionals)
 {
     const auto gr = buildSdpaFwdGraph();
-    const auto result = runSynthesis(gr, {4});
+    const auto result = runFill(gr, {4});
 
     EXPECT_TRUE(result.filled) << result.reason;
 }
 
-TEST(TestSynthesizeInputs, SdpaFwdWithStructuredInputRefuses)
+TEST(TestFillInputs, SdpaFwdWithStructuredInputRefuses)
 {
     const auto gr = buildSdpaFwdWithStructuredGraph();
-    const auto result = runSynthesis(gr, {4});
+    const auto result = runFill(gr, {4});
 
     EXPECT_FALSE(result.filled);
     EXPECT_NE(result.reason.find("uid=5"), std::string::npos);
     EXPECT_NE(result.reason.find("structured"), std::string::npos);
 }
 
-TEST(TestSynthesizeInputs, SdpaBwdStandaloneRefusesDerived)
+TEST(TestFillInputs, SdpaBwdStandaloneRefusesDerived)
 {
     const auto gr = buildSdpaBwdStandaloneGraph();
-    const auto result = runSynthesis(gr, {7, 8, 9});
+    const auto result = runFill(gr, {7, 8, 9});
 
     EXPECT_FALSE(result.filled);
     EXPECT_NE(result.reason.find("derived"), std::string::npos);
 }
 
-TEST(TestSynthesizeInputs, SdpaFwdBwdFusedSucceeds)
+TEST(TestFillInputs, SdpaFwdBwdFusedSucceeds)
 {
     const auto gr = buildSdpaFwdBwdFusedGraph();
-    const auto result = runSynthesis(gr, {7, 8, 9});
+    const auto result = runFill(gr, {7, 8, 9});
 
     EXPECT_TRUE(result.filled) << result.reason;
 }
