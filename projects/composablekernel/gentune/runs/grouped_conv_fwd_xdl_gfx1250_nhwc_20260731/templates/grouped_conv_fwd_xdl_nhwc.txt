@@ -1,0 +1,60 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+//
+// Gentune derivative of example/09_convnd_fwd/grouped_conv_fwd_xdl.txt.
+// Difference vs. the checked-in template: the convolution-forward
+// specialization is a replaceable gentune token (CK_CONVSPEC) instead of a
+// hard-coded ::Default, so the specialization can be tuned. Everything else is
+// identical. 2D BENCH_ARGS (num_dim_spatial == 2) selects the NHWC layout
+// (GNHWC / GKYXC / GNHWK) inside run_convnd_fwd_example.inc.
+
+#include "convnd_fwd_common.hpp"
+
+#include "ck/tensor_operation/gpu/device/impl/device_grouped_conv_fwd_multiple_abd_xdl_cshuffle.hpp"
+
+using InDataType       = ck::bhalf_t;
+using WeiDataType      = ck::bhalf_t;
+using AccDataType      = float;
+using CShuffleDataType = ck::bhalf_t;
+using OutDataType      = ck::bhalf_t;
+using AComputeDataType = InDataType;
+using BComputeDataType = AComputeDataType;
+
+template <ck::index_t... Is>
+using S = ck::Sequence<Is...>;
+
+using InElementOp  = ck::tensor_operation::element_wise::PassThrough;
+using WeiElementOp = ck::tensor_operation::element_wise::PassThrough;
+using OutElementOp = ck::tensor_operation::element_wise::PassThrough;
+
+static constexpr auto ConvSpec =
+    ck::tensor_operation::device::ConvolutionForwardSpecialization::CK_CONVSPEC;
+
+static constexpr auto GemmSpec = ck::tensor_operation::device::GemmSpecialization::MNKPadding;
+
+template <ck::index_t NDimSpatial, typename InLayout, typename WeiLayout, typename OutLayout>
+using DeviceGroupedConvNDFwdInstance =
+    ck::tensor_operation::device::DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle<
+    NDimSpatial,
+    InLayout,
+    WeiLayout,
+    ck::Tuple<>,
+    OutLayout,
+    InDataType,
+    WeiDataType,
+    AccDataType,
+    CShuffleDataType,
+    ck::Tuple<>,
+    OutDataType,
+    InElementOp,
+    WeiElementOp,
+    OutElementOp,
+    ConvSpec,
+    GemmSpec,
+    CK_GENTUNE_XDL_SUFFIX>;
+
+#include "run_convnd_fwd_example.inc"
+
+int main(int argc, char* argv[]) {
+    return run_convnd_fwd_example(argc, argv) ? 0 : 1;
+}

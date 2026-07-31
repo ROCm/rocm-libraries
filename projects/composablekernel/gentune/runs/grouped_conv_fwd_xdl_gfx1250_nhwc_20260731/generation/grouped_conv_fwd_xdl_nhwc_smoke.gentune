@@ -1,0 +1,29 @@
+TEST_INSTANCE_TEMPLATE_PATH: runs/grouped_conv_fwd_xdl_gfx1250_nhwc_20260731/templates/grouped_conv_fwd_xdl_nhwc.txt
+
+# Smoke config: ONE candidate (the gfx1250 compile-confirmed skeleton with
+# A=B=CDE=8, ConvSpec=Default) x ONE shape (c256 k128 1x1, both channels
+# divisible by 8). Constrained cardinality = 1. VERIFY uses CPU reference
+# (verify=1) as a one-time gold-standard correctness check before the full run.
+
+PARAMS:
+CK_CONVSPEC TUNE Default
+
+CK_A_SRC_VEC TUNE 8
+
+CK_B_SRC_VEC TUNE 8
+CONSTRAINT CK_B_SRC_VEC == CK_A_SRC_VEC
+
+CK_CDE_VEC TUNE 8
+
+CK_GENTUNE_XDL_SUFFIX TUNE REPLACE
+ 1, 256, 64, 64, 32, 8, 8, 16, 16, 2, 2, S<4, 64, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, CK_A_SRC_VEC, 8, 1, S<4, 64, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, CK_B_SRC_VEC, 8, 1, 1, 1, S<1, 32, 1, 4>, CK_CDE_VEC
+
+BENCH_ARGS:
+0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+
+VERIFY_ARGS:
+0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+
+TEST_INSTANCE_DIR: runs/grouped_conv_fwd_xdl_gfx1250_nhwc_20260731/test_instances_smoke/
+
+COMPILE_CMD: /opt/rocm/llvm/bin/clang++ -DCK_CMAKE_GPU_TARGET_IDS=0x1250 -DCK_ENABLE_BF16 -DCK_GFX1250_SUPPORT -DCK_GFX12_SUPPORT -DCK_TIME_KERNEL=1 -DCK_USE_GFX1250 -DCK_USE_XDL -DUSE_PROF_API=1 -D__HIP_PLATFORM_AMD__=1 -D__HIP_PLATFORM_HCC__=1 -I/workspace/rocm-libraries/projects/composablekernel/library/include -I/workspace/rocm-libraries/projects/composablekernel/include -I/workspace/rocm-libraries/projects/composablekernel/build/include -I/workspace/rocm-libraries/projects/composablekernel/example/09_convnd_fwd -isystem /opt/rocm/include -O3 -DNDEBUG -std=c++20 -fPIC -Wno-unknown-warning-option -fno-offload-uniform-block -mllvm --lsr-drop-solution=1 -mllvm -enable-post-misched=0 -mllvm -amdgpu-early-inline-all=true -mllvm -amdgpu-function-calls=false -fbracket-depth=1024 --offload-compress -x hip --offload-arch=gfx1250 -o OUTPUT_NAME INPUT_FILENAME -L/workspace/rocm-libraries/projects/composablekernel/build/lib -lutility -L/opt/rocm/lib -lamdhip64
