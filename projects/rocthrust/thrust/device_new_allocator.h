@@ -34,17 +34,15 @@
 #include <thrust/device_ptr.h>
 #include <thrust/device_reference.h>
 
-// Use rocprim::numeric_limits if thrust/detail/type_traits.h uses rocprim::arithmetic
-#include _THRUST_STD_INCLUDE(limits)
+#include _THRUST_STD_INCLUDE(__new/bad_alloc.h)
 
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
 #  include _THRUST_STD_INCLUDE(cstdint)
-#endif
-
-#include <stdexcept>
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
+#else
 #  include <cstddef>
 #endif
+
+#include _THRUST_STD_INCLUDE(limits)
 
 THRUST_NAMESPACE_BEGIN
 
@@ -137,7 +135,7 @@ public:
   {
     if (cnt > this->max_size())
     {
-      throw std::bad_alloc();
+      _THRUST_STD::__throw_bad_alloc();
     } // end if
 
     // use "::operator new" rather than keyword new
