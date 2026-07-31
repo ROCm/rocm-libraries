@@ -1754,9 +1754,9 @@ GemmDescriptor CreateGemmDescriptorConvFwd(const TensorDescriptor& wDesc,
     bool transA     = false;
     bool transB     = (wDesc.GetType() == miopenInt8);
     int m           = wei_k;
-    int n = std::accumulate(out_spatial.begin(), out_spatial.end(), 1, std::multiplies<int>());
+    int n = static_cast<int>(std::accumulate(out_spatial.begin(), out_spatial.end(), 1, std::multiplies<int>()));
     int k =
-        in_c * std::accumulate(wei_spatial.begin(), wei_spatial.end(), 1, std::multiplies<int>());
+        in_c * static_cast<int>(std::accumulate(wei_spatial.begin(), wei_spatial.end(), 1, std::multiplies<int>()));
     int lda         = k;
     int ldb         = wDesc.GetType() == miopenInt8 ? k : n;
     int ldc         = n;
@@ -1807,8 +1807,8 @@ GemmDescriptor CreateGemmDescriptorConvBwdData(const TensorDescriptor& wDesc,
     bool transA     = true;
     bool transB     = false;
     int m =
-        in_c * std::accumulate(wei_spatial.begin(), wei_spatial.end(), 1, std::multiplies<int>());
-    int n   = std::accumulate(out_spatial.begin(), out_spatial.end(), 1, std::multiplies<int>());
+        in_c * static_cast<int>(std::accumulate(wei_spatial.begin(), wei_spatial.end(), 1, std::multiplies<int>()));
+    int n   = static_cast<int>(std::accumulate(out_spatial.begin(), out_spatial.end(), 1, std::multiplies<int>()));
     int k   = wei_k;
     int lda = m;
     int ldb = n;
@@ -1861,8 +1861,8 @@ GemmDescriptor CreateGemmDescriptorConvBwdWeight(const TensorDescriptor& dyDesc,
     bool transB     = true;
     int m           = wei_k;
     int n           = static_cast<int>(in_c) *
-            std::accumulate(wei_spatial.begin(), wei_spatial.end(), 1, std::multiplies<int>());
-    int k   = std::accumulate(out_spatial.begin(), out_spatial.end(), 1, std::multiplies<int>());
+            static_cast<int>(std::accumulate(wei_spatial.begin(), wei_spatial.end(), 1, std::multiplies<int>()));
+    int k   = static_cast<int>(std::accumulate(out_spatial.begin(), out_spatial.end(), 1, std::multiplies<int>()));
     int lda = k;
     int ldb = k;
     int ldc = n;
@@ -1915,7 +1915,7 @@ GemmDescriptor CreateGemmDescriptorConvCNHWFwd(const TensorDescriptor& wDesc,
     bool transB     = (wDesc.GetType() == miopenInt8);
     int m           = wei_k;
     int n =
-        in_n * std::accumulate(out_spatial.begin(), out_spatial.end(), 1, std::multiplies<int>());
+        in_n * static_cast<int>(std::accumulate(out_spatial.begin(), out_spatial.end(), 1, std::multiplies<int>()));
     int k           = in_c;
     int lda         = k;
     int ldb         = wDesc.GetType() == miopenInt8 ? k : n;
@@ -1967,7 +1967,7 @@ GemmDescriptor CreateGemmDescriptorConvCNHWBwdData(const TensorDescriptor& wDesc
     bool transB     = false;
     int m           = in_c;
     int n =
-        in_n * std::accumulate(out_spatial.begin(), out_spatial.end(), 1, std::multiplies<int>());
+        in_n * static_cast<int>(std::accumulate(out_spatial.begin(), out_spatial.end(), 1, std::multiplies<int>()));
     int k           = wei_k;
     int lda         = m;
     int ldb         = n;
@@ -2022,7 +2022,7 @@ GemmDescriptor CreateGemmStridedBatchedDescriptorConv1x1Fwd(const TensorDescript
     bool transA     = false;
     bool transB     = (wDesc.GetType() == miopenInt8);
     int m           = wei_k;
-    int n   = std::accumulate(in_spatial.begin(), in_spatial.end(), 1, std::multiplies<int>());
+    int n   = static_cast<int>(std::accumulate(in_spatial.begin(), in_spatial.end(), 1, std::multiplies<int>()));
     int k   = in_c;
     int lda = k;
     int ldb = wDesc.GetType() == miopenInt8 ? k : n;
@@ -2075,7 +2075,7 @@ GemmDescriptor CreateGemmStridedBatchedDescriptorConv1x1BwdData(const TensorDesc
     bool transA     = true;
     bool transB     = false;
     int m           = in_c;
-    int n   = std::accumulate(in_spatial.begin(), in_spatial.end(), 1, std::multiplies<int>());
+    int n   = static_cast<int>(std::accumulate(in_spatial.begin(), in_spatial.end(), 1, std::multiplies<int>()));
     int k   = wei_k;
     int lda = m;
     int ldb = n;
@@ -2129,7 +2129,7 @@ GemmDescriptor CreateGemmStridedBatchedDescriptorConv1x1BwdWeight(const TensorDe
     bool transB     = true;
     int m           = wei_k;
     int n           = in_c;
-    int k   = std::accumulate(in_spatial.begin(), in_spatial.end(), 1, std::multiplies<int>());
+    int k   = static_cast<int>(std::accumulate(in_spatial.begin(), in_spatial.end(), 1, std::multiplies<int>()));
     int lda = k;
     int ldb = k;
     int ldc = n;
@@ -2181,9 +2181,9 @@ GemmDescriptor CreateGemmDescriptorGroupConvFwd(const TensorDescriptor& wDesc,
     bool transA     = false;
     bool transB     = false;
     int m           = wei_k / groupCount;
-    int n = std::accumulate(out_spatial.begin(), out_spatial.end(), 1, std::multiplies<int>());
+    int n = static_cast<int>(std::accumulate(out_spatial.begin(), out_spatial.end(), 1, std::multiplies<int>()));
     int k = (in_c / groupCount) *
-            std::accumulate(wei_spatial.begin(), wei_spatial.end(), 1, std::multiplies<int>());
+            static_cast<int>(std::accumulate(wei_spatial.begin(), wei_spatial.end(), 1, std::multiplies<int>()));
     int lda         = k;
     int ldb         = n;
     int ldc         = n;
@@ -2235,8 +2235,8 @@ GemmDescriptor CreateGemmDescriptorGroupConvBwdData(const TensorDescriptor& wDes
     bool transA     = true;
     bool transB     = false;
     int m           = (in_c / groupCount) *
-            std::accumulate(wei_spatial.begin(), wei_spatial.end(), 1, std::multiplies<int>());
-    int n   = std::accumulate(out_spatial.begin(), out_spatial.end(), 1, std::multiplies<int>());
+            static_cast<int>(std::accumulate(wei_spatial.begin(), wei_spatial.end(), 1, std::multiplies<int>()));
+    int n   = static_cast<int>(std::accumulate(out_spatial.begin(), out_spatial.end(), 1, std::multiplies<int>()));
     int k   = wei_k / groupCount;
     int lda = m;
     int ldb = n;
@@ -2290,8 +2290,8 @@ GemmDescriptor CreateGemmDescriptorGroupConvBwdWeight(const TensorDescriptor& dy
     bool transB     = true;
     int m           = wei_k / groupCount;
     int n           = (in_c / groupCount) *
-            std::accumulate(wei_spatial.begin(), wei_spatial.end(), 1, std::multiplies<int>());
-    int k   = std::accumulate(out_spatial.begin(), out_spatial.end(), 1, std::multiplies<int>());
+            static_cast<int>(std::accumulate(wei_spatial.begin(), wei_spatial.end(), 1, std::multiplies<int>()));
+    int k   = static_cast<int>(std::accumulate(out_spatial.begin(), out_spatial.end(), 1, std::multiplies<int>()));
     int lda = k;
     int ldb = k;
     int ldc = n;
@@ -2343,7 +2343,7 @@ GemmDescriptor CreateGemmDescriptorGroupConvCNHWFwd(const TensorDescriptor& wDes
     bool transB     = false;
     int m           = wei_k / groupCount;
     int n =
-        in_n * std::accumulate(out_spatial.begin(), out_spatial.end(), 1, std::multiplies<int>());
+        in_n * static_cast<int>(std::accumulate(out_spatial.begin(), out_spatial.end(), 1, std::multiplies<int>()));
     int k           = in_c / groupCount;
     int lda         = k;
     int ldb         = n;
@@ -2396,7 +2396,7 @@ GemmDescriptor CreateGemmDescriptorGroupConvCNHWBwdData(const TensorDescriptor& 
     bool transB     = false;
     int m           = in_c / groupCount;
     int n =
-        in_n * std::accumulate(out_spatial.begin(), out_spatial.end(), 1, std::multiplies<int>());
+        in_n * static_cast<int>(std::accumulate(out_spatial.begin(), out_spatial.end(), 1, std::multiplies<int>()));
     int k           = wei_k / groupCount;
     int lda         = m;
     int ldb         = n;
