@@ -26,6 +26,7 @@
  *
  ******************************************************************************/
 
+#include <thrust/copy.h>
 #include <thrust/device_vector.h>
 #include <thrust/execution_policy.h>
 #include <thrust/sort.h>
@@ -62,6 +63,9 @@ struct sort_benchmark : public primbench::benchmark_interface
     thrust::device_vector<K> keys = bench_utils::generate(m_items, state.seed, entropy);
     thrust::device_vector<T> vals = bench_utils::generate(m_items, state.seed);
 
+    thrust::device_vector<K> k_ref = keys;
+    thrust::device_vector<T> v_ref = vals;
+
     state.set_items(m_items);
 
     state.add_reads<T>(m_items);
@@ -69,6 +73,11 @@ struct sort_benchmark : public primbench::benchmark_interface
 
     state.add_writes<T>(m_items);
     state.add_writes<K>(m_items);
+
+    state.run_before_every_iteration([&] {
+      thrust::copy(policy.on(state.stream), k_ref.begin(), k_ref.end(), keys.begin());
+      thrust::copy(policy.on(state.stream), v_ref.begin(), v_ref.end(), vals.begin());
+    });
 
     state.run([&] {
       thrust::sort_by_key(policy(alloc).on(state.stream), keys.begin(), keys.end(), vals.begin(), bench_utils::less_t{});

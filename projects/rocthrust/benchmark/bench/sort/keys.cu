@@ -26,6 +26,7 @@
  *
  ******************************************************************************/
 
+#include <thrust/copy.h>
 #include <thrust/device_vector.h>
 #include <thrust/execution_policy.h>
 #include <thrust/sort.h>
@@ -57,12 +58,17 @@ struct sort_benchmark : public primbench::benchmark_interface
     bench_utils::caching_allocator_t alloc{};
     thrust::detail::device_t policy{};
 
-    const auto entropy          = bench_utils::get_entropy_percentage(entropy_reduction) / 100.0f;
-    thrust::device_vector<T> in = bench_utils::generate(m_items, state.seed, entropy);
+    const auto entropy           = bench_utils::get_entropy_percentage(entropy_reduction) / 100.0f;
+    thrust::device_vector<T> in  = bench_utils::generate(m_items, state.seed, entropy);
+    thrust::device_vector<T> ref = in;
 
     state.set_items(m_items);
     state.add_reads<T>(m_items);
     state.add_writes<T>(m_items);
+
+    state.run_before_every_iteration([&] {
+      thrust::copy(policy.on(state.stream), ref.begin(), ref.end(), in.begin());
+    });
 
     state.run([&] {
       thrust::sort(policy(alloc).on(state.stream), in.begin(), in.end());
