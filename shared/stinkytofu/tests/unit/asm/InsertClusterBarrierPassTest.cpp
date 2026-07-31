@@ -393,8 +393,7 @@ TEST_F(InsertClusterBarrierPassTest, Rule3ForwardsPastWorkgroupBarriers) {
             clusterSignalIdx == static_cast<size_t>(-1)) {
             clusterSignalIdx = idx;
         }
-        if (firstWgSignalIdx == static_cast<size_t>(-1) &&
-            isWorkgroupBarrierSignalInst(*inst)) {
+        if (firstWgSignalIdx == static_cast<size_t>(-1) && isWorkgroupBarrierSignalInst(*inst)) {
             firstWgSignalIdx = idx;
         }
         ++idx;
@@ -446,4 +445,39 @@ TEST_F(InsertClusterBarrierPassTest, Wait3StopAnchorsAfterFollowingWorkgroupBarr
     ASSERT_NE(rule3ClusterCmp, nullptr);
     EXPECT_GE(indexOf(rule3ClusterCmp), anchorFloor)
         << "scan hitting wait-3 must anchor after the following workgroup barrier";
+}
+
+TEST_F(InsertClusterBarrierPassTest, Rule3SegmentBoundaryFallbackAnchorsAtSegBegin) {
+    // Short segment: one instruction after the label, then the handshake.  With
+    // kRule3SignalLeadCycles = 900 the cycle lead cannot match, so the backward
+    // scan falls back to segBegin (label + 1) rather than co-locating with wait.
+    createLabel("label_SegmentStart");
+    StinkyInstruction* segBeginInst =
+        createVAddInBlock(bb, arch, /*destReg=*/0, /*src0Reg=*/4, /*src1Reg=*/8);
+    ASSERT_NE(segBeginInst, nullptr);
+    StinkyInstruction* labelBeforePass = findLabelNamed("label_SegmentStart");
+    ASSERT_NE(labelBeforePass, nullptr);
+    ASSERT_EQ(segBeginInst, firstRealInstAfter(labelBeforePass));
+    appendHandshake(/*loadS0=*/0, /*loadS1=*/4);
+
+    runPass();
+
+    StinkyInstruction* wgSignal = nullptr;
+    for (IRBase& ir : *bb) {
+        if (ir.getType() != IRBase::IRType::StinkyTofu) continue;
+        auto* inst = cast<StinkyInstruction>(&ir);
+        if (isWorkgroupBarrierSignalInst(*inst)) {
+            wgSignal = inst;
+            break;
+        }
+    }
+    ASSERT_NE(wgSignal, nullptr);
+
+    StinkyInstruction* rule3ClusterCmp = findClusterWaveCmpAfter(0);
+    ASSERT_NE(rule3ClusterCmp, nullptr);
+
+    EXPECT_LT(indexOf(rule3ClusterCmp), indexOf(segBeginInst))
+        << "cluster signal must anchor before segBegin, not co-locate with wait";
+    EXPECT_LT(indexOf(segBeginInst), indexOf(wgSignal))
+        << "segBegin must precede the workgroup signal";
 }

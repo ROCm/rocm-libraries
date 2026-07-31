@@ -335,6 +335,9 @@ IRBase* findRule3SignalAnchorByCycleLead(
     auto refIt = cycleMap.find(referenceAnchor);
     if (refIt == cycleMap.end()) return defaultAnchor;
 
+    // target may be <= 0 when the wait anchor is fewer than leadCycles from
+    // function entry; cycle matching then fails and the barrier/segment
+    // fallbacks below decide the anchor.
     const int64_t target = static_cast<int64_t>(refIt->second) - leadCycles;
     auto it = BasicBlock::iterator(referenceAnchor);
     while (it != segBegin) {
@@ -344,7 +347,7 @@ IRBase* findRule3SignalAnchorByCycleLead(
         if (isClusterBarrierWait(*inst)) {
             return anchorAfterWorkgroupBarrierFollowing(inst, defaultAnchor);
         }
-        if (isSegmentBoundary(*inst)) return defaultAnchor;
+        if (isSegmentBoundary(*inst)) return segBegin.getNodePtr();
         if (isWorkgroupBarrierSignal(*inst)) {
             if (priorWaitAnchors.count(inst) != 0) {
                 return anchorAfterWorkgroupBarrierPair(inst, defaultAnchor);
