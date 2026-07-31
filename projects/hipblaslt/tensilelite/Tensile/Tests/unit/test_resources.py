@@ -1,7 +1,10 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
+import importlib
+import sys
 from pathlib import Path
+from zipfile import Path as ZipPath, ZipFile
 
 import pytest
 import yaml
@@ -182,6 +185,54 @@ def test_known_bugs_text_raises_for_missing_resource(tmp_path, monkeypatch):
 
     with pytest.raises(FileNotFoundError, match="known_bugs.yaml"):
         Resources.known_bugs_text()
+
+
+def test_resource_helpers_work_from_zip_package(tmp_path, monkeypatch):
+    archive = tmp_path / "resources.zip"
+    package = "zip_tensile_resources"
+    known_bugs = "version: 1\nskips: []\n"
+    defaults = "runner:\n  name: pytest\n"
+
+    # Import the real module from the archive instead of monkeypatching _root.
+    # This fails if resource lookup regresses to a __file__-derived Path.
+    with ZipFile(archive, "w") as zip_file:
+        zip_file.writestr(f"{package}/__init__.py", "")
+        zip_file.write(Resources.__file__, f"{package}/Resources.py")
+        for name in EXPECTED_STATIC_HEADERS:
+            zip_file.writestr(
+                f"{package}/Source/{name}", f"contents for {name}\n"
+            )
+        zip_file.writestr(f"{package}/CustomKernels/b.s", "kernel b\n")
+        zip_file.writestr(f"{package}/CustomKernels/a.s", "kernel a\n")
+        zip_file.writestr(f"{package}/CustomKernels/readme.txt", "not a kernel\n")
+        zip_file.writestr(
+            f"{package}/TensileLogic/known_bugs.yaml", known_bugs
+        )
+        zip_file.writestr(
+            f"{package}/ductile/config/defaults.yaml", defaults
+        )
+
+    monkeypatch.syspath_prepend(str(archive))
+    zip_resources = importlib.import_module(f"{package}.Resources")
+    try:
+        assert zip_resources.__file__.startswith(f"{archive}/")
+        assert isinstance(zip_resources._root(), ZipPath)
+        assert zip_resources.custom_kernel_names() == ["a", "b"]
+        assert zip_resources.custom_kernel_text("a") == "kernel a\n"
+        assert zip_resources.known_bugs_text() == known_bugs
+        assert zip_resources.ductile_defaults_text() == defaults
+
+        output = tmp_path / "headers"
+        copied = zip_resources.copy_static_headers(output)
+
+        assert copied == list(EXPECTED_STATIC_HEADERS)
+        for name in EXPECTED_STATIC_HEADERS:
+            assert (output / name).read_text(encoding="utf-8") == (
+                f"contents for {name}\n"
+            )
+    finally:
+        sys.modules.pop(f"{package}.Resources", None)
+        sys.modules.pop(package, None)
 
 
 def test_real_static_header_resources_are_available(tmp_path):
