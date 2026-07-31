@@ -211,6 +211,34 @@ auto GetSubbatchTestCase2D()
     };
 }
 
+// Large-tensor test case: NHWC numel > INT_MAX
+// Shape: N=1, C=1, H=46342, W=46342, 1x1 kernel, NHWC
+// numel = 1 * 1 * 46342 * 46342 = 2,147,580,964 > INT_MAX (2,147,483,647)
+// Tests that ConvDirectNaiveConvFwd (the fallback path when no optimised solver
+// applies) correctly handles int64 index arithmetic when the tensor element
+// count exceeds INT_MAX, preventing int32 index wrap-around / out-of-bounds.
+// FP16 chosen to keep per-tensor VRAM at ~4.3 GB (feasible on MI300X/MI325X).
+auto GetNhwcScaleTestCase()
+{
+    using TestCase = miopen::unit_tests::ConvTestCase;
+    return std::vector{
+        // clang-format off
+        // input NHWC {N,C,H,W} x filter {K,C,Fy,Fx}: numel = 46342*46342 = 2,147,580,964 > INT_MAX
+        TestCase{{miopenHalf, miopenTensorNHWC, {1, 1, 46342, 46342}}, {miopenHalf, {1, 1, 1, 1}}, miopenHalf, {{0, 0}, {1, 1}, {1, 1}}},
+        // clang-format on
+    };
+}
+
+const auto& GetScaleTestParams()
+{
+    static const auto params = [] {
+        auto p = miopen::unit_tests::UnitTestConvSolverParams(Gpu::All);
+        p.UseGpuRef(); // GPU reference: CPU ref is impractical at this tensor size
+        return p;
+    }();
+    return params;
+}
+
 } // namespace
 
 using GPU_UnitTestConvSolverDirectNaiveFwd_FP16  = GPU_UnitTestConvSolverFwd_FP16;
@@ -314,3 +342,12 @@ INSTANTIATE_TEST_SUITE_P(FullSubbatch2D,
                          testing::Combine(testing::Values(GetTestParams()),
                                           testing::Values(miopenConvolutionAlgoDirect),
                                           testing::ValuesIn(GetSubbatchTestCase2D())));
+
+// Scale test: NHWC numel > INT_MAX (int32 index-wrap coverage for the naive
+// conv fallback path). Runs in the Scale tier (requires large-memory GPU,
+// e.g. MI300X / MI325X).
+INSTANTIATE_TEST_SUITE_P(FullScale,
+                         GPU_UnitTestConvSolverDirectNaiveFwd_FP16,
+                         testing::Combine(testing::Values(GetScaleTestParams()),
+                                          testing::Values(miopenConvolutionAlgoDirect),
+                                          testing::ValuesIn(GetNhwcScaleTestCase())));
