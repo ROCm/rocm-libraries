@@ -5,6 +5,28 @@ Documentation for rocFFT is available at
 
 ## Since last release (ROCm 7.14)
 
+### Optimized
+
+* Improved performance of unit-strided, interleaved, real-to-complex FFTs on gfx1201, gfx90a, gfx942, and gfx950 for the following lengths:
+  * (100,100,100)
+  * (192,96,96)
+  * (200,96,96)
+  * (128,128,256)
+  * (160,168,168)
+  * (160,168,192)
+  * (168,168,192)
+  * (168,192,192)
+  * (192,192,192)
+  * (192,192,200)
+  * (192,200,200)
+  * (200,200,200)
+  * (216,216,216)
+  * (216,104,100)
+  * (216,104,104)
+  * (224,104,104)
+  * (224,108,104)
+  * (224,108,108)
+
 ### Added
 
 * Added optional RCCL (ROCm Collective Communications Library) backend for single-node multi-GPU communication, enabled via `-DROCFFT_RCCL_ENABLE=ON`.
@@ -25,7 +47,6 @@ Documentation for rocFFT is available at
 
 * Generalized multi-device computations for transforms such that each of the length dimension is fully covered either in all the input field's bricks or in all the output field's bricks, regardless of the type and placement of the transform. Note specifically for real transforms: the innermost length dimension must be fully covered in all the input (resp. output) field's bricks for real forward (resp. inverse) transforms.
 * Support for the gfx1250 architecture.
-* Added amdgcnspirv architecture to client programs, so that they are functional even on gfx architectures that have not been explicitly compiled in.
 
 ### Optimized
 

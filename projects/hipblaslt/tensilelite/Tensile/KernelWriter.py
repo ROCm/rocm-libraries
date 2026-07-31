@@ -57,6 +57,8 @@ from .Activation import ActivationModule
 from .Common import printWarning, roundUp, print2, DebugConfig, DataDirection, \
   INDEX_CHARS, IsaVersion, log2
 from .Common.GlobalParameters import globalParameters
+from .Common.ValidParameters import resolveSwInstructionPrefetch, \
+  SW_INSTRUCTION_PREFETCH_AUTO
 from Tensile.SolutionStructs.Naming import getKernelNameMin
 from Tensile.Toolchain.Component import Assembler
 
@@ -307,6 +309,15 @@ class StateValues:
   numSgprAddressDbg: int                 = 0
 
   firstInitSgpr: int                     = -1
+  # Abs SW instruction prefetch base: low index of 3 contiguous SGPRs (even-aligned pair
+  # s[N:N+1] + scratch s[N+2]) auto-allocated in _initKernel. Reserved through the prolog and
+  # checked back in at label_MultiGemmEnd (just before defineVariableSgprs reclaims the slots),
+  # so the dynamic CFG-target prefetch ladder inserted there can use it without clobbering body
+  # values (net +0 SGPR). The scratch holds the PC-rel offset (bare-label + temp idiom). -1 = off.
+  swPrefetchAbsBaseSgpr: int             = -1
+  # Pending deferred check-in of the abs-prefetch base triple: set in _initKernel, freed at
+  # label_MultiGemmEnd in KernelWriterAssembly. -1 = nothing pending / already freed.
+  swPrefetchAbsBaseSgprPendingCheckIn: int = -1
   nonPostLoopSgpr: List[str]             = field(init=False)
   userArgsInfo: UserArgumentsInfo        = field(default_factory=UserArgumentsInfo)
   numSgprToLoad: int                     = 0 # For kernel args
@@ -3410,8 +3421,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
       return module
 
     skipLabel = Label(self.labels.getNameInc("SK_SkipNllSubtilePAP"), "")
-    module.add(SCmpEQU64(src0=sgpr("AddressFlags", 2), src1=hex(0), comment="Parallel reduction: skip Subtile PAP"))
-    module.add(SCBranchSCC1(labelName=skipLabel.getLabelName(), comment=""))
+    # Under StreamKForceDPOnly the reduction is always forced to the tree path
+    # (AddressFlags != 0 invariant), so this parallel-reduction skip never fires;
+    # fold it out and keep only the StreamKIter >= StreamKIterEnd (last-tile) check.
+    if not kernel["StreamKForceDPOnly"]:
+      module.add(SCmpEQU64(src0=sgpr("AddressFlags", 2), src1=hex(0), comment="Parallel reduction: skip Subtile PAP"))
+      module.add(SCBranchSCC1(labelName=skipLabel.getLabelName(), comment=""))
     module.add(SCmpGeU32(src0=sgpr("StreamKIter"), src1=sgpr("StreamKIterEnd"), comment="No next persistent iteration"))
     module.add(SCBranchSCC1(labelName=skipLabel.getLabelName(), comment=""))
     if not skipBarrier:
@@ -4261,6 +4276,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
         self.codes.gl2PrefetchIncrement.add(SCMovB32(sgpr("GL2PrefetchIncMXSA"), 0))
       if kernel["ProblemType"]["MXBlockB"]:
         self.codes.gl2PrefetchIncrement.add(SCMovB32(sgpr("GL2PrefetchIncMXSB"), 0))
+      if kernel["enableTDMMetadata"]:
+        self.codes.gl2PrefetchIncrement.add(SCMovB32(sgpr("GL2PrefetchIncMetadata"), 0))
       self.codes.gl2PrefetchIncrement.add(self.gl2PrefetchIncrementAddr(kernel, tensorParametersA, tensorParametersB))
       self.codes.gl2Prefetch = Module()
       self.codes.gl2Prefetch.add(self.gl2PrefetchIssueLoad(kernel, tensorParametersA, tensorParametersB))
@@ -5256,6 +5273,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
       module.add(kernelEndLabel)
       if kernel["ProblemType"]["OutputAmaxD"]:
         module.add(self.insertAmaxD(kernel))
+      # Mirror functionEnd's StreamK kernelEnd on the deferred-blocks epilogue.
+      # Single-hop next-neighbor work stealing self-resets its per-queue counters via the
+      # atomic_inc auto-reset bounds, so kernelEnd emits no explicit reset.
+      skComponent = Component.StreamK.find(self)
+      module.add(skComponent.kernelEnd(self, kernel))
       module.add(SEndpgm(comment="Kernel End"))
     else:
       # If activation was deferred but no other deferred blocks exist, emit it before functionEnd
@@ -5313,6 +5335,50 @@ class KernelWriter(metaclass=abc.ABCMeta):
   def releaseStreamKConstSgpr(self, nameOrIdx):
     if isinstance(nameOrIdx, int):
       self.sgprPool.checkIn(nameOrIdx)
+
+  def skUsesRawQueueRank(self, kernel):
+    """True when the per-XCD work-queue index must come from the RAW pre-remap
+    launch WG rank, captured once into the reused persistent ``StreamKTileIdx``
+    carrier (KernelWriterAssembly prologue) and read back in
+    StreamK.graWorkGroup.
+
+    The auto-reset wrap bound (tiles_q + W_q) assumes each queue's home-workgroup
+    count equals distribute(skGrid, q), i.e. that the value feeding % numQueues
+    densely covers [0, skGrid). Once WorkGroup0 has been remapped, its
+    % numQueues is NOT count-preserving when the grid does not block evenly, so
+    it skews the per-queue count and the counter drifts off 0. We therefore
+    snapshot the raw launch id (== physical XCD rank) BEFORE any remap.
+
+    ZERO additional persistent SGPRs are spent: the raw rank is stashed in the
+    already-allocated ``StreamKTileIdx`` slot, which is provably dead in the
+    [prologue, queue-read) window (see StreamK.usesRawQueueRank). A dedicated
+    ``StreamKQueue`` SGPR was rejected because these SK4/SK5 kernels sit at the
+    register ceiling and it overflowed the SGPR file on the tuned high-register
+    SKXCC kernels (the unaligned-pool parity shift can cost up to 4 SGPRs).
+
+    Two disjoint remap regimes need the raw rank:
+
+      * WorkGroupMappingXCC == -1 -- the dynamic auto-WGM path, where the host
+        picks WGMXCC = NUM_XCD > 1 at runtime and the wgmXCC CU-count remap skews
+        the per-queue count.
+      * StreamKXCCMapping != 0 with WorkGroupMappingXCC > 1 -- the SKXCC path,
+        where the StreamKXCCMapping chiplet remap (plus the fixed WGMXCC > 1
+        remap) rewrites WorkGroup0 non-count-preservingly. (SKXCC with WGMXCC ==
+        1 is already count-preserving -- it stays on the cheap StreamKIdx %
+        numQueues else-branch -- and WGMXCC == -1 is mutually exclusive with
+        SKXCC, so the two disjuncts never overlap.)
+
+    Fixed non-SKXCC WGMXCC solutions (== 1 no-op, or a tuned power-of-two > 1
+    without SKXCC) are excluded: == 1 needs no fix (StreamKIdx already equals the
+    raw rank). Single-XCD arches are trivially balanced; gfx12
+    (WorkGroupIdFromTTM) re-reads the raw id from ttmp9. Kept in sync with
+    StreamK.usesRawQueueRank."""
+    return (kernel["StreamK"] in (4, 5)
+            and self.states.archCaps["NumXCD"] > 1
+            and not self.states.archCaps["WorkGroupIdFromTTM"]
+            and (kernel["WorkGroupMappingXCC"] == -1
+                 or (kernel["StreamKXCCMapping"] != 0
+                     and kernel["WorkGroupMappingXCC"] > 1)))
 
   ##############################################################################
   # Move StreamK Constants to VGPRs
@@ -6655,6 +6721,17 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
       moduleKernelBody.body.setParent()
 
+      # Resolve the SwInstructionPrefetch bitmask (int; legacy bool accepted as a
+      # deprecated alias) to the (relative, absolute) enable pair the StinkyTofu
+      # passes read. Auto resolves to Absolute on gfx1250 non-Stream-K, Relative
+      # otherwise. Absolute gating (Stream-K / non-gfx1250 / GSU) is enforced
+      # downstream by the baseSgpr=-1 reservation gate and the C++ passes.
+      swpRelEnable, swpAbsEnable = resolveSwInstructionPrefetch(
+          kernel.get("SwInstructionPrefetch", SW_INSTRUCTION_PREFETCH_AUTO),
+          self.states.version == (12, 5, 0),
+          bool(kernel.get("StreamK", 0)),
+          kernel["ProblemType"]["DataType"].isDouble())
+
       # Set StinkyTofu module options
       stinky_module_options = {"OptLevel": stinky_opt_level,
                                "EnableRemarks": bool(globalParameters.get("StinkyTofuEnableRemarks") or False),
@@ -6666,6 +6743,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
                                "EnableWaitCntInsertion": True if stinky_opt_level != 0 else not globalParameters.get("DisableSTWaitCnt", True),
                                # True: expert scheduling mode2; False: mode 0. Independent of ScheduleIterAlg/OptLevel.
                                "EnableESM2": kernel["EnableStinkyTofuESM2"],
+                               "EnableESM2TrackValuVsrc": kernel["EnableESM2TrackValuVsrc"],
                                "TileA0": kernel["ThreadTile0"],
                                "TileB0": kernel["ThreadTile1"],
                                "TileM0": kernel["MacroTile0"],
@@ -6681,8 +6759,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
                                "DirectToLdsA": bool(kernel["DirectToLdsA"]),
                                "DirectToLdsB": bool(kernel["DirectToLdsB"]),
                                "UseSgprForGRO": kernel["_UseSgprForGRO"],
-                               # -1 disables SwInstructionPrefetch in Gfx1250Backend; else scratch pool index
-                               "SwPrefetchScratchSgpr": int(self.sgprs.get("SwPrefetchScratch", -1)),
+                               "EnableSwInstructionPrefetchRelStatic": swpRelEnable,
                                # Cluster-barrier handshake insertion in Gfx1250Backend
                                # (kernel-scope at every OptLevel when set).
                                "ClusterBarrier": bool(kernel.get("ClusterBarrier", False)),
@@ -6698,6 +6775,14 @@ class KernelWriter(metaclass=abc.ABCMeta):
                                # a workgroup sync inside the LCL-gated signal block.
                                # Defaults to 1 (fallback off) when unset.
                                "PrefetchLocalRead": int(kernel.get("PrefetchLocalRead", 1)),
+                               # Abs SW prefetch: mutually exclusive with PC-rel.
+                               # Abs takes priority when both are True (backend enforces via else-if).
+                               "EnableSwInstructionPrefetchAbs": swpAbsEnable,
+                               # Auto-allocated 3-SGPR triple (even-aligned pair + scratch),
+                               # reserved in _initKernel and freed at label_MultiGemmEnd; -1 when
+                               # abs prefetch is off (also -1 for Stream-K / non-gfx1250).
+                               "SwInstructionPrefetchAbsBaseSgpr": int(
+                                   self.states.swPrefetchAbsBaseSgpr),
                               }
 
       # Region-clone jobs for StinkyTofu RegionClonePass.
@@ -9041,6 +9126,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
         if kernel["ProblemType"]["MXBlockB"]:
           self.states.mxsb.startVgprGL2PrefetchAddr = vgprIdx
           vgprIdx += tensorParametersB["MX"]["gl2nl"] * self.states.rpga      
+        if kernel["enableTDMMetadata"]:
+          tPM = tensorParametersA["tpsMetadata"] if tensorParametersA["is_sparse"] else tensorParametersB["tpsMetadata"]
+          self.states.m.startVgprGL2PrefetchAddr = vgprIdx
+          vgprIdx += tPM["gl2nl"] * self.states.rpga
 
       # TODO: Serial is always the first/last register in the pool so the store
       # code doesn't have to deal with fragmentation
@@ -9092,6 +9181,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
         if kernel["ProblemType"]["MXBlockB"]:
           self.states.mxsb.startVgprGL2PrefetchAddr = vgprIdx
           vgprIdx += tensorParametersB["MX"]["gl2nl"] * self.states.rpga
+        if kernel["enableTDMMetadata"]:
+          tPM = tensorParametersA["tpsMetadata"] if tensorParametersA["is_sparse"] else tensorParametersB["tpsMetadata"]
+          self.states.m.startVgprGL2PrefetchAddr = vgprIdx
+          vgprIdx += tPM["gl2nl"] * self.states.rpga
 
       self.states.totalVgprs = vgprIdx
 
@@ -9294,10 +9387,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     self.defineSgpr("OrigLoopCounter", 1)
 
-    # Whole-kernel scratch for StinkyTofu SwPrefetchInsertionPass (user SGPR; pool order);
-    if rocisa.isSupportedByStinkyTofu(self.states.version) and bool(kernel.get("SwInstructionPrefetch", True)):
-      self.defineSgpr("SwPrefetchScratch", 1)
-
     if self.debugConfig.debugKernel:
       self.defineSgpr("AddressDbg", self.states.numSgprAddressDbg)
       self.defineSgpr("DebugKernelItems", 1)
@@ -9353,7 +9442,16 @@ class KernelWriter(metaclass=abc.ABCMeta):
       self.defineSgpr("AddressMXSB", numSgprAddressMXSB)
     if kernel["ProblemType"]["Sparse"]:
       self.defineSgpr("AddressMetadata", numSgprAddressMetadata)
-    if kernel["StreamK"] > 0 and kernel["StreamKAtomic"] == 0:
+    # AddressWS/AddressFlags are the StreamK workspace + synchronizer-flag kernarg
+    # pointers. Under StreamKForceDPOnly (SK3 DP-first, gfx1250) the reduction is
+    # always the single-kernel tree path and the workspace partials/fixup path is
+    # never reached, so both are dead (every runtime reader is constant-folded or
+    # removed, see StreamK.py / KernelWriterAssembly.py). Drop them from the kernarg
+    # SGPR define to shrink the persistent kernarg footprint (peak .amdhsa_next_free_sgpr
+    # -4 SGPRs). The .kd metadata (Components/Signature.py) and the host kernarg builder
+    # (ContractionSolution.cpp singleCallArgs) are gated identically so the positional
+    # layout stays consistent host<->device.
+    if kernel["StreamK"] > 0 and kernel["StreamKAtomic"] == 0 and not kernel["StreamKForceDPOnly"]:
       self.defineSgpr("AddressWS", numSgprAddressWS)
       self.defineSgpr("AddressFlags", numSgprAddressFlags)
       self.states.numSgprStreamK += numSgprAddressWS + numSgprAddressFlags
@@ -9466,6 +9564,14 @@ class KernelWriter(metaclass=abc.ABCMeta):
     requiredUnalignedSgprVar = []
     requiredAligned4SgprVar = []
 
+    # Per-XCD work-queue index comes from the RAW pre-remap launch WG rank
+    # (see skUsesRawQueueRank). It is snapshotted once, before wgmXCC / the
+    # SKXCC XCCMapping rewrite WorkGroup0, into the ALREADY-allocated persistent
+    # StreamKTileIdx SGPR (provably dead in the [prologue, queue-read) window)
+    # and read back in StreamK.graWorkGroup. Reusing that slot as the raw-rank
+    # carrier costs ZERO additional persistent SGPRs -- a dedicated StreamKQueue
+    # SGPR overflowed the SGPR file on tuned high-register SKXCC kernels -- so no
+    # dedicated queue SGPR is declared here.
     if kernel["StreamK"] == 4:
       requiredUnalignedSgprVar += [
         "StreamKIdx",
@@ -9474,6 +9580,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
         "StreamKLocalStart",
         "StreamKLocalEnd",
       ]
+      # Work stealing: per-WG sticky-empty flag. Persists across the persistent
+      # loop back-edge (added to nonPostLoopSgpr below) so each WG only touches
+      # its home counter for its valid dispenses + exactly one empty fetch.
+      if kernel["StreamKWorkStealing"]:
+        requiredUnalignedSgprVar.append("StreamKStickyEmpty")
       if kernel["StreamKAtomic"] == 0:
         requiredAligned4SgprVar.append("SrdWS")
     elif kernel["StreamK"] == 5:
@@ -9495,6 +9606,16 @@ class KernelWriter(metaclass=abc.ABCMeta):
         "StreamKLocalEnd",
         "StreamKHybridMode",
       ]
+      # SK5 keeps StreamKHybridMode holding ONLY the mode bit (its SCmpEQU32==0
+      # dispatch must stay a plain compare). The per-XCD queue index reuses the
+      # already-allocated persistent StreamKTileIdx slot as the raw-rank carrier
+      # (dead in the [prologue, queue-read) window: for SK5 it aliases
+      # StreamKIter, whose only in-window writes live on the mutually-exclusive
+      # SK3-static path), so no dedicated queue SGPR is declared.
+      # Work stealing: per-WG sticky-empty flag (see SK4 note above). Only the
+      # SK4 sub-path uses it, but it must persist for the whole persistent loop.
+      if kernel["StreamKWorkStealing"]:
+        requiredUnalignedSgprVar.append("StreamKStickyEmpty")
       if len(kernel["SpaceFillingAlgo"]):
         requiredUnalignedSgprVar.append("StreamKTileID")
       if kernel["StreamKAtomic"] == 0:
@@ -9505,14 +9626,33 @@ class KernelWriter(metaclass=abc.ABCMeta):
       requiredUnalignedSgprVar += [
         "StreamKIter",
         "StreamKIterEnd",
-        "StreamKLocalStart",
-        "StreamKLocalEnd",
       ]
+      # Under StreamKForceDPOnly every WG processes complete tiles, so the
+      # per-tile local iteration bounds are compile-time constants
+      # (StreamKLocalStart == 0, StreamKLocalEnd == ItersPerTile). Skip these
+      # two persistent SGPRs; all readers are constant-folded/removed under
+      # DP-only (see StreamK.py Common methods, graWorkGroup, and the TDM
+      # StreamK-offset helpers, all gated on StreamKForceDPOnly).
+      if not kernel["StreamKForceDPOnly"]:
+        requiredUnalignedSgprVar += [
+          "StreamKLocalStart",
+          "StreamKLocalEnd",
+        ]
       if len(kernel["SpaceFillingAlgo"]):
         requiredUnalignedSgprVar.append("StreamKTileID")
       if self.isPrefetchAcrossPersistentEnabled(kernel):
         requiredUnalignedSgprVar.append("SkPrefetchPrimed")
-      if kernel["StreamKAtomic"] == 0:
+      # SrdWS is the 4-aligned StreamK workspace SRD, used only by the
+      # partials/fixup reduction path. Under StreamKForceDPOnly there are no
+      # partials/fixup: computeStoreSrdStartCommon and storeBranchesCommon
+      # early-return, computeWorkspaceSrd (the sole AddressWS->SrdWS init) and
+      # the tc=='WS' workspace store are never emitted, and the epilogue SrdWS
+      # borrow is guarded by "SrdWS" in self.sgprs. So skip these 4 aligned
+      # SGPRs (plus any alignment padding) for DP-only kernels. AddressWS and
+      # AddressFlags are likewise dropped for DP-only (see the kernarg define
+      # above): all their runtime readers are constant-folded/removed, and the
+      # .kd metadata + host kernarg builder are gated to match.
+      if kernel["StreamKAtomic"] == 0 and not kernel["StreamKForceDPOnly"]:
         requiredAligned4SgprVar.append("SrdWS")
 
     if kernel["UseSubtileImpl"]:
@@ -9621,6 +9761,61 @@ class KernelWriter(metaclass=abc.ABCMeta):
     while SgprSlot:
       tempSgpr = SgprSlot.pop(0)
       self.sgprPool.checkIn(tempSgpr)
+
+    # Abs SW instruction prefetch base SGPRs.
+    # Reserve 3 contiguous SGPRs with an even-aligned base for the StinkyTofu abs static pass,
+    # which inserts the prefetch burst
+    #   (s_getpc_b64 -> s_add_i32 -> s_add_u32 -> s_addc_u32 -> s_prefetch_inst)
+    # at kernel entry-begin:
+    #   s[base:base+1] = even-aligned 64-bit address pair (s_getpc_b64 / s_prefetch_inst base)
+    #   s[base+2]      = scratch (PC-rel offset, then klength=31 for the slength operand)
+    # The burst runs BEFORE the kernarg preload shuffle has moved preloaded arguments out of their
+    # launch SGPRs, so with PreloadKernArgs the base pair MUST NOT alias the live-in preload region
+    # s[0:MaxSgprPreload). checkOutAligned() returns the lowest free aligned block, which can fall
+    # inside that region (e.g. s20 == SrdC, holding a preloaded stride at entry), so temporarily
+    # reserve s[0:MaxSgprPreload) to force the base above it (mirrors the preloadGuard above). The
+    # base triple's check-in is DEFERRED to label_MultiGemmEnd (KernelWriterAssembly), so it stays
+    # reserved across the prolog for the dynamic CFG-target ladder and is reclaimed by
+    # defineVariableSgprs right after MGE (net +0). Fallback: immediate check-in when do["PreLoop"]
+    # is off. Stream-K / non-gfx1250 are excluded from allocation entirely (see below).
+    self.states.swPrefetchAbsBaseSgpr = -1
+    self.states.swPrefetchAbsBaseSgprPendingCheckIn = -1
+    # Only gfx1250 non-Stream-K kernels reserve the abs base; leaving baseSgpr = -1 makes both
+    # abs passes no-op. Stream-K is unsupported (may be GSU0, so sgprGSU can be unset, and its
+    # SrdWS prolog SGPRs would collide with the base); non-gfx1250 never uses s_prefetch_inst.
+    # The StreamK/ISA guards below mirror the resolver (defense-in-depth).
+    swpAbsRequested = resolveSwInstructionPrefetch(
+        kernel.get("SwInstructionPrefetch", SW_INSTRUCTION_PREFETCH_AUTO),
+        self.states.version == (12, 5, 0),
+        bool(kernel.get("StreamK", 0)),
+        kernel["ProblemType"]["DataType"].isDouble())[1]
+    if swpAbsRequested and not kernel["StreamK"] \
+       and self.states.version == (12, 5, 0):
+      # Force the base past the live-in kernarg preload region when preloading is enabled.
+      prefetchPreloadGuard = []
+      if kernel["PreloadKernArgs"]:
+        while True:
+          guardSgpr = self.sgprPool.checkOut(1, "SwPrefetchAbsPreloadGuard", preventOverflow=False)
+          if guardSgpr >= self.states.archCaps["MaxSgprPreload"]:
+            self.sgprPool.checkIn(guardSgpr)
+            break
+          prefetchPreloadGuard.append(guardSgpr)
+      absBaseIdx = self.sgprPool.checkOutAligned(3, 2, tag="SwPrefetchAbsBase", preventOverflow=False)
+      assert absBaseIdx % 2 == 0, "abs prefetch base SGPR pair must be even-aligned"
+      assert (not kernel["PreloadKernArgs"]) or absBaseIdx >= self.states.archCaps["MaxSgprPreload"], \
+        "abs prefetch base SGPR must not alias the kernarg preload region"
+      self.states.swPrefetchAbsBaseSgpr = absBaseIdx
+      # Defer the check-in to label_MultiGemmEnd (KernelWriterAssembly) so the triple stays
+      # reserved across the prolog for the dynamic CFG-target prefetch ladder inserted there; it is
+      # reclaimed by defineVariableSgprs right after MGE (net +0 SGPR; fleet-verified). (Stream-K
+      # is already excluded above, so no SrdWS collision here.) Fall back to an immediate check-in
+      # if the PreLoop block that emits labelMultiGemmEnd is disabled (avoids leaking the pair).
+      if self.do.get("PreLoop", True):
+        self.states.swPrefetchAbsBaseSgprPendingCheckIn = absBaseIdx
+      else:
+        self.sgprPool.checkIn(absBaseIdx)
+      for guardSgpr in prefetchPreloadGuard:
+        self.sgprPool.checkIn(guardSgpr)
 
     if self.sgprPool.size() > self.states.regCaps["MaxSgpr"]:
       print ("warning: Number of first half of defined SGPRS (%d) overflowed max SGPRS (%d)." \
@@ -9903,6 +10098,18 @@ class KernelWriter(metaclass=abc.ABCMeta):
             enableFactorDim = True
       storeSgprLoad += self.states.numSgprAddressBias + self.states.BiasType + self.states.BiasStride
 
+    if self.states.useGateResidual:
+      self.states.numSgprAddressGate = self.states.rpga # 64-bit
+      self.states.numStoreSgprNames.append("AddressGate")
+      self.states.numStoreSgprNameSizes.append(self.states.numSgprAddressGate)
+      self.states.GateType   = 1
+      self.states.GateStride = self.states.gate.numSgprStrides
+      self.states.numStoreSgprNames.append("GateType")
+      self.states.numStoreSgprNameSizes.append(self.states.GateType)
+      self.states.numStoreSgprNames.append("GateStride")
+      self.states.numStoreSgprNameSizes.append(self.states.GateStride)
+      storeSgprLoad += self.states.numSgprAddressGate + self.states.GateType + self.states.GateStride
+
     if enableFactorDim:
       self.states.numStoreSgprNames.append("FactorDim")
       self.states.numStoreSgprNameSizes.append(1)
@@ -9925,18 +10132,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
         self.states.numStoreSgprNames.append("ActivationType")
         self.states.numStoreSgprNameSizes.append(1)
       storeSgprLoad += self.states.numActivationTypeArgSize + self.states.numactivationArgTotalSize
-
-    if self.states.useGateResidual:
-      self.states.numSgprAddressGate = self.states.rpga # 64-bit
-      self.states.numStoreSgprNames.append("AddressGate")
-      self.states.numStoreSgprNameSizes.append(self.states.numSgprAddressGate)
-      self.states.GateType   = 1
-      self.states.GateStride = self.states.gate.numSgprStrides
-      self.states.numStoreSgprNames.append("GateType")
-      self.states.numStoreSgprNameSizes.append(self.states.GateType)
-      self.states.numStoreSgprNames.append("GateStride")
-      self.states.numStoreSgprNameSizes.append(self.states.GateStride)
-      storeSgprLoad += self.states.numSgprAddressGate + self.states.GateType + self.states.GateStride
   
     self.states.numStoreSgprToLoad = storeSgprLoad      
     if self.db["InitLds"] : print ("\n***WARNING: InitLds enabled, may impact performance\n")
