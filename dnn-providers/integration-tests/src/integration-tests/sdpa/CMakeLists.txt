@@ -9,6 +9,7 @@ target_sources(${INTEGRATION_TESTS_EXE}
 if(BUILD_CPP_GRAPH_TESTS)
     target_sources(${INTEGRATION_TESTS_EXE}
         PRIVATE
+            IntegrationGpuSdpaBackward.cpp
             IntegrationGpuSdpaFwdInference.cpp
     )
 endif()
