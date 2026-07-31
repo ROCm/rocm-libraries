@@ -254,11 +254,8 @@ rocsparse_status rocsparse::coomv_analysis_template(rocsparse_handle          ha
                                                max_nnz);
 
             I max_nnz_host = 0;
-            RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(&max_nnz_host,
-                                                         max_nnz,
-                                                         sizeof(I),
-                                                         hipMemcpyDeviceToHost,
-                                                         handle->stream));
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
+                &max_nnz_host, max_nnz, sizeof(I), hipMemcpyDeviceToHost, handle->stream));
             RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle->stream));
             coomv_info[0]->max_nnz_per_row = static_cast<int64_t>(max_nnz_host);
 

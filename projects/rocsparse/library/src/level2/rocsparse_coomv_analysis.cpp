@@ -135,16 +135,7 @@ rocsparse_status rocsparse::coomv_analysis(rocsparse_handle          handle,
     RETURN_IF_ROCSPARSE_ERROR(
         rocsparse::coomv_analysis_find(&f, coo_row_indextype, coo_val_datatype));
 
-    RETURN_IF_ROCSPARSE_ERROR(f(handle,
-                                trans,
-                                alg,
-                                m,
-                                n,
-                                nnz,
-                                descr,
-                                coo_val,
-                                coo_row_ind,
-                                coo_col_ind,
-                                coomv_info));
+    RETURN_IF_ROCSPARSE_ERROR(
+        f(handle, trans, alg, m, n, nnz, descr, coo_val, coo_row_ind, coo_col_ind, coomv_info));
     return rocsparse_status_success;
 }
