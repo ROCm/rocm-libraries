@@ -49,7 +49,8 @@ The **UED (engine) owns the UHD**: one heuristic per engine, shared by every pac
 KDPs may name the same engine, and thus share its one UHD. The UED also owns the **KMD (Kernel Metadata
 Descriptor)** — the explicit declaration of compilation knobs (tile size, block size, split-K, dtype,
 and the like, each with a type and optional default) that distinguish kernel variants. The KMD *is* the
-feature space the UHD ranks over, so the two are coupled: mutate the KMD and you must retrain the UHD.
+feature space the UHD ranks over, so the two are coupled — though only a *breaking* KMD change forces a
+retrain; additive changes and dispatch-only fields do not ([Section 4.3](#43-coupling-rules)).
 
 This RFC defines:
 
@@ -77,9 +78,6 @@ A UHD is the kernel-selection heuristic. It is part of the generic provider that
 plugin. The two levels are not cleanly one-after-the-other: applicability bubbles up before engine
 selection ranks anything, and UHD predictions can feed engine selection to rank by predicted
 performance ([Section 11–12](#11-applicability-flow)).
-
-**In scope:** UHD schema, selection flow, ownership model, feature contract, model adapters,
-generation pipeline.
 
 - **Applicability bubbles up first.** Before engine selection can rank anything, it must know which
   engines even apply. For a descriptor engine, "do I apply?" is the **matcher (UMD) pass** at the
@@ -233,11 +231,23 @@ KMD field, as `metadata`) versus the user (the exposed subset) — not two diffe
 
 ### 4.3 Coupling Rules
 
-**The KMD is the explicit schema for `$kernel.*`, and the UED owns both it and the UHD.** The UED
-references one KMD and one UHD, and every child UKD's `metadata` fills exactly the KMD's fields,
-validated at load. Putting both on the UED is deliberate — the KMD *is* the feature space the UHD ranks
-over, so they are **coupled: mutate the KMD and you must retrain the UHD** (a field the model was not
-trained on is not selected against until it learns it). This gives the UHD a firm, checkable contract:
+**The KMD is the schema for `$kernel.*`, and the UED owns both it and the UHD.** The UED references one
+KMD and one UHD, and every child UKD's `metadata` fills the KMD's fields, validated at load. Putting both
+on the UED is deliberate — the KMD *is* the feature space the UHD ranks over, so they are coupled. But
+the coupling is **conditional, not unconditional** (matching [RFC 0017](0017_UniversalKernelDescriptor.md)):
+
+- **Additive KMD change** — a new field, or new legal values on an existing field — **requires no
+  retrain until that change is exposed to selection.** The old feature space is still valid, so the
+  existing model keeps ranking correctly; a field the UHD never reads costs it nothing.
+- **Breaking KMD change** — removing or reinterpreting an existing field's values — **must land its
+  retrain in the same change**, because a field the model was not trained on is not selected against
+  until it learns it.
+
+**The KMD is a *superset* of the UHD's features, not equal to it.** All `$kernel.*` fields the UHD ranks
+on must be in the KMD, but the KMD may also carry fields the UHD never reads — values a **UDD** formula
+consumes for per-kernel dispatch detail (launch geometry, workspace). So the relationship is
+`UHD features ⊆ KMD fields`, and an additive field added purely for dispatch never touches the heuristic.
+This gives the UHD a firm, checkable contract:
 
 - **A UKD is one point in the KMD-declared field space** — its `metadata`, and its unique key in the catalog.
 - **The collection of those points is the KDP** (a pack joining one engine, adding a matcher set, a UDD,
@@ -245,7 +255,8 @@ trained on is not selected against until it learns it). This gives the UHD a fir
   it. `arch` is a KDP property, so one engine — and its one UHD/KMD — spans arches.
 - **The UHD's `features_signature` `$kernel.*` references must be a subset of the KMD fields** — a
   load-time check ([Section 7.3](#73-contract-enforcement)). The KMD is the authority on *what fields
-  exist*; the `features_signature` picks *which* it uses and how it derives from them.
+  exist*; the `features_signature` picks *which subset* it ranks on (the rest may serve the UDD), and how
+  it derives from them.
 
 **One UHD per engine.** Many KDPs may join the same engine and share its UHD. The UHD is never inlined
 per kernel or per pack.
@@ -573,19 +584,25 @@ concrete need appears.
 
 ### 9.1 KMD ↔ UHD Coupling
 
-Because the UED co-owns the KMD and UHD, changing the KMD (adding/altering a compilation knob)
-invalidates the trained model:
+Because the UED co-owns the KMD and UHD, a KMD change *may* invalidate the trained model — but the
+obligation is **conditional**, matching [RFC 0017](0017_UniversalKernelDescriptor.md) (see
+[Section 4.3](#43-coupling-rules)):
 
-- **Adding a field:** The new field is not selected against until the model learns it. Dropping in a
-  KDP with kernels whose variants the engine's model never saw silently degrades ranking — the model
-  ranks on stale features.
-- **Removing a field:** The model references a missing feature → load-time failure (caught by
-  contract check).
-- **Renaming a field:** Treated as remove + add — load-time failure on the old name.
+- **Additive change (new field, or new legal values on a field):** **no retrain required until the
+  change is exposed to selection.** The old feature space is still valid, so the existing model keeps
+  ranking correctly. A field added purely for the UDD (dispatch/launch geometry) never affects the UHD
+  at all, since `UHD features ⊆ KMD fields`.
+  - *Caveat:* dropping in a KDP whose kernels vary along a field the model was **exposed to but not
+    trained across** can still degrade ranking — the model ranks on values it never saw. This is a
+    training-coverage gap, not a schema break; the fix is a retrain, not a load failure.
+- **Breaking change (remove or reinterpret an existing field's values):** the retrain **must land in
+  the same change**. A removed/reinterpreted field the model still references is caught at load.
+- **Renaming a field:** treated as remove + add — a breaking change on the old name.
 
-**Enforcement:** Generation pipeline emits KMD version alongside UHD. Loader checks
-`UHD.kmd_version == KMD.version` and fails closed on mismatch. The trace surfaces "model did not
-train on this field" when a KMD field exists that the UHD's `features_signature` does not reference.
+**Enforcement:** the generation pipeline emits a KMD version alongside the UHD. The loader fails closed
+on an incompatible pairing and on any `features_signature` reference to a field the KMD no longer
+declares. The trace surfaces a training-coverage warning when the catalog spans a field value outside
+what the model was trained on.
 
 ### 9.2 Model Updates
 
@@ -913,7 +930,7 @@ both heuristics are layered on afterward as data.
 The generation tool sweeps two things: the **problem-shape corpus** (batch, seqlen, heads, … — supplied
 by the author as representative shapes, or a per-op default) and optionally the **exposed knobs** (the
 KMD fields the engine lets a user set, via `add_engine_variants` knob settings). Note a knob setting only
-*filters* the catalog ([Section 6.1](#42-kmd-fields-and-knobs-as-a-view-onto-them)), so sweeping knobs
+*filters* the catalog ([Section 4.2](#42-kmd-fields-and-knobs-as-a-view-onto-them)), so sweeping knobs
 explores user-visible restrictions, not new kernels. The **variant space itself is fixed** — it is the pack's
 existing child UKDs, so the tool does not enumerate or build variants; it enrolls the shipped ones and
 times them ([Section 14.2](#142-benchmarking-via-hipdnn-autotune)).
@@ -952,7 +969,7 @@ land only when a concrete need appears.
 |------|-------------|------------|
 | **Feature-contract drift** | Training and inference feature vectors diverge | Single `features_signature` drives both sides via one generic extractor; three-part load-time check ([Section 7.3](#73-contract-enforcement)); fail-closed on mismatch |
 | **Kernel-identity drift** | Timed candidate doesn't match emitted UKD | Tool keys dataset on UKD identity (`engineId`/config → `metadata`); load-time validation |
-| **KMD↔UHD coupling** | KMD change invalidates trained model silently | Version check at load (`UHD.kmd_version == KMD.version`); retrain UHD when KMD changes; surface "model did not train on this field" in trace |
+| **KMD↔UHD coupling** | a *breaking* KMD change (removed/reinterpreted field) invalidates the trained model; a training-coverage gap degrades ranking silently | KMD-version check at load, fail closed on incompatible pairing or dangling `features_signature` ref; additive changes need no retrain until exposed ([§4.3](#43-coupling-rules)); training-coverage warning in the trace |
 | **Dependency creep** | Pressure to link `liblightgbm` at runtime | In-tree `tree_data` default; runtime deps stay opt-in only |
 | **Bad/stale model** | Model picks worse than first-match | Fail-open to `static_order`; generic-vs-baseline parity gate; model provenance in trace |
 | **Miscalibrated cross-engine scores** | Absolute score misleads engine selection | Train calibratable TFLOPS from start; fall back to rank-ordering at policy level if calibration unreliable |
@@ -1055,22 +1072,23 @@ land only when a concrete need appears.
   `dtype`, …) every kernel carries, each with a type and optional default. **One KMD per engine, owned
   by the UED**; each UKD's `metadata` fills it. It is the authoritative schema for the `$kernel.*` fields
   the UHD ranks on and the `features_signature` references
-  ([Section 6.1](#42-kmd-fields-and-knobs-as-a-view-onto-them)).
+  ([Section 4.2](#42-kmd-fields-and-knobs-as-a-view-onto-them)).
 
 - **UED (Universal Engine Descriptor):** The UED names one UHD and one KMD. They are coupled — the KMD
-  is the feature space the UHD ranks over — so the engine owns both, and changing the KMD requires
-  retraining the UHD ([Section 6.1](#42-kmd-fields-and-knobs-as-a-view-onto-them)).
+  is the feature space the UHD ranks over — so the engine owns both; a *breaking* KMD change requires
+  retraining the UHD, while additive changes and dispatch-only fields do not
+  ([Section 4.3](#43-coupling-rules)).
 
 - **Knob:** A **KMD field the engine chooses to expose** to the user — a name in the UED's `knobs`, and
   nothing more (the KMD already declares the field's type and default). Only KMD fields can be knobs; a
   knob's legal values come from the *catalog* for this graph, and its **default is whatever the UHD ranks
   first**. Knobs *filter* the catalog; the UHD then ranks what survives
-  ([Section 6.1](#42-kmd-fields-and-knobs-as-a-view-onto-them)).
+  ([Section 4.2](#42-kmd-fields-and-knobs-as-a-view-onto-them)).
 
 - **KMD field space:** The engine's variant axes (`tile_m`, `warp_n`, `split_k`), filled per-kernel in
   UKD `metadata` — the space the UHD ranks over, read as `$kernel.*`. Each UKD is one point in it (and
   its unique catalog key); the KDP is the collection. Knobs are a user-facing *subset* of these fields,
-  not a separate category ([Section 6.1](#42-kmd-fields-and-knobs-as-a-view-onto-them)).
+  not a separate category ([Section 4.2](#42-kmd-fields-and-knobs-as-a-view-onto-them)).
 
 - **Kernel-selection heuristic vs. engine-selection heuristic:** The two levels; the UHD is the former
   (which kernel within an engine), [RFC 0007](0007_EngineSelectionHeuristicsFramework.md) owns the
