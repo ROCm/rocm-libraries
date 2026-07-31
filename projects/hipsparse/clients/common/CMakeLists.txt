@@ -13,7 +13,6 @@ target_sources(hipsparse-clients-common PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/utility.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/hipsparse_parse_data.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/hipsparse_template_specialization.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/cusparse_routine_support.cpp"
 )
 
 target_include_directories(hipsparse-clients-common PUBLIC

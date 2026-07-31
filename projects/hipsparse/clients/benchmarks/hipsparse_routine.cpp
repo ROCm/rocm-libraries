@@ -49,7 +49,7 @@ hipsparse_routine::hipsparse_routine(const char* function)
 }
 
 hipsparse_routine::hipsparse_routine()
-    : value((value_type)-1) {};
+    : value((value_type)-1){};
 
 hipsparse_routine& hipsparse_routine::operator()(const char* function)
 {
@@ -361,12 +361,7 @@ bool hipsparse_routine::is_routine_supported(hipsparse_routine::value_type FNAME
 
 void hipsparse_routine::print_routine_support_info(hipsparse_routine::value_type FNAME)
 {
-<<<<<<< HEAD
-#if defined(CUDART_VERSION)
-    std::cout << CusparseRoutineSupport::instance().get_support_warning(s_routine_names[FNAME],
-                                                                        CUDART_VERSION);
-#endif
-    ======= switch(FNAME)
+    switch(FNAME)
     {
     // Level 1
     case axpyi:
@@ -531,7 +526,6 @@ void hipsparse_routine::print_routine_support_info(hipsparse_routine::value_type
         routine_support::print_gebsr2gebsr_support_warning();
         break;
     }
->>>>>>> 6af1d2837314d88da378caec83af082a7bbbedb9
 }
 
 template <hipsparse_routine::value_type FNAME, typename T, typename I, typename J>
