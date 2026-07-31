@@ -89,7 +89,7 @@ def parseArguments():
         type=Path,
         default=None,
         metavar="FILE",
-        help="YAML file listing (path, solution_name) pairs to skip validation for "
+        help="YAML file overriding the bundled (path, solution_name) pairs to skip "
         "(documented exceptions; paths relative to LogicPath). solution_name is the "
         "solution's SolutionNameMin, which is stable across library re-tuning",
     )
