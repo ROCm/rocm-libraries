@@ -171,6 +171,20 @@ std::vector<GroupConvTestConfig<NDim>> GroupedFullConfigs()
     return GroupConvTestConfig<NDim>::template GetConfigs<Direction::Forward>();
 }
 
+// Large-tensor fused-conv test case: 2D NHWC numel > INT_MAX
+// N=1, C=1, H=46342, W=46342, K=1, 1x1 kernel
+// numel = 46342 * 46342 = 2,147,580,964 > INT_MAX (2,147,483,647)
+// Exercises the conv+bias+activation fusion path (ConvHipDirectFwdFused) at
+// NHWC tensor sizes that overflow int32 index arithmetic.
+// FP16 chosen to keep per-tensor VRAM at ~4.3 GB (feasible on MI300X/MI325X).
+inline std::vector<ConvTestCaseBase> GetNhwcFusedScaleCase()
+{
+    // clang-format off
+    // N    C      H       W       k  y  x  pad_x  pad_y  stride_x  stride_y  dil_x  dil_y  conv_mode
+    return {{1, 1, 46342, 46342, 1, 1, 1, 0,     0,     1,        1,        1,     1,     miopenConvolution}};
+    // clang-format on
+}
+
 } // namespace
 
 TEST_P(GPU_ConvBiasActivInfer_FP32, ConvBiasActivAsm1x1UFloat)
@@ -440,3 +454,18 @@ INSTANTIATE_TEST_SUITE_P(Full,
 #undef GCBA_3D_LAYOUTS
 #undef GCBA_3D_SMOKE_LAYOUT
 #undef GCBA_3D_STD_LAYOUT
+
+// Scale test: 2D NHWC fused conv at numel > INT_MAX.
+// Tests that Conv+Bias+Activ fusion (ConvHipDirectFwdFused) correctly handles
+// int64 index arithmetic when NHWC element count exceeds INT_MAX.
+// Runs in the Scale tier (requires large-memory GPU, e.g. MI300X / MI325X).
+INSTANTIATE_TEST_SUITE_P(
+    FullScale,
+    GPU_ConvBiasActivInfer_FP16,
+    testing::Combine(testing::Values(miopenActivationRELU),
+                     testing::ValuesIn(GetNhwcFusedScaleCase()),
+                     testing::Values(miopenTensorNHWC),
+                     testing::Values(0.25f),
+                     testing::Values(0.75f),
+                     testing::Values(0.5f)),
+    CbaParamNameGenerator{});
