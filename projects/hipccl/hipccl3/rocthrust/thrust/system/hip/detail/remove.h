@@ -94,7 +94,7 @@ template <class Derived, class InputIt, class OutputIt, class T>
 OutputIt THRUST_HOST_DEVICE
 remove_copy(execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt result, const T& value)
 {
-  thrust::detail::equal_to_value<T> pred(value);
+  thrust::detail::equal_to_value<T> pred{value};
   return hip_rocprim::remove_copy_if(policy, first, last, result, pred);
 }
 
