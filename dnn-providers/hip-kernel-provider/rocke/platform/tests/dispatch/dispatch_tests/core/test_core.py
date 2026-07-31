@@ -205,10 +205,11 @@ class TestRegistryCoverage(unittest.TestCase):
                 "spec_id": "fast_spec",
                 "abi_version": "dummy/v1",
                 "priority": 10,
-                # False here because this fixture declares no bind, and
-                # "dummy" does not require one. Reported either way so that
-                # "can I launch this?" stays a lookup rather than a call that
-                # might raise.
+                # Both False here because this fixture declares neither, and
+                # "dummy" requires neither. Reported either way so that "can I
+                # compile and launch this?" stays a lookup rather than a call
+                # that might raise.
+                "buildable": False,
                 "bindable": False,
                 # Never None: registration requires a declared capability, so
                 # the manifest cannot have a hole in it.
@@ -245,15 +246,20 @@ class TestRegistryCoverage(unittest.TestCase):
     def test_coverage_of_an_empty_registry_is_empty(self):
         self.assertEqual(
             CandidateRegistry("dummy").coverage(),
-            {"family": "dummy", "requires_binding": False, "candidates": []},
+            {
+                "family": "dummy",
+                "requires_build": False,
+                "requires_binding": False,
+                "candidates": [],
+            },
         )
 
-    def test_coverage_reports_a_familys_binding_stance(self):
-        self.assertTrue(
-            CandidateRegistry("dummy", require_binding=True).coverage()[
-                "requires_binding"
-            ]
-        )
+    def test_coverage_reports_a_familys_build_and_binding_stance(self):
+        coverage = CandidateRegistry(
+            "dummy", require_build=True, require_binding=True
+        ).coverage()
+        self.assertTrue(coverage["requires_build"])
+        self.assertTrue(coverage["requires_binding"])
 
 
 class TestShapeRange(unittest.TestCase):
