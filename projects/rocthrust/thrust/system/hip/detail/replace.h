@@ -158,7 +158,7 @@ OutputIt THRUST_HOST_DEVICE replace_copy(
   T const& new_value)
 {
   return hip_rocprim::replace_copy_if(
-    policy, first, last, result, thrust::detail::equal_to_value<T>(old_value), new_value);
+    policy, first, last, result, thrust::detail::equal_to_value<T>{old_value}, new_value);
 }
 
 } // namespace hip_rocprim
