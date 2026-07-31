@@ -260,7 +260,8 @@ void insertClusterBarrierWaitBefore(IRBase* anchor, const char* comment, AsmIRBu
     waitInst->addModifier<CommentData>(CommentData{comment});
 }
 
-void insertRule3SccRestore(IRBase* anchor, AsmIRBuilder& irBuilder, StinkyInstruction* sccRestoreCmp) {
+void insertRule3SccRestore(IRBase* anchor, AsmIRBuilder& irBuilder,
+                           StinkyInstruction* sccRestoreCmp) {
     const HwInstDesc* restoreDesc = sccRestoreCmp->getHwInstDesc();
     StinkyInstruction* restoreInst = irBuilder.create(restoreDesc, anchor);
     for (const auto& src : sccRestoreCmp->getSrcRegs()) restoreInst->addSrcReg(src);
@@ -386,9 +387,8 @@ class InsertClusterBarrierPassImpl : public Pass {
         const GfxArchID archId = getGfxArchID(arch[0], arch[1], arch[2]);
 
         const std::unordered_map<const StinkyInstruction*, uint32_t> cycleMap =
-            (kRule3SignalLeadCycles > 0)
-                ? computeEstimatedCyclesPerInstruction(func, passCtx)
-                : std::unordered_map<const StinkyInstruction*, uint32_t>{};
+            (kRule3SignalLeadCycles > 0) ? computeEstimatedCyclesPerInstruction(func, passCtx)
+                                         : std::unordered_map<const StinkyInstruction*, uint32_t>{};
 
         for (BasicBlock& bb : func) {
             std::vector<std::tuple<StinkyInstruction*, IRBase*, IRBase*, StinkyInstruction*>>
@@ -477,8 +477,7 @@ class InsertClusterBarrierPassImpl : public Pass {
                 }
             }
 
-            if (pending.empty() && gsu1Anchors.empty() && tailTL == nullptr &&
-                tailWait == nullptr)
+            if (pending.empty() && gsu1Anchors.empty() && tailTL == nullptr && tailWait == nullptr)
                 continue;
 
             AsmIRBuilder irBuilder(bb, archId);

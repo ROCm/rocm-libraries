@@ -137,8 +137,7 @@ const std::vector<PassInfo> availablePasses = {
     {"InsertInitialUnclausedVmemPass",
      [](const auto&) { return createInsertInitialUnclausedVmemPass(); }},
     {"LongBranchLoweringPass", [](const auto&) { return createLongBranchLoweringPass(); }},
-    {"InsertClusterBarrierPass",
-     [](const auto&) { return createInsertClusterBarrierPass(); }},
+    {"InsertClusterBarrierPass", [](const auto&) { return createInsertClusterBarrierPass(); }},
     {"RemoveWaitAluPass", [](const auto&) { return createRemoveWaitAluPass(); }},
     {"InsertWaitAluPass",
      [](const std::vector<std::string>& args) {

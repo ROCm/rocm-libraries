@@ -164,8 +164,7 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBu
     // the module opts in. Must precede InsertVgprMsbPass so the new
     // branches/labels are present when MSB configuration is materialized.
     if (moduleOptions.ClusterBarrier) {
-        pm.addPass(
-            createInsertClusterBarrierPass());
+        pm.addPass(createInsertClusterBarrierPass());
     }
 
     // Build the CFG after the flat region splice-backs so RegionClonePass can match its
