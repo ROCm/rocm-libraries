@@ -194,11 +194,11 @@ if(HIPDNN_IT_YAML_CATEGORIZATION_ENABLED)
     # doesn't fail validation before anything has been built.
     file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}")
 
-    set(_hipdnn_it_cache_fixture "")
-    if(HIPDNN_TEST_MIOPEN_CACHE_DIR)
-        set(_hipdnn_it_cache_fixture hipdnn_clear_miopen_test_cache)
-    endif()
-
+    # No FIXTURES_REQUIRED/hipdnn_clear_miopen_test_cache here: neither
+    # hipdnn_integration_tests_unit_tests nor hipdnn_gpu_ref_tests link against or
+    # invoke MIOpen (they exercise the hipDNN backend and the from-scratch GPU
+    # reference implementation directly), so the ASAN-only MIOpen-cache-clear
+    # fixture miopen-provider/hipblaslt-provider wire up does not apply here.
     foreach(_it_target hipdnn_integration_tests_unit_tests hipdnn_gpu_ref_tests)
         apply_test_category_labels(
             ${_it_target}
@@ -207,7 +207,6 @@ if(HIPDNN_IT_YAML_CATEGORIZATION_ENABLED)
             "${HIPDNN_IT_CTEST_INSTALL_FILE}"
             ENVIRONMENT ${TEST_ENVIRONMENT}
             ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
-            FIXTURES_REQUIRED ${_hipdnn_it_cache_fixture}
         )
     endforeach()
 
