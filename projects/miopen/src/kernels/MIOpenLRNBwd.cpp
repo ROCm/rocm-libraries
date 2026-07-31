@@ -262,9 +262,9 @@ __launch_bounds__(GROUP_SIZE_X* GROUP_SIZE_Y* group_size_z) extern "C" __global_
                                      FLOAT /* alpha */,
                                      FLOAT beta)
 {
-    const int x       = blockIdx.x * GROUP_SIZE_X + threadIdx.x; // channel x
-    const int y       = blockIdx.y * GROUP_SIZE_Y + threadIdx.y; // channel y
-    const int b       = blockIdx.z * group_size_z + threadIdx.z; // batch
+    const int x = blockIdx.x * GROUP_SIZE_X + threadIdx.x; // channel x
+    const int y = blockIdx.y * GROUP_SIZE_Y + threadIdx.y; // channel y
+    const int b = blockIdx.z * group_size_z + threadIdx.z; // batch
     if(x >= BOT_WIDTH || y >= BOT_HEIGHT)
         return;
     FLOAT accum_ratio = 0;
