@@ -263,7 +263,7 @@ rocblas_status rocsolver_potrf_template(rocblas_handle handle,
         I jb = 0, j = 0;
 
         I nb = potrf_get_block_size<T>(n);
-        if(use_recursion)
+        if(use_recursion && (n > 16 * nb))
         {
             I const n1 = n / 2;
             I const n2 = n - n1;
