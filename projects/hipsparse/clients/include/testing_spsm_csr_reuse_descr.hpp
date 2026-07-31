@@ -114,87 +114,79 @@ static void call_spsm(hipsparseHandle_t&     handle,
         hipsparseSpMatSetAttribute(matA, HIPSPARSE_SPMAT_DIAG_TYPE, &diag, sizeof(diag)));
 
     hipsparseDnMatDescr_t B, C1, C2;
-    CHECK_HIPSPARSE_ERROR(
-        hipsparseCreateDnMat(&B, m, k, ldb, dB, typeT, HIPSPARSE_ORDER_COL));
-    CHECK_HIPSPARSE_ERROR(
-        hipsparseCreateDnMat(&C1, m, k, ldc, dC_1, typeT, HIPSPARSE_ORDER_COL));
-    CHECK_HIPSPARSE_ERROR(
-        hipsparseCreateDnMat(&C2, m, k, ldc, dC_2, typeT, HIPSPARSE_ORDER_COL));
+    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnMat(&B, m, k, ldb, dB, typeT, HIPSPARSE_ORDER_COL));
+    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnMat(&C1, m, k, ldc, dC_1, typeT, HIPSPARSE_ORDER_COL));
+    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnMat(&C2, m, k, ldc, dC_2, typeT, HIPSPARSE_ORDER_COL));
 
     hipsparseSpSMDescr_t descr;
     CHECK_HIPSPARSE_ERROR(hipsparseSpSM_createDescr(&descr));
 
     // Query SpSM buffer
     size_t bufferSize;
-    CHECK_HIPSPARSE_ERROR(
-        hipsparseSpSM_bufferSize(handle,
-                                 transA,
-                                 HIPSPARSE_OPERATION_NON_TRANSPOSE,
-                                 &alpha,
-                                 matA,
-                                 B,
-                                 C1,
-                                 typeT,
-                                 alg,
-                                 descr,
-                                 &bufferSize));
+    CHECK_HIPSPARSE_ERROR(hipsparseSpSM_bufferSize(handle,
+                                                   transA,
+                                                   HIPSPARSE_OPERATION_NON_TRANSPOSE,
+                                                   &alpha,
+                                                   matA,
+                                                   B,
+                                                   C1,
+                                                   typeT,
+                                                   alg,
+                                                   descr,
+                                                   &bufferSize));
 
     void* buffer;
     CHECK_HIP_ERROR(hipMalloc(&buffer, bufferSize));
 
     // HIPSPARSE pointer mode host
     CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_HOST));
-    CHECK_HIPSPARSE_ERROR(
-        hipsparseSpSM_analysis(handle,
-                               transA,
-                               HIPSPARSE_OPERATION_NON_TRANSPOSE,
-                               &alpha,
-                               matA,
-                               B,
-                               C1,
-                               typeT,
-                               alg,
-                               descr,
-                               buffer));
-    CHECK_HIPSPARSE_ERROR(
-        hipsparseSpSM_solve(handle,
-                            transA,
-                            HIPSPARSE_OPERATION_NON_TRANSPOSE,
-                            &alpha,
-                            matA,
-                            B,
-                            C1,
-                            typeT,
-                            alg,
-                            descr,
-                            buffer));
+    CHECK_HIPSPARSE_ERROR(hipsparseSpSM_analysis(handle,
+                                                 transA,
+                                                 HIPSPARSE_OPERATION_NON_TRANSPOSE,
+                                                 &alpha,
+                                                 matA,
+                                                 B,
+                                                 C1,
+                                                 typeT,
+                                                 alg,
+                                                 descr,
+                                                 buffer));
+    CHECK_HIPSPARSE_ERROR(hipsparseSpSM_solve(handle,
+                                              transA,
+                                              HIPSPARSE_OPERATION_NON_TRANSPOSE,
+                                              &alpha,
+                                              matA,
+                                              B,
+                                              C1,
+                                              typeT,
+                                              alg,
+                                              descr,
+                                              buffer));
 
     // HIPSPARSE pointer mode device
     CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_DEVICE));
-    CHECK_HIPSPARSE_ERROR(
-        hipsparseSpSM_analysis(handle,
-                               transA,
-                               HIPSPARSE_OPERATION_NON_TRANSPOSE,
-                               d_alpha,
-                               matA,
-                               B,
-                               C2,
-                               typeT,
-                               alg,
-                               descr,
-                               buffer));
-    CHECK_HIPSPARSE_ERROR(
-        hipsparseSpSM_solve(handle,
-                            transA,
-                            HIPSPARSE_OPERATION_NON_TRANSPOSE,
-                            d_alpha,
-                            matA,
-                            B,
-                            C2,
-                            typeT,
-                            alg,
-                            descr,
-                            buffer));
+    CHECK_HIPSPARSE_ERROR(hipsparseSpSM_analysis(handle,
+                                                 transA,
+                                                 HIPSPARSE_OPERATION_NON_TRANSPOSE,
+                                                 d_alpha,
+                                                 matA,
+                                                 B,
+                                                 C2,
+                                                 typeT,
+                                                 alg,
+                                                 descr,
+                                                 buffer));
+    CHECK_HIPSPARSE_ERROR(hipsparseSpSM_solve(handle,
+                                              transA,
+                                              HIPSPARSE_OPERATION_NON_TRANSPOSE,
+                                              d_alpha,
+                                              matA,
+                                              B,
+                                              C2,
+                                              typeT,
+                                              alg,
+                                              descr,
+                                              buffer));
 
     CHECK_HIP_ERROR(hipMemcpy(hC_1.data(), dC_1, sizeof(T) * nnz_C, hipMemcpyDeviceToHost));
     CHECK_HIP_ERROR(hipMemcpy(hC_2.data(), dC_2, sizeof(T) * nnz_C, hipMemcpyDeviceToHost));
@@ -382,22 +374,21 @@ static void call_spsm_shared_buffer(hipsparseHandle_t&                       han
                                                    alg,
                                                    descr,
                                                    buffer));
-                        CHECK_HIPSPARSE_ERROR(
-                            hipsparseSpSM_solve(handle,
-                                               op,
-                                               HIPSPARSE_OPERATION_NON_TRANSPOSE,
-                                               &alpha,
-                                               matA,
-                                               B,
-                                               C,
-                                               typeT,
-                                               alg,
-                                               descr,
-                                               buffer));
+                        CHECK_HIPSPARSE_ERROR(hipsparseSpSM_solve(handle,
+                                                                  op,
+                                                                  HIPSPARSE_OPERATION_NON_TRANSPOSE,
+                                                                  &alpha,
+                                                                  matA,
+                                                                  B,
+                                                                  C,
+                                                                  typeT,
+                                                                  alg,
+                                                                  descr,
+                                                                  buffer));
 
                         std::vector<T> hC_out(nnz_C);
-                        CHECK_HIP_ERROR(hipMemcpy(
-                            hC_out.data(), dC, sizeof(T) * nnz_C, hipMemcpyDeviceToHost));
+                        CHECK_HIP_ERROR(
+                            hipMemcpy(hC_out.data(), dC, sizeof(T) * nnz_C, hipMemcpyDeviceToHost));
 
                         std::vector<T> hC_gold(hC);
                         J              struct_pivot  = -1;
@@ -500,9 +491,8 @@ void testing_spsm_csr_reuse_descr(Arguments argus)
         = {HIPSPARSE_OPERATION_NON_TRANSPOSE, HIPSPARSE_OPERATION_TRANSPOSE};
     const std::vector<hipsparseFillMode_t> uplos
         = {HIPSPARSE_FILL_MODE_LOWER, HIPSPARSE_FILL_MODE_UPPER};
-    const std::vector<hipsparseDiagType_t> diags
-        = {HIPSPARSE_DIAG_TYPE_NON_UNIT, HIPSPARSE_DIAG_TYPE_UNIT};
-    const std::vector<hipsparseSpSMAlg_t> algs = {HIPSPARSE_SPSM_ALG_DEFAULT};
+    const std::vector<hipsparseDiagType_t> diags = {HIPSPARSE_DIAG_TYPE_NON_UNIT};
+    const std::vector<hipsparseSpSMAlg_t>  algs  = {HIPSPARSE_SPSM_ALG_DEFAULT};
 
     constexpr int number_of_passes = 3;
 

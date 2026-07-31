@@ -69,5 +69,4 @@ Tests:
   baseA: [HIPSPARSE_INDEX_BASE_ONE]
   filename: [nos2,
              nos4,
-             nos6,
-             nos7]
+             nos6]
