@@ -102,6 +102,12 @@ Definitions:
   <<: *level2_shared
   indextype: *i32i32_i64i32_i64i64
 
+# gemvi multiplies a dense matrix by a sparse vector; percentage controls the
+# vector density (nnz = N * percentage / 100), so it must be non-zero.
+- &level2_gemvi_shared
+  <<: *level2_shared
+  percentage: [10, 33, 50]
+
 ###########
 # Level 3 #
 ###########
@@ -213,7 +219,7 @@ Tests:
     - csrsv: *level2_shared
     - ellmv: *level2_shared
     - gebsrmv: *level2_shared
-    - gemvi: *level2_shared
+    - gemvi: *level2_gemvi_shared
     - hybmv: *level2_shared
     - spitsv_csr: *level2_shared_mixed_index
     - spmv_bsr: *level2_shared_mixed_index
