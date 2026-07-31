@@ -147,7 +147,9 @@ NB_MODULE(_stinkytofu, m) {
         "lower_logical_module",
         [](PyLogicalModule& module, std::array<int, 3> arch, const nb::object& options_obj) {
             StinkyAsmModule::ModuleOptions moduleOptions{};
-            moduleOptions.SwPrefetchScratchSgpr = -1;
+            // Abs SW-prefetch base SGPR defaults to -1 (off); Tensile overrides via the
+            // options dict below. (Replaces the removed SwPrefetchScratchSgpr default.)
+            moduleOptions.SwInstructionPrefetchAbsBaseSgpr = -1;
             if (nb::isinstance<nb::dict>(options_obj)) {
                 nb::dict options = nb::cast<nb::dict>(options_obj);
 #define SET_MODULE_OPTION_LLM(name, type) \

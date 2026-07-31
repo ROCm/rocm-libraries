@@ -2624,10 +2624,11 @@
     }),
     'SwInstructionPrefetch': dict({
       'head': list([
-        False,
-        True,
+        -1,
+        0,
+        1,
       ]),
-      'len': 2,
+      'len': 6,
       'type': 'list',
     }),
     'SwapGlobalReadOrder': dict({

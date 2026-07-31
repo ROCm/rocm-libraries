@@ -11,7 +11,7 @@
 
 // <thread>
 
-// class thread
+// class wthread
 
 // template <class F, class ...Args> thread(F&& f, Args&&... args);
 
@@ -119,7 +119,7 @@ public:
 //  A Each allocation performed during thread construction should be performed
 //    in the parent thread so that ::std::terminate is not called if
 //    ::std::bad_alloc is thrown by new.
-//  B hip::thread's constructor should properly handle exceptions and not leak
+//  B hip::wthread's constructor should properly handle exceptions and not leak
 //    memory.
 // Plan:
 //  1 Create a thread and count the number of allocations, 'numAllocs', it
@@ -137,7 +137,7 @@ void test_throwing_new_during_thread_creation() {
 #ifndef TEST_HAS_NO_EXCEPTIONS
     throw_one = 0xFFF;
     {
-        hip::thread t(f);
+        hip::wthread t(f);
         t.join();
     }
     numAllocs = 0xFFF - throw_one;
@@ -147,7 +147,7 @@ void test_throwing_new_during_thread_creation() {
         f_run = false;
         unsigned old_outstanding = outstanding_new;
         try {
-            hip::thread t(f);
+            hip::wthread t(f);
             assert(i == numAllocs); // Only final iteration will not throw.
             t.join();
             assert(f_run);
@@ -166,7 +166,7 @@ int main(int, char**)
 {
     test_throwing_new_during_thread_creation();
     {
-        hip::thread t(f);
+        hip::wthread t(f);
         t.join();
         assert(f_run == true);
     }
@@ -176,7 +176,7 @@ int main(int, char**)
         assert(!G::op_run);
         {
             G g;
-            hip::thread t(g);
+            hip::wthread t(g);
             t.join();
         }
         assert(G::n_alive == 0);
@@ -184,7 +184,7 @@ int main(int, char**)
     }
     G::op_run = false;
 #ifndef TEST_HAS_NO_EXCEPTIONS
-    // The test below expects `hip::thread` to call `new`, which may not be the
+    // The test below expects `hip::wthread` to call `new`, which may not be the
     // case for all implementations.
     LIBCPP_ASSERT(numAllocs > 0); // libc++ should call new.
     if (numAllocs > 0) {
@@ -193,7 +193,7 @@ int main(int, char**)
             throw_one = 0;
             assert(G::n_alive == 0);
             assert(!G::op_run);
-            hip::thread t((G()));
+            hip::wthread t((G()));
             assert(false);
         }
         catch (::std::bad_alloc const&)
@@ -210,14 +210,14 @@ int main(int, char**)
         assert(!G::op_run);
         {
             G g;
-            hip::thread t(g, 5, 5.5);
+            hip::wthread t(g, 5, 5.5);
             t.join();
         }
         assert(G::n_alive == 0);
         assert(G::op_run);
     }
     {
-        hip::thread t = hip::thread(MoveOnly(), MoveOnly());
+        hip::wthread t = hip::wthread(MoveOnly(), MoveOnly());
         t.join();
     }
 #endif

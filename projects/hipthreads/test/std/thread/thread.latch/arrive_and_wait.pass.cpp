@@ -23,7 +23,7 @@ int main(int, char**)
 {
   ::std::latch l(2);
 
-  hip::thread t = support::make_test_thread([&](){
+  hip::wthread t = support::make_test_thread([&](){
       l.arrive_and_wait();
   });
   l.arrive_and_wait();
