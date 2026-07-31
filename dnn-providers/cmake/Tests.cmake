@@ -279,8 +279,8 @@ endfunction()
 # - RPATH settings for relocatable test executables
 # - Installation rules for test binaries
 # - CTest registration
-# - YAML-driven category labels when DNN_PROVIDER_CTEST_CATEGORIES_YAML is set,
-#   otherwise legacy labels such as unit_test/integration_test
+#   YAML-driven category labels when DNN_PROVIDER_CTEST_CATEGORIES_YAML or
+#   DNN_PROVIDER_TEST_CATEGORY_YAMLS is set, otherwise legacy labels such as unit_test/integration_test
 #
 # Parameters:
 #   APPEND_FUNCTION_SUFFIX - Legacy grouping name retained by add_unit_test_target/add_integration_test_target
@@ -330,12 +330,13 @@ function(_add_test_target_internal APPEND_FUNCTION_SUFFIX TARGET WORKING_DIR)
         add_dependencies(${TARGET} stage_shadowed_rocm_dlls)
     endif()
 
-    # YAML-driven categorization (currently miopen-provider only) generates
-    # its own tiered suites via apply_test_category_labels() after this
-    # function returns; registering the raw, unfiltered ${TARGET} test here
-    # would just duplicate the *_full_suite entry with zero labels (never
-    # selectable via `ctest -L`, always run by a bare `ctest`).
-    if(DNN_PROVIDER_CTEST_CATEGORIES_YAML)
+    # YAML-driven categorization (miopen-provider via DNN_PROVIDER_CTEST_CATEGORIES_YAML,
+    # integration-tests via DNN_PROVIDER_TEST_CATEGORY_YAMLS) generates its own tiered
+    # suites via apply_test_category_labels() after this function returns; registering
+    # the raw, unfiltered ${TARGET} test here would just duplicate the *_full_suite
+    # entry with zero labels (never selectable via `ctest -L`, always run by a bare
+    # `ctest`).
+    if(DNN_PROVIDER_CTEST_CATEGORIES_YAML OR DNN_PROVIDER_TEST_CATEGORY_YAMLS)
         return()
     endif()
 
