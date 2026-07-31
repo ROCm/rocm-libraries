@@ -57,6 +57,32 @@ void StinkyInstruction::dump(std::ostream& out) const {
     printer.print(*this);
 }
 
+void StinkyInstruction::resolveMatrixFmtOverrides() {
+    if (!hwInstDesc) return;
+    const bool hasCost = !hwInstDesc->matrixFmtCostOverrides.empty();
+    const bool hasCoIssue = !hwInstDesc->matrixFmtCoIssueOverrides.empty();
+    if (!hasCost && !hasCoIssue) return;
+
+    const auto* fmt = getModifier<MatrixFmtModifiers>();
+    if (!fmt) return;
+    const auto a = static_cast<uint8_t>(fmt->fmtA);
+    const auto b = static_cast<uint8_t>(fmt->fmtB);
+
+    for (const auto& ov : hwInstDesc->matrixFmtCostOverrides) {
+        if (ov.fmtA == a && ov.fmtB == b) {
+            issueCycles = ov.issue;
+            latencyCycles = ov.latency;
+            break;
+        }
+    }
+    for (const auto& ov : hwInstDesc->matrixFmtCoIssueOverrides) {
+        if (ov.fmtA == a && ov.fmtB == b) {
+            coIssueWindow = ov.coIssueWindow;
+            break;
+        }
+    }
+}
+
 //----------------------------------------------------------------------
 // AsmIRBuilder implementation
 //----------------------------------------------------------------------
@@ -122,13 +148,14 @@ uint16_t getMnemonicToIsaOpcode(const std::string& mnemonic, GfxArchID arch) {
     auto get = [&](const std::unordered_map<std::string, uint16_t>& map,
                    const std::string& mnemonic) -> uint16_t {
         auto it = map.find(mnemonic);
-#ifndef NDEBUG
         if (it == map.end()) {
+            // Keep this check in release builds too: returning it->second on a
+            // past-the-end iterator is UB and previously caused a segfault when
+            // an unmapped mnemonic reached the emitter.
             std::cerr << "Error: No ISA opcode found for mnemonic " << mnemonic << " in arch "
                       << getArchName(arch) << "\n";
             return GFX::INVALID;
         }
-#endif
         return it->second;
     };
 

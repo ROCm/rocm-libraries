@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2020-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -39,8 +39,8 @@ __device__ auto warp_reduce_benchmark(const T* d_input, T* d_output)
 
     using wreduce_t = hipcub::WarpReduce<T, WarpSize>;
     __shared__ typename wreduce_t::TempStorage storage;
-    auto                                       reduce_op = hipcub::Sum();
-#pragma nounroll
+    auto                                       reduce_op = benchmark_utils::plus{};
+    _CCCL_PRAGMA_NOUNROLL()
     for(unsigned int trial = 0; trial < Trials; trial++)
     {
         value = wreduce_t(storage).Reduce(value, reduce_op);
@@ -72,7 +72,7 @@ __device__ auto segmented_warp_reduce_benchmark(const T* d_input, Flag* d_flags,
 
     using wreduce_t = hipcub::WarpReduce<T, WarpSize>;
     __shared__ typename wreduce_t::TempStorage storage;
-#pragma nounroll
+    _CCCL_PRAGMA_NOUNROLL()
     for(unsigned int trial = 0; trial < Trials; trial++)
     {
         value = wreduce_t(storage).HeadSegmentedSum(value, flag);
