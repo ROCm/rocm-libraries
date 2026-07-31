@@ -3,9 +3,16 @@
 
 """gfx1250 LDS segment-conflict interleave oracle.
 
-Pure function of `state` that decides whether a wave-separated TDM kernel should
-split its A/B halves across LDS segments (so the two MFMA read ports hit different
-segments), and returns the offsets the emit sites consume.
+Pure function of `state` that decides whether a wave-separated TDM kernel should put
+operand A's two halves in different LDS segments (so A's two MFMA read ports stop
+conflicting), and returns the byte offsets the emit sites consume.
+
+Only A is separated this way (B is not). Baseline packs each operand's halves adjacently
+([A0][A1][B0][B1]); this picks one of two layouts by whether B can be split cleanly:
+  split   [A0][B0][A1][B1]: B's halves move too, but its ports can still hit one B segment.
+  bcontig [A0][B0][B1][A1]: for odd WaveTileB (a split B read would cross a component),
+          B is kept whole with baseline addressing and only A moves.
+Each layout is tight (no extra LDS) or aligned (padded to a segment boundary; more LDS, PGR2).
 """
 
 # gfx1250 LDS segment size (5 x 64 KiB segments).
