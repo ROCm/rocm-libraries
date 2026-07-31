@@ -164,7 +164,13 @@ class SignatureDefault(Signature):
         if kernel["ProblemType"]["Sparse"]:
             signature.addArg("MetaData", SVK.SIG_GLOBALBUFFER, "void" , "generic")
 
-        if kernel["StreamK"] > 0 and kernel["StreamKAtomic"] == 0:
+        # StreamKForceDPOnly (SK3 DP-first, gfx1250) never touches the workspace
+        # partials/fixup path, so AddressWS/AddressFlags are dead: they are dropped
+        # from the SGPR define (KernelWriter.py) and here from the .kd metadata. The
+        # host (ContractionSolution.cpp singleCallArgs) matches by not appending
+        # ws/Flags under streamKForceDPOnly, so the positional kernarg layout stays
+        # consistent host<->device.
+        if kernel["StreamK"] > 0 and kernel["StreamKAtomic"] == 0 and not kernel["StreamKForceDPOnly"]:
             signature.addArg("AddressWS", SVK.SIG_GLOBALBUFFER, cptValueType, "generic")
             signature.addArg("AddressFlags", SVK.SIG_GLOBALBUFFER, dstValueType, "generic")
 
@@ -281,6 +287,14 @@ class SignatureDefault(Signature):
                     userArgumentsInfo.factorDimSize = 4
         userArgumentsInfo.biasSize += (8 + 4 + 4)
 
+        if writer.states.useGateResidual:
+            signature.addArg("gate",     SVK.SIG_GLOBALBUFFER, srcValueTypeB, "generic")
+            signature.addArg("gateType", SVK.SIG_VALUE,        "u32")
+            for i in range(0, writer.states.gate.numSgprStrides):
+                signature.addArg("strideG%u"%i, SVK.SIG_VALUE, "u32")
+        # Gate is not part of the grouped-gemm UserArgs struct (totalSize); it is
+        # delivered via the normal kernarg above, so gate adds nothing to totalSize.
+
         if userArgumentsInfo.factorDimSize == 4:
             signature.addArg("factorDim", SVK.SIG_VALUE, "u32")
 
@@ -299,14 +313,6 @@ class SignatureDefault(Signature):
                 signature.addArg(                   name, SVK.SIG_VALUE,        actValueType)
             if kernel["ProblemType"]["ActivationType"] in ['all', 'hipblaslt_all'] :
                 signature.addArg(       "activationType", SVK.SIG_VALUE,               "u32")
-
-        if writer.states.useGateResidual:
-            signature.addArg("gate",     SVK.SIG_GLOBALBUFFER, srcValueTypeB, "generic")
-            signature.addArg("gateType", SVK.SIG_VALUE,        "u32")
-            for i in range(0, writer.states.gate.numSgprStrides):
-                signature.addArg("strideG%u"%i, SVK.SIG_VALUE, "u32")
-        # Gate is not part of the grouped-gemm UserArgs struct (totalSize); it is
-        # delivered via the normal kernarg above, so gate adds nothing to totalSize.
 
         # TODO- combine one workspace
         if (kernel["ProblemType"]["OutputAmaxD"]):
