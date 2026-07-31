@@ -236,6 +236,45 @@ class InsertClusterBarrierPassTest : public ::testing::Test {
         const std::vector<int> seq = clusterBarrierSequence();
         return {countClusterSignals(seq), countClusterWaits(seq)};
     }
+
+    size_t indexOf(const StinkyInstruction* target) const {
+        size_t idx = 0;
+        for (const IRBase& ir : *bb) {
+            if (ir.getType() != IRBase::IRType::StinkyTofu) continue;
+            if (cast<StinkyInstruction>(&ir) == target) return idx;
+            ++idx;
+        }
+        return static_cast<size_t>(-1);
+    }
+
+    static bool isWorkgroupBarrierSignalInst(const StinkyInstruction& inst) {
+        if (!isBarrierSignal(inst)) return false;
+        const auto& srcs = inst.getSrcRegs();
+        return !srcs.empty() && srcs[0].dataType == StinkyRegister::Type::LiteralInt &&
+               srcs[0].getLiteralInt() == kWorkgroupBarrierId;
+    }
+
+    static bool isWorkgroupBarrierWaitInst(const StinkyInstruction& inst) {
+        if (!isBarrierWait(inst)) return false;
+        const auto& srcs = inst.getSrcRegs();
+        return !srcs.empty() && srcs[0].dataType == StinkyRegister::Type::LiteralInt &&
+               srcs[0].getLiteralInt() == kWorkgroupBarrierId;
+    }
+
+    StinkyInstruction* findClusterWaveCmpAfter(size_t startIdx) const {
+        size_t idx = 0;
+        for (const IRBase& ir : *bb) {
+            if (ir.getType() != IRBase::IRType::StinkyTofu) continue;
+            const auto* inst = cast<StinkyInstruction>(&ir);
+            if (idx >= startIdx && inst->getUnifiedOpcode() == GFX::s_cmp_eq_u32 &&
+                !inst->getSrcRegs().empty() &&
+                inst->getSrcRegs()[0].getSymbolicName() == "sgprWaveIdx") {
+                return const_cast<StinkyInstruction*>(inst);
+            }
+            ++idx;
+        }
+        return nullptr;
+    }
 };
 
 TEST_F(InsertClusterBarrierPassTest, SingleHandshakeEmitsOneSignalBeforeItsWaits) {
@@ -330,4 +369,81 @@ TEST_F(InsertClusterBarrierPassTest, IdempotencySecondRunIsNoOp) {
         << "a second pass must not insert additional cluster signals";
     EXPECT_EQ(waitsAfterSecond, waitsAfterFirst)
         << "a second pass must not insert additional cluster waits";
+}
+
+TEST_F(InsertClusterBarrierPassTest, Rule3ForwardsPastWorkgroupBarriers) {
+    for (int i = 0; i < 80; ++i) {
+        createWMMA(8 + (i % 8) * 8, (i % 8) * 8, ((i + 1) % 8) * 8);
+    }
+    createBarrierSignal(kWorkgroupBarrierId);
+    createBarrierWait(kWorkgroupBarrierId);
+    createBarrierSignal(kWorkgroupBarrierId);
+    createBarrierWait(kWorkgroupBarrierId);
+    createTensorLoadInBlock(bb, arch, /*loadS0=*/0, /*loadS1=*/4);
+
+    runPass();
+
+    size_t clusterSignalIdx = static_cast<size_t>(-1);
+    size_t firstWgSignalIdx = static_cast<size_t>(-1);
+    size_t idx = 0;
+    for (const IRBase& ir : *bb) {
+        if (ir.getType() != IRBase::IRType::StinkyTofu) continue;
+        const auto* inst = cast<StinkyInstruction>(&ir);
+        if (isClusterBarrierWithLiteral(*inst, /*wantSignal=*/true) &&
+            clusterSignalIdx == static_cast<size_t>(-1)) {
+            clusterSignalIdx = idx;
+        }
+        if (firstWgSignalIdx == static_cast<size_t>(-1) &&
+            isWorkgroupBarrierSignalInst(*inst)) {
+            firstWgSignalIdx = idx;
+        }
+        ++idx;
+    }
+    ASSERT_NE(clusterSignalIdx, static_cast<size_t>(-1));
+    ASSERT_NE(firstWgSignalIdx, static_cast<size_t>(-1));
+    EXPECT_LT(clusterSignalIdx, firstWgSignalIdx)
+        << "cluster signal must forward past intervening workgroup barriers";
+}
+
+TEST_F(InsertClusterBarrierPassTest, Wait3StopAnchorsAfterFollowingWorkgroupBarrier) {
+    createWMMA(24, 0, 8);
+    createBarrierWait(kClusterBarrierId);
+    createBarrierSignal(kWorkgroupBarrierId);
+    createBarrierWait(kWorkgroupBarrierId);
+    createWMMA(32, 8, 16);
+    createWMMA(40, 16, 8);
+    appendHandshake(/*loadS0=*/0, /*loadS1=*/4);
+
+    runPass();
+
+    StinkyInstruction* preexistingClusterWait = nullptr;
+    for (IRBase& ir : *bb) {
+        if (ir.getType() != IRBase::IRType::StinkyTofu) continue;
+        auto* inst = cast<StinkyInstruction>(&ir);
+        if (isClusterBarrierWithLiteral(*inst, /*wantSignal=*/false)) {
+            preexistingClusterWait = inst;
+            break;
+        }
+    }
+    ASSERT_NE(preexistingClusterWait, nullptr);
+
+    StinkyInstruction* wgWaitAfterPreexisting = nullptr;
+    for (StinkyInstruction* fwd = firstRealInstAfter(preexistingClusterWait); fwd != nullptr;
+         fwd = firstRealInstAfter(fwd)) {
+        if (!isWorkgroupBarrierSignalInst(*fwd)) continue;
+        StinkyInstruction* maybeWait = firstRealInstAfter(fwd);
+        ASSERT_NE(maybeWait, nullptr);
+        ASSERT_TRUE(isWorkgroupBarrierWaitInst(*maybeWait));
+        wgWaitAfterPreexisting = maybeWait;
+        break;
+    }
+    ASSERT_NE(wgWaitAfterPreexisting, nullptr);
+
+    const size_t anchorFloor = indexOf(firstRealInstAfter(wgWaitAfterPreexisting));
+    ASSERT_NE(anchorFloor, static_cast<size_t>(-1));
+
+    StinkyInstruction* rule3ClusterCmp = findClusterWaveCmpAfter(indexOf(preexistingClusterWait));
+    ASSERT_NE(rule3ClusterCmp, nullptr);
+    EXPECT_GE(indexOf(rule3ClusterCmp), anchorFloor)
+        << "scan hitting wait-3 must anchor after the following workgroup barrier";
 }

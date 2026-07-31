@@ -301,9 +301,36 @@ bool isFollowedByClusterBarrierHandshakeOrSignal(StinkyInstruction* anchor) {
     return sym == kWaveIdxSymbol || sym == kLoopCounterLSymbol;
 }
 
+/// Forward scan from ``wgSignal`` for its paired ``s_barrier_wait -1`` and return
+/// the first real instruction after that wait.
+IRBase* anchorAfterWorkgroupBarrierPair(StinkyInstruction* wgSignal, IRBase* defaultAnchor) {
+    for (StinkyInstruction* afterSig = firstRealInstAfter(wgSignal); afterSig != nullptr;
+         afterSig = firstRealInstAfter(afterSig)) {
+        if (isWorkgroupBarrierWait(*afterSig)) {
+            StinkyInstruction* afterWgWait = firstRealInstAfter(afterSig);
+            return (afterWgWait != nullptr) ? static_cast<IRBase*>(afterWgWait) : defaultAnchor;
+        }
+        if (isWorkgroupBarrierSignal(*afterSig)) break;
+    }
+    return defaultAnchor;
+}
+
+/// Forward scan from ``afterWait`` for the next workgroup barrier handshake
+/// (signal then wait).  Returns the first real instruction after that wait, or
+/// ``defaultAnchor`` when the pair is missing or incomplete.
+IRBase* anchorAfterWorkgroupBarrierFollowing(StinkyInstruction* afterWait, IRBase* defaultAnchor) {
+    for (StinkyInstruction* fwd = firstRealInstAfter(afterWait); fwd != nullptr;
+         fwd = firstRealInstAfter(fwd)) {
+        if (!isWorkgroupBarrierSignal(*fwd)) continue;
+        return anchorAfterWorkgroupBarrierPair(fwd, defaultAnchor);
+    }
+    return defaultAnchor;
+}
+
 IRBase* findRule3SignalAnchorByCycleLead(
     StinkyInstruction* referenceAnchor, BasicBlock::iterator segBegin, IRBase* defaultAnchor,
-    const std::unordered_map<const StinkyInstruction*, uint32_t>& cycleMap, int leadCycles) {
+    const std::unordered_map<const StinkyInstruction*, uint32_t>& cycleMap, int leadCycles,
+    const std::unordered_set<StinkyInstruction*>& priorWaitAnchors) {
     if (leadCycles <= 0) return defaultAnchor;
     auto refIt = cycleMap.find(referenceAnchor);
     if (refIt == cycleMap.end()) return defaultAnchor;
@@ -314,16 +341,17 @@ IRBase* findRule3SignalAnchorByCycleLead(
         --it;
         auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
         if (inst == nullptr) continue;
-        if (isWorkgroupBarrierSignal(*inst)) {
-            for (StinkyInstruction* fwd = firstRealInstAfter(inst);
-                 fwd != nullptr && fwd != referenceAnchor; fwd = firstRealInstAfter(fwd)) {
-                if (isWorkgroupBarrierWait(*fwd)) {
-                    StinkyInstruction* after = firstRealInstAfter(fwd);
-                    return (after != nullptr) ? static_cast<IRBase*>(after) : defaultAnchor;
-                }
-            }
-            return defaultAnchor;
+        if (isClusterBarrierWait(*inst)) {
+            return anchorAfterWorkgroupBarrierFollowing(inst, defaultAnchor);
         }
+        if (isSegmentBoundary(*inst)) return defaultAnchor;
+        if (isWorkgroupBarrierSignal(*inst)) {
+            if (priorWaitAnchors.count(inst) != 0) {
+                return anchorAfterWorkgroupBarrierPair(inst, defaultAnchor);
+            }
+            continue;
+        }
+        if (isWorkgroupBarrierWait(*inst)) continue;
         auto cycleIt = cycleMap.find(inst);
         if (cycleIt == cycleMap.end()) continue;
         if (static_cast<int64_t>(cycleIt->second) <= target) return inst;
@@ -414,9 +442,17 @@ class InsertClusterBarrierPassImpl : public Pass {
                 StinkyInstruction* waitAnchorInst = trigger;
                 if (isImmediatelyPrecededByClusterBarrierWait(waitAnchorInst)) continue;
 
+                std::unordered_set<StinkyInstruction*> priorWaitAnchors;
+                for (const auto& [priorTrigger, _sig, _wait, _live] : pending) {
+                    (void)_sig;
+                    (void)_wait;
+                    (void)_live;
+                    priorWaitAnchors.insert(priorTrigger);
+                }
+
                 IRBase* signalAnchor = findRule3SignalAnchorByCycleLead(
                     waitAnchorInst, segBegin, /*defaultAnchor=*/waitAnchor, cycleMap,
-                    kRule3SignalLeadCycles);
+                    kRule3SignalLeadCycles, priorWaitAnchors);
                 StinkyInstruction* signalAnchorInst =
                     (signalAnchor != nullptr) ? dyn_cast<StinkyInstruction>(signalAnchor) : nullptr;
 
