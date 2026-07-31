@@ -115,8 +115,12 @@ rocblas_status rocsolver_sy2sb_he2hb_argCheck(rocblas_handle handle,
     if(rocblas_is_device_memory_size_query(handle))
         return rocblas_status_continue;
 
+    // skip pointer check if quick return
+    if(n == 0 || batch_count == 0)
+        return rocblas_status_continue;
+
     // 3. invalid pointers
-    if((n && !A) || (n && !Aband) || (n && !tau))
+    if(!A || !Aband || !tau)
         return rocblas_status_invalid_pointer;
 
     return rocblas_status_continue;
