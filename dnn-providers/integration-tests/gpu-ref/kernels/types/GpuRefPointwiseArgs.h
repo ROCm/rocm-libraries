@@ -31,7 +31,7 @@ enum PointwiseOps
 
 struct PointwiseUnaryArgs
 {
-    // In PointwiseBinaryArgs
+    // IO tensors
     const void* input;
     void* output;
 
@@ -55,7 +55,7 @@ struct PointwiseUnaryArgs
 
 struct PointwiseBinaryArgs
 {
-    // IO buffers
+    // IO tensors
     const void* input0;
     const void* input1;
     void* output;

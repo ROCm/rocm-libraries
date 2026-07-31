@@ -143,7 +143,7 @@ void GpuReferencePointwise::launchUnary(
 
     // Use output dims to calculate launch grid dimensions due to broadcasting rules
     const int64_t numElements
-        = std::accumulate(outputDims.begin(), outputDims.end(), 1, std::multiplies<>());
+        = std::accumulate(outputDims.begin(), outputDims.end(), int64_t{1}, std::multiplies<>());
     int64_t numBlocks = numElements / GpuReferencePointwise::BLOCK_SIZE;
     numBlocks += (numElements % GpuReferencePointwise::BLOCK_SIZE == 0) ? 0 : 1;
 
@@ -215,7 +215,7 @@ void GpuReferencePointwise::launchBinary(
 
     // Use output dims to calculate launch grid dimensions due to broadcasting rules
     const int64_t numElements
-        = std::accumulate(outputDims.begin(), outputDims.end(), 1, std::multiplies<>());
+        = std::accumulate(outputDims.begin(), outputDims.end(), int64_t{1}, std::multiplies<>());
     int64_t numBlocks = numElements / GpuReferencePointwise::BLOCK_SIZE;
     numBlocks += (numElements % GpuReferencePointwise::BLOCK_SIZE == 0) ? 0 : 1;
 

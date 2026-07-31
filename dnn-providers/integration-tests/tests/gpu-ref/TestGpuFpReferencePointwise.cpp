@@ -271,6 +271,30 @@ TEST(TestGpuPointwise3DShapes, Binary)
         outputCpuTensor, outputGpuTensor, getDynamicTolerance<float>(operation, fillRange));
 }
 
+// Edge case tests with DISABLED_ prefix to avoid running in CI.
+// Run the tests manually with --gtest_also_run_disabled_tests
+// --gtest_filter=*ExceedsInt32MaxElements* flags.
+TEST(TestGpuPointwise5DShapes, DISABLED_ExceedsInt32MaxElements)
+{
+    SKIP_IF_NO_DEVICES();
+    // Test with 2,487,206,250 elements, which is greater than 2,147,483,647 INT32_MAX
+    Tensor<float> inputTensor({255, 255, 255, 50, 3});
+    Tensor<float> outputCpuTensor({255, 255, 255, 50, 3});
+    Tensor<float> outputGpuTensor({255, 255, 255, 50, 3});
+
+    const unsigned int seed = getGlobalTestSeed();
+    const float fillRange = 1.0f;
+    inputTensor.fillWithRandomValues(-fillRange, fillRange, seed);
+
+    auto operation = PointwiseMode::ABS;
+    CpuReferencePointwiseImpl<float>::pointwiseCompute(operation, outputCpuTensor, inputTensor);
+
+    GpuReferencePointwise::pointwiseCompute<float>(operation, outputGpuTensor, inputTensor);
+
+    assertAllClose(
+        outputCpuTensor, outputGpuTensor, getDynamicTolerance<float>(operation, fillRange));
+}
+
 // --- Test validation ---
 
 TEST(TestGpuPointwiseValidation, UnaryNotBroadcastable)

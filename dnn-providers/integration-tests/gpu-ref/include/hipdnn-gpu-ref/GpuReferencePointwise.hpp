@@ -281,14 +281,18 @@ private:
             throw std::invalid_argument("Pointwise operations require input1 tensor dimensions "
                                         "to be broadcastable to dimensions of output tensor.");
         }
-        static_assert(IS_SUPPORTED_DATA_TYPE<Input0Type>,
-                      "Pointwise supports only float, half, and bfloat16 input0 data types.");
-        static_assert(IS_SUPPORTED_DATA_TYPE<Input1Type>,
-                      "Pointwise supports only float, half, and bfloat16 input1 data types.");
-        static_assert(IS_SUPPORTED_DATA_TYPE<OutputType>,
-                      "Pointwise supports only float, half, and bfloat16 output data types.");
-        static_assert(IS_SUPPORTED_DATA_TYPE<ComputeType>,
-                      "Pointwise supports only float, half, and bfloat16 compute data types.");
+        static_assert(
+            IS_SUPPORTED_DATA_TYPE<Input0Type>,
+            "Pointwise supports only double, float, half, and bfloat16 input0 data types.");
+        static_assert(
+            IS_SUPPORTED_DATA_TYPE<Input1Type>,
+            "Pointwise supports only double, float, half, and bfloat16 input1 data types.");
+        static_assert(
+            IS_SUPPORTED_DATA_TYPE<OutputType>,
+            "Pointwise supports only double, float, half, and bfloat16 output data types.");
+        static_assert(
+            IS_SUPPORTED_DATA_TYPE<ComputeType>,
+            "Pointwise supports only double, float, half, and bfloat16 compute data types.");
     }
 
     // --- Kernel launchers (defined in GpuReferencePointwise.cpp) ---
