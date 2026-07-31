@@ -1057,10 +1057,52 @@ the open/closed property applied to execution rather than selection.
 ## 8. Per-architecture organization
 
 One module per architecture per family. Each owns its candidates and nothing
-else.
+else — but a family earns those modules only when its *builders* diverge, not
+merely when its arch coverage does.
+
+### When a family earns a lane
+
+Attention has lanes because its architectures are genuinely different kernels:
+`kernels/gfx950/attention_dense` and `kernels/gfx1250/wmma_attention_fwd` each
+carry their own spec dataclass, their own builder, and — for gfx1250 — their own
+ABI version. A module per arch mirrors the kernel tree one for one.
+
+The platform families are the opposite case. Every dispatched conv candidate
+builds through one `build_implicit_gemm_conv`, every GEMM candidate through one
+`build_universal_gemm`, with arch passed as an argument. The only thing that
+varies per architecture is a cohort tuple (`_CDNA_MEM`, `_RDNA_WMMA`,
+`_GFX1250_WMMA`). Splitting those into per-arch modules would put a tuple in
+each file and separate no code, while scattering a cohort list that currently
+reads at a glance.
+
+Hence the rule: **silo when the builder differs, parameterize when only the
+cohort does.** A family earns a lane the day it acquires a second builder for
+the same operation.
+
+By that test, GEMM has already earned lanes it does not yet have. Three
+architectures define their own `WmmaGemmSpec` and their own `build_wmma_gemm`
+under `instances/gfx1151`, `instances/gfx1201`, and `instances/gfx1250`, with no
+shared base between them; dispatch reaches none of them, and routes those arches
+to the portable universal builder instead. MoE has one such variant
+(`instances/gfx1250/fused_moe_mega_wmma`). Deep-fused conv is mixed: the gfx950
+and gfx1201 specs are thin subclasses of a shared base and stay honest as a
+cohort, while gfx1151 carries an independent spec and a builder of its own and
+wants a lane. Norm and implicit-GEMM conv have no arch-specific instance at all,
+so a lane there would be an empty directory.
+
+Note what the existing guards do and do not catch here. `require_build=True` and
+the spec/builder agreement tests reject a candidate that cannot build; they say
+nothing about a candidate that builds the *portable* kernel on an arch that has a
+faster dedicated one. That is a silently suboptimal route, not a failure, and
+only this rule prevents it.
+
+### Layout
+
+Lanes live next to the kernels they register, so a family split across the
+platform and library trees gets a lane in each.
 
 ```
-library/dispatch/
+library/dispatch/                         # library-owned kernels
   __init__.py
   attention/
     __init__.py        # request type, registry assembly, dispatch entry points
@@ -1069,12 +1111,22 @@ library/dispatch/
     gfx942.py          # dense_pipe, tiled_2d/3d specializations
     gfx950.py          # d256 prefill, attention_dense, ...
     gfx1250.py         # wmma_attention_fwd, tiled_2d/3d specializations
+  gemm/  conv/  moe/  norm/               # when library gains arch kernels here
+
+platform/python/rocke/dispatch/           # platform-owned kernels
+  core.py
+  families/
+    conv.py  moe.py  norm.py              # cohort-parameterized, no lane earned
   gemm/
-    __init__.py
-    common.py
-    gfx942.py  gfx950.py  gfx1250.py
-  conv/  moe/  norm/
+    common.py  fp16_rcr.py  bf16_rcr.py   # cohort-parameterized (universal GEMM)
+    gfx1151.py  gfx1201.py  gfx1250.py    # PLANNED: each instances/gfx*/wmma_gemm
 ```
+
+Everything above exists today except the `gfx<NNNN>.py` lanes, which appear only
+under `attention/`; the rest are where a lane goes when the rule says one is
+due. A platform lane registers a
+platform builder — it does not move kernels into `library/`, and library dispatch
+does not reach across into `platform/instances/`.
 
 Registration is explicit, never an import side effect:
 
@@ -1100,7 +1152,11 @@ dependence.
 
 ### 8.1 Adding an architecture
 
-1. Create `library/dispatch/<family>/gfx<NNNN>.py` with a `register(registry)`.
+1. Confirm the family has earned a lane at all: does this target need a builder
+   the family does not already have? If not, extend the cohort tuple instead and
+   stop here. If so, create `<tree>/dispatch/<family>/gfx<NNNN>.py` with a
+   `register(registry)`, where `<tree>` is whichever of `library/` or
+   `platform/python/rocke/` owns the kernel.
 2. Confirm the arch exists in `core/arch/data/arch_specs.json`; add it if not.
 3. Declare each candidate's `Capability` with explicit `arches=("gfx<NNNN>",)`.
 4. Point `build` at the real builder and `select_spec` at the builder's spec type.
