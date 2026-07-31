@@ -23,7 +23,7 @@ improve throughput.
 
    Setting the number of vcores per WGP too high can reduce performance. Monitor your throughput when tuning this setting. See :ref:`limitations <limitations>` for more information.
 
-The number of vcores per WGP can be changed at either compile time using the ``HIPTHREADS_DEFAULT_VCORES_PER_WGP`` CMake option, or at application runtime, using the ``HIPTHREADS_VCORES_PER_WGP`` environment variable.
+You can change the number of vcores per WGP at compile time with the ``HIPTHREADS_DEFAULT_VCORES_PER_WGP`` CMake option, or at runtime with the ``HIPTHREADS_VCORES_PER_WGP`` environment variable.
 
 For example, to set the default number of vcores per WGP to 20:
 
