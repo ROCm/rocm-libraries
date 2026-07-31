@@ -115,12 +115,6 @@ def main() -> None:
     lib_logic_path, passthrough = _parse_argv(root)
     _ensure_paths(root, build_dir, lib_logic_path)
 
-    default_known_bugs = (
-        root / "tensilelite" / "Tensile" / "TensileLogic" / "known_bugs.yaml"
-    )
-    if default_known_bugs.is_file() and "--known-bugs" not in passthrough:
-        passthrough = ["--known-bugs", str(default_known_bugs)] + passthrough
-
     # TensileLogic: LOGIC_PATH [options] --check-all
     sys.argv = ["TensileLogic", str(lib_logic_path.resolve())] + passthrough + ["--check-all"]
 

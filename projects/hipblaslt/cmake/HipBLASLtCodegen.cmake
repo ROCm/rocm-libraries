@@ -80,7 +80,6 @@ function(hipblaslt_create_device_library)
         list(APPEND _opts_list "--disable-asm-comments")
     endif()
 
-    set(_known_bugs "${_codegen_dir}/Tensile/TensileLogic/known_bugs.yaml")
     set(_logic_stamp "${CMAKE_CURRENT_BINARY_DIR}/${_cdl_TARGET}-TensileLogic.stamp")
     add_custom_command(
         OUTPUT "${_logic_stamp}"
@@ -90,11 +89,9 @@ function(hipblaslt_create_device_library)
             "${_cdl_LOGIC_PATH}"
             --architecture
             "${_arches_semi}"
-            --known-bugs
-            "${_known_bugs}"
             --check-all
         COMMAND ${CMAKE_COMMAND} -E touch "${_logic_stamp}"
-        DEPENDS ${HIPBLASLT_PYTHON_DEPS} "${_known_bugs}"
+        DEPENDS ${HIPBLASLT_PYTHON_DEPS}
         VERBATIM
         USES_TERMINAL
     )

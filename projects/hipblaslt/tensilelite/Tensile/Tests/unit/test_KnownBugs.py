@@ -35,6 +35,16 @@ def test_load_known_bugs_missing_file(tmp_path):
     assert load_known_bugs(tmp_path / "none.yaml") == frozenset()
 
 
+def test_load_known_bugs_uses_bundled_resource_by_default(monkeypatch):
+    monkeypatch.setattr(
+        _kb,
+        "known_bugs_text",
+        lambda: "skips:\n  - path: bundled/logic.yaml\n    solution_name: NameA\n",
+    )
+
+    assert load_known_bugs(None) == frozenset({("bundled/logic.yaml", "NameA")})
+
+
 def test_load_known_bugs_roundtrip(tmp_path):
     p = tmp_path / "kb.yaml"
     p.write_text(
