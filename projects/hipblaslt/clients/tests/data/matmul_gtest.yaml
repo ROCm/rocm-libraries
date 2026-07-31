@@ -3391,12 +3391,12 @@ Tests:
   function:
     matmul:
     - { a_type: f8_r, b_type: f8_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r}
-  M: [64]
-  N: [64]
-  K: [256]
+  matrix_size:
+    - { M:  64,  N:  64,  K:  256 }
+    - { M:  256, N:  256, K:  256 }
   transA: T
   transB: N
-  grouped_gemm: [1]
+  grouped_gemm: [1, 2]
   use_user_args: 1
   alpha: 1.0
   beta: 0.0
@@ -3409,12 +3409,12 @@ Tests:
   function:
     matmul:
     - { a_type: f8_r, b_type: f8_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r}
-  M: [64]
-  N: [64]
-  K: [256]
+  matrix_size:
+    - { M:  64,  N:  64,  K:  256 }
+    - { M:  256, N:  256, K:  256 }
   transA: T
   transB: N
-  grouped_gemm: [1]
+  grouped_gemm: [1, 2]
   use_user_args: 1
   alpha: 1.0
   beta: 0.0
@@ -3427,12 +3427,12 @@ Tests:
   function:
     matmul:
     - { a_type: f8_r, b_type: f8_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r}
-  M: [64]
-  N: [64]
-  K: [256]
+  matrix_size:
+    - { M:  64,  N:  64,  K:  256 }
+    - { M:  256, N:  256, K:  256 }
   transA: T
   transB: N
-  grouped_gemm: [1]
+  grouped_gemm: [1, 2]
   use_user_args: 1
   alpha: 1.0
   beta: 0.0
@@ -3445,12 +3445,12 @@ Tests:
   function:
     matmul:
     - { a_type: f4_r, b_type: f4_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r}
-  M: [64]
-  N: [64]
-  K: [256]
+  matrix_size:
+    - { M:  64,  N:  64,  K:  256 }
+    - { M:  256, N:  256, K:  256 }
   transA: T
   transB: N
-  grouped_gemm: [1]
+  grouped_gemm: [1, 2]
   use_user_args: 1
   alpha: 1.0
   beta: 0.0
@@ -3463,12 +3463,12 @@ Tests:
   function:
     matmul:
     - { a_type: f4_r, b_type: f4_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r}
-  M: [64]
-  N: [64]
-  K: [256]
+  matrix_size:
+    - { M:  64,  N:  64,  K:  256 }
+    - { M:  256, N:  256, K:  256 }
   transA: T
   transB: N
-  grouped_gemm: [1]
+  grouped_gemm: [1, 2]
   use_user_args: 1
   alpha: 1.0
   beta: 0.0
@@ -3481,24 +3481,29 @@ Tests:
   function:
     matmul:
     - { a_type: f4_r, b_type: f4_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r}
-  M: [64]
-  N: [64]
-  K: [256]
+  matrix_size:
+    - { M:  64,  N:  64,  K:  256 }
+    - { M:  256, N:  256, K:  256 }
   transA: T
   transB: N
-  grouped_gemm: [1]
+  grouped_gemm: [1, 2]
   use_user_args: 1
   alpha: 1.0
   beta: 0.0
   initialization: rand_int
   unit_check: 1
   gpu_arch: '950'
+
+# Non-grouped GEMM MX with use_user_args
+- name: matmul_mxfp8_f8bs_kaligned_userargs_gfx950
   category: pre_checkin
   function:
     matmul:
-    - { a_type: f4_r, b_type: f4_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r}
-  M: [64]
-  N: [64]
+    - { a_type: f8_r, b_type: f8_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r}
+    - { a_type: f8_r, b_type: f8_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r}
+    - { a_type: f4_r, b_type: f4_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r}
+  M: [64, 256]
+  N: [64, 256]
   K: [256]
   transA: T
   transB: N

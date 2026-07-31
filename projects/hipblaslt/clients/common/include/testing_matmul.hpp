@@ -4830,10 +4830,13 @@ void testing_matmul_with_bias(const Arguments& arg,
 
     if(arg.use_user_args)
     {
+        size_t userArgSize = (isBlockScaling(arg.scaleA) || isBlockScaling(arg.scaleB))
+                             ? sizeof(hipblaslt_ext::UserArgumentsMX)
+                             : sizeof(hipblaslt_ext::UserArguments);
         CHECK_HIP_ERROR(
-            hipHostMalloc(&userArgs, gemm_count * sizeof(hipblaslt_ext::UserArguments)));
+            hipHostMalloc(&userArgs, gemm_count * userArgSize));
         CHECK_HIP_ERROR(hipMalloc(&d_userArgs,
-                                  block_count * gemm_count * sizeof(hipblaslt_ext::UserArguments)));
+                                  block_count * gemm_count * userArgSize));
     }
 
     auto ptrs = benchmark_allocation();
@@ -5372,10 +5375,15 @@ void testing_matmul_with_bias(const Arguments& arg,
                                                      *dWorkspace));
                     groupedGemmVec[0].getDefaultValueForDeviceUserArguments(userArgs);
                     // Copy them to device memory
-                    CHECK_HIP_ERROR(hipMemcpy(d_userArgs,
-                                              userArgs,
-                                              gemm_count * sizeof(hipblaslt_ext::UserArguments),
-                                              hipMemcpyHostToDevice));
+                    {
+                        size_t uaSize = (isBlockScaling(arg.scaleA) || isBlockScaling(arg.scaleB))
+                                        ? sizeof(hipblaslt_ext::UserArgumentsMX)
+                                        : sizeof(hipblaslt_ext::UserArguments);
+                        CHECK_HIP_ERROR(hipMemcpy(d_userArgs,
+                                                  userArgs,
+                                                  gemm_count * uaSize,
+                                                  hipMemcpyHostToDevice));
+                    }
 
                     CHECK_HIPBLASLT_ERROR(groupedGemmVec[0].run(d_userArgs, stream));
                 }
@@ -5869,13 +5877,18 @@ void testing_matmul_with_bias(const Arguments& arg,
                             tuningVec[heuristicTuningIndex[sol]],
                             ((unsigned char*)(*dWorkspace) + b * workspace_size)));
                         groupedGemmVec[b].getDefaultValueForDeviceUserArguments(userArgs);
-                        d_userArgsVec[b] = (unsigned char*)d_userArgs
-                                           + b * gemm_count * sizeof(hipblaslt_ext::UserArguments);
-                        // Copy them to device memory
-                        CHECK_HIP_ERROR(hipMemcpy(d_userArgsVec[b],
-                                                  userArgs,
-                                                  gemm_count * sizeof(hipblaslt_ext::UserArguments),
-                                                  hipMemcpyHostToDevice));
+                        {
+                            size_t uaSize = (isBlockScaling(arg.scaleA) || isBlockScaling(arg.scaleB))
+                                            ? sizeof(hipblaslt_ext::UserArgumentsMX)
+                                            : sizeof(hipblaslt_ext::UserArguments);
+                            d_userArgsVec[b] = (unsigned char*)d_userArgs
+                                               + b * gemm_count * uaSize;
+                            // Copy them to device memory
+                            CHECK_HIP_ERROR(hipMemcpy(d_userArgsVec[b],
+                                                      userArgs,
+                                                      gemm_count * uaSize,
+                                                      hipMemcpyHostToDevice));
+                        }
                     }
                     if(arg.skip_slow_solution_ratio)
                         pre_gpu_time(
