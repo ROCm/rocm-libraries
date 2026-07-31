@@ -3259,6 +3259,22 @@ std::vector<std::string> gfx1201_wmma_gemm_verify(const py::dict& d, const std::
  * involved. Every failure (parse or lower) is converted to a Python exception;
  * the engine's extern "C" boundary never aborts/terminates.
  * ------------------------------------------------------------------------ */
+
+/* "'llvm20', 'llvm22', 'llvm23'" -- built from the engine's flavor ladder so
+ * the message cannot drift from what from_name() actually accepts. */
+static std::string rocke_engine_flavor_list()
+{
+    std::string out;
+    const int n = rocke_llvm_flavor_count();
+    for(int i = 0; i < n; ++i)
+    {
+        if(i)
+            out += (i + 1 == n) ? ", or " : ", ";
+        out += std::string("'") + rocke_llvm_flavor_at(i) + "'";
+    }
+    return out;
+}
+
 std::string lower_serialized_ir(const std::string& ir_text,
                                 const std::string& arch,
                                 const std::string& flavor)
@@ -3269,9 +3285,12 @@ std::string lower_serialized_ir(const std::string& ir_text,
     }
     const char* a = arch.empty() ? "gfx950" : arch.c_str();
 
-    /* flavor: "" => AUTO (resolve from env / ROCm version); "llvm20"/"llvm22"
-     * pin the intrinsic declaration shape. An unrecognised non-empty flavor is
-     * rejected so callers get the same hard error the Python lowerer raises. */
+    /* flavor: "" => AUTO (resolve from env / ROCm version); a named flavor
+     * pins the intrinsic declaration shape. An unrecognised non-empty flavor
+     * is rejected so callers get the same hard error the Python lowerer
+     * raises. The accepted set is read from the engine's ladder rather than
+     * restated here -- a hand-written list is what goes stale when a flavor is
+     * added. */
     rocke_llvm_flavor_t fl = ROCKE_LLVM_FLAVOR_AUTO;
     if(!flavor.empty())
     {
@@ -3280,7 +3299,7 @@ std::string lower_serialized_ir(const std::string& ir_text,
         {
             throw std::runtime_error(
                 std::string("rocke_engine.lower_serialized_ir: unknown LLVM flavor '") + flavor
-                + "' (expected 'llvm20' or 'llvm22')");
+                + "' (expected one of " + rocke_engine_flavor_list() + ")");
         }
     }
 
@@ -3359,7 +3378,24 @@ PYBIND11_MODULE(rocke_engine, m)
           "Parse serialized ck.dsl.ir/v1 text and lower it to AMDGPU LLVM IR "
           "(.ll) text via the C++ engine. Family-agnostic; byte-identical to "
           "the Python lowerer for the same serialized IR. flavor='' resolves "
-          "the LLVM flavor automatically; 'llvm20'/'llvm22' pin it.");
+          "the LLVM flavor automatically; a name from llvm_flavors() pins it.");
+
+    /* Exposes the engine's flavor ladder so a test can assert it still equals
+     * rocke.core.lower_llvm.LLVM_FLAVORS. Without a way to read the C++ list
+     * back, the two enumerations can drift into a flavor that lowers on one
+     * engine and is rejected on the other. */
+    m.def(
+        "llvm_flavors",
+        []() {
+            std::vector<std::string> out;
+            const int n = rocke_llvm_flavor_count();
+            out.reserve((size_t)n);
+            for(int i = 0; i < n; ++i)
+                out.emplace_back(rocke_llvm_flavor_at(i));
+            return out;
+        },
+        "The LLVM flavors this engine accepts, oldest first. Must equal "
+        "rocke.core.lower_llvm.LLVM_FLAVORS.");
 
     m.def("gemm_lower_llvm",
           &gemm_lower_llvm,
