@@ -24,7 +24,8 @@ Requirements:
 Usage:
   python3 15_grouped_gemm_abquant.py                     # fp8, 128x128x128, no preshuffle
   python3 15_grouped_gemm_abquant.py --dtype bf8
-  python3 15_grouped_gemm_abquant.py --pipeline eightwaves --M 192 --N 256 --K 128  # bqgn=128 default
+  python3 15_grouped_gemm_abquant.py --pipeline eightwaves --M 192 --N 256 --K 128   # bqgn=128 default
+  python3 15_grouped_gemm_abquant.py --pipeline preshuffleb                          # bqgn=128 default
   python3 15_grouped_gemm_abquant.py --no-verify
 """
 
@@ -232,9 +233,9 @@ def main():
     N = args.N if args.N is not None else _dn
     K = args.K
     gK = args.quant_group_k
-    # EightWaves requires bquant_group_n >= warp_tile_n (16); tested config uses 128.
-    # CompV3/PreshuffleB support bquant_group_n=1 (one scale per column).
-    _default_bqn = {"compv3": 1, "preshuffleb": 1, "eightwaves": 128}
+    # EightWaves and PreshuffleB are only validated with bquant_group_n=128 in C++ tests.
+    # CompV3 supports bquant_group_n=1 (one scale per column).
+    _default_bqn = {"compv3": 1, "preshuffleb": 128, "eightwaves": 128}
     bN = args.bquant_group_n if args.bquant_group_n is not None else _default_bqn[args.pipeline]
 
     # -------------------------------------------------------------------------

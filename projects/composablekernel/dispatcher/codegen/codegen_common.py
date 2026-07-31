@@ -535,11 +535,12 @@ def abquant_effective_epilogue(
     """Return the epilogue tag the codegen will emit for ABQuant kernels.
 
     The PermuteN selection is governed by the B-side quant group N, matching
-    the same logic used by BQuant / AQuant. The EightWaves pipeline uses a
-    transposed accumulator layout (TransposeC=true) that is incompatible with
-    PermuteNEpilogue — it must always use CShuffleEpilogue.
+    the same logic used by BQuant / AQuant. EightWaves and PreshuffleB use
+    TransposeC=true (transposed accumulator layout) which is incompatible with
+    PermuteNEpilogue — both must always use CShuffleEpilogue (TiledMMAPermuteN=false
+    in the C++ test fixtures for both GemmConfigEightWaves and GemmConfigPreshuffleB_ABQuant_Prefill).
     """
-    if pipeline == "eightwaves":
+    if pipeline in ("eightwaves", "preshuffleb"):
         return "cshuffle"
     n_repeat = tile_n // (warp_n * warp_tile_n)
     use_permute_n = (n_repeat % 2 == 0) and (bquant_group_n == 1)
