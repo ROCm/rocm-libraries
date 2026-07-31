@@ -161,6 +161,9 @@ add_library(rocke_core STATIC ${ROCKE_CORE_SOURCES})
 target_include_directories(rocke_core PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/cpp/include>
   $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
+if(CMAKE_DL_LIBS)
+  target_link_libraries(rocke_core PUBLIC ${CMAKE_DL_LIBS})
+endif()
 
 # --- Engine freshness / provenance stamp -------------------------------------
 # Compute a deterministic, git-independent content hash of the engine source

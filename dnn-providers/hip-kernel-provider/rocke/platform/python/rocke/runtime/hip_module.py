@@ -210,6 +210,8 @@ def _device_props(device: int = 0) -> Optional[bytes]:
     return None
 
 
+# TODO(AICK-1849 follow-up): add get_current_device_arch() using hipGetDevice(),
+# while retaining get_device_arch(device) as the explicit HIP-visible-ordinal query.
 def get_device_arch(device: int = 0) -> Optional[str]:
     """Best-effort gfx string of a HIP device (e.g. ``"gfx942"``).
 

@@ -17,6 +17,7 @@
  *   KeyError                   ckc::KeyError           ROCKE_ERR_KEY
  *   MemoryError / OOM          ckc::OOMError           ROCKE_ERR_OOM
  *   NotImplementedError        ckc::NotImplError       ROCKE_ERR_NOTIMPL
+ *   RuntimeError               ckc::RuntimeError       ROCKE_ERR_HIP_RUNTIME
  *
  * Each carries a human-readable message and its rocke_status_t code. The message
  * text is kept byte-identical to the legacy *_set_err strings so that parity /
@@ -118,6 +119,16 @@ public:
     }
 };
 
+/* maps to Python RuntimeError */
+class RuntimeError : public Error
+{
+public:
+    explicit RuntimeError(std::string msg)
+        : Error(ROCKE_ERR_HIP_RUNTIME, std::move(msg))
+    {
+    }
+};
+
 /* printf-style message formatting, bounded to ROCKE_ERR_MSG_CAP exactly like the
  * legacy *_set_err sites (truncation of an over-long reason string is
  * intentional and harmless -- these are reject/error paths only). Returns the
@@ -158,6 +169,8 @@ inline std::string format_error(const char* fmt, ...)
         throw OOMError(std::move(m));
     case ROCKE_ERR_NOTIMPL:
         throw NotImplError(std::move(m));
+    case ROCKE_ERR_HIP_RUNTIME:
+        throw RuntimeError(std::move(m));
     case ROCKE_ERR_VALUE:
     default:
         throw ValueError(std::move(m));

@@ -55,7 +55,8 @@ typedef enum rocke_status
     ROCKE_ERR_TYPE, /* maps to Python TypeError                           */
     ROCKE_ERR_KEY, /* maps to Python KeyError (unknown op_id / param)    */
     ROCKE_ERR_OOM, /* allocation failure                                 */
-    ROCKE_ERR_NOTIMPL /* maps to Python NotImplementedError                 */
+    ROCKE_ERR_NOTIMPL, /* maps to Python NotImplementedError              */
+    ROCKE_ERR_HIP_RUNTIME /* HIP runtime/library/device discovery failure     */
 } rocke_status_t;
 
 #define ROCKE_ERR_MSG_CAP 256

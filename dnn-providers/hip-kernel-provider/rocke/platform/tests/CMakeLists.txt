@@ -14,6 +14,27 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/smoke.cpp")
 endif()
 
 if(BUILD_TESTING)
+  # Optional HIP target resolution is host-testable through an injected
+  # function table; no HIP headers, runtime, or GPU are required.
+  if(EXISTS
+     "${CMAKE_CURRENT_SOURCE_DIR}/runtime/hip_target_resolution_test.cpp")
+    add_executable(rocke_hip_target_resolution
+                   runtime/hip_target_resolution_test.cpp)
+    target_link_libraries(rocke_hip_target_resolution PRIVATE rocke_core)
+    add_test(NAME rocke_hip_target_resolution
+             COMMAND rocke_hip_target_resolution)
+    set_tests_properties(rocke_hip_target_resolution
+                         PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(
+      _rocke_installed_name rocke_hip_target_resolution)
+    set_target_properties(rocke_hip_target_resolution
+                          PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+    install(TARGETS rocke_hip_target_resolution
+            RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+    set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+                 rocke_hip_target_resolution)
+  endif()
+
   # ck.dsl.ir/v1 serializer round-trip + verifier test. Proves
   # lower(parse(serialize(k))) == lower(k) byte-for-byte, serialization
   # idempotence, and a clean verifier pass for the buildable GEMM configs.

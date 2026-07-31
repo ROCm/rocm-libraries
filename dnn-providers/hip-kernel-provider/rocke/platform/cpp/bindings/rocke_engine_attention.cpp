@@ -47,6 +47,7 @@ extern "C" {
 #include "rocke/ir.h"
 #include "rocke/ir_serialize.h"
 #include "rocke/lower_llvm.h"
+#include "rocke/runtime_hip.h"
 #include "rocke/verify.h"
 }
 
@@ -108,6 +109,22 @@ std::string take_ll(rocke_status_t st, char* ll, const char* err, const char* fn
     std::string out(ll);
     free(ll);
     return out;
+}
+
+const rocke_arch_target_t* resolve_compile_target(const std::string& requested_gfx, const char* fn)
+{
+    rocke_resolved_target_t resolved{};
+    char err[ROCKE_ERR_MSG_CAP];
+    err[0] = '\0';
+    rocke_status_t status = rocke_resolve_compile_target(
+        requested_gfx.empty() ? nullptr : requested_gfx.c_str(), &resolved, err, sizeof(err));
+    if(status != ROCKE_OK)
+    {
+        throw std::runtime_error(std::string(fn) + " target resolution failed (status="
+                                 + std::to_string((int)status)
+                                 + "): " + (err[0] ? err : "unknown error"));
+    }
+    return resolved.target;
 }
 
 std::string ser_kernel(rocke_kernel_def_t* k, const char* fn)
@@ -224,6 +241,8 @@ rocke_kernel_def_t* au_make(const py::dict& d, Store& st, rocke_ir_builder_t* b)
 
 std::string au_lower(const py::dict& d, const std::string& arch)
 {
+    const rocke_arch_target_t* target
+        = resolve_compile_target(arch, "rocke_engine.attention_unified_lower_llvm");
     Store st;
     rocke_ir_builder_t b;
     rocke_kernel_def_t* k = au_make(d, st, &b);
@@ -238,7 +257,7 @@ std::string au_lower(const py::dict& d, const std::string& arch)
     char err[ROCKE_ERR_MSG_CAP];
     err[0] = '\0';
     rocke_status_t s2 = rocke_lower_kernel_to_llvm_ex(
-        k, ROCKE_LLVM_FLAVOR_AUTO, arch.empty() ? "gfx950" : arch.c_str(), &ll, err, sizeof err);
+        k, ROCKE_LLVM_FLAVOR_AUTO, target->gfx, &ll, err, sizeof err);
     rocke_ir_builder_free(&b);
     return take_ll(s2, ll, err, "rocke_engine.attention_unified_lower_llvm");
 }
@@ -1217,7 +1236,7 @@ void reg3(py::module_& m,
 
 void register_attention(py::module_& m)
 {
-    reg3(m, "attention_unified", &au_lower, &au_serialize, &au_verify, "gfx950");
+    reg3(m, "attention_unified", &au_lower, &au_serialize, &au_verify, "");
     reg3(m, "fmha_mfma", &fmma_lower, &fmma_serialize, &fmma_verify, "gfx950");
     reg3(m, "fmha_fwd_fp8", &fp8_lower, &fp8_serialize, &fp8_verify, "gfx950");
     reg3(m, "fmha_bwd", &bwd_lower, &bwd_serialize, &bwd_verify, "gfx950");
