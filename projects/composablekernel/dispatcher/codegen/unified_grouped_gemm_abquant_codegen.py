@@ -240,10 +240,11 @@ class ABQuantKernelHeaderGenerator:
         double_smem_buffer = str(spec.double_smem_buffer).lower()
         is_eight_waves    = str(spec.pipeline == "eightwaves").lower()
 
-        # Epilogue selection — B-side tile geometry governs PermuteN (same logic as BQuant)
+        # Epilogue selection — B-side tile geometry governs PermuteN (except EightWaves).
         use_permute_n_epilogue = (
-            abquant_effective_epilogue(t.tile_n, t.warp_n, t.warp_tile_n, spec.bquant_group_n)
-            == "permute_n"
+            abquant_effective_epilogue(
+                t.tile_n, t.warp_n, t.warp_tile_n, spec.bquant_group_n, spec.pipeline
+            ) == "permute_n"
         )
 
         if use_permute_n_epilogue:

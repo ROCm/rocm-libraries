@@ -530,12 +530,17 @@ def abquant_effective_epilogue(
     warp_n: int,
     warp_tile_n: int,
     bquant_group_n: int,
+    pipeline: str = "compv3",
 ) -> str:
     """Return the epilogue tag the codegen will emit for ABQuant kernels.
 
     The PermuteN selection is governed by the B-side quant group N, matching
-    the same logic used by BQuant / AQuant.
+    the same logic used by BQuant / AQuant. The EightWaves pipeline uses a
+    transposed accumulator layout (TransposeC=true) that is incompatible with
+    PermuteNEpilogue — it must always use CShuffleEpilogue.
     """
+    if pipeline == "eightwaves":
+        return "cshuffle"
     n_repeat = tile_n // (warp_n * warp_tile_n)
     use_permute_n = (n_repeat % 2 == 0) and (bquant_group_n == 1)
     return "permute_n" if use_permute_n else "cshuffle"
@@ -566,7 +571,7 @@ def make_abquant_kernel_name(
     Both ABQuantKernelConfig (utils) and ABQuantKernelSpec (codegen) delegate
     to this function so the two sides are guaranteed to stay byte-exact.
     """
-    effective_epilogue = abquant_effective_epilogue(tile_n, warp_n, warp_tile_n, bquant_group_n)
+    effective_epilogue = abquant_effective_epilogue(tile_n, warp_n, warp_tile_n, bquant_group_n, pipeline)
     parts = [
         "grouped_gemm_abquant",
         variant_key,
