@@ -631,11 +631,11 @@ def default_fp8_compv3_config(
 ) -> ABQuantKernelConfig:
     """fp8 ABQuant CompV3 config (GemmConfigABQuantPrefill<fp8_t>, TransposeC=False).
 
-    Tile: 128x128x128, warp 1x4x1. kPadK=false (ABQuant prefill tiles).
-    warp_tile_k mirrors get_k_warp_tile<fp8_t, 16, IsFlatMM=false>:
-      gfx950 (CK_GFX950_SUPPORT): 128
-      gfx942: 32
-    The value must match what the C++ kernel header computes at compile time.
+    Tile: 128x128x128, warp 1x4x1. kPadK=false.
+    warp_tile_k=32 selects mfma_f32_16x16x32_fp8_fp8 (standard MFMA, valid on gfx942
+    and gfx950). CompV3 is a standard compute pipeline — it does NOT use FlatMM, so
+    WarpTileK must stay at 32 regardless of arch. Only the gfx950-native pipelines
+    (eightwaves, preshuffleb) use FlatMM and require WarpTileK=128.
     """
     return ABQuantKernelConfig(
         variant_key="fp8",
@@ -645,7 +645,7 @@ def default_fp8_compv3_config(
         scheduler="intrawave",
         tile_m=128, tile_n=128, tile_k=128,
         warp_m=1, warp_n=4, warp_k=1,
-        warp_tile_m=16, warp_tile_n=16, warp_tile_k=_compv3_warp_tile_k(gfx_arch),
+        warp_tile_m=16, warp_tile_n=16, warp_tile_k=32,
         aquant_group_m=1, aquant_group_n=1, aquant_group_k=quant_group_k,
         bquant_group_m=1, bquant_group_n=bquant_group_n, bquant_group_k=quant_group_k,
         preshuffle_b=False, preshuffle_aq=False, preshuffle_bq=False,
@@ -661,8 +661,7 @@ def default_bf8_compv3_config(
 ) -> ABQuantKernelConfig:
     """bf8 ABQuant CompV3 config (GemmConfigABQuantPrefill<bf8_t>, TransposeC=False).
 
-    warp_tile_k mirrors get_k_warp_tile<bf8_t, 16, IsFlatMM=false>:
-      gfx950: 128, gfx942: 32. See default_fp8_compv3_config for rationale.
+    warp_tile_k=32 — CompV3 uses standard MFMA, not FlatMM. See default_fp8_compv3_config.
     """
     return ABQuantKernelConfig(
         variant_key="bf8",
@@ -672,23 +671,13 @@ def default_bf8_compv3_config(
         scheduler="intrawave",
         tile_m=128, tile_n=128, tile_k=128,
         warp_m=1, warp_n=4, warp_k=1,
-        warp_tile_m=16, warp_tile_n=16, warp_tile_k=_compv3_warp_tile_k(gfx_arch),
+        warp_tile_m=16, warp_tile_n=16, warp_tile_k=32,
         aquant_group_m=1, aquant_group_n=1, aquant_group_k=quant_group_k,
         bquant_group_m=1, bquant_group_n=bquant_group_n, bquant_group_k=quant_group_k,
         preshuffle_b=False, preshuffle_aq=False, preshuffle_bq=False,
         transpose_c=False,
         gfx_arch=gfx_arch,
     )
-
-
-def _compv3_warp_tile_k(gfx_arch: str) -> int:
-    """Return the correct warp_tile_k for the CompV3 (ABQuantPrefill) pipeline.
-
-    Mirrors get_k_warp_tile<fp8_t/bf8_t, M_Warp_Tile=16, IsFlatMM=false>:
-      gfx950 (CK_GFX950_SUPPORT): 128
-      gfx942: 32
-    """
-    return 128 if gfx_arch.startswith("gfx950") else 32
 
 
 def _eightwaves_warp_tile_k(gfx_arch: str) -> int:
