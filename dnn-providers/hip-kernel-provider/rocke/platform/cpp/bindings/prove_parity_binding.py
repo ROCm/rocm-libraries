@@ -1423,21 +1423,11 @@ def _selector_parity_row(problem_dict, arch):
       cpp_spec:    dict
       diff:        str  -- human-readable summary of any mismatch
     """
-    import sys
-    import os
-
     # --- Python selector ---
     try:
-        lib_dir = os.environ.get(
-            "ROCKE_LIBRARY_DIR",
-            os.path.join(os.path.dirname(__file__), "..", "..", "..", "library"),
-        )
-        if lib_dir not in sys.path:
-            sys.path.insert(0, lib_dir)
         from builders.common.attention_spec_builder import _tiled_spec_from_problem
         from kernels.common.attention_unified import (
             UnifiedAttentionProblem,
-            _resolve_attention_arch,
         )
     except ImportError as e:
         return dict(
@@ -1466,7 +1456,13 @@ def _selector_parity_row(problem_dict, arch):
             use_fp8=bool(problem_dict.get("use_fp8", False)),
             num_kv_blocks=problem_dict.get("num_kv_blocks", 0),
         )
-        py_spec_obj = _tiled_spec_from_problem(prob)
+        from unittest.mock import patch
+
+        with patch(
+            "kernels.common.attention_unified._resolve_attention_arch",
+            return_value=arch,
+        ):
+            py_spec_obj = _tiled_spec_from_problem(prob)
         # Normalise to the same field-set the C++ binding emits
         from dataclasses import asdict
 
