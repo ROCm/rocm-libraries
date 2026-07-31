@@ -64,8 +64,12 @@ _WMMA_FWD_CAP = Capability(
         DimRelation("hdim_q", "==", "hdim_v"),  # single head_size arg
         DimRelation("nhead_q", "multiple_of", "nhead_k"),  # GQA grouping
     ),
-    # No sinks: the kernel's mask helper takes mask_mode + sliding_window only.
-    supports_features=frozenset({"causal", "sliding_window"}),
+    # Causal only. The spec's mask_mode vocabulary is "none"/"causal", and
+    # apply_attention_mask reads sliding_window solely under a "sliding_window"
+    # mode this spec cannot express -- so the field is inert and a window would
+    # be silently dropped. Declaring the feature here would admit that request
+    # and compile plain causal for it. No sinks either, for the same reason.
+    supports_features=frozenset({"causal"}),
 )
 
 

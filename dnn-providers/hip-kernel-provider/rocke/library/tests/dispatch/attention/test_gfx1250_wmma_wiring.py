@@ -119,8 +119,37 @@ class TestCapabilityGates(unittest.TestCase):
     def test_sinks_are_not_claimed(self):
         self.assertFalse(_candidate().admits(_opt_in(use_sinks=True))[0])
 
-    def test_sliding_window_is_claimed(self):
-        self.assertTrue(_candidate().admits(_opt_in(sliding_window=256))[0])
+    def test_sliding_window_is_not_claimed(self):
+        # The spec carries a sliding_window field, but its mask_mode vocabulary
+        # is "none"/"causal" and apply_attention_mask reads the window only
+        # under a "sliding_window" mode this spec cannot express. Claiming the
+        # feature admits the request and compiles plain causal for it.
+        ok, why = _candidate().admits(_opt_in(sliding_window=256))
+        self.assertFalse(ok)
+        self.assertIn("sliding_window", why)
+
+    def test_the_window_field_is_inert_in_the_kernel(self):
+        # Why the gate above must be a rejection: the emitted kernel is
+        # identical with and without a window, so an admitted request would get
+        # unwindowed numerics and no diagnostic. If this ever stops holding,
+        # the kernel grew real support and the capability should widen.
+        from kernels.gfx1250.wmma_attention_fwd import (
+            WmmaAttentionFwdSpec,
+            build_wmma_attention_fwd,
+        )
+        from rocke.core.ir_serialize import canonical_equal
+
+        def _kernel(window):
+            spec = WmmaAttentionFwdSpec(
+                head_size=128,
+                num_query_heads=16,
+                num_kv_heads=4,
+                mask_mode="causal",
+                sliding_window=window,
+            )
+            return build_wmma_attention_fwd(spec, arch="gfx1250")
+
+        self.assertTrue(canonical_equal(_kernel(0), _kernel(256)))
 
 
 class TestGeometryAndBuild(unittest.TestCase):
