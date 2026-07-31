@@ -1793,4 +1793,3 @@ Four things to settle before this is a plan rather than an idea:
   *builder* reachable from dispatch; it does not make *dispatch* reachable from
    the provider's no-Python-at-runtime path. That is the separate problem behind
    the dual-engine constraint in phase 6.
-
