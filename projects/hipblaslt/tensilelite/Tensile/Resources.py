@@ -40,10 +40,6 @@ def _resource_text(*parts: str, encoding: str = "utf-8") -> str:
     return _resource(*parts).read_text(encoding=encoding)
 
 
-def _custom_kernels() -> Traversable:
-    return _resource("CustomKernels")
-
-
 def static_header_paths() -> Tuple[Traversable, ...]:
     """Return the packaged static-header resources in copy order."""
     source = _resource("Source")
@@ -78,6 +74,16 @@ def copy_static_headers(output_dir) -> List[str]:
     return [name for name, _ in sources]
 
 
+def _custom_kernels() -> Traversable:
+    return _resource("CustomKernels")
+
+
+def _validate_custom_kernel_resource_name(name: str) -> None:
+    """Reject path-bearing names at the bundled-resource boundary."""
+    if "/" in name or "\\" in name or PureWindowsPath(name).drive:
+        raise ValueError(f"Custom kernel resource name must not be a path: {name!r}")
+
+
 def custom_kernel_names() -> List[str]:
     """Return bundled custom kernel names in deterministic order."""
     return sorted(
@@ -85,12 +91,6 @@ def custom_kernel_names() -> List[str]:
         for resource in _custom_kernels().iterdir()
         if resource.is_file() and resource.name.endswith(".s")
     )
-
-
-def _validate_custom_kernel_resource_name(name: str) -> None:
-    """Reject path-bearing names at the bundled-resource boundary."""
-    if "/" in name or "\\" in name or PureWindowsPath(name).drive:
-        raise ValueError(f"Custom kernel resource name must not be a path: {name!r}")
 
 
 def custom_kernel_text(name: str) -> str:
