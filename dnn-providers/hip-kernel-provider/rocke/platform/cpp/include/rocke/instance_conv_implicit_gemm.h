@@ -176,6 +176,13 @@ typedef struct rocke_implicit_gemm_conv_spec
     const char* dtype_acc; /* default "fp32" */
 
     rocke_conv_acc_epilogue_t acc_epilogue; /* default identity */
+
+    /* cshuffle epilogue LDS aliasing (same knob as UniversalGemmSpec.trait).
+     * False (default): the smem-pool packer aliases the cshuffle C tile onto the
+     * A/B staging bytes (pool = max(ab,c)) with a step-0 reuse barrier. True: C
+     * gets its own LDS bytes (pool = ab+c) and the barrier is elided -> lower
+     * small-tile latency, more LDS. Only affects epilogue == "cshuffle". */
+    bool cshuffle_no_alias; /* default false */
 } rocke_implicit_gemm_conv_spec_t;
 
 /* Default-constructed spec (every field == Python dataclass default). The caller
