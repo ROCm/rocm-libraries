@@ -104,7 +104,7 @@ std::shared_ptr<hipdnn_frontend::graph::Graph> buildSdpaFwdGraph(const GraphTest
 
     if(testCase.attnScale.has_value())
     {
-        attributes.set_attn_scale_value(testCase.attnScale.value());
+        attributes.set_attn_scale(testCase.attnScale.value());
     }
 
     // Configure mask type

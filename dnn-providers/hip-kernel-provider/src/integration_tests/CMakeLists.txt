@@ -79,14 +79,16 @@ if(ENABLE_ASM_SDPA_ENGINE)
                 "Skipping SDPA integration test environment setup.")
     else()
         set(ASM_KERNEL_ENV "HIPDNN_AITER_ASM_DIR=${CMAKE_BINARY_DIR}/hip_kernel_provider/asm_kernels")
-        if(COVERAGE_ENVIRONMENT)
-            set_tests_properties(hip_kernel_provider_integration_tests PROPERTIES
-                ENVIRONMENT "${COVERAGE_ENVIRONMENT};${ASM_KERNEL_ENV}"
-            )
-        else()
-            set_tests_properties(hip_kernel_provider_integration_tests PROPERTIES
-                ENVIRONMENT "${ASM_KERNEL_ENV}"
-            )
+        if(TEST hip_kernel_provider_integration_tests)
+            if(COVERAGE_ENVIRONMENT)
+                set_tests_properties(hip_kernel_provider_integration_tests PROPERTIES
+                    ENVIRONMENT "${COVERAGE_ENVIRONMENT};${ASM_KERNEL_ENV}"
+                )
+            else()
+                set_tests_properties(hip_kernel_provider_integration_tests PROPERTIES
+                    ENVIRONMENT "${ASM_KERNEL_ENV}"
+                )
+            endif()
         endif()
     endif()
 endif()

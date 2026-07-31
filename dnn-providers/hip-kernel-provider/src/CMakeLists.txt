@@ -141,12 +141,18 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
             "${HIPKERNELPROVIDER_CTEST_INSTALL_FILE}"
             ENVIRONMENT ${TEST_ENVIRONMENT}
         )
+        # YAML categorization skips the raw ctest target; forward the asm dir to the suites.
+        set(_integration_test_env ${TEST_ENVIRONMENT})
+        if(ENABLE_ASM_SDPA_ENGINE AND HIPDNN_ENABLE_SDPA)
+            list(APPEND _integration_test_env
+                "HIPDNN_AITER_ASM_DIR=${CMAKE_BINARY_DIR}/hip_kernel_provider/asm_kernels")
+        endif()
         apply_test_category_labels(
             hip_kernel_provider_integration_tests
             "${HIPKERNELPROVIDER_GTEST_CATEGORIES_YAML}"
             "${PROJECT_BINARY_DIR}/staging"
             "${HIPKERNELPROVIDER_CTEST_INSTALL_FILE}"
-            ENVIRONMENT ${TEST_ENVIRONMENT}
+            ENVIRONMENT ${_integration_test_env}
         )
     endif()
 
