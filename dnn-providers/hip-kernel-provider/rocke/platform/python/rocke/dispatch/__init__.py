@@ -14,11 +14,14 @@ all families.
 from __future__ import annotations
 
 from .core import (
+    Capability,
     CandidateRegistry,
+    DimRelation,
     DispatchResult,
     KernelCandidate,
     KernelId,
     OperatorRequest,
+    ShapeRange,
 )
 from .families import (
     ConvRequest,
@@ -39,12 +42,15 @@ from .gemm import (
 )
 
 __all__ = [
+    "Capability",
+    "DimRelation",
     "DispatchResult",
     "CandidateRegistry",
     "GemmRequest",
     "KernelCandidate",
     "KernelId",
     "OperatorRequest",
+    "ShapeRange",
     "dispatch_gemm_fp16",
     "dispatch_gemm_bf16",
     "gemm_fp16_candidates",

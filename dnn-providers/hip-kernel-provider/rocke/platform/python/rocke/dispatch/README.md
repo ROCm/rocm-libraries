@@ -41,23 +41,68 @@ result_bf16 = dispatch_gemm_bf16(
     GemmRequest(M=4096, N=4096, K=4096, arch="gfx950", dtype="bf16")
 )
 
-print(result.kernel_id.cache_key)
+print(result.kernel_id.selection_key)
 print(result.candidate.name)
 print(result.grid, result.block)
 ```
 
-### Arch-family gate
+### Declared coverage and the arch gate
 
-Every GEMM candidate is gated to its micro-arch family (`cdna` or `rdna`) via
-`arch_family_supported` (in `gemm/common.py`), which consults
-`ArchTarget.family`. Without it an RDNA/WMMA candidate would report support on a
-CDNA arch (its spec rebuilds wave64 and a 16x16x16 MFMA atom that also exists on
-CDNA), wrongly out-ranking the intended CDNA candidate. The regression is pinned
-by `tests/gemm/test_arch_family_gate.py`.
+Every GEMM candidate declares a `Capability`: the exact `gfx` targets it was
+built for, its dtype and layout, and any shape bounds expressible as data. That
+declaration is the arch gate. Without one, an RDNA/WMMA candidate would report
+support on a CDNA arch (its spec rebuilds wave64 and a 16x16x16 MFMA atom that
+also exists on CDNA), wrongly out-ranking the intended CDNA candidate. The
+regression is pinned by `tests/gemm/test_arch_family_gate.py`, and the
+family-wide invariants by `tests/gemm/test_capability.py`.
+
+The gate is an explicit arch list rather than a `cdna`/`rdna` label, for two
+reasons. Family does not imply wave size — gfx1250 is CDNA at wave32 — so a
+family gate would admit a wave32 target into wave64 MFMA kernels. And the right
+list is per candidate, not per family: bf16's cshuffle path runs on gfx90a where
+fp16's does not, and the bf16 decode candidate needs a deep-K atom that exists
+only on gfx950.
+
+Capability is a prefilter, not the whole answer. Ask `candidate.admits(req)` for
+the complete verdict:
+
+```python
+ok, why = candidate.admits(req)   # capability, then the residual predicate
+```
+
+`supports()` is the residual predicate alone. Since it no longer re-checks arch
+or dtype, it is not a complete gate and should not be called directly.
+
+### Identity
 
 `KernelId` is the stable identity used by compile caches, manifests, logs, and
 benchmark records. It includes the operation family, candidate, algorithm,
-`spec_id`, target arch, ABI version, request hash, and spec hash.
+`spec_id`, target arch, ABI version, request hash, and spec hash, and exposes
+two keys over those fields because they answer different questions:
+
+- `compile_key` — `arch:abi_version:spec_hash`. Identifies the compiled binary.
+  Problem-independent, so every request that selects the same spec shares one
+  compile. This is what an HSACO cache should key on.
+- `selection_key` — every field, including the request hash. Identifies the
+  routing decision, which is what tuning records and dispatch logs index by.
+
+`cache_key` is a deprecated alias for `selection_key`, kept at its pre-split
+value so existing benchmark records stay comparable. Using it for a compile
+cache recompiles per shape, which is why the two are now named apart.
+
+### Lookup without dispatching
+
+`CandidateRegistry` answers three questions that need no request:
+
+```python
+registry.get("universal_gemm_fp16_cdna_mem")   # by name
+registry.resolve(kernel_id)                    # by persisted id, ABI-checked
+registry.coverage()                            # JSON manifest of what is registered
+```
+
+`resolve` is the replay path: it rejects a `KernelId` whose `abi_version` no
+longer matches the registry, so a tuning record from an older build fails loudly
+instead of binding to a kernel whose kernarg layout has since changed.
 
 ## Run Tests
 

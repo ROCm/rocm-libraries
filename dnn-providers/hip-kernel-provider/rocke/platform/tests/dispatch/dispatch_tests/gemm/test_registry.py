@@ -57,10 +57,10 @@ class TestCandidateRegistry(unittest.TestCase):
         cdna_req = GemmRequest(M=128, N=128, K=32, arch="gfx950")
         rdna_req = GemmRequest(M=64, N=32, K=16, arch="gfx1151")
         supported_cdna = {
-            c.spec_id for c in gemm_fp16_candidates() if c.supports(cdna_req)[0]
+            c.spec_id for c in gemm_fp16_candidates() if c.admits(cdna_req)[0]
         }
         supported_rdna = {
-            c.spec_id for c in gemm_fp16_candidates() if c.supports(rdna_req)[0]
+            c.spec_id for c in gemm_fp16_candidates() if c.admits(rdna_req)[0]
         }
         self.assertIn("cdna_cshuffle_default", supported_cdna)
         self.assertIn("cdna_mem_64x128", supported_cdna)
