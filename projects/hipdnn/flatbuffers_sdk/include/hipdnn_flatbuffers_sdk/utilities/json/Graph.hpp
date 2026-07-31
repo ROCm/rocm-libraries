@@ -151,6 +151,11 @@ inline void to_json(nlohmann::json& graphJson, const data_objects::Graph& graph)
     {
         graphJson["preferred_engine_id"] = graph.preferred_engine_id().value();
     }
+    if(const auto* version = graph.min_required_engine_api_version())
+    {
+        graphJson["min_required_engine_api_version"] = {
+            {"major", version->major()}, {"minor", version->minor()}, {"patch", version->patch()}};
+    }
 }
 
 }
@@ -237,6 +242,18 @@ inline auto to<data_objects::Graph>(flatbuffers::FlatBufferBuilder& builder,
     }
     const bool isOverrideShapeEnabled = entry.value("is_override_shape_enabled", false);
 
+    const data_objects::EngineApiVersion* minRequiredEngineApiVersion = nullptr;
+    data_objects::EngineApiVersion parsedMinRequiredEngineApiVersion;
+    if(entry.contains("min_required_engine_api_version"))
+    {
+        const auto& version = entry.at("min_required_engine_api_version");
+        parsedMinRequiredEngineApiVersion
+            = data_objects::EngineApiVersion(version.at("major").get<uint32_t>(),
+                                             version.at("minor").get<uint32_t>(),
+                                             version.at("patch").get<uint32_t>());
+        minRequiredEngineApiVersion = &parsedMinRequiredEngineApiVersion;
+    }
+
     auto nodes = toVector<Node>(builder, entry.at("nodes"));
     auto tensors = toVector<TensorAttributes>(builder, entry.at("tensors"));
     return data_objects::CreateGraphDirect(builder,
@@ -247,7 +264,8 @@ inline auto to<data_objects::Graph>(flatbuffers::FlatBufferBuilder& builder,
                                            &tensors,
                                            &nodes,
                                            preferredEngineId,
-                                           isOverrideShapeEnabled);
+                                           isOverrideShapeEnabled,
+                                           minRequiredEngineApiVersion);
 }
 
 }
