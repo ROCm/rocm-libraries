@@ -269,6 +269,9 @@ inline std::map<std::string, int>
     rv["v_pk_mul_f32"] = tryAssembler(
         isaVersion, assemblerPath, "v_pk_mul_f32 v[20:21], v[18:19], v[20:21]", isDebug);
 
+    rv["v_pk_fma_f32"] = tryAssembler(
+        isaVersion, assemblerPath, "v_pk_fma_f32 v[0:1], v[2:3], v[4:5], v[6:7]", isDebug);
+
     rv["v_mad_mix_f32"]
         = tryAssembler(isaVersion,
                        assemblerPath,
@@ -606,6 +609,18 @@ inline std::map<std::string, int> initArchCaps(const IsaVersion& isaVersion)
     rv["LDSBankCount"] = 64;
     rv["LDSBankWidth"] = 4; // bytes per bank
 
+    // Per-XCD work-queue count baked into StreamK dynamic-queue kernels. Single
+    // codegen-side mirror of origami get_default_num_xcds(): gfx942/gfx950 bake
+    // 8 (the MI300X value), every other arch 1. gfx942 covers BOTH MI300X (8
+    // XCDs) and MI300A (6 XCDs), which codegen cannot tell apart, so it always
+    // bakes 8; the host guard rejects a device whose runtime NUM_XCD != this
+    // baked value (so MI300A's 6 is excluded at runtime). Power-of-two keeps the
+    // StreamK queue masking (AND/shift) valid.
+    rv["NumXCD"] = checkInList(isaVersion, {{9, 4, 2}, {9, 5, 0}}) ? 8 : 1;
+
+    // Per-queue counter stride = L2 cache-line size (uniform 128B on supported archs).
+    rv["CacheLineBytes"] = 128;
+
     return rv;
 }
 
@@ -641,7 +656,7 @@ inline std::map<std::string, int> initRegisterCaps(const IsaVersion&           i
         else
             rv["PhysicalMaxVgprCU"] = 2 * 1536 * 32;
     else if(isaVersion[0] == 12)
-        rv["PhysicalMaxVgprCU"] = isaVersion[1] == 5? 4096 * 32 : 1536 * 32;
+        rv["PhysicalMaxVgprCU"] = isaVersion[1] == 5? 4096 * 32 : 2 * 1536 * 32;
     else if(isaVersion[0] == 9)
         if(archCaps["ArchAccUnifiedRegs"])
             rv["PhysicalMaxVgprCU"] = 2048 * 64;

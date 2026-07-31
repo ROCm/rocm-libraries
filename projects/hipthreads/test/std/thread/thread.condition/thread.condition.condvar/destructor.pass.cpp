@@ -53,12 +53,12 @@ int main(int, char**)
 {
 #ifdef __HIP_DEVICE_COMPILE__
     cv = new hip::spin_condition_variable;
-    hip::thread th2 = support::make_test_thread(g);
+    hip::wthread th2 = support::make_test_thread(g);
     Lock lk(m);
     while (!g_ready)
         cv->wait(lk);
     lk.unlock();
-    hip::thread th1 = support::make_test_thread(f);
+    hip::wthread th1 = support::make_test_thread(f);
     th1.join();
     th2.join();
 #endif

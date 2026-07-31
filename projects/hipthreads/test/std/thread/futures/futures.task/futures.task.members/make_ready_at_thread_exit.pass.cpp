@@ -111,7 +111,7 @@ int main(int, char**)
     }
     {
         ::std::packaged_task<double(int, char)> p;
-        hip::thread t = support::make_test_thread(func3, ::std::move(p));
+        hip::wthread t = support::make_test_thread(func3, ::std::move(p));
         t.join();
     }
 #endif

@@ -108,6 +108,8 @@ BenchmarkProblems:
           - Exact: [161, 159, 1, 128]
           - Exact: [33,  127, 1, 128]
           - Exact: [129, 33,  1, 256]
+          # M=264 gives M%256==8 (for MT[0]=256 kernels): exercises subtile NonEdge store exec mask
+          - Exact: [264, 256, 1, 256]
   -
     - # ProblemType
       OperationType: GEMM
