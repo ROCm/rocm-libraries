@@ -148,11 +148,11 @@ class TestLayoutAutoDetection:
         )
         def _fake_mutating(kernel, useLDSTr, TLDS):
             if isTN(kernel) and TLDS == 1:
-                kernel["SwapGlobalReadOrder"] = True
+                kernel["SwapGlobalReadOrder"] = 1
                 return True, None
             if isNN(kernel) and useLDSTr and TLDS == 1:
                 # If mutation leaked from TN probe, this would be True
-                assert not kernel.get("SwapGlobalReadOrder", False)
+                assert not kernel.get("SwapGlobalReadOrder", 0)
                 return True, None
             return False, None
 

@@ -47,6 +47,10 @@ NHWK from MFMA's (m_in_tile, n_in_tile) layout).
 Target: CK Tile's `cktile_fixed_lean` reference for this shape
 (`N=8, Hi=Wi=56, C=K=64, Y=X=3`) reaches ~250 TFLOPS in CUDA-graph
 mode. We aim to beat that on the same shape.
+
+Shared dataclasses and low-level helpers live in
+:mod:`._conv_implicit_gemm_common` (underscore-prefixed, internal).
+This module re-exports the shared helpers to keep existing callers stable.
 """
 
 from __future__ import annotations
@@ -56,7 +60,6 @@ from typing import Callable, List, Optional, Sequence, Tuple
 
 from ...core.ir import (
     BF16,
-    F16,
     F32,
     I32,
     IRBuilder,
@@ -73,179 +76,29 @@ from ...helpers.loads import AsyncTileLoader, CoalescedTileLoader
 from ...helpers.mfma_gemm_inner import decode_mfma_lanes
 from ...helpers.pipeline import SoftwarePipeline
 from ...helpers.schedule import SchedulePolicy
-from ...helpers.spec import choose_load_vec
 from ...helpers.tensor_view import (
     make_buffer_resource,
 )
 from ...helpers.transforms import TensorDescriptor, embed, pad, unmerge_magic
+from ._conv_implicit_gemm_common import (  # noqa: F401 — re-exported for callers
+    ConvAccumulatorEpilogue,
+    ConvDataSpec,
+    ConvProblem,
+    _apply_accumulator_epilogue,
+    _choose_load_vec_for,
+    _emit_frag_smem_load,
+    _emit_mfma,
+    _emit_smem_load,
+    _ir_dtype,
+    make_a_descriptor,
+)
 
 
-_DTYPE_TO_IR: dict = {"f16": F16, "fp16": F16, "bf16": BF16, "fp32": F32}
-
-
-def _ir_dtype(dtype: str) -> Type:
-    """Map a dtype string (``"fp16"``, ``"bf16"``, ``"fp32"``) to an IR ``Type``."""
-    t = _DTYPE_TO_IR.get(dtype)
-    if t is None:
-        raise ValueError(
-            f"unsupported conv dtype {dtype!r}; choose fp16, bf16, or fp32"
-        )
-    return t
-
-
-# ---------------------------------------------------------------------
-# Spec dataclasses
-# ---------------------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class ConvDataSpec:
-    """Element / accumulator dtype choice for the conv kernel.
-
-    Layouts:
-      A: NHWC, dtype_a (input activations)
-      B: KYXC, dtype_b (weights)
-      D: NHWK, dtype_d (output)
-      accumulator: dtype_acc (always fp32)
-    """
-
-    dtype_a: str = "fp16"
-    dtype_b: str = "fp16"
-    dtype_d: str = "fp16"
-    dtype_acc: str = "fp32"
-
-
-@dataclass(frozen=True)
-class ConvProblem:
-    """2-D or 3-D convolution shape parameters.
-
-    2-D (default — ``Di`` / ``Z`` are ``None``):
-      A: NHWC,  shape ``[N, Hi, Wi, C]``
-      B: KYXC, shape ``[K, Y, X, C]``
-      D: NHWK,  shape ``[N, Ho, Wo, K]``
-      M = N*Ho*Wo,  N_gemm = K,  K_gemm = Y*X*C
-
-     3-D (set ``Di`` and ``Z``):
-       A: NDHWC, shape ``[N, Di, Hi, Wi, C]``
-       B: KZYXC, shape ``[K, Z, Y, X, C]``
-       D: NDHWK, shape ``[N, Do, Ho, Wo, K]``
-       M = N*Do*Ho*Wo,  N_gemm = K,  K_gemm = Z*Y*X*C
-    """
-
-    N: int
-    Hi: int
-    Wi: int
-    C: int
-    K: int
-    Y: int
-    X: int
-    sH: int = 1
-    sW: int = 1
-    pH: int = 0
-    pW: int = 0
-    dH: int = 1
-    dW: int = 1
-    # 3-D-only fields; leave as None for 2-D convolutions.
-    Di: Optional[int] = None
-    Z: Optional[int] = None
-    sD: Optional[int] = None
-    pD: Optional[int] = None
-    dD: Optional[int] = None
-
-    def __post_init__(self) -> None:
-        depth = (self.Di, self.Z, self.sD, self.pD, self.dD)
-        any_set = any(v is not None for v in depth)
-        all_set = all(v is not None for v in depth)
-        if any_set and not all_set:
-            raise ValueError(
-                "3-D ConvProblem requires Di, Z, sD, pD, dD (set all or leave all as None)"
-            )
-
-    @property
-    def is_3d(self) -> bool:
-        return self.Di is not None
-
-    # ---- depth spatial output (3-D only) ----
-    @property
-    def Do(self) -> Optional[int]:
-        if not self.is_3d:
-            return None
-        return (self.Di + 2 * self.pD - self.dD * (self.Z - 1) - 1) // self.sD + 1
-
-    @property
-    def Ho(self) -> int:
-        return (self.Hi + 2 * self.pH - self.dH * (self.Y - 1) - 1) // self.sH + 1
-
-    @property
-    def Wo(self) -> int:
-        return (self.Wi + 2 * self.pW - self.dW * (self.X - 1) - 1) // self.sW + 1
-
-    @property
-    def M(self) -> int:
-        base = self.N * self.Ho * self.Wo
-        return base * self.Do if self.is_3d else base
-
-    @property
-    def N_gemm(self) -> int:
-        return self.K
-
-    @property
-    def K_gemm(self) -> int:
-        z = self.Z if self.is_3d else 1
-        return z * self.Y * self.X * self.C
-
-    @property
-    def flops(self) -> int:
-        return 2 * self.M * self.N_gemm * self.K_gemm
-
-    def short(self) -> str:
-        if self.is_3d:
-            return (
-                f"N{self.N}D{self.Di}H{self.Hi}W{self.Wi}C{self.C}"
-                f"_K{self.K}Z{self.Z}Y{self.Y}X{self.X}"
-            )
-        return f"N{self.N}H{self.Hi}W{self.Wi}C{self.C}_K{self.K}Y{self.Y}X{self.X}"
-
-
-@dataclass(frozen=True)
-class ConvAccumulatorEpilogue:
-    """Static fp32 accumulator transform applied before the conv store.
-
-    This is intentionally narrower than ``helpers.fuse.FusedEpilogue``:
-    it runs directly on MFMA accumulator fragments inside the hand-authored
-    conv instance. The default is identity, preserving the historical conv IR.
-    """
-
-    bias: float = 0.0
-    scale: float = 1.0
-    relu: bool = False
-    clamp_min: Optional[float] = None
-    clamp_max: Optional[float] = None
-
-    def is_identity(self) -> bool:
-        return (
-            self.bias == 0.0
-            and self.scale == 1.0
-            and not self.relu
-            and self.clamp_min is None
-            and self.clamp_max is None
-        )
-
-    def tag(self) -> str:
-        if self.is_identity():
-            return ""
-        pieces: List[str] = []
-        if self.bias != 0.0:
-            pieces.append(f"bias{self.bias:g}")
-        if self.scale != 1.0:
-            pieces.append(f"scale{self.scale:g}")
-        if self.relu:
-            pieces.append("relu")
-        if self.clamp_min is not None or self.clamp_max is not None:
-            lo = "-inf" if self.clamp_min is None else f"{self.clamp_min:g}"
-            hi = "inf" if self.clamp_max is None else f"{self.clamp_max:g}"
-            pieces.append(f"clamp{lo}to{hi}")
-        return "epi_" + "_".join(pieces)
+def _choose_load_vec(spec: ImplicitGemmConvSpec) -> int:
+    """Thin shim keeping the forward-conv call sites unchanged."""
+    return _choose_load_vec_for(
+        spec.tile_m, spec.tile_n, spec.tile_k, spec.block_size, spec.data.dtype_a
+    )
 
 
 @dataclass(frozen=True)
@@ -365,6 +218,12 @@ class ImplicitGemmConvSpec:
     # It composes simple fp32 VALU transforms directly on MFMA accumulator
     # fragments before the existing direct/cshuffle store path.
     acc_epilogue: ConvAccumulatorEpilogue = ConvAccumulatorEpilogue()
+    # cshuffle epilogue LDS aliasing (same knob as UniversalGemmSpec.trait).
+    # False (default): the smem-pool packer aliases the cshuffle C tile onto the
+    # A/B staging bytes (pool = max(ab, c)) with a step-0 reuse barrier. True:
+    # C gets its own LDS bytes (pool = ab + c) and the barrier is elided ->
+    # lower small-tile latency, more LDS. Only affects epilogue == "cshuffle".
+    cshuffle_no_alias: bool = False
 
     @property
     def block_size(self) -> int:
@@ -400,7 +259,7 @@ class ImplicitGemmConvSpec:
             f"a{self.warp_tile_m}x{self.warp_tile_n}x{self.warp_tile_k}",
             f"{self.pipeline}_{self.epilogue}",
             self.acc_epilogue.tag(),
-            flags={"async": self.async_dma},
+            flags={"async": self.async_dma, "noalc": self.cshuffle_no_alias},
         )
 
     def validate(self) -> None:
@@ -450,10 +309,60 @@ class ImplicitGemmConvSpec:
         layout.validate()
         return layout
 
+    @staticmethod
+    def default_vector_sizes(C: int, K: int, dtype: str) -> "Tuple[int, int, int]":
+        """Return ``(vec_a, vec_b, vec_c)`` for a forward-pass problem.
+
+        Forward pass memory layout:
+          A (input):  NHWC → last dim C → vec_a
+          B (filter): KYXC → last dim C → vec_b
+          D (output): NHWK → last dim K → vec_c
+        """
+        sizes = [8, 4, 2, 1] if dtype != "fp32" else [4, 2, 1]
+
+        def _vec(n: int) -> int:
+            return next(v for v in sizes if n % v == 0)
+
+        vec_c = _vec(C)
+        return vec_c, vec_c, _vec(K)
+
 
 # ---------------------------------------------------------------------
 # Arch-aware spec validation
 # ---------------------------------------------------------------------
+
+
+def is_valid_spec_for_problem(
+    spec: ImplicitGemmConvSpec, problem: ConvProblem, arch: str = "gfx950"
+) -> Tuple[bool, str]:
+    """Return ``(ok, reason)`` for ``spec`` paired with a specific ``problem`` on ``arch``.
+
+    Extends :func:`is_valid_spec` with problem-aware checks — e.g. tile
+    divisibility against the actual M / N_gemm / K_gemm dimensions,
+    minimum occupancy constraints, or problem-specific LDS pressure.
+    """
+    ok, reason = is_valid_spec(spec, arch)
+    if not ok:
+        return False, reason
+
+    # caps gridDim.y (and .x/.z) at 65535. The M-tile axis maps
+    # to gridDim.y so reject specs whose grid would silently truncate and
+    # leave output tiles unwritten.
+    _MAX_GRID_DIM = 65535
+    _grid_m = (problem.M + spec.tile_m - 1) // spec.tile_m
+    _grid_n = (problem.N_gemm + spec.tile_n - 1) // spec.tile_n
+    if _grid_m > _MAX_GRID_DIM:
+        return False, (
+            f"grid_m {_grid_m} > {_MAX_GRID_DIM} (hardware gridDim.y cap): "
+            f"M={problem.M} tile_m={spec.tile_m}"
+        )
+    if _grid_n > _MAX_GRID_DIM:
+        return False, (
+            f"grid_n {_grid_n} > {_MAX_GRID_DIM} (hardware gridDim.x cap): "
+            f"N_gemm={problem.N_gemm} tile_n={spec.tile_n}"
+        )
+
+    return True, "ok"
 
 
 def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[bool, str]:
@@ -485,6 +394,17 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
         return False, (
             f"block_size {spec.block_size} > {target.max_threads_per_block} "
             f"(hardware cap) on {arch}"
+        )
+
+    # Check global store vector size and disable default epilogue for
+    # vec_size_c > 1
+    if (
+        spec.vector_size_c is not None
+        and spec.vector_size_c > 1
+        and spec.epilogue == "default"
+    ):
+        return False, (
+            f"default epilogue is not supported with vector size c: {spec.vector_size_c}"
         )
 
     # The MMA *family* is selected from the target's wave size: CDNA (wave64)
@@ -526,7 +446,11 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
     _c_lds = (
         spec.tile_m * spec.tile_n * _c_dtype_bytes if spec.epilogue == "cshuffle" else 0
     )
-    _total_lds = _ab_lds + _c_lds
+    # cshuffle_no_alias decides whether the cshuffle C tile shares the A/B pool
+    # bytes, so the LDS budget must be computed per case:
+    #   OFF (default, aliased): C reuses the A/B bytes   -> pool = max(ab, c)
+    #   ON  (exclusive):        C gets its own LDS bytes -> pool = ab + c
+    _total_lds = (_ab_lds + _c_lds) if spec.cshuffle_no_alias else max(_ab_lds, _c_lds)
     if not target.fits_lds(_total_lds):
         return False, (
             f"LDS budget {_total_lds} bytes "
@@ -535,21 +459,25 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
         )
 
     # WMMA (RDNA wave32) coverage mirrors the unified GEMM's narrow subset: the
-    # 16x16x16 atom with the simple ``mem`` pipeline + ``default`` epilogue and
-    # synchronous descriptor-driven loads. The richer MFMA-shaped paths
-    # (compv3/compv4 scheduler interleave, cshuffle LDS-staged C, async DMA,
-    # K-unroll, chiplet swizzle, grouped conv) are gated off until ported.
+    # 16x16x16 atom (gfx11/gfx12) or 16x16x32 atom (gfx1250) with the simple
+    # ``mem`` pipeline + ``default`` epilogue and synchronous descriptor-driven
+    # loads. The richer MFMA-shaped paths (compv3/compv4 scheduler interleave,
+    # cshuffle LDS-staged C, async DMA, K-unroll, chiplet swizzle, grouped conv)
+    # are gated off until ported.
     if family == "wmma":
-        if atom != (16, 16, 16):
-            return False, f"WMMA conv supports only 16x16x16 (got {atom}) on {arch}"
+        if atom not in ((16, 16, 4), (16, 16, 16), (16, 16, 32)):
+            return (
+                False,
+                f"WMMA conv supports only 16x16x4, 16x16x16, or 16x16x32 (got {atom}) on {arch}",
+            )
         if spec.pipeline != "mem":
             return False, (
                 f"WMMA conv supports only the 'mem' pipeline "
                 f"(got {spec.pipeline!r}) on {arch}"
             )
-        if spec.epilogue != "default":
+        if spec.epilogue not in ("default", "cshuffle"):
             return False, (
-                f"WMMA conv supports only the 'default' epilogue "
+                f"WMMA conv supports only 'default' or 'cshuffle' epilogue "
                 f"(got {spec.epilogue!r}) on {arch}"
             )
         for flag, label in (
@@ -815,121 +743,6 @@ def make_d_descriptor(p: ConvProblem, dtype: str = "fp16") -> TensorDescriptor:
 # ---------------------------------------------------------------------
 
 
-def _emit_mfma(b: IRBuilder, atom: MfmaAtom, a: Value, bv: Value, c: Value) -> Value:
-    return atom.emit(b, a, bv, c)
-
-
-def _emit_smem_load(
-    b: IRBuilder,
-    smem: Value,
-    row: Value,
-    col: Value,
-    n: int,
-    *,
-    smem_dtype: Optional[Type] = None,
-) -> Value:
-    if smem_dtype is not None and smem_dtype is not F16:
-        vec = b.smem_load_vN(smem, row, col, dtype=smem_dtype, n=n)
-        # MFMA fp32 intrinsics take a scalar float, not a vector.
-        return b.vec_extract(vec, 0) if (smem_dtype is F32 and n == 1) else vec
-    if n == 4:
-        return b.smem_load_v4_f16(smem, row, col)
-    return b.smem_load_vN_f16(smem, row, col, n=n)
-
-
-def _apply_accumulator_epilogue(
-    b: IRBuilder,
-    epilogue: ConvAccumulatorEpilogue,
-    accs: Sequence[Value],
-) -> List[Value]:
-    """Apply a static fp32 epilogue to each accumulator fragment.
-
-    The transform is scalar per accumulator lane, then packed back into the
-    original vector width so the existing direct/cshuffle epilogues can consume
-    the result unchanged.
-    """
-
-    if epilogue.is_identity():
-        return list(accs)
-
-    out: List[Value] = []
-    c_zero = b.const_f32(0.0)
-    c_bias = b.const_f32(epilogue.bias) if epilogue.bias != 0.0 else None
-    c_scale = b.const_f32(epilogue.scale) if epilogue.scale != 1.0 else None
-    c_clamp_min = (
-        b.const_f32(epilogue.clamp_min) if epilogue.clamp_min is not None else None
-    )
-    c_clamp_max = (
-        b.const_f32(epilogue.clamp_max) if epilogue.clamp_max is not None else None
-    )
-
-    for acc in accs:
-        elems: List[Value] = []
-        for i in range(acc.type.count):
-            v = b.vec_extract(acc, i)
-            if c_bias is not None:
-                v = b.fadd(v, c_bias)
-            if c_scale is not None:
-                v = b.fmul(v, c_scale)
-            if epilogue.relu:
-                v = b.fmax(v, c_zero)
-            if c_clamp_min is not None:
-                v = b.fmax(v, c_clamp_min)
-            if c_clamp_max is not None:
-                v = b.fmin(v, c_clamp_max)
-            elems.append(v)
-        out.append(b.vec_pack(elems, elems[0].type))
-    return out
-
-
-def _emit_frag_smem_load(
-    b: IRBuilder,
-    src: Value,
-    mn_in_atom: Value,
-    k_in_atom: Value,
-    atom_mn_base: Value,
-    k_tile_base: Value,
-    frag_len: int,
-    *,
-    smem_dtype: Optional[Type] = None,
-) -> Value:
-    """Load one ``frag_len``-wide operand fragment from a row-major LDS tile.
-
-    Both the A LDS tile ``(block_m, block_k)`` and the B LDS tile
-    ``(block_n, block_k)`` are row-major with the M/N index as the row and K as
-    the column. One lane's fragment occupies a single tile row
-    (``atom_mn_base + mn_in_atom``) and ``frag_len`` contiguous K columns from
-    ``k_tile_base + k_in_atom`` — true for both the MFMA and WMMA layout maps,
-    whose A/B fragment slots are K-contiguous. fp16 smem loads cap at 8 lanes,
-    so a wider fragment (WMMA ``<16 x half>``) is assembled from 8-wide chunks.
-    """
-    lds_row = b.add(atom_mn_base, mn_in_atom)
-    lds_col = b.add(k_tile_base, k_in_atom)
-    if frag_len <= 8:
-        return _emit_smem_load(
-            b, src, lds_row, lds_col, frag_len, smem_dtype=smem_dtype
-        )
-    frag = None
-    for off in range(0, frag_len, 8):
-        chunk = _emit_smem_load(
-            b, src, lds_row, b.add(lds_col, b.const_i32(off)), 8, smem_dtype=smem_dtype
-        )
-        frag = chunk if frag is None else b.vec_concat(frag, chunk)
-    return frag
-
-
-def _choose_load_vec(spec: ImplicitGemmConvSpec) -> int:
-    """Pick the widest load vector width that divides the K tile and
-    distributes evenly over `block_size` threads, respecting the
-    hardware limit of 4 dwords (16 bytes) per buffer_load.
-
-    Thin adapter over the shared :func:`rocke.helpers.spec.choose_load_vec`."""
-    _eb = {"fp16": 2, "bf16": 2, "fp32": 4}.get(spec.data.dtype_a, 2)
-    return choose_load_vec(
-        spec.tile_m, spec.tile_n, spec.tile_k, spec.block_size, elem_bytes=_eb
-    )
-
-
 def build_implicit_gemm_conv(
     spec: ImplicitGemmConvSpec,
     arch: str = "gfx950",
@@ -1143,13 +956,17 @@ def build_implicit_gemm_conv(
     ]
 
     threads = spec.block_size
-    _auto_load_vec = _choose_load_vec(spec)
-    load_vec_a = (
-        spec.vector_size_a if spec.vector_size_a is not None else _auto_load_vec
+    _def_vec_a, _def_vec_b, _ = ImplicitGemmConvSpec.default_vector_sizes(
+        p.C, p.K, spec.data.dtype_a
     )
-    load_vec_b = (
-        spec.vector_size_b if spec.vector_size_b is not None else _auto_load_vec
-    )
+    # Clamp the C/K-derived default by the tile-geometry safe maximum so that the
+    # CoalescedTileLoader's (tile_rows * tile_cols / vec) % block_size == 0 invariant
+    # is always satisfied (e.g. when tile_n is small relative to block_size).
+    _tile_vec = _choose_load_vec(spec)
+    _def_vec_a = min(_def_vec_a, _tile_vec)
+    _def_vec_b = min(_def_vec_b, _tile_vec)
+    load_vec_a = spec.vector_size_a if spec.vector_size_a is not None else _def_vec_a
+    load_vec_b = spec.vector_size_b if spec.vector_size_b is not None else _def_vec_b
     # ``CoalescedTileLoader`` derives ``vecs_per_thread`` /
     # ``cols_per_vec`` internally from ``(tile_rows, tile_cols,
     # block_size, load_vec)`` and re-emits the per-iter constants
@@ -1601,7 +1418,7 @@ def build_implicit_gemm_conv(
     if epilogue_override is not None:
         epilogue_override(b, spec, final_accs, grid, d_rsrc, extra_context)
     elif spec.epilogue == "cshuffle":
-        _emit_cshuffle_epilogue(b, spec, final_accs, grid, d_rsrc)
+        _emit_cshuffle_epilogue(b, spec, final_accs, grid, d_rsrc, op=op)
     elif op.family == "wmma":
         # WMMA (RDNA) direct epilogue still uses the explicit per-warp/lane
         # decomposition (it predates the helper-based path); pass the bound
@@ -1738,6 +1555,8 @@ def _emit_cshuffle_epilogue(
     accs: Sequence[Value],
     grid: WarpGrid,
     d_rsrc: Value,
+    *,
+    op=None,
 ) -> None:
     """LDS-staged cshuffle epilogue — the runbook §9.3 lever.
 
@@ -1747,7 +1566,7 @@ def _emit_cshuffle_epilogue(
 
       1. Each lane converts its `<c_per_lane x f32>` accumulator to
          `<c_per_lane x dtype_d>` (f16/bf16/f32) and stores them into an
-         `[tile_m x tile_n]` LDS region at the MFMA *output* layout.
+         `[tile_m x tile_n]` LDS region at the MMA *output* layout.
       2. ``block_sync_lds`` (s_barrier).
       3. A flat distribution of `block_size` threads reads
          `<store_vec x dtype_d>` from LDS at consecutive row-major
@@ -1760,6 +1579,10 @@ def _emit_cshuffle_epilogue(
     The conv-specific bit is the ``addr_fn``: the D descriptor maps
     ``(m, k_out) -> NHWK linear element offset`` via the
     coordinate-transform DAG.
+
+    ``op`` is the resolved :class:`~rocke.core.arch.MmaOp`; when it is a
+    WMMA op (``op.family == "wmma"``) the LDS scatter uses
+    ``op.c_layout().coord()`` instead of the MFMA ``atom.lane_to_output``.
     """
     p = spec.problem
     D_desc = make_d_descriptor(p, dtype=spec.data.dtype_d)
@@ -1767,10 +1590,22 @@ def _emit_cshuffle_epilogue(
     def d_addr(b_: IRBuilder, m_val: Value, n_val: Value):
         return D_desc.offset(b_, m=m_val, k_out=n_val)
 
-    _cshuffle_kwargs: dict = {"out_dtype": spec.data.dtype_d}
+    _cshuffle_kwargs: dict = {
+        "out_dtype": spec.data.dtype_d,
+        "no_alias": spec.cshuffle_no_alias,
+    }
     if spec.vector_size_c is not None:
         _cshuffle_kwargs["max_store_vec"] = spec.vector_size_c
-    CShuffleEpilogue.from_grid(atom=spec.atom, grid=grid, **_cshuffle_kwargs).store(
+    else:
+        _, __, vec_c = ImplicitGemmConvSpec.default_vector_sizes(
+            p.C, p.K, spec.data.dtype_d
+        )
+        _cshuffle_kwargs["max_store_vec"] = vec_c
+    if op is not None and op.family == "wmma":
+        _epi = CShuffleEpilogue.from_grid_op(op=op, grid=grid, **_cshuffle_kwargs)
+    else:
+        _epi = CShuffleEpilogue.from_grid(atom=spec.atom, grid=grid, **_cshuffle_kwargs)
+    _epi.store(
         b,
         accs=accs,
         addr_fn=d_addr,

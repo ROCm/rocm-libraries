@@ -49,7 +49,7 @@ RppStatus rppt_non_silent_region_detection(RppPtr_t srcPtr, RpptDescPtr srcDescP
     //     return RPP_ERROR_INVALID_SRC_DIMS;
 
     rpp::Handle& handle = rpp::deref(rppHandle);
-    RppBackend handleBackend = handle.GetBackend();
+    [[maybe_unused]] RppBackend handleBackend = handle.GetBackend();
 
     if (executionBackend == RppBackend::RPP_HOST_BACKEND) {
         if (srcDescPtr->dataType == RpptDataType::F32) {
@@ -90,7 +90,7 @@ RppStatus rppt_to_decibels(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dst
     if (!multiplier) return RPP_ERROR_ZERO_DIVISION;
 
     rpp::Handle& handle = rpp::deref(rppHandle);
-    RppBackend handleBackend = handle.GetBackend();
+    [[maybe_unused]] RppBackend handleBackend = handle.GetBackend();
 
     if (executionBackend == RppBackend::RPP_HOST_BACKEND) {
         // Disabled this check for now.
@@ -135,7 +135,7 @@ RppStatus rppt_pre_emphasis_filter(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppP
                                    Rpp32f* coeffTensor, RpptAudioBorderType borderType,
                                    rppHandle_t rppHandle, RppBackend executionBackend) {
     rpp::Handle& handle = rpp::deref(rppHandle);
-    RppBackend handleBackend = handle.GetBackend();
+    [[maybe_unused]] RppBackend handleBackend = handle.GetBackend();
 
     if (executionBackend == RppBackend::RPP_HOST_BACKEND) {
         // Disabled this check for now.
@@ -177,7 +177,7 @@ RppStatus rppt_down_mixing(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dst
                            RpptDescPtr dstDescPtr, Rpp32s* srcDimsTensor, bool normalizeWeights,
                            rppHandle_t rppHandle, RppBackend executionBackend) {
     rpp::Handle& handle = rpp::deref(rppHandle);
-    RppBackend handleBackend = handle.GetBackend();
+    [[maybe_unused]] RppBackend handleBackend = handle.GetBackend();
 
     if (executionBackend == RppBackend::RPP_HOST_BACKEND) {
         // Disabled this check for now.
@@ -227,7 +227,7 @@ RppStatus rppt_spectrogram(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dst
         return RPP_ERROR_INVALID_DST_LAYOUT;
 
     rpp::Handle& handle = rpp::deref(rppHandle);
-    RppBackend handleBackend = handle.GetBackend();
+    [[maybe_unused]] RppBackend handleBackend = handle.GetBackend();
 
     if (executionBackend == RppBackend::RPP_HOST_BACKEND) {
         // Disabled this checks for now.
@@ -284,7 +284,7 @@ RppStatus rppt_mel_filter_bank(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t
     if (dstDescPtr->layout != RpptLayout::NFT) return RPP_ERROR_INVALID_DST_LAYOUT;
 
     rpp::Handle& handle = rpp::deref(rppHandle);
-    RppBackend handleBackend = handle.GetBackend();
+    [[maybe_unused]] RppBackend handleBackend = handle.GetBackend();
 
     if (executionBackend == RppBackend::RPP_HOST_BACKEND) {
         // Disabled this check for now.
@@ -334,7 +334,7 @@ RppStatus rppt_resample(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstPtr
                         Rpp32s* srcDimsTensor, RpptResamplingWindow& window, rppHandle_t rppHandle,
                         RppBackend executionBackend) {
     rpp::Handle& handle = rpp::deref(rppHandle);
-    RppBackend handleBackend = handle.GetBackend();
+    [[maybe_unused]] RppBackend handleBackend = handle.GetBackend();
 
     if (executionBackend == RppBackend::RPP_HOST_BACKEND) {
         // Disabled this check for now.
@@ -379,7 +379,7 @@ RppStatus rppt_audio_tensor_add_tensor(RppPtr_t srcPtr1, RppPtr_t srcPtr2, RpptD
                                        Rpp32s* srcLengthTensor, rppHandle_t rppHandle,
                                        RppBackend executionBackend) {
     rpp::Handle& handle = rpp::deref(rppHandle);
-    RppBackend handleBackend = handle.GetBackend();
+    [[maybe_unused]] RppBackend handleBackend = handle.GetBackend();
 
     if (executionBackend == RppBackend::RPP_HOST_BACKEND) {
         if ((srcDescPtr->dataType == RpptDataType::F32) &&
@@ -416,7 +416,7 @@ RppStatus rppt_audio_tensor_mul_scalar(RppPtr_t srcPtr, Rpp32f scalarValue, Rppt
                                        Rpp32s* srcLengthTensor, rppHandle_t rppHandle,
                                        RppBackend executionBackend) {
     rpp::Handle& handle = rpp::deref(rppHandle);
-    RppBackend handleBackend = handle.GetBackend();
+    [[maybe_unused]] RppBackend handleBackend = handle.GetBackend();
 
     if (executionBackend == RppBackend::RPP_HOST_BACKEND) {
         if ((srcDescPtr->dataType == RpptDataType::F32) &&
