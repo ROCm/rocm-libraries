@@ -189,12 +189,16 @@ int dispatcher_run_aquant_gemm(const void* A,
 
     // Allocate device buffers.
     // B may be a packed type (pk_int4_t): elements_to_bytes<T>(n) handles PackedSize correctly.
-    if(hipMalloc(&A_dev, elements_to_bytes<ADataType>(static_cast<std::size_t>(M) * static_cast<std::size_t>(K))) != hipSuccess)
+    if(hipMalloc(&A_dev,
+                 elements_to_bytes<ADataType>(static_cast<std::size_t>(M) *
+                                              static_cast<std::size_t>(K))) != hipSuccess)
     {
         cleanup();
         return -1;
     }
-    if(hipMalloc(&B_dev, elements_to_bytes<BDataType>(static_cast<std::size_t>(K) * static_cast<std::size_t>(N))) != hipSuccess)
+    if(hipMalloc(&B_dev,
+                 elements_to_bytes<BDataType>(static_cast<std::size_t>(K) *
+                                              static_cast<std::size_t>(N))) != hipSuccess)
     {
         cleanup();
         return -1;
@@ -204,21 +208,29 @@ int dispatcher_run_aquant_gemm(const void* A,
         cleanup();
         return -1;
     }
-    if(hipMalloc(&C_dev, elements_to_bytes<CDataType>(static_cast<std::size_t>(M) * static_cast<std::size_t>(N))) != hipSuccess)
+    if(hipMalloc(&C_dev,
+                 elements_to_bytes<CDataType>(static_cast<std::size_t>(M) *
+                                              static_cast<std::size_t>(N))) != hipSuccess)
     {
         cleanup();
         return -1;
     }
 
     // Copy inputs to device
-    if(hipMemcpy(A_dev, A_host, elements_to_bytes<ADataType>(static_cast<std::size_t>(M) * static_cast<std::size_t>(K)), hipMemcpyHostToDevice) !=
-       hipSuccess)
+    if(hipMemcpy(
+           A_dev,
+           A_host,
+           elements_to_bytes<ADataType>(static_cast<std::size_t>(M) * static_cast<std::size_t>(K)),
+           hipMemcpyHostToDevice) != hipSuccess)
     {
         cleanup();
         return -1;
     }
-    if(hipMemcpy(B_dev, B_host, elements_to_bytes<BDataType>(static_cast<std::size_t>(K) * static_cast<std::size_t>(N)), hipMemcpyHostToDevice) !=
-       hipSuccess)
+    if(hipMemcpy(
+           B_dev,
+           B_host,
+           elements_to_bytes<BDataType>(static_cast<std::size_t>(K) * static_cast<std::size_t>(N)),
+           hipMemcpyHostToDevice) != hipSuccess)
     {
         cleanup();
         return -1;
@@ -248,16 +260,18 @@ int dispatcher_run_aquant_gemm(const void* A,
     }
     else
     {
-        if(hipMemcpy(AQ_dev,
-                     AQ_host,
-                     elements_to_bytes<QDataType>(QM_A * QK_A),
-                     hipMemcpyHostToDevice) != hipSuccess)
+        if(hipMemcpy(
+               AQ_dev, AQ_host, elements_to_bytes<QDataType>(QM_A * QK_A), hipMemcpyHostToDevice) !=
+           hipSuccess)
         {
             cleanup();
             return -1;
         }
     }
-    if(hipMemset(C_dev, 0, elements_to_bytes<CDataType>(static_cast<std::size_t>(M) * static_cast<std::size_t>(N))) != hipSuccess)
+    if(hipMemset(C_dev,
+                 0,
+                 elements_to_bytes<CDataType>(static_cast<std::size_t>(M) *
+                                              static_cast<std::size_t>(N))) != hipSuccess)
     {
         cleanup();
         return -1;
@@ -304,8 +318,11 @@ int dispatcher_run_aquant_gemm(const void* A,
     }
 
     // Copy result back
-    if(hipMemcpy(C_host, C_dev, elements_to_bytes<CDataType>(static_cast<std::size_t>(M) * static_cast<std::size_t>(N)), hipMemcpyDeviceToHost) !=
-       hipSuccess)
+    if(hipMemcpy(
+           C_host,
+           C_dev,
+           elements_to_bytes<CDataType>(static_cast<std::size_t>(M) * static_cast<std::size_t>(N)),
+           hipMemcpyDeviceToHost) != hipSuccess)
     {
         cleanup();
         return -1;
