@@ -66,7 +66,7 @@ THRUST_HOST_DEVICE void uninitialized_fill(
 {
   using ValueType = thrust::detail::it_value_t<ForwardIterator>;
 
-  thrust::for_each(exec, first, last, thrust::detail::uninitialized_fill_functor<ValueType>(x));
+  thrust::for_each(exec, first, last, thrust::detail::uninitialized_fill_functor<ValueType>{x});
 } // end uninitialized_fill()
 
 template <typename DerivedPolicy, typename ForwardIterator, typename Size, typename T>
@@ -90,7 +90,7 @@ THRUST_HOST_DEVICE ForwardIterator uninitialized_fill_n(
 {
   using ValueType = thrust::detail::it_value_t<ForwardIterator>;
 
-  return thrust::for_each_n(exec, first, n, thrust::detail::uninitialized_fill_functor<ValueType>(x));
+  return thrust::for_each_n(exec, first, n, thrust::detail::uninitialized_fill_functor<ValueType>{x});
 } // end uninitialized_fill()
 
 } // namespace detail
