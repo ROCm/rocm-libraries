@@ -24,7 +24,7 @@ Requirements:
 Usage:
   python3 15_grouped_gemm_abquant.py                     # fp8, 128x128x128, no preshuffle
   python3 15_grouped_gemm_abquant.py --dtype bf8
-  python3 15_grouped_gemm_abquant.py --pipeline eightwaves --M 192 --N 256 --K 128
+  python3 15_grouped_gemm_abquant.py --pipeline eightwaves --M 192 --N 256 --K 128  # bqgn=128 default
   python3 15_grouped_gemm_abquant.py --no-verify
 """
 
@@ -215,7 +215,7 @@ def main():
     parser.add_argument("--N", type=int, default=None)
     parser.add_argument("--K", type=int, default=1024)
     parser.add_argument("--quant-group-k", type=int, default=128)
-    parser.add_argument("--bquant-group-n", type=int, default=1)
+    parser.add_argument("--bquant-group-n", type=int, default=None)
     parser.add_argument("--no-verify", action="store_true")
     parser.add_argument("--output-dir", type=Path, default=None)
     parser.add_argument("--gfx-arch", type=str, default="gfx950")
@@ -232,7 +232,10 @@ def main():
     N = args.N if args.N is not None else _dn
     K = args.K
     gK = args.quant_group_k
-    bN = args.bquant_group_n
+    # EightWaves requires bquant_group_n >= warp_tile_n (16); tested config uses 128.
+    # CompV3/PreshuffleB support bquant_group_n=1 (one scale per column).
+    _default_bqn = {"compv3": 1, "preshuffleb": 1, "eightwaves": 128}
+    bN = args.bquant_group_n if args.bquant_group_n is not None else _default_bqn[args.pipeline]
 
     # -------------------------------------------------------------------------
     # 1. Build kernel config
