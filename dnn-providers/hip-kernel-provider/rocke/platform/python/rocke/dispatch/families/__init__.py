@@ -7,7 +7,7 @@ The GEMM family (``rocke.dispatch.gemm``) is fully implemented as the worked
 reference: two cases (fp16 / bf16 RCR) on top of the operator-agnostic
 ``core.py`` contracts (``OperatorRequest`` / ``KernelCandidate`` /
 ``CandidateRegistry`` / ``DispatchResult``) plus a generic config predicate
-(``gemm_config_supported``) and the arch-family gate (``arch_family_supported``).
+(``gemm_config_supported``) and a declared ``Capability`` per candidate.
 
 This package holds **documented scaffolds** for the remaining families so the
 extension pattern is obvious and uniform. Each scaffold:
@@ -25,11 +25,21 @@ A scaffold is "filled in" by registering ``KernelCandidate`` objects on its
 registry exactly the way ``gemm/fp16_rcr.py`` does:
 
     1. write per-candidate ``_spec_*`` factories (one per tuned tile/algorithm),
-    2. write a ``support`` predicate = family request errors
-       + ``arch_family_supported`` + a family config predicate
-       (generalize ``gemm_config_supported``) + a runtime-shape check,
-    3. register the candidates with (priority, arch_family),
-    4. point ``dispatch_<family>`` at ``registry.select(req)``.
+    2. declare a ``Capability`` per candidate: the explicit ``arches`` it serves,
+       plus the dtypes / layouts / shape bounds it is built for. This is
+       mandatory -- ``register()`` rejects a candidate without one, because a
+       candidate that declares nothing is invisible to ``for_arch`` and
+       ``coverage()``,
+    3. write a ``support`` predicate for what is left: family request errors, a
+       family config predicate (generalize ``gemm_config_supported``), and any
+       runtime-shape check the capability cannot express as data,
+    4. register the candidates, and call ``candidate.admits(req)`` rather than
+       ``supports(req)`` anywhere the full verdict is wanted,
+    5. point ``dispatch_<family>`` at ``registry.select(req)``.
+
+Each family also passes a ``dim_vocabulary`` to its registry, which turns a
+misspelled dimension name in a ``ShapeRange`` into an import-time error instead
+of a constraint that silently never matches.
 """
 
 from __future__ import annotations

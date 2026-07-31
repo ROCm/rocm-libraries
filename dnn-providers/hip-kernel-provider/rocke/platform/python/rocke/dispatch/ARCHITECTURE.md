@@ -169,7 +169,8 @@ per candidate and probing it, and the registry cannot be serialized, diffed
 across releases, or rendered into documentation.
 
 **Nothing gates on architecture for attention.** GEMM and conv at least gate
-coarsely, through `arch_family_supported` (see `README.md`, "Arch-family gate").
+coarsely, through `arch_family_supported` (see `README.md`, "Declared coverage
+and the arch gate", for what replaced it).
 Attention has no equivalent. It touches `ArchTarget` only to validate
 that the arch string parses, and `supports_native_unified_attention` is entirely
 architecture-blind — it checks `head_size`, `block_size`, and `dtype` and
@@ -185,16 +186,25 @@ gfx1250          cdna      32    attention_unified_2d
 gfx1201          rdna      32    attention_unified_2d
 ```
 
-Wave64 MFMA and wave32 WMMA targets receive the same candidate, and so do
-architectures for which no attention kernel exists at all. The dedicated
-gfx1250 kernel — `build_wmma_attention_fwd`, with an `is_valid_spec` that checks
-for the 16x16x32 WMMA atom and the matching wave size — is registered nowhere
-and is unreachable through dispatch.
+Wave64 MFMA and wave32 WMMA targets receive the same candidate. That single
+answer is not itself wrong — `unified_2d` names a *path*, and `attention_unified`
+picks the concrete backend downstream from the running device, so gfx1250 does
+get a WMMA kernel and RDNA gets the arch-neutral scalar one. What is wrong is
+that dispatch cannot see any of it. It cannot say which arches attention covers,
+cannot prefer an arch-specialized kernel over the generic path, and cannot be
+asked the question at all without a device attached.
 
-The `wave` column also rules out the obvious fix. Copying GEMM's family gate
-would not close this: `arch_specs.json` records gfx1250 as `family="cdna"` with
-`wave_size=32`, so a `cdna` gate still admits a wave32 target to the wave64 MFMA
-kernels. Family is not a proxy for wave size, which is why section 5.1 gates on
+The cost is concrete: the dedicated gfx1250 kernel — `build_wmma_attention_fwd`,
+with an `is_valid_spec` that checks for the 16x16x32 WMMA atom and the matching
+wave size — is registered nowhere. It is a better kernel than the generic path
+on its target and dispatch has no way to choose it, because choosing requires
+comparing declared coverage and there is none to compare.
+
+Copying GEMM's family gate would not close this, and would do harm elsewhere:
+`arch_specs.json` records gfx1250 as `family="cdna"` with `wave_size=32`, so a
+`cdna` gate admits a wave32 target to genuinely wave64 MFMA kernels. That is a
+live bug in the conv family, which gated on `arch_family` until section 12's
+phase 3. Family is not a proxy for wave size, which is why section 5.1 gates on
 an explicit list of gfx targets instead.
 
 **Selection depends on the host, not the request.** The arch-specialized
@@ -570,8 +580,8 @@ class KernelCandidate:
     signature: Callable[[Spec], Sequence[dict]]
     sweep_space: Callable[[Request], Sequence[Spec]]  # tuning variants
 
-    # --- execution (NEW; see 6.5) ---
-    bind: Callable[[Request, Spec], ProblemBinding]   # allocate + pack + verify
+    # --- execution (see 7.5) ---
+    bind: Callable[[DispatchResult, bool], ProblemBinding] | None = None
     bind_torch: Callable[..., ProblemBinding] | None = None   # optional
 ```
 
@@ -581,6 +591,41 @@ alone, which is what lets `DispatchResult` be executable instead of advisory.
 `bind` closes the remaining gap between "I have a compiled kernel" and "I can
 launch and verify it", so one benchmark harness can sweep every registered
 kernel — see section 7.5.
+
+**`bind` is mandatory per family, not globally — a ratchet rather than a rule.**
+`CandidateRegistry(..., require_binding=True)` makes a family refuse any
+candidate it could not launch, with the same import-time failure `capability`
+gets. GEMM fp16 and bf16 have it on today.
+
+It is not global, because `capability` and `bind` are different kinds of thing.
+A capability is a *declaration*: every candidate can make one, it costs nothing
+but honesty, and refusing to declare only hides you from `for_arch`. A binding
+is *behavior* — host allocation, argument packing, a numeric reference — and a
+candidate can truthfully say "I support gfx950 fp16 NHWC" long before anyone has
+written the reference for it. Mandating it everywhere today would de-register 41
+of the 50 registered candidates rather than cause 41 bindings to be written.
+
+The concrete blockers, which are also the backfill order:
+
+| family | candidates | blocker |
+|---|---|---|
+| `gemm_fp16_rcr`, `gemm_bf16_rcr` | 9 | none — required |
+| `conv_implicit_gemm` | 3 | `signature` is empty, so there is nothing to pack |
+| `norm2d` | 30 | same |
+| `moe_fused_mega` | 2 | same, plus `grid` is `(0, 0, 0)` (runtime `num_m_blocks`) |
+| attention (library) | 6 | geometry deferred by design; needs phase 6 |
+
+So the sequence is: declare the args signature, then write the binding, then
+flip `require_binding`. A family that has flipped it cannot silently regress,
+which is the property worth having — the risk is not the 41 known gaps, it is
+the 42nd arriving unnoticed. `coverage()` reports `requires_binding` per family
+and `bindable` per candidate so the remaining gap is queryable rather than
+discovered at call time, and an invariant test pins the exempt set so a family
+leaving it is a deliberate edit.
+
+Where a candidate genuinely has no binding, `bound()` raises
+`NotImplementedError` naming it, so the gap reads as a known limit rather than a
+crash.
 
 ### 5.3 Priority bands
 
@@ -798,10 +843,10 @@ Moving `build` onto the candidate (section 5.2) generalizes it: `dispatch_*_all`
 plus `build` means "compile every registered kernel for this problem" costs a
 bench script one loop.
 
-**The launch half is what is missing.** `run_manifest.py` already provides an
+**The launch half is what was missing.** `run_manifest.py` already provides an
 operator-agnostic runner — `_launch_timed`, the perf/TFLOPs/GB-s computation, and
-the verification plumbing are all generic. But it selects the per-problem adapter
-through a hardcoded string dispatch on the manifest `kind`:
+the verification plumbing are all generic. But it selected the per-problem
+adapter through a hardcoded string dispatch on the manifest `kind`:
 
 ```python
 if kind == "gemm_fp16":            ... run_gemm_manifest_problem(manifest, shape, verify)
@@ -814,9 +859,15 @@ else: raise ValueError(f"unsupported manifest kind {kind!r}")
 ```
 
 Every branch is a hand-written `run_*_manifest_problem(manifest, shape, verify)`
-returning `(make_args, grid, block, flop, bytes_xfer, check)`. There is no
-`attention` kind, and `instances/common/manifest_runner/` holds adapters only for
-gemm, conv, matmul_nbits, and simple_ops.
+returning `(make_args, grid, block, flop, bytes_xfer, check)`. The chain is the
+reason the set of runnable families was closed: `instances/common/manifest_runner/`
+holds adapters only for gemm, conv, matmul_nbits, and simple_ops, and a family
+that lives in `library/` — attention, MoE — could not add one without editing a
+function in the shipped platform wheel. Phase 4 replaced the chain with
+`register_manifest_runner(kind, builder)`, which lets the adapter live beside the
+code that knows the buffer layout. The `attention_unified` kind is still
+unserved, but now for a reason that is about attention rather than about the
+runner (see phase 4).
 
 `signature()` **cannot close this gap.** It returns argument *descriptors* —
 `{"name": "A", "type": "ptr<f16, global>", "size_bytes": 8}` — which fix the ABI
@@ -838,24 +889,44 @@ or how to compute it.
 The adapter concept already exists; it is just keyed by a string and living
 outside the registry. Put it on the candidate and the `kind` dispatch collapses
 into a registry lookup. `ProblemBinding` deliberately mirrors what
-`run_*_manifest_problem` already returns, minus the grid and block the candidate
-supplies:
+`run_*_manifest_problem` already returns:
 
 ```python
 @dataclass(frozen=True)
 class ProblemBinding:
-    """Everything needed to execute one (request, spec) pair, minus geometry."""
+    """Everything a launcher needs to run one dispatched kernel once."""
+    grid: tuple[int, int, int]
+    block: tuple[int, int, int]
     # (rt) -> (packed_args, device_ptrs_to_free)
-    make_args: Callable[[Runtime], tuple[bytes, list[int]]]
-    flop: int
-    bytes_moved: int
-    # (rt, ptrs) -> (max_abs_diff, bad_count, total); None == no reference
-    check: Callable[[Runtime, list[int]], tuple[float, int, int]] | None = None
+    make_args: Callable[[Runtime], tuple[bytes, tuple[int, ...]]]
+    # (rt, ptrs) -> (max_abs_diff, bad_count, total)
+    check: Callable[[Runtime, tuple[int, ...]], tuple[float, int, int]]
+    flop: float
+    bytes_moved: float
 
 
 # on KernelCandidate, alongside build:
-bind: Callable[[Request, Spec], ProblemBinding]
+bind: Callable[[DispatchResult, bool], ProblemBinding] | None = None
 ```
+
+Two details differ from how this was first sketched, both learned from
+implementing it.
+
+**The binding carries geometry, and takes a** `DispatchResult` **rather than a
+(request, spec) pair.** The original sketch omitted grid and block on the
+grounds that the candidate already supplies them — but then every caller has to
+re-pair a binding with the geometry from somewhere else, and the legacy manifest
+adapters show where that leads: `run_gemm_manifest_problem` re-derives the grid
+from `block_m` / `block_n` / `grid_order`, which is the candidate's `grid`
+arithmetic written a second time and free to drift. Since a `DispatchResult`
+already holds the request, the spec, *and* the geometry the dispatcher computed,
+binding from the result makes the launch recipe whole and gives it exactly one
+source for geometry. `dispatch_gemm_fp16(req).bind(verify=True)` is the call.
+
+**The callables take the runtime as a parameter rather than closing over one.**
+That is what keeps `dispatch/` free of a HIP import and lets a binding be built
+and asserted on a machine with no GPU, which is where most of its tests run. It
+is also, not coincidentally, the shape the existing adapters already use.
 
 A family-agnostic sweep is then the whole harness:
 
@@ -1276,8 +1347,29 @@ for cand in registry.candidates():
     assert len(waves) == 1, f"{cand.name} spans wave sizes {sorted(waves)}"
 ```
 
-A kernel that genuinely serves both wave sizes is then an explicit decision:
-split it into two candidates, one per wave size, each with its own arch list.
+A kernel that genuinely serves both wave sizes is then an explicit decision, and
+the choice is between splitting it into one candidate per wave size and taking a
+named exemption. Two candidates in the tree take the exemption, both because
+nothing about them bakes in a wave size:
+
+| Exempt | Why it is not an MMA kernel |
+| --- | --- |
+| `norm2d_*` (all 30) | One CTA per row, LDS-tree reduction, no MMA atom; `wave_size` is read from the target and passed to the spec. The per-arch LDS and max-threads checks in the instance validators do the narrowing. |
+| `attention_unified_2d` / `_3d` | These select a *path*; the concrete backend is chosen downstream per device — wave64 MFMA on gfx942/gfx950, wave32 WMMA on gfx1250, arch-neutral scalar elsewhere. |
+
+The exemption is itself pinned by a test, so a new straddling candidate has to be
+argued for rather than quietly inheriting it:
+
+```python
+straddling = {c.name for c in registry.candidates()
+              if len({ArchTarget.from_gfx(a).wave_size
+                      for a in c.capability.arches}) > 1}
+assert straddling == EXPECTED_EXEMPT
+```
+
+A candidate that does bake a wave size into its geometry — every GEMM, conv, moe,
+and arch-specialized attention candidate — gets no such latitude, because the
+failure it prevents is emitting wrong ISA rather than merely picking a slow path.
 
 **No dead coverage.** Every arch a candidate declares must be reachable: some
 request in the family's sample grid must be admitted on it. This is the inverse
@@ -1396,47 +1488,111 @@ has the 16x16x16 bf16 atom the cshuffle path needs, and the decode candidate's
 deep-K 16x16x32 bf16 atom exists only on gfx950. A cdna/rdna label could not have
 expressed either.
 
-**Phase 3 — arch gate becomes mandatory.** Once every candidate declares
-coverage, enforce a non-empty `arches` in `register()` and narrow `unified_2d` /
-`unified_3d` to `arches=("gfx90a", "gfx942", "gfx950")` — the wave64 MFMA targets
-they were actually written and run against. Add the arch-gate, wave-size, and
-capability/predicate-agreement tests. **This phase fixes the cross-architecture
-misroute in section 3** and is the highest-value single change in the plan.
+**Phase 3 — coverage becomes mandatory.** Backfill the remaining families (conv,
+moe, norm, attention), then make `register()` reject a candidate whose
+`capability` is `None`, so `for_arch` and `coverage()` can no longer answer by
+omission. Add the arch-gate and wave-size invariants per family. Every candidate
+in the tree now declares what it serves.
 
-**Phase 4 — register the existing arch variants.** The first phase that changes
+The plan originally said to narrow `unified_2d` / `unified_3d` to
+`arches=("gfx90a", "gfx942", "gfx950")`, on the reading that they were wave64
+MFMA kernels being handed wave32 targets. Backfilling them showed that reading
+to be wrong, and the correction is worth recording because it changes what
+section 3's attention finding means:
+
+- These two candidates select a **path**, not a kernel. `attention_unified`
+  chooses the concrete backend downstream from the running device —
+  `_tiled_2d_impl` routes gfx1250 to a wave32 WMMA variant and gfx942 to its own
+  narrow-atom variant, and anything the tiled gate refuses falls through to the
+  arch-neutral scalar CK DSL kernel, which uses no MMA atom at all.
+- So gfx1250 reaching `unified_2d` is not a misroute. The gfx1250 live prefill
+  benchmark dispatches through it today and runs the WMMA backend behind it;
+  narrowing to the wave64 list would have broken that and dropped RDNA's scalar
+  coverage with it.
+- gfx90a, by contrast, was never in the wave64 tiled set at all:
+  `validate_tiled_attention_arch` admits only gfx942 and gfx950. The proposed
+  list would have simultaneously added a target that has no tiled path and
+  removed two that work.
+
+They therefore declare every known arch, and are the documented wave-size
+exception alongside norm2d (section 10). The real gap section 3 identifies is
+narrower than "the unified paths are misrouted": it is that the *dedicated*
+gfx1250 WMMA attention kernel is registered nowhere, so dispatch cannot prefer
+it over the generic path. That is phase 5, not this phase.
+
+The genuine cross-architecture arch-label bug did get fixed here, in conv:
+`conv_igemm_cdna_cshuffle` and `conv_igemm_cdna_mem` gated on
+`arch_family="cdna"`, which admits wave32 gfx1250, while the WMMA candidate that
+suits it geometrically rejected it. Only `is_valid_spec` kept that from becoming
+a live misroute. All three now declare explicit `arches`.
+
+**Phase 4 — the binding seam.** Originally sequenced last, and moved ahead of
+registration for a reason worth recording: phase 5 registers candidates for
+targets nobody has run yet (conv on gfx1250, attention on gfx1250), and without
+a way to launch what dispatch selects, "registered" would mean "appears in
+`coverage()`" and nothing more. Binding first means each newly registered
+candidate can be exercised as it lands. Nothing in this phase depends on the
+file moves in phase 5, so the reorder costs nothing.
+
+Three changes, all additive:
+
+*The runner registry.* `run_manifest` routed on a hand-maintained
+`if kind == ...` chain, so a family whose buffer knowledge lives outside the
+platform wheel — attention and MoE both live in `library/` — could not be run
+without editing shipped code. `register_manifest_runner(kind, builder)` replaces
+the chain with a lookup, pre-populated with the same fourteen kinds the chain
+served. The kind is now resolved *before* the HSACO is loaded, so an unrunnable
+manifest can be diagnosed without a GPU.
+
+*`ProblemBinding` and `bind`.* Section 7.5, with the two shape corrections
+recorded there: the binding carries geometry and takes a `DispatchResult`, and
+its callables take the runtime as a parameter.
+
+*GEMM adopts it.* `dispatch/gemm/binding.py` serves fp16 and bf16 from one
+definition — they share an args signature and an RCR reference, differing only
+in element encoding. The geometry comes from the dispatch result, which removes
+the second copy of the grid arithmetic that `run_gemm_manifest_problem` carries.
+
+What this phase does **not** do is give attention a binding, and the reason is
+structural rather than a matter of effort. Attention dispatch selects a path;
+its candidates report `grid=(0, 0, 0)` and an empty signature because the CTA
+geometry is chosen downstream by arch-tuned heuristics in `attention_unified`
+that are explicitly out of the parity identity and, per that module, "not
+reproducible CPU-only without a device". A binding needs geometry, so attention
+cannot have one until phase 6 moves that policy up. `make_attention_manifest`
+should be read in the same light: it emits `kind: "attention_unified"`, has no
+runner, and — as of this phase — no callers either. It is a stub for the format
+phase 6 will make real, not a working path with a missing piece.
+
+**Phase 5 — register the existing arch variants.** The first phase that changes
 what dispatch can reach. Begin with the mechanical move of the single
 `attention.py` into the per-arch layout of section 8 — no logic change — then
 register per arch module:
 
 *Attention, gfx942 and gfx950.* The four arch-specialized candidates already
 written in `attention.py` — `gfx942_dense_pipe`, the gfx950 dense path,
-`gfx950_d256`, and `d256_decode` — move into their modules and gain a declared
-`Capability`. These are existing, tested variants, so the work is stating what
-they already do, not writing kernels.
+`gfx950_d256`, and `d256_decode` — move into their modules. They declared their
+`Capability` in phase 3, so this is the mechanical file move only.
 
 *Attention, gfx1250.* Add `gfx1250.py` per section 9.1, which makes
 `build_wmma_attention_fwd` reachable for the first time.
 `builders/gfx1250/attention/wmma_attention_fwd_verify.py` becomes a thin caller
 of `dispatch_attention_by_id` rather than constructing the spec itself.
 
-*Convolution, gfx1250.* Onboard the target the conv registry cannot currently
-serve correctly. `families/conv.py` registers three candidates, each gated by
-family: `conv_igemm_cdna_cshuffle` and `conv_igemm_cdna_mem` on
-`arch_family="cdna"`, and `conv_igemm_rdna_wmma` on `arch_family="rdna"`. Because
-gfx1250 is CDNA-family at wave32, the two wave64 MFMA candidates admit it while
-the WMMA candidate that is geometrically right for it rejects it — wrong in both
-directions, from a single label, and the same trap section 3 documents for
-attention. Add an explicit gfx1250 conv candidate over the portable
-`instances/common/conv_implicit_gemm.py` builder with WMMA atoms, and convert
-conv's family gates to `arches` per phase 3. There is no gfx1250-specific conv
-kernel today, so this is onboarding an existing portable builder to a new target
-rather than registering something already written.
+*Convolution, gfx1250.* Onboard the target the conv registry still cannot serve.
+Phase 3 replaced conv's `arch_family` labels with explicit `arches`, which
+stopped gfx1250 from being admitted to the two wave64 MFMA candidates — but
+stopping a wrong answer is not the same as having a right one, and no conv
+candidate declares gfx1250 today. Add one over the portable
+`instances/common/conv_implicit_gemm.py` builder with WMMA atoms. There is no
+gfx1250-specific conv kernel, so this is onboarding an existing portable builder
+to a new target rather than registering something already written.
 
 This phase also introduces `build` on the candidate: every module registered here
 points `build` at its real builder, and GEMM adopts it where
 `build_kernel(result)` already exists. Add the spec/builder agreement test.
 
-**Phase 5 — move routing policy into dispatch.** The large one, and the shape of
+**Phase 6 — move routing policy into dispatch.** The large one, and the shape of
 the gfx942 example in section 9.2. Today the choice of kernel geometry is made
 *below* dispatch: `kernels/common/attention_unified.py` owns
 `_select_2d_tile_size`, `_select_2d_num_warps`, `_select_2d_waves_per_eu` and
@@ -1462,14 +1618,35 @@ byte-identity.
 Migrate one cohort at a time, starting with `gfx950_d256`, whose overrides the
 candidate already computes and currently discards.
 
-**Phase 6 —** `bind` **and benchmark integration.** Add `ProblemBinding` and the
-`bind` hook (section 7.5). Port the existing `run_*_manifest_problem` adapters
-to their families — mechanical, the return shape already matches — and replace
-`run_manifest`'s `kind` chain with a registry lookup. Write the family-agnostic
-sweep loop once; retire the per-script build/launch code it replaces. Add
-`bind_torch` only where an existing torch harness needs it.
+**Phase 7 — finish benchmark integration.** What phase 4 left: give attention a
+binding once phase 6 has moved its geometry up, write the family-agnostic sweep
+loop once so the per-script build/launch code can retire, and add `bind_torch`
+only where an existing torch harness needs it. Settle `make_attention_manifest`
+here too — either it gains a producer and a runner, or it goes.
 
-Phases 1–4 and 6 are additive and low risk. Phase 5 is the one that requires
+**Binding must never become the only way in.** An earlier draft of this phase
+said to "port the remaining `run_*_manifest_problem` adapters to their
+families", which reads as though every adapter should be replaced by a
+candidate's `bind`. That would break most of the manifest workflows, because
+they do not go through dispatch and have nothing to bind *from*: of the fourteen
+registered manifest kinds, **ten have no dispatch candidate at all** —
+`gemm_iu8`, `batched_gemm_fp16`, `matmul_nbits_fp16`, both
+`deep_fused_conv_pool_*`, and the five simple ops. The examples that emit them
+(`wmma_iu8_probe`, `matmul_nbits_verify`, `deep_fused_conv_pool_verify`, the
+gfx950 skinny-decode sweep, and the rest) build a spec, compile it, write a
+manifest, and shell out to `python -m rocke.run_manifest`. There is no
+`KernelCandidate` anywhere in that path, and for kernels dispatch has never
+registered there is no reason there should be.
+
+So the rule for phase 7, and for the manifest runner generally: a candidate's
+`bind` is an *additional* registerable adapter, never a precondition. The
+registry from phase 4 already has the right shape for this — a kind maps to a
+plain `(manifest, shape, verify)` builder that knows nothing about dispatch, and
+a family with a binding registers one that happens to delegate to it. Nothing in
+`run_manifest` imports `dispatch`, and that should stay true: it is what keeps
+the hand-built-manifest workflow, which is most of them, working untouched.
+
+Phases 1–5 and 7 are additive and low risk. Phase 6 is the one that requires
 care, because it changes what production compiles; migrating per cohort keeps
 each step verifiable against the existing golden IR tests.
 
@@ -1527,5 +1704,5 @@ Four things to settle before this is a plan rather than an idea:
 4. **What it does not solve.** Selection stays in Python. This makes the C++
   *builder* reachable from dispatch; it does not make *dispatch* reachable from
    the provider's no-Python-at-runtime path. That is the separate problem behind
-   the dual-engine constraint in phase 5.
+   the dual-engine constraint in phase 6.
 

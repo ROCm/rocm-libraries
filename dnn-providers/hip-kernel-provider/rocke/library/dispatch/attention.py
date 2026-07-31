@@ -47,13 +47,16 @@ from kernels.common.attention_unified import (
     UnifiedAttentionProblem,
     supports_native_unified_attention,
 )
+from rocke.core.arch import known_arches
 from rocke.dispatch.core import (
+    Capability,
     CandidateRegistry,
     DispatchResult,
     KernelCandidate,
     KernelId,
     OperatorRequest,
     Ranker,
+    ShapeRange,
     stable_json_hash,
 )
 
@@ -101,6 +104,48 @@ class AttentionRequest(OperatorRequest):
         d = asdict(self)
         d["dtype"] = self.dtype.lower()
         return d
+
+    def dims(self) -> dict[str, int]:
+        return {
+            "batch": int(self.batch),
+            "nhead_q": int(self.nhead_q),
+            "nhead_k": int(self.nhead_k),
+            "seqlen_q": int(self.seqlen_q),
+            "seqlen_k": int(self.seqlen_k),
+            "hdim_q": int(self.hdim_q),
+            "hdim_v": int(self.hdim_v),
+            "kv_block_size": int(self.kv_block_size),
+        }
+
+    def features(self) -> frozenset[str]:
+        active = set()
+        if int(self.mask_type) != 0:
+            active.add("causal")
+        if int(self.sliding_window) > 0:
+            active.add("sliding_window")
+        if bool(self.use_sinks):
+            active.add("sinks")
+        return frozenset(active)
+
+
+ATTENTION_DIM_VOCABULARY = (
+    "batch",
+    "nhead_q",
+    "nhead_k",
+    "seqlen_q",
+    "seqlen_k",
+    "hdim_q",
+    "hdim_v",
+    "kv_block_size",
+)
+
+_ATTENTION_FEATURES = frozenset({"causal", "sliding_window", "sinks"})
+
+# Head sizes and paged-KV block sizes the unified backend covers, mirroring
+# ``supports_native_unified_attention``. Declared as data so a coverage query
+# can answer "what head sizes does attention support?" without probing.
+_UNIFIED_HEAD_SIZES = (64, 128, 256)
+_UNIFIED_BLOCK_SIZES = (16, 32, 64)
 
 
 def _request_errors(req: OperatorRequest) -> list[str]:
@@ -264,7 +309,7 @@ def _make_candidate(*, path: str, priority: int) -> KernelCandidate:
         return True, "ok"
 
     def select(req: OperatorRequest) -> AttentionSpec:
-        ok, why = support(req)
+        ok, why = candidate.admits(req)
         if not ok:
             raise ValueError(f"{name} does not support request: {why}")
         assert isinstance(req, AttentionRequest)
@@ -285,17 +330,37 @@ def _make_candidate(*, path: str, priority: int) -> KernelCandidate:
         spec_id=spec_id,
         abi_version=ATTENTION_ABI_VERSION,
         priority=priority,
+        capability=_UNIFIED_CAPABILITY,
         supports=support,
         select_spec=select,
         signature=lambda _spec: (),
         grid=lambda spec, req: (0, 0, 0),  # geometry deferred (see module doc)
         block=lambda spec: (0, 0, 0),
-        sweep_space=lambda req: (select(req),) if support(req)[0] else (),
+        sweep_space=lambda req: (select(req),) if candidate.admits(req)[0] else (),
     )
     return candidate
 
 
-ATTENTION_REGISTRY = CandidateRegistry(_FAMILY)
+# The unified paths are portable, so they declare every known target rather than
+# a wave-size cohort. This looks like an over-broad claim and is not: these
+# candidates select a *path*, and the concrete kernel behind it is chosen
+# downstream by ``attention_unified`` on the running device -- the wave64 MFMA
+# variants on gfx942/gfx950, the wave32 WMMA variant on gfx1250, and the
+# arch-neutral scalar CK DSL kernel (no MMA atom at all) everywhere else. They
+# are therefore the second documented exception to wave-size consistency,
+# alongside norm2d. Narrowing them to the wave64 MFMA targets would drop the
+# gfx1250 and RDNA coverage that the scalar and WMMA backends actually provide.
+_UNIFIED_CAPABILITY = Capability(
+    arches=known_arches(),
+    dtypes=("fp16", "bf16"),
+    shapes=(
+        ShapeRange("hdim_q", allowed=_UNIFIED_HEAD_SIZES),
+        ShapeRange("kv_block_size", allowed=_UNIFIED_BLOCK_SIZES),
+    ),
+    supports_features=_ATTENTION_FEATURES,
+)
+
+ATTENTION_REGISTRY = CandidateRegistry(_FAMILY, dim_vocabulary=ATTENTION_DIM_VOCABULARY)
 ATTENTION_REGISTRY.extend(
     (
         # 2d and 3d are mutually exclusive per problem (select_path returns one),
@@ -323,10 +388,6 @@ def _make_gfx942_dense_pipe_candidate() -> KernelCandidate:
         if errors:
             return False, "; ".join(errors)
         assert isinstance(req, AttentionRequest)
-        if req.arch != "gfx942":
-            return False, f"dense_pipe requires gfx942 (got {req.arch!r})"
-        if req.dtype != "fp16":
-            return False, f"dense_pipe is fp16-only (got {req.dtype!r})"
         ok, why = _selector_matches(req, candidate)
         if not ok:
             return False, why
@@ -343,7 +404,7 @@ def _make_gfx942_dense_pipe_candidate() -> KernelCandidate:
         return True, "ok"
 
     def select(req: OperatorRequest) -> AttentionSpec:
-        ok, why = support(req)
+        ok, why = candidate.admits(req)
         if not ok:
             raise ValueError(f"{name} does not support request: {why}")
         assert isinstance(req, AttentionRequest)
@@ -365,12 +426,23 @@ def _make_gfx942_dense_pipe_candidate() -> KernelCandidate:
         spec_id=spec_id,
         abi_version=ATTENTION_ABI_VERSION,
         priority=5,
+        capability=Capability(
+            arches=("gfx942",),
+            dtypes=("fp16",),
+            shapes=(
+                ShapeRange("hdim_q", allowed=_UNIFIED_HEAD_SIZES),
+                ShapeRange("kv_block_size", allowed=_UNIFIED_BLOCK_SIZES),
+            ),
+            # ``_enable_gfx942_fp16_flash`` is the real narrowing; nothing here
+            # claims a feature it turns down, so the full set stays declared.
+            supports_features=_ATTENTION_FEATURES,
+        ),
         supports=support,
         select_spec=select,
         signature=lambda _spec: (),
         grid=lambda spec, req: (0, 0, 0),
         block=lambda spec: (0, 0, 0),
-        sweep_space=lambda req: (select(req),) if support(req)[0] else (),
+        sweep_space=lambda req: (select(req),) if candidate.admits(req)[0] else (),
     )
     return candidate
 
@@ -461,12 +533,6 @@ def _make_gfx950_attention_dense_candidate() -> KernelCandidate:
             req.spec_id.strip().lower() != spec_id
         ):
             return False, "attention_dense is opt-in (algorithm='attention_dense')"
-        if req.arch != "gfx950":
-            return False, f"attention_dense requires gfx950 (got {req.arch!r})"
-        if req.dtype.lower() not in ("bf16", "fp16"):
-            return False, f"attention_dense is bf16/fp16 only (got {req.dtype!r})"
-        if int(req.sliding_window) or bool(req.use_sinks):
-            return False, "attention_dense is dense (no sliding-window / sinks)"
         from kernels.gfx950.attention_dense import supports_attention_dense
 
         try:
@@ -479,7 +545,7 @@ def _make_gfx950_attention_dense_candidate() -> KernelCandidate:
         return True, "ok"
 
     def select(req: OperatorRequest) -> AttentionSpec:
-        ok, why = support(req)
+        ok, why = candidate.admits(req)
         if not ok:
             raise ValueError(f"{name} does not support request: {why}")
         assert isinstance(req, AttentionRequest)
@@ -505,12 +571,19 @@ def _make_gfx950_attention_dense_candidate() -> KernelCandidate:
         spec_id=spec_id,
         abi_version=ATTENTION_ABI_VERSION,
         priority=3,
+        capability=Capability(
+            arches=("gfx950",),
+            dtypes=("bf16", "fp16"),
+            # Dense: no sliding-window, no sinks. Causal is a mask, not a
+            # feature this path turns down.
+            supports_features=frozenset({"causal"}),
+        ),
         supports=support,
         select_spec=select,
         signature=lambda _spec: (),
         grid=lambda spec, req: (0, 0, 0),
         block=lambda spec: (0, 0, 0),
-        sweep_space=lambda req: (select(req),) if support(req)[0] else (),
+        sweep_space=lambda req: (select(req),) if candidate.admits(req)[0] else (),
     )
     return candidate
 
@@ -539,10 +612,6 @@ def _make_gfx950_d256_candidate() -> KernelCandidate:
         if errors:
             return False, "; ".join(errors)
         assert isinstance(req, AttentionRequest)
-        if req.arch != "gfx950":
-            return False, f"d256_gfx950 requires gfx950 (got {req.arch!r})"
-        if req.dtype != "bf16":
-            return False, f"d256_gfx950 is bf16-only (got {req.dtype!r})"
         ok, why = _selector_matches(req, candidate)
         if not ok:
             return False, why
@@ -559,7 +628,7 @@ def _make_gfx950_d256_candidate() -> KernelCandidate:
         return True, "ok"
 
     def select(req: OperatorRequest) -> AttentionSpec:
-        ok, why = support(req)
+        ok, why = candidate.admits(req)
         if not ok:
             raise ValueError(f"{name} does not support request: {why}")
         assert isinstance(req, AttentionRequest)
@@ -584,12 +653,21 @@ def _make_gfx950_d256_candidate() -> KernelCandidate:
         spec_id=spec_id,
         abi_version=ATTENTION_ABI_VERSION,
         priority=5,
+        capability=Capability(
+            arches=("gfx950",),
+            dtypes=("bf16",),
+            shapes=(
+                ShapeRange("hdim_q", allowed=(256,)),
+                ShapeRange("kv_block_size", allowed=_UNIFIED_BLOCK_SIZES),
+            ),
+            supports_features=frozenset({"causal"}),
+        ),
         supports=support,
         select_spec=select,
         signature=lambda _spec: (),
         grid=lambda spec, req: (0, 0, 0),
         block=lambda spec: (0, 0, 0),
-        sweep_space=lambda req: (select(req),) if support(req)[0] else (),
+        sweep_space=lambda req: (select(req),) if candidate.admits(req)[0] else (),
     )
     return candidate
 
@@ -611,10 +689,6 @@ def _make_d256_decode_candidate() -> KernelCandidate:
         if errors:
             return False, "; ".join(errors)
         assert isinstance(req, AttentionRequest)
-        if req.arch not in ("gfx942", "gfx950"):
-            return False, f"d256_decode requires gfx942 or gfx950 (got {req.arch!r})"
-        if req.dtype != "bf16":
-            return False, f"d256_decode is bf16-only (got {req.dtype!r})"
         ok, why = _selector_matches(req, candidate)
         if not ok:
             return False, why
@@ -631,7 +705,7 @@ def _make_d256_decode_candidate() -> KernelCandidate:
         return True, "ok"
 
     def select(req: OperatorRequest) -> AttentionSpec:
-        ok, why = support(req)
+        ok, why = candidate.admits(req)
         if not ok:
             raise ValueError(f"{name} does not support request: {why}")
         assert isinstance(req, AttentionRequest)
@@ -653,12 +727,21 @@ def _make_d256_decode_candidate() -> KernelCandidate:
         spec_id=spec_id,
         abi_version=ATTENTION_ABI_VERSION,
         priority=5,
+        capability=Capability(
+            arches=("gfx942", "gfx950"),
+            dtypes=("bf16",),
+            shapes=(
+                ShapeRange("hdim_q", allowed=(256,)),
+                ShapeRange("kv_block_size", allowed=_UNIFIED_BLOCK_SIZES),
+            ),
+            supports_features=frozenset({"causal"}),
+        ),
         supports=support,
         select_spec=select,
         signature=lambda _spec: (),
         grid=lambda spec, req: (0, 0, 0),
         block=lambda spec: (0, 0, 0),
-        sweep_space=lambda req: (select(req),) if support(req)[0] else (),
+        sweep_space=lambda req: (select(req),) if candidate.admits(req)[0] else (),
     )
     return candidate
 

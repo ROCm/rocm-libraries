@@ -275,6 +275,43 @@ class KernelId:
 
 
 @dataclass(frozen=True)
+class ProblemBinding:
+    """Everything a launcher needs to run one dispatched kernel once.
+
+    Selection answers *which* kernel; a binding answers *how to call it* for a
+    concrete request: the launch geometry, the packed argument buffer, a
+    numeric reference, and the roofline denominators.
+
+    The callables take the HIP ``Runtime`` as a parameter rather than closing
+    over one, so this module keeps its CPU-only import cost and a binding can
+    be built, inspected, and unit-tested on a machine with no GPU. That is also
+    the shape the manifest runner's problem builders already use, so an adapter
+    can delegate here instead of re-deriving geometry from manifest fields.
+    """
+
+    grid: Tuple[int, int, int]
+    block: Tuple[int, int, int]
+    make_args: Callable[[Any], Tuple[bytes, Tuple[int, ...]]]
+    """``make_args(rt) -> (packed_args, device_ptrs)``; allocates and uploads."""
+    check: Callable[[Any, Tuple[int, ...]], Tuple[float, int, int]]
+    """``check(rt, ptrs) -> (max_abs_diff, bad_count, total)``; a no-op returns
+    ``(0.0, 0, total)`` when the binding was built without verification."""
+    flop: float
+    bytes_moved: float
+
+    def as_problem_builder(self) -> tuple:
+        """Adapt to the manifest runner's positional problem-builder tuple."""
+        return (
+            self.make_args,
+            self.grid,
+            self.block,
+            self.flop,
+            self.bytes_moved,
+            self.check,
+        )
+
+
+@dataclass(frozen=True)
 class KernelCandidate:
     """One selectable implementation family for an operator request."""
 
@@ -291,21 +328,40 @@ class KernelCandidate:
     block: Callable[[Any], Tuple[int, int, int]]
     sweep_space: Callable[[OperatorRequest], Sequence[Any]]
     capability: Capability | None = None
-    """Declared coverage, or ``None`` for a candidate that has not adopted it.
+    """Declared coverage. Required by :meth:`CandidateRegistry.register`.
 
-    ``None`` and ``Capability()`` are deliberately different: the first means
-    "undeclared", which skips the prefilter and leaves gating entirely to
-    ``supports``, while the second declares no architecture and so matches
-    nothing. Capability becomes mandatory in a later phase, at which point
-    ``None`` is rejected at registration.
+    Still typed optional so a candidate can be constructed and inspected
+    standalone in a test, but a registry will not accept ``None``: an
+    undeclared candidate is invisible to ``for_arch`` and ``coverage``, and
+    answering "what runs on gfx1250?" has to stay a lookup rather than a probe.
     """
+
+    bind: Callable[[Any, bool], ProblemBinding] | None = None
+    """``bind(result, verify) -> ProblemBinding``; optional.
+
+    Optional because a candidate is useful for selection alone, and the
+    families differ in how much host-side setup they need. Where it is
+    provided it is the single definition of the launch contract: the geometry
+    it reports comes from this candidate's own ``grid``/``block``, so a runner
+    cannot drift from the dispatcher the way a hand-written adapter can.
+    """
+
+    def bound(self, result: Any, *, verify: bool = False) -> ProblemBinding:
+        """Bind ``result`` to a runnable problem, or explain what is missing."""
+        if self.bind is None:
+            raise NotImplementedError(
+                f"candidate {self.name!r} ({self.family}) declares no bind(); "
+                "it can be selected but not launched through the generic "
+                "runner. Give it a bind to close that gap."
+            )
+        return self.bind(result, verify)
 
     def admits(self, request: OperatorRequest) -> Tuple[bool, str]:
         """Full eligibility verdict: capability prefilter, then predicate.
 
-        Call this rather than ``supports`` directly. Once a candidate moves its
-        arch and dtype gates into ``capability``, ``supports`` carries only the
-        residual checks and is no longer a complete answer on its own.
+        Call this rather than ``supports`` directly. Registered candidates keep
+        their arch and dtype gates in ``capability``, so ``supports`` carries
+        only the residual checks and is not a complete answer on its own.
         """
         if self.capability is not None:
             ok, why = self.capability.check(request)
@@ -328,12 +384,25 @@ class CandidateRegistry:
     """
 
     def __init__(
-        self, family: str, *, dim_vocabulary: Iterable[str] | None = None
+        self,
+        family: str,
+        *,
+        dim_vocabulary: Iterable[str] | None = None,
+        require_binding: bool = False,
     ) -> None:
         self.family = family
         self.dim_vocabulary = (
             None if dim_vocabulary is None else frozenset(dim_vocabulary)
         )
+        self.require_binding = require_binding
+        """Whether this family refuses to register a candidate it cannot launch.
+
+        A per-family ratchet rather than a global rule, because ``bind`` is
+        executable behavior and not, like ``capability``, a declaration that is
+        always available to make. A family turns this on once it has backfilled
+        its candidates; from then on a new candidate cannot rejoin the
+        unlaunchable set by omission. See ARCHITECTURE.md 5.2.
+        """
         self._candidates = {}
 
     def register(self, candidate: KernelCandidate) -> None:
@@ -343,9 +412,20 @@ class CandidateRegistry:
             raise ValueError(
                 f"candidate family {candidate.family!r} != registry {self.family!r}"
             )
-        if candidate.capability is not None:
-            self._validate_capability(candidate)
+        self._validate_capability(candidate)
+        self._validate_binding(candidate)
         self._candidates[candidate.name] = candidate
+
+    def _validate_binding(self, candidate: KernelCandidate) -> None:
+        if self.require_binding and candidate.bind is None:
+            raise ValueError(
+                f"{candidate.name!r} declares no bind, and family "
+                f"{self.family!r} requires one: every candidate it registers "
+                "must be launchable, not merely selectable. Give it a bind "
+                "returning a ProblemBinding (see ARCHITECTURE.md 7.5), or if "
+                "this candidate genuinely cannot be launched, that is a reason "
+                "not to register it here."
+            )
 
     def _validate_capability(self, candidate: KernelCandidate) -> None:
         """Reject a capability that cannot mean what its author intended.
@@ -355,6 +435,11 @@ class CandidateRegistry:
         some request happened to reach it.
         """
         capability = candidate.capability
+        if capability is None:
+            raise ValueError(
+                f"{candidate.name!r} declares no capability; every registered "
+                "candidate must say what it covers (see ARCHITECTURE.md 5.1)"
+            )
         if not capability.arches:
             raise ValueError(
                 f"{candidate.name!r} declares no arch coverage; set "
@@ -419,6 +504,7 @@ class CandidateRegistry:
         """
         return {
             "family": self.family,
+            "requires_binding": self.require_binding,
             "candidates": [
                 {
                     "name": c.name,
@@ -426,6 +512,10 @@ class CandidateRegistry:
                     "spec_id": c.spec_id,
                     "abi_version": c.abi_version,
                     "priority": c.priority,
+                    # Whether this candidate can be launched, not just chosen.
+                    # Queryable for the same reason coverage is: "can I run
+                    # this?" should be a lookup, not a call that might raise.
+                    "bindable": c.bind is not None,
                     "capability": (
                         None if c.capability is None else c.capability.as_dict()
                     ),
@@ -492,3 +582,11 @@ class DispatchResult:
     block: Tuple[int, int, int]
     signature: Tuple[dict, ...]
     explanation: Tuple[str, ...]
+
+    def bind(self, *, verify: bool = False) -> ProblemBinding:
+        """Turn this selection into a runnable problem.
+
+        The call site for anything that wants to execute what the dispatcher
+        chose: ``dispatch_gemm_fp16(req).bind(verify=True)``.
+        """
+        return self.candidate.bound(self, verify=verify)

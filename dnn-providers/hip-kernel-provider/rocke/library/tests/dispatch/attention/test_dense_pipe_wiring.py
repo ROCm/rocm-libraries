@@ -108,7 +108,7 @@ class TestDensePipeSupportGates(unittest.TestCase):
                 for c in attention_candidates()
                 if c.name == "attention_gfx942_dense_pipe"
             )
-            ok, why = candidate.supports(_gfx942_fp16(arch="gfx950"))
+            ok, why = candidate.admits(_gfx942_fp16(arch="gfx950"))
             self.assertFalse(ok)
             self.assertIn("gfx942", why)
 
@@ -119,7 +119,7 @@ class TestDensePipeSupportGates(unittest.TestCase):
                 for c in attention_candidates()
                 if c.name == "attention_gfx942_dense_pipe"
             )
-            ok, why = candidate.supports(_gfx942_fp16(dtype="bf16"))
+            ok, why = candidate.admits(_gfx942_fp16(dtype="bf16"))
             self.assertFalse(ok)
             self.assertIn("fp16", why)
 
@@ -134,7 +134,7 @@ class TestDensePipeSupportGates(unittest.TestCase):
             req = _gfx942_fp16(
                 batch=1, nhead_q=16, nhead_k=16, seqlen_q=1, seqlen_k=8192
             )
-            ok, why = candidate.supports(req)
+            ok, why = candidate.admits(req)
             self.assertFalse(ok)
             self.assertIn("3D", why)
 
@@ -145,7 +145,7 @@ class TestDensePipeSupportGates(unittest.TestCase):
                 for c in attention_candidates()
                 if c.name == "attention_gfx942_dense_pipe"
             )
-            ok, why = candidate.supports(
+            ok, why = candidate.admits(
                 _gfx942_fp16(seqlen_q=512, seqlen_k=4096, sliding_window=256)
             )
             self.assertFalse(ok)
@@ -191,7 +191,7 @@ class TestDensePipeRouting(unittest.TestCase):
             req = _gfx942_fp16(
                 batch=2, nhead_q=32, nhead_k=8, seqlen_q=512, seqlen_k=512
             )
-            ok, _ = candidate.supports(req)
+            ok, _ = candidate.admits(req)
         self.assertFalse(ok)
 
     def test_spec_records_correct_dims(self):

@@ -44,6 +44,7 @@ from ..core import (
     ShapeRange,
     stable_json_hash,
 )
+from .binding import gemm_rcr_binding
 from .common import (
     GEMM_DIM_VOCABULARY,
     GemmRequest,
@@ -254,6 +255,7 @@ def _make_candidate(
         grid=_grid,
         block=lambda spec: (int(spec.block_size), 1, 1),
         sweep_space=lambda req: (select(req),) if candidate.admits(req)[0] else (),
+        bind=lambda result, verify: gemm_rcr_binding(result, verify, dtype="bf16"),
     )
     return candidate
 
@@ -275,7 +277,9 @@ _CDNA_MEM_BF16 = ("gfx942", "gfx950")
 _CDNA_DECODE_BF16 = ("gfx950",)
 _RDNA_WMMA = ("gfx11-generic", "gfx1151", "gfx1201")
 
-GEMM_BF16_REGISTRY = CandidateRegistry(_FAMILY, dim_vocabulary=GEMM_DIM_VOCABULARY)
+GEMM_BF16_REGISTRY = CandidateRegistry(
+    _FAMILY, dim_vocabulary=GEMM_DIM_VOCABULARY, require_binding=True
+)
 GEMM_BF16_REGISTRY.extend(
     (
         _make_candidate(

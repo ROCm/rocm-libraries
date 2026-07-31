@@ -12,6 +12,7 @@ import json
 import unittest
 from dataclasses import dataclass, replace
 
+from rocke.core.arch import known_arches
 from rocke.dispatch.core import (
     Capability,
     CandidateRegistry,
@@ -39,13 +40,18 @@ def _kernel_id(**overrides) -> KernelId:
     return KernelId(**base)
 
 
+# Registration requires a capability, so tests about registry mechanics rather
+# than about coverage get one that constrains nothing but the arch list.
+_ANY_ARCH = Capability(arches=known_arches())
+
+
 def _candidate(
     name: str,
     *,
     family: str = "dummy",
     priority: int = 0,
     abi="dummy/v1",
-    capability=None,
+    capability=_ANY_ARCH,
     supports=lambda _req: (True, "ok"),
 ):
     return KernelCandidate(
@@ -199,7 +205,14 @@ class TestRegistryCoverage(unittest.TestCase):
                 "spec_id": "fast_spec",
                 "abi_version": "dummy/v1",
                 "priority": 10,
-                "capability": None,
+                # False here because this fixture declares no bind, and
+                # "dummy" does not require one. Reported either way so that
+                # "can I launch this?" stays a lookup rather than a call that
+                # might raise.
+                "bindable": False,
+                # Never None: registration requires a declared capability, so
+                # the manifest cannot have a hole in it.
+                "capability": _ANY_ARCH.as_dict(),
             },
         )
 
@@ -232,7 +245,14 @@ class TestRegistryCoverage(unittest.TestCase):
     def test_coverage_of_an_empty_registry_is_empty(self):
         self.assertEqual(
             CandidateRegistry("dummy").coverage(),
-            {"family": "dummy", "candidates": []},
+            {"family": "dummy", "requires_binding": False, "candidates": []},
+        )
+
+    def test_coverage_reports_a_familys_binding_stance(self):
+        self.assertTrue(
+            CandidateRegistry("dummy", require_binding=True).coverage()[
+                "requires_binding"
+            ]
         )
 
 
@@ -387,11 +407,18 @@ class TestCapability(unittest.TestCase):
 
 
 class TestCapabilityRegistration(unittest.TestCase):
-    def test_an_undeclared_capability_is_still_registrable(self):
-        """Phase 2 is opt-in: existing candidates must keep working."""
+    def test_an_undeclared_capability_is_rejected(self):
+        """Coverage is mandatory: an undeclared candidate is invisible to
+        for_arch and coverage, which would make them lie by omission."""
         registry = CandidateRegistry("dummy")
-        registry.register(_candidate("legacy"))
-        self.assertEqual(registry.get("legacy").capability, None)
+        with self.assertRaisesRegex(ValueError, "declares no capability"):
+            registry.register(_candidate("legacy", capability=None))
+
+    def test_the_rejection_names_the_offending_candidate(self):
+        registry = CandidateRegistry("dummy")
+        with self.assertRaises(ValueError) as ctx:
+            registry.register(_candidate("forgot_to_declare", capability=None))
+        self.assertIn("'forgot_to_declare'", str(ctx.exception))
 
     def test_a_declared_capability_must_name_an_arch(self):
         registry = CandidateRegistry("dummy")
@@ -485,10 +512,21 @@ class TestCapabilityPrefilter(unittest.TestCase):
         self.assertIn("gfx942_only: capability: arch 'gfx1250' not in", message)
         self.assertIn("gfx950_only: capability:", message)
 
-    def test_an_undeclared_candidate_is_unaffected_by_the_prefilter(self):
-        registry = CandidateRegistry("dummy")
-        registry.register(_candidate("legacy"))
-        self.assertEqual(len(registry.supported(_Request(arch="gfx1250"))), 1)
+    def test_the_prefilter_runs_before_the_predicate(self):
+        """A predicate that would crash must never be reached once capability
+        has already ruled the request out."""
+
+        def explode(_req):
+            raise AssertionError("predicate ran despite a capability rejection")
+
+        candidate = _candidate(
+            "gfx942_only",
+            capability=Capability(arches=("gfx942",)),
+            supports=explode,
+        )
+        ok, why = candidate.admits(_Request(arch="gfx950"))
+        self.assertFalse(ok)
+        self.assertIn("capability: arch 'gfx950' not in", why)
 
 
 class TestForArch(unittest.TestCase):
@@ -508,7 +546,6 @@ class TestForArch(unittest.TestCase):
                 capability=Capability(arches=("gfx950",)),
             )
         )
-        registry.register(_candidate("undeclared", priority=99))
         return registry
 
     def test_for_arch_returns_declaring_candidates_in_priority_order(self):
@@ -519,11 +556,6 @@ class TestForArch(unittest.TestCase):
         self.assertEqual(
             [c.name for c in self._registry().for_arch("gfx942")], ["generic"]
         )
-
-    def test_for_arch_excludes_candidates_with_no_capability(self):
-        """An undeclared candidate has made no claim, so it is not an answer."""
-        names = {c.name for c in self._registry().for_arch("gfx950")}
-        self.assertNotIn("undeclared", names)
 
     def test_an_unserved_arch_returns_nothing(self):
         self.assertEqual(self._registry().for_arch("gfx1250"), ())
