@@ -666,6 +666,41 @@ class TestVerifyGoldenBundlesCli(unittest.TestCase):
                 "golden.path must reference a tensors.dvc file", completed.stderr
             )
 
+    def test_sweep_invalid_golden_path_does_not_validate_unrelated_directory(
+        self,
+    ) -> None:
+        # A case whose golden.path fails the tensors.dvc-name check must not
+        # have golden_dir derived from that bad path and fed into
+        # tensor-payload validation — otherwise an unrelated (but real)
+        # golden directory belonging to another case gets validated a
+        # second time, duplicating its diagnostics under the wrong case.
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            template_path, sweep_path = self.write_sweep_bundle(
+                root,
+                Path("quick/TestOp/Topology"),
+                [
+                    self.sweep_case("wrong_target"),
+                    self.sweep_case(
+                        "small_fp32", golden_path="golden/wrong_target/notes.txt"
+                    ),
+                ],
+            )
+            self.write_sweep_golden_case(
+                sweep_path.parent,
+                "wrong_target",
+                input_bytes=self.default_bytes("float"),
+                output_bytes=struct.pack("<f", float("nan")),
+            )
+
+            completed = self.run_verifier(root, require_data=True)
+
+            self.assertEqual(completed.returncode, 1)
+            self.assertIn(
+                "golden.path must reference a tensors.dvc file", completed.stderr
+            )
+            self.assertEqual(completed.stderr.count("NaN/Inf"), 1)
+
     def test_sweep_missing_tensor_file_fails_with_manifest(self) -> None:
         with TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)

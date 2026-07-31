@@ -212,7 +212,7 @@ def warn_unexpected_top_level_directories(
 
     child_directories = sorted(path for path in root.iterdir() if path.is_dir())
     has_tier_children = any(path.name in ALLOWED_TIERS for path in child_directories)
-    if root.name != "integration_test_bundles" and not has_tier_children:
+    if root.name != "integration-test-bundles" and not has_tier_children:
         return
 
     for path in child_directories:
@@ -983,7 +983,8 @@ def validate_sweep_case(
                         sweep_path,
                         f"case '{case_label}' golden.path must reference a tensors.dvc file",
                     )
-                golden_dir = golden_path.parent
+                else:
+                    golden_dir = golden_path.parent
 
     if case_id is not None:
         advisory = derive_sweep_advisory(sweep_path, case_id, result, default_tier)

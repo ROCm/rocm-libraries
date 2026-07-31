@@ -9,15 +9,15 @@ Standalone verifier for hipDNN golden bundle directories.
 From the `rocm-libraries/` repo root:
 
 ```bash
-python dnn-providers/integration-tests/reference_data_scripts/verify_golden_bundles.py \
+python dnn-providers/integration-tests/reference-data-scripts/verify_golden_bundles.py \
   [--default-tier quick|standard|comprehensive|full] \
   [--require-data] \
   ROOT [ROOT ...]
 ```
 
 `ROOT` may point at:
-- `dnn-providers/integration-tests/integration_test_bundles/`
-- a tier directory such as `.../integration_test_bundles/quick/`
+- `dnn-providers/integration-tests/integration-test-bundles/`
+- a tier directory such as `.../integration-test-bundles/quick/`
 - a canonical subtree or individual bundle directory containing single-graph or
   template-sweep bundles
 
@@ -51,7 +51,7 @@ Hard errors, template-sweep bundles (`graph.template.json` + `sweep.json`):
 
 Warnings only:
 - stray non-graph `.json` files are ignored
-- unexpected top-level directories under an `integration_test_bundles/`-style root are reported
+- unexpected top-level directories under an `integration-test-bundles/`-style root are reported
 - bundle total size above 1 MiB emits a warning
 - a `.tensors.dvc`-backed tensor file that is missing locally and `--require-data` was not passed (default): warns that the payload hasn't been pulled yet instead of failing
 - missing tier segment falls back to `--default-tier`
@@ -94,7 +94,7 @@ byte-size and NaN/Inf checks always run regardless of `--require-data`.
 Direct Python test run:
 
 ```bash
-python dnn-providers/integration-tests/reference_data_scripts/tests/test_verify_golden_bundles.py
+python dnn-providers/integration-tests/reference-data-scripts/tests/test_verify_golden_bundles.py
 ```
 
 CTest registration after configuring `dnn-providers/integration-tests`:
