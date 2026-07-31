@@ -28,7 +28,7 @@ The scheduler manages a fixed grid of vcores. Each work-group processor (WGP) on
 
 The logical thread executes across multiple single instruction, multiple data (SIMD) lanes called fibers within a single GPU wavefront. All fibers in a thread execute in lockstep.
 
-A single ``hip::wthread`` can run as multiple fibers, with one fibre per hardware lane. Workload runs on each active lane, which enables cooperative, SIMD-style work partitioning within one ``hip::wthread``.
+A single ``hip::wthread`` can run as multiple fibers, with one fiber per hardware lane. The workload runs on each active lane, which enables cooperative, SIMD-style work partitioning within one ``hip::wthread``.
 
 Logical threads are scheduled cooperatively. ``hip::this_thread::pseudo_yield`` will run the next work item nested inside the current one. Once the nested work item completes, the original workload can continue. There is no preemption or hardware blocking in this model, and synchronization primitives such as ``condition_variable`` spin and yield rather than block.
 
