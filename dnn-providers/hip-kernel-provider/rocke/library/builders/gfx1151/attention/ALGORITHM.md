@@ -442,7 +442,7 @@ matrix unit.
 
 ---
 
-## 9. The transposed-QK reformulation (`swapqk`) — the ~23 TF production kernel
+## 9. The transposed-QK reformulation (`swapqk`) — the production kernel
 
 Everything above computes the scores **untransposed**, $S = Q K^\top$, which puts
 the *query* on the accumulator slots and the *key* on the lane. Two costs follow:
@@ -485,8 +485,8 @@ accumulator slots (plus the $\text{lane}\oplus16$ half). Three consequences:
 $V$ is still the cache-resident column **gather** (gfx1151 has no `ds_read_tr`);
 the transpose here is on $P$ (registers), not on $V$.
 
-**What actually moved the number** (each hardware-A/B'd on a gfx1151 Strix Halo
-mini; see `README.md` for the ledger):
+**What actually moved the number** (each hardware-A/B'd on gfx1151; see
+`README.md` for the ledger):
 
 - **pingpong `s_setprio`** wave scheduling — the dominant lever (~2.25×): two
   waves alternate priority so one issues WMMA while the other runs softmax VALU.
@@ -504,9 +504,9 @@ mini; see `README.md` for the ledger):
   contiguous and read as 2 `dwordx4` instead of 16 strided d16 loads (256→32
   vector-memory instructions per iteration). Costs address divergence across the
   32 lanes, which a standalone bandwidth probe settles in favour of the
-  transposed form: 1685 GB/s vs 850 GB/s. Worth −20.3% cycles at $L=4096$,
-  −5.9% at $L=8192$, and nothing at $L=16384$ where the memory unit is
-  latency-saturated rather than throughput-saturated.
+  transposed form by roughly 2×. Worth −20.3% cycles at $L=4096$, −5.9% at
+  $L=8192$, and nothing at $L=16384$ where the memory unit is latency-saturated
+  rather than throughput-saturated.
 - **d-outer QK loop** (`qk_douter`) — restructure the QK loop to iterate $d$
   outside the kv sub-tiles (+3.3%). Note the mechanism is *not* the one it was
   built for: $Q$ is loop-invariant and LLVM already hoisted it, so no loads were
@@ -514,8 +514,8 @@ mini; see `README.md` for the ledger):
   only in `TA_TA_BUSY` — which is why the ISA is worth checking before crediting
   a mechanism.
 
-The result is **22.80 TF at $L=16384$** and a peak of **~24.7 TF at $L=1024$**,
-roughly **2×** the single-wave record. The reformulation, not any single micro-op,
+The result is roughly **2×** the single-wave record, peaking at $L\approx1024$
+and holding most of that out to $L=16384$. The reformulation, not any micro-op,
 is what unlocked it: putting the query on the lane made the softmax in-lane, the
 P-transpose LDS-free, and the rescale a register op — removing the three
 structural taxes the untransposed kernel pays every K-tile.

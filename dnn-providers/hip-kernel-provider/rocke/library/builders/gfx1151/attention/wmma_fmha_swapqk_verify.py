@@ -3,9 +3,9 @@
 """Build, numeric-verify and time the gfx1151 transposed-QK WMMA FMHA (swapqk).
 
 The production counterpart to ``wmma_fmha_fwd_verify``: builds the kernel from
-:class:`WmmaFmhaSwapQKSpec` (winning knobs baked in), launches it via the HIP
-runtime, compares against the same dense-attention numpy reference the rest of
-this package uses, and reports achieved throughput.
+:class:`SwapQKCfg` (whose defaults are the winning knobs), launches it via the
+HIP runtime, compares against the same dense-attention numpy reference the rest
+of this package uses, and reports achieved throughput.
 
     PYTHONPATH=python python3 -m builders.gfx1151.attention.wmma_fmha_swapqk_verify \
         --seqlen-q 2048 --seqlen-k 2048 --head-size 128 --heads 24 --batch 1
@@ -36,11 +36,11 @@ from rocke.runtime.hip_module import Runtime
 from rocke.runtime.launcher import time_launches
 
 from kernels.gfx1151.wmma_fmha_swapqk import (
-    WmmaFmhaSwapQKSpec,
-    build_wmma_fmha_swapqk_fwd,
+    SwapQKCfg,
+    build_wmma_fmha_swapqk,
     is_valid_spec,
+    swapqk_grid,
     swapqk_transpose_v,
-    wmma_fmha_swapqk_fwd_grid,
 )
 
 from .bench_v_staging import _ref_attention
@@ -56,7 +56,7 @@ def main() -> int:
     p.add_argument("--kv-heads", type=int, default=0, help="0 -> MHA (== heads)")
     p.add_argument("--batch", type=int, default=1)
     p.add_argument("--causal", action="store_true")
-    # Production tunables (see WmmaFmhaSwapQKSpec for the measured defaults).
+    # Production tunables (see SwapQKCfg for the measured defaults).
     p.add_argument("--n-waves", type=int, default=2)
     p.add_argument("--block-n", type=int, default=64)
     p.add_argument("--qk-ilp", type=int, default=2)
@@ -81,7 +81,7 @@ def main() -> int:
     import numpy as np
 
     kvh = args.kv_heads or args.heads
-    spec = WmmaFmhaSwapQKSpec(
+    cfg = SwapQKCfg(
         head_size=args.head_size,
         num_query_heads=args.heads,
         num_kv_heads=args.kv_heads,
@@ -92,15 +92,14 @@ def main() -> int:
         v_transposed=not args.row_major_v,
         o_nt=args.o_nt,
     )
-    ok, why = is_valid_spec(spec, args.arch)
+    ok, why = is_valid_spec(cfg, args.arch)
     if not ok:
-        raise SystemExit(f"invalid spec: {why}")
-    cfg = spec.to_cfg()
+        raise SystemExit(f"invalid config: {why}")
 
     B, Hq, Hk, D = args.batch, args.heads, kvh, args.head_size
     Sq, Sk = args.seqlen_q, args.seqlen_k
-    if Sk % spec.block_n:
-        raise SystemExit(f"seqlen_k={Sk} must be a multiple of block_n={spec.block_n}")
+    if Sk % cfg.block_n:
+        raise SystemExit(f"seqlen_k={Sk} must be a multiple of block_n={cfg.block_n}")
 
     if args.prebuilt is not None:
         name = cfg.kernel_name()
@@ -110,7 +109,7 @@ def main() -> int:
         print(f"[{args.arch}] loaded prebuilt {name} ({len(hsaco)} B)")
     else:
         art = compile_kernel(
-            build_wmma_fmha_swapqk_fwd(spec, arch=args.arch), arch=args.arch
+            build_wmma_fmha_swapqk(cfg, arch=args.arch), arch=args.arch
         )
         hsaco, kernel_name = art.hsaco, art.kernel_name
         print(
@@ -132,10 +131,10 @@ def main() -> int:
     Out = np.zeros((B, Sq, Hq, D), dtype=np.float16)
 
     # The reference consumes V row-major; only the device copy is relaid.
-    V_dev = swapqk_transpose_v(V) if spec.v_transposed else V
+    V_dev = swapqk_transpose_v(V) if cfg.v_transposed else V
     scale_log2 = float(1.0 / math.sqrt(D) * math.log2(math.e))
 
-    grid = wmma_fmha_swapqk_fwd_grid(spec, seqlen_q=Sq, batch=B)
+    grid = swapqk_grid(cfg, seqlen_q=Sq, batch=B)
     block = (cfg.block_size, 1, 1)
 
     rt = Runtime()
@@ -207,8 +206,8 @@ def main() -> int:
     verdict = "SKIP" if args.no_verify else ("PASS" if ok else "FAIL")
     print(
         f"[{args.arch}] swapqk Sq={Sq} Sk={Sk} D={D} Hq={Hq} Hk={Hk} "
-        f"causal={args.causal} bn={spec.block_n} w={spec.n_waves} "
-        f"vt={int(spec.v_transposed)} o_nt={int(spec.o_nt)}: "
+        f"causal={args.causal} bn={cfg.block_n} w={cfg.n_waves} "
+        f"vt={int(cfg.v_transposed)} o_nt={int(cfg.o_nt)}: "
         f"{ms * 1e3:.1f}us {tflops:.2f} TF | verify={verdict}"
     )
     if not args.no_verify:

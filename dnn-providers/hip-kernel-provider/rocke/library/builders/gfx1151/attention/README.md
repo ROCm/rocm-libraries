@@ -2,14 +2,13 @@
 
 > ## Update — the transposed-QK (`swapqk`) kernel is the new winner (~2× the single-wave record)
 >
-> The case study below documents the single-wave campaign that topped out at
-> **~11 TF**. A later structural rewrite — **computing the scores transposed,
-> `S^T = K·Q^T`** — roughly **doubled** throughput, to **22.80 TF at L=16384** and
-> a peak of **~24.7 TF at L=1024**, hardware-validated on a gfx1151 Strix Halo
-> mini (H24, B1, D128, bit-identical to the reference at max_abs 1.53e-5).
+> The case study below documents the single-wave campaign and the plateau it hit.
+> A later structural rewrite — **computing the scores transposed, `S^T = K·Q^T`**
+> — roughly **doubled** throughput, hardware-validated on gfx1151 (H24, B1, D128,
+> bit-identical to the reference at max_abs 1.53e-5).
 >
 > - **Production kernel:** [`kernels/gfx1151/wmma_fmha_swapqk.py`](../../../kernels/gfx1151/wmma_fmha_swapqk.py)
->   — `WmmaFmhaSwapQKSpec` + `build_wmma_fmha_swapqk_fwd`, winning knobs baked in
+>   — one config type, `SwapQKCfg`, whose defaults are the winning knobs
 >   (wave2, pingpong, buffer-D16 gather, dual-gather, transposed V, d-outer QK,
 >   lazy online rescale, fast exp2). Note the default takes **V pre-transposed**
 >   as `[B, H, D, S]` — relay with `swapqk_transpose_v()`.
@@ -17,7 +16,7 @@
 >   [`ALGORITHM.md`](ALGORITHM.md), which also carries the full ledger of measured
 >   levers and rejected approaches.
 > - **Verify + bench:** [`wmma_fmha_swapqk_verify.py`](wmma_fmha_swapqk_verify.py)
->   (numpy-referenced correctness + achieved TFLOPS, with `--emit`/`--prebuilt`
+>   (numpy-referenced correctness + achieved throughput, with `--emit`/`--prebuilt`
 >   for the compile-here / run-there board workflow) and the importable
 >   [`gfx1151_dense_attention_builder.py`](gfx1151_dense_attention_builder.py).
 >   The dead-end levers (`d16hi` inline-asm gather, `iglp_opt`, pipeline, LDS-Q,
@@ -735,7 +734,7 @@ silent regression; the fragment and the accumulator have to stay packed.*
 
 ## The transposed-QK production kernel (`swapqk`)
 
-The structural rewrite that broke past the single-wave ~11 TF plateau. Full math
+The structural rewrite that broke past the single-wave plateau. Full math
 derivation in [`ALGORITHM.md`](ALGORITHM.md); the short version:
 
 - **Compute the scores transposed, `S^T = K·Q^T`.** Query then lands *on the lane*
@@ -748,7 +747,7 @@ derivation in [`ALGORITHM.md`](ALGORITHM.md); the short version:
 - **PV transposed too, `O^T = V·P`**, so the softmax stats and the O accumulator
   share a layout and the online rescale `O *= α` is a trivial in-lane vector-mul.
 
-**Production knobs (all hardware-validated, baked into `WmmaFmhaSwapQKSpec`):**
+**Production knobs (all hardware-validated, the `SwapQKCfg` defaults):**
 wave2, pingpong `s_setprio` scheduling (the 2.25× lever), **buffer-descriptor D16
 V-gather** (returns `half`, keeps the strided gather clause-batched: `s_clause`
 121→38, +~14%), **dual-subtile gather** (lanes 16–31 load the adjacent d-subtile +
@@ -758,28 +757,28 @@ iteration), the **d-outer QK loop** (`qk_douter`, +3.3%), **lazy online rescale*
 (skip the O rescale when the tile max doesn't re-anchor), and **fast exp2** (raw
 `v_exp_f32`, +2.7%).
 
-**Per-L sweep (gfx1151 Strix Halo mini, dense, H24 B1 D128; best config each):**
+**Per-L sweep (gfx1151, dense, H24 B1 D128; best config each), relative to the
+peak-throughput shape:**
 
-| L | best config | TFLOPS |
+| L | best config | relative throughput |
 |---|---|---|
-| 512   | w2 bn64 ilp2 | 22.9 |
-| 1024  | w2 bn64 ilp2 | **24.7** |
-| 2048  | w2 bn64 ilp2 | 23.1 |
-| 16384 | w2 bn64 ilp2 vt qk_douter | 22.80 |
+| 512   | w2 bn64 ilp2 | 0.93× |
+| 1024  | w2 bn64 ilp2 | **1.00× (peak)** |
+| 2048  | w2 bn64 ilp2 | 0.94× |
+| 16384 | w2 bn64 ilp2 vt qk_douter | 0.92× |
 
-The L=16384 number is the mean of 3 interleaved reps (22.61 / 22.81 / 22.97, peak
-23.39) at 15.16 Mcyc of `GRBM_GUI_ACTIVE`, 199 VGPR with 0 spill (a 208 granule →
-7 waves/SIMD, 12.6 waves/CU measured). Efficiency peaks at L≈1024 and declines as
-the KV working set outgrows the 32 MB MALL. For large-L launches, chunk the heads
-so the concurrent KV working set fits, and enable `o_nt` (+3–14%) so the
+The L=16384 point is the mean of 3 interleaved reps (spread under 2%), at 199
+VGPR with 0 spill (a 208 granule → 7 waves/SIMD). Efficiency peaks at L≈1024 and
+declines as the KV working set outgrows the MALL. For large-L launches, chunk the
+heads so the concurrent KV working set fits, and enable `o_nt` (+3–14%) so the
 write-once O output streams past the MALL instead of evicting the KV it needs.
 
 #### Where the cycles go, and what that rules out
 
 Priced against issue-cost anchors measured with `probe_roofline_peaks.py` (WMMA
-36.15 cycles/instr/SIMD → a 43.51 TF ceiling; VALU 1.31; `v_exp` 4.00), the
-L=16384 budget is **71.8% issue** (WMMA 50.0%, other VALU 19.0%, `v_exp` 2.8%)
-and **28.2% stall**. The implied issue floor is 30.28 TF, so the kernel is
+36.15 cycles/instr/SIMD, VALU 1.31, `v_exp` 4.00), the L=16384 budget is
+**71.8% issue** (WMMA 50.0%, other VALU 19.0%, `v_exp` 2.8%) and **28.2%
+stall**, and the kernel reaches ~75% of its own implied issue floor. So it is
 issue-bound first and latency-bound second.
 
 That budget is why several plausible levers cannot pay off, and measuring them
@@ -793,17 +792,18 @@ confirmed it:
 - **Requests per WMMA are invariant in `block_n`.** At 32/64/96/128 the ratio
   stays pinned at 1.5, so no tile size improves arithmetic intensity; only
   reuse (`q_block`) can, and at D=128 `q_block=2` does not fit (vgpr 256 + 235
-  spills → 11.6 TF). The O accumulator alone is 128 VGPR at MQ=2.
+  spills, landing well below the unblocked baseline). The O accumulator alone is
+  128 VGPR at MQ=2.
 - **Cache residency, not bandwidth or request count, is the long-L constraint.**
   The decisive evidence is the persistent kernel's schedule: `qb_major` (work
-  ordered to keep a head's KV resident) reaches 20.24 TF where `batch_major`
-  (spreading across heads) gets 0.94 TF — a 21× gap from scheduling alone.
+  ordered to keep a head's KV resident) beats `batch_major` (spreading across
+  heads) by **21×** at L=16384 — from scheduling alone.
   Persistence itself is +24% at L=2048 and **parity** at L=16384, so it ships off.
 - **The 8th wave is real but out of reach.** Holding the source constant and only
   changing `waves_per_eu` isolates it at +3.9%, needing 199→≤192 VGPR. The 96 VGPR
   of accumulators (O + scores) are mandatory, and `waves_per_eu=8` "achieves" 190
   only by spilling 24 values into scratch, which makes throughput *unstable*
-  (21.88 / 9.22 / 22.82 TF). Source-level grouping cannot force the peak down
+  (a >2× spread across reps). Source-level grouping cannot force the peak down
   either — the scheduler re-interleaves freely, so a grouping knob measured 199
   VGPR unchanged and was reverted rather than shipped as dead code.
 - **Duplicate lanes inside one vector load are free; duplicate instructions are
@@ -822,7 +822,7 @@ D≤64, and at D=128 the carried next-tile scores blow the 256-VGPR cap. `q_lds`
 loses 3× (an L1-resident global re-read beats LDS staging on this APU) and
 `kv_lds` loses 3× and gets *worse* with L. `o_f16` is correct and does free 20
 VGPR, but the converts cost more than the registers buy and it goes pathological
-at L≥8192 (2.71–7.26 TF, unexplained — profile before reaching for it).
+at L≥8192 (3–8× slower, unexplained — profile before reaching for it).
 `q_hoist`, `static_shape`, `prefetch_v` — see the flag comments in the kernel,
 which record the measurement alongside the code it describes.
 
@@ -847,15 +847,15 @@ python -m builders.gfx1151.attention.wmma_fmha_swapqk_verify --prebuilt /tmp/art
 numpy reference is only tractable to about L=4096; use `--no-verify` beyond that
 (the kernel logic is seqlen-agnostic and is covered by the small-L verifies).
 [`gfx1151_dense_attention_builder.py`](gfx1151_dense_attention_builder.py) is the
-importable equivalent (`WmmaFmhaSwapQKSpec`, `build_wmma_fmha_swapqk_fwd`,
+importable equivalent (`SwapQKCfg`, `build_wmma_fmha_swapqk`, `swapqk_grid`,
 `swapqk_transpose_v`, …).
 
-**Measurement discipline.** This part decays from 2405 MHz / 87 W to ~1600 MHz /
-43 W within seconds, a 20–40% swing that is larger than most levers being
-measured. A sequential A/A/B/B comparison read one real win *backwards*; always
-interleave reps and report all of them. For keep/revert decisions prefer
-clock-independent `GRBM_GUI_ACTIVE` cycles
+**Measurement discipline.** This part power-throttles hard within seconds of a
+sustained run, and the resulting swing is larger than most levers being measured.
+A sequential A/A/B/B comparison read one real win *backwards*; always interleave
+reps and report all of them. For keep/revert decisions prefer clock-independent
+`GRBM_GUI_ACTIVE` cycles
 (`platform/dsl_docs/optimization/utilities/tools/dsl_probes/probe_cycle_budget.py`)
-and treat wall-clock TFLOPS as confirmation only. `MemUnitBusy` is misleading
+and treat wall-clock throughput as confirmation only. `MemUnitBusy` is misleading
 here — it sits at ~96% in every config, including slower ones; trust
 `TA_TA_BUSY` and request counts instead.

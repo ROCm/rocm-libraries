@@ -2,19 +2,21 @@
 # SPDX-License-Identifier: MIT
 """Transposed-QK WMMA FMHA-forward kernel for gfx1151 (CK gfx11 `qr_ks_vs` design).
 
-PRODUCTION kernel (the campaign winner: 22.80 TF dense @ L16384, 24.7 TF @ L1024,
-H24 B1 D128, gfx1151 Strix Halo). The clean production entry point is
-:class:`WmmaFmhaSwapQKSpec` + :func:`build_wmma_fmha_swapqk_fwd` /
-:func:`wmma_fmha_swapqk_fwd_grid`, which bake the swept + hardware-validated
-knobs: wave2, pingpong ``s_setprio`` scheduling, buffer-descriptor D16 V-gather,
-dual-subtile gather, the transposed V layout, the d-outer QK loop, lazy
-online-softmax rescale, and fast (raw) exp2. Note that the transposed V layout
-means callers pass V as ``[B, H, D, S]`` -- see :func:`swapqk_transpose_v`.
+PRODUCTION kernel (the campaign winner for dense D128 fp16 on gfx1151). There is
+one config type, :class:`SwapQKCfg`: its defaults are the swept +
+hardware-validated winner (wave2, pingpong ``s_setprio`` scheduling,
+buffer-descriptor D16 V-gather, dual-subtile gather, the transposed V layout, the
+d-outer QK loop, lazy online-softmax rescale, and fast (raw) exp2), so
+``SwapQKCfg(head_size=..., num_query_heads=...)`` is the production
+configuration and every other field is an opt-in lever for A/B work. Note that
+the transposed V layout means callers pass V as ``[B, H, D, S]`` -- see
+:func:`swapqk_transpose_v`.
 
-The lower-level :class:`SwapQKCfg` / :func:`build_wmma_fmha_swapqk` expose every
-knob for A/B work. Each field's docstring records what it measured, including the
-dead-ends, so the negative results stay attached to the code they describe rather
-than living only in a design doc. See ``ALGORITHM.md`` / ``README.md``.
+Use :func:`is_valid_spec` as the cheap static gate and
+:func:`build_wmma_fmha_swapqk` / :func:`swapqk_grid` to build and launch. Each
+field's docstring records what it measured, including the dead-ends, so the
+negative results stay attached to the code they describe rather than living only
+in a design doc. See ``ALGORITHM.md`` / ``README.md``.
 
 This is the structural change the register-transpose investigation pointed at. The
 gather winner (``fmha_multiwave``) computes ``S = Q*K^T`` (query on the accumulator
@@ -74,18 +76,13 @@ from rocke.helpers import (
 from rocke.helpers.attention import apply_attention_mask
 
 __all__ = [
-    # production API (clean spec, winning knobs baked in)
-    "WmmaFmhaSwapQKSpec",
-    "swapqk_num_work_items",
-    "swapqk_persistent_grid",
-    "build_wmma_fmha_swapqk_fwd",
-    "wmma_fmha_swapqk_fwd_grid",
-    "is_valid_spec",
-    # research API (every knob; consumed by the builders/ tuning harness)
     "SwapQKCfg",
+    "is_valid_spec",
     "build_wmma_fmha_swapqk",
     "swapqk_grid",
     "swapqk_transpose_v",
+    "swapqk_num_work_items",
+    "swapqk_persistent_grid",
 ]
 
 _WMMA_OP_ID = "wmma_f32_16x16x16_f16"
@@ -97,15 +94,37 @@ _LAZY_RESCALE_THRESHOLD = 8.0
 
 @dataclass(frozen=True)
 class SwapQKCfg:
+    """Configuration for the transposed-QK WMMA FMHA forward.
+
+    The defaults ARE the production configuration: the swept, hardware-validated
+    winner for dense D128 fp16 on gfx1151. ``SwapQKCfg(head_size=128,
+    num_query_heads=24)`` builds that kernel (199 VGPR, zero spill, zero
+    scratch); every remaining field is an opt-in lever kept for A/B work, with
+    what it measured recorded in place -- including the dead-ends, so the
+    negative results stay attached to the code they describe.
+
+    NOTE the ``v_transposed=True`` default: callers must supply V as [B, H, D, S]
+    rather than [B, S, H, D] -- see :func:`swapqk_transpose_v`. That is the
+    layout the winning config needs (it collapses the PV V-gather from 16 strided
+    d16 loads to 2 dwordx4). Pass ``v_transposed=False`` to build against the
+    row-major layout instead, at the cost of a materially slower gather.
+
+    The production tunables are the kv tile (``block_n``), the wave count
+    (``n_waves``), the QK ILP (``qk_ilp``) and the non-temporal O store
+    (``o_nt``, a large-L lever). Everything experimental (pipeline, q_hoist,
+    q_lds, kv_lds, o_f16, d16hi, iglp, static_shape, prefetch_v, v_prefetch,
+    bcast_group, k_dual, num_persistent) is off by default.
+    """
+
     head_size: int
     num_query_heads: int
     num_kv_heads: int = 0
     mask_mode: str = "none"  # "none" | "causal"
-    # Swept defaults on gfx1151 (H24 B1 D128): block_n=32, qk_ilp=2, pingpong.
-    # n_waves=2 is the ROBUST choice: best at L512 (18.8 TF) and dominant in the
-    # memory-bound regime (L4096 14.1 vs w1 7.3; L8192 7.3 vs w1 2.3 -- more waves
-    # = more DRAM MLP), only ~3% behind w1 at L2048 (19.0 vs 19.5). +11-15% over
-    # the gather winner in the compute-bound regime.
+    # n_waves=2 is the ROBUST choice: best at short L and dominant in the
+    # memory-bound regime (more waves = more DRAM memory-level parallelism; at
+    # L4096 and L8192 it is roughly 2x and 3x w1 respectively), and only ~3%
+    # behind w1 at L2048. Worth +11-15% over the gather kernel in the
+    # compute-bound regime.
     n_waves: int = 2
     # q_block (MQ): query-blocking factor. Each wave processes MQ 16-row query
     # tiles per K-loop iteration, REUSING the loaded K fragment (QK) and V
@@ -116,29 +135,27 @@ class SwapQKCfg:
     # fits where O is small: D64 (n_dk=4 -> 32 VGPR/group, 141 VGPR baseline has
     # room for MQ=2) -- at D128 (64 VGPR/group) MQ=2 hits the 256-VGPR wall.
     # Requires the default (non-pipeline) dual-gather PV path.
-    # MEASURED WIN (hardware, gfx1151 stx-halo, D64 dense H24 B1, w2 bn64 ilp2;
-    # correct -- max_abs 3.05e-5): MQ=2 (vgpr 141->246, spill 0) breaks the DRAM
-    # roofline and stays compute-bound where the baseline craters --
-    #     L2048  23.8 -> 26.4 TF (+11%)
-    #     L4096  13.0 -> 26.9 TF (+106%)   <-- beats 23 TF at L>=4096
-    #     L8192   4.1 -> 20.5 TF (+404%)
+    # MEASURED WIN (D64 dense H24 B1, w2 bn64 ilp2; correct -- max_abs 3.05e-5):
+    # MQ=2 (vgpr 141->246, spill 0) breaks the DRAM roofline and stays
+    # compute-bound where the baseline craters -- +11% at L2048, +106% at L4096,
+    # +404% at L8192.
     # MQ=4 register-trim attempt (block_n/ilp down cuts spill 268->67 since the
     # p_tiles/scores liveness scales with n_kv_sub=block_n/16): still LOSES to
-    # MQ=2 at every L -- MQ4 bn16/ilp1/of16 gets 14.7/9.3/7.0 TF @ L8k/16k/32k vs
-    # MQ2 bn64's 22.8/18.3/11.5. Can't reach spill=0 (the carried f16 O 64 VGPR +
-    # f32 PV transient 64 VGPR are irreducible without 2x V traffic), and the
-    # bn16 needed to shrink spill carries its own throughput penalty. The extra
-    # reuse and the register cost fight each other -> MQ=2 is the hard ceiling.
+    # MQ=2 at every L -- MQ4 bn16/ilp1/of16 runs 35-50% behind MQ2 bn64 across
+    # L8k/16k/32k. Can't reach spill=0 (the carried f16 O 64 VGPR + f32 PV
+    # transient 64 VGPR are irreducible without 2x V traffic), and the bn16
+    # needed to shrink spill carries its own throughput penalty. The extra reuse
+    # and the register cost fight each other -> MQ=2 is the hard ceiling.
     # MQ=4 spills (381 f32 / 268 even with o_f16 O-carry) and craters: each
     # extra query group costs ~105 VGPR (O + P-tiles + scores/Q transients), and
     # o_f16 only trims the O part (~11 VGPR), so MQ=4 (~456 VGPR) can't fit 256.
-    # MQ=2 is the register ceiling at D64 (sustained win to ~L8K, tapering to
-    # ~14-18 TF by L16-32K); sustained 25-26 beyond that needs the persistent
-    # KV-stationary kernel, not more MQ. D128 MQ=2 does NOT fit -- vgpr=256 +
-    # spill=235 -> 11.6 TF @ L4096 (worse than the 18 TF baseline); the wall is
-    # far past what o_f16 O-carry (~64 VGPR saved) could recover. So query-
-    # blocking is a D64 (and smaller-head) win; D128 L>=4096 stays DRAM-bound
-    # (~17-18 TF), register-wall-limited as throughout the campaign.
+    # MQ=2 is the register ceiling at D64 (sustained win to ~L8K, tapering after
+    # that); holding it further out needs the persistent KV-stationary kernel,
+    # not more MQ. D128 MQ=2 does NOT fit -- vgpr=256 + spill=235 puts it well
+    # BELOW the unblocked baseline at L4096, and the wall is far past what an
+    # o_f16 O-carry (~64 VGPR saved) could recover. So query-blocking is a D64
+    # (and smaller-head) win; D128 L>=4096 stays DRAM-bound, register-wall-
+    # limited as throughout the campaign.
     q_block: int = 1
     # waves_per_eu: amdgpu-waves-per-eu hint. Occupancy on gfx1151 wave32 is a
     # STEP function -- VGPRs come from a 1536-entry file in granules of 16, so
@@ -148,30 +165,32 @@ class SwapQKCfg:
     # waves_per_eu=8 does force the allocation under the boundary (199 -> 190) and
     # does report 8 waves/SIMD, but it buys those 9 registers with 24 spills into
     # 100B of scratch and a loop grown to 1105 instructions. The scratch traffic
-    # makes it not just slower on average but UNSTABLE across reps
-    # (21.88 / 9.22 / 22.82 TF vs a steady 22.9 without it). Squeezing the
-    # allocator does not create registers; crossing 192 has to come from needing
-    # fewer live values, not from telling the allocator to want them less.
+    # makes it not just slower on average but UNSTABLE across reps (a >2x spread
+    # run to run, against a steady baseline). Squeezing the allocator does not
+    # create registers; crossing 192 has to come from needing fewer live values,
+    # not from telling the allocator to want them less.
     waves_per_eu: Optional[int] = None
     sched_mode: str = "pingpong"  # "none" | "pingpong"
     # iglp: -1 = off; >=0 = emit llvm.amdgcn.iglp_opt(level) at the loop-body top
     # to hand the steady-state schedule to the backend's canned interleave
     # strategy (0 = GEMM/mem<->mfma).
-    # DEAD-END (hardware, gfx1151 stx-halo-mini, L2048 dense): every level
-    # regresses ~3.5% (baseline 22.48 -> iglp0 21.67 / iglp1 21.72 / iglp2 21.71
-    # TF, all correct). The loop is already scheduling-optimal via the pingpong
-    # s_setprio hand-tuning (the 2.25x lever); the canned iglp strategy conflicts
-    # with it and does worse. sched_barrier/sched_group_barrier can't help the
-    # d16hi inline-asm path either (they reorder, but don't insert the vmcnt wait
-    # the uncounted asm loads need). Kept OFF for reference.
+    # DEAD-END (hardware, L2048 dense): every level regresses ~3.5% (levels 0, 1
+    # and 2 are within 0.3% of each other, all correct). The loop is already
+    # scheduling-optimal via the pingpong s_setprio hand-tuning (the 2.25x
+    # lever); the canned iglp strategy conflicts with it and does worse.
+    # sched_barrier/sched_group_barrier can't help the d16hi inline-asm path
+    # either (they reorder, but don't insert the vmcnt wait the uncounted asm
+    # loads need). Kept OFF for reference.
     iglp: int = -1
     qk_ilp: int = 2
     # block_n: kv tile processed per K-loop iteration (multiple of 16). Larger
     # block_n does block_n/16 QK+PV WMMA sub-steps per iteration and rescales the
     # O accumulator only ONCE per block_n keys (vs once per 16) -- amortizes the
     # online-softmax fixed cost + adds WMMA ILP, at the price of block_n/16 live
-    # score/P fragments. seqlen_k must be a multiple of block_n.
-    block_n: int = 32
+    # score/P fragments. seqlen_k must be a multiple of block_n. bn64 is the
+    # measured winner and only fits spill-free because dual_gather pays for it;
+    # bn128 collapses on VGPR.
+    block_n: int = 64
     # prefetch_v: software-pipeline the PV V-gather so the strided loads are
     # hidden behind compute. The first fragment's gather is issued BEFORE the
     # softmax (overlaps the softmax VALU); every subsequent (ns,d) fragment is
@@ -180,9 +199,9 @@ class SwapQKCfg:
     # lands a full step later, when the data is already home). Costs +1 live V
     # fragment.
     #
-    # MEASURED DEAD-END (gfx1151, H24 B1 D128): prefetch_v=True REGRESSES at every
-    # shape. Compute-bound (L<=2048): the gather is L1-resident, so the AMDGPU
-    # backend already hides it; the extra live fragment only adds spills (8->12)
+    # MEASURED DEAD-END (H24 B1 D128): prefetch_v=True REGRESSES at every shape.
+    # Compute-bound (L<=2048): the gather is L1-resident, so the AMDGPU backend
+    # already hides it; the extra live fragment only adds spills (8->12)
     # -> -8..-10%. Memory-bound (L>=4096): the bottleneck is DRAM MLP, which is
     # hidden by MORE WAVES (n_waves=2 >> n_waves=1 at long L), not by manual
     # prefetch (~neutral to worse). Kept as a lever for the A/B record; OFF by
@@ -197,36 +216,35 @@ class SwapQKCfg:
     # scaled immediates / a single shift. The params are still declared (ABI/driver
     # packing unchanged) -- just ignored for addressing.
     #
-    # MEASURED DEAD-END: static_shape=True REGRESSES (-9%, 18.97->17.26 @ L2048).
-    # The per-kv offset kv*stride_v*2 (~6 KB steps) exceeds the global_load
-    # immediate-offset range (+/-4 KB), so constant strides don't fold into scaled
-    # immediates -- LLVM instead materializes each address with an explicit 64-bit
-    # v_add_co (163 vs 36). The runtime-stride path shares the stride multiply in
-    # SALU and is cheaper. Kept as a lever; OFF by default.
+    # MEASURED DEAD-END: static_shape=True REGRESSES (-9% at L2048). The per-kv
+    # offset kv*stride_v*2 (~6 KB steps) exceeds the global_load immediate-offset
+    # range (+/-4 KB), so constant strides don't fold into scaled immediates --
+    # LLVM instead materializes each address with an explicit 64-bit v_add_co
+    # (163 vs 36). The runtime-stride path shares the stride multiply in SALU and
+    # is cheaper. Kept as a lever; OFF by default.
     static_shape: bool = False
     # buffer_gather: issue the PV V-gather via a buffer descriptor + the D16
     # half-return load (buffer_load_f16_d16 -> raw.ptr.buffer.load.f16). Address =
     # base + voffset + soffset is computed in the MEMORY UNIT (no 64-bit address
     # VALU), and returning `half` directly (not i16+bitcast) keeps the load clause
     # batched (s_clause 121->38) so the loads pipeline like the flat d16 path.
-    # MEASURED +2..12% (avg ~+7%, ~19.2-19.5 TF, peak 21.7) over flat @ L2048,
-    # bit-identical (1.53e-5).
+    # MEASURED +2..12% (avg ~+7%) over flat @ L2048, bit-identical (1.53e-5).
     #   FRAGILE: only wins at n_waves=2 AND block_n>=32. At block_n=16 or
-    #   n_waves=1 the backend stops batching the buffer loads and it collapses to
-    #   ~8 TF. Enabled by default because the shipped defaults ARE w2/bn32; the
-    #   sweep will still expose the bad off-sweet-spot points.
+    #   n_waves=1 the backend stops batching the buffer loads and throughput
+    #   drops to well under half. Enabled by default because the shipped defaults
+    #   ARE w2/bn64; an off-sweet-spot sweep will still expose the bad points.
     buffer_gather: bool = True
     # dual_gather: kill the 2x V-load redundancy from the WMMA A-operand's
     # lane 0-15 <-> 16-31 duplication. Instead of lanes 16-31 re-loading subtile
     # d, they load the ADJACENT subtile d+1 (one 32-lane load fetches TWO
     # d-subtiles); a permlanex16 + select then broadcasts each subtile's fragment
     # into both halves. Halves the V load instructions (256->128) at the cost of
-    # permlanex16/cndmask VALU -- a win because the kernel is memory-unit-bound
-    # (MemUnitBusy ~= 4984). Requires n_dk even (D%32==0).
+    # permlanex16/cndmask VALU -- a win because the kernel is memory-unit-bound.
+    # Requires n_dk even (D%32==0).
     # MEASURED: halves V loads (256->128) + s_waitcnt (147->76); small consistent
-    # win once loads are no longer strictly binding (+0.3-0.7 TF, ~22.0 @ L2048)
-    # and lower VGPR/instr. Also lets block_n=64 fit spill-free (though bn32 is
-    # still the sweet spot -- larger tiles don't beat it, bn128 collapses on VGPR).
+    # win once loads are no longer strictly binding (~+2-3% at L2048) and lower
+    # VGPR/instr. It is also what lets block_n=64 fit spill-free, which is the
+    # shipped default.
     dual_gather: bool = True
     # lazy_rescale: skip the O-accumulator rescale (n_dk vector-muls/iter) when the
     # running softmax max is stable -- i.e. every lane's tile_max is within
@@ -247,19 +265,19 @@ class SwapQKCfg:
     # utilization) instead of idling. Costs n_kv_sub carried score tiles.
     # MEASURED (register-GATED, not a flat dead-end):
     #   * D<=64 (O accumulator <= 32 VGPR): FITS spill-free and WINS +4-5%
-    #     (D64 L2048: 19.3->20.0 TF, vgpr 115->185, spill 0). Recommended ON here.
+    #     (D64 L2048, vgpr 115->185, spill 0). Recommended ON here.
     #   * D=128 (O = 64 VGPR): carrying current+next scores blows the 256-VGPR cap
-    #     (vgpr=255 + spills) -> 22->10 TF. The D=128 kernel is register-bound and
-    #     cannot pipeline; unblocking it via a D-split costs 2x softmax + 1.5x
-    #     matmul (a confirmed net loss). So D=128 dense tops out at ~22.5 TF.
+    #     (vgpr=255 + spills) and more than halves throughput. The D=128 kernel is
+    #     register-bound and cannot pipeline; unblocking it via a D-split costs
+    #     2x softmax + 1.5x matmul (a confirmed net loss).
     pipeline: bool = False
     # q_hoist: Q is loop-invariant (this wave's 16 query rows). Load all n_dk Q
     # fragments ONCE before the K-loop and pre-scale them by scale_log2, so the
     # QK loop (a) doesn't reload Q every tile -> fewer QK loads + fewer vmcnt(0)
     # drains, and (b) the QK output is already scaled -> drop the per-slot softmax
     # scale-mul (VALU). Costs n_dk live Q fragments (register pressure).
-    # MEASURED DEAD-END: regresses 22->13 TF. The 8 hoisted Q fragments (64 VGPR)
-    # on top of the 64-VGPR O accumulator blow the 256-VGPR budget (vgpr=256 + 60
+    # MEASURED DEAD-END: regresses ~40%. The 8 hoisted Q fragments (64 VGPR) on
+    # top of the 64-VGPR O accumulator blow the 256-VGPR budget (vgpr=256 + 60
     # spills). Same register wall as `pipeline` -- the kernel is register-bound.
     q_hoist: bool = False
     # q_lds: the register-pressure-free version of q_hoist. Stage each wave's 16
@@ -269,19 +287,19 @@ class SwapQKCfg:
     # holding Q in VGPRs (avoids the q_hoist register wall). Costs W*16*hs*2 bytes
     # LDS (8 KB for w2/D128) + a one-time cooperative staging pass + intra-wave
     # waitcnt.
-    # MEASURED DEAD-END: regresses 22.6->9.1 TF. Same lesson as V (cache-gather
-    # beat LDS): on this APU the cache-resident global Q re-read is free (hidden by
+    # MEASURED DEAD-END: regresses ~2.5x. Same lesson as V (cache-gather beat
+    # LDS): on this APU the cache-resident global Q re-read is free (hidden by
     # pingpong), while LDS staging breaks the clause/pipeline structure -- vmcnt(0)
     # drains EXPLODE 20->77 and instr 1215->1689. L1-hit >= LDS here.
     #
     # RE-CONFIRMED at MQ2 (per-wave slab, per-wave s_waitcnt -- NO block barrier,
-    # each wave stages+reads only Q_lds[wave_id]): still a 3x dead-end at every L
-    # (L2048 16.9->6.0, L16K 16.1->5.5). The barrier was never the issue -- the
-    # per-K-tile ds_read breaks the WMMA operand clause + adds lgkmcnt waits, and
-    # (unlike o_nt) Q is NOT a MALL-pressure source: it is ~8 KB/q-block and
-    # L1-resident, so it never competed with the 32 MB-MALL KV -> staging it in
-    # LDS relieves nothing and only adds overhead. o_nt (stream write-once O, 8
-    # MB/head in MALL) helps precisely because O DID contend; Q does not.
+    # each wave stages+reads only Q_lds[wave_id]): still a ~3x dead-end at every
+    # L. The barrier was never the issue -- the per-K-tile ds_read breaks the WMMA
+    # operand clause + adds lgkmcnt waits, and (unlike o_nt) Q is NOT a
+    # MALL-pressure source: it is ~8 KB/q-block and L1-resident, so it never
+    # competed with the MALL-resident KV -> staging it in LDS relieves nothing and
+    # only adds overhead. o_nt (stream the write-once O) helps precisely because O
+    # DID contend; Q does not.
     q_lds: bool = False
     # kv_lds: PROTOTYPE (large-L / DRAM-bound regime). Keep the ENTIRE swapqk
     # architecture (transposed QK, in-lane softmax, register P-transpose, dual,
@@ -293,12 +311,9 @@ class SwapQKCfg:
     # per-head KV working set spills L2 to a ~47% hit rate). Costs one cooperative
     # load + 2 s_barriers per K-tile (which partially fight pingpong). Forces the
     # flat LDS V-read path (buffer_gather is a global-only lever).
-    # DEAD-END (hardware, gfx1151 stx-halo, dense H24 B1 D128, w2 bn64 ilp2;
-    # correct -- max_abs 3.05e-5 == gather): loses badly AND the gap WIDENS with
-    # L, the opposite of the hypothesis --
-    #     L512  24.2 -> 9.1 TF (0.38x)
-    #     L2048 22.4 -> 7.7 TF (0.35x)
-    #     L4096 17.5 -> 5.1 TF (0.29x)
+    # DEAD-END (hardware, dense H24 B1 D128, w2 bn64 ilp2; correct -- max_abs
+    # 3.05e-5 == gather): loses badly AND the gap WIDENS with L, the opposite of
+    # the hypothesis -- 0.38x at L512, 0.35x at L2048, 0.29x at L4096.
     # Root causes: (1) vgpr 197->256 + spill=16 (coop loader's div/mod addressing
     # + LDS staging), (2) dsld 0->320 -- the flat V read is 16 uncoalesced scalar
     # ds_loads/fragment, far worse than the strided buffer gather it replaces,
@@ -320,18 +335,18 @@ class SwapQKCfg:
     # per-d-pair convert).
     # MEASURED: correct (1.07e-4, within tol) and DOES reclaim VGPR (184->164,
     # -20). But (a) the 16 f16<->f32 converts/block cost more than the 20 freed
-    # regs buy -> slower standalone (23.2->18.5 TF), and (b) the pipeline needs
-    # ~92 VGPR of headroom (its next-QK accumulators), so o_f16+pipeline still
-    # spills (vgpr=256 + 111). Net dead-end for D=128; the register relief is real
-    # but an order of magnitude short of unblocking the pipeline.
+    # regs buy -> ~20% slower standalone, and (b) the pipeline needs ~92 VGPR of
+    # headroom (its next-QK accumulators), so o_f16+pipeline still spills
+    # (vgpr=256 + 111). Net dead-end for D=128; the register relief is real but an
+    # order of magnitude short of unblocking the pipeline.
     #
     # ALSO MEASURED as an occupancy lever, and rejected: at bn64/vt it is the only
     # way found to reach 8 waves/SIMD with ZERO spill (vgpr 199 -> 183, crossing
     # the 192 granule), but the loop grows 1082 -> 1251 instructions and it goes
-    # PATHOLOGICAL at long sequences -- 2.71-7.26 TF at L16384 (vs 22.9 with
-    # o_f32) while still fine at L2048 (21.50), independent of qk_douter. Whatever
-    # that cliff is, it is not the +14% occupancy paying off. Unexplained; do not
-    # reach for o_f16 to buy waves at L>=8K without profiling it first.
+    # PATHOLOGICAL at long sequences -- 3-8x slower at L16384 while still fine at
+    # L2048, independent of qk_douter. Whatever that cliff is, it is not the +14%
+    # occupancy paying off. Unexplained; do not reach for o_f16 to buy waves at
+    # L>=8K without profiling it first.
     o_f16: bool = False
     # d16hi: d16_hi buffer gather (buffer_gather + dual_gather only). Pins
     # buffer_load_d16_b16/_hi_b16 via inline asm (hi tied to lo) so each strided
@@ -342,13 +357,13 @@ class SwapQKCfg:
     # regardless of insertelement shape). The flat path already gets
     # global_load_d16_hi_b16 for free, so d16hi is a no-op there.
     #
-    # DEAD-END (hardware-validated, gfx1151 stx-halo-mini, L2048 dense H24 B1
-    # D128). ISA is clean either way -- 64 buffer_load_d16_b16 + 64 _hi_b16,
-    # 0 buffer_load_u16, v_mov_b16 73->9 -- but the inline-asm loads are OUTSIDE
-    # the backend vmcnt model, and every way of adding the mandatory wait loses:
-    #   * no fence          -> +2.8% (22.99->23.64 TF) but NaN: the PV permute
-    #                          reads the fragment before the loads land (a race).
-    #   * coarse vmcnt0_fence (CURRENT, correct 1.53e-5) -> -5.3% (->21.78 TF):
+    # DEAD-END (hardware-validated, L2048 dense H24 B1 D128). ISA is clean either
+    # way -- 64 buffer_load_d16_b16 + 64 _hi_b16, 0 buffer_load_u16, v_mov_b16
+    # 73->9 -- but the inline-asm loads are OUTSIDE the backend vmcnt model, and
+    # every way of adding the mandatory wait loses:
+    #   * no fence          -> +2.8% but NaN: the PV permute reads the fragment
+    #                          before the loads land (a race).
+    #   * coarse vmcnt0_fence (CURRENT, correct 1.53e-5) -> -5.3%:
     #                          one s_waitcnt vmcnt(0) per fragment serialises the
     #                          gather, killing the load/compute overlap the typed
     #                          path gets from backend-managed PARTIAL waits
@@ -365,16 +380,17 @@ class SwapQKCfg:
     d16hi: bool = False
     # o_nt / q_nt: streaming (non-temporal, cache-bypass) global O-store / Q-load.
     # LARGE-Sq MALL-residency levers (idea 1 / idea 2). At L>=8K the per-head KV
-    # (4-16 MB) is the reused working set we WANT resident in the 32 MB MALL, but
-    # the write-once O output (up to 8 MB/head @ L32K, never re-read) allocates
-    # MALL lines and EVICTS KV -- dropping the KV hit rate (the measured cause of
-    # the sub-ceiling L16K/32K throughput). ``o_nt`` marks the O epilogue store
-    # ``!nontemporal`` so it streams past MALL (no allocate), leaving the full
-    # 32 MB for KV. ``q_nt`` does the same for the Q-fragment load -- an
-    # EXPERIMENT knob: Q is re-read every K-tile (reused), so streaming it should
-    # HURT, confirming the "keep reused data cached, stream write-once data"
-    # separation. KV (K load + V gather) is ALWAYS left default-cached. Pair with
-    # the head-chunked launch (concurrent working set <= MALL) for large Sq.
+    # is the reused working set we WANT resident in the MALL, but the write-once
+    # O output (up to 8 MB/head @ L32K, never re-read) allocates MALL lines and
+    # EVICTS KV -- dropping the KV hit rate (the measured cause of the
+    # sub-ceiling L16K/32K throughput). ``o_nt`` marks the O epilogue store
+    # ``!nontemporal`` so it streams past MALL (no allocate), leaving the whole
+    # cache to KV; it is worth +3-14% for large-L head-chunked launches.
+    # ``q_nt`` does the same for the Q-fragment load -- an EXPERIMENT knob: Q is
+    # re-read every K-tile (reused), so streaming it should HURT, confirming the
+    # "keep reused data cached, stream write-once data" separation. KV (K load +
+    # V gather) is ALWAYS left default-cached. Pair with the head-chunked launch
+    # (concurrent working set <= MALL) for large Sq.
     o_nt: bool = False
     q_nt: bool = False
     # v_transposed: take V pre-transposed as [B, H, D, S] instead of [B, S, H, D].
@@ -388,43 +404,43 @@ class SwapQKCfg:
     #
     # The tradeoff is address divergence: the 32 lanes now sit on 32 different
     # d-rows (S*2 bytes apart) instead of one cache line. Measured in isolation
-    # (profiling/vgather.hip, gfx1151, S=16K/D128/H24, 512 waves): 850 GB/s for
-    # [B,S,H,D] vs 1685 GB/s for [B,H,D,S] -- the instruction saving wins ~2x,
-    # and the transposed form saturates at low occupancy while the row-major one
-    # needs 2-4x the waves to catch up (this kernel is VGPR-capped at ~12.8
-    # waves/CU, so it never gets there).
+    # with a standalone gather microbenchmark (S=16K/D128/H24, 512 waves):
+    # [B,H,D,S] sustains ~2x the bandwidth of [B,S,H,D] -- the instruction saving
+    # wins, and the transposed form saturates at low occupancy while the
+    # row-major one needs 2-4x the waves to catch up (this kernel is VGPR-capped
+    # at 7 waves/SIMD, so it never gets there).
     #
-    # MEASURED (gfx1151 stx-halo-mini, H24 B1 D128, mq1/of32/bn64, single-head
-    # dispatch, exact: 1.53e-05, identical to the default layout). ISA does what
-    # it promises -- buffer_load 256->32, v_mov_b16 145->17, s_waitcnt 163->67,
-    # +3 VGPR, 0 spill. Cycle counts (GRBM_GUI_ACTIVE, so clock-independent --
-    # see the throttling note below) and memory-unit busy cycles (TA_TA_BUSY):
+    # MEASURED (H24 B1 D128, mq1/of32/bn64, single-head dispatch, exact: 1.53e-05,
+    # identical to the default layout). ISA does what it promises -- buffer_load
+    # 256->32, v_mov_b16 145->17, s_waitcnt 163->67, +3 VGPR, 0 spill. Cycle
+    # counts (GRBM_GUI_ACTIVE, so clock-independent -- see the throttling note
+    # below) and memory-unit busy cycles (TA_TA_BUSY):
     #                cycles      TA busy
     #   * L4096      -20.3%      -24%
     #   * L8192       -5.9%      -10%
     #   * L16384      +0.3%        0%
     # The benefit tracks whether the memory unit RESPONDS at all: at L4096 the
     # gather is the constraint and removing 8/9 of the loads removes a fifth of
-    # the runtime; by L16384 TA_TA_BUSY is pinned at ~480 Mcycles no matter what
-    # the load stream looks like, so there is nothing left to win. At L16K the
-    # unit is latency-saturated (holding outstanding L2/MALL returns), not
+    # the runtime; by L16384 TA_TA_BUSY is pinned no matter what the load stream
+    # looks like, so there is nothing left to win. At L16K the unit is
+    # latency-saturated (holding outstanding L2/MALL returns), not
     # throughput-saturated -- see v_kblock for the experiment that rules out
     # instruction count and cache-line count as the L16K constraint.
     #
-    # BEWARE when re-measuring in wall-clock TF: sustained runs power-throttle
-    # this part from 2405 MHz / 87 W down to ~1600 MHz / 43 W within ~5 s, and
-    # long-L runs sit deep in that regime. That swing (20-40%) is larger than
-    # any of the effects here and it masked the L4096/L8192 wins entirely in an
-    # earlier end-to-end sweep. Compare cycles, not TF.
+    # BEWARE when re-measuring in wall-clock terms: sustained runs power-throttle
+    # this part hard within a few seconds, and long-L runs sit deep in that
+    # regime. That swing is larger than any of the effects here and it masked the
+    # L4096/L8192 wins entirely in an earlier end-to-end sweep. Compare cycles,
+    # not wall clock.
     #
     # REQUIRES q_block=1. At q_block=2 the wide loads land on a kernel already
     # pinned at the 256-VGPR cap and spills explode (38 -> 153, scratch 28 ->
-    # 114) for -24% (23.4 -> 17.8 TF @ L2048).
+    # 114) for -24% at L2048.
     #
     # Requires buffer_gather and is incompatible with kv_lds (an LDS-staged V
     # tile is a separate lever that solves the same problem a different way).
     # Callers must supply V already transposed; see swapqk_transpose_v().
-    v_transposed: bool = False
+    v_transposed: bool = True
     # v_kblock: with v_transposed, use the KEY-BLOCKED layout [B, H, S/KB, D, KB]
     # instead of the full transpose (KB=0). KB keys stay contiguous per d, and d
     # advances every KB*2 bytes, so one instruction's 32 lanes cover 32*KB*2
@@ -439,17 +455,18 @@ class SwapQKCfg:
     # fewer lines than the default. If the memory unit were bound by either
     # instruction issue or line lookups, KB=8 would be the clear winner.
     #
-    # MEASURED (L16384, single-head dispatch, 3 reps, GRBM_GUI_ACTIVE Mcycles):
-    #   default 16.49 | transpose 16.54 (+0.3%) | blocked KB8 18.02 (+9.3%)
-    #   TA_TA_BUSY:  480 |  483 | 484 Mcycles -- FLAT to within 1%
-    # So KB=8 is the WORST of the three, and the memory-unit busy counter does
-    # not budge across an 8x swing in instructions and an 8x swing in lines.
-    # That rules out both as the L16K constraint (at L4096, where the gather IS
-    # binding, the same counter moves -24%). The kernel is memory-LATENCY bound
-    # there: TA reads as ~75% busy because it is holding outstanding L2/MALL
-    # returns, and issuing fewer/cheaper requests does not shorten the wait.
-    # Kept only as the probe that establishes this; KB=0 is the useful setting.
-    # KB must divide 16 and give a 4/8/16-byte load, so KB in {2, 4, 8}.
+    # MEASURED (L16384, single-head dispatch, 3 reps, GRBM_GUI_ACTIVE cycles):
+    # default and transpose are within 0.3% of each other, and blocked KB8 spends
+    # 9.3% MORE cycles than either, while TA_TA_BUSY is FLAT to within 1% across
+    # all three. So KB=8 is the WORST of the three, and the memory-unit busy
+    # counter does not budge across an 8x swing in instructions and an 8x swing
+    # in lines. That rules out both as the L16K constraint (at L4096, where the
+    # gather IS binding, the same counter moves -24%). The kernel is
+    # memory-LATENCY bound there: TA reads as ~75% busy because it is holding
+    # outstanding L2/MALL returns, and issuing fewer/cheaper requests does not
+    # shorten the wait. Kept only as the probe that establishes this; KB=0 is the
+    # useful setting. KB must divide 16 and give a 4/8/16-byte load, so KB in
+    # {2, 4, 8}.
     v_kblock: int = 0
     # v_prefetch: keep N V-gathers in flight across the PV step sequence. The
     # loads for step i+N are issued before step i's permute + WMMAs, so the
@@ -461,9 +478,8 @@ class SwapQKCfg:
     # This is the lever for the L16K regime, which is memory-LATENCY bound: the
     # SIMD issues on ~16% of cycles and a wave spends ~55 cycles per instruction
     # waiting, while occupancy is hard-capped at 8-9 waves/SIMD by the O
-    # accumulator (see v_kblock and the occupancy sweep in
-    # profiling/occ_sweep.py). More requests per wave is the only remaining way
-    # to cover the latency once more waves are unavailable.
+    # accumulator (see v_kblock). More requests per wave is the only remaining
+    # way to cover the latency once more waves are unavailable.
     #
     # Distinct from prefetch_v, which only ever ran on the NON-dual_gather path
     # (it sits in an elif after dual_gather, so with the shipped dual_gather=True
@@ -471,11 +487,11 @@ class SwapQKCfg:
     # that is not the production one). v_prefetch targets the dual path and
     # composes with v_transposed, where a gather is only 2 loads to issue.
     #
-    # MEASURED DEAD-END (gfx1151, H24 B1 D128 L16K, GRBM cycles, o_f32/bn32/vt):
-    #   depth 0 -> 15.96 Mcyc, 187 VGPR, L2 0.3M miss,  0.2M 128B DRAM reads
-    #   depth 2 -> 15.58 Mcyc, 204 VGPR, L2 0.8M miss,  0.7M
-    #   depth 3 -> 51.56 Mcyc, 220 VGPR, L2 12.4M miss, 12.4M
-    #   depth 4 -> 56.20 Mcyc, 220 VGPR, L2 13.5M miss, 13.5M
+    # MEASURED DEAD-END (H24 B1 D128 L16K, GRBM cycles, o_f32/bn32/vt), relative
+    # to depth 0 (187 VGPR, 0.3M L2 misses, 0.2M 128B DRAM reads):
+    #   depth 2 -> -2% cycles,  204 VGPR, L2  0.8M miss,  0.7M DRAM reads
+    #   depth 3 -> 3.2x cycles, 220 VGPR, L2 12.4M miss, 12.4M
+    #   depth 4 -> 3.5x cycles, 220 VGPR, L2 13.5M miss, 13.5M
     # Depth 2 is neutral (within run-to-run spread); depth >=3 falls off a cliff.
     # The cliff is NOT registers or instructions: spill and scratch stay 0, the
     # static mix is unchanged (16 buffer_load / 48 global_load / 32 wmma),
@@ -486,14 +502,14 @@ class SwapQKCfg:
     # for the same 8.4M loads.
     #
     # The deeper reason this lever cannot pay: at depth 0 the kernel only pulls
-    # ~26 MB from DRAM (~4% of bandwidth), so the latency the waves are hiding is
-    # mostly L0/L1/L2-HIT latency on the vector-memory path, not DRAM latency.
-    # Adding requests-in-flight cannot cover that without spending the very cache
-    # residency that makes those hits cheap.
+    # ~26 MB from DRAM (~4% of available bandwidth), so the latency the waves are
+    # hiding is mostly L0/L1/L2-HIT latency on the vector-memory path, not DRAM
+    # latency. Adding requests-in-flight cannot cover that without spending the
+    # very cache residency that makes those hits cheap.
     v_prefetch: int = 0
     # NOTE on the dual-gather broadcast cost (248 v_cndmask_b32 + 146
     # v_permlanex16_b32 in dual_gather_finish, together ~16% of the K-loop's issue
-    # cycles). Two routes to make it cheaper, measured with profiling/shufdbg.py:
+    # cycles). Two routes to make it cheaper, both checked against the ISA:
     #
     # (a) One-instruction row swap: NOT on this target. v_permlane16_swap_b32
     #     would turn the 3-op broadcast (1 permlane + 2 selects per dword) into
@@ -528,35 +544,34 @@ class SwapQKCfg:
     # and must keep all n_dk fragments live (64 VGPR at D=128 -> spills).
     #
     # MEASURED WIN (L16384 H24 B1 D128, mq1/of32/bn64/vt, 3 interleaved reps):
-    # 22.05/22.04/22.12 -> 22.81/22.97/22.61 TF, i.e. +3.3%; GRBM cycles
-    # 15.80 -> 15.16 Mcyc (-4.0%), TA_TA_BUSY 504.7M -> 449.9M (-11%), stall
-    # 4.84 -> 4.27 Mcyc. vgpr 200 -> 199, zero spill, zero scratch, error
-    # unchanged (1.53e-05 @ L2048, 7.63e-06 @ L16384). Interleave the reps: a
-    # sequential A/B/A/B reads BACKWARDS here because the part decays from 2405
-    # to ~1600 MHz within seconds and the drift exceeds the effect.
+    # +3.3% throughput, -4.0% GRBM cycles, -11% TA_TA_BUSY, -12% stall cycles.
+    # vgpr 200 -> 199, zero spill, zero scratch, error unchanged (1.53e-05 @
+    # L2048, 7.63e-06 @ L16384). Interleave the reps: a sequential A/B/A/B reads
+    # BACKWARDS here because the part throttles within seconds and the drift
+    # exceeds the effect.
     #
     # The win is NOT the mechanism this was built for. The intent was to delete
     # n_kv_sub*n_dk - n_dk = 24 redundant Q loads per iteration, but the in-loop
     # global_load count does not move (64 at bn64, 32 at bn32) under ANY nesting,
     # and does not move when o_f16 frees 17 VGPR either, so it is not remat under
-    # pressure. Grouping the loads by address operand (see profiling/loaddbg.py)
-    # shows what actually changed: kv-outer issues 32 distinct addresses TWICE
-    # each, d-outer issues 64 distinct addresses once each. Same instruction
-    # count, but the duplicate fetches were spending requests on a texture-address
-    # path already 96.9% busy -- which is why TA_TA_BUSY, not the load count, is
-    # where the gain shows up.
+    # pressure. Grouping the loads by address operand shows what actually
+    # changed: kv-outer issues 32 distinct addresses TWICE each, d-outer issues
+    # 64 distinct addresses once each. Same instruction count, but the duplicate
+    # fetches were spending requests on a texture-address path already 96.9%
+    # busy -- which is why TA_TA_BUSY, not the load count, is where the gain
+    # shows up.
     #
     # MQ>1 has its own QK loop that already hoists K across query groups; this
     # knob is rejected there rather than silently doing nothing.
-    qk_douter: bool = False
+    qk_douter: bool = True
     # A NOTE on the register peak, since it is what caps this kernel. qk_douter
     # keeps all n_kv_sub score accumulators AND all n_kv_sub K fragments live (at
     # bn64: 32 + 32 VGPR), which pins it at 199 VGPR = 7 waves/SIMD. The 8th wave is
-    # worth +3.9% MEASURED IN ISOLATION (qkdo=0 ilp1: 192 VGPR/8 waves 22.12 TF vs
-    # the same code at 193 VGPR/7 waves 21.30), and qk_douter itself is worth +7.1%,
-    # so having both would be ~23.7 TF. They do not compose: waves_per_eu=8 on the
-    # qkdo path gives 190 VGPR but 24 IN-LOOP spills (22.47 TF, i.e. the wave nearly
-    # pays for the spills but not quite).
+    # worth +3.9% MEASURED IN ISOLATION (qkdo=0 ilp1 at 192 VGPR/8 waves vs the
+    # same code at 193 VGPR/7 waves), and qk_douter itself is worth +7.1%, so the
+    # two together would compound. They do not compose: waves_per_eu=8 on the qkdo
+    # path gives 190 VGPR but 24 IN-LOOP spills, netting -1.5% -- the wave nearly
+    # pays for the spills, but not quite.
     #
     # Source-level grouping does NOT fix this -- tried and reverted: running the d
     # loop over groups of 2 kv sub-tiles (so only 2 accumulators + 2 K fragments are
@@ -582,23 +597,23 @@ class SwapQKCfg:
     # win that falls off a cliff at long sequences. Default off.
     #   codegen (bn64/vt/qk_douter, N=4): selects 248 -> 20 singles + 118
     #     v_dual_cndmask_b32 pairs (from 4), K-loop 1082 -> 899 instructions,
-    #     dynamic VALU 201.6M -> 173.3M (-14%), issue floor 10.89 -> 10.43 Mcyc.
-    #     Zero spill, zero scratch. N=0 and N=1 compile identically, confirming
-    #     this is a pure reorder; error is 1.53e-05 at every N, as it must be.
-    #   L2048 bn64: +6.2% (19.24 -> 20.44 TF, 3 interleaved reps). Real win.
-    #   L16384 bn64: 11x LOSS (22.5 -> 2.0 TF). Root cause is a cache-residency
-    #     collapse, NOT the occupancy drop: at the real 24-chunk shape L2 misses go
-    #     3.75M -> 393M (105x) and DRAM read 323 MiB -> 47.9 GiB (148x). Grouping
-    #     lets the scheduler hoist the gather loads away from their consumers, and
-    #     the extra distinct lines in flight blow L2 once 24 heads are resident --
+    #     dynamic VALU -14%, issue floor -4%. Zero spill, zero scratch. N=0 and
+    #     N=1 compile identically, confirming this is a pure reorder; error is
+    #     1.53e-05 at every N, as it must be.
+    #   L2048 bn64: +6.2% (3 interleaved reps). Real win.
+    #   L16384 bn64: 11x LOSS. Root cause is a cache-residency collapse, NOT the
+    #     occupancy drop: at the real 24-chunk shape L2 misses go 3.75M -> 393M
+    #     (105x) and DRAM read 323 MiB -> 47.9 GiB (148x). Grouping lets the
+    #     scheduler hoist the gather loads away from their consumers, and the
+    #     extra distinct lines in flight blow L2 once 24 heads are resident --
     #     the same failure mode as v_prefetch depth>=3 (0.3M -> 12.4M misses).
     #   L16384 bn32: VGPR stays 179 so occupancy is UNCHANGED (8 waves/SIMD) and
-    #     the loop still shrinks 581 -> 500 instructions, yet cycles are FLAT
-    #     (16.43 -> 16.41 Mcyc): issue 11.22 -> 10.67 while stall rises
-    #     5.20 -> 5.74. The freed issue slots convert 1:1 into stall, which says
-    #     these selects were never on the critical path -- they were being issued
-    #     in stall shadow. Cutting VALU issue is not a lever for this kernel at
-    #     long L; the memory path is.
+    #     the loop still shrinks 581 -> 500 instructions, yet cycles are FLAT:
+    #     issue drops ~5% while stall rises by the same absolute amount. The
+    #     freed issue slots convert 1:1 into stall, which says these selects were
+    #     never on the critical path -- they were being issued in stall shadow.
+    #     Cutting VALU issue is not a lever for this kernel at long L; the memory
+    #     path is.
     #
     # NOTE on measuring this: a reduced single-head dispatch reported merely +8%
     # cycles for N=4 at L16384 and completely masked the 11x cliff, which only
@@ -628,12 +643,11 @@ class SwapQKCfg:
     # Requires qk_douter (the pair-wise kv iteration lives in its d-outer loop) and
     # an even n_kv_sub, i.e. block_n >= 32.
     #
-    # MEASURED: correct (max_abs 1.53e-05) and a win at L=2048 (9.12 vs 8.41 TF),
-    # but 2.1 TF vs 22.5 TF at L=16384 (3 interleaved reps). The codegen did exactly
-    # what it was built to do -- FLAT loads 16.9M -> 8.5M, spill-free, occupancy
-    # held, and the doubled broadcast even self-packed into VOPD (42 -> 164 pairs) --
-    # yet TA_TA_BUSY went UP 13% (435.8M -> 493.4M) and DRAM read 13x (19.4 ->
-    # 256.4 MiB).
+    # MEASURED: correct (max_abs 1.53e-05) and a win at L=2048 (+8%), but an 11x
+    # LOSS at L=16384 (3 interleaved reps). The codegen did exactly what it was
+    # built to do -- FLAT loads 16.9M -> 8.5M, spill-free, occupancy held, and the
+    # doubled broadcast even self-packed into VOPD (42 -> 164 pairs) -- yet
+    # TA_TA_BUSY went UP 13% and DRAM read up 13x.
     #
     # WHY, and the general rule: duplicate LANES are free, duplicate INSTRUCTIONS
     # are not. The address unit coalesces the 16 identical addresses inside one
@@ -657,28 +671,31 @@ class SwapQKCfg:
     # resident* rather than trading locality for fewer instructions: with
     # persist_decode="qb_major" a CTA draining adjacent tile ids stays on ONE
     # (head, batch) and reuses that head's K/V out of L2, and deep oversubscription
-    # (~24x the 40 CUs) keeps the queue full enough to hide the fetch latency.
+    # (~24x the CU count) keeps the queue full enough to hide the fetch latency.
     #
     # MQ>1 / q_lds / kv_lds are rejected here: MQ=2 does not fit at D=128 and the
     # LDS paths allocate inside what would become the work-item loop.
     # MEASURED (D128 H24 B1, mq1 of32 bn64 w2 vt dual qkdo): correct (1.53e-05).
-    #   L=2048  : pers960 + waves_per_eu=8... 22.44 TF vs 18.04 one-shot (+24%)
-    #   L=16384 : pers1920 + waves_per_eu=8 . 22.49 TF vs 22.55 one-shot (parity,
-    #             3 interleaved reps; pers960 WITHOUT wpe is 18.8 -- see below)
-    # Depth is not optional and the curve is monotone: 40 CTAs 6.17 TF, 120 15.28,
-    # 240 15.34, 480 17.98, 960 20.04, 1920 20.23. One CTA per CU starves the queue.
+    #   L=2048  : pers960 + waves_per_eu=8 .. +24% over one-shot
+    #   L=16384 : pers1920 + waves_per_eu=8 . parity with one-shot (3 interleaved
+    #             reps; pers960 WITHOUT wpe is ~17% down -- see below)
+    # Depth is not optional and the curve is monotone in the CTA count: one CTA per
+    # CU starves the queue badly, and throughput climbs steadily out to ~1920 CTAs,
+    # more than 3x the shallowest point.
     #
     # COST: the work-item loop is +55 VGPR (199 -> 254, spill-free) because
     # loop-invariant setup hoisted out of it stays live across the whole body, which
     # drops 7 -> 6 waves/SIMD. waves_per_eu=8 buys the wave back (192 VGPR, 19
-    # spills, 80 B scratch) and recovers ~3 TF; this is the one config where wpe=8
-    # helps, since it corrects that regression rather than pushing past a real peak.
+    # spills, 80 B scratch) and recovers most of the loss; this is the one config
+    # where wpe=8 helps, since it corrects that regression rather than pushing past
+    # a real peak.
     #
     # The schedule itself is emphatically the right idea -- persist_decode alone is
-    # worth 21x at L=16K (qb_major 20.24 TF vs batch_major 0.94) -- but the one-shot
-    # grid's in-order dispatch already approximates qb_major, so L2 hit only moves
+    # worth 21x at L=16K (qb_major over batch_major) -- but the one-shot grid's
+    # in-order dispatch already approximates qb_major, so L2 hit only moves
     # 66.0% -> 67.8% and the net is parity. Default off; use it for short L, or when
-    # run-to-run stability matters (pers1920 wpe8 spread 0.08 TF vs one-shot 1.30).
+    # run-to-run stability matters (pers1920 wpe8 holds a ~16x tighter spread than
+    # one-shot).
     num_persistent: int = 0
     # persist_decode: work-item -> (q_group, head, batch) unpack order.
     #   "qb_major"    : q_group fastest -> a CTA stays on one (head,batch): K/V reuse
@@ -745,6 +762,40 @@ class SwapQKCfg:
             ),
             f"iglp{self.iglp}" if self.iglp >= 0 else "noiglp",
         )
+
+
+def is_valid_spec(cfg: SwapQKCfg, arch: str = "gfx1151") -> "tuple[bool, str]":
+    """Cheap static validity gate (mirrors ``wmma_fmha_fwd.is_valid_spec``).
+
+    Only the shape/tile constraints that are cheap to check without building.
+    Knob-compatibility rules (``v_transposed`` needs ``buffer_gather``, and so
+    on) are enforced by :func:`build_wmma_fmha_swapqk`.
+    """
+    if arch != "gfx1151":
+        return False, f"swapqk is a gfx1151 (RDNA3.5) kernel; got arch={arch!r}"
+    # dual_gather pairs adjacent d-subtiles, so n_dk must be even.
+    if cfg.head_size <= 0 or (cfg.dual_gather and cfg.head_size % 32 != 0):
+        return (
+            False,
+            f"head_size must be a positive multiple of 32 (got {cfg.head_size})",
+        )
+    if cfg.head_size % 16 != 0:
+        return (
+            False,
+            f"head_size must be a positive multiple of 16 (got {cfg.head_size})",
+        )
+    # The backend stops batching the buffer gather below block_n=32, which
+    # collapses throughput.
+    if cfg.block_n % 16 != 0 or (cfg.buffer_gather and cfg.block_n < 32):
+        return (
+            False,
+            f"block_n must be a multiple of 16 and at least 32 (got {cfg.block_n})",
+        )
+    if cfg.n_waves not in (1, 2):
+        return False, f"n_waves must be 1 or 2 (got {cfg.n_waves})"
+    if cfg.mask_mode not in ("none", "causal"):
+        return False, f"mask_mode must be 'none' or 'causal' (got {cfg.mask_mode!r})"
+    return True, ""
 
 
 def swapqk_transpose_v(v, kblock: int = 0):
@@ -827,6 +878,9 @@ def build_wmma_fmha_swapqk(
 ) -> KernelDef:
     """``seqlen_q``/``batch`` are only needed when ``cfg.num_persistent > 0``: the
     work-item count and the per-CTA drain bound are compile-time constants there."""
+    ok, why = is_valid_spec(cfg, arch)
+    if not ok:
+        raise ValueError(why)
     atom = WmmaAtom.f16_16x16x16()
     wave = atom.wave_size  # 32
     c_map = atom.c_layout(arch)
@@ -2068,111 +2122,3 @@ def build_wmma_fmha_swapqk(
     _pers_close()
     b.ret()
     return b.kernel
-
-
-# ============================================================================
-# Production entry point
-# ============================================================================
-# A frozen spec over the swept + hardware-validated production knobs. Everything
-# experimental / dead-end (pipeline, q_hoist, q_lds, kv_lds, o_f16, d16hi, iglp,
-# static_shape, prefetch_v, bcast_group, k_dual, num_persistent) is OFF and not
-# reachable from here -- use SwapQKCfg directly to explore those; each field
-# carries its own measurement. The production tunables are the kv tile
-# (block_n), the wave count (n_waves), the QK ILP (qk_ilp) and the non-temporal
-# O store (o_nt); everything else is pinned at the measured winner.
-#
-# Defaults are the L=16384 winner measured on gfx1151 stx-halo-mini (Radeon
-# 8060S, 40 CU, 32 MB MALL), dense D=128 H=24 B=1 fp16: 22.80 TF as the mean of
-# 3 interleaved reps (22.61 / 22.81 / 22.97, peak 23.39), 15.16 Mcyc of
-# GRBM_GUI_ACTIVE, 199 VGPR with 0 spill (208 granule -> 7 waves/SIMD). That
-# config is `block_n=64, n_waves=2, qk_ilp=2, v_transposed, dual_gather,
-# qk_douter` with the f32 O-carry and q_block=1. Per-L guidance from the sweep:
-# throughput peaks ~24.7 TF at L=1024 and is cache-residency-bound past ~4K;
-# `o_nt=True` is worth +3-14% for large-L head-chunked launches, where the
-# write-once O output would otherwise evict the reused KV from the MALL.
-#
-# NOTE: the default carries `v_transposed=True`, so callers must supply V as
-# [B, H, D, S] rather than [B, S, H, D] -- see swapqk_transpose_v(). This is the
-# layout the winning config needs (it collapses the PV V-gather from 16 strided
-# d16 loads to 2 dwordx4, 256 -> 32 vector-memory instructions per iteration).
-# Pass `v_transposed=False` to build against the row-major layout instead, at
-# the cost of ~20% more cycles at L=4096.
-
-
-@dataclass(frozen=True)
-class WmmaFmhaSwapQKSpec:
-    """Production spec for the transposed-QK WMMA FMHA forward (gfx1151)."""
-
-    head_size: int
-    num_query_heads: int
-    num_kv_heads: int = 0  # 0 -> MHA (== num_query_heads); else GQA/MQA
-    mask_mode: str = "none"  # "none" | "causal"
-    # tunables (defaults = the L=16384 winner); everything else is baked.
-    n_waves: int = 2
-    block_n: int = 64
-    qk_ilp: int = 2
-    # V arrives pre-transposed as [B, H, D, S]; see swapqk_transpose_v().
-    v_transposed: bool = True
-    # Stream the write-once O store past the MALL. Large-L lever (+3-14%).
-    o_nt: bool = False
-
-    def to_cfg(self) -> SwapQKCfg:
-        """Lower the spec to the full research config with production knobs on."""
-        return SwapQKCfg(
-            head_size=self.head_size,
-            num_query_heads=self.num_query_heads,
-            num_kv_heads=self.num_kv_heads,
-            mask_mode=self.mask_mode,
-            n_waves=self.n_waves,
-            block_n=self.block_n,
-            qk_ilp=self.qk_ilp,
-            sched_mode="pingpong",
-            buffer_gather=True,
-            dual_gather=True,
-            lazy_rescale=True,
-            fast_exp2=True,
-            v_transposed=self.v_transposed,
-            qk_douter=True,
-            o_nt=self.o_nt,
-        )
-
-
-def is_valid_spec(
-    spec: WmmaFmhaSwapQKSpec, arch: str = "gfx1151"
-) -> "tuple[bool, str]":
-    """Cheap static validity gate (mirrors ``wmma_fmha_fwd.is_valid_spec``)."""
-    if arch != "gfx1151":
-        return False, f"swapqk is a gfx1151 (RDNA3.5) kernel; got arch={arch!r}"
-    # dual_gather is baked on and pairs adjacent d-subtiles, so n_dk must be even.
-    if spec.head_size <= 0 or spec.head_size % 32 != 0:
-        return (
-            False,
-            f"head_size must be a positive multiple of 32 (got {spec.head_size})",
-        )
-    # buffer_gather is baked on and the backend stops batching its loads below
-    # block_n=32, which collapses throughput to ~8 TF.
-    if spec.block_n < 32 or spec.block_n % 16 != 0:
-        return (
-            False,
-            f"block_n must be a multiple of 16 and at least 32 (got {spec.block_n})",
-        )
-    if spec.n_waves not in (1, 2):
-        return False, f"n_waves must be 1 or 2 (got {spec.n_waves})"
-    if spec.mask_mode not in ("none", "causal"):
-        return False, f"mask_mode must be 'none' or 'causal' (got {spec.mask_mode!r})"
-    return True, ""
-
-
-def build_wmma_fmha_swapqk_fwd(
-    spec: WmmaFmhaSwapQKSpec, arch: str = "gfx1151"
-) -> KernelDef:
-    """Build the production transposed-QK WMMA FMHA-forward kernel."""
-    ok, why = is_valid_spec(spec, arch)
-    if not ok:
-        raise ValueError(why)
-    return build_wmma_fmha_swapqk(spec.to_cfg(), arch=arch)
-
-
-def wmma_fmha_swapqk_fwd_grid(spec: WmmaFmhaSwapQKSpec, *, seqlen_q: int, batch: int):
-    """Launch grid ``(seqlen_q // (16*n_waves), num_query_heads, batch)``."""
-    return swapqk_grid(spec.to_cfg(), seqlen_q=seqlen_q, batch=batch)

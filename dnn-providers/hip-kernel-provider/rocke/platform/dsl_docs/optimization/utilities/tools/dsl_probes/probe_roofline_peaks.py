@@ -11,7 +11,7 @@ parts that power-throttle, where wall-clock FLOPS numbers are not reproducible.
 Feed the numbers to ``probe_cycle_budget.py --anchor-mma/--anchor-valu/
 --anchor-transcendental``.
 
-    python probe_roofline_peaks.py --build --cus 40
+    python probe_roofline_peaks.py --build --cus <compute-units-on-the-part>
 
 Each class is measured twice: at one wave per SIMD (the issue cost with the SIMD
 to itself) and saturated (the real ceiling once many waves compete for the port).
