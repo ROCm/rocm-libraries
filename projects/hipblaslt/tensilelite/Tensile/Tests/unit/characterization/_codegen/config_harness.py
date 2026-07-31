@@ -168,7 +168,8 @@ def solutions_from_config(config_path, arch=_DEFAULT_ARCH, limit_solutions=None)
         return _solutions_from_config_unguarded(config_path, assembler, iim, limit_solutions)
 
 
-def emit_kernels_from_config(config_path, limit=8, arch=_DEFAULT_ARCH, canonical=True, splitGSU=False):
+def emit_kernels_from_config(config_path, limit=8, arch=_DEFAULT_ARCH, canonical=True,
+                             splitGSU=False, cluster_dim=None):
     """Emit assembly for the kernels of a ``BenchmarkProblems`` config.
 
     Drives ``config -> BenchmarkProcess -> constructForkPermutations ->
@@ -180,6 +181,10 @@ def emit_kernels_from_config(config_path, limit=8, arch=_DEFAULT_ARCH, canonical
     ``err`` is the emitter return code (0 == ok). ``limit`` bounds both the
     number of fork permutations turned into solutions *and* the number of
     emitted kernels, so the rocisa per-process footprint stays small.
+
+    ``cluster_dim``, when given, keeps only the kernels of that ClusterDim. A
+    config that sweeps several cluster shapes can then be pinned one shape at a
+    time (the kernel name is a hash, so the shape is not recoverable from it).
     """
     import rocisa  # noqa: F401  (ensures the singleton module is importable here)
     from Tensile.TensileCreateLibrary.Run import generateKernelObjectsFromSolutions
@@ -193,6 +198,10 @@ def emit_kernels_from_config(config_path, limit=8, arch=_DEFAULT_ARCH, canonical
     with _isolated_globals_with_isa(iim):
         sols = _solutions_from_config_unguarded(config_path, assembler, iim, limit_solutions=limit)
         kernels = generateKernelObjectsFromSolutions(sols)
+        if cluster_dim is not None:
+            want = list(cluster_dim)
+            kernels = [k for k in kernels if list(k["ClusterDim"]) == want]
+            assert kernels, f"config {config_path} has no ClusterDim={want} kernel"
         if limit is not None:
             kernels = sorted(kernels, key=lambda k: getKernelFileBase(splitGSU, k))[:limit]
         kwa = KernelWriterAssembly(assembler, DebugConfig())
@@ -231,6 +240,80 @@ def _emit_one(kwa, kernel, splitGSU, canonical):
     elif isinstance(src, (bytes, bytearray)):
         src = src.decode(errors="replace")
     return base, src, res.err
+
+
+def assert_cluster_barrier_balanced(src, base):
+    """Cluster-scope split-barrier balance check shared by the gfx1250 StreamK
+    cluster char tests. Every arrive (``s_barrier_signal -3``) must be consumed by
+    a completion (``s_barrier_wait -3``) on every control-flow path. The prologue
+    wave-0 arrive is consumed by exactly one of two mutually exclusive cluster
+    waits: the last-iteration guard's zero-iteration skip-edge wait, or the
+    first-load wait on the >=1-iteration fall-through. Both waits are emitted
+    statically but only one executes on any given path, so the static wait count
+    is exactly one greater than the signal count; every other arrive (including a
+    config's dedicated prologue-prefetch handshake) is a self-contained arrive/wait
+    pair. Any other imbalance would leave a cluster wait unpaired and stall the
+    cluster waves.
+    """
+    n_signal = src.count("s_barrier_signal -3")
+    n_wait = src.count("s_barrier_wait -3")
+    assert n_wait == n_signal + 1, (
+        f"Kernel {base!r}: unexpected cluster barrier balance: "
+        f"{n_signal} signal(-3) vs {n_wait} wait(-3) (expected wait == signal + 1)"
+    )
+
+
+def derive_states(config_path, arch=_DEFAULT_ARCH, limit_solutions=8):
+    """Return the derived Solution ``state`` dicts for a config (CPU-only).
+
+    Shared by the StreamK-cluster / Multicast unit suites, which all pin the
+    derived solution state (Multicast / ClusterBarrier / StreamKMulticast) rather
+    than emitted asm. Unwraps ``Solution._state`` when present.
+    """
+    sols = solutions_from_config(config_path, arch=arch, limit_solutions=limit_solutions)
+    return [s._state if hasattr(s, "_state") else s for s in sols]
+
+
+def assert_real_gfx1250_kernels(results):
+    """Shared preamble check for the gfx1250 StreamK cluster char drivers.
+
+    Every emitted kernel must be real gfx1250 assembly: >=1 kernel, all err==0, a
+    non-trivial body (>50 lines), the gfx1250 target directive, and the ``Cijk_``
+    kernel-name prefix. Returns ``results`` for further per-file dispatch.
+    """
+    assert len(results) >= 1, f"Expected >=1 kernel, got {len(results)}"
+    bad = [(b, e) for (b, _s, e) in results if e != 0]
+    assert not bad, f"Expected all err==0, got: {bad}"
+    for base, src, _err in results:
+        assert src and len(src.splitlines()) > 50, (
+            f"Kernel {base!r} emitted suspiciously short source"
+        )
+        assert ".amdgcn_target" in src, f"Kernel {base!r} missing .amdgcn_target"
+        assert "gfx1250" in src, f"Kernel {base!r} missing gfx1250 target"
+        assert base.startswith("Cijk_"), f"Kernel {base!r} has unexpected prefix"
+    return results
+
+
+def golden_digest(results):
+    """Order-invariant ``{basename, err}`` digest shared by the syrupy goldens."""
+    return sorted(
+        ({"basename": b, "err": e} for (b, _s, e) in results),
+        key=lambda d: d["basename"],
+    )
+
+
+def assert_split_multicast_masks(src, base):
+    """Split topology: each operand carries its own mask on its own descriptor.
+
+    B broadcasts along Cs and A along Ck; when Ck == 1 the A mask degenerates to
+    the self bit but is still bound, so both attaches are expected either way.
+    """
+    assert "s[sgprtdmBGroup1], s[sgprtdmBGroup1], s[sgprMulticastMaskB]" in src, (
+        f"Kernel {base!r} missing B-broadcast mask on the B descriptor"
+    )
+    assert "s[sgprtdmAGroup1], s[sgprtdmAGroup1], s[sgprMulticastMaskA]" in src, (
+        f"Kernel {base!r} missing the A mask on the A descriptor"
+    )
 
 
 # --- in-file smoke runner ---------------------------------------------------

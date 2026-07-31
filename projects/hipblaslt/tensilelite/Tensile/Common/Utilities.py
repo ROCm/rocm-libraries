@@ -365,6 +365,45 @@ def clusterEnabled(clusterDim):
     """True when a workgroup cluster is requested (ClusterDim [x, y] is not [1, 1])."""
     return (clusterDim[0] * clusterDim[1]) != 1
 
+def isPow2(n):
+    """True when ``n`` is a positive power of two."""
+    return n > 0 and (n & (n - 1)) == 0
+
+def streamKMulticast(d):
+    """True when the StreamK=3 cluster multicast path is active.
+
+    Single source of truth derived from ClusterDim: on StreamK=3 a spatial
+    cluster (ClusterDim[0] = Cs > 1, i.e. Cs peers sharing B across M-adjacent
+    tiles) IS the cluster multicast path, so there is no separate state key to
+    store or serialize.
+
+    StreamKForceDPOnly=1 is part of the condition, not an extra gate the callers
+    add: only the DP-only schedule launches over the real M x N tile space that
+    the mask derivation, the tile-index fold and the padded-peer exit assume.
+    The two-tile (FDPO=0) SK3 cluster is cluster *reduction*, which predates this
+    path and must keep emitting exactly what it emits without any of it.
+
+    ``d`` may be a kernel or a solution ``state`` dict; both expose "StreamK"
+    and "ClusterDim". Uses ``.get`` for partial-state derivation call sites that
+    construct a dict without a StreamK / ClusterDim / StreamKForceDPOnly key.
+    """
+    return (d.get("StreamK", 0) == 3
+            and d.get("ClusterDim", [1, 1])[0] > 1
+            and bool(d.get("StreamKForceDPOnly", 0)))
+
+def streamK2DMulticast(d):
+    """True when the cluster multicasts A as well as B, i.e. Ck > 1.
+
+    ClusterDim = [Cs, Ck] with BOTH axes > 1: Cs/X peers share B on M-adjacent
+    tiles and Ck/Y peers share A on N-adjacent tiles. A 1-D [Cs, 1] cluster is
+    the Ck == 1 degenerate of the same shape -- A simply has no peers there.
+
+    ``d`` may be a kernel or a solution ``state`` dict; uses ``.get`` for
+    partial-state derivation call sites.
+    """
+    clusterDim = d.get("ClusterDim", [1, 1])
+    return clusterDim[0] > 1 and clusterDim[1] > 1
+
 def log2(x):
     return int(log(x, 2) + 0.5)
 

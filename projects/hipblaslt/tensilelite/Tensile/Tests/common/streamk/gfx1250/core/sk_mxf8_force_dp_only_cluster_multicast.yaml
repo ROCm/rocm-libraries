@@ -45,11 +45,12 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - UseSgprForGRO: [0]
-        - ForceDisableShadowInit: [true]
+        - ForceDisableShadowInit: [True]
         - MatrixInstruction:
-          - [16, 16, 128, 1,  1,  1, 1,  2, 2]
-          - [16, 16, 128, 1,  1,  2, 2,  2, 2]
-          - [16, 16, 128, 1,  1,  4, 4,  2, 2]
+          - [16, 16, 128, 1, 1, 1, 1, 2, 2]
+          - [16, 16, 128, 1, 1, 2, 2, 2, 2]
+          - [16, 16, 128, 1, 1, 4, 4, 2, 2]
+          - [16, 16, 128, 1, 1, 1, 1, 2, 1]
         - DepthU: [256]
         - ClusterLocalRead: [0]
         - TransposeLDS: [-1]
@@ -63,17 +64,15 @@ BenchmarkProblems:
         - LdsBlockSizePerPadMXSB: [-1]
         - LdsPadMetadata: [0]
         - LDSTrInst: [False]
-        - TDMInst: [3]
-        - PrefetchAcrossPersistent: [1]
-        - PrefetchGlobalRead: [1]
+        - PrefetchGlobalRead: [1, 2]
         - PrefetchLocalRead: [1]
         - ScheduleIterAlg: [0, 4]
-        - SourceSwap: [false]
+        - SourceSwap: [False]
         - StoreRemapVectorWidth: [0]
         - GlobalSplitU: [0]
         - GlobalReadVectorWidthA: [-1]
         - GlobalReadVectorWidthB: [-1]
-        - ExpandPointerSwap: [false]
+        - ExpandPointerSwap: [False]
         - VectorWidthA: [-1]
         - VectorWidthB: [-1]
         - LocalReadVectorWidth: [-1]
@@ -81,21 +80,42 @@ BenchmarkProblems:
         - DirectToVgprSparseMetadata: [false]
         - StoreVectorWidth: [-1]
         - StreamK: [3]
-        - StreamKForceDPOnly: [0, 1]
+        - StreamKForceDPOnly: [1]
         - StaggerU: [0]
         - DirectToVgprA: [False]
         - DirectToVgprB: [False]
         - WavefrontSize: [32]
         - WorkGroupMapping: [1]
+        - TDMInst: [3]
         - MXLoadInst: ["TDM"]
         - MXScaleFormat: ["InMemorySwizzle"]
-        - ClusterDim: [[2, 1], [4, 1], [8, 1]]
+        - ClusterDim: [[2, 1], [4, 1], [8, 1], [2, 2], [2, 4], [4, 2]]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
+          - Exact: [512, 512, 1, 256]
+          - Exact: [256, 256, 1, 256]
+          - Exact: [128, 128, 1, 512]
+          - Exact: [256, 256, 2, 256]
+          - Exact: [256, 256, 1, 1920]
+          - Exact: [2048, 256, 1, 1024]
+          - Exact: [2048, 512, 1, 1056]
+          - Exact: [1280, 1280, 1, 256]
+          - Exact: [320, 320, 1, 512]
+          - Exact: [96, 96, 3, 256]
+          # Mirrors the two sizes carried over into the mxf4 twin from
+          # sk_mxf4_force_dp_only_cluster.yaml; develop had no mxf8 cluster
+          # ancestor, so these keep the two cluster-multicast files symmetric.
+          - Exact: [256, 256, 1, 1056]
+          - Exact: [512, 512, 1, 1056]
+          # Carried up from sk_mxf8_force_dp_only_pap_cluster_multicast.yaml so
+          # this file and that one share one size set, leaving PAP as their only
+          # difference.
           - Exact: [2048, 256, 1, 2048]
           - Exact: [2048, 256, 1, 2080]
+          - Exact: [1280, 1280, 1, 1024]
+          - Exact: [320, 320, 3, 1056]
         - ActivationArgs:
           - [Enum: none]
