@@ -1,6 +1,8 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
+import os
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -25,6 +27,42 @@ def test_default_contents_use_bundled_resources(monkeypatch):
     monkeypatch.setattr(CustomKernels, "custom_kernel_text", lambda name: f"contents: {name}")
 
     assert CustomKernels.getCustomKernelContents("kernel") == "contents: kernel"
+
+
+def test_custom_kernel_filepath_defaults_to_current_bundled_path(tmp_path, monkeypatch):
+    monkeypatch.setattr(CustomKernels, "CUSTOM_KERNEL_PATH", str(tmp_path))
+
+    assert Path(CustomKernels.getCustomKernelFilepath("kernel")) == tmp_path / "kernel.s"
+
+
+def test_bundled_path_comparison_normalizes_trailing_separator(tmp_path, monkeypatch):
+    bundled = tmp_path / "bundled"
+    bundled.mkdir()
+    monkeypatch.setattr(CustomKernels, "CUSTOM_KERNEL_PATH", str(bundled))
+
+    assert CustomKernels._uses_bundled_custom_kernels(f"{bundled}{os.sep}")
+
+
+def test_bundled_path_comparison_resolves_symlink(tmp_path, monkeypatch):
+    bundled = tmp_path / "bundled"
+    bundled.mkdir()
+    alias = tmp_path / "alias"
+    try:
+        alias.symlink_to(bundled, target_is_directory=True)
+    except OSError as error:
+        pytest.skip(f"directory symlinks are unavailable: {error}")
+    monkeypatch.setattr(CustomKernels, "CUSTOM_KERNEL_PATH", str(bundled))
+
+    assert CustomKernels._uses_bundled_custom_kernels(alias)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows path comparison semantics")
+def test_bundled_path_comparison_is_case_insensitive_on_windows(tmp_path, monkeypatch):
+    bundled = tmp_path / "Bundled"
+    bundled.mkdir()
+    monkeypatch.setattr(CustomKernels, "CUSTOM_KERNEL_PATH", str(bundled))
+
+    assert CustomKernels._uses_bundled_custom_kernels(str(bundled).swapcase())
 
 
 def test_custom_kernel_source_filters_preload_for_old_rocm(monkeypatch):
@@ -61,17 +99,42 @@ def test_default_missing_custom_kernel_preserves_runtime_error(monkeypatch):
 
     monkeypatch.setattr(CustomKernels, "custom_kernel_text", raise_missing)
 
-    with pytest.raises(RuntimeError, match="missing"):
+    with pytest.raises(
+        RuntimeError, match=r"^Failed to find custom kernel: missing$"
+    ) as error:
         CustomKernels.getCustomKernelContents("missing")
+
+    assert isinstance(error.value.__cause__, FileNotFoundError)
 
 
 def test_default_resource_read_error_preserves_runtime_error(monkeypatch):
     def raise_permission_error(name):
-        raise PermissionError(name)
+        raise PermissionError(f"access denied: {name}")
 
     monkeypatch.setattr(CustomKernels, "custom_kernel_text", raise_permission_error)
 
-    with pytest.raises(RuntimeError, match="kernel"):
+    with pytest.raises(
+        RuntimeError, match=r"^Failed to find custom kernel: restricted$"
+    ) as error:
+        CustomKernels.getCustomKernelContents("restricted")
+
+    assert isinstance(error.value.__cause__, PermissionError)
+    assert str(error.value.__cause__) == "access denied: restricted"
+
+
+def test_default_path_validation_error_is_not_wrapped():
+    with pytest.raises(ValueError, match="must not be a path"):
+        CustomKernels.getCustomKernelContents("../kernel")
+
+
+@pytest.mark.parametrize("exception_type", [KeyboardInterrupt, SystemExit])
+def test_default_base_exceptions_are_not_wrapped(monkeypatch, exception_type):
+    def raise_base_exception(name):
+        raise exception_type(name)
+
+    monkeypatch.setattr(CustomKernels, "custom_kernel_text", raise_base_exception)
+
+    with pytest.raises(exception_type):
         CustomKernels.getCustomKernelContents("kernel")
 
 
@@ -98,8 +161,10 @@ def test_explicit_directory_missing_uses_legacy_runtime_error(tmp_path, monkeypa
         lambda name: (_ for _ in ()).throw(AssertionError("should not be used")),
     )
 
-    with pytest.raises(RuntimeError, match=str(tmp_path / "missing")):
+    with pytest.raises(RuntimeError, match=str(tmp_path / "missing")) as error:
         CustomKernels.getCustomKernelContents("missing", directory=str(tmp_path))
+
+    assert isinstance(error.value.__cause__, FileNotFoundError)
 
 
 def test_real_default_custom_kernel_resource_is_available():

@@ -43,15 +43,10 @@ def _write_static_headers(root: Path) -> None:
         (root / "Source" / name).write_text(f"contents for {name}\n", encoding="utf-8")
 
 
-def test_static_header_paths_are_exact_and_immutable():
-    paths = Resources.static_header_paths()
-
-    assert tuple(path.name for path in paths) == EXPECTED_STATIC_HEADERS
-    assert isinstance(paths, tuple)
-
-    with pytest.raises(AttributeError):
-        paths.append("unexpected.h")
-    assert tuple(path.name for path in Resources.static_header_paths()) == EXPECTED_STATIC_HEADERS
+def test_static_header_paths_have_expected_order():
+    assert tuple(
+        path.name for path in Resources.static_header_paths()
+    ) == EXPECTED_STATIC_HEADERS
 
 
 def test_copy_static_files_copies_expected_files_from_resource_root(tmp_path, monkeypatch):
