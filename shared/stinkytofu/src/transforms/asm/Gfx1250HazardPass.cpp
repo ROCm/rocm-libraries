@@ -177,8 +177,8 @@ class Gfx1250HazardPass : public Pass {
    public:
     static char ID;
 
-    explicit Gfx1250HazardPass(std::vector<Function*> functions, StinkyAsmModule* module)
-        : functions(std::move(functions)), module(module) {}
+    Gfx1250HazardPass(std::vector<Function*> functions, bool enableXcntDrainProfile)
+        : functions(std::move(functions)), enableXcntDrainProfile(enableXcntDrainProfile) {}
 
     const char* getName() const override {
         return "Gfx1250HazardPass";
@@ -193,20 +193,20 @@ class Gfx1250HazardPass : public Pass {
         if (arch[0] != 12 || arch[1] != 5 || arch[2] != 0) return preserveCFGAnalyses();
 
         const GfxArchID archId = getGfxArchID(arch[0], arch[1], arch[2]);
-        XcntDrainProfile profile(module);
+        auto profile = makeXcntDrainProfile(enableXcntDrainProfile);
         if (!functions.empty()) {
             for (Function* f : functions)
-                if (f) runOnFunction(*f, archId, profile);
+                if (f) runOnFunction(*f, archId, *profile);
         } else {
-            runOnFunction(func, archId, profile);
+            runOnFunction(func, archId, *profile);
         }
-        profile.print();
+        profile->print();
         return preserveCFGAnalyses();
     }
 
    private:
     static void insertXcntDrain(AsmIRBuilder& builder, GfxArchID archId, StinkyInstruction* anchor,
-                                GroupState& state, XcntDrainProfile& profile,
+                                GroupState& state, XcntDrainProfileBase& profile,
                                 XcntDrainReason reason) {
         StinkyInstruction* wait = builder.create(getMCIDByUOp(GFX::s_wait_xcnt, archId), anchor);
         wait->addSrcReg(StinkyRegister(0));
@@ -221,7 +221,7 @@ class Gfx1250HazardPass : public Pass {
     // preserves replay sources and inserts required drains.
     static void applySingleGroupXnackReplayFix(BasicBlock& bb, BasicBlock::iterator it,
                                                AsmIRBuilder& builder, GfxArchID archId,
-                                               GroupState& state, XcntDrainProfile& profile) {
+                                               GroupState& state, XcntDrainProfileBase& profile) {
         auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
         if (inst == nullptr || isPseudoInst(inst)) return;
 
@@ -320,13 +320,21 @@ class Gfx1250HazardPass : public Pass {
             insertXcntDrain(builder, archId, inst, state, profile, XcntDrainReason::FlatRule2);
         }
 
+        // Only VMEM and SMEM retain replay state.
+        if (kind == MemoryGroupKind::Other) {
+            state.clear();
+            return;
+        }
+
         state.kind = kind;
         state.hasMemory = true;
         state.hasNonAtomic |= !atomic;
         addSources(state, *inst);
     }
 
-    static void runOnFunction(Function& func, GfxArchID archId, XcntDrainProfile& profile) {
+    static void runOnFunction(Function& func, GfxArchID archId, XcntDrainProfileBase& profile) {
+        profile.beginFunction(func);
+
         GroupState state;
         BasicBlock* previous = nullptr;
 
@@ -345,7 +353,7 @@ class Gfx1250HazardPass : public Pass {
     }
 
     std::vector<Function*> functions;
-    StinkyAsmModule* module = nullptr;
+    bool enableXcntDrainProfile = false;
 };
 
 char Gfx1250HazardPass::ID = 0;
@@ -353,7 +361,7 @@ char Gfx1250HazardPass::ID = 0;
 
 namespace stinkytofu {
 std::unique_ptr<Pass> createGfx1250HazardPass(std::vector<Function*> functions,
-                                              StinkyAsmModule* module) {
-    return std::make_unique<Gfx1250HazardPass>(std::move(functions), module);
+                                              bool enableXcntDrainProfile) {
+    return std::make_unique<Gfx1250HazardPass>(std::move(functions), enableXcntDrainProfile);
 }
 }  // namespace stinkytofu

@@ -10,7 +10,6 @@
 namespace stinkytofu {
 class Function;
 class Pass;
-class StinkyAsmModule;
 
 /// Insert gfx1250 assembly hazards that cannot be left to hardware.
 ///
@@ -29,9 +28,11 @@ class StinkyAsmModule;
 /// callable functions); otherwise it processes the single Function given to
 /// the pipeline.
 ///
-/// Define @c STINKYTOFU_GFX1250_HAZARD_PROFILE=1 at build time to emit an
-/// stderr summary of inserted drains by rule and source region.
+/// With \p enableXcntDrainProfile the pass emits an stderr summary of inserted
+/// drains by rule, and by whether each drain's block belongs to a loop and/or
+/// holds a matrix instruction. Off by default: the summary costs a loop and
+/// matrix-instruction scan per function.
 STINKYTOFU_EXPORT std::unique_ptr<Pass> createGfx1250HazardPass(
-    std::vector<Function*> functions = {}, StinkyAsmModule* module = nullptr);
+    std::vector<Function*> functions = {}, bool enableXcntDrainProfile = false);
 
 }  // namespace stinkytofu

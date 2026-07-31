@@ -186,3 +186,17 @@ st.func @smem_vmem_type_switches() {
   v9 = "st.buffer_load_b32"(v0)
   s5 = "st.s_load_b32"(s[2:3])
 }
+
+# TDM is Other in single-group mode and does not retain replay state for a
+# following non-memory VGPR-MSB change.
+# CHECK-LABEL: @tensor_then_vgpr_msb
+# CHECK: tensor_load_to_lds
+# CHECK-NEXT: s_set_vgpr_msb"(1)
+# CHECK-NEXT: v_readfirstlane_b32
+# CHECK-NOT: s_wait_xcnt
+st.func @tensor_then_vgpr_msb() {
+^entry:
+  "st.tensor_load_to_lds"(s[0:3], s[4:11]) { mod.memtoken = { tokens = [0] } }
+  "st.s_set_vgpr_msb"(1)
+  s5 = "st.v_readfirstlane_b32"(v0)
+}

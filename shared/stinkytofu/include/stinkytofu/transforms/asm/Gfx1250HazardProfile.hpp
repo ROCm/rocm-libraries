@@ -2,26 +2,19 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
-#ifndef STINKYTOFU_GFX1250_HAZARD_PROFILE
-#define STINKYTOFU_GFX1250_HAZARD_PROFILE 0
-#endif
-
-#if STINKYTOFU_GFX1250_HAZARD_PROFILE
+#include <array>
+#include <cstddef>
 #include <cstdint>
 #include <iostream>
-#include <string>
+#include <memory>
 #include <unordered_set>
 
-#include "stinkytofu/bindings/python/Module.hpp"
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/core/IRBase.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
-#endif
+#include "stinkytofu/support/LoopDetection.hpp"
 
 namespace stinkytofu {
-
-class IRBase;
-class StinkyAsmModule;
 
 enum class XcntDrainReason {
     AtomicRule4a,
@@ -30,116 +23,123 @@ enum class XcntDrainReason {
     ForeverSleep,
     ScalarPrefetch,
     VgprMsb,
+    Count,
 };
 
-#if STINKYTOFU_GFX1250_HAZARD_PROFILE
-class XcntDrainProfile {
+/// Reported name of each reason, in enum order.
+constexpr std::array kXcntDrainReasonNames = {"atomic",       "smem",           "flat",
+                                              "foreverSleep", "scalarPrefetch", "vgprMsb"};
+static_assert(kXcntDrainReasonNames.size() == static_cast<size_t>(XcntDrainReason::Count),
+              "every XcntDrainReason needs a reported name");
+
+/// Hooks Gfx1250HazardPass calls while it inserts s_wait_xcnt drains.
+/// makeXcntDrainProfile() picks the implementation: XcntDrainProfile to count
+/// and report, EmptyXcntDrainProfile to do nothing.
+class XcntDrainProfileBase {
    public:
-    explicit XcntDrainProfile(const StinkyAsmModule* module) {
-        collectGroupAnchors(module, "loopWithPrefetch", loopWithPrefetchAnchors);
-        collectGroupAnchors(module, "noLoadLoopBody", noLoadLoopBodyAnchors);
+    virtual ~XcntDrainProfileBase() = default;
+
+    /// Called before the pass walks \p func, so per-function facts can be collected.
+    virtual void beginFunction(Function& func) = 0;
+    virtual void noteTensorLoad() = 0;
+    virtual void record(XcntDrainReason reason, const IRBase* anchor) = 0;
+    virtual void print() const = 0;
+};
+
+/// Counts inserted drains by rule and by where they landed.
+///
+/// Placement is described by two independent facts about the block holding the
+/// drain's anchor: whether the block belongs to a loop (the drain is paid on
+/// every iteration) and whether it holds a matrix instruction (the drain sits in
+/// the MAC pipeline). Both come from the final CFG at the moment the pass runs,
+/// so unlike recorded region ranges they cannot go stale.
+class XcntDrainProfile final : public XcntDrainProfileBase {
+   public:
+    /// Drain insertion only adds instructions to existing blocks, so neither the
+    /// loop structure nor the per-block matrix flag changes during the walk.
+    void beginFunction(Function& func) override {
+        loopBlocks.clear();
+        matrixBlocks.clear();
+
+        for (const Loop& loop : detectLoops(func))
+            loopBlocks.insert(loop.bodyBBs.begin(), loop.bodyBBs.end());
+
+        for (BasicBlock& bb : func)
+            if (holdsMatrixInstruction(bb)) matrixBlocks.insert(&bb);
     }
 
-    void noteTensorLoad() {
+    void noteTensorLoad() override {
         usesTensorLoad = true;
     }
 
-    void record(XcntDrainReason reason, const IRBase* anchor) {
+    void record(XcntDrainReason reason, const IRBase* anchor) override {
         ++total;
-        switch (reason) {
-            case XcntDrainReason::AtomicRule4a:
-                ++atomicRule4a;
-                break;
-            case XcntDrainReason::SmemRule3:
-                ++smemRule3;
-                break;
-            case XcntDrainReason::FlatRule2:
-                ++flatRule2;
-                break;
-            case XcntDrainReason::ForeverSleep:
-                ++foreverSleep;
-                break;
-            case XcntDrainReason::ScalarPrefetch:
-                ++scalarPrefetch;
-                break;
-            case XcntDrainReason::VgprMsb:
-                ++vgprMsb;
-                break;
-        }
-
-        if (loopWithPrefetchAnchors.contains(anchor)) {
-            ++loopWithPrefetch;
-        } else if (noLoadLoopBodyAnchors.contains(anchor)) {
-            ++noLoadLoopBody;
-        } else {
-            ++outsideRegions;
-        }
+        ++reasonCounts[static_cast<size_t>(reason)];
+        ++siteCounter(anchor);
     }
 
-    void print() const {
+    void print() const override {
         std::cerr << "[Gfx1250HazardPass] xcnt drains: total=" << total
-                  << ", loopWithPrefetch=" << loopWithPrefetch
-                  << ", noLoadLoopBody=" << noLoadLoopBody << ", outsideRegions=" << outsideRegions
-                  << "\n";
-        std::cerr << "[Gfx1250HazardPass] xcnt drain rules: atomic=" << atomicRule4a
-                  << ", smem=" << smemRule3 << ", flat=" << flatRule2
-                  << ", foreverSleep=" << foreverSleep << ", scalarPrefetch=" << scalarPrefetch
-                  << ", vgprMsb=" << vgprMsb << "\n";
+                  << ", loop+matrix=" << loopMatrixSites << ", loop=" << loopSites
+                  << ", matrix=" << matrixSites << ", other=" << otherSites << "\n";
+        std::cerr << "[Gfx1250HazardPass] xcnt drain rules:";
+        const char* separator = " ";
+        for (size_t i = 0; i < reasonCounts.size(); ++i) {
+            std::cerr << separator << kXcntDrainReasonNames[i] << "=" << reasonCounts[i];
+            separator = ", ";
+        }
+        std::cerr << "\n";
         std::cerr << "[Gfx1250HazardPass] tensor_load_to_lds: "
                   << (usesTensorLoad ? "used" : "not used") << "\n";
     }
 
    private:
-    static void collectGroupAnchors(const StinkyAsmModule* module, const std::string& name,
-                                    std::unordered_set<const IRBase*>& anchors) {
-        if (module == nullptr) return;
-        auto range = module->findGroupRange(name);
-        if (!range) return;
-        auto [begin, end] = range.value();
-
-        IRBase* beginAnchor = begin.getNodePtr();
-        IRBase* endAnchor = end.getNodePtr();  // Exclusive; null means function end.
-        if (beginAnchor == nullptr) return;
-
-        BasicBlock* beginBB = beginAnchor->getParent();
-        Function* function = beginBB ? beginBB->getParent() : nullptr;
-        if (function == nullptr) return;
-
-        // CFG construction can split the original range across physical basic
-        // blocks. Walk them in layout order until reaching the exclusive end.
-        for (auto bbIt = BasicBlockList::iterator(beginBB); bbIt != function->end(); ++bbIt) {
-            BasicBlock& bb = *bbIt;
-            auto irIt = (&bb == beginBB) ? BasicBlock::iterator(beginAnchor) : bb.begin();
-            for (; irIt != bb.end(); ++irIt) {
-                IRBase* ir = irIt.getNodePtr();
-                if (ir == endAnchor) return;
-                if (dyn_cast<StinkyInstruction>(ir)) anchors.insert(ir);
-            }
+    static bool holdsMatrixInstruction(BasicBlock& bb) {
+        for (IRBase& ir : bb) {
+            const auto* inst = dyn_cast<StinkyInstruction>(&ir);
+            if (inst != nullptr && isMatrixInstruction(*inst)) return true;
         }
+        return false;
     }
 
-    std::unordered_set<const IRBase*> loopWithPrefetchAnchors;
-    std::unordered_set<const IRBase*> noLoadLoopBodyAnchors;
-    uint64_t total = 0;
-    uint64_t atomicRule4a = 0;
-    uint64_t smemRule3 = 0;
-    uint64_t flatRule2 = 0;
-    uint64_t foreverSleep = 0;
-    uint64_t scalarPrefetch = 0;
-    uint64_t vgprMsb = 0;
-    uint64_t loopWithPrefetch = 0;
-    uint64_t noLoadLoopBody = 0;
-    uint64_t outsideRegions = 0;
+    /// The two facts are independent, so each combination keeps its own count:
+    /// a loop block without matrix instructions (the loop-close block, say)
+    /// still pays its drain on every iteration.
+    uint32_t& siteCounter(const IRBase* anchor) {
+        const BasicBlock* bb = anchor != nullptr ? anchor->getParent() : nullptr;
+        const bool inLoop = loopBlocks.contains(bb);
+        const bool hasMatrix = matrixBlocks.contains(bb);
+
+        if (inLoop) return hasMatrix ? loopMatrixSites : loopSites;
+        return hasMatrix ? matrixSites : otherSites;
+    }
+
+    // Facts about the function currently being walked.
+    std::unordered_set<const BasicBlock*> loopBlocks;
+    std::unordered_set<const BasicBlock*> matrixBlocks;
+
+    uint32_t total = 0;
+    std::array<uint32_t, kXcntDrainReasonNames.size()> reasonCounts{};
+    // One per reported site: loop+matrix, loop, matrix, other.
+    uint32_t loopMatrixSites = 0;
+    uint32_t loopSites = 0;
+    uint32_t matrixSites = 0;
+    uint32_t otherSites = 0;
     bool usesTensorLoad = false;
 };
-#else
-class XcntDrainProfile {
+
+/// Profiling off: no counters, no per-function analysis, no output.
+class EmptyXcntDrainProfile final : public XcntDrainProfileBase {
    public:
-    explicit XcntDrainProfile(const StinkyAsmModule* /*module*/) {}
-    void noteTensorLoad() {}
-    void record(XcntDrainReason /*reason*/, const IRBase* /*anchor*/) {}
-    void print() const {}
+    void beginFunction(Function&) override {}
+    void noteTensorLoad() override {}
+    void record(XcntDrainReason, const IRBase*) override {}
+    void print() const override {}
 };
-#endif
+
+inline std::unique_ptr<XcntDrainProfileBase> makeXcntDrainProfile(bool enabled) {
+    if (enabled) return std::make_unique<XcntDrainProfile>();
+    return std::make_unique<EmptyXcntDrainProfile>();
+}
 
 }  // namespace stinkytofu

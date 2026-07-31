@@ -104,7 +104,12 @@ const std::vector<PassInfo> availablePasses = {
          options.enableLoopCarriedTokenDeps = hasPassArg(args, "enableLoopCarriedTokenDeps");
          return createStinkyWaitCntInsertionPass(options);
      }},
-    {"Gfx1250HazardPass", [](const auto&) { return createGfx1250HazardPass(); }},
+    // Gfx1250HazardPass accepts:
+    //   profile — print the xcnt drain summary (per rule and drain site) to stderr
+    {"Gfx1250HazardPass",
+     [](const std::vector<std::string>& args) {
+         return createGfx1250HazardPass({}, hasPassArg(args, "profile"));
+     }},
     // BuildUseDefChainPass accepts:
     //   includePseudo    — also build chains for pseudo registers (memtokens)
     //   noClearExisting  — keep any existing PHIs/chains

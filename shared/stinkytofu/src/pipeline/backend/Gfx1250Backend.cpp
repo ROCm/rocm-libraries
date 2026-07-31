@@ -203,7 +203,8 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBu
 
     // Run after the final CFG build but before flatten/SW-prefetch: this pass
     // covers final per-function code, while SW-prefetch owns its hints' XCnt waits.
-    pm.addPass(createGfx1250HazardPass(module.getFunctions(), &module));
+    constexpr bool kEnableXcntDrainProfile = false;
+    pm.addPass(createGfx1250HazardPass(module.getFunctions(), kEnableXcntDrainProfile));
 
     // Re-merge callable functions into the entry at their ASM placement markers so
     // SwInstructionPrefetchRelStaticPass sees a single linear stream / legacy emission
