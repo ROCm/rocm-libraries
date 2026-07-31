@@ -29,9 +29,22 @@ def _ck_library_dir():
     return gemm_instances_path
 
 
-def parse_instances(str_instances: List[str]) -> List[CKBatchedGemmOperation]:
+def parse_instances(
+    str_instances: List[str],
+    class_name: str = "DeviceBatchedGemmMultiD_Xdl_CShuffle_V3",
+    ds_mode: str = "overwrite",
+) -> List[CKBatchedGemmOperation]:
     """
     Parse the lines containing Universal Gemm template instances into `CKBatchedGemmOperation` instances
+
+    `class_name` is the CK device-op class the instance lines instantiate.
+
+    `ds_mode` selects how the two Ds slots are reconciled with the dataclass, and it does NOT
+    follow from `class_name` -- the two device ops genuinely differ. `DeviceBatchedGemmMultiD_*`
+    declares `DsLayout`/`DsDataType` at positions 2 and 6 (44 template args), so their parsed
+    placeholders are *overwritten*. `DeviceBatchedGemm_Wmma_CShuffleV3` has no Ds parameters at
+    all (42 args), so empty slots must be *inserted* to line the remaining fields up. Getting
+    this wrong shifts every subsequent field by two and yields plausible-looking garbage.
     """
 
     def maybe_int(s):
@@ -42,9 +55,7 @@ def parse_instances(str_instances: List[str]) -> List[CKBatchedGemmOperation]:
 
     op_instances = []
     for line in str_instances:
-        s_template_args = line.split("DeviceBatchedGemmMultiD_Xdl_CShuffle_V3")[
-            -1
-        ].strip("<>, ")
+        s_template_args = line.split(class_name)[-1].strip("<>, ")
         template_args = []
         i_current = 0
         while i_current < len(s_template_args):
@@ -72,15 +83,21 @@ def parse_instances(str_instances: List[str]) -> List[CKBatchedGemmOperation]:
             if i_next == -1:
                 break
 
-        # ds layout and dtype are parsed as placeholder; reset value
-        template_args[2] = tuple()  # ds layout
-        template_args[6] = tuple()  # ds dtype
+        if ds_mode == "overwrite":
+            # ds layout and dtype are parsed as placeholder; reset value
+            template_args[2] = tuple()  # ds layout
+            template_args[6] = tuple()  # ds dtype
+        else:
+            template_args.insert(2, tuple())  # ds layout
+            template_args.insert(6, tuple())  # ds dtype
 
-        new_instance = CKBatchedGemmOperation(
-            *template_args,  # type: ignore[arg-type]
-        )
-
-        op_instances.append(new_instance)
+        try:
+            new_instance = CKBatchedGemmOperation(
+                *template_args,  # type: ignore[arg-type]
+            )
+            op_instances.append(new_instance)
+        except TypeError as e:
+            log.debug(f"{e} when parsing {line}")
     return op_instances
 
 
@@ -108,6 +125,14 @@ def gen_ops_library() -> List[CKBatchedGemmOperation]:
 
     log.debug("ck instances from library: %d", len(op_instances))
 
+    return _substitute_scheduler_spec(op_instances)
+
+
+def _substitute_scheduler_spec(
+    op_instances: List[CKBatchedGemmOperation],
+) -> List[CKBatchedGemmOperation]:
+    """Expand each parsed instance across the scheduler x GemmSpecialization domains,
+    but only for the fields left as placeholders (`BlkGemmPipeSched` / `GemmSpec`)."""
     schedulers = [
         "BlockGemmPipelineScheduler::Intrawave",
         "BlockGemmPipelineScheduler::Interwave",
