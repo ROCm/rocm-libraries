@@ -23,7 +23,7 @@ namespace
 
 using BnFwdInfTestCase = std::tuple<TensorLayout, test_bn_common::BatchnormTestCase>;
 
-template <typename DataType>
+template <typename DataType, typename OutputDataType = DataType>
 class BatchnormForwardInference
     : public IntegrationGraphVerificationHarness<DataType, BnFwdInfTestCase>
 {
@@ -81,6 +81,7 @@ public:
                                                         bnAttrs);
 
         yTensorAttr->set_output(true);
+        yTensorAttr->set_data_type(getDataTypeEnumFromType<OutputDataType>());
 
         auto validateResult = graphObj.validate();
         if(validateResult.is_bad())
@@ -110,7 +111,7 @@ protected:
 
         this->setTestCaseLayout(layout.name);
         this->setTestCaseNote(bnTestCase.note);
-        this->synthesis().setGlobalSeed(bnTestCase.seed);
+        this->inputFillRecipes().setGlobalSeed(bnTestCase.seed);
         this->verifyGraph(graphObj);
     }
 };
@@ -119,16 +120,25 @@ protected:
 using IntegrationGpuBatchnormForwardInference1dFp32 = BatchnormForwardInference<float>;
 using IntegrationGpuBatchnormForwardInference1dBfp16 = BatchnormForwardInference<bfloat16>;
 using IntegrationGpuBatchnormForwardInference1dFp16 = BatchnormForwardInference<half>;
+using IntegrationGpuBatchnormForwardInference1dUpcastBfp16
+    = BatchnormForwardInference<bfloat16, float>;
+using IntegrationGpuBatchnormForwardInference1dUpcastFp16 = BatchnormForwardInference<half, float>;
 
 // 2D layout tests (NCHW, NHWC)
 using IntegrationGpuBatchnormForwardInference2dFp32 = BatchnormForwardInference<float>;
 using IntegrationGpuBatchnormForwardInference2dBfp16 = BatchnormForwardInference<bfloat16>;
 using IntegrationGpuBatchnormForwardInference2dFp16 = BatchnormForwardInference<half>;
+using IntegrationGpuBatchnormForwardInference2dUpcastBfp16
+    = BatchnormForwardInference<bfloat16, float>;
+using IntegrationGpuBatchnormForwardInference2dUpcastFp16 = BatchnormForwardInference<half, float>;
 
 // 3D layout tests (NCDHW, NDHWC)
 using IntegrationGpuBatchnormForwardInference3dFp32 = BatchnormForwardInference<float>;
 using IntegrationGpuBatchnormForwardInference3dBfp16 = BatchnormForwardInference<bfloat16>;
 using IntegrationGpuBatchnormForwardInference3dFp16 = BatchnormForwardInference<half>;
+using IntegrationGpuBatchnormForwardInference3dUpcastBfp16
+    = BatchnormForwardInference<bfloat16, float>;
+using IntegrationGpuBatchnormForwardInference3dUpcastFp16 = BatchnormForwardInference<half, float>;
 
 } // namespace
 
@@ -168,6 +178,22 @@ INSTANTIATE_TEST_SUITE_P(Full,
                          testing::Combine(testing::Values(TensorLayout::NCL, TensorLayout::NLC),
                                           testing::ValuesIn(getBnFwdInference1dFullTestCases())));
 
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuBatchnormForwardInference1dUpcastBfp16);
+TEST_P(IntegrationGpuBatchnormForwardInference1dUpcastBfp16, Correctness)
+{
+    runGraphTest();
+}
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuBatchnormForwardInference1dUpcastBfp16,
+                         testing::Combine(testing::Values(TensorLayout::NCL, TensorLayout::NLC),
+                                          testing::ValuesIn(getBnFwdInference1dTestCases())));
+
+INSTANTIATE_TEST_SUITE_P(Full,
+                         IntegrationGpuBatchnormForwardInference1dUpcastBfp16,
+                         testing::Combine(testing::Values(TensorLayout::NCL, TensorLayout::NLC),
+                                          testing::ValuesIn(getBnFwdInference1dFullTestCases())));
+
 GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuBatchnormForwardInference1dFp16);
 TEST_P(IntegrationGpuBatchnormForwardInference1dFp16, Correctness)
 {
@@ -181,6 +207,22 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
 
 INSTANTIATE_TEST_SUITE_P(Full,
                          IntegrationGpuBatchnormForwardInference1dFp16,
+                         testing::Combine(testing::Values(TensorLayout::NCL, TensorLayout::NLC),
+                                          testing::ValuesIn(getBnFwdInference1dFullTestCases())));
+
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuBatchnormForwardInference1dUpcastFp16);
+TEST_P(IntegrationGpuBatchnormForwardInference1dUpcastFp16, Correctness)
+{
+    runGraphTest();
+}
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuBatchnormForwardInference1dUpcastFp16,
+                         testing::Combine(testing::Values(TensorLayout::NCL, TensorLayout::NLC),
+                                          testing::ValuesIn(getBnFwdInference1dTestCases())));
+
+INSTANTIATE_TEST_SUITE_P(Full,
+                         IntegrationGpuBatchnormForwardInference1dUpcastFp16,
                          testing::Combine(testing::Values(TensorLayout::NCL, TensorLayout::NLC),
                                           testing::ValuesIn(getBnFwdInference1dFullTestCases())));
 
@@ -220,6 +262,22 @@ INSTANTIATE_TEST_SUITE_P(Full,
                          testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
                                           testing::ValuesIn(getBnFwdInferenceFullTestCases())));
 
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuBatchnormForwardInference2dUpcastBfp16);
+TEST_P(IntegrationGpuBatchnormForwardInference2dUpcastBfp16, Correctness)
+{
+    runGraphTest();
+}
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuBatchnormForwardInference2dUpcastBfp16,
+                         testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
+                                          testing::ValuesIn(getBnFwdInferenceTestCases())));
+
+INSTANTIATE_TEST_SUITE_P(Full,
+                         IntegrationGpuBatchnormForwardInference2dUpcastBfp16,
+                         testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
+                                          testing::ValuesIn(getBnFwdInferenceFullTestCases())));
+
 GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuBatchnormForwardInference2dFp16);
 TEST_P(IntegrationGpuBatchnormForwardInference2dFp16, Correctness)
 {
@@ -233,6 +291,22 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
 
 INSTANTIATE_TEST_SUITE_P(Full,
                          IntegrationGpuBatchnormForwardInference2dFp16,
+                         testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
+                                          testing::ValuesIn(getBnFwdInferenceFullTestCases())));
+
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuBatchnormForwardInference2dUpcastFp16);
+TEST_P(IntegrationGpuBatchnormForwardInference2dUpcastFp16, Correctness)
+{
+    runGraphTest();
+}
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuBatchnormForwardInference2dUpcastFp16,
+                         testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
+                                          testing::ValuesIn(getBnFwdInferenceTestCases())));
+
+INSTANTIATE_TEST_SUITE_P(Full,
+                         IntegrationGpuBatchnormForwardInference2dUpcastFp16,
                          testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
                                           testing::ValuesIn(getBnFwdInferenceFullTestCases())));
 
@@ -272,6 +346,22 @@ INSTANTIATE_TEST_SUITE_P(Full,
                          testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
                                           testing::ValuesIn(getBnFwdInference3dFullTestCases())));
 
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuBatchnormForwardInference3dUpcastBfp16);
+TEST_P(IntegrationGpuBatchnormForwardInference3dUpcastBfp16, Correctness)
+{
+    runGraphTest();
+}
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuBatchnormForwardInference3dUpcastBfp16,
+                         testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
+                                          testing::ValuesIn(getBnFwdInference3dTestCases())));
+
+INSTANTIATE_TEST_SUITE_P(Full,
+                         IntegrationGpuBatchnormForwardInference3dUpcastBfp16,
+                         testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
+                                          testing::ValuesIn(getBnFwdInference3dFullTestCases())));
+
 GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuBatchnormForwardInference3dFp16);
 TEST_P(IntegrationGpuBatchnormForwardInference3dFp16, Correctness)
 {
@@ -285,5 +375,21 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
 
 INSTANTIATE_TEST_SUITE_P(Full,
                          IntegrationGpuBatchnormForwardInference3dFp16,
+                         testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
+                                          testing::ValuesIn(getBnFwdInference3dFullTestCases())));
+
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuBatchnormForwardInference3dUpcastFp16);
+TEST_P(IntegrationGpuBatchnormForwardInference3dUpcastFp16, Correctness)
+{
+    runGraphTest();
+}
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuBatchnormForwardInference3dUpcastFp16,
+                         testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
+                                          testing::ValuesIn(getBnFwdInference3dTestCases())));
+
+INSTANTIATE_TEST_SUITE_P(Full,
+                         IntegrationGpuBatchnormForwardInference3dUpcastFp16,
                          testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
                                           testing::ValuesIn(getBnFwdInference3dFullTestCases())));

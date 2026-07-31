@@ -137,6 +137,43 @@ TEST_CASE("Origami: hardware_arch_enum", "[origami]") {
   }
 }
 
+TEST_CASE("Origami: gfx1250 complex matrix instructions", "[origami]") {
+  auto hardware = make_hardware(1250);
+
+  struct ComplexMiCase {
+    origami::data_type_t complex_dtype;
+    origami::data_type_t base_dtype;
+    const char* string_dtype;
+  };
+
+  const ComplexMiCase cases[] = {{origami::data_type_t::ComplexFloat,
+                                  origami::data_type_t::Float,
+                                  "c32"},
+                                 {origami::data_type_t::ComplexDouble,
+                                  origami::data_type_t::Double,
+                                  "c64"}};
+
+  for (const auto& tc : cases) {
+    DYNAMIC_SECTION(tc.string_dtype) {
+      const auto instructions = hardware.get_valid_matrix_instructions(tc.complex_dtype);
+      REQUIRE(instructions.size() == 1);
+      REQUIRE(instructions[0].m == 16);
+      REQUIRE(instructions[0].n == 16);
+      REQUIRE(instructions[0].k == 4);
+
+      const size_t base_latency    = hardware.get_mi_latency(16, 16, 4, tc.base_dtype);
+      const size_t complex_latency = hardware.get_mi_latency(16, 16, 4, tc.complex_dtype);
+      REQUIRE(base_latency > 0);
+      REQUIRE(complex_latency == base_latency * 4);
+
+      const auto from_string =
+          hardware.get_valid_matrix_instructions(origami::string_to_datatype(tc.string_dtype));
+      REQUIRE(from_string.size() == 1);
+      REQUIRE(from_string[0] == instructions[0]);
+    }
+  }
+}
+
 TEST_CASE("Origami: has_MALL", "[origami]") {
   for (int gpu_arch : test_architectures) {
     DYNAMIC_SECTION("gfx" << gpu_arch << " - MALL support check") {
@@ -1288,4 +1325,42 @@ TEST_CASE("Origami: num_cus changes selected config", "[origami]") {
       REQUIRE(capped_mt.n == 192);
     }
   }
+}
+
+TEST_CASE("gfx950 pci_chip_id id75a0 vs id75a8", "[hardware]") {
+  using origami::hardware_t;
+  const auto c_def = hardware_t::get_gfx950_arch_constants(std::nullopt);
+  const auto c_v2 = hardware_t::get_gfx950_arch_constants(std::make_optional(0x75a8));
+  REQUIRE(c_def.mem1_perf_ratio != c_v2.mem1_perf_ratio);
+  REQUIRE(c_def.mem2_perf_ratio != c_v2.mem2_perf_ratio);
+  REQUIRE(c_def.mem3_perf_ratio != c_v2.mem3_perf_ratio);
+  REQUIRE(c_def.mem_bw_per_wg_coefficients != c_v2.mem_bw_per_wg_coefficients);
+  REQUIRE(c_def.parallel_mi_cu == c_v2.parallel_mi_cu);
+
+  const auto g942_v2 = hardware_t::get_arch_constants(
+      hardware_t::architecture_t::gfx942, std::make_optional(0x75a8));
+  const auto g942_def =
+      hardware_t::get_arch_constants(hardware_t::architecture_t::gfx942);
+  REQUIRE(g942_v2.mem1_perf_ratio == g942_def.mem1_perf_ratio);
+
+  const auto hw_def = hardware_t::get_hardware_for_arch(hardware_t::architecture_t::gfx950,
+                                                        256,               // N_CU
+                                                        65536,             // lds_capacity
+                                                        512 * 1024,        // rf_capacity
+                                                        4 * 1024 * 1024,   // L2_capacity
+                                                        2'100'000,         // compute_clock_khz
+                                                        std::nullopt);     // pci_chip_id
+  const auto hw_v2 = hardware_t::get_hardware_for_arch(hardware_t::architecture_t::gfx950,
+                                                       128,
+                                                       65536,
+                                                       512 * 1024,
+                                                       4 * 1024 * 1024,
+                                                       2'100'000,
+                                                       std::make_optional(0x75a8));
+  REQUIRE(hw_def.mem1_perf_ratio != hw_v2.mem1_perf_ratio);
+  REQUIRE(hw_def.mem_bw_per_wg_coefficients == c_def.mem_bw_per_wg_coefficients);
+  REQUIRE(hw_v2.mem_bw_per_wg_coefficients == c_v2.mem_bw_per_wg_coefficients);
+  REQUIRE_FALSE(hw_def.pci_chip_id.has_value());
+  REQUIRE(hw_v2.pci_chip_id.has_value());
+  REQUIRE(hw_v2.pci_chip_id.value() == 0x75a8);
 }

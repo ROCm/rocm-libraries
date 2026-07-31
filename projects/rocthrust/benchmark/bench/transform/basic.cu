@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2024, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2024-2025, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2024-2026, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -158,10 +158,9 @@ void run_benchmark(benchmark::State& state, const std::size_t elements, const st
   }
 
 template <class Benchmark>
-void add_benchmarks(
-  const std::string& name, std::vector<benchmark::internal::Benchmark*>& benchmarks, const std::string seed_type)
+void add_benchmarks(const std::string& name, std::vector<benchmark::Benchmark*>& benchmarks, const std::string seed_type)
 {
-  std::vector<benchmark::internal::Benchmark*> bs;
+  std::vector<benchmark::Benchmark*> bs;
   BENCHMARK_TYPE(uint32_t)
   BENCHMARK_TYPE(uint64_t)
   benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());
@@ -281,7 +280,7 @@ void run_babelstream(benchmark::State& state, const std::size_t n)
     b = thrust::device_vector<T>(n);
     c = thrust::device_vector<T>(n);
   }
-  catch (const ::thrust::system::detail::bad_alloc& e)
+  catch (const THRUST_NS_QUALIFIER::system::detail::bad_alloc& e)
   {
     (void) hipGetLastError();
     state.SkipWithError(("thrust::system::detail::bad_alloc: " + std::string(e.what())).c_str());
@@ -300,7 +299,7 @@ void run_babelstream(benchmark::State& state, const std::size_t n)
     {
       duration = Benchmark::template run<T>(a, b, c);
     }
-    catch (const ::thrust::system::detail::bad_alloc& e)
+    catch (const THRUST_NS_QUALIFIER::system::detail::bad_alloc& e)
     {
       (void) hipGetLastError();
       state.SkipWithError(("thrust::system::detail::bad_alloc: " + std::string(e.what())).c_str());
@@ -345,9 +344,9 @@ void run_babelstream(benchmark::State& state, const std::size_t n)
     bs.push_back(CREATE_BABELSTREAM_BENCHMARK(type, (1u << 31), nstream_stable)); \
   }
 
-void add_benchmarks(const std::string& name, std::vector<benchmark::internal::Benchmark*>& benchmarks)
+void add_benchmarks(const std::string& name, std::vector<benchmark::Benchmark*>& benchmarks)
 {
-  std::vector<benchmark::internal::Benchmark*> bs;
+  std::vector<benchmark::Benchmark*> bs;
   BENCHMARK_BABELSTREAM_TYPE(int8_t)
   BENCHMARK_BABELSTREAM_TYPE(int16_t)
   BENCHMARK_BABELSTREAM_TYPE(float)
@@ -378,7 +377,7 @@ int main(int argc, char* argv[])
   benchmark::AddCustomContext("seed", seed_type);
 
   // Add benchmarks
-  std::vector<benchmark::internal::Benchmark*> benchmarks;
+  std::vector<benchmark::Benchmark*> benchmarks;
   add_benchmarks<basic>("basic", benchmarks, seed_type);
   babelstream::add_benchmarks("babelstream", benchmarks);
 
