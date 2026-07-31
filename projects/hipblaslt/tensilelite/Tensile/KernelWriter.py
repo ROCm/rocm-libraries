@@ -323,6 +323,12 @@ class StateValues:
   numSgprToLoad: int                     = 0 # For kernel args
   preloadGuard: List[int]                = field(init=False)  # For preload kernel args guard
   numSgprPreload: int                    = 0 # For kernel args
+  # Kernarg byte offsets of the general-batched offsets, set when the signature
+  # appends them at the tail (0 for grouped-gemm kernels that omit them)
+  batchOffsetDKernArgOffset: int         = 0
+  batchOffsetCKernArgOffset: int         = 0
+  batchOffsetAKernArgOffset: int         = 0
+  batchOffsetBKernArgOffset: int         = 0
   numSgprAlpha: int                      = 0 # For user arguments
   numSgprBeta: int                       = 0 # For user arguments
   numStoreSgprNames: List[str]           = field(init=False) # For post-loop kernel args
@@ -9468,6 +9474,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if kernel["ProblemType"]["Sparse"]:
       self.defineSgpr("StridesMetadata", self.states.m.numSgprStrides)
 
+    # Batch offset support for general batched GEMM (pointer array mode)
+    # Offsets are loaded on-demand from kernel arguments to avoid using persistent SGPRs
+    # No SGPR allocation here - offsets loaded directly when applying to addresses
+
     # for packed batches without stride restrictions need to do something different here
     assert sorted(kernel["PackedC0IdxChars"]+kernel["PackedC1IdxChars"]) == \
            sorted(set(kernel["PackedC0IdxChars"]+kernel["PackedC1IdxChars"]))
@@ -10098,6 +10108,18 @@ class KernelWriter(metaclass=abc.ABCMeta):
             enableFactorDim = True
       storeSgprLoad += self.states.numSgprAddressBias + self.states.BiasType + self.states.BiasStride
 
+    if self.states.useGateResidual:
+      self.states.numSgprAddressGate = self.states.rpga # 64-bit
+      self.states.numStoreSgprNames.append("AddressGate")
+      self.states.numStoreSgprNameSizes.append(self.states.numSgprAddressGate)
+      self.states.GateType   = 1
+      self.states.GateStride = self.states.gate.numSgprStrides
+      self.states.numStoreSgprNames.append("GateType")
+      self.states.numStoreSgprNameSizes.append(self.states.GateType)
+      self.states.numStoreSgprNames.append("GateStride")
+      self.states.numStoreSgprNameSizes.append(self.states.GateStride)
+      storeSgprLoad += self.states.numSgprAddressGate + self.states.GateType + self.states.GateStride
+
     if enableFactorDim:
       self.states.numStoreSgprNames.append("FactorDim")
       self.states.numStoreSgprNameSizes.append(1)
@@ -10120,18 +10142,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
         self.states.numStoreSgprNames.append("ActivationType")
         self.states.numStoreSgprNameSizes.append(1)
       storeSgprLoad += self.states.numActivationTypeArgSize + self.states.numactivationArgTotalSize
-
-    if self.states.useGateResidual:
-      self.states.numSgprAddressGate = self.states.rpga # 64-bit
-      self.states.numStoreSgprNames.append("AddressGate")
-      self.states.numStoreSgprNameSizes.append(self.states.numSgprAddressGate)
-      self.states.GateType   = 1
-      self.states.GateStride = self.states.gate.numSgprStrides
-      self.states.numStoreSgprNames.append("GateType")
-      self.states.numStoreSgprNameSizes.append(self.states.GateType)
-      self.states.numStoreSgprNames.append("GateStride")
-      self.states.numStoreSgprNameSizes.append(self.states.GateStride)
-      storeSgprLoad += self.states.numSgprAddressGate + self.states.GateType + self.states.GateStride
   
     self.states.numStoreSgprToLoad = storeSgprLoad      
     if self.db["InitLds"] : print ("\n***WARNING: InitLds enabled, may impact performance\n")
