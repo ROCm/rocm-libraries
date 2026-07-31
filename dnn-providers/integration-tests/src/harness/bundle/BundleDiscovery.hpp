@@ -123,7 +123,7 @@ inline std::vector<std::filesystem::path> findLeafDirectories(const std::filesys
 // list.
 inline const std::set<std::string>& companionKinds()
 {
-    static const std::set<std::string> s_kinds = {"meta"};
+    static const std::set<std::string> s_kinds = {"meta", "support"};
     return s_kinds;
 }
 
