@@ -125,6 +125,33 @@ def test_extractArchInfo_with_cu_count(mock_logic_file_with_cu):
     assert result.DeviceIds == {"id=74a0"}
     assert result.CUCount == "cu=228"
 
+
+def test_extractArchInfo_dict_format_header_fast_path():
+    content = """MinimumRequiredVersion: 5.0.0
+ScheduleName: gfx950
+ArchitectureName: gfx950
+CUCount: 256
+DeviceNames: [Device 75a0, Device 75b0]
+ProblemType: {}
+DefaultSolution: {}
+Solutions: []
+IndexOrder: [2, 3, 0, 1]
+ExactLogic: []
+RangeLogic: null
+TileSelectionIndices: null
+PerfMetric: DeviceEfficiency
+LibraryType: Equality
+"""
+
+    with patch("builtins.open", mock_open(read_data=content)):
+        result = _extractArchInfo("dummy.yaml")
+
+    assert isinstance(result, ArchInfo)
+    assert result.Name == "gfx950"
+    assert result.Gfx == "gfx950"
+    assert result.DeviceIds == {"id=75a0", "id=75b0"}
+    assert result.CUCount == "cu=256"
+
 def test_extractArchInfo_with_invalid_version(mock_logic_file_invalid_version):
     with pytest.raises(LogicFileError):
         _extractArchInfo("dummy.yaml")
