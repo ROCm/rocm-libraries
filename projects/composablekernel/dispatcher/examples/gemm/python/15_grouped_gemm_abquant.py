@@ -211,9 +211,9 @@ def main():
     parser.add_argument("--dtype", choices=["fp8", "bf8"], default="fp8")
     parser.add_argument("--pipeline", choices=["compv3", "eightwaves", "preshuffleb"],
                         default="compv3")
-    parser.add_argument("--M", type=int, default=128)
-    parser.add_argument("--N", type=int, default=128)
-    parser.add_argument("--K", type=int, default=128)
+    parser.add_argument("--M", type=int, default=None)
+    parser.add_argument("--N", type=int, default=None)
+    parser.add_argument("--K", type=int, default=1024)
     parser.add_argument("--quant-group-k", type=int, default=128)
     parser.add_argument("--bquant-group-n", type=int, default=1)
     parser.add_argument("--no-verify", action="store_true")
@@ -221,7 +221,16 @@ def main():
     parser.add_argument("--gfx-arch", type=str, default="gfx950")
     args = parser.parse_args()
 
-    M, N, K = args.M, args.N, args.K
+    # Default M and N to the smallest valid multiples of the tile for each pipeline.
+    # kPadM/kPadN are false for all ABQuant prefill configs, so M and N must be exact
+    # multiples of TileM and TileN respectively.
+    #   compv3/preshuffleb: TileM=128, TileN=128
+    #   eightwaves:         TileM=192, TileN=256
+    _default_mn = {"compv3": (1024, 1024), "preshuffleb": (1024, 1024), "eightwaves": (1152, 1024)}
+    _dm, _dn = _default_mn[args.pipeline]
+    M = args.M if args.M is not None else _dm
+    N = args.N if args.N is not None else _dn
+    K = args.K
     gK = args.quant_group_k
     bN = args.bquant_group_n
 
