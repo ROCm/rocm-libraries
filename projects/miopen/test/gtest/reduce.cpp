@@ -959,6 +959,44 @@ inline auto GetCasesReduceCustomTestSet2()
     return testing::ValuesIn(test_cases);
 }
 
+// Scale / numel > INT_MAX coverage (ALMIOPEN-2150)
+//
+// Shape {1, 1, 46342, 46342} has numel = 46342^2 = 2,147,580,964 > INT_MAX (2,147,483,647).
+// Reduces all four dims to a scalar so the overflow path in the index/workspace size
+// calculation is exercised.
+//
+// MAX is listed first because ALMIOPEN-2152 confirmed it silently returns all-0.0 output
+// at numel > INT_MAX; that case is therefore marked DISABLED_Standard pending the fix.
+inline auto GetCasesReduceScaleLargeNumel()
+{
+    static std::vector<float> alphabeta = {1.0f, 0.0f};
+
+    // {1, 1, 46342, 46342}: numel = 46342^2 ~ 2.148e9, just above INT_MAX
+    constexpr size_t H = 46342;
+    constexpr size_t W = 46342;
+
+    // clang-format off
+    static std::vector<TestCase> test_cases = {
+        // MAX: known to return all-0.0 at numel > INT_MAX (ALMIOPEN-2152).
+        std::make_tuple(std::vector<size_t>{1, 1, H, W},
+                        std::vector<int>{0, 1, 2, 3},
+                        MIOPEN_REDUCE_TENSOR_MAX,
+                        MIOPEN_NOT_PROPAGATE_NAN,
+                        MIOPEN_REDUCE_TENSOR_NO_INDICES,
+                        alphabeta),
+        // ADD: also exercised at numel > INT_MAX to catch workspace-size overflow.
+        std::make_tuple(std::vector<size_t>{1, 1, H, W},
+                        std::vector<int>{0, 1, 2, 3},
+                        MIOPEN_REDUCE_TENSOR_ADD,
+                        MIOPEN_NOT_PROPAGATE_NAN,
+                        MIOPEN_REDUCE_TENSOR_NO_INDICES,
+                        alphabeta),
+    };
+    // clang-format on
+
+    return testing::ValuesIn(test_cases);
+}
+
 } // anonymous namespace
 
 template <class T>
@@ -1338,3 +1376,24 @@ TEST_P(GPU_reduce_custom_fp32_fp16_FP16, HalfTest_reduce_custom_fp32_fp16) { thi
 INSTANTIATE_TEST_SUITE_P(Full, GPU_reduce_custom_fp32_fp16_FP32, GetCasesReduceCustomTestSet2());
 
 INSTANTIATE_TEST_SUITE_P(Full, GPU_reduce_custom_fp32_fp16_FP16, GetCasesReduceCustomTestSet2());
+
+// numel > INT_MAX scale tests (ALMIOPEN-2150)
+//
+// Disabled pending ALMIOPEN-2152 fix: ReduceTensor MAX returns all-0.0 output
+// with status SUCCESS when numel exceeds INT_MAX.  The ADD case is included in
+// the same suite so both ops are tracked together; it may pass independently once
+// ALMIOPEN-2152 is resolved for MAX.
+class GPU_reduce_scale_large_numel_FP32 : public ReduceCommon<float>
+{
+};
+
+// DISABLED_Standard: the MAX case silently produces wrong results (all-0.0) at
+// numel > INT_MAX -- see ALMIOPEN-2152.  Remove the DISABLED_ prefix once fixed.
+TEST_P(GPU_reduce_scale_large_numel_FP32, DISABLED_Standard_ReduceScaleLargeNumel)
+{
+    this->Run();
+}
+
+INSTANTIATE_TEST_SUITE_P(Standard,
+                         GPU_reduce_scale_large_numel_FP32,
+                         GetCasesReduceScaleLargeNumel());
