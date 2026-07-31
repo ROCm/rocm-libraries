@@ -16,9 +16,20 @@
 #      "*HostUnit*" pattern in ../test_categories.yaml, without which the cases
 #      would be built but never selected.
 #
-#   2. hipblaslt-client-unit-tests, a standalone binary that runs these cases
-#      without the rest of the matmul suite, ready for a future CPU-only lane. It
-#      is deliberately not installed or registered with ctest yet.
+#   2. hipblaslt-test-hostunit, a standalone binary that runs these cases without
+#      the rest of the matmul suite, on a machine with no GPU. The top-level
+#      CMakeLists.txt installs it next to hipblaslt-test so it ships in the test
+#      artifact and can be pulled straight from a CI run. It is still not
+#      registered with ctest: a second labelled entry would hit the multi-entry
+#      sharding hazard described above.
+#
+#      The "hipblaslt-test" prefix is load-bearing. TheRock picks what goes in the
+#      blas test artifact with a "bin/hipblaslt-test*" glob in
+#      math-libs/BLAS/artifact-blas.toml, so a name outside that pattern needs a
+#      matching change there. Nothing globs that pattern to decide what to *run*
+#      (test_hipblaslt.py execs hipblaslt-test by exact path, and
+#      apply_test_category_labels is called with that one target), so the extra
+#      binary is shipped but never auto-executed.
 set(HIPBLASLT_HOST_UNIT_TEST_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/parser_gtest.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/scaling_format_gtest.cpp
@@ -39,9 +50,9 @@ target_sources(hipblaslt-test PRIVATE ${HIPBLASLT_HOST_UNIT_TEST_SOURCES})
 #
 # OpenMP is omitted because it is already a PUBLIC dependency of
 # hipblaslt-clients-common.
-add_executable(hipblaslt-client-unit-tests ${HIPBLASLT_HOST_UNIT_TEST_SOURCES})
+add_executable(hipblaslt-test-hostunit ${HIPBLASLT_HOST_UNIT_TEST_SOURCES})
 
-target_link_libraries(hipblaslt-client-unit-tests
+target_link_libraries(hipblaslt-test-hostunit
     PRIVATE
         hipblaslt::hipblaslt-clients-common
         hip::device
@@ -49,4 +60,4 @@ target_link_libraries(hipblaslt-client-unit-tests
         GTest::gtest_main
 )
 
-target_compile_definitions(hipblaslt-client-unit-tests PRIVATE GOOGLE_TEST)
+target_compile_definitions(hipblaslt-test-hostunit PRIVATE GOOGLE_TEST)
