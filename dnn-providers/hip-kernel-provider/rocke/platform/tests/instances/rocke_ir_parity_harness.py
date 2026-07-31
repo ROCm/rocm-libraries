@@ -488,6 +488,35 @@ def build_attention_d256_gfx942(arch):
     return _build
 
 
+def build_attention_wmma_gfx1250(arch, **over):
+    """gfx1250 WMMA FMHA forward (library ``kernels/gfx1250/wmma_attention_fwd``).
+
+    ``over`` patches the base spec. This kernel is dispatchable only opt-in, so
+    no default route reaches it and nothing else in this harness lowers a
+    wave32 WMMA attention body -- without these cases its IR moves unobserved.
+    """
+
+    def _build():
+        from kernels.gfx1250.wmma_attention_fwd import (
+            WmmaAttentionFwdSpec,
+            build_wmma_attention_fwd,
+        )
+
+        spec = WmmaAttentionFwdSpec(
+            **{
+                "head_size": 128,
+                "num_query_heads": 8,
+                "num_kv_heads": 8,
+                "dtype": "fp16",
+                "mask_mode": "causal",
+                **over,
+            }
+        )
+        return build_wmma_attention_fwd(spec, arch=arch)
+
+    return _build
+
+
 def build_deep(kind, arch, **kw):
     def _build():
         if kind == "common":
@@ -1535,6 +1564,22 @@ def cases():
         "gfx942",
         build_attention_d256_gfx942("gfx942"),
     )
+
+    # gfx1250 WMMA FMHA forward. Covers both mask branches the spec can express,
+    # GQA grouping, and three head sizes -- each a different WMMA K-step count.
+    # Verified to hash distinctly; a sliding_window variant would not, because
+    # the spec cannot express that mask mode and the field is inert.
+    for _variant, _over in (
+        ("h128_causal", {}),
+        ("h64_gqa_none", {"head_size": 64, "num_kv_heads": 2, "mask_mode": "none"}),
+        ("h256_causal", {"head_size": 256}),
+    ):
+        add(
+            "attention_wmma",
+            f"attention_wmma/gfx1250/{_variant}",
+            "gfx1250",
+            build_attention_wmma_gfx1250("gfx1250", **_over),
+        )
     return out
 
 
