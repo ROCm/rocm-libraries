@@ -336,6 +336,15 @@ class KernelCandidate:
     answering "what runs on gfx1250?" has to stay a lookup rather than a probe.
     """
 
+    build: Callable[[Any, str], Any] | None = None
+    """``build(spec, arch) -> KernelDef``; the candidate's real IR builder.
+
+    Typed loosely because ``KernelDef`` lives in :mod:`rocke.core` and importing
+    it here would drag the IR layer into every dispatch import. What matters is
+    the contract: the spec ``select_spec`` returns is exactly what this accepts,
+    so a selection can be compiled without a per-family call site.
+    """
+
     bind: Callable[[Any, bool], ProblemBinding] | None = None
     """``bind(result, verify) -> ProblemBinding``; optional.
 
@@ -345,6 +354,16 @@ class KernelCandidate:
     it reports comes from this candidate's own ``grid``/``block``, so a runner
     cannot drift from the dispatcher the way a hand-written adapter can.
     """
+
+    def built(self, spec: Any, arch: str) -> Any:
+        """Build this candidate's IR for ``spec`` on ``arch``."""
+        if self.build is None:
+            raise NotImplementedError(
+                f"candidate {self.name!r} ({self.family}) declares no build(); "
+                "it can be selected but not compiled through the generic "
+                "path. Point build at its real builder to close that gap."
+            )
+        return self.build(spec, arch)
 
     def bound(self, result: Any, *, verify: bool = False) -> ProblemBinding:
         """Bind ``result`` to a runnable problem, or explain what is missing."""
@@ -388,12 +407,21 @@ class CandidateRegistry:
         family: str,
         *,
         dim_vocabulary: Iterable[str] | None = None,
+        require_build: bool = False,
         require_binding: bool = False,
     ) -> None:
         self.family = family
         self.dim_vocabulary = (
             None if dim_vocabulary is None else frozenset(dim_vocabulary)
         )
+        self.require_build = require_build
+        """Whether this family refuses to register a candidate it cannot build.
+
+        Separate from ``require_binding`` because the two are reachable at
+        different times: building needs only a spec and a builder, which every
+        platform family already has, while binding additionally needs a
+        declared args signature and launch geometry.
+        """
         self.require_binding = require_binding
         """Whether this family refuses to register a candidate it cannot launch.
 
@@ -413,8 +441,18 @@ class CandidateRegistry:
                 f"candidate family {candidate.family!r} != registry {self.family!r}"
             )
         self._validate_capability(candidate)
+        self._validate_build(candidate)
         self._validate_binding(candidate)
         self._candidates[candidate.name] = candidate
+
+    def _validate_build(self, candidate: KernelCandidate) -> None:
+        if self.require_build and candidate.build is None:
+            raise ValueError(
+                f"{candidate.name!r} declares no build, and family "
+                f"{self.family!r} requires one: a candidate this family "
+                "registers must be compilable, not merely selectable. Point "
+                "build at the builder whose spec type select_spec returns."
+            )
 
     def _validate_binding(self, candidate: KernelCandidate) -> None:
         if self.require_binding and candidate.bind is None:
@@ -504,6 +542,7 @@ class CandidateRegistry:
         """
         return {
             "family": self.family,
+            "requires_build": self.require_build,
             "requires_binding": self.require_binding,
             "candidates": [
                 {
@@ -512,9 +551,11 @@ class CandidateRegistry:
                     "spec_id": c.spec_id,
                     "abi_version": c.abi_version,
                     "priority": c.priority,
-                    # Whether this candidate can be launched, not just chosen.
-                    # Queryable for the same reason coverage is: "can I run
-                    # this?" should be a lookup, not a call that might raise.
+                    # Whether this candidate can be compiled and launched, not
+                    # just chosen. Queryable for the same reason coverage is:
+                    # "can I run this?" should be a lookup, not a call that
+                    # might raise.
+                    "buildable": c.build is not None,
                     "bindable": c.bind is not None,
                     "capability": (
                         None if c.capability is None else c.capability.as_dict()
@@ -582,6 +623,15 @@ class DispatchResult:
     block: Tuple[int, int, int]
     signature: Tuple[dict, ...]
     explanation: Tuple[str, ...]
+
+    def build(self) -> Any:
+        """Build the IR for this selection.
+
+        ``dispatch_gemm_fp16(req).build()`` replaces the per-family
+        ``build_kernel(result)`` call sites, so "compile whatever dispatch
+        chose" can be written once over ``dispatch_*_all``.
+        """
+        return self.candidate.built(self.spec, self.request.arch)
 
     def bind(self, *, verify: bool = False) -> ProblemBinding:
         """Turn this selection into a runnable problem.

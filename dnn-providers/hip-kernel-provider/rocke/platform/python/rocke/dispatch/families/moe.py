@@ -42,8 +42,14 @@ from dataclasses import asdict, dataclass
 from typing import Sequence, Tuple
 
 from ...core.arch import ArchTarget
-from ...instances.common.moe_fused_mega import FusedMegaKernelSpec
-from ...instances.common.moe_fused_mega_fp8 import FusedMegaKernelSpecFp8
+from ...instances.common.moe_fused_mega import (
+    FusedMegaKernelSpec,
+    build_moe_fused_mega_gemm,
+)
+from ...instances.common.moe_fused_mega_fp8 import (
+    FusedMegaKernelSpecFp8,
+    build_moe_fused_mega_gemm_fp8,
+)
 from ..core import (
     Capability,
     CandidateRegistry,
@@ -154,6 +160,18 @@ def _spec_fp8(req: MoeRequest):
     return FusedMegaKernelSpecFp8(name="moe_fp8")
 
 
+def _build(spec, arch: str):
+    """Route to the builder that matches the spec ``select_spec`` produced.
+
+    The family carries two spec types, so the fp8/f16 split that ``_struct``
+    already makes for identity has to be made here too. Keyed on the spec type
+    rather than on the request dtype, so the two can never disagree.
+    """
+    if isinstance(spec, FusedMegaKernelSpecFp8):
+        return build_moe_fused_mega_gemm_fp8(spec, arch)
+    return build_moe_fused_mega_gemm(spec, arch)
+
+
 def _make_candidate(*, name, spec_id, dtypes, spec_fn, priority) -> KernelCandidate:
     def support(req: OperatorRequest) -> Tuple[bool, str]:
         errors = _request_errors(req)
@@ -203,11 +221,14 @@ def _make_candidate(*, name, spec_id, dtypes, spec_fn, priority) -> KernelCandid
         grid=lambda spec, req: (0, 0, 0),  # grid is runtime (num_m_blocks, inter)
         block=lambda spec: (int(spec.block_size), 1, 1),
         sweep_space=lambda req: (select(req),) if candidate.admits(req)[0] else (),
+        build=_build,
     )
     return candidate
 
 
-MOE_REGISTRY = CandidateRegistry(_FAMILY, dim_vocabulary=MOE_DIM_VOCABULARY)
+MOE_REGISTRY = CandidateRegistry(
+    _FAMILY, dim_vocabulary=MOE_DIM_VOCABULARY, require_build=True
+)
 MOE_REGISTRY.extend(
     (
         _make_candidate(

@@ -211,6 +211,7 @@ def _make_candidate(
         grid=_grid,
         block=lambda spec: (int(spec.block_size), 1, 1),
         sweep_space=lambda req: (select(req),) if candidate.admits(req)[0] else (),
+        build=build_universal_gemm,
         bind=lambda result, verify: gemm_rcr_binding(result, verify, dtype="fp16"),
     )
     return candidate
@@ -232,7 +233,10 @@ _CDNA_MFMA_FP16 = ("gfx942", "gfx950")
 _RDNA_WMMA = ("gfx11-generic", "gfx1151", "gfx1201")
 
 GEMM_FP16_REGISTRY = CandidateRegistry(
-    _FAMILY, dim_vocabulary=GEMM_DIM_VOCABULARY, require_binding=True
+    _FAMILY,
+    dim_vocabulary=GEMM_DIM_VOCABULARY,
+    require_build=True,
+    require_binding=True,
 )
 GEMM_FP16_REGISTRY.extend(
     (
@@ -291,7 +295,12 @@ def _kernel_id(
 
 
 def build_kernel(result: DispatchResult):
-    return build_universal_gemm(result.spec, arch=result.request.arch)
+    """Deprecated in favour of ``result.build()``.
+
+    Kept because benchmark harnesses and examples import it by name; it now
+    delegates so there is one definition of how a selection becomes IR.
+    """
+    return result.build()
 
 
 def gemm_fp16_sweep_space(req: OperatorRequest) -> Sequence[UniversalGemmSpec]:

@@ -37,6 +37,7 @@ from ...core.arch import ArchTarget
 from ...instances.common.conv_implicit_gemm import (
     ConvProblem,
     ImplicitGemmConvSpec,
+    build_implicit_gemm_conv,
     is_valid_spec as _conv_is_valid_spec,
 )
 from ..core import (
@@ -336,6 +337,7 @@ def _make_candidate(
         grid=_grid,
         block=lambda spec: (int(spec.block_size), 1, 1),
         sweep_space=lambda req: (select(req),) if candidate.admits(req)[0] else (),
+        build=build_implicit_gemm_conv,
     )
     return candidate
 
@@ -358,7 +360,9 @@ _CDNA_CSHUFFLE = ("gfx950",)
 _CDNA_MEM = ("gfx90a", "gfx942", "gfx950")
 _RDNA_WMMA = ("gfx11-generic", "gfx1151", "gfx1201")
 
-CONV_REGISTRY = CandidateRegistry(_FAMILY, dim_vocabulary=CONV_DIM_VOCABULARY)
+CONV_REGISTRY = CandidateRegistry(
+    _FAMILY, dim_vocabulary=CONV_DIM_VOCABULARY, require_build=True
+)
 CONV_REGISTRY.extend(
     (
         _make_candidate(

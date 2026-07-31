@@ -592,12 +592,27 @@ alone, which is what lets `DispatchResult` be executable instead of advisory.
 launch and verify it", so one benchmark harness can sweep every registered
 kernel — see section 7.5.
 
-**`bind` is mandatory per family, not globally — a ratchet rather than a rule.**
-`CandidateRegistry(..., require_binding=True)` makes a family refuse any
-candidate it could not launch, with the same import-time failure `capability`
-gets. GEMM fp16 and bf16 have it on today.
+**`build` is required everywhere; `bind` is a per-family ratchet.** Both are
+enforced the same way, at import time, by `CandidateRegistry(...,
+require_build=True, require_binding=True)`. They are separate flags because
+they became reachable at different times, and the difference is instructive.
+
+`build` needs only a spec and a builder, which every family already had — the
+work was not writing builders but routing to the right one, since `moe` carries
+two spec types and `norm` two more. All five platform families require it, and
+there is no exempt set: a spec with no builder is not a kernel anyone can use.
+`build` is what makes `result.build()` meaningful, so the per-family
+`build_kernel(result)` helpers now delegate to it rather than re-deriving the
+call. The check that matters is not that a callable was assigned but that
+`select_spec`'s output is what the builder accepts — a TypeError surfacing at
+compile time, far from the registration that caused it — so the test actually
+dispatches and builds one request per family.
+
+`bind` is the ratchet. GEMM fp16 and bf16 have it on today.
 
 It is not global, because `capability` and `bind` are different kinds of thing.
+(Nor is it global for the reason `build` is: `build` bottoms out in code that
+already exists, `bind` does not.)
 A capability is a *declaration*: every candidate can make one, it costs nothing
 but honesty, and refusing to declare only hides you from `for_arch`. A binding
 is *behavior* — host allocation, argument packing, a numeric reference — and a
@@ -618,10 +633,10 @@ The concrete blockers, which are also the backfill order:
 So the sequence is: declare the args signature, then write the binding, then
 flip `require_binding`. A family that has flipped it cannot silently regress,
 which is the property worth having — the risk is not the 41 known gaps, it is
-the 42nd arriving unnoticed. `coverage()` reports `requires_binding` per family
-and `bindable` per candidate so the remaining gap is queryable rather than
-discovered at call time, and an invariant test pins the exempt set so a family
-leaving it is a deliberate edit.
+the 42nd arriving unnoticed. `coverage()` reports `requires_build` /
+`requires_binding` per family and `buildable` / `bindable` per candidate so the
+remaining gap is queryable rather than discovered at call time, and an
+invariant test pins the exempt set so a family leaving it is a deliberate edit.
 
 Where a candidate genuinely has no binding, `bound()` raises
 `NotImplementedError` naming it, so the gap reads as a known limit rather than a
@@ -1565,9 +1580,19 @@ runner, and — as of this phase — no callers either. It is a stub for the for
 phase 6 will make real, not a working path with a missing piece.
 
 **Phase 5 — register the existing arch variants.** The first phase that changes
-what dispatch can reach. Begin with the mechanical move of the single
-`attention.py` into the per-arch layout of section 8 — no logic change — then
-register per arch module:
+what dispatch can reach.
+
+It opens with `build`, for the same reason phase 4 came before this one: it is
+additive, it needs nothing from the file moves, and every module registered
+below has to point `build` somewhere anyway, so having the seam first means the
+new arch variants land already compilable rather than being retrofitted. All
+five platform families now require it (section 5.2), the GEMM `build_kernel`
+helpers delegate to it, and the spec/builder agreement test dispatches and
+builds one request per family. **Done.**
+
+What remains is the registration itself. Begin with the mechanical move of the
+single `attention.py` into the per-arch layout of section 8 — no logic change —
+then register per arch module:
 
 *Attention, gfx942 and gfx950.* The four arch-specialized candidates already
 written in `attention.py` — `gfx942_dense_pipe`, the gfx950 dense path,
@@ -1588,9 +1613,9 @@ candidate declares gfx1250 today. Add one over the portable
 gfx1250-specific conv kernel, so this is onboarding an existing portable builder
 to a new target rather than registering something already written.
 
-This phase also introduces `build` on the candidate: every module registered here
-points `build` at its real builder, and GEMM adopts it where
-`build_kernel(result)` already exists. Add the spec/builder agreement test.
+Each of these points `build` at its real builder as it lands; the agreement test
+covers it by construction, since a family that registers without one is refused
+at import.
 
 **Phase 6 — move routing policy into dispatch.** The large one, and the shape of
 the gfx942 example in section 9.2. Today the choice of kernel geometry is made

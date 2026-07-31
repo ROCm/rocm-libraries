@@ -192,8 +192,21 @@ def _make_candidate(
         grid=_grid,
         block=lambda spec: (int(spec.block_size), 1, 1),
         sweep_space=lambda req: (select(req),) if candidate.admits(req)[0] else (),
+        build=_build,
     )
     return candidate
+
+
+def _build(spec, _arch: str):
+    """Both norm builders take only a spec.
+
+    Norm derives its wave size from the spec rather than the target, which is
+    the same property that lets one candidate declare every arch (section 10),
+    so there is no arch to pass down.
+    """
+    if isinstance(spec, _rms.RMSNorm2DSpec):
+        return _rms.build_rmsnorm2d(spec)
+    return _ln.build_layernorm2d(spec)
 
 
 def _grid(spec, req: OperatorRequest) -> Tuple[int, int, int]:
@@ -203,7 +216,9 @@ def _grid(spec, req: OperatorRequest) -> Tuple[int, int, int]:
 
 
 def _build_registry() -> CandidateRegistry:
-    reg = CandidateRegistry(_FAMILY, dim_vocabulary=NORM_DIM_VOCABULARY)
+    reg = CandidateRegistry(
+        _FAMILY, dim_vocabulary=NORM_DIM_VOCABULARY, require_build=True
+    )
     # Priority order = largest block_size first, then widest vec, so the
     # highest-throughput candidate that the arch accepts wins under ``auto``.
     cands = []
