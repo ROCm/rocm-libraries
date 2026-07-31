@@ -13,6 +13,9 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 concurrency:
   # For PRs, group by PR number so a new commit cancels any in-progress run
   # for the same PR. For postsubmits, group by commit SHA (unique per commit)
@@ -25,6 +28,9 @@ jobs:
   setup:
     name: "Setup"
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: read
     outputs:
       matrix: ${{ steps.build-matrix.outputs.matrix }}
     steps:
@@ -50,17 +56,6 @@ jobs:
           # checkout_paths lists all repo paths needed for sparse checkout.
           LIBS=()
 
-          # hipDNN
-          LIBS+=($(jq -cn '{
-            name:           "hipdnn",
-            path_filters:   [
-              "projects/hipdnn/**/*.{c,h,cpp,hpp,cxx,hxx}",
-              "projects/hipdnn/cmake/ClangTidy.cmake",
-              "projects/hipdnn/.clang-tidy"
-            ],
-            checkout_paths: ["projects/hipdnn"]
-          }'))
-
           # stinkytofu
           LIBS+=($(jq -cn '{
             name:           "stinkytofu",
@@ -83,17 +78,6 @@ jobs:
             ],
             checkout_paths: ["projects/miopen", "shared/ctest"]
           }'))
-
-          # Disabled: see https://github.com/ROCm/rocm-libraries/issues/5067
-          # LIBS+=($(jq -cn '{
-          #   name:           "miopen-provider",
-          #   path_filters:   [
-          #     "dnn-providers/miopen-provider/**/*.{c,h,cpp,hpp,cxx,hxx}",
-          #     "dnn-providers/miopen-provider/cmake/ClangTidy.cmake",
-          #     "dnn-providers/miopen-provider/.clang-tidy"
-          #   ],
-          #   checkout_paths: ["dnn-providers/miopen-provider"]
-          # }'))
 
           # Common filters applied to every library — changes here re-run all opted-in libraries.
           COMMON_FILTERS='[".github/workflows/clang-tidy.yml"]'
@@ -175,17 +159,6 @@ jobs:
 
       # Per-library optional dependency steps — only the matching step runs.
       # Add a new step here when opting in a library that has custom deps.
-      - name: Install deps (hipDNN)
-        if: matrix.name == 'hipdnn'
-        run: |
-          wget https://apt.llvm.org/llvm.sh
-          chmod +x llvm.sh
-          sudo ./llvm.sh 20
-          sudo apt-get update
-          sudo apt-get install -y \
-            clang-tidy-20 \
-            clang-tools-20
-
       - name: Install deps (stinkytofu)
         if: matrix.name == 'stinkytofu'
         run: |
@@ -221,36 +194,6 @@ jobs:
           sed -i '/composablekernel/d; /half/d; /rocMLIR/d' /tmp/requirements.txt
           cd /tmp && CMAKE_GENERATOR=Ninja rbuild prepare -s develop -d /tmp/miopen-deps
 
-      # Disabled: see https://github.com/ROCm/rocm-libraries/issues/5067
-      # To re-enable: uncomment the LIBS entry above and these two steps.
-      # - name: Install deps (miopen-provider)
-      #   if: matrix.name == 'miopen-provider'
-      #   run: |
-      #     wget https://apt.llvm.org/llvm.sh
-      #     chmod +x llvm.sh
-      #     sudo ./llvm.sh 20
-      #     sudo apt-get update
-      #     sudo apt-get install -y \
-      #       clang-tidy-20 \
-      #       clang-tools-20
-
-      # Per-library run steps — each library defines its own build and tidy sequence.
-      # Add a new step here when opting in a library.
-      - name: Run clang-tidy (hipDNN)
-        if: matrix.name == 'hipdnn'
-        run: |
-          . .venv/bin/activate
-          export PATH=/opt/rocm/bin:/opt/rocm/llvm/bin:$PATH
-          export CXX=/opt/rocm/llvm/bin/clang++
-          cmake -S projects/hipdnn -B build-hipdnn -G Ninja \
-            -DENABLE_CLANG_TIDY=ON \
-            -DROCM_PATH=/opt/rocm \
-            -DCMAKE_PREFIX_PATH=/opt/rocm \
-            -DENABLE_CLANG_FORMAT=OFF \
-            -DHIP_PLATFORM=amd \
-            -DHIPDNN_BUILD_PYTHON_BINDINGS=ON
-          ninja -C build-hipdnn tidy
-
       - name: Run clang-tidy (stinkytofu)
         if: matrix.name == 'stinkytofu'
         run: |
@@ -275,21 +218,6 @@ jobs:
             -DCMAKE_PREFIX_PATH="/opt/rocm;/tmp/miopen-deps" \
             -DROCM_PATH=/opt/rocm
           ninja -C build-miopen analyze
-
-      # Disabled: see https://github.com/ROCm/rocm-libraries/issues/5067
-      # - name: Run clang-tidy (miopen-provider)
-      #   if: matrix.name == 'miopen-provider'
-      #   run: |
-      #     . .venv/bin/activate
-      #     export PATH=/opt/rocm/bin:/opt/rocm/llvm/bin:$PATH
-      #     export CXX=/opt/rocm/llvm/bin/clang++
-      #     cmake -S dnn-providers/miopen-provider -B build-miopen-provider -G Ninja \
-      #       -DENABLE_CLANG_TIDY=ON \
-      #       -DROCM_PATH=/opt/rocm \
-      #       -DCMAKE_PREFIX_PATH=/opt/rocm \
-      #       -DENABLE_CLANG_FORMAT=OFF \
-      #       -DHIP_PLATFORM=amd
-      #     ninja -C build-miopen-provider tidy
 
   clang_tidy_summary:
     name: "clang-tidy summary"

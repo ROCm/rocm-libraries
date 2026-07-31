@@ -508,8 +508,21 @@ class TestDeviceArchAndFusionTargeting(unittest.TestCase):
     def test_get_device_arch_importable(self):
         from rocke.runtime.hip_module import get_device_arch
 
-        v = get_device_arch()  # None off-GPU, "gfxNNN" on a device — never raises
+        v = get_device_arch()
         self.assertTrue(v is None or (isinstance(v, str) and v.startswith("gfx")))
+
+    def test_get_device_name_importable(self):
+        from rocke.runtime.hip_module import get_device_name
+
+        v = get_device_name()
+        self.assertTrue(v is None or (isinstance(v, str) and len(v) > 0))
+
+    def test_get_device_count_importable(self):
+        from rocke.runtime.hip_module import get_device_count
+
+        v = get_device_count()
+        self.assertIsInstance(v, int)
+        self.assertGreaterEqual(v, 0)
 
     def test_fusion_gemm_atoms_are_catalog_legal_per_arch(self):
         # The GemmEpilogueLowerer must pick warp-tile K from the target's MMA
@@ -560,11 +573,70 @@ class TestDeviceArchAndFusionTargeting(unittest.TestCase):
                     )
 
 
+class TestDeviceQueryParsing(unittest.TestCase):
+    """Field extraction for the HIP device queries, pinned without a GPU.
+
+    Uses a synthetic hipDeviceProp_t buffer so the parsing is deterministic: the
+    marketing ``name`` is the char[256] at offset 0; ``gcnArchName`` carries the gfx
+    token further in and may carry ``:sramecc+:xnack-`` feature suffixes to strip.
+    """
+
+    @staticmethod
+    def _props(name: bytes, gcn_arch: bytes | None) -> bytes:
+        buf = bytearray(4096)
+        buf[0 : len(name)] = name  # name[256] at offset 0, NUL-terminated
+        if gcn_arch is not None:
+            buf[256 : 256 + len(gcn_arch)] = gcn_arch
+        return bytes(buf)
+
+    def test_arch_strips_feature_flags(self):
+        import unittest.mock as mock
+        from rocke.runtime import hip_module
+
+        raw = self._props(b"Marketing Name", b"gfx000:sramecc+:xnack-")
+        with mock.patch.object(hip_module, "_device_props", return_value=raw):
+            self.assertEqual(hip_module.get_device_arch(0), "gfx000")
+
+    def test_arch_keeps_letter_suffix(self):
+        import unittest.mock as mock
+        from rocke.runtime import hip_module
+
+        raw = self._props(b"Marketing Name", b"gfx00a:sramecc+:xnack-")
+        with mock.patch.object(hip_module, "_device_props", return_value=raw):
+            self.assertEqual(hip_module.get_device_arch(0), "gfx00a")
+
+    def test_name_read_from_offset_zero_to_nul(self):
+        import unittest.mock as mock
+        from rocke.runtime import hip_module
+
+        raw = self._props(b"Marketing Name", b"gfx000")
+        with mock.patch.object(hip_module, "_device_props", return_value=raw):
+            self.assertEqual(hip_module.get_device_name(0), "Marketing Name")
+
+    def test_no_gfx_token_yields_none_arch(self):
+        import unittest.mock as mock
+        from rocke.runtime import hip_module
+
+        raw = self._props(b"Marketing Name", None)
+        with mock.patch.object(hip_module, "_device_props", return_value=raw):
+            self.assertIsNone(hip_module.get_device_arch(0))
+
+    def test_missing_props_yields_none(self):
+        import unittest.mock as mock
+        from rocke.runtime import hip_module
+
+        with mock.patch.object(hip_module, "_device_props", return_value=None):
+            self.assertIsNone(hip_module.get_device_arch(0))
+            self.assertIsNone(hip_module.get_device_name(0))
+
+
 class TestArchitecturalIsolation(unittest.TestCase):
     """Review-rule gates from the design doc."""
 
+    # Sources are UTF-8 whatever the host locale is: reading them with the
+    # Windows default (cp1252) fails on the non-ASCII a few modules carry.
     def _read(self, rel):
-        return (_ROCKE_ROOT / rel).read_text()
+        return (_ROCKE_ROOT / rel).read_text(encoding="utf-8")
 
     def test_core_arch_no_dispatcher_import(self):
         # Catch real imports of dispatcher, not the word in docstrings/comments.
@@ -573,20 +645,23 @@ class TestArchitecturalIsolation(unittest.TestCase):
         pat = re.compile(r"^\s*(from|import)\s+\S*dispatcher", re.MULTILINE)
         for p in (_ROCKE_ROOT / "core" / "arch").rglob("*.py"):
             self.assertIsNone(
-                pat.search(p.read_text()), f"{p} must not import from dispatcher/"
+                pat.search(p.read_text(encoding="utf-8")),
+                f"{p} must not import from dispatcher/",
             )
 
     def test_core_arch_no_pipeline_vocabulary(self):
         # Pipeline/scheduler names are instance-side policy, never in core/arch.
         blob = "\n".join(
-            p.read_text() for p in (_ROCKE_ROOT / "core" / "arch").rglob("*.py")
+            p.read_text(encoding="utf-8")
+            for p in (_ROCKE_ROOT / "core" / "arch").rglob("*.py")
         )
         for tok in ("compv4", "compv3", "intrawave", "interwave", "qr_ks_vs"):
             self.assertNotIn(tok, blob, f"pipeline token {tok!r} leaked into core/arch")
 
     def test_core_arch_no_llvm_intrinsic_text(self):
         blob = "\n".join(
-            p.read_text() for p in (_ROCKE_ROOT / "core" / "arch").rglob("*.py")
+            p.read_text(encoding="utf-8")
+            for p in (_ROCKE_ROOT / "core" / "arch").rglob("*.py")
         )
         self.assertNotIn(
             "llvm.amdgcn", blob, "core/arch must not contain intrinsic text"
@@ -597,7 +672,8 @@ class TestDatalayoutDriftGuard(unittest.TestCase):
     """Drift guard: assert rocke's hardcoded datalayout matches the toolchain.
 
     The LLVM IR datalayout is LLVM-version-keyed (not gfx-keyed): ROCm 7.2
-    ships ``p8:128:128:128:48``, while 7.0/7.1 shipped ``p8:128:128``. The
+    ships ``p8:128:128:128:48`` (llvm22), ROCm 7.13+ ships the same layout
+    under llvm23, while 7.0/7.1 shipped ``p8:128:128`` (llvm20). The
     difference is auto-upgraded away when compiling textual IR through comgr,
     so a wrong-but-well-formed hardcoded string compiles fine — but relying
     on that parser leniency is fragile across ingestion paths.
@@ -639,6 +715,7 @@ class TestDatalayoutDriftGuard(unittest.TestCase):
         from rocke.core.ir import F32, KernelDef, Param, PtrType, Region
         from rocke.core.isa.backend import wired_arches
         from rocke.core.lower_llvm import (
+            LLVM_FLAVOR_LLVM23,
             _datalayout_for_flavor,
             _detect_llvm_flavor,
             _flavor_for_rocm,
@@ -666,6 +743,12 @@ class TestDatalayoutDriftGuard(unittest.TestCase):
             _flavor_for_rocm(*sys_ver) if sys_ver else _detect_llvm_flavor()
         )
         rocke_dl = _datalayout_for_flavor(detected_flavor)
+        if detected_flavor == LLVM_FLAVOR_LLVM23:
+            self.assertEqual(
+                rocke_dl,
+                _datalayout_for_flavor("llvm22"),
+                "llvm23 datalayout must track llvm22 until drift is proven",
+            )
 
         # Test across all wired arches to confirm datalayout really is gfx-invariant
         # (the assumption the flavor split rests on).
