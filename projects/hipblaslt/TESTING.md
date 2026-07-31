@@ -129,7 +129,8 @@ intend to change, read the resulting diff, and explain the behavior change in yo
 **The goldens are enforced.** Any pull request touching `projects/hipblaslt/tensilelite/**` runs the
 `Component CI: TensileLite coverage` GitHub Actions lane, which executes `tox -e coverage-unit` over
 the characterization tree with syrupy installed. A stale golden fails that check. The same tox
-environment also runs in Math CI, so there are two independent lanes asserting the same snapshots.
+environment also runs in Math CI's `tensilelite-unit-codecov` job, so two independent lanes assert the
+same snapshots, though only the GitHub Actions one is required to merge.
 
 There is one place snapshots do *not* run: the installed-artifact lane, which re-runs the unit tree
 from the packaged `share/hipblaslt/tensilelite/` install. That environment does not ship syrupy, so
@@ -200,11 +201,13 @@ None of these are hard problems. They are the roadmap (see
 hardware, anything in the generated assembly, memory-management behavior, stream and event
 semantics, and multi-GPU behavior. All of that is integration territory by construction.
 
-**Coverage expectation.** For TensileLite Python, the target is 80% patch coverage on modified code,
-with the project as a whole expected to reach 80% by end of 2026. Current whole-project Python
-coverage is far below that, which is exactly why the floors are ratchets rather than a fixed bar.
-For the C++ side there is no coverage target today, because with the current structure a target
-would be aspirational rather than actionable.
+**Coverage expectation.** The enforced whole-project floor for TensileLite Python is `fail_under = 75`
+in [`tensilelite/pyproject.toml`](tensilelite/pyproject.toml), which is deliberately the only place
+that number lives. The comment beside it records the intent: the GPU-less `coverage-unit` run
+measures around 79%, 80% is the target, and the floor is set below the measured value on purpose so
+that ordinary run-to-run noise cannot trip an exact cutoff. Per-file floors ratchet separately. For
+the C++ side there is no coverage target today, because with the current structure a target would be
+aspirational rather than actionable.
 
 ### Integration Testing Strategy
 
@@ -266,50 +269,76 @@ broader hardware coverage than PR or nightly CI provides. See
 
 ### Performance and Benchmarking Testing
 
-hipBLASLt is a performance library, so this section deserves to be read carefully: the tooling is
-good, and the automation is absent.
+hipBLASLt is a performance library, so this section deserves to be read carefully. The distinction
+that matters: measurement and comparison are automated, but the verdict is not. Nothing decides that
+a number is bad and fails the build.
 
 | Item | Detail |
 | --- | --- |
 | Stack layer | Core SDK (math library) |
 | Metrics measured | GFLOP/s, memory bandwidth (GB/s), latency (µs). Optionally clock frequencies, achieved efficiency, and memory read/write bytes |
 | How benchmarks are run | `hipblaslt-bench` for a single problem or a YAML batch; `hipblaslt-perf` to run named suites and aggregate CSV over repeated samples; `hipblaslt-cotenant` to measure under CU contention |
-| Baseline stored per architecture | **No.** No per-architecture baselines are stored in this repository |
-| Where results are stored | Local CSV in the developer's workspace. Optional export of a commit hash and machine specification for external tracking. Nothing is persisted by CI |
-| Regression threshold | **None defined.** The tuning flow uses an uplift threshold to decide whether to keep a tuned kernel, which is a candidate filter, not a regression gate |
-| Gating approach | Manual, ad hoc |
+| Automated runs | Two Math CI jobs, `perfci` and `performance` (described below). Neither is a merge gate |
+| Reference for comparison | A second build of the merge target (`develop`) produced in the same job, benchmarked on the same machine and tagged `build_reference` against the change's `build_new` |
+| Where results are stored | Ingested into rocPTS, AMD's performance tracking service, and viewable from a Kibana dashboard and the PTS web app. Local runs write CSV to the developer's workspace |
+| Regression threshold | **None defined.** The ingest step uploads both datasets and fails only if the upload itself fails. The tuning flow's uplift threshold is a candidate filter, not a regression gate |
+| Gating approach | Human review of the dashboard |
+
+**The two automated jobs.** `perfci` runs on pull requests. It builds the change and a `develop`
+reference, benchmarks both with the `ci_perf_job` suite on gfx950 (specifically an MI350X, pinned by
+device ID because the job requires it), uploads both datasets to rocPTS, and posts a comment on the
+pull request linking the run. It is configured not to report a check to GitHub, so it appears as a
+comment rather than as a check row. `performance` is the broader job: the `all` suite on gfx942 and
+gfx950, throttled to one run per day, reporting a check.
+
+Note that the `ci_perf_job` suite defined in this repository is invoked by Math CI, not from anything
+in this tree. Searching this repository for callers finds none, which is misleading.
 
 **Gating, stated honestly:**
 
 | Gating level | Status | Notes |
 | --- | --- | --- |
-| PR-level automated gate | **No** | Known gap. Nothing in CI runs a benchmark and compares it to anything |
-| Nightly automated comparison | **No** | Scaffolding for a last-known-good comparison exists in TheRock's extended tests, but it is currently marked expected-to-fail and its results API is disabled |
-| Manual nightly review | **Informal** | Developers and tuning owners run benchmarks by hand around changes they believe are performance-sensitive. There is no scheduled review and no named reviewer |
+| PR-level automated measurement | **Yes**, via `perfci` | Change and reference are benchmarked side by side and both land in rocPTS |
+| PR-level automated gate | **No** | No threshold is defined and the job is not in the gating set. A regression shows up as a number on a dashboard that someone has to look at |
+| Daily automated comparison | **Yes**, via `performance` | Same shape, wider suite, two architectures, once per day |
+| Automated regression alerting | **No** | Nothing watches the dashboard and tells anyone. This is the real gap, not the absence of measurement |
 | Release qualification | **No documented gate** | Performance is discussed at release time but there is no in-repo criterion |
-
-There is a function named `ci_perf_job` in the performance suite definitions, documented as "run
-basic job for PR-CI". It has no callers anywhere in the repository. Mentioning it here so nobody
-concludes from its name that a performance gate exists.
 
 Related tooling that is sometimes mistaken for regression testing: `utilities/geko/` is a GEMM
 kernel optimizer that searches for better kernels and benchmarks candidates during tuning, and
 `utilities/QuickTune/` performs offline per-workload tuning from captured logs. Both produce
-performance numbers. Neither compares against a stored baseline, and neither runs in CI.
-Similarly, TensileLite's benchmark and library-logic phases generate performance data used to
-*select* kernels during tuning; that data is not retained as a regression baseline.
+performance numbers as part of tuning rather than as a regression signal. Similarly, TensileLite's
+benchmark and library-logic phases generate performance data used to *select* kernels.
 
-**Known gaps:** no stored per-architecture baselines, no threshold, no automated comparison at any
-cadence, no dashboard, and no gate on library size, kernel count, or build time. A performance
-regression introduced by a code or tuning change is currently caught by a human noticing, or by a
-downstream consumer.
+**Known gaps:** no defined threshold, no automated alerting on a regression, no gate at any cadence,
+and no gate on library size, kernel count, or build time. Architecture coverage is also narrower than
+the library ships for: `perfci` measures gfx950 only. A performance regression is caught today by a
+human reading a dashboard, or by a downstream consumer.
 
 ## Pre-submit / CI Gates
 
 hipBLASLt is validated by two CI systems, which is the single most important thing to understand
 about its signal. GitHub Actions runs the build and the shared TheRock-based test lanes. A separate
-internal Jenkins-based system ("Math CI") runs the multi-architecture TensileLite suite and posts
-checks named `mci/rocm-libraries/...` onto the same PR. Both appear in the PR checks list.
+internal Jenkins-based system ("Math CI") builds and tests on AMD-hosted GPU runners and posts checks
+named `mci/rocm-libraries/...` onto the same pull request. Both appear in the PR checks list.
+
+Math CI's configuration lives in an AMD-internal repository rather than in this tree, so a
+contributor reading this repository cannot see what it runs. For hipBLASLt it defines roughly a dozen
+job types, of which exactly three are configured as gating:
+
+- **`precheckin`** builds hipBLASLt from source and runs its client test suite on gfx90a, gfx942,
+  gfx950, and gfx12, plus a compile-only gfx1250 configuration. This is the broadest hardware
+  coverage hipBLASLt gets on a pull request, and it is the only per-PR signal on gfx950.
+- **`static-analysis`** runs a static analysis scan over the source.
+- **`preliminary`** runs the TensileLite `common`-marked suite under tox on gfx12, gfx90a, gfx942,
+  and gfx950. It first diffs the change against `develop` and skips entirely when nothing under
+  `tensilelite/`, `shared/stinkytofu/`, or `shared/origami/` has changed, so on a pull request that
+  touches neither, it passes without running anything.
+
+Other Math CI jobs post checks without gating. The one worth knowing is
+`tensilelite-unit-codecov`, which runs the TensileLite Python and C++ coverage environments on gfx950
+and uploads to codecov under the `TensileLite-Unit` and `TensileLite-CPP` flags. It reports a check,
+but that check is not required.
 
 ### Validation Gates and Ownership
 
@@ -322,23 +351,25 @@ checks named `mci/rocm-libraries/...` onto the same PR. Both appear in the PR ch
 | HOST_ASAN build and quick test | Yes, on gfx90a | Component team | Keep the sanitizer lane green |
 | Code coverage floor and ratchet (TensileLite) | Yes, when `tensilelite/` is touched | Component team / CI | Floors move up only |
 | Formatting and lint (`pre-commit`) | Yes | CI / DevOps | Maintain hooks |
-| Static analysis | No | CI / DevOps | Not currently run for hipBLASLt |
-| Performance | No | Component team | No gate exists (see above) |
+| Static analysis | Yes | CI / DevOps | Gating Math CI job (`static-analysis`) |
+| Client test suite on gfx90a / gfx942 / gfx950 / gfx12 | Yes | Component team | Gating Math CI job (`precheckin`) |
+| Performance | No | Component team | Measured on every PR by `perfci`, but nothing gates on the result (see above) |
 | Shared validation infrastructure | N/A | TheRock team | Provide shared build and test infrastructure |
 | System validation | N/A | QA | Execute system-level and release validation |
 | Release qualification | N/A | Component team + QA + TPM | Confirm readiness, review known risks |
 
-A caveat on this table: which checks are configured as *required* in branch protection is not
-documented anywhere a contributor can see, and the answer is not consistently understood even among
-the people working on the tests. The rows above reflect intent and observed behavior. Confirming
-and publishing the actual required-check list is tracked as a gap.
+A caveat on this table: the Math CI rows are taken from that system's gating configuration, which is
+authoritative but lives outside this repository. Which GitHub Actions checks are configured as
+*required* in branch protection is not documented anywhere a contributor can see, and the answer is
+not consistently understood even among the people working on the tests. Publishing the actual
+required-check list, in this repository, is tracked as a gap.
 
 ### PR Test Classification
 
 | Status | Applies to |
 | --- | --- |
-| **Trusted gate** | Build (both platforms); client GTest quick tier on gfx94X-dcgpu (Linux) and gfx110X (Windows); TensileLite Python unit and characterization suites; HOST_ASAN build and quick test on gfx90a; TensileLite coverage floor and ratchet; `pre-commit` |
-| **Informational** | HOST_ASAN on gfx942 (opt-in via the `ci:asan` label, explicitly non-blocking); the TensileLite characterization-versus-unit coverage summary card; codecov reports |
+| **Trusted gate** | Build (both platforms); client GTest quick tier on gfx94X-dcgpu (Linux) and gfx110X (Windows); the Math CI client suite on gfx90a, gfx942, gfx950 and gfx12; Math CI static analysis; TensileLite Python unit and characterization suites; HOST_ASAN build and quick test on gfx90a; TensileLite coverage floor and ratchet; `pre-commit` |
+| **Informational** | HOST_ASAN on gfx942 (opt-in via the `ci:asan` label, explicitly non-blocking); the TensileLite characterization-versus-unit coverage summary card; the `tensilelite-unit-codecov` check and codecov reports; the `perfci` benchmark comparison |
 | **Unstable / flaky** | Not tracked as a category. hipBLASLt has no `UNSTABLE` tag |
 
 The third row is a real gap and not a claim that nothing is flaky. What hipBLASLt has instead is a
@@ -388,15 +419,25 @@ enforces both floors on the combined data, and renders a non-gating summary card
 coverage to each suite so the next refactor targets are visible. That lane is deliberately scoped
 and is expected to retire once the characterization-to-unit conversion finishes.
 
-**Targets.** TensileLite PRs are expected to reach 80% patch coverage on modified Python, with
-essentially full patch coverage required for new Python files and for changes to files already at
-full coverage. Files with no meaningful coverage today, notably the assembly kernel writers and
-`Solution.py`, are named exceptions where a justification comment is expected instead. The whole
-project is expected to reach 80% by end of 2026, from a starting point in the low thirties.
+**Targets.** Two different mechanisms carry a number, and they are easy to confuse:
 
-**Scope and exclusions.** Coverage measurement is Python-focused. The kernel writers and assembly
-generation modules are outside the characterization scope and are excluded from the per-file floors.
-Linux and Windows coverage are not tracked separately; coverage is measured on Linux only.
+- The **enforced floor** is `fail_under = 75` in [`tensilelite/pyproject.toml`](tensilelite/pyproject.toml),
+  checked on the combined characterization-plus-unit dataset, alongside the per-file floors in
+  `coverage-baseline.json`. This is what actually fails a run.
+- The **codecov target** is 80% project coverage per flag, set in the monorepo's
+  [`codecov.yml`](../../codecov.yml) for `hipBLASLt`, `TensileLite-Unit` and `TensileLite-CPP` along
+  with every other library. No patch-coverage target is configured. Codecov's report is advisory here
+  because the job that uploads it is not a required check.
+
+80% is the direction of travel for the enforced floor, and the ratchet is how it gets there.
+
+**Scope and exclusions.** Coverage measurement is Python-focused, and measured on Linux only; Linux
+and Windows are not tracked separately. The exclusions in
+[`tensilelite/pyproject.toml`](tensilelite/pyproject.toml) cover test, build and packaging paths
+rather than product modules. The kernel writers are sometimes described as uncovered exceptions, but
+they are not: `KernelWriter.py`, `KernelWriterAssembly.py` and `SolutionStructs/Solution.py` all
+carry active per-file floors in the seventies. The genuinely uncovered modules are elsewhere,
+including `ExperimentalLibrary.py` at zero and much of `Tensile/Components/`.
 
 **No C++ coverage target exists**, for the reasons given in
 [Unit Testing Strategy](#unit-testing-strategy). Setting one before the host-side code is linkable
@@ -406,17 +447,20 @@ in isolation would produce a number nobody could act on.
 
 Beyond PR validation, the following run on a nightly or postsubmit cadence rather than per PR:
 
-- **Additional hardware.** gfx950 runs hipBLASLt tests on postsubmit and nightly, but not on PRs, due
-  to runner capacity ([ROCm/TheRock#3288](https://github.com/ROCm/TheRock/issues/3288)). Additional
-  gfx families (gfx90a, gfx103X, gfx110X on Linux, gfx1151, gfx120X) are covered nightly.
+- **Additional hardware in the TheRock lane.** gfx950 runs there on postsubmit and nightly but not on
+  pull requests, due to runner capacity
+  ([ROCm/TheRock#3288](https://github.com/ROCm/TheRock/issues/3288)). Math CI does cover gfx950 per
+  PR, so this is a gap in one lane rather than in the whole gate. Additional gfx families (gfx90a,
+  gfx103X, gfx110X on Linux, gfx1151, gfx120X) are covered nightly.
 - **Wider test tiers.** Nightly runs use the `comprehensive` tier; prerelease runs use `full`.
 - **Full ASAN.** TheRock's nightly ASAN lane runs device-side instrumented builds with tests, which
   the per-PR hipBLASLt lane does not.
-- **TensileLite GPU tests.** The GPU-marked subset of the TensileLite suite runs on scheduled builds
-  rather than per PR.
-- **Multi-architecture TensileLite kernel-config suite.** Math CI runs a broad YAML kernel-config
-  suite across gfx90a, gfx942, gfx950, and gfx12 on PRs; that architecture breadth is what makes it
-  the slowest and most valuable functional signal hipBLASLt has.
+- **TensileLite GPU tests.** In the GitHub Actions lanes, the GPU-marked subset of the TensileLite
+  suite runs on scheduled builds rather than per PR. Math CI's `preliminary` job runs the
+  `common`-marked suite on GPUs per PR, but only when `tensilelite/` and its shared dependencies are
+  touched.
+- **Broad performance benchmarking.** The Math CI `performance` job runs the full benchmark suite on
+  gfx942 and gfx950 once per day, with results in rocPTS. It measures; it does not judge.
 
 ### Supported Configurations
 
@@ -425,12 +469,15 @@ the set of architectures the library supports or builds for.
 
 | Configuration | Validation level | Frequency | Notes |
 | --- | --- | --- | --- |
-| Linux, gfx94X-dcgpu | Full | PR (quick), nightly (comprehensive) | Primary PR test target. 6 shards |
+| Linux, gfx90a / gfx942 / gfx950 / gfx12 | Client test suite | PR, via Math CI `precheckin` | Broadest per-PR hardware coverage, and the only per-PR signal on gfx950. Also compiles for gfx1250 |
+| Linux, gfx90a / gfx942 / gfx950 / gfx12 | TensileLite `common` suite | PR, via Math CI `preliminary` | Skipped unless `tensilelite/` or its shared dependencies changed |
+| Linux, gfx94X-dcgpu | Full | PR (quick), nightly (comprehensive), via TheRock | Primary GitHub Actions test target. 6 shards |
 | Linux, gfx90a | Partial | PR (HOST_ASAN quick tier), nightly | Sanitizer lane's default architecture |
-| Linux, gfx950-dcgpu | Full | Postsubmit and nightly, **not PR** | Runner capacity, ROCm/TheRock#3288 |
+| Linux, gfx950-dcgpu | Full | Postsubmit and nightly in the TheRock lane, **not PR** there | Runner capacity, ROCm/TheRock#3288. Covered per PR by Math CI |
 | Windows, gfx110X | Partial | PR (quick), nightly | 1 shard |
 | Windows, gfx1151 | Partial | Nightly | Forced to the quick tier regardless of requested tier, for memory reasons |
-| Linux, gfx90a / gfx942 / gfx950 / gfx12 | Partial (TensileLite kernel-config suite only) | PR, via Math CI | Broadest architecture coverage on a PR |
+| Linux, gfx950 (MI350X) | Benchmarks only | PR, via Math CI `perfci` | Non-gating measurement into rocPTS |
+| Linux, gfx942 / gfx950 | Benchmarks only | Daily, via Math CI `performance` | Non-gating |
 | Linux, gfx103X / gfx120X | Partial | Nightly | |
 
 **Explicitly not tested**, so that nothing is assumed at release time:
@@ -439,8 +486,6 @@ the set of architectures the library supports or builds for.
 - **Windows beyond gfx110X and gfx1151.** No other Windows architecture runs hipBLASLt tests.
 - **HMM / managed memory**, except in the `full` tier, which requires a capable host and does not run
   in PR or nightly CI.
-- **gfx950 on pull requests.** A change can merge without ever having run hipBLASLt's GTest suite on
-  gfx950.
 - **Any architecture not listed above.** The library may build for it; its tests do not run.
 
 ## Sanitizer Coverage
@@ -533,12 +578,14 @@ datatype and shape space, plus dedicated ULP-level tests. Silent-wrong-answer bu
 the reproducer-then-quarantine pattern in `known_bugs.yaml` is designed to prevent from recurring.
 
 **2. Performance.** Users choose hipBLASLt for throughput; a correctness-preserving change that costs
-20% is a real defect. This is currently validated by hand, or not at all. It is the largest gap in
-this document.
+20% is a real defect. Every pull request is benchmarked against a `develop` reference and the numbers
+land in rocPTS, but nothing compares them to a threshold or raises an alarm, so catching the
+regression still depends on someone looking. It is the largest gap in this document.
 
 **3. Kernel selection and generation correctness.** A regression in TensileLite affects every
 consumer at once and can be invisible in a small test set. Validated by the Python unit suite, the
-characterization goldens, and the multi-architecture kernel-config suite in Math CI.
+characterization goldens, and the multi-architecture `common` suite run by Math CI's gating
+`preliminary` job.
 
 **4. Memory safety.** Wrong-sized workspaces, out-of-bounds host buffers, and leaks in long-running
 inference processes. Validated by the per-PR HOST_ASAN gate on gfx90a and by nightly full ASAN.
@@ -561,14 +608,14 @@ the whole release gate.
 - **Release-branch validation.** The `comprehensive` tier across the supported architecture set,
   rather than the `quick` tier that PRs run.
 - **Supported GPU and OS validation.** Explicit runs on the architectures being claimed for the
-  release, including the ones that do not run in PR CI. gfx950 in particular must be validated
-  deliberately at release time, because no PR has ever run the client suite on it.
+  release, including the ones that do not run in PR CI at all: the Windows architectures beyond
+  gfx110X, gfx103X and gfx120X, and anything newer than the per-PR set.
 - **`full` tier and HMM.** The managed-memory cases run only here, on a capable host.
 - **Known-gap review.** The quarantine list in `known_bugs.yaml` should be walked before sign-off:
   every entry is a known defect shipping in the release, and each should be a conscious decision
   rather than an accumulated default.
-- **Performance review.** Currently manual and informal. This is the release step most in need of
-  automation.
+- **Performance review.** The data exists in rocPTS; the review of it is manual and informal. This is
+  the release step most in need of automation.
 - **QA handoff.** System-level and release validation are executed by QA outside this repository.
 
 ## Dependencies and Validation Handoffs
@@ -578,7 +625,7 @@ Where confidence comes from and where ownership changes hands.
 | Dependency | Owning team | How it is validated | Known gap |
 | --- | --- | --- | --- |
 | TheRock (build and shared test infrastructure) | TheRock team | PR, nightly, and release lanes | Runner capacity limits which architectures run per PR |
-| Math CI (multi-architecture TensileLite suite) | DevOps / Math CI | Per-PR checks on the same PR | Configuration is not visible from this repository, so contributors cannot see what it runs or whether it is required |
+| Math CI (multi-architecture client, TensileLite, coverage and benchmark jobs) | DevOps / Math CI | Per-PR checks on the same PR, plus daily benchmarks | Configuration lives in an AMD-internal repository, so contributors cannot see what runs or which jobs gate without asking |
 | HIP, ROCr, compiler toolchain | Core ROCm teams | Consumed via TheRock; validated by their own CI | A toolchain regression surfaces here as a hipBLASLt test failure, and triage cost lands on this team |
 | `rocisa` | Component team (in this repository) | Own tox environment and CI lane | |
 | Downstream frameworks | Framework teams | Integration testing outside this repository | No pre-merge signal; regressions are found after the fact |
@@ -592,13 +639,13 @@ between them is not documented anywhere a contributor can see. That is the most 
 
 | Change type | Expected validation |
 | --- | --- |
-| New hardware-independent logic (TensileLite Python) | Unit test, with patch coverage at the stated target |
+| New hardware-independent logic (TensileLite Python) | Unit test, keeping the whole-project floor and every per-file floor intact |
 | New hardware-independent logic (C++) | Unit test if the code is reachable from `hipblaslt-test`; otherwise say so in the PR and prefer a structure that is reachable |
 | New on-device behavior | Client test case with numerical validation against the CPU reference |
 | New public API | API or descriptor test in the auxiliary suite |
 | Bug fix | A regression test that fails without the fix. If the fix is not yet available, land the reproducer quarantined in `known_bugs.yaml` with a removal note, following the existing pattern |
 | Change to TensileLite behavior | Update the affected golden on the smallest node id, and explain the diff in the PR description |
-| Performance-sensitive path | Before-and-after benchmark numbers in the PR description, since no automated comparison exists |
+| Performance-sensitive path | Read the `perfci` comparison for the PR and summarize it in the description. Nothing fails on a regression, so saying what the numbers showed is the control |
 | New GPU or OS support | Validation on that configuration, plus an update to the supported-configuration table above |
 | Packaging or build change | Install and layout validation; the pre-flight layout check must pass |
 
@@ -632,9 +679,10 @@ Ordered by value per unit of effort, not by ambition.
 
 **Longer term, the real gap:**
 
-1. **Automated performance regression detection.** Stored per-architecture baselines, a defined
-   threshold, and an automated comparison at some cadence. Nightly first; PR-level gating only if it
-   can be made fast and stable enough not to become the thing everyone reruns.
+1. **Turn the performance data into a signal.** The measurement and the reference comparison already
+   exist and already run per PR. What is missing is a defined regression threshold, an alert when a
+   run crosses it, and a named owner who reads the result. Alerting first; PR-level gating only if it
+   can be made stable enough not to become the thing everyone reruns.
 2. **Graduate mutation testing** from a report-only pilot to a maintained signal on the modules where
    it has demonstrated value.
 3. **Prune redundant numerical variants** in the client suite to buy back runtime, and spend it on
@@ -646,8 +694,9 @@ Stated plainly, so none of these are a surprise at release time.
 
 | Gap | Regression risk | Impact | Mitigation today | Owner |
 | --- | --- | --- | --- | --- |
-| No automated performance regression detection at any cadence | High | High | Manual before-and-after benchmarking by whoever suspects an impact | TBD |
-| gfx950 never runs the client suite on a PR | High | High | Postsubmit and nightly coverage; deliberate validation at release | TBD |
+| No threshold, alert, or gate on the performance data, so a regression is only caught if someone reads the dashboard | High | High | Per-PR and daily benchmarks against a `develop` reference, retained in rocPTS | TBD |
+| Benchmark coverage is gfx950-only per PR, and gfx942 plus gfx950 daily | Medium | Medium | Correctness coverage is broader; performance risk on other architectures is carried unmeasured | TBD |
+| What Math CI runs and which of its jobs gate is not visible from this repository | Medium | Medium | This document, which is a snapshot and will drift from the internal configuration | TBD |
 | The installed-artifact test lane silently skips the snapshot tests, because syrupy is not part of the installed tree's requirements | Low | Low | The goldens are already enforced upstream in the source lanes; the skip is stated in `conftest.py` rather than hidden, but it reads like an accident to anyone scanning the run | TBD |
 | Tiers above `quick` apply no filter in the TheRock lane, so the taxonomy is only half-real | Medium | Medium | CTest honors the tiers correctly when used | TBD |
 | Very little of the C++ library is unit-testable; the blockers are structural | Medium | Medium | Heavy integration coverage compensates for correctness, at the cost of slow feedback | TBD |
