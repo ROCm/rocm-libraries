@@ -39,7 +39,6 @@ from pathlib import Path
 
 import pytest
 
-from Tensile.TensileLogic import KnownBugs
 from Tensile.TensileLogic.KnownBugs import (
     is_known_bug,
     load_known_bugs,
@@ -81,8 +80,8 @@ def test_is_known_bug_hit_and_miss(snapshot):
 
 # --- load_known_bugs: frozenset-returning branches --------------------------
 
-def test_load_bundled_empty_yaml_returns_empty(monkeypatch, snapshot):
-    monkeypatch.setattr(KnownBugs, "known_bugs_text", lambda: "skips: []\n")
+def test_load_none_returns_empty(snapshot):
+    # config_path is None -> early empty frozenset.
     assert _sorted(load_known_bugs(None)) == snapshot
 
 

@@ -15,7 +15,7 @@
   list([
   ])
 # ---
-# name: test_load_bundled_empty_yaml_returns_empty
+# name: test_load_none_returns_empty
   list([
   ])
 # ---
