@@ -178,9 +178,8 @@ TEST_P(GPU_GRU_LargeWorkspace_FP32, ForwardTrainingSucceedsWhenWorkspaceExceedsI
     ASSERT_GT(ws_size, static_cast<size_t>(INT_MAX));
 
     size_t rs_size = 0;
-    ASSERT_EQ(
-        miopenGetRNNTrainingReserveSize(&handle, rnn, cfg.seq_len, xDescs.data(), &rs_size),
-        miopenStatusSuccess);
+    ASSERT_EQ(miopenGetRNNTrainingReserveSize(&handle, rnn, cfg.seq_len, xDescs.data(), &rs_size),
+              miopenStatusSuccess);
 
     size_t w_size = 0;
     ASSERT_EQ(miopenGetRNNParamsSize(&handle, rnn, xDescs[0], &w_size, cfg.dtype),
@@ -282,9 +281,8 @@ TEST_P(GPU_GRU_LargeWorkspace_FP32, BackwardDataSucceedsWhenWorkspaceExceedsInt)
     ASSERT_GT(ws_size, static_cast<size_t>(INT_MAX));
 
     size_t rs_size = 0;
-    ASSERT_EQ(
-        miopenGetRNNTrainingReserveSize(&handle, rnn, cfg.seq_len, xDescs.data(), &rs_size),
-        miopenStatusSuccess);
+    ASSERT_EQ(miopenGetRNNTrainingReserveSize(&handle, rnn, cfg.seq_len, xDescs.data(), &rs_size),
+              miopenStatusSuccess);
 
     size_t w_size = 0;
     ASSERT_EQ(miopenGetRNNParamsSize(&handle, rnn, xDescs[0], &w_size, cfg.dtype),
@@ -457,9 +455,8 @@ TEST_P(GPU_RNNVanilla_LargeWorkspace_FP32, ForwardTrainingSucceedsWhenWorkspaceE
     ASSERT_GT(ws_size, static_cast<size_t>(INT_MAX));
 
     size_t rs_size = 0;
-    ASSERT_EQ(
-        miopenGetRNNTrainingReserveSize(&handle, rnn, cfg.seq_len, xDescs.data(), &rs_size),
-        miopenStatusSuccess);
+    ASSERT_EQ(miopenGetRNNTrainingReserveSize(&handle, rnn, cfg.seq_len, xDescs.data(), &rs_size),
+              miopenStatusSuccess);
 
     size_t w_size = 0;
     ASSERT_EQ(miopenGetRNNParamsSize(&handle, rnn, xDescs[0], &w_size, cfg.dtype),
@@ -561,9 +558,8 @@ TEST_P(GPU_RNNVanilla_LargeWorkspace_FP32, BackwardDataSucceedsWhenWorkspaceExce
     ASSERT_GT(ws_size, static_cast<size_t>(INT_MAX));
 
     size_t rs_size = 0;
-    ASSERT_EQ(
-        miopenGetRNNTrainingReserveSize(&handle, rnn, cfg.seq_len, xDescs.data(), &rs_size),
-        miopenStatusSuccess);
+    ASSERT_EQ(miopenGetRNNTrainingReserveSize(&handle, rnn, cfg.seq_len, xDescs.data(), &rs_size),
+              miopenStatusSuccess);
 
     size_t w_size = 0;
     ASSERT_EQ(miopenGetRNNParamsSize(&handle, rnn, xDescs[0], &w_size, cfg.dtype),
@@ -738,9 +734,8 @@ TEST_P(GPU_LSTM_LargeWorkspace_FP32, ForwardTrainingSucceedsWhenWorkspaceExceeds
     ASSERT_GT(ws_size, static_cast<size_t>(INT_MAX));
 
     size_t rs_size = 0;
-    ASSERT_EQ(
-        miopenGetRNNTrainingReserveSize(&handle, rnn, cfg.seq_len, xDescs.data(), &rs_size),
-        miopenStatusSuccess);
+    ASSERT_EQ(miopenGetRNNTrainingReserveSize(&handle, rnn, cfg.seq_len, xDescs.data(), &rs_size),
+              miopenStatusSuccess);
 
     size_t w_size = 0;
     ASSERT_EQ(miopenGetRNNParamsSize(&handle, rnn, xDescs[0], &w_size, cfg.dtype),
@@ -842,9 +837,8 @@ TEST_P(GPU_LSTM_LargeWorkspace_FP32, BackwardDataSucceedsWhenWorkspaceExceedsInt
     ASSERT_GT(ws_size, static_cast<size_t>(INT_MAX));
 
     size_t rs_size = 0;
-    ASSERT_EQ(
-        miopenGetRNNTrainingReserveSize(&handle, rnn, cfg.seq_len, xDescs.data(), &rs_size),
-        miopenStatusSuccess);
+    ASSERT_EQ(miopenGetRNNTrainingReserveSize(&handle, rnn, cfg.seq_len, xDescs.data(), &rs_size),
+              miopenStatusSuccess);
 
     size_t w_size = 0;
     ASSERT_EQ(miopenGetRNNParamsSize(&handle, rnn, xDescs[0], &w_size, cfg.dtype),
