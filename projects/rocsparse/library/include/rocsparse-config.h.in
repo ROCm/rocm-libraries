@@ -34,30 +34,14 @@
 #ifndef ROCSPARSE_CONFIG_H
 #define ROCSPARSE_CONFIG_H
 
-/* Build-time feature flags baked in at compile time.
- *
- * Each flag is tagged with the rocSPARSE release it was introduced in ("since")
- * and the earliest release its #ifdef guard may be deleted ("remove-after") --
- * one release after the feature ships enabled by default. Update these tags
- * whenever a flag is added or retired.
- *
- * Every consumer-facing flag MUST be listed here: a configure-time guardrail
- * (cmake/CheckFeatureFlags.cmake) fails the build if a public header is gated by
- * a flag that is not registered in this template.
- */
+/* Build-time feature flags baked in at compile time. */
 
-/* since 5.0; remove-after 5.1 */
+/* rocSPARSE 5.0 */
 #cmakedefine ROCSPARSE_WITH_HANDLE_CREATE
-
-/* since 5.0; remove-after 5.1 */
-#cmakedefine ROCSPARSE_WITH_ILDLT0
-
-/* since 5.0; remove-after 5.1 */
-#cmakedefine ROCSPARSE_WITH_ILU0_BOOST_SIGN
-
-/* since 5.0; remove-after 5.1. When defined, the deprecated
-   rocsparse_indextype_u16 index type is removed from the public API, so
-   consumer code referencing it fails to compile. */
 #cmakedefine ROCSPARSE_WITH_U16_REMOVED
+
+/* rocSPARSE 4.7 */
+#cmakedefine ROCSPARSE_WITH_ILDLT0
+#cmakedefine ROCSPARSE_WITH_ILU0_BOOST_SIGN
 
 #endif /* ROCSPARSE_CONFIG_H */
