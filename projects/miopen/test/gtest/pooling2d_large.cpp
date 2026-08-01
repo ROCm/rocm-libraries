@@ -36,6 +36,7 @@
 
 #include <miopen/miopen.h>
 #include <miopen/pooling.hpp>
+#include <miopen/tensor.hpp>
 
 #include <hip/hip_runtime.h>
 
@@ -88,7 +89,7 @@ constexpr size_t kMinFreeMemBytes = 16ULL * 1024 * 1024 * 1024;
 // Helper: fill a device buffer with a non-degenerate pattern (avoids all-zero inputs).
 // hipMemset with 0x3F gives a repeated-byte IEEE 754 value (all elements ≈ 0.247,
 // positive and finite), so max-pool has a well-defined winner.
-void FillDeviceBuffer(void* dev_ptr, size_t n_bytes) { hipMemset(dev_ptr, 0x3F, n_bytes); }
+void FillDeviceBuffer(void* dev_ptr, size_t n_bytes) { (void)hipMemset(dev_ptr, 0x3F, n_bytes); }
 
 // Helper: check that a sample of output elements are finite.
 // Copying all ~537 M elements to the host is slow; we read the first 256 Ki floats.
@@ -98,7 +99,7 @@ bool SampleIsFinite(const void* dev_ptr, size_t n_elems)
     constexpr size_t kSampleElems = 256 * 1024;
     const size_t sample           = std::min(kSampleElems, n_elems);
     std::vector<float> host(sample);
-    hipMemcpy(host.data(), dev_ptr, sample * sizeof(float), hipMemcpyDeviceToHost);
+    (void)hipMemcpy(host.data(), dev_ptr, sample * sizeof(float), hipMemcpyDeviceToHost);
     for(size_t i = 0; i < sample; ++i)
     {
         if(!std::isfinite(host[i]))
@@ -161,7 +162,8 @@ struct GPU_Pooling2d_Large_FP32 : public testing::TestWithParam<PoolingLargeTest
             << "hipMalloc failed for output";
 
         FillDeviceBuffer(in_dev, in_elems * sizeof(float));
-        hipMemset(out_dev, 0, out_elems * sizeof(float));
+        ASSERT_EQ(hipMemset(out_dev, 0, out_elems * sizeof(float)), hipSuccess)
+            << "hipMemset failed for output buffer";
 
         Workspace wspace{ws_bytes};
 
@@ -187,8 +189,8 @@ struct GPU_Pooling2d_Large_FP32 : public testing::TestWithParam<PoolingLargeTest
             << " pooling output contains non-finite values "
                "(possible INT_MAX index overflow at numel > 2^31)";
 
-        hipFree(in_dev);
-        hipFree(out_dev);
+        (void)hipFree(in_dev);
+        (void)hipFree(out_dev);
     }
 };
 
