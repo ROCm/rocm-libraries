@@ -92,8 +92,10 @@ function(rocm_export_targets_header_only)
 
     if(PARSE_DEPENDS)
         rocm_list_split(PARSE_DEPENDS PACKAGE DEPENDS_LIST)
-        foreach(DEPEND ${DEPENDS_LIST})
-            rocm_write_package_template_function(${CONFIG_TEMPLATE} find_dependency ${${DEPEND}})
+	string(REPLACE " " ";" DEPENDS_LIST_SEMICOLON "${${DEPENDS_LIST}}")
+	foreach(DEPEND IN LISTS DEPENDS_LIST_SEMICOLON)
+	    message(STATUS "DEPEND ${DEPEND}")
+            rocm_write_package_template_function(${CONFIG_TEMPLATE} find_dependency ${DEPEND})
         endforeach()
     endif()
 

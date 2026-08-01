@@ -269,6 +269,28 @@ if(${LINK_HIP_DEVICE_LIBS})
   endif()
 endif()
 
+if(ROCTHRUST_USE_LIBHIPCXX OR ROCTHRUST_USE_LIBCUDACXX)
+  find_package(libhipcxx QUIET)
+
+  if (NOT TARGET libhipcxx::libhipcxx)
+    message(STATUS "libhipcxx not found.  Downloading and building libhipcxx.")
+    FetchContent_Declare(
+      libhipcxx
+      INSTALL_DIR   ${CMAKE_CURRENT_BINARY_DIR}/deps/libhipcxx
+      CMAKE_ARGS    -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR> -DCMAKE_PREFIX_PATH=/opt/rocm
+      LOG_CONFIGURE TRUE
+      LOG_BUILD     TRUE
+      LOG_INSTALL   TRUE
+    )
+    FetchContent_MakeAvailable(libhipcxx)
+    if (NOT TARGET libhipcxx::libhipcxx)
+      add_library(libhipcxx)
+    endif()
+  else()
+    message(STATUS "Found libhipcxx installation.")
+  endif()
+endif()
+
 # Test dependencies
 if(BUILD_TEST OR BUILD_HIPSTDPAR_TEST)
   if(NOT EXTERNAL_DEPS_FORCE_DOWNLOAD)

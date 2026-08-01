@@ -50,6 +50,7 @@
 // If the '::cuda::std' namespace from 'libcudacxx' or 'libhipcxx' is available.
 #if THRUST_HAS_INCLUDE(<cuda/std/version>) \
 	&& (USE_LIBCUDACXX || USE_LIBHIPCXX)
+#pragma message("Found libhipcxx")
 #  include <cuda/std/version>
 // If version matches and '_CUDA_VSTD' is available.
 #  if _LIBCUDACXX_CUDA_API_VERSION_MAJOR == _THRUST_REQUIRED_LIBCXX_VERSION_MAJOR \
@@ -88,6 +89,7 @@
 // If 'libcudacxx' or 'libhipcxx' is not found, or the
 // feature flag ROCTHRUST_USE_LIBHIPCXX is not ON, use fallback.
 #ifndef _THRUST_HAS_DEVICE_SYSTEM_STD 
+#pragma message("did not find libhipcxx")
 #  define _THRUST_LIBCXX_INCLUDE(LIB)
 #  define _THRUST_STD_INCLUDE(LIB) <LIB>
 #  define _THRUST_LIBCXX
