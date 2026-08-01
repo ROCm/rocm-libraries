@@ -307,6 +307,50 @@ no fallback for a misplaced file, so a packaging regression would otherwise surf
 broader hardware coverage than PR or nightly CI provides. See
 [Release Validation](#release-validation).
 
+### Build-Time Validation of Library Logic
+
+This one is easy to miss, because it does not look like a test and does not report like one. It is
+nonetheless a real gate, and it covers a class of defect nothing else in the component touches.
+
+hipBLASLt's kernel selection is driven by library logic YAML: generated, tuned data describing which
+solution serves which problem shape on which architecture. That data can be wrong in ways no code
+review catches, and a bad entry surfaces at runtime as a kernel-selection failure on one shape on one
+architecture, which is an expensive way to find out.
+
+`TensileLogic --check-all` validates it before any of it is used. It checks chip IDs, matrix
+instructions, work-group shapes, the XCC work-group mapping, and custom kernel declarations across
+every logic file. It reads YAML only, so it needs no GPU and no compiled kernels, and it is fast.
+
+**Where it runs is the odd part.** It is wired into the build, as a CMake custom command in
+[`cmake/HipBLASLtCodegen.cmake`](cmake/HipBLASLtCodegen.cmake) that runs ahead of
+`TensileCreateLibrary` and writes a stamp file. So it executes on every build that generates kernels,
+including every developer's local build, and a failure stops the build. That gives it excellent
+reach and costs three things: it has no check name in the pull request, it produces no test report,
+and it cannot be run in isolation by CI. It also cannot be tightened in place, because any stricter
+setting would fail local developer builds as readily as CI ones.
+
+Its known-bug list,
+[`tensilelite/Tensile/TensileLogic/known_bugs.yaml`](tensilelite/Tensile/TensileLogic/known_bugs.yaml),
+is the best-structured quarantine in the component (see
+[Known Bugs and Expected Failures](#known-bugs-and-expected-failures)). Entries are keyed on the
+logic file path plus the solution's `SolutionNameMin`, a content-derived name chosen so that keys
+survive library re-tuning instead of shifting with a positional index, and each entry carries a
+`ticket:` field. The checker re-validates every entry and reports the ones that no longer reproduce,
+so a fixed bug is detected rather than skipped forever. All 14 current entries document the same
+gfx950 validation drift under ROCM-7144.
+
+`--strict-known-bugs` turns that detection into a failure, but it defaults off and nothing passes it
+today, so a stale entry only warns. Enforcing it is tracked in AIHPBLAS-4196, which proposes the
+right fix: a dedicated GitHub Actions job running
+[`scripts/run_tensile_logic_check.py`](scripts/run_tensile_logic_check.py) with the flag, rather than
+tightening the in-build command. That ticket also names a remaining hole, which is that an orphaned
+entry whose `solution_name` resolves to nothing currently matches nothing and is silently ignored, so
+strict mode is not yet a complete dead-entry detector. Extending the gate to cover derived-parameter
+assignment is tracked in AIHPBLAS-3575.
+
+The check arrived in [PR #5039](https://github.com/ROCm/rocm-libraries/pull/5039) and was re-keyed
+onto solution names in [PR #9355](https://github.com/ROCm/rocm-libraries/pull/9355).
+
 ### Performance and Benchmarking Testing
 
 hipBLASLt is a performance library, so this section deserves to be read carefully. The distinction
@@ -385,6 +429,7 @@ but that check is not required.
 | Validation area | Required before merge | Owner | Responsibility |
 | --- | --- | --- | --- |
 | Build (Linux and Windows) | Yes | CI / DevOps + TheRock | Maintain jobs, runners, and pipeline health |
+| Library logic validation (`TensileLogic --check-all`) | Yes, implicitly | Component team | Runs inside the build ahead of codegen, so it blocks any build that generates kernels. It has no separate check name and produces no test report |
 | Unit tests (TensileLite Python) | Yes | Component team | Create, maintain, review |
 | Integration / smoke tests (client GTest) | Yes | Component team | Validate behavior across key scenarios |
 | Characterization goldens | Yes, when `tensilelite/` is touched | Component team | Review every golden diff; never bulk-regenerate |
@@ -408,7 +453,7 @@ required-check list, in this repository, is tracked as a gap.
 
 | Status | Applies to |
 | --- | --- |
-| **Trusted gate** | Build (both platforms); client GTest quick tier on gfx94X-dcgpu (Linux) and gfx110X (Windows); the Math CI client suite on gfx90a, gfx942, gfx950 and gfx12; Math CI static analysis; TensileLite Python unit and characterization suites; HOST_ASAN build and quick test on gfx90a; TensileLite coverage floor and ratchet; `pre-commit` |
+| **Trusted gate** | Build (both platforms), which includes the `TensileLogic --check-all` library logic validation; client GTest quick tier on gfx94X-dcgpu (Linux) and gfx110X (Windows); the Math CI client suite on gfx90a, gfx942, gfx950 and gfx12; Math CI static analysis; TensileLite Python unit and characterization suites; HOST_ASAN build and quick test on gfx90a; TensileLite coverage floor and ratchet; `pre-commit` |
 | **Informational** | HOST_ASAN on gfx942 (opt-in via the `ci:asan` label, explicitly non-blocking); the TensileLite characterization-versus-unit coverage summary card; the `tensilelite-unit-codecov` check and codecov reports; the `perfci` benchmark comparison |
 | **Unstable / flaky** | Not tracked as a category. hipBLASLt has no `UNSTABLE` tag |
 
@@ -417,25 +462,68 @@ quarantine list, described next.
 
 ### Flaky Test Policy
 
-hipBLASLt does not currently tag flaky tests. What it has is
-[`clients/tests/data/known_bugs.yaml`](clients/tests/data/known_bugs.yaml), a quarantine list that
-matches test cases by their parameters and optionally by GPU architecture
-(`known_bug_platforms`). Quarantined cases are excluded from every tier.
+hipBLASLt does not currently tag flaky tests, and has no `UNSTABLE` category. A nondeterministic
+test today goes into the same quarantine list as a deterministically broken one,
+[`clients/tests/data/known_bugs.yaml`](clients/tests/data/known_bugs.yaml), which is described with
+the other quarantine mechanisms in
+[Known Bugs and Expected Failures](#known-bugs-and-expected-failures) below.
 
-The convention in that file is better than the absence of a tag suggests: entries carry a name, a
-tracking ticket in a comment, an explanation of the failure mode, and an explicit instruction to
-remove the entry once the underlying fix lands so the case re-activates as an enforced gate. That is
-close to what the template asks for.
-
-What is missing against the template's expectations:
-
-- No distinction between a *flaky* test (nondeterministic) and a *known-failing* test
-  (deterministically wrong, pending a fix). Today both go in the same file.
-- No owner field. Tickets are referenced in comments but no person is named in the repository.
-- No expiry. Nothing prompts a review of a quarantine entry that has been sitting for a year.
-- No automated report of what is currently quarantined and for how long.
+That conflation is the policy gap. A flaky test and a known-failing test need different responses: a
+flaky test is a defect in the test, usually fixable by the component team, while a known-failing test
+is a defect in the product waiting on someone else. Filing them in one undifferentiated list means
+neither gets the follow-up it needs, and no report exists of what is currently suppressed or for how
+long.
 
 A flaky test is not an accepted final state, and neither is an aging quarantine entry.
+
+### Known Bugs and Expected Failures
+
+hipBLASLt suppresses or records known-bad behavior in seven different places. They accumulated
+independently, they use different formats, and they are not governed as one thing. Anyone reasoning
+about "what do we currently know is broken" has to check all seven.
+
+| Mechanism | What it suppresses | Ticket linkage | Detects its own fix? |
+| --- | --- | --- | --- |
+| [`clients/tests/data/known_bugs.yaml`](clients/tests/data/known_bugs.yaml) | Client GTest cases matched by parameters, optionally per architecture via `known_bug_platforms`. Excluded from every tier | Comment convention | **No.** The case never runs, so nothing can observe a fix |
+| `GTEST_SKIP()` in client sources | Individual cases at runtime | None | Not applicable, and mostly not bugs: these are environment guards (no GPU present, no Stream-K kernel selected for the problem) |
+| [`tensilelite/Tensile/TensileLogic/known_bugs.yaml`](tensilelite/Tensile/TensileLogic/known_bugs.yaml) | Library-logic validation failures, keyed on the logic file path plus the solution's `SolutionNameMin` | Structured `ticket:` field | **Partly.** The check re-validates each entry and reports stale ones, but only warns by default |
+| Filename-driven marks in `Tensile/Tests/common/config_helpers.py` | Any config YAML whose path contains `xfail`, `wip` or `disabled` | None; the reason lives in a filename | **No**, and non-strict, so an expected failure that starts passing is silent |
+| `skip-<arch>` marks in config YAML `TestParameters` | A config on named architectures | Free-text comment | Not applicable |
+| Explicit `pytest.mark.xfail` markers | Specific assertions in a Python test | Ticket in the `reason` string | **Yes**, when written `strict=True` |
+| Characterization goldens that pin known-wrong behavior | Nothing. The wrong behavior is recorded rather than hidden | ADR under `adr/` with a defect link, required by the reviewer checklist | Not applicable: a fix shows up as a golden diff needing review |
+
+**The distinction that matters is the last column.** Format is cosmetic; what separates a healthy
+suppression from rot is whether the mechanism can tell you the underlying bug got fixed. That sorts
+the list into three tiers. *Self-cleaning*: the code still runs, and a fix fails the build, forcing
+the entry's removal. *Detectable*: something notices, but nothing fails. *Blind*: the code no longer
+runs at all, so the entry can outlive its bug indefinitely. The largest surface, the client
+quarantine list, is in the blind tier.
+
+**The best-governed example is already in the tree**, and is worth copying rather than redesigning.
+The `_ROCM3994_XFAIL` marker in
+[`test_amax_true16_activation.py`](tensilelite/Tensile/Tests/unit/test_amax_true16_activation.py)
+carries a ticket in its reason, `strict=True` so that a fix turns the unexpected pass into a hard
+failure, `raises=AssertionError` so an unrelated crash is not absorbed, a time-box comment naming
+when to re-evaluate, and an explicit instruction to delete the marker in the fixing PR. The test
+still executes; it is quarantined, not disabled. Everything a governance policy would ask for is in
+those few lines.
+
+The two YAML quarantine files each have half of what the other needs. The client list has the better
+prose discipline: named entries, a ROCm ticket, a root-cause explanation, and a note to remove the
+entry so the case re-activates as an enforced gate. But it is all in comments, so no tool can act on
+it, and the excluded case never runs again. The TensileLogic list has the weaker narrative and the
+better structure: a real `ticket:` field, keys chosen so they survive library re-tuning, and a check
+that re-validates every entry on each run and reports the ones that no longer reproduce.
+
+**Known gaps.** No mechanism records an owner or a review date. Nothing reports what is currently
+suppressed across all seven places, or for how long. The filename-driven marks in `config_helpers.py`
+are the weakest link by construction, since a path substring cannot carry a ticket, an owner or a
+reason, and the resulting mark is non-strict so a fix is invisible; they have no users in the tree
+today, which makes now the right time to decide whether to keep the machinery at all. Separately,
+`skip-<arch>` marks appear in around 395 config files with free-text justifications, and while most
+are genuine capability statements ("not supported by arch"), some read "not supported yet", which is
+deferred work with nothing tracking it. Consolidating all of this under one policy is on the
+[roadmap](#improvement-roadmap).
 
 ### Coverage
 
@@ -731,8 +819,18 @@ Ordered by value per unit of effort, not by ambition.
    accident.
 3. **Publish the required-check list.** Document which checks actually block a merge, so contributors
    and reviewers stop guessing.
-4. **Split `known_bugs.yaml` semantics**: distinguish flaky from known-failing, and add an owner and
-   a review date to each entry.
+4. **Enforce `--strict-known-bugs` in its own lane** (AIHPBLAS-4196). The detection already exists;
+   what is missing is a job that fails on a stale entry. A dedicated GitHub Actions job is the right
+   home for it, because the flag cannot be turned on inside the build without failing local developer
+   builds. Worth extending to orphaned entries, which are silently ignored today.
+5. **Govern known-bug entries as one thing.** Seven mechanisms suppress or record known-bad behavior
+   and none of them share a convention. The proposal, which needs team agreement before it becomes
+   policy, is four rules: every entry names its ticket in a machine-readable field rather than a
+   comment; every entry carries an owner and a review date; the suppressed code keeps running wherever
+   the mechanism allows, so a fix can be observed rather than assumed; and a fix fails the build so
+   the entry deletes itself. Two mechanisms cannot satisfy the third rule today, so adopting this
+   means changing them or accepting a stated exception. Start by splitting flaky from known-failing in
+   the client quarantine list, which is the largest and blindest surface.
 
 **Medium term, the structural unlock:**
 
@@ -777,7 +875,10 @@ Stated plainly, so none of these are a surprise at release time.
 | Enforced coverage counts characterization scaffolding the same as unit tests, so the numbers overstate how much TensileLite Python is actually verified | High | Medium | The split summary card reports the characterization-only share, but it gates nothing and no target is set on it | TBD |
 | Mutation testing, the only check that a golden would catch a regression rather than just execute the line, covers five files and runs nowhere in CI | Medium | Medium | Manual runs via `tox -e mutation-unit`; widening PRs are in draft | TBD |
 | Very little of the C++ library is unit-testable; the blockers are structural | Medium | Medium | Heavy integration coverage compensates for correctness, at the cost of slow feedback | TBD |
-| No flaky-test tagging, owner, or expiry convention | Medium | Medium | `known_bugs.yaml` quarantine with ticket references and removal notes | TBD |
+| No flaky-test tagging, owner, or expiry convention, and flaky tests share one list with known-failing ones | Medium | Medium | `known_bugs.yaml` quarantine with ticket references and removal notes | TBD |
+| Known-bad behavior is suppressed in seven places with no shared convention, and the largest of them excludes the test entirely, so a fixed bug can stay quarantined indefinitely | Medium | Medium | Per-mechanism discipline is good in places and absent in others; nothing reports the total | TBD |
+| A stale `TensileLogic` known-bugs entry only warns, because `--strict-known-bugs` defaults off and no job passes it | Low | Low | The checker does re-validate and report stale entries on every build; enforcement is tracked in AIHPBLAS-4196 | TBD |
+| The library logic validation gate is invisible as a check: it runs inside the build, so it has no check name, no test report, and cannot be run in isolation by CI | Low | Medium | It runs on every kernel-generating build including local ones, which gives it good reach; a standalone lane is proposed in AIHPBLAS-4196 | TBD |
 | Which checks are actually required to merge is undocumented | Medium | Medium | Institutional knowledge | TBD |
 | TSAN build options exist but no CI lane uses them; no UBSAN at all | Low | High if hit | None. Thread-safety bugs would be found downstream | TBD |
 | No multi-GPU tests | Low | High if hit | None in this repository | TBD |
