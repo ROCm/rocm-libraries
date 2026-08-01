@@ -29,6 +29,8 @@
 #ifndef ROCSPARSE_GENERIC_H
 #define ROCSPARSE_GENERIC_H
 
+#include "../rocsparse-config.h"
+
 #include "generic/rocsparse_axpby.h"
 #include "generic/rocsparse_check_spmat.h"
 #include "generic/rocsparse_dense_to_sparse.h"

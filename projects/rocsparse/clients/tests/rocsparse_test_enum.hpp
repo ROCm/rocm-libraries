@@ -23,6 +23,7 @@
 * ************************************************************************ */
 #pragma once
 #include "rocsparse_arguments.hpp"
+#include <rocsparse/rocsparse-config.h>
 template <std::size_t N, typename T>
 static constexpr std::size_t countof2(T (&)[N])
 {

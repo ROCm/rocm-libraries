@@ -28,8 +28,8 @@
 #ifndef ROCSPARSE_AUXILIARY_H
 #define ROCSPARSE_AUXILIARY_H
 
+#include "rocsparse-config.h"
 #include "rocsparse-types.h"
-#include "rocsparse-version.h"
 #include "rocsparse/rocsparse-export.h"
 
 #ifdef __cplusplus

@@ -49,15 +49,34 @@ if (rocblas_FOUND)
   add_compile_options(-DROCSPARSE_WITH_ROCBLAS)
 endif()
 
-# Configure a header file to pass the rocSPARSE version and build-time
-# feature flags. Variables referenced via #cmakedefine in the .h.in must
-# be set (or unset) prior to this configure_file() call.
+# Configure the version header (version numbers only) and the config header
+# (build-time feature flags). Variables referenced via #cmakedefine in the
+# .h.in must be set (or unset) prior to the configure_file() calls.
 set(ROCSPARSE_WITH_HANDLE_CREATE ${ROCSPARSE_ENABLE_HANDLE_CREATE})
 set(ROCSPARSE_WITH_ILDLT0 ${BUILD_WITH_ILDLT0})
 set(ROCSPARSE_WITH_U16_REMOVED ${BUILD_WITH_U16_REMOVED})
 
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/include/rocsparse-version.h.in"
                "${PROJECT_BINARY_DIR}/include/rocsparse/rocsparse-version.h"
+)
+
+configure_file("${CMAKE_CURRENT_SOURCE_DIR}/include/rocsparse-config.h.in"
+               "${PROJECT_BINARY_DIR}/include/rocsparse/rocsparse-config.h"
+)
+
+# Guardrail: every feature flag that gates a public header must be registered in
+# the config template above (see cmake/CheckFeatureFlags.cmake). Build-only flags
+# that are intentionally invisible to consumers are excluded explicitly.
+include(CheckFeatureFlags)
+check_config_header_flags(
+  PREFIX   ROCSPARSE_WITH_
+  TEMPLATE "${CMAKE_CURRENT_SOURCE_DIR}/include/rocsparse-config.h.in"
+  HEADERS  "${CMAKE_CURRENT_SOURCE_DIR}/include"
+  EXCLUDE  ROCSPARSE_WITH_ASAN
+           ROCSPARSE_WITH_MEMSTAT
+           ROCSPARSE_WITH_ROCBLAS
+           ROCSPARSE_WITH_CSC_TRSV
+           ROCSPARSE_WITH_CSC_TRSM
 )
 
 # Public rocSPARSE headers
@@ -70,6 +89,7 @@ set(rocsparse_headers_public
   include/rocsparse.h
   include/internal
   ${PROJECT_BINARY_DIR}/include/rocsparse/rocsparse-version.h
+  ${PROJECT_BINARY_DIR}/include/rocsparse/rocsparse-config.h
   include/internal
 )
 
