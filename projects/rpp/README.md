@@ -23,9 +23,204 @@ vision library for AMD processors that have `HIP`, or `CPU` backends.
 
 ## Supported Augmentations / Primitives
 
-RPP supports various 2D image, 3D image (voxel), audio and miscellaneous augmentations and primitives as listed below.
+RPP supports various 2D image, 3D image (voxel), and audio augmentations and primitives. The tables below show CPU (HOST) and GPU (HIP) support for each functionality. For the authoritative, always up-to-date list, see [Supported functionalities and variants](https://rocm.docs.amd.com/projects/rpp/en/latest/reference/rpp-supported-functionalities.html) in the documentation.
 
-<p align="center"><img width="90%" src="docs/data/supported_functionalities.png" /></p>
+<details>
+<summary><b>Color augmentations</b></summary>
+
+| Type | CPU | GPU |
+|------|:---:|:---:|
+| brightness | ✅ | ✅ |
+| gamma correction | ✅ | ✅ |
+| blend | ✅ | ✅ |
+| hue | ✅ | ✅ |
+| saturation | ✅ | ✅ |
+| color twist | ✅ | ✅ |
+| color jitter | ✅ | ❌ |
+| color cast | ✅ | ✅ |
+| exposure | ✅ | ✅ |
+| contrast | ✅ | ✅ |
+| lut | ✅ | ✅ |
+| color temperature | ✅ | ✅ |
+| histogram equalize | ✅ | ✅ |
+
+</details>
+
+<details>
+<summary><b>Effects augmentations</b></summary>
+
+| Type | CPU | GPU |
+|------|:---:|:---:|
+| gridmask | ✅ | ✅ |
+| spatter | ✅ | ✅ |
+| salt and pepper noise | ✅ | ✅ |
+| shot noise | ✅ | ✅ |
+| gaussian noise | ✅ | ✅ |
+| non-linear blend | ✅ | ✅ |
+| water | ✅ | ✅ |
+| ricap | ✅ | ✅ |
+| vignette | ✅ | ✅ |
+| jitter | ✅ | ✅ |
+| erase | ✅ | ✅ |
+| random erase | ✅ | ✅ |
+| glitch | ✅ | ✅ |
+| rain | ✅ | ✅ |
+| pixelate | ✅ | ✅ |
+| fog | ✅ | ✅ |
+| posterize | ✅ | ✅ |
+| solarize | ✅ | ✅ |
+| snow | ✅ | ✅ |
+| channel dropout | ✅ | ✅ |
+| cutout dropout | ✅ | ✅ |
+| grid dropout | ✅ | ✅ |
+| coarse dropout | ✅ | ✅ |
+
+</details>
+
+<details>
+<summary><b>Geometric augmentations</b></summary>
+
+| Type | CPU | GPU |
+|------|:---:|:---:|
+| crop | ✅ | ✅ |
+| crop mirror normalize | ✅ | ✅ |
+| crop and patch | ✅ | ✅ |
+| flip | ✅ | ✅ |
+| resize | ✅ | ✅ |
+| resize mirror normalize | ✅ | ✅ |
+| resize crop mirror | ✅ | ✅ |
+| rotate | ✅ | ✅ |
+| warp affine | ✅ | ✅ |
+| warp perspective | ✅ | ✅ |
+| lens correction | ✅ | ✅ |
+| fisheye | ✅ | ✅ |
+| phase | ✅ | ✅ |
+| slice | ✅ | ✅ |
+| remap | ✅ | ✅ |
+| transpose | ✅ | ✅ |
+| concat | ✅ | ✅ |
+| jpeg compression distortion | ✅ | ✅ |
+
+</details>
+
+<details>
+<summary><b>Morphological operations</b></summary>
+
+| Type | CPU | GPU |
+|------|:---:|:---:|
+| erode | ✅ | ✅ |
+| dilate | ✅ | ✅ |
+
+</details>
+
+<details>
+<summary><b>Filter augmentations</b></summary>
+
+| Type | CPU | GPU |
+|------|:---:|:---:|
+| box filter | ✅ | ✅ |
+| median filter | ✅ | ✅ |
+| gaussian filter | ✅ | ✅ |
+| sobel filter | ✅ | ✅ |
+| emboss | ✅ | ✅ |
+
+</details>
+
+<details>
+<summary><b>Arithmetic operations</b></summary>
+
+| Type | CPU | GPU |
+|------|:---:|:---:|
+| add scalar | ✅ | ✅ |
+| subtract scalar | ✅ | ✅ |
+| multiply scalar | ✅ | ✅ |
+| fused multiply add scalar | ✅ | ✅ |
+| magnitude | ✅ | ✅ |
+| log | ✅ | ✅ |
+| log1p | ✅ | ✅ |
+| tensor add | ✅ | ✅ |
+| tensor subtract | ✅ | ✅ |
+| tensor multiply | ✅ | ✅ |
+| tensor divide | ✅ | ✅ |
+
+</details>
+
+<details>
+<summary><b>Statistical operations</b></summary>
+
+| Type | CPU | GPU |
+|------|:---:|:---:|
+| tensor sum | ✅ | ✅ |
+| tensor min | ✅ | ✅ |
+| tensor max | ✅ | ✅ |
+| tensor mean | ✅ | ✅ |
+| tensor stddev | ✅ | ✅ |
+| normalize | ✅ | ✅ |
+| threshold | ✅ | ✅ |
+
+</details>
+
+<details>
+<summary><b>Bitwise operations</b></summary>
+
+| Type | CPU | GPU |
+|------|:---:|:---:|
+| bitwise `AND` | ✅ | ✅ |
+| bitwise `OR` | ✅ | ✅ |
+| bitwise `XOR` | ✅ | ✅ |
+| bitwise `NOT` | ✅ | ✅ |
+| tensor `AND` tensor | ✅ | ✅ |
+| tensor `OR` tensor | ✅ | ✅ |
+| tensor `XOR` tensor | ✅ | ✅ |
+
+</details>
+
+<details>
+<summary><b>Data exchange operations</b></summary>
+
+| Type | CPU | GPU |
+|------|:---:|:---:|
+| copy | ✅ | ✅ |
+| channel permute | ✅ | ✅ |
+| color to greyscale | ✅ | ✅ |
+| YUV to RGB | ❌ | ✅ |
+| YUV to RGB (cubic vertical upsampling) | ❌ | ✅ |
+| YUV to RGB (linear vertical upsampling) | ❌ | ✅ |
+
+</details>
+
+<details>
+<summary><b>Audio augmentations</b></summary>
+
+| Type | CPU | GPU |
+|------|:---:|:---:|
+| non-silent region detection | ✅ | ✅ |
+| to decibels | ✅ | ✅ |
+| pre-emphasis filter | ✅ | ✅ |
+| down mixing | ✅ | ✅ |
+| spectrogram | ✅ | ✅ |
+| mel filter bank | ✅ | ✅ |
+| resample | ✅ | ✅ |
+| audio tensor add tensor | ✅ | ✅ |
+| audio tensor multiply scalar | ✅ | ✅ |
+
+</details>
+
+<details>
+<summary><b>3D image (voxel) augmentations</b></summary>
+
+| Type | CPU | GPU |
+|------|:---:|:---:|
+| flip (voxel) | ✅ | ✅ |
+| gaussian noise (voxel) | ✅ | ✅ |
+| add scalar | ✅ | ✅ |
+| subtract scalar | ✅ | ✅ |
+| multiply scalar | ✅ | ✅ |
+| fused multiply add scalar | ✅ | ✅ |
+| slice | ✅ | ✅ |
+| normalize | ✅ | ✅ |
+
+</details>
 
 ## Supported 2D Image Augmentations Samples
 
