@@ -1389,10 +1389,7 @@ class GPU_reduce_scale_large_numel_FP32 : public ReduceCommon<float>
 
 // DISABLED_Standard: the MAX case silently produces wrong results (all-0.0) at
 // numel > INT_MAX -- see ALMIOPEN-2152.  Remove the DISABLED_ prefix once fixed.
-TEST_P(GPU_reduce_scale_large_numel_FP32, DISABLED_Standard_ReduceScaleLargeNumel)
-{
-    this->Run();
-}
+TEST_P(GPU_reduce_scale_large_numel_FP32, DISABLED_Standard_ReduceScaleLargeNumel) { this->Run(); }
 
 INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_reduce_scale_large_numel_FP32,
