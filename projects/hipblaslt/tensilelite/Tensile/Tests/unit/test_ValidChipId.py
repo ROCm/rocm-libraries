@@ -175,6 +175,27 @@ def test_validateChipIdRejectsEmptyDeviceList(tmp_path, capsys, validate_chip_id
     assert "must declare at least one Device chip ID" in err
 
 
+def test_validateChipIdAcceptsSpdxCommentsBeforeHeader(tmp_path, validate_chip_id):
+    logic_file = _baseGfx950Path(tmp_path)
+    logic_file.parent.mkdir(parents=True, exist_ok=True)
+    logic_file.write_text(
+        "\n".join(
+            [
+                "# Copyright Advanced Micro Devices, Inc., or its affiliates.",
+                "# SPDX-License-Identifier: MIT",
+                "",
+                "- MinimumRequiredVersion: 4.33.0",
+                "- gfx950",
+                "- gfx950",
+                "- [Device 75a0]",
+                "",
+            ]
+        )
+    )
+
+    assert validate_chip_id(logic_file)
+
+
 def test_validateChipIdRejectsMissingDeviceLine(tmp_path, capsys, validate_chip_id):
     # File with no Device line raises LogicFileError in the parser, which
     # ValidChipId must surface via the "Chip ID validation failed" path.

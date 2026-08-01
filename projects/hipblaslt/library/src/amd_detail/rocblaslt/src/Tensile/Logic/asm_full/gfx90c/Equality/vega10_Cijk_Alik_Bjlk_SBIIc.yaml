@@ -1,0 +1,3449 @@
+- MinimumRequiredVersion: 5.0.0
+- gfx90c
+- gfx90c
+- [Device 6863, Device 6862, Device 687f, Device 6860, Device 6861, 'Vega 10 XTX [Radeon Vega Frontier Edition]', 'Vega [Radeon RX Vega]', Vega, Device 6864, Device 686c, 'Vega 10 [Radeon Instinct MI25 MxGPU]']
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+- AllowNoFreeDims: false
+  AssignedDerivedParameters: true
+  Batched: true
+  ComplexConjugateA: false
+  ComplexConjugateB: false
+  ComputeDataType: 0
+  ConvolutionConfig: []
+  DataType: 0
+  DestDataType: 0
+  HighPrecisionAccumulate: false
+  Index0: 0
+  Index01A: 0
+  Index01B: 1
+  Index1: 1
+  IndexAssignmentsA:
+  - 3
+  - 0
+  - 2
+  IndexAssignmentsB:
+  - 1
+  - 3
+  - 2
+  IndexAssignmentsLD:
+  - 3
+  - 4
+  - 5
+  - 6
+  IndexUnroll: 3
+  IndexUnrollA: 0
+  IndexUnrollB: 1
+  IndicesBatch:
+  - 2
+  IndicesFree:
+  - 0
+  - 1
+  IndicesSummation:
+  - 3
+  NumIndicesBatch: 1
+  NumIndicesC: 3
+  NumIndicesFree: 2
+  NumIndicesLD: 0
+  NumIndicesSummation: 1
+  OperationType: GEMM
+  SetConstStrideA: []
+  SetConstStrideB: []
+  SilentHighPrecisionAccumulate: false
+  TLUA: false
+  TLUB: true
+  Tensor0: 0
+  Tensor1: 1
+  TileA: 0
+  TileAwareSelection: false
+  TileB: 1
+  TotalIndices: 4
+  TransposeA: true
+  TransposeB: true
+  UseBeta: true
+  UseInitialStridesAB: true
+  UseInitialStridesCD: true
+  ZeroPadA: []
+  ZeroPadB: []
+  ActivationComputeDataType: 0
+- - AggressivePerfMode: 1
+    AssertFree0ElementMultiple: 1
+    AssertFree1ElementMultiple: 1
+    AssertSummationElementMultiple: 1
+    AssignedDerivedParameters: true
+    AssignedProblemIndependentDerivedParameters: true
+    BufferLoad: true
+    BufferStore: true
+    CheckDimOverflow: 0
+    CheckTensorDimAsserts: false
+    DepthU: 8
+    DirectToLds: 0
+    DirectToLdsA: 0
+    DirectToLdsB: 0
+    DisableKernelPieces: 0
+    EdgeType: ShiftPtr
+    ExpandPointerSwap: true
+    FractionalLoad: 0
+    GlobalRead2A: true
+    GlobalRead2B: true
+    GlobalReadCoalesceGroupA: true
+    GlobalReadCoalesceGroupB: true
+    GlobalReadCoalesceVectorA: true
+    GlobalReadCoalesceVectorB: true
+    GlobalReadVectorWidth: 4
+    GlobalSplitU: 1
+    GlobalSplitUSummationAssignmentRoundRobin: true
+    GlobalSplitUWorkGroupMappingRoundRobin: false
+    GlobalWriteVectorWidth: 4
+    GuaranteeNoPartialA: false
+    GuaranteeNoPartialB: false
+    InnerUnroll: 1
+    KernelLanguage: Assembly
+    LSCA: 8
+    LSCB: 128
+    LSPA: 128
+    LSPB: 8
+    LVCA: 2
+    LVCB: 32
+    LVPA: 32
+    LVPB: 2
+    LdsNumElements: 4096
+    LdsNumElementsAlignedA: 1024
+    LdsNumElementsAlignedB: 1024
+    LdsOffsetA: 0
+    LdsOffsetA_Blk: 2048
+    LdsOffsetB: 1024
+    LdsOffsetB_Blk: 3072
+    LdsPadA: 0
+    LdsPadB: 0
+    LocalDotLayout: 1
+    LocalRead2A: true
+    LocalRead2B: true
+    LocalSplitU: 1
+    LocalWrite2A: true
+    LocalWrite2B: true
+    LocalWriteUseSgprA: false
+    LocalWriteUseSgprB: false
+    LoopDoWhile: false
+    LoopTail: true
+    LoopUnroll: 8
+    MacroTile0: 128
+    MacroTile1: 128
+    MacroTileA: 128
+    MacroTileB: 128
+    MacroTileShapeMax: 64
+    MacroTileShapeMin: 1
+    MaxOccupancy: 40
+    MinGlobalWriteVectorWidth: 1
+    NonTemporalA: 0
+    NonTemporalB: 0
+    NonTemporalC: 0
+    NumElementsPerThread: 64
+    NumGlobalWriteVectorsPerThread: 16
+    NumLoadsA: 1
+    NumLoadsB: 1
+    NumLoadsCoalescedA: 1
+    NumLoadsCoalescedB: 1
+    NumLoadsPerpendicularA: 1
+    NumLoadsPerpendicularB: 1
+    NumThreads: 256
+    PerformanceSyncLocation: -1
+    PerformanceWaitCount: -1
+    PerformanceWaitLocation: -1
+    PersistentKernel: 0
+    PrefetchGlobalRead: 1
+    PrefetchLocalRead: 1
+    ProblemType:
+      AllowNoFreeDims: false
+      AssignedDerivedParameters: true
+      Batched: true
+      ComplexConjugateA: false
+      ComplexConjugateB: false
+      ComputeDataType: 0
+      ConvolutionConfig: []
+      DataType: 0
+      DestDataType: 0
+      HighPrecisionAccumulate: false
+      Index0: 0
+      Index01A: 0
+      Index01B: 1
+      Index1: 1
+      IndexAssignmentsA:
+      - 3
+      - 0
+      - 2
+      IndexAssignmentsB:
+      - 1
+      - 3
+      - 2
+      IndexAssignmentsLD:
+      - 3
+      - 4
+      - 5
+      - 6
+      IndexUnroll: 3
+      IndexUnrollA: 0
+      IndexUnrollB: 1
+      IndicesBatch:
+      - 2
+      IndicesFree:
+      - 0
+      - 1
+      IndicesSummation:
+      - 3
+      NumIndicesBatch: 1
+      NumIndicesC: 3
+      NumIndicesFree: 2
+      NumIndicesLD: 0
+      NumIndicesSummation: 1
+      OperationType: GEMM
+      SetConstStrideA: []
+      SetConstStrideB: []
+      SilentHighPrecisionAccumulate: false
+      TLUA: false
+      TLUB: true
+      Tensor0: 0
+      Tensor1: 1
+      TileA: 0
+      TileAwareSelection: false
+      TileB: 1
+      TotalIndices: 4
+      TransposeA: true
+      TransposeB: true
+      UseBeta: true
+      UseInitialStridesAB: true
+      UseInitialStridesCD: true
+      ZeroPadA: []
+      ZeroPadB: []
+      ActivationComputeDataType: 0
+    SolutionIndex: 0
+    SolutionNameMin: Cijk_Alik_Bjlk_SBIIc_MT128x128x08_GRVW04_GSU01_SNLL1_TT08_08_VW04_WG16_16_01
+    SubGroup0: 16
+    SubGroup1: 16
+    SubGroupA: 16
+    SubGroupB: 16
+    SuppresssNoLoadLoop: true
+    ThreadTile:
+    - 8
+    - 8
+    ThreadTile0: 8
+    ThreadTile1: 8
+    ThreadTileA: 8
+    ThreadTileB: 8
+    UnrollMemFence: false
+    UseSgprForGRO: 0
+    Valid: true
+    VectorAtomicWidth: 1
+    VectorStore: 1
+    VectorWidth: 4
+    WorkGroup:
+    - 16
+    - 16
+    - 1
+    WorkGroupMapping: 1
+    WorkGroupMappingType: B
+    GlobalReadVectorWidthA: 4
+    GlobalReadVectorWidthB: 4
+    VectorWidthA: 4
+    VectorWidthB: 4
+    ISA:
+    - 9
+    - 0
+    - 12
+    EnableMatrixInstruction: false
+    MatrixInstruction: []
+    ScheduleIterAlg: 1
+    CustomKernelName: ''
+  - AggressivePerfMode: 1
+    AssertFree0ElementMultiple: 1
+    AssertFree1ElementMultiple: 1
+    AssertSummationElementMultiple: 1
+    AssignedDerivedParameters: true
+    AssignedProblemIndependentDerivedParameters: true
+    BufferLoad: true
+    BufferStore: true
+    CheckDimOverflow: 0
+    CheckTensorDimAsserts: false
+    DepthU: 8
+    DirectToLds: 0
+    DirectToLdsA: 0
+    DirectToLdsB: 0
+    DisableKernelPieces: 0
+    EdgeType: ShiftPtr
+    ExpandPointerSwap: true
+    FractionalLoad: 0
+    GlobalRead2A: true
+    GlobalRead2B: true
+    GlobalReadCoalesceGroupA: true
+    GlobalReadCoalesceGroupB: true
+    GlobalReadCoalesceVectorA: true
+    GlobalReadCoalesceVectorB: true
+    GlobalReadVectorWidth: 4
+    GlobalSplitU: 1
+    GlobalSplitUSummationAssignmentRoundRobin: true
+    GlobalSplitUWorkGroupMappingRoundRobin: false
+    GlobalWriteVectorWidth: 4
+    GuaranteeNoPartialA: false
+    GuaranteeNoPartialB: false
+    InnerUnroll: 1
+    KernelLanguage: Assembly
+    LSCA: 8
+    LSCB: 128
+    LSPA: 128
+    LSPB: 8
+    LVCA: 2
+    LVCB: 32
+    LVPA: 32
+    LVPB: 2
+    LdsNumElements: 4096
+    LdsNumElementsAlignedA: 1024
+    LdsNumElementsAlignedB: 1024
+    LdsOffsetA: 0
+    LdsOffsetA_Blk: 2048
+    LdsOffsetB: 1024
+    LdsOffsetB_Blk: 3072
+    LdsPadA: 0
+    LdsPadB: 0
+    LocalDotLayout: 1
+    LocalRead2A: true
+    LocalRead2B: true
+    LocalSplitU: 1
+    LocalWrite2A: true
+    LocalWrite2B: true
+    LocalWriteUseSgprA: false
+    LocalWriteUseSgprB: false
+    LoopDoWhile: false
+    LoopTail: true
+    LoopUnroll: 8
+    MacroTile0: 128
+    MacroTile1: 128
+    MacroTileA: 128
+    MacroTileB: 128
+    MacroTileShapeMax: 64
+    MacroTileShapeMin: 1
+    MaxOccupancy: 40
+    MinGlobalWriteVectorWidth: 1
+    NonTemporalA: 0
+    NonTemporalB: 0
+    NonTemporalC: 0
+    NumElementsPerThread: 64
+    NumGlobalWriteVectorsPerThread: 16
+    NumLoadsA: 1
+    NumLoadsB: 1
+    NumLoadsCoalescedA: 1
+    NumLoadsCoalescedB: 1
+    NumLoadsPerpendicularA: 1
+    NumLoadsPerpendicularB: 1
+    NumThreads: 256
+    PerformanceSyncLocation: -1
+    PerformanceWaitCount: -1
+    PerformanceWaitLocation: -1
+    PersistentKernel: 0
+    PrefetchGlobalRead: 1
+    PrefetchLocalRead: 1
+    ProblemType:
+      AllowNoFreeDims: false
+      AssignedDerivedParameters: true
+      Batched: true
+      ComplexConjugateA: false
+      ComplexConjugateB: false
+      ComputeDataType: 0
+      ConvolutionConfig: []
+      DataType: 0
+      DestDataType: 0
+      HighPrecisionAccumulate: false
+      Index0: 0
+      Index01A: 0
+      Index01B: 1
+      Index1: 1
+      IndexAssignmentsA:
+      - 3
+      - 0
+      - 2
+      IndexAssignmentsB:
+      - 1
+      - 3
+      - 2
+      IndexAssignmentsLD:
+      - 3
+      - 4
+      - 5
+      - 6
+      IndexUnroll: 3
+      IndexUnrollA: 0
+      IndexUnrollB: 1
+      IndicesBatch:
+      - 2
+      IndicesFree:
+      - 0
+      - 1
+      IndicesSummation:
+      - 3
+      NumIndicesBatch: 1
+      NumIndicesC: 3
+      NumIndicesFree: 2
+      NumIndicesLD: 0
+      NumIndicesSummation: 1
+      OperationType: GEMM
+      SetConstStrideA: []
+      SetConstStrideB: []
+      SilentHighPrecisionAccumulate: false
+      TLUA: false
+      TLUB: true
+      Tensor0: 0
+      Tensor1: 1
+      TileA: 0
+      TileAwareSelection: false
+      TileB: 1
+      TotalIndices: 4
+      TransposeA: true
+      TransposeB: true
+      UseBeta: true
+      UseInitialStridesAB: true
+      UseInitialStridesCD: true
+      ZeroPadA: []
+      ZeroPadB: []
+      ActivationComputeDataType: 0
+    SolutionIndex: 1
+    SolutionNameMin: Cijk_Alik_Bjlk_SBIIc_MT128x128x08_GRVW04_GSU01_SNLL1_TT08_08_VW04_WG16_16_01
+    SubGroup0: 16
+    SubGroup1: 16
+    SubGroupA: 16
+    SubGroupB: 16
+    SuppresssNoLoadLoop: true
+    ThreadTile:
+    - 8
+    - 8
+    ThreadTile0: 8
+    ThreadTile1: 8
+    ThreadTileA: 8
+    ThreadTileB: 8
+    UnrollMemFence: false
+    UseSgprForGRO: 0
+    Valid: true
+    VectorAtomicWidth: 1
+    VectorStore: 1
+    VectorWidth: 4
+    WorkGroup:
+    - 16
+    - 16
+    - 1
+    WorkGroupMapping: 4
+    WorkGroupMappingType: B
+    GlobalReadVectorWidthA: 4
+    GlobalReadVectorWidthB: 4
+    VectorWidthA: 4
+    VectorWidthB: 4
+    ISA:
+    - 9
+    - 0
+    - 12
+    EnableMatrixInstruction: false
+    MatrixInstruction: []
+    ScheduleIterAlg: 1
+    CustomKernelName: ''
+  - AggressivePerfMode: 1
+    AssertFree0ElementMultiple: 1
+    AssertFree1ElementMultiple: 1
+    AssertSummationElementMultiple: 1
+    AssignedDerivedParameters: true
+    AssignedProblemIndependentDerivedParameters: true
+    BufferLoad: true
+    BufferStore: true
+    CheckDimOverflow: 0
+    CheckTensorDimAsserts: false
+    DepthU: 16
+    DirectToLds: 0
+    DirectToLdsA: 0
+    DirectToLdsB: 0
+    DisableKernelPieces: 0
+    EdgeType: ShiftPtr
+    ExpandPointerSwap: true
+    FractionalLoad: 0
+    GlobalRead2A: true
+    GlobalRead2B: true
+    GlobalReadCoalesceGroupA: true
+    GlobalReadCoalesceGroupB: true
+    GlobalReadCoalesceVectorA: true
+    GlobalReadCoalesceVectorB: true
+    GlobalReadVectorWidth: 4
+    GlobalSplitU: 1
+    GlobalSplitUSummationAssignmentRoundRobin: true
+    GlobalSplitUWorkGroupMappingRoundRobin: false
+    GlobalWriteVectorWidth: 4
+    GuaranteeNoPartialA: false
+    GuaranteeNoPartialB: false
+    InnerUnroll: 1
+    KernelLanguage: Assembly
+    LSCA: 16
+    LSCB: 64
+    LSPA: 64
+    LSPB: 16
+    LVCA: 4
+    LVCB: 16
+    LVPA: 16
+    LVPB: 4
+    LdsNumElements: 4096
+    LdsNumElementsAlignedA: 1024
+    LdsNumElementsAlignedB: 1024
+    LdsOffsetA: 0
+    LdsOffsetA_Blk: 2048
+    LdsOffsetB: 1024
+    LdsOffsetB_Blk: 3072
+    LdsPadA: 0
+    LdsPadB: 0
+    LocalDotLayout: 1
+    LocalRead2A: true
+    LocalRead2B: true
+    LocalSplitU: 1
+    LocalWrite2A: true
+    LocalWrite2B: true
+    LocalWriteUseSgprA: false
+    LocalWriteUseSgprB: false
+    LoopDoWhile: false
+    LoopTail: true
+    LoopUnroll: 16
+    MacroTile0: 64
+    MacroTile1: 64
+    MacroTileA: 64
+    MacroTileB: 64
+    MacroTileShapeMax: 64
+    MacroTileShapeMin: 1
+    MaxOccupancy: 40
+    MinGlobalWriteVectorWidth: 1
+    NonTemporalA: 0
+    NonTemporalB: 0
+    NonTemporalC: 0
+    NumElementsPerThread: 16
+    NumGlobalWriteVectorsPerThread: 4
+    NumLoadsA: 1
+    NumLoadsB: 1
+    NumLoadsCoalescedA: 1
+    NumLoadsCoalescedB: 1
+    NumLoadsPerpendicularA: 1
+    NumLoadsPerpendicularB: 1
+    NumThreads: 256
+    PerformanceSyncLocation: -1
+    PerformanceWaitCount: -1
+    PerformanceWaitLocation: -1
+    PersistentKernel: 0
+    PrefetchGlobalRead: 1
+    PrefetchLocalRead: 1
+    ProblemType:
+      AllowNoFreeDims: false
+      AssignedDerivedParameters: true
+      Batched: true
+      ComplexConjugateA: false
+      ComplexConjugateB: false
+      ComputeDataType: 0
+      ConvolutionConfig: []
+      DataType: 0
+      DestDataType: 0
+      HighPrecisionAccumulate: false
+      Index0: 0
+      Index01A: 0
+      Index01B: 1
+      Index1: 1
+      IndexAssignmentsA:
+      - 3
+      - 0
+      - 2
+      IndexAssignmentsB:
+      - 1
+      - 3
+      - 2
+      IndexAssignmentsLD:
+      - 3
+      - 4
+      - 5
+      - 6
+      IndexUnroll: 3
+      IndexUnrollA: 0
+      IndexUnrollB: 1
+      IndicesBatch:
+      - 2
+      IndicesFree:
+      - 0
+      - 1
+      IndicesSummation:
+      - 3
+      NumIndicesBatch: 1
+      NumIndicesC: 3
+      NumIndicesFree: 2
+      NumIndicesLD: 0
+      NumIndicesSummation: 1
+      OperationType: GEMM
+      SetConstStrideA: []
+      SetConstStrideB: []
+      SilentHighPrecisionAccumulate: false
+      TLUA: false
+      TLUB: true
+      Tensor0: 0
+      Tensor1: 1
+      TileA: 0
+      TileAwareSelection: false
+      TileB: 1
+      TotalIndices: 4
+      TransposeA: true
+      TransposeB: true
+      UseBeta: true
+      UseInitialStridesAB: true
+      UseInitialStridesCD: true
+      ZeroPadA: []
+      ZeroPadB: []
+      ActivationComputeDataType: 0
+    SolutionIndex: 2
+    SolutionNameMin: Cijk_Alik_Bjlk_SBIIc_MT064x064x16_GRVW04_GSU01_SNLL1_TT04_04_VW04_WG16_16_01
+    SubGroup0: 16
+    SubGroup1: 16
+    SubGroupA: 16
+    SubGroupB: 16
+    SuppresssNoLoadLoop: true
+    ThreadTile:
+    - 4
+    - 4
+    ThreadTile0: 4
+    ThreadTile1: 4
+    ThreadTileA: 4
+    ThreadTileB: 4
+    UnrollMemFence: false
+    UseSgprForGRO: 0
+    Valid: true
+    VectorAtomicWidth: 1
+    VectorStore: 1
+    VectorWidth: 4
+    WorkGroup:
+    - 16
+    - 16
+    - 1
+    WorkGroupMapping: 1
+    WorkGroupMappingType: B
+    GlobalReadVectorWidthA: 4
+    GlobalReadVectorWidthB: 4
+    VectorWidthA: 4
+    VectorWidthB: 4
+    ISA:
+    - 9
+    - 0
+    - 12
+    EnableMatrixInstruction: false
+    MatrixInstruction: []
+    ScheduleIterAlg: 1
+    CustomKernelName: ''
+  - AggressivePerfMode: 1
+    AssertFree0ElementMultiple: 1
+    AssertFree1ElementMultiple: 1
+    AssertSummationElementMultiple: 1
+    AssignedDerivedParameters: true
+    AssignedProblemIndependentDerivedParameters: true
+    BufferLoad: true
+    BufferStore: true
+    CheckDimOverflow: 0
+    CheckTensorDimAsserts: false
+    DepthU: 16
+    DirectToLds: 0
+    DirectToLdsA: 0
+    DirectToLdsB: 0
+    DisableKernelPieces: 0
+    EdgeType: ShiftPtr
+    ExpandPointerSwap: false
+    FractionalLoad: 0
+    GlobalRead2A: true
+    GlobalRead2B: true
+    GlobalReadCoalesceGroupA: true
+    GlobalReadCoalesceGroupB: true
+    GlobalReadCoalesceVectorA: true
+    GlobalReadCoalesceVectorB: true
+    GlobalReadVectorWidth: 4
+    GlobalSplitU: 1
+    GlobalSplitUSummationAssignmentRoundRobin: true
+    GlobalSplitUWorkGroupMappingRoundRobin: false
+    GlobalWriteVectorWidth: 4
+    GuaranteeNoPartialA: false
+    GuaranteeNoPartialB: false
+    InnerUnroll: 1
+    KernelLanguage: Assembly
+    LSCA: 16
+    LSCB: 128
+    LSPA: 64
+    LSPB: 8
+    LVCA: 4
+    LVCB: 32
+    LVPA: 16
+    LVPB: 2
+    LdsNumElements: 3072
+    LdsOffsetA: 0
+    LdsOffsetB: 1024
+    LdsPadA: 0
+    LdsPadB: 0
+    LocalDotLayout: 1
+    LocalRead2A: true
+    LocalRead2B: true
+    LocalSplitU: 1
+    LocalWrite2A: true
+    LocalWrite2B: true
+    LocalWriteUseSgprA: false
+    LocalWriteUseSgprB: false
+    LoopDoWhile: false
+    LoopTail: true
+    LoopUnroll: 16
+    MacroTile0: 64
+    MacroTile1: 128
+    MacroTileA: 64
+    MacroTileB: 128
+    MacroTileShapeMax: 64
+    MacroTileShapeMin: 1
+    MaxOccupancy: 40
+    MinGlobalWriteVectorWidth: 1
+    NonTemporalA: 0
+    NonTemporalB: 0
+    NonTemporalC: 0
+    NumElementsPerThread: 32
+    NumGlobalWriteVectorsPerThread: 8
+    NumLoadsA: 1
+    NumLoadsB: 2
+    NumLoadsCoalescedA: 1
+    NumLoadsCoalescedB: 1
+    NumLoadsPerpendicularA: 1
+    NumLoadsPerpendicularB: 2
+    NumThreads: 256
+    PerformanceSyncLocation: -1
+    PerformanceWaitCount: -1
+    PerformanceWaitLocation: -1
+    PersistentKernel: 0
+    PrefetchGlobalRead: 0
+    PrefetchLocalRead: 1
+    ProblemType:
+      AllowNoFreeDims: false
+      AssignedDerivedParameters: true
+      Batched: true
+      ComplexConjugateA: false
+      ComplexConjugateB: false
+      ComputeDataType: 0
+      ConvolutionConfig: []
+      DataType: 0
+      DestDataType: 0
+      HighPrecisionAccumulate: false
+      Index0: 0
+      Index01A: 0
+      Index01B: 1
+      Index1: 1
+      IndexAssignmentsA:
+      - 3
+      - 0
+      - 2
+      IndexAssignmentsB:
+      - 1
+      - 3
+      - 2
+      IndexAssignmentsLD:
+      - 3
+      - 4
+      - 5
+      - 6
+      IndexUnroll: 3
+      IndexUnrollA: 0
+      IndexUnrollB: 1
+      IndicesBatch:
+      - 2
+      IndicesFree:
+      - 0
+      - 1
+      IndicesSummation:
+      - 3
+      NumIndicesBatch: 1
+      NumIndicesC: 3
+      NumIndicesFree: 2
+      NumIndicesLD: 0
+      NumIndicesSummation: 1
+      OperationType: GEMM
+      SetConstStrideA: []
+      SetConstStrideB: []
+      SilentHighPrecisionAccumulate: false
+      TLUA: false
+      TLUB: true
+      Tensor0: 0
+      Tensor1: 1
+      TileA: 0
+      TileAwareSelection: false
+      TileB: 1
+      TotalIndices: 4
+      TransposeA: true
+      TransposeB: true
+      UseBeta: true
+      UseInitialStridesAB: true
+      UseInitialStridesCD: true
+      ZeroPadA: []
+      ZeroPadB: []
+      ActivationComputeDataType: 0
+    SolutionIndex: 3
+    SolutionNameMin: Cijk_Alik_Bjlk_SBIIc_MT064x128x16_GRVW04_GSU01_SNLL0_TT04_08_VW04_WG16_16_01
+    SubGroup0: 16
+    SubGroup1: 16
+    SubGroupA: 16
+    SubGroupB: 16
+    SuppresssNoLoadLoop: false
+    ThreadTile:
+    - 4
+    - 8
+    ThreadTile0: 4
+    ThreadTile1: 8
+    ThreadTileA: 4
+    ThreadTileB: 8
+    UnrollMemFence: false
+    UseSgprForGRO: 0
+    Valid: true
+    VectorAtomicWidth: 1
+    VectorStore: 1
+    VectorWidth: 4
+    WorkGroup:
+    - 16
+    - 16
+    - 1
+    WorkGroupMapping: 1
+    WorkGroupMappingType: B
+    GlobalReadVectorWidthA: 4
+    GlobalReadVectorWidthB: 4
+    VectorWidthA: 4
+    VectorWidthB: 4
+    ISA:
+    - 9
+    - 0
+    - 12
+    EnableMatrixInstruction: false
+    MatrixInstruction: []
+    ScheduleIterAlg: 1
+    CustomKernelName: ''
+  - AggressivePerfMode: 1
+    AssertFree0ElementMultiple: 1
+    AssertFree1ElementMultiple: 1
+    AssertSummationElementMultiple: 1
+    AssignedDerivedParameters: true
+    AssignedProblemIndependentDerivedParameters: true
+    BufferLoad: true
+    BufferStore: true
+    CheckDimOverflow: 0
+    CheckTensorDimAsserts: false
+    DepthU: 16
+    DirectToLds: 0
+    DirectToLdsA: 0
+    DirectToLdsB: 0
+    DisableKernelPieces: 0
+    EdgeType: ShiftPtr
+    ExpandPointerSwap: true
+    FractionalLoad: 0
+    GlobalRead2A: true
+    GlobalRead2B: true
+    GlobalReadCoalesceGroupA: true
+    GlobalReadCoalesceGroupB: true
+    GlobalReadCoalesceVectorA: true
+    GlobalReadCoalesceVectorB: true
+    GlobalReadVectorWidth: 4
+    GlobalSplitU: 1
+    GlobalSplitUSummationAssignmentRoundRobin: true
+    GlobalSplitUWorkGroupMappingRoundRobin: false
+    GlobalWriteVectorWidth: 4
+    GuaranteeNoPartialA: false
+    GuaranteeNoPartialB: false
+    InnerUnroll: 1
+    KernelLanguage: Assembly
+    LSCA: 16
+    LSCB: 64
+    LSPA: 64
+    LSPB: 16
+    LVCA: 4
+    LVCB: 16
+    LVPA: 16
+    LVPB: 4
+    LdsNumElements: 4096
+    LdsNumElementsAlignedA: 1024
+    LdsNumElementsAlignedB: 1024
+    LdsOffsetA: 0
+    LdsOffsetA_Blk: 2048
+    LdsOffsetB: 1024
+    LdsOffsetB_Blk: 3072
+    LdsPadA: 0
+    LdsPadB: 0
+    LocalDotLayout: 1
+    LocalRead2A: true
+    LocalRead2B: true
+    LocalSplitU: 1
+    LocalWrite2A: true
+    LocalWrite2B: true
+    LocalWriteUseSgprA: false
+    LocalWriteUseSgprB: false
+    LoopDoWhile: false
+    LoopTail: true
+    LoopUnroll: 16
+    MacroTile0: 64
+    MacroTile1: 64
+    MacroTileA: 64
+    MacroTileB: 64
+    MacroTileShapeMax: 64
+    MacroTileShapeMin: 1
+    MaxOccupancy: 40
+    MinGlobalWriteVectorWidth: 1
+    NonTemporalA: 0
+    NonTemporalB: 0
+    NonTemporalC: 0
+    NumElementsPerThread: 16
+    NumGlobalWriteVectorsPerThread: 4
+    NumLoadsA: 1
+    NumLoadsB: 1
+    NumLoadsCoalescedA: 1
+    NumLoadsCoalescedB: 1
+    NumLoadsPerpendicularA: 1
+    NumLoadsPerpendicularB: 1
+    NumThreads: 256
+    PerformanceSyncLocation: -1
+    PerformanceWaitCount: -1
+    PerformanceWaitLocation: -1
+    PersistentKernel: 0
+    PrefetchGlobalRead: 1
+    PrefetchLocalRead: 1
+    ProblemType:
+      AllowNoFreeDims: false
+      AssignedDerivedParameters: true
+      Batched: true
+      ComplexConjugateA: false
+      ComplexConjugateB: false
+      ComputeDataType: 0
+      ConvolutionConfig: []
+      DataType: 0
+      DestDataType: 0
+      HighPrecisionAccumulate: false
+      Index0: 0
+      Index01A: 0
+      Index01B: 1
+      Index1: 1
+      IndexAssignmentsA:
+      - 3
+      - 0
+      - 2
+      IndexAssignmentsB:
+      - 1
+      - 3
+      - 2
+      IndexAssignmentsLD:
+      - 3
+      - 4
+      - 5
+      - 6
+      IndexUnroll: 3
+      IndexUnrollA: 0
+      IndexUnrollB: 1
+      IndicesBatch:
+      - 2
+      IndicesFree:
+      - 0
+      - 1
+      IndicesSummation:
+      - 3
+      NumIndicesBatch: 1
+      NumIndicesC: 3
+      NumIndicesFree: 2
+      NumIndicesLD: 0
+      NumIndicesSummation: 1
+      OperationType: GEMM
+      SetConstStrideA: []
+      SetConstStrideB: []
+      SilentHighPrecisionAccumulate: false
+      TLUA: false
+      TLUB: true
+      Tensor0: 0
+      Tensor1: 1
+      TileA: 0
+      TileAwareSelection: false
+      TileB: 1
+      TotalIndices: 4
+      TransposeA: true
+      TransposeB: true
+      UseBeta: true
+      UseInitialStridesAB: true
+      UseInitialStridesCD: true
+      ZeroPadA: []
+      ZeroPadB: []
+      ActivationComputeDataType: 0
+    SolutionIndex: 4
+    SolutionNameMin: Cijk_Alik_Bjlk_SBIIc_MT064x064x16_GRVW04_GSU01_SNLL1_TT04_04_VW04_WG16_16_01
+    SubGroup0: 16
+    SubGroup1: 16
+    SubGroupA: 16
+    SubGroupB: 16
+    SuppresssNoLoadLoop: true
+    ThreadTile:
+    - 4
+    - 4
+    ThreadTile0: 4
+    ThreadTile1: 4
+    ThreadTileA: 4
+    ThreadTileB: 4
+    UnrollMemFence: false
+    UseSgprForGRO: 0
+    Valid: true
+    VectorAtomicWidth: 1
+    VectorStore: 1
+    VectorWidth: 4
+    WorkGroup:
+    - 16
+    - 16
+    - 1
+    WorkGroupMapping: 4
+    WorkGroupMappingType: B
+    GlobalReadVectorWidthA: 4
+    GlobalReadVectorWidthB: 4
+    VectorWidthA: 4
+    VectorWidthB: 4
+    ISA:
+    - 9
+    - 0
+    - 12
+    EnableMatrixInstruction: false
+    MatrixInstruction: []
+    ScheduleIterAlg: 1
+    CustomKernelName: ''
+- - 2
+  - 3
+  - 0
+  - 1
+- - - - 1856
+      - 448
+      - 1
+      - 3328
+    - - 2
+      - 7695.9
+  - - - 2944
+      - 4288
+      - 1
+      - 1280
+    - - 0
+      - 9438.92
+  - - - 5888
+      - 1856
+      - 1
+      - 3328
+    - - 0
+      - 9217.71
+  - - - 5056
+      - 704
+      - 1
+      - 256
+    - - 2
+      - 9005.1
+  - - - 5888
+      - 2944
+      - 1
+      - 3328
+    - - 0
+      - 9182.94
+  - - - 1856
+      - 4288
+      - 1
+      - 256
+    - - 2
+      - 9092.17
+  - - - 5056
+      - 5056
+      - 1
+      - 3328
+    - - 1
+      - 9180.65
+  - - - 1408
+      - 5888
+      - 1
+      - 1280
+    - - 0
+      - 10109.5
+  - - - 256
+      - 4288
+      - 1
+      - 3328
+    - - 4
+      - 8203.12
+  - - - 5888
+      - 1408
+      - 1
+      - 1280
+    - - 0
+      - 10356.5
+  - - - 704
+      - 1856
+      - 1
+      - 3328
+    - - 2
+      - 9305.98
+  - - - 1024
+      - 2368
+      - 1
+      - 256
+    - - 4
+      - 6954.29
+  - - - 1408
+      - 1856
+      - 1
+      - 1280
+    - - 2
+      - 9900.35
+  - - - 448
+      - 1024
+      - 1
+      - 1280
+    - - 4
+      - 7436.19
+  - - - 256
+      - 1408
+      - 1
+      - 3328
+    - - 4
+      - 6245.15
+  - - - 5056
+      - 5056
+      - 1
+      - 1280
+    - - 0
+      - 9498.87
+  - - - 448
+      - 5056
+      - 1
+      - 256
+    - - 2
+      - 7914.92
+  - - - 704
+      - 1856
+      - 1
+      - 1280
+    - - 2
+      - 8867.91
+  - - - 2368
+      - 128
+      - 1
+      - 256
+    - - 4
+      - 3837.04
+  - - - 64
+      - 5056
+      - 1
+      - 256
+    - - 2
+      - 4022.6
+  - - - 6784
+      - 256
+      - 1
+      - 3328
+    - - 4
+      - 9368.88
+  - - - 6784
+      - 4288
+      - 1
+      - 3328
+    - - 0
+      - 8774.76
+  - - - 4288
+      - 448
+      - 1
+      - 256
+    - - 2
+      - 7960.28
+  - - - 1856
+      - 2368
+      - 1
+      - 3328
+    - - 2
+      - 9307.21
+  - - - 4288
+      - 2944
+      - 1
+      - 1280
+    - - 3
+      - 9672.46
+  - - - 2368
+      - 704
+      - 1
+      - 3328
+    - - 4
+      - 9054.13
+  - - - 256
+      - 5888
+      - 1
+      - 256
+    - - 4
+      - 7928.66
+  - - - 256
+      - 2944
+      - 1
+      - 256
+    - - 4
+      - 7096.96
+  - - - 5888
+      - 1024
+      - 1
+      - 256
+    - - 4
+      - 9566.84
+  - - - 448
+      - 5056
+      - 1
+      - 3328
+    - - 2
+      - 8836.62
+  - - - 2944
+      - 64
+      - 1
+      - 256
+    - - 2
+      - 2843.43
+  - - - 1408
+      - 2944
+      - 1
+      - 256
+    - - 3
+      - 9338.43
+  - - - 256
+      - 1856
+      - 1
+      - 1280
+    - - 4
+      - 7723.48
+  - - - 6784
+      - 5056
+      - 1
+      - 3328
+    - - 1
+      - 8729.31
+  - - - 5056
+      - 5056
+      - 1
+      - 256
+    - - 1
+      - 9738.02
+  - - - 128
+      - 3584
+      - 1
+      - 1280
+    - - 4
+      - 7450.15
+  - - - 6784
+      - 6784
+      - 1
+      - 1280
+    - - 0
+      - 9205.51
+  - - - 1024
+      - 256
+      - 1
+      - 3328
+    - - 2
+      - 6851.2
+  - - - 1408
+      - 4288
+      - 1
+      - 1280
+    - - 1
+      - 9882.97
+  - - - 3584
+      - 4288
+      - 1
+      - 1280
+    - - 0
+      - 9681.49
+  - - - 2368
+      - 704
+      - 1
+      - 1280
+    - - 4
+      - 8838.94
+  - - - 5056
+      - 4288
+      - 1
+      - 3328
+    - - 1
+      - 8880.25
+  - - - 4288
+      - 256
+      - 1
+      - 256
+    - - 2
+      - 6198.71
+  - - - 4288
+      - 2944
+      - 1
+      - 256
+    - - 3
+      - 10026.8
+  - - - 5888
+      - 704
+      - 1
+      - 1280
+    - - 2
+      - 9988.27
+  - - - 2944
+      - 256
+      - 1
+      - 3328
+    - - 4
+      - 8870.71
+  - - - 448
+      - 3584
+      - 1
+      - 1280
+    - - 2
+      - 8379.48
+  - - - 1408
+      - 448
+      - 1
+      - 1280
+    - - 2
+      - 7320.07
+  - - - 5056
+      - 704
+      - 1
+      - 3328
+    - - 4
+      - 9157.22
+  - - - 1408
+      - 1856
+      - 1
+      - 256
+    - - 2
+      - 8986.14
+  - - - 1408
+      - 704
+      - 1
+      - 3328
+    - - 4
+      - 9105.02
+  - - - 704
+      - 5888
+      - 1
+      - 256
+    - - 3
+      - 8729.54
+  - - - 2944
+      - 256
+      - 1
+      - 256
+    - - 4
+      - 6431.05
+  - - - 2944
+      - 6784
+      - 1
+      - 3328
+    - - 0
+      - 8853.25
+  - - - 704
+      - 1408
+      - 1
+      - 3328
+    - - 2
+      - 9166.85
+  - - - 448
+      - 4288
+      - 1
+      - 256
+    - - 2
+      - 7476.17
+  - - - 704
+      - 2368
+      - 1
+      - 1280
+    - - 2
+      - 8868.86
+  - - - 1856
+      - 2368
+      - 1
+      - 1280
+    - - 2
+      - 9963.69
+  - - - 2944
+      - 128
+      - 1
+      - 256
+    - - 4
+      - 4269.86
+  - - - 448
+      - 1408
+      - 1
+      - 256
+    - - 2
+      - 6157.98
+  - - - 1856
+      - 4288
+      - 1
+      - 1280
+    - - 1
+      - 9944.96
+  - - - 704
+      - 6784
+      - 1
+      - 256
+    - - 1
+      - 8361.24
+  - - - 6784
+      - 704
+      - 1
+      - 256
+    - - 2
+      - 9179.7
+  - - - 3584
+      - 4288
+      - 1
+      - 3328
+    - - 1
+      - 9284.09
+  - - - 5056
+      - 1024
+      - 1
+      - 3328
+    - - 1
+      - 9983.26
+  - - - 1024
+      - 704
+      - 1
+      - 256
+    - - 4
+      - 6538.86
+  - - - 2368
+      - 6784
+      - 1
+      - 1280
+    - - 0
+      - 9789.66
+  - - - 1024
+      - 256
+      - 1
+      - 256
+    - - 4
+      - 4194.17
+  - - - 448
+      - 448
+      - 1
+      - 256
+    - - 4
+      - 3334.75
+  - - - 2944
+      - 3584
+      - 1
+      - 3328
+    - - 0
+      - 8783.27
+  - - - 6784
+      - 2944
+      - 1
+      - 256
+    - - 3
+      - 10310.9
+  - - - 4288
+      - 2368
+      - 1
+      - 3328
+    - - 3
+      - 8891.25
+  - - - 1856
+      - 2368
+      - 1
+      - 256
+    - - 4
+      - 9312.46
+  - - - 3584
+      - 6784
+      - 1
+      - 3328
+    - - 1
+      - 9022.66
+  - - - 256
+      - 1024
+      - 1
+      - 256
+    - - 4
+      - 4397.7
+  - - - 1024
+      - 5888
+      - 1
+      - 3328
+    - - 1
+      - 9619.18
+  - - - 5056
+      - 4288
+      - 1
+      - 1280
+    - - 3
+      - 9401.0
+  - - - 1408
+      - 5056
+      - 1
+      - 1280
+    - - 0
+      - 10222.7
+  - - - 1856
+      - 256
+      - 1
+      - 1280
+    - - 2
+      - 7490.94
+  - - - 704
+      - 5888
+      - 1
+      - 1280
+    - - 3
+      - 9995.24
+  - - - 6784
+      - 5888
+      - 1
+      - 3328
+    - - 0
+      - 8748.71
+  - - - 704
+      - 1024
+      - 1
+      - 1280
+    - - 4
+      - 8348.99
+  - - - 1024
+      - 704
+      - 1
+      - 1280
+    - - 2
+      - 8179.04
+  - - - 128
+      - 5888
+      - 1
+      - 256
+    - - 2
+      - 6927.01
+  - - - 4288
+      - 1024
+      - 1
+      - 256
+    - - 4
+      - 9361.19
+  - - - 704
+      - 704
+      - 1
+      - 3328
+    - - 4
+      - 8540.97
+  - - - 704
+      - 1408
+      - 1
+      - 1280
+    - - 2
+      - 8888.39
+  - - - 5888
+      - 448
+      - 1
+      - 1280
+    - - 2
+      - 9136.12
+  - - - 3584
+      - 256
+      - 1
+      - 3328
+    - - 4
+      - 8462.39
+  - - - 128
+      - 3584
+      - 1
+      - 3328
+    - - 4
+      - 7920.88
+  - - - 3584
+      - 2944
+      - 1
+      - 256
+    - - 4
+      - 9679.88
+  - - - 128
+      - 2944
+      - 1
+      - 1280
+    - - 2
+      - 6213.22
+  - - - 1408
+      - 5056
+      - 1
+      - 3328
+    - - 0
+      - 9638.8
+  - - - 3584
+      - 128
+      - 1
+      - 256
+    - - 4
+      - 4044.37
+  - - - 448
+      - 1408
+      - 1
+      - 3328
+    - - 2
+      - 7374.17
+  - - - 2368
+      - 2368
+      - 1
+      - 256
+    - - 3
+      - 9598.13
+  - - - 704
+      - 6784
+      - 1
+      - 3328
+    - - 0
+      - 9312.37
+  - - - 5888
+      - 5888
+      - 1
+      - 1280
+    - - 1
+      - 9274.41
+  - - - 5056
+      - 1024
+      - 1
+      - 1280
+    - - 0
+      - 10296.0
+  - - - 448
+      - 5888
+      - 1
+      - 3328
+    - - 0
+      - 8687.65
+  - - - 1024
+      - 2944
+      - 1
+      - 1280
+    - - 1
+      - 9780.62
+  - - - 5056
+      - 5888
+      - 1
+      - 1280
+    - - 0
+      - 9469.01
+  - - - 256
+      - 3584
+      - 1
+      - 256
+    - - 4
+      - 6848.34
+  - - - 256
+      - 2944
+      - 1
+      - 3328
+    - - 4
+      - 9046.1
+  - - - 5888
+      - 2944
+      - 1
+      - 1280
+    - - 0
+      - 9702.2
+  - - - 1408
+      - 704
+      - 1
+      - 256
+    - - 2
+      - 7495.91
+  - - - 6784
+      - 1024
+      - 1
+      - 3328
+    - - 1
+      - 9484.48
+  - - - 6784
+      - 2944
+      - 1
+      - 3328
+    - - 0
+      - 8908.1
+  - - - 1856
+      - 1856
+      - 1
+      - 256
+    - - 2
+      - 8811.74
+  - - - 4288
+      - 5888
+      - 1
+      - 1280
+    - - 0
+      - 9392.58
+  - - - 4288
+      - 1856
+      - 1
+      - 1280
+    - - 0
+      - 9982.49
+  - - - 1856
+      - 2944
+      - 1
+      - 3328
+    - - 4
+      - 9169.33
+  - - - 256
+      - 6784
+      - 1
+      - 3328
+    - - 4
+      - 8703.19
+  - - - 64
+      - 5888
+      - 1
+      - 256
+    - - 4
+      - 4601.65
+  - - - 5056
+      - 1024
+      - 1
+      - 256
+    - - 3
+      - 9687.22
+  - - - 5056
+      - 1856
+      - 1
+      - 3328
+    - - 1
+      - 8842.02
+  - - - 1856
+      - 1408
+      - 1
+      - 256
+    - - 4
+      - 8906.35
+  - - - 6784
+      - 128
+      - 1
+      - 3328
+    - - 2
+      - 7833.74
+  - - - 5056
+      - 256
+      - 1
+      - 3328
+    - - 4
+      - 9523.42
+  - - - 704
+      - 704
+      - 1
+      - 256
+    - - 2
+      - 6228.35
+  - - - 1024
+      - 5888
+      - 1
+      - 1280
+    - - 1
+      - 9634.99
+  - - - 128
+      - 1856
+      - 1
+      - 1280
+    - - 2
+      - 5749.37
+  - - - 1856
+      - 1024
+      - 1
+      - 1280
+    - - 0
+      - 9308.5
+  - - - 6784
+      - 4288
+      - 1
+      - 1280
+    - - 0
+      - 9243.72
+  - - - 448
+      - 704
+      - 1
+      - 1280
+    - - 2
+      - 5200.2
+  - - - 1024
+      - 448
+      - 1
+      - 3328
+    - - 4
+      - 7670.32
+  - - - 1856
+      - 704
+      - 1
+      - 1280
+    - - 2
+      - 8850.52
+  - - - 5888
+      - 5888
+      - 1
+      - 3328
+    - - 1
+      - 8870.71
+  - - - 6784
+      - 1024
+      - 1
+      - 256
+    - - 3
+      - 9519.19
+  - - - 2944
+      - 2368
+      - 1
+      - 256
+    - - 3
+      - 9511.4
+  - - - 5056
+      - 5888
+      - 1
+      - 3328
+    - - 1
+      - 9021.28
+  - - - 1856
+      - 1024
+      - 1
+      - 256
+    - - 3
+      - 7922.87
+  - - - 448
+      - 1408
+      - 1
+      - 1280
+    - - 2
+      - 7310.26
+  - - - 3584
+      - 448
+      - 1
+      - 1280
+    - - 2
+      - 8534.12
+  - - - 448
+      - 5888
+      - 1
+      - 256
+    - - 2
+      - 7906.37
+  - - - 1408
+      - 6784
+      - 1
+      - 3328
+    - - 0
+      - 8944.73
+  - - - 448
+      - 2368
+      - 1
+      - 3328
+    - - 2
+      - 7932.91
+  - - - 704
+      - 1024
+      - 1
+      - 256
+    - - 4
+      - 6679.19
+  - - - 2368
+      - 1856
+      - 1
+      - 256
+    - - 2
+      - 9352.6
+  - - - 128
+      - 6784
+      - 1
+      - 1280
+    - - 4
+      - 7754.33
+  - - - 1408
+      - 3584
+      - 1
+      - 3328
+    - - 0
+      - 9786.39
+  - - - 5056
+      - 1408
+      - 1
+      - 1280
+    - - 0
+      - 10146.8
+  - - - 1408
+      - 5888
+      - 1
+      - 3328
+    - - 0
+      - 9870.01
+  - - - 1856
+      - 256
+      - 1
+      - 256
+    - - 2
+      - 5864.32
+  - - - 256
+      - 4288
+      - 1
+      - 1280
+    - - 4
+      - 7479.54
+  - - - 2368
+      - 2944
+      - 1
+      - 256
+    - - 2
+      - 9284.14
+  - - - 3584
+      - 1856
+      - 1
+      - 1280
+    - - 1
+      - 9548.99
+  - - - 3584
+      - 448
+      - 1
+      - 256
+    - - 2
+      - 7428.18
+  - - - 2944
+      - 4288
+      - 1
+      - 3328
+    - - 1
+      - 8826.91
+  - - - 256
+      - 6784
+      - 1
+      - 256
+    - - 4
+      - 8154.74
+  - - - 2944
+      - 704
+      - 1
+      - 3328
+    - - 4
+      - 9746.04
+  - - - 3584
+      - 3584
+      - 1
+      - 256
+    - - 4
+      - 9821.04
+  - - - 3584
+      - 5056
+      - 1
+      - 256
+    - - 1
+      - 9724.09
+  - - - 6784
+      - 128
+      - 1
+      - 256
+    - - 2
+      - 4553.75
+  - - - 704
+      - 448
+      - 1
+      - 256
+    - - 2
+      - 4036.82
+  - - - 1408
+      - 3584
+      - 1
+      - 256
+    - - 4
+      - 9222.26
+  - - - 6784
+      - 3584
+      - 1
+      - 256
+    - - 3
+      - 10088.4
+  - - - 128
+      - 1408
+      - 1
+      - 256
+    - - 2
+      - 3068.15
+  - - - 1024
+      - 704
+      - 1
+      - 3328
+    - - 4
+      - 8505.09
+  - - - 6784
+      - 448
+      - 1
+      - 256
+    - - 2
+      - 8781.97
+  - - - 128
+      - 4288
+      - 1
+      - 256
+    - - 4
+      - 5298.33
+  - - - 704
+      - 448
+      - 1
+      - 3328
+    - - 2
+      - 5483.54
+  - - - 5056
+      - 1856
+      - 1
+      - 256
+    - - 2
+      - 9800.48
+  - - - 3584
+      - 3584
+      - 1
+      - 1280
+    - - 1
+      - 9746.85
+  - - - 448
+      - 2368
+      - 1
+      - 1280
+    - - 2
+      - 7300.33
+  - - - 64
+      - 6784
+      - 1
+      - 3328
+    - - 2
+      - 7505.22
+  - - - 2944
+      - 256
+      - 1
+      - 1280
+    - - 2
+      - 8506.14
+  - - - 5056
+      - 2368
+      - 1
+      - 3328
+    - - 0
+      - 9287.22
+  - - - 2944
+      - 4288
+      - 1
+      - 256
+    - - 3
+      - 9729.41
+  - - - 1408
+      - 3584
+      - 1
+      - 1280
+    - - 0
+      - 10529.7
+  - - - 2368
+      - 64
+      - 1
+      - 256
+    - - 2
+      - 2530.23
+  - - - 1408
+      - 448
+      - 1
+      - 3328
+    - - 2
+      - 7595.53
+  - - - 2368
+      - 256
+      - 1
+      - 256
+    - - 2
+      - 5527.67
+  - - - 2368
+      - 6784
+      - 1
+      - 3328
+    - - 1
+      - 8953.93
+  - - - 1856
+      - 448
+      - 1
+      - 1280
+    - - 2
+      - 7425.14
+  - - - 1024
+      - 1024
+      - 1
+      - 256
+    - - 4
+      - 7247.57
+  - - - 64
+      - 6784
+      - 1
+      - 256
+    - - 2
+      - 5121.13
+  - - - 3584
+      - 704
+      - 1
+      - 1280
+    - - 2
+      - 9563.13
+  - - - 256
+      - 2368
+      - 1
+      - 1280
+    - - 4
+      - 7006.63
+  - - - 3584
+      - 448
+      - 1
+      - 3328
+    - - 2
+      - 8685.79
+  - - - 704
+      - 2368
+      - 1
+      - 3328
+    - - 4
+      - 8648.47
+  - - - 64
+      - 5056
+      - 1
+      - 1280
+    - - 2
+      - 5320.05
+  - - - 2944
+      - 2944
+      - 1
+      - 1280
+    - - 3
+      - 9561.59
+  - - - 6784
+      - 704
+      - 1
+      - 3328
+    - - 0
+      - 9045.03
+  - - - 2368
+      - 256
+      - 1
+      - 1280
+    - - 4
+      - 6969.35
+  - - - 1408
+      - 2944
+      - 1
+      - 3328
+    - - 1
+      - 10123.3
+  - - - 2368
+      - 448
+      - 1
+      - 1280
+    - - 2
+      - 7228.36
+  - - - 128
+      - 3584
+      - 1
+      - 256
+    - - 2
+      - 5682.38
+  - - - 704
+      - 448
+      - 1
+      - 1280
+    - - 2
+      - 5205.16
+  - - - 128
+      - 5056
+      - 1
+      - 256
+    - - 2
+      - 6195.31
+  - - - 3584
+      - 2368
+      - 1
+      - 256
+    - - 4
+      - 9382.54
+  - - - 5888
+      - 5056
+      - 1
+      - 1280
+    - - 1
+      - 9547.75
+  - - - 4288
+      - 256
+      - 1
+      - 1280
+    - - 2
+      - 7488.41
+  - - - 3584
+      - 3584
+      - 1
+      - 3328
+    - - 0
+      - 9093.38
+  - - - 4288
+      - 2944
+      - 1
+      - 3328
+    - - 0
+      - 8873.73
+  - - - 4288
+      - 704
+      - 1
+      - 1280
+    - - 2
+      - 9616.95
+  - - - 256
+      - 5056
+      - 1
+      - 1280
+    - - 4
+      - 9393.29
+  - - - 2944
+      - 5888
+      - 1
+      - 3328
+    - - 0
+      - 9051.66
+  - - - 6784
+      - 5888
+      - 1
+      - 1280
+    - - 0
+      - 9233.25
+  - - - 5888
+      - 4288
+      - 1
+      - 1280
+    - - 1
+      - 9501.0
+  - - - 256
+      - 1408
+      - 1
+      - 1280
+    - - 2
+      - 5898.03
+  - - - 5888
+      - 448
+      - 1
+      - 3328
+    - - 2
+      - 8887.68
+  - - - 2368
+      - 4288
+      - 1
+      - 1280
+    - - 3
+      - 9606.08
+  - - - 128
+      - 2368
+      - 1
+      - 256
+    - - 2
+      - 3908.56
+  - - - 5056
+      - 2944
+      - 1
+      - 3328
+    - - 0
+      - 9144.59
+  - - - 2944
+      - 3584
+      - 1
+      - 256
+    - - 3
+      - 9804.81
+  - - - 1408
+      - 1408
+      - 1
+      - 3328
+    - - 1
+      - 9702.1
+  - - - 64
+      - 3584
+      - 1
+      - 256
+    - - 2
+      - 3829.42
+  - - - 3584
+      - 704
+      - 1
+      - 256
+    - - 2
+      - 8599.29
+  - - - 3584
+      - 1408
+      - 1
+      - 3328
+    - - 0
+      - 9932.6
+  - - - 2944
+      - 6784
+      - 1
+      - 1280
+    - - 0
+      - 9563.98
+  - - - 4288
+      - 448
+      - 1
+      - 3328
+    - - 4
+      - 8786.01
+  - - - 6784
+      - 704
+      - 1
+      - 1280
+    - - 1
+      - 9639.7
+  - - - 256
+      - 4288
+      - 1
+      - 256
+    - - 4
+      - 6726.31
+  - - - 5888
+      - 1024
+      - 1
+      - 3328
+    - - 1
+      - 9823.25
+  - - - 704
+      - 6784
+      - 1
+      - 1280
+    - - 0
+      - 9897.52
+  - - - 5888
+      - 128
+      - 1
+      - 256
+    - - 4
+      - 4498.39
+  - - - 2368
+      - 448
+      - 1
+      - 3328
+    - - 2
+      - 7577.26
+  - - - 1856
+      - 5056
+      - 1
+      - 3328
+    - - 0
+      - 8776.68
+  - - - 5888
+      - 5056
+      - 1
+      - 3328
+    - - 1
+      - 8934.98
+  - - - 128
+      - 5056
+      - 1
+      - 3328
+    - - 2
+      - 7780.3
+  - - - 3584
+      - 6784
+      - 1
+      - 1280
+    - - 1
+      - 9315.93
+  - - - 4288
+      - 1408
+      - 1
+      - 1280
+    - - 0
+      - 9878.29
+  - - - 4288
+      - 2368
+      - 1
+      - 256
+    - - 3
+      - 10023.1
+  - - - 2944
+      - 5056
+      - 1
+      - 1280
+    - - 1
+      - 9559.28
+  - - - 448
+      - 6784
+      - 1
+      - 256
+    - - 3
+      - 8073.21
+  - - - 6784
+      - 2368
+      - 1
+      - 3328
+    - - 0
+      - 9217.87
+  - - - 256
+      - 1024
+      - 1
+      - 1280
+    - - 4
+      - 6291.26
+  - - - 4288
+      - 128
+      - 1
+      - 256
+    - - 2
+      - 3719.24
+  - - - 4288
+      - 1856
+      - 1
+      - 3328
+    - - 1
+      - 9301.48
+  - - - 1856
+      - 5056
+      - 1
+      - 256
+    - - 3
+      - 9168.74
+  - - - 5056
+      - 3584
+      - 1
+      - 3328
+    - - 0
+      - 9078.54
+  - - - 128
+      - 5888
+      - 1
+      - 1280
+    - - 4
+      - 8613.0
+  - - - 2368
+      - 1408
+      - 1
+      - 1280
+    - - 2
+      - 9824.72
+  - - - 5056
+      - 2944
+      - 1
+      - 1280
+    - - 0
+      - 9585.65
+  - - - 3584
+      - 256
+      - 1
+      - 256
+    - - 4
+      - 6444.72
+  - - - 128
+      - 2944
+      - 1
+      - 256
+    - - 2
+      - 4859.29
+  - - - 448
+      - 1856
+      - 1
+      - 256
+    - - 2
+      - 6371.46
+  - - - 1856
+      - 6784
+      - 1
+      - 3328
+    - - 1
+      - 8689.05
+  - - - 3584
+      - 128
+      - 1
+      - 3328
+    - - 2
+      - 7413.72
+  - - - 1024
+      - 448
+      - 1
+      - 1280
+    - - 2
+      - 7259.14
+  - - - 3584
+      - 1024
+      - 1
+      - 256
+    - - 3
+      - 9230.84
+  - - - 256
+      - 704
+      - 1
+      - 256
+    - - 2
+      - 3038.15
+  - - - 4288
+      - 1024
+      - 1
+      - 1280
+    - - 4
+      - 9953.1
+  - - - 5888
+      - 128
+      - 1
+      - 3328
+    - - 4
+      - 8456.42
+  - - - 2944
+      - 1408
+      - 1
+      - 1280
+    - - 0
+      - 10534.8
+  - - - 2944
+      - 1856
+      - 1
+      - 3328
+    - - 2
+      - 9243.57
+  - - - 3584
+      - 5888
+      - 1
+      - 1280
+    - - 1
+      - 9375.73
+  - - - 2944
+      - 5056
+      - 1
+      - 256
+    - - 4
+      - 9833.77
+  - - - 5888
+      - 256
+      - 1
+      - 3328
+    - - 2
+      - 9430.31
+  - - - 1856
+      - 5888
+      - 1
+      - 3328
+    - - 1
+      - 9146.62
+  - - - 3584
+      - 1408
+      - 1
+      - 256
+    - - 4
+      - 9183.42
+  - - - 5056
+      - 448
+      - 1
+      - 1280
+    - - 2
+      - 9483.74
+  - - - 3584
+      - 1856
+      - 1
+      - 3328
+    - - 1
+      - 9094.27
+  - - - 1408
+      - 704
+      - 1
+      - 1280
+    - - 4
+      - 8828.82
+  - - - 2368
+      - 4288
+      - 1
+      - 3328
+    - - 3
+      - 8728.44
+  - - - 704
+      - 256
+      - 1
+      - 3328
+    - - 2
+      - 4860.05
+  - - - 448
+      - 2944
+      - 1
+      - 256
+    - - 2
+      - 7144.19
+  - - - 2944
+      - 6784
+      - 1
+      - 256
+    - - 4
+      - 9454.98
+  - - - 2368
+      - 2368
+      - 1
+      - 1280
+    - - 3
+      - 10075.2
+  - - - 64
+      - 2944
+      - 1
+      - 256
+    - - 2
+      - 3207.61
+  - - - 5056
+      - 256
+      - 1
+      - 1280
+    - - 2
+      - 9125.01
+  - - - 1024
+      - 4288
+      - 1
+      - 3328
+    - - 4
+      - 8979.4
+  - - - 448
+      - 2368
+      - 1
+      - 256
+    - - 2
+      - 6629.75
+  - - - 2944
+      - 2368
+      - 1
+      - 3328
+    - - 0
+      - 9215.85
+  - - - 1024
+      - 1856
+      - 1
+      - 1280
+    - - 1
+      - 9175.83
+  - - - 5056
+      - 128
+      - 1
+      - 1280
+    - - 4
+      - 6941.45
+  - - - 1408
+      - 2368
+      - 1
+      - 256
+    - - 4
+      - 9058.49
+  - - - 1408
+      - 1408
+      - 1
+      - 256
+    - - 0
+      - 8107.91
+  - - - 5056
+      - 128
+      - 1
+      - 3328
+    - - 2
+      - 7551.95
+  - - - 448
+      - 704
+      - 1
+      - 256
+    - - 2
+      - 4128.67
+  - - - 128
+      - 5056
+      - 1
+      - 1280
+    - - 4
+      - 7500.14
+  - - - 3584
+      - 5056
+      - 1
+      - 1280
+    - - 1
+      - 9474.57
+  - - - 704
+      - 256
+      - 1
+      - 1280
+    - - 2
+      - 4506.74
+  - - - 64
+      - 6784
+      - 1
+      - 1280
+    - - 4
+      - 7091.03
+  - - - 704
+      - 4288
+      - 1
+      - 256
+    - - 2
+      - 8169.53
+  - - - 5888
+      - 2368
+      - 1
+      - 1280
+    - - 1
+      - 9546.43
+  - - - 2368
+      - 5888
+      - 1
+      - 1280
+    - - 3
+      - 9521.54
+  - - - 5888
+      - 256
+      - 1
+      - 1280
+    - - 2
+      - 8823.09
+  - - - 2368
+      - 1856
+      - 1
+      - 3328
+    - - 4
+      - 9140.47
+  - - - 2944
+      - 704
+      - 1
+      - 256
+    - - 2
+      - 8526.86
+  - - - 256
+      - 704
+      - 1
+      - 3328
+    - - 2
+      - 4877.61
+  - - - 704
+      - 3584
+      - 1
+      - 256
+    - - 4
+      - 8506.99
+  - - - 704
+      - 2944
+      - 1
+      - 3328
+    - - 4
+      - 9652.09
+  - - - 448
+      - 1024
+      - 1
+      - 3328
+    - - 4
+      - 7914.81
+  - - - 6784
+      - 1408
+      - 1
+      - 3328
+    - - 3
+      - 8972.6
+  - - - 256
+      - 2368
+      - 1
+      - 3328
+    - - 2
+      - 7311.37
+  - - - 6784
+      - 2944
+      - 1
+      - 1280
+    - - 0
+      - 9426.05
+  - - - 4288
+      - 704
+      - 1
+      - 256
+    - - 2
+      - 8759.38
+  - - - 5888
+      - 704
+      - 1
+      - 256
+    - - 2
+      - 9308.13
+  - - - 256
+      - 5888
+      - 1
+      - 3328
+    - - 4
+      - 9472.51
+  - - - 6784
+      - 1024
+      - 1
+      - 1280
+    - - 1
+      - 10003.9
+  - - - 1024
+      - 128
+      - 1
+      - 256
+    - - 4
+      - 2198.92
+  - - - 6784
+      - 3584
+      - 1
+      - 1280
+    - - 1
+      - 9415.94
+  - - - 1408
+      - 2944
+      - 1
+      - 1280
+    - - 1
+      - 10567.4
+  - - - 256
+      - 1856
+      - 1
+      - 256
+    - - 4
+      - 5761.41
+  - - - 1408
+      - 2368
+      - 1
+      - 3328
+    - - 2
+      - 9431.53
+  - - - 1408
+      - 256
+      - 1
+      - 3328
+    - - 2
+      - 6242.76
+  - - - 3584
+      - 1856
+      - 1
+      - 256
+    - - 4
+      - 9448.49
+  - - - 4288
+      - 3584
+      - 1
+      - 1280
+    - - 1
+      - 9950.68
+  - - - 2368
+      - 448
+      - 1
+      - 256
+    - - 2
+      - 6466.06
+  - - - 4288
+      - 256
+      - 1
+      - 3328
+    - - 2
+      - 8184.05
+  - - - 5056
+      - 2368
+      - 1
+      - 256
+    - - 3
+      - 9886.74
+  - - - 4288
+      - 704
+      - 1
+      - 3328
+    - - 4
+      - 9293.0
+  - - - 448
+      - 3584
+      - 1
+      - 256
+    - - 4
+      - 7488.33
+  - - - 2944
+      - 1408
+      - 1
+      - 3328
+    - - 0
+      - 10138.1
+  - - - 1408
+      - 448
+      - 1
+      - 256
+    - - 2
+      - 6021.8
+  - - - 1408
+      - 1856
+      - 1
+      - 3328
+    - - 2
+      - 9702.83
+  - - - 704
+      - 2944
+      - 1
+      - 256
+    - - 4
+      - 8557.46
+  - - - 256
+      - 2368
+      - 1
+      - 256
+    - - 2
+      - 5868.27
+  - - - 2368
+      - 1408
+      - 1
+      - 256
+    - - 4
+      - 9079.93
+  - - - 704
+      - 2368
+      - 1
+      - 256
+    - - 2
+      - 7817.1
+  - - - 2944
+      - 448
+      - 1
+      - 1280
+    - - 2
+      - 8136.41
+  - - - 5888
+      - 2368
+      - 1
+      - 3328
+    - - 0
+      - 9154.56
+  - - - 448
+      - 1856
+      - 1
+      - 1280
+    - - 2
+      - 7463.72
+  - - - 5056
+      - 128
+      - 1
+      - 256
+    - - 2
+      - 4411.3
+  - - - 1408
+      - 1024
+      - 1
+      - 256
+    - - 4
+      - 7773.28
+  - - - 448
+      - 1024
+      - 1
+      - 256
+    - - 4
+      - 5807.27
+  - - - 5056
+      - 6784
+      - 1
+      - 1280
+    - - 1
+      - 9249.69
+  - - - 3584
+      - 5056
+      - 1
+      - 3328
+    - - 1
+      - 9171.2
+  - - - 2368
+      - 2944
+      - 1
+      - 3328
+    - - 1
+      - 9482.88
+  - - - 448
+      - 448
+      - 1
+      - 1280
+    - - 2
+      - 4968.55
+  - - - 2368
+      - 3584
+      - 1
+      - 256
+    - - 2
+      - 9299.23
+  - - - 1024
+      - 256
+      - 1
+      - 1280
+    - - 2
+      - 6137.86
+  - - - 5056
+      - 3584
+      - 1
+      - 1280
+    - - 1
+      - 9565.16
+  - - - 1856
+      - 2944
+      - 1
+      - 1280
+    - - 2
+      - 9811.49
+  - - - 2944
+      - 1408
+      - 1
+      - 256
+    - - 3
+      - 9449.32
+  - - - 4288
+      - 1408
+      - 1
+      - 3328
+    - - 0
+      - 9784.44
+  - - - 1408
+      - 128
+      - 1
+      - 256
+    - - 2
+      - 3098.65
+  - - - 4288
+      - 5056
+      - 1
+      - 1280
+    - - 1
+      - 9300.41
+  - - - 256
+      - 1024
+      - 1
+      - 3328
+    - - 4
+      - 6952.32
+  - - - 448
+      - 3584
+      - 1
+      - 3328
+    - - 2
+      - 8304.8
+  - - - 1408
+      - 256
+      - 1
+      - 256
+    - - 4
+      - 4648.01
+  - - - 128
+      - 5888
+      - 1
+      - 3328
+    - - 4
+      - 9012.38
+  - - - 2368
+      - 1408
+      - 1
+      - 3328
+    - - 2
+      - 9337.46
+  - - - 5888
+      - 448
+      - 1
+      - 256
+    - - 2
+      - 8242.34
+  - - - 6784
+      - 5056
+      - 1
+      - 1280
+    - - 1
+      - 9136.47
+  - - - 5056
+      - 704
+      - 1
+      - 1280
+    - - 2
+      - 9761.12
+  - - - 1408
+      - 256
+      - 1
+      - 1280
+    - - 2
+      - 5848.2
+  - - - 4288
+      - 6784
+      - 1
+      - 1280
+    - - 1
+      - 9245.59
+  - - - 64
+      - 3584
+      - 1
+      - 1280
+    - - 2
+      - 5497.17
+  - - - 2368
+      - 1024
+      - 1
+      - 256
+    - - 4
+      - 8405.19
+  - - - 2944
+      - 1856
+      - 1
+      - 256
+    - - 4
+      - 9522.52
+  - - - 4288
+      - 3584
+      - 1
+      - 256
+    - - 3
+      - 10201.8
+  - - - 5056
+      - 1856
+      - 1
+      - 1280
+    - - 2
+      - 9372.24
+  - - - 2368
+      - 256
+      - 1
+      - 3328
+    - - 2
+      - 7287.88
+  - - - 5888
+      - 3584
+      - 1
+      - 1280
+    - - 1
+      - 9583.7
+  - - - 5888
+      - 128
+      - 1
+      - 1280
+    - - 2
+      - 7378.41
+  - - - 1024
+      - 2944
+      - 1
+      - 256
+    - - 1
+      - 7833.3
+  - - - 256
+      - 3584
+      - 1
+      - 1280
+    - - 4
+      - 8193.26
+  - - - 704
+      - 5056
+      - 1
+      - 256
+    - - 2
+      - 8524.57
+  - - - 3584
+      - 5888
+      - 1
+      - 3328
+    - - 1
+      - 9032.39
+  - - - 1856
+      - 5888
+      - 1
+      - 1280
+    - - 0
+      - 9876.14
+  - - - 5056
+      - 448
+      - 1
+      - 3328
+    - - 2
+      - 9311.24
+  - - - 4288
+      - 1856
+      - 1
+      - 256
+    - - 3
+      - 9650.45
+  - - - 1856
+      - 256
+      - 1
+      - 3328
+    - - 2
+      - 8009.83
+  - - - 1856
+      - 2944
+      - 1
+      - 256
+    - - 4
+      - 9460.5
+  - - - 64
+      - 5888
+      - 1
+      - 1280
+    - - 2
+      - 6183.71
+  - - - 1024
+      - 4288
+      - 1
+      - 1280
+    - - 4
+      - 9002.43
+  - - - 4288
+      - 1024
+      - 1
+      - 3328
+    - - 4
+      - 9010.16
+  - - - 1024
+      - 5056
+      - 1
+      - 3328
+    - - 1
+      - 10033.7
+  - - - 1024
+      - 1856
+      - 1
+      - 3328
+    - - 1
+      - 9461.98
+  - - - 704
+      - 704
+      - 1
+      - 1280
+    - - 2
+      - 8079.22
+  - - - 3584
+      - 256
+      - 1
+      - 1280
+    - - 2
+      - 8113.59
+  - - - 3584
+      - 128
+      - 1
+      - 1280
+    - - 2
+      - 6382.43
+  - - - 128
+      - 1856
+      - 1
+      - 256
+    - - 2
+      - 3928.27
+  - - - 64
+      - 4288
+      - 1
+      - 256
+    - - 2
+      - 3525.69
+  - - - 448
+      - 1856
+      - 1
+      - 3328
+    - - 2
+      - 7703.83
+  - - - 5056
+      - 4288
+      - 1
+      - 256
+    - - 3
+      - 10107.1
+  - - - 1024
+      - 448
+      - 1
+      - 256
+    - - 4
+      - 5448.16
+  - - - 256
+      - 704
+      - 1
+      - 1280
+    - - 2
+      - 4480.79
+  - - - 6784
+      - 6784
+      - 1
+      - 3328
+    - - 0
+      - 8825.99
+  - - - 448
+      - 5888
+      - 1
+      - 1280
+    - - 1
+      - 8897.16
+  - - - 6784
+      - 256
+      - 1
+      - 1280
+    - - 2
+      - 9174.33
+  - - - 256
+      - 2944
+      - 1
+      - 1280
+    - - 4
+      - 8705.17
+  - - - 2368
+      - 5888
+      - 1
+      - 3328
+    - - 0
+      - 8961.13
+  - - - 704
+      - 1024
+      - 1
+      - 3328
+    - - 2
+      - 8549.98
+  - - - 2368
+      - 1856
+      - 1
+      - 1280
+    - - 4
+      - 9935.02
+  - - - 128
+      - 6784
+      - 1
+      - 256
+    - - 4
+      - 6523.79
+  - - - 2368
+      - 704
+      - 1
+      - 256
+    - - 4
+      - 7827.71
+  - - - 256
+      - 1856
+      - 1
+      - 3328
+    - - 2
+      - 8178.63
+  - - - 1856
+      - 128
+      - 1
+      - 256
+    - - 2
+      - 3891.07
+  - - - 1856
+      - 5056
+      - 1
+      - 1280
+    - - 1
+      - 9339.85
+  - - - 2944
+      - 1024
+      - 1
+      - 1280
+    - - 0
+      - 10120.8
+  - - - 2368
+      - 4288
+      - 1
+      - 256
+    - - 3
+      - 9677.61
+  - - - 704
+      - 1408
+      - 1
+      - 256
+    - - 4
+      - 7495.8
+  - - - 6784
+      - 1856
+      - 1
+      - 3328
+    - - 1
+      - 8970.13
+  - - - 4288
+      - 5888
+      - 1
+      - 3328
+    - - 1
+      - 8828.9
+  - - - 256
+      - 1408
+      - 1
+      - 256
+    - - 4
+      - 4665.4
+  - - - 1024
+      - 2944
+      - 1
+      - 3328
+    - - 1
+      - 9661.03
+  - - - 256
+      - 6784
+      - 1
+      - 1280
+    - - 4
+      - 8854.91
+  - - - 4288
+      - 6784
+      - 1
+      - 3328
+    - - 1
+      - 8739.96
+  - - - 6784
+      - 128
+      - 1
+      - 1280
+    - - 2
+      - 7131.48
+  - - - 1856
+      - 448
+      - 1
+      - 256
+    - - 2
+      - 6385.7
+  - - - 6784
+      - 3584
+      - 1
+      - 3328
+    - - 0
+      - 8947.64
+  - - - 2368
+      - 5056
+      - 1
+      - 1280
+    - - 0
+      - 9713.59
+  - - - 1408
+      - 2368
+      - 1
+      - 1280
+    - - 4
+      - 9527.39
+  - - - 6784
+      - 256
+      - 1
+      - 256
+    - - 2
+      - 7136.55
+  - - - 256
+      - 5056
+      - 1
+      - 3328
+    - - 4
+      - 9205.33
+  - - - 128
+      - 4288
+      - 1
+      - 1280
+    - - 2
+      - 6335.38
+  - - - 448
+      - 704
+      - 1
+      - 3328
+    - - 2
+      - 5485.67
+  - - - 1024
+      - 2368
+      - 1
+      - 1280
+    - - 4
+      - 9086.9
+  - - - 1856
+      - 704
+      - 1
+      - 3328
+    - - 2
+      - 9307.45
+  - - - 5888
+      - 6784
+      - 1
+      - 3328
+    - - 1
+      - 8815.15
+  - - - 704
+      - 256
+      - 1
+      - 256
+    - - 2
+      - 3068.15
+  - - - 6784
+      - 448
+      - 1
+      - 3328
+    - - 2
+      - 9063.53
+- null
+- null
+- DeviceEfficiency
+- Euclidean

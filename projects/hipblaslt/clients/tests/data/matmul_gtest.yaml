@@ -32,6 +32,11 @@ Definitions:
     - { transA: T, transB: N }
     - { transA: T, transB: T }
 
+  - &gfx90c_transposed_range
+    - { transA: N, transB: T }
+    - { transA: T, transB: N }
+    - { transA: T, transB: T }
+
   - &complex_transA_transB_range
     - { transA: N, transB: N }
     - { transA: N, transB: T }
@@ -285,6 +290,71 @@ Tests:
   alpha: 1.0
   beta: 0.0
   initialization: fp16_accumulator_probe
+  unit_check: 1
+  gpu_arch: '90c'
+
+- name: gfx90c_transpose_fp32
+  category: pre_checkin
+  function:
+    matmul:
+      - { a_type: f32_r, b_type: f32_r, c_type: f32_r, d_type: f32_r,
+          compute_type: c_f32_r, scale_type: f32_r }
+  matrix_size:
+    - { M: 64, N: 96, K: 128 }
+    - { M: 31, N: 47, K: 65, lda: 72, ldb: 72, ldc: 40, ldd: 40 }
+  transA_transB: *gfx90c_transposed_range
+  beta: [ 0.0, 1.0 ]
+  batch_count: [ 1, 3 ]
+  initialization: [ integer_exact, norm_dist ]
+  unit_check: 1
+  norm_check: 1
+  gpu_arch: '90c'
+
+- name: gfx90c_transpose_fp16_fallback
+  category: pre_checkin
+  function:
+    matmul:
+      - { a_type: f16_r, b_type: f16_r, c_type: f16_r, d_type: f16_r,
+          compute_type: c_f16_r, scale_type: f32_r }
+  matrix_size:
+    - { M: 64, N: 96, K: 128 }
+    - { M: 31, N: 47, K: 65, lda: 72, ldb: 72, ldc: 40, ldd: 40 }
+  transA_transB: *gfx90c_transposed_range
+  beta: [ 0.0, 1.0 ]
+  batch_count: [ 1, 3 ]
+  initialization: integer_exact
+  unit_check: 1
+  gpu_arch: '90c'
+
+- name: gfx90c_transpose_fp16_hpa
+  category: pre_checkin
+  function:
+    matmul:
+      - { a_type: f16_r, b_type: f16_r, c_type: f16_r, d_type: f16_r,
+          compute_type: c_f32_r, scale_type: f32_r }
+  matrix_size:
+    - { M: 64, N: 96, K: 128 }
+    - { M: 31, N: 47, K: 65, lda: 72, ldb: 72, ldc: 40, ldd: 40 }
+  transA_transB: *gfx90c_transposed_range
+  beta: [ 0.0, 1.0 ]
+  batch_count: [ 1, 3 ]
+  initialization: [ integer_exact, fp16_accumulator_probe ]
+  unit_check: 1
+  gpu_arch: '90c'
+
+- name: gfx90c_transpose_fp16_pedantic
+  category: pre_checkin
+  function:
+    matmul:
+      - { a_type: f16_r, b_type: f16_r, c_type: f16_r, d_type: f16_r,
+          compute_type: c_f16_pedantic_r, scale_type: f32_r }
+  matrix_size:
+    - { M: 64, N: 96, K: 128 }
+    - { M: 31, N: 47, K: 65, lda: 72, ldb: 72, ldc: 40, ldd: 40 }
+  transA_transB: *gfx90c_transposed_range
+  beta: [ 0.0, 1.0 ]
+  batch_count: [ 1, 3 ]
+  initialization: [ integer_exact, norm_dist ]
   unit_check: 1
   gpu_arch: '90c'
 

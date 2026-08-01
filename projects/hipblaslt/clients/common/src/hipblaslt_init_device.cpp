@@ -672,7 +672,8 @@ void hipblaslt_init_device(ABC_dims                 abc,
                            size_t                   lda,
                            size_t                   stride,
                            size_t                   batch_count,
-                           int                      norm_dist_one_special_type = -1)
+                           int                      norm_dist_one_special_type = -1,
+                           bool                     transposed = false)
 {
     using T_real = get_real_type_t<T>;
 
@@ -1026,12 +1027,12 @@ void hipblaslt_init_device(ABC_dims                 abc,
                     // Match integer_exact B: use effective_stride in fill_batch so batch_count>1 with
                     // stride==0 still covers every batch slab (stride_b defaults to 0 in Arguments).
                     size_t effective_stride = stride ? std::max(stride, lda * N) : lda * N;
-                    fill_batch(A, M, N, lda, effective_stride, batch_count, [effective_stride, lda] __host__ __device__ (size_t idx) -> T {
+                    fill_batch(A, M, N, lda, effective_stride, batch_count, [effective_stride, lda, transposed] __host__ __device__ (size_t idx) -> T {
                         auto b        = idx / effective_stride;
                         auto in_batch = idx - b * effective_stride;
                         auto n        = in_batch / lda;
-                        auto k        = in_batch - n * lda;
-                        (void)n;
+                        auto row      = in_batch - n * lda;
+                        auto k        = transposed ? n : row;
                         // For K=256, FP32 accumulation computes 2048+255=2303
                         // (stored as FP16 2304). Sequential FP16 accumulation
                         // stays at 2048 because every +1 is a halfway tie.
@@ -1129,69 +1130,70 @@ void hipblaslt_init_device(ABC_dims                 abc,
                            hipDataType              type,
                            size_t                   stride,
                            size_t                   batch_count,
-                           int                      norm_dist_one_special_type)
+                           int                      norm_dist_one_special_type,
+                           bool                     transposed)
 {
     switch(type)
     {
     case HIP_R_32F:
         hipblaslt_init_device<float>(
-            abc, init, is_nan, static_cast<float*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type);
+            abc, init, is_nan, static_cast<float*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type, transposed);
         break;
     case HIP_R_64F:
         hipblaslt_init_device<double>(
-            abc, init, is_nan, static_cast<double*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type);
+            abc, init, is_nan, static_cast<double*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type, transposed);
         break;
     case HIP_R_16F:
         hipblaslt_init_device<hipblasLtHalf>(
-            abc, init, is_nan, static_cast<hipblasLtHalf*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type);
+            abc, init, is_nan, static_cast<hipblasLtHalf*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type, transposed);
         break;
     case HIP_R_16BF:
         hipblaslt_init_device<hip_bfloat16>(
-            abc, init, is_nan, static_cast<hip_bfloat16*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type);
+            abc, init, is_nan, static_cast<hip_bfloat16*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type, transposed);
         break;
 #if HIP_FP8_TYPE_FNUZ
     case HIP_R_8F_E4M3_FNUZ:
         hipblaslt_init_device<hipblaslt_f8_fnuz>(
-            abc, init, is_nan, static_cast<hipblaslt_f8_fnuz*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type);
+            abc, init, is_nan, static_cast<hipblaslt_f8_fnuz*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type, transposed);
         break;
     case HIP_R_8F_E5M2_FNUZ:
         hipblaslt_init_device<hipblaslt_bf8_fnuz>(
-            abc, init, is_nan, static_cast<hipblaslt_bf8_fnuz*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type);
+            abc, init, is_nan, static_cast<hipblaslt_bf8_fnuz*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type, transposed);
         break;
 #endif
 #if HIP_FP8_TYPE_OCP
     case HIP_R_8F_E4M3:
         hipblaslt_init_device<hipblaslt_f8>(
-            abc, init, is_nan, static_cast<hipblaslt_f8*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type);
+            abc, init, is_nan, static_cast<hipblaslt_f8*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type, transposed);
         break;
     case HIP_R_8F_E5M2:
         hipblaslt_init_device<hipblaslt_bf8>(
-            abc, init, is_nan, static_cast<hipblaslt_bf8*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type);
+            abc, init, is_nan, static_cast<hipblaslt_bf8*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type, transposed);
         break;
 #endif
     case HIP_R_32I:
         hipblaslt_init_device<int32_t>(
-            abc, init, is_nan, static_cast<int32_t*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type);
+            abc, init, is_nan, static_cast<int32_t*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type, transposed);
         break;
     case HIP_R_8I:
         hipblaslt_init_device<hipblasLtInt8>(
-            abc, init, is_nan, static_cast<hipblasLtInt8*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type);
+            abc, init, is_nan, static_cast<hipblasLtInt8*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type, transposed);
         break;
     case HIP_R_8F_UE8M0:
         hipblaslt_init_device<hipblaslt_e8>(
-            abc, init, is_nan, static_cast<hipblaslt_e8*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type);
+            abc, init, is_nan, static_cast<hipblaslt_e8*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type, transposed);
         break;
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wswitch"
     case HIP_R_8F_E5M3_EXT:
 #pragma GCC diagnostic pop
         hipblaslt_init_device<hipblaslt_e5m3>(
-            abc, init, is_nan, static_cast<hipblaslt_e5m3*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type);
+            abc, init, is_nan, static_cast<hipblaslt_e5m3*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type, transposed);
         break;
 #if defined(HIPBLASLT_USE_FP6)
     case static_cast<hipDataType>(HIP_R_6F_E2M3):
         hipblaslt_init_device<hipblaslt_f6x16>(
-            abc, init, is_nan, static_cast<hipblaslt_f6x16*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type);
+            abc, init, is_nan, static_cast<hipblaslt_f6x16*>(A), M, N, lda, stride, batch_count, norm_dist_one_special_type, transposed);
         break;
 #endif
 #if defined(HIPBLASLT_USE_BF6)

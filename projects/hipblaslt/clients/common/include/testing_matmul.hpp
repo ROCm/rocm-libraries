@@ -1801,12 +1801,6 @@ void testing_matmul(const Arguments& arg)
                 << std::endl;
             return;
         }
-        if(arg.transA != 'N' || arg.transB != 'N')
-        {
-            hipblaslt_cout << "Skipping fp16_accumulator_probe: only NN transposes supported"
-                           << std::endl;
-            return;
-        }
         if(arg.grouped_gemm > 0)
         {
             hipblaslt_cout << "Skipping fp16_accumulator_probe: grouped_gemm not supported"
@@ -3023,7 +3017,9 @@ void testing_matmul_with_bias(const Arguments& arg,
                                       TiB,
                                       (do_swizzle_b && stride_b[i] != 0) ? B_row[i] * B_col[i]
                                                                          : stride_b[i],
-                                      num_batches[i]);
+                                      num_batches[i],
+                                      -1,
+                                      transB == HIPBLAS_OP_T);
             }
             else
             {
@@ -3039,7 +3035,9 @@ void testing_matmul_with_bias(const Arguments& arg,
                                           TiB,
                                           (do_swizzle_b && stride_b[i] != 0) ? B_row[i] * B_col[i]
                                                                              : stride_b[i],
-                                          1);
+                                          1,
+                                          -1,
+                                          transB == HIPBLAS_OP_T);
                 }
             }
         }

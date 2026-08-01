@@ -366,11 +366,11 @@ def _extractArchInfo(file: Union[str, Path], validateDeviceIds: bool = True) -> 
     """
     Extracts architecture predicate information from a given logic file.
 
-    The file is expected to have the following format:
-    - Line 0: Minimum required version (e.g., "- {MinimumRequiredVersion: 4.33.0}")
-    - Line 1: Code name of the architecture (e.g., "- aquavanjaram")
-    - Line 2: GFX name of the architecture or a map with variant details (e.g., "- gfx950" or "- {Architecture: gfx950, CUCount: 256}")
-    - Line 3: Device IDs (e.g., "- [Device 1234, Device 5678]")
+    The first four non-comment, non-empty lines are expected to contain:
+    - Minimum required version (e.g., "- {MinimumRequiredVersion: 4.33.0}")
+    - Code name of the architecture (e.g., "- aquavanjaram")
+    - GFX name of the architecture or a map with variant details (e.g., "- gfx950" or "- {Architecture: gfx950, CUCount: 256}")
+    - Device IDs (e.g., "- [Device 1234, Device 5678]")
 
     Args:
         file: Path to a logic file.
@@ -415,10 +415,17 @@ def _extractArchInfo(file: Union[str, Path], validateDeviceIds: bool = True) -> 
             raise LogicFileError(f"No device IDs found: line: {line}")
 
     with open(file, "r") as f:
-        l0(f.readline())
-        name = l1(f.readline())
-        gfx, cu = l2(f.readline())
-        deviceIds = l3(f.readline())
+        header = []
+        for line in f:
+            if line.strip() and not line.lstrip().startswith("#"):
+                header.append(line)
+                if len(header) == 4:
+                    break
+        header.extend([""] * (4 - len(header)))
+        l0(header[0])
+        name = l1(header[1])
+        gfx, cu = l2(header[2])
+        deviceIds = l3(header[3])
 
     if validateDeviceIds:
         try:

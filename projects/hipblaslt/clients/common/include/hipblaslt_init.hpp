@@ -84,7 +84,8 @@ void hipblaslt_init_device(ABC_dims                 ABC_dims,
                            hipDataType              type,
                            size_t                   stride,
                            size_t                   batch_count,
-                           int norm_dist_one_special_type = -1);
+                           int                      norm_dist_one_special_type = -1,
+                           bool                     transposed = false);
 
 /* ============================================================================================ */
 /*! \brief  matrix/vector initialization: */

@@ -4298,22 +4298,11 @@ inline auto getSolutions(
     bool                                          enableEpilogue,
     const int&                                    requestedAlgoCount)
 {
-    auto solutions = library->findTopSolutions(tensile_prob, *hardware, requestedAlgoCount);
-    if constexpr(std::is_same_v<T, RocblasltContractionProblem>)
-    {
-        if(inputs.compute_type == rocblaslt_compute_f16_pedantic
-           && (inputs.trans_a != HIPBLAS_OP_N || inputs.trans_b != HIPBLAS_OP_N))
-        {
-            const char* experimentalHB = getenv("HIPBLASLT_ENABLE_EXPERIMENTAL_HB");
-            if(hardware->description().find("gfx90c") != std::string::npos
-               && experimentalHB != nullptr && std::string(experimentalHB) == "1")
-            {
-                throw rocblaslt_status_not_implemented;
-            }
-        }
-    }
-    return solutions;
+    // Tensile's ordering is the measured catalog ranking for this exact problem.
+    // Preserve it so heuristic selection remains scoped to the catalog predicates.
+    return library->findTopSolutions(tensile_prob, *hardware, requestedAlgoCount);
 }
+
 
 std::vector<std::shared_ptr<TensileLite::ContractionSolution>>
     getBestRawSolutions(RocblasltContractionProblem const& prob,
