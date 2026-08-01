@@ -65,18 +65,18 @@ configure_file("${CMAKE_CURRENT_SOURCE_DIR}/include/rocsparse-config.h.in"
 )
 
 # Guardrail: every feature flag that gates a public header must be registered in
-# the config template above (see cmake/CheckFeatureFlags.cmake). Build-only flags
-# that are intentionally invisible to consumers are excluded explicitly.
+# the config template above (see cmake/CheckFeatureFlags.cmake). EXCLUDE lists
+# flags that appear in a public header but are intentionally build-only and never
+# reach consumers; only ROCSPARSE_WITH_MEMSTAT qualifies (it gates dev-only
+# memory-tracing routines in rocsparse-auxiliary.h). Other build-only flags
+# (ASAN, ROCBLAS, CSC_TRSV, CSC_TRSM) are used solely in src, never in public
+# headers, so the guardrail never sees them and they do not need excluding.
 include(CheckFeatureFlags)
 check_config_header_flags(
   PREFIX   ROCSPARSE_WITH_
   TEMPLATE "${CMAKE_CURRENT_SOURCE_DIR}/include/rocsparse-config.h.in"
   HEADERS  "${CMAKE_CURRENT_SOURCE_DIR}/include"
-  EXCLUDE  ROCSPARSE_WITH_ASAN
-           ROCSPARSE_WITH_MEMSTAT
-           ROCSPARSE_WITH_ROCBLAS
-           ROCSPARSE_WITH_CSC_TRSV
-           ROCSPARSE_WITH_CSC_TRSM
+  EXCLUDE  ROCSPARSE_WITH_MEMSTAT
 )
 
 # Public rocSPARSE headers
