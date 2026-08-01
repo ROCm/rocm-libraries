@@ -22,8 +22,8 @@
  * ************************************************************************ */
 
 /*!\file
- * \brief hipsparse-version.h provides the configured hipSPARSE version. Build-time
- * feature configuration lives in hipsparse-config.h.
+ * \brief hipsparse-version.h provides the configured hipSPARSE version.
+ *  Build-time feature configuration lives in hipsparse-config.h.
  */
 
 #ifndef HIPSPARSE_VERSION_H
