@@ -37,8 +37,10 @@
 /* Build-time feature flags baked in at compile time. */
 
 /* hipSPARSE 4.7 */
-#cmakedefine HIPSPARSE_WITH_SPMV_BSR
 #cmakedefine HIPSPARSE_WITH_CSC_TRSV
 #cmakedefine HIPSPARSE_WITH_CSC_TRSM
+
+/* hipSPARSE 4.6 */
+#cmakedefine HIPSPARSE_WITH_SPMV_BSR
 
 #endif /* HIPSPARSE_CONFIG_H */

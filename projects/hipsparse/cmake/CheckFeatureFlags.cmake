@@ -3,27 +3,14 @@
 # SPDX-License-Identifier: MIT
 # ########################################################################
 
-# check_config_header_flags() is a configure-time guardrail that keeps the
-# generated config header in sync with the public API.
+# check_config_header_flags(): fail the CMake configure step if a public header
+# uses a <PREFIX>* feature macro that is not declared (#cmakedefine) in the
+# config template (*-config.h.in). This guarantees every consumer-facing flag is
+# baked into the installed header, so a feature cannot silently disappear for
+# users because someone forgot the #cmakedefine. Macros that are purely internal
+# (never seen by consumers) are passed in EXCLUDE.
 #
-# Motivation: build-time feature-flag macros used to gate the *installed* public
-# headers. If a public header is guarded by a macro that is never baked into the
-# installed config header, the guarded API silently disappears for consumers
-# (they never define the macro). This check makes that mistake a hard build
-# error instead of a shipped bug.
-#
-# Rule enforced: every "<PREFIX>*" macro that appears in an installed public
-# header MUST be declared with "#cmakedefine" in the config template, unless it
-# is listed in EXCLUDE (for macros that are intentionally build-only / not
-# consumer-facing, e.g. sanitizer or memory-tracing dev toggles).
-#
-# Usage:
-#   check_config_header_flags(
-#     PREFIX   HIPSPARSE_WITH_
-#     TEMPLATE ${CMAKE_CURRENT_SOURCE_DIR}/hipsparse-config.h.in
-#     HEADERS  ${CMAKE_CURRENT_SOURCE_DIR}                   # dir(s) to scan
-#     EXCLUDE                                                # build-only flags
-#   )
+# check_config_header_flags(PREFIX <P> TEMPLATE <file.in> HEADERS <dir>... [EXCLUDE <macro>...])
 function(check_config_header_flags)
   set(oneValueArgs PREFIX TEMPLATE)
   set(multiValueArgs HEADERS EXCLUDE)
