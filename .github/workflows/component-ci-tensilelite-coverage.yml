@@ -56,6 +56,11 @@ jobs:
       # No GPU or client build is needed - coverage-unit skips the client build;
       # the compiler env below is only so rocisa builds during the tox run.
       #
+      # TENSILELITE_COVERAGE_ENFORCE opts this job in to the floors. The tox env
+      # measures for everyone but enforces only on request, because the Math CI
+      # Jenkins job tensilelite-unit-codecov runs the same env for its Codecov
+      # upload and must not be failed by a gate this job owns.
+      #
       # PATH must include the ROCm toolchain bin dirs: setup-rocm sets ROCM_PATH
       # but not PATH, and several characterization tests resolve the assembler
       # via shutil.which("amdclang++"). Without it on PATH they initialize the
@@ -66,6 +71,7 @@ jobs:
         shell: bash
         working-directory: projects/hipblaslt/tensilelite
         env:
+          TENSILELITE_COVERAGE_ENFORCE: "1"
           CXX: ${{ env.ROCM_PATH }}/lib/llvm/bin/amdclang++
           CC: ${{ env.ROCM_PATH }}/lib/llvm/bin/amdclang
           CMAKE_PREFIX_PATH: ${{ env.ROCM_PATH }}

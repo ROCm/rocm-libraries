@@ -116,8 +116,8 @@ file's own statements, matching the bucket table above, so they run slightly hig
 branch-inclusive whole-project numbers in the card's headline. The row count is adjustable via
 `--top-files N` on `tools/coverage_split_summary.py` (default 20; `0` omits the table).
 
-Both floors are enforced in the `coverage-unit` tox environment (`tox -e coverage-unit`), which the
-TensileLite coverage GitHub Actions lane invokes.
+Both floors live in the `coverage-unit` tox environment (`tox -e coverage-unit`), which the
+TensileLite coverage GitHub Actions job invokes.
 
 - **Whole-project floor** (AIHPBLAS-3877). The value lives in exactly one place: `fail_under` under
   `[tool.coverage.report]` in the top-level [`pyproject.toml`](../../../../pyproject.toml). The
@@ -127,6 +127,27 @@ TensileLite coverage GitHub Actions lane invokes.
   file's floor. `tools/coverage_ratchet.py check` (also in the env's `commands_post`) fails the run
   if any file drops below its floor by more than the tolerance (see below). The failure message
   names every file that dropped and prints the one command that raises the floors on purpose.
+
+#### Enforcement is opt-in: `TENSILELITE_COVERAGE_ENFORCE`
+
+Every run **measures** and prints the coverage table. Whether a shortfall **fails** the run is
+opt-in, via `TENSILELITE_COVERAGE_ENFORCE=1`:
+
+```bash
+tox -e coverage-unit                                 # measure and report only
+TENSILELITE_COVERAGE_ENFORCE=1 tox -e coverage-unit  # measure, and fail below either floor
+```
+
+The reason is that this env has a second caller. The Math CI Jenkins job
+`tensilelite-unit-codecov` runs the same `tox -e coverage-unit` to produce the `coverage.xml` it
+uploads to Codecov under the `TensileLite-Unit` flag. It predates these floors, it does not want
+them, and its config lives in `ROCm/rocJenkins`, which this repo cannot change. With enforcement
+unconditional, a floor miss failed that Jenkins stage too (and, because the job runs under `set -e`,
+took the C++ `coverage-cpp` pass down with it). Defaulting off keeps the gate with the job that owns
+it: the GitHub Actions job sets the variable, Jenkins keeps measuring.
+
+Set the variable locally when you want to reproduce exactly what CI gates on. Without it you still
+get the same numbers, just no failure.
 
 #### The tolerance (noise buffer)
 
