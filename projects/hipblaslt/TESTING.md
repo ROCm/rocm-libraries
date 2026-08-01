@@ -520,10 +520,11 @@ it, and the excluded case never runs again. The TensileLogic list has the weaker
 better structure: a real `ticket:` field, keys chosen so they survive library re-tuning, and a check
 that re-validates every entry on each run and reports the ones that no longer reproduce.
 
-**Known gaps.** No mechanism records an owner or a review date. Nothing reports what is currently
-suppressed across all seven places, or for how long. The filename-driven marks in `config_helpers.py`
-are the weakest link by construction, since a path substring cannot carry a ticket, an owner or a
-reason, and the resulting mark is non-strict so a fix is invisible; they have no users in the tree
+**Known gaps.** Only one mechanism records its ticket somewhere a tool could read, and none records a
+review date. Nothing reports what is currently suppressed across all seven places, or for how long.
+The filename-driven marks in `config_helpers.py` are the weakest link by construction, since a path
+substring cannot carry a ticket or a reason at all, and the resulting mark is non-strict so a fix is
+invisible; they have no users in the tree
 today, which makes now the right time to decide whether to keep the machinery at all. Separately,
 `skip-<arch>` marks appear in around 395 config files with free-text justifications, and while most
 are genuine capability statements ("not supported by arch"), some read "not supported yet", which is
@@ -877,7 +878,9 @@ Ordered by value per unit of effort, not by ambition.
 5. **Govern known-bug entries as one thing.** Seven mechanisms suppress or record known-bad behavior
    and none of them share a convention. The proposal, which needs team agreement before it becomes
    policy, is four rules: every entry names its ticket in a machine-readable field rather than a
-   comment; every entry carries an owner and a review date; the suppressed code keeps running wherever
+   comment, so that ownership and status live on the ticket where they can be kept current rather
+   than as a name in a file that goes stale; every entry carries a review date; the suppressed code
+   keeps running wherever
    the mechanism allows, so a fix can be observed rather than assumed; and a fix fails the build so
    the entry deletes itself. Two mechanisms cannot satisfy the third rule today, so adopting this
    means changing them or accepting a stated exception. Start by splitting flaky from known-failing in
@@ -926,42 +929,47 @@ Ordered by value per unit of effort, not by ambition.
 
 Stated plainly, so none of these are a surprise at release time.
 
-| Gap | Regression risk | Impact | Mitigation today | Owner |
+| Gap | Regression risk | Impact | Mitigation today | Tracking |
 | --- | --- | --- | --- | --- |
-| No threshold, alert, or gate on the performance data, so a regression is only caught if someone reads the dashboard | High | High | Per-PR and daily benchmarks against a `develop` reference, retained in rocPTS | TBD |
-| Benchmark coverage is gfx950-only per PR, and gfx942 plus gfx950 daily | Medium | Medium | Correctness coverage is broader; performance risk on other architectures is carried unmeasured | TBD |
-| What Math CI runs and which of its jobs gate is not visible from this repository | Medium | Medium | This document, which is a snapshot and will drift from the internal configuration | TBD |
-| The installed-artifact test lane silently skips the snapshot tests, because syrupy is not part of the installed tree's requirements | Low | Low | The goldens are already enforced upstream in the source lanes; the skip is stated in `conftest.py` rather than hidden, but it reads like an accident to anyone scanning the run | TBD |
-| Tiers above `quick` apply no filter in the TheRock lane, so the taxonomy is only half-real | Medium | Medium | CTest honors the tiers correctly when used | TBD |
-| Enforced coverage counts characterization scaffolding the same as unit tests, so the numbers overstate how much TensileLite Python is actually verified | High | Medium | The split summary card reports the characterization-only share, but it gates nothing and no target is set on it | TBD |
-| Mutation testing, the only check that a golden would catch a regression rather than just execute the line, covers five files and runs nowhere in CI | Medium | Medium | Manual runs via `tox -e mutation-unit`; widening PRs are in draft | TBD |
-| Very little of the C++ library is unit-testable; the blockers are structural | Medium | Medium | Heavy integration coverage compensates for correctness, at the cost of slow feedback | TBD |
-| No flaky-test tagging, owner, or expiry convention, and flaky tests share one list with known-failing ones | Medium | Medium | `known_bugs.yaml` quarantine with ticket references and removal notes | TBD |
-| Known-bad behavior is suppressed in seven places with no shared convention, and the largest of them excludes the test entirely, so a fixed bug can stay quarantined indefinitely | Medium | Medium | Per-mechanism discipline is good in places and absent in others; nothing reports the total | TBD |
-| A stale `TensileLogic` known-bugs entry only warns, because `--strict-known-bugs` defaults off and no job passes it | Low | Low | The checker does re-validate and report stale entries on every build; enforcement is tracked in AIHPBLAS-4196 | TBD |
-| The library logic validation gate is invisible as a check: it runs inside the build, so it has no check name, no test report, and cannot be run in isolation by CI | Low | Medium | It runs on every kernel-generating build including local ones, which gives it good reach; a standalone lane is proposed in AIHPBLAS-4196 | TBD |
-| Which checks are actually required to merge is undocumented | Medium | Medium | Institutional knowledge | TBD |
-| No code-quality static analysis runs on the C++ library at all: no clang-tidy or cppcheck configuration, and CodeQL does not cover C++ | High | Medium | Code review, the sanitizer lane, and the test suite absorb what an analyzer would catch at authoring time | TBD |
-| The gating job named `static-analysis` is a sensitive-word scan, so the gate list reads as though code analysis is covered when it is not | Medium | Medium | Documented here; the scan itself does its actual job well | TBD |
-| Python linting is configured (`tox -e lint`) but no CI job runs it, and `ignore = E, W` narrows it to pyflakes checks | Medium | Low | `black` formatting is enforced through `pre-commit`; pyflakes-class bugs are otherwise caught in review | TBD |
-| No type checking on TensileLite, despite type hints being a documented style rule | Medium | Medium | None. A large dynamically typed code generator with no type verification | TBD |
-| TSAN build options exist but no CI lane uses them; no UBSAN at all | Low | High if hit | None. Thread-safety bugs would be found downstream | TBD |
-| No multi-GPU tests | Low | High if hit | None in this repository | TBD |
-| Three parallel enum-to-string tables can drift | Low | Medium | None automated | TBD |
-| Mutation testing is a report-only pilot on a small slice | Low | Low | It is a signal, not a gate, and is treated as such | TBD |
-| Submodule-bump pull requests run a reduced test set relative to source changes | Medium | Medium | Owned outside this component; noted here because failures have been merged past | TBD |
+| No threshold, alert, or gate on the performance data, so a regression is only caught if someone reads the dashboard | High | High | Per-PR and daily benchmarks against a `develop` reference, retained in rocPTS |  |
+| Benchmark coverage is gfx950-only per PR, and gfx942 plus gfx950 daily | Medium | Medium | Correctness coverage is broader; performance risk on other architectures is carried unmeasured |  |
+| What Math CI runs and which of its jobs gate is not visible from this repository | Medium | Medium | This document, which is a snapshot and will drift from the internal configuration |  |
+| The installed-artifact test lane silently skips the snapshot tests, because syrupy is not part of the installed tree's requirements | Low | Low | The goldens are already enforced upstream in the source lanes; the skip is stated in `conftest.py` rather than hidden, but it reads like an accident to anyone scanning the run |  |
+| Tiers above `quick` apply no filter in the TheRock lane, so the taxonomy is only half-real | Medium | Medium | CTest honors the tiers correctly when used |  |
+| Enforced coverage counts characterization scaffolding the same as unit tests, so the numbers overstate how much TensileLite Python is actually verified | High | Medium | The split summary card reports the characterization-only share, but it gates nothing and no target is set on it |  |
+| Mutation testing, the only check that a golden would catch a regression rather than just execute the line, covers five files and runs nowhere in CI | Medium | Medium | Manual runs via `tox -e mutation-unit`; widening PRs are in draft. It is a report-only signal and is treated as one | AIHPBLAS-3868 |
+| Very little of the C++ library is unit-testable; the blockers are structural | Medium | Medium | Heavy integration coverage compensates for correctness, at the cost of slow feedback |  |
+| No flaky-test tagging, tracking reference, or expiry convention, and flaky tests share one list with known-failing ones | Medium | Medium | `known_bugs.yaml` quarantine with ticket references and removal notes |  |
+| Known-bad behavior is suppressed in seven places with no shared convention, and the largest of them excludes the test entirely, so a fixed bug can stay quarantined indefinitely | Medium | Medium | Per-mechanism discipline is good in places and absent in others; nothing reports the total |  |
+| A stale `TensileLogic` known-bugs entry only warns, because `--strict-known-bugs` defaults off and no job passes it | Low | Low | The checker does re-validate and report stale entries on every build | AIHPBLAS-4196 |
+| The library logic validation gate is invisible as a check: it runs inside the build, so it has no check name, no test report, and cannot be run in isolation by CI | Low | Medium | It runs on every kernel-generating build including local ones, which gives it good reach | AIHPBLAS-4196 |
+| Which checks are actually required to merge is undocumented | Medium | Medium | Institutional knowledge |  |
+| No code-quality static analysis runs on the C++ library at all: no clang-tidy or cppcheck configuration, and CodeQL does not cover C++ | High | Medium | Code review, the sanitizer lane, and the test suite absorb what an analyzer would catch at authoring time |  |
+| The gating job named `static-analysis` is a sensitive-word scan, so the gate list reads as though code analysis is covered when it is not | Medium | Medium | Documented here; the scan itself does its actual job well |  |
+| Python linting is configured (`tox -e lint`) but no CI job runs it, and `ignore = E, W` narrows it to pyflakes checks | Medium | Low | `black` formatting is enforced through `pre-commit`; pyflakes-class bugs are otherwise caught in review |  |
+| No type checking on TensileLite, despite type hints being a documented style rule | Medium | Medium | None. A large dynamically typed code generator with no type verification |  |
+| TSAN build options exist but no CI lane uses them; no UBSAN at all | Low | High if hit | None. Thread-safety bugs would be found downstream |  |
+| No multi-GPU tests | Low | High if hit | None in this repository |  |
+| Three parallel enum-to-string tables can drift | Low | Medium | None automated |  |
+| Submodule-bump pull requests run a reduced test set relative to source changes | Medium | Medium | Owned outside this component; noted here because failures have been merged past |  |
 
-Owners are marked TBD rather than assigned unilaterally. Filling this column in is part of taking
-this document out of draft.
+**On the Tracking column.** This table names no owner. Per-gap ownership changes far more often than
+this document does, and a stale name in a repository file is worse than no name because it reads as
+authoritative. Instead each row points at a work item, which is where ownership, status and priority
+can actually be kept current. An empty cell is meaningful: it means the gap is real, acknowledged,
+and not yet tracked anywhere. Most of them are empty right now, and closing that is the first thing
+this table should drive.
 
 ## Owners and Review Cadence
 
 **Document owner:** Tony Davis (@tony-davis), responsible for keeping this document accurate.
 
-**Test ownership** is currently distributed rather than assigned: the client GTest suite, the
+**Test ownership** is currently distributed rather than assigned. The client GTest suite, the
 TensileLite Python suites, the characterization goldens, and the CI lanes each have people who work
-on them, but no named owner recorded here. Recording named owners is a prerequisite for the flaky
-test policy to mean anything, since "every flaky test has an owner" requires there to be owners.
+on them, but none has a designated owner. That is a real gap, because a flaky-test policy needs
+someone for a flaky test to belong to. Note the distinction this document draws: area ownership is
+worth naming here because it changes slowly, while ownership of an individual test, gap, or
+quarantine entry belongs on a ticket, where it can be reassigned without editing a file.
 
 **Review this document when:**
 
