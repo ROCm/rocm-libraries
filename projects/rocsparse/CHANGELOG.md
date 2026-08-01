@@ -15,6 +15,7 @@ Documentation for rocSPARSE is available at
 
 ### Resolved issues
 * Fixed an issue with `rocsparse_spmm`, which produced incorrect results for the Blocked ELL sparse format.
+* Fixed an issue with `rocsparse_spmm` for CSR/CSC and the nnz-split algorithm, which produced incorrect results. The segmented block reduction marked its shared memory pointers `__restrict__`. Threads in the block read the values that other threads wrote, so the attribute was not valid.
 
 ### Removed
 * The deprecated `rocsparse_indextype_u16` enum.
