@@ -1,0 +1,6965 @@
+{
+  "declarations": [
+    {
+      "file": "hiprand_kernel_rocm.h",
+      "kind": "typedef",
+      "line": 291,
+      "name": "base_type",
+      "underlying_type": "typename StateType::base"
+    },
+    {
+      "file": "hiprand_kernel_rocm.h",
+      "kind": "typedef",
+      "line": 321,
+      "name": "base_type",
+      "underlying_type": "typename StateType::base"
+    },
+    {
+      "file": "hiprand_kernel_rocm.h",
+      "kind": "typedef",
+      "line": 351,
+      "name": "base_type",
+      "underlying_type": "typename StateType::base"
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand_kernel_rocm.h",
+      "inline_specified": true,
+      "kind": "function",
+      "line": 124,
+      "linkage_name": "_Z16check_state_typev",
+      "name": "check_state_type",
+      "parameters": [],
+      "return_type": "void",
+      "templated_kind": 1,
+      "type": "void (void)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "fields": [],
+      "file": "hiprand_kernel_rocm.h",
+      "kind": "record",
+      "layout_available": false,
+      "line": 82,
+      "name": "detail::is_any_of"
+    },
+    {
+      "fields": [],
+      "file": "hiprand_kernel_rocm.h",
+      "kind": "record",
+      "layout_available": false,
+      "line": 86,
+      "name": "detail::is_any_of"
+    },
+    {
+      "fields": [],
+      "file": "hiprand_kernel_rocm.h",
+      "kind": "record",
+      "layout_available": false,
+      "line": 90,
+      "name": "detail::is_any_of"
+    },
+    {
+      "file": "hiprand_kernel.h",
+      "kind": "typedef",
+      "line": 71,
+      "name": "hipRandState_t",
+      "underlying_type": "hiprandStateXORWOW_t"
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand_kernel_rocm.h",
+      "inline_specified": true,
+      "kind": "function",
+      "line": 377,
+      "linkage_name": "_Z8hiprand4P25hiprandStatePhilox4_32_10",
+      "name": "hiprand4",
+      "parameters": [
+        {
+          "name": "state",
+          "type": "hiprandStatePhilox4_32_10_t *"
+        }
+      ],
+      "return_type": "uint4",
+      "templated_kind": 0,
+      "type": "uint4 (hiprandStatePhilox4_32_10_t *)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand_kernel_rocm.h",
+      "inline_specified": true,
+      "kind": "function",
+      "line": 366,
+      "linkage_name": "_Z7hiprandPT_",
+      "name": "hiprand",
+      "parameters": [
+        {
+          "name": "state",
+          "type": "StateType *"
+        }
+      ],
+      "return_type": "unsigned int",
+      "templated_kind": 1,
+      "type": "unsigned int (StateType *)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hiprand.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 222,
+      "linkage_name": "hiprandCreateGenerator",
+      "name": "hiprandCreateGenerator",
+      "parameters": [
+        {
+          "name": "generator",
+          "type": "hiprandGenerator_t *"
+        },
+        {
+          "name": "rng_type",
+          "type": "hiprandRngType_t"
+        }
+      ],
+      "return_type": "hiprandStatus_t",
+      "templated_kind": 0,
+      "type": "hiprandStatus_t (hiprandGenerator_t *, hiprandRngType_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hiprand.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 256,
+      "linkage_name": "hiprandCreateGeneratorHost",
+      "name": "hiprandCreateGeneratorHost",
+      "parameters": [
+        {
+          "name": "generator",
+          "type": "hiprandGenerator_t *"
+        },
+        {
+          "name": "rng_type",
+          "type": "hiprandRngType_t"
+        }
+      ],
+      "return_type": "hiprandStatus_t",
+      "templated_kind": 0,
+      "type": "hiprandStatus_t (hiprandGenerator_t *, hiprandRngType_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hiprand.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 776,
+      "linkage_name": "hiprandCreatePoissonDistribution",
+      "name": "hiprandCreatePoissonDistribution",
+      "parameters": [
+        {
+          "name": "lambda",
+          "type": "double"
+        },
+        {
+          "name": "discrete_distribution",
+          "type": "hiprandDiscreteDistribution_t *"
+        }
+      ],
+      "return_type": "hiprandStatus_t",
+      "templated_kind": 0,
+      "type": "hiprandStatus_t (double, hiprandDiscreteDistribution_t *)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hiprand.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 791,
+      "linkage_name": "hiprandDestroyDistribution",
+      "name": "hiprandDestroyDistribution",
+      "parameters": [
+        {
+          "name": "discrete_distribution",
+          "type": "hiprandDiscreteDistribution_t"
+        }
+      ],
+      "return_type": "hiprandStatus_t",
+      "templated_kind": 0,
+      "type": "hiprandStatus_t (hiprandDiscreteDistribution_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hiprand.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 270,
+      "linkage_name": "hiprandDestroyGenerator",
+      "name": "hiprandDestroyGenerator",
+      "parameters": [
+        {
+          "name": "generator",
+          "type": "hiprandGenerator_t"
+        }
+      ],
+      "return_type": "hiprandStatus_t",
+      "templated_kind": 0,
+      "type": "hiprandStatus_t (hiprandGenerator_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "file": "hiprand.h",
+      "kind": "enum",
+      "line": 178,
+      "name": "hiprandDirectionVectorSet",
+      "underlying_type": "unsigned int",
+      "values": [
+        {
+          "name": "HIPRAND_DIRECTION_VECTORS_32_JOEKUO6",
+          "value": "101"
+        },
+        {
+          "name": "HIPRAND_SCRAMBLED_DIRECTION_VECTORS_32_JOEKUO6",
+          "value": "102"
+        },
+        {
+          "name": "HIPRAND_DIRECTION_VECTORS_64_JOEKUO6",
+          "value": "103"
+        },
+        {
+          "name": "HIPRAND_SCRAMBLED_DIRECTION_VECTORS_64_JOEKUO6",
+          "value": "104"
+        }
+      ]
+    },
+    {
+      "file": "hiprand.h",
+      "kind": "typedef",
+      "line": 184,
+      "name": "hiprandDirectionVectorSet_t",
+      "underlying_type": "enum hiprandDirectionVectorSet"
+    },
+    {
+      "file": "hiprand_rocm.h",
+      "kind": "typedef",
+      "line": 34,
+      "name": "hiprandDirectionVectors32_t",
+      "underlying_type": "unsigned int[32]"
+    },
+    {
+      "file": "hiprand_rocm.h",
+      "kind": "typedef",
+      "line": 37,
+      "name": "hiprandDirectionVectors64_t",
+      "underlying_type": "unsigned long long[64]"
+    },
+    {
+      "file": "hiprand_rocm.h",
+      "kind": "typedef",
+      "line": 28,
+      "name": "hiprandDiscreteDistribution_st",
+      "underlying_type": "struct rocrand_discrete_distribution_st"
+    },
+    {
+      "file": "hiprand.h",
+      "kind": "typedef",
+      "line": 90,
+      "name": "hiprandDiscreteDistribution_t",
+      "underlying_type": "hiprandDiscreteDistribution_st *"
+    },
+    {
+      "c_linkage": true,
+      "file": "hiprand.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 294,
+      "linkage_name": "hiprandGenerate",
+      "name": "hiprandGenerate",
+      "parameters": [
+        {
+          "name": "generator",
+          "type": "hiprandGenerator_t"
+        },
+        {
+          "name": "output_data",
+          "type": "unsigned int *"
+        },
+        {
+          "name": "n",
+          "type": "size_t"
+        }
+      ],
+      "return_type": "hiprandStatus_t",
+      "templated_kind": 0,
+      "type": "hiprandStatus_t (hiprandGenerator_t, unsigned int *, size_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hiprand.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 316,
+      "linkage_name": "hiprandGenerateChar",
+      "name": "hiprandGenerateChar",
+      "parameters": [
+        {
+          "name": "generator",
+          "type": "hiprandGenerator_t"
+        },
+        {
+          "name": "output_data",
+          "type": "unsigned char *"
+        },
+        {
+          "name": "n",
+          "type": "size_t"
+        }
+      ],
+      "return_type": "hiprandStatus_t",
+      "templated_kind": 0,
+      "type": "hiprandStatus_t (hiprandGenerator_t, unsigned char *, size_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hiprand.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 540,
+      "linkage_name": "hiprandGenerateLogNormal",
+      "name": "hiprandGenerateLogNormal",
+      "parameters": [
+        {
+          "name": "generator",
+          "type": "hiprandGenerator_t"
+        },
+        {
+          "name": "output_data",
+          "type": "float *"
+        },
+        {
+          "name": "n",
+          "type": "size_t"
+        },
+        {
+          "name": "mean",
+          "type": "float"
+        },
+        {
+          "name": "stddev",
+          "type": "float"
+        }
+      ],
+      "return_type": "hiprandStatus_t",
+      "templated_kind": 0,
+      "type": "hiprandStatus_t (hiprandGenerator_t, float *, size_t, float, float)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hiprand.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 565,
+      "linkage_name": "hiprandGenerateLogNormalDouble",
+      "name": "hiprandGenerateLogNormalDouble",
+      "parameters": [
+        {
+          "name": "generator",
+          "type": "hiprandGenerator_t"
+        },
+        {
+          "name": "output_data",
+          "type": "double *"
+        },
+        {
+          "name": "n",
+          "type": "size_t"
+        },
+        {
+          "name": "mean",
+          "type": "double"
+        },
+        {
+          "name": "stddev",
+          "type": "double"
+        }
+      ],
+      "return_type": "hiprandStatus_t",
+      "templated_kind": 0,
+      "type": "hiprandStatus_t (hiprandGenerator_t, double *, size_t, double, double)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hiprand.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 590,
+      "linkage_name": "hiprandGenerateLogNormalHalf",
+      "name": "hiprandGenerateLogNormalHalf",
+      "parameters": [
+        {
+          "name": "generator",
+          "type": "hiprandGenerator_t"
+        },
+        {
+          "name": "output_data",
+          "type": "half *"
+        },
+        {
+          "name": "n",
+          "type": "size_t"
+        },
+        {
+          "name": "mean",
+          "type": "half"
+        },
+        {
+          "name": "stddev",
+          "type": "half"
+        }
+      ],
+      "return_type": "hiprandStatus_t",
+      "templated_kind": 0,
+      "type": "hiprandStatus_t (hiprandGenerator_t, half *, size_t, half, half)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hiprand.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 362,
+      "linkage_name": "hiprandGenerateLongLong",
+      "name": "hiprandGenerateLongLong",
+      "parameters": [
+        {
+          "name": "generator",
+          "type": "hiprandGenerator_t"
+        },
+        {
+          "name": "output_data",
+          "type": "unsigned long long *"
+        },
+        {
+          "name": "n",
+          "type": "size_t"
+        }
+      ],
+      "return_type": "hiprandStatus_t",
+      "templated_kind": 0,
+      "type": "hiprandStatus_t (hiprandGenerator_t, unsigned long long *, size_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hiprand.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 465,
+      "linkage_name": "hiprandGenerateNormal",
+      "name": "hiprandGenerateNormal",
+      "parameters": [
+        {
+          "name": "generator",
+          "type": "hiprandGenerator_t"
+        },
+        {
+          "name": "output_data",
+          "type": "float *"
+        },
+        {
+          "name": "n",
+          "type": "size_t"
+        },
+        {
+          "name": "mean",
+          "type": "float"
+        },
+        {
+          "name": "stddev",
+          "type": "float"
+        }
+      ],
+      "return_type": "hiprandStatus_t",
+      "templated_kind": 0,
+      "type": "hiprandStatus_t (hiprandGenerator_t, float *, size_t, float, float)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hiprand.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 490,
+      "linkage_name": "hiprandGenerateNormalDouble",
+      "name": "hiprandGenerateNormalDouble",
+      "parameters": [
+        {
+          "name": "generator",
+          "type": "hiprandGenerator_t"
+        },
+        {
+          "name": "output_data",
+          "type": "double *"
+        },
+        {
+          "name": "n",
+          "type": "size_t"
+        },
+        {
+          "name": "mean",
+          "type": "double"
+        },
+        {
+          "name": "stddev",
+          "type": "double"
+        }
+      ],
+      "return_type": "hiprandStatus_t",
+      "templated_kind": 0,
+      "type": "hiprandStatus_t (hiprandGenerator_t, double *, size_t, double, double)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hiprand.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 515,
+      "linkage_name": "hiprandGenerateNormalHalf",
+      "name": "hiprandGenerateNormalHalf",
+      "parameters": [
+        {
+          "name": "generator",
+          "type": "hiprandGenerator_t"
+        },
+        {
+          "name": "output_data",
+          "type": "half *"
+        },
+        {
+          "name": "n",
+          "type": "size_t"
+        },
+        {
+          "name": "mean",
+          "type": "half"
+        },
+        {
+          "name": "stddev",
+          "type": "half"
+        }
+      ],
+      "return_type": "hiprandStatus_t",
+      "templated_kind": 0,
+      "type": "hiprandStatus_t (hiprandGenerator_t, half *, size_t, half, half)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hiprand.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 614,
+      "linkage_name": "hiprandGeneratePoisson",
+      "name": "hiprandGeneratePoisson",
+      "parameters": [
+        {
+          "name": "generator",
+          "type": "hiprandGenerator_t"
+        },
+        {
+          "name": "output_data",
+          "type": "unsigned int *"
+        },
+        {
+          "name": "n",
+          "type": "size_t"
+        },
+        {
+          "name": "lambda",
+          "type": "double"
+        }
+      ],
+      "return_type": "hiprandStatus_t",
+      "templated_kind": 0,
+      "type": "hiprandStatus_t (hiprandGenerator_t, unsigned int *, size_t, double)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hiprand.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 637,
+      "linkage_name": "hiprandGenerateSeeds",
+      "name": "hiprandGenerateSeeds",
+      "parameters": [
+        {
+          "name": "generator",
+          "type": "hiprandGenerator_t"
+        }
+      ],
+      "return_type": "hiprandStatus_t",
+      "templated_kind": 0,
+      "type": "hiprandStatus_t (hiprandGenerator_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hiprand.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 338,
+      "linkage_name": "hiprandGenerateShort",
+      "name": "hiprandGenerateShort",
+      "parameters": [
+        {
+          "name": "generator",
+          "type": "hiprandGenerator_t"
+        },
+        {
+          "name": "output_data",
+          "type": "unsigned short *"
+        },
+        {
+          "name": "n",
+          "type": "size_t"
+        }
+      ],
+      "return_type": "hiprandStatus_t",
+      "templated_kind": 0,
+      "type": "hiprandStatus_t (hiprandGenerator_t, unsigned short *, size_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hiprand.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 387,
+      "linkage_name": "hiprandGenerateUniform",
+      "name": "hiprandGenerateUniform",
+      "parameters": [
+        {
+          "name": "generator",
+          "type": "hiprandGenerator_t"
+        },
+        {
+          "name": "output_data",
+          "type": "float *"
+        },
+        {
+          "name": "n",
+          "type": "size_t"
+        }
+      ],
+      "return_type": "hiprandStatus_t",
+      "templated_kind": 0,
+      "type": "hiprandStatus_t (hiprandGenerator_t, float *, size_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hiprand.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 417,
+      "linkage_name": "hiprandGenerateUniformDouble",
+      "name": "hiprandGenerateUniformDouble",
+      "parameters": [
+        {
+          "name": "generator",
+          "type": "hiprandGenerator_t"
+        },
+        {
+          "name": "output_data",
+          "type": "double *"
+        },
+        {
+          "name": "n",
+          "type": "size_t"
+        }
+      ],
+      "return_type": "hiprandStatus_t",
+      "templated_kind": 0,
+      "type": "hiprandStatus_t (hiprandGenerator_t, double *, size_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hiprand.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 441,
+      "linkage_name": "hiprandGenerateUniformHalf",
+      "name": "hiprandGenerateUniformHalf",
+      "parameters": [
+        {
+          "name": "generator",
+          "type": "hiprandGenerator_t"
+        },
+        {
+          "name": "output_data",
+          "type": "half *"
+        },
+        {
+          "name": "n",
+          "type": "size_t"
+        }
+      ],
+      "return_type": "hiprandStatus_t",
+      "templated_kind": 0,
+      "type": "hiprandStatus_t (hiprandGenerator_t, half *, size_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "file": "hiprand_rocm.h",
+      "kind": "typedef",
+      "line": 26,
+      "name": "hiprandGenerator_st",
+      "underlying_type": "struct rocrand_generator_base_type"
+    },
+    {
+      "file": "hiprand.h",
+      "kind": "typedef",
+      "line": 85,
+      "name": "hiprandGenerator_t",
+      "underlying_type": "hiprandGenerator_st *"
+    },
+    {
+      "c_linkage": true,
+      "file": "hiprand.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 803,
+      "linkage_name": "hiprandGetDirectionVectors32",
+      "name": "hiprandGetDirectionVectors32",
+      "parameters": [
+        {
+          "name": "vectors",
+          "type": "hiprandDirectionVectors32_t **"
+        },
+        {
+          "name": "set",
+          "type": "hiprandDirectionVectorSet_t"
+        }
+      ],
+      "return_type": "hiprandStatus_t",
+      "templated_kind": 0,
+      "type": "hiprandStatus_t (hiprandDirectionVectors32_t **, hiprandDirectionVectorSet_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hiprand.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 816,
+      "linkage_name": "hiprandGetDirectionVectors64",
+      "name": "hiprandGetDirectionVectors64",
+      "parameters": [
+        {
+          "name": "vectors",
+          "type": "hiprandDirectionVectors64_t **"
+        },
+        {
+          "name": "set",
+          "type": "hiprandDirectionVectorSet_t"
+        }
+      ],
+      "return_type": "hiprandStatus_t",
+      "templated_kind": 0,
+      "type": "hiprandStatus_t (hiprandDirectionVectors64_t **, hiprandDirectionVectorSet_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hiprand.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 827,
+      "linkage_name": "hiprandGetScrambleConstants32",
+      "name": "hiprandGetScrambleConstants32",
+      "parameters": [
+        {
+          "name": "constants",
+          "type": "const unsigned int **"
+        }
+      ],
+      "return_type": "hiprandStatus_t",
+      "templated_kind": 0,
+      "type": "hiprandStatus_t (const unsigned int **)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hiprand.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 837,
+      "linkage_name": "hiprandGetScrambleConstants64",
+      "name": "hiprandGetScrambleConstants64",
+      "parameters": [
+        {
+          "name": "constants",
+          "type": "const unsigned long long **"
+        }
+      ],
+      "return_type": "hiprandStatus_t",
+      "templated_kind": 0,
+      "type": "hiprandStatus_t (const unsigned long long **)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hiprand.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 759,
+      "linkage_name": "hiprandGetVersion",
+      "name": "hiprandGetVersion",
+      "parameters": [
+        {
+          "name": "version",
+          "type": "int *"
+        }
+      ],
+      "return_type": "hiprandStatus_t",
+      "templated_kind": 0,
+      "type": "hiprandStatus_t (int *)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "file": "hiprand.h",
+      "kind": "enum",
+      "line": 160,
+      "name": "hiprandOrdering",
+      "underlying_type": "unsigned int",
+      "values": [
+        {
+          "name": "HIPRAND_ORDERING_PSEUDO_BEST",
+          "value": "100"
+        },
+        {
+          "name": "HIPRAND_ORDERING_PSEUDO_DEFAULT",
+          "value": "101"
+        },
+        {
+          "name": "HIPRAND_ORDERING_PSEUDO_SEEDED",
+          "value": "102"
+        },
+        {
+          "name": "HIPRAND_ORDERING_PSEUDO_LEGACY",
+          "value": "103"
+        },
+        {
+          "name": "HIPRAND_ORDERING_PSEUDO_DYNAMIC",
+          "value": "104"
+        },
+        {
+          "name": "HIPRAND_ORDERING_QUASI_DEFAULT",
+          "value": "201"
+        }
+      ]
+    },
+    {
+      "file": "hiprand.h",
+      "kind": "typedef",
+      "line": 173,
+      "name": "hiprandOrdering_t",
+      "underlying_type": "enum hiprandOrdering"
+    },
+    {
+      "file": "hiprand.h",
+      "kind": "enum",
+      "line": 140,
+      "name": "hiprandRngType",
+      "underlying_type": "unsigned int",
+      "values": [
+        {
+          "name": "HIPRAND_RNG_TEST",
+          "value": "0"
+        },
+        {
+          "name": "HIPRAND_RNG_PSEUDO_DEFAULT",
+          "value": "400"
+        },
+        {
+          "name": "HIPRAND_RNG_PSEUDO_XORWOW",
+          "value": "401"
+        },
+        {
+          "name": "HIPRAND_RNG_PSEUDO_MRG32K3A",
+          "value": "402"
+        },
+        {
+          "name": "HIPRAND_RNG_PSEUDO_MTGP32",
+          "value": "403"
+        },
+        {
+          "name": "HIPRAND_RNG_PSEUDO_MT19937",
+          "value": "404"
+        },
+        {
+          "name": "HIPRAND_RNG_PSEUDO_PHILOX4_32_10",
+          "value": "405"
+        },
+        {
+          "name": "HIPRAND_RNG_QUASI_DEFAULT",
+          "value": "500"
+        },
+        {
+          "name": "HIPRAND_RNG_QUASI_SOBOL32",
+          "value": "501"
+        },
+        {
+          "name": "HIPRAND_RNG_QUASI_SCRAMBLED_SOBOL32",
+          "value": "502"
+        },
+        {
+          "name": "HIPRAND_RNG_QUASI_SOBOL64",
+          "value": "503"
+        },
+        {
+          "name": "HIPRAND_RNG_QUASI_SCRAMBLED_SOBOL64",
+          "value": "504"
+        }
+      ]
+    },
+    {
+      "file": "hiprand.h",
+      "kind": "typedef",
+      "line": 155,
+      "name": "hiprandRngType_t",
+      "underlying_type": "enum hiprandRngType"
+    },
+    {
+      "c_linkage": true,
+      "file": "hiprand.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 695,
+      "linkage_name": "hiprandSetGeneratorOffset",
+      "name": "hiprandSetGeneratorOffset",
+      "parameters": [
+        {
+          "name": "generator",
+          "type": "hiprandGenerator_t"
+        },
+        {
+          "name": "offset",
+          "type": "unsigned long long"
+        }
+      ],
+      "return_type": "hiprandStatus_t",
+      "templated_kind": 0,
+      "type": "hiprandStatus_t (hiprandGenerator_t, unsigned long long)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hiprand.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 722,
+      "linkage_name": "hiprandSetGeneratorOrdering",
+      "name": "hiprandSetGeneratorOrdering",
+      "parameters": [
+        {
+          "name": "generator",
+          "type": "hiprandGenerator_t"
+        },
+        {
+          "name": "order",
+          "type": "hiprandOrdering_t"
+        }
+      ],
+      "return_type": "hiprandStatus_t",
+      "templated_kind": 0,
+      "type": "hiprandStatus_t (hiprandGenerator_t, hiprandOrdering_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hiprand.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 672,
+      "linkage_name": "hiprandSetPseudoRandomGeneratorSeed",
+      "name": "hiprandSetPseudoRandomGeneratorSeed",
+      "parameters": [
+        {
+          "name": "generator",
+          "type": "hiprandGenerator_t"
+        },
+        {
+          "name": "seed",
+          "type": "unsigned long long"
+        }
+      ],
+      "return_type": "hiprandStatus_t",
+      "templated_kind": 0,
+      "type": "hiprandStatus_t (hiprandGenerator_t, unsigned long long)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hiprand.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 744,
+      "linkage_name": "hiprandSetQuasiRandomGeneratorDimensions",
+      "name": "hiprandSetQuasiRandomGeneratorDimensions",
+      "parameters": [
+        {
+          "name": "generator",
+          "type": "hiprandGenerator_t"
+        },
+        {
+          "name": "dimensions",
+          "type": "unsigned int"
+        }
+      ],
+      "return_type": "hiprandStatus_t",
+      "templated_kind": 0,
+      "type": "hiprandStatus_t (hiprandGenerator_t, unsigned int)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hiprand.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 653,
+      "linkage_name": "hiprandSetStream",
+      "name": "hiprandSetStream",
+      "parameters": [
+        {
+          "name": "generator",
+          "type": "hiprandGenerator_t"
+        },
+        {
+          "name": "stream",
+          "type": "hipStream_t"
+        }
+      ],
+      "return_type": "hiprandStatus_t",
+      "templated_kind": 0,
+      "type": "hiprandStatus_t (hiprandGenerator_t, hipStream_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "align_bits": 64,
+      "fields": [],
+      "file": "hiprand_kernel_rocm.h",
+      "kind": "record",
+      "layout_available": true,
+      "line": 50,
+      "name": "hiprandState",
+      "size_bits": 320
+    },
+    {
+      "file": "hiprand_kernel_rocm.h",
+      "kind": "typedef",
+      "line": 50,
+      "name": "hiprandState::base",
+      "underlying_type": "rocrand_state_xorwow"
+    },
+    {
+      "file": "hiprand_kernel_rocm.h",
+      "kind": "typedef",
+      "line": 53,
+      "name": "hiprandStateMRG32k3a::base",
+      "underlying_type": "rocrand_state_mrg32k3a"
+    },
+    {
+      "file": "hiprand_kernel.h",
+      "kind": "typedef",
+      "line": 81,
+      "name": "hiprandStateMRG32k3a_t",
+      "underlying_type": "struct hiprandStateMRG32k3a"
+    },
+    {
+      "file": "hiprand_kernel_rocm.h",
+      "kind": "typedef",
+      "line": 54,
+      "name": "hiprandStateMtgp32::base",
+      "underlying_type": "rocrand_state_mtgp32"
+    },
+    {
+      "file": "hiprand_kernel.h",
+      "kind": "typedef",
+      "line": 86,
+      "name": "hiprandStateMtgp32_t",
+      "underlying_type": "struct hiprandStateMtgp32"
+    },
+    {
+      "file": "hiprand_kernel_rocm.h",
+      "kind": "typedef",
+      "line": 52,
+      "name": "hiprandStatePhilox4_32_10::base",
+      "underlying_type": "rocrand_state_philox4x32_10"
+    },
+    {
+      "file": "hiprand_kernel.h",
+      "kind": "typedef",
+      "line": 76,
+      "name": "hiprandStatePhilox4_32_10_t",
+      "underlying_type": "struct hiprandStatePhilox4_32_10"
+    },
+    {
+      "file": "hiprand_kernel_rocm.h",
+      "kind": "typedef",
+      "line": 56,
+      "name": "hiprandStateScrambledSobol32::base",
+      "underlying_type": "rocrand_state_scrambled_sobol32"
+    },
+    {
+      "file": "hiprand_kernel.h",
+      "kind": "typedef",
+      "line": 91,
+      "name": "hiprandStateScrambledSobol32_t",
+      "underlying_type": "struct hiprandStateScrambledSobol32"
+    },
+    {
+      "file": "hiprand_kernel_rocm.h",
+      "kind": "typedef",
+      "line": 58,
+      "name": "hiprandStateScrambledSobol64::base",
+      "underlying_type": "rocrand_state_scrambled_sobol64"
+    },
+    {
+      "file": "hiprand_kernel.h",
+      "kind": "typedef",
+      "line": 96,
+      "name": "hiprandStateScrambledSobol64_t",
+      "underlying_type": "struct hiprandStateScrambledSobol64"
+    },
+    {
+      "file": "hiprand_kernel_rocm.h",
+      "kind": "typedef",
+      "line": 55,
+      "name": "hiprandStateSobol32::base",
+      "underlying_type": "rocrand_state_sobol32"
+    },
+    {
+      "file": "hiprand_kernel.h",
+      "kind": "typedef",
+      "line": 101,
+      "name": "hiprandStateSobol32_t",
+      "underlying_type": "struct hiprandStateSobol32"
+    },
+    {
+      "file": "hiprand_kernel_rocm.h",
+      "kind": "typedef",
+      "line": 57,
+      "name": "hiprandStateSobol64::base",
+      "underlying_type": "rocrand_state_sobol64"
+    },
+    {
+      "file": "hiprand_kernel.h",
+      "kind": "typedef",
+      "line": 106,
+      "name": "hiprandStateSobol64_t",
+      "underlying_type": "struct hiprandStateSobol64"
+    },
+    {
+      "file": "hiprand_kernel_rocm.h",
+      "kind": "typedef",
+      "line": 51,
+      "name": "hiprandStateXORWOW::base",
+      "underlying_type": "rocrand_state_xorwow"
+    },
+    {
+      "file": "hiprand_kernel.h",
+      "kind": "typedef",
+      "line": 65,
+      "name": "hiprandStateXORWOW_t",
+      "underlying_type": "struct hiprandStateXORWOW"
+    },
+    {
+      "file": "hiprand_kernel_rocm.h",
+      "kind": "typedef",
+      "line": 50,
+      "name": "hiprandState_t",
+      "underlying_type": "struct hiprandState"
+    },
+    {
+      "file": "hiprand.h",
+      "kind": "enum",
+      "line": 118,
+      "name": "hiprandStatus",
+      "underlying_type": "unsigned int",
+      "values": [
+        {
+          "name": "HIPRAND_STATUS_SUCCESS",
+          "value": "0"
+        },
+        {
+          "name": "HIPRAND_STATUS_VERSION_MISMATCH",
+          "value": "100"
+        },
+        {
+          "name": "HIPRAND_STATUS_NOT_INITIALIZED",
+          "value": "101"
+        },
+        {
+          "name": "HIPRAND_STATUS_ALLOCATION_FAILED",
+          "value": "102"
+        },
+        {
+          "name": "HIPRAND_STATUS_TYPE_ERROR",
+          "value": "103"
+        },
+        {
+          "name": "HIPRAND_STATUS_OUT_OF_RANGE",
+          "value": "104"
+        },
+        {
+          "name": "HIPRAND_STATUS_LENGTH_NOT_MULTIPLE",
+          "value": "105"
+        },
+        {
+          "name": "HIPRAND_STATUS_DOUBLE_PRECISION_REQUIRED",
+          "value": "106"
+        },
+        {
+          "name": "HIPRAND_STATUS_LAUNCH_FAILURE",
+          "value": "201"
+        },
+        {
+          "name": "HIPRAND_STATUS_PREEXISTING_FAILURE",
+          "value": "202"
+        },
+        {
+          "name": "HIPRAND_STATUS_INITIALIZATION_FAILED",
+          "value": "203"
+        },
+        {
+          "name": "HIPRAND_STATUS_ARCH_MISMATCH",
+          "value": "204"
+        },
+        {
+          "name": "HIPRAND_STATUS_INTERNAL_ERROR",
+          "value": "999"
+        },
+        {
+          "name": "HIPRAND_STATUS_NOT_IMPLEMENTED",
+          "value": "1000"
+        }
+      ]
+    },
+    {
+      "file": "hiprand.h",
+      "kind": "typedef",
+      "line": 135,
+      "name": "hiprandStatus_t",
+      "underlying_type": "enum hiprandStatus"
+    },
+    {
+      "file": "hiprand.hpp",
+      "kind": "typedef",
+      "line": 2412,
+      "name": "hiprand_cpp::default_random_engine",
+      "underlying_type": "xorwow"
+    },
+    {
+      "align_bits": 64,
+      "fields": [
+        {
+          "name": "m_error",
+          "type": "error_type"
+        },
+        {
+          "name": "m_error_string",
+          "type": "std::string"
+        }
+      ],
+      "file": "hiprand.hpp",
+      "kind": "record",
+      "layout_available": true,
+      "line": 47,
+      "name": "hiprand_cpp::error",
+      "size_bits": 384
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 56,
+      "linkage_name": "_ZN11hiprand_cpp5errorC1E13hiprandStatus",
+      "name": "hiprand_cpp::error::error",
+      "parameters": [
+        {
+          "name": "error",
+          "type": "error_type"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (error_type) noexcept",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 67,
+      "linkage_name": "_ZNK11hiprand_cpp5error10error_codeEv",
+      "name": "hiprand_cpp::error::error_code",
+      "parameters": [],
+      "return_type": "error_type",
+      "templated_kind": 0,
+      "type": "error_type (void) const noexcept",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 73,
+      "linkage_name": "_ZNK11hiprand_cpp5error12error_stringB5cxx11Ev",
+      "name": "hiprand_cpp::error::error_string",
+      "parameters": [],
+      "return_type": "std::string",
+      "templated_kind": 0,
+      "type": "std::string (void) const noexcept",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "file": "hiprand.hpp",
+      "kind": "typedef",
+      "line": 51,
+      "name": "hiprand_cpp::error::error_type",
+      "underlying_type": "hiprandStatus_t"
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 90,
+      "linkage_name": "_ZN11hiprand_cpp5error9to_stringB5cxx11E13hiprandStatus",
+      "name": "hiprand_cpp::error::to_string",
+      "parameters": [
+        {
+          "name": "error",
+          "type": "error_type"
+        }
+      ],
+      "return_type": "std::string",
+      "templated_kind": 0,
+      "type": "std::string (error_type)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 79,
+      "linkage_name": "_ZNK11hiprand_cpp5error4whatEv",
+      "name": "hiprand_cpp::error::what",
+      "parameters": [],
+      "return_type": "const char *",
+      "templated_kind": 0,
+      "type": "const char *(void) const noexcept",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 62,
+      "linkage_name": "_ZN11hiprand_cpp5errorD1Ev",
+      "name": "hiprand_cpp::error::~error",
+      "parameters": [],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (void) noexcept",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "fields": [
+        {
+          "name": "m_params",
+          "type": "param_type"
+        }
+      ],
+      "file": "hiprand.hpp",
+      "kind": "record",
+      "layout_available": false,
+      "line": 560,
+      "name": "hiprand_cpp::lognormal_distribution"
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 726,
+      "linkage_name": "_ZN11hiprand_cpp22lognormal_distribution8generateERTL0__Pfm",
+      "name": "hiprand_cpp::lognormal_distribution::generate",
+      "parameters": [
+        {
+          "name": "g",
+          "type": "Generator &"
+        },
+        {
+          "name": "output",
+          "type": "float *"
+        },
+        {
+          "name": "size",
+          "type": "size_t"
+        }
+      ],
+      "return_type": "hiprandStatus_t",
+      "templated_kind": 1,
+      "type": "hiprandStatus_t (Generator &, float *, size_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 734,
+      "linkage_name": "_ZN11hiprand_cpp22lognormal_distribution8generateERTL0__Pdm",
+      "name": "hiprand_cpp::lognormal_distribution::generate",
+      "parameters": [
+        {
+          "name": "g",
+          "type": "Generator &"
+        },
+        {
+          "name": "output",
+          "type": "double *"
+        },
+        {
+          "name": "size",
+          "type": "size_t"
+        }
+      ],
+      "return_type": "hiprandStatus_t",
+      "templated_kind": 1,
+      "type": "hiprandStatus_t (Generator &, double *, size_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 742,
+      "linkage_name": "_ZN11hiprand_cpp22lognormal_distribution8generateERTL0__P6__halfm",
+      "name": "hiprand_cpp::lognormal_distribution::generate",
+      "parameters": [
+        {
+          "name": "g",
+          "type": "Generator &"
+        },
+        {
+          "name": "output",
+          "type": "half *"
+        },
+        {
+          "name": "size",
+          "type": "size_t"
+        }
+      ],
+      "return_type": "hiprandStatus_t",
+      "templated_kind": 1,
+      "type": "hiprandStatus_t (Generator &, half *, size_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 624,
+      "linkage_name": "_ZN11hiprand_cpp22lognormal_distributionC1ET_S1_",
+      "name": "hiprand_cpp::lognormal_distribution::lognormal_distribution<RealType>",
+      "parameters": [
+        {
+          "name": "m",
+          "type": "RealType"
+        },
+        {
+          "name": "s",
+          "type": "RealType"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (RealType, RealType)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 631,
+      "linkage_name": "_ZN11hiprand_cpp22lognormal_distributionC1ERKNS0_10param_typeE",
+      "name": "hiprand_cpp::lognormal_distribution::lognormal_distribution<RealType>",
+      "parameters": [
+        {
+          "name": "params",
+          "type": "const param_type &"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (const param_type &)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 644,
+      "linkage_name": "_ZNK11hiprand_cpp22lognormal_distribution1mEv",
+      "name": "hiprand_cpp::lognormal_distribution::m",
+      "parameters": [],
+      "return_type": "RealType",
+      "templated_kind": 0,
+      "type": "RealType (void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 676,
+      "linkage_name": "_ZNK11hiprand_cpp22lognormal_distribution3maxEv",
+      "name": "hiprand_cpp::lognormal_distribution::max",
+      "parameters": [],
+      "return_type": "RealType",
+      "templated_kind": 0,
+      "type": "RealType (void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 670,
+      "linkage_name": "_ZNK11hiprand_cpp22lognormal_distribution3minEv",
+      "name": "hiprand_cpp::lognormal_distribution::min",
+      "parameters": [],
+      "return_type": "RealType",
+      "templated_kind": 0,
+      "type": "RealType (void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 719,
+      "linkage_name": "_ZN11hiprand_cpp22lognormal_distributionneERKS0_",
+      "name": "hiprand_cpp::lognormal_distribution::operator!=",
+      "parameters": [
+        {
+          "name": "other",
+          "type": "const lognormal_distribution<RealType> &"
+        }
+      ],
+      "return_type": "_Bool",
+      "templated_kind": 0,
+      "type": "_Bool (const lognormal_distribution<RealType> &)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 701,
+      "linkage_name": "_ZN11hiprand_cpp22lognormal_distributionclERTL0__PT_m",
+      "name": "hiprand_cpp::lognormal_distribution::operator()",
+      "parameters": [
+        {
+          "name": "g",
+          "type": "Generator &"
+        },
+        {
+          "name": "output",
+          "type": "RealType *"
+        },
+        {
+          "name": "size",
+          "type": "size_t"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 1,
+      "type": "void (Generator &, RealType *, size_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 711,
+      "linkage_name": "_ZN11hiprand_cpp22lognormal_distributioneqERKS0_",
+      "name": "hiprand_cpp::lognormal_distribution::operator==",
+      "parameters": [
+        {
+          "name": "other",
+          "type": "const lognormal_distribution<RealType> &"
+        }
+      ],
+      "return_type": "_Bool",
+      "templated_kind": 0,
+      "type": "_Bool (const lognormal_distribution<RealType> &)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 658,
+      "linkage_name": "_ZNK11hiprand_cpp22lognormal_distribution5paramEv",
+      "name": "hiprand_cpp::lognormal_distribution::param",
+      "parameters": [],
+      "return_type": "param_type",
+      "templated_kind": 0,
+      "type": "param_type (void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 664,
+      "linkage_name": "_ZN11hiprand_cpp22lognormal_distribution5paramERKNS0_10param_typeE",
+      "name": "hiprand_cpp::lognormal_distribution::param",
+      "parameters": [
+        {
+          "name": "params",
+          "type": "const param_type &"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (const param_type &)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "fields": [
+        {
+          "name": "m_mean",
+          "type": "RealType"
+        },
+        {
+          "name": "m_stddev",
+          "type": "RealType"
+        }
+      ],
+      "file": "hiprand.hpp",
+      "kind": "record",
+      "layout_available": false,
+      "line": 575,
+      "name": "hiprand_cpp::lognormal_distribution::param_type"
+    },
+    {
+      "file": "hiprand.hpp",
+      "kind": "typedef",
+      "line": 579,
+      "name": "hiprand_cpp::lognormal_distribution::param_type::distribution_type",
+      "underlying_type": "lognormal_distribution<RealType>"
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 592,
+      "linkage_name": "_ZNK11hiprand_cpp22lognormal_distribution10param_type1mEv",
+      "name": "hiprand_cpp::lognormal_distribution::param_type::m",
+      "parameters": [],
+      "return_type": "RealType",
+      "templated_kind": 0,
+      "type": "RealType (void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 612,
+      "linkage_name": "_ZN11hiprand_cpp22lognormal_distribution10param_typeneERKS1_",
+      "name": "hiprand_cpp::lognormal_distribution::param_type::operator!=",
+      "parameters": [
+        {
+          "name": "other",
+          "type": "const param_type &"
+        }
+      ],
+      "return_type": "_Bool",
+      "templated_kind": 0,
+      "type": "_Bool (const param_type &)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 606,
+      "linkage_name": "_ZN11hiprand_cpp22lognormal_distribution10param_typeeqERKS1_",
+      "name": "hiprand_cpp::lognormal_distribution::param_type::operator==",
+      "parameters": [
+        {
+          "name": "other",
+          "type": "const param_type &"
+        }
+      ],
+      "return_type": "_Bool",
+      "templated_kind": 0,
+      "type": "_Bool (const param_type &)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 584,
+      "linkage_name": "_ZN11hiprand_cpp22lognormal_distribution10param_typeC1ET_S2_",
+      "name": "hiprand_cpp::lognormal_distribution::param_type::param_type",
+      "parameters": [
+        {
+          "name": "m",
+          "type": "RealType"
+        },
+        {
+          "name": "s",
+          "type": "RealType"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (RealType, RealType)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 600,
+      "linkage_name": "_ZNK11hiprand_cpp22lognormal_distribution10param_type1sEv",
+      "name": "hiprand_cpp::lognormal_distribution::param_type::s",
+      "parameters": [],
+      "return_type": "RealType",
+      "templated_kind": 0,
+      "type": "RealType (void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 637,
+      "linkage_name": "_ZN11hiprand_cpp22lognormal_distribution5resetEv",
+      "name": "hiprand_cpp::lognormal_distribution::reset",
+      "parameters": [],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (void)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "file": "hiprand.hpp",
+      "kind": "typedef",
+      "line": 571,
+      "name": "hiprand_cpp::lognormal_distribution::result_type",
+      "underlying_type": "RealType"
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 652,
+      "linkage_name": "_ZNK11hiprand_cpp22lognormal_distribution1sEv",
+      "name": "hiprand_cpp::lognormal_distribution::s",
+      "parameters": [],
+      "return_type": "RealType",
+      "templated_kind": 0,
+      "type": "RealType (void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "file": "hiprand.hpp",
+      "kind": "typedef",
+      "line": 2390,
+      "name": "hiprand_cpp::mrg32k3a",
+      "underlying_type": "mrg32k3a_engine<>"
+    },
+    {
+      "fields": [
+        {
+          "name": "m_generator",
+          "type": "hiprandGenerator_t"
+        }
+      ],
+      "file": "hiprand.hpp",
+      "kind": "record",
+      "layout_available": false,
+      "line": 1283,
+      "name": "hiprand_cpp::mrg32k3a_engine"
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1390,
+      "linkage_name": "_ZNK11hiprand_cpp15mrg32k3a_engine3maxEv",
+      "name": "hiprand_cpp::mrg32k3a_engine::max",
+      "parameters": [],
+      "return_type": "result_type",
+      "templated_kind": 0,
+      "type": "result_type (void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1384,
+      "linkage_name": "_ZNK11hiprand_cpp15mrg32k3a_engine3minEv",
+      "name": "hiprand_cpp::mrg32k3a_engine::min",
+      "parameters": [],
+      "return_type": "result_type",
+      "templated_kind": 0,
+      "type": "result_type (void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1298,
+      "linkage_name": "_ZN11hiprand_cpp15mrg32k3a_engineC1Eyy",
+      "name": "hiprand_cpp::mrg32k3a_engine::mrg32k3a_engine<DefaultSeed>",
+      "parameters": [
+        {
+          "name": "seed_value",
+          "type": "seed_type"
+        },
+        {
+          "name": "offset_value",
+          "type": "offset_type"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (seed_type, offset_type)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1320,
+      "linkage_name": "_ZN11hiprand_cpp15mrg32k3a_engineC1ERP27rocrand_generator_base_type",
+      "name": "hiprand_cpp::mrg32k3a_engine::mrg32k3a_engine<DefaultSeed>",
+      "parameters": [
+        {
+          "name": "generator",
+          "type": "hiprandGenerator_t &"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (hiprandGenerator_t &)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1330,
+      "linkage_name": "_ZN11hiprand_cpp15mrg32k3a_engineC1ERKS0_",
+      "name": "hiprand_cpp::mrg32k3a_engine::mrg32k3a_engine<DefaultSeed>",
+      "parameters": [
+        {
+          "name": "",
+          "type": "const mrg32k3a_engine<DefaultSeed> &"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (const mrg32k3a_engine<DefaultSeed> &)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1332,
+      "linkage_name": "_ZN11hiprand_cpp15mrg32k3a_engineC1EOS0_",
+      "name": "hiprand_cpp::mrg32k3a_engine::mrg32k3a_engine<DefaultSeed>",
+      "parameters": [
+        {
+          "name": "",
+          "type": "mrg32k3a_engine<DefaultSeed> &&"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (mrg32k3a_engine<DefaultSeed> &&)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1353,
+      "linkage_name": "_ZN11hiprand_cpp15mrg32k3a_engine6offsetEy",
+      "name": "hiprand_cpp::mrg32k3a_engine::offset",
+      "parameters": [
+        {
+          "name": "value",
+          "type": "offset_type"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (offset_type)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "file": "hiprand.hpp",
+      "kind": "typedef",
+      "line": 1291,
+      "name": "hiprand_cpp::mrg32k3a_engine::offset_type",
+      "underlying_type": "unsigned long long"
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1376,
+      "linkage_name": "_ZN11hiprand_cpp15mrg32k3a_engineclEPjm",
+      "name": "hiprand_cpp::mrg32k3a_engine::operator()",
+      "parameters": [
+        {
+          "name": "output",
+          "type": "result_type *"
+        },
+        {
+          "name": "size",
+          "type": "size_t"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 1,
+      "type": "void (result_type *, size_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1334,
+      "linkage_name": "_ZN11hiprand_cpp15mrg32k3a_engineaSERKS0_",
+      "name": "hiprand_cpp::mrg32k3a_engine::operator=",
+      "parameters": [
+        {
+          "name": "",
+          "type": "const mrg32k3a_engine<DefaultSeed> &"
+        }
+      ],
+      "return_type": "mrg32k3a_engine<DefaultSeed> &",
+      "templated_kind": 0,
+      "type": "mrg32k3a_engine<DefaultSeed> &(const mrg32k3a_engine<DefaultSeed> &)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1336,
+      "linkage_name": "_ZN11hiprand_cpp15mrg32k3a_engineaSEOS0_",
+      "name": "hiprand_cpp::mrg32k3a_engine::operator=",
+      "parameters": [
+        {
+          "name": "",
+          "type": "mrg32k3a_engine<DefaultSeed> &&"
+        }
+      ],
+      "return_type": "mrg32k3a_engine<DefaultSeed> &",
+      "templated_kind": 0,
+      "type": "mrg32k3a_engine<DefaultSeed> &(mrg32k3a_engine<DefaultSeed> &&)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1360,
+      "linkage_name": "_ZN11hiprand_cpp15mrg32k3a_engine5orderE15hiprandOrdering",
+      "name": "hiprand_cpp::mrg32k3a_engine::order",
+      "parameters": [
+        {
+          "name": "value",
+          "type": "order_type"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (order_type)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "file": "hiprand.hpp",
+      "kind": "typedef",
+      "line": 1289,
+      "name": "hiprand_cpp::mrg32k3a_engine::order_type",
+      "underlying_type": "hiprandOrdering_t"
+    },
+    {
+      "file": "hiprand.hpp",
+      "kind": "typedef",
+      "line": 1287,
+      "name": "hiprand_cpp::mrg32k3a_engine::result_type",
+      "underlying_type": "unsigned int"
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1368,
+      "linkage_name": "_ZN11hiprand_cpp15mrg32k3a_engine4seedEy",
+      "name": "hiprand_cpp::mrg32k3a_engine::seed",
+      "parameters": [
+        {
+          "name": "value",
+          "type": "seed_type"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (seed_type)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "file": "hiprand.hpp",
+      "kind": "typedef",
+      "line": 1293,
+      "name": "hiprand_cpp::mrg32k3a_engine::seed_type",
+      "underlying_type": "unsigned long long"
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1346,
+      "linkage_name": "_ZN11hiprand_cpp15mrg32k3a_engine6streamEP12ihipStream_t",
+      "name": "hiprand_cpp::mrg32k3a_engine::stream",
+      "parameters": [
+        {
+          "name": "value",
+          "type": "hipStream_t"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (hipStream_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1396,
+      "linkage_name": "_ZN11hiprand_cpp15mrg32k3a_engine4typeEv",
+      "name": "hiprand_cpp::mrg32k3a_engine::type",
+      "parameters": [],
+      "return_type": "hiprandRngType",
+      "templated_kind": 0,
+      "type": "hiprandRngType (void)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1339,
+      "linkage_name": "_ZN11hiprand_cpp15mrg32k3a_engineD1Ev",
+      "name": "hiprand_cpp::mrg32k3a_engine::~mrg32k3a_engine<DefaultSeed>",
+      "parameters": [],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (void) noexcept(false)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "file": "hiprand.hpp",
+      "kind": "typedef",
+      "line": 2396,
+      "name": "hiprand_cpp::mt19937",
+      "underlying_type": "mt19937_engine<>"
+    },
+    {
+      "fields": [
+        {
+          "name": "m_generator",
+          "type": "hiprandGenerator_t"
+        }
+      ],
+      "file": "hiprand.hpp",
+      "kind": "record",
+      "layout_available": false,
+      "line": 1577,
+      "name": "hiprand_cpp::mt19937_engine"
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1680,
+      "linkage_name": "_ZNK11hiprand_cpp14mt19937_engine3maxEv",
+      "name": "hiprand_cpp::mt19937_engine::max",
+      "parameters": [],
+      "return_type": "result_type",
+      "templated_kind": 0,
+      "type": "result_type (void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1674,
+      "linkage_name": "_ZNK11hiprand_cpp14mt19937_engine3minEv",
+      "name": "hiprand_cpp::mt19937_engine::min",
+      "parameters": [],
+      "return_type": "result_type",
+      "templated_kind": 0,
+      "type": "result_type (void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1596,
+      "linkage_name": "_ZN11hiprand_cpp14mt19937_engineC1Ey",
+      "name": "hiprand_cpp::mt19937_engine::mt19937_engine<DefaultSeed>",
+      "parameters": [
+        {
+          "name": "seed_value",
+          "type": "seed_type"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (seed_type)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1614,
+      "linkage_name": "_ZN11hiprand_cpp14mt19937_engineC1ERP27rocrand_generator_base_type",
+      "name": "hiprand_cpp::mt19937_engine::mt19937_engine<DefaultSeed>",
+      "parameters": [
+        {
+          "name": "generator",
+          "type": "hiprandGenerator_t &"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (hiprandGenerator_t &)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1623,
+      "linkage_name": "_ZN11hiprand_cpp14mt19937_engineC1ERKS0_",
+      "name": "hiprand_cpp::mt19937_engine::mt19937_engine<DefaultSeed>",
+      "parameters": [
+        {
+          "name": "",
+          "type": "const mt19937_engine<DefaultSeed> &"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (const mt19937_engine<DefaultSeed> &)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1625,
+      "linkage_name": "_ZN11hiprand_cpp14mt19937_engineC1EOS0_",
+      "name": "hiprand_cpp::mt19937_engine::mt19937_engine<DefaultSeed>",
+      "parameters": [
+        {
+          "name": "",
+          "type": "mt19937_engine<DefaultSeed> &&"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (mt19937_engine<DefaultSeed> &&)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1665,
+      "linkage_name": "_ZN11hiprand_cpp14mt19937_engineclEPjm",
+      "name": "hiprand_cpp::mt19937_engine::operator()",
+      "parameters": [
+        {
+          "name": "output",
+          "type": "result_type *"
+        },
+        {
+          "name": "size",
+          "type": "size_t"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 1,
+      "type": "void (result_type *, size_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1627,
+      "linkage_name": "_ZN11hiprand_cpp14mt19937_engineaSERKS0_",
+      "name": "hiprand_cpp::mt19937_engine::operator=",
+      "parameters": [
+        {
+          "name": "",
+          "type": "const mt19937_engine<DefaultSeed> &"
+        }
+      ],
+      "return_type": "mt19937_engine<DefaultSeed> &",
+      "templated_kind": 0,
+      "type": "mt19937_engine<DefaultSeed> &(const mt19937_engine<DefaultSeed> &)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1629,
+      "linkage_name": "_ZN11hiprand_cpp14mt19937_engineaSEOS0_",
+      "name": "hiprand_cpp::mt19937_engine::operator=",
+      "parameters": [
+        {
+          "name": "",
+          "type": "mt19937_engine<DefaultSeed> &&"
+        }
+      ],
+      "return_type": "mt19937_engine<DefaultSeed> &",
+      "templated_kind": 0,
+      "type": "mt19937_engine<DefaultSeed> &(mt19937_engine<DefaultSeed> &&)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1648,
+      "linkage_name": "_ZN11hiprand_cpp14mt19937_engine5orderE15hiprandOrdering",
+      "name": "hiprand_cpp::mt19937_engine::order",
+      "parameters": [
+        {
+          "name": "value",
+          "type": "order_type"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (order_type)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "file": "hiprand.hpp",
+      "kind": "typedef",
+      "line": 1583,
+      "name": "hiprand_cpp::mt19937_engine::order_type",
+      "underlying_type": "hiprandOrdering_t"
+    },
+    {
+      "file": "hiprand.hpp",
+      "kind": "typedef",
+      "line": 1581,
+      "name": "hiprand_cpp::mt19937_engine::result_type",
+      "underlying_type": "unsigned int"
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1656,
+      "linkage_name": "_ZN11hiprand_cpp14mt19937_engine4seedEy",
+      "name": "hiprand_cpp::mt19937_engine::seed",
+      "parameters": [
+        {
+          "name": "value",
+          "type": "seed_type"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (seed_type)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "file": "hiprand.hpp",
+      "kind": "typedef",
+      "line": 1585,
+      "name": "hiprand_cpp::mt19937_engine::seed_type",
+      "underlying_type": "unsigned long long"
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1640,
+      "linkage_name": "_ZN11hiprand_cpp14mt19937_engine6streamEP12ihipStream_t",
+      "name": "hiprand_cpp::mt19937_engine::stream",
+      "parameters": [
+        {
+          "name": "value",
+          "type": "hipStream_t"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (hipStream_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1686,
+      "linkage_name": "_ZN11hiprand_cpp14mt19937_engine4typeEv",
+      "name": "hiprand_cpp::mt19937_engine::type",
+      "parameters": [],
+      "return_type": "hiprandRngType",
+      "templated_kind": 0,
+      "type": "hiprandRngType (void)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1632,
+      "linkage_name": "_ZN11hiprand_cpp14mt19937_engineD1Ev",
+      "name": "hiprand_cpp::mt19937_engine::~mt19937_engine<DefaultSeed>",
+      "parameters": [],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (void) noexcept(false)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "file": "hiprand.hpp",
+      "kind": "typedef",
+      "line": 2393,
+      "name": "hiprand_cpp::mtgp32",
+      "underlying_type": "mtgp32_engine<>"
+    },
+    {
+      "fields": [
+        {
+          "name": "m_generator",
+          "type": "hiprandGenerator_t"
+        }
+      ],
+      "file": "hiprand.hpp",
+      "kind": "record",
+      "layout_available": false,
+      "line": 1435,
+      "name": "hiprand_cpp::mtgp32_engine"
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1534,
+      "linkage_name": "_ZNK11hiprand_cpp13mtgp32_engine3maxEv",
+      "name": "hiprand_cpp::mtgp32_engine::max",
+      "parameters": [],
+      "return_type": "result_type",
+      "templated_kind": 0,
+      "type": "result_type (void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1528,
+      "linkage_name": "_ZNK11hiprand_cpp13mtgp32_engine3minEv",
+      "name": "hiprand_cpp::mtgp32_engine::min",
+      "parameters": [],
+      "return_type": "result_type",
+      "templated_kind": 0,
+      "type": "result_type (void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1454,
+      "linkage_name": "_ZN11hiprand_cpp13mtgp32_engineC1Ey",
+      "name": "hiprand_cpp::mtgp32_engine::mtgp32_engine<DefaultSeed>",
+      "parameters": [
+        {
+          "name": "seed_value",
+          "type": "seed_type"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (seed_type)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1471,
+      "linkage_name": "_ZN11hiprand_cpp13mtgp32_engineC1ERP27rocrand_generator_base_type",
+      "name": "hiprand_cpp::mtgp32_engine::mtgp32_engine<DefaultSeed>",
+      "parameters": [
+        {
+          "name": "generator",
+          "type": "hiprandGenerator_t &"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (hiprandGenerator_t &)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1481,
+      "linkage_name": "_ZN11hiprand_cpp13mtgp32_engineC1ERKS0_",
+      "name": "hiprand_cpp::mtgp32_engine::mtgp32_engine<DefaultSeed>",
+      "parameters": [
+        {
+          "name": "",
+          "type": "const mtgp32_engine<DefaultSeed> &"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (const mtgp32_engine<DefaultSeed> &)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1483,
+      "linkage_name": "_ZN11hiprand_cpp13mtgp32_engineC1EOS0_",
+      "name": "hiprand_cpp::mtgp32_engine::mtgp32_engine<DefaultSeed>",
+      "parameters": [
+        {
+          "name": "",
+          "type": "mtgp32_engine<DefaultSeed> &&"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (mtgp32_engine<DefaultSeed> &&)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1520,
+      "linkage_name": "_ZN11hiprand_cpp13mtgp32_engineclEPjm",
+      "name": "hiprand_cpp::mtgp32_engine::operator()",
+      "parameters": [
+        {
+          "name": "output",
+          "type": "result_type *"
+        },
+        {
+          "name": "size",
+          "type": "size_t"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 1,
+      "type": "void (result_type *, size_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1485,
+      "linkage_name": "_ZN11hiprand_cpp13mtgp32_engineaSERKS0_",
+      "name": "hiprand_cpp::mtgp32_engine::operator=",
+      "parameters": [
+        {
+          "name": "",
+          "type": "const mtgp32_engine<DefaultSeed> &"
+        }
+      ],
+      "return_type": "mtgp32_engine<DefaultSeed> &",
+      "templated_kind": 0,
+      "type": "mtgp32_engine<DefaultSeed> &(const mtgp32_engine<DefaultSeed> &)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1487,
+      "linkage_name": "_ZN11hiprand_cpp13mtgp32_engineaSEOS0_",
+      "name": "hiprand_cpp::mtgp32_engine::operator=",
+      "parameters": [
+        {
+          "name": "",
+          "type": "mtgp32_engine<DefaultSeed> &&"
+        }
+      ],
+      "return_type": "mtgp32_engine<DefaultSeed> &",
+      "templated_kind": 0,
+      "type": "mtgp32_engine<DefaultSeed> &(mtgp32_engine<DefaultSeed> &&)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1504,
+      "linkage_name": "_ZN11hiprand_cpp13mtgp32_engine5orderE15hiprandOrdering",
+      "name": "hiprand_cpp::mtgp32_engine::order",
+      "parameters": [
+        {
+          "name": "value",
+          "type": "order_type"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (order_type)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "file": "hiprand.hpp",
+      "kind": "typedef",
+      "line": 1441,
+      "name": "hiprand_cpp::mtgp32_engine::order_type",
+      "underlying_type": "hiprandOrdering_t"
+    },
+    {
+      "file": "hiprand.hpp",
+      "kind": "typedef",
+      "line": 1439,
+      "name": "hiprand_cpp::mtgp32_engine::result_type",
+      "underlying_type": "unsigned int"
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1512,
+      "linkage_name": "_ZN11hiprand_cpp13mtgp32_engine4seedEy",
+      "name": "hiprand_cpp::mtgp32_engine::seed",
+      "parameters": [
+        {
+          "name": "value",
+          "type": "seed_type"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (seed_type)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "file": "hiprand.hpp",
+      "kind": "typedef",
+      "line": 1443,
+      "name": "hiprand_cpp::mtgp32_engine::seed_type",
+      "underlying_type": "unsigned long long"
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1497,
+      "linkage_name": "_ZN11hiprand_cpp13mtgp32_engine6streamEP12ihipStream_t",
+      "name": "hiprand_cpp::mtgp32_engine::stream",
+      "parameters": [
+        {
+          "name": "value",
+          "type": "hipStream_t"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (hipStream_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1540,
+      "linkage_name": "_ZN11hiprand_cpp13mtgp32_engine4typeEv",
+      "name": "hiprand_cpp::mtgp32_engine::type",
+      "parameters": [],
+      "return_type": "hiprandRngType",
+      "templated_kind": 0,
+      "type": "hiprandRngType (void)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1490,
+      "linkage_name": "_ZN11hiprand_cpp13mtgp32_engineD1Ev",
+      "name": "hiprand_cpp::mtgp32_engine::~mtgp32_engine<DefaultSeed>",
+      "parameters": [],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (void) noexcept(false)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "fields": [
+        {
+          "name": "m_params",
+          "type": "param_type"
+        }
+      ],
+      "file": "hiprand.hpp",
+      "kind": "record",
+      "layout_available": false,
+      "line": 363,
+      "name": "hiprand_cpp::normal_distribution"
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 528,
+      "linkage_name": "_ZN11hiprand_cpp19normal_distribution8generateERTL0__Pfm",
+      "name": "hiprand_cpp::normal_distribution::generate",
+      "parameters": [
+        {
+          "name": "g",
+          "type": "Generator &"
+        },
+        {
+          "name": "output",
+          "type": "float *"
+        },
+        {
+          "name": "size",
+          "type": "size_t"
+        }
+      ],
+      "return_type": "hiprandStatus_t",
+      "templated_kind": 1,
+      "type": "hiprandStatus_t (Generator &, float *, size_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 536,
+      "linkage_name": "_ZN11hiprand_cpp19normal_distribution8generateERTL0__Pdm",
+      "name": "hiprand_cpp::normal_distribution::generate",
+      "parameters": [
+        {
+          "name": "g",
+          "type": "Generator &"
+        },
+        {
+          "name": "output",
+          "type": "double *"
+        },
+        {
+          "name": "size",
+          "type": "size_t"
+        }
+      ],
+      "return_type": "hiprandStatus_t",
+      "templated_kind": 1,
+      "type": "hiprandStatus_t (Generator &, double *, size_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 544,
+      "linkage_name": "_ZN11hiprand_cpp19normal_distribution8generateERTL0__P6__halfm",
+      "name": "hiprand_cpp::normal_distribution::generate",
+      "parameters": [
+        {
+          "name": "g",
+          "type": "Generator &"
+        },
+        {
+          "name": "output",
+          "type": "half *"
+        },
+        {
+          "name": "size",
+          "type": "size_t"
+        }
+      ],
+      "return_type": "hiprandStatus_t",
+      "templated_kind": 1,
+      "type": "hiprandStatus_t (Generator &, half *, size_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 467,
+      "linkage_name": "_ZNK11hiprand_cpp19normal_distribution3maxEv",
+      "name": "hiprand_cpp::normal_distribution::max",
+      "parameters": [],
+      "return_type": "RealType",
+      "templated_kind": 0,
+      "type": "RealType (void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 447,
+      "linkage_name": "_ZNK11hiprand_cpp19normal_distribution4meanEv",
+      "name": "hiprand_cpp::normal_distribution::mean",
+      "parameters": [],
+      "return_type": "RealType",
+      "templated_kind": 0,
+      "type": "RealType (void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 461,
+      "linkage_name": "_ZNK11hiprand_cpp19normal_distribution3minEv",
+      "name": "hiprand_cpp::normal_distribution::min",
+      "parameters": [],
+      "return_type": "RealType",
+      "templated_kind": 0,
+      "type": "RealType (void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 427,
+      "linkage_name": "_ZN11hiprand_cpp19normal_distributionC1ET_S1_",
+      "name": "hiprand_cpp::normal_distribution::normal_distribution<RealType>",
+      "parameters": [
+        {
+          "name": "mean",
+          "type": "RealType"
+        },
+        {
+          "name": "stddev",
+          "type": "RealType"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (RealType, RealType)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 434,
+      "linkage_name": "_ZN11hiprand_cpp19normal_distributionC1ERKNS0_10param_typeE",
+      "name": "hiprand_cpp::normal_distribution::normal_distribution<RealType>",
+      "parameters": [
+        {
+          "name": "params",
+          "type": "const param_type &"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (const param_type &)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 521,
+      "linkage_name": "_ZN11hiprand_cpp19normal_distributionneERKS0_",
+      "name": "hiprand_cpp::normal_distribution::operator!=",
+      "parameters": [
+        {
+          "name": "other",
+          "type": "const normal_distribution<RealType> &"
+        }
+      ],
+      "return_type": "_Bool",
+      "templated_kind": 0,
+      "type": "_Bool (const normal_distribution<RealType> &)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 503,
+      "linkage_name": "_ZN11hiprand_cpp19normal_distributionclERTL0__PT_m",
+      "name": "hiprand_cpp::normal_distribution::operator()",
+      "parameters": [
+        {
+          "name": "g",
+          "type": "Generator &"
+        },
+        {
+          "name": "output",
+          "type": "RealType *"
+        },
+        {
+          "name": "size",
+          "type": "size_t"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 1,
+      "type": "void (Generator &, RealType *, size_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 513,
+      "linkage_name": "_ZN11hiprand_cpp19normal_distributioneqERKS0_",
+      "name": "hiprand_cpp::normal_distribution::operator==",
+      "parameters": [
+        {
+          "name": "other",
+          "type": "const normal_distribution<RealType> &"
+        }
+      ],
+      "return_type": "_Bool",
+      "templated_kind": 0,
+      "type": "_Bool (const normal_distribution<RealType> &)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 473,
+      "linkage_name": "_ZNK11hiprand_cpp19normal_distribution5paramEv",
+      "name": "hiprand_cpp::normal_distribution::param",
+      "parameters": [],
+      "return_type": "param_type",
+      "templated_kind": 0,
+      "type": "param_type (void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 479,
+      "linkage_name": "_ZN11hiprand_cpp19normal_distribution5paramERKNS0_10param_typeE",
+      "name": "hiprand_cpp::normal_distribution::param",
+      "parameters": [
+        {
+          "name": "params",
+          "type": "const param_type &"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (const param_type &)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "fields": [
+        {
+          "name": "m_mean",
+          "type": "RealType"
+        },
+        {
+          "name": "m_stddev",
+          "type": "RealType"
+        }
+      ],
+      "file": "hiprand.hpp",
+      "kind": "record",
+      "layout_available": false,
+      "line": 378,
+      "name": "hiprand_cpp::normal_distribution::param_type"
+    },
+    {
+      "file": "hiprand.hpp",
+      "kind": "typedef",
+      "line": 382,
+      "name": "hiprand_cpp::normal_distribution::param_type::distribution_type",
+      "underlying_type": "normal_distribution<RealType>"
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 395,
+      "linkage_name": "_ZNK11hiprand_cpp19normal_distribution10param_type4meanEv",
+      "name": "hiprand_cpp::normal_distribution::param_type::mean",
+      "parameters": [],
+      "return_type": "RealType",
+      "templated_kind": 0,
+      "type": "RealType (void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 415,
+      "linkage_name": "_ZN11hiprand_cpp19normal_distribution10param_typeneERKS1_",
+      "name": "hiprand_cpp::normal_distribution::param_type::operator!=",
+      "parameters": [
+        {
+          "name": "other",
+          "type": "const param_type &"
+        }
+      ],
+      "return_type": "_Bool",
+      "templated_kind": 0,
+      "type": "_Bool (const param_type &)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 409,
+      "linkage_name": "_ZN11hiprand_cpp19normal_distribution10param_typeeqERKS1_",
+      "name": "hiprand_cpp::normal_distribution::param_type::operator==",
+      "parameters": [
+        {
+          "name": "other",
+          "type": "const param_type &"
+        }
+      ],
+      "return_type": "_Bool",
+      "templated_kind": 0,
+      "type": "_Bool (const param_type &)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 387,
+      "linkage_name": "_ZN11hiprand_cpp19normal_distribution10param_typeC1ET_S2_",
+      "name": "hiprand_cpp::normal_distribution::param_type::param_type",
+      "parameters": [
+        {
+          "name": "mean",
+          "type": "RealType"
+        },
+        {
+          "name": "stddev",
+          "type": "RealType"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (RealType, RealType)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 403,
+      "linkage_name": "_ZNK11hiprand_cpp19normal_distribution10param_type6stddevEv",
+      "name": "hiprand_cpp::normal_distribution::param_type::stddev",
+      "parameters": [],
+      "return_type": "RealType",
+      "templated_kind": 0,
+      "type": "RealType (void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 440,
+      "linkage_name": "_ZN11hiprand_cpp19normal_distribution5resetEv",
+      "name": "hiprand_cpp::normal_distribution::reset",
+      "parameters": [],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (void)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "file": "hiprand.hpp",
+      "kind": "typedef",
+      "line": 374,
+      "name": "hiprand_cpp::normal_distribution::result_type",
+      "underlying_type": "RealType"
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 455,
+      "linkage_name": "_ZNK11hiprand_cpp19normal_distribution6stddevEv",
+      "name": "hiprand_cpp::normal_distribution::stddev",
+      "parameters": [],
+      "return_type": "RealType",
+      "templated_kind": 0,
+      "type": "RealType (void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 139,
+      "linkage_name": "_ZN11hiprand_cppneERKNS_5errorES2_",
+      "name": "hiprand_cpp::operator!=",
+      "parameters": [
+        {
+          "name": "l",
+          "type": "const error &"
+        },
+        {
+          "name": "r",
+          "type": "const error &"
+        }
+      ],
+      "return_type": "_Bool",
+      "templated_kind": 0,
+      "type": "_Bool (const error &, const error &)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 132,
+      "linkage_name": "_ZN11hiprand_cppeqERKNS_5errorES2_",
+      "name": "hiprand_cpp::operator==",
+      "parameters": [
+        {
+          "name": "l",
+          "type": "const error &"
+        },
+        {
+          "name": "r",
+          "type": "const error &"
+        }
+      ],
+      "return_type": "_Bool",
+      "templated_kind": 0,
+      "type": "_Bool (const error &, const error &)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "file": "hiprand.hpp",
+      "kind": "typedef",
+      "line": 2384,
+      "name": "hiprand_cpp::philox4x32_10",
+      "underlying_type": "philox4x32_10_engine<>"
+    },
+    {
+      "fields": [
+        {
+          "name": "m_generator",
+          "type": "hiprandGenerator_t"
+        }
+      ],
+      "file": "hiprand.hpp",
+      "kind": "record",
+      "layout_available": false,
+      "line": 915,
+      "name": "hiprand_cpp::philox4x32_10_engine"
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1089,
+      "linkage_name": "_ZNK11hiprand_cpp20philox4x32_10_engine3maxEv",
+      "name": "hiprand_cpp::philox4x32_10_engine::max",
+      "parameters": [],
+      "return_type": "result_type",
+      "templated_kind": 0,
+      "type": "result_type (void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1083,
+      "linkage_name": "_ZNK11hiprand_cpp20philox4x32_10_engine3minEv",
+      "name": "hiprand_cpp::philox4x32_10_engine::min",
+      "parameters": [],
+      "return_type": "result_type",
+      "templated_kind": 0,
+      "type": "result_type (void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1023,
+      "linkage_name": "_ZN11hiprand_cpp20philox4x32_10_engine6offsetEy",
+      "name": "hiprand_cpp::philox4x32_10_engine::offset",
+      "parameters": [
+        {
+          "name": "value",
+          "type": "offset_type"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (offset_type)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "file": "hiprand.hpp",
+      "kind": "typedef",
+      "line": 933,
+      "name": "hiprand_cpp::philox4x32_10_engine::offset_type",
+      "underlying_type": "unsigned long long"
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1075,
+      "linkage_name": "_ZN11hiprand_cpp20philox4x32_10_engineclEPjm",
+      "name": "hiprand_cpp::philox4x32_10_engine::operator()",
+      "parameters": [
+        {
+          "name": "output",
+          "type": "result_type *"
+        },
+        {
+          "name": "size",
+          "type": "size_t"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 1,
+      "type": "void (result_type *, size_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 991,
+      "linkage_name": "_ZN11hiprand_cpp20philox4x32_10_engineaSERKS0_",
+      "name": "hiprand_cpp::philox4x32_10_engine::operator=",
+      "parameters": [
+        {
+          "name": "",
+          "type": "const philox4x32_10_engine<DefaultSeed> &"
+        }
+      ],
+      "return_type": "philox4x32_10_engine<DefaultSeed> &",
+      "templated_kind": 0,
+      "type": "philox4x32_10_engine<DefaultSeed> &(const philox4x32_10_engine<DefaultSeed> &)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 993,
+      "linkage_name": "_ZN11hiprand_cpp20philox4x32_10_engineaSEOS0_",
+      "name": "hiprand_cpp::philox4x32_10_engine::operator=",
+      "parameters": [
+        {
+          "name": "",
+          "type": "philox4x32_10_engine<DefaultSeed> &&"
+        }
+      ],
+      "return_type": "philox4x32_10_engine<DefaultSeed> &",
+      "templated_kind": 0,
+      "type": "philox4x32_10_engine<DefaultSeed> &(philox4x32_10_engine<DefaultSeed> &&)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1040,
+      "linkage_name": "_ZN11hiprand_cpp20philox4x32_10_engine5orderE15hiprandOrdering",
+      "name": "hiprand_cpp::philox4x32_10_engine::order",
+      "parameters": [
+        {
+          "name": "value",
+          "type": "order_type"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (order_type)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "file": "hiprand.hpp",
+      "kind": "typedef",
+      "line": 926,
+      "name": "hiprand_cpp::philox4x32_10_engine::order_type",
+      "underlying_type": "hiprandOrdering_t"
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 948,
+      "linkage_name": "_ZN11hiprand_cpp20philox4x32_10_engineC1Eyy",
+      "name": "hiprand_cpp::philox4x32_10_engine::philox4x32_10_engine<DefaultSeed>",
+      "parameters": [
+        {
+          "name": "seed_value",
+          "type": "seed_type"
+        },
+        {
+          "name": "offset_value",
+          "type": "offset_type"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (seed_type, offset_type)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 977,
+      "linkage_name": "_ZN11hiprand_cpp20philox4x32_10_engineC1ERP27rocrand_generator_base_type",
+      "name": "hiprand_cpp::philox4x32_10_engine::philox4x32_10_engine<DefaultSeed>",
+      "parameters": [
+        {
+          "name": "generator",
+          "type": "hiprandGenerator_t &"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (hiprandGenerator_t &)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 987,
+      "linkage_name": "_ZN11hiprand_cpp20philox4x32_10_engineC1ERKS0_",
+      "name": "hiprand_cpp::philox4x32_10_engine::philox4x32_10_engine<DefaultSeed>",
+      "parameters": [
+        {
+          "name": "",
+          "type": "const philox4x32_10_engine<DefaultSeed> &"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (const philox4x32_10_engine<DefaultSeed> &)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 989,
+      "linkage_name": "_ZN11hiprand_cpp20philox4x32_10_engineC1EOS0_",
+      "name": "hiprand_cpp::philox4x32_10_engine::philox4x32_10_engine<DefaultSeed>",
+      "parameters": [
+        {
+          "name": "",
+          "type": "philox4x32_10_engine<DefaultSeed> &&"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (philox4x32_10_engine<DefaultSeed> &&)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "file": "hiprand.hpp",
+      "kind": "typedef",
+      "line": 920,
+      "name": "hiprand_cpp::philox4x32_10_engine::result_type",
+      "underlying_type": "unsigned int"
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1055,
+      "linkage_name": "_ZN11hiprand_cpp20philox4x32_10_engine4seedEy",
+      "name": "hiprand_cpp::philox4x32_10_engine::seed",
+      "parameters": [
+        {
+          "name": "value",
+          "type": "seed_type"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (seed_type)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "file": "hiprand.hpp",
+      "kind": "typedef",
+      "line": 938,
+      "name": "hiprand_cpp::philox4x32_10_engine::seed_type",
+      "underlying_type": "unsigned long long"
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1006,
+      "linkage_name": "_ZN11hiprand_cpp20philox4x32_10_engine6streamEP12ihipStream_t",
+      "name": "hiprand_cpp::philox4x32_10_engine::stream",
+      "parameters": [
+        {
+          "name": "value",
+          "type": "hipStream_t"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (hipStream_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1095,
+      "linkage_name": "_ZN11hiprand_cpp20philox4x32_10_engine4typeEv",
+      "name": "hiprand_cpp::philox4x32_10_engine::type",
+      "parameters": [],
+      "return_type": "hiprandRngType",
+      "templated_kind": 0,
+      "type": "hiprandRngType (void)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 998,
+      "linkage_name": "_ZN11hiprand_cpp20philox4x32_10_engineD1Ev",
+      "name": "hiprand_cpp::philox4x32_10_engine::~philox4x32_10_engine<DefaultSeed>",
+      "parameters": [],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (void) noexcept(false)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "fields": [
+        {
+          "name": "m_params",
+          "type": "param_type"
+        }
+      ],
+      "file": "hiprand.hpp",
+      "kind": "record",
+      "layout_available": false,
+      "line": 758,
+      "name": "hiprand_cpp::poisson_distribution"
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 844,
+      "linkage_name": "_ZNK11hiprand_cpp20poisson_distribution3maxEv",
+      "name": "hiprand_cpp::poisson_distribution::max",
+      "parameters": [],
+      "return_type": "IntType",
+      "templated_kind": 0,
+      "type": "IntType (void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 832,
+      "linkage_name": "_ZNK11hiprand_cpp20poisson_distribution4meanEv",
+      "name": "hiprand_cpp::poisson_distribution::mean",
+      "parameters": [],
+      "return_type": "double",
+      "templated_kind": 0,
+      "type": "double (void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 838,
+      "linkage_name": "_ZNK11hiprand_cpp20poisson_distribution3minEv",
+      "name": "hiprand_cpp::poisson_distribution::min",
+      "parameters": [],
+      "return_type": "IntType",
+      "templated_kind": 0,
+      "type": "IntType (void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 898,
+      "linkage_name": "_ZN11hiprand_cpp20poisson_distributionneERKS0_",
+      "name": "hiprand_cpp::poisson_distribution::operator!=",
+      "parameters": [
+        {
+          "name": "other",
+          "type": "const poisson_distribution<IntType> &"
+        }
+      ],
+      "return_type": "_Bool",
+      "templated_kind": 0,
+      "type": "_Bool (const poisson_distribution<IntType> &)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 880,
+      "linkage_name": "_ZN11hiprand_cpp20poisson_distributionclERTL0__PT_m",
+      "name": "hiprand_cpp::poisson_distribution::operator()",
+      "parameters": [
+        {
+          "name": "g",
+          "type": "Generator &"
+        },
+        {
+          "name": "output",
+          "type": "IntType *"
+        },
+        {
+          "name": "size",
+          "type": "size_t"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 1,
+      "type": "void (Generator &, IntType *, size_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 890,
+      "linkage_name": "_ZN11hiprand_cpp20poisson_distributioneqERKS0_",
+      "name": "hiprand_cpp::poisson_distribution::operator==",
+      "parameters": [
+        {
+          "name": "other",
+          "type": "const poisson_distribution<IntType> &"
+        }
+      ],
+      "return_type": "_Bool",
+      "templated_kind": 0,
+      "type": "_Bool (const poisson_distribution<IntType> &)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 850,
+      "linkage_name": "_ZNK11hiprand_cpp20poisson_distribution5paramEv",
+      "name": "hiprand_cpp::poisson_distribution::param",
+      "parameters": [],
+      "return_type": "param_type",
+      "templated_kind": 0,
+      "type": "param_type (void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 856,
+      "linkage_name": "_ZN11hiprand_cpp20poisson_distribution5paramERKNS0_10param_typeE",
+      "name": "hiprand_cpp::poisson_distribution::param",
+      "parameters": [
+        {
+          "name": "params",
+          "type": "const param_type &"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (const param_type &)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "fields": [
+        {
+          "name": "m_mean",
+          "type": "double"
+        }
+      ],
+      "file": "hiprand.hpp",
+      "kind": "record",
+      "layout_available": false,
+      "line": 771,
+      "name": "hiprand_cpp::poisson_distribution::param_type"
+    },
+    {
+      "file": "hiprand.hpp",
+      "kind": "typedef",
+      "line": 775,
+      "name": "hiprand_cpp::poisson_distribution::param_type::distribution_type",
+      "underlying_type": "poisson_distribution<IntType>"
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 788,
+      "linkage_name": "_ZNK11hiprand_cpp20poisson_distribution10param_type4meanEv",
+      "name": "hiprand_cpp::poisson_distribution::param_type::mean",
+      "parameters": [],
+      "return_type": "double",
+      "templated_kind": 0,
+      "type": "double (void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 800,
+      "linkage_name": "_ZN11hiprand_cpp20poisson_distribution10param_typeneERKS1_",
+      "name": "hiprand_cpp::poisson_distribution::param_type::operator!=",
+      "parameters": [
+        {
+          "name": "other",
+          "type": "const param_type &"
+        }
+      ],
+      "return_type": "_Bool",
+      "templated_kind": 0,
+      "type": "_Bool (const param_type &)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 794,
+      "linkage_name": "_ZN11hiprand_cpp20poisson_distribution10param_typeeqERKS1_",
+      "name": "hiprand_cpp::poisson_distribution::param_type::operator==",
+      "parameters": [
+        {
+          "name": "other",
+          "type": "const param_type &"
+        }
+      ],
+      "return_type": "_Bool",
+      "templated_kind": 0,
+      "type": "_Bool (const param_type &)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 779,
+      "linkage_name": "_ZN11hiprand_cpp20poisson_distribution10param_typeC1Ed",
+      "name": "hiprand_cpp::poisson_distribution::param_type::param_type",
+      "parameters": [
+        {
+          "name": "mean",
+          "type": "double"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (double)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 811,
+      "linkage_name": "_ZN11hiprand_cpp20poisson_distributionC1Ed",
+      "name": "hiprand_cpp::poisson_distribution::poisson_distribution<IntType>",
+      "parameters": [
+        {
+          "name": "mean",
+          "type": "double"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (double)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 818,
+      "linkage_name": "_ZN11hiprand_cpp20poisson_distributionC1ERKNS0_10param_typeE",
+      "name": "hiprand_cpp::poisson_distribution::poisson_distribution<IntType>",
+      "parameters": [
+        {
+          "name": "params",
+          "type": "const param_type &"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (const param_type &)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 824,
+      "linkage_name": "_ZN11hiprand_cpp20poisson_distribution5resetEv",
+      "name": "hiprand_cpp::poisson_distribution::reset",
+      "parameters": [],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (void)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "file": "hiprand.hpp",
+      "kind": "typedef",
+      "line": 767,
+      "name": "hiprand_cpp::poisson_distribution::result_type",
+      "underlying_type": "IntType"
+    },
+    {
+      "file": "hiprand.hpp",
+      "kind": "typedef",
+      "line": 2441,
+      "name": "hiprand_cpp::random_device",
+      "underlying_type": "std::random_device"
+    },
+    {
+      "file": "hiprand.hpp",
+      "kind": "typedef",
+      "line": 2402,
+      "name": "hiprand_cpp::scrambled_sobol32",
+      "underlying_type": "scrambled_sobol32_engine<>"
+    },
+    {
+      "fields": [
+        {
+          "name": "m_generator",
+          "type": "hiprandGenerator_t"
+        }
+      ],
+      "file": "hiprand.hpp",
+      "kind": "record",
+      "layout_available": false,
+      "line": 1906,
+      "name": "hiprand_cpp::scrambled_sobol32_engine"
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1994,
+      "linkage_name": "_ZN11hiprand_cpp24scrambled_sobol32_engine10dimensionsEj",
+      "name": "hiprand_cpp::scrambled_sobol32_engine::dimensions",
+      "parameters": [
+        {
+          "name": "value",
+          "type": "dimensions_num_type"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (dimensions_num_type)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "file": "hiprand.hpp",
+      "kind": "typedef",
+      "line": 1916,
+      "name": "hiprand_cpp::scrambled_sobol32_engine::dimensions_num_type",
+      "underlying_type": "unsigned int"
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 2018,
+      "linkage_name": "_ZNK11hiprand_cpp24scrambled_sobol32_engine3maxEv",
+      "name": "hiprand_cpp::scrambled_sobol32_engine::max",
+      "parameters": [],
+      "return_type": "result_type",
+      "templated_kind": 0,
+      "type": "result_type (void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 2012,
+      "linkage_name": "_ZNK11hiprand_cpp24scrambled_sobol32_engine3minEv",
+      "name": "hiprand_cpp::scrambled_sobol32_engine::min",
+      "parameters": [],
+      "return_type": "result_type",
+      "templated_kind": 0,
+      "type": "result_type (void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1978,
+      "linkage_name": "_ZN11hiprand_cpp24scrambled_sobol32_engine6offsetEy",
+      "name": "hiprand_cpp::scrambled_sobol32_engine::offset",
+      "parameters": [
+        {
+          "name": "value",
+          "type": "offset_type"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (offset_type)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "file": "hiprand.hpp",
+      "kind": "typedef",
+      "line": 1914,
+      "name": "hiprand_cpp::scrambled_sobol32_engine::offset_type",
+      "underlying_type": "unsigned long long"
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 2003,
+      "linkage_name": "_ZN11hiprand_cpp24scrambled_sobol32_engineclEPjm",
+      "name": "hiprand_cpp::scrambled_sobol32_engine::operator()",
+      "parameters": [
+        {
+          "name": "output",
+          "type": "result_type *"
+        },
+        {
+          "name": "size",
+          "type": "size_t"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 1,
+      "type": "void (result_type *, size_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1957,
+      "linkage_name": "_ZN11hiprand_cpp24scrambled_sobol32_engineaSERKS0_",
+      "name": "hiprand_cpp::scrambled_sobol32_engine::operator=",
+      "parameters": [
+        {
+          "name": "",
+          "type": "const scrambled_sobol32_engine<DefaultNumDimensions> &"
+        }
+      ],
+      "return_type": "scrambled_sobol32_engine<DefaultNumDimensions> &",
+      "templated_kind": 0,
+      "type": "scrambled_sobol32_engine<DefaultNumDimensions> &(const scrambled_sobol32_engine<DefaultNumDimensions> &)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1959,
+      "linkage_name": "_ZN11hiprand_cpp24scrambled_sobol32_engineaSEOS0_",
+      "name": "hiprand_cpp::scrambled_sobol32_engine::operator=",
+      "parameters": [
+        {
+          "name": "",
+          "type": "scrambled_sobol32_engine<DefaultNumDimensions> &&"
+        }
+      ],
+      "return_type": "scrambled_sobol32_engine<DefaultNumDimensions> &",
+      "templated_kind": 0,
+      "type": "scrambled_sobol32_engine<DefaultNumDimensions> &(scrambled_sobol32_engine<DefaultNumDimensions> &&)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1986,
+      "linkage_name": "_ZN11hiprand_cpp24scrambled_sobol32_engine5orderE15hiprandOrdering",
+      "name": "hiprand_cpp::scrambled_sobol32_engine::order",
+      "parameters": [
+        {
+          "name": "value",
+          "type": "order_type"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (order_type)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "file": "hiprand.hpp",
+      "kind": "typedef",
+      "line": 1912,
+      "name": "hiprand_cpp::scrambled_sobol32_engine::order_type",
+      "underlying_type": "hiprandOrdering_t"
+    },
+    {
+      "file": "hiprand.hpp",
+      "kind": "typedef",
+      "line": 1910,
+      "name": "hiprand_cpp::scrambled_sobol32_engine::result_type",
+      "underlying_type": "unsigned int"
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1921,
+      "linkage_name": "_ZN11hiprand_cpp24scrambled_sobol32_engineC1Ejy",
+      "name": "hiprand_cpp::scrambled_sobol32_engine::scrambled_sobol32_engine<DefaultNumDimensions>",
+      "parameters": [
+        {
+          "name": "num_of_dimensions",
+          "type": "dimensions_num_type"
+        },
+        {
+          "name": "offset_value",
+          "type": "offset_type"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (dimensions_num_type, offset_type)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1944,
+      "linkage_name": "_ZN11hiprand_cpp24scrambled_sobol32_engineC1ERP27rocrand_generator_base_type",
+      "name": "hiprand_cpp::scrambled_sobol32_engine::scrambled_sobol32_engine<DefaultNumDimensions>",
+      "parameters": [
+        {
+          "name": "generator",
+          "type": "hiprandGenerator_t &"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (hiprandGenerator_t &)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1953,
+      "linkage_name": "_ZN11hiprand_cpp24scrambled_sobol32_engineC1ERKS0_",
+      "name": "hiprand_cpp::scrambled_sobol32_engine::scrambled_sobol32_engine<DefaultNumDimensions>",
+      "parameters": [
+        {
+          "name": "",
+          "type": "const scrambled_sobol32_engine<DefaultNumDimensions> &"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (const scrambled_sobol32_engine<DefaultNumDimensions> &)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1955,
+      "linkage_name": "_ZN11hiprand_cpp24scrambled_sobol32_engineC1EOS0_",
+      "name": "hiprand_cpp::scrambled_sobol32_engine::scrambled_sobol32_engine<DefaultNumDimensions>",
+      "parameters": [
+        {
+          "name": "",
+          "type": "scrambled_sobol32_engine<DefaultNumDimensions> &&"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (scrambled_sobol32_engine<DefaultNumDimensions> &&)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1970,
+      "linkage_name": "_ZN11hiprand_cpp24scrambled_sobol32_engine6streamEP12ihipStream_t",
+      "name": "hiprand_cpp::scrambled_sobol32_engine::stream",
+      "parameters": [
+        {
+          "name": "value",
+          "type": "hipStream_t"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (hipStream_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 2024,
+      "linkage_name": "_ZN11hiprand_cpp24scrambled_sobol32_engine4typeEv",
+      "name": "hiprand_cpp::scrambled_sobol32_engine::type",
+      "parameters": [],
+      "return_type": "hiprandRngType",
+      "templated_kind": 0,
+      "type": "hiprandRngType (void)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1962,
+      "linkage_name": "_ZN11hiprand_cpp24scrambled_sobol32_engineD1Ev",
+      "name": "hiprand_cpp::scrambled_sobol32_engine::~scrambled_sobol32_engine<DefaultNumDimensions>",
+      "parameters": [],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (void) noexcept(false)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "file": "hiprand.hpp",
+      "kind": "typedef",
+      "line": 2408,
+      "name": "hiprand_cpp::scrambled_sobol64",
+      "underlying_type": "scrambled_sobol64_engine<>"
+    },
+    {
+      "fields": [
+        {
+          "name": "m_generator",
+          "type": "hiprandGenerator_t"
+        }
+      ],
+      "file": "hiprand.hpp",
+      "kind": "record",
+      "layout_available": false,
+      "line": 2232,
+      "name": "hiprand_cpp::scrambled_sobol64_engine"
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 2320,
+      "linkage_name": "_ZN11hiprand_cpp24scrambled_sobol64_engine10dimensionsEj",
+      "name": "hiprand_cpp::scrambled_sobol64_engine::dimensions",
+      "parameters": [
+        {
+          "name": "value",
+          "type": "dimensions_num_type"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (dimensions_num_type)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "file": "hiprand.hpp",
+      "kind": "typedef",
+      "line": 2242,
+      "name": "hiprand_cpp::scrambled_sobol64_engine::dimensions_num_type",
+      "underlying_type": "unsigned int"
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 2344,
+      "linkage_name": "_ZNK11hiprand_cpp24scrambled_sobol64_engine3maxEv",
+      "name": "hiprand_cpp::scrambled_sobol64_engine::max",
+      "parameters": [],
+      "return_type": "result_type",
+      "templated_kind": 0,
+      "type": "result_type (void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 2338,
+      "linkage_name": "_ZNK11hiprand_cpp24scrambled_sobol64_engine3minEv",
+      "name": "hiprand_cpp::scrambled_sobol64_engine::min",
+      "parameters": [],
+      "return_type": "result_type",
+      "templated_kind": 0,
+      "type": "result_type (void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 2304,
+      "linkage_name": "_ZN11hiprand_cpp24scrambled_sobol64_engine6offsetEy",
+      "name": "hiprand_cpp::scrambled_sobol64_engine::offset",
+      "parameters": [
+        {
+          "name": "value",
+          "type": "offset_type"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (offset_type)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "file": "hiprand.hpp",
+      "kind": "typedef",
+      "line": 2240,
+      "name": "hiprand_cpp::scrambled_sobol64_engine::offset_type",
+      "underlying_type": "unsigned long long"
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 2329,
+      "linkage_name": "_ZN11hiprand_cpp24scrambled_sobol64_engineclEPym",
+      "name": "hiprand_cpp::scrambled_sobol64_engine::operator()",
+      "parameters": [
+        {
+          "name": "output",
+          "type": "result_type *"
+        },
+        {
+          "name": "size",
+          "type": "size_t"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 1,
+      "type": "void (result_type *, size_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 2283,
+      "linkage_name": "_ZN11hiprand_cpp24scrambled_sobol64_engineaSERKS0_",
+      "name": "hiprand_cpp::scrambled_sobol64_engine::operator=",
+      "parameters": [
+        {
+          "name": "",
+          "type": "const scrambled_sobol64_engine<DefaultNumDimensions> &"
+        }
+      ],
+      "return_type": "scrambled_sobol64_engine<DefaultNumDimensions> &",
+      "templated_kind": 0,
+      "type": "scrambled_sobol64_engine<DefaultNumDimensions> &(const scrambled_sobol64_engine<DefaultNumDimensions> &)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 2285,
+      "linkage_name": "_ZN11hiprand_cpp24scrambled_sobol64_engineaSEOS0_",
+      "name": "hiprand_cpp::scrambled_sobol64_engine::operator=",
+      "parameters": [
+        {
+          "name": "",
+          "type": "scrambled_sobol64_engine<DefaultNumDimensions> &&"
+        }
+      ],
+      "return_type": "scrambled_sobol64_engine<DefaultNumDimensions> &",
+      "templated_kind": 0,
+      "type": "scrambled_sobol64_engine<DefaultNumDimensions> &(scrambled_sobol64_engine<DefaultNumDimensions> &&)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 2312,
+      "linkage_name": "_ZN11hiprand_cpp24scrambled_sobol64_engine5orderE15hiprandOrdering",
+      "name": "hiprand_cpp::scrambled_sobol64_engine::order",
+      "parameters": [
+        {
+          "name": "value",
+          "type": "order_type"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (order_type)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "file": "hiprand.hpp",
+      "kind": "typedef",
+      "line": 2238,
+      "name": "hiprand_cpp::scrambled_sobol64_engine::order_type",
+      "underlying_type": "hiprandOrdering_t"
+    },
+    {
+      "file": "hiprand.hpp",
+      "kind": "typedef",
+      "line": 2236,
+      "name": "hiprand_cpp::scrambled_sobol64_engine::result_type",
+      "underlying_type": "unsigned long long"
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 2247,
+      "linkage_name": "_ZN11hiprand_cpp24scrambled_sobol64_engineC1Ejy",
+      "name": "hiprand_cpp::scrambled_sobol64_engine::scrambled_sobol64_engine<DefaultNumDimensions>",
+      "parameters": [
+        {
+          "name": "num_of_dimensions",
+          "type": "dimensions_num_type"
+        },
+        {
+          "name": "offset_value",
+          "type": "offset_type"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (dimensions_num_type, offset_type)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 2270,
+      "linkage_name": "_ZN11hiprand_cpp24scrambled_sobol64_engineC1ERP27rocrand_generator_base_type",
+      "name": "hiprand_cpp::scrambled_sobol64_engine::scrambled_sobol64_engine<DefaultNumDimensions>",
+      "parameters": [
+        {
+          "name": "generator",
+          "type": "hiprandGenerator_t &"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (hiprandGenerator_t &)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 2279,
+      "linkage_name": "_ZN11hiprand_cpp24scrambled_sobol64_engineC1ERKS0_",
+      "name": "hiprand_cpp::scrambled_sobol64_engine::scrambled_sobol64_engine<DefaultNumDimensions>",
+      "parameters": [
+        {
+          "name": "",
+          "type": "const scrambled_sobol64_engine<DefaultNumDimensions> &"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (const scrambled_sobol64_engine<DefaultNumDimensions> &)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 2281,
+      "linkage_name": "_ZN11hiprand_cpp24scrambled_sobol64_engineC1EOS0_",
+      "name": "hiprand_cpp::scrambled_sobol64_engine::scrambled_sobol64_engine<DefaultNumDimensions>",
+      "parameters": [
+        {
+          "name": "",
+          "type": "scrambled_sobol64_engine<DefaultNumDimensions> &&"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (scrambled_sobol64_engine<DefaultNumDimensions> &&)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 2296,
+      "linkage_name": "_ZN11hiprand_cpp24scrambled_sobol64_engine6streamEP12ihipStream_t",
+      "name": "hiprand_cpp::scrambled_sobol64_engine::stream",
+      "parameters": [
+        {
+          "name": "value",
+          "type": "hipStream_t"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (hipStream_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 2350,
+      "linkage_name": "_ZN11hiprand_cpp24scrambled_sobol64_engine4typeEv",
+      "name": "hiprand_cpp::scrambled_sobol64_engine::type",
+      "parameters": [],
+      "return_type": "hiprandRngType",
+      "templated_kind": 0,
+      "type": "hiprandRngType (void)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 2288,
+      "linkage_name": "_ZN11hiprand_cpp24scrambled_sobol64_engineD1Ev",
+      "name": "hiprand_cpp::scrambled_sobol64_engine::~scrambled_sobol64_engine<DefaultNumDimensions>",
+      "parameters": [],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (void) noexcept(false)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "file": "hiprand.hpp",
+      "kind": "typedef",
+      "line": 2399,
+      "name": "hiprand_cpp::sobol32",
+      "underlying_type": "sobol32_engine<>"
+    },
+    {
+      "fields": [
+        {
+          "name": "m_generator",
+          "type": "hiprandGenerator_t"
+        }
+      ],
+      "file": "hiprand.hpp",
+      "kind": "record",
+      "layout_available": false,
+      "line": 1723,
+      "name": "hiprand_cpp::sobol32_engine"
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1825,
+      "linkage_name": "_ZN11hiprand_cpp14sobol32_engine10dimensionsEj",
+      "name": "hiprand_cpp::sobol32_engine::dimensions",
+      "parameters": [
+        {
+          "name": "value",
+          "type": "dimensions_num_type"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (dimensions_num_type)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "file": "hiprand.hpp",
+      "kind": "typedef",
+      "line": 1736,
+      "name": "hiprand_cpp::sobol32_engine::dimensions_num_type",
+      "underlying_type": "unsigned int"
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1862,
+      "linkage_name": "_ZNK11hiprand_cpp14sobol32_engine3maxEv",
+      "name": "hiprand_cpp::sobol32_engine::max",
+      "parameters": [],
+      "return_type": "result_type",
+      "templated_kind": 0,
+      "type": "result_type (void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1856,
+      "linkage_name": "_ZNK11hiprand_cpp14sobol32_engine3minEv",
+      "name": "hiprand_cpp::sobol32_engine::min",
+      "parameters": [],
+      "return_type": "result_type",
+      "templated_kind": 0,
+      "type": "result_type (void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1801,
+      "linkage_name": "_ZN11hiprand_cpp14sobol32_engine6offsetEy",
+      "name": "hiprand_cpp::sobol32_engine::offset",
+      "parameters": [
+        {
+          "name": "value",
+          "type": "offset_type"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (offset_type)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "file": "hiprand.hpp",
+      "kind": "typedef",
+      "line": 1731,
+      "name": "hiprand_cpp::sobol32_engine::offset_type",
+      "underlying_type": "unsigned long long"
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1848,
+      "linkage_name": "_ZN11hiprand_cpp14sobol32_engineclEPjm",
+      "name": "hiprand_cpp::sobol32_engine::operator()",
+      "parameters": [
+        {
+          "name": "output",
+          "type": "result_type *"
+        },
+        {
+          "name": "size",
+          "type": "size_t"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 1,
+      "type": "void (result_type *, size_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1782,
+      "linkage_name": "_ZN11hiprand_cpp14sobol32_engineaSERKS0_",
+      "name": "hiprand_cpp::sobol32_engine::operator=",
+      "parameters": [
+        {
+          "name": "",
+          "type": "const sobol32_engine<DefaultNumDimensions> &"
+        }
+      ],
+      "return_type": "sobol32_engine<DefaultNumDimensions> &",
+      "templated_kind": 0,
+      "type": "sobol32_engine<DefaultNumDimensions> &(const sobol32_engine<DefaultNumDimensions> &)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1784,
+      "linkage_name": "_ZN11hiprand_cpp14sobol32_engineaSEOS0_",
+      "name": "hiprand_cpp::sobol32_engine::operator=",
+      "parameters": [
+        {
+          "name": "",
+          "type": "sobol32_engine<DefaultNumDimensions> &&"
+        }
+      ],
+      "return_type": "sobol32_engine<DefaultNumDimensions> &",
+      "templated_kind": 0,
+      "type": "sobol32_engine<DefaultNumDimensions> &(sobol32_engine<DefaultNumDimensions> &&)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1808,
+      "linkage_name": "_ZN11hiprand_cpp14sobol32_engine5orderE15hiprandOrdering",
+      "name": "hiprand_cpp::sobol32_engine::order",
+      "parameters": [
+        {
+          "name": "value",
+          "type": "order_type"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (order_type)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "file": "hiprand.hpp",
+      "kind": "typedef",
+      "line": 1729,
+      "name": "hiprand_cpp::sobol32_engine::order_type",
+      "underlying_type": "hiprandOrdering_t"
+    },
+    {
+      "file": "hiprand.hpp",
+      "kind": "typedef",
+      "line": 1727,
+      "name": "hiprand_cpp::sobol32_engine::result_type",
+      "underlying_type": "unsigned int"
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1746,
+      "linkage_name": "_ZN11hiprand_cpp14sobol32_engineC1Ejy",
+      "name": "hiprand_cpp::sobol32_engine::sobol32_engine<DefaultNumDimensions>",
+      "parameters": [
+        {
+          "name": "num_of_dimensions",
+          "type": "dimensions_num_type"
+        },
+        {
+          "name": "offset_value",
+          "type": "offset_type"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (dimensions_num_type, offset_type)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1768,
+      "linkage_name": "_ZN11hiprand_cpp14sobol32_engineC1ERP27rocrand_generator_base_type",
+      "name": "hiprand_cpp::sobol32_engine::sobol32_engine<DefaultNumDimensions>",
+      "parameters": [
+        {
+          "name": "generator",
+          "type": "hiprandGenerator_t &"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (hiprandGenerator_t &)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1778,
+      "linkage_name": "_ZN11hiprand_cpp14sobol32_engineC1ERKS0_",
+      "name": "hiprand_cpp::sobol32_engine::sobol32_engine<DefaultNumDimensions>",
+      "parameters": [
+        {
+          "name": "",
+          "type": "const sobol32_engine<DefaultNumDimensions> &"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (const sobol32_engine<DefaultNumDimensions> &)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1780,
+      "linkage_name": "_ZN11hiprand_cpp14sobol32_engineC1EOS0_",
+      "name": "hiprand_cpp::sobol32_engine::sobol32_engine<DefaultNumDimensions>",
+      "parameters": [
+        {
+          "name": "",
+          "type": "sobol32_engine<DefaultNumDimensions> &&"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (sobol32_engine<DefaultNumDimensions> &&)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1794,
+      "linkage_name": "_ZN11hiprand_cpp14sobol32_engine6streamEP12ihipStream_t",
+      "name": "hiprand_cpp::sobol32_engine::stream",
+      "parameters": [
+        {
+          "name": "value",
+          "type": "hipStream_t"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (hipStream_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1868,
+      "linkage_name": "_ZN11hiprand_cpp14sobol32_engine4typeEv",
+      "name": "hiprand_cpp::sobol32_engine::type",
+      "parameters": [],
+      "return_type": "hiprandRngType",
+      "templated_kind": 0,
+      "type": "hiprandRngType (void)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1787,
+      "linkage_name": "_ZN11hiprand_cpp14sobol32_engineD1Ev",
+      "name": "hiprand_cpp::sobol32_engine::~sobol32_engine<DefaultNumDimensions>",
+      "parameters": [],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (void) noexcept(false)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "file": "hiprand.hpp",
+      "kind": "typedef",
+      "line": 2405,
+      "name": "hiprand_cpp::sobol64",
+      "underlying_type": "sobol64_engine<>"
+    },
+    {
+      "fields": [
+        {
+          "name": "m_generator",
+          "type": "hiprandGenerator_t"
+        }
+      ],
+      "file": "hiprand.hpp",
+      "kind": "record",
+      "layout_available": false,
+      "line": 2062,
+      "name": "hiprand_cpp::sobol64_engine"
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 2150,
+      "linkage_name": "_ZN11hiprand_cpp14sobol64_engine10dimensionsEj",
+      "name": "hiprand_cpp::sobol64_engine::dimensions",
+      "parameters": [
+        {
+          "name": "value",
+          "type": "dimensions_num_type"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (dimensions_num_type)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "file": "hiprand.hpp",
+      "kind": "typedef",
+      "line": 2072,
+      "name": "hiprand_cpp::sobol64_engine::dimensions_num_type",
+      "underlying_type": "unsigned int"
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 2188,
+      "linkage_name": "_ZNK11hiprand_cpp14sobol64_engine3maxEv",
+      "name": "hiprand_cpp::sobol64_engine::max",
+      "parameters": [],
+      "return_type": "result_type",
+      "templated_kind": 0,
+      "type": "result_type (void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 2182,
+      "linkage_name": "_ZNK11hiprand_cpp14sobol64_engine3minEv",
+      "name": "hiprand_cpp::sobol64_engine::min",
+      "parameters": [],
+      "return_type": "result_type",
+      "templated_kind": 0,
+      "type": "result_type (void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 2134,
+      "linkage_name": "_ZN11hiprand_cpp14sobol64_engine6offsetEy",
+      "name": "hiprand_cpp::sobol64_engine::offset",
+      "parameters": [
+        {
+          "name": "value",
+          "type": "offset_type"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (offset_type)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "file": "hiprand.hpp",
+      "kind": "typedef",
+      "line": 2070,
+      "name": "hiprand_cpp::sobol64_engine::offset_type",
+      "underlying_type": "unsigned long long"
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 2173,
+      "linkage_name": "_ZN11hiprand_cpp14sobol64_engineclEPym",
+      "name": "hiprand_cpp::sobol64_engine::operator()",
+      "parameters": [
+        {
+          "name": "output",
+          "type": "result_type *"
+        },
+        {
+          "name": "size",
+          "type": "size_t"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 1,
+      "type": "void (result_type *, size_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 2113,
+      "linkage_name": "_ZN11hiprand_cpp14sobol64_engineaSERKS0_",
+      "name": "hiprand_cpp::sobol64_engine::operator=",
+      "parameters": [
+        {
+          "name": "",
+          "type": "const sobol64_engine<DefaultNumDimensions> &"
+        }
+      ],
+      "return_type": "sobol64_engine<DefaultNumDimensions> &",
+      "templated_kind": 0,
+      "type": "sobol64_engine<DefaultNumDimensions> &(const sobol64_engine<DefaultNumDimensions> &)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 2115,
+      "linkage_name": "_ZN11hiprand_cpp14sobol64_engineaSEOS0_",
+      "name": "hiprand_cpp::sobol64_engine::operator=",
+      "parameters": [
+        {
+          "name": "",
+          "type": "sobol64_engine<DefaultNumDimensions> &&"
+        }
+      ],
+      "return_type": "sobol64_engine<DefaultNumDimensions> &",
+      "templated_kind": 0,
+      "type": "sobol64_engine<DefaultNumDimensions> &(sobol64_engine<DefaultNumDimensions> &&)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 2142,
+      "linkage_name": "_ZN11hiprand_cpp14sobol64_engine5orderE15hiprandOrdering",
+      "name": "hiprand_cpp::sobol64_engine::order",
+      "parameters": [
+        {
+          "name": "value",
+          "type": "order_type"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (order_type)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "file": "hiprand.hpp",
+      "kind": "typedef",
+      "line": 2068,
+      "name": "hiprand_cpp::sobol64_engine::order_type",
+      "underlying_type": "hiprandOrdering_t"
+    },
+    {
+      "file": "hiprand.hpp",
+      "kind": "typedef",
+      "line": 2066,
+      "name": "hiprand_cpp::sobol64_engine::result_type",
+      "underlying_type": "unsigned long long"
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 2077,
+      "linkage_name": "_ZN11hiprand_cpp14sobol64_engineC1Ejy",
+      "name": "hiprand_cpp::sobol64_engine::sobol64_engine<DefaultNumDimensions>",
+      "parameters": [
+        {
+          "name": "num_of_dimensions",
+          "type": "dimensions_num_type"
+        },
+        {
+          "name": "offset_value",
+          "type": "offset_type"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (dimensions_num_type, offset_type)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 2100,
+      "linkage_name": "_ZN11hiprand_cpp14sobol64_engineC1ERP27rocrand_generator_base_type",
+      "name": "hiprand_cpp::sobol64_engine::sobol64_engine<DefaultNumDimensions>",
+      "parameters": [
+        {
+          "name": "generator",
+          "type": "hiprandGenerator_t &"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (hiprandGenerator_t &)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 2109,
+      "linkage_name": "_ZN11hiprand_cpp14sobol64_engineC1ERKS0_",
+      "name": "hiprand_cpp::sobol64_engine::sobol64_engine<DefaultNumDimensions>",
+      "parameters": [
+        {
+          "name": "",
+          "type": "const sobol64_engine<DefaultNumDimensions> &"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (const sobol64_engine<DefaultNumDimensions> &)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 2111,
+      "linkage_name": "_ZN11hiprand_cpp14sobol64_engineC1EOS0_",
+      "name": "hiprand_cpp::sobol64_engine::sobol64_engine<DefaultNumDimensions>",
+      "parameters": [
+        {
+          "name": "",
+          "type": "sobol64_engine<DefaultNumDimensions> &&"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (sobol64_engine<DefaultNumDimensions> &&)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 2126,
+      "linkage_name": "_ZN11hiprand_cpp14sobol64_engine6streamEP12ihipStream_t",
+      "name": "hiprand_cpp::sobol64_engine::stream",
+      "parameters": [
+        {
+          "name": "value",
+          "type": "hipStream_t"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (hipStream_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 2194,
+      "linkage_name": "_ZN11hiprand_cpp14sobol64_engine4typeEv",
+      "name": "hiprand_cpp::sobol64_engine::type",
+      "parameters": [],
+      "return_type": "hiprandRngType",
+      "templated_kind": 0,
+      "type": "hiprandRngType (void)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 2118,
+      "linkage_name": "_ZN11hiprand_cpp14sobol64_engineD1Ev",
+      "name": "hiprand_cpp::sobol64_engine::~sobol64_engine<DefaultNumDimensions>",
+      "parameters": [],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (void) noexcept(false)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "fields": [],
+      "file": "hiprand.hpp",
+      "kind": "record",
+      "layout_available": false,
+      "line": 156,
+      "name": "hiprand_cpp::uniform_int_distribution"
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 230,
+      "linkage_name": "_ZN11hiprand_cpp24uniform_int_distribution8generateERTL0__Phm",
+      "name": "hiprand_cpp::uniform_int_distribution::generate",
+      "parameters": [
+        {
+          "name": "g",
+          "type": "Generator &"
+        },
+        {
+          "name": "output",
+          "type": "unsigned char *"
+        },
+        {
+          "name": "size",
+          "type": "size_t"
+        }
+      ],
+      "return_type": "hiprandStatus_t",
+      "templated_kind": 1,
+      "type": "hiprandStatus_t (Generator &, unsigned char *, size_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 236,
+      "linkage_name": "_ZN11hiprand_cpp24uniform_int_distribution8generateERTL0__Ptm",
+      "name": "hiprand_cpp::uniform_int_distribution::generate",
+      "parameters": [
+        {
+          "name": "g",
+          "type": "Generator &"
+        },
+        {
+          "name": "output",
+          "type": "unsigned short *"
+        },
+        {
+          "name": "size",
+          "type": "size_t"
+        }
+      ],
+      "return_type": "hiprandStatus_t",
+      "templated_kind": 1,
+      "type": "hiprandStatus_t (Generator &, unsigned short *, size_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 242,
+      "linkage_name": "_ZN11hiprand_cpp24uniform_int_distribution8generateERTL0__Pjm",
+      "name": "hiprand_cpp::uniform_int_distribution::generate",
+      "parameters": [
+        {
+          "name": "g",
+          "type": "Generator &"
+        },
+        {
+          "name": "output",
+          "type": "unsigned int *"
+        },
+        {
+          "name": "size",
+          "type": "size_t"
+        }
+      ],
+      "return_type": "hiprandStatus_t",
+      "templated_kind": 1,
+      "type": "hiprandStatus_t (Generator &, unsigned int *, size_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 248,
+      "linkage_name": "_ZN11hiprand_cpp24uniform_int_distribution8generateERTL0__Pym",
+      "name": "hiprand_cpp::uniform_int_distribution::generate",
+      "parameters": [
+        {
+          "name": "g",
+          "type": "Generator &"
+        },
+        {
+          "name": "output",
+          "type": "unsigned long long *"
+        },
+        {
+          "name": "size",
+          "type": "size_t"
+        }
+      ],
+      "return_type": "hiprandStatus_t",
+      "templated_kind": 1,
+      "type": "hiprandStatus_t (Generator &, unsigned long long *, size_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 185,
+      "linkage_name": "_ZNK11hiprand_cpp24uniform_int_distribution3maxEv",
+      "name": "hiprand_cpp::uniform_int_distribution::max",
+      "parameters": [],
+      "return_type": "IntType",
+      "templated_kind": 0,
+      "type": "IntType (void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 179,
+      "linkage_name": "_ZNK11hiprand_cpp24uniform_int_distribution3minEv",
+      "name": "hiprand_cpp::uniform_int_distribution::min",
+      "parameters": [],
+      "return_type": "IntType",
+      "templated_kind": 0,
+      "type": "IntType (void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 223,
+      "linkage_name": "_ZN11hiprand_cpp24uniform_int_distributionneERKS0_",
+      "name": "hiprand_cpp::uniform_int_distribution::operator!=",
+      "parameters": [
+        {
+          "name": "other",
+          "type": "const uniform_int_distribution<IntType> &"
+        }
+      ],
+      "return_type": "_Bool",
+      "templated_kind": 0,
+      "type": "_Bool (const uniform_int_distribution<IntType> &)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 208,
+      "linkage_name": "_ZN11hiprand_cpp24uniform_int_distributionclERTL0__PT_m",
+      "name": "hiprand_cpp::uniform_int_distribution::operator()",
+      "parameters": [
+        {
+          "name": "g",
+          "type": "Generator &"
+        },
+        {
+          "name": "output",
+          "type": "IntType *"
+        },
+        {
+          "name": "size",
+          "type": "size_t"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 1,
+      "type": "void (Generator &, IntType *, size_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 216,
+      "linkage_name": "_ZN11hiprand_cpp24uniform_int_distributioneqERKS0_",
+      "name": "hiprand_cpp::uniform_int_distribution::operator==",
+      "parameters": [
+        {
+          "name": "other",
+          "type": "const uniform_int_distribution<IntType> &"
+        }
+      ],
+      "return_type": "_Bool",
+      "templated_kind": 0,
+      "type": "_Bool (const uniform_int_distribution<IntType> &)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 174,
+      "linkage_name": "_ZN11hiprand_cpp24uniform_int_distribution5resetEv",
+      "name": "hiprand_cpp::uniform_int_distribution::reset",
+      "parameters": [],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (void)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "file": "hiprand.hpp",
+      "kind": "typedef",
+      "line": 166,
+      "name": "hiprand_cpp::uniform_int_distribution::result_type",
+      "underlying_type": "IntType"
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 169,
+      "linkage_name": "_ZN11hiprand_cpp24uniform_int_distributionC1Ev",
+      "name": "hiprand_cpp::uniform_int_distribution::uniform_int_distribution<IntType>",
+      "parameters": [],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (void)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "fields": [],
+      "file": "hiprand.hpp",
+      "kind": "record",
+      "layout_available": false,
+      "line": 260,
+      "name": "hiprand_cpp::uniform_real_distribution"
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 339,
+      "linkage_name": "_ZN11hiprand_cpp25uniform_real_distribution8generateERTL0__Pfm",
+      "name": "hiprand_cpp::uniform_real_distribution::generate",
+      "parameters": [
+        {
+          "name": "g",
+          "type": "Generator &"
+        },
+        {
+          "name": "output",
+          "type": "float *"
+        },
+        {
+          "name": "size",
+          "type": "size_t"
+        }
+      ],
+      "return_type": "hiprandStatus_t",
+      "templated_kind": 1,
+      "type": "hiprandStatus_t (Generator &, float *, size_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 345,
+      "linkage_name": "_ZN11hiprand_cpp25uniform_real_distribution8generateERTL0__Pdm",
+      "name": "hiprand_cpp::uniform_real_distribution::generate",
+      "parameters": [
+        {
+          "name": "g",
+          "type": "Generator &"
+        },
+        {
+          "name": "output",
+          "type": "double *"
+        },
+        {
+          "name": "size",
+          "type": "size_t"
+        }
+      ],
+      "return_type": "hiprandStatus_t",
+      "templated_kind": 1,
+      "type": "hiprandStatus_t (Generator &, double *, size_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 351,
+      "linkage_name": "_ZN11hiprand_cpp25uniform_real_distribution8generateERTL0__P6__halfm",
+      "name": "hiprand_cpp::uniform_real_distribution::generate",
+      "parameters": [
+        {
+          "name": "g",
+          "type": "Generator &"
+        },
+        {
+          "name": "output",
+          "type": "half *"
+        },
+        {
+          "name": "size",
+          "type": "size_t"
+        }
+      ],
+      "return_type": "hiprandStatus_t",
+      "templated_kind": 1,
+      "type": "hiprandStatus_t (Generator &, half *, size_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 294,
+      "linkage_name": "_ZNK11hiprand_cpp25uniform_real_distribution3maxEv",
+      "name": "hiprand_cpp::uniform_real_distribution::max",
+      "parameters": [],
+      "return_type": "RealType",
+      "templated_kind": 0,
+      "type": "RealType (void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 284,
+      "linkage_name": "_ZNK11hiprand_cpp25uniform_real_distribution3minEv",
+      "name": "hiprand_cpp::uniform_real_distribution::min",
+      "parameters": [],
+      "return_type": "RealType",
+      "templated_kind": 0,
+      "type": "RealType (void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 332,
+      "linkage_name": "_ZN11hiprand_cpp25uniform_real_distributionneERKS0_",
+      "name": "hiprand_cpp::uniform_real_distribution::operator!=",
+      "parameters": [
+        {
+          "name": "other",
+          "type": "const uniform_real_distribution<RealType> &"
+        }
+      ],
+      "return_type": "_Bool",
+      "templated_kind": 0,
+      "type": "_Bool (const uniform_real_distribution<RealType> &)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 317,
+      "linkage_name": "_ZN11hiprand_cpp25uniform_real_distributionclERTL0__PT_m",
+      "name": "hiprand_cpp::uniform_real_distribution::operator()",
+      "parameters": [
+        {
+          "name": "g",
+          "type": "Generator &"
+        },
+        {
+          "name": "output",
+          "type": "RealType *"
+        },
+        {
+          "name": "size",
+          "type": "size_t"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 1,
+      "type": "void (Generator &, RealType *, size_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 325,
+      "linkage_name": "_ZN11hiprand_cpp25uniform_real_distributioneqERKS0_",
+      "name": "hiprand_cpp::uniform_real_distribution::operator==",
+      "parameters": [
+        {
+          "name": "other",
+          "type": "const uniform_real_distribution<RealType> &"
+        }
+      ],
+      "return_type": "_Bool",
+      "templated_kind": 0,
+      "type": "_Bool (const uniform_real_distribution<RealType> &)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 279,
+      "linkage_name": "_ZN11hiprand_cpp25uniform_real_distribution5resetEv",
+      "name": "hiprand_cpp::uniform_real_distribution::reset",
+      "parameters": [],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (void)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "file": "hiprand.hpp",
+      "kind": "typedef",
+      "line": 271,
+      "name": "hiprand_cpp::uniform_real_distribution::result_type",
+      "underlying_type": "RealType"
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 274,
+      "linkage_name": "_ZN11hiprand_cpp25uniform_real_distributionC1Ev",
+      "name": "hiprand_cpp::uniform_real_distribution::uniform_real_distribution<RealType>",
+      "parameters": [],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (void)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": true,
+      "kind": "function",
+      "line": 2445,
+      "linkage_name": "_ZN11hiprand_cpp7versionEv",
+      "name": "hiprand_cpp::version",
+      "parameters": [],
+      "return_type": "int",
+      "templated_kind": 0,
+      "type": "int (void)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "file": "hiprand.hpp",
+      "kind": "typedef",
+      "line": 2387,
+      "name": "hiprand_cpp::xorwow",
+      "underlying_type": "xorwow_engine<>"
+    },
+    {
+      "fields": [
+        {
+          "name": "m_generator",
+          "type": "hiprandGenerator_t"
+        }
+      ],
+      "file": "hiprand.hpp",
+      "kind": "record",
+      "layout_available": false,
+      "line": 1133,
+      "name": "hiprand_cpp::xorwow_engine"
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1240,
+      "linkage_name": "_ZNK11hiprand_cpp13xorwow_engine3maxEv",
+      "name": "hiprand_cpp::xorwow_engine::max",
+      "parameters": [],
+      "return_type": "result_type",
+      "templated_kind": 0,
+      "type": "result_type (void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1234,
+      "linkage_name": "_ZNK11hiprand_cpp13xorwow_engine3minEv",
+      "name": "hiprand_cpp::xorwow_engine::min",
+      "parameters": [],
+      "return_type": "result_type",
+      "templated_kind": 0,
+      "type": "result_type (void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1203,
+      "linkage_name": "_ZN11hiprand_cpp13xorwow_engine6offsetEy",
+      "name": "hiprand_cpp::xorwow_engine::offset",
+      "parameters": [
+        {
+          "name": "value",
+          "type": "offset_type"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (offset_type)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "file": "hiprand.hpp",
+      "kind": "typedef",
+      "line": 1141,
+      "name": "hiprand_cpp::xorwow_engine::offset_type",
+      "underlying_type": "unsigned long long"
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1226,
+      "linkage_name": "_ZN11hiprand_cpp13xorwow_engineclEPjm",
+      "name": "hiprand_cpp::xorwow_engine::operator()",
+      "parameters": [
+        {
+          "name": "output",
+          "type": "result_type *"
+        },
+        {
+          "name": "size",
+          "type": "size_t"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 1,
+      "type": "void (result_type *, size_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1184,
+      "linkage_name": "_ZN11hiprand_cpp13xorwow_engineaSERKS0_",
+      "name": "hiprand_cpp::xorwow_engine::operator=",
+      "parameters": [
+        {
+          "name": "",
+          "type": "const xorwow_engine<DefaultSeed> &"
+        }
+      ],
+      "return_type": "xorwow_engine<DefaultSeed> &",
+      "templated_kind": 0,
+      "type": "xorwow_engine<DefaultSeed> &(const xorwow_engine<DefaultSeed> &)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1186,
+      "linkage_name": "_ZN11hiprand_cpp13xorwow_engineaSEOS0_",
+      "name": "hiprand_cpp::xorwow_engine::operator=",
+      "parameters": [
+        {
+          "name": "",
+          "type": "xorwow_engine<DefaultSeed> &&"
+        }
+      ],
+      "return_type": "xorwow_engine<DefaultSeed> &",
+      "templated_kind": 0,
+      "type": "xorwow_engine<DefaultSeed> &(xorwow_engine<DefaultSeed> &&)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1210,
+      "linkage_name": "_ZN11hiprand_cpp13xorwow_engine5orderE15hiprandOrdering",
+      "name": "hiprand_cpp::xorwow_engine::order",
+      "parameters": [
+        {
+          "name": "value",
+          "type": "order_type"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (order_type)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "file": "hiprand.hpp",
+      "kind": "typedef",
+      "line": 1139,
+      "name": "hiprand_cpp::xorwow_engine::order_type",
+      "underlying_type": "hiprandOrdering_t"
+    },
+    {
+      "file": "hiprand.hpp",
+      "kind": "typedef",
+      "line": 1137,
+      "name": "hiprand_cpp::xorwow_engine::result_type",
+      "underlying_type": "unsigned int"
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1218,
+      "linkage_name": "_ZN11hiprand_cpp13xorwow_engine4seedEy",
+      "name": "hiprand_cpp::xorwow_engine::seed",
+      "parameters": [
+        {
+          "name": "value",
+          "type": "seed_type"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (seed_type)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "file": "hiprand.hpp",
+      "kind": "typedef",
+      "line": 1143,
+      "name": "hiprand_cpp::xorwow_engine::seed_type",
+      "underlying_type": "unsigned long long"
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1196,
+      "linkage_name": "_ZN11hiprand_cpp13xorwow_engine6streamEP12ihipStream_t",
+      "name": "hiprand_cpp::xorwow_engine::stream",
+      "parameters": [
+        {
+          "name": "value",
+          "type": "hipStream_t"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (hipStream_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1246,
+      "linkage_name": "_ZN11hiprand_cpp13xorwow_engine4typeEv",
+      "name": "hiprand_cpp::xorwow_engine::type",
+      "parameters": [],
+      "return_type": "hiprandRngType",
+      "templated_kind": 0,
+      "type": "hiprandRngType (void)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1148,
+      "linkage_name": "_ZN11hiprand_cpp13xorwow_engineC1Eyy",
+      "name": "hiprand_cpp::xorwow_engine::xorwow_engine<DefaultSeed>",
+      "parameters": [
+        {
+          "name": "seed_value",
+          "type": "seed_type"
+        },
+        {
+          "name": "offset_value",
+          "type": "offset_type"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (seed_type, offset_type)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1170,
+      "linkage_name": "_ZN11hiprand_cpp13xorwow_engineC1ERP27rocrand_generator_base_type",
+      "name": "hiprand_cpp::xorwow_engine::xorwow_engine<DefaultSeed>",
+      "parameters": [
+        {
+          "name": "generator",
+          "type": "hiprandGenerator_t &"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (hiprandGenerator_t &)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1180,
+      "linkage_name": "_ZN11hiprand_cpp13xorwow_engineC1ERKS0_",
+      "name": "hiprand_cpp::xorwow_engine::xorwow_engine<DefaultSeed>",
+      "parameters": [
+        {
+          "name": "",
+          "type": "const xorwow_engine<DefaultSeed> &"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (const xorwow_engine<DefaultSeed> &)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1182,
+      "linkage_name": "_ZN11hiprand_cpp13xorwow_engineC1EOS0_",
+      "name": "hiprand_cpp::xorwow_engine::xorwow_engine<DefaultSeed>",
+      "parameters": [
+        {
+          "name": "",
+          "type": "xorwow_engine<DefaultSeed> &&"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (xorwow_engine<DefaultSeed> &&)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1189,
+      "linkage_name": "_ZN11hiprand_cpp13xorwow_engineD1Ev",
+      "name": "hiprand_cpp::xorwow_engine::~xorwow_engine<DefaultSeed>",
+      "parameters": [],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (void) noexcept(false)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand_kernel_rocm.h",
+      "inline_specified": true,
+      "kind": "function",
+      "line": 718,
+      "linkage_name": "_Z17hiprand_discrete4P25hiprandStatePhilox4_32_10P32rocrand_discrete_distribution_st",
+      "name": "hiprand_discrete4",
+      "parameters": [
+        {
+          "name": "state",
+          "type": "hiprandStatePhilox4_32_10_t *"
+        },
+        {
+          "name": "discrete_distribution",
+          "type": "hiprandDiscreteDistribution_t"
+        }
+      ],
+      "return_type": "uint4",
+      "templated_kind": 0,
+      "type": "uint4 (hiprandStatePhilox4_32_10_t *, hiprandDiscreteDistribution_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand_kernel_rocm.h",
+      "inline_specified": true,
+      "kind": "function",
+      "line": 703,
+      "linkage_name": "_Z16hiprand_discretePT_P32rocrand_discrete_distribution_st",
+      "name": "hiprand_discrete",
+      "parameters": [
+        {
+          "name": "state",
+          "type": "StateType *"
+        },
+        {
+          "name": "discrete_distribution",
+          "type": "hiprandDiscreteDistribution_t"
+        }
+      ],
+      "return_type": "unsigned int",
+      "templated_kind": 1,
+      "type": "unsigned int (StateType *, hiprandDiscreteDistribution_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand_kernel_rocm.h",
+      "inline_specified": true,
+      "kind": "function",
+      "line": 201,
+      "linkage_name": "_Z12hiprand_inityyyPT_",
+      "name": "hiprand_init",
+      "parameters": [
+        {
+          "name": "seed",
+          "type": "const unsigned long long"
+        },
+        {
+          "name": "subsequence",
+          "type": "const unsigned long long"
+        },
+        {
+          "name": "offset",
+          "type": "const unsigned long long"
+        },
+        {
+          "name": "state",
+          "type": "StateType *"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 1,
+      "type": "void (const unsigned long long, const unsigned long long, const unsigned long long, StateType *)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand_kernel_rocm.h",
+      "inline_specified": true,
+      "kind": "function",
+      "line": 225,
+      "linkage_name": "_Z12hiprand_initPjjP19hiprandStateSobol32",
+      "name": "hiprand_init",
+      "parameters": [
+        {
+          "name": "direction_vectors",
+          "type": "unsigned int *"
+        },
+        {
+          "name": "offset",
+          "type": "unsigned int"
+        },
+        {
+          "name": "state",
+          "type": "hiprandStateSobol32_t *"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (unsigned int *, unsigned int, hiprandStateSobol32_t *)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand_kernel_rocm.h",
+      "inline_specified": true,
+      "kind": "function",
+      "line": 239,
+      "linkage_name": "_Z12hiprand_initPjjjP28hiprandStateScrambledSobol32",
+      "name": "hiprand_init",
+      "parameters": [
+        {
+          "name": "direction_vectors",
+          "type": "unsigned int *"
+        },
+        {
+          "name": "scramble_constant",
+          "type": "unsigned int"
+        },
+        {
+          "name": "offset",
+          "type": "unsigned int"
+        },
+        {
+          "name": "state",
+          "type": "hiprandStateScrambledSobol32_t *"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (unsigned int *, unsigned int, unsigned int, hiprandStateScrambledSobol32_t *)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand_kernel_rocm.h",
+      "inline_specified": true,
+      "kind": "function",
+      "line": 253,
+      "linkage_name": "_Z12hiprand_initPyjP19hiprandStateSobol64",
+      "name": "hiprand_init",
+      "parameters": [
+        {
+          "name": "direction_vectors",
+          "type": "unsigned long long *"
+        },
+        {
+          "name": "offset",
+          "type": "unsigned int"
+        },
+        {
+          "name": "state",
+          "type": "hiprandStateSobol64_t *"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (unsigned long long *, unsigned int, hiprandStateSobol64_t *)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand_kernel_rocm.h",
+      "inline_specified": true,
+      "kind": "function",
+      "line": 267,
+      "linkage_name": "_Z12hiprand_initPyyjP28hiprandStateScrambledSobol64",
+      "name": "hiprand_init",
+      "parameters": [
+        {
+          "name": "direction_vectors",
+          "type": "unsigned long long *"
+        },
+        {
+          "name": "scramble_constant",
+          "type": "unsigned long long"
+        },
+        {
+          "name": "offset",
+          "type": "unsigned int"
+        },
+        {
+          "name": "state",
+          "type": "hiprandStateScrambledSobol64_t *"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (unsigned long long *, unsigned long long, unsigned int, hiprandStateScrambledSobol64_t *)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand_kernel_rocm.h",
+      "inline_specified": true,
+      "kind": "function",
+      "line": 593,
+      "linkage_name": "_Z19hiprand_log_normal2PT_ff",
+      "name": "hiprand_log_normal2",
+      "parameters": [
+        {
+          "name": "state",
+          "type": "StateType *"
+        },
+        {
+          "name": "mean",
+          "type": "float"
+        },
+        {
+          "name": "stddev",
+          "type": "float"
+        }
+      ],
+      "return_type": "float2",
+      "templated_kind": 1,
+      "type": "float2 (StateType *, float, float)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand_kernel_rocm.h",
+      "inline_specified": true,
+      "kind": "function",
+      "line": 643,
+      "linkage_name": "_Z26hiprand_log_normal2_doublePT_dd",
+      "name": "hiprand_log_normal2_double",
+      "parameters": [
+        {
+          "name": "state",
+          "type": "StateType *"
+        },
+        {
+          "name": "mean",
+          "type": "double"
+        },
+        {
+          "name": "stddev",
+          "type": "double"
+        }
+      ],
+      "return_type": "double2",
+      "templated_kind": 1,
+      "type": "double2 (StateType *, double, double)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand_kernel_rocm.h",
+      "inline_specified": true,
+      "kind": "function",
+      "line": 611,
+      "linkage_name": "_Z19hiprand_log_normal4P25hiprandStatePhilox4_32_10ff",
+      "name": "hiprand_log_normal4",
+      "parameters": [
+        {
+          "name": "state",
+          "type": "hiprandStatePhilox4_32_10_t *"
+        },
+        {
+          "name": "mean",
+          "type": "float"
+        },
+        {
+          "name": "stddev",
+          "type": "float"
+        }
+      ],
+      "return_type": "float4",
+      "templated_kind": 0,
+      "type": "float4 (hiprandStatePhilox4_32_10_t *, float, float)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand_kernel_rocm.h",
+      "inline_specified": true,
+      "kind": "function",
+      "line": 661,
+      "linkage_name": "_Z26hiprand_log_normal4_doubleP25hiprandStatePhilox4_32_10dd",
+      "name": "hiprand_log_normal4_double",
+      "parameters": [
+        {
+          "name": "state",
+          "type": "hiprandStatePhilox4_32_10_t *"
+        },
+        {
+          "name": "mean",
+          "type": "double"
+        },
+        {
+          "name": "stddev",
+          "type": "double"
+        }
+      ],
+      "return_type": "double4",
+      "templated_kind": 0,
+      "type": "double4 (hiprandStatePhilox4_32_10_t *, double, double)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand_kernel_rocm.h",
+      "inline_specified": true,
+      "kind": "function",
+      "line": 575,
+      "linkage_name": "_Z18hiprand_log_normalPT_ff",
+      "name": "hiprand_log_normal",
+      "parameters": [
+        {
+          "name": "state",
+          "type": "StateType *"
+        },
+        {
+          "name": "mean",
+          "type": "float"
+        },
+        {
+          "name": "stddev",
+          "type": "float"
+        }
+      ],
+      "return_type": "float",
+      "templated_kind": 1,
+      "type": "float (StateType *, float, float)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand_kernel_rocm.h",
+      "inline_specified": true,
+      "kind": "function",
+      "line": 625,
+      "linkage_name": "_Z25hiprand_log_normal_doublePT_dd",
+      "name": "hiprand_log_normal_double",
+      "parameters": [
+        {
+          "name": "state",
+          "type": "StateType *"
+        },
+        {
+          "name": "mean",
+          "type": "double"
+        },
+        {
+          "name": "stddev",
+          "type": "double"
+        }
+      ],
+      "return_type": "double",
+      "templated_kind": 1,
+      "type": "double (StateType *, double, double)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand_kernel_rocm.h",
+      "inline_specified": true,
+      "kind": "function",
+      "line": 392,
+      "linkage_name": "_Z17hiprand_long_longPT_",
+      "name": "hiprand_long_long",
+      "parameters": [
+        {
+          "name": "state",
+          "type": "StateType *"
+        }
+      ],
+      "return_type": "unsigned long long",
+      "templated_kind": 1,
+      "type": "unsigned long long (StateType *)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand_kernel_rocm.h",
+      "inline_specified": true,
+      "kind": "function",
+      "line": 170,
+      "linkage_name": "_Z25hiprand_mtgp32_block_copyP18hiprandStateMtgp32S0_",
+      "name": "hiprand_mtgp32_block_copy",
+      "parameters": [
+        {
+          "name": "src",
+          "type": "hiprandStateMtgp32_t *"
+        },
+        {
+          "name": "dest",
+          "type": "hiprandStateMtgp32_t *"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (hiprandStateMtgp32_t *, hiprandStateMtgp32_t *)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand_kernel_rocm.h",
+      "inline_specified": true,
+      "kind": "function",
+      "line": 181,
+      "linkage_name": "_Z25hiprand_mtgp32_set_paramsP18hiprandStateMtgp32PN14rocrand_device13mtgp32_paramsE",
+      "name": "hiprand_mtgp32_set_params",
+      "parameters": [
+        {
+          "name": "state",
+          "type": "hiprandStateMtgp32_t *"
+        },
+        {
+          "name": "params",
+          "type": "mtgp32_kernel_params_t *"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (hiprandStateMtgp32_t *, mtgp32_kernel_params_t *)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand_kernel_rocm.h",
+      "inline_specified": true,
+      "kind": "function",
+      "line": 489,
+      "linkage_name": "_Z15hiprand_normal2PT_",
+      "name": "hiprand_normal2",
+      "parameters": [
+        {
+          "name": "state",
+          "type": "StateType *"
+        }
+      ],
+      "return_type": "float2",
+      "templated_kind": 1,
+      "type": "float2 (StateType *)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand_kernel_rocm.h",
+      "inline_specified": true,
+      "kind": "function",
+      "line": 542,
+      "linkage_name": "_Z22hiprand_normal2_doublePT_",
+      "name": "hiprand_normal2_double",
+      "parameters": [
+        {
+          "name": "state",
+          "type": "StateType *"
+        }
+      ],
+      "return_type": "double2",
+      "templated_kind": 1,
+      "type": "double2 (StateType *)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand_kernel_rocm.h",
+      "inline_specified": true,
+      "kind": "function",
+      "line": 508,
+      "linkage_name": "_Z15hiprand_normal4P25hiprandStatePhilox4_32_10",
+      "name": "hiprand_normal4",
+      "parameters": [
+        {
+          "name": "state",
+          "type": "hiprandStatePhilox4_32_10_t *"
+        }
+      ],
+      "return_type": "float4",
+      "templated_kind": 0,
+      "type": "float4 (hiprandStatePhilox4_32_10_t *)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand_kernel_rocm.h",
+      "inline_specified": true,
+      "kind": "function",
+      "line": 561,
+      "linkage_name": "_Z22hiprand_normal4_doubleP25hiprandStatePhilox4_32_10",
+      "name": "hiprand_normal4_double",
+      "parameters": [
+        {
+          "name": "state",
+          "type": "hiprandStatePhilox4_32_10_t *"
+        }
+      ],
+      "return_type": "double4",
+      "templated_kind": 0,
+      "type": "double4 (hiprandStatePhilox4_32_10_t *)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand_kernel_rocm.h",
+      "inline_specified": true,
+      "kind": "function",
+      "line": 470,
+      "linkage_name": "_Z14hiprand_normalPT_",
+      "name": "hiprand_normal",
+      "parameters": [
+        {
+          "name": "state",
+          "type": "StateType *"
+        }
+      ],
+      "return_type": "float",
+      "templated_kind": 1,
+      "type": "float (StateType *)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand_kernel_rocm.h",
+      "inline_specified": true,
+      "kind": "function",
+      "line": 523,
+      "linkage_name": "_Z21hiprand_normal_doublePT_",
+      "name": "hiprand_normal_double",
+      "parameters": [
+        {
+          "name": "state",
+          "type": "StateType *"
+        }
+      ],
+      "return_type": "double",
+      "templated_kind": 1,
+      "type": "double (StateType *)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand_kernel_rocm.h",
+      "inline_specified": true,
+      "kind": "function",
+      "line": 687,
+      "linkage_name": "_Z16hiprand_poisson4P25hiprandStatePhilox4_32_10d",
+      "name": "hiprand_poisson4",
+      "parameters": [
+        {
+          "name": "state",
+          "type": "hiprandStatePhilox4_32_10_t *"
+        },
+        {
+          "name": "lambda",
+          "type": "double"
+        }
+      ],
+      "return_type": "uint4",
+      "templated_kind": 0,
+      "type": "uint4 (hiprandStatePhilox4_32_10_t *, double)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand_kernel_rocm.h",
+      "inline_specified": true,
+      "kind": "function",
+      "line": 676,
+      "linkage_name": "_Z15hiprand_poissonPT_d",
+      "name": "hiprand_poisson",
+      "parameters": [
+        {
+          "name": "state",
+          "type": "StateType *"
+        },
+        {
+          "name": "lambda",
+          "type": "double"
+        }
+      ],
+      "return_type": "unsigned int",
+      "templated_kind": 1,
+      "type": "unsigned int (StateType *, double)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand_kernel_rocm.h",
+      "inline_specified": true,
+      "kind": "function",
+      "line": 445,
+      "linkage_name": "_Z23hiprand_uniform2_doubleP25hiprandStatePhilox4_32_10",
+      "name": "hiprand_uniform2_double",
+      "parameters": [
+        {
+          "name": "state",
+          "type": "hiprandStatePhilox4_32_10_t *"
+        }
+      ],
+      "return_type": "double2",
+      "templated_kind": 0,
+      "type": "double2 (hiprandStatePhilox4_32_10_t *)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand_kernel_rocm.h",
+      "inline_specified": true,
+      "kind": "function",
+      "line": 417,
+      "linkage_name": "_Z16hiprand_uniform4P25hiprandStatePhilox4_32_10",
+      "name": "hiprand_uniform4",
+      "parameters": [
+        {
+          "name": "state",
+          "type": "hiprandStatePhilox4_32_10_t *"
+        }
+      ],
+      "return_type": "float4",
+      "templated_kind": 0,
+      "type": "float4 (hiprandStatePhilox4_32_10_t *)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand_kernel_rocm.h",
+      "inline_specified": true,
+      "kind": "function",
+      "line": 455,
+      "linkage_name": "_Z23hiprand_uniform4_doubleP25hiprandStatePhilox4_32_10",
+      "name": "hiprand_uniform4_double",
+      "parameters": [
+        {
+          "name": "state",
+          "type": "hiprandStatePhilox4_32_10_t *"
+        }
+      ],
+      "return_type": "double4",
+      "templated_kind": 0,
+      "type": "double4 (hiprandStatePhilox4_32_10_t *)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand_kernel_rocm.h",
+      "inline_specified": true,
+      "kind": "function",
+      "line": 406,
+      "linkage_name": "_Z15hiprand_uniformPT_",
+      "name": "hiprand_uniform",
+      "parameters": [
+        {
+          "name": "state",
+          "type": "StateType *"
+        }
+      ],
+      "return_type": "float",
+      "templated_kind": 1,
+      "type": "float (StateType *)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand_kernel_rocm.h",
+      "inline_specified": true,
+      "kind": "function",
+      "line": 434,
+      "linkage_name": "_Z22hiprand_uniform_doublePT_",
+      "name": "hiprand_uniform_double",
+      "parameters": [
+        {
+          "name": "state",
+          "type": "StateType *"
+        }
+      ],
+      "return_type": "double",
+      "templated_kind": 1,
+      "type": "double (StateType *)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "file": "hiprand_kernel_rocm.h",
+      "kind": "typedef",
+      "line": 75,
+      "name": "mtgp32_fast_param_t",
+      "underlying_type": "mtgp32_fast_params"
+    },
+    {
+      "file": "hiprand_kernel_rocm.h",
+      "kind": "typedef",
+      "line": 66,
+      "name": "mtgp32_kernel_params_t",
+      "underlying_type": "mtgp32_params"
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand_kernel_rocm.h",
+      "inline_specified": true,
+      "kind": "function",
+      "line": 286,
+      "linkage_name": "_Z9skipaheadyPT_",
+      "name": "skipahead",
+      "parameters": [
+        {
+          "name": "n",
+          "type": "unsigned long long"
+        },
+        {
+          "name": "state",
+          "type": "StateType *"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 1,
+      "type": "void (unsigned long long, StateType *)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand_kernel_rocm.h",
+      "inline_specified": true,
+      "kind": "function",
+      "line": 311,
+      "linkage_name": "_Z18skipahead_sequenceyPT_",
+      "name": "skipahead_sequence",
+      "parameters": [
+        {
+          "name": "n",
+          "type": "unsigned long long"
+        },
+        {
+          "name": "state",
+          "type": "StateType *"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 1,
+      "type": "void (unsigned long long, StateType *)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand_kernel_rocm.h",
+      "inline_specified": true,
+      "kind": "function",
+      "line": 341,
+      "linkage_name": "_Z21skipahead_subsequenceyPT_",
+      "name": "skipahead_subsequence",
+      "parameters": [
+        {
+          "name": "n",
+          "type": "unsigned long long"
+        },
+        {
+          "name": "state",
+          "type": "StateType *"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 1,
+      "type": "void (unsigned long long, StateType *)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hiprand_kernel_rocm.h",
+      "inline_specified": true,
+      "kind": "function",
+      "line": 98,
+      "linkage_name": "_Z17to_hiprand_status14rocrand_status",
+      "name": "to_hiprand_status",
+      "parameters": [
+        {
+          "name": "status",
+          "type": "rocrand_status"
+        }
+      ],
+      "return_type": "hiprandStatus_t",
+      "templated_kind": 0,
+      "type": "hiprandStatus_t (rocrand_status)",
+      "variadic": false,
+      "visibility": 2
+    }
+  ],
+  "schema_version": 1
+}
