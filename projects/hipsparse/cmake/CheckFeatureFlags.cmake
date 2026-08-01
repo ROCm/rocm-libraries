@@ -11,78 +11,55 @@
 # (never seen by consumers) are passed in EXCLUDE.
 #
 # check_config_header_flags(PREFIX <P> TEMPLATE <file.in> HEADERS <dir>... [EXCLUDE <macro>...])
-function(check_config_header_flags)
-  set(oneValueArgs PREFIX TEMPLATE)
-  set(multiValueArgs HEADERS EXCLUDE)
-  cmake_parse_arguments(CFF "" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
 
-  if(NOT CFF_PREFIX OR NOT CFF_TEMPLATE OR NOT CFF_HEADERS)
-    message(FATAL_ERROR "check_config_header_flags: PREFIX, TEMPLATE and HEADERS are required")
-  endif()
-  if(NOT EXISTS "${CFF_TEMPLATE}")
-    message(FATAL_ERROR "check_config_header_flags: config template not found: ${CFF_TEMPLATE}")
-  endif()
-
-  # --- Registered flags: "#cmakedefine <PREFIX...>" lines in the template. ---
-  file(STRINGS "${CFF_TEMPLATE}" _tmpl_lines REGEX "#cmakedefine")
-  set(_registered "")
-  foreach(_line IN LISTS _tmpl_lines)
-    string(REGEX MATCHALL "${CFF_PREFIX}[A-Z0-9_]+" _names "${_line}")
-    list(APPEND _registered ${_names})
-  endforeach()
-  if(_registered)
-    list(REMOVE_DUPLICATES _registered)
-  endif()
-
-  # --- Used flags: any "<PREFIX>*" token in the installed public headers. ---
-  set(_header_files "")
-  foreach(_dir IN LISTS CFF_HEADERS)
-    file(GLOB_RECURSE _hs CONFIGURE_DEPENDS "${_dir}/*.h")
-    list(APPEND _header_files ${_hs})
-  endforeach()
-
-  set(_used "")
-  foreach(_hf IN LISTS _header_files)
-    file(STRINGS "${_hf}" _hits REGEX "${CFF_PREFIX}[A-Z0-9_]+")
-    foreach(_hit IN LISTS _hits)
-      string(REGEX MATCHALL "${CFF_PREFIX}[A-Z0-9_]+" _names "${_hit}")
-      list(APPEND _used ${_names})
+# Set <out_var> to the de-duplicated list of "<prefix>NAME" macros found in the
+# files listed after the prefix argument.
+function(_collect_feature_macros out_var prefix)
+  set(macros "")
+  foreach(file IN LISTS ARGN)
+    file(STRINGS "${file}" lines REGEX "${prefix}[A-Z0-9_]+")
+    foreach(line IN LISTS lines)
+      string(REGEX MATCHALL "${prefix}[A-Z0-9_]+" tokens "${line}")
+      list(APPEND macros ${tokens})
     endforeach()
   endforeach()
-  if(_used)
-    list(REMOVE_DUPLICATES _used)
+  list(REMOVE_DUPLICATES macros)
+  set(${out_var} "${macros}" PARENT_SCOPE)
+endfunction()
+
+function(check_config_header_flags)
+  cmake_parse_arguments(ARG "" "PREFIX;TEMPLATE" "HEADERS;EXCLUDE" ${ARGN})
+  if(NOT ARG_PREFIX OR NOT ARG_TEMPLATE OR NOT ARG_HEADERS)
+    message(FATAL_ERROR "check_config_header_flags: PREFIX, TEMPLATE and HEADERS are required")
   endif()
 
-  # --- A public-header flag that is neither registered nor excluded is a bug. ---
-  set(_missing "")
-  foreach(_flag IN LISTS _used)
-    if(NOT _flag IN_LIST _registered AND NOT _flag IN_LIST CFF_EXCLUDE)
-      list(APPEND _missing "${_flag}")
+  # Flags declared in the config template (its "#cmakedefine" lines).
+  _collect_feature_macros(registered "${ARG_PREFIX}" "${ARG_TEMPLATE}")
+
+  # Flags actually referenced by the installed public headers.
+  set(public_headers "")
+  foreach(dir IN LISTS ARG_HEADERS)
+    file(GLOB_RECURSE found CONFIGURE_DEPENDS "${dir}/*.h")
+    list(APPEND public_headers ${found})
+  endforeach()
+  _collect_feature_macros(used "${ARG_PREFIX}" ${public_headers})
+
+  # A flag used by a public header but neither declared nor excluded is a bug.
+  set(missing "")
+  foreach(flag IN LISTS used)
+    if(NOT flag IN_LIST registered AND NOT flag IN_LIST ARG_EXCLUDE)
+      list(APPEND missing "${flag}")
     endif()
   endforeach()
 
-  if(_missing)
-    string(REPLACE ";" "\n  - " _missing_str "${_missing}")
+  if(missing)
+    string(REPLACE ";" "\n  - " missing_list "${missing}")
     message(FATAL_ERROR
-      "Feature-flag guardrail failed.\n"
-      "The following macro(s) gate the public headers but are not registered "
-      "in\n  ${CFF_TEMPLATE}\n"
-      "  - ${_missing_str}\n\n"
-      "Fix one of:\n"
-      "  * add a matching '#cmakedefine <FLAG>' to the config template so the "
-      "flag is baked into the installed header and reaches consumers, or\n"
-      "  * add <FLAG> to the EXCLUDE list of check_config_header_flags() if it "
-      "is intentionally build-only (never seen by consumers).")
+      "Feature-flag guardrail: these macros gate a public header but are missing "
+      "from ${ARG_TEMPLATE}:\n  - ${missing_list}\n"
+      "Add '#cmakedefine <FLAG>' there, or pass <FLAG> in EXCLUDE if it is build-only.")
   endif()
 
-  # --- Informational: registered flags not referenced by any public header. ---
-  foreach(_flag IN LISTS _registered)
-    if(NOT _flag IN_LIST _used)
-      message(STATUS "Feature flag ${_flag} is registered in the config header "
-                     "but not used in any public header (ok if reserved for clients/tests).")
-    endif()
-  endforeach()
-
-  list(LENGTH _registered _n)
-  message(STATUS "Feature-flag guardrail: ${_n} registered flag(s) checked against public headers under ${CFF_HEADERS}.")
+  list(LENGTH registered count)
+  message(STATUS "Feature-flag guardrail: ${count} flag(s) registered, all public headers OK.")
 endfunction()
