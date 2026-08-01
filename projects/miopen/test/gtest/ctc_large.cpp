@@ -225,4 +225,3 @@ struct GPU_CTCLargeScale_FP32 : public ::testing::Test
 //   MIOpenDriver ctc -T 1000 -N 2048 -C 1048 --forw 1 -V 0 -t 1
 
 TEST_F(GPU_CTCLargeScale_FP32, FullScale) { this->Run(); }
-
