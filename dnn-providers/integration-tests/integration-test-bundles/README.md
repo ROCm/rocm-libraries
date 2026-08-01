@@ -150,6 +150,22 @@ own `remote: golden-data` key (see the DVC Remote Layout section above).
 
 > **Note:** DVC commands must be run from the repo root (`rocm-libraries/`), not from a subdirectory.
 
+## Verify Bundles
+
+```bash
+python dnn-providers/integration-tests/reference-data-scripts/verify_golden_bundles.py \
+  dnn-providers/integration-tests/integration-test-bundles
+```
+
+The verifier checks graph JSON parsing, tensor byte sizes, metadata sidecars, and
+output-tensor NaN/Inf rejection. Real `.bin` payloads are optional unless the
+bundle includes `<Name>.tensors.dvc`; when that pointer exists, run `dvc pull`
+if only the pointer file is present.
+
+For `quick/BatchnormFwdInference/nchw/fp32/Small/Small.json`, the verifier
+prints the advisory test name
+`quick_BatchnormFwdInference_nchw_fp32_Small.Small`.
+
 ## Add a New Bundle
 
 ```bash
