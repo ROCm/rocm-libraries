@@ -15,6 +15,7 @@ project(rocke LANGUAGES CXX)
 
 include(GNUInstallDirs)
 find_package(Python3 COMPONENTS Interpreter QUIET)
+find_package(Threads REQUIRED)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -161,6 +162,7 @@ add_library(rocke_core STATIC ${ROCKE_CORE_SOURCES})
 target_include_directories(rocke_core PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/cpp/include>
   $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
+target_link_libraries(rocke_core PUBLIC Threads::Threads)
 if(CMAKE_DL_LIBS)
   target_link_libraries(rocke_core PUBLIC ${CMAKE_DL_LIBS})
 endif()

@@ -21,6 +21,7 @@ project(rocke_engine_binding LANGUAGES CXX)
 
 include(GNUInstallDirs)
 find_package(Python3 COMPONENTS Interpreter Development.Module REQUIRED)
+find_package(Threads REQUIRED)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -69,9 +70,14 @@ pybind11_add_module(rocke_engine rocke_engine.cpp rocke_engine_img2col.cpp
                     rocke_engine_fmha_extra.cpp rocke_engine_fused_moe_e2e.cpp)
 target_include_directories(rocke_engine PRIVATE "${ROCKE_INCLUDE_DIR}")
 
-# Link the engine archive whole, plus libm. The engine is C++; its symbols are
-# exposed via extern "C" headers, so the archive links cleanly here.
+# Link the engine archive plus its platform dependencies. The engine is C++;
+# its symbols are exposed via extern "C" headers, so the archive links cleanly
+# here.
 target_link_libraries(rocke_engine PRIVATE "${_ROCKE_BINDING_LINK_TARGET}")
+target_link_libraries(rocke_engine PRIVATE Threads::Threads)
+if(CMAKE_DL_LIBS)
+  target_link_libraries(rocke_engine PRIVATE ${CMAKE_DL_LIBS})
+endif()
 if(UNIX)
   target_link_libraries(rocke_engine PRIVATE m)
 endif()

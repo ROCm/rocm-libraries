@@ -35,6 +35,76 @@ if(BUILD_TESTING)
                  rocke_hip_target_resolution)
   endif()
 
+  # Exercise the actual platform loader with tiny fake HIP shared libraries.
+  # Each scenario is a separate process because a successfully selected HIP
+  # runtime is intentionally cached for process lifetime.
+  if(EXISTS
+     "${CMAKE_CURRENT_SOURCE_DIR}/runtime/hip_loader_integration_test.cpp")
+    add_library(rocke_fake_hip_preloaded SHARED
+                runtime/fake_hip_runtime.cpp)
+    target_compile_definitions(rocke_fake_hip_preloaded PRIVATE
+                               ROCKE_FAKE_HIP_ARCH="gfx942")
+    set_target_properties(rocke_fake_hip_preloaded PROPERTIES
+                          OUTPUT_NAME amdhip64)
+
+    add_library(rocke_fake_hip_override SHARED
+                runtime/fake_hip_runtime.cpp)
+    target_compile_definitions(rocke_fake_hip_override PRIVATE
+                               ROCKE_FAKE_HIP_ARCH="gfx950")
+    set_target_properties(rocke_fake_hip_override PROPERTIES
+                          OUTPUT_NAME rocke_fake_hip_override)
+
+    add_library(rocke_fake_hip_root SHARED
+                runtime/fake_hip_runtime.cpp)
+    target_compile_definitions(rocke_fake_hip_root PRIVATE
+                               ROCKE_FAKE_HIP_ARCH="gfx942")
+    set(_rocke_fake_rocm_root "${CMAKE_CURRENT_BINARY_DIR}/fake_rocm")
+    if(WIN32)
+      set(_rocke_fake_rocm_libdir "${_rocke_fake_rocm_root}/bin")
+      set(_rocke_fake_rocm_library
+          "${_rocke_fake_rocm_libdir}/amdhip64.dll")
+    else()
+      set(_rocke_fake_rocm_libdir "${_rocke_fake_rocm_root}/lib")
+      set(_rocke_fake_rocm_library
+          "${_rocke_fake_rocm_libdir}/libamdhip64.so")
+    endif()
+    add_custom_command(TARGET rocke_fake_hip_root POST_BUILD
+      COMMAND ${CMAKE_COMMAND} -E make_directory
+              "${_rocke_fake_rocm_libdir}"
+      COMMAND ${CMAKE_COMMAND} -E copy_if_different
+              "$<TARGET_FILE:rocke_fake_hip_root>"
+              "${_rocke_fake_rocm_library}"
+      COMMENT "Preparing fake ROCm root for HIP loader tests")
+
+    add_executable(rocke_hip_loader_integration
+                   runtime/hip_loader_integration_test.cpp)
+    target_link_libraries(rocke_hip_loader_integration PRIVATE rocke_core)
+    add_dependencies(rocke_hip_loader_integration
+                     rocke_fake_hip_preloaded
+                     rocke_fake_hip_override
+                     rocke_fake_hip_root)
+
+    add_test(NAME rocke_hip_loader_override_precedence
+      COMMAND rocke_hip_loader_integration override
+              "$<TARGET_FILE:rocke_fake_hip_preloaded>"
+              "$<TARGET_FILE:rocke_fake_hip_override>")
+    add_test(NAME rocke_hip_loader_retry
+      COMMAND rocke_hip_loader_integration retry
+              "$<TARGET_FILE:rocke_fake_hip_override>")
+    add_test(NAME rocke_hip_loader_root_discovery
+      COMMAND rocke_hip_loader_integration root
+              "${_rocke_fake_rocm_root}")
+    add_test(NAME rocke_hip_loader_pin
+      COMMAND rocke_hip_loader_integration pin
+              "$<TARGET_FILE:rocke_fake_hip_preloaded>")
+    set_tests_properties(
+      rocke_hip_loader_override_precedence
+      rocke_hip_loader_retry
+      rocke_hip_loader_root_discovery
+      rocke_hip_loader_pin
+      PROPERTIES LABELS "ckc;unit;host")
+  endif()
+
   # ck.dsl.ir/v1 serializer round-trip + verifier test. Proves
   # lower(parse(serialize(k))) == lower(k) byte-for-byte, serialization
   # idempotence, and a clean verifier pass for the buildable GEMM configs.
