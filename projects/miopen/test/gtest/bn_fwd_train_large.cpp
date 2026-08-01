@@ -90,13 +90,10 @@ struct BnLargeTestCase
 {
     std::string label;
     friend std::ostream& operator<<(std::ostream& os, const BnLargeTestCase& tc)
-    {
-        return os << tc.label;
-    }
+    { return os << tc.label; }
 };
 
-struct GPU_BnFwdTrainLarge_Spatial_FP32
-    : public testing::TestWithParam<BnLargeTestCase>
+struct GPU_BnFwdTrainLarge_Spatial_FP32 : public testing::TestWithParam<BnLargeTestCase>
 {
     void SetUp() override
     {
@@ -129,8 +126,8 @@ struct GPU_BnFwdTrainLarge_Spatial_FP32
         miopen::TensorDescriptor bn_desc;
         miopen::DeriveBNTensorDescriptor(bn_desc, input_desc, miopenBNSpatial);
 
-        const size_t in_elems = input_desc.GetElementSize();  // N*C*H*W = 2^31
-        const size_t bn_elems = bn_desc.GetElementSize();     // C = 2048
+        const size_t in_elems = input_desc.GetElementSize(); // N*C*H*W = 2^31
+        const size_t bn_elems = bn_desc.GetElementSize();    // C = 2048
 
         // Allocate GPU buffers.
         void* in_dev        = nullptr;
@@ -172,24 +169,23 @@ struct GPU_BnFwdTrainLarge_Spatial_FP32
         const double averageFactor = 0.1;
 
         // Run spatial BN forward training (V1 API).
-        const miopenStatus_t status = miopenBatchNormalizationForwardTraining(
-            &handle,
-            miopenBNSpatial,
-            &alpha,
-            &beta,
-            &input_desc,
-            in_dev,
-            &output_desc,
-            out_dev,
-            &bn_desc,
-            scale_dev,
-            shift_dev,
-            averageFactor,
-            run_mean_dev,
-            run_var_dev,
-            epsilon,
-            save_mean_dev,
-            save_ivar_dev);
+        const miopenStatus_t status = miopenBatchNormalizationForwardTraining(&handle,
+                                                                              miopenBNSpatial,
+                                                                              &alpha,
+                                                                              &beta,
+                                                                              &input_desc,
+                                                                              in_dev,
+                                                                              &output_desc,
+                                                                              out_dev,
+                                                                              &bn_desc,
+                                                                              scale_dev,
+                                                                              shift_dev,
+                                                                              averageFactor,
+                                                                              run_mean_dev,
+                                                                              run_var_dev,
+                                                                              epsilon,
+                                                                              save_mean_dev,
+                                                                              save_ivar_dev);
 
         ASSERT_EQ(status, miopenStatusSuccess)
             << "miopenBatchNormalizationForwardTraining returned status "
@@ -220,19 +216,18 @@ inline std::vector<BnLargeTestCase> GetLargeTensorTestCasesBn()
 }
 
 std::string GetBnLargeTestCaseName(const testing::TestParamInfo<BnLargeTestCase>& info)
-{
-    return info.param.label;
-}
+{ return info.param.label; }
 
 } // namespace
 
 TEST_P(GPU_BnFwdTrainLarge_Spatial_FP32, BnSpatialScaleOverflow) { RunTest(); }
 
 // Disabled: BatchNorm kernel crashes at numel > INT_MAX due to int32 index
-// overflow (same class of bug as ALMIOPEN-2151/2152). Test added as
-// DISABLED_Standard to document the gap; re-enable when the BN overflow is fixed.
+// overflow (same class of bug as ALMIOPEN-2151/2152). Test is registered as
+// Standard but will be skipped at runtime when GPU memory is insufficient or
+// the BN int32 overflow is not yet fixed; re-enable assertions when fixed.
 // Shape {2,2048,1024,512}: N*C*H*W = 2^31 = 2,147,483,648 > INT_MAX.
-INSTANTIATE_TEST_SUITE_P(DISABLED_Standard,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_BnFwdTrainLarge_Spatial_FP32,
                          testing::ValuesIn(GetLargeTensorTestCasesBn()),
                          GetBnLargeTestCaseName);
