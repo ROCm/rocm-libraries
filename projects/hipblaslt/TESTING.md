@@ -98,8 +98,10 @@ that variance, because its two codebases sit at opposite ends of the spectrum.
 
 #### TensileLite Python (strong)
 
-This is where hipBLASLt's real unit testing lives. The code generator is pure Python producing
-text, so essentially all of it is testable with no GPU.
+This is where most of hipBLASLt's hardware-independent testing lives. The code generator is pure
+Python producing text, so essentially all of it is testable with no GPU. How much of that testing is
+*unit* testing, as opposed to characterization scaffolding, is a separate question that this section
+returns to below. It matters more than the headline coverage number does.
 
 | Item | Detail |
 | --- | --- |
@@ -119,6 +121,34 @@ today, including latent bugs, so that the ongoing consolidation refactor shows a
 behavior change as a reviewable diff rather than a silent downstream regression. Latent bugs found
 while characterizing are flagged in that directory's `DECISIONS.md` rather than silently fixed, so a
 golden that encodes wrong behavior is documented as such.
+
+**Characterization coverage is not unit coverage, and the coverage numbers do not distinguish them.**
+This is the most important caveat on every percentage in this document. A characterization golden
+proves that behavior did not change. It does not prove the behavior is correct, and by design some
+goldens pin behavior that is known to be wrong. A unit test asserts what the code *should* do. So a
+line reached only by a characterization test is protected against accidental change but unverified,
+and it still owes a real test.
+
+The scaffolding is deliberate and temporary. It exists so the consolidation refactor can proceed
+safely, and the intent is for unit tests to replace it as the code becomes unit-testable. The
+difficulty is that the enforced floors cannot see that migration at all. Coverage is measured on the
+union of the two suites, so converting a line from characterization protection to a genuine unit test
+leaves every enforced number identical. A file can sit at 80% while almost all of that 80% is
+scaffolding, and no gate will say a word.
+
+What does show it is the characterization-versus-unit summary card, rendered into the GitHub Actions
+run summary by the coverage lane. It splits every measurable statement into four buckets that sum to
+100%: reached by both suites, by characterization only, by unit only, and by no test at all. The
+characterization-only count is the migration debt, and the goal is for it to fall toward zero. The
+card also ranks the largest files by statement count with each file's unit-suite and
+characterization-suite percentages side by side, which is how the next refactor target gets picked: a
+high characterization percentage next to a low unit percentage is a file still leaning on
+scaffolding. The two suites are kept disjoint in the coverage lane specifically so this attribution
+means something.
+
+Worth being blunt about the consequence: the one number that measures real progress is the one number
+nothing enforces. Reading a file's coverage without reading its split is how a team convinces itself
+it is further along than it is.
 
 The discipline that goes with goldens is documented in the suite's
 [README.md](tensilelite/Tensile/Tests/unit/characterization/README.md) and is worth stating here
@@ -151,9 +181,15 @@ anything performance-related. The switch is covered by
 and documented, with that caveat, at
 [`_codegen/GPU-MOCK.md`](tensilelite/Tensile/Tests/unit/characterization/_codegen/GPU-MOCK.md).
 
-**Mutation testing** is a report-only pilot on a small slice of modules, run through
-`tox -e mutation-unit` and configured in `pyproject.toml`. It is not a gate and does not run in CI.
-A series of PRs widening the mutation-hardened surface starts at
+**Mutation testing** is how the scaffolding earns its keep. Coverage only says a line was executed;
+a surviving mutant says the suite did not notice when that line's behavior changed, which is exactly
+the failure mode a golden-based suite is prone to. It is the only signal available today that
+distinguishes a characterization test that would catch a regression from one that merely runs the
+code, so widening it is what makes the scaffolding trustworthy while the unit tests are still being
+written. Today it is a report-only pilot on a five-file slice, run through `tox -e mutation-unit` and
+configured in `pyproject.toml`. It is not a gate and does not run in CI. Accepted equivalent mutants
+and every `# pragma: no mutate` are justified in `DECISIONS.md`. A series of PRs widening the
+mutation-hardened surface starts at
 [PR #10133](https://github.com/ROCm/rocm-libraries/pull/10133); those are still in draft.
 
 #### C++ library and clients (weak, and structurally blocked)
@@ -205,9 +241,13 @@ semantics, and multi-GPU behavior. All of that is integration territory by const
 in [`tensilelite/pyproject.toml`](tensilelite/pyproject.toml), which is deliberately the only place
 that number lives. The comment beside it records the intent: the GPU-less `coverage-unit` run
 measures around 79%, 80% is the target, and the floor is set below the measured value on purpose so
-that ordinary run-to-run noise cannot trip an exact cutoff. Per-file floors ratchet separately. For
-the C++ side there is no coverage target today, because with the current structure a target would be
-aspirational rather than actionable.
+that ordinary run-to-run noise cannot trip an exact cutoff. Per-file floors ratchet separately.
+
+Read that 79% with the caveat above firmly in mind: it is union coverage across the unit and
+characterization suites, so it describes how much code is *protected*, not how much is *verified*.
+There is no enforced target on the unit-only share, which is the number that actually tracks the
+migration. For the C++ side there is no coverage target at all today, because with the current
+structure a target would be aspirational rather than actionable.
 
 ### Integration Testing Strategy
 
@@ -405,19 +445,29 @@ of the difference. TensileLite could reach high line coverage while leaving whol
 kernel-generation behavior unexercised, and the client suite could exercise every supported
 datatype while touching a small fraction of the C++ library's lines.
 
+hipBLASLt has a third distinction on top of those two, and it is the one most likely to mislead: for
+TensileLite Python, a covered line may be covered by a *unit test* that asserts intended behavior or
+by a *characterization golden* that merely pins current behavior, bugs included. Every enforced
+number here is the union of the two and cannot tell them apart. See
+[Unit Testing Strategy](#unit-testing-strategy) for why that matters; the short version is that
+characterization coverage is scaffolding to be repaid, not testing that is finished.
+
 **Code coverage as measured today:**
 
 | Scope | Tool | Measured in | Enforced |
 | --- | --- | --- | --- |
-| TensileLite Python | `coverage.py` via `tox -e coverage-unit` | GitHub Actions, on any change under `projects/hipblaslt/tensilelite/**` | Yes: whole-project floor plus per-file ratchet with 1 pp tolerance |
+| TensileLite Python, unit and characterization combined | `coverage.py` via `tox -e coverage-unit` | GitHub Actions, on any change under `projects/hipblaslt/tensilelite/**` | Yes: whole-project floor plus per-file ratchet with 1 pp tolerance |
+| TensileLite Python, unit-only share | Same lane, reported in the split summary card | GitHub Actions | **No.** Informational only, and it is the number that tracks real progress |
+| TensileLite Python, mutation score | `tox -e mutation-unit` | Nowhere; run by hand | No. Report-only pilot on five files |
 | TensileLite C++ host library | `tox -e coverage-cpp` | Math CI | Reported to codecov, not enforced |
 | hipBLASLt C++ library | Optional `HIPBLASLT_ENABLE_COVERAGE=ON` build | Not run in CI | No |
 
 The GitHub Actions coverage lane is CPU-only and takes roughly seven minutes. It runs the
-characterization suite and the pure unit suite once each under coverage, unions the results,
-enforces both floors on the combined data, and renders a non-gating summary card attributing
-coverage to each suite so the next refactor targets are visible. That lane is deliberately scoped
-and is expected to retire once the characterization-to-unit conversion finishes.
+characterization suite and the pure unit suite once each under coverage, keeping the two selections
+disjoint so each line can be attributed to one or both, unions the results, enforces both floors on
+the combined data, and renders the non-gating split summary card. That lane is deliberately scoped
+and is expected to retire once the characterization-to-unit conversion finishes, which makes the
+card's characterization-only count a rough progress bar for the lane's own retirement.
 
 **Targets.** Two different mechanisms carry a number, and they are easy to confuse:
 
@@ -430,6 +480,11 @@ and is expected to retire once the characterization-to-unit conversion finishes.
   because the job that uploads it is not a required check.
 
 80% is the direction of travel for the enforced floor, and the ratchet is how it gets there.
+
+Neither mechanism sets a target on the unit-only share, and neither one would notice if the
+characterization-only count stopped falling. Both numbers can be fully satisfied by a codebase whose
+Python is entirely pinned and barely verified. Setting an explicit target on the unit-only share, so
+the migration has a gate and not just a dashboard, is on the [roadmap](#improvement-roadmap).
 
 **Scope and exclusions.** Coverage measurement is Python-focused, and measured on Linux only; Linux
 and Windows are not tracked separately. The exclusions in
@@ -537,6 +592,14 @@ it cheap to test exhaustively and cheap to characterize. Investing there buys mo
 anywhere else in the component, which is why the deepest test infrastructure in hipBLASLt sits in
 `tensilelite/` and not in `library/`.
 
+**Characterization came first because the code was not ready for unit tests.** Much of TensileLite
+predates any expectation of testability, so writing real unit tests against it means refactoring it,
+and refactoring it without a net is how silent regressions happen. Pinning current behavior first,
+then refactoring behind the pins, then replacing the pins with unit tests, is the order the situation
+forces. The cost of that order is a coverage number that looks better than the underlying quality
+warrants, which is why this document keeps separating the two rather than quoting the union and
+moving on.
+
 **Correctness of a GEMM is not decidable without hardware.** A kernel can be structurally valid,
 compile cleanly, and produce wrong numbers on one architecture at one tile size. No amount of
 host-side testing detects that. This forces a large integration suite and sets a floor on how fast
@@ -585,7 +648,11 @@ regression still depends on someone looking. It is the largest gap in this docum
 **3. Kernel selection and generation correctness.** A regression in TensileLite affects every
 consumer at once and can be invisible in a small test set. Validated by the Python unit suite, the
 characterization goldens, and the multi-architecture `common` suite run by Math CI's gating
-`preliminary` job.
+`preliminary` job. Note what the goldens do and do not buy here: they will catch an *unintended*
+change to generation, which is the common failure, but they cannot tell you the generated result was
+right in the first place, since they were recorded from the same code. For that, the module needs
+real unit tests, which is the migration described in
+[Unit Testing Strategy](#unit-testing-strategy).
 
 **4. Memory safety.** Wrong-sized workspaces, out-of-bounds host buffers, and leaks in long-running
 inference processes. Validated by the per-PR HOST_ASAN gate on gfx90a and by nightly full ASAN.
@@ -639,7 +706,8 @@ between them is not documented anywhere a contributor can see. That is the most 
 
 | Change type | Expected validation |
 | --- | --- |
-| New hardware-independent logic (TensileLite Python) | Unit test, keeping the whole-project floor and every per-file floor intact |
+| New hardware-independent logic (TensileLite Python) | A real unit test asserting intended behavior, keeping the whole-project floor and every per-file floor intact. A characterization golden is not a substitute for new code: pinning behavior you just wrote pins whatever you happened to write |
+| Refactoring TensileLite behind existing goldens | Goldens unchanged is the pass condition. If the refactor makes a module unit-testable, converting its characterization coverage to unit tests in the same PR is the highest-value thing you can do, and the split card is where to show it |
 | New hardware-independent logic (C++) | Unit test if the code is reachable from `hipblaslt-test`; otherwise say so in the PR and prefer a structure that is reachable |
 | New on-device behavior | Client test case with numerical validation against the CPU reference |
 | New public API | API or descriptor test in the auxiliary suite |
@@ -668,14 +736,19 @@ Ordered by value per unit of effort, not by ambition.
 
 **Medium term, the structural unlock:**
 
-1. **Create a host-only link target for library internals**, resolving the include-path collision, so
+1. **Put a number on the characterization-to-unit migration.** The split summary card already computes
+   the characterization-only statement count. Track it over time and set a target on it, so the
+   migration has a gate rather than a dashboard nobody is accountable for. Without this, the union
+   floors are fully satisfiable by a codebase that is pinned everywhere and verified nowhere, and the
+   scaffolding has no expiry date.
+2. **Create a host-only link target for library internals**, resolving the include-path collision, so
    C++ unit tests can reach validation, enum and string mapping, tuning-override parsing, and
    workspace-sizing logic without linking the whole shared library. Everything in the C++ unit-test
    backlog is blocked behind this one change.
-2. **Unify the three parallel enum-to-string tables** (client, library, and test-data YAML), or at
+3. **Unify the three parallel enum-to-string tables** (client, library, and test-data YAML), or at
    minimum add a test that asserts they agree. They can drift today, and a drift produces confusing
    test-selection behavior rather than an obvious failure.
-3. **Extract validation ahead of dispatch** so argument-error paths are reachable without a GPU.
+4. **Extract validation ahead of dispatch** so argument-error paths are reachable without a GPU.
 
 **Longer term, the real gap:**
 
@@ -684,7 +757,9 @@ Ordered by value per unit of effort, not by ambition.
    run crosses it, and a named owner who reads the result. Alerting first; PR-level gating only if it
    can be made stable enough not to become the thing everyone reruns.
 2. **Graduate mutation testing** from a report-only pilot to a maintained signal on the modules where
-   it has demonstrated value.
+   it has demonstrated value. This is the companion to the migration item above: until a module has
+   real unit tests, its mutation score is the only evidence that its goldens would actually catch a
+   regression rather than just execute the code.
 3. **Prune redundant numerical variants** in the client suite to buy back runtime, and spend it on
    architecture breadth per PR.
 
@@ -699,6 +774,8 @@ Stated plainly, so none of these are a surprise at release time.
 | What Math CI runs and which of its jobs gate is not visible from this repository | Medium | Medium | This document, which is a snapshot and will drift from the internal configuration | TBD |
 | The installed-artifact test lane silently skips the snapshot tests, because syrupy is not part of the installed tree's requirements | Low | Low | The goldens are already enforced upstream in the source lanes; the skip is stated in `conftest.py` rather than hidden, but it reads like an accident to anyone scanning the run | TBD |
 | Tiers above `quick` apply no filter in the TheRock lane, so the taxonomy is only half-real | Medium | Medium | CTest honors the tiers correctly when used | TBD |
+| Enforced coverage counts characterization scaffolding the same as unit tests, so the numbers overstate how much TensileLite Python is actually verified | High | Medium | The split summary card reports the characterization-only share, but it gates nothing and no target is set on it | TBD |
+| Mutation testing, the only check that a golden would catch a regression rather than just execute the line, covers five files and runs nowhere in CI | Medium | Medium | Manual runs via `tox -e mutation-unit`; widening PRs are in draft | TBD |
 | Very little of the C++ library is unit-testable; the blockers are structural | Medium | Medium | Heavy integration coverage compensates for correctness, at the cost of slow feedback | TBD |
 | No flaky-test tagging, owner, or expiry convention | Medium | Medium | `known_bugs.yaml` quarantine with ticket references and removal notes | TBD |
 | Which checks are actually required to merge is undocumented | Medium | Medium | Institutional knowledge | TBD |
@@ -748,7 +825,10 @@ When adding or modifying functionality:
 ### Choosing the Right Test Type
 
 - **Can the behavior be validated without GPU hardware?**
-  - Yes, and it is in TensileLite Python: add a unit test in `tensilelite/Tensile/Tests/unit/`.
+  - Yes, and it is in TensileLite Python: add a unit test in `tensilelite/Tensile/Tests/unit/`. Write
+    a test that asserts what the code *should* do. Reach for a characterization golden only when you
+    are pinning behavior that already exists so it can be refactored safely, not when you are adding
+    behavior.
   - Yes, and it is C++: add a host-only case in `clients/tests/src/`, if the code is reachable. If it
     is not reachable, say so in your PR rather than reaching for a GPU test by default; the
     reachability problem is a known gap and evidence of it is useful.
