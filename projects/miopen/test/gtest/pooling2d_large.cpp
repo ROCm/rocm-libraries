@@ -89,7 +89,10 @@ constexpr size_t kMinFreeMemBytes = 16ULL * 1024 * 1024 * 1024;
 // Helper: fill a device buffer with a non-degenerate pattern (avoids all-zero inputs).
 // hipMemset with 0x3F gives a repeated-byte IEEE 754 value (all elements ≈ 0.247,
 // positive and finite), so max-pool has a well-defined winner.
-void FillDeviceBuffer(void* dev_ptr, size_t n_bytes) { (void)hipMemset(dev_ptr, 0x3F, n_bytes); }
+void FillDeviceBuffer(void* dev_ptr, size_t n_bytes)
+{
+    ASSERT_EQ(hipMemset(dev_ptr, 0x3F, n_bytes), hipSuccess) << "hipMemset fill failed";
+}
 
 // Helper: check that a sample of output elements are finite.
 // Copying all ~537 M elements to the host is slow; we read the first 256 Ki floats.
@@ -99,6 +102,7 @@ bool SampleIsFinite(const void* dev_ptr, size_t n_elems)
     constexpr size_t kSampleElems = 256 * 1024;
     const size_t sample           = std::min(kSampleElems, n_elems);
     std::vector<float> host(sample);
+    // cppcheck-suppress checkLibraryUseReturnValue
     (void)hipMemcpy(host.data(), dev_ptr, sample * sizeof(float), hipMemcpyDeviceToHost);
     for(size_t i = 0; i < sample; ++i)
     {
