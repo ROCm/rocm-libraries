@@ -90,12 +90,12 @@ static_assert(kInputLen >= kLabelLen * 2 + 1,
 // Total headroom requested: 19 GiB (conservative; skip on smaller GPUs).
 constexpr size_t kMinFreeMemBytes = 19ULL * 1024 * 1024 * 1024;
 
-struct CTCLargeScaleTest : public ::testing::Test
+struct GPU_CTCLargeScale_FP32 : public ::testing::Test
 {
     void SetUp() override
     {
-        size_t free_bytes  = 0;
-        size_t total_bytes = 0;
+        size_t free_bytes        = 0;
+        size_t total_bytes       = 0;
         const hipError_t mem_err = hipMemGetInfo(&free_bytes, &total_bytes);
         if(mem_err != hipSuccess)
         {
@@ -105,8 +105,8 @@ struct CTCLargeScaleTest : public ::testing::Test
         if(free_bytes < kMinFreeMemBytes)
         {
             GTEST_SKIP() << "Insufficient free GPU memory for large-scale CTC test: need "
-                         << (kMinFreeMemBytes >> 30) << " GiB, have "
-                         << (free_bytes >> 30) << " GiB";
+                         << (kMinFreeMemBytes >> 30) << " GiB, have " << (free_bytes >> 30)
+                         << " GiB";
         }
     }
 
@@ -145,18 +145,17 @@ struct CTCLargeScaleTest : public ::testing::Test
         // Query workspace size.
         size_t wsp_bytes = 0;
         ASSERT_NO_THROW(wsp_bytes = ctcDesc.GetCTCLossWorkspaceSize(handle,
-                                                                     probsDesc,
-                                                                     gradsDesc,
-                                                                     labels.data(),
-                                                                     labelLengths.data(),
-                                                                     inputLengths.data(),
-                                                                     miopenCTCLossAlgo_t(0)));
+                                                                    probsDesc,
+                                                                    gradsDesc,
+                                                                    labels.data(),
+                                                                    labelLengths.data(),
+                                                                    inputLengths.data(),
+                                                                    miopenCTCLossAlgo_t(0)));
         ASSERT_GT(wsp_bytes, 0u) << "GetCTCLossWorkspaceSize returned zero";
 
         // Allocate GPU buffers.
         const size_t logit_elems = static_cast<size_t>(max_time_step) *
-                                   static_cast<size_t>(batch_sz) *
-                                   static_cast<size_t>(class_sz);
+                                   static_cast<size_t>(batch_sz) * static_cast<size_t>(class_sz);
         const size_t logit_bytes = logit_elems * sizeof(float);
 
         void* probs_dev  = nullptr;
@@ -167,8 +166,7 @@ struct CTCLargeScaleTest : public ::testing::Test
             << "hipMalloc failed for probs (" << (logit_bytes >> 30) << " GiB)";
         ASSERT_EQ(hipMalloc(&grads_dev, logit_bytes), hipSuccess)
             << "hipMalloc failed for grads (" << (logit_bytes >> 30) << " GiB)";
-        ASSERT_EQ(hipMalloc(&losses_dev, static_cast<size_t>(batch_sz) * sizeof(float)),
-                  hipSuccess)
+        ASSERT_EQ(hipMalloc(&losses_dev, static_cast<size_t>(batch_sz) * sizeof(float)), hipSuccess)
             << "hipMalloc failed for losses";
 
         // Zero-fill all three buffers.  All-zero logits are valid inputs:
@@ -222,8 +220,8 @@ struct CTCLargeScaleTest : public ::testing::Test
 // Named Scale to indicate this belongs to large-scale / nightly coverage.
 // The test is excluded from Smoke and Standard tiers via test_categories.yaml.
 // Run manually with:
-//   ./miopen_gtest --gtest_filter='Scale/GPU_CTC_LargeScale_FP32*'
+//   ./miopen_gtest --gtest_filter='GPU_CTCLargeScale_FP32.FullScale'
 // or via MIOpenDriver:
 //   MIOpenDriver ctc -T 1000 -N 2048 -C 1048 --forw 1 -V 0 -t 1
 
-TEST_F(CTCLargeScaleTest, Scale_GPU_CTC_numel_gt_INT_MAX) { this->Run(); }
+TEST_F(GPU_CTCLargeScale_FP32, FullScale) { this->Run(); }
