@@ -73,7 +73,7 @@ static bool SampleIsFinite(const void* dev_ptr, size_t n_elems)
     constexpr size_t kSampleElems = 256 * 1024;
     const size_t sample           = std::min(kSampleElems, n_elems);
     std::vector<float> host(sample);
-    hipMemcpy(host.data(), dev_ptr, sample * sizeof(float), hipMemcpyDeviceToHost);
+    (void)hipMemcpy(host.data(), dev_ptr, sample * sizeof(float), hipMemcpyDeviceToHost);
     for(size_t i = 0; i < sample; ++i)
     {
         if(!std::isfinite(host[i]))
@@ -90,7 +90,9 @@ struct BnLargeTestCase
 {
     std::string label;
     friend std::ostream& operator<<(std::ostream& os, const BnLargeTestCase& tc)
-    { return os << tc.label; }
+    {
+        return os << tc.label;
+    }
 };
 
 struct GPU_BnFwdTrainLarge_Spatial_FP32 : public testing::TestWithParam<BnLargeTestCase>
@@ -152,16 +154,16 @@ struct GPU_BnFwdTrainLarge_Spatial_FP32 : public testing::TestWithParam<BnLargeT
 
         // Fill input with a non-degenerate pattern.
         // hipMemset with 0x3F gives a repeated-byte value (≈ 0.247 float), positive and finite.
-        hipMemset(in_dev, 0x3F, in_elems * sizeof(float));
-        hipMemset(out_dev, 0, in_elems * sizeof(float));
+        (void)hipMemset(in_dev, 0x3F, in_elems * sizeof(float));
+        (void)hipMemset(out_dev, 0, in_elems * sizeof(float));
 
         // Scale=1 (approx), shift=0, running stats=0.
-        hipMemset(scale_dev, 0x3F, bn_elems * sizeof(float));
-        hipMemset(shift_dev, 0, bn_elems * sizeof(float));
-        hipMemset(run_mean_dev, 0, bn_elems * sizeof(float));
-        hipMemset(run_var_dev, 0, bn_elems * sizeof(float));
-        hipMemset(save_mean_dev, 0, bn_elems * sizeof(float));
-        hipMemset(save_ivar_dev, 0, bn_elems * sizeof(float));
+        (void)hipMemset(scale_dev, 0x3F, bn_elems * sizeof(float));
+        (void)hipMemset(shift_dev, 0, bn_elems * sizeof(float));
+        (void)hipMemset(run_mean_dev, 0, bn_elems * sizeof(float));
+        (void)hipMemset(run_var_dev, 0, bn_elems * sizeof(float));
+        (void)hipMemset(save_mean_dev, 0, bn_elems * sizeof(float));
+        (void)hipMemset(save_ivar_dev, 0, bn_elems * sizeof(float));
 
         const float alpha          = 1.0f;
         const float beta           = 0.0f;
@@ -198,14 +200,14 @@ struct GPU_BnFwdTrainLarge_Spatial_FP32 : public testing::TestWithParam<BnLargeT
                "(possible INT_MAX index overflow at numel="
             << in_elems << " > 2^31-1)";
 
-        hipFree(in_dev);
-        hipFree(out_dev);
-        hipFree(scale_dev);
-        hipFree(shift_dev);
-        hipFree(run_mean_dev);
-        hipFree(run_var_dev);
-        hipFree(save_mean_dev);
-        hipFree(save_ivar_dev);
+        (void)hipFree(in_dev);
+        (void)hipFree(out_dev);
+        (void)hipFree(scale_dev);
+        (void)hipFree(shift_dev);
+        (void)hipFree(run_mean_dev);
+        (void)hipFree(run_var_dev);
+        (void)hipFree(save_mean_dev);
+        (void)hipFree(save_ivar_dev);
     }
 };
 
@@ -216,7 +218,9 @@ inline std::vector<BnLargeTestCase> GetLargeTensorTestCasesBn()
 }
 
 std::string GetBnLargeTestCaseName(const testing::TestParamInfo<BnLargeTestCase>& info)
-{ return info.param.label; }
+{
+    return info.param.label;
+}
 
 } // namespace
 
