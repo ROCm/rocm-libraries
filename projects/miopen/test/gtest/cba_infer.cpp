@@ -161,15 +161,11 @@ inline auto gcbaInferParamGen(Configs configs, TensorTypes tensorTypes)
 // those configs were not previously running.
 template <unsigned NDim>
 std::vector<GroupConvTestConfig<NDim>> GroupedSmokeConfigs()
-{
-    return GroupConvTestConfig<NDim>::template GetSmokeConfigs<Direction::Forward>();
-}
+{ return GroupConvTestConfig<NDim>::template GetSmokeConfigs<Direction::Forward>(); }
 
 template <unsigned NDim>
 std::vector<GroupConvTestConfig<NDim>> GroupedFullConfigs()
-{
-    return GroupConvTestConfig<NDim>::template GetConfigs<Direction::Forward>();
-}
+{ return GroupConvTestConfig<NDim>::template GetConfigs<Direction::Forward>(); }
 
 // Large-tensor fused-conv test case: 2D NHWC numel > INT_MAX
 // N=1, C=1, H=46342, W=46342, K=1, 1x1 kernel
@@ -188,59 +184,33 @@ inline std::vector<ConvTestCaseBase> GetNhwcFusedScaleCase()
 } // namespace
 
 TEST_P(GPU_ConvBiasActivInfer_FP32, ConvBiasActivAsm1x1UFloat)
-{
-    RunTunableSolver<miopen::solver::fusion::ConvBiasActivAsm1x1U>();
-}
+{ RunTunableSolver<miopen::solver::fusion::ConvBiasActivAsm1x1U>(); }
 TEST_P(GPU_ConvBiasActivInfer_FP32, ConvHipDirectFwdFused)
-{
-    RunTunableSolver<miopen::solver::fusion::ConvHipDirectFwdFused>();
-}
+{ RunTunableSolver<miopen::solver::fusion::ConvHipDirectFwdFused>(); }
 TEST_P(GPU_ConvBiasActivInfer_FP32, ConvBinWinogradRxSFused)
-{
-    RunSolver(miopen::solver::fusion::ConvBinWinogradRxSFused{});
-}
+{ RunSolver(miopen::solver::fusion::ConvBinWinogradRxSFused{}); }
 TEST_P(GPU_ConvBiasActivInfer_FP32, ConvBinWinogradRxSf2x3g1Fused)
-{
-    RunSolver(miopen::solver::fusion::ConvBinWinogradRxSf2x3g1Fused{});
-}
+{ RunSolver(miopen::solver::fusion::ConvBinWinogradRxSf2x3g1Fused{}); }
 TEST_P(GPU_ConvBiasActivInfer_FP16, ConvWinoFuryRxSf2x3Fused)
-{
-    RunSolver(miopen::solver::fusion::ConvWinoFuryRxSFused<2, 3>{});
-}
+{ RunSolver(miopen::solver::fusion::ConvWinoFuryRxSFused<2, 3>{}); }
 TEST_P(GPU_ConvBiasActivInfer_FP16, ConvWinoRageRxSf2x3Fused)
-{
-    RunSolver(miopen::solver::fusion::ConvWinoRageRxSFused<2, 3>{});
-}
+{ RunSolver(miopen::solver::fusion::ConvWinoRageRxSFused<2, 3>{}); }
 
 TEST_P(GPU_ConvBiasActivInfer_FP16, ConvCKIgemmFwdBiasActivFused)
-{
-    RunTunableSolver<miopen::solver::fusion::ConvCKIgemmFwdBiasActivFused>();
-}
+{ RunTunableSolver<miopen::solver::fusion::ConvCKIgemmFwdBiasActivFused>(); }
 
 TEST_P(GPU_ConvGrpBiasActivInfer_BFP16, ConvCKIgemmGrpFwdBiasActivFused)
-{
-    RunTunableSolver<miopen::solver::fusion::ConvCKIgemmGrpFwdBiasActivFused>();
-}
+{ RunTunableSolver<miopen::solver::fusion::ConvCKIgemmGrpFwdBiasActivFused>(); }
 TEST_P(GPU_ConvGrpBiasActivInfer3D_BFP16, ConvCKIgemmGrpFwdBiasActivFused)
-{
-    RunTunableSolver<miopen::solver::fusion::ConvCKIgemmGrpFwdBiasActivFused>();
-}
+{ RunTunableSolver<miopen::solver::fusion::ConvCKIgemmGrpFwdBiasActivFused>(); }
 TEST_P(GPU_ConvGrpBiasActivInfer_FP16, ConvCKIgemmGrpFwdBiasActivFused)
-{
-    RunTunableSolver<miopen::solver::fusion::ConvCKIgemmGrpFwdBiasActivFused>();
-}
+{ RunTunableSolver<miopen::solver::fusion::ConvCKIgemmGrpFwdBiasActivFused>(); }
 TEST_P(GPU_ConvGrpBiasActivInfer3D_FP16, ConvCKIgemmGrpFwdBiasActivFused)
-{
-    RunTunableSolver<miopen::solver::fusion::ConvCKIgemmGrpFwdBiasActivFused>();
-}
+{ RunTunableSolver<miopen::solver::fusion::ConvCKIgemmGrpFwdBiasActivFused>(); }
 TEST_P(GPU_ConvGrpBiasActivInfer_FP32, ConvCKIgemmGrpFwdBiasActivFused)
-{
-    RunTunableSolver<miopen::solver::fusion::ConvCKIgemmGrpFwdBiasActivFused>();
-}
+{ RunTunableSolver<miopen::solver::fusion::ConvCKIgemmGrpFwdBiasActivFused>(); }
 TEST_P(GPU_ConvGrpBiasActivInfer3D_FP32, ConvCKIgemmGrpFwdBiasActivFused)
-{
-    RunTunableSolver<miopen::solver::fusion::ConvCKIgemmGrpFwdBiasActivFused>();
-}
+{ RunTunableSolver<miopen::solver::fusion::ConvCKIgemmGrpFwdBiasActivFused>(); }
 
 #if MIOPEN_BACKEND_HIP
 
@@ -459,13 +429,12 @@ INSTANTIATE_TEST_SUITE_P(Full,
 // Tests that Conv+Bias+Activ fusion (ConvHipDirectFwdFused) correctly handles
 // int64 index arithmetic when NHWC element count exceeds INT_MAX.
 // Runs in the Scale tier (requires large-memory GPU, e.g. MI300X / MI325X).
-INSTANTIATE_TEST_SUITE_P(
-    FullScale,
-    GPU_ConvBiasActivInfer_FP16,
-    testing::Combine(testing::Values(miopenActivationRELU),
-                     testing::ValuesIn(GetNhwcFusedScaleCase()),
-                     testing::Values(miopenTensorNHWC),
-                     testing::Values(0.25f),
-                     testing::Values(0.75f),
-                     testing::Values(0.5f)),
-    CbaParamNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(FullScale,
+                         GPU_ConvBiasActivInfer_FP16,
+                         testing::Combine(testing::Values(miopenActivationRELU),
+                                          testing::ValuesIn(GetNhwcFusedScaleCase()),
+                                          testing::Values(miopenTensorNHWC),
+                                          testing::Values(0.25f),
+                                          testing::Values(0.75f),
+                                          testing::Values(0.5f)),
+                         CbaParamNameGenerator{});
