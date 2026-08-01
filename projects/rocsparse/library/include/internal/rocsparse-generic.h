@@ -29,7 +29,7 @@
 #ifndef ROCSPARSE_GENERIC_H
 #define ROCSPARSE_GENERIC_H
 
-#include "../rocsparse-config.h"
+#include "rocsparse-config.h"
 
 #include "generic/rocsparse_axpby.h"
 #include "generic/rocsparse_check_spmat.h"
