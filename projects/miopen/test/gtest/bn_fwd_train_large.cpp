@@ -40,6 +40,7 @@
 
 #include <miopen/miopen.h>
 #include <miopen/batch_norm.hpp>
+#include <miopen/tensor.hpp>
 
 #include <hip/hip_runtime.h>
 
