@@ -34,25 +34,11 @@
 #ifndef HIPSPARSE_CONFIG_H
 #define HIPSPARSE_CONFIG_H
 
-/* Build-time feature flags baked in at compile time.
- *
- * Each flag is tagged with the hipSPARSE release it was introduced in ("since")
- * and the earliest release its #ifdef guard may be deleted ("remove-after") --
- * one release after the feature ships enabled by default. Update these tags
- * whenever a flag is added or retired.
- *
- * Every consumer-facing flag MUST be listed here: a configure-time guardrail
- * (cmake/CheckFeatureFlags.cmake) fails the build if a public header is gated by
- * a flag that is not registered in this template.
- */
+/* Build-time feature flags baked in at compile time. */
 
-/* since 4.7; remove-after 4.8 */
+/* hipSPARSE 4.7 */
 #cmakedefine HIPSPARSE_WITH_SPMV_BSR
-
-/* since 4.7; remove-after 4.8. Reserved for client/test CSC coverage. */
 #cmakedefine HIPSPARSE_WITH_CSC_TRSV
-
-/* since 4.7; remove-after 4.8. Reserved for client/test CSC coverage. */
 #cmakedefine HIPSPARSE_WITH_CSC_TRSM
 
 #endif /* HIPSPARSE_CONFIG_H */
