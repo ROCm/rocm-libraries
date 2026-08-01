@@ -413,7 +413,10 @@ job types, of which exactly three are configured as gating:
 - **`precheckin`** builds hipBLASLt from source and runs its client test suite on gfx90a, gfx942,
   gfx950, and gfx12, plus a compile-only gfx1250 configuration. This is the broadest hardware
   coverage hipBLASLt gets on a pull request, and it is the only per-PR signal on gfx950.
-- **`static-analysis`** runs a static analysis scan over the source.
+- **`static-analysis`** is not what its name suggests. It scans the working tree and the git log for
+  a list of sensitive words maintained in the CI system rather than in this repository, and fails on
+  any match. It is a disclosure gate protecting a public repository, not a code-quality analyzer. See
+  [Static Analysis](#static-analysis) for what that means in practice.
 - **`preliminary`** runs the TensileLite `common`-marked suite under tox on gfx12, gfx90a, gfx942,
   and gfx950. It first diffs the change against `develop` and skips entirely when nothing under
   `tensilelite/`, `shared/stinkytofu/`, or `shared/origami/` has changed, so on a pull request that
@@ -436,7 +439,9 @@ but that check is not required.
 | HOST_ASAN build and quick test | Yes, on gfx90a | Component team | Keep the sanitizer lane green |
 | Code coverage floor and ratchet (TensileLite) | Yes, when `tensilelite/` is touched | Component team / CI | Floors move up only |
 | Formatting and lint (`pre-commit`) | Yes | CI / DevOps | Maintain hooks |
-| Static analysis | Yes | CI / DevOps | Gating Math CI job (`static-analysis`) |
+| Sensitive-word scan (the Math CI job named `static-analysis`) | Yes | CI / DevOps | Gating, but it is a disclosure gate rather than code analysis |
+| Code-quality static analysis (C++) | No | Unowned | **Nothing runs.** No clang-tidy or cppcheck configuration exists for hipBLASLt, and CodeQL does not cover C++ |
+| Code-quality static analysis (Python) | No | Component team | `tox -e lint` exists but no CI job invokes it, and it is narrowed to pyflakes checks |
 | Client test suite on gfx90a / gfx942 / gfx950 / gfx12 | Yes | Component team | Gating Math CI job (`precheckin`) |
 | Performance | No | Component team | Measured on every PR by `perfci`, but nothing gates on the result (see above) |
 | Shared validation infrastructure | N/A | TheRock team | Provide shared build and test infrastructure |
@@ -453,7 +458,7 @@ required-check list, in this repository, is tracked as a gap.
 
 | Status | Applies to |
 | --- | --- |
-| **Trusted gate** | Build (both platforms), which includes the `TensileLogic --check-all` library logic validation; client GTest quick tier on gfx94X-dcgpu (Linux) and gfx110X (Windows); the Math CI client suite on gfx90a, gfx942, gfx950 and gfx12; Math CI static analysis; TensileLite Python unit and characterization suites; HOST_ASAN build and quick test on gfx90a; TensileLite coverage floor and ratchet; `pre-commit` |
+| **Trusted gate** | Build (both platforms), which includes the `TensileLogic --check-all` library logic validation; client GTest quick tier on gfx94X-dcgpu (Linux) and gfx110X (Windows); the Math CI client suite on gfx90a, gfx942, gfx950 and gfx12; the Math CI sensitive-word scan (the job named `static-analysis`); TensileLite Python unit and characterization suites; HOST_ASAN build and quick test on gfx90a; TensileLite coverage floor and ratchet; `pre-commit` |
 | **Informational** | HOST_ASAN on gfx942 (opt-in via the `ci:asan` label, explicitly non-blocking); the TensileLite characterization-versus-unit coverage summary card; the `tensilelite-unit-codecov` check and codecov reports; the `perfci` benchmark comparison |
 | **Unstable / flaky** | Not tracked as a category. hipBLASLt has no `UNSTABLE` tag |
 
@@ -667,6 +672,52 @@ substantially slower, and is why full ASAN is nightly rather than per PR.
 undefined behavior (no UBSAN); device-side memory errors on any per-PR lane; and any test outside
 the quick tier, since the sanitized run uses the quick tier only.
 
+## Static Analysis
+
+This section is short on achievements and long on gaps, which is itself the finding. **hipBLASLt has
+essentially no code-quality static analysis, and the gate that sounds like it provides some does
+not.**
+
+**What the gating job actually does.** Math CI's `static-analysis` job scans the working tree and the
+git log for a list of sensitive words, maintained in the CI system rather than in this repository, and
+fails the build on any match. It exists to keep internal names and unreleased information out of a
+public repository. That is a worthwhile gate and it is genuinely enforced, but it inspects text rather
+than code, and it would not notice a null dereference, a resource leak, or an uninitialized read. The
+name invites exactly the wrong conclusion, which is why it is called out here rather than left in a
+table row.
+
+**C++ analysis: none.** There is no `.clang-tidy` file anywhere in hipBLASLt, and although
+`cmake/modules/ClangTidy.cmake` exists at the repository root, hipBLASLt's build never references it.
+Neither does it use the `CppCheck.cmake` that some sibling projects in this repository wire up. The
+top-level `CMakeLists.txt` sets no warning escalation of its own. So the C++ library, which is the
+bulk of the shipped product, receives no static analysis on a pull request from any source.
+
+**CodeQL exists but not where it would help.** Two separate things carry the name. The GitHub Actions
+workflow [`codeql.yml`](../../.github/workflows/codeql.yml) runs on a weekly schedule and analyzes
+only the `python` and `actions` languages, so it never runs on a pull request and never sees C++.
+Math CI also defines a `codeql` job for hipBLASLt that does a real compile, but it is not in the
+gating set. Between them, C++ CodeQL coverage on a pull request is zero.
+
+**Python analysis is configured down to almost nothing, and unenforced.** `tox -e lint` runs flake8
+over `Tensile`, but the `[flake8]` section in
+[`tensilelite/tox.ini`](tensilelite/tox.ini) sets `ignore = E, W`, which disables every pycodestyle
+error and warning and leaves only the pyflakes checks: undefined names, unused imports, redefinitions.
+Those are worth having and they catch real bugs. But the `max-line-length = 132` sitting above that
+line has no effect, since line length is an `E` code. More importantly, no CI job runs this
+environment, so the check is available rather than applied. There is no type checking at all, despite
+type hints on function signatures being a documented style rule; a `mypy` or `pyright` run would be
+the highest-value addition here because TensileLite is a large, dynamically typed code generator.
+
+**What does run** is formatting, not analysis, and it should not be counted as the latter.
+`pre-commit` enforces `clang-format` across C and C++ sources and `black` across Python, and both are
+gating. Math CI's static analysis class contains a clang-format checking routine as well, but the job
+disables it, so formatting enforcement comes from `pre-commit` alone.
+
+The practical consequence is that defects which a standard analyzer would catch cheaply, at authoring
+time, are instead left to code review, the sanitizer lane, and the test suite. The
+[roadmap](#improvement-roadmap) proposes closing this, starting with the Python side, which is the
+cheapest by a wide margin.
+
 ## Why We Test This Way
 
 The strategy above is not the one you would design from scratch. It is the one the architecture
@@ -832,6 +883,11 @@ Ordered by value per unit of effort, not by ambition.
    means changing them or accepting a stated exception. Start by splitting flaky from known-failing in
    the client quarantine list, which is the largest and blindest surface.
 
+6. **Run the Python linter that already exists.** `tox -e lint` is configured and invoked by nothing.
+   Wiring it into the existing TensileLite GitHub Actions lane is close to free, and widening it past
+   `ignore = E, W` can be done gradually. Rename or re-describe the `static-analysis` job at the same
+   time, since its current name causes people to believe code analysis is already covered.
+
 **Medium term, the structural unlock:**
 
 1. **Put a number on the characterization-to-unit migration.** The split summary card already computes
@@ -860,6 +916,11 @@ Ordered by value per unit of effort, not by ambition.
    regression rather than just execute the code.
 3. **Prune redundant numerical variants** in the client suite to buy back runtime, and spend it on
    architecture breadth per PR.
+4. **Introduce real static analysis on the C++ library.** Add a `.clang-tidy` with a deliberately
+   small starting rule set, wire it into the build the way sibling projects in this repository
+   already do, and ratchet it rather than trying to land a clean full-strength run. Adding `cpp` to
+   the CodeQL language matrix is the cheaper first step and would at least produce a weekly signal.
+   Type checking on TensileLite belongs in the same effort.
 
 ## Known Risks and Gaps
 
@@ -880,6 +941,10 @@ Stated plainly, so none of these are a surprise at release time.
 | A stale `TensileLogic` known-bugs entry only warns, because `--strict-known-bugs` defaults off and no job passes it | Low | Low | The checker does re-validate and report stale entries on every build; enforcement is tracked in AIHPBLAS-4196 | TBD |
 | The library logic validation gate is invisible as a check: it runs inside the build, so it has no check name, no test report, and cannot be run in isolation by CI | Low | Medium | It runs on every kernel-generating build including local ones, which gives it good reach; a standalone lane is proposed in AIHPBLAS-4196 | TBD |
 | Which checks are actually required to merge is undocumented | Medium | Medium | Institutional knowledge | TBD |
+| No code-quality static analysis runs on the C++ library at all: no clang-tidy or cppcheck configuration, and CodeQL does not cover C++ | High | Medium | Code review, the sanitizer lane, and the test suite absorb what an analyzer would catch at authoring time | TBD |
+| The gating job named `static-analysis` is a sensitive-word scan, so the gate list reads as though code analysis is covered when it is not | Medium | Medium | Documented here; the scan itself does its actual job well | TBD |
+| Python linting is configured (`tox -e lint`) but no CI job runs it, and `ignore = E, W` narrows it to pyflakes checks | Medium | Low | `black` formatting is enforced through `pre-commit`; pyflakes-class bugs are otherwise caught in review | TBD |
+| No type checking on TensileLite, despite type hints being a documented style rule | Medium | Medium | None. A large dynamically typed code generator with no type verification | TBD |
 | TSAN build options exist but no CI lane uses them; no UBSAN at all | Low | High if hit | None. Thread-safety bugs would be found downstream | TBD |
 | No multi-GPU tests | Low | High if hit | None in this repository | TBD |
 | Three parallel enum-to-string tables can drift | Low | Medium | None automated | TBD |
