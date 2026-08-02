@@ -98,7 +98,9 @@ class UnifiedAttentionProblem:
     # 0 => auto: derive as ``num_sms * 4``. When > 0, this takes precedence over
     # ``num_sms`` for 2D<->3D routing (``select_path``) and 3D segmentation
     # (``select_3d``), so tuners/benchmarks can pin the target without knowing
-    # the device CU count.
+    # the device CU count. Honoured on the Python dispatch path; like ``num_sms``,
+    # the C++ C-ABI engine (attention_unified_entry.cpp) does not yet read it, so
+    # a companion change is needed for it to take effect in production.
     target_ctas: int = 0
     # AMDGPU occupancy hint ("amdgpu-waves-per-eu"). The 2D-tiled and
     # 3D-tiled specs both honour this knob; the scalar paths ignore it

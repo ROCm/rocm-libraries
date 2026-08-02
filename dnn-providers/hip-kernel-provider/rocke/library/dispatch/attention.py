@@ -135,9 +135,10 @@ def _device_num_cus() -> "int | None":
 
     Torch-free: delegates to the ctypes ``libamdhip64`` wrapper
     (``rocke.runtime.hip_module``) so the library layer stays off torch. NOTE:
-    this resolver covers the Python dispatch path only -- the C++ C-ABI engine
-    keeps its own num_sms default (attention_unified_entry.cpp) and requires the
-    mirror resolver there for production (companion change).
+    this resolver -- and the ``target_ctas`` routing/segmentation override -- cover
+    the Python dispatch path only. The C++ C-ABI engine keeps its own num_sms
+    default (attention_unified_entry.cpp) with no target_ctas field, so both need
+    the mirror resolver + target_ctas there for production (companion change).
     """
     try:
         from rocke.runtime.hip_module import get_device_num_cus
