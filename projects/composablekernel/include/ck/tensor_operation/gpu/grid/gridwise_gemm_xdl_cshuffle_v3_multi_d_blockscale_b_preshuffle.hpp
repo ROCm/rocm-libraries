@@ -1009,6 +1009,16 @@ struct GridwiseGemmMultiD_blockscale_xdl_cshuffle_v3_b_preshuffle
             }
         }
 
+        if constexpr(IsTaggedPerChannelScale<DsDataType,
+                                             DsLayout,
+                                             CElementwiseOperation>::value)
+        {
+            if(karg.StrideDs[0] != 0)
+            {
+                return false;
+            }
+        }
+
         // check gridwise gemm pipeline
         const auto num_k_loop = karg.AK0 / (KPerBlock / AK1Value);
 
@@ -1308,17 +1318,34 @@ struct GridwiseGemmMultiD_blockscale_xdl_cshuffle_v3_b_preshuffle
             MakeDsGridDescriptor_MBlock_MPerBlock_NBlock_NPerBlock(
                 ds_grid_desc_m_n, problem.MBlock, problem.NBlock);
 
-        Base::template RunMultiDEpilogue<CGlobalMemoryDataOperation, false, true, false>(
-            blockwise_gemm_pipeline,
-            ds_grid_desc_mblock_mperblock_nblock_nperblock,
-            c_grid_desc_mblock_mperblock_nblock_nperblock,
-            c_thread_buf,
-            block_m_id,
-            block_n_id,
-            p_shared,
-            p_ds_grid,
-            p_c_grid,
-            c_element_op);
+        if constexpr(IsTaggedPerChannelScale<DsDataType,
+                                             DsLayout,
+                                             CElementwiseOperation>::value)
+        {
+            Base::template RunPerChannelScaleEpilogue<CGlobalMemoryDataOperation, true>(
+                blockwise_gemm_pipeline,
+                c_grid_desc_mblock_mperblock_nblock_nperblock,
+                c_thread_buf,
+                block_m_id,
+                block_n_id,
+                p_shared,
+                p_ds_grid[I0],
+                p_c_grid);
+        }
+        else
+        {
+            Base::template RunMultiDEpilogue<CGlobalMemoryDataOperation, false, true, false>(
+                blockwise_gemm_pipeline,
+                ds_grid_desc_mblock_mperblock_nblock_nperblock,
+                c_grid_desc_mblock_mperblock_nblock_nperblock,
+                c_thread_buf,
+                block_m_id,
+                block_n_id,
+                p_shared,
+                p_ds_grid,
+                p_c_grid,
+                c_element_op);
+        }
     }
 
     template <bool HasMainKBlockLoop,
@@ -1577,17 +1604,34 @@ struct GridwiseGemmMultiD_blockscale_xdl_cshuffle_v3_b_preshuffle
             MakeDsGridDescriptor_MBlock_MPerBlock_NBlock_NPerBlock(
                 ds_grid_desc_m_n, problem.MBlock, problem.NBlock);
 
-        Base::template RunMultiDEpilogue<CGlobalMemoryDataOperation, false, true, false>(
-            blockwise_gemm_pipeline,
-            ds_grid_desc_mblock_mperblock_nblock_nperblock,
-            c_grid_desc_mblock_mperblock_nblock_nperblock,
-            c_thread_buf,
-            block_m_id,
-            block_n_id,
-            p_shared,
-            p_ds_grid,
-            p_c_grid,
-            c_element_op);
+        if constexpr(IsTaggedPerChannelScale<DsDataType,
+                                             DsLayout,
+                                             CElementwiseOperation>::value)
+        {
+            Base::template RunPerChannelScaleEpilogue<CGlobalMemoryDataOperation, true>(
+                blockwise_gemm_pipeline,
+                c_grid_desc_mblock_mperblock_nblock_nperblock,
+                c_thread_buf,
+                block_m_id,
+                block_n_id,
+                p_shared,
+                p_ds_grid[I0],
+                p_c_grid);
+        }
+        else
+        {
+            Base::template RunMultiDEpilogue<CGlobalMemoryDataOperation, false, true, false>(
+                blockwise_gemm_pipeline,
+                ds_grid_desc_mblock_mperblock_nblock_nperblock,
+                c_grid_desc_mblock_mperblock_nblock_nperblock,
+                c_thread_buf,
+                block_m_id,
+                block_n_id,
+                p_shared,
+                p_ds_grid,
+                p_c_grid,
+                c_element_op);
+        }
     }
 };
 
