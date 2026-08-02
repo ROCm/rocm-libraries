@@ -778,6 +778,51 @@ Rules:
 5. **Cheap checks first.** The predicate runs for every candidate on every
   dispatch.
 
+### 6.3 The two layers on one request
+
+Rule 1 is easier to trust after watching it work. The fp16 RCR GEMM candidates
+split their gate exactly as stages 3 and 4 prescribe — arch, dtype, and layout
+as data; everything needing a constructed spec in the predicate:
+
+```python
+capability=Capability(arches=arches, dtypes=("fp16",), layouts=("RCR",)),
+supports=support,   # selector, then gemm_config_supported, then shape tiling
+```
+
+Dispatching `M=16, N=512, K=512` on `gfx950` exercises both layers at once, and
+the `capability:` prefix `admits` adds is what tells them apart:
+
+```
+candidate                            capability.check                     supports()
+universal_gemm_fp16_cdna_cshuffle    pass                                 reject: M=16 not divisible by tile_m=128
+universal_gemm_fp16_rdna_wmma        REJECT: arch 'gfx950' not in (...)   reject: M=16 not divisible by tile_m=64
+universal_gemm_fp16_cdna_mem         pass                                 reject: M=16 not divisible by tile_m=64
+universal_gemm_fp16_rdna_wmma_small  REJECT: arch 'gfx950' not in (...)   reject: M=16 not divisible by tile_m=32
+```
+
+The RDNA rows repay a second look. Their predicate rejects on divisibility and
+never mentions arch, because rule 1 removed that check once capability owned it.
+Hand the same candidate a shape that *does* tile evenly and the predicate alone
+answers:
+
+```
+universal_gemm_fp16_rdna_wmma, M=N=K=512, arch=gfx950   # declared: gfx11-generic, gfx1151, gfx1201
+  supports(req)    -> (True, 'ok')
+  capability.check -> (False, "arch 'gfx950' not in ('gfx11-generic', 'gfx1151', 'gfx1201')")
+  admits(req)      -> (False, "capability: arch 'gfx950' not in (...)")
+```
+
+An RDNA-only WMMA kernel accepting a CDNA target is rule 1 working as intended,
+not a bug in the predicate — and it is the concrete reason section 6 insists
+callers ask `admits`. It is also why backfilling capability had to move every
+direct `candidate.supports(...)` call site in the same change.
+
+Ordering is load-bearing in the other direction too. The gfx1250 WMMA attention
+predicate constructs a spec, and `WmmaAttentionFwdSpec` raises from
+`__post_init__` on a bad dtype or head size. It can only do that safely because
+the prefilter has already cleared those fields — a predicate that ran first
+would turn an unsupported request into a traceback instead of a verdict.
+
 ---
 
 
@@ -1479,8 +1524,8 @@ Note that these two together replace an earlier "capability must be a superset
 of what `supports()` accepts" formulation, which does not survive rule 1 of
 section 6.2. Once a predicate stops re-checking arch and dtype, `supports()`
 alone *will* accept an arch that capability rejects — for GEMM, the RDNA
-candidate's spec rebuilds happily on a CDNA target — and that is correct rather
-than a violation. The complete verdict is `candidate.admits(req)`, capability
+candidate's spec rebuilds happily on a CDNA target, which section 6.3 shows
+verdict by verdict — and that is correct rather than a violation. The complete verdict is `candidate.admits(req)`, capability
 then predicate; the residual predicate is not a complete gate by itself and must
 not be tested as one.
 
