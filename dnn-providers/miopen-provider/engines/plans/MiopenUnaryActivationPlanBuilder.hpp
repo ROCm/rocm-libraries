@@ -5,6 +5,7 @@
 
 #include <functional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <hipdnn_flatbuffers_sdk/data_objects/knob_value_generated.h>
