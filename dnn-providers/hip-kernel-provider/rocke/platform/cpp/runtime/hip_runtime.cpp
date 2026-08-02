@@ -148,8 +148,8 @@ std::vector<unsigned long> version_key(const std::string& value)
         if(c >= static_cast<unsigned char>('0') && c <= static_cast<unsigned char>('9'))
         {
             unsigned long digit = static_cast<unsigned long>(c - static_cast<unsigned char>('0'));
-            constexpr unsigned long max = std::numeric_limits<unsigned long>::max();
-            number = number > (max - digit) / 10 ? max : number * 10 + digit;
+            constexpr unsigned long max_value = (std::numeric_limits<unsigned long>::max)();
+            number = number > (max_value - digit) / 10 ? max_value : number * 10 + digit;
             in_number = true;
         }
         else if(in_number)

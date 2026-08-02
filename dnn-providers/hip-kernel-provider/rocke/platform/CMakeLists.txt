@@ -14,6 +14,7 @@ cmake_minimum_required(VERSION 3.16)
 project(rocke LANGUAGES CXX)
 
 include(GNUInstallDirs)
+include(CMakePackageConfigHelpers)
 find_package(Python3 COMPONENTS Interpreter QUIET)
 find_package(Threads REQUIRED)
 
@@ -204,6 +205,13 @@ if(ROCKE_BUILD_PYBIND)
 endif()
 
 # --- Installable engine + test artifacts -------------------------------------
+set(_rocke_cmake_install_dir "${CMAKE_INSTALL_LIBDIR}/cmake/ckc")
+configure_package_config_file(
+  "${CMAKE_CURRENT_SOURCE_DIR}/cmake/ckcConfig.cmake.in"
+  "${CMAKE_CURRENT_BINARY_DIR}/ckcConfig.cmake"
+  INSTALL_DESTINATION "${_rocke_cmake_install_dir}"
+  NO_SET_AND_CHECK_MACRO
+  NO_CHECK_REQUIRED_COMPONENTS_MACRO)
 install(TARGETS rocke_core
         EXPORT ckcTargets
         ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
@@ -212,9 +220,13 @@ install(TARGETS rocke_core
 install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/cpp/include/"
         DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 install(EXPORT ckcTargets
-        FILE ckcTargets.cmake
+        FILE ckcTargetsImpl.cmake
         NAMESPACE ckc::
-        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/ckc)
+        DESTINATION "${_rocke_cmake_install_dir}")
+install(FILES
+        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/ckcTargets.cmake"
+        "${CMAKE_CURRENT_BINARY_DIR}/ckcConfig.cmake"
+        DESTINATION "${_rocke_cmake_install_dir}")
 
 if(ROCKE_INSTALL_PYTHON_PACKAGE)
   # In provider mode, co-locate the rocke package under the test subdir
