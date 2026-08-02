@@ -136,8 +136,16 @@ class UnifiedAttentionProblem:
         block_q = block_m // self.num_queries_per_kv
         return self.total_q // block_q + self.num_seqs
 
+    @property
+    def _effective_target_ctas(self) -> int:
+        """Device-subscription target: the number of concurrent workgroups that
+        "fills" the device. Single source of truth for 2D<->3D routing
+        (``select_path``) and the 3D segment count (``select_3d``). Currently
+        ``num_sms * 4`` (4 CTAs/CU)."""
+        return self.num_sms * 4
+
     def select_path(self) -> str:
-        target = self.num_sms * 4
+        target = self._effective_target_ctas
         num_2d = self.total_num_q_blocks_upper_bound * self.num_kv_heads
         return (
             "2d"
@@ -167,7 +175,7 @@ class UnifiedAttentionProblem:
         )
 
     def select_3d(self) -> Tuple[Attention3DConfig, Attention3DConfig]:
-        target = self.num_sms * 4
+        target = self._effective_target_ctas
         num_2d = self.total_num_q_blocks_upper_bound * self.num_kv_heads
         return select_3d_config(
             head_size=self.head_size,
