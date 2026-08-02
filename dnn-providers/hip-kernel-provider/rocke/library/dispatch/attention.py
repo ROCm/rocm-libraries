@@ -154,7 +154,7 @@ def _resolve_num_cus(req: AttentionRequest) -> int:
          and gfx942 built off-box / with no visible gfx942 device.
     An explicit ``target_ctas`` on the spec supersedes all of the above. Because
     the resolved value feeds the 3D ``num_segments`` (a compiled-kernel constant),
-    the on-box value is device-dependent within gfx942 (MI300X 304 vs MI300A 228);
+    the on-box value is device-dependent within gfx942 (varies across parts);
     for a reproducible or cross-compile target pass an explicit ``num_sms`` or the
     ``target_ctas`` spec override rather than relying on the live query.
     """

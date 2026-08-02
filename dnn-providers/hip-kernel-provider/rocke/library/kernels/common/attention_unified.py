@@ -2494,7 +2494,7 @@ def _num_segments(problem: UnifiedAttentionProblem) -> int:
             min_seg,
         )
         if problem.max_seqlen_q == 1:
-            # DECODE: boundaries measured on MI300X (Level 1, fp32-gated).
+            # DECODE: boundaries measured on gfx942 (Level 1, fp32-gated).
             if problem.max_seqlen_k <= 2048:
                 if problem.head_size == 64:
                     return min(segments, 32)
