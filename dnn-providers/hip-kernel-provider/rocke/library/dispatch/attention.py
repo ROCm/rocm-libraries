@@ -123,13 +123,6 @@ def _request_errors(req: OperatorRequest) -> list[str]:
     return errors
 
 
-# gfx942 fallback CU count, used only when the live gfx942 query is
-# unavailable (torch-less lowering / no visible GPU). Matches the StreamK
-# ``num_cus`` convention. Other archs are intentionally NOT resolved yet
-# (Future Scope) -- they keep the legacy 120 default.
-_GFX942_NUM_CUS = 304
-
-
 def _device_num_cus() -> "int | None":
     """Live device multiprocessor (CU) count, or None if unqueryable.
 
@@ -154,16 +147,16 @@ def _resolve_num_cus(req: AttentionRequest) -> int:
     ``num_sms`` is the dispatcher's "how many CUs does this device have" knob; it
     drives 2D<->3D routing (``select_path``) and the 3D segment count. Resolution:
       1. an explicit caller value (benchmarks pass a real count),
-      2. **gfx942 only** -- the live device CU count (guarded so a gfx942 *request*
-         on a non-gfx942 *box* falls back to the constant instead of that box's
-         count; correctly yields the device's real CU count within gfx942),
-      3. gfx942 fallback constant.
-    Other archs keep the legacy ``120`` (Future Scope -- not validated yet).
-    NOTE: because this feeds the 3D ``num_segments`` (a compiled-kernel constant),
-    the resolved value is device-dependent within gfx942 (varies by device).
-    Kernel goldens are safe (they pin ``num_segments`` directly). For a target that
-    is reproducible across boxes, pass an explicit ``num_sms`` (or the
-    ``target_ctas`` spec override) rather than relying on the live query.
+      2. **verified on-box gfx942 only** -- the live device CU count, used ONLY
+         when the request targets gfx942 AND the build box IS gfx942, so a
+         cross-compile never bakes the wrong device's count into the kernel,
+      3. otherwise the legacy ``120`` (matches develop): every non-gfx942 arch,
+         and gfx942 built off-box / with no visible gfx942 device.
+    An explicit ``target_ctas`` on the spec supersedes all of the above. Because
+    the resolved value feeds the 3D ``num_segments`` (a compiled-kernel constant),
+    the on-box value is device-dependent within gfx942 (MI300X 304 vs MI300A 228);
+    for a reproducible or cross-compile target pass an explicit ``num_sms`` or the
+    ``target_ctas`` spec override rather than relying on the live query.
     """
     n = int(req.num_sms)
     if n > 0:
@@ -178,7 +171,6 @@ def _resolve_num_cus(req: AttentionRequest) -> int:
                     return cus
         except Exception:
             pass
-        return _GFX942_NUM_CUS
     return 120
 
 

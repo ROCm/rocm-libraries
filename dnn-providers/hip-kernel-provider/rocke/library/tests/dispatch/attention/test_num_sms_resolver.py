@@ -66,12 +66,12 @@ def test_gfx942_device_query():
 
 
 def test_gfx942_fallback_off_box():
-    """gfx942 request on a non-gfx942 / CPU box -> the 304 constant, not the box's count."""
+    """gfx942 request off-box (no visible gfx942 device) -> legacy 120 (matches develop), NOT the box's count, NOT a 304 guess."""
     p = _Patch()
     try:
         p.attr(hipm, "get_device_arch", lambda *a, **k: None)  # no gfx942 device
-        p.attr(A, "_device_num_cus", lambda: 256)  # e.g. a gfx950 box
-        assert _resolve_num_cus(_req(num_sms=0)) == 304  # constant, not 256
+        p.attr(A, "_device_num_cus", lambda: 256)  # e.g. a gfx950 box; must NOT be consulted
+        assert _resolve_num_cus(_req(num_sms=0)) == 120  # legacy fallback, not 256, not 304
     finally:
         p.restore()
 
