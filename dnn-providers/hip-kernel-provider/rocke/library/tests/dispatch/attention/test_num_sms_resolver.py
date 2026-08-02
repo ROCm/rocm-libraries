@@ -70,8 +70,12 @@ def test_gfx942_fallback_off_box():
     p = _Patch()
     try:
         p.attr(hipm, "get_device_arch", lambda *a, **k: None)  # no gfx942 device
-        p.attr(A, "_device_num_cus", lambda: 256)  # e.g. a gfx950 box; must NOT be consulted
-        assert _resolve_num_cus(_req(num_sms=0)) == 120  # legacy fallback, not 256, not 304
+        p.attr(
+            A, "_device_num_cus", lambda: 256
+        )  # e.g. a gfx950 box; must NOT be consulted
+        assert (
+            _resolve_num_cus(_req(num_sms=0)) == 120
+        )  # legacy fallback, not 256, not 304
     finally:
         p.restore()
 
