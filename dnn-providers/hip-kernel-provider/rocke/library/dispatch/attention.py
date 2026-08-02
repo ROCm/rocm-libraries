@@ -39,7 +39,6 @@ left to the instance builder at launch time.
 
 from __future__ import annotations
 
-import os
 from dataclasses import asdict, dataclass
 from typing import Sequence, Tuple
 
@@ -80,6 +79,9 @@ class AttentionRequest(OperatorRequest):
     kv_block_size: int = 16  # paged KV block_size (modulus); {16,32,64}
     num_sms: int = (
         0  # 0 => auto-resolve to the device CU count at dispatch (_resolve_num_cus)
+    )
+    target_ctas: int = (
+        0  # 0 => auto: num_sms*4. >0 pins the routing/segmentation target directly.
     )
     op: str = "attention"
     dtype: str = "fp16"
@@ -150,27 +152,18 @@ def _resolve_num_cus(req: AttentionRequest) -> int:
 
     ``num_sms`` is the dispatcher's "how many CUs does this device have" knob; it
     drives 2D<->3D routing (``select_path``) and the 3D segment count. Resolution:
-      1. ``ROCKE_NUM_SMS`` env pin (deterministic across CI boxes),
-      2. an explicit caller value (benchmarks pass a real count),
-      3. **gfx942 only** -- the live device CU count (guarded so a gfx942 *request*
+      1. an explicit caller value (benchmarks pass a real count),
+      2. **gfx942 only** -- the live device CU count (guarded so a gfx942 *request*
          on a non-gfx942 *box* falls back to the constant instead of that box's
          count; correctly yields the device's real CU count within gfx942),
-      4. gfx942 fallback constant.
+      3. gfx942 fallback constant.
     Other archs keep the legacy ``120`` (Future Scope -- not validated yet).
     NOTE: because this feeds the 3D ``num_segments`` (a compiled-kernel constant),
     the resolved value is device-dependent within gfx942 (varies by device).
-    Kernel goldens are safe (they pin ``num_segments`` directly), but any NEW perf
-    snapshot captured on the resolved path must pin ``ROCKE_NUM_SMS`` to stay
-    reproducible across CI boxes.
+    Kernel goldens are safe (they pin ``num_segments`` directly). For a target that
+    is reproducible across boxes, pass an explicit ``num_sms`` (or the
+    ``target_ctas`` spec override) rather than relying on the live query.
     """
-    env = os.environ.get("ROCKE_NUM_SMS")
-    if env:
-        try:
-            v = int(env)
-            if v > 0:
-                return v
-        except ValueError:
-            pass
     n = int(req.num_sms)
     if n > 0:
         return n
@@ -203,6 +196,7 @@ def _problem(req: AttentionRequest) -> UnifiedAttentionProblem:
         sliding_window=int(req.sliding_window),
         use_sinks=bool(req.use_sinks),
         num_sms=_resolve_num_cus(req),
+        target_ctas=int(req.target_ctas),
     )
 
 

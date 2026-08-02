@@ -94,6 +94,12 @@ class UnifiedAttentionProblem:
     use_qq_bias: bool = False
     use_fp8: bool = False
     num_sms: int = 120
+    # Direct device-subscription target override (concurrent workgroups / CTAs).
+    # 0 => auto: derive as ``num_sms * 4``. When > 0, this takes precedence over
+    # ``num_sms`` for 2D<->3D routing (``select_path``) and 3D segmentation
+    # (``select_3d``), so tuners/benchmarks can pin the target without knowing
+    # the device CU count.
+    target_ctas: int = 0
     # AMDGPU occupancy hint ("amdgpu-waves-per-eu"). The 2D-tiled and
     # 3D-tiled specs both honour this knob; the scalar paths ignore it
     # because they already fit at 1 wave per workgroup. ``None`` keeps
@@ -140,9 +146,10 @@ class UnifiedAttentionProblem:
     def _effective_target_ctas(self) -> int:
         """Device-subscription target: the number of concurrent workgroups that
         "fills" the device. Single source of truth for 2D<->3D routing
-        (``select_path``) and the 3D segment count (``select_3d``). Currently
-        ``num_sms * 4`` (4 CTAs/CU)."""
-        return self.num_sms * 4
+        (``select_path``) and the 3D segment count (``select_3d``). Uses the
+        explicit ``target_ctas`` override when set (> 0); otherwise derives it
+        as ``num_sms * 4`` (4 CTAs/CU)."""
+        return self.target_ctas if self.target_ctas > 0 else self.num_sms * 4
 
     def select_path(self) -> str:
         target = self._effective_target_ctas

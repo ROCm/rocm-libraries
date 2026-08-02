@@ -1,18 +1,18 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""CPU-only tests for the dispatch-layer num_sms resolver.
+"""CPU-only tests for the dispatch-layer num_sms resolver + target_ctas knob.
 
 ``num_sms`` drives 2D<->3D routing and the 3D segment count. It historically
-defaulted to a stale 120, under-subscribing gfx942 (304 CUs). The
-resolver turns the sentinel default into the live gfx942 CU count behind an
+defaulted to a stale 120, under-subscribing gfx942 (304 CUs). The resolver turns
+the sentinel default into the live gfx942 CU count behind an explicit-caller
 override seam. Auto-resolution is scoped to gfx942 for now; other archs keep the
-legacy 120 (Future Scope). These tests mock the device query/arch (no GPU) and
+legacy 120 (Future Scope). ``target_ctas`` is the direct device-subscription
+target override: when > 0 it replaces ``num_sms * 4`` for routing/segmentation
+without a device CU count. These tests mock the device query/arch (no GPU) and
 assert the resolution order plus the downstream routing/segment effects.
 """
 from __future__ import annotations
-
-import os
 
 import dispatch.attention as A
 from dispatch.attention import AttentionRequest, _resolve_num_cus
@@ -41,26 +41,13 @@ class _Patch:
     """Minimal save/restore so the file runs under pytest AND as a script."""
 
     def __init__(self):
-        self._env = {}
         self._attrs = []
-
-    def env(self, k, v):
-        self._env.setdefault(k, os.environ.get(k))
-        if v is None:
-            os.environ.pop(k, None)
-        else:
-            os.environ[k] = v
 
     def attr(self, obj, name, val):
         self._attrs.append((obj, name, getattr(obj, name)))
         setattr(obj, name, val)
 
     def restore(self):
-        for k, v in self._env.items():
-            if v is None:
-                os.environ.pop(k, None)
-            else:
-                os.environ[k] = v
         for obj, name, old in reversed(self._attrs):
             setattr(obj, name, old)
 
@@ -69,7 +56,6 @@ def test_gfx942_device_query():
     """gfx942 on a gfx942 box -> the live CU count (device-dependent within gfx942)."""
     p = _Patch()
     try:
-        p.env("ROCKE_NUM_SMS", None)
         p.attr(hipm, "get_device_arch", lambda *a, **k: "gfx942")
         p.attr(A, "_device_num_cus", lambda: 304)
         assert _resolve_num_cus(_req(num_sms=0)) == 304
@@ -83,7 +69,6 @@ def test_gfx942_fallback_off_box():
     """gfx942 request on a non-gfx942 / CPU box -> the 304 constant, not the box's count."""
     p = _Patch()
     try:
-        p.env("ROCKE_NUM_SMS", None)
         p.attr(hipm, "get_device_arch", lambda *a, **k: None)  # no gfx942 device
         p.attr(A, "_device_num_cus", lambda: 256)  # e.g. a gfx950 box
         assert _resolve_num_cus(_req(num_sms=0)) == 304  # constant, not 256
@@ -95,7 +80,6 @@ def test_other_archs_keep_legacy_120():
     """Non-gfx942 archs are NOT auto-resolved yet (Future Scope) -> legacy 120."""
     p = _Patch()
     try:
-        p.env("ROCKE_NUM_SMS", None)
         p.attr(hipm, "get_device_arch", lambda *a, **k: "gfx950")
         p.attr(A, "_device_num_cus", lambda: 256)
         assert _resolve_num_cus(_req(num_sms=0, arch="gfx950")) == 120
@@ -109,7 +93,6 @@ def test_explicit_caller_wins_any_arch():
     """An explicit caller value beats the device query, on any arch."""
     p = _Patch()
     try:
-        p.env("ROCKE_NUM_SMS", None)
         p.attr(hipm, "get_device_arch", lambda *a, **k: "gfx942")
         p.attr(A, "_device_num_cus", lambda: 999)  # must NOT be consulted
         assert _resolve_num_cus(_req(num_sms=200)) == 200
@@ -118,35 +101,7 @@ def test_explicit_caller_wins_any_arch():
         p.restore()
 
 
-def test_env_pin_wins():
-    """ROCKE_NUM_SMS pins deterministically over explicit value + device, any arch."""
-    p = _Patch()
-    try:
-        p.env("ROCKE_NUM_SMS", "77")
-        p.attr(hipm, "get_device_arch", lambda *a, **k: "gfx942")
-        p.attr(A, "_device_num_cus", lambda: 304)
-        assert _resolve_num_cus(_req(num_sms=200)) == 77
-        assert _resolve_num_cus(_req(num_sms=0)) == 77
-        assert _resolve_num_cus(_req(num_sms=0, arch="gfx950")) == 77
-    finally:
-        p.restore()
-
-
-def test_ignores_bad_env():
-    """A non-integer / non-positive env pin is ignored, not fatal."""
-    p = _Patch()
-    try:
-        p.attr(hipm, "get_device_arch", lambda *a, **k: None)
-        p.attr(A, "_device_num_cus", lambda: None)
-        p.env("ROCKE_NUM_SMS", "garbage")
-        assert _resolve_num_cus(_req(num_sms=0)) == 304  # gfx942 fallback
-        p.env("ROCKE_NUM_SMS", "0")
-        assert _resolve_num_cus(_req(num_sms=0)) == 304
-    finally:
-        p.restore()
-
-
-def _prob(nsms, *, nq=64, nk=8, D=64, kv=8192, batch=64):
+def _prob(nsms, *, nq=64, nk=8, D=64, kv=8192, batch=64, tctas=0):
     return UnifiedAttentionProblem(
         total_q=batch,
         num_seqs=batch,
@@ -160,6 +115,7 @@ def _prob(nsms, *, nq=64, nk=8, D=64, kv=8192, batch=64):
         sliding_window=0,
         use_sinks=False,
         num_sms=nsms,
+        target_ctas=tctas,
     )
 
 
@@ -168,6 +124,31 @@ def test_routing_scales_with_num_sms():
     # b64 GQA-64/8 D64 kv8192: num_2d=768 -> 2D at 120 (target 480), 3D at 304 (target 1216)
     assert _prob(120).select_path() == "2d"
     assert _prob(304).select_path() == "3d"
+
+
+def test_target_ctas_overrides_effective_target():
+    """target_ctas (>0) is the effective routing/segment target, bypassing num_sms*4."""
+    assert _prob(120)._effective_target_ctas == 480  # auto: 120*4
+    assert _prob(120, tctas=1216)._effective_target_ctas == 1216  # override beats 480
+    assert _prob(304, tctas=99)._effective_target_ctas == 99  # override beats 1216
+    assert _prob(120, tctas=0)._effective_target_ctas == 480  # 0 => auto
+
+
+def test_target_ctas_flips_routing_without_num_sms():
+    """Setting target_ctas alone flips 2D->3D at fixed num_sms (the knob's purpose)."""
+    assert _prob(120).select_path() == "2d"  # auto target 480, num_2d=768 -> 2D
+    assert _prob(120, tctas=1216).select_path() == "3d"  # same num_sms, pinned target
+
+
+def test_target_ctas_threaded_through_problem():
+    """AttentionRequest.target_ctas reaches the built problem; the resolver ignores it."""
+    prob = A._problem(_req(num_sms=200, target_ctas=1216))
+    assert prob.target_ctas == 1216
+    assert prob.num_sms == 200  # num_sms still resolved independently
+    assert prob._effective_target_ctas == 1216
+    prob2 = A._problem(_req(num_sms=200, target_ctas=0))
+    assert prob2.target_ctas == 0  # unset => auto
+    assert prob2._effective_target_ctas == 800  # 200*4
 
 
 def test_segments_bounded_after_bump():
