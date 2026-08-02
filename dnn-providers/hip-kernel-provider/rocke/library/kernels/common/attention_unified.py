@@ -905,7 +905,9 @@ def _select_2d_tile_size(problem: UnifiedAttentionProblem) -> int:
     if _d256_gfx950_fast(problem):
         return 64
     if _gfx942_4warp_fast(problem):
-        return max(32, problem.block_size)  # BLOCK_N: 32 for bs16/32, 64 for bs64 (T%bs==0)
+        return max(
+            32, problem.block_size
+        )  # BLOCK_N: 32 for bs16/32, 64 for bs64 (T%bs==0)
     if _resolve_attention_arch() == "gfx1250":
         # gfx1250 v1 consumes exactly one 32-token paged-KV block per WMMA
         # iteration; wider T needs separate multi-block block-table handling.

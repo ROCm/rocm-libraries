@@ -72,10 +72,12 @@ class TestGfx942D128SwRouting(unittest.TestCase):
             for dt in ("bf16", "fp16"):
                 p = _d128_problem(dtype=dt)
                 self.assertTrue(
-                    au._d128_gfx942_swa_fast(p), msg=f"D128 SW {dt} must be the SW cohort"
+                    au._d128_gfx942_swa_fast(p),
+                    msg=f"D128 SW {dt} must be the SW cohort",
                 )
                 self.assertTrue(
-                    au._gfx942_4warp_fast(p), msg=f"D128 SW {dt} must take the 4-warp path"
+                    au._gfx942_4warp_fast(p),
+                    msg=f"D128 SW {dt} must take the 4-warp path",
                 )
 
     def test_sw_dispatch_gate_accepts_both_dtypes(self):
@@ -92,7 +94,8 @@ class TestGfx942D128SwRouting(unittest.TestCase):
                     p = _d128_problem(dtype=dt, block_size=bs)
                     ok, reason = au.supports_native_unified_attention_tiled(p)
                     self.assertTrue(
-                        ok, msg=f"D128 SW {dt} bs{bs} must reach the tiled path: {reason}"
+                        ok,
+                        msg=f"D128 SW {dt} bs{bs} must reach the tiled path: {reason}",
                     )
 
     def test_sw_ineligible_falls_back_not_4warp_gate(self):
@@ -120,8 +123,12 @@ class TestGfx942D128SwRouting(unittest.TestCase):
                     self.assertEqual(spec.block_m_per_warp, 32, msg=f"{tag} block_m")
                     self.assertEqual(spec.tile_size, exp_tile, msg=f"{tag} tile_size")
                     self.assertFalse(spec.use_mfma_32x32x8, msg=f"{tag} mfma_32x32")
-                    self.assertFalse(spec.use_transposed_qk_32x32, msg=f"{tag} transposed_qk")
-                    self.assertFalse(spec.use_k_single_buffer, msg=f"{tag} single_buffer")
+                    self.assertFalse(
+                        spec.use_transposed_qk_32x32, msg=f"{tag} transposed_qk"
+                    )
+                    self.assertFalse(
+                        spec.use_k_single_buffer, msg=f"{tag} single_buffer"
+                    )
                     self.assertFalse(spec.use_k_sliced_ring, msg=f"{tag} ring")
                     self.assertEqual(spec.sliding_window, 4096, msg=f"{tag} window")
 
@@ -133,10 +140,16 @@ class TestGfx942D128SwRouting(unittest.TestCase):
                 for bs in (16, 32, 64):
                     for sq in (8192, 16384):
                         p = _d128_problem(
-                            dtype=dt, block_size=bs, max_seqlen_q=sq, max_seqlen_k=sq, total_q=sq
+                            dtype=dt,
+                            block_size=bs,
+                            max_seqlen_q=sq,
+                            max_seqlen_k=sq,
+                            total_q=sq,
                         )
                         spec = _tiled_spec_from_problem(p)
-                        build_gfx942_4warp_gqa(spec, arch="gfx942")  # raises on bad combo
+                        build_gfx942_4warp_gqa(
+                            spec, arch="gfx942"
+                        )  # raises on bad combo
 
     def test_causal_stays_off_4warp(self):
         # D128 causal stays on develop's flash/ring path -- NOT the 4-warp cohort.
@@ -144,10 +157,12 @@ class TestGfx942D128SwRouting(unittest.TestCase):
             for dt in ("bf16", "fp16"):
                 pc = _d128_problem(dtype=dt, sliding_window=0)
                 self.assertFalse(
-                    au._d128_gfx942_swa_fast(pc), msg=f"D128 causal {dt} must not be SW cohort"
+                    au._d128_gfx942_swa_fast(pc),
+                    msg=f"D128 causal {dt} must not be SW cohort",
                 )
                 self.assertFalse(
-                    au._gfx942_4warp_fast(pc), msg=f"D128 causal {dt} must not take 4-warp"
+                    au._gfx942_4warp_fast(pc),
+                    msg=f"D128 causal {dt} must not take 4-warp",
                 )
             # develop's causal routing is unchanged: bf16 flash/ring-off, fp16 flash/ring-on.
             pb = _d128_problem(dtype="bf16", sliding_window=0)
@@ -168,9 +183,16 @@ class TestGfx942D128SwRouting(unittest.TestCase):
         # Regression: the D256 bf16 causal fast path still routes to the 4-warp.
         with _PinArch("gfx942"):
             p = au.UnifiedAttentionProblem(
-                total_q=8192, num_seqs=1, num_query_heads=16, num_kv_heads=2,
-                head_size=256, block_size=16, max_seqlen_q=8192, max_seqlen_k=8192,
-                dtype="bf16", sliding_window=0,
+                total_q=8192,
+                num_seqs=1,
+                num_query_heads=16,
+                num_kv_heads=2,
+                head_size=256,
+                block_size=16,
+                max_seqlen_q=8192,
+                max_seqlen_k=8192,
+                dtype="bf16",
+                sliding_window=0,
             )
             self.assertTrue(au._d256_gfx942_fast(p))
             self.assertTrue(au._gfx942_4warp_fast(p))
@@ -181,7 +203,9 @@ class TestGfx942D128SwRouting(unittest.TestCase):
             variants = (
                 dict(block_size=64),  # real production paged block size
                 dict(num_seqs=2, total_q=16384),  # multi-batch
-                dict(max_seqlen_q=512, max_seqlen_k=512, total_q=512),  # short (Sq < window)
+                dict(
+                    max_seqlen_q=512, max_seqlen_k=512, total_q=512
+                ),  # short (Sq < window)
             )
             for dt in ("bf16", "fp16"):
                 for kw in variants:
@@ -204,7 +228,8 @@ class TestGfx942D128SwRouting(unittest.TestCase):
                 for dt in ("bf16", "fp16"):
                     p = _d128_problem(dtype=dt, **kw)
                     self.assertFalse(
-                        au._d128_gfx942_swa_fast(p), msg=f"{dt} {kw} must not be SW cohort"
+                        au._d128_gfx942_swa_fast(p),
+                        msg=f"{dt} {kw} must not be SW cohort",
                     )
                     self.assertFalse(
                         au._gfx942_4warp_fast(p), msg=f"{dt} {kw} must not take 4-warp"
