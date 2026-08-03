@@ -962,7 +962,7 @@ struct DeviceGroupedConvFwdMultipleABD_WaveletModel_Xdl_CShuffle_V3
             float avg_time = 0.f;
             if constexpr(!isMultiABD)
             {
-                // Transpose to NGHWC layotu
+                // Transpose to NGHWC layout
                 if constexpr(is_NGCHW_GKCYX_NGKHW<ALayout, BLayout, ELayout>() ||
                              is_NGCDHW_GKCZYX_NGKDHW<ALayout, BLayout, ELayout>())
                 {
