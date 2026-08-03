@@ -398,4 +398,39 @@ __forceinline__ __device__ FpVecType max(FpVecType x, FpVecType y)
 
 #undef DUAL_OPERAND_VEC_MATH
 
+#define TRIPLE_OPERAND_VEC_MATH(BASE)                                                \
+    template <typename FpVecType>                                                    \
+    __forceinline__ __device__ FpVecType BASE(FpVecType x, FpVecType y, FpVecType z) \
+    {                                                                                \
+        constexpr auto VecSize = mapped_vector_info<FpVecType>::size;                \
+        if constexpr(VecSize == 4)                                                   \
+        {                                                                            \
+            FpVecType out;                                                           \
+            out.x = detail::BASE(x.x, y.x, z.x);                                     \
+            out.y = detail::BASE(x.y, y.y, z.y);                                     \
+            out.z = detail::BASE(x.z, y.z, z.z);                                     \
+            out.w = detail::BASE(x.w, y.w, z.w);                                     \
+            return out;                                                              \
+        }                                                                            \
+        else if constexpr(VecSize == 2)                                              \
+        {                                                                            \
+            FpVecType out;                                                           \
+            out.x = detail::BASE(x.x, y.x, z.x);                                     \
+            out.y = detail::BASE(x.y, y.y, z.y);                                     \
+            return out;                                                              \
+        }                                                                            \
+        else if constexpr(VecSize == 1)                                              \
+        {                                                                            \
+            return detail::BASE(x, y, z);                                            \
+        }                                                                            \
+        else                                                                         \
+        {                                                                            \
+            static_assert(false, "Unsupported miopen vector operation.");            \
+        }                                                                            \
+    }
+
+TRIPLE_OPERAND_VEC_MATH(fma);
+
+#undef TRIPLE_OPERAND_VEC_MATH
+
 } // namespace hip_kernel_provider
