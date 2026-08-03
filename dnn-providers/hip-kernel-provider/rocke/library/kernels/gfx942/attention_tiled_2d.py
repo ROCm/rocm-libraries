@@ -6026,7 +6026,19 @@ def build_gfx942_4warp_gqa(
             b.vec_pack([P[kk // 4][(kk % 4) * 4 + j] for j in range(BPL)], dtype)
             for kk in range(NKpv)
         ]
-        pv = [at.zero_acc(b) for _ in range(NDdim)]
+        # In-place rescale-then-accumulate (HD128_PIPE / D128 sliding-window path only):
+        # fold acc *= alpha, then MFMA-accumulate PV directly into acc, dropping the separate
+        # `pv` accumulator (~64 VGPR) so the D128 kernel stays spill-free at the gfx942
+        # 256-VGPR cap. D256 / bs64 (non-HD128_PIPE) keep the original zero-init + fma path.
+        if HD128_PIPE:
+            acc_tgt = [
+                b.vec_pack(
+                    [b.fmul(b.vec_extract(accs[nt], i), alpha) for i in range(CPL)], F32
+                )
+                for nt in range(NDdim)
+            ]
+        else:
+            acc_tgt = [at.zero_acc(b) for _ in range(NDdim)]
         for kk in range(NKpv):
             for nt in range(NDdim):
                 col_v = b.add(b.mul(b.const_i32(nt), b.const_i32(32)), ld.m_in_atom)
@@ -6052,17 +6064,24 @@ def build_gfx942_4warp_gqa(
                         )
                     )
                 va = b.vec_pack(vparts, dtype)
-                pv[nt] = at.emit(b, va, Bp[kk], pv[nt])
-        newaccs = [
-            b.vec_pack(
-                [
-                    b.fma(b.vec_extract(accs[nt], i), alpha, b.vec_extract(pv[nt], i))
-                    for i in range(CPL)
-                ],
-                F32,
-            )
-            for nt in range(NDdim)
-        ]
+                acc_tgt[nt] = at.emit(b, va, Bp[kk], acc_tgt[nt])
+        if HD128_PIPE:
+            newaccs = acc_tgt
+        else:
+            newaccs = [
+                b.vec_pack(
+                    [
+                        b.fma(
+                            b.vec_extract(accs[nt], i),
+                            alpha,
+                            b.vec_extract(acc_tgt[nt], i),
+                        )
+                        for i in range(CPL)
+                    ],
+                    F32,
+                )
+                for nt in range(NDdim)
+            ]
         if HD128_PIPE:
             fill_store(pf, nbuf_off)  # store prefetched tile (loads hid under compute)
             b.sync()  # single barrier/iter (RAW next + WAR this)
