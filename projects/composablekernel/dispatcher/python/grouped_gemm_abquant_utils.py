@@ -386,7 +386,7 @@ def _shuffle_b_cdna(B: "np.ndarray", wt_n: int, wt_k: int) -> "np.ndarray":
     items = min(16, wt_k // kLane)
     # C++ copies B col-major (HostTensor[K,N] with stride=[1,K]) into
     # a row-major view [N/wt_n, wt_n, K/items, items], then permutes {0,2,1,3}.
-    flat = np.asfortranarray(B).flatten()           # col-major byte order
+    flat = B.flatten(order='F')                      # col-major byte order
     view = flat.reshape(N // wt_n, wt_n, K // items, items)
     return np.ascontiguousarray(view.transpose(0, 2, 1, 3)).reshape(B.shape)
 
