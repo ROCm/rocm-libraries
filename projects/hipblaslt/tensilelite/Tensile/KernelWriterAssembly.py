@@ -2145,7 +2145,7 @@ class KernelWriterAssembly(KernelWriter):
           module.add(SMulI32(dst=sgpr(tmpSgpr), src0=sgpr(Batch), src1=0x8, comment="offset of global buffer address"))
           if self.states.archCaps["RequiresXCntForVolatileVMEM"]:
             with self.allocTmpSgpr(2, tag="loadBatchedAddress_sgprAddressDTmp") as tmpSgprRes:
-              sgprIdx: int = tmpSgprRes.idx  
+              sgprIdx: int = tmpSgprRes.idx
               module.add(SMovB64(dst=sgpr(sgprIdx, 2), src=sgpr("AddressD", 2)))
               module.add(SLoadB64(dst=sgpr("AddressD", 2), base=sgpr(sgprIdx, 2), soffset=sgpr(tmpSgpr), comment="load global buffer D address"))
           else:
@@ -2162,7 +2162,7 @@ class KernelWriterAssembly(KernelWriter):
             module.add(SMulI32(dst=sgpr(tmpSgpr), src0=sgpr(Batch), src1=0x8, comment="offset of global buffer address"))
             if self.states.archCaps["RequiresXCntForVolatileVMEM"]:
               with self.allocTmpSgpr(2, tag="loadBatchedAddress_sgprAddressCTmp") as tmpSgprRes:
-                sgprIdx: int = tmpSgprRes.idx  
+                sgprIdx: int = tmpSgprRes.idx
                 module.add(SMovB64(dst=sgpr(sgprIdx, 2), src=sgpr("AddressC", 2)))
                 module.add(SLoadB64(dst=sgpr("AddressC", 2), base=sgpr(sgprIdx, 2), soffset=sgpr(tmpSgpr), comment="load global buffer C address"))
             else:            
@@ -2185,12 +2185,12 @@ class KernelWriterAssembly(KernelWriter):
       if not isPackedIndex(kernel,idx):
         if self.states.archCaps["RequiresXCntForVolatileVMEM"]:
           with self.allocTmpSgpr(2, tag="loadBatchedAddress_sgprAddressABTmp") as tmpSgprRes:
-            sgprIdx: int = tmpSgprRes.idx           
+            sgprIdx: int = tmpSgprRes.idx
             module.add(SMovB64(dst=sgpr(sgprIdx, 2), src=sgpr("AddressA", 2)))
             module.add(SLoadB64(dst=sgpr("AddressA", 2), base=sgpr(sgprIdx, 2), soffset=sgpr(tmpSgpr), comment="load global buffer A address"))
             module.add(SMovB64(dst=sgpr(sgprIdx, 2), src=sgpr("AddressB", 2)))
             module.add(SLoadB64(dst=sgpr("AddressB", 2), base=sgpr(sgprIdx, 2), soffset=sgpr(tmpSgpr), comment="load global buffer B address"))          
-        else:           
+        else:
           module.add(SLoadB64(dst=sgpr("AddressA", 2), base=sgpr("AddressA",2), soffset=sgpr(tmpSgpr), comment="load global buffer A address"))
           module.add(SLoadB64(dst=sgpr("AddressB", 2), base=sgpr("AddressB",2), soffset=sgpr(tmpSgpr), comment="load global buffer B address"))
 
@@ -2536,7 +2536,7 @@ class KernelWriterAssembly(KernelWriter):
         hbmArgs.addComment1("Load address of kernel arguments")
         if self.states.archCaps["RequiresXCntForVolatileVMEM"]:
           with self.allocTmpSgpr(2, tag="defineAndResources_sgprKernArgAddressTmp") as tmpSgprRes:
-            sgprIdx: int = tmpSgprRes.idx          
+            sgprIdx: int = tmpSgprRes.idx
             hbmArgs.add(SMovB64(dst=sgpr(sgprIdx, 2), src=sgpr("KernArgAddress", 2), comment="XNACK protect for SMEM"))
             hbmArgs.add(self.argLoader.loadKernArg("KernArgAddress", sgprIdx, self.states.userArgsInfo.commonArgsSize, dword=2))
         else:
