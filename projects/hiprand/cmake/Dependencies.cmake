@@ -22,6 +22,13 @@
 
 # Dependencies
 
+# NOTE: hipRAND and rocRAND share CMake options for building tests.
+#       Until that's not fixed, we have to save/restore them.
+foreach(SHARED_OPTION BUILD_TEST)
+  set(USER_${SHARED_OPTION} ${${SHARED_OPTION}})
+  set(${SHARED_OPTION} OFF)
+endforeach()
+
 # HIP dependency is handled earlier in the project cmake file
 # when VerifyCompiler.cmake is included.
 
@@ -299,7 +306,7 @@ if(BUILD_FORTRAN_WRAPPER)
 endif()
 
 # Test dependencies
-if(BUILD_TEST)
+if(USER_BUILD_TEST)
   # NOTE: Google Test has created a mess with legacy FindGTest.cmake and newer GTestConfig.cmake
   #
   # FindGTest.cmake defines:   GTest::GTest, GTest::Main, GTEST_FOUND
@@ -332,3 +339,8 @@ if(BUILD_TEST)
     find_package(GTest CONFIG REQUIRED PATHS ${GTEST_ROOT})
   endif()
 endif()
+
+# Restore user global state
+foreach(SHARED_OPTION BUILD_TEST BUILD_BENCHMARK BUILD_EXAMPLE)
+  set(${SHARED_OPTION} ${USER_${SHARED_OPTION}})
+endforeach()
