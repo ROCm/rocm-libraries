@@ -21,7 +21,9 @@ add_example_executable(example_moe_gemm1_xdl_fp8_blockscale moe_gemm1_xdl_fp8_bl
 add_example_executable(example_moe_gemm1_xdl_fp8_blockscale_splitk moe_gemm1_xdl_fp8_blockscale_splitk.cpp)
 
 add_example_executable(example_moe_gemm1_xdl_fp8_gelu_tanh moe_gemm1_xdl_fp8.cpp)
-target_compile_definitions(example_moe_gemm1_xdl_fp8_gelu_tanh PRIVATE MOE_ACTOP=4)
+if(TARGET example_moe_gemm1_xdl_fp8_gelu_tanh)
+    target_compile_definitions(example_moe_gemm1_xdl_fp8_gelu_tanh PRIVATE MOE_ACTOP=4)
+endif()
 
 list(APPEND gpu_list gfx942 gfx950 gfx1100 gfx1101 gfx1102 gfx1103 gfx1150 gfx1151 gfx1152 gfx1153 gfx1200 gfx1201 gfx11-generic gfx12-generic gfx1250)
 
