@@ -20,7 +20,7 @@ def _dummy_candidate(name: str, family: str = "dummy") -> KernelCandidate:
         abi_version="dummy/v1",
         priority=0,
         capability=Capability(arches=known_arches()),
-        supports=lambda _req: (True, "ok"),
+        _supports=lambda _req: (True, "ok"),
         select_spec=lambda _req: object(),
         signature=lambda _spec: (),
         grid=lambda _spec, _req: (1, 1, 1),

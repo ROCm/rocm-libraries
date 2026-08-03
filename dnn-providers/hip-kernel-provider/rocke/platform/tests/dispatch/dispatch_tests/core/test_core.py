@@ -52,7 +52,7 @@ def _candidate(
     priority: int = 0,
     abi="dummy/v1",
     capability=_ANY_ARCH,
-    supports=lambda _req: (True, "ok"),
+    _supports=lambda _req: (True, "ok"),
 ):
     return KernelCandidate(
         name=name,
@@ -61,7 +61,7 @@ def _candidate(
         spec_id=f"{name}_spec",
         abi_version=abi,
         priority=priority,
-        supports=supports,
+        _supports=_supports,
         select_spec=lambda _req: object(),
         signature=lambda _spec: (),
         grid=lambda _spec, _req: (1, 1, 1),
@@ -487,7 +487,7 @@ class TestCapabilityPrefilter(unittest.TestCase):
             _candidate(
                 "picky",
                 capability=Capability(arches=("gfx950",)),
-                supports=lambda req: (req.rows >= 256, f"rows={req.rows} below 256"),
+                _supports=lambda req: (req.rows >= 256, f"rows={req.rows} below 256"),
             )
         )
         self.assertEqual(registry.supported(_Request(rows=512)), registry.candidates())
@@ -505,7 +505,7 @@ class TestCapabilityPrefilter(unittest.TestCase):
             _candidate(
                 "gated",
                 capability=Capability(arches=("gfx942",)),
-                supports=_supports,
+                _supports=_supports,
             )
         )
         registry.supported(_Request(arch="gfx950"))
@@ -528,7 +528,7 @@ class TestCapabilityPrefilter(unittest.TestCase):
         candidate = _candidate(
             "gfx942_only",
             capability=Capability(arches=("gfx942",)),
-            supports=explode,
+            _supports=explode,
         )
         ok, why = candidate.admits(_Request(arch="gfx950"))
         self.assertFalse(ok)

@@ -357,7 +357,7 @@ def _make_candidate(
         abi_version=CONV_ABI_VERSION,
         priority=priority,
         capability=Capability(arches=arches, dtypes=("f16",), layouts=("NHWC",)),
-        supports=support,
+        _supports=support,
         select_spec=select,
         signature=lambda _spec: (),
         grid=_grid,

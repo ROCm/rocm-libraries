@@ -186,7 +186,7 @@ def _make_candidate(
         abi_version=NORM_ABI_VERSION,
         priority=priority,
         capability=Capability(arches=_NORM_ARCHES, dtypes=("f16", "bf16")),
-        supports=support,
+        _supports=support,
         select_spec=select,
         signature=lambda _spec: (),
         grid=_grid,

@@ -95,7 +95,7 @@ def _make_gfx942_dense_pipe_candidate() -> KernelCandidate:
             # claims a feature it turns down, so the full set stays declared.
             supports_features=ATTENTION_FEATURES,
         ),
-        supports=support,
+        _supports=support,
         select_spec=select,
         signature=lambda _spec: (),
         grid=lambda spec, req: (0, 0, 0),

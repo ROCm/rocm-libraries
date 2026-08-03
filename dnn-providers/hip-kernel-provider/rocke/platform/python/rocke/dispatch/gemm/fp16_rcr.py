@@ -205,7 +205,7 @@ def _make_candidate(
         abi_version=GEMM_FP16_RCR_ABI_VERSION,
         priority=priority,
         capability=Capability(arches=arches, dtypes=("fp16",), layouts=("RCR",)),
-        supports=support,
+        _supports=support,
         select_spec=select,
         signature=lambda _spec: gemm_args_signature(),
         grid=_grid,

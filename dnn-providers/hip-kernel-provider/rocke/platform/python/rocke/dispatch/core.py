@@ -159,7 +159,7 @@ class Capability:
     no architecture matches nothing. :meth:`CandidateRegistry.register` rejects
     that case up front rather than letting it surface as a silent no-match.
 
-    Capability is a conservative *superset* of what ``supports()`` accepts. A
+    Capability is a conservative *superset* of what ``_supports()`` accepts. A
     constraint it cannot express stays in the predicate; the direction that
     must never invert is capability accepting less than the predicate does.
     """
@@ -321,7 +321,15 @@ class KernelCandidate:
     spec_id: str
     abi_version: str
     priority: int
-    supports: Callable[[OperatorRequest], Tuple[bool, str]]
+    _supports: Callable[[OperatorRequest], Tuple[bool, str]]
+    """The residual predicate: everything ``capability`` cannot express as data.
+
+    Underscored because it is not a complete eligibility answer and calling it
+    alone silently skips the arch and dtype gates that moved into
+    ``capability``. :meth:`admits` is the public verdict; a bare ``_supports``
+    call at a non-registry call site should read as the violation it is.
+    """
+
     select_spec: Callable[[OperatorRequest], Any]
     signature: Callable[[Any], Sequence[dict]]
     grid: Callable[[Any, OperatorRequest], Tuple[int, int, int]]
@@ -378,15 +386,18 @@ class KernelCandidate:
     def admits(self, request: OperatorRequest) -> Tuple[bool, str]:
         """Full eligibility verdict: capability prefilter, then predicate.
 
-        Call this rather than ``supports`` directly. Registered candidates keep
-        their arch and dtype gates in ``capability``, so ``supports`` carries
-        only the residual checks and is not a complete answer on its own.
+        The only eligibility question a caller should ask. Registered
+        candidates keep their arch and dtype gates in ``capability``, so
+        ``_supports`` carries only the residual checks and is not a complete
+        answer on its own -- an RDNA-only WMMA candidate's predicate happily
+        accepts a CDNA target, because rule 1 of ARCHITECTURE.md 6.2 removed
+        the arch check it used to duplicate.
         """
         if self.capability is not None:
             ok, why = self.capability.check(request)
             if not ok:
                 return False, f"capability: {why}"
-        return self.supports(request)
+        return self._supports(request)
 
 
 Ranker = Callable[
