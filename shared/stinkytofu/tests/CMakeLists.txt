@@ -45,6 +45,7 @@ set(TEST_LINK_LIBS
 set(UNIT_ASM_TEST_FILES
     unit/asm/WaitCntInsertionTest.cpp
     unit/asm/DAGSchedulerPassTest.cpp
+    unit/asm/ExecMaskGroupingTest.cpp
     unit/asm/DeadCodeEliminationPassTest.cpp
     unit/asm/DefUseChainTest.cpp
     unit/asm/InsertPhiTest.cpp
@@ -54,8 +55,13 @@ set(UNIT_ASM_TEST_FILES
     unit/asm/ScopeAdaptorTest.cpp
     unit/asm/PeepholeOptimizationPassTest.cpp
     unit/asm/AccumulateInstructionSizePassTest.cpp
-    unit/asm/SwPrefetchInsertionPassTest.cpp
+    unit/asm/SwInstructionPrefetchRelStaticPassTest.cpp
+    unit/asm/SwInstructionPrefetchRelDynamicPassTest.cpp
+    unit/asm/SwInstructionPrefetchAbsStaticPassTest.cpp
+    unit/asm/SwInstructionPrefetchAbsDynamicPassTest.cpp
     unit/asm/StinkyAsmEmitterTest.cpp
+    unit/asm/StinkyModifiersTest.cpp
+    unit/asm/LegalizationUtilsTest.cpp
     unit/asm/VirtualRegisterTest.cpp
     # Parser/Lexer Tests (added for critical testing gaps)
     unit/asm/IRLexerTest.cpp
@@ -70,6 +76,18 @@ set(UNIT_ASM_TEST_FILES
     unit/asm/SetpcSwappcCfgTest.cpp
     unit/asm/LongBranchLoweringTest.cpp
     unit/asm/MemTokenConsistencyCheckPassTest.cpp
+    unit/asm/InsertClusterBarrierPassTest.cpp
+    unit/asm/VerifyInstrumentationTest.cpp
+    unit/asm/DebugPrintInstrumentation_test.cpp
+    unit/asm/AccumulateInstructionSizePassRunTest.cpp
+    unit/asm/StinkyRemoveWaitCntPassTest.cpp
+    unit/asm/StinkyWmmaVgprReorderPassTest.cpp
+    unit/asm/RemoveInstructionPassTest.cpp
+    unit/asm/FlattenCalleesPassTest.cpp
+    unit/asm/BasicBlockTest.cpp
+    unit/asm/DumpStinkyModulePassTest.cpp
+    unit/asm/StinkySignatureTest.cpp
+    unit/asm/RederiveExpertScopePassTest.cpp
 )
 
 # High-Level IR Tests
@@ -84,6 +102,7 @@ set(UNIT_LOGICAL_TEST_FILES
     unit/logical/LogicalToAsmPipelineTest.cpp
     unit/logical/LogicalToAsmMultiArchTest.cpp
     unit/logical/LogicalIntrinsicFlowTest.cpp
+    unit/logical/LogicalIRVerifierPassTest.cpp
 )
 
 # Core Infrastructure Tests
@@ -92,6 +111,7 @@ set(UNIT_CORE_TEST_FILES
     unit/core/BackendRegistryTest.cpp
     unit/core/ComgrProbeTest.cpp
     unit/core/PassBuilderTest.cpp
+    unit/core/BackendTest.cpp
 )
 
 # Common/Shared Tests

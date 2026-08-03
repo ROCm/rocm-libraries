@@ -21,12 +21,15 @@
 #include "HipdnnException.hpp"
 #include "KnobDescriptor.hpp"
 #include "KnobSettingDescriptor.hpp"
+#include "LayernormBackwardOperationDescriptor.hpp"
 #include "LayernormOperationDescriptor.hpp"
 #include "MatmulOperationDescriptor.hpp"
 #include "PointwiseOperationDescriptor.hpp"
+#include "ProfilingControlDescriptor.hpp"
 #include "RMSNormBackwardOperationDescriptor.hpp"
 #include "RMSNormOperationDescriptor.hpp"
 #include "ReductionOperationDescriptor.hpp"
+#include "ResampleBwdOperationDescriptor.hpp"
 #include "ResampleFwdOperationDescriptor.hpp"
 #include "SdpaBwdOperationDescriptor.hpp"
 #include "SdpaFwdOperationDescriptor.hpp"
@@ -116,6 +119,9 @@ void DescriptorFactory::create(hipdnnBackendDescriptorType_t descriptorType,
     case HIPDNN_BACKEND_OPERATION_LAYERNORM_DESCRIPTOR_EXT:
         privateDesc = std::make_shared<LayernormOperationDescriptor>();
         break;
+    case HIPDNN_BACKEND_OPERATION_LAYERNORM_BACKWARD_DESCRIPTOR_EXT:
+        privateDesc = std::make_shared<LayernormBackwardOperationDescriptor>();
+        break;
     case HIPDNN_BACKEND_OPERATION_BATCHNORM_DESCRIPTOR_EXT:
         privateDesc = std::make_shared<BatchnormOperationDescriptor>();
         break;
@@ -134,8 +140,14 @@ void DescriptorFactory::create(hipdnnBackendDescriptorType_t descriptorType,
     case HIPDNN_BACKEND_OPERATION_RESAMPLE_FWD_DESCRIPTOR:
         privateDesc = std::make_shared<ResampleFwdOperationDescriptor>();
         break;
+    case HIPDNN_BACKEND_OPERATION_RESAMPLE_BWD_DESCRIPTOR:
+        privateDesc = std::make_shared<ResampleBwdOperationDescriptor>();
+        break;
     case HIPDNN_BACKEND_OPERATION_RMSNORM_BACKWARD_DESCRIPTOR_EXT:
         privateDesc = std::make_shared<RMSNormBackwardOperationDescriptor>();
+        break;
+    case HIPDNN_BACKEND_PROFILING_CONTROL_EXT:
+        privateDesc = std::make_shared<ProfilingControlDescriptor>();
         break;
     default:
         throw HipdnnException(HIPDNN_STATUS_NOT_SUPPORTED,

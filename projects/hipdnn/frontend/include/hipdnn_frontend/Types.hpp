@@ -303,7 +303,7 @@ typedef BehaviorNote BehaviorNote_t; ///< @brief Type alias for BehaviorNote
 enum class BuildPlanPolicy
 {
     HEURISTICS_CHOICE, ///< Use heuristics to select the best plan
-    ALL ///< Build all available plans (currently unused)
+    ALL ///< Build all available plans
 };
 typedef BuildPlanPolicy BuildPlanPolicy_t; ///< @brief Type alias for BuildPlanPolicy
 
@@ -1571,6 +1571,8 @@ inline std::optional<hipdnnPaddingMode_t> toBackendPaddingMode(const PaddingMode
 {
     switch(type)
     {
+    case PaddingMode::NOT_SET:
+        return HIPDNN_PADDING_NOT_SET;
     case PaddingMode::NEG_INF_PAD:
         return HIPDNN_PADDING_NEG_INF_PAD;
     case PaddingMode::ZERO_PAD:
@@ -1587,6 +1589,8 @@ inline std::pair<PaddingMode, Error> fromHipdnnPaddingMode(hipdnnPaddingMode_t m
 {
     switch(mode)
     {
+    case HIPDNN_PADDING_NOT_SET:
+        return {PaddingMode::NOT_SET, {}};
     case HIPDNN_PADDING_NEG_INF_PAD:
         return {PaddingMode::NEG_INF_PAD, {}};
     case HIPDNN_PADDING_ZERO_PAD:
