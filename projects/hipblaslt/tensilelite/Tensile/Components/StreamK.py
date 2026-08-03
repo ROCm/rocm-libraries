@@ -3445,6 +3445,7 @@ class StreamKDynamic(StreamK):
 
     def storeBranches(self, writer, kernel, skPartialsLabel, vectorWidths, elements, tmpVgpr, cvtVgprStruct):
         module = Module("StreamK Dynamic storeBranches")
+        memOrder = Component.StreamKMemoryOrdering.find(writer)
 
         # No branches for atomic mode
         if kernel["StreamKAtomic"]:
@@ -3483,12 +3484,11 @@ class StreamKDynamic(StreamK):
             # Check flag
             module.add(SLShiftLeftB32(dst=sgpr(tmpSgpr), src=sgpr(sPartialIdx), shiftHex=log2(4), comment="flag offset based on partial index"))
             module.add(SAddU32(dst=sgpr(tmpSgpr), src0=sgpr(tmpSgpr), src1=self._wsFlagsBaseOffset(writer, kernel), comment="Offset flags to come after the work queues"))
-            module.add(SLoadB32(dst=sgpr(tmpSgpr+2), base=sgpr("AddressFlags", 2), soffset=sgpr(tmpSgpr), smem=SMEMModifiers(glc=True, dlc=True, scope=CacheScope.SCOPE_DEV), comment="get flag"))
-
-            module.add(SWaitCnt(kmcnt=0, comment="wait for flag load"))
+            module.add(memOrder.readFlag(writer, dst=tmpSgpr+2, soffset=sgpr(tmpSgpr)))
             if kernel["DebugStreamK"] & 2 == 0:
                 module.add(SCmpEQU32(src0=sgpr(tmpSgpr+2), src1=1, comment="check if ready"))
                 module.add(SCBranchSCC0(labelName=skFixupLabel.getLabelName(), comment="if flag not set, wait and check again"))
+                module.add(memOrder.acquireFence(writer))
 
             # TODO Barrier here to sync all threads in workgroup, but maybe better to have separate flag for each wavefront (to be tested)
             module.add(SBarrier(comment="wait for all workgroups before resetting flag"))
@@ -4266,6 +4266,7 @@ class StreamKHybrid(StreamK):
     # ------------------------------------------------------------------
     def storeBranches(self, writer, kernel, skPartialsLabel, vectorWidths, elements, tmpVgpr, cvtVgprStruct):
         module = Module("StreamK Hybrid storeBranches")
+        memOrder = Component.StreamKMemoryOrdering.find(writer)
 
         if kernel["StreamKAtomic"]:
             return module
@@ -4300,16 +4301,12 @@ class StreamKHybrid(StreamK):
                                        comment="flag offset based on partial index"))
                 mod.add(SAddU32(dst=sgpr(tmpSgpr), src0=sgpr(tmpSgpr), src1=self._wsFlagsBaseOffset(writer, kernel),
                                 comment="Offset flags to come after the work queues"))
-                mod.add(SLoadB32(dst=sgpr(tmpSgpr+2), base=sgpr("AddressFlags", 2),
-                                 soffset=sgpr(tmpSgpr),
-                                 smem=SMEMModifiers(glc=True, dlc=True, scope=CacheScope.SCOPE_DEV),
-                                 comment="get flag"))
-
-                mod.add(SWaitCnt(kmcnt=0, comment="wait for flag load"))
+                mod.add(memOrder.readFlag(writer, dst=tmpSgpr+2, soffset=sgpr(tmpSgpr)))
                 if kernel["DebugStreamK"] & 2 == 0:
                     mod.add(SCmpEQU32(src0=sgpr(tmpSgpr+2), src1=1, comment="check if ready"))
                     mod.add(SCBranchSCC0(labelName=skFixupLabel.getLabelName(),
                                          comment="if flag not set, wait and check again"))
+                    mod.add(memOrder.acquireFence(writer))
 
                 mod.add(SBarrier(comment="wait for all workgroups before resetting flag"))
                 skipFlagReset = Label(writer.labels.getNameInc("SK_SkipFlagReset"), "")
