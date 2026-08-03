@@ -1154,6 +1154,27 @@ namespace TensileLite
             }
         }
 
+        if(problemType.useGateResidual)
+        {
+            if(problemType.stridedBatched)
+                args.template append<void const*>("gateResidual", inputs.gateResidual);
+            else
+                args.template append<void const* const*>("batchGateResidual",
+                                                         inputs.batchGateResidual);
+            bool hasGate = problem.useGateResidual();
+            args.template append<uint32_t>(
+                "gate_type",
+                static_cast<uint32_t>(
+                    hasGate ? problem.tensor(ContractionProblemGemm::TENSOR::GATE_RESIDUAL).dataType()
+                            : problemType.gateResidualDataTypeWhiteList.at(0)));
+
+            TensorDescriptor const& gate
+                = problem.tensor(ContractionProblemGemm::TENSOR::GATE_RESIDUAL);
+            for(size_t i = startStrideCD; i < d.dimensions(); i++)
+                args.template append<uint32_t>(concatenate_if<T_Debug>("strideGate", i),
+                                               hasGate ? gate.strides()[i] : 0);
+        }
+
         if(problemType.useScaleAlphaVec == 3 || problemType.useBias == 3)
         {
             args.template append<uint32_t>("factorDim",
@@ -1214,27 +1235,6 @@ namespace TensileLite
             args.template append<const void*>("AmaxWS",
                                               (uint8_t*)inputs.ws + workspaceOffsetInByte);
             args.template append<const void*>("AmaxSync", inputs.Synchronizer);
-        }
-
-        if(problemType.useGateResidual)
-        {
-            if(problemType.stridedBatched)
-                args.template append<void const*>("gateResidual", inputs.gateResidual);
-            else
-                args.template append<void const* const*>("batchGateResidual",
-                                                         inputs.batchGateResidual);
-            bool hasGate = problem.useGateResidual();
-            args.template append<uint32_t>(
-                "gate_type",
-                static_cast<uint32_t>(
-                    hasGate ? problem.tensor(ContractionProblemGemm::TENSOR::GATE_RESIDUAL).dataType()
-                            : problemType.gateResidualDataTypeWhiteList.at(0)));
-
-            TensorDescriptor const& gate
-                = problem.tensor(ContractionProblemGemm::TENSOR::GATE_RESIDUAL);
-            for(size_t i = startStrideCD; i < d.dimensions(); i++)
-                args.template append<uint32_t>(concatenate_if<T_Debug>("strideGate", i),
-                                               hasGate ? gate.strides()[i] : 0);
         }
     }
 
@@ -1979,10 +1979,21 @@ namespace TensileLite
             rv.args.append<void const*>("dstD", inputs.d);
             // MBSK: synchronizer address, MB: null address
             rv.args.append<void const*>("Synchronizer",
-                                        gsuSettings.globalAccumulation == 3 
-                                        ? inputs.Synchronizer 
+                                        gsuSettings.globalAccumulation == 3
+                                        ? inputs.Synchronizer
                                         : NULL);
             rv.args.append<uint32_t>("GSUSync", 0);
+        }
+
+        // Batch offset support for General Batched GEMM (SupportUserArgs kernels).
+        // Appended at the tail, after the dstD/Synchronizer block, to match the
+        // kernel signature order (see Signature.py).
+        if(!problemType.groupedGemm && sizeMapping.customKernelName.empty())
+        {
+            rv.args.append<int64_t>("batchOffsetD", inputs.batchOffsetD);
+            rv.args.append<int64_t>("batchOffsetC", inputs.batchOffsetC);
+            rv.args.append<int64_t>("batchOffsetA", inputs.batchOffsetA);
+            rv.args.append<int64_t>("batchOffsetB", inputs.batchOffsetB);
         }
 
         if(problemType.stochasticRounding)
@@ -2430,7 +2441,7 @@ namespace TensileLite
                                                        KA&                    args,
                                                        StreamKSettings const& sk,
                                                        uint32_t               autoGsuVal,
-                                                       uint32_t               additionalPaddingPerBatchGeneralBatch) const                                                       
+                                                       uint32_t               additionalPaddingPerBatchGeneralBatch) const
     {
         TensorDescriptor const& c = problem.c();
         TensorDescriptor const& d = problem.d();
@@ -2618,11 +2629,20 @@ namespace TensileLite
         }
         // Adding the batchmode kernel argument for post GSU kernel to determine 
         // how to index the batch dimension in Strided Batch versus General Batched.
-        if(problemType.groupedGemm == false)
+        if(problemType.groupedGemm == false && sizeMapping.customKernelName.empty())
         {
             ContractionProblemGemm::BATCHMODE batchMode = problem.batchMode();
             args.template append<uint32_t>("batchMode", static_cast<uint32_t>(batchMode));
-            args.template append<uint32_t>("additionalPaddingPerBatch", additionalPaddingPerBatchGeneralBatch);        
+            args.template append<uint32_t>("additionalPaddingPerBatch", additionalPaddingPerBatchGeneralBatch);
+
+            // The HIP-compiled conversion kernel lays out these int64_t params on
+            // 8-byte-aligned kernarg slots. Match that alignment on the host so the
+            // bytes line up; a bare append() leaves them 4-byte-shifted when the
+            // preceding args don't end on an 8-byte boundary (e.g. the non-HAS
+            // variant), causing the kernel to read the neighboring offset into the
+            // high dword of the address and fault.
+            args.template appendAligned<int64_t>("batchOffsetD", inputs.batchOffsetD);
+            args.template appendAligned<int64_t>("batchOffsetC", inputs.batchOffsetC);
         }
 
     }

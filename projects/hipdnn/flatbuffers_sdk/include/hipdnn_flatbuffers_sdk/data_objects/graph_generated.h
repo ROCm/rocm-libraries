@@ -29,6 +29,7 @@ static_assert(FLATBUFFERS_VERSION_MAJOR == 25 &&
 #include "matmul_attributes_generated.h"
 #include "pointwise_attributes_generated.h"
 #include "reduction_attributes_generated.h"
+#include "resample_bwd_attributes_generated.h"
 #include "resample_fwd_attributes_generated.h"
 #include "rmsnorm_attributes_generated.h"
 #include "rmsnorm_backward_attributes_generated.h"
@@ -78,11 +79,12 @@ enum class NodeAttributes : uint8_t {
   ReductionAttributes = 18,
   ResampleFwdAttributes = 19,
   LayernormBackwardAttributes = 20,
+  ResampleBwdAttributes = 21,
   MIN = NONE,
-  MAX = LayernormBackwardAttributes
+  MAX = ResampleBwdAttributes
 };
 
-inline const NodeAttributes (&EnumValuesNodeAttributes())[21] {
+inline const NodeAttributes (&EnumValuesNodeAttributes())[22] {
   static const NodeAttributes values[] = {
     NodeAttributes::NONE,
     NodeAttributes::BatchnormInferenceAttributes,
@@ -104,13 +106,14 @@ inline const NodeAttributes (&EnumValuesNodeAttributes())[21] {
     NodeAttributes::RMSNormBackwardAttributes,
     NodeAttributes::ReductionAttributes,
     NodeAttributes::ResampleFwdAttributes,
-    NodeAttributes::LayernormBackwardAttributes
+    NodeAttributes::LayernormBackwardAttributes,
+    NodeAttributes::ResampleBwdAttributes
   };
   return values;
 }
 
 inline const char * const *EnumNamesNodeAttributes() {
-  static const char * const names[22] = {
+  static const char * const names[23] = {
     "NONE",
     "BatchnormInferenceAttributes",
     "PointwiseAttributes",
@@ -132,13 +135,14 @@ inline const char * const *EnumNamesNodeAttributes() {
     "ReductionAttributes",
     "ResampleFwdAttributes",
     "LayernormBackwardAttributes",
+    "ResampleBwdAttributes",
     nullptr
   };
   return names;
 }
 
 inline const char *EnumNameNodeAttributes(NodeAttributes e) {
-  if (::flatbuffers::IsOutRange(e, NodeAttributes::NONE, NodeAttributes::LayernormBackwardAttributes)) return "";
+  if (::flatbuffers::IsOutRange(e, NodeAttributes::NONE, NodeAttributes::ResampleBwdAttributes)) return "";
   const size_t index = static_cast<size_t>(e);
   return EnumNamesNodeAttributes()[index];
 }
@@ -227,6 +231,10 @@ template<> struct NodeAttributesTraits<hipdnn_flatbuffers_sdk::data_objects::Lay
   static const NodeAttributes enum_value = NodeAttributes::LayernormBackwardAttributes;
 };
 
+template<> struct NodeAttributesTraits<hipdnn_flatbuffers_sdk::data_objects::ResampleBwdAttributes> {
+  static const NodeAttributes enum_value = NodeAttributes::ResampleBwdAttributes;
+};
+
 template<typename T> struct NodeAttributesUnionTraits {
   static const NodeAttributes enum_value = NodeAttributes::NONE;
 };
@@ -309,6 +317,10 @@ template<> struct NodeAttributesUnionTraits<hipdnn_flatbuffers_sdk::data_objects
 
 template<> struct NodeAttributesUnionTraits<hipdnn_flatbuffers_sdk::data_objects::LayernormBackwardAttributesT> {
   static const NodeAttributes enum_value = NodeAttributes::LayernormBackwardAttributes;
+};
+
+template<> struct NodeAttributesUnionTraits<hipdnn_flatbuffers_sdk::data_objects::ResampleBwdAttributesT> {
+  static const NodeAttributes enum_value = NodeAttributes::ResampleBwdAttributes;
 };
 
 struct NodeAttributesUnion {
@@ -501,6 +513,14 @@ struct NodeAttributesUnion {
     return type == NodeAttributes::LayernormBackwardAttributes ?
       reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::LayernormBackwardAttributesT *>(value) : nullptr;
   }
+  hipdnn_flatbuffers_sdk::data_objects::ResampleBwdAttributesT *AsResampleBwdAttributes() {
+    return type == NodeAttributes::ResampleBwdAttributes ?
+      reinterpret_cast<hipdnn_flatbuffers_sdk::data_objects::ResampleBwdAttributesT *>(value) : nullptr;
+  }
+  const hipdnn_flatbuffers_sdk::data_objects::ResampleBwdAttributesT *AsResampleBwdAttributes() const {
+    return type == NodeAttributes::ResampleBwdAttributes ?
+      reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::ResampleBwdAttributesT *>(value) : nullptr;
+  }
 };
 
 
@@ -589,6 +609,10 @@ inline bool operator==(const NodeAttributesUnion &lhs, const NodeAttributesUnion
     case NodeAttributes::LayernormBackwardAttributes: {
       return *(reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::LayernormBackwardAttributesT *>(lhs.value)) ==
              *(reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::LayernormBackwardAttributesT *>(rhs.value));
+    }
+    case NodeAttributes::ResampleBwdAttributes: {
+      return *(reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::ResampleBwdAttributesT *>(lhs.value)) ==
+             *(reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::ResampleBwdAttributesT *>(rhs.value));
     }
     default: {
       return false;
@@ -748,6 +772,9 @@ struct Node FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   const hipdnn_flatbuffers_sdk::data_objects::LayernormBackwardAttributes *attributes_as_LayernormBackwardAttributes() const {
     return attributes_type() == hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::LayernormBackwardAttributes ? static_cast<const hipdnn_flatbuffers_sdk::data_objects::LayernormBackwardAttributes *>(attributes()) : nullptr;
   }
+  const hipdnn_flatbuffers_sdk::data_objects::ResampleBwdAttributes *attributes_as_ResampleBwdAttributes() const {
+    return attributes_type() == hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::ResampleBwdAttributes ? static_cast<const hipdnn_flatbuffers_sdk::data_objects::ResampleBwdAttributes *>(attributes()) : nullptr;
+  }
   void *mutable_attributes() {
     return GetPointer<void *>(VT_ATTRIBUTES);
   }
@@ -844,6 +871,10 @@ template<> inline const hipdnn_flatbuffers_sdk::data_objects::ResampleFwdAttribu
 
 template<> inline const hipdnn_flatbuffers_sdk::data_objects::LayernormBackwardAttributes *Node::attributes_as<hipdnn_flatbuffers_sdk::data_objects::LayernormBackwardAttributes>() const {
   return attributes_as_LayernormBackwardAttributes();
+}
+
+template<> inline const hipdnn_flatbuffers_sdk::data_objects::ResampleBwdAttributes *Node::attributes_as<hipdnn_flatbuffers_sdk::data_objects::ResampleBwdAttributes>() const {
+  return attributes_as_ResampleBwdAttributes();
 }
 
 struct NodeBuilder {
@@ -1336,6 +1367,10 @@ inline bool VerifyNodeAttributes(::flatbuffers::Verifier &verifier, const void *
       auto ptr = reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::LayernormBackwardAttributes *>(obj);
       return verifier.VerifyTable(ptr);
     }
+    case NodeAttributes::ResampleBwdAttributes: {
+      auto ptr = reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::ResampleBwdAttributes *>(obj);
+      return verifier.VerifyTable(ptr);
+    }
     default: return true;
   }
 }
@@ -1435,6 +1470,10 @@ inline void *NodeAttributesUnion::UnPack(const void *obj, NodeAttributes type, c
       auto ptr = reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::LayernormBackwardAttributes *>(obj);
       return ptr->UnPack(resolver);
     }
+    case NodeAttributes::ResampleBwdAttributes: {
+      auto ptr = reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::ResampleBwdAttributes *>(obj);
+      return ptr->UnPack(resolver);
+    }
     default: return nullptr;
   }
 }
@@ -1522,6 +1561,10 @@ inline ::flatbuffers::Offset<void> NodeAttributesUnion::Pack(::flatbuffers::Flat
       auto ptr = reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::LayernormBackwardAttributesT *>(value);
       return CreateLayernormBackwardAttributes(_fbb, ptr, _rehasher).Union();
     }
+    case NodeAttributes::ResampleBwdAttributes: {
+      auto ptr = reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::ResampleBwdAttributesT *>(value);
+      return CreateResampleBwdAttributes(_fbb, ptr, _rehasher).Union();
+    }
     default: return 0;
   }
 }
@@ -1606,6 +1649,10 @@ inline NodeAttributesUnion::NodeAttributesUnion(const NodeAttributesUnion &u) : 
     }
     case NodeAttributes::LayernormBackwardAttributes: {
       value = new hipdnn_flatbuffers_sdk::data_objects::LayernormBackwardAttributesT(*reinterpret_cast<hipdnn_flatbuffers_sdk::data_objects::LayernormBackwardAttributesT *>(u.value));
+      break;
+    }
+    case NodeAttributes::ResampleBwdAttributes: {
+      value = new hipdnn_flatbuffers_sdk::data_objects::ResampleBwdAttributesT(*reinterpret_cast<hipdnn_flatbuffers_sdk::data_objects::ResampleBwdAttributesT *>(u.value));
       break;
     }
     default:
@@ -1712,6 +1759,11 @@ inline void NodeAttributesUnion::Reset() {
     }
     case NodeAttributes::LayernormBackwardAttributes: {
       auto ptr = reinterpret_cast<hipdnn_flatbuffers_sdk::data_objects::LayernormBackwardAttributesT *>(value);
+      delete ptr;
+      break;
+    }
+    case NodeAttributes::ResampleBwdAttributes: {
+      auto ptr = reinterpret_cast<hipdnn_flatbuffers_sdk::data_objects::ResampleBwdAttributesT *>(value);
       delete ptr;
       break;
     }

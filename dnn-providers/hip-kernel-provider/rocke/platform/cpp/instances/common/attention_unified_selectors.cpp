@@ -495,6 +495,10 @@ int rocke_unified_attn_select_2d_num_warps(const rocke_unified_attn_problem_t* p
     /* gfx942 D64 oracle. */
     if(arch_is("gfx942") && p->head_size == 64)
     {
+        if(p->max_seqlen_q == 1 && !p->use_fp8)
+        {
+            return 1;
+        }
         return 4;
     }
     if(enable_combo_2d(p))

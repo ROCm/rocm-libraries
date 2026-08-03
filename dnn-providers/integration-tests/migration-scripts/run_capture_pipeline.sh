@@ -26,7 +26,7 @@ BINARY="${1:?Usage: $0 <integration_tests_binary> [work_dir] [--skip-hopd]}"
 WORK="${2:-/tmp/almiopen2279}"
 SKIP_HOPD="${3:-}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-OUT="$(cd "$SCRIPT_DIR/.." && pwd)/integration_test_bundles"
+OUT="$(cd "$SCRIPT_DIR/.." && pwd)/integration-test-bundles"
 
 # Template-sweep bundles register under gtest suites named {tier}_{Op}_{Topology}
 # (e.g. quick_ConvolutionFwd_Default) — NOT containing the word "Bundle". Filter
