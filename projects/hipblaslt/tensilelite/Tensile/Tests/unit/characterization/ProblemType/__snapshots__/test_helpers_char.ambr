@@ -41,6 +41,7 @@
     'SetConstStrideA',
     'SetConstStrideB',
     'SetConstStrideBias',
+    'SetConstStrideGate',
     'SilentHighPrecisionAccumulate',
     'Sparse',
     'StochasticRounding',
@@ -54,6 +55,7 @@
     'UseBeta',
     'UseBias',
     'UseE',
+    'UseGateResidual',
     'UseInitialStridesAB',
     'UseInitialStridesCD',
     'UseScaleAB',
@@ -184,6 +186,9 @@
     'SetConstStrideBias': list([
       'list',
     ]),
+    'SetConstStrideGate': list([
+      'list',
+    ]),
     'SilentHighPrecisionAccumulate': list([
       'bool',
     ]),
@@ -221,6 +226,9 @@
       'int',
     ]),
     'UseE': list([
+      'bool',
+    ]),
+    'UseGateResidual': list([
       'bool',
     ]),
     'UseInitialStridesAB': list([
