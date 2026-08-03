@@ -143,7 +143,8 @@ RppStatus rppt_erode(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstPtr,
     [[maybe_unused]] RppBackend handleBackend = handle.GetBackend();
 
     if (executionBackend == RppBackend::RPP_HOST_BACKEND) {
-        return RPP_ERROR_NOT_IMPLEMENTED;
+        return rppt_erode_host(srcPtr, srcDescPtr, dstPtr, dstDescPtr, kernelSize, roiTensorPtrSrc,
+                               roiType, rppHandle);
     }
 #ifdef GPU_SUPPORT
     else if ((handleBackend == RppBackend::RPP_HIP_BACKEND) &&
@@ -198,7 +199,8 @@ RppStatus rppt_dilate(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstPtr,
     [[maybe_unused]] RppBackend handleBackend = handle.GetBackend();
 
     if (executionBackend == RppBackend::RPP_HOST_BACKEND) {
-        return RPP_ERROR_NOT_IMPLEMENTED;
+        return rppt_dilate_host(srcPtr, srcDescPtr, dstPtr, dstDescPtr, kernelSize, roiTensorPtrSrc,
+                                roiType, rppHandle);
     }
 #ifdef GPU_SUPPORT
     else if ((handleBackend == RppBackend::RPP_HIP_BACKEND) &&
