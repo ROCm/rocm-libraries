@@ -133,7 +133,7 @@ using is_tuple = decltype(std::declval<T&>().IsTuple());
 // @brief      Device Convolution operation.
 //
 // Supports:
-//  @li         Forward convolution with up to 3 spatial dimentions
+//  @li         Forward convolution with up to 3 spatial dimensions
 //  @li         Input tensor in GNWC data format
 //  @li         Weight tensor in GKXC data format
 //  @li         Output tensor in GNWK data format
