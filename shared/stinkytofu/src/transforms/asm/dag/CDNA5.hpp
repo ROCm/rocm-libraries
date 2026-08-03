@@ -332,6 +332,15 @@ class CDNA5ReadyQueue : public ReadyQueue {
     bool dsReadQueueFull() const {
         return dsReadInflight_.full();
     }
+    double dsReadThrottleInterval() const {
+        const int depth = dsReadQueueDepth();
+        if (depth <= 0) return 0.0;
+        return (double)dsReadDrainLatency() / (double)depth;
+    }
+    int dsReadThrottleWait() const {
+        const double interval = dsReadThrottleInterval();
+        return dsReadInflight_.throttleWait(interval);
+    }
 
     // --- VALU co-issue timeline tracker ---
     uint16_t activeCoIssueWindow_ = 0;
@@ -551,7 +560,7 @@ DAGNode* CDNA5ReadyQueue::popNonWmma(DAGNode* node, int pickKind) {
         if (globalReadQueueDepth() > 0) globalReadInflight_.push(globalReadDrainLatency());
     } else if (pickKind == kLocalRead) {
         localReadQueue.erase(node);
-        dsReadInflight_.push(dsReadDrainLatency());
+        dsReadInflight_.pushWithThrottle(dsReadDrainLatency(), dsReadThrottleInterval());
         dsInsertedSinceLastWmma_++;
     } else if (pickKind == kOther) {
         otherQueue.erase(node);
@@ -825,16 +834,21 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
 
     // Per-WMMA-window DS cap (rule 4) only spreads ds_loads across an active WMMA
     // co-issue window; it is meaningless when no WMMA is available to issue, so it
-    // is applied only while a WMMA is pending. Otherwise ds_loads drain freely,
-    // bounded only by the real hardware limiter dsReadQueueFull().
+    // is applied only while a WMMA is pending. When the DS queue reaches depth,
+    // ds_load can still issue, but is throttled to dsReadDrainLatency/dsReadQueueDepth.
     int windowCap = maxDsPerWmmaWindow_;
     if (!dsTargetPerWindow_.empty()) {
         const int w = std::min((int)wmmaIssuedCountThisRegion_, (int)dsTargetPerWindow_.size() - 1);
         windowCap = dsTargetPerWindow_[w];
     }
     const bool dsCapReached = !wmmaQueue.empty() && dsInsertedSinceLastWmma_ >= windowCap;
-    bool dsWindowOk =
-        pickedDS && !dsCapReached && !dsReadQueueFull() && !destOverlapsActiveWmmaSrc(pickedDS);
+    const bool dsBaseOk = pickedDS && !dsCapReached && !destOverlapsActiveWmmaSrc(pickedDS);
+    int dsThrottleWait = 0;
+    if (dsBaseOk) {
+        dsThrottleWait = dsReadThrottleWait();
+        consider(pickedDS, kLocalRead, dsThrottleWait);
+    }
+    const bool dsWindowOk = dsBaseOk && dsThrottleWait == 0;
 
     if (!globalReadQueue.empty() && !globalReadQueueFull() &&
         (globalReadCounter < globalReadPerWMMA || otherQueue.empty())) {
@@ -845,8 +859,6 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
         DAGNode* gr = globalReadQueue.top();
         consider(gr, kGlobalRead, getHazardWait(gr));
     }
-    if (dsWindowOk) consider(pickedDS, kLocalRead, 0);
-
     // SALU/other allows hidden stalls (see pickFreeBest); VALU stays RAW-free-only.
     int otherWait = 0;
     if (DAGNode* t = pickFreeBest(otherQueue, &otherWait, /*allowHiddenStall=*/true)) {
@@ -981,6 +993,7 @@ int CDNA5ReadyQueue::computeWmmaWindowsNeeded(int dsLoadCount) const {
     const int maxDsPerWmmaWindow = dsReadPerWmma();
     int wmmaWindowsNeeded = (dsLoadCount + maxDsPerWmmaWindow - 1) / maxDsPerWmmaWindow;
     if (dsLoadCount > dsReadQueueDepth()) {
+        // Fixme: Don't use dsReadDrainLatency() here, it's not the actual latency.
         const float cyclePerDs = (float)dsReadDrainLatency() / (float)dsReadQueueDepth();
         const float cyclesNeeded = cyclePerDs * (dsLoadCount - dsReadQueueDepth());
         wmmaWindowsNeeded += (int)std::ceil(cyclesNeeded / (float)wmmaIssueConfig.latency);
@@ -1498,6 +1511,7 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
         int waitCycles = fallbackWait;
         if (fallbackKind == kGlobalRead && globalReadQueueFull())
             waitCycles = std::max(waitCycles, globalReadInflight_.minResidual());
+        if (fallbackKind == kLocalRead) waitCycles = std::max(waitCycles, dsReadThrottleWait());
         if (waitCycles > 0) advanceTime(waitCycles);
         PASS_DEBUG(std::cerr << "[CDNA5 pickOne] Phase G fallback pick dagId=" << fallback->id
                              << " kind=" << fallbackKind << " wait=" << waitCycles << "\n");
