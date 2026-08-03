@@ -388,8 +388,12 @@ static void scheduleRegionWithMovableSideEffects(
                 // too late relative to X.
                 const int producerCost =
                     isMatrixInstruction(*prod) ? prod->latencyCycles : prod->issueCycles;
-                bestDeadline =
-                    std::min(bestDeadline, cumCycles[ruleConsumerId] - rule.cycles - producerCost);
+                // rule.cycles == -1: "hoist as far as possible" mode. Force the deadline
+                // to 0 so decidePromote() issues this producer the instant it is free,
+                // maximizing its distance from the consumer instead of targeting a fixed gap.
+                const int deadline =
+                    rule.cycles < 0 ? 0 : cumCycles[ruleConsumerId] - rule.cycles - producerCost;
+                bestDeadline = std::min(bestDeadline, deadline);
             }
         }
 
