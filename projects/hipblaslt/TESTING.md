@@ -109,7 +109,7 @@ returns to below. It matters more than the headline coverage number does.
 | Location | [`tensilelite/Tensile/Tests/unit/`](tensilelite/Tensile/Tests/unit/) |
 | Golden snapshots | [syrupy](https://github.com/syrupy-project/syrupy), `.ambr` files in per-module `__snapshots__/` directories |
 | How to run | `cd tensilelite && tox -e unit` (skips the client build), or `tox -e rocisa` for the extension only |
-| Coverage measurement | `tox -e coverage-unit` |
+| Coverage | `tox -e coverage-unit` measures; `tox -e coverage-gate` enforces the floors against what it wrote |
 
 A significant part of that suite is a **characterization suite** under
 [`tensilelite/Tensile/Tests/unit/characterization/`](tensilelite/Tensile/Tests/unit/characterization/),
@@ -156,18 +156,27 @@ because it is easy to get wrong: **never run a blanket `pytest --snapshot-update
 every golden at once and produces a green run that proves nothing. Update the smallest node id you
 intend to change, read the resulting diff, and explain the behavior change in your PR description.
 
-**The goldens are enforced.** Any pull request touching `projects/hipblaslt/tensilelite/**` runs the
-`Component CI: TensileLite coverage` GitHub Actions lane, which executes `tox -e coverage-unit` over
-the characterization tree with syrupy installed. A stale golden fails that check. The same tox
-environment also runs in Math CI's `tensilelite-unit-codecov` job, so two independent lanes assert the
-same snapshots, though only the GitHub Actions one is required to merge.
+**The goldens are enforced, and they do gate a merge.** Three lanes assert them, because every tox
+environment involved inherits syrupy from the base `[testenv]` dependency list:
 
-There is one place snapshots do *not* run: the installed-artifact lane, which re-runs the unit tree
-from the packaged `share/hipblaslt/tensilelite/` install. That environment does not ship syrupy, so
-the suite's `conftest.py` detects the missing plugin and skips the snapshot-using tests cleanly
-rather than erroring the whole run. Nothing is lost, because those goldens were already asserted in
-the source lanes before the artifact was built, but a reader scanning that run will see skips and
-should know they are deliberate.
+- Math CI's **`preliminary`** job, which is in hipBLASLt's gating set. Its second stage runs
+  `tox -e unit -- Tensile/Tests/unit` with no marker filter, so the whole tree including
+  characterization executes on GPU across gfx90a, gfx942, gfx950 and gfx12. A stale golden fails a
+  required check. Conditions narrow when this runs, covered under
+  [Pre-submit / CI Gates](#pre-submit--ci-gates).
+- The **`Component CI: TensileLite coverage`** GitHub Actions lane, which runs `tox -e coverage-unit`
+  on any change under `projects/hipblaslt/tensilelite/**`. This one is CPU-only and fast, so it is
+  usually the first place a stale golden shows up, but it rolls up to `Component CI Summary`, which is
+  not a required check.
+- Math CI's **`tensilelite-unit-codecov`**, running the same tox environment. Not gating.
+
+There is one place snapshots do *not* run: the installed-artifact lane in TheRock CI, which re-runs
+the unit tree from the packaged `share/hipblaslt/tensilelite/` install. That environment does not
+install syrupy, so the suite's `conftest.py` detects the missing plugin and skips the snapshot-using
+tests cleanly rather than erroring the whole run. The tests are still collected, which is why that
+lane's log reads as though characterization ran. Nothing is lost, because those goldens were already
+asserted in the source lanes before the artifact was built, but a reader scanning that run will see
+skips and should know they are deliberate.
 
 The suite also carries two enforced coverage floors: a whole-project floor and a per-file ratchet
 with a one percentage point tolerance, so per-file coverage can only move up over time. Both are
@@ -237,13 +246,19 @@ None of these are hard problems. They are the roadmap (see
 hardware, anything in the generated assembly, memory-management behavior, stream and event
 semantics, and multi-GPU behavior. All of that is integration territory by construction.
 
+**Suite size.** The characterization half is about 2,891 tests and the pure-unit half about 3,126,
+of which roughly 230 are GPU-guarded and skip on a CPU-only runner. Call it six thousand tests, and
+note that all of them run in four separate CI lanes (see
+[Where these tests actually run](#where-these-tests-actually-run)).
+
 **Coverage expectation.** The enforced whole-project floor for TensileLite Python is `fail_under = 75`
 in [`tensilelite/pyproject.toml`](tensilelite/pyproject.toml), which is deliberately the only place
-that number lives. The comment beside it records the intent: the GPU-less `coverage-unit` run
-measures around 79%, 80% is the target, and the floor is set below the measured value on purpose so
-that ordinary run-to-run noise cannot trip an exact cutoff. Per-file floors ratchet separately.
+that number lives. The comment beside it records the intent: 80% is the target, and the floor is set
+below the measured value on purpose so that ordinary run-to-run noise cannot trip an exact cutoff.
+Recent runs measure 78.55% on the GitHub Actions lane and 78.68% in Math CI, which is close enough
+agreement to trust. Per-file floors ratchet separately.
 
-Read that 79% with the caveat above firmly in mind: it is union coverage across the unit and
+Read that number with the caveat above firmly in mind: it is union coverage across the unit and
 characterization suites, so it describes how much code is *protected*, not how much is *verified*.
 There is no enforced target on the unit-only share, which is the number that actually tracks the
 migration. For the C++ side there is no coverage target at all today, because with the current
@@ -417,15 +432,72 @@ job types, of which exactly three are configured as gating:
   a list of sensitive words maintained in the CI system rather than in this repository, and fails on
   any match. It is a disclosure gate protecting a public repository, not a code-quality analyzer. See
   [Static Analysis](#static-analysis) for what that means in practice.
-- **`preliminary`** runs the TensileLite `common`-marked suite under tox on gfx12, gfx90a, gfx942,
-  and gfx950. It first diffs the change against `develop` and skips entirely when nothing under
-  `tensilelite/`, `shared/stinkytofu/`, or `shared/origami/` has changed, so on a pull request that
-  touches neither, it passes without running anything.
+- **`preliminary`** is the functional gate for TensileLite, and it runs two stages on gfx12, gfx90a,
+  gfx942, and gfx950. First `tox -e py3 -- Tensile/Tests "-m common"`, the GEMM selection that
+  genuinely needs hardware. Then, *only if that stage passed*, `tox -e unit -- Tensile/Tests/unit`,
+  which carries no marker filter and therefore runs the entire unit tree, characterization included,
+  on all four architectures.
+
+  Three conditions narrow when any of this happens, and all three are easy to miss:
+
+  1. The job diffs the change against `develop` and skips entirely when nothing under
+     `tensilelite/`, `shared/stinkytofu/`, or `shared/origami/` has changed. A pull request touching
+     none of those passes it without running anything.
+  2. The second stage is conditional on the *target branch*. It runs only when the PR targets
+     `develop` or one of the two `hipblaslt_common_cms_*` branches. Which tests gate your change
+     depends on where you aimed it.
+  3. The gate itself can be dropped. Math CI's `statusGate` carries a rule that removes `preliminary`
+     from hipBLASLt's gating list whenever the same pull request also touches rocroller, so a
+     rocroller-touching change loses this gate silently.
 
 Other Math CI jobs post checks without gating. The one worth knowing is
 `tensilelite-unit-codecov`, which runs the TensileLite Python and C++ coverage environments on gfx950
-and uploads to codecov under the `TensileLite-Unit` and `TensileLite-CPP` flags. It reports a check,
-but that check is not required.
+and uploads to codecov under the `TensileLite-Unit` and `TensileLite-CPP` flags. It is two jobs in
+one, a Python coverage run and a C++ coverage run sharing a single script, which is why it needs
+gfx950 and why it takes hours rather than minutes. It reports a check, but that check is not
+required, and a failure anywhere in it skips the codecov uploads, so a codecov number can be older
+than the commit you are looking at.
+
+### Where these tests actually run
+
+The TensileLite Python tree under `Tensile/Tests/unit` (characterization *and* unit, about six
+thousand tests) executes in four separate CI lanes. They are easy to confuse with each other, and
+with three adjacent lanes that sound like them but run none of these tests, so the whole set is worth
+laying out once.
+
+| Lane | Where defined | Hardware | Gates? |
+| --- | --- | --- | --- |
+| `Component CI: TensileLite coverage` | [`component-ci-tensilelite-coverage.yml`](../../.github/workflows/component-ci-tensilelite-coverage.yml) | CPU only | No. Rolls up to `Component CI Summary`, which is not required |
+| `preliminary` | Math CI (internal) | gfx12, gfx90a, gfx942, gfx950 | **Yes**, via the required `Math CI Summary` |
+| TheRock `Test tensilelite` | [`test_tensilelite.py`](https://github.com/ROCm/TheRock/blob/main/build_tools/github_actions/test_executable_scripts/test_tensilelite.py) in TheRock | GPU runner, Linux | **Yes**, via the required `TheRock CI Summary` |
+| `tensilelite-unit-codecov` | Math CI (internal) | gfx950 | No |
+
+Three observations follow from that table, and they are the ones that most often get stated
+backwards in review:
+
+**The tests gate; the coverage numbers do not.** Both required checks (`Math CI Summary` through
+`preliminary`, and `TheRock CI Summary` through the TensileLite job) execute the unit and
+characterization suites, so a broken test blocks a merge. Neither of them looks at coverage. The
+floor and the per-file ratchet are enforced only in lanes that cannot block anything. "None of it
+gates" is wrong, and so is treating a coverage regression as a merge blocker.
+
+**Three of the four lanes hold a GPU, and only one of them needs it for these tests.** TheRock's lane
+is validating a real install, so its GPU is the point. `preliminary` needs hardware for its
+`-m common` GEMM stage and the unit tests inherit the node because they are appended to the same
+script. `tensilelite-unit-codecov` needs gfx950 for its C++ half only; the Python coverage run is
+along for the ride, which is most of why that job takes about two and a half hours where the
+CPU-only GitHub Actions lane takes seven minutes.
+
+**Every one of these lanes is fail-fast, and that erases signal.** In each case characterization-ish
+work runs first and everything after it is conditional on it passing: the two coverage lanes through
+the ordering of tox `commands`, `preliminary` through an explicit exit-code guard, TheRock's through
+plain sequential ordering. One early failure means you get no information at all from the stages
+behind it, which is why a red run so often says less than it appears to.
+
+Three adjacent lanes run none of these tests, despite their names:
+`Component CI: rocISA` only tests a `pip install` of the rocisa package; Math CI's `codecov` job is
+C++ hipBLASLt coverage and is one character away from `tensilelite-unit-codecov`; and `precheckin` is
+the C++ build and test.
 
 ### Validation Gates and Ownership
 
@@ -435,9 +507,9 @@ but that check is not required.
 | Library logic validation (`TensileLogic --check-all`) | Yes, implicitly | Component team | Runs inside the build ahead of codegen, so it blocks any build that generates kernels. It has no separate check name and produces no test report |
 | Unit tests (TensileLite Python) | Yes | Component team | Create, maintain, review |
 | Integration / smoke tests (client GTest) | Yes | Component team | Validate behavior across key scenarios |
-| Characterization goldens | Yes, when `tensilelite/` is touched | Component team | Review every golden diff; never bulk-regenerate |
+| Characterization goldens | Yes, when `tensilelite/` is touched and the PR targets `develop` | Component team | Asserted by the gating `preliminary` job, and earlier by the non-gating coverage lane. Review every golden diff; never bulk-regenerate |
 | HOST_ASAN build and quick test | Yes, on gfx90a | Component team | Keep the sanitizer lane green |
-| Code coverage floor and ratchet (TensileLite) | Yes, when `tensilelite/` is touched | Component team / CI | Floors move up only |
+| Code coverage floor and ratchet (TensileLite) | **No** | Component team / CI | Enforced, but only inside lanes that roll up to non-required checks. Floors move up only, on the honor system |
 | Formatting and lint (`pre-commit`) | Yes | CI / DevOps | Maintain hooks |
 | Sensitive-word scan (the Math CI job named `static-analysis`) | Yes | CI / DevOps | Gating, but it is a disclosure gate rather than code analysis |
 | Code-quality static analysis (C++) | No | Unowned | **Nothing runs.** No clang-tidy or cppcheck configuration exists for hipBLASLt, and CodeQL does not cover C++ |
@@ -458,8 +530,8 @@ required-check list, in this repository, is tracked as a gap.
 
 | Status | Applies to |
 | --- | --- |
-| **Trusted gate** | Build (both platforms), which includes the `TensileLogic --check-all` library logic validation; client GTest quick tier on gfx94X-dcgpu (Linux) and gfx110X (Windows); the Math CI client suite on gfx90a, gfx942, gfx950 and gfx12; the Math CI sensitive-word scan (the job named `static-analysis`); TensileLite Python unit and characterization suites; HOST_ASAN build and quick test on gfx90a; TensileLite coverage floor and ratchet; `pre-commit` |
-| **Informational** | HOST_ASAN on gfx942 (opt-in via the `ci:asan` label, explicitly non-blocking); the TensileLite characterization-versus-unit coverage summary card; the `tensilelite-unit-codecov` check and codecov reports; the `perfci` benchmark comparison |
+| **Trusted gate** | Build (both platforms), which includes the `TensileLogic --check-all` library logic validation; client GTest quick tier on gfx94X-dcgpu (Linux) and gfx110X (Windows); the Math CI client suite on gfx90a, gfx942, gfx950 and gfx12; the Math CI sensitive-word scan (the job named `static-analysis`); TensileLite Python unit and characterization suites, on GPU across four architectures via `preliminary` and against installed artifacts via TheRock; HOST_ASAN build and quick test on gfx90a; `pre-commit` |
+| **Informational** | HOST_ASAN on gfx942 (opt-in via the `ci:asan` label, explicitly non-blocking); the TensileLite coverage floor and per-file ratchet, which fail their own lane but cannot block a merge; the characterization-versus-unit coverage summary card; the `tensilelite-unit-codecov` check and codecov reports; the `perfci` benchmark comparison |
 | **Unstable / flaky** | Not tracked as a category. hipBLASLt has no `UNSTABLE` tag |
 
 The third row is a real gap and not a claim that nothing is flaky. What hipBLASLt has instead is a
@@ -550,7 +622,7 @@ characterization coverage is scaffolding to be repaid, not testing that is finis
 
 | Scope | Tool | Measured in | Enforced |
 | --- | --- | --- | --- |
-| TensileLite Python, unit and characterization combined | `coverage.py` via `tox -e coverage-unit` | GitHub Actions, on any change under `projects/hipblaslt/tensilelite/**` | Yes: whole-project floor plus per-file ratchet with 1 pp tolerance |
+| TensileLite Python, unit and characterization combined | `coverage.py` via `tox -e coverage-unit` | GitHub Actions, on any change under `projects/hipblaslt/tensilelite/**`. Math CI's `tensilelite-unit-codecov` measures the same thing again for its codecov upload | Whole-project floor plus per-file ratchet with 1 pp tolerance, enforced by the GitHub Actions lane, which is not a required check |
 | TensileLite Python, unit-only share | Same lane, reported in the split summary card | GitHub Actions | **No.** Informational only, and it is the number that tracks real progress |
 | TensileLite Python, mutation score | `tox -e mutation-unit` | Nowhere; run by hand | No. Report-only pilot on five files |
 | TensileLite C++ host library | `tox -e coverage-cpp` | Math CI | Reported to codecov, not enforced |
@@ -558,10 +630,23 @@ characterization coverage is scaffolding to be repaid, not testing that is finis
 
 The GitHub Actions coverage lane is CPU-only and takes roughly seven minutes. It runs the
 characterization suite and the pure unit suite once each under coverage, keeping the two selections
-disjoint so each line can be attributed to one or both, unions the results, enforces both floors on
-the combined data, and renders the non-gating split summary card. That lane is deliberately scoped
-and is expected to retire once the characterization-to-unit conversion finishes, which makes the
-card's characterization-only count a rough progress bar for the lane's own retirement.
+disjoint so each line can be attributed to one or both, unions the results, and renders the
+non-gating split summary card. That lane is deliberately scoped and is expected to retire once the
+characterization-to-unit conversion finishes, which makes the card's characterization-only count a
+rough progress bar for the lane's own retirement.
+
+**Measuring and enforcing are separate tox environments,** and the distinction is worth knowing
+before you try to reproduce a coverage failure. `coverage-unit` runs the suites and writes the
+reports, reporting with `--fail-under=0` so it never gates. `coverage-gate` reads those artifacts and
+applies both floors. The GitHub Actions lane runs them as two named steps and owns the floors;
+Math CI's `tensilelite-unit-codecov` runs only the first, so it cannot be failed by a gate it does
+not own.
+
+The practical benefit is local reproduction. `coverage-gate` sets `skip_install = true` and depends
+only on `coverage[toml]`, so it builds no rocisa, needs no ROCm, and runs no tests. Run
+`coverage-unit` once, then re-run `coverage-gate` as often as you like against the `coverage.json`
+you already have. Chasing a floor failure costs seconds rather than another pass over six thousand
+tests.
 
 **Targets.** Two different mechanisms carry a number, and they are easy to confuse:
 
@@ -604,10 +689,10 @@ Beyond PR validation, the following run on a nightly or postsubmit cadence rathe
 - **Wider test tiers.** Nightly runs use the `comprehensive` tier; prerelease runs use `full`.
 - **Full ASAN.** TheRock's nightly ASAN lane runs device-side instrumented builds with tests, which
   the per-PR hipBLASLt lane does not.
-- **TensileLite GPU tests.** In the GitHub Actions lanes, the GPU-marked subset of the TensileLite
-  suite runs on scheduled builds rather than per PR. Math CI's `preliminary` job runs the
-  `common`-marked suite on GPUs per PR, but only when `tensilelite/` and its shared dependencies are
-  touched.
+- **TensileLite GPU tests.** The `Component CI: TensileLite coverage` lane is CPU-only, so its roughly
+  230 GPU-guarded tests skip there by design. They do run per PR, on Math CI's `preliminary` job and
+  in TheRock's installed-artifact lane, subject to the conditions on each. See
+  [Where these tests actually run](#where-these-tests-actually-run).
 - **Broad performance benchmarking.** The Math CI `performance` job runs the full benchmark suite on
   gfx942 and gfx950 once per day, with results in rocPTS. It measures; it does not judge.
 
@@ -619,7 +704,7 @@ the set of architectures the library supports or builds for.
 | Configuration | Validation level | Frequency | Notes |
 | --- | --- | --- | --- |
 | Linux, gfx90a / gfx942 / gfx950 / gfx12 | Client test suite | PR, via Math CI `precheckin` | Broadest per-PR hardware coverage, and the only per-PR signal on gfx950. Also compiles for gfx1250 |
-| Linux, gfx90a / gfx942 / gfx950 / gfx12 | TensileLite `common` suite | PR, via Math CI `preliminary` | Skipped unless `tensilelite/` or its shared dependencies changed |
+| Linux, gfx90a / gfx942 / gfx950 / gfx12 | TensileLite `common` suite, then the whole unit and characterization tree | PR, via Math CI `preliminary` | Skipped unless `tensilelite/` or its shared dependencies changed. The second stage additionally requires the first to pass and the PR to target `develop` |
 | Linux, gfx94X-dcgpu | Full | PR (quick), nightly (comprehensive), via TheRock | Primary GitHub Actions test target. 6 shards |
 | Linux, gfx90a | Partial | PR (HOST_ASAN quick tier), nightly | Sanitizer lane's default architecture |
 | Linux, gfx950-dcgpu | Full | Postsubmit and nightly in the TheRock lane, **not PR** there | Runner capacity, ROCm/TheRock#3288. Covered per PR by Math CI |
@@ -870,12 +955,19 @@ Ordered by value per unit of effort, not by ambition.
    coverage is intentionally left to the source lanes. Today it is a silent skip that reads like an
    accident.
 3. **Publish the required-check list.** Document which checks actually block a merge, so contributors
-   and reviewers stop guessing.
-4. **Enforce `--strict-known-bugs` in its own lane** (AIHPBLAS-4196). The detection already exists;
+   and reviewers stop guessing. The four-lane table under
+   [Where these tests actually run](#where-these-tests-actually-run) is a start, but it belongs
+   somewhere it cannot drift from the branch-protection settings themselves.
+4. **Make the test suite resolve its own toolchain.** Characterization tests locate `amdclang++`
+   through a bare `shutil.which`, so whether they pass depends on how the surrounding lane happened
+   to order `PATH`. The same tests then behave differently in different lanes for reasons that have
+   nothing to do with the code under test. Resolving the toolchain inside the tox environment removes
+   a recurring source of false failures.
+5. **Enforce `--strict-known-bugs` in its own lane** (AIHPBLAS-4196). The detection already exists;
    what is missing is a job that fails on a stale entry. A dedicated GitHub Actions job is the right
    home for it, because the flag cannot be turned on inside the build without failing local developer
    builds. Worth extending to orphaned entries, which are silently ignored today.
-5. **Govern known-bug entries as one thing.** Seven mechanisms suppress or record known-bad behavior
+6. **Govern known-bug entries as one thing.** Seven mechanisms suppress or record known-bad behavior
    and none of them share a convention. The proposal, which needs team agreement before it becomes
    policy, is four rules: every entry names its ticket in a machine-readable field rather than a
    comment, so that ownership and status live on the ticket where they can be kept current rather
@@ -886,7 +978,7 @@ Ordered by value per unit of effort, not by ambition.
    means changing them or accepting a stated exception. Start by splitting flaky from known-failing in
    the client quarantine list, which is the largest and blindest surface.
 
-6. **Run the Python linter that already exists.** `tox -e lint` is configured and invoked by nothing.
+7. **Run the Python linter that already exists.** `tox -e lint` is configured and invoked by nothing.
    Wiring it into the existing TensileLite GitHub Actions lane is close to free, and widening it past
    `ignore = E, W` can be done gradually. Rename or re-describe the `static-analysis` job at the same
    time, since its current name causes people to believe code analysis is already covered.
@@ -944,6 +1036,11 @@ Stated plainly, so none of these are a surprise at release time.
 | A stale `TensileLogic` known-bugs entry only warns, because `--strict-known-bugs` defaults off and no job passes it | Low | Low | The checker does re-validate and report stale entries on every build | AIHPBLAS-4196 |
 | The library logic validation gate is invisible as a check: it runs inside the build, so it has no check name, no test report, and cannot be run in isolation by CI | Low | Medium | It runs on every kernel-generating build including local ones, which gives it good reach | AIHPBLAS-4196 |
 | Which checks are actually required to merge is undocumented | Medium | Medium | Institutional knowledge |  |
+| The `preliminary` gate is dropped from hipBLASLt's gating list whenever the same PR also touches rocroller, so a rocroller-touching change loses its TensileLite functional gate | Medium | High if hit | TheRock's installed-artifact lane still runs the unit tree, so the tests are not entirely ungated, but the four-architecture GPU coverage is lost silently |  |
+| The second `preliminary` stage, which is what runs the unit and characterization tree, is conditional on the PR's target branch, so which tests gate a change depends on where it is aimed | Medium | Medium | Most pull requests target `develop` and do get the full gate |  |
+| Every lane that runs these tests is fail-fast, so one early failure erases the signal from every stage behind it | Medium | Medium | Documented here. Reading a red run means checking what did not get to run, not just what failed |  |
+| The same ~6,000 TensileLite tests execute in four separate lanes, three of them holding a GPU that only one of them needs for these tests | Low | Low | Cheap in correctness terms and expensive in runner capacity; the redundancy does buy independent confirmation |  |
+| TheRock's lane skips the unit tests entirely when `AMDGPU_FAMILIES` includes `gfx1250`, and `gfx950-dcgpu` is excluded from PR CI for runner capacity | Low | Medium | Math CI's `preliminary` covers gfx950 on the pull request; the gfx1250 skip is emulation-mode only | [TheRock#3288](https://github.com/ROCm/TheRock/issues/3288) |
 | No code-quality static analysis runs on the C++ library at all: no clang-tidy or cppcheck configuration, and CodeQL does not cover C++ | High | Medium | Code review, the sanitizer lane, and the test suite absorb what an analyzer would catch at authoring time |  |
 | The gating job named `static-analysis` is a sensitive-word scan, so the gate list reads as though code analysis is covered when it is not | Medium | Medium | Documented here; the scan itself does its actual job well |  |
 | Python linting is configured (`tox -e lint`) but no CI job runs it, and `ignore = E, W` narrows it to pyflakes checks | Medium | Low | `black` formatting is enforced through `pre-commit`; pyflakes-class bugs are otherwise caught in review |  |
