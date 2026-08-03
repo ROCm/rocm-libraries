@@ -262,4 +262,46 @@ END_HIPCUB_NAMESPACE
     #define HIPCUB_PRAGMA_NOUNROLL() _Pragma("nounroll")
 #endif // HIPCUB_PRAGMA_NOUNROLL
 
+#ifndef HIPCUB_RETURN_ON_ERROR
+    #define HIPCUB_RETURN_ON_ERROR(...)       \
+        do                                    \
+        {                                     \
+            hipError_t error = (__VA_ARGS__); \
+            if(error != hipSuccess)           \
+            {                                 \
+                return error;                 \
+            }                                 \
+        }                                     \
+        while(0)
+#endif // HIPCUB_RETURN_ON_ERROR
+
+#ifndef HIPCUB_TRY_CUDA_API
+    #define HIPCUB_TRY_CUDA_API(_NAME, _MSG, ...)                               \
+        do                                                                      \
+        {                                                                       \
+            const ::hipError_t __status = _NAME(__VA_ARGS__);                   \
+            switch(__status)                                                    \
+            {                                                                   \
+                case ::hipSuccess: break;                                       \
+                default:                                                        \
+                    (void)::hipGetLastError();                                  \
+                    _HIPCUB_LIBCXX::__throw_cuda_error(__status, _MSG, #_NAME); \
+            }                                                                   \
+        }                                                                       \
+        while(0)
+#endif // HIPCUB_TRY_CUDA_API
+
+#ifndef HIPCUB_ASSERT_CUDA_API
+    #define HIPCUB_ASSERT_CUDA_API(_NAME, _MSG, ...)     \
+        do                                               \
+        {                                                \
+            [[maybe_unused]]                             \
+            const ::hipError_t __status                  \
+                = _NAME(__VA_ARGS__);                    \
+            (void)::hipGetLastError();                   \
+            _CCCL_ASSERT(__status == cudaSuccess, _MSG); \
+        }                                                \
+        while(0)
+#endif // HIPCUB_ASSERT_CUDA_API
+
 #endif // HIPCUB_CONFIG_HPP_
