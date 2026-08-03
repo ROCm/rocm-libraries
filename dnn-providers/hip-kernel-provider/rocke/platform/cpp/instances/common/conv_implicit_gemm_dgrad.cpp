@@ -159,8 +159,12 @@ bool rocke_dgrad_conv_spec_needs_atomic(const rocke_dgrad_conv_spec_t* s)
         return true;
     if(!rocke_dgrad_conv_spec_is_strided(s))
         return false;
-    rocke_tilde_decomposition_t t = rocke_compute_tilde(&s->problem);
-    return (t.y_tilde * t.x_tilde) > 1;
+    /* Count actual non-empty sub-GEMMs (some tilde phases can be empty for
+     * small filters), mirroring the Python len(compute_sub_gemms()) > 1 check. */
+    rocke_sub_gemm_params_t sgs[128];
+    int n = rocke_enumerate_sub_gemms(
+        &s->problem, s->tile_m, s->tile_n, s->tile_k, _max(s->split_k, 1), sgs, 128);
+    return n > 1;
 }
 
 rocke_status_t

@@ -523,6 +523,24 @@ class DgradConvSpec:
             self.data.dtype_a, self.warp_tile_m, self.warp_tile_n, self.warp_tile_k
         )
 
+    # ---- vector-size helpers ----
+
+    @staticmethod
+    def default_vector_sizes(C: int, K: int, dtype: str) -> "Tuple[int, int, int]":
+        """Return ``(vec_a, vec_b, vec_c)`` for a dgrad problem.
+
+        Dgrad memory layout:
+          A (dY):  NHWK → last dim K → vec_a
+          B (W):   KYXC → last dim C → vec_b
+          D (dX):  NHWC → last dim C → vec_c
+        """
+        sizes = [8, 4, 2, 1] if dtype != "fp32" else [4, 2, 1]
+
+        def _vec(n: int) -> int:
+            return next(v for v in sizes if n % v == 0)
+
+        return _vec(K), _vec(C), _vec(C)
+
     # ---- dgrad GEMM dimensions ----
 
     @property
@@ -613,12 +631,12 @@ class DgradConvSpec:
                 f"got {self.split_k}"
             )
         if self.split_k > 1:
-            if self.data.dtype_d not in ("fp32", "bf16", "fp16"):
+            if self.data.dtype_d not in ("fp32", "bf16", "fp16", "f16"):
                 raise ValueError(
                     f"split_k > 1 requires dtype_d in fp32/bf16/fp16 "
                     f"(got {self.data.dtype_d!r})"
                 )
-            if self.data.dtype_d in ("bf16", "fp16") and self.problem.C % 2 != 0:
+            if self.data.dtype_d in ("bf16", "fp16", "f16") and self.problem.C % 2 != 0:
                 raise ValueError(
                     f"split_k > 1 with dtype_d={self.data.dtype_d!r} requires even C "
                     f"(packed <2 x dtype> atomic pairs on the innermost NHWC dimension); "
@@ -715,12 +733,12 @@ def is_valid_dgrad_spec(spec: DgradConvSpec, arch: str = "gfx950") -> Tuple[bool
         return False, f"split_k must be -1 (auto), 1, or >1 (got {sk})"
     if sk > 1 and family != "mma":
         return False, f"split_k > 1 is CDNA-only (got family {family!r} on {arch})"
-    if sk > 1 and spec.data.dtype_d not in ("fp32", "bf16", "fp16"):
+    if sk > 1 and spec.data.dtype_d not in ("fp32", "bf16", "fp16", "f16"):
         return False, (
             f"split_k > 1 requires dtype_d in fp32/bf16/fp16 for atomic accumulation "
             f"(got {spec.data.dtype_d!r})"
         )
-    if sk > 1 and spec.data.dtype_d in ("bf16", "fp16") and p.C % 2 != 0:
+    if sk > 1 and spec.data.dtype_d in ("bf16", "fp16", "f16") and p.C % 2 != 0:
         return False, (
             f"split_k > 1 with dtype_d={spec.data.dtype_d!r} requires even C "
             f"(packed <2 x dtype> atomic pairs on the innermost NHWC dimension); "

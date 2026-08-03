@@ -111,28 +111,15 @@ def _grid_for_wgrad_spec(spec, split_k: int):
     return (gx, gy, split_k)
 
 
-def _get_vector_sizes_dgrad(C: int, K: int, dtype: str):
-    """Per-operand vector widths for the dgrad direction.
-
-    Last memory dimension of each dgrad operand:
-      A = dY  NHWK  → last dim K  → vec_a
-      B = W   KYXC  → last dim C  → vec_b
-      D = dX  NHWC  → last dim C  → vec_c
-    """
-
-    def _vec(n: int) -> int:
-        sizes = [8, 4, 2, 1] if dtype != "fp32" else [4, 2, 1]
-        return next(v for v in sizes if n % v == 0)
-
-    return _vec(K), _vec(C), _vec(C)
-
-
 def _grid_for_dgrad_spec(spec, split_k: int):
-    """Derive launch grid from dgrad spec and split-K degree."""
-    tile_m, tile_n = spec.tile_m, spec.tile_n
-    gx = (spec.dg_N + tile_n - 1) // tile_n
-    gy = (spec.dg_M + tile_m - 1) // tile_m
-    return (gx, gy, split_k)
+    """Derive launch grid from dgrad spec and split-K degree.
+
+    Dgrad uses a 1-D flat tile grid: blockIdx.x is the flat CTA index into
+    the sub-GEMM tile space; blockIdx.z is the split-K partition.
+    """
+    sub_gemms = spec.compute_sub_gemms()
+    flat_tiles = sub_gemms[-1].block_end
+    return (flat_tiles, 1, max(split_k, 1))
 
 
 def _sample_combos(combos: list, frac: float, seed: int) -> list:
@@ -1374,7 +1361,7 @@ def _run_dgrad_sweep(
     bytes_xfer = float(dY_t.nbytes + W_t.nbytes + dX_t.nbytes)
     flop = float(p.flops)
 
-    vec_a, vec_b, vec_c = _get_vector_sizes_dgrad(p.C, p.K, dtype)
+    vec_a, vec_b, vec_c = DgradConvSpec.default_vector_sizes(p.C, p.K, dtype)
     base_sig = conv_args_signature(dtype)
     ext_sig = base_sig + [
         {"name": "sub_gemm_buf", "type": "ptr<i32, global>", "size_bytes": 8},
