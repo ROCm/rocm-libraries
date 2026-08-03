@@ -577,8 +577,7 @@ int main(int argc, char* argv[])
         ->check(CLI::PositiveNumber);
     app.add_option("--hipfftxt_test_token",
                    hipfftxt_test_token,
-                   "Token string for manual hipfftXt multi-GPU test (as produced by "
-                   "hipfftxt_test_params_t::str())")
+                   "Token string for manual hipfftXt single-process, multi-GPU tests")
         ->default_val("");
     app.add_option("-w, --wise", use_fftw_wisdom, "Use FFTW wisdom");
     // Filename for fftw and fftwf wisdom.

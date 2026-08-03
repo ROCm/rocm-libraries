@@ -385,8 +385,8 @@ struct fft_enum_map<fft_result_placement>
 {
     static constexpr std::string_view                                  type_name = "placement";
     static constexpr std::pair<fft_result_placement, std::string_view> entries[] = {
-        {fft_placement_inplace, "inplace"},
-        {fft_placement_notinplace, "notinplace"},
+        {fft_placement_inplace, "ip"},
+        {fft_placement_notinplace, "op"},
     };
 };
 
