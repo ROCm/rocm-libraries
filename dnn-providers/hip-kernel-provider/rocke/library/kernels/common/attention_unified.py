@@ -460,7 +460,7 @@ def supports_native_unified_attention_tiled(
         use_k_single_buffer=gfx942_flash and _gfx942_flash_use_single_buffer(problem),
         use_conflict_free_v_store=gfx942_flash and _gfx942_flash_use_cfvst(problem),
         use_k_sliced_ring=_enable_gfx942_flash_k_sliced_ring(problem),
-        use_d256_gfx942_fast=_d256_gfx942_fast(problem),
+        use_d256_fast=_d256_gfx942_fast(problem),
     )
 
 
@@ -990,9 +990,16 @@ def _select_2d_num_warps(problem: UnifiedAttentionProblem) -> int:
     # key, so a drift would silently launch the wrong CTA count, not rebuild).
     if _enable_gfx942_l4(problem):
         return _select_gfx942_flash_num_warps(problem)
-    # gfx942 D64 oracle: paired with ``T=block_size`` and mw=32, four waves fit
-    # in the MI300X 64 KB LDS budget and match the direct gfx942 harness.
+    # gfx942 D64 oracle.
+    #   * prefill: num_warps=4 (BLOCK_M=128) + mw=32, four waves fit the MI300X
+    #     64 KB LDS budget and match the direct gfx942 harness.
+    #   * decode (max_seqlen_q == 1, bf16): num_warps=1. Decode is memory-bound;
+    #     nw=1 (BLOCK_M=32, T=2*block_size) measured markedly faster than nw=4
+    #     on gpt-oss sink decode. fp8 decode is excluded (dequant-bound, wants
+    #     more warps to spread the fp8->bf16 dequant).
     if _resolve_attention_arch() == "gfx942" and problem.head_size == 64:
+        if problem.all_decode and not problem.use_fp8:
+            return 1
         return 4
     if _enable_combo_2d(problem):
         # bf16 sliding-window is prelude-bound -> nw2 (lighter prelude). But
