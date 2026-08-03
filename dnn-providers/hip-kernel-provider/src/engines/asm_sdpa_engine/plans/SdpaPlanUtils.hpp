@@ -6,11 +6,13 @@
 #include <algorithm>
 #include <cstdint>
 #include <hip/hip_runtime.h>
+#include <hip_kernel_provider_common/HipDeviceUtils.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <initializer_list>
+#include <optional>
 #include <string>
 
 namespace asm_sdpa_engine
@@ -169,22 +171,21 @@ inline bool byteStrideFitsU32(const char* name, int64_t elements, int64_t elemen
 }
 
 // =============================================================================
-// Per-launch post-check
+// HIP device string query with error handling
 // =============================================================================
 //
-// Surfaces async launch faults that hipModuleLaunchKernel itself returned
-// success for. Without this, a memory-access fault inside the ASM kernel would
-// propagate silently to the next stage. Throws
-// HipdnnPluginException(INTERNAL_ERROR) on async error so the caller's API
-// status reflects the actual root cause.
-inline void throwOnLaunchPostError(const char* stage)
+// Query the HIP device string for the stream, logging `logPrefix` on failure.
+// Returns std::nullopt when the HIP runtime throws.
+inline std::optional<std::string> tryGetDeviceString(hipStream_t stream, const char* logPrefix)
 {
-    const hipError_t err = hipPeekAtLastError();
-    if(err != hipSuccess)
+    try
     {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-            std::string(stage) + ": post-launch error: " + hipGetErrorString(err));
+        return hip_kernel_provider_common::getDeviceString(stream);
+    }
+    catch(const std::exception& e)
+    {
+        HIPDNN_PLUGIN_LOG_ERROR(logPrefix << e.what());
+        return std::nullopt;
     }
 }
 

@@ -22,8 +22,8 @@ Two modes:
 
 Usage (no GPU, runs anywhere with rocke importable):
 
-    PYTHONPATH=Python python -m builders.gfx1250.attention.aiter_ua2_runner \\
-        --build-only --shapes Python/rocke/library/builders/gfx950/attention/aiter_ua_2_shapes.json
+    PYTHONPATH=python python -m builders.gfx1250.attention.aiter_ua2_runner \\
+        --build-only --shapes python/rocke/library/builders/gfx950/attention/aiter_ua_2_shapes.json
 
 Usage (on the gfx1250 box, venv python + ROCm on LD_LIBRARY_PATH):
 

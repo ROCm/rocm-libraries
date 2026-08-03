@@ -26,6 +26,7 @@ if __name__ == "__main__":
     print("This file can no longer be run as a script.  Run 'Tensile/bin/Tensile' instead.")
     exit(1)
 
+import ast
 import os
 import subprocess
 import sys
@@ -53,6 +54,7 @@ from Tensile.Utilities.Decorators.Profile import profile
 from Tensile import BenchmarkProblems
 from Tensile import ClientWriter
 from Tensile import LibraryIO
+from Tensile.backends.config import parse_backend_config
 from Tensile import LibraryLogic
 
 TENSILE_SCRIPT_DIR = Path(os.path.dirname(os.path.abspath(__file__)))
@@ -107,9 +109,10 @@ def executeStepsInConfig(
     # Benchmark Problems
     ##############################################################################
     gfxName = isaToGfx(next(iter(isaInfoMap)))
-    if "BenchmarkProblems" in config:
+    if "BenchmarkProblems" in config:       
         with timing_context("python_benchmark_problems"):
             BenchmarkProblems.main(
+                config.get("Backend", {}),
                 config["BenchmarkProblems"],
                 config["UseCache"],
                 asmToolchain,
@@ -194,9 +197,19 @@ def addCommonArguments(argParser):
     def splitExtraParameters(par):
         """
         Allows the --global-parameters option to specify any parameters from the command line.
+
+        Each argument is a ``key=value`` pair. The value is parsed as a Python literal
+        (number, string, tuple, list, dict, bool, or None) via ``ast.literal_eval``.
+        Arbitrary expressions are rejected so a CLI/CI argument cannot execute code.
         """
-        (key, value) = par.split("=")
-        value = eval(value)
+        (key, value) = par.split("=", 1)
+        try:
+            value = ast.literal_eval(value)
+        except (ValueError, SyntaxError) as e:
+            raise argparse.ArgumentTypeError(
+                f"invalid --global-parameters value for '{key}': {value!r} must be a "
+                f"Python literal (e.g. 5, True, 'text', [1, 2])"
+            ) from e
         return (key, value)
 
     argParser.add_argument("-d", "--device", dest="device", default=0, type=int, \
@@ -309,13 +322,12 @@ def get_gpu_max_frequency(device_id):
     try:
         from hip import hip
     except ImportError:
-        print("HIP module not found. Installing it now...")
-        # Install the HIP module using pip
-        subprocess.run("python3 -m pip install --upgrade pip", shell=True)
-        subprocess.run("python3 -m pip install --index-url https://test.pypi.org/simple/ hip-python", shell=True)
-
-        from hip import hip
-        print("HIP module successfully installed.")
+        # hip-python is optional and intentionally NOT auto-installed here.
+        # Auto-installing from a package index at build time is a supply-chain
+        # risk (ROCM-26748 / SEC-00581) and hip-python has no wheel on some
+        # platforms (e.g. Windows). Return None so the caller falls back to
+        # amd-smi (get_gpu_max_frequency_smi) and then the manual prompt.
+        return None
 
     def hip_check(call_result):
         err, result = call_result[0], call_result[1]
@@ -604,9 +616,15 @@ def Tensile(userArgs):
             }]
         }
         config["BenchmarkProblems"] = [[base["ProblemType"], solParams]]
-
+    
     config["UseCache"] = useCache
     globalParameters["ConfigPath"] = configPaths
+
+    # Backend selection precedence:
+    # 1) YAML Backend (with strict validation)
+    # 2) tensile (default)
+    yaml_backend = config.get("Backend", None)
+    config["Backend"] = parse_backend_config(yaml_backend)
 
     asm_debug = config["GlobalParameters"].get("AsmDebug", False)
     device_id = config["GlobalParameters"].get("Device", int(args.device))

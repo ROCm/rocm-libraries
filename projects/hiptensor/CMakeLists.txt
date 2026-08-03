@@ -74,6 +74,7 @@ set(CMAKE_CXX_FLAGS_MINSIZEREL "${CMAKE_CXX_FLAGS_MINSIZEREL} -O2 -DNDEBUG") # c
 
 # Project options
 if(CMAKE_PROJECT_NAME STREQUAL "hiptensor")
+    option(HIPTENSOR_DISABLE_DEVICE "Build hipTensor without device backend." OFF)
     option(HIPTENSOR_BUILD_TESTS "Build hiptensor tests" ON)
     option(HIPTENSOR_BUILD_SAMPLES "Build hiptensor samples" ON)
     option(HIPTENSOR_BUILD_COMPRESSED_DBG "Enable compressed debug symbols" ON)
@@ -150,15 +151,30 @@ endif()
 # default cached variable GPU_TARGET to "gfx900;gfx906;gfx908", where not all archs are compatible with MFMA instructions
 #
 # By rule, once cached variable is set, it cannot be overridden unless we use the FORCE option
+#
+# Three cases are distinguished here:
+#   * GPU_TARGETS / AMDGPU_TARGETS unset      -> fall back to DEFAULT_GPU_TARGETS
+#   * set to a non-empty list                 -> honor it
+#   * explicitly set to an empty string       -> no supported architecture is available for this configuration;
+#                                                build with stub implementation.
 if(GPU_TARGETS)
     set(GPU_TARGETS "${GPU_TARGETS}" CACHE STRING "List of specific machine types for library to target")
 elseif(AMDGPU_TARGETS)
     set(GPU_TARGETS "${AMDGPU_TARGETS}" CACHE STRING "List of specific machine types for library to target")
     message(DEPRECATION "AMDGPU_TARGETS use is deprecated. Use GPU_TARGETS.")
+elseif(DEFINED GPU_TARGETS OR DEFINED AMDGPU_TARGETS)
+    # When hipTensor is configured for an architecture set that resolves to no GPU
+    # targets, the device libraries and their Composable Kernel dependency cannot
+    # be built. This option is turned on automatically so the library is still built
+    # with a stub implementation where HIPTENSOR_STATUS_NOT_SUPPORTED is returned
+    # for any call to device operations.
+    set(HIPTENSOR_DISABLE_DEVICE ON)
+    message(WARNING "GPU_TARGETS is empty; hipTensor stub libraries will be built. No device operation supported.")
 else()
     set(GPU_TARGETS "${DEFAULT_GPU_TARGETS}" CACHE STRING "List of specific machine types for library to target")
 endif()
 message(STATUS "GPU_TARGETS=${GPU_TARGETS}")
+message(STATUS "HIPTENSOR_DISABLE_DEVICE=${HIPTENSOR_DISABLE_DEVICE}")
 
 if(HIPTENSOR_DEFAULT_STRIDES_COL_MAJOR)
     add_compile_definitions(HIPTENSOR_DEFAULT_STRIDES_COL_MAJOR=1)
@@ -204,32 +220,48 @@ endif()
 # disable warning about 'amdgpu-waves-per-eu'
 add_compile_options(-Wno-pass-failed)
 
-find_package(composable_kernel 1.0.0 REQUIRED COMPONENTS device_contraction_operations device_reduction_operations device_other_operations)
-rocm_package_add_dependencies("composable_kernel >= 1.0.0" COMPONENT tests)
+# Define the stub helpers
+add_subdirectory(library/stub)
 
-# Configure library build
-add_subdirectory(library/src)
+if(NOT HIPTENSOR_DISABLE_DEVICE)
+    find_package(composable_kernel 1.0.0 REQUIRED COMPONENTS device_contraction_operations device_reduction_operations device_other_operations)
+    rocm_package_add_dependencies("composable_kernel >= 1.0.0" COMPONENT tests)
 
-# Configure testing setup
-if(HIPTENSOR_BUILD_TESTS OR HIPTENSOR_BUILD_SAMPLES)
-    enable_testing()
-    rocm_package_setup_component(clients)
+    # Configure library build
+    add_subdirectory(library/src)
+
+    # Configure testing setup
+    if(HIPTENSOR_BUILD_TESTS OR HIPTENSOR_BUILD_SAMPLES)
+        enable_testing()
+        rocm_package_setup_component(clients)
+    endif()
+
+    # Configure tests build
+    if(HIPTENSOR_BUILD_TESTS)
+        rocm_package_setup_client_component(tests)
+        add_subdirectory(test)
+    endif()
+
+    # Configure clients build
+    if(HIPTENSOR_BUILD_SAMPLES)
+        rocm_package_setup_client_component(samples)
+        add_subdirectory(samples)
+    endif()
+else()
+    # No supported GPU target is available for this configuration, so the device
+    # library (and its Composable Kernel dependency) cannot be built. Build a
+    # host-only stub library that implements the full public API but reports
+    # HIPTENSOR_STATUS_NOT_SUPPORTED for every entry point. This keeps the
+    # package and its headers available so downstream find_package(hiptensor)
+    # and linking keep working, while giving callers a well-defined runtime error.
+    create_hiptensor_stub_library()
 endif()
 
-# Configure tests build
-if(HIPTENSOR_BUILD_TESTS)
-    rocm_package_setup_client_component(tests)
-    add_subdirectory(test)
-endif()
-
-# Configure clients build
-if(HIPTENSOR_BUILD_SAMPLES)
-    rocm_package_setup_client_component(samples)
-    add_subdirectory(samples)
-endif()
+# Guarantee, at build time, that the stub implements the entire public API.
+hiptensor_add_stub_api_coverage_check()
 
 # Versioning via rocm-cmake
-set (VERSION_STRING "2.3.0")
+set (VERSION_STRING "2.4.0")
 rocm_setup_version(VERSION ${VERSION_STRING})
 
 # Configure a header file to pass the CMake version settings to the source
