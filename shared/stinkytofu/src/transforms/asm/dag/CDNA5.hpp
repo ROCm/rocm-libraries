@@ -569,7 +569,10 @@ DAGNode* CDNA5ReadyQueue::popNonWmma(DAGNode* node, int pickKind) {
     // waits the fixed hazard out. Per-rule lane (not regDataReadyCounters) so an
     // unrelated instruction reading the same register is not wrongly gated.
     for (const HazardFlag& hf : node->hazardFlags)
-        hazardGates_[hf.ruleIdx][hf.regKey] = kCdna5HazardRules[hf.ruleIdx].cycles;
+        // rule.cycles == -1 ("hoist as far as possible"): the strategy is producer-side
+        // hoisting (deadline forced to 0 in the pre-scan), not a consumer-side hold, so
+        // clamp the gate to 0 rather than stamping a negative wait.
+        hazardGates_[hf.ruleIdx][hf.regKey] = std::max(0, kCdna5HazardRules[hf.ruleIdx].cycles);
     // No longer a live hoist candidate once issued (decidePromote() must not try to
     // force it again).
     if (!node->hazardFlags.empty()) {
