@@ -570,6 +570,9 @@ protected:
 ///
 /// It is not the responsibility of the generator to mark the tensor as host or
 /// device modified.
+///
+/// For device fills the operation must be complete before the generator returns,
+/// or use the same HIP stream as the migratable memory object backing the tensor.
 template <typename T>
 using ValueGenerator = std::function<void(T* data, size_t count)>;
 
@@ -690,13 +693,17 @@ public:
         MigratableMemoryBase<T>& migratableMem = memory();
         if(hostFill)
         {
+            // Call will overwrite the whole allocation, mark host modified before getting the pointer
+            // to avoid synchronizing device-to-host copy when calling `hostData()`
             migratableMem.markHostModified();
-            generator(reinterpret_cast<T*>(migratableMem.hostData()), migratableMem.count());
+            generator(migratableMem.hostData(), migratableMem.count());
         }
         else
         {
+            // Call will overwrite the whole allocation, mark device modified before getting
+            // the pointer to avoid synchronizing host-to-device copy when calling `deviceData()`
             migratableMem.markDeviceModified();
-            generator(reinterpret_cast<T*>(migratableMem.deviceData()), migratableMem.count());
+            generator(static_cast<T*>(migratableMem.deviceData()), migratableMem.count());
         }
     }
 

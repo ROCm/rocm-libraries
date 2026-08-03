@@ -4,11 +4,14 @@
 #include <cmath>
 #include <gtest/gtest.h>
 
+#include <hip/hip_runtime.h>
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
+#include <numeric>
 #include <random>
 #include <stdexcept>
+#include <vector>
 
 using namespace hipdnn_data_sdk::utilities;
 using namespace hipdnn_data_sdk::types;
@@ -132,7 +135,7 @@ TEST(TestTensor, FillWithValuesHostGeneratorPacked)
 
     for(auto it{tensor.cbegin()}; it != tensor.cend(); ++it)
     {
-        auto val{(*reinterpret_cast<const float*>((*it)))};
+        auto val{(*static_cast<const float*>((*it)))};
         EXPECT_GE(val, min);
         EXPECT_LE(val, max);
     }
@@ -173,7 +176,7 @@ TEST(TestTensor, FillWithValuesHostGeneratorNonPacked)
 
     for(auto it{tensor.cbegin()}; it != tensor.cend(); ++it)
     {
-        auto val{(*reinterpret_cast<const float*>((*it)))};
+        auto val{(*static_cast<const float*>((*it)))};
         EXPECT_GE(val, min);
         EXPECT_LE(val, max);
     }
@@ -184,25 +187,29 @@ TEST(TestTensor, FillWithValuesDeviceGeneratorPacked)
     SKIP_IF_NO_DEVICES();
 
     Tensor<float> tensor({1, 2, 3, 4});
-    struct ZeroInitGpuGenerator
+
+    struct DeviceGpuGenerator
     {
         void operator()(float* data, size_t count) const
         {
-            const int zero = 0;
-            auto err = hipMemset(data, zero, count * sizeof(float));
+            std::vector<float> writeData(count);
+            std::iota(writeData.begin(), writeData.end(), 0.0f);
+
+            auto err = hipMemcpyWithStream(
+                data, writeData.data(), count * sizeof(float), hipMemcpyHostToDevice, nullptr);
             if(err != hipSuccess)
             {
-                throw std::runtime_error("hipMemset failed");
+                throw std::runtime_error("hipMemcpyWithStream failed");
             }
         }
     };
 
-    tensor.fillWithValues(ZeroInitGpuGenerator(), false);
+    tensor.fillWithValues(DeviceGpuGenerator(), false);
 
-    auto hostData = reinterpret_cast<float*>(tensor.rawHostData());
+    auto hostData = static_cast<float*>(tensor.rawHostData());
     for(size_t i = 0; i < tensor.elementCount(); i++)
     {
-        EXPECT_EQ(hostData[i], 0);
+        EXPECT_EQ(hostData[i], static_cast<float>(i));
     }
 }
 
@@ -211,25 +218,29 @@ TEST(TestTensor, FillWithValuesDeviceGeneratorNonPacked)
     SKIP_IF_NO_DEVICES();
 
     Tensor<float> tensor({1, 2, 3, 4}, {30, 15, 5, 1});
-    struct ZeroInitGpuGenerator
+
+    struct DeviceGpuGenerator
     {
         void operator()(float* data, size_t count) const
         {
-            const int zero = 0;
-            auto err = hipMemset(data, zero, count * sizeof(float));
+            std::vector<float> writeData(count);
+            std::iota(writeData.begin(), writeData.end(), 0.0f);
+
+            auto err = hipMemcpyWithStream(
+                data, writeData.data(), count * sizeof(float), hipMemcpyHostToDevice, nullptr);
             if(err != hipSuccess)
             {
-                throw std::runtime_error("hipMemset failed");
+                throw std::runtime_error("hipMemcpyWithStream failed");
             }
         }
     };
 
-    tensor.fillWithValues(ZeroInitGpuGenerator(), false);
+    tensor.fillWithValues(DeviceGpuGenerator(), false);
 
-    auto hostData = reinterpret_cast<float*>(tensor.rawHostData());
+    auto hostData = static_cast<float*>(tensor.rawHostData());
     for(size_t i = 0; i < tensor.elementCount(); i++)
     {
-        EXPECT_EQ(hostData[i], 0);
+        EXPECT_EQ(hostData[i], static_cast<float>(i));
     }
 }
 

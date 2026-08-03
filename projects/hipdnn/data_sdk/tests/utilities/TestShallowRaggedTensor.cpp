@@ -152,7 +152,7 @@ TEST(TestShallowRaggedTensor, FillWithValuesHostGenerator)
 
     for(auto it{tensor.cbegin()}; it != tensor.cend(); ++it)
     {
-        auto val{(*reinterpret_cast<const float*>((*it)))};
+        auto val{(*static_cast<const float*>((*it)))};
         EXPECT_GE(val, min);
         EXPECT_LE(val, max);
     }
