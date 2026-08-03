@@ -2154,7 +2154,13 @@ class KernelWriterAssembly(KernelWriter):
       for idx in kernel["ProblemType"]["IndicesBatch"]:
         if not isPackedIndex(kernel,idx):
           module.add(SMulI32(dst=sgpr(tmpSgpr), src0=sgpr(Batch), src1=0x8, comment="offset of global buffer address"))
-          module.add(SLoadB64(dst=sgpr("AddressD", 2), base=sgpr("AddressD",2), soffset=sgpr(tmpSgpr), comment="load global buffer D address"))
+          if self.states.archCaps["RequiresXCntForVolatileVMEM"]:
+            with self.allocTmpSgpr(2, tag="loadBatchedAddress_sgprAddressDTmp") as tmpSgprRes:
+              sgprIdx: int = tmpSgprRes.idx
+              module.add(SMovB64(dst=sgpr(sgprIdx, 2), src=sgpr("AddressD", 2)))
+              module.add(SLoadB64(dst=sgpr("AddressD", 2), base=sgpr(sgprIdx, 2), soffset=sgpr(tmpSgpr), comment="load global buffer D address"))
+          else:
+            module.add(SLoadB64(dst=sgpr("AddressD", 2), base=sgpr("AddressD",2), soffset=sgpr(tmpSgpr), comment="load global buffer D address"))
 
       # Only load C buffer address if Beta is used and potentially non-zero
       if kernel["ProblemType"]["UseBeta"]:
@@ -2165,7 +2171,13 @@ class KernelWriterAssembly(KernelWriter):
         for idx in kernel["ProblemType"]["IndicesBatch"]:
           if not isPackedIndex(kernel,idx):
             module.add(SMulI32(dst=sgpr(tmpSgpr), src0=sgpr(Batch), src1=0x8, comment="offset of global buffer address"))
-            module.add(SLoadB64(dst=sgpr("AddressC", 2), base=sgpr("AddressC",2), soffset=sgpr(tmpSgpr), comment="load global buffer C address"))
+            if self.states.archCaps["RequiresXCntForVolatileVMEM"]:
+              with self.allocTmpSgpr(2, tag="loadBatchedAddress_sgprAddressCTmp") as tmpSgprRes:
+                sgprIdx: int = tmpSgprRes.idx
+                module.add(SMovB64(dst=sgpr(sgprIdx, 2), src=sgpr("AddressC", 2)))
+                module.add(SLoadB64(dst=sgpr("AddressC", 2), base=sgpr(sgprIdx, 2), soffset=sgpr(tmpSgpr), comment="load global buffer C address"))
+            else:            
+              module.add(SLoadB64(dst=sgpr("AddressC", 2), base=sgpr("AddressC",2), soffset=sgpr(tmpSgpr), comment="load global buffer C address"))
 
         module.add(endCheckLabel)
 
@@ -2182,8 +2194,16 @@ class KernelWriterAssembly(KernelWriter):
     module.add(SMulI32(dst=sgpr(tmpSgpr), src0=sgpr(Batch), src1=0x8, comment="offset of global buffer address"))
     for idx in kernel["ProblemType"]["IndicesBatch"]:
       if not isPackedIndex(kernel,idx):
-        module.add(SLoadB64(dst=sgpr("AddressA", 2), base=sgpr("AddressA",2), soffset=sgpr(tmpSgpr), comment="load global buffer A address"))
-        module.add(SLoadB64(dst=sgpr("AddressB", 2), base=sgpr("AddressB",2), soffset=sgpr(tmpSgpr), comment="load global buffer B address"))
+        if self.states.archCaps["RequiresXCntForVolatileVMEM"]:
+          with self.allocTmpSgpr(2, tag="loadBatchedAddress_sgprAddressABTmp") as tmpSgprRes:
+            sgprIdx: int = tmpSgprRes.idx
+            module.add(SMovB64(dst=sgpr(sgprIdx, 2), src=sgpr("AddressA", 2)))
+            module.add(SLoadB64(dst=sgpr("AddressA", 2), base=sgpr(sgprIdx, 2), soffset=sgpr(tmpSgpr), comment="load global buffer A address"))
+            module.add(SMovB64(dst=sgpr(sgprIdx, 2), src=sgpr("AddressB", 2)))
+            module.add(SLoadB64(dst=sgpr("AddressB", 2), base=sgpr(sgprIdx, 2), soffset=sgpr(tmpSgpr), comment="load global buffer B address"))          
+        else:
+          module.add(SLoadB64(dst=sgpr("AddressA", 2), base=sgpr("AddressA",2), soffset=sgpr(tmpSgpr), comment="load global buffer A address"))
+          module.add(SLoadB64(dst=sgpr("AddressB", 2), base=sgpr("AddressB",2), soffset=sgpr(tmpSgpr), comment="load global buffer B address"))
 
     module.add(endCheckLabel)
 
@@ -2525,7 +2545,13 @@ class KernelWriterAssembly(KernelWriter):
         # load ws/ user args
         hbmArgs = Module("load HBM arguments")
         hbmArgs.addComment1("Load address of kernel arguments")
-        hbmArgs.add(self.argLoader.loadKernArg("KernArgAddress", "KernArgAddress", self.states.userArgsInfo.commonArgsSize, dword=2))
+        if self.states.archCaps["RequiresXCntForVolatileVMEM"]:
+          with self.allocTmpSgpr(2, tag="defineAndResources_sgprKernArgAddressTmp") as tmpSgprRes:
+            sgprIdx: int = tmpSgprRes.idx
+            hbmArgs.add(SMovB64(dst=sgpr(sgprIdx, 2), src=sgpr("KernArgAddress", 2), comment="XNACK protect for SMEM"))
+            hbmArgs.add(self.argLoader.loadKernArg("KernArgAddress", sgprIdx, self.states.userArgsInfo.commonArgsSize, dword=2))
+        else:
+          hbmArgs.add(self.argLoader.loadKernArg("KernArgAddress", "KernArgAddress", self.states.userArgsInfo.commonArgsSize, dword=2))
 
         moduleArgs.addModuleAsFlatItems(deepcopy(commonArgs))
         moduleArgs.add(SWaitCnt(kmcnt=0, comment="load args"))
@@ -13498,7 +13524,8 @@ class KernelWriterAssembly(KernelWriter):
       self.addSgprVarToPool("SrdWS")
 
     # Keep tmp SGPR usage lean for the common path.
-    with self.allocTmpSgpr(3, tag="computeStoreSrdStart_tmpSgprInfo") as tmpSgprInfo:
+    requiredNumSgpr = 4 if self.states.archCaps["RequiresXCntForVolatileVMEM"] else 3
+    with self.allocTmpSgpr(requiredNumSgpr, tag="computeStoreSrdStart_tmpSgprInfo") as tmpSgprInfo:
       tmpS0 = tmpSgprInfo.idx
       tmpS1 = tmpS0+1
       wgMT1 = tmpS0+2
@@ -13628,10 +13655,21 @@ class KernelWriterAssembly(KernelWriter):
               module.add(SMulI32(dst=sgpr(tmpS0), src0=8, src1=coord, comment="Compute stride in bytes into Pointer Array"))
               module.add(SAddU32(dst=sgpr(tmpS0), src0=sgpr(tmpS0), src1=sgpr("Address%s+0"%mat), comment="Offsetting to the location [Lower half of address]"))
               module.add(SAddCU32(dst=sgpr(tmpS1), src0=sgpr("Address%s+1"%mat), src1=0, comment="Offsetting to the location [Higher half of address]"))
-              module.add(SLoadB64(dst=sgpr(tmpS0, 2), base=sgpr(tmpS0, 2), soffset=0, comment="Load the Matrix Address in the Pointer Array"))
+              sgprSrdTmp = tmpS0
+              if self.states.archCaps["RequiresXCntForVolatileVMEM"]:
+                # wgMT1 (= tmpS0+2) holds wg1*MT1, used as coord only at i == Index1.
+                # Index1 is always 0 or 1 (inner free dimension of C), so by i == 2
+                # wgMT1 is dead. Reuse [wgMT1, wgMT1+1] as the xnack-safe load dst
+                # so it is disjoint from the base [tmpS0, tmpS1].
+                # wgMT1+1 is the 4th slot from the requiredNumSgpr=4 allocation above.
+                assert sgpr(wgMT1) != coord, \
+                    f"wgMT1 is still active as coord (Index1={kernel['ProblemType']['Index1']}); " \
+                    f"cannot reuse as xnack-safe dst"
+                sgprSrdTmp = wgMT1
+              module.add(SLoadB64(dst=sgpr(sgprSrdTmp, 2), base=sgpr(tmpS0, 2), soffset=0, comment="Load the Matrix Address in the Pointer Array"))
               module.add(SWaitCnt(kmcnt=0, comment="Wait for the Matrix Address Load from the Pointer Array"))
-              module.add(SAddU32(dst=sgpr("Srd%s+0"%mat), src0=sgpr("Srd%s+0"%mat), src1=sgpr(tmpS0), comment="Offsetting within the Batch Matrix [Lower half of address]"))
-              module.add(SAddCU32(dst=sgpr("Srd%s+1"%mat), src0=sgpr("Srd%s+1"%mat), src1=sgpr(tmpS1), comment="Offsetting within the Batch Matrix [Higher half of address]"))
+              module.add(SAddU32(dst=sgpr("Srd%s+0"%mat), src0=sgpr("Srd%s+0"%mat), src1=sgpr(sgprSrdTmp), comment="Offsetting within the Batch Matrix [Lower half of address]"))
+              module.add(SAddCU32(dst=sgpr("Srd%s+1"%mat), src0=sgpr("Srd%s+1"%mat), src1=sgpr(sgprSrdTmp+1), comment="Offsetting within the Batch Matrix [Higher half of address]"))
               # Now, we have starting matrix address of a specific batch in the corresponding Srd.
               # Load and apply batch offset for General Batched GEMM (C or D matrix) as necessary.
               # This block sits inside the generalBatchedGemmLoad label, which the GSU routing
