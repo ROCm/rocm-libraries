@@ -284,6 +284,8 @@ struct HandleImpl
     KernelCache cache;
     TargetProperties target_properties;
     mutable StreamTracker stream_tracker_;
+    std::shared_ptr<ScratchAllocation> active_scratch_;
+    std::size_t scratch_cap_ = 0;
 };
 
 Handle::Handle(miopenAcceleratorQueue_t stream) : impl(std::make_unique<HandleImpl>())
@@ -403,6 +405,27 @@ miopenAcceleratorQueue_t Handle::GetStream() const
 
 StreamTracker& Handle::GetStreamTracker() const { return impl->stream_tracker_; }
 
+std::shared_ptr<ScratchAllocation> Handle::GetScratchBuffer(std::size_t sz) const
+{
+    if(sz == 0)
+        return nullptr;
+
+    if(impl->scratch_cap_ == 0)
+        impl->scratch_cap_ = GetGlobalMemorySize() / 8;
+
+    if(sz > impl->scratch_cap_)
+        return nullptr;
+
+    if(impl->active_scratch_ && sz <= impl->active_scratch_->size)
+        return impl->active_scratch_;
+
+    auto alloc    = std::make_shared<ScratchAllocation>();
+    alloc->buffer = impl->allocator(sz);
+    alloc->size   = sz;
+    impl->active_scratch_ = alloc;
+    return alloc;
+}
+
 StreamTracker::Slot StreamTracker::acquire(const Handle& handle)
 {
     if(available_.empty())
@@ -411,7 +434,8 @@ StreamTracker::Slot StreamTracker::acquire(const Handle& handle)
         {
             if(hipStreamQuery(it->stream) == hipSuccess)
             {
-                available_.push_back(*it);
+                it->scratch.reset();
+                available_.push_back(std::move(*it));
                 it = draining_.erase(it);
             }
             else
@@ -421,7 +445,7 @@ StreamTracker::Slot StreamTracker::acquire(const Handle& handle)
 
     if(!available_.empty())
     {
-        auto slot = available_.back();
+        auto slot = std::move(available_.back());
         available_.pop_back();
         return slot;
     }
@@ -429,7 +453,7 @@ StreamTracker::Slot StreamTracker::acquire(const Handle& handle)
     int id = next_id_++;
     handle.ReserveExtraStreamsInPool(id);
     handle.SetStreamFromPool(id);
-    return {id, handle.GetStream()};
+    return {id, handle.GetStream(), {}};
 }
 
 void Handle::SetAllocator(miopenAllocatorFunction allocator,

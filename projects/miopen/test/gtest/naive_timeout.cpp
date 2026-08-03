@@ -42,6 +42,7 @@
 #include "../tensor_holder.hpp"
 
 MIOPEN_LIB_ENV_VAR(MIOPEN_NAIVE_TIMEOUT)
+MIOPEN_LIB_ENV_VAR(MIOPEN_NAIVE_TIMEOUT_FACTOR)
 
 namespace {
 
@@ -155,6 +156,27 @@ TEST(GPU_NaiveTimeout_FP32, FindSucceedsWithTimeoutEnabled)
     auto solvers = RunFind(handle);
 
     ASSERT_FALSE(solvers.empty()) << "miopenFindSolutions returned no results with timeout enabled";
+}
+
+// With MIOPEN_NAIVE_TIMEOUT_FACTOR=1 (0.01x budget), the wall-clock deadline expires
+// before the naive kernel can finish. Naive must be absent from the results.
+TEST(GPU_NaiveTimeout_FP32, NaiveSkippedWithTinyBudget)
+{
+    auto& handle_ref      = get_handle();
+    miopenHandle_t handle = &handle_ref;
+
+    ScopedFindDb no_cache;
+    ScopedEnvironment<bool> guard_naive(MIOPEN_NAIVE_TIMEOUT, true);
+    ScopedEnvironment<int> guard_factor(MIOPEN_NAIVE_TIMEOUT_FACTOR, 1);
+    auto solvers = RunFind(handle);
+
+    ASSERT_FALSE(solvers.empty()) << "miopenFindSolutions returned no results";
+    const bool any_naive = std::any_of(solvers.begin(), solvers.end(), IsNaive);
+    std::string all_names;
+    for(const auto& s : solvers)
+        all_names += (all_names.empty() ? "" : ", ") + s;
+    EXPECT_FALSE(any_naive) << "Naive solver should have been short-circuited with 1% budget"
+                            << "; got: [" << all_names << "]";
 }
 
 // CPU-only: verify that MIOPEN_NAIVE_TIMEOUT can be set and read back via the debug

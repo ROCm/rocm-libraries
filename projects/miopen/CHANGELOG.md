@@ -3,6 +3,11 @@
 
 Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/projects/MIOpen/en/latest/)
 
+## MIOpen for ROCm 10.1
+
+### Changed
+* [Conv] Naive convolution solvers are now time-bounded during find when a non-naive solver has already succeeded. The warmup run is launched on a separate stream with a budget of 3x the best non-naive time; if it exceeds this budget the solver is skipped. Set `MIOPEN_NAIVE_TIMEOUT=0` to disable this behavior.
+
 ## MIOpen 3.5.2 for ROCm 7.14.0
 ### Added
 * Added an informational log when the Composable Kernel (CK) dynamic library is loaded.
@@ -12,7 +17,6 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 
 ### Changed
 * [Conv] Load the Composable Kernel (CK) dynamic library during handle creation (`miopenCreate`) instead of on first CK use, so the one-time library-load cost is paid at a predictable setup point rather than as an unpredictable mid-run stall.
-* [Conv] Naive convolution solvers are now time-bounded during find when a non-naive solver has already succeeded. The warmup run is launched on a disposable stream with a budget of 3x the best non-naive time; if it exceeds this budget the solver is skipped. Set `MIOPEN_NAIVE_TIMEOUT=0` to disable this behavior.
 * [Conv] Refreshed the gfx942 SystemDB with updated tuned entries from recent perf-eval runs.
 * [Conv] Refined the 2D AI heuristics (Tunanet solver selection and kernel-tuning-network candidate ranking) with feature-engineered inputs for gfx942 and gfx950, improving selection for grouped implicit-GEMM convolutions.
 

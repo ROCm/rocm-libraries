@@ -18,7 +18,9 @@
 #include <miopen/kernel_tuning_mode.hpp>
 #include <miopen/mlo_internal.hpp>
 #include <miopen/perf_field.hpp>
+#include <miopen/conv/data_invoke_params.hpp>
 #include <miopen/conv/problem_description.hpp>
+#include <miopen/conv/wrw_invoke_params.hpp>
 #include <miopen/solution.hpp>
 #include <miopen/utility/modified_z.hpp>
 
@@ -214,22 +216,61 @@ static float TryNaiveWithTimeout(const Handle& handle,
                                  const AnyInvokeParams& invoke_ctx,
                                  float best_time)
 {
+    std::shared_ptr<ScratchAllocation> scratch;
+    AnyInvokeParams scratch_ctx;
+
+    if(invoke_ctx.IsOfType<conv::DataInvokeParams>())
+    {
+        auto params = invoke_ctx.CastTo<conv::DataInvokeParams>();
+        scratch     = handle.GetScratchBuffer(params.tensors.outDesc.GetNumBytes());
+        if(!scratch)
+            return -1.0f;
+        params.tensors.out = scratch->buffer.get();
+        scratch_ctx        = AnyInvokeParams{params};
+    }
+    else if(invoke_ctx.IsOfType<conv::WrWInvokeParams>())
+    {
+        auto params = invoke_ctx.CastTo<conv::WrWInvokeParams>();
+        scratch     = handle.GetScratchBuffer(params.tensors.dwDesc.GetNumBytes());
+        if(!scratch)
+            return -1.0f;
+        params.tensors.dw = scratch->buffer.get();
+        scratch_ctx       = AnyInvokeParams{params};
+    }
+    else
+        return -1.0f;
+
     auto& tracker = handle.GetStreamTracker();
     auto slot     = tracker.acquire(handle);
+    slot.scratch  = scratch;
 
     handle.SetStreamFromPool(slot.pool_id);
     handle.EnableProfiling(false);
 
+    auto guard = [&] {
+        handle.SetStreamFromPool(0);
+        handle.EnableProfiling(true);
+    };
+
     HipEventPtr ev_start = make_hip_event();
     HipEventPtr ev_stop  = make_hip_event();
 
-    auto ev_status = hipEventRecord(ev_start.get(), slot.stream);
-    if(ev_status != hipSuccess)
-        MIOPEN_THROW_HIP_STATUS(ev_status, "Failed to record naive start event");
-    invoker(handle, invoke_ctx);
-    ev_status = hipEventRecord(ev_stop.get(), slot.stream);
-    if(ev_status != hipSuccess)
-        MIOPEN_THROW_HIP_STATUS(ev_status, "Failed to record naive stop event");
+    try
+    {
+        auto ev_status = hipEventRecord(ev_start.get(), slot.stream);
+        if(ev_status != hipSuccess)
+            MIOPEN_THROW_HIP_STATUS(ev_status, "Failed to record naive start event");
+        invoker(handle, scratch_ctx);
+        ev_status = hipEventRecord(ev_stop.get(), slot.stream);
+        if(ev_status != hipSuccess)
+            MIOPEN_THROW_HIP_STATUS(ev_status, "Failed to record naive stop event");
+    }
+    catch(...)
+    {
+        guard();
+        tracker.abandon(slot);
+        throw;
+    }
 
     const float timeout_factor =
         static_cast<float>(env::value(MIOPEN_NAIVE_TIMEOUT_FACTOR)) / 100.0f;
@@ -247,8 +288,7 @@ static float TryNaiveWithTimeout(const Handle& handle,
         std::this_thread::yield();
     }
 
-    handle.SetStreamFromPool(0);
-    handle.EnableProfiling(true);
+    guard();
 
     if(finished)
     {

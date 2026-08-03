@@ -147,3 +147,63 @@ TEST_F(GPU_StreamTracker_FP32, CascadeAbandonReclaim)
         tracker.release(s);
     }
 }
+
+TEST_F(GPU_StreamTracker_FP32, ScratchAllocateAndReuse)
+{
+    auto s1 = handle.GetScratchBuffer(1024);
+    ASSERT_NE(s1, nullptr);
+    EXPECT_GE(s1->size, 1024u);
+
+    auto s2 = handle.GetScratchBuffer(s1->size);
+    EXPECT_EQ(s1, s2);
+
+    auto s3 = handle.GetScratchBuffer(1);
+    EXPECT_EQ(s1, s3);
+}
+
+TEST_F(GPU_StreamTracker_FP32, ScratchGrows)
+{
+    auto s1 = handle.GetScratchBuffer(1);
+    ASSERT_NE(s1, nullptr);
+    auto* raw1 = s1->buffer.get();
+
+    auto s2 = handle.GetScratchBuffer(s1->size + 1);
+    ASSERT_NE(s2, nullptr);
+    EXPECT_NE(s2->buffer.get(), raw1);
+    EXPECT_GE(s2->size, s1->size + 1);
+}
+
+TEST_F(GPU_StreamTracker_FP32, ScratchReturnsNullOnOversize)
+{
+    auto s = handle.GetScratchBuffer(handle.GetGlobalMemorySize());
+    EXPECT_EQ(s, nullptr);
+}
+
+TEST_F(GPU_StreamTracker_FP32, ScratchReturnsNullOnZero)
+{
+    auto s = handle.GetScratchBuffer(0);
+    EXPECT_EQ(s, nullptr);
+}
+
+TEST_F(GPU_StreamTracker_FP32, ScratchSurvivesAbandon)
+{
+    auto prev     = handle.GetScratchBuffer(1);
+    const auto sz = (prev ? prev->size : 0) + 65536;
+    prev.reset();
+
+    auto scratch = handle.GetScratchBuffer(sz);
+    ASSERT_NE(scratch, nullptr);
+    EXPECT_EQ(scratch.use_count(), 2); // local + handle active
+
+    auto slot    = tracker.acquire(handle);
+    slot.scratch = scratch;
+    EXPECT_EQ(scratch.use_count(), 3); // local + handle + slot
+
+    tracker.abandon(std::move(slot));
+    EXPECT_EQ(scratch.use_count(), 3); // local + handle + draining
+
+    // No work on stream → hipStreamQuery succeeds → reclaim resets scratch
+    auto reclaimed = tracker.acquire(handle);
+    EXPECT_EQ(scratch.use_count(), 2); // local + handle
+    tracker.release(reclaimed);
+}
