@@ -10,7 +10,6 @@ Documentation for hipFFT is available at
 ### Added
 
 * Support for the gfx1250 architecture.
-* Added amdgcnspirv architecture to client programs, so that they are functional even on gfx architectures that have not been explicitly compiled in.
 
 ## hipFFT 1.0.23 for ROCm 7.13
 

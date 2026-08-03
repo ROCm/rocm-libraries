@@ -22,6 +22,8 @@
  * ************************************************************************ */
 #include <gtest/gtest.h>
 
+#include <sstream>
+
 #include "TestHelpers.hpp"
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/core/PassManager.hpp"
@@ -221,6 +223,20 @@ class DAGSchedulerPassTest : public ::testing::Test {
                                                int ldsToken) {
         StinkyInstruction* inst = createTensorLoadInBlock(targetBB, arch, src0Reg, src1Reg);
         inst->addDestReg(StinkyRegister(RegType::LDS, ldsToken, 1));
+        return inst;
+    }
+
+    // global_prefetch_b8 (gfx1250 gl2-prefetch): reads vaddr = v[vaddrReg:vaddrReg+2)
+    // (64-bit vgpr) and saddr = s[saddrReg:saddrReg+2) (64-bit sreg). No destination,
+    // not HasSideEffect, so the scheduler treats it as a movable op. Used to exercise
+    // the ValuVgprToVmemAddr hazard rule against a prefetch consumer.
+    StinkyInstruction* createGlobalPrefetchB8(BasicBlock* targetBB, int vaddrReg, int saddrReg) {
+        AsmIRBuilder builder(*targetBB, arch);
+        const HwInstDesc* desc = getMCIDByUOp(GFX::global_prefetch_b8, arch);
+        if (!desc) return nullptr;
+        StinkyInstruction* inst = builder.create(desc);
+        inst->addSrcReg(StinkyRegister("v", vaddrReg, 2));
+        inst->addSrcReg(StinkyRegister("s", saddrReg, 2));
         return inst;
     }
 
@@ -929,6 +945,163 @@ TEST_F(DAGSchedulerPassTest, SgprToTensorLoadHazard_AtLeast8CycleGap) {
     int gap = 0;
     for (int i = saluPos + 1; i < tensorPos; i++) gap += cyclesAt[i];
     EXPECT_GE(gap, 8) << "tensor_load must be >= 8 cycles after the SALU writing its SGPR";
+}
+
+// Two-instruction SGPR address (e.g. low/high 64-bit split) where a second WMMA
+// becomes ready right as WMMA #0's window closes, stealing the slot the address
+// SALUs needed -- both must still end up >= 8 cycles ahead of the tensor_load.
+TEST_F(DAGSchedulerPassTest, SgprPairToTensorLoadHazard_StolenWindow_AtLeast8CycleGap) {
+    BasicBlock* body = bb;
+    body->addSuccessor(body);
+
+    auto createScalarAdd = [&](int dst, int src0, int src1) {
+        AsmIRBuilder builder(*body, arch);
+        StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::s_add_u32, arch));
+        inst->addDestReg(StinkyRegister("s", dst, 1));
+        inst->addSrcReg(StinkyRegister("s", src0, 1));
+        inst->addSrcReg(StinkyRegister("s", src1, 1));
+        return inst;
+    };
+
+    // WMMA #0 fires first (Phase B); latency=8 keeps its co-issue window open.
+    createWmmaScaleF8_in(body, /*destStart=*/12, /*src0Start=*/50);
+
+    // RAW chain a0->a1->a2->a3: fills positions 2,4,6,8 exactly, saturating the window.
+    const int kChain = 4;
+    for (int i = 0; i < kChain; i++) {
+        const int src0 = (i == 0) ? 20 : (100 + i - 1);
+        StinkyInstruction* a = createScalarAdd(/*dst=*/100 + i, src0, /*src1=*/21);
+        a->issueCycles = 1;
+        a->latencyCycles = 2;
+    }
+
+    // Independent WMMA #1: ready the instant WMMA #0's window closes.
+    createWmmaScaleF8_in(body, /*destStart=*/200, /*src0Start=*/220);
+
+    // The hazard pair: address low/high, independently computed (no RAW between them),
+    // both feeding the same tensor_load's 4-SGPR base address s[150:154).
+    StinkyInstruction* addLow = createScalarAdd(/*dst=*/150, /*src0=*/160, /*src1=*/161);
+    StinkyInstruction* addHigh = createScalarAdd(/*dst=*/151, /*src0=*/162, /*src1=*/163);
+
+    createMovableTensorLoad(body, /*s0=*/150, /*s1=*/158, /*ldsToken=*/1);
+
+    int beforeCount = countStinkyInstructions(*body);
+    runPassWithUnrollGemm();
+    EXPECT_EQ(countStinkyInstructions(*body), beforeCount)
+        << "scheduling must not drop instructions";
+
+    int addLowPos = -1, addHighPos = -1, tensorPos = -1, idx = 0;
+    std::vector<int> cyclesAt;
+    for (const IRBase& ir : *body) {
+        if (ir.getType() != IRBase::IRType::StinkyTofu) continue;
+        const auto* inst = cast<StinkyInstruction>(&ir);
+        cyclesAt.push_back(isMatrixInstruction(*inst) ? inst->latencyCycles : inst->issueCycles);
+        if (inst == addLow) addLowPos = idx;
+        if (inst == addHigh) addHighPos = idx;
+        if (isTensorLoad(*inst)) tensorPos = idx;
+        idx++;
+    }
+    ASSERT_GE(addLowPos, 0);
+    ASSERT_GE(addHighPos, 0);
+    ASSERT_GE(tensorPos, 0);
+    ASSERT_LT(addLowPos, tensorPos) << "low-address SALU must precede the tensor_load";
+    ASSERT_LT(addHighPos, tensorPos) << "high-address SALU must precede the tensor_load";
+
+    const int laterProducerPos = std::max(addLowPos, addHighPos);
+    int gap = 0;
+    for (int i = laterProducerPos + 1; i < tensorPos; i++) gap += cyclesAt[i];
+    EXPECT_GE(gap, 8) << "tensor_load must be >= 8 cycles after BOTH address SALUs, "
+                         "including whichever one was scheduled later";
+}
+
+// Forces Phase G to fire while a SaluSgprToMemAddr gate is still live. Phase G's
+// wait is a clock-only advance with no emitted instruction, so this asserts on
+// the PASS_DEBUG trace instead of instruction order.
+TEST_F(DAGSchedulerPassTest, QueueFullDuringHazard_PhaseGPaysHazardWait) {
+    BasicBlock* body = bb;
+    body->addSuccessor(body);
+
+    // Occupies the single global-read credit slot (unrelated address).
+    createMovableTensorLoad(body, /*s0=*/40, /*s1=*/48, /*ldsToken=*/1);
+
+    AsmIRBuilder builder(*body, arch);
+    StinkyInstruction* salu = builder.create(getMCIDByUOp(GFX::s_mov_b32, arch));
+    salu->addDestReg(StinkyRegister("s", 0, 1));
+    salu->addSrcReg(StinkyRegister(0));
+
+    // Hazarded: address s[0:4) written by the SALU above; credit pool still full.
+    createMovableTensorLoad(body, /*s0=*/0, /*s1=*/4, /*ldsToken=*/2);
+
+    PassManagerDebugConfig::addDebugOnly("StinkyDAGSchedulerPass");
+    std::ostringstream captured;
+    std::streambuf* oldBuf = std::cerr.rdbuf(captured.rdbuf());
+    runPassWithGlobalReadThrottle(/*depth=*/1, /*drainLatency=*/6);
+    std::cerr.rdbuf(oldBuf);
+    PassManagerDebugConfig::clearDebugOnly();
+
+    const std::string trace = captured.str();
+    const std::string marker = "Phase G fallback pick";
+    const size_t phaseGPos = trace.find(marker);
+    ASSERT_NE(phaseGPos, std::string::npos)
+        << "expected the credit-pool-exhaustion scenario to force Phase G; trace:\n"
+        << trace;
+
+    const std::string waitMarker = "wait=";
+    const size_t waitPos = trace.find(waitMarker, phaseGPos);
+    ASSERT_NE(waitPos, std::string::npos)
+        << "Phase G must record the hazard wait it paid before issuing (regression: it used "
+           "to pay only the credit-pool drain wait and skip the hazard gate entirely); trace:\n"
+        << trace;
+    const int paidWait = std::stoi(trace.substr(waitPos + waitMarker.size()));
+
+    // Safe clock is >= 9 (gate stamped at clock 1); Phase G is reached at clock 2, so
+    // it must pay >= 7 -- the pre-fix code paid only the credit-pool wait (6).
+    EXPECT_GE(paidWait, 7) << "Phase G must pay the full outstanding SaluSgprToMemAddr hazard "
+                              "wait, not just the credit-pool drain wait";
+}
+
+// VGPR->global_prefetch_b8 address hazard: a VALU that writes a VGPR the prefetch reads
+// as its vaddr must be separated from that prefetch by the ValuVgprToVmemAddr gap (16
+// cycles). Same structure as SgprToTensorLoadHazard, but exercises the vgpr-address rule
+// against a global_prefetch_b8 consumer. Regression for the bug where the prefetch was
+// missing IF_GLOBALLoad, so isBufferMemLoad (the rule's consumer predicate) never matched
+// it and the gate was skipped -- the prefetch could sit < 16 cycles after its address VALU.
+TEST_F(DAGSchedulerPassTest, VgprToGlobalPrefetchHazard_AtLeast16CycleGap) {
+    BasicBlock* body = bb;
+    body->addSuccessor(body);
+
+    // Movable ds_loads as fill work so the 16-cycle gap is paid by real intervening
+    // instructions (observable in emitted order rather than an invisible stall). Each
+    // ds_load_b128 is issueCycles=1, so >= 16 are needed to cover the 16-cycle gate; use
+    // the default ds in-flight queue depth (16) worth so they all pack between.
+    for (int i = 0; i < 16; i++)
+        createMovableDsLoad(/*destReg=*/8 + i * 4, /*addrReg=*/60, /*ldsToken=*/i + 2);
+
+    // VALU writes v100; prefetch reads v[100:102) as vaddr, so v100 is the hazard register.
+    StinkyInstruction* valu = createVAddInBlock(body, arch, /*destReg=*/100, /*src0Reg=*/101,
+                                                /*src1Reg=*/102);
+    StinkyInstruction* prefetch = createGlobalPrefetchB8(body, /*vaddrReg=*/100, /*saddrReg=*/0);
+
+    runPassWithGlobalReadThrottle(/*depth=*/4, /*drainLatency=*/8);
+
+    int valuPos = -1, prefetchPos = -1, idx = 0;
+    std::vector<int> cyclesAt;
+    for (const IRBase& ir : *body) {
+        if (ir.getType() != IRBase::IRType::StinkyTofu) continue;
+        const auto* inst = cast<StinkyInstruction>(&ir);
+        cyclesAt.push_back(isMatrixInstruction(*inst) ? inst->latencyCycles : inst->issueCycles);
+        if (inst == valu) valuPos = idx;
+        if (inst == prefetch) prefetchPos = idx;
+        idx++;
+    }
+    ASSERT_GE(valuPos, 0);
+    ASSERT_GE(prefetchPos, 0);
+    ASSERT_LT(valuPos, prefetchPos) << "VALU must be scheduled before the prefetch it feeds";
+
+    int gap = 0;
+    for (int i = valuPos + 1; i < prefetchPos; i++) gap += cyclesAt[i];
+    EXPECT_GE(gap, 16) << "global_prefetch_b8 must be >= 16 cycles after the VALU writing its "
+                          "vaddr VGPR";
 }
 
 // ---------------------------------------------------------------------------
