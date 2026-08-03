@@ -419,9 +419,9 @@ std::shared_ptr<ScratchAllocation> Handle::GetScratchBuffer(std::size_t sz) cons
     if(impl->active_scratch_ && sz <= impl->active_scratch_->size)
         return impl->active_scratch_;
 
-    auto alloc    = std::make_shared<ScratchAllocation>();
-    alloc->buffer = impl->allocator(sz);
-    alloc->size   = sz;
+    auto alloc            = std::make_shared<ScratchAllocation>();
+    alloc->buffer         = impl->allocator(sz);
+    alloc->size           = sz;
     impl->active_scratch_ = alloc;
     return alloc;
 }
