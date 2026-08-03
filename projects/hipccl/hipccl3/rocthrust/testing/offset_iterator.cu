@@ -43,7 +43,7 @@ void TestOffsetIteratorTraits()
 
   static_assert(_THRUST_STD::is_same_v<thrust::iterator_traversal_t<it>, thrust::random_access_traversal_tag>);
 
-  static_assert(::internal::is_cpp17_random_access_iterator<it>::value);
+  static_assert(_THRUST_STD::__has_random_access_traversal<it>);
 
 #if _THRUST_HAS_DEVICE_SYSTEM_STD || THRUST_STD_VER >= 2020
   static_assert(_THRUST_STD::output_iterator<it, int>);
