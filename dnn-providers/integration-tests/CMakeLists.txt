@@ -58,6 +58,8 @@ endif()
 
 option(BUILD_ADDRESS_SANITIZER "Build with Address Sanitizer enabled" OFF)
 
+option(USE_ROCRAND "Use rocRAND for random GPU data generation" ON)
+
 include(GNUInstallDirs)
 include(ClangTidy)
 include(ClangCheck)
@@ -105,6 +107,12 @@ if(NOT TARGET hipdnn_plugin_sdk)
 endif()
 
 find_package(Threads REQUIRED)
+
+find_package(rocrand)
+if(USE_ROCRAND AND NOT TARGET roc::rocrand)
+    message(WARNING "rocRAND not found, falling back to CPU random number generation")
+    set(USE_ROCRAND OFF)
+endif()
 
 include(Dependencies)
 fetch_gtest_dependency()
