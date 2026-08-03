@@ -93,6 +93,9 @@ not symbol links and are not checked. For a JSON report, pass `--format json`
 and choose a JSON `--output` path. The command exits with status 1 when it finds
 a broken link.
 
+Run `python tools/test_check_doc_symbols.py` to exercise both successful and
+broken symbol links through the complete local `uvx` and Sphinx command path.
+
 This command is local tooling only; it is not wired into CI.
 
 ## Byte-identity gate (cross-engine)

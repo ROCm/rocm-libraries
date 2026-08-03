@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -122,6 +124,69 @@ class CheckDocSymbolsTest(unittest.TestCase):
         self.assertEqual(broken[0].line, 11)
         self.assertEqual(broken[0].role, "func")
         self.assertEqual(broken[0].target, "pkg.missing")
+
+
+class CheckDocSymbolsCliTest(unittest.TestCase):
+    def _run_checker(
+        self, reference: str
+    ) -> tuple[subprocess.CompletedProcess[str], str]:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            docs_root = root / "docs"
+            python_root = root / "python"
+            package = python_root / "pkg"
+            docs_root.mkdir()
+            package.mkdir(parents=True)
+            (docs_root / "guide.md").write_text(
+                f"# Guide\n\n{{py:func}}`{reference}`\n", encoding="utf-8"
+            )
+            (package / "__init__.py").write_text(
+                "def available():\n    return None\n", encoding="utf-8"
+            )
+            report_path = root / "report.txt"
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(Path(__file__).with_name("check_doc_symbols.py")),
+                    "--docs-root",
+                    str(docs_root),
+                    "--python-root",
+                    str(python_root),
+                    "--work-dir",
+                    str(root / "work"),
+                    "--output",
+                    str(report_path),
+                ],
+                capture_output=True,
+                check=False,
+                text=True,
+            )
+            if not report_path.is_file():
+                self.fail(
+                    "checker did not create its report\n"
+                    f"stdout:\n{result.stdout}\n"
+                    f"stderr:\n{result.stderr}"
+                )
+            report = report_path.read_text(encoding="utf-8")
+        return result, report
+
+    def test_cli_accepts_resolvable_symbol(self) -> None:
+        result, report = self._run_checker("pkg.available")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Sphinx symbol references: 1", report)
+        self.assertIn("broken references: 0", report)
+
+    def test_cli_reports_missing_symbol_and_exits_one(self) -> None:
+        result, report = self._run_checker("pkg.missing")
+
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("Sphinx symbol references: 1", report)
+        self.assertIn("broken references: 1", report)
+        self.assertIn(
+            "docs/guide.md:3: error: unresolved py:func target 'pkg.missing'",
+            report,
+        )
 
 
 if __name__ == "__main__":
