@@ -211,6 +211,25 @@ auto GetSubbatchTestCase2D()
     };
 }
 
+// 3D int8 forward with int8_t output, both NCDHW and NDHWC layouts.
+// C<=16 keeps num_add < int8_max=127 so the test data generator does not
+// overflow the int8_t accumulator path.
+auto GetConvTestCases3dInt8()
+{
+    using TestCase = miopen::unit_tests::ConvTestCase;
+    using TDP      = miopen::unit_tests::TensorDescriptorParams;
+    using CDP      = miopen::unit_tests::ConvolutionDescriptorParams;
+    return std::vector{
+        // clang-format off
+        TestCase{{1, 16, 5, 14, 14}, {8, 16, 1, 1, 1}, {0, 0, 0}, {1, 1, 1}, {1, 1, 1}, miopenInt8, miopenInt8, miopenInt8},
+        TestCase{TDP{miopenInt8, miopenTensorNDHWC, {1, 16, 5, 14, 14}},
+                 TDP{miopenInt8, miopenTensorNDHWC, {8, 16, 1, 1, 1}},
+                 miopenInt8,
+                 CDP{{0, 0, 0}, {1, 1, 1}, {1, 1, 1}}},
+        // clang-format on
+    };
+}
+
 } // namespace
 
 using GPU_UnitTestConvSolverDirectNaiveFwd_FP16  = GPU_UnitTestConvSolverFwd_FP16;
@@ -314,3 +333,10 @@ INSTANTIATE_TEST_SUITE_P(FullSubbatch2D,
                          testing::Combine(testing::Values(GetTestParams()),
                                           testing::Values(miopenConvolutionAlgoDirect),
                                           testing::ValuesIn(GetSubbatchTestCase2D())));
+
+// Smoke: 3D int8 fwd with int8_t output, NCDHW and NDHWC layouts
+INSTANTIATE_TEST_SUITE_P(Smoke3dInt8,
+                         GPU_UnitTestConvSolverDirectNaiveFwd_I8,
+                         testing::Combine(testing::Values(GetTestParams()),
+                                          testing::Values(miopenConvolutionAlgoDirect),
+                                          testing::ValuesIn(GetConvTestCases3dInt8())));
