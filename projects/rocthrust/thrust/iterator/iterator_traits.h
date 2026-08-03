@@ -272,18 +272,18 @@ struct iterator_traversal<_THRUST_LIBCXX::tabulate_output_iterator<Fn, Index>>
   using type = random_access_traversal_tag;
 };
 
-template <class Iter, class Fn>
-struct iterator_system<_THRUST_LIBCXX::transform_output_iterator<Iter, Fn>> : iterator_system<Iter>
+template <class Fn, class Iter>
+struct iterator_system<_THRUST_LIBCXX::transform_output_iterator<Fn, Iter>> : iterator_system<Iter>
 {};
-template <class Iter, class Fn>
-struct iterator_traversal<_THRUST_LIBCXX::transform_output_iterator<Iter, Fn>> : iterator_traversal<Iter>
+template <class Fn, class Iter>
+struct iterator_traversal<_THRUST_LIBCXX::transform_output_iterator<Fn, Iter>> : iterator_traversal<Iter>
 {};
 
-template <class Iter, class Fn>
-struct iterator_system<_THRUST_LIBCXX::transform_iterator<Iter, Fn>> : iterator_system<Iter>
+template <class Fn, class Iter>
+struct iterator_system<_THRUST_LIBCXX::transform_iterator<Fn, Iter>> : iterator_system<Iter>
 {};
-template <class Iter, class Fn>
-struct iterator_traversal<_THRUST_LIBCXX::transform_iterator<Iter, Fn>> : iterator_traversal<Iter>
+template <class Fn, class Iter>
+struct iterator_traversal<_THRUST_LIBCXX::transform_iterator<Fn, Iter>> : iterator_traversal<Iter>
 {};
 
 THRUST_NAMESPACE_END
