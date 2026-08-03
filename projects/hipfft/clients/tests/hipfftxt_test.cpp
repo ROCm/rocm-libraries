@@ -1173,18 +1173,10 @@ static void verify_device_side_content(const hipfftLibXtDesc_wrapper_t& desc,
         auto inplace_desc = make_xt_desc(params, plan, HIPFFT_XT_FORMAT_INPLACE);
         ASSERT_TRUE(inplace_desc) << "hipfftXtMalloc for INPLACE descriptor unexpectedly failed";
         hipfft_rt = hipfftXtMemcpy(plan, inplace_desc, desc, HIPFFT_COPY_DEVICE_TO_DEVICE);
-        if constexpr(rocfft_backend)
-        {
-            ASSERT_EQ(hipfft_rt, HIPFFT_NOT_IMPLEMENTED)
-                << "hipfftXtMemcpy D2D returned code " << hipfftResult_string(hipfft_rt);
-        }
-        else
-        {
-            ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS)
-                << "hipfftXtMemcpy D2D failed with code " << hipfftResult_string(hipfft_rt);
-            verify_data_distribution(
-                inplace_desc, tmp_host_buf[0], params, desc_io, min_probes_per_dev_for_xt);
-        }
+        ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS)
+            << "hipfftXtMemcpy D2D failed with code " << hipfftResult_string(hipfft_rt);
+        verify_data_distribution(
+            inplace_desc, tmp_host_buf[0], params, desc_io, min_probes_per_dev_for_xt);
         if(verbose)
             std::cout << "Verified D2D copy from INPLACE_SHUFFLED descriptor to INPLACE descriptor."
                       << std::endl;

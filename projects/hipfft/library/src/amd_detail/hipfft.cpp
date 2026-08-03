@@ -109,18 +109,15 @@ inline rocfft_result_placement placement_from_format(const hipfftXtSubFormat& fo
     switch(format)
     {
     case HIPFFT_XT_FORMAT_INPLACE:
-        [[fallthrough]];
     case HIPFFT_XT_FORMAT_INPLACE_SHUFFLED:
         return rocfft_placement_inplace;
     case HIPFFT_XT_FORMAT_INPUT:
-        [[fallthrough]];
     case HIPFFT_XT_FORMAT_OUTPUT:
         return rocfft_placement_notinplace;
     case HIPFFT_XT_FORMAT_1D_INPUT_SHUFFLED:
-        // TO DO: figure this out if ever implemented
+        // TODO: figure this out if ever implemented
         throw HIPFFT_NOT_IMPLEMENTED;
     case HIPFFT_FORMAT_UNDEFINED:
-        [[fallthrough]];
     default:
         throw std::invalid_argument("placement_from_format: invalid input format");
     }
@@ -131,8 +128,7 @@ struct hipfft_brick
     hipfft_brick(const std::vector<size_t>& lower,
                  const std::vector<size_t>& upper,
                  const std::vector<size_t>& strides,
-                 int                        _device_id,
-                 bool                       user_defined = false)
+                 int                        _device_id)
         : device_id(_device_id)
     {
         if(lower.empty() || lower.size() != upper.size() || lower.size() != strides.size())
@@ -141,38 +137,6 @@ struct hipfft_brick
             // internal error
             throw std::invalid_argument(
                 "hipfft_brick: lower, upper, and strides must be non-empty and of equal size");
-        }
-        if(!user_defined)
-        {
-            // current implementation assumes sorted (decreasing) strides and
-            // unit stride for the fastest-moving dimension (last in row-major order)
-            // for all library-defined bricks. Verify this here: it's a logic error if
-            // not verified
-            if(!std::is_sorted(
-                   strides.begin(), strides.end(), [](size_t a, size_t b) { return a >= b; })
-               || strides.back() != 1)
-            {
-                throw std::invalid_argument(
-                    "hipfft_brick: strides must be sorted in decreasing order "
-                    "and the last stride must be 1");
-            }
-            for(size_t dim = 0; dim < strides.size() - 1; ++dim)
-            {
-                if(strides[dim] % strides[dim + 1] != 0)
-                {
-                    throw std::invalid_argument(
-                        "hipfft_brick: strides must be multiples of the next "
-                        "stride for all dimensions");
-                }
-                if(strides[dim] / strides[dim + 1] < upper[dim + 1] - lower[dim + 1])
-                {
-                    throw std::invalid_argument(
-                        "hipfft_brick: embedding length for dimension " + std::to_string(dim)
-                        + " is smaller than logical length: "
-                        + std::to_string(strides[dim] / strides[dim + 1]) + " < "
-                        + std::to_string(upper[dim + 1] - lower[dim + 1]));
-                }
-            }
         }
         axes.reserve(lower.size());
         for(size_t dim = 0; dim < lower.size(); ++dim)
@@ -188,6 +152,14 @@ struct hipfft_brick
             throw std::out_of_range("hipfft_brick: embedding_length: dim out of range");
         if(dim == 0)
             return axes[0].span();
+
+        if(!(axes[dim - 1].stride > axes[dim].stride && axes[dim - 1].stride % axes[dim].stride == 0
+             && axes[dim - 1].stride / axes[dim].stride >= axes[dim].span()))
+        {
+            throw std::runtime_error(
+                "hipfft_brick::embedding_length: invalid stride relationship between dimensions "
+                + std::to_string(dim - 1) + " and " + std::to_string(dim));
+        }
         // note: multiplicity of strides is guaranteed at construction
         return axes[dim - 1].stride / axes[dim].stride;
     }
@@ -268,6 +240,90 @@ struct hipfft_brick
         return spans;
     }
 
+    bool is_empty() const
+    {
+        return std::any_of(axes.begin(), axes.end(), [](const axis_t& a) { return a.span() == 0; });
+    }
+
+    // Returns the sub-brick of *this whose logical range is common to other.
+    // Retains this brick's strides and device_id; may be empty (use is_empty()).
+    hipfft_brick get_overlap_with(const hipfft_brick& other) const
+    {
+        if(axes.size() != other.axes.size())
+            throw std::invalid_argument("hipfft_brick::get_overlap_with: rank mismatch");
+        std::vector<size_t> lower(axes.size()), upper(axes.size()), strides(axes.size());
+        for(size_t dim = 0; dim < axes.size(); ++dim)
+        {
+            lower[dim]   = std::max(axes[dim].lower, other.axes[dim].lower);
+            upper[dim]   = std::max(std::min(axes[dim].upper, other.axes[dim].upper), lower[dim]);
+            strides[dim] = axes[dim].stride;
+        }
+        return hipfft_brick(lower, upper, strides, device_id);
+    }
+
+    // Strip unit-span dimensions shared by all bricks, then collapse adjacent
+    // dimensions (dim, dim+1) where all bricks have identical lower/upper
+    // bounds and embedding lengths at dim+1.
+    template <typename... Args>
+    static void collapse_matching_axes(Args&... args)
+    {
+        std::vector<std::reference_wrapper<hipfft_brick>> targets;
+        auto                                              collect = [&targets](auto& arg) {
+            using T = std::decay_t<decltype(arg)>;
+            static_assert(std::is_same<T, hipfft_brick>::value
+                              || std::is_same<T, std::vector<hipfft_brick>>::value,
+                          "collapse_matching_axes: each argument must be hipfft_brick& "
+                          "or std::vector<hipfft_brick>&");
+            if constexpr(std::is_same<T, hipfft_brick>::value)
+                targets.push_back(arg);
+            else
+                targets.insert(targets.end(), arg.begin(), arg.end());
+        };
+        (collect(args), ...);
+
+        if(targets.size() < 2)
+            throw std::invalid_argument(
+                "collapse_matching_axes: need at least two bricks to collapse");
+
+        if(std::any_of(targets.begin() + 1, targets.end(), [&](const hipfft_brick& brick) {
+               return brick.full_rank() != targets[0].get().full_rank();
+           }))
+            throw std::invalid_argument("collapse_matching_axes: rank mismatch");
+
+        for(size_t dim = 0; dim < targets[0].get().full_rank();)
+        {
+            if(std::all_of(targets.begin(), targets.end(), [dim](const hipfft_brick& brick) {
+                   return brick.axes[dim].span() == 1;
+               }))
+            {
+                std::for_each(targets.begin(), targets.end(), [dim](hipfft_brick& brick) {
+                    brick.axes.erase(brick.axes.begin() + dim);
+                });
+                continue;
+            }
+            while(
+                dim < targets[0].get().full_rank() - 1
+                && std::all_of(
+                    targets.begin() + 1, targets.end(), [dim, &targets](const hipfft_brick& brick) {
+                        return brick.axes[dim + 1].lower == targets[0].get().axes[dim + 1].lower
+                               && brick.axes[dim + 1].upper == targets[0].get().axes[dim + 1].upper
+                               && brick.embedding_length(dim + 1)
+                                      == targets[0].get().embedding_length(dim + 1);
+                    }))
+            {
+                const auto multiplier = targets[0].get().embedding_length(dim + 1);
+                for(auto& target : targets)
+                {
+                    target.get().axes[dim].stride = target.get().axes[dim + 1].stride;
+                    target.get().axes[dim].lower *= multiplier;
+                    target.get().axes[dim].upper *= multiplier;
+                    target.get().axes.erase(target.get().axes.begin() + dim + 1);
+                }
+            }
+            ++dim;
+        }
+    }
+
 private:
     struct axis_t
     {
@@ -298,7 +354,7 @@ struct hipfft_field
                  fft_io                               field_io_label,
                  const std::vector<device_context_t>& device_contexts)
     {
-        validate_or_throw(dft_type, "hipfft_field::hipfft_field(...)");
+        validate_enums_or_throw("hipfft_field::hipfft_field(...)", dft_type, field_io_label);
         if(transform_lengths.empty() || batch_sz == 0
            || std::any_of(transform_lengths.begin(), transform_lengths.end(), [](const auto& l) {
                   return l == 0;
@@ -312,6 +368,7 @@ struct hipfft_field
         if(format != HIPFFT_XT_FORMAT_INPUT && format != HIPFFT_XT_FORMAT_OUTPUT
            && format != HIPFFT_XT_FORMAT_INPLACE && format != HIPFFT_XT_FORMAT_INPLACE_SHUFFLED)
         {
+            // no other formats are supported for now, so throw an invalid argument error
             throw std::invalid_argument("Invalid descriptor sub-format");
         }
 
@@ -336,17 +393,17 @@ struct hipfft_field
 
         const auto global_inbuffer_strides
             = default_strides(dft_type, placement, field_io_label, transform_batch_and_lengths);
-        auto global_field_spans = transform_batch_and_lengths;
+        auto global_brick_spans = transform_batch_and_lengths;
         // Adjust logical spans for fields in "hermitian symmetric" domain
-        if(is_real(dft_type) && (is_fwd(dft_type) == (field_io_label == fft_io::fft_io_out)))
-            global_field_spans.back() = (global_field_spans.back() / 2) + 1;
+        if(is_real(dft_type) && (is_fwd(dft_type) == (field_io_label == fft_io_out)))
+            global_brick_spans.back() = (global_brick_spans.back() / 2) + 1;
 
-        global_field            = hipfft_brick(std::vector<size_t>(global_field_spans.size(), 0),
-                                    global_field_spans,
+        global_brick            = hipfft_brick(std::vector<size_t>(global_brick_spans.size(), 0),
+                                    global_brick_spans,
                                     global_inbuffer_strides,
                                     rocfft_scoped_device::current_device());
         const size_t num_bricks = batch_sz == 1 ? ngpus : std::min(batch_sz, ngpus);
-        if(global_field_spans[split_dim] < num_bricks)
+        if(global_brick_spans[split_dim] < num_bricks)
         {
             // e.g. more devices than the length of the split dimension
             // This is not supported by hipFFT, so throw HIPFFT_NOT_SUPPORTED.
@@ -356,28 +413,28 @@ struct hipfft_field
         }
         for(size_t brick_idx = 0; brick_idx < num_bricks; ++brick_idx)
         {
-            std::vector<size_t> brick_lower(global_field_spans.size(), 0);
-            std::vector<size_t> brick_upper(global_field_spans);
+            std::vector<size_t> brick_lower(global_brick_spans.size(), 0);
+            std::vector<size_t> brick_upper(global_brick_spans);
             brick_lower[split_dim]
-                = brick_idx * (global_field_spans[split_dim] / num_bricks)
-                  + std::min(brick_idx, global_field_spans[split_dim] % num_bricks);
+                = brick_idx * (global_brick_spans[split_dim] / num_bricks)
+                  + std::min(brick_idx, global_brick_spans[split_dim] % num_bricks);
             brick_upper[split_dim]
-                = (brick_idx + 1) * (global_field_spans[split_dim] / num_bricks)
-                  + std::min((brick_idx + 1), global_field_spans[split_dim] % num_bricks);
-            std::vector<size_t> brick_strides(global_field_spans.size());
+                = (brick_idx + 1) * (global_brick_spans[split_dim] / num_bricks)
+                  + std::min((brick_idx + 1), global_brick_spans[split_dim] % num_bricks);
+            std::vector<size_t> brick_strides(global_brick_spans.size());
             for(size_t dim = brick_strides.size(); dim-- > 0;)
             {
                 if(dim == brick_strides.size() - 1)
                     brick_strides[dim] = 1;
                 else if(dim == brick_strides.size() - 2
-                        && split_dim != global_field_spans.size() - 1
+                        && split_dim != global_brick_spans.size() - 1
                         && placement == fft_placement_inplace
                         && ((dft_type == fft_transform_type_real_forward
-                             && field_io_label == fft_io::fft_io_in)
+                             && field_io_label == fft_io_in)
                             || (dft_type == fft_transform_type_real_inverse
-                                && field_io_label == fft_io::fft_io_out)))
+                                && field_io_label == fft_io_out)))
                 {
-                    brick_strides[dim] = 2 * (global_field_spans.back() / 2 + 1);
+                    brick_strides[dim] = 2 * (global_brick_spans.back() / 2 + 1);
                 }
                 else
                     brick_strides[dim]
@@ -391,11 +448,12 @@ struct hipfft_field
     }
 
 #ifdef HIPFFT_MPI_ENABLE
-    static hipfft_field make_lone_brick_field(const hipfft_brick& brick)
+    // make proc-local field content from a single brick (used for MPI)
+    static hipfft_field make_proc_local_field(const hipfft_brick& brick)
     {
         hipfft_field ret;
         ret.bricks.emplace_back(brick);
-        ret.global_field.reset(); // unknown global field
+        ret.global_brick.reset(); // unknown global field
         return ret;
     }
 #endif
@@ -422,13 +480,13 @@ struct hipfft_field
                                                                brick.get_device_id()));
             ROCFFT_EXPECT_SUCCESS(rocfft_field_add_brick(field_wrapper, brick_wrapper));
         }
-        if(field_label == fft_io::fft_io_in)
+        if(field_label == fft_io_in)
             ROCFFT_EXPECT_SUCCESS(rocfft_plan_description_add_infield(desc, field_wrapper));
         else
             ROCFFT_EXPECT_SUCCESS(rocfft_plan_description_add_outfield(desc, field_wrapper));
     }
 
-    inline size_t brick_count() const
+    size_t brick_count() const
     {
         return bricks.size();
     }
@@ -440,54 +498,20 @@ struct hipfft_field
         return bricks[brick_idx];
     }
 
-    // Collapse contiguous dimensions of a brick and its enclosing global field
-    // into fewer, larger dimensions suitable for hipMemcpy2D (rank 2) or plain
-    // hipMemcpy (rank 1).
-    //
-    // Two adjacent dimensions (dim, dim+1) are merged when:
-    //   - The brick covers the full extent of dim+1 (same lower/upper as global field)
-    //   - The embedding length of dim+1 is identical for both brick and field
-    //     (i.e., if padding is used, it must be used in brick and in global field)
-    //
-    // Unit-span global dimensions (batch == 1, or length-1 axes) are skipped
-    // entirely since they contribute no data movement.
-    //
-    // Returns a pair: (collapsed_brick, collapsed_field) with matching ranks,
-    // which defines whether block/2D memcpy should be used.
-    std::pair<hipfft_brick, hipfft_brick>
-        get_collapsed_brick_in_collapsed_field(size_t brick_idx) const
+    const hipfft_brick& get_global_brick() const
     {
-        if(!global_field)
-            throw std::logic_error("hipfft_field::get_collapsed_brick_in_collapsed_field: global "
-                                   "field is not known (not a library-defined decomposition)");
-        const auto&                           brick = get_brick(brick_idx);
-        std::pair<hipfft_brick, hipfft_brick> ret{hipfft_brick{}, hipfft_brick{}};
-        for(size_t global_dim = 0; global_dim < global_field->axes.size(); global_dim++)
-        {
-            // unit global spans are ignored
-            if(global_field->axes[global_dim].span() == 1)
-                continue;
-            auto collapsed_brick_axis = brick.axes[global_dim];
-            auto collapsed_field_axis = global_field->axes[global_dim];
-            while(global_dim < global_field->axes.size() - 1
-                  && brick.axes[global_dim + 1].lower == global_field->axes[global_dim + 1].lower
-                  && brick.axes[global_dim + 1].upper == global_field->axes[global_dim + 1].upper
-                  && brick.embedding_length(global_dim + 1)
-                         == global_field->embedding_length(global_dim + 1))
-            {
-                collapsed_brick_axis.stride = brick.axes[global_dim + 1].stride;
-                collapsed_brick_axis.lower *= brick.embedding_length(global_dim + 1);
-                collapsed_brick_axis.upper *= brick.embedding_length(global_dim + 1);
-                collapsed_field_axis.stride = global_field->axes[global_dim + 1].stride;
-                collapsed_field_axis.lower *= global_field->embedding_length(global_dim + 1);
-                collapsed_field_axis.upper *= global_field->embedding_length(global_dim + 1);
-                global_dim++;
-            }
-            ret.first.axes.push_back(collapsed_brick_axis);
-            ret.second.axes.push_back(collapsed_field_axis);
-        }
-        ret.first.device_id  = brick.device_id;
-        ret.second.device_id = global_field->device_id;
+        if(!global_brick)
+            throw std::logic_error("hipfft_field::get_global_brick: global field is not known");
+        return *global_brick;
+    }
+
+    static hipfft_field collapse(const hipfft_field& field_to_collapse)
+    {
+        if(!field_to_collapse.global_brick)
+            throw std::logic_error("hipfft_field::collapse: global field is not known");
+        // create a copy and collapse it, so that the original field is not modified
+        auto ret = field_to_collapse;
+        hipfft_brick::collapse_matching_axes(*ret.global_brick, ret.bricks);
         return ret;
     }
 
@@ -497,7 +521,7 @@ private:
     std::vector<hipfft_brick> bricks;
     // For library-defined decompositions, we need to know the global field's
     // upper bounds and strides, so we can compute the offsets for each brick.
-    std::optional<hipfft_brick> global_field;
+    std::optional<hipfft_brick> global_brick;
 };
 
 struct hipfftIOType
@@ -686,13 +710,13 @@ public:
         validate_or_throw(io, "hipfftIOType::array_type");
         if(is_real_to_complex())
         {
-            return io == fft_io::fft_io_in ? rocfft_array_type_real
-                                           : rocfft_array_type_hermitian_interleaved;
+            return io == fft_io_in ? rocfft_array_type_real
+                                   : rocfft_array_type_hermitian_interleaved;
         }
         else if(is_complex_to_real())
         {
-            return io == fft_io::fft_io_in ? rocfft_array_type_hermitian_interleaved
-                                           : rocfft_array_type_real;
+            return io == fft_io_in ? rocfft_array_type_hermitian_interleaved
+                                   : rocfft_array_type_real;
         }
         else
         {
@@ -700,12 +724,12 @@ public:
         }
     }
 
-    inline hipDataType get_hip_data_type(fft_io io) const
+    hipDataType get_hip_data_type(fft_io io) const
     {
         if(!isinitialized)
             throw std::runtime_error("hipfftIOType not initialized");
         validate_or_throw(io, "hipfftIOType::get_hip_data_type");
-        return io == fft_io::fft_io_in ? inputType : outputType;
+        return io == fft_io_in ? inputType : outputType;
     }
 };
 
@@ -779,13 +803,13 @@ struct hipfftHandle_t
         if(std::holds_alternative<type_placement_key_t>(key))
             return placement_from_format(fmt) == placement_variant_of(key).placement;
         const auto& sk = subformat_variant_of(key);
-        return fmt == (io == fft_io::fft_io_in ? sk.input_format : sk.output_format);
+        return fmt == (io == fft_io_in ? sk.input_format : sk.output_format);
     }
 
     // Return the library-defined field that stores sub-format `fmt` data for I/O role `io`.
     const hipfft_field& field_for_format(hipfftXtSubFormat fmt, fft_io io) const
     {
-        const auto& fields = io == fft_io::fft_io_in ? input_fields : output_fields;
+        const auto& fields = io == fft_io_in ? input_fields : output_fields;
         for(const auto& [key, _] : exec_plans)
         {
             if(key_matches_format(key, fmt, io))
@@ -816,60 +840,37 @@ struct hipfftHandle_t
     rocfft_comm_type comm_type   = rocfft_comm_none;
     void*            comm_handle = nullptr;
 
-    inline bool can_work_with(const hipLibXtDesc& desc, fft_io desc_io_label) const
+    bool is_valid_for(const hipLibXtDesc& lib_desc, fft_io desc_io_label) const
     {
-        if(!initialized())
+        // Plan must be initialized for multi-device usage
+        if(!initialized() || device_contexts.size() <= 1)
             return false;
-        if(!desc.descriptor)
+        // Given descriptor comes straight from the user, so invalid
+        // values thereof must be reported/escalated as such
+        if(!lib_desc.descriptor)
+            throw HIPFFT_INVALID_VALUE;
+        const auto& field
+            = field_for_format(static_cast<hipfftXtSubFormat>(lib_desc.subFormat), desc_io_label);
+        const auto elem_type = io_type.get_hip_data_type(desc_io_label);
+        if(static_cast<int>(field.brick_count()) > lib_desc.descriptor->nGPUs
+           || field.brick_count() > device_contexts.size())
             return false;
-        // Verify consistency of set device IDs vs device IDs expected by the plan
-        if(desc.descriptor->nGPUs != static_cast<int>(device_contexts.size())
-           || desc.descriptor->nGPUs <= 1)
-            return false;
-        for(int dev_idx = 0; dev_idx < desc.descriptor->nGPUs; ++dev_idx)
+        for(size_t brick_idx = 0; brick_idx < field.brick_count(); ++brick_idx)
         {
-            if(desc.descriptor->GPUs[dev_idx] != device_contexts[dev_idx].device_id)
+            const auto& brick = field.get_brick(brick_idx);
+            if(brick.get_device_id() != lib_desc.descriptor->GPUs[brick_idx]
+               || brick.get_device_id() != device_contexts[brick_idx].device_id)
+                return false;
+            if(lib_desc.descriptor->size[brick_idx] < brick.data_byte_size(elem_type))
+                return false;
+            if(brick.data_byte_size(elem_type) > 0 && !lib_desc.descriptor->data[brick_idx])
                 return false;
         }
-
-        const auto desc_subformat = static_cast<hipfftXtSubFormat>(desc.subFormat);
-
-        // In-place descriptors must be able to carry both the input- and output-domain views of
-        // their buffer.
-        const std::vector<fft_io> relevant_io_field_labels
-            = placement_from_format(desc_subformat) == rocfft_placement_inplace
-                  ? std::vector<fft_io>{fft_io::fft_io_in, fft_io::fft_io_out}
-                  : std::vector<fft_io>{desc_io_label};
-
-        for(const auto& [key, _] : exec_plans)
-        {
-            // The descriptor is usable by this plan if the plan exposes the descriptor's
-            // sub-format for the descriptor's I/O role; the in-place case additionally requires
-            // both domain views to fit (checked below).
-            if(!key_matches_format(key, desc_subformat, desc_io_label))
-                continue; // no match
-            for(const auto io : relevant_io_field_labels)
-            {
-                const auto& field
-                    = io == fft_io::fft_io_in ? input_fields.at(key) : output_fields.at(key);
-                for(size_t brick_idx = 0; brick_idx < field.brick_count(); ++brick_idx)
-                {
-                    const auto data_sz
-                        = field.get_brick(brick_idx).data_byte_size(io_type.get_hip_data_type(io));
-                    if(desc.descriptor->size[brick_idx] < data_sz)
-                        return false;
-                    if(data_sz > 0 && !desc.descriptor->data[brick_idx])
-                        return false;
-                }
-            }
-            return true;
-        }
-        // The descriptor's intended usage was not found in the plan's execution plans
-        return false;
+        return true;
     }
 
     template <typename TransformArgType>
-    inline rocfft_transform_type get_transform_type_for(TransformArgType transform_arg) const
+    rocfft_transform_type get_transform_type_for(TransformArgType transform_arg) const
     {
         static_assert(std::is_same<TransformArgType, int>::value
                           || std::is_same<TransformArgType, rocfft_transform_type>::value,
@@ -901,9 +902,9 @@ struct hipfftHandle_t
         }
     }
 
-    inline bool can_execute(rocfft_transform_type                  transform_type,
-                            const std::optional<rocfft_precision>& execution_precision
-                            = std::nullopt) const
+    bool can_execute(rocfft_transform_type                  transform_type,
+                     const std::optional<rocfft_precision>& execution_precision
+                     = std::nullopt) const
     {
         if(!initialized())
             return false;
@@ -913,7 +914,6 @@ struct hipfftHandle_t
         switch(transform_type)
         {
         case rocfft_transform_type_complex_forward:
-            [[fallthrough]];
         case rocfft_transform_type_complex_inverse:
         {
             if(!io_type.is_complex_to_complex())
@@ -1145,16 +1145,16 @@ static hipfftResult hipfftMakePlan_internal(hipfftHandle               plan,
     const std::vector<size_t> cm_lengths_vec(plan->transform_lengths.rbegin(),
                                              plan->transform_lengths.rend());
     // NOTE: hipFFT ignores distance arguments if default layouts are used!
-    const bool ignore_user_distances = !plan->global_ionembed.get_nembed(fft_io::fft_io_in)
-                                       && !plan->global_ionembed.get_nembed(fft_io::fft_io_out);
+    const bool ignore_user_distances = !plan->global_ionembed.get_nembed(fft_io_in)
+                                       && !plan->global_ionembed.get_nembed(fft_io_out);
 
     for(const auto& map_key : plan->possible_exec_map_key())
     {
         const auto dft_type  = std::visit([](const auto& key) { return key.dft_type; }, map_key);
         const auto placement = std::visit(
             [](const auto& key) {
-                if constexpr(std::is_same_v<std::decay_t<decltype(key)>,
-                                            hipfftHandle_t::type_placement_key_t>)
+                if constexpr(std::is_same<std::decay_t<decltype(key)>,
+                                          hipfftHandle_t::type_placement_key_t>::value)
                     return key.placement;
                 else
                     return placement_from_format(key.input_format);
@@ -1166,12 +1166,12 @@ static hipfftResult hipfftMakePlan_internal(hipfftHandle               plan,
         ROCFFT_EXPECT_SUCCESS(desc.alloc_with_err());
 
         auto i_strides = plan->global_ionembed.as_generalized_strides(
-            fft_io::fft_io_in,
+            fft_io_in,
             fft_transform_type_from_rocfft_transform_type(dft_type),
             fft_result_placement_from_rocfft_result_placement(placement),
             plan->transform_lengths);
         auto o_strides = plan->global_ionembed.as_generalized_strides(
-            fft_io::fft_io_out,
+            fft_io_out,
             fft_transform_type_from_rocfft_transform_type(dft_type),
             fft_result_placement_from_rocfft_result_placement(placement),
             plan->transform_lengths);
@@ -1184,7 +1184,7 @@ static hipfftResult hipfftMakePlan_internal(hipfftHandle               plan,
                   ? user_idist
                   : default_distance(fft_transform_type_from_rocfft_transform_type(dft_type),
                                      fft_result_placement_from_rocfft_result_placement(placement),
-                                     fft_io::fft_io_in,
+                                     fft_io_in,
                                      plan->transform_lengths,
                                      number_of_transforms);
         const auto outDist
@@ -1192,22 +1192,21 @@ static hipfftResult hipfftMakePlan_internal(hipfftHandle               plan,
                   ? user_odist
                   : default_distance(fft_transform_type_from_rocfft_transform_type(dft_type),
                                      fft_result_placement_from_rocfft_result_placement(placement),
-                                     fft_io::fft_io_out,
+                                     fft_io_out,
                                      plan->transform_lengths,
                                      number_of_transforms);
 
-        ROCFFT_EXPECT_SUCCESS(
-            rocfft_plan_description_set_data_layout(desc,
-                                                    iotype.array_type(fft_io::fft_io_in),
-                                                    iotype.array_type(fft_io::fft_io_out),
-                                                    nullptr,
-                                                    nullptr,
-                                                    i_strides.size(),
-                                                    i_strides.data(),
-                                                    inDist,
-                                                    o_strides.size(),
-                                                    o_strides.data(),
-                                                    outDist));
+        ROCFFT_EXPECT_SUCCESS(rocfft_plan_description_set_data_layout(desc,
+                                                                      iotype.array_type(fft_io_in),
+                                                                      iotype.array_type(fft_io_out),
+                                                                      nullptr,
+                                                                      nullptr,
+                                                                      i_strides.size(),
+                                                                      i_strides.data(),
+                                                                      inDist,
+                                                                      o_strides.size(),
+                                                                      o_strides.data(),
+                                                                      outDist));
 
         if(plan->scale_factor != 1.0)
             ROCFFT_EXPECT_SUCCESS(
@@ -1224,20 +1223,19 @@ static hipfftResult hipfftMakePlan_internal(hipfftHandle               plan,
             // placement, so the canonical out-of-place (INPUT/OUTPUT) or in-place (INPLACE)
             // sub-formats are used (the batch split is sub-format independent).
 
-            for(auto io : {fft_io::fft_io_in, fft_io::fft_io_out})
+            for(auto io : {fft_io_in, fft_io_out})
             {
                 const hipfftXtSubFormat field_fmt
                     = std::holds_alternative<hipfftHandle_t::type_subformat_key_t>(map_key)
-                          ? (io == fft_io::fft_io_in
+                          ? (io == fft_io_in
                                  ? hipfftHandle_t::subformat_variant_of(map_key).input_format
                                  : hipfftHandle_t::subformat_variant_of(map_key).output_format)
                           : (placement == rocfft_placement_inplace
                                  ? HIPFFT_XT_FORMAT_INPLACE
-                                 : (io == fft_io::fft_io_in ? HIPFFT_XT_FORMAT_INPUT
-                                                            : HIPFFT_XT_FORMAT_OUTPUT));
-                auto& plan_fields
-                    = io == fft_io::fft_io_in ? plan->input_fields : plan->output_fields;
-                auto it = plan_fields.find(map_key);
+                                 : (io == fft_io_in ? HIPFFT_XT_FORMAT_INPUT
+                                                    : HIPFFT_XT_FORMAT_OUTPUT));
+                auto& plan_fields = io == fft_io_in ? plan->input_fields : plan->output_fields;
+                auto  it          = plan_fields.find(map_key);
                 if(it == plan_fields.end())
                 {
                     it = plan_fields
@@ -1257,9 +1255,9 @@ static hipfftResult hipfftMakePlan_internal(hipfftHandle               plan,
 #ifdef HIPFFT_MPI_ENABLE
         if(plan->mp_input_brick && plan->mp_output_brick)
         {
-            hipfft_field::make_lone_brick_field(*(plan->mp_input_brick))
+            hipfft_field::make_proc_local_field(*(plan->mp_input_brick))
                 .add_to(desc, fft_io::fft_io_in);
-            hipfft_field::make_lone_brick_field(*(plan->mp_output_brick))
+            hipfft_field::make_proc_local_field(*(plan->mp_output_brick))
                 .add_to(desc, fft_io::fft_io_out);
         }
 #endif
@@ -2260,7 +2258,7 @@ try
     if(plan->device_contexts.size() == 1)
     {
 #ifdef HIPFFT_MPI_ENABLE
-        if(plan->mp_input_brick && plan->mp_output_brick)
+        if(plan->comm_type != rocfft_comm_none)
             return HIPFFT_NOT_IMPLEMENTED;
 #endif
         return HIPFFT_INVALID_PLAN;
@@ -2271,43 +2269,24 @@ try
     // unbatched 1D transforms are not supported yet
     if(plan->transform_lengths.size() == 1 && plan->batch == 1)
         return HIPFFT_NOT_IMPLEMENTED;
+    if(format == HIPFFT_XT_FORMAT_1D_INPUT_SHUFFLED)
+        return HIPFFT_NOT_IMPLEMENTED;
     // No other value than the following can possibly be accepted for other cases
     if(format != HIPFFT_XT_FORMAT_INPLACE && format != HIPFFT_XT_FORMAT_INPLACE_SHUFFLED
        && format != HIPFFT_XT_FORMAT_INPUT && format != HIPFFT_XT_FORMAT_OUTPUT)
     {
         return HIPFFT_INVALID_VALUE;
     }
-    if(plan->batch > 1)
-    {
-        // batched cases accept everything except HIPFFT_XT_FORMAT_INPLACE_SHUFFLED
-        if(format == HIPFFT_XT_FORMAT_INPLACE_SHUFFLED)
-            return HIPFFT_NOT_SUPPORTED;
-    }
-    else
-    {
-        // only in-place formats are supported for non-batched transforms
-        if(format != HIPFFT_XT_FORMAT_INPLACE && format != HIPFFT_XT_FORMAT_INPLACE_SHUFFLED)
-            return HIPFFT_NOT_SUPPORTED;
-        // 2D real forward (resp. inverse) transforms accept only HIPFFT_XT_FORMAT_INPLACE
-        // (resp. HIPFFT_XT_FORMAT_INPLACE_SHUFFLED).
-        if(plan->transform_lengths.size() == 2)
-        {
-            if(plan->io_type.is_real_to_complex() && format != HIPFFT_XT_FORMAT_INPLACE)
-                return HIPFFT_NOT_SUPPORTED;
-            if(plan->io_type.is_complex_to_real() && format != HIPFFT_XT_FORMAT_INPLACE_SHUFFLED)
-                return HIPFFT_NOT_SUPPORTED;
-        }
-    }
-    // When requesting an in-place descriptor's subformat, the key's input descriptor format
-    // must match the requested subformat.
-    const fft_io desc_io_label
-        = format == HIPFFT_XT_FORMAT_OUTPUT ? fft_io::fft_io_out : fft_io::fft_io_in;
-    std::vector<fft_io> field_io_labels_to_fit{desc_io_label};
-    if(placement_from_format(format) == rocfft_placement_inplace)
-    {
-        // both input and output fields must fit the same descriptor for in-place transforms
-        field_io_labels_to_fit = {fft_io::fft_io_in, fft_io::fft_io_out};
-    }
+    // batched cases accept everything except HIPFFT_XT_FORMAT_INPLACE_SHUFFLED
+    if(plan->batch > 1 && format == HIPFFT_XT_FORMAT_INPLACE_SHUFFLED)
+        return HIPFFT_NOT_SUPPORTED;
+    // unbatched cases accept only formats destined to in-place usage
+    if(plan->batch == 1 && placement_from_format(format) != rocfft_placement_inplace)
+        return HIPFFT_NOT_SUPPORTED;
+
+    // The requested descriptor format must match (one of) the plan's expected
+    // input format(s), unless explicitly requesting HIPFFT_XT_FORMAT_OUTPUT.
+    const auto desc_io_label = format == HIPFFT_XT_FORMAT_OUTPUT ? fft_io_out : fft_io_in;
 
     std::unique_ptr<hipLibXtDesc, decltype(&hipfftXtFree)> lib_desc(new hipLibXtDesc, hipfftXtFree);
     std::memset(lib_desc.get(), 0, sizeof(hipLibXtDesc));
@@ -2335,15 +2314,22 @@ try
         {
             if(!hipfftHandle_t::key_matches_format(key, format, desc_io_label))
                 continue; // requested format not compatible with this item
-            for(auto io : field_io_labels_to_fit)
+            for(auto io : {fft_io_in, fft_io_out})
             {
-                const auto& field = io == fft_io::fft_io_in ? plan->input_fields.at(key)
-                                                            : plan->output_fields.at(key);
+                // Descriptors for in-place transforms must fit both of the plan's
+                // input and output fields' data
+                if(placement_from_format(format) == rocfft_placement_notinplace
+                   && desc_io_label != io)
+                {
+                    continue;
+                }
+                const auto& field
+                    = io == fft_io_in ? plan->input_fields.at(key) : plan->output_fields.at(key);
+                const auto elem_type = plan->io_type.get_hip_data_type(io);
                 if(brick_idx >= field.brick_count())
                     continue;
                 xt_desc->size[brick_idx] = std::max(
-                    xt_desc->size[brick_idx],
-                    field.get_brick(brick_idx).data_byte_size(plan->io_type.get_hip_data_type(io)));
+                    xt_desc->size[brick_idx], field.get_brick(brick_idx).data_byte_size(elem_type));
             }
         }
         if(xt_desc->size[brick_idx] > 0)
@@ -2353,6 +2339,15 @@ try
                 return HIPFFT_ALLOC_FAILED;
         }
     }
+    if(std::all_of(xt_desc->size, xt_desc->size + xt_desc->nGPUs, [](size_t sz) { return sz == 0; })
+       && std::all_of(
+           xt_desc->data, xt_desc->data + xt_desc->nGPUs, [](void* ptr) { return ptr == nullptr; }))
+    {
+        // cufft actually returns HIPFFT_SUCCESS for use cases reaching this
+        // point, but that seems like a bug: The descriptor simply cannot be
+        // used if no data chunk is allocated.
+        return HIPFFT_NOT_SUPPORTED;
+    }
     *desc = lib_desc.release();
     return HIPFFT_SUCCESS;
 }
@@ -2361,79 +2356,220 @@ catch(...)
     return handle_exception();
 }
 
+struct p2p_enabler
+{
+    p2p_enabler(int src_dev_id, int _peer_id)
+        : src_id(src_dev_id)
+        , peer_id(_peer_id)
+    {
+        if(peer_id < 0 || src_id < 0 || peer_id >= rocfft_scoped_device::device_count()
+           || src_id >= rocfft_scoped_device::device_count())
+            throw std::out_of_range("p2p_enabler: a given device ID is out of range");
+        if(peer_id == src_id)
+            return;
+        rocfft_scoped_device scoped_dev(src_id);
+        HIP_EXPECT_SUCCESS(hipDeviceCanAccessPeer(&original_can_access_peer, src_id, peer_id));
+        if(original_can_access_peer == 0)
+            HIP_EXPECT_SUCCESS(hipDeviceEnablePeerAccess(peer_id, 0));
+    }
+    ~p2p_enabler()
+    try
+    {
+        if(original_can_access_peer == 0 && peer_id != src_id)
+        {
+            rocfft_scoped_device scoped_dev(src_id);
+            (void)hipDeviceDisablePeerAccess(peer_id);
+        }
+    }
+    catch(...)
+    {
+    }
+
+private:
+    int       original_can_access_peer = 0;
+    const int src_id                   = hipInvalidDeviceId;
+    const int peer_id                  = hipInvalidDeviceId;
+};
+
 hipfftResult hipfftXtMemcpy(hipfftHandle plan, void* dest, void* src, hipfftXtCopyType cptype)
 try
 {
-    if(!plan || plan->device_contexts.size() < 2)
+    if(!plan || !plan->initialized())
         return HIPFFT_INVALID_PLAN;
     if(!dest || !src || dest == src)
         return HIPFFT_INVALID_VALUE;
 
-    if(cptype == HIPFFT_COPY_DEVICE_TO_DEVICE)
+    // Expected behavior is significantly different for multi-process plans.
+    if(plan->comm_type == rocfft_comm_none)
+    {
+        // must be multi-device
+        if(plan->device_contexts.size() < 2)
+            return HIPFFT_INVALID_PLAN;
+        // no implementation yet for unbatched 1D
+        if(plan->batch == 1 && plan->transform_lengths.size() == 1)
+            return HIPFFT_NOT_IMPLEMENTED;
+        switch(cptype)
+        {
+        case HIPFFT_COPY_HOST_TO_DEVICE:
+        case HIPFFT_COPY_DEVICE_TO_HOST:
+        {
+            const auto h2d      = cptype == HIPFFT_COPY_HOST_TO_DEVICE;
+            const auto lib_desc = static_cast<hipLibXtDesc*>(h2d ? dest : src);
+            if(!lib_desc->descriptor)
+                return HIPFFT_INVALID_VALUE;
+            const auto desc_io_label = h2d ? fft_io_in : fft_io_out;
+            if(!plan->is_valid_for(*lib_desc, desc_io_label))
+                return HIPFFT_INVALID_PLAN;
+            const auto  desc_subformat = static_cast<hipfftXtSubFormat>(lib_desc->subFormat);
+            const auto& field          = plan->field_for_format(desc_subformat, desc_io_label);
+            const auto& xt_desc        = *(lib_desc->descriptor);
+            // Use field layout stored in the descriptor at allocation time
+            const auto  collapsed_field   = hipfft_field::collapse(field);
+            const auto& host_global_brick = collapsed_field.get_global_brick();
+            const auto  elem_type         = plan->io_type.get_hip_data_type(desc_io_label);
+            for(size_t brick_idx = 0; brick_idx < collapsed_field.brick_count(); ++brick_idx)
+            {
+                const auto& dev_info        = plan->device_contexts[brick_idx];
+                const auto& collapsed_brick = collapsed_field.get_brick(brick_idx);
+                auto        host_offset
+                    = static_cast<char*>(h2d ? src : dest)
+                      + collapsed_brick.offset_in(host_global_brick) * hipDataType_bytes(elem_type);
+                // copy:
+                rocfft_scoped_device dev(collapsed_brick.get_device_id());
+                if(collapsed_brick.full_rank() == 1)
+                {
+                    const auto data_sz = collapsed_brick.data_byte_size(elem_type);
+                    HIP_EXPECT_SUCCESS(
+                        hipMemcpyAsync(h2d ? xt_desc.data[brick_idx] : host_offset,
+                                       h2d ? host_offset : xt_desc.data[brick_idx],
+                                       data_sz,
+                                       h2d ? hipMemcpyHostToDevice : hipMemcpyDeviceToHost,
+                                       dev_info.stream));
+                }
+                else if(collapsed_brick.full_rank() == 2)
+                {
+                    const auto brick_strides = collapsed_brick.get_strides();
+                    const auto brick_spans   = collapsed_brick.get_spans();
+                    const auto host_strides  = host_global_brick.get_strides();
+                    HIP_EXPECT_SUCCESS(
+                        hipMemcpy2DAsync(h2d ? xt_desc.data[brick_idx] : host_offset,
+                                         h2d ? brick_strides[0] * hipDataType_bytes(elem_type)
+                                             : host_strides[0] * hipDataType_bytes(elem_type),
+                                         h2d ? host_offset : xt_desc.data[brick_idx],
+                                         h2d ? host_strides[0] * hipDataType_bytes(elem_type)
+                                             : brick_strides[0] * hipDataType_bytes(elem_type),
+                                         brick_spans[1] * hipDataType_bytes(elem_type),
+                                         brick_spans[0],
+                                         h2d ? hipMemcpyHostToDevice : hipMemcpyDeviceToHost,
+                                         dev_info.stream));
+                }
+                else
+                {
+                    return HIPFFT_INTERNAL_ERROR;
+                }
+            }
+        }
+        break;
+        case HIPFFT_COPY_DEVICE_TO_DEVICE:
+        {
+            // Copy operation supposed to be done in plan's output domain
+            // (according to cufft documentation). NOTE: INPLACE_SHUFFLE
+            // to INPLACE copies result in identical operations in either
+            // domain for plans supporting both formats, though.
+            const auto  desc_io_label = fft_io_out;
+            const auto& src_lib_desc  = *static_cast<hipLibXtDesc*>(src);
+            const auto& dst_lib_desc  = *static_cast<hipLibXtDesc*>(dest);
+            const auto  src_fmt       = static_cast<hipfftXtSubFormat>(src_lib_desc.subFormat);
+            const auto  dst_fmt       = static_cast<hipfftXtSubFormat>(dst_lib_desc.subFormat);
+            // Restricted to INPLACE_SHUFFLE -> INPLACE operations.
+            if(src_fmt != HIPFFT_XT_FORMAT_INPLACE_SHUFFLED || dst_fmt != HIPFFT_XT_FORMAT_INPLACE)
+                return HIPFFT_NOT_SUPPORTED;
+            if(!plan->is_valid_for(src_lib_desc, desc_io_label)
+               || !plan->is_valid_for(dst_lib_desc, desc_io_label))
+                return HIPFFT_INVALID_PLAN;
+
+            const auto& src_field = plan->field_for_format(src_fmt, desc_io_label);
+            const auto& dst_field = plan->field_for_format(dst_fmt, desc_io_label);
+            const auto  elem_type = plan->io_type.get_hip_data_type(desc_io_label);
+            const auto  elem_sz   = hipDataType_bytes(elem_type);
+            const auto& src_xt    = *src_lib_desc.descriptor;
+            const auto& dst_xt    = *dst_lib_desc.descriptor;
+            std::map<std::pair<int, int>, p2p_enabler> p2p_enablers;
+            for(size_t si = 0; si < src_field.brick_count(); ++si)
+            {
+                auto&                cpy_stream = plan->device_contexts[si].stream;
+                rocfft_scoped_device dev(plan->device_contexts[si].device_id);
+
+                for(size_t di = 0; di < dst_field.brick_count(); ++di)
+                {
+                    // copy src and destination bricks before collapsing common chunks
+                    hipfft_brick src_brick(src_field.get_brick(si));
+                    hipfft_brick dst_brick(dst_field.get_brick(di));
+                    auto         overlap = src_brick.get_overlap_with(dst_brick);
+                    if(overlap.is_empty())
+                        continue; // no overlap between these two bricks
+                    hipfft_brick::collapse_matching_axes(overlap, src_brick, dst_brick);
+                    if(overlap.full_rank() != 2)
+                        throw std::logic_error(
+                            "hipfftXtMemcpy: unexpected rank of overlap in D2D copy");
+                    auto dev_pair
+                        = std::make_pair(src_brick.get_device_id(), dst_brick.get_device_id());
+                    if(p2p_enablers.find(dev_pair) == p2p_enablers.end())
+                    {
+                        p2p_enablers.emplace(dev_pair,
+                                             p2p_enabler(dev_pair.first, dev_pair.second));
+                    }
+                    const auto spans       = overlap.get_spans();
+                    const auto src_strides = src_brick.get_strides();
+                    const auto dst_strides = dst_brick.get_strides();
+                    if(src_strides.back() != 1 || dst_strides.back() != 1)
+                        throw std::logic_error("hipfftXtMemcpy: unexpected elementary stride "
+                                               "(non-unit) in src/dst of D2D copy");
+                    for(size_t slab_idx = 0; slab_idx < spans[0]; ++slab_idx)
+                    {
+                        auto* src_ptr = static_cast<const char*>(src_xt.data[si])
+                                        + (overlap.offset_in(src_brick) + src_strides[0] * slab_idx)
+                                              * elem_sz;
+                        auto* dst_ptr = static_cast<char*>(dst_xt.data[di])
+                                        + (overlap.offset_in(dst_brick) + dst_strides[0] * slab_idx)
+                                              * elem_sz;
+                        if(src_brick.get_device_id() != dst_brick.get_device_id())
+                        {
+                            HIP_EXPECT_SUCCESS(hipMemcpyPeerAsync(dst_ptr,
+                                                                  dst_brick.get_device_id(),
+                                                                  src_ptr,
+                                                                  src_brick.get_device_id(),
+                                                                  spans[1] * elem_sz,
+                                                                  cpy_stream));
+                        }
+                        else
+                        {
+                            HIP_EXPECT_SUCCESS(hipMemcpyAsync(dst_ptr,
+                                                              src_ptr,
+                                                              spans[1] * elem_sz,
+                                                              hipMemcpyDeviceToDevice,
+                                                              cpy_stream));
+                        }
+                    }
+                }
+            }
+        }
+        break;
+        default:
+            return HIPFFT_INVALID_VALUE;
+        }
+        for(const auto& dev_info : plan->device_contexts)
+        {
+            rocfft_scoped_device dev(dev_info.device_id);
+            HIP_EXPECT_SUCCESS(hipStreamSynchronize(dev_info.stream));
+        }
+        return HIPFFT_SUCCESS;
+    }
+    else
+    {
+        // not implemented yet
         return HIPFFT_NOT_IMPLEMENTED;
-    // any other value is invalid
-    if(cptype != HIPFFT_COPY_HOST_TO_DEVICE && cptype != HIPFFT_COPY_DEVICE_TO_HOST)
-        return HIPFFT_INVALID_VALUE;
-
-    const bool h2d     = cptype == HIPFFT_COPY_HOST_TO_DEVICE;
-    auto&      xt_desc = *static_cast<hipLibXtDesc*>(h2d ? dest : src);
-    // Given descriptor's format is considered input descriptor's format
-    // for H2D and output descriptor's format for D2H
-    const auto desc_io_label = h2d ? fft_io::fft_io_in : fft_io::fft_io_out;
-    const auto element_type  = plan->io_type.get_hip_data_type(desc_io_label);
-    // validate user-given descriptor w.r.t. plan
-    if(!plan->can_work_with(xt_desc, desc_io_label))
-        return HIPFFT_INVALID_VALUE;
-    const auto          desc_format = static_cast<hipfftXtSubFormat>(xt_desc.subFormat);
-    const hipfft_field& field       = plan->field_for_format(desc_format, desc_io_label);
-    for(size_t brick_idx = 0; brick_idx < field.brick_count(); ++brick_idx)
-    {
-        const auto& dev_info = plan->device_contexts[brick_idx];
-        const auto [collapsed_brick, collapsed_field]
-            = field.get_collapsed_brick_in_collapsed_field(brick_idx);
-        void* host_ptr
-            = static_cast<char*>(h2d ? src : dest)
-              + collapsed_brick.offset_in(collapsed_field) * hipDataType_bytes(element_type);
-        // copy:
-        rocfft_scoped_device dev(collapsed_brick.get_device_id());
-        if(collapsed_brick.full_rank() == 1)
-        {
-            const auto data_sz = collapsed_brick.data_byte_size(element_type);
-            HIP_EXPECT_SUCCESS(hipMemcpyAsync(h2d ? xt_desc.descriptor->data[brick_idx] : host_ptr,
-                                              h2d ? host_ptr : xt_desc.descriptor->data[brick_idx],
-                                              data_sz,
-                                              h2d ? hipMemcpyHostToDevice : hipMemcpyDeviceToHost,
-                                              dev_info.stream));
-        }
-        else if(collapsed_brick.full_rank() == 2)
-        {
-            const auto brick_strides = collapsed_brick.get_strides();
-            const auto brick_spans   = collapsed_brick.get_spans();
-            const auto field_strides = collapsed_field.get_strides();
-            HIP_EXPECT_SUCCESS(
-                hipMemcpy2DAsync(h2d ? xt_desc.descriptor->data[brick_idx] : host_ptr,
-                                 h2d ? brick_strides[0] * hipDataType_bytes(element_type)
-                                     : field_strides[0] * hipDataType_bytes(element_type),
-                                 h2d ? host_ptr : xt_desc.descriptor->data[brick_idx],
-                                 h2d ? field_strides[0] * hipDataType_bytes(element_type)
-                                     : brick_strides[0] * hipDataType_bytes(element_type),
-                                 brick_spans[1] * hipDataType_bytes(element_type),
-                                 brick_spans[0],
-                                 h2d ? hipMemcpyHostToDevice : hipMemcpyDeviceToHost,
-                                 dev_info.stream));
-        }
-        else
-        {
-            return HIPFFT_INTERNAL_ERROR;
-        }
     }
-
-    for(const auto& dev_info : plan->device_contexts)
-    {
-        rocfft_scoped_device dev(dev_info.device_id);
-        HIP_EXPECT_SUCCESS(hipStreamSynchronize(dev_info.stream));
-    }
-    return HIPFFT_SUCCESS;
 }
 catch(...)
 {
@@ -2482,41 +2618,40 @@ try
     const auto dft_type = plan->get_transform_type_for(transform_arg);
     if(!plan->can_execute(dft_type, precision))
         return HIPFFT_INVALID_PLAN;
-    if(!input || !output || !plan->can_work_with(*input, fft_io::fft_io_in)
-       || (input != output && !plan->can_work_with(*output, fft_io::fft_io_out)))
+    if(!input || !output || !input->descriptor || (input != output && (!output->descriptor)))
         return HIPFFT_INVALID_VALUE;
+    if(!plan->is_valid_for(*input, fft_io_in)
+       || (input != output && !plan->is_valid_for(*output, fft_io_out)))
+        return HIPFFT_INVALID_PLAN;
 
-    const auto input_subformat = static_cast<hipfftXtSubFormat>(input->subFormat);
+    const auto in_subfmt  = static_cast<hipfftXtSubFormat>(input->subFormat);
+    const auto out_subfmt = static_cast<hipfftXtSubFormat>(output->subFormat);
+    const auto placement = input == output ? rocfft_placement_inplace : rocfft_placement_notinplace;
     // formats' apparent placement must be reflected by argument descriptors
-    if((placement_from_format(input_subformat) == rocfft_placement_inplace) != (input == output))
+    if(placement_from_format(in_subfmt) != placement
+       || placement_from_format(out_subfmt) != placement)
         return HIPFFT_INVALID_VALUE;
 
     hipfftHandle_t::map_key_t plan_key;
     if(plan->batch > 1)
     {
         // Batched multi-device plans are keyed by placement.
-        plan_key = hipfftHandle_t::type_placement_key_t{dft_type,
-                                                        placement_from_format(input_subformat)};
+        plan_key = hipfftHandle_t::type_placement_key_t{dft_type, placement};
     }
     else
     {
         // Unbatched multi-device transforms are only in-place
         if(input != output)
             return HIPFFT_NOT_SUPPORTED;
-        const auto output_subformat = input_subformat == HIPFFT_XT_FORMAT_INPLACE
+        const auto output_subformat = in_subfmt == HIPFFT_XT_FORMAT_INPLACE
                                           ? HIPFFT_XT_FORMAT_INPLACE_SHUFFLED
                                           : HIPFFT_XT_FORMAT_INPLACE;
-        plan_key
-            = hipfftHandle_t::type_subformat_key_t{dft_type, input_subformat, output_subformat};
+        plan_key = hipfftHandle_t::type_subformat_key_t{dft_type, in_subfmt, output_subformat};
     }
-
-    const auto possible_map_keys = plan->possible_exec_map_key();
-    if(possible_map_keys.find(plan_key) == possible_map_keys.end())
-        return HIPFFT_NOT_SUPPORTED;
 
     const auto it = plan->exec_plans.find(plan_key);
     if(it == plan->exec_plans.end())
-        throw HIPFFT_INVALID_PLAN;
+        throw HIPFFT_NOT_SUPPORTED;
 
     const auto ret
         = rocfft_execute(it->second, input->descriptor->data, output->descriptor->data, plan->info);
@@ -2666,29 +2801,24 @@ try
     if(plan->device_contexts.empty())
         plan->device_contexts.emplace_back(rocfft_scoped_device::current_device());
 
-    constexpr bool user_defined_brick = true;
-    for(auto io : {fft_io::fft_io_in, fft_io::fft_io_out})
+    for(auto io : {fft_io_in, fft_io_out})
     {
         // unit batch is implicit for this API
         std::vector<size_t> brick_lower  = {0};
         std::vector<size_t> brick_upper  = {1};
         std::vector<size_t> brick_stride = {0};
-        std::copy_n(io == fft_io::fft_io_in ? input_lower : output_lower,
-                    rank,
-                    std::back_inserter(brick_lower));
-        std::copy_n(io == fft_io::fft_io_in ? input_upper : output_upper,
-                    rank,
-                    std::back_inserter(brick_upper));
-        std::copy_n(io == fft_io::fft_io_in ? input_stride : output_stride,
-                    rank,
-                    std::back_inserter(brick_stride));
+        std::copy_n(
+            io == fft_io_in ? input_lower : output_lower, rank, std::back_inserter(brick_lower));
+        std::copy_n(
+            io == fft_io_in ? input_upper : output_upper, rank, std::back_inserter(brick_upper));
+        std::copy_n(
+            io == fft_io_in ? input_stride : output_stride, rank, std::back_inserter(brick_stride));
 
-        auto& mp_io_brick = io == fft_io::fft_io_in ? plan->mp_input_brick : plan->mp_output_brick;
+        auto& mp_io_brick = io == fft_io_in ? plan->mp_input_brick : plan->mp_output_brick;
         mp_io_brick.emplace(std::move(brick_lower),
                             std::move(brick_upper),
                             std::move(brick_stride),
-                            plan->device_contexts.front().device_id,
-                            user_defined_brick);
+                            plan->device_contexts.front().device_id);
     }
     return HIPFFT_SUCCESS;
 }
