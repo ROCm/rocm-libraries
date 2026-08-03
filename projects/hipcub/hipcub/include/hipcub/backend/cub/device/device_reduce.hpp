@@ -36,7 +36,8 @@
 
 #include <cub/device/device_reduce.cuh> // IWYU pragma: export
 
-#include <cuda/std/limits> // IWYU pragma: export
+#include _HIPCUB_STD_INCLUDE(limits)
+#include _HIPCUB_STD_INCLUDE(execution)
 
 BEGIN_HIPCUB_NAMESPACE
 
@@ -65,6 +66,24 @@ public:
                                                                   reduction_op,
                                                                   init,
                                                                   stream));
+    }
+
+    template<typename InputIteratorT,
+             typename OutputIteratorT,
+             typename ReductionOpT,
+             typename T,
+             typename NumItemsT,
+             typename EnvT = _HIPCUB_STD_EXEC::env<>>
+    HIPCUB_RUNTIME_FUNCTION
+    static hipError_t Reduce(InputIteratorT  d_in,
+                             OutputIteratorT d_out,
+                             NumItemsT       num_items,
+                             ReductionOpT    reduction_op,
+                             T               init,
+                             EnvT            env = {})
+    {
+        return hipCUDAErrorTohipError(
+            ::cub::DeviceReduce::Reduce(d_in, d_out, num_items, reduction_op, init, env));
     }
 
     template<typename InputIteratorT, typename OutputIteratorT, typename NumItemsT>
