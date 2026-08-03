@@ -32,7 +32,6 @@ from rocke.core.arch import known_arches
 from rocke_ir_parity_harness import (  # noqa: E402 -- after sys.path shim
     cases,
     check_golden,
-    current_flavor,
 )
 
 _HERE = Path(__file__).resolve().parents[0]
@@ -116,9 +115,10 @@ class TestIrParityCoverage(unittest.TestCase):
 
     def test_ir_cases_match_golden_sha256(self):
         """Byte-stability gate: every case's lowered-IR sha256 (and the set of
-        expected failures) must match the committed golden for this host's llvm
-        flavor. A drift here means emitted IR changed -- if intended & reviewed,
-        re-bless with:
+        expected failures) must match the committed golden, for EVERY llvm
+        flavor the golden holds -- not just the one this host autodetects, or
+        the llvm23 sub-document would go unchecked below ROCm 7.13. A drift
+        here means emitted IR changed -- if intended & reviewed, re-bless with:
           python tests/instances/rocke_ir_parity_harness.py \\
             --write tests/golden/rocke_representative_ir_sha256.json
         """
@@ -126,7 +126,7 @@ class TestIrParityCoverage(unittest.TestCase):
             _GOLDEN.exists(),
             f"golden missing: {_GOLDEN} (bless with harness --write)",
         )
-        drift = check_golden(_GOLDEN, current_flavor())
+        drift = check_golden(_GOLDEN)
         self.assertEqual(drift, [], "IR drift vs golden:\n  " + "\n  ".join(drift))
 
 
