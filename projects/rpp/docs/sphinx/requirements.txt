@@ -69,7 +69,7 @@ fastjsonschema==2.20.0
     # via
     #   nbformat
     #   rocm-docs-core
-fonttools==4.55.0
+fonttools==4.60.2
     # via matplotlib
 gitdb==4.0.11
     # via gitpython
@@ -93,7 +93,7 @@ ipython==8.31.0
     #   myst-nb
 jedi==0.19.2
     # via ipython
-jinja2==3.1.4
+jinja2==3.1.6
     # via
     #   myst-parser
     #   sphinx
@@ -187,7 +187,7 @@ pydata-sphinx-theme==0.15.4
     #   sphinx-book-theme
 pygithub==2.3.0
     # via rocm-docs-core
-pygments==2.18.0
+pygments==2.20.0
     # via
     #   accessible-pygments
     #   ipython
