@@ -42,6 +42,7 @@
 #include "ReadyQueue.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/ir/asm/StinkyModifiers.hpp"
+#include "stinkytofu/transforms/asm/dag/HazardRules.hpp"
 
 namespace {
 using namespace stinkytofu;
@@ -54,47 +55,6 @@ constexpr int kCdna5DsReadQueueDepth = 16;
 constexpr int kCdna5DsReadDrainLatency = 72;
 constexpr int kCdna5DsReadPerWmma = 3;
 constexpr int kCdna5GlobalReadPerWmma = 1;
-
-// -------------------------------------------------------------------------
-// Hardware hazard rules: a fixed cycle gap required between a producer writing a
-// register and a specific class of consumer reading it as a source (not either op's
-// own issue/latency cycles — a producer->consumer edge gap). Data-driven so a new
-// hazard pair is a new table row, not new code. Consumer-side correctness (the gate in
-// CDNA5ReadyQueue::hazardGates_) is unconditional regardless of scheduling order;
-// producer-side hoisting (CDNA5ReadyQueue::decidePromote(), via DAGNode::hazardDeadline)
-// is a throughput heuristic layered on top, never required for correctness.
-// -------------------------------------------------------------------------
-struct HazardRule {
-    const char* name;
-    bool (*isProducer)(const StinkyInstruction&);
-    bool (*isConsumer)(const StinkyInstruction&);
-    RegType regType;
-    int cycles;
-};
-
-// SALU sgpr -> any SMEM/tensor_load/VMEM address (s_load, tensor_load, global_read...).
-// isGlobalMemLoad already covers SMemLoad + MUBUF/FLAT/GLOBAL loads; tensor_load is a
-// separate flag (IF_TENSORLoadToLds). Tensor_load and SMEM addresses are sgpr-only;
-// VMEM addresses can also carry a vgpr offset, covered separately below.
-static inline bool isSaluHazardConsumer(const StinkyInstruction& inst) {
-    return isGlobalMemLoad(inst) || isTensorLoad(inst);
-}
-
-// VMEM vgpr-address consumers: buffer/flat/global loads plus global_prefetch_b8, whose
-// vaddr is a vgpr. The prefetch is not a load (no dest, not IF_GLOBALLoad), so it is
-// listed explicitly rather than folded into isBufferMemLoad.
-static inline bool isVmemAddrHazardConsumer(const StinkyInstruction& inst) {
-    return isBufferMemLoad(inst) || isGlobalPrefetch(inst);
-}
-
-static constexpr HazardRule kCdna5HazardRules[] = {
-    {"SaluSgprToMemAddr", isScalarALU, isSaluHazardConsumer, RegType::S, 8},
-    // VALU vgpr -> VMEM address (global_read/MUBUF/FLAT/GLOBAL). Excludes SMEM/tensor_load:
-    // those addresses are sgpr-only, never vgpr.
-    {"ValuVgprToVmemAddr", isVectorALU, isVmemAddrHazardConsumer, RegType::V, 32},
-};
-constexpr int kNumCdna5HazardRules =
-    static_cast<int>(sizeof(kCdna5HazardRules) / sizeof(kCdna5HazardRules[0]));
 
 // -------------------------------------------------------------------------
 // Prefix / loop analysis (free functions; no CDNA5ReadyQueue state)
