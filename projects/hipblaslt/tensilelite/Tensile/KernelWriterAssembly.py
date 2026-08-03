@@ -357,10 +357,10 @@ class KernelWriterAssembly(KernelWriter):
   def isTdmWaveIdxLive(self, kernel) -> bool:
     if not (kernel["enableTDMA"] or kernel["enableTDMB"]):
       return False
-    if kernel.get("UseSubtileImpl"):
-      return False
     if kernel["ClusterBarrier"]:
       return True
+    if kernel.get("UseSubtileImpl"):
+      return False
     if self.states.waveIdxReleasedAfterStagger:
       return False
     return bool(self.states.staggerUCode) and self.isTdmWaveSeparated(kernel)

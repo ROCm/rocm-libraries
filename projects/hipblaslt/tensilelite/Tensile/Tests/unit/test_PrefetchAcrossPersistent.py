@@ -214,6 +214,9 @@ class _SetupNewTilePapTdmWriter:
     def isTdmWaveSeparated(self, kernel):
         return kwa_module.KernelWriterAssembly.isTdmWaveSeparated(self, kernel)
 
+    def isTdmWaveIdxLive(self, kernel):
+        return kwa_module.KernelWriterAssembly.isTdmWaveIdxLive(self, kernel)
+
     def undefineSgpr(self, name):
         # Mirror the real undefineSgpr: return the slot to the pool but keep the name
         # in self.sgprs, so the latch stays the only guard against a double check-in.
@@ -625,21 +628,24 @@ def _instruction_index(items, instruction_type, dst, src):
     )
 
 
-def _setup_new_tile_writer_and_names(prefetch_across_persistent, stagger_u_code=False):
+def _setup_new_tile_writer_and_names(prefetch_across_persistent, stagger_u_code=False,
+                                     **overrides):
     tpa, tpb = _tensor_parameters(with_metadata=True)
     writer = _SetupNewTilePapTdmWriter()
     writer.states.staggerUCode = stagger_u_code
     module = KernelWriter.setupNewTile(
         writer,
-        _setup_new_tile_tdm_kernel(prefetch_across_persistent=prefetch_across_persistent),
+        _setup_new_tile_tdm_kernel(prefetch_across_persistent=prefetch_across_persistent,
+                                   **overrides),
         tpa,
         tpb,
     )
     return writer, _module_names(module)
 
 
-def _setup_new_tile_module_names(prefetch_across_persistent, stagger_u_code=False):
-    return _setup_new_tile_writer_and_names(prefetch_across_persistent, stagger_u_code)[1]
+def _setup_new_tile_module_names(prefetch_across_persistent, stagger_u_code=False, **overrides):
+    return _setup_new_tile_writer_and_names(prefetch_across_persistent, stagger_u_code,
+                                            **overrides)[1]
 
 
 def _waveidx_is_in_pool(writer):
@@ -822,6 +828,59 @@ def test_setup_new_tile_releases_waveidx_after_stagger_for_wave_separated_tdm(mo
         )
         assert writer.states.waveIdxReleasedAfterStagger is True
         assert _waveidx_is_in_pool(writer)
+
+
+@pytest.mark.parametrize(
+    "kernel_overrides, stagger_u_code, expected",
+    [
+        pytest.param({}, True, True, id="stagger_reads"),
+        pytest.param({}, False, False, id="no_readers"),
+        pytest.param({"ClusterBarrier": True}, False, True, id="cluster_barrier"),
+        pytest.param({"NumWaves": 1}, True, False, id="single_wave"),
+        pytest.param({"UseSubtileImpl": True}, True, False, id="subtile"),
+        pytest.param({"UseSubtileImpl": True, "ClusterBarrier": True}, False, True,
+                     id="subtile_cluster_barrier"),
+        pytest.param({"enableTDMA": False, "enableTDMB": False}, True, False, id="non_tdm"),
+    ],
+)
+def test_is_tdm_waveidx_live(kernel_overrides, stagger_u_code, expected):
+    """The predicate must answer for the same reasons the release sites do.
+
+    subtile_cluster_barrier is the case that pins the guard order: every release
+    site bails out on ClusterBarrier, so WaveIdx is still checked out there and
+    the predicate has to say so even though subtile is on.
+    """
+    writer = _SetupNewTilePapTdmWriter()
+    writer.states.staggerUCode = stagger_u_code
+    kernel = _setup_new_tile_tdm_kernel(**kernel_overrides)
+
+    assert kwa_module.KernelWriterAssembly.isTdmWaveIdxLive(writer, kernel) is expected
+
+
+def test_setup_new_tile_releases_waveidx_early_for_subtile(monkeypatch):
+    """Subtile computes wave offsets from vgpr("Serial"), so WaveIdx dies early."""
+    monkeypatch.setattr(kw_module.Component.GSU, "find", lambda writer: _StubGsu())
+    module_names = _setup_new_tile_module_names(prefetch_across_persistent=1,
+                                               UseSubtileImpl=True)
+
+    assert module_names.index("undefineSgpr_WaveIdx") < module_names.index("graWorkGroup")
+
+
+def test_setup_new_tile_keeps_waveidx_for_subtile_cluster_barrier(monkeypatch):
+    """With ClusterBarrier the handshake reads sgprWaveIdx all kernel, so no release.
+
+    This is the allocator-side half of the guard order asserted by
+    test_is_tdm_waveidx_live[subtile_cluster_barrier]: nothing frees the slot, so
+    the predicate reporting it live is the truthful answer.
+    """
+    monkeypatch.setattr(kw_module.Component.GSU, "find", lambda writer: _StubGsu())
+    writer, module_names = _setup_new_tile_writer_and_names(
+        prefetch_across_persistent=1, UseSubtileImpl=True, ClusterBarrier=True
+    )
+
+    assert "undefineSgpr_WaveIdx" not in module_names
+    assert "ReleaseWaveIdxAfterStagger" not in module_names
+    assert not _waveidx_is_in_pool(writer)
 
 
 def test_setup_new_tile_releases_waveidx_at_most_once(monkeypatch):
