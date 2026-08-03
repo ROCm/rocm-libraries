@@ -354,6 +354,17 @@ class KernelWriterAssembly(KernelWriter):
   def isTdmWaveSeparated(self, kernel) -> bool:
     return kernel["enableTDMA"] and kernel["enableTDMB"] and kernel["NumWaves"] > 1
 
+  def isTdmWaveIdxLive(self, kernel) -> bool:
+    if not (kernel["enableTDMA"] or kernel["enableTDMB"]):
+      return False
+    if kernel.get("UseSubtileImpl"):
+      return False
+    if kernel["ClusterBarrier"]:
+      return True
+    if self.states.waveIdxReleasedAfterStagger:
+      return False
+    return bool(self.states.staggerUCode) and self.isTdmWaveSeparated(kernel)
+
   ########################################
   def strideRef(self, tc, dim):
     """
@@ -2198,6 +2209,12 @@ class KernelWriterAssembly(KernelWriter):
         kernelArgs.add(self.argLoader.loadKernArg(self.states.esmRuntimeFlagSgpr, "KernArgAddress", sgprOffset=hex(sgprOffset), dword=1))
         sgprOffset += 4
         self.argLoader.setOffset(sgprOffset)
+
+    # Batch offset arguments for general batched mode are loaded on-demand from
+    # their kernarg byte offsets. Those offsets are recorded accurately by
+    # the signature builder (see Signature.py) into self.states.batchOffset*KernArgOffset,
+    # so nothing is computed here.
+
     return kernelArgs
 
   def localReadAddresses(self, kernel, tPA, tPB, tPM):
@@ -4790,7 +4807,16 @@ class KernelWriterAssembly(KernelWriter):
     moduleLoadGeneralBatch.add(SAddU32(dst=sgpr(stmp+0), src0=sgpr(stmp+0), src1=sgpr("Address%s+0"%tc), comment="Offsetting to the location [Lower half of address]"))
     moduleLoadGeneralBatch.add(SAddCU32(dst=sgpr(stmp+1), src0=sgpr("Address%s+1"%tc), src1=0, comment="Offsetting to the location [Higher half of address]"))
     moduleLoadGeneralBatch.add(SLoadB64(dst=sgpr("Srd%s"%tc, 2), base=sgpr(stmp, 2), soffset=0, comment="Load the Matrix Address in the Pointer Array"))
-    moduleLoadGeneralBatch.add(SWaitCnt(kmcnt=0, comment="Wait for the Matrix Address Load from the Pointer Array"))
+    # Load and apply batch offset for General Batched GEMM
+    if not kernel["ProblemType"]["GroupedGemm"]:
+      batchOffsetKernArgOffset = self.states.batchOffsetAKernArgOffset if tc == "A" else self.states.batchOffsetBKernArgOffset
+      moduleLoadGeneralBatch.add(SLoadB64(dst=sgpr(stmp, 2), base=sgpr("KernArgAddress", 2), soffset=hex(batchOffsetKernArgOffset), comment="Load batchOffset%s from kernel args"%tc))
+      moduleLoadGeneralBatch.add(SWaitCnt(kmcnt=0, comment="Wait for Matrix Address and Batch Offset Loads"))
+      moduleLoadGeneralBatch.add(SAddU32(dst=sgpr("Srd%s+0"%tc), src0=sgpr("Srd%s+0"%tc), src1=sgpr(stmp+0), comment="Add batch offset to %s address (low)"%tc))
+      moduleLoadGeneralBatch.add(SAddCU32(dst=sgpr("Srd%s+1"%tc), src0=sgpr("Srd%s+1"%tc), src1=sgpr(stmp+1), comment="Add batch offset to %s address (high)"%tc))
+    else:
+      moduleLoadGeneralBatch.add(SWaitCnt(kmcnt=0, comment="Wait for the Matrix Address Load from the Pointer Array"))
+
     if self.states.groOffsetInMacroTile and ((tc == "A" and not kernel["enableTDMA"]) or (tc == "B" and not kernel["enableTDMB"])):
       prePad1 = int(self.states.srdShiftLeft[tc] * tP["bpeGR"]) # leave room in case we have to pointer shift
       moduleLoadGeneralBatch.add(SSubU32(dst=sgpr("Srd%s+0"%tc), src0=sgpr("Srd%s+0"%tc), src1=prePad1, comment="pre-pad to make room for possible pointer shift"))
@@ -6499,13 +6525,13 @@ class KernelWriterAssembly(KernelWriter):
 
     skipLabel = None
     if useParityGate:
-      wavelen = kernel["WavefrontSize"]
       skipLabel = Label(label=f"{labelName}{tc}", comment="")
 
-      with self.allocTmpSgpr(1, tag="_applyStaggerTDM_waveIdTmp") as waveIdTmp:
-        imod.add(VReadfirstlaneB32(dst=sgpr(waveIdTmp.idx), src=vgpr("Serial"), comment="get tId"))
-        imod.add(SLShiftRightB32(dst=sgpr(waveIdTmp.idx), shiftHex=ceil(log2(wavelen)), src=sgpr(waveIdTmp.idx), comment="waveId"))
-        imod.add(SBitcmp1B32(src0=sgpr(waveIdTmp.idx), src1=0, comment="check wave parity"))
+      if self.isTdmWaveIdxLive(kernel):
+        self._emitTdmWaveParitySCC(imod, kernel, comment="check wave parity")
+      else:
+        with self.allocTmpSgpr(1, tag="_applyStaggerTDM_waveIdTmp") as waveIdTmp:
+          self._emitTdmWaveParitySCC(imod, kernel, waveIdTmp.idx, "check wave parity")
 
       if "A" in tc:
         imod.add(SCBranchSCC1(labelName=skipLabel.getLabelName(), comment="skip: odd waves handle B"))
@@ -6566,7 +6592,25 @@ class KernelWriterAssembly(KernelWriter):
       imod.add(labelRemoveSUEnd)
     # Wave-separated TDM: stagger setup/remove still use GlobalReadIncs*; release here.
     imod.add(self.releaseGlobalReadIncsSgprsAfterTdmWaveSep(kernel))
+    imod.add(self.releaseWaveIdxAfterStagger(kernel))
     return imod
+
+  def releaseWaveIdxAfterStagger(self, kernel):
+    module = Module("ReleaseWaveIdxAfterStagger")
+    # The cluster barrier handshake reads WaveIdx for the whole kernel.
+    if kernel["ClusterBarrier"]:
+      return module
+    if not (self.states.staggerUCode and self.isTdmWaveSeparated(kernel)):
+      return module
+    # Idempotent: removeStaggerAB has two mutually exclusive call sites.
+    # Double undefineSgpr is a compiler error; double pool check-in corrupts the pool.
+    if "WaveIdx" not in self.sgprs:
+      return module
+    if self.states.waveIdxReleasedAfterStagger:
+      return module
+    self.states.waveIdxReleasedAfterStagger = True
+    module.add(self.undefineSgpr("WaveIdx"))
+    return module
 
   def removeStagger(self, kernel, tP):
     imod = Module("removeStagger")
@@ -11413,8 +11457,11 @@ class KernelWriterAssembly(KernelWriter):
             if halfRowsA == halfRowsB:
               imod.middle.add(SMovB32(sgpr(hr), halfRowsA, "halfRows"))
             else:
-              with self.allocTmpSgpr(1, tag="tdmSplitDim1Parity") as waveIdTmp:
-                self._emitTdmWaveParitySCC(imod.middle, kernel, waveIdTmp.idx)
+              if self.isTdmWaveIdxLive(kernel):
+                self._emitTdmWaveParitySCC(imod.middle, kernel)
+              else:
+                with self.allocTmpSgpr(1, tag="tdmSplitDim1Parity") as waveIdTmp:
+                  self._emitTdmWaveParitySCC(imod.middle, kernel, waveIdTmp.idx)
               imod.middle.add(SCSelectB32(sgpr(hr), halfRowsB, halfRowsA, "halfRows = parity ? B : A"))
             imod.middle.add(SLShiftRightB32(sgpr(h0), hex(16), sgpr(f"{group1}+2"), "H0 = dim1 lo"))
             imod.middle.add(SLShiftLeftB32(sgpr(h1), hex(16), sgpr(f"{group1}+3"), "H0 hi << 16"))
@@ -13584,7 +13631,21 @@ class KernelWriterAssembly(KernelWriter):
               module.add(SLoadB64(dst=sgpr(tmpS0, 2), base=sgpr(tmpS0, 2), soffset=0, comment="Load the Matrix Address in the Pointer Array"))
               module.add(SWaitCnt(kmcnt=0, comment="Wait for the Matrix Address Load from the Pointer Array"))
               module.add(SAddU32(dst=sgpr("Srd%s+0"%mat), src0=sgpr("Srd%s+0"%mat), src1=sgpr(tmpS0), comment="Offsetting within the Batch Matrix [Lower half of address]"))
-              module.add(SAddCU32(dst=sgpr("Srd%s+1"%mat), src0=sgpr("Srd%s+1"%mat), src1=sgpr(tmpS1), comment="Offsetting within the Batch Matrix [Higher half of address]")) 
+              module.add(SAddCU32(dst=sgpr("Srd%s+1"%mat), src0=sgpr("Srd%s+1"%mat), src1=sgpr(tmpS1), comment="Offsetting within the Batch Matrix [Higher half of address]"))
+              # Now, we have starting matrix address of a specific batch in the corresponding Srd.
+              # Load and apply batch offset for General Batched GEMM (C or D matrix) as necessary.
+              # This block sits inside the generalBatchedGemmLoad label, which the GSU routing
+              # only reaches at runtime GSU==1 -- where SrdC/SrdD are the real user pointer arrays
+              # (not the GSU workspace), so the offset is correctly applied here. When GSU>1 the
+              # routing branches to the strided/workspace path and skips this block; the PostGSU
+              # conversion kernel applies the offset when it writes the final result to C/D.
+              if not kernel["ProblemType"]["GroupedGemm"]:
+                batchOffsetKernArgOffset = self.states.batchOffsetCKernArgOffset if mat == "C" else self.states.batchOffsetDKernArgOffset
+                module.add(SLoadB64(dst=sgpr(tmpS0, 2), base=sgpr("KernArgAddress", 2), soffset=hex(batchOffsetKernArgOffset), comment="Load batchOffset%s from kernel args"%mat))
+                module.add(SWaitCnt(kmcnt=0, comment="Wait for Matrix Address and Batch Offset Loads"))
+                # Add loaded matrix address to SRD
+                module.add(SAddU32(dst=sgpr("Srd%s+0"%mat), src0=sgpr("Srd%s+0"%mat), src1=sgpr(tmpS0), comment="Add matrix address to SRD (low)"))
+                module.add(SAddCU32(dst=sgpr("Srd%s+1"%mat), src0=sgpr("Srd%s+1"%mat), src1=sgpr(tmpS1), comment="Add matrix address to SRD (high)"))
               module.add(generalBatchedGemmLoad_End)
           module.addSpaceLine()
 
@@ -13644,20 +13705,21 @@ class KernelWriterAssembly(KernelWriter):
 
   def SrdTDInit(self, kernel):
     module = Module("SrdTDInit")
-    tmpspgr0 = self.sgprPool.checkOut(1, tag="SrdTDInit_tmpspgr0", preventOverflow=False)
-    tmpspgr1 = self.sgprPool.checkOutAligned(2, 4, tag="SrdTDInit_tmpspgr1", preventOverflow=False)
-    tmpspgr2 = self.sgprPool.checkOutAligned(2, 4, tag="SrdTDInit_tmpspgr2", preventOverflow=False)
+    tmpsgpr0 = self.sgprPool.checkOut(1, tag="SrdTDInit_tmpsgpr0", preventOverflow=False)
+    tmpsgpr1 = self.sgprPool.checkOutAligned(2, 4, tag="SrdTDInit_tmpsgpr1", preventOverflow=False)
+    tmpsgpr2 = self.sgprPool.checkOutAligned(2, 4, tag="SrdTDInit_tmpsgpr2", preventOverflow=False)
+    tmpsgpr3 = self.sgprPool.checkOutAligned(2, 4, tag="SrdTDInit_tmpsgpr3", preventOverflow=False)
     module.addComment0("calculate SrdTD address")
 
     module.add(SMovB32(dst=sgpr("SrdTD+2"), src="BufferOOB"))
     module.add(SMovB32(dst=sgpr("SrdTD+3"), src="Srd127_96", comment="Set bits 127_96 in post-loop SRD"))
 
-    module.add(SMulI32(dst=sgpr(tmpspgr0), src0="MT1", src1=sgpr("WorkGroup1"), comment=""))
-    module.add(SMulHIU32(dst=sgpr(tmpspgr1+1), src0=sgpr(tmpspgr0), src1=sgpr("StrideD1J"), comment=""))
-    module.add(SMulI32(dst=sgpr(tmpspgr1+0), src0=sgpr(tmpspgr0), src1=sgpr("StrideD1J"), comment=""))
+    module.add(SMulI32(dst=sgpr(tmpsgpr0), src0="MT1", src1=sgpr("WorkGroup1"), comment=""))
+    module.add(SMulHIU32(dst=sgpr(tmpsgpr1+1), src0=sgpr(tmpsgpr0), src1=sgpr("StrideD1J"), comment=""))
+    module.add(SMulI32(dst=sgpr(tmpsgpr1+0), src0=sgpr(tmpsgpr0), src1=sgpr("StrideD1J"), comment=""))
 
     bpe = int(self.states.bpr * kernel["ProblemType"]["DestDataType"].numRegisters()) # self.states.bpeCinternal
-    module.add(SLShiftLeftB64(dst=sgpr(tmpspgr1,2), src=sgpr(tmpspgr1,2), shiftHex=log2(bpe), comment="scale by bpe"))
+    module.add(SLShiftLeftB64(dst=sgpr(tmpsgpr1,2), src=sgpr(tmpsgpr1,2), shiftHex=log2(bpe), comment="scale by bpe"))
 
     SrdTDGeneralBatched = Label(label="SrdTDInit_GeneralBatched", comment="")
     SrdTDGeneralBatched_End = Label(label="SrdTDInit_GeneralBatched_End", comment="")
@@ -13666,27 +13728,35 @@ class KernelWriterAssembly(KernelWriter):
       module.add(SCmpEQU32(src0=sgpr("ArgType"), src1=3, comment="ArgType == 3 for General Batched GEMM"))
       module.add(SCBranchSCC1(labelName=SrdTDGeneralBatched.getLabelName(), comment="Initializing General Batched GEMM SrdTD differently"))
 
-    module.add(SAddU32(dst=sgpr("SrdTD+0"), src0=sgpr("AddressTD+0"), src1=sgpr(tmpspgr1+0), comment="add lo to SRTD" ))
-    module.add(SAddCU32(dst=sgpr("SrdTD+1"), src0=sgpr("AddressTD+1"), src1=sgpr(tmpspgr1+1), comment="add hi to SRTD" ))
+    module.add(SAddU32(dst=sgpr("SrdTD+0"), src0=sgpr("AddressTD+0"), src1=sgpr(tmpsgpr1+0), comment="add lo to SRTD" ))
+    module.add(SAddCU32(dst=sgpr("SrdTD+1"), src0=sgpr("AddressTD+1"), src1=sgpr(tmpsgpr1+1), comment="add hi to SRTD" ))
 
-    module.add(SMulHIU32(dst=sgpr(tmpspgr1+1), src0=sgpr("WorkGroup2"), src1=sgpr("StrideDK"), comment=""))
-    module.add(SMulI32(dst=sgpr(tmpspgr1+0), src0=sgpr("WorkGroup2"), src1=sgpr("StrideDK"), comment=""))
+    module.add(SMulHIU32(dst=sgpr(tmpsgpr1+1), src0=sgpr("WorkGroup2"), src1=sgpr("StrideDK"), comment=""))
+    module.add(SMulI32(dst=sgpr(tmpsgpr1+0), src0=sgpr("WorkGroup2"), src1=sgpr("StrideDK"), comment=""))
 
-    module.add(SLShiftLeftB64(dst=sgpr(tmpspgr1,2), src=sgpr(tmpspgr1,2), shiftHex=log2(bpe), comment="scale by bpe"))
+    module.add(SLShiftLeftB64(dst=sgpr(tmpsgpr1,2), src=sgpr(tmpsgpr1,2), shiftHex=log2(bpe), comment="scale by bpe"))
     module.add(SBranch(labelName=SrdTDGeneralBatched_End.getLabelName()))
     module.add(SrdTDGeneralBatched)
-    module.add(SMulI32(dst=sgpr(tmpspgr2+0), src0=8, src1=sgpr("WorkGroup2"), comment="Compute stride in bytes into Pointer Array"))
-    module.add(SAddU32(dst=sgpr(tmpspgr2+0), src0=sgpr(tmpspgr2+0), src1=sgpr("AddressTD+0"), comment="Offsetting to the location [Lower half of address]"))
-    module.add(SAddCU32(dst=sgpr(tmpspgr2+1), src0=sgpr("AddressTD+1"), src1=0, comment="Offsetting to the location [Higher half of address]"))
-    module.add(SLoadB64(dst=sgpr("SrdTD", 2), base=sgpr(tmpspgr2, 2), soffset=0, comment="Load the Matrix Address in the Pointer Array"))
-    module.add(SWaitCnt(kmcnt=0, comment="Wait for the Matrix Address Load from the Pointer Array"))
+    module.add(SMulI32(dst=sgpr(tmpsgpr2+0), src0=8, src1=sgpr("WorkGroup2"), comment="Compute stride in bytes into Pointer Array"))
+    module.add(SAddU32(dst=sgpr(tmpsgpr2+0), src0=sgpr(tmpsgpr2+0), src1=sgpr("AddressTD+0"), comment="Offsetting to the location [Lower half of address]"))
+    module.add(SAddCU32(dst=sgpr(tmpsgpr2+1), src0=sgpr("AddressTD+1"), src1=0, comment="Offsetting to the location [Higher half of address]"))
+    module.add(SLoadB64(dst=sgpr("SrdTD", 2), base=sgpr(tmpsgpr2, 2), soffset=0, comment="Load the Matrix Address in the Pointer Array"))
+    # Load and apply batch offset for General Batched GEMM (dstD) as necessary.
+    if not kernel["ProblemType"]["GroupedGemm"]:
+      module.add(SLoadB64(dst=sgpr(tmpsgpr3, 2), base=sgpr("KernArgAddress", 2), soffset=hex(self.states.batchOffsetDKernArgOffset), comment="Load batchOffsetD from kernel args"))
+      module.add(SWaitCnt(kmcnt=0, comment="Wait for the Matrix Address and batchOffsetD Load"))
+      module.add(SAddU32(dst=sgpr("SrdTD+0"), src0=sgpr("SrdTD+0"), src1=sgpr(tmpsgpr3+0), comment="Apply batchOffsetD to SrdTD (low)"))
+      module.add(SAddCU32(dst=sgpr("SrdTD+1"), src0=sgpr("SrdTD+1"), src1=sgpr(tmpsgpr3+1), comment="Apply batchOffsetD to SrdTD (high)"))
+    else:
+      module.add(SWaitCnt(kmcnt=0, comment="Wait for the Matrix Address Load from the Pointer Array"))
     module.add(SrdTDGeneralBatched_End)
-    module.add(SAddU32(dst=sgpr("SrdTD+0"), src0=sgpr("SrdTD+0"), src1=sgpr(tmpspgr1+0), comment="add lo to SRTD" ))
-    module.add(SAddCU32(dst=sgpr("SrdTD+1"), src0=sgpr("SrdTD+1"), src1=sgpr(tmpspgr1+1), comment="add hi to SRTD" ))
+    module.add(SAddU32(dst=sgpr("SrdTD+0"), src0=sgpr("SrdTD+0"), src1=sgpr(tmpsgpr1+0), comment="add lo to SRTD" ))
+    module.add(SAddCU32(dst=sgpr("SrdTD+1"), src0=sgpr("SrdTD+1"), src1=sgpr(tmpsgpr1+1), comment="add hi to SRTD" ))
 
-    self.sgprPool.checkIn(tmpspgr0)
-    self.sgprPool.checkIn(tmpspgr1)
-    self.sgprPool.checkIn(tmpspgr2)
+    self.sgprPool.checkIn(tmpsgpr0)
+    self.sgprPool.checkIn(tmpsgpr1)
+    self.sgprPool.checkIn(tmpsgpr2)
+    self.sgprPool.checkIn(tmpsgpr3)
 
     module.add(self.shiftSrd("TD"))
 
@@ -19044,10 +19114,15 @@ class KernelWriterAssembly(KernelWriter):
                       f"TDM iter_count = rows_per_il({rows_per_il}) / tile_dim1({tile_dim1}) - 1"))
       mod.add(comp.setIterations(descSgprName(2), sIter))
 
-  def _emitTdmWaveParitySCC(self, module: Module, kernel: Mapping, dstTmpIdx: int,
+  def _emitTdmWaveParitySCC(self, module: Module, kernel: Mapping, dstTmpIdx: Optional[int] = None,
                             comment: str = "wave parity"):
-    """Leave this wave's parity (bit0 of WaveId) in SCC. WaveIdx is not live inside
-    the loop, so recompute it from Serial. Clobbers sgpr(dstTmpIdx)."""
+    """Leave this wave's parity (bit0 of WaveId) in SCC.
+    When sgpr("WaveIdx") is still live, read bit0 directly.
+    Otherwise recompute it from vgpr("Serial"), which
+    clobbers sgpr(dstTmpIdx)."""
+    if self.isTdmWaveIdxLive(kernel):
+      module.add(SBitcmp1B32(src0=sgpr("WaveIdx"), src1=0, comment=comment))
+      return
     wavelen: int = kernel["WavefrontSize"]
     module.add(VReadfirstlaneB32(dst=sgpr(dstTmpIdx), src=vgpr("Serial"), comment="get tId"))
     module.add(SLShiftRightB32(dst=sgpr(dstTmpIdx), shiftHex=ceil(log2(wavelen)),
@@ -19104,8 +19179,11 @@ class KernelWriterAssembly(KernelWriter):
         "TDMSplit multi-wave split stride must be a live SGPR, not a constStride symbol"
     strideArgA = strideRefA
     strideArgB = strideRefB
-    with self.allocTmpSgpr(1, tag="tdmSplitParity") as waveIdTmp:
-      self._emitTdmWaveParitySCC(module, kernel, waveIdTmp.idx, "wave parity (A=even/B=odd)")
+    if self.isTdmWaveIdxLive(kernel):
+      self._emitTdmWaveParitySCC(module, kernel, comment="wave parity (A=even/B=odd)")
+    else:
+      with self.allocTmpSgpr(1, tag="tdmSplitParity") as waveIdTmp:
+        self._emitTdmWaveParitySCC(module, kernel, waveIdTmp.idx, "wave parity (A=even/B=odd)")
 
     def selectByParity(dstIdx: int, valB: int, valA: int, comment: str):
       # dst = SCC ? valB : valA. SALU allows only one literal operand per
@@ -19900,8 +19978,11 @@ class KernelWriterAssembly(KernelWriter):
         wrapTmpLo = tmpSgprInfo.idx + 2
         wrapTmpHi = tmpSgprInfo.idx + 3
 
-        with self.allocTmpSgpr(1, tag="tdmIncrementABWaveSperated_tmpSgprInfo2") as waveIdTmp:
-          self._emitTdmWaveParitySCC(mod, kernel, waveIdTmp.idx, "check wave parity")
+        if self.isTdmWaveIdxLive(kernel):
+          self._emitTdmWaveParitySCC(mod, kernel, comment="check wave parity")
+        else:
+          with self.allocTmpSgpr(1, tag="tdmIncrementABWaveSperated_tmpSgprInfo2") as waveIdTmp:
+            self._emitTdmWaveParitySCC(mod, kernel, waveIdTmp.idx, "check wave parity")
         mod.add(SCSelectB32(dst=sgpr(wrapTmpLo), src0=sgpr(f"WrapU{tcB}+0"), src1=sgpr(f"WrapU{tcA}+0"), \
                 comment="select WrapU based on wave parity (lo)"))
         mod.add(SCSelectB32(dst=sgpr(wrapTmpHi), src0=sgpr(f"WrapU{tcB}+1"), src1=sgpr(f"WrapU{tcA}+1"), \

@@ -8,15 +8,16 @@
 #include <fstream>
 #include <string>
 
-#include <hipdnn_test_sdk/utilities/BundleMetadata.hpp>
+#include "harness/BundleMetadata.hpp"
+
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
 
-using hipdnn_test_sdk::utilities::BundleMetadata;
-using hipdnn_test_sdk::utilities::checkArchCompatibility;
-using hipdnn_test_sdk::utilities::checkVramRequirement;
+using hipdnn_integration_tests::BundleMetadata;
+using hipdnn_integration_tests::checkArchCompatibility;
+using hipdnn_integration_tests::checkVramRequirement;
+using hipdnn_integration_tests::loadBundleMetadata;
+using hipdnn_integration_tests::metaJsonPath;
 using hipdnn_test_sdk::utilities::isMetaJsonFile;
-using hipdnn_test_sdk::utilities::loadBundleMetadata;
-using hipdnn_test_sdk::utilities::metaJsonPath;
 
 // NOLINTBEGIN(readability-identifier-naming) -- gtest macro-generated names
 
