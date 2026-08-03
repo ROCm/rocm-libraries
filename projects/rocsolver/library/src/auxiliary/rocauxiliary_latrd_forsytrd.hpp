@@ -418,13 +418,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(NB_X)
             res += conj(a[n_full]) * x[tx + n_full];
 
         // reduction of partial sums
-        res += shift_left(res, 1);
-        res += shift_left(res, 2);
-        res += shift_left(res, 4);
-        res += shift_left(res, 8);
-        res += shift_left(res, 16);
-        if(warpSize > 32)
-            res += shift_left(res, 32);
+        reduce_wave_sum(res);
         if(tx % warpSize == 0)
             sdata[tx / warpSize] = res;
         __syncthreads();
@@ -505,13 +499,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(NB_X)
             res += conj(a[n_full]) * x[tx + n_full];
 
         // reduction of partial sums
-        res += shift_left(res, 1);
-        res += shift_left(res, 2);
-        res += shift_left(res, 4);
-        res += shift_left(res, 8);
-        res += shift_left(res, 16);
-        if(warpSize > 32)
-            res += shift_left(res, 32);
+        reduce_wave_sum(res);
         if(tx % warpSize == 0)
             sdata[tx / warpSize] = res;
         __syncthreads();

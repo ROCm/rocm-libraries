@@ -1,8 +1,8 @@
-# CK DSL `unified_attention` parity & benchmark harness
+# RocKE `unified_attention` parity & benchmark harness
 
 This folder hosts the cross-backend parity + benchmark script for AITER's
 `unified_attention` kernel. It is the canonical performance harness for
-the CK DSL attention work.
+the RocKE attention work.
 
 > **New to flash attention or this kernel family?** [`ALGORITHM.md`](ALGORITHM.md)
 > derives both kernels from the math up — the paged/varlen attention spec, the
@@ -21,7 +21,7 @@ The script (`parity_unified_attention.py`):
    2D kernel), `3d` (force Triton's 3D split-KV kernel). Forcing works
    by monkey-patching the `use_2d_kernel` callable that
    `unified_attention()` consults; it does not require modifying AITER.
-3. Runs the **CK DSL** `run_unified_attention_torch` in matching modes
+3. Runs the **RocKE** `run_unified_attention_torch` in matching modes
    (`backend="auto"`, `"tiled"`, `"3d"`).
 4. Compares both backends' outputs to AITER's `ref_paged_attn` reference
    and to each other.
@@ -29,9 +29,9 @@ The script (`parity_unified_attention.py`):
 
 ### Why three tables
 
-CK DSL and Triton ship different selectors. Triton's `use_2d_kernel`
+RocKE and Triton ship different selectors. Triton's `use_2d_kernel`
 picks 2D for short `max_seqlen_k`, sliding window, or when the 2D grid
-already saturates the device; CK DSL always prefers the 3D split-KV
+already saturates the device; RocKE always prefers the 3D split-KV
 path when supported. Without forcing, you'd be comparing Triton-2D vs
 CK-3D, which is **not** apples-to-apples. The three tables resolve that:
 
@@ -40,7 +40,7 @@ CK-3D, which is **not** apples-to-apples. The three tables resolve that:
 * **`3d vs 3d`** is the algorithmically-fair comparison — same split-KV
   algorithm on both sides.
 * **`2d vs 2d`** is the second algorithmically-fair comparison — same
-  single-warp algorithm on both sides. CK DSL's 2D kernel is a
+  single-warp algorithm on both sides. RocKE's 2D kernel is a
   single-warp single-CTA-per-(qblock, kv_head) design intentionally
   kept simple; it is **never** selected by `backend="auto"` and is
   noticeably slower than Triton's multi-warp 2D kernel. We include
@@ -67,7 +67,7 @@ Flags (exactly as accepted by `parity_unified_attention.py`):
 | `--attempts N` | `10` | timed iterations per lane; reported number is `elapsed_ms / N` from a single HIP-event pair recorded on torch's current stream |
 | `--warmup N`   | `3`  | untimed warmup iterations |
 | `--skip-ck`    | off  | only run Triton (useful when CK is unavailable) |
-| `--skip-triton` | off | only run CK DSL lanes (useful when AITER/Triton deps are unavailable) |
+| `--skip-triton` | off | only run RocKE lanes (useful when AITER/Triton deps are unavailable) |
 | `--report PATH` | none | dump every measurement to JSON |
 
 `sudo -n` is needed because the runner uses `libamd_comgr` and HIP
@@ -138,10 +138,10 @@ paged-attention constraints), and `all` (`default` + `creative`).
 >   `dlopen`ed first (e.g. via a dependency imported before torch), it produces
 >   a *different, slower* code-gen — **llvm20 measurements are not
 >   representative and must not be mixed into these tables.**
-> * **Two separate baselines, never blended.** We report CK DSL against
+> * **Two separate baselines, never blended.** We report RocKE against
 >   **(a) torch SDPA FLASH** and **(b) AITER Triton `unified_attention`**
 >   independently. They are different kernels with different strengths; a single
->   blended "win" would be misleading. Where CK DSL wins one and trails the
+>   blended "win" would be misleading. Where RocKE wins one and trails the
 >   other (notably the single-batch d128 prefill cohort: wins flash, trails
 >   Triton-2D), both bars are stated explicitly.
 > * **Re-measured 2026-06-19** on verified llvm22, `--attempts 30 --warmup 10`,
@@ -188,7 +188,7 @@ HIP events recorded on torch's current stream. **Both backends use
 the same timer and the same stream**, so the numbers are directly
 comparable. Concretely, the harness does:
 
-1. 10 untimed warmup launches (CK DSL or Triton, depending on lane).
+1. 10 untimed warmup launches (RocKE or Triton, depending on lane).
 2. ``hipDeviceSynchronize`` to drain.
 3. Record a start HIP event on ``torch.cuda.current_stream()``.
 4. 30 timed launches on that same stream.
@@ -196,7 +196,7 @@ comparable. Concretely, the harness does:
    ``elapsed_ms / 30``.
 
 This is the apples-to-apples replacement for the older mixed-clock
-setup (torch CUDA events for Triton, HIP events for CK DSL), which
+setup (torch CUDA events for Triton, HIP events for RocKE), which
 under-measured CK lanes for some shapes.
 
 The numbers below were produced on **2026-06-19** with
@@ -261,12 +261,12 @@ algorithm, same timer, same stream.
 | combo_bf16_d64_b32_gqa8_64x8 |  164.3us |  138.9us | **1.17x** |
 | combo_bf16_d64_b32_gqa8_16x2 |   54.8us |   47.9us | **1.16x** |
 
-CK DSL **wins every row, 1.16x–1.27x**; geomean **≈1.20x** — re-measured
+RocKE **wins every row, 1.16x–1.27x**; geomean **≈1.20x** — re-measured
 2026-06-19 on verified llvm22 / comgr 7.2, median of 3 same-session runs.
 This is the algorithmically-honest comparison (same split-KV algorithm, same
 timer, same stream), and the campaign's rework of the 3D segment kernel is
 what carries it. The CK Tile lessons ported into the segment kernel are what
-keep CK DSL ahead:
+keep RocKE ahead:
 
 - `ds_read_b64_tr_b16` for the PV operand using
   `TransposeLDSLayout<16,K>` lane formulas
@@ -294,7 +294,7 @@ GPU. Re-run the harness a few times for a stable median.
 
 ### 2D vs 2D — same single-CTA algorithm on both backends
 
-CK DSL's tiled 2D kernel is **single-warp per CTA** by design (Triton
+RocKE's tiled 2D kernel is **single-warp per CTA** by design (Triton
 2D uses 2-4 warps depending on the shape). Under the unified HIP-event
 timer the 2D path **wins on the chunked-prefill scenarios and the
 small-context sliding row** but **loses on long-context single-query
@@ -324,7 +324,7 @@ trade-off; the auto selector already routes the slow shapes to 3D
 Geomean **≈0.47x** (the chunked-prefill wins balance the decode losses;
 the single-warp 2D kernel is intentionally simple and never auto-selected
 for the decode shapes). The auto-selector skirts the slow
-rows by routing them to 3D where CK DSL has a clean 1.13–1.23x win.
+rows by routing them to 3D where RocKE has a clean 1.13–1.23x win.
 The ALiBi / QQ-bias rows previously had a 2D-kernel correctness gap
 (``max_abs(ck-2d vs ref)`` reached 2.4 in the worst case); the
 transposed-32x32 softmax path now applies ALiBi (``slope * (key_pos
@@ -348,7 +348,7 @@ follow-up for the 2D kernel itself.
 
 The single-batch (`num_seqs == 1`) **d128 full-prefill** family — GQA-8
 (64 query / 8 KV heads), bf16 + fp16, `S = q = kv ∈ {1024, 2048, 4096}` —
-was historically the weakest CK DSL path. The campaign's **occupancy lever**
+was historically the weakest RocKE path. The campaign's **occupancy lever**
 reversed the loss **against torch SDPA flash** (it now wins flash at
 short/mid context); it does **not** close the gap to Triton's 2D kernel,
 which stays ~0.55-0.60x and is the open follow-up. The d128 transposed-32×32
@@ -549,7 +549,11 @@ The new body edges ahead at long context (S4096: 0.55x vs 0.50x) but trails
 at short context, so it is **not** a strict win and is **not** wired into
 the production selector — it ships as opt-in spec flags
 (`use_q_direct_reg`, `use_k_single_buffer`, `use_mask_phase_split`,
-`use_softmax_mfma_interleave`), all default-OFF and golden-safe.
+`use_softmax_mfma_interleave`), all default-OFF and golden-safe **on this
+`BLOCK_M=128` path**. (`use_softmax_mfma_interleave` is separately wired ON
+for the shipped `BLOCK_M=32` d128 cohort with `num_warps=4` — see
+[Softmax↔MFMA interleave + num_warps=4](#softmaxmfma-interleave--num_warps4-now-wired-into-the-selector)
+below; that is a different geometry and a real production win.)
 
 **The residual is the MFMA schedule, not the geometry.** With occupancy and
 register budget now identical to Triton, a static ISA comparison shows the
@@ -571,6 +575,78 @@ torch flash at short/mid context — geomean ≈1.10x over flash, dipping to
 llvm22) is a real MFMA-scheduling limitation, not a missing config, an
 occupancy lever, or a stale-backend artifact.**
 
+### Softmax↔MFMA interleave + num_warps=4 (now wired into the selector)
+
+A joint `num_warps × iglp_opt` sweep found the win path is `iglp_opt(1)`
+**plus `num_warps=4`** — the two must move together.
+`_enable_softmax_mfma_interleave` now routes the single-batch d128 prefill
+cohort to `use_softmax_mfma_interleave` (mode 1) + `num_warps=4` in the
+**production** selector (this supersedes the "keeps this cohort on the
+K-single-buffer `BLOCK_M=32` combo" statement above for this cohort). The
+lever mechanism — why `iglp_opt` is the right knob here, the rocprofv3
+limiter read (MFMA-busy ≈5%→18%), and the occupancy table (nw2 296 VGPR /
+40 AGPR / 4 waves/CU → nw4 250 VGPR / 0 AGPR / 8 waves/CU, strictly better)
+— is documented once in the optimization runbook,
+[`arch/gfx950.md` §21.4a](../../../../platform/dsl_docs/optimization/arch/gfx950.md).
+Modes 0/1 (`iglp_opt` at the loop top) are ported to the gfx950 C twin; mode
+2 is Python-only and rejected by the C path.
+
+Measured on gfx950 MI355X (comgr llvm22, same-session vs the shipped auto
+path across the gap-doc cohort), correctness `max_abs = 0.0` vs the shipped
+kernel on every shape. The speedup bundles the interleave hint **and** the
+nw2→nw4 widening vs the shipped nw2 baseline:
+
+| shape (bf16, d128) | shipped nw2 | interleave + nw4 | speedup |
+|--------------------|------------:|-----------------:|--------:|
+| S512  | 105 TF | 198 TF | 1.9x |
+| S1024 | 108 TF | 278 TF | 2.6x |
+| S2048 | 109 TF | 350 TF | 3.2x |
+| S4096 | 118 TF | 412 TF | 3.5x |
+| S8192 | 122 TF | 443 TF | 3.6x |
+
+The win **holds across the model cohort** — Llama-3-8B/70B, Llama-3.1-405B,
+Qwen2.5-7B, Qwen3-235B, GPT-3-13B (MHA) — and across **both bf16 and fp16**
+(no dtype cliff), so head_size=128 in this single-batch prefill cohort is a
+uniform nw=4 win, not a per-shape toss-up.
+
+**Why this cohort only — the full eligible space was measured.** The
+`iglp_opt` hint has no combo dependency in the spec validator (only
+mutual-exclusion with `use_sched_barrier`), so it is *technically* legal on
+d64, multi-seq d128, sliding-window d128, and d256. It was measured on all
+of them. The hint is a pure scheduling change (`max_abs = 0.0` vs the same
+spec with it off), so the only question is timing. Adding **only** the hint
+to each cohort's **shipped** geometry (MI355X, vs the production baseline):
+
+| cohort (shipped geometry) | S1024 | S2048 | S4096 |
+|---------------------------|------:|------:|------:|
+| d128 single-batch combo, nw4 (**gated win**) | 1.10x | 1.05x | 1.03x |
+| d64 single-batch combo, nw4 | 0.97x | 0.95x | 0.93x |
+| d128 multi-seq combo, nw2 | 1.00x | 1.00x | 0.99x |
+| d256 single-seq plain, nw1 | 1.00x | 1.00x | 0.99x |
+| d128 sliding-window plain, nw2 | 0.83x | 0.72x | 0.73x |
+
+On each cohort's **shipped** geometry the hint helps only single-batch d128
+combo; it is inert on d128 multi-seq and regresses d64 and sliding-window.
+This is the documented `iglp_opt` behavior (`arch/gfx950.md`): it only helps
+a schedule-bound loop with a real softmax-VALU/MFMA-idle window — the plain
+(non-combo) and short-loop cohorts have none. (These isolated ratios hold nw
+fixed to isolate the hint, so they are smaller than the 1.9–3.6x headline
+above, which bundles the hint with the nw2→nw4 widening.)
+
+> **d256 and sliding-window also benefit — via the cohort-owning PRs, not
+> dropped.** The lever helps those cohorts too, but only once they run the
+> combo+nw geometry they actually want (on their shipped plain geometry the
+> hint alone is inert/negative). That geometry work is owned separately:
+> **d256 gfx950** by [PR #9233](https://github.com/ROCm/rocm-libraries/pull/9233)
+> (AICK-1495 — 32×32 combo + interleave mode2/g4, 1.1–1.94x vs AOTriton), and
+> **sliding-window d128** by AICK-1492 (wide-atom windowed path, in progress).
+> This gate stays scoped to the single-batch d128 combo to avoid colliding
+> with those PRs on the same `use_softmax_mfma_interleave` field.
+
+**Escape hatch:** `HIPDNN_GFX950_D128_SOFTMAX_INTERLEAVE=0` (or
+`off`/`no`/`false`) force-disables the lever, restoring the prior nw=2 /
+no-interleave routing.
+
 ## Prefill-2D trace cohort (the d64 / sinks production family)
 
 The scenarios above are the d128 reference set. Real serving traces
@@ -580,7 +656,7 @@ sinks, sliding-window (127,0) or full, bf16 (or bf16-Q + fp8-KV)**, with
 chunked prefill across 1..512 sequences. These all route to the 2D path.
 
 A dedicated live-Triton workbench, `benchmark_prefill2d_live.py`, runs
-AITER's Triton `unified_attention` (forced 2D) and the CK DSL variants on
+AITER's Triton `unified_attention` (forced 2D) and the RocKE variants on
 the same stream/timer with a per-shape correctness check against Triton.
 
 **The 2D dispatcher was substantially reworked (2026-05-28)** after this
@@ -603,7 +679,7 @@ workbench showed the production path was leaving ~40% on the table:
   to avoid an occupancy cliff).
 
 Result on the bf16 trace cohort (142 deduped shapes, geomean speedup of
-Triton-2d over rocke-production; **>1.0 means CK DSL is faster**, all
+Triton-2d over rocke-production; **>1.0 means RocKE is faster**, all
 shapes bit-accurate vs Triton, max_abs <= 3.9e-3):
 
 | stage | geomean ck-prod speedup vs Triton-2d |
@@ -619,17 +695,17 @@ shapes bit-accurate vs Triton, max_abs <= 3.9e-3):
 > cache, which makes the cache **artificially L2-resident**. Production
 > caches have hundreds of thousands of blocks, so the KV working set far
 > exceeds L2 and attention is **HBM-bandwidth-bound** — and that is
-> exactly the regime where CK DSL's async-DMA KV loads beat Triton's. At a
+> exactly the regime where RocKE's async-DMA KV loads beat Triton's. At a
 > production-representative `cap_blocks=65536` the **bf16 cohort flips to
 > 1.11x** (the harness default is now 65536). The small-cap regime was
-> understating CK DSL by ~20%.
+> understating RocKE by ~20%.
 
 **At production scale (`cap_blocks=65536`), the bf16 prefill cohort is a
 clean win — geomean 1.108x, 105/142 shapes beating Triton** (no-SW
 1.118x, SW 1.099x), all bit-accurate. That is a **2.5x improvement** over
 the original 0.44x. The advantage grows with KV working-set size (the
-more HBM-bound, the bigger CK DSL's bandwidth edge). On the
-**low-num-seqs** shapes CK DSL wins decisively (ns=1: **1.5–1.8x**).
+more HBM-bound, the bigger RocKE's bandwidth edge). On the
+**low-num-seqs** shapes RocKE wins decisively (ns=1: **1.5–1.8x**).
 
 ### fp8 KV cache (bf16-Q + fp8-KV trace family)
 
@@ -752,14 +828,14 @@ the gap is purely per-iteration code-gen. Two findings shaped the work:
 The remaining gap is therefore an occupancy/latency problem: closing it
 needs lower register pressure (fewer live PV accumulators — an
 algorithmic redesign) or deeper K/V latency hiding, not fewer
-instructions. CK DSL still trails Triton's well-tuned d64 2D
+instructions. RocKE still trails Triton's well-tuned d64 2D
 kernel on the high-num-seqs shapes — the remaining gap is per-iteration
 code-gen efficiency in the 2D kernel body (Triton uses an algorithmically
 identical kernel; the delta is scheduling/VALU, not the algorithm), which
-is the open follow-up. On the **low-num-seqs** shapes CK DSL already wins
+is the open follow-up. On the **low-num-seqs** shapes RocKE already wins
 (e.g. ns=1: **1.5-1.8x**).
 
-Sweep the live workbench over a set of shapes (best-correct CK DSL
+Sweep the live workbench over a set of shapes (best-correct RocKE
 variant per shape + bucket; writes a JSON to `--output-json`, default
 `/tmp/prefill2d_live.json`):
 
@@ -785,21 +861,24 @@ PYTHONPATH="python:${AITER_PATH}" python \
 
 ## File map
 
-The CK DSL `unified_attention` kernels themselves live in `rocke.instances`
+The RocKE `unified_attention` kernels themselves live in `rocke.instances`
 (`gfx950/attention_tiled_2d.py`, `gfx950/attention_tiled_3d.py`,
 `gfx950/attention_tiled_2d_fastkv_regp.py`, and the dispatcher
-`common/attention_unified.py`). This folder holds the parity + benchmark
-harnesses and their captured data.
+`common/attention_unified.py`). The spec-builder
+(`builders/common/attention_spec_builder.py`) and its knob reference live in
+[`builders/common/README.md`](../../common/README.md). This folder holds the
+parity + benchmark harnesses and their captured data.
 
 | path | purpose |
 |---|---|
-| `README.md` | this document — parity methodology + prefill-2D optimization history + results |
+| `README.md` | this document — parity methodology + prefill-2D optimization history + results + spec-knob reference |
 | `ALGORITHM.md` | the math + kernel strategy (2D vs 3D split-KV, online softmax, bias/mask order, CDNA mapping) |
-| `parity_unified_attention.py` | the canonical parity + benchmark harness: builds AITER paged-KV inputs, runs Triton and CK DSL in `auto`/`2d`/`3d` lanes on one shared HIP-event timer/stream, compares both to `ref_paged_attn`, emits the three apples-to-apples tables. Scenario sets: `default` (13 = 11 d128/d256 reference + 2 bf16 d64/b32 combo), `creative` (21, exploratory sweep), `fmha` (26, CK Tile testing-matrix subset), `all` (default + creative) |
-| `benchmark_prefill2d_live.py` | the authoritative prefill-2D workbench: runs **live** Triton (forced 2D) vs a sweep of CK DSL 2D kernel variants (`prod`/`combo`/`fallback`/…) on the same stream, checks every variant against the Triton output, reports the best correct variant per shape and per bucket (sw/no-sw, bf16/fp8). Default `--cap-blocks 65536` (production-representative HBM-bound regime) |
-| `benchmark_prefill2d_traces.py` | runs the CK DSL 2D combo policy over traced AITER prefill shapes and joins against a pre-profiled Triton CSV by `shape_signature` (the CSV-join workflow; writes `prefill2d_bf16_triton_ckdsl_perf.csv`) |
+| [`../common/README.md`](../../common/README.md) | spec-builder knob reference — dispatch branches, per-knob documentation for `use_fast_paged_kv_desc`, `use_transposed_half_local_pv`, `use_mfma32_skip_legacy_qreg`, `use_register_pv`, `use_agpr_alloc_zero`, etc. |
+| `parity_unified_attention.py` | the canonical parity + benchmark harness: builds AITER paged-KV inputs, runs Triton and RocKE in `auto`/`2d`/`3d` lanes on one shared HIP-event timer/stream, compares both to `ref_paged_attn`, emits the three apples-to-apples tables. Scenario sets: `default` (13 = 11 d128/d256 reference + 2 bf16 d64/b32 combo), `creative` (21, exploratory sweep), `fmha` (26, CK Tile testing-matrix subset), `all` (default + creative) |
+| `benchmark_prefill2d_live.py` | the authoritative prefill-2D workbench: runs **live** Triton (forced 2D) vs a sweep of RocKE 2D kernel variants (`prod`/`combo`/`fallback`/…) on the same stream, checks every variant against the Triton output, reports the best correct variant per shape and per bucket (sw/no-sw, bf16/fp8). Default `--cap-blocks 65536` (production-representative HBM-bound regime) |
+| `benchmark_prefill2d_traces.py` | runs the RocKE 2D combo policy over traced AITER prefill shapes and joins against a pre-profiled Triton CSV by `shape_signature` (the CSV-join workflow; writes `prefill2d_bf16_triton_ckdsl_perf.csv`) |
 | `benchmark_prefill2d_fastkv_regp.py` | benchmarks the experimental `attention_tiled_2d_fastkv_regp` kernel (fast paged-KV + register-resident P) against the R4 / combo 2D baselines; `--smart-dispatch-policy latest` reproduces the measured-best per-shape host policy |
-| `_d128_cktile_bakeoff.py` | per-shape, same-session A/B of CK DSL production `unified_attention` vs CK Tile `tile_example_fmha_fwd` (subprocess) and Triton, over a d128/d256 GQA-8 cohort; reports `cktile_ms / rocke_ms` (>1 = CK DSL faster) — requires a built `tile_example_fmha_fwd` binary |
+| `_d128_cktile_bakeoff.py` | per-shape, same-session A/B of RocKE production `unified_attention` vs CK Tile `tile_example_fmha_fwd` (subprocess) and Triton, over a d128/d256 GQA-8 cohort; reports `cktile_ms / rocke_ms` (>1 = RocKE faster) — requires a built `tile_example_fmha_fwd` binary |
 | `_profile_one.py` | standalone single-shape launcher for `rocprofv3` profiling of the production-dispatched 2D combo kernel (d64/b32/GQA-8/sinks); args `<sw> <num_seqs> <iters>` |
 | `prefill2d_bf16_triton_ckdsl_perf.csv` | captured bf16 prefill-2D cohort (142 deduped shapes; geomean **1.108x** vs Triton-2D at `cap_blocks=65536`, 105/142 wins) |
 | `prefill2d_fp8_triton_ckdsl_perf.csv` | captured bf16-Q + fp8-KV prefill cohort (74 shapes; geomean **0.984x**; SW 1.108x 37/37, full-attention 0.874x) |

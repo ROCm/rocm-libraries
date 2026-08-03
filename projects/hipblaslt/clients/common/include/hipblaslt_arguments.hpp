@@ -112,6 +112,12 @@ struct Arguments
     int32_t batch_count;
     int32_t batch_mode;
 
+    // Batch offset support for general batched GEMM
+    int64_t batch_offset_a;
+    int64_t batch_offset_b;
+    int64_t batch_offset_c;
+    int64_t batch_offset_d;
+
     int32_t iters;
     int32_t cold_iters;
 
@@ -163,6 +169,7 @@ struct Arguments
     int8_t norm_check;
     int8_t allclose_check;
     int8_t unit_check;
+    int8_t ulp_check;
     int8_t timing;
 
     char transA;
@@ -251,6 +258,10 @@ struct Arguments
     OPER(lde) SEP                    \
     OPER(batch_count) SEP            \
     OPER(batch_mode) SEP             \
+    OPER(batch_offset_a) SEP         \
+    OPER(batch_offset_b) SEP         \
+    OPER(batch_offset_c) SEP         \
+    OPER(batch_offset_d) SEP         \
     OPER(iters) SEP                  \
     OPER(cold_iters) SEP             \
     OPER(warmup_time) SEP            \
@@ -286,6 +297,7 @@ struct Arguments
     OPER(norm_check) SEP             \
     OPER(allclose_check) SEP         \
     OPER(unit_check) SEP             \
+    OPER(ulp_check) SEP              \
     OPER(timing) SEP                 \
     OPER(transA) SEP                 \
     OPER(transB) SEP                 \

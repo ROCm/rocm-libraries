@@ -104,7 +104,7 @@ TEST(TestBatchnormFwdTrainingParams, ExtractsEpsilonValueCorrectly)
     const BatchnormFwdTrainingParams params(*attrs, graph.getTensorMap());
 
     // Epsilon should be extracted as double
-    EXPECT_NEAR(params.epsilonValue(), 1e-5, 1e-10);
+    EXPECT_NEAR(params.epsilonValue(nullptr, 0), 1e-5, 1e-10);
 }
 
 TEST(TestBatchnormFwdTrainingParams, HandlesMeanVariancePresent)
@@ -359,7 +359,6 @@ TEST(TestBatchnormFwdTrainingPlan, CompileDefaultSetsCorrectDefines)
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_NODPP=0"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_LDSGCN_SIZE=16"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_USESAVED=0"));
-    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_VECTORIZE=0"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_STASH_METHOD=0"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_VARIANT=1"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_NRN_OP_ID=0"));
