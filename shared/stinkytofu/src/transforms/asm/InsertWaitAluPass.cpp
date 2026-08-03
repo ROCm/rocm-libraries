@@ -55,7 +55,6 @@ bool g_enableESM2TrackValuVsrc = false;
 // hazard of GLOBAL-family memory ops — the "valu writes VGPR, global op reads
 // it" case. Only the global op's src RAW va_vdst is dropped; its dst WAW
 // va_vdst, the vm_vsrc WAR, and every non-GLOBAL consumer are untouched.
-// Default false preserves current behavior (the wait is inserted).
 constexpr bool g_enableESM2SuppressValuToGlobalVaVdst = true;
 
 // ---------------------------------------------------------------------------
