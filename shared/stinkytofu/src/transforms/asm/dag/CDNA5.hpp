@@ -52,6 +52,7 @@ enum NonWmmaKind { kGlobalRead = 0, kLocalRead, kOther, kValu };
 // PassFeatureConfig sentinel values (0 / INT_MAX). Explicit non-sentinel config wins.
 constexpr int kCdna5DsReadQueueDepth = 16;
 constexpr int kCdna5DsReadDrainLatency = 72;
+constexpr int kCdna5DsReadThrottleLatency = 72;
 constexpr int kCdna5DsReadPerWmma = 3;
 constexpr int kCdna5GlobalReadPerWmma = 1;
 
@@ -325,6 +326,10 @@ class CDNA5ReadyQueue : public ReadyQueue {
         const int cfg = getPassContext().getPassFeatureConfig().dagFeatures.dsReadDrainLatency;
         return cfg > 0 ? cfg : kCdna5DsReadDrainLatency;
     }
+    int dsReadThrottleLatency() const {
+        const int cfg = getPassContext().getPassFeatureConfig().dagFeatures.dsReadThrottleLatency;
+        return cfg > 0 ? cfg : kCdna5DsReadThrottleLatency;
+    }
     int dsReadPerWmma() const {
         const int cfg = getPassContext().getPassFeatureConfig().dagFeatures.dsReadPerWmma;
         return cfg < INT_MAX ? cfg : kCdna5DsReadPerWmma;
@@ -332,14 +337,8 @@ class CDNA5ReadyQueue : public ReadyQueue {
     bool dsReadQueueFull() const {
         return dsReadInflight_.full();
     }
-    double dsReadThrottleInterval() const {
-        const int depth = dsReadQueueDepth();
-        if (depth <= 0) return 0.0;
-        return (double)dsReadDrainLatency() / (double)depth;
-    }
     int dsReadThrottleWait() const {
-        const double interval = dsReadThrottleInterval();
-        return dsReadInflight_.throttleWait(interval);
+        return dsReadInflight_.throttleWait();
     }
 
     // --- VALU co-issue timeline tracker ---
@@ -560,7 +559,7 @@ DAGNode* CDNA5ReadyQueue::popNonWmma(DAGNode* node, int pickKind) {
         if (globalReadQueueDepth() > 0) globalReadInflight_.push(globalReadDrainLatency());
     } else if (pickKind == kLocalRead) {
         localReadQueue.erase(node);
-        dsReadInflight_.pushWithThrottle(dsReadDrainLatency(), dsReadThrottleInterval());
+        dsReadInflight_.pushWithThrottle(dsReadThrottleLatency());
         dsInsertedSinceLastWmma_++;
     } else if (pickKind == kOther) {
         otherQueue.erase(node);
@@ -993,8 +992,7 @@ int CDNA5ReadyQueue::computeWmmaWindowsNeeded(int dsLoadCount) const {
     const int maxDsPerWmmaWindow = dsReadPerWmma();
     int wmmaWindowsNeeded = (dsLoadCount + maxDsPerWmmaWindow - 1) / maxDsPerWmmaWindow;
     if (dsLoadCount > dsReadQueueDepth()) {
-        // Fixme: Don't use dsReadDrainLatency() here, it's not the actual latency.
-        const float cyclePerDs = (float)dsReadDrainLatency() / (float)dsReadQueueDepth();
+        const float cyclePerDs = (float)dsReadThrottleLatency() / (float)dsReadQueueDepth();
         const float cyclesNeeded = cyclePerDs * (dsLoadCount - dsReadQueueDepth());
         wmmaWindowsNeeded += (int)std::ceil(cyclesNeeded / (float)wmmaIssueConfig.latency);
     }
@@ -1572,6 +1570,10 @@ void CDNA5ReadyQueue::onInit(IRList::iterator regionStart, IRList::iterator regi
     activeWmmaNode_ = nullptr;
     globalReadInflight_ = InFlightQueue(globalReadQueueDepth());
     dsReadInflight_ = InFlightQueue(dsReadQueueDepth());
+    const int dsDepth = dsReadQueueDepth();
+    const double dsThrottleInterval =
+        dsDepth > 0 ? (double)dsReadThrottleLatency() / (double)dsDepth : 0.0;
+    dsReadInflight_.setThrottleInterval(dsThrottleInterval);
 
     currentBB_ = (regionStart != regionEnd) ? regionStart->getParent() : nullptr;
 

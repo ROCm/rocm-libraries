@@ -41,7 +41,10 @@ class InFlightQueue {
 
     void advance(int cycles) {
         currentTime_ += cycles;
-        throttleClock_ += (double)cycles;
+    }
+
+    void setThrottleInterval(double issueInterval) {
+        throttleInterval_ = issueInterval;
     }
 
     void push(int drainLatency) {
@@ -71,7 +74,6 @@ class InFlightQueue {
     void clear() {
         expiries_.clear();
         currentTime_ = 0;
-        throttleClock_ = 0.0;
         nextIssueTick_ = -1.0;
     }
 
@@ -84,19 +86,21 @@ class InFlightQueue {
 
     // Wait cycles to satisfy a saturated-queue issue pacing interval.
     // Returns 0 when queue is not full or interval is invalid.
-    int throttleWait(double issueInterval) const {
-        if (!full() || issueInterval <= 0.0) return 0;
-        const double nextTick = (nextIssueTick_ < 0.0) ? throttleClock_ : nextIssueTick_;
-        return (int)std::max(0.0, std::ceil((nextTick - throttleClock_) - 1e-9));
+    int throttleWait() const {
+        if (!full() || throttleInterval_ <= 0.0) return 0;
+        const double now = (double)currentTime_;
+        const double nextTick = (nextIssueTick_ < 0.0) ? now : nextIssueTick_;
+        return (int)std::max(0.0, std::ceil((nextTick - now) - 1e-9));
     }
 
     // Push one entry and update saturation pacing state.
-    void pushWithThrottle(int drainLatency, double issueInterval) {
+    void pushWithThrottle(int drainLatency) {
         push(drainLatency);
-        if (full() && issueInterval > 0.0)
-            nextIssueTick_ = std::max(nextIssueTick_, throttleClock_) + issueInterval;
+        const double now = (double)currentTime_;
+        if (full() && throttleInterval_ > 0.0)
+            nextIssueTick_ = std::max(nextIssueTick_, now) + throttleInterval_;
         else
-            nextIssueTick_ = throttleClock_;
+            nextIssueTick_ = now;
     }
 
     // Remaining cycles until the oldest in-flight entry expires.
@@ -120,7 +124,7 @@ class InFlightQueue {
 
     int depth_ = 0;
     int currentTime_ = 0;
-    double throttleClock_ = 0.0;
+    double throttleInterval_ = 0.0;
     double nextIssueTick_ = -1.0;
     mutable std::deque<int> expiries_;
 };
