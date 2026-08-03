@@ -215,8 +215,7 @@ public:
    *  \param first The beginning of the range.
    *  \param last The end of the range.
    */
-  template <typename InputIterator,
-            _THRUST_STD::enable_if_t<::internal::is_cpp17_input_iterator<InputIterator>::value, int> = 0>
+  template <typename InputIterator, _THRUST_STD::enable_if_t<_THRUST_STD::__has_input_traversal<InputIterator>, int> = 0>
   vector_base(InputIterator first, InputIterator last);
 
   /*! This constructor builds a vector_base from a range.
@@ -224,8 +223,7 @@ public:
    *  \param last The end of the range.
    *  \param alloc The allocator to use by this vector_base.
    */
-  template <typename InputIterator,
-            _THRUST_STD::enable_if_t<::internal::is_cpp17_input_iterator<InputIterator>::value, int> = 0>
+  template <typename InputIterator, _THRUST_STD::enable_if_t<_THRUST_STD::__has_input_traversal<InputIterator>, int> = 0>
   vector_base(InputIterator first, InputIterator last, const Alloc& alloc);
 
   /*! The destructor erases the elements.
