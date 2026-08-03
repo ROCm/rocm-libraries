@@ -1,4 +1,4 @@
-# CK DSL Dispatch
+# rocKE Dispatch
 
 `rocke.dispatch` owns operator-to-kernel selection. It does not benchmark or
 collect performance evidence; benchmark harnesses live under `rocke.benchmark`.
@@ -27,9 +27,12 @@ rocke/dispatch/
     conv.py moe.py norm.py
 ```
 
-Attention lives outside this package, in `library/dispatch/attention.py`, because
-its cohort predicates import arch-specific kernel modules. It uses the same
-`core.py` contracts and is subject to the same coverage invariants.
+Attention lives outside this package, in `library/dispatch/attention/`, because
+its cohort predicates import arch-specific kernel modules. That package is split
+per architecture — `common.py`, `generic.py`, `gfx942.py`, `gfx950.py`,
+`gfx1250.py` — with `__init__.py` holding the registry assembly and the entry
+points. It uses the same `core.py` contracts and is subject to the same coverage
+invariants.
 
 ## Current Scope
 
@@ -87,8 +90,9 @@ the complete verdict:
 ok, why = candidate.admits(req)   # capability, then the residual predicate
 ```
 
-`supports()` is the residual predicate alone. Since it no longer re-checks arch
-or dtype, it is not a complete gate and should not be called directly.
+`_supports()` is the residual predicate alone. Since it no longer re-checks arch
+or dtype, it is not a complete gate; the underscore marks it as private so that
+calling it directly reads as the violation it is.
 
 ### Identity
 

@@ -155,7 +155,7 @@ def _make_gfx950_attention_dense_candidate() -> KernelCandidate:
             # feature this path turns down.
             supports_features=frozenset({"causal"}),
         ),
-        supports=support,
+        _supports=support,
         select_spec=select,
         signature=lambda _spec: (),
         grid=lambda spec, req: (0, 0, 0),
@@ -239,7 +239,7 @@ def _make_gfx950_d256_candidate() -> KernelCandidate:
             ),
             supports_features=frozenset({"causal"}),
         ),
-        supports=support,
+        _supports=support,
         select_spec=select,
         signature=lambda _spec: (),
         grid=lambda spec, req: (0, 0, 0),

@@ -59,7 +59,7 @@ class TestConvDispatch(unittest.TestCase):
     def test_cshuffle_unsupported_on_gfx942(self):
         for c in conv_candidates():
             if c.spec_id == "cdna_cshuffle_64x64":
-                ok, why = c.supports(_conv("gfx942"))
+                ok, why = c.admits(_conv("gfx942"))
                 self.assertFalse(ok)
 
     def test_rdna_arch_selects_wmma(self):

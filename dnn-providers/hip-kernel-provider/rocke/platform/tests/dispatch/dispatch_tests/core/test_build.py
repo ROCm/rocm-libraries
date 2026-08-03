@@ -149,7 +149,7 @@ class TestBuildRatchet(unittest.TestCase):
                     abi_version="demo/v1",
                     priority=10,
                     capability=Capability(arches=known_arches()),
-                    supports=lambda req: (True, ""),
+                    _supports=lambda req: (True, ""),
                     select_spec=lambda req: None,
                     signature=lambda spec: (),
                     grid=lambda spec, req: (1, 1, 1),

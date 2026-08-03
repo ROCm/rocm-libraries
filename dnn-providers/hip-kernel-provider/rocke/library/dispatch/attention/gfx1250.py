@@ -164,7 +164,7 @@ def _make_wmma_fwd_candidate() -> KernelCandidate:
         abi_version=ATTENTION_GFX1250_ABI,
         priority=5,
         capability=_WMMA_FWD_CAP,
-        supports=support,
+        _supports=support,
         select_spec=select,
         build=build_wmma_attention_fwd,
         grid=grid,

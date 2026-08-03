@@ -215,7 +215,7 @@ def _make_candidate(*, name, spec_id, dtypes, spec_fn, priority) -> KernelCandid
         # Both mega configs are gfx950-tuned: the 16x16x32 / 16x16x128 atoms
         # they are built around are gfx950-specific.
         capability=Capability(arches=_SUPPORTED_ARCHES, dtypes=dtypes),
-        supports=support,
+        _supports=support,
         select_spec=select,
         signature=lambda _spec: (),
         grid=lambda spec, req: (0, 0, 0),  # grid is runtime (num_m_blocks, inter)

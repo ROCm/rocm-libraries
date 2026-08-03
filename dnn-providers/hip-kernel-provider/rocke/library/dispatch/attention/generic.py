@@ -42,7 +42,7 @@ from .common import (
 # candidates select a *path*, and the concrete kernel behind it is chosen
 # downstream by ``attention_unified`` on the running device -- the wave64 MFMA
 # variants on gfx942/gfx950, the wave32 WMMA variant on gfx1250, and the
-# arch-neutral scalar CK DSL kernel (no MMA atom at all) everywhere else. They
+# arch-neutral scalar rocKE kernel (no MMA atom at all) everywhere else. They
 # are therefore the second documented exception to wave-size consistency,
 # alongside norm2d. Narrowing them to the wave64 MFMA targets would drop the
 # gfx1250 and RDNA coverage that the scalar and WMMA backends actually provide.
@@ -102,7 +102,7 @@ def _make_candidate(*, path: str, priority: int) -> KernelCandidate:
         abi_version=ATTENTION_ABI_VERSION,
         priority=priority,
         capability=_UNIFIED_CAPABILITY,
-        supports=support,
+        _supports=support,
         select_spec=select,
         signature=lambda _spec: (),
         grid=lambda spec, req: (0, 0, 0),  # geometry deferred (see common.py)
@@ -179,7 +179,7 @@ def _make_d256_decode_candidate() -> KernelCandidate:
             ),
             supports_features=frozenset({"causal"}),
         ),
-        supports=support,
+        _supports=support,
         select_spec=select,
         signature=lambda _spec: (),
         grid=lambda spec, req: (0, 0, 0),

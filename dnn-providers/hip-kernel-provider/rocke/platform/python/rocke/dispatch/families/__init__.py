@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Operator-family scaffolds for the CK DSL dispatcher.
+"""Operator-family scaffolds for the rocKE dispatcher.
 
 The GEMM family (``rocke.dispatch.gemm``) is fully implemented as the worked
 reference: two cases (fp16 / bf16 RCR) on top of the operator-agnostic
@@ -33,8 +33,9 @@ registry exactly the way ``gemm/fp16_rcr.py`` does:
     3. write a ``support`` predicate for what is left: family request errors, a
        family config predicate (generalize ``gemm_config_supported``), and any
        runtime-shape check the capability cannot express as data,
-    4. register the candidates, and call ``candidate.admits(req)`` rather than
-       ``supports(req)`` anywhere the full verdict is wanted,
+    4. register the candidates, and call ``candidate.admits(req)`` anywhere the
+       full verdict is wanted -- the residual predicate is stored as
+       ``_supports`` precisely so that calling it alone reads as a mistake,
     5. point ``dispatch_<family>`` at ``registry.select(req)``.
 
 Each family also passes a ``dim_vocabulary`` to its registry, which turns a

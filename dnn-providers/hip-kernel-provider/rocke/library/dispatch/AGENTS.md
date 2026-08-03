@@ -88,8 +88,9 @@ Follow the `_make_d256_decode_candidate()` pattern in `generic.py`:
    spec_id, algorithm, priority ordering, rejection gates (wrong arch/dtype/
    cohort/path), and routing for each target arch. Use `_PinnedArch` context
    manager to avoid GPU dependency. Call `candidate.admits(req)`, not
-   `candidate.supports(req)` — the latter skips the capability prefilter and is
-   no longer a complete verdict. The coverage invariants in
+   `candidate._supports(req)` — the latter skips the capability prefilter and is
+   no longer a complete verdict, which is what the underscore is there to say.
+   The coverage invariants in
    `test_declared_coverage.py` apply to the new candidate automatically.
 
 6. **No C++ changes needed.** The dispatcher is Python-only.

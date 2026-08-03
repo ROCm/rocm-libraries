@@ -11,7 +11,7 @@ wrongly out-ranked the intended prio-20 ``cdna_mem`` candidate whenever the
 
 The gate is now the ``arches`` list each candidate declares in its
 ``Capability``, rather than a cdna/rdna family label, so these tests query
-``admits`` (capability then predicate) rather than the residual ``supports``.
+``admits`` (capability then predicate) rather than the residual ``_supports``.
 """
 
 from __future__ import annotations

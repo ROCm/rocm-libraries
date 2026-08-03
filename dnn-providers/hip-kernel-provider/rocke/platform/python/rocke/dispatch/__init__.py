@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""CK DSL dispatcher surface.
+"""rocKE dispatcher surface.
 
 The dispatcher started with FP16 RCR GEMM only; it now also implements BF16 RCR
 GEMM (the worked template for further dtypes/layouts) and carries documented

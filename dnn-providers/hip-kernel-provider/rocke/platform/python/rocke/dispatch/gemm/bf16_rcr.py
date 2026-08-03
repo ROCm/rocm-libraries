@@ -249,7 +249,7 @@ def _make_candidate(
         capability=Capability(
             arches=arches, dtypes=("bf16",), layouts=("RCR",), shapes=shapes
         ),
-        supports=support,
+        _supports=support,
         select_spec=select,
         signature=lambda _spec: gemm_args_signature(),
         grid=_grid,

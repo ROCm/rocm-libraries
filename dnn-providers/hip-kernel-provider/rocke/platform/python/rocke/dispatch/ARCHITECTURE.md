@@ -24,142 +24,20 @@ Companion documents: `README.md` (current dispatcher usage),
    that is not the host.
 5. The spec a dispatcher produces is the spec a builder consumes. There is one
   selection stack per operator, not two.
+6. Registry coverage is queryable without a request: `for_arch` and `coverage()`
+  answer "what runs on X?" from declared data, never by probing.
+7. Selection is explainable: every candidate's accept/reject reason is
+  recoverable from the result, so routing decisions are auditable.
+8. Selection and build changes preserve the Python/C++ byte-identity contract;
+  dispatch is a new caller of the shared builders, never a third lowering path.
 
 
 
-## 2. Workflow: how a kernel reaches a client
-
-Dispatch is the last stage of a four-stage pipeline. A kernel is authored,
-measured, registered, and then consumed. The first two stages already exist and
-are healthy; this document is about the third, which is the thin link in the
-chain today.
-
-```mermaid
-flowchart TD
-    subgraph S1["1 · Author — reusable spec-driven builder"]
-        direction LR
-        A1["library/kernels/{arch}/<br/>attention family"]
-        A2["platform/python/rocke/instances/<br/>gemm · conv · moe · norm"]
-    end
-
-    subgraph S2["2 · Experiment — measure, verify, write up"]
-        direction LR
-        E1["library/builders/{arch}/{family}/<br/>*_verify.py · tuners · case study .md"]
-        E2["platform/python/rocke/examples/{arch}/{workload}/<br/>README · ALGORITHM · data · scripts · goldens"]
-    end
-
-    subgraph S3["3 · Register — this document"]
-        direction LR
-        R1["KernelCandidate<br/>capability · supports() · spec() · build() · bind()"]
-        R2[("CandidateRegistry")]
-    end
-
-    subgraph S4["4 · Consume — one registry, three lanes"]
-        direction LR
-        C1["client API<br/>dispatch(req) → 1 kernel"]
-        C2["benchmark · autotune<br/>dispatch_all + sweep_space + bind"]
-        C3["CI<br/>by-id replay · coverage"]
-    end
-
-    A1 --> E1
-    A2 --> E2
-    E1 --> R1
-    E2 --> R1
-    R1 --> R2
-    R2 --> C1
-    R2 --> C2
-    R2 --> C3
-    C2 -. "measurements become the next case study" .-> E2
-```
-
-
-
-
-
-### 2.1 Author
-
-Two trees, split by layer, holding the same kind of artifact:
-
-- `library/kernels/<arch>/` — the attention family, e.g.
-`gfx1250/wmma_attention_fwd.py` and `gfx942/attention_tiled_2d.py`.
-- `platform/python/rocke/instances/` — the core families. `common/` holds
-arch-portable builders that take `arch` as a parameter (`gemm_universal.py`,
-`conv_implicit_gemm.py`, `fused_moe.py`, `layernorm2d.py`), and
-`instances/<arch>/` holds the specializations that could not stay portable
-(`gfx950/deep_fused_conv_pool.py`).
-
-Whichever tree it lands in, the artifact has the same shape, and that is what
-makes registration mechanical later: a frozen spec dataclass with a
-`kernel_name()`, a `build_*(spec, arch)` that emits the kernel, and a validity
-predicate (`supports_*` or `is_valid_spec`). `platform/AGENTS.md` requires this
-shape — "new kernels must become reusable spec-driven builders under
-`instances/`, not one-off scripts."
-
-### 2.2 Experiment and report
-
-Mirrored trees, holding evidence rather than kernels:
-
-- `library/builders/<arch>/<family>/` — the harnesses that build, launch,
-verify, and tune a kernel, kept next to their write-up.
-`library/builders/gfx1250/attention/` holds `wmma_attention_fwd_verify.py`,
-`tiled_2d_verify.py`, `gfx1250_mha_optimization_case_study.md`, and
-`gfx1250_universal_attention_plan.md`.
-- `platform/python/rocke/examples/<arch>/<workload>/` — workload case studies,
-each a `README.md`, `ALGORITHM.md`, `data/`, and `scripts/`. These are
-executable, not just prose: `run_all.py --bless` captures goldens into
-`_goldens/` and `--check` asserts against them, so a case study doubles as a
-repeatability gate. `examples/REGISTRY.md` indexes the curated subset.
-
-What this stage produces is exactly what registration needs as input: which knob
-values are numerically correct, which are fast, and on what hardware. A
-capability that claims a shape range in section 5.1 is claiming something this
-stage measured.
-
-### 2.3 Register — the promotion gate
-
-The knobs that survived experimentation are frozen into `Capability` data, the
-conditions under which they held become `supports()`, and the winning
-configuration becomes `spec()`. `build()` and `bind()` point back at the same
-builder and harness the experiment used, so the benchmark path and the
-production path exercise the same code rather than two drifting copies.
-
-This is a gate, not a formality. Again from `platform/AGENTS.md`: "reusable
-kernels must be wired into registry/test/byte-identity coverage before they are
-considered complete; workload-only benchmark scripts should not be wired into
-production dispatch by default." A passing experiment does not register a
-kernel, and a workload-specific script is not meant to become a dispatch target.
-
-It is also where the pipeline currently leaks. Stage 1 and stage 2 are complete
-for `library/kernels/gfx1250/wmma_attention_fwd.py` — a finished spec-driven
-builder, a `wmma_attention_fwd_verify.py` harness, and a written-up case study —
-and yet no client can reach it. `ATTENTION_REGISTRY` holds six candidates — the
-generic `unified_2d` and `unified_3d` paths, plus four arch-specialized ones for
-gfx942 and gfx950 — and not one of them is gfx1250, so the kernel is reachable
-only by running its verify script by hand. Section 3 catalogs why this keeps
-happening, and section 9.1 shows the registration that fixes it.
-
-### 2.4 Consume
-
-One registry, three consumers, no parallel selection stacks (goal 3):
-
-- **Client API / production** — `dispatch_*(req)` returns a single kernel, which
-is what the provider ABI under `dnn-providers/hip-kernel-provider/include`
-calls through.
-- **Benchmark and autotune** — `dispatch_*_all(req)` returns every eligible
-kernel, `sweep_space(req)` expands each into its knob variants, and `bind()`
-makes them launchable by one generic harness (section 7.5).
-- **CI** — by-identifier replay and coverage queries (sections 7.3 and 7.4)
-assert that what was registered is still selectable and still byte-identical.
-
-The loop closes at the second lane: a sweep produces measurements that land back
-in stage 2 as a case study, which in turn revises a heuristic or a priority band
-in stage 3.
-
-## 3. Why this needs to change
+## 2. Why this needs to change
 
 The current registry (`core.py`) already does the hard part well: support
 predicates compose, ranking is pluggable, and rejection reasons accumulate into
-a readable error. Four gaps block the goals above.
+a readable error. Five gaps block the goals above.
 
 **Capabilities are code, not data.** `KernelCandidate` carries six callables and
 no description of what the kernel supports. Architecture gating lives inside
@@ -233,6 +111,143 @@ so the index exists but is not exposed.
 spec get different keys and therefore different compile-cache entries. This is
 why attention grew its own separate cache keyed on a problem tuple.
 
+## 3. Workflow: how a kernel reaches a client
+
+Section 2 said where things break; this section states the model they break
+against. It is written as target state throughout — how each stage is meant to
+work once this document is implemented, not a survey of what runs today.
+
+A kernel is authored, measured, registered, and then consumed. Registration is
+the third stage and the subject of this document: it is where a measured kernel
+becomes a declared, selectable candidate, and it is what makes the fourth stage
+a query rather than a hand-maintained list.
+
+```mermaid
+flowchart TD
+    subgraph S1["1 · Author — reusable spec-driven builder"]
+        direction LR
+        A1["library/kernels/{arch}/<br/>attention family"]
+        A2["platform/python/rocke/instances/<br/>gemm · conv · moe · norm"]
+    end
+
+    subgraph S2["2 · Experiment — measure, verify, write up"]
+        direction LR
+        E1["library/builders/{arch}/{family}/<br/>*_verify.py · tuners · case study .md"]
+        E2["platform/python/rocke/examples/{arch}/{workload}/<br/>README · ALGORITHM · data · scripts · goldens"]
+    end
+
+    subgraph S3["3 · Register — this document"]
+        direction LR
+        R1["KernelCandidate<br/>capability · _supports() · spec() · build() · bind()"]
+        R2[("CandidateRegistry")]
+    end
+
+    subgraph S4["4 · Consume — one registry, three lanes"]
+        direction LR
+        C1["client API<br/>dispatch(req) → 1 kernel"]
+        C2["benchmark · autotune<br/>dispatch_all + sweep_space + bind"]
+        C3["CI<br/>by-id replay · coverage"]
+    end
+
+    A1 --> E1
+    A2 --> E2
+    E1 --> R1
+    E2 --> R1
+    R1 --> R2
+    R2 --> C1
+    R2 --> C2
+    R2 --> C3
+    C2 -. "measurements become the next case study" .-> E2
+```
+
+
+
+
+
+### 3.1 Author
+
+Two trees, split by layer, holding the same kind of artifact:
+
+- `library/kernels/<arch>/` — the attention family, e.g.
+`gfx1250/wmma_attention_fwd.py` and `gfx942/attention_tiled_2d.py`.
+- `platform/python/rocke/instances/` — the core families. `common/` holds
+arch-portable builders that take `arch` as a parameter (`gemm_universal.py`,
+`conv_implicit_gemm.py`, `fused_moe.py`, `layernorm2d.py`), and
+`instances/<arch>/` holds the specializations that could not stay portable
+(`gfx950/deep_fused_conv_pool.py`).
+
+Whichever tree it lands in, the artifact has the same shape, and that is what
+makes registration mechanical later: a frozen spec dataclass with a
+`kernel_name()`, a `build_*(spec, arch)` that emits the kernel, and a validity
+predicate (`supports_*` or `is_valid_spec`). `platform/AGENTS.md` requires this
+shape — "new kernels must become reusable spec-driven builders under
+`instances/`, not one-off scripts."
+
+### 3.2 Experiment and report
+
+Mirrored trees, holding evidence rather than kernels:
+
+- `library/builders/<arch>/<family>/` — the harnesses that build, launch,
+verify, and tune a kernel, kept next to their write-up.
+`library/builders/gfx1250/attention/` holds `wmma_attention_fwd_verify.py`,
+`tiled_2d_verify.py`, `gfx1250_mha_optimization_case_study.md`, and
+`gfx1250_universal_attention_plan.md`.
+- `platform/python/rocke/examples/<arch>/<workload>/` — workload case studies,
+each a `README.md`, `ALGORITHM.md`, `data/`, and `scripts/`. These are
+executable, not just prose: `run_all.py --bless` captures goldens into
+`_goldens/` and `--check` asserts against them, so a case study doubles as a
+repeatability gate. `examples/REGISTRY.md` indexes the curated subset.
+
+What this stage produces is exactly what registration needs as input: which knob
+values are numerically correct, which are fast, and on what hardware. A
+capability that claims a shape range in section 5.1 is claiming something this
+stage measured.
+
+### 3.3 Register — the promotion gate
+
+The knobs that survived experimentation are frozen into `Capability` data, the
+conditions under which they held become the residual `_supports()` predicate,
+and the winning
+configuration becomes `spec()`. `build()` and `bind()` point back at the same
+builder and harness the experiment used, so the benchmark path and the
+production path exercise the same code rather than two drifting copies.
+
+This is a gate, not a formality. Again from `platform/AGENTS.md`: "reusable
+kernels must be wired into registry/test/byte-identity coverage before they are
+considered complete; workload-only benchmark scripts should not be wired into
+production dispatch by default." A passing experiment does not register a
+kernel, and a workload-specific script is not meant to become a dispatch target.
+
+It is also the stage section 2 found leaking, and the leak is worth naming
+against the model just described: `library/kernels/gfx1250/wmma_attention_fwd.py`
+clears stages 1 and 2 — a finished spec-driven builder, a
+`wmma_attention_fwd_verify.py` harness, and a written-up case study — and still
+reaches no client, because `ATTENTION_REGISTRY` holds six candidates and not one
+of them is gfx1250. A kernel that stops at stage 2 is reachable only by running
+its verify script by hand. Section 9.1 shows the registration that closes it.
+
+### 3.4 Consume
+
+One registry, three consumers, no parallel selection stacks (goal 3):
+
+- **Client API / production** — `dispatch_*(req)` returns a single kernel. No
+shipped ABI calls through this today: the C++ client API (`rocke/library/api/`,
+`rocke_client`) was removed by
+[#9800](https://github.com/ROCm/rocm-libraries/pull/9800), and its intended
+replacement is the hipDNN Universal Kernel Descriptor connector
+([RFC 0017 / #9533](https://github.com/ROCm/rocm-libraries/pull/9533)). The UKD
+connector is the planned consumer of this lane, which is why single-kernel
+selection has to stay reproducible from a request alone.
+- **Benchmark and autotune** — `dispatch_*_all(req)` returns every eligible
+kernel, `sweep_space(req)` expands each into its knob variants, and `bind()`
+makes them launchable by one generic harness (section 7.5).
+- **CI** — by-identifier replay and coverage queries (sections 7.3 and 7.4)
+assert that what was registered is still selectable and still byte-identical.
+
+The loop closes at the second lane: a sweep produces measurements that land back
+in stage 2 as a case study, which in turn revises a heuristic or a priority band
+in stage 3.
+
 ## 4. Vocabulary
 
 
@@ -241,9 +256,9 @@ why attention grew its own separate cache keyed on a problem tuple.
 | **Family**     | One operator surface with a shared request type and registry: `attention_unified`, `gemm_fp16_rcr`, `conv_implicit_gemm`.                             |
 | **Candidate**  | One registered kernel implementation. The unit of registration and selection.                                                                         |
 | **Request**    | The normalized problem, architecture included. Frozen, hashable, JSON-serializable. Exposes `normalized()` for hashing and `dims()` for shape gating. |
-| **Dimension**  | One named integer quantity a family exposes through `dims()`, stored or derived. Families range from two (`norm`) to fourteen (`conv`).               |
+| **Dimension**  | A gateable problem *scalar*, not a tensor axis: any named integer a family exposes through `dims()`, stored or derived (e.g. `total_q`, `gqa_ratio`). Families range from two (`norm`) to fourteen (`conv`). |
 | **Capability** | Declarative data describing what a candidate accepts: arches, dtypes, per-dimension ranges, cross-dimension relations, features.                      |
-| **Predicate**  | The residual `supports()` callable for constraints not expressible as data.                                                                           |
+| **Predicate**  | The residual `_supports()` callable for constraints not expressible as data.                                                                           |
 | **Spec**       | The knobs handed to a builder. Must be the builder's actual input type.                                                                               |
 | **Binding**    | Allocation, argument packing, and reference check for one (request, spec) pair. What makes a selected kernel runnable.                                |
 | **KernelId**   | Stable identity of a selected (candidate, spec) pair. Resolvable back to the candidate.                                                               |
@@ -281,6 +296,19 @@ The families registered today span two to fourteen gateable integer quantities:
 
 Constraints are therefore keyed by dimension *name*, never by position, and each
 family declares its own vocabulary.
+
+**What** `normalized()` **contributes.** It is the other half of the request
+surface, and it predates `dims()`. It canonicalizes the case-variant and
+free-text fields — `dtype` through `normalize_dtype`, `layout` upper-cased,
+`algorithm` and `spec_id` stripped and lower-cased — and returns the frozen
+request as a plain JSON-serializable dict. Two consequences matter here. It is
+what `request_hash` is taken over (`stable_json_hash(req.normalized())`, keys
+sorted), so two spellings of the same problem hash alike and index one tuning
+record rather than two. And it is what `Capability.check` reads for arch, dtype,
+and layout, so a request written `dtype="FP16"` gates identically to `"fp16"`
+instead of falling out of the prefilter on spelling. `dims()` is the integer
+half of the same idea: `normalized()` canonicalizes *identity*, `dims()` exposes
+what may be *gated on*.
 
 **The** `dims()` **contract.** Requests expose their dimensions as a flat mapping,
 alongside the existing `normalized()`:
@@ -483,14 +511,14 @@ relations=(
 
 Keeping these as data rather than as a `Callable` field is deliberate. A
 callable would be quicker to write and would immediately reintroduce the
-capabilities-are-code problem from section 3: it could not be serialized into a
+capabilities-are-code problem from section 2: it could not be serialized into a
 coverage manifest, diffed across releases, or rendered into documentation. The
 fixed operator set is small because it only has to cover what kernels actually
 assert about shape.
 
 **Capability stays a conservative superset.** It is a prefilter, not a complete
 description, so a constraint no relation can express simply stays in
-`supports()` — that is what the residual predicate is for. The rule is
+`_supports()` — that is what the residual predicate is for. The rule is
 directional and is enforced by the capability/predicate agreement test in
 section 10: capability may accept problems the predicate later rejects, never
 the reverse. That is what lets the coverage manifest be generated from data
@@ -534,7 +562,7 @@ would spare generic kernels from listing every target, but it is the wrong gate
 and it is redundant. Wrong, because family does not imply wave size: in
 `arch_specs.json`, gfx1250 is `family="cdna"` with `wave_size=32`, so
 `arch_families=("cdna",)` would happily admit a wave32 target into the wave64
-MFMA kernels — the exact misroute in section 3, reintroduced by the mechanism
+MFMA kernels — the exact misroute in section 2, reintroduced by the mechanism
 meant to prevent it. Redundant, because family is already derivable from the
 arch name through `ArchTarget.from_gfx(arch).family`, so storing it in the
 capability creates a second source of truth for something the arch string
@@ -570,8 +598,8 @@ class KernelCandidate:
     capability: Capability
 
     # --- behavior ---
-    supports: Callable[[Request], tuple[bool, str]]   # residual predicate
-    # admits(req) = capability.check(req) and then supports(req); the complete
+    _supports: Callable[[Request], tuple[bool, str]]  # residual predicate
+    # admits(req) = capability.check(req) and then _supports(req); the complete
     # verdict, and the one callers should use. See section 6.
     select_spec: Callable[[Request], Spec]            # -> the BUILDER's spec type
     build: Callable[[Spec, str], KernelDef]           # NEW: (spec, arch) -> IR
@@ -719,7 +747,7 @@ only genuine logic (measured cohort thresholds, relationships between fields)
 belongs in the predicate.
 
 Stages 3 and 4 together are `candidate.admits(request)`, and that — not
-`supports()` — is what every caller should ask. The distinction matters as soon
+`_supports()` — is what every caller should ask. The distinction matters as soon
 as rule 1 of section 6.2 is followed: a predicate that no longer re-checks arch
 is not a complete gate on its own, so a caller holding a bare candidate outside
 the registry would silently lose the arch gate. Keeping the combined verdict on
@@ -758,7 +786,7 @@ class DispatchResult:
 Keeping the full trace on success — not only on failure — is what makes
 "why did this shape pick that kernel?" answerable in a benchmark log.
 
-### 6.2 Writing a `supports()` predicate
+### 6.2 Writing a `_supports()` predicate
 
 Rules:
 
@@ -771,7 +799,7 @@ Rules:
    cross-arch testing are impossible. This is the single largest constraint the
    current attention stack violates: `_tiled_spec_from_problem` calls
    `_resolve_attention_arch()`, which reads the running device — the cause of
-   the host-dependent gfx942 selection shown in section 3.
+   the host-dependent gfx942 selection shown in section 2.
 4. **Share cohort predicates with the builder.** When a heuristic decides both
   eligibility and geometry, it must have one definition imported by both, so
    selection and codegen cannot drift.
@@ -786,14 +814,14 @@ as data; everything needing a constructed spec in the predicate:
 
 ```python
 capability=Capability(arches=arches, dtypes=("fp16",), layouts=("RCR",)),
-supports=support,   # selector, then gemm_config_supported, then shape tiling
+_supports=support,  # selector, then gemm_config_supported, then shape tiling
 ```
 
 Dispatching `M=16, N=512, K=512` on `gfx950` exercises both layers at once, and
 the `capability:` prefix `admits` adds is what tells them apart:
 
 ```
-candidate                            capability.check                     supports()
+candidate                            capability.check                     _supports()
 universal_gemm_fp16_cdna_cshuffle    pass                                 reject: M=16 not divisible by tile_m=128
 universal_gemm_fp16_rdna_wmma        REJECT: arch 'gfx950' not in (...)   reject: M=16 not divisible by tile_m=64
 universal_gemm_fp16_cdna_mem         pass                                 reject: M=16 not divisible by tile_m=64
@@ -807,7 +835,7 @@ answers:
 
 ```
 universal_gemm_fp16_rdna_wmma, M=N=K=512, arch=gfx950   # declared: gfx11-generic, gfx1151, gfx1201
-  supports(req)    -> (True, 'ok')
+  _supports(req)   -> (True, 'ok')
   capability.check -> (False, "arch 'gfx950' not in ('gfx11-generic', 'gfx1151', 'gfx1201')")
   admits(req)      -> (False, "capability: arch 'gfx950' not in (...)")
 ```
@@ -815,7 +843,7 @@ universal_gemm_fp16_rdna_wmma, M=N=K=512, arch=gfx950   # declared: gfx11-generi
 An RDNA-only WMMA kernel accepting a CDNA target is rule 1 working as intended,
 not a bug in the predicate — and it is the concrete reason section 6 insists
 callers ask `admits`. It is also why backfilling capability had to move every
-direct `candidate.supports(...)` call site in the same change.
+direct `candidate._supports(...)` call site in the same change.
 
 Ordering is load-bearing in the other direction too. The gfx1250 WMMA attention
 predicate constructs a spec, and `WmmaAttentionFwdSpec` raises from
@@ -1284,7 +1312,7 @@ def _wmma_fwd_spec(req) -> WmmaAttentionFwdSpec:
 
 
 def _make_wmma_fwd_candidate() -> KernelCandidate:
-    def supports(req):
+    def support(req):
         # Capability (stage 3) already cleared arch / dtype / head_size, so the
         # spec construction below cannot raise. Only residual checks here.
         ok, why = wmma_fwd_is_valid(_wmma_fwd_spec(req), arch=req.arch)
@@ -1300,7 +1328,7 @@ def _make_wmma_fwd_candidate() -> KernelCandidate:
         abi_version=ATTENTION_GFX1250_ABI,
         priority=10,                     # arch+shape specialized fast path
         capability=_WMMA_FWD_CAP,
-        supports=supports,
+        _supports=support,
         select_spec=_wmma_fwd_spec,
         build=build_wmma_attention_fwd,  # (spec, arch) -> KernelDef
         grid=lambda spec, req: (
@@ -1379,7 +1407,7 @@ def _tiled_2d_spec(req) -> UnifiedAttention2DTiledSpec:
 
 
 def _make_tiled_2d_candidate() -> KernelCandidate:
-    def supports(req):
+    def support(req):
         spec = _tiled_2d_spec(req)
         # The kernel's own validator is the authority on knob combinations.
         return supports_tiled_2d(
@@ -1403,7 +1431,7 @@ def _make_tiled_2d_candidate() -> KernelCandidate:
         abi_version=ATTENTION_GFX942_ABI,
         priority=30,                # arch-specialized, shape-general
         capability=_TILED_2D_CAP,
-        supports=supports,
+        _supports=support,
         select_spec=_tiled_2d_spec,
         build=build_unified_attention_2d_tiled,
         grid=_tiled_2d_grid,
@@ -1429,7 +1457,7 @@ def _tiled_2d_sweep(req):
 
 Two things this makes concrete. `arch=req.arch` is passed to `supports_tiled_2d`
 rather than letting the kernel resolve the device, which is the fix for the
-host-dependence in section 3. And `sweep_space` exposes the `num_warps x waves_per_eu` grid that the `_select_*` heuristics currently collapse to a
+host-dependence in section 2. And `sweep_space` exposes the `num_warps x waves_per_eu` grid that the `_select_*` heuristics currently collapse to a
 single point — so an autotuner can search it while production keeps taking the
 heuristic's choice through `select_spec`.
 
@@ -1450,7 +1478,7 @@ heuristic's choice through `select_spec`.
 
 
 The two generic candidates move from unconstrained to an explicit list of the
-three wave64 MFMA targets, and that is the fix for the misroute in section 3.
+three wave64 MFMA targets, and that is the fix for the misroute in section 2.
 The list is worth reading against that section's table: gfx1250 is absent even
 though it is CDNA-family, because the generic 2D kernel is a wave64 MFMA path
 and gfx1250 is wave32. A family-level gate would have re-admitted it and
@@ -1475,8 +1503,8 @@ for cand in registry.candidates():
     for arch in known_arches():
         if arch in cand.capability.arches:
             continue
-        ok, why = cand.supports(request_for(arch))
-        assert not ok, f"{cand.name} wrongly supports {arch}"
+        ok, why = cand.admits(request_for(arch))
+        assert not ok, f"{cand.name} wrongly admits {arch}"
 ```
 
 **Wave-size consistency.** Every arch a candidate declares must agree on wave
@@ -1521,8 +1549,8 @@ overstating what is dispatchable — a declared arch nothing can run on is a cla
 the registry cannot honor.
 
 Note that these two together replace an earlier "capability must be a superset
-of what `supports()` accepts" formulation, which does not survive rule 1 of
-section 6.2. Once a predicate stops re-checking arch and dtype, `supports()`
+of what `_supports()` accepts" formulation, which does not survive rule 1 of
+section 6.2. Once a predicate stops re-checking arch and dtype, `_supports()`
 alone *will* accept an arch that capability rejects — for GEMM, the RDNA
 candidate's spec rebuilds happily on a CDNA target, which section 6.3 shows
 verdict by verdict — and that is correct rather than a violation. The complete verdict is `candidate.admits(req)`, capability
@@ -1530,7 +1558,7 @@ then predicate; the residual predicate is not a complete gate by itself and must
 not be tested as one.
 
 **Additive registration.** Registering a new candidate into a fresh registry
-changes no existing candidate's `supports()` verdict or `select_spec()` output.
+changes no existing candidate's `_supports()` verdict or `select_spec()` output.
 Seed a copy from the family's candidate list; never mutate the shipped
 singleton.
 
@@ -1606,7 +1634,7 @@ Ordered so each phase is independently landable and testable.
 
 `for_arch` belongs to phase 2, not here: it filters on `Capability.arches`, and
 until phase 2 lands there is no declarative arch data to read — today arch
-support exists only inside `supports()` predicates, which need a request.
+support exists only inside `_supports()` predicates, which need a request.
 `coverage()` does land here, over the metadata candidates already carry (name,
 algorithm, `spec_id`, `abi_version`, priority), and gains the capability fields
 in phase 2. Even that much is useful: it makes the registered surface diffable
@@ -1623,7 +1651,7 @@ arch/dtype/shape checks from predicates as each is covered.
 
 Backfilling one family is what surfaces the `admits()` requirement in section 6:
 the moment `arch_family_supported` leaves a GEMM predicate, every direct
-`candidate.supports(...)` caller loses its arch gate, so those call sites move in
+`candidate._supports(...)` caller loses its arch gate, so those call sites move in
 the same change. Two properties make the swap auditable. Capability is declared
 to match observed coverage exactly, so no verdict moves; and the arch lists are
 per candidate rather than per family, because bf16's differ from fp16's — gfx90a
@@ -1641,13 +1669,13 @@ The plan originally said to narrow `unified_2d` / `unified_3d` to
 `arches=("gfx90a", "gfx942", "gfx950")`, on the reading that they were wave64
 MFMA kernels being handed wave32 targets. Backfilling them showed that reading
 to be wrong, and the correction is worth recording because it changes what
-section 3's attention finding means:
+section 2's attention finding means:
 
 - These two candidates select a **path**, not a kernel. `attention_unified`
   chooses the concrete backend downstream from the running device —
   `_tiled_2d_impl` routes gfx1250 to a wave32 WMMA variant and gfx942 to its own
   narrow-atom variant, and anything the tiled gate refuses falls through to the
-  arch-neutral scalar CK DSL kernel, which uses no MMA atom at all.
+  arch-neutral scalar rocKE kernel, which uses no MMA atom at all.
 - So gfx1250 reaching `unified_2d` is not a misroute. The gfx1250 live prefill
   benchmark dispatches through it today and runs the WMMA backend behind it;
   narrowing to the wave64 list would have broken that and dropped RDNA's scalar
@@ -1658,7 +1686,7 @@ section 3's attention finding means:
   removed two that work.
 
 They therefore declare every known arch, and are the documented wave-size
-exception alongside norm2d (section 10). The real gap section 3 identifies is
+exception alongside norm2d (section 10). The real gap section 2 identifies is
 narrower than "the unified paths are misrouted": it is that the *dedicated*
 gfx1250 WMMA attention kernel is registered nowhere, so dispatch cannot prefer
 it over the generic path. That is phase 5, not this phase.
@@ -1796,7 +1824,7 @@ Two constraints shape how this is done. First, **target arch must become a
 request field.** `_resolve_attention_arch()`, and its C++counterpart++
 `rocke_unified_attn_set_resolved_arch`++, read the running device; until selection
 keys off++ `req.arch`++, offline and cross-arch dispatch stay impossible and the
-host-dependence in section 3 remains. Second, **the selectors are dual-engine.**
+host-dependence in section 2 remains. Second, **the selectors are dual-engine.**
 They are mirrored in++ `cpp/instances/common/attention_unified_selectors.cpp`++, and
 the C++ engine serves the provider with no Python at runtime. So this is a move
 of the *call site*, not a reimplementation: the selector functions remain the one
