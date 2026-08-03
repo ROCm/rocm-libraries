@@ -5888,6 +5888,31 @@ def build_gfx942_4warp_gqa(
             b.mod(col, b.const_i32(8)),
         )
 
+    # fp16 swizzle-hoist: precompute the LDS swizzle columns once per lane (buf_off drops
+    # out - it is 0 mod 16 - so swz depends only on key/col) instead of recomputing swz()
+    # on every K/V store and read. fp16-only: trims ~12 VGPR + ~6% wall-clock; bf16 regresses
+    # (spills at the 256-VGPR cap), so bf16 keeps the byte-identical per-access swz path.
+    _SWZH = HD128_PIPE and spec.dtype == "fp16"
+    SWZ_ST, SWZ_K, SWZ_V = [], {}, {}
+    if _SWZH:
+        _mia = ld.m_in_atom
+        _kbapl = b.mul(ld.k_blk, b.const_i32(APL))
+        for _c in range(v_fill_nloads):
+            _lin = b.add(b.mul(tid, b.const_i32(v_fill_epw)), b.const_i32(_c * 8))
+            SWZ_ST.append(
+                swz(b.div(_lin, b.const_i32(HD)), b.mod(_lin, b.const_i32(HD)))
+            )
+        for _h in range(NK):
+            _koff = b.add(b.const_i32(_h * K), _kbapl)
+            for _kt in range(NKEYT):
+                SWZ_K[(_h, _kt)] = swz(b.add(b.const_i32(_kt * 32), _mia), _koff)
+        for _kk in range(NKpv):
+            for _nt in range(NDdim):
+                _colv = b.add(b.const_i32(_nt * 32), _mia)
+                for _j in range(APL):
+                    _rnb = b.add(b.const_i32(_kk * K), b.add(_kbapl, b.const_i32(_j)))
+                    SWZ_V[(_kk, _nt, _j)] = swz(_rnb, _colv)
+
     def fill_tile(tkv, buf_off):
         for c in range(v_fill_nloads):
             lin = b.add(b.mul(tid, b.const_i32(v_fill_epw)), b.const_i32(c * 8))
@@ -5900,14 +5925,14 @@ def build_gfx942_4warp_gqa(
             row = b.add(buf_off, key)
             b.smem_store_vN(
                 V_lds,
-                [row, swz(row, hd) if HD128_PIPE else hd],
+                [row, SWZ_ST[c] if _SWZH else (swz(row, hd) if HD128_PIPE else hd)],
                 b.global_load_vN(Vp, velem, dtype, 8, align=16),
                 8,
             )
             if HD128_PIPE:
                 b.smem_store_vN(
                     K_lds,
-                    [row, swz(row, hd)],
+                    [row, SWZ_ST[c] if _SWZH else swz(row, hd)],
                     b.global_load_vN(Kp, velem, dtype, 8, align=16),
                     8,
                 )
@@ -5932,10 +5957,11 @@ def build_gfx942_4warp_gqa(
     def fill_store(
         pf, buf_off
     ):  # PREFETCH phase 2: store prefetched regs (loads already drained)
-        for vr, kr, key, hd in pf:
+        for c, (vr, kr, key, hd) in enumerate(pf):
             row = b.add(buf_off, key)
-            b.smem_store_vN(V_lds, [row, swz(row, hd)], vr, 8)
-            b.smem_store_vN(K_lds, [row, swz(row, hd)], kr, 8)
+            _col = SWZ_ST[c] if _SWZH else swz(row, hd)
+            b.smem_store_vN(V_lds, [row, _col], vr, 8)
+            b.smem_store_vN(K_lds, [row, _col], kr, 8)
 
     def body(kv, carry, masked):
         m_old = carry[0]
@@ -5977,9 +6003,8 @@ def build_gfx942_4warp_gqa(
             for kt in range(NKEYT):
                 if HD128_PIPE:
                     row_k = b.add(buf_off, b.add(b.const_i32(kt * 32), ld.m_in_atom))
-                    kf = b.smem_load_vN(
-                        K_lds, row_k, swz(row_k, koff), dtype=dtype, n=APL
-                    )
+                    _kcol = SWZ_K[(h, kt)] if _SWZH else swz(row_k, koff)
+                    kf = b.smem_load_vN(K_lds, row_k, _kcol, dtype=dtype, n=APL)
                 else:
                     kelem = b.add(
                         b.mul(
@@ -6056,7 +6081,11 @@ def build_gfx942_4warp_gqa(
                             b.smem_load_vN(
                                 V_lds,
                                 row_v,
-                                swz(row_v, col_v) if HD128_PIPE else col_v,
+                                (
+                                    SWZ_V[(kk, nt, j)]
+                                    if _SWZH
+                                    else (swz(row_v, col_v) if HD128_PIPE else col_v)
+                                ),
                                 dtype=dtype,
                                 n=1,
                             ),
