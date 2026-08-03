@@ -12,22 +12,12 @@ Documentation for hipFFT is available at
 ### Changed
 
 * Modified the rocFFT backend's implementation details of hipFFT so that cuFFT backend's
-  behavior is matched for multi-device plans configured via `hipfftMakePlan{2,3}d` and
-  `hipfftMakePlanMany`, with respect to data distribution within descriptors. Behaviors
-  are now aligned for unbatched multi-dimensional transforms (in-place only) and all
-  batched transforms (in-place and out-of-place).
-  The following multi-device use cases remain unimplemented, pending further analyses
-  of the exact behavior(s) to be matched:
-  - Unbatched one-dimensional transforms;
-  - Transform of length(s) and/or batch sizes that result in data decompositions
-    leaving some data chunk empty (e.g., batched transforms where the batch count
-    is less than the number of devices).
-  As a result, expect `HIPFFT_NOT_IMPLEMENTED` error codes with rocfft backend to be
-  returned by plan-creation functions (`hipfftMakePlan{1,2,3}d`, `hipfftMakePlanMany`,
-  etc.) for such possible use cases. Similarly, expect `HIPFFT_NOT_SUPPORTED` from
-  `hipfftXtMalloc` when requesting a descriptor sub-format that is incompatible with the
-  plan's configuration (e.g., `HIPFFT_XT_FORMAT_INPLACE_SHUFFLED` for batched transforms,
-  or out-of-place formats for unbatched transforms).
+  behavior is matched for single-process, multi-device plans configured via
+  `hipfftMakePlan{2,3}d` and `hipfftMakePlanMany`, with respect to data distribution
+  within descriptors. Behaviors are now aligned for unbatched multi-dimensional transforms
+  (in-place only) and all batched transforms (in-place and out-of-place).
+  Multi-device, unbatched one-dimensional transforms remain unimplemented pending
+  further analyses of the exact behavior(s) to be matched.
 
 ## hipFFT 1.0.24 for ROCm 7.14
 
