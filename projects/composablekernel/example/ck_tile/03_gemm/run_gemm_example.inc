@@ -305,7 +305,8 @@ int run_gemm_example_with_layouts(ck_tile::ArgParser& arg_parser,
             }
         }();
         // shuffled buffer B for device implementation
-        if constexpr(std::is_same_v<BDataTypeBuf, ck_tile::pk_int4_t>)
+        if constexpr(std::is_same_v<BDataTypeBuf, ck_tile::pk_int4_t> &&
+                     !std::is_same_v<ADataTypeBuf, ck_tile::pk_int4_t>)
         {
             ck_tile::permute_vectors_i4x4_b(b_shuffle_host);
         }
@@ -313,7 +314,8 @@ int run_gemm_example_with_layouts(ck_tile::ArgParser& arg_parser,
     }
     else
     {
-        if constexpr(std::is_same_v<BDataTypeBuf, ck_tile::pk_int4_t>)
+        if constexpr(std::is_same_v<BDataTypeBuf, ck_tile::pk_int4_t> &&
+                     !std::is_same_v<ADataTypeBuf, ck_tile::pk_int4_t>)
         {
             // Permute vector pk_i4x4 data for device implementation
             ck_tile::HostTensor<BDataTypeBuf> b_k_n_dev = b_k_n;

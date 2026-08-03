@@ -37,6 +37,36 @@ struct WmmaTraits<gfx11_t, int8_t, int8_t, int32_t, 16, 16, 16>
     }
 };
 
+// int4 specialization - GFX11
+template <>
+struct WmmaTraits<gfx11_t, pk_int4_t, pk_int4_t, int32_t, 16, 16, 16>
+    : WmmaTraitsBase<gfx11_t, pk_int4_t, pk_int4_t, int32_t, 16>
+{
+    using ArchType = gfx11_t;
+    using AVecType = ext_vector_t<pk_int4_t, 8>;
+    using BVecType = ext_vector_t<pk_int4_t, 8>;
+
+    template <typename... Params>
+    CK_TILE_DEVICE static CVecType
+    wmma_intrinsic(const AVecType& a_vec, const BVecType& b_vec, const CVecType& c_vec)
+    {
+#ifdef __gfx11__
+        using P = WarpGemmParamsParser<Params...>;
+        return __builtin_amdgcn_wmma_i32_16x16x16_iu4_w32(true, // neg_a
+                                                          bit_cast<int32x2_t>(a_vec),
+                                                          true, // neg_b
+                                                          bit_cast<int32x2_t>(b_vec),
+                                                          bit_cast<int32x8_t>(c_vec),
+                                                          P::clamp);
+#else
+        ck_tile::ignore = a_vec;
+        ck_tile::ignore = b_vec;
+        ck_tile::ignore = c_vec;
+        return CVecType{0};
+#endif
+    }
+};
+
 // int8 specialization - GFX12
 template <>
 struct WmmaTraits<gfx120_t, int8_t, int8_t, int32_t, 16, 16, 16>

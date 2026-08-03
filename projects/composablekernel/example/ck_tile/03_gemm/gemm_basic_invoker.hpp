@@ -33,15 +33,19 @@ struct BasicInvoker
         constexpr bool is_fp32_or_tf32_input =
             std::is_same_v<ADataType, float> || std::is_same_v<ADataType, ck_tile::tf32_t>;
         constexpr bool is_tf32_compute = std::is_same_v<ADataType, ck_tile::tf32_t>;
+        constexpr bool is_i4_compute   = std::is_same_v<ADataType, ck_tile::pk_int4_t> &&
+                                       std::is_same_v<BDataType, ck_tile::pk_int4_t>;
 
         // This part comes from the Codegen
-        constexpr ck_tile::index_t M_Tile = is_fp32_or_tf32_input ? 128 : 256;
-        constexpr ck_tile::index_t N_Tile = is_fp32_or_tf32_input ? 128 : 256;
-        constexpr ck_tile::index_t K_Tile = 64;
+        constexpr ck_tile::index_t M_Tile =
+            is_i4_compute ? 16 : (is_fp32_or_tf32_input ? 128 : 256);
+        constexpr ck_tile::index_t N_Tile =
+            is_i4_compute ? 128 : (is_fp32_or_tf32_input ? 128 : 256);
+        constexpr ck_tile::index_t K_Tile = is_i4_compute ? 128 : 64;
 
 #if CK_TILE_USE_WMMA
-        constexpr ck_tile::index_t M_Warp = 4;
-        constexpr ck_tile::index_t N_Warp = 2;
+        constexpr ck_tile::index_t M_Warp = is_i4_compute ? 1 : 4;
+        constexpr ck_tile::index_t N_Warp = is_i4_compute ? 8 : 2;
         constexpr ck_tile::index_t K_Warp = 1;
 
         constexpr ck_tile::index_t M_Warp_Tile = 16;

@@ -43,6 +43,13 @@ struct GemmConfigBase
     static constexpr bool Async = false;
 };
 
+struct GemmConfigI4 : public GemmConfigBase
+{
+    static constexpr bool kPadM = true;
+    static constexpr bool kPadN = true;
+    static constexpr bool kPadK = true;
+};
+
 template <typename PrecType>
 struct GemmConfigMemoryInterwave : public GemmConfigBase
 {
@@ -467,6 +474,15 @@ struct GemmTypeConfig<ck_tile::half_t, ck_tile::pk_int4_t, ck_tile::half_t>
 };
 
 template <>
+struct GemmTypeConfig<ck_tile::pk_int4_t, ck_tile::pk_int4_t, int32_t>
+{
+    using ADataType   = ck_tile::pk_int4_t;
+    using BDataType   = ck_tile::pk_int4_t;
+    using AccDataType = int32_t;
+    using CDataType   = int32_t;
+};
+
+template <>
 struct GemmTypeConfig<ck_tile::int8_t, ck_tile::int8_t, int32_t>
 {
     using ADataType   = ck_tile::int8_t;
@@ -641,7 +657,9 @@ inline auto create_args()
         .insert("stride_b", "0", "Tensor B stride")
         .insert("stride_c", "0", "Tensor C stride")
         .insert("v", "2", "0. No validation, 1. Validation on CPU, 2. Validation on GPU")
-        .insert("prec", "fp16", "data type. fp16/bf16/fp8/bf8/pk_int4_t/tf32 (tf32 only on gfx950)")
+        .insert("prec",
+                "fp16",
+                "data type. fp16/bf16/fp8/bf8/i8/i4/pk_int4_t/tf32 (tf32 only on gfx950)")
         .insert("warmup", "50", "number of iterations before benchmark the kernel")
         .insert("repeat", "100", "number of iterations to benchmark the kernel")
         .insert("timer", "gpu", "gpu:gpu timer, cpu:cpu timer")
