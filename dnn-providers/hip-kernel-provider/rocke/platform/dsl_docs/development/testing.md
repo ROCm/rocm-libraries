@@ -66,6 +66,35 @@ Expected runtime: ~2 seconds. The validation pass for this doc tree had `245 tes
 
 These tests do not require a GPU. They prove IR builds, LLVM text shape, and helpers' static contracts.
 
+## Documentation Symbol References
+
+Run the local Sphinx symbol check from the `rocke/platform/` root. `uvx`
+provides pinned Sphinx and MyST versions without adding documentation packages
+to rocKE's runtime dependencies. `uvx` must be on `PATH`; standard uv
+environment variables such as `UV_CACHE_DIR` and `UV_TOOL_DIR` are honored.
+
+```bash
+python tools/check_doc_symbols.py \
+  --work-dir <scratch-dir>/rocke-sphinx \
+  --output <scratch-dir>/rocke-doc-symbols.txt
+```
+
+The script copies `dsl_docs/` to the scratch directory and reads the Python
+source without importing rocKE. Sphinx then reports symbol links that it cannot
+find. The script recognizes both forms:
+
+```text
+{py:func}`rocke.helpers.apply_mx_scale`
+:func:`rocke.helpers.apply_mx_scale`
+```
+
+Each error points to the original Markdown file and line. Plain code spans are
+not symbol links and are not checked. For a JSON report, pass `--format json`
+and choose a JSON `--output` path. The command exits with status 1 when it finds
+a broken link.
+
+This command is local tooling only; it is not wired into CI.
+
 ## Byte-identity gate (cross-engine)
 
 The rocKE-native cross-engine test is the byte-identity gate: it builds the C++
