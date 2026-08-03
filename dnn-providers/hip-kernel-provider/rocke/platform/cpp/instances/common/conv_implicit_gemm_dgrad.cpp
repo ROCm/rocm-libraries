@@ -161,9 +161,10 @@ bool rocke_dgrad_conv_spec_needs_atomic(const rocke_dgrad_conv_spec_t* s)
         return false;
     /* Count actual non-empty sub-GEMMs (some tilde phases can be empty for
      * small filters), mirroring the Python len(compute_sub_gemms()) > 1 check. */
+    rocke_tilde_decomposition_t tilde = rocke_compute_tilde(&s->problem);
     rocke_sub_gemm_params_t sgs[128];
     int n = rocke_enumerate_sub_gemms(
-        &s->problem, s->tile_m, s->tile_n, s->tile_k, _max(s->split_k, 1), sgs, 128);
+        &s->problem, &tilde, s->tile_m, s->tile_n, s->tile_k, _max(s->split_k, 1), sgs, 128);
     return n > 1;
 }
 
@@ -242,18 +243,164 @@ bool rocke_dgrad_conv_is_valid_spec(const rocke_dgrad_conv_spec_t* s,
         return false;
     }
 
-    int bs = rocke_dgrad_conv_spec_block_size(s);
-    if(bs > 1024)
+    /* Arch target lookup (Python: ArchTarget.from_gfx). */
+    const rocke_arch_target_t* tgt = rocke_arch_target_from_gfx(arch);
+    if(!tgt)
     {
-        snprintf(reason, reason_cap, "block_size %d > 1024", bs);
+        snprintf(reason, reason_cap, "unknown arch %s", arch);
         return false;
     }
 
+    /* block_size vs hardware cap (Python: block_size > target.max_threads_per_block). */
+    int bs = rocke_dgrad_conv_spec_block_size(s);
+    int max_tpb = rocke_arch_max_threads_per_block(tgt);
+    if(bs > max_tpb)
+    {
+        snprintf(reason, reason_cap, "block_size %d > %d (hardware cap) on %s", bs, max_tpb, arch);
+        return false;
+    }
+
+    /* vector_size_c > 1 incompatible with default epilogue. */
+    if(s->vector_size_c > 1 && strcmp(s->epilogue, "default") == 0)
+    {
+        snprintf(reason,
+                 reason_cap,
+                 "default epilogue is not supported with vector size c: %d",
+                 s->vector_size_c);
+        return false;
+    }
+
+    /* wave_size must match arch (Python: spec.wave_size != target.wave_size). */
+    if(s->wave_size != tgt->wave_size)
+    {
+        snprintf(reason,
+                 reason_cap,
+                 "spec wave_size %d != %s wave_size %d",
+                 s->wave_size,
+                 arch,
+                 tgt->wave_size);
+        return false;
+    }
+
+    const char* family = (tgt->wave_size == 32) ? "wmma" : "mma";
+
+    /* split_k range and arch/dtype gating (Python: sk checks). */
     int sk = s->split_k;
     if(sk < -1 || sk == 0)
     {
         snprintf(reason, reason_cap, "split_k must be -1 (auto), 1, or >1 (got %d)", sk);
         return false;
+    }
+    if(sk > 1 && strcmp(family, "mma") != 0)
+    {
+        snprintf(
+            reason, reason_cap, "split_k > 1 is CDNA-only (got family %s on %s)", family, arch);
+        return false;
+    }
+    if(sk > 1)
+    {
+        /* Accept fp32, bf16, fp16, f16 for atomic accumulation. */
+        const char* dd = s->data.dtype_d;
+        int ok_dtype = (strcmp(dd, "fp32") == 0 || strcmp(dd, "bf16") == 0
+                        || strcmp(dd, "fp16") == 0 || strcmp(dd, "f16") == 0);
+        if(!ok_dtype)
+        {
+            snprintf(
+                reason, reason_cap, "split_k > 1 requires dtype_d in fp32/bf16/fp16 (got %s)", dd);
+            return false;
+        }
+        /* Even-C constraint for packed bf16/fp16 atomics. */
+        int packed = (strcmp(dd, "bf16") == 0 || strcmp(dd, "fp16") == 0 || strcmp(dd, "f16") == 0);
+        if(packed && p->C % 2 != 0)
+        {
+            snprintf(reason,
+                     reason_cap,
+                     "split_k > 1 with dtype_d=%s requires even C (got C=%d)",
+                     dd,
+                     p->C);
+            return false;
+        }
+    }
+
+    /* MMA shape availability (Python: target.mma.has_shape). */
+    if(!rocke_mma_catalog_has_shape(&tgt->mma,
+                                    family,
+                                    s->data.dtype_a,
+                                    s->data.dtype_b,
+                                    "fp32",
+                                    s->warp_tile_m,
+                                    s->warp_tile_n,
+                                    s->warp_tile_k))
+    {
+        snprintf(reason,
+                 reason_cap,
+                 "unsupported %s warp_tile %dx%dx%d on %s",
+                 s->data.dtype_a,
+                 s->warp_tile_m,
+                 s->warp_tile_n,
+                 s->warp_tile_k,
+                 arch);
+        return false;
+    }
+
+    /* LDS budget (Python: target.fits_lds check). */
+    int ab_dtype_bytes = (strcmp(s->data.dtype_a, "fp32") == 0) ? 4 : 2;
+    /* Simplified LDS estimate (no cshuffle for dgrad, pipeline="mem" only in practice). */
+    long a_lds = (long)s->tile_m * s->tile_k * ab_dtype_bytes;
+    long b_lds = (long)s->tile_n * s->tile_k * ab_dtype_bytes;
+    long total_lds = a_lds + b_lds;
+    if(!rocke_arch_fits_lds(tgt, total_lds))
+    {
+        snprintf(reason,
+                 reason_cap,
+                 "LDS budget %ld bytes > %d cap on %s",
+                 total_lds,
+                 tgt->lds_capacity_bytes,
+                 arch);
+        return false;
+    }
+
+    /* WMMA-specific restrictions (Python: family == "wmma" block). */
+    if(strcmp(family, "wmma") == 0)
+    {
+        if(s->warp_tile_m != 16 || s->warp_tile_n != 16 || s->warp_tile_k != 16)
+        {
+            snprintf(reason,
+                     reason_cap,
+                     "WMMA dgrad supports only 16x16x16 (got %dx%dx%d) on %s",
+                     s->warp_tile_m,
+                     s->warp_tile_n,
+                     s->warp_tile_k,
+                     arch);
+            return false;
+        }
+        if(strcmp(s->pipeline, "mem") != 0)
+        {
+            snprintf(reason,
+                     reason_cap,
+                     "WMMA dgrad supports only the 'mem' pipeline (got %s) on %s",
+                     s->pipeline,
+                     arch);
+            return false;
+        }
+        if(strcmp(s->epilogue, "default") != 0)
+        {
+            snprintf(reason,
+                     reason_cap,
+                     "WMMA dgrad supports only the 'default' epilogue (got %s) on %s",
+                     s->epilogue,
+                     arch);
+            return false;
+        }
+        if(s->async_dma || s->unroll_k || s->chiplet_swizzle || s->split_k > 1)
+        {
+            snprintf(
+                reason,
+                reason_cap,
+                "WMMA dgrad does not support async_dma/unroll_k/chiplet_swizzle/split_k>1 on %s",
+                arch);
+            return false;
+        }
     }
 
     snprintf(reason, reason_cap, "ok");

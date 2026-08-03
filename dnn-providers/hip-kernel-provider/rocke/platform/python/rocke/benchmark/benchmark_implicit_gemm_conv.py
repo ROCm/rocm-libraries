@@ -111,17 +111,6 @@ def _grid_for_wgrad_spec(spec, split_k: int):
     return (gx, gy, split_k)
 
 
-def _grid_for_dgrad_spec(spec, split_k: int):
-    """Derive launch grid from dgrad spec and split-K degree.
-
-    Dgrad uses a 1-D flat tile grid: blockIdx.x is the flat CTA index into
-    the sub-GEMM tile space; blockIdx.z is the split-K partition.
-    """
-    sub_gemms = spec.compute_sub_gemms()
-    flat_tiles = sub_gemms[-1].block_end
-    return (flat_tiles, 1, max(split_k, 1))
-
-
 def _sample_combos(combos: list, frac: float, seed: int) -> list:
     """Return a random subset of *combos* of size ceil(frac * len(combos))."""
     n = max(1, round(len(combos) * frac))
@@ -1503,46 +1492,35 @@ def _run_dgrad_sweep(
             continue
         n_built += 1
 
-        _is_strided = spec.is_strided
-        if _is_strided:
-            from rocke.instances.common.conv_implicit_gemm_dgrad import (
-                pack_sub_gemm_buffer,
-            )
-            import struct as _struct
+        # All dgrad kernels require sub_gemm_buf / num_sub_gemms regardless of
+        # stride, because the kernel ABI always includes those parameters.  For
+        # stride=1 there is exactly one non-empty sub-GEMM so the buffer holds a
+        # single record and the binary-search degenerates trivially.
+        from rocke.instances.common.conv_implicit_gemm_dgrad import pack_sub_gemm_buffer
+        import struct as _struct
 
-            sub_gemms = spec.compute_sub_gemms()
-            buf_i32 = pack_sub_gemm_buffer(sub_gemms, spec.tile_m, spec.tile_n)
-            buf_bytes = _struct.pack(f"{len(buf_i32)}i", *buf_i32)
-            total_flat_tiles = sub_gemms[-1].block_end
-            sgbuf_dev = rt.alloc(len(buf_bytes))
-            rt.memcpy_h2d(
-                sgbuf_dev,
-                (ctypes.c_uint8 * len(buf_bytes)).from_buffer_copy(buf_bytes),
-                len(buf_bytes),
-            )
-            sig = ext_sig
-            grid = (total_flat_tiles, 1, resolved_split_k)
-            values = {
-                "A": dY_dev,
-                "B": W_dev,
-                "D": dX_dev,
-                "A_bytes": dY_t.nbytes,
-                "B_bytes": W_t.nbytes,
-                "D_bytes": dX_t.nbytes,
-                "sub_gemm_buf": sgbuf_dev,
-                "num_sub_gemms": len(sub_gemms),
-            }
-        else:
-            sig = base_sig
-            grid = _grid_for_dgrad_spec(spec, resolved_split_k)
-            values = {
-                "A": dY_dev,
-                "B": W_dev,
-                "D": dX_dev,
-                "A_bytes": dY_t.nbytes,
-                "B_bytes": W_t.nbytes,
-                "D_bytes": dX_t.nbytes,
-            }
+        sub_gemms = spec.compute_sub_gemms()
+        buf_i32 = pack_sub_gemm_buffer(sub_gemms, spec.tile_m, spec.tile_n)
+        buf_bytes = _struct.pack(f"{len(buf_i32)}i", *buf_i32)
+        sgbuf_dev = rt.alloc(len(buf_bytes))
+        rt.memcpy_h2d(
+            sgbuf_dev,
+            (ctypes.c_uint8 * len(buf_bytes)).from_buffer_copy(buf_bytes),
+            len(buf_bytes),
+        )
+        flat_tiles = sub_gemms[-1].block_end
+        sig = ext_sig
+        grid = (flat_tiles, 1, resolved_split_k)
+        values = {
+            "A": dY_dev,
+            "B": W_dev,
+            "D": dX_dev,
+            "A_bytes": dY_t.nbytes,
+            "B_bytes": W_t.nbytes,
+            "D_bytes": dX_t.nbytes,
+            "sub_gemm_buf": sgbuf_dev,
+            "num_sub_gemms": len(sub_gemms),
+        }
 
         launcher = KernelLauncher(
             hsaco=artifact.hsaco,
@@ -1572,6 +1550,7 @@ def _run_dgrad_sweep(
                 u8=_u8,
             )
             if stopped:
+                rt.free(sgbuf_dev)
                 rt.free(dY_dev)
                 rt.free(W_dev)
                 rt.free(dX_dev)
@@ -1626,8 +1605,7 @@ def _run_dgrad_sweep(
             flush=True,
         )
 
-        if _is_strided:
-            rt.free(sgbuf_dev)
+        rt.free(sgbuf_dev)
 
     rt.free(dY_dev)
     rt.free(W_dev)
