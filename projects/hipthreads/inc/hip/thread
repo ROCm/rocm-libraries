@@ -29,28 +29,28 @@
 
 /*
 
-    thread synopsis
+    wthread synopsis
 
 namespace std
 {
 
-class thread
+class wthread
 {
 public:
     class id;
     typedef pthread_t native_handle_type;
 
-    thread() noexcept;
-    template <class F, class ...Args> explicit thread(F&& f, Args&&... args);
-    ~thread();
+    wthread() noexcept;
+    template <class F, class ...Args> explicit wthread(F&& f, Args&&... args);
+    ~wthread();
 
-    thread(const thread&) = delete;
-    thread(thread&& t) noexcept;
+    wthread(const wthread&) = delete;
+    wthread(wthread&& t) noexcept;
 
-    thread& operator=(const thread&) = delete;
-    thread& operator=(thread&& t) noexcept;
+    wthread& operator=(const wthread&) = delete;
+    wthread& operator=(wthread&& t) noexcept;
 
-    void swap(thread& t) noexcept;
+    void swap(wthread& t) noexcept;
 
     bool joinable() const noexcept;
     void join();
@@ -61,33 +61,33 @@ public:
     static unsigned hardware_concurrency() noexcept;
 };
 
-void swap(thread& x, thread& y) noexcept;
+void swap(wthread& x, wthread& y) noexcept;
 
-class thread::id
+class wthread::id
 {
 public:
     id() noexcept;
 };
 
-bool operator==(thread::id x, thread::id y) noexcept;
-bool operator!=(thread::id x, thread::id y) noexcept;             // removed in C++20
-bool operator< (thread::id x, thread::id y) noexcept;             // removed in C++20
-bool operator<=(thread::id x, thread::id y) noexcept;             // removed in C++20
-bool operator> (thread::id x, thread::id y) noexcept;             // removed in C++20
-bool operator>=(thread::id x, thread::id y) noexcept;             // removed in C++20
-strong_ordering operator<=>(thread::id x, thread::id y) noexcept; // C++20
+bool operator==(wthread::id x, wthread::id y) noexcept;
+bool operator!=(wthread::id x, wthread::id y) noexcept;             // removed in C++20
+bool operator< (wthread::id x, wthread::id y) noexcept;             // removed in C++20
+bool operator<=(wthread::id x, wthread::id y) noexcept;             // removed in C++20
+bool operator> (wthread::id x, wthread::id y) noexcept;             // removed in C++20
+bool operator>=(wthread::id x, wthread::id y) noexcept;             // removed in C++20
+strong_ordering operator<=>(wthread::id x, wthread::id y) noexcept; // C++20
 
 template<class charT, class traits>
 basic_ostream<charT, traits>&
-operator<<(basic_ostream<charT, traits>& out, thread::id id);
+operator<<(basic_ostream<charT, traits>& out, wthread::id id);
 
 template<class charT>
-struct formatter<thread::id, charT>;
+struct formatter<wthread::id, charT>;
 
 namespace this_thread
 {
 
-thread::id get_id() noexcept;
+wthread::id get_id() noexcept;
 
 void yield() noexcept;
 

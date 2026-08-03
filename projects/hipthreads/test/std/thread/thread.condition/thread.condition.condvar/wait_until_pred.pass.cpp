@@ -57,7 +57,7 @@ void test() {
     ::std::condition_variable cv;
     ::std::mutex mutex;
 
-    hip::thread t1 = support::make_test_thread([&] {
+    hip::wthread t1 = support::make_test_thread([&] {
       hip::unique_lock<::std::mutex> lock(mutex);
       ready       = true;
       bool result = cv.wait_until(lock, timeout, [&] { return !likely_spurious; });
@@ -65,7 +65,7 @@ void test() {
       assert(Clock::now() < timeout);
     });
 
-    hip::thread t2 = support::make_test_thread([&] {
+    hip::wthread t2 = support::make_test_thread([&] {
       while (!ready) {
         // spin
       }
@@ -93,7 +93,7 @@ void test() {
     ::std::condition_variable cv;
     ::std::mutex mutex;
 
-    hip::thread t1 = support::make_test_thread([&] {
+    hip::wthread t1 = support::make_test_thread([&] {
       hip::unique_lock<::std::mutex> lock(mutex);
       bool result = cv.wait_until(lock, timeout, [] { return false; }); // never stop waiting (until timeout)
       assert(!result); // return value should be false since the predicate returns false after the timeout
@@ -120,7 +120,7 @@ void test() {
     ::std::condition_variable cv;
     ::std::mutex mutex;
 
-    hip::thread t1 = support::make_test_thread([&] {
+    hip::wthread t1 = support::make_test_thread([&] {
       hip::unique_lock<::std::mutex> lock(mutex);
       ready       = true;
       bool result = cv.wait_until(lock, timeout, [&] { return true; });
@@ -129,7 +129,7 @@ void test() {
       assert(Clock::now() < timeout); // can technically fail if t2 never executes and we timeout, but very unlikely
     });
 
-    hip::thread t2 = support::make_test_thread([&] {
+    hip::wthread t2 = support::make_test_thread([&] {
       while (!ready) {
         // spin
       }
