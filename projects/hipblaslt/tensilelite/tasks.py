@@ -237,6 +237,8 @@ def _maybe_rebuild_rocisa(c, rocisa_dir=None):
         "enable_rocprof": "Build tensilelite-client with rocprof.",
         "cxx_flags_release": "Override CMAKE_CXX_FLAGS_RELEASE (for example, -O3 to keep asserts enabled in Release).",
         "rebuild_rocisa": "Re-install the editable rocisa (if present) so rocisa C++ edits are picked up; pass --no-rebuild-rocisa to skip.",
+        "enable_asan": "Enable AddressSanitizer.",
+        "enable_tsan": "Enable ThreadSanitizer.",
     }
 )
 def build_client(
@@ -253,6 +255,8 @@ def build_client(
     enable_rocprof=False,
     cxx_flags_release=None,
     rebuild_rocisa=True,
+    enable_asan=False,
+    enable_tsan=False,
 ):
     """Build the tensilelite-client C++ executable.
 
@@ -263,11 +267,13 @@ def build_client(
     refreshed to pick up C++ edits (disable with --no-rebuild-rocisa).
     """
 
+    if enable_asan and enable_tsan:
+        raise Exit("Error: ASAN and TSAN cannot be enabled simultaneously", code=1)
+
     if gpu_targets is None:
         gpu_targets = detect_gpu_arch()
         if not gpu_targets:
-            print("Error: No GPU detected and no gpu_targets provided. Skipping build.")
-            return
+            raise Exit("Error: No GPU detected and no gpu_targets provided", code=1)
         print(f"warning: No GPU targets specified. Detected and using: {gpu_targets}")
 
     if rocm_path:
@@ -278,11 +284,9 @@ def build_client(
             try:
                 subprocess.run([compiler, "--version"], capture_output=True, timeout=5, check=True)
             except FileNotFoundError:
-                print(f"Error: compiler not found at {compiler}", file=sys.stderr)
-                return
+                raise Exit(f"Error: compiler not found at {compiler}", code=1)
             except subprocess.SubprocessError as e:
-                print(f"Error: compiler check failed for {compiler}: {e}", file=sys.stderr)
-                return
+                raise Exit(f"Error: compiler check failed for {compiler}: {e}", code=1)
 
     if rebuild_rocisa:
         _maybe_rebuild_rocisa(c)
@@ -319,6 +323,10 @@ def build_client(
             cmake_cmd.append("-DCMAKE_CXX_COMPILER_LAUNCHER=ccache")
         if export_compile_commands:
             cmake_cmd.append("-DCMAKE_EXPORT_COMPILE_COMMANDS=ON")
+        if enable_asan:
+            cmake_cmd.append("-DTENSILELITE_ENABLE_HOST_ASAN=ON")
+        if enable_tsan:
+            cmake_cmd.append("-DTENSILELITE_ENABLE_HOST_TSAN=ON")
         cmake_cmd.append(f"-DHIPBLASLT_BUNDLE_PYTHON_DEPS={_cmake_bool(bundle_python_deps)}")
 
         c.run(shlex.join(cmake_cmd))

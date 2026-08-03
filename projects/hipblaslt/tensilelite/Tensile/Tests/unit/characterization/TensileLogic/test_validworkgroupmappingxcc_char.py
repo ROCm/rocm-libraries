@@ -146,6 +146,18 @@ def test_reset_clears_state(snapshot):
     assert {"before_reset": before, "after_reset": after} == snapshot
 
 
+def test_report_false_is_side_effect_free(capsys, snapshot):
+    # A rejecting solution validated with report=False still returns False but
+    # neither prints nor bumps the per-file dedup counter -- so re-validating a
+    # documented known bug cannot swallow a later *real* XCC failure's message.
+    reset_reported_failures()
+    ret = _validateWorkGroupMappingXCC(
+        {"WorkGroupMappingXCC": 0, "SolutionIndex": 0}, _CU_DIR, report=False
+    )
+    assert capsys.readouterr().out == ""
+    assert {"returned": ret, "reported_failures": _state()} == snapshot
+
+
 # --- _cu_count_from_path ----------------------------------------------------
 
 @pytest.mark.parametrize("name,parts", [

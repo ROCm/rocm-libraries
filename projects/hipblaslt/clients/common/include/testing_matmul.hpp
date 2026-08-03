@@ -1153,6 +1153,37 @@ void check(hipStream_t                   stream,
                     synchronize(hBias[gemmIdx], dBias[gemmIdx], 0, 0, 0, 0, 1, false, stream));
             }
         }
+        // Check Inf/NaN consistency first so "Inf turned into NaN" bugs fail with a clear message.
+        // Mirror the unit/norm-check buffer branching: pointer-array mode uses per-batch buffers,
+        // so a strided read over num_batches would compare the wrong buffers / go out of bounds.
+        if(arg.unit_check || arg.norm_check)
+        {
+            if(batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
+            {
+                check_special_value_consistency(M[gemmIdx],
+                                                N[gemmIdx],
+                                                ldd[gemmIdx],
+                                                stride_d[gemmIdx],
+                                                hD_gold[gemmIdx].buf(),
+                                                hD_1[gemmIdx].buf(),
+                                                num_batches[gemmIdx],
+                                                To);
+            }
+            else
+            {
+                for(int batch = 0; batch < num_batches[gemmIdx]; batch++)
+                {
+                    check_special_value_consistency(M[gemmIdx],
+                                                    N[gemmIdx],
+                                                    ldd[gemmIdx],
+                                                    0,
+                                                    hD_gold[batch].buf(),
+                                                    hD_1[batch].buf(),
+                                                    1,
+                                                    To);
+                }
+            }
+        }
         if(arg.unit_check)
         {
             if(batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
@@ -5421,8 +5452,7 @@ void testing_matmul_with_bias(const Arguments& arg,
             {
                 // Gaussian-filled inputs + batched GEMM: use near_check like fp16_accumulator_probe
                 // (CPU ref vs GPU are not always bit-identical for f32/f16 accumulations).
-                for(int gemmIdx = 0; gemmIdx < gemm_count; gemmIdx++)
-                    tol[gemmIdx] = 1e-2;
+                std::fill(tol.begin(), tol.end(), 1e-2);
             }
 
             if(arg.unit_check || arg.norm_check || arg.allclose_check)
@@ -6036,8 +6066,7 @@ void testing_matmul_with_bias(const Arguments& arg,
             }
             else if(arg.initialization == hipblaslt_initialization::norm_dist_one_special)
             {
-                for(int gemmIdx = 0; gemmIdx < gemm_count; gemmIdx++)
-                    tol[gemmIdx] = 1e-2;
+                std::fill(tol.begin(), tol.end(), 1e-2);
             }
             if(arg.unit_check || arg.norm_check || arg.allclose_check)
             {
