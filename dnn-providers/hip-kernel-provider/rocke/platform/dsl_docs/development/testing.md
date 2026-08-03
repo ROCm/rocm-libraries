@@ -80,18 +80,24 @@ python tools/check_doc_symbols.py \
 ```
 
 The script copies `dsl_docs/` to the scratch directory and reads the Python
-source without importing rocKE. Sphinx then reports symbol links that it cannot
-find. The script recognizes both forms:
+source without importing rocKE. It checks explicit Python symbol roles in both
+Markdown and Python docstrings. The script recognizes both forms:
 
 ```text
 {py:func}`rocke.helpers.apply_mx_scale`
 :func:`rocke.helpers.apply_mx_scale`
 ```
 
-Each error points to the original Markdown file and line. Plain code spans are
-not symbol links and are not checked. For a JSON report, pass `--format json`
-and choose a JSON `--output` path. The command exits with status 1 when it finds
-a broken link.
+Each error points to the original file and line. Plain code spans are not symbol
+links and are not checked. Roles in comments are also not checked. Local rocKE
+references are checked against symbols found in the Python source. References
+to imported standard-library or third-party packages are counted separately and
+skipped because the local rocKE source cannot prove that they exist. The role
+must also match the symbol kind. For example, a method referenced with
+`:func:` is reported as a role mismatch.
+
+For a JSON report, pass `--format json` and choose a JSON `--output` path. The
+command exits with status 1 when it finds a broken local link.
 
 Run `python tools/test_check_doc_symbols.py` to exercise both successful and
 broken symbol links through the complete local `uvx` and Sphinx command path.
