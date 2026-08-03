@@ -35,7 +35,9 @@ class StinkyAsmModule;
 /// The module overload reaches callee Functions for their conservative entry
 /// drain. The no-argument overload (stinkytofu-opt single-pass mode, unit tests)
 /// processes just the Function it is given and skips callee iteration.
-STINKYTOFU_EXPORT std::unique_ptr<Pass> createInsertWaitAluPass(StinkyAsmModule& module);
-STINKYTOFU_EXPORT std::unique_ptr<Pass> createInsertWaitAluPass();
+STINKYTOFU_EXPORT std::unique_ptr<Pass> createInsertWaitAluPass(
+    StinkyAsmModule& module, bool enableESM2TrackValuVsrc = false);
+STINKYTOFU_EXPORT std::unique_ptr<Pass> createInsertWaitAluPass(
+    bool enableESM2TrackValuVsrc = false);
 
 }  // namespace stinkytofu
