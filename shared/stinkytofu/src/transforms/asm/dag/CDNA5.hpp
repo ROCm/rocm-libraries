@@ -432,7 +432,8 @@ class CDNA5ReadyQueue : public ReadyQueue {
     bool findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** outNode, int* kindOut,
                                      int* outWait = nullptr) const;
 
-    bool findOldestFallbackNonWmma(DAGNode* pickedDS, DAGNode** outNode, int* kindOut) const;
+    bool findOldestFallbackNonWmma(DAGNode* pickedDS, DAGNode** outNode, int* kindOut,
+                                   int* outWait = nullptr) const;
 
     // Promotion = split the old forced-barrier phase into a pure decision + a per-phase
     // gate, run once before the normal phases. decidePromote() records which phase must
@@ -568,7 +569,10 @@ DAGNode* CDNA5ReadyQueue::popNonWmma(DAGNode* node, int pickKind) {
     // waits the fixed hazard out. Per-rule lane (not regDataReadyCounters) so an
     // unrelated instruction reading the same register is not wrongly gated.
     for (const HazardFlag& hf : node->hazardFlags)
-        hazardGates_[hf.ruleIdx][hf.regKey] = kCdna5HazardRules[hf.ruleIdx].cycles;
+        // rule.cycles == -1 ("hoist as far as possible"): the strategy is producer-side
+        // hoisting (deadline forced to 0 in the pre-scan), not a consumer-side hold, so
+        // clamp the gate to 0 rather than stamping a negative wait.
+        hazardGates_[hf.ruleIdx][hf.regKey] = std::max(0, kCdna5HazardRules[hf.ruleIdx].cycles);
     // No longer a live hoist candidate once issued (decidePromote() must not try to
     // force it again).
     if (!node->hazardFlags.empty()) {
@@ -756,7 +760,7 @@ DAGNode* CDNA5ReadyQueue::pickOneFromWMMA(DAGNode* pick) {
     // consume the time that is not used by the WMMA
     if (coIssueCyclePos_ < activeWmmaLatency_) advanceTime(activeWmmaLatency_ - coIssueCyclePos_);
 
-    activeCoIssueWindow_ = node->inst->hwInstDesc->coIssueWindow;
+    activeCoIssueWindow_ = node->inst->coIssueWindow;
     coIssueCyclePos_ = 0;
     activeWmmaLatency_ = node->inst->latencyCycles;
     activeWmmaNode_ = node;
@@ -861,20 +865,25 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
     return true;
 }
 
-// Final-fallback candidate search across non-WMMA queues.
+// Final-fallback candidate search across non-WMMA queues. Ranks by smallest
+// outstanding wait (not DAG id) so real work fills gaps where possible.
 // kind: 0=global, 1=local, 2=other, 3=valu.
-bool CDNA5ReadyQueue::findOldestFallbackNonWmma(DAGNode* pickedDS, DAGNode** outNode,
-                                                int* kindOut) const {
+bool CDNA5ReadyQueue::findOldestFallbackNonWmma(DAGNode* pickedDS, DAGNode** outNode, int* kindOut,
+                                                int* outWait) const {
     *outNode = nullptr;
     *kindOut = -1;
+    if (outWait) *outWait = 0;
     DAGNode* best = nullptr;
     int kind = -1;
+    int bestWait = 0;
 
     auto consider = [&](DAGNode* cand, int candKind) {
         if (cand == nullptr) return;
-        if (best == nullptr || cand->id < best->id) {
+        const int wait = std::max(getMaxSrcDataWait(cand), getHazardWait(cand));
+        if (best == nullptr || wait < bestWait || (wait == bestWait && cand->id < best->id)) {
             best = cand;
             kind = candKind;
+            bestWait = wait;
         }
     };
 
@@ -886,6 +895,7 @@ bool CDNA5ReadyQueue::findOldestFallbackNonWmma(DAGNode* pickedDS, DAGNode** out
     if (best == nullptr) return false;
     *outNode = best;
     *kindOut = kind;
+    if (outWait) *outWait = bestWait;
     return true;
 }
 
@@ -915,19 +925,29 @@ void CDNA5ReadyQueue::decidePromote() {
     }
 
     // Hazard hoist: fires once the live elapse clock reaches this producer's
-    // hazardDeadline. Deliberately clock_-based, not a proxy node's readiness: clock_
-    // only advances via cycles actually issued (advanceTime, called on every real
-    // pick), so it can't run ahead of the true schedule the way "some node's inDegree
-    // hit 0" can when that node is structurally unblocked long before it is actually
-    // picked. Before the deadline, the producer competes as ordinary work -- no
-    // special priority -- so it never crowds out ds/wmma while it still has slack.
-    // Also requires the producer to be genuinely free to issue right now (no
-    // outstanding RAW/hazard wait of its own, and no WMMA-src overlap) -- this is a
-    // throughput heuristic layered on an unconditionally-correct consumer-side gate,
-    // so it must never force an otherwise-unsafe issue; missing the deadline just
-    // costs a later explicit stall via that gate.
+    // hazardDeadline, or earlier if a pending WMMA would otherwise jump clock_ past
+    // it first (a WMMA can otherwise steal the slot right before the deadline).
+    // Deliberately clock_-based, not a proxy node's readiness: clock_ only advances
+    // via cycles actually issued (advanceTime, called on every real pick), so it can't
+    // run ahead of the true schedule the way "some node's inDegree hit 0" can when
+    // that node is structurally unblocked long before it is actually picked. Before
+    // the deadline, the producer competes as ordinary work -- no special priority --
+    // so it never crowds out ds/wmma while it still has slack. Also requires the
+    // producer to be genuinely free to issue right now (no outstanding RAW/hazard
+    // wait of its own, and no WMMA-src overlap) -- this is a throughput heuristic
+    // layered on an unconditionally-correct consumer-side gate, so it must never
+    // force an otherwise-unsafe issue; missing the deadline just costs a later
+    // explicit stall via that gate.
     for (const HazardHoistCandidate& hc : hazardHoistCandidates_) {
-        if (clock_ < hc.node->hazardDeadline) continue;
+        bool deadlineReached = clock_ >= hc.node->hazardDeadline;
+        if (!deadlineReached && !wmmaQueue.empty()) {
+            auto [bestWMMA, bestLatency] = findMostReadyWMMA();
+            if (bestWMMA && bestLatency <= 0 &&
+                clock_ + bestWMMA->inst->latencyCycles > hc.node->hazardDeadline) {
+                deadlineReached = true;
+            }
+        }
+        if (!deadlineReached) continue;
         if (getMaxSrcDataWait(hc.node) > 0 || getHazardWait(hc.node) > 0) continue;
         if (destOverlapsActiveWmmaSrc(hc.node)) continue;
         promotedPhase_ = PromotePhase::NonWmmaFill;
@@ -1467,20 +1487,20 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
         return rememberPick(barrier);
     }
 
-    // Phase G — final safety net: force-pick the oldest DAG node to guarantee progress.
+    // Phase G — final safety net: force-pick the least-blocked ready node to
+    // guarantee progress.
     DAGNode* fallback = nullptr;
     int fallbackKind = -1;
-    if (findOldestFallbackNonWmma(pickedDS, &fallback, &fallbackKind)) {
-        // Safety net must guarantee progress, so the global-read gate is not
-        // applied here. If a tensor load is the only remaining work but the
-        // credit pool is full, idle until the earliest credit drains so the
-        // pick below stays within the queue depth.
-        if (fallbackKind == kGlobalRead && globalReadQueueFull()) {
-            int minDrain = globalReadInflight_.minResidual();
-            if (minDrain > 0) advanceTime(minDrain);
-        }
+    int fallbackWait = 0;
+    if (findOldestFallbackNonWmma(pickedDS, &fallback, &fallbackKind, &fallbackWait)) {
+        // Throttle (queue depth) is skipped for progress, but the hazard gate is
+        // unconditional (see kCdna5HazardRules) and still has to be paid here too.
+        int waitCycles = fallbackWait;
+        if (fallbackKind == kGlobalRead && globalReadQueueFull())
+            waitCycles = std::max(waitCycles, globalReadInflight_.minResidual());
+        if (waitCycles > 0) advanceTime(waitCycles);
         PASS_DEBUG(std::cerr << "[CDNA5 pickOne] Phase G fallback pick dagId=" << fallback->id
-                             << " kind=" << fallbackKind << "\n");
+                             << " kind=" << fallbackKind << " wait=" << waitCycles << "\n");
         return rememberPick(popNonWmma(fallback, fallbackKind));
     }
 
