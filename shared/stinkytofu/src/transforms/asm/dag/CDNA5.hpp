@@ -341,6 +341,10 @@ class CDNA5ReadyQueue : public ReadyQueue {
     // activeWmmaLatency_). Used to detect ds_load dest / WMMA src VGPR overlap hazards.
     DAGNode* activeWmmaNode_ = nullptr;
 
+    // VGPR-MSB bank currently in effect (mirrors InsertVgprMsbPass); updated on issue,
+    // reset per region. pickFreeBest prefers a free candidate matching it. -1 = unknown.
+    int currentMsb_ = -1;
+
     // --- Per-WMMA-window DS cap (dagFeatures.dsReadPerWmma) ---
     int maxDsPerWmmaWindow_ = 0;
     int dsInsertedSinceLastWmma_ = 0;
@@ -564,6 +568,8 @@ DAGNode* CDNA5ReadyQueue::popNonWmma(DAGNode* node, int pickKind) {
     touchOperands(*node->inst);
     updateWMMAStatus(node);
     stampDataReady(*node->inst);
+    // Advance the tracked MSB bank; ops with no opinion (-1) leave it unchanged.
+    if (node->requiredMsb != -1) currentMsb_ = node->requiredMsb;
     // Hazard gates: stamp exactly the (rule, register) pairs the pre-scan found a
     // rule.isConsumer instruction reads from this producer, so that consumer's pick
     // waits the fixed hazard out. Per-rule lane (not regDataReadyCounters) so an
@@ -703,6 +709,7 @@ DAGNode* CDNA5ReadyQueue::pickFreeBest(const ReadySetByDAGid& queue, int* outWai
     DAGNode* best = nullptr;
     int bestElapse = INT_MIN;
     int bestWait = 0;
+    int bestAff = 0;
     for (DAGNode* n : queue) {  // iterates smallest-id first, so ties keep the oldest id
         const int wait = std::max(getMaxSrcDataWait(n), getHazardWait(n));
         // Tolerate a wait only if it fits the WMMA latency shadow and the dest does
@@ -711,18 +718,26 @@ DAGNode* CDNA5ReadyQueue::pickFreeBest(const ReadySetByDAGid& queue, int* outWai
                          destOverlapsActiveWmmaSrc(n)))
             continue;
         const int elapse = nodeElapseKey(n);
-        // Free nodes rank above hidden-stall ones; within a tier, largest elapse wins.
+        // MSB bank affinity: a tiebreak BELOW the free/hazard tier and ABOVE elapse —
+        // prefer a same-bank candidate to avoid an s_set_vgpr_msb switch. Inert when
+        // currentMsb_ == -1 (nothing matches), so unchanged behavior until a real tie.
+        const int aff = (n->requiredMsb != -1 && n->requiredMsb == currentMsb_) ? 1 : 0;
+        // Free nodes rank above hidden-stall ones; within a tier, prefer same-bank
+        // (larger aff), then largest elapse.
         const bool nHazard = wait > 0;
         const bool curHazard = bestWait > 0;
         bool better;
         if (best == nullptr)
             better = true;
         else
-            better = (!nHazard && curHazard) || (nHazard == curHazard && elapse > bestElapse);
+            better = (!nHazard && curHazard) ||
+                     (nHazard == curHazard &&
+                      (aff > bestAff || (aff == bestAff && elapse > bestElapse)));
         if (better) {
             best = n;
             bestElapse = elapse;
             bestWait = wait;
+            bestAff = aff;
         }
     }
     if (best && outWait) *outWait = bestWait;
@@ -780,6 +795,7 @@ DAGNode* CDNA5ReadyQueue::pickOneFromWMMA(DAGNode* pick) {
     // (B) elapse: record the timeline touch for all its operands.
     stampDataReady(*node->inst);
     touchOperands(*node->inst);
+    if (node->requiredMsb != -1) currentMsb_ = node->requiredMsb;
     return node;
 }
 
@@ -1640,6 +1656,8 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
     // region starts with all regs "very old" (no spurious deferrals from a prior region).
     regLastTouch_.clear();
     clock_ = 0;
+    // Per-region: MSB state is not carried across a region boundary (side-effect cut).
+    currentMsb_ = -1;
     // Clear per-region node ptr; it dangles into the previous region's freed DAGNodeList.
     activeWmmaNode_ = nullptr;
     // Hazard state is per-region: hazardHoistCandidates_ holds DAGNode* into the prior
