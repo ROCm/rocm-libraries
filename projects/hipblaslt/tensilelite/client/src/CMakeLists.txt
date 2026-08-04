@@ -16,7 +16,6 @@ target_sources(tensilelite-client-common
         "${CMAKE_CURRENT_SOURCE_DIR}/ResultFileReporter.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ResultReporter.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/MetaRunListener.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/Reference.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ProgressListener.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/TypedId.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Rotating.cpp"
