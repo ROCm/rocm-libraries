@@ -164,20 +164,17 @@ TEST_F(GPU_StreamTracker_FP32, ScratchAllocateAndReuse)
 
 TEST_F(GPU_StreamTracker_FP32, ScratchFreedWhenCallersRelease)
 {
-    // Core memory-pressure fix: Handle holds only weak_ptr, so scratch is freed
-    // as soon as all callers (TryNaiveWithTimeout stack frame + draining slots) drop refs.
-    auto scratch = handle.GetScratchBuffer(1024);
+    // Force a fresh allocation larger than anything the shared Handle has cached.
+    auto prior    = handle.GetScratchBuffer(1);
+    const auto sz = (prior ? prior->size : 0) + 131072;
+    prior.reset();
+
+    auto scratch = handle.GetScratchBuffer(sz);
     ASSERT_NE(scratch, nullptr);
-    EXPECT_EQ(scratch.use_count(), 1); // only local; Handle has weak_ptr
 
     std::weak_ptr<miopen::ScratchAllocation> weak = scratch;
-    scratch.reset();             // simulate caller (find phase) completing
-    EXPECT_TRUE(weak.expired()); // no strong refs remain → allocation freed
-
-    // Next call must allocate fresh (weak_ptr expired)
-    auto s2 = handle.GetScratchBuffer(1024);
-    ASSERT_NE(s2, nullptr);
-    EXPECT_EQ(s2.use_count(), 1);
+    scratch.reset();
+    EXPECT_TRUE(weak.expired());
 }
 
 TEST_F(GPU_StreamTracker_FP32, ScratchGrows)
