@@ -83,7 +83,9 @@ int dispatcher_initialize()
                   << "' (supported: gfx90a, gfx942, gfx950)\n";
         return -1;
     }
-    g_initialized.store(true, std::memory_order_relaxed);
+    // release: make the device-property query results visible to any thread
+    // that subsequently loads g_initialized with memory_order_acquire.
+    g_initialized.store(true, std::memory_order_release);
     return 0;
 }
 
@@ -128,7 +130,9 @@ int dispatcher_run_rowcolquant_gemm(const void* A,
                                     int k_batch,
                                     float* time_ms)
 {
-    if(!g_initialized.load(std::memory_order_relaxed))
+    // acquire: synchronise with the release store in dispatcher_initialize so
+    // that all device-property checks performed there are visible here.
+    if(!g_initialized.load(std::memory_order_acquire))
     {
         std::cerr << "dispatcher_run_rowcolquant_gemm: not initialized\n";
         return -1;
@@ -146,6 +150,13 @@ int dispatcher_run_rowcolquant_gemm(const void* A,
 
     // Only packed (contiguous) layouts are supported for A, B, C.
     // stride_AQ and stride_BQ are unused here; the kernel uses broadcast strides (0).
+    //
+    // B layout (rcr = row-major A, column-major B, row-major C):
+    //   B is stored column-major (Fortran order), shape [K, N].
+    //   The leading dimension of a column-major [K, N] matrix is K (the number of
+    //   rows), so stride_B == K for a packed column-major B.  This is NOT the same
+    //   as row-major stride which would be N.  A row-major (C-contiguous) B passed
+    //   with stride_B=K would cause the kernel to read the wrong elements.
     if(stride_A != K || stride_B != K || stride_C != N)
     {
         std::cerr << "dispatcher_run_rowcolquant_gemm: non-packed strides are not supported. "
@@ -273,8 +284,10 @@ const char* dispatcher_get_kernel_name() { return KERNEL_NAME; }
 int dispatcher_get_kernel_count() { return 1; }
 
 /**
- * Release resources.
+ * Reset the initialisation flag so dispatcher_initialize() can be called again.
+ * This function does not free any GPU memory or unload the library; those are
+ * managed per-call inside dispatcher_run_rowcolquant_gemm.
  */
-void dispatcher_cleanup() { g_initialized.store(false, std::memory_order_relaxed); }
+void dispatcher_cleanup() { g_initialized.store(false, std::memory_order_release); }
 
 } // extern "C"

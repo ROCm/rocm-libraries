@@ -222,6 +222,19 @@ def test_rowcolquant_bf8_correctness(tmp_path):
 
 
 @requires_gpu
+def test_rowcolquant_fp8_rectangular(tmp_path):
+    """GPU RowColQuant fp8: non-square M/N/K to stress stride math."""
+    M, N, K = 64, 256, 128
+    cfg = default_fp8_config(gfx_arch=_GFX_ARCH)
+    A_raw, A_dec, B_raw, B_dec, AQ, BQ = _make_inputs(M, N, K, dtype="fp8")
+    status, detail = _run_one(
+        "rect/fp8", cfg, M, N, K, A_raw, A_dec, B_raw, B_dec, AQ, BQ,
+        tmp_path, gfx_arch=_GFX_ARCH,
+    )
+    assert status == "PASS", detail
+
+
+@requires_gpu
 def test_rowcolquant_timing_positive(tmp_path):
     """GPU RowColQuant: time_ms > 0 when timing is collected."""
     M, N, K = 128, 128, 64

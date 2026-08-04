@@ -227,10 +227,17 @@ class TensorQuantDispatcherLib:
         stride_AQ: int, stride_BQ: int, stride_C: int,
         k_batch: int = 1,
     ) -> Tuple[int, float]:
-        """Call dispatcher_run_tensorquant_gemm with ctypes-wrapped pointers."""
+        """Call dispatcher_run_tensorquant_gemm with ctypes-wrapped pointers.
+
+        B must already be F-contiguous (column-major) — the caller (GpuGemmRunner)
+        converts it with asfortranarray before passing it here.  Using
+        ascontiguousarray on a 2-D F-contiguous array would silently copy it back
+        to C order, making the declared stride_B=K incorrect.
+        """
         import numpy as np
         A  = np.ascontiguousarray(A)
-        B  = np.ascontiguousarray(B)
+        # Preserve F-contiguous layout for B (rcr: column-major B, stride_B = K).
+        B  = np.asfortranarray(B) if B.ndim == 2 else np.ascontiguousarray(B)
         AQ = np.ascontiguousarray(AQ)
         BQ = np.ascontiguousarray(BQ)
         C  = np.ascontiguousarray(C)
