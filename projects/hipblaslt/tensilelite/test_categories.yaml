@@ -106,6 +106,24 @@ test_categories:
     labels:
       - "ffm-quick"
 
+  # Arch-agnostic emulation pre-submit tests. {AMDGPU_FAMILIES} is substituted
+  # at runtime by pytest_runner.py from the AMDGPU_FAMILIES env var.
+  # Kernel devs opt tests in by adding `emu_fast` to
+  # TestParameters.marks in individual YAML files.
+  emu-quick:
+    description: "Common GEMM tests for emulation pre-submits"
+    test_paths:
+      - "Tensile/Tests/common"
+    pytest_markers:
+      - "{AMDGPU_FAMILIES} and emu_fast"
+    parallel_workers: 16
+    pytest_args:
+      - "--prebuilt-client={ROCM_PATH}/libexec/hipblaslt/tensilelite/tensilelite-client"
+      - "--global-parameters=LibraryFormat='msgpack'"
+      - "--tensile-options=--cxx-compiler,{ROCM_PATH}/bin/amdclang++,--gpu-targets,{AMDGPU_FAMILIES}"
+    labels:
+      - "emu-quick"
+
 execution_settings:
   # TensileLite GPU unit tests assemble/run kernels and the legacy runner ran
   # them serially; pytest-xdist worker isolation (HIP_VISIBLE_DEVICES) is set up
@@ -121,3 +139,4 @@ execution_settings:
     comprehensive: 25200  # 7 hours
     full: 28800           # 8 hours
     ffm-quick: 2700       # 45 minutes
+    emu-quick: 2400       # 40 minutes
