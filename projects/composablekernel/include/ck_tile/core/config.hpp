@@ -210,6 +210,13 @@
 // workaround: gfx1250 does not support a negative offset (emulator issue)
 #define CK_TILE_WORKAROUND_SWDEV_XXXXXX_GFX1250_NEG_OFFSET_ISSUE 1
 
+// workaround: V_WMMA_SCALE_F32_32X16X128_F4 (Scale32) produces incorrect results on
+// gfx1250 ASIC revision 0x0. V_WMMA_SCALE16_F32_32X16X128_F4 (Scale16) is unaffected.
+// Disable Scale32 paths on gfx1250 until a hardware fix is available.
+#ifndef CK_TILE_WORKAROUND_GFX1250_SCALE32_WMMA_BUG
+#define CK_TILE_WORKAROUND_GFX1250_SCALE32_WMMA_BUG 1
+#endif
+
 #ifndef CK_TILE_WORKAROUND_ROCM_6_1_SCRATCH_MEMORY_ISSUE
 #if HIP_VERSION_MAJOR == 6 && HIP_VERSION_MINOR == 1 && HIP_VERSION_PATCH >= 40091
 #define CK_TILE_WORKAROUND_ROCM_6_1_SCRATCH_MEMORY_ISSUE 1

@@ -893,6 +893,13 @@ struct WmmaTraitsGfx125PkFp4F32_32x32x128
             }
             else
             {
+#if defined(__gfx125__) && CK_TILE_WORKAROUND_GFX1250_SCALE32_WMMA_BUG
+                // V_WMMA_SCALE_F32_32X16X128_F4 (Scale32) is broken on gfx1250 rev 0x0:
+                // it produces incorrect results even for zero inputs.
+                // Leave c_slice unchanged (zero from initialisation) and suppress unused warnings.
+                ck_tile::ignore = a_scale;
+                ck_tile::ignore = b_scale;
+#else
                 c_slice = __builtin_amdgcn_wmma_scale_f32_32x16x128_f4(
                     bit_cast<int32x16_t>(a_slice),
                     bit_cast<int32x8_t>(b_slice),
@@ -906,6 +913,7 @@ struct WmmaTraitsGfx125PkFp4F32_32x32x128
                     b_scale,
                     0,  // NEG
                     0); // NEG_HI
+#endif
             }
         });
 

@@ -34,6 +34,11 @@ TYPED_TEST(WGRuntimeTest, Compare_Dispatcher_MakeWG_Scale16)
 
 TYPED_TEST(WGRuntimeTest, Compare_Dispatcher_MakeWG_Scale32)
 {
+#if CK_TILE_WORKAROUND_GFX1250_SCALE32_WMMA_BUG
+    GTEST_SKIP() << "Scale32 (V_WMMA_SCALE_F32_32X16X128_F4) disabled on gfx1250 "
+                    "due to hardware bug (incorrect results even for zero inputs)";
+#else
     ck_tile::test::warp_gemm::
         RunCompareDispatcherAndReference<TypeParam, 32, 32, 128, true, false>();
+#endif
 }
