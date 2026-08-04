@@ -153,7 +153,8 @@ endif()
 
 if(Client IN_LIST TENSILE_COMPONENTS)
     set(test_sources ${test_sources}
-        client/DataInitialization_test.cpp)
+        client/DataInitialization_test.cpp
+        client/HardwareMonitorType_test.cpp)
 endif()
 
 if(TENSILE_USE_HIP)
