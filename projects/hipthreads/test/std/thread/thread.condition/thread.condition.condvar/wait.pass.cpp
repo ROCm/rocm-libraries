@@ -45,7 +45,7 @@ int main(int, char**)
 {
 #ifdef __HIP_DEVICE_COMPILE__
     hip::unique_lock<hip::spin_mutex> lk(mut);
-    hip::thread t = support::make_test_thread(f);
+    hip::wthread t = support::make_test_thread(f);
     assert(test1 == 0);
     while (test1 == 0)
         cv.wait(lk);
