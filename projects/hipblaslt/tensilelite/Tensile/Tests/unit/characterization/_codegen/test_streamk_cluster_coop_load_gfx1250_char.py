@@ -22,6 +22,7 @@ import os
 import pytest
 
 from config_harness import (
+    assert_assembles,
     assert_cluster_barrier_balanced,
     assert_real_gfx1250_kernels,
     assert_split_multicast_masks,
@@ -48,6 +49,7 @@ def test_streamk_cluster_coop_load_gfx1250_emits_assembly():
     results = emit_kernels_from_config(_CONFIG, limit=8, arch=_ARCH)
     assert_real_gfx1250_kernels(results)
     for base, src, _err in results:
+        assert_assembles(src, base)
         # Cluster WG-id decode arm.
         assert "RemapWorkGroupDone" in src, (
             f"Kernel {base!r}: missing cluster WG-id decode ('RemapWorkGroupDone')"

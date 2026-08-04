@@ -3155,8 +3155,13 @@ class StreamKTwoTileDPFirst(StreamK):
         module = Module("StreamK TwoTileDPFirst graWorkGroup")
         skConstsInVgprs = writer.isStreamKConstantsToVgprEnabled(kernel)
 
-        # StreamK workgroup mapping
-        sTmp = writer.sgprPool.checkOutAligned(4, 2, "SKMappingTemp", preventOverflow=not kernel.get("UseSubtileImpl", False))
+        # StreamK workgroup mapping. This is short-lived scratch, so grow the pool
+        # rather than reject the solution when no 4-register hole is free: MX TDM
+        # kernels can be left without one while still far below MaxSgpr. Growth only
+        # happens where the pinned checkout would have failed, so kernels that fit a
+        # hole keep the same register assignment, and checkResources still rejects
+        # anything that ends up over MaxSgpr.
+        sTmp = writer.sgprPool.checkOutAligned(4, 2, "SKMappingTemp", preventOverflow=False)
 
         if kernel["StreamKForceDPOnly"]:
             sIpt = writer.acquireStreamKConstSgpr(kernel, "ItersPerTile")

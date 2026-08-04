@@ -30,6 +30,7 @@ import re
 import pytest
 
 from config_harness import (
+    assert_assembles,
     assert_real_gfx1250_kernels,
     emit_kernels_from_config,
     golden_digest,
@@ -80,6 +81,7 @@ def test_streamk_pap_cluster_multicast_gfx1250_mask_liveness(cluster_dim, a_has_
     results = _emit(cluster_dim)
     assert_real_gfx1250_kernels(results)
     for base, src, _err in results:
+        assert_assembles(src, base)
         # B broadcasts along Cs in both shapes, so it is always re-applied.
         assert _B_ATTACH in src, (
             f"Kernel {base!r} dropped the B-multicast mask (MulticastMaskB)"

@@ -39,6 +39,11 @@ The expensive toolchain build is cached process-wide (per arch).
 import contextlib
 import copy
 import functools
+import os
+import re
+import tempfile
+
+import pytest
 
 # Reuse the logic-driven harness for: assembler/toolchain construction, the
 # canonicalize/warm-state emit, global-state isolation, and per-kernel rocisa
@@ -242,6 +247,39 @@ def _emit_one(kwa, kernel, splitGSU, canonical):
     return base, src, res.err
 
 
+_CLONE_TARGET_RE = re.compile(r"^label_([A-Za-z0-9]+)_target_\d+:", re.M)
+_LABEL_RE = re.compile(r"^(label_\S+):")
+
+
+def _count_cluster_barriers(src):
+    """Return ``(signals, waits)`` cluster-scope ``-3`` counts, discounting the
+    copies RegionClonePass duplicated into cloned bodies.
+
+    A cloned region is emitted as ``label_<Clone>_label_<original>_<idx>`` bodies
+    that converge on a ``label_<Clone>_target_<idx>`` join, and the clone ends in
+    an unconditional branch to that join. Only one of the bodies runs on any given
+    path, so a barrier inside one is a per-path copy of its original rather than an
+    extra dynamic arrive/completion, and it must not be counted twice.
+    """
+    clone_names = set(_CLONE_TARGET_RE.findall(src))
+    label = None
+    signals = waits = 0
+    for line in src.split("\n"):
+        matched = _LABEL_RE.match(line)
+        if matched:
+            label = matched.group(1)
+            continue
+        if label is not None and any(
+            label.startswith(f"label_{name}_label_") for name in clone_names
+        ):
+            continue
+        if line.startswith("s_barrier_signal -3"):
+            signals += 1
+        elif line.startswith("s_barrier_wait -3"):
+            waits += 1
+    return signals, waits
+
+
 def assert_cluster_barrier_balanced(src, base):
     """Cluster-scope split-barrier balance check shared by the gfx1250 StreamK
     cluster char tests. Every arrive (``s_barrier_signal -3``) must be consumed by
@@ -254,12 +292,18 @@ def assert_cluster_barrier_balanced(src, base):
     config's dedicated prologue-prefetch handshake) is a self-contained arrive/wait
     pair. Any other imbalance would leave a cluster wait unpaired and stall the
     cluster waves.
+
+    Barriers inside cloned bodies are discounted the same way (see
+    ``_count_cluster_barriers``): InsertClusterBarrierPass anchors the Rule 3
+    signal a fixed cycle lead ahead of its wait, which can place it in a loop-begin
+    block that RegionClonePass duplicates, so one arrive can have several static
+    copies of which exactly one runs.
     """
-    n_signal = src.count("s_barrier_signal -3")
-    n_wait = src.count("s_barrier_wait -3")
+    n_signal, n_wait = _count_cluster_barriers(src)
     assert n_wait == n_signal + 1, (
         f"Kernel {base!r}: unexpected cluster barrier balance: "
-        f"{n_signal} signal(-3) vs {n_wait} wait(-3) (expected wait == signal + 1)"
+        f"{n_signal} signal(-3) vs {n_wait} wait(-3) (expected wait == signal + 1, "
+        "both counted outside cloned bodies)"
     )
 
 
@@ -300,6 +344,69 @@ def golden_digest(results):
         ({"basename": b, "err": e} for (b, _s, e) in results),
         key=lambda d: d["basename"],
     )
+
+
+_TARGET_RE = re.compile(r'^\.amdgcn_target\s+"amdgcn-amd-amdhsa--(\S+?)"', re.M)
+_WAVE32_RE = re.compile(r"^\s*\.amdhsa_wavefront_size32\s+1", re.M)
+
+
+@functools.lru_cache(maxsize=1)
+@functools.lru_cache(maxsize=1)
+def _guard_assembler():
+    """Assembler for :func:`assert_assembles`, built with a real code-object version.
+
+    ``codegen_harness`` builds its shared assembler with ``"default"``, which is
+    harmless while nothing invokes it but which clang rejects outright
+    (``invalid integral value 'default' in '-mcode-object-version=default'``).
+    Build a separate one on Tensile's own default version instead of retargeting
+    the shared assembler, whose ``code_object_version`` reaches signature codegen
+    through ``Solution``.
+    """
+    from Tensile.Common.GlobalParameters import globalParameters
+    from Tensile.Toolchain.Assembly import makeAssemblyToolchain
+    from Tensile.Toolchain.Validators import validateToolchain, ToolchainDefaults
+
+    coVersion = str(globalParameters["CodeObjectVersion"])
+    if not coVersion.isdigit():
+        coVersion = "4"
+    cxx = validateToolchain("amdclang++")
+    bundler = validateToolchain(ToolchainDefaults.OFFLOAD_BUNDLER)
+    return makeAssemblyToolchain(cxx, bundler, coVersion).assembler
+
+
+def _assembler_or_reason():
+    """Return ``(assembler, None)``, or ``(None, reason)`` if none is usable."""
+    try:
+        return _guard_assembler(), None
+    except Exception as exc:  # noqa: BLE001 - any toolchain problem is a skip
+        return None, f"ROCm assembler unavailable: {exc}"
+
+
+def assert_assembles(src, base):
+    """Assert the ROCm assembler accepts ``src``.
+
+    The rest of the cluster assertions only pattern-match assembly *text*, so a
+    kernel that names an SGPR the allocator never defined, or that puts two
+    literals in one SOP2, still satisfies them and only breaks much later when a
+    real build assembles it. Feeding the emitted text to the assembler closes
+    that gap in the fast unit layer. Target and wavefront size come from the
+    emitted directives so this stays arch-agnostic; skips when the toolchain has
+    no assembler.
+    """
+    assembler, reason = _assembler_or_reason()
+    if assembler is None:
+        pytest.skip(reason)
+    target = _TARGET_RE.search(src)
+    assert target, f"Kernel {base!r} has no .amdgcn_target to assemble for"
+    waveSize = 32 if _WAVE32_RE.search(src) else 64
+    with tempfile.TemporaryDirectory() as tmpDir:
+        srcPath = os.path.join(tmpDir, "kernel.s")
+        with open(srcPath, "w") as fh:
+            fh.write(src)
+        try:
+            assembler(target.group(1), waveSize, srcPath, os.path.join(tmpDir, "kernel.o"))
+        except RuntimeError as exc:
+            pytest.fail(f"Kernel {base!r} does not assemble for {target.group(1)}: {exc}")
 
 
 def assert_split_multicast_masks(src, base):

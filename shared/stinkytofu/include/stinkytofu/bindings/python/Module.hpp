@@ -93,6 +93,7 @@
     X(CloneList, std::vector<CloneSpec>)          \
     X(DsReadQueueDepth, int)                      \
     X(DsReadDrainLatency, int)                    \
+    X(DsReadThrottleLatency, int)                 \
     X(DsReadPerWmma, int)                         \
     X(GlobalReadQueueDepth, int)                  \
     X(GlobalReadDrainLatency, int)                \
