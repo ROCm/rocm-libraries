@@ -34,8 +34,7 @@
 #include <math.h>
 
 // Grouped batched GEMM was added in rocBLAS 5.7 (matches hipblas package rocblas_minimum).
-#if (ROCBLAS_VERSION_MAJOR > 5) \
-    || (ROCBLAS_VERSION_MAJOR == 5 && ROCBLAS_VERSION_MINOR >= 7)
+#if(ROCBLAS_VERSION_MAJOR > 5) || (ROCBLAS_VERSION_MAJOR == 5 && ROCBLAS_VERSION_MINOR >= 7)
 #define HIPBLAS_ROCBLAS_GROUPED_GEMM_AVAILABLE 1
 #else
 #define HIPBLAS_ROCBLAS_GROUPED_GEMM_AVAILABLE 0
