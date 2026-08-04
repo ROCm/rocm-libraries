@@ -33,8 +33,6 @@
 #include "rocsparse_common.h"
 #include "rocsparse_primitives.hpp"
 
-#include <vector>
-
 namespace rocsparse
 {
     template <rocsparse_int DIM_X, rocsparse_int DIM_Y, typename T>

@@ -294,10 +294,6 @@ rocsparse_status
 
     T* output = reinterpret_cast<T*>(temp_buffer);
 
-    // Compute absolute value of csr_val_A and store in first half of output array.
-    // One thread per nonzero. abs_kernel linearizes a 2D grid, so spread the
-    // required blocks across x, then y, keeping each grid dimension within its
-    // HIP per-axis limit.
     {
         static constexpr int BLOCKSIZE = 256;
 
