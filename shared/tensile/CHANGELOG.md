@@ -6,6 +6,8 @@
 
 - For clock frequency monitoring, amd-smi replaces the deprecated rocm-smi dependency for client functionality.
 
+## Tensile 4.48.0 (Unreleased)
+
 ## Tensile 4.46.0 (Unreleased)
 
 ## Changed
