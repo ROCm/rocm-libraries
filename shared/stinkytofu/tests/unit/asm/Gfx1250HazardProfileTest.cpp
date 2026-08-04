@@ -109,9 +109,9 @@ TEST_F(Gfx1250HazardProfileTest, SplitsCountsBetweenKernelBodyAndHelperFunctions
 
     // The "whole kernel" lines cover all four drains, not just the last
     // function walked.
-    EXPECT_NE(
-        report.find("] whole kernel xcnt drains: total=4, loop+matrix=0, loop=0, matrix=0, other=4"),
-        std::string::npos)
+    EXPECT_NE(report.find(
+                  "] whole kernel xcnt drains: total=4, loop+matrix=0, loop=0, matrix=0, other=4"),
+              std::string::npos)
         << report;
     EXPECT_NE(report.find("] kernel body xcnt drains: total=2"), std::string::npos) << report;
     EXPECT_NE(report.find("] helper functions xcnt drains: total=2"), std::string::npos) << report;
