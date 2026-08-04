@@ -10,7 +10,7 @@
 
 // <thread>
 
-// thread::id this_thread::get_id();
+// wthread::id this_thread::get_id();
 
 #include <hip/thread>
 #include <cassert>
@@ -22,8 +22,8 @@
 int main(int, char**)
 {
 #ifdef __HIP_DEVICE_COMPILE__
-    hip::thread::id id = hip::this_thread::get_id();
-    assert(id != hip::thread::id());
+    hip::wthread::id id = hip::this_thread::get_id();
+    assert(id != hip::wthread::id());
 #endif
 
   return 0;
