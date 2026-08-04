@@ -27,6 +27,66 @@
 #include <cuda_runtime_api.h>
 #include <hip/hip_runtime.h>
 
+#if defined(CUBLAS_VERSION) && CUBLAS_VERSION >= 120500
+#define HIPBLAS_CUBLAS_GROUPED_GEMM_AVAILABLE 1
+#else
+#define HIPBLAS_CUBLAS_GROUPED_GEMM_AVAILABLE 0
+#endif
+
+static bool hipblasGroupedGemmExSameCAndD(const void* const Carray[],
+                                          void* const       Darray[],
+                                          hipDataType       c_type,
+                                          hipDataType       d_type,
+                                          int               group_count,
+                                          const int*        group_size,
+                                          const int*        ldc_array,
+                                          const int*        ldd_array)
+{
+    if(c_type != d_type)
+        return false;
+
+    int idx = 0;
+    for(int g = 0; g < group_count; ++g)
+    {
+        if(ldc_array[g] != ldd_array[g])
+            return false;
+
+        for(int j = 0; j < group_size[g]; ++j, ++idx)
+        {
+            if(Carray[idx] != static_cast<const void*>(Darray[idx]))
+                return false;
+        }
+    }
+    return true;
+}
+
+static bool hipblasGroupedGemmExSameCAndD_64(const void* const Carray[],
+                                             void* const       Darray[],
+                                             hipDataType       c_type,
+                                             hipDataType       d_type,
+                                             int64_t           group_count,
+                                             const int64_t*    group_size,
+                                             const int64_t*    ldc_array,
+                                             const int64_t*    ldd_array)
+{
+    if(c_type != d_type)
+        return false;
+
+    int64_t idx = 0;
+    for(int64_t g = 0; g < group_count; ++g)
+    {
+        if(ldc_array[g] != ldd_array[g])
+            return false;
+
+        for(int64_t j = 0; j < group_size[g]; ++j, ++idx)
+        {
+            if(Carray[idx] != static_cast<const void*>(Darray[idx]))
+                return false;
+        }
+    }
+    return true;
+}
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -22475,23 +22535,26 @@ hipblasStatus_t hipblasSgemmGroupedBatched(hipblasHandle_t           handle,
                                            const int*                group_size)
 try
 {
-    (void)handle;
-    (void)transA_array;
-    (void)transB_array;
-    (void)m_array;
-    (void)n_array;
-    (void)k_array;
-    (void)alpha_array;
-    (void)Aarray;
-    (void)lda_array;
-    (void)Barray;
-    (void)ldb_array;
-    (void)beta_array;
-    (void)Carray;
-    (void)ldc_array;
-    (void)group_count;
-    (void)group_size;
+#if HIPBLAS_CUBLAS_GROUPED_GEMM_AVAILABLE
+    return hipblasConvertStatus(cublasSgemmGroupedBatched((cublasHandle_t)handle,
+                                                          (const cublasOperation_t*)transA_array,
+                                                          (const cublasOperation_t*)transB_array,
+                                                          m_array,
+                                                          n_array,
+                                                          k_array,
+                                                          alpha_array,
+                                                          Aarray,
+                                                          lda_array,
+                                                          Barray,
+                                                          ldb_array,
+                                                          beta_array,
+                                                          Carray,
+                                                          ldc_array,
+                                                          group_count,
+                                                          group_size));
+#else
     return HIPBLAS_STATUS_NOT_SUPPORTED;
+#endif
 }
 catch(...)
 {
@@ -22516,23 +22579,26 @@ hipblasStatus_t hipblasDgemmGroupedBatched(hipblasHandle_t           handle,
                                            const int*                group_size)
 try
 {
-    (void)handle;
-    (void)transA_array;
-    (void)transB_array;
-    (void)m_array;
-    (void)n_array;
-    (void)k_array;
-    (void)alpha_array;
-    (void)Aarray;
-    (void)lda_array;
-    (void)Barray;
-    (void)ldb_array;
-    (void)beta_array;
-    (void)Carray;
-    (void)ldc_array;
-    (void)group_count;
-    (void)group_size;
+#if HIPBLAS_CUBLAS_GROUPED_GEMM_AVAILABLE
+    return hipblasConvertStatus(cublasDgemmGroupedBatched((cublasHandle_t)handle,
+                                                          (const cublasOperation_t*)transA_array,
+                                                          (const cublasOperation_t*)transB_array,
+                                                          m_array,
+                                                          n_array,
+                                                          k_array,
+                                                          alpha_array,
+                                                          Aarray,
+                                                          lda_array,
+                                                          Barray,
+                                                          ldb_array,
+                                                          beta_array,
+                                                          Carray,
+                                                          ldc_array,
+                                                          group_count,
+                                                          group_size));
+#else
     return HIPBLAS_STATUS_NOT_SUPPORTED;
+#endif
 }
 catch(...)
 {
@@ -22557,23 +22623,26 @@ hipblasStatus_t hipblasSgemmGroupedBatched_64(hipblasHandle_t           handle,
                                               const int64_t*            group_size)
 try
 {
-    (void)handle;
-    (void)transA_array;
-    (void)transB_array;
-    (void)m_array;
-    (void)n_array;
-    (void)k_array;
-    (void)alpha_array;
-    (void)Aarray;
-    (void)lda_array;
-    (void)Barray;
-    (void)ldb_array;
-    (void)beta_array;
-    (void)Carray;
-    (void)ldc_array;
-    (void)group_count;
-    (void)group_size;
+#if HIPBLAS_CUBLAS_GROUPED_GEMM_AVAILABLE
+    return hipblasConvertStatus(cublasSgemmGroupedBatched_64((cublasHandle_t)handle,
+                                                             (const cublasOperation_t*)transA_array,
+                                                             (const cublasOperation_t*)transB_array,
+                                                             m_array,
+                                                             n_array,
+                                                             k_array,
+                                                             alpha_array,
+                                                             Aarray,
+                                                             lda_array,
+                                                             Barray,
+                                                             ldb_array,
+                                                             beta_array,
+                                                             Carray,
+                                                             ldc_array,
+                                                             group_count,
+                                                             group_size));
+#else
     return HIPBLAS_STATUS_NOT_SUPPORTED;
+#endif
 }
 catch(...)
 {
@@ -22598,23 +22667,26 @@ hipblasStatus_t hipblasDgemmGroupedBatched_64(hipblasHandle_t           handle,
                                               const int64_t*            group_size)
 try
 {
-    (void)handle;
-    (void)transA_array;
-    (void)transB_array;
-    (void)m_array;
-    (void)n_array;
-    (void)k_array;
-    (void)alpha_array;
-    (void)Aarray;
-    (void)lda_array;
-    (void)Barray;
-    (void)ldb_array;
-    (void)beta_array;
-    (void)Carray;
-    (void)ldc_array;
-    (void)group_count;
-    (void)group_size;
+#if HIPBLAS_CUBLAS_GROUPED_GEMM_AVAILABLE
+    return hipblasConvertStatus(cublasDgemmGroupedBatched_64((cublasHandle_t)handle,
+                                                             (const cublasOperation_t*)transA_array,
+                                                             (const cublasOperation_t*)transB_array,
+                                                             m_array,
+                                                             n_array,
+                                                             k_array,
+                                                             alpha_array,
+                                                             Aarray,
+                                                             lda_array,
+                                                             Barray,
+                                                             ldb_array,
+                                                             beta_array,
+                                                             Carray,
+                                                             ldc_array,
+                                                             group_count,
+                                                             group_size));
+#else
     return HIPBLAS_STATUS_NOT_SUPPORTED;
+#endif
 }
 catch(...)
 {
@@ -23621,6 +23693,34 @@ hipblasStatus_t hipblasGemmGroupedBatchedEx(hipblasHandle_t           handle,
                                             hipblasGemmAlgo_t         algo)
 try
 {
+#if HIPBLAS_CUBLAS_GROUPED_GEMM_AVAILABLE
+    if(!hipblasGroupedGemmExSameCAndD(
+           Carray, Darray, c_type, d_type, group_count, group_size, ldc_array, ldd_array))
+        return HIPBLAS_STATUS_NOT_SUPPORTED;
+
+    (void)algo;
+    return hipblasConvertStatus(
+        cublasGemmGroupedBatchedEx((cublasHandle_t)handle,
+                                   (const cublasOperation_t*)transA_array,
+                                   (const cublasOperation_t*)transB_array,
+                                   m_array,
+                                   n_array,
+                                   k_array,
+                                   alpha_array,
+                                   Aarray,
+                                   hipblasConvertDatatype(a_type),
+                                   lda_array,
+                                   Barray,
+                                   hipblasConvertDatatype(b_type),
+                                   ldb_array,
+                                   beta_array,
+                                   Darray,
+                                   hipblasConvertDatatype(c_type),
+                                   ldc_array,
+                                   group_count,
+                                   group_size,
+                                   hipblasConvertComputeType(compute_type)));
+#else
     (void)handle;
     (void)transA_array;
     (void)transB_array;
@@ -23646,6 +23746,7 @@ try
     (void)compute_type;
     (void)algo;
     return HIPBLAS_STATUS_NOT_SUPPORTED;
+#endif
 }
 catch(...)
 {
@@ -23737,6 +23838,34 @@ hipblasStatus_t hipblasGemmGroupedBatchedEx_64(hipblasHandle_t           handle,
                                                hipblasGemmAlgo_t         algo)
 try
 {
+#if HIPBLAS_CUBLAS_GROUPED_GEMM_AVAILABLE
+    if(!hipblasGroupedGemmExSameCAndD_64(
+           Carray, Darray, c_type, d_type, group_count, group_size, ldc_array, ldd_array))
+        return HIPBLAS_STATUS_NOT_SUPPORTED;
+
+    (void)algo;
+    return hipblasConvertStatus(
+        cublasGemmGroupedBatchedEx_64((cublasHandle_t)handle,
+                                      (const cublasOperation_t*)transA_array,
+                                      (const cublasOperation_t*)transB_array,
+                                      m_array,
+                                      n_array,
+                                      k_array,
+                                      alpha_array,
+                                      Aarray,
+                                      hipblasConvertDatatype(a_type),
+                                      lda_array,
+                                      Barray,
+                                      hipblasConvertDatatype(b_type),
+                                      ldb_array,
+                                      beta_array,
+                                      Darray,
+                                      hipblasConvertDatatype(c_type),
+                                      ldc_array,
+                                      group_count,
+                                      group_size,
+                                      hipblasConvertComputeType(compute_type)));
+#else
     (void)handle;
     (void)transA_array;
     (void)transB_array;
@@ -23762,6 +23891,7 @@ try
     (void)compute_type;
     (void)algo;
     return HIPBLAS_STATUS_NOT_SUPPORTED;
+#endif
 }
 catch(...)
 {

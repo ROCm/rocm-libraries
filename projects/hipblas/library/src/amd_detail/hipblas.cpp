@@ -33,6 +33,14 @@
 #include <hip/library_types.h>
 #include <math.h>
 
+// Grouped batched GEMM was added in rocBLAS 5.7 (matches hipblas package rocblas_minimum).
+#if (ROCBLAS_VERSION_MAJOR > 5) \
+    || (ROCBLAS_VERSION_MAJOR == 5 && ROCBLAS_VERSION_MINOR >= 7)
+#define HIPBLAS_ROCBLAS_GROUPED_GEMM_AVAILABLE 1
+#else
+#define HIPBLAS_ROCBLAS_GROUPED_GEMM_AVAILABLE 0
+#endif
+
 extern "C" hipblasStatus_t hipblasConvertStatus(rocblas_status_ error);
 
 // Attempt a rocBLAS call; if it gets an allocation error, query the
@@ -32595,6 +32603,9 @@ hipblasStatus_t hipblasSgemmGroupedBatched(hipblasHandle_t           handle,
                                            const int*                group_size)
 try
 {
+#if !HIPBLAS_ROCBLAS_GROUPED_GEMM_AVAILABLE
+    return HIPBLAS_STATUS_NOT_SUPPORTED;
+#else
     return hipblasConvertStatus(
         rocblas_sgemm_grouped_batched((rocblas_handle)handle,
                                       (const rocblas_operation*)transA_array,
@@ -32612,6 +32623,7 @@ try
                                       ldc_array,
                                       group_count,
                                       group_size));
+#endif
 }
 catch(...)
 {
@@ -32636,6 +32648,9 @@ hipblasStatus_t hipblasDgemmGroupedBatched(hipblasHandle_t           handle,
                                            const int*                group_size)
 try
 {
+#if !HIPBLAS_ROCBLAS_GROUPED_GEMM_AVAILABLE
+    return HIPBLAS_STATUS_NOT_SUPPORTED;
+#else
     return hipblasConvertStatus(
         rocblas_dgemm_grouped_batched((rocblas_handle)handle,
                                       (const rocblas_operation*)transA_array,
@@ -32653,6 +32668,7 @@ try
                                       ldc_array,
                                       group_count,
                                       group_size));
+#endif
 }
 catch(...)
 {
@@ -32677,6 +32693,9 @@ hipblasStatus_t hipblasSgemmGroupedBatched_64(hipblasHandle_t           handle,
                                               const int64_t*            group_size)
 try
 {
+#if !HIPBLAS_ROCBLAS_GROUPED_GEMM_AVAILABLE
+    return HIPBLAS_STATUS_NOT_SUPPORTED;
+#else
     return hipblasConvertStatus(
         rocblas_sgemm_grouped_batched_64((rocblas_handle)handle,
                                          (const rocblas_operation*)transA_array,
@@ -32694,6 +32713,7 @@ try
                                          ldc_array,
                                          group_count,
                                          group_size));
+#endif
 }
 catch(...)
 {
@@ -32718,6 +32738,9 @@ hipblasStatus_t hipblasDgemmGroupedBatched_64(hipblasHandle_t           handle,
                                               const int64_t*            group_size)
 try
 {
+#if !HIPBLAS_ROCBLAS_GROUPED_GEMM_AVAILABLE
+    return HIPBLAS_STATUS_NOT_SUPPORTED;
+#else
     return hipblasConvertStatus(
         rocblas_dgemm_grouped_batched_64((rocblas_handle)handle,
                                          (const rocblas_operation*)transA_array,
@@ -32735,6 +32758,7 @@ try
                                          ldc_array,
                                          group_count,
                                          group_size));
+#endif
 }
 catch(...)
 {
@@ -34050,6 +34074,9 @@ hipblasStatus_t hipblasGemmGroupedBatchedEx(hipblasHandle_t           handle,
                                             hipblasGemmAlgo_t         algo)
 try
 {
+#if !HIPBLAS_ROCBLAS_GROUPED_GEMM_AVAILABLE
+    return HIPBLAS_STATUS_NOT_SUPPORTED;
+#else
     rocblas_datatype a_type_roc, b_type_roc, c_type_roc, compute_type_roc;
     hipblasStatus_t  status = hipblasInternalGemmExTypes(
         a_type, b_type, c_type, compute_type, a_type_roc, b_type_roc, c_type_roc, compute_type_roc);
@@ -34083,6 +34110,7 @@ try
                                         compute_type_roc,
                                         hipblasConvertGemmAlgo(algo),
                                         static_cast<uint32_t>(rocblas_gemm_flags_none)));
+#endif
 }
 catch(...)
 {
@@ -34116,6 +34144,9 @@ hipblasStatus_t hipblasGemmGroupedBatchedExWithFlags(hipblasHandle_t           h
                                                      hipblasGemmFlags_t        flags)
 try
 {
+#if !HIPBLAS_ROCBLAS_GROUPED_GEMM_AVAILABLE
+    return HIPBLAS_STATUS_NOT_SUPPORTED;
+#else
     rocblas_datatype a_type_roc, b_type_roc, c_type_roc, compute_type_roc;
     hipblasStatus_t  status = hipblasInternalGemmExTypes(
         a_type, b_type, c_type, compute_type, a_type_roc, b_type_roc, c_type_roc, compute_type_roc);
@@ -34149,6 +34180,7 @@ try
                                         compute_type_roc,
                                         hipblasConvertGemmAlgo(algo),
                                         static_cast<uint32_t>(hipblasConvertGemmFlags(flags))));
+#endif
 }
 catch(...)
 {
@@ -34181,6 +34213,9 @@ hipblasStatus_t hipblasGemmGroupedBatchedEx_64(hipblasHandle_t           handle,
                                                hipblasGemmAlgo_t         algo)
 try
 {
+#if !HIPBLAS_ROCBLAS_GROUPED_GEMM_AVAILABLE
+    return HIPBLAS_STATUS_NOT_SUPPORTED;
+#else
     rocblas_datatype a_type_roc, b_type_roc, c_type_roc, compute_type_roc;
     hipblasStatus_t  status = hipblasInternalGemmExTypes(
         a_type, b_type, c_type, compute_type, a_type_roc, b_type_roc, c_type_roc, compute_type_roc);
@@ -34214,6 +34249,7 @@ try
                                            compute_type_roc,
                                            hipblasConvertGemmAlgo(algo),
                                            static_cast<uint32_t>(rocblas_gemm_flags_none)));
+#endif
 }
 catch(...)
 {
@@ -34247,6 +34283,9 @@ hipblasStatus_t hipblasGemmGroupedBatchedExWithFlags_64(hipblasHandle_t         
                                                         hipblasGemmFlags_t        flags)
 try
 {
+#if !HIPBLAS_ROCBLAS_GROUPED_GEMM_AVAILABLE
+    return HIPBLAS_STATUS_NOT_SUPPORTED;
+#else
     rocblas_datatype a_type_roc, b_type_roc, c_type_roc, compute_type_roc;
     hipblasStatus_t  status = hipblasInternalGemmExTypes(
         a_type, b_type, c_type, compute_type, a_type_roc, b_type_roc, c_type_roc, compute_type_roc);
@@ -34280,6 +34319,7 @@ try
                                            compute_type_roc,
                                            hipblasConvertGemmAlgo(algo),
                                            static_cast<uint32_t>(hipblasConvertGemmFlags(flags))));
+#endif
 }
 catch(...)
 {
