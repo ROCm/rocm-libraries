@@ -106,8 +106,9 @@ test_categories:
     labels:
       - "ffm-quick"
 
-  # Arch-agnostic emulation pre-submit tests. {AMDGPU_FAMILIES} is substituted
-  # at runtime by pytest_runner.py from the AMDGPU_FAMILIES env var.
+  # Arch-agnostic emulation pre-submit tests. {AMDGPU_TARGETS} is substituted
+  # at runtime by pytest_runner.py with the concrete gfx target (from
+  # AMDGPU_TARGETS env var, falling back to AMDGPU_FAMILIES).
   # Kernel devs opt tests in by adding `emu_fast` to
   # TestParameters.marks in individual YAML files.
   emu-quick:
@@ -115,12 +116,12 @@ test_categories:
     test_paths:
       - "Tensile/Tests/common"
     pytest_markers:
-      - "{AMDGPU_FAMILIES} and emu_fast"
+      - "{AMDGPU_TARGETS} and emu_fast"
     parallel_workers: 16
     pytest_args:
       - "--prebuilt-client={ROCM_PATH}/libexec/hipblaslt/tensilelite/tensilelite-client"
       - "--global-parameters=LibraryFormat='msgpack'"
-      - "--tensile-options=--cxx-compiler,{ROCM_PATH}/bin/amdclang++,--gpu-targets,{AMDGPU_FAMILIES}"
+      - "--tensile-options=--cxx-compiler,{ROCM_PATH}/bin/amdclang++,--gpu-targets,{AMDGPU_TARGETS}"
     labels:
       - "emu-quick"
 
