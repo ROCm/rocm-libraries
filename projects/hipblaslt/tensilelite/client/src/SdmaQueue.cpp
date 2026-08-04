@@ -18,6 +18,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <memory>
 #include <mutex>
 #include <stdexcept>
 #include <string>
@@ -323,8 +324,20 @@ namespace TensileLite
             }
 
             const size_t bytes = handles.size() * sizeof(SdmaQueueDeviceHandle);
-            CHK_HIP(hipMalloc(&dHandles_, bytes));
-            CHK_HIP(hipMemcpy(dHandles_, handles.data(), bytes, hipMemcpyHostToDevice));
+
+            // Keep the allocation in a local owner until the copy has succeeded.
+            // CHK_HIP throws, and a throw here leaves the constructor incomplete, so
+            // ~SdmaQueueSet never runs: assigning straight into dHandles_ would leak
+            // the device allocation if the copy failed. queues_ is unaffected -- its
+            // unique_ptr elements are destroyed as fully-constructed members.
+            // Ownership transfers to the member only once nothing else can throw.
+            SdmaQueueDeviceHandle* raw = nullptr;
+            CHK_HIP(hipMalloc(&raw, bytes));
+            auto hipFreeDeleter = [](SdmaQueueDeviceHandle* p) { (void)hipFree(p); };
+            std::unique_ptr<SdmaQueueDeviceHandle, decltype(hipFreeDeleter)> owned(
+                raw, hipFreeDeleter);
+            CHK_HIP(hipMemcpy(owned.get(), handles.data(), bytes, hipMemcpyHostToDevice));
+            dHandles_ = owned.release();
         }
 
         SdmaQueueSet::~SdmaQueueSet()

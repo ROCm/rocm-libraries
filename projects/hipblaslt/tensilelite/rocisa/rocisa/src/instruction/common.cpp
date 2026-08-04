@@ -775,26 +775,6 @@ void common_inst(nb::module_ m_common)
         .def("__deepcopy__",
              [](const rocisa::GlobalInv& self, nb::dict&) { return new rocisa::GlobalInv(self); });
 
-    nb::class_<rocisa::BufferWbl2, rocisa::Instruction>(m_common, "BufferWbl2")
-        .def(nb::init<rocisa::CacheScope, const std::string&>(),
-             nb::arg("scope")   = rocisa::CacheScope::SCOPE_SYS,
-             nb::arg("comment") = "")
-        .def_rw("scope", &rocisa::BufferWbl2::scope)
-        .def("getParams", &rocisa::BufferWbl2::getParams)
-        .def("__str__", &rocisa::BufferWbl2::toString)
-        .def("__deepcopy__",
-             [](const rocisa::BufferWbl2& self, nb::dict&) { return new rocisa::BufferWbl2(self); });
-
-    nb::class_<rocisa::BufferInv, rocisa::Instruction>(m_common, "BufferInv")
-        .def(nb::init<rocisa::CacheScope, const std::string&>(),
-             nb::arg("scope")   = rocisa::CacheScope::SCOPE_SYS,
-             nb::arg("comment") = "")
-        .def_rw("scope", &rocisa::BufferInv::scope)
-        .def("getParams", &rocisa::BufferInv::getParams)
-        .def("__str__", &rocisa::BufferInv::toString)
-        .def("__deepcopy__",
-             [](const rocisa::BufferInv& self, nb::dict&) { return new rocisa::BufferInv(self); });
-
     nb::class_<rocisa::SNop, rocisa::Instruction>(m_common, "SNop")
         .def(nb::init<int, const std::string&>(), nb::arg("waitState"), nb::arg("comment") = "")
         .def("getParams", &rocisa::SNop::getParams)

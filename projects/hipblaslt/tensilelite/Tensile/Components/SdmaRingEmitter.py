@@ -10,9 +10,16 @@
 # host-created SDMA ring, place already-built packet dwords, and ring the
 # doorbell -- WITHOUT knowing what the packet is. Task 5 builds the COPY_SUBWIN
 # + ATOMIC packet dwords and calls placePacket; Tasks 6/7 wire the whole thing
-# into the GEMM epilogue store path. This round emits nothing into a live
-# kernel; it is verified by rendering each method's Module to assembly text and
-# asserting on the instruction sequence + scope bits
+# into the GEMM epilogue store path. Those tasks have LANDED: this emitter is
+# live in a real kernel. The caller is GlobalWriteBatch._emitFusedA2ASdmaIssue
+# (the fused-A2A SDMA path), which invokes emitReserveQueueSpace, then
+# emitPlacePacket twice (COPY then ATOMIC), then emitSubmitPacket. Grep for that
+# function name rather than a line number -- earlier revisions of this comment
+# carried line numbers that rotted, which is worse than useless here: the whole
+# point of this paragraph is to stop a triage engineer concluding the emitter is
+# dead, and a stale number lands them somewhere with no call in sight.
+# It is additionally verified out-of-kernel by rendering each method's Module
+# to assembly text and asserting on the instruction sequence + scope bits
 # (Tensile/Tests/unit/test_sdma_ring_emitter.py).
 #
 # The device handle it consumes is the W-element SdmaQueueDeviceHandle array
@@ -83,6 +90,33 @@ class SdmaRingEmitter:
     Field pointers (queueBuf/rptr/wptr/doorbell/cachedWptr/committedWptr) are
     loaded on demand with s_load_dwordx2 from handleBase+offset, matching the
     on-demand kernarg loads in _fusedA2ALoadRecvBase.
+
+    REGISTER SIDE EFFECTS / CALLER CONTRACT. Two of these are invisible in the
+    method signatures, and both fail SILENTLY when violated, so they are spelled
+    out here rather than left to the reader of the emitted assembly:
+
+      * VCC IS CLOBBERED by any call that reaches _emitRingByteAddr -- in
+        practice, every emitPlacePacket. That helper forms the 64-bit ring
+        address with v_add_co_u32 / v_addc_co_u32, which write their carry-out
+        to VCC (the second also reads it back as carry-in). Nothing saves or
+        restores it, so a VCC value the caller holds live across the call is
+        destroyed. This is an ACCEPTED DEBT, not a hardware constraint: under
+        VOP3 encoding the carry destination may be an arbitrary SGPR pair (CDNA4
+        ISA, V_ADD_CO_U32 "Notes"), so the fix, if the caller ever needs VCC
+        preserved, is to check out a scratch pair instead of naming VCC() here.
+
+      * EXEC MUST BE NONZERO on entry to every method, and stay nonzero for the
+        whole reserve/place/submit sequence. Each memory-to-SGPR step goes
+        through v_readfirstlane_b32, and on CDNA4 that instruction "overrides
+        the EXEC mask for the VGPR read": with EXEC == 0 it is NOT skipped --
+        the ISA forces lane 0 and reads whatever that lane's VGPR happens to
+        hold (CDNA4 ISA, V_READFIRSTLANE_B32). Lane 0 will not have run the
+        global_load meant to fill it, so entering with EXEC == 0 neither faults
+        nor hangs: the CAS compares against a garbage `cur`, the submit spin
+        compares against a garbage committedWptr, and the ring is corrupted with
+        no diagnostic anywhere. This contract is UNENFORCED -- nothing here
+        checks it. Guaranteeing at least one active lane is the caller's job
+        (GlobalWriteBatch._emitFusedA2ASdmaIssue elects one).
     """
 
     def __init__(self, queueSize: int = SDMA_QUEUE_SIZE):
@@ -131,10 +165,25 @@ class SdmaRingEmitter:
         refreshes the cache, and re-tests. Emits the SYSTEM-scope rptr load
         (glc/slc => sc0 sc1). `resultS` is set to 1 (can write) or 0 (full);
         the caller branches on it. All index math is 64-bit (idx pair = S:S+1).
+
+        CALLER CONTRACT: `resultS` MUST be disjoint from `uptoIdxS`,
+        `cachedHwReadIdxS` and `tmpPairS`. `resultS` is defaulted to 0 as the very
+        first emitted instruction -- before the first READ of those inputs -- so an
+        aliasing caller would have its input clobbered rather than merely its output
+        overwritten late. (Before the default was added, every resultS write followed
+        every input read, so aliasing was harmless; this requirement is new.) Both
+        current call sites satisfy it: emitReserveQueueSpace passes three independent
+        sgprPool checkouts plus the caller-persistent cachedHwReadIdx pair.
         """
         canLabel  = Label(w.labels.getNameInc("sdma_canwrite_ok"),  "CanWriteUpto: room in ring")
         fullLabel = Label(w.labels.getNameInc("sdma_canwrite_full"), "CanWriteUpto: cache says full -> read rptr")
         doneLabel = Label(w.labels.getNameInc("sdma_canwrite_done"), "CanWriteUpto: done")
+
+        # resultS defaults to 0 (full): the refresh-retest tail branch below
+        # ("hi != 0 -> full") jumps straight to doneLabel without writing it,
+        # and the caller's register is live across CAS retries -- so a stale 1
+        # from a previous iteration would claim space on a full ring.
+        module.add(SMovB32(dst=sgpr(resultS), src=0, comment="CanWriteUpto = false (default)"))
 
         # tmp = upto - cachedHwReadIndex (64-bit), then compare tmp < queueSize.
         # queueSize < 2^32 so if the high dword of the difference is nonzero the
@@ -173,7 +222,13 @@ class SdmaRingEmitter:
         self._emitU64Sub(module, tmpPairS, uptoIdxS, cachedHwReadIdxS,
                          "CanWriteUpto: upto - refreshed rptr")
         module.add(SCmpEQU32(src0=sgpr(tmpPairS + 1), src1=0, comment="diff hi == 0?"))
-        module.add(SCBranchSCC0(labelName=doneLabel.getLabelName(), comment="hi != 0 -> full (result stays 0)"))
+        # NB: this is the ONLY one of the four branches in this function that exits
+        # without writing resultS. The other three all reach a write: the earlier
+        # SCBranchSCC0 -> fullLabel falls into this slow path and continues on to one,
+        # and both SCBranchSCC1 -> canLabel write 1. This one jumps straight to
+        # doneLabel, so it relies on the entry default above.
+        module.add(SCBranchSCC0(labelName=doneLabel.getLabelName(),
+                                comment="hi != 0 -> full (result already defaulted to 0)"))
         module.add(SCmpLtU32(src0=sgpr(tmpPairS + 0), src1=self.queueSize, comment="diff < queueSize?"))
         module.add(SCBranchSCC1(labelName=canLabel.getLabelName(), comment="room after refresh"))
         # fall through to done with result=0 set below.
@@ -321,6 +376,10 @@ class SdmaRingEmitter:
         aligned byte offset). Wrap padding is emitted as an unrolled run of
         zero stores when offset is a compile-time constant; when it is runtime
         (the general reserve result) a small loop covers it.
+
+        CLOBBERS VCC (via _emitRingByteAddr, called once per pad iteration and
+        once for the packet base) and requires EXEC != 0. Both are detailed in
+        the class docstring's register-side-effects note.
         """
         queueBufPtrS = w.sgprPool.checkOutAligned(2, 2, tag="sdma_pp_qbuf", preventOverflow=False)
         self._loadFieldPtr(module, w, queueBufPtrS, handleBaseS, OFF_queueBuf)
@@ -382,7 +441,13 @@ class SdmaRingEmitter:
         """Compute the 64-bit VGPR byte address queueBuf + WrapIntoRing(pending)
         into vAddrV[0:1]. queueBuf is a byte-addressable base; the wrapped index
         is already a byte offset (<4 GiB, so it adds only into the low dword with
-        carry)."""
+        carry).
+
+        CLOBBERS VCC. The low add writes its carry-out there and the high add
+        consumes it; neither is saved or restored. This is the only VCC use in
+        the file and the reason emitPlacePacket destroys the caller's VCC -- see
+        the register-side-effects note in the class docstring, which also records
+        why this is a fixable choice rather than a hardware requirement."""
         module.add(VMovB32(dst=vgpr(vAddrV + 0), src=sgpr(queueBufPtrS + 0), comment="queueBuf lo"))
         module.add(VMovB32(dst=vgpr(vAddrV + 1), src=sgpr(queueBufPtrS + 1), comment="queueBuf hi"))
         module.add(VAddCOU32(dst=vgpr(vAddrV + 0), dst1=VCC(), src0=sgpr(wrapS), src1=vgpr(vAddrV + 0),
@@ -413,6 +478,12 @@ class SdmaRingEmitter:
         Emitted by a single elected lane (Task 7 gates it), so NO s_barrier here
         -- MORI's wave_barrier is a C++ compiler fence; in single-lane assembly
         the s_waitcnt already orders memory and an s_barrier would deadlock.
+
+        "A single elected lane" means exactly one, never zero: the spin predicate
+        reaches SGPRs through v_readfirstlane_b32, which ignores EXEC. An election
+        that leaves EXEC == 0 does not skip this loop -- it spins on lane 0's
+        never-loaded register, so the turn check either never fires or fires at
+        the wrong time. See the class docstring.
         """
         # --- (1) spin: committedWptr == base ---
         commPtrS = w.sgprPool.checkOutAligned(2, 2, tag="sdma_sp_commPtr", preventOverflow=False)
@@ -428,6 +499,7 @@ class SdmaRingEmitter:
         spinLabel = Label(w.labels.getNameInc("sdma_submit_spin"), "submitPacket: wait committedWptr == base")
         spinDone  = Label(w.labels.getNameInc("sdma_submit_ready"), "submitPacket: our turn")
         module.add(spinLabel)
+        module.add(SSleep(simm16=1, comment="submitPacket: backoff between polls (must stay INSIDE the spin body)"))
         module.add(GlobalLoadB64(
             dst=vgpr(vVal, 2), vaddr=vgpr(vAddr, 2), saddr=off,
             modifier=GLOBALModifiers(glc=False, slc=True),
@@ -439,7 +511,6 @@ class SdmaRingEmitter:
         module.add(self._vReadfirstlane(tmpS, vVal + 1, "committedWptr hi"))
         module.add(SCmpEQU32(src0=sgpr(tmpS), src1=sgpr(baseS + 1), comment="committedWptr hi == base hi?"))
         module.add(SCBranchSCC0(labelName=spinLabel.getLabelName(), comment="not our turn -> spin"))
-        module.add(SSleep(simm16=1, comment="submitPacket: brief backoff between polls"))
         module.add(spinDone)
         module.add(SWaitCnt(vlcnt=0, vscnt=0, comment="ensure our packet stores are globally visible before wptr"))
 
@@ -499,5 +570,12 @@ class SdmaRingEmitter:
 
     def _vReadfirstlane(self, dstS, srcV, comment):
         """v_readfirstlane_b32: move a lane-uniform VGPR value to an SGPR (the
-        reserve/submit math is uniform, so lane 0 is representative)."""
+        reserve/submit math is uniform, so the lowest active lane is
+        representative).
+
+        REQUIRES EXEC != 0. This instruction overrides the EXEC mask for its VGPR
+        read: with EXEC == 0 the ISA forces lane 0 instead of skipping the read,
+        so it returns a register that the disabled lane never loaded -- no fault,
+        no hang, just a wrong value flowing into a CAS compare or a spin
+        predicate. See the class docstring; the contract is unenforced."""
         return VReadfirstlaneB32(dst=sgpr(dstS), src=vgpr(srcV), comment=comment)

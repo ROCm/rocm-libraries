@@ -74,31 +74,17 @@ if(TENSILELITE_ENABLE_SDMA_A2A AND NOT WIN32)
 
     # ROCm 7.x's hsakmtTargets.cmake bakes BUILD-HOST absolute paths into
     # hsakmt::hsakmt's INTERFACE_LINK_LIBRARIES that do not exist on a fresh
-    # container, so every executable linking hsakmt fails. Two forms appear:
-    #   * an absolute /usr/lib64/libc.so entry -> make reports "No rule to make
-    #     target '/usr/lib64/libc.so'" (libc is linked implicitly anyway), and
-    #   * a `-L/home/runner/.../rocm_sysdeps/lib` search dir feeding `-ldrm` /
-    #     `-ldrm_amdgpu` -> ld.lld "unable to find library -ldrm".
-    # The libdrm/numa the interface wants are actually vendored in
-    # ${ROCM_PATH}/lib/rocm_sysdeps/lib. Drop the phantom libc entry and repoint
-    # every dead `-L` search dir at the real vendored sysdeps lib dir.
+    # container, so every executable linking hsakmt fails. The repair lives in
+    # cmake/HsakmtLinkInterface.cmake -- which documents the two broken forms
+    # and is unit-tested by cmake/tests/test_hsakmt_link_interface.cmake -- so
+    # that the "is this search dir dead?" logic is exercised somewhere other
+    # than a live ROCm install.
     if(TARGET hsakmt::hsakmt)
-        set(_sysdeps_lib "${ROCM_PATH}/lib/rocm_sysdeps/lib")
+        include("${CMAKE_CURRENT_LIST_DIR}/../cmake/HsakmtLinkInterface.cmake")
         get_target_property(_hsakmt_ill hsakmt::hsakmt INTERFACE_LINK_LIBRARIES)
         if(_hsakmt_ill)
-            set(_hsakmt_ill_clean "")
-            foreach(_lib IN LISTS _hsakmt_ill)
-                if(_lib MATCHES "/libc\\.so$" AND NOT EXISTS "${_lib}")
-                    message(STATUS "hsakmt: dropping nonexistent libc path '${_lib}' "
-                                   "from INTERFACE_LINK_LIBRARIES (libc is linked implicitly)")
-                elseif(_lib MATCHES "^-L(.+)$" AND NOT IS_DIRECTORY "${CMAKE_MATCH_1}")
-                    message(STATUS "hsakmt: repointing dead search dir '${CMAKE_MATCH_1}' "
-                                   "to vendored '${_sysdeps_lib}'")
-                    list(APPEND _hsakmt_ill_clean "-L${_sysdeps_lib}")
-                else()
-                    list(APPEND _hsakmt_ill_clean "${_lib}")
-                endif()
-            endforeach()
+            tensilelite_sanitize_hsakmt_link_interface(_hsakmt_ill_clean
+                "${ROCM_PATH}/lib/rocm_sysdeps/lib" _hsakmt_ill)
             set_target_properties(hsakmt::hsakmt PROPERTIES
                 INTERFACE_LINK_LIBRARIES "${_hsakmt_ill_clean}")
         endif()
@@ -121,6 +107,10 @@ endif()
 if(TENSILELITE_ENABLE_SDMA_A2A AND NOT WIN32)
     target_link_libraries(tensilelite-client-common
         PRIVATE hsakmt::hsakmt hsa-runtime64::hsa-runtime64)
+    # FusedA2AClient.cpp gates its SdmaQueueSet setup on this macro; without it
+    # the fused run fails fast instead of handing the kernel a null queue array.
+    target_compile_definitions(tensilelite-client-common
+        PRIVATE TENSILELITE_ENABLE_SDMA_A2A)
 endif()
 
 # When mxDataGenerator is enabled, hipblaslt::mxdatagen propagates the

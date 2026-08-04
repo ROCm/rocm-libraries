@@ -47,7 +47,17 @@
 #include <Tensile/hip/HipUtils.hpp>
 
 #include "ClientProblemFactory.hpp"
+#include "FusedA2ACounterSentinel.hpp"
+#include "FusedA2AKernArg.hpp"
 #include "SolutionIterator.hpp"
+
+// The GPU-initiated SDMA route needs the host to create one ring per (device,
+// peer) and hand the kernel the device-visible handle array. SdmaQueue.cpp is
+// only compiled (and hsakmt only linked) when the option is on, so the include
+// and every use of it are gated on the same macro.
+#ifdef TENSILELITE_ENABLE_SDMA_A2A
+#include "SdmaQueue.hpp"
+#endif
 
 #include <hip/hip_runtime.h>
 
@@ -63,86 +73,9 @@ namespace TensileLite
 {
     namespace Client
     {
-        // Compile-time fixed slot count for the fused-A2A kernarg segment. MUST
-        // match FUSED_A2A_MAX_RANKS in Tensile/Components/Signature.py: the
-        // kernel metadata always reserves 8 recv_ptr + 8 flag_ptr slots
-        // regardless of the runtime world size, so the host must append exactly
-        // 8 of each (unused slots j>=W filled with nullptr).
-        static constexpr int    FUSED_A2A_MAX_RANKS      = 8;
-        // Expected byte growth of args after appending the fused segment:
-        //   (2*8 recv/flag + 1 counter + 1 FusedSdmaQueues) pointers * 8B
-        //   + (6 legacy + 2 SDMA) scalars * 4B = 176B.
-        static constexpr size_t FUSED_A2A_SEGMENT_BYTES  = (2 * FUSED_A2A_MAX_RANKS + 2) * 8 + 8 * 4;
-
-        namespace
-        {
-            // Append the fixed-size fused-A2A kernarg segment to `args` in the
-            // exact emission order of Signature.py fusedA2AKernArgLayout().
-            //
-            // Alignment: recv_ptr_0 is appendAligned<void*> so it lands on an
-            // 8-byte boundary, mirroring how the kernel metadata 8-aligns the
-            // first SIG_GLOBALBUFFER arg of the segment. The remaining pointers
-            // (8B) and scalars (4B) are appended contiguously with no interior
-            // padding, matching the Python layout (off += 8 / off += 4).
-            void appendFusedSegment(KernelArguments&           args,
-                                    std::vector<void*> const&  recvPtrs,   // size W (device d's view: recv[j])
-                                    std::vector<void*> const&  flagPtrs,   // size W
-                                    void*                      counterPtr,
-                                    uint32_t                   myRank,
-                                    uint32_t                   target,
-                                    uint32_t                   worldSize,
-                                    uint32_t                   nShard,
-                                    uint32_t                   drain,
-                                    uint32_t                   an,
-                                    void*                      sdmaQueues,   // W-element SdmaQueueDeviceHandle array
-                                    uint32_t                   tilesPerRank,
-                                    uint32_t                   tokenTiles)
-            {
-                size_t before = args.size();
-
-                for(int j = 0; j < FUSED_A2A_MAX_RANKS; j++)
-                {
-                    void* p = (j < (int)recvPtrs.size()) ? recvPtrs[j] : nullptr;
-                    if(j == 0)
-                        args.appendAligned<void*>("recv_ptr_0", p);
-                    else
-                        args.append<void*>("recv_ptr_" + std::to_string(j), p);
-                }
-                for(int j = 0; j < FUSED_A2A_MAX_RANKS; j++)
-                {
-                    void* p = (j < (int)flagPtrs.size()) ? flagPtrs[j] : nullptr;
-                    args.append<void*>("flag_ptr_" + std::to_string(j), p);
-                }
-                args.append<void*>("counter_ptr", counterPtr);
-                args.append<uint32_t>("FusedMyRank", myRank);
-                args.append<uint32_t>("FusedTarget", target);
-                args.append<uint32_t>("FusedW", worldSize);
-                args.append<uint32_t>("FusedNShard", nShard);
-                args.append<uint32_t>("FusedDrain", drain);
-                // Kernarg "FusedAM" (renamed from FusedAN in Task 6 alongside
-                // Signature.py); the value `an` carries AM (A2A width along
-                // FEATURE) from the swapped client.
-                args.append<uint32_t>("FusedAM", an);
-                // SDMA offload args (Task 3), appended at the very end to match
-                // Signature.py. FusedSdmaQueues is nullptr this round -- T3 is
-                // pure ABI and does not instantiate the SdmaQueueSet (its
-                // SdmaQueue.cpp only compiles under TENSILELITE_ENABLE_SDMA_A2A).
-                // TODO(T7): pass SdmaQueueSet::deviceHandles() (the device
-                // pointer to the W-element SdmaQueueDeviceHandle array).
-                args.append<void*>("FusedSdmaQueues", sdmaQueues);
-                args.append<uint32_t>("FusedTilesPerRank", tilesPerRank);
-                args.append<uint32_t>("FusedTokenTiles", tokenTiles);
-
-                size_t grew = args.size() - before;
-                if(grew != FUSED_A2A_SEGMENT_BYTES)
-                {
-                    std::cerr << "[fused-a2a] WARNING: fused segment grew args by " << grew
-                              << " bytes, expected " << FUSED_A2A_SEGMENT_BYTES
-                              << " (alignment/padding mismatch — epilogue will read wrong offsets)"
-                              << std::endl;
-                }
-            }
-        } // namespace
+        // FUSED_A2A_MAX_RANKS, FUSED_A2A_SEGMENT_BYTES, fusedA2AWorldSizeValid
+        // and appendFusedSegment come from FusedA2AKernArg.hpp so that the
+        // gtest can exercise the real definitions rather than a copy.
 
         // Entry point invoked from main() when --fused-a2a is passed. Returns a
         // process exit code (0 == all iterations passed: numeric validation when
@@ -161,6 +94,27 @@ namespace TensileLite
             // race detection then degrades to "kernel exited cleanly" (no HIP
             // error / no DRAIN hang), i.e. clean-exit, not byte-verified.
             const bool validate = args["fused-a2a-validate"].as<int>() != 0;
+
+            // Bound W FIRST -- before it is printed, compared against deviceCount, or
+            // used as a divisor. fusedA2AWorldSizeValid carries why the range is what
+            // it is; what matters *here* is the position. The deviceCount check below
+            // only bounds W by the machine, not by the ABI, and it cannot stand in for
+            // the lower bound either: for W <= 0 `deviceCount < W` is false, so it
+            // falls through. The check also has to precede the coordinate guard
+            // further down, because W is already a divisor by then (`AM % W`,
+            // `AM / W`) -- a W of 0 would divide by zero, and a negative W would
+            // produce a misleading divisibility error, both before the range check
+            // could ever run.
+            if(!fusedA2AWorldSizeValid(W))
+            {
+                std::cerr << "[fused-a2a] ERROR: world size W=" << W
+                          << " is out of range; the kernarg segment reserves exactly "
+                          << FUSED_A2A_MAX_RANKS
+                          << " recv_ptr/flag_ptr slots.\n"
+                          << "  require: 1 <= W <= " << FUSED_A2A_MAX_RANKS
+                          << ". Refusing to launch." << std::endl;
+                return -1;
+            }
 
             std::cout << "[fused-a2a] single-process " << W << "-GPU setup + launch smoke\n";
 
@@ -207,17 +161,17 @@ namespace TensileLite
 
             // Tile sizes MUST come from THIS solution's macro-tile, not a hardcoded
             // 256: the kernel epilogue gates PUSH/local and computes dst_rank +
-            // FusedTarget from the compile-time MacroTile0/MacroTile1 (see
-            // GlobalWriteBatch.py _fusedA2ADispatch / _emitFusedA2AHandshake, which
-            // use self.kernel["MacroTile1"]). sizeMapping.macroTile.{x,y} are those
+            // the counter index/target from the compile-time MacroTile0/MacroTile1
+            // (see GlobalWriteBatch.py _emitFusedA2AHandshake, which uses
+            // self.kernel["MacroTile0"]). sizeMapping.macroTile.{x,y} are those
             // same MT0/MT1 (the runtime WG grid is CeilDivide(M,macroTile.x) x
-            // CeilDivide(N,macroTile.y), ContractionProblem.cpp:795-796). `target`
-            // is an EXACT per-dst-rank count of contributing PUSH workgroups
-            // ((n_shard/MT0)*(N/MT1) = feature-tiles-in-shard * token-tiles, since
-            // post-swap feature=WG0 is scattered and token=WG1 is replicated) compared
-            // for equality kernel-side; a hardcoded 256 against a 128 macro-tile makes
-            // the tile factors wrong and over-restricts admissible shapes via the
-            // M%256/AM%256 guards. macroTile.x = MT0 (M dim), macroTile.y = MT1 (N dim).
+            // CeilDivide(N,macroTile.y), ContractionProblem.cpp:795-796).
+            // `tilesPerRank` (= n_shard/MT0) is an EXACT count of the PUSH workgroups
+            // sharing one counter slot (dst_rank, token-tile), compared for equality
+            // kernel-side, and `tokenTiles` (= CeilDivide(N,MT1)) is the counter array's
+            // token dimension; a hardcoded 256 against a 128 macro-tile makes the tile
+            // factors wrong and over-restricts admissible shapes via the M%256/AM%256
+            // guards. macroTile.x = MT0 (M dim), macroTile.y = MT1 (N dim).
             const uint32_t FUSED_A2A_M_TILE = (uint32_t)solution->sizeMapping.macroTile.x;
             const uint32_t FUSED_A2A_N_TILE = (uint32_t)solution->sizeMapping.macroTile.y;
             if(FUSED_A2A_M_TILE == 0 || FUSED_A2A_N_TILE == 0)
@@ -267,12 +221,20 @@ namespace TensileLite
             // tokenTiles: token-tiles across the full token dim N. Post-swap the
             // A2A-scattered dim is FEATURE (WG0), so TOKEN (WG1) is the replicated
             // dim -- every token-tile workgroup in a rank's feature shard contributes
-            // one PUSH to that rank. FusedTarget (the per-dst-rank contributing-WG
-            // count, compared for equality kernel-side) is therefore
-            // tilesPerRank (feature-tiles in the shard) * tokenTiles (all N-tiles).
-            const uint32_t tokenTiles   = (uint32_t)(N / FUSED_A2A_N_TILE);
+            // one PUSH to that rank.
+            //
+            // CEIL, not floor: tokenTiles is a DIMENSION of the counter array (the
+            // kernel indexes counter[dst_rank*tokenTiles + WorkGroup1]) and the grid
+            // has CeilDivide(N, MT1) token-tiles. There is no N % MT1 == 0 guard below
+            // (token = batch*seqlen, the user gives what they give), so a floor here
+            // would let WG1 == tokenTiles index one past the row -> counter overrun or
+            // a slot no WG ever completes -> DRAIN deadlock.
+            const uint32_t tokenTiles   = (uint32_t)((N + FUSED_A2A_N_TILE - 1) / FUSED_A2A_N_TILE);
             // mTiles: feature-tiles across the full feature dim M (diagnostic only).
             const uint32_t mTiles       = (uint32_t)(M / FUSED_A2A_M_TILE);
+            // DEPRECATED: the kernel's election target is now FusedTilesPerRank (the
+            // counter is per (dst_rank, token-tile), so only tilesPerRank WGs share a
+            // slot). Still passed so the kernarg layout / offsets stay untouched.
             const uint32_t target       = tilesPerRank * tokenTiles;
 
             // Fail-fast on shapes that violate the fused-A2A design constraints
@@ -310,6 +272,43 @@ namespace TensileLite
                 return -1;
             }
 
+            // src_x, rect_x AND dst_y of the SDMA COPY_SUBWIN packet are 14-BIT
+            // fields, and the kernel packs all three with bare s_lshl_b32/s_or_b32
+            // -- no mask (SdmaPacketEmitter._packXY, the DW8 inline shift,
+            // _packRectMinus1). The pure-Python reference encoder DOES mask, so past
+            // 2^14 the two disagree and NEITHER complains: the packet would silently
+            // address a wrapped-around token row / feature column and scatter data
+            // into the wrong recv slot. Reject the shape here instead -- this mirrors
+            // Tensile/Components/SdmaPacketEmitter.py:checkA2AFieldsFit.
+            //   src_x  max = (W-1)*n_shard        (top peer's feature offset into D)
+            //   rect_x     = n_shard              (the X extent itself; binding only
+            //                                      at W == 1, else <= max src_x)
+            //   dst_y  max = (W-1)*N + (tokenTiles-1)*MT1  (top rank's last tile)
+            // src_y = j*MT1 is <= dst_y, so it needs no separate term. The `>=`
+            // comparison is one value tighter than the hardware for rect_x (which is
+            // minus-one encoded); deliberate, so all three terms read the same.
+            const size_t maxSrcX  = (size_t)(W - 1) * (size_t)nShard;
+            const size_t maxRectX = (size_t)nShard;
+            const size_t maxDstY
+                = (size_t)(W - 1) * N + (size_t)(tokenTiles - 1) * FUSED_A2A_N_TILE;
+            if(maxSrcX >= (1u << 14) || maxRectX >= (1u << 14) || maxDstY >= (1u << 14))
+            {
+                std::cerr << "[fused-a2a] ERROR: geometry overflows the SDMA packet's "
+                             "14-bit coordinate fields.\n"
+                          << "  W=" << W << " AM=" << AM << " n_shard=AM/W=" << nShard
+                          << " N(token)=" << N
+                          << " MacroTile1(token)=" << FUSED_A2A_N_TILE
+                          << " tokenTiles=" << tokenTiles << "\n"
+                          << "  max src_x=(W-1)*n_shard=" << maxSrcX
+                          << " rect_x=n_shard=" << maxRectX
+                          << " max dst_y=" << maxDstY
+                          << "; each must be < " << (1u << 14) << ".\n"
+                          << "  Refusing to launch (the copy would silently move the "
+                             "wrong band into the wrong recv slot). Reduce W, AM or N."
+                          << std::endl;
+                return -1;
+            }
+
             // recv is feature-contiguous [W, token, feature_shard]: token is the outer
             // (strided-by-n_shard) axis, feature-shard is the inner stride-1 axis. The
             // fused PUSH store writes the FULL macro-tile edge (not just the logical
@@ -320,8 +319,34 @@ namespace TensileLite
             // constraint (AM/W)%MT0==0), so the contiguous feature extent is n_shard.
             const size_t nTokenPad = ((N + FUSED_A2A_N_TILE - 1) / FUSED_A2A_N_TILE) * FUSED_A2A_N_TILE;
             const size_t recvBytes    = (size_t)W * nTokenPad * nShard * sizeof(uint16_t); // bf16
-            const size_t flagBytes    = (size_t)W * sizeof(uint32_t);
-            const size_t counterBytes = (size_t)W * sizeof(uint32_t);
+            // flag slots are u64, NOT u32: the release signal is an SDMA ATOMIC
+            // ADD64 (MORI's SDMA packet set has ADD64 and no ADD32), so each slot
+            // is written 8 bytes wide. With a 4-byte stride the top rank's atomic
+            // would run past the end of this allocation.
+            const size_t flagBytes    = (size_t)W * sizeof(uint64_t);
+            // counter is indexed [dst_rank][token-tile] -> W*tokenTiles u32 slots,
+            // followed by a W-entry second-level counter2[dst_rank] (target
+            // tokenTiles) at word index W*tokenTiles, then a single third-level
+            // u32 counter3 at word index W*tokenTiles + W. counter2 converges the
+            // DRAIN spinners to one per peer; counter3 is reserved for the
+            // grid-wide workgroup tally that will elect the single DRAIN owner
+            // (Task 4). All three ride this same allocation (and this same
+            // per-iteration memset below) so the kernarg layout stays untouched.
+            //
+            // Past those live slots the allocation carries a guard tail (see
+            // FusedA2ACounterSentinel.hpp). The tail catches only an overrun past
+            // the TOP level, and it catches it by absorbing the write: the tail is
+            // inside the allocation, so the store reddens the pattern rather than
+            // reaching memory that is not ours. Absent the tail that store lands in
+            // whatever hipMalloc handed back next and stays silent -- the counters
+            // themselves still reach their expected values and every numeric check
+            // passes. An off-by-one in a lower level stays inside the payload and
+            // lands on a live slot instead: at the top of counter2's range that
+            // slot is counter3, so the write would mis-elect the DRAIN owner rather
+            // than raise anything. Only counterBytes is memset per launch; the tail
+            // keeps its pattern and is re-checked after each launch.
+            const size_t counterBytes      = fusedA2ACounterPayloadBytes((uint32_t)W, tokenTiles);
+            const size_t counterAllocBytes = fusedA2ACounterAllocBytes((uint32_t)W, tokenTiles);
             const size_t aBytes       = problem->a().totalAllocatedBytes();
             const size_t bBytes       = problem->b().totalAllocatedBytes();
             const size_t cBytes       = problem->c().totalAllocatedBytes();
@@ -419,6 +444,11 @@ namespace TensileLite
             std::vector<void*> recv(W, nullptr), flag(W, nullptr), counter(W, nullptr);
             std::vector<void*> xA(W, nullptr), wB(W, nullptr), cC(W, nullptr), outD(W, nullptr);
 
+            // Reference image of the counter guard tail: written once per device at
+            // allocation, compared against the device copy after every launch.
+            std::vector<uint32_t> hCounterGuard(FUSED_A2A_COUNTER_SENTINEL_WORDS);
+            fusedA2ACounterSentinelFill(hCounterGuard.data());
+
             for(int d = 0; d < W; d++)
             {
                 HIP_CHECK_EXC(hipSetDevice(d));
@@ -426,7 +456,13 @@ namespace TensileLite
                 HIP_CHECK_EXC(hipExtMallocWithFlags(&recv[d], recvBytes, hipDeviceMallocFinegrained));
                 HIP_CHECK_EXC(hipExtMallocWithFlags(&flag[d], flagBytes, hipDeviceMallocFinegrained));
                 // Local (not remotely written): plain device memory.
-                HIP_CHECK_EXC(hipMalloc(&counter[d], counterBytes));
+                HIP_CHECK_EXC(hipMalloc(&counter[d], counterAllocBytes));
+                // Arm the guard tail. Sits past counterBytes, so the per-launch
+                // memset below leaves it untouched.
+                HIP_CHECK_EXC(hipMemcpy((char*)counter[d] + counterBytes,
+                                        hCounterGuard.data(),
+                                        FUSED_A2A_COUNTER_SENTINEL_BYTES,
+                                        hipMemcpyHostToDevice));
                 HIP_CHECK_EXC(hipMalloc(&xA[d], aBytes));
                 HIP_CHECK_EXC(hipMalloc(&wB[d], bBytes));
                 HIP_CHECK_EXC(hipMalloc(&cC[d], cBytes));
@@ -462,6 +498,44 @@ namespace TensileLite
                         HIP_CHECK_EXC(pe);
                 }
             }
+
+            // --- Per-device SDMA queue sets: one ring per (device, peer), created
+            //     AFTER P2P is enabled so a peer's recv/flag pages are already
+            //     mapped into this device's VA space when the engine dereferences
+            //     them. The self entry (j == d) is a loopback queue: §1.5 routes the
+            //     p == my_rank packet through SDMA too, which is what gives this
+            //     card's own flag slot a real producer (no DRAIN special case).
+            //
+            //     sdmaHandles is declared OUTSIDE the #ifdef on purpose: the kernarg
+            //     append below is ordinary code that the preprocessor still has to
+            //     parse in an SDMA-off build (the `return 1` in the #else is a
+            //     RUNTIME return, it does not remove later statements from the token
+            //     stream). Referring to the SdmaQueueSet vector directly down there
+            //     made the default build fail to compile. ---
+            std::vector<void*> sdmaHandles(W, nullptr);
+#ifdef TENSILELITE_ENABLE_SDMA_A2A
+            std::vector<std::unique_ptr<SdmaQueueSet>> sdmaSets(W);
+            {
+                std::vector<uint32_t> nodes(W);
+                for(int j = 0; j < W; j++)
+                    nodes[j] = sdmaNodeIdForDevice(j);
+                for(int d = 0; d < W; d++)
+                {
+                    HIP_CHECK_EXC(hipSetDevice(d));
+                    sdmaSets[d]   = std::make_unique<SdmaQueueSet>(nodes[d], nodes);
+                    sdmaHandles[d] = sdmaSets[d]->deviceHandles();
+                }
+            }
+            std::cout << "[fused-a2a] created " << W << " SDMA queues per device (one per peer)\n";
+#else
+            std::cerr << "[fused-a2a] ERROR: this client was built without "
+                         "TENSILELITE_ENABLE_SDMA_A2A, so no SDMA rings exist, but the "
+                         "fused epilogue unconditionally submits SDMA packets and would "
+                         "dereference a null queue handle. Reconfigure with "
+                         "-DTENSILELITE_ENABLE_SDMA_A2A=ON."
+                      << std::endl;
+            return 1;
+#endif
 
             // --- Per-device streams + code-object adapters. The main adapter's
             //     modules are bound to device 0; give each device its own adapter
@@ -524,13 +598,15 @@ namespace TensileLite
                 float tol  = 1e-2f * std::max(1.0f, std::fabs(want));
                 return diff <= tol;
             };
-            // recv is feature-contiguous [W, token, feature_shard]: the kernel's PUSH
-            // store uses token stride = n_shard (FusedNShard) and slot stride =
-            // N_token * n_shard (N = logical SizeJ = nToken), with feature-shard as the
-            // stride-1 inner axis. This mirrors the _emitFusedA2APushStore offset formula
-            // (slotElem + t*n_shard + f_local). recv is a bf16 buffer. slotStride uses the
-            // UNPADDED N to match the kernel's SizeJ slot multiply. See
-            // task3-index-derivation.md.
+            // recv is feature-contiguous [W, token, feature_shard]: token stride =
+            // n_shard (FusedNShard) and slot stride = N_token * n_shard (N = logical
+            // SizeJ = nToken), with feature-shard as the stride-1 inner axis, i.e.
+            // element offset = slotElem + t*n_shard + f_local.
+            // recv is a bf16 buffer. slotStride uses the UNPADDED N to match the
+            // kernel's SizeJ slot multiply. See task3-index-derivation.md.
+            // NOTE (Task 6): nothing writes recv any more -- the CU-side remote PUSH
+            // store was removed and the SDMA copy that replaces it lands in Task 7, so
+            // this L2 check is EXPECTED to fail until then.
             const size_t slotStride = (size_t)N * (size_t)nShard; // elems per src slot (nToken*nShard)
             const size_t rowStride  = (size_t)nShard;             // per-token stride (feature-shard contiguous)
 
@@ -560,6 +636,7 @@ namespace TensileLite
             bool raceFail     = false;
             int  firstFailIt  = -1;
             bool anyHipError  = false;
+            bool guardFail    = false; // counter guard tail corrupted (see below)
 
             for(int it = 0; it < iters; it++)
             {
@@ -628,9 +705,9 @@ namespace TensileLite
                                        // kernarg "FusedAM" (Signature.py); pass AM as
                                        // the value to keep the client/kernel ABI matched.
                                        (uint32_t)AM,
-                                       // SDMA offload args (Task 3). nullptr this round;
-                                       // TODO(T7) fill with SdmaQueueSet::deviceHandles().
-                                       nullptr,
+                                       // SDMA offload args: this device's W-element
+                                       // SdmaQueueDeviceHandle array (one queue per peer).
+                                       sdmaHandles[d],
                                        tilesPerRank,
                                        tokenTiles);
                     // Print kernarg size only on iter 0 to avoid log spam; a constant
@@ -672,6 +749,45 @@ namespace TensileLite
                             std::cout << "[fused-a2a] device " << d
                                       << " kernel exited cleanly (" << std::fixed
                                       << std::setprecision(1) << us << " us)\n";
+                    }
+                }
+
+                // -- Counter guard tail (see FusedA2ACounterSentinel.hpp). --
+                // Checked EVERY iteration and independently of `validate`: an
+                // overrun past the counter payload corrupts unrelated device
+                // memory, which no numeric check can see -- the counters
+                // themselves still hold their expected values. Read with a
+                // non-throwing hipMemcpy so that a device already wedged by a
+                // failed launch degrades to a warning instead of masking the
+                // kernel error that was just reported.
+                for(int d = 0; d < W; d++)
+                {
+                    HIP_CHECK_EXC(hipSetDevice(d));
+                    std::vector<uint32_t> devGuard(FUSED_A2A_COUNTER_SENTINEL_WORDS);
+                    hipError_t            ge = hipMemcpy(devGuard.data(),
+                                              (const char*)counter[d] + counterBytes,
+                                              FUSED_A2A_COUNTER_SENTINEL_BYTES,
+                                              hipMemcpyDeviceToHost);
+                    if(ge != hipSuccess)
+                    {
+                        std::cerr << "[fused-a2a] WARNING: could not read counter guard on device "
+                                  << d << " (iter " << it << "): " << hipGetErrorString(ge)
+                                  << std::endl;
+                        continue;
+                    }
+                    int bad = fusedA2ACounterSentinelFirstBad(devGuard.data());
+                    if(bad >= 0)
+                    {
+                        std::cerr << "[fused-a2a] COUNTER OVERRUN iter=" << it << " device=" << d
+                                  << ": guard word " << bad << " (byte "
+                                  << counterBytes + (size_t)bad * sizeof(uint32_t)
+                                  << " of a " << counterAllocBytes << "-byte allocation) holds 0x"
+                                  << std::hex << devGuard[bad] << ", expected 0x"
+                                  << fusedA2ACounterSentinelWord((size_t)bad) << std::dec
+                                  << " -- a counter index ran past the " << counterBytes
+                                  << "-byte payload" << std::endl;
+                        guardFail = true;
+                        ok        = false;
                     }
                 }
 
@@ -912,12 +1028,14 @@ namespace TensileLite
             }
 
             std::cout << "[fused-a2a] overall " << (raceFail ? "FAILED" : "PASSED") << std::endl;
-            // Exit codes: 2 = a kernel returned a HIP error in some iteration;
+            // Exit codes: 2 = a kernel returned a HIP error in some iteration, or a
+            //     counter guard tail came back corrupted -- both are hard runtime
+            //     faults rather than numeric disagreement;
             // 3 = all kernels ran but some iteration failed numeric validation
             //     (only reachable when validate=1);
             // 0 = every iteration passed (validate=1: dual-segment numeric check;
             //     validate=0: clean exit on all iterations).
-            if(anyHipError)
+            if(anyHipError || guardFail)
                 return 2;
             return raceFail ? 3 : 0;
         }

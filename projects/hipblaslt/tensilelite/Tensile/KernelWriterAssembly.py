@@ -17063,7 +17063,7 @@ class KernelWriterAssembly(KernelWriter):
 
   ##############################################################################
   def addStore(self, kernel, ss, tc: str, addrCalc, sumIdx, tmpS01, edge, elementIdx=None, batchIdx=None,
-               wsOffset=0, overrideAfterPrimerRows=0, comment="addStore"):
+               wsOffset=0, overrideAfterPrimerRows=0, comment="addStore", forceSlc: bool = False):
     """
     Add stores for the element with addrCalc and sumIdx.
     tmpS01 is a single :temp sGPR
@@ -17077,6 +17077,10 @@ class KernelWriterAssembly(KernelWriter):
     delayed AFTER-primer so the primer encodes the NEXT EMITTING elt's
     rowInc (look-ahead). 0 means no override.
 
+    `forceSlc` forces the slc bit (prints as sc1 on gfx950) on the D store
+    regardless of NonTemporalD. Used by the fused-A2A PUSH pass so the tile
+    bypasses L2 and is visible in HBM to the SDMA engine. Only honoured for
+    tc == 'D'; the TD/WS/E/Bias paths are untouched.
     """
     module = Module("addStore sumIdx %s"%(str(sumIdx)))
     if self.do["GlobalWrite"]:
@@ -17094,6 +17098,7 @@ class KernelWriterAssembly(KernelWriter):
       if tc == 'D':
         isGlc, isSlc, isNT, scope, th, nv = decodeNonTemporal(
             self.states.asmCaps, kernel["NonTemporalD"], _temporalHint(kernel, "D"), _nonVolatile(kernel, "D"))
+        isSlc = bool(isSlc or forceSlc)
         bps = self.states.bpeCexternal * ss.cfg.gwvw
         rpv = self.states.bpeCexternal * ss.cfg.gwvw / self.states.bpr
 
