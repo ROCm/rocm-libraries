@@ -182,8 +182,28 @@ SUBTREE_EXTRA_MATRIX_PROJECTS = {
     "projects/hipblaslt": "sparselt",
 }
 
+# PR labels that inject an extra cmake option into a specific project's build.
+# The option is only added when the gating label is present on the PR AND that
+# project is actually being built, so the default build is unchanged. This lets a
+# branch opt a single superbuild into a feature flag without adding a second,
+# colliding job: the existing job builds with the flag on and uploads its
+# artifact once, in place of the flag-off one, so there is no artifact overlap or
+# job-name clash.
+#
+# To add an entry, map a (manually applied) GitHub label to a project and the
+# cmake option to inject. The label must exist in the repo's label set; it is not
+# auto-applied via labeler.yml. Example:
+#
+#   LABEL_GATED_CMAKE_OPTIONS = {
+#       "ci:my-feature": {
+#           "project": "myproject",
+#           "cmake_option": "-DTHEROCK_FLAG_MY_FEATURE=ON",
+#       },
+#   }
+LABEL_GATED_CMAKE_OPTIONS = {}
 
-def collect_projects_to_run(subtrees):
+
+def collect_projects_to_run(subtrees, pr_labels=None):
     platform = os.getenv("PLATFORM")
     projects = set()
     # Work on per-call deep copies so module-level state stays immutable across calls.
@@ -243,6 +263,16 @@ def collect_projects_to_run(subtrees):
     for to_remove_item in to_remove_from_project_map:
         projects.remove(to_remove_item)
         del local_project_map[to_remove_item]
+
+    # Inject label-gated cmake options into their target project's build. Only
+    # applied when the gating label is present and that project is actually being
+    # built, so the default build is untouched. See LABEL_GATED_CMAKE_OPTIONS.
+    for label in pr_labels or []:
+        gated = LABEL_GATED_CMAKE_OPTIONS.get(label)
+        if gated and gated["project"] in projects:
+            local_project_map[gated["project"]]["cmake_options"].append(
+                gated["cmake_option"]
+            )
 
     # retrieve the subtrees to checkout, cmake options to build, and projects to test
     project_to_run = []

@@ -3,6 +3,7 @@ from pathlib import Path
 import os
 import sys
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.fspath(Path(__file__).parent.parent))
 import therock_matrix
@@ -78,6 +79,65 @@ class TheRockMatrixTest(unittest.TestCase):
 
         self.assertEqual(therock_matrix.project_map, project_map_before)
         self.assertEqual(therock_matrix.additional_options, additional_options_before)
+
+    def test_label_gated_cmake_option_injected_when_label_and_project_present(self):
+        gated = {
+            "ci:test-flag": {
+                "project": "hipthreads",
+                "cmake_option": "-DTHEROCK_FLAG_TEST=ON",
+            }
+        }
+        with mock.patch.dict(
+            therock_matrix.LABEL_GATED_CMAKE_OPTIONS, gated, clear=True
+        ):
+            project_to_run = therock_matrix.collect_projects_to_run(
+                ["projects/hipthreads"], ["ci:test-flag"]
+            )
+        self.assertEqual(len(project_to_run), 1)
+        self.assertIn(
+            "-DTHEROCK_FLAG_TEST=ON",
+            project_to_run[0]["cmake_options"].split(" "),
+        )
+
+    def test_label_gated_cmake_option_absent_without_label(self):
+        gated = {
+            "ci:test-flag": {
+                "project": "hipthreads",
+                "cmake_option": "-DTHEROCK_FLAG_TEST=ON",
+            }
+        }
+        with mock.patch.dict(
+            therock_matrix.LABEL_GATED_CMAKE_OPTIONS, gated, clear=True
+        ):
+            project_to_run = therock_matrix.collect_projects_to_run(
+                ["projects/hipthreads"]
+            )
+        self.assertEqual(len(project_to_run), 1)
+        self.assertNotIn(
+            "-DTHEROCK_FLAG_TEST=ON",
+            project_to_run[0]["cmake_options"].split(" "),
+        )
+
+    def test_label_gated_cmake_option_absent_when_project_not_built(self):
+        # Label is present, but its target project is not in the build set, so
+        # nothing is injected into the project that is being built.
+        gated = {
+            "ci:test-flag": {
+                "project": "miopen",
+                "cmake_option": "-DTHEROCK_FLAG_TEST=ON",
+            }
+        }
+        with mock.patch.dict(
+            therock_matrix.LABEL_GATED_CMAKE_OPTIONS, gated, clear=True
+        ):
+            project_to_run = therock_matrix.collect_projects_to_run(
+                ["projects/hipthreads"], ["ci:test-flag"]
+            )
+        self.assertEqual(len(project_to_run), 1)
+        self.assertNotIn(
+            "-DTHEROCK_FLAG_TEST=ON",
+            project_to_run[0]["cmake_options"].split(" "),
+        )
 
 
 if __name__ == "__main__":
