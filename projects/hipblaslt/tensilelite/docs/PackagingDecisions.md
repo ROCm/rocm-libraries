@@ -318,6 +318,323 @@ Consequences:
 - Adding a new optional fallback requires adding a corresponding extra rather
   than merely deleting it from the mandatory dependency set.
 
+## 2026-08-04 Amendment: Source-development client binding
+
+The following decisions restore the ability to pair an installed-from-source
+TensileLite Python package with a source-built `tensilelite-client`, while
+preserving the deterministic release-wheel boundary established above.
+
+These decisions supersede two narrower parts of the original record:
+
+- D3's allowance for `ROCM_VERSION` to override the selected ROCm
+  installation's release metadata is removed. Package compatibility is derived
+  from the selected ROCm root only.
+- D5's prohibition on every non-ROCm-layout client path is narrowed to released
+  wheels and runtime overrides. A source build may freeze one custom client
+  path while the Python distribution is built; that path cannot be changed at
+  runtime.
+
+The remainder of D3 and D5, including exact release coupling, import-time
+validation, fixed release layout, and independently supplied rocisa, remains in
+force.
+
+### D12. Two immutable client-binding modes
+
+Decision:
+
+TensileLite has two client-binding modes. The mode is fixed when the Python
+distribution is built and cannot be replaced by a command-line argument, YAML,
+environment variable, or mutable Python global.
+
+1. **Standard ROCm-relative binding** is the default. When no custom build
+   setting is supplied, the client is resolved from the version-validated ROCm
+   root at:
+
+   ```text
+   libexec/hipblaslt/tensilelite/tensilelite-client
+   ```
+
+   Windows uses the platform executable name. The relative locator is fixed;
+   `ROCM_PATH` continues to select the complete ROCm installation rather than
+   independently selecting a client.
+
+2. **Custom absolute binding** is available only while building a normal or
+   editable distribution from source. It freezes the exact absolute path
+   supplied by the developer. The final symlink is preserved so a stable
+   symlink may be retargeted, but `~` and `..` are normalized. Relative input is
+   rejected.
+
+A custom binding has strict semantics. If its file later disappears, becomes
+non-executable, or points at a broken symlink, TensileLite fails and never
+falls back to the standard ROCm client. Rebuilding the executable at the same
+path or retargeting the preserved symlink requires no Python reinstall.
+
+Reasoning:
+
+Released wheels must work under `/opt/rocm`, non-standard prefixes, and
+equivalent relocated ROCm installations, so they cannot embed the temporary
+absolute prefix used by a release builder. Source development needs the
+opposite property: Python must keep using the exact client under development
+without requiring an override on every invocation. Freezing either the
+ROCm-relative release contract or one explicit absolute development path gives
+both workflows deterministic behavior.
+
+### D13. PEP 517 build interface and minimal persistence
+
+Decision:
+
+The canonical source-build interface is the namespaced PEP 517/660 setting:
+
+```bash
+python -m pip install -e . \
+  --config-settings=tensilelite.client-path=/absolute/path/to/tensilelite-client
+```
+
+The shorter `-C` spelling is equivalent. The setting works for editable and
+non-editable source builds. Installing an already-built wheel cannot consume
+the setting because wheel installation does not invoke a build backend; such
+wheels always use the binding already present in the artifact.
+
+A thin in-repository build backend delegates ordinary behavior to
+`setuptools.build_meta`, consumes only `tensilelite.client-path`, and forwards
+unrelated settings such as `editable_mode=compat`. Pip never builds the C++
+client. The executable must exist before the Python build starts.
+
+PEP 517 config settings are transient, so a custom binding is persisted as one
+minimal, installation-specific file in the distribution's `.dist-info`
+directory. The file contains only the absolute path as a JSON string and is
+listed in wheel `RECORD`. No file is emitted for the standard binding: absence
+means the built-in ROCm-relative default. Sdists never contain a machine-local
+path.
+
+The source checkout is never modified. Consequently, two Python environments
+may share one editable checkout while retaining different client bindings.
+Reinstalling the distribution is the only supported way to replace a frozen
+path.
+
+Reasoning:
+
+`config_settings` is the modern installer-to-backend transport; legacy
+`setup.py`, `--install-option`, and `--global-option` interfaces are not
+appropriate. A generated source module would be shared by every editable
+environment and let one environment overwrite another. Mutable user config
+would no longer be build-frozen. Per-installation `.dist-info` is already owned
+and removed by pip, works for both wheel and editable installations, and adds
+only the state that the exceptional custom mode actually requires.
+
+### D14. One private runtime client service
+
+Decision:
+
+Client selection is internal package state, not a public or configurable
+Tensile global parameter. Remove the branch-added public and legacy plumbing:
+
+- `tensilelite.TENSILELITE_CLIENT_PATH`;
+- public `tensilelite.RUNTIME` and `RuntimeInfo`;
+- `globalParameters["ClientExecutable"]`;
+- `--prebuilt-client` and every other runtime client-path override.
+
+An internal runtime service has only two responsibilities:
+
+1. initialize during `import tensilelite`, validating rocisa, ROCm release,
+   binding metadata, and the selected client; and
+2. return the process-frozen client path to `ClientWriter` when it writes a run
+   script or launches the client.
+
+Retrieval rechecks that the selected file still exists and is executable, but
+never chooses a different path. No production caller needs a public runtime
+object containing the ROCm root, release, and client.
+
+Reasoning:
+
+The prior `globalParameters` entry was retained as legacy plumbing after
+`PrebuiltClient` was removed. It made installation state mutable, required each
+entry point to restore it after `restoreDefaultGlobalParameters()`, and could
+allow YAML assignment to replace it. A small private service supplies every
+entry point consistently without expanding public API or threading a new path
+argument through the legacy benchmarking call graph.
+
+### D15. ROCm compatibility has one source of truth
+
+Decision:
+
+Both source and release builds derive the complete target ROCm version from the
+selected ROCm root's `.info/version`. Remove the branch-added `ROCM_VERSION`
+environment override from the canonical and compatibility package metadata
+flows and from CMake packaging commands.
+
+At runtime, TensileLite resolves `ROCM_PATH` (with the established platform
+fallback), reads that root's `.info/version`, and requires an exact canonical
+match with the distribution's `+rocm...` local version. The full value,
+including nightly suffixes, participates in the comparison. Equality means
+release equality, not filesystem-path or inode identity, so an equivalent ROCm
+installation may be relocated or selected through a symlink.
+
+Custom client selection overrides only the client locator. It never bypasses
+the ROCm release check or the requirement that rocisa import successfully.
+Non-standard ROCm installations remain environment-selected through
+`ROCM_PATH`; the Python package does not attempt to persist or activate an
+entire ROCm environment.
+
+Reasoning:
+
+`ROCM_VERSION` and its `rocm_version()` packaging helper were introduced on
+this branch to let pure-Python metadata declare a target without inspecting a
+ROCm installation. That permits an invalid artifact such as a wheel labeled
+for ROCm 7.3 while `ROCM_PATH` and its native client come from ROCm 7.2.4. The
+integrated build already reads the real root, writes the same release into its
+stage, and builds against that stage, making the override both redundant and a
+way to conceal mismatches.
+
+### D16. One-command and manual source-development workflows
+
+Decision:
+
+The individual building blocks remain supported, including direct CMake,
+`invoke rocisa`, `invoke build-client`, and manual pip installation with the
+PEP 517 setting. In addition, a Linux-only `invoke install` task is the complete
+TensileLite source-development bootstrap after cloning into a supported ROCm
+development environment.
+
+`invoke install`:
+
+1. uses the active Python interpreter and never creates or silently activates a
+   virtual environment;
+2. installs the shared development requirements dynamically from a factored
+   requirements file;
+3. runs the existing rocisa task, producing the specialized editable in-tree
+   rocisa build;
+4. runs the existing client build and refreshes the synthetic ROCm stage;
+5. installs TensileLite editably into the active environment, freezing the
+   absolute path of the staged client; and
+6. verifies rocisa and TensileLite imports, exact ROCm compatibility, and the
+   selected client.
+
+The task is always editable, repeatable, and incremental. Advanced or
+non-editable installs use the manual interface. The developer must already have
+Python, Invoke, the ROCm SDK/compiler, and required system build tools because
+no Invoke task can bootstrap the interpreter that runs it.
+
+Requirements are factored so direct pip users retain a complete interface:
+
+```text
+requirements-dev-common.txt  # shared runtime, native-build, and test tools
+requirements-dev.txt         # includes common requirements plus ./rocisa
+```
+
+Thus `python -m pip install -r requirements-dev.txt` continues to install the
+complete direct-pip development dependency set, while `invoke install` consumes
+the common file and then owns the specialized rocisa installation. Optional
+runtime extras such as profilers, hip-python, and alternate JSON backends remain
+explicit rather than part of the default bootstrap.
+
+Reasoning:
+
+One command is the appropriate ergonomic interface for the common development
+loop, but the underlying commands must remain visible and independently useful.
+Invoke already owns ROCm and GPU-target discovery, compiler selection, client
+flags, and cross-platform command construction. Factoring the requirements
+avoids hard-coding a second dependency list, parsing pip requirement syntax, or
+building rocisa twice.
+
+### D17. Reuse the staged client and preserve release-layout validation
+
+Decision:
+
+The existing synthetic ROCm stage remains part of integrated CMake `BUILD`
+mode. It owns `.info/version` and the copied client at the standard `libexec`
+location while reusing the selected ROCm toolchain. The copy is inexpensive and
+continuously tests the layout expected from a released ROCm artifact without
+writing into `/opt/rocm`.
+
+Both automated source workflows consume the same staged client:
+
+- the CMake-owned private environment resolves it through the standard
+  ROCm-relative binding; and
+- `invoke install` freezes its absolute staged path into the developer's active
+  editable environment.
+
+The fully manual interface may bind any valid absolute client. After changing
+client sources, rerunning `invoke build-client` or `invoke install` refreshes
+the stage. A clean build deliberately leaves the frozen path invalid until the
+stage is rebuilt, which strict validation reports.
+
+Official release wheels are built with no custom config setting against a
+matching staged ROCm root. They contain no custom path record, use the standard
+ROCm-relative binding, and are checked for accidental custom metadata before
+publication. A locally built non-editable custom distribution necessarily
+passes through a wheel internally; such wheels are allowed as machine-local,
+non-relocatable artifacts but must not be distributed.
+
+Reasoning:
+
+Binding the active environment directly to the original CMake output would add
+a third artifact path for little benefit. Reusing the existing staged copy
+keeps the integrated and convenience workflows aligned and preserves continual
+release-layout coverage. Release wheels cannot embed the stage's absolute path
+because that prefix exists only on the build worker.
+
+### D18. Validation and acceptance boundary
+
+Decision:
+
+Custom-path validation is deliberately deterministic. At build time and import
+time, require an absolute path to a regular file and POSIX execute permission
+where applicable. Validate again when internal code retrieves the client.
+Do not execute the client, inspect its linked libraries, hash it, or attempt a
+GPU operation during package installation or import. The developer who
+explicitly binds a source client owns source-revision compatibility; functional
+tests validate actual execution.
+
+The change is complete only when tests cover:
+
+- normal and editable backend builds with and without the custom setting;
+- invalid, relative, missing, directory, non-executable, malformed, and broken
+  custom bindings;
+- final-symlink preservation and correct wheel `RECORD` contents;
+- strict no-fallback behavior and the standard ROCm-relative default;
+- exact release and nightly matching for both binding modes;
+- isolation of two editable environments sharing one checkout;
+- non-editable source installation and sdist exclusion of local paths;
+- absence of public runtime/client constants and mutable global/YAML overrides;
+- `invoke install` ordering, repeatability, active-interpreter targeting, and
+  staged-client selection;
+- integrated CMake standard-layout validation; and
+- release-wheel rejection of custom binding metadata.
+
+Reasoning:
+
+Filesystem and release checks catch deterministic configuration errors without
+requiring a GPU or making packaging depend on client command-line behavior.
+Testing every boundary is necessary because the feature crosses PEP 517 wheel
+construction, PEP 660 editable installation, import-time validation, legacy
+client launch code, CMake staging, and developer orchestration.
+
+### Rejected alternatives for source client binding
+
+- **Copy the custom binary into the Python wheel.** This creates a stale
+  snapshot, transfers native-artifact ownership to pip, and requires reinstall
+  after every client rebuild.
+- **Restore a runtime flag or environment override.** This makes the selected
+  binary invocation-dependent and can silently test the wrong client.
+- **Write generated configuration into the source package.** Shared editable
+  checkouts would make environments overwrite one another.
+- **Emit metadata for the standard binding.** Absence already has one
+  unambiguous meaning, so an explicit two-mode schema duplicates the default
+  without solving a user problem.
+- **Let pip build the C++ client.** Native CMake/toolchain failures do not belong
+  in the Python backend, and the branch deliberately removed Python-side client
+  autobuilding.
+- **Execute the client as package validation.** GPU and dynamic-runtime
+  availability are not guaranteed in build environments, and no stable client
+  ABI/version handshake exists.
+- **Remove the synthetic ROCm stage.** The copy is inexpensive, avoids writes to
+  a system ROCm root, and continuously exercises the release filesystem
+  contract.
+- **Add another shell install script.** The existing Invoke tasks already own
+  the developer build orchestration and are the thinner reusable layer over
+  CMake and pip.
+
 ## Non-Goals
 
 - Changing generated kernel semantics or library logic formats.
