@@ -108,7 +108,7 @@ void testing_csrcolor(const Arguments& arg)
     //
     rocsparse_int            M                 = arg.M;
     rocsparse_index_base     csr_base          = arg.baseA;
-    const floating_data_t<T> fraction_to_color = arg.get_percentage<T>();
+    const floating_data_t<T> fraction_to_color = arg.get_percentage<T>() / 100;
 
     //
     // Local variables.

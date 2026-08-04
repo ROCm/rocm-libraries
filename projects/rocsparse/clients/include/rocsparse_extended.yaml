@@ -157,7 +157,7 @@ Definitions:
   <<: *common
   <<: *dims
   precision: *single_double_precisions_complex_real
-  percentage: [0.5]
+  percentage: [50]
 
 ##############
 # Conversion #
