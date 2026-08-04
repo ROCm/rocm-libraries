@@ -3,6 +3,7 @@
 
 #include <gtest/gtest.h>
 #include <hipdnn-gpu-ref/GpuFpReferenceCommon.hpp>
+#include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 using namespace hipdnn_data_sdk::utilities;
 using namespace hipdnn_gpu_ref::common;
@@ -17,6 +18,8 @@ using BFloat16Type = hipdnn_data_sdk::types::bfloat16;
 
 TEST(TestFillTensorWithRandomValues, FloatValuesAreWithinRange)
 {
+    SKIP_IF_NO_DEVICES();
+
     Tensor<float> tensor({10, 10, 100, 100});
     GpuFpReferenceTensor::fillWithRandomValues(tensor, -1.0f, 10.0f, 42);
 
@@ -34,6 +37,8 @@ TEST(TestFillTensorWithRandomValues, FloatValuesAreWithinRange)
 
 TEST(TestFillTensorWithRandomValues, DoubleValuesAreWithinRange)
 {
+    SKIP_IF_NO_DEVICES();
+
     Tensor<double> tensor({10, 10, 100, 100});
     GpuFpReferenceTensor::fillWithRandomValues(tensor, -1.0, 10.0, 42);
 
@@ -51,6 +56,8 @@ TEST(TestFillTensorWithRandomValues, DoubleValuesAreWithinRange)
 
 TEST(TestFillTensorWithRandomValues, HalfValuesAreWithinRange)
 {
+    SKIP_IF_NO_DEVICES();
+
     Tensor<HalfType> tensor({10, 10, 100, 100});
     GpuFpReferenceTensor::fillWithRandomValues<HalfType>(
         tensor, static_cast<HalfType>(-1.0f), static_cast<HalfType>(10.0f), 42);
@@ -69,6 +76,8 @@ TEST(TestFillTensorWithRandomValues, HalfValuesAreWithinRange)
 
 TEST(TestFillTensorWithRandomValues, BFloat16ValuesAreWithinRange)
 {
+    SKIP_IF_NO_DEVICES();
+
     Tensor<BFloat16Type> tensor({10, 10, 100, 100});
     GpuFpReferenceTensor::fillWithRandomValues<BFloat16Type>(
         tensor, static_cast<BFloat16Type>(-1.0f), static_cast<BFloat16Type>(10.0f), 42);
@@ -91,6 +100,8 @@ TEST(TestFillTensorWithRandomValues, BFloat16ValuesAreWithinRange)
 
 TEST(TestFillTensorWithRandomValues, FloatMeanAndVariance)
 {
+    SKIP_IF_NO_DEVICES();
+
     Tensor<float> tensor({10, 10, 100, 100});
     GpuFpReferenceTensor::fillWithRandomValues(tensor, 2.0f, 20.0f, 42);
 
@@ -115,6 +126,8 @@ TEST(TestFillTensorWithRandomValues, FloatMeanAndVariance)
 
 TEST(TestFillTensorWithRandomValues, HalfMeanAndVariance)
 {
+    SKIP_IF_NO_DEVICES();
+
     Tensor<HalfType> tensor({10, 10, 100, 100});
     GpuFpReferenceTensor::fillWithRandomValues<HalfType>(
         tensor, static_cast<HalfType>(2.0f), static_cast<HalfType>(20.0f), 42);
@@ -140,6 +153,8 @@ TEST(TestFillTensorWithRandomValues, HalfMeanAndVariance)
 
 TEST(TestFillTensorWithRandomValues, BFloat16MeanAndVariance)
 {
+    SKIP_IF_NO_DEVICES();
+
     Tensor<BFloat16Type> tensor({10, 10, 100, 100});
     GpuFpReferenceTensor::fillWithRandomValues<BFloat16Type>(
         tensor, static_cast<BFloat16Type>(2.0f), static_cast<BFloat16Type>(20.0f), 42);
@@ -169,6 +184,8 @@ TEST(TestFillTensorWithRandomValues, BFloat16MeanAndVariance)
 
 TEST(TestFillTensorWithRandomValues, SameSeedProducesSameValues)
 {
+    SKIP_IF_NO_DEVICES();
+
     Tensor<float> tensor1({10, 10, 100, 100});
     Tensor<float> tensor2({10, 10, 100, 100});
 
@@ -187,6 +204,8 @@ TEST(TestFillTensorWithRandomValues, SameSeedProducesSameValues)
 
 TEST(TestFillTensorWithRandomValues, DifferentSeedsProduceDifferentValues)
 {
+    SKIP_IF_NO_DEVICES();
+
     Tensor<float> tensor1({10, 10, 100, 100});
     Tensor<float> tensor2({10, 10, 100, 100});
 
@@ -216,6 +235,8 @@ TEST(TestFillTensorWithRandomValues, DifferentSeedsProduceDifferentValues)
 
 TEST(TestFillTensorWithRandomValues, ConstantTensor)
 {
+    SKIP_IF_NO_DEVICES();
+
     Tensor<float> tensor({10, 10, 100, 100});
     GpuFpReferenceTensor::fillWithRandomValues(tensor, 5.0f, 5.0f, 42);
 
@@ -230,6 +251,8 @@ TEST(TestFillTensorWithRandomValues, ConstantTensor)
 
 TEST(TestFillTensorWithRandomValues, SingleElementTensor)
 {
+    SKIP_IF_NO_DEVICES();
+
     Tensor<float> tensor({1, 1, 1, 1});
     GpuFpReferenceTensor::fillWithRandomValues(tensor, -10.0f, 10.0f, 42);
 
@@ -241,6 +264,8 @@ TEST(TestFillTensorWithRandomValues, SingleElementTensor)
 
 TEST(TestFillTensorWithRandomValues, TensorSizeNotMultipleOfBlockSize)
 {
+    SKIP_IF_NO_DEVICES();
+
     constexpr size_t TENSOR_SIZE = 256 * 10000 + 123; // Not a multiple of BLOCK_SIZE (256)
     Tensor<float> tensor({1, 1, 1, TENSOR_SIZE});
     GpuFpReferenceTensor::fillWithRandomValues(tensor, 3.0f, 10.0f, 42);
