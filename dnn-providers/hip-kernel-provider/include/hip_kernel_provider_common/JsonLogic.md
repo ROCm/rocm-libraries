@@ -103,10 +103,12 @@ begin with `$`.
 
 Data access: `var` (dotted paths, `[N]` array subscripts, `""` whole-document,
 `[path, default]` fallback, and computed `[expr, default]` paths);
-`value_or_default` (`{"value_or_default": ["$x", default]}`) returns the
-variable's value when the path resolves and the default otherwise. It keys on
+`value_or_default` (`{"value_or_default": ["$x", fallback]}`) returns the
+variable's value when the path resolves and the fallback otherwise. It keys on
 *existence* (an unresolved path reads as `null`), not truthiness, so a present
-`0`, `""`, or `false` is returned rather than the default.
+`0`, `""`, or `false` is returned rather than the fallback. The fallback is any
+expression, evaluated lazily, so `["$a", "$b"]` reads "this field, else that
+one".
 
 Logic / control: `if` / `?:`, `and`, `or`, `!`, `!!` (short-circuit, lazy
 branches).
@@ -124,6 +126,14 @@ Math extensions (value-core, for hipDNN dispatch/constraint formulas): `ceil_div
 Membership: `in`. `{"in": [needle, array]}` is true when `array` contains
 `needle` (strict element equality); `{"in": [needle, string]}` is a substring
 test.
+
+Presence: `present`, `not_present`. `{"present": ["$a", "$b"]}` is true when
+every listed path resolves to a non-null value; `{"not_present": [...]}` is true
+when every listed path resolves to null. Both are `and`-folds, so one call
+decides a whole list. They key on the same *existence* mechanism as
+`value_or_default`, and are the only operators that do not propagate a null: an
+unresolved path yields `false`/`true` rather than `null`, because answering
+"was this supplied?" is their whole job.
 
 Value semantics follow JsonLogic/JS: `false`, `0`, `""`, `null` and the empty
 array are falsy; `Number()`-style coercion drives arithmetic and ordering.

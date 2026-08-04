@@ -37,8 +37,9 @@
 // Strings without the sigil remain literals, so stock rules keep working.
 //
 // Scope: core operator set (data access, logic, comparison, arithmetic), the
-// membership operator `in`, the `value_or_default` fallback, and the value-core
-// math extensions the hipDNN UMD needs (ceil_div, abs, pow, log2, rsqrt).
+// membership operator `in`, the `value_or_default` fallback, the `present` /
+// `not_present` resolution predicates, and the value-core math extensions the
+// hipDNN UMD needs (ceil_div, abs, pow, log2, rsqrt).
 // Collection/string operators (map/reduce/filter/cat/substr/...) are not
 // included.
 
@@ -427,7 +428,9 @@ enum class Op
     POW,
     LOG2,
     RSQRT,
-    VALUE_OR_DEFAULT
+    VALUE_OR_DEFAULT,
+    PRESENT,
+    NOT_PRESENT
 };
 
 struct Node
@@ -693,6 +696,24 @@ struct OpNode final : Node
             Value const v = args[0]->eval(d);
             return v.isNull() ? args[1]->eval(d) : v;
         }
+        case Op::PRESENT:
+        case Op::NOT_PRESENT:
+        {
+            // Presence keys on *existence*, the same mechanism as
+            // VALUE_OR_DEFAULT above: an unresolved path reads null. Unlike
+            // every other operator these do not propagate that null -- asking
+            // "was this supplied?" always yields a real boolean. Both fold with
+            // `and` over their arguments, so one call decides a whole list.
+            const bool wantNull = (op == Op::NOT_PRESENT);
+            for(const auto& c : args)
+            {
+                if(c->eval(d).isNull() != wantNull)
+                {
+                    return {false};
+                }
+            }
+            return {true};
+        }
         default:
             break;
         }
@@ -710,7 +731,7 @@ struct OpNode final : Node
 
 inline const Op* lookupOp(const std::string& key)
 {
-    static const std::array<std::pair<const char*, Op>, 26> s_table
+    static const std::array<std::pair<const char*, Op>, 28> s_table
         = {{{"+", Op::ADD},
             {"-", Op::SUB},
             {"*", Op::MUL},
@@ -736,7 +757,9 @@ inline const Op* lookupOp(const std::string& key)
             {"pow", Op::POW},
             {"log2", Op::LOG2},
             {"rsqrt", Op::RSQRT},
-            {"value_or_default", Op::VALUE_OR_DEFAULT}}};
+            {"value_or_default", Op::VALUE_OR_DEFAULT},
+            {"present", Op::PRESENT},
+            {"not_present", Op::NOT_PRESENT}}};
     for(const auto& e : s_table)
     {
         if(key == e.first)
@@ -794,6 +817,10 @@ inline void checkArity(Op op, std::size_t n, const std::string& key)
     case Op::CEIL_DIV:
     case Op::VALUE_OR_DEFAULT:
         require(n == 2);
+        break;
+    case Op::PRESENT:
+    case Op::NOT_PRESENT:
+        require(n >= 1);
         break;
     case Op::ABS:
     case Op::LOG2:

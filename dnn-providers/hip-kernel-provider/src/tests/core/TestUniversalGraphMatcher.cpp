@@ -17,6 +17,7 @@
 #include <nlohmann/json.hpp>
 
 #include <cstdint>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -84,11 +85,14 @@ std::vector<std::int64_t> contiguousStrides(const std::vector<std::int64_t>& dim
 }
 
 // Build a single-node SDPA-forward graph with the given per-tensor dims and
-// dtype (contiguous strides), returning the owning builder.
+// dtype (contiguous strides), returning the owning builder. `withScale` adds
+// the optional `scale` operand as a pass-by-value tensor carrying a
+// compile-time Float32 value of 1.0.
 flatbuffers::FlatBufferBuilder buildSdpaGraph(const std::vector<std::int64_t>& dims,
                                               data::DataType dtype,
                                               bool withAttnMask = false,
-                                              bool overrideShape = false)
+                                              bool overrideShape = false,
+                                              bool withScale = false)
 {
     const std::vector<std::int64_t> strides = contiguousStrides(dims);
     return hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(dims,
@@ -101,7 +105,7 @@ flatbuffers::FlatBufferBuilder buildSdpaGraph(const std::vector<std::int64_t>& d
                                                                strides,
                                                                dtype,
                                                                withAttnMask,
-                                                               /*withScale=*/false,
+                                                               withScale,
                                                                /*withStats=*/false,
                                                                /*alibiMask=*/false,
                                                                /*paddingMask=*/false,
@@ -599,17 +603,29 @@ json sdpaKernelDescriptor()
 TEST(UmdCompiler, AcceptsKernelReference)
 {
     // A criterion over a $kernel field compiles (DYNAMIC wildcard) and the
-    // descriptor is flagged as referencing kernel metadata.
+    // field name it reads is recorded.
     umd::CompiledUmd c;
     ASSERT_NO_THROW(c = umd::UmdCompiler::compile(sdpaKernelDescriptor()));
-    EXPECT_TRUE(c.referencesKernelMetadata);
+    EXPECT_EQ(c.kernelFields, (std::set<std::string>{"head_dim"}));
     EXPECT_TRUE(c.boundSymbols.count("kernel.head_dim") == 1);
 }
 
 TEST(UmdCompiler, StockDescriptorDoesNotReferenceKernel)
 {
     const umd::CompiledUmd c = umd::UmdCompiler::compile(sdpaDescriptor());
-    EXPECT_FALSE(c.referencesKernelMetadata);
+    EXPECT_TRUE(c.kernelFields.empty());
+}
+
+TEST(UmdCompiler, RecordsEveryDistinctKernelFieldRead)
+{
+    // The memoization key is the set of `$kernel.*` fields the matcher reads,
+    // without the `kernel.` prefix; a field read twice contributes once, and a
+    // subscripted path contributes its subscript form (RFC 0017 §5).
+    json d = sdpaDescriptor();
+    d["criteria"]["and"].push_back(json::parse(R"({"==": ["$kernel.tile_m", 64]})"));
+    d["criteria"]["and"].push_back(json::parse(R"({"<": ["$kernel.tile_m", "$kernel.tile_n"]})"));
+    const umd::CompiledUmd c = umd::UmdCompiler::compile(d);
+    EXPECT_EQ(c.kernelFields, (std::set<std::string>{"tile_m", "tile_n"}));
 }
 
 TEST(UmdCompiler, KernelFieldUnifiesWithAnyScalarDomain)
@@ -674,6 +690,27 @@ TEST(UniversalGraphMatcher, ReportsKernelMetadataReference)
     EXPECT_FALSE(m.referencesKernelMetadata());
 }
 
+TEST(UniversalGraphMatcher, PublishesKernelFieldsItReads)
+{
+    // The set is the loader's KMD existence check and the per-kernel
+    // memoization key (RFC 0017 §5): exactly the names read, prefix stripped.
+    const umd::UniversalGraphMatcher mk(sdpaKernelDescriptor());
+    EXPECT_EQ(mk.kernelFields(), (std::set<std::string>{"head_dim"}));
+    // A graph-only matcher reads none, which is what makes the two-argument
+    // match() overload legal for it.
+    const umd::UniversalGraphMatcher m = makeSdpaMatcher();
+    EXPECT_TRUE(m.kernelFields().empty());
+}
+
+TEST(UniversalGraphMatcher, PublishesBoundSymbols)
+{
+    // A pack's dispatch descriptor is checked against the fields its matchers
+    // bind, so the set must be reachable from the matcher (RFC 0017 §6).
+    const umd::UniversalGraphMatcher m = makeSdpaMatcher();
+    EXPECT_EQ(m.boundSymbols(), m.descriptor().boundSymbols);
+    EXPECT_TRUE(m.boundSymbols().count("q.head_size") == 1);
+}
+
 TEST(UniversalGraphMatcher, TwoArgMatchThrowsWhenDescriptorNeedsKernel)
 {
     const umd::UniversalGraphMatcher m(sdpaKernelDescriptor());
@@ -713,4 +750,446 @@ TEST(UniversalGraphMatcher, EmptyKernelMetadataDeclinesComparison)
     auto builder = buildSdpaGraph({2, 8, 16, 128}, data::DataType::BFLOAT16);
     fbu::GraphWrapper const g(builder.GetBufferPointer(), builder.GetSize());
     EXPECT_NO_THROW({ EXPECT_FALSE(m.match(K_DEVICE, g, json::object()).matched); });
+}
+
+// ---- Descriptor versions (RFC 0017 §4 / A.10 §1) -------------------------
+
+TEST(UmdCompiler, AcceptsAndPublishesWellFormedVersions)
+{
+    json d = sdpaDescriptor();
+    d["version"] = "1.0";
+    d["sdk_version"] = "1.2";
+    umd::CompiledUmd c;
+    ASSERT_NO_THROW(c = umd::UmdCompiler::compile(d));
+    EXPECT_EQ(c.version, "1.0");
+    EXPECT_EQ(c.sdkVersion, "1.2");
+}
+
+TEST(UmdCompiler, VersionKeysAreOptional)
+{
+    // A descriptor omitting both still compiles; the fields read empty so a
+    // loader can tell "undeclared" from "declared 1.0".
+    const umd::CompiledUmd c = umd::UmdCompiler::compile(sdpaDescriptor());
+    EXPECT_TRUE(c.version.empty());
+    EXPECT_TRUE(c.sdkVersion.empty());
+}
+
+TEST(UmdCompiler, RejectsMalformedVersion)
+{
+    for(const char* bad : {"1", "1.0.0", "1.", ".0", "+1.0", "-1.0", "1.x", "one.zero", ""})
+    {
+        json d = sdpaDescriptor();
+        d["version"] = bad;
+        EXPECT_THROW(umd::UmdCompiler::compile(d), umd::UmdCompileError) << bad;
+        json e = sdpaDescriptor();
+        e["sdk_version"] = bad;
+        EXPECT_THROW(umd::UmdCompiler::compile(e), umd::UmdCompileError) << bad;
+    }
+}
+
+TEST(UmdCompiler, RejectsNonStringVersion)
+{
+    json d = sdpaDescriptor();
+    d["version"] = 1.0;
+    EXPECT_THROW(umd::UmdCompiler::compile(d), umd::UmdCompileError);
+}
+
+TEST(UmdCompiler, RejectsSdkVersionBelowFloor)
+{
+    // The graph schema the matcher was authored against predates what this
+    // compiler serves, so it is declined before it runs.
+    json d = sdpaDescriptor();
+    d["sdk_version"] = "0.9";
+    EXPECT_THROW(umd::UmdCompiler::compile(d), umd::UmdCompileError);
+}
+
+TEST(UmdCompiler, RejectsVersionBelowFloor)
+{
+    json d = sdpaDescriptor();
+    d["version"] = "0.1";
+    EXPECT_THROW(umd::UmdCompiler::compile(d), umd::UmdCompileError);
+}
+
+TEST(UmdCompiler, VersionFloorIsNumericNotLexicographic)
+{
+    // "1.10" is above "1.9" numerically but below it as text; a lexicographic
+    // comparison would decline it.
+    EXPECT_TRUE(umd::UmdCompiler::versionAtLeast("1.10", "1.9"));
+    EXPECT_FALSE(umd::UmdCompiler::versionAtLeast("1.9", "1.10"));
+    EXPECT_FALSE(umd::UmdCompiler::versionAtLeast("2.0", "10.0"));
+    EXPECT_TRUE(umd::UmdCompiler::versionAtLeast("10.0", "2.0"));
+    // equal is at the floor, not below it
+    EXPECT_TRUE(umd::UmdCompiler::versionAtLeast("1.0", "1.0"));
+    // an unparseable version is below every floor (fail closed)
+    EXPECT_FALSE(umd::UmdCompiler::versionAtLeast("1", "1.0"));
+
+    json d = sdpaDescriptor();
+    d["sdk_version"] = "1.10";
+    d["version"] = "1.10";
+    EXPECT_NO_THROW(umd::UmdCompiler::compile(d));
+}
+
+// ---- present / not_present (RFC 0017 §5) ---------------------------------
+
+namespace
+{
+
+// The SDPA descriptor with its `.present` field gates on the three optional
+// operands replaced by the `not_present` operator over the same list.
+json sdpaNotPresentDescriptor()
+{
+    json d = sdpaDescriptor();
+    json& crit = d["criteria"]["and"];
+    // Drop the three trailing `{"!": "$x.present"}` field-form gates.
+    crit.erase(crit.size() - 1);
+    crit.erase(crit.size() - 1);
+    crit.erase(crit.size() - 1);
+    crit.push_back(
+        json::parse(R"({"not_present": ["$attn_mask", "$page_table_k", "$page_table_v"]})"));
+    return d;
+}
+
+} // namespace
+
+TEST(UmdCompiler, AcceptsPresenceOperators)
+{
+    EXPECT_NO_THROW(umd::UmdCompiler::compile(sdpaNotPresentDescriptor()));
+
+    // `present`/`not_present` are the general form: unlike the `.present`
+    // FIELD, they apply to a required operand too.
+    for(const char* crit : {R"({"present": ["$q"]})",
+                            R"({"not_present": ["$attn_mask"]})",
+                            R"({"present": ["$q", "$k", "$v"]})",
+                            R"({"or": [{"not_present": ["$attn_mask"]}, {"present": ["$q"]}]})"})
+    {
+        json d = sdpaDescriptor();
+        d["criteria"]["and"].push_back(json::parse(crit));
+        EXPECT_NO_THROW(umd::UmdCompiler::compile(d)) << crit;
+    }
+}
+
+TEST(UmdCompiler, RejectsPresenceOperatorOnNonReference)
+{
+    for(const char* bad : {R"({"present": [4]})",
+                           R"({"present": ["BFLOAT16"]})",
+                           R"({"not_present": [{"+": ["$q.rank", 1]}]})",
+                           R"({"present": ["$q", 4]})",
+                           R"({"present": []})"})
+    {
+        json d = sdpaDescriptor();
+        d["criteria"]["and"].push_back(json::parse(bad));
+        EXPECT_THROW(umd::UmdCompiler::compile(d), umd::UmdCompileError) << bad;
+    }
+}
+
+TEST(UmdCompiler, RejectsPresenceOperatorOnUnresolvedReference)
+{
+    json d = sdpaDescriptor();
+    d["criteria"]["and"].push_back(json::parse(R"({"present": ["$not_a_tensor"]})"));
+    EXPECT_THROW(umd::UmdCompiler::compile(d), umd::UmdCompileError);
+}
+
+TEST(UniversalGraphMatcher, NotPresentOperatorMatchesWhenOptionalsAbsent)
+{
+    const umd::UniversalGraphMatcher m(sdpaNotPresentDescriptor());
+    auto builder = buildSdpaGraph({2, 8, 16, 128}, data::DataType::BFLOAT16);
+    fbu::GraphWrapper const g(builder.GetBufferPointer(), builder.GetSize());
+    EXPECT_TRUE(m.match(K_DEVICE, g).matched);
+}
+
+TEST(UniversalGraphMatcher, NotPresentOperatorDeclinesWhenAnyOptionalBound)
+{
+    // The n-ary form is an `and`-fold: one supplied operand out of the list
+    // decides the whole call.
+    const umd::UniversalGraphMatcher m(sdpaNotPresentDescriptor());
+    auto builder = buildSdpaGraph({2, 8, 16, 128}, data::DataType::BFLOAT16, /*withAttnMask=*/true);
+    fbu::GraphWrapper const g(builder.GetBufferPointer(), builder.GetSize());
+    EXPECT_FALSE(m.match(K_DEVICE, g).matched);
+}
+
+TEST(UniversalGraphMatcher, PresenceOperatorsEvaluateRatherThanDecline)
+{
+    // The key distinction from a bare field read: a field read on an absent
+    // optional resolves null and declines, but `present`/`not_present` always
+    // produce a boolean, so a criterion built only from them still matches.
+    json d = sdpaDescriptor();
+    json& crit = d["criteria"]["and"];
+    crit.erase(crit.size() - 1);
+    crit.erase(crit.size() - 1);
+    crit.erase(crit.size() - 1);
+    // `$attn_mask` is absent; `present` on it is false, so `!` of it is true.
+    crit.push_back(json::parse(R"({"!": {"present": ["$attn_mask"]}})"));
+    // `$q` is a required operand and always bound.
+    crit.push_back(json::parse(R"({"present": ["$q", "$k", "$v", "$o"]})"));
+
+    const umd::UniversalGraphMatcher m(d);
+    auto builder = buildSdpaGraph({2, 8, 16, 128}, data::DataType::BFLOAT16);
+    fbu::GraphWrapper const g(builder.GetBufferPointer(), builder.GetSize());
+    EXPECT_TRUE(m.match(K_DEVICE, g).matched);
+}
+
+TEST(UniversalGraphMatcher, PresentOperatorSeesABoundOptional)
+{
+    // Same descriptor, but the graph supplies `attn_mask`: `present` now reads
+    // true and the criterion declines, proving it tracks binding rather than
+    // returning a constant.
+    json d = sdpaDescriptor();
+    json& crit = d["criteria"]["and"];
+    crit.erase(crit.size() - 1);
+    crit.erase(crit.size() - 1);
+    crit.erase(crit.size() - 1);
+    crit.push_back(json::parse(R"({"!": {"present": ["$attn_mask"]}})"));
+
+    const umd::UniversalGraphMatcher m(d);
+    auto bound = buildSdpaGraph({2, 8, 16, 128}, data::DataType::BFLOAT16, /*withAttnMask=*/true);
+    fbu::GraphWrapper const gb(bound.GetBufferPointer(), bound.GetSize());
+    EXPECT_FALSE(m.match(K_DEVICE, gb).matched);
+
+    auto absent = buildSdpaGraph({2, 8, 16, 128}, data::DataType::BFLOAT16);
+    fbu::GraphWrapper const ga(absent.GetBufferPointer(), absent.GetSize());
+    EXPECT_TRUE(m.match(K_DEVICE, ga).matched);
+}
+
+// ---- value_or_default with an expression fallback (RFC 0017 §5) ----------
+
+TEST(UmdCompiler, ValueOrDefaultAcceptsFieldReferenceFallback)
+{
+    // "this field, else that one": both arms are Int, so the pair unifies.
+    json d = sdpaDescriptor();
+    d["criteria"]["and"].push_back(
+        json::parse(R"({"==": [{"value_or_default": ["$q.head_size", "$k.head_size"]}, 128]})"));
+    EXPECT_NO_THROW(umd::UmdCompiler::compile(d));
+}
+
+TEST(UmdCompiler, ValueOrDefaultAcceptsDynamicArm)
+{
+    // A `$kernel.*` arm is DYNAMIC, so the other arm supplies the result kind
+    // and the comparison against an Int still type-checks.
+    json d = sdpaDescriptor();
+    d["criteria"]["and"].push_back(
+        json::parse(R"({"==": [{"value_or_default": ["$kernel.tile_m", 64]}, 128]})"));
+    EXPECT_NO_THROW(umd::UmdCompiler::compile(d));
+    json e = sdpaDescriptor();
+    e["criteria"]["and"].push_back(
+        json::parse(R"({"==": [{"value_or_default": ["$q.head_size", "$kernel.tile_m"]}, 128]})"));
+    EXPECT_NO_THROW(umd::UmdCompiler::compile(e));
+}
+
+TEST(UmdCompiler, RejectsTypeIncompatibleValueOrDefaultArms)
+{
+    for(const char* bad :
+        {R"({"==": [{"value_or_default": ["$q.head_size", "BFLOAT16"]}, 128]})",
+         R"({"==": [{"value_or_default": ["$q.dtype", 4]}, "BFLOAT16"]})",
+         R"({"==": [{"value_or_default": ["$q.head_size", "$q.stride_order"]}, 128]})"})
+    {
+        json d = sdpaDescriptor();
+        d["criteria"]["and"].push_back(json::parse(bad));
+        EXPECT_THROW(umd::UmdCompiler::compile(d), umd::UmdCompileError) << bad;
+    }
+}
+
+TEST(UniversalGraphMatcher, ValueOrDefaultFallsBackToTheSecondField)
+{
+    // `$sdpa_fwd.dropout_probability` is an unset optional attribute, so the
+    // fallback expression is evaluated and its value is what the comparison
+    // sees.
+    json d = sdpaDescriptor();
+    d["criteria"]["and"].push_back(json::parse(
+        R"({"==": [{"value_or_default": ["$sdpa_fwd.dropout_probability", "$q.head_size"]}, 128]})"));
+    const umd::UniversalGraphMatcher m(d);
+    auto builder = buildSdpaGraph({2, 8, 16, 128}, data::DataType::BFLOAT16);
+    fbu::GraphWrapper const g(builder.GetBufferPointer(), builder.GetSize());
+    EXPECT_TRUE(m.match(K_DEVICE, g).matched);
+}
+
+// ---- $graph.is_override_shape_enabled (RFC 0017 §5) ----------------------
+
+TEST(UmdCompiler, AcceptsGraphOverrideShapeFlag)
+{
+    json d = sdpaDescriptor();
+    d["criteria"]["and"].push_back(json::parse(R"({"!": "$graph.is_override_shape_enabled"})"));
+    umd::CompiledUmd c;
+    ASSERT_NO_THROW(c = umd::UmdCompiler::compile(d));
+    EXPECT_TRUE(c.boundSymbols.count("graph.is_override_shape_enabled") == 1);
+}
+
+TEST(UmdCompiler, RejectsGraphOverrideShapeFlagAgainstNonBool)
+{
+    // The flag is Bool; comparing it to an int is a static type error.
+    json d = sdpaDescriptor();
+    d["criteria"]["and"].push_back(
+        json::parse(R"({"==": ["$graph.is_override_shape_enabled", 1]})"));
+    EXPECT_THROW(umd::UmdCompiler::compile(d), umd::UmdCompileError);
+}
+
+TEST(BindingContext, ResolvesGraphOverrideShapeFlag)
+{
+    // The descriptor key `allow_override_shape` is the MATCHER's opt-in; the
+    // `$graph.is_override_shape_enabled` token is the GRAPH's state. A matcher
+    // that opts in still sees the graph's flag.
+    json d = sdpaDescriptor();
+    d["allow_override_shape"] = true;
+    const umd::UniversalGraphMatcher m(d);
+
+    auto plain = buildSdpaGraph({2, 8, 16, 128}, data::DataType::BFLOAT16);
+    fbu::GraphWrapper const gp(plain.GetBufferPointer(), plain.GetSize());
+    const umd::MatchResult rp = m.match(K_DEVICE, gp);
+    ASSERT_TRUE(rp.matched);
+    EXPECT_TRUE(rp.bindings.get("$graph.is_override_shape_enabled").isBool());
+    EXPECT_FALSE(rp.bindings.get("$graph.is_override_shape_enabled").asBool());
+
+    auto overriden = buildSdpaGraph({2, 8, 16, 128},
+                                    data::DataType::BFLOAT16,
+                                    /*withAttnMask=*/false,
+                                    /*overrideShape=*/true);
+    fbu::GraphWrapper const go(overriden.GetBufferPointer(), overriden.GetSize());
+    const umd::MatchResult ro = m.match(K_DEVICE, go);
+    ASSERT_TRUE(ro.matched);
+    EXPECT_TRUE(ro.bindings.get("$graph.is_override_shape_enabled").asBool());
+}
+
+TEST(UniversalGraphMatcher, DeclinesOnGraphOverrideShapeFlagCriterion)
+{
+    // An opted-in matcher can still refuse an override-shape graph by reading
+    // the graph's own flag.
+    json d = sdpaDescriptor();
+    d["allow_override_shape"] = true;
+    d["criteria"]["and"].push_back(json::parse(R"({"!": "$graph.is_override_shape_enabled"})"));
+    const umd::UniversalGraphMatcher m(d);
+
+    auto overriden = buildSdpaGraph({2, 8, 16, 128},
+                                    data::DataType::BFLOAT16,
+                                    /*withAttnMask=*/false,
+                                    /*overrideShape=*/true);
+    fbu::GraphWrapper const go(overriden.GetBufferPointer(), overriden.GetSize());
+    EXPECT_FALSE(m.match(K_DEVICE, go).matched);
+
+    auto plain = buildSdpaGraph({2, 8, 16, 128}, data::DataType::BFLOAT16);
+    fbu::GraphWrapper const gp(plain.GetBufferPointer(), plain.GetSize());
+    EXPECT_TRUE(m.match(K_DEVICE, gp).matched);
+}
+
+// ---- $q.is_runtime_pass_by_value / $q.value_f32 (RFC 0017 §5) ------------
+
+namespace
+{
+
+// The SDPA descriptor with the optional `scale` operand bound, so the tensor
+// carrying a compile-time value is reachable as `$scale`.
+json sdpaScaleDescriptor()
+{
+    json d = sdpaDescriptor();
+    d["nodes"][0]["operands"]["scale"] = "$scale?";
+    return d;
+}
+
+} // namespace
+
+TEST(UmdCompiler, AcceptsTensorValueFields)
+{
+    json d = sdpaScaleDescriptor();
+    d["criteria"]["and"].push_back(json::parse(R"({"!": "$scale.is_runtime_pass_by_value"})"));
+    d["criteria"]["and"].push_back(json::parse(R"({"==": ["$scale.value_f32", 1.0]})"));
+    EXPECT_NO_THROW(umd::UmdCompiler::compile(d));
+}
+
+TEST(UmdCompiler, TensorValueFieldsAreTyped)
+{
+    // is_runtime_pass_by_value is Bool and value_f32 is Float; using either in
+    // the wrong domain is a static type error.
+    json d = sdpaScaleDescriptor();
+    d["criteria"]["and"].push_back(
+        json::parse(R"({"==": ["$scale.is_runtime_pass_by_value", 1]})"));
+    EXPECT_THROW(umd::UmdCompiler::compile(d), umd::UmdCompileError);
+
+    json e = sdpaScaleDescriptor();
+    e["criteria"]["and"].push_back(json::parse(R"({"==": ["$scale.value_f32", "BFLOAT16"]})"));
+    EXPECT_THROW(umd::UmdCompiler::compile(e), umd::UmdCompileError);
+
+    json f = sdpaScaleDescriptor();
+    f["criteria"]["and"].push_back(json::parse(R"({"<": ["$scale.value_f32", 2.0]})"));
+    EXPECT_NO_THROW(umd::UmdCompiler::compile(f));
+}
+
+TEST(UmdCompiler, RejectsShapeDimNameCollidingWithTensorValueFields)
+{
+    // A.10 §7: a `shape` short-hand may not name a dim after a reserved field.
+    for(const char* name : {"is_runtime_pass_by_value", "value_f32"})
+    {
+        json d = sdpaDescriptor();
+        d["criteria"]["and"].push_back(
+            json{{"shape", json::array({"$o", json::array({"b", "h", "s", name})})}});
+        EXPECT_THROW(umd::UmdCompiler::compile(d), umd::UmdCompileError) << name;
+    }
+}
+
+TEST(BindingContext, ResolvesTensorValueFields)
+{
+    const umd::UniversalGraphMatcher m(sdpaScaleDescriptor());
+    auto builder = buildSdpaGraph({2, 8, 16, 128},
+                                  data::DataType::BFLOAT16,
+                                  /*withAttnMask=*/false,
+                                  /*overrideShape=*/false,
+                                  /*withScale=*/true);
+    fbu::GraphWrapper const g(builder.GetBufferPointer(), builder.GetSize());
+
+    const umd::MatchResult r = m.match(K_DEVICE, g);
+    ASSERT_TRUE(r.matched);
+    const umd::BindingContext& b = r.bindings;
+
+    // The scale tensor carries a compile-time Float32 value of 1.0, baked into
+    // the graph rather than supplied per execution.
+    EXPECT_FALSE(b.get("$scale.is_runtime_pass_by_value").asBool());
+    EXPECT_DOUBLE_EQ(b.get("$scale.value_f32").toNumber(), 1.0);
+
+    // A regular data tensor carries neither.
+    EXPECT_FALSE(b.get("$q.is_runtime_pass_by_value").asBool());
+    EXPECT_TRUE(b.get("$q.value_f32").isNull());
+}
+
+TEST(BindingContext, ValueF32DeclinesWithoutACompileTimeValue)
+{
+    // "present only when the tensor carries a compile-time value at all": the
+    // union is NONE, so the token reads null and a criterion over it declines
+    // rather than seeing a zero that would satisfy a comparison.
+    const umd::UniversalGraphMatcher m = makeSdpaMatcher();
+    auto builder = buildSdpaGraph({2, 8, 16, 128}, data::DataType::BFLOAT16);
+    fbu::GraphWrapper const g(builder.GetBufferPointer(), builder.GetSize());
+
+    const umd::MatchResult r = m.match(K_DEVICE, g);
+    ASSERT_TRUE(r.matched);
+    EXPECT_TRUE(r.bindings.get("$q.value_f32").isNull());
+    EXPECT_FALSE(r.bindings.get("$q.value_f32").isNumber());
+}
+
+TEST(UniversalGraphMatcher, DeclinesOnValueF32OfAValuelessTensor)
+{
+    // The fail-closed consequence: a criterion reading value_f32 on a tensor
+    // with no compile-time value declines the whole match.
+    json d = sdpaDescriptor();
+    d["criteria"]["and"].push_back(json::parse(R"({"==": ["$q.value_f32", 0.0]})"));
+    const umd::UniversalGraphMatcher m(d);
+    auto builder = buildSdpaGraph({2, 8, 16, 128}, data::DataType::BFLOAT16);
+    fbu::GraphWrapper const g(builder.GetBufferPointer(), builder.GetSize());
+    EXPECT_FALSE(m.match(K_DEVICE, g).matched);
+}
+
+TEST(UniversalGraphMatcher, MatchesOnACompileTimeScaleValue)
+{
+    json d = sdpaScaleDescriptor();
+    d["criteria"]["and"].push_back(json::parse(R"({"==": ["$scale.value_f32", 1.0]})"));
+    const umd::UniversalGraphMatcher m(d);
+
+    auto withScale = buildSdpaGraph({2, 8, 16, 128},
+                                    data::DataType::BFLOAT16,
+                                    /*withAttnMask=*/false,
+                                    /*overrideShape=*/false,
+                                    /*withScale=*/true);
+    fbu::GraphWrapper const gs(withScale.GetBufferPointer(), withScale.GetSize());
+    EXPECT_TRUE(m.match(K_DEVICE, gs).matched);
+
+    // No scale operand at all -> the field read on an absent optional declines.
+    auto noScale = buildSdpaGraph({2, 8, 16, 128}, data::DataType::BFLOAT16);
+    fbu::GraphWrapper const gn(noScale.GetBufferPointer(), noScale.GetSize());
+    EXPECT_FALSE(m.match(K_DEVICE, gn).matched);
 }

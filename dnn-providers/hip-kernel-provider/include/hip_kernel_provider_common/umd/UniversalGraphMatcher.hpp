@@ -36,6 +36,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <memory>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
@@ -97,7 +98,24 @@ public:
     // the two-argument overload throws for it.
     bool referencesKernelMetadata() const
     {
-        return _umd->referencesKernelMetadata;
+        return !_umd->kernelFields.empty();
+    }
+
+    // The `$kernel.<field>` names this matcher reads, without the `kernel.`
+    // prefix. A KDP/KMD loader checks each name exists in the engine's KMD and
+    // uses the set as the key that memoizes this matcher per distinct kernel
+    // field tuple, rather than per kernel (RFC 0017 §5).
+    const std::set<std::string>& kernelFields() const
+    {
+        return _umd->kernelFields;
+    }
+
+    // The variable paths the descriptor's criteria bind, so a pack's dispatch
+    // descriptor can be checked against the fields its matchers publish
+    // (RFC 0017 §6).
+    const std::set<std::string>& boundSymbols() const
+    {
+        return _umd->boundSymbols;
     }
 
     // Match a graph against this matcher's single descriptor.
@@ -107,7 +125,7 @@ public:
     // three-argument overload. Use referencesKernelMetadata() to route.
     MatchResult match(const DeviceProperties& device, const IGraph& graph) const
     {
-        if(_umd->referencesKernelMetadata)
+        if(referencesKernelMetadata())
         {
             throw std::logic_error(
                 "UMD '" + _umd->id

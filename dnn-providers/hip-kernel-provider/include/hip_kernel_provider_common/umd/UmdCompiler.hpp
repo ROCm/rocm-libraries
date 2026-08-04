@@ -95,16 +95,24 @@ struct CompiledUmd
 {
     std::string id;
     std::string name;
+    // Matcher format version and the hipDNN graph schema version this matcher
+    // was authored against; empty when the descriptor declares neither
+    // (RFC 0017 §4).
+    std::string version;
+    std::string sdkVersion;
     bool allowOverrideShape = false;
     std::vector<NodeSpec> nodes;
     std::vector<TensorVarSpec> tvars;
     jlogic::Expression<BindingContext> criteria;
     std::set<std::string> boundSymbols;
 
-    // True when the criteria expression references any `$kernel.<field>`. Set
-    // once by UmdCompiler::run() and immutable thereafter; the matcher reads it
-    // to route between the metadata and non-metadata match overloads.
-    bool referencesKernelMetadata = false;
+    // The `$kernel.<field>` names the criteria expression reads, without the
+    // `kernel.` prefix (`$kernel.tile_m` contributes "tile_m"). Set once by
+    // UmdCompiler::run() and immutable thereafter; empty for a graph-only
+    // matcher, which is what routes between the metadata and non-metadata
+    // match overloads. A KDP/KMD loader checks each name exists in the engine's
+    // KMD and uses the set as the per-kernel memoization key (RFC 0017 §5).
+    std::set<std::string> kernelFields;
 
     const TensorVarSpec* findTvar(const std::string& tvar) const
     {
@@ -152,6 +160,29 @@ public:
         return c.run(descriptor);
     }
 
+    // The oldest matcher format version and hipDNN graph schema (SDK) version
+    // this compiler accepts. A descriptor declaring less is declined before it
+    // runs (RFC 0017 §4 / A.10 §1).
+    static constexpr const char* K_MIN_VERSION = "1.0";
+    static constexpr const char* K_MIN_SDK_VERSION = "1.0";
+
+    // True when the "<major>.<minor>" `version` is at or above `floor`.
+    // Compared numerically on (major, minor), never lexicographically, so
+    // "1.10" ranks above "1.9". A version that does not parse is below every
+    // floor (fail closed).
+    static bool versionAtLeast(const std::string& version, const std::string& floor)
+    {
+        std::size_t major = 0;
+        std::size_t minor = 0;
+        std::size_t floorMajor = 0;
+        std::size_t floorMinor = 0;
+        if(!parseVersion(version, major, minor) || !parseVersion(floor, floorMajor, floorMinor))
+        {
+            return false;
+        }
+        return major > floorMajor || (major == floorMajor && minor >= floorMinor);
+    }
+
 private:
     // Static type domain for A.10 §9. Numeric unifies Int and Float; ARRAY
     // carries its element kind for `in` / IntArray equality. DYNAMIC is a
@@ -184,12 +215,42 @@ private:
         return k == Kind::INT || k == Kind::FLOAT;
     }
 
+    // Kind rendered for a diagnostic (A.10 §9).
+    static std::string kindName(Kind k)
+    {
+        switch(k)
+        {
+        case Kind::INT:
+            return "Int";
+        case Kind::FLOAT:
+            return "Float";
+        case Kind::BOOL:
+            return "Bool";
+        case Kind::DTYPE:
+            return "Dtype";
+        case Kind::ARRAY:
+            return "Array";
+        case Kind::TENSOR:
+            return "Tensor";
+        case Kind::JSON_NULL:
+            return "Null";
+        case Kind::DYNAMIC:
+            return "Dynamic";
+        default:
+            break;
+        }
+        return "Unknown";
+    }
+
     CompiledUmd run(const nlohmann::json& d)
     {
         CompiledUmd out;
         validateTopLevel(d);
         out.id = d.at("id").get<std::string>();
         out.name = d.at("name").get<std::string>();
+        out.version = d.contains("version") ? d.at("version").get<std::string>() : std::string();
+        out.sdkVersion
+            = d.contains("sdk_version") ? d.at("sdk_version").get<std::string>() : std::string();
         out.allowOverrideShape
             = d.contains("allow_override_shape") ? d.at("allow_override_shape").get<bool>() : false;
 
@@ -208,8 +269,14 @@ private:
             // Validate each reference resolves (A.10 §8); varTypeOf throws if not.
             varTypeOf(sym, out);
             out.boundSymbols.insert(sym);
+            std::string root;
+            std::string rest;
+            path::splitRoot(sym, root, rest);
+            if(root == "kernel")
+            {
+                out.kernelFields.insert(rest);
+            }
         }
-        out.referencesKernelMetadata = jlogic::referencesVariableRoot(out.criteria, "kernel");
         return out;
     }
 
@@ -220,8 +287,14 @@ private:
         {
             throw UmdCompileError("descriptor must be a JSON object");
         }
-        static const std::set<std::string> s_allowed
-            = {"schema", "id", "name", "allow_override_shape", "nodes", "criteria"};
+        static const std::set<std::string> s_allowed = {"schema",
+                                                        "version",
+                                                        "sdk_version",
+                                                        "id",
+                                                        "name",
+                                                        "allow_override_shape",
+                                                        "nodes",
+                                                        "criteria"};
         for(const auto& [key, value] : d.items())
         {
             if(s_allowed.find(key) == s_allowed.end())
@@ -252,6 +325,8 @@ private:
         {
             throw UmdCompileError("allow_override_shape must be a boolean");
         }
+        validateVersionKey(d, "version", K_MIN_VERSION);
+        validateVersionKey(d, "sdk_version", K_MIN_SDK_VERSION);
         if(!d.at("nodes").is_array() || d.at("nodes").empty())
         {
             throw UmdCompileError("nodes must be a non-empty array (A.1)");
@@ -278,6 +353,66 @@ private:
                 return false;
             }
         }
+        return true;
+    }
+
+    // Both version keys are optional; when present each must be a
+    // "<major>.<minor>" string at or above its floor (A.10 §1).
+    static void validateVersionKey(const nlohmann::json& d, const char* key, const char* floor)
+    {
+        if(!d.contains(key))
+        {
+            return;
+        }
+        if(!d.at(key).is_string())
+        {
+            throw UmdCompileError(std::string(key)
+                                  + " must be a \"<major>.<minor>\" string (A.10 §1)");
+        }
+        const std::string declared = d.at(key).get<std::string>();
+        std::size_t major = 0;
+        std::size_t minor = 0;
+        if(!parseVersion(declared, major, minor))
+        {
+            throw UmdCompileError(std::string(key) + " \"" + declared
+                                  + "\" is not a \"<major>.<minor>\" string (A.10 §1)");
+        }
+        if(!versionAtLeast(declared, floor))
+        {
+            throw UmdCompileError(std::string(key) + " " + declared
+                                  + " is below the minimum supported " + floor + " (A.10 §1)");
+        }
+    }
+
+    static bool parseVersion(const std::string& s, std::size_t& major, std::size_t& minor)
+    {
+        const std::size_t dot = s.find('.');
+        if(dot == std::string::npos || s.find('.', dot + 1) != std::string::npos)
+        {
+            return false;
+        }
+        return parseVersionComponent(s.substr(0, dot), major)
+               && parseVersionComponent(s.substr(dot + 1), minor);
+    }
+
+    // A version component is a run of decimal digits: no sign, no whitespace,
+    // no exponent. The length cap keeps the accumulation below overflow.
+    static bool parseVersionComponent(const std::string& s, std::size_t& out)
+    {
+        if(s.empty() || s.size() > 9)
+        {
+            return false;
+        }
+        std::size_t value = 0;
+        for(const char c : s)
+        {
+            if(std::isdigit(static_cast<unsigned char>(c)) == 0)
+            {
+                return false;
+            }
+            value = (value * 10) + static_cast<std::size_t>(c - '0');
+        }
+        out = value;
         return true;
     }
 
@@ -607,7 +742,9 @@ private:
                                                          "virtual",
                                                          "present",
                                                          "dims",
-                                                         "strides"};
+                                                         "strides",
+                                                         "is_runtime_pass_by_value",
+                                                         "value_f32"};
         return s_reserved.find(name) != s_reserved.end();
     }
 
@@ -953,8 +1090,39 @@ private:
         }
         if(op == "value_or_default")
         {
+            // A.7: the fallback is any expression of the same type, not just a
+            // literal, so both arms are checked and unified. DYNAMIC carries no
+            // concrete type, so the other arm supplies the result kind.
             requireArity(2, 2);
-            return argType(1); // value type follows the default literal
+            const TypeInfo a = argType(0);
+            const TypeInfo b = argType(1);
+            if(!sameDomain(a.kind, b.kind))
+            {
+                throw UmdCompileError("'value_or_default' arms have different types (A.7): "
+                                      + kindName(a.kind) + " vs " + kindName(b.kind));
+            }
+            return a.kind == Kind::DYNAMIC ? b : a;
+        }
+        if(op == "present" || op == "not_present")
+        {
+            // A.7: n-ary resolution predicates. Each argument is a variable
+            // reference resolved as itself -- never through the `.present`
+            // field form -- so a required operand is legal here, and the result
+            // is always a real Bool because the operator inspects resolution
+            // rather than a value.
+            requireArity(1, 0);
+            for(std::size_t i = 0; i < args.size(); ++i)
+            {
+                const nlohmann::json& a = args.at(i);
+                if(!a.is_string() || a.get_ref<const std::string&>().size() < 2
+                   || a.get_ref<const std::string&>().front() != '$')
+                {
+                    throw UmdCompileError("operator '" + op
+                                          + "' requires variable-reference arguments (A.7)");
+                }
+                argType(i); // the reference must resolve (A.10 §8)
+            }
+            return {Kind::BOOL, Kind::UNKNOWN};
         }
         if(op == "if")
         {
@@ -1023,6 +1191,10 @@ private:
             if(rest == "node_count")
             {
                 return {Kind::INT, Kind::UNKNOWN};
+            }
+            if(rest == "is_override_shape_enabled")
+            {
+                return {Kind::BOOL, Kind::UNKNOWN};
             }
             throw UmdCompileError("unknown graph field: " + rest);
         }
@@ -1126,9 +1298,16 @@ private:
         {
             return {Kind::ARRAY, Kind::INT};
         }
-        if(rest == "packed" || rest == "virtual")
+        if(rest == "packed" || rest == "virtual" || rest == "is_runtime_pass_by_value")
         {
             return {Kind::BOOL, Kind::UNKNOWN};
+        }
+        if(rest == "value_f32")
+        {
+            // The schema layer coerces whichever arm of the tensor's `value`
+            // union is set to f32 and publishes it as one typed token; it reads
+            // null when the tensor carries no compile-time value (RFC 0017 §5).
+            return {Kind::FLOAT, Kind::UNKNOWN};
         }
         for(const std::string_view prefix : {std::string_view("dims"), std::string_view("strides")})
         {

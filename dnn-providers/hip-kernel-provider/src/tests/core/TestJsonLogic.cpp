@@ -189,6 +189,34 @@ TEST(JsonLogic, ValueOrDefault)
               V("fallback"));
 }
 
+TEST(JsonLogic, PresenceOperators)
+{
+    // A resolving path is present; an unresolved one is not.
+    EXPECT_EQ(eval(json({{"present", json::array({"$x"})}})), V(true));
+    EXPECT_EQ(eval(json({{"present", json::array({"$nope"})}})), V(false));
+    EXPECT_EQ(eval(json({{"not_present", json::array({"$nope"})}})), V(true));
+    EXPECT_EQ(eval(json({{"not_present", json::array({"$x"})}})), V(false));
+    // Presence keys on existence, not truthiness: a present 0 / false is present.
+    EXPECT_EQ(eval(json({{"present", json::array({"$zero"})}})), V(true));
+    EXPECT_EQ(eval(json({{"not_present", json::array({"$zero"})}})), V(false));
+    // Unlike every other operator, an unresolved path yields a real boolean
+    // rather than propagating null, so the criterion decides instead of declining.
+    EXPECT_TRUE(eval(json({{"present", json::array({"$nope"})}})).isBool());
+    EXPECT_TRUE(eval(json({{"not_present", json::array({"$nope"})}})).isBool());
+    // n-ary: both fold with `and` over every argument.
+    EXPECT_EQ(eval(json({{"present", json::array({"$x", "$y", "$name"})}})), V(true));
+    EXPECT_EQ(eval(json({{"present", json::array({"$x", "$nope"})}})), V(false));
+    EXPECT_EQ(eval(json({{"not_present", json::array({"$nope", "$missing"})}})), V(true));
+    EXPECT_EQ(eval(json({{"not_present", json::array({"$nope", "$x"})}})), V(false));
+    // unary sugar (a bare argument, not an array)
+    EXPECT_EQ(eval(json({{"present", "$x"}})), V(true));
+    // at least one argument is required
+    EXPECT_THROW(jlogic::compile<jlogic::JsonDataSource>(json({{"present", json::array()}})),
+                 jlogic::JsonLogicCompileError);
+    EXPECT_THROW(jlogic::compile<jlogic::JsonDataSource>(json({{"not_present", json::array()}})),
+                 jlogic::JsonLogicCompileError);
+}
+
 TEST(JsonLogic, Umd0018ConstraintShapes)
 {
     EXPECT_EQ(eval(json({{"in", json::array({"$name", json::array({"amd", "xilinx"})})}})),

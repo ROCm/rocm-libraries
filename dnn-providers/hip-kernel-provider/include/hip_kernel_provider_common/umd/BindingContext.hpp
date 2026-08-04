@@ -20,8 +20,9 @@
 // (RFC 0018 §4):
 //   - Tensor    `$q`, `$q.uid`, `$q.rank`, `$q.dtype`, `$q.dims[i]`,
 //               `$q.strides[i]`, `$q.<named-dim>`, `$q.stride_order`,
-//               `$q.packed`, `$q.virtual`, `$q.present`
-//   - Graph     `$graph.node_count`
+//               `$q.packed`, `$q.virtual`, `$q.present`,
+//               `$q.is_runtime_pass_by_value`, `$q.value_f32`
+//   - Graph     `$graph.node_count`, `$graph.is_override_shape_enabled`
 //   - Attributes `$<node_id>.<attr>`, `$<node_id>.<attr>.present`
 //   - Kernel    `$kernel.<field>` (from caller-supplied, fully-resolved KMD
 //               metadata; an unbound document is a defensive fallback that
@@ -44,6 +45,10 @@
 #include "hip_kernel_provider_common/JsonLogic.hpp"
 #include "hip_kernel_provider_common/umd/UmdPathParse.hpp"
 
+#include <hipdnn_data_sdk/types/Fp8E4M3.hpp>
+#include <hipdnn_data_sdk/types/Fp8E4M3Fnuz.hpp>
+#include <hipdnn_data_sdk/types/Fp8E5M2.hpp>
+#include <hipdnn_data_sdk/types/Fp8E5M2Fnuz.hpp>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
@@ -192,9 +197,20 @@ private:
 
     jlogic::Value resolveGraph(const std::string& rest) const
     {
-        if(rest == "node_count" && _graph != nullptr)
+        if(_graph == nullptr)
+        {
+            return {};
+        }
+        if(rest == "node_count")
         {
             return {static_cast<std::int64_t>(_graph->nodeCount())};
+        }
+        if(rest == "is_override_shape_enabled")
+        {
+            // The graph's own state, read from the same accessor the matcher's
+            // override-shape gate uses. Distinct from the descriptor's
+            // `allow_override_shape` key, which is the matcher's opt-in.
+            return {_graph->getGraph().is_override_shape_enabled()};
         }
         return {};
     }
@@ -296,6 +312,14 @@ private:
             return {hipdnn_data_sdk::utilities::isTensorPacked(toVector(t->dims()),
                                                                toVector(t->strides()))};
         }
+        if(rest == "is_runtime_pass_by_value")
+        {
+            return {t->is_runtime_pass_by_value()};
+        }
+        if(rest == "value_f32")
+        {
+            return resolveValueF32(*t);
+        }
         if(rest == "stride_order")
         {
             const std::vector<std::int64_t> order
@@ -347,6 +371,64 @@ private:
             }
         }
         return {}; // unknown tensor field -> decline
+    }
+
+    // Coerce whichever arm of the tensor's `value` union is set to f32 and
+    // publish it as the single `$q.value_f32` token (RFC 0017 §5). A tensor
+    // carrying no compile-time value resolves to null, so a criterion over it
+    // declines rather than reading a zero that would satisfy a comparison.
+    static jlogic::Value resolveValueF32(const TensorAttributes& t)
+    {
+        namespace data = hipdnn_flatbuffers_sdk::data_objects;
+        switch(t.value_type())
+        {
+        case data::TensorValue::Float32Value:
+            return {static_cast<double>(t.value_as_Float32Value()->value())};
+        case data::TensorValue::Float16Value:
+            return {static_cast<double>(t.value_as_Float16Value()->value())};
+        case data::TensorValue::BFloat16Value:
+            return {static_cast<double>(t.value_as_BFloat16Value()->value())};
+        case data::TensorValue::Float64Value:
+            return {t.value_as_Float64Value()->value()};
+        case data::TensorValue::Int32Value:
+            return {static_cast<double>(t.value_as_Int32Value()->value())};
+        case data::TensorValue::Int64Value:
+            return {static_cast<double>(t.value_as_Int64Value()->value())};
+        case data::TensorValue::BoolValue:
+            return {t.value_as_BoolValue()->value() ? 1.0 : 0.0};
+        case data::TensorValue::Float8Value:
+            return fp8ValueToF32(t.value_as_Float8Value()->value(), t.data_type());
+        default:
+            break;
+        }
+        return {}; // TensorValue::NONE -> no compile-time value -> decline
+    }
+
+    // Float8Value stores raw bits; the tensor's data_type says which 8-bit
+    // format they encode. An arm/data_type pairing that names no 8-bit format
+    // resolves to null (fail closed) rather than reinterpreting the bits.
+    static jlogic::Value fp8ValueToF32(std::uint8_t bits,
+                                       hipdnn_flatbuffers_sdk::data_objects::DataType dtype)
+    {
+        namespace data = hipdnn_flatbuffers_sdk::data_objects;
+        namespace types = hipdnn_data_sdk::types;
+        switch(dtype)
+        {
+        case data::DataType::FP8_E4M3:
+            return {static_cast<double>(static_cast<float>(types::fp8_e4m3::from_bits(bits)))};
+        case data::DataType::FP8_E5M2:
+            return {static_cast<double>(static_cast<float>(types::fp8_e5m2::from_bits(bits)))};
+        case data::DataType::FP8_E4M3_FNUZ:
+            return {static_cast<double>(static_cast<float>(types::fp8_e4m3_fnuz::from_bits(bits)))};
+        case data::DataType::FP8_E5M2_FNUZ:
+            return {static_cast<double>(static_cast<float>(types::fp8_e5m2_fnuz::from_bits(bits)))};
+        case data::DataType::UINT8:
+        case data::DataType::INT8:
+            return {static_cast<double>(bits)};
+        default:
+            break;
+        }
+        return {};
     }
 
     const IGraph* _graph = nullptr;
