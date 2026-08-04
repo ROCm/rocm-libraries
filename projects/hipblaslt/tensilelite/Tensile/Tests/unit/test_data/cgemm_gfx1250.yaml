@@ -1,0 +1,41 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+# Minimal single-solution CGEMM (DataType C) pinned to gfx1250 so --build-only
+# compiles the WMMA complex path regardless of host GPU. Consumed by
+# test_cgemm_gfx1250_codegen.py; placed under test_data/ so findConfigs() in
+# test_config.py skips it.
+GlobalParameters:
+  ISA: [[12,5,0]]
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: 0
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  Device: 0
+
+BenchmarkProblems:
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: C
+      DestDataType: C
+      ComputeDataType: C
+      TransposeA: false
+      TransposeB: false
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 4, 1, 1, 1, 1, 1, 1]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - DepthU: [16]
+        - ScheduleIterAlg: [3]
+        - MIArchVgpr: [true]
+        - GlobalSplitU: [1]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 64]
