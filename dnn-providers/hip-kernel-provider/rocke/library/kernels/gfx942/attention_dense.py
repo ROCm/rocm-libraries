@@ -53,7 +53,7 @@ Implementation status (see the AICK-1664 plan for the full ordered work list)
 -----------------------------------------------------------------------------
   * P0  enablement + 32x32x8 atom + K-loop doubling ............ DONE (this file)
   * P1  conflict-free V (perm_b32 store-path transpose) ........ DONE (D128 fp16)
-  * P2  exp2_fast + lazy_rescale ............................... TODO (portable)
+  * P2  exp2_fast (DONE, fp16) + lazy/fused rescale ............ exp2_fast DONE (fp16)
   * P3  wide4 (WG=256) + K bank-pad retune + K single-buffer ... TODO
   * P4  persistent grid-stride + hkv_major decode .............. TODO
   * P5  diagonal masking (re-test only), partial-vmcnt prefetch  TODO
@@ -200,6 +200,18 @@ def _p0_rows_per_instr(head_size: int) -> int:
     and the DMA disagree about row adjacency, which corrupts silently.
     """
     return _DMA_ELEMS_PER_INSTR // head_size
+
+
+def _p0_use_exp2_fast(dtype: str) -> bool:
+    """Whether softmax uses ``exp2_fast`` (one v_exp_f32, no range-reduction guard).
+
+    fp16 only. exp2_fast is a strict VALU reduction and the dominant P2 lever on the
+    (post-P1) VALU-bound path, but its result is live sooner and raises register
+    pressure; on bf16 D128 -- the tightest config -- that spills over the
+    waves-per-eu=2 cap. bf16 keeps plain ``exp2`` until the fused-rescale VGPR relief
+    lands (same prerequisite as bf16 conflict-free V). See :func:`_p0_use_cfvst`.
+    """
+    return dtype == "fp16"
 
 
 def _p0_use_cfvst(head_size: int, dtype: str) -> bool:
@@ -829,10 +841,25 @@ def _build_attention_dense_p0(spec: AttentionDenseSpec) -> KernelDef:
                 local_max = b.fmax(local_max, s[nsub][i])
         tile_max = b.fmax(local_max, b.warp_shuffle_xor(local_max, 32))
         m_new = b.fmax(m_i, tile_max)
-        alpha = b.exp2(b.fsub(m_i, m_new))
+        # P2: exp2_fast (llvm.amdgcn.exp2.f32 -> one v_exp_f32) drops the ~5-VALU
+        # guarded range reduction that plain exp2 (llvm.exp2.f32) emits. Safe here:
+        # both softmax args are always <= 0 -- alpha's m_i - m_new (m_new = max(m_i,
+        # tile_max) >= m_i) and p's s - m_new (m_new >= tile_max >= every s) -- which
+        # is exactly exp2_fast's documented precondition (no overflow; v_exp_f32
+        # flushes large negatives to 0). Cuts ~99 VALU/tile at D128, the dominant
+        # MFMA-starving residual once conflict-free V (P1) lands.
+        #
+        # Gated to fp16 (_p0_use_exp2_fast): the single-instruction exp result is
+        # available sooner, which lengthens live ranges and RAISES register pressure;
+        # on the already-tightest config (bf16 D128) that tips it over the
+        # waves-per-eu=2 cap into a spill. fp16 has the headroom (0 spill). bf16's
+        # exp2_fast waits on the fused exp2->accumulate->cast->pack rescale that frees
+        # ~32 VGPR (plan §6.1) -- same headroom prerequisite as bf16 cfvst.
+        exp2 = b.exp2_fast if _p0_use_exp2_fast(spec.dtype) else b.exp2
+        alpha = exp2(b.fsub(m_i, m_new))
 
         p_vals = [
-            [b.exp2(b.fsub(s[nsub][i], m_new)) for i in range(16)]
+            [exp2(b.fsub(s[nsub][i], m_new)) for i in range(16)]
             for nsub in range(N_SUB)
         ]
         l_local = b.const_f32(0.0)
