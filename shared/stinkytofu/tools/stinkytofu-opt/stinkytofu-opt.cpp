@@ -731,6 +731,10 @@ int main(int argc, char** argv) {
         emitVerbatim(preResult);
     }
 
+    // Set to true if any analysis/verification pass reports a failure; surfaced as a
+    // non-zero exit code after all functions and output have been processed.
+    bool analysisFailed = false;
+
     // Process each function independently
     for (auto& parsedFunc : parsed.functions) {
         if (optLevel >= 0) {
@@ -797,6 +801,7 @@ int main(int argc, char** argv) {
             }
 
             passManager.run(func);
+            if (passManager.getPassContext().getAnalysisFailed()) analysisFailed = true;
 
             emitFunction(func);
         }
@@ -804,5 +809,5 @@ int main(int argc, char** argv) {
 
     emitVerbatim(postResult);
 
-    return 0;
+    return analysisFailed ? 1 : 0;
 }

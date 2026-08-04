@@ -83,22 +83,32 @@ std::vector<Violation> analyzeBlock(const BasicBlock& bb) {
     for (int ruleIdx = 0; ruleIdx < kNumCdna5HazardRules; ++ruleIdx) {
         const HazardRule& rule = kCdna5HazardRules[ruleIdx];
 
-        // lastWriter[regKey] = latest index in instrs that wrote that reg as a producer.
-        std::map<int, int> lastWriter;
+        // lastWriter[regKey] = the most recent instruction that wrote that reg, plus
+        // whether that writer is a hazard producer. A non-producer write (e.g. a load
+        // dest) still overwrites the register's value, so it must overwrite the entry
+        // too — otherwise a stale earlier producer would be paired against a consumer
+        // that no longer reads the producer's value.
+        struct Writer {
+            int idx;
+            bool isProducer;
+        };
+        std::map<int, Writer> lastWriter;
 
         for (int ci = 0; ci < (int)instrs.size(); ++ci) {
             const StinkyInstruction& inst = *instrs[ci].inst;
 
-            // Update lastWriter for producer dest regs.
-            if (rule.isProducer(inst)) {
-                std::vector<int> destKeys;
-                collectRegKeys(inst.getDestRegs(), rule.regType, destKeys);
-                for (int k : destKeys) lastWriter[k] = ci;
+            // Record the latest writer for every dest reg, producer or not.
+            std::vector<int> destKeys;
+            collectRegKeys(inst.getDestRegs(), rule.regType, destKeys);
+            if (!destKeys.empty()) {
+                bool isProd = rule.isProducer(inst);
+                for (int k : destKeys) lastWriter[k] = {ci, isProd};
             }
 
             if (!rule.isConsumer(inst)) continue;
 
-            // Find the latest producer across all matching source regs.
+            // Find the latest producer across all matching source regs. A source whose
+            // most recent writer is not a producer contributes no hazard pair.
             std::vector<int> srcKeys;
             collectRegKeys(inst.getSrcRegs(), rule.regType, srcKeys);
             if (srcKeys.empty()) continue;
@@ -106,9 +116,10 @@ std::vector<Violation> analyzeBlock(const BasicBlock& bb) {
             int latestProducer = -1;
             for (int k : srcKeys) {
                 auto it = lastWriter.find(k);
-                if (it != lastWriter.end()) latestProducer = std::max(latestProducer, it->second);
+                if (it != lastWriter.end() && it->second.isProducer)
+                    latestProducer = std::max(latestProducer, it->second.idx);
             }
-            if (latestProducer < 0) continue;  // no in-block producer
+            if (latestProducer < 0) continue;  // no in-block producer feeds this consumer
 
             // Gap = sum of cycles of instructions strictly between producer and consumer.
             int gap = cumCycles[ci] - cumCycles[latestProducer + 1];
@@ -139,8 +150,7 @@ class HazardGapAnalysisPass : public StinkyInstPass {
         return &HazardGapAnalysisPass::ID;
     }
 
-    PreservedAnalyses run(Function& func, PassContext& /*passCtx*/,
-                          AnalysisManager& /*AM*/) override {
+    PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& /*AM*/) override {
         std::map<std::string, RuleStat> stats;
         for (int i = 0; i < kNumCdna5HazardRules; ++i) stats[kCdna5HazardRules[i].name] = {};
 
@@ -177,7 +187,9 @@ class HazardGapAnalysisPass : public StinkyInstPass {
                       << " pair(s) checked," << "  " << s.violations << " VIOLATION(s)\n";
         }
 
-        if (anyViolation) std::exit(1);
+        // Report failure through the pass framework rather than aborting the process,
+        // so the driver controls the exit code and any teardown still runs.
+        if (anyViolation) passCtx.setAnalysisFailed();
         return preserveCFGAnalyses();
     }
 
