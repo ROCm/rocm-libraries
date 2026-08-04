@@ -61,6 +61,8 @@ add_executable(
     IntegrationPassByValueDelivery.cpp
     IntegrationResampleFwdDescriptorLifting.cpp
     IntegrationResampleFwdDescriptorLowering.cpp
+    IntegrationResampleBwdDescriptorLifting.cpp
+    IntegrationResampleBwdDescriptorLowering.cpp
     IntegrationReductionDescriptorLifting.cpp
     IntegrationReductionDescriptorLowering.cpp
     IntegrationRMSNormDescriptorLifting.cpp
