@@ -355,26 +355,21 @@ class RowColQuantGpuGemmRunner:
         if not B.flags["F_CONTIGUOUS"]:
             raise RuntimeError("B is not F-contiguous after asfortranarray — unexpected numpy state")
 
-        # Strides (in elements, matching the kernel's BQLayout=ColumnMajor convention):
-        #   stride_A  = K  : A row-major [M, K], leading dim K
-        #   stride_B  = K  : B col-major [K, N], leading dim K (column index advances by K rows)
-        #   stride_AQ = 1  : AQ row-major [M, 1], leading dim 1 (single column)
-        #   stride_BQ = N  : BQ row-major [1, N] stored as one row of N floats;
-        #                    BQLayout=ColumnMajor is nominal — the kernel reads it as a flat
-        #                    row vector so stride_BQ is the number of columns N, not the
-        #                    column-major leading dim (which would be 1 for a [1,N] matrix).
-        #   stride_C  = N  : C row-major [M, N], leading dim N
-        stride_A  = K
-        stride_B  = K
-        stride_AQ = 1
-        stride_BQ = N
-        stride_C  = N
+        # Strides for A, B, C (standard packed layouts).
+        # stride_AQ and stride_BQ are NOT passed to the kernel; the C++ lib hardwires
+        # broadcast strides (0) because the RowColQuant kernel indexes each scale vector
+        # directly by the row/col index without a stride multiply.
+        stride_A = K   # A row-major [M, K]
+        stride_B = K   # B col-major [K, N], leading dim = K
+        stride_C = N   # C row-major [M, N]
 
+        # stride_AQ=1, stride_BQ=1 are placeholder values; the C++ lib ignores them
+        # and always passes broadcast strides (0) to the kernel.
         rc, time_ms = self._lib.run(
             A=A, B=B, AQ=AQ, BQ=BQ, C=C,
             M=M, N=N, K=K,
             stride_A=stride_A, stride_B=stride_B,
-            stride_AQ=stride_AQ, stride_BQ=stride_BQ, stride_C=stride_C,
+            stride_AQ=1, stride_BQ=1, stride_C=stride_C,
             QK_A=QK_A, QK_B=QK_B,
             k_batch=problem.k_batch,
         )

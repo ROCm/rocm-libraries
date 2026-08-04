@@ -143,14 +143,14 @@ int dispatcher_run_rowcolquant_gemm(const void* A,
         return -1;
     }
 
-    // Only packed (contiguous) layouts are supported.
-    if(stride_A != K || stride_B != K || stride_AQ != 1 || stride_BQ != N || stride_C != N)
+    // Only packed (contiguous) layouts are supported for A, B, C.
+    // stride_AQ and stride_BQ are unused here; the kernel uses broadcast strides (0).
+    if(stride_A != K || stride_B != K || stride_C != N)
     {
         std::cerr << "dispatcher_run_rowcolquant_gemm: non-packed strides are not supported. "
-                  << "Expected stride_A=" << K << " stride_B=" << K << " stride_AQ=1"
-                  << " stride_BQ=" << N << " stride_C=" << N << ", got stride_A=" << stride_A
-                  << " stride_B=" << stride_B << " stride_AQ=" << stride_AQ
-                  << " stride_BQ=" << stride_BQ << " stride_C=" << stride_C << "\n";
+                  << "Expected stride_A=" << K << " stride_B=" << K
+                  << " stride_C=" << N << ", got stride_A=" << stride_A
+                  << " stride_B=" << stride_B << " stride_C=" << stride_C << "\n";
         return -1;
     }
 
@@ -203,7 +203,12 @@ int dispatcher_run_rowcolquant_gemm(const void* A,
         hipMemcpy(BQ_dev, BQ_host, elements_to_bytes<BQDataType>(QK_B), hipMemcpyHostToDevice));
     HIP_CHECK(hipMemset(C_dev, 0, elements_to_bytes<CDataType>(M * N)));
 
-    // Build QuantGroupedGemmHostArgs for single-group launch
+    // Build QuantGroupedGemmHostArgs for single-group launch.
+    // The RowColQuant kernel treats AQ as a 1-D per-row vector and BQ as a 1-D per-col
+    // vector. It uses broadcast strides (stride=0) to index them — i.e. scale[0] is
+    // reused across all columns (AQ) / all rows (BQ). QK_A and QK_B are ignored by the
+    // kernel; M and N govern the loop bounds directly. Passing any non-zero stride causes
+    // the kernel to step past the end of the scale buffer, producing garbage output.
     ck_tile::QuantGroupedGemmHostArgs args(A_dev,
                                            B_dev,
                                            C_dev,
@@ -213,13 +218,13 @@ int dispatcher_run_rowcolquant_gemm(const void* A,
                                            static_cast<ck_tile::index_t>(M),
                                            static_cast<ck_tile::index_t>(N),
                                            static_cast<ck_tile::index_t>(K),
-                                           static_cast<ck_tile::index_t>(QK_A),
-                                           static_cast<ck_tile::index_t>(QK_B),
+                                           static_cast<ck_tile::index_t>(1), // QK_A: unused
+                                           static_cast<ck_tile::index_t>(1), // QK_B: unused
                                            static_cast<ck_tile::index_t>(stride_A),
                                            static_cast<ck_tile::index_t>(stride_B),
                                            static_cast<ck_tile::index_t>(stride_C),
-                                           static_cast<ck_tile::index_t>(stride_AQ),
-                                           static_cast<ck_tile::index_t>(stride_BQ));
+                                           static_cast<ck_tile::index_t>(0), // stride_AQ: broadcast
+                                           static_cast<ck_tile::index_t>(0)); // stride_BQ: broadcast
 
     const std::vector<ck_tile::QuantGroupedGemmHostArgs> gemm_descs = {args};
 
