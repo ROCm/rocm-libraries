@@ -19,7 +19,7 @@
   <line x1="157" y1="135" x2="187" y2="135" stroke="#444" stroke-width="1.5" marker-end="url(#arrowMP)"/>
 
   <rect x="189" y="92" width="140" height="86" rx="6" fill="#ffffff" stroke="#c99a2e" stroke-width="1.2"/>
-  <text x="259" y="120" text-anchor="middle" font-family="Consolas, monospace" font-size="10">resolve roles</text>
+  <text x="259" y="120" text-anchor="middle" font-family="Consolas, monospace" font-size="10">resolve names</text>
   <text x="259" y="137" text-anchor="middle" font-family="Consolas, monospace" font-size="10">expand layouts</text>
   <text x="259" y="154" text-anchor="middle" font-family="Consolas, monospace" font-size="10">parse exprs, check</text>
 
@@ -61,19 +61,19 @@
   <line x1="495" y1="285" x2="525" y2="285" stroke="#444" stroke-width="1.5" marker-end="url(#arrowMP)"/>
 
   <rect x="527" y="252" width="80" height="66" rx="6" fill="#e6f4ea" stroke="#3f9159" stroke-width="1.2"/>
-  <text x="567" y="282" text-anchor="middle" font-family="Consolas, monospace" font-size="10">plan</text>
+  <text x="567" y="282" text-anchor="middle" font-family="Consolas, monospace" font-size="10">provider</text>
   <text x="567" y="300" text-anchor="middle" font-family="Consolas, monospace" font-size="10">cache</text>
 
   <!-- cache reuse box on the right -->
   <rect x="650" y="120" width="270" height="150" rx="8" fill="#f3e8fd" stroke="#8a4fbe" stroke-width="1.5"/>
-  <text x="785" y="146" text-anchor="middle" font-weight="600" font-size="12">Per-plan bind cache</text>
-  <text x="668" y="174" font-family="Consolas, monospace" font-size="11">chosen UMD</text>
-  <text x="668" y="196" font-family="Consolas, monospace" font-size="11">bound symbol table</text>
-  <text x="668" y="218" font-family="Consolas, monospace" font-size="11">arbitration outcome</text>
-  <text x="668" y="248" font-family="Consolas, monospace" font-size="10" fill="#666">reused by isApplicable /</text>
-  <text x="668" y="264" font-family="Consolas, monospace" font-size="10" fill="#666">workspace / buildPlan</text>
+  <text x="785" y="146" text-anchor="middle" font-weight="600" font-size="12">Applicability-time cache</text>
+  <text x="668" y="174" font-family="Consolas, monospace" font-size="11">catalog (kernels that passed)</text>
+  <text x="668" y="196" font-family="Consolas, monospace" font-size="11">bound token state</text>
+  <text x="668" y="218" font-family="Consolas, monospace" font-size="11">key: engine, graph, device</text>
+  <text x="668" y="248" font-family="Consolas, monospace" font-size="10" fill="#666">written by isApplicable; read by</text>
+  <text x="668" y="264" font-family="Consolas, monospace" font-size="10" fill="#666">getDetails / workspace / buildPlan</text>
 
   <line x1="607" y1="285" x2="649" y2="230" stroke="#8a4fbe" stroke-width="1.5" stroke-dasharray="4 3" marker-end="url(#arrowMP)"/>
 
-  <text x="470" y="352" text-anchor="middle" font-style="italic" fill="#444">Root-opcode indexing keeps match cost sublinear in descriptor count; the per-plan cache matches each graph once.</text>
+  <text x="470" y="352" text-anchor="middle" font-style="italic" fill="#444">Root-opcode indexing keeps match cost sublinear in descriptor count; the provider-owned cache matches each graph once (RFC 0017 §8).</text>
 </svg>

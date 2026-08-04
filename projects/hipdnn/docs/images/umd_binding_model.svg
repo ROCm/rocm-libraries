@@ -33,11 +33,11 @@
   <rect x="335" y="52" width="250" height="330" rx="8" fill="#fef7e0" stroke="#c99a2e" stroke-width="1.5"/>
   <text x="352" y="80" font-family="Consolas, monospace" font-size="11">sdpa_fwd schema:</text>
   <text x="352" y="104" font-family="Consolas, monospace" font-size="11">  operands (required):</text>
-  <text x="352" y="124" font-family="Consolas, monospace" font-size="11">    Q -&gt; q_tensor_uid</text>
-  <text x="352" y="144" font-family="Consolas, monospace" font-size="11">    K -&gt; k_tensor_uid</text>
-  <text x="352" y="164" font-family="Consolas, monospace" font-size="11">    V -&gt; v_tensor_uid</text>
+  <text x="352" y="124" font-family="Consolas, monospace" font-size="11">    q -&gt; q_tensor_uid</text>
+  <text x="352" y="144" font-family="Consolas, monospace" font-size="11">    k -&gt; k_tensor_uid</text>
+  <text x="352" y="164" font-family="Consolas, monospace" font-size="11">    v -&gt; v_tensor_uid</text>
   <text x="352" y="184" font-family="Consolas, monospace" font-size="11">  results:</text>
-  <text x="352" y="204" font-family="Consolas, monospace" font-size="11">    O -&gt; o_tensor_uid</text>
+  <text x="352" y="204" font-family="Consolas, monospace" font-size="11">    o -&gt; o_tensor_uid</text>
   <text x="352" y="224" font-family="Consolas, monospace" font-size="11">  operands (optional):</text>
   <text x="352" y="244" font-family="Consolas, monospace" font-size="11">    attn_mask, page_table_*</text>
   <text x="352" y="268" font-family="Consolas, monospace" font-size="11">  attributes:</text>
@@ -52,15 +52,15 @@
   <rect x="655" y="52" width="245" height="330" rx="8" fill="#e6f4ea" stroke="#3f9159" stroke-width="1.5"/>
   <text x="672" y="80" font-family="Consolas, monospace" font-size="11">$q -&gt; tensor(uid 7)</text>
   <text x="672" y="100" font-family="Consolas, monospace" font-size="11">$k $v $o  ...</text>
-  <text x="672" y="124" font-family="Consolas, monospace" font-size="11">$q0..$q3  (dims)</text>
+  <text x="672" y="124" font-family="Consolas, monospace" font-size="11">$q.dims[0..3]</text>
   <text x="672" y="144" font-family="Consolas, monospace" font-size="11">$q.strides[0..3]</text>
   <text x="672" y="164" font-family="Consolas, monospace" font-size="11">$q.rank $q.dtype</text>
-  <text x="672" y="184" font-family="Consolas, monospace" font-size="11">stride_order($q)</text>
-  <text x="672" y="212" font-family="Consolas, monospace" font-size="11">$batch, $num_heads,</text>
-  <text x="672" y="232" font-family="Consolas, monospace" font-size="11">$seqlen_q, $head_size</text>
+  <text x="672" y="184" font-family="Consolas, monospace" font-size="11">$q.stride_order $q.packed</text>
+  <text x="672" y="212" font-family="Consolas, monospace" font-size="11">$q.batch, $q.num_heads,</text>
+  <text x="672" y="232" font-family="Consolas, monospace" font-size="11">$q.seqlen_q, $q.head_size</text>
   <text x="672" y="252" font-family="Consolas, monospace" font-size="11">  (named shape dims)</text>
-  <text x="672" y="280" font-family="Consolas, monospace" font-size="11">$root.causal_mask</text>
-  <text x="672" y="300" font-family="Consolas, monospace" font-size="11">$root.dropout_probability</text>
+  <text x="672" y="280" font-family="Consolas, monospace" font-size="11">$sdpa_fwd.causal_mask</text>
+  <text x="672" y="300" font-family="Consolas, monospace" font-size="11">$sdpa_fwd.dropout_probability</text>
   <text x="672" y="336" font-family="Consolas, monospace" font-size="11" fill="#666">consumed by the UDD's</text>
   <text x="672" y="356" font-family="Consolas, monospace" font-size="11" fill="#666">launch + workspace formulas</text>
 

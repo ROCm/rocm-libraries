@@ -3,7 +3,7 @@
 - Contributors: Brian Harrison
 
 > Follow-up to [RFC 0017 (Universal Kernel Descriptors)](0017_UniversalKernelDescriptor.md),
-> the "UMD + graph matcher" row of its follow-up series ([RFC 0017 §12.2](0017_UniversalKernelDescriptor.md#122-follow-up-rfcs)).
+> the "UMD + graph matcher" row of its follow-up series ([RFC 0017 §14.2](0017_UniversalKernelDescriptor.md#142-follow-up-rfcs)).
 > This RFC designs the match format and the matcher; the sibling formats (UDD, UED, UHD, KDP) and
 > subsystems (packaging, drop-in, adapters) are designed in their own follow-ups and are referenced,
 > not redesigned, here. The RFC number is provisional and is reconciled against the concurrent
@@ -68,16 +68,16 @@ deterministic arbitration, and the compile-once matcher with its indexing and ca
 
 | Capability | This RFC (day-one) | Deferred |
 |---|---|---|
-| Structural pattern: op nodes, named operand/result edges, single-op and bounded fused subgraphs | Yes ([§3](#3-structural-pattern)) | None |
+| Structural pattern: op nodes, named operand/result edges, single-op and bounded fused subgraphs that are the entire graph | Yes ([§3](#3-structural-pattern)) | Matching a fused pattern *inside* a larger graph: JIT follow-up |
 | Auto-binding of every operand/result tensor, its dims and strides, and every op attribute | Yes ([§4](#4-symbol-binding-and-the-auto-binding-formula)) | None |
 | Criteria as one JsonLogic expression: opcode, dtype (exact/set/relation), shape/rank, divisibility, stride order, packed, attribute, graph-structure (`node_count`, `virtual`), cross-tensor relation, optional operand, device property | Yes ([§5](#5-constraint-vocabulary)) | None |
 | JsonLogic as the shared expression language (UMD boolean + UDD value), `$`-variable convention | Yes ([§6](#6-the-shared-expression-language)) | New operators as needed |
 | Layout as a stride-order index array, with named aliases | Yes ([§7](#7-layout-and-stride-order-constraints)) | None |
 | Custom-operation (native-predicate) escape hatch, registry-resolved | Yes ([§8](#8-native-predicate-escape-hatch)) | None |
 | Composite criteria: `(A AND B) OR C` as one criteria expression, via JsonLogic `and`/`or`/`!`/`if` | Yes ([§9](#9-composite-constraints)) | None |
-| Compile-once matcher, root-opcode index, per-plan match cache | Yes ([§10](#10-the-matcher-compilation-indexing-and-caching)) | None |
+| Compile-once matcher, root-opcode index, applicability-time match cache | Yes ([§10](#10-the-matcher-compilation-indexing-and-caching)) | None |
 | Static (compile-time / AOT-lowered) matcher | Options sketched ([§11](#11-static-matcher-sketch)) | Full design |
-| General N-ary commutative matching, unbounded variable-length chains | None | JIT follow-up ([RFC 0017 §8.3](0017_UniversalKernelDescriptor.md#83-future-jit-and-normalized-providers)) |
+| General N-ary commutative matching, unbounded variable-length chains | None | JIT follow-up ([RFC 0017 §9.3](0017_UniversalKernelDescriptor.md#93-future-jit-and-normalized-providers)) |
 
 ---
 
@@ -182,13 +182,17 @@ variables (`$q`, `$conv_out`).
   with `{"==": ["$graph.node_count", N]}` ([§5](#5-constraint-vocabulary)): a single-op kernel checks
   `node_count == 1`, replacing the `nodeWrappers().size() != 1` gate; a fused three-op kernel checks
   `node_count == 3`. Matching a pattern inside a larger graph without a fixed count is the looser JIT
-  mode ([RFC 0017 §8.3](0017_UniversalKernelDescriptor.md#83-future-jit-and-normalized-providers)).
+  mode ([RFC 0017 §9.3](0017_UniversalKernelDescriptor.md#93-future-jit-and-normalized-providers)).
 - **Override-shape graphs** are declined by default (mirroring today's gate); a UMD that supports them
   sets `"allow_override_shape": true` at the top level.
 
-**Fusion is day-one.** A multi-node pattern binds the whole fused subgraph at once and hands it to one
-UKD. Legality — that the fused intermediates are absorbed into the kernel, not consumed outside it — is
-expressed by requiring each intermediate `virtual` and pinning the op count with `$graph.node_count`:
+**Fusion matching is day-one, for a pattern that is the whole graph.** A multi-node pattern binds the
+whole fused subgraph at once and hands it to one UKD. Legality — that the fused intermediates are
+absorbed into the kernel, not consumed outside it — is expressed by requiring each intermediate
+`virtual` and pinning the op count with `$graph.node_count`, which also confines a day-one fused
+pattern to the entire graph. Matching a fused pattern *inside* a larger graph, with no fixed count,
+is the JIT follow-up's looser mode. Fusion is distinct from composition — running one graph as
+several kernels — which goes the opposite direction and is not in scope here:
 
 ```jsonc
 {
@@ -204,8 +208,8 @@ expressed by requiring each intermediate `virtual` and pinning the op count with
      "operands": {"a": "$bias_out"},                "results": {"y": "$y"}}
   ],
   "criteria": {"and": [
-    {"==": ["$x.dtype", "FLOAT16"]}, {"==": ["$x.stride_order", [0, 2, 3, 1]]}, "$x.packed",  // NHWC
-    {"==": ["$y.dtype", "FLOAT16"]}, {"==": ["$y.stride_order", [0, 2, 3, 1]]}, "$y.packed",  // NHWC
+    {"==": ["$x.dtype", "FLOAT16"]}, {"==": ["$x.stride_order", [3, 0, 2, 1]]}, "$x.packed",  // NHWC
+    {"==": ["$y.dtype", "FLOAT16"]}, {"==": ["$y.stride_order", [3, 0, 2, 1]]}, "$y.packed",  // NHWC
     {"shape": ["$y",    ["batch", "out_h", "out_w", "out_channels"]]},
     {"shape": ["$bias", ["out_channels"]]},
     {"==": ["$graph.node_count", 3]},              // exactly these three ops
@@ -240,20 +244,42 @@ declares them so the interpreter fails closed on anything undeclared:
   `TensorAttributes`) and `$q.uid` its graph UID; each
   dim positionally as `$q.dims[i]` and by name as `$q.<dim>` once a `shape` names it (`$q.seqlen_q`);
   each stride as `$q.strides[i]`; and the derived facts `$q.rank`, `$q.dtype`, `$q.stride_order`
-  ([§7](#7-layout-and-stride-order-constraints)), `$q.packed`, and `$q.virtual` (an internal
-  intermediate between matched nodes, not a graph input or output). An optional operand also carries
-  `$q.present`, true only when the graph supplies it.
-- **Graph** — structural facts of the matched graph, chiefly `$graph.node_count`, which pins an exact
-  match ([§3](#3-structural-pattern)).
+  ([§7](#7-layout-and-stride-order-constraints)), `$q.packed`, `$q.virtual` (an internal
+  intermediate between matched nodes, not a graph input or output),
+  `$q.is_runtime_pass_by_value` (its value arrives per execution rather than being baked into the
+  graph, [RFC 0016](0016_RuntimePassByValueTensors.md)), and the precomputed scalar `$q.value_f32`
+  (below). An optional operand also carries `$q.present`, true only when the graph supplies it.
+- **Graph** — structural facts and graph-level flags of the matched graph: `$graph.node_count`, which
+  pins an exact match ([§3](#3-structural-pattern)), and `$graph.is_override_shape_enabled`, the
+  graph's own opt-in to execute-time override shapes. That flag is the graph's state and is distinct
+  from the descriptor's `allow_override_shape`, which is this matcher's opt-in to accepting such a
+  graph at all.
 - **Attributes** — a matched node's scalar attributes, named by the node's pattern `id`: an
   `{"id": "sdpa_fwd"}` node exposes `$sdpa_fwd.dropout_probability`, a `{"id": "conv"}` node
   `$conv.dilation`. An optional attribute carries `$sdpa_fwd.<attr>.present`.
 - **Kernel metadata** — `$kernel.<field>`, the values a UKD supplies for the fields its KMD declares
   (tile and vector constants, the dtype it targets, [RFC 0017 §4](0017_UniversalKernelDescriptor.md#4-descriptor-formats));
   a matcher that reads them is evaluated per kernel ([§10](#10-the-matcher-compilation-indexing-and-caching)).
+  A `$kernel.*` field a matcher reads MUST exist in the engine's KMD; the loader checks this, so the
+  matcher publishes the set of `$kernel.*` fields it reads alongside its bound-symbol set.
 - **Device properties** — `$device.<field>` such as `$device.lds_size` or `$device.warp_size`, for a
-  check like an LDS budget. Architecture is **not** here for AOT: it is a pack property gated at
+  check like an LDS budget. The device facts hipDNN carries today are narrower than this vocabulary
+  needs, so the device-property set is extended additively as the checks that need it land.
+  Architecture is **not** here for AOT: it is a pack property gated at
   selection ([§2](#2-the-matchers-input-hipdnns-graph-model)); a JIT pack may reference `$device.arch`.
+
+**Precomputed fields.** Some tokens above are not stored on the graph: the schema layer derives them
+once and publishes them as ordinary fields, so a matcher compares a value instead of re-deriving it.
+`$q.packed` and `$q.stride_order` are the layout examples, standing in for `inferLayout`'s
+contiguous-stride arithmetic. `$q.value_f32` is the other kind: a tensor's compile-time `value` is a
+tagged union over eight differently-typed arms, and the expression language has no discriminator
+syntax to unwrap one, so the schema layer coerces whichever arm is set to `f32` once and publishes it
+as a single typed token — present only when the tensor carries a compile-time value at all, so a
+criterion over it declines on a tensor that does not. A precomputed field is declared in the hipDNN
+schema like any other field and versioned with it, so adding one is an additive schema change rather
+than a per-pack extension point. Precomputed fields sit between the built-in operators and the
+native-predicate escape hatch ([§8](#8-native-predicate-escape-hatch)): reach for one when a check
+needs a derived fact, and for the hatch only when it needs real C++.
 
 **A `$` marks a reference.** Every reference to a bound field carries a leading `$`: tensors and
 their fields (`$q`, `$q.uid`, `$q.dims[2]`, `$q.rank`, `$q.seqlen_q`), a node's attributes (`$sdpa_fwd.head_size`
@@ -297,12 +323,12 @@ same expression as any built-in operator.
 | **Rank** | `{"==": ["$q.rank", 4]}`, or a `shape` short-hand that names four dims | `validateDimensionCount`, rank == 4 |
 | **Shape (bind / relate)** | `{"shape": ["$q", ["batch", "num_heads", "seqlen_q", "head_size"]]}` binds `$q.<dim>`; relate with `{"==": ["$q.head_size", "$k.head_size"]}` | dim reads and cross-tensor dim relations |
 | **Divisibility** | `{"divisible": [{"*": ["$y.n", "$y.ho", "$y.wo"]}, "$kernel.MPerBlock"]}` | tile-fit / GEMM-dim gates |
-| **Layout** | `{"==": ["$q.stride_order", [0, 1, 2, 3]]}` ([§7](#7-layout-and-stride-order-constraints)) | `validateSupportedLayout` |
+| **Layout** | `{"==": ["$q.stride_order", [3, 2, 1, 0]]}` ([§7](#7-layout-and-stride-order-constraints)) | `validateSupportedLayout` |
 | **Packing** | `"$q.packed"` (a bound boolean) | `validatePackedTensors` |
 | **Cross-tensor layout** | `{"==": ["$x.stride_order", "$y.stride_order"]}` (per pair) | `validateConsistentLayouts` |
 | **Attribute (value)** | `{"==": ["$sdpa_fwd.causal_mask", false]}`; absent-or `{"or": [{"!": "$sdpa_fwd.dropout_probability.present"}, {"==": ["$sdpa_fwd.dropout_probability", 0.0]}]}` | per-attr value gates |
 | **Attribute (one_of)** | `{"in": ["$sdpa_fwd.head_dim", [64, 128, 192]]}` | `head_dim in {...}` |
-| **Optional operand present/absent** | operand `?` in the pattern; `{"!": "$attn_mask.present"}` (absent) / `"$bias.present"` (present) | `attn_mask_tensor_uid()` absent gate |
+| **Optional operand present/absent** | operand `?` in the pattern; `{"not_present": ["$attn_mask"]}` (absent) / `{"present": ["$bias"]}` (present); one call takes a list, so a pack declines every optional operand it cannot serve at once | `attn_mask_tensor_uid()` absent gate |
 | **Graph structure (exact / fusion)** | `{"==": ["$graph.node_count", 3]}`, and each intermediate `"$conv_out.virtual"` | node-count gate, fusion legality |
 | **Cross-tensor / arithmetic** | `{"==": ["$q.dims[1]", "$k.dims[2]"]}`, `{"<": ["$q.head_size", 129]}`, `{"==": [{"%": ["$q.num_heads", "$k.kv_heads"]}, 0]}` | arithmetic and comparison gates |
 | **Device property** | `{"<=": ["$kernel.lds_per_block", "$device.lds_size"]}` (arch is a pack property, not a criterion) | LDS/occupancy budgets; `getDeviceString` arch → pack `arch` |
@@ -310,8 +336,36 @@ same expression as any built-in operator.
 
 Architecture gates *applicability* at pack selection via the KDP `arch` property and the per-arch
 `kpack` manifest ([RFC 0017 §5](0017_UniversalKernelDescriptor.md#5-matching-and-the-umd),
-[§9](0017_UniversalKernelDescriptor.md#10-packaging-and-delivery)), not as a match-time criterion for
+[§12](0017_UniversalKernelDescriptor.md#12-packaging-and-delivery)), not as a match-time criterion for
 AOT; other device properties (`$device.lds_size`, `$device.warp_size`) are read directly in criteria.
+
+**Exactness runs to the kernel, not just the graph.** `$graph.node_count` and the pattern's topology
+pin the shape of the *graph*, but say nothing about whether a given candidate kernel can serve it. A
+prebuilt kernel bakes quantities into its binary — a dtype, a head size, sometimes a sequence length —
+and a graph that clears a pack's graph-level gates may still disagree with what one kernel baked.
+**Every quantity a kernel bakes MUST therefore be a KMD field, and the pack's matcher MUST pin it
+against the graph with a `$kernel.*` criterion.** Those are the clauses re-evaluated per candidate
+([§10](#10-the-matcher-compilation-indexing-and-caching)), which is what turns one matcher plus a
+kernel vector into a per-kernel applicability test.
+
+Getting this wrong fails silently rather than loudly: a matcher gating dtype only as
+`{"in": ["$q.dtype", ["FLOAT16", "BFLOAT16"]]}` accepts an fp16 graph and may hand it to a bf16
+binary, which returns wrong numbers instead of an error. A field missing from the KMD also cannot be
+pinned, so two kernels differing only in an unmodelled baked constant collide on the catalog key. The
+check is mechanical, so the loader performs it: a UKD whose source declares a baked constant with no
+corresponding KMD field is a load error. That check is a KDP/KMD-loader responsibility and is
+specified by [RFC 0017 §5](0017_UniversalKernelDescriptor.md#5-matching-and-the-umd); the UMD's part
+is to publish the `$kernel.*` fields it reads ([§4](#4-symbol-binding-and-the-auto-binding-formula))
+so the loader can perform it.
+
+**Every KDP needs one umbrella matcher.** At least one matcher in a pack MUST check the complete graph
+topology the pack accepts — the same `node_count` and shape-defining criteria, applied to the whole
+graph rather than a fragment. Other matchers in the pack may constrain any subset of what that matcher
+binds. Without the rule, several matchers could each verify disjoint pieces of a graph while nothing
+ever confirms the overall topology, producing loose or incorrect matches. Authors may write one large
+matcher or split the work across focused ones; the only requirement is that the full graph shape is
+checked explicitly somewhere in the pack. This is a **pack-level** rule: a single UMD cannot enforce
+it, so it is validated by the KDP loader, not by A.10's per-descriptor checks.
 
 ---
 
@@ -320,8 +374,9 @@ AOT; other device properties (`$device.lds_size`, `$device.warp_size`) are read 
 Every UMD criterion and every UDD dispatch formula is a **JsonLogic** expression: a nested
 `{"op": [args]}` tree whose arguments are themselves expressions or literals (the criteria-expression
 form of [RFC 0017 §5](0017_UniversalKernelDescriptor.md#5-matching-and-the-umd)). Descriptors stay pure
-data, and one parser, validator, and interpreter serve both subsystems. This RFC pins JsonLogic as the
-concrete form RFC 0017 §5/§6 left to the follow-ups; the UDD follow-up adopts the same core.
+data, and one parser, validator, and interpreter serve both subsystems. RFC 0017 §5 fixes the operator
+vocabulary and the `$`-reference leaf convention; this RFC pins the concrete dialect, grammar, and
+static typing those imply, and the UDD follow-up adopts the same core.
 
 **The `$`-variable convention.** Stock JsonLogic reads a bound value with `{"var": "path"}`. This RFC
 replaces that with a single rule: **any string that begins with `$` is a variable reference** into the
@@ -340,13 +395,19 @@ it names a boolean field, e.g. `"$q.packed"`.
   ([RFC 0017 §6](0017_UniversalKernelDescriptor.md#6-dispatch-and-workspace)), yielding a number.
 
 **Operators.** Logical `and`, `or`, `!`; comparison `==`, `!=`, `<`, `<=`, `>`, `>=`; membership `in`;
-the per-element `all`; arithmetic `+`, `-`, `*`, `/`, `%`; the pattern/short-hand ops `shape`, `rank`,
-`divisible`, and `value_or_default` (reads a possibly-absent optional operand with a default); the
-conditional `if`; and the value-core arithmetic the UDD needs (`ceil_div`, `min`, `max`, `abs`, `pow`,
-`log2`, `rsqrt`). Anything the built-ins cannot express is a **custom operation**
+the per-element `all`; arithmetic `+`, `-`, `*`, `/`, `%`; the presence predicates `present` and
+`not_present`; the pattern/short-hand ops `shape`, `rank`, `divisible`, and `value_or_default` (reads
+a possibly-absent optional operand with a fallback); the conditional `if`; and the value-core
+arithmetic the UDD needs (`ceil_div`, `min`, `max`, `abs`, `pow`, `log2`, `rsqrt`). The full table
+with arities and types is [A.7](#a7-operator-reference); naming an operator outside it fails load
+validation. Anything the built-ins cannot express is a **custom operation**
 ([§8](#8-native-predicate-escape-hatch)). Adding an operator is additive
 ([§13](#13-serialization-and-versioning)); it never introduces a new criterion *kind*, since the whole
 `criteria` field is one JsonLogic expression.
+
+**Operators nest, and either side of a comparison may be computed.** A leaf is a literal or a
+`$`-prefixed reference, but either operand of a comparison can itself be an expression, so a check
+like `{"divisible": [{"*": ["$y.n", "$y.ho", "$y.wo"]}, "$kernel.MPerBlock"]}` needs no temporary.
 
 ```jsonc
 // criteria (boolean): sub-expressions of the single top-level criteria expression
@@ -355,9 +416,9 @@ conditional `if`; and the value-core arithmetic the UDD needs (`ceil_div`, `min`
 {"<=": ["$q.head_size", 128]}                               // range bound
 {"in": ["$q.head_size", [64, 128, 256]]}                    // set membership
 {"divisible": ["$q.num_heads", "$k.kv_heads"]}             // GQA divisibility
-{"==": ["$q.stride_order", [0, 1, 2, 3]]}, "$q.packed"      // layout + packed
+{"==": ["$q.stride_order", [3, 2, 1, 0]]}, "$q.packed"      // layout + packed
 {"==": ["$graph.node_count", 1]}                            // exact whole-graph match
-{"or": [{"!": "$attn_mask.present"},
+{"or": [{"not_present": ["$attn_mask"]},
         {"==": ["$attn_mask.dtype", "$q.dtype"]}]}          // composition (§10)
 
 // dispatch formulas (value), reused by the UDD
@@ -378,25 +439,25 @@ enough to audit and to lower into the static matcher ([§11](#11-static-matcher-
 
 hipDNN tensors store no layout enum; layout is implied by stride order
 ([§2](#2-the-matchers-input-hipdnns-graph-model)). The UMD therefore represents layout as an **array of
-dimension indexes giving the stride order**, from the slowest-varying dimension to the
-fastest-varying. This is the shape a matcher can check directly against `strides()` and matches how
-`TensorDescriptor` already precomputes `strideOrder` (`ApplicabilityChecks.cpp:17`).
+per-dimension stride priorities**: entry `i` ranks logical dimension `i` by stride magnitude, with a
+higher number meaning a slower-varying (larger-stride) dimension. This is the encoding
+`extractStrideOrder` already computes (`ApplicabilityChecks.cpp:17`), so a matcher compares
+`$q.stride_order` directly against the same arrays the `validateSupportedLayout` oracle uses today
+rather than against a re-derived permutation.
 
 ```jsonc
-{"==": ["$q.stride_order", [0, 1, 2, 3]]}   // natural order (BHSD, rank-4)
-{"==": ["$x.stride_order", [0, 2, 3, 1]]}   // NHWC over an NCHW logical dim order
+{"==": ["$q.stride_order", [3, 2, 1, 0]]}   // descending-stride packed (BHSD, rank-4)
+{"==": ["$x.stride_order", [3, 0, 2, 1]]}   // NHWC over an NCHW logical dim order
 ```
 
-- The array is a permutation of `0..rank-1`. Entry `k` names the logical dimension that occupies stride
-  position `k`, so `[0,1,2,3]` is descending-stride packed and `[0,2,3,1]` places the channel dim last
+- The array is a permutation of `0..rank-1`. Entry `i` is the stride rank of logical dimension `i`,
+  so `[3,2,1,0]` is descending-stride packed and `[3,0,2,1]` places the channel dim fastest-varying
   (NHWC). The `axis` used everywhere else (dims, strides, `args_signature`) indexes the logical
   dimension order, independent of this physical layout, consistent with RFC 0017 §6.
 - **Named aliases** are provided for the common cases and expand to the array literal at compile time,
-  so `{"==": ["$x.stride_order", "nhwc"]}` compiles to a comparison against `[0, 2, 3, 1]`:
-  `"nchw" -> [0,1,2,3]`, `"nhwc" -> [0,2,3,1]`, `"ncdhw"`, `"ndhwc"`, `"bhsd" -> [0,1,2,3]`,
-  `"contiguous"` (identity permutation for the tensor's rank). The array remains the single canonical
-  form. The alias set matches the layouts `validateSupportedLayout` accepts today
-  (`ApplicabilityChecks.cpp:77`).
+  so `{"==": ["$x.stride_order", "nhwc"]}` compiles to a comparison against `[3, 0, 2, 1]`
+  (A.8). The array remains the single canonical form. The alias set matches the layouts
+  `validateSupportedLayout` accepts today (`ApplicabilityChecks.cpp:77`).
 - **Cross-tensor consistency** is a JsonLogic equality between stride orders,
   `{"==": ["$x.stride_order", "$y.stride_order"]}` (one per pair, joined by the top-level `and`),
   lowering `validateConsistentLayouts`; layout-agnostic tensors (rank-1 scalars, pass-by-value) are
@@ -404,7 +465,7 @@ fastest-varying. This is the shape a matcher can check directly against `strides
 - **Packing** is the separate bound boolean `$q.packed` (written `"$q.packed"`), since a supported
   stride order does not imply the tensor is gap-free; it lowers `validatePackedTensors`.
 - `$q.stride_order` is an ordinary bound value ([§4](#4-symbol-binding-and-the-auto-binding-formula)),
-  so a `stride_order == [0,1,2,3]` gate is expressible directly.
+  so a `stride_order == [3,2,1,0]` gate is expressible directly.
 
 ---
 
@@ -481,14 +542,15 @@ chains remain deferred to the JIT follow-up, as in RFC 0017 §5.
 
 ## 10. The Matcher: Compilation, Indexing, and Caching
 
-A UMD is authored as text and **compiled once** into an in-memory matcher structure at provider load
-(or, for the drop-in path, when the bundle is scanned). Compilation resolves op-schema names, expands
-layout aliases, parses the criteria expression to an AST, and validates that every referenced symbol
-is bound. The compiled form, not the text, is what runs against live graphs.
+A UMD is authored as text and **compiled once** into an in-memory matcher structure, on demand: nothing
+is parsed until a graph needs it, and the parsed result is cached and reused
+([RFC 0017 §3](0017_UniversalKernelDescriptor.md#3-how-it-works)). Compilation resolves op-schema
+names, expands layout aliases, parses the criteria expression to an AST, and validates that every
+referenced symbol is bound. The compiled form, not the text, is what runs against live graphs.
 
 **Root-opcode indexing.** The compiled matchers are indexed by the root node's opcode, so match cost
 does not grow linearly with the number of descriptors: a graph whose root op is `sdpa_fwd` only
-consults UMDs rooted at `sdpa_fwd`. This is the index RFC 0017 §14 calls for. Per-candidate cost (one
+consults UMDs rooted at `sdpa_fwd`. This is the index RFC 0017 §16 calls for. Per-candidate cost (one
 pass over the criteria expression) is separate from the index and bounded by short-circuit evaluation.
 
 **Shared matchers, evaluated once.** A KDP lists a set of matcher IDs and a kernel applies only when
@@ -497,8 +559,12 @@ unit of sharing and of evaluation. A matcher that reads only graph fields (Tenso
 Device, [§4](#4-symbol-binding-and-the-auto-binding-formula)) runs **once per graph**; on failure it
 prunes every pack that lists it, so the most-shared checks (dtype, layout, shape) evaluated first shrink
 the candidate set fast. A matcher that also reads `$kernel.*` is the **same** matcher re-evaluated
-**once per distinct metadata** (memoized), pruning per kernel rather than per pack. Results are cached
-across queries.
+**once per distinct value of the `$kernel.*` fields it reads**, memoized on those, pruning per kernel
+rather than per pack. The projection is what makes this pay: a kernel's full metadata tuple is unique
+by construction, so memoizing on the whole tuple would save nothing, while a matcher reading one field
+collapses an engine's catalog to that field's handful of distinct values. The compiler already
+computes which `$kernel.*` fields a matcher reads ([§4](#4-symbol-binding-and-the-auto-binding-formula)),
+so the memoization key costs nothing extra. Results are cached across queries.
 
 **Short-circuit evaluation.** The criteria expression evaluates with normal JsonLogic
 short-circuiting: an `and` stops at its first false sub-expression, an `or` at its first true one, so a
@@ -507,19 +573,30 @@ compiler may hoist a cheap, highly selective sub-expression (a scalar attribute 
 an expensive one (a native predicate) as an internal optimization, but this never changes the result,
 only when a decision is reached.
 
-**Per-plan caching (AICK-1698).** Matching runs at plan-build time. The result (the chosen UMD, the
-bound symbol table, and the arbitration outcome) is cached on the compiled plan and reused for
-workspace queries and execution, so the same graph is not re-matched across the
-`isApplicable` / `getMaxWorkspaceSize` / `buildPlan` calls that re-run the loop today
-(`AsmSdpaEngine.cpp:66,87`). The compiled matcher itself is built once and shared across plans; only
-the per-graph binding result is per-plan.
+**Matching runs during applicability, and the provider owns the cache.** The order and the cache are
+specified by [RFC 0017 §8](0017_UniversalKernelDescriptor.md#8-end-to-end-flow), which this RFC
+follows rather than restates: matching happens inside `IEngine::isApplicable`, and its two products —
+the **catalog** (the kernels whose full matcher set passed) and the **bound token state** (every
+`$`-prefixed value the matchers resolved) — are cached together on the provider's shared container,
+keyed on the engine, graph, and device that describe the problem, plus the descriptor-inventory
+generation. Later phases read that cache instead of re-matching, so the
+`isApplicable` / `getMaxWorkspaceSize` / `buildPlan` sequence that re-runs the loop today
+(`AsmSdpaEngine.cpp:66,87`) matches a graph once. The compiled matcher itself is built once and shared
+across every graph; only the binding result is per-problem.
+
+**Accepting is a promise.** Because the catalog is settled during applicability, a non-empty catalog
+commits the engine to producing a launchable kernel: a later failure surfaces as a failed plan build,
+not a fallback to another engine. This is RFC 0017 §8.6's base-path invariant, and it is what makes
+match semantics load-bearing — a matcher that accepts a graph its kernel cannot serve turns a decline
+into a user-visible error rather than a retry. It is the reason every quantity a kernel bakes must be
+pinned by a `$kernel.*` criterion ([§5](#5-constraint-vocabulary)).
 
 **Device properties are constant per stream.** A `$device.<field>` sub-expression (for example
 `$device.lds_size`) is evaluated once per graph, since device properties do not vary across a stream.
 Architecture is not a match-time criterion at all for AOT: it is a pack property gated at selection
 ([RFC 0017 §5](0017_UniversalKernelDescriptor.md#5-matching-and-the-umd)).
 
-![Compile-once pipeline: text UMD to constraint IR to a root-opcode-indexed matcher, with a per-plan bind cache](../images/umd_matcher_pipeline.svg)
+![Compile-once pipeline: text UMD to constraint IR to a root-opcode-indexed matcher, with an applicability-time bind cache](../images/umd_matcher_pipeline.svg)
 
 ---
 
@@ -564,11 +641,13 @@ Today the first applicable plan builder wins, which is a documented latent bug w
 matches (`HipMlopsEngine.cpp:34`). The UMD makes overlap explicit and resolves it deterministically,
 reusing the rule from RFC 0017 §5:
 
-1. When several UKDs match a graph, the **UHD** (kernel-selection heuristic) ranks them and the
+1. When several UKDs match a graph, the engine's **heuristic** (the UHD) ranks them and the
    top-scored kernel wins.
 2. Ties break by explicit **`priority`** on the UKD.
-3. Remaining ties break by the descriptor's stable **`id`**, and the conflict is logged to the warning
-   log so an unintended overlap is visible.
+3. Remaining ties break by the descriptor's stable **`id`**, compared as raw bytes, and the conflict
+   is logged to the warning log so an unintended overlap is visible. That byte order carries no
+   meaning; it is chosen for being stable across runs, load orders, and machines, not because a lower
+   id is better.
 
 Arbitration is a property of the generic engine over the set of matching UKDs; a UMD shared by several
 UKDs contributes each of them as a candidate. This closes the mutual-exclusion-by-construction
@@ -583,12 +662,20 @@ hazard.
   expression of [§6](#6-the-shared-expression-language) with the `$`-variable convention.
 - **Compiled form.** The compact binary the matcher runs ([§10](#10-the-matcher-compilation-indexing-and-caching)),
   whose concrete bytes are defined with the KDP/packaging follow-up
-  ([RFC 0017 §12.2](0017_UniversalKernelDescriptor.md#122-follow-up-rfcs)); the schema those bytes
+  ([RFC 0017 §14.2](0017_UniversalKernelDescriptor.md#142-follow-up-rfcs)); the schema those bytes
   encode is specified in [Appendix A](#appendix-a-schema-reference).
 - **Schema and version.** Every UMD carries `schema: "hipdnn.umd/v1"`, a stable `id` (a UUID), and a
   mandatory `name` for diagnostics. A UMD whose schema version is newer than the runtime understands is
   refused with a clear error, never silently reinterpreted, matching
   [RFC 0017 §4](0017_UniversalKernelDescriptor.md#4-descriptor-formats).
+- **A matcher carries two versions.** `version` is the matcher format itself. `sdk_version` is the
+  hipDNN graph schema the matcher was authored against, and a matcher is the only descriptor that
+  needs it: it is the only one that reads graph fields, so it is the only one a graph-schema change
+  can silently invalidate. The runtime holds a floor for each, and a matcher declaring either below
+  its floor is declined before it runs rather than matching against a schema it does not understand
+  ([RFC 0017 §4](0017_UniversalKernelDescriptor.md#4-descriptor-formats)). Both compare numerically
+  by `(major, minor)`; both default to `1.0` when omitted, which is what every descriptor authored
+  against this revision means.
 - **Additive evolution.** New JsonLogic operators, native predicates, and layout aliases are additive
   within `v1` where they do not change the meaning of an existing descriptor; anything that would
   reinterpret existing fields bumps the version.
@@ -596,7 +683,7 @@ hazard.
   authored independently — including third-party drop-in files — do not collide by construction.
   References are typed by field (a KDP's `matchers` versus `engine`), so a matcher id and an engine id
   are never confused. A duplicate `id` seen on the drop-in path is logged and ignored rather than
-  taking down the provider ([RFC 0017 §14](0017_UniversalKernelDescriptor.md#14-risks)).
+  taking down the provider ([RFC 0017 §16](0017_UniversalKernelDescriptor.md#16-risks)).
 
 ---
 
@@ -604,7 +691,7 @@ hazard.
 
 On the drop-in path the loader, the matcher, and the expression interpreter parse input that may be
 untrusted or simply malformed, so they must be bounded and fail closed rather than crash
-([RFC 0017 §14](0017_UniversalKernelDescriptor.md#14-risks)).
+([RFC 0017 §16](0017_UniversalKernelDescriptor.md#16-risks)).
 
 - **Bounded parsing and matching.** Recursion depth, expression step count, node/constraint counts, and
   descriptor size are capped; exceeding a cap quarantines the descriptor, it does not abort the
@@ -615,7 +702,7 @@ untrusted or simply malformed, so they must be bounded and fail closed rather th
 - **Fail-closed evaluation.** An unknown symbol, unresolved native predicate, out-of-range axis, or
   type error declines the match; it never matches by default.
 - **Quarantine, not cascade.** A bad descriptor is quarantined on load with a diagnostic; the rest load
-  ([RFC 0017 §10](0017_UniversalKernelDescriptor.md#10-packaging-and-delivery)).
+  ([RFC 0017 §12](0017_UniversalKernelDescriptor.md#12-packaging-and-delivery)).
 - **Fuzzing.** A seed corpus of UMDs and graphs plus a fuzzer over the loader, matcher, and interpreter
   run under the existing ASAN build ([§16](#16-testing-and-performance)), backing the fail-closed
   requirement.
@@ -624,27 +711,39 @@ untrusted or simply malformed, so they must be bounded and fail closed rather th
 
 ## 15. Observability and Diagnostics
 
-Because matching is data-driven, it is inspectable, and the tooling is a first-class deliverable
-([RFC 0017 §9](0017_UniversalKernelDescriptor.md#9-observability-and-diagnostics)). For the UMD the
-provider surfaces:
+Because matching is data-driven, it is inspectable. For the UMD the provider surfaces:
 
 - **A why-not trace.** For a graph and a candidate UMD, the sub-expression of `criteria` that
   evaluated false and why (the concrete values compared), so an author can see exactly which test declined.
 - **A binding view.** For a successful match, the full bound symbol table (tensors, dims, strides,
-  attributes) as the UDD will see it.
-- **An arbitration trace.** Which UKDs matched, how the UHD scored them, and where a tie fell to
+  attributes) as the UDD will see it — the bound token state of
+  [RFC 0017 §8](0017_UniversalKernelDescriptor.md#8-end-to-end-flow).
+- **An arbitration trace.** Which UKDs matched, how the heuristic scored them, and where a tie fell to
   `priority` or stable `id` ([§12](#12-arbitration)).
 - **Load diagnostics.** Which UMDs compiled, which were quarantined and why, and unresolved native
   predicates by name.
 
-These reuse the diagnostic surface RFC 0017 §9 defines rather than adding a UMD-specific one.
+These reuse the diagnostic surface
+[RFC 0017 §10](0017_UniversalKernelDescriptor.md#10-observability-and-diagnostics) defines rather than
+adding a UMD-specific one. Authoring and validation tooling around the format is a separate,
+first-class deliverable specified in
+[RFC 0017 §11](0017_UniversalKernelDescriptor.md#11-tooling), where agentic authoring — agent-driven
+skills that build and check descriptors from intent — is a committed first step. A UMD is a good fit
+for it: the schema of [Appendix A](#appendix-a-schema-reference) and the compile-time checks of A.10
+are exactly what such a tool validates against.
+
+A matcher is also affected by the runtime opt-outs RFC 0017 §10 defines
+(`HIPDNN_DISABLE_ENGINES`, `HIPDNN_DISABLE_KDPS`, `HIPDNN_DISABLE_UKDS`). Disabling a kernel carries a
+risk specific to shared matchers: a matcher written around the kernel set it was meant to cover may no
+longer be correct once one of those kernels is excluded, leaving the engine over-claiming
+applicability for cases it no longer serves. The option is provided with that risk stated.
 
 ---
 
 ## 16. Testing and Performance
 
 The UMD introduces no new testing strategy; it slots into hipDNN's existing tiers (`docs/Testing.md`,
-`docs/testing/TestingStrategy.md`) as RFC 0017 §12.1 requires. A UMD-backed kernel runs through the
+`docs/testing/TestingStrategy.md`) as RFC 0017 §14.1 requires. A UMD-backed kernel runs through the
 generic engine as an ordinary engine and produces the same graphs everything else consumes, so the
 plugin-agnostic integration harness ([RFC 0006](0006_PluginAgnosticIntegrationTests.md)) validates it
 against the CPU reference ([RFC 0001](0001_CpuGraphExecutorDesign.md)) with the golden-reference
@@ -664,14 +763,14 @@ UMD-specific coverage:
 - **Fuzzing.** The corpus and fuzzer of [§14](#14-security-and-hostile-input).
 - **Match overhead.** Plan-time match cost is measured against the hand-written baseline as
   benchmarking matures (`tools/dnn-benchmarking`, [RFC 0013](0013_Autotune.md)); the compiled matcher,
-  root-opcode index, and per-plan cache ([§10](#10-the-matcher-compilation-indexing-and-caching)) keep
-  it minimal, and the cost is paid once at plan build.
+  root-opcode index, and applicability-time cache ([§10](#10-the-matcher-compilation-indexing-and-caching))
+  keep it minimal, and the cost is paid once per graph and device.
 
 ---
 
 ## 17. Migration
 
-Migration follows RFC 0017 §12: no engine is converted until a UMD-backed kernel runs end to end, and a
+Migration follows RFC 0017 §14: no engine is converted until a UMD-backed kernel runs end to end, and a
 hand-written engine and its descriptor-backed replacement coexist until the generic one reaches parity
 on the graphs that engine covers, at which point the hand-written code is retired.
 
@@ -692,6 +791,13 @@ The SDPA-forward check collapses into one UMD. Compared to the hand-written buil
 non-declarative gates (uint32 stride fit, mask self-consistency) remain as custom operations. Note
 `$q.head_size` is bound from `$q`'s dim, not read as an attribute
 ([§2](#2-the-matchers-input-hipdnns-graph-model)).
+
+This example is grounded on the asm-SDPA builder because that builder is this RFC's first migration
+target ([§17](#17-migration)), so the mapping table below doubles as the cutover checklist. It is
+deliberately a different example from
+[RFC 0017 §13](0017_UniversalKernelDescriptor.md#13-worked-example-sdpa-as-a-ukd), which works the
+`attention_dense` kernel family end to end across all six descriptor kinds; that one shows a UMD in
+the context of a full UKD, this one shows one hand-written `isApplicable` becoming one UMD.
 
 ```jsonc
 {
@@ -719,8 +825,9 @@ non-declarative gates (uint32 stride fit, mask self-consistency) remain as custo
     {"==": ["$sdpa_fwd.alibi_mask", false]},
     {"==": ["$sdpa_fwd.padding_mask", false]},
     {"or": [{"!": "$sdpa_fwd.generate_stats.present"}, {"==": ["$sdpa_fwd.generate_stats", false]}]},
-    {"!": "$attn_mask.present"},                                   // unsupported optional operands absent
-    {"!": "$page_table_k.present"}, {"!": "$page_table_v.present"},
+    // unsupported optional operands declined together; `not_present` always evaluates,
+    // unlike a field read on an absent operand
+    {"not_present": ["$attn_mask", "$page_table_k", "$page_table_v"]},
     {"hipdnn.sdpa_mask_consistent": ["$sdpa_fwd"]},                // custom operation (needs C++)
     {"hipdnn.strides_fit_u32":      ["$q", "$k", "$v", "$o"]}      // custom operation (needs C++)
   ]}
@@ -736,7 +843,7 @@ Mapping to the hand-written code:
 | `nodeWrappers().size() != 1` (:199) | `{"==": ["$graph.node_count", 1]}` |
 | `attributesType() != SdpaAttributes` (:200) | node `op: sdpa_fwd` |
 | dropout / alibi / padding / stats gates (:205-224) | `$sdpa_fwd.*` criteria |
-| `attn_mask` / `page_table_*` absent (:209-215) | `?` operands + `{"!": "$attn_mask.present"}` |
+| `attn_mask` / `page_table_*` absent (:209-215) | `?` operands + one `{"not_present": [...]}` over all three |
 | rank == 4 (:231-247) | `shape` short-hand (names four dims) |
 | `q == k == v` dtype (:244) | `{"==": ["$k.dtype", "$q.dtype"]}` |
 | `k.dims[1] == v.dims[1]` head count (:251) | shared `kv_heads` name in `$k`/`$v` `shape` |
@@ -769,7 +876,7 @@ and argument formulas reference ([RFC 0017 §6](0017_UniversalKernelDescriptor.m
   Mitigation: version and document the shipped predicate set; fail closed with a clear diagnostic.
 - **Match overhead.** Per-candidate evaluation of the criteria expression is unbounded by the
   root-opcode index ([§10](#10-the-matcher-compilation-indexing-and-caching)). Mitigation: short-circuit
-  evaluation, per-plan caching, and the overhead test of [§16](#16-testing-and-performance).
+  evaluation, applicability-time caching, and the overhead test of [§16](#16-testing-and-performance).
 - **Static-matcher parity.** A lowered matcher that diverges from the interpreter is a silent
   correctness bug ([§11](#11-static-matcher-sketch)). Mitigation: the interpreter is the oracle and the
   parity test gates any lowering.
@@ -787,8 +894,13 @@ and argument formulas reference ([RFC 0017 §6](0017_UniversalKernelDescriptor.m
 3. **Static-matcher form.** Which of the [§11](#11-static-matcher-sketch) options becomes the AOT fast
    path, and does it also serve drop-in via a serialized bytecode?
 4. **Feature-vector overlap.** The bound symbol table overlaps the feature vector a UHD consumes
-   ([RFC 0017 §15 Q4](0017_UniversalKernelDescriptor.md#15-open-questions)); should the UMD's bindings
+   ([RFC 0017 §17 Q4](0017_UniversalKernelDescriptor.md#17-open-questions)); should the UMD's bindings
    be the canonical feature source for kernel selection?
+5. **Operators RFC 0017 omits.** `abs`, `pow`, `log2`, and `if` are in A.7 but not in the vocabulary
+   table of [RFC 0017 §5](0017_UniversalKernelDescriptor.md#5-matching-and-the-umd), which declares
+   itself complete. They are needed for dispatch formulas and precedence chains. Add them to RFC
+   0017's table, or scope them in this RFC as dispatch-formula-only and keep criteria to RFC 0017's
+   set?
 
 ---
 
@@ -828,15 +940,19 @@ The design borrows established ideas; none is a dependency. These informed the U
   value-valued expressions are UDD dispatch formulas, both over one `$`-variable symbol table (the five
   namespaces of [§4](#4-symbol-binding-and-the-auto-binding-formula)) with one evaluator
   ([§6](#6-the-shared-expression-language)).
-- **Stride-order layout:** layout represented as an array of dimension indexes giving stride order,
-  since tensors carry no layout enum ([§7](#7-layout-and-stride-order-constraints)).
+- **Stride-order layout:** layout represented as an array of per-dimension stride ranks, higher meaning
+  slower-varying, since tensors carry no layout enum ([§7](#7-layout-and-stride-order-constraints)).
 - **Custom operation (native predicate):** the escape hatch; a registry-resolved JsonLogic operation a
   UMD invokes by its namespaced name for logic the built-in operators cannot state, carried as an
   operation name and typed arguments, never inline code ([§8](#8-native-predicate-escape-hatch)).
 - **Composite criteria:** any boolean combination of tests within the one `criteria` expression,
   written directly with JsonLogic `and` / `or` / `!` / `if` ([§9](#9-composite-constraints)).
-- **Arbitration:** the deterministic resolution when several UKDs match: UHD score, then `priority`,
-  then stable `id` ([§12](#12-arbitration)).
+- **Arbitration:** the deterministic resolution when several UKDs match: heuristic (UHD) score, then
+  `priority`, then stable `id` compared as raw bytes ([§12](#12-arbitration)).
+- **Catalog / bound token state:** the two products of matching a graph — the kernels whose full
+  matcher set passed, and every `$`-prefixed value the matchers resolved. Both are cached by the
+  provider during applicability and read by every later phase
+  ([RFC 0017 §8](0017_UniversalKernelDescriptor.md#8-end-to-end-flow)).
 - **Root-opcode index:** the index of compiled matchers by root opcode that keeps match cost sublinear
   in descriptor count ([§10](#10-the-matcher-compilation-indexing-and-caching)).
 
@@ -860,11 +976,14 @@ these. Criteria arithmetic is integer; `Float` arises only in UDD dispatch formu
 | `schema` | string | yes | — | MUST equal `"hipdnn.umd/v1"`; a newer version is refused, never reinterpreted ([§13](#13-serialization-and-versioning)) |
 | `id` | string (UUID) | yes | — | A UUID; stable, globally unique identity ([§13](#13-serialization-and-versioning)) |
 | `name` | string | yes | — | Diagnostics only; not semantic |
+| `version` | string | no | `"1.0"` | Matcher format version, `<major>.<minor>`, gated at load against the runtime's floor ([§13](#13-serialization-and-versioning)) |
+| `sdk_version` | string | no | `"1.0"` | The hipDNN graph schema version this matcher was authored against, `<major>.<minor>`. A matcher declaring a version below the runtime's floor is declined before it runs ([§13](#13-serialization-and-versioning)) |
 | `allow_override_shape` | bool | no | `false` | When `false`, override-shape graphs are declined ([§3](#3-structural-pattern)) |
 | `nodes` | array&lt;Node&gt; | yes | — | Non-empty; A.2 |
 | `criteria` | Expr | yes | — | A single expression whose static type is `Bool` (A.6) |
 
-No other top-level keys are permitted; an unknown key is refused.
+No other top-level keys are permitted; an unknown key is refused. Both version fields compare
+numerically by `(major, minor)`, so `1.10` is above `1.9`.
 
 ### A.2 Node object and opcode selector
 
@@ -910,10 +1029,11 @@ var-ref      = "$" , ( tensor-ref | graph-ref | attr-ref | kernel-ref | device-r
 tensor-ref   = tvar , [ "." , tensor-field ] ;
 tvar         = ident ;                          (* a pattern variable bound to a Tensor *)
 tensor-field = "uid" | "rank" | "dtype" | "stride_order" | "packed" | "virtual" | "present"
+             | "is_runtime_pass_by_value" | "value_f32"
              | "dims"    , "[" , uint , "]"
              | "strides" , "[" , uint , "]"
              | dim-name ;                        (* a name a shape short-hand introduced (A.5) *)
-graph-ref    = "graph" , "." , "node_count" ;
+graph-ref    = "graph" , "." , ( "node_count" | "is_override_shape_enabled" ) ;
 attr-ref     = node-id , "." , attr-name , [ "." , "present" ] ;
 kernel-ref   = "kernel" , "." , ident ;
 device-ref   = "device" , "." , ident ;
@@ -923,8 +1043,8 @@ uint         = digit , { digit } ;
 
 | Namespace | Root | Fields | Type |
 |---|---|---|---|
-| Tensor | a pattern variable (`$q`) | `uid`, `rank`, `dtype`, `stride_order`, `packed`, `virtual`, `present`, `dims[i]`, `strides[i]`, `<dim-name>` | `Tensor` / `Int` / `Dtype` / `IntArray` / `Bool` |
-| Graph | `$graph` | `node_count` | `Int` |
+| Tensor | a pattern variable (`$q`) | `uid`, `rank`, `dtype`, `stride_order`, `packed`, `virtual`, `present`, `is_runtime_pass_by_value`, `value_f32`, `dims[i]`, `strides[i]`, `<dim-name>` | `Tensor` / `Int` / `Dtype` / `IntArray` / `Bool` / `Float` |
+| Graph | `$graph` | `node_count`, `is_override_shape_enabled` | `Int` / `Bool` |
 | Attributes | a node `id` (`$sdpa_fwd`) | `<attr-name>`, `<attr-name>.present` | scalar / `Bool` |
 | Kernel | `$kernel` | `<field>` a UKD supplies ([RFC 0017 §4](0017_UniversalKernelDescriptor.md#4-descriptor-formats)) | scalar |
 | Device | `$device` | `<field>` (`lds_size`, `warp_size`, …) | scalar |
@@ -938,7 +1058,11 @@ Rules:
   guard such reads with `.present` and rely on short-circuit ordering
   ([§10](#10-the-matcher-compilation-indexing-and-caching)).
 - An out-of-range `dims[i]`/`strides[i]`, an unknown `dim-name`, or any unresolved reference declines
-  the match.
+  the match. `value_f32` resolves only when the tensor carries a compile-time value, so it declines
+  on one that does not.
+- The `present` / `not_present` **operators** (A.7) are the exception to the fail-closed rule above:
+  they report whether a reference resolved and so always yield a boolean, on a required or an
+  optional reference alike.
 
 ### A.5 The `shape` short-hand
 
@@ -1014,7 +1138,8 @@ All integer arithmetic uses checked-width integers and fails closed on overflow
 | `log2`, `rsqrt` | 1 | `Number` | `Float` | Dispatch-formula value core; fails closed on a non-positive argument |
 | `rank` | 1 | `Tensor` | `Int` | Equal to `$t.rank` |
 | `divisible` | 2 | `Int, Int` | `Bool` | `true` iff divisor `!= 0` and dividend `% divisor == 0`; a zero divisor yields `false`, not an error, giving uniform fail-closed zero-guarding (resolves [Open Question 2](#20-open-questions)) |
-| `value_or_default` | 2 | `Ref, Value` | `Value` | The referenced optional operand/attribute value when present, else the default literal |
+| `value_or_default` | 2 | `Ref, Value` | `Value` | The referenced optional operand/attribute value when present, else the fallback. The fallback is usually a literal, but it may be any expression of the same type, including a second field reference, so "this field, else that one" is one operator instead of a branch; both arms MUST be type-compatible against the schema's declared field types |
+| `present`, `not_present` | n-ary | `Ref…` | `Bool` | Was this supplied? `present` is `true` iff every referenced operand/field is bound; `not_present` iff every one is absent. Unlike a field read, these **always evaluate** rather than declining on an absent reference, so one call declines a list of unsupported optional operands |
 | `if` | 3 or 2n+1 | `Bool, Value [, Bool, Value]… , Value` | `Value` | `if`/`elif`/`else` chain; branch results MUST share a type |
 | `shape` | 2 | `Tensor, EntryList` | `Bool` | A.5 |
 | `<ns>.<name>` | per registry | per registry | `Bool` or `Value` | Custom operation, A.9 |
@@ -1022,17 +1147,29 @@ All integer arithmetic uses checked-width integers and fails closed on overflow
 Adding an operator is additive within `v1` where it does not change the meaning of an existing
 descriptor ([§13](#13-serialization-and-versioning)).
 
+`abs`, `pow`, `log2`, and `if` are not in the vocabulary table of
+[RFC 0017 §5](0017_UniversalKernelDescriptor.md#5-matching-and-the-umd), which declares its list
+complete. They are retained here because the UDD's dispatch formulas need them, and because
+`if` is what encodes a precedence chain such as a mask classifier. They are additive under the rule
+above; reconciling them into RFC 0017's table is tracked as
+[Open Question 5](#20-open-questions).
+
 ### A.8 `stride_order` values and layout aliases
 
 A `stride_order` comparison accepts either an integer array or an alias string; aliases expand to the
 array at compile time, and the array is the single canonical form ([§7](#7-layout-and-stride-order-constraints)).
-An array MUST be a permutation of `0 .. rank-1`, slowest-varying dimension first.
+An array MUST be a permutation of `0 .. rank-1` giving each logical dimension's stride rank, higher
+meaning slower-varying.
 
 | Alias | Array | | Alias | Array |
 |---|---|---|---|---|
-| `nchw` | `[0,1,2,3]` | | `ndhwc` | `[0,2,3,4,1]` |
-| `nhwc` | `[0,2,3,1]` | | `bhsd` | `[0,1,2,3]` |
-| `ncdhw` | `[0,1,2,3,4]` | | `contiguous` | identity permutation for the tensor's rank |
+| `nchw` | `[3,2,1,0]` | | `ndhwc` | `[4,0,3,2,1]` |
+| `nhwc` | `[3,0,2,1]` | | `bhsd` | `[3,2,1,0]` |
+| `ncdhw` | `[4,3,2,1,0]` | | `contiguous` | descending stride ranks for the tensor's rank |
+
+`contiguous` needs a rank, so it is legal only on a tensor whose rank a `shape` short-hand has pinned
+(A.5); a fixed-rank alias compared against a differently-pinned tensor is refused at compile rather
+than declining silently at match time.
 
 ### A.9 Custom operations
 
@@ -1049,7 +1186,8 @@ A descriptor MUST pass every check below to compile; a failure refuses (and, on 
 quarantines) the descriptor with a diagnostic ([§10](#10-the-matcher-compilation-indexing-and-caching),
 [§14](#14-security-and-hostile-input)):
 
-1. `schema == "hipdnn.umd/v1"`, and `id` is a well-formed UUID.
+1. `schema == "hipdnn.umd/v1"`, `id` is a well-formed UUID, and each of `version` / `sdk_version`,
+   when present, is a well-formed `<major>.<minor>` string at or above the runtime's floor.
 2. Only the keys of A.1 at the top level; only the keys of A.2 on each node.
 3. Every `opcode` and every name key resolves in the op-schema registry.
 4. Every `?` suffix matches the registry's optionality for that name.

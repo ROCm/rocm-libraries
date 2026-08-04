@@ -33,17 +33,17 @@
   <!-- STAGE 2: constraints -->
   <rect x="330" y="55" width="315" height="290" rx="8" fill="#fef7e0" stroke="#c99a2e" stroke-width="1.5"/>
   <text x="345" y="82" font-family="Consolas, monospace" font-size="11">op: sdpa_fwd</text>
-  <text x="345" y="102" font-family="Consolas, monospace" font-size="11">operands {Q:$q, K:$k, V:$v}</text>
-  <text x="345" y="122" font-family="Consolas, monospace" font-size="11">results  {O:$o}</text>
-  <text x="345" y="148" font-family="Consolas, monospace" font-size="11">$q.dtype one_of {BF16, FP8}</text>
-  <text x="345" y="168" font-family="Consolas, monospace" font-size="11">$k.dtype same_as $q</text>
-  <text x="345" y="188" font-family="Consolas, monospace" font-size="11">$q.shape [b, h, sq, $head_size]</text>
-  <text x="345" y="208" font-family="Consolas, monospace" font-size="11">$k.shape [b, kvh, sk, $head_size]</text>
-  <text x="345" y="228" font-family="Consolas, monospace" font-size="11">expr: $head_size == 128</text>
-  <text x="345" y="248" font-family="Consolas, monospace" font-size="11">layout: [0, 1, 2, 3]</text>
-  <text x="345" y="268" font-family="Consolas, monospace" font-size="11">$attn_mask present: false</text>
-  <text x="345" y="292" font-family="Consolas, monospace" font-size="11" fill="#a05a00">native: strides_fit_u32(...)</text>
-  <text x="345" y="312" font-family="Consolas, monospace" font-size="11" fill="#a05a00">native: sdpa_mask_consistent</text>
+  <text x="345" y="102" font-family="Consolas, monospace" font-size="11">operands {q:$q, k:$k, v:$v}</text>
+  <text x="345" y="122" font-family="Consolas, monospace" font-size="11">results  {o:$o}</text>
+  <text x="345" y="148" font-family="Consolas, monospace" font-size="11">{"in": ["$q.dtype", ["BFLOAT16","FP8_E4M3"]]}</text>
+  <text x="345" y="168" font-family="Consolas, monospace" font-size="11">{"==": ["$k.dtype", "$q.dtype"]}</text>
+  <text x="345" y="188" font-family="Consolas, monospace" font-size="11">{"shape": ["$q", [b, h, sq, head_size]]}</text>
+  <text x="345" y="208" font-family="Consolas, monospace" font-size="11">{"shape": ["$k", [b, kvh, sk, head_size]]}</text>
+  <text x="345" y="228" font-family="Consolas, monospace" font-size="11">{"==": ["$q.head_size", 128]}</text>
+  <text x="345" y="248" font-family="Consolas, monospace" font-size="11">{"==": ["$q.stride_order", [3,2,1,0]]}</text>
+  <text x="345" y="268" font-family="Consolas, monospace" font-size="11">{"not_present": ["$attn_mask"]}</text>
+  <text x="345" y="292" font-family="Consolas, monospace" font-size="11" fill="#a05a00">{"hipdnn.strides_fit_u32": [...]}</text>
+  <text x="345" y="312" font-family="Consolas, monospace" font-size="11" fill="#a05a00">{"hipdnn.sdpa_mask_consistent": [...]}</text>
 
   <line x1="650" y1="200" x2="700" y2="200" stroke="#444" stroke-width="1.5" marker-end="url(#arrowSB)"/>
   <text x="675" y="192" text-anchor="middle" font-weight="600">bind</text>
@@ -51,16 +51,16 @@
   <!-- STAGE 3: bound -->
   <rect x="705" y="55" width="195" height="290" rx="8" fill="#e6f4ea" stroke="#3f9159" stroke-width="1.5"/>
   <text x="720" y="86" font-family="Consolas, monospace" font-size="11">$q $k $v $o</text>
-  <text x="720" y="112" font-family="Consolas, monospace" font-size="11">$q0..$q3 (dims)</text>
+  <text x="720" y="112" font-family="Consolas, monospace" font-size="11">$q.dims[0..3]</text>
   <text x="720" y="132" font-family="Consolas, monospace" font-size="11">$q.strides[0..3]</text>
-  <text x="720" y="158" font-family="Consolas, monospace" font-size="11">$batch, $num_heads</text>
-  <text x="720" y="178" font-family="Consolas, monospace" font-size="11">$kv_heads ($k1==$v1)</text>
-  <text x="720" y="198" font-family="Consolas, monospace" font-size="11">$seqlen_q, $seqlen_k</text>
-  <text x="720" y="218" font-family="Consolas, monospace" font-size="11">$head_size</text>
-  <text x="720" y="252" font-family="Consolas, monospace" font-size="11">$root.causal_mask</text>
-  <text x="720" y="272" font-family="Consolas, monospace" font-size="11">$root.dropout_..</text>
+  <text x="720" y="158" font-family="Consolas, monospace" font-size="11">$q.batch, $q.num_heads</text>
+  <text x="720" y="178" font-family="Consolas, monospace" font-size="11">$k.kv_heads, $v.kv_heads</text>
+  <text x="720" y="198" font-family="Consolas, monospace" font-size="11">$q.seqlen_q, $k.seqlen_k</text>
+  <text x="720" y="218" font-family="Consolas, monospace" font-size="11">$q.head_size, $k.head_size</text>
+  <text x="720" y="252" font-family="Consolas, monospace" font-size="11">$sdpa_fwd.causal_mask</text>
+  <text x="720" y="272" font-family="Consolas, monospace" font-size="11">$sdpa_fwd.dropout_..</text>
   <text x="720" y="308" font-family="Consolas, monospace" font-size="10" fill="#666">used by the UDD's</text>
   <text x="720" y="326" font-family="Consolas, monospace" font-size="10" fill="#666">grid / arg formulas</text>
 
-  <text x="460" y="395" text-anchor="middle" font-style="italic" fill="#444">The match auto-binds every tensor, dim, stride, and attribute; shared names unify dims ($kv_heads = $k1 = $v1).</text>
+  <text x="460" y="395" text-anchor="middle" font-style="italic" fill="#444">The match auto-binds every tensor, dim, stride, and attribute; dim names are per-tensor, so a cross-tensor relation is an explicit criterion.</text>
 </svg>

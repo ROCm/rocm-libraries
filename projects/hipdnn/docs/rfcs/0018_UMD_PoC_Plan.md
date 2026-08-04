@@ -207,14 +207,27 @@ nlohmann_json + plan_utils; add dep on the generated registry).
   exercised opcode.
 - **`shape` lowered in the UMD compiler**, not JsonLogic — keeps the shared language pure; matches
   RFC §10 "compile expands short-hands."
-- **No JsonLogic core change.** The custom-operation (native-predicate) hook is skipped for this
+- **JsonLogic core changes are limited to the presence predicates.** `present` / `not_present` are
+  added because RFC 0017 §5 lists them in the closed operator vocabulary and they are the only way to
+  write "absent, or present and constrained" — a bare field read on an absent operand declines rather
+  than answering. The custom-operation (native-predicate) hook is still skipped for this
   PoC; the two SDPA gates that need it (uint32 stride fit, mask self-consistency) are held constant
-  in the test battery rather than expressed as criteria. `all` / `rank`-op / `divisible` are also
+  in the test battery rather than expressed as criteria. `all` / `rank`-op / `divisible` are
   unused by SDPA fwd — deferred (add if broader §A.7 coverage is wanted).
 - **Not plumbed as a provider engine** — matcher is exercised directly by tests.
 - **Deferred (RFC-acknowledged):** custom-operation (native-predicate) hook and predicate registry
   (§8), static/bytecode matcher (§11), fuzzing (§14), arbitration across multiple UKDs (§12), UDD
-  dispatch formulas, per-plan match cache, multi-node fusion patterns.
+  dispatch formulas, multi-node fusion patterns, and the whole applicability-time catalog and cache
+  (RFC 0017 §8) — the PoC matcher answers one UMD against one graph and holds no catalog.
+- **Deferred pack-level checks.** Two rules RFC 0018 §5 states are enforced by a KDP/KMD loader, not
+  by a single descriptor's compile: that every quantity a kernel bakes is a KMD field pinned by a
+  `$kernel.*` criterion, and that every pack carries an umbrella matcher checking the full graph
+  topology. Neither a KDP nor a KMD loader exists in this tree, so both are out of scope. The
+  compiler does its half: it publishes the `$kernel.*` fields a matcher reads, which is what such a
+  loader needs.
+- **Version floors are structural only.** `version` and `sdk_version` parse and gate against a
+  compiled-in floor, but nothing yet publishes a real graph-schema version to compare against, so
+  the floor is a constant rather than a negotiated value.
 - **Two non-declarative gates out of the UMD.** `strides_fit_u32` and `sdpa_mask_consistent`
   (RFC §8 custom operations) are excluded with the hook; match-equivalence covers the declarative
   subset with those two gates held constant, exactly as arch/kernel-table are.
