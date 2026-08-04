@@ -1202,13 +1202,73 @@ def attention_dense_signature(spec: AttentionDenseSpec):
     )
 
 
-def run_attention_dense_torch(*args, **kwargs):
-    """End-to-end torch entry point for the gfx942 dense kernel.
+_DENSE_LAUNCHER_CACHE: dict = {}
 
-    NOT YET IMPLEMENTED (AICK-1664). Will mirror
-    ``kernels.gfx950.attention_dense.run_attention_dense_torch`` once
-    :func:`build_attention_dense` emits a kernel.
-    """
-    raise NotImplementedError(
-        "run_attention_dense_torch (gfx942) not yet implemented (AICK-1664)"
+
+def run_attention_dense_torch(
+    *,
+    spec: AttentionDenseSpec,
+    q,
+    k,
+    v,
+    out,
+    scale: float,
+    stream: int = 0,
+    arch: str = "gfx942",
+    cu_seqlens_q=None,
+    cu_seqlens_kv=None,
+):
+    """High-level framework entry: compile (cached) + launch the gfx942 dense prefill
+    kernel on torch tensors. ``q``/``out`` are ``[B, S, Hq, D]`` and ``k``/``v`` are
+    ``[B, Skv, Hkv, D]``, dense contiguous; ``scale`` is the softmax scale (1/sqrt(D)).
+    Returns ``out``. torch is imported lazily by the launcher, so this module stays
+    torch-free at import time. Serves both the default and the P4 persistent grid
+    (``spec.persistent``) -- ``attention_dense_grid`` picks the right launch shape.
+
+    Mirrors ``kernels.gfx950.attention_dense.run_attention_dense_torch`` but keys the
+    launcher cache on :func:`p0_kernel_name` (not the shared ``kernel_name()``): this
+    kernel bakes ``batch`` into the buffer-resource extents and ``waves_per_eu`` into
+    the register-allocation attribute, both of which ``kernel_name()`` omits -- so two
+    specs differing only in batch (or wpe) MUST NOT share a cached binary, or a B>1
+    launch is served the B=1 kernel and reads out of bounds.
+
+    varlen / ragged are rejected by :func:`supports_attention_dense` on gfx942, so the
+    ABI is always the 5-arg (q, k, v, o, scale) form; passing ``cu_seqlens_*`` is a
+    caller error rather than a silently-ignored argument."""
+    ok, why = supports_attention_dense(spec, arch=arch)
+    if not ok:
+        raise NotImplementedError(f"attention_dense unsupported for spec: {why}")
+    if cu_seqlens_q is not None or cu_seqlens_kv is not None:
+        raise ValueError(
+            "cu_seqlens_* provided but gfx942 attention_dense is dense-only (varlen "
+            "is rejected by supports_attention_dense); the ABI has no cu_seqlens args"
+        )
+    from rocke.helpers.compile import compile_kernel
+    from rocke.runtime import KernelLauncher, LaunchConfig
+
+    # batch- and wpe-unique cache key (see docstring): p0_kernel_name, not kernel_name.
+    key = p0_kernel_name(spec)
+    launcher = _DENSE_LAUNCHER_CACHE.get(key)
+    if launcher is None:
+        art = compile_kernel(
+            build_attention_dense(spec, arch=arch),
+            arch=arch,
+            backend="python",
+            capture_ir_text=False,
+        )
+        assert art.kernel_name == key, (art.kernel_name, key)
+        launcher = KernelLauncher(
+            hsaco=art.hsaco,
+            kernel_name=art.kernel_name,
+            signature=attention_dense_signature(spec),
+        )
+        _DENSE_LAUNCHER_CACHE[key] = launcher
+    launcher(
+        {"q_ptr": q, "k_ptr": k, "v_ptr": v, "o_ptr": out, "scale": float(scale)},
+        config=LaunchConfig(
+            grid=attention_dense_grid(spec),
+            block=attention_dense_block(spec),
+            stream=int(stream),
+        ),
     )
+    return out

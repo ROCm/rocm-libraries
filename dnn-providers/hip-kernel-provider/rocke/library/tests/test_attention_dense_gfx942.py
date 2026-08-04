@@ -35,6 +35,7 @@ from kernels.gfx942.attention_dense import (
     attention_dense_grid,
     build_attention_dense,
     p0_kernel_name,
+    run_attention_dense_torch,
     supports_attention_dense,
     _p0_d64_kpad,
     _p0_use_cfvst,
@@ -800,3 +801,34 @@ def test_dispatch_persistent_auto_turns_on_for_large_sq_only():
     assert _dense_spec(_req(256, "gfx942", "on")).persistent is True
     # gfx950 untouched: keeps the 256 default (not the gfx942 304 override).
     assert _dense_spec(_req(8192, "gfx950")).num_persistent == 256
+
+
+# --------------------------------------------------------------------------- #
+# run_attention_dense_torch entry point (guard logic; numeric lane is on-GPU)
+# --------------------------------------------------------------------------- #
+def test_run_attention_dense_torch_rejects_unsupported_spec():
+    """The framework entry raises (not silently no-ops) for a supported-by-dataclass
+    but out-of-scope spec. varlen is dataclass-valid but rejected by
+    supports_attention_dense, so the entry must raise NotImplementedError before any
+    compile/launch is attempted (rather than launching a kernel that does not exist)."""
+    spec = _spec(head_size=128, dtype="fp16", varlen=True)
+    with pytest.raises(NotImplementedError, match="unsupported|varlen"):
+        run_attention_dense_torch(
+            spec=spec, q=None, k=None, v=None, out=None, scale=0.1
+        )
+
+
+def test_run_attention_dense_torch_rejects_cu_seqlens():
+    """gfx942 attention_dense is dense-only (varlen rejected), so the ABI has no
+    cu_seqlens args; passing them is a caller error, not a silently-ignored kwarg."""
+    spec = _spec(head_size=128, dtype="fp16")
+    with pytest.raises(ValueError, match="cu_seqlens"):
+        run_attention_dense_torch(
+            spec=spec,
+            q=None,
+            k=None,
+            v=None,
+            out=None,
+            scale=0.1,
+            cu_seqlens_q=[0, 128],
+        )
