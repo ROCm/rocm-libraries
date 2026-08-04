@@ -54,7 +54,6 @@ inline void hipblaslt_check_streamk_sync_scan(rocblaslt_handle handle,
             ++nonzero;
         }
 
-    handle->check_streamk_sync_dirty = (nonzero != 0);
     if(nonzero)
         fprintf(stderr,
                 "[hipBLASLt CHECK_STREAMK_SYNC] %s: Synchronizer left dirty "
