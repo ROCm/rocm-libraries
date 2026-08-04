@@ -124,8 +124,8 @@ A B.3-violation fixture fails generation.
    graph after structural match; resolves all five namespaces via `getData`:
    - **Tensor**: `$q` (→ uid int64), `$q.uid`, `$q.rank` (`dims->size()`), `$q.dtype` (enum name
      string), `$q.dims[i]`, `$q.strides[i]`, `$q.<named-dim>` (via compiler-supplied name→index map),
-     `$q.stride_order` (IntArray, computed from strides by `extractStrideOrder`,
-     `data_sdk/include/hipdnn_data_sdk/utilities/ShapeUtilities.hpp:146`),
+     `$q.stride_order` (IntArray in the RFC 0017 §5 outermost-first form, inverted from
+     `extractStrideOrder`'s stride-rank vector, `ShapeUtilities.hpp:146`),
      `$q.packed` (bool, from dims+strides), `$q.virtual`, `$q.present` (optional operands).
      Absent-optional field access resolves to unknown, which propagates rather than coercing, so the
      criterion containing it declines (fail closed, A.4).
@@ -144,7 +144,7 @@ A B.3-violation fixture fails generation.
    subset (schema exact, single key per op-object, names resolve in registry, `?` ↔ registry
    optionality, node-id/tvar disjoint from reserved roots, single-producer per variable).
    JSON→JSON lowering pass:
-   - Expand layout aliases (`"nhwc"`→`[3,0,2,1]`, `"nchw"`→`[3,2,1,0]`, …, A.8).
+   - Expand layout aliases (`"nhwc"`→`[0,2,3,1]`, `"nchw"`→`[0,1,2,3]`, …, A.8).
    - Expand `shape` (A.5): record per-tensor `{name→index, rank, capture}`; rewrite
      `{"shape":["$q",[...]]}` → `{"==":["$q.rank",N]}` (no capture) / `{">=":["$q.rank",N-1]}`
      (capture). Named-dim reads then resolve through `BindingContext`.

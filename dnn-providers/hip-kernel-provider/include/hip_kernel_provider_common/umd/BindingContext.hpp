@@ -323,13 +323,26 @@ private:
         }
         if(rest == "stride_order")
         {
-            const std::vector<std::int64_t> order
+            // Published in the RFC 0017 §5 form: logical dimension indices
+            // ordered outermost (largest-stride) first, so `[0,2,3,1]` over an
+            // (n,c,h,w) dim order spells N,H,W,C. extractStrideOrder returns
+            // the inverse -- entry `d` is dimension `d`'s stride rank, higher
+            // meaning slower-varying -- so invert it here, once, at the one
+            // place a descriptor-visible value is minted.
+            const std::vector<std::int64_t> ranks
                 = hipdnn_data_sdk::utilities::extractStrideOrder(toVector(t->strides()));
-            jlogic::Value::Array arr;
-            arr.reserve(order.size());
-            for(const std::int64_t v : order)
+            jlogic::Value::Array arr(ranks.size(), jlogic::Value(std::int64_t{0}));
+            const auto rank = static_cast<std::int64_t>(ranks.size());
+            for(std::size_t dim = 0; dim < ranks.size(); ++dim)
             {
-                arr.emplace_back(v);
+                // A dim of stride rank r sits at physical position rank-1-r.
+                const std::int64_t position = rank - 1 - ranks[dim];
+                if(position < 0 || position >= rank)
+                {
+                    return {}; // malformed rank vector -> decline (fail closed)
+                }
+                arr[static_cast<std::size_t>(position)]
+                    = jlogic::Value(static_cast<std::int64_t>(dim));
             }
             return {std::move(arr)};
         }

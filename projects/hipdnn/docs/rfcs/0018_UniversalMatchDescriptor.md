@@ -208,8 +208,8 @@ several kernels — which goes the opposite direction and is not in scope here:
      "operands": {"a": "$bias_out"},                "results": {"y": "$y"}}
   ],
   "criteria": {"and": [
-    {"==": ["$x.dtype", "FLOAT16"]}, {"==": ["$x.stride_order", [3, 0, 2, 1]]}, "$x.packed",  // NHWC
-    {"==": ["$y.dtype", "FLOAT16"]}, {"==": ["$y.stride_order", [3, 0, 2, 1]]}, "$y.packed",  // NHWC
+    {"==": ["$x.dtype", "FLOAT16"]}, {"==": ["$x.stride_order", [0, 2, 3, 1]]}, "$x.packed",  // NHWC
+    {"==": ["$y.dtype", "FLOAT16"]}, {"==": ["$y.stride_order", [0, 2, 3, 1]]}, "$y.packed",  // NHWC
     {"shape": ["$y",    ["batch", "out_channels", "out_h", "out_w"]]},  // logical dim order; layout is the stride_order above
     {"shape": ["$bias", ["out_channels"]]},
     {"==": ["$graph.node_count", 3]},              // exactly these three ops
@@ -323,7 +323,7 @@ same expression as any built-in operator.
 | **Rank** | `{"==": ["$q.rank", 4]}`, or a `shape` short-hand that names four dims | `validateDimensionCount`, rank == 4 |
 | **Shape (bind / relate)** | `{"shape": ["$q", ["batch", "num_heads", "seqlen_q", "head_size"]]}` binds `$q.<dim>`; relate with `{"==": ["$q.head_size", "$k.head_size"]}` | dim reads and cross-tensor dim relations |
 | **Divisibility** | `{"divisible": [{"*": ["$y.n", "$y.ho", "$y.wo"]}, "$kernel.MPerBlock"]}` | tile-fit / GEMM-dim gates |
-| **Layout** | `{"==": ["$q.stride_order", [3, 2, 1, 0]]}` ([§7](#7-layout-and-stride-order-constraints)) | `validateSupportedLayout` |
+| **Layout** | `{"==": ["$q.stride_order", [0, 1, 2, 3]]}` ([§7](#7-layout-and-stride-order-constraints)) | `validateSupportedLayout` |
 | **Packing** | `"$q.packed"` (a bound boolean) | `validatePackedTensors` |
 | **Cross-tensor layout** | `{"==": ["$x.stride_order", "$y.stride_order"]}` (per pair) | `validateConsistentLayouts` |
 | **Attribute (value)** | `{"==": ["$sdpa_fwd.causal_mask", false]}`; absent-or `{"or": [{"!": "$sdpa_fwd.dropout_probability.present"}, {"==": ["$sdpa_fwd.dropout_probability", 0.0]}]}` | per-attr value gates |
@@ -416,7 +416,7 @@ like `{"divisible": [{"*": ["$y.n", "$y.ho", "$y.wo"]}, "$kernel.MPerBlock"]}` n
 {"<=": ["$q.head_size", 128]}                               // range bound
 {"in": ["$q.head_size", [64, 128, 256]]}                    // set membership
 {"divisible": ["$q.num_heads", "$k.kv_heads"]}             // GQA divisibility
-{"==": ["$q.stride_order", [3, 2, 1, 0]]}, "$q.packed"      // layout + packed
+{"==": ["$q.stride_order", [0, 1, 2, 3]]}, "$q.packed"      // layout + packed
 {"==": ["$graph.node_count", 1]}                            // exact whole-graph match
 {"or": [{"not_present": ["$attn_mask"]},
         {"==": ["$attn_mask.dtype", "$q.dtype"]}]}          // composition (§10)
@@ -438,26 +438,32 @@ enough to audit and to lower into the static matcher ([§11](#11-static-matcher-
 ## 7. Layout and Stride-Order Constraints
 
 hipDNN tensors store no layout enum; layout is implied by stride order
-([§2](#2-the-matchers-input-hipdnns-graph-model)). The UMD therefore represents layout as an **array of
-per-dimension stride priorities**: entry `i` ranks logical dimension `i` by stride magnitude, with a
-higher number meaning a slower-varying (larger-stride) dimension. This is the encoding
-`extractStrideOrder` already computes
-(`data_sdk/include/hipdnn_data_sdk/utilities/ShapeUtilities.hpp:146`, called from
-`ApplicabilityChecks.cpp:22`), so a matcher compares
-`$q.stride_order` directly against the same arrays the `validateSupportedLayout` oracle uses today
-rather than against a re-derived permutation.
+([§2](#2-the-matchers-input-hipdnns-graph-model)). The UMD represents layout the way
+[RFC 0017 §5](0017_UniversalKernelDescriptor.md#5-matching-and-the-umd) writes it: an **ordered list
+of logical dimension indices, outermost (largest-stride) first**. Entry `i` names the logical
+dimension stored at physical position `i`, so the array reads as the layout it describes:
+`[0, 2, 3, 1]` over an `(n, c, h, w)` logical dim order spells N, H, W, C.
 
 ```jsonc
-{"==": ["$q.stride_order", [3, 2, 1, 0]]}   // descending-stride packed (BHSD, rank-4)
-{"==": ["$x.stride_order", [3, 0, 2, 1]]}   // NHWC over an NCHW logical dim order
+{"==": ["$q.stride_order", [0, 1, 2, 3]]}   // descending-stride packed (BHSD, rank-4)
+{"==": ["$x.stride_order", [0, 2, 3, 1]]}   // NHWC over an NCHW logical dim order
 ```
 
-- The array is a permutation of `0..rank-1`. Entry `i` is the stride rank of logical dimension `i`,
-  so `[3,2,1,0]` is descending-stride packed and `[3,0,2,1]` places the channel dim fastest-varying
-  (NHWC). The `axis` used everywhere else (dims, strides, `args_signature`) indexes the logical
-  dimension order, independent of this physical layout, consistent with RFC 0017 §6.
+- The array is a permutation of `0..rank-1`. Entry `i` is the logical dimension at physical position
+  `i`, counting from the slowest-varying, so `[0,1,2,3]` is descending-stride packed and `[0,2,3,1]`
+  places the channel dim last, hence fastest-varying (NHWC). The `axis` used everywhere else (dims,
+  strides, `args_signature`) indexes the logical dimension order, independent of this physical
+  layout, consistent with RFC 0017 §6.
+- **This is not the encoding `extractStrideOrder` returns.** That helper
+  (`data_sdk/include/hipdnn_data_sdk/utilities/ShapeUtilities.hpp:146`, called from
+  `ApplicabilityChecks.cpp:22`) produces the inverse: a per-dimension stride *rank*, entry `d`
+  giving the rank of logical dimension `d`, higher meaning slower-varying. The two forms are exact
+  inverses carrying identical information — `[0,2,3,1]` and `[3,0,2,1]` are the same NHWC layout —
+  so the binding layer converts once when it publishes `$q.stride_order`, and descriptors are
+  authored in the RFC 0017 form throughout. Nothing in the graph model changes; only the spelling a
+  matcher author writes.
 - **Named aliases** are provided for the common cases and expand to the array literal at compile time,
-  so `{"==": ["$x.stride_order", "nhwc"]}` compiles to a comparison against `[3, 0, 2, 1]`
+  so `{"==": ["$x.stride_order", "nhwc"]}` compiles to a comparison against `[0, 2, 3, 1]`
   (A.8). The array remains the single canonical form. The four convolution aliases are exactly the
   layouts `validateSupportedLayout` accepts today — NCHW/NHWC at rank 4, NCDHW/NDHWC at rank 5
   (`ApplicabilityChecks.cpp:76`); `bhsd` and `contiguous` are additions for the attention families,
@@ -465,11 +471,12 @@ rather than against a re-derived permutation.
 - **Cross-tensor consistency** is a JsonLogic equality between stride orders,
   `{"==": ["$x.stride_order", "$y.stride_order"]}` (one per pair, joined by the top-level `and`),
   lowering `validateConsistentLayouts`; layout-agnostic tensors (rank-1 scalars, pass-by-value) are
-  skipped as they are today.
+  skipped as they are today. Equality is convention-independent, so a cross-tensor check reads the
+  same under either form.
 - **Packing** is the separate bound boolean `$q.packed` (written `"$q.packed"`), since a supported
   stride order does not imply the tensor is gap-free; it lowers `validatePackedTensors`.
 - `$q.stride_order` is an ordinary bound value ([§4](#4-symbol-binding-and-the-auto-binding-formula)),
-  so a `stride_order == [3,2,1,0]` gate is expressible directly.
+  so a `stride_order == [0,1,2,3]` gate is expressible directly.
 
 ---
 
@@ -919,16 +926,6 @@ and argument formulas reference ([RFC 0017 §6](0017_UniversalKernelDescriptor.m
    itself complete. They are needed for dispatch formulas and precedence chains. Add them to RFC
    0017's table, or scope them in this RFC as dispatch-formula-only and keep criteria to RFC 0017's
    set?
-6. **Stride-order convention.** [§7](#7-layout-and-stride-order-constraints) and A.8 define
-   `stride_order` as a per-dimension stride **rank** (higher = slower-varying), which is what
-   `extractStrideOrder` computes and what the matcher implements and tests: contiguous rank-4 is
-   `[3,2,1,0]` and NHWC is `[3,0,2,1]`. The examples in
-   [RFC 0017 §5](0017_UniversalKernelDescriptor.md#5-matching-and-the-umd) use the inverse,
-   position-to-dimension convention (`[0,1,2,3]` contiguous, `[0,2,3,1]` NHWC), which no
-   implementation uses; RFC 0017 never states which convention it intends. This RFC pins the
-   codebase encoding, so RFC 0017's `stride_order` literals need inverting to match. Confirm, and
-   correct them in RFC 0017 — a matcher copied from those examples silently accepts the wrong
-   physical layout.
 
 ---
 
@@ -968,8 +965,8 @@ The design borrows established ideas; none is a dependency. These informed the U
   value-valued expressions are UDD dispatch formulas, both over one `$`-variable symbol table (the five
   namespaces of [§4](#4-symbol-binding-and-the-auto-binding-formula)) with one evaluator
   ([§6](#6-the-shared-expression-language)).
-- **Stride-order layout:** layout represented as an array of per-dimension stride ranks, higher meaning
-  slower-varying, since tensors carry no layout enum ([§7](#7-layout-and-stride-order-constraints)).
+- **Stride-order layout:** layout represented as an ordered list of logical dimension indices,
+  outermost first, since tensors carry no layout enum ([§7](#7-layout-and-stride-order-constraints)).
 - **Custom operation (native predicate):** the escape hatch; a registry-resolved JsonLogic operation a
   UMD invokes by its namespaced name for logic the built-in operators cannot state, carried as an
   operation name and typed arguments, never inline code ([§8](#8-native-predicate-escape-hatch)).
@@ -1202,14 +1199,15 @@ above; reconciling them into RFC 0017's table is tracked as
 
 A `stride_order` comparison accepts either an integer array or an alias string; aliases expand to the
 array at compile time, and the array is the single canonical form ([§7](#7-layout-and-stride-order-constraints)).
-An array MUST be a permutation of `0 .. rank-1` giving each logical dimension's stride rank, higher
-meaning slower-varying.
+An array MUST be a permutation of `0 .. rank-1` listing logical dimension indices outermost
+(largest-stride) first, matching
+[RFC 0017 §5](0017_UniversalKernelDescriptor.md#5-matching-and-the-umd).
 
 | Alias | Array | | Alias | Array |
 |---|---|---|---|---|
-| `nchw` | `[3,2,1,0]` | | `ndhwc` | `[4,0,3,2,1]` |
-| `nhwc` | `[3,0,2,1]` | | `bhsd` | `[3,2,1,0]` |
-| `ncdhw` | `[4,3,2,1,0]` | | `contiguous` | descending stride ranks for the tensor's rank |
+| `nchw` | `[0,1,2,3]` | | `ndhwc` | `[0,2,3,4,1]` |
+| `nhwc` | `[0,2,3,1]` | | `bhsd` | `[0,1,2,3]` |
+| `ncdhw` | `[0,1,2,3,4]` | | `contiguous` | ascending positions for the tensor's rank |
 
 `contiguous` needs a rank, so it is legal only on a tensor whose rank a `shape` short-hand has pinned
 (A.5); a fixed-rank alias compared against a differently-pinned tensor is refused at compile rather

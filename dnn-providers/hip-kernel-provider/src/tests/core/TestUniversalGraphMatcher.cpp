@@ -366,15 +366,17 @@ TEST(BindingContext, ResolvesEveryNamespaceForm)
     EXPECT_TRUE(b.get("$q.packed").asBool());
     EXPECT_FALSE(b.get("$q.virtual").asBool());
 
-    // stride_order uses extractStrideOrder's per-dim priority encoding
-    // (ShapeUtilities.hpp, RFC 0018 A.8): contiguous rank-4 is [3,2,1,0].
+    // stride_order is published in the RFC 0017 §5 form: logical dim indices
+    // outermost-first, so a contiguous rank-4 tensor is [0,1,2,3]. That is the
+    // inverse of extractStrideOrder's stride-rank vector, which BindingContext
+    // converts once (RFC 0018 §7/A.8).
     const jlogic::Value strideOrder = b.get("$q.stride_order");
     ASSERT_TRUE(strideOrder.isArray());
     EXPECT_EQ(strideOrder,
-              jlogic::Value(jlogic::Value::Array{jlogic::Value(std::int64_t{3}),
-                                                 jlogic::Value(std::int64_t{2}),
+              jlogic::Value(jlogic::Value::Array{jlogic::Value(std::int64_t{0}),
                                                  jlogic::Value(std::int64_t{1}),
-                                                 jlogic::Value(std::int64_t{0})}));
+                                                 jlogic::Value(std::int64_t{2}),
+                                                 jlogic::Value(std::int64_t{3})}));
 
     // Attributes namespace.
     EXPECT_FALSE(b.get("$sdpa_fwd.dropout_probability.present").asBool());
@@ -423,6 +425,46 @@ TEST(UmdCompiler, LayoutAliasMatchesContiguousLayout)
     auto builder = buildSdpaGraph({2, 8, 16, 128}, data::DataType::BFLOAT16);
     fbu::GraphWrapper const g(builder.GetBufferPointer(), builder.GetSize());
     EXPECT_TRUE(m.match(K_DEVICE, g).matched);
+}
+
+TEST(BindingContext, StrideOrderIsPublishedOutermostFirst)
+{
+    // The conversion is observable, not cosmetic: an NHWC tensor must publish
+    // [0,2,3,1] (N,H,W,C read left to right), NOT extractStrideOrder's
+    // [3,0,2,1] stride-rank vector. Reading the rank vector as if it were this
+    // form would name the dims H,C,W,N -- a layout that does not exist.
+    const std::vector<std::int64_t> dims{2, 8, 16, 128};
+    // NHWC over an (n,c,h,w) logical dim order: c varies fastest.
+    const std::vector<std::int64_t> nhwcStrides
+        = hipdnn_data_sdk::utilities::generateStrides(dims, {3, 0, 2, 1});
+
+    auto builder = hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(dims,
+                                                                       nhwcStrides,
+                                                                       dims,
+                                                                       nhwcStrides,
+                                                                       dims,
+                                                                       nhwcStrides,
+                                                                       dims,
+                                                                       nhwcStrides,
+                                                                       data::DataType::BFLOAT16);
+    fbu::GraphWrapper const g(builder.GetBufferPointer(), builder.GetSize());
+
+    json d = sdpaDescriptor();
+    d["criteria"]["and"].push_back(json::parse(R"({"==": ["$q.stride_order", [0, 2, 3, 1]]})"));
+    const umd::UniversalGraphMatcher m(d);
+
+    const umd::MatchResult r = m.match(K_DEVICE, g);
+    ASSERT_TRUE(r.matched);
+    EXPECT_EQ(r.bindings.get("$q.stride_order"),
+              jlogic::Value(jlogic::Value::Array{jlogic::Value(std::int64_t{0}),
+                                                 jlogic::Value(std::int64_t{2}),
+                                                 jlogic::Value(std::int64_t{3}),
+                                                 jlogic::Value(std::int64_t{1})}));
+
+    // The `nhwc` alias expands to the same array, so it matches the same graph.
+    json aliased = sdpaDescriptor();
+    aliased["criteria"]["and"].push_back(json::parse(R"({"==": ["$q.stride_order", "nhwc"]})"));
+    EXPECT_TRUE(umd::UniversalGraphMatcher(aliased).match(K_DEVICE, g).matched);
 }
 
 // ---- Multi-node patterns (RFC 0018 §3/A.3) -------------------------------

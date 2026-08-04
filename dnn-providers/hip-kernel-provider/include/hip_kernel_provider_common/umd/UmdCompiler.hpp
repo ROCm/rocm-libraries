@@ -859,32 +859,32 @@ private:
         return ref.substr(1, dot - 1);
     }
 
-    // Expand a layout alias to a stride-order array. `$q.stride_order` is
-    // computed by extractStrideOrder (ShapeUtilities.hpp) as a per-dim
-    // priority (higher == slower-varying / larger stride), so a contiguous
-    // rank-4 tensor is [3,2,1,0] and NHWC is [3,0,2,1]. The alias arrays match
-    // that encoding -- the same TensorLayout::NCHW/NHWC arrays the real
-    // validateSupportedLayout oracle compares against -- so `stride_order ==
-    // alias` holds against a live graph's strides, and it is the encoding
-    // RFC 0018 A.8 tabulates.
+    // Expand a layout alias to a stride-order array, in the RFC 0017 §5 form
+    // BindingContext publishes: logical dimension indices ordered outermost
+    // (largest-stride) first, so a contiguous rank-4 tensor is [0,1,2,3] and
+    // NHWC is [0,2,3,1] -- the array reads as the layout it names. This is the
+    // inverse of the stride-rank vector extractStrideOrder returns;
+    // BindingContext converts once when it binds `$q.stride_order`, so
+    // `stride_order == alias` holds against a live graph's strides.
+    // RFC 0018 A.8 tabulates these arrays.
     static nlohmann::json aliasToArray(const std::string& alias, std::size_t rank)
     {
         nlohmann::json arr;
         if(alias == "nchw" || alias == "bhsd")
         {
-            arr = nlohmann::json::array({3, 2, 1, 0});
+            arr = nlohmann::json::array({0, 1, 2, 3});
         }
         else if(alias == "nhwc")
         {
-            arr = nlohmann::json::array({3, 0, 2, 1});
+            arr = nlohmann::json::array({0, 2, 3, 1});
         }
         else if(alias == "ncdhw")
         {
-            arr = nlohmann::json::array({4, 3, 2, 1, 0});
+            arr = nlohmann::json::array({0, 1, 2, 3, 4});
         }
         else if(alias == "ndhwc")
         {
-            arr = nlohmann::json::array({4, 0, 3, 2, 1});
+            arr = nlohmann::json::array({0, 2, 3, 4, 1});
         }
         else if(alias == "contiguous")
         {
@@ -896,7 +896,7 @@ private:
             arr = nlohmann::json::array();
             for(std::size_t i = 0; i < rank; ++i)
             {
-                arr.push_back(static_cast<std::int64_t>(rank - 1 - i));
+                arr.push_back(static_cast<std::int64_t>(i));
             }
         }
         else
