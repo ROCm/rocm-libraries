@@ -5,7 +5,7 @@
 
 from importlib.metadata import version as _distribution_version
 
-from ._runtime import RuntimeInfo, validate_runtime
+from . import _runtime
 
 
 # This is the compatibility version written to generated logic/configuration
@@ -13,12 +13,9 @@ from ._runtime import RuntimeInfo, validate_runtime
 GENERATOR_VERSION = "5.0.0"
 
 __version__ = _distribution_version("tensilelite")
-RUNTIME: RuntimeInfo = validate_runtime(__version__)
-TENSILELITE_CLIENT_PATH = RUNTIME.client
+_runtime.initialize(__version__)
 
 __all__ = [
     "GENERATOR_VERSION",
-    "RUNTIME",
-    "TENSILELITE_CLIENT_PATH",
     "__version__",
 ]

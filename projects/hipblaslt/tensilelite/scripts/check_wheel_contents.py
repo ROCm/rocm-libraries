@@ -33,6 +33,8 @@ _OPTIONAL_REQUIREMENTS = {
     "ujson": "ujson",
 }
 
+_CUSTOM_CLIENT_BINDING = "tensilelite-client-path.json"
+
 
 def _wheel_names(wheel: Path) -> set[str]:
     with zipfile.ZipFile(wheel) as archive:
@@ -79,6 +81,14 @@ def _forbidden_entries(names: set[str]) -> list[str]:
 def errors(wheel: Path, source_root: Path) -> list[str]:
     names = _wheel_names(wheel)
     problems = []
+    custom_bindings = sorted(
+        name for name in names if name.endswith(f".dist-info/{_CUSTOM_CLIENT_BINDING}")
+    )
+    if custom_bindings:
+        problems.append(
+            "custom client binding metadata is forbidden in release wheels: "
+            + ", ".join(custom_bindings)
+        )
     forbidden = _forbidden_entries(names)
     if forbidden:
         problems.append("forbidden entries:\n  " + "\n  ".join(forbidden))
@@ -178,7 +188,7 @@ def main(argv=None) -> int:
             for problem in compatibility_errors(compatibility_wheel)
         )
     if problems:
-        print(f"Invalid TensileLite wheels:\n" + "\n".join(problems), file=sys.stderr)
+        print("Invalid TensileLite wheels:\n" + "\n".join(problems), file=sys.stderr)
         return 1
     checked = [wheel, *compatibility_wheels]
     print("TensileLite wheel contents are valid: " + ", ".join(map(str, checked)))

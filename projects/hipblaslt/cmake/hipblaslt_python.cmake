@@ -131,7 +131,6 @@ function(hipblaslt_configure_tensilelite_python mode asan_options)
             "from pathlib import Path; import site; Path(site.getsitepackages()[0], 'hipblaslt-bootstrap.pth').write_text(chr(10).join(${_bootstrap_site_packages}) + chr(10), encoding='utf-8')"
         COMMAND "${CMAKE_COMMAND}" -E env
             "ROCM_PATH=${_stage}"
-            "ROCM_VERSION=${_rocm_version}"
             -- "${_venv_python}" -m pip install
             --disable-pip-version-check --no-build-isolation --no-deps
             --config-settings editable_mode=compat
@@ -143,6 +142,7 @@ function(hipblaslt_configure_tensilelite_python mode asan_options)
         COMMAND "${CMAKE_COMMAND}" -E touch "${_runtime_stamp}"
         DEPENDS
             tensilelite-client
+            "${_source_root}/build_backend.py"
             "${_source_root}/pyproject.toml"
             "${_source_root}/setup.py"
             "${_source_root}/release_metadata.py"
@@ -157,5 +157,4 @@ function(hipblaslt_configure_tensilelite_python mode asan_options)
     set(HIPBLASLT_PYTHON_DEPS "hipblaslt-tensilelite-python-env" PARENT_SCOPE)
     set(HIPBLASLT_TENSILELITE_STAGE "${_stage}" PARENT_SCOPE)
     set(HIPBLASLT_TENSILELITE_PYTHON_EXECUTABLE "${_venv_python}" PARENT_SCOPE)
-    set(HIPBLASLT_TENSILELITE_ROCM_VERSION "${_rocm_version}" PARENT_SCOPE)
 endfunction()

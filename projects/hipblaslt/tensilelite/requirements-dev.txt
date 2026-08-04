@@ -1,7 +1,2 @@
--r ./requirements.txt
+-r ./requirements-dev-common.txt
 ./rocisa
-memory_profiler
-tox
-invoke
-nanobind>=2.0
-scikit-build-core>=0.10

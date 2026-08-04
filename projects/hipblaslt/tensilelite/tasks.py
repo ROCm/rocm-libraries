@@ -55,7 +55,7 @@ def detect_gpu_arch():
     except Exception as e:
         print(f"An unexpected error occurred during GPU detection: {e}", file=sys.stderr)
 
-    print(f"Failed to detect a valid GPU architecture (gfx target not found).", file=sys.stderr)
+    print("Failed to detect a valid GPU architecture (gfx target not found).", file=sys.stderr)
     return None
 
 @task
@@ -189,9 +189,10 @@ def get_gpu_revision_target(c):
         "rocisa_dir": "Path to the rocisa source directory (default: rocisa/ next to this file).",
         "stinkytofu_prefix": "Install prefix for the stinkytofu build (default: build_tmp/stinkytofu-install).",
         "static": "Build stinkytofu static (BUILD_SHARED_LIBS=OFF) instead of the default shared build.",
+        "rocm_path": "ROCm installation used to build rocisa and stinkytofu.",
     }
 )
-def rocisa(c, rocisa_dir=None, stinkytofu_prefix=None, static=False):
+def rocisa(c, rocisa_dir=None, stinkytofu_prefix=None, static=False, rocm_path=None):
     """Install rocisa editably for source development.
 
     This is a separate rocisa developer workflow. TensileLite packaging and
@@ -202,7 +203,9 @@ def rocisa(c, rocisa_dir=None, stinkytofu_prefix=None, static=False):
     exercising the static-plugin path covered by
     rocisa/test/test_pass_plugin.py::TestHelloWorldPassIntegrationStatic.
     """
-    _pip_install_rocisa(c, rocisa_dir, stinkytofu_prefix, shared=not static)
+    _pip_install_rocisa(
+        c, rocisa_dir, stinkytofu_prefix, shared=not static, rocm_path=rocm_path
+    )
 
 
 def _load_stinkytofu_tasks():
@@ -268,7 +271,9 @@ def _build_and_install_stinkytofu(
     c.run(shlex.join(["cmake", "--install", str(build_dir)]))
 
 
-def _pip_install_rocisa(c, rocisa_dir=None, stinkytofu_prefix=None, shared=True):
+def _pip_install_rocisa(
+    c, rocisa_dir=None, stinkytofu_prefix=None, shared=True, rocm_path=None
+):
     """Build and editable-install rocisa for its standalone developer flow.
 
     Builds stinkytofu and installs it to stinkytofu_prefix (default:
@@ -281,7 +286,7 @@ def _pip_install_rocisa(c, rocisa_dir=None, stinkytofu_prefix=None, shared=True)
     shared library.
     """
     src = pathlib.Path(rocisa_dir).resolve() if rocisa_dir else _TASKS_DIR / "rocisa"
-    rocm = _detect_rocm()
+    rocm = rocm_path or _detect_rocm()
 
     prefix = (
         pathlib.Path(stinkytofu_prefix).resolve()
@@ -408,7 +413,114 @@ def build_client(
     if build:
         c.run(shlex.join(["cmake", "--build", build_dir, "--parallel"]))
 
+@task(
+    help={
+        "clean": "Remove the client build directory before building.",
+        "build_dir": "Path to the client build and staged ROCm root.",
+        "build_type": "CMake build type (for example Release or Debug).",
+        "gpu_targets": "Comma-separated GPU targets; detected when omitted.",
+        "rocm_path": "ROCm installation used to build and version the package.",
+        "export_compile_commands": "Enable CMAKE_EXPORT_COMPILE_COMMANDS.",
+        "enable_rocprof": "Build tensilelite-client with rocprof.",
+        "cxx_flags_release": "Override CMAKE_CXX_FLAGS_RELEASE.",
+        "enable_asan": "Enable AddressSanitizer.",
+        "enable_tsan": "Enable ThreadSanitizer.",
+    }
+)
+def install(
+    c,
+    clean=False,
+    build_dir="build_tmp",
+    build_type="Release",
+    gpu_targets=None,
+    rocm_path=None,
+    export_compile_commands=False,
+    enable_rocprof=False,
+    cxx_flags_release=None,
+    enable_asan=False,
+    enable_tsan=False,
+):
+    """Build rocisa/client and install TensileLite editably into this Python."""
+    if sys.platform != "linux":
+        raise Exit(
+            "invoke install is supported only in the Linux ROCm development environment; "
+            "use the manual CMake and pip workflow on other platforms.",
+            code=1,
+        )
 
+    python = pathlib.Path(sys.executable).absolute()
+    selected_rocm = rocm_path or os.environ.get("ROCM_PATH") or "/opt/rocm"
+    rocm = pathlib.Path(selected_rocm).expanduser().absolute()
+    common_requirements = _TASKS_DIR / "requirements-dev-common.txt"
+    if clean and os.path.exists(build_dir):
+        shutil.rmtree(build_dir)
+    c.run(
+        shlex.join(
+            [str(python), "-m", "pip", "install", "-r", str(common_requirements)]
+        )
+    )
+    rocisa.body(c, rocm_path=str(rocm))
+    build_client.body(
+        c,
+        clean=False,
+        build_dir=build_dir,
+        build_type=build_type,
+        gpu_targets=gpu_targets,
+        rocm_path=rocm_path,
+        export_compile_commands=export_compile_commands,
+        enable_rocprof=enable_rocprof,
+        cxx_flags_release=cxx_flags_release,
+        enable_asan=enable_asan,
+        enable_tsan=enable_tsan,
+    )
+
+    staged_client = (
+        pathlib.Path(build_dir).resolve()
+        / "tensilelite-rocm"
+        / "libexec"
+        / "hipblaslt"
+        / "tensilelite"
+        / "tensilelite-client"
+    )
+    if not staged_client.is_file() or not os.access(staged_client, os.X_OK):
+        raise Exit(f"Staged tensilelite-client is missing or not executable: {staged_client}", code=1)
+
+    env = dict(os.environ, ROCM_PATH=str(rocm))
+    c.run(
+        shlex.join(
+            [
+                str(python),
+                "-m",
+                "pip",
+                "install",
+                "--no-build-isolation",
+                "--no-deps",
+                "--editable",
+                str(_TASKS_DIR),
+                "--config-settings",
+                f"tensilelite.client-path={staged_client}",
+            ]
+        ),
+        env=env,
+    )
+    c.run(
+        shlex.join(
+            [
+                str(python),
+                "-c",
+                (
+                    "import pathlib, sys; import rocisa, tensilelite; "
+                    "from tensilelite import _runtime; "
+                    "actual = _runtime.client_executable(); "
+                    "expected = pathlib.Path(sys.argv[1]); "
+                    "assert actual == expected, f'{actual} != {expected}'"
+                ),
+                str(staged_client),
+            ]
+        ),
+        env=env,
+    )
+    print(f"TensileLite editable install uses: {staged_client}")
 @task
 def precommit_install(c):
     """Install the hipblaslt/TensileLite git pre-commit hook (run once after `uv sync`).

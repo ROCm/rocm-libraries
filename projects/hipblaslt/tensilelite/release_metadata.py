@@ -24,18 +24,14 @@ def canonical_rocm_version(value: str) -> str:
 
 
 def rocm_version() -> str:
-    explicit = os.environ.get("ROCM_VERSION")
-    if explicit:
-        return canonical_rocm_version(explicit)
-
     root = Path(os.environ.get("ROCM_PATH", "/opt/rocm"))
     version_file = root / ".info" / "version"
     try:
         return canonical_rocm_version(version_file.read_text(encoding="utf-8"))
     except OSError as exc:
         raise RuntimeError(
-            "Set ROCM_VERSION or point ROCM_PATH at an installation containing "
-            f".info/version (looked at {version_file})."
+            "Point ROCM_PATH at an installation containing .info/version "
+            f"(looked at {version_file})."
         ) from exc
 
 

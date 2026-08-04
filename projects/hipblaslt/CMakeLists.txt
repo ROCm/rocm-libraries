@@ -678,7 +678,6 @@ if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
         COMMAND ${CMAKE_COMMAND} -E make_directory "${_tensilelite_wheel_dir}"
         COMMAND ${CMAKE_COMMAND} -E env
             "ROCM_PATH=${HIPBLASLT_TENSILELITE_STAGE}"
-            "ROCM_VERSION=${HIPBLASLT_TENSILELITE_ROCM_VERSION}"
             -- "${HIPBLASLT_TENSILELITE_PYTHON_EXECUTABLE}" -m pip wheel
             --disable-pip-version-check --no-build-isolation --no-deps
             --wheel-dir "${_tensilelite_wheel_dir}"
@@ -692,6 +691,7 @@ if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
         DEPENDS
             hipblaslt-tensilelite-python-env
             ${_tensilelite_wheel_sources}
+            "${_tensilelite_src}/build_backend.py"
             "${_tensilelite_src}/pyproject.toml"
             "${_tensilelite_src}/setup.py"
             "${_tensilelite_src}/MANIFEST.in"

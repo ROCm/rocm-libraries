@@ -37,8 +37,8 @@ python -c 'import tensilelite, rocisa; print(tensilelite.__version__)'
 ```
 
 Import fails deliberately when the wheel and ROCm release differ, when rocisa
-cannot be imported, or when the ROCm-owned client is missing. There is no
-client-path override.
+cannot be imported, or when the ROCm-owned client is missing. Released wheels
+have no runtime client-path override.
 
 Optional runtime capabilities remain available as extras:
 
@@ -56,28 +56,47 @@ library.
 
 ## Source development
 
-Install or otherwise provide a working rocisa first. `invoke build-client`
-then builds and stages `tensilelite-client` and installs TensileLite editably
-into a private Python environment that inherits rocisa from the invoking
-Python environment:
+From a Linux ROCm development environment, the one-command setup installs the
+shared development requirements and editable rocisa, builds/stages
+`tensilelite-client`, and installs TensileLite editably into the active Python
+environment:
 
 ```bash
 cd rocm-libraries/projects/hipblaslt/tensilelite
+invoke install --gpu-targets gfx942
+```
+
+The editable installation records the staged client's absolute path. Python
+source edits are immediately visible; rerun `invoke build-client` after client
+source or CMake changes to rebuild and refresh that same staged path.
+
+Each step remains available independently. A manual source install may bind any
+existing client executable:
+
+```bash
+python -m pip install -r requirements-dev.txt
 invoke build-client --gpu-targets gfx942
 
-export ROCM_PATH="$PWD/build_tmp/tensilelite-rocm"
-PYTHON="$PWD/build_tmp/tensilelite-venv/bin/python"
+python -m pip install --no-build-isolation --no-deps -e . \
+  --config-settings="tensilelite.client-path=$PWD/build_tmp/tensilelite-rocm/libexec/hipblaslt/tensilelite/tensilelite-client"
+```
 
-"$PYTHON" -m tensilelite --help
-"$PYTHON" -m tensilelite run config.yaml tensile-out
+The config-setting value must be an absolute executable path. It is frozen into
+that installation; runtime CLI, YAML, and environment overrides are not
+supported. A stable symlink may be supplied and retargeted without reinstalling
+the Python package.
+
+The integrated CMake `BUILD` mode still creates a private environment using the
+standard staged ROCm layout:
+
+```bash
+invoke build-client --gpu-targets gfx942
+export ROCM_PATH="$PWD/build_tmp/tensilelite-rocm"
+"$PWD/build_tmp/tensilelite-venv/bin/python" -m tensilelite --help
 ```
 
 On Windows, use `build_tmp/tensilelite-venv/Scripts/python.exe`. A custom build
 directory has the same `tensilelite-rocm` and `tensilelite-venv` children.
-
-Re-run `invoke build-client` after changing `tensilelite-client` or its CMake
-configuration. `invoke rocisa` remains a separate source-development helper
-for the in-tree rocisa project; it is not part of TensileLite packaging.
 
 ## Tests
 

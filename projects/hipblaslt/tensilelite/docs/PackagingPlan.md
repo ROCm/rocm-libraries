@@ -96,8 +96,8 @@ Windows uses the corresponding ROCm SDK runtime directory for the client.
 
 ## Phase 4: Packaging Metadata and Contents
 
-1. Make PEP 517 metadata derive the target ROCm release from `ROCM_VERSION` or
-   the selected root's `.info/version`.
+1. Make PEP 517 metadata derive the target ROCm release exclusively from the
+   selected root's `.info/version`.
 2. Emit the TensileLite distribution version and declare `rocisa` without
    choosing rocisa's versioning policy.
 3. Keep the generator compatibility constant independent from distribution

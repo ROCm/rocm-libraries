@@ -10,7 +10,6 @@
     "tensilelite/BenchmarkProblems.py": 81.22,
     "tensilelite/BenchmarkSplitter.py": 97.92,
     "tensilelite/BenchmarkStructs.py": 74.24,
-    "tensilelite/ClientExecutable.py": 100.0,
     "tensilelite/ClientWriter.py": 74.63,
     "tensilelite/Common/Architectures.py": 79.6,
     "tensilelite/Common/Capabilities.py": 100.0,

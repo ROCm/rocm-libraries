@@ -24,7 +24,7 @@ def test_generator_version_is_independent():
     assert tensilelite.__version__.startswith(tensilelite.GENERATOR_VERSION + "+rocm")
 
 
-def test_runtime_paths_are_validated():
-    assert tensilelite.RUNTIME.rocm_root.is_dir()
-    assert tensilelite.RUNTIME.client == tensilelite.TENSILELITE_CLIENT_PATH
-    assert tensilelite.RUNTIME.client.is_file()
+def test_runtime_details_are_not_public():
+    assert not hasattr(tensilelite, "RUNTIME")
+    assert not hasattr(tensilelite, "RuntimeInfo")
+    assert not hasattr(tensilelite, "TENSILELITE_CLIENT_PATH")

@@ -61,7 +61,7 @@ def test_runtime_reports_external_rocisa_import_failure(monkeypatch):
     monkeypatch.setattr(_runtime, "import_module", fail_import)
 
     with pytest.raises(_rocm.TensileLiteRuntimeError, match="independently packaged"):
-        _runtime.validate_runtime("5.0.0+rocm7.2.4")
+        _runtime.initialize("5.0.0+rocm7.2.4")
 
 
 def test_runtime_treats_rocisa_as_an_opaque_import(tmp_path, monkeypatch):
@@ -72,14 +72,59 @@ def test_runtime_treats_rocisa_as_an_opaque_import(tmp_path, monkeypatch):
     client.chmod(0o755)
     imports = []
 
+    monkeypatch.setattr(_runtime, "_client", _runtime._client)
+    monkeypatch.setattr(_runtime, "_custom", _runtime._custom)
     monkeypatch.setattr(_runtime, "import_module", lambda name: imports.append(name) or object())
     monkeypatch.setattr(
         _runtime,
         "validate_distribution",
         lambda distribution, version: _rocm.ValidatedRocm(root, "7.2.4"),
     )
+    monkeypatch.setattr(_runtime, "_custom_client_path", lambda: None)
 
-    result = _runtime.validate_runtime("5.0.0+rocm7.2.4")
+    _runtime.initialize("5.0.0+rocm7.2.4")
 
     assert imports == ["rocisa"]
-    assert result.client == client
+    assert _runtime.client_executable() == client
+
+
+def test_custom_client_never_falls_back_to_rocm_client(tmp_path, monkeypatch):
+    root = _root(tmp_path)
+    rocm_client = root / "libexec" / "hipblaslt" / "tensilelite" / "tensilelite-client"
+    rocm_client.parent.mkdir(parents=True)
+    rocm_client.write_text("", encoding="utf-8")
+    rocm_client.chmod(0o755)
+    custom_client = tmp_path / "custom-client"
+    custom_client.write_text("", encoding="utf-8")
+    custom_client.chmod(0o755)
+
+    monkeypatch.setattr(_runtime, "_client", _runtime._client)
+    monkeypatch.setattr(_runtime, "_custom", _runtime._custom)
+    monkeypatch.setattr(_runtime, "import_module", lambda name: object())
+    monkeypatch.setattr(
+        _runtime,
+        "validate_distribution",
+        lambda distribution, version: _rocm.ValidatedRocm(root, "7.2.4"),
+    )
+    monkeypatch.setattr(_runtime, "_custom_client_path", lambda: custom_client)
+
+    _runtime.initialize("5.0.0+rocm7.2.4")
+    custom_client.unlink()
+
+    with pytest.raises(_rocm.TensileLiteRuntimeError, match=str(custom_client)):
+        _runtime.client_executable()
+
+
+def test_malformed_installed_client_binding_is_rejected(monkeypatch):
+    class InstalledDistribution:
+        def read_text(self, filename):
+            return "Wheel-Version: 1.0" if filename == "WHEEL" else "not-json"
+
+    monkeypatch.setattr(
+        _runtime,
+        "distributions",
+        lambda **selection: [InstalledDistribution()],
+    )
+
+    with pytest.raises(_rocm.TensileLiteRuntimeError, match="not valid JSON"):
+        _runtime._custom_client_path()

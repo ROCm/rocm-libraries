@@ -35,6 +35,7 @@ from tensilelite.SolutionStructs import ActivationArgs, BiasTypeArgs, FactorDimA
 from tensilelite.Toolchain.Component import Assembler
 
 from . import LibraryIO
+from . import _runtime
 from tensilelite.Common import ensurePath, print1, printExit, printWarning, ClientExecutionLock,\
                            LIBRARY_LOGIC_DIR, LIBRARY_CLIENT_DIR
 from tensilelite.Common.Architectures import ARCH_COMPILER_TARGET, baseArchName, gfxToIsa, isaToGfx
@@ -861,11 +862,4 @@ def CreateBenchmarkClientParametersForSizes(libraryRootPath, problemSizes, dataF
     writeClientConfigIni(True, problemSizes, "", "", "", "", problemType, libraryRootPath, codeObjectFiles, dataFilePath, configFile, deviceId, gfxName, libraryFile=libraryFile)
 
 def getClientExecutablePath():
-  clientExe = globalParameters.get("ClientExecutable")
-
-  if not clientExe or not os.path.isfile(clientExe):
-    raise FileNotFoundError(
-        f"Tensile client executable not found at '{clientExe}'.\n"
-        "Reinstall the matching ROCm hipBLASLt/TensileLite runtime artifact."
-    )
-  return clientExe
+  return str(_runtime.client_executable())

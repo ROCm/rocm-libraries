@@ -1,0 +1,6 @@
+-r ./requirements.txt
+memory_profiler
+tox
+invoke
+nanobind>=2.0
+scikit-build-core>=0.10
