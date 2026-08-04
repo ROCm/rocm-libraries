@@ -31,6 +31,10 @@
   - any-glob-to-any-file: 'dnn-providers/hip-kernel-provider/rocke/library/**/*sdpa*'
   - any-glob-to-any-file: 'dnn-providers/hip-kernel-provider/rocke/library/builders/**/attention/**/*'
 
+"rocke: platform":
+- changed-files:
+  - any-glob-to-any-file: 'dnn-providers/hip-kernel-provider/rocke/platform/**/*'
+
 "project: hipdnn-integration-tests":
 - changed-files:
   - any-glob-to-any-file: 'dnn-providers/integration-tests/**/*'
