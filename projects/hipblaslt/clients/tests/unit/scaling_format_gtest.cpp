@@ -11,11 +11,17 @@
 // scaleBufferSize is the interesting one: it applies two independent paddings
 // with integer division, so it gets explicit boundary cases rather than a
 // restatement of its own formula.
+//
+// The enumerator list below is kept complete by the compiler, not by review: it
+// is expanded into a tripwire switch with no `default:` arm and -Wswitch promoted
+// to an error, so adding a scaling format without listing it here breaks this
+// file's build. See parser_gtest.cpp for the same pattern applied to the parsers.
 
 #include "hipblaslt_datatype2string.hpp"
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <vector>
 
@@ -32,37 +38,72 @@ namespace
         int                      block_size;
     };
 
-    // Every hipblaslt_scaling_format enumerator, with what the three mapping
-    // helpers are expected to report. Keep in sync with
-    // hipblaslt_scaling_format.hpp.
+    // Every hipblaslt_scaling_format enumerator, named once, with what the three
+    // mapping helpers are expected to report for it. Expanded twice: into the
+    // expectation table the tests iterate, and into a tripwire switch that makes
+    // the compiler reject a list missing an enumerator.
+    //
+    // Keep in sync with hipblaslt_scaling_format.hpp. The tripwire enforces that
+    // every enumerator appears; the expected values in each row are the part that
+    // still needs a human.
+    //
+    // Columns: format, scale type, is block scaling, block size.
+#define HIPBLASLT_TEST_SCALING_FORMATS(X)          \
+    X(none, HIP_R_8F_UE8M0, false, 1)              \
+    X(Scalar, HIP_R_8F_UE8M0, false, 1)            \
+    X(Vector, HIP_R_8F_UE8M0, false, 1)            \
+    X(Block_32_UE8M0, HIP_R_8F_UE8M0, true, 32)    \
+    X(Block_16_UE8M0, HIP_R_8F_UE8M0, true, 16)    \
+    X(Block_32_UE4M3, HIP_R_8F_E4M3, true, 32)     \
+    X(Block_16_UE4M3, HIP_R_8F_E4M3, true, 16)     \
+    X(Block_32_UE5M3, HIP_R_8F_E5M3_EXT, true, 32) \
+    X(Block_16_UE5M3, HIP_R_8F_E5M3_EXT, true, 16) \
+    X(Block_32_UE8M0_32_8_EXT, HIP_R_8F_UE8M0, true, 32)
+
     const std::vector<ScalingFormatExpectation>& known_scaling_formats()
     {
-        static const std::vector<ScalingFormatExpectation> formats = {
-            {"none", hipblaslt_scaling_format::none, HIP_R_8F_UE8M0, false, 1},
-            {"Scalar", hipblaslt_scaling_format::Scalar, HIP_R_8F_UE8M0, false, 1},
-            {"Vector", hipblaslt_scaling_format::Vector, HIP_R_8F_UE8M0, false, 1},
-            {"Block_32_UE8M0", hipblaslt_scaling_format::Block_32_UE8M0, HIP_R_8F_UE8M0, true, 32},
-            {"Block_16_UE8M0", hipblaslt_scaling_format::Block_16_UE8M0, HIP_R_8F_UE8M0, true, 16},
-            {"Block_32_UE4M3", hipblaslt_scaling_format::Block_32_UE4M3, HIP_R_8F_E4M3, true, 32},
-            {"Block_16_UE4M3", hipblaslt_scaling_format::Block_16_UE4M3, HIP_R_8F_E4M3, true, 16},
-            {"Block_32_UE5M3",
-             hipblaslt_scaling_format::Block_32_UE5M3,
-             HIP_R_8F_E5M3_EXT,
-             true,
-             32},
-            {"Block_16_UE5M3",
-             hipblaslt_scaling_format::Block_16_UE5M3,
-             HIP_R_8F_E5M3_EXT,
-             true,
-             16},
-            {"Block_32_UE8M0_32_8_EXT",
-             hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT,
-             HIP_R_8F_UE8M0,
-             true,
-             32},
-        };
+#define X(fmt, scale_type, block_scaling, block_size) \
+    {#fmt, hipblaslt_scaling_format::fmt, scale_type, block_scaling, block_size},
+        static const std::vector<ScalingFormatExpectation> formats
+            = {HIPBLASLT_TEST_SCALING_FORMATS(X)};
+#undef X
         return formats;
     }
+
+    // Tripwire: never called. Adding an enumerator to hipblaslt_scaling_format
+    // without adding it to the list above fails to compile here, in the
+    // developer's own build. The switch has no `default:` arm and -Wswitch is
+    // promoted to an error, so the enumerator is reported by name.
+    //
+    // This matters more here than for the parsers. All three mapping helpers in
+    // hipblaslt_datatype2string.hpp have `default:` arms returning a plausible
+    // value, so an unhandled enumerator produces a wrong answer rather than an
+    // error, and the runtime guard below cannot tell a new non-block format apart
+    // from an unhandled value. This check has no such blind spot.
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic error "-Wswitch"
+#elif defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic error "-Wswitch"
+#endif
+
+    [[maybe_unused]] void assert_scaling_formats_listed(hipblaslt_scaling_format value)
+    {
+        switch(value)
+        {
+#define X(fmt, scale_type, block_scaling, block_size) case hipblaslt_scaling_format::fmt:
+            HIPBLASLT_TEST_SCALING_FORMATS(X)
+#undef X
+            break;
+        }
+    }
+
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#elif defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
 
     bool is_registered_format(int value)
     {
@@ -74,9 +115,15 @@ namespace
         return false;
     }
 
-    // Covers the largest enumerator (Block_32_UE8M0_32_8_EXT == 1001) plus
-    // headroom for new ones.
-    constexpr int kScalingSweepMax = 1023;
+    // Derived from the table rather than hand-written so it cannot go stale as
+    // enumerators are added; the margin carries the sweep past the largest one.
+    int scaling_sweep_max()
+    {
+        int max_registered = 0;
+        for(const auto& entry : known_scaling_formats())
+            max_registered = std::max(max_registered, static_cast<int>(entry.format));
+        return max_registered + 64;
+    }
 
     struct ScaleBufferSizeCase
     {
@@ -102,15 +149,18 @@ TEST(HostUnitScalingFormat, smoke_RegisteredFormatsMapAsExpected)
 // All three mapping helpers have `default:` arms returning a plausible value
 // (HIP_R_8F_UE8M0, false, 1), so an unhandled enumerator produces a wrong answer
 // rather than an error. Require every unregistered value to look exactly like
-// that default: a newly added *block* format wired into the switches but not
-// into known_scaling_formats() flips isBlockScaling or blockSize and fails here.
+// that default, which pins the behavior the helpers promise for inputs outside
+// the enum.
 //
-// Known limitation: none/Scalar/Vector are registered but also produce the
-// default triple, so a new *non-block* format is indistinguishable from an
-// unhandled value and this guard cannot catch it.
+// This is a secondary guard, and a partial one: none/Scalar/Vector are registered
+// but also produce the default triple, so at runtime a new *non-block* format is
+// indistinguishable from an unhandled value. That blind spot is covered at compile
+// time by assert_scaling_formats_listed above, which does not care what the
+// helpers return.
 TEST(HostUnitScalingFormat, smoke_EveryEnumeratorIsRegistered)
 {
-    for(int value = 0; value <= kScalingSweepMax; ++value)
+    const int sweep_max = scaling_sweep_max();
+    for(int value = 0; value <= sweep_max; ++value)
     {
         if(is_registered_format(value))
             continue; // asserted in RegisteredFormatsMapAsExpected
