@@ -29,12 +29,14 @@
 // If these values change intentionally, update both places.
 static constexpr int kCdna5DsReadQueueDepth = 16;
 static constexpr int kCdna5DsReadDrainLatency = 72;
+static constexpr int kCdna5DsReadThrottleLatency = 72;
 static constexpr int kCdna5DsReadPerWmma = 3;
 static constexpr int kCdna5GlobalReadPerWmma = 1;
 
 TEST(CDNA5Constants, KnownDefaults) {
     EXPECT_EQ(kCdna5DsReadQueueDepth, 16);
     EXPECT_EQ(kCdna5DsReadDrainLatency, 72);
+    EXPECT_EQ(kCdna5DsReadThrottleLatency, 72);
     EXPECT_EQ(kCdna5DsReadPerWmma, 3);
     EXPECT_EQ(kCdna5GlobalReadPerWmma, 1);
 }
