@@ -15,7 +15,7 @@
 name: TheRock Multi-Arch CI
 
 # TEST BRANCH: users/geomin12/dynamic-determination-stage
-# Testing dynamic baseline_run_id selection for external repos
+# Testing skip path filter for external repos
 
 on:
   pull_request:
