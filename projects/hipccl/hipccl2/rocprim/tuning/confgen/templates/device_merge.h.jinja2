@@ -1,0 +1,4 @@
+{% extends "common/base.h.jinja2" %}
+{% block config_constructor -%}
+merge_config_params{ { {{ config.block_size_x }}, {{ config.ipt }} } }
+{%- endblock %}

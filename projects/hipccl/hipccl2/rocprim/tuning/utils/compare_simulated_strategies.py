@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -23,6 +23,8 @@
 import os
 import json
 import argparse
+from typing import Any
+import numpy as np
 import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
@@ -149,7 +151,7 @@ def load_json_files(simulated_output_dir, output_dir, algo, arch):
     return results
 
 
-def calculate_performance_stats(results, algo, arch):
+def calculate_performance_stats(results: dict[str, Any], algo, arch):
     """
     Calculate and print performance statistics for each strategy.
     Returns the DataFrame for the heatmap.
@@ -157,17 +159,17 @@ def calculate_performance_stats(results, algo, arch):
     strategies = sorted(list(results["simulated"].keys()))
     kernels = sorted(list(results["best_times"].keys()))
 
-    data = []
+    data: list[list[float]] = []
     for strategy in strategies:
-        row = []
+        row: list[float] = []
         for kernel in kernels:
-            strategy_time = results["simulated"][strategy][kernel]
-            best_time = results["best_times"][kernel]
+            strategy_time: float = results["simulated"][strategy][kernel]
+            best_time: float = results["best_times"][kernel]
             relative_perf = (best_time / strategy_time) * 100
             row.append(relative_perf)
         data.append(row)
 
-    df = pd.DataFrame(data, index=strategies, columns=kernels)
+    df = pd.DataFrame(data, index=np.array(strategies), columns=np.array(kernels))
 
     # Calculate summary statistics
     summary_stats = pd.DataFrame(
