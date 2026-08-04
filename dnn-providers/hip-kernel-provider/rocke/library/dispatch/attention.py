@@ -77,11 +77,25 @@ class AttentionRequest(OperatorRequest):
     use_sinks: bool = False
     sliding_window: int = 0
     kv_block_size: int = 16  # paged KV block_size (modulus); {16,32,64}
-    num_sms: int = 120
+    num_sms: int = (
+        0  # 0 => auto-resolve to the device CU count at dispatch (_resolve_num_cus)
+    )
+    target_ctas: int = (
+        0  # 0 => auto: num_sms*4. >0 pins the routing/segmentation target directly.
+    )
     op: str = "attention"
     dtype: str = "fp16"
     algorithm: str = "auto"
     spec_id: str = "auto"
+    # --- gfx950 attention_dense knobs (only consumed by the opt-in
+    #     ``attention_dense`` candidate; ignored by the unified 2D/3D paths).
+    #     Defaults deliver the persistent ~970-TFLOPS prefill path for large Sq:
+    #     ``dense_persistent="auto"`` turns on the grid-stride variant once there
+    #     is enough work to fill the persistent grid, and ``persist_decode="auto"``
+    #     picks the L2-locality hkv-major decode where it is balance-safe. ---
+    dense_persistent: str = "auto"  # "auto" | "on" | "off"
+    dense_num_persistent: int = 256
+    dense_persist_decode: str = "auto"  # "auto" | "qb_major" | "hkv_major"
 
     def normalized(self) -> dict:
         d = asdict(self)
@@ -109,6 +123,57 @@ def _request_errors(req: OperatorRequest) -> list[str]:
     return errors
 
 
+def _device_num_cus() -> "int | None":
+    """Live device multiprocessor (CU) count, or None if unqueryable.
+
+    Torch-free: delegates to the ctypes ``libamdhip64`` wrapper
+    (``rocke.runtime.hip_module``) so the library layer stays off torch. NOTE:
+    this resolver -- and the ``target_ctas`` routing/segmentation override -- cover
+    the Python dispatch path only. The C++ C-ABI engine keeps its own num_sms
+    default (attention_unified_entry.cpp) with no target_ctas field, so both need
+    the mirror resolver + target_ctas there for production (companion change).
+    """
+    try:
+        from rocke.runtime.hip_module import get_device_num_cus
+
+        return get_device_num_cus()
+    except Exception:
+        return None
+
+
+def _resolve_num_cus(req: AttentionRequest) -> int:
+    """Resolve the split-KV device-subscription target (``num_sms``).
+
+    ``num_sms`` is the dispatcher's "how many CUs does this device have" knob; it
+    drives 2D<->3D routing (``select_path``) and the 3D segment count. Resolution:
+      1. an explicit caller value (benchmarks pass a real count),
+      2. **verified on-box gfx942 only** -- the live device CU count, used ONLY
+         when the request targets gfx942 AND the build box IS gfx942, so a
+         cross-compile never bakes the wrong device's count into the kernel,
+      3. otherwise the legacy ``120`` (matches develop): every non-gfx942 arch,
+         and gfx942 built off-box / with no visible gfx942 device.
+    An explicit ``target_ctas`` on the spec supersedes all of the above. Because
+    the resolved value feeds the 3D ``num_segments`` (a compiled-kernel constant),
+    the on-box value is device-dependent within gfx942 (varies across parts);
+    for a reproducible or cross-compile target pass an explicit ``num_sms`` or the
+    ``target_ctas`` spec override rather than relying on the live query.
+    """
+    n = int(req.num_sms)
+    if n > 0:
+        return n
+    if req.arch.lower() == "gfx942":
+        try:
+            from rocke.runtime.hip_module import get_device_arch
+
+            if get_device_arch() == "gfx942":
+                cus = _device_num_cus()
+                if cus and cus > 0:
+                    return cus
+        except Exception:
+            pass
+    return 120
+
+
 def _problem(req: AttentionRequest) -> UnifiedAttentionProblem:
     # total_q = batch * seqlen_q (the flattened query rows). num_seqs = batch.
     return UnifiedAttentionProblem(
@@ -123,7 +188,8 @@ def _problem(req: AttentionRequest) -> UnifiedAttentionProblem:
         dtype=req.dtype.lower(),
         sliding_window=int(req.sliding_window),
         use_sinks=bool(req.use_sinks),
-        num_sms=int(req.num_sms),
+        num_sms=_resolve_num_cus(req),
+        target_ctas=int(req.target_ctas),
     )
 
 
@@ -150,6 +216,10 @@ class AttentionSpec:
     num_query_heads: int
     num_kv_heads: int
     name: str = "rocke_attention_unified"
+    # When set, this verbatim kernel_name is returned by :meth:`kernel_name`
+    # instead of the composed unified name. Used by the dense candidate to
+    # surface the concrete persistent/ragged/decode kernel it will launch.
+    kernel_name_override: str = ""
     # Optional pinned codegen knobs a specialized candidate wants the builder to
     # apply (sorted (key, value) pairs; empty for generic candidates). See
     # ``attention_unified._d256_gfx950_spec_overrides``; the builder consumes them
@@ -157,6 +227,8 @@ class AttentionSpec:
     tiled_overrides: Tuple[Tuple[str, object], ...] = ()
 
     def kernel_name(self) -> str:
+        if self.kernel_name_override:
+            return self.kernel_name_override
         from rocke.helpers.spec import kernel_name_join
 
         return kernel_name_join(
@@ -304,6 +376,143 @@ def _make_gfx942_dense_pipe_candidate() -> KernelCandidate:
 
 
 ATTENTION_REGISTRY.register(_make_gfx942_dense_pipe_candidate())
+
+
+# block_n (KV tile) the dense candidate ships; 64 is the resource-efficient
+# peak (see AttentionDenseSpec.block_n).
+_DENSE_BLOCK_N = 64
+
+
+def _dense_spec(req: OperatorRequest):
+    """Build the ``AttentionDenseSpec`` for a request at its best-performing
+    config. Persistent ("auto") turns on the grid-stride ~970-TFLOPS variant once
+    there is enough work to fill the persistent grid (``nqb*Hq*B >= num_persistent``
+    -- the large-Sq prefill regime); ``persist_decode`` / ``lazy_rescale`` default
+    to the L2-locality hkv-major decode and always-on lazy rescale. Non-tile-
+    multiple self-attention lengths use the on-chip ragged path (no host pad)."""
+    from kernels.gfx950.attention_dense import AttentionDenseSpec, _BLOCK_M
+
+    assert isinstance(req, AttentionRequest)
+    sq, sk = int(req.seqlen_q), int(req.seqlen_k)
+    bn = _DENSE_BLOCK_N
+    # on-chip ragged padding for ragged self-attention lengths (seqlen_q==seqlen_kv,
+    # not a 256/block_n multiple). Cross-attention ragged is left to the validator.
+    ragged = (sq == sk) and ((sq % _BLOCK_M != 0) or (sk % bn != 0))
+    nqb = (sq + _BLOCK_M - 1) // _BLOCK_M
+    work = nqb * int(req.nhead_q) * int(req.batch)
+    np = int(req.dense_num_persistent)
+    mode = req.dense_persistent.strip().lower()
+    if mode == "on":
+        persistent = True
+    elif mode == "off":
+        persistent = False
+    elif mode == "auto":
+        persistent = work >= np  # enough work to fill the persistent grid
+    else:
+        raise ValueError(
+            f"dense_persistent must be 'auto'/'on'/'off', got {req.dense_persistent!r}"
+        )
+    return AttentionDenseSpec(
+        batch=int(req.batch),
+        seqlen_q=sq,
+        seqlen_kv=sk,
+        num_query_heads=int(req.nhead_q),
+        num_kv_heads=int(req.nhead_k),
+        head_size=int(req.hdim_q),
+        causal=(int(req.mask_type) != 0),
+        dtype=req.dtype.lower(),
+        block_n=bn,
+        persistent=persistent,
+        num_persistent=np,
+        persist_decode=req.dense_persist_decode.strip().lower(),
+        ragged=ragged,
+    )
+
+
+def dense_spec_for_request(req: AttentionRequest):
+    """Public builder: the launch-ready ``AttentionDenseSpec`` for ``req`` at its
+    best config (see :func:`_dense_spec`). Pair with ``run_attention_dense_torch``
+    to execute the dispatched dense candidate."""
+    return _dense_spec(req)
+
+
+def _make_gfx950_attention_dense_candidate() -> KernelCandidate:
+    """Dense CK-1 persistent flash-attn prefill on gfx950 (bf16/fp16, causal/full).
+
+    OPT-IN ONLY: matches solely when the request explicitly names
+    ``algorithm="attention_dense"`` (or ``spec_id="gfx950_attention_dense"``), so it
+    never auto-overrides the generic unified_2d path (no change to default routing).
+    When selected it uses the persistent best-config from :func:`_dense_spec`
+    (grid-stride + hkv-major + lazy for large Sq); the concrete kernel_name (incl.
+    ``persist``/``hkvmaj``/``lazyrs``/``ragged``) is surfaced on the spec so the
+    launched kernel is the fast path, not the default grid. End-to-end launch is
+    ``run_attention_dense_torch(spec=dense_spec_for_request(req), ...)``.
+    """
+    spec_id = "gfx950_attention_dense"
+    name = "attention_gfx950_dense"
+
+    def support(req: OperatorRequest) -> Tuple[bool, str]:
+        errors = _request_errors(req)
+        if errors:
+            return False, "; ".join(errors)
+        assert isinstance(req, AttentionRequest)
+        # Opt-in: never selected under algorithm/spec_id "auto".
+        if req.algorithm.strip().lower() != "attention_dense" and (
+            req.spec_id.strip().lower() != spec_id
+        ):
+            return False, "attention_dense is opt-in (algorithm='attention_dense')"
+        if req.arch != "gfx950":
+            return False, f"attention_dense requires gfx950 (got {req.arch!r})"
+        if req.dtype.lower() not in ("bf16", "fp16"):
+            return False, f"attention_dense is bf16/fp16 only (got {req.dtype!r})"
+        if int(req.sliding_window) or bool(req.use_sinks):
+            return False, "attention_dense is dense (no sliding-window / sinks)"
+        from kernels.gfx950.attention_dense import supports_attention_dense
+
+        try:
+            spec = _dense_spec(req)
+        except ValueError as e:
+            return False, str(e)
+        ok, why = supports_attention_dense(spec, arch=req.arch)
+        if not ok:
+            return False, why
+        return True, "ok"
+
+    def select(req: OperatorRequest) -> AttentionSpec:
+        ok, why = support(req)
+        if not ok:
+            raise ValueError(f"{name} does not support request: {why}")
+        assert isinstance(req, AttentionRequest)
+        problem = _problem(req)
+        dense_spec = _dense_spec(req)
+        return AttentionSpec(
+            path="2d",
+            head_size=problem.head_size,
+            block_size=problem.block_size,
+            dtype=problem.dtype,
+            num_query_heads=problem.num_query_heads,
+            num_kv_heads=problem.num_kv_heads,
+            name="rocke_attention_dense",
+            # surface the concrete persistent/hkvmaj/lazyrs/ragged kernel so the
+            # dispatched spec names the fast path it will actually launch.
+            kernel_name_override=dense_spec.kernel_name(),
+        )
+
+    candidate = KernelCandidate(
+        name=name,
+        family=_FAMILY,
+        algorithm="attention_dense",
+        spec_id=spec_id,
+        abi_version=ATTENTION_ABI_VERSION,
+        priority=3,
+        supports=support,
+        select_spec=select,
+        signature=lambda _spec: (),
+        grid=lambda spec, req: (0, 0, 0),
+        block=lambda spec: (0, 0, 0),
+        sweep_space=lambda req: (select(req),) if support(req)[0] else (),
+    )
+    return candidate
 
 
 def _make_gfx950_d256_candidate() -> KernelCandidate:
@@ -454,6 +663,7 @@ def _make_d256_decode_candidate() -> KernelCandidate:
     return candidate
 
 
+ATTENTION_REGISTRY.register(_make_gfx950_attention_dense_candidate())
 ATTENTION_REGISTRY.register(_make_gfx950_d256_candidate())
 ATTENTION_REGISTRY.register(_make_d256_decode_candidate())
 

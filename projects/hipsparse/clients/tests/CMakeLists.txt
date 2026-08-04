@@ -141,6 +141,18 @@ if(HIPSPARSE_ENABLE_SPMV_BSR)
     )
 endif()
 
+if(BUILD_WITH_CSC_TRSV)
+    target_sources(hipsparse-test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/test_spsv_csc.cpp"
+    )
+endif()
+
+if(BUILD_WITH_CSC_TRSM)
+    target_sources(hipsparse-test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/test_spsm_csc.cpp"
+    )
+endif()
+
 if(HIPSPARSE_ENABLE_HIP)
     target_sources(hipsparse-test PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/test_doti.cpp"
