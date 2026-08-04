@@ -1545,8 +1545,15 @@ INSTANTIATE_TEST_SUITE_P(
             // descriptors must be allocated using the reciprocal (not primary) plan,
             // in general. The generalized usage test's roundtrip operations cover this
             // possible usage in a robust way, for any type of plan.
-            return params.input_desc_format != HIPFFT_XT_FORMAT_OUTPUT
-                   && params.output_desc_format() != HIPFFT_XT_FORMAT_INPUT;
+            if(params.input_desc_format == HIPFFT_XT_FORMAT_OUTPUT
+               || params.output_desc_format() == HIPFFT_XT_FORMAT_INPUT)
+                return false;
+            // Exclude unbatched 1D transforms: more analyses are required to determine
+            // exact expectations from source-of-truth implementations for such cases
+            // (and full test-side infrastructure doesn't exist yet, anyways).
+            if(params.batch == 1 && params.transform_lengths.size() == 1)
+                return false;
+            return true;
         })),
     [](const testing::TestParamInfo<hipfftXtGeneralizedUsage::ParamType>& info) {
         return info.param.str();
