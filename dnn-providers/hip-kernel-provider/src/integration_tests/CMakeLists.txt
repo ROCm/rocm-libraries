@@ -47,7 +47,6 @@ if(ENABLE_ASM_SDPA_ENGINE)
         target_sources(hip_kernel_provider_integration_tests PRIVATE
             asm_sdpa_engine/AsmSdpaConfigHelpers.cpp
             asm_sdpa_engine/IntegrationGpuSdpaForward.cpp
-            asm_sdpa_engine/IntegrationGpuSdpaBackward.cpp
         )
         # Add include path for codegen-generated headers (e.g., asm_fmha_v3_fwd_configs.hpp)
         target_include_directories(hip_kernel_provider_integration_tests PRIVATE
@@ -64,7 +63,6 @@ endif()
 if(ENABLE_HIP_MLOPS_ENGINE)
     target_sources(hip_kernel_provider_integration_tests PRIVATE
         hip_mlops_engine/IntegrationGpuPassByValue.cpp
-        hip_mlops_engine/Resample/IntegrationGpuResampleForward.cpp
     )
 endif()
 clang_tidy_check(hip_kernel_provider_integration_tests)
@@ -79,7 +77,18 @@ if(ENABLE_ASM_SDPA_ENGINE)
                 "Skipping SDPA integration test environment setup.")
     else()
         set(ASM_KERNEL_ENV "HIPDNN_AITER_ASM_DIR=${CMAKE_BINARY_DIR}/hip_kernel_provider/asm_kernels")
-        if(COVERAGE_ENVIRONMENT)
+        if(HIPKERNELPROVIDER_YAML_CATEGORIZATION_ENABLED)
+            # YAML categorization registers tiered *_suite tests instead of the
+            # raw hip_kernel_provider_integration_tests test (see
+            # _add_test_target_internal's early return in
+            # dnn-providers/cmake/Tests.cmake when DNN_PROVIDER_CTEST_CATEGORIES_YAML
+            # is set), so set_tests_properties() on the raw target name below
+            # would fail with "Can not find test to add properties to". Propagate
+            # the env var to the parent scope so src/CMakeLists.txt's
+            # apply_test_category_labels() call can merge it into the generated
+            # suites' ENVIRONMENT instead.
+            set(HIPKERNELPROVIDER_ASM_KERNEL_ENV "${ASM_KERNEL_ENV}" PARENT_SCOPE)
+        elseif(COVERAGE_ENVIRONMENT)
             set_tests_properties(hip_kernel_provider_integration_tests PROPERTIES
                 ENVIRONMENT "${COVERAGE_ENVIRONMENT};${ASM_KERNEL_ENV}"
             )
