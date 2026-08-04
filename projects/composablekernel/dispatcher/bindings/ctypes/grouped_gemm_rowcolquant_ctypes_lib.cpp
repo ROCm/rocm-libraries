@@ -160,9 +160,9 @@ int dispatcher_run_rowcolquant_gemm(const void* A,
     if(stride_A != K || stride_B != K || stride_C != N)
     {
         std::cerr << "dispatcher_run_rowcolquant_gemm: non-packed strides are not supported. "
-                  << "Expected stride_A=" << K << " stride_B=" << K
-                  << " stride_C=" << N << ", got stride_A=" << stride_A
-                  << " stride_B=" << stride_B << " stride_C=" << stride_C << "\n";
+                  << "Expected stride_A=" << K << " stride_B=" << K << " stride_C=" << N
+                  << ", got stride_A=" << stride_A << " stride_B=" << stride_B
+                  << " stride_C=" << stride_C << "\n";
         return -1;
     }
 
@@ -221,22 +221,23 @@ int dispatcher_run_rowcolquant_gemm(const void* A,
     // reused across all columns (AQ) / all rows (BQ). QK_A and QK_B are ignored by the
     // kernel; M and N govern the loop bounds directly. Passing any non-zero stride causes
     // the kernel to step past the end of the scale buffer, producing garbage output.
-    ck_tile::QuantGroupedGemmHostArgs args(A_dev,
-                                           B_dev,
-                                           C_dev,
-                                           AQ_dev,
-                                           BQ_dev,
-                                           static_cast<ck_tile::index_t>(k_batch),
-                                           static_cast<ck_tile::index_t>(M),
-                                           static_cast<ck_tile::index_t>(N),
-                                           static_cast<ck_tile::index_t>(K),
-                                           static_cast<ck_tile::index_t>(1), // QK_A: unused
-                                           static_cast<ck_tile::index_t>(1), // QK_B: unused
-                                           static_cast<ck_tile::index_t>(stride_A),
-                                           static_cast<ck_tile::index_t>(stride_B),
-                                           static_cast<ck_tile::index_t>(stride_C),
-                                           static_cast<ck_tile::index_t>(0), // stride_AQ: broadcast
-                                           static_cast<ck_tile::index_t>(0)); // stride_BQ: broadcast
+    ck_tile::QuantGroupedGemmHostArgs args(
+        A_dev,
+        B_dev,
+        C_dev,
+        AQ_dev,
+        BQ_dev,
+        static_cast<ck_tile::index_t>(k_batch),
+        static_cast<ck_tile::index_t>(M),
+        static_cast<ck_tile::index_t>(N),
+        static_cast<ck_tile::index_t>(K),
+        static_cast<ck_tile::index_t>(1), // QK_A: unused
+        static_cast<ck_tile::index_t>(1), // QK_B: unused
+        static_cast<ck_tile::index_t>(stride_A),
+        static_cast<ck_tile::index_t>(stride_B),
+        static_cast<ck_tile::index_t>(stride_C),
+        static_cast<ck_tile::index_t>(0),  // stride_AQ: broadcast
+        static_cast<ck_tile::index_t>(0)); // stride_BQ: broadcast
 
     const std::vector<ck_tile::QuantGroupedGemmHostArgs> gemm_descs = {args};
 
@@ -244,14 +245,14 @@ int dispatcher_run_rowcolquant_gemm(const void* A,
     // stream_config fields (positional): stream_id, time_kernel, log_level,
     //   cold_niters, nrepeat, do_log_perf, use_gpu_timer, rotating_count
     ck_tile::stream_config stream_cfg{
-        nullptr,           // stream_id
-        do_time,           // time_kernel
-        0,                 // log_level
-        do_time ? 3 : 0,   // cold_niters
-        do_time ? 10 : 1,  // nrepeat
-        do_time,           // do_log_perf
-        false,             // use_gpu_timer
-        1,                 // rotating_count
+        nullptr,          // stream_id
+        do_time,          // time_kernel
+        0,                // log_level
+        do_time ? 3 : 0,  // cold_niters
+        do_time ? 10 : 1, // nrepeat
+        do_time,          // do_log_perf
+        false,            // use_gpu_timer
+        1,                // rotating_count
     };
 
     float exec_time = SelectedKernel::launch(gemm_descs, stream_cfg, kargs_dev);

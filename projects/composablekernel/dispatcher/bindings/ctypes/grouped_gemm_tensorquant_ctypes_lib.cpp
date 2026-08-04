@@ -243,14 +243,14 @@ int dispatcher_run_tensorquant_gemm(const void* A,
     // stream_config fields (positional): stream_id, time_kernel, log_level,
     //   cold_niters, nrepeat, do_log_perf, use_gpu_timer, rotating_count
     ck_tile::stream_config stream_cfg{
-        nullptr,           // stream_id
-        do_time,           // time_kernel
-        0,                 // log_level
-        do_time ? 3 : 0,   // cold_niters
-        do_time ? 10 : 1,  // nrepeat
-        do_time,           // do_log_perf
-        false,             // use_gpu_timer
-        1,                 // rotating_count
+        nullptr,          // stream_id
+        do_time,          // time_kernel
+        0,                // log_level
+        do_time ? 3 : 0,  // cold_niters
+        do_time ? 10 : 1, // nrepeat
+        do_time,          // do_log_perf
+        false,            // use_gpu_timer
+        1,                // rotating_count
     };
 
     float exec_time = SelectedKernel::launch(gemm_descs, stream_cfg, kargs_dev);
