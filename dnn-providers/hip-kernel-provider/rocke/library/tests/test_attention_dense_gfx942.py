@@ -36,6 +36,7 @@ from kernels.gfx942.attention_dense import (
     build_attention_dense,
     p0_kernel_name,
     supports_attention_dense,
+    _p0_d64_kpad,
     _p0_use_cfvst,
     _p0_use_exp2_fast,
     _p0_waves_per_eu,
@@ -609,7 +610,104 @@ def test_dispatch_applies_gfx942_waves_per_eu_tuning_and_leaves_gfx950_alone():
     tuned = _dense_spec(_req("bf16", 64, "gfx942"))
     kernel = build_attention_dense(tuned, arch="gfx942")
     assert kernel.attrs.get("waves_per_eu") == 4
-    assert p0_kernel_name(tuned).endswith("_wpe4")
+    # D64 also folds in the K bank-conflict pad, so the suffix is _wpe4_kpad.
+    assert p0_kernel_name(tuned).endswith("_wpe4_kpad")
+
+
+# --------------------------------------------------------------------------- #
+# P3 D64 K-LDS bank-conflict pad (AICK-1664 Hypothesis #3) wiring
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize(
+    "head_size, expected",
+    [(64, True), (128, False)],
+)
+def test_d64_kpad_selector_matches_policy(head_size, expected):
+    """The per-config policy: ON for D64 (both dtypes), never for D128 (which already
+    carries a per-row K pad). Mirrors _p0_waves_per_eu -- a pure predicate dispatch
+    folds into spec.d64_kpad."""
+    assert _p0_d64_kpad(head_size) is expected
+
+
+def test_d64_kpad_off_build_is_byte_identical_and_unnamed():
+    """A directly-built spec (dispatch not involved) leaves d64_kpad at the default
+    False, so the shipped/probe-off codegen stays byte-identical: no _kpad name tag and
+    the emitted symbol matches p0_kernel_name. This is the do-not-regress guard for the
+    'module constant default False' invariant."""
+    for spec in (_spec(head_size=64, dtype="fp16"), _spec(head_size=64, dtype="bf16")):
+        assert spec.d64_kpad is False
+        assert "_kpad" not in p0_kernel_name(spec)
+        kd = build_attention_dense(spec, arch="gfx942")
+        assert kd.name == p0_kernel_name(spec)
+
+
+def test_d64_kpad_on_carries_the_kpad_tag_and_builds():
+    """With d64_kpad=True the K_lds layout + do_qk addressing change, so the name must
+    carry a _kpad tag (name-cache disambiguation, same class as _wpe / _b) and the two
+    specs must compile to different symbols. D128 ignores the flag entirely."""
+    import dataclasses
+
+    off = _spec(head_size=64, dtype="fp16")
+    on = dataclasses.replace(off, d64_kpad=True)
+    assert "_kpad" in p0_kernel_name(on)
+    assert p0_kernel_name(on) != p0_kernel_name(off)
+    kd_on = build_attention_dense(on, arch="gfx942")
+    assert kd_on.name == p0_kernel_name(on)
+    # D128 never re-pads: the flag is inert there (no tag, no layout change).
+    d128 = dataclasses.replace(_spec(head_size=128, dtype="fp16"), d64_kpad=True)
+    assert "_kpad" not in p0_kernel_name(d128)
+    assert p0_kernel_name(d128) == p0_kernel_name(_spec(head_size=128, dtype="fp16"))
+
+
+def test_dispatch_applies_gfx942_d64_kpad_and_leaves_gfx950_alone():
+    """The gfx942 dispatch spec factory folds d64_kpad=True for D64 (both dtypes) and
+    leaves D128 + gfx950 untouched, so the dispatched kernel_name and the emitted K_lds
+    layout agree. The shared spec default (owned by the gfx950 file) must stay False."""
+    from dispatch.attention import _dense_spec, AttentionRequest
+
+    assert (
+        AttentionDenseSpec(
+            batch=1,
+            seqlen_q=2048,
+            seqlen_kv=2048,
+            num_query_heads=16,
+            num_kv_heads=4,
+            head_size=64,
+            dtype="fp16",
+            causal=True,
+            block_n=64,
+        ).d64_kpad
+        is False
+    )
+
+    def _req(dtype, d, arch):
+        return AttentionRequest(
+            batch=1,
+            nhead_q=16,
+            nhead_k=4,
+            seqlen_q=2048,
+            seqlen_k=2048,
+            hdim_q=d,
+            hdim_v=d,
+            arch=arch,
+            mask_type=1,
+            dtype=dtype,
+            algorithm="attention_dense",
+            dense_persistent="off",
+        )
+
+    # gfx942: D64 both dtypes ON, D128 OFF.
+    assert _dense_spec(_req("fp16", 64, "gfx942")).d64_kpad is True
+    assert _dense_spec(_req("bf16", 64, "gfx942")).d64_kpad is True
+    assert _dense_spec(_req("fp16", 128, "gfx942")).d64_kpad is False
+    assert _dense_spec(_req("bf16", 128, "gfx942")).d64_kpad is False
+    # gfx950: untouched, spec default preserved even for the D64 shape.
+    assert _dense_spec(_req("fp16", 64, "gfx950")).d64_kpad is False
+
+    # End-to-end: the dispatched D64 spec's _kpad tag reaches the emitted symbol.
+    tuned = _dense_spec(_req("fp16", 64, "gfx942"))
+    kernel = build_attention_dense(tuned, arch="gfx942")
+    assert kernel.name == p0_kernel_name(tuned)
+    assert "_kpad" in kernel.name
 
 
 # --------------------------------------------------------------------------- #

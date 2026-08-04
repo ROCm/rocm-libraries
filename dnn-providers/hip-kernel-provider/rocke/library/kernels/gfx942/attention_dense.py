@@ -146,6 +146,18 @@ _P0_LDS_PAD = 8
 # attention_tiled_2d cfvst vehicle (v_pad=8); a gfx942 re-derivation is a P3 item.
 _P0_V_PAD = 8
 
+# --- AICK-1664 investigation probe (Hypothesis #3): D64 K-LDS bank-conflict fix. ---
+# Default False => shipped codegen byte-identical. When True, the D64 K_lds is laid
+# out with a *2-row-group boundary pad* (group stride 2*D + _P0_LDS_PAD elements) so
+# the do_qk K reads drop from a full 32-way bank conflict to 4-way (matching D128),
+# WITHOUT losing async-DMA efficiency (the contiguous 2-rows-per-instruction DMA
+# still writes one whole group per instruction; the pad sits at the group boundary
+# it never touches). This is the "swizzled LDS layout" arm of the hypothesis (a
+# strictly better realization than "ROWS_PER_INSTR=1 + half DMA efficiency"). The
+# read decomposes krow -> (group = krow >> 1, within = krow & 1). Flipped by the
+# replayable probe under builders/gfx942/attention/prefill/. gfx942/D64 only.
+_P0_D64_KPAD = False
+
 __all__ = [
     "AttentionDenseSpec",
     "supports_attention_dense",
@@ -173,8 +185,17 @@ def p0_kernel_name(spec: AttentionDenseSpec) -> str:
     Appending both keeps the identity unique. The shared ``kernel_name`` itself
     cannot be extended: it is emitted into the IR as the symbol, so changing it would
     break the gfx950 golden / byte-identity.
+
+    The D64 K-LDS bank-conflict pad (:func:`_p0_d64_kpad_active`) adds a further
+    ``_kpad`` tag: it changes the emitted K_lds layout + do_qk addressing, so a
+    kpad-on and a kpad-off spec that agree on every other field compile to different
+    binaries and must not collide in a name-keyed cache (the same collision class as
+    ``batch`` / ``waves_per_eu``).
     """
-    return f"{spec.kernel_name()}_gfx942_b{spec.batch}_wpe{spec.waves_per_eu}"
+    name = f"{spec.kernel_name()}_gfx942_b{spec.batch}_wpe{spec.waves_per_eu}"
+    if _p0_d64_kpad_active(spec):
+        name += "_kpad"
+    return name
 
 
 # In-scope for the gfx942 port (AICK-1664). supports_attention_dense rejects
@@ -288,6 +309,42 @@ def _p0_lds_row_stride(head_size: int) -> int:
     return head_size + _P0_LDS_PAD if _p0_rows_per_instr(head_size) == 1 else head_size
 
 
+def _p0_d64_kpad(head_size: int) -> bool:
+    """Per-config D64 K-LDS bank-conflict-pad policy (P3, AICK-1664 Hypothesis #3).
+
+    Consulted by the gfx942 dispatch spec factory (``_dense_spec``) -- the exact
+    mirror of :func:`_p0_waves_per_eu`: a pure per-config predicate that dispatch
+    folds into ``spec.d64_kpad`` so the kernel-name ``_kpad`` tag and the emitted
+    K_lds layout always agree.
+
+    ON for **D64 (both dtypes)**: the 2-row-group boundary pad drops the do_qk K reads
+    from a full 32-way LDS bank conflict to 4-way (matching the D128 QK path), measured
+    large-positive on both dtypes with bit-identical correctness and 0 spill (see
+    ``builders/gfx942/attention/prefill/D64_KPAD_PROBE.md``). D128 already carries a
+    per-row K pad (:func:`_p0_lds_row_stride`) so it is never re-padded here.
+    """
+    return head_size == 64
+
+
+def _p0_d64_kpad_active(spec: AttentionDenseSpec) -> bool:
+    """Whether the D64 K-LDS 2-row-group bank-conflict pad is EMITTED for ``spec``.
+
+    Active when the config opted in via ``spec.d64_kpad`` (set by the gfx942 dispatch
+    factory, see :func:`_p0_d64_kpad`) OR the module-level ``_P0_D64_KPAD`` override is
+    on (the replayable A/B probe), AND the head size is D64. The module constant
+    defaults False so a non-dispatch :func:`build_attention_dense` stays byte-identical;
+    the dispatch spec is what flips the shipped D64 path on. D128 is never affected."""
+    return (spec.d64_kpad or _P0_D64_KPAD) and spec.head_size == 64
+
+
+def _p0_k_group_stride(head_size: int) -> int:
+    """K_lds physical group stride in ELEMENTS when the D64 kpad probe is active.
+
+    A group is ROWS_PER_INSTR (=2 at D64) contiguous rows written by one async-DMA
+    instruction; the pad sits at the group boundary (never DMA-touched)."""
+    return _p0_rows_per_instr(head_size) * head_size + _P0_LDS_PAD
+
+
 def _p0_lds_bytes(spec: AttentionDenseSpec) -> int:
     """Total LDS footprint: ``K_lds[1, block_n, row_stride] + V_lds[1, D, block_n+pad]``.
 
@@ -297,8 +354,16 @@ def _p0_lds_bytes(spec: AttentionDenseSpec) -> int:
     2 bytes/element is exact for every dtype in ``_SUPPORTED_DTYPES`` (bf16/fp16) and
     must be revisited if a narrower or wider element type is added. Shared with the
     budget check in :func:`supports_attention_dense` so the two cannot drift.
+
+    When :func:`_p0_d64_kpad_active` (the D64 bank-conflict pad), K instead takes the
+    2-row-group layout ``K_lds[1, block_n // rows_per_instr, _p0_k_group_stride]`` --
+    +``_P0_LDS_PAD`` elements per group (D128 and the kpad-off D64 path are unchanged).
     """
-    k_bytes = spec.block_n * _p0_lds_row_stride(spec.head_size) * 2
+    if _p0_d64_kpad_active(spec):
+        rpi = _p0_rows_per_instr(spec.head_size)
+        k_bytes = (spec.block_n // rpi) * _p0_k_group_stride(spec.head_size) * 2
+    else:
+        k_bytes = spec.block_n * _p0_lds_row_stride(spec.head_size) * 2
     if _p0_use_cfvst(spec.head_size, spec.dtype):
         # V transposed to [dim, token+pad] for the conflict-free store (D128).
         v_bytes = spec.head_size * (spec.block_n + _P0_V_PAD) * 2
@@ -544,10 +609,22 @@ def _build_attention_dense_p0(spec: AttentionDenseSpec) -> KernelDef:
     # for the default grid it is the single tile) ----
     # Padded for D128 (one row per DMA instr), unpadded for D64 (two rows per
     # instr need a contiguous stride) -- see _p0_lds_row_stride. Shared with the
-    # LDS-budget check in supports_attention_dense so the two cannot drift.
+    # LDS-budget check in supports_attention_dense so the two cannot drift. The one
+    # exception is when _p0_d64_kpad_active(spec): D64 K_lds then takes the padded
+    # [1, block_n // rows_per_instr, _p0_k_group_stride] 2-row-group layout below.
     USE_CFVST = _p0_use_cfvst(D, spec.dtype)  # P1 conflict-free V: D128 fp16 only
     LDROW = _p0_lds_row_stride(D)
-    K_lds = b.smem_alloc(dtype, [1, BN, LDROW], name_hint="Klds")
+    # AICK-1664 (Hypothesis #3): D64 K_lds with a 2-row-group boundary pad, gated per
+    # config via spec.d64_kpad (dispatch) or the _P0_D64_KPAD probe override.
+    KPAD_D64 = _p0_d64_kpad_active(spec)
+    if KPAD_D64:
+        K_GROUP = ROWS_PER_INSTR  # rows per async-DMA instruction (=2 at D64)
+        K_GROUP_STRIDE = _p0_k_group_stride(D)  # 2*D + _P0_LDS_PAD elems
+        K_lds = b.smem_alloc(
+            dtype, [1, BN // K_GROUP, K_GROUP_STRIDE], name_hint="Klds"
+        )
+    else:
+        K_lds = b.smem_alloc(dtype, [1, BN, LDROW], name_hint="Klds")
     if USE_CFVST:
         # V stored TRANSPOSED (P1 conflict-free V): [dim, token] with token inner and
         # padded by _P0_V_PAD, so the PV A-operand read is a contiguous ds_read_b64
@@ -718,7 +795,7 @@ def _build_attention_dense_p0(spec: AttentionDenseSpec) -> KernelDef:
             ]
             q_packs.append(b.vec_pack(elems, dtype))
 
-        def _async_load(rsrc, lds_base, tile_key0):
+        def _async_load(rsrc, lds_base, tile_key0, group_pad=False):
             if ROWS_PER_INSTR == 1:
                 for r in range(ROWS_PER_WAVE):
                     row = b.add(b.mul(wave, b.const_i32(ROWS_PER_WAVE)), b.const_i32(r))
@@ -741,7 +818,26 @@ def _build_attention_dense_p0(spec: AttentionDenseSpec) -> KernelDef:
                         b.mul(wave, b.const_i32(ROWS_PER_WAVE)),
                         b.const_i32(it * ROWS_PER_INSTR),
                     )
-                    row_lds_off = b.zext(b.mul(row0, b.const_i32(K_LDROW_BYTES)), I64)
+                    if group_pad:
+                        # 2-row-group boundary pad (AICK-1664 probe): the DMA still
+                        # writes one whole group (ROWS_PER_INSTR contiguous rows)
+                        # per instruction, but consecutive groups are spaced by the
+                        # padded K_GROUP_STRIDE so do_qk's krow reads land 4-way (not
+                        # 32-way) bank-conflicted. group = row0 // ROWS_PER_INSTR.
+                        grp = b.add(
+                            b.mul(
+                                wave,
+                                b.const_i32(ROWS_PER_WAVE // ROWS_PER_INSTR),
+                            ),
+                            b.const_i32(it),
+                        )
+                        row_lds_off = b.zext(
+                            b.mul(grp, b.const_i32(K_GROUP_STRIDE * 2)), I64
+                        )
+                    else:
+                        row_lds_off = b.zext(
+                            b.mul(row0, b.const_i32(K_LDROW_BYTES)), I64
+                        )
                     row_base = b.smem_ptr_add(lds_base, row_lds_off)
                     gkey = b.add(b.add(tile_key0, row0), sub_row)
                     voff = b.add(
@@ -757,7 +853,7 @@ def _build_attention_dense_p0(spec: AttentionDenseSpec) -> KernelDef:
             # conflict-free read). Naive (D64): K and V both via async DMA, natural
             # [token, dim].
             tk0 = b.mul(tile_idx, b.const_i32(BN))
-            _async_load(k_rsrc, K_lds_addr, tk0)
+            _async_load(k_rsrc, K_lds_addr, tk0, group_pad=KPAD_D64)
             if not USE_CFVST:
                 _async_load(v_rsrc, V_lds_addr, tk0)
 
@@ -798,11 +894,28 @@ def _build_attention_dense_p0(spec: AttentionDenseSpec) -> KernelDef:
             for nsub in range(N_SUB):
                 acc = b.zero_vec_f32(16)
                 krow = b.add(b.const_i32(nsub * 32), lane_m)
+                if KPAD_D64:
+                    # 2-row-group padded K_lds[1, BN//2, 2*D+pad]: decompose the
+                    # logical krow into (group = krow >> 1, within = krow & 1); the
+                    # padded group stride spreads consecutive krow across 4 (not 32)
+                    # banks (AICK-1664 probe). col stays within the D-wide row.
+                    k_group = b.lshr(krow, b.const_i32(1))
+                    k_within_off = b.mul(b.land(krow, b.const_i32(1)), b.const_i32(D))
                 for ks in range(K_STEPS):
                     col = b.add(b.const_i32(ks * 8), d_base)
-                    k_pack = b.smem_load_vN(
-                        K_lds, b.const_i32(0), krow, col, dtype=dtype, n=4
-                    )
+                    if KPAD_D64:
+                        k_pack = b.smem_load_vN(
+                            K_lds,
+                            b.const_i32(0),
+                            k_group,
+                            b.add(k_within_off, col),
+                            dtype=dtype,
+                            n=4,
+                        )
+                    else:
+                        k_pack = b.smem_load_vN(
+                            K_lds, b.const_i32(0), krow, col, dtype=dtype, n=4
+                        )
                     acc = mfma_32x32x8_for_dtype(b, dtype, k_pack, q_packs[ks], acc)
                 s_reg.append([b.vec_extract(acc, i) for i in range(16)])
             return s_reg

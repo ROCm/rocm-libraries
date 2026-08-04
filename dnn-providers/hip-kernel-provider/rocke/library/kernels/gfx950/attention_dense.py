@@ -153,6 +153,18 @@ class AttentionDenseSpec:
     # waves_per_eu: occupancy hint. 2 is a free win (tighter allocation, still 2
     #   waves/SIMD); 3 is a measured trap (VGPR<=170 forces spills -> -20%).
     waves_per_eu: int = 2
+    # d64_kpad: emit the D64 K-LDS 2-row-group bank-conflict pad (gfx942 P3, AICK-1664
+    #   Hypothesis #3). D64 has no per-row K pad by construction (2 rows/DMA instr need
+    #   a contiguous stride), so its QK K-reads take a full 32-way LDS bank conflict.
+    #   When True the gfx942 K_lds is laid out [1, block_n//2, 2*head_size+8] with the
+    #   pad at the 2-row-group boundary the DMA never touches, dropping the conflict to
+    #   4-way (matches the D128 QK path). D64 only (ignored at D128, which already
+    #   carries a per-row pad) and consumed ONLY by the gfx942 kernel -- the gfx950
+    #   builder never reads this field, so gfx950 codegen is byte-identical. Default
+    #   False keeps every non-gfx942-dispatch build byte-identical; the gfx942 dispatch
+    #   factory (dispatch.attention._dense_spec) flips it on for D64. See
+    #   kernels/gfx942/attention_dense.py::_p0_d64_kpad / _p0_d64_kpad_active.
+    d64_kpad: bool = False
     # persistent: emit the grid-stride PERSISTENT variant instead of one CTA per
     #   (query-block, head, batch). A 1-D grid of ``num_persistent`` long-lived CTAs
     #   grid-strides over the W = (seqlen_q//256)*Hq*B work items, so the per-CTA

@@ -377,18 +377,29 @@ def _dense_spec(req: OperatorRequest):
         persist_decode=req.dense_persist_decode.strip().lower(),
         ragged=ragged,
     )
-    # gfx942 (AICK-1664) P3 occupancy tuning: override waves_per_eu per config so the
-    # kernel_name wpe tag AND the emitted amdgpu-waves-per-eu attribute both carry the
-    # tuned value (bf16 D64 -> 4 reaches 2 WG/CU, +~50% at long seq). Gated on gfx942
-    # so the shared gfx950 candidate keeps the spec default (waves_per_eu=2) untouched.
+    # gfx942 (AICK-1664) P3 tuning: fold the per-config occupancy + LDS-layout levers
+    # into the spec so the kernel_name tags AND the emitted binary agree. Gated on
+    # gfx942 so the shared gfx950 candidate keeps the spec defaults untouched.
+    #   * waves_per_eu: bf16 D64 -> 4 reaches 2 WG/CU (+~50% at long seq); baked as the
+    #     amdgpu-waves-per-eu attribute and the kernel_name wpe tag.
+    #   * d64_kpad: D64 (both dtypes) -> the 2-row-group K-LDS bank-conflict pad (32-way
+    #     -> 4-way on the do_qk reads); baked as the K_lds layout and the _kpad tag. The
+    #     module-level _P0_D64_KPAD default stays False, so only the dispatch spec (this
+    #     replace) flips the shipped D64 path on -- non-dispatch builds stay byte-identical.
     if req.arch == "gfx942":
         import dataclasses
 
-        from kernels.gfx942.attention_dense import _p0_waves_per_eu
+        from kernels.gfx942.attention_dense import _p0_d64_kpad, _p0_waves_per_eu
 
+        changes: dict = {}
         wpe = _p0_waves_per_eu(spec.head_size, spec.dtype)
         if wpe != spec.waves_per_eu:
-            spec = dataclasses.replace(spec, waves_per_eu=wpe)
+            changes["waves_per_eu"] = wpe
+        kpad = _p0_d64_kpad(spec.head_size)
+        if kpad != spec.d64_kpad:
+            changes["d64_kpad"] = kpad
+        if changes:
+            spec = dataclasses.replace(spec, **changes)
     return spec
 
 
