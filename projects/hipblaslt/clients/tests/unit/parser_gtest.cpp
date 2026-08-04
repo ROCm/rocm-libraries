@@ -6,6 +6,13 @@
 // compiled into both hipblaslt-test (where it runs in the existing CI lane) and
 // the standalone hipblaslt-test-hostunit binary (which needs no GPU).
 //
+// These tests are only as good as their coverage of each enum, so the enumerator
+// lists below are kept honest by the compiler rather than by review: each list is
+// expanded into a tripwire switch with no `default:` arm, with -Wswitch promoted
+// to an error, so adding an enumerator without listing it here breaks this file's
+// build. That fires in the developer's own build and does not depend on the
+// enumerator's numeric value.
+//
 // The names carry two selectors. The `HostUnit` suite prefix is the one that
 // picks these cases up in PR CI: every tier in clients/tests/test_categories.yaml
 // carries a "*HostUnit*" pattern, and ctest bakes the tier's patterns into the
@@ -23,6 +30,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <string>
 #include <utility>
 #include <vector>
@@ -36,54 +44,132 @@ namespace
     // returns for a value it does not recognize.
     constexpr const char* kUnknownName = "invalid";
 
-    // Every init string the client accepts today, paired with its enum value.
-    // Keep this in sync with string2hipblaslt_initialization().
+    // One list per enum, naming every enumerator exactly once. Each list is
+    // expanded twice: into the name table the tests below iterate, and into a
+    // tripwire switch that makes the compiler reject a list missing an
+    // enumerator. Adding an X() entry therefore updates both.
+    //
+    // The spelling in each X() is both the enum member and the string the
+    // parsers are expected to accept for it, so the two cannot disagree here.
+    // Whether the parser really accepts that string is what the round-trip tests
+    // check.
+
+    // Keep in sync with string2hipblaslt_initialization().
+#define HIPBLASLT_TEST_INIT_MODES(X) \
+    X(rand_int)                      \
+    X(trig_float)                    \
+    X(hpl)                           \
+    X(special)                       \
+    X(zero)                          \
+    X(norm_dist)                     \
+    X(uniform_01)                    \
+    X(integer_exact)                 \
+    X(fp16_accumulator_probe)        \
+    X(inf)                           \
+    X(neg_zero)                      \
+    X(neg_inf)                       \
+    X(nan)                           \
+    X(norm_dist_one_special)         \
+    X(uniform_low_precision)
+
+    // Keep in sync with string_to_hipblaslt_activation_type().
+#define HIPBLASLT_TEST_ACTIVATIONS(X) \
+    X(none)                           \
+    X(relu)                           \
+    X(gelu)                           \
+    X(swish)                          \
+    X(clamp)                          \
+    X(sigmoid)
+
+    // Keep in sync with string_to_hipblaslt_bias_source().
+#define HIPBLASLT_TEST_BIAS_SOURCES(X) \
+    X(a)                               \
+    X(b)                               \
+    X(d)
+
     const NameTable<hipblaslt_initialization>& known_init_modes()
     {
-        static const NameTable<hipblaslt_initialization> modes = {
-            {"rand_int", hipblaslt_initialization::rand_int},
-            {"trig_float", hipblaslt_initialization::trig_float},
-            {"hpl", hipblaslt_initialization::hpl},
-            {"special", hipblaslt_initialization::special},
-            {"zero", hipblaslt_initialization::zero},
-            {"norm_dist", hipblaslt_initialization::norm_dist},
-            {"uniform_01", hipblaslt_initialization::uniform_01},
-            {"integer_exact", hipblaslt_initialization::integer_exact},
-            {"fp16_accumulator_probe", hipblaslt_initialization::fp16_accumulator_probe},
-            {"inf", hipblaslt_initialization::inf},
-            {"neg_zero", hipblaslt_initialization::neg_zero},
-            {"neg_inf", hipblaslt_initialization::neg_inf},
-            {"nan", hipblaslt_initialization::nan},
-            {"norm_dist_one_special", hipblaslt_initialization::norm_dist_one_special},
-            {"uniform_low_precision", hipblaslt_initialization::uniform_low_precision},
-        };
+#define X(name) {#name, hipblaslt_initialization::name},
+        static const NameTable<hipblaslt_initialization> modes = {HIPBLASLT_TEST_INIT_MODES(X)};
+#undef X
         return modes;
     }
 
-    // Keep in sync with string_to_hipblaslt_activation_type().
     const NameTable<hipblaslt_activation_type>& known_activations()
     {
-        static const NameTable<hipblaslt_activation_type> types = {
-            {"none", hipblaslt_activation_type::none},
-            {"relu", hipblaslt_activation_type::relu},
-            {"gelu", hipblaslt_activation_type::gelu},
-            {"swish", hipblaslt_activation_type::swish},
-            {"clamp", hipblaslt_activation_type::clamp},
-            {"sigmoid", hipblaslt_activation_type::sigmoid},
-        };
+#define X(name) {#name, hipblaslt_activation_type::name},
+        static const NameTable<hipblaslt_activation_type> types = {HIPBLASLT_TEST_ACTIVATIONS(X)};
+#undef X
         return types;
     }
 
-    // Keep in sync with string_to_hipblaslt_bias_source().
     const NameTable<hipblaslt_bias_source>& known_bias_sources()
     {
-        static const NameTable<hipblaslt_bias_source> sources = {
-            {"a", hipblaslt_bias_source::a},
-            {"b", hipblaslt_bias_source::b},
-            {"d", hipblaslt_bias_source::d},
-        };
+#define X(name) {#name, hipblaslt_bias_source::name},
+        static const NameTable<hipblaslt_bias_source> sources = {HIPBLASLT_TEST_BIAS_SOURCES(X)};
+#undef X
         return sources;
     }
+
+    // Tripwires. These are never called; they exist so that adding an enumerator
+    // to one of these enums without adding it to the matching list above fails to
+    // compile, in the developer's own build, at the moment they make the change.
+    //
+    // Each switch deliberately has no `default:` arm, and -Wswitch is promoted to
+    // an error for the block, so an unlisted enumerator is reported as
+    // "enumeration value 'foo' not handled in switch". Nothing in
+    // hipblaslt_datatype2string.hpp can raise that diagnostic on its own: the
+    // *_to_string switches all carry `default: return "invalid"`, and
+    // string2hipblaslt_initialization is a ternary chain rather than a switch.
+    //
+    // This is the only check here that is independent of an enumerator's numeric
+    // value, which is why it and not the sweep below is the primary guard.
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic error "-Wswitch"
+#elif defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic error "-Wswitch"
+#endif
+
+    [[maybe_unused]] void assert_init_modes_listed(hipblaslt_initialization value)
+    {
+        switch(value)
+        {
+#define X(name) case hipblaslt_initialization::name:
+            HIPBLASLT_TEST_INIT_MODES(X)
+#undef X
+            break;
+        }
+    }
+
+    [[maybe_unused]] void assert_activations_listed(hipblaslt_activation_type value)
+    {
+        switch(value)
+        {
+#define X(name) case hipblaslt_activation_type::name:
+            HIPBLASLT_TEST_ACTIVATIONS(X)
+#undef X
+            break;
+        }
+    }
+
+    [[maybe_unused]] void assert_bias_sources_listed(hipblaslt_bias_source value)
+    {
+        switch(value)
+        {
+#define X(name) case hipblaslt_bias_source::name:
+            HIPBLASLT_TEST_BIAS_SOURCES(X)
+#undef X
+            break;
+        }
+    }
+
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#elif defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
 
     template <typename Enum>
     const std::string* registered_name(const NameTable<Enum>& table, int value)
@@ -96,23 +182,40 @@ namespace
         return nullptr;
     }
 
-    // Assert `table` describes the enum->string mapping exactly, across the
-    // enum's whole integer space. Values absent from the table must report
-    // kUnknownName; when one does not, an enumerator was added to the header and
-    // to its *_to_string switch without being registered here, so none of the
-    // round-trip tests below cover it. That silent drift is what this guard
-    // exists to catch.
+    // Upper bound for the sweep below, derived from the table rather than
+    // hand-written so it cannot go stale as enumerators are added. The headroom
+    // is what lets the sweep also cover values just past the end of the enum.
+    template <typename Enum>
+    int sweep_max(const NameTable<Enum>& table)
+    {
+        int max_registered = 0;
+        for(const auto& entry : table)
+            max_registered = std::max(max_registered, static_cast<int>(entry.second));
+        return max_registered + 64;
+    }
+
+    // Assert `table` describes the enum->string mapping exactly, over the
+    // registered enumerators and a margin past the largest of them. Values absent
+    // from the table must report kUnknownName; when one does not, an enumerator
+    // was added to the header and to its *_to_string switch without being
+    // registered here, so none of the round-trip tests below cover it.
+    //
+    // This is a secondary guard. It can only see values it sweeps, so on its own
+    // it would miss an enumerator numbered past the margin, which is exactly what
+    // the compile-time tripwires above are for. What it adds is behavioral: it
+    // pins the "unrecognized values report invalid" contract that the tripwires
+    // say nothing about.
     //
     // Casting an arbitrary int to these enums is well defined: they are all
     // scoped enums with a fixed underlying type (int), so every int value is
     // representable.
     template <typename Enum, typename ToString>
     void expect_table_is_exhaustive(const NameTable<Enum>& table,
-                                    int                    max_value,
                                     ToString               to_string,
                                     const char*            enum_name,
                                     const char*            table_name)
     {
+        const int max_value = sweep_max(table);
         for(int value = 0; value <= max_value; ++value)
         {
             const std::string  actual   = to_string(static_cast<Enum>(value));
@@ -131,12 +234,6 @@ namespace
             }
         }
     }
-
-    // Sweep bounds: high enough to cover every enumerator plus headroom for new
-    // ones, small enough to stay instant.
-    constexpr int kInitSweepMax       = 1023; // enumerators run to 999
-    constexpr int kActivationSweepMax = 63; // enumerators run to 5
-    constexpr int kBiasSourceSweepMax = 63; // enumerators run to 3
 }
 
 TEST(HostUnitInitParser, smoke_KnownStringsMapToExpectedEnum)
@@ -162,7 +259,6 @@ TEST(HostUnitInitParser, smoke_EveryEnumeratorIsRegistered)
 {
     expect_table_is_exhaustive(
         known_init_modes(),
-        kInitSweepMax,
         [](hipblaslt_initialization init) { return hipblaslt_initialization2string(init); },
         "hipblaslt_initialization",
         "known_init_modes");
@@ -195,7 +291,6 @@ TEST(HostUnitActivationParser, smoke_EveryEnumeratorIsRegistered)
 {
     expect_table_is_exhaustive(
         known_activations(),
-        kActivationSweepMax,
         [](hipblaslt_activation_type type) { return hipblaslt_activation_type_to_string(type); },
         "hipblaslt_activation_type",
         "known_activations");
@@ -222,7 +317,6 @@ TEST(HostUnitBiasSourceParser, smoke_EveryEnumeratorIsRegistered)
 {
     expect_table_is_exhaustive(
         known_bias_sources(),
-        kBiasSourceSweepMax,
         [](hipblaslt_bias_source source) { return hipblaslt_bias_source_to_string(source); },
         "hipblaslt_bias_source",
         "known_bias_sources");
