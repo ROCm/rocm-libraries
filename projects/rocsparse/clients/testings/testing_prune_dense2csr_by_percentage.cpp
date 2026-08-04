@@ -123,9 +123,9 @@ void testing_prune_dense2csr_by_percentage_bad_arg(const Arguments& arg)
 template <typename T>
 void testing_prune_dense2csr_by_percentage(const Arguments& arg)
 {
-    rocsparse_int        M          = arg.M;
-    rocsparse_int        N          = arg.N;
-    rocsparse_int        LDA        = arg.denseld;
+    int64_t              M          = arg.M;
+    int64_t              N          = arg.N;
+    int64_t              LDA        = arg.denseld;
     rocsparse_index_base base       = arg.baseA;
     T                    percentage = static_cast<T>(arg.percentage);
 
