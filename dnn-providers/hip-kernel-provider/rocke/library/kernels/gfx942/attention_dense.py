@@ -39,15 +39,42 @@ Why this is a port, not a copy (the CDNA3 deltas)
 
 Problem category (drives the optimization order)
 ------------------------------------------------
-The shipped gfx942 tiled-2D prefill kernel is **LDS-bank-conflict-bound ->
-MFMA-starved** (NOT compute-bound, NOT HBM-bound): the V-read bank-conflict rate
-dominates and leaves the MFMA pipe mostly idle, rather than sitting at the
-HBM-bound roofline this problem should reach on this part. So conflict-free V and
-softmax-VALU reduction rank first; compute-side scheduling levers that win on the
-compute-bound gfx950 dense kernel (``s_setprio``, diagonal two-phase peel) are
-PROVEN-NEGATIVE on gfx942 and are NOT ported. Measured conflict rates, pipe
-utilisation and per-lever deltas are recorded outside the repo -- see the AICK-1664
-plan and the protected results page.
+**Measured bound (rocprofv3 PMC over the Step-0 config sweep): occupancy-bound ->
+MFMA-starved.** MFMA issue rate sits far under the runbook's compute-bound
+threshold while waves/CU sit at a small fraction of the per-CU maximum; L2 hit rate
+and the memory-stall counter rule out HBM/L2 as the primary limit, and no in-scope
+config spills. Per the runbook §3.1a decision tree -- a short-circuiting chain whose
+FIRST branch is ``occupancy < 0.5`` -- the classification resolves at occupancy and
+never reaches the ``LDS_BOUND`` branch.
+
+**This SUPERSEDES the earlier "LDS-bank-conflict-bound" framing** that was inherited
+from the gfx942 tiled-2D kernel and used to order P0-P5. That framing was a good
+guide and it paid off -- P1 conflict-free V and the P3 D64 K bank-pad each removed a
+large bank-conflict cost -- but it does not describe the kernel that remains. Two
+findings retire it:
+
+  * Post-P1/P3 the residual bank-conflict RATE no longer tracks throughput: within a
+    fixed shape/dtype, configs with several times the conflict rate are level with or
+    faster than their low-rate siblings. The counter is conflicts per LDS-active
+    cycle, so a lever that removes LDS instructions (cfvst: 128 -> ~32 LDS instrs per
+    tile at D128) shrinks the denominator and can RAISE the rate while lowering the
+    cost. Rate is not cost; only an ablation prices LDS.
+  * Occupancy trips the decision tree first, so LDS conflicts cannot be the governing
+    limiter regardless of their rate.
+
+What still follows from this, unchanged: NOT compute-bound and NOT HBM-bound, so
+compute-side scheduling levers that win on the compute-bound gfx950 dense kernel
+(``s_setprio``, diagonal two-phase peel) stay PROVEN-NEGATIVE on gfx942 and are NOT
+ported, and bandwidth-saving levers stay demoted. What changes: the dominant
+remaining lever is **occupancy** (D128 -> 2 WG/CU), not a further LDS-conflict fix.
+That is a combined-constraint problem -- it needs LDS <= 32 KB AND the total-register
+floor cut TOGETHER (D128 carries a large AGPR residency on top of its architected
+VGPRs). Dropping the LDS pads alone to buy the LDS half is PROVEN-NEGATIVE and
+catastrophically so: occupancy does not move (the register floor co-limits) and the
+K/V bank conflicts come straight back.
+
+Measured conflict rates, pipe utilisation and per-lever deltas are recorded outside
+the repo -- see the AICK-1664 plan and the protected results page.
 
 Implementation status (see the AICK-1664 plan for the full ordered work list)
 -----------------------------------------------------------------------------
@@ -56,11 +83,42 @@ Implementation status (see the AICK-1664 plan for the full ordered work list)
   * P2  exp2_fast + fused/lazy rescale ........................ DONE (exp2_fast all
         but bf16 D128; fused rescale bit-identical, enables bf16 D64 exp2_fast)
   * P3  occupancy: waves-per-eu tune (bf16 D64 -> wpe4 = 2 WG/CU),
-        wide4 (WG=256) + K bank-pad retune + K single-buffer ...... IN PROGRESS
-        (waves-per-eu DONE via _p0_waves_per_eu; wide4 / K-pad / K-single-buf TODO)
+        D64 K bank-pad, wide4 (WG=256), K single-buffer ........... IN PROGRESS
+        (waves-per-eu DONE via _p0_waves_per_eu; **D64 K bank-pad DONE and ADOPTED**
+        -- cross-part-confirmed large win on both D64 dtypes, wired per-config via
+        ``spec.d64_kpad`` (see :func:`_p0_d64_kpad`), golden re-blessed against the
+        shipped path; wide4 / K-single-buf still TODO. D128 -> 2 WG/CU is the open
+        item and needs the LDS and register floors cut together -- see "Problem
+        category" above. ``BLOCK_M`` is a further occupancy axis: contrary to the
+        gfx950 sibling's "kernel FAULTS at other values" comment, every ``BLOCK_M``
+        use in THIS body is parametric (the invariant is ``BLOCK_M == 32 * WAVES``),
+        but shrinking it adds CTAs without adding a CTA/CU -- LDS is BLOCK_M-
+        invariant -- and costs VGPRs on the K-side DMA addressing, so it is a modest
+        win on two of four shapes and a loss elsewhere; not wired.)
   * P4  persistent grid-stride + qb/hkv_major decode .......... DONE (both decodes;
-        shared _run_work_item body; auto-on for large Sq via dispatch)
-  * P5  diagonal masking (re-test only), partial-vmcnt prefetch  TODO
+        shared _run_work_item body; auto-on for large Sq via dispatch, validated
+        cross-part for every config by the ON/OFF ablation -- KEEP everywhere)
+  * P5  diagonal masking (re-test only), partial-vmcnt prefetch  N/A (see below)
+
+P5 is deliberately no-op for this kernel (a decision, not code):
+  * Diagonal two-phase peel: the plan gates it on "re-test ONLY if the bound shifts
+    to compute after P1-P4." It has not -- the rocprof sweep confirms D128 is still
+    occupancy/latency-bound at 1 WG/CU and nowhere near compute-bound -- and the peel
+    was proven negative on gfx942 tiled_2d via register pressure, which D128 (at its
+    register floor) is the most exposed to. Keep the single-phase mask.
+  * partial-vmcnt software prefetch: N/A here, but NOT for the reason previously
+    recorded. It is a double-buffered pipelining lever and this kernel is
+    single-buffered (NBUF=1), so there is no prefetch to partially overlap. The old
+    "NBUF=2 does not fit 64 KB LDS at D128" justification is only true at the shipped
+    ``block_n=64``: at ``block_n=32`` D128 LDS roughly halves and NBUF=2 DOES fit.
+    That door is closed by measurement instead -- ``block_n=32`` was GPU-timed in the
+    Step-0 funnel and is proven-negative for fp16 D128 and only part-dependently
+    positive for bf16 D128 (halving the KV tile doubles the tile/grid count and the
+    extra loop/barrier overhead outweighs the LDS relief while occupancy stays
+    pinned), so it is not wired and the prefetch it would unlock is unreachable on
+    the shipped config. Independently, bounding the live set with partial ``vmcnt=N``
+    waits entangles with the K async DMA, which shares the same counter -- see the
+    reverted cfvst-chunking experiment recorded in the ``V_ITEMS`` NOTE below.
 
 P1 conflict-free V (:func:`_p0_use_cfvst`): V is stored TRANSPOSED via a perm_b32
 store-path transpose so the PV A-operand read is a contiguous ds_read_b64 instead of
@@ -69,8 +127,8 @@ P0's 4 element-wise ds_read_u16 (128 -> ~32 LDS instrs/tile at D128). Gated to
 bf16 spills over the waves-per-eu=2 cap (a P2/P3 register-headroom item). The lever
 is numerically identity-preserving (same MFMA operands; only the LDS layout and read
 width change) -- the cohort's ``max_abs`` is unchanged from the naive path. The
-conflict-free vehicle is proven correct in
-``builders/gfx942/attention/prefill/CFVST_DISPROOF.md`` (cross-part).
+conflict-free vehicle was proven correct cross-part before being lifted (see the
+AICK-1664 plan for the disproof procedure).
 
 P0 is CORRECTNESS-FIRST: the naive-V path (D64 / bf16-D128) is non-pipelined (a
 single LDS buffer) and reads V element-wise; the remaining perf levers (P2-P4) layer
@@ -136,6 +194,11 @@ if _P0_BLOCK_M != _BLOCK_M:  # not an `assert`: python -O would strip it
 # re-derived for gfx942's bank geometry / LDS size -- that retune is a P3 item. Only
 # applied when one K row is packed per async-DMA instruction; see
 # _p0_lds_row_stride for why D64 cannot carry it.
+# SETTLED (do not re-attempt): DROPPING this pad (and the cfvst V pad) to cut D128
+# LDS under the 32 KB needed for a 2nd WG/CU is PROVEN-NEGATIVE and catastrophically
+# so -- D128 stays 1 WG/CU even unpadded because the register floor co-limits, so the
+# pads are removed for nothing and the K/QK + cfvst V bank conflicts come back. Only
+# the VALUE is still open to retune; the pads themselves stay.
 _P0_LDS_PAD = 8
 
 # V^T row (token axis) bank-conflict pad, in elements, for the P1 conflict-free-V
@@ -146,7 +209,17 @@ _P0_LDS_PAD = 8
 # attention_tiled_2d cfvst vehicle (v_pad=8); a gfx942 re-derivation is a P3 item.
 _P0_V_PAD = 8
 
-# --- AICK-1664 investigation probe (Hypothesis #3): D64 K-LDS bank-conflict fix. ---
+# --- D64 K-LDS bank-conflict fix (AICK-1664 Hypothesis #3) -- ADOPTED, not pending. ---
+# STATUS: the lever is PROVEN (cross-part, both D64 dtypes, all seqlens) and is WIRED
+# ON for D64 through `spec.d64_kpad` (see _p0_d64_kpad / _p0_d64_kpad_active), so the
+# SHIPPED D64 path emits the pad. This module constant stays False purely as the A/B
+# probe override -- it is NOT the shipped switch, and "default False" below means
+# "the probe knob is off", not "the pad is off".
+# MECHANISM (corrected): the static codegen A/B is IDENTICAL with the pad on and off
+# (VGPR, LDS-instruction stream and s_nop all unchanged), so the once-hypothesised
+# "frees registers -> more ILP, compounding" mechanism is DEBUNKED. The win is purely
+# eliminated bank-conflict REPLAY -- the same ds_read replayed ~8x at 32-way instead
+# of ~4-way -- which is a runtime effect invisible to any static probe.
 # Default False => shipped codegen byte-identical. When True, the D64 K_lds is laid
 # out with a *2-row-group boundary pad* (group stride 2*D + _P0_LDS_PAD elements) so
 # the do_qk K reads drop from a full 32-way bank conflict to 4-way (matching D128),
@@ -163,9 +236,23 @@ _P0_D64_KPAD = False
 # proven-negative s_setprio / sched_barrier hints (plan §2 DO-NOT-PORT). Its
 # precondition is in-loop ds_write traffic to interleave against the MFMAs -- which
 # only the P1 cfvst path has (V is stored to V_lds inside the loop; the naive path
-# is direct-load, 0 ds_write, so iglp is a priori neutral). Default OFF; this is a
-# static ISA-diff probe knob, promoted to a knob only if GPU timing shows a win on
-# the cfvst config. Placed once at the top of the main-loop body per the runbook.
+# is direct-load, 0 ds_write, so iglp is a priori neutral). Placed once at the top of
+# the main-loop body per the runbook.
+#
+# RESOLVED -- do not re-attempt. This is no longer a pending probe: the GPU timing it
+# was gated on has been run, cross-part, on the cfvst config it was supposed to help.
+#   * Static (runbook §8.4): the intrinsic is a compile-time scheduler DIRECTIVE and
+#     leaves NO runtime instruction -- the ISA opcode histogram is unchanged and
+#     ds_read / ds_write / mfma counts are identical, with no spill or LDS delta. So
+#     the effect could never be confirmed by artifact and had to be timed.
+#   * Timed: PROVEN-NEUTRAL on both parts. Its only visible effect is shifting the
+#     architected-VGPR / AGPR split (88/128 -> 128/128 at fp16 D128) at equal total
+#     registers, which does not move the clock.
+# The neutrality is itself the useful result, per runbook §8.6 (barrier-bound vs
+# schedule-bound): a canned MFMA/DS interleave buying nothing means the main loop is
+# NOT schedule-bound -- it is barrier-rendezvous-bound, which no scheduling hint can
+# fix. That is consistent with the measured occupancy bound in the module docstring,
+# and it is why the whole scheduling-hint family stays unported. Stays default OFF.
 _P0_IGLP = False
 
 __all__ = [
@@ -329,8 +416,8 @@ def _p0_d64_kpad(head_size: int) -> bool:
 
     ON for **D64 (both dtypes)**: the 2-row-group boundary pad drops the do_qk K reads
     from a full 32-way LDS bank conflict to 4-way (matching the D128 QK path), measured
-    large-positive on both dtypes with bit-identical correctness and 0 spill (see
-    ``builders/gfx942/attention/prefill/D64_KPAD_PROBE.md``). D128 already carries a
+    large-positive on both dtypes with bit-identical correctness and 0 spill (the A/B
+    method and its measurements are in the AICK-1664 plan). D128 already carries a
     per-row K pad (:func:`_p0_lds_row_stride`) so it is never re-padded here.
     """
     return head_size == 64
@@ -684,7 +771,8 @@ def _build_attention_dense_p0(spec: AttentionDenseSpec) -> KernelDef:
     # CK transpose_vectors masks), then write ONE contiguous 2-half ds_write per dim
     # row into V_lds[dim, token]. The consumer read_v then reads 4 consecutive tokens
     # at a fixed dim as a single ds_read_b64. Lifted from the proven
-    # attention_tiled_2d cfvst vehicle (disproof: builders/.../CFVST_DISPROOF.md).
+    # attention_tiled_2d cfvst vehicle, after a cross-part correctness disproof of its
+    # parked sign-flip symptom (procedure recorded in the AICK-1664 plan).
     # The block loop is statically unrolled (V_ITEMS is small: 4 at D128/BN64), which
     # is well under the tiled_2d full-unroll IR-explosion threshold.
     THREADS = WAVES * 64
