@@ -239,10 +239,10 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
                                         matmul_descr->streamk_tile_scheduling_ext,
                                         effective_sm_count_target(handle, matmul_descr, nullptr)};
 
-    // No-op unless HIPBLASLT_CHECK_STREAMK_SYNC is set.
-    hipblaslt_check_streamk_sync_scope sync_check(handle, stream, "rocblaslt_matmul_impl");
-
     rocblaslt_status st = runContractionProblem(handle, algo, problem, gemmData);
+
+    // No-op unless HIPBLASLT_CHECK_STREAMK_SYNC is set.
+    hipblaslt_check_streamk_sync_scan(handle, stream, "rocblaslt_matmul_impl");
 
     if(st == rocblaslt_status_success)
     {

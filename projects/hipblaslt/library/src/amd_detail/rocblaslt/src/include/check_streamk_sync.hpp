@@ -13,22 +13,13 @@
 #include "handle.h"
 #include "rocblaslt-types.h"
 
+#include <cstdint>
 #include <cstdio>
 #include <hip/hip_runtime.h>
 #include <vector>
 
-// Zeroes the buffer for a known-clean baseline before the launch. Pair with
-// hipblaslt_check_streamk_sync_scan to report residue left by that launch.
-inline void hipblaslt_check_streamk_sync_reset(rocblaslt_handle handle, hipStream_t stream)
-{
-    if(!handle || !handle->check_streamk_sync || !handle->Synchronizer)
-        return;
-    static_cast<void>(hipMemsetAsync(
-        handle->Synchronizer, 0, hipblaslt_streamk_synchronizer_ints * sizeof(int), stream));
-}
-
-// Blocks on `stream` to read the buffer back. Gated on the env var, so the
-// default path costs nothing.
+// Blocks on `stream` to read the buffer back, and reports it if any int is
+// nonzero. Gated on the env var, so the default path costs nothing.
 inline void hipblaslt_check_streamk_sync_scan(rocblaslt_handle handle,
                                               hipStream_t      stream,
                                               const char*      label)
@@ -36,15 +27,15 @@ inline void hipblaslt_check_streamk_sync_scan(rocblaslt_handle handle,
     if(!handle || !handle->check_streamk_sync || !handle->Synchronizer)
         return;
 
-    std::vector<int> host(hipblaslt_streamk_synchronizer_ints);
+    constexpr size_t count = hipblaslt_streamk_synchronizer_ints;
+    constexpr size_t bytes = count * sizeof(int);
+
+    std::vector<int> host(count);
     hipError_t       err = hipStreamSynchronize(stream);
     if(err == hipSuccess)
-        err = hipMemcpy(host.data(),
-                        handle->Synchronizer,
-                        hipblaslt_streamk_synchronizer_ints * sizeof(int),
-                        hipMemcpyDeviceToHost);
-    // `host` is zero-initialized, so a silent readback failure would read as a
-    // clean buffer. Report it instead.
+        err = hipMemcpy(host.data(), handle->Synchronizer, bytes, hipMemcpyDeviceToHost);
+    // `host` is zero-initialized, so an unreported failure here would read as a
+    // clean buffer.
     if(err != hipSuccess)
     {
         fprintf(stderr,
@@ -54,8 +45,20 @@ inline void hipblaslt_check_streamk_sync_scan(rocblaslt_handle handle,
         return;
     }
 
-    size_t nonzero = 0, first = hipblaslt_streamk_synchronizer_ints;
-    for(size_t i = 0; i < hipblaslt_streamk_synchronizer_ints; ++i)
+    // Word-at-a-time on the clean path; the per-int tally below only runs once
+    // a nonzero word is found.
+    const uint64_t* w     = reinterpret_cast<const uint64_t*>(host.data());
+    bool            dirty = false;
+    for(size_t i = 0; i < count / 2 && !dirty; ++i)
+        dirty = (w[i] != 0);
+    if(!dirty && (count % 2) != 0)
+        dirty = (host[count - 1] != 0);
+
+    if(!dirty)
+        return;
+
+    size_t nonzero = 0, first = count;
+    for(size_t i = 0; i < count; ++i)
         if(host[i] != 0)
         {
             if(nonzero == 0)
@@ -63,41 +66,19 @@ inline void hipblaslt_check_streamk_sync_scan(rocblaslt_handle handle,
             ++nonzero;
         }
 
-    if(nonzero)
-        fprintf(stderr,
-                "[hipBLASLt CHECK_STREAMK_SYNC] %s: Synchronizer left dirty "
-                "(%zu/%zu ints nonzero, first at offset %zu) -- the kernel did "
-                "not self-clean its work-queue state.\n",
-                label,
-                nonzero,
-                hipblaslt_streamk_synchronizer_ints,
-                first);
+    fprintf(stderr,
+            "[hipBLASLt CHECK_STREAMK_SYNC] %s: Synchronizer left dirty "
+            "(%zu/%zu ints nonzero, first at offset %zu) -- the kernel did "
+            "not self-clean its work-queue state.\n",
+            label,
+            nonzero,
+            count,
+            first);
+
+    // hipblasLtCreate zeroes the buffer once and every matmul is scanned, so
+    // restoring zero here keeps the next call's baseline clean and stops this
+    // residue being re-reported by every call after it.
+    static_cast<void>(hipMemset(handle->Synchronizer, 0, bytes));
 }
-
-// Resets the Synchronizer buffer on construction and scans it on
-// destruction, reporting any residue left by whatever ran in between.
-class hipblaslt_check_streamk_sync_scope
-{
-public:
-    hipblaslt_check_streamk_sync_scope(rocblaslt_handle handle,
-                                       hipStream_t      stream,
-                                       const char*      label)
-        : handle_(handle)
-        , stream_(stream)
-        , label_(label)
-    {
-        hipblaslt_check_streamk_sync_reset(handle_, stream_);
-    }
-
-    ~hipblaslt_check_streamk_sync_scope()
-    {
-        hipblaslt_check_streamk_sync_scan(handle_, stream_, label_);
-    }
-
-private:
-    rocblaslt_handle handle_;
-    hipStream_t      stream_;
-    const char*      label_;
-};
 
 #endif // HIPBLASLT_CHECK_STREAMK_SYNC_HPP
