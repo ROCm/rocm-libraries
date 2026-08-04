@@ -4,6 +4,10 @@ defaults:
   numbered: False
 root: index
 subtrees:
+- entries:
+  - file: about/rocThrust-cccl-update
+    title: Migration to CCCL 3.0.3
+
 - caption: Install
   entries:
   - file: install/install
