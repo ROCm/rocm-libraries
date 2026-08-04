@@ -311,7 +311,11 @@ bool profile_grouped_conv_bwd_weight_impl(int do_verification,
 
     std::vector<ck::index_t> split_k_list = {/*auto deduce value*/ -1, 1, 2, 4, 8, 16, 32, 64, 128};
 
-    if(split_k != "all")
+    if(split_k == "smart")
+    {
+        split_k_list = {-1, -2, -3};
+    }
+    else if(split_k != "all")
     {
         try
         {
@@ -368,10 +372,20 @@ bool profile_grouped_conv_bwd_weight_impl(int do_verification,
             {
                 auto* split_k_arg =
                     dynamic_cast<ck::tensor_operation::device::ArgumentSplitK*>(argument_ptr.get());
-                if(split_k_arg)
+                if (split_k_arg && split_k_value == -1)
                 {
                     split_k_value     = split_k_arg->k_batch_;
                     split_k_param_str = std::to_string(split_k_value) + " (best occupancy)";
+                }
+                else if (split_k_arg && split_k_value == -2)
+                {
+                    split_k_value     = split_k_arg->k_batch_ / 2;
+                    split_k_param_str = std::to_string(split_k_value) + " (best occupancy / 2)";
+                }
+                else if (split_k_arg && split_k_value == -3)
+                {
+                    split_k_value     = split_k_arg->k_batch_ * 2;
+                    split_k_param_str = std::to_string(split_k_value) + " (best occupancy * 2)";
                 }
                 else
                 {
