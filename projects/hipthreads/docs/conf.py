@@ -14,7 +14,7 @@ with open("../CMakeLists.txt", encoding="utf-8") as f:
 left_nav_title = f"hipThreads {version_number} Documentation"
 
 # for PDF output on Read the Docs
-project = "hipThreads Documentation"
+project = "hipThreads"
 author = "Advanced Micro Devices, Inc."
 copyright = "Copyright (c) 2025-2026 Advanced Micro Devices, Inc. All rights reserved."
 version = version_number
