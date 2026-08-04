@@ -1,7 +1,7 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include "mxDataGen.hpp"
+#include <roc/host_validation/adapters/hipblaslt/mxDataGen.hpp>
 #include <mxDataGenerator/DataGenerator.hpp>
 #include <mxDataGenerator/PreSwizzle.hpp>
 #include <mxDataGenerator/dataTypeInfo.hpp>

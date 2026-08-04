@@ -3,7 +3,7 @@
 
 #include <gtest/gtest.h>
 #include "DataInitialization.hpp"             // isMXTensor / Problem
-#include "DataInitializationHelpers.hpp"    // detail::* (MX-only, internally guarded)
+#include <roc/host_validation/adapters/tensilelite/DataInitializationHelpers.hpp>
 #include <Tensile/ContractionProblem.hpp>
 #include <Tensile/DataTypes.hpp>
 #include <Tensile/TensorDescriptor.hpp>

@@ -38,6 +38,7 @@ set(ROCM_LIBS_ENABLE_COMPONENTS "all"
 
 set(DEFAULT_COMPONENTS
     # shared
+    host-validation
     mxdatagenerator
     rocroller
     origami
@@ -141,6 +142,14 @@ endif()
 unset(_rocm_libs_needs_shared_json)
 
 # --- Add subdirectories ---
+if("host-validation" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
+    add_subdirectory_with_message(
+        COMPONENT host-validation
+        PREFIX_PATH shared
+        EXPECT_TARGET roc::host-validation
+    )
+endif()
+
 if("mxdatagenerator" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
     add_subdirectory_with_message(
         COMPONENT mxdatagenerator
@@ -177,7 +186,6 @@ if("origami" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
 endif()
 
 if("hipblaslt" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
-    set(HIPBLASLT_ENABLE_BLIS OFF)
     add_subdirectory_with_message(
         COMPONENT hipblaslt
         PREFIX_PATH projects

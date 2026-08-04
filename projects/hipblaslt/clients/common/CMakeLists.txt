@@ -36,7 +36,7 @@ if(NOT ROCM_LIBS_SUPERBUILD)
 endif()
 
 add_library(hipblaslt-mxdatagen STATIC
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/mxDataGen.cpp"
+    "${ROCM_LIBRARIES_ROOT}/shared/host-validation/adapters/hipblaslt/mxDataGen.cpp"
 )
 add_library(hipblaslt::mxdatagen ALIAS hipblaslt-mxdatagen)
 
@@ -48,6 +48,7 @@ target_include_directories(hipblaslt-mxdatagen
 target_link_libraries(hipblaslt-mxdatagen
     PUBLIC
         hipblaslt::headers
+        roc::host-validation-adapters
         roc::mxDataGenerator
     PRIVATE
         # `-x hip` (via hip::device's INTERFACE_COMPILE_OPTIONS) makes the

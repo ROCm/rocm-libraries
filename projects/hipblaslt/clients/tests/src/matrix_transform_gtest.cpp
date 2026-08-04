@@ -32,6 +32,7 @@
 #include <hip/hip_runtime_api.h>
 #include <hipblaslt/hipblaslt.h>
 #include <numeric>
+#include <roc/host_validation/data_generation.hpp>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -121,13 +122,13 @@ namespace
     private:
         void init(DType* buf, size_t len)
         {
-            srand(time(nullptr));
             std::vector<DType> ref(len);
-
-            for(auto& i : ref)
-            {
-                i = DType(rand() % 7 - 3);
-            }
+            roc::host_validation::RandomGenerator generator(69069);
+            roc::host_validation::fill(std::span(ref),
+                                       roc::host_validation::DataPattern::UniformInteger,
+                                       generator,
+                                       -3,
+                                       3);
 
             auto err = hipMemcpy(buf, ref.data(), len * sizeof(DType), hipMemcpyHostToDevice);
             ASSERT_EQ(err, hipSuccess);

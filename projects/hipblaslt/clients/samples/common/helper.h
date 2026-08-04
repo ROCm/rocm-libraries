@@ -27,6 +27,7 @@
 #include <functional>
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt.h>
+#include <roc/host_validation/data_generation.hpp>
 
 #ifndef CHECK_HIP_ERROR
 #define CHECK_HIP_ERROR(error)                    \
@@ -134,10 +135,19 @@ struct Runner
 
         if(max_workspace_size > 0)
             CHECK_HIP_ERROR(hipMalloc(&d_workspace, max_workspace_size));
-        for(int i = 0; i < m * n * batch_count; i++)
-            ((OutType*)c)[i] = static_cast<OutType>((rand() % 7) - 3);
-        for(int i = 0; i < m * batch_count; ++i)
-            ((float*)alphaVec)[i] = static_cast<float>((rand() % 7) - 3);
+        roc::host_validation::RandomGenerator generator(69069);
+        roc::host_validation::fill(
+            std::span(static_cast<OutType*>(c), size_t(m * n * batch_count)),
+            roc::host_validation::DataPattern::UniformInteger,
+            generator,
+            -3,
+            3);
+        roc::host_validation::fill(
+            std::span(static_cast<float*>(alphaVec), size_t(m * batch_count)),
+            roc::host_validation::DataPattern::UniformInteger,
+            generator,
+            -3,
+            3);
     }
 
     ~Runner()
@@ -186,8 +196,13 @@ struct Runner
 
             CHECK_HIP_ERROR(hipMalloc(&d_biasVec, biasElems * sizeof(BiasType)));
             CHECK_HIP_ERROR(hipHostMalloc(&biasVec, biasElems * sizeof(BiasType)));
-            for(int i = 0; i < biasElems; ++i)
-                ((BiasType*)biasVec)[i] = static_cast<BiasType>((rand() % 7) - 3);
+            roc::host_validation::RandomGenerator generator(69069);
+            roc::host_validation::fill(
+                std::span(static_cast<BiasType*>(biasVec), size_t(biasElems)),
+                roc::host_validation::DataPattern::UniformInteger,
+                generator,
+                -3,
+                3);
         }
     }
 
@@ -286,6 +301,7 @@ struct RunnerVec
         c.resize(m.size(), nullptr);
         d.resize(m.size(), nullptr);
         alphaVec.resize(m.size(), nullptr);
+        roc::host_validation::RandomGenerator generator(69069);
         for(int j = 0; j < m.size(); j++)
         {
             CHECK_HIP_ERROR(hipMalloc(&d_a[j], m[j] * k[j] * batch_count[j] * sizeof(InTypeA)));
@@ -300,14 +316,30 @@ struct RunnerVec
             CHECK_HIP_ERROR(hipHostMalloc(&d[j], m[j] * n[j] * batch_count[j] * sizeof(OutType)));
             CHECK_HIP_ERROR(hipHostMalloc(&alphaVec[j], m[j] * batch_count[j] * sizeof(float)));
 
-            for(int i = 0; i < m[j] * k[j] * batch_count[j]; i++)
-                ((InTypeA*)a[j])[i] = static_cast<InTypeA>((rand() % 7) - 3);
-            for(int i = 0; i < n[j] * k[j] * batch_count[j]; i++)
-                ((InTypeB*)b[j])[i] = static_cast<InTypeB>((rand() % 7) - 3);
-            for(int i = 0; i < m[j] * n[j] * batch_count[j]; i++)
-                ((OutType*)c[j])[i] = static_cast<OutType>((rand() % 7) - 3);
-            for(int i = 0; i < m[j] * batch_count[j]; i++)
-                ((float*)alphaVec[j])[i] = static_cast<float>((rand() % 7) - 3);
+            roc::host_validation::fill(
+                std::span(static_cast<InTypeA*>(a[j]), size_t(m[j] * k[j] * batch_count[j])),
+                roc::host_validation::DataPattern::UniformInteger,
+                generator,
+                -3,
+                3);
+            roc::host_validation::fill(
+                std::span(static_cast<InTypeB*>(b[j]), size_t(n[j] * k[j] * batch_count[j])),
+                roc::host_validation::DataPattern::UniformInteger,
+                generator,
+                -3,
+                3);
+            roc::host_validation::fill(
+                std::span(static_cast<OutType*>(c[j]), size_t(m[j] * n[j] * batch_count[j])),
+                roc::host_validation::DataPattern::UniformInteger,
+                generator,
+                -3,
+                3);
+            roc::host_validation::fill(
+                std::span(static_cast<float*>(alphaVec[j]), size_t(m[j] * batch_count[j])),
+                roc::host_validation::DataPattern::UniformInteger,
+                generator,
+                -3,
+                3);
         }
         if(max_workspace_size > 0)
             CHECK_HIP_ERROR(hipMalloc(&d_workspace, max_workspace_size));
@@ -423,12 +455,22 @@ struct LayerNormRunner
         CHECK_HIP_ERROR(hipHostMalloc(&gamma, n * sizeof(Type)));
         CHECK_HIP_ERROR(hipHostMalloc(&beta, n * sizeof(Type)));
 
-        for(int i = 0; i < m * n; i++)
-            ((Type*)in)[i] = static_cast<Type>((rand() % 7) - 3);
-        for(int i = 0; i < n; i++)
-            ((Type*)gamma)[i] = static_cast<Type>((rand() % 7) - 3);
-        for(int i = 0; i < n; i++)
-            ((Type*)beta)[i] = static_cast<Type>((rand() % 7) - 3);
+        roc::host_validation::RandomGenerator generator(69069);
+        roc::host_validation::fill(std::span(static_cast<Type*>(in), size_t(m * n)),
+                                   roc::host_validation::DataPattern::UniformInteger,
+                                   generator,
+                                   -3,
+                                   3);
+        roc::host_validation::fill(std::span(static_cast<Type*>(gamma), size_t(n)),
+                                   roc::host_validation::DataPattern::UniformInteger,
+                                   generator,
+                                   -3,
+                                   3);
+        roc::host_validation::fill(std::span(static_cast<Type*>(beta), size_t(n)),
+                                   roc::host_validation::DataPattern::UniformInteger,
+                                   generator,
+                                   -3,
+                                   3);
     }
 
     ~LayerNormRunner()
@@ -507,8 +549,12 @@ struct OptAMaxRunner
         CHECK_HIP_ERROR(hipHostMalloc(&out, sizeof(Type)));
         CHECK_HIP_ERROR(hipHostMalloc(&in, m * n * sizeof(Type)));
 
-        for(int i = 0; i < m * n; i++)
-            ((Type*)in)[i] = static_cast<Type>((rand() % 7) - 3);
+        roc::host_validation::RandomGenerator generator(69069);
+        roc::host_validation::fill(std::span(static_cast<Type*>(in), size_t(m * n)),
+                                   roc::host_validation::DataPattern::UniformInteger,
+                                   generator,
+                                   -3,
+                                   3);
     }
 
     ~OptAMaxRunner()

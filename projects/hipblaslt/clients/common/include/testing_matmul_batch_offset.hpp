@@ -26,7 +26,6 @@
 
 #pragma once
 
-#include "cblas_interface.hpp"
 #include "datatype_interface.hpp"
 #include "flops.hpp"
 #include "hipblaslt_datatype2string.hpp"
@@ -39,8 +38,10 @@
 #include "norm.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
+#include <cmath>
 #include <hipblaslt/hipblaslt.h>
 #include <hipblaslt/hipblaslt-ext.hpp>
+#include <roc/host_validation/validation.hpp>
 
 /* ============================================================================================ */
 /*! \brief  Test for 64-bit batch offset support in general batched GEMM                        */
@@ -127,18 +128,25 @@ void testing_matmul_batch_offset_impl(const Arguments& arg)
         Ti* B_batch = B_base + offset_b;
         To* C_batch = C_base + offset_c;
 
-        // Simple initialization: A and B with small integers
-        for(int64_t j = 0; j < A_col; j++)
-            for(int64_t i = 0; i < A_row; i++)
-                A_batch[i + j * lda] = Ti((i + j + b) % 7 + 1);
-
-        for(int64_t j = 0; j < B_col; j++)
-            for(int64_t i = 0; i < B_row; i++)
-                B_batch[i + j * ldb] = Ti((i - j + b) % 5 + 1);
-
-        for(int64_t j = 0; j < N; j++)
-            for(int64_t i = 0; i < M; i++)
-                C_batch[i + j * ldc] = To((i + j) % 3);
+        // Simple initialization: A and B with small integers.
+        roc::host_validation::generate(
+            roc::host_validation::MatrixView<Ti>(
+                A_batch, size_t(A_row), size_t(A_col), 1, static_cast<ptrdiff_t>(lda)),
+            [b](size_t row, size_t column) {
+                return (static_cast<int64_t>(row) + static_cast<int64_t>(column) + b) % 7 + 1;
+            });
+        roc::host_validation::generate(
+            roc::host_validation::MatrixView<Ti>(
+                B_batch, size_t(B_row), size_t(B_col), 1, static_cast<ptrdiff_t>(ldb)),
+            [b](size_t row, size_t column) {
+                return (static_cast<int64_t>(row) - static_cast<int64_t>(column) + b) % 5 + 1;
+            });
+        roc::host_validation::generate(
+            roc::host_validation::MatrixView<To>(
+                C_batch, size_t(M), size_t(N), 1, static_cast<ptrdiff_t>(ldc)),
+            [](size_t row, size_t column) {
+                return (static_cast<int64_t>(row) + static_cast<int64_t>(column)) % 3;
+            });
     }
 
     // Allocate device memory
@@ -301,30 +309,23 @@ void testing_matmul_batch_offset_impl(const Arguments& arg)
         To* C_sub = h_C_full.data() + b * size_C_full + padding_c + offset_c;
         To* D_sub = h_D_gold.data() + b * size_D_sub;
 
-        // Simple GEMM: D = alpha * A * B + beta * C
-        for(int64_t i = 0; i < M; i++)
-        {
-            for(int64_t j = 0; j < N; j++)
-            {
-                Tc sum = 0;
-                for(int64_t k = 0; k < K; k++)
-                {
-                    // A is A_row x A_col, B is B_row x B_col
-                    // For transA=N: A(i,k) = A[i + k*lda]
-                    // For transA=T: A(i,k) = A[k + i*lda]
-                    // For transB=N: B(k,j) = B[k + j*ldb]
-                    // For transB=T: B(k,j) = B[j + k*ldb]
-                    Tc a_val = (transA == HIPBLAS_OP_N)
-                                   ? Tc(A_sub[i + k * lda])
-                                   : Tc(A_sub[k + i * lda]);
-                    Tc b_val = (transB == HIPBLAS_OP_N)
-                                   ? Tc(B_sub[k + j * ldb])
-                                   : Tc(B_sub[j + k * ldb]);
-                    sum += a_val * b_val;
-                }
-                D_sub[i + j * ldd] = To(h_alpha * sum + h_beta * Tc(C_sub[i + j * ldc]));
-            }
-        }
+        const ptrdiff_t aRowStride    = transA == HIPBLAS_OP_N ? 1 : static_cast<ptrdiff_t>(lda);
+        const ptrdiff_t aColumnStride = transA == HIPBLAS_OP_N ? static_cast<ptrdiff_t>(lda) : 1;
+        const ptrdiff_t bRowStride    = transB == HIPBLAS_OP_N ? 1 : static_cast<ptrdiff_t>(ldb);
+        const ptrdiff_t bColumnStride = transB == HIPBLAS_OP_N ? static_cast<ptrdiff_t>(ldb) : 1;
+
+        roc::host_validation::GemmInvocation<Ti, Ti, To, To, Tc> invocation{
+            roc::host_validation::ConstMatrixView<Ti>(
+                A_sub, size_t(M), size_t(K), aRowStride, aColumnStride),
+            roc::host_validation::ConstMatrixView<Ti>(
+                B_sub, size_t(K), size_t(N), bRowStride, bColumnStride),
+            roc::host_validation::ConstMatrixView<To>(
+                C_sub, size_t(M), size_t(N), 1, static_cast<ptrdiff_t>(ldc)),
+            roc::host_validation::MatrixView<To>(
+                D_sub, size_t(M), size_t(N), 1, static_cast<ptrdiff_t>(ldd))};
+        invocation.alpha = h_alpha;
+        invocation.beta  = h_beta;
+        roc::host_validation::referenceGemm(invocation);
     }
 
     // Tolerance: epsilon * factor * K (accumulation over K elements)
@@ -374,6 +375,7 @@ void testing_matmul_batch_offset_impl(const Arguments& arg)
         // VALIDATION: Compare GPU vs CPU
         // ========================================
         double max_error = 0.0;
+        bool   all_close = true;
         for(int b = 0; b < batch_count; b++)
         {
             // GPU result is at (base + offset) within each batch's buffer
@@ -381,17 +383,21 @@ void testing_matmul_batch_offset_impl(const Arguments& arg)
             To* result_gpu = h_D_full.data() + b * size_D_full + padding_d + offset_d;
             To* result_cpu = h_D_gold.data() + b * size_D_sub;
 
-            for(size_t i = 0; i < size_D_sub; i++)
-            {
-                double diff = std::abs(double(result_gpu[i]) - double(result_cpu[i]));
-                max_error   = std::max(max_error, diff);
-            }
+            const auto comparison = roc::host_validation::compare(
+                roc::host_validation::ConstMatrixView<To>(
+                    result_gpu, size_t(M), size_t(N), 1, static_cast<ptrdiff_t>(ldd)),
+                roc::host_validation::ConstMatrixView<To>(
+                    result_cpu, size_t(M), size_t(N), 1, static_cast<ptrdiff_t>(ldd)),
+                {.absoluteTolerance = std::nextafter(tol, 0.0),
+                 .maxReportedMismatches = 0});
+            max_error = std::max(max_error, comparison.maxAbsoluteDifference);
+            all_close = all_close && comparison.passed();
         }
 
         // Check and count per-solution results
         if(arg.unit_check)
         {
-            if(max_error >= tol)
+            if(!all_close)
             {
                 numFailed++;
                 EXPECT_LT(max_error, tol)

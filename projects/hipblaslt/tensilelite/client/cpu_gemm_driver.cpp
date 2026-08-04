@@ -25,20 +25,21 @@
  *******************************************************************************/
 
 #include <algorithm>
-#include <cassert>
 #include <chrono>
 #include <cmath>
 #include <iostream>
-#include <random>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
 #include <vector>
 
+#include <roc/host_validation/adapters/tensilelite/HostValidationBridge.hpp>
 #include "ProgramOptions.hpp"
 #include "Reference.hpp"
 #include "rocisa/include/enum.hpp"
 #include <Tensile/Activation.hpp>
+#include <roc/host_validation/validation.hpp>
 
 /*
  * CPU GEMM Driver and Validator
@@ -134,248 +135,6 @@ namespace
         static constexpr rocisa::DataType value = rocisa::DataType::Float4;
     };
 #endif
-
-    // A slow, easy to understand, golden reference implementation of GEMM.
-    // Used strictly for validating the correctness of the optimized path.
-    // Calculates, for each element (i, j):
-    //   D[i,j] = activation( effectiveAlpha * (A * B)[i,j] + beta * C[i,j] + bias[i] )
-    // where:
-    //   effectiveAlpha = alpha
-    //                  * scaleA[i]                              (if scaleAVec     != nullptr)
-    //                  * scaleB[j]                              (if scaleBVec     != nullptr)
-    //                  * scaleAlphaVec[factorDim == 0 ? i : j]  (if scaleAlphaVec != nullptr)
-    //
-    // scaleA is always indexed by row (M), scaleB always by col (N).
-    // factorDim only affects scaleAlphaVec: 0 = row-dim (length M), 1 = col-dim (length N).
-    //
-    // Template parameters:
-    //   AccumT         — accumulation type (float or double)
-    //   OperandMathOpT — per-operand math type used immediately before multiply.
-    //                    XFloat32, for example, truncates float operands to a
-    //                    10-bit mantissa.
-    //
-    // When both MX operand descriptors are populated, the K-reduction is
-    // block-structured: accumulate min(mxA.block, mxB.block) products, then
-    // scale by the MX scale factors before adding to the running sum.
-
-    // Quantize a value through `Narrow`, then return as float. This mirrors
-    // what the GPU MFMA path does when storage is wider than the MAC input
-    // type (e.g. Half stored, F8 used in MFMA).
-    template <typename Narrow>
-    inline float quantizeThroughNarrow(float v)
-    {
-        return static_cast<float>(static_cast<Narrow>(v));
-    }
-
-    using QuantizeFn = float (*)(float);
-
-    inline QuantizeFn quantizerFor(rocisa::DataType t)
-    {
-        switch(t)
-        {
-        case rocisa::DataType::Float:    return [](float v) { return v; };
-        case rocisa::DataType::Half:     return &quantizeThroughNarrow<TensileLite::Half>;
-        case rocisa::DataType::BFloat16: return &quantizeThroughNarrow<TensileLite::BFloat16>;
-#ifdef TENSILE_USE_FP8_BF8
-        case rocisa::DataType::Float8:        return &quantizeThroughNarrow<TensileLite::Float8>;
-        case rocisa::DataType::BFloat8:       return &quantizeThroughNarrow<TensileLite::BFloat8>;
-        case rocisa::DataType::Float8_fnuz:   return &quantizeThroughNarrow<TensileLite::Float8_fnuz>;
-        case rocisa::DataType::BFloat8_fnuz:  return &quantizeThroughNarrow<TensileLite::BFloat8_fnuz>;
-#endif
-        default:
-            throw std::runtime_error("Unsupported compute-input type for golden GEMM quantizer.");
-        }
-    }
-
-#ifndef _WIN32
-    struct MXGemmOperand
-    {
-        const E8* scale        = nullptr;
-        int       block        = 0;
-        size_t    strideFree   = 0;
-        size_t    strideKBlock = 0;
-
-        bool empty() const
-        {
-            return scale == nullptr && block == 0 && strideFree == 0
-                   && strideKBlock == 0;
-        }
-    };
-
-    bool validateMXGemmOperands(const MXGemmOperand& mxA,
-                                const MXGemmOperand& mxB)
-    {
-        const bool hasMXA = !mxA.empty();
-        const bool hasMXB = !mxB.empty();
-
-        if(hasMXA != hasMXB)
-        {
-            throw std::runtime_error(
-                "CPU reference GEMM requires MX operands for both A and B, "
-                "or for neither side.");
-        }
-
-        if(!hasMXA)
-            return false;
-
-        auto validateSide = [](const char* name, const MXGemmOperand& operand) {
-            if(!operand.scale)
-                throw std::runtime_error(std::string("CPU reference GEMM MX ")
-                                         + name + " operand has no scale data.");
-            if(operand.block <= 0)
-                throw std::runtime_error(std::string("CPU reference GEMM MX ")
-                                         + name + " operand has a non-positive block.");
-            if(operand.strideFree == 0 || operand.strideKBlock == 0)
-                throw std::runtime_error(std::string("CPU reference GEMM MX ")
-                                         + name
-                                         + " operand requires non-zero scale strides.");
-        };
-
-        validateSide("A", mxA);
-        validateSide("B", mxB);
-        return true;
-    }
-#endif
-
-    template <typename AccumT = float, typename OperandMathOpT = AccumT>
-    void columnMajorGemm(const AccumT*  a,
-                         const AccumT*  b,
-                         const AccumT*  c,
-                         AccumT*        d,
-                         size_t         m,
-                         size_t         n,
-                         size_t         k,
-                         bool           transA,
-                         bool           transB,
-                         AccumT         alpha,
-                         AccumT         beta,
-                         const AccumT*  biasVec       = nullptr,
-                         const AccumT*  scaleAlphaVec = nullptr,
-                         ActivationType activation    = ActivationType::None,
-                         const AccumT*  scaleAVec     = nullptr,
-                         const AccumT*  scaleBVec     = nullptr,
-                         int            factorDim     = 0,
-                         QuantizeFn     quantizeA     = nullptr,
-                         QuantizeFn     quantizeB     = nullptr
-#ifndef _WIN32
-                         ,
-                         MXGemmOperand  mxA           = {},
-                         MXGemmOperand  mxB           = {}
-#endif
-                         )
-    {
-
-        switch(activation)
-        {
-        case ActivationType::None:
-        case ActivationType::Relu:
-            break;
-        default:
-            throw std::runtime_error(
-                "Unsupported activation for CPU reference GEMM "
-                "(supported: None, Relu).");
-        }
-        size_t strideAK = transA ? 1 : m;
-        size_t strideAM = transA ? k : 1;
-        size_t strideBK = transB ? n : 1;
-        size_t strideBN = transB ? 1 : k;
-
-#ifndef _WIN32
-        const bool hasMX = validateMXGemmOperands(mxA, mxB);
-#endif
-
-        for(size_t i = 0; i < m; i++)
-        {
-            for(size_t j = 0; j < n; j++)
-            {
-                AccumT sum = AccumT(0);
-
-#ifndef _WIN32
-                // MX scale tensor layout follows the ContractionProblem tensor
-                // descriptors. Even with padScaleTensor=false, setMXScaleA/B
-                // can pad the scale-K dimension, so using k/mxBlock as the
-                // free-dimension stride would address the wrong scale element.
-                //
-                // Both MX operands have positive blocks and non-null scale
-                // buffers here. Block shape is validated in runGemm. When the
-                // blocks differ, one divides the other; step the inner
-                // reduction by the smaller of the two so each inner segment
-                // has constant (sa, sb) and can pick the correct scale index
-                // for each side.
-                if(hasMX)
-                {
-                    size_t step     = static_cast<size_t>(
-                        std::min(mxA.block, mxB.block));
-                    for(size_t lBase = 0; lBase < k; lBase += step)
-                    {
-                        AccumT blockSum = AccumT(0);
-                        for(size_t t = 0; t < step; t++)
-                        {
-                            size_t l    = lBase + t;
-                            AccumT aVal = a[i * strideAM + l * strideAK];
-                            AccumT bVal = b[l * strideBK + j * strideBN];
-                            if(quantizeA) aVal = static_cast<AccumT>(quantizeA(static_cast<float>(aVal)));
-                            if(quantizeB) bVal = static_cast<AccumT>(quantizeB(static_cast<float>(bVal)));
-                            blockSum
-                                += static_cast<AccumT>(static_cast<OperandMathOpT>(aVal))
-                                   * static_cast<AccumT>(static_cast<OperandMathOpT>(bVal));
-                        }
-
-                        size_t blkA = lBase / static_cast<size_t>(mxA.block);
-                        size_t blkB = lBase / static_cast<size_t>(mxB.block);
-
-                        size_t mxsaIdx = i * mxA.strideFree
-                                        + blkA * mxA.strideKBlock;
-                        size_t mxsbIdx = j * mxB.strideFree
-                                        + blkB * mxB.strideKBlock;
-
-                        AccumT mxScale
-                            = static_cast<AccumT>(static_cast<float>(mxA.scale[mxsaIdx]))
-                            * static_cast<AccumT>(static_cast<float>(mxB.scale[mxsbIdx]));
-                        sum += blockSum * mxScale;
-                    }
-                }
-                else
-#endif
-                {
-                    for(size_t l = 0; l < k; l++)
-                    {
-                        AccumT aVal = a[i * strideAM + l * strideAK];
-                        AccumT bVal = b[l * strideBK + j * strideBN];
-                        if(quantizeA) aVal = static_cast<AccumT>(quantizeA(static_cast<float>(aVal)));
-                        if(quantizeB) bVal = static_cast<AccumT>(quantizeB(static_cast<float>(bVal)));
-                        sum += static_cast<AccumT>(static_cast<OperandMathOpT>(aVal))
-                               * static_cast<AccumT>(static_cast<OperandMathOpT>(bVal));
-                    }
-                }
-
-                AccumT effectiveAlpha = alpha;
-                if(scaleAVec)
-                    effectiveAlpha *= static_cast<AccumT>(scaleAVec[i]);
-                if(scaleBVec)
-                    effectiveAlpha *= static_cast<AccumT>(scaleBVec[j]);
-                if(scaleAlphaVec)
-                    effectiveAlpha *= static_cast<AccumT>(
-                        scaleAlphaVec[factorDim == 0 ? i : j]);
-
-                AccumT result = effectiveAlpha * sum + beta * c[i + j * m];
-
-                if(biasVec)
-                    result += static_cast<AccumT>(biasVec[i]);
-
-                if(activation == ActivationType::Relu)
-                {
-                    result = std::max(AccumT(0), result);
-                }
-                else
-                {
-                    assert(activation == ActivationType::None);
-                }
-
-                d[i + j * m] = result;
-            }
-        }
-    }
 }
 
 /*
@@ -386,18 +145,18 @@ namespace
  * AccumulateT: The type used for accumulation (currently restricted to float).
  */
 template <typename InputAT, typename InputBT = InputAT, typename AccumulateT = float>
-int runGemm(size_t         m,
-            size_t         n,
-            size_t         k,
-            bool           transA,
-            bool           transB,
-            float          alpha,
-            float          beta,
-            bool           validate,
-            bool           injectValidationFailure,
-            bool           tryFastPath,
-            bool           useBias,
-            ActivationType activation,
+int runGemm(size_t             m,
+            size_t             n,
+            size_t             k,
+            bool               transA,
+            bool               transB,
+            float              alpha,
+            float              beta,
+            bool               validate,
+            bool               injectValidationFailure,
+            bool               tryFastPath,
+            bool               useBias,
+            ActivationType     activation,
             bool               useScaleAlphaVec,
             const std::string& useScaleAB,
             int                factorDim,
@@ -415,8 +174,10 @@ int runGemm(size_t         m,
     }
     constexpr rocisa::DataType dtypeEnumA = TypeTraits<InputAT>::value;
     constexpr rocisa::DataType dtypeEnumB = TypeTraits<InputBT>::value;
-    if(computeInputA == rocisa::DataType::None) computeInputA = dtypeEnumA;
-    if(computeInputB == rocisa::DataType::None) computeInputB = dtypeEnumB;
+    if(computeInputA == rocisa::DataType::None)
+        computeInputA = dtypeEnumA;
+    if(computeInputB == rocisa::DataType::None)
+        computeInputB = dtypeEnumB;
 
 #ifndef _WIN32
     constexpr bool isInputAFP4 = std::is_same_v<InputAT, Float4x2>;
@@ -446,7 +207,8 @@ int runGemm(size_t         m,
             return 1;
         }
         auto checkSide = [&](const char* name, int b) -> int {
-            if(b <= 0) return 0;
+            if(b <= 0)
+                return 0;
             if((b & (b - 1)) != 0)
             {
                 std::cerr << "Error: " << name << " (" << b << ") must be a power of 2"
@@ -461,14 +223,16 @@ int runGemm(size_t         m,
             }
             if(k % static_cast<size_t>(b) != 0)
             {
-                std::cerr << "Error: K (" << k << ") must be a multiple of " << name
-                          << " (" << b << ")" << std::endl;
+                std::cerr << "Error: K (" << k << ") must be a multiple of " << name << " (" << b
+                          << ")" << std::endl;
                 return 1;
             }
             return 0;
         };
-        if(int rc = checkSide("mxBlockA", mxBlockA)) return rc;
-        if(int rc = checkSide("mxBlockB", mxBlockB)) return rc;
+        if(int rc = checkSide("mxBlockA", mxBlockA))
+            return rc;
+        if(int rc = checkSide("mxBlockB", mxBlockB))
+            return rc;
 
         // Asymmetric MX (mxBlockA != mxBlockB) is only supported on the fast
         // path. The production slow path's MX inner loop uses a single scale
@@ -479,17 +243,16 @@ int runGemm(size_t         m,
         if(mxBlockA != mxBlockB && !tryFastPath)
         {
             std::cerr << "Error: asymmetric MX (mxBlockA=" << mxBlockA
-                      << " != mxBlockB=" << mxBlockB
-                      << ") is only supported on the fast path "
+                      << " != mxBlockB=" << mxBlockB << ") is only supported on the fast path "
                       << "(use --tryFastPath)." << std::endl;
             return 1;
         }
     }
 
     // Calculate strides assuming standard column-major packed storage
-    size_t lda        = transA ? k : m;
-    size_t ldb        = transB ? n : k;
-    size_t ldc        = m;
+    size_t lda = transA ? k : m;
+    size_t ldb = transB ? n : k;
+    size_t ldc = m;
 
     // C/D and alpha/beta types: use AccumulateT's DataType
     constexpr rocisa::DataType accumDtypeEnum = TypeTraits<AccumulateT>::value;
@@ -562,12 +325,9 @@ int runGemm(size_t         m,
     //
     // For FP4 with mxBlockA/B>0 (mxfp4), inputs are drawn from the discrete
     // E2M1-representable value set so the MX-scale logic is exercised.
-    size_t                                seed = 42;
-    std::mt19937                          gen(seed);
-    std::uniform_int_distribution<>       binary_distribution(0, 1);
-    std::uniform_real_distribution<float> realDist(-1.0f, 1.0f);
+    roc::host_validation::RandomGenerator generator(42);
 
-    auto randomGen = [&]() { return binary_distribution(gen) ? 1.0f : -1.0f; };
+    auto randomGen = [&]() { return generator.binary<float>(); };
 
 #ifndef _WIN32
     if constexpr(isFP4)
@@ -576,12 +336,23 @@ int runGemm(size_t         m,
         // Drawing from the entire grid (not just the powers of two near zero)
         // exercises the MX-scale path with values whose products span more of
         // the FP4 range, while still being exactly representable.
-        constexpr float fp4Values[]
-            = {-6.0f, -4.0f, -3.0f, -2.0f, -1.5f, -1.0f, -0.5f, 0.0f,
-                0.5f,  1.0f,  1.5f,  2.0f,  3.0f,  4.0f,  6.0f};
-        constexpr int fp4ValueCount = sizeof(fp4Values) / sizeof(fp4Values[0]);
-        std::uniform_int_distribution<> fp4Dist(0, fp4ValueCount - 1);
-        auto randomFp4 = [&]() { return fp4Values[fp4Dist(gen)]; };
+        constexpr float fp4Values[] = {-6.0f,
+                                       -4.0f,
+                                       -3.0f,
+                                       -2.0f,
+                                       -1.5f,
+                                       -1.0f,
+                                       -0.5f,
+                                       0.0f,
+                                       0.5f,
+                                       1.0f,
+                                       1.5f,
+                                       2.0f,
+                                       3.0f,
+                                       4.0f,
+                                       6.0f};
+        auto            randomFp4
+            = [&]() { return generator.choose<float>(std::span<const float>(fp4Values)); };
 
         // Pack 2 logical FP4 values per byte (Float4x2). When the logical
         // element count is odd, the second slot of the last byte has no
@@ -615,23 +386,22 @@ int runGemm(size_t         m,
                 // FP4 mixed-input init unsupported in this branch; the FP4-only
                 // path above handles the pure FP4 case. Mixed FP4/non-FP4
                 // dispatch is rejected at the dispatcher level.
-                throw std::runtime_error(
-                    "Mixed FP4 / non-FP4 input is not supported.");
+                throw std::runtime_error("Mixed FP4 / non-FP4 input is not supported.");
             }
             else
 #endif
-            if(quantizes)
+                if(quantizes)
             {
                 // Values representable in storage but not on the compute-input grid -
                 // for storage=Half/compute=F8N, values like 0.7 that Half holds
                 // exactly but F8N rounds to 0.625 or 0.75.
-                std::generate(vec.begin(), vec.end(),
-                              [&]() { return static_cast<T>(realDist(gen)); });
+                std::generate(
+                    vec.begin(), vec.end(), [&]() { return generator.uniformReal<T>(-1.0, 1.0); });
             }
             else
             {
-                std::generate(vec.begin(), vec.end(),
-                              [&]() { return static_cast<T>(randomGen()); });
+                std::generate(
+                    vec.begin(), vec.end(), [&]() { return static_cast<T>(randomGen()); });
             }
         };
 
@@ -649,8 +419,10 @@ int runGemm(size_t         m,
 
     if(useBias)
     {
-        biasVec.resize(m);
-        std::generate(biasVec.begin(), biasVec.end(), [&]() { return static_cast<AccumulateT>(randomGen()); });
+        biasVec.resize(m * batchCount);
+        std::generate(biasVec.begin(), biasVec.end(), [&]() {
+            return static_cast<AccumulateT>(randomGen());
+        });
         contraction.setUseBias(1);
         contraction.setBias(accumDtypeEnum, m, m);
     }
@@ -659,18 +431,19 @@ int runGemm(size_t         m,
     {
         size_t scaleAlphaVecLen = (factorDim == 0) ? m : n;
         scaleAlphaVecBuf.resize(scaleAlphaVecLen);
-        std::generate(scaleAlphaVecBuf.begin(), scaleAlphaVecBuf.end(), [&]() { return static_cast<AccumulateT>(randomGen()); });
+        std::generate(scaleAlphaVecBuf.begin(), scaleAlphaVecBuf.end(), [&]() {
+            return static_cast<AccumulateT>(randomGen());
+        });
         contraction.setUseScaleAlphaVec(1);
         contraction.setScaleAlphaVec(accumDtypeEnum, scaleAlphaVecLen, factorDim);
     }
 
     // Random scale generator: magnitude in (1, 100], integer values to avoid rounding issues, sign random.
     // Excludes 0 and ±1 so missing/incorrect scaling is never masked.
-    std::uniform_int_distribution<int> scaleDis(2, 100);
     auto scaleGen = [&]() -> AccumulateT {
-        AccumulateT sign = binary_distribution(gen) ? AccumulateT(1) : AccumulateT(-1);
-        int         mag  = scaleDis(gen);
-        return sign * static_cast<AccumulateT>(mag);
+        const AccumulateT sign      = generator.binary<AccumulateT>();
+        const AccumulateT magnitude = generator.uniformInteger<AccumulateT>(2, 100);
+        return sign * magnitude;
     };
 
     std::vector<AccumulateT> scaleABuf;
@@ -713,13 +486,15 @@ int runGemm(size_t         m,
     {
         if(mxBlockA > 0 || mxBlockB > 0)
         {
-            // Use unpadded MX scale tensors so the columnMajorGemm reference
-            // indexing matches: mxsa = {m, k/mxBlockA} with m as leading
+            // Use unpadded MX scale tensors so the shared reference indexing
+            // matches: mxsa = {m, k/mxBlockA} with m as leading
             // stride (and analogous for B). Default padScaleTensor=true would
             // round M up to next 32 and K/mxBlockA/B up to next 8, breaking
             // the index math below.
-            contraction.setMXScaleA(rocisa::DataType::E8, mxBlockA, /*saStride=*/{}, /*padScaleTensor=*/false);
-            contraction.setMXScaleB(rocisa::DataType::E8, mxBlockB, /*sbStride=*/{}, /*padScaleTensor=*/false);
+            contraction.setMXScaleA(
+                rocisa::DataType::E8, mxBlockA, /*saStride=*/{}, /*padScaleTensor=*/false);
+            contraction.setMXScaleB(
+                rocisa::DataType::E8, mxBlockB, /*sbStride=*/{}, /*padScaleTensor=*/false);
 
             size_t nmxsa = contraction.mxsa().totalLogicalElements();
             size_t nmxsb = contraction.mxsb().totalLogicalElements();
@@ -735,16 +510,18 @@ int runGemm(size_t         m,
             mxsb.resize(nmxsb);
 
             // Distinct exponents in [0..7] so wrong indexing breaks validation
-            std::uniform_int_distribution<> expDist(0, 7);
             for(size_t i = 0; i < nmxsa; i++)
-                mxsa[i] = E8(std::ldexp(1.0f, expDist(gen)));
+                mxsa[i] = E8(std::ldexp(1.0f, generator.uniformInteger<int>(0, 7)));
             for(size_t i = 0; i < nmxsb; i++)
-                mxsb[i] = E8(std::ldexp(1.0f, expDist(gen)));
+                mxsb[i] = E8(std::ldexp(1.0f, generator.uniformInteger<int>(0, 7)));
         }
     }
 #endif
 
-    ContractionInputs inputs(a.data(), b.data(), c.data(), d.data(),
+    ContractionInputs inputs(a.data(),
+                             b.data(),
+                             c.data(),
+                             d.data(),
                              static_cast<AccumulateT>(alpha),
                              static_cast<AccumulateT>(beta));
     inputs.bias          = useBias ? biasVec.data() : nullptr;
@@ -764,9 +541,8 @@ int runGemm(size_t         m,
 
     if(tryFastPath && !TensileLite::Client::isFastPathEligible(contraction))
     {
-        throw std::runtime_error(
-            "--tryFastPath was requested but the problem is not eligible "
-            "for the fast CPU GEMM path.");
+        throw std::runtime_error("--tryFastPath was requested but the problem is not eligible "
+                                 "for the fast CPU GEMM path.");
     }
 
     // Execute the 'device under test'.
@@ -794,11 +570,10 @@ int runGemm(size_t         m,
         std::cout << "Validating..." << std::endl;
 
         // Convert inputs to AccumulateT for the golden reference comparison.
-        // For batched problems, A/B/C are batchCount slices of size numA/numB/numC
-        // (column-major packed; batch stride = numA / numB / numC).
+        // For batched problems, A/B are batchCount slices of size numA/numB
+        // (column-major packed; batch stride = numA / numB).
         size_t totalA = numA * batchCount;
         size_t totalB = numB * batchCount;
-        size_t totalC = numC * batchCount;
 
         std::vector<AccumulateT> aRef, bRef;
 
@@ -819,22 +594,23 @@ int runGemm(size_t         m,
         else
 #endif
         {
-            aRef.resize(totalA);
-            for(size_t i = 0; i < totalA; i++)
-                aRef[i] = static_cast<AccumulateT>(a[i]);
-            bRef.resize(totalB);
-            for(size_t i = 0; i < totalB; i++)
-                bRef[i] = static_cast<AccumulateT>(b[i]);
+            aRef = roc::host_validation::convertValues<AccumulateT>(std::span<const InputAT>(a));
+            bRef = roc::host_validation::convertValues<AccumulateT>(std::span<const InputBT>(b));
         }
 
-        std::vector<AccumulateT> cRef(c.begin(), c.end());
+        std::vector<AccumulateT> cRef
+            = roc::host_validation::convertValues<AccumulateT>(std::span<const AccumulateT>(c));
         std::vector<AccumulateT> dRef(d.size());
 
         // If the storage type is wider than the compute-input type, the GPU
         // (and slow-path validator) quantize the operand down before the MAC.
         // Mirror that here so the golden GEMM reflects the same model.
-        QuantizeFn quantA = (computeInputA != dtypeEnumA) ? quantizerFor(computeInputA) : nullptr;
-        QuantizeFn quantB = (computeInputB != dtypeEnumB) ? quantizerFor(computeInputB) : nullptr;
+        roc::host_validation::QuantizeFunction<AccumulateT> quantA
+            = (computeInputA != dtypeEnumA) ? hostValidationQuantizerFor<AccumulateT>(computeInputA)
+                                            : nullptr;
+        roc::host_validation::QuantizeFunction<AccumulateT> quantB
+            = (computeInputB != dtypeEnumB) ? hostValidationQuantizerFor<AccumulateT>(computeInputB)
+                                            : nullptr;
 
 #ifndef _WIN32
         size_t mxsaBatchStride = 0, mxsbBatchStride = 0;
@@ -871,41 +647,57 @@ int runGemm(size_t         m,
                 const AccumulateT* cPtr = cRef.data() + batch * numC;
                 AccumulateT*       dPtr = dRef.data() + batch * numC;
 
-                columnMajorGemm<AccumulateT, MathOpT>(
-                    aPtr,
-                    bPtr,
-                    cPtr,
-                    dPtr,
-                    m,
-                    n,
-                    k,
-                    transA,
-                    transB,
-                    static_cast<AccumulateT>(
-                        (useScaleAB == "Scalar") ? alpha * scaleABuf[0] * scaleBBuf[0] : alpha),
-                    static_cast<AccumulateT>(beta),
-                    useBias ? biasVec.data() : nullptr,
-                    useScaleAlphaVec ? scaleAlphaVecBuf.data() : nullptr,
-                    activation,
-                    (useScaleAB == "Vector") ? scaleABuf.data() : nullptr,
-                    (useScaleAB == "Vector") ? scaleBBuf.data() : nullptr,
-                    factorDim,
-                    quantA,
-                    quantB
+                auto invocation = makeHostValidationColumnMajorGemm<AccumulateT,
+                                                                    AccumulateT,
+                                                                    AccumulateT,
+                                                                    AccumulateT,
+                                                                    AccumulateT>(
+                    aPtr, bPtr, cPtr, dPtr, m, n, k, transA, transB);
+
+                invocation.alpha = static_cast<AccumulateT>(
+                    (useScaleAB == "Scalar") ? alpha * scaleABuf[0] * scaleBBuf[0] : alpha);
+                invocation.beta            = static_cast<AccumulateT>(beta);
+                invocation.factorDimension = factorDim;
+                invocation.activation      = toHostValidationActivation(activation);
+                invocation.quantizeA       = quantA;
+                invocation.quantizeB       = quantB;
+
+                if(useBias)
+                    invocation.bias = roc::host_validation::ConstVectorView<AccumulateT>(
+                        biasVec.data() + batch * m, m);
+                if(useScaleAlphaVec)
+                    invocation.scaleAlpha = roc::host_validation::ConstVectorView<AccumulateT>(
+                        scaleAlphaVecBuf.data(), scaleAlphaVecBuf.size());
+                if(useScaleAB == "Vector")
+                {
+                    invocation.scaleA = roc::host_validation::ConstVectorView<AccumulateT>(
+                        scaleABuf.data(), scaleABuf.size());
+                    invocation.scaleB = roc::host_validation::ConstVectorView<AccumulateT>(
+                        scaleBBuf.data(), scaleBBuf.size());
+                }
+
 #ifndef _WIN32
-                    ,
-                    MXGemmOperand{
-                        (isFP4 && mxBlockA > 0) ? mxsa.data() + batch * mxsaBatchStride : nullptr,
-                        mxBlockA,
-                        mxsaStrideM,
-                        mxsaStrideKBlk},
-                    MXGemmOperand{
-                        (isFP4 && mxBlockB > 0) ? mxsb.data() + batch * mxsbBatchStride : nullptr,
-                        mxBlockB,
-                        mxsbStrideN,
-                        mxsbStrideKBlk}
+                if constexpr(isFP4)
+                {
+                    if(mxBlockA > 0)
+                    {
+                        invocation.blockScaleA
+                            = roc::host_validation::makeBlockScaleView<AccumulateT>(
+                                mxsa.data() + batch * mxsaBatchStride,
+                                static_cast<size_t>(mxBlockA),
+                                mxsaStrideM,
+                                mxsaStrideKBlk);
+                        invocation.blockScaleB
+                            = roc::host_validation::makeBlockScaleView<AccumulateT>(
+                                mxsb.data() + batch * mxsbBatchStride,
+                                static_cast<size_t>(mxBlockB),
+                                mxsbStrideN,
+                                mxsbStrideKBlk);
+                    }
+                }
 #endif
-                );
+
+                roc::host_validation::referenceGemm<MathOpT>(invocation);
             }
         };
 
@@ -924,34 +716,28 @@ int runGemm(size_t         m,
             return 0.05;
         }();
 
-        bool   allClose = true;
-        double maxDiff  = 0.0;
+        const auto comparison = roc::host_validation::compare(std::span<const AccumulateT>(d),
+                                                              std::span<const AccumulateT>(dRef),
+                                                              {.absoluteTolerance     = tolerance,
+                                                               .relativeTolerance     = 0.0,
+                                                               .maxReportedMismatches = 10});
 
-        for(size_t i = 0; i < totalC; i++)
+        for(const auto& mismatch : comparison.reportedMismatches)
         {
-            double valDut = static_cast<double>(d[i]);
-            double valRef = static_cast<double>(dRef[i]);
-            double diff   = std::abs(valDut - valRef);
-            maxDiff       = std::max(maxDiff, diff);
-
-            if(diff > tolerance)
-            {
-                allClose = false;
-                if(i < 10)
-                {
-                    std::cout << "Mismatch at " << i << ": observed=" << valDut
-                              << " expected=" << valRef << " diff=" << diff << std::endl;
-                }
-            }
+            std::cout << "Mismatch at " << mismatch.index << ": observed=" << mismatch.observed
+                      << " expected=" << mismatch.expected
+                      << " diff=" << mismatch.absoluteDifference << std::endl;
         }
 
-        if(allClose)
+        if(comparison.passed())
         {
-            std::cout << "PASSED! (max diff: " << maxDiff << ")" << std::endl;
+            std::cout << "PASSED! (max diff: " << comparison.maxAbsoluteDifference << ")"
+                      << std::endl;
         }
         else
         {
-            std::cout << "FAILED! (max diff: " << maxDiff << ")" << std::endl;
+            std::cout << "FAILED! (max diff: " << comparison.maxAbsoluteDifference << ")"
+                      << std::endl;
             return 1;
         }
     }

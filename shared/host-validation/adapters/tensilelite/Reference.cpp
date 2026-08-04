@@ -24,8 +24,7 @@
  *
  *******************************************************************************/
 
-#include "Reference.hpp"
-#include "DataInitialization.hpp"
+#include <roc/host_validation/adapters/tensilelite/Reference.hpp>
 #include "Tensile/TensorDescriptor_fwd.hpp"
 #include "Tensile/Utils.hpp"
 #include "TimingInstrumentation.hpp"
@@ -302,6 +301,14 @@ namespace TensileLite
 
     namespace Client
     {
+        inline bool isMXFP4Problem(const ContractionProblemGemm& problem)
+        {
+            return (problem.a().dataType() == rocisa::DataType::Float4
+                    && problem.mxBlockA() > 0)
+                || (problem.b().dataType() == rocisa::DataType::Float4
+                    && problem.mxBlockB() > 0);
+        }
+
         template <typename T>
         T abs(T val)
         {
@@ -571,7 +578,7 @@ namespace TensileLite
             case rocisa::DataType::Float4:
             ;
             }
-            return DataInitialization::getValue<Accumulator, InitMode::Zero>();
+            return Accumulator(0);
         }
 
         template <typename Accumulator>
@@ -589,7 +596,7 @@ namespace TensileLite
                                 Accumulator>::type
             GetValue(rocisa::DataType biasType, void const* biasptr, int pos, bool aConjugate)
         {
-            return DataInitialization::getValue<Accumulator, InitMode::Zero>();
+            return Accumulator(0);
         }
 
         template <typename Accumulator,

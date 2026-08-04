@@ -32,7 +32,7 @@
 #ifdef TENSILE_YAML
 #include <Tensile/llvm/YAML.hpp>
 #endif
-#include <TestUtils.hpp>
+#include <roc/host_validation/adapters/tensilelite/TestUtils.hpp>
 
 #include "TestData.hpp"
 
