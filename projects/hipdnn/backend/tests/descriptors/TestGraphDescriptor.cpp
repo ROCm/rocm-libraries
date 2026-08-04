@@ -38,12 +38,6 @@ public:
         EXPECT_EQ(graph.tensors.size(), 3);
         EXPECT_EQ(graph.nodes.size(), 1);
     }
-
-    static void verifyGraphsEquivalent(const hipdnn_flatbuffers_sdk::data_objects::GraphT& graph1,
-                                       const hipdnn_flatbuffers_sdk::data_objects::GraphT& graph2)
-    {
-        EXPECT_EQ(graph1, graph2);
-    }
 };
 
 TEST_F(TestGraphDescriptor, SerializeDeserializeGraph)
@@ -298,7 +292,7 @@ TEST_F(TestGraphDescriptor, JsonRoundTripViaDescriptorApi)
     auto graph2 = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(
         static_cast<const uint8_t*>(binary2.ptr));
 
-    verifyGraphsEquivalent(*graph1, *graph2);
+    EXPECT_EQ(*graph1, *graph2);
 }
 
 TEST_F(TestGraphDescriptor, JsonRoundTripPreservesMinimumApiVersionAndRuntimePassByValue)
@@ -591,7 +585,7 @@ TEST_F(TestGraphDescriptor, JsonRoundTripViaApi)
     auto graph2 = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(
         static_cast<const uint8_t*>(binary2.ptr));
 
-    verifyGraphsEquivalent(*graph1, *graph2);
+    EXPECT_EQ(*graph1, *graph2);
 }
 
 TEST_F(TestGraphDescriptor, DeserializeInvalidatesSerializedBuffer)
@@ -859,7 +853,7 @@ TEST_F(TestGraphDescriptor, BinaryRoundTripViaApi)
     auto graph2 = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(
         static_cast<const uint8_t*>(binary2.ptr));
 
-    verifyGraphsEquivalent(*graph1, *graph2);
+    EXPECT_EQ(*graph1, *graph2);
 }
 
 // ============================================================================

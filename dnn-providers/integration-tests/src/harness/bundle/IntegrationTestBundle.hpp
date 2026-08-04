@@ -17,10 +17,10 @@
 
 #include <nlohmann/json.hpp>
 
+#include "harness/BundleMetadata.hpp"
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/Graph.hpp>
-#include <hipdnn_test_sdk/utilities/BundleMetadata.hpp>
 #include <hipdnn_test_sdk/utilities/LoadGraphAndTensors.hpp>
 
 #include "harness/bundle/BundleDiscovery.hpp"
@@ -51,14 +51,14 @@ using TensorMap = std::unordered_map<int64_t, std::unique_ptr<hipdnn_data_sdk::u
 //                      are available. If present and hasGoldenOutputs is false,
 //                      it carries inputs only and outputs are reference-verified.
 //                      Absent means the bundle is graph-only; the harness may
-//                      synthesize inputs, otherwise it skips the case.
+//                      fill inputs, otherwise it skips the case.
 //   hasGoldenOutputs — true iff every output tensor's .bin blob was present and
 //                      loaded into `tensors`. When false, engine output must be
 //                      checked against a reference executor instead of golden data.
 struct IntegrationTestBundle
 {
     flatbuffers::DetachedBuffer graphBuffer;
-    hipdnn_test_sdk::utilities::BundleMetadata metadata;
+    hipdnn_integration_tests::BundleMetadata metadata;
     std::vector<int64_t> outputTensorUids;
     std::optional<TensorMap> tensors;
     bool hasGoldenOutputs = false;
@@ -73,7 +73,7 @@ struct IntegrationTestBundle
 
 // Why a load did NOT produce a bundle. These are authoring failures in the
 // bundle or sweep case. A valid graph-only bundle is still a loaded bundle and is
-// skipped later only if the harness cannot synthesize inputs.
+// skipped later only if the harness cannot fill inputs.
 enum class LoadError
 {
     MALFORMED_JSON, // graph/template/sweep JSON is unreadable or syntactically invalid
@@ -766,7 +766,7 @@ inline LoadResult loadIntegrationTestBundle(const std::filesystem::path& jsonPat
         = !bundle.outputTensorUids.empty()
           && detail::blobsPresentFor(bundle.outputTensorUids, blobPathForUid);
 
-    auto metadata = hipdnn_test_sdk::utilities::loadBundleMetadata(jsonPath);
+    auto metadata = hipdnn_integration_tests::loadBundleMetadata(jsonPath);
     if(!metadata.has_value())
     {
         if(goldenOutputsPresent)
@@ -862,7 +862,7 @@ inline LoadResult loadIntegrationTestBundle(const DiscoveredBundle& discovered)
     {
         return LoadError::MISSING_METADATA;
     }
-    auto metadata = hipdnn_test_sdk::utilities::parseBundleMetadataJson(
+    auto metadata = hipdnn_integration_tests::parseBundleMetadataJson(
         caseJson->at("metadata"), discovered.diagnosticPath().string());
     if(!metadata.has_value())
     {
