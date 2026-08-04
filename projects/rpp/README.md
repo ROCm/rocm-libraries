@@ -53,7 +53,7 @@ Spectrogram functionality output represented as an image:
 
 ### Operating Systems
 * Linux
-  * Ubuntu - `22.04` / `24.04`
+  * Ubuntu - `22.04+`
   * RedHat - `8` / `9`
   * SLES - `15 SP7`
 
@@ -66,49 +66,19 @@ Spectrogram functionality output represented as an image:
 > * [ROCm-supported hardware required for HIP backend](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/system-requirements.html)
 > * `gfx908` or higher GPU required
 
-* Install ROCm `7.0.0` or later with [amdgpu-install](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/how-to/amdgpu-install.html): **Required** usecase:`rocm`
-> [!IMPORTANT]
-> `sudo amdgpu-install --usecase=rocm`
+rpp is also built and installed as part of
+[TheRock](https://github.com/ROCm/TheRock), which is the recommended path for
+source builds and nightly/CI artifacts.
 
-### Compiler
-* AMD Clang++ Version 18.0.0 or later - installed with ROCm
-> [!NOTE]
-> * For CPU only backend use Clang Version `5.0.1` or later
->   ```shell
->    sudo apt install clang
->   ```
-> * To use GNU compiler or custom compilers use `-D CMAKE_CXX_COMPILER` during build
-
-### Libraries
-* CMake Version `3.10` or later
-  ```shell
-  sudo apt install cmake
-  ```
-* HIP
-  ```shell
-  sudo apt install hip-dev
-  ```
-
-* OpenMP
-  ```shell
-  sudo apt install openmp-extras-dev
-  ```
-
-* Half-precision floating-point library - Version `1.12.0` or later
-  ```shell
-  sudo apt install half
-  ```
-
-> [!IMPORTANT]
-> * Required compiler support
->   * C++17
->   * OpenMP
->   * Threads
-> * On Ubuntu 22.04 - Additional package required: libstdc++-12-dev
+### Dependancies
+* AMD Clang++ compiler (C++17 or higher) - installed with ROCm
+* CMake Version `3.10` or later - installed with ROCm
+* OpenMP - installed with ROCm llvm
+* Half - installed with ROCm
+* On Ubuntu 22.04 - Additional package required: libstdc++-12-dev
 >  ```shell
 >  sudo apt install libstdc++-12-dev
 >  ```
-
 
 >[!NOTE]
 > * All package installs are shown with the `apt` package manager. Use the appropriate package manager for your operating system.
@@ -119,8 +89,11 @@ The installation process uses the following steps:
 
 * [ROCm-supported hardware](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/system-requirements.html) install verification
 
-* Install ROCm `7.0.0` or later with [amdgpu-install](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/how-to/amdgpu-install.html) with `--usecase=rocm`
-
+* RPP is included with the ROCm Core SDK on Linux. A standard ROCm
+installation using the `amdrocm-core-sdk` meta package installs the RPP
+runtime and development hpackage by default. Follow the official
+[Install AMD ROCm](https://rocm.docs.amd.com/en/latest/install/rocm.html) guide
+and use the selector to choose your GPU, operating system, and install method.
 > [!IMPORTANT]
 > Use **either** [package install](#package-install) **or** [source install](#source-install) as described below.
 
@@ -160,15 +133,17 @@ sudo zypper install rpp rpp-devel rpp-test
   git clone https://github.com/ROCm/rpp.git
   ```
 
-#### HIP Backend
+#### HIP/HOST Backend
 
   ```shell
-  mkdir build-hip
-  cd build-hip
-  cmake ../rpp
-  make -j8
-  sudo make install
-  ```
+  mkdir build && cd build
+cmake ../
+make -j$(nproc)
+sudo make install
+```
+> [!NOTE]
+> RPP has both GPU and CPU backends. Building it with HIP backend enables both backends.
+
 ### Running Tests
   After installing RPP, refer to the [Verify installation](#verify-installation) section below for instructions on running tests.
 
@@ -263,7 +238,7 @@ All notable changes for each release are added to our [changelog](CHANGELOG.md).
 ## Tested configurations
 
 * Linux distribution
-  * Ubuntu - `22.04` / `24.04`
+  * Ubuntu - `22.04+`
   * RedHat - `8` / `9`
   * SLES - `15 SP7`
 * ROCm: rocm-core - `7.0.0`+

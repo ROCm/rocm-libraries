@@ -47,7 +47,7 @@
           "bytes": 23162,
           "family": "conv",
           "kernel_name": "irhash_conv_950_a_N1H8W8C16_K32Y3X3_t64x64x32_w2x2_a32x32x16_compv4_cshuffle",
-          "sha256": "fca9393b171090b7ea99543bee2559d4bb4526477550d582f8c906e7d34b10fe",
+          "sha256": "fabf05c09130f6fffce81d8022b97a1a932c5afe06f98b80f3125e5d61313b85",
           "status": "ok"
         },
         "conv/gfx950/n1h8c16k32r3/basic_cshuffle": {
@@ -379,7 +379,144 @@
           "status": "ok"
         }
       },
-      "expected_failures": {},
+      "expected_failures": {
+        "attention/gfx942/2d_bf16_d128_b64": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention/gfx942/2d_fp16_d128_b64": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention/gfx942/3d_bf16_d128_b64": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention/gfx942/3d_fp16_d128_b64": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention/gfx942/reduce_bf16_d128": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention/gfx942/reduce_fp16_d128": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention/gfx950/2d_bf16_d128_b64": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention/gfx950/2d_fp16_d128_b64": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention/gfx950/2d_fp16_d128_b64_alibi": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention/gfx950/2d_fp16_d128_b64_softcap": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention/gfx950/3d_bf16_d128_b64": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention/gfx950/3d_fp16_d128_b64": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention/gfx950/reduce_bf16_d128": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention/gfx950/reduce_fp16_d128": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_d256/gfx942/4warp_gqa": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_d256/gfx950/pad_interleave": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/bn128_sq512": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/default_causal_sq512": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/fp16_h64_sq512": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/lazy_off_sq512": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/noncausal_sq512": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/persist_h64_sq512": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/persist_hkvmaj_sq512": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/persist_intl_sq512": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/persist_lazy_off_sq512": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/persist_qbmaj_sq512": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/persist_ragged_sq500": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/persist_swa_w128_sq512": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/persistent_causal_sq512": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/ragged_causal_sq500": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/ragged_full_sq500": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/ragged_h64_sq500": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/swa_w128_sq512": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/varlen_sq512": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        }
+      },
       "summary": {
         "arches": {
           "gfx11-generic": 1,
@@ -390,7 +527,7 @@
           "gfx942": 5,
           "gfx950": 20
         },
-        "expected_failures": 0,
+        "expected_failures": 34,
         "families": {
           "conv": 9,
           "conv_wgrad": 7,
@@ -448,7 +585,7 @@
           "bytes": 23295,
           "family": "conv",
           "kernel_name": "irhash_conv_950_a_N1H8W8C16_K32Y3X3_t64x64x32_w2x2_a32x32x16_compv4_cshuffle",
-          "sha256": "e2aca30141115bdb6a30ff561af8a19c474abf2e10a64ec2e284cde98816beb9",
+          "sha256": "cf569d57d0fda33ca410b369f6b739752abc56790a31be24e820316c432e3909",
           "status": "ok"
         },
         "conv/gfx950/n1h8c16k32r3/basic_cshuffle": {
@@ -780,7 +917,144 @@
           "status": "ok"
         }
       },
-      "expected_failures": {},
+      "expected_failures": {
+        "attention/gfx942/2d_bf16_d128_b64": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention/gfx942/2d_fp16_d128_b64": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention/gfx942/3d_bf16_d128_b64": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention/gfx942/3d_fp16_d128_b64": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention/gfx942/reduce_bf16_d128": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention/gfx942/reduce_fp16_d128": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention/gfx950/2d_bf16_d128_b64": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention/gfx950/2d_fp16_d128_b64": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention/gfx950/2d_fp16_d128_b64_alibi": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention/gfx950/2d_fp16_d128_b64_softcap": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention/gfx950/3d_bf16_d128_b64": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention/gfx950/3d_fp16_d128_b64": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention/gfx950/reduce_bf16_d128": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention/gfx950/reduce_fp16_d128": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_d256/gfx942/4warp_gqa": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_d256/gfx950/pad_interleave": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/bn128_sq512": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/default_causal_sq512": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/fp16_h64_sq512": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/lazy_off_sq512": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/noncausal_sq512": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/persist_h64_sq512": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/persist_hkvmaj_sq512": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/persist_intl_sq512": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/persist_lazy_off_sq512": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/persist_qbmaj_sq512": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/persist_ragged_sq500": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/persist_swa_w128_sq512": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/persistent_causal_sq512": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/ragged_causal_sq500": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/ragged_full_sq500": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/ragged_h64_sq500": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/swa_w128_sq512": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/varlen_sq512": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        }
+      },
       "summary": {
         "arches": {
           "gfx11-generic": 1,
@@ -791,7 +1065,545 @@
           "gfx942": 5,
           "gfx950": 20
         },
-        "expected_failures": 0,
+        "expected_failures": 34,
+        "families": {
+          "conv": 9,
+          "conv_wgrad": 7,
+          "deep_fused_conv": 9,
+          "gemm": 13,
+          "moe": 9
+        },
+        "ok_cases": 47
+      }
+    },
+    "llvm23": {
+      "cases": {
+        "conv/gfx1151/n1h8c16k32r3": {
+          "arch": "gfx1151",
+          "bytes": 41994,
+          "family": "conv",
+          "kernel_name": "irhash_conv_1151_a_N1H8W8C16_K32Y3X3_t32x32x16_w2x1_a16x16x16_mem_default",
+          "sha256": "ce1c975f22e27bc0087ad54cd6ef72ee99f72d2acfc2642196ce766cfe7e23dc",
+          "status": "ok"
+        },
+        "conv/gfx1151/n2h16c32k32r1": {
+          "arch": "gfx1151",
+          "bytes": 41241,
+          "family": "conv",
+          "kernel_name": "irhash_conv_1151_b_N2H16W16C32_K32Y1X1_t32x32x16_w2x1_a16x16x16_mem_default",
+          "sha256": "e5d18c62b8b8ead0c460cb67546e3f9c85e04a50484ab0f054d87fae739d0aa3",
+          "status": "ok"
+        },
+        "conv/gfx1201/n1h8c16k32r3": {
+          "arch": "gfx1201",
+          "bytes": 35570,
+          "family": "conv",
+          "kernel_name": "irhash_conv_1201_a_N1H8W8C16_K32Y3X3_t32x32x16_w2x1_a16x16x16_mem_default",
+          "sha256": "9f792368e733062bd8907c8d16f7f38e6b47fd0b4524bdf3aa92653e107d3c86",
+          "status": "ok"
+        },
+        "conv/gfx90a/n1h8c16k32r3": {
+          "arch": "gfx90a",
+          "bytes": 28268,
+          "family": "conv",
+          "kernel_name": "irhash_conv_90a_a_N1H8W8C16_K32Y3X3_t64x32x16_w2x2_a16x16x16_mem_default",
+          "sha256": "02edec2f222500f680576a275acf9ed89af7a7784763312e8427aea4197f5c8e",
+          "status": "ok"
+        },
+        "conv/gfx942/n1h8c16k32r3": {
+          "arch": "gfx942",
+          "bytes": 28268,
+          "family": "conv",
+          "kernel_name": "irhash_conv_942_a_N1H8W8C16_K32Y3X3_t64x32x16_w2x2_a16x16x16_mem_default",
+          "sha256": "46c25343a58ddfc5652ecc198be65bc6469e1700eceacea5af7756ee21e9db8f",
+          "status": "ok"
+        },
+        "conv/gfx950/n1h8c16k32r3": {
+          "arch": "gfx950",
+          "bytes": 23299,
+          "family": "conv",
+          "kernel_name": "irhash_conv_950_a_N1H8W8C16_K32Y3X3_t64x64x32_w2x2_a32x32x16_compv4_cshuffle",
+          "sha256": "0f53461698c0f352825462756c3d1e88f1aef3e5119c15cf575d6d944ecbd9d5",
+          "status": "ok"
+        },
+        "conv/gfx950/n1h8c16k32r3/basic_cshuffle": {
+          "arch": "gfx950",
+          "bytes": 50538,
+          "family": "conv",
+          "kernel_name": "irhash_conv_950_basic_b_N1H8W8C16_K32Y3X3_t64x64x32_w2x2_a32x32x16_basic_cshuffle",
+          "sha256": "b30fed8bd47d12db2a05694a4a0d02338898461bf76d9864468c04d1f902e533",
+          "status": "ok"
+        },
+        "conv/gfx950/n1h8c16k32r3/basic_default": {
+          "arch": "gfx950",
+          "bytes": 64379,
+          "family": "conv",
+          "kernel_name": "irhash_conv_950_basic_a_N1H8W8C16_K32Y3X3_t64x64x32_w2x2_a32x32x16_basic_default",
+          "sha256": "a0b6acb3748dae3ee5e3961503cb12b7a08bbf03d232f7baf24b726a0ba74bd3",
+          "status": "ok"
+        },
+        "conv/gfx950/n2h16c32k32r1": {
+          "arch": "gfx950",
+          "bytes": 27051,
+          "family": "conv",
+          "kernel_name": "irhash_conv_950_b_N2H16W16C32_K32Y1X1_t64x32x16_w2x2_a16x16x16_mem_default",
+          "sha256": "5a11a7d4cb0c58289e579662429dbcb9cf87217fabd408f621ccaeb7255b3a24",
+          "status": "ok"
+        },
+        "conv_wgrad/gfx1151/n1h8c16k32r3": {
+          "arch": "gfx1151",
+          "bytes": 78701,
+          "family": "conv_wgrad",
+          "kernel_name": "irhash_wgrad_1151_a_N1H8W8C16_K32Y3X3_t32x32x16_w2x1_a16x16x16_mem_default",
+          "sha256": "01b7f7b79c3487f887dd830d167f0da1470f37b3796e2c9ead7b12f7d6077c66",
+          "status": "ok"
+        },
+        "conv_wgrad/gfx1201/n1h8c16k32r3": {
+          "arch": "gfx1201",
+          "bytes": 72294,
+          "family": "conv_wgrad",
+          "kernel_name": "irhash_wgrad_1201_a_N1H8W8C16_K32Y3X3_t32x32x16_w2x1_a16x16x16_mem_default",
+          "sha256": "88bfdb7ed49fcbb052652cd10809215ed9fa17dc3aaf4f5436d992bffb535d35",
+          "status": "ok"
+        },
+        "conv_wgrad/gfx90a/n1h8c16k32r3": {
+          "arch": "gfx90a",
+          "bytes": 34832,
+          "family": "conv_wgrad",
+          "kernel_name": "irhash_wgrad_90a_a_N1H8W8C16_K32Y3X3_t64x32x16_w2x2_a16x16x16_mem_default",
+          "sha256": "913d71801ad850db4549a08ec31e6db0bd775b6224d4b739962384f033fd4f9a",
+          "status": "ok"
+        },
+        "conv_wgrad/gfx942/n1h8c16k32r3": {
+          "arch": "gfx942",
+          "bytes": 34832,
+          "family": "conv_wgrad",
+          "kernel_name": "irhash_wgrad_942_a_N1H8W8C16_K32Y3X3_t64x32x16_w2x2_a16x16x16_mem_default",
+          "sha256": "09e2bf1d2f0b96d27f7578be8784f956f12041edeef1bab50c798f0a61eac7de",
+          "status": "ok"
+        },
+        "conv_wgrad/gfx950/n1h8c16k32r3": {
+          "arch": "gfx950",
+          "bytes": 73415,
+          "family": "conv_wgrad",
+          "kernel_name": "irhash_wgrad_950_a_N1H8W8C16_K32Y3X3_t64x64x32_w2x2_a32x32x16_mem_default",
+          "sha256": "12b532cc2e565fe2102e18d610f9879175ac66d4a0a38bfa998772e96bdf5bd7",
+          "status": "ok"
+        },
+        "conv_wgrad/gfx950/n1h8c16k32r3_spk4": {
+          "arch": "gfx950",
+          "bytes": 29486,
+          "family": "conv_wgrad",
+          "kernel_name": "irhash_wgrad_950_spk4_N1H8W8C16_K32Y3X3_t64x32x16_w2x2_a16x16x16_mem_default_spk4",
+          "sha256": "8ece69f0bcafc71288ba4c78df4d3a111a1a15155f13230e56907a4c7f298536",
+          "status": "ok"
+        },
+        "conv_wgrad/gfx950/n2h16c32k32r1": {
+          "arch": "gfx950",
+          "bytes": 30964,
+          "family": "conv_wgrad",
+          "kernel_name": "irhash_wgrad_950_b_N2H16W16C32_K32Y1X1_t64x32x16_w2x2_a16x16x16_mem_default",
+          "sha256": "9641f62c84d951c776870d7f7f44cea99e0c19720a2ac061fcac173de776012c",
+          "status": "ok"
+        },
+        "deep/common_gfx950_wt16/h16w16_k32": {
+          "arch": "gfx950",
+          "bytes": 53436,
+          "family": "deep_fused_conv",
+          "kernel_name": "irhash_deep_gfx950_wt16_N1H16W16C16_K32Y3X3_t64x32x16_w2x1_a16x16x16_mem_cshuffle_epi_relu",
+          "sha256": "ca7477119474aa8ea0ea70089be478ed0a6f6be04e4d5cda85257a142157d7d4",
+          "status": "ok"
+        },
+        "deep/common_gfx950_wt16/h24w24_k32": {
+          "arch": "gfx950",
+          "bytes": 53485,
+          "family": "deep_fused_conv",
+          "kernel_name": "irhash_deep_gfx950_wt16b_N1H24W24C16_K32Y3X3_t64x32x16_w2x1_a16x16x16_mem_cshuffle_epi_relu",
+          "sha256": "871fb9dce54a3dc8744c792faaadc88635965c89a481f6d0de81d9b1fac3e680",
+          "status": "ok"
+        },
+        "deep/gfx1151/native_h16w16": {
+          "arch": "gfx1151",
+          "bytes": 112152,
+          "family": "deep_fused_conv",
+          "kernel_name": "rocke_gfx1151_deep_fused_conv_pool_N1H16W16C16_K32Y3X3_K132_pool2x2_s2x2_t64x32_pt4x4_w4x2_wmma16x16x16_directa_nativeiu8_i8i4_realquant",
+          "sha256": "fcf612ac9a9ea72bc36e7f9f0cb0a0f72f0b6f9a2b8341ce25e8f1306a40a039",
+          "status": "ok"
+        },
+        "deep/gfx1151/native_h24w24": {
+          "arch": "gfx1151",
+          "bytes": 112153,
+          "family": "deep_fused_conv",
+          "kernel_name": "rocke_gfx1151_deep_fused_conv_pool_N1H24W24C16_K32Y3X3_K132_pool2x2_s2x2_t64x32_pt4x4_w4x2_wmma16x16x16_directa_nativeiu8_i8i4_realquant",
+          "sha256": "b9633b0f9451a24bcc8726b0e8ea5fd853414631c769ba12afe5f1e5e9238169",
+          "status": "ok"
+        },
+        "deep/gfx11_generic/native_h16w16": {
+          "arch": "gfx11-generic",
+          "bytes": 112152,
+          "family": "deep_fused_conv",
+          "kernel_name": "rocke_gfx1151_deep_fused_conv_pool_N1H16W16C16_K32Y3X3_K132_pool2x2_s2x2_t64x32_pt4x4_w4x2_wmma16x16x16_directa_nativeiu8_i8i4_realquant",
+          "sha256": "fcf612ac9a9ea72bc36e7f9f0cb0a0f72f0b6f9a2b8341ce25e8f1306a40a039",
+          "status": "ok"
+        },
+        "deep/gfx1201/h16w16_k32": {
+          "arch": "gfx1201",
+          "bytes": 72597,
+          "family": "deep_fused_conv",
+          "kernel_name": "rocke_gfx1201_deep_fused_conv_pool_N1H16W16C16_K32Y3X3_t64x32x16_w2x1_a16x16x16_mem_default_epi_relu",
+          "sha256": "e880a635284b99c1a8313a7b91f8f94720ab4b17be34fbfe4edada66329c601e",
+          "status": "ok"
+        },
+        "deep/gfx1201/h24w24_k32": {
+          "arch": "gfx1201",
+          "bytes": 72598,
+          "family": "deep_fused_conv",
+          "kernel_name": "rocke_gfx1201_deep_fused_conv_pool_N1H24W24C16_K32Y3X3_t64x32x16_w2x1_a16x16x16_mem_default_epi_relu",
+          "sha256": "99abe59745195c7ce58aefc20af95879d242dd99a4e849636a4c5ee32aaa779e",
+          "status": "ok"
+        },
+        "deep/gfx950/h16w16_k32": {
+          "arch": "gfx950",
+          "bytes": 32285,
+          "family": "deep_fused_conv",
+          "kernel_name": "rocke_gfx950_deep_fused_conv_pool_N1H16W16C16_K32Y3X3_t64x32x16_w2x1_a32x32x16_mem_cshuffle_epi_relu",
+          "sha256": "e4049b4033ca3fa0b6d00e9e42e260d38e3975533c613fff8e96f45711ca11c8",
+          "status": "ok"
+        },
+        "deep/gfx950/h24w24_k32": {
+          "arch": "gfx950",
+          "bytes": 32289,
+          "family": "deep_fused_conv",
+          "kernel_name": "rocke_gfx950_deep_fused_conv_pool_N1H24W24C16_K32Y3X3_t64x32x16_w2x1_a32x32x16_mem_cshuffle_epi_relu",
+          "sha256": "35bcd9ab9330e6a1b7eb5d7d51bba466e0264e4828711b4516a8da1d40be60fe",
+          "status": "ok"
+        },
+        "fused_moe/gfx950/gather_h128": {
+          "arch": "gfx950",
+          "bytes": 1808,
+          "family": "moe",
+          "kernel_name": "irhash_fused_moe_gather_gather_T32_E8_K2_H128_I256_f16_b128_v4",
+          "sha256": "eb4d8469653a9506b8168ad56bebdbe535d971482e7f0c5d28fde7e746155b37",
+          "status": "ok"
+        },
+        "fused_moe/gfx950/reduce_h128": {
+          "arch": "gfx950",
+          "bytes": 2213,
+          "family": "moe",
+          "kernel_name": "irhash_fused_moe_reduce_reduce_T32_E8_K2_H128_I256_f16_b128_v4",
+          "sha256": "1bcf852141db143177dda92ba12c2266a88980f37f89372581fbb628267f0b66",
+          "status": "ok"
+        },
+        "fused_moe/gfx950/silu_i256": {
+          "arch": "gfx950",
+          "bytes": 2959,
+          "family": "moe",
+          "kernel_name": "irhash_fused_moe_silu_silu_mul_T32_E8_K2_H128_I256_f16_b128_v4",
+          "sha256": "4cb223b0dd399407235925ab78e804e5e9885eee8eb4a34279bd4bd552957ada",
+          "status": "ok"
+        },
+        "gemm/gfx1151/t32x32x16": {
+          "arch": "gfx1151",
+          "bytes": 20310,
+          "family": "gemm",
+          "kernel_name": "irhash_gemm_1151_a_fp16_t32x32x16_w2x2x1_wt16x16x16_mem_intrawave_default_pad",
+          "sha256": "9de9a2b40af45bd2097a9b648d76f3641161b83e38d53a83682f9ffabf202015",
+          "status": "ok"
+        },
+        "gemm/gfx1151/t64x32x16": {
+          "arch": "gfx1151",
+          "bytes": 55040,
+          "family": "gemm",
+          "kernel_name": "irhash_gemm_1151_b_fp16_t64x32x16_w2x1x1_wt16x16x16_mem_intrawave_default_pad",
+          "sha256": "7118754b22d6eeb1eefeeeaae4c7a9912fb6ea0eb82fe47f35123aca5ceeaa2b",
+          "status": "ok"
+        },
+        "gemm/gfx1201/t32x32x16": {
+          "arch": "gfx1201",
+          "bytes": 16104,
+          "family": "gemm",
+          "kernel_name": "irhash_gemm_1201_a_fp16_t32x32x16_w2x2x1_wt16x16x16_mem_intrawave_default_pad",
+          "sha256": "704cfc383b7531093c1638258552af60ae282abc4b3c0e462a45f4628bb26397",
+          "status": "ok"
+        },
+        "gemm/gfx1201/t64x32x16": {
+          "arch": "gfx1201",
+          "bytes": 46827,
+          "family": "gemm",
+          "kernel_name": "irhash_gemm_1201_b_fp16_t64x32x16_w2x1x1_wt16x16x16_mem_intrawave_default_pad",
+          "sha256": "4602cb57a8b57916659d91de9dd76756616541649600d7c8596d4073c39f48c4",
+          "status": "ok"
+        },
+        "gemm/gfx1250/t32x32x32": {
+          "arch": "gfx1250",
+          "bytes": 26574,
+          "family": "gemm",
+          "kernel_name": "irhash_gemm_1250_a_fp16_t32x32x32_w2x2x1_wt16x16x32_mem_intrawave_default_pad",
+          "sha256": "ae485165ef0f4b6061839695443568567b958a9644f17b5937772e4eba7bd2c0",
+          "status": "ok"
+        },
+        "gemm/gfx1250/t64x32x32": {
+          "arch": "gfx1250",
+          "bytes": 75610,
+          "family": "gemm",
+          "kernel_name": "irhash_gemm_1250_b_fp16_t64x32x32_w2x1x1_wt16x16x32_mem_intrawave_default_pad",
+          "sha256": "1bc884131b61b51b7b19806ef8ab9ca8dd7d82901c1d0abe9242671c93aaa5f3",
+          "status": "ok"
+        },
+        "gemm/gfx90a/t128x128x16": {
+          "arch": "gfx90a",
+          "bytes": 89314,
+          "family": "gemm",
+          "kernel_name": "irhash_gemm_90a_b_fp16_t128x128x16_w2x2x1_wt32x32x8_compv4_intrawave_cshuffle_pad",
+          "sha256": "908a474777c1597c8b8916dfe81f325cfe48775351e46f229de1af224a0dffcb",
+          "status": "ok"
+        },
+        "gemm/gfx90a/t64x64x16": {
+          "arch": "gfx90a",
+          "bytes": 25266,
+          "family": "gemm",
+          "kernel_name": "irhash_gemm_90a_a_fp16_t64x64x16_w2x2x1_wt16x16x16_mem_intrawave_default_pad",
+          "sha256": "24e533210b8c4491712e900406c281f7eb8fe15dc387d7e12b00009d56d5c8ff",
+          "status": "ok"
+        },
+        "gemm/gfx942/t128x128x16": {
+          "arch": "gfx942",
+          "bytes": 89314,
+          "family": "gemm",
+          "kernel_name": "irhash_gemm_942_b_fp16_t128x128x16_w2x2x1_wt32x32x8_compv4_intrawave_cshuffle_pad",
+          "sha256": "76021c3e815aef173e4d17663a3283051355500467549cdc73e7ccc00dfd1847",
+          "status": "ok"
+        },
+        "gemm/gfx942/t64x64x16": {
+          "arch": "gfx942",
+          "bytes": 25266,
+          "family": "gemm",
+          "kernel_name": "irhash_gemm_942_a_fp16_t64x64x16_w2x2x1_wt16x16x16_mem_intrawave_default_pad",
+          "sha256": "9140d3a20af35dd082903dfe1db8b7b58ff906a2aa1dc077cb5a589767fe6566",
+          "status": "ok"
+        },
+        "gemm/gfx950/t128x128x32": {
+          "arch": "gfx950",
+          "bytes": 94303,
+          "family": "gemm",
+          "kernel_name": "irhash_gemm_950_a_fp16_t128x128x32_w2x2x1_wt32x32x16_compv4_intrawave_cshuffle_pad",
+          "sha256": "e636915286c0c66a1925274dfcecb3775620b817bd247b762fdc4c7584c42baf",
+          "status": "ok"
+        },
+        "gemm/gfx950/t128x128x32/cshuffle_no_alias": {
+          "arch": "gfx950",
+          "bytes": 90019,
+          "family": "gemm",
+          "kernel_name": "irhash_gemm_950_a_noalc_fp16_t128x128x32_w2x2x1_wt32x32x16_compv4_intrawave_cshuffle_pad_noalc",
+          "sha256": "5ef0e672c62be29dfc55c156c111eade24002744a9ae6ff38cec0f4f079f6abb",
+          "status": "ok"
+        },
+        "gemm/gfx950/t64x128x32": {
+          "arch": "gfx950",
+          "bytes": 44743,
+          "family": "gemm",
+          "kernel_name": "irhash_gemm_950_b_fp16_t64x128x32_w2x2x1_wt16x16x32_mem_intrawave_default_pad",
+          "sha256": "f6f9ba500d6695ca21a1711c63e6cea4ad98875d8a478adfac96269c7005cee1",
+          "status": "ok"
+        },
+        "moe_sort/gfx1151/hist_t32_k2_e8": {
+          "arch": "gfx1151",
+          "bytes": 3022,
+          "family": "moe",
+          "kernel_name": "irhash_moe_sort_histogram_hist_T32_K2_E8_b128",
+          "sha256": "32da3faf5c92a075224f1328ff83369eb7deef99dee64de27d9506ff671cdf68",
+          "status": "ok"
+        },
+        "moe_sort/gfx1201/hist_t32_k2_e8": {
+          "arch": "gfx1201",
+          "bytes": 3022,
+          "family": "moe",
+          "kernel_name": "irhash_moe_sort_histogram_hist_T32_K2_E8_b128",
+          "sha256": "32da3faf5c92a075224f1328ff83369eb7deef99dee64de27d9506ff671cdf68",
+          "status": "ok"
+        },
+        "moe_sort/gfx942/hist_t32_k2_e8": {
+          "arch": "gfx942",
+          "bytes": 3026,
+          "family": "moe",
+          "kernel_name": "irhash_moe_sort_histogram_hist_T32_K2_E8_b128",
+          "sha256": "d4e0cba2f4ae527b14f144c57833521bb5b4b46ab8034a6acb239776eaa1077e",
+          "status": "ok"
+        },
+        "moe_sort/gfx950/hist_t32_k2_e8": {
+          "arch": "gfx950",
+          "bytes": 3026,
+          "family": "moe",
+          "kernel_name": "irhash_moe_sort_histogram_hist_T32_K2_E8_b128",
+          "sha256": "d4e0cba2f4ae527b14f144c57833521bb5b4b46ab8034a6acb239776eaa1077e",
+          "status": "ok"
+        },
+        "moe_sort/gfx950/scan_t64_k2_e16": {
+          "arch": "gfx950",
+          "bytes": 2966,
+          "family": "moe",
+          "kernel_name": "irhash_moe_sort_scan_scan_T64_K2_E16_b128",
+          "sha256": "b53557bdba21e352ae303470af1e9854419a275a4190c88f4a42891001d12b5d",
+          "status": "ok"
+        },
+        "moe_sort/gfx950/scatter_t64_k2_e16": {
+          "arch": "gfx950",
+          "bytes": 2894,
+          "family": "moe",
+          "kernel_name": "irhash_moe_sort_scatter_scatter_T64_K2_E16_b128",
+          "sha256": "d7cbeb824b95cbe046b4a5b9cc7f40c5be517afe5106082b9f30dcebdae19619",
+          "status": "ok"
+        }
+      },
+      "expected_failures": {
+        "attention/gfx942/2d_bf16_d128_b64": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention/gfx942/2d_fp16_d128_b64": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention/gfx942/3d_bf16_d128_b64": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention/gfx942/3d_fp16_d128_b64": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention/gfx942/reduce_bf16_d128": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention/gfx942/reduce_fp16_d128": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention/gfx950/2d_bf16_d128_b64": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention/gfx950/2d_fp16_d128_b64": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention/gfx950/2d_fp16_d128_b64_alibi": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention/gfx950/2d_fp16_d128_b64_softcap": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention/gfx950/3d_bf16_d128_b64": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention/gfx950/3d_fp16_d128_b64": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention/gfx950/reduce_bf16_d128": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention/gfx950/reduce_fp16_d128": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_d256/gfx942/4warp_gqa": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_d256/gfx950/pad_interleave": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/bn128_sq512": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/default_causal_sq512": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/fp16_h64_sq512": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/lazy_off_sq512": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/noncausal_sq512": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/persist_h64_sq512": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/persist_hkvmaj_sq512": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/persist_intl_sq512": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/persist_lazy_off_sq512": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/persist_qbmaj_sq512": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/persist_ragged_sq500": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/persist_swa_w128_sq512": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/persistent_causal_sq512": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/ragged_causal_sq500": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/ragged_full_sq500": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/ragged_h64_sq500": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/swa_w128_sq512": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        },
+        "attention_dense/gfx950/varlen_sq512": {
+          "message": "No module named 'kernels'",
+          "type": "ModuleNotFoundError"
+        }
+      },
+      "summary": {
+        "arches": {
+          "gfx11-generic": 1,
+          "gfx1151": 8,
+          "gfx1201": 7,
+          "gfx1250": 2,
+          "gfx90a": 4,
+          "gfx942": 5,
+          "gfx950": 20
+        },
+        "expected_failures": 34,
         "families": {
           "conv": 9,
           "conv_wgrad": 7,
