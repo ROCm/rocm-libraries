@@ -31,7 +31,7 @@ import json
 import math
 import sys
 import traceback
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -52,14 +52,21 @@ class DecodeShape:
     block_size: int
     dtype: str
     label: str
+    use_sinks: bool = False
+    sliding_window: int = 0
 
     @property
     def signature(self) -> str:
-        return (
+        sig = (
             f"b{self.batch}_sq{self.seqlen_q}_sk{self.seqlen_k}"
             f"_nhq{self.num_query_heads}_nhk{self.num_kv_heads}"
             f"_hd{self.head_size}_bs{self.block_size}_{self.dtype}"
         )
+        if self.use_sinks:
+            sig += "_sinks"
+        if self.sliding_window:
+            sig += f"_sw{self.sliding_window}"
+        return sig
 
 
 def load_decode_shapes(paths: List[Path]) -> List[DecodeShape]:
@@ -94,6 +101,8 @@ def load_decode_shapes(paths: List[Path]) -> List[DecodeShape]:
                     block_size=int(merged["block_size"]),
                     dtype=str(merged.get("dtype", "bf16")),
                     label=str(merged.get("label", f"kv{merged['seqlen_k']}")),
+                    use_sinks=bool(merged.get("use_sinks", False)),
+                    sliding_window=int(merged.get("sliding_window", 0)),
                 )
                 shapes.append(shape)
     return shapes
@@ -174,6 +183,11 @@ def _make_inputs(
         if use_qq_bias
         else None
     )
+    sinks = (
+        torch.randn(shape.num_query_heads, dtype=dtype, device="cuda") * 0.1
+        if shape.use_sinks
+        else None
+    )
 
     return dict(
         q=q,
@@ -186,6 +200,7 @@ def _make_inputs(
         softcap=softcap,
         alibi_slopes=alibi_slopes,
         qq_bias=qq_bias,
+        sinks=sinks,
     )
 
 
@@ -203,6 +218,7 @@ def _run_triton(
 
     hip_stream = _bench_stream_handle()
     out = torch.empty_like(data["q"])
+    window_size = (shape.sliding_window - 1, 0) if shape.sliding_window else (-1, -1)
 
     def call_once():
         tri(
@@ -216,7 +232,7 @@ def _run_triton(
             max_seqlen_k=shape.seqlen_k,
             softmax_scale=data["scale"],
             causal=True,
-            window_size=(-1, -1),
+            window_size=window_size,
             block_table=data["block_table"],
             softcap=data["softcap"],
             q_descale=None,
@@ -224,7 +240,7 @@ def _run_triton(
             v_descale=None,
             alibi_slopes=data["alibi_slopes"],
             qq_bias=data["qq_bias"],
-            sinks=None,
+            sinks=data["sinks"],
         )
 
     try:
@@ -271,6 +287,8 @@ def _run_dsl(shape: DecodeShape, data: dict, num_sms: int, *, warmup: int, iters
             dtype=shape.dtype,
             kv_block_size=shape.block_size,
             num_sms=num_sms,
+            use_sinks=shape.use_sinks,
+            sliding_window=shape.sliding_window,
         )
         result = dispatch_attention(req)
         path = result.spec.path  # "2d" or "3d"
@@ -290,6 +308,8 @@ def _run_dsl(shape: DecodeShape, data: dict, num_sms: int, *, warmup: int, iters
             softcap=data["softcap"],
             use_alibi=data["alibi_slopes"] is not None,
             use_qq_bias=data["qq_bias"] is not None,
+            use_sinks=data["sinks"] is not None,
+            sliding_window=shape.sliding_window,
             num_sms=num_sms,
         )
 
@@ -305,6 +325,7 @@ def _run_dsl(shape: DecodeShape, data: dict, num_sms: int, *, warmup: int, iters
                 softmax_scale=data["scale"],
                 block_table=data["block_table"],
                 softcap=data["softcap"],
+                sinks=data["sinks"],
                 alibi_slopes=data["alibi_slopes"],
                 qq_bias=data["qq_bias"],
                 backend=run_backend,
@@ -324,9 +345,9 @@ def _run_aoTriton(
     """Time AOTriton flash SDPA for decode. Returns ms or None on failure.
 
     Reconstructs dense [B, H, S_k, D] KV from the paged cache outside the
-    timed region. Returns None (skipped) when any bias operand is active
-    (softcap, alibi_slopes, or qq_bias) because
-    scaled_dot_product_attention does not support them.
+    timed region. Returns None (skipped) when any operand it cannot express
+    is active (softcap, alibi_slopes, qq_bias, attention sinks, or a sliding
+    window) because scaled_dot_product_attention does not support them.
     """
     import torch
     from torch.nn.attention import SDPBackend, sdpa_kernel
@@ -361,10 +382,16 @@ def _run_aoTriton(
         alibi_slopes = data["alibi_slopes"]
         softcap = data["softcap"]
 
-        # scaled_dot_product_attention does not support alibi, qq_bias or
-        # softcap
-        use_bias = alibi_slopes is not None or data["qq_bias"] is not None or softcap
-        if use_bias:
+        # scaled_dot_product_attention does not support alibi, qq_bias,
+        # softcap, attention sinks, or a sliding window.
+        unsupported = (
+            alibi_slopes is not None
+            or data["qq_bias"] is not None
+            or softcap
+            or shape.use_sinks
+            or shape.sliding_window > 0
+        )
+        if unsupported:
             return None
 
         # Probe eligibility.
@@ -459,6 +486,10 @@ def _flydsl_supported(shape: DecodeShape) -> tuple[bool, str]:
         return False, f"head_size={shape.head_size} (need 64 or 128)"
     if shape.dtype not in ("bf16", "fp16"):
         return False, f"dtype={shape.dtype} (need bf16 or fp16)"
+    if shape.use_sinks:
+        return False, "sinks unsupported"
+    if shape.sliding_window:
+        return False, "sliding_window unsupported"
     return True, ""
 
 
@@ -633,35 +664,9 @@ def main() -> int:
 
     shapes = load_decode_shapes(args.shapes)
     if args.dtype is not None:
-        shapes = [
-            DecodeShape(
-                batch=s.batch,
-                seqlen_q=s.seqlen_q,
-                seqlen_k=s.seqlen_k,
-                num_query_heads=s.num_query_heads,
-                num_kv_heads=s.num_kv_heads,
-                head_size=s.head_size,
-                block_size=s.block_size,
-                dtype=args.dtype,
-                label=s.label,
-            )
-            for s in shapes
-        ]
+        shapes = [replace(s, dtype=args.dtype) for s in shapes]
     if args.batch is not None:
-        shapes = [
-            DecodeShape(
-                batch=args.batch,
-                seqlen_q=s.seqlen_q,
-                seqlen_k=s.seqlen_k,
-                num_query_heads=s.num_query_heads,
-                num_kv_heads=s.num_kv_heads,
-                head_size=s.head_size,
-                block_size=s.block_size,
-                dtype=s.dtype,
-                label=s.label,
-            )
-            for s in shapes
-        ]
+        shapes = [replace(s, batch=args.batch) for s in shapes]
     if args.limit is not None:
         shapes = shapes[: args.limit]
 
@@ -794,6 +799,8 @@ def main() -> int:
                 "head_size": shape.head_size,
                 "block_size": shape.block_size,
                 "dtype": shape.dtype,
+                "use_sinks": shape.use_sinks,
+                "sliding_window": shape.sliding_window,
                 "triton_ms": tri_ms,
                 "aoTriton_ms": aot_ms,
                 "dsl": {str(sms): dsl_results[sms] for sms in args.num_sms_sweep},
