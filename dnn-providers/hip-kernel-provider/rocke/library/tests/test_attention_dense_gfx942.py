@@ -137,7 +137,8 @@ def test_supports_rejects_non_gfx942():
 @pytest.mark.parametrize(
     "kw,marker",
     [
-        (dict(persistent=True, num_persistent=228), "persistent"),
+        # persistent is NOT here anymore -- it is supported (P4). See the persistent
+        # build/decode tests below.
         (dict(varlen=True), "varlen"),
         (dict(seqlen_q=1000, seqlen_kv=1000, ragged=True), "ragged"),
         (dict(sliding_window=64), "sliding_window"),
@@ -293,14 +294,14 @@ def test_grid_covers_every_query_row_and_head():
         assert (ghq, gb) == (hq, batch)
 
 
-def test_persistent_grid_geometry_is_available_but_unbuildable():
-    """``attention_dense_grid`` still describes the persistent grid (P4 will use it),
-    but the body cannot be built for it yet -- keep those two facts in sync."""
+def test_persistent_grid_geometry_and_build():
+    """P4: ``attention_dense_grid`` is the 1-D ``num_persistent`` grid, and the
+    persistent body now BUILDS (was rejected as P4 in P0-P3). Keep those in sync."""
     sp = _spec(persistent=True, num_persistent=228)
     assert attention_dense_grid(sp) == (228, 1, 1)
-    assert not supports_attention_dense(sp, arch="gfx942")[0]
-    with pytest.raises(ValueError, match="persistent is P4"):
-        build_attention_dense(sp, arch="gfx942")
+    ok, _ = supports_attention_dense(sp, arch="gfx942")
+    assert ok
+    assert build_attention_dense(sp, arch="gfx942") is not None
 
 
 def test_extents_just_under_the_32_bit_limit_are_accepted():
@@ -609,3 +610,95 @@ def test_dispatch_applies_gfx942_waves_per_eu_tuning_and_leaves_gfx950_alone():
     kernel = build_attention_dense(tuned, arch="gfx942")
     assert kernel.attrs.get("waves_per_eu") == 4
     assert p0_kernel_name(tuned).endswith("_wpe4")
+
+
+# --------------------------------------------------------------------------- #
+# P4 persistent grid-stride variant
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize("dtype", ["fp16", "bf16"])
+@pytest.mark.parametrize("d", [64, 128])
+@pytest.mark.parametrize("decode", ["qb_major", "hkv_major"])
+def test_persistent_builds_for_both_decodes(dtype, d, decode):
+    """P4: the persistent grid-stride body builds for every in-scope config and both
+    work-decode orders. The decode is a build-time (Python) branch, so both must emit;
+    GPU numeric correctness (the decode bijection) is verified in the live cohort."""
+    spec = _spec(
+        head_size=d,
+        dtype=dtype,
+        persistent=True,
+        num_persistent=228,
+        persist_decode=decode,
+    )
+    ok, why = supports_attention_dense(spec, arch="gfx942")
+    assert ok, why
+    kernel = build_attention_dense(spec, arch="gfx942")
+    assert kernel is not None
+
+
+def test_persistent_kernel_name_carries_the_persist_tag():
+    """The persistent identity must be in the name: a persistent and a default spec
+    that agree on every other field compile to different binaries (different grid +
+    body), so a shared name would collide in the launcher/HSACO cache."""
+    default = _spec(head_size=128, dtype="fp16")
+    persist = _spec(head_size=128, dtype="fp16", persistent=True, num_persistent=304)
+    assert "persist304" in p0_kernel_name(persist)
+    assert "persist" not in p0_kernel_name(default)
+    assert p0_kernel_name(persist) != p0_kernel_name(default)
+
+
+def test_persistent_and_default_share_one_inner_body():
+    """The refactor factored the per-work-item compute into a single ``_run_work_item``
+    used by both grids, so the two bodies must contain the SAME per-tile op mix (the
+    32x32x8 QK/PV MFMAs and the softmax exps). Persistent only adds the outer
+    grid-stride ``scf.for`` and the work decode; it must not drop or duplicate the
+    inner MFMA/exp work relative to the default grid."""
+    default = _spec(head_size=128, dtype="fp16")
+    persist = _spec(head_size=128, dtype="fp16", persistent=True, num_persistent=304)
+    kd = build_attention_dense(default, arch="gfx942")
+    kp = build_attention_dense(persist, arch="gfx942")
+    nd = [n for op in kd.body.ops for n in _walk_op_names(op)]
+    npp = [n for op in kp.body.ops for n in _walk_op_names(op)]
+    # same count of the heavy inner ops (per-tile MFMA + softmax exp), since the inner
+    # loop body is shared verbatim.
+    for op in ("math.exp2_fast", "arith.cast_f32_to"):
+        assert nd.count(op) == npp.count(op), (
+            f"{op}: default={nd.count(op)} persistent={npp.count(op)} -- the shared "
+            "inner body diverged"
+        )
+    # persistent has exactly one MORE scf.for (the outer grid-stride loop).
+    assert npp.count("scf.for") == nd.count("scf.for") + 1
+
+
+def test_dispatch_persistent_auto_turns_on_for_large_sq_only():
+    """P4 dispatch: ``dense_persistent='auto'`` resolves to persistent once the work
+    (nqb*Hq*B) fills the gfx942 persistent grid (num_persistent defaulted to 304), and
+    stays off for small Sq. Explicit on/off are honored; gfx950 keeps its 256 default
+    and is otherwise untouched."""
+    from dispatch.attention import _dense_spec, AttentionRequest
+
+    def _req(sq, arch, persist="auto"):
+        return AttentionRequest(
+            batch=1,
+            nhead_q=16,
+            nhead_k=4,
+            seqlen_q=sq,
+            seqlen_k=sq,
+            hdim_q=128,
+            hdim_v=128,
+            arch=arch,
+            mask_type=1,
+            dtype="fp16",
+            algorithm="attention_dense",
+            dense_persistent=persist,
+        )
+
+    # gfx942 num_persistent defaulted to the MI300X CU count.
+    assert _dense_spec(_req(8192, "gfx942")).num_persistent == 304
+    # auto: on for large Sq (nqb*Hq = 32*16 = 512 >= 304), off for small.
+    assert _dense_spec(_req(8192, "gfx942")).persistent is True
+    assert _dense_spec(_req(2048, "gfx942")).persistent is False  # 8*16 = 128 < 304
+    # explicit modes honored.
+    assert _dense_spec(_req(8192, "gfx942", "off")).persistent is False
+    assert _dense_spec(_req(256, "gfx942", "on")).persistent is True
+    # gfx950 untouched: keeps the 256 default (not the gfx942 304 override).
+    assert _dense_spec(_req(8192, "gfx950")).num_persistent == 256

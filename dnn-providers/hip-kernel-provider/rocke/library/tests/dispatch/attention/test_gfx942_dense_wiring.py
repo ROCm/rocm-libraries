@@ -20,7 +20,6 @@ off the default gfx942 path.
 
 from __future__ import annotations
 
-import dataclasses
 import unittest
 
 import kernels.common.attention_unified as au
@@ -134,21 +133,25 @@ class TestGfx942DenseSupportGates(unittest.TestCase):
 
 
 class TestGfx942DensePersistent(unittest.TestCase):
-    def test_auto_persistent_is_resolved_off_and_accepted(self):
-        """'auto' would turn persistent ON at this size; the candidate resolves it to
-        off (persistent is P4) rather than rejecting the request."""
+    def test_auto_persistent_turns_on_for_large_sq(self):
+        """Post-P4 (ledger row 16): 'auto' turns the persistent grid-stride variant
+        ON once there is enough work to fill the grid -- the large-Sq prefill
+        regime -- and the request is accepted."""
         with _Gfx942Arch():
-            ok, why = _candidate().supports(
-                _req(seqlen_q=8192, seqlen_k=8192, dense_persistent="auto")
-            )
+            req = _req(seqlen_q=8192, seqlen_k=8192, dense_persistent="auto")
+            ok, why = _candidate().supports(req)
             self.assertTrue(ok, why)
+            self.assertTrue(_dense_spec(req).persistent)
 
-    def test_explicit_persistent_on_is_rejected_not_downgraded(self):
-        """An explicit 'on' must NOT be silently answered with a default-grid kernel."""
+    def test_explicit_persistent_on_is_accepted_and_builds_persistent(self):
+        """Post-P4 the persistent variant ships, so an explicit 'on' is accepted
+        and yields a genuinely persistent spec -- never silently downgraded to a
+        default-grid kernel."""
         with _Gfx942Arch():
-            ok, why = _candidate().supports(_req(dense_persistent="on"))
-            self.assertFalse(ok)
-            self.assertIn("P4", why)
+            req = _req(dense_persistent="on")
+            ok, why = _candidate().supports(req)
+            self.assertTrue(ok, why)
+            self.assertTrue(_dense_spec(req).persistent)
 
 
 class TestGfx942DenseSpecIdentity(unittest.TestCase):
@@ -163,11 +166,13 @@ class TestGfx942DenseSpecIdentity(unittest.TestCase):
             self.assertEqual(len(names), 3, names)
 
     def test_support_implies_the_dispatched_spec_builds(self):
-        """The dispatch-level half of the supports/build contract."""
+        """The dispatch-level half of the supports/build contract: the spec the
+        dispatcher actually selects (persistent auto-on for this large-Sq shape,
+        post-P4) is exactly what the builder emits."""
         with _Gfx942Arch():
             req = _req()
             self.assertTrue(_candidate().supports(req)[0])
-            spec = _dense_spec(dataclasses.replace(req, dense_persistent="off"))
+            spec = _dense_spec(req)
             kd = build_attention_dense(spec, arch="gfx942")
             self.assertEqual(kd.name, dispatch_attention(req).spec.kernel_name_override)
 

@@ -344,6 +344,13 @@ def _dense_spec(req: OperatorRequest):
     nqb = (sq + _BLOCK_M - 1) // _BLOCK_M
     work = nqb * int(req.nhead_q) * int(req.batch)
     np = int(req.dense_num_persistent)
+    # gfx942 (AICK-1664 P4): default the persistent grid to the MI300X CU count (304)
+    # rather than the shared AttentionRequest default (256 = MI355X). Only when the
+    # caller left it at that default, so an explicit dense_num_persistent is respected.
+    # Drives BOTH the auto persistent decision (work >= np) and the grid size, so it
+    # is applied here before the mode branch. gfx950 keeps 256.
+    if req.arch == "gfx942" and np == 256:
+        np = 304
     mode = req.dense_persistent.strip().lower()
     if mode == "on":
         persistent = True
@@ -626,34 +633,19 @@ def _make_gfx942_attention_dense_candidate() -> KernelCandidate:
     ``algorithm="attention_dense"`` / ``spec_id="gfx942_attention_dense"``, so it never
     auto-overrides the generic unified_2d / dense_pipe paths.
 
-    PERFORMANCE CAVEAT: the P0 body is a CORRECTNESS baseline -- non-pipelined, with
-    an element-wise V read -- and is expected to be slower than the generic
-    ``attention_tiled_2d`` gfx942 kernel until the P1-P3 levers (conflict-free V,
-    exp2_fast, wide workgroups) land. Opt in for correctness or bring-up, not for
-    throughput.
+    Carries the AICK-1664 P1-P4 levers: conflict-free V (D128 fp16), exp2_fast +
+    fused rescale, per-config waves-per-eu occupancy tuning, and the P4 persistent
+    grid-stride variant (``dense_persistent='auto'`` turns it on once there is enough
+    work to fill the grid; ``num_persistent`` defaults to the MI300X CU count).
 
     Scope is delegated entirely to ``supports_attention_dense``, which rejects every
-    spec the builder cannot emit (persistent is P4; varlen / ragged / sliding-window
-    are later follow-ups; plus block_n, LDS-budget and 32-bit-extent limits). That
-    keeps ``support`` and ``build`` in agreement, so an out-of-scope request falls
-    through to another candidate instead of being selected and then failing to build.
+    spec the builder cannot emit (varlen / ragged / sliding-window are later
+    follow-ups; plus block_n, LDS-budget and 32-bit-extent limits). That keeps
+    ``support`` and ``build`` in agreement, so an out-of-scope request falls through
+    to another candidate instead of being selected and then failing to build.
     """
     spec_id = "gfx942_attention_dense"
     name = "attention_gfx942_dense"
-
-    def _p0_req(req: "AttentionRequest") -> "AttentionRequest":
-        """Resolve ``dense_persistent='auto'`` to 'off' for the P0 default-grid scope.
-
-        Only 'auto' is resolved. An EXPLICIT ``dense_persistent='on'`` is left intact
-        so ``supports_attention_dense`` rejects it (persistent is P4) rather than this
-        candidate silently launching a non-persistent kernel for a caller who asked
-        for the persistent one.
-        """
-        import dataclasses
-
-        if req.dense_persistent.strip().lower() == "auto":
-            return dataclasses.replace(req, dense_persistent="off")
-        return req
 
     def support(req: OperatorRequest) -> Tuple[bool, str]:
         errors = _request_errors(req)
@@ -673,7 +665,7 @@ def _make_gfx942_attention_dense_candidate() -> KernelCandidate:
         if int(req.sliding_window) or bool(req.use_sinks):
             return False, "attention_dense is dense (no sliding-window / sinks)"
         try:
-            spec = _dense_spec(_p0_req(req))
+            spec = _dense_spec(req)
         except ValueError as e:
             return False, str(e)
         ok, why = supports_attention_dense(spec, arch=req.arch)
@@ -689,7 +681,7 @@ def _make_gfx942_attention_dense_candidate() -> KernelCandidate:
         from kernels.gfx942.attention_dense import p0_kernel_name
 
         problem = _problem(req)
-        dense_spec = _dense_spec(_p0_req(req))
+        dense_spec = _dense_spec(req)
         return AttentionSpec(
             path="2d",
             head_size=problem.head_size,
