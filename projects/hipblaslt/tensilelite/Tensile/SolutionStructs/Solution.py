@@ -1628,6 +1628,98 @@ class Solution(collections.abc.Mapping):
     return divisorName
 
   ########################################
+  # PostLoopStoreInNll (PLSIN) eligibility gate -- factored out so it can run
+  # UNCONDITIONALLY. assignDerivedParameters short-circuits (returns early) for
+  # solutions loaded from pre-tuned logic files that carry
+  # AssignedDerivedParameters=True; those solutions predate PLSIN and lack the
+  # key entirely, so the original inline gate never ran for them and the fused
+  # store was never enabled on the shipped library. Running this here (both from
+  # the early-return branch and from the normal derivation path) makes PLSIN
+  # eligibility a deterministic function of the already-present solution/problem
+  # parameters, independent of whether the full derivation pass executed.
+  @staticmethod
+  def assignPostLoopStoreInNll(state):
+    # These two keys are absent on solutions tuned before PLSIN existed; default
+    # them (matching GlobalParameters.py) so the gate below can evaluate. The
+    # gate only ever AUTO-DISABLES (never enables something ineligible), so a
+    # defaulted True is safe -- every ineligible config is turned back to False.
+    if "PostLoopStoreInNll" not in state:
+      state["PostLoopStoreInNll"] = True
+    if "PLSINStoreMode" not in state:
+      state["PLSINStoreMode"] = "Weave"
+
+    isa = tuple(state["ISA"])
+
+    if state["PostLoopStoreInNll"]:
+      isFloat4 = state["ProblemType"]["DataTypeA"].isFloat4() or \
+                 state["ProblemType"]["DataTypeB"].isFloat4()
+      isgfx950 = isa[:2] == (9, 5)
+      destType = state["ProblemType"]["DestDataType"]
+      # The fused store is _emit16bitSubtilePairedStore: it only exists for a
+      # bf16/half dest with HPA on wave64, and not for the StreamK workspace
+      # (MultipleBuffer*) accumulation paths.
+      pairedStoreAvailable = (
+        (destType.isBFloat16() or destType.isHalf()) and
+        state["ProblemType"]["HighPrecisionAccumulate"] and
+        state["WavefrontSize"] != 32 and
+        state["_GlobalAccumulation"] not in ("MultipleBufferSingleKernel", "MultipleBuffer")
+      )
+      # Barrier-free-store precondition: only StoreRemapVectorWidth>0 puts an
+      # s_barrier *inside* the ds_bpermute paired store (LDS remap + barriers) and
+      # uses an entirely different store mechanism, so it stays excluded.
+      barrierFreeStore = (
+        state["StoreRemapVectorWidth"] == 0
+      )
+      # StreamK support: only the non-atomic reduction (SK3/4/5) is eligible.
+      streamKAtomicFree = not (state["StreamK"] and state["StreamKAtomic"])
+      # Spill tiles: MIWaveTile product > 64 spills accumulators into arch VGPRs
+      # and overflows the occ-1 budget under the fused store. MIWaveTile is only
+      # present for EnableMatrixInstruction solutions; guard the lookup.
+      miwt = state.get("MIWaveTile")
+      spillFree = bool(miwt) and len(miwt) == 2 and (miwt[0] * miwt[1] <= 64)
+      # Store-footprint fit: large asymmetric tiles (min>=4 and max>=14) overflow
+      # the arch-VGPR budget and emit out-of-range v>=256.
+      storeFitsVgpr = not (bool(miwt) and len(miwt) == 2 and
+                           min(miwt[0], miwt[1]) >= 4 and max(miwt[0], miwt[1]) >= 14)
+      # Overlap feasibility: the weave only weaves store-pairs with pair index >=
+      # weaveLA (default 4). numStorePairs = MIWT0*MIWT1//2; below the threshold no
+      # pair is woven so PLSIN is pure overhead. Keep in sync with LogicalScheduler.
+      WEAVE_LA_DEFAULT = 4
+      overlapPossible = bool(miwt) and len(miwt) == 2 and \
+                        (miwt[0] * miwt[1] // 2) > WEAVE_LA_DEFAULT
+      streamKFixupSafe = True
+      # MX-block-scaled fp4 extreme skews ([2,16]/[16,2]) overflow the 102-SGPR
+      # gfx9 ceiling; auto-disable just those.
+      mxBlockScaled = bool(state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"])
+      mxBlockScaleSgprFits = not (mxBlockScaled and bool(miwt) and len(miwt) == 2 and
+                                  min(miwt[0], miwt[1]) <= 2 and max(miwt[0], miwt[1]) >= 16)
+      if (not isFloat4) or \
+         (not state["UseSubtileImpl"]) or \
+         (not isgfx950) or \
+         (not state["EnableMatrixInstruction"]) or \
+         (state["PrefetchGlobalRead"] < 1) or \
+         (not state["BufferStore"]) or \
+         (not pairedStoreAvailable) or \
+         (not streamKAtomicFree) or \
+         (not barrierFreeStore) or \
+         (not spillFree) or \
+         (not storeFitsVgpr) or \
+         (not overlapPossible) or \
+         (not streamKFixupSafe) or \
+         (not mxBlockScaleSgprFits):
+        state["PostLoopStoreInNll"] = False
+
+    # PLSIN fuses the D store into the No-Load Loop, so it needs a structural NLL
+    # (PGR >= 1). Defensive re-check.
+    if state["PostLoopStoreInNll"] and state["PrefetchGlobalRead"] < 1:
+      state["PostLoopStoreInNll"] = False
+
+    # PLSINStoreMode only matters when PLSIN is on; canonicalize when disabled so
+    # non-PLSIN kernels are not split into spurious Weave/Lend name variants.
+    if not state.get("PostLoopStoreInNll", False):
+      state["PLSINStoreMode"] = "Weave"
+
+  ########################################
   # assign all derived parameters
   @staticmethod
   def assignDerivedParameters(
@@ -1669,6 +1761,11 @@ class Solution(collections.abc.Mapping):
 
     if "AssignedDerivedParameters" in state:
       if state["AssignedDerivedParameters"]:
+        # Pre-tuned solutions loaded from logic files short-circuit here before
+        # the PLSIN gate would normally run. Evaluate it explicitly so the fused
+        # store is enabled for eligible fp4 subtile kernels even though the rest
+        # of the derivation is (correctly) skipped for already-derived solutions.
+        Solution.assignPostLoopStoreInNll(state)
         return
     state["AssignedDerivedParameters"] = False
 
@@ -4456,155 +4553,10 @@ class Solution(collections.abc.Mapping):
 
     _disableUnsupportedRuntimeStaggerU(state)
 
-    # PostLoopStoreInNll optimization check (self-contained gate).
-    # OPT-OUT: the global default is True (see GlobalParameters.py); a solution
-    # must explicitly request PostLoopStoreInNll: False to skip this gate. The
-    # preconditions below auto-disable the feature (rather than reject) whenever
-    # a config the gate does not anticipate is ineligible, so unrelated configs
-    # are unaffected.
-    # Scope: fp4-input (MXFP4) + UseSubtileImpl only. Fuses the 16bit paired
-    # buffer_store_dwordx4 (sba=0 + sba=1) into the NLL. Auto-disable (do NOT
-    # reject) whenever any precondition fails so unrelated configs are unaffected.
-    # The small/medium-K restriction is enforced at RUNTIME (emitFusedStoreGuard's
-    # SizesSum <= maxK ceiling), not here, because the summation size K is a runtime
-    # problem dimension unknown at solution-derivation time; large-K problems fall
-    # through to the plain post-loop store within the same kernel.
-    if state["PostLoopStoreInNll"]:
-      isFloat4 = state["ProblemType"]["DataTypeA"].isFloat4() or \
-                 state["ProblemType"]["DataTypeB"].isFloat4()
-      isgfx950 = isa[:2] == (9, 5)
-      destType = state["ProblemType"]["DestDataType"]
-      # The fused store is _emit16bitSubtilePairedStore: it only exists for a
-      # bf16/half dest with HPA on wave64, and not for the StreamK workspace
-      # (MultipleBuffer*) accumulation paths.
-      pairedStoreAvailable = (
-        (destType.isBFloat16() or destType.isHalf()) and
-        state["ProblemType"]["HighPrecisionAccumulate"] and
-        state["WavefrontSize"] != 32 and
-        state["_GlobalAccumulation"] not in ("MultipleBufferSingleKernel", "MultipleBuffer")
-      )
-      # Barrier-free-store precondition: only StoreRemapVectorWidth>0 puts an
-      # s_barrier *inside* the ds_bpermute paired store (LDS remap + barriers) and
-      # uses an entirely different store mechanism, so it stays excluded. Bias /
-      # scaleAlphaVec / scaleAB-vector / activation are LDS-staged with their
-      # s_barriers *outside* the per-pair Phase1/Phase2 weave window (upfront LDS
-      # write/read syncs + a post-store subtile drain barrier), so the MFMA weave
-      # never crosses one. Their only hazard is ordering: the epilogue rewrites
-      # ValuC, which in weave mode is populated by the per-pair accvgpr_read that
-      # was sunk into Phase1 -- GlobalWriteBatch relocates those reads ahead of the
-      # epilogue when it touches ValuC (see _weaveReadBeforeEpilogue), keeping the
-      # result correct. The barrier-free property comes from the ds_bpermute-based
-      # paired store, not from MIArchVgpr: the AGPR-accumulate path
-      # (MIArchVgpr=False) is the validated fp4-subtile store, whereas
-      # MIArchVgpr=True fp4 subtile is currently broken at baseline.
-      barrierFreeStore = (
-        state["StoreRemapVectorWidth"] == 0
-      )
-      # StreamK support: only the non-atomic reduction (SK3/4/5) is eligible.
-      # Atomic StreamK has no full-tile SK_Store branch to attach the fused store
-      # to (storeBranchesCommon early-returns for StreamKAtomic), so exclude it.
-      # For non-atomic StreamK the fused final-D store is taken only by full-tile
-      # owner WGs (StreamKLocalStart==0 && StreamKLocalEnd==ItersPerTile), gated by
-      # the StreamK full-tile condition in the fused front guard (LogicalScheduler);
-      # partial / fixup WGs fall through to the PLAIN NLL + workspace store path.
-      # The SrdD/SrdWS register collision is resolved by reserving SrdD in the
-      # common early-allocation block (see KernelWriter defineVariableSgprs).
-      streamKAtomicFree = not (state["StreamK"] and state["StreamKAtomic"])
-      # Spill tiles: when the per-wave accumulator count exceeds the 256-AGPR cap
-      # (MIWaveTile product > 64 for the 16x16 MI used by fp4), the >256th
-      # accumulators spill into arch VGPRs. The fused store must copy those spilled
-      # accumulators through a ValuC working window and also check out its store
-      # element batch; keeping the window disjoint from the live spilled
-      # accumulators pushes arch VGPRs past the single-wave occupancy budget
-      # (validated: MT320x256 / MT256x320 overflow at occ=1 even after lending the
-      # dead input tiles to the store pool). Non-spill large tiles (e.g. MT320x128)
-      # and all <=256x256 tiles are unaffected. Fall back to the normal (non-fused)
-      # post-loop store for spill tiles.
-      # MIWaveTile is only present for EnableMatrixInstruction solutions; a non-MI
-      # kernel that opted into PLSIN would KeyError here. Guard the lookup -- a
-      # missing/short MIWaveTile just
-      # disqualifies PLSIN (non-MI kernels are already excluded via
-      # EnableMatrixInstruction below).
-      miwt = state.get("MIWaveTile")
-      spillFree = bool(miwt) and len(miwt) == 2 and (miwt[0] * miwt[1] <= 64)
-      # Store-footprint fit: even inside the product<=64 spill-free set, a LARGE
-      # ASYMMETRIC MIWaveTile overflows the arch-VGPR budget. The fused store checks
-      # out its ValuC accumulator window (and store element batch) on top of the
-      # still-live main-loop LR tiles at occupancy 1; when BOTH dims are non-trivial
-      # (min >= 4, so a large accumulator window) AND one dim is large (max >= 14, so
-      # a large main-loop LR-tile footprint that lending the dead input tiles cannot
-      # fully recover) the combined high-water pushes past the 256-VGPR ceiling and
-      # the store emits an out-of-range v>=256 (assembler "register index is out of
-      # range"). Validated on the shipped gfx950 fp4 (16x16x128 MI) MXA32/MXB32
-      # subtile logic: only MIWaveTile [4,14]/[14,4] fail; thinner-but-tall tiles
-      # ([2,14]/[2,16]), square tiles ([8,8]) and smaller asymmetric tiles
-      # ([4,12]/[12,4]) all fit. Fall back to the plain post-loop store for the
-      # overflow shapes (auto-disable, always correct).
-      storeFitsVgpr = not (bool(miwt) and len(miwt) == 2 and
-                           min(miwt[0], miwt[1]) >= 4 and max(miwt[0], miwt[1]) >= 14)
-      # Overlap feasibility: PLSIN only pays for its front guard + fused drain/setup
-      # if the terminal-MFMA weave can actually hide the store behind the loop's
-      # MFMAs. The weave (LogicalScheduler._extractTerminalMfmaGroups) only weaves
-      # store-pairs whose pair index is >= weaveLA (TENSILE_WEAVE_LA, default 4);
-      # numStorePairs = MIWT0*MIWT1//2 for the 16x16 fp4 MI (each pair = 8 accs = 2
-      # paired 16x16 output tiles on wave64). When numStorePairs <= weaveLA NO pair is
-      # woven (zero overlap), so the fused path is pure guard/setup overhead with no
-      # latency hiding (validated on MT-shape 320x5760x3072, MIWT[2,4] -> 4 pairs, 0
-      # woven: serial buffer_store, feature slower than develop). Emit the plain
-      # non-fused kernel (PLSIN0) for these tiles. WEAVE_LA_DEFAULT must track the
-      # TENSILE_WEAVE_LA default in LogicalScheduler.py.
-      WEAVE_LA_DEFAULT = 4
-      overlapPossible = bool(miwt) and len(miwt) == 2 and \
-                        (miwt[0] * miwt[1] // 2) > WEAVE_LA_DEFAULT
-      # StreamK non-atomic partial-tile fixup (_emitNonatomicAdd) previously
-      # allocated its 16bit-paired-store lane mask via a fresh
-      # checkOutAligned(2,2, preventOverflow=True). That hard-failed on skewed /
-      # non-256x256 tiles because PLSIN's fused store raises the whole-kernel SGPR
-      # high-water to the occupancy-1 ceiling (the partial path shares the same
-      # compile-time register file even though it is runtime-exclusive with the
-      # fused store), leaving no free 2-aligned pair. That mask now reuses the
-      # batch-owned scratch pair (self.tmpS01) instead of a pool checkout (see
-      # GlobalWriteBatch._emitNonatomicAdd), so the overflow can no longer occur and
-      # PLSIN is safe on non-256x256 StreamK non-atomic tiles. (The separate arch-
-      # VGPR spillFree guard below still fences off the truly-large spill tiles.)
-      streamKFixupSafe = True
-      # MX-block-scaled fp4 (MXBlockA/MXBlockB, e.g. MXAE8B32/MXBE8B32) is supported,
-      # but the extra MX stride/address kernargs (AddressMXSA/B, StridesMXSA/B) plus
-      # the fused store's transient epilogue SRDs (SrdBias/SrdScaleAlphaVec/SrdScaleA/B,
-      # allocated on top of the still-live main-loop bookkeeping) can push the SGPR
-      # high-water past the 102-SGPR gfx9 ceiling for extreme-aspect-ratio tiles.
-      # Validated on the shipped gfx950 fp4 (16x16x1 MI) MXA32/MXB32 + Bias + vector-
-      # ScaleAB + ScaleAlphaVec + StreamK logic (52 solutions): only MIWaveTile
-      # [2,16]/[16,2] overflow (sgprs=104 > 102); every other tested skew, including
-      # [4,18]/[18,4], [4,10]/[10,4], [2,8]/[8,2] and [2,6]/[6,2], fits. Auto-disable
-      # (do NOT reject) just this narrow shape so MXBlockA/MXBlockB fp4 gets PLSIN
-      # everywhere else.
-      mxBlockScaled = bool(state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"])
-      mxBlockScaleSgprFits = not (mxBlockScaled and bool(miwt) and len(miwt) == 2 and
-                                  min(miwt[0], miwt[1]) <= 2 and max(miwt[0], miwt[1]) >= 16)
-      # Bias / ScaleAlphaVec / vector-ScaleAB epilogues are now supported under the
-      # weave: their store SRDs (SrdBias, SrdScaleAlphaVec, SrdScaleA/B) and the
-      # backing Address* kernargs are defined+loaded up front by
-      # loadFusedEpilogueStoreSgprs (replicating endSummation's epilogue store-kernarg
-      # setup) before the fused NLL store, so the store no longer references
-      # as-yet-undefined symbols. The larger epilogue body pushes the NLL exit /
-      # fused-guard branches past +-simm16; those are emitted as 32-bit long branches
-      # (gated on postLoopStoreInNll), so bias/SAV no longer needs to be excluded.
-      if (not isFloat4) or \
-         (not state["UseSubtileImpl"]) or \
-         (not isgfx950) or \
-         (not state["EnableMatrixInstruction"]) or \
-         (state["PrefetchGlobalRead"] < 1) or \
-         (not state["BufferStore"]) or \
-         (not pairedStoreAvailable) or \
-         (not streamKAtomicFree) or \
-         (not barrierFreeStore) or \
-         (not spillFree) or \
-         (not storeFitsVgpr) or \
-         (not overlapPossible) or \
-         (not streamKFixupSafe) or \
-         (not mxBlockScaleSgprFits):
-        state["PostLoopStoreInNll"] = False
+    # PostLoopStoreInNll (PLSIN) eligibility. Delegated to a standalone helper so
+    # the exact same gate also runs for already-derived solutions on the
+    # early-return path above (pre-tuned logic-file kernels that predate PLSIN).
+    Solution.assignPostLoopStoreInNll(state)
 
     # Determine if we can load directly-to-Vgpr
     # need to check after state["LocalReadVectorWidth"] = -1 is resolved
