@@ -87,7 +87,7 @@ bool RMSnormBwdPlanBuilder::isApplicable(
 
         return true;
     }
-    case 2: // Backward fused activation (backward + forward + activation)
+    case 2: // Backward fused activation (backward + activation)
     {
         if(anyNodeIsNotF32Compute())
         {
@@ -134,7 +134,7 @@ bool RMSnormBwdPlanBuilder::isApplicable(
     default:
     {
         HIPDNN_PLUGIN_LOG_INFO(
-            "RMSnorm backward plan builder is applicable only for 1 or 3 node graphs. "
+            "RMSnorm backward plan builder is applicable only for 1 or 2 node graphs. "
             "Graph has "
             << opGraph.nodeCount() << " nodes");
         return false;
