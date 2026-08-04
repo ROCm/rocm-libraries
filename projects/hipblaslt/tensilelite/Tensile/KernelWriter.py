@@ -7976,7 +7976,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
           self.states.mxsa.numVgprG2LAllocated = 0
           self.states.mxsa.numVgprG2LTailloopAllocated = statesMXSANumVgprG2LAllocated
         # using _ds_store_b8: need one more vgpr space to do lshr
-        if tensorParametersMXSA["localWriteInstruction"].blockWidth == 0.25:
+        if tensorParametersMXSA["localWriteInstruction"].blockWidth == 0.25 and not kernel["enableTDMA"]:
           self.states.mxsa.numVgprG2L = self.states.mxsa.numVgprG2L * 2
           self.states.mxsa.numVgprG2LAllocated += numVgprG2LMXSAllocatedLocal
           self.states.mxsa.numVgprG2LTailloopAllocated += numVgprG2LMXSAllocatedLocal
@@ -8069,7 +8069,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
           self.states.mxsb.numVgprG2LAllocated = 0
           self.states.mxsb.numVgprG2LTailloopAllocated = statesMXSBNumVgprG2LAllocated
         # using _ds_store_b8: need one more vgpr space to do lshr
-        if tensorParametersMXSB["localWriteInstruction"].blockWidth == 0.25:
+        if tensorParametersMXSB["localWriteInstruction"].blockWidth == 0.25 and not kernel["enableTDMB"]:
           self.states.mxsb.numVgprG2L = self.states.mxsb.numVgprG2L * 2
           self.states.mxsb.numVgprG2LAllocated += numVgprG2LMXSBllocatedLocal
           self.states.mxsb.numVgprG2LTailloopAllocated += numVgprG2LMXSBllocatedLocal
