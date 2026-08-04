@@ -284,7 +284,7 @@ struct HandleImpl
     KernelCache cache;
     TargetProperties target_properties;
     mutable StreamTracker stream_tracker_;
-    std::shared_ptr<ScratchAllocation> active_scratch_;
+    std::weak_ptr<ScratchAllocation> active_scratch_;
     std::size_t scratch_cap_ = 0;
 };
 
@@ -416,8 +416,8 @@ std::shared_ptr<ScratchAllocation> Handle::GetScratchBuffer(std::size_t sz) cons
     if(sz > impl->scratch_cap_)
         return nullptr;
 
-    if(impl->active_scratch_ && sz <= impl->active_scratch_->size)
-        return impl->active_scratch_;
+    if(auto existing = impl->active_scratch_.lock(); existing && sz <= existing->size)
+        return existing;
 
     auto alloc            = std::make_shared<ScratchAllocation>();
     alloc->buffer         = impl->allocator(sz);
