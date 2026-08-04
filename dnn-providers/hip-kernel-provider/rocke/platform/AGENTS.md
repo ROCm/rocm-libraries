@@ -29,11 +29,15 @@ govern what you commit and how you describe it.
   been publicly released, escalate to a human rather than naming it in an artifact.
 - **No product / marketing / code names.** Refer to targets by device name (`gfx942`,
   `gfx950`, …) only. No customers or related data shall ever be mentioned (e.g., model architectures, operator shapes, labeling or codenames, IP, confidential data).
-- **No public hardware-performance data.** Never publish measured **hardware**
-  performance characteristics in the repo, git history, PRs, or anything that can become
-  public. Two things are outside this rule: published **hardware** spec numbers — e.g.
-  theoretical peak — which are governed by AMD marketing; and **software-achieved**
-  numbers, which may be shared as long as they are reproducible.
+- **Archive performance data only for released hardware.** Measured performance data —
+  achieved TFLOP/s, MFU, latencies, throughputs — may be archived in a public space such as
+  the repo or a PR when it was measured on **publicly released** hardware and is
+  reproducible; record the configuration it was measured on so the number stays meaningful.
+  The same data measured on **NPI / pre-release** hardware is confidential: never archive it
+  in the repo, git history, PRs, or any other public or permanent location. Present such
+  numbers in-session if needed and keep them in the protected, access-controlled space.
+  Published **hardware** spec numbers — e.g. theoretical peak — are governed by AMD
+  marketing, not this rule.
 - **No legal or marketing claims or comparisons** about AMD or competitor
   products/software (performance, superiority, availability, roadmap). No marketing
   language. **Protect AMD.**
