@@ -521,7 +521,7 @@ TEST(TestLoadBundleMetadata, EnforcementLevelDefaultsToFullWhenAbsent)
     const TempBundle bundle(R"({"format_version": 1})");
     auto meta = loadBundleMetadata(bundle.bundleJsonPath());
     ASSERT_TRUE(meta.has_value());
-    EXPECT_EQ(meta->enforcementLevel, EnforcementLevel::Full);
+    EXPECT_EQ(meta->enforcementLevel, EnforcementLevel::FULL);
 }
 
 TEST(TestLoadBundleMetadata, EnforcementLevelParsesApplicability)
@@ -529,7 +529,7 @@ TEST(TestLoadBundleMetadata, EnforcementLevelParsesApplicability)
     const TempBundle bundle(R"({"format_version": 1, "enforcement_level": "applicability"})");
     auto meta = loadBundleMetadata(bundle.bundleJsonPath());
     ASSERT_TRUE(meta.has_value());
-    EXPECT_EQ(meta->enforcementLevel, EnforcementLevel::Applicability);
+    EXPECT_EQ(meta->enforcementLevel, EnforcementLevel::APPLICABILITY);
 }
 
 TEST(TestLoadBundleMetadata, EnforcementLevelParsesBuildable)
@@ -537,7 +537,7 @@ TEST(TestLoadBundleMetadata, EnforcementLevelParsesBuildable)
     const TempBundle bundle(R"({"format_version": 1, "enforcement_level": "buildable"})");
     auto meta = loadBundleMetadata(bundle.bundleJsonPath());
     ASSERT_TRUE(meta.has_value());
-    EXPECT_EQ(meta->enforcementLevel, EnforcementLevel::Buildable);
+    EXPECT_EQ(meta->enforcementLevel, EnforcementLevel::BUILDABLE);
 }
 
 TEST(TestLoadBundleMetadata, EnforcementLevelParsesFull)
@@ -545,7 +545,7 @@ TEST(TestLoadBundleMetadata, EnforcementLevelParsesFull)
     const TempBundle bundle(R"({"format_version": 1, "enforcement_level": "full"})");
     auto meta = loadBundleMetadata(bundle.bundleJsonPath());
     ASSERT_TRUE(meta.has_value());
-    EXPECT_EQ(meta->enforcementLevel, EnforcementLevel::Full);
+    EXPECT_EQ(meta->enforcementLevel, EnforcementLevel::FULL);
 }
 
 TEST(TestLoadBundleMetadata, EnforcementLevelInvalidTokenRejectsMetadata)

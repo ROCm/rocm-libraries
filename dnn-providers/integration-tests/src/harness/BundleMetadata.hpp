@@ -31,9 +31,9 @@ namespace hipdnn_integration_tests
 /// How far up RFC 0015's enforcement ladder a bundle/case is checked.
 enum class EnforcementLevel
 {
-    Applicability, ///< engine must accept the graph
-    Buildable, ///< engine must additionally compile a plan
-    Full ///< engine must additionally execute and numeric-verify (default)
+    APPLICABILITY, ///< engine must accept the graph
+    BUILDABLE, ///< engine must additionally compile a plan
+    FULL ///< engine must additionally execute and numeric-verify (default)
 };
 
 struct BundleMetadata
@@ -54,7 +54,7 @@ struct BundleMetadata
     std::optional<int64_t> seed;
     std::optional<int64_t> minimumVramMb;
     std::optional<std::unordered_map<int64_t, nlohmann::json>> inputs;
-    EnforcementLevel enforcementLevel = EnforcementLevel::Full;
+    EnforcementLevel enforcementLevel = EnforcementLevel::FULL;
 };
 
 // ---------------------------------------------------------------------------
@@ -156,15 +156,15 @@ inline std::optional<BundleMetadata> parseBundleMetadataJson(const nlohmann::jso
         const auto level = json["enforcement_level"].get<std::string>();
         if(level == "applicability")
         {
-            meta.enforcementLevel = EnforcementLevel::Applicability;
+            meta.enforcementLevel = EnforcementLevel::APPLICABILITY;
         }
         else if(level == "buildable")
         {
-            meta.enforcementLevel = EnforcementLevel::Buildable;
+            meta.enforcementLevel = EnforcementLevel::BUILDABLE;
         }
         else if(level == "full")
         {
-            meta.enforcementLevel = EnforcementLevel::Full;
+            meta.enforcementLevel = EnforcementLevel::FULL;
         }
         else
         {
