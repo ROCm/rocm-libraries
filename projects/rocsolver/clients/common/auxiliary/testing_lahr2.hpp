@@ -120,9 +120,9 @@ void lahr2_initData(const rocblas_handle handle,
         rocblas_init<T>(hA, true);
 
         // scale A to avoid singularities
-        for(rocblas_int i = 0; i < n; i++)
+        for(rocblas_int j = 0; j < n; j++)
         {
-            for(rocblas_int j = 0; j < n; j++)
+            for(rocblas_int i = 0; i < n; i++)
             {
                 if(i == j)
                     hA[0][i + j * lda] += 400;
