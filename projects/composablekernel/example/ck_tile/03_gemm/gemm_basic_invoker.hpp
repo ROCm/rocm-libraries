@@ -114,7 +114,10 @@ struct BasicInvoker
                                              M_Warp_Tile,
                                              N_Warp_Tile,
                                              K_Warp_Tile,
-                                             CodegenPipelineProblem::TransposeC>>;
+                                             CodegenPipelineProblem::TransposeC,
+                                             1,
+                                             GemmConfig::FixedVectorSizeC,
+                                             GemmConfig::VectorSizeC>>;
 
         // ToDo: Will add the codegen part to test different pipeline policies in GEMM.
         // Now we only use the BlockGemmASmemBSmemCRegV1DefaultPolicy.

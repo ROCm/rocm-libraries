@@ -42,6 +42,8 @@ using NativeI4Config =
                std::false_type,
                ck_tile::number<1>,
                ck_tile::number<8>,
+               ck_tile::number<1>,
+               std::true_type,
                ck_tile::number<1>>;
 
 class TestCkTileGemmBasicV1WmmaI4Intrawave

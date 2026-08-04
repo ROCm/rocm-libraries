@@ -86,6 +86,13 @@ int run_gemm_example(ck_tile::ArgParser& arg_parser)
 
         using Row = ck_tile::tensor_layout::gemm::RowMajor;
         using Col = ck_tile::tensor_layout::gemm::ColumnMajor;
+        if(n % GemmConfigI4::VectorSizeC != 0)
+            return run_gemm_example_with_layouts<GemmConfigI4Tail,
+                                                 Invoker,
+                                                 ck_tile::pk_int4_t,
+                                                 ck_tile::pk_int4_t,
+                                                 int32_t>(arg_parser, Row{}, Col{}, Row{});
+
         return run_gemm_example_with_layouts<GemmConfigI4,
                                              Invoker,
                                              ck_tile::pk_int4_t,

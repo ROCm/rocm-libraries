@@ -288,6 +288,11 @@ class TestCkTileGemmPipeline : public ::testing::Test
     static constexpr ck_tile::index_t K_Warp_Count =
         ck_tile::tuple_element_or_default_t<Tuple, 18, ck_tile::number<1>>::value;
 
+    static constexpr bool FixedVectorSizeC =
+        ck_tile::tuple_element_or_default_t<Tuple, 19, std::false_type>::value;
+    static constexpr ck_tile::index_t VectorSizeC =
+        ck_tile::tuple_element_or_default_t<Tuple, 20, ck_tile::number<1>>::value;
+
     protected:
     template <bool PadM, bool PadN, bool PadK, bool Preshuffle>
     void invoke_gemm(const ck_tile::GemmHostArgs& args, const ck_tile::stream_config& s)
@@ -406,8 +411,8 @@ class TestCkTileGemmPipeline : public ::testing::Test
                                              K_Warp_Tile,
                                              UniversalGemmProblem::TransposeC,
                                              1,                /*kNumWaveGroups_*/
-                                             false,            /*FixedVectorSize_*/
-                                             1,                /*VectorSizeC_*/
+                                             FixedVectorSizeC, /*FixedVectorSize_*/
+                                             VectorSizeC,      /*VectorSizeC_*/
                                              1,                /*BlockedXDLN_PerWarp_*/
                                              DoubleSmemBuffer, /*DoubleSmemBuffer*/
                                              AComputeDataType, /*AComputeDataType_*/

@@ -33,6 +33,9 @@ struct GemmConfigBase
     static constexpr bool Preshuffle                = false;
     static constexpr bool TiledMMAPermuteN          = false;
 
+    static constexpr bool FixedVectorSizeC        = false;
+    static constexpr ck_tile::index_t VectorSizeC = 1;
+
     static constexpr ck_tile::index_t kClusterSizeM       = 1;
     static constexpr ck_tile::index_t kClusterSizeN       = 1;
     static constexpr ck_tile::index_t BlockedXDLN_PerWarp = 1;
@@ -45,9 +48,16 @@ struct GemmConfigBase
 
 struct GemmConfigI4 : public GemmConfigBase
 {
-    static constexpr bool kPadM = true;
-    static constexpr bool kPadN = true;
-    static constexpr bool kPadK = true;
+    static constexpr bool kPadM                   = true;
+    static constexpr bool kPadN                   = true;
+    static constexpr bool kPadK                   = true;
+    static constexpr ck_tile::index_t VectorSizeC = 16 / sizeof(int32_t);
+};
+
+struct GemmConfigI4Tail : public GemmConfigI4
+{
+    static constexpr bool FixedVectorSizeC        = true;
+    static constexpr ck_tile::index_t VectorSizeC = 1;
 };
 
 template <typename PrecType>
