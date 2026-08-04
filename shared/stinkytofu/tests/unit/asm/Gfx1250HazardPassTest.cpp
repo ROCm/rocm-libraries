@@ -1,11 +1,11 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// Gfx1250HazardPass aborts when an SMEM instruction overwrites one of its own
-// source registers: XNACK replay would re-execute it after the source is gone,
-// and no s_wait_xcnt placement can bring the source back. The abort cannot be
-// expressed in a lit/FileCheck test, so it is covered here with a death test.
-// Every repairable case lives in tests/filecheck/gfx1250_xnack_hazard_test.stir.
+// Covers the one Gfx1250HazardPass case that aborts instead of inserting a
+// drain: a multi-DWORD SMEM load overwriting its own source.
+//
+// Note: FileCheck cannot express an abort; every other case lives in
+// tests/filecheck/gfx1250_xnack_hazard_test.stir.
 
 #include <gtest/gtest.h>
 
@@ -44,11 +44,11 @@ class Gfx1250HazardPassTest : public ::testing::Test {
 
 // A release build compiles the assert away and only prints the error.
 #ifndef NDEBUG
-TEST_F(Gfx1250HazardPassTest, SmemSelfOverlapAborts) {
+TEST_F(Gfx1250HazardPassTest, MultiDwordSmemSelfOverlapAborts) {
     std::string irString = R"(
 st.func @smem_self_overlap() {
 ^entry:
-  s0 = "st.s_load_b32"(s[0:1])
+  s[0:1] = "st.s_load_b64"(s[0:1])
 }
 )";
     StinkyIRConverter converter(arch);

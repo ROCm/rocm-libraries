@@ -84,9 +84,30 @@ st.func @single_group_tensor_is_other() {
   v3 = "st.global_atomic_inc_u32"(v1, v2, s[14:15])
 }
 
-# A self-overlapping SMEM load is not repairable with a drain, so the pass
-# aborts on it. That path cannot be expressed here; see the death test in
-# unit/asm/Gfx1250HazardPassTest.cpp.
+# A single-DWORD SMEM load returns all or nothing, so a one-instruction clause
+# may overwrite its own source.
+# CHECK-LABEL: @smem_singleton_self_overlap
+# CHECK: s_load_b32
+# CHECK-NOT: s_wait_xcnt
+st.func @smem_singleton_self_overlap() {
+^entry:
+  s0 = "st.s_load_b32"(s[0:1])
+}
+
+# The same self-overlap needs a drain when an earlier SMEM keeps the clause open.
+# CHECK-LABEL: @smem_multi_op_self_overlap
+# CHECK: s_load_b32
+# CHECK-NEXT: s_wait_xcnt"(0)
+# CHECK-NEXT: s_load_b32
+st.func @smem_multi_op_self_overlap() {
+^entry:
+  s8 = "st.s_load_b32"(s[10:11])
+  s2 = "st.s_load_b32"(s[2:3])
+}
+
+# A multi-DWORD SMEM load may complete partially, so it can never overwrite its
+# own source. That is not repairable with a drain and the pass aborts on it;
+# see the death test in unit/asm/Gfx1250HazardPassTest.cpp.
 
 # prefetch needs XCnt drain when a memory group is still outstanding.
 # CHECK-LABEL: @existing_scalar_prefetch

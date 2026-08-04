@@ -105,6 +105,21 @@ bool violatesFlatSourceRule(const StinkyInstruction& inst, const GroupState& sta
     return hasDestSourceOverlap(inst, state.sources) || hasSelfDestSourceOverlap(inst);
 }
 
+bool violatesSmemSourceRule(const StinkyInstruction& inst, const GroupState& state) {
+    if (!state.hasMemory) return false;  // A single-instruction clause may self-overlap.
+    return hasDestSourceOverlap(inst, state.sources) || hasSelfDestSourceOverlap(inst);
+}
+
+// An SMEM load returning more than one DWORD can complete partially: some
+// DWORDs return while others XNACK. Such a load is unreplayable once its source
+// is gone, whereas a single-DWORD load returns all or nothing.
+bool returnsMultipleDwords(const StinkyInstruction& inst) {
+    unsigned dwords = 0;
+    for (const StinkyRegister& dest : inst.getDestRegs())
+        forEachRegUnit(dest, [&](RegKey) { ++dwords; });
+    return dwords > 1;
+}
+
 bool hasZeroWaitImmediate(const StinkyInstruction& inst) {
     const auto& srcs = inst.getSrcRegs();
     return srcs.size() == 1 && srcs.front().dataType == StinkyRegister::Type::LiteralInt &&
@@ -171,12 +186,13 @@ void warnGroupBreak(const BasicBlock& bb, const StinkyInstruction& inst, const c
     inst.dump(std::cerr);
 }
 
-// A drain only separates the overlap from an earlier instruction. When an SMEM
-// overwrites its own source there is nothing to separate: XNACK replay
-// re-executes it with the source already clobbered, so only a different
-// register allocation can fix it.
+// A drain only separates the overlap from an earlier instruction. A multi-DWORD
+// SMEM load that overwrites its own source has nothing to separate: it can
+// partially complete, and the XNACKed DWORDs then replay with the source
+// already clobbered. Only a different register allocation can fix it.
 void reportUnrepairableSmemSelfOverlap(const BasicBlock& bb, const StinkyInstruction& inst) {
-    std::cerr << "[Gfx1250HazardPass] error: SMEM instruction in block \"" << bb.getLabel()
+    std::cerr << "[Gfx1250HazardPass] error: multi-DWORD SMEM instruction in block \""
+              << bb.getLabel()
               << "\" overwrites one of its own source registers; "
                  "s_wait_xcnt cannot repair this register allocation:\n";
     inst.dump(std::cerr);
@@ -315,7 +331,11 @@ class Gfx1250HazardPass : public Pass {
         //        source has been overwritten. The XNACKed FLAT is safe because its
         //        source is still intact.
         // 3. SMEM:
-        //    (a) no instruction may overwrite any group source.
+        //    (a) must not overwrite a group source;
+        //    (b) a single instruction SMEM clause may overwrite its own source
+        //        only if it returns one DWORD or less. A multi-DWORD load can
+        //        return some DWORDs and XNACK on others, so it cannot be
+        //        replayed once its source is gone.
         // 4. Atomic / RMW:
         //    (a) drain before the first atomic after non-atomic memory;
         //    (b) consecutive atomics need no intervening drain due to the
@@ -331,11 +351,12 @@ class Gfx1250HazardPass : public Pass {
         }
 
         // Apply rule 3:
-        if (kind == MemoryGroupKind::SMEM && hasSelfDestSourceOverlap(*inst))
+        if (kind == MemoryGroupKind::SMEM && returnsMultipleDwords(*inst) &&
+            hasSelfDestSourceOverlap(*inst)) {
             reportUnrepairableSmemSelfOverlap(bb, *inst);
+        }
 
-        if (kind == MemoryGroupKind::SMEM && state.hasMemory &&
-            hasDestSourceOverlap(*inst, state.sources)) {
+        if (kind == MemoryGroupKind::SMEM && violatesSmemSourceRule(*inst, state)) {
             warnGroupBreak(bb, *inst, "SMEM");
             insertXcntDrain(builder, archId, inst, state, profile, XcntDrainReason::SmemRule3);
         }
