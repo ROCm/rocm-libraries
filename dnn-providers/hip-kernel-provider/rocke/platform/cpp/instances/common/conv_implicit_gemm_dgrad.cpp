@@ -310,7 +310,7 @@ bool rocke_dgrad_conv_is_valid_spec(const rocke_dgrad_conv_spec_t* s,
     if(sk > 1)
     {
         /* Accept fp32, bf16, fp16 for atomic accumulation. */
-        const char* dd = s->data.dtype_d;
+        const char* dd = s->dtype_d;
         int ok_dtype
             = (strcmp(dd, "fp32") == 0 || strcmp(dd, "bf16") == 0 || strcmp(dd, "fp16") == 0);
         if(!ok_dtype)
@@ -335,8 +335,8 @@ bool rocke_dgrad_conv_is_valid_spec(const rocke_dgrad_conv_spec_t* s,
     /* MMA shape availability (Python: target.mma.has_shape). */
     if(!rocke_mma_catalog_has_shape(&tgt->mma,
                                     family,
-                                    s->data.dtype_a,
-                                    s->data.dtype_b,
+                                    s->dtype_a,
+                                    s->dtype_b,
                                     "fp32",
                                     s->warp_tile_m,
                                     s->warp_tile_n,
@@ -345,7 +345,7 @@ bool rocke_dgrad_conv_is_valid_spec(const rocke_dgrad_conv_spec_t* s,
         snprintf(reason,
                  reason_cap,
                  "unsupported %s warp_tile %dx%dx%d on %s",
-                 s->data.dtype_a,
+                 s->dtype_a,
                  s->warp_tile_m,
                  s->warp_tile_n,
                  s->warp_tile_k,
@@ -354,7 +354,7 @@ bool rocke_dgrad_conv_is_valid_spec(const rocke_dgrad_conv_spec_t* s,
     }
 
     /* LDS budget (Python: target.fits_lds check). */
-    int ab_dtype_bytes = (strcmp(s->data.dtype_a, "fp32") == 0) ? 4 : 2;
+    int ab_dtype_bytes = (strcmp(s->dtype_a, "fp32") == 0) ? 4 : 2;
     /* Simplified LDS estimate (no cshuffle for dgrad, pipeline="mem" only in practice). */
     long a_lds = (long)s->tile_m * s->tile_k * ab_dtype_bytes;
     long b_lds = (long)s->tile_n * s->tile_k * ab_dtype_bytes;
@@ -743,7 +743,7 @@ static void _emit_dgrad_direct_epilogue(rocke_ir_builder_t* b,
 
     rocke_direct_epilogue_t epi;
     epi.atom = rocke_mfma_atom(
-        spec->data.dtype_a, spec->warp_tile_m, spec->warp_tile_n, spec->warp_tile_k);
+        spec->dtype_a, spec->warp_tile_m, spec->warp_tile_n, spec->warp_tile_k);
     epi.grid = *grid;
     epi.out_dtype = spec->dtype_d;
 
@@ -1212,8 +1212,8 @@ static rocke_kernel_def_t*
         rocke_attr_set_int(b, &b->kernel->attrs, "waves_per_eu", spec->waves_per_eu);
 
     // ---- params ----
-    const rocke_type_t* ab_ir = _dtype_to_ir(spec->data.dtype_a);
-    const rocke_type_t* d_ir = _dtype_to_ir(spec->data.dtype_d);
+    const rocke_type_t* ab_ir = _dtype_to_ir(spec->dtype_a);
+    const rocke_type_t* d_ir = _dtype_to_ir(spec->dtype_d);
     const rocke_type_t* ab_global = rocke_ptr_type(b, ab_ir, "global");
     const rocke_type_t* d_global = rocke_ptr_type(b, d_ir, "global");
     rocke_param_opts_t ro_opts;
@@ -1269,7 +1269,7 @@ static rocke_kernel_def_t*
         = is_wmma
               ? NULL
               : rocke_mfma_atom(
-                    spec->data.dtype_a, spec->warp_tile_m, spec->warp_tile_n, spec->warp_tile_k);
+                    spec->dtype_a, spec->warp_tile_m, spec->warp_tile_n, spec->warp_tile_k);
     int a_per_lane = op->a_frag_len;
     int b_per_lane = op->b_frag_len;
     int c_per_lane = op->c_frag_len;
