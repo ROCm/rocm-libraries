@@ -20,6 +20,7 @@ import pytest
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _flatten(region, out):
     for op in region.ops:
         out.append(op)
@@ -31,6 +32,7 @@ def _flatten(region, out):
 # ---------------------------------------------------------------------------
 # SchedulePolicy
 # ---------------------------------------------------------------------------
+
 
 class TestSchedulePolicyBasic:
     def test_for_pipeline_basic_returns_emit_hints_false(self):
@@ -69,6 +71,7 @@ class TestSchedulePolicyBasic:
 # ---------------------------------------------------------------------------
 # CoalescedTileLoader split-load helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_loader_and_builder():
     """Return (b, loader, rsrc, tid, smem) for a 64x32 tile, 256 threads."""
@@ -119,9 +122,9 @@ class TestCoalescedTileLoaderSplit:
         load_ops = [n for n in op_names if "buffer_load" in n]
         store_ops = [n for n in op_names if "smem_store" in n]
 
-        assert len(load_ops) == loader.vecs_per_thread, (
-            f"expected {loader.vecs_per_thread} buffer_load ops, got {load_ops}"
-        )
+        assert (
+            len(load_ops) == loader.vecs_per_thread
+        ), f"expected {loader.vecs_per_thread} buffer_load ops, got {load_ops}"
         assert store_ops == [], "load_global() must not emit any smem_store ops"
 
     def test_store_lds_emits_smem_store_ops(self):
@@ -139,9 +142,9 @@ class TestCoalescedTileLoaderSplit:
         new_ops = [op.name for op in b.kernel.body.ops][count_before:]
 
         smem_stores = [n for n in new_ops if "smem_store" in n]
-        assert len(smem_stores) == loader.vecs_per_thread, (
-            f"expected {loader.vecs_per_thread} smem_store ops, got {smem_stores}"
-        )
+        assert (
+            len(smem_stores) == loader.vecs_per_thread
+        ), f"expected {loader.vecs_per_thread} smem_store ops, got {smem_stores}"
 
     def test_split_load_sequence_matches_fused_load(self):
         """load_global + store_lds must emit the same types (and count) of
@@ -159,7 +162,9 @@ class TestCoalescedTileLoaderSplit:
             rsrc_ptr = b.param("rsrc", PtrType(F16, "global"))
             rsrc = b.buffer_rsrc(rsrc_ptr, b.const_i32(1024 * 1024))
             tid = b.param("tid", None)
-            smem = b.smem_alloc(F16, [loader.tile_rows, loader.tile_cols], name_hint="tile")
+            smem = b.smem_alloc(
+                F16, [loader.tile_rows, loader.tile_cols], name_hint="tile"
+            )
             return b, rsrc, tid, smem
 
         def _desc(b, row, col):
@@ -168,15 +173,23 @@ class TestCoalescedTileLoaderSplit:
         # Fused path
         b_fused, rsrc_f, tid_f, smem_f = _setup()
         loader.load(b_fused, tid=tid_f, smem_dst=smem_f, descriptor=_desc, rsrc=rsrc_f)
-        fused_loads = sum(1 for op in b_fused.kernel.body.ops if "buffer_load" in op.name)
-        fused_stores = sum(1 for op in b_fused.kernel.body.ops if "smem_store" in op.name)
+        fused_loads = sum(
+            1 for op in b_fused.kernel.body.ops if "buffer_load" in op.name
+        )
+        fused_stores = sum(
+            1 for op in b_fused.kernel.body.ops if "smem_store" in op.name
+        )
 
         # Split path
         b_split, rsrc_s, tid_s, smem_s = _setup()
         staged = loader.load_global(b_split, tid=tid_s, descriptor=_desc, rsrc=rsrc_s)
         loader.store_lds(b_split, smem_dst=smem_s, staged=staged)
-        split_loads = sum(1 for op in b_split.kernel.body.ops if "buffer_load" in op.name)
-        split_stores = sum(1 for op in b_split.kernel.body.ops if "smem_store" in op.name)
+        split_loads = sum(
+            1 for op in b_split.kernel.body.ops if "buffer_load" in op.name
+        )
+        split_stores = sum(
+            1 for op in b_split.kernel.body.ops if "smem_store" in op.name
+        )
 
         assert split_loads == fused_loads
         assert split_stores == fused_stores
@@ -204,6 +217,7 @@ class TestCoalescedTileLoaderSplit:
 # ---------------------------------------------------------------------------
 # is_valid_spec: pipeline="basic" + async_dma=True must be rejected
 # ---------------------------------------------------------------------------
+
 
 class TestIsValidSpecBasicPipeline:
     def _mk_basic_spec(self, async_dma=False):
@@ -239,14 +253,15 @@ class TestIsValidSpecBasicPipeline:
 
         ok, why = is_valid_spec(self._mk_basic_spec(async_dma=True), "gfx950")
         assert not ok, "pipeline='basic' with async_dma=True must be rejected"
-        assert "async_dma" in why.lower() or "basic" in why.lower(), (
-            f"rejection message should mention the conflict, got: {why!r}"
-        )
+        assert (
+            "async_dma" in why.lower() or "basic" in why.lower()
+        ), f"rejection message should mention the conflict, got: {why!r}"
 
 
 # ---------------------------------------------------------------------------
 # build_implicit_gemm_conv: pipeline="basic" produces correct IR structure
 # ---------------------------------------------------------------------------
+
 
 class TestBuildConvBasicPipeline:
     def _build(self, epilogue="default"):
@@ -307,7 +322,8 @@ class TestBuildConvBasicPipeline:
         ops = _flatten(kernel.body, [])
         # cshuffle allocates a C staging tile
         c_allocs = [
-            op for op in ops
+            op
+            for op in ops
             if op.name == "tile.smem_alloc" and "C_smem" in op.results[0].name
         ]
         assert c_allocs, "cshuffle epilogue must allocate a C_smem tile"
@@ -318,11 +334,12 @@ class TestBuildConvBasicPipeline:
         kernel = self._build()
         ops = _flatten(kernel.body, [])
         for_iters = [op for op in ops if "for_iter" in op.name]
-        assert not for_iters, (
-            "pipeline='basic' K-loop is Python-unrolled; scf.for_iter must not appear"
-        )
+        assert (
+            not for_iters
+        ), "pipeline='basic' K-loop is Python-unrolled; scf.for_iter must not appear"
 
 
 if __name__ == "__main__":  # pragma: no cover
     import sys
+
     sys.exit(pytest.main([__file__, "-v"]))
