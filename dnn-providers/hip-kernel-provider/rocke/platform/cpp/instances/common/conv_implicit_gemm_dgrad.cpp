@@ -71,6 +71,16 @@ static int _min(int a, int b)
     return a < b ? a : b;
 }
 
+/* Map a dtype string ("fp16", "bf16", "fp32") to the corresponding IR scalar type. */
+static const rocke_type_t* _dtype_to_ir(const char* dtype)
+{
+    if(dtype && strcmp(dtype, "bf16") == 0)
+        return rocke_bf16();
+    if(dtype && strcmp(dtype, "fp32") == 0)
+        return rocke_f32();
+    return rocke_f16(); /* fp16 and default */
+}
+
 // ---------------------------------------------------------------------------
 // Spec default + property accessors  (Python DgradConvSpec @property)
 // ---------------------------------------------------------------------------
@@ -732,7 +742,8 @@ static void _emit_dgrad_direct_epilogue(rocke_ir_builder_t* b,
     addr_ctx.desc = dX_desc;
 
     rocke_direct_epilogue_t epi;
-    epi.atom = rocke_mfma_atom("f16", spec->warp_tile_m, spec->warp_tile_n, spec->warp_tile_k);
+    epi.atom = rocke_mfma_atom(
+        spec->data.dtype_a, spec->warp_tile_m, spec->warp_tile_n, spec->warp_tile_k);
     epi.grid = *grid;
     epi.out_dtype = spec->dtype_d;
 
@@ -1201,7 +1212,10 @@ static rocke_kernel_def_t*
         rocke_attr_set_int(b, &b->kernel->attrs, "waves_per_eu", spec->waves_per_eu);
 
     // ---- params ----
-    const rocke_type_t* f16_global = rocke_ptr_type(b, rocke_f16(), "global");
+    const rocke_type_t* ab_ir = _dtype_to_ir(spec->data.dtype_a);
+    const rocke_type_t* d_ir = _dtype_to_ir(spec->data.dtype_d);
+    const rocke_type_t* ab_global = rocke_ptr_type(b, ab_ir, "global");
+    const rocke_type_t* d_global = rocke_ptr_type(b, d_ir, "global");
     rocke_param_opts_t ro_opts;
     memset(&ro_opts, 0, sizeof(ro_opts));
     ro_opts.noalias = true;
@@ -1211,8 +1225,8 @@ static rocke_kernel_def_t*
     ro_opts.align = 16;
     ro_opts.align_set = true;
 
-    rocke_value_t* dY = rocke_b_param(b, "dY", f16_global, &ro_opts);
-    rocke_value_t* W = rocke_b_param(b, "W", f16_global, &ro_opts);
+    rocke_value_t* dY = rocke_b_param(b, "dY", ab_global, &ro_opts);
+    rocke_value_t* W = rocke_b_param(b, "W", ab_global, &ro_opts);
 
     bool needs_atomic = rocke_dgrad_conv_spec_needs_atomic(spec);
     rocke_param_opts_t d_opts;
@@ -1226,7 +1240,7 @@ static rocke_kernel_def_t*
     }
     d_opts.align = 16;
     d_opts.align_set = true;
-    rocke_value_t* dX = rocke_b_param(b, "dX", f16_global, &d_opts);
+    rocke_value_t* dX = rocke_b_param(b, "dX", d_global, &d_opts);
 
     rocke_value_t* dY_bytes = rocke_b_param(b, "dY_bytes", rocke_i32(), NULL);
     rocke_value_t* W_bytes = rocke_b_param(b, "W_bytes", rocke_i32(), NULL);
@@ -1252,8 +1266,10 @@ static rocke_kernel_def_t*
         return NULL;
     bool is_wmma = (op->family && strcmp(op->family, "wmma") == 0);
     const rocke_mfma_atom_t* atom
-        = is_wmma ? NULL
-                  : rocke_mfma_atom("f16", spec->warp_tile_m, spec->warp_tile_n, spec->warp_tile_k);
+        = is_wmma
+              ? NULL
+              : rocke_mfma_atom(
+                    spec->data.dtype_a, spec->warp_tile_m, spec->warp_tile_n, spec->warp_tile_k);
     int a_per_lane = op->a_frag_len;
     int b_per_lane = op->b_frag_len;
     int c_per_lane = op->c_frag_len;
@@ -1383,8 +1399,8 @@ static rocke_kernel_def_t*
     rocke_conv_lds_layout_t lds_layout = _dgrad_effective_lds_layout(spec);
     int a_shape[2] = {block_m, lds_layout.row_stride};
     int b_shape_arr[2] = {block_n, lds_layout.row_stride};
-    rocke_value_t* A_smem = rocke_b_smem_alloc(b, rocke_f16(), a_shape, 2, "A_smem");
-    rocke_value_t* B_smem = rocke_b_smem_alloc(b, rocke_f16(), b_shape_arr, 2, "B_smem");
+    rocke_value_t* A_smem = rocke_b_smem_alloc(b, ab_ir, a_shape, 2, "A_smem");
+    rocke_value_t* B_smem = rocke_b_smem_alloc(b, ab_ir, b_shape_arr, 2, "B_smem");
 
     // ---- MFMA tile counts ----
     int mfmas_m = rocke_dgrad_conv_spec_mfmas_per_warp_m(spec);
