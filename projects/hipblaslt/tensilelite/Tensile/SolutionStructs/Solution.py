@@ -1778,8 +1778,6 @@ class Solution(collections.abc.Mapping):
         # limits, stagger state, and LDS bank state before current-tile code
         # resumes. Keep rejecting axes whose borrowed-state contract is not
         # audited below.
-        # HalfPLR+PAP is validated narrowly in the HalfPLR block below because
-        # HalfPLR forces SuppressNoLoadLoop after this guard runs.
         if state["StreamK"] != 3:
           reject(state, printRejectionReason, "PrefetchAcrossPersistent is currently supported only with StreamK=3")
         if not state["BufferLoad"]:
@@ -1797,9 +1795,10 @@ class Solution(collections.abc.Mapping):
         if not state["BufferStore"]:
           reject(state, printRejectionReason, "PrefetchAcrossPersistent NLL path requires BufferStore")
         # HalfPLR sets SuppressNoLoadLoop after this guard runs. Its supported
-        # out-of-line PAP path is validated in the HalfPLR block below.
-        if state.get("SuppressNoLoadLoop", False):
-          reject(state, printRejectionReason, "PrefetchAcrossPersistent NLL path requires NoLoadLoop")
+        # out-of-line PAP path is validated in the HalfPLR block below. Add a
+        # condition here for clarity.
+        if state.get("SuppressNoLoadLoop", False) and not state["HalfPLR"]:
+          reject(state, printRejectionReason, "PrefetchAcrossPersistent NLL path requires NoLoadLoop if not using HalfPLR")
         if state["ProblemType"]["Sparse"]:
           reject(state, printRejectionReason, "PrefetchAcrossPersistent NLL path not supported with sparse")
         if state["StoreRemapVectorWidth"]:
