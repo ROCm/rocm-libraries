@@ -2,107 +2,107 @@ flag_management:
   default_rules:
     carryforward: false # drop unused flags by default instead of carrying forward perpetually
   individual_flags: # exceptions to the default rules above, stated flag by flag
-    -name: composable_kernel
+    - name: composable_kernel
       carryforward: true
       statuses:
       - type: project
         target: 80%
-    -name: hipBLASLt
+    - name: hipBLASLt
       carryforward: true
       statuses:
       - type: project
         target: 80%
-    -name: TensileLite-Unit
+    - name: TensileLite-Unit
       carryforward: true
       statuses:
       - type: project
         target: 80%
-    -name: TensileLite-CPP
+    - name: TensileLite-CPP
       carryforward: true
       statuses:
       - type: project
         target: 80%
-    -name: hipSPARSELt
+    - name: hipSPARSELt
       carryforward: true
       statuses:
       - type: project
         target: 80%
-    -name: rocBLAS
+    - name: rocBLAS
       carryforward: true
       statuses:
       - type: project
         target: 80%
-    -name: rocRAND
+    - name: rocRAND
       carryforward: true
       statuses:
       - type: project
         target: 80%
-    -name: hipRAND
+    - name: hipRAND
       carryforward: true
       statuses:
       - type: project
         target: 80%
-    -name: hipBLAS
+    - name: hipBLAS
       carryforward: true
       statuses:
       - type: project
         target: 80%
-    -name: rocPRIM
+    - name: rocPRIM
       carryforward: true
       statuses:
       - type: project
         target: 80%
-    -name: rocThrust
+    - name: rocThrust
       carryforward: true
       statuses:
       - type: project
         target: 80%
-    -name: hipCUB
+    - name: hipCUB
       carryforward: true
       statuses:
       - type: project
         target: 80%
-    -name: hipDNN
+    - name: hipDNN
       carryforward: true
       statuses:
       - type: project
         target: 80%
-    -name: rocRoller
+    - name: rocRoller
       carryforward: true
       statuses:
       - type: project
         target: 80%
-    -name: rocSPARSE
+    - name: rocSPARSE
       carryforward: true
       statuses:
       - type: project
         target: 80%
-    -name: hipSPARSE
+    - name: hipSPARSE
       carryforward: true
       statuses:
       - type: project
         target: 80%
-    -name: hipFFT
+    - name: hipFFT
       carryforward: true
       statuses:
       - type: project
         target: 80%
-    -name: rocFFT
+    - name: rocFFT
       carryforward: true
       statuses:
       - type: project
         target: 80%
-    -name: Tensile
+    - name: Tensile
       carryforward: true
       statuses:
       - type: project
         target: 80%
-    -name: rocSOLVER
+    - name: rocSOLVER
       carryforward: true
       statuses:
       - type: project
         target: 80%
-    -name: hipSOLVER
+    - name: hipSOLVER
       carryforward: true
       statuses:
       - type: project
