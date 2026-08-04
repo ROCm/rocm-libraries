@@ -154,11 +154,30 @@ TEST_F(GPU_StreamTracker_FP32, ScratchAllocateAndReuse)
     ASSERT_NE(s1, nullptr);
     EXPECT_GE(s1->size, 1024u);
 
+    // Same or smaller request while s1 is alive → same allocation returned
     auto s2 = handle.GetScratchBuffer(s1->size);
     EXPECT_EQ(s1, s2);
 
     auto s3 = handle.GetScratchBuffer(1);
     EXPECT_EQ(s1, s3);
+}
+
+TEST_F(GPU_StreamTracker_FP32, ScratchFreedWhenCallersRelease)
+{
+    // Core memory-pressure fix: Handle holds only weak_ptr, so scratch is freed
+    // as soon as all callers (TryNaiveWithTimeout stack frame + draining slots) drop refs.
+    auto scratch = handle.GetScratchBuffer(1024);
+    ASSERT_NE(scratch, nullptr);
+    EXPECT_EQ(scratch.use_count(), 1); // only local; Handle has weak_ptr
+
+    std::weak_ptr<ScratchAllocation> weak = scratch;
+    scratch.reset(); // simulate caller (find phase) completing
+    EXPECT_TRUE(weak.expired()); // no strong refs remain → allocation freed
+
+    // Next call must allocate fresh (weak_ptr expired)
+    auto s2 = handle.GetScratchBuffer(1024);
+    ASSERT_NE(s2, nullptr);
+    EXPECT_EQ(s2.use_count(), 1);
 }
 
 TEST_F(GPU_StreamTracker_FP32, ScratchGrows)
@@ -193,17 +212,18 @@ TEST_F(GPU_StreamTracker_FP32, ScratchSurvivesAbandon)
 
     auto scratch = handle.GetScratchBuffer(sz);
     ASSERT_NE(scratch, nullptr);
-    EXPECT_EQ(scratch.use_count(), 2); // local + handle active
+    // Handle holds weak_ptr only; local is the sole strong ref
+    EXPECT_EQ(scratch.use_count(), 1);
 
     auto slot    = tracker.acquire(handle);
     slot.scratch = scratch;
-    EXPECT_EQ(scratch.use_count(), 3); // local + handle + slot
+    EXPECT_EQ(scratch.use_count(), 2); // local + slot
 
     tracker.abandon(std::move(slot));
-    EXPECT_EQ(scratch.use_count(), 3); // local + handle + draining
+    EXPECT_EQ(scratch.use_count(), 2); // local + draining slot
 
     // No work on stream → hipStreamQuery succeeds → reclaim resets scratch
     auto reclaimed = tracker.acquire(handle);
-    EXPECT_EQ(scratch.use_count(), 2); // local + handle
+    EXPECT_EQ(scratch.use_count(), 1); // draining slot scratch reset; only local remains
     tracker.release(reclaimed);
 }
