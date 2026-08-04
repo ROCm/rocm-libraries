@@ -1991,6 +1991,16 @@ class Solution(collections.abc.Mapping):
       if state["ProblemType"]["DataType"].isDouble() and not (isaInfoMap[isa].asmCaps["HasMFMA_f64"] or isaInfoMap[isa].asmCaps["HasWMMA_V3_f64"]):
         reject(state, printRejectionReason, f"isa {isa} doesn't support matrix instruction with type f64")
         return
+      # Complex on WMMA (K>1) de-interleaves operands into temps just before each
+      # matrix op; SIA3 flat-schedules the mac items individually, separating the
+      # de-interleave moves from their consuming WMMA and recycling the temps early
+      # -> wrong results. Restrict such kernels to SIA<3 (gfx1250 uses SIA0).
+      if state["ProblemType"]["DataType"].isComplex() \
+         and not isaInfoMap[isa].asmCaps["HasMFMA"] \
+         and state["MatrixInstK"] > 1 \
+         and state["_ScheduleIterAlg"] == 3:
+        reject(state, printRejectionReason, "Complex WMMA de-interleave does not support ScheduleIterAlg=3")
+        return
       if state["InterleaveAlpha"]:
         reject(state, printRejectionReason, "Matrix instruction doesn't support InterleaveAlpha")
         return

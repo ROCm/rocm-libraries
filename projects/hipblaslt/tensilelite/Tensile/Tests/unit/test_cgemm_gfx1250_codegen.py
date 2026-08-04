@@ -19,7 +19,9 @@ from pathlib import Path
 
 from Tensile import Tensile
 
-_CONFIG = Path(__file__).parent / "test_data" / "cgemm_gfx1250.yaml"
+# Reuse the common CGEMM gfx1250 config (small enough to double as codegen input).
+_CONFIG = (Path(__file__).parent / ".." / "common" / "gemm" / "gfx12"
+           / "cgemm_gfx1250.yaml").resolve()
 
 
 def _gfx1250_asm_supported() -> bool:

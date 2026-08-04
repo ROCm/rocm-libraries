@@ -1,10 +1,6 @@
-# Copyright Advanced Micro Devices, Inc., or its affiliates.
-# SPDX-License-Identifier: MIT
-# ZGEMM (complex-double) on gfx1250. gfx1250 has no f64 matrix instruction, so
-# ZGEMM runs the VALU v_fma_f64 path (EnableMatrixInstruction=false, SIA0), like
-# real DGEMM on this arch. The MFMA-based top-level zgemm.yaml does not apply here.
 TestParameters:
   marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # not supported by arch
+  # gfx1250 ZGEMM uses the f64 VALU MAC path, so it does not share zgemm.yaml.
 
 GlobalParameters:
   SyncsPerBenchmark: 0
@@ -26,9 +22,9 @@ BenchmarkProblems:
     - {OperationType: GEMM, DataType: z, DestDataType: z, ComputeDataType: z, TransposeA: False, TransposeB: False, UseBeta: True, Batched: True}
     - BenchmarkCommonParameters: [{KernelLanguage: ["Assembly"]}]
       ForkParameters: &zvalu
-        - ThreadTile: [[2,2],[4,4]]
+        - ThreadTile: [[1,1],[2,2],[4,4]]
         - WorkGroup: [[8,4,1],[4,8,1]]
-        - DepthU: [8,16]
+        - DepthU: [8,16,32]
         - StaggerU: [0]
         - ScheduleIterAlg: [0]
         - PrefetchLocalRead: [1]
