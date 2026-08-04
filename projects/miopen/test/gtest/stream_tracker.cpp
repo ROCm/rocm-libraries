@@ -164,13 +164,12 @@ TEST_F(GPU_StreamTracker_FP32, ScratchAllocateAndReuse)
 
 TEST_F(GPU_StreamTracker_FP32, ScratchFreedWhenCallersRelease)
 {
-    // Force a fresh allocation larger than anything the shared Handle has cached.
-    auto prior    = handle.GetScratchBuffer(1);
-    const auto sz = (prior ? prior->size : 0) + 131072;
-    prior.reset();
+    // Fresh Handle so no other test can hold a ref to this scratch allocation.
+    miopen::Handle fresh_handle{};
 
-    auto scratch = handle.GetScratchBuffer(sz);
+    auto scratch = fresh_handle.GetScratchBuffer(1024);
     ASSERT_NE(scratch, nullptr);
+    EXPECT_GE(scratch->size, 1024u);
 
     std::weak_ptr<miopen::ScratchAllocation> weak = scratch;
     scratch.reset();
