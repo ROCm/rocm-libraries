@@ -27,6 +27,7 @@
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt-ext.hpp>
 #include <iostream>
+#include <roc/host_validation/validation.hpp>
 
 #include "helper.h"
 
@@ -50,61 +51,48 @@ void simpleGemmMixPrecisionExt(hipblasLtHandle_t  handle,
 template <typename TypeA, typename TypeB, typename TypeCD, typename AlphaType, typename BetaType>
 int validate(const Runner<TypeA, TypeB, TypeCD, AlphaType, BetaType>& runner)
 {
-    std::vector<float> ref(runner.m * runner.n * runner.batch_count, 0);
-    float              scaleA{2.f};
+    std::vector<TypeCD> reference(runner.m * runner.n * runner.batch_count);
+    constexpr float     scaleA{2.f};
+
+    const auto batchStrideA = runner.m * runner.k;
+    const auto batchStrideB = runner.k * runner.n;
+    const auto batchStrideC = runner.m * runner.n;
+    const auto batchStrideD = runner.m * runner.n;
+    const TypeA* aPtr       = reinterpret_cast<const TypeA*>(runner.a);
+    const TypeB* bPtr       = reinterpret_cast<const TypeB*>(runner.b);
+    const TypeCD* cPtr      = reinterpret_cast<const TypeCD*>(runner.c);
 
     for(int64_t b = 0; b < runner.batch_count; ++b)
     {
-        const auto    batchStrideA = runner.m * runner.k;
-        const auto    batchStrideB = runner.k * runner.n;
-        const auto    batchStrideC = runner.m * runner.n;
-        const auto    batchStrideD = runner.m * runner.n;
-        const TypeA*  aPtr         = reinterpret_cast<const TypeA*>(runner.a);
-        const TypeB*  bPtr         = reinterpret_cast<const TypeB*>(runner.b);
-        const TypeCD* cPtr         = reinterpret_cast<const TypeCD*>(runner.c);
-        for(int64_t i = 0; i < runner.m; ++i)
-        {
-            for(int64_t j = 0; j < runner.n; ++j)
-            {
-                for(int64_t k = 0; k < runner.k; ++k)
-                {
-                    ref[batchStrideD * b + j * runner.m + i]
-                        += scaleA * float(aPtr[batchStrideA * b + runner.m * k + i])
-                           * float(bPtr[batchStrideB * b + runner.k * j + k]);
-                }
-
-                ref[batchStrideD * b + j * runner.m + i] *= runner.alpha;
-                ref[batchStrideD * b + j * runner.m + i]
-                    += runner.beta * cPtr[batchStrideC * b + j * runner.m + i];
-            }
-        }
+        roc::host_validation::GemmInvocation<TypeA, TypeB, TypeCD, TypeCD, float> invocation{
+            roc::host_validation::ConstMatrixView<TypeA>(
+                aPtr + batchStrideA * b, runner.m, runner.k, 1, runner.m),
+            roc::host_validation::ConstMatrixView<TypeB>(
+                bPtr + batchStrideB * b, runner.k, runner.n, 1, runner.k),
+            roc::host_validation::ConstMatrixView<TypeCD>(
+                cPtr + batchStrideC * b, runner.m, runner.n, 1, runner.m),
+            roc::host_validation::MatrixView<TypeCD>(
+                reference.data() + batchStrideD * b, runner.m, runner.n, 1, runner.m)};
+        invocation.alpha = static_cast<float>(runner.alpha) * scaleA;
+        invocation.beta  = static_cast<float>(runner.beta);
+        roc::host_validation::referenceGemm(invocation);
     }
 
     std::vector<TypeCD> gpuResult(runner.m * runner.n * runner.batch_count);
     CHECK_HIP_ERROR(hipMemcpyDtoH(
         gpuResult.data(), runner.d_d, runner.batch_count * runner.m * runner.n * sizeof(TypeCD)));
 
-    for(int64_t b = 0; b < runner.batch_count; ++b)
+    const auto comparison
+        = roc::host_validation::compare(std::span<const TypeCD>(gpuResult),
+                                        std::span<const TypeCD>(reference),
+                                        {.absoluteTolerance = 1e-5,
+                                         .maxReportedMismatches = 10});
+    for(const auto& mismatch : comparison.reportedMismatches)
     {
-        const auto batchStrideD = runner.m * runner.n;
-        for(int64_t i = 0; i < runner.m; ++i)
-        {
-            for(int64_t j = 0; j < runner.n; ++j)
-            {
-                const auto lhs = float(TypeCD(ref[batchStrideD * b + j * runner.m + i]));
-                const auto rhs = float(gpuResult[batchStrideD * b + j * runner.m + i]);
-
-                if(std::abs(lhs - rhs) > 1e-5)
-                {
-                    std::cout << lhs << " vs " << rhs << '\n';
-                    // assert(ref[batchStrideD * b + j * runner.m + i] == float(gpuResult[batchStrideD * b + j * runner.m + i]));
-                    return -1;
-                }
-            }
-        }
+        std::cout << mismatch.expected << " vs " << mismatch.observed << '\n';
     }
 
-    return 0;
+    return comparison.passed() ? 0 : -1;
 }
 
 int main()

@@ -4,8 +4,8 @@
 #include <gtest/gtest.h>
 #include "DataInitialization.hpp"             // isMXTensor / Problem
 #include "ClientProblemFactory.hpp"
-#include "DataInitializationHelpers.hpp"    // detail::* (MX-only, internally guarded)
 #include "ProgramOptions.hpp"
+#include <roc/host_validation/adapters/tensilelite/DataInitializationHelpers.hpp>
 #include <Tensile/ContractionProblem.hpp>
 #include <Tensile/ContractionSolution.hpp>
 #include <Tensile/DataTypes.hpp>

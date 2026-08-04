@@ -26,15 +26,13 @@
 
 #pragma once
 
-#include "cblas.h"
 #include "datatype_interface.hpp"
 #include "hipblaslt_ostream.hpp"
 #include <hipblaslt/hipblaslt.h>
 #include <type_traits>
 
 /*!\file
- * \brief provide template functions interfaces to CBLAS C89 interfaces, it is only used for testing
- * not part of the GPU library
+ * \brief hipBLASLt type-erased bridge to the shared host reference GEMM.
  */
 
 #ifdef HIPBLASLT_ENABLE_BLIS
@@ -43,7 +41,7 @@ void setup_blis();
 
 // gemm
 template <typename Tc>
-void cblas_gemm(hipblasOperation_t       transA,
+void hipblaslt_reference_gemm(hipblasOperation_t       transA,
                 hipblasOperation_t       transB,
                 int64_t                  m,
                 int64_t                  n,
@@ -72,7 +70,7 @@ void cblas_gemm(hipblasOperation_t       transA,
                 bool                     isScaleAMXFormat = false,
                 bool                     isScaleBMXFormat = false);
 
-inline void cblas_gemm(hipblasOperation_t       transA,
+inline void hipblaslt_reference_gemm(hipblasOperation_t       transA,
                        hipblasOperation_t       transB,
                        int64_t                  m,
                        int64_t                  n,
@@ -110,7 +108,7 @@ inline void cblas_gemm(hipblasOperation_t       transA,
     {
         if(tiA == HIP_C_32F)
         {
-            cblas_gemm<std::complex<float>>(transA,
+            hipblaslt_reference_gemm<std::complex<float>>(transA,
                                             transB,
                                             m,
                                             n,
@@ -142,7 +140,7 @@ inline void cblas_gemm(hipblasOperation_t       transA,
         }
         else
         {
-            cblas_gemm<std::complex<double>>(transA,
+            hipblaslt_reference_gemm<std::complex<double>>(transA,
                                              transB,
                                              m,
                                              n,
@@ -176,7 +174,7 @@ inline void cblas_gemm(hipblasOperation_t       transA,
         switch(tc)
         {
         case HIP_R_16F: // setting compute_type to f16_r will fallback to f32_r
-            cblas_gemm<hipblasLtHalf>(transA,
+            hipblaslt_reference_gemm<hipblasLtHalf>(transA,
                                       transB,
                                       m,
                                       n,
@@ -204,7 +202,7 @@ inline void cblas_gemm(hipblasOperation_t       transA,
                                       alt);
             return;
         case HIP_R_32F:
-            cblas_gemm<float>(transA,
+            hipblaslt_reference_gemm<float>(transA,
                               transB,
                               m,
                               n,
@@ -235,7 +233,7 @@ inline void cblas_gemm(hipblasOperation_t       transA,
 
             return;
         case HIP_R_64F:
-            cblas_gemm<double>(transA,
+            hipblaslt_reference_gemm<double>(transA,
                                transB,
                                m,
                                n,
@@ -263,7 +261,7 @@ inline void cblas_gemm(hipblasOperation_t       transA,
                                alt);
             return;
         case HIP_R_32I:
-            cblas_gemm<int32_t>(transA,
+            hipblaslt_reference_gemm<int32_t>(transA,
                                 transB,
                                 m,
                                 n,
@@ -291,7 +289,7 @@ inline void cblas_gemm(hipblasOperation_t       transA,
                                 alt);
             return;
         default:
-            hipblaslt_cerr << "Error type in cblas_gemm()" << std::endl;
+            hipblaslt_cerr << "Error type in hipblaslt_reference_gemm()" << std::endl;
             return;
         }
     }

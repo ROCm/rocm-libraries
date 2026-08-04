@@ -25,7 +25,7 @@
  *******************************************************************************/
 
 #include "ReferenceValidator.hpp"
-#include "ResultComparison.hpp"
+#include <roc/host_validation/adapters/tensilelite/ResultComparison.hpp>
 #include "ResultReporter.hpp"
 #include "TimingInstrumentation.hpp"
 

@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022 Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,7 +24,7 @@
  *
  *******************************************************************************/
 
-#include "hipblaslt_random.hpp"
+#include <roc/host_validation/adapters/hipblaslt/hipblaslt_random.hpp>
 
 // Random number generator
 // Note: We do not use random_device to initialize the RNG, because we want
