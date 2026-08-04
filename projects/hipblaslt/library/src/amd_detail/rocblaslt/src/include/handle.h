@@ -138,9 +138,6 @@ struct _rocblaslt_handle
     // HIPBLASLT_CHECK_STREAMK_SYNC state. Read once in the ctor; opt-in via
     // env. See check_streamk_sync.hpp for the checker protocol.
     bool check_streamk_sync = false;
-    // Set by the most recent scan; true if the Synchronizer buffer was left
-    // dirty. Queried by tests via hipblaslt_debug_streamk_sync_was_dirty.
-    bool check_streamk_sync_dirty = false;
 
     // Kernels treat these buffers as inter-workgroup flags that they set, spin
     // on, and reset themselves, so a flag region may only be touched by one
