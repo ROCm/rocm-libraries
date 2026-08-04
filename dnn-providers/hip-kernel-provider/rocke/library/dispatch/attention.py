@@ -355,7 +355,7 @@ def _dense_spec(req: OperatorRequest):
         raise ValueError(
             f"dense_persistent must be 'auto'/'on'/'off', got {req.dense_persistent!r}"
         )
-    return AttentionDenseSpec(
+    spec = AttentionDenseSpec(
         batch=int(req.batch),
         seqlen_q=sq,
         seqlen_kv=sk,
@@ -370,6 +370,19 @@ def _dense_spec(req: OperatorRequest):
         persist_decode=req.dense_persist_decode.strip().lower(),
         ragged=ragged,
     )
+    # gfx942 (AICK-1664) P3 occupancy tuning: override waves_per_eu per config so the
+    # kernel_name wpe tag AND the emitted amdgpu-waves-per-eu attribute both carry the
+    # tuned value (bf16 D64 -> 4 reaches 2 WG/CU, +~50% at long seq). Gated on gfx942
+    # so the shared gfx950 candidate keeps the spec default (waves_per_eu=2) untouched.
+    if req.arch == "gfx942":
+        import dataclasses
+
+        from kernels.gfx942.attention_dense import _p0_waves_per_eu
+
+        wpe = _p0_waves_per_eu(spec.head_size, spec.dtype)
+        if wpe != spec.waves_per_eu:
+            spec = dataclasses.replace(spec, waves_per_eu=wpe)
+    return spec
 
 
 def dense_spec_for_request(req: AttentionRequest):

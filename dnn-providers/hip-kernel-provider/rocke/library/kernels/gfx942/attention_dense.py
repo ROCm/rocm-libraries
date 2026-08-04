@@ -55,7 +55,9 @@ Implementation status (see the AICK-1664 plan for the full ordered work list)
   * P1  conflict-free V (perm_b32 store-path transpose) ........ DONE (D128 fp16)
   * P2  exp2_fast + fused/lazy rescale ........................ DONE (exp2_fast all
         but bf16 D128; fused rescale bit-identical, enables bf16 D64 exp2_fast)
-  * P3  wide4 (WG=256) + K bank-pad retune + K single-buffer ... TODO
+  * P3  occupancy: waves-per-eu tune (bf16 D64 -> wpe4 = 2 WG/CU),
+        wide4 (WG=256) + K bank-pad retune + K single-buffer ...... IN PROGRESS
+        (waves-per-eu DONE via _p0_waves_per_eu; wide4 / K-pad / K-single-buf TODO)
   * P4  persistent grid-stride + hkv_major decode .............. TODO
   * P5  diagonal masking (re-test only), partial-vmcnt prefetch  TODO
 
@@ -239,6 +241,34 @@ def _p0_use_cfvst(head_size: int, dtype: str) -> bool:
     Gate on rows-per-DMA == 1 (D128) AND fp16 so the LDS budget and the body agree.
     """
     return _p0_rows_per_instr(head_size) == 1 and dtype == "fp16"
+
+
+def _p0_waves_per_eu(head_size: int, dtype: str) -> int:
+    """Tuned ``amdgpu-waves-per-eu`` per config (P3 occupancy).
+
+    Default 2 (one WG/CU = 2 waves/SIMD at this kernel's ~175-217 VGPR). The one
+    override is **bf16 D64 -> 4**, which forces the allocator from 215 VGPR down to
+    ~117 (0 spill). D64's LDS is only 16 KB (allows 4 WGs), so the smaller per-wave
+    budget lets a SECOND WG co-reside (2 WG/CU), and the bf16 ``.1k`` schedule is
+    serialized enough at wpe=2 that its HBM latency is EXPOSED -- the extra resident
+    WG hides it. Measured on MI300X: S512 +~77%, S8192 +~48%, S256 neutral, S2048
+    ~-1.5% (noise); strongly net-positive, so no seqlen gate.
+
+    Why not the other configs (all measured, all kept at 2):
+      * fp16 D64: wpe=3 already reaches 2 WG/CU at 116 VGPR / 0 spill, but its wpe=2
+        schedule ALREADY hides the latency via ILP (the 214 VGPR is scheduler headroom
+        spent on in-flight LDS reads, plan §6.1) -- halving per-wave registers loses
+        more ILP than the 2nd WG buys (S2048 81.5 -> 79.8, slightly negative).
+      * D128 (either dtype): LDS-bound at ~35 KB, so 2 x 35 > 64 KB -- no wpe value
+        reaches a 2nd WG/CU. Occupancy there is an LDS-footprint problem (P3 K/V-pad
+        or single-buffer work), not a waves-per-eu knob.
+
+    Consumed by the gfx942 dispatch spec factory (``_dense_spec``) so the kernel_name
+    ``wpe{N}`` tag and the emitted ``amdgpu-waves-per-eu`` attribute always agree.
+    """
+    if dtype == "bf16" and head_size == 64:
+        return 4
+    return 2
 
 
 def _p0_lds_row_stride(head_size: int) -> int:

@@ -38,6 +38,7 @@ from kernels.gfx942.attention_dense import (
     supports_attention_dense,
     _p0_use_cfvst,
     _p0_use_exp2_fast,
+    _p0_waves_per_eu,
 )
 
 # Query rows per CTA baked into the P0 body; block_n must divide it.
@@ -508,3 +509,103 @@ def test_fused_rescale_casts_each_p_exactly_once(head_size, dtype):
     assert (
         n_exp == n_p + 1
     ), f"{dtype} D{head_size}: expected {n_p + 1} exps (P + alpha), got {n_exp}"
+
+
+# --------------------------------------------------------------------------- #
+# P3 waves-per-eu occupancy tune
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize(
+    "head_size, dtype, expected",
+    [
+        (64, "bf16", 4),  # 2 WG/CU (215->117 VGPR, 0 spill) -- +~50% at long seq
+        (64, "fp16", 2),  # wpe=3 reaches 2 WG/CU but loses more ILP than it buys
+        (128, "fp16", 2),  # LDS-bound at ~35 KB: no wpe reaches a 2nd WG/CU
+        (128, "bf16", 2),  # LDS-bound: same
+    ],
+)
+def test_waves_per_eu_selector_matches_measured_matrix(head_size, dtype, expected):
+    """The per-config waves-per-eu is a measured occupancy fact, not a preference.
+
+    Only bf16 D64 is overridden (to 4); every other config keeps the default 2. This
+    pins the exact matrix so a future edit that flips one arm must update it on purpose
+    (see :func:`_p0_waves_per_eu` for the per-config measurement rationale).
+    """
+    assert _p0_waves_per_eu(head_size, dtype) == expected
+
+
+def test_build_bakes_the_tuned_waves_per_eu_attribute():
+    """The tuned value reaches the emitted ``amdgpu-waves-per-eu`` kernel attribute.
+
+    waves_per_eu changes register allocation and is baked into both the kernel_name
+    (``wpe{N}``) and the attribute, so a spec built at waves_per_eu=4 must emit the 4
+    attribute -- otherwise the name and the binary disagree (the cache-collision class
+    of bug guarded elsewhere by :func:`p0_kernel_name`).
+    """
+    spec = _spec(head_size=64, dtype="bf16", waves_per_eu=4)
+    kernel = build_attention_dense(spec, arch="gfx942")
+    assert kernel.attrs.get("waves_per_eu") == 4
+    # anchored on the full baked suffix, not a bare "_wpe4" (which "_wpe14" would
+    # also match): batch + arch + wpe are all part of the identity.
+    assert p0_kernel_name(spec).endswith("_gfx942_b1_wpe4")
+
+
+def test_dispatch_applies_gfx942_waves_per_eu_tuning_and_leaves_gfx950_alone():
+    """The gfx942 dispatch spec factory applies the tune; gfx950 stays at the default.
+
+    The tune lives in the shared ``_dense_spec`` gated on ``req.arch == 'gfx942'`` so
+    the kernel_name ``wpe`` tag and the emitted attribute agree on the dispatched path
+    (``dense_spec_for_request`` -> ``run_attention_dense_torch``). gfx950 reuses the
+    same factory and MUST keep the spec default (waves_per_eu=2) -- this is the
+    do-not-touch-gfx950 guard as an executable assertion.
+    """
+    from dispatch.attention import _dense_spec, AttentionRequest
+
+    # The gfx942 tune is an OVERRIDE relative to the shared spec's default; if that
+    # default (owned by the gfx950 file) ever shifts, the "== 2" baseline below would
+    # be silently wrong. Pin it so the assumption is explicit and fails loudly.
+    assert (
+        AttentionDenseSpec(
+            batch=1,
+            seqlen_q=2048,
+            seqlen_kv=2048,
+            num_query_heads=16,
+            num_kv_heads=4,
+            head_size=64,
+            dtype="bf16",
+            causal=True,
+            block_n=64,
+        ).waves_per_eu
+        == 2
+    )
+
+    def _req(dtype, d, arch):
+        return AttentionRequest(
+            batch=1,
+            nhead_q=16,
+            nhead_k=4,
+            seqlen_q=2048,
+            seqlen_k=2048,
+            hdim_q=d,
+            hdim_v=d,
+            arch=arch,
+            mask_type=1,
+            dtype=dtype,
+            algorithm="attention_dense",
+            dense_persistent="off",
+        )
+
+    # gfx942: only bf16 D64 is bumped to 4.
+    assert _dense_spec(_req("bf16", 64, "gfx942")).waves_per_eu == 4
+    assert _dense_spec(_req("fp16", 64, "gfx942")).waves_per_eu == 2
+    assert _dense_spec(_req("bf16", 128, "gfx942")).waves_per_eu == 2
+    assert _dense_spec(_req("fp16", 128, "gfx942")).waves_per_eu == 2
+    # gfx950: untouched, spec default preserved even for the bf16-D64 shape.
+    assert _dense_spec(_req("bf16", 64, "gfx950")).waves_per_eu == 2
+
+    # End-to-end: the dispatched (tuned) spec's wpe actually reaches the emitted
+    # attribute -- not just the spec field. Guards against a builder that ignores
+    # spec.waves_per_eu (which would keep the name/binary from agreeing).
+    tuned = _dense_spec(_req("bf16", 64, "gfx942"))
+    kernel = build_attention_dense(tuned, arch="gfx942")
+    assert kernel.attrs.get("waves_per_eu") == 4
+    assert p0_kernel_name(tuned).endswith("_wpe4")
