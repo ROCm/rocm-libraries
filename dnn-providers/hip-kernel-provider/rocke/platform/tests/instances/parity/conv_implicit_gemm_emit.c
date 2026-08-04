@@ -94,6 +94,13 @@ static int make_cfg(int idx, rocke_implicit_gemm_conv_spec_t* spec, const char**
         spec->chiplet_chunk_size = 64;
         *arch = "gfx950";
         return 0;
+    case 10:
+        /* cshuffle with cshuffle_no_alias=True (idx 2 shape). */
+        spec->problem = rocke_conv_problem_default(16, 112, 112, 128, 128, 3, 3);
+        spec->epilogue = "cshuffle";
+        spec->cshuffle_no_alias = true;
+        *arch = "gfx950";
+        return 0;
     default:
         return -1;
     }

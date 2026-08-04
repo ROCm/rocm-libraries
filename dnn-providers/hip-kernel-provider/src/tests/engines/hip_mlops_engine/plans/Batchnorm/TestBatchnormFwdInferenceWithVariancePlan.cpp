@@ -55,7 +55,7 @@ TEST(TestBatchnormFwdInferenceWithVarianceParams, HasCorrectTensorPointersForSin
     EXPECT_NE(params.bias(), nullptr);
     EXPECT_NE(params.estMean(), nullptr);
     EXPECT_NE(params.estVariance(), nullptr);
-    EXPECT_NEAR(params.epsilonValue(), 1e-5, 1e-10);
+    EXPECT_NEAR(params.epsilonValue(nullptr, 0), 1e-5, 1e-10);
 
     // No activation in this graph, so these should be nullopt / nullptr
     EXPECT_EQ(params.optActivation(), std::nullopt);

@@ -56,8 +56,13 @@ add_executable(
     IntegrationMatmulDescriptorLowering.cpp
     IntegrationPointwiseDescriptorLifting.cpp
     IntegrationPointwiseDescriptorLowering.cpp
+    IntegrationRaggedTensorDescriptorLowering.cpp
+    IntegrationPassByValueVersionFilter.cpp
+    IntegrationPassByValueDelivery.cpp
     IntegrationResampleFwdDescriptorLifting.cpp
     IntegrationResampleFwdDescriptorLowering.cpp
+    IntegrationResampleBwdDescriptorLifting.cpp
+    IntegrationResampleBwdDescriptorLowering.cpp
     IntegrationReductionDescriptorLifting.cpp
     IntegrationReductionDescriptorLowering.cpp
     IntegrationRMSNormDescriptorLifting.cpp
@@ -122,6 +127,8 @@ function(configure_hipdnn_public_frontend_test_target TARGET_NAME)
                 TEST_SECOND_OVERRIDE_PLUGIN_NAME="${HIPDNN_TEST_SECOND_OVERRIDE_PLUGIN_TARGET}"
                 TEST_MALFORMED_VERSION_PLUGIN_NAME="${HIPDNN_TEST_MALFORMED_VERSION_PLUGIN_TARGET}"
                 TEST_VERSION_ZERO_PLUGIN_NAME="${HIPDNN_TEST_VERSION_ZERO_PLUGIN_TARGET}"
+                TEST_PASS_BY_VALUE_PLUGIN_NAME="${HIPDNN_TEST_PASS_BY_VALUE_PLUGIN_TARGET}"
+                TEST_PASS_BY_VALUE_RECORDER_PLUGIN_NAME="${HIPDNN_TEST_PASS_BY_VALUE_RECORDER_PLUGIN_TARGET}"
                 TEST_GOOD_HEURISTIC_PLUGIN_NAME="${TEST_GOOD_HEURISTIC_PLUGIN_NAME}"
                 TEST_AUTOTUNE_PLUGIN_NAME="${TEST_AUTOTUNE_PLUGIN_NAME}"
     )
@@ -146,6 +153,8 @@ function(configure_hipdnn_public_frontend_test_target TARGET_NAME)
         ${HIPDNN_TEST_SECOND_OVERRIDE_PLUGIN_TARGET}
         ${HIPDNN_TEST_MALFORMED_VERSION_PLUGIN_TARGET}
         ${HIPDNN_TEST_VERSION_ZERO_PLUGIN_TARGET}
+        ${HIPDNN_TEST_PASS_BY_VALUE_PLUGIN_TARGET}
+        ${HIPDNN_TEST_PASS_BY_VALUE_RECORDER_PLUGIN_TARGET}
         ${TEST_GOOD_HEURISTIC_PLUGIN_NAME}
         test_autotune_plugin
     )

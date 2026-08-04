@@ -52,8 +52,10 @@ endif()
 # Configure a header file to pass the rocSPARSE version and build-time
 # feature flags. Variables referenced via #cmakedefine in the .h.in must
 # be set (or unset) prior to this configure_file() call.
+set(ROCSPARSE_WITH_HANDLE_CREATE ${ROCSPARSE_ENABLE_HANDLE_CREATE})
 set(ROCSPARSE_WITH_ILDLT0 ${BUILD_WITH_ILDLT0})
 set(ROCSPARSE_WITH_U16_REMOVED ${BUILD_WITH_U16_REMOVED})
+set(ROCSPARSE_WITH_ILU0_BOOST_SIGN ${ROCSPARSE_ENABLE_ILU0_BOOST_SIGN})
 
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/include/rocsparse-version.h.in"
                "${PROJECT_BINARY_DIR}/include/rocsparse/rocsparse-version.h"
@@ -175,6 +177,16 @@ if (NOT WIN32)
       endif()
     endif()
   endif()
+endif()
+
+# CSC triangular solve support (rocsparse_spsv / rocsparse_sptrsv)
+if(BUILD_WITH_CSC_TRSV)
+  target_compile_definitions(rocsparse PRIVATE ROCSPARSE_WITH_CSC_TRSV)
+endif()
+
+# CSC triangular solve support (rocsparse_spsm / rocsparse_sptrsm)
+if(BUILD_WITH_CSC_TRSM)
+  target_compile_definitions(rocsparse PRIVATE ROCSPARSE_WITH_CSC_TRSM)
 endif()
 
 # Target properties

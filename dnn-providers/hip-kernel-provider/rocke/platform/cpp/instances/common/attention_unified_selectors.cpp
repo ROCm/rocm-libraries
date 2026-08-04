@@ -32,7 +32,9 @@
  * context).
  *
  * TODO(port): wire a real runtime.hip_module.get_device_arch() query when the
- * C runtime surface exposes one. Until then this faithfully reproduces the
+ * C runtime surface exposes one. The Python runtime now offers get_device_arch,
+ * get_device_name, and get_device_count as HIP-backed queries; mirror them under
+ * matching names when this port lands. Until then this faithfully reproduces the
  * documented fallback (the only arch the tiled MFMA path supports by default)
  * and lets a host override the resolution via the setter below. */
 static const char* g_resolved_attention_arch = NULL;
@@ -50,6 +52,48 @@ static const char* rocke_unified_attn_resolve_arch(void)
 static bool arch_is(const char* want)
 {
     return strcmp(rocke_unified_attn_resolve_arch(), want) == 0;
+}
+
+/* ----------------------------------------------------- env off-switch gate */
+
+/* Mirror Python's ``os.environ.get(name, "").strip().lower() in
+ * ("0","false","no","off")`` for a boolean feature kill-switch. Returns true
+ * when the env var is set to a recognized OFF keyword (feature force-disabled),
+ * false otherwise (unset, empty, or any other value -> feature stays enabled).
+ *
+ * Strips leading/trailing ASCII whitespace and case-folds before comparison so
+ * values like ``"0 "`` / ``" off"`` behave identically to the Python gate. */
+static bool rocke_env_forces_off(const char* name)
+{
+    const char* env = getenv(name);
+    if(env == NULL)
+    {
+        return false;
+    }
+    /* skip leading whitespace (Python str.strip default set) */
+    while(*env == ' ' || *env == '\t' || *env == '\n' || *env == '\r' || *env == '\v'
+          || *env == '\f')
+    {
+        ++env;
+    }
+    /* copy + case-fold up to the first trailing-whitespace / capacity bound */
+    char buf[16];
+    size_t n = 0;
+    for(; env[n] != '\0' && n + 1 < sizeof(buf); ++n)
+    {
+        char c = env[n];
+        buf[n] = (c >= 'A' && c <= 'Z') ? (char)(c - 'A' + 'a') : c;
+    }
+    buf[n] = '\0';
+    /* trim trailing whitespace */
+    while(n > 0
+          && (buf[n - 1] == ' ' || buf[n - 1] == '\t' || buf[n - 1] == '\n' || buf[n - 1] == '\r'
+              || buf[n - 1] == '\v' || buf[n - 1] == '\f'))
+    {
+        buf[--n] = '\0';
+    }
+    return strcmp(buf, "0") == 0 || strcmp(buf, "false") == 0 || strcmp(buf, "no") == 0
+           || strcmp(buf, "off") == 0;
 }
 
 /* ----------------------------------------------------- num_queries_per_kv */
@@ -177,24 +221,26 @@ static bool enable_single_batch_combo(const rocke_unified_attn_problem_t* p)
  * the Python helper's env gate byte-faithfully (case-folded, off-keywords only). */
 static bool enable_d128_small_tile(const rocke_unified_attn_problem_t* p)
 {
-    const char* env = getenv("HIPDNN_GFX950_D128_SMALL_TILE");
-    if(env != NULL)
+    /* ESCAPE HATCH: HIPDNN_GFX950_D128_SMALL_TILE=0 (or off/no/false)
+       force-DISABLES it. Mirrors the Python .strip().lower() env gate. */
+    if(rocke_env_forces_off("HIPDNN_GFX950_D128_SMALL_TILE"))
     {
-        /* case-fold then compare to the OFF keywords (matches Python
-           .strip().lower() in ("0","false","no","off")). */
-        char buf[16];
-        size_t i = 0;
-        for(; env[i] != '\0' && i + 1 < sizeof(buf); ++i)
-        {
-            char c = env[i];
-            buf[i] = (c >= 'A' && c <= 'Z') ? (char)(c - 'A' + 'a') : c;
-        }
-        buf[i] = '\0';
-        if(strcmp(buf, "0") == 0 || strcmp(buf, "false") == 0 || strcmp(buf, "no") == 0
-           || strcmp(buf, "off") == 0)
-        {
-            return false;
-        }
+        return false;
+    }
+    return p->head_size == 128 && !p->use_fp8 && enable_single_batch_combo(p);
+}
+
+/* Python: _enable_softmax_mfma_interleave(problem). gfx950 single-batch d128
+ * prefill: enable use_softmax_mfma_interleave (iglp_opt(1)) and widen to nw=4.
+ * The widened kernel is occupancy-BETTER than the shipped nw=2 (250 vs 296 VGPR,
+ * 8 vs 4 waves/CU), so it does not trip the d128 small-tile nw=2 reconciliation.
+ * ESCAPE HATCH: HIPDNN_GFX950_D128_SOFTMAX_INTERLEAVE=0 (or off/no/false)
+ * force-DISABLES it. Mirrors the Python env gate byte-faithfully. */
+static bool enable_softmax_mfma_interleave(const rocke_unified_attn_problem_t* p)
+{
+    if(rocke_env_forces_off("HIPDNN_GFX950_D128_SOFTMAX_INTERLEAVE"))
+    {
+        return false;
     }
     return p->head_size == 128 && !p->use_fp8 && enable_single_batch_combo(p);
 }
@@ -390,6 +436,16 @@ static int select_2d_tile_size(const rocke_unified_attn_problem_t* p)
         {
             return 128;
         }
+        /* d128 softmax-MFMA-interleave cohort keeps the WIDE T=2*BS tile (the
+           nw=4 interleave win is measured at the wide tile; nw=4 + T=32 is the
+           occupancy-WORSE combo -- 56 KB LDS -> 1 WG/CU). Guard BEFORE the
+           small-tile check so this cohort mirrors Python _select_2d_tile_size
+           (which returns 2*block_size here). Matches the num_warps selector's
+           interleave-before-small-tile ordering. */
+        if(enable_softmax_mfma_interleave(p))
+        {
+            return 2 * p->block_size;
+        }
         /* d128 occupancy lever: halve the tile to T=block_size (one paged
            block per iter) -> LDS 48->24 KB -> 2 WG/CU. DEFAULT-ON;
            HIPDNN_GFX950_D128_SMALL_TILE=0 force-disables. */
@@ -439,6 +495,10 @@ int rocke_unified_attn_select_2d_num_warps(const rocke_unified_attn_problem_t* p
     /* gfx942 D64 oracle. */
     if(arch_is("gfx942") && p->head_size == 64)
     {
+        if(p->max_seqlen_q == 1 && !p->use_fp8)
+        {
+            return 1;
+        }
         return 4;
     }
     if(enable_combo_2d(p))
@@ -474,6 +534,15 @@ int rocke_unified_attn_select_2d_num_warps(const rocke_unified_attn_problem_t* p
         int BS = p->block_size;
         int T = select_2d_tile_size(p);
         if(p->head_size == 64)
+        {
+            t2 = 4;
+        }
+        /* d128 softmax-MFMA-interleave cohort: widen to nw=4. The interleaved
+           kernel is occupancy-BETTER than the shipped nw=2 (250 vs 296 VGPR,
+           8 vs 4 waves/CU -- see enable_softmax_mfma_interleave), so the
+           small-tile nw=2 reconciliation below does not apply. Overrides the
+           _enable_d128_small_tile -> nw=2 rule for this cohort only. */
+        else if(enable_softmax_mfma_interleave(p))
         {
             t2 = 4;
         }
@@ -744,6 +813,11 @@ bool rocke_unified_attn_enable_d128_small_tile(const rocke_unified_attn_problem_
     return enable_d128_small_tile(p);
 }
 
+bool rocke_unified_attn_enable_softmax_mfma_interleave(const rocke_unified_attn_problem_t* p)
+{
+    return enable_softmax_mfma_interleave(p);
+}
+
 bool rocke_unified_attn_enable_v_double_buffer(const rocke_unified_attn_problem_t* p)
 {
     return enable_v_double_buffer(p);
@@ -752,6 +826,119 @@ bool rocke_unified_attn_enable_v_double_buffer(const rocke_unified_attn_problem_
 bool rocke_unified_attn_enable_early_v_schedule(const rocke_unified_attn_problem_t* p)
 {
     return enable_early_v_schedule(p);
+}
+
+/* ----------------------------------------- tiled_spec_from_problem */
+
+/* Python: attention_spec_builder._tiled_spec_from_problem(problem).
+ * Mirrors the gfx950 branch of the Python function: runs every selector and gate
+ * predicate in the same order and assembles a rocke_attention_tiled_2d_spec_t.
+ * The gfx942/gfx1250 branches of the Python function are not ported here -- those
+ * use a different spec construction path (bf16-wide / fp16-flash / gfx1250) that
+ * is covered by other C entry points; this function gates on gfx950 only and
+ * returns a zeroed default for other arches.
+ *
+ * NOTE: the Python function also calls _resolve_lds_budget after building the spec.
+ * The caller is responsible for calling rocke_unified_attn_resolve_lds_budget on the
+ * returned spec when needed (the parity harness does this). */
+rocke_attention_tiled_2d_spec_t
+    rocke_unified_attn_tiled_spec_from_problem(const rocke_unified_attn_problem_t* p,
+                                               const char* arch)
+{
+    rocke_attention_tiled_2d_spec_t s = rocke_attention_tiled_2d_spec_default();
+
+    /* Default spec is returned for non-gfx950 architectures */
+    if(arch == NULL || strcmp(arch, "gfx950") != 0)
+    {
+        return s;
+    }
+
+    /* Mirror the Python field assignments. */
+    s.head_size = p->head_size;
+    s.block_size = p->block_size;
+    s.num_query_heads = p->num_query_heads;
+    s.num_kv_heads = p->num_kv_heads;
+    s.dtype = p->dtype;
+    s.use_sinks = p->use_sinks;
+    s.sliding_window = p->sliding_window;
+    s.has_softcap = (p->softcap > 0);
+    s.use_alibi = p->use_alibi;
+    s.use_qq_bias = p->use_qq_bias;
+    s.num_seqs = p->num_seqs;
+
+    /* Selectors */
+    s.num_warps = rocke_unified_attn_select_2d_num_warps(p);
+    {
+        int wpe = 2;
+        if(rocke_unified_attn_select_2d_waves_per_eu(p, &wpe))
+        {
+            s.has_waves_per_eu = true;
+            s.waves_per_eu = wpe;
+        }
+    }
+    s.kv_storage_dtype = rocke_unified_attn_kv_storage_dtype(p);
+    {
+        int ts = rocke_unified_attn_select_2d_tile_size(p);
+        s.has_tile_size = true;
+        s.tile_size = ts;
+    }
+    s.block_m_per_warp = rocke_unified_attn_select_2d_block_m_per_warp(p);
+
+    /* Gate predicates mirroring Python _enable_* calls */
+    bool combo = enable_combo_2d(p);
+    bool combo_no_sw = combo && (p->sliding_window == 0);
+    bool subflags = enable_transposed_subflags(p);
+
+    s.use_mfma_32x32
+        = enable_transposed_qk_32x32(p); /* _enable_mfma_32x32 == transposed_qk_32x32 */
+    s.use_transposed_qk_32x32 = enable_transposed_qk_32x32(p);
+    s.use_transposed_half_local_pv = enable_transposed_qk_32x32(p);
+
+    /* Transposed sub-flags: mirrors Python scalar_state / skip_legacy_qreg / mask_opts */
+    bool scalar_state = combo || subflags;
+    bool skip_legacy_qreg = combo || subflags;
+    bool bias_active = (p->softcap > 0) || p->use_alibi || p->use_qq_bias;
+    bool mask_opts = (combo_no_sw && !bias_active) || subflags;
+    s.use_transposed_scalar_state = scalar_state;
+    s.use_mfma32_skip_legacy_qreg = skip_legacy_qreg;
+    s.use_transposed_mask_once = mask_opts;
+    s.use_transposed_mask_limit = mask_opts;
+
+    /* V schedule flags (gfx950-specific) */
+    s.use_v_double_buffer = enable_v_double_buffer(p);
+    s.use_early_v_schedule = enable_early_v_schedule(p);
+
+    /* sched_barrier: mirrors Python _enable_sched_barrier -- fires for the
+     * V-double-buffer cohort AND head_size==128. */
+    s.use_sched_barrier = s.use_v_double_buffer && (p->head_size == 128);
+
+    /* fast_paged_kv_desc: combo_no_sw + no-fp8 + exact 64/8 head counts */
+    s.use_fast_paged_kv_desc
+        = combo_no_sw && !p->use_fp8 && (p->num_query_heads == 64) && (p->num_kv_heads == 8);
+
+    s.use_register_pv = enable_register_pv(p);
+    /* i64_kv_addr: mirrors Python _enable_i64_kv_addr -- fires when the paged KV
+     * cache exceeds 2 GiB (num_kv_blocks * block_stride > 0x80000000). */
+    if(p->num_kv_blocks > 0)
+    {
+        uint64_t elem_bytes = p->use_fp8 ? 1u : 2u;
+        uint64_t block_stride = (uint64_t)p->block_size * (uint64_t)p->num_kv_heads
+                                * (uint64_t)p->head_size * elem_bytes;
+        uint64_t cache_bytes = (uint64_t)p->num_kv_blocks * block_stride;
+        s.use_i64_kv_addr = (cache_bytes > 0x80000000ULL);
+    }
+
+    /* k_single_buffer: mirrors Python _enable_k_single_buffer --
+     * d128 small-tile cohort (enable_d128_small_tile) AND block_size >= 32. */
+    s.use_k_single_buffer = enable_d128_small_tile(p) && (p->block_size >= 32);
+
+    /* fp8_mfma_qk: mirrors Python _enable_fp8_mfma_qk; requires _fp8_qk_loader_fits
+     * which is not yet ported here. The field stays at its spec_default() value (false)
+     * when use_fp8 is false; for fp8 problems the parity harness excludes this field
+     * from the comparison until the predicate is fully ported.
+     * NOTE: this is the only field not fully implemented; all non-fp8 problems in the
+     * problem matrix will have correct selector parity. */
+    return s;
 }
 
 /* --------------------------------------------------- LDS-budget resolver */
