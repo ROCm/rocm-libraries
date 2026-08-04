@@ -171,7 +171,7 @@ inline std::vector<ActivTestCase> createBwdActivationSmokeCases()
 
     std::vector<ActivTestCase> cases;
 
-    // RELU_FWD (standard ReLU) - Only activation supported by fusion ops
+    // RELU_BWD (standard ReLU) - Only activation supported by fusion ops
     cases.emplace_back(PM::RELU_BWD,
                        std::nullopt, // reluLowerClip
                        std::nullopt, // reluUpperClip
@@ -268,7 +268,7 @@ inline std::vector<ActivTestCase> createBwdReluCases()
 
     std::vector<ActivTestCase> cases;
 
-    // RELU_FWD (standard ReLU)
+    // RELU_BWD (standard ReLU)
     cases.emplace_back(PM::RELU_BWD,
                        0.0f, // reluLowerClip
                        std::nullopt, // reluUpperClip
