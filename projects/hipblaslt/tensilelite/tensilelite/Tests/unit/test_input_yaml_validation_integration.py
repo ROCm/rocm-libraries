@@ -105,7 +105,7 @@ def test_mutated_global_parameter_raises(tmp_path):
 def test_validator_ordering_global_fires_first(tmp_path):
     """A YAML with a bad GlobalParameter AND a bad ProblemType surfaces
     the GlobalParameters error first because that validator runs first
-    on the tensilelite.Tensile() entry path.
+    on the tensilelite.tensilelite() entry path.
 
     We exercise the ordering by invoking the two validators in the same
     order Tensile() does and observing which raises. The bad ProblemType

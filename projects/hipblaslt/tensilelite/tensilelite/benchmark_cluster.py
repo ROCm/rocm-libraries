@@ -30,7 +30,7 @@ import argparse
 
 from .BenchmarkSplitter import BenchmarkSplitter
 from .Configuration import ProjectConfig
-from .TensileBenchmarkClusterScripts import ScriptWriter
+from .benchmark_cluster_scripts import ScriptWriter
 from tensilelite.Utilities.merge import mergePartialLogics
 
 try:

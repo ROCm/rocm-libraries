@@ -65,7 +65,7 @@ def _run(config: str, output_dir: str, artifact_dir: str, tensile_args: list[str
     tarball = os.path.join(artifact_dir, artifact_name + ".tar.gz")
     assert os.path.isfile(tarball), f"Artifact tarball not found: {tarball}"
     extract_artifact(tarball, output_dir)
-    tensilelite.Tensile([config, output_dir, "--use-cache", *tensile_args])
+    tensilelite.tensilelite([config, output_dir, "--use-cache", *tensile_args])
 
 
 def test_config_run(tensile_args: list[str], config: str, tmpdir: py.path.local, pytestconfig: pytest.Config) -> None:

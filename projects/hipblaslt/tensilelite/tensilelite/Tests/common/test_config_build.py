@@ -60,7 +60,7 @@ def _build(config: str, output_dir: str, artifact_dir: str, tensile_args: list[s
     Callable from both the pytest wrapper below and from test_config.py via
     subprocess (where it runs in a clean process to avoid global-state bleed).
     """
-    tensilelite.Tensile([config, output_dir, "--build-only", *tensile_args])
+    tensilelite.tensilelite([config, output_dir, "--build-only", *tensile_args])
     compress_output(output_dir, dest_dir=artifact_dir, name=artifact_name_for_config(config))
 
 

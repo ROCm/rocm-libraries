@@ -1,5 +1,5 @@
 ################################################################################
-# Characterization tests for tensilelite.Tensile — helper layer.
+# Characterization tests for tensilelite.tensilelite — helper layer.
 #
 # ADD-ONLY. tensilelite.py's executeStepsInConfig / Tensile() are the top-level
 # build+benchmark orchestrators (BenchmarkProblems / ClientWriter / LibraryLogic
@@ -17,7 +17,7 @@ import pytest
 
 pytestmark = pytest.mark.unit
 
-M = importlib.import_module("tensilelite.Tensile")
+M = importlib.import_module("tensilelite.tensilelite")
 
 
 # ---------------------------------------------------------------------------

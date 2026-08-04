@@ -663,7 +663,7 @@ if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
         "${_tensilelite_src}/tensilelite/*.py"
         "${_tensilelite_src}/tensilelite/CustomKernels/*.s"
         "${_tensilelite_src}/tensilelite/Source/*.h"
-        "${_tensilelite_src}/tensilelite/TensileLogic/*.yaml"
+        "${_tensilelite_src}/tensilelite/tensilelite_logic/*.yaml"
         "${_tensilelite_src}/tensilelite/ductile/config/*.yaml"
         "${_tensilelite_src}/compat/tensilelite_tensile_compat/*.py"
     )

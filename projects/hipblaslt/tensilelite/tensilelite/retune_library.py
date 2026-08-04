@@ -29,7 +29,7 @@ from . import LibraryLogic
 from .Common.GlobalParameters import globalParameters, assignGlobalParameters, restoreDefaultGlobalParameters, __version__
 from .Common.Utilities import print1, printWarning, ensurePath as ensurePathUtil
 from .Common.Constants import HR
-from .Tensile import addCommonArguments, argUpdatedGlobalParameters
+from .tensilelite import addCommonArguments, argUpdatedGlobalParameters
 from .SolutionStructs import ProblemSizes
 from .Toolchain.Validators import validateToolchain
 

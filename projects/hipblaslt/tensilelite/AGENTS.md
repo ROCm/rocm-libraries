@@ -108,7 +108,7 @@ Use the `users/<github-username>/<branch-name>` branch convention and base PRs o
 
 3. **ClientWriter** (`tensilelite/ClientWriter.py`): Wraps the selected kernels in a C++ library and generates the benchmark client. Output: `4_LibraryClient/`.
 
-Entry point: `python -m tensilelite run` → `tensilelite/Tensile.py:Tensile()` → `executeStepsInConfig()`.
+Entry point: `python -m tensilelite run` → `tensilelite/tensilelite.py:Tensile()` → `executeStepsInConfig()`.
 
 ### Key Python Modules
 
@@ -121,7 +121,7 @@ Entry point: `python -m tensilelite run` → `tensilelite/Tensile.py:Tensile()` 
 | `tensilelite/LibraryIO.py` | YAML/MsgPack serialization |
 | `tensilelite/Common/` | Global parameters, architecture tables, utilities |
 | `tensilelite/Components/` | Modular kernel building blocks (MAC variants, local/global read/write, scheduling) |
-| `tensilelite/TensileCreateLibrary/` | Standalone library-creation implementation (no benchmarking) |
+| `tensilelite/tensilelite_create_library/` | Standalone library-creation implementation (no benchmarking) |
 
 ### rocisa
 

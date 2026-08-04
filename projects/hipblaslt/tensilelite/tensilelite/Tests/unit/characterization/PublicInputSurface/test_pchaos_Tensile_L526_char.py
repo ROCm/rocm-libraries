@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: MIT
 ################################################################################
 
-"""PublicInputSurface characterization: tensilelite/Tensile.py lines 526 and 529.
+"""PublicInputSurface characterization: tensilelite/tensilelite.py lines 526 and 529.
 
 Branch d8f43265b665a4b721072cb052d2fbd64d526645 (L526):
   Predicate: ``altFormat and len(configPaths) > 2``
@@ -27,7 +27,7 @@ import pytest
 
 pytestmark = pytest.mark.unit
 
-M = importlib.import_module("tensilelite.Tensile")
+M = importlib.import_module("tensilelite.tensilelite")
 
 
 # ---------------------------------------------------------------------------
@@ -35,7 +35,7 @@ M = importlib.import_module("tensilelite.Tensile")
 # ---------------------------------------------------------------------------
 
 def alt_format_rejected(alt_format: bool, n_config_files: int) -> bool:
-    """Mirror of tensilelite/Tensile.py:526 predicate: ``altFormat and len(configPaths) > 2``.
+    """Mirror of tensilelite/tensilelite.py:526 predicate: ``altFormat and len(configPaths) > 2``.
 
     Returns True when the alternate-format branch fires printExit
     (alt format selected AND more than 2 config files supplied).
@@ -81,7 +81,7 @@ def test_pure_helper_full_domain_enumeration():
 
 
 # ---------------------------------------------------------------------------
-# (2) Real-entry pin: call tensilelite.Tensile(userArgs) and observe SystemExit
+# (2) Real-entry pin: call tensilelite.tensilelite(userArgs) and observe SystemExit
 # ---------------------------------------------------------------------------
 
 def _make_fake_configs(tmpdir, n):

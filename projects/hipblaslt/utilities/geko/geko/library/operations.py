@@ -318,7 +318,7 @@ def merge(
         raise FileNotFoundError(f"hipBLASLt path not found: '{hipblaslt_path}'")
 
     logger.info(f"Merging TensileLite library '{inc_dir}'")
-    from tensilelite.TensileMergeLibrary import avoidRegressions
+    from tensilelite.merge_library import avoidRegressions
 
     avoidRegressions(orig_dir, inc_dir, output_dir, force, not eff)
 
@@ -348,7 +348,7 @@ def create(hipblaslt_path: str | Path, library_dir: str | Path, output_dir: str 
     arch = load_library(lib_paths[0]).arch
 
     logger.info(f"Creating TensileLite library from '{library_dir}'")
-    from tensilelite.TensileCreateLibrary import run as create_library
+    from tensilelite.tensilelite_create_library import run as create_library
 
     create_library(
         [

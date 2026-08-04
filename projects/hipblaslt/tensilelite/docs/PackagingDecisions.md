@@ -23,7 +23,7 @@ history as the source of truth.
   approximately 102 MB, and includes 1,002 test files plus
   `Tensile/Tests/unit/build_tmp/CMakeCache.txt`.
 - The wheel already contains the six required static headers, all 119 tracked
-  custom kernels, `TensileLogic/known_bugs.yaml`, and the ductile defaults.
+  custom kernels, `tensilelite_logic/known_bugs.yaml`, and the ductile defaults.
 - The branch already contains an `importlib.resources` implementation for
   headers, custom kernels, known bugs, and ductile defaults. Its 29 focused
   resource tests pass and should be retained.
@@ -279,7 +279,7 @@ resources:
 - `ReductionTemplate.h`
 - `memory_gfx.h`
 - all tracked `CustomKernels/*.s`
-- `TensileLogic/known_bugs.yaml`
+- `tensilelite_logic/known_bugs.yaml`
 - ductile defaults
 
 Tests, source launchers, Invoke tasks, CMake helpers not used at runtime, native

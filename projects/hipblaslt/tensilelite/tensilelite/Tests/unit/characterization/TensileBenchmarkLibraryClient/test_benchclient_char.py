@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: MIT
 ################################################################################
 
-"""Characterization tests for tensilelite.TensileBenchmarkLibraryClient.
+"""Characterization tests for tensilelite.benchmark_library_client.
 
 This module pins the client benchmark driver entry points and the working stats
 helpers (mean/stddev). The median and PrintStats functions are pinned in existing
@@ -26,7 +26,7 @@ import pytest
 
 pytestmark = pytest.mark.unit
 
-M = importlib.import_module("tensilelite.TensileBenchmarkLibraryClient")
+M = importlib.import_module("tensilelite.benchmark_library_client")
 
 
 # ============================================================================
@@ -186,7 +186,7 @@ def test_tensile_benchmark_client_csv_parsing(mock_csv_file):
         sys.stdout = io.StringIO()
         sys.stderr = io.StringIO()
 
-        with patch("tensilelite.TensileBenchmarkLibraryClient.BenchmarkProblemSize", mock_benchmark_fn):
+        with patch("tensilelite.benchmark_library_client.BenchmarkProblemSize", mock_benchmark_fn):
             # The function will reach CSV parsing (lines 117-159) and then fail
             # on the median bug in PrintStats (line 163). This pins that the
             # CSV and benchmark paths were exercised.
@@ -232,7 +232,7 @@ def test_main_entry_point(mock_csv_file):
         sys.stdout = io.StringIO()
         sys.stderr = io.StringIO()
 
-        with patch("tensilelite.TensileBenchmarkLibraryClient.BenchmarkProblemSize", mock_benchmark_fn):
+        with patch("tensilelite.benchmark_library_client.BenchmarkProblemSize", mock_benchmark_fn):
             # main() delegates to TensileBenchmarkLibraryClient, which fails on median bug.
             with pytest.raises(TypeError, match="list indices must be integers"):
                 M.main()

@@ -105,7 +105,7 @@ def errors(wheel: Path, source_root: Path) -> list[str]:
         )
 
     for required in (
-        "tensilelite/TensileLogic/known_bugs.yaml",
+        "tensilelite/tensilelite_logic/known_bugs.yaml",
         "tensilelite/ductile/config/defaults.yaml",
     ):
         if required not in names:

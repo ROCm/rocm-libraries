@@ -19,15 +19,15 @@ _COMMAND_HELP = {
 
 def _handler(command: str) -> Callable[[Sequence[str] | None], int | None]:
     if command == "create-library":
-        from .TensileCreateLibrary.Run import run
+        from .tensilelite_create_library.run import run
 
         return run
     if command == "logic":
-        from .TensileLogic.Run import main
+        from .tensilelite_logic.run import main
 
         return main
     if command == "run":
-        from .Tensile import main
+        from .tensilelite import main
 
         return main
     raise AssertionError(f"unhandled command: {command}")

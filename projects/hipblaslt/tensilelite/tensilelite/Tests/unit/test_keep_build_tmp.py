@@ -40,7 +40,7 @@ def test_keep_build_tmp(tensile_args: list[str], tmp_path: Path, keep_build_tmp:
         *tensile_args,
     ]
 
-    tensilelite.Tensile(args)
+    tensilelite.tensilelite(args)
 
     leftover = [p for p in output_dir.rglob("build_tmp") if p.is_dir()]
     if keep_build_tmp:

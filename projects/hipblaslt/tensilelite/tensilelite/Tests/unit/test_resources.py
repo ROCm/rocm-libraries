@@ -10,7 +10,7 @@ import pytest
 import yaml
 
 from tensilelite import resources
-from tensilelite.TensileCreateLibrary import copyStaticFiles
+from tensilelite.tensilelite_create_library import copyStaticFiles
 
 
 pytestmark = pytest.mark.unit
@@ -33,7 +33,7 @@ def _fake_resource_tree(tmp_path: Path, monkeypatch) -> Path:
     root = tmp_path / "pkg"
     (root / "Source").mkdir(parents=True)
     (root / "CustomKernels").mkdir()
-    (root / "TensileLogic").mkdir()
+    (root / "tensilelite_logic").mkdir()
     monkeypatch.setattr(resources, "_root", lambda: root)
     return root
 
@@ -160,7 +160,7 @@ def test_custom_kernel_text_rejects_paths(name):
 def test_known_bugs_text_uses_resource_root(tmp_path, monkeypatch):
     root = _fake_resource_tree(tmp_path, monkeypatch)
     text = "version: 1\nskips: []\n"
-    (root / "TensileLogic" / "known_bugs.yaml").write_text(text, encoding="utf-8")
+    (root / "tensilelite_logic" / "known_bugs.yaml").write_text(text, encoding="utf-8")
 
     assert resources.known_bugs_text() == text
 
@@ -201,7 +201,7 @@ def test_resource_helpers_work_from_zip_package(tmp_path, monkeypatch):
         zip_file.writestr(f"{package}/CustomKernels/a.s", "kernel a\n")
         zip_file.writestr(f"{package}/CustomKernels/readme.txt", "not a kernel\n")
         zip_file.writestr(
-            f"{package}/TensileLogic/known_bugs.yaml", known_bugs
+            f"{package}/tensilelite_logic/known_bugs.yaml", known_bugs
         )
         zip_file.writestr(
             f"{package}/ductile/config/defaults.yaml", defaults

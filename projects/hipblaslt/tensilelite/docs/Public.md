@@ -105,7 +105,7 @@ The public names should describe the fork people are actually using:
 | `Tensile` | `tensilelite run` |
 | `TensileCreateLibrary` | `tensilelite create-library` |
 | `TensileLogic` | `tensilelite logic` |
-| `python -m Tensile.TensileCreateLibrary ...` | `python -m tensilelite create-library ...` |
+| `python -m Tensile.tensilelite_create_library ...` | `python -m tensilelite create-library ...` |
 
 Temporary `Tensile*` command aliases are reasonable during migration, but they should be provided by `tensilelite-tensile-compat`, not by the default `tensilelite` wheel. They should route through the new CLI and print deprecation warnings.
 
@@ -156,7 +156,7 @@ The Python wheel should be intentionally small. It should include the generator 
 | Python codegen modules | `tensilelite` wheel | Required for logic processing and library generation. |
 | Static headers copied by `create-library` | `tensilelite` package data | Generated libraries need these headers in the output tree. |
 | `CustomKernels/*.s` | `tensilelite` package data | Configs and logic files can reference custom kernels by name; codegen must be able to read the matching assembly. |
-| `TensileLogic/known_bugs.yaml` | `tensilelite` package data | Default documented exception list for `tensilelite logic --check-all`; CMake and downstream callers should not need to pass a source-tree path. |
+| `tensilelite_logic/known_bugs.yaml` | `tensilelite` package data | Default documented exception list for `tensilelite logic --check-all`; CMake and downstream callers should not need to pass a source-tree path. |
 | `rocisa` Python package and `_rocisa` extension | Separate `rocisa` package | Native extension with its own ABI and ROCm/TheRock dependency contract. |
 | `libstinkytofu` | ROCm/TheRock package or vendored `rocisa` wheel dependency, depending on build mode | Runtime dependency of `_rocisa`; it must be intentionally resolved. |
 | ROCm compiler tools and system libraries | ROCm/system packages | `pip` cannot install `amdclang++`, HIP runtime libraries, `hipconfig`, or similar system tools. |

@@ -46,7 +46,7 @@ def logic() -> int:
 
 def benchmark_cluster():
     _warn(sys.argv[0])
-    from tensilelite.TensileBenchmarkCluster import main
+    from tensilelite.benchmark_cluster import main
 
     return main()
 
@@ -60,28 +60,28 @@ def generate_summations():
 
 def logic_to_yaml():
     _warn(sys.argv[0])
-    from tensilelite.TensileLibLogicToYaml import main
+    from tensilelite.lib_logic_to_yaml import main
 
     return main()
 
 
 def merge_library():
     _warn(sys.argv[0])
-    from tensilelite.TensileMergeLibrary import main
+    from tensilelite.merge_library import main
 
     return main()
 
 
 def retune_library():
     _warn(sys.argv[0])
-    from tensilelite.TensileRetuneLibrary import main
+    from tensilelite.retune_library import main
 
     return main()
 
 
 def update_library():
     _warn(sys.argv[0])
-    from tensilelite.TensileUpdateLibrary import main
+    from tensilelite.update_library import main
 
     return main()
 
