@@ -92,7 +92,8 @@ void run_color_cast(const TestConfig& cfg, const ColorCastParams& op) {
 
 }  // namespace
 
-// Full name: Image_Color/ColorCastTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<Alpha>_<RGB>
+// Full name:
+// Image_Color/ColorCastTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<Alpha>_<RGB>
 class ColorCastTest : public ::testing::TestWithParam<WithParams<ColorCastParams>> {};
 
 TEST_P(ColorCastTest, Correctness) {
@@ -118,10 +119,10 @@ TEST_P(ColorCastTest, Correctness) {
 // Restricted to the 3-channel layouts: color_cast applies distinct R/G/B constants, and the
 // kernel rejects 1-channel input with an error despite the header documenting c = 1/3 (a
 // doc/kernel discrepancy).
-INSTANTIATE_TEST_SUITE_P(
-    Image_Color, ColorCastTest,
-    ::testing::ValuesIn(with_params<ColorCastParams>(
-        make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
-                     {Layout::PKD3, Layout::PLN3}, {Roi::Full, Roi::Partial}),
-        {ColorCastParams{0.6f, 30, 90, 150}})),
-    op_config_name<ColorCastParams>);
+INSTANTIATE_TEST_SUITE_P(Image_Color, ColorCastTest,
+                         ::testing::ValuesIn(with_params<ColorCastParams>(
+                             make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
+                                          {Layout::PKD3, Layout::PLN3, Layout::PLN1},
+                                          {Roi::Full, Roi::Partial}),
+                             {ColorCastParams{0.6f, 30, 90, 150}})),
+                         op_config_name<ColorCastParams>);
