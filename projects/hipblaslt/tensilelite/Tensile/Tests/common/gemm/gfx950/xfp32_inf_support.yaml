@@ -61,7 +61,7 @@ BenchmarkProblems:
         - LocalReadVectorWidth: [4]
         - VectorWidthA: [4]
         - VectorWidthB: [4]
-        - UseF32XEmulationInfSupport: [0]
+        - UseF32XEmulationInfSupport: [1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
