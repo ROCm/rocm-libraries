@@ -356,27 +356,48 @@ def test_supports_returns_rather_than_raises_for_block_n_zero():
 
 
 def test_tile_end_barrier_drains_lds_before_the_barrier():
-    """C1 regression guard (AICK-1664).
+    """C1 regression guard (AICK-1664), both V-feed paths.
 
-    NBUF=1: the next iteration's DMA refills the SAME K/V LDS buffer, so the
-    tile-end rendezvous must drain lgkmcnt BEFORE s_barrier. A bare s_barrier is NOT
-    enough on gfx942 -- FeatureBackOffBarrier makes SIInsertWaitcnts skip the
-    conservative pre-barrier drain, so the do_pv ds_reads stay in flight across it
-    and another wave's DMA overwrites V_lds underneath them.
+    NBUF=1: the next iteration refills the SAME K/V LDS buffer, so the tile-END
+    rendezvous must drain lgkmcnt BEFORE s_barrier. A bare s_barrier is NOT enough on
+    gfx942 -- FeatureBackOffBarrier makes SIInsertWaitcnts skip the conservative
+    pre-barrier drain, so the do_pv ds_reads stay in flight across it and another
+    wave overwrites V_lds underneath them. Tested for BOTH:
+      * naive V (D64 / bf16): V lands via async DMA, so the tile-START barrier can be
+        bare + vmcnt(0) (making the DMA writes visible; draining lgkm would be dead);
+      * conflict-free V / cfvst (D128 fp16, P1): V is published by an in-loop
+        ds_write, so the tile-START rendezvous ALSO must be sync_lds_only -- a bare
+        barrier there would race the perm_b32 store the same way the tile-end raced.
     """
-    kernel = build_attention_dense(_spec(head_size=128, dtype="fp16"), arch="gfx942")
-    loops = [o for o in kernel.body.ops if o.name == "scf.for"]
-    assert len(loops) == 1, "expected exactly one KV loop"
-    loop = loops[0]
-    body = [o.name for o in loop.regions[0].ops]
-    assert body[-1] == "scf.yield"
-    assert body[-2] == "tile.sync_lds_only", (
-        "tile-end rendezvous must be sync_lds_only (s_waitcnt lgkmcnt(0) + "
-        f"s_barrier), not {body[-2]!r} -- a bare s_barrier races V_lds"
-    )
-    # The tile-START barrier stays bare + vmcnt(0): it only has to make the DMA
-    # writes visible, and draining lgkm there would be dead work.
-    i = body.index("tile.s_barrier_bare")
-    assert body[i - 1] == "tile.s_waitcnt"
-    # And it must not be elidable: the elide pass targets body_ops[-2].
-    assert loop.attrs["elide_trailing_barrier"] is False
+    for spec, cfvst in (
+        (_spec(head_size=64, dtype="fp16"), False),
+        (_spec(head_size=128, dtype="fp16"), True),
+    ):
+        kernel = build_attention_dense(spec, arch="gfx942")
+        loops = [o for o in kernel.body.ops if o.name == "scf.for"]
+        assert len(loops) == 1, "expected exactly one KV loop"
+        loop = loops[0]
+        body = [o.name for o in loop.regions[0].ops]
+        assert body[-1] == "scf.yield"
+        assert body[-2] == "tile.sync_lds_only", (
+            "tile-end rendezvous must be sync_lds_only (s_waitcnt lgkmcnt(0) + "
+            f"s_barrier), not {body[-2]!r} -- a bare s_barrier races V_lds"
+        )
+        if cfvst:
+            # cfvst tile-START: V is an in-loop ds_write, so publication is
+            # sync_lds_only (lgkm drain + barrier), NOT a bare s_barrier, and it
+            # follows a vmcnt(0) that drained the K DMA + V register loads.
+            assert "tile.s_barrier_bare" not in body, (
+                "cfvst tile-start must NOT use a bare s_barrier -- the V perm_b32 "
+                "store needs an lgkm drain before publication (sync_lds_only)"
+            )
+            # >= 2 sync_lds_only: the store-publication one and the tile-end one.
+            assert body.count("tile.sync_lds_only") >= 2
+            assert "tile.s_waitcnt" in body
+        else:
+            # naive tile-START stays bare + vmcnt(0).
+            i = body.index("tile.s_barrier_bare")
+            assert body[i - 1] == "tile.s_waitcnt"
+        # And the tile-end barrier must not be elidable: the elide pass targets
+        # body_ops[-2].
+        assert loop.attrs["elide_trailing_barrier"] is False

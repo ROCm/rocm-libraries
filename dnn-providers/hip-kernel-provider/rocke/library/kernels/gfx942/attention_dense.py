@@ -24,12 +24,15 @@ Why this is a port, not a copy (the CDNA3 deltas)
   * **Conflict-free V.** gfx950's CK-1 transposed PV uses ``ds_read_b64_tr_b16``
     (transpose read) for the half-local V load. gfx942 has NO ``ds_read_tr16`` and
     NO ``permlane32_swap``. The CDNA3 vehicle is a ``perm_b32`` STORE-path transpose
-    (CK ``transpose_vectors`` masks) into a transposed ``V_lds`` — the same vehicle
-    already prototyped in ``kernels/gfx942/attention_tiled_2d.py``
-    (``use_conflict_free_v_store``). It was long parked on a suspected
-    store-mapping bug; that failure was re-tested and does NOT reproduce on
-    ``develop`` (see the builder's ``IMPACT_LEDGER.md``), so P1 is a lift of a
-    working vehicle, not a bug hunt.
+    (CK ``transpose_vectors`` masks) into a transposed ``V_lds`` — the same vehicle in
+    ``kernels/gfx942/attention_tiled_2d.py`` (``use_conflict_free_v_store``). Its
+    parked "1/8 sign-flip" symptom was reproduced-or-disproven before anything was
+    lifted: DISPROVEN cross-part (both the 228- and 304-CU parts, bit-identical, no
+    sign mismatches), so the vehicle is proven correct rather than merely untested.
+    It is lifted here for D128 fp16 as :func:`_p0_use_cfvst` — the barrier caveat is
+    that V publication becomes an in-loop ``ds_write``, so the tile-START rendezvous
+    needs an lgkmcnt drain (``sync_lds_only``), not a bare barrier. The disproof
+    procedure and its evidence are recorded in the AICK-1664 plan.
   * **LDS / occupancy.** gfx942 has 64 KB LDS/CU (vs gfx950's 160 KB); occupancy /
     ``num_persistent`` / block sizing must be re-derived for the 228- and 304-CU
     gfx942 parts rather than inherited from the gfx950 tuning.
@@ -49,17 +52,25 @@ plan and the protected results page.
 Implementation status (see the AICK-1664 plan for the full ordered work list)
 -----------------------------------------------------------------------------
   * P0  enablement + 32x32x8 atom + K-loop doubling ............ DONE (this file)
-  * P1  conflict-free V (perm_b32 store-path transpose) ........ TODO
+  * P1  conflict-free V (perm_b32 store-path transpose) ........ DONE (D128 fp16)
   * P2  exp2_fast + lazy_rescale ............................... TODO (portable)
   * P3  wide4 (WG=256) + K bank-pad retune + K single-buffer ... TODO
   * P4  persistent grid-stride + hkv_major decode .............. TODO
   * P5  diagonal masking (re-test only), partial-vmcnt prefetch  TODO
 
-P0 is CORRECTNESS-FIRST: :func:`_build_attention_dense_p0` is non-pipelined (a
-single LDS buffer) and reads V element-wise, so it is deliberately SLOWER than the
-shipped ``attention_tiled_2d`` gfx942 kernel until P1-P3 land. It is validated
-against an fp32 SDPA reference across the in-scope cohort; the perf levers layer on
-top of it.
+P1 conflict-free V (:func:`_p0_use_cfvst`): V is stored TRANSPOSED via a perm_b32
+store-path transpose so the PV A-operand read is a contiguous ds_read_b64 instead of
+P0's 4 element-wise ds_read_u16 (128 -> ~32 LDS instrs/tile at D128). Gated to
+**D128 fp16**: D64 is VGPR-bound so the register round-trip regresses it, and D128
+bf16 spills over the waves-per-eu=2 cap (a P2/P3 register-headroom item). The lever
+is numerically identity-preserving (same MFMA operands; only the LDS layout and read
+width change) -- the cohort's ``max_abs`` is unchanged from the naive path. The
+conflict-free vehicle is proven correct in
+``builders/gfx942/attention/prefill/CFVST_DISPROOF.md`` (cross-part).
+
+P0 is CORRECTNESS-FIRST: the naive-V path (D64 / bf16-D128) is non-pipelined (a
+single LDS buffer) and reads V element-wise; the remaining perf levers (P2-P4) layer
+on top. It is validated against an fp32 SDPA reference across the in-scope cohort.
 
 :func:`supports_attention_dense` is the SINGLE gate: it rejects every spec
 :func:`build_attention_dense` cannot emit -- including the modes deferred to later
@@ -76,7 +87,17 @@ the dataclass.
 
 from __future__ import annotations
 
-from rocke.core.ir import IRBuilder, KernelDef, PtrType, BF16, F16, F32, I64
+from rocke.core.ir import (
+    IRBuilder,
+    KernelDef,
+    PtrType,
+    VectorType,
+    BF16,
+    F16,
+    F32,
+    I32,
+    I64,
+)
 from rocke.helpers.attention import mfma_32x32x8_for_dtype
 
 # The spec is arch-neutral (compile-time shape + tuning knobs); reuse it rather
@@ -109,9 +130,17 @@ if _P0_BLOCK_M != _BLOCK_M:  # not an `assert`: python -O would strip it
 
 # K-row bank-conflict pad, in elements. INHERITED from the gfx950 sibling and NOT
 # re-derived for gfx942's bank geometry / LDS size -- that retune is a P3 item. Only
-# applied when one K/V row is packed per async-DMA instruction; see
+# applied when one K row is packed per async-DMA instruction; see
 # _p0_lds_row_stride for why D64 cannot carry it.
 _P0_LDS_PAD = 8
+
+# V^T row (token axis) bank-conflict pad, in elements, for the P1 conflict-free-V
+# store. V_lds is transposed to [D, block_n] (dim-major, token inner) so the PV
+# A-operand read is a contiguous ds_read_b64; the pad spaces the dim rows so the
+# per-lane 4-token reads land in distinct banks (token stride block_n+8 dwords ->
+# 8-bank / 4-way at block_n=64, matching the D128 QK path). Lifted from the proven
+# attention_tiled_2d cfvst vehicle (v_pad=8); a gfx942 re-derivation is a P3 item.
+_P0_V_PAD = 8
 
 __all__ = [
     "AttentionDenseSpec",
@@ -173,6 +202,23 @@ def _p0_rows_per_instr(head_size: int) -> int:
     return _DMA_ELEMS_PER_INSTR // head_size
 
 
+def _p0_use_cfvst(head_size: int, dtype: str) -> bool:
+    """Whether to feed V through the P1 conflict-free perm_b32 store-path transpose.
+
+    D128 **fp16** only. Measured on gfx942 (both parts):
+      * D64 (any dtype): cfvst REGRESSES it -- D64 is VGPR-bound, not LDS-bound
+        (plan §6.1), so the register round-trip + perm temps raise pressure without
+        relieving the actual bottleneck.
+      * D128 bf16: the bf16 ``.1k`` MFMA schedule keeps more registers live, so cfvst
+        pushes VGPR over the waves-per-eu=2 cap (256) and SPILLS. fp16 does not
+        (it drops slightly, 176 -> 173). The flash x8 ladder is fp16-first anyway
+        (tiled_2d keeps bf16 D128 on the narrow path); a bf16 cfvst register-pressure
+        fix is a P3 occupancy item.
+    Gate on rows-per-DMA == 1 (D128) AND fp16 so the LDS budget and the body agree.
+    """
+    return _p0_rows_per_instr(head_size) == 1 and dtype == "fp16"
+
+
 def _p0_lds_row_stride(head_size: int) -> int:
     """K_lds / V_lds row stride in ELEMENTS for one head size.
 
@@ -190,13 +236,23 @@ def _p0_lds_row_stride(head_size: int) -> int:
 
 
 def _p0_lds_bytes(spec: AttentionDenseSpec) -> int:
-    """Total LDS footprint: K_lds + V_lds, each ``[1, block_n, row_stride]``.
+    """Total LDS footprint: ``K_lds[1, block_n, row_stride] + V_lds[1, D, block_n+pad]``.
 
-    ``row_stride`` is :func:`_p0_lds_row_stride`; 2 bytes/element is exact for every
-    dtype in ``_SUPPORTED_DTYPES`` (bf16/fp16) and must be revisited if a narrower or
-    wider element type is added.
+    K keeps the natural ``[token, dim]`` layout with :func:`_p0_lds_row_stride` (async
+    DMA target). V is TRANSPOSED to ``[dim, token]`` for the P1 conflict-free store, so
+    its footprint is ``D * (block_n + _P0_V_PAD)`` rather than ``block_n * row_stride``.
+    2 bytes/element is exact for every dtype in ``_SUPPORTED_DTYPES`` (bf16/fp16) and
+    must be revisited if a narrower or wider element type is added. Shared with the
+    budget check in :func:`supports_attention_dense` so the two cannot drift.
     """
-    return 2 * spec.block_n * _p0_lds_row_stride(spec.head_size) * 2
+    k_bytes = spec.block_n * _p0_lds_row_stride(spec.head_size) * 2
+    if _p0_use_cfvst(spec.head_size, spec.dtype):
+        # V transposed to [dim, token+pad] for the conflict-free store (D128).
+        v_bytes = spec.head_size * (spec.block_n + _P0_V_PAD) * 2
+    else:
+        # V keeps the natural [token, dim] async-DMA layout (D64, naive read).
+        v_bytes = spec.block_n * _p0_lds_row_stride(spec.head_size) * 2
+    return k_bytes + v_bytes
 
 
 def supports_attention_dense(
@@ -296,6 +352,18 @@ def supports_attention_dense(
             f"{spec.block_n // _waves}, not a multiple of ROWS_PER_INSTR={_rpi} "
             f"(D={spec.head_size}); the async K/V DMA would skip rows"
         )
+    # cfvst assigns one 2x2 (token-pair x dim-pair) block per thread with no tail
+    # guard, so the CTA thread count must divide the block count. Gated on the cfvst
+    # predicate: the naive-V path never reads these quantities, and checking it
+    # unconditionally would reject specs the naive path builds fine.
+    if _p0_use_cfvst(spec.head_size, spec.dtype):
+        _threads = _waves * 64
+        _vblocks = (spec.block_n // 2) * (spec.head_size // 2)
+        if _vblocks % _threads != 0:
+            return False, (
+                f"cfvst: V 2x2 block count {_vblocks} (block_n={spec.block_n}, "
+                f"D={spec.head_size}) is not a multiple of the {_threads}-thread CTA"
+            )
 
     # --- LDS budget. Without this, an over-budget tile reaches comgr and fails with
     # an opaque CODEGEN_BC_TO_RELOCATABLE abort instead of a structured reason.
@@ -431,9 +499,20 @@ def _build_attention_dense_p0(spec: AttentionDenseSpec) -> KernelDef:
     # Padded for D128 (one row per DMA instr), unpadded for D64 (two rows per
     # instr need a contiguous stride) -- see _p0_lds_row_stride. Shared with the
     # LDS-budget check in supports_attention_dense so the two cannot drift.
+    USE_CFVST = _p0_use_cfvst(D, spec.dtype)  # P1 conflict-free V: D128 fp16 only
     LDROW = _p0_lds_row_stride(D)
     K_lds = b.smem_alloc(dtype, [1, BN, LDROW], name_hint="Klds")
-    V_lds = b.smem_alloc(dtype, [1, BN, LDROW], name_hint="Vlds")
+    if USE_CFVST:
+        # V stored TRANSPOSED (P1 conflict-free V): [dim, token] with token inner and
+        # padded by _P0_V_PAD, so the PV A-operand read is a contiguous ds_read_b64
+        # rather than P0's 4 element-wise ds_read_u16. Filled by the perm_b32 store
+        # path below.
+        V_LDROW = BN + _P0_V_PAD
+        V_lds = b.smem_alloc(dtype, [1, D, V_LDROW], name_hint="VldsT")
+    else:
+        # V keeps the natural [token, dim] async-DMA layout (D64: VGPR-bound, cfvst
+        # regresses it -- see _p0_use_cfvst); read element-wise in read_v.
+        V_lds = b.smem_alloc(dtype, [1, BN, LDROW], name_hint="Vlds")
 
     # Q packs (QK B-operand), scaled once by qk_scale so exp2(s) is direct.
     q_tok = b.add(q_tok0, lane_m)
@@ -473,7 +552,9 @@ def _build_attention_dense_p0(spec: AttentionDenseSpec) -> KernelDef:
         )
     zero_soff = b.const_i32(0)
     K_lds_addr = b.smem_addr_of(K_lds)
-    V_lds_addr = b.smem_addr_of(V_lds)
+    # cfvst feeds V via buffer_load + perm_b32 + smem_store (no async-DMA handle); the
+    # naive D64 path still lands V through async_buffer_load_lds, which needs the base.
+    V_lds_addr = None if USE_CFVST else b.smem_addr_of(V_lds)
     k_rsrc = b.buffer_rsrc(k, b.const_i32(B * Skv * Hkv * D * 2))
     v_rsrc = b.buffer_rsrc(v, b.const_i32(B * Skv * Hkv * D * 2))
 
@@ -509,9 +590,100 @@ def _build_attention_dense_p0(spec: AttentionDenseSpec) -> KernelDef:
                 )
 
     def load_tile(tile_idx):
+        # cfvst (D128): K only; V is fed through the perm_b32 store path below (async
+        # DMA would land V in the WRONG [token, dim] orientation for a conflict-free
+        # read). Naive (D64): K and V both via async DMA, natural [token, dim].
         tk0 = b.mul(tile_idx, b.const_i32(BN))
         _async_load(k_rsrc, K_lds_addr, tk0)
-        _async_load(v_rsrc, V_lds_addr, tk0)
+        if not USE_CFVST:
+            _async_load(v_rsrc, V_lds_addr, tk0)
+
+    # ---- conflict-free V (P1): perm_b32 store-path transpose into V_lds[dim, token] ----
+    # Load V naturally [token, dim] (coalesced VMEM over the contiguous dim axis),
+    # transpose each 2x2 f16 block in-thread with perm_b32 (no cross-lane, no lgkmcnt;
+    # CK transpose_vectors masks), then write ONE contiguous 2-half ds_write per dim
+    # row into V_lds[dim, token]. The consumer read_v then reads 4 consecutive tokens
+    # at a fixed dim as a single ds_read_b64. Lifted from the proven
+    # attention_tiled_2d cfvst vehicle (disproof: builders/.../CFVST_DISPROOF.md).
+    # The block loop is statically unrolled (V_ITEMS is small: 4 at D128/BN64), which
+    # is well under the tiled_2d full-unroll IR-explosion threshold.
+    THREADS = WAVES * 64
+    if USE_CFVST:
+        V_TOK_PAIRS = BN // 2
+        V_DIM_PAIRS = D // 2
+        V_BLOCKS = V_TOK_PAIRS * V_DIM_PAIRS
+        # tid-strided block assignment must tile the 2x2 grid exactly (no partial
+        # last item, so no per-item guard).
+        #
+        # CFVST-PATH-ONLY. Computing this unconditionally would reject specs the
+        # NAIVE V path builds fine: at D64/block_n=32 with a 1024-thread CTA,
+        # V_BLOCKS=512 < THREADS=1024 and the check fires even though `read_v` never
+        # touches V_BLOCKS there (D64 is naive-V by _p0_use_cfvst). Raised, not
+        # asserted, for the reason stated at the DMA row-split guard above:
+        # `python -O` strips asserts, and this one guards a silent wrong answer (an
+        # unguarded tail item would read past the tile).
+        if V_BLOCKS % THREADS != 0:
+            raise ValueError(
+                f"cfvst: V 2x2 block count {V_BLOCKS} (block_n={BN}, D={D}) is not a "
+                f"multiple of THREADS={THREADS}; a tail item would need a bounds guard"
+            )
+        V_ITEMS = V_BLOCKS // THREADS
+    else:
+        V_TOK_PAIRS = V_DIM_PAIRS = V_BLOCKS = V_ITEMS = 0
+
+    def _cfvst_load_v(tile_idx):
+        """Issue the cfvst VMEM loads and keep each thread's V tile in VGPRs.
+
+        Returns a payload of ``(d0, t0, x0, x1)`` per unrolled item: ``x0``/``x1`` are
+        the i32-packed ``<2 x elem>`` loads of token rows ``t0``/``t0+1`` at the
+        contiguous dim pair ``(d0, d0+1)``. Loads go through ``v_rsrc`` so an
+        out-of-range token is hardware-clamped to 0 (matches the async path).
+        """
+        tile_tok0 = b.mul(tile_idx, b.const_i32(BN))
+        payload = []
+        for it in range(V_ITEMS):
+            blk = b.add(b.mul(b.const_i32(it), b.const_i32(THREADS)), tid)
+            # dim-pair is the fastest-varying coord so adjacent lanes issue coalesced
+            # VMEM loads over the natural [token, dim] layout.
+            tg = b.div(blk, b.const_i32(V_DIM_PAIRS))
+            dg = b.mod(blk, b.const_i32(V_DIM_PAIRS))
+            t0 = b.mul(tg, b.const_i32(2))
+            d0 = b.mul(dg, b.const_i32(2))
+            gk0 = b.add(tile_tok0, t0)
+            gk1 = b.add(gk0, b.const_i32(1))
+            # byte offset of (token, d0); contiguous dim pair -> one 2-half load.
+            eoff0 = b.add(b.add(k_base, b.mul(gk0, b.const_i32(stride_k_tok))), d0)
+            eoff1 = b.add(b.add(k_base, b.mul(gk1, b.const_i32(stride_k_tok))), d0)
+            x0 = b.buffer_load_vN(
+                v_rsrc, b.mul(eoff0, b.const_i32(2)), zero_soff, dtype, 2
+            )
+            x1 = b.buffer_load_vN(
+                v_rsrc, b.mul(eoff1, b.const_i32(2)), zero_soff, dtype, 2
+            )
+            payload.append((d0, t0, b.bitcast(x0, I32), b.bitcast(x1, I32)))
+        return payload
+
+    def _cfvst_store_v(payload):
+        """perm_b32 2x2 transpose + contiguous ds_write publishing V_lds[dim, token]."""
+        for d0, t0, x0, x1 in payload:
+            # Each output i32 holds 2 CONSECUTIVE tokens (t0, t0+1) at one fixed dim.
+            row_d0 = b.perm_b32(x0, x1, b.const_i32(0x01000504))  # (V[t0,d0], V[t1,d0])
+            row_d1 = b.perm_b32(
+                x0, x1, b.const_i32(0x03020706)
+            )  # (V[t0,d0+1], V[t1,d0+1])
+            d1 = b.add(d0, b.const_i32(1))
+            b.smem_store_vN(
+                V_lds,
+                [b.const_i32(0), d0, t0],
+                b.bitcast(row_d0, VectorType(dtype, 2)),
+                2,
+            )
+            b.smem_store_vN(
+                V_lds,
+                [b.const_i32(0), d1, t0],
+                b.bitcast(row_d1, VectorType(dtype, 2)),
+                2,
+            )
 
     # ---- per-tile compute ----
     def do_qk():
@@ -554,8 +726,20 @@ def _build_attention_dense_p0(spec: AttentionDenseSpec) -> KernelDef:
         return packs
 
     def read_v(dt, kk):
-        """PV A-operand = V^T[dim, key], element-wise (P0). key=kk*8+lane_h*4+j,
-        dim=dt*32+lane_m. Bank-heavy; cfvst conflict-free vehicle is P1."""
+        """PV A-operand = V^T[dim, key]. dim=dt*32+lane_m, keys=kk*8+lane_h*4+{0..3}.
+
+        cfvst (D128): the 4 keys are CONTIGUOUS in the transposed V_lds[dim, token],
+        so this is ONE ds_read_b64 vs the naive path's 4 element-wise ds_read_u16.
+        The values delivered to the MFMA are bit-identical between the two paths (same
+        (dim, key) mapping); only the LDS layout and read width differ.
+        naive (D64 / bf16-D128): element-wise from V_lds[key, dim] (bank-heavy, but
+        those configs are VGPR-bound / spill under cfvst, not LDS-read-bound)."""
+        if USE_CFVST:
+            dim_row = b.add(b.const_i32(dt * 32), lane_m)
+            key0 = b.add(b.const_i32(kk * 8), d_base)
+            return b.smem_load_vN(
+                V_lds, b.const_i32(0), dim_row, key0, dtype=dtype, n=4
+            )
         dim_col = b.add(b.const_i32(dt * 32), lane_m)
         elems = []
         for j in range(4):
@@ -609,9 +793,31 @@ def _build_attention_dense_p0(spec: AttentionDenseSpec) -> KernelDef:
         l_i = carry[1]
         o_acc = list(carry[2 : 2 + D_TILES])
 
-        load_tile(j)
-        b.s_waitcnt(vmcnt=0)
-        b.s_barrier_bare()
+        if USE_CFVST:
+            load_tile(j)  # K async DMA -> K_lds
+            v_payload = _cfvst_load_v(
+                j
+            )  # V register buffer_loads (natural [token,dim])
+            # Drain BOTH the K async DMA and the V register loads (all vmcnt) before
+            # the V perm+store reads those registers and before QK reads K_lds.
+            b.s_waitcnt(vmcnt=0)
+            _cfvst_store_v(v_payload)  # perm_b32 transpose -> ds_write V_lds[dim,token]
+            # Publish K_lds (DMA) AND V_lds (ds_write) to all waves. This MUST drain
+            # lgkmcnt for the V ds_write and cannot be a bare s_barrier: gfx90a+ set
+            # FeatureBackOffBarrier, so LLVM would sink the lgkm wait past the barrier
+            # to the ds_read consumer (the P0 read-after-barrier race, now on the
+            # tile-START barrier because V publication is an in-loop ds_write).
+            # sync_lds_only() emits the lgkm drain BEFORE the barrier (CK Tile
+            # block_sync_lds). vmcnt is already 0 here, so no full sync() is needed.
+            b.sync_lds_only()
+        else:
+            # Naive (D64): K and V both async-DMA'd into their natural layout. Drain
+            # the DMA (vmcnt) then a plain barrier -- V is not an in-loop ds_write
+            # here, so the tile-start barrier needs no lgkm drain (the DMA landed the
+            # data; the trailing sync_lds_only guards the read-before-overwrite).
+            load_tile(j)
+            b.s_waitcnt(vmcnt=0)
+            b.s_barrier_bare()
 
         s = do_qk()
         do_mask(s, j)
@@ -643,9 +849,10 @@ def _build_attention_dense_p0(spec: AttentionDenseSpec) -> KernelDef:
             for dt in range(D_TILES)
         ]
         o_acc = do_pv(o_acc, relayout_p(p_vals))
-        # Tile done; the next iteration's async DMA refills the SINGLE K/V buffer, so
-        # every wave's LDS reads must have LANDED (not just issued) before any wave
-        # starts writing. This MUST drain lgkmcnt and cannot be a bare s_barrier:
+        # Tile done; the next iteration refills the SINGLE K/V buffer (K via async DMA,
+        # V via the perm_b32 ds_write), so every wave's LDS reads must have LANDED (not
+        # just issued) before any wave starts writing. This MUST drain lgkmcnt and
+        # cannot be a bare s_barrier:
         # gfx90a+ set FeatureBackOffBarrier, so SIInsertWaitcnts skips the
         # conservative pre-barrier drain and places the lgkm wait at the ds_read's
         # CONSUMER -- which the scheduler is free to sink past the barrier. Measured
