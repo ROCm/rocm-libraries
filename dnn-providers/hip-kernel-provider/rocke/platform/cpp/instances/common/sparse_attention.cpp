@@ -137,8 +137,8 @@ static void rocke_sparse_attn_jenga_body(rocke_ir_builder_t* b, rocke_value_t* s
 
     /* mask_off  = b.add(mask_row_base, slot) */
     mask_off = rocke_b_add(b, ctx->mask_row_base, slot);
-    /* mask_byte = b.global_load(mask_global, mask_off, I8)  (align=1 default) */
-    mask_byte = rocke_b_global_load(b, ctx->mask_global, mask_off, rocke_i8(), 1);
+    /* mask_byte = b.global_load_i8(mask_global, mask_off) */
+    mask_byte = rocke_b_global_load_i8(b, ctx->mask_global, mask_off, 0);
     /* b.smem_store_vN(mask_lds, [slot], mask_byte, 1) */
     idx[0] = slot;
     rocke_b_smem_store_vN(b, ctx->mask_lds, idx, 1, mask_byte, 1);

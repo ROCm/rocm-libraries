@@ -40,7 +40,7 @@ The `RunListener` objects are generally managed by the `MetaRunListener` object 
 RunListener subclasses implement key functionality in a generic way:
 - `ReferenceValidator` implements correctness checking.
 - `BenchmarkTimer` performs timing with Hip events or via CPU timing and calculates speed in GFlops
-- `HardwareMonitorListener` uses the HardwareMonitor class to monitor the GPU's clock frequency, temperature, fan speed, etc using the ROCm-SMI library.
+- `HardwareMonitorListener` uses the HardwareMonitor class to monitor the GPU's clock frequency, temperature, fan speed, etc using the amd-smi library.
 - The `DataInitialization`, `SolutionIterator`, and `ResultReporter` (mentioned below) classes also inherit from `RunListener`.
 
 The loop conditions of several of the `main` loops are driven by calls into the `MetaRunListener` to allow subclasses to determine loop counts:
@@ -153,9 +153,9 @@ This class just calls `findBestSolution()` on the solution library, in order to 
 
 ## `HardwareMonitorListener` and `HardwareMonitor`
 
-Responsible for monitoring GPU temperatures and clock rates, via ROCm-SMI.  **Note**: Hardware monitoring can be disabled by setting the `hardware-monitor` program argument to `false`.
+Responsible for monitoring GPU temperatures and clock rates, via amd-smi.  **Note**: Hardware monitoring can be disabled by setting the `hardware-monitor` program argument to `false`.
 
-`HardwareMonitor` uses threads to asynchronously query ROCm-SMI.  It provides an interface to start/stop monitoring manually, or to monitor between Hip events, to limit query rates, and to specify the specific sensor(s) that are required.  It also examines the PCI id data to make sure we are monitoring the correct device in the case that there are multiple GPUs in the system.
+`HardwareMonitor` uses threads to asynchronously query amd-smi.  It provides an interface to start/stop monitoring manually, or to monitor between Hip events, to limit query rates, and to specify the specific sensor(s) that are required.  It also examines the PCI id data to make sure we are monitoring the correct device in the case that there are multiple GPUs in the system.
 
 `HardwareMonitorListener` implements the `RunListener` interface and uses `HardwareMonitor`'s asynchronous interface to monitor GPU properties while the GPU kernels are actually executing.  It then provides this information to any reporter classes via the `report()` functionality:
 

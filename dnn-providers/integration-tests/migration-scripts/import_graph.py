@@ -20,13 +20,14 @@ Dup policy: default is skip-and-report (idempotent, safe to re-run).
 
 Usage::
 
-    import_graph.py --graph case.json --bundle-dir integration_test_bundles/ \\
+    import_graph.py --graph case.json --bundle-dir integration-test-bundles/ \\
         [--tier quick] [--meta reference_source="..."] [--dry-run] [--strict] [--force]
 """
 
 import argparse
 import copy
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -96,14 +97,17 @@ def _extract_placeholders(node, prefix=""):
             yield from _extract_placeholders(v, f"{prefix}[{i}]")
 
 
-def _deep_get(obj, dotted_path):
+_MISSING = object()
+
+
+def _deep_get(obj, dotted_path, default=_MISSING):
     """Resolve a dotted path like 'attributes.padding' against a dict tree."""
     cur = obj
     for tok in dotted_path.split("."):
         if isinstance(cur, dict) and tok in cur:
             cur = cur[tok]
         else:
-            return None
+            return default
     return cur
 
 
@@ -141,7 +145,7 @@ def _extract_values(graph: dict, template: dict) -> dict:
             if case_path.startswith("tensors[") or case_path in TOP_LEVEL_IF_VARIES:
                 continue
             src_val = _deep_get(g_node, loc)
-            if src_val is not None:
+            if src_val is not _MISSING:
                 _deep_set(values, case_path, src_val)
 
     return values
@@ -243,7 +247,10 @@ def main() -> int:
 
     # --- Structural match: append to existing sweep ---
     if matches:
-        template, sweep, sweep_path = matches[0]
+        # Prefer a sweep in the requested tier so Smoke cases land in quick/.
+        tier_prefix = str(args.bundle_dir / args.tier) + os.sep
+        tier_matches = [m for m in matches if str(m[2]).startswith(tier_prefix)]
+        template, sweep, sweep_path = (tier_matches or matches)[0]
         values = _extract_values(graph, template)
         new_case = {"id": None, "values": values, "metadata": meta}
         existing_cases = sweep.get("cases", [])
