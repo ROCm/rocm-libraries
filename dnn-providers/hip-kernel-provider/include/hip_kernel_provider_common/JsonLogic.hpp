@@ -432,7 +432,11 @@ enum class Op
     IF,
     AND,
     OR,
-    IN,
+    // Spelled MEMBERSHIP, not IN: <minwindef.h> defines IN as an empty
+    // annotation macro, so an enumerator named IN fails to compile on Windows
+    // in any translation unit that also pulls in windows.h. The JsonLogic
+    // operator key stays "in".
+    MEMBERSHIP,
     CEIL_DIV,
     ABS,
     POW,
@@ -763,7 +767,7 @@ struct OpNode final : Node
             }
             return sawNull ? Value() : cur;
         }
-        case Op::IN:
+        case Op::MEMBERSHIP:
         {
             const std::vector<Value> v = evalArgs(d);
             if(anyNull(v))
@@ -881,7 +885,7 @@ inline const Op* lookupOp(const std::string& key)
             {"?:", Op::IF},
             {"and", Op::AND},
             {"or", Op::OR},
-            {"in", Op::IN},
+            {"in", Op::MEMBERSHIP},
             {"ceil_div", Op::CEIL_DIV},
             {"abs", Op::ABS},
             {"pow", Op::POW},
@@ -942,7 +946,7 @@ inline void checkArity(Op op, std::size_t n, const std::string& key)
     case Op::IF:
         require(n >= 2);
         break;
-    case Op::IN:
+    case Op::MEMBERSHIP:
     case Op::POW:
     case Op::CEIL_DIV:
     case Op::VALUE_OR_DEFAULT:

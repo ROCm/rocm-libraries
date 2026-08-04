@@ -179,7 +179,7 @@ private:
         const auto* required = graph.getGraph().min_required_engine_api_version();
         if(required == nullptr)
         {
-            return std::string(UmdCompiler::K_DEFAULT_VERSION);
+            return {UmdCompiler::K_DEFAULT_VERSION};
         }
         return std::to_string(required->major()) + "." + std::to_string(required->minor());
     }
