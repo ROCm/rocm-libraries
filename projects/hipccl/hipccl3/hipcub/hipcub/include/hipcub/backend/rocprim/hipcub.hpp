@@ -69,7 +69,6 @@
 #include "device/device_transform.hpp"
 
 // Grid
-#include "grid/grid_barrier.hpp"
 #include "grid/grid_even_share.hpp"
 #include "grid/grid_mapping.hpp"
 #include "grid/grid_queue.hpp"
