@@ -10,7 +10,7 @@ Tuning scheduler concurrency
 
 hipthreads launches a fixed number of execution slots, called vcores, on each Workgroup Processor (WGP). The default number of vcores per WGP is 16. It can be changed to accommodate different workloads and architectures.
 
-The total vcore count is calculated by multiplying the number of WGPs per compute unit (multiprocessorCount) by the number of vcores per WGP:
+The total vcore count is calculated by multiplying the number of WGPs on the device (``multiprocessorCount``) by the number of vcores per WGP:
 
 .. code-block:: text
 
