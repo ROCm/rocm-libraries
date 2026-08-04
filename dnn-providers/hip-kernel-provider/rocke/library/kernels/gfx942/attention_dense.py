@@ -53,7 +53,8 @@ Implementation status (see the AICK-1664 plan for the full ordered work list)
 -----------------------------------------------------------------------------
   * P0  enablement + 32x32x8 atom + K-loop doubling ............ DONE (this file)
   * P1  conflict-free V (perm_b32 store-path transpose) ........ DONE (D128 fp16)
-  * P2  exp2_fast (DONE, fp16) + lazy/fused rescale ............ exp2_fast DONE (fp16)
+  * P2  exp2_fast + fused/lazy rescale ........................ DONE (exp2_fast all
+        but bf16 D128; fused rescale bit-identical, enables bf16 D64 exp2_fast)
   * P3  wide4 (WG=256) + K bank-pad retune + K single-buffer ... TODO
   * P4  persistent grid-stride + hkv_major decode .............. TODO
   * P5  diagonal masking (re-test only), partial-vmcnt prefetch  TODO
@@ -202,16 +203,25 @@ def _p0_rows_per_instr(head_size: int) -> int:
     return _DMA_ELEMS_PER_INSTR // head_size
 
 
-def _p0_use_exp2_fast(dtype: str) -> bool:
+def _p0_use_exp2_fast(head_size: int, dtype: str) -> bool:
     """Whether softmax uses ``exp2_fast`` (one v_exp_f32, no range-reduction guard).
 
-    fp16 only. exp2_fast is a strict VALU reduction and the dominant P2 lever on the
-    (post-P1) VALU-bound path, but its result is live sooner and raises register
-    pressure; on bf16 D128 -- the tightest config -- that spills over the
-    waves-per-eu=2 cap. bf16 keeps plain ``exp2`` until the fused-rescale VGPR relief
-    lands (same prerequisite as bf16 conflict-free V). See :func:`_p0_use_cfvst`.
+    Enabled everywhere EXCEPT bf16 D128. exp2_fast is a strict VALU reduction and the
+    dominant P2 lever on the (post-P1) VALU-bound path, and is always numerically safe
+    here -- both softmax args (alpha's m_i - m_new and p's s - m_new) are <= 0, exactly
+    exp2_fast's precondition.
+
+    bf16 D128 is the sole holdout. Its ``.1k`` MFMA schedule keeps more registers live,
+    and exp2_fast makes the exp result available in one instruction (vs plain exp2's
+    ~5-op range reduction), which the scheduler hoists -- lengthening the exp live
+    ranges. Measured post-fused-rescale (plan §6.1): bf16 D128 goes 175 VGPR / 0 spill
+    (plain exp2) -> 256 VGPR / 22 spill (exp2_fast), over the waves-per-eu=2 cap. The
+    fused rescale freed ~28 VGPR but not enough to absorb that hoist on the .1k path;
+    fp16 D128 (213, cfvst) and bf16 D64 (215) both have the headroom. A bf16 D128
+    exp2_fast unblock is a P3 occupancy/scheduling item. Spill re-verified across the
+    fp16/bf16 x D64/D128 cohort.
     """
-    return dtype == "fp16"
+    return dtype == "fp16" or head_size != 128
 
 
 def _p0_use_cfvst(head_size: int, dtype: str) -> bool:
@@ -726,17 +736,6 @@ def _build_attention_dense_p0(spec: AttentionDenseSpec) -> KernelDef:
                     b.cmp_le(ktok, query_tok), s_reg[nsub][i], neg_inf
                 )
 
-    def relayout_p(p):
-        """PV B-operand from lane-local P regs (no cross-lane): key=kk*8+lane_h*4+j
-        maps to QK C-reg (nsub=kk//4, i=(kk%4)*4+j) — same lane_h split."""
-        packs = []
-        for kk in range(KK_STEPS):
-            nsub = kk // 4
-            base_i = (kk % 4) * 4
-            elems = [b.cast_f32_to(p[nsub][base_i + j], dtype) for j in range(4)]
-            packs.append(b.vec_pack(elems, dtype))
-        return packs
-
     def read_v(dt, kk):
         """PV A-operand = V^T[dim, key]. dim=dt*32+lane_m, keys=kk*8+lane_h*4+{0..3}.
 
@@ -847,25 +846,36 @@ def _build_attention_dense_p0(spec: AttentionDenseSpec) -> KernelDef:
         # tile_max) >= m_i) and p's s - m_new (m_new >= tile_max >= every s) -- which
         # is exactly exp2_fast's documented precondition (no overflow; v_exp_f32
         # flushes large negatives to 0). Cuts ~99 VALU/tile at D128, the dominant
-        # MFMA-starving residual once conflict-free V (P1) lands.
-        #
-        # Gated to fp16 (_p0_use_exp2_fast): the single-instruction exp result is
-        # available sooner, which lengthens live ranges and RAISES register pressure;
-        # on the already-tightest config (bf16 D128) that tips it over the
-        # waves-per-eu=2 cap into a spill. fp16 has the headroom (0 spill). bf16's
-        # exp2_fast waits on the fused exp2->accumulate->cast->pack rescale that frees
-        # ~32 VGPR (plan §6.1) -- same headroom prerequisite as bf16 cfvst.
-        exp2 = b.exp2_fast if _p0_use_exp2_fast(spec.dtype) else b.exp2
+        # MFMA-starving residual once conflict-free V (P1) lands. Enabled for every
+        # config except bf16 D128, which spills on the .1k schedule -- the spill
+        # rationale and the measured matrix live in _p0_use_exp2_fast's docstring.
+        exp2 = b.exp2_fast if _p0_use_exp2_fast(D, spec.dtype) else b.exp2
         alpha = exp2(b.fsub(m_i, m_new))
 
-        p_vals = [
-            [exp2(b.fsub(s[nsub][i], m_new)) for i in range(16)]
-            for nsub in range(N_SUB)
-        ]
+        # P2 fused/lazy rescale: compute each exp2 inline, accumulate l_local, and
+        # cast->pack it into the PV B-operand in ONE pass. The f32 p value now dies
+        # after its two uses (the l_local fadd + the dtype cast) instead of staying
+        # live across the whole l_local reduction AND a separate cast/pack pass. Peak
+        # live f32 p regs drop from N_SUB*16 (=32 at D128) to ~one pack, freeing
+        # ~28 VGPR (plan §6.1) -- the headroom bf16 cfvst / bf16 exp2_fast needed.
+        #
+        # The kk->(nsub,i) map is the PV B-operand relayout (key=kk*8+lane_h*4+j maps
+        # to QK C-reg nsub=kk//4, i=(kk%4)*4+j -- same lane_h split, no cross-lane).
+        # KK_STEPS==N_SUB*4, so this covers every p element exactly once, and i steps
+        # 0,1,2,3 / 4,5,6,7 / ... within each nsub -- the identical accumulation order
+        # as the old nested (nsub,i) loop, so l_local and the packed casts are
+        # numerically bit-identical to before: pure live-range relief, no algo change.
         l_local = b.const_f32(0.0)
-        for nsub in range(N_SUB):
-            for i in range(16):
-                l_local = b.fadd(l_local, p_vals[nsub][i])
+        p_packs = []
+        for kk in range(KK_STEPS):
+            nsub = kk // 4
+            base_i = (kk % 4) * 4
+            elems = []
+            for j in range(4):
+                pv = exp2(b.fsub(s[nsub][base_i + j], m_new))
+                l_local = b.fadd(l_local, pv)
+                elems.append(b.cast_f32_to(pv, dtype))
+            p_packs.append(b.vec_pack(elems, dtype))
         l_tile = b.fadd(l_local, b.warp_shuffle_xor(l_local, 32))
         l_new = b.fadd(b.fmul(l_i, alpha), l_tile)
 
@@ -875,7 +885,7 @@ def _build_attention_dense_p0(spec: AttentionDenseSpec) -> KernelDef:
             )
             for dt in range(D_TILES)
         ]
-        o_acc = do_pv(o_acc, relayout_p(p_vals))
+        o_acc = do_pv(o_acc, p_packs)
         # Tile done; the next iteration refills the SINGLE K/V buffer (K via async DMA,
         # V via the perm_b32 ds_write), so every wave's LDS reads must have LANDED (not
         # just issued) before any wave starts writing. This MUST drain lgkmcnt and

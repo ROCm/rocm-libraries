@@ -36,6 +36,8 @@ from kernels.gfx942.attention_dense import (
     build_attention_dense,
     p0_kernel_name,
     supports_attention_dense,
+    _p0_use_cfvst,
+    _p0_use_exp2_fast,
 )
 
 # Query rows per CTA baked into the P0 body; block_n must divide it.
@@ -401,3 +403,108 @@ def test_tile_end_barrier_drains_lds_before_the_barrier():
         # And the tile-end barrier must not be elidable: the elide pass targets
         # body_ops[-2].
         assert loop.attrs["elide_trailing_barrier"] is False
+
+
+# --------------------------------------------------------------------------- #
+# P2 exp2_fast gate (spill-driven) + fused/lazy rescale
+# --------------------------------------------------------------------------- #
+def _walk_op_names(op):
+    """Yield every op name in the op tree (op + all nested region ops)."""
+    yield op.name
+    for region in getattr(op, "regions", ()):
+        for child in region.ops:
+            yield from _walk_op_names(child)
+
+
+@pytest.mark.parametrize(
+    "head_size, dtype, expected",
+    [
+        (64, "fp16", True),
+        (128, "fp16", True),
+        (64, "bf16", True),  # fused rescale gave the headroom (P2)
+        (128, "bf16", False),  # spills on the .1k schedule even post-fused-rescale
+    ],
+)
+def test_exp2_fast_gate_matches_the_spill_measured_matrix(head_size, dtype, expected):
+    """The exp2_fast decision is a spill fact, not a preference.
+
+    exp2_fast is numerically safe for every config (both softmax args <= 0), so the
+    gate exists ONLY to keep occupancy: its sooner-available result raises register
+    pressure, and bf16 D128's `.1k` MFMA schedule spills over the waves-per-eu=2 cap
+    (measured 175->256 VGPR / 22 spill) even after the P2 fused rescale freed ~28
+    VGPR. Every other config has the headroom. This pins the exact enabled set so a
+    future edit that flips one arm has to update this matrix on purpose.
+    """
+    assert _p0_use_exp2_fast(head_size, dtype) is expected
+
+
+@pytest.mark.parametrize(
+    "head_size, dtype",
+    [(128, "fp16"), (64, "fp16"), (64, "bf16"), (128, "bf16")],
+)
+def test_softmax_emits_the_gated_exp2_intrinsic(head_size, dtype):
+    """The gate actually selects the intrinsic in the emitted IR.
+
+    exp2_fast lowers to ``math.exp2_fast`` (llvm.amdgcn.exp2.f32 -> one v_exp_f32);
+    plain exp2 lowers to ``math.exp2`` (llvm.exp2.f32, guarded range reduction). The
+    softmax path must emit exactly one family, matching :func:`_p0_use_exp2_fast`, so
+    the bf16-D128 spill guard is not silently defeated by an IR-level fallback.
+    Parametrized (not a plain loop) so each config's failure is isolated -- the gate
+    boundary case bf16 D128 must be reported even if an earlier config regresses.
+    """
+    spec = _spec(head_size=head_size, dtype=dtype)
+    kernel = build_attention_dense(spec, arch="gfx942")
+    names = [n for op in kernel.body.ops for n in _walk_op_names(op)]
+    has_fast = "math.exp2_fast" in names
+    has_plain = "math.exp2" in names
+    if _p0_use_exp2_fast(head_size, dtype):
+        assert has_fast and not has_plain, (
+            f"{dtype} D{head_size}: gate says exp2_fast but IR has "
+            f"fast={has_fast} plain={has_plain}"
+        )
+    else:
+        assert has_plain and not has_fast, (
+            f"{dtype} D{head_size}: gate says plain exp2 but IR has "
+            f"fast={has_fast} plain={has_plain}"
+        )
+
+
+@pytest.mark.parametrize(
+    "head_size, dtype", [(128, "fp16"), (64, "fp16"), (64, "bf16")]
+)
+def test_fused_rescale_casts_each_p_exactly_once(head_size, dtype):
+    """P2 fused/lazy rescale: exp2 -> l_local accumulate -> cast -> pack in one pass.
+
+    The pre-P2 code built a full f32 ``p_vals`` matrix (N_SUB*16 values), reduced it
+    into ``l_local``, THEN cast+packed it in a separate ``relayout_p`` pass -- holding
+    all those f32 regs live across both. The fused rescale casts each P exp result to
+    ``dtype`` inline instead, so in the loop there is exactly ONE ``arith.cast_f32_to``
+    per P element and the exp count is that plus one (alpha). More casts than P
+    elements would mean a second materialization pass (the live-range regression this
+    change removed) survived. The P-element count is ``N_SUB*16 = (block_n//32)*16``,
+    which is head-size-independent, so it is derived from the spec here rather than
+    hardcoded -- the assertion stays honest if block_n ever changes. Covers both the
+    cfvst path (D128 fp16) and the naive-V path (D64, bf16) so neither can regress.
+
+    NOTE: this pins the cast/exp COUNTS, not the ``l_local`` accumulation ORDER. The
+    bit-identical-order claim is a numeric property verified by the GPU cohort (this
+    file is not a numeric lane -- see the module docstring), not by op counting.
+    """
+    spec = _spec(head_size=head_size, dtype=dtype)
+    n_p = spec.block_n // 32 * 16  # N_SUB * 16 -- P elements the softmax exps produce
+    kernel = build_attention_dense(spec, arch="gfx942")
+    loops = [o for o in kernel.body.ops if o.name == "scf.for"]
+    assert len(loops) == 1
+    names = list(_walk_op_names(loops[0]))
+    n_exp = names.count("math.exp2_fast") + names.count("math.exp2")
+    n_cast = names.count("arith.cast_f32_to")
+    # exactly one P cast per P element -- no second pass (o_acc rescale uses
+    # fmul/vec_pack, not cast; the final output cast lives outside the loop).
+    assert n_cast == n_p, (
+        f"{dtype} D{head_size}: expected {n_p} P casts (one per element, fused), "
+        f"got {n_cast} -- a standalone relayout/materialization pass may have survived"
+    )
+    # one exp per P element plus alpha's exp.
+    assert (
+        n_exp == n_p + 1
+    ), f"{dtype} D{head_size}: expected {n_p + 1} exps (P + alpha), got {n_exp}"
