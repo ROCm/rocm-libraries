@@ -352,14 +352,23 @@ class RowColQuantGpuGemmRunner:
         # which means elements are stored column-first in memory (Fortran order).
         # Reorder here so the raw pointer passed to C++ matches the stride we declare below.
         B = np.asfortranarray(B)
-        assert B.flags["F_CONTIGUOUS"], "B must be F-contiguous after asfortranarray"
+        if not B.flags["F_CONTIGUOUS"]:
+            raise RuntimeError("B is not F-contiguous after asfortranarray — unexpected numpy state")
 
-        # Strides (in elements)
-        stride_A  = K   # A is row-major [M, K]
-        stride_B  = K   # B is col-major [K, N] → leading dim = K
-        stride_AQ = 1   # AQ per-row: [M, 1] → leading dim = 1
-        stride_BQ = N   # BQ per-col: [1, N] → leading dim = N
-        stride_C  = N   # C is row-major [M, N]
+        # Strides (in elements, matching the kernel's BQLayout=ColumnMajor convention):
+        #   stride_A  = K  : A row-major [M, K], leading dim K
+        #   stride_B  = K  : B col-major [K, N], leading dim K (column index advances by K rows)
+        #   stride_AQ = 1  : AQ row-major [M, 1], leading dim 1 (single column)
+        #   stride_BQ = N  : BQ row-major [1, N] stored as one row of N floats;
+        #                    BQLayout=ColumnMajor is nominal — the kernel reads it as a flat
+        #                    row vector so stride_BQ is the number of columns N, not the
+        #                    column-major leading dim (which would be 1 for a [1,N] matrix).
+        #   stride_C  = N  : C row-major [M, N], leading dim N
+        stride_A  = K
+        stride_B  = K
+        stride_AQ = 1
+        stride_BQ = N
+        stride_C  = N
 
         rc, time_ms = self._lib.run(
             A=A, B=B, AQ=AQ, BQ=BQ, C=C,
@@ -395,8 +404,10 @@ def _detect_gpu_arch() -> str:
             line = line.strip()
             if line.startswith("gfx") and line != "gfx000":
                 return line
-    except Exception:
-        pass
+    except Exception as e:
+        log.warning("rocm_agent_enumerator failed (%s); defaulting to %s", e, _DEFAULT_GFX_ARCH)
+        return _DEFAULT_GFX_ARCH
+    log.warning("rocm_agent_enumerator returned no usable arch; defaulting to %s", _DEFAULT_GFX_ARCH)
     return _DEFAULT_GFX_ARCH
 
 

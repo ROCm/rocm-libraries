@@ -45,6 +45,9 @@ static constexpr std::size_t elements_to_bytes(std::size_t n)
     return n * sizeof(T) / ck_tile::numeric_traits<T>::PackedSize;
 }
 
+// HIP_CHECK calls cleanup() which must be a lambda in scope at every call site.
+// All uses of this macro are inside dispatcher_run_tensorquant_gemm, after the
+// lambda is defined.
 #define HIP_CHECK(call)                                                                        \
     {                                                                                          \
         hipError_t _err = (call);                                                              \
@@ -226,15 +229,17 @@ int dispatcher_run_tensorquant_gemm(const void* A,
     const std::vector<ck_tile::QuantGroupedGemmHostArgs> gemm_descs = {args};
 
     const bool do_time = (time_ms != nullptr);
+    // stream_config fields (positional): stream_id, time_kernel, log_level,
+    //   cold_niters, nrepeat, do_log_perf, use_gpu_timer, rotating_count
     ck_tile::stream_config stream_cfg{
-        nullptr,
-        do_time,
-        0,
-        do_time ? 3 : 0,
-        do_time ? 10 : 1,
-        do_time,
-        false,
-        1,
+        nullptr,           // stream_id
+        do_time,           // time_kernel
+        0,                 // log_level
+        do_time ? 3 : 0,   // cold_niters
+        do_time ? 10 : 1,  // nrepeat
+        do_time,           // do_log_perf
+        false,             // use_gpu_timer
+        1,                 // rotating_count
     };
 
     float exec_time = SelectedKernel::launch(gemm_descs, stream_cfg, kargs_dev);

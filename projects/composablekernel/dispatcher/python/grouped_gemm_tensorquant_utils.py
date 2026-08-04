@@ -335,9 +335,10 @@ class TensorQuantGpuGemmRunner:
         # which means elements are stored column-first in memory (Fortran order).
         # Reorder here so the raw pointer passed to C++ matches the stride we declare below.
         B = np.asfortranarray(B)
-        assert B.flags["F_CONTIGUOUS"], "B must be F-contiguous after asfortranarray"
+        if not B.flags["F_CONTIGUOUS"]:
+            raise RuntimeError("B is not F-contiguous after asfortranarray — unexpected numpy state")
 
-        # TensorQuant: single scalar scale → strides are 1
+        # TensorQuant: single scalar scale per tensor → AQ/BQ strides are 1
         stride_A  = K
         stride_B  = K
         stride_AQ = 1
@@ -377,8 +378,10 @@ def _detect_gpu_arch() -> str:
             line = line.strip()
             if line.startswith("gfx") and line != "gfx000":
                 return line
-    except Exception:
-        pass
+    except Exception as e:
+        log.warning("rocm_agent_enumerator failed (%s); defaulting to %s", e, _DEFAULT_GFX_ARCH)
+        return _DEFAULT_GFX_ARCH
+    log.warning("rocm_agent_enumerator returned no usable arch; defaulting to %s", _DEFAULT_GFX_ARCH)
     return _DEFAULT_GFX_ARCH
 
 
