@@ -75,6 +75,7 @@ int run_gemm_example(ck_tile::ArgParser& arg_parser)
                                           ck_tile::int8_t,
                                           int32_t>(a_layout, b_layout, arg_parser);
     }
+#if CK_TILE_USE_WMMA
     else if(data_type == "i4")
     {
         if(a_layout != "R" || b_layout != "C" || c_layout != "R")
@@ -86,6 +87,22 @@ int run_gemm_example(ck_tile::ArgParser& arg_parser)
 
         using Row = ck_tile::tensor_layout::gemm::RowMajor;
         using Col = ck_tile::tensor_layout::gemm::ColumnMajor;
+        if(m <= GemmConfigI4SmallM::M_Tile)
+        {
+            if(n % GemmConfigI4SmallM::VectorSizeC != 0)
+                return run_gemm_example_with_layouts<GemmConfigI4SmallMTail,
+                                                     Invoker,
+                                                     ck_tile::pk_int4_t,
+                                                     ck_tile::pk_int4_t,
+                                                     int32_t>(arg_parser, Row{}, Col{}, Row{});
+
+            return run_gemm_example_with_layouts<GemmConfigI4SmallM,
+                                                 Invoker,
+                                                 ck_tile::pk_int4_t,
+                                                 ck_tile::pk_int4_t,
+                                                 int32_t>(arg_parser, Row{}, Col{}, Row{});
+        }
+
         if(n % GemmConfigI4::VectorSizeC != 0)
             return run_gemm_example_with_layouts<GemmConfigI4Tail,
                                                  Invoker,
@@ -99,6 +116,7 @@ int run_gemm_example(ck_tile::ArgParser& arg_parser)
                                              ck_tile::pk_int4_t,
                                              int32_t>(arg_parser, Row{}, Col{}, Row{});
     }
+#endif
     else if(data_type == "pk_int4_t")
     {
         // TODO: Add support for bhalf_t ADataType

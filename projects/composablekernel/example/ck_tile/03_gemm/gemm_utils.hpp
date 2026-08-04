@@ -48,13 +48,34 @@ struct GemmConfigBase
 
 struct GemmConfigI4 : public GemmConfigBase
 {
-    static constexpr bool kPadM                   = true;
-    static constexpr bool kPadN                   = true;
-    static constexpr bool kPadK                   = true;
+    static constexpr bool kPadM = true;
+    static constexpr bool kPadN = true;
+    static constexpr bool kPadK = true;
+
+    static constexpr ck_tile::index_t M_Tile = 16;
+    static constexpr ck_tile::index_t N_Tile = 128;
+    static constexpr ck_tile::index_t K_Tile = 128;
+
+    static constexpr ck_tile::index_t M_Warp = 1;
+    static constexpr ck_tile::index_t N_Warp = 8;
+    static constexpr ck_tile::index_t K_Warp = 1;
+
     static constexpr ck_tile::index_t VectorSizeC = 16 / sizeof(int32_t);
 };
 
+struct GemmConfigI4SmallM : public GemmConfigI4
+{
+    static constexpr ck_tile::index_t N_Tile = 32;
+    static constexpr ck_tile::index_t N_Warp = 2;
+};
+
 struct GemmConfigI4Tail : public GemmConfigI4
+{
+    static constexpr bool FixedVectorSizeC        = true;
+    static constexpr ck_tile::index_t VectorSizeC = 1;
+};
+
+struct GemmConfigI4SmallMTail : public GemmConfigI4SmallM
 {
     static constexpr bool FixedVectorSizeC        = true;
     static constexpr ck_tile::index_t VectorSizeC = 1;

@@ -22,7 +22,9 @@ static_assert(!ck_tile::has_wmma_traits_v<ck_tile::gfx120_t,
                                           16,
                                           16>);
 
-template <ck_tile::GemmPipelineScheduler Scheduler>
+template <ck_tile::GemmPipelineScheduler Scheduler,
+          ck_tile::index_t NPerBlock = 128,
+          ck_tile::index_t NWarps    = 8>
 using NativeI4Config =
     std::tuple<ck_tile::tensor_layout::gemm::RowMajor,
                ck_tile::tensor_layout::gemm::ColumnMajor,
@@ -32,7 +34,7 @@ using NativeI4Config =
                ck_tile::int32_t,
                ck_tile::int32_t,
                ck_tile::number<16>,
-               ck_tile::number<128>,
+               ck_tile::number<NPerBlock>,
                ck_tile::number<128>,
                ck_tile::number<16>,
                ck_tile::number<16>,
@@ -41,7 +43,7 @@ using NativeI4Config =
                std::false_type,
                std::false_type,
                ck_tile::number<1>,
-               ck_tile::number<8>,
+               ck_tile::number<NWarps>,
                ck_tile::number<1>,
                std::true_type,
                ck_tile::number<1>>;
@@ -57,6 +59,13 @@ class TestCkTileGemmBasicV1WmmaI4Interwave
     : public TestCkTileGemmPipelineWmmaBase<
           NativeI4Config<ck_tile::GemmPipelineScheduler::Interwave>,
           TestCkTileGemmBasicV1WmmaI4Interwave>
+{
+};
+
+class TestCkTileGemmBasicV1WmmaI4SmallMIntrawave
+    : public TestCkTileGemmPipelineWmmaBase<
+          NativeI4Config<ck_tile::GemmPipelineScheduler::Intrawave, 32, 2>,
+          TestCkTileGemmBasicV1WmmaI4SmallMIntrawave>
 {
 };
 
@@ -82,4 +91,15 @@ TEST_F(TestCkTileGemmBasicV1WmmaI4Intrawave, RejectsUnsupportedKVectorTail)
 TEST_F(TestCkTileGemmBasicV1WmmaI4Interwave, RejectsUnsupportedKVectorTail)
 {
     EXPECT_THROW(this->Run(5, 127, 130, 144, 144, 129), std::runtime_error);
+}
+
+TEST_F(TestCkTileGemmBasicV1WmmaI4SmallMIntrawave, ExactSignedPackedValues)
+{
+    this->Run(16, 32, 128);
+    this->Run(5, 31, 128, 144, 144, 33);
+}
+
+TEST_F(TestCkTileGemmBasicV1WmmaI4SmallMIntrawave, RejectsUnsupportedKVectorTail)
+{
+    EXPECT_THROW(this->Run(5, 31, 130, 144, 144, 33), std::runtime_error);
 }
