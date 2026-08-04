@@ -67,12 +67,15 @@ def _detect_gfx_arch() -> str:
 
 
 _GFX_ARCH = _detect_gfx_arch()
-_SUPPORTED_ARCHES = ("gfx90a", "gfx942", "gfx950")
+# TensorQuant fp8/bf8 kernels use CK CompV3 pipelines that require native fp8 hardware.
+# gfx90a (MI200 series) lacks native fp8 support and produces incorrect results.
+# Only gfx942 (MI300X) and gfx950 (MI350X) are validated.
+_SUPPORTED_ARCHES = ("gfx942", "gfx950")
 
 requires_gpu = pytest.mark.skipif(
     not (_has_hipcc() and _GFX_ARCH in _SUPPORTED_ARCHES),
     reason=(
-        f"GPU test: requires hipcc and a supported GPU ({', '.join(_SUPPORTED_ARCHES)}); "
+        f"GPU test: requires hipcc and native fp8 GPU ({', '.join(_SUPPORTED_ARCHES)}); "
         f"detected arch='{_GFX_ARCH}'"
     ),
 )
