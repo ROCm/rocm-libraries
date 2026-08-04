@@ -125,6 +125,21 @@ test_categories:
     labels:
       - "emu-quick"
 
+  # Arch-agnostic emulation nightly — runs ALL tests for the target arch.
+  emu-full:
+    description: "All common GEMM tests for emulation nightly"
+    test_paths:
+      - "Tensile/Tests/common"
+    pytest_markers:
+      - "{AMDGPU_TARGETS}"
+    parallel_workers: 16
+    pytest_args:
+      - "--prebuilt-client={ROCM_PATH}/libexec/hipblaslt/tensilelite/tensilelite-client"
+      - "--global-parameters=LibraryFormat='msgpack'"
+      - "--tensile-options=--cxx-compiler,{ROCM_PATH}/bin/amdclang++,--gpu-targets,{AMDGPU_TARGETS}"
+    labels:
+      - "emu-full"
+
 execution_settings:
   # TensileLite GPU unit tests assemble/run kernels and the legacy runner ran
   # them serially; pytest-xdist worker isolation (HIP_VISIBLE_DEVICES) is set up
@@ -141,3 +156,4 @@ execution_settings:
     full: 28800           # 8 hours
     ffm-quick: 2700       # 45 minutes
     emu-quick: 2400       # 40 minutes
+    emu-full: 28800       # 8 hours
