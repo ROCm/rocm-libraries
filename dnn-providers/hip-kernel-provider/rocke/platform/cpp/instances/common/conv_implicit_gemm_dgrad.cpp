@@ -299,10 +299,10 @@ bool rocke_dgrad_conv_is_valid_spec(const rocke_dgrad_conv_spec_t* s,
     }
     if(sk > 1)
     {
-        /* Accept fp32, bf16, fp16, f16 for atomic accumulation. */
+        /* Accept fp32, bf16, fp16 for atomic accumulation. */
         const char* dd = s->data.dtype_d;
-        int ok_dtype = (strcmp(dd, "fp32") == 0 || strcmp(dd, "bf16") == 0
-                        || strcmp(dd, "fp16") == 0 || strcmp(dd, "f16") == 0);
+        int ok_dtype
+            = (strcmp(dd, "fp32") == 0 || strcmp(dd, "bf16") == 0 || strcmp(dd, "fp16") == 0);
         if(!ok_dtype)
         {
             snprintf(
@@ -310,7 +310,7 @@ bool rocke_dgrad_conv_is_valid_spec(const rocke_dgrad_conv_spec_t* s,
             return false;
         }
         /* Even-C constraint for packed bf16/fp16 atomics. */
-        int packed = (strcmp(dd, "bf16") == 0 || strcmp(dd, "fp16") == 0 || strcmp(dd, "f16") == 0);
+        int packed = (strcmp(dd, "bf16") == 0 || strcmp(dd, "fp16") == 0);
         if(packed && p->C % 2 != 0)
         {
             snprintf(reason,
@@ -1034,7 +1034,10 @@ static void _emit_dgrad_tilde_atomic_epilogue(rocke_ir_builder_t* b,
                         rocke_value_t* v_odd = rocke_b_select(b, is_odd, val_cvt, zero_cvt);
                         rocke_value_t* comps[2] = {v_even, v_odd};
                         rocke_value_t* vec = rocke_b_vec_pack(b, comps, 2, val_cvt->type);
-                        rocke_b_global_atomic_add_pk_f16(b, dx_ptr, off_even, vec, NULL);
+                        if(is_bf16)
+                            rocke_b_global_atomic_add_pk_bf16(b, dx_ptr, off_even, vec, NULL);
+                        else
+                            rocke_b_global_atomic_add_pk_f16(b, dx_ptr, off_even, vec, NULL);
                     }
                 }
                 rocke_b_region_leave(b);

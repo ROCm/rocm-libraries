@@ -631,13 +631,12 @@ class DgradConvSpec:
                 f"got {self.split_k}"
             )
         if self.split_k > 1:
-            _dtype_d = "fp16" if self.data.dtype_d == "f16" else self.data.dtype_d
-            if _dtype_d not in ("fp32", "bf16", "fp16"):
+            if self.data.dtype_d not in ("fp32", "bf16", "fp16"):
                 raise ValueError(
                     f"split_k > 1 requires dtype_d in fp32/bf16/fp16 "
                     f"(got {self.data.dtype_d!r})"
                 )
-            if _dtype_d in ("bf16", "fp16") and self.problem.C % 2 != 0:
+            if self.data.dtype_d in ("bf16", "fp16") and self.problem.C % 2 != 0:
                 raise ValueError(
                     f"split_k > 1 with dtype_d={self.data.dtype_d!r} requires even C "
                     f"(packed <2 x dtype> atomic pairs on the innermost NHWC dimension); "
@@ -734,13 +733,12 @@ def is_valid_dgrad_spec(spec: DgradConvSpec, arch: str = "gfx950") -> Tuple[bool
         return False, f"split_k must be -1 (auto), 1, or >1 (got {sk})"
     if sk > 1 and family != "mma":
         return False, f"split_k > 1 is CDNA-only (got family {family!r} on {arch})"
-    _dtype_d = "fp16" if spec.data.dtype_d == "f16" else spec.data.dtype_d
-    if sk > 1 and _dtype_d not in ("fp32", "bf16", "fp16"):
+    if sk > 1 and spec.data.dtype_d not in ("fp32", "bf16", "fp16"):
         return False, (
             f"split_k > 1 requires dtype_d in fp32/bf16/fp16 for atomic accumulation "
             f"(got {spec.data.dtype_d!r})"
         )
-    if sk > 1 and _dtype_d in ("bf16", "fp16") and p.C % 2 != 0:
+    if sk > 1 and spec.data.dtype_d in ("bf16", "fp16") and p.C % 2 != 0:
         return False, (
             f"split_k > 1 with dtype_d={spec.data.dtype_d!r} requires even C "
             f"(packed <2 x dtype> atomic pairs on the innermost NHWC dimension); "
