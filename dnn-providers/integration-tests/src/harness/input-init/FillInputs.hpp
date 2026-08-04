@@ -12,7 +12,7 @@
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 
-#include "harness/input-init/SynthesisConfig.hpp"
+#include "harness/input-init/InputFillRecipes.hpp"
 
 namespace hipdnn_integration_tests
 {
@@ -20,24 +20,24 @@ namespace hipdnn_integration_tests
 using InputTensorMap
     = std::unordered_map<int64_t, std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>>;
 
-struct SynthesisResult
+struct FillResult
 {
     bool filled = false;
     std::string reason;
 
-    static SynthesisResult ok()
+    static FillResult ok()
     {
         return {true, {}};
     }
-    static SynthesisResult unsupported(std::string why)
+    static FillResult unsupported(std::string why)
     {
         return {false, std::move(why)};
     }
 };
 
-SynthesisResult synthesizeInputs(const hipdnn_flatbuffers_sdk::data_objects::Graph& graph,
-                                 InputTensorMap& inputs,
-                                 const std::vector<int64_t>& ownedUids,
-                                 SynthesisConfig& config);
+FillResult fillInputs(const hipdnn_flatbuffers_sdk::data_objects::Graph& graph,
+                      InputTensorMap& inputs,
+                      const std::vector<int64_t>& ownedUids,
+                      InputFillRecipes& recipes);
 
 } // namespace hipdnn_integration_tests

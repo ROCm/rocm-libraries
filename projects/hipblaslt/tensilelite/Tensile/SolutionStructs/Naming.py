@@ -51,7 +51,9 @@ def getKeyNoInternalArgs(state, splitGSU: bool) -> str:
   parameters — they don't change the generated assembly. This function
   produces a canonical key where those parameters are masked to "M" and
   GroupedGemm is forced to False, so that kernels differing only in
-  internal args map to the same key.
+  internal args map to the same key. GroupedGemm masking is skipped when
+  SupportUserArgs is set, because the batch-offset codegen is gated on
+  GroupedGemm there and the assembly genuinely differs.
 
   Used to:
     - Deduplicate kernels before code generation (BenchmarkProblems.py,
@@ -71,8 +73,13 @@ def getKeyNoInternalArgs(state, splitGSU: bool) -> str:
   gg_backup = pt["GroupedGemm"]
   wgmxcc_backup = s["WorkGroupMappingXCC"]
 
-  # Mask internal args
-  pt["GroupedGemm"] = False
+  # Mask internal args. GroupedGemm normally does not change the generated
+  # assembly, so it is masked to dedup grouped/non-grouped kernels. But when
+  # SupportUserArgs is set, the batch-offset codegen (KernelWriterAssembly /
+  # Signature) is gated on GroupedGemm, so grouped and non-grouped kernels
+  # differ and must keep distinct keys -- preserve the real value in that case.
+  if not pt.get("SupportUserArgs", False):
+    pt["GroupedGemm"] = False
   if splitGSU:
     s["GlobalSplitU"] = "M" if (gsu_backup > 1 or gsu_backup == -1) else gsu_backup
   elif gsu_backup != 0:
@@ -161,7 +168,12 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
     state["WorkGroupMappingXCC"] = 1
 
   if ignoreInternalArgs:
-    state["ProblemType"]["GroupedGemm"] = False
+    # GroupedGemm is masked so kernels differing only in GroupedGemm dedup to
+    # one key. When SupportUserArgs is set the batch-offset codegen depends on
+    # GroupedGemm, so grouped and non-grouped kernels are not identical and must
+    # keep distinct keys -- preserve the real value in that case.
+    if not state["ProblemType"].get("SupportUserArgs", False):
+      state["ProblemType"]["GroupedGemm"] = False
     if splitGSU:
       state["GlobalSplitU"] = "M" if (state["GlobalSplitU"] > 1 or state["GlobalSplitU"] == -1) else state["GlobalSplitU"]
 
