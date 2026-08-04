@@ -58,8 +58,14 @@ std::string runPassAndCaptureReport(StinkyAsmModule& module) {
 
     GemmTileConfig config;
     config.arch = kArchTriple;
+
+    // The pass's only gate; TensileLite forwards rocisa's archCaps here.
+    AsmCapsConfig caps;
+    caps.requiresXCntForVolatileVMEM = true;
+
     PassContext ctx;
     ctx.setGemmTileConfig(config);
+    ctx.setAsmCapsConfig(caps);
     AnalysisManager am;
 
     std::ostringstream report;
@@ -101,16 +107,17 @@ TEST_F(Gfx1250HazardProfileTest, SplitsCountsBetweenKernelBodyAndHelperFunctions
 
     const std::string report = runPassAndCaptureReport(*module);
 
-    // The unprefixed lines are the whole kernel: all four drains, not just the
-    // last function walked.
-    EXPECT_NE(report.find("] xcnt drains: total=4, loop+matrix=0, loop=0, matrix=0, other=4"),
-              std::string::npos)
+    // The "whole kernel" lines cover all four drains, not just the last
+    // function walked.
+    EXPECT_NE(
+        report.find("] whole kernel xcnt drains: total=4, loop+matrix=0, loop=0, matrix=0, other=4"),
+        std::string::npos)
         << report;
     EXPECT_NE(report.find("] kernel body xcnt drains: total=2"), std::string::npos) << report;
     EXPECT_NE(report.find("] helper functions xcnt drains: total=2"), std::string::npos) << report;
 
-    EXPECT_NE(report.find("] xcnt drain rules: atomic=0, smem=0, flat=0, foreverSleep=0, "
-                          "scalarPrefetch=0, vgprMsb=4"),
+    EXPECT_NE(report.find("] whole kernel xcnt drain rules: atomic=0, smem=0, flat=0, "
+                          "foreverSleep=0, scalarPrefetch=0, vgprMsb=4"),
               std::string::npos)
         << report;
     EXPECT_NE(report.find("] kernel body xcnt drain rules: atomic=0, smem=0, flat=0, "
@@ -128,7 +135,7 @@ TEST_F(Gfx1250HazardProfileTest, ReportsTotalsOnlyWhenTheKernelHasNoHelperFuncti
 
     const std::string report = runPassAndCaptureReport(*module);
 
-    EXPECT_NE(report.find("] xcnt drains: total=1"), std::string::npos) << report;
+    EXPECT_NE(report.find("] whole kernel xcnt drains: total=1"), std::string::npos) << report;
     // A split would only repeat the totals.
     EXPECT_EQ(report.find("kernel body"), std::string::npos) << report;
     EXPECT_EQ(report.find("helper functions"), std::string::npos) << report;

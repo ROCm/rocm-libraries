@@ -19,9 +19,15 @@ class Pass;
 /// belong here when they require a late whole-kernel view of the final
 /// instruction order.
 ///
+/// Runs only on arches with the `RequiresXCntForVolatileVMEM` capability, the
+/// one that makes s_wait_xcnt drains necessary; a no-op everywhere else.
+///
 /// Requires a correctly built CFG. In particular, a replay group that crosses
 /// a physical basic-block boundary must have the corresponding fall-through
 /// edge.
+///
+/// An SMEM instruction that overwrites its own source register cannot be
+/// repaired by a drain; the pass reports it and asserts.
 ///
 /// Existing full s_wait_xcnt drains reset the pass's replay-group state. When
 /// \p functions is non-empty, the pass walks the whole kernel (entry plus

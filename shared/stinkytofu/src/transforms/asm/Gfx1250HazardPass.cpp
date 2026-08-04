@@ -4,6 +4,7 @@
 #include "stinkytofu/transforms/asm/Gfx1250HazardPass.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <cstdint>
 #include <iostream>
@@ -130,9 +131,13 @@ bool isFullTranslationDrain(const StinkyInstruction& inst) {
 }
 
 bool isForeverSleep(const StinkyInstruction& inst) {
-    if (inst.getUnifiedOpcode() != GFX::s_sleep) return false;
+    if (inst.getUnifiedOpcode() != GFX::s_sleep) {
+        return false;
+    }
     const auto& srcs = inst.getSrcRegs();
-    if (srcs.size() != 1 || srcs.front().dataType != StinkyRegister::Type::LiteralInt) return false;
+    if (srcs.size() != 1 || srcs.front().dataType != StinkyRegister::Type::LiteralInt) {
+        return false;
+    }
     return (static_cast<uint16_t>(srcs.front().getLiteralInt()) & 0x8000U) != 0;
 }
 
@@ -143,7 +148,9 @@ bool isScalarPrefetch(const StinkyInstruction& inst) {
 bool isImmediateMemorySuccessor(BasicBlock::iterator it, BasicBlock& bb, ReplayMode replayMode) {
     for (auto next = std::next(it); next != bb.end(); ++next) {
         auto* inst = dyn_cast<StinkyInstruction>(next.getNodePtr());
-        if (inst == nullptr || isPseudoInst(inst)) continue;
+        if (inst == nullptr || isPseudoInst(inst)) {
+            continue;
+        }
         return getMemoryGroupKind(*inst, replayMode) != MemoryGroupKind::None;
     }
     return false;
@@ -153,11 +160,27 @@ void addSources(GroupState& state, const StinkyInstruction& inst) {
     addSources(state.sources, inst);
 }
 
-void warnUnrepairableSmemSelfOverlap(const BasicBlock& bb, const StinkyInstruction& inst) {
-    std::cerr << "[Gfx1250HazardPass] warning: SMEM instruction \""
-              << inst.getHwInstDesc()->mnemonic << "\" in block \"" << bb.getLabel()
+// Rules 2 and 3 are repaired by cutting the replay group short, which costs
+// memory-level parallelism. Report it: a register allocation without the
+// overlap would have kept the group intact.
+void warnGroupBreak(const BasicBlock& bb, const StinkyInstruction& inst, const char* memKind) {
+    std::cerr << "[Gfx1250HazardPass] warning: " << memKind << " instruction in block \""
+              << bb.getLabel()
+              << "\" overwrites a replay source of its group; "
+                 "inserting s_wait_xcnt 0 to break the group:\n";
+    inst.dump(std::cerr);
+}
+
+// A drain only separates the overlap from an earlier instruction. When an SMEM
+// overwrites its own source there is nothing to separate: XNACK replay
+// re-executes it with the source already clobbered, so only a different
+// register allocation can fix it.
+void reportUnrepairableSmemSelfOverlap(const BasicBlock& bb, const StinkyInstruction& inst) {
+    std::cerr << "[Gfx1250HazardPass] error: SMEM instruction in block \"" << bb.getLabel()
               << "\" overwrites one of its own source registers; "
-                 "s_wait_xcnt cannot repair this register allocation\n";
+                 "s_wait_xcnt cannot repair this register allocation:\n";
+    inst.dump(std::cerr);
+    assert(false && "SMEM instruction overwrites its own XNACK replay source");
 }
 
 void assertFallthrough(const BasicBlock& previous, const BasicBlock& next) {
@@ -189,8 +212,12 @@ class Gfx1250HazardPass : public Pass {
     }
 
     PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& /*AM*/) override {
+        // Only run if `RequiresXCntForVolatileVMEM` is enabled.
+        if (!passCtx.getAsmCapsConfig().requiresXCntForVolatileVMEM) {
+            return preserveCFGAnalyses();
+        }
+
         const auto arch = passCtx.getGemmTileConfig().arch;
-        if (arch[0] != 12 || arch[1] != 5 || arch[2] != 0) return preserveCFGAnalyses();
 
         const GfxArchID archId = getGfxArchID(arch[0], arch[1], arch[2]);
         auto profile = makeXcntDrainProfile(enableXcntDrainProfile);
@@ -305,10 +332,11 @@ class Gfx1250HazardPass : public Pass {
 
         // Apply rule 3:
         if (kind == MemoryGroupKind::SMEM && hasSelfDestSourceOverlap(*inst))
-            warnUnrepairableSmemSelfOverlap(bb, *inst);
+            reportUnrepairableSmemSelfOverlap(bb, *inst);
 
         if (kind == MemoryGroupKind::SMEM && state.hasMemory &&
             hasDestSourceOverlap(*inst, state.sources)) {
+            warnGroupBreak(bb, *inst, "SMEM");
             insertXcntDrain(builder, archId, inst, state, profile, XcntDrainReason::SmemRule3);
         }
 
@@ -317,6 +345,7 @@ class Gfx1250HazardPass : public Pass {
         const bool violatesRule2 = kind == MemoryGroupKind::VMEM && isFlat(*inst) && !atomic &&
                                    violatesFlatSourceRule(*inst, state);
         if (violatesRule2) {
+            warnGroupBreak(bb, *inst, "FLAT");
             insertXcntDrain(builder, archId, inst, state, profile, XcntDrainReason::FlatRule2);
         }
 
