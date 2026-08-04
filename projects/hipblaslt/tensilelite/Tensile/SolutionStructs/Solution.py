@@ -2797,7 +2797,7 @@ class Solution(collections.abc.Mapping):
     # instruction scheduling is not yet handled under CMS). When inf support is
     # off (e.g. gfx950 default), CMS is left untouched.
     # TODO: re-enable CMS with Inf support
-    if state["UseF32XEmulation"] and state.get("UseF32XEmulationInfSupport", 0):
+    if state.get("UseF32XEmulationInfSupport", 0):
       state["UseCustomMainLoopSchedule"] = 0
 
     # backup UsePLRPack from yaml before calling hasCustomSchedule
