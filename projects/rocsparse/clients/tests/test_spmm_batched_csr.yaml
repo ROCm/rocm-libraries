@@ -513,7 +513,7 @@ Tests:
   transB: [rocsparse_operation_none]
   baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_file_rocalution]
-  spmm_alg: [rocsparse_spmm_alg_csr_nnz_split]
+  spmm_alg: [rocsparse_spmm_alg_csr, rocsparse_spmm_alg_csr_nnz_split]
   orderB: [rocsparse_order_column]
   orderC: [rocsparse_order_column]
   filename: [nos4]
