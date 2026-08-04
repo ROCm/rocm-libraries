@@ -24,10 +24,8 @@
 
 # NOTE: hipRAND and rocRAND share CMake options for building tests.
 #       Until that's not fixed, we have to save/restore them.
-foreach(SHARED_OPTION BUILD_TEST)
-  set(USER_${SHARED_OPTION} ${${SHARED_OPTION}})
-  set(${SHARED_OPTION} OFF)
-endforeach()
+set(USER_BUILD_TEST ${BUILD_TEST})
+set(BUILD_TEST OFF)
 
 # HIP dependency is handled earlier in the project cmake file
 # when VerifyCompiler.cmake is included.
@@ -341,6 +339,4 @@ if(USER_BUILD_TEST)
 endif()
 
 # Restore user global state
-foreach(SHARED_OPTION BUILD_TEST BUILD_BENCHMARK BUILD_EXAMPLE)
-  set(${SHARED_OPTION} ${USER_${SHARED_OPTION}})
-endforeach()
+set(BUILD_TEST ${USER_BUILD_TEST})
