@@ -1265,7 +1265,7 @@ public:
         return {error_code_t::GRAPH_NOT_SUPPORTED, "update_cuda_graph is unsupported by this shim"};
     }
 
-    // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
+    // NOLINTBEGIN(readability-convert-member-functions-to-static)
     error_t
         update_cuda_graph(cudnnHandle_t handle,
                           std::unordered_map<std::shared_ptr<Tensor_attributes>, void*>& tensorMap,
@@ -1278,6 +1278,7 @@ public:
         static_cast<void>(cudnnCudaGraph);
         return {error_code_t::GRAPH_NOT_SUPPORTED, "update_cuda_graph is unsupported by this shim"};
     }
+    // NOLINTEND(readability-convert-member-functions-to-static)
 
     error_t get_workspace_size(int64_t& workspaceSize) const
     {
