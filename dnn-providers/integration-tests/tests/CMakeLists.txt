@@ -28,6 +28,10 @@ add_executable(hipdnn_integration_tests_unit_tests
     TestToleranceResolver.cpp
     TestVerificationModePaths.cpp
     TestErrorPaths.cpp
+    TestSupportClaimEnforcement.cpp
+    TestSupportEnforcementReport.cpp
+    TestEnforcementLadder.cpp
+    TestBundleSupportClaimsLoading.cpp
 )
 
 target_include_directories(hipdnn_integration_tests_unit_tests

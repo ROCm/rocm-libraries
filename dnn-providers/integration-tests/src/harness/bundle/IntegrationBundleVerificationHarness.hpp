@@ -17,12 +17,15 @@
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "harness/IReferenceGraphExecutor.hpp"
 #include "harness/TestConfig.hpp"
 #include "harness/TomlGuards.hpp"
 #include "harness/bundle/IntegrationTestBundle.hpp"
+#include "harness/bundle/SupportClaimEnforcement.hpp"
+#include "harness/bundle/SupportEnforcementReport.hpp"
 #include "harness/input-init/InputFillRecipes.hpp"
 
 namespace hipdnn_integration_tests::bundle
@@ -126,7 +129,28 @@ protected:
     // NOLINTNEXTLINE(readability-identifier-naming)
     void TestBody() override
     {
-        runComparison();
+        // RFC 0015 §6: the enforcement ladder is a stacking sequence of stop
+        // points. `applicability`/`buildable` bundles stop before any input
+        // generation, execution, or comparison (§6.1: never subject to golden
+        // mode's no-.bin skip, since they never even reach runComparison()).
+        // `full` (the default) runs the pre-existing comparison pipeline,
+        // which independently enforces claims at its own engine-selection
+        // point (see executeGraphThroughEngine).
+        switch(_bundle->metadata.enforcementLevel)
+        {
+        case hipdnn_integration_tests::EnforcementLevel::Applicability:
+            runApplicabilityLevel();
+            return;
+        case hipdnn_integration_tests::EnforcementLevel::Buildable:
+            runBuildableLevel();
+            return;
+        case hipdnn_integration_tests::EnforcementLevel::Full:
+            runComparison();
+            return;
+        default:
+            FAIL() << "Unknown enforcement level";
+            return;
+        }
     }
 
     // Builds the graph, selects an engine, and executes. Throws on unsupported graph (→ SKIP).
@@ -152,6 +176,40 @@ protected:
     // TestConfig singleton, which is only initialized by the real test main.
     virtual void applyMetadataGuards() const;
 
+    // Data-free applicability query (RFC 0015 §8): deserializes the graph
+    // with no tensor data and calls get_ranked_engine_ids(). Bumps the
+    // process-wide SupportQueryGuard (a query was observed) every call.
+    // Overridable, like executeGraphThroughEngine, so unit tests can stub the
+    // backend call.
+    struct SupportQueryResult
+    {
+        hipdnn_frontend::Error status;
+        std::vector<int64_t> rankedEngineIds;
+    };
+    virtual SupportQueryResult queryGraphSupport();
+
+    // Data-free plan-compile check for the "buildable" rung (RFC 0015 §6,
+    // §8): create_execution_plans -> check_support -> build_plans, no input
+    // generation, no execution. Hard ASSERTs on failure, mirroring
+    // executeGraphThroughEngine's existing (always-unconditional) plan-build
+    // assertions. Overridable so unit tests can stub it.
+    virtual void runPlanBuildOnly();
+
+    // Every engine name currently loaded on the shared handle (RFC 0015
+    // §7.3: support enforcement is multi-engine in every mode -- every
+    // loaded engine is attributed independently from one query). Overridable
+    // so unit tests can substitute a fixed engine list without a real
+    // handle/plugin.
+    virtual std::vector<std::string> listLoadedEngines() const;
+
+    // Current device arch token (RFC 0015 §5.1: the gcnArchName prefix
+    // before the first ':') and lowercase platform name ("linux"/"windows"),
+    // used to evaluate support claims. Virtual, like getVerificationMode(),
+    // so tests can inject values without depending on the TestConfig
+    // singleton being initialized.
+    virtual std::string currentArchToken() const;
+    virtual std::string currentPlatform() const;
+
     InputFillRecipes& inputFillRecipes()
     {
         return _inputFillRecipes;
@@ -174,6 +232,25 @@ private:
         RefStatus status;
         std::string message;
     };
+
+    // ── enforcement ladder (RFC 0015 §6, §7, §8) ────────────────────────
+    void runApplicabilityLevel();
+    void runBuildableLevel();
+    // Evaluates the bundle's support claims (if any) against one
+    // already-observed support query outcome, shared by every rung: the
+    // applicability/buildable ladder's own query, and full's existing
+    // engine-selection query in executeGraphThroughEngine. `rung` names the
+    // lowest broken rung in FAIL messages (RFC 0015 §6: "the failure is
+    // attributed to the lowest rung that broke"). No-op (aside from the
+    // caller's own query-observed bump) when the bundle carries no
+    // support.json. Returns true iff a claim-broken or errored-before-assert
+    // row was found (and FAILed) -- callers branch on this return value
+    // directly rather than GTest's global HasFailure() state, so the
+    // ladder's stop-early behavior does not depend on how a caller's result
+    // reporter is wired (production run vs a test double capturing results).
+    bool enforceSupportClaims(const char* rung,
+                              const hipdnn_frontend::Error& status,
+                              const std::vector<int64_t>& rankedEngineIds);
 
     // ── top-level dispatch ────────────────────────────────────────────────
     void runComparison();

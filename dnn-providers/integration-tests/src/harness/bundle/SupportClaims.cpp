@@ -296,4 +296,25 @@ std::optional<SweepSupportClaims> loadSweepSupportClaims(const std::filesystem::
     return parseSweepSupportClaimsJson(json, path.string());
 }
 
+SupportClaims projectSweepClaimsForCase(const SweepSupportClaims& sweepClaims,
+                                        const std::string& caseId)
+{
+    SupportClaims result;
+    result.version = sweepClaims.version;
+
+    for(const auto& [engine, groups] : sweepClaims.claims)
+    {
+        for(const auto& group : groups)
+        {
+            if(std::find(group.cases.begin(), group.cases.end(), caseId) != group.cases.end())
+            {
+                result.claims[engine] = group.support;
+                break;
+            }
+        }
+    }
+
+    return result;
+}
+
 } // namespace hipdnn_integration_tests::bundle

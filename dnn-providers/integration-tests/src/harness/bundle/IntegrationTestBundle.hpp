@@ -24,6 +24,7 @@
 #include <hipdnn_test_sdk/utilities/LoadGraphAndTensors.hpp>
 
 #include "harness/bundle/BundleDiscovery.hpp"
+#include "harness/bundle/SupportClaims.hpp"
 
 namespace hipdnn_integration_tests::bundle
 {
@@ -63,6 +64,16 @@ struct IntegrationTestBundle
     std::optional<TensorMap> tensors;
     bool hasGoldenOutputs = false;
 
+    // RFC 0015 support claims for this exact graph: the direct bundle's
+    // co-located {Name}.support.json, or (for a template-sweep case) the
+    // sweep's support.json projected onto this case id
+    // (projectSweepClaimsForCase). Absent means the bundle carries no
+    // support.json at all — "not claim-bearing", never enforced. Present but
+    // with an empty `claims` map is legal too (a claim-bearing file with no
+    // current claims) and is still distinct from absent: it still feeds the
+    // end-of-run unclaimed-support summary.
+    std::optional<SupportClaims> supportClaims;
+
     // View over the graph flatbuffer, valid as long as this bundle lives.
     hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper() const
     {
@@ -80,7 +91,12 @@ enum class LoadError
     INVALID_GRAPH_SCHEMA, // expanded graph JSON cannot build a valid graph flatbuffer
     MISSING_METADATA, // direct golden bundle is missing valid .meta.json metadata
     TENSOR_LOAD_FAILED, // a present tensor blob is unreadable, wrong-sized, or unsupported
-    INVALID_SWEEP_CASE // sweep case id, placeholders, metadata, or golden path are invalid
+    INVALID_SWEEP_CASE, // sweep case id, placeholders, metadata, or golden path are invalid
+    // RFC 0015 §6.2: a claim exists (a {Name}.support.json, or a sweep
+    // support.json group covering this case) but enforcement_level is
+    // missing or invalid in the companion metadata. A typo must never
+    // silently leave a claim-bearing graph at the default Full level.
+    MISSING_ENFORCEMENT_LEVEL
 };
 
 // A load either yields a bundle or explains why it could not. std::visit at the
@@ -101,6 +117,8 @@ inline const char* toString(LoadError error)
         return "tensor .bin present but failed to load";
     case LoadError::INVALID_SWEEP_CASE:
         return "template-sweep case is invalid";
+    case LoadError::MISSING_ENFORCEMENT_LEVEL:
+        return "support.json claim exists but enforcement_level is missing or invalid";
     default:
         return "unknown load error";
     }
@@ -665,6 +683,17 @@ inline LoadResult loadIntegrationTestBundle(const std::filesystem::path& jsonPat
     }
     bundle.metadata = std::move(*metadata);
 
+    // RFC 0015 §5.3/§6.2: a co-located {Name}.support.json makes this bundle
+    // claim-bearing regardless of whether its `claims` map is empty. A
+    // claim-bearing bundle without an explicit enforcement_level is a
+    // pre-commit authoring error — a typo must never silently leave a
+    // claimed graph at the default Full level.
+    bundle.supportClaims = loadSupportClaims(jsonPath);
+    if(bundle.supportClaims.has_value() && !bundle.metadata.enforcementLevelExplicit)
+    {
+        return LoadError::MISSING_ENFORCEMENT_LEVEL;
+    }
+
     if(const auto loadError = detail::loadTensorDataIfPresent(bundle, *graphJson, blobPathForUid);
        loadError.has_value())
     {
@@ -753,6 +782,24 @@ inline LoadResult loadIntegrationTestBundle(const DiscoveredBundle& discovered)
         return LoadError::INVALID_SWEEP_CASE;
     }
     bundle.metadata = std::move(*metadata);
+
+    // RFC 0015 §5.4/§6.2: this case is claim-bearing iff at least one engine's
+    // claim group in the sweep's support.json names this cases[].id (a "support.json
+    // cases entry") — not merely whether the sweep's support.json file exists. A
+    // sweep support.json with no group covering this case behaves like "no
+    // support.json at all" for it, same as a single-graph bundle with no file.
+    if(auto sweepClaims = loadSweepSupportClaims(discovered.jsonPath.parent_path()))
+    {
+        auto caseClaims = projectSweepClaimsForCase(*sweepClaims, discovered.sweep->caseId);
+        if(!caseClaims.claims.empty())
+        {
+            bundle.supportClaims = std::move(caseClaims);
+        }
+    }
+    if(bundle.supportClaims.has_value() && !bundle.metadata.enforcementLevelExplicit)
+    {
+        return LoadError::MISSING_ENFORCEMENT_LEVEL;
+    }
 
     if(goldenDirectory.has_value())
     {

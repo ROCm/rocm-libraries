@@ -562,4 +562,20 @@ TEST(TestLoadBundleMetadata, EnforcementLevelNonStringRejectsMetadata)
     EXPECT_FALSE(meta.has_value());
 }
 
+TEST(TestLoadBundleMetadata, EnforcementLevelExplicitFalseWhenAbsent)
+{
+    const TempBundle bundle(R"({"format_version": 1})");
+    auto meta = loadBundleMetadata(bundle.bundleJsonPath());
+    ASSERT_TRUE(meta.has_value());
+    EXPECT_FALSE(meta->enforcementLevelExplicit);
+}
+
+TEST(TestLoadBundleMetadata, EnforcementLevelExplicitTrueWhenPresentAndValid)
+{
+    const TempBundle bundle(R"({"format_version": 1, "enforcement_level": "full"})");
+    auto meta = loadBundleMetadata(bundle.bundleJsonPath());
+    ASSERT_TRUE(meta.has_value());
+    EXPECT_TRUE(meta->enforcementLevelExplicit);
+}
+
 // NOLINTEND(readability-identifier-naming)

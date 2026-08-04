@@ -110,4 +110,15 @@ std::optional<SupportClaims> loadSupportClaims(const std::filesystem::path& bund
 /// loadSupportClaims().
 std::optional<SweepSupportClaims> loadSweepSupportClaims(const std::filesystem::path& sweepDir);
 
+/// Projects one template-sweep case's claims out of a sweep's
+/// SweepSupportClaims into the same shape as a single-graph SupportClaims
+/// (RFC 0015 §5.4: "the claim key is still the exact graph ... whose verdict
+/// is read from the group listing it"). Every engine that has a group
+/// covering `caseId` contributes that group's `support` map; an engine with
+/// no group covering `caseId` is simply absent from the result (not
+/// claim-bearing for that engine, same as an unclaimed single-graph engine).
+/// The result's `version` mirrors the sweep's.
+SupportClaims projectSweepClaimsForCase(const SweepSupportClaims& sweepClaims,
+                                        const std::string& caseId);
+
 } // namespace hipdnn_integration_tests::bundle

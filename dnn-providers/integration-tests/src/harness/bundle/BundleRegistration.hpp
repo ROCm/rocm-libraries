@@ -17,6 +17,7 @@
 #include "harness/TestConfig.hpp"
 #include "harness/bundle/BundleDiscovery.hpp"
 #include "harness/bundle/IntegrationBundleVerificationHarness.hpp"
+#include "harness/bundle/SupportEnforcementReport.hpp"
 
 namespace hipdnn_integration_tests::bundle
 {
@@ -145,11 +146,18 @@ inline void registerBundleTests()
             continue;
         }
 
-        bundles.push_back({diagnosticPath,
-                           disc.suiteName,
-                           disc.testName,
-                           std::make_shared<IntegrationTestBundle>(
-                               std::move(std::get<IntegrationTestBundle>(loadResult)))});
+        auto loadedBundle = std::make_shared<IntegrationTestBundle>(
+            std::move(std::get<IntegrationTestBundle>(loadResult)));
+
+        // RFC 0015 §7.2: the run-level empty-query guard needs to know
+        // whether enforcement was ever expected -- i.e. at least one
+        // registered bundle carries a support.json claim.
+        if(loadedBundle->supportClaims.has_value())
+        {
+            SupportQueryGuard::get().noteClaimBearingBundleRegistered();
+        }
+
+        bundles.push_back({diagnosticPath, disc.suiteName, disc.testName, std::move(loadedBundle)});
     }
 
     if(bundles.empty())

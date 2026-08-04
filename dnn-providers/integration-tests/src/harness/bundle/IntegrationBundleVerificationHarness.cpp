@@ -19,6 +19,7 @@
 #include <hipdnn_test_sdk/utilities/VariantPackUtils.hpp>
 #include <hipdnn_test_sdk/utilities/detail/FlatbufferTensorAttributesUtils.hpp>
 
+#include "common/Utilities.hpp"
 #include "harness/CpuReferenceGraphExecutorAdapter.hpp"
 #include "harness/EngineNotApplicableError.hpp"
 #include "harness/ReferenceCapabilityError.hpp"
@@ -49,6 +50,18 @@ void IntegrationBundleVerificationHarness::executeGraphThroughEngine(
 
     std::vector<int64_t> engineIds;
     auto status = graph.get_ranked_engine_ids(engineIds);
+    SupportQueryGuard::get().noteQueryObserved();
+
+    // RFC 0015 §6/§7.1: a `full` bundle's claim is evaluated at this same
+    // engine-selection point using the query this call already made -- no
+    // extra query needed. A claim-broken/errored-before-assert FAIL here
+    // replaces the SKIP the unclaimed branch below still performs, and the
+    // failure is attributed to the "applicability" rung per §6 ("the failure
+    // is attributed to the lowest rung that broke").
+    if(enforceSupportClaims("applicability", status, engineIds))
+    {
+        return;
+    }
 
     const auto graphSummary = [&] {
         return std::to_string(_bundle->outputTensorUids.size()) + " output tensor(s), "
@@ -179,7 +192,7 @@ std::optional<OutputTensors> IntegrationBundleVerificationHarness::runEngineOrSk
 {
     std::string error;
     auto engineOutputs = runEngineCapturingOutputs(error);
-    if(!engineOutputs && !::testing::Test::HasFatalFailure())
+    if(!engineOutputs && !::testing::Test::HasFailure())
     {
         skipEngineCouldNotRun(_bundlePath, error);
     }
@@ -435,6 +448,16 @@ std::optional<OutputTensors>
         return std::nullopt;
     }
 
+    // A claim-broken/errored-before-assert FAIL recorded inside
+    // executeGraphThroughEngine (via enforceSupportClaims) is not a thrown
+    // EngineNotApplicableError -- it returns normally. Treat it the same as
+    // "engine could not run": propagate nullopt without also SKIPping (the
+    // caller's HasFailure() guard already suppresses the SKIP).
+    if(::testing::Test::HasFailure())
+    {
+        return std::nullopt;
+    }
+
     markOutputsModified(engineOutputs);
     return engineOutputs;
 }
@@ -669,6 +692,144 @@ void IntegrationBundleVerificationHarness::applyMetadataGuards() const
     {
         GTEST_SKIP() << *reason;
     }
+}
+
+// ---- enforcement ladder (RFC 0015 §6, §7, §8) ------------------------------
+
+IntegrationBundleVerificationHarness::SupportQueryResult
+    IntegrationBundleVerificationHarness::queryGraphSupport()
+{
+    auto handle = getSharedHandle();
+    const std::vector<uint8_t> graphBytes(
+        _bundle->graphBuffer.data(), _bundle->graphBuffer.data() + _bundle->graphBuffer.size());
+
+    // Data-free: from_binary finalizes the descriptor from shape/dtype
+    // metadata alone (RFC 0015 §8 point 3); get_ranked_engine_ids() needs no
+    // tensor buffers either. No allocation, no golden-data pull.
+    SupportQueryResult result;
+    hipdnn_frontend::graph::Graph graph;
+    auto buildErr = graph.from_binary(handle, graphBytes);
+    if(buildErr.is_bad())
+    {
+        // The graph build itself crashed (RFC 0015 §7.1): no per-engine
+        // verdict can be produced, same as any other unresolved query.
+        result.status = buildErr;
+        SupportQueryGuard::get().noteQueryObserved();
+        return result;
+    }
+
+    result.status = graph.get_ranked_engine_ids(result.rankedEngineIds);
+    SupportQueryGuard::get().noteQueryObserved();
+    return result;
+}
+
+void IntegrationBundleVerificationHarness::runPlanBuildOnly()
+{
+    auto handle = getSharedHandle();
+    const std::vector<uint8_t> graphBytes(
+        _bundle->graphBuffer.data(), _bundle->graphBuffer.data() + _bundle->graphBuffer.size());
+
+    hipdnn_frontend::graph::Graph graph;
+    auto err = graph.from_binary(handle, graphBytes);
+    ASSERT_TRUE(err.is_good()) << "buildable: from_binary failed: " << err.get_message();
+
+    if(TestConfig::get().hasEngineName())
+    {
+        graph.set_preferred_engine_id_ext(TestConfig::get().getEngineId());
+    }
+
+    // Same compile sequence as executeGraphThroughEngine's full-rung path,
+    // stopping before get_workspace_size/execute (RFC 0015 §6, §8): no input
+    // generation, no execution, no comparison. Hard ASSERTs unconditionally,
+    // mirroring the pre-existing full-rung behavior -- a plan-build failure
+    // is always a FAIL, claimed or not (RFC 0015 §6.2: "a plan-build failure
+    // on a supported claim FAILs").
+    auto result = graph.create_execution_plans();
+    ASSERT_TRUE(result.is_good()) << "buildable: create_execution_plans failed: "
+                                  << result.get_message();
+    result = graph.check_support();
+    ASSERT_TRUE(result.is_good()) << "buildable: check_support failed: " << result.get_message();
+    result = graph.build_plans();
+    ASSERT_TRUE(result.is_good()) << "buildable: build_plans failed: " << result.get_message();
+}
+
+std::vector<std::string> IntegrationBundleVerificationHarness::listLoadedEngines() const
+{
+    return hipdnn_integration_tests::listLoadedEngineNames(getSharedHandle());
+}
+
+void IntegrationBundleVerificationHarness::runApplicabilityLevel()
+{
+    const auto query = queryGraphSupport();
+    enforceSupportClaims("applicability", query.status, query.rankedEngineIds);
+}
+
+void IntegrationBundleVerificationHarness::runBuildableLevel()
+{
+    const auto query = queryGraphSupport();
+    if(enforceSupportClaims("applicability", query.status, query.rankedEngineIds))
+    {
+        return;
+    }
+    runPlanBuildOnly();
+}
+
+bool IntegrationBundleVerificationHarness::enforceSupportClaims(
+    const char* rung,
+    const hipdnn_frontend::Error& status,
+    const std::vector<int64_t>& rankedEngineIds)
+{
+    if(!_bundle->supportClaims.has_value())
+    {
+        return false;
+    }
+
+    const auto arch = currentArchToken();
+    const auto platform = currentPlatform();
+    const auto loadedEngines = listLoadedEngines();
+
+    bool anyBroken = false;
+    for(const auto& row : evaluateClaimedEngines(
+            loadedEngines, arch, platform, *_bundle->supportClaims, status, rankedEngineIds))
+    {
+        anyBroken = true;
+        if(row.verdict == EngineVerdict::Declined)
+        {
+            ADD_FAILURE() << "[RFC 0015] Support claim broken at the \"" << rung
+                          << "\" rung: engine \"" << row.engine
+                          << "\" no longer supports this graph on " << arch << "/" << platform
+                          << ". Bundle: " << _bundlePath
+                          << ". This claim was recorded by --write-support-claims in the "
+                             "co-located support.json; if the coverage loss is expected, "
+                             "re-run the tool to update it.";
+        }
+        else
+        {
+            ADD_FAILURE() << "[RFC 0015] Support claim for engine \"" << row.engine
+                          << "\" errored before it could be checked at the \"" << rung
+                          << "\" rung (support query did not resolve): " << status.get_message()
+                          << ". Bundle: " << _bundlePath << ". Fix the underlying error first.";
+        }
+    }
+
+    for(auto& engine : findUnclaimedSupportedEngines(
+            loadedEngines, arch, platform, *_bundle->supportClaims, status, rankedEngineIds))
+    {
+        UnclaimedSupportReport::get().record(
+            _bundlePath.string(), std::move(engine), arch, platform);
+    }
+
+    return anyBroken;
+}
+
+std::string IntegrationBundleVerificationHarness::currentArchToken() const
+{
+    return archToken(TestConfig::get().getCurrentArch());
+}
+
+std::string IntegrationBundleVerificationHarness::currentPlatform() const
+{
+    return TestConfig::get().getCurrentPlatform();
 }
 
 } // namespace hipdnn_integration_tests::bundle

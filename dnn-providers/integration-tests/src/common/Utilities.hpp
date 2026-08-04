@@ -6,6 +6,7 @@
 #include <hipdnn_backend.h>
 
 #include <string>
+#include <vector>
 
 namespace hipdnn_integration_tests
 {
@@ -64,6 +65,28 @@ inline EngineInfo getEngineInfo(hipdnnHandle_t handle, size_t engineIndex)
     }
 
     return info;
+}
+
+// Enumerates every engine currently loaded on `handle` (RFC 0015 §7.3/§8:
+// support-claim enforcement is multi-engine -- it evaluates every loaded
+// engine, not just a pinned --test-engine). Empty on failure or when no
+// engines are loaded. Cheap in-process bookkeeping (no GPU dispatch), so
+// callers may call it once per test rather than caching across the run.
+inline std::vector<std::string> listLoadedEngineNames(hipdnnHandle_t handle)
+{
+    std::vector<std::string> names;
+    size_t numEngines = 0;
+    if(hipdnnGetEngineCount_ext(handle, &numEngines) != HIPDNN_STATUS_SUCCESS)
+    {
+        return names;
+    }
+
+    names.reserve(numEngines);
+    for(size_t i = 0; i < numEngines; ++i)
+    {
+        names.push_back(getEngineInfo(handle, i).engineName);
+    }
+    return names;
 }
 
 } // namespace hipdnn_integration_tests

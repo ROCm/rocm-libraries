@@ -55,6 +55,14 @@ struct BundleMetadata
     std::optional<int64_t> minimumVramMb;
     std::optional<std::unordered_map<int64_t, nlohmann::json>> inputs;
     EnforcementLevel enforcementLevel = EnforcementLevel::Full;
+    // True iff the JSON explicitly carried an `enforcement_level` key (as
+    // opposed to leaving it absent and taking the Full default above). RFC
+    // 0015 §6.2's hard pre-commit error — a claim-bearing bundle whose
+    // enforcement_level is missing or invalid must fail to load, not
+    // silently default to Full — needs this distinction; the downstream
+    // check lives in IntegrationTestBundle.hpp, where the claim file (if
+    // any) is also loaded.
+    bool enforcementLevelExplicit = false;
 };
 
 // ---------------------------------------------------------------------------
@@ -146,6 +154,8 @@ inline std::optional<BundleMetadata> parseBundleMetadataJson(const nlohmann::jso
     // it belongs to the downstream enforcement/verifier ticket.
     if(json.contains("enforcement_level"))
     {
+        meta.enforcementLevelExplicit = true;
+
         if(!json["enforcement_level"].is_string())
         {
             HIPDNN_SDK_LOG_WARN((source.empty() ? std::string("Metadata") : std::string(source))

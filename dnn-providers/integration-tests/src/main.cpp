@@ -23,6 +23,7 @@
 #include "harness/SupportMatrixCollector.hpp"
 #include "harness/TestConfig.hpp"
 #include "harness/bundle/BundleRegistration.hpp"
+#include "harness/bundle/SupportEnforcementReport.hpp"
 #include "harness/bundle/UnverifiableBundleReport.hpp"
 
 namespace
@@ -320,11 +321,32 @@ int main(int argc, char** argv) noexcept
 
         hipdnn_integration_tests::bundle::registerBundleTests();
 
-        const int result = RUN_ALL_TESTS();
+        int result = RUN_ALL_TESTS();
 
         // Print bundles that ended without a verdict (no oracle / reference bug).
         // Informational only — these SKIP, so they do not affect `result`.
         hipdnn_integration_tests::bundle::UnverifiableBundleReport::get().print();
+
+        // Print engines that turned out to support a claim-bearing bundle's
+        // graph on an (engine, arch, platform) its support.json does not
+        // list (RFC 0015 §7.1). Informational only -- never affects `result`.
+        hipdnn_integration_tests::bundle::UnclaimedSupportReport::get().print();
+
+        // RFC 0015 §7.2: the run-level empty-query guard. If enforcement was
+        // expected (>=1 claim-bearing bundle registered) but zero support
+        // queries were observed anywhere in the run, fail loudly rather than
+        // report green -- a claim that is never queried is silently
+        // unenforced, and this is the only floor that catches "nothing ran".
+        if(hipdnn_integration_tests::bundle::SupportQueryGuard::get().tripped())
+        {
+            std::cerr << "\nERROR: RFC 0015 empty-query guard tripped: "
+                      << hipdnn_integration_tests::bundle::SupportQueryGuard::get()
+                             .claimBearingBundleCount()
+                      << " claim-bearing bundle(s) were registered but zero engine-support "
+                         "queries were observed in this run (no GPU, plugin failed to load, or "
+                         "an over-narrow --gtest_filter). Failing rather than reporting green.\n";
+            result = 1;
+        }
 
         {
             const auto* unit = ::testing::UnitTest::GetInstance();
