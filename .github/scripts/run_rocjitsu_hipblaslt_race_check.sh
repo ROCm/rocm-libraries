@@ -232,9 +232,6 @@ show_rocjitsu_version() {
 run_hipblaslt_bench_check() {
   mkdir -p "${RACE_REPORT_DIR}/hipblaslt-bench"
   echo "running hipblaslt-bench under rocjitsu race detection"
-  # Use zero initialization because the default HPL initialization currently
-  # triggers a separate device-fill kernel race report that needs independent
-  # investigation. This check is scoped to the hipBLASLt GEMM dispatch path.
   timeout "${RACE_TIMEOUT_SECONDS}" \
     env \
       HSA_ENABLE_SDMA=1 \
@@ -246,7 +243,7 @@ run_hipblaslt_bench_check() {
         --config "${ROCJITSU_CONFIG}" \
         -- "${HIPBLASLT_BENCH}" \
           --precision f32_r \
-          --initialization zero \
+          --initialization hpl \
           --verify \
           -m 128 \
           -n 128 \

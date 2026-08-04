@@ -20,6 +20,7 @@ on:
         type: string
       run_rocjitsu_race_check:
         type: boolean
+        default: false
       amdgpu_families:
         type: string
       test_runs_on:
