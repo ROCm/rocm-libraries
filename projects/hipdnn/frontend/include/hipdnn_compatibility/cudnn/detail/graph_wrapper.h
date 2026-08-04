@@ -147,7 +147,8 @@ public:
             return err;
         }
 
-        CHECK_CUDNN_FRONTEND_ERROR(applyPendingPlanFilters(modes));
+        _planCreationModes = modes;
+        CHECK_CUDNN_FRONTEND_ERROR(applyPendingPlanFilters(_planCreationModes));
         _stage = Stage::PlansCreated;
         return err;
     }
@@ -178,6 +179,7 @@ public:
 
         HIPDNN_CUDNN_SHIM_RETURN_OK_IF_NO_NATIVE_GRAPH();
 
+        CHECK_CUDNN_FRONTEND_ERROR(applyPendingFiltersForCreatedPlans());
         auto err = _graph.build_plans(policy);
         if(err.is_good())
         {
@@ -204,6 +206,7 @@ public:
         {
             CHECK_CUDNN_FRONTEND_ERROR(create_execution_plans());
         }
+        CHECK_CUDNN_FRONTEND_ERROR(applyPendingFiltersForCreatedPlans());
         CHECK_CUDNN_FRONTEND_ERROR(_graph.build_plan_at_index(index));
         _stage = Stage::PlansBuilt;
         return {};
@@ -1385,6 +1388,7 @@ private:
     std::vector<std::shared_ptr<Tensor_attributes>> _ownedTensors;
     std::optional<int64_t> _maxWorkspaceAllowed;
     std::vector<int64_t> _barredEngineIndices;
+    std::vector<HeurMode_t> _planCreationModes = {HeurMode_t::FALLBACK};
     std::vector<std::string> _barredEngineNames;
     std::vector<int64_t> _engineIndexToNativeEngineId;
     std::vector<BehaviorNote_t> _selectedBehaviorNotes;
@@ -1441,6 +1445,15 @@ private:
             nativeEngineIds.push_back(nativeEngineId);
         }
         return {};
+    }
+
+    error_t applyPendingFiltersForCreatedPlans()
+    {
+        if(!stageAtLeast(Stage::PlansCreated))
+        {
+            return {};
+        }
+        return applyPendingPlanFilters(_planCreationModes);
     }
 
     error_t applyPendingPlanFilters(const std::vector<HeurMode_t>& modes = {HeurMode_t::FALLBACK})
@@ -1590,6 +1603,7 @@ private:
         _ownedTensors.clear();
         _maxWorkspaceAllowed.reset();
         _barredEngineIndices.clear();
+        _planCreationModes = {HeurMode_t::FALLBACK};
         _barredEngineNames.clear();
         _engineIndexToNativeEngineId.clear();
         _selectedBehaviorNotes.clear();

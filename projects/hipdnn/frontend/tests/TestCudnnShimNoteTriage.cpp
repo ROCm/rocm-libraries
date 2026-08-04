@@ -4,12 +4,17 @@
 // Host-only coverage for the shim's public note-filter behavior. The triage is
 // intentionally inline in Graph methods; these tests assert the observable
 // contracts, not helper internals.
+#include "CudnnShimTestSupport.hpp"
+#include "fake_backend/MockBackendFixture.hpp"
+
 #include <hipdnn_compatibility/cudnn/cudnn_frontend.h>
 
+#include <array>
 #include <cstdint>
 #include <gtest/gtest.h>
 
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace
@@ -18,6 +23,88 @@ namespace fe = hipdnn_frontend::compatibility::cudnn_frontend;
 
 using NumNote = fe::NumericalNote_t;
 using BehNote = fe::BehaviorNote_t;
+
+using ::testing::_;
+using ::testing::AnyNumber;
+
+void addPointwiseGraph(fe::graph::Graph& graph)
+{
+    const int64_t n = 4;
+    graph.set_io_data_type(fe::DataType_t::FLOAT).set_compute_data_type(fe::DataType_t::FLOAT);
+
+    auto a = hipdnn_shim_test::makeTensor(graph, {n, n, n, n}, {n * n * n, n * n, n, 1}, 1);
+    auto b = hipdnn_shim_test::makeTensor(graph, {n, n, n, n}, {n * n * n, n * n, n, 1}, 2);
+    auto c = graph.pointwise(
+        a, b, fe::graph::Pointwise_attributes{}.set_mode(fe::PointwiseMode_t::ADD));
+    ASSERT_NE(c, nullptr);
+    c->set_output(true).set_uid(3);
+}
+
+class TestCudnnShimNoteTriageBackend : public hipdnn_shim_test::ShimMockBackendFixture
+{
+protected:
+    std::vector<hipdnnBackendDescriptor_t> _executionPlanDescs;
+    std::unordered_map<hipdnnBackendDescriptor_t, int64_t> _engineIdsByDesc;
+    std::array<char, 16> _engineDescs{};
+    size_t _nextEngineDesc = 0;
+    size_t _nextEngineIdLookup = 0;
+
+    void installTwoEnginePlanMocks()
+    {
+        ON_CALL(*_mockBackend, backendCreateDescriptor(_, _))
+            .WillByDefault(
+                [this](hipdnnBackendDescriptorType_t type, hipdnnBackendDescriptor_t* desc) {
+                    *desc = reinterpret_cast<hipdnnBackendDescriptor_t>(
+                        &_fakeDescs[_nextFakeDescIdx++ % _fakeDescs.size()]);
+                    if(type == HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR)
+                    {
+                        _executionPlanDescs.push_back(*desc);
+                    }
+                    return HIPDNN_STATUS_SUCCESS;
+                });
+
+        ON_CALL(*_mockBackend, backendGetAttribute(_, _, _, _, _, _))
+            .WillByDefault([this](hipdnnBackendDescriptor_t descriptor,
+                                  hipdnnBackendAttributeName_t attribute,
+                                  hipdnnBackendAttributeType_t,
+                                  int64_t requestedElementCount,
+                                  int64_t* elementCount,
+                                  void* arrayOfElements) {
+                if(attribute == HIPDNN_ATTR_ENGINEHEUR_RESULTS)
+                {
+                    if(elementCount != nullptr)
+                    {
+                        *elementCount = requestedElementCount == 0 ? 2 : requestedElementCount;
+                    }
+                    return HIPDNN_STATUS_SUCCESS;
+                }
+                if(attribute == HIPDNN_ATTR_ENGINECFG_ENGINE)
+                {
+                    const int64_t engineId = (_nextEngineIdLookup++ % 2 == 0) ? 10 : 20;
+                    auto engineDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(
+                        &_engineDescs[_nextEngineDesc++ % _engineDescs.size()]);
+                    _engineIdsByDesc[engineDesc] = engineId;
+                    *static_cast<hipdnnBackendDescriptor_t*>(arrayOfElements) = engineDesc;
+                    return HIPDNN_STATUS_SUCCESS;
+                }
+                if(attribute == HIPDNN_ATTR_ENGINE_GLOBAL_INDEX)
+                {
+                    *static_cast<int64_t*>(arrayOfElements) = _engineIdsByDesc.at(descriptor);
+                    return HIPDNN_STATUS_SUCCESS;
+                }
+                if(attribute == HIPDNN_ATTR_EXECUTION_PLAN_WORKSPACE_SIZE)
+                {
+                    *static_cast<int64_t*>(arrayOfElements) = 0;
+                    return HIPDNN_STATUS_SUCCESS;
+                }
+                if(elementCount != nullptr)
+                {
+                    *elementCount = 0;
+                }
+                return HIPDNN_STATUS_SUCCESS;
+            });
+    }
+};
 
 TEST(TestCudnnShimNoteTriage, DeselectNondeterministicPoisonsValidate)
 {
@@ -264,6 +351,71 @@ TEST(TestCudnnShimNoteTriage, DeselectEngineIndicesBeforeBuildDoesNotPoisonNativ
 
     EXPECT_EQ(&graph.deselect_engines(std::vector<int64_t>{0, 1}), &graph);
     EXPECT_TRUE(graph.validate().is_good());
+}
+
+TEST_F(TestCudnnShimNoteTriageBackend, DeselectEngineIndicesAfterPlanCreationAppliesBeforeBuildAll)
+{
+    installTwoEnginePlanMocks();
+
+    fe::graph::Graph graph;
+    addPointwiseGraph(graph);
+    ASSERT_TRUE(graph.validate().is_good());
+    ASSERT_TRUE(graph.build_operation_graph(_handle).is_good());
+    ASSERT_TRUE(graph.create_execution_plans({fe::HeurMode_t::A}).is_good());
+    ASSERT_EQ(_executionPlanDescs.size(), 2u);
+
+    EXPECT_EQ(&graph.deselect_engines(std::vector<int64_t>{0}), &graph);
+
+    EXPECT_CALL(*_mockBackend, backendSetAttribute(_, _, _, _, _)).Times(AnyNumber());
+    EXPECT_CALL(*_mockBackend,
+                backendSetAttribute(_executionPlanDescs[0],
+                                    HIPDNN_ATTR_EXECUTION_PLAN_ENGINE_CONFIG,
+                                    HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                    1,
+                                    _))
+        .Times(0);
+    EXPECT_CALL(*_mockBackend,
+                backendSetAttribute(_executionPlanDescs[1],
+                                    HIPDNN_ATTR_EXECUTION_PLAN_ENGINE_CONFIG,
+                                    HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                    1,
+                                    _))
+        .Times(1);
+
+    auto err = graph.build_plans(fe::BuildPlanPolicy_t::ALL);
+
+    EXPECT_TRUE(err.is_good()) << err.get_message();
+    EXPECT_EQ(graph.get_workspace_size_plan_at_index(0), -1);
+    EXPECT_EQ(graph.get_workspace_size_plan_at_index(1), 0);
+}
+
+TEST_F(TestCudnnShimNoteTriageBackend, DeselectEngineIndicesAfterPlanCreationBarsBuildPlanAtIndex)
+{
+    installTwoEnginePlanMocks();
+
+    fe::graph::Graph graph;
+    addPointwiseGraph(graph);
+    ASSERT_TRUE(graph.validate().is_good());
+    ASSERT_TRUE(graph.build_operation_graph(_handle).is_good());
+    ASSERT_TRUE(graph.create_execution_plans({fe::HeurMode_t::A}).is_good());
+    ASSERT_EQ(_executionPlanDescs.size(), 2u);
+
+    EXPECT_EQ(&graph.deselect_engines(std::vector<int64_t>{0}), &graph);
+
+    EXPECT_CALL(*_mockBackend, backendSetAttribute(_, _, _, _, _)).Times(AnyNumber());
+    EXPECT_CALL(*_mockBackend,
+                backendSetAttribute(_executionPlanDescs[0],
+                                    HIPDNN_ATTR_EXECUTION_PLAN_ENGINE_CONFIG,
+                                    HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                    1,
+                                    _))
+        .Times(0);
+
+    auto err = graph.build_plan_at_index(0);
+
+    EXPECT_TRUE(err.is_bad());
+    EXPECT_EQ(err.get_code(), fe::error_code_t::INVALID_VALUE);
+    EXPECT_NE(err.get_message().find("barred"), std::string::npos);
 }
 
 } // namespace
