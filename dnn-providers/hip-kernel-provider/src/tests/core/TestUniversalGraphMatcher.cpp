@@ -124,12 +124,12 @@ constexpr umd::DeviceProperties K_DEVICE{/*ldsSize=*/65536, /*warpSize=*/64};
 
 // ---- Compiler validation (A.10) ------------------------------------------
 
-TEST(UmdCompiler, AcceptsSdpaDescriptor)
+TEST(TestUmdCompiler, AcceptsSdpaDescriptor)
 {
     EXPECT_NO_THROW(umd::UmdCompiler::compile(sdpaDescriptor()));
 }
 
-TEST(UmdCompiler, PublishesReferencedBoundSymbols)
+TEST(TestUmdCompiler, PublishesReferencedBoundSymbols)
 {
     const umd::CompiledUmd c = umd::UmdCompiler::compile(sdpaDescriptor());
     // The `shape` short-hands lower to `$q.rank` etc.; named dims are read
@@ -140,56 +140,56 @@ TEST(UmdCompiler, PublishesReferencedBoundSymbols)
     EXPECT_TRUE(c.boundSymbols.count("attn_mask.present") == 1);
 }
 
-TEST(UmdCompiler, RejectsWrongSchema)
+TEST(TestUmdCompiler, RejectsWrongSchema)
 {
     json d = sdpaDescriptor();
     d["schema"] = "hipdnn.umd/v2";
     EXPECT_THROW(umd::UmdCompiler::compile(d), umd::UmdCompileError);
 }
 
-TEST(UmdCompiler, RejectsMalformedUuid)
+TEST(TestUmdCompiler, RejectsMalformedUuid)
 {
     json d = sdpaDescriptor();
     d["id"] = "not-a-uuid";
     EXPECT_THROW(umd::UmdCompiler::compile(d), umd::UmdCompileError);
 }
 
-TEST(UmdCompiler, RejectsUnknownTopLevelKey)
+TEST(TestUmdCompiler, RejectsUnknownTopLevelKey)
 {
     json d = sdpaDescriptor();
     d["priority"] = 3;
     EXPECT_THROW(umd::UmdCompiler::compile(d), umd::UmdCompileError);
 }
 
-TEST(UmdCompiler, RejectsUnknownOperandName)
+TEST(TestUmdCompiler, RejectsUnknownOperandName)
 {
     json d = sdpaDescriptor();
     d["nodes"][0]["operands"]["not_a_name"] = "$bogus";
     EXPECT_THROW(umd::UmdCompiler::compile(d), umd::UmdCompileError);
 }
 
-TEST(UmdCompiler, RejectsQuestionOnRequiredName)
+TEST(TestUmdCompiler, RejectsQuestionOnRequiredName)
 {
     json d = sdpaDescriptor();
     d["nodes"][0]["operands"]["q"] = "$q?"; // q is required
     EXPECT_THROW(umd::UmdCompiler::compile(d), umd::UmdCompileError);
 }
 
-TEST(UmdCompiler, RejectsMissingQuestionOnOptionalName)
+TEST(TestUmdCompiler, RejectsMissingQuestionOnOptionalName)
 {
     json d = sdpaDescriptor();
     d["nodes"][0]["operands"]["attn_mask"] = "$attn_mask"; // optional, needs ?
     EXPECT_THROW(umd::UmdCompiler::compile(d), umd::UmdCompileError);
 }
 
-TEST(UmdCompiler, RejectsReservedRootAsNodeId)
+TEST(TestUmdCompiler, RejectsReservedRootAsNodeId)
 {
     json d = sdpaDescriptor();
     d["nodes"][0]["id"] = "device";
     EXPECT_THROW(umd::UmdCompiler::compile(d), umd::UmdCompileError);
 }
 
-TEST(UmdCompiler, RejectsTypeMismatchIntVsDtype)
+TEST(TestUmdCompiler, RejectsTypeMismatchIntVsDtype)
 {
     json d = sdpaDescriptor();
     // $q.head_size is Int; comparing it to a Dtype string is a compile error.
@@ -197,28 +197,28 @@ TEST(UmdCompiler, RejectsTypeMismatchIntVsDtype)
     EXPECT_THROW(umd::UmdCompiler::compile(d), umd::UmdCompileError);
 }
 
-TEST(UmdCompiler, RejectsNonBooleanCriteria)
+TEST(TestUmdCompiler, RejectsNonBooleanCriteria)
 {
     json d = sdpaDescriptor();
     d["criteria"] = json::parse(R"({"+": ["$q.head_size", 1]})"); // Int, not Bool
     EXPECT_THROW(umd::UmdCompiler::compile(d), umd::UmdCompileError);
 }
 
-TEST(UmdCompiler, RejectsCustomOperation)
+TEST(TestUmdCompiler, RejectsCustomOperation)
 {
     json d = sdpaDescriptor();
     d["criteria"]["and"].push_back(json::parse(R"({"hipdnn.strides_fit_u32": ["$q"]})"));
     EXPECT_THROW(umd::UmdCompiler::compile(d), umd::UmdCompileError);
 }
 
-TEST(UmdCompiler, RejectsPresentOnRequiredOperand)
+TEST(TestUmdCompiler, RejectsPresentOnRequiredOperand)
 {
     json d = sdpaDescriptor();
     d["criteria"]["and"].push_back(json::parse(R"({"!": "$q.present"})"));
     EXPECT_THROW(umd::UmdCompiler::compile(d), umd::UmdCompileError);
 }
 
-TEST(UmdCompiler, RejectsWrongArity)
+TEST(TestUmdCompiler, RejectsWrongArity)
 {
     // Binary/unary operators with the wrong argument count must refuse at
     // compile with a UmdCompileError, not escape as std::out_of_range.
@@ -235,21 +235,21 @@ TEST(UmdCompiler, RejectsWrongArity)
     }
 }
 
-TEST(UmdCompiler, RejectsMalformedSubscript)
+TEST(TestUmdCompiler, RejectsMalformedSubscript)
 {
     json d = sdpaDescriptor();
     d["criteria"]["and"].push_back(json::parse(R"({"==": ["$q.dims[x]", 2]})"));
     EXPECT_THROW(umd::UmdCompiler::compile(d), umd::UmdCompileError);
 }
 
-TEST(UmdCompiler, RejectsBareNodeIdAsValue)
+TEST(TestUmdCompiler, RejectsBareNodeIdAsValue)
 {
     json d = sdpaDescriptor();
     d["criteria"]["and"].push_back(json::parse(R"({"==": ["$sdpa_fwd", 0]})"));
     EXPECT_THROW(umd::UmdCompiler::compile(d), umd::UmdCompileError);
 }
 
-TEST(UmdCompiler, RejectsLayoutAliasRankMismatch)
+TEST(TestUmdCompiler, RejectsLayoutAliasRankMismatch)
 {
     // $q is pinned rank 4 by the shape short-hand; a rank-5 alias can never
     // match, so it is refused at compile rather than always declining.
@@ -258,7 +258,7 @@ TEST(UmdCompiler, RejectsLayoutAliasRankMismatch)
     EXPECT_THROW(umd::UmdCompiler::compile(d), umd::UmdCompileError);
 }
 
-TEST(UmdCompiler, AcceptsWellFormedArithmeticAndIf)
+TEST(TestUmdCompiler, AcceptsWellFormedArithmeticAndIf)
 {
     // Guard the arity checks against over-rejecting valid n-ary / binary / if
     // forms.
@@ -270,7 +270,7 @@ TEST(UmdCompiler, AcceptsWellFormedArithmeticAndIf)
 
 // ---- Matcher: accept / reject --------------------------------------------
 
-TEST(UniversalGraphMatcher, OwnsSingleDescriptor)
+TEST(TestUniversalGraphMatcher, OwnsSingleDescriptor)
 {
     // A matcher has a 1:1 relationship with its UMD: it exposes that one
     // descriptor's id and compiled form.
@@ -280,7 +280,7 @@ TEST(UniversalGraphMatcher, OwnsSingleDescriptor)
     EXPECT_EQ(m.descriptor().nodes.size(), 1u);
 }
 
-TEST(UniversalGraphMatcher, MatchesValidSdpaForward)
+TEST(TestUniversalGraphMatcher, MatchesValidSdpaForward)
 {
     const umd::UniversalGraphMatcher m = makeSdpaMatcher();
     auto builder = buildSdpaGraph({2, 8, 16, 128}, data::DataType::BFLOAT16);
@@ -291,7 +291,7 @@ TEST(UniversalGraphMatcher, MatchesValidSdpaForward)
     EXPECT_EQ(r.umdId, "9c3f5b2a-7d41-4e88-b6a0-1f2e3d4c5b6a");
 }
 
-TEST(UniversalGraphMatcher, DeclinesWrongHeadSize)
+TEST(TestUniversalGraphMatcher, DeclinesWrongHeadSize)
 {
     const umd::UniversalGraphMatcher m = makeSdpaMatcher();
     auto builder = buildSdpaGraph({2, 8, 16, 64}, data::DataType::BFLOAT16);
@@ -299,7 +299,7 @@ TEST(UniversalGraphMatcher, DeclinesWrongHeadSize)
     EXPECT_FALSE(m.match(K_DEVICE, g).matched);
 }
 
-TEST(UniversalGraphMatcher, DeclinesUnsupportedDtype)
+TEST(TestUniversalGraphMatcher, DeclinesUnsupportedDtype)
 {
     const umd::UniversalGraphMatcher m = makeSdpaMatcher();
     auto builder = buildSdpaGraph({2, 8, 16, 128}, data::DataType::HALF);
@@ -307,7 +307,7 @@ TEST(UniversalGraphMatcher, DeclinesUnsupportedDtype)
     EXPECT_FALSE(m.match(K_DEVICE, g).matched);
 }
 
-TEST(UniversalGraphMatcher, DeclinesWhenUnsupportedOptionalPresent)
+TEST(TestUniversalGraphMatcher, DeclinesWhenUnsupportedOptionalPresent)
 {
     const umd::UniversalGraphMatcher m = makeSdpaMatcher();
     auto builder = buildSdpaGraph({2, 8, 16, 128}, data::DataType::BFLOAT16, /*withAttnMask=*/true);
@@ -315,7 +315,7 @@ TEST(UniversalGraphMatcher, DeclinesWhenUnsupportedOptionalPresent)
     EXPECT_FALSE(m.match(K_DEVICE, g).matched);
 }
 
-TEST(UniversalGraphMatcher, DeclinesOverrideShapeGraph)
+TEST(TestUniversalGraphMatcher, DeclinesOverrideShapeGraph)
 {
     const umd::UniversalGraphMatcher m = makeSdpaMatcher();
     auto builder = buildSdpaGraph({2, 8, 16, 128},
@@ -326,7 +326,7 @@ TEST(UniversalGraphMatcher, DeclinesOverrideShapeGraph)
     EXPECT_FALSE(m.match(K_DEVICE, g).matched);
 }
 
-TEST(UniversalGraphMatcher, DeclinesGraphWithoutMatchingOpcode)
+TEST(TestUniversalGraphMatcher, DeclinesGraphWithoutMatchingOpcode)
 {
     const umd::UniversalGraphMatcher m = makeSdpaMatcher();
     auto builder = hipdnn_test_sdk::utilities::createValidBlockScaleQuantizeGraph();
@@ -334,7 +334,7 @@ TEST(UniversalGraphMatcher, DeclinesGraphWithoutMatchingOpcode)
     EXPECT_FALSE(m.match(K_DEVICE, g).matched);
 }
 
-TEST(UniversalGraphMatcher, DeclinesNodelessGraphWithoutThrowing)
+TEST(TestUniversalGraphMatcher, DeclinesNodelessGraphWithoutThrowing)
 {
     // A valid but empty graph must fail closed, not throw (nodeWrappers() would
     // throw on a null nodes vector).
@@ -346,7 +346,7 @@ TEST(UniversalGraphMatcher, DeclinesNodelessGraphWithoutThrowing)
 
 // ---- Bindings: queryable BindingContext (RFC 0018 §4/§15) ----------------
 
-TEST(BindingContext, ResolvesEveryNamespaceForm)
+TEST(TestBindingContext, ResolvesEveryNamespaceForm)
 {
     const umd::UniversalGraphMatcher m = makeSdpaMatcher();
     auto builder = buildSdpaGraph({2, 8, 16, 128}, data::DataType::BFLOAT16);
@@ -388,7 +388,7 @@ TEST(BindingContext, ResolvesEveryNamespaceForm)
     EXPECT_EQ(b.get("$device.warp_size").asInt(), 64);
 }
 
-TEST(BindingContext, FailsClosedOnBadPaths)
+TEST(TestBindingContext, FailsClosedOnBadPaths)
 {
     const umd::UniversalGraphMatcher m = makeSdpaMatcher();
     auto builder = buildSdpaGraph({2, 8, 16, 128}, data::DataType::BFLOAT16);
@@ -407,7 +407,7 @@ TEST(BindingContext, FailsClosedOnBadPaths)
 
 // ---- Lowering: layout alias (A.8) ----------------------------------------
 
-TEST(UmdCompiler, LayoutAliasMatchesContiguousLayout)
+TEST(TestUmdCompiler, LayoutAliasMatchesContiguousLayout)
 {
     const umd::UniversalGraphMatcher m(json::parse(R"JSON({
       "schema": "hipdnn.umd/v1",
@@ -427,7 +427,7 @@ TEST(UmdCompiler, LayoutAliasMatchesContiguousLayout)
     EXPECT_TRUE(m.match(K_DEVICE, g).matched);
 }
 
-TEST(BindingContext, StrideOrderIsPublishedOutermostFirst)
+TEST(TestBindingContext, StrideOrderIsPublishedOutermostFirst)
 {
     // The conversion is observable, not cosmetic: an NHWC tensor must publish
     // [0,2,3,1] (N,H,W,C read left to right), NOT extractStrideOrder's
@@ -560,7 +560,7 @@ json twoNodeChainDescriptor()
 
 } // namespace
 
-TEST(UmdCompiler, AcceptsMultiNodeDescriptor)
+TEST(TestUmdCompiler, AcceptsMultiNodeDescriptor)
 {
     const umd::CompiledUmd c = umd::UmdCompiler::compile(twoNodeChainDescriptor());
     EXPECT_EQ(c.nodes.size(), 2u);
@@ -571,21 +571,21 @@ TEST(UmdCompiler, AcceptsMultiNodeDescriptor)
     ASSERT_NE(c.findTvar("mid"), nullptr);
 }
 
-TEST(UmdCompiler, RejectsDuplicateNodeId)
+TEST(TestUmdCompiler, RejectsDuplicateNodeId)
 {
     json d = twoNodeChainDescriptor();
     d["nodes"][1]["id"] = "sdpa1"; // collides with node 0
     EXPECT_THROW(umd::UmdCompiler::compile(d), umd::UmdCompileError);
 }
 
-TEST(UmdCompiler, RejectsVariableProducedTwice)
+TEST(TestUmdCompiler, RejectsVariableProducedTwice)
 {
     json d = twoNodeChainDescriptor();
     d["nodes"][1]["results"]["o"] = "$mid"; // $mid produced by both nodes
     EXPECT_THROW(umd::UmdCompiler::compile(d), umd::UmdCompileError);
 }
 
-TEST(UniversalGraphMatcher, MatchesTwoNodeChainAndBindsEachNode)
+TEST(TestUniversalGraphMatcher, MatchesTwoNodeChainAndBindsEachNode)
 {
     const umd::UniversalGraphMatcher m(twoNodeChainDescriptor());
     auto builder = buildTwoNodeSdpaGraph(/*chained=*/true);
@@ -605,7 +605,7 @@ TEST(UniversalGraphMatcher, MatchesTwoNodeChainAndBindsEachNode)
     EXPECT_FALSE(b.get("$sdpa2.alibi_mask").asBool());
 }
 
-TEST(UniversalGraphMatcher, DeclinesWhenEdgeIsInconsistent)
+TEST(TestUniversalGraphMatcher, DeclinesWhenEdgeIsInconsistent)
 {
     const umd::UniversalGraphMatcher m(twoNodeChainDescriptor());
     // node2 reads an independent Q, so no tensor satisfies the shared `$mid`
@@ -615,7 +615,7 @@ TEST(UniversalGraphMatcher, DeclinesWhenEdgeIsInconsistent)
     EXPECT_FALSE(m.match(K_DEVICE, g).matched);
 }
 
-TEST(UniversalGraphMatcher, PerNodeAttributesAreDistinct)
+TEST(TestUniversalGraphMatcher, PerNodeAttributesAreDistinct)
 {
     const umd::UniversalGraphMatcher m(twoNodeChainDescriptor());
     // Chained graph, but node2's alibi_mask is set; the criterion
@@ -642,7 +642,7 @@ json sdpaKernelDescriptor()
 
 } // namespace
 
-TEST(UmdCompiler, AcceptsKernelReference)
+TEST(TestUmdCompiler, AcceptsKernelReference)
 {
     // A criterion over a $kernel field compiles (DYNAMIC wildcard) and the
     // field name it reads is recorded.
@@ -652,13 +652,13 @@ TEST(UmdCompiler, AcceptsKernelReference)
     EXPECT_TRUE(c.boundSymbols.count("kernel.head_dim") == 1);
 }
 
-TEST(UmdCompiler, StockDescriptorDoesNotReferenceKernel)
+TEST(TestUmdCompiler, StockDescriptorDoesNotReferenceKernel)
 {
     const umd::CompiledUmd c = umd::UmdCompiler::compile(sdpaDescriptor());
     EXPECT_TRUE(c.kernelFields.empty());
 }
 
-TEST(UmdCompiler, RecordsEveryDistinctKernelFieldRead)
+TEST(TestUmdCompiler, RecordsEveryDistinctKernelFieldRead)
 {
     // The memoization key is the set of `$kernel.*` fields the matcher reads,
     // without the `kernel.` prefix; a field read twice contributes once, and a
@@ -670,7 +670,7 @@ TEST(UmdCompiler, RecordsEveryDistinctKernelFieldRead)
     EXPECT_EQ(c.kernelFields, (std::set<std::string>{"tile_m", "tile_n"}));
 }
 
-TEST(UmdCompiler, KernelFieldUnifiesWithAnyScalarDomain)
+TEST(TestUmdCompiler, KernelFieldUnifiesWithAnyScalarDomain)
 {
     // A $kernel field is DYNAMIC: it compiles against an int, a dtype string,
     // and a bool alike -- none is a static type error.
@@ -685,14 +685,14 @@ TEST(UmdCompiler, KernelFieldUnifiesWithAnyScalarDomain)
     }
 }
 
-TEST(UmdCompiler, KernelReferenceNeedsAField)
+TEST(TestUmdCompiler, KernelReferenceNeedsAField)
 {
     json d = sdpaDescriptor();
     d["criteria"]["and"].push_back(json::parse(R"({"==": ["$kernel", 1]})"));
     EXPECT_THROW(umd::UmdCompiler::compile(d), umd::UmdCompileError);
 }
 
-TEST(UmdCompiler, KernelFieldAsIfCondition)
+TEST(TestUmdCompiler, KernelFieldAsIfCondition)
 {
     // A DYNAMIC $kernel field is accepted in an `if` condition, consistent with
     // its acceptance in and/or/! boolean positions.
@@ -701,7 +701,7 @@ TEST(UmdCompiler, KernelFieldAsIfCondition)
     EXPECT_NO_THROW(umd::UmdCompiler::compile(d));
 }
 
-TEST(UmdCompiler, KernelFieldDoesNotUnifyWithArray)
+TEST(TestUmdCompiler, KernelFieldDoesNotUnifyWithArray)
 {
     // DYNAMIC is a scalar wildcard: comparing a $kernel field to an array
     // literal is a static type error, not a runtime-deferred check.
@@ -710,21 +710,21 @@ TEST(UmdCompiler, KernelFieldDoesNotUnifyWithArray)
     EXPECT_THROW(umd::UmdCompiler::compile(d), umd::UmdCompileError);
 }
 
-TEST(UmdCompiler, KernelIsReservedAsPatternVariable)
+TEST(TestUmdCompiler, KernelIsReservedAsPatternVariable)
 {
     json d = sdpaDescriptor();
     d["nodes"][0]["operands"]["q"] = "$kernel"; // bind a tensor var to the reserved root
     EXPECT_THROW(umd::UmdCompiler::compile(d), umd::UmdCompileError);
 }
 
-TEST(UmdCompiler, KernelIsReservedAsNodeId)
+TEST(TestUmdCompiler, KernelIsReservedAsNodeId)
 {
     json d = sdpaDescriptor();
     d["nodes"][0]["id"] = "kernel";
     EXPECT_THROW(umd::UmdCompiler::compile(d), umd::UmdCompileError);
 }
 
-TEST(UniversalGraphMatcher, ReportsKernelMetadataReference)
+TEST(TestUniversalGraphMatcher, ReportsKernelMetadataReference)
 {
     const umd::UniversalGraphMatcher mk(sdpaKernelDescriptor());
     EXPECT_TRUE(mk.referencesKernelMetadata());
@@ -732,7 +732,7 @@ TEST(UniversalGraphMatcher, ReportsKernelMetadataReference)
     EXPECT_FALSE(m.referencesKernelMetadata());
 }
 
-TEST(UniversalGraphMatcher, PublishesKernelFieldsItReads)
+TEST(TestUniversalGraphMatcher, PublishesKernelFieldsItReads)
 {
     // The set is the loader's KMD existence check and the per-kernel
     // memoization key (RFC 0017 §5): exactly the names read, prefix stripped.
@@ -744,7 +744,7 @@ TEST(UniversalGraphMatcher, PublishesKernelFieldsItReads)
     EXPECT_TRUE(m.kernelFields().empty());
 }
 
-TEST(UniversalGraphMatcher, PublishesBoundSymbols)
+TEST(TestUniversalGraphMatcher, PublishesBoundSymbols)
 {
     // A pack's dispatch descriptor is checked against the fields its matchers
     // bind, so the set must be reachable from the matcher (RFC 0017 §6).
@@ -753,7 +753,7 @@ TEST(UniversalGraphMatcher, PublishesBoundSymbols)
     EXPECT_TRUE(m.boundSymbols().count("q.head_size") == 1);
 }
 
-TEST(UniversalGraphMatcher, TwoArgMatchThrowsWhenDescriptorNeedsKernel)
+TEST(TestUniversalGraphMatcher, TwoArgMatchThrowsWhenDescriptorNeedsKernel)
 {
     const umd::UniversalGraphMatcher m(sdpaKernelDescriptor());
     auto builder = buildSdpaGraph({2, 8, 16, 128}, data::DataType::BFLOAT16);
@@ -762,7 +762,7 @@ TEST(UniversalGraphMatcher, TwoArgMatchThrowsWhenDescriptorNeedsKernel)
     EXPECT_THROW(m.match(K_DEVICE, g), std::logic_error);
 }
 
-TEST(UniversalGraphMatcher, MatchesWithSuppliedKernelMetadata)
+TEST(TestUniversalGraphMatcher, MatchesWithSuppliedKernelMetadata)
 {
     const umd::UniversalGraphMatcher m(sdpaKernelDescriptor());
     auto builder = buildSdpaGraph({2, 8, 16, 128}, data::DataType::BFLOAT16);
@@ -774,7 +774,7 @@ TEST(UniversalGraphMatcher, MatchesWithSuppliedKernelMetadata)
     EXPECT_EQ(r.bindings.get("$kernel.head_dim").asInt(), 128);
 }
 
-TEST(UniversalGraphMatcher, DeclinesWhenKernelMetadataMismatches)
+TEST(TestUniversalGraphMatcher, DeclinesWhenKernelMetadataMismatches)
 {
     const umd::UniversalGraphMatcher m(sdpaKernelDescriptor());
     auto builder = buildSdpaGraph({2, 8, 16, 128}, data::DataType::BFLOAT16);
@@ -783,7 +783,7 @@ TEST(UniversalGraphMatcher, DeclinesWhenKernelMetadataMismatches)
     EXPECT_FALSE(m.match(K_DEVICE, g, json{{"head_dim", 64}}).matched);
 }
 
-TEST(UniversalGraphMatcher, EmptyKernelMetadataDeclinesComparison)
+TEST(TestUniversalGraphMatcher, EmptyKernelMetadataDeclinesComparison)
 {
     // Defensive edge case: production metadata is fully resolved so every
     // referenced field is present, but an unbound/empty document must not
@@ -796,7 +796,7 @@ TEST(UniversalGraphMatcher, EmptyKernelMetadataDeclinesComparison)
 
 // ---- Descriptor versions (RFC 0017 §4 / A.10 §1) -------------------------
 
-TEST(UmdCompiler, AcceptsAndPublishesWellFormedVersions)
+TEST(TestUmdCompiler, AcceptsAndPublishesWellFormedVersions)
 {
     json d = sdpaDescriptor();
     d["version"] = "1.0";
@@ -807,7 +807,7 @@ TEST(UmdCompiler, AcceptsAndPublishesWellFormedVersions)
     EXPECT_EQ(c.sdkVersion, "1.2");
 }
 
-TEST(UmdCompiler, VersionKeysAreOptionalAndDefaultToOneZero)
+TEST(TestUmdCompiler, VersionKeysAreOptionalAndDefaultToOneZero)
 {
     // A descriptor omitting both still compiles, and both read "1.0": the
     // version a descriptor authored before either key existed implies
@@ -818,7 +818,7 @@ TEST(UmdCompiler, VersionKeysAreOptionalAndDefaultToOneZero)
     EXPECT_EQ(c.sdkVersion, "1.0");
 }
 
-TEST(UmdCompiler, RejectsMalformedVersion)
+TEST(TestUmdCompiler, RejectsMalformedVersion)
 {
     for(const char* bad : {"1", "1.0.0", "1.", ".0", "+1.0", "-1.0", "1.x", "one.zero", ""})
     {
@@ -831,14 +831,14 @@ TEST(UmdCompiler, RejectsMalformedVersion)
     }
 }
 
-TEST(UmdCompiler, RejectsNonStringVersion)
+TEST(TestUmdCompiler, RejectsNonStringVersion)
 {
     json d = sdpaDescriptor();
     d["version"] = 1.0;
     EXPECT_THROW(umd::UmdCompiler::compile(d), umd::UmdCompileError);
 }
 
-TEST(UmdCompiler, RejectsVersionNewerThanTheRuntime)
+TEST(TestUmdCompiler, RejectsVersionNewerThanTheRuntime)
 {
     // RFC 0017 §4: a minor newer than the runtime's carries features this
     // runtime cannot understand, so the descriptor is refused, never silently
@@ -861,7 +861,7 @@ TEST(UmdCompiler, RejectsVersionNewerThanTheRuntime)
     EXPECT_THROW(umd::UmdCompiler::compile(newerSdk), umd::UmdCompileError);
 }
 
-TEST(UmdCompiler, AcceptsAnOlderMinorWithinTheSameMajor)
+TEST(TestUmdCompiler, AcceptsAnOlderMinorWithinTheSameMajor)
 {
     // RFC 0017 §4: "A file stamped 1.0 loads on a 1.1 runtime." An older minor
     // is never refused, so a descriptor stays loadable on the oldest runtime
@@ -884,7 +884,7 @@ TEST(UmdCompiler, AcceptsAnOlderMinorWithinTheSameMajor)
     }
 }
 
-TEST(UmdCompiler, VersionComparisonIsNumericNotLexicographic)
+TEST(TestUmdCompiler, VersionComparisonIsNumericNotLexicographic)
 {
     // "1.10" is above "1.9" numerically but below it as text; a lexicographic
     // comparison would order these backwards.
@@ -956,7 +956,7 @@ flatbuffers::FlatBufferBuilder buildSdpaGraphRequiringSchema(std::uint32_t major
 
 } // namespace
 
-TEST(UniversalGraphMatcher, DeclinesAMatcherBelowTheGraphsRequiredSchema)
+TEST(TestUniversalGraphMatcher, DeclinesAMatcherBelowTheGraphsRequiredSchema)
 {
     // RFC 0017 §4: a graph reports the schema version its own contents require,
     // and a matcher declaring less is skipped instead of asked -- it would
@@ -976,7 +976,7 @@ TEST(UniversalGraphMatcher, DeclinesAMatcherBelowTheGraphsRequiredSchema)
     EXPECT_FALSE(m.match(K_DEVICE, gNewer).matched);
 }
 
-TEST(UniversalGraphMatcher, MatcherAtOrAboveTheGraphsRequiredSchemaRuns)
+TEST(TestUniversalGraphMatcher, MatcherAtOrAboveTheGraphsRequiredSchemaRuns)
 {
     // The same graph, matched by a descriptor that adopted the newer schema.
     json d = sdpaDescriptor();
@@ -993,7 +993,7 @@ TEST(UniversalGraphMatcher, MatcherAtOrAboveTheGraphsRequiredSchemaRuns)
     EXPECT_TRUE(m.match(K_DEVICE, gBaseline).matched);
 }
 
-TEST(UniversalGraphMatcher, AnUnstampedGraphReadsAsTheBaselineFloor)
+TEST(TestUniversalGraphMatcher, AnUnstampedGraphReadsAsTheBaselineFloor)
 {
     // A hand-built fixture or a graph written before the field existed carries
     // no stamp; it reads as the 1.0 baseline rather than declining every
@@ -1026,7 +1026,7 @@ json sdpaNotPresentDescriptor()
 
 } // namespace
 
-TEST(UmdCompiler, AcceptsPresenceOperators)
+TEST(TestUmdCompiler, AcceptsPresenceOperators)
 {
     EXPECT_NO_THROW(umd::UmdCompiler::compile(sdpaNotPresentDescriptor()));
 
@@ -1043,7 +1043,7 @@ TEST(UmdCompiler, AcceptsPresenceOperators)
     }
 }
 
-TEST(UmdCompiler, RejectsPresenceOperatorOnNonReference)
+TEST(TestUmdCompiler, RejectsPresenceOperatorOnNonReference)
 {
     for(const char* bad : {R"({"present": [4]})",
                            R"({"present": ["BFLOAT16"]})",
@@ -1057,14 +1057,14 @@ TEST(UmdCompiler, RejectsPresenceOperatorOnNonReference)
     }
 }
 
-TEST(UmdCompiler, RejectsPresenceOperatorOnUnresolvedReference)
+TEST(TestUmdCompiler, RejectsPresenceOperatorOnUnresolvedReference)
 {
     json d = sdpaDescriptor();
     d["criteria"]["and"].push_back(json::parse(R"({"present": ["$not_a_tensor"]})"));
     EXPECT_THROW(umd::UmdCompiler::compile(d), umd::UmdCompileError);
 }
 
-TEST(UniversalGraphMatcher, NotPresentOperatorMatchesWhenOptionalsAbsent)
+TEST(TestUniversalGraphMatcher, NotPresentOperatorMatchesWhenOptionalsAbsent)
 {
     const umd::UniversalGraphMatcher m(sdpaNotPresentDescriptor());
     auto builder = buildSdpaGraph({2, 8, 16, 128}, data::DataType::BFLOAT16);
@@ -1072,7 +1072,7 @@ TEST(UniversalGraphMatcher, NotPresentOperatorMatchesWhenOptionalsAbsent)
     EXPECT_TRUE(m.match(K_DEVICE, g).matched);
 }
 
-TEST(UniversalGraphMatcher, NotPresentOperatorDeclinesWhenAnyOptionalBound)
+TEST(TestUniversalGraphMatcher, NotPresentOperatorDeclinesWhenAnyOptionalBound)
 {
     // The n-ary form is an `and`-fold: one supplied operand out of the list
     // decides the whole call.
@@ -1082,7 +1082,7 @@ TEST(UniversalGraphMatcher, NotPresentOperatorDeclinesWhenAnyOptionalBound)
     EXPECT_FALSE(m.match(K_DEVICE, g).matched);
 }
 
-TEST(UniversalGraphMatcher, PresenceOperatorsEvaluateRatherThanDecline)
+TEST(TestUniversalGraphMatcher, PresenceOperatorsEvaluateRatherThanDecline)
 {
     // The key distinction from a bare field read: a field read on an absent
     // optional resolves null and declines, but `present`/`not_present` always
@@ -1124,7 +1124,7 @@ json sdpaWithCriterion(const char* extra)
 
 } // namespace
 
-TEST(UniversalGraphMatcher, FieldReadOnAnAbsentOptionalNeverAccepts)
+TEST(TestUniversalGraphMatcher, FieldReadOnAnAbsentOptionalNeverAccepts)
 {
     // RFC 0017 §5: "A dtype or layout check on an absent $bias neither passes
     // nor fails, it simply does not run." The hazard is the negative and
@@ -1145,7 +1145,7 @@ TEST(UniversalGraphMatcher, FieldReadOnAnAbsentOptionalNeverAccepts)
     }
 }
 
-TEST(UniversalGraphMatcher, AbsentOrPresentAndConstrainedAcceptsBothShapes)
+TEST(TestUniversalGraphMatcher, AbsentOrPresentAndConstrainedAcceptsBothShapes)
 {
     // RFC 0017 §5: the pair a pack writes when it serves an optional operand
     // only in a particular form. The `or` must see past the unresolved second
@@ -1166,7 +1166,7 @@ TEST(UniversalGraphMatcher, AbsentOrPresentAndConstrainedAcceptsBothShapes)
     EXPECT_TRUE(m.match(K_DEVICE, gPresent).matched);
 }
 
-TEST(UniversalGraphMatcher, DefiniteFalseStillDeclinesBesideAnUnresolvedCheck)
+TEST(TestUniversalGraphMatcher, DefiniteFalseStillDeclinesBesideAnUnresolvedCheck)
 {
     // An unresolved sibling must not rescue a criterion that definitely fails:
     // `and` short-circuits on the definite false rather than going unresolved.
@@ -1178,7 +1178,7 @@ TEST(UniversalGraphMatcher, DefiniteFalseStillDeclinesBesideAnUnresolvedCheck)
     EXPECT_FALSE(m.match(K_DEVICE, g).matched);
 }
 
-TEST(UniversalGraphMatcher, PresentOperatorSeesABoundOptional)
+TEST(TestUniversalGraphMatcher, PresentOperatorSeesABoundOptional)
 {
     // Same descriptor, but the graph supplies `attn_mask`: `present` now reads
     // true and the criterion declines, proving it tracks binding rather than
@@ -1202,7 +1202,7 @@ TEST(UniversalGraphMatcher, PresentOperatorSeesABoundOptional)
 
 // ---- value_or_default with an expression fallback (RFC 0017 §5) ----------
 
-TEST(UmdCompiler, ValueOrDefaultAcceptsFieldReferenceFallback)
+TEST(TestUmdCompiler, ValueOrDefaultAcceptsFieldReferenceFallback)
 {
     // "this field, else that one": both arms are Int, so the pair unifies.
     json d = sdpaDescriptor();
@@ -1211,7 +1211,7 @@ TEST(UmdCompiler, ValueOrDefaultAcceptsFieldReferenceFallback)
     EXPECT_NO_THROW(umd::UmdCompiler::compile(d));
 }
 
-TEST(UmdCompiler, ValueOrDefaultAcceptsDynamicArm)
+TEST(TestUmdCompiler, ValueOrDefaultAcceptsDynamicArm)
 {
     // A `$kernel.*` arm is DYNAMIC, so the other arm supplies the result kind
     // and the comparison against an Int still type-checks.
@@ -1225,7 +1225,7 @@ TEST(UmdCompiler, ValueOrDefaultAcceptsDynamicArm)
     EXPECT_NO_THROW(umd::UmdCompiler::compile(e));
 }
 
-TEST(UmdCompiler, RejectsTypeIncompatibleValueOrDefaultArms)
+TEST(TestUmdCompiler, RejectsTypeIncompatibleValueOrDefaultArms)
 {
     for(const char* bad :
         {R"({"==": [{"value_or_default": ["$q.head_size", "BFLOAT16"]}, 128]})",
@@ -1238,7 +1238,7 @@ TEST(UmdCompiler, RejectsTypeIncompatibleValueOrDefaultArms)
     }
 }
 
-TEST(UniversalGraphMatcher, ValueOrDefaultFallsBackToTheSecondField)
+TEST(TestUniversalGraphMatcher, ValueOrDefaultFallsBackToTheSecondField)
 {
     // `$sdpa_fwd.dropout_probability` is an unset optional attribute, so the
     // fallback expression is evaluated and its value is what the comparison
@@ -1254,7 +1254,7 @@ TEST(UniversalGraphMatcher, ValueOrDefaultFallsBackToTheSecondField)
 
 // ---- $graph.is_override_shape_enabled (RFC 0017 §5) ----------------------
 
-TEST(UmdCompiler, AcceptsGraphOverrideShapeFlag)
+TEST(TestUmdCompiler, AcceptsGraphOverrideShapeFlag)
 {
     json d = sdpaDescriptor();
     d["criteria"]["and"].push_back(json::parse(R"({"!": "$graph.is_override_shape_enabled"})"));
@@ -1263,7 +1263,7 @@ TEST(UmdCompiler, AcceptsGraphOverrideShapeFlag)
     EXPECT_TRUE(c.boundSymbols.count("graph.is_override_shape_enabled") == 1);
 }
 
-TEST(UmdCompiler, RejectsGraphOverrideShapeFlagAgainstNonBool)
+TEST(TestUmdCompiler, RejectsGraphOverrideShapeFlagAgainstNonBool)
 {
     // The flag is Bool; comparing it to an int is a static type error.
     json d = sdpaDescriptor();
@@ -1272,7 +1272,7 @@ TEST(UmdCompiler, RejectsGraphOverrideShapeFlagAgainstNonBool)
     EXPECT_THROW(umd::UmdCompiler::compile(d), umd::UmdCompileError);
 }
 
-TEST(BindingContext, ResolvesGraphOverrideShapeFlag)
+TEST(TestBindingContext, ResolvesGraphOverrideShapeFlag)
 {
     // The descriptor key `allow_override_shape` is the MATCHER's opt-in; the
     // `$graph.is_override_shape_enabled` token is the GRAPH's state. A matcher
@@ -1298,7 +1298,7 @@ TEST(BindingContext, ResolvesGraphOverrideShapeFlag)
     EXPECT_TRUE(ro.bindings.get("$graph.is_override_shape_enabled").asBool());
 }
 
-TEST(UniversalGraphMatcher, DeclinesOnGraphOverrideShapeFlagCriterion)
+TEST(TestUniversalGraphMatcher, DeclinesOnGraphOverrideShapeFlagCriterion)
 {
     // An opted-in matcher can still refuse an override-shape graph by reading
     // the graph's own flag.
@@ -1335,7 +1335,7 @@ json sdpaScaleDescriptor()
 
 } // namespace
 
-TEST(UmdCompiler, AcceptsTensorValueFields)
+TEST(TestUmdCompiler, AcceptsTensorValueFields)
 {
     json d = sdpaScaleDescriptor();
     d["criteria"]["and"].push_back(json::parse(R"({"!": "$scale.is_runtime_pass_by_value"})"));
@@ -1343,7 +1343,7 @@ TEST(UmdCompiler, AcceptsTensorValueFields)
     EXPECT_NO_THROW(umd::UmdCompiler::compile(d));
 }
 
-TEST(UmdCompiler, TensorValueFieldsAreTyped)
+TEST(TestUmdCompiler, TensorValueFieldsAreTyped)
 {
     // is_runtime_pass_by_value is Bool and value_f32 is Float; using either in
     // the wrong domain is a static type error.
@@ -1361,7 +1361,7 @@ TEST(UmdCompiler, TensorValueFieldsAreTyped)
     EXPECT_NO_THROW(umd::UmdCompiler::compile(f));
 }
 
-TEST(UmdCompiler, RejectsShapeDimNameCollidingWithTensorValueFields)
+TEST(TestUmdCompiler, RejectsShapeDimNameCollidingWithTensorValueFields)
 {
     // A.10 §7: a `shape` short-hand may not name a dim after a reserved field.
     for(const char* name : {"is_runtime_pass_by_value", "value_f32"})
@@ -1373,7 +1373,7 @@ TEST(UmdCompiler, RejectsShapeDimNameCollidingWithTensorValueFields)
     }
 }
 
-TEST(BindingContext, ResolvesTensorValueFields)
+TEST(TestBindingContext, ResolvesTensorValueFields)
 {
     const umd::UniversalGraphMatcher m(sdpaScaleDescriptor());
     auto builder = buildSdpaGraph({2, 8, 16, 128},
@@ -1397,7 +1397,7 @@ TEST(BindingContext, ResolvesTensorValueFields)
     EXPECT_TRUE(b.get("$q.value_f32").isNull());
 }
 
-TEST(BindingContext, ValueF32DeclinesWithoutACompileTimeValue)
+TEST(TestBindingContext, ValueF32DeclinesWithoutACompileTimeValue)
 {
     // "present only when the tensor carries a compile-time value at all": the
     // union is NONE, so the token reads null and a criterion over it declines
@@ -1412,7 +1412,7 @@ TEST(BindingContext, ValueF32DeclinesWithoutACompileTimeValue)
     EXPECT_FALSE(r.bindings.get("$q.value_f32").isNumber());
 }
 
-TEST(UniversalGraphMatcher, DeclinesOnValueF32OfAValuelessTensor)
+TEST(TestUniversalGraphMatcher, DeclinesOnValueF32OfAValuelessTensor)
 {
     // The fail-closed consequence: a criterion reading value_f32 on a tensor
     // with no compile-time value declines the whole match.
@@ -1424,7 +1424,7 @@ TEST(UniversalGraphMatcher, DeclinesOnValueF32OfAValuelessTensor)
     EXPECT_FALSE(m.match(K_DEVICE, g).matched);
 }
 
-TEST(UniversalGraphMatcher, MatchesOnACompileTimeScaleValue)
+TEST(TestUniversalGraphMatcher, MatchesOnACompileTimeScaleValue)
 {
     json d = sdpaScaleDescriptor();
     d["criteria"]["and"].push_back(json::parse(R"({"==": ["$scale.value_f32", 1.0]})"));
@@ -1526,7 +1526,7 @@ jlogic::Value scaleValueF32(flatbuffers::FlatBufferBuilder& builder)
 
 } // namespace
 
-TEST(BindingContext, ValueF32CoercesEveryUnionArm)
+TEST(TestBindingContext, ValueF32CoercesEveryUnionArm)
 {
     // RFC 0017 §5: the schema layer "coerces whichever arm is set to f32" and
     // publishes one typed token. Every arm must produce a number, not null.
@@ -1568,7 +1568,7 @@ TEST(BindingContext, ValueF32CoercesEveryUnionArm)
     EXPECT_DOUBLE_EQ(boolean.toNumber(), 1.0);
 }
 
-TEST(BindingContext, ValueF32DecodesFloat8ThroughTheTensorDataType)
+TEST(TestBindingContext, ValueF32DecodesFloat8ThroughTheTensorDataType)
 {
     // Float8Value stores raw bits; the tensor's data_type says which 8-bit
     // format they encode. The bits 0x38 are 1.0 in E4M3 (exponent bias 7) but

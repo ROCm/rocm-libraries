@@ -176,5 +176,5 @@ Unit tests live in `src/tests/core/TestJsonLogic.cpp` and build into the
 ```bash
 ctest -R hip_kernel_provider_tests
 # or, filtered directly on the binary:
-./hip_kernel_provider_tests --gtest_filter=JsonLogic.*
+./hip_kernel_provider_tests --gtest_filter=TestJsonLogic.*
 ```

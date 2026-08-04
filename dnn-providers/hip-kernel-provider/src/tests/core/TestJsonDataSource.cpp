@@ -18,7 +18,7 @@ using V = jlogic::Value;
 // ---------------------------------------------------------------------------
 // JsonDataSource: the sample nlohmann::json-backed data source (getData/setData).
 // ---------------------------------------------------------------------------
-TEST(JsonDataSource, GetResolvesPathsAndSubscripts)
+TEST(TestJsonDataSource, GetResolvesPathsAndSubscripts)
 {
     const jlogic::JsonDataSource src{json{{"q", {{"dims", {8, 16}}}},
                                           {"rows", {{{"name", "a0"}}, {{"name", "a1"}}}},
@@ -36,14 +36,14 @@ TEST(JsonDataSource, GetResolvesPathsAndSubscripts)
     EXPECT_EQ(src.getData("q.dims["), V()); // malformed subscript
 }
 
-TEST(JsonDataSource, GetStripsOptionalSigil)
+TEST(TestJsonDataSource, GetStripsOptionalSigil)
 {
     const jlogic::JsonDataSource src{json{{"q", {{"dims", {8, 16}}}}}};
     EXPECT_EQ(src.getData("$q.dims[0]"), src.getData("q.dims[0]"));
     EXPECT_EQ(src.getData("$q.dims[0]"), V(8));
 }
 
-TEST(JsonDataSource, SetScalarCreatesNestedObjects)
+TEST(TestJsonDataSource, SetScalarCreatesNestedObjects)
 {
     jlogic::JsonDataSource src;
     src.setData("q.dims", V(4));
@@ -51,7 +51,7 @@ TEST(JsonDataSource, SetScalarCreatesNestedObjects)
     EXPECT_EQ(src.document(), (json{{"q", {{"dims", 4}}}}));
 }
 
-TEST(JsonDataSource, SetSubscriptCreatesAndExtendsArray)
+TEST(TestJsonDataSource, SetSubscriptCreatesAndExtendsArray)
 {
     jlogic::JsonDataSource src;
     // [N] forces array creation; gaps fill with null.
@@ -61,7 +61,7 @@ TEST(JsonDataSource, SetSubscriptCreatesAndExtendsArray)
     EXPECT_EQ(src.getData("q.dims[0]"), V()); // gap reads as null
 }
 
-TEST(JsonDataSource, SetOverwritesExistingArrayIndex)
+TEST(TestJsonDataSource, SetOverwritesExistingArrayIndex)
 {
     jlogic::JsonDataSource src{json{{"q", {{"dims", {8, 16}}}}}};
     src.setData("$q.dims[0]", V(2)); // the motivating example
@@ -69,7 +69,7 @@ TEST(JsonDataSource, SetOverwritesExistingArrayIndex)
     EXPECT_EQ(src.getData("q.dims[0]"), V(2));
 }
 
-TEST(JsonDataSource, SetWholeDocument)
+TEST(TestJsonDataSource, SetWholeDocument)
 {
     jlogic::JsonDataSource src{json{{"x", 1}}};
     src.setData("", V(V::Array{V(1), V(2)}));
@@ -77,7 +77,7 @@ TEST(JsonDataSource, SetWholeDocument)
     EXPECT_EQ(src.getData("[1]"), V(2));
 }
 
-TEST(JsonDataSource, SetRoundTripsValueKinds)
+TEST(TestJsonDataSource, SetRoundTripsValueKinds)
 {
     jlogic::JsonDataSource src;
     src.setData("b", V(true));
@@ -90,7 +90,7 @@ TEST(JsonDataSource, SetRoundTripsValueKinds)
     EXPECT_EQ(src.getData("a"), V(V::Array{V(1), V("two"), V(false)}));
 }
 
-TEST(JsonDataSource, SetThenEvaluateReflectsChange)
+TEST(TestJsonDataSource, SetThenEvaluateReflectsChange)
 {
     jlogic::JsonDataSource src{json{{"q", {{"dims", {8, 16}}}}}};
     const auto expr = jlogic::compile<jlogic::JsonDataSource>(
@@ -100,7 +100,7 @@ TEST(JsonDataSource, SetThenEvaluateReflectsChange)
     EXPECT_EQ(expr(src), V(32));
 }
 
-TEST(JsonDataSource, SetRejectsMalformedPaths)
+TEST(TestJsonDataSource, SetRejectsMalformedPaths)
 {
     jlogic::JsonDataSource src{json{{"q", {{"dims", {8, 16}}}}}};
     EXPECT_THROW(src.setData("q.dims[0", V(1)), std::invalid_argument); // missing ']'

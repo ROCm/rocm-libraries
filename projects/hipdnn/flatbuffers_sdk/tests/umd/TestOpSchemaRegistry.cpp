@@ -87,7 +87,7 @@ fb::FlatBufferBuilder buildSdpa()
 
 } // namespace
 
-TEST(UmdOpSchemaRegistry, SdpaEntryResolvesByNameAndType)
+TEST(TestUmdOpSchemaRegistry, SdpaEntryResolvesByNameAndType)
 {
     const auto* byName = umd::lookupOpByName("sdpa_fwd"); // the umd_opcode shorthand
     const auto* byType = umd::lookupOpByType(data::NodeAttributes::SdpaAttributes);
@@ -100,7 +100,7 @@ TEST(UmdOpSchemaRegistry, SdpaEntryResolvesByNameAndType)
     EXPECT_EQ(umd::lookupOpByName("NoSuchOp"), nullptr);
 }
 
-TEST(UmdOpSchemaRegistry, SdpaRequiredOperandsAndResult)
+TEST(TestUmdOpSchemaRegistry, SdpaRequiredOperandsAndResult)
 {
     const auto* e = sdpaEntry();
     ASSERT_NE(e, nullptr);
@@ -115,7 +115,7 @@ TEST(UmdOpSchemaRegistry, SdpaRequiredOperandsAndResult)
     EXPECT_FALSE(o->optional);
 }
 
-TEST(UmdOpSchemaRegistry, SdpaOptionalOperandsClassifiedOptional)
+TEST(TestUmdOpSchemaRegistry, SdpaOptionalOperandsClassifiedOptional)
 {
     const auto* e = sdpaEntry();
     ASSERT_NE(e, nullptr);
@@ -136,7 +136,7 @@ TEST(UmdOpSchemaRegistry, SdpaOptionalOperandsClassifiedOptional)
 }
 
 // Optionality parity with the schema `= null` defaults / generated Optional<T>.
-TEST(UmdOpSchemaRegistry, SdpaScalarAttributeOptionalityParity)
+TEST(TestUmdOpSchemaRegistry, SdpaScalarAttributeOptionalityParity)
 {
     const auto* e = sdpaEntry();
     ASSERT_NE(e, nullptr);
@@ -166,7 +166,7 @@ TEST(UmdOpSchemaRegistry, SdpaScalarAttributeOptionalityParity)
     }
 }
 
-TEST(UmdOpSchemaRegistry, SdpaScalarAttributeTypes)
+TEST(TestUmdOpSchemaRegistry, SdpaScalarAttributeTypes)
 {
     const auto* e = sdpaEntry();
     ASSERT_NE(e, nullptr);
@@ -176,7 +176,7 @@ TEST(UmdOpSchemaRegistry, SdpaScalarAttributeTypes)
     EXPECT_EQ(findAttr(e, "diagonal_alignment")->type, umd::AttrType::DTYPE);
 }
 
-TEST(UmdOpSchemaRegistry, AccessorRoundTripReadsLiveValues)
+TEST(TestUmdOpSchemaRegistry, AccessorRoundTripReadsLiveValues)
 {
     const auto* e = sdpaEntry();
     ASSERT_NE(e, nullptr);
@@ -195,7 +195,7 @@ TEST(UmdOpSchemaRegistry, AccessorRoundTripReadsLiveValues)
     EXPECT_EQ(uid, 201);
 }
 
-TEST(UmdOpSchemaRegistry, AbsentOptionalOperandReadsFalse)
+TEST(TestUmdOpSchemaRegistry, AbsentOptionalOperandReadsFalse)
 {
     const auto* e = sdpaEntry();
     ASSERT_NE(e, nullptr);
@@ -208,7 +208,7 @@ TEST(UmdOpSchemaRegistry, AbsentOptionalOperandReadsFalse)
     EXPECT_FALSE(findInputTensor(e, "page_table_k")->read(a, uid));
 }
 
-TEST(UmdOpSchemaRegistry, ScalarReadersReflectPresenceAndValue)
+TEST(TestUmdOpSchemaRegistry, ScalarReadersReflectPresenceAndValue)
 {
     const auto* e = sdpaEntry();
     ASSERT_NE(e, nullptr);

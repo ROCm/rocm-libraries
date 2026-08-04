@@ -41,7 +41,7 @@ V eval(const json& rule)
 }
 } // namespace
 
-TEST(JsonLogic, Literals)
+TEST(TestJsonLogic, Literals)
 {
     EXPECT_EQ(eval(42), V(42));
     EXPECT_EQ(eval("hello"), V("hello"));
@@ -49,7 +49,7 @@ TEST(JsonLogic, Literals)
     EXPECT_EQ(eval(json::array({1, 2, 3})), V(V::Array{V(1), V(2), V(3)}));
 }
 
-TEST(JsonLogic, VarStockForm)
+TEST(TestJsonLogic, VarStockForm)
 {
     EXPECT_EQ(eval(json({{"var", "x"}})), V(41));
     EXPECT_EQ(eval(json({{"var", "nested.a.b"}})), V(7));
@@ -60,7 +60,7 @@ TEST(JsonLogic, VarStockForm)
     EXPECT_EQ(eval(json({{"var", "arr"}})), V(V::Array{V(10), V(20), V(30)}));
 }
 
-TEST(JsonLogic, InlineVariables)
+TEST(TestJsonLogic, InlineVariables)
 {
     EXPECT_EQ(eval("$x"), V(41));
     EXPECT_EQ(eval("$nested.a.b"), V(7));
@@ -72,7 +72,7 @@ TEST(JsonLogic, InlineVariables)
     EXPECT_EQ(eval(json({{"==", json::array({"amd", "$name"})}})), V(true));
 }
 
-TEST(JsonLogic, SubscriptIndex)
+TEST(TestJsonLogic, SubscriptIndex)
 {
     // [N] subscript, stock and inline forms
     EXPECT_EQ(eval(json({{"var", "arr[0]"}})), V(10));
@@ -90,7 +90,7 @@ TEST(JsonLogic, SubscriptIndex)
     EXPECT_EQ(eval("$nested[0]"), V());
 }
 
-TEST(JsonLogic, Arithmetic)
+TEST(TestJsonLogic, Arithmetic)
 {
     EXPECT_EQ(eval(json({{"+", json::array({1, 2, 3})}})), V(6));
     EXPECT_EQ(eval(json({{"+", json::array({"2", "3"})}})), V(5));
@@ -104,7 +104,7 @@ TEST(JsonLogic, Arithmetic)
     EXPECT_EQ(eval(json({{"+", json::array({{{"var", "x"}}, 1})}})), V(42));
 }
 
-TEST(JsonLogic, ComparisonIsStrict)
+TEST(TestJsonLogic, ComparisonIsStrict)
 {
     EXPECT_EQ(eval(json({{"==", json::array({1, 1})}})), V(true));
     EXPECT_EQ(eval(json({{"==", json::array({1, 1.0})}})), V(true));
@@ -122,7 +122,7 @@ TEST(JsonLogic, ComparisonIsStrict)
     EXPECT_EQ(eval(json({{"<", json::array({"abc", "abd"})}})), V(true));
 }
 
-TEST(JsonLogic, TruthinessAndLogic)
+TEST(TestJsonLogic, TruthinessAndLogic)
 {
     EXPECT_EQ(eval(json({{"!", 0}})), V(true));
     EXPECT_EQ(eval(json({{"!", 1}})), V(false));
@@ -134,7 +134,7 @@ TEST(JsonLogic, TruthinessAndLogic)
     EXPECT_EQ(eval(json({{"or", json::array({0, ""})}})), V(""));
 }
 
-TEST(JsonLogic, IfTernary)
+TEST(TestJsonLogic, IfTernary)
 {
     EXPECT_EQ(eval(json({{"if", json::array({true, "yes", "no"})}})), V("yes"));
     EXPECT_EQ(eval(json({{"if", json::array({false, "yes", "no"})}})), V("no"));
@@ -144,7 +144,7 @@ TEST(JsonLogic, IfTernary)
               V(41));
 }
 
-TEST(JsonLogic, Composed)
+TEST(TestJsonLogic, Composed)
 {
     EXPECT_EQ(
         eval(json({{"if",
@@ -154,7 +154,7 @@ TEST(JsonLogic, Composed)
         V("small"));
 }
 
-TEST(JsonLogic, Membership)
+TEST(TestJsonLogic, Membership)
 {
     EXPECT_EQ(eval(json({{"in", json::array({20, "$arr"})}})), V(true));
     EXPECT_EQ(eval(json({{"in", json::array({99, "$arr"})}})), V(false));
@@ -165,7 +165,7 @@ TEST(JsonLogic, Membership)
     EXPECT_EQ(eval(json({{"in", json::array({"z", "$name"})}})), V(false));
 }
 
-TEST(JsonLogic, MathExtensions)
+TEST(TestJsonLogic, MathExtensions)
 {
     EXPECT_EQ(eval(json({{"ceil_div", json::array({100, 16})}})), V(7));
     EXPECT_EQ(eval(json({{"ceil_div", json::array({32, 16})}})), V(2));
@@ -176,7 +176,7 @@ TEST(JsonLogic, MathExtensions)
     EXPECT_EQ(eval(json({{"rsqrt", 4}})), V(0.5));
 }
 
-TEST(JsonLogic, ValueOrDefault)
+TEST(TestJsonLogic, ValueOrDefault)
 {
     EXPECT_EQ(eval(json({{"value_or_default", json::array({"$x", 99})}})), V(41));
     EXPECT_EQ(eval(json({{"value_or_default", json::array({"$nope", 99})}})), V(99));
@@ -189,7 +189,7 @@ TEST(JsonLogic, ValueOrDefault)
               V("fallback"));
 }
 
-TEST(JsonLogic, PresenceOperators)
+TEST(TestJsonLogic, PresenceOperators)
 {
     // A resolving path is present; an unresolved one is not.
     EXPECT_EQ(eval(json({{"present", json::array({"$x"})}})), V(true));
@@ -217,7 +217,7 @@ TEST(JsonLogic, PresenceOperators)
                  jlogic::JsonLogicCompileError);
 }
 
-TEST(JsonLogic, NullPropagatesThroughEveryOtherOperator)
+TEST(TestJsonLogic, NullPropagatesThroughEveryOtherOperator)
 {
     // An unresolved reference is "unknown", not a value. Every operator except
     // the presence pair and value_or_default must yield null rather than
@@ -248,7 +248,7 @@ TEST(JsonLogic, NullPropagatesThroughEveryOtherOperator)
     EXPECT_TRUE(eval(json({{"!=", json::array({"$nope", "$missing"})}})).isNull());
 }
 
-TEST(JsonLogic, KleeneAndOrShortCircuitPastUnknown)
+TEST(TestJsonLogic, KleeneAndOrShortCircuitPastUnknown)
 {
     // A definite false decides an `and` even beside an unknown, and a definite
     // true decides an `or`. This is what lets "absent, or present and
@@ -264,7 +264,7 @@ TEST(JsonLogic, KleeneAndOrShortCircuitPastUnknown)
     EXPECT_EQ(eval(json({{"or", json::array({false, false})}})), V(false));
 }
 
-TEST(JsonLogic, DivisionAndDomainErrorsFailClosed)
+TEST(TestJsonLogic, DivisionAndDomainErrorsFailClosed)
 {
     // A zero divisor declines instead of yielding inf/NaN, giving uniform
     // fail-closed zero-guarding (RFC 0018 A.7).
@@ -281,7 +281,7 @@ TEST(JsonLogic, DivisionAndDomainErrorsFailClosed)
     EXPECT_EQ(eval(json({{"log2", 8}})), V(3));
 }
 
-TEST(JsonLogic, Umd0018ConstraintShapes)
+TEST(TestJsonLogic, Umd0018ConstraintShapes)
 {
     EXPECT_EQ(eval(json({{"in", json::array({"$name", json::array({"amd", "xilinx"})})}})),
               V(true));
@@ -292,7 +292,7 @@ TEST(JsonLogic, Umd0018ConstraintShapes)
     EXPECT_EQ(eval(json({{"ceil_div", json::array({"$x", 16})}})), V(3));
 }
 
-TEST(JsonLogic, CompileOnceReuseAcrossData)
+TEST(TestJsonLogic, CompileOnceReuseAcrossData)
 {
     const auto expr
         = jlogic::compile<jlogic::JsonDataSource>(json({{"*", json::array({"$x", 2})}}));
@@ -302,7 +302,7 @@ TEST(JsonLogic, CompileOnceReuseAcrossData)
     EXPECT_EQ(expr(b), V(20));
 }
 
-TEST(JsonLogic, MalformedRulesThrowAtCompileTime)
+TEST(TestJsonLogic, MalformedRulesThrowAtCompileTime)
 {
     EXPECT_THROW(jlogic::compile<jlogic::JsonDataSource>(json({{"nope", json::array({1, 2})}})),
                  jlogic::JsonLogicCompileError);
@@ -312,7 +312,7 @@ TEST(JsonLogic, MalformedRulesThrowAtCompileTime)
                  jlogic::JsonLogicCompileError);
 }
 
-TEST(JsonLogic, VariablesCollectsReferencedPaths)
+TEST(TestJsonLogic, VariablesCollectsReferencedPaths)
 {
     using S = std::set<std::string>;
     // Keep the Expression alive while draining the borrowed range into a set.
@@ -335,7 +335,7 @@ TEST(JsonLogic, VariablesCollectsReferencedPaths)
     EXPECT_TRUE(vars(json(42)).empty());
 }
 
-TEST(JsonLogic, ReferencesVariableRootMatchesFirstToken)
+TEST(TestJsonLogic, ReferencesVariableRootMatchesFirstToken)
 {
     const auto refs = [](const json& rule, std::string_view root) {
         const auto expr = jlogic::compile<jlogic::JsonDataSource>(rule);
@@ -355,7 +355,7 @@ TEST(JsonLogic, ReferencesVariableRootMatchesFirstToken)
     EXPECT_FALSE(refs(json({{"+", json::array({1, 2})}}), "kernel"));
 }
 
-TEST(JsonLogic, VariablesRangeIsLazyAndKeepsDuplicates)
+TEST(TestJsonLogic, VariablesRangeIsLazyAndKeepsDuplicates)
 {
     // range-for yields every occurrence, duplicates included
     const auto expr
@@ -379,7 +379,7 @@ TEST(JsonLogic, VariablesRangeIsLazyAndKeepsDuplicates)
     EXPECT_TRUE(std::any_of(r.begin(), r.end(), [](const std::string& s) { return s == "y"; }));
 }
 
-TEST(JsonLogic, WholeDocumentAndDynamicKeysRejected)
+TEST(TestJsonLogic, WholeDocumentAndDynamicKeysRejected)
 {
     // whole-document references: inline sigil, empty var, empty array, null
     EXPECT_THROW(jlogic::compile<jlogic::JsonDataSource>(json("$")), jlogic::JsonLogicCompileError);
