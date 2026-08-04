@@ -205,7 +205,6 @@ ROCSOLVER_KERNEL void lahr2_computeY_kernel(const rocblas_int mm,
 
     // Registers/LDS:
     // ac, acs -> accumulator
-    // sx -> hold the elements of 'x'
     extern __shared__ double smem[]; //min size should be threadsr x threadsc
     T* acs = reinterpret_cast<T*>(smem);
     T ac;
@@ -293,7 +292,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(DIM_X* DIM_Y)
     // handle diagonal separately
     if(ty == 0 && row < n)
     {
-        if(UNIT)
+        if constexpr(UNIT)
             res_A = x[row * incx];
         else
             res_A = A[row + row * lda] * x[row * incx];
@@ -322,8 +321,8 @@ ROCSOLVER_KERNEL void __launch_bounds__(DIM_X* DIM_Y)
     }
 }
 
-/***** Scale column of T and set diag kernel *****/
-/*************************************************/
+/***** Scale current column and set diag of triangular factor kernel *****/
+/*************************************************************************/
 template <int MAX_THDS, typename T, typename I, typename U>
 ROCSOLVER_KERNEL void __launch_bounds__(MAX_THDS) lahr2_scale_set_tau(const I j,
                                                                       U __restrict__ FA,

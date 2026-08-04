@@ -1753,9 +1753,10 @@ rocblas_status rocblasCall_trmm(rocblas_handle handle,
                   "n:", n, "shiftA:", offsetA, "lda:", lda, "shiftB:", offsetB, "ldb:", ldb,
                   "shiftC:", offsetC, "ldc:", ldc, "bc:", batch_count);
 
-    return rocblas_internal_trmm_template(handle, side, uplo, transA, diag, m, n, alpha,
-                                          stride_alpha, A, offsetA, lda, strideA, B, offsetB, ldb,
-                                          strideB, C, offsetC, ldc, strideC, batch_count);
+    THROW_IF_ROCBLAS_ERROR(rocblas_internal_trmm_template(
+        handle, side, uplo, transA, diag, m, n, alpha, stride_alpha, A, offsetA, lda, strideA, B,
+        offsetB, ldb, strideB, C, offsetC, ldc, strideC, batch_count));
+    return rocblas_status_success;
 }
 
 template <typename T>
@@ -1788,9 +1789,10 @@ rocblas_status rocblasCall_trmm(rocblas_handle handle,
                   "n:", n, "shiftA:", offsetA, "lda:", lda, "shiftB:", offsetB, "ldb:", ldb,
                   "shiftC:", offsetC, "ldc:", ldc, "bc:", batch_count);
 
-    return rocblas_internal_trmm_batched_template(
+    THROW_IF_ROCBLAS_ERROR(rocblas_internal_trmm_batched_template(
         handle, side, uplo, transA, diag, m, n, alpha, stride_alpha, A, offsetA, lda, strideA, B,
-        offsetB, ldb, strideB, C, offsetC, ldc, strideC, batch_count);
+        offsetB, ldb, strideB, C, offsetC, ldc, strideC, batch_count));
+    return rocblas_status_success;
 }
 
 // trmm out-of-place: batched A and B, strided flat C
@@ -1830,9 +1832,10 @@ rocblas_status rocblasCall_trmm(rocblas_handle handle,
     ROCSOLVER_LAUNCH_KERNEL(get_array, dim3(blocks), dim3(256), 0, stream, workArr, C, strideC,
                             batch_count);
 
-    return rocblas_internal_trmm_batched_template(
+    THROW_IF_ROCBLAS_ERROR(rocblas_internal_trmm_batched_template(
         handle, side, uplo, transA, diag, m, n, alpha, stride_alpha, A, offsetA, lda, strideA, B,
-        offsetB, ldb, strideB, cast2constPointer<T>(workArr), offsetC, ldc, strideC, batch_count);
+        offsetB, ldb, strideB, cast2constPointer<T>(workArr), offsetC, ldc, strideC, batch_count));
+    return rocblas_status_success;
 }
 
 // syr2/her2
