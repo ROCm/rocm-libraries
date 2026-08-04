@@ -52,6 +52,7 @@ enum NonWmmaKind { kGlobalRead = 0, kLocalRead, kOther, kValu };
 // PassFeatureConfig sentinel values (0 / INT_MAX). Explicit non-sentinel config wins.
 constexpr int kCdna5DsReadQueueDepth = 16;
 constexpr int kCdna5DsReadDrainLatency = 72;
+constexpr int kCdna5DsReadThrottleLatency = 72;
 constexpr int kCdna5DsReadPerWmma = 3;
 constexpr int kCdna5GlobalReadPerWmma = 1;
 
@@ -325,12 +326,19 @@ class CDNA5ReadyQueue : public ReadyQueue {
         const int cfg = getPassContext().getPassFeatureConfig().dagFeatures.dsReadDrainLatency;
         return cfg > 0 ? cfg : kCdna5DsReadDrainLatency;
     }
+    int dsReadThrottleLatency() const {
+        const int cfg = getPassContext().getPassFeatureConfig().dagFeatures.dsReadThrottleLatency;
+        return cfg > 0 ? cfg : kCdna5DsReadThrottleLatency;
+    }
     int dsReadPerWmma() const {
         const int cfg = getPassContext().getPassFeatureConfig().dagFeatures.dsReadPerWmma;
         return cfg < INT_MAX ? cfg : kCdna5DsReadPerWmma;
     }
     bool dsReadQueueFull() const {
         return dsReadInflight_.full();
+    }
+    int dsReadThrottleWait() const {
+        return dsReadInflight_.throttleWait();
     }
 
     // --- VALU co-issue timeline tracker ---
@@ -551,7 +559,7 @@ DAGNode* CDNA5ReadyQueue::popNonWmma(DAGNode* node, int pickKind) {
         if (globalReadQueueDepth() > 0) globalReadInflight_.push(globalReadDrainLatency());
     } else if (pickKind == kLocalRead) {
         localReadQueue.erase(node);
-        dsReadInflight_.push(dsReadDrainLatency());
+        dsReadInflight_.pushWithThrottle(dsReadThrottleLatency());
         dsInsertedSinceLastWmma_++;
     } else if (pickKind == kOther) {
         otherQueue.erase(node);
@@ -569,7 +577,10 @@ DAGNode* CDNA5ReadyQueue::popNonWmma(DAGNode* node, int pickKind) {
     // waits the fixed hazard out. Per-rule lane (not regDataReadyCounters) so an
     // unrelated instruction reading the same register is not wrongly gated.
     for (const HazardFlag& hf : node->hazardFlags)
-        hazardGates_[hf.ruleIdx][hf.regKey] = kCdna5HazardRules[hf.ruleIdx].cycles;
+        // rule.cycles == -1 ("hoist as far as possible"): the strategy is producer-side
+        // hoisting (deadline forced to 0 in the pre-scan), not a consumer-side hold, so
+        // clamp the gate to 0 rather than stamping a negative wait.
+        hazardGates_[hf.ruleIdx][hf.regKey] = std::max(0, kCdna5HazardRules[hf.ruleIdx].cycles);
     // No longer a live hoist candidate once issued (decidePromote() must not try to
     // force it again).
     if (!node->hazardFlags.empty()) {
@@ -822,16 +833,21 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
 
     // Per-WMMA-window DS cap (rule 4) only spreads ds_loads across an active WMMA
     // co-issue window; it is meaningless when no WMMA is available to issue, so it
-    // is applied only while a WMMA is pending. Otherwise ds_loads drain freely,
-    // bounded only by the real hardware limiter dsReadQueueFull().
+    // is applied only while a WMMA is pending. When the DS queue reaches depth,
+    // ds_load can still issue, but is throttled to dsReadDrainLatency/dsReadQueueDepth.
     int windowCap = maxDsPerWmmaWindow_;
     if (!dsTargetPerWindow_.empty()) {
         const int w = std::min((int)wmmaIssuedCountThisRegion_, (int)dsTargetPerWindow_.size() - 1);
         windowCap = dsTargetPerWindow_[w];
     }
     const bool dsCapReached = !wmmaQueue.empty() && dsInsertedSinceLastWmma_ >= windowCap;
-    bool dsWindowOk =
-        pickedDS && !dsCapReached && !dsReadQueueFull() && !destOverlapsActiveWmmaSrc(pickedDS);
+    const bool dsBaseOk = pickedDS && !dsCapReached && !destOverlapsActiveWmmaSrc(pickedDS);
+    int dsThrottleWait = 0;
+    if (dsBaseOk) {
+        dsThrottleWait = dsReadThrottleWait();
+        consider(pickedDS, kLocalRead, dsThrottleWait);
+    }
+    const bool dsWindowOk = dsBaseOk && dsThrottleWait == 0;
 
     if (!globalReadQueue.empty() && !globalReadQueueFull() &&
         (globalReadCounter < globalReadPerWMMA || otherQueue.empty())) {
@@ -842,8 +858,6 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
         DAGNode* gr = globalReadQueue.top();
         consider(gr, kGlobalRead, getHazardWait(gr));
     }
-    if (dsWindowOk) consider(pickedDS, kLocalRead, 0);
-
     // SALU/other allows hidden stalls (see pickFreeBest); VALU stays RAW-free-only.
     int otherWait = 0;
     if (DAGNode* t = pickFreeBest(otherQueue, &otherWait, /*allowHiddenStall=*/true)) {
@@ -978,7 +992,7 @@ int CDNA5ReadyQueue::computeWmmaWindowsNeeded(int dsLoadCount) const {
     const int maxDsPerWmmaWindow = dsReadPerWmma();
     int wmmaWindowsNeeded = (dsLoadCount + maxDsPerWmmaWindow - 1) / maxDsPerWmmaWindow;
     if (dsLoadCount > dsReadQueueDepth()) {
-        const float cyclePerDs = (float)dsReadDrainLatency() / (float)dsReadQueueDepth();
+        const float cyclePerDs = (float)dsReadThrottleLatency() / (float)dsReadQueueDepth();
         const float cyclesNeeded = cyclePerDs * (dsLoadCount - dsReadQueueDepth());
         wmmaWindowsNeeded += (int)std::ceil(cyclesNeeded / (float)wmmaIssueConfig.latency);
     }
@@ -1495,6 +1509,7 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
         int waitCycles = fallbackWait;
         if (fallbackKind == kGlobalRead && globalReadQueueFull())
             waitCycles = std::max(waitCycles, globalReadInflight_.minResidual());
+        if (fallbackKind == kLocalRead) waitCycles = std::max(waitCycles, dsReadThrottleWait());
         if (waitCycles > 0) advanceTime(waitCycles);
         PASS_DEBUG(std::cerr << "[CDNA5 pickOne] Phase G fallback pick dagId=" << fallback->id
                              << " kind=" << fallbackKind << " wait=" << waitCycles << "\n");
@@ -1555,6 +1570,10 @@ void CDNA5ReadyQueue::onInit(IRList::iterator regionStart, IRList::iterator regi
     activeWmmaNode_ = nullptr;
     globalReadInflight_ = InFlightQueue(globalReadQueueDepth());
     dsReadInflight_ = InFlightQueue(dsReadQueueDepth());
+    const int dsDepth = dsReadQueueDepth();
+    const double dsThrottleInterval =
+        dsDepth > 0 ? (double)dsReadThrottleLatency() / (double)dsDepth : 0.0;
+    dsReadInflight_.setThrottleInterval(dsThrottleInterval);
 
     currentBB_ = (regionStart != regionEnd) ? regionStart->getParent() : nullptr;
 

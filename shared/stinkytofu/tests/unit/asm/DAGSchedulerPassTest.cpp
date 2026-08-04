@@ -98,16 +98,19 @@ class DAGSchedulerPassTest : public ::testing::Test {
         pass->run(*func, ctx, am);
     }
 
-    // Run with the ds_read in-flight credit-pool throttle enabled. perWmma is held
-    // generously high by default so the separate per-WMMA-window ds cap never binds,
-    // isolating queueDepth/drainLatency as the only active constraint (mirrors how
-    // runPassWithGlobalReadThrottle isolates globalReadQueueDepth/globalReadDrainLatency).
-    void runPassWithDsReadThrottle(int queueDepth, int drainLatency, int perWmma = 100) {
+    // Run with ds_read queue-depth + throttled-issue controls enabled.
+    // perWmma is held generously high by default so the separate per-WMMA-window
+    // ds cap never binds. throttleLatency drives queue-full pacing; drainLatency is
+    // kept for paths that still model data-return/drain behavior (e.g. barrier timing).
+    void runPassWithDsReadThrottle(int queueDepth, int throttleLatency, int perWmma = 100,
+                                   int drainLatency = -1) {
         PassContext ctx;
         ctx.setGemmTileConfig(config);
         PassFeatureConfig pfc;
         pfc.loopConfig.unrollGemm = true;
         pfc.dagFeatures.dsReadQueueDepth = queueDepth;
+        pfc.dagFeatures.dsReadThrottleLatency = throttleLatency;
+        if (drainLatency <= 0) drainLatency = throttleLatency;
         pfc.dagFeatures.dsReadDrainLatency = drainLatency;
         pfc.dagFeatures.dsReadPerWmma = perWmma;
         ctx.setPassFeatureConfig(pfc);
@@ -1105,9 +1108,9 @@ TEST_F(DAGSchedulerPassTest, VgprToGlobalPrefetchHazard_AtLeast16CycleGap) {
 }
 
 // ---------------------------------------------------------------------------
-// dsReadQueueDepth / dsReadDrainLatency / dsReadPerWmma: same in-flight
-// credit-pool mechanism as globalReadQueueDepth/globalReadDrainLatency, but
-// gating ds_read_b128 instead of tensor_load_to_lds. Unlike global-read
+// dsReadQueueDepth / dsReadThrottleLatency / dsReadPerWmma: queue-full pacing
+// and in-flight depth control for ds_read_b128 (analogous to global-read
+// queue throttling, but with DS-specific queue + WMMA interactions). Unlike global-read
 // throttling, the ds_read gate additionally requires a WMMA to have been
 // picked at least once (it seeds maxDsPerWmmaWindow_), so each test below
 // includes one WMMA read (with dest/src registers disjoint from the ds_reads,
@@ -1123,7 +1126,7 @@ TEST_F(DAGSchedulerPassTest, DsReadThrottle_Depth2_RespectsQueueDepth) {
         createMovableDsLoad(/*destReg=*/i * 4, /*addrReg=*/300 + i * 4, /*ldsToken=*/i + 1);
     for (int i = 0; i < 30; i++) createVAddInBlock(body, arch, 40 + i, 80 + i, 100 + i);
 
-    runPassWithDsReadThrottle(/*queueDepth=*/2, /*drainLatency=*/8);
+    runPassWithDsReadThrottle(/*queueDepth=*/2, /*throttleLatency=*/8);
 
     std::vector<std::string> seq = mnemonicSequence(*body);
     EXPECT_EQ(maxConsecutiveDsReads(seq), 2)
@@ -1139,10 +1142,68 @@ TEST_F(DAGSchedulerPassTest, DsReadThrottle_Depth1_SeparatesEveryLoad) {
         createMovableDsLoad(/*destReg=*/i * 4, /*addrReg=*/300 + i * 4, /*ldsToken=*/i + 1);
     for (int i = 0; i < 30; i++) createVAddInBlock(body, arch, 40 + i, 80 + i, 100 + i);
 
-    runPassWithDsReadThrottle(/*queueDepth=*/1, /*drainLatency=*/8);
+    runPassWithDsReadThrottle(/*queueDepth=*/1, /*throttleLatency=*/8);
 
     std::vector<std::string> seq = mnemonicSequence(*body);
     EXPECT_EQ(maxConsecutiveDsReads(seq), 1) << "depth=1: no two ds_reads may be adjacent";
+}
+
+// Queue-full ds_read pacing is controlled by dsReadThrottleLatency. In a
+// barrier-free region, changing dsReadDrainLatency alone should not change the
+// ds_read interleave pattern.
+TEST_F(DAGSchedulerPassTest, DsReadThrottle_QueuePacingIgnoresDrainLatency) {
+    auto runCase = [&](int drainLatency) {
+        func = std::make_unique<Function>("dag_sched_test_ds_throttle_drain_split");
+        setFunctionArch(*func, arch);
+        bb = func->createBasicBlock("loop_body");
+        bb->addSuccessor(bb);
+
+        createWmmaF32_16x16x16_bf16_in(bb, /*destStart=*/200, /*src0Start=*/204);
+        for (int i = 0; i < 4; i++)
+            createMovableDsLoad(/*destReg=*/i * 4, /*addrReg=*/300 + i * 4, /*ldsToken=*/i + 1);
+        for (int i = 0; i < 30; i++) createVAddInBlock(bb, arch, 40 + i, 80 + i, 100 + i);
+
+        runPassWithDsReadThrottle(/*queueDepth=*/2, /*throttleLatency=*/8, /*perWmma=*/100,
+                                  /*drainLatency=*/drainLatency);
+        return mnemonicSequence(*bb);
+    };
+
+    const std::vector<std::string> seqDrain8 = runCase(/*drainLatency=*/8);
+    const std::vector<std::string> seqDrain80 = runCase(/*drainLatency=*/80);
+    EXPECT_EQ(maxConsecutiveDsReads(seqDrain8), 2);
+    EXPECT_EQ(maxConsecutiveDsReads(seqDrain80), 2);
+    EXPECT_EQ(seqDrain8, seqDrain80)
+        << "drainLatency must not change queue pacing order when throttleLatency is fixed";
+}
+
+// Smaller dsReadThrottleLatency should allow more aggressive ds_read bursts
+// under the same queue depth.
+TEST_F(DAGSchedulerPassTest, DsReadThrottle_ThrottleLatencyControlsBurstLength) {
+    auto runCase = [&](int throttleLatency) {
+        func = std::make_unique<Function>("dag_sched_test_ds_throttle_interval");
+        setFunctionArch(*func, arch);
+        bb = func->createBasicBlock("loop_body");
+        bb->addSuccessor(bb);
+
+        createWmmaF32_16x16x16_bf16_in(bb, /*destStart=*/200, /*src0Start=*/204);
+        for (int i = 0; i < 4; i++)
+            createMovableDsLoad(/*destReg=*/i * 4, /*addrReg=*/300 + i * 4, /*ldsToken=*/i + 1);
+        for (int i = 0; i < 30; i++) createVAddInBlock(bb, arch, 40 + i, 80 + i, 100 + i);
+
+        runPassWithDsReadThrottle(/*queueDepth=*/2, /*throttleLatency=*/throttleLatency,
+                                  /*perWmma=*/100, /*drainLatency=*/80);
+        return mnemonicSequence(*bb);
+    };
+
+    const std::vector<std::string> seqSlow = runCase(/*throttleLatency=*/8);
+    const std::vector<std::string> seqFast = runCase(/*throttleLatency=*/2);
+    const int burstSlow = maxConsecutiveDsReads(seqSlow);
+    const int burstFast = maxConsecutiveDsReads(seqFast);
+    EXPECT_EQ(burstSlow, 2);
+    EXPECT_GE(burstFast, burstSlow)
+        << "smaller throttleLatency should not reduce ds_read burst capacity";
+    EXPECT_GT(burstFast, burstSlow)
+        << "smaller throttleLatency should increase ds_read burst length under same queue depth";
 }
 
 // NOTE: the former DsReadThrottle_PerWmmaCap_RespectsCap test isolated the
@@ -1172,7 +1233,7 @@ TEST_F(DAGSchedulerPassTest, DsReadThrottle_NoWmma_LoadsDrainBeforeConsumerValu)
         createVAddInBlock(body, arch, /*dst=*/100 + i, /*src0=*/i * 4, /*src1=*/i * 4 + 1);
 
     // Queue depth 6 so all loads can be in flight at once; perWmma irrelevant (no WMMA).
-    runPassWithDsReadThrottle(/*queueDepth=*/6, /*drainLatency=*/8, /*perWmma=*/100);
+    runPassWithDsReadThrottle(/*queueDepth=*/6, /*throttleLatency=*/8, /*perWmma=*/100);
 
     std::vector<std::string> seq = mnemonicSequence(*body);
     // Every ds_load must precede every v_add: find the last load and first valu.
@@ -1235,6 +1296,6 @@ TEST_F(DAGSchedulerPassTest, DsReadThrottle_PreservesInstructionCount) {
     for (int i = 0; i < 30; i++) createVAddInBlock(body, arch, 40 + i, 80 + i, 100 + i);
 
     int beforeCount = countStinkyInstructions(*body);
-    runPassWithDsReadThrottle(/*queueDepth=*/2, /*drainLatency=*/8);
+    runPassWithDsReadThrottle(/*queueDepth=*/2, /*throttleLatency=*/8);
     EXPECT_EQ(countStinkyInstructions(*body), beforeCount) << "throttle must not drop instructions";
 }

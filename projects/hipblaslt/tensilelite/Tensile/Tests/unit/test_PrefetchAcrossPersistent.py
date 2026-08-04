@@ -202,8 +202,17 @@ class _SetupNewTilePapTdmWriter:
     def releaseGlobalReadIncsSgprsAfterTdmWaveSep(self, kernel):
         return self._module("releaseGlobalReadIncsSgprsAfterTdmWaveSep")
 
+    def isTdmWaveSeparated(self, kernel):
+        return kwa_module.KernelWriterAssembly.isTdmWaveSeparated(self, kernel)
+
     def undefineSgpr(self, name):
         return self._module("undefineSgpr_%s" % name)
+
+    def declareStaggerParms(self, kernel):
+        return self._module("declareStaggerParms")
+
+    def calculateStagger(self, kernel, tensor_parameters):
+        return self._module("calculateStagger_%s" % tensor_parameters["tensorChar"])
 
     def initC(self, kernel):
         return self._module("initC")
@@ -599,10 +608,12 @@ def _instruction_index(items, instruction_type, dst, src):
     )
 
 
-def _setup_new_tile_module_names(prefetch_across_persistent):
+def _setup_new_tile_module_names(prefetch_across_persistent, stagger_u_code=False):
     tpa, tpb = _tensor_parameters(with_metadata=True)
+    writer = _SetupNewTilePapTdmWriter()
+    writer.states.staggerUCode = stagger_u_code
     module = KernelWriter.setupNewTile(
-        _SetupNewTilePapTdmWriter(),
+        writer,
         _setup_new_tile_tdm_kernel(prefetch_across_persistent=prefetch_across_persistent),
         tpa,
         tpb,
@@ -756,6 +767,19 @@ def test_setup_new_tile_releases_waveidx_for_pap_wave_separated_tdm(monkeypatch)
     assert "undefineSgpr_WaveIdx" in pap_module_names
     assert "undefineSgpr_WaveIdx" in non_pap_module_names
     assert pap_module_names.index("undefineSgpr_WaveIdx") < pap_module_names.index("papTdmRestoreLdsBank")
+
+
+def test_setup_new_tile_keeps_waveidx_for_wave_separated_tdm_staggeru(monkeypatch):
+    monkeypatch.setattr(kw_module.Component.GSU, "find", lambda writer: _StubGsu())
+
+    for pap in (0, 1):
+        module_names = _setup_new_tile_module_names(
+            prefetch_across_persistent=pap, stagger_u_code=True
+        )
+        # Confirm we really took the stagger path before asserting on its effect.
+        assert "calculateStagger_A" in module_names
+        assert "calculateStagger_B" in module_names
+        assert "undefineSgpr_WaveIdx" not in module_names
 
 
 def test_pap_tdm_descriptor_refresh_threads_temporary_waveidx(monkeypatch):
