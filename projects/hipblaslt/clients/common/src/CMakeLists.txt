@@ -7,20 +7,13 @@ target_sources(hipblaslt-clients-common
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt_bench_options.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/utility.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/efficiency_monitor.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/cblas_interface.cpp"
+        "${ROCM_LIBRARIES_ROOT}/shared/host-validation/adapters/hipblaslt/HipblasltReferenceGemm.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/argument_model.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt_parse_data.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt_arguments.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt_random.cpp"
+        "${ROCM_LIBRARIES_ROOT}/shared/host-validation/adapters/hipblaslt/hipblaslt_random.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt_init_device.cpp"
 )
-
-if(HIPBLASLT_ENABLE_BLIS)
-    target_sources(hipblaslt-clients-common
-        PRIVATE
-            "${CMAKE_CURRENT_SOURCE_DIR}/blis_interface.cpp"
-    )
-endif()
 
 if(amd_smi_FOUND)
     target_link_libraries(hipblaslt-clients-common PRIVATE amd_smi)

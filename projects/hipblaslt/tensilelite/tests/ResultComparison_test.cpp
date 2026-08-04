@@ -34,7 +34,7 @@
 #include <gtest/gtest.h>
 
 #include <DataInitialization.hpp>
-#include <ResultComparison.hpp>
+#include <roc/host_validation/adapters/tensilelite/ResultComparison.hpp>
 #include <Tensile/DataTypes.hpp>
 
 using TensileLite::BFloat16;

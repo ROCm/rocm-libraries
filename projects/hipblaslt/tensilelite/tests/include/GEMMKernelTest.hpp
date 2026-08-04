@@ -32,7 +32,7 @@
 #include <Tensile/Tensile.hpp>
 
 #include "TestData.hpp"
-#include "TestUtils.hpp"
+#include <roc/host_validation/adapters/tensilelite/TestUtils.hpp>
 
 #include <iostream>
 #include <unordered_map>

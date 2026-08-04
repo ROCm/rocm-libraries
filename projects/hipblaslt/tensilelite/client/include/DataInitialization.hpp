@@ -35,9 +35,9 @@
 #include "Rotating.hpp"
 
 #include <mxDataGen.hpp>
+#include <roc/host_validation/adapters/tensilelite/TensileDataGeneration.hpp>
 
 #include <cstddef>
-#include <random>
 
 #include "RunListener.hpp"
 
@@ -116,9 +116,8 @@ namespace TensileLite
 
         static int getThreadLocalRandInt()
         {
-            thread_local std::mt19937          generator(std::random_device{}());
-            std::uniform_int_distribution<int> distribution;
-            return distribution(generator);
+            return static_cast<int>(
+                roc::host_validation::tensilelite_adapter::nextRandomBits() & 0x7fffffffU);
         }
 
         static bool IsProblemDependent(InitMode const& mode)
@@ -2335,38 +2334,38 @@ namespace TensileLite
         template <>
         inline Float6x32 DataInitialization::getValue<Float6x32, InitMode::Random>()
         {
-            float v0  = static_cast<float>((rand() % 7) - 3);
-            float v1  = static_cast<float>((rand() % 7) - 3);
-            float v2  = static_cast<float>((rand() % 7) - 3);
-            float v3  = static_cast<float>((rand() % 7) - 3);
-            float v4  = static_cast<float>((rand() % 7) - 3);
-            float v5  = static_cast<float>((rand() % 7) - 3);
-            float v6  = static_cast<float>((rand() % 7) - 3);
-            float v7  = static_cast<float>((rand() % 7) - 3);
-            float v8  = static_cast<float>((rand() % 7) - 3);
-            float v9  = static_cast<float>((rand() % 7) - 3);
-            float v10 = static_cast<float>((rand() % 7) - 3);
-            float v11 = static_cast<float>((rand() % 7) - 3);
-            float v12 = static_cast<float>((rand() % 7) - 3);
-            float v13 = static_cast<float>((rand() % 7) - 3);
-            float v14 = static_cast<float>((rand() % 7) - 3);
-            float v15 = static_cast<float>((rand() % 7) - 3);
-            float v16 = static_cast<float>((rand() % 7) - 3);
-            float v17 = static_cast<float>((rand() % 7) - 3);
-            float v18 = static_cast<float>((rand() % 7) - 3);
-            float v19 = static_cast<float>((rand() % 7) - 3);
-            float v20 = static_cast<float>((rand() % 7) - 3);
-            float v21 = static_cast<float>((rand() % 7) - 3);
-            float v22 = static_cast<float>((rand() % 7) - 3);
-            float v23 = static_cast<float>((rand() % 7) - 3);
-            float v24 = static_cast<float>((rand() % 7) - 3);
-            float v25 = static_cast<float>((rand() % 7) - 3);
-            float v26 = static_cast<float>((rand() % 7) - 3);
-            float v27 = static_cast<float>((rand() % 7) - 3);
-            float v28 = static_cast<float>((rand() % 7) - 3);
-            float v29 = static_cast<float>((rand() % 7) - 3);
-            float v30 = static_cast<float>((rand() % 7) - 3);
-            float v31 = static_cast<float>((rand() % 7) - 3);
+            float v0  = static_cast<float>(roc::host_validation::tensilelite_adapter::nextUniformInteger(-3, 3));
+            float v1  = static_cast<float>(roc::host_validation::tensilelite_adapter::nextUniformInteger(-3, 3));
+            float v2  = static_cast<float>(roc::host_validation::tensilelite_adapter::nextUniformInteger(-3, 3));
+            float v3  = static_cast<float>(roc::host_validation::tensilelite_adapter::nextUniformInteger(-3, 3));
+            float v4  = static_cast<float>(roc::host_validation::tensilelite_adapter::nextUniformInteger(-3, 3));
+            float v5  = static_cast<float>(roc::host_validation::tensilelite_adapter::nextUniformInteger(-3, 3));
+            float v6  = static_cast<float>(roc::host_validation::tensilelite_adapter::nextUniformInteger(-3, 3));
+            float v7  = static_cast<float>(roc::host_validation::tensilelite_adapter::nextUniformInteger(-3, 3));
+            float v8  = static_cast<float>(roc::host_validation::tensilelite_adapter::nextUniformInteger(-3, 3));
+            float v9  = static_cast<float>(roc::host_validation::tensilelite_adapter::nextUniformInteger(-3, 3));
+            float v10 = static_cast<float>(roc::host_validation::tensilelite_adapter::nextUniformInteger(-3, 3));
+            float v11 = static_cast<float>(roc::host_validation::tensilelite_adapter::nextUniformInteger(-3, 3));
+            float v12 = static_cast<float>(roc::host_validation::tensilelite_adapter::nextUniformInteger(-3, 3));
+            float v13 = static_cast<float>(roc::host_validation::tensilelite_adapter::nextUniformInteger(-3, 3));
+            float v14 = static_cast<float>(roc::host_validation::tensilelite_adapter::nextUniformInteger(-3, 3));
+            float v15 = static_cast<float>(roc::host_validation::tensilelite_adapter::nextUniformInteger(-3, 3));
+            float v16 = static_cast<float>(roc::host_validation::tensilelite_adapter::nextUniformInteger(-3, 3));
+            float v17 = static_cast<float>(roc::host_validation::tensilelite_adapter::nextUniformInteger(-3, 3));
+            float v18 = static_cast<float>(roc::host_validation::tensilelite_adapter::nextUniformInteger(-3, 3));
+            float v19 = static_cast<float>(roc::host_validation::tensilelite_adapter::nextUniformInteger(-3, 3));
+            float v20 = static_cast<float>(roc::host_validation::tensilelite_adapter::nextUniformInteger(-3, 3));
+            float v21 = static_cast<float>(roc::host_validation::tensilelite_adapter::nextUniformInteger(-3, 3));
+            float v22 = static_cast<float>(roc::host_validation::tensilelite_adapter::nextUniformInteger(-3, 3));
+            float v23 = static_cast<float>(roc::host_validation::tensilelite_adapter::nextUniformInteger(-3, 3));
+            float v24 = static_cast<float>(roc::host_validation::tensilelite_adapter::nextUniformInteger(-3, 3));
+            float v25 = static_cast<float>(roc::host_validation::tensilelite_adapter::nextUniformInteger(-3, 3));
+            float v26 = static_cast<float>(roc::host_validation::tensilelite_adapter::nextUniformInteger(-3, 3));
+            float v27 = static_cast<float>(roc::host_validation::tensilelite_adapter::nextUniformInteger(-3, 3));
+            float v28 = static_cast<float>(roc::host_validation::tensilelite_adapter::nextUniformInteger(-3, 3));
+            float v29 = static_cast<float>(roc::host_validation::tensilelite_adapter::nextUniformInteger(-3, 3));
+            float v30 = static_cast<float>(roc::host_validation::tensilelite_adapter::nextUniformInteger(-3, 3));
+            float v31 = static_cast<float>(roc::host_validation::tensilelite_adapter::nextUniformInteger(-3, 3));
 
             return Float6x32(v0, v1, v2, v3, v4, v5, v6, v7, v8, v9,
                             v10, v11, v12, v13, v14, v15, v16, v17, v18, v19,
@@ -2436,38 +2435,38 @@ namespace TensileLite
         {
             BFloat6x32 ret;
 
-            float v0  = static_cast<float>((rand() % 7) - 3);
-            float v1  = static_cast<float>((rand() % 7) - 3);
-            float v2  = static_cast<float>((rand() % 7) - 3);
-            float v3  = static_cast<float>((rand() % 7) - 3);
-            float v4  = static_cast<float>((rand() % 7) - 3);
-            float v5  = static_cast<float>((rand() % 7) - 3);
-            float v6  = static_cast<float>((rand() % 7) - 3);
-            float v7  = static_cast<float>((rand() % 7) - 3);
-            float v8  = static_cast<float>((rand() % 7) - 3);
-            float v9  = static_cast<float>((rand() % 7) - 3);
-            float v10 = static_cast<float>((rand() % 7) - 3);
-            float v11 = static_cast<float>((rand() % 7) - 3);
-            float v12 = static_cast<float>((rand() % 7) - 3);
-            float v13 = static_cast<float>((rand() % 7) - 3);
-            float v14 = static_cast<float>((rand() % 7) - 3);
-            float v15 = static_cast<float>((rand() % 7) - 3);
-            float v16 = static_cast<float>((rand() % 7) - 3);
-            float v17 = static_cast<float>((rand() % 7) - 3);
-            float v18 = static_cast<float>((rand() % 7) - 3);
-            float v19 = static_cast<float>((rand() % 7) - 3);
-            float v20 = static_cast<float>((rand() % 7) - 3);
-            float v21 = static_cast<float>((rand() % 7) - 3);
-            float v22 = static_cast<float>((rand() % 7) - 3);
-            float v23 = static_cast<float>((rand() % 7) - 3);
-            float v24 = static_cast<float>((rand() % 7) - 3);
-            float v25 = static_cast<float>((rand() % 7) - 3);
-            float v26 = static_cast<float>((rand() % 7) - 3);
-            float v27 = static_cast<float>((rand() % 7) - 3);
-            float v28 = static_cast<float>((rand() % 7) - 3);
-            float v29 = static_cast<float>((rand() % 7) - 3);
-            float v30 = static_cast<float>((rand() % 7) - 3);
-            float v31 = static_cast<float>((rand() % 7) - 3);
+            float v0  = static_cast<float>(roc::host_validation::tensilelite_adapter::nextUniformInteger(-3, 3));
+            float v1  = static_cast<float>(roc::host_validation::tensilelite_adapter::nextUniformInteger(-3, 3));
+            float v2  = static_cast<float>(roc::host_validation::tensilelite_adapter::nextUniformInteger(-3, 3));
+            float v3  = static_cast<float>(roc::host_validation::tensilelite_adapter::nextUniformInteger(-3, 3));
+            float v4  = static_cast<float>(roc::host_validation::tensilelite_adapter::nextUniformInteger(-3, 3));
+            float v5  = static_cast<float>(roc::host_validation::tensilelite_adapter::nextUniformInteger(-3, 3));
+            float v6  = static_cast<float>(roc::host_validation::tensilelite_adapter::nextUniformInteger(-3, 3));
+            float v7  = static_cast<float>(roc::host_validation::tensilelite_adapter::nextUniformInteger(-3, 3));
+            float v8  = static_cast<float>(roc::host_validation::tensilelite_adapter::nextUniformInteger(-3, 3));
+            float v9  = static_cast<float>(roc::host_validation::tensilelite_adapter::nextUniformInteger(-3, 3));
+            float v10 = static_cast<float>(roc::host_validation::tensilelite_adapter::nextUniformInteger(-3, 3));
+            float v11 = static_cast<float>(roc::host_validation::tensilelite_adapter::nextUniformInteger(-3, 3));
+            float v12 = static_cast<float>(roc::host_validation::tensilelite_adapter::nextUniformInteger(-3, 3));
+            float v13 = static_cast<float>(roc::host_validation::tensilelite_adapter::nextUniformInteger(-3, 3));
+            float v14 = static_cast<float>(roc::host_validation::tensilelite_adapter::nextUniformInteger(-3, 3));
+            float v15 = static_cast<float>(roc::host_validation::tensilelite_adapter::nextUniformInteger(-3, 3));
+            float v16 = static_cast<float>(roc::host_validation::tensilelite_adapter::nextUniformInteger(-3, 3));
+            float v17 = static_cast<float>(roc::host_validation::tensilelite_adapter::nextUniformInteger(-3, 3));
+            float v18 = static_cast<float>(roc::host_validation::tensilelite_adapter::nextUniformInteger(-3, 3));
+            float v19 = static_cast<float>(roc::host_validation::tensilelite_adapter::nextUniformInteger(-3, 3));
+            float v20 = static_cast<float>(roc::host_validation::tensilelite_adapter::nextUniformInteger(-3, 3));
+            float v21 = static_cast<float>(roc::host_validation::tensilelite_adapter::nextUniformInteger(-3, 3));
+            float v22 = static_cast<float>(roc::host_validation::tensilelite_adapter::nextUniformInteger(-3, 3));
+            float v23 = static_cast<float>(roc::host_validation::tensilelite_adapter::nextUniformInteger(-3, 3));
+            float v24 = static_cast<float>(roc::host_validation::tensilelite_adapter::nextUniformInteger(-3, 3));
+            float v25 = static_cast<float>(roc::host_validation::tensilelite_adapter::nextUniformInteger(-3, 3));
+            float v26 = static_cast<float>(roc::host_validation::tensilelite_adapter::nextUniformInteger(-3, 3));
+            float v27 = static_cast<float>(roc::host_validation::tensilelite_adapter::nextUniformInteger(-3, 3));
+            float v28 = static_cast<float>(roc::host_validation::tensilelite_adapter::nextUniformInteger(-3, 3));
+            float v29 = static_cast<float>(roc::host_validation::tensilelite_adapter::nextUniformInteger(-3, 3));
+            float v30 = static_cast<float>(roc::host_validation::tensilelite_adapter::nextUniformInteger(-3, 3));
+            float v31 = static_cast<float>(roc::host_validation::tensilelite_adapter::nextUniformInteger(-3, 3));
 
             return BFloat6x32(v0, v1, v2, v3, v4, v5, v6, v7, v8, v9,
                             v10, v11, v12, v13, v14, v15, v16, v17, v18, v19,
@@ -2592,8 +2591,10 @@ namespace TensileLite
                 Float4x2 value;
             } x;
 
-            uint8_t val0 = static_cast<uint8_t>(rand() % 15);
-            uint8_t val1 = static_cast<uint8_t>(rand() % 15);
+            uint8_t val0 = static_cast<uint8_t>(
+                roc::host_validation::tensilelite_adapter::nextUniformInteger(0, 14));
+            uint8_t val1 = static_cast<uint8_t>(
+                roc::host_validation::tensilelite_adapter::nextUniformInteger(0, 14));
             x.bits = (val1 << 4) | val0;
             return x.value;
         }
@@ -2658,7 +2659,7 @@ namespace TensileLite
         template <>
         inline E8 DataInitialization::getValue<E8, InitMode::Random>()
         {
-            return E8(static_cast<uint8_t>((rand() % 7) - 3 + 127));
+            return E8(static_cast<uint8_t>(roc::host_validation::tensilelite_adapter::nextUniformInteger(-3, 3) + 127));
         }
         template <>
         inline E8 DataInitialization::getValue<E8, InitMode::BadInput>()
@@ -2723,7 +2724,7 @@ namespace TensileLite
         template <>
         inline E5M3 DataInitialization::getValue<E5M3, InitMode::Random>()
         {
-            return E5M3((rand() % 7) - 3);
+            return E5M3(roc::host_validation::tensilelite_adapter::nextUniformInteger(-3, 3));
         }
         template <>
         inline E5M3 DataInitialization::getValue<E5M3, InitMode::BadInput>()
@@ -3263,8 +3264,6 @@ namespace TensileLite
             using typename FP_PARAM<T>::UINT_T;
             using FP_PARAM<T>::NUMSIG;
             using FP_PARAM<T>::NUMEXP;
-            using random_fp_int_dist = std::uniform_int_distribution<UINT_T>;
-
             static_assert(sizeof(UINT_T) == sizeof(T), "Type sizes do not match");
             static constexpr UINT_T expmask = (((UINT_T)1 << NUMEXP) - 1) << NUMSIG;
             static constexpr UINT_T expbias = ((UINT_T)1 << (NUMEXP - 1)) - 1;
@@ -3293,13 +3292,15 @@ namespace TensileLite
         template <typename T, int LOW_EXP, int HIGH_EXP>
         struct rocm_random : rocm_random_common<T>
         {
-            using typename rocm_random_common<T>::random_fp_int_dist;
             __attribute__((flatten)) T operator()()
             {
-                static std::mt19937 rng;
-                int                 exp = std::uniform_int_distribution<int>{}(rng);
-                exp                     = exp % (HIGH_EXP - LOW_EXP + 1) + LOW_EXP;
-                return this->signsig_exp(random_fp_int_dist{}(rng), exp);
+                const uint64_t randomBits
+                    = roc::host_validation::tensilelite_adapter::nextRandomBits();
+                const int exp = static_cast<int>(
+                                    randomBits % static_cast<uint64_t>(HIGH_EXP - LOW_EXP + 1))
+                                + LOW_EXP;
+                return this->signsig_exp(static_cast<typename FP_PARAM<T>::UINT_T>(randomBits),
+                                         exp);
             }
         };
 

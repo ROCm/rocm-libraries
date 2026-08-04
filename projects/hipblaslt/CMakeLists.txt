@@ -80,7 +80,6 @@ if(HIPBLASLT_ENABLE_CLIENT)
     option(HIPBLASLT_ENABLE_SAMPLES "Build client samples." ON)
     # amd-smi is not presently available on Windows so we do not require it.
     cmake_dependent_option(HIPBLASLT_ENABLE_AMD_SMI "Require amd_smi." ON "NOT WIN32" OFF)
-    option(HIPBLASLT_ENABLE_BLIS "Enable BLIS support." ON)
 endif()
 
 if(HIPBLASLT_ENABLE_HOST OR TENSILELITE_ENABLE_HOST)
@@ -158,10 +157,6 @@ if(HIPBLASLT_ENABLE_CLIENT)
         set(CMAKE_Fortran_COMPILER  "gfortran")
     endif()
     enable_language(Fortran)
-
-    if(HIPBLASLT_ENABLE_BLIS)
-        find_package(BLIS REQUIRED)
-    endif()
 
     # There is an implicit find_package(BLAS) when finding lapack
     find_package(LAPACK REQUIRED)
@@ -283,6 +278,17 @@ if(NOT ROCM_LIBS_SUPERBUILD)
             add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../shared/origami" "${CMAKE_CURRENT_BINARY_DIR}/origami" EXCLUDE_FROM_ALL)
         endblock()
     endif()
+endif()
+
+if(NOT TARGET roc::host-validation)
+    block(SCOPE_FOR VARIABLES)
+        set(HOST_VALIDATION_BUILD_TESTING OFF)
+        add_subdirectory(
+            "${CMAKE_CURRENT_SOURCE_DIR}/../../shared/host-validation"
+            "${CMAKE_CURRENT_BINARY_DIR}/host-validation"
+            EXCLUDE_FROM_ALL
+        )
+    endblock()
 endif()
 
 add_library(hipblaslt-headers INTERFACE)

@@ -3,9 +3,6 @@
 
 add_library(sample-helper INTERFACE)
 
-if(HIPBLASLT_ENABLE_BLIS)
-    target_link_libraries(sample-helper INTERFACE BLIS::BLIS)
-endif()
 target_link_libraries(sample-helper INTERFACE hip::device)
 
 target_compile_features(sample-helper INTERFACE cxx_std_17)
@@ -29,6 +26,7 @@ endif()
 target_link_libraries(sample-helper
     INTERFACE
         roc::hipblaslt
+        roc::host-validation-adapters
 )
 
 add_subdirectory(01_hipblaslt_gemm)

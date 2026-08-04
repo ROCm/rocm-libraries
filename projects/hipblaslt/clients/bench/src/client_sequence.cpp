@@ -25,7 +25,7 @@
  *******************************************************************************/
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt-ext.hpp>
-#include <hipblaslt_init.hpp>
+#include <roc/host_validation/adapters/hipblaslt/HipblasltDataInitialization.hpp>
 #include <iostream>
 #include <numeric>
 #include <string>
@@ -206,21 +206,17 @@ void initData(hipDataType type, void* data, int m, int n, int lda, int stride, i
     switch(type)
     {
     case hipDataType::HIP_R_8F_E4M3_FNUZ:
-    {
-        hipblaslt_init_cos<hipblaslt_f8_fnuz>(
-            (hipblaslt_f8_fnuz*)data, m, n, lda, stride, batch_count);
-    }
-    break;
+        roc::host_validation::hipblaslt_adapter::initializeCosineMatrix(
+            static_cast<hipblaslt_f8_fnuz*>(data), m, n, lda, stride, batch_count);
+        break;
     case hipDataType::HIP_R_8F_E4M3:
-    {
-        hipblaslt_init_cos<hipblaslt_f8>((hipblaslt_f8*)data, m, n, lda, stride, batch_count);
-    }
-    break;
+        roc::host_validation::hipblaslt_adapter::initializeCosineMatrix(
+            static_cast<hipblaslt_f8*>(data), m, n, lda, stride, batch_count);
+        break;
     case hipDataType::HIP_R_16F:
-    {
-        hipblaslt_init_cos<hipblasLtHalf>((hipblasLtHalf*)data, m, n, lda, stride, batch_count);
-    }
-    break;
+        roc::host_validation::hipblaslt_adapter::initializeCosineMatrix(
+            static_cast<hipblasLtHalf*>(data), m, n, lda, stride, batch_count);
+        break;
     default:
         exit(1);
     }

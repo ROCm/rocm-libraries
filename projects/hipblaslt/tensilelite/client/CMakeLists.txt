@@ -70,6 +70,7 @@ target_link_libraries(tensilelite-client-common
     PUBLIC
         hip::device
         hip::host
+        roc::host-validation-adapters
         roc::tensilelite-host
         rocisa::rocisa-cpp
         OpenMP::OpenMP_CXX
@@ -131,6 +132,50 @@ if(HIPBLASLT_CXX_HAS_MF16C)
     target_compile_options(tensilelite-client-common PRIVATE -mf16c)
 endif()
 
+add_library(host-validation-tensilelite STATIC
+    "${ROCM_LIBRARIES_ROOT}/shared/host-validation/adapters/tensilelite/Reference.cpp"
+)
+add_library(roc::host-validation-tensilelite ALIAS host-validation-tensilelite)
+
+target_include_directories(host-validation-tensilelite
+    PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/include"
+)
+target_link_libraries(host-validation-tensilelite
+    PUBLIC
+        roc::host-validation-adapters
+    PRIVATE
+        hip::device
+        hip::host
+        roc::tensilelite-host
+        rocisa::rocisa-cpp
+        OpenMP::OpenMP_CXX
+)
+set_target_properties(host-validation-tensilelite
+    PROPERTIES
+        POSITION_INDEPENDENT_CODE ON
+        CXX_STANDARD 20
+        CXX_STANDARD_REQUIRED ON
+        CXX_EXTENSIONS OFF
+)
+if(HIPBLASLT_CXX_HAS_MF16C)
+    target_compile_options(host-validation-tensilelite PRIVATE -mf16c)
+endif()
+if(HIPBLASLT_ENABLE_ASAN)
+    hipblaslt_target_configure_sanitizers(host-validation-tensilelite PUBLIC)
+endif()
+if(TENSILELITE_ENABLE_COVERAGE)
+    target_compile_options(
+        host-validation-tensilelite PRIVATE -fprofile-instr-generate -fcoverage-mapping)
+    target_link_options(
+        host-validation-tensilelite PUBLIC -fprofile-instr-generate -fcoverage-mapping)
+endif()
+
+target_link_libraries(tensilelite-client-common
+    PUBLIC
+        roc::host-validation-tensilelite
+)
+
 option(TENSILELITE_CLIENT_ENABLE_ROCPROFSDK "Enable in-process ROCprofiler-SDK counters" OFF)
 target_compile_definitions(tensilelite-client-common
     PUBLIC
@@ -147,7 +192,11 @@ add_executable(tensilelite-client "${CMAKE_CURRENT_SOURCE_DIR}/main.cpp")
 target_link_libraries(tensilelite-client PRIVATE tensilelite-client-common)
 
 add_executable(cpu-gemm-driver "${CMAKE_CURRENT_SOURCE_DIR}/cpu_gemm_driver.cpp")
-target_link_libraries(cpu-gemm-driver PRIVATE tensilelite-client-common)
+target_link_libraries(cpu-gemm-driver
+    PRIVATE
+        tensilelite-client-common
+        roc::host-validation
+)
 
 # rocprofiler-sdk is only used by tensilelite-client (in-process counters).
 if(TENSILELITE_CLIENT_ENABLE_ROCPROFSDK)

@@ -27,7 +27,7 @@
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt.h>
 #include <hipblaslt_datatype2string.hpp>
-#include <hipblaslt_init.hpp>
+#include <roc/host_validation/adapters/hipblaslt/HipblasltDataInitialization.hpp>
 #include <iostream>
 #include <memory>
 #include <numeric>
@@ -81,38 +81,8 @@ private:
     void init(DType* buf, size_t len, hipblaslt_initialization initMethod)
     {
         std::vector<DType> ref(len);
-
-        switch(initMethod)
-        {
-        case hipblaslt_initialization::rand_int:
-            hipblaslt_init<DType>(ref.data(), ref.size(), 1, 1);
-            break;
-        case hipblaslt_initialization::trig_float:
-            hipblaslt_init_cos<DType>(ref.data(), ref.size(), 1, 1);
-            break;
-        case hipblaslt_initialization::hpl:
-            hipblaslt_init_hpl<DType>(ref.data(), ref.size(), 1, 1);
-            break;
-        case hipblaslt_initialization::uniform_low_precision:
-            hipblaslt_init_low_precision<DType>(ref.data(), ref.size(), 1, 1);
-            break;
-        case hipblaslt_initialization::special:
-            hipblaslt_init_alt_impl_big<DType>(ref.data(), ref.size(), 1, 1);
-            break;
-        case hipblaslt_initialization::zero:
-            hipblaslt_init_zero<DType>(ref.data(), ref.size(), 1, 1);
-            break;
-        // Matmul-oriented inits need proper M×K / K×N (GEMM ABC) layout; ext-op benches only flatten — zero-fill
-        // instead of silently skipping (ref would stay default-constructed).
-        case hipblaslt_initialization::integer_exact:
-        case hipblaslt_initialization::norm_dist:
-        case hipblaslt_initialization::uniform_01:
-        case hipblaslt_initialization::fp16_accumulator_probe:
-            hipblaslt_init_zero<DType>(ref.data(), ref.size(), 1, 1);
-            break;
-        default:
-            break;
-        }
+        roc::host_validation::hipblaslt_adapter::initialize(
+            ref.data(), ref.size(), initMethod);
 
         auto err = hipMemcpy(buf, ref.data(), len * sizeof(DType), hipMemcpyHostToDevice);
     }
