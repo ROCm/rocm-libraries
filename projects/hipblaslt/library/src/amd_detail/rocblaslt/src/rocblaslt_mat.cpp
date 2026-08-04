@@ -252,10 +252,10 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
                                         effective_uniform_summation_order(handle, matmul_descr)};
     problem.streamKFlags = streamKFlags;
 
-    // No-op unless HIPBLASLT_CHECK_STREAMK_SYNC is set.
-    hipblaslt_check_streamk_sync_scope sync_check(handle, stream, "rocblaslt_matmul_impl");
-
     rocblaslt_status st = runContractionProblem(handle, algo, problem, gemmData);
+
+    // No-op unless HIPBLASLT_CHECK_STREAMK_SYNC is set.
+    hipblaslt_check_streamk_sync_scan(handle, stream, "rocblaslt_matmul_impl");
 
     if(st == rocblaslt_status_success)
     {
