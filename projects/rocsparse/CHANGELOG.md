@@ -3,6 +3,14 @@
 Documentation for rocSPARSE is available at
 [https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/](https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/).
 
+## (Unreleased) rocSPARSE 5.1.0
+
+### Added
+* Added batched support to the SpMM algorithm `rocsparse_spmm_alg_csr_nnz_split`.
+
+### Resolved issues
+* Fixed `rocsparse_spmm` with the row-split CSR algorithm, which failed with `hipErrorInvalidConfiguration` for batch counts exceeding 65535 because the batch dimension of the kernel launch grid exceeded the maximum grid dimension.
+
 ## (Unreleased) rocSPARSE 5.0.0
 
 ### Added
