@@ -49,6 +49,7 @@
 // --- stinkytofu-opt consumer headers ---
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/analysis/asm/AsmVerifierPass.hpp"
+#include "stinkytofu/analysis/ssa/CanonicalSSAAnalysis.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/hardware/ToolchainCaps.hpp"
 #include "stinkytofu/ir/DumpStinkyModulePass.hpp"
@@ -60,6 +61,7 @@
 #include "stinkytofu/transforms/asm/BuildDefUseChain.hpp"
 #include "stinkytofu/transforms/asm/CFGBuilderPass.hpp"
 #include "stinkytofu/transforms/asm/DeadCodeEliminationPass.hpp"
+#include "stinkytofu/transforms/asm/DefUseAnalysisCleanup.hpp"
 #include "stinkytofu/transforms/asm/Gfx1250HazardPass.hpp"
 #include "stinkytofu/transforms/asm/InsertClusterBarrierPass.hpp"
 #include "stinkytofu/transforms/asm/InsertDelayAluPass.hpp"
@@ -84,6 +86,10 @@
 #include "stinkytofu/transforms/asm/StinkyWaitCntInsertionPass.hpp"
 #include "stinkytofu/transforms/asm/TDMLoadWaveSyncPass.hpp"
 #include "stinkytofu/transforms/asm/WaitAwareScheduleRepairPass.hpp"
+#include "stinkytofu/transforms/ssa/CanonicalSSADestruction.hpp"
+#include "stinkytofu/transforms/ssa/DumpCanonicalSSAPass.hpp"
+#include "stinkytofu/transforms/ssa/LiftAsmRegistersToSSAPass.hpp"
+#include "stinkytofu/transforms/ssa/ReplayLegacyColoringPass.hpp"
 
 using namespace stinkytofu;
 
@@ -252,6 +258,10 @@ TEST(ApiExport, PassFactories) {
     EXPECT_NE(createWaitAwareScheduleRepairPass(), nullptr);
     EXPECT_NE(createBuildUseDefChainPass(true, false), nullptr);
     EXPECT_NE(createCFGBuilderPass(), nullptr);
+    EXPECT_NE(createLiftAsmRegistersToSSAPass(), nullptr);
+    EXPECT_NE(createRemoveDefUseAnalysisPass(), nullptr);
+    EXPECT_NE(createDumpCanonicalSSAPass(), nullptr);
+    EXPECT_NE(createReplayLegacyColoringPass(), nullptr);
     EXPECT_NE(createDumpStinkyModulePass({}), nullptr);
     EXPECT_NE(createPeepholeOptimizationPass(), nullptr);
     EXPECT_NE(createDeadCodeEliminationPass(), nullptr);

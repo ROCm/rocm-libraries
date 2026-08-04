@@ -1,0 +1,28 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --LiftAsmRegistersToSSAPass --DumpCanonicalSSAPass=uses
+#
+# LiftAsmRegistersToSSAPass: every use is recorded at its exact position.
+#
+# Uses are per operand and per DWORD, and they are not deduplicated: an
+# instruction reading one value through two operands records two uses. That
+# precision is what lets allocation compute live ranges without re-deriving
+# anything from physical register numbers.
+#
+# CHECK-LABEL: ssa.func @lift_asm_registers_to_ssa_uses
+#
+# v0 is read twice by the first instruction and once by the second, so it has
+# three use records, ordered by instruction then operand.
+# CHECK: %1:v = livein { origin = v0 }
+# CHECK-NEXT: uses = [{ inst = #0, src = 0, unit = 0 }, { inst = #0, src = 1, unit = 0 }, { inst = #1, src = 0, unit = 0 }]
+#
+# CHECK: %2:v = livein { origin = v1 }
+# CHECK-NEXT: uses = [{ inst = #1, src = 1, unit = 0 }]
+#
+# The first result is never read, so its use list is empty.
+# CHECK: %3:v = "st.v_add_f32"(src0 = [%1:v], src1 = [%1:v]) { inst = #0, origin = [v2] }
+# CHECK: %3:v uses = []
+
+st.func @lift_asm_registers_to_ssa_uses() {
+^entry:
+  v2 = "st.v_add_f32"(v0, v0)
+  v3 = "st.v_add_f32"(v0, v1)
+}

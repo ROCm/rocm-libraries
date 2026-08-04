@@ -1,0 +1,57 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --LiftAsmRegistersToSSAPass --DumpCanonicalSSAPass
+#
+# LiftAsmRegistersToSSAPass: a loop-carried register becomes a header PHI.
+#
+# v5 is defined before the loop and again in the body, so the header merges the
+# incoming value with the one arriving on the back edge. The header PHI is what
+# makes the loop-carried dependence explicit: reads inside the loop see the
+# merged value, not the physical register name.
+#
+#   ^entry:  v5 = ...
+#      |
+#   ^header: PHI(v5) <-------+
+#      |                     |
+#   ^body:   v5 = f(v5) -----+
+#      |
+#   ^exit:   uses v5
+#
+# CHECK-LABEL: ssa.func @lift_asm_registers_to_ssa_loop
+#
+# CHECK: ^entry:
+# CHECK-NEXT: %8:v = "st.v_add_f32"(src0 = [%4:v], src1 = [%5:v]) { inst = #0, origin = [v5] }
+#
+# The header merges the entry value with the body's redefinition. The back-edge
+# input is defined later in program order, which is legal: it dominates the end
+# of the latch.
+# CHECK: ^header:
+# CHECK-NEXT: %7:v = phi(^entry: %8:v, ^body: %11:v) { origin = v5 }
+#
+# Reads in the loop resolve to the PHI result.
+# CHECK-NEXT: %9:v = "st.v_add_f32"(src0 = [%7:v], src1 = [%6:v]) { inst = #1, origin = [v6] }
+#
+# The body reads the PHI result and defines the value the back edge carries.
+# CHECK: ^body:
+# CHECK-NEXT: %11:v = "st.v_add_f32"(src0 = [%7:v], src1 = [%1:v]) { inst = #4, origin = [v5] }
+#
+# The exit is dominated by the header, so it reads the PHI result too, with no
+# PHI of its own.
+# CHECK: ^exit:
+# CHECK-NEXT: %10:v = "st.v_add_f32"(src0 = [%7:v], src1 = [%1:v]) { inst = #6, origin = [v7] }
+# CHECK-NOT: unprinted_values
+
+st.func @lift_asm_registers_to_ssa_loop() {
+^entry:
+  v5 = "st.v_add_f32"(v20, v21)
+  Successors: ^header
+^header:
+  v6 = "st.v_add_f32"(v5, v22)
+  SCC0 = "st.v_cmp_eq_u32"(v10, v11)
+  "st.s_cbranch_scc1"("exit", SCC0)
+  Successors: ^body, ^exit
+^body:
+  v5 = "st.v_add_f32"(v5, v1)
+  "st.s_branch"("header")
+  Successors: ^header
+^exit:
+  v7 = "st.v_add_f32"(v5, v1)
+}

@@ -25,6 +25,7 @@
 #include "stinkytofu/analysis/BBIndexAnalysis.hpp"
 #include "stinkytofu/analysis/LoopAnalysis.hpp"
 #include "stinkytofu/analysis/controlflow/DominanceAnalysis.hpp"
+#include "stinkytofu/analysis/ssa/CanonicalSSAAnalysis.hpp"
 #include "stinkytofu/core/AnalysisManager.hpp"
 
 namespace stinkytofu {
@@ -34,6 +35,7 @@ inline void registerAllAnalyses(AnalysisManager& AM) {
     AM.registerPass<BBIndexAnalysis>();
     AM.registerPass<DominanceAnalysis>();
     AM.registerPass<LoopAnalysis>();
+    AM.registerPass<CanonicalSSAAnalysis>();
 }
 
 /// Convenience: build a PreservedAnalyses that keeps CFG analyses.
@@ -43,6 +45,18 @@ inline PreservedAnalyses preserveCFGAnalyses() {
     PA.preserve<BBIndexAnalysis>();
     PA.preserve<DominanceAnalysis>();
     PA.preserve<LoopAnalysis>();
+    return PA;
+}
+
+/// As above, and keeps the canonical SSA graph as well.
+///
+/// Canonical SSA additionally depends on instruction order and on every register
+/// operand, so only a pass that changes none of those may preserve it. Every
+/// pass between lifting and SSA destruction has to, or the graph is evicted and
+/// its consumer finds nothing.
+inline PreservedAnalyses preserveCFGAndCanonicalSSA() {
+    PreservedAnalyses PA = preserveCFGAnalyses();
+    PA.preserve<CanonicalSSAAnalysis>();
     return PA;
 }
 

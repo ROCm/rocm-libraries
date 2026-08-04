@@ -1,0 +1,46 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --LiftAsmRegistersToSSAPass --DumpCanonicalSSAPass
+#
+# LiftAsmRegistersToSSAPass: physical registers become SSA values.
+#
+# Each reaching definition of a physical register gets its own value, so the two
+# definitions of v2 below are distinct values and the second read of v2 sees the
+# second definition. Registers read without a definition become function
+# live-ins. Every value keeps the physical register it came from as `origin`,
+# which is what legacy replay and diagnostics rely on.
+#
+# CHECK-LABEL: ssa.func @lift_asm_registers_to_ssa
+#
+# v0 and v1 are read before they are written, so they are live-ins. They are
+# created in register order, independent of the order they are read.
+# CHECK: initial_values:
+# CHECK-NEXT: %1:v = livein { origin = v0 }
+# CHECK-NEXT: %2:v = livein { origin = v1 }
+#
+# CHECK: ^entry:
+# v2 = v0 + v1
+# CHECK-NEXT: %3:v = "st.v_add_f32"(src0 = [%1:v], src1 = [%2:v]) { inst = #0, origin = [v2] }
+# CHECK-NEXT: // physical: v2 = "st.v_add_f32"(v0, v1)
+#
+# v3 = v2 + v0 reads the value just defined, not the physical name.
+# CHECK-NEXT: %4:v = "st.v_add_f32"(src0 = [%3:v], src1 = [%1:v]) { inst = #1, origin = [v3] }
+# CHECK-NEXT: // physical: v3 = "st.v_add_f32"(v2, v0)
+#
+# v2 is redefined: a second, distinct value with the same origin.
+# CHECK-NEXT: %5:v = "st.v_add_f32"(src0 = [%4:v], src1 = [%2:v]) { inst = #2, origin = [v2] }
+# CHECK-NEXT: // physical: v2 = "st.v_add_f32"(v3, v1)
+#
+# The last read of v2 resolves to the second definition, not the first.
+# CHECK-NEXT: %6:v = "st.v_add_f32"(src0 = [%5:v], src1 = [%5:v]) { inst = #3, origin = [v4] }
+# CHECK-NEXT: // physical: v4 = "st.v_add_f32"(v2, v2)
+#
+# Nothing is left over: no unprinted values and no unmapped instructions.
+# CHECK-NOT: unprinted_values
+# CHECK-NOT: unmapped
+
+st.func @lift_asm_registers_to_ssa() {
+^entry:
+  v2 = "st.v_add_f32"(v0, v1)
+  v3 = "st.v_add_f32"(v2, v0)
+  v2 = "st.v_add_f32"(v3, v1)
+  v4 = "st.v_add_f32"(v2, v2)
+}

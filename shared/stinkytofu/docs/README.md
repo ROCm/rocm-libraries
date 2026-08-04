@@ -20,6 +20,7 @@
 - [Adding Intrinsics](developer/adding-intrinsics.md) -- Define reusable high-level operations
 - [Pattern Grammar Reference](developer/pattern-grammar.md) -- Complete syntax for the pattern language
 - [Wait-Aware Schedule Repair Pass](developer/wait-aware-schedule-repair-pass.md) -- Reopen WMMA issue windows after final wait insertion, leaving wait immediates untouched
+- [Lift Asm Registers to SSA Pass](developer/lift-asm-registers-to-ssa-pass.md) -- Canonical SSA graph built from physical VGPR/SGPR operands
 
 ## [Known Issues](known-issues.md)
 

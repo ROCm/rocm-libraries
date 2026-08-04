@@ -1,0 +1,36 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --LiftAsmRegistersToSSAPass --DumpCanonicalSSAPass
+#
+# LiftAsmRegistersToSSAPass: register ranges are lifted one DWORD at a time.
+#
+# A wide operand binds one SSA value per DWORD, in operand order, so a partial
+# redefinition replaces only the units it writes. Keeping units separate is what
+# makes that visible; a whole-range value would have to pretend the narrow write
+# clobbered all four DWORDs.
+#
+# CHECK-LABEL: ssa.func @lift_asm_registers_to_ssa_ranges
+#
+# The 4-DWORD load defines four values whose origins are v4 through v7.
+# CHECK: ^entry:
+# CHECK-NEXT: %2:v, %3:v, %4:v, %5:v = "st.ds_load_b128"(src0 = [%1:v]) { inst = #0, origin = [v4, v5, v6, v7] }
+# CHECK-NEXT: // physical: v[4:7] = "st.ds_load_b128"(v0)
+#
+# A 2-DWORD store consumes only the first two units of that range.
+# CHECK-NEXT: "st.ds_store_b64"(src0 = [%1:v], src1 = [%2:v, %3:v]) { inst = #1 }
+# CHECK-NEXT: // physical: "st.ds_store_b64"(v0, v[4:5])
+#
+# Overwriting v4 alone creates one new value.
+# CHECK-NEXT: %6:v = "st.v_add_f32"(src0 = [%1:v], src1 = [%1:v]) { inst = #2, origin = [v4] }
+# CHECK-NEXT: // physical: v4 = "st.v_add_f32"(v0, v0)
+#
+# Reading the whole range now mixes the new v4 with the surviving v5, v6, v7.
+# CHECK-NEXT: "st.ds_store_b128"(src0 = [%1:v], src1 = [%6:v, %3:v, %4:v, %5:v]) { inst = #3 }
+# CHECK-NEXT: // physical: "st.ds_store_b128"(v0, v[4:7])
+# CHECK-NOT: unprinted_values
+
+st.func @lift_asm_registers_to_ssa_ranges() {
+^entry:
+  v[4:7] = "st.ds_load_b128"(v0)
+  "st.ds_store_b64"(v0, v[4:5])
+  v4 = "st.v_add_f32"(v0, v0)
+  "st.ds_store_b128"(v0, v[4:7])
+}

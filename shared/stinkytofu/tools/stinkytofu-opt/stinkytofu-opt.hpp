@@ -38,6 +38,7 @@
 #include "stinkytofu/transforms/asm/BuildDefUseChain.hpp"
 #include "stinkytofu/transforms/asm/CFGBuilderPass.hpp"
 #include "stinkytofu/transforms/asm/DeadCodeEliminationPass.hpp"
+#include "stinkytofu/transforms/asm/DefUseAnalysisCleanup.hpp"
 #include "stinkytofu/transforms/asm/EpilogueStoreSinkPass.hpp"
 #include "stinkytofu/transforms/asm/Gfx1250HazardPass.hpp"
 #include "stinkytofu/transforms/asm/InsertClusterBarrierPass.hpp"
@@ -68,6 +69,10 @@
 #include "stinkytofu/transforms/asm/SwInstructionPrefetchRelStaticPass.hpp"
 #include "stinkytofu/transforms/asm/TDMLoadWaveSyncPass.hpp"
 #include "stinkytofu/transforms/asm/WaitAwareScheduleRepairPass.hpp"
+#include "stinkytofu/transforms/ssa/CanonicalSSADestruction.hpp"
+#include "stinkytofu/transforms/ssa/DumpCanonicalSSAPass.hpp"
+#include "stinkytofu/transforms/ssa/LiftAsmRegistersToSSAPass.hpp"
+#include "stinkytofu/transforms/ssa/ReplayLegacyColoringPass.hpp"
 
 using namespace stinkytofu;
 
@@ -157,6 +162,39 @@ const std::vector<PassInfo> availablePasses = {
          return createBuildUseDefChainPass(clearExisting, includePseudo);
      }},
     {"CFGBuilderPass", [](const auto&) { return createCFGBuilderPass(); }},
+    // Discards physical-register PHIs and def-use chains. Canonical SSA
+    // construction reads the function without modifying it, so this runs
+    // immediately before LiftAsmRegistersToSSAPass rather than inside it.
+    {"RemoveDefUseAnalysisPass", [](const auto&) { return createRemoveDefUseAnalysisPass(); }},
+    // LiftAsmRegistersToSSAPass accepts:
+    //   strictLiveIns  — reject a read with no reaching definition instead of
+    //                    inferring a function live-in
+    //   noVerify       — skip canonical SSA verification after construction
+    {"LiftAsmRegistersToSSAPass",
+     [](const std::vector<std::string>& args) {
+         LiftAsmRegistersToSSAOptions options;
+         options.allowInferredLiveIns = !hasPassArg(args, "strictLiveIns");
+         options.verify = !hasPassArg(args, "noVerify");
+         return createLiftAsmRegistersToSSAPass(options);
+     }},
+    // DumpCanonicalSSAPass writes the canonical SSA graph to stdout. Accepts:
+    //   uses          — also print each value's exact use list
+    //   noProvenance  — omit physical register origins
+    //   noPhysical    — omit the trailing physical-instruction comment
+    //   allowMissing  — print a placeholder instead of erroring when a function
+    //                   has no graph
+    {"DumpCanonicalSSAPass",
+     [](const std::vector<std::string>& args) {
+         DumpCanonicalSSAConfig config;
+         config.printerOptions.printUses = hasPassArg(args, "uses");
+         config.printerOptions.printProvenance = !hasPassArg(args, "noProvenance");
+         config.printerOptions.printPhysicalInstruction = !hasPassArg(args, "noPhysical");
+         config.requireCanonicalSSA = !hasPassArg(args, "allowMissing");
+         return createDumpCanonicalSSAPass(config);
+     }},
+    // ReplayLegacyColoringPass lowers the graph back to the registers it was
+    // lifted from. Lift followed by replay must not change the program.
+    {"ReplayLegacyColoringPass", [](const auto&) { return createReplayLegacyColoringPass(); }},
     {"DumpStinkyModulePass",
      [](const auto&) { return createDumpStinkyModulePass({.stirPath = "dump_module.stir"}); }},
     {"DumpMemTokenIRStructurePass",
