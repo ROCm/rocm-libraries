@@ -7,11 +7,6 @@ flag_management:
       statuses:
       - type: project
         target: 80%
-    -name: hipBLAS
-      carryforward: true
-      statuses:
-      - type: project
-        target: 80%
     -name: hipBLASLt
       carryforward: true
       statuses:
@@ -27,16 +22,6 @@ flag_management:
       statuses:
       - type: project
         target: 80%
-    -name: hipCUB
-      carryforward: true
-      statuses:
-      - type: project
-        target: 80%
-    -name: hipSPARSE
-      carryforward: true
-      statuses:
-      - type: project
-        target: 80%
     -name: hipSPARSELt
       carryforward: true
       statuses:
@@ -47,17 +32,32 @@ flag_management:
       statuses:
       - type: project
         target: 80%
-    -name: rocPRIM
-      carryforward: true
-      statuses:
-      - type: project
-        target: 80%
     -name: rocRAND
       carryforward: true
       statuses:
       - type: project
         target: 80%
     -name: hipRAND
+      carryforward: true
+      statuses:
+      - type: project
+        target: 80%
+    -name: hipBLAS
+      carryforward: true
+      statuses:
+      - type: project
+        target: 80%
+    -name: rocPRIM
+      carryforward: true
+      statuses:
+      - type: project
+        target: 80%
+    -name: rocThrust
+      carryforward: true
+      statuses:
+      - type: project
+        target: 80%
+    -name: hipCUB
       carryforward: true
       statuses:
       - type: project
@@ -77,7 +77,7 @@ flag_management:
       statuses:
       - type: project
         target: 80%
-    -name: rocThrust
+    -name: hipSPARSE
       carryforward: true
       statuses:
       - type: project
@@ -97,12 +97,12 @@ flag_management:
       statuses:
       - type: project
         target: 80%
-    -name: hipSOLVER
+    -name: rocSOLVER
       carryforward: true
       statuses:
       - type: project
         target: 80%
-    -name: rocSOLVER
+    -name: hipSOLVER
       carryforward: true
       statuses:
       - type: project
