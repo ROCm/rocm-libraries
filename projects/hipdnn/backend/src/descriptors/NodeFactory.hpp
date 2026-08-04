@@ -20,6 +20,7 @@
 #include "PointwiseOperationDescriptor.hpp"
 #include "RMSNormOperationDescriptor.hpp"
 #include "ReductionOperationDescriptor.hpp"
+#include "ResampleBwdOperationDescriptor.hpp"
 #include "ResampleFwdOperationDescriptor.hpp"
 #include "SdpaBwdOperationDescriptor.hpp"
 #include "SdpaFwdOperationDescriptor.hpp"
