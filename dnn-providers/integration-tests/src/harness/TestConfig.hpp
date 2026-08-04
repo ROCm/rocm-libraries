@@ -125,6 +125,15 @@ struct TestConfigOptions
     std::optional<std::filesystem::path> goldenDataDir;
     std::optional<VerificationMode> verificationMode;
     std::optional<std::filesystem::path> captureDir;
+    // RFC 0015 §9.1: observe live support and write support-claim sidecars
+    // for exercised bundles (--write-support-claims). Mode-scoped: a no-op
+    // in mode A (no --test-article), meaningful in modes B and C.
+    bool writeSupportClaims = false;
+    // RFC 0015 §9.4: directory of per-engine TOML configs (<dir>/<Engine>.toml),
+    // used only in mode B (--test-article without --test-engine) to resolve
+    // each pass's tolerance/skip overrides via loadActiveTestSettingsForEngine().
+    // Mutually exclusive with configPath; main() enforces that, not TestConfig.
+    std::optional<std::filesystem::path> testConfigDir;
 };
 
 // Singleton class for storing CLI-based test configuration.
@@ -206,6 +215,8 @@ public:
         instance._goldenDataDir = resolveGoldenDataDir(std::move(opts.goldenDataDir));
         instance._verificationMode = resolveVerificationMode(opts.verificationMode);
         instance._captureDir = std::move(opts.captureDir);
+        instance._writeSupportClaims = opts.writeSupportClaims;
+        instance._testConfigDir = std::move(opts.testConfigDir);
 
         // Detect device 0's gfx arch and VRAM once at startup. Used by
         // [[test_skips]] and golden-ref metadata guards (arch/VRAM checks).
@@ -296,6 +307,10 @@ public:
     std::optional<ToleranceOverride> findToleranceOverride(std::string_view testName) const
     {
         throwIfNotInitialized();
+        if(_activeTestSettingsOverride.has_value())
+        {
+            return _activeTestSettingsOverride->findToleranceOverride(testName);
+        }
         if(!_testSettings.has_value())
         {
             return std::nullopt;
@@ -332,6 +347,10 @@ public:
     std::optional<std::string> findSkipForTest(std::string_view testName) const
     {
         throwIfNotInitialized();
+        if(_activeTestSettingsOverride.has_value())
+        {
+            return _activeTestSettingsOverride->findSkip(testName, _currentArch, _currentPlatform);
+        }
         if(!_testSettings.has_value())
         {
             return std::nullopt;
@@ -395,6 +414,58 @@ public:
         return _captureDir.value();
     }
 
+    // RFC 0015 §9.1: whether --write-support-claims was requested. Mode
+    // detection (A/B/C) and the empty-write guard live in main()/the harness
+    // -- this is just the raw CLI flag.
+    bool writeSupportClaims() const
+    {
+        throwIfNotInitialized();
+        return _writeSupportClaims;
+    }
+
+    bool hasTestConfigDir() const
+    {
+        throwIfNotInitialized();
+        return _testConfigDir.has_value();
+    }
+
+    const std::filesystem::path& getTestConfigDir() const
+    {
+        throwIfNotInitialized();
+        if(!_testConfigDir.has_value())
+        {
+            throw std::runtime_error(
+                "getTestConfigDir() called but --test-config-dir was not provided");
+        }
+        return _testConfigDir.value();
+    }
+
+    // RFC 0015 §7.3/§9.4, mode B only: main()'s per-engine loop calls this
+    // before each pass's RUN_ALL_TESTS() to load that engine's TOML (if one
+    // exists at <test-config-dir>/<engineName>.toml) as the active
+    // tolerance/skip source, taking precedence over the immutable
+    // `_testSettings` loaded (if any) from a plain --test-config. This is the
+    // one deliberate exception to "immutable after initialize()": every
+    // other CLI-derived field never changes once set, but a mode-B pass
+    // genuinely needs a different config per engine within one process
+    // invocation. Clears the prior pass's override first, so an engine with
+    // no TOML of its own falls back to `_testSettings` (or no overrides at
+    // all), never a stale sibling engine's settings.
+    void loadActiveTestSettingsForEngine(const std::string& engineName)
+    {
+        throwIfNotInitialized();
+        _activeTestSettingsOverride.reset();
+        if(!_testConfigDir.has_value())
+        {
+            return;
+        }
+        const auto candidate = *_testConfigDir / (engineName + ".toml");
+        if(std::filesystem::exists(candidate))
+        {
+            _activeTestSettingsOverride.emplace(candidate);
+        }
+    }
+
 private:
     TestConfig() = default;
 
@@ -413,6 +484,9 @@ private:
     std::optional<std::filesystem::path> _goldenDataDir;
     std::optional<VerificationMode> _verificationMode;
     std::optional<std::filesystem::path> _captureDir;
+    bool _writeSupportClaims = false;
+    std::optional<std::filesystem::path> _testConfigDir;
+    std::optional<TestSettings> _activeTestSettingsOverride;
     std::string _currentArch;
     std::size_t _currentDeviceVramMb = 0;
     std::string _currentPlatform;

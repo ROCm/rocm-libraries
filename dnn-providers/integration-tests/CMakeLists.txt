@@ -124,12 +124,27 @@ install(DIRECTORY "${CMAKE_BINARY_DIR}/lib/integration-test-bundles"
         DESTINATION ${CMAKE_INSTALL_LIBDIR}
 )
 
+# RFC 0015 §9.3: pre-commit support-claim validator (standalone Python tool,
+# no C++ dependency). Its own unit tests run as a ctest here so a broken
+# validator fails CI the same way any other unit test would.
+if(Python3_FOUND)
+    add_test(
+        NAME hipdnn_support_claims_verifier_python_tests
+        COMMAND
+            ${Python3_EXECUTABLE} -m unittest discover -v
+            -s "${CMAKE_CURRENT_SOURCE_DIR}/reference-data-scripts/tests"
+            -p "test_verify_support_claims.py"
+    )
+    set_tests_properties(hipdnn_support_claims_verifier_python_tests PROPERTIES LABELS "unit_test;quick")
+endif()
+
 set(INTEGRATION_TESTS_EXE hipdnn_integration_tests)
 
 add_executable(${INTEGRATION_TESTS_EXE}
     src/main.cpp
     src/harness/bundle/IntegrationBundleVerificationHarness.cpp
     src/harness/bundle/SupportClaims.cpp
+    src/harness/bundle/SupportClaimWriter.cpp
     src/harness/input-init/FillInputs.cpp
 )
 

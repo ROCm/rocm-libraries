@@ -417,6 +417,71 @@ cmake --build build --target miopen-provider-external-integration-check
 ctest -L quick
 ```
 
+### Support-claim authoring, validation, and all-engines CI (RFC 0015)
+
+[RFC 0015](../../projects/hipdnn/docs/rfcs/0015_EngineSupportClaims.md) adds an
+optional, machine-managed `{Name}.support.json` (or, for a template sweep, a
+co-located bare `support.json`) next to a bundle: a per-engine, per-`(arch,
+platform)` claim that "this exact graph is supported here." At test time the
+harness re-queries live support and **FAILs** (not `SKIP`) a claimed graph that
+has lost coverage. This section covers only the authoring/validation tooling;
+see the RFC for the full enforcement-ladder design.
+
+**Write the claims** by running the shared binary with `--write-support-claims`
+on the target hardware. Generation needs a pinned engine, so it only runs in
+mode B (every engine a plugin exposes) or mode C (one named engine) — never
+mode A (hipDNN's default auto-select, ambiguous across graphs):
+
+```bash
+# Mode C — refresh one engine's claims
+./hipdnn_integration_tests --test-article <plugin.so> --test-engine MIOPEN_ENGINE \
+    --write-support-claims
+
+# Mode B — refresh every engine the plugin exposes, sequentially, in one run
+./hipdnn_integration_tests --test-article <plugin.so> --write-support-claims
+```
+
+The tool observes each exercised `(engine, arch, platform)` and updates only
+those keys — everything else on disk is left byte-for-byte unchanged, so a
+re-run with no support change is a zero-diff `git status`. Review the diff and
+commit it like any other change. `--test-config-dir <dir>` is the mode-B
+analog of `--test-config`: each engine in the loop resolves its own
+`<dir>/<EngineName>.toml` (if one exists) instead of a single shared file.
+
+**Validate claims before committing** with the standalone Python verifier
+(no build required):
+
+```bash
+python3 reference-data-scripts/verify_support_claims.py integration-test-bundles/
+```
+
+It hard-fails on: a claim-bearing bundle/case with a missing or invalid
+`enforcement_level`; a malformed `support.json` (bad `version`, non-`linux`/
+`windows` platform token); and, for a sweep's `support.json`, a `cases` id
+with no matching `sweep.json` case (orphaned claim) or a case id claimed
+twice under one engine (ambiguous claim). Its own unit tests run as the
+`hipdnn_support_claims_verifier_python_tests` ctest.
+
+**Register an all-engines CI target** with
+`add_external_integration_test_target_all_engines()` — the mode-B counterpart
+to `add_external_integration_test_target()` above. It omits `ENGINE_NAME`
+(the binary enumerates the plugin's engines itself) and takes a
+`TEST_CONFIG_DIR` instead of a single `TEST_CONFIG`:
+
+```cmake
+add_external_integration_test_target_all_engines(
+    TARGET_NAME     ${PROJECT_NAME}-all-engines-check
+    PLUGIN_TARGET   miopen_plugin
+    TEST_CONFIG_DIR ${CMAKE_CURRENT_SOURCE_DIR}/config
+)
+```
+
+This registers one ctest that exercises every engine the plugin exposes,
+sequentially, in a single invocation — useful for CI coverage across a
+plugin's full engine set without one `add_external_integration_test_target()`
+call per engine. The existing single-engine helper is unchanged; a provider
+registers whichever fits (or both).
+
 ## C++ Integration Tests (History & When to Use)
 
 Before bundles, every integration test was C++: a `buildGraph()` function plus

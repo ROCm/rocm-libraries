@@ -24,6 +24,7 @@
 #include <hipdnn_test_sdk/utilities/LoadGraphAndTensors.hpp>
 
 #include "harness/bundle/BundleDiscovery.hpp"
+#include "harness/bundle/SupportClaimWriter.hpp"
 #include "harness/bundle/SupportClaims.hpp"
 
 namespace hipdnn_integration_tests::bundle
@@ -73,6 +74,14 @@ struct IntegrationTestBundle
     // current claims) and is still distinct from absent: it still feeds the
     // end-of-run unclaimed-support summary.
     std::optional<SupportClaims> supportClaims;
+
+    // RFC 0015 §9: where --write-support-claims should record a live
+    // observation for this exact graph, if it observes one. Always set for
+    // any loaded bundle/case (a bundle can be write-eligible even with no
+    // existing supportClaims -- first-time authoring works the same as
+    // refreshing an existing sidecar), regardless of whether the run is
+    // actually in write mode.
+    std::optional<ClaimWriteTarget> claimWriteTarget;
 
     // View over the graph flatbuffer, valid as long as this bundle lives.
     hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper() const
@@ -689,6 +698,9 @@ inline LoadResult loadIntegrationTestBundle(const std::filesystem::path& jsonPat
     // pre-commit authoring error — a typo must never silently leave a
     // claimed graph at the default Full level.
     bundle.supportClaims = loadSupportClaims(jsonPath);
+    // RFC 0015 §9: a direct bundle's write target is its own {Name}.json --
+    // supportJsonPath() derives the {Name}.support.json sidecar from it.
+    bundle.claimWriteTarget = ClaimWriteTarget{jsonPath, std::nullopt};
     if(bundle.supportClaims.has_value() && !bundle.metadata.enforcementLevelExplicit)
     {
         return LoadError::MISSING_ENFORCEMENT_LEVEL;
@@ -782,6 +794,11 @@ inline LoadResult loadIntegrationTestBundle(const DiscoveredBundle& discovered)
         return LoadError::INVALID_SWEEP_CASE;
     }
     bundle.metadata = std::move(*metadata);
+
+    // RFC 0015 §9: a sweep case's write target is the sweep directory (the
+    // sidecar is <dir>/support.json), disambiguated by this case's id.
+    bundle.claimWriteTarget
+        = ClaimWriteTarget{discovered.jsonPath.parent_path(), discovered.sweep->caseId};
 
     // RFC 0015 §5.4/§6.2: this case is claim-bearing iff at least one engine's
     // claim group in the sweep's support.json names this cases[].id (a "support.json

@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cctype>
 #include <filesystem>
+#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_frontend.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
@@ -23,6 +24,7 @@
 #include "harness/SupportMatrixCollector.hpp"
 #include "harness/TestConfig.hpp"
 #include "harness/bundle/BundleRegistration.hpp"
+#include "harness/bundle/SupportClaimWriter.hpp"
 #include "harness/bundle/SupportEnforcementReport.hpp"
 #include "harness/bundle/UnverifiableBundleReport.hpp"
 
@@ -113,6 +115,18 @@ int main(int argc, char** argv) noexcept
         parser.add_argument("--capture-bundles")
             .help("Capture C++ graph tests as JSON bundles into the given directory. "
                   "Each test writes a {suite}/{case}/{case}.json + .meta.json pair.");
+        parser.add_argument("--write-support-claims")
+            .default_value(false)
+            .implicit_value(true)
+            .help("RFC 0015: observe live engine support (and, for buildable/full bundles, "
+                  "plan-build/execute results) and write support-claim sidecars for every "
+                  "exercised bundle. Requires --test-article (mode B or C); a mode-A run "
+                  "(neither --test-article nor --test-engine) writes nothing.");
+        parser.add_argument("--test-config-dir")
+            .help("Directory of per-engine TOML configs (<dir>/<EngineName>.toml), used only "
+                  "in mode B (--test-article without --test-engine): each pass over the "
+                  "plugin's engines resolves its own tolerance/skip overrides from this "
+                  "directory. Mutually exclusive with --test-config.");
 
         std::vector<std::string> remainingArgs;
         try
@@ -147,6 +161,54 @@ int main(int argc, char** argv) noexcept
             {
                 std::cerr << "Error: Config path does not exist: " << configPathArg << '\n';
                 return 1;
+            }
+        }
+
+        // Parse --write-support-claims / --test-config-dir (RFC 0015 §9.1, §9.4).
+        // Mode detection here only needs whether --test-article/--test-engine were
+        // *used* on the CLI -- the resolved articlePath is parsed further below.
+        auto writeSupportClaims = parser.get<bool>("--write-support-claims");
+        const bool hasArticleArg = parser.is_used("--test-article");
+        const bool hasEngineArg = engineName.has_value();
+
+        if(writeSupportClaims && !hasArticleArg)
+        {
+            std::cerr << "Error: --write-support-claims requires --test-article (mode B or C); "
+                         "mode A (neither flag) cannot attribute an observation to any engine.\n";
+            return 1;
+        }
+
+        std::optional<std::filesystem::path> testConfigDir;
+        if(parser.is_used("--test-config-dir"))
+        {
+            if(configPath.has_value())
+            {
+                std::cerr << "Error: --test-config and --test-config-dir are mutually "
+                             "exclusive\n";
+                return 1;
+            }
+            auto testConfigDirArg = parser.get<std::string>("--test-config-dir");
+            try
+            {
+                testConfigDir = std::filesystem::canonical(testConfigDirArg);
+            }
+            catch(const std::filesystem::filesystem_error&)
+            {
+                std::cerr << "Error: --test-config-dir path does not exist: " << testConfigDirArg
+                          << '\n';
+                return 1;
+            }
+            if(!std::filesystem::is_directory(*testConfigDir))
+            {
+                std::cerr << "Error: --test-config-dir is not a directory: " << testConfigDirArg
+                          << '\n';
+                return 1;
+            }
+            if(hasEngineArg || !hasArticleArg)
+            {
+                std::cerr << "Warning: --test-config-dir only applies in mode B (--test-article "
+                             "without --test-engine); ignoring it for this run.\n";
+                testConfigDir.reset();
             }
         }
 
@@ -263,6 +325,8 @@ int main(int argc, char** argv) noexcept
         opts.goldenDataDir = std::move(goldenDataDir);
         opts.verificationMode = verificationMode;
         opts.captureDir = std::move(captureDir);
+        opts.writeSupportClaims = writeSupportClaims;
+        opts.testConfigDir = std::move(testConfigDir);
         hipdnn_integration_tests::TestConfig::initialize(std::move(opts));
 
         // Reconstruct argc/argv for GTest from remaining (unknown) args.
@@ -321,7 +385,71 @@ int main(int argc, char** argv) noexcept
 
         hipdnn_integration_tests::bundle::registerBundleTests();
 
-        int result = RUN_ALL_TESTS();
+        auto printCoverageSummary = [](const std::string& label) {
+            const auto* unit = ::testing::UnitTest::GetInstance();
+            const int total = unit->test_to_run_count();
+            const int passed = unit->successful_test_count();
+            const int skip = unit->skipped_test_count();
+            const int failed = unit->failed_test_count();
+            const double pct = total > 0 ? 100.0 * passed / total : 0.0;
+
+            std::cerr << "\n==== TEST COVERAGE SUMMARY (" << label << ") ====\n"
+                      << "Passed:  " << passed << " / " << total << " (" << std::fixed
+                      << std::setprecision(1) << pct << "%)\n"
+                      << "Skipped: " << skip << "\n"
+                      << "Failed:  " << failed << "\n";
+        };
+
+        int result = 0;
+
+        // RFC 0015 §7.3: mode B (--test-article without --test-engine) enumerates
+        // every engine the plugin exposes and runs the whole suite once per
+        // engine, pinning each in turn, so buildable/full checks (and
+        // --write-support-claims observations) are attributable to a specific
+        // engine instead of whichever one hipDNN's heuristic auto-selects. Mode
+        // C pins its one named engine (already handled by TestConfig); mode A
+        // never pins anything (unchanged auto-select behavior).
+        if(hasArticleArg && !hasEngineArg)
+        {
+            auto engineNames = hipdnn_integration_tests::listLoadedEngineNames(handle);
+            if(engineNames.empty())
+            {
+                std::cerr << "Error: --test-article was provided but the loaded plugin exposes "
+                             "no engines.\n";
+                static_cast<void>(hipStreamDestroy(stream));
+                hipdnnDestroy(handle);
+                return 1;
+            }
+
+            for(const auto& loopEngineName : engineNames)
+            {
+                std::cerr << "\n==== Pass for engine: " << loopEngineName << " ====\n";
+                hipdnn_integration_tests::bundle::EnginePassContext::get().set(
+                    loopEngineName, hipdnn_data_sdk::utilities::engineNameToId(loopEngineName));
+                hipdnn_integration_tests::TestConfig::get().loadActiveTestSettingsForEngine(
+                    loopEngineName);
+
+                result |= RUN_ALL_TESTS();
+                printCoverageSummary(loopEngineName);
+            }
+            hipdnn_integration_tests::bundle::EnginePassContext::get().clear();
+        }
+        else
+        {
+            if(hasEngineArg)
+            {
+                hipdnn_integration_tests::bundle::EnginePassContext::get().set(
+                    std::string(hipdnn_integration_tests::TestConfig::get().getEngineName()),
+                    hipdnn_integration_tests::TestConfig::get().getEngineId());
+            }
+
+            result = RUN_ALL_TESTS();
+            printCoverageSummary(
+                hasEngineArg
+                    ? std::string(hipdnn_integration_tests::TestConfig::get().getEngineName())
+                    : std::string("auto-select"));
+            hipdnn_integration_tests::bundle::EnginePassContext::get().clear();
+        }
 
         // Print bundles that ended without a verdict (no oracle / reference bug).
         // Informational only — these SKIP, so they do not affect `result`.
@@ -348,19 +476,41 @@ int main(int argc, char** argv) noexcept
             result = 1;
         }
 
+        // RFC 0015 §9.2: the write tool's empty-write guard. A degenerate run
+        // that recorded zero observations at all must not silently report
+        // success -- it refuses to touch any file rather than risk masking a
+        // real failure (no GPU, plugin load failure, or an over-narrow
+        // --gtest_filter that excluded every claim-bearing bundle) as "no
+        // change needed".
+        if(hipdnn_integration_tests::TestConfig::get().writeSupportClaims())
         {
-            const auto* unit = ::testing::UnitTest::GetInstance();
-            const int total = unit->test_to_run_count();
-            const int passed = unit->successful_test_count();
-            const int skip = unit->skipped_test_count();
-            const int failed = unit->failed_test_count();
-            const double pct = total > 0 ? 100.0 * passed / total : 0.0;
-
-            std::cerr << "\n==== TEST COVERAGE SUMMARY ====\n"
-                      << "Passed:  " << passed << " / " << total << " (" << std::fixed
-                      << std::setprecision(1) << pct << "%)\n"
-                      << "Skipped: " << skip << "\n"
-                      << "Failed:  " << failed << "\n";
+            if(hipdnn_integration_tests::bundle::ClaimObservationCollector::get().empty())
+            {
+                std::cerr << "\nERROR: --write-support-claims requested but zero support "
+                             "observations were recorded this run. Refusing to write anything "
+                             "(this would otherwise risk silently nulling existing claims).\n";
+                result = 1;
+            }
+            else
+            {
+                try
+                {
+                    auto written
+                        = hipdnn_integration_tests::bundle::ClaimObservationCollector::get()
+                              .writeAll();
+                    std::cerr << "\nWrote " << written.size() << " support-claim file(s):\n";
+                    for(const auto& path : written)
+                    {
+                        std::cerr << "  " << path << "\n";
+                    }
+                }
+                catch(const std::exception& e)
+                {
+                    std::cerr << "\nERROR: failed to write support-claim file(s): " << e.what()
+                              << "\n";
+                    result = 1;
+                }
+            }
         }
 
         // Generate support matrix if requested

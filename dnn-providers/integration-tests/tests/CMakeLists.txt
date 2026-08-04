@@ -5,6 +5,7 @@ add_executable(hipdnn_integration_tests_unit_tests
     main.cpp
     ../src/harness/bundle/IntegrationBundleVerificationHarness.cpp
     ../src/harness/bundle/SupportClaims.cpp
+    ../src/harness/bundle/SupportClaimWriter.cpp
     ../src/harness/input-init/FillInputs.cpp
     TestArchMatch.cpp
     TestBundleMetadata.cpp
@@ -32,6 +33,8 @@ add_executable(hipdnn_integration_tests_unit_tests
     TestSupportEnforcementReport.cpp
     TestEnforcementLadder.cpp
     TestBundleSupportClaimsLoading.cpp
+    TestSupportClaimWriter.cpp
+    TestWriteSupportClaimsHarness.cpp
 )
 
 target_include_directories(hipdnn_integration_tests_unit_tests

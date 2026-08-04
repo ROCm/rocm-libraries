@@ -62,23 +62,23 @@ void IntegrationBundleVerificationHarness::executeGraphThroughEngine(
     {
         return;
     }
+    recordSupportObservationForWrite(status, engineIds);
 
     const auto graphSummary = [&] {
         return std::to_string(_bundle->outputTensorUids.size()) + " output tensor(s), "
                + std::to_string(engineIds.size()) + " ranked engine(s)";
     };
 
-    if(TestConfig::get().hasEngineName())
+    if(const auto pinnedEngineId = resolveActivePreferredEngineId())
     {
-        int64_t targetEngineId = TestConfig::get().getEngineId();
         if(status.is_bad()
-           || std::find(engineIds.begin(), engineIds.end(), targetEngineId) == engineIds.end())
+           || std::find(engineIds.begin(), engineIds.end(), *pinnedEngineId) == engineIds.end())
         {
-            throw EngineNotApplicableError(
-                "Engine " + std::string(TestConfig::get().getEngineName())
-                + " does not support this graph (" + graphSummary() + ")");
+            throw EngineNotApplicableError("Engine " + resolveActivePreferredEngineName()
+                                           + " does not support this graph (" + graphSummary()
+                                           + ")");
         }
-        graph.set_preferred_engine_id_ext(targetEngineId);
+        graph.set_preferred_engine_id_ext(*pinnedEngineId);
     }
     else
     {
@@ -136,6 +136,11 @@ std::unique_ptr<IReferenceGraphExecutor>
 VerificationMode IntegrationBundleVerificationHarness::getVerificationMode() const
 {
     return TestConfig::get().getVerificationMode();
+}
+
+bool IntegrationBundleVerificationHarness::writeSupportClaimsRequested() const
+{
+    return TestConfig::get().writeSupportClaims();
 }
 
 void IntegrationBundleVerificationHarness::runComparison()
@@ -715,11 +720,13 @@ IntegrationBundleVerificationHarness::SupportQueryResult
         // verdict can be produced, same as any other unresolved query.
         result.status = buildErr;
         SupportQueryGuard::get().noteQueryObserved();
+        recordSupportObservationForWrite(result.status, result.rankedEngineIds);
         return result;
     }
 
     result.status = graph.get_ranked_engine_ids(result.rankedEngineIds);
     SupportQueryGuard::get().noteQueryObserved();
+    recordSupportObservationForWrite(result.status, result.rankedEngineIds);
     return result;
 }
 
@@ -733,9 +740,9 @@ void IntegrationBundleVerificationHarness::runPlanBuildOnly()
     auto err = graph.from_binary(handle, graphBytes);
     ASSERT_TRUE(err.is_good()) << "buildable: from_binary failed: " << err.get_message();
 
-    if(TestConfig::get().hasEngineName())
+    if(const auto pinnedEngineId = resolveActivePreferredEngineId())
     {
-        graph.set_preferred_engine_id_ext(TestConfig::get().getEngineId());
+        graph.set_preferred_engine_id_ext(*pinnedEngineId);
     }
 
     // Same compile sequence as executeGraphThroughEngine's full-rung path,
@@ -830,6 +837,59 @@ std::string IntegrationBundleVerificationHarness::currentArchToken() const
 std::string IntegrationBundleVerificationHarness::currentPlatform() const
 {
     return TestConfig::get().getCurrentPlatform();
+}
+
+std::optional<int64_t> IntegrationBundleVerificationHarness::resolveActivePreferredEngineId() const
+{
+    if(TestConfig::get().hasEngineName())
+    {
+        return TestConfig::get().getEngineId();
+    }
+    return EnginePassContext::get().id();
+}
+
+std::string IntegrationBundleVerificationHarness::resolveActivePreferredEngineName() const
+{
+    if(TestConfig::get().hasEngineName())
+    {
+        return std::string(TestConfig::get().getEngineName());
+    }
+    return EnginePassContext::get().name().value_or("<unknown engine>");
+}
+
+void IntegrationBundleVerificationHarness::recordSupportObservationForWrite(
+    const hipdnn_frontend::Error& status, const std::vector<int64_t>& rankedEngineIds)
+{
+    if(!writeSupportClaimsRequested())
+    {
+        return;
+    }
+    if(!_bundle->claimWriteTarget.has_value())
+    {
+        return;
+    }
+
+    const auto engineId = resolveActivePreferredEngineId();
+    if(!engineId.has_value())
+    {
+        // Mode A: no engine pinned for this pass, nothing to attribute this
+        // observation to (RFC 0015 §9.5: "a mode-A run writes nothing").
+        return;
+    }
+
+    const auto verdict = classifyEngineVerdict(status, rankedEngineIds, *engineId);
+    if(verdict == EngineVerdict::Unknown)
+    {
+        // Unresolved query: never write from an indeterminate signal (RFC
+        // 0015 §9.2's empty-write guard extends per-cell, not just per-run).
+        return;
+    }
+
+    ClaimObservationCollector::get().record(*_bundle->claimWriteTarget,
+                                            resolveActivePreferredEngineName(),
+                                            currentArchToken(),
+                                            currentPlatform(),
+                                            verdict == EngineVerdict::Supported);
 }
 
 } // namespace hipdnn_integration_tests::bundle

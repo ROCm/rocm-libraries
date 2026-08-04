@@ -25,6 +25,7 @@
 #include "harness/TomlGuards.hpp"
 #include "harness/bundle/IntegrationTestBundle.hpp"
 #include "harness/bundle/SupportClaimEnforcement.hpp"
+#include "harness/bundle/SupportClaimWriter.hpp"
 #include "harness/bundle/SupportEnforcementReport.hpp"
 #include "harness/input-init/InputFillRecipes.hpp"
 
@@ -170,6 +171,12 @@ protected:
     // without touching the TestConfig singleton.
     virtual VerificationMode getVerificationMode() const;
 
+    // RFC 0015 §9.1: whether --write-support-claims was requested. Virtual
+    // like getVerificationMode(), for the same reason -- so a test can
+    // inject a value without depending on the TestConfig singleton's live
+    // (process-wide, initialize-once) state.
+    virtual bool writeSupportClaimsRequested() const;
+
     // Skips the test when the bundle's metadata is incompatible with the
     // current device (VRAM/arch). Virtual so isolated unit tests that don't
     // exercise hardware guards can override it — production reads from the
@@ -209,6 +216,30 @@ protected:
     // singleton being initialized.
     virtual std::string currentArchToken() const;
     virtual std::string currentPlatform() const;
+
+    // RFC 0015 §9: records one live observation into the process-wide
+    // ClaimObservationCollector when --write-support-claims is active and
+    // this bundle has a write target, regardless of whether it already
+    // carries a support.json (first-time authoring works the same as
+    // refreshing one). No-op when write mode is off, this bundle has no
+    // write target, no engine is pinned for the current pass (mode A), or
+    // the query did not resolve (never write from an indeterminate signal).
+    // Calls the two resolveActivePreferredEngine*() primitives below, both
+    // virtual (like queryGraphSupport/listLoadedEngines/currentArchToken)
+    // precisely so a test can stub the engine-pin resolution without
+    // depending on TestConfig's/EnginePassContext's live singleton state,
+    // and exercise this method's own gating (write mode, write target,
+    // verdict classification) directly via `using`.
+    void recordSupportObservationForWrite(const hipdnn_frontend::Error& status,
+                                          const std::vector<int64_t>& rankedEngineIds);
+
+    // The engine id/name this pass should pin for plan-build/execute (RFC
+    // 0015 §7.3): TestConfig's immutable --test-engine when provided (mode
+    // C), else the current mode-B pass's EnginePassContext pin, else
+    // nullopt (mode A: auto-select, unchanged existing behavior). Virtual so
+    // tests can inject a value without depending on either singleton.
+    virtual std::optional<int64_t> resolveActivePreferredEngineId() const;
+    virtual std::string resolveActivePreferredEngineName() const;
 
     InputFillRecipes& inputFillRecipes()
     {
