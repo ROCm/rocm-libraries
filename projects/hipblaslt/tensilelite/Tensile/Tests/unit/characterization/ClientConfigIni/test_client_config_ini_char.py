@@ -149,6 +149,7 @@ def _set_all_gp(monkeypatch):
         "NumBenchmarks": 1,
         "NumElementsToValidate": 0,
         "NumElementsToValidateWinner": -1,
+        "CheckStreamKSync": False,
         "EnqueuesPerSync": 1,
         "MaxEnqueuesPerSync": -1,
         "SyncsPerBenchmark": 1,

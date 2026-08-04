@@ -252,7 +252,7 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
                                         effective_uniform_summation_order(handle, matmul_descr)};
     problem.streamKFlags = streamKFlags;
 
-    // Check if the synchronizer buffer is clean when enabled
+    // No-op unless HIPBLASLT_CHECK_STREAMK_SYNC is set.
     hipblaslt_check_streamk_sync_scope sync_check(handle, stream, "rocblaslt_matmul_impl");
 
     rocblaslt_status st = runContractionProblem(handle, algo, problem, gemmData);
