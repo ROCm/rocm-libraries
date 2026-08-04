@@ -157,9 +157,14 @@ TEST(TestJson, GraphToJsonAndBack)
             context = "(valid reduction graph)";
             break;
         case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::ResampleFwdAttributes:
-            graphBuilder = hipdnn_test_sdk::utilities::createValidResampleFwdGraph();
+            graphBuilder = hipdnn_test_sdk::utilities::createValidResampleFwdGraph(true);
             graph = hipdnn_flatbuffers_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
             context = "(valid resample fwd graph)";
+            break;
+        case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::ResampleBwdAttributes:
+            graphBuilder = hipdnn_test_sdk::utilities::createValidResampleBwdGraph(true);
+            graph = hipdnn_flatbuffers_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
+            context = "(valid resample bwd graph)";
             break;
         default:
             FAIL() << "Unhandled NodeAttributes enum value";
