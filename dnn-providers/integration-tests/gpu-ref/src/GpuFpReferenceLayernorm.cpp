@@ -3,8 +3,8 @@
 
 #include <hip/amd_detail/amd_hip_runtime.h>
 #include <hipdnn-gpu-ref/GpuFpReferenceLayernorm.hpp>
-#include <stdexcept>
 
+#include "hipdnn-gpu-ref/detail/GpuRefHelpers.hpp"
 #include "hipdnn-gpu-ref/detail/GpuRefHipError.hpp"
 #include "hipdnn-gpu-ref/detail/GpuRefKernelCompiler.hpp"
 
@@ -32,18 +32,7 @@ void launchKernel(hipFunction_t function,
     const int64_t zgridsize = 1;
 
     // Check the device limits for grid size
-    int deviceId;
-    detail::throwOnHipError(hipGetDevice(&deviceId), "hipGetDevice failed");
-    hipDeviceProp_t deviceProps;
-    detail::throwOnHipError(hipGetDeviceProperties(&deviceProps, deviceId),
-                            "hipGetDeviceProperties failed");
-    const auto maxGridSize = static_cast<int64_t>(deviceProps.maxGridSize[0]);
-    if(outerSize * stride > maxGridSize)
-    {
-        throw std::runtime_error("Grid size exceeds device limit: "
-                                 + std::to_string(outerSize * stride) + " > "
-                                 + std::to_string(maxGridSize));
-    }
+    detail::assertValidGridSize(xgridsize, ygridsize, zgridsize);
 
     // NOLINTNEXTLINE(modernize-avoid-c-arrays)
     void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER,

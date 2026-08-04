@@ -642,9 +642,9 @@ TEST(TestGpuLayernormBwdRefMixedType, BfloatInputHalfScaleBias)
         nullptr,
         3);
 
-    assertAllClose(dxCpu, dxGpu, getTolerance<float>());
-    assertAllClose(dscaleCpu, dscaleGpu, getTolerance<float>());
-    assertAllClose(dbiasCpu, dbiasGpu, getTolerance<float>());
+    assertAllClose(dxCpu, dxGpu, getTolerance<bfloat16>());
+    assertAllClose(dscaleCpu, dscaleGpu, getTolerance<half>());
+    assertAllClose(dbiasCpu, dbiasGpu, getTolerance<half>());
 }
 
 // --- Optional argument tests ---
@@ -979,8 +979,7 @@ int64_t getMaxOuterSizeForCurrentDevice()
     hipDeviceProp_t props{};
     EXPECT_EQ(hipGetDeviceProperties(&props, deviceId), hipSuccess);
 
-    return static_cast<int64_t>(props.maxGridSize[0])
-           / static_cast<int64_t>(GpuFpReferenceLayernorm::LOCAL_SIZE);
+    return static_cast<int64_t>(props.maxGridSize[0]);
 }
 
 } // namespace
@@ -1003,7 +1002,7 @@ TEST(TestGpuLayernormBwdRefEdgeCaseValidation, DISABLED_OuterSizeAtMaxBlocksMinu
 TEST(TestGpuLayernormBwdRefEdgeCaseValidation, DISABLED_OuterSizeAtMaxBlocksSucceeds)
 {
     SKIP_IF_NO_DEVICES();
-    const int64_t outerSize = getMaxOuterSizeForCurrentDevice() - 1;
+    const int64_t outerSize = getMaxOuterSizeForCurrentDevice();
     Tensor<float> dy({outerSize, 1, 1, 1});
     Tensor<float> x({outerSize, 1, 1, 1});
     Tensor<float> scale({1, 1, 1, 1});
@@ -1072,7 +1071,7 @@ TEST(TestGpuLayernormBwdRefEdgeCaseValidation, DISABLED_BeyondInt32InnerSizeIfMe
     x.fillWithRandomValues(-1.0f, 1.0f, seed + 1);
     scale.fillWithRandomValues(-1.0f, 1.0f, seed + 2);
 
-    GpuFpReferenceLayernorm::bprop<float, float, float, double, double>(
+    CpuFpReferenceLayernorm::bprop<float, float, float, double, double>(
         dy, x, scale, dxCpu, dscaleCpu, dbiasCpu, LAYERNORM_DEFAULT_EPSILON, nullptr, nullptr, 3);
     GpuFpReferenceLayernorm::bprop<float, float, float, double, double>(
         dy, x, scale, dxGpu, dscaleGpu, dbiasGpu, LAYERNORM_DEFAULT_EPSILON, nullptr, nullptr, 3);

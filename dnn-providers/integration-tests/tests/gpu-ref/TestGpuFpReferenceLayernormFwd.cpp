@@ -705,8 +705,7 @@ int64_t getMaxOuterSizeForCurrentDevice()
     hipDeviceProp_t props{};
     EXPECT_EQ(hipGetDeviceProperties(&props, deviceId), hipSuccess);
 
-    return static_cast<int64_t>(props.maxGridSize[0])
-           / static_cast<int64_t>(GpuFpReferenceLayernorm::LOCAL_SIZE);
+    return static_cast<int64_t>(props.maxGridSize[0]);
 }
 
 } // namespace

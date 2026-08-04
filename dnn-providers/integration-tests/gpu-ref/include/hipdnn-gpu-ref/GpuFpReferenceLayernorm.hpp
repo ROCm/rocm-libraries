@@ -126,8 +126,8 @@ public:
         launchFprop(x.rawDeviceData(),
                     x.dims(),
                     x.strides(),
-                    scale->rawDeviceData(),
-                    bias->rawDeviceData(),
+                    scale == nullptr ? nullptr : scale->rawDeviceData(),
+                    bias == nullptr ? nullptr : bias->rawDeviceData(),
                     y.rawDeviceData(),
                     mean == nullptr ? nullptr : mean->rawDeviceData(),
                     rstd == nullptr ? nullptr : rstd->rawDeviceData(),
@@ -572,14 +572,14 @@ private:
 
         // Validate data types
         static_assert(IS_SUPPORTED_DATA_TYPE<XDataType>,
-                      "RMSNorm forward supports only float, half, and bfloat16 x data types.");
+                      "Layernorm forward supports only float, half, and bfloat16 x data types.");
         static_assert(IS_SUPPORTED_DATA_TYPE<YDataType>,
-                      "RMSNorm forward supports only float, half, and bfloat16 y data types.");
+                      "Layernorm forward supports only float, half, and bfloat16 y data types.");
         static_assert(
             IS_SUPPORTED_DATA_TYPE<ScaleBiasDataType>,
-            "RMSNorm forward supports only float, half, and bfloat16 scale/bias data types.");
+            "Layernorm forward supports only float, half, and bfloat16 scale/bias data types.");
         static_assert(IS_SUPPORTED_COMPUTE_DATA_TYPE<MeanRstdDataType>,
-                      "RMSNorm forward supports only double, float, half, and bfloat16 mean/rstd "
+                      "Layernorm forward supports only double, float, half, and bfloat16 mean/rstd "
                       "data types.");
     }
 
@@ -633,15 +633,16 @@ private:
 
         // Validate data types
         static_assert(IS_SUPPORTED_DATA_TYPE<XDataType>,
-                      "RMSNorm forward supports only float, half, and bfloat16 x data types.");
+                      "Layernorm backward supports only float, half, and bfloat16 x data types.");
         static_assert(IS_SUPPORTED_DATA_TYPE<YDataType>,
-                      "RMSNorm forward supports only float, half, and bfloat16 y data types.");
+                      "Layernorm backward supports only float, half, and bfloat16 y data types.");
         static_assert(
             IS_SUPPORTED_DATA_TYPE<ScaleBiasDataType>,
-            "RMSNorm forward supports only float, half, and bfloat16 scale/bias data types.");
-        static_assert(IS_SUPPORTED_COMPUTE_DATA_TYPE<MeanRstdDataType>,
-                      "RMSNorm forward supports only double, float, half, and bfloat16 mean/rstd "
-                      "data types.");
+            "Layernorm backward supports only float, half, and bfloat16 scale/bias data types.");
+        static_assert(
+            IS_SUPPORTED_COMPUTE_DATA_TYPE<MeanRstdDataType>,
+            "Layernorm backward supports only double, float, half, and bfloat16 mean/rstd "
+            "data types.");
     }
 
     // --- Kernel launchers (defined in GpuFpReferenceLayernorm.cpp) ---
