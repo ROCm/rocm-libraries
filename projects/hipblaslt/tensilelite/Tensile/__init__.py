@@ -30,7 +30,7 @@ from os import path
 __version__ = "5.0.0"
 
 # Compatibility-only filesystem-style paths. Production code that reads bundled
-# resources should use Tensile.Resources.
+# resources should use Tensile.resources.
 ROOT_PATH: str = path.dirname(__file__)
 SOURCE_PATH: str = path.join(ROOT_PATH, "Source")
 

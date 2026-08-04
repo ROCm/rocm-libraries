@@ -22,7 +22,7 @@
 #
 ################################################################################
 
-from .Resources import custom_kernel_names, custom_kernel_text
+from .resources import custom_kernel_names, custom_kernel_text
 from Tensile.Common.ValidParameters import checkParametersAreValid, validParameters, newMIValidParameters
 
 import yaml
