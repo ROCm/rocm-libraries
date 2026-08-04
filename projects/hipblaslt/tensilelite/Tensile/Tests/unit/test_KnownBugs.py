@@ -43,15 +43,28 @@ version: 1
 # ROCM-9999: example
 skips:
   - path: foo/bar.yaml
-    solution_index: 3
+    solution_name: Cijk_Ailk_Bljk_ExampleName
     ticket: ROCM-9999
 """,
         encoding="utf-8",
     )
     kb = load_known_bugs(p)
-    assert ("foo/bar.yaml", 3) in kb
-    assert is_known_bug(kb, Path("foo/bar.yaml"), 3)
-    assert not is_known_bug(kb, Path("foo/bar.yaml"), 4)
+    assert ("foo/bar.yaml", "Cijk_Ailk_Bljk_ExampleName") in kb
+    assert is_known_bug(kb, Path("foo/bar.yaml"), "Cijk_Ailk_Bljk_ExampleName")
+    assert not is_known_bug(kb, Path("foo/bar.yaml"), "Cijk_Ailk_Bljk_OtherName")
+    # A None solution name (solution has no SolutionNameMin) never matches.
+    assert not is_known_bug(kb, Path("foo/bar.yaml"), None)
+
+
+def test_load_known_bugs_requires_solution_name(tmp_path):
+    # An entry keyed only on the old solution_index is no longer accepted.
+    p = tmp_path / "legacy.yaml"
+    p.write_text(
+        "version: 1\nskips:\n  - path: foo/bar.yaml\n    solution_index: 3\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="requires string 'solution_name'"):
+        load_known_bugs(p)
 
 
 def test_load_known_bugs_invalid(tmp_path):
