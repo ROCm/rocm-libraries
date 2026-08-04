@@ -8,9 +8,9 @@
 
 // <thread>
 
-// class thread
+// class wthread
 
-// thread& operator=(thread&& t);
+// wthread& operator=(wthread&& t);
 
 #include <hip/thread>
 
@@ -18,8 +18,8 @@
 
 int main(int, char**)
 {
-    hip::thread t0;
-    hip::thread t1;
+    hip::wthread t0;
+    hip::wthread t1;
     t0 = t1;
     return 0;
 }

@@ -30,6 +30,7 @@
 // Memory ops and SALU use independent pipelines.
 //
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <climits>
 #include <cmath>
@@ -51,8 +52,50 @@ enum NonWmmaKind { kGlobalRead = 0, kLocalRead, kOther, kValu };
 // PassFeatureConfig sentinel values (0 / INT_MAX). Explicit non-sentinel config wins.
 constexpr int kCdna5DsReadQueueDepth = 16;
 constexpr int kCdna5DsReadDrainLatency = 72;
+constexpr int kCdna5DsReadThrottleLatency = 72;
 constexpr int kCdna5DsReadPerWmma = 3;
 constexpr int kCdna5GlobalReadPerWmma = 1;
+
+// -------------------------------------------------------------------------
+// Hardware hazard rules: a fixed cycle gap required between a producer writing a
+// register and a specific class of consumer reading it as a source (not either op's
+// own issue/latency cycles — a producer->consumer edge gap). Data-driven so a new
+// hazard pair is a new table row, not new code. Consumer-side correctness (the gate in
+// CDNA5ReadyQueue::hazardGates_) is unconditional regardless of scheduling order;
+// producer-side hoisting (CDNA5ReadyQueue::decidePromote(), via DAGNode::hazardDeadline)
+// is a throughput heuristic layered on top, never required for correctness.
+// -------------------------------------------------------------------------
+struct HazardRule {
+    const char* name;
+    bool (*isProducer)(const StinkyInstruction&);
+    bool (*isConsumer)(const StinkyInstruction&);
+    RegType regType;
+    int cycles;
+};
+
+// SALU sgpr -> any SMEM/tensor_load/VMEM address (s_load, tensor_load, global_read...).
+// isGlobalMemLoad already covers SMemLoad + MUBUF/FLAT/GLOBAL loads; tensor_load is a
+// separate flag (IF_TENSORLoadToLds). Tensor_load and SMEM addresses are sgpr-only;
+// VMEM addresses can also carry a vgpr offset, covered separately below.
+static inline bool isSaluHazardConsumer(const StinkyInstruction& inst) {
+    return isGlobalMemLoad(inst) || isTensorLoad(inst);
+}
+
+// VMEM vgpr-address consumers: buffer/flat/global loads plus global_prefetch_b8, whose
+// vaddr is a vgpr. The prefetch is not a load (no dest, not IF_GLOBALLoad), so it is
+// listed explicitly rather than folded into isBufferMemLoad.
+static inline bool isVmemAddrHazardConsumer(const StinkyInstruction& inst) {
+    return isBufferMemLoad(inst) || isGlobalPrefetch(inst);
+}
+
+static constexpr HazardRule kCdna5HazardRules[] = {
+    {"SaluSgprToMemAddr", isScalarALU, isSaluHazardConsumer, RegType::S, 8},
+    // VALU vgpr -> VMEM address (global_read/MUBUF/FLAT/GLOBAL). Excludes SMEM/tensor_load:
+    // those addresses are sgpr-only, never vgpr.
+    {"ValuVgprToVmemAddr", isVectorALU, isVmemAddrHazardConsumer, RegType::V, 32},
+};
+constexpr int kNumCdna5HazardRules =
+    static_cast<int>(sizeof(kCdna5HazardRules) / sizeof(kCdna5HazardRules[0]));
 
 // -------------------------------------------------------------------------
 // Prefix / loop analysis (free functions; no CDNA5ReadyQueue state)
@@ -283,12 +326,19 @@ class CDNA5ReadyQueue : public ReadyQueue {
         const int cfg = getPassContext().getPassFeatureConfig().dagFeatures.dsReadDrainLatency;
         return cfg > 0 ? cfg : kCdna5DsReadDrainLatency;
     }
+    int dsReadThrottleLatency() const {
+        const int cfg = getPassContext().getPassFeatureConfig().dagFeatures.dsReadThrottleLatency;
+        return cfg > 0 ? cfg : kCdna5DsReadThrottleLatency;
+    }
     int dsReadPerWmma() const {
         const int cfg = getPassContext().getPassFeatureConfig().dagFeatures.dsReadPerWmma;
         return cfg < INT_MAX ? cfg : kCdna5DsReadPerWmma;
     }
     bool dsReadQueueFull() const {
         return dsReadInflight_.full();
+    }
+    int dsReadThrottleWait() const {
+        return dsReadInflight_.throttleWait();
     }
 
     // --- VALU co-issue timeline tracker ---
@@ -299,15 +349,39 @@ class CDNA5ReadyQueue : public ReadyQueue {
     // activeWmmaLatency_). Used to detect ds_load dest / WMMA src VGPR overlap hazards.
     DAGNode* activeWmmaNode_ = nullptr;
 
+    // VGPR-MSB bank currently in effect (mirrors InsertVgprMsbPass); updated on issue,
+    // reset per region. pickFreeBest prefers a free candidate matching it. -1 = unknown.
+    int currentMsb_ = -1;
+
     // --- Per-WMMA-window DS cap (dagFeatures.dsReadPerWmma) ---
     int maxDsPerWmmaWindow_ = 0;
     int dsInsertedSinceLastWmma_ = 0;
+    // Per-window override for maxDsPerWmmaWindow_; empty => use the flat value.
+    std::vector<int> dsTargetPerWindow_;
 
     // (A) RAW data-ready gate. Per reg index: remaining modeled latency until a
     // producer's result is safe to consume (e.g. ds_load LDS->VGPR, 56 cyc). Any
     // long-latency producer stamps it; a consumer whose src is still in flight is not
     // "free". Decays in advanceTime. Crosses BBs via BBScheduleState.dsResiduals.
     std::map<int, int> regDataReadyCounters;
+
+    // Hazard gates, one independent lane per kCdna5HazardRules entry. Per reg key:
+    // remaining cycles until a rule.isConsumer instruction may read it (stamped
+    // rule.cycles when a flagged producer issues). Kept SEPARATE per rule (and
+    // separate from regDataReadyCounters) because each hazard is consumer-type- and
+    // register-file-specific: e.g. a VALU/SALU reading the same sgpr a flagged SALU
+    // just wrote is not gated by the SaluSgprToMemAddr lane. Decays in advanceTime.
+    std::array<std::map<int, int>, kNumCdna5HazardRules> hazardGates_;
+
+    // Ready, flagged (non-empty hazardFlags), not-yet-issued hazard producers, tracked
+    // so decidePromote() doesn't need to scan every queue each pick to find the ones
+    // whose hazardDeadline might have arrived. Populated in push(), erased once the
+    // node is picked (popNonWmma).
+    struct HazardHoistCandidate {
+        DAGNode* node;
+        int kind;  // NonWmmaKind: which queue this producer sits in (kOther or kValu).
+    };
+    std::vector<HazardHoistCandidate> hazardHoistCandidates_;
 
     // (B) elapse-time ordering. Timeline (advanceTime clock) at which each reg was last
     // touched by any operand (dst or src) of an issued instruction. Used to order
@@ -348,6 +422,9 @@ class CDNA5ReadyQueue : public ReadyQueue {
     // and the exact node that phase will issue. Read via isPromote() to gate the phases.
     PromotePhase promotedPhase_ = PromotePhase::None;
     DAGNode* promotedNode_ = nullptr;
+    // Valid only when promotedPhase_ == PromotePhase::NonWmmaFill via the hazard-hoist
+    // case: which queue (NonWmmaKind: kOther or kValu) promotedNode_ must be popped from.
+    int promotedKind_ = -1;
 
     std::map<int, int> crossBBDsResiduals_;
 
@@ -357,6 +434,7 @@ class CDNA5ReadyQueue : public ReadyQueue {
     void stampDataReady(const StinkyInstruction& inst);
     void touchOperands(const StinkyInstruction& inst);
     int getMaxSrcDataWait(DAGNode* node) const;
+    int getHazardWait(DAGNode* node) const;
     bool destOverlapsActiveWmmaSrc(DAGNode* node) const;
     int nodeElapseKey(DAGNode* node) const;
     DAGNode* pickFreeBest(const ReadySetByDAGid& queue, int* outWait = nullptr,
@@ -366,7 +444,8 @@ class CDNA5ReadyQueue : public ReadyQueue {
     bool findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** outNode, int* kindOut,
                                      int* outWait = nullptr) const;
 
-    bool findOldestFallbackNonWmma(DAGNode* pickedDS, DAGNode** outNode, int* kindOut) const;
+    bool findOldestFallbackNonWmma(DAGNode* pickedDS, DAGNode** outNode, int* kindOut,
+                                   int* outWait = nullptr) const;
 
     // Promotion = split the old forced-barrier phase into a pure decision + a per-phase
     // gate, run once before the normal phases. decidePromote() records which phase must
@@ -375,8 +454,11 @@ class CDNA5ReadyQueue : public ReadyQueue {
     // nothing is promoted every phase runs normally; when something is promoted only
     // that phase runs, so the promoted node issues through its own existing phase (one
     // entry point), never a second dedicated path. A new forcing rule is a new case in
-    // decidePromote(), not a new phase. Currently the only promotion is a barrier whose
-    // per-barrier WMMA-issued threshold is met (formerly the forced-barrier phase).
+    // decidePromote(), not a new phase. Two promotions: a barrier whose per-barrier
+    // WMMA-issued threshold is met (formerly the forced-barrier phase), and a
+    // hazard-hoist producer whose live clock_ has reached its hazardDeadline (forces
+    // the producer to issue now, through its own NonWmmaFill phase, so it lands before
+    // its hazarded consumer needs the gap instead of after).
     void decidePromote();
     bool isPromote(PromotePhase phase) const {
         return promotedPhase_ == PromotePhase::None || promotedPhase_ == phase;
@@ -420,6 +502,15 @@ void CDNA5ReadyQueue::advanceTime(int cycles) {
             it = regDataReadyCounters.erase(it);
         else
             ++it;
+    }
+    for (auto& gate : hazardGates_) {
+        for (auto it = gate.begin(); it != gate.end();) {
+            it->second -= cycles;
+            if (it->second <= 0)
+                it = gate.erase(it);
+            else
+                ++it;
+        }
     }
 }
 
@@ -472,7 +563,7 @@ DAGNode* CDNA5ReadyQueue::popNonWmma(DAGNode* node, int pickKind) {
         if (globalReadQueueDepth() > 0) globalReadInflight_.push(globalReadDrainLatency());
     } else if (pickKind == kLocalRead) {
         localReadQueue.erase(node);
-        dsReadInflight_.push(dsReadDrainLatency());
+        dsReadInflight_.pushWithThrottle(dsReadThrottleLatency());
         dsInsertedSinceLastWmma_++;
     } else if (pickKind == kOther) {
         otherQueue.erase(node);
@@ -485,6 +576,24 @@ DAGNode* CDNA5ReadyQueue::popNonWmma(DAGNode* node, int pickKind) {
     touchOperands(*node->inst);
     updateWMMAStatus(node);
     stampDataReady(*node->inst);
+    // Advance the tracked MSB bank; ops with no opinion (-1) leave it unchanged.
+    if (node->requiredMsb != -1) currentMsb_ = node->requiredMsb;
+    // Hazard gates: stamp exactly the (rule, register) pairs the pre-scan found a
+    // rule.isConsumer instruction reads from this producer, so that consumer's pick
+    // waits the fixed hazard out. Per-rule lane (not regDataReadyCounters) so an
+    // unrelated instruction reading the same register is not wrongly gated.
+    for (const HazardFlag& hf : node->hazardFlags)
+        // rule.cycles == -1 ("hoist as far as possible"): the strategy is producer-side
+        // hoisting (deadline forced to 0 in the pre-scan), not a consumer-side hold, so
+        // clamp the gate to 0 rather than stamping a negative wait.
+        hazardGates_[hf.ruleIdx][hf.regKey] = std::max(0, kCdna5HazardRules[hf.ruleIdx].cycles);
+    // No longer a live hoist candidate once issued (decidePromote() must not try to
+    // force it again).
+    if (!node->hazardFlags.empty()) {
+        auto it = std::find_if(hazardHoistCandidates_.begin(), hazardHoistCandidates_.end(),
+                               [node](const HazardHoistCandidate& hc) { return hc.node == node; });
+        if (it != hazardHoistCandidates_.end()) hazardHoistCandidates_.erase(it);
+    }
     if (deferHeadBalanceThisRegion_) deferFirstHeadWmmaActive_ = false;
     return node;
 }
@@ -534,6 +643,30 @@ int CDNA5ReadyQueue::getMaxSrcDataWait(DAGNode* node) const {
     return maxLat;
 }
 
+// Hazard gate: max remaining hazard cycles over \p node's sources, across every rule
+// where \p node's instruction matches rule.isConsumer. Returns 0 when \p node may issue
+// now with respect to every hazard rule, >0 when it must still wait for some flagged
+// producer's write to clear the hardware gap. Consulted for any candidate that could be
+// a hazarded consumer (tensor_load/s_load/global_read/etc. — see call sites in
+// pickFreeBest and findSmallestPickableNonWmma).
+int CDNA5ReadyQueue::getHazardWait(DAGNode* node) const {
+    int maxLat = 0;
+    for (int ruleIdx = 0; ruleIdx < kNumCdna5HazardRules; ++ruleIdx) {
+        const HazardRule& rule = kCdna5HazardRules[ruleIdx];
+        const auto& gate = hazardGates_[ruleIdx];
+        if (gate.empty() || !rule.isConsumer(*node->inst)) continue;
+        for (const StinkyRegister& srcReg : node->inst->getSrcRegs()) {
+            if (!srcReg.isRegister() || isPseudoReg(srcReg) || srcReg.reg.type != rule.regType)
+                continue;
+            for (unsigned off = 0; off < srcReg.reg.num; ++off) {
+                auto it = gate.find(regDepKey(srcReg.reg.type, srcReg.reg.idx + off));
+                if (it != gate.end() && it->second > maxLat) maxLat = it->second;
+            }
+        }
+    }
+    return maxLat;
+}
+
 // True if issuing \p node now would risk a co-execution hazard: while the WMMA that
 // opened the current latency window is still in flight, \p node's dest VGPRs overlap
 // that WMMA's src VGPRs, so the write could clobber a source the WMMA is still reading.
@@ -568,37 +701,51 @@ int CDNA5ReadyQueue::nodeElapseKey(DAGNode* node) const {
     return minElapse;
 }
 
-// Best issuable node in \p queue: RAW-free nodes are preferred; when none is free
-// and \p allowHiddenStall is set, a node whose remaining src RAW wait still fits
-// under the active WMMA's latency shadow is also eligible (the wait is hidden by
-// the in-flight WMMA, so it is free to co-issue). Within the same free/hazard tier
-// the operand touched longest ago wins (largest elapse), tie broken by DAG id.
+// Best issuable node in \p queue: RAW/hazard-free nodes are preferred; when none is
+// free and \p allowHiddenStall is set, a node whose remaining wait (RAW data-ready or
+// hazard-gate, whichever is larger) still fits under the active WMMA's latency shadow
+// is also eligible (the wait is hidden by the in-flight WMMA, so it is free to
+// co-issue). Within the same free/hazard tier the operand touched longest ago wins
+// (largest elapse), tie broken by DAG id. Producer-side hazard hoisting is handled
+// separately by decidePromote(), not here — this function only decides whether a
+// candidate is safe to issue *now*, not whether it should be forced early.
 // \p outWait (optional) receives the cycles the caller must advanceTime() before
-// issuing the returned node (0 for a RAW-free pick). Returns nullptr if none is
-// eligible.
+// issuing the returned node (0 for a free pick). Returns nullptr if none is eligible.
 DAGNode* CDNA5ReadyQueue::pickFreeBest(const ReadySetByDAGid& queue, int* outWait,
                                        bool allowHiddenStall) const {
     const int coIssueSpace = activeWmmaLatency_ - coIssueCyclePos_;
     DAGNode* best = nullptr;
     int bestElapse = INT_MIN;
     int bestWait = 0;
+    int bestAff = 0;
     for (DAGNode* n : queue) {  // iterates smallest-id first, so ties keep the oldest id
-        const int wait = getMaxSrcDataWait(n);
-        // Tolerate a src RAW hazard only if its wait fits the WMMA latency shadow
-        // and the dest does not clobber a live WMMA src (then the stall is free).
+        const int wait = std::max(getMaxSrcDataWait(n), getHazardWait(n));
+        // Tolerate a wait only if it fits the WMMA latency shadow and the dest does
+        // not clobber a live WMMA src (then the stall is free).
         if (wait > 0 && (!allowHiddenStall || coIssueSpace <= 0 || wait > coIssueSpace ||
                          destOverlapsActiveWmmaSrc(n)))
             continue;
         const int elapse = nodeElapseKey(n);
-        // Free nodes rank above hidden-stall ones; within a tier, largest elapse wins.
+        // MSB bank affinity: a tiebreak BELOW the free/hazard tier and ABOVE elapse —
+        // prefer a same-bank candidate to avoid an s_set_vgpr_msb switch. Inert when
+        // currentMsb_ == -1 (nothing matches), so unchanged behavior until a real tie.
+        const int aff = (n->requiredMsb != -1 && n->requiredMsb == currentMsb_) ? 1 : 0;
+        // Free nodes rank above hidden-stall ones; within a tier, prefer same-bank
+        // (larger aff), then largest elapse.
         const bool nHazard = wait > 0;
         const bool curHazard = bestWait > 0;
-        const bool better = (best == nullptr) || (!nHazard && curHazard) ||
-                            (nHazard == curHazard && elapse > bestElapse);
+        bool better;
+        if (best == nullptr)
+            better = true;
+        else
+            better = (!nHazard && curHazard) ||
+                     (nHazard == curHazard &&
+                      (aff > bestAff || (aff == bestAff && elapse > bestElapse)));
         if (better) {
             best = n;
             bestElapse = elapse;
             bestWait = wait;
+            bestAff = aff;
         }
     }
     if (best && outWait) *outWait = bestWait;
@@ -636,7 +783,7 @@ DAGNode* CDNA5ReadyQueue::pickOneFromWMMA(DAGNode* pick) {
     // consume the time that is not used by the WMMA
     if (coIssueCyclePos_ < activeWmmaLatency_) advanceTime(activeWmmaLatency_ - coIssueCyclePos_);
 
-    activeCoIssueWindow_ = node->inst->hwInstDesc->coIssueWindow;
+    activeCoIssueWindow_ = node->inst->coIssueWindow;
     coIssueCyclePos_ = 0;
     activeWmmaLatency_ = node->inst->latencyCycles;
     activeWmmaNode_ = node;
@@ -656,6 +803,7 @@ DAGNode* CDNA5ReadyQueue::pickOneFromWMMA(DAGNode* pick) {
     // (B) elapse: record the timeline touch for all its operands.
     stampDataReady(*node->inst);
     touchOperands(*node->inst);
+    if (node->requiredMsb != -1) currentMsb_ = node->requiredMsb;
     return node;
 }
 
@@ -677,7 +825,10 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
     int kind = -1;
     int bestWait = 0;
 
-    // Free work beats a hidden-stall candidate; within a tier, smallest DAG id.
+    // Ordering, highest key first: (1) free work beats a hidden-stall candidate;
+    // (2) smallest id. Producer-side hazard hoisting is handled separately by
+    // decidePromote(), not here — a flagged producer competes on equal terms with
+    // everything else unless/until decidePromote() forces it.
     auto consider = [&](DAGNode* cand, int candKind, int candWait) {
         if (!cand) return;
         const bool candHazard = candWait > 0;
@@ -698,18 +849,31 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
 
     // Per-WMMA-window DS cap (rule 4) only spreads ds_loads across an active WMMA
     // co-issue window; it is meaningless when no WMMA is available to issue, so it
-    // is applied only while a WMMA is pending. Otherwise ds_loads drain freely,
-    // bounded only by the real hardware limiter dsReadQueueFull().
-    const bool dsCapReached = !wmmaQueue.empty() && dsInsertedSinceLastWmma_ >= maxDsPerWmmaWindow_;
-    bool dsWindowOk =
-        pickedDS && !dsCapReached && !dsReadQueueFull() && !destOverlapsActiveWmmaSrc(pickedDS);
+    // is applied only while a WMMA is pending. When the DS queue reaches depth,
+    // ds_load can still issue, but is throttled to dsReadDrainLatency/dsReadQueueDepth.
+    int windowCap = maxDsPerWmmaWindow_;
+    if (!dsTargetPerWindow_.empty()) {
+        const int w = std::min((int)wmmaIssuedCountThisRegion_, (int)dsTargetPerWindow_.size() - 1);
+        windowCap = dsTargetPerWindow_[w];
+    }
+    const bool dsCapReached = !wmmaQueue.empty() && dsInsertedSinceLastWmma_ >= windowCap;
+    const bool dsBaseOk = pickedDS && !dsCapReached && !destOverlapsActiveWmmaSrc(pickedDS);
+    int dsThrottleWait = 0;
+    if (dsBaseOk) {
+        dsThrottleWait = dsReadThrottleWait();
+        consider(pickedDS, kLocalRead, dsThrottleWait);
+    }
+    const bool dsWindowOk = dsBaseOk && dsThrottleWait == 0;
 
     if (!globalReadQueue.empty() && !globalReadQueueFull() &&
         (globalReadCounter < globalReadPerWMMA || otherQueue.empty())) {
-        consider(globalReadQueue.top(), kGlobalRead, 0);
+        // A tensor_load whose source is still inside a live hazard-gate window carries
+        // that wait, so it ranks as a hidden-stall candidate and defers behind free
+        // work (whatever fills the gap). It is still eligible when nothing else can
+        // go, paying the remaining wait before issue.
+        DAGNode* gr = globalReadQueue.top();
+        consider(gr, kGlobalRead, getHazardWait(gr));
     }
-    if (dsWindowOk) consider(pickedDS, kLocalRead, 0);
-
     // SALU/other allows hidden stalls (see pickFreeBest); VALU stays RAW-free-only.
     int otherWait = 0;
     if (DAGNode* t = pickFreeBest(otherQueue, &otherWait, /*allowHiddenStall=*/true)) {
@@ -728,20 +892,25 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
     return true;
 }
 
-// Final-fallback candidate search across non-WMMA queues.
+// Final-fallback candidate search across non-WMMA queues. Ranks by smallest
+// outstanding wait (not DAG id) so real work fills gaps where possible.
 // kind: 0=global, 1=local, 2=other, 3=valu.
-bool CDNA5ReadyQueue::findOldestFallbackNonWmma(DAGNode* pickedDS, DAGNode** outNode,
-                                                int* kindOut) const {
+bool CDNA5ReadyQueue::findOldestFallbackNonWmma(DAGNode* pickedDS, DAGNode** outNode, int* kindOut,
+                                                int* outWait) const {
     *outNode = nullptr;
     *kindOut = -1;
+    if (outWait) *outWait = 0;
     DAGNode* best = nullptr;
     int kind = -1;
+    int bestWait = 0;
 
     auto consider = [&](DAGNode* cand, int candKind) {
         if (cand == nullptr) return;
-        if (best == nullptr || cand->id < best->id) {
+        const int wait = std::max(getMaxSrcDataWait(cand), getHazardWait(cand));
+        if (best == nullptr || wait < bestWait || (wait == bestWait && cand->id < best->id)) {
             best = cand;
             kind = candKind;
+            bestWait = wait;
         }
     };
 
@@ -753,17 +922,22 @@ bool CDNA5ReadyQueue::findOldestFallbackNonWmma(DAGNode* pickedDS, DAGNode** out
     if (best == nullptr) return false;
     *outNode = best;
     *kindOut = kind;
+    if (outWait) *outWait = bestWait;
     return true;
 }
 
 // Pure promotion decision, run once at the top of each pickOne(). Records which phase
-// must fire now and the exact node it will issue, without mutating any queue. Currently
-// the sole rule: a barrier whose WMMA-issued threshold is met is promoted (this is what
-// the dedicated forced-barrier phase used to do ahead of WMMA). Add further forcing
-// rules here as new PromotePhase cases.
+// must fire now and the exact node it will issue, without mutating any queue. Two
+// rules: (1) a barrier whose WMMA-issued threshold is met (this is what the dedicated
+// forced-barrier phase used to do ahead of WMMA); (2) a hazard-hoist producer whose
+// live clock_ has reached its hazardDeadline -- forces the producer to issue now,
+// through its own NonWmmaFill phase, so it lands before its hazarded consumer needs
+// the gap instead of after. Add further forcing rules here as new PromotePhase cases
+// (or new decisions within an existing phase, as below).
 void CDNA5ReadyQueue::decidePromote() {
     promotedPhase_ = PromotePhase::None;
     promotedNode_ = nullptr;
+    promotedKind_ = -1;
 
     if (!barrierQueue.empty() && !barrierWmmaThresholds_.empty()) {
         for (DAGNode* node : barrierQueue) {
@@ -772,9 +946,44 @@ void CDNA5ReadyQueue::decidePromote() {
                 wmmaIssuedCountThisRegion_ >= thIt->second) {
                 promotedPhase_ = PromotePhase::Barrier;
                 promotedNode_ = node;
+                PASS_DEBUG(std::cerr << "[CDNA5 decidePromote] promote barrier=" << node->inst
+                                     << " wmmaIssuedCountThisRegion_=" << wmmaIssuedCountThisRegion_
+                                     << " threshold=" << thIt->second << "\n");
                 return;
             }
         }
+    }
+
+    // Hazard hoist: fires once the live elapse clock reaches this producer's
+    // hazardDeadline, or earlier if a pending WMMA would otherwise jump clock_ past
+    // it first (a WMMA can otherwise steal the slot right before the deadline).
+    // Deliberately clock_-based, not a proxy node's readiness: clock_ only advances
+    // via cycles actually issued (advanceTime, called on every real pick), so it can't
+    // run ahead of the true schedule the way "some node's inDegree hit 0" can when
+    // that node is structurally unblocked long before it is actually picked. Before
+    // the deadline, the producer competes as ordinary work -- no special priority --
+    // so it never crowds out ds/wmma while it still has slack. Also requires the
+    // producer to be genuinely free to issue right now (no outstanding RAW/hazard
+    // wait of its own, and no WMMA-src overlap) -- this is a throughput heuristic
+    // layered on an unconditionally-correct consumer-side gate, so it must never
+    // force an otherwise-unsafe issue; missing the deadline just costs a later
+    // explicit stall via that gate.
+    for (const HazardHoistCandidate& hc : hazardHoistCandidates_) {
+        bool deadlineReached = clock_ >= hc.node->hazardDeadline;
+        if (!deadlineReached && !wmmaQueue.empty()) {
+            auto [bestWMMA, bestLatency] = findMostReadyWMMA();
+            if (bestWMMA && bestLatency <= 0 &&
+                clock_ + bestWMMA->inst->latencyCycles > hc.node->hazardDeadline) {
+                deadlineReached = true;
+            }
+        }
+        if (!deadlineReached) continue;
+        if (getMaxSrcDataWait(hc.node) > 0 || getHazardWait(hc.node) > 0) continue;
+        if (destOverlapsActiveWmmaSrc(hc.node)) continue;
+        promotedPhase_ = PromotePhase::NonWmmaFill;
+        promotedNode_ = hc.node;
+        promotedKind_ = hc.kind;
+        return;
     }
 }
 
@@ -802,9 +1011,12 @@ int CDNA5ReadyQueue::computeWmmaWindowsNeeded(int dsLoadCount) const {
     const int maxDsPerWmmaWindow = dsReadPerWmma();
     int wmmaWindowsNeeded = (dsLoadCount + maxDsPerWmmaWindow - 1) / maxDsPerWmmaWindow;
     if (dsLoadCount > dsReadQueueDepth()) {
-        const float cyclePerDs = (float)dsReadDrainLatency() / (float)dsReadQueueDepth();
+        const float cyclePerDs = (float)dsReadThrottleLatency() / (float)dsReadQueueDepth();
         const float cyclesNeeded = cyclePerDs * (dsLoadCount - dsReadQueueDepth());
-        wmmaWindowsNeeded += (int)std::ceil(cyclesNeeded / (float)wmmaIssueConfig.latency);
+        const float baseWindows =
+            (float)(dsReadQueueDepth() + maxDsPerWmmaWindow - 1) / (float)maxDsPerWmmaWindow;
+        const float latencyWindows = cyclesNeeded / (float)wmmaIssueConfig.latency;
+        wmmaWindowsNeeded = (int)std::ceil(baseWindows + latencyWindows);
     }
     return wmmaWindowsNeeded;
 }
@@ -1240,6 +1452,19 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
 
     // Phase C+D — NonWmmaFill: fill with non-WMMA work (inside then outside the window).
     if (isPromote(PromotePhase::NonWmmaFill)) {
+        // Hazard-hoist promotion: decidePromote() found a flagged producer whose
+        // hazardDeadline the live clock_ has reached, and confirmed it's genuinely
+        // free to issue now. Issue it directly through this, its own existing phase —
+        // no separate entry point — bypassing the normal findSmallestPickableNonWmma
+        // selection (which would otherwise rank it as ordinary work and might not pick
+        // it this cycle, missing the deadline).
+        if (promotedPhase_ == PromotePhase::NonWmmaFill && promotedNode_) {
+            PASS_DEBUG(std::cerr << "[CDNA5 pickOne] hazard-hoist promoted dagId="
+                                 << promotedNode_->id << " kind=" << promotedKind_ << " deadline="
+                                 << promotedNode_->hazardDeadline << " clock=" << clock_ << "\n");
+            return rememberPick(popNonWmma(promotedNode_, promotedKind_));
+        }
+
         // Phase C — inside WMMA latency window.
         if (coIssueCyclePos_ < activeWmmaLatency_) {
             DAGNode* smallestPickable = nullptr;
@@ -1295,20 +1520,21 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
         return rememberPick(barrier);
     }
 
-    // Phase G — final safety net: force-pick the oldest DAG node to guarantee progress.
+    // Phase G — final safety net: force-pick the least-blocked ready node to
+    // guarantee progress.
     DAGNode* fallback = nullptr;
     int fallbackKind = -1;
-    if (findOldestFallbackNonWmma(pickedDS, &fallback, &fallbackKind)) {
-        // Safety net must guarantee progress, so the global-read gate is not
-        // applied here. If a tensor load is the only remaining work but the
-        // credit pool is full, idle until the earliest credit drains so the
-        // pick below stays within the queue depth.
-        if (fallbackKind == kGlobalRead && globalReadQueueFull()) {
-            int minDrain = globalReadInflight_.minResidual();
-            if (minDrain > 0) advanceTime(minDrain);
-        }
+    int fallbackWait = 0;
+    if (findOldestFallbackNonWmma(pickedDS, &fallback, &fallbackKind, &fallbackWait)) {
+        // Throttle (queue depth) is skipped for progress, but the hazard gate is
+        // unconditional (see kCdna5HazardRules) and still has to be paid here too.
+        int waitCycles = fallbackWait;
+        if (fallbackKind == kGlobalRead && globalReadQueueFull())
+            waitCycles = std::max(waitCycles, globalReadInflight_.minResidual());
+        if (fallbackKind == kLocalRead) waitCycles = std::max(waitCycles, dsReadThrottleWait());
+        if (waitCycles > 0) advanceTime(waitCycles);
         PASS_DEBUG(std::cerr << "[CDNA5 pickOne] Phase G fallback pick dagId=" << fallback->id
-                             << " kind=" << fallbackKind << "\n");
+                             << " kind=" << fallbackKind << " wait=" << waitCycles << "\n");
         return rememberPick(popNonWmma(fallback, fallbackKind));
     }
 
@@ -1336,6 +1562,7 @@ void CDNA5ReadyQueue::push(DAGNode* node) {
 
     if (isVectorALU(*node->inst) || isTranscendental(*node->inst)) {
         valuQueue.push(node);
+        if (!node->hazardFlags.empty()) hazardHoistCandidates_.push_back({node, kValu});
         return;
     }
 
@@ -1345,6 +1572,7 @@ void CDNA5ReadyQueue::push(DAGNode* node) {
     }
 
     otherQueue.push(node);
+    if (!node->hazardFlags.empty()) hazardHoistCandidates_.push_back({node, kOther});
 }
 
 bool CDNA5ReadyQueue::empty() const {
@@ -1364,6 +1592,10 @@ void CDNA5ReadyQueue::onInit(IRList::iterator regionStart, IRList::iterator regi
     activeWmmaNode_ = nullptr;
     globalReadInflight_ = InFlightQueue(globalReadQueueDepth());
     dsReadInflight_ = InFlightQueue(dsReadQueueDepth());
+    const int dsDepth = dsReadQueueDepth();
+    const double dsThrottleInterval =
+        dsDepth > 0 ? (double)dsReadThrottleLatency() / (double)dsDepth : 0.0;
+    dsReadInflight_.setThrottleInterval(dsThrottleInterval);
 
     currentBB_ = (regionStart != regionEnd) ? regionStart->getParent() : nullptr;
 
@@ -1446,8 +1678,16 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
     // region starts with all regs "very old" (no spurious deferrals from a prior region).
     regLastTouch_.clear();
     clock_ = 0;
+    // Per-region: MSB state is not carried across a region boundary (side-effect cut).
+    currentMsb_ = -1;
     // Clear per-region node ptr; it dangles into the previous region's freed DAGNodeList.
     activeWmmaNode_ = nullptr;
+    // Hazard state is per-region: hazardHoistCandidates_ holds DAGNode* into the prior
+    // region's freed DAGNodeList, and any in-flight gate window is already locked into
+    // the prior region's fixed instruction order (region boundaries are side-effect
+    // cuts — no reordering crosses them), so it has nothing left to gate here.
+    hazardHoistCandidates_.clear();
+    for (auto& gate : hazardGates_) gate.clear();
     if (getPassContext().getPassFeatureConfig().loopConfig.unrollGemm == false) return;
 
     const Loop* loop = getLoop();
@@ -1469,6 +1709,9 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
             hasWMMAInRegion_ = true;
         }
     }
+
+    // Flat fill (one entry per window); a later commit computes per-window targets.
+    dsTargetPerWindow_.assign(wmmaIssueConfig.issuedCount + 1, dsReadPerWmma());
 
     barrierWmmaThresholds_.clear();
     barrierDsLoadCounts_.clear();
