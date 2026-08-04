@@ -138,7 +138,7 @@ private:
         // Launch the appropriate rocrand_generate_uniform function based on the data type
         if constexpr(std::is_same_v<T, hipdnn_data_sdk::types::bfloat16>)
         {
-            detail::HipDeviceBuffer<float> scratch(count);
+            const detail::HipDeviceBuffer<float> scratch(count);
 
             detail::throwOnRocRandError(
                 rocrand_generate_uniform(gen.generator, scratch.data, count),
@@ -157,7 +157,7 @@ private:
         else if constexpr(std::is_same_v<T, hipdnn_data_sdk::types::half>)
         {
             detail::throwOnRocRandError(
-                rocrand_generate_uniform_half(gen.generator, static_cast<_Float16*>(dstPtr), count),
+                rocrand_generate_uniform_half(gen.generator, static_cast<half*>(dstPtr), count),
                 "rocrand_generate_uniform_half");
 
             launchScaleUniform<T>(dstPtr, dstPtr, count, minValue, maxValue);
