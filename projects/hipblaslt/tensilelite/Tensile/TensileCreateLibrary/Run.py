@@ -817,24 +817,27 @@ def renameFallbacksPerArch(masterLibraries) -> None:
 def deferCyclicGC():
     """Suspend cyclic garbage collection while a large object graph is loaded.
 
-    The logic-loading loop pulls every parsed library back from the worker
-    processes and keeps it for the rest of the run. Python's cyclic collector
-    walks the whole live heap on each pass, so as the graph grows the receive
-    loop turns superlinear: it costs 0.59 ms per solution at 3.9k solutions but
-    2.74 ms at 161k. On a 297-file / 161k-solution load that is 67,591 gen-0
-    collections and 447 s of a 474 s phase, against 63 s with collection
-    suspended.
+    Note that this operates under the premise that the objects loaded during
+    the lifetime of the context manager are needed later in the program and
+    should not be freed when the context manager exits.
 
-    Nothing leaks by not collecting here: the graph stays reachable until
-    TensileCreateLibrary exits, so the collector was reclaiming nothing. Peak
-    RSS is unchanged (41.62 GiB vs 41.64 GiB with the collector running).
+    On entering the context manager, we "freeze" garbage collection, which
+    means that the garbage collector will consider all currently existing
+    objects as permanent residents. It will also improve memory sharing with
+    child processes in some situations, see
+    https://docs.python.org/3/library/gc.html#gc.freeze. Then, we disable
+    garbage collection.
 
-    The trailing freeze() is load-bearing. It moves the loaded graph into the
-    permanent generation so later collections skip it; re-enabling with
-    unfreeze() instead hands the graph straight back to the collector, which
-    then spends ~95 s rescanning it and gives back a third of the win. The
-    leading freeze() does the same for objects that already existed, and also
-    improves copy-on-write sharing for the workers forked inside this block.
+    The `finally` block is entered after the code wrapped by this context
+    manager has finished (or raised an exception).
+    We freeze the currently existing objects again and re-enable garbage
+    collection in case it was enabled before. This converts the objects that
+    got added in the meantime to permanent residents, and, thus, avoids them to
+    be analyzed by garbage collection now (remember that they shouldn't be
+    freed at this point, anyway).
+    We also register an exit hook, such that we "unfreeze" the "frozen" objects
+    on program exit and make them available to be garbage collected. This makes
+    leak checking tooling happy.
     """
     wasEnabled = gc.isenabled()
     gc.freeze()
