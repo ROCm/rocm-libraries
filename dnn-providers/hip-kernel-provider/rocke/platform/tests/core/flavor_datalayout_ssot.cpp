@@ -10,11 +10,11 @@
  * (lower_llvm/data.cpp, what the lowerer stamps into the module header).
  * Python has one function, _datalayout_for_flavor, that both of its layers
  * call. Two copies of a string table is a drift hazard with no natural
- * failure: llvm23 currently aliases the llvm22 layout, so an llvm23 branch
- * missing from one table emits *correct* IR today and silently wrong IR the
- * day LLVM 23 moves off that shape. This test makes the two agree by
- * construction over the whole flavor ladder, so adding a rung or changing a
- * layout has to be done in both places.
+ * failure: an llvm23 branch missing from one table can emit IR that differs
+ * only in a field the runtime tolerates today and is silently wrong the day a
+ * stricter path (bitcode, a tighter verifier) rejects it. This test makes the
+ * two agree by construction over the whole flavor ladder, so adding a rung or
+ * changing a layout has to be done in both places.
  *
  * Plain executable: returns non-zero on the first failed check (a clean run is
  * the pass criterion). Registered via tests/CMakeLists.txt so it is installed
@@ -88,6 +88,21 @@ int main(void)
         const char* want = modern ? "-p8:128:128:128:48-" : "-p8:128:128-";
 
         CHECK(dl != NULL && strstr(dl, want) != NULL, name);
+    }
+
+    /* The ELF symbol-mangling spec m:e is the second drift axis, orthogonal to
+     * p8: absent in LLVM 20 / 22, present in LLVM 23. Pin it per flavor so a
+     * wrong or missing m:e is caught here with an explanation -- the same guard
+     * the p8 field gets above -- instead of surfacing as golden hash churn. */
+    for(i = 0; i < n; ++i)
+    {
+        const char* name = rocke_llvm_flavor_at(i);
+        rocke_llvm_flavor_t f = rocke_llvm_flavor_from_name(name);
+        const char* dl = ckc::rocke_ll_datalayout_for_flavor(f);
+        bool want_me = (f == ROCKE_LLVM_FLAVOR_LLVM23);
+        bool has_me = dl != NULL && strstr(dl, "-m:e-") != NULL;
+
+        CHECK(dl != NULL && has_me == want_me, name);
     }
 
     if(g_failures == 0)
