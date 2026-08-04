@@ -261,7 +261,11 @@ void rocsolver_sygst_hegst_getMemorySize(const rocblas_fill uplo,
         // extra requirements for calling TRSM
         // -----------------------------------
 
-        I const nn = xxGST_BLOCKSIZE;
+        // ------------------------------------------
+        // work around for multiple of 128 in rocblas
+        // ------------------------------------------
+        I const n0 = xxGST_BLOCKSIZE;
+        I const nn = ((n0 % 128) == 0) ? n0 + 1 : n0;
         size_t temp1{}, temp2{}, temp3{}, temp4{}, temp5{}, temp6{}, temp7{}, temp8{};
 
         if(itype == rocblas_eform_ax)
@@ -328,7 +332,8 @@ void rocsolver_sygst_hegst_getMemorySize(const rocblas_fill uplo,
     {
         I const n1 = split_n(n);
         I const n2 = n - n1;
-        I const nn = std::max(n1, n2);
+        I const max_n1n2 = std::max(n1, n2);
+        I const nn = ((max_n1n2 % 128) == 0) ? max_n1n2 + 1 : max_n1n2;
 
         size_t temp1{}, temp2{}, temp3{}, temp4{}, temp5{}, temp6{}, temp7{}, temp8{};
 
