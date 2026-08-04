@@ -15,14 +15,13 @@
 // It faults inside hipBLASLt's heuristic instead of returning an error, so
 // probing support (isApplicable, which constructs a plan) crashes the caller.
 // Until the upstream fix lands we early-return `false` from the matmul plan
-// builders' isApplicable() so engine selection skips the hipBLASLt matmul path
-// and hipDNN falls back.
+// builders' isApplicable() so engine selection skips the hipBLASLt matmul path.
 //
 // REJECT_IF_WORKAROUND_ISSUE_9962(handle) must only be invoked from a function
 // whose return type is `bool` (it contains a `return`). The fault is only
 // observed on Windows, so it is compile-time gated to Windows builds; elsewhere
-// it expands to a no-op. An arch-query failure is treated as "not affected" so a
-// healthy device is never suppressed.
+// it expands to a no-op. An arch-query failure is fail-closed: declining reports
+// the graph unsupported, guessing "not affected" on a real gfx115x crashes.
 //
 // To remove after the fix: delete this file and `tests/TestWorkarounds.hpp`,
 // drop their includes, and remove the call sites. `git grep WORKAROUND_ISSUE_9962`
@@ -53,8 +52,9 @@
         }                                                                                          \
         catch(const std::exception& workaround_9962_e)                                             \
         {                                                                                          \
-            HIPDNN_PLUGIN_LOG_INFO("[#9962] arch query failed; not applying workaround: "          \
+            HIPDNN_PLUGIN_LOG_INFO("[#9962] arch query failed; treating as not-applicable: "       \
                                    << workaround_9962_e.what());                                   \
+            return false;                                                                          \
         }                                                                                          \
     } while(0)
 #else
