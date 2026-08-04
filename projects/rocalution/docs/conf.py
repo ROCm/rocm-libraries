@@ -36,3 +36,11 @@ external_projects_current_project = "rocalution"
 
 for sphinx_var in ROCmDocs.SPHINX_VARS:
     globals()[sphinx_var] = getattr(docs_core, sphinx_var)
+
+html_theme_options.update(
+    {
+        "repository_url": "https://github.com/ROCm/rocm-libraries",
+        "use_repository_button": True,
+        "use_issues_button": True,
+    }
+)
