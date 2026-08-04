@@ -86,7 +86,9 @@ def _custom_kernels() -> Traversable:
 def _validate_custom_kernel_resource_name(name: str) -> None:
     """Reject path-bearing names at the bundled-resource boundary."""
     if "/" in name or "\\" in name or PureWindowsPath(name).drive:
-        raise ValueError(f"Custom kernel resource name must not be a path: {name!r}")
+        raise ValueError(
+            f"Custom kernel resource name must not be a path: {name!r}"
+        )
 
 
 def custom_kernel_names() -> List[str]:

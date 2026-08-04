@@ -9,7 +9,7 @@ from zipfile import Path as ZipPath, ZipFile
 import pytest
 import yaml
 
-from Tensile import Resources
+from Tensile import resources
 from Tensile.TensileCreateLibrary import copyStaticFiles
 
 
@@ -34,7 +34,7 @@ def _fake_resource_tree(tmp_path: Path, monkeypatch) -> Path:
     (root / "Source").mkdir(parents=True)
     (root / "CustomKernels").mkdir()
     (root / "TensileLogic").mkdir()
-    monkeypatch.setattr(Resources, "_root", lambda: root)
+    monkeypatch.setattr(resources, "_root", lambda: root)
     return root
 
 
@@ -45,7 +45,7 @@ def _write_static_headers(root: Path) -> None:
 
 def test_static_header_paths_have_expected_order():
     assert tuple(
-        path.name for path in Resources.static_header_paths()
+        path.name for path in resources.static_header_paths()
     ) == EXPECTED_STATIC_HEADERS
 
 
@@ -121,25 +121,25 @@ def test_custom_kernel_names_filters_suffixes_and_sorts_deterministically(monkey
         def iterdir(self):
             return iter(orders.pop(0))
 
-    monkeypatch.setattr(Resources, "_custom_kernels", lambda: ResourceDir())
+    monkeypatch.setattr(resources, "_custom_kernels", lambda: ResourceDir())
 
     expected = [".hidden", "a", "b", "foo.bar"]
-    assert Resources.custom_kernel_names() == expected
-    assert Resources.custom_kernel_names() == expected
+    assert resources.custom_kernel_names() == expected
+    assert resources.custom_kernel_names() == expected
 
 
 def test_custom_kernel_text_uses_resource_root(tmp_path, monkeypatch):
     root = _fake_resource_tree(tmp_path, monkeypatch)
     (root / "CustomKernels" / "kernel.s").write_text("s_nop 0\n", encoding="utf-8")
 
-    assert Resources.custom_kernel_text("kernel") == "s_nop 0\n"
+    assert resources.custom_kernel_text("kernel") == "s_nop 0\n"
 
 
 def test_custom_kernel_text_raises_for_missing_resource(tmp_path, monkeypatch):
     _fake_resource_tree(tmp_path, monkeypatch)
 
     with pytest.raises(FileNotFoundError, match="missing.s"):
-        Resources.custom_kernel_text("missing")
+        resources.custom_kernel_text("missing")
 
 
 @pytest.mark.parametrize(
@@ -154,7 +154,7 @@ def test_custom_kernel_text_raises_for_missing_resource(tmp_path, monkeypatch):
 )
 def test_custom_kernel_text_rejects_paths(name):
     with pytest.raises(ValueError):
-        Resources.custom_kernel_text(name)
+        resources.custom_kernel_text(name)
 
 
 def test_known_bugs_text_uses_resource_root(tmp_path, monkeypatch):
@@ -162,7 +162,7 @@ def test_known_bugs_text_uses_resource_root(tmp_path, monkeypatch):
     text = "version: 1\nskips: []\n"
     (root / "TensileLogic" / "known_bugs.yaml").write_text(text, encoding="utf-8")
 
-    assert Resources.known_bugs_text() == text
+    assert resources.known_bugs_text() == text
 
 
 def test_ductile_defaults_text_uses_resource_root(tmp_path, monkeypatch):
@@ -172,14 +172,14 @@ def test_ductile_defaults_text_uses_resource_root(tmp_path, monkeypatch):
     text = "runner:\n  name: pytest\n"
     (defaults / "defaults.yaml").write_text(text, encoding="utf-8")
 
-    assert Resources.ductile_defaults_text() == text
+    assert resources.ductile_defaults_text() == text
 
 
 def test_known_bugs_text_raises_for_missing_resource(tmp_path, monkeypatch):
     _fake_resource_tree(tmp_path, monkeypatch)
 
     with pytest.raises(FileNotFoundError, match="known_bugs.yaml"):
-        Resources.known_bugs_text()
+        resources.known_bugs_text()
 
 
 def test_resource_helpers_work_from_zip_package(tmp_path, monkeypatch):
@@ -192,7 +192,7 @@ def test_resource_helpers_work_from_zip_package(tmp_path, monkeypatch):
     # This fails if resource lookup regresses to a __file__-derived Path.
     with ZipFile(archive, "w") as zip_file:
         zip_file.writestr(f"{package}/__init__.py", "")
-        zip_file.write(Resources.__file__, f"{package}/Resources.py")
+        zip_file.write(resources.__file__, f"{package}/resources.py")
         for name in EXPECTED_STATIC_HEADERS:
             zip_file.writestr(
                 f"{package}/Source/{name}", f"contents for {name}\n"
@@ -208,7 +208,7 @@ def test_resource_helpers_work_from_zip_package(tmp_path, monkeypatch):
         )
 
     monkeypatch.syspath_prepend(str(archive))
-    zip_resources = importlib.import_module(f"{package}.Resources")
+    zip_resources = importlib.import_module(f"{package}.resources")
     try:
         assert zip_resources.__file__.startswith(f"{archive}/")
         assert isinstance(zip_resources._root(), ZipPath)
@@ -226,7 +226,7 @@ def test_resource_helpers_work_from_zip_package(tmp_path, monkeypatch):
                 f"contents for {name}\n"
             )
     finally:
-        sys.modules.pop(f"{package}.Resources", None)
+        sys.modules.pop(f"{package}.resources", None)
         sys.modules.pop(package, None)
 
 
@@ -239,14 +239,14 @@ def test_real_static_header_resources_are_available(tmp_path):
 
 
 def test_real_custom_kernel_resources_are_available():
-    names = Resources.custom_kernel_names()
+    names = resources.custom_kernel_names()
 
     assert names
     assert KNOWN_CUSTOM_KERNEL in names
 
 
 def test_real_known_bugs_resource_is_parseable_yaml():
-    data = yaml.safe_load(Resources.known_bugs_text())
+    data = yaml.safe_load(resources.known_bugs_text())
 
     assert data["version"] == 1
     assert isinstance(data["skips"], list)
