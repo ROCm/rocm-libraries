@@ -742,8 +742,8 @@ static void _emit_dgrad_direct_epilogue(rocke_ir_builder_t* b,
     addr_ctx.desc = dX_desc;
 
     rocke_direct_epilogue_t epi;
-    epi.atom = rocke_mfma_atom(
-        spec->dtype_a, spec->warp_tile_m, spec->warp_tile_n, spec->warp_tile_k);
+    epi.atom
+        = rocke_mfma_atom(spec->dtype_a, spec->warp_tile_m, spec->warp_tile_n, spec->warp_tile_k);
     epi.grid = *grid;
     epi.out_dtype = spec->dtype_d;
 
@@ -1266,10 +1266,9 @@ static rocke_kernel_def_t*
         return NULL;
     bool is_wmma = (op->family && strcmp(op->family, "wmma") == 0);
     const rocke_mfma_atom_t* atom
-        = is_wmma
-              ? NULL
-              : rocke_mfma_atom(
-                    spec->dtype_a, spec->warp_tile_m, spec->warp_tile_n, spec->warp_tile_k);
+        = is_wmma ? NULL
+                  : rocke_mfma_atom(
+                        spec->dtype_a, spec->warp_tile_m, spec->warp_tile_n, spec->warp_tile_k);
     int a_per_lane = op->a_frag_len;
     int b_per_lane = op->b_frag_len;
     int c_per_lane = op->c_frag_len;
