@@ -1,6 +1,49 @@
 flag_management:
   default_rules:
-    carryforward: true # compare reports between projects or flags, not just the latest commit
+    carryforward: false # drop unused flags by default instead of carrying forward perpetually
+  individual_flags: # exceptions to the default rules above, stated flag by flag
+    -name: composable_kernel
+      carryforward: true
+    -name: hipBLAS
+      carryforward: true
+    -name: hipBLASLt
+      carryforward: true
+    -name: TensileLite-Unit
+      carryforward: true
+    -name: TensileLite-CPP
+      carryforward: true
+    -name: hipCUB
+      carryforward: true
+    -name: hipSPARSE
+      carryforward: true
+    -name: hipSPARSELt
+      carryforward: true
+    -name: rocBLAS
+      carryforward: true
+    -name: rocPRIM
+      carryforward: true
+    -name: rocRAND
+      carryforward: true
+    -name: hipRAND
+      carryforward: true
+    -name: hipDNN
+      carryforward: true
+    -name: rocRoller
+      carryforward: true
+    -name: rocSPARSE
+      carryforward: true
+    -name: rocThrust
+      carryforward: true
+    -name: hipFFT
+      carryforward: true
+    -name: rocFFT
+      carryforward: true
+    -name: Tensile
+      carryforward: true
+    -name: hipSOLVER
+      carryforward: true
+    -name: rocSOLVER
+      carryforward: true
 
 comment:
   layout: "diff, flags, files"
@@ -26,8 +69,11 @@ coverage:
       hipBLASLt:
         flags: [hipBLASLt]
         target: 80%
-      TensileLite:
-        flags: [TensileLite]
+      TensileLite-Unit:
+        flags: [TensileLite-Unit]
+        target: 80%
+      TensileLite-CPP:
+        flags: [TensileLite-CPP]
         target: 80%
       hipCUB:
         flags: [hipCUB]
@@ -40,6 +86,9 @@ coverage:
         target: 80%
       rocBLAS:
         flags: [rocBLAS]
+        target: 80%
+      rocPRIM:
+        flags: [rocPRIM]
         target: 80%
       rocRAND:
         flags: [rocRAND]
