@@ -44,10 +44,13 @@ def _gfx1250_asm_supported() -> bool:
                     reason="assembler does not support gfx1250 WMMA")
 def test_cgemm_gfx1250_codegen(tensile_args: list[str], tmp_path: Path) -> None:
     output_dir = tmp_path / "output"
+    # Force gfx1250 last so it wins over any CI-provided --gpu-targets (this is a
+    # gfx1250-only codegen check; other targets reject the complex WMMA solutions).
     args = [
         str(_CONFIG), str(output_dir), "--build-only",
         "--global-parameters", "KeepBuildTmp=True",
         *tensile_args,
+        "--gpu-targets", "gfx1250",
     ]
     Tensile.Tensile(args)
 
