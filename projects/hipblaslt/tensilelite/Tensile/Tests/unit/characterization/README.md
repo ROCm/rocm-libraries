@@ -190,7 +190,7 @@ A floor-raising PR is a small, behavior-neutral maintenance change. It should to
 1. **Get fresh numbers.** Run the lane so it writes a current `coverage.json`:
 
    ```bash
-   tox -e coverage-unit    # writes coverage.json even if the per-file check then fails
+   tox -e coverage-unit    # writes coverage.json
    ```
 
 2. **Recompute the per-file floors.** Rewrite the baseline from that report:
