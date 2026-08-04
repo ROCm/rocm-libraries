@@ -5200,17 +5200,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
       if not self.states.doShadowInit:
         self.removeSgprVarFromPool("SrdWS")
       module.add(self.endSummation(kernel, tensorParametersA, tensorParametersB))
-      if not self.states.doShadowInit:
-        self.removeSgprVarFromPool("SrdD")
-        self.removeSgprVarFromPool("SrdC")
-        # Step 4b-2: if SrdD's value was already hoisted before the main loop, the
-        # post-loop copy must compute only SrdC (channels=["C"]) — SrdD is already
-        # valid and re-emitting its SRD-init would duplicate the D labels. When the
-        # hoist did not run (non-fused, doShadowInit, or SrdD pre-defined) fall back
-        # to the full C+D init (channels=None), byte-identical to the legacy path.
-        module.add(self.buildSubtileStoreInitModule(
-          kernel,
-          channels=["C"] if self.states.postLoopSrdDHoisted else None))
 
       ####################################
       # NOT LocalSplitU
@@ -5225,18 +5214,42 @@ class KernelWriter(metaclass=abc.ABCMeta):
       # through to store normally. This replaces the persistent PostLoopStored flag
       # (all guard inputs are loop-invariant and still live post-endSummation). When
       # the feature is off, no guard/branch is emitted (byte-identical).
+      #
+      # Tail-reduction: the guard is emitted BEFORE the post-loop store-init (SrdC/SrdD
+      # address math) so a fused full-tile owner branches over BOTH the store-init AND
+      # the store body. Previously the store-init ran ahead of the guard, so a fused
+      # owner paid the full ~SrdC/SrdD recompute in the exposed post-store tail even
+      # though its store body was skipped. The store-init's SrdC/SrdD values are only
+      # consumed by the (also-skipped) store body, so skipping the init for a fused
+      # owner is runtime-safe; non-fused waves fall through doPostLoopStoreLabel and run
+      # the full init + store unchanged.
       postLoopStoreDedupLabel = None
       if self.states.postLoopStoreInNll:
         postLoopStoreDedupLabel = Label("SkipPostLoopStore", "")
         doPostLoopStoreLabel = Label("DoPostLoopStore", "")
         # Guard branches target the adjacent doPostLoopStoreLabel -> short is fine.
         module.add(self.emitFusedStoreGuard(kernel, doPostLoopStoreLabel))
-        # The skip-over-store jump spans the entire post-loop store body, which with
-        # bias/SAV exceeds the +-simm16 short-branch range -> emit a 32-bit long branch.
+        # The skip jump now spans the post-loop store-init + entire store body, which
+        # exceeds the +-simm16 short-branch range -> emit a 32-bit long branch.
         with self.allocTmpSgpr(3, tag="postLoopStoreDedup_longBranch") as tmpSgprInfo:
           module.add(SLongBranchPositive(postLoopStoreDedupLabel, tmpSgprInfo,
-                     comment="FUSED NLL already stored D -> skip redundant post-loop store (long)"))
+                     comment="FUSED NLL already stored D -> skip redundant post-loop store-init + store (long)"))
         module.add(doPostLoopStoreLabel)
+
+      # Post-loop store-init (SrdC/SrdD address math). Emitted AFTER the dedup guard so
+      # a fused owner skips it (see tail-reduction note above). For non-PostLoopStoreInNll
+      # builds no guard was emitted, so this runs inline exactly as before.
+      # Step 4b-2: if SrdD's value was already hoisted before the main loop, the
+      # post-loop copy must compute only SrdC (channels=["C"]) — SrdD is already
+      # valid and re-emitting its SRD-init would duplicate the D labels. When the
+      # hoist did not run (non-fused, doShadowInit, or SrdD pre-defined) fall back
+      # to the full C+D init (channels=None), byte-identical to the legacy path.
+      if not self.states.doShadowInit:
+        self.removeSgprVarFromPool("SrdD")
+        self.removeSgprVarFromPool("SrdC")
+        module.add(self.buildSubtileStoreInitModule(
+          kernel,
+          channels=["C"] if self.states.postLoopSrdDHoisted else None))
 
       # global write indices
       module.addComment1("not-LocalSplitU: global write indices")
