@@ -12,6 +12,8 @@ comment:
 
 coverage:
   status:
+    default_rules:
+      flag_coverage_not_uploaded_behavior: exclude # don't send status checks for unrelated projects
     project:
       default:
         enabled: false # only check flags instead of whole monorepo
