@@ -930,6 +930,9 @@ void CDNA5ReadyQueue::decidePromote() {
                 wmmaIssuedCountThisRegion_ >= thIt->second) {
                 promotedPhase_ = PromotePhase::Barrier;
                 promotedNode_ = node;
+                PASS_DEBUG(std::cerr << "[CDNA5 decidePromote] promote barrier=" << node->inst
+                                     << " wmmaIssuedCountThisRegion_=" << wmmaIssuedCountThisRegion_
+                                     << " threshold=" << thIt->second << "\n");
                 return;
             }
         }
@@ -994,7 +997,10 @@ int CDNA5ReadyQueue::computeWmmaWindowsNeeded(int dsLoadCount) const {
     if (dsLoadCount > dsReadQueueDepth()) {
         const float cyclePerDs = (float)dsReadThrottleLatency() / (float)dsReadQueueDepth();
         const float cyclesNeeded = cyclePerDs * (dsLoadCount - dsReadQueueDepth());
-        wmmaWindowsNeeded += (int)std::ceil(cyclesNeeded / (float)wmmaIssueConfig.latency);
+        const float baseWindows =
+            (float)(dsReadQueueDepth() + maxDsPerWmmaWindow - 1) / (float)maxDsPerWmmaWindow;
+        const float latencyWindows = cyclesNeeded / (float)wmmaIssueConfig.latency;
+        wmmaWindowsNeeded = (int)std::ceil(baseWindows + latencyWindows);
     }
     return wmmaWindowsNeeded;
 }
