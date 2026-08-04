@@ -143,12 +143,12 @@ class RowColQuantGemmProblem:
 
     @property
     def QK_A(self) -> int:
-        """Number of row-wise A scales: one per row."""
+        """Number of AQ elements (one per row). Used for buffer sizing only; the kernel uses broadcast strides."""
         return self.M
 
     @property
     def QK_B(self) -> int:
-        """Number of column-wise B scales: one per column."""
+        """Number of BQ elements (one per column). Used for buffer sizing only; the kernel uses broadcast strides."""
         return self.N
 
 

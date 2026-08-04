@@ -99,11 +99,12 @@ int dispatcher_initialize()
  *   M, N, K          - matrix dimensions (single problem)
  *   stride_A         - leading dimension of A (row-major: K)
  *   stride_B         - leading dimension of B (col-major: K)
- *   stride_AQ        - leading dimension of AQ (row-major: 1)
- *   stride_BQ        - leading dimension of BQ (row-major: N)
+ *   stride_AQ        - ignored; present for ABI symmetry with other quant ops.
+ *                      The kernel uses broadcast stride=0 for AQ and BQ.
+ *   stride_BQ        - ignored; see stride_AQ.
  *   stride_C         - leading dimension of C (row-major: N)
- *   QK_A             - number of AQ rows (== M for row-wise quant)
- *   QK_B             - number of BQ cols (== N for col-wise quant, but stored as rows in BQ[1,N])
+ *   QK_A             - number of AQ elements (== M); used only for buffer sizing.
+ *   QK_B             - number of BQ elements (== N); used only for buffer sizing.
  *   k_batch          - split-K factor (1 = no split)
  *   time_ms          - output: kernel execution time in ms (may be NULL)
  *
