@@ -333,7 +333,7 @@ class CheckDocSymbolsCliTest(unittest.TestCase):
         result, report = self._run_checker("pkg.available")
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("Markdown symbol references: 2", report)
+        self.assertIn("Python symbol references in Markdown: 2", report)
         self.assertIn("Python docstring symbol references: 1", report)
         self.assertIn("broken local references: 0", report)
 
@@ -341,7 +341,7 @@ class CheckDocSymbolsCliTest(unittest.TestCase):
         result, report = self._run_checker("pkg.missing")
 
         self.assertEqual(result.returncode, 1, result.stderr)
-        self.assertIn("Markdown symbol references: 2", report)
+        self.assertIn("Python symbol references in Markdown: 2", report)
         self.assertIn("Python docstring symbol references: 1", report)
         self.assertIn("broken local references: 1", report)
         self.assertIn(
@@ -356,8 +356,8 @@ class CheckDocSymbolsCliTest(unittest.TestCase):
         )
 
         self.assertEqual(result.returncode, 1, result.stderr)
-        self.assertIn("Markdown symbol references: 2", report)
-        self.assertIn("broken Markdown references: 1", report)
+        self.assertIn("Python symbol references in Markdown: 2", report)
+        self.assertIn("broken Python symbol references in Markdown: 1", report)
         self.assertIn(
             "docs/guide.md:6: error: unresolved local py:func "
             "target 'pkg.missing' (markdown)",
@@ -369,6 +369,10 @@ class CheckDocSymbolsCliTest(unittest.TestCase):
 
         self.assertEqual(result.returncode, 1, result.stderr)
         payload = json.loads(report)
+        self.assertEqual(payload["markdown_python_symbol_reference_count"], 2)
+        self.assertEqual(payload["broken_markdown_python_symbol_references"], 0)
+        self.assertNotIn("markdown_reference_count", payload)
+        self.assertNotIn("broken_markdown_references", payload)
         self.assertEqual(payload["python_docstring_targets_unresolved"], 1)
         self.assertNotIn("python_docstring_targets_not_found", payload)
 

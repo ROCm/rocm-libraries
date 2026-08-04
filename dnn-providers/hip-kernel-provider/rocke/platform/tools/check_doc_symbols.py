@@ -685,13 +685,13 @@ def _text_report(
         "rocKE documentation symbol report",
         f"docs root: {docs_root}",
         f"Markdown files: {markdown_files}",
-        f"Markdown symbol references: {markdown_references}",
+        f"Python symbol references in Markdown: {markdown_references}",
         f"Python files: {index.python_files}",
         f"Python docstrings: {index.docstrings}",
         f"indexed Python symbols: {len(index.symbols)}",
         f"Python docstring symbol references: {len(index.references)}",
         f"external docstring references skipped: {len(external_references)}",
-        f"broken Markdown references: {markdown_broken}",
+        f"broken Python symbol references in Markdown: {markdown_broken}",
         f"broken Python docstring references: {len(docstring_broken)}",
         f"docstring targets unresolved: {len(docstring_broken) - role_mismatches}",
         f"docstring role mismatches: {role_mismatches}",
@@ -727,7 +727,7 @@ def _json_report(
     docstring_broken = [item for item in broken if item.source == "docstring"]
     role_mismatches = sum(bool(item.found_kinds) for item in docstring_broken)
     payload = {
-        "broken_markdown_references": markdown_broken,
+        "broken_markdown_python_symbol_references": markdown_broken,
         "broken_python_docstring_references": len(docstring_broken),
         "broken_references": [asdict(item) for item in broken],
         "docs_root": str(docs_root),
@@ -736,7 +736,7 @@ def _json_report(
         ],
         "indexed_python_symbols": len(index.symbols),
         "markdown_files": markdown_files,
-        "markdown_reference_count": markdown_references,
+        "markdown_python_symbol_reference_count": markdown_references,
         "python_docstring_reference_count": len(index.references),
         "python_docstring_role_mismatches": role_mismatches,
         "python_docstring_targets_unresolved": len(docstring_broken) - role_mismatches,
