@@ -287,6 +287,20 @@ jobs:
       - name: Build
         run: cmake --build build
 
+      - name: Verify UMD op-schema registry is in sync
+        # The build regenerates op_schema_registry_generated.hpp in-tree from the
+        # .fbs schemas (HIPDNN_GENERATE_SDK_HEADERS defaults ON). The pre-commit
+        # flatc-hipdnn hook only refreshes the --cpp data-object headers, not this
+        # registry, so a schema change committed via pre-commit can leave the
+        # committed registry stale. This step is the authoritative drift guard.
+        run: |
+          if ! git diff --exit-code -- \
+            projects/hipdnn/flatbuffers_sdk/include/hipdnn_flatbuffers_sdk/umd/op_schema_registry_generated.hpp; then
+            echo "::error::UMD op-schema registry is stale: a schema change was committed without regenerating op_schema_registry_generated.hpp."
+            echo "Rebuild hipDNN with -DHIPDNN_GENERATE_SDK_HEADERS=ON (the default) and commit the regenerated header."
+            exit 1
+          fi
+
       - name: Run tests
         run: ctest --test-dir build --output-on-failure
 
