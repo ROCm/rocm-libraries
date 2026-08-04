@@ -1083,9 +1083,12 @@ class Solution(collections.abc.Mapping):
     # each WG's tile per iteration, so the broadcast would target the wrong partner.
     # Keep the cluster WG-id decode (gated on ClusterDim) but leave multicast off for Stream-K.
     if state["ClusterDim"] != [1, 1] and state["StreamK"] == 0:
-      state["Multicast"] = True
+      asmCaps = isaInfoMap[state["ISA"]].asmCaps
+      # gfx1250 v0 silicon has no TDM-multicast. Clustering (the ClusterDim WG-id decode) and
+      # ClusterBarrier are separate features it does support, so they stay enabled below.
+      state["Multicast"] = asmCaps.get("HasTDMMulticast", True)
       # ClusterBarrier emits SCmp/branch on sgpr("WaveIdx"), which is only allocated when TDM is enabled.
-      if state["TDMInst"] != 0 and isaInfoMap[state["ISA"]].asmCaps.get("HasClusterBarrier", False):
+      if state["TDMInst"] != 0 and asmCaps.get("HasClusterBarrier", False):
         state["ClusterBarrier"] = True
 
     # done
@@ -2940,6 +2943,18 @@ class Solution(collections.abc.Mapping):
     isFloat4 = state["ProblemType"]["DataTypeA"].isFloat4() or state["ProblemType"]["DataTypeB"].isFloat4()
     isFloat6 = state["ProblemType"]["DataTypeA"].is6bitFloat() or state["ProblemType"]["DataTypeB"].is6bitFloat()
     if isa[:2] == (12, 5) and state["KernelLanguage"] == "Assembly" and (isFloat4 or isFloat6):
+      # gfx1250 v0 silicon lacks the fp4 32x16 WMMA opcode. Gate on the *physical* opcode dims
+      # MIBlock[0]/[1], not the effective MatrixInstM/N: under SourceSwap the effective extents
+      # transpose (32x16 -> 16x32) while the physical opcode is unchanged. Real 32x16 fp4 configs
+      # ship with SourceSwap both ways (true in mxf4_gfx1250.yaml, false in
+      # streamk/gfx1250/sk_mxf4gemm_tdm_ext.yaml), so only the physical dims identify the opcode.
+      if isFloat4 and not isaInfoMap[isa].asmCaps.get("HasWMMA_f4_32x16", True) \
+          and len(state.get("MIBlock", [])) >= 2 \
+          and state["MIBlock"][0] == 32 and state["MIBlock"][1] == 16:
+        reject(state, printRejectionReason,
+               "This gfx1250 stepping does not support the fp4 32x16 matrix-instruction shape; "
+               "use a 16x16 MatrixInstruction or build for gfx1250")
+        return
       if state["ProblemType"]["MacDataTypeA"].isFloat4() or state["ProblemType"]["MacDataTypeB"].isFloat4():
         if not state["enableLDSTrA"] and not state["UnrollMajorLDSA"]:
           reject(state, printRejectionReason, "Currently FP4 requires LDSTrInst == True for UnrolledMajorLDSA == False")
