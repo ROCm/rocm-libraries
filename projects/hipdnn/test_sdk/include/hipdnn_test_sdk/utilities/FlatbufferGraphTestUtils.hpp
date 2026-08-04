@@ -2133,15 +2133,15 @@ inline flatbuffers::FlatBufferBuilder
         hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD,
         0.1f,
         0.5f,
-        1.0f,
+        std::nullopt,
         std::nullopt,
         2, // y uid
         std::nullopt,
         std::nullopt,
         5, // yActiv uid
-        1.0f,
-        0.2f,
-        2.0f);
+        std::nullopt,
+        std::nullopt,
+        std::nullopt);
 
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> nodes;
     auto node = hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
@@ -2396,15 +2396,15 @@ inline flatbuffers::FlatBufferBuilder createValidRMSNormBwdActivationGraph(
         hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_BWD,
         0.1f,
         0.5f,
-        1.0f,
+        std::nullopt,
         std::nullopt,
         1, // dy uid
         9, // y uid
         std::nullopt,
         10, // dyActiv uid
-        1.0f,
-        0.2f,
-        2.0f);
+        std::nullopt,
+        std::nullopt,
+        std::nullopt);
 
     auto rmsnormBwdAttributes
         = hipdnn_flatbuffers_sdk::data_objects::CreateRMSNormBackwardAttributes(
