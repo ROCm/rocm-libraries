@@ -605,6 +605,10 @@ Arguments:
   - lde: c_int64*32
   - batch_count: c_int32
   - batch_mode: c_int32
+  - batch_offset_a: c_int64
+  - batch_offset_b: c_int64
+  - batch_offset_c: c_int64
+  - batch_offset_d: c_int64
   - iters: c_int32
   - cold_iters: c_int32
   - warmup_time: c_float
@@ -732,6 +736,10 @@ Defaults:
   transB: '*'
   batch_count: 1
   batch_mode: 0
+  batch_offset_a: 0
+  batch_offset_b: 0
+  batch_offset_c: 0
+  batch_offset_d: 0
   HMM: false
   pad: 4096
   threads: 0

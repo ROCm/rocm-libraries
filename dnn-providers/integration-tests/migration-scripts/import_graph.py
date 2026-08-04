@@ -20,7 +20,7 @@ Dup policy: default is skip-and-report (idempotent, safe to re-run).
 
 Usage::
 
-    import_graph.py --graph case.json --bundle-dir integration_test_bundles/ \\
+    import_graph.py --graph case.json --bundle-dir integration-test-bundles/ \\
         [--tier quick] [--meta reference_source="..."] [--dry-run] [--strict] [--force]
 """
 
