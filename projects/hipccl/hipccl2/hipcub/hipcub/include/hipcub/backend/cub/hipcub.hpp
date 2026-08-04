@@ -73,19 +73,12 @@
 #include <cub/grid/grid_even_share.cuh> // IWYU pragma: export
 #include <cub/grid/grid_mapping.cuh> // IWYU pragma: export
 #include <cub/grid/grid_queue.cuh> // IWYU pragma: export
-// These functions must be wrapped so they return
-// hipError_t instead of cudaError_t
-#include "grid/grid_barrier.hpp"
 
 // Iterator
 #include <cub/iterator/arg_index_input_iterator.cuh> // IWYU pragma: export
 #include <cub/iterator/cache_modified_input_iterator.cuh> // IWYU pragma: export
 #include <cub/iterator/cache_modified_output_iterator.cuh> // IWYU pragma: export
-#include <cub/iterator/constant_input_iterator.cuh> // IWYU pragma: export
-#include <cub/iterator/counting_input_iterator.cuh> // IWYU pragma: export
-#include <cub/iterator/discard_output_iterator.cuh> // IWYU pragma: export
 #include <cub/iterator/tex_obj_input_iterator.cuh> // IWYU pragma: export
-#include <cub/iterator/transform_input_iterator.cuh> // IWYU pragma: export
 
 // Thread
 #include <cub/thread/thread_load.cuh> // IWYU pragma: export
