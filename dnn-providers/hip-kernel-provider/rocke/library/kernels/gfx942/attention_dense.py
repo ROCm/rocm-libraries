@@ -158,6 +158,16 @@ _P0_V_PAD = 8
 # replayable probe under builders/gfx942/attention/prefill/. gfx942/D64 only.
 _P0_D64_KPAD = False
 
+# Runbook lever 7 (optimization_runbook.md §8.4): iglp_opt is the canned backend
+# MFMA / ds_read / ds_write interleave (llvm.amdgcn.iglp.opt), distinct from the
+# proven-negative s_setprio / sched_barrier hints (plan §2 DO-NOT-PORT). Its
+# precondition is in-loop ds_write traffic to interleave against the MFMAs -- which
+# only the P1 cfvst path has (V is stored to V_lds inside the loop; the naive path
+# is direct-load, 0 ds_write, so iglp is a priori neutral). Default OFF; this is a
+# static ISA-diff probe knob, promoted to a knob only if GPU timing shows a win on
+# the cfvst config. Placed once at the top of the main-loop body per the runbook.
+_P0_IGLP = False
+
 __all__ = [
     "AttentionDenseSpec",
     "supports_attention_dense",
@@ -968,6 +978,11 @@ def _build_attention_dense_p0(spec: AttentionDenseSpec) -> KernelDef:
             m_i = carry[0]
             l_i = carry[1]
             o_acc = list(carry[2 : 2 + D_TILES])
+
+            if _P0_IGLP:
+                # Runbook lever 7: one canned-scheduler hint at the loop-body top.
+                # Only meaningful on the cfvst path (in-loop ds_write to interleave).
+                b.iglp_opt(0)
 
             if USE_CFVST:
                 load_tile(j)  # K async DMA -> K_lds
