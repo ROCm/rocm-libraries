@@ -78,9 +78,7 @@ void RMSnormValidator::checkTensorDataTypesSupported(
                                 "All stat tensors for RMSnorm must have the same data type.");
 
     const std::unordered_set<hipdnn_flatbuffers_sdk::data_objects::DataType>
-        allowedIntermediateTypes{hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
-                                 hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
-                                 hipdnn_flatbuffers_sdk::data_objects::DataType::HALF};
+        allowedIntermediateTypes{hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT};
 
     validateConsistentDataTypes(
         intermediateTensorIds,
