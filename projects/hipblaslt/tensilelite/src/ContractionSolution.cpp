@@ -2211,7 +2211,7 @@ namespace TensileLite
         // Batch offset support for General Batched GEMM (SupportUserArgs kernels).
         // Appended at the tail, after the dstD/Synchronizer block, to match the
         // kernel signature order (see Signature.py).
-        if(!problemType.groupedGemm && sizeMapping.customKernelName.empty())
+        if(!problemType.groupedGemm && (customKernel.name.empty() || customKernel.generated))
         {
             rv.args.append<int64_t>("batchOffsetD", inputs.batchOffsetD);
             rv.args.append<int64_t>("batchOffsetC", inputs.batchOffsetC);
@@ -3499,7 +3499,8 @@ namespace TensileLite
         }
         // Adding the batchmode kernel argument for post GSU kernel to determine
         // how to index the batch dimension in Strided Batch versus General Batched.
-        if(problemType.groupedGemm == false && sizeMapping.customKernelName.empty())
+        if(problemType.groupedGemm == false
+           && (customKernel.name.empty() || customKernel.generated))
         {
             ContractionProblemGemm::BATCHMODE batchMode = problem.batchMode();
             args.template append<uint32_t>("batchMode", static_cast<uint32_t>(batchMode));

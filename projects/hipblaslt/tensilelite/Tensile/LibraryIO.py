@@ -665,7 +665,7 @@ def parseLibraryLogicData(
         if "KernelLanguage" not in solutionState.keys():
             solutionState["KernelLanguage"] = defaultSolution["KernelLanguage"]
         if "CustomKernelName" not in solutionState.keys():
-            solutionState["CustomKernelName"] = defaultSolution["CustomKernelName"]
+            solutionState["CustomKernelName"] = defaultSolution.get("CustomKernelName", "")
 
         if solutionState["KernelLanguage"] == "Assembly":
             solutionState["ISA"] = gfxToIsa(data["ArchitectureName"])
