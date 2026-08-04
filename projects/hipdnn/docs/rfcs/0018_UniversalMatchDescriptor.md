@@ -210,7 +210,7 @@ several kernels — which goes the opposite direction and is not in scope here:
   "criteria": {"and": [
     {"==": ["$x.dtype", "FLOAT16"]}, {"==": ["$x.stride_order", [3, 0, 2, 1]]}, "$x.packed",  // NHWC
     {"==": ["$y.dtype", "FLOAT16"]}, {"==": ["$y.stride_order", [3, 0, 2, 1]]}, "$y.packed",  // NHWC
-    {"shape": ["$y",    ["batch", "out_h", "out_w", "out_channels"]]},
+    {"shape": ["$y",    ["batch", "out_channels", "out_h", "out_w"]]},  // logical dim order; layout is the stride_order above
     {"shape": ["$bias", ["out_channels"]]},
     {"==": ["$graph.node_count", 3]},              // exactly these three ops
     "$conv_out.virtual", "$bias_out.virtual"       // intermediates absorbed by the fused kernel
@@ -441,7 +441,9 @@ hipDNN tensors store no layout enum; layout is implied by stride order
 ([§2](#2-the-matchers-input-hipdnns-graph-model)). The UMD therefore represents layout as an **array of
 per-dimension stride priorities**: entry `i` ranks logical dimension `i` by stride magnitude, with a
 higher number meaning a slower-varying (larger-stride) dimension. This is the encoding
-`extractStrideOrder` already computes (`ApplicabilityChecks.cpp:17`), so a matcher compares
+`extractStrideOrder` already computes
+(`data_sdk/include/hipdnn_data_sdk/utilities/ShapeUtilities.hpp:146`, called from
+`ApplicabilityChecks.cpp:22`), so a matcher compares
 `$q.stride_order` directly against the same arrays the `validateSupportedLayout` oracle uses today
 rather than against a re-derived permutation.
 
@@ -456,8 +458,10 @@ rather than against a re-derived permutation.
   dimension order, independent of this physical layout, consistent with RFC 0017 §6.
 - **Named aliases** are provided for the common cases and expand to the array literal at compile time,
   so `{"==": ["$x.stride_order", "nhwc"]}` compiles to a comparison against `[3, 0, 2, 1]`
-  (A.8). The array remains the single canonical form. The alias set matches the layouts
-  `validateSupportedLayout` accepts today (`ApplicabilityChecks.cpp:77`).
+  (A.8). The array remains the single canonical form. The four convolution aliases are exactly the
+  layouts `validateSupportedLayout` accepts today — NCHW/NHWC at rank 4, NCDHW/NDHWC at rank 5
+  (`ApplicabilityChecks.cpp:76`); `bhsd` and `contiguous` are additions for the attention families,
+  which that oracle never covered.
 - **Cross-tensor consistency** is a JsonLogic equality between stride orders,
   `{"==": ["$x.stride_order", "$y.stride_order"]}` (one per pair, joined by the top-level `and`),
   lowering `validateConsistentLayouts`; layout-agnostic tensors (rank-1 scalars, pass-by-value) are
@@ -668,14 +672,28 @@ hazard.
   mandatory `name` for diagnostics. A UMD whose schema version is newer than the runtime understands is
   refused with a clear error, never silently reinterpreted, matching
   [RFC 0017 §4](0017_UniversalKernelDescriptor.md#4-descriptor-formats).
-- **A matcher carries two versions.** `version` is the matcher format itself. `sdk_version` is the
-  hipDNN graph schema the matcher was authored against, and a matcher is the only descriptor that
-  needs it: it is the only one that reads graph fields, so it is the only one a graph-schema change
-  can silently invalidate. The runtime holds a floor for each, and a matcher declaring either below
-  its floor is declined before it runs rather than matching against a schema it does not understand
+- **A matcher carries two versions, gated in opposite directions.** `version` is the matcher format
+  itself, gated as a **ceiling**: a differing `major`, or a `minor` newer than the runtime's, is
+  refused, because the descriptor carries features that runtime cannot understand. An older minor
+  within the same major always loads — a file stamped `1.0` loads on a `1.1` runtime — so an author
+  stamps the lowest version their descriptor needs and it stays loadable on the oldest runtime that
+  can serve it. `sdk_version` is the hipDNN graph schema the matcher was authored against, and a
+  matcher is the only descriptor that needs it: it is the only one that reads graph fields, so it is
+  the only one a graph-schema change can silently invalidate. It is gated as a **floor the graph
+  sets**, not a constant: a graph reports the schema version its own contents require, and a matcher
+  declaring less is declined before it runs rather than matching on the fields it knows while
+  silently ignoring one that changes what the graph means. Both bounds hold at once — a
+  `sdk_version` newer than the runtime's own schema is still refused at compile
   ([RFC 0017 §4](0017_UniversalKernelDescriptor.md#4-descriptor-formats)). Both compare numerically
   by `(major, minor)`; both default to `1.0` when omitted, which is what every descriptor authored
   against this revision means.
+- **The graph's floor is an existing mechanism, not a new one.** hipDNN already computes the minimum
+  engine-plugin API version a graph requires from the optional features it uses and stamps it into
+  the serialized graph (`min_required_engine_api_version`); override shapes
+  ([RFC 0008](0008_OverridableTensorShapesDesign.md)) raise it to `1.1` and runtime pass-by-value
+  tensors ([RFC 0016](0016_RuntimePassByValueTensors.md)) to `1.2`. The matcher reads that field
+  rather than deriving a second floor of its own. A graph carrying no stamp reads as the `1.0`
+  baseline.
 - **Additive evolution.** New JsonLogic operators, native predicates, and layout aliases are additive
   within `v1` where they do not change the meaning of an existing descriptor; anything that would
   reinterpret existing fields bumps the version.
@@ -901,6 +919,16 @@ and argument formulas reference ([RFC 0017 §6](0017_UniversalKernelDescriptor.m
    itself complete. They are needed for dispatch formulas and precedence chains. Add them to RFC
    0017's table, or scope them in this RFC as dispatch-formula-only and keep criteria to RFC 0017's
    set?
+6. **Stride-order convention.** [§7](#7-layout-and-stride-order-constraints) and A.8 define
+   `stride_order` as a per-dimension stride **rank** (higher = slower-varying), which is what
+   `extractStrideOrder` computes and what the matcher implements and tests: contiguous rank-4 is
+   `[3,2,1,0]` and NHWC is `[3,0,2,1]`. The examples in
+   [RFC 0017 §5](0017_UniversalKernelDescriptor.md#5-matching-and-the-umd) use the inverse,
+   position-to-dimension convention (`[0,1,2,3]` contiguous, `[0,2,3,1]` NHWC), which no
+   implementation uses; RFC 0017 never states which convention it intends. This RFC pins the
+   codebase encoding, so RFC 0017's `stride_order` literals need inverting to match. Confirm, and
+   correct them in RFC 0017 — a matcher copied from those examples silently accepts the wrong
+   physical layout.
 
 ---
 
@@ -976,14 +1004,15 @@ these. Criteria arithmetic is integer; `Float` arises only in UDD dispatch formu
 | `schema` | string | yes | — | MUST equal `"hipdnn.umd/v1"`; a newer version is refused, never reinterpreted ([§13](#13-serialization-and-versioning)) |
 | `id` | string (UUID) | yes | — | A UUID; stable, globally unique identity ([§13](#13-serialization-and-versioning)) |
 | `name` | string | yes | — | Diagnostics only; not semantic |
-| `version` | string | no | `"1.0"` | Matcher format version, `<major>.<minor>`, gated at load against the runtime's floor ([§13](#13-serialization-and-versioning)) |
-| `sdk_version` | string | no | `"1.0"` | The hipDNN graph schema version this matcher was authored against, `<major>.<minor>`. A matcher declaring a version below the runtime's floor is declined before it runs ([§13](#13-serialization-and-versioning)) |
+| `version` | string | no | `"1.0"` | Matcher format version, `<major>.<minor>`, gated at load as a **ceiling**: a differing `major`, or a `minor` newer than the runtime's, is refused; an older minor always loads ([§13](#13-serialization-and-versioning)) |
+| `sdk_version` | string | no | `"1.0"` | The hipDNN graph schema version this matcher was authored against, `<major>.<minor>`. Refused at load when newer than the runtime's own schema, and declined at match time against the **floor the graph sets** — a matcher below what the graph requires is skipped instead of asked ([§13](#13-serialization-and-versioning)) |
 | `allow_override_shape` | bool | no | `false` | When `false`, override-shape graphs are declined ([§3](#3-structural-pattern)) |
 | `nodes` | array&lt;Node&gt; | yes | — | Non-empty; A.2 |
 | `criteria` | Expr | yes | — | A single expression whose static type is `Bool` (A.6) |
 
 No other top-level keys are permitted; an unknown key is refused. Both version fields compare
-numerically by `(major, minor)`, so `1.10` is above `1.9`.
+numerically by `(major, minor)`, so `1.10` is above `1.9`; a value that does not parse as exactly two
+decimal components is refused.
 
 ### A.2 Node object and opcode selector
 
@@ -1054,9 +1083,18 @@ Rules:
   use them.
 - `present` is bound only for an optional operand/attribute; reading it on a required one is refused.
 - A field access on an **absent** optional operand or attribute (e.g. `$attn_mask.dtype` when
-  `attn_mask` is absent) declines the whole `criteria` (fail closed, [§14](#14-security-and-hostile-input));
-  guard such reads with `.present` and rely on short-circuit ordering
-  ([§10](#10-the-matcher-compilation-indexing-and-caching)).
+  `attn_mask` is absent) resolves to **unknown**, which is neither true nor false: the criterion
+  containing it can no longer be satisfied, so the match declines (fail closed,
+  [§14](#14-security-and-hostile-input)). Unknown is not coerced — it never reads as `false`, `0`, or
+  "not equal" — because a coerced unknown would make a narrowing check such as
+  `{"!=": ["$attn_mask.dtype", "BFLOAT16"]}` silently **pass** on an operand the pack never saw. This
+  is what RFC 0017 §5 means by a check on an absent operand that "neither passes nor fails, it simply
+  does not run".
+- **`and` and `or` are three-valued.** A definite `false` still decides an `and` and a definite `true`
+  still decides an `or`, even beside an unknown argument; only an otherwise-undecided result stays
+  unknown. This is what lets the "absent, or present and constrained" pair of
+  [§5](#5-the-constraint-vocabulary) accept a graph without the operand, where the second arm's field
+  reads cannot run.
 - An out-of-range `dims[i]`/`strides[i]`, an unknown `dim-name`, or any unresolved reference declines
   the match. `value_f32` resolves only when the tensor carries a compile-time value, so it declines
   on one that does not.
@@ -1144,6 +1182,12 @@ All integer arithmetic uses checked-width integers and fails closed on overflow
 | `shape` | 2 | `Tensor, EntryList` | `Bool` | A.5 |
 | `<ns>.<name>` | per registry | per registry | `Bool` or `Value` | Custom operation, A.9 |
 
+**Every operator except `present`, `not_present`, and `value_or_default` propagates an unknown**
+(an unresolved reference) rather than coercing it, so an absent optional operand can never satisfy a
+criterion (A.4). `and` and `or` are three-valued: a definite `false` still decides an `and` and a
+definite `true` still decides an `or`, even beside an unknown argument. The three exceptions answer
+"did this resolve?", so they always yield a real value.
+
 Adding an operator is additive within `v1` where it does not change the meaning of an existing
 descriptor ([§13](#13-serialization-and-versioning)).
 
@@ -1187,7 +1231,9 @@ quarantines) the descriptor with a diagnostic ([§10](#10-the-matcher-compilatio
 [§14](#14-security-and-hostile-input)):
 
 1. `schema == "hipdnn.umd/v1"`, `id` is a well-formed UUID, and each of `version` / `sdk_version`,
-   when present, is a well-formed `<major>.<minor>` string at or above the runtime's floor.
+   when present, is a well-formed `<major>.<minor>` string the runtime can honor: same `major`, and a
+   `minor` no newer than the runtime's ([§13](#13-serialization-and-versioning)). The `sdk_version`
+   floor is a match-time check against the graph, not a compile-time one.
 2. Only the keys of A.1 at the top level; only the keys of A.2 on each node.
 3. Every `opcode` and every name key resolves in the op-schema registry.
 4. Every `?` suffix matches the registry's optionality for that name.
