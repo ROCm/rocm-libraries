@@ -170,11 +170,13 @@ clang_tidy_check(${INTEGRATION_TESTS_EXE})
 # engine and selects tests via that provider's test_categories_integration.yaml.
 
 set(HIPDNN_IT_GTEST_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml")
+set(HIPDNN_IT_CTEST_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/test_categories_external.yaml")
 set(HIPDNN_IT_YAML_CATEGORIZATION_ENABLED FALSE)
 if(EXISTS "${HIPDNN_IT_GTEST_CATEGORIES_YAML}"
    AND EXISTS "${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
     include("${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
     set(DNN_PROVIDER_TEST_CATEGORY_YAMLS "${HIPDNN_IT_GTEST_CATEGORIES_YAML}")
+    set(DNN_PROVIDER_CTEST_CATEGORIES_YAML "${HIPDNN_IT_CTEST_CATEGORIES_YAML}")
     set(HIPDNN_IT_YAML_CATEGORIZATION_ENABLED TRUE)
     message(STATUS "hipdnn-integration-tests: YAML-based CTest categorization enabled")
 else()
@@ -218,18 +220,13 @@ if(HIPDNN_IT_YAML_CATEGORIZATION_ENABLED)
         )
     endforeach()
 
-    # Standalone: install the generated (category-labeled) CTestTestfile so
+    # Install the generated (category-labeled) CTestTestfile so
     # `ctest -L quick|standard|...` works from the installed tree.
-    if(NOT ROCM_LIBS_SUPERBUILD)
-        install(FILES "${HIPDNN_IT_CTEST_INSTALL_FILE}"
-                DESTINATION "${CMAKE_INSTALL_BINDIR}/hipdnn_integration_tests_ctest"
-                RENAME "CTestTestfile.cmake")
-    endif()
+    install(FILES "${HIPDNN_IT_CTEST_INSTALL_FILE}"
+            DESTINATION "${CMAKE_INSTALL_BINDIR}/hipdnn_integration_tests_ctest"
+            RENAME "CTestTestfile.cmake")
 else()
-    # For standalone builds we need to install the ctest files
-    if(NOT ROCM_LIBS_SUPERBUILD)
-        install_provider_ctest_files("hipdnn_integration_tests_ctest")
-    endif()
+    install_provider_ctest_files("hipdnn_integration_tests_ctest")
 endif()
 
 include(CMakePackageConfigHelpers)
