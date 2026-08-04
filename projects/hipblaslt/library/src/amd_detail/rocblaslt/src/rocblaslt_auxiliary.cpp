@@ -2751,11 +2751,3 @@ extern "C" HIPBLASLT_EXPORT void hipblaslt_debug_reload()
 {
     TensileLite::Debug::Instance().reloadDebugBitsForTest();
 }
-
-// Returns whether HIPBLASLT_CHECK_STREAMK_SYNC observed the Synchronizer
-// buffer left dirty by the handle's most recent StreamK launch. Always
-// false when the handle was created without the env var set.
-extern "C" HIPBLASLT_EXPORT bool hipblaslt_debug_streamk_sync_was_dirty(hipblasLtHandle_t handle)
-{
-    return handle != nullptr && (*(rocblaslt_handle)handle).check_streamk_sync_dirty;
-}
