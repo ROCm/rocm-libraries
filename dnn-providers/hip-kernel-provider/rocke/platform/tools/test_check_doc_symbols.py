@@ -11,61 +11,15 @@ import unittest
 from pathlib import Path
 
 from check_doc_symbols import (
-    ReferenceLocation,
     build_symbol_inventory,
     build_python_index,
     check_docstring_references,
-    find_sphinx_references,
-    normalize_sphinx_roles,
     parse_missing_references,
     render_inventory,
 )
 
 
 class CheckDocSymbolsTest(unittest.TestCase):
-    def test_normalizes_roles_outside_fenced_code(self) -> None:
-        source = (
-            ":func:`pkg.good`\n"
-            "```python\n"
-            ":class:`pkg.Literal`\n"
-            "```\n"
-            "{py:meth}`pkg.Thing.method`\n"
-        )
-
-        normalized, replacements = normalize_sphinx_roles(source)
-
-        self.assertEqual(replacements, 1)
-        self.assertIn("{py:func}`pkg.good`", normalized)
-        self.assertIn(":class:`pkg.Literal`", normalized)
-        self.assertIn("{py:meth}`pkg.Thing.method`", normalized)
-        self.assertEqual(source.count("\n"), normalized.count("\n"))
-
-        references = find_sphinx_references(normalized, "guide.md")
-        self.assertEqual(
-            [(item.line, item.role, item.target) for item in references],
-            [(1, "func", "pkg.good"), (5, "meth", "pkg.Thing.method")],
-        )
-
-    def test_longer_fence_is_not_closed_by_shorter_fence(self) -> None:
-        source = (
-            "````markdown\n"
-            "```\n"
-            ":func:`pkg.inside`\n"
-            "```\n"
-            "````\n"
-            ":func:`pkg.outside`\n"
-        )
-
-        normalized, replacements = normalize_sphinx_roles(source)
-        references = find_sphinx_references(normalized, "guide.md")
-
-        self.assertEqual(replacements, 1)
-        self.assertIn(":func:`pkg.inside`", normalized)
-        self.assertEqual(
-            [(item.line, item.target) for item in references],
-            [(6, "pkg.outside")],
-        )
-
     def test_builds_definitions_members_and_reexports(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -132,19 +86,11 @@ class CheckDocSymbolsTest(unittest.TestCase):
                 copied_docs,
                 docs_root,
                 root / "platform",
-                [
-                    ReferenceLocation(
-                        path="guide.md",
-                        line=11,
-                        role="func",
-                        target="pkg.missing",
-                    )
-                ],
             )
 
         self.assertEqual(len(broken), 1)
         self.assertEqual(broken[0].path, "dsl_docs/guide.md")
-        self.assertEqual(broken[0].line, 11)
+        self.assertEqual(broken[0].line, 7)
         self.assertEqual(broken[0].role, "func")
         self.assertEqual(broken[0].target, "pkg.missing")
 
@@ -161,7 +107,7 @@ class CheckDocSymbolsTest(unittest.TestCase):
             (package / "mod.py").write_text(
                 '"""Use :meth:`Thing.run`, :func:`available`, '
                 ":class:`ValueError`, and :class:`pathlib.Path`.\n\n"
-                'Broken: :func:`missing` and :class:`available`.\n"""\n'
+                'Broken: :func:`missing`.\n"""\n'
                 "import pathlib\n"
                 "from .base import Thing\n\n"
                 "# A comment with :func:`comment_only` is not a docstring.\n"
@@ -173,13 +119,84 @@ class CheckDocSymbolsTest(unittest.TestCase):
             index = build_python_index([root], root)
             broken, external = check_docstring_references(index)
 
-        self.assertEqual(len(index.references), 6)
+        self.assertEqual(len(index.references), 5)
         self.assertEqual([item.target for item in external], ["pathlib.Path"])
         self.assertEqual(
             [(item.role, item.target, item.found_kinds) for item in broken],
-            [("class", "available", ("function",)), ("func", "missing", ())],
+            [("func", "missing", ())],
         )
         self.assertNotIn("comment_only", [item.target for item in index.references])
+
+    def test_does_not_resolve_unrelated_symbol_by_suffix(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            package = root / "pkg"
+            package.mkdir()
+            (package / "__init__.py").write_text("", encoding="utf-8")
+            (package / "a.py").write_text(
+                "def helper():\n    return None\n", encoding="utf-8"
+            )
+            (package / "b.py").write_text(
+                '"""This module uses :func:`helper`."""\n', encoding="utf-8"
+            )
+
+            index = build_python_index([root], root)
+            broken, external = check_docstring_references(index)
+
+        self.assertEqual(external, [])
+        self.assertEqual(
+            [(item.role, item.target, item.found_kinds) for item in broken],
+            [("func", "helper", ())],
+        )
+
+    def test_accepts_existing_symbol_with_a_different_normal_role(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            package = root / "pkg"
+            package.mkdir()
+            (package / "__init__.py").write_text("", encoding="utf-8")
+            (package / "mod.py").write_text(
+                "\n".join(
+                    [
+                        '"""Use :class:`available` and :func:`Thing.run`."""',
+                        "def available():",
+                        "    return None",
+                        "class Thing:",
+                        "    def run(self):",
+                        "        return None",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            index = build_python_index([root], root)
+            broken, external = check_docstring_references(index)
+
+        self.assertEqual(broken, [])
+        self.assertEqual(external, [])
+
+    def test_relative_reference_requires_a_matching_symbol_kind(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            package = root / "pkg"
+            package.mkdir()
+            (package / "__init__.py").write_text("", encoding="utf-8")
+            (package / "mod.py").write_text(
+                '"""Use :class:`.available`."""\n'
+                "def available():\n"
+                "    return None\n",
+                encoding="utf-8",
+            )
+
+            index = build_python_index([root], root)
+            broken, external = check_docstring_references(index)
+
+        self.assertEqual(external, [])
+        self.assertEqual(
+            [(item.role, item.target, item.found_kinds) for item in broken],
+            [("class", ".available", ("function",))],
+        )
 
 
 @unittest.skipUnless(shutil.which("uvx"), "uvx is required for CLI integration tests")
@@ -195,7 +212,16 @@ class CheckDocSymbolsCliTest(unittest.TestCase):
             docs_root.mkdir()
             package.mkdir(parents=True)
             (docs_root / "guide.md").write_text(
-                "# Guide\n\n{py:func}`pkg.available`\n", encoding="utf-8"
+                "# Guide\n\n"
+                "{py:func}`pkg.available`\n"
+                ":func:`pkg.available`\n"
+                "``:func:`pkg.literal` ``\n"
+                "````markdown\n"
+                "```\n"
+                ":func:`pkg.in_a_fence`\n"
+                "```\n"
+                "````\n",
+                encoding="utf-8",
             )
             (package / "__init__.py").write_text(
                 f'"""API using :func:`{reference}`."""\n\n'
@@ -233,7 +259,7 @@ class CheckDocSymbolsCliTest(unittest.TestCase):
         result, report = self._run_checker("pkg.available")
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("Markdown symbol references: 1", report)
+        self.assertIn("Markdown symbol references: 2", report)
         self.assertIn("Python docstring symbol references: 1", report)
         self.assertIn("broken local references: 0", report)
 
@@ -241,7 +267,7 @@ class CheckDocSymbolsCliTest(unittest.TestCase):
         result, report = self._run_checker("pkg.missing")
 
         self.assertEqual(result.returncode, 1, result.stderr)
-        self.assertIn("Markdown symbol references: 1", report)
+        self.assertIn("Markdown symbol references: 2", report)
         self.assertIn("Python docstring symbol references: 1", report)
         self.assertIn("broken local references: 1", report)
         self.assertIn(

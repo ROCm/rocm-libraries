@@ -93,8 +93,9 @@ links and are not checked. Roles in comments are also not checked. Local rocKE
 references are checked against symbols found in the Python source. References
 to imported standard-library or third-party packages are counted separately and
 skipped because the local rocKE source cannot prove that they exist. The role
-must also match the symbol kind. For example, a method referenced with
-`:func:` is reported as a role mismatch.
+name does not need to match the symbol kind. The check only verifies that a
+normal reference resolves to an implemented symbol. A target that starts with
+`.` uses Sphinx's relative-name search and must match the role's symbol kind.
 
 For a JSON report, pass `--format json` and choose a JSON `--output` path. The
 command exits with status 1 when it finds a broken local link.

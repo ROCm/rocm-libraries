@@ -34,8 +34,77 @@ MISSING_REFERENCE_RE = re.compile(
     r"^(?P<path>.+):(?P<line>\d+): WARNING: py:(?P<role>[a-z]+) "
     r"reference target not found: (?P<target>.+?) \[ref\.[^]]+\]$"
 )
-FENCE_RE = re.compile(r"^ {0,3}(?P<fence>`{3,}|~{3,})(?P<rest>.*)$")
-Fence = tuple[str, int]
+
+SPHINX_EXTENSION = r'''"""Temporary MyST extension for the symbol check."""
+
+import re
+from pathlib import Path
+
+from sphinx import addnodes
+from myst_parser.parsers import sphinx_ as myst_sphinx
+
+
+RST_PYTHON_ROLE_RE = re.compile(
+    r":(?:py:)?(?P<role>attr|class|const|data|exc|func|meth|mod|obj):"
+    r"`(?P<target>[^`\n]+)`"
+)
+_REFERENCE_COUNT = 0
+
+
+def _rst_python_role(state, silent):
+    match = RST_PYTHON_ROLE_RE.match(state.src, state.pos)
+    if not match:
+        return False
+    if not silent:
+        token = state.push("myst_role", "", 0)
+        token.meta = {"name": f"py:{match.group('role')}"}
+        token.content = match.group("target")
+    state.pos = match.end()
+    return True
+
+
+def _create_md_parser(config, renderer):
+    parser = _create_md_parser.original(config, renderer)
+    parser.inline.ruler.before(
+        "backticks", "rst_python_role", _rst_python_role
+    )
+    return parser
+
+
+def _reset_references(app):
+    global _REFERENCE_COUNT
+    _REFERENCE_COUNT = 0
+
+
+def _collect_references(app, doctree):
+    global _REFERENCE_COUNT
+    docs_root = Path(app.srcdir) / "docs"
+    for node in doctree.findall(addnodes.pending_xref):
+        if node.get("refdomain") != "py" or not node.source:
+            continue
+        try:
+            Path(node.source).relative_to(docs_root)
+        except ValueError:
+            continue
+        _REFERENCE_COUNT += 1
+
+
+def _write_references(app, exception):
+    if exception is not None:
+        return
+    output = Path(app.config.rocke_reference_output)
+    output.write_text(f"{_REFERENCE_COUNT}\n", encoding="utf-8")
+
+
+def setup(app):
+    _create_md_parser.original = myst_sphinx.create_md_parser
+    myst_sphinx.create_md_parser = _create_md_parser
+    app.add_config_value("rocke_reference_output", "", "env")
+    app.connect("builder-inited", _reset_references)
+    app.connect("doctree-read", _collect_references)
+    app.connect("build-finished", _write_references)
+    return {"parallel_read_safe": False, "parallel_write_safe": True}
+'''
 
 
 @dataclass(frozen=True)
@@ -54,14 +123,6 @@ class BrokenReference:
     target: str
     source: str = "markdown"
     found_kinds: tuple[str, ...] = ()
-
-
-@dataclass(frozen=True)
-class ReferenceLocation:
-    path: str
-    line: int
-    role: str
-    target: str
 
 
 @dataclass(frozen=True)
@@ -93,76 +154,6 @@ def _reference_target(target: str) -> str | None:
     if target.startswith("!"):
         return None
     return target.removesuffix("()")
-
-
-def _fence_transition(line: str, active_fence: Fence | None) -> Fence | None:
-    match = FENCE_RE.match(line)
-    if not match:
-        return active_fence
-    fence = match.group("fence")
-    marker = fence[0]
-    if active_fence is None:
-        return marker, len(fence)
-    active_marker, active_length = active_fence
-    if (
-        marker == active_marker
-        and len(fence) >= active_length
-        and not match.group("rest").strip()
-    ):
-        return None
-    return active_fence
-
-
-def normalize_sphinx_roles(text: str) -> tuple[str, int]:
-    """Convert reStructuredText Python roles to MyST roles outside code fences."""
-    normalized: list[str] = []
-    replacements = 0
-    active_fence: Fence | None = None
-
-    for line in text.splitlines(keepends=True):
-        next_fence = _fence_transition(line, active_fence)
-        if next_fence != active_fence:
-            active_fence = next_fence
-            normalized.append(line)
-            continue
-
-        if active_fence is None:
-
-            def replace(match: re.Match[str]) -> str:
-                nonlocal replacements
-                replacements += 1
-                return f"{{py:{match.group('role')}}}`{match.group('target')}`"
-
-            line = RST_ROLE_RE.sub(replace, line)
-        normalized.append(line)
-
-    return "".join(normalized), replacements
-
-
-def find_sphinx_references(text: str, path: str) -> list[ReferenceLocation]:
-    """Return MyST Python references outside fenced code blocks."""
-    references: list[ReferenceLocation] = []
-    active_fence: Fence | None = None
-    for line_number, line in enumerate(text.splitlines(), start=1):
-        next_fence = _fence_transition(line, active_fence)
-        if next_fence != active_fence:
-            active_fence = next_fence
-            continue
-        if active_fence is not None:
-            continue
-        for match in MYST_ROLE_RE.finditer(line):
-            target = _reference_target(match.group("target"))
-            if target is None:
-                continue
-            references.append(
-                ReferenceLocation(
-                    path=path,
-                    line=line_number,
-                    role=match.group("role"),
-                    target=target,
-                )
-            )
-    return references
 
 
 def _assignment_names(node: ast.Assign | ast.AnnAssign) -> list[str]:
@@ -499,21 +490,11 @@ ROLE_KINDS = {
 
 
 def _reference_candidates(reference: DocstringReference) -> list[str]:
-    target = reference.target
-    relative_target = target.lstrip(".")
-    package = reference.module.rpartition(".")[0]
-    candidates: list[str] = []
-    if target.startswith(".") and package:
-        candidates.append(f"{package}.{relative_target}")
-    else:
-        candidates.append(target)
+    target = reference.target.lstrip(".")
+    candidates = [target]
     if reference.class_name:
-        candidates.append(f"{reference.class_name}.{relative_target}")
-    candidates.append(f"{reference.module}.{relative_target}")
-    if package:
-        candidates.append(f"{package}.{relative_target}")
-    root = reference.module.partition(".")[0]
-    candidates.append(f"{root}.{relative_target}")
+        candidates.append(f"{reference.class_name}.{target}")
+    candidates.append(f"{reference.module}.{target}")
     return list(dict.fromkeys(candidates))
 
 
@@ -560,14 +541,18 @@ def check_docstring_references(
             for candidate in _reference_candidates(reference)
             if (kind := _indexed_kind(index, candidate)) is not None
         }
-        suffix = reference.target.lstrip(".")
-        found_kinds.update(
-            kind for name, kind in index.symbols.items() if name.endswith(f".{suffix}")
-        )
         builtin_kind = _builtin_kind(reference.target)
         if builtin_kind is not None:
             found_kinds.add(builtin_kind)
-        if found_kinds & allowed_kinds:
+        explicitly_relative = reference.target.startswith(".")
+        if explicitly_relative:
+            suffix = reference.target.lstrip(".")
+            found_kinds.update(
+                kind
+                for name, kind in index.symbols.items()
+                if name.endswith(f".{suffix}")
+            )
+        if found_kinds and (not explicitly_relative or found_kinds & allowed_kinds):
             continue
 
         first_component = reference.target.lstrip(".").partition(".")[0]
@@ -616,19 +601,12 @@ def render_inventory(symbols: dict[str, str]) -> str:
 
 
 def _prepare_sphinx_source(
-    source_root: Path, docs_root: Path, inventory: str
-) -> tuple[int, list[ReferenceLocation]]:
+    source_root: Path, docs_root: Path, inventory: str, references_path: Path
+) -> int:
     copied_docs = source_root / "docs"
     shutil.copytree(docs_root, copied_docs)
 
     markdown_files = sorted(copied_docs.rglob("*.md"))
-    references: list[ReferenceLocation] = []
-    for markdown in markdown_files:
-        normalized, _ = normalize_sphinx_roles(markdown.read_text(encoding="utf-8"))
-        relative_path = markdown.relative_to(copied_docs).as_posix()
-        references.extend(find_sphinx_references(normalized, relative_path))
-        markdown.write_text(normalized, encoding="utf-8")
-
     entries = [
         markdown.relative_to(source_root).with_suffix("").as_posix()
         for markdown in markdown_files
@@ -646,20 +624,33 @@ def _prepare_sphinx_source(
     ]
     (source_root / "index.md").write_text("\n".join(index), encoding="utf-8")
     (source_root / "api.rst").write_text(inventory, encoding="utf-8")
+    (source_root / "rocke_doc_symbols_ext.py").write_text(
+        SPHINX_EXTENSION, encoding="utf-8"
+    )
     (source_root / "conf.py").write_text(
         "\n".join(
             [
+                "import sys",
+                "from pathlib import Path",
+                "sys.path.insert(0, str(Path(__file__).parent))",
+                "",
                 'project = "rocKE documentation symbol check"',
-                'extensions = ["myst_parser"]',
+                'extensions = ["myst_parser", "rocke_doc_symbols_ext"]',
                 "nitpicky = True",
                 'root_doc = "index"',
+                f"rocke_reference_output = {str(references_path)!r}",
                 'source_suffix = {".md": "markdown", ".rst": "restructuredtext"}',
                 "",
             ]
         ),
         encoding="utf-8",
     )
-    return len(markdown_files), references
+    return len(markdown_files)
+
+
+def _read_sphinx_reference_count(path: Path) -> int:
+    """Read the number of Python references in the parsed Sphinx doctrees."""
+    return int(path.read_text(encoding="utf-8"))
 
 
 def parse_missing_references(
@@ -667,11 +658,9 @@ def parse_missing_references(
     copied_docs: Path,
     docs_root: Path,
     platform_root: Path,
-    references: Sequence[ReferenceLocation],
 ) -> list[BrokenReference]:
     """Extract unresolved references and map scratch paths to source paths."""
     broken: list[BrokenReference] = []
-    used_references: set[int] = set()
     for warning in warnings.splitlines():
         match = MISSING_REFERENCE_RE.match(warning)
         if not match:
@@ -681,30 +670,12 @@ def parse_missing_references(
             relative = warning_path.relative_to(copied_docs)
         except ValueError:
             continue
-        relative_path = relative.as_posix()
         source_path = docs_root / relative
         display_path = _display_path(source_path, platform_root, docs_root)
-        warning_line = int(match.group("line"))
-        candidates = [
-            (index, reference)
-            for index, reference in enumerate(references)
-            if index not in used_references
-            and reference.path == relative_path
-            and reference.role == match.group("role")
-            and reference.target == match.group("target")
-        ]
-        if candidates:
-            index, reference = min(
-                candidates, key=lambda item: abs(item[1].line - warning_line)
-            )
-            used_references.add(index)
-            source_line = reference.line
-        else:
-            source_line = warning_line
         broken.append(
             BrokenReference(
                 path=display_path,
-                line=source_line,
+                line=int(match.group("line")),
                 role=match.group("role"),
                 target=match.group("target"),
             )
@@ -845,8 +816,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             run_root = Path(temporary)
             source_root = run_root / "source"
             source_root.mkdir()
-            markdown_files, reference_locations = _prepare_sphinx_source(
-                source_root, docs_root, inventory
+            references_path = run_root / "sphinx-reference-count.txt"
+            markdown_files = _prepare_sphinx_source(
+                source_root, docs_root, inventory, references_path
             )
             warnings_path = run_root / "sphinx-warnings.txt"
             build_root = run_root / "build"
@@ -884,12 +856,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                 print(f"error: Sphinx build failed\n{details}", file=sys.stderr)
                 return 2
             warnings = warnings_path.read_text(encoding="utf-8")
+            markdown_reference_count = _read_sphinx_reference_count(references_path)
             markdown_broken = parse_missing_references(
                 warnings,
                 source_root / "docs",
                 docs_root,
                 platform_root,
-                reference_locations,
             )
     except (OSError, RuntimeError, subprocess.SubprocessError) as error:
         print(f"error: {error}", file=sys.stderr)
@@ -900,7 +872,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         [*markdown_broken, *docstring_broken],
         key=lambda item: (item.path, item.line, item.target),
     )
-    markdown_reference_count = len(reference_locations)
     total_reference_count = markdown_reference_count + len(index.references)
     try:
         report_docs_root = docs_root.relative_to(platform_root)
