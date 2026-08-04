@@ -17,10 +17,8 @@
 #include <hip/hip_runtime.h>
 #include <vector>
 
-// StreamK kernels are expected to leave the Synchronizer buffer all-zero on
-// exit so the next launch can reuse it. Zero it before the launch for a
-// known-clean baseline; call hipblaslt_check_streamk_sync_scan afterwards to
-// report any residue left by that launch.
+// Zeroes the buffer for a known-clean baseline before the launch. Pair with
+// hipblaslt_check_streamk_sync_scan to report residue left by that launch.
 inline void hipblaslt_check_streamk_sync_reset(rocblaslt_handle handle, hipStream_t stream)
 {
     if(!handle || !handle->check_streamk_sync || !handle->Synchronizer)
@@ -29,8 +27,8 @@ inline void hipblaslt_check_streamk_sync_reset(rocblaslt_handle handle, hipStrea
         handle->Synchronizer, 0, hipblaslt_streamk_synchronizer_ints * sizeof(int), stream));
 }
 
-// Blocks on `stream` to read the buffer back; only runs when the env-gated
-// check is enabled, so it costs nothing on the default path.
+// Blocks on `stream` to read the buffer back. Gated on the env var, so the
+// default path costs nothing.
 inline void hipblaslt_check_streamk_sync_scan(rocblaslt_handle handle,
                                               hipStream_t      stream,
                                               const char*      label)
@@ -38,12 +36,23 @@ inline void hipblaslt_check_streamk_sync_scan(rocblaslt_handle handle,
     if(!handle || !handle->check_streamk_sync || !handle->Synchronizer)
         return;
 
-    static_cast<void>(hipStreamSynchronize(stream));
     std::vector<int> host(hipblaslt_streamk_synchronizer_ints);
-    static_cast<void>(hipMemcpy(host.data(),
-                                handle->Synchronizer,
-                                hipblaslt_streamk_synchronizer_ints * sizeof(int),
-                                hipMemcpyDeviceToHost));
+    hipError_t       err = hipStreamSynchronize(stream);
+    if(err == hipSuccess)
+        err = hipMemcpy(host.data(),
+                        handle->Synchronizer,
+                        hipblaslt_streamk_synchronizer_ints * sizeof(int),
+                        hipMemcpyDeviceToHost);
+    // `host` is zero-initialized, so a silent readback failure would read as a
+    // clean buffer. Report it instead.
+    if(err != hipSuccess)
+    {
+        fprintf(stderr,
+                "[hipBLASLt CHECK_STREAMK_SYNC] %s: readback failed (%s); buffer not checked.\n",
+                label,
+                hipGetErrorString(err));
+        return;
+    }
 
     size_t nonzero = 0, first = hipblaslt_streamk_synchronizer_ints;
     for(size_t i = 0; i < hipblaslt_streamk_synchronizer_ints; ++i)

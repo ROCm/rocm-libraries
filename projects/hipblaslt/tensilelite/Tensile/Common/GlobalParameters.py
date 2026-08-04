@@ -212,6 +212,10 @@ globalParameters["DataInitValueActivationArgs"] = [2.0, 2.0]
 # host for non-SK5 solutions. Default keeps behavior unchanged for
 # existing tests.
 globalParameters["StreamKHybridMode"] = [0]
+# Read the shared Synchronizer buffer back after the first warmup and after each
+# sync group, and fail the run if a kernel left it nonzero. Residue is silent
+# otherwise: it corrupts a later launch, not the one that left it.
+globalParameters["CheckStreamKSync"] = False
 globalParameters["CEqualD"] = (
     False  # Set to true if testing for the case where the pointer to C is the same as D.
 )
