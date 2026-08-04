@@ -170,7 +170,7 @@ TEST_F(GPU_StreamTracker_FP32, ScratchFreedWhenCallersRelease)
     ASSERT_NE(scratch, nullptr);
     EXPECT_EQ(scratch.use_count(), 1); // only local; Handle has weak_ptr
 
-    std::weak_ptr<ScratchAllocation> weak = scratch;
+    std::weak_ptr<miopen::ScratchAllocation> weak = scratch;
     scratch.reset();             // simulate caller (find phase) completing
     EXPECT_TRUE(weak.expired()); // no strong refs remain → allocation freed
 
