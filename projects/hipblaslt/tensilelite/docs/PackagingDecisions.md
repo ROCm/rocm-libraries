@@ -224,6 +224,16 @@ This exercises the installed-artifact contract without modifying `/opt/rocm`,
 depending on a preinstalled wheel set, or injecting source directories through
 `PYTHONPATH`.
 
+The two modes cover opposite sides of that contract. `BUILD` is the producer
+path for source development: it stages the artifacts built from the current
+checkout without requiring them to be installed into the system ROCm tree.
+`SYSTEM` is the consumer path for packaging and downstream environments: it
+uses and validates the version-matched TensileLite wheel, client, and rocisa
+already supplied by the selected ROCm installation. Keeping both modes lets the
+same hipBLASLt build exercise source and installed-artifact workflows without
+forcing source developers to preinstall a wheel or packaged builds to rebuild
+TensileLite from source.
+
 Consequences:
 
 - Code generation waits for the client/runtime stage even when it does not
