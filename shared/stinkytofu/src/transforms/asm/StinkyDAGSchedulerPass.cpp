@@ -31,6 +31,7 @@
 #include "stinkytofu/core/BasicBlock.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
+#include "stinkytofu/ir/asm/VgprMsbEncoding.hpp"
 #include "stinkytofu/support/CFGTraversal.hpp"
 #include "stinkytofu/support/LoopDetection.hpp"
 #include "stinkytofu/transforms/asm/BuildDefUseChain.hpp"
@@ -334,6 +335,10 @@ static void scheduleRegionWithMovableSideEffects(
     for (unsigned i = 0; i < regionSize; ++i) {
         StinkyInstruction* prod = dagNodes[i].inst;
         int bestDeadline = INT_MAX;
+
+        // MSB-affinity tiebreak input (see DAGNode::requiredMsb); -1 = no MSB opinion.
+        auto [msbVal, msbHasVgpr] = computeRequiredMsb(prod);
+        dagNodes[i].requiredMsb = msbHasVgpr ? msbVal : -1;
 
         for (int ruleIdx = 0; ruleIdx < kNumCdna5HazardRules; ++ruleIdx) {
             const HazardRule& rule = kCdna5HazardRules[ruleIdx];
