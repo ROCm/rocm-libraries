@@ -935,7 +935,7 @@ TEST_F(TestBundleDiscoveryFixture, ClassifyBundleIsolatesFailureAmongMultipleDis
 // synthetic test body directly and confirms it records exactly the stored
 // message as a non-fatal failure, the same way GTest would run it once
 // registerFailedBundleLoad() has registered it.
-TEST_F(TestBundleDiscoveryFixture, FailedBundleLoadTestRecordsFailureWithMessage)
+TEST_F(TestBundleDiscoveryFixture, FailedBundleLoadRecordsFailureWithMessage)
 {
     detail::FailedBundleLoadTest test("boom");
     EXPECT_NONFATAL_FAILURE(test.TestBody(), "boom");
