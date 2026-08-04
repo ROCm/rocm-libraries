@@ -51,6 +51,12 @@ using namespace stinkytofu;
 // Gate for the ESM2 VALU source-operand VA_VDST stamp (the src-operand WAR hazard).
 bool g_enableESM2TrackValuVsrc = false;
 
+// TEMP HACK gate. When true, suppress the va_vdst wait for the VGPR-source (RAW)
+// hazard of GLOBAL-family memory ops — the "valu writes VGPR, global op reads
+// it" case. Only the global op's src RAW va_vdst is dropped; its dst WAW
+// va_vdst, the vm_vsrc WAR, and every non-GLOBAL consumer are untouched.
+constexpr bool g_enableESM2SuppressValuToGlobalVaVdst = true;
+
 // ---------------------------------------------------------------------------
 // Mode 2 counters and events (VA_VDST, VM_VSRC).
 // ---------------------------------------------------------------------------
@@ -386,12 +392,18 @@ class WaitcntBrackets {
     void onConsumer(const StinkyInstruction& inst, const VGPRHalfKeyer& keyer, Wait& wait) const {
         const True16Modifiers* true16Mod = inst.getModifier<True16Modifiers>();
 
-        forEachVGPR(
-            inst.getSrcRegs(), [&](size_t i) { return srcHalfSel(true16Mod, i); },
-            [&](unsigned idx, HighBitSel half) {
-                keyer.forEachConsumerKey(
-                    idx, half, [&](RegKey k) { determineWait(CT_VA_VDST, k, wait, "src(RAW)"); });
-            });
+        // TEMP HACK: optionally drop the src RAW va_vdst for valu->global.
+        const bool suppressSrcVaVdst =
+            g_enableESM2SuppressValuToGlobalVaVdst && isGLOBALOrAtomic(inst);
+        if (!suppressSrcVaVdst) {
+            forEachVGPR(
+                inst.getSrcRegs(), [&](size_t i) { return srcHalfSel(true16Mod, i); },
+                [&](unsigned idx, HighBitSel half) {
+                    keyer.forEachConsumerKey(idx, half, [&](RegKey k) {
+                        determineWait(CT_VA_VDST, k, wait, "src(RAW)");
+                    });
+                });
+        }
 
         forEachVGPR(
             inst.getDestRegs(), [&](size_t i) { return destHalfSel(true16Mod, i); },

@@ -123,7 +123,7 @@ def iterCustomKernelFiles(directory=CUSTOM_KERNEL_PATH):
                 yield os.path.join(root, fname)
 
 def getAllCustomKernelNames(directory=CUSTOM_KERNEL_PATH):
-    return [os.path.basename(path)[:-2] for path in iterCustomKernelFiles(directory)]
+    return sorted(os.path.basename(path)[:-2] for path in iterCustomKernelFiles(directory))
 
 def getCustomKernelContents(name, directory=CUSTOM_KERNEL_PATH):
     try:
