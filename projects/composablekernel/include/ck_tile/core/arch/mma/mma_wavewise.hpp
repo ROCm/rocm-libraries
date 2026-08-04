@@ -244,16 +244,38 @@ struct WaveWiseMmaPipeline : public MmaPipelineBase<WaveWiseMmaPipeline<ADataTyp
 
         if constexpr(AccumPolicy == MmaAccumPolicy::ROW_MAJOR)
         {
-            for(uint32_t bm = 0u; bm < FragsM; ++bm)
+            if constexpr(FragsM == 1 && FragsN == 1 && FragsK > 1)
             {
-                for(uint32_t bn = 0u; bn < FragsN; ++bn)
+                // This implementation is simlar to WarpGemmAttributeMfmaIterateK: multiple
+                // get_as/reinterpret_cast and static_for with inputs captured by reference. In most
+                // cases this code generates the same assembly as WarpGemmAttributeMfmaIterateK (but
+                // it's not always optimal).
+                using AVec1 = ext_vector_t<ADataType, ATensor::get_thread_buffer_size()>;
+                using BVec1 = ext_vector_t<BDataType, BTensor::get_thread_buffer_size()>;
+
+                const auto a_buf1 = a.get_thread_buffer().template get_as<AVec1>();
+                const auto b_buf1 = b.get_thread_buffer().template get_as<BVec1>();
+
+                static_for<0, FragsK, 1>{}([&](auto bk) {
+                    c_buf.at(0) = MmaOp::template exec<Params...>(
+                        a_buf1.template get_as<typename MmaOp::AVecType>().at(bk),
+                        b_buf1.template get_as<typename MmaOp::BVecType>().at(bk),
+                        c_buf.at(0));
+                });
+            }
+            else
+            {
+                for(uint32_t bm = 0u; bm < FragsM; ++bm)
                 {
-                    for(uint32_t bk = 0u; bk < FragsK; ++bk)
+                    for(uint32_t bn = 0u; bn < FragsN; ++bn)
                     {
-                        c_buf.at(bm * FragsN + bn) =
-                            MmaOp::template exec<Params...>(a_buf.at(bm * FragsK + bk),
-                                                            b_buf.at(bn * FragsK + bk),
-                                                            c_buf.at(bm * FragsN + bn));
+                        for(uint32_t bk = 0u; bk < FragsK; ++bk)
+                        {
+                            c_buf.at(bm * FragsN + bn) =
+                                MmaOp::template exec<Params...>(a_buf.at(bm * FragsK + bk),
+                                                                b_buf.at(bn * FragsK + bk),
+                                                                c_buf.at(bm * FragsN + bn));
+                        }
                     }
                 }
             }
