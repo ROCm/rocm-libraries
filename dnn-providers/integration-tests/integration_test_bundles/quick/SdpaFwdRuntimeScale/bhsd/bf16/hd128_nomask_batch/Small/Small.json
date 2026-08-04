@@ -9,7 +9,7 @@
                 "k_tensor_uid": 1,
                 "v_tensor_uid": 2,
                 "attn_mask_tensor_uid": null,
-                "scale_tensor_uid": 4,
+                "scale_tensor_uid": 10,
                 "seq_len_q_tensor_uid": null,
                 "seq_len_kv_tensor_uid": null,
                 "seed_tensor_uid": null,
@@ -127,7 +127,7 @@
             "virtual": false
         },
         {
-            "uid": 4,
+            "uid": 10,
             "name": "scale",
             "dims": [
                 1

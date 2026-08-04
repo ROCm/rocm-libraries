@@ -2,56 +2,75 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 """
-SDPA Forward Runtime Scale Golden Reference Bundle Generator
+SDPA Forward Runtime Scale Test Bundle Generator
 
-Generates pre-computed reference data for SDPA forward where the attention
-scale is provided as a runtime pass-by-value tensor (dims=[1], strides=[1],
-uid=4) rather than a compile-time baked scalar (attn_scale_value attribute).
+Generates graph-only reference bundles for SDPA forward where the attention
+scale is provided as a runtime pass-by-value tensor (dims=[1], strides=[1])
+rather than a compile-time baked scalar (attn_scale_value attribute).
 
 In existing SDPA bundles the scale is baked into the node's `attn_scale_value`
 attribute. This script instead wires it as a runtime tensor via `scale_tensor_uid`,
 leaving `attn_scale_value` as null. A provider that ignores the runtime scale
 and falls back to a compile-time default will produce detectably wrong output.
 
-Uses PyTorch's SDPBackend.MATH as the golden reference source.
-Supports BF16 and FP16 data types.
+These bundles carry no tensor blobs: the harness synthesizes Q/K/V/etc. itself
+and verifies provider output against its own CPU reference executor. The only
+thing this generator needs to communicate beyond the graph shape is which
+runtime tensor should be pinned to a fixed detection value — done via the
+`inputs` field in the companion `.meta.json`. There is no golden data to
+compute, so this script has no numeric/tensor-framework dependency.
 
-Output: {base_filename}.json + {base_filename}.tensor{uid}.bin + {base_filename}.meta.json
+Tensor UID slots (fixed convention across this bundle family):
+  0=Q  1=K  2=V  3=O  4=stats(LSE, if --stats)  5=SeqLenQ  6=SeqLenKv (if
+  --variable-seq-lens)  7/8/9=DescaleQ/K/V (if --dtype fp8)  10=scale (always
+  — the scale tensor's UID is never referenced positionally, only via the
+  node's explicit scale_tensor_uid field, so a single fixed slot above the
+  highest optional-tensor slot avoids any collision regardless of flags).
+
+Output: {base_filename}.json + {base_filename}.meta.json
 
 Usage:
-    python generate_sdpa_runtime_scale_golden.py \\
-        --base-filename bundles/SdpaFwdRuntimeScale/bhsd/bf16/Small/Small \\
+    python generate_sdpa_runtime_scale_test_bundle.py \\
+        --base-filename bundles/SdpaFwdRuntimeScale/bhsd/bf16/hd128_nomask_batch/Small \\
         --q-dims 2 4 256 128 --v-dims 2 4 256 128 \\
-        --scale-value 1.0 --dtype bf16 --seed 42
+        --name SdpaFwdRuntimeScale_bhsd_bf16_hd128_nomask_batch_Small
 """
 
 import argparse
 import datetime
-import hashlib
 import json
-import math
 import os
 import sys
 
-import torch
-import torch.nn.functional as F
-from torch.nn.attention import SDPBackend, sdpa_kernel
-
 # Bump when generator logic changes in a way that affects output data.
-# 1.0.0 — Initial: SDPA forward with runtime scale tensor (uid=4)
+# 1.0.0 — Initial: SDPA forward with runtime scale tensor (dynamic UID: 4
+#         normally, displaced to 10 when stats or fp8 also claim slot 4/7-9),
+#         with --causal (bottom_right), --variable-seq-lens (group/ragged
+#         batch), --stats (LSE), and --dtype fp8 (+ descale) support. Carries
+#         no tensor blobs and no PyTorch dependency: this bundle family's
+#         inputs are synthesized and outputs are reference-verified by the
+#         harness at test time, so there is no golden data for this script to
+#         compute.
 GENERATOR_VERSION = "1.0.0"
 
-DTYPE_MAP = {
-    "bf16": {"torch": torch.bfloat16, "json": "bfloat16", "bytes": 2},
-    "fp16": {"torch": torch.float16, "json": "half", "bytes": 2},
+DTYPE_JSON = {
+    "bf16": "bfloat16",
+    "fp16": "half",
+    "fp8": "fp8_e4m3",
 }
 
-# UID assignments
+# Tensor UID assignment (stable contract with the JSON consumer / loader).
 UID_Q = 0
 UID_K = 1
 UID_V = 2
 UID_O = 3
-UID_SCALE = 4  # runtime scalar tensor — dims=[1], strides=[1]
+UID_STATS = 4
+UID_SEQ_LEN_Q = 5
+UID_SEQ_LEN_KV = 6
+UID_DESCALE_Q = 7
+UID_DESCALE_K = 8
+UID_DESCALE_V = 9
+UID_SCALE = 10
 
 
 def compute_contiguous_strides(dims):
@@ -64,46 +83,33 @@ def compute_contiguous_strides(dims):
     return strides
 
 
-def compute_forward(Q, K, V, scale, H_q, H_kv):
-    """SDPA forward via PyTorch Math backend."""
-    with sdpa_kernel(SDPBackend.MATH):
-        O = F.scaled_dot_product_attention(
-            Q,
-            K,
-            V,
-            scale=scale,
-            enable_gqa=(H_q != H_kv),
-        )
-    return O
-
-
-def save_tensor_bin(tensor, path):
-    t = tensor.contiguous().cpu()
-    if t.dtype in (torch.bfloat16, torch.float16):
-        raw = t.view(torch.uint8).numpy().tobytes()
-    else:
-        raw = t.numpy().tobytes()
-    with open(path, "wb") as f:
-        f.write(raw)
-
-
-def build_graph_json(q_dims, k_dims, v_dims, o_dims, dtype_str):
+def build_graph_json(q_dims, k_dims, v_dims, o_dims, dtype, causal, group, stats, name):
     """Build the SDPA graph JSON with scale wired as a runtime tensor.
 
     Key difference from the compile-time variant (generate_sdpa_fwd_golden.py):
-      - scale_tensor_uid = UID_SCALE (pure runtime PBV tensor, no baked fallback)
-      - attn_scale_value = null (forces CPU reference to read from variantPack)
+      - scale_tensor_uid points at the runtime scale tensor (no baked fallback)
+      - attn_scale_value = null (forces the CPU reference to read from variantPack)
     A provider that falls back to a compile-time default (e.g. 1/sqrt(headDim))
     instead of reading the runtime tensor produces output that diverges from the
     CPU reference.
     """
+    B = q_dims[0]
+    is_fp8 = dtype == "fp8"
+    qkv_json_dtype = DTYPE_JSON[dtype]
+    # fp8 attention output is bf16; io_data_type mirrors that (matches the
+    # committed fp8 bundles, even though Q/K/V are individually fp8_e4m3).
+    o_json_dtype = "bfloat16" if is_fp8 else qkv_json_dtype
+    io_json_dtype = o_json_dtype
+
+    scale_uid = UID_SCALE
+
     tensors = [
         {
             "uid": UID_Q,
             "name": "Q",
             "dims": q_dims,
             "strides": compute_contiguous_strides(q_dims),
-            "data_type": dtype_str,
+            "data_type": qkv_json_dtype,
             "virtual": False,
         },
         {
@@ -111,7 +117,7 @@ def build_graph_json(q_dims, k_dims, v_dims, o_dims, dtype_str):
             "name": "K",
             "dims": k_dims,
             "strides": compute_contiguous_strides(k_dims),
-            "data_type": dtype_str,
+            "data_type": qkv_json_dtype,
             "virtual": False,
         },
         {
@@ -119,7 +125,7 @@ def build_graph_json(q_dims, k_dims, v_dims, o_dims, dtype_str):
             "name": "V",
             "dims": v_dims,
             "strides": compute_contiguous_strides(v_dims),
-            "data_type": dtype_str,
+            "data_type": qkv_json_dtype,
             "virtual": False,
         },
         {
@@ -127,19 +133,80 @@ def build_graph_json(q_dims, k_dims, v_dims, o_dims, dtype_str):
             "name": "O",
             "dims": o_dims,
             "strides": compute_contiguous_strides(o_dims),
-            "data_type": dtype_str,
+            "data_type": o_json_dtype,
             "virtual": False,
         },
+    ]
+
+    stats_tensor_uid = None
+    if stats:
+        lse_dims = [B, q_dims[1], q_dims[2], 1]
+        tensors.append(
+            {
+                "uid": UID_STATS,
+                "name": "LSE",
+                "dims": lse_dims,
+                "strides": compute_contiguous_strides(lse_dims),
+                "data_type": "float",
+                "virtual": False,
+            }
+        )
+        stats_tensor_uid = UID_STATS
+
+    seq_len_q_tensor_uid = None
+    seq_len_kv_tensor_uid = None
+    if group:
+        for uid, tname in [(UID_SEQ_LEN_Q, "SeqLenQ"), (UID_SEQ_LEN_KV, "SeqLenKv")]:
+            tensors.append(
+                {
+                    "uid": uid,
+                    "name": tname,
+                    "dims": [B + 1],
+                    "strides": [1],
+                    "data_type": "int32",
+                    "virtual": False,
+                }
+            )
+        seq_len_q_tensor_uid = UID_SEQ_LEN_Q
+        seq_len_kv_tensor_uid = UID_SEQ_LEN_KV
+
+    descale_q_tensor_uid = descale_k_tensor_uid = descale_v_tensor_uid = None
+    if is_fp8:
+        for uid, tname in [
+            (UID_DESCALE_Q, "DescaleQ"),
+            (UID_DESCALE_K, "DescaleK"),
+            (UID_DESCALE_V, "DescaleV"),
+        ]:
+            tensors.append(
+                {
+                    "uid": uid,
+                    "name": tname,
+                    "dims": [1],
+                    "strides": [1],
+                    "data_type": "float",
+                    "virtual": False,
+                }
+            )
+        descale_q_tensor_uid = UID_DESCALE_Q
+        descale_k_tensor_uid = UID_DESCALE_K
+        descale_v_tensor_uid = UID_DESCALE_V
+
+    tensors.append(
         {
-            "uid": UID_SCALE,
+            "uid": scale_uid,
             "name": "scale",
             "dims": [1],
             "strides": [1],
             "data_type": "float",
             "virtual": False,
             "is_runtime_pass_by_value": True,
-        },
-    ]
+        }
+    )
+
+    causal_mask_bottom_right = causal == "bottom_right"
+    diagonal_alignment = "BOTTOM_RIGHT" if causal_mask_bottom_right else "TOP_LEFT"
+    left_bound = -1 if causal_mask_bottom_right else None
+    right_bound = 0 if causal_mask_bottom_right else None
 
     graph = {
         "nodes": [
@@ -152,9 +219,9 @@ def build_graph_json(q_dims, k_dims, v_dims, o_dims, dtype_str):
                     "k_tensor_uid": UID_K,
                     "v_tensor_uid": UID_V,
                     "attn_mask_tensor_uid": None,
-                    "scale_tensor_uid": UID_SCALE,  # runtime tensor
-                    "seq_len_q_tensor_uid": None,
-                    "seq_len_kv_tensor_uid": None,
+                    "scale_tensor_uid": scale_uid,  # runtime tensor
+                    "seq_len_q_tensor_uid": seq_len_q_tensor_uid,
+                    "seq_len_kv_tensor_uid": seq_len_kv_tensor_uid,
                     "seed_tensor_uid": None,
                     "offset_tensor_uid": None,
                     "dropout_mask_tensor_uid": None,
@@ -163,16 +230,16 @@ def build_graph_json(q_dims, k_dims, v_dims, o_dims, dtype_str):
                     "page_table_v_tensor_uid": None,
                     "block_mask_tensor_uid": None,
                     "sink_token_tensor_uid": None,
-                    "descale_q_tensor_uid": None,
-                    "descale_k_tensor_uid": None,
-                    "descale_v_tensor_uid": None,
+                    "descale_q_tensor_uid": descale_q_tensor_uid,
+                    "descale_k_tensor_uid": descale_k_tensor_uid,
+                    "descale_v_tensor_uid": descale_v_tensor_uid,
                     "descale_s_tensor_uid": None,
                     "scale_s_tensor_uid": None,
                     "scale_o_tensor_uid": None,
                 },
                 "outputs": {
                     "o_tensor_uid": UID_O,
-                    "stats_tensor_uid": None,
+                    "stats_tensor_uid": stats_tensor_uid,
                     "max_tensor_uid": None,
                     "sum_exp_tensor_uid": None,
                     "rng_dump_tensor_uid": None,
@@ -180,70 +247,50 @@ def build_graph_json(q_dims, k_dims, v_dims, o_dims, dtype_str):
                     "amax_o_tensor_uid": None,
                 },
                 "attributes": {
-                    "generate_stats": None,
+                    "generate_stats": True if stats else None,
                     "alibi_mask": False,
                     "padding_mask": False,
                     "causal_mask": False,
-                    "causal_mask_bottom_right": False,
+                    "causal_mask_bottom_right": causal_mask_bottom_right,
                     "dropout_probability": None,
                     "attn_scale_value": None,  # null — scale is runtime, not baked
-                    "left_bound": None,
-                    "right_bound": None,
+                    "left_bound": left_bound,
+                    "right_bound": right_bound,
                     "max_seq_len_kv": None,
-                    "diagonal_alignment": "TOP_LEFT",
+                    "diagonal_alignment": diagonal_alignment,
                     "mma_core_mode": "float",
                     "implementation": "AUTO",
                 },
             }
         ],
         "tensors": tensors,
-        "io_data_type": dtype_str,
+        "io_data_type": io_json_dtype,
         "compute_data_type": "float",
         "intermediate_data_type": "float",
-        "name": "",
+        "name": name,
     }
-    return graph
+    return graph, scale_uid
 
 
-def _get_generator_sha256():
-    script_path = os.path.abspath(__file__)
-    with open(script_path, "rb") as f:
-        return hashlib.sha256(f.read()).hexdigest()
-
-
-def build_meta_json(config, pytorch_version):
-    rocm_ver = ""
-    if "+rocm" in pytorch_version:
-        rocm_ver = pytorch_version.split("+rocm")[1]
-
+def build_meta_json(scale_uid, scale_value):
     return {
         "format_version": 1,
         "operation": "SdpaFwdRuntimeScale",
-        "generator": "generate_sdpa_runtime_scale_golden.py",
-        "generator_sha256": _get_generator_sha256(),
+        "generator": "generate_sdpa_runtime_scale_test_bundle.py",
         "generator_version": GENERATOR_VERSION,
         "generated_at": datetime.datetime.now(datetime.timezone.utc).strftime(
             "%Y-%m-%dT%H:%M:%SZ"
         ),
-        "reference_source": f"PyTorch {pytorch_version}",
-        "reference_backend": "pytorch_math_backend",
-        "rocm_version": rocm_ver,
-        "seed": config["seed"],
+        "reference_source": "synthesis+cpu_reference",
         "notes": (
-            f"Runtime scale bundle: scale (uid={UID_SCALE}) is a runtime tensor "
-            "(no value_type/value field in JSON; attn_scale_value attribute is null). "
-            f"Detection value={config['scale_value']} is intentionally far from the "
-            "compile-time default (1/sqrt(D_qk)) to expose providers that use a "
-            "baked-in compile-time scale instead of the runtime tensor."
+            f"Pure-runtime scale bundle: scale (uid={scale_uid}) has "
+            "is_runtime_pass_by_value=true with no baked value. The harness "
+            f"supplies the detection value ({scale_value}) via the inputs "
+            "field; both the CPU reference and the provider read it from the "
+            "variantPack. A provider that ignores the runtime tensor and "
+            "falls back to a hardcoded scale produces diverging output."
         ),
-        "config": {
-            "q_dims": config["q_dims"],
-            "v_dims": config["v_dims"],
-            "dtype": config["dtype"],
-            "scale_uid": UID_SCALE,
-            "scale_value": config["scale_value"],
-            "gqa_ratio": config["q_dims"][1] // config["v_dims"][1],
-        },
+        "inputs": {str(scale_uid): {"kind": "fixed", "value": scale_value}},
     }
 
 
@@ -252,14 +299,21 @@ def generate_bundle(
     q_dims,
     v_dims,
     dtype="bf16",
-    scale_value=1.0,
-    seed=42,
-    min_val=-1.0,
-    max_val=1.0,
+    causal="none",
+    group=False,
+    stats=False,
+    scale_value=2.0,
+    name="",
 ):
-    if dtype not in DTYPE_MAP:
+    if dtype not in DTYPE_JSON:
         print(
-            f"ERROR: --dtype must be one of {list(DTYPE_MAP.keys())} (got '{dtype}')",
+            f"ERROR: --dtype must be one of {list(DTYPE_JSON.keys())} (got '{dtype}')",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    if causal not in ("none", "bottom_right"):
+        print(
+            f"ERROR: --causal must be one of ('none', 'bottom_right') (got '{causal}')",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -274,76 +328,29 @@ def generate_bundle(
         errors.append(f"Batch mismatch: Q batch={B}, V batch={B_v}")
     if H_q % H_kv != 0:
         errors.append(f"H_q ({H_q}) must be divisible by H_kv ({H_kv})")
-    if min_val >= max_val:
-        errors.append(f"--min ({min_val}) must be less than --max ({max_val})")
     if errors:
         for e in errors:
             print(f"ERROR: {e}", file=sys.stderr)
         sys.exit(1)
 
-    dtype_info = DTYPE_MAP[dtype]
-    torch_dtype = dtype_info["torch"]
-
     os.makedirs(os.path.dirname(os.path.abspath(base_filename)), exist_ok=True)
 
-    compile_time_default = 1.0 / math.sqrt(D_qk)
     print(f"Generating SDPA runtime scale bundle: {base_filename}")
     print(f"  Q: {q_dims}, K: {k_dims}, V: {v_dims}, O: {o_dims}")
-    print(f"  dtype: {dtype}, seed: {seed}")
-    print(
-        f"  scale uid={UID_SCALE}, runtime value={scale_value} "
-        f"(compile-time default would be {compile_time_default:.6f})"
+    print(f"  dtype: {dtype}, causal: {causal}, group: {group}, stats: {stats}")
+
+    graph_json, scale_uid = build_graph_json(
+        q_dims, k_dims, v_dims, o_dims, dtype, causal, group, stats, name
     )
+    print(f"  scale uid={scale_uid}, detection value={scale_value}")
 
-    rng = torch.Generator().manual_seed(seed)
-    Q = torch.empty(q_dims, dtype=torch_dtype).uniform_(min_val, max_val, generator=rng)
-    K = torch.empty(k_dims, dtype=torch_dtype).uniform_(min_val, max_val, generator=rng)
-    V = torch.empty(v_dims, dtype=torch_dtype).uniform_(min_val, max_val, generator=rng)
-    scale_tensor = torch.full([1], scale_value, dtype=torch.float32)
-
-    try:
-        O = compute_forward(Q, K, V, scale_value, H_q, H_kv)
-    except RuntimeError as e:
-        print(f"ERROR: PyTorch SDPA failed: {e}", file=sys.stderr)
-        sys.exit(1)
-
-    for name, t in [("Q", Q), ("K", K), ("V", V), ("O", O)]:
-        assert not torch.isnan(t).any(), f"NaN in {name}"
-        assert not torch.isinf(t).any(), f"Inf in {name}"
-
-    # Write tensor .bin files
-    tensor_list = [
-        ("Q", Q, UID_Q),
-        ("K", K, UID_K),
-        ("V", V, UID_V),
-        ("O", O, UID_O),
-        ("scale", scale_tensor, UID_SCALE),
-    ]
-    for name, tensor, uid in tensor_list:
-        bin_path = f"{base_filename}.tensor{uid}.bin"
-        save_tensor_bin(tensor, bin_path)
-        size_bytes = os.path.getsize(bin_path)
-        print(
-            f"  {name} (uid={uid}): {list(tensor.shape)} {tensor.dtype} -> {size_bytes} bytes"
-        )
-
-    # Write graph JSON
-    graph_json = build_graph_json(q_dims, k_dims, v_dims, o_dims, dtype_info["json"])
     json_path = f"{base_filename}.json"
     with open(json_path, "w") as f:
         json.dump(graph_json, f, indent=4)
         f.write("\n")
     print(f"  Graph JSON: {json_path}")
 
-    # Write meta JSON
-    config = {
-        "q_dims": q_dims,
-        "v_dims": v_dims,
-        "dtype": dtype,
-        "scale_value": scale_value,
-        "seed": seed,
-    }
-    meta_json = build_meta_json(config, torch.__version__)
+    meta_json = build_meta_json(scale_uid, scale_value)
     meta_path = f"{base_filename}.meta.json"
     with open(meta_path, "w") as f:
         json.dump(meta_json, f, indent=4)
@@ -353,7 +360,7 @@ def generate_bundle(
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Generate SDPA forward runtime scale golden reference bundles"
+        description="Generate SDPA forward runtime scale test bundles (graph + meta only)"
     )
     parser.add_argument(
         "--base-filename",
@@ -379,22 +386,44 @@ def main():
     parser.add_argument(
         "--dtype",
         default="bf16",
-        choices=list(DTYPE_MAP.keys()),
-        help="Input/output tensor dtype (default: bf16)",
+        choices=list(DTYPE_JSON.keys()),
+        help="Q/K/V tensor dtype (default: bf16). 'fp8' emits fp8_e4m3 "
+        "Q/K/V with a bf16 output and per-tensor descale_q/k/v runtime tensors.",
+    )
+    parser.add_argument(
+        "--causal",
+        default="none",
+        choices=["none", "bottom_right"],
+        help="Causal masking mode (default: none).",
+    )
+    parser.add_argument(
+        "--variable-seq-lens",
+        action="store_true",
+        help="Declare runtime seq_len_q/seq_len_kv tensors (uid 5/6) for a "
+        "ragged/padded batch, in addition to Q/K/V/O.",
+    )
+    parser.add_argument(
+        "--stats",
+        action="store_true",
+        help="Declare a runtime stats (LSE) output tensor (uid=4).",
     )
     parser.add_argument(
         "--scale-value",
         type=float,
-        default=1.0,
+        default=2.0,
         help=(
-            "Detection value for the runtime scale tensor (uid=4). "
-            "Default=1.0 (no scaling) is far from the typical compile-time "
-            "default of 1/sqrt(D_qk) to enable detection of incorrect handling."
+            "Detection value for the runtime scale tensor, recorded in "
+            "meta.json's 'inputs' field for the harness to inject. Default=2.0 "
+            "is far from the typical compile-time default of 1/sqrt(D_qk) to "
+            "enable detection of incorrect handling."
         ),
     )
-    parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--min", type=float, default=-1.0, dest="min_val")
-    parser.add_argument("--max", type=float, default=1.0, dest="max_val")
+    parser.add_argument(
+        "--name",
+        required=True,
+        help="Graph-level 'name' field, e.g. "
+        "SdpaFwdRuntimeScale_bhsd_bf16_hd128_causal_batch_Small",
+    )
     args = parser.parse_args()
 
     generate_bundle(
@@ -402,10 +431,11 @@ def main():
         q_dims=args.q_dims,
         v_dims=args.v_dims,
         dtype=args.dtype,
+        causal=args.causal,
+        group=args.variable_seq_lens,
+        stats=args.stats,
         scale_value=args.scale_value,
-        seed=args.seed,
-        min_val=args.min_val,
-        max_val=args.max_val,
+        name=args.name,
     )
     print("\nDone.")
 
