@@ -79,10 +79,10 @@ extern "C" {
 *  handle       handle to the rocSPARSE library context queue.
 *  @param[in]
 *  alpha        size-one dense vector descriptor holding the scalar \f$\alpha\f$.
-*  @param[out]
-*  target       sparse matrix \f$C\f$ descriptor.
 *  @param[in]
 *  source       sparse matrix \f$A\f$ descriptor.
+*  @param[out]
+*  target       sparse matrix \f$C\f$ descriptor.
 *  @param[out]
 *  p_error      error descriptor created if the returned status is not
 *               \ref rocsparse_status_success. A null pointer can be passed if an error
@@ -90,15 +90,15 @@ extern "C" {
 *
 *  \retval rocsparse_status_success the operation completed successfully.
 *  \retval rocsparse_status_invalid_handle the library context was not initialized.
-*  \retval rocsparse_status_invalid_pointer \p alpha, \p target or \p source pointer is invalid.
+*  \retval rocsparse_status_invalid_pointer \p alpha, \p source or \p target pointer is invalid.
 *  \retval rocsparse_status_not_implemented the formats of \p source and \p target differ, the
 *          format is not one of the supported formats, or a batched matrix is passed.
 */
 ROCSPARSE_EXPORT
 rocsparse_status rocsparse_spmat_scale(rocsparse_handle            handle,
                                        rocsparse_const_dnvec_descr alpha,
-                                       rocsparse_spmat_descr       target,
                                        rocsparse_const_spmat_descr source,
+                                       rocsparse_spmat_descr       target,
                                        rocsparse_error*            p_error);
 
 #ifdef __cplusplus

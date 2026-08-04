@@ -242,8 +242,8 @@ namespace rocsparse
 
 extern "C" rocsparse_status rocsparse_spmat_scale(rocsparse_handle            handle,
                                                   rocsparse_const_dnvec_descr alpha,
-                                                  rocsparse_spmat_descr       target,
                                                   rocsparse_const_spmat_descr source,
+                                                  rocsparse_spmat_descr       target,
                                                   rocsparse_error*            p_error)
 try
 {
@@ -254,8 +254,8 @@ try
 
     // Argument positions in this routine's signature.
     static constexpr int arg_alpha  = 1;
-    static constexpr int arg_target = 2;
-    static constexpr int arg_source = 3;
+    static constexpr int arg_source = 2;
+    static constexpr int arg_target = 3;
 
     ROCSPARSE_CHECKARG_POINTER(arg_alpha, alpha);
 

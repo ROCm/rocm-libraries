@@ -68,13 +68,13 @@ void testing_spmat_scale_bad_arg(const Arguments& arg)
     // p_error is an optional output error descriptor and may be null.
     rocsparse_error p_error[1] = {nullptr};
 
-    // Signature: rocsparse_spmat_scale(handle, alpha, target, source, p_error). p_error (arg 4)
+    // Signature: rocsparse_spmat_scale(handle, alpha, source, target, p_error). p_error (arg 4)
     // is optional and not checked.
     {
         static const int nex   = 1;
         static const int ex[1] = {4};
         select_bad_arg_analysis(
-            rocsparse_spmat_scale, nex, ex, handle, alpha, target, source, p_error);
+            rocsparse_spmat_scale, nex, ex, handle, alpha, source, target, p_error);
     }
 
     // Consistency checks between source and target that the generic bad-arg harness does not
@@ -84,14 +84,14 @@ void testing_spmat_scale_bad_arg(const Arguments& arg)
         rocsparse_local_spmat local_C_coo(
             m, n, nnz, csr_row_ptr_C, csr_col_ind_C, csr_val_C, itype, base, ttype);
         rocsparse_spmat_descr target_coo = local_C_coo;
-        EXPECT_ROCSPARSE_STATUS(rocsparse_spmat_scale(handle, alpha, target_coo, source, p_error),
+        EXPECT_ROCSPARSE_STATUS(rocsparse_spmat_scale(handle, alpha, source, target_coo, p_error),
                                 rocsparse_status_not_implemented);
 
         // Dimension mismatch: target has a different number of rows.
         rocsparse_local_spmat local_C_rows(
             m + 1, n, nnz, csr_row_ptr_C, csr_col_ind_C, csr_val_C, itype, jtype, base, ttype);
         rocsparse_spmat_descr target_rows = local_C_rows;
-        EXPECT_ROCSPARSE_STATUS(rocsparse_spmat_scale(handle, alpha, target_rows, source, p_error),
+        EXPECT_ROCSPARSE_STATUS(rocsparse_spmat_scale(handle, alpha, source, target_rows, p_error),
                                 rocsparse_status_invalid_size);
 
         // Data-type mismatch between source and target.
@@ -101,7 +101,7 @@ void testing_spmat_scale_bad_arg(const Arguments& arg)
         rocsparse_local_spmat    local_C_dtype(
             m, n, nnz, csr_row_ptr_C, csr_col_ind_C, csr_val_C, itype, jtype, base, other_ttype);
         rocsparse_spmat_descr target_dtype = local_C_dtype;
-        EXPECT_ROCSPARSE_STATUS(rocsparse_spmat_scale(handle, alpha, target_dtype, source, p_error),
+        EXPECT_ROCSPARSE_STATUS(rocsparse_spmat_scale(handle, alpha, source, target_dtype, p_error),
                                 rocsparse_status_type_mismatch);
 
         // Note: a differing index base or index type between source and target is intentionally
@@ -110,7 +110,7 @@ void testing_spmat_scale_bad_arg(const Arguments& arg)
         // Data-type mismatch between alpha and the matrices.
         rocsparse_local_dnvec       alpha_other(static_cast<int64_t>(1), &local_alpha, other_ttype);
         rocsparse_const_dnvec_descr alpha_bad = alpha_other;
-        EXPECT_ROCSPARSE_STATUS(rocsparse_spmat_scale(handle, alpha_bad, target, source, p_error),
+        EXPECT_ROCSPARSE_STATUS(rocsparse_spmat_scale(handle, alpha_bad, source, target, p_error),
                                 rocsparse_status_type_mismatch);
     }
 }
@@ -169,7 +169,7 @@ static void testing_spmat_scale_dispatch(const Arguments& arg, HostMatrix& hA)
         // Out-of-place, host scalar alpha (needed by the hipSPARSE SpGEAM use case).
         for(int32_t i = 0; i < 2; i++)
         {
-            CHECK_ROCSPARSE_ERROR(rocsparse_spmat_scale(handle, alpha_host, mat_C, mat_A, nullptr));
+            CHECK_ROCSPARSE_ERROR(rocsparse_spmat_scale(handle, alpha_host, mat_A, mat_C, nullptr));
             hC.near_check(dC);
         }
 
@@ -177,7 +177,7 @@ static void testing_spmat_scale_dispatch(const Arguments& arg, HostMatrix& hA)
         for(int32_t i = 0; i < 2; i++)
         {
             CHECK_ROCSPARSE_ERROR(
-                rocsparse_spmat_scale(handle, alpha_device, mat_C, mat_A, nullptr));
+                rocsparse_spmat_scale(handle, alpha_device, mat_A, mat_C, nullptr));
             hC.near_check(dC);
         }
 
@@ -197,7 +197,7 @@ static void testing_spmat_scale_dispatch(const Arguments& arg, HostMatrix& hA)
         // Warm up
         for(int32_t iter = 0; iter < number_cold_calls; ++iter)
         {
-            CHECK_ROCSPARSE_ERROR(rocsparse_spmat_scale(handle, alpha_host, mat_C, mat_A, nullptr));
+            CHECK_ROCSPARSE_ERROR(rocsparse_spmat_scale(handle, alpha_host, mat_A, mat_C, nullptr));
         }
 
         double gpu_solve_time_used = get_time_us();
@@ -205,7 +205,7 @@ static void testing_spmat_scale_dispatch(const Arguments& arg, HostMatrix& hA)
         // Performance run
         for(int32_t iter = 0; iter < number_hot_calls; ++iter)
         {
-            CHECK_ROCSPARSE_ERROR(rocsparse_spmat_scale(handle, alpha_host, mat_C, mat_A, nullptr));
+            CHECK_ROCSPARSE_ERROR(rocsparse_spmat_scale(handle, alpha_host, mat_A, mat_C, nullptr));
         }
 
         gpu_solve_time_used = (get_time_us() - gpu_solve_time_used) / number_hot_calls;

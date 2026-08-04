@@ -160,7 +160,7 @@ int main(int argc, char* argv[])
         handle, &alpha_descr, rocsparse_pointer_mode_host, ttype, &alpha, &alpha, nullptr));
 
     // Compute C = alpha * A. No temporary storage buffer is required.
-    ROCSPARSE_CHECK(rocsparse_spmat_scale(handle, alpha_descr, C, A, nullptr));
+    ROCSPARSE_CHECK(rocsparse_spmat_scale(handle, alpha_descr, A, C, nullptr));
 
     HIP_CHECK(hipStreamSynchronize(stream));
 
