@@ -30,8 +30,10 @@ class Pass;
 ///
 /// With \p enableXcntDrainProfile the pass emits an stderr summary of inserted
 /// drains by rule, and by whether each drain's block belongs to a loop and/or
-/// holds a matrix instruction. Off by default: the summary costs a loop and
-/// matrix-instruction scan per function.
+/// holds a matrix instruction. The summary covers every walked function, and
+/// when the kernel has callable functions it also reports the kernel body (the
+/// entry function) and the helper functions separately. Off by default: the
+/// summary costs a loop and matrix-instruction scan per function.
 STINKYTOFU_EXPORT std::unique_ptr<Pass> createGfx1250HazardPass(
     std::vector<Function*> functions = {}, bool enableXcntDrainProfile = false);
 

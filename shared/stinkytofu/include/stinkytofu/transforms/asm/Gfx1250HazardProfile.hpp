@@ -46,7 +46,35 @@ class XcntDrainProfileBase {
     virtual void print() const = 0;
 };
 
-/// Counts inserted drains by rule and by where they landed.
+/// Everything reported for one scope. Adding two scopes gives the whole-kernel
+/// numbers, so the pass never has to count the same drain twice.
+struct XcntDrainCounts {
+    uint32_t total = 0;
+    std::array<uint32_t, kXcntDrainReasonNames.size()> reasons{};
+    // One per reported site: loop+matrix, loop, matrix, other.
+    uint32_t loopMatrixSites = 0;
+    uint32_t loopSites = 0;
+    uint32_t matrixSites = 0;
+    uint32_t otherSites = 0;
+    bool usesTensorLoad = false;
+
+    XcntDrainCounts& operator+=(const XcntDrainCounts& other) {
+        total += other.total;
+        for (size_t i = 0; i < reasons.size(); ++i) reasons[i] += other.reasons[i];
+        loopMatrixSites += other.loopMatrixSites;
+        loopSites += other.loopSites;
+        matrixSites += other.matrixSites;
+        otherSites += other.otherSites;
+        usesTensorLoad |= other.usesTensorLoad;
+        return *this;
+    }
+};
+
+/// Counts inserted drains by rule and by where they landed, over the whole
+/// kernel: the counts accumulate across every function the pass walks, and are
+/// additionally split into the kernel body (the entry function) and the helper
+/// functions it calls (activation functions and friends), which are usually
+/// worth judging separately.
 ///
 /// Placement is described by two independent facts about the block holding the
 /// drain's anchor: whether the block belongs to a loop (the drain is paid on
@@ -55,9 +83,13 @@ class XcntDrainProfileBase {
 /// so unlike recorded region ranges they cannot go stale.
 class XcntDrainProfile final : public XcntDrainProfileBase {
    public:
-    /// Drain insertion only adds instructions to existing blocks, so neither the
-    /// loop structure nor the per-block matrix flag changes during the walk.
+    /// Only the per-function CFG facts are rebuilt here; the counts keep adding
+    /// up. Drain insertion only adds instructions to existing blocks, so neither
+    /// the loop structure nor the per-block matrix flag changes during the walk.
     void beginFunction(Function& func) override {
+        if (func.getIsCallable()) hasHelpers = true;
+        current = func.getIsCallable() ? &helpers : &kernelBody;
+
         loopBlocks.clear();
         matrixBlocks.clear();
 
@@ -69,31 +101,45 @@ class XcntDrainProfile final : public XcntDrainProfileBase {
     }
 
     void noteTensorLoad() override {
-        usesTensorLoad = true;
+        current->usesTensorLoad = true;
     }
 
     void record(XcntDrainReason reason, const IRBase* anchor) override {
-        ++total;
-        ++reasonCounts[static_cast<size_t>(reason)];
+        ++current->total;
+        ++current->reasons[static_cast<size_t>(reason)];
         ++siteCounter(anchor);
     }
 
     void print() const override {
-        std::cerr << "[Gfx1250HazardPass] xcnt drains: total=" << total
-                  << ", loop+matrix=" << loopMatrixSites << ", loop=" << loopSites
-                  << ", matrix=" << matrixSites << ", other=" << otherSites << "\n";
-        std::cerr << "[Gfx1250HazardPass] xcnt drain rules:";
-        const char* separator = " ";
-        for (size_t i = 0; i < reasonCounts.size(); ++i) {
-            std::cerr << separator << kXcntDrainReasonNames[i] << "=" << reasonCounts[i];
-            separator = ", ";
-        }
-        std::cerr << "\n";
-        std::cerr << "[Gfx1250HazardPass] tensor_load_to_lds: "
-                  << (usesTensorLoad ? "used" : "not used") << "\n";
+        XcntDrainCounts wholeKernel = kernelBody;
+        wholeKernel += helpers;
+        printCounts("whole kernel ", wholeKernel);
+
+        // With no helper function the split would just repeat the totals.
+        if (!hasHelpers) return;
+        printCounts("kernel body ", kernelBody);
+        printCounts("helper functions ", helpers);
     }
 
    private:
+    static void printCounts(const char* scope, const XcntDrainCounts& counts) {
+        constexpr const char* tag = "[Gfx1250HazardPass] ";
+
+        std::cerr << tag << scope << "xcnt drains: total=" << counts.total
+                  << ", loop+matrix=" << counts.loopMatrixSites << ", loop=" << counts.loopSites
+                  << ", matrix=" << counts.matrixSites << ", other=" << counts.otherSites << "\n";
+        std::cerr << tag << scope << "xcnt drain rules:";
+        const char* separator = " ";
+        for (size_t i = 0; i < counts.reasons.size(); ++i) {
+            std::cerr << separator << kXcntDrainReasonNames[i] << "=" << counts.reasons[i];
+            separator = ", ";
+        }
+        std::cerr << "\n";
+        std::cerr << tag << scope
+                  << "tensor_load_to_lds: " << (counts.usesTensorLoad ? "used" : "not used")
+                  << "\n";
+    }
+
     static bool holdsMatrixInstruction(BasicBlock& bb) {
         for (IRBase& ir : bb) {
             const auto* inst = dyn_cast<StinkyInstruction>(&ir);
@@ -110,22 +156,20 @@ class XcntDrainProfile final : public XcntDrainProfileBase {
         const bool inLoop = loopBlocks.contains(bb);
         const bool hasMatrix = matrixBlocks.contains(bb);
 
-        if (inLoop) return hasMatrix ? loopMatrixSites : loopSites;
-        return hasMatrix ? matrixSites : otherSites;
+        if (inLoop) return hasMatrix ? current->loopMatrixSites : current->loopSites;
+        return hasMatrix ? current->matrixSites : current->otherSites;
     }
 
     // Facts about the function currently being walked.
     std::unordered_set<const BasicBlock*> loopBlocks;
     std::unordered_set<const BasicBlock*> matrixBlocks;
 
-    uint32_t total = 0;
-    std::array<uint32_t, kXcntDrainReasonNames.size()> reasonCounts{};
-    // One per reported site: loop+matrix, loop, matrix, other.
-    uint32_t loopMatrixSites = 0;
-    uint32_t loopSites = 0;
-    uint32_t matrixSites = 0;
-    uint32_t otherSites = 0;
-    bool usesTensorLoad = false;
+    XcntDrainCounts kernelBody;
+    XcntDrainCounts helpers;
+    // Scope of the function currently being walked; the pass always calls
+    // beginFunction() first, so this only guards a stray record().
+    XcntDrainCounts* current = &kernelBody;
+    bool hasHelpers = false;
 };
 
 /// Profiling off: no counters, no per-function analysis, no output.

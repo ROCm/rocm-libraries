@@ -15,6 +15,13 @@
 #   ^tail_math    no loop, wmma      -> matrix
 #   ^epilogue     no loop, no wmma   -> other
 #
+# The report also splits the counts into the kernel body and the helper
+# functions, which needs a module (entry + callable functions) that .stir cannot
+# express; unit/asm/Gfx1250HazardProfileTest.cpp covers that in C++.
+#
+# TODO: teach .stir/stinkytofu-opt to represent a module and fold those cases
+# back into this test.
+#
 # CHECK: xcnt drains: total=4, loop+matrix=1, loop=1, matrix=1, other=1
 # CHECK: vgprMsb=4
 
