@@ -41,64 +41,6 @@ enum VgprMsbState : int {
     LABEL_BEGIN = -2,
 };
 
-int getMsbFromVgpr(const StinkyRegister& reg) {
-    if (reg.dataType != StinkyRegister::Type::Register || reg.reg.type != RegType::V) return -1;
-    return static_cast<int>(reg.reg.idx) / 256;
-}
-
-void collectVgprMsbSlots(const StinkyInstruction* inst, int msbSrc[3], int& msbDst, bool& hasVgpr) {
-    const auto& fields = inst->getHwInstDesc()->operandFields;
-    const auto& srcRegs = inst->getSrcRegs();
-    const auto& destRegs = inst->getDestRegs();
-
-    int srcIdx = 0, dstIdx = 0;
-    for (const auto& field : fields) {
-        const StinkyRegister* reg = nullptr;
-        if (field.isDest || field.isReadWrite) {
-            if (dstIdx < static_cast<int>(destRegs.size())) reg = &destRegs[dstIdx++];
-        } else {
-            if (srcIdx < static_cast<int>(srcRegs.size())) reg = &srcRegs[srcIdx++];
-        }
-        if (!reg) continue;
-
-        int slot = encodeFieldToVgprOffSlot(field.encodeField);
-        if (slot < 0) continue;
-
-        int msb = getMsbFromVgpr(*reg);
-        if (msb < 0) continue;
-
-        hasVgpr = true;
-        if (slot == 3)
-            msbDst = msb;
-        else
-            msbSrc[slot] = msb;
-    }
-}
-
-/// \return (setVal, hasVgpr). setVal is NOT_REQUIRED when the instruction
-///         doesn't use VGPRs or is a non-VOP instruction type.
-std::pair<int, bool> computeRequiredMsb(const StinkyInstruction* inst) {
-    if (inst->is(InstFlag::IF_SALU) || inst->is(InstFlag::IF_SMemLoad) ||
-        inst->is(InstFlag::IF_SMemStore) || inst->is(InstFlag::IF_SMemAtomic) ||
-        inst->is(InstFlag::IF_Branch) || inst->is(InstFlag::IF_Call) ||
-        inst->is(InstFlag::IF_Barrier) || inst->is(InstFlag::IF_WaitCnt) ||
-        inst->is(InstFlag::IF_HasSideEffect)) {
-        return {VgprMsbState::NOT_REQUIRED, false};
-    }
-
-    int msbSrc[3] = {0, 0, 0};
-    int msbDst = 0;
-    bool hasVgpr = false;
-
-    collectVgprMsbSlots(inst, msbSrc, msbDst, hasVgpr);
-
-    if (!hasVgpr) return {VgprMsbState::NOT_REQUIRED, false};
-
-    int setVal = encodeVgprMsbForSlot(0, msbSrc[0]) | encodeVgprMsbForSlot(1, msbSrc[1]) |
-                 encodeVgprMsbForSlot(2, msbSrc[2]) | encodeVgprMsbForSlot(3, msbDst);
-    return {setVal, true};
-}
-
 // Set offset = -msb*256 on each VGPR operand so the emitter prints byte form
 // (`v[idx + offset]` evaluates to idx ≤ 255).
 void encodeVgprOperands(StinkyInstruction* inst) {

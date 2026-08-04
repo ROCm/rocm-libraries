@@ -30,7 +30,7 @@ from Tensile.Common.DataType import DataType
 from Tensile.SolutionStructs.Solution import Solution
 
 
-def _build_state(*, data_type_a, data_type_b, tdm_inst=3, num_threads=256):
+def _build_state(*, data_type_a, data_type_b, tdm_inst=3, num_threads=256, sparse=0):
     """Minimal state dict for Solution.setGlobalReadVectorWidth TDM tests."""
     return {
         "TDMInst": tdm_inst,
@@ -38,6 +38,7 @@ def _build_state(*, data_type_a, data_type_b, tdm_inst=3, num_threads=256):
         "ProblemType": {
             "DataTypeA": data_type_a,
             "DataTypeB": data_type_b,
+            "Sparse": sparse,
         },
     }
 
@@ -104,6 +105,20 @@ class TestTDMGlobalReadVectorWidth:
         Solution.setGlobalReadVectorWidth(state, tc, 999, 8, False)
 
         assert state["GlobalReadVectorWidth%s" % tc] == 1
+
+    @pytest.mark.parametrize("sparse,tc", [(1, "A"), (2, "B")])
+    def test_sparse_tensor_bumped_to_4(self, sparse, tc):
+        """The sparse tensor (Sparse==1 -> A, Sparse==2 -> B) loads 2:4 metadata
+        that requires GRVW % 4 == 0, so it is bumped to 4 rather than forced to 1."""
+        state = _build_state(
+            data_type_a=DataType(DataTypeEnum.Half),
+            data_type_b=DataType(DataTypeEnum.Half),
+            sparse=sparse,
+        )
+
+        Solution.setGlobalReadVectorWidth(state, tc, 999, 8, False)
+
+        assert state["GlobalReadVectorWidth%s" % tc] == 4
 
     def test_numloads_normalized_for_tdm(self):
         """TDM normalizes the per-thread tile-split params to 1."""

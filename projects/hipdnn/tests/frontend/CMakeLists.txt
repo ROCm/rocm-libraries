@@ -56,10 +56,13 @@ add_executable(
     IntegrationMatmulDescriptorLowering.cpp
     IntegrationPointwiseDescriptorLifting.cpp
     IntegrationPointwiseDescriptorLowering.cpp
+    IntegrationRaggedTensorDescriptorLowering.cpp
     IntegrationPassByValueVersionFilter.cpp
     IntegrationPassByValueDelivery.cpp
     IntegrationResampleFwdDescriptorLifting.cpp
     IntegrationResampleFwdDescriptorLowering.cpp
+    IntegrationResampleBwdDescriptorLifting.cpp
+    IntegrationResampleBwdDescriptorLowering.cpp
     IntegrationReductionDescriptorLifting.cpp
     IntegrationReductionDescriptorLowering.cpp
     IntegrationRMSNormDescriptorLifting.cpp
