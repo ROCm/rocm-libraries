@@ -9,7 +9,7 @@
 namespace hipdnn_backend::heuristics::uhd
 {
 
-const std::string StaticOrderAdapter::_emptyHash;
+const std::string StaticOrderAdapter::EMPTY_HASH;
 
 StaticOrderAdapter::StaticOrderAdapter(std::vector<size_t> orderFieldIndices, size_t numFeatures)
     : _orderFieldIndices(std::move(orderFieldIndices)), _numFeatures(numFeatures)
@@ -26,10 +26,18 @@ std::unique_ptr<StaticOrderAdapter>
     for(const auto& field : orderFields)
     {
         // Look for exact match or $kernel.<field> pattern
+        // Signature entries may be quoted JSON strings like "\"$kernel.priority\""
         bool found = false;
         for(size_t i = 0; i < signature.size(); ++i)
         {
-            if(signature[i] == field || signature[i] == "$kernel." + field)
+            std::string sigField = signature[i];
+            // Strip surrounding quotes if present
+            if(sigField.size() >= 2 && sigField.front() == '"' && sigField.back() == '"')
+            {
+                sigField = sigField.substr(1, sigField.size() - 2);
+            }
+
+            if(sigField == field || sigField == "$kernel." + field)
             {
                 indices.push_back(i);
                 found = true;
@@ -63,7 +71,7 @@ double StaticOrderAdapter::score(const std::vector<double>& features) const
     double score = 0.0;
     double weight = std::pow(1e10, static_cast<double>(_orderFieldIndices.size() - 1));
 
-    for(size_t idx : _orderFieldIndices)
+    for(const size_t idx : _orderFieldIndices)
     {
         if(idx < features.size())
         {

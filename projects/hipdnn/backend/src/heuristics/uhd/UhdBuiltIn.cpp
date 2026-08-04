@@ -54,11 +54,11 @@ constexpr const char* PLUGIN_NAME = "BuiltInUHDHeuristic";
 constexpr const char* PLUGIN_VERSION = "1.0.0";
 constexpr const char* POLICY_NAME = "SelectionHeuristic::UHD";
 
-hipdnnCallback_t g_loggingCallback = nullptr;
-hipdnnSeverity_t g_logLevel = HIPDNN_SEV_INFO;
+hipdnnCallback_t gLoggingCallback = nullptr;
+hipdnnSeverity_t gLogLevel = HIPDNN_SEV_INFO;
 
 #define UHD_LOG(severity, ...) \
-    HIPDNN_BUILTIN_HEURISTIC_LOG(g_loggingCallback, g_logLevel, severity, "[BuiltInUHD] ", __VA_ARGS__)
+    HIPDNN_BUILTIN_HEURISTIC_LOG(gLoggingCallback, gLogLevel, severity, "[BuiltInUHD] ", __VA_ARGS__)
 
 int64_t policyId()
 {
@@ -121,13 +121,13 @@ hipdnnPluginStatus_t getType(hipdnnPluginType_t* type)
 
 hipdnnPluginStatus_t setLoggingCallback(hipdnnCallback_t callback)
 {
-    g_loggingCallback = callback;
+    gLoggingCallback = callback;
     return HIPDNN_PLUGIN_STATUS_SUCCESS;
 }
 
 hipdnnPluginStatus_t setLogLevel(hipdnnSeverity_t level)
 {
-    g_logLevel = level;
+    gLogLevel = level;
     return HIPDNN_PLUGIN_STATUS_SUCCESS;
 }
 
@@ -296,7 +296,7 @@ hipdnnPluginStatus_t policySetSerializedGraph(hipdnnHeuristicPolicyDescriptor_t 
     try
     {
         auto* d = reinterpret_cast<PolicyDescriptor*>(desc);
-        if(serializedGraph && serializedGraph->ptr && serializedGraph->size > 0)
+        if(serializedGraph != nullptr && serializedGraph->ptr != nullptr && serializedGraph->size > 0)
         {
             const auto* data = reinterpret_cast<const uint8_t*>(serializedGraph->ptr);
             d->serializedGraph.assign(data, data + serializedGraph->size);
@@ -317,25 +317,29 @@ hipdnnPluginStatus_t policySetSerializedGraph(hipdnnHeuristicPolicyDescriptor_t 
 // ---- Selection -------------------------------------------------------------
 
 // Helper to bind device properties to feature extraction context.
-void bindDeviceProperties(FeatureExtractionContext& ctx, const fb::DevicePropertiesT* props)
+// TODO(RFC-0017): Enable when UHD integration is complete
+[[maybe_unused]] void bindDeviceProperties(FeatureExtractionContext& ctx,
+                                           const fb::DevicePropertiesT* props)
 {
-    if(!props)
+    if(props == nullptr)
     {
         return;
     }
 
     FeatureExtractionContext::ValueMap deviceVars;
-    deviceVars["cu_count"] = static_cast<int64_t>(props->cu_count);
+    // Map actual schema fields to feature names
+    deviceVars["device_id"] = static_cast<int64_t>(props->device_id);
+    deviceVars["cu_count"] = static_cast<int64_t>(props->multi_processor_count);
+    deviceVars["multi_processor_count"] = static_cast<int64_t>(props->multi_processor_count);
     deviceVars["total_global_mem"] = static_cast<int64_t>(props->total_global_mem);
-    deviceVars["max_shared_mem_per_cu"] = static_cast<int64_t>(props->max_shared_mem_per_cu);
-    deviceVars["warp_size"] = static_cast<int64_t>(props->warp_size);
-    deviceVars["max_threads_per_block"] = static_cast<int64_t>(props->max_threads_per_block);
-    deviceVars["clock_rate"] = static_cast<int64_t>(props->clock_rate);
-    deviceVars["memory_clock_rate"] = static_cast<int64_t>(props->memory_clock_rate);
-    deviceVars["memory_bus_width"] = static_cast<int64_t>(props->memory_bus_width);
-    deviceVars["l2_cache_size"] = static_cast<int64_t>(props->l2_cache_size);
-    deviceVars["major"] = static_cast<int64_t>(props->major);
-    deviceVars["minor"] = static_cast<int64_t>(props->minor);
+    if(props->architecture_name.empty())
+    {
+        deviceVars["architecture_name"] = std::string{};
+    }
+    else
+    {
+        deviceVars["architecture_name"] = props->architecture_name;
+    }
 
     ctx.bindDeviceVars(deviceVars);
 }

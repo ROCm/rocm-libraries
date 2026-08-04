@@ -83,7 +83,7 @@ FeatureExtractor::FeatureExtractor(const std::vector<std::string>& signature)
         _parsedExprs.push_back(std::move(parsed));
 
         // Extract variable references from this expression
-        auto vars = _evaluator.extractVariables(_parsedExprs.back());
+        auto vars = JsonLogicEvaluator::extractVariables(_parsedExprs.back());
         _varRefs.insert(vars.begin(), vars.end());
     }
 
@@ -126,12 +126,12 @@ std::string FeatureExtractor::computeHash(const std::vector<std::string>& signat
         }
         oss << signature[i];
     }
-    std::string combined = oss.str();
+    const std::string combined = oss.str();
 
     // Use std::hash for now (replace with proper SHA-256 in production)
     // This is a placeholder - the actual implementation should use OpenSSL
     // or a header-only SHA-256 implementation.
-    std::size_t h = std::hash<std::string>{}(combined);
+    const std::size_t h = std::hash<std::string>{}(combined);
 
     // Format as hex string
     std::ostringstream hexStream;
@@ -141,7 +141,7 @@ std::string FeatureExtractor::computeHash(const std::vector<std::string>& signat
     std::string result = hexStream.str();
     while(result.length() < 64)
     {
-        result = "0" + result;
+        result.insert(0, 1, '0');
     }
 
     return result;
@@ -157,7 +157,7 @@ bool FeatureExtractor::validateAgainstKmdFields(
         if(var.rfind(kernelPrefix, 0) == 0)
         {
             // Extract field name after "$kernel."
-            std::string fieldName = var.substr(kernelPrefix.length());
+            const std::string fieldName = var.substr(kernelPrefix.length());
             if(kmdFieldNames.find(fieldName) == kmdFieldNames.end())
             {
                 return false;
@@ -177,7 +177,7 @@ std::vector<std::string>
     {
         if(var.rfind(kernelPrefix, 0) == 0)
         {
-            std::string fieldName = var.substr(kernelPrefix.length());
+            const std::string fieldName = var.substr(kernelPrefix.length());
             if(kmdFieldNames.find(fieldName) == kmdFieldNames.end())
             {
                 missing.push_back(fieldName);

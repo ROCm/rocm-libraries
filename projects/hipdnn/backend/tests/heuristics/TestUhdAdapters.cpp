@@ -37,39 +37,39 @@ protected:
 
 TEST_F(TestStaticOrderAdapter, CreateFromFieldNames)
 {
-    std::vector<std::string> orderFields = {"priority", "id"};
-    auto adapter = StaticOrderAdapter::create(orderFields, _signature);
+    const std::vector<std::string> orderFields = {"priority", "id"};
+    const auto adapter = StaticOrderAdapter::create(orderFields, _signature);
     ASSERT_NE(adapter, nullptr);
-    EXPECT_EQ(adapter->type(), UhdAdapterType::StaticOrder);
+    EXPECT_EQ(adapter->type(), UhdAdapterType::STATIC_ORDER);
 }
 
 TEST_F(TestStaticOrderAdapter, CreateWithKernelPrefixMatch)
 {
     // signature has "$kernel.priority" but we pass "priority"
-    std::vector<std::string> orderFields = {"priority"};
-    auto adapter = StaticOrderAdapter::create(orderFields, _signature);
+    const std::vector<std::string> orderFields = {"priority"};
+    const auto adapter = StaticOrderAdapter::create(orderFields, _signature);
     ASSERT_NE(adapter, nullptr);
 }
 
 TEST_F(TestStaticOrderAdapter, CreateFailsOnUnknownField)
 {
-    std::vector<std::string> orderFields = {"unknown_field"};
-    auto adapter = StaticOrderAdapter::create(orderFields, _signature);
+    const std::vector<std::string> orderFields = {"unknown_field"};
+    const auto adapter = StaticOrderAdapter::create(orderFields, _signature);
     EXPECT_EQ(adapter, nullptr);
 }
 
 TEST_F(TestStaticOrderAdapter, ReportsCorrectFeatureCount)
 {
-    std::vector<std::string> orderFields = {"priority"};
-    auto adapter = StaticOrderAdapter::create(orderFields, _signature);
+    const std::vector<std::string> orderFields = {"priority"};
+    const auto adapter = StaticOrderAdapter::create(orderFields, _signature);
     ASSERT_NE(adapter, nullptr);
     EXPECT_EQ(adapter->expectedFeatureCount(), 4u);
 }
 
 TEST_F(TestStaticOrderAdapter, ValidatesFeatureCount)
 {
-    std::vector<std::string> orderFields = {"priority"};
-    auto adapter = StaticOrderAdapter::create(orderFields, _signature);
+    const std::vector<std::string> orderFields = {"priority"};
+    const auto adapter = StaticOrderAdapter::create(orderFields, _signature);
     ASSERT_NE(adapter, nullptr);
 
     EXPECT_TRUE(adapter->validateFeatureCount(4));
@@ -79,8 +79,8 @@ TEST_F(TestStaticOrderAdapter, ValidatesFeatureCount)
 
 TEST_F(TestStaticOrderAdapter, EmptyFeaturesHash)
 {
-    std::vector<std::string> orderFields = {"priority"};
-    auto adapter = StaticOrderAdapter::create(orderFields, _signature);
+    const std::vector<std::string> orderFields = {"priority"};
+    const auto adapter = StaticOrderAdapter::create(orderFields, _signature);
     ASSERT_NE(adapter, nullptr);
 
     // StaticOrder doesn't use a trained model, so hash is empty
@@ -90,16 +90,16 @@ TEST_F(TestStaticOrderAdapter, EmptyFeaturesHash)
 TEST_F(TestStaticOrderAdapter, ScoresLowerPriorityHigher)
 {
     // Order by priority (index 0)
-    std::vector<std::string> orderFields = {"priority"};
-    auto adapter = StaticOrderAdapter::create(orderFields, _signature);
+    const std::vector<std::string> orderFields = {"priority"};
+    const auto adapter = StaticOrderAdapter::create(orderFields, _signature);
     ASSERT_NE(adapter, nullptr);
 
     // Lower priority value should get higher score
-    std::vector<double> lowPriority = {1.0, 100, 64, 64};
-    std::vector<double> highPriority = {10.0, 200, 64, 64};
+    const std::vector<double> lowPriority = {1.0, 100, 64, 64};
+    const std::vector<double> highPriority = {10.0, 200, 64, 64};
 
-    double scoreLow = adapter->score(lowPriority);
-    double scoreHigh = adapter->score(highPriority);
+    const double scoreLow = adapter->score(lowPriority);
+    const double scoreHigh = adapter->score(highPriority);
 
     EXPECT_GT(scoreLow, scoreHigh);
 }
@@ -107,16 +107,16 @@ TEST_F(TestStaticOrderAdapter, ScoresLowerPriorityHigher)
 TEST_F(TestStaticOrderAdapter, OrderByMultipleFields)
 {
     // Order by priority then id
-    std::vector<std::string> orderFields = {"priority", "id"};
-    auto adapter = StaticOrderAdapter::create(orderFields, _signature);
+    const std::vector<std::string> orderFields = {"priority", "id"};
+    const auto adapter = StaticOrderAdapter::create(orderFields, _signature);
     ASSERT_NE(adapter, nullptr);
 
     // Same priority, different id - lower id should win
-    std::vector<double> samePriorityLowId = {5.0, 1.0, 64, 64};
-    std::vector<double> samePriorityHighId = {5.0, 10.0, 64, 64};
+    const std::vector<double> samePriorityLowId = {5.0, 1.0, 64, 64};
+    const std::vector<double> samePriorityHighId = {5.0, 10.0, 64, 64};
 
-    double scoreLowId = adapter->score(samePriorityLowId);
-    double scoreHighId = adapter->score(samePriorityHighId);
+    const double scoreLowId = adapter->score(samePriorityLowId);
+    const double scoreHighId = adapter->score(samePriorityHighId);
 
     EXPECT_GT(scoreLowId, scoreHighId);
 }
@@ -124,16 +124,16 @@ TEST_F(TestStaticOrderAdapter, OrderByMultipleFields)
 TEST_F(TestStaticOrderAdapter, PrimaryFieldDominates)
 {
     // Order by priority then id
-    std::vector<std::string> orderFields = {"priority", "id"};
-    auto adapter = StaticOrderAdapter::create(orderFields, _signature);
+    const std::vector<std::string> orderFields = {"priority", "id"};
+    const auto adapter = StaticOrderAdapter::create(orderFields, _signature);
     ASSERT_NE(adapter, nullptr);
 
     // Lower priority should win even with higher id
-    std::vector<double> lowPriorityHighId = {1.0, 1000.0, 64, 64};
-    std::vector<double> highPriorityLowId = {10.0, 1.0, 64, 64};
+    const std::vector<double> lowPriorityHighId = {1.0, 1000.0, 64, 64};
+    const std::vector<double> highPriorityLowId = {10.0, 1.0, 64, 64};
 
-    double scoreLowPriority = adapter->score(lowPriorityHighId);
-    double scoreHighPriority = adapter->score(highPriorityLowId);
+    const double scoreLowPriority = adapter->score(lowPriorityHighId);
+    const double scoreHighPriority = adapter->score(highPriorityLowId);
 
     EXPECT_GT(scoreLowPriority, scoreHighPriority);
 }
@@ -141,30 +141,30 @@ TEST_F(TestStaticOrderAdapter, PrimaryFieldDominates)
 TEST_F(TestStaticOrderAdapter, ConstructorWithIndices)
 {
     // Direct construction with indices: order by index 0 (priority)
-    std::vector<size_t> indices = {0};
-    StaticOrderAdapter adapter(indices, 4);
+    const std::vector<size_t> indices = {0};
+    const StaticOrderAdapter adapter(indices, 4);
 
-    EXPECT_EQ(adapter.type(), UhdAdapterType::StaticOrder);
+    EXPECT_EQ(adapter.type(), UhdAdapterType::STATIC_ORDER);
     EXPECT_EQ(adapter.expectedFeatureCount(), 4u);
 
-    std::vector<double> features = {5.0, 100, 64, 64};
-    double score = adapter.score(features);
+    const std::vector<double> features = {5.0, 100, 64, 64};
+    const double score = adapter.score(features);
     EXPECT_NE(score, 0.0);
 }
 
 TEST_F(TestStaticOrderAdapter, BatchScoring)
 {
-    std::vector<std::string> orderFields = {"priority"};
-    auto adapter = StaticOrderAdapter::create(orderFields, _signature);
+    const std::vector<std::string> orderFields = {"priority"};
+    const auto adapter = StaticOrderAdapter::create(orderFields, _signature);
     ASSERT_NE(adapter, nullptr);
 
-    std::vector<std::vector<double>> batch = {
+    const std::vector<std::vector<double>> batch = {
         {1.0, 100, 64, 64},
         {5.0, 200, 64, 64},
         {3.0, 300, 64, 64},
     };
 
-    auto scores = adapter->scoreBatch(batch);
+    const auto scores = adapter->scoreBatch(batch);
     ASSERT_EQ(scores.size(), 3u);
 
     // Priority 1 should have highest score, then 3, then 5

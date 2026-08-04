@@ -14,11 +14,11 @@ namespace hipdnn_backend::heuristics::uhd
 /// @brief Adapter types matching UhdAdapter enum in uhd.fbs.
 enum class UhdAdapterType
 {
-    StaticOrder = 0,
-    TreeData = 1,
-    Table = 2,
-    Onnx = 3,
-    CustomLibrary = 4,
+    STATIC_ORDER = 0,
+    TREE_DATA = 1,
+    TABLE = 2,
+    ONNX = 3,
+    CUSTOM_LIBRARY = 4,
 };
 
 /// @brief Abstract interface for UHD model adapters.
@@ -37,6 +37,7 @@ public:
 
     /// Score multiple candidates in batch.
     /// Default implementation calls score() for each row.
+    // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
     virtual std::vector<double> scoreBatch(const std::vector<std::vector<double>>& batch) const
     {
         std::vector<double> results;

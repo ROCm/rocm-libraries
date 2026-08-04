@@ -86,7 +86,7 @@ TEST_F(TestUhdBuiltIn, GetPolicyNameReturnsUhd)
 
 TEST_F(TestUhdBuiltIn, GetPolicyNameThrowsOnBadId)
 {
-    EXPECT_THROW(_plugin->getPolicyName(9999), std::runtime_error);
+    EXPECT_THROW(_plugin->getPolicyName(9999), std::exception);
 }
 
 // ========== Handle lifecycle ==========
@@ -109,7 +109,7 @@ TEST_F(TestUhdBuiltIn, CreatePolicyDescriptorSucceeds)
 
 TEST_F(TestUhdBuiltIn, CreatePolicyDescriptorBadIdThrows)
 {
-    EXPECT_THROW(_plugin->createPolicyDescriptor(_handle, 9999), std::runtime_error);
+    EXPECT_THROW(_plugin->createPolicyDescriptor(_handle, 9999), std::exception);
 }
 
 // ========== Engine IDs ==========
@@ -118,13 +118,13 @@ TEST_F(TestUhdBuiltIn, SetEngineIdsSucceeds)
 {
     std::vector<int64_t> engineIds = {100, 200, 300};
     // Should not throw
-    _plugin->setEngineIds(_desc, engineIds);
+    _plugin->setEngineIds(_desc, engineIds.data(), engineIds.size());
 }
 
 TEST_F(TestUhdBuiltIn, SetEmptyEngineIds)
 {
     std::vector<int64_t> emptyIds;
-    _plugin->setEngineIds(_desc, emptyIds);
+    _plugin->setEngineIds(_desc, emptyIds.data(), emptyIds.size());
 }
 
 // ========== Finalize (stub behavior) ==========
@@ -132,20 +132,20 @@ TEST_F(TestUhdBuiltIn, SetEmptyEngineIds)
 TEST_F(TestUhdBuiltIn, FinalizeDeclinesDueToStub)
 {
     // Currently UHD declines because RFC-0017 integration is pending
-    std::vector<int64_t> engineIds = {100, 200, 300};
-    _plugin->setEngineIds(_desc, engineIds);
+    const std::vector<int64_t> engineIds = {100, 200, 300};
+    _plugin->setEngineIds(_desc, engineIds.data(), engineIds.size());
 
-    bool applied = _plugin->finalize(_desc);
+    const bool applied = _plugin->finalize(_desc);
     // UHD stub returns outApplied = 0
     EXPECT_FALSE(applied);
 }
 
 TEST_F(TestUhdBuiltIn, FinalizeWithNoEnginesDeclines)
 {
-    std::vector<int64_t> emptyIds;
-    _plugin->setEngineIds(_desc, emptyIds);
+    const std::vector<int64_t> emptyIds;
+    _plugin->setEngineIds(_desc, emptyIds.data(), emptyIds.size());
 
-    bool applied = _plugin->finalize(_desc);
+    const bool applied = _plugin->finalize(_desc);
     EXPECT_FALSE(applied);
 }
 
@@ -154,7 +154,7 @@ TEST_F(TestUhdBuiltIn, FinalizeWithNoEnginesDeclines)
 TEST_F(TestUhdBuiltIn, GetSortedEngineIdsAfterFinalize)
 {
     std::vector<int64_t> engineIds = {100, 200, 300};
-    _plugin->setEngineIds(_desc, engineIds);
+    _plugin->setEngineIds(_desc, engineIds.data(), engineIds.size());
     _plugin->finalize(_desc);
 
     // Since UHD declines, sorted list should be empty

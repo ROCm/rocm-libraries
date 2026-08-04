@@ -5,6 +5,7 @@
 
 #include "adapters/IUhdAdapter.hpp"
 
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -40,9 +41,9 @@ public:
     {
         size_t operator()(const CacheKey& key) const
         {
-            size_t h1 = std::hash<int64_t>{}(key.engineId);
-            size_t h2 = std::hash<int64_t>{}(key.deviceId);
-            size_t h3 = std::hash<std::string>{}(key.uhdId);
+            const size_t h1 = std::hash<int64_t>{}(key.engineId);
+            const size_t h2 = std::hash<int64_t>{}(key.deviceId);
+            const size_t h3 = std::hash<std::string>{}(key.uhdId);
             return h1 ^ (h2 << 1) ^ (h3 << 2);
         }
     };
@@ -51,8 +52,9 @@ public:
     /// @param key Cache key.
     /// @param loader Function to load the adapter if not cached.
     /// @returns Adapter pointer (may be null if loading failed).
-    std::shared_ptr<IUhdAdapter> getOrLoad(const CacheKey& key,
-                                            std::function<std::unique_ptr<IUhdAdapter>()> loader);
+    std::shared_ptr<IUhdAdapter>
+        getOrLoad(const CacheKey& key,
+                  const std::function<std::unique_ptr<IUhdAdapter>()>& loader);
 
     /// Check if an adapter is cached for the given key.
     bool contains(const CacheKey& key) const;
@@ -63,10 +65,11 @@ public:
     /// Get the number of cached adapters.
     size_t size() const;
 
-private:
-    UhdModelCache() = default;
     UhdModelCache(const UhdModelCache&) = delete;
     UhdModelCache& operator=(const UhdModelCache&) = delete;
+
+private:
+    UhdModelCache() = default;
 
     mutable std::mutex _mutex;
     std::unordered_map<CacheKey, std::shared_ptr<IUhdAdapter>, CacheKeyHash> _cache;

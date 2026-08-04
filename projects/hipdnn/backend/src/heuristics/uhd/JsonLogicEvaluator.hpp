@@ -89,15 +89,15 @@ public:
 
     /// Extract all variable references from an expression.
     /// Returns variable names (e.g., "$device.cu_count", "$kernel.tile_m").
-    std::unordered_set<std::string> extractVariables(const nlohmann::json& expr) const;
+    static std::unordered_set<std::string> extractVariables(const nlohmann::json& expr);
 
 private:
     Value evaluateOp(const std::string& op,
                      const nlohmann::json& args,
                      const VariableContext& ctx) const;
 
-    double toDouble(const Value& v) const;
-    bool toBool(const Value& v) const;
+    static double toDouble(const Value& v);
+    static bool toBool(const Value& v);
 };
 
 } // namespace hipdnn_backend::heuristics::uhd

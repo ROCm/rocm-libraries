@@ -37,16 +37,16 @@ public:
 
     double score(const std::vector<double>& features) const override;
 
-    UhdAdapterType type() const override { return UhdAdapterType::StaticOrder; }
+    UhdAdapterType type() const override { return UhdAdapterType::STATIC_ORDER; }
 
     size_t expectedFeatureCount() const override { return _numFeatures; }
 
-    const std::string& getFeaturesHash() const override { return _emptyHash; }
+    const std::string& getFeaturesHash() const override { return EMPTY_HASH; }
 
 private:
     std::vector<size_t> _orderFieldIndices;
     size_t _numFeatures;
-    static const std::string _emptyHash;
+    static const std::string EMPTY_HASH;
 };
 
 } // namespace hipdnn_backend::heuristics::uhd

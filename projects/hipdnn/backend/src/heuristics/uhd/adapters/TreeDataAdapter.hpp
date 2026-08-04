@@ -46,7 +46,7 @@ public:
 
     double score(const std::vector<double>& features) const override;
 
-    UhdAdapterType type() const override { return UhdAdapterType::TreeData; }
+    UhdAdapterType type() const override { return UhdAdapterType::TREE_DATA; }
 
     size_t expectedFeatureCount() const override { return _numFeatures; }
 
@@ -64,8 +64,8 @@ private:
                     double learningRate);
 
     /// Evaluate a single tree.
-    double evaluateTree(const hipdnn_flatbuffers_sdk::data_objects::GbdtTree* tree,
-                        const std::vector<double>& features) const;
+    static double evaluateTree(const hipdnn_flatbuffers_sdk::data_objects::GbdtTree* tree,
+                               const std::vector<double>& features);
 
     std::vector<uint8_t> _ownedBuffer;
     const hipdnn_flatbuffers_sdk::data_objects::GbdtModel* _model;

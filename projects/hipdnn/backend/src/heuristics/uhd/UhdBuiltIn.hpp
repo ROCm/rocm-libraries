@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "plugins/HeuristicPluginFunctionTable.hpp"
+#include "plugin/HeuristicPlugin.hpp"
 
 namespace hipdnn_backend::heuristics::uhd
 {

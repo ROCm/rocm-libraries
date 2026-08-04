@@ -3,6 +3,7 @@
 
 #include "TreeDataAdapter.hpp"
 
+#include <cmath>
 #include <fstream>
 
 #include <hipdnn_flatbuffers_sdk/data_objects/gbdt_model_generated.h>
@@ -56,27 +57,30 @@ std::unique_ptr<TreeDataAdapter>
     }
 
     const auto* model = fb::GetGbdtModel(buffer);
-    if(!model)
+    if(model == nullptr)
     {
         return nullptr;
     }
 
     // Validate features hash
-    std::string modelHash = model->features_hash() ? model->features_hash()->str() : "";
+    const std::string modelHash =
+        model->features_hash() != nullptr ? model->features_hash()->str() : "";
     if(!expectedFeaturesHash.empty() && modelHash != expectedFeaturesHash)
     {
         return nullptr;
     }
 
-    size_t numFeatures = static_cast<size_t>(model->num_features());
-    double baseScore = model->base_score();
-    double learningRate = model->learning_rate();
+    const auto numFeatures = static_cast<size_t>(model->num_features());
+    const double baseScore = model->base_score();
+    const double learningRate = model->learning_rate();
 
     // Copy buffer to owned storage
     std::vector<uint8_t> ownedBuffer(buffer, buffer + size);
 
+    // Create the adapter with the owned buffer data pointer before moving
+    const uint8_t* bufferData = ownedBuffer.data();
     return std::unique_ptr<TreeDataAdapter>(new TreeDataAdapter(std::move(ownedBuffer),
-                                                                 fb::GetGbdtModel(ownedBuffer.data()),
+                                                                 fb::GetGbdtModel(bufferData),
                                                                  modelHash,
                                                                  numFeatures,
                                                                  baseScore,
@@ -93,7 +97,7 @@ TreeDataAdapter::TreeDataAdapter(std::vector<uint8_t> ownedBuffer,
       _model(model),
       _featuresHash(std::move(featuresHash)),
       _numFeatures(numFeatures),
-      _treeCount(model->trees() ? model->trees()->size() : 0),
+      _treeCount(model->trees() != nullptr ? model->trees()->size() : 0),
       _baseScore(baseScore),
       _learningRate(learningRate)
 {
@@ -103,7 +107,7 @@ TreeDataAdapter::~TreeDataAdapter() = default;
 
 double TreeDataAdapter::score(const std::vector<double>& features) const
 {
-    if(!_model || !_model->trees())
+    if(_model == nullptr || _model->trees() == nullptr)
     {
         return _baseScore;
     }
@@ -118,10 +122,11 @@ double TreeDataAdapter::score(const std::vector<double>& features) const
 }
 
 double TreeDataAdapter::evaluateTree(const fb::GbdtTree* tree,
-                                      const std::vector<double>& features) const
+                                      const std::vector<double>& features)
 {
-    if(!tree || !tree->feature_indices() || !tree->thresholds() || !tree->left_children() ||
-       !tree->right_children() || !tree->leaf_values())
+    if(tree == nullptr || tree->feature_indices() == nullptr || tree->thresholds() == nullptr ||
+       tree->left_children() == nullptr || tree->right_children() == nullptr ||
+       tree->leaf_values() == nullptr)
     {
         return 0.0;
     }
@@ -132,38 +137,39 @@ double TreeDataAdapter::evaluateTree(const fb::GbdtTree* tree,
     const auto& rightChildren = *tree->right_children();
     const auto& leafValues = *tree->leaf_values();
 
-    bool hasDefaultLeft = tree->default_left() && tree->default_left()->size() > 0;
+    const bool hasDefaultLeft = tree->default_left() != nullptr && !tree->default_left()->empty();
 
     size_t node = 0;
     while(node < leftChildren.size())
     {
-        int leftChild = leftChildren[node];
-        int rightChild = rightChildren[node];
+        const auto nodeIdx = static_cast<flatbuffers::uoffset_t>(node);
+        const int leftChild = leftChildren[nodeIdx];
+        const int rightChild = rightChildren[nodeIdx];
 
         // Leaf node: left_children[node] == -1
         if(leftChild < 0)
         {
             if(node < leafValues.size())
             {
-                return leafValues[node];
+                return leafValues[nodeIdx];
             }
             return 0.0;
         }
 
         // Internal node: compare feature value against threshold
-        int featureIdx = featureIndices[node];
-        double threshold = thresholds[node];
+        const int featureIdx = featureIndices[nodeIdx];
+        const double threshold = thresholds[nodeIdx];
 
         bool goLeft = false;
         if(featureIdx >= 0 && static_cast<size_t>(featureIdx) < features.size())
         {
-            double featureVal = features[static_cast<size_t>(featureIdx)];
+            const double featureVal = features[static_cast<size_t>(featureIdx)];
 
             // Check for NaN (missing value)
             if(std::isnan(featureVal))
             {
                 goLeft = hasDefaultLeft && node < tree->default_left()->size() &&
-                         (*tree->default_left())[node];
+                         ((*tree->default_left())[nodeIdx] != 0u);
             }
             else
             {
@@ -174,7 +180,7 @@ double TreeDataAdapter::evaluateTree(const fb::GbdtTree* tree,
         {
             // Out of range feature index: use default direction
             goLeft = hasDefaultLeft && node < tree->default_left()->size() &&
-                     (*tree->default_left())[node];
+                     ((*tree->default_left())[nodeIdx] != 0u);
         }
 
         node = static_cast<size_t>(goLeft ? leftChild : rightChild);

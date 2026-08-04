@@ -23,9 +23,12 @@ void VariableContext::bind(const std::string& name, ValueType value)
 void VariableContext::bindNamespace(const std::string& ns,
                                     const std::unordered_map<std::string, ValueType>& values)
 {
+    std::string prefix = "$";
+    prefix += ns;
+    prefix += ".";
     for(const auto& [key, val] : values)
     {
-        _bindings["$" + ns + "." + key] = val;
+        _bindings[prefix + key] = val;
     }
 }
 
@@ -226,7 +229,7 @@ JsonLogicEvaluator::Value JsonLogicEvaluator::evaluateOp(const std::string& op,
         double result = toDouble(vals[0]);
         for(size_t i = 1; i < vals.size(); ++i)
         {
-            double divisor = toDouble(vals[i]);
+            const double divisor = toDouble(vals[i]);
             if(divisor == 0.0)
             {
                 throw JsonLogicError("Division by zero");
@@ -243,8 +246,8 @@ JsonLogicEvaluator::Value JsonLogicEvaluator::evaluateOp(const std::string& op,
         {
             throw JsonLogicError("Modulo requires exactly 2 arguments");
         }
-        double a = toDouble(vals[0]);
-        double b = toDouble(vals[1]);
+        const double a = toDouble(vals[0]);
+        const double b = toDouble(vals[1]);
         if(b == 0.0)
         {
             throw JsonLogicError("Modulo by zero");
@@ -259,8 +262,8 @@ JsonLogicEvaluator::Value JsonLogicEvaluator::evaluateOp(const std::string& op,
         {
             throw JsonLogicError("ceil_div requires exactly 2 arguments");
         }
-        double a = toDouble(vals[0]);
-        double b = toDouble(vals[1]);
+        const double a = toDouble(vals[0]);
+        const double b = toDouble(vals[1]);
         if(b == 0.0)
         {
             throw JsonLogicError("Division by zero in ceil_div");
@@ -326,7 +329,7 @@ JsonLogicEvaluator::Value JsonLogicEvaluator::evaluateOp(const std::string& op,
         {
             throw JsonLogicError("log2 requires exactly 1 argument");
         }
-        double v = toDouble(vals[0]);
+        const double v = toDouble(vals[0]);
         if(v <= 0.0)
         {
             throw JsonLogicError("log2 of non-positive number");
@@ -341,7 +344,7 @@ JsonLogicEvaluator::Value JsonLogicEvaluator::evaluateOp(const std::string& op,
         {
             throw JsonLogicError("rsqrt requires exactly 1 argument");
         }
-        double v = toDouble(vals[0]);
+        const double v = toDouble(vals[0]);
         if(v <= 0.0)
         {
             throw JsonLogicError("rsqrt of non-positive number");
@@ -496,8 +499,7 @@ JsonLogicEvaluator::Value JsonLogicEvaluator::evaluateOp(const std::string& op,
     throw JsonLogicError("Unknown operator: " + op);
 }
 
-std::unordered_set<std::string>
-    JsonLogicEvaluator::extractVariables(const nlohmann::json& expr) const
+std::unordered_set<std::string> JsonLogicEvaluator::extractVariables(const nlohmann::json& expr)
 {
     std::unordered_set<std::string> vars;
 
@@ -530,7 +532,7 @@ std::unordered_set<std::string>
     return vars;
 }
 
-double JsonLogicEvaluator::toDouble(const Value& v) const
+double JsonLogicEvaluator::toDouble(const Value& v)
 {
     return std::visit(
         [](const auto& val) -> double {
@@ -559,7 +561,7 @@ double JsonLogicEvaluator::toDouble(const Value& v) const
         v);
 }
 
-bool JsonLogicEvaluator::toBool(const Value& v) const
+bool JsonLogicEvaluator::toBool(const Value& v)
 {
     return std::visit(
         [](const auto& val) -> bool {
