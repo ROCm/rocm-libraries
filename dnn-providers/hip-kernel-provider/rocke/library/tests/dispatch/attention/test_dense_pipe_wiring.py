@@ -291,13 +291,14 @@ class TestBf16FlashGate(unittest.TestCase):
             )
             self.assertTrue(au._enable_gfx942_flash_k_sliced_ring(p))
 
-    def test_bf16_ring_enabled_for_d128(self):
-        # D128 bf16 now shares the sliced-K ring path: the earlier generator-bug
-        # exclusion was fixed on develop (ring uses the fp16-flash nw4+cfvst
-        # geometry; verified numerically correct, byte-identity gate green).
+    def test_bf16_ring_disabled_for_d128(self):
+        # bf16 D128 stays OFF the sliced-K ring. #9647 excluded all D128 from the
+        # ring for correctness; #9662 recovered ONLY fp16 D128 (depth-2 ring).
+        # bf16 D128 keeps the non-ring T=64 path, which is its bs=64 optimum (the
+        # correct depth-2/depth-3 rings are all slower than non-ring for bf16).
         with _Gfx942Arch():
             p = self._bf16_problem(seqlen_q=2048, seqlen_k=2048)
-            self.assertTrue(au._enable_gfx942_flash_k_sliced_ring(p))
+            self.assertFalse(au._enable_gfx942_flash_k_sliced_ring(p))
 
     def test_bf16_mask_limit_enabled_for_prefill(self):
         with _Gfx942Arch():
