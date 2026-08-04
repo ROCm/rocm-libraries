@@ -56,10 +56,10 @@ public:
       : stream(stream_)
   {}
 
-  _CCCL_HOST_DEVICE Derived on(::cuda::stream_ref s) const
+  _CCCL_HOST_DEVICE Derived on(::cudaStream_t s) const
   {
     Derived result = derived_cast(*this);
-    result.stream  = s.get();
+    result.stream  = s;
     return result;
   }
 
@@ -81,10 +81,10 @@ public:
       : stream(stream_)
   {}
 
-  _CCCL_HOST_DEVICE Derived on(::cuda::stream_ref s) const
+  _CCCL_HOST_DEVICE Derived on(::cudaStream_t s) const
   {
     Derived result = derived_cast(*this);
-    result.stream  = s.get();
+    result.stream  = s;
     return result;
   }
 
@@ -105,9 +105,9 @@ struct execute_on_stream : execute_on_stream_base<execute_on_stream>
   using base_t = execute_on_stream_base<execute_on_stream>;
 
   _CCCL_HOST_DEVICE execute_on_stream()
-      : base_t(){};
+      : base_t() {};
   _CCCL_HOST_DEVICE execute_on_stream(cudaStream_t stream)
-      : base_t(stream){};
+      : base_t(stream) {};
 };
 
 struct execute_on_stream_nosync : execute_on_stream_nosync_base<execute_on_stream_nosync>
@@ -115,9 +115,9 @@ struct execute_on_stream_nosync : execute_on_stream_nosync_base<execute_on_strea
   using base_t = execute_on_stream_nosync_base<execute_on_stream_nosync>;
 
   _CCCL_HOST_DEVICE execute_on_stream_nosync()
-      : base_t(){};
+      : base_t() {};
   _CCCL_HOST_DEVICE execute_on_stream_nosync(cudaStream_t stream)
-      : base_t(stream){};
+      : base_t(stream) {};
 };
 
 struct par_t
@@ -132,9 +132,9 @@ struct par_t
 
   using stream_attachment_type = execute_on_stream;
 
-  _CCCL_HOST_DEVICE stream_attachment_type on(::cuda::stream_ref s) const
+  _CCCL_HOST_DEVICE stream_attachment_type on(::cudaStream_t s) const
   {
-    return execute_on_stream(s.get());
+    return execute_on_stream(s);
   }
 };
 
@@ -150,9 +150,9 @@ struct par_nosync_t
 
   using stream_attachment_type = execute_on_stream_nosync;
 
-  _CCCL_HOST_DEVICE stream_attachment_type on(::cuda::stream_ref s) const
+  _CCCL_HOST_DEVICE stream_attachment_type on(::cudaStream_t s) const
   {
-    return execute_on_stream_nosync(s.get());
+    return execute_on_stream_nosync(s);
   }
 
 private:
