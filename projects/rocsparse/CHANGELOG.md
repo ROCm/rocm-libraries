@@ -10,6 +10,7 @@ Documentation for rocSPARSE is available at
 
 ### Resolved issues
 * Fixed the atomic COO algorithm in `rocsparse_spmm`, which failed with `hipErrorInvalidConfiguration` for batch counts greater than 65,535 because the kernel launch grid exceeded the maximum supported batch dimension.
+* Fixed `rocsparse_spmm` with the row-split CSR algorithm, which failed with `hipErrorInvalidConfiguration` for batch counts exceeding 65535 because the batch dimension of the kernel launch grid exceeded the maximum grid dimension.
 
 ## (Unreleased) rocSPARSE 5.0.0
 
