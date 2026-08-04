@@ -220,7 +220,8 @@ It outputs this `results.json`:
             "max_cooling_secs": 60,
             "output_batches": false,
             "spaces_per_indent": 4,
-            "stream_blocking_timeout_secs": 10
+            "stream_blocking_timeout_secs": 10,
+            "skip_header": false
         },
         "flags": {
             "sync": false
@@ -320,6 +321,7 @@ You can also pass `--help` to benchmarks to print the available options.
 | `--output-batches`                       | Output a `batches` array for each specialization, containing per-batch details.                                                                                                    |
 | `--spaces-per-indent`                    | Number of spaces per indentation level in JSON output. Set to 0 for no indentation. (default: 4)                                                                                   |
 | `--stream-blocking-timeout-secs`         | Maximum stream blocking duration in seconds before timing out. Stream is blocked while queueing kernel calls. Use `primbench::flags::sync` if kernel is synchronous. (default: 10) |
+| `--skip-header`                          | Skip printing the header to output.                                                                                                                                                |
 
 ### Adding Custom Options
 
