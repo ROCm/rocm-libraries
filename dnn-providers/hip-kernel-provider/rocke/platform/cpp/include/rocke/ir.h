@@ -131,6 +131,9 @@ typedef struct rocke_type
     /* ROCKE_TYPE_SMEM */
     const int* shape; /* arena-owned array of dim sizes            */
     int rank; /* number of dims in shape                   */
+    int smem_exclusive; /* 1 => smem-pool packer gives this alloc its own
+                         * byte range (cshuffle no-alias mode). Kept OUT of
+                         * `name` so default (0) stays byte-identical.       */
 } rocke_type_t;
 
 /* -------------------------------------------------------------- attr values */
@@ -273,6 +276,7 @@ typedef enum rocke_opcode
     ROCKE_OP_MEMREF_GLOBAL_ATOMIC_ADD,
     ROCKE_OP_MEMREF_GLOBAL_ATOMIC_ADD_F32,
     ROCKE_OP_MEMREF_GLOBAL_ATOMIC_ADD_PK_BF16,
+    ROCKE_OP_MEMREF_GLOBAL_ATOMIC_ADD_PK_F16,
     ROCKE_OP_MEMREF_COOPERATIVE_GLOBAL_STORE,
 
     /* vector.* */
@@ -318,6 +322,8 @@ typedef enum rocke_opcode
     ROCKE_OP_TILE_GLOBAL_LOAD_LDS,
     ROCKE_OP_TILE_ASYNC_BUFFER_LOAD_LDS,
     ROCKE_OP_TILE_ASYNC_BUFFER_LOAD_LDS_ADDR,
+    ROCKE_OP_TILE_BUFFER_LOAD_LDS_ASYNC,
+    ROCKE_OP_TILE_GLOBAL_LOAD_ASYNC_TO_LDS,
     ROCKE_OP_TILE_BUFFER_RSRC,
     ROCKE_OP_TILE_BUFFER_LOAD_F16,
     ROCKE_OP_TILE_BUFFER_LOAD_VN_F16,
@@ -348,6 +354,18 @@ typedef enum rocke_opcode
     ROCKE_OP_TILE_DS_BPERMUTE,
     ROCKE_OP_TILE_DS_BPERMUTE_B64,
     ROCKE_OP_TILE_DS_SWIZZLE_XOR,
+    ROCKE_OP_TILE_DS_SWIZZLE,
+    ROCKE_OP_TILE_MOV_DPP8,
+    ROCKE_OP_TILE_WAVE_REDUCE,
+    ROCKE_OP_TILE_READLANE,
+    ROCKE_OP_TILE_WRITELANE,
+    ROCKE_OP_TILE_PERMLANE16,
+    ROCKE_OP_TILE_PERMLANE64,
+    ROCKE_OP_TILE_ALIGNBYTE,
+    ROCKE_OP_TILE_S_WQM,
+    ROCKE_OP_TILE_AV_LOAD_B128,
+    ROCKE_OP_TILE_AV_STORE_B128,
+    ROCKE_OP_TILE_S_ALLOC_VGPR,
     ROCKE_OP_TILE_MOV_DPP,
     ROCKE_OP_TILE_PERMLANE32_SWAP,
     ROCKE_OP_TILE_PERM_B32,
@@ -363,6 +381,11 @@ typedef enum rocke_opcode
     ROCKE_OP_TILE_SYNC_LDS_ONLY,
     ROCKE_OP_TILE_S_BARRIER_BARE,
     ROCKE_OP_TILE_S_WAITCNT,
+    ROCKE_OP_TILE_S_WAIT_ASYNCCNT,
+    ROCKE_OP_TILE_ASYNCMARK,
+    ROCKE_OP_TILE_WAIT_ASYNCMARK,
+    ROCKE_OP_TILE_S_WAIT_EVENT,
+    ROCKE_OP_TILE_S_PREFETCH_INST,
     ROCKE_OP_TILE_S_SETPRIO,
     ROCKE_OP_TILE_IGLP_OPT,
     ROCKE_OP_TILE_SCHED_BARRIER,
@@ -534,8 +557,8 @@ const rocke_type_t* rocke_scalar_by_name(const char* name);
 const rocke_type_t* rocke_vector_type(rocke_ir_builder_t* b, const rocke_type_t* elem, int count);
 const rocke_type_t*
     rocke_ptr_type(rocke_ir_builder_t* b, const rocke_type_t* pointee, const char* space);
-const rocke_type_t*
-    rocke_smem_type(rocke_ir_builder_t* b, const rocke_type_t* elem, const int* shape, int rank);
+const rocke_type_t* rocke_smem_type(
+    rocke_ir_builder_t* b, const rocke_type_t* elem, const int* shape, int rank, int exclusive);
 
 /* Structural type equality (matches Python frozen-dataclass __eq__: compares by
  * canonical name, which encodes kind + components). */
@@ -745,6 +768,11 @@ rocke_value_t* rocke_b_global_atomic_add_pk_bf16(rocke_ir_builder_t* b,
                                                  rocke_value_t* idx,
                                                  rocke_value_t* value,
                                                  const char* ordering);
+rocke_value_t* rocke_b_global_atomic_add_pk_f16(rocke_ir_builder_t* b,
+                                                rocke_value_t* ptr,
+                                                rocke_value_t* idx,
+                                                rocke_value_t* value,
+                                                const char* ordering);
 
 /* ----- gpu ids ----- */
 rocke_value_t* rocke_b_thread_id_x(rocke_ir_builder_t* b);
@@ -758,6 +786,15 @@ rocke_value_t* rocke_b_smem_alloc(rocke_ir_builder_t* b,
                                   const int* shape,
                                   int rank,
                                   const char* name_hint);
+/* Like rocke_b_smem_alloc but marks the allocation `exclusive` (cshuffle
+ * no-alias mode): the smem-pool packer gives it its own byte range. The
+ * plain rocke_b_smem_alloc forwards here with exclusive=0. */
+rocke_value_t* rocke_b_smem_alloc_ex(rocke_ir_builder_t* b,
+                                     const rocke_type_t* elem,
+                                     const int* shape,
+                                     int rank,
+                                     const char* name_hint,
+                                     int exclusive);
 rocke_value_t* rocke_b_global_load(rocke_ir_builder_t* b,
                                    rocke_value_t* ptr,
                                    rocke_value_t* idx,
@@ -783,6 +820,18 @@ rocke_value_t* rocke_b_global_load_bf16(rocke_ir_builder_t* b,
                                         rocke_value_t* ptr,
                                         rocke_value_t* idx,
                                         int align);
+rocke_value_t* rocke_b_global_load_i8(rocke_ir_builder_t* b,
+                                      rocke_value_t* ptr,
+                                      rocke_value_t* idx,
+                                      int align);
+rocke_value_t* rocke_b_global_load_i16(rocke_ir_builder_t* b,
+                                       rocke_value_t* ptr,
+                                       rocke_value_t* idx,
+                                       int align);
+rocke_value_t* rocke_b_global_load_bf8e5m2(rocke_ir_builder_t* b,
+                                           rocke_value_t* ptr,
+                                           rocke_value_t* idx,
+                                           int align);
 rocke_value_t* rocke_b_global_load_fp8e4m3(rocke_ir_builder_t* b,
                                            rocke_value_t* ptr,
                                            rocke_value_t* idx,
@@ -1027,6 +1076,33 @@ rocke_value_t* rocke_b_ds_bpermute(rocke_ir_builder_t* b, rocke_value_t* addr, r
 rocke_value_t*
     rocke_b_ds_bpermute_b64(rocke_ir_builder_t* b, rocke_value_t* addr, rocke_value_t* data);
 rocke_value_t* rocke_b_ds_swizzle_xor(rocke_ir_builder_t* b, rocke_value_t* data, int xor_mask);
+rocke_value_t* rocke_b_ds_swizzle(rocke_ir_builder_t* b, rocke_value_t* data, int offset);
+rocke_value_t* rocke_b_mov_dpp8(rocke_ir_builder_t* b, rocke_value_t* data, int sel);
+rocke_value_t* rocke_b_wave_reduce(rocke_ir_builder_t* b,
+                                   rocke_value_t* v,
+                                   const char* reduce_op,
+                                   int strategy);
+rocke_value_t* rocke_b_readlane(rocke_ir_builder_t* b, rocke_value_t* v, rocke_value_t* lane);
+rocke_value_t* rocke_b_writelane(rocke_ir_builder_t* b,
+                                 rocke_value_t* uniform_val,
+                                 rocke_value_t* lane,
+                                 rocke_value_t* passthrough);
+rocke_value_t* rocke_b_permlane16(rocke_ir_builder_t* b,
+                                  rocke_value_t* old,
+                                  rocke_value_t* src0,
+                                  rocke_value_t* src1,
+                                  rocke_value_t* src2,
+                                  bool fi,
+                                  bool bound_ctrl);
+rocke_value_t* rocke_b_permlane64(rocke_ir_builder_t* b, rocke_value_t* src);
+rocke_value_t* rocke_b_alignbyte(rocke_ir_builder_t* b,
+                                 rocke_value_t* a,
+                                 rocke_value_t* bb,
+                                 rocke_value_t* shift);
+rocke_value_t* rocke_b_s_wqm(rocke_ir_builder_t* b, rocke_value_t* mask);
+rocke_value_t* rocke_b_av_load_b128(rocke_ir_builder_t* b, rocke_value_t* ptr);
+void rocke_b_av_store_b128(rocke_ir_builder_t* b, rocke_value_t* ptr, rocke_value_t* data);
+rocke_value_t* rocke_b_s_alloc_vgpr(rocke_ir_builder_t* b, int count);
 /* mov_dpp: exactly one of row_shr/row_shl must be >= 0 (the other < 0 = unset). */
 rocke_value_t* rocke_b_mov_dpp(
     rocke_ir_builder_t* b, rocke_value_t* data, int row_shr, int row_shl, bool bound_ctrl);
@@ -1088,6 +1164,22 @@ void rocke_b_async_buffer_load_lds(rocke_ir_builder_t* b,
                                    rocke_value_t* soffset,
                                    int dwords,
                                    int coherency);
+void rocke_b_buffer_load_lds_async(rocke_ir_builder_t* b,
+                                   rocke_value_t* rsrc,
+                                   rocke_value_t* lds_ptr,
+                                   rocke_value_t* voffset,
+                                   rocke_value_t* soffset,
+                                   int dwords,
+                                   int coherency);
+void rocke_b_global_load_async_to_lds(rocke_ir_builder_t* b,
+                                      rocke_value_t* src_ptr,
+                                      rocke_value_t* src_index,
+                                      rocke_value_t* lds_smem,
+                                      rocke_value_t* const* lds_indices,
+                                      int num_lds_indices,
+                                      int width_bytes,
+                                      int coherency,
+                                      int offset_bytes);
 void rocke_b_global_load_lds(rocke_ir_builder_t* b,
                              rocke_value_t* src_ptr,
                              rocke_value_t* byte_off,
@@ -1199,6 +1291,11 @@ void rocke_b_sync_half_block(rocke_ir_builder_t* b, rocke_value_t* half_selector
 void rocke_b_sync_lds_only(rocke_ir_builder_t* b);
 /* s_waitcnt: pass -1 to leave a counter alone, 0 to fully drain. */
 void rocke_b_s_waitcnt(rocke_ir_builder_t* b, int vmcnt, int lgkmcnt, int expcnt);
+void rocke_b_s_wait_asynccnt(rocke_ir_builder_t* b, int n);
+void rocke_b_asyncmark(rocke_ir_builder_t* b);
+void rocke_b_wait_asyncmark(rocke_ir_builder_t* b, int n);
+void rocke_b_s_wait_event(rocke_ir_builder_t* b, int imm);
+void rocke_b_s_prefetch_inst(rocke_ir_builder_t* b, rocke_value_t* ptr, rocke_value_t* length);
 void rocke_b_s_setprio(rocke_ir_builder_t* b, int level);
 void rocke_b_iglp_opt(rocke_ir_builder_t* b, int level);
 void rocke_b_sched_barrier(rocke_ir_builder_t* b, int mask);
