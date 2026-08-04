@@ -56,6 +56,9 @@ struct DAGNode {
     // Assigned by the pre-scan in scheduleRegionWithMovableSideEffects
     // based on DsReadOrder config and WMMA consumer analysis.
     unsigned dsReadPriority = UINT_MAX;
+    // Packed s_set_vgpr_msb immediate this op needs (computeRequiredMsb); -1 = no MSB
+    // opinion. Filled by the pre-scan; drives the MSB-affinity tiebreak in pickFreeBest.
+    int requiredMsb = -1;
     // Hardware hazard: the exact (rule, register) pairs this node writes that some
     // later consumer reads, per kCdna5HazardRules (a fixed producer->consumer cycle
     // gap keyed by register file). Filled by the pre-scan via the def-use user walk.
