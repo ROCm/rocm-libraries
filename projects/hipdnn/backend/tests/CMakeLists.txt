@@ -117,6 +117,10 @@ add_executable(
     heuristics/TestDeviceProperties.cpp
     heuristics/TestEngineOverrideConfig.cpp
     heuristics/TestStaticOrderingBuiltIn.cpp
+    heuristics/TestJsonLogicEvaluator.cpp
+    heuristics/TestFeatureExtractor.cpp
+    heuristics/TestUhdAdapters.cpp
+    heuristics/TestUhdBuiltIn.cpp
     TestUserLoggingApis.cpp
     TestPlatformUtils.cpp
     TestEnginePluginOverride.cpp
