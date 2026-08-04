@@ -42,6 +42,16 @@
 // hipDNN UMD needs (ceil_div, abs, pow, log2, rsqrt).
 // Collection/string operators (map/reduce/filter/cat/substr/...) are not
 // included.
+//
+// Null is "unresolved", not a value (extension over stock JsonLogic)
+// -----------------------------------------------------------------
+// Every operator except `present`, `not_present`, and `value_or_default`
+// propagates a null argument instead of coercing it, and `and`/`or` are
+// three-valued: a definite false still decides an `and`, a definite true a
+// `or`. The consumer is the hipDNN UMD matcher, where an unresolved path is an
+// absent optional operand; a coerced null would read as false/0/not-equal and
+// make a narrowing criterion silently PASS on data the pack never saw. A null
+// root is falsy, so an undecided expression declines the match.
 
 #include <nlohmann/json.hpp>
 
@@ -514,61 +524,123 @@ struct OpNode final : Node
     Op op;
     std::vector<NodePtr> args;
 
+    // Null is "unresolved", not a value: an absent optional operand's field
+    // read must neither pass nor fail a criterion (RFC 0017 §5, RFC 0018 A.4).
+    // Every operator below therefore propagates a null operand instead of
+    // coercing it (null would otherwise read as 0 / false / not-equal, so a
+    // narrowing check on an absent operand would silently PASS). `present`,
+    // `not_present`, `value_or_default`, and the short-circuit halves of
+    // `and`/`or` are the deliberate exceptions: they answer "did this
+    // resolve?", so they always yield a real value. The root null declines the
+    // match, because Value::truthy() reads null as false.
+    static bool anyNull(const std::vector<Value>& v)
+    {
+        for(const Value& x : v)
+        {
+            if(x.isNull())
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // Evaluate every argument once, so a null is detected before the operator
+    // coerces it and so each argument is evaluated exactly once.
+    std::vector<Value> evalArgs(const IDataSource& d) const
+    {
+        std::vector<Value> out;
+        out.reserve(args.size());
+        for(const auto& c : args)
+        {
+            out.push_back(c->eval(d));
+        }
+        return out;
+    }
+
     Value eval(const IDataSource& d) const override
     {
         switch(op)
         {
         case Op::ADD:
         {
-            double a = 0.0;
-            for(const auto& c : args)
+            const std::vector<Value> v = evalArgs(d);
+            if(anyNull(v))
             {
-                a += c->eval(d).toNumber();
+                return {};
+            }
+            double a = 0.0;
+            for(const Value& x : v)
+            {
+                a += x.toNumber();
             }
             return Value::number(a);
         }
         case Op::MUL:
         {
-            double a = 1.0;
-            for(const auto& c : args)
+            const std::vector<Value> v = evalArgs(d);
+            if(anyNull(v))
             {
-                a *= c->eval(d).toNumber();
+                return {};
+            }
+            double a = 1.0;
+            for(const Value& x : v)
+            {
+                a *= x.toNumber();
             }
             return Value::number(a);
         }
         case Op::SUB:
         {
-            if(args.size() == 1)
+            const std::vector<Value> v = evalArgs(d);
+            if(anyNull(v))
             {
-                return Value::number(-args[0]->eval(d).toNumber());
+                return {};
             }
-            return Value::number(args[0]->eval(d).toNumber() - args[1]->eval(d).toNumber());
+            if(v.size() == 1)
+            {
+                return Value::number(-v[0].toNumber());
+            }
+            return Value::number(v[0].toNumber() - v[1].toNumber());
         }
         case Op::DIV:
-            return Value::number(args[0]->eval(d).toNumber() / args[1]->eval(d).toNumber());
         case Op::MOD:
-            return Value::number(
-                std::fmod(args[0]->eval(d).toNumber(), args[1]->eval(d).toNumber()));
-        case Op::MIN:
+        case Op::CEIL_DIV:
         {
-            double best = std::nan("");
-            for(const auto& c : args)
+            const std::vector<Value> v = evalArgs(d);
+            if(anyNull(v))
             {
-                const double n = c->eval(d).toNumber();
-                if(std::isnan(best) || n < best)
-                {
-                    best = n;
-                }
+                return {};
             }
-            return Value::number(best);
+            const double num = v[0].toNumber();
+            const double den = v[1].toNumber();
+            if(den == 0.0)
+            {
+                return {}; // zero divisor declines rather than yielding inf/NaN
+            }
+            if(op == Op::DIV)
+            {
+                return Value::number(num / den);
+            }
+            if(op == Op::MOD)
+            {
+                return Value::number(std::fmod(num, den));
+            }
+            return Value::number(std::ceil(num / den));
         }
+        case Op::MIN:
         case Op::MAX:
         {
-            double best = std::nan("");
-            for(const auto& c : args)
+            const std::vector<Value> v = evalArgs(d);
+            if(anyNull(v))
             {
-                const double n = c->eval(d).toNumber();
-                if(std::isnan(best) || n > best)
+                return {};
+            }
+            double best = std::nan("");
+            for(const Value& x : v)
+            {
+                const double n = x.toNumber();
+                if(std::isnan(best) || (op == Op::MIN ? n < best : n > best))
                 {
                     best = n;
                 }
@@ -576,50 +648,69 @@ struct OpNode final : Node
             return Value::number(best);
         }
         case Op::LT:
-        {
-            const Value a = args[0]->eval(d);
-            const Value b = args[1]->eval(d);
-            if(args.size() >= 3)
-            {
-                return {Value::compare(a, b) == -1 && Value::compare(b, args[2]->eval(d)) == -1};
-            }
-            return {Value::compare(a, b) == -1};
-        }
         case Op::LE:
-        {
-            const Value a = args[0]->eval(d);
-            const Value b = args[1]->eval(d);
-            const auto le = [](const Value& x, const Value& y) {
-                const int c = Value::compare(x, y);
-                return c == -1 || c == 0;
-            };
-            if(args.size() >= 3)
-            {
-                return {le(a, b) && le(b, args[2]->eval(d))};
-            }
-            return {le(a, b)};
-        }
         case Op::GT:
-            return {Value::compare(args[0]->eval(d), args[1]->eval(d)) == 1};
         case Op::GE:
         {
-            const int c = Value::compare(args[0]->eval(d), args[1]->eval(d));
-            return {c == 1 || c == 0};
+            const std::vector<Value> v = evalArgs(d);
+            if(anyNull(v))
+            {
+                return {};
+            }
+            const auto ordered = [this](const Value& x, const Value& y) {
+                const int c = Value::compare(x, y);
+                switch(op)
+                {
+                case Op::LT:
+                    return c == -1;
+                case Op::LE:
+                    return c == -1 || c == 0;
+                case Op::GT:
+                    return c == 1;
+                default:
+                    return c == 1 || c == 0;
+                }
+            };
+            // The 3-arg form is the between-chain: a < b < c.
+            if(v.size() >= 3)
+            {
+                return {ordered(v[0], v[1]) && ordered(v[1], v[2])};
+            }
+            return {ordered(v[0], v[1])};
         }
         case Op::EQ:
-            return {args[0]->eval(d) == args[1]->eval(d)};
         case Op::NEQ:
-            return {args[0]->eval(d) != args[1]->eval(d)};
+        {
+            const std::vector<Value> v = evalArgs(d);
+            // Two unresolved references are not "equal"; the question is
+            // unanswerable, so it declines instead of accepting.
+            if(anyNull(v))
+            {
+                return {};
+            }
+            return {op == Op::EQ ? v[0] == v[1] : v[0] != v[1]};
+        }
         case Op::NOT:
-            return {!args[0]->eval(d).truthy()};
         case Op::NOT_NOT:
-            return {args[0]->eval(d).truthy()};
+        {
+            const Value a = args[0]->eval(d);
+            if(a.isNull())
+            {
+                return {}; // negating an unresolved reference stays unresolved
+            }
+            return {op == Op::NOT ? !a.truthy() : a.truthy()};
+        }
         case Op::IF:
         {
             std::size_t i = 0;
             for(; i + 1 < args.size(); i += 2)
             {
-                if(args[i]->eval(d).truthy())
+                const Value cond = args[i]->eval(d);
+                if(cond.isNull())
+                {
+                    return {}; // an unresolved condition picks no branch
+                }
+                if(cond.truthy())
                 {
                     return args[i + 1]->eval(d);
                 }
@@ -628,34 +719,59 @@ struct OpNode final : Node
         }
         case Op::AND:
         {
+            // Kleene `and`: a definite false short-circuits even when another
+            // argument is unresolved, so `and`-ing an inapplicable check beside
+            // a failing one still declines. Otherwise a null makes the whole
+            // conjunction unresolved.
             Value cur(true);
+            bool sawNull = false;
             for(const auto& c : args)
             {
                 cur = c->eval(d);
+                if(cur.isNull())
+                {
+                    sawNull = true;
+                    continue;
+                }
                 if(!cur.truthy())
                 {
-                    return cur; // first falsy
+                    return cur; // definite false
                 }
             }
-            return cur; // last value
+            return sawNull ? Value() : cur;
         }
         case Op::OR:
         {
+            // Kleene `or`: a definite true short-circuits past an unresolved
+            // argument, which is what lets
+            // `{"or": [{"not_present": ["$bias"]}, {"==": ["$bias.dtype", ...]}]}`
+            // accept a bias-free graph even though the second arm cannot run.
             Value cur;
+            bool sawNull = false;
             for(const auto& c : args)
             {
                 cur = c->eval(d);
+                if(cur.isNull())
+                {
+                    sawNull = true;
+                    continue;
+                }
                 if(cur.truthy())
                 {
-                    return cur; // first truthy
+                    return cur; // definite true
                 }
             }
-            return cur; // last value
+            return sawNull ? Value() : cur;
         }
         case Op::IN:
         {
-            const Value needle = args[0]->eval(d);
-            const Value hay = args[1]->eval(d);
+            const std::vector<Value> v = evalArgs(d);
+            if(anyNull(v))
+            {
+                return {};
+            }
+            const Value& needle = v[0];
+            const Value& hay = v[1];
             if(hay.isArray())
             {
                 for(const auto& e : hay.asArray())
@@ -674,21 +790,35 @@ struct OpNode final : Node
             }
             return {false};
         }
-        case Op::CEIL_DIV:
-        {
-            const double num = args[0]->eval(d).toNumber();
-            const double den = args[1]->eval(d).toNumber();
-            return Value::number(std::ceil(num / den));
-        }
         case Op::ABS:
-            return Value::number(std::fabs(args[0]->eval(d).toNumber()));
-        case Op::POW:
-            return Value::number(
-                std::pow(args[0]->eval(d).toNumber(), args[1]->eval(d).toNumber()));
         case Op::LOG2:
-            return Value::number(std::log2(args[0]->eval(d).toNumber()));
         case Op::RSQRT:
-            return Value::number(1.0 / std::sqrt(args[0]->eval(d).toNumber()));
+        {
+            const Value a = args[0]->eval(d);
+            if(a.isNull())
+            {
+                return {};
+            }
+            const double n = a.toNumber();
+            if(op == Op::ABS)
+            {
+                return Value::number(std::fabs(n));
+            }
+            if(n <= 0.0)
+            {
+                return {}; // log2/rsqrt decline on a non-positive argument
+            }
+            return Value::number(op == Op::LOG2 ? std::log2(n) : 1.0 / std::sqrt(n));
+        }
+        case Op::POW:
+        {
+            const std::vector<Value> v = evalArgs(d);
+            if(anyNull(v))
+            {
+                return {};
+            }
+            return Value::number(std::pow(v[0].toNumber(), v[1].toNumber()));
+        }
         case Op::VALUE_OR_DEFAULT:
         {
             // First arg is a variable reference; a null result means the path

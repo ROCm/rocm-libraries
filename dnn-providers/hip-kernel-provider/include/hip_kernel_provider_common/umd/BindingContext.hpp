@@ -49,6 +49,7 @@
 #include <hipdnn_data_sdk/types/Fp8E4M3Fnuz.hpp>
 #include <hipdnn_data_sdk/types/Fp8E5M2.hpp>
 #include <hipdnn_data_sdk/types/Fp8E5M2Fnuz.hpp>
+#include <hipdnn_data_sdk/types/Fp8E8M0.hpp>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
@@ -422,9 +423,14 @@ private:
             return {static_cast<double>(static_cast<float>(types::fp8_e4m3_fnuz::from_bits(bits)))};
         case data::DataType::FP8_E5M2_FNUZ:
             return {static_cast<double>(static_cast<float>(types::fp8_e5m2_fnuz::from_bits(bits)))};
+        case data::DataType::FP8_E8M0:
+            return {static_cast<double>(static_cast<float>(types::fp8_e8m0::from_bits(bits)))};
         case data::DataType::UINT8:
-        case data::DataType::INT8:
             return {static_cast<double>(bits)};
+        case data::DataType::INT8:
+            // Reinterpret the raw byte as signed: an INT8 -1 is stored as 0xFF
+            // and must read as -1.0, not 255.0.
+            return {static_cast<double>(static_cast<std::int8_t>(bits))};
         default:
             break;
         }

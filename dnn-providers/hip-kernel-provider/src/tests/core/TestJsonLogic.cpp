@@ -217,6 +217,70 @@ TEST(JsonLogic, PresenceOperators)
                  jlogic::JsonLogicCompileError);
 }
 
+TEST(JsonLogic, NullPropagatesThroughEveryOtherOperator)
+{
+    // An unresolved reference is "unknown", not a value. Every operator except
+    // the presence pair and value_or_default must yield null rather than
+    // coerce, because a coerced null reads as false / 0 / not-equal and would
+    // make a narrowing check silently PASS on data it never saw.
+    for(const json& rule : {json({{"!", "$nope"}}),
+                            json({{"!!", "$nope"}}),
+                            json({{"!=", json::array({"$nope", 1})}}),
+                            json({{"==", json::array({"$nope", 1})}}),
+                            json({{"<", json::array({"$nope", 5})}}),
+                            json({{"<=", json::array({"$nope", 5})}}),
+                            json({{">", json::array({"$nope", 5})}}),
+                            json({{">=", json::array({"$nope", 0})}}),
+                            json({{"+", json::array({"$nope", 1})}}),
+                            json({{"*", json::array({"$nope", 1})}}),
+                            json({{"-", json::array({"$nope", 1})}}),
+                            json({{"in", json::array({"$nope", json::array({1, 2})})}}),
+                            json({{"ceil_div", json::array({"$nope", 4})}}),
+                            json({{"abs", "$nope"}}),
+                            json({{"min", json::array({"$nope", 1})}}),
+                            json({{"max", json::array({"$nope", 1})}}),
+                            json({{"if", json::array({"$nope", 1, 2})}})})
+    {
+        EXPECT_TRUE(eval(rule).isNull()) << rule.dump();
+    }
+    // Two unresolved references are not "equal": the question is unanswerable.
+    EXPECT_TRUE(eval(json({{"==", json::array({"$nope", "$missing"})}})).isNull());
+    EXPECT_TRUE(eval(json({{"!=", json::array({"$nope", "$missing"})}})).isNull());
+}
+
+TEST(JsonLogic, KleeneAndOrShortCircuitPastUnknown)
+{
+    // A definite false decides an `and` even beside an unknown, and a definite
+    // true decides an `or`. This is what lets "absent, or present and
+    // constrained" accept an absent operand whose field checks cannot run.
+    EXPECT_EQ(eval(json({{"and", json::array({false, "$nope"})}})), V(false));
+    EXPECT_EQ(eval(json({{"or", json::array({true, "$nope"})}})), V(true));
+    // Without a decisive argument the result stays unknown rather than
+    // collapsing to true/false.
+    EXPECT_TRUE(eval(json({{"and", json::array({true, "$nope"})}})).isNull());
+    EXPECT_TRUE(eval(json({{"or", json::array({false, "$nope"})}})).isNull());
+    // A fully-resolved expression is unaffected.
+    EXPECT_EQ(eval(json({{"and", json::array({true, true})}})), V(true));
+    EXPECT_EQ(eval(json({{"or", json::array({false, false})}})), V(false));
+}
+
+TEST(JsonLogic, DivisionAndDomainErrorsFailClosed)
+{
+    // A zero divisor declines instead of yielding inf/NaN, giving uniform
+    // fail-closed zero-guarding (RFC 0018 A.7).
+    EXPECT_TRUE(eval(json({{"/", json::array({"$x", 0})}})).isNull());
+    EXPECT_TRUE(eval(json({{"%", json::array({"$x", 0})}})).isNull());
+    EXPECT_TRUE(eval(json({{"ceil_div", json::array({"$x", 0})}})).isNull());
+    // log2/rsqrt decline on a non-positive argument rather than returning
+    // -inf/NaN.
+    EXPECT_TRUE(eval(json({{"log2", 0}})).isNull());
+    EXPECT_TRUE(eval(json({{"rsqrt", 0}})).isNull());
+    EXPECT_TRUE(eval(json({{"rsqrt", -4}})).isNull());
+    // The well-behaved cases still compute.
+    EXPECT_EQ(eval(json({{"/", json::array({8, 2})}})), V(4));
+    EXPECT_EQ(eval(json({{"log2", 8}})), V(3));
+}
+
 TEST(JsonLogic, Umd0018ConstraintShapes)
 {
     EXPECT_EQ(eval(json({{"in", json::array({"$name", json::array({"amd", "xilinx"})})}})),

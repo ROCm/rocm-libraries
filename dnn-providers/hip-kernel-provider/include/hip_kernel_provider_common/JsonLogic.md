@@ -119,9 +119,12 @@ false (integers and doubles of equal value still compare equal). Ordering
 (`<`/`<=`/`>`/`>=`) still uses numeric coercion.
 
 Arithmetic: `+`, `-` (binary and unary negation), `*`, `/`, `%`, `min`, `max`.
+`/`, `%`, and `ceil_div` decline (yield `null`) on a zero divisor rather than
+producing `inf`/`NaN`.
 
 Math extensions (value-core, for hipDNN dispatch/constraint formulas): `ceil_div`
-(2-arg ceiling division), `abs`, `pow`, `log2`, `rsqrt` (`1/sqrt(x)`).
+(2-arg ceiling division), `abs`, `pow`, `log2`, `rsqrt` (`1/sqrt(x)`). `log2` and
+`rsqrt` decline on a non-positive argument.
 
 Membership: `in`. `{"in": [needle, array]}` is true when `array` contains
 `needle` (strict element equality); `{"in": [needle, string]}` is a substring
@@ -131,12 +134,32 @@ Presence: `present`, `not_present`. `{"present": ["$a", "$b"]}` is true when
 every listed path resolves to a non-null value; `{"not_present": [...]}` is true
 when every listed path resolves to null. Both are `and`-folds, so one call
 decides a whole list. They key on the same *existence* mechanism as
-`value_or_default`, and are the only operators that do not propagate a null: an
-unresolved path yields `false`/`true` rather than `null`, because answering
-"was this supplied?" is their whole job.
+`value_or_default`, and, with `value_or_default`, are the only operators that do
+not propagate a null: an unresolved path yields `false`/`true` rather than
+`null`, because answering "was this supplied?" is their whole job.
 
-Value semantics follow JsonLogic/JS: `false`, `0`, `""`, `null` and the empty
-array are falsy; `Number()`-style coercion drives arithmetic and ordering.
+## Null is unknown, and it propagates
+
+`null` means *unresolved*, not a value. Every operator except `present`,
+`not_present`, and `value_or_default` returns `null` when any argument is
+`null`, rather than coercing it to `false`/`0`/not-equal. This matters because
+the consumer is hipDNN's UMD matcher, where an unresolved path is an absent
+optional operand: if `null` coerced, a narrowing check such as
+`{"!=": ["$bias.dtype", "BFLOAT16"]}` would evaluate **true** on a graph with no
+bias and the matcher would accept input it cannot serve. Two `null`s are not
+equal to each other either — the question is unanswerable, so `==` and `!=` both
+decline.
+
+`and` and `or` are three-valued (Kleene): a definite `false` still decides an
+`and` and a definite `true` still decides an `or`, even beside a `null`
+argument; otherwise the result is `null`. That is what lets
+`{"or": [{"not_present": ["$bias"]}, {"and": [{"present": ["$bias"]}, ...]}]}`
+accept an absent operand whose field reads cannot run.
+
+Once every argument resolves, value semantics follow JsonLogic/JS: `false`, `0`,
+`""`, `null` and the empty array are falsy; `Number()`-style coercion drives
+arithmetic and ordering. A `null` root is falsy, so an undecided expression
+declines.
 
 Malformed rules (unknown operator, wrong argument count, a non-operator object)
 raise `JsonLogicCompileError` at `compile` time, so evaluation stays on the fast

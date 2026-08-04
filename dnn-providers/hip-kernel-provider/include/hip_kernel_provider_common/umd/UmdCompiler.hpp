@@ -160,27 +160,77 @@ public:
         return c.run(descriptor);
     }
 
-    // The oldest matcher format version and hipDNN graph schema (SDK) version
-    // this compiler accepts. A descriptor declaring less is declined before it
-    // runs (RFC 0017 §4 / A.10 §1).
-    static constexpr const char* K_MIN_VERSION = "1.0";
-    static constexpr const char* K_MIN_SDK_VERSION = "1.0";
+    // The matcher format version this compiler implements. Gating is a
+    // CEILING, not a floor (RFC 0017 §4): a descriptor whose major differs, or
+    // whose minor is newer than this runtime's, is refused, because it carries
+    // features this runtime cannot understand. An older minor within the same
+    // major always loads -- a file stamped "1.0" loads on a "1.1" runtime.
+    static constexpr const char* K_RUNTIME_VERSION = "1.0";
 
-    // True when the "<major>.<minor>" `version` is at or above `floor`.
-    // Compared numerically on (major, minor), never lexicographically, so
-    // "1.10" ranks above "1.9". A version that does not parse is below every
-    // floor (fail closed).
-    static bool versionAtLeast(const std::string& version, const std::string& floor)
+    // The hipDNN graph schema (SDK) version this compiler understands. Unlike
+    // the format version, `sdk_version` is gated against a floor the GRAPH
+    // sets, not a constant: a graph reports the schema version its own
+    // contents require, and a matcher declaring less is declined before it runs
+    // (RFC 0017 §4). This constant is only the ceiling half -- the upper bound
+    // on what a matcher may claim to understand. The per-graph floor is applied
+    // by UniversalGraphMatcher via graphRequiredSdkVersion().
+    static constexpr const char* K_RUNTIME_SDK_VERSION = "1.2";
+
+    // The version an omitted `version` / `sdk_version` key means: the lowest
+    // this format ever had, which is what a descriptor authored before either
+    // key existed implies (RFC 0018 A.1).
+    static constexpr const char* K_DEFAULT_VERSION = "1.0";
+
+    // Parsed "<major>.<minor>". A version that does not parse is not ordered
+    // against anything; callers treat that as a refusal (fail closed).
+    struct SemVer
     {
         std::size_t major = 0;
         std::size_t minor = 0;
-        std::size_t floorMajor = 0;
-        std::size_t floorMinor = 0;
-        if(!parseVersion(version, major, minor) || !parseVersion(floor, floorMajor, floorMinor))
+
+        bool operator<(const SemVer& o) const
+        {
+            return major != o.major ? major < o.major : minor < o.minor;
+        }
+        bool operator<=(const SemVer& o) const
+        {
+            return !(o < *this);
+        }
+    };
+
+    // Parse "<major>.<minor>"; false when the string is not exactly two
+    // digit-only components.
+    static bool parseSemVer(const std::string& s, SemVer& out)
+    {
+        return parseVersion(s, out.major, out.minor);
+    }
+
+    // True when `version` is at or above `floor`. Compared numerically on
+    // (major, minor), never lexicographically, so "1.10" ranks above "1.9". A
+    // version that does not parse is below every floor (fail closed).
+    static bool versionAtLeast(const std::string& version, const std::string& floor)
+    {
+        SemVer v;
+        SemVer f;
+        if(!parseSemVer(version, v) || !parseSemVer(floor, f))
         {
             return false;
         }
-        return major > floorMajor || (major == floorMajor && minor >= floorMinor);
+        return f <= v;
+    }
+
+    // True when a descriptor stamped `version` is loadable on a runtime
+    // implementing `runtime`: same major, and a minor no newer than the
+    // runtime's (RFC 0017 §4). An unparseable version loads nowhere.
+    static bool versionLoadableOn(const std::string& version, const std::string& runtime)
+    {
+        SemVer v;
+        SemVer r;
+        if(!parseSemVer(version, v) || !parseSemVer(runtime, r))
+        {
+            return false;
+        }
+        return v.major == r.major && v.minor <= r.minor;
     }
 
 private:
@@ -248,9 +298,14 @@ private:
         validateTopLevel(d);
         out.id = d.at("id").get<std::string>();
         out.name = d.at("name").get<std::string>();
-        out.version = d.contains("version") ? d.at("version").get<std::string>() : std::string();
-        out.sdkVersion
-            = d.contains("sdk_version") ? d.at("sdk_version").get<std::string>() : std::string();
+        // Both version keys are optional. An omitted key means "1.0", the
+        // version every descriptor authored against this revision implies
+        // (RFC 0018 A.1), so the published value is never empty and the
+        // per-graph SDK floor has a concrete version to compare against.
+        out.version = d.contains("version") ? d.at("version").get<std::string>()
+                                            : std::string(K_DEFAULT_VERSION);
+        out.sdkVersion = d.contains("sdk_version") ? d.at("sdk_version").get<std::string>()
+                                                   : std::string(K_DEFAULT_VERSION);
         out.allowOverrideShape
             = d.contains("allow_override_shape") ? d.at("allow_override_shape").get<bool>() : false;
 
@@ -325,8 +380,8 @@ private:
         {
             throw UmdCompileError("allow_override_shape must be a boolean");
         }
-        validateVersionKey(d, "version", K_MIN_VERSION);
-        validateVersionKey(d, "sdk_version", K_MIN_SDK_VERSION);
+        validateVersionKey(d, "version", K_RUNTIME_VERSION);
+        validateVersionKey(d, "sdk_version", K_RUNTIME_SDK_VERSION);
         if(!d.at("nodes").is_array() || d.at("nodes").empty())
         {
             throw UmdCompileError("nodes must be a non-empty array (A.1)");
@@ -357,8 +412,13 @@ private:
     }
 
     // Both version keys are optional; when present each must be a
-    // "<major>.<minor>" string at or above its floor (A.10 §1).
-    static void validateVersionKey(const nlohmann::json& d, const char* key, const char* floor)
+    // "<major>.<minor>" string this runtime can honor. The gate is a ceiling
+    // (RFC 0017 §4): same major, minor no newer than the runtime's. An older
+    // minor always loads, so a descriptor stays loadable on the oldest runtime
+    // that can serve it. The per-graph `sdk_version` FLOOR is a separate,
+    // match-time check (UniversalGraphMatcher), because only a graph can say
+    // which schema version its own contents require.
+    static void validateVersionKey(const nlohmann::json& d, const char* key, const char* runtime)
     {
         if(!d.contains(key))
         {
@@ -370,17 +430,17 @@ private:
                                   + " must be a \"<major>.<minor>\" string (A.10 §1)");
         }
         const std::string declared = d.at(key).get<std::string>();
-        std::size_t major = 0;
-        std::size_t minor = 0;
-        if(!parseVersion(declared, major, minor))
+        SemVer parsed;
+        if(!parseSemVer(declared, parsed))
         {
             throw UmdCompileError(std::string(key) + " \"" + declared
                                   + "\" is not a \"<major>.<minor>\" string (A.10 §1)");
         }
-        if(!versionAtLeast(declared, floor))
+        if(!versionLoadableOn(declared, runtime))
         {
             throw UmdCompileError(std::string(key) + " " + declared
-                                  + " is below the minimum supported " + floor + " (A.10 §1)");
+                                  + " is not supported by this runtime, which implements " + runtime
+                                  + " (A.10 §1)");
         }
     }
 
@@ -800,14 +860,13 @@ private:
     }
 
     // Expand a layout alias to a stride-order array. `$q.stride_order` is
-    // computed by extractStrideOrder (ApplicabilityChecks.cpp:17) as a per-dim
+    // computed by extractStrideOrder (ShapeUtilities.hpp) as a per-dim
     // priority (higher == slower-varying / larger stride), so a contiguous
     // rank-4 tensor is [3,2,1,0] and NHWC is [3,0,2,1]. The alias arrays match
     // that encoding -- the same TensorLayout::NCHW/NHWC arrays the real
     // validateSupportedLayout oracle compares against -- so `stride_order ==
-    // alias` holds against a live graph's strides. (RFC A.8's tables are
-    // written in the inverse, position->dim convention; the PoC pins to the
-    // codebase encoding per the plan.)
+    // alias` holds against a live graph's strides, and it is the encoding
+    // RFC 0018 A.8 tabulates.
     static nlohmann::json aliasToArray(const std::string& alias, std::size_t rank)
     {
         nlohmann::json arr;

@@ -165,12 +165,41 @@ private:
         return tryMatch(*_umd, graph, graph.nodeWrappers(), deviceMap, kernel);
     }
 
+    // The hipDNN graph schema (SDK) version this graph's own contents require,
+    // as "<major>.<minor>" (RFC 0017 §4). hipDNN already computes exactly this
+    // floor from the optional features a graph uses and stamps it into the
+    // serialized graph as `min_required_engine_api_version` (RFC 0008
+    // override shapes at 1.1, RFC 0016 runtime pass-by-value at 1.2), so the
+    // matcher reads that rather than inventing a second source of truth. An
+    // unstamped graph (a hand-built fixture, or one written before the field
+    // existed) reads as the 1.0 baseline, matching the plugin SDK's own
+    // null-tolerant accessor.
+    static std::string graphRequiredSdkVersion(const IGraph& graph)
+    {
+        const auto* required = graph.getGraph().min_required_engine_api_version();
+        if(required == nullptr)
+        {
+            return std::string(UmdCompiler::K_DEFAULT_VERSION);
+        }
+        return std::to_string(required->major()) + "." + std::to_string(required->minor());
+    }
+
     MatchResult tryMatch(const CompiledUmd& umd,
                          const IGraph& graph,
                          const std::vector<std::unique_ptr<INodeWrapper>>& wrappers,
                          const std::unordered_map<std::string, jlogic::Value>& deviceMap,
                          const nlohmann::json* kernel) const
     {
+        // Per-graph SDK floor (RFC 0017 §4). A graph reports the schema version
+        // its own contents require; a matcher declaring less was authored
+        // before a feature this graph uses existed, so it is skipped rather
+        // than asked -- it would otherwise match on the fields it knows and
+        // silently ignore one that changes what the graph means.
+        if(!UmdCompiler::versionAtLeast(umd.sdkVersion, graphRequiredSdkVersion(graph)))
+        {
+            return {};
+        }
+
         // allow_override_shape gate (RFC 0018 §3): decline override-shape graphs
         // unless the descriptor opts in.
         if(graph.getGraph().is_override_shape_enabled() && !umd.allowOverrideShape)

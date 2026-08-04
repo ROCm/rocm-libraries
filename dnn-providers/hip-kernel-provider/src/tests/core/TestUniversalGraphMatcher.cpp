@@ -367,7 +367,7 @@ TEST(BindingContext, ResolvesEveryNamespaceForm)
     EXPECT_FALSE(b.get("$q.virtual").asBool());
 
     // stride_order uses extractStrideOrder's per-dim priority encoding
-    // (ApplicabilityChecks.cpp:17): contiguous rank-4 is [3,2,1,0].
+    // (ShapeUtilities.hpp, RFC 0018 A.8): contiguous rank-4 is [3,2,1,0].
     const jlogic::Value strideOrder = b.get("$q.stride_order");
     ASSERT_TRUE(strideOrder.isArray());
     EXPECT_EQ(strideOrder,
@@ -765,13 +765,15 @@ TEST(UmdCompiler, AcceptsAndPublishesWellFormedVersions)
     EXPECT_EQ(c.sdkVersion, "1.2");
 }
 
-TEST(UmdCompiler, VersionKeysAreOptional)
+TEST(UmdCompiler, VersionKeysAreOptionalAndDefaultToOneZero)
 {
-    // A descriptor omitting both still compiles; the fields read empty so a
-    // loader can tell "undeclared" from "declared 1.0".
+    // A descriptor omitting both still compiles, and both read "1.0": the
+    // version a descriptor authored before either key existed implies
+    // (RFC 0018 A.1). The published value is never empty, so the per-graph SDK
+    // floor always has a concrete version to compare against.
     const umd::CompiledUmd c = umd::UmdCompiler::compile(sdpaDescriptor());
-    EXPECT_TRUE(c.version.empty());
-    EXPECT_TRUE(c.sdkVersion.empty());
+    EXPECT_EQ(c.version, "1.0");
+    EXPECT_EQ(c.sdkVersion, "1.0");
 }
 
 TEST(UmdCompiler, RejectsMalformedVersion)
@@ -794,26 +796,56 @@ TEST(UmdCompiler, RejectsNonStringVersion)
     EXPECT_THROW(umd::UmdCompiler::compile(d), umd::UmdCompileError);
 }
 
-TEST(UmdCompiler, RejectsSdkVersionBelowFloor)
+TEST(UmdCompiler, RejectsVersionNewerThanTheRuntime)
 {
-    // The graph schema the matcher was authored against predates what this
-    // compiler serves, so it is declined before it runs.
-    json d = sdpaDescriptor();
-    d["sdk_version"] = "0.9";
-    EXPECT_THROW(umd::UmdCompiler::compile(d), umd::UmdCompileError);
+    // RFC 0017 §4: a minor newer than the runtime's carries features this
+    // runtime cannot understand, so the descriptor is refused, never silently
+    // reinterpreted.
+    json newerMinor = sdpaDescriptor();
+    newerMinor["version"] = "1.9";
+    EXPECT_THROW(umd::UmdCompiler::compile(newerMinor), umd::UmdCompileError);
+
+    // A differing major is refused in either direction.
+    for(const char* major : {"0.9", "2.0"})
+    {
+        json d = sdpaDescriptor();
+        d["version"] = major;
+        EXPECT_THROW(umd::UmdCompiler::compile(d), umd::UmdCompileError) << major;
+    }
+
+    // Same for the SDK version's ceiling half.
+    json newerSdk = sdpaDescriptor();
+    newerSdk["sdk_version"] = "1.99";
+    EXPECT_THROW(umd::UmdCompiler::compile(newerSdk), umd::UmdCompileError);
 }
 
-TEST(UmdCompiler, RejectsVersionBelowFloor)
+TEST(UmdCompiler, AcceptsAnOlderMinorWithinTheSameMajor)
 {
-    json d = sdpaDescriptor();
-    d["version"] = "0.1";
-    EXPECT_THROW(umd::UmdCompiler::compile(d), umd::UmdCompileError);
+    // RFC 0017 §4: "A file stamped 1.0 loads on a 1.1 runtime." An older minor
+    // is never refused, so a descriptor stays loadable on the oldest runtime
+    // that can serve it. This is the case the previous floor-only gate broke.
+    EXPECT_TRUE(umd::UmdCompiler::versionLoadableOn("1.0", "1.1"));
+    EXPECT_TRUE(umd::UmdCompiler::versionLoadableOn("1.1", "1.1"));
+    EXPECT_FALSE(umd::UmdCompiler::versionLoadableOn("1.2", "1.1"));
+    EXPECT_FALSE(umd::UmdCompiler::versionLoadableOn("2.0", "1.1"));
+    EXPECT_FALSE(umd::UmdCompiler::versionLoadableOn("0.9", "1.1"));
+    // an unparseable version loads nowhere (fail closed)
+    EXPECT_FALSE(umd::UmdCompiler::versionLoadableOn("1", "1.1"));
+
+    // The SDK version's runtime is 1.2, so a matcher authored against the
+    // older 1.0 and 1.1 schemas still compiles.
+    for(const char* older : {"1.0", "1.1", "1.2"})
+    {
+        json d = sdpaDescriptor();
+        d["sdk_version"] = older;
+        EXPECT_NO_THROW(umd::UmdCompiler::compile(d)) << older;
+    }
 }
 
-TEST(UmdCompiler, VersionFloorIsNumericNotLexicographic)
+TEST(UmdCompiler, VersionComparisonIsNumericNotLexicographic)
 {
     // "1.10" is above "1.9" numerically but below it as text; a lexicographic
-    // comparison would decline it.
+    // comparison would order these backwards.
     EXPECT_TRUE(umd::UmdCompiler::versionAtLeast("1.10", "1.9"));
     EXPECT_FALSE(umd::UmdCompiler::versionAtLeast("1.9", "1.10"));
     EXPECT_FALSE(umd::UmdCompiler::versionAtLeast("2.0", "10.0"));
@@ -822,11 +854,112 @@ TEST(UmdCompiler, VersionFloorIsNumericNotLexicographic)
     EXPECT_TRUE(umd::UmdCompiler::versionAtLeast("1.0", "1.0"));
     // an unparseable version is below every floor (fail closed)
     EXPECT_FALSE(umd::UmdCompiler::versionAtLeast("1", "1.0"));
+    // the ceiling comparison is numeric too: 1.10 is newer than a 1.9 runtime
+    EXPECT_FALSE(umd::UmdCompiler::versionLoadableOn("1.10", "1.9"));
+    EXPECT_TRUE(umd::UmdCompiler::versionLoadableOn("1.9", "1.10"));
+}
 
+// ---- Per-graph sdk_version floor (RFC 0017 §4) ---------------------------
+
+namespace
+{
+
+// Rebuild an SDPA graph with `min_required_engine_api_version` stamped, the
+// field hipDNN computes from the optional features a graph uses (RFC 0008
+// override shapes at 1.1, RFC 0016 runtime pass-by-value at 1.2). The test-SDK
+// fixture leaves it unset, so the floor is set explicitly here.
+flatbuffers::FlatBufferBuilder buildSdpaGraphRequiringSchema(std::uint32_t major,
+                                                             std::uint32_t minor)
+{
+    flatbuffers::FlatBufferBuilder builder;
+    const std::vector<std::int64_t> dims{2, 8, 16, 128};
+    const std::vector<std::int64_t> strides = contiguousStrides(dims);
+
+    std::vector<::flatbuffers::Offset<data::TensorAttributes>> tensors;
+    for(const auto& [uid, name] :
+        {std::pair<std::int64_t, const char*>{1, "q"}, {2, "k"}, {3, "v"}, {4, "o"}})
+    {
+        tensors.push_back(data::CreateTensorAttributesDirect(
+            builder, uid, name, data::DataType::BFLOAT16, &strides, &dims));
+    }
+
+    data::SdpaAttributesBuilder sb(builder);
+    sb.add_q_tensor_uid(1);
+    sb.add_k_tensor_uid(2);
+    sb.add_v_tensor_uid(3);
+    sb.add_o_tensor_uid(4);
+    const auto sdpa = sb.Finish();
+
+    std::vector<::flatbuffers::Offset<data::Node>> nodes;
+    nodes.push_back(data::CreateNodeDirect(builder,
+                                           "sdpa_fwd",
+                                           data::DataType::BFLOAT16,
+                                           data::NodeAttributes::SdpaAttributes,
+                                           sdpa.Union()));
+
+    const data::EngineApiVersion required(major, minor, 0);
+    auto graph = data::CreateGraphDirect(builder,
+                                         "test",
+                                         data::DataType::FLOAT,
+                                         data::DataType::HALF,
+                                         data::DataType::BFLOAT16,
+                                         &tensors,
+                                         &nodes,
+                                         flatbuffers::nullopt,
+                                         /*is_override_shape_enabled=*/false,
+                                         &required);
+    builder.Finish(graph);
+    return builder;
+}
+
+} // namespace
+
+TEST(UniversalGraphMatcher, DeclinesAMatcherBelowTheGraphsRequiredSchema)
+{
+    // RFC 0017 §4: a graph reports the schema version its own contents require,
+    // and a matcher declaring less is skipped instead of asked -- it would
+    // otherwise match on the fields it knows and silently ignore a field that
+    // changes what the graph means. The descriptor is otherwise a full match.
     json d = sdpaDescriptor();
-    d["sdk_version"] = "1.10";
-    d["version"] = "1.10";
-    EXPECT_NO_THROW(umd::UmdCompiler::compile(d));
+    d["sdk_version"] = "1.0";
+    const umd::UniversalGraphMatcher m(d);
+
+    auto baseline = buildSdpaGraphRequiringSchema(1, 0);
+    fbu::GraphWrapper const gBaseline(baseline.GetBufferPointer(), baseline.GetSize());
+    EXPECT_TRUE(m.match(K_DEVICE, gBaseline).matched);
+
+    // The graph sets an optional feature this matcher never accounted for.
+    auto newer = buildSdpaGraphRequiringSchema(1, 2);
+    fbu::GraphWrapper const gNewer(newer.GetBufferPointer(), newer.GetSize());
+    EXPECT_FALSE(m.match(K_DEVICE, gNewer).matched);
+}
+
+TEST(UniversalGraphMatcher, MatcherAtOrAboveTheGraphsRequiredSchemaRuns)
+{
+    // The same graph, matched by a descriptor that adopted the newer schema.
+    json d = sdpaDescriptor();
+    d["sdk_version"] = "1.2";
+    const umd::UniversalGraphMatcher m(d);
+
+    auto newer = buildSdpaGraphRequiringSchema(1, 2);
+    fbu::GraphWrapper const gNewer(newer.GetBufferPointer(), newer.GetSize());
+    EXPECT_TRUE(m.match(K_DEVICE, gNewer).matched);
+
+    // A matcher above the floor still serves a graph that requires less.
+    auto baseline = buildSdpaGraphRequiringSchema(1, 0);
+    fbu::GraphWrapper const gBaseline(baseline.GetBufferPointer(), baseline.GetSize());
+    EXPECT_TRUE(m.match(K_DEVICE, gBaseline).matched);
+}
+
+TEST(UniversalGraphMatcher, AnUnstampedGraphReadsAsTheBaselineFloor)
+{
+    // A hand-built fixture or a graph written before the field existed carries
+    // no stamp; it reads as the 1.0 baseline rather than declining every
+    // matcher, mirroring the plugin SDK's null-tolerant accessor.
+    const umd::UniversalGraphMatcher m = makeSdpaMatcher();
+    auto builder = buildSdpaGraph({2, 8, 16, 128}, data::DataType::BFLOAT16);
+    fbu::GraphWrapper const g(builder.GetBufferPointer(), builder.GetSize());
+    EXPECT_TRUE(m.match(K_DEVICE, g).matched);
 }
 
 // ---- present / not_present (RFC 0017 §5) ---------------------------------
@@ -926,6 +1059,81 @@ TEST(UniversalGraphMatcher, PresenceOperatorsEvaluateRatherThanDecline)
     auto builder = buildSdpaGraph({2, 8, 16, 128}, data::DataType::BFLOAT16);
     fbu::GraphWrapper const g(builder.GetBufferPointer(), builder.GetSize());
     EXPECT_TRUE(m.match(K_DEVICE, g).matched);
+}
+
+// ---- Absent optional operands neither pass nor fail (RFC 0017 §5) --------
+
+namespace
+{
+
+// The SDPA descriptor with its three trailing `.present` field gates dropped
+// and `extra` appended, so a single criterion can be exercised against a graph
+// that supplies no optional operands.
+json sdpaWithCriterion(const char* extra)
+{
+    json d = sdpaDescriptor();
+    json& crit = d["criteria"]["and"];
+    crit.erase(crit.size() - 1);
+    crit.erase(crit.size() - 1);
+    crit.erase(crit.size() - 1);
+    crit.push_back(json::parse(extra));
+    return d;
+}
+
+} // namespace
+
+TEST(UniversalGraphMatcher, FieldReadOnAnAbsentOptionalNeverAccepts)
+{
+    // RFC 0017 §5: "A dtype or layout check on an absent $bias neither passes
+    // nor fails, it simply does not run." The hazard is the negative and
+    // ordering forms: if an unresolved read coerced to false/0 instead of
+    // propagating, each of these would evaluate TRUE and the pack would accept
+    // a graph carrying an operand its kernel cannot serve.
+    for(const char* crit : {R"({"!": "$attn_mask.packed"})",
+                            R"({"!=": ["$attn_mask.dtype", "BFLOAT16"]})",
+                            R"({"<": ["$attn_mask.rank", 5]})",
+                            R"({">=": ["$attn_mask.rank", 0]})",
+                            R"({"==": ["$attn_mask.dtype", "$page_table_k.dtype"]})",
+                            R"({"==": [{"+": ["$attn_mask.rank", 1]}, 1]})"})
+    {
+        const umd::UniversalGraphMatcher m(sdpaWithCriterion(crit));
+        auto builder = buildSdpaGraph({2, 8, 16, 128}, data::DataType::BFLOAT16);
+        fbu::GraphWrapper const g(builder.GetBufferPointer(), builder.GetSize());
+        EXPECT_FALSE(m.match(K_DEVICE, g).matched) << crit;
+    }
+}
+
+TEST(UniversalGraphMatcher, AbsentOrPresentAndConstrainedAcceptsBothShapes)
+{
+    // RFC 0017 §5: the pair a pack writes when it serves an optional operand
+    // only in a particular form. The `or` must see past the unresolved second
+    // arm when the operand is absent, and must still enforce it when present.
+    const char* crit = R"({"or": [
+        {"not_present": ["$attn_mask"]},
+        {"and": [{"present": ["$attn_mask"]},
+                 {"==": ["$attn_mask.dtype", "BFLOAT16"]}]}
+    ]})";
+    const umd::UniversalGraphMatcher m(sdpaWithCriterion(crit));
+
+    auto absent = buildSdpaGraph({2, 8, 16, 128}, data::DataType::BFLOAT16);
+    fbu::GraphWrapper const gAbsent(absent.GetBufferPointer(), absent.GetSize());
+    EXPECT_TRUE(m.match(K_DEVICE, gAbsent).matched);
+
+    auto present = buildSdpaGraph({2, 8, 16, 128}, data::DataType::BFLOAT16, /*withAttnMask=*/true);
+    fbu::GraphWrapper const gPresent(present.GetBufferPointer(), present.GetSize());
+    EXPECT_TRUE(m.match(K_DEVICE, gPresent).matched);
+}
+
+TEST(UniversalGraphMatcher, DefiniteFalseStillDeclinesBesideAnUnresolvedCheck)
+{
+    // An unresolved sibling must not rescue a criterion that definitely fails:
+    // `and` short-circuits on the definite false rather than going unresolved.
+    const char* crit = R"({"and": [{"==": ["$q.rank", 9]},
+                                   {"==": ["$attn_mask.dtype", "BFLOAT16"]}]})";
+    const umd::UniversalGraphMatcher m(sdpaWithCriterion(crit));
+    auto builder = buildSdpaGraph({2, 8, 16, 128}, data::DataType::BFLOAT16);
+    fbu::GraphWrapper const g(builder.GetBufferPointer(), builder.GetSize());
+    EXPECT_FALSE(m.match(K_DEVICE, g).matched);
 }
 
 TEST(UniversalGraphMatcher, PresentOperatorSeesABoundOptional)
@@ -1192,4 +1400,189 @@ TEST(UniversalGraphMatcher, MatchesOnACompileTimeScaleValue)
     auto noScale = buildSdpaGraph({2, 8, 16, 128}, data::DataType::BFLOAT16);
     fbu::GraphWrapper const gn(noScale.GetBufferPointer(), noScale.GetSize());
     EXPECT_FALSE(m.match(K_DEVICE, gn).matched);
+}
+
+// ---- value_f32 union coercion (RFC 0017 §5) ------------------------------
+
+namespace
+{
+
+// A single-node SDPA graph whose optional `scale` operand carries `value`, the
+// tagged union arm under test, with the tensor's own data_type. The test-SDK
+// fixture only ever builds the Float32 arm, so the other seven (and the
+// data_type-dispatched Float8 decode) are unreachable through it.
+template <typename AddValue>
+flatbuffers::FlatBufferBuilder buildSdpaGraphWithScaleValue(data::DataType scaleType,
+                                                            AddValue&& addValue)
+{
+    flatbuffers::FlatBufferBuilder builder;
+    const std::vector<std::int64_t> dims{2, 8, 16, 128};
+    const std::vector<std::int64_t> strides = contiguousStrides(dims);
+    const std::vector<std::int64_t> scalarDims{1};
+    const std::vector<std::int64_t> scalarStrides{1};
+
+    std::vector<::flatbuffers::Offset<data::TensorAttributes>> tensors;
+    for(const auto& [uid, name] :
+        {std::pair<std::int64_t, const char*>{1, "q"}, {2, "k"}, {3, "v"}, {4, "o"}})
+    {
+        tensors.push_back(data::CreateTensorAttributesDirect(
+            builder, uid, name, data::DataType::BFLOAT16, &strides, &dims));
+    }
+
+    // addValue writes the union arm and returns its (type, offset) pair.
+    const auto [valueType, valueOffset] = addValue(builder);
+    const auto scaleName = builder.CreateString("scale");
+    const auto scaleDims = builder.CreateVector(scalarDims);
+    const auto scaleStrides = builder.CreateVector(scalarStrides);
+    data::TensorAttributesBuilder tb(builder);
+    tb.add_uid(5);
+    tb.add_name(scaleName);
+    tb.add_data_type(scaleType);
+    tb.add_dims(scaleDims);
+    tb.add_strides(scaleStrides);
+    tb.add_value_type(valueType);
+    tb.add_value(valueOffset);
+    tensors.push_back(tb.Finish());
+
+    data::SdpaAttributesBuilder sb(builder);
+    sb.add_q_tensor_uid(1);
+    sb.add_k_tensor_uid(2);
+    sb.add_v_tensor_uid(3);
+    sb.add_o_tensor_uid(4);
+    sb.add_scale_tensor_uid(5);
+    const auto sdpa = sb.Finish();
+
+    std::vector<::flatbuffers::Offset<data::Node>> nodes;
+    nodes.push_back(data::CreateNodeDirect(builder,
+                                           "sdpa_fwd",
+                                           data::DataType::BFLOAT16,
+                                           data::NodeAttributes::SdpaAttributes,
+                                           sdpa.Union()));
+
+    auto graph = data::CreateGraphDirect(builder,
+                                         "test",
+                                         data::DataType::FLOAT,
+                                         data::DataType::HALF,
+                                         data::DataType::BFLOAT16,
+                                         &tensors,
+                                         &nodes,
+                                         flatbuffers::nullopt,
+                                         /*is_override_shape_enabled=*/false);
+    builder.Finish(graph);
+    return builder;
+}
+
+// Resolve `$scale.value_f32` for a graph carrying one union arm.
+jlogic::Value scaleValueF32(flatbuffers::FlatBufferBuilder& builder)
+{
+    const umd::UniversalGraphMatcher m(sdpaScaleDescriptor());
+    fbu::GraphWrapper const g(builder.GetBufferPointer(), builder.GetSize());
+    const umd::MatchResult r = m.match(K_DEVICE, g);
+    EXPECT_TRUE(r.matched);
+    return r.bindings.get("$scale.value_f32");
+}
+
+} // namespace
+
+TEST(BindingContext, ValueF32CoercesEveryUnionArm)
+{
+    // RFC 0017 §5: the schema layer "coerces whichever arm is set to f32" and
+    // publishes one typed token. Every arm must produce a number, not null.
+    const auto f32 = scaleValueF32(*std::make_unique<flatbuffers::FlatBufferBuilder>(
+        buildSdpaGraphWithScaleValue(data::DataType::FLOAT, [](auto& b) {
+            return std::pair{
+                data::TensorValue::Float32Value,
+                ::flatbuffers::Offset<void>(b.CreateStruct(data::Float32Value(2.5F)).o)};
+        })));
+    EXPECT_DOUBLE_EQ(f32.toNumber(), 2.5);
+
+    const auto f64 = scaleValueF32(*std::make_unique<flatbuffers::FlatBufferBuilder>(
+        buildSdpaGraphWithScaleValue(data::DataType::DOUBLE, [](auto& b) {
+            return std::pair{
+                data::TensorValue::Float64Value,
+                ::flatbuffers::Offset<void>(b.CreateStruct(data::Float64Value(0.25)).o)};
+        })));
+    EXPECT_DOUBLE_EQ(f64.toNumber(), 0.25);
+
+    const auto i32 = scaleValueF32(*std::make_unique<flatbuffers::FlatBufferBuilder>(
+        buildSdpaGraphWithScaleValue(data::DataType::INT32, [](auto& b) {
+            return std::pair{data::TensorValue::Int32Value,
+                             ::flatbuffers::Offset<void>(b.CreateStruct(data::Int32Value(-7)).o)};
+        })));
+    EXPECT_DOUBLE_EQ(i32.toNumber(), -7.0);
+
+    const auto i64 = scaleValueF32(*std::make_unique<flatbuffers::FlatBufferBuilder>(
+        buildSdpaGraphWithScaleValue(data::DataType::INT64, [](auto& b) {
+            return std::pair{data::TensorValue::Int64Value,
+                             ::flatbuffers::Offset<void>(b.CreateStruct(data::Int64Value(42)).o)};
+        })));
+    EXPECT_DOUBLE_EQ(i64.toNumber(), 42.0);
+
+    const auto boolean = scaleValueF32(*std::make_unique<flatbuffers::FlatBufferBuilder>(
+        buildSdpaGraphWithScaleValue(data::DataType::BOOLEAN, [](auto& b) {
+            return std::pair{data::TensorValue::BoolValue,
+                             ::flatbuffers::Offset<void>(b.CreateStruct(data::BoolValue(true)).o)};
+        })));
+    EXPECT_DOUBLE_EQ(boolean.toNumber(), 1.0);
+}
+
+TEST(BindingContext, ValueF32DecodesFloat8ThroughTheTensorDataType)
+{
+    // Float8Value stores raw bits; the tensor's data_type says which 8-bit
+    // format they encode. The bits 0x38 are 1.0 in E4M3 (exponent bias 7) but
+    // 0.5 in E5M2 (bias 15), so decoding through the wrong format -- or not
+    // decoding at all -- is directly observable.
+    const auto e4m3 = scaleValueF32(*std::make_unique<flatbuffers::FlatBufferBuilder>(
+        buildSdpaGraphWithScaleValue(data::DataType::FP8_E4M3, [](auto& b) {
+            return std::pair{
+                data::TensorValue::Float8Value,
+                ::flatbuffers::Offset<void>(b.CreateStruct(data::Float8Value(0x38)).o)};
+        })));
+    EXPECT_DOUBLE_EQ(e4m3.toNumber(), 1.0);
+
+    const auto e5m2 = scaleValueF32(*std::make_unique<flatbuffers::FlatBufferBuilder>(
+        buildSdpaGraphWithScaleValue(data::DataType::FP8_E5M2, [](auto& b) {
+            return std::pair{
+                data::TensorValue::Float8Value,
+                ::flatbuffers::Offset<void>(b.CreateStruct(data::Float8Value(0x38)).o)};
+        })));
+    EXPECT_DOUBLE_EQ(e5m2.toNumber(), 0.5);
+
+    // E8M0 is an 8-bit format too: bits 127 encode the 2^0 scale. It must
+    // decode rather than fall through to the fail-closed null.
+    const auto e8m0 = scaleValueF32(*std::make_unique<flatbuffers::FlatBufferBuilder>(
+        buildSdpaGraphWithScaleValue(data::DataType::FP8_E8M0, [](auto& b) {
+            return std::pair{data::TensorValue::Float8Value,
+                             ::flatbuffers::Offset<void>(b.CreateStruct(data::Float8Value(127)).o)};
+        })));
+    ASSERT_FALSE(e8m0.isNull());
+    EXPECT_DOUBLE_EQ(e8m0.toNumber(), 1.0);
+
+    // INT8 raw bits are signed: 0xFF is -1, not 255.
+    const auto i8 = scaleValueF32(*std::make_unique<flatbuffers::FlatBufferBuilder>(
+        buildSdpaGraphWithScaleValue(data::DataType::INT8, [](auto& b) {
+            return std::pair{
+                data::TensorValue::Float8Value,
+                ::flatbuffers::Offset<void>(b.CreateStruct(data::Float8Value(0xFF)).o)};
+        })));
+    EXPECT_DOUBLE_EQ(i8.toNumber(), -1.0);
+
+    // UINT8 keeps the unsigned reading of the same bits.
+    const auto u8 = scaleValueF32(*std::make_unique<flatbuffers::FlatBufferBuilder>(
+        buildSdpaGraphWithScaleValue(data::DataType::UINT8, [](auto& b) {
+            return std::pair{
+                data::TensorValue::Float8Value,
+                ::flatbuffers::Offset<void>(b.CreateStruct(data::Float8Value(0xFF)).o)};
+        })));
+    EXPECT_DOUBLE_EQ(u8.toNumber(), 255.0);
+
+    // A pairing that names no 8-bit format resolves to null rather than
+    // reinterpreting the bits.
+    const auto mismatched = scaleValueF32(*std::make_unique<flatbuffers::FlatBufferBuilder>(
+        buildSdpaGraphWithScaleValue(data::DataType::FLOAT, [](auto& b) {
+            return std::pair{
+                data::TensorValue::Float8Value,
+                ::flatbuffers::Offset<void>(b.CreateStruct(data::Float8Value(0x38)).o)};
+        })));
+    EXPECT_TRUE(mismatched.isNull());
 }
