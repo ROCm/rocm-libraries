@@ -323,4 +323,12 @@ typedef enum
      */
     HIPDNN_BACKEND_OPERATION_LAYERNORM_BACKWARD_DESCRIPTOR_EXT = 35,
 
+    /**
+     * @brief Resample backward operation descriptor
+     *
+     * Represents a resample backward operation (pooling gradient)
+     * with DY input, optional index input, and DX output.
+     */
+    HIPDNN_BACKEND_OPERATION_RESAMPLE_BWD_DESCRIPTOR = 36,
+
 } hipdnnBackendDescriptorType_t;
