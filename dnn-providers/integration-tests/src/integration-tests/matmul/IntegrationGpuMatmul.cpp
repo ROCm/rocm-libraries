@@ -76,7 +76,7 @@ protected:
 
         this->registerValidator(outputs.c, this->getTolerance(graphObj, outputs.c));
 
-        this->synthesis().setGlobalSeed(testCase.seed);
+        this->inputFillRecipes().setGlobalSeed(testCase.seed);
         this->verifyGraph(graphObj);
     }
 };

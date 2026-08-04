@@ -112,15 +112,23 @@ fetch_gtest_dependency()
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
 # Copy integration test bundles into the build tree so tests can find them at
-# <exe_dir>/../lib/integration_test_bundles/
+# <exe_dir>/../lib/integration-test-bundles/
 # NOTE: file(COPY) runs at configure time only. If you add or modify files
-# under integration_test_bundles/, re-run cmake to pick up the changes.
-file(COPY "${CMAKE_CURRENT_SOURCE_DIR}/integration_test_bundles/"
-     DESTINATION "${CMAKE_BINARY_DIR}/lib/integration_test_bundles")
+# under integration-test-bundles/, re-run cmake to pick up the changes.
+file(COPY "${CMAKE_CURRENT_SOURCE_DIR}/integration-test-bundles/"
+     DESTINATION "${CMAKE_BINARY_DIR}/lib/integration-test-bundles")
+if(Python3_FOUND)
+    add_test(
+        NAME hipdnn_bundle_verifier_python_tests
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/reference-data-scripts/tests/test_verify_golden_bundles.py
+    )
+    set_tests_properties(hipdnn_bundle_verifier_python_tests PROPERTIES LABELS "unit_test;quick")
+endif()
 
 # Install integration test bundles so installed tests can find them at
-# <exe_dir>/../lib/integration_test_bundles/
-install(DIRECTORY "${CMAKE_BINARY_DIR}/lib/integration_test_bundles"
+# <exe_dir>/../lib/integration-test-bundles/
+install(DIRECTORY "${CMAKE_BINARY_DIR}/lib/integration-test-bundles"
         DESTINATION ${CMAKE_INSTALL_LIBDIR}
 )
 
@@ -129,7 +137,7 @@ set(INTEGRATION_TESTS_EXE hipdnn_integration_tests)
 add_executable(${INTEGRATION_TESTS_EXE}
     src/main.cpp
     src/harness/bundle/IntegrationBundleVerificationHarness.cpp
-    src/harness/input-init/SynthesizeInputs.cpp
+    src/harness/input-init/FillInputs.cpp
 )
 
 add_subdirectory(src/integration-tests)

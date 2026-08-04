@@ -10,6 +10,7 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_details_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/reduction_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/resample_bwd_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/resample_fwd_attributes_generated.h>
 
 namespace hipdnn_test_sdk::utilities
@@ -2903,8 +2904,7 @@ inline flatbuffers::FlatBufferBuilder
     ::flatbuffers::Optional<bool> flatbufferGenerateIndex = ::flatbuffers::nullopt;
     if(generateIndex.has_value())
     {
-        const bool generateIndexValue = generateIndex.value_or(false);
-        flatbufferGenerateIndex = ::flatbuffers::Optional<bool>(generateIndexValue);
+        flatbufferGenerateIndex = ::flatbuffers::Optional<bool>(generateIndex.value_or(false));
     }
 
     auto resampleAttr = hipdnn_flatbuffers_sdk::data_objects::CreateResampleFwdAttributesDirect(
@@ -2926,6 +2926,82 @@ inline flatbuffers::FlatBufferBuilder
         "resample_fwd",
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
         hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::ResampleFwdAttributes,
+        resampleAttr.Union()));
+
+    auto graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
+        builder,
+        "test",
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        &tensorAttributes,
+        &nodes);
+    builder.Finish(graphOffset);
+    return builder;
+}
+
+inline flatbuffers::FlatBufferBuilder createValidResampleBwdGraph(bool generateIndex = true)
+{
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
+        tensorAttributes;
+
+    const std::vector<int64_t> dyDims = {1, 1, 2, 2};
+    const std::vector<int64_t> dyStrides = {4, 4, 2, 1};
+    const std::vector<int64_t> dxDims = {1, 1, 4, 4};
+    const std::vector<int64_t> dxStrides = {16, 16, 4, 1};
+
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+        builder,
+        1,
+        "dy",
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        &dyStrides,
+        &dyDims));
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+        builder,
+        2,
+        "dx",
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        &dxStrides,
+        &dxDims));
+    ::flatbuffers::Optional<int64_t> indexTensorUid = ::flatbuffers::nullopt;
+    if(generateIndex)
+    {
+        indexTensorUid = 3;
+        tensorAttributes.push_back(
+            hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+                builder,
+                *indexTensorUid,
+                "index",
+                hipdnn_flatbuffers_sdk::data_objects::DataType::INT32,
+                &dyStrides,
+                &dyDims));
+    }
+
+    const std::vector<int64_t> prePadding = {0, 0};
+    const std::vector<int64_t> postPadding = {0, 0};
+    const std::vector<int64_t> stride = {2, 2};
+    const std::vector<int64_t> window = {2, 2};
+
+    auto resampleAttr = hipdnn_flatbuffers_sdk::data_objects::CreateResampleBwdAttributesDirect(
+        builder,
+        1,
+        2,
+        indexTensorUid,
+        &prePadding,
+        &postPadding,
+        &stride,
+        &window,
+        hipdnn_flatbuffers_sdk::data_objects::ResampleMode::MAXPOOL,
+        hipdnn_flatbuffers_sdk::data_objects::PaddingMode::ZERO_PAD);
+
+    std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> nodes;
+    nodes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
+        builder,
+        "resample_bwd",
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::ResampleBwdAttributes,
         resampleAttr.Union()));
 
     auto graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
