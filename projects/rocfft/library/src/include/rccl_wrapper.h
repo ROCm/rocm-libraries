@@ -64,6 +64,11 @@ private:
 
 // value-semantic handle to an RCCL communicator set for single-process
 // multi-GPU transfers.
+//
+// Thread safety: create()/reset_all() are internally synchronized. A given
+// comm is NOT safe for concurrent use (per NCCL: only one thread may
+// operate a comm at a time), so plans sharing a comm (same device set) must
+// be executed serially; concurrent use needs caller-side serialization.
 class rocfft_rccl_comm_t
 {
 public:
@@ -152,6 +157,9 @@ private:
     // for reuse by later plans, amortizing ncclCommInitRank; freed at
     // reset_all(). Reuse is safe because the comm owns its stream, keeping
     // RCCL's fixed comm/stream pairing across sequential and overlapping plans.
+    // The mutex only makes looking up / creating a cached comm thread-safe;
+    // it does NOT make using a comm's collectives thread-safe (a comm still
+    // must be used by one thread at a time)
     static std::map<std::set<int>, std::shared_ptr<Impl>> comm_cache;
     static std::mutex                                     comm_cache_mutex;
 
