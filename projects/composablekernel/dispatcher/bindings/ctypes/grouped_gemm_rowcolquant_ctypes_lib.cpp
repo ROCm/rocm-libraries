@@ -217,7 +217,7 @@ int dispatcher_run_rowcolquant_gemm(const void* A,
 
     // Build QuantGroupedGemmHostArgs for single-group launch.
     // The RowColQuant kernel treats AQ as a 1-D per-row vector and BQ as a 1-D per-col
-    // vector. It uses broadcast strides (stride=0) to index them — i.e. scale[0] is
+    // vector. It uses broadcast strides (stride=0) to index them -- i.e. scale[0] is
     // reused across all columns (AQ) / all rows (BQ). QK_A and QK_B are ignored by the
     // kernel; M and N govern the loop bounds directly. Passing any non-zero stride causes
     // the kernel to step past the end of the scale buffer, producing garbage output.
