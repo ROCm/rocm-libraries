@@ -60,6 +60,12 @@ add_library(
     heuristics/SelectionHeuristic.cpp
     heuristics/config/ConfigBuiltIn.cpp
     heuristics/static_ordering/StaticOrderingBuiltIn.cpp
+    heuristics/uhd/JsonLogicEvaluator.cpp
+    heuristics/uhd/FeatureExtractor.cpp
+    heuristics/uhd/UhdBuiltIn.cpp
+    heuristics/uhd/UhdModelCache.cpp
+    heuristics/uhd/adapters/StaticOrderAdapter.cpp
+    heuristics/uhd/adapters/TreeDataAdapter.cpp
     plugin/EnginePlugin.cpp
     plugin/EnginePluginResourceManager.cpp
     plugin/HeuristicPlugin.cpp

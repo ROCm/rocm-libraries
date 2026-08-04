@@ -19,6 +19,7 @@
 
 #include "config/ConfigBuiltIn.hpp"
 #include "static_ordering/StaticOrderingBuiltIn.hpp"
+#include "uhd/UhdBuiltIn.hpp"
 
 namespace hipdnn_backend::plugin
 {
@@ -32,6 +33,10 @@ void HeuristicPluginManager::registerBuiltIns()
     registerPlugin(HeuristicPlugin::createBuiltIn(
         hipdnn_backend::heuristics::static_ordering::populateFunctionTable(),
         "built-in:SelectionHeuristic::StaticOrdering"));
+
+    registerPlugin(
+        HeuristicPlugin::createBuiltIn(hipdnn_backend::heuristics::uhd::populateFunctionTable(),
+                                       "built-in:SelectionHeuristic::UHD"));
 }
 
 } // namespace hipdnn_backend::plugin

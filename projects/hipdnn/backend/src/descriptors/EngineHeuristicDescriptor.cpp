@@ -90,16 +90,19 @@ std::vector<int64_t> EngineHeuristicDescriptor::resolveHeuristicPolicyOrder()
         return _policyOrder;
     }
     // 3. Default policy list — Config first so HIPDNN_HEUR_CONFIG_PATH
-    // rules win when set; StaticOrdering is the canonical last-resort fallback
-    // and always succeeds when there is at least one candidate. Vendor
-    // heuristic plugins may be inserted via env or descriptor attribute above.
+    // rules win when set; UHD (Universal Heuristic Descriptor) provides data-driven
+    // selection when RFC 0017 UED/UKD metadata is available; StaticOrdering is the
+    // canonical last-resort fallback and always succeeds when there is at least
+    // one candidate. Vendor heuristic plugins may be inserted via env or descriptor
+    // attribute above.
     std::vector<int64_t> policyIds = {
         hipdnn_data_sdk::utilities::policyNameToId("SelectionHeuristic::Config"),
+        hipdnn_data_sdk::utilities::policyNameToId("SelectionHeuristic::UHD"),
         hipdnn_data_sdk::utilities::policyNameToId("SelectionHeuristic::StaticOrdering"),
     };
     HIPDNN_BACKEND_LOG_WARN(
         "No heuristic policy order configured, falling back to built-in defaults "
-        "[SelectionHeuristic::Config, SelectionHeuristic::StaticOrdering]. "
+        "[SelectionHeuristic::Config, SelectionHeuristic::UHD, SelectionHeuristic::StaticOrdering]. "
         "Set HIPDNN_HEUR_POLICY_ORDER or the descriptor attribute to silence "
         "this warning.");
     return policyIds;
