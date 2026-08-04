@@ -98,6 +98,9 @@ TEST(TestBackendEnumStringUtils, GetBackendDescriptorTypeName)
         "HIPDNN_BACKEND_OPERATION_RESAMPLE_FWD_DESCRIPTOR");
     EXPECT_STREQ(hipdnnGetBackendDescriptorTypeName(HIPDNN_BACKEND_PROFILING_CONTROL_EXT),
                  "HIPDNN_BACKEND_PROFILING_CONTROL_EXT");
+    EXPECT_STREQ(
+        hipdnnGetBackendDescriptorTypeName(HIPDNN_BACKEND_OPERATION_RESAMPLE_BWD_DESCRIPTOR),
+        "HIPDNN_BACKEND_OPERATION_RESAMPLE_BWD_DESCRIPTOR");
 
     // Test unknown type
     EXPECT_STREQ(hipdnnGetBackendDescriptorTypeName(static_cast<hipdnnBackendDescriptorType_t>(-1)),
@@ -757,6 +760,14 @@ TEST(TestBackendEnumStringUtils, GetBackendAttributeName)
                  "HIPDNN_ATTR_OPERATION_RESAMPLE_FWD_YDESC");
     EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_OPERATION_RESAMPLE_FWD_IDXDESC),
                  "HIPDNN_ATTR_OPERATION_RESAMPLE_FWD_IDXDESC");
+
+    // ResampleBwd operation attributes
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_DYDESC),
+                 "HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_DYDESC");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_DXDESC),
+                 "HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_DXDESC");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_IDXDESC),
+                 "HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_IDXDESC");
     EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_RESAMPLE_MODE),
                  "HIPDNN_ATTR_RESAMPLE_MODE");
     EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_RESAMPLE_PRE_PADDINGS),
@@ -773,6 +784,10 @@ TEST(TestBackendEnumStringUtils, GetBackendAttributeName)
                  "HIPDNN_ATTR_RESAMPLE_GENERATE_INDEX_EXT");
     EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_RESAMPLE_COMP_TYPE),
                  "HIPDNN_ATTR_RESAMPLE_COMP_TYPE");
+    EXPECT_EQ(HIPDNN_ATTR_RESAMPLE_MODE, 3400);
+    EXPECT_EQ(HIPDNN_ATTR_RESAMPLE_COMP_TYPE, 3407);
+    EXPECT_EQ(HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_DYDESC, 3408);
+    EXPECT_EQ(HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_IDXDESC, 3410);
 
     // Profiling control descriptor attributes
     EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_PROFILING_HANDLE_EXT),

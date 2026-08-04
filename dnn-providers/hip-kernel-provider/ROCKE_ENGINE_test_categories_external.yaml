@@ -1,0 +1,37 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# rocKE CTest Categories (RFC0010) for pre-registered (non-GTest) CTest tests.
+#
+# rocke/platform/tests/CMakeLists.txt (C++ smoke binaries) and
+# rocke/platform/CMakeLists.txt (Python import/golden/pytest checks) register
+# these six directly via add_test(), not through a GTest binary categorized
+# by a shared YAML (rocKE's C++ client API and its GTest binaries were
+# removed entirely in AICK-1737 (#9800); no rocKE GTest suite remains).
+# Without an entry here they carry no quick/standard/comprehensive/full
+# label: the install-tree copy only has a hardcoded literal "quick" label
+# baked in by rocke/platform/CMakeLists.txt (nothing gives it
+# standard/comprehensive/full), and the build-tree copy
+# (rocke/platform/tests/CMakeLists.txt) has no tier label at all. Either way
+# they silently drop out of `ctest -L <tier>` selection, which is how
+# TheRock CI's per-tier test_hipkernelprovider.py invocation runs these
+# suites.
+#
+# All six are fast (<5s total combined) and carry no Full*/Standard*/
+# Comprehensive* variant, so every tier runs the same coverage -- matching
+# HIP_MLOPS_ENGINE_test_categories.yaml's convention for suites without
+# tiered coverage yet.
+test_categories:
+  quick:
+    description: "rocKE pre-registered smoke/golden/unit checks (C++ + Python)"
+    test_patterns:
+      - "rocke_ir_serialize_roundtrip"
+      - "rocke_mma_frag_ssot"
+      - "rocke_tiled_attention_2d_reentrancy"
+      - "rocke_python_import_smoke"
+      - "rocke_golden_static"
+      - "rocke_pytest"
+    labels:
+      - "quick"
+      - "pre-commit"
+      - "smoke"
