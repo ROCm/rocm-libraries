@@ -17,7 +17,9 @@
 
 #include "UhdBuiltIn.hpp"
 
+#include "EngineRegistry.hpp"
 #include "FeatureExtractor.hpp"
+#include "SelectionEngine.hpp"
 #include "UhdModelCache.hpp"
 #include "adapters/IUhdAdapter.hpp"
 #include "adapters/StaticOrderAdapter.hpp"
@@ -316,32 +318,26 @@ hipdnnPluginStatus_t policySetSerializedGraph(hipdnnHeuristicPolicyDescriptor_t 
 
 // ---- Selection -------------------------------------------------------------
 
-// Helper to bind device properties to feature extraction context.
-// TODO(RFC-0017): Enable when UHD integration is complete
-[[maybe_unused]] void bindDeviceProperties(FeatureExtractionContext& ctx,
-                                           const fb::DevicePropertiesT* props)
+/// Extract device variables from parsed DevicePropertiesT.
+FeatureExtractionContext::ValueMap extractDeviceVars(const fb::DevicePropertiesT* props)
 {
+    FeatureExtractionContext::ValueMap deviceVars;
     if(props == nullptr)
     {
-        return;
+        return deviceVars;
     }
 
-    FeatureExtractionContext::ValueMap deviceVars;
     // Map actual schema fields to feature names
     deviceVars["device_id"] = static_cast<int64_t>(props->device_id);
     deviceVars["cu_count"] = static_cast<int64_t>(props->multi_processor_count);
     deviceVars["multi_processor_count"] = static_cast<int64_t>(props->multi_processor_count);
     deviceVars["total_global_mem"] = static_cast<int64_t>(props->total_global_mem);
-    if(props->architecture_name.empty())
-    {
-        deviceVars["architecture_name"] = std::string{};
-    }
-    else
+    if(!props->architecture_name.empty())
     {
         deviceVars["architecture_name"] = props->architecture_name;
     }
 
-    ctx.bindDeviceVars(deviceVars);
+    return deviceVars;
 }
 
 hipdnnPluginStatus_t policyFinalize(hipdnnHeuristicPolicyDescriptor_t desc, int32_t* outApplied)
@@ -355,23 +351,96 @@ hipdnnPluginStatus_t policyFinalize(hipdnnHeuristicPolicyDescriptor_t desc, int3
         {
             UHD_LOG(HIPDNN_SEV_WARN, "policyFinalize: no candidate engines");
             *outApplied = 0;
+            d->finalized = true;
             return HIPDNN_PLUGIN_STATUS_SUCCESS;
         }
 
-        // TODO(RFC-0017): When UED/UKD is implemented, look up per-engine UHD
-        // metadata here. For now, decline and let StaticOrdering handle it.
-        //
-        // The full flow will be:
-        // 1. For each candidate engine ID, look up its UED (Universal Engine Descriptor)
-        // 2. Get the UHD from the UED (if present)
-        // 3. Load/cache the UHD's model adapter
-        // 4. Extract features from device properties + kernel metadata + query
-        // 5. Score each candidate and sort by score
-        //
-        // Stub: decline so StaticOrdering takes over.
-        UHD_LOG(HIPDNN_SEV_INFO,
-                "policyFinalize: UHD policy not yet connected to UED/UKD (RFC-0017 stub)");
-        *outApplied = 0;
+        // Extract device properties from handle
+        FeatureExtractionContext::ValueMap deviceVars;
+        if(d->handle != nullptr && d->handle->devicePropertiesSet)
+        {
+            deviceVars = extractDeviceVars(d->handle->deviceProperties.get());
+        }
+
+        // TODO(RFC-0017): Extract query vars from serialized graph.
+        // For now, use empty query vars — the graph parsing will come with UMD.
+        FeatureExtractionContext::ValueMap queryVars;
+
+        // Check if any candidate engines are registered in the mock registry.
+        // This allows the selection flow to work when engines are registered,
+        // while falling back gracefully when they are not.
+        auto& registry = EngineRegistry::instance();
+        bool anyEngineRegistered = false;
+        for(const auto engineId : d->candidateEngineIds)
+        {
+            if(registry.hasEngine(engineId))
+            {
+                anyEngineRegistered = true;
+                break;
+            }
+        }
+
+        if(!anyEngineRegistered)
+        {
+            // No engines in registry — decline so StaticOrdering handles it.
+            // This is the expected path until RFC 0017 populates the registry.
+            UHD_LOG(HIPDNN_SEV_INFO,
+                    "policyFinalize: no candidate engines in UHD registry, declining");
+            *outApplied = 0;
+            d->finalized = true;
+            return HIPDNN_PLUGIN_STATUS_SUCCESS;
+        }
+
+        // Run selection for each registered engine and collect results.
+        // For kernel-level selection, we rank kernels within each engine.
+        // For engine-level selection (RFC §12), we would compare best scores
+        // across engines — that's a future enhancement.
+        d->sortedEngineIds.clear();
+        bool anyApplied = false;
+
+        for(const auto engineId : d->candidateEngineIds)
+        {
+            if(!registry.hasEngine(engineId))
+            {
+                // Engine not in registry — skip (will be handled by fallback)
+                continue;
+            }
+
+            auto result = SelectionEngine::select(engineId, deviceVars, queryVars);
+
+            if(result.applied)
+            {
+                anyApplied = true;
+                // For now, add the engine ID if selection succeeded.
+                // The sorted kernel IDs are stored in the result but we
+                // don't have a place to return them in this API yet.
+                // TODO(RFC-0017): Extend API to return per-engine kernel ranking.
+                d->sortedEngineIds.push_back(engineId);
+
+                UHD_LOG(HIPDNN_SEV_INFO,
+                        "policyFinalize: engine %lld selection applied, %zu kernels ranked",
+                        static_cast<long long>(engineId),
+                        result.sortedKernelIds.size());
+
+                if(result.bestScore.has_value())
+                {
+                    UHD_LOG(HIPDNN_SEV_INFO,
+                            "policyFinalize: engine %lld best kernel=%lld score=%f",
+                            static_cast<long long>(engineId),
+                            static_cast<long long>(*result.bestKernelId),
+                            *result.bestScore);
+                }
+            }
+            else
+            {
+                UHD_LOG(HIPDNN_SEV_WARN,
+                        "policyFinalize: engine %lld selection failed: %s",
+                        static_cast<long long>(engineId),
+                        result.fallbackReason.c_str());
+            }
+        }
+
+        *outApplied = anyApplied ? 1 : 0;
         d->finalized = true;
         return HIPDNN_PLUGIN_STATUS_SUCCESS;
     }
