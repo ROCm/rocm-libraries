@@ -28,7 +28,7 @@
 
 #if HIPBLASLT_ENABLE_MXDATAGENERATOR
 #include <mxDataGen.hpp>
-#include "DataInitializationHelpers.hpp"
+#include <roc/host_validation/adapters/tensilelite/DataInitializationHelpers.hpp>
 #endif
 #include "TensorDataManipulation.hpp"
 #include "Utility.hpp"
@@ -450,11 +450,6 @@ namespace TensileLite
 
 #pragma omp parallel
             {
-                std::random_device                      rd;
-                std::mt19937                            rng(rd());
-                std::uniform_int_distribution<uint32_t> dist(
-                    1, static_cast<uint32_t>(PruneSparseMode::MaxPruneMode) - 1);
-
 #pragma omp for schedule(static)
                 for(size_t loop = 0; loop < loop_count; loop++)
                 {
@@ -466,7 +461,16 @@ namespace TensileLite
                     {
                         uint32_t umode = static_cast<uint32_t>(mode);
                         if(umode == static_cast<uint32_t>(PruneSparseMode::PruneRandom))
-                            umode = dist(rng);
+                        {
+                            const uint64_t randomIndex
+                                = loop * ((pruneDimSize + 3) / 4) + pruneDimIdx / 4;
+                            umode = static_cast<uint32_t>(
+                                roc::host_validation::tensilelite_adapter::indexedUniformInteger(
+                                    1,
+                                    randomIndex,
+                                    1,
+                                    static_cast<int>(PruneSparseMode::MaxPruneMode) - 1));
+                        }
 
                         uint32_t mask_ = pruneMask[umode];
 

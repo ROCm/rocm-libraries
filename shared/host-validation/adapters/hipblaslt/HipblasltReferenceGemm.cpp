@@ -23,24 +23,32 @@
  * SOFTWARE.
  *
  *******************************************************************************/
-#include "cblas_interface.hpp"
+#include <roc/host_validation/adapters/hipblaslt/HipblasltReferenceGemm.hpp>
 #include "datatype_interface.hpp"
 #include "hipblaslt_vector.hpp"
 #include "utility.hpp"
 #include <bitset>
+#include <cblas.h>
 #include <iostream>
 #include <omp.h>
+#include <roc/host_validation/reference_gemm.hpp>
+#include <stdexcept>
 
-CBLAS_TRANSPOSE HIPOperationToCBLASTanspose(hipblasOperation_t trans)
+namespace
 {
-    switch(trans)
+    CBLAS_TRANSPOSE toCblasTranspose(hipblasOperation_t transpose)
     {
-    case HIPBLAS_OP_N:
-        return CblasNoTrans;
-    case HIPBLAS_OP_T:
-        return CblasTrans;
-    case HIPBLAS_OP_C:
-        return CblasConjTrans;
+        switch(transpose)
+        {
+        case HIPBLAS_OP_N:
+            return CblasNoTrans;
+        case HIPBLAS_OP_T:
+            return CblasTrans;
+        case HIPBLAS_OP_C:
+            return CblasConjTrans;
+        }
+
+        throw std::invalid_argument("Unsupported hipBLAS operation.");
     }
 }
 
@@ -1205,189 +1213,8 @@ void cast_mul_with_Tci(customVector<TcCast>& dst,
     }
 }
 
-// legacy BLAS implementation
-// gemm for dim and leading dims <= 600 so no int64 multiplies
-template <typename T>
-void small_gemm(hipblasOperation_t transA,
-                hipblasOperation_t transB,
-                int                m,
-                int                n,
-                int                k,
-                T                  alpha,
-                const T*           A,
-                int                lda,
-                const T*           B,
-                int                ldb,
-                T                  beta,
-                T*                 C,
-                int                ldc)
-{
-    bool notTA = (transA == HIPBLAS_OP_N);
-    bool notTB = (transB == HIPBLAS_OP_N);
-
-    if(!m or !n or (alpha == 0.0 or !k) && (beta == 1.0))
-        return;
-
-    if(alpha == 0.0)
-    {
-        if(beta == 0.0)
-        {
-#ifdef _OPENMP
-#pragma omp parallel for
-#endif
-            for(int j = 0; j < n; ++j)
-            {
-                for(int i = 0; i < m; ++i)
-                {
-                    C[j * ldc + i] = 0.0;
-                }
-            }
-        }
-        else
-        {
-#ifdef _OPENMP
-#pragma omp parallel for
-#endif
-            for(int j = 0; j < n; ++j)
-            {
-                for(int i = 0; i < m; ++i)
-                {
-                    C[j * ldc + i] *= beta;
-                }
-            }
-        }
-        return;
-    }
-
-    if(notTB)
-    {
-        if(notTA)
-        {
-            // C = alpha*A*B + beta*C.
-#ifdef _OPENMP
-#pragma omp parallel for
-#endif
-            for(int j = 0; j < n; ++j)
-            {
-                if(beta == 0.0)
-                {
-                    for(int i = 0; i < m; ++i)
-                    {
-                        C[j * ldc + i] = 0.0;
-                    }
-                }
-                else if(beta != 1.0)
-                {
-                    for(int i = 0; i < m; ++i)
-                    {
-                        C[j * ldc + i] *= beta;
-                    }
-                }
-
-                for(int l = 0; l < k; ++l)
-                {
-                    float temp = alpha * B[j * ldb + l];
-                    for(int i = 0; i < m; ++i)
-                    {
-                        C[j * ldc + i] += temp * A[l * lda + i];
-                    }
-                }
-            }
-        }
-        else
-        {
-            // C = alpha*A**T*B + beta*C
-#ifdef _OPENMP
-#pragma omp parallel for
-#endif
-            for(int j = 0; j < n; ++j)
-            {
-                for(int i = 0; i < m; ++i)
-                {
-                    float temp = 0.0f;
-                    for(int l = 0; l < k; ++l)
-                    {
-                        temp += A[i * lda + l] * B[j * ldb + l];
-                    }
-                    if(beta == 0.0f)
-                    {
-                        C[j * ldc + i] = alpha * temp;
-                    }
-                    else
-                    {
-                        C[j * ldc + i] = alpha * temp + beta * C[j * ldc + i];
-                    }
-                }
-            }
-        }
-    }
-    else // TB
-    {
-        if(notTA)
-        {
-            //  C = alpha*A*B**T + beta*C
-#ifdef _OPENMP
-#pragma omp parallel for
-#endif
-            for(int j = 0; j < n; ++j)
-            {
-                if(beta == 0.0)
-                {
-                    for(int i = 0; i < m; ++i)
-                    {
-                        C[j * ldc + i] = 0.0;
-                    }
-                }
-                else if(beta != 1.0)
-                {
-                    for(int i = 0; i < m; ++i)
-                    {
-                        C[j * ldc + i] = beta * C[j * ldc + i];
-                    }
-                }
-
-                for(int l = 0; l < k; ++l)
-                {
-                    float temp = alpha * B[l * ldb + j];
-                    for(int i = 0; i < m; ++i)
-                    {
-                        C[j * ldc + i] += temp * A[l * lda + i];
-                    }
-                }
-            }
-        }
-        else
-        {
-            // C = alpha*A**T*B**T + beta*C
-#ifdef _OPENMP
-#pragma omp parallel for
-#endif
-            for(int j = 0; j < n; ++j)
-            {
-                for(int i = 0; i < m; ++i)
-                {
-                    float temp = 0.0;
-                    for(int l = 0; l < k; ++l)
-                    {
-                        temp += A[i * lda + l] * B[l * ldb + j];
-                    }
-
-                    if(beta == 0.0)
-                    {
-                        C[j * ldc + i] = alpha * temp;
-                    }
-                    else
-                    {
-                        C[j * ldc + i] = alpha * temp + beta * C[j * ldc + i];
-                    }
-                }
-            }
-        }
-    }
-}
-
 template <typename Tc>
-void cblas_gemm(hipblasOperation_t       transA,
+void hipblaslt_reference_gemm(hipblasOperation_t       transA,
                 hipblasOperation_t       transB,
                 int64_t                  m,
                 int64_t                  n,
@@ -1417,8 +1244,7 @@ void cblas_gemm(hipblasOperation_t       transA,
                 bool                     isScaleBMXFormat)
 {
     using IntTcCast = std::conditional_t<std::is_same<Tc, int32_t>::value, double, Tc>;
-    // cblas does not support hipblasLtHalf, so convert to higher precision float
-    // This will give more precise result which is acceptable for testing
+    // Promote half accumulation to float for the host reference.
     using HalfTcCast = std::conditional_t<std::is_same<Tc, hipblasLtHalf>::value, float, Tc>;
     using TcCast     = std::conditional_t<std::is_same<Tc, int32_t>::value, IntTcCast, HalfTcCast>;
 
@@ -1453,11 +1279,21 @@ void cblas_gemm(hipblasOperation_t       transA,
         scaleA_Tc.initialize(scaleAVec_size);
         cast_mul(scaleA_Tc, (Tc*)scaleAVec, scaleAVec_size);
     }
+    else
+    {
+        scaleA_Tc.initialize(1);
+        scaleA_Tc[0] = TcCast(1);
+    }
 
     if(scaleBVec)
     {
         scaleB_Tc.initialize(scaleBVec_size);
         cast_mul(scaleB_Tc, (Tc*)scaleBVec, scaleBVec_size);
+    }
+    else
+    {
+        scaleB_Tc.initialize(1);
+        scaleB_Tc[0] = TcCast(1);
     }
 
     A_Tc.initialize(sizeA);
@@ -1533,69 +1369,104 @@ void cblas_gemm(hipblasOperation_t       transA,
     TcCast alphaCast = (TcCast)alpha;
     TcCast betaCast  = (TcCast)beta;
 
-    // just directly cast, since transA, transB are integers in the enum
-    //printf("transA: hipblaslt =%d, cblas=%d\n", transA, HIPOperationToCBLASTanspose(transA) );
-    if constexpr(std::is_same<TcCast, float>::value)
+    const ptrdiff_t aRowStride = transA == HIPBLAS_OP_N ? 1 : lda;
+    const ptrdiff_t aColumnStride = transA == HIPBLAS_OP_N ? lda : 1;
+    const ptrdiff_t bRowStride = transB == HIPBLAS_OP_N ? 1 : ldb;
+    const ptrdiff_t bColumnStride = transB == HIPBLAS_OP_N ? ldb : 1;
+    const TcCast* aValues = A_Tc;
+    const TcCast* bValues = B_Tc;
+    TcCast* cValues = C_Tc;
+
+    static constexpr int64_t blasThreshold = 600;
+    const bool useBlas = m > blasThreshold || n > blasThreshold || k > blasThreshold
+                         || lda > blasThreshold || ldb > blasThreshold || ldc > blasThreshold;
+
+    if(useBlas)
     {
-        static constexpr int64_t small = 600; // seeing random NaNs with blis on some small sizes
-        if(m > small || n > small || k > small || lda > small || ldb > small || ldc > small)
+        if constexpr(std::is_same_v<TcCast, float>)
         {
             cblas_sgemm(CblasColMajor,
-                        HIPOperationToCBLASTanspose(transA),
-                        HIPOperationToCBLASTanspose(transB),
+                        toCblasTranspose(transA),
+                        toCblasTranspose(transB),
                         m,
                         n,
                         k,
                         alphaCast,
-                        A_Tc,
+                        aValues,
                         lda,
-                        B_Tc,
+                        bValues,
                         ldb,
                         betaCast,
-                        C_Tc,
+                        cValues,
                         ldc);
         }
-        else
-        {
-            small_gemm<float>(
-                transA, transB, m, n, k, alphaCast, A_Tc, lda, B_Tc, ldb, betaCast, C_Tc, ldc);
-        }
-    }
-    else if constexpr(std::is_same<TcCast, double>::value)
-    {
-        static constexpr int64_t small = 600; // seeing random NaNs with blis on some small sizes
-        if(m > small || n > small || k > small || lda > small || ldb > small || ldc > small)
+        else if constexpr(std::is_same_v<TcCast, double>)
         {
             cblas_dgemm(CblasColMajor,
-                        HIPOperationToCBLASTanspose(transA),
-                        HIPOperationToCBLASTanspose(transB),
+                        toCblasTranspose(transA),
+                        toCblasTranspose(transB),
                         m,
                         n,
                         k,
                         alphaCast,
-                        A_Tc,
+                        aValues,
                         lda,
-                        B_Tc,
+                        bValues,
                         ldb,
                         betaCast,
-                        C_Tc,
+                        cValues,
                         ldc);
         }
-        else
+        else if constexpr(std::is_same_v<TcCast, std::complex<float>>)
         {
-            small_gemm<double>(
-                transA, transB, m, n, k, alphaCast, A_Tc, lda, B_Tc, ldb, betaCast, C_Tc, ldc);
+            cblas_cgemm(CblasColMajor,
+                        toCblasTranspose(transA),
+                        toCblasTranspose(transB),
+                        m,
+                        n,
+                        k,
+                        &alphaCast,
+                        aValues,
+                        lda,
+                        bValues,
+                        ldb,
+                        &betaCast,
+                        cValues,
+                        ldc);
+        }
+        else if constexpr(std::is_same_v<TcCast, std::complex<double>>)
+        {
+            cblas_zgemm(CblasColMajor,
+                        toCblasTranspose(transA),
+                        toCblasTranspose(transB),
+                        m,
+                        n,
+                        k,
+                        &alphaCast,
+                        aValues,
+                        lda,
+                        bValues,
+                        ldb,
+                        &betaCast,
+                        cValues,
+                        ldc);
         }
     }
-     else if constexpr(std::is_same<TcCast, std::complex<float>>::value)
+    else
     {
-        cblas_cgemm(CblasColMajor, HIPOperationToCBLASTanspose(transA), HIPOperationToCBLASTanspose(transB),
-                    m, n, k, &alphaCast, A_Tc, lda, B_Tc, ldb, &betaCast, C_Tc, ldc);
-    }
-    else if constexpr(std::is_same<TcCast, std::complex<double>>::value)
-    {
-        cblas_zgemm(CblasColMajor, HIPOperationToCBLASTanspose(transA), HIPOperationToCBLASTanspose(transB),
-                    m, n, k, &alphaCast, A_Tc, lda, B_Tc, ldb, &betaCast, C_Tc, ldc);
+        roc::host_validation::GemmInvocation<TcCast, TcCast, TcCast, TcCast, TcCast> invocation{
+            roc::host_validation::ConstMatrixView<TcCast>(
+                aValues, size_t(m), size_t(k), aRowStride, aColumnStride),
+            roc::host_validation::ConstMatrixView<TcCast>(
+                bValues, size_t(k), size_t(n), bRowStride, bColumnStride),
+            roc::host_validation::ConstMatrixView<TcCast>(
+                cValues, size_t(m), size_t(n), 1, ldc),
+            roc::host_validation::MatrixView<TcCast>(cValues, size_t(m), size_t(n), 1, ldc)};
+        invocation.alpha      = alphaCast;
+        invocation.beta       = betaCast;
+        invocation.conjugateA = transA == HIPBLAS_OP_C;
+        invocation.conjugateB = transB == HIPBLAS_OP_C;
+        roc::host_validation::referenceGemm(invocation);
     }
 
     if(scaleD != static_cast<Tc>(1))
@@ -1612,7 +1483,7 @@ void cblas_gemm(hipblasOperation_t       transA,
 }
 
 #define CREATEFUNCTION(Tc)                                                  \
-    template void cblas_gemm<Tc>(hipblasOperation_t       transA,           \
+    template void hipblaslt_reference_gemm<Tc>(hipblasOperation_t       transA,           \
                                  hipblasOperation_t       transB,           \
                                  int64_t                  m,                \
                                  int64_t                  n,                \

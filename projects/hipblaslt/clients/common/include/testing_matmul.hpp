@@ -29,7 +29,7 @@
 #include "TensorDataManipulation.hpp"
 #include "allclose.hpp"
 #include "benchmark_timing.hpp"
-#include "cblas_interface.hpp"
+#include <roc/host_validation/adapters/hipblaslt/HipblasltReferenceGemm.hpp>
 #include "efficiency_monitor.hpp"
 #include "flops.hpp"
 #include "hipBuffer.hpp"
@@ -1993,7 +1993,7 @@ void testing_matmul_with_bias(const Arguments& arg,
 
     // These two vectors store the float values of MX data. mxDataGenerator
     // can generate MX data and return the corresponding float values. The float
-    // values can be directly used for CPU verification (cblas_gemm) instead
+    // values can be directly used for CPU verification (hipblaslt_reference_gemm) instead
     // of converting the MX data to float again.
     std::vector<std::vector<float>> refA, refB;
 
@@ -4943,8 +4943,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                 if(epilogue_on[gemmIdx])
                 {
                     // Note: for MX types, pass the reference float instead so there is
-                    //       no need to convert them to float in cblas_gemm
-                    cblas_gemm(
+                    //       no need to convert them to float in hipblaslt_reference_gemm
+                    hipblaslt_reference_gemm(
                         transA,
                         transB,
                         M[gemmIdx],
@@ -5159,7 +5159,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                 else if(batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY) //For General Batch GEMM
                 {
                     // Note: for MX types, pass the reference float instead so there is
-                    //       no need to convert them to float in cblas_gemm
+                    //       no need to convert them to float in hipblaslt_reference_gemm
                     
                     // Added this logic to mimic the rocblas test quick_gemm_batched_bad_arg_f32_r_bad_arg_F
                     // This rocblas test passes alpha, A and B as 0 but beta as non-zero with valid C and D
@@ -5170,7 +5170,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                     // General Batched GEMM happens before the alphaNonZero check.                    
                     void *ptrA = (size_dA[0]) ? hA[batchIdx].as<char>() : nullptr;
                     void *ptrB = (size_dB[0]) ? hB[batchIdx].as<char>() : nullptr;                    
-                    cblas_gemm(transA,
+                    hipblaslt_reference_gemm(transA,
                                transB,
                                M[gemmIdx],
                                N[gemmIdx],
@@ -5202,8 +5202,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                 else
                 {
                     // Note: for MX types, pass the reference float instead so there is
-                    //       no need to convert them to float in cblas_gemm
-                    cblas_gemm(
+                    //       no need to convert them to float in hipblaslt_reference_gemm
+                    hipblaslt_reference_gemm(
                         transA,
                         transB,
                         M[gemmIdx],

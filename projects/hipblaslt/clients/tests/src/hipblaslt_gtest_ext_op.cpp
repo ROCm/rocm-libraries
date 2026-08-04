@@ -11,7 +11,7 @@
 #include <hip/hip_runtime.h>
 #include <hip/hip_runtime_api.h>
 #include <hipblaslt/hipblaslt-ext-op.h>
-#include <hipblaslt_init.hpp>
+#include <roc/host_validation/adapters/hipblaslt/HipblasltDataInitialization.hpp>
 #include <limits>
 #include <numeric>
 #include <vector>
@@ -192,9 +192,12 @@ TEST_P(ExtOpLayerNormTest, layernormSuccess)
     std::vector<float> gamma(n, 1.f);
     std::vector<float> beta(n, 0.f);
 
-    hipblaslt_init_hpl(input, n, m, n);
-    hipblaslt_init_hpl(gamma, n, 1, n);
-    hipblaslt_init_hpl(beta, n, 1, n);
+    roc::host_validation::hipblaslt_adapter::initialize(
+        input.data(), input.size(), hipblaslt_initialization::hpl);
+    roc::host_validation::hipblaslt_adapter::initialize(
+        gamma.data(), gamma.size(), hipblaslt_initialization::hpl);
+    roc::host_validation::hipblaslt_adapter::initialize(
+        beta.data(), beta.size(), hipblaslt_initialization::hpl);
 
     float* gpuOutput{};
     float* gpuMean{};
@@ -284,7 +287,8 @@ void AMaxTest(hipDataType type, hipDataType dtype, std::size_t m, std::size_t n)
     std::vector<Ti> cpuInput(m * n, 0.f);
     std::vector<To> refOutput(1, 0.f);
 
-    hipblaslt_init_hpl(cpuInput, m * n, 1, m * n);
+    roc::host_validation::hipblaslt_adapter::initialize(
+        cpuInput.data(), cpuInput.size(), hipblaslt_initialization::hpl);
 
     hipErr = hipMemcpyHtoD(gpuInput, cpuInput.data(), m * n * inNumBytes);
 
