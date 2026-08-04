@@ -34,7 +34,7 @@ Inputs:
 
 Run-1 canonical contract (two test groups):
   (1) TestAltFormatRejectedHelper — pure extracted predicates, no argparse/filesystem.
-  (2) TestTensileArgparseGuards   — real Tensile(userArgs) entry calls; asserts that
+  (2) TestTensileArgparseGuards   — real tensilelite(userArgs) entry calls; asserts that
       L526/L529 printExit (sys.exit(-1)) fires or does NOT fire for each witness.
 
 CPU-only.  Deterministic.  Add-only.
@@ -149,7 +149,7 @@ class TestTensileArgparseGuards:
         userArgs = self._userArgs([cfg1, cfg2], str(tmp_path / "out"))
 
         with pytest.raises(SystemExit) as exc_info:
-            TM.Tensile(userArgs)
+            TM.tensilelite(userArgs)
 
         assert exc_info.value.code == -1
 
@@ -163,7 +163,7 @@ class TestTensileArgparseGuards:
         userArgs = self._userArgs([cfg1, cfg2, cfg3], str(tmp_path / "out"))
 
         with pytest.raises(SystemExit) as exc_info:
-            TM.Tensile(userArgs)
+            TM.tensilelite(userArgs)
 
         assert exc_info.value.code == -1
 
@@ -178,7 +178,7 @@ class TestTensileArgparseGuards:
                                   alternate_format=True)
 
         with pytest.raises(SystemExit) as exc_info:
-            TM.Tensile(userArgs)
+            TM.tensilelite(userArgs)
 
         assert exc_info.value.code == -1
 
@@ -199,7 +199,7 @@ class TestTensileArgparseGuards:
                                   alternate_format=True)
 
         try:
-            TM.Tensile(userArgs)
+            TM.tensilelite(userArgs)
             # If we somehow return cleanly, guard definitely did not fire.
         except SystemExit as e:
             assert e.code != -1, (
@@ -222,7 +222,7 @@ class TestTensileArgparseGuards:
         userArgs = self._userArgs([cfg1], str(tmp_path / "out"))
 
         try:
-            TM.Tensile(userArgs)
+            TM.tensilelite(userArgs)
         except SystemExit as e:
             assert e.code != -1, (
                 "L529 guard fired for (altFormat=False, n=1) but should not: "

@@ -15,6 +15,10 @@
   list([
   ])
 # ---
+# name: test_load_none_returns_empty
+  list([
+  ])
+# ---
 # name: test_load_null_skips_returns_empty
   list([
   ])

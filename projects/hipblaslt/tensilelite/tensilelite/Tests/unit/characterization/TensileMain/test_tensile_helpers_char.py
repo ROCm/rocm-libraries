@@ -212,7 +212,7 @@ def test_config_and_test_paths():
 ])
 def test_entry_points_call_tensile(monkeypatch, fn, frag):
     calls = []
-    monkeypatch.setattr(M, "Tensile", lambda argv: calls.append(argv))
+    monkeypatch.setattr(M, "tensilelite", lambda argv: calls.append(argv))
     getattr(M, fn)()
     assert len(calls) == 1
     assert frag in calls[0][0]
@@ -222,6 +222,6 @@ def test_entry_points_call_tensile(monkeypatch, fn, frag):
 def test_main_calls_tensile(monkeypatch):
     monkeypatch.setattr(M.sys, "argv", ["prog", "cfg.yaml", "out"])
     calls = []
-    monkeypatch.setattr(M, "Tensile", lambda argv: calls.append(argv))
+    monkeypatch.setattr(M, "tensilelite", lambda argv: calls.append(argv))
     M.main()
     assert calls == [["cfg.yaml", "out"]]

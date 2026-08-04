@@ -46,4 +46,4 @@ for f in glob.glob("%s/*aml"%targetDir):
         testName = "test_" + testName
 
     outfile.write ("def %s(tmpdir):\n" % (testName))
-    outfile.write (' tensilelite.tensilelite([tensilelite.tensilelite.TensileTestPath("%s"), tmpdir.strpath])\n\n' % (f))
+    outfile.write (' Tensile.tensilelite([Tensile.TensileTestPath("%s"), tmpdir.strpath])\n\n' % (f))

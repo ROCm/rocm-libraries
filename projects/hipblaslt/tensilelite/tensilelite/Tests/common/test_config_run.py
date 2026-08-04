@@ -50,7 +50,7 @@ import os
 import py
 import pytest
 
-from tensilelite import Tensile as tensilelite
+from tensilelite import tensilelite
 
 from artifact_helpers import artifact_name_for_config, extract_artifact
 

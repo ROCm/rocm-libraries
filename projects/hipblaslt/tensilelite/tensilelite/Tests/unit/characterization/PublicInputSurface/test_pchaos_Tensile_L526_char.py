@@ -102,7 +102,7 @@ def test_real_entry_l526_true_branch_triggers_system_exit(capsys):
         userArgs = ["--alternate-format"] + configs + [outdir]
 
         with pytest.raises(SystemExit) as exc_info:
-            M.Tensile(userArgs)
+            M.tensilelite(userArgs)
 
         assert exc_info.value.code == -1
         captured = capsys.readouterr()
@@ -121,7 +121,7 @@ def test_real_entry_l526_false_two_configs_passes_guard(capsys):
         userArgs = ["--alternate-format"] + configs + [outdir]
 
         try:
-            M.Tensile(userArgs)
+            M.tensilelite(userArgs)
         except SystemExit as e:
             captured = capsys.readouterr()
             # Must NOT be the L526 message
@@ -142,7 +142,7 @@ def test_real_entry_l529_true_branch_triggers_system_exit(capsys):
         userArgs = configs + [outdir]
 
         with pytest.raises(SystemExit) as exc_info:
-            M.Tensile(userArgs)
+            M.tensilelite(userArgs)
 
         assert exc_info.value.code == -1
         captured = capsys.readouterr()
@@ -161,7 +161,7 @@ def test_real_entry_l529_false_one_config_passes_guard(capsys):
         userArgs = configs + [outdir]
 
         try:
-            M.Tensile(userArgs)
+            M.tensilelite(userArgs)
         except SystemExit as e:
             captured = capsys.readouterr()
             assert "Only 1 config_file is accepted" not in captured.out, (

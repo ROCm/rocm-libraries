@@ -46,7 +46,7 @@ import pytest
 
 pytestmark = pytest.mark.unit
 
-from tensilelite import Tensile as tensilelite
+from tensilelite import tensilelite
 from tensilelite.Common.GlobalParameters import (
     globalParameters,
     restoreDefaultGlobalParameters,

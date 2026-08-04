@@ -350,7 +350,7 @@ def get_user_max_frequency() -> Optional[int]:
     '''
     # Non-interactive guard: when stdin is not a tty (CI, --build-only via
     # pytest, etc.) we cannot prompt.  Returning None is safe because:
-    #   - The caller in Tensile() already handles None/<=0 with a warning and
+    #   - The caller in tensilelite() already handles None/<=0 with a warning and
     #     skips store_max_frequency().
     #   - The downstream consumer (LibraryLogic.read_max_freq) also handles a
     #     missing MAX_FREQ env var gracefully (returns None, caller checks).
@@ -487,10 +487,10 @@ def restore_prob_sol_map(logfile):
 
 
 ################################################################################
-# Tensile
+# tensilelite
 # - below entry points call here
 ################################################################################
-def Tensile(userArgs):
+def tensilelite(userArgs):
     global globalParameters
 
     print1("")
@@ -760,30 +760,30 @@ def TensileTestPath(*args):
 
 # installed "tensile_rocblas_sgemm" command
 def TensileROCBLASSGEMM():
-    Tensile([TensileConfigPath("rocblas_sgemm.yaml"), "."])
+    tensilelite([TensileConfigPath("rocblas_sgemm.yaml"), "."])
 
 
 # installed "tensile_rocblas_dgemm" command
 def TensileROCBLASDGEMM():
-    Tensile([TensileConfigPath("rocblas_dgemm.yaml"), "."])
+    tensilelite([TensileConfigPath("rocblas_dgemm.yaml"), "."])
 
 
 # installed "tensile_rocblas_cgemm" command
 def TensileROCBLASCGEMM():
-    Tensile([TensileConfigPath("rocblas_cgemm.yaml"), "."])
+    tensilelite([TensileConfigPath("rocblas_cgemm.yaml"), "."])
 
 
 # installed "tensile_rocblas_zgemm" command
 def TensileROCBLASZGEMM():
-    Tensile([TensileConfigPath("rocblas_zgemm.yaml"), "."])
+    tensilelite([TensileConfigPath("rocblas_zgemm.yaml"), "."])
 
 
 # installed "tensile_sgemm" command
 def TensileSGEMM5760():
-    Tensile([TensileConfigPath("sgemm_5760.yaml"), "."])
+    tensilelite([TensileConfigPath("sgemm_5760.yaml"), "."])
 
 
 # installed "tensile" command
 def main(argv=None):
-    Tensile(sys.argv[1:] if argv is None else argv)
+    tensilelite(sys.argv[1:] if argv is None else argv)
     return 0

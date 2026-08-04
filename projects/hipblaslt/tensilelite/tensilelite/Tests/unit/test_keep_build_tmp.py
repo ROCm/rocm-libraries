@@ -26,7 +26,7 @@ pytestmark = pytest.mark.unit
 
 from pathlib import Path
 
-from tensilelite import Tensile as tensilelite
+from tensilelite import tensilelite
 
 _CONFIG = Path(__file__).parent / "test_data" / "keep_build_tmp.yaml"
 
