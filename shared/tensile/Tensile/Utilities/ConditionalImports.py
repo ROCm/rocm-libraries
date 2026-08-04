@@ -25,9 +25,6 @@ try:
 except ImportError:
     from yaml import SafeLoader
 
-# Kept for out-of-tree importers of the old name.
-yamlLoader = SafeLoader
-
 try:
     from yaml import CSafeDumper as yamlDumper
 except ImportError:
