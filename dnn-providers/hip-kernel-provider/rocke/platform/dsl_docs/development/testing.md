@@ -95,7 +95,9 @@ to imported standard-library or third-party packages are counted separately and
 skipped because the local rocKE source cannot prove that they exist. The role
 name does not need to match the symbol kind. The check only verifies that a
 normal reference resolves to an implemented symbol. A target that starts with
-`.` uses Sphinx's relative-name search and must match the role's symbol kind.
+`.` is resolved in the current class or module and must match the role's symbol
+kind. An unresolved result can mean that the implementation is missing or that
+the reference needs a fully qualified or locally imported name.
 
 For a JSON report, pass `--format json` and choose a JSON `--output` path. The
 command exits with status 1 when it finds a broken local link.

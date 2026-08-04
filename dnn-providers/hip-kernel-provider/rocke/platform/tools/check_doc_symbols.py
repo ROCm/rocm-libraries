@@ -40,6 +40,7 @@ SPHINX_EXTENSION = r'''"""Temporary MyST extension for the symbol check."""
 import re
 from pathlib import Path
 
+from mdit_py_plugins.myst_role.index import myst_role as _myst_role
 from sphinx import addnodes
 from myst_parser.parsers import sphinx_ as myst_sphinx
 
@@ -59,12 +60,29 @@ def _rst_python_role(state, silent):
         token = state.push("myst_role", "", 0)
         token.meta = {"name": f"py:{match.group('role')}"}
         token.content = match.group("target")
+        token.meta["line_offset"] = state.src.count("\n", 0, state.pos)
     state.pos = match.end()
     return True
 
 
+def _myst_role_with_line(state, silent):
+    start = state.pos
+    matched = _myst_role(state, silent)
+    if matched and not silent:
+        state.tokens[-1].meta["line_offset"] = state.src.count("\n", 0, start)
+    return matched
+
+
 def _create_md_parser(config, renderer):
-    parser = _create_md_parser.original(config, renderer)
+    class ExactLineRenderer(renderer):
+        def render_myst_role(self, token):
+            offset = token.meta.get("line_offset", 0)
+            if offset and token.token is not None and token.token.map:
+                token.token.map = [token.token.map[0] + offset, token.token.map[1]]
+            return super().render_myst_role(token)
+
+    parser = _create_md_parser.original(config, ExactLineRenderer)
+    parser.inline.ruler.at("myst_role", _myst_role_with_line)
     parser.inline.ruler.before(
         "backticks", "rst_python_role", _rst_python_role
     )
@@ -321,7 +339,6 @@ def build_python_index(python_roots: Sequence[Path], display_root: Path) -> Pyth
     """Index Python definitions, imports, and explicit roles in docstrings."""
     symbols: dict[str, str] = {}
     imports: list[ImportRecord] = []
-    imported_aliases: list[tuple[str, str, str]] = []
     exports: dict[str, tuple[str, ...]] = {}
     references: list[DocstringReference] = []
     module_names: set[str] = set()
@@ -352,25 +369,6 @@ def build_python_index(python_roots: Sequence[Path], display_root: Path) -> Pyth
             )
             references.extend(source_references)
             docstrings += source_docstrings
-            for imported_node in ast.walk(tree):
-                if isinstance(imported_node, ast.Import):
-                    for alias in imported_node.names:
-                        binding = alias.asname or alias.name.partition(".")[0]
-                        imported_aliases.append((module, alias.name, binding))
-                elif (
-                    isinstance(imported_node, ast.ImportFrom)
-                    and not imported_node.level
-                    and imported_node.module
-                ):
-                    for alias in imported_node.names:
-                        if alias.name != "*":
-                            imported_aliases.append(
-                                (
-                                    module,
-                                    f"{imported_node.module}.{alias.name}",
-                                    alias.asname or alias.name,
-                                )
-                            )
             for node in tree.body:
                 if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                     symbols[f"{module}.{node.name}"] = "function"
@@ -415,9 +413,6 @@ def build_python_index(python_roots: Sequence[Path], display_root: Path) -> Pyth
     package_roots = frozenset(name.partition(".")[0] for name in module_names)
     external_aliases: dict[str, set[str]] = {}
     local_aliases: dict[str, str] = {}
-    for module, target, alias in imported_aliases:
-        if target.partition(".")[0] not in package_roots:
-            external_aliases.setdefault(module, set()).add(alias)
     local_imports: list[ImportRecord] = []
     for record in imports:
         if record.target.partition(".")[0] in package_roots:
@@ -545,13 +540,6 @@ def check_docstring_references(
         if builtin_kind is not None:
             found_kinds.add(builtin_kind)
         explicitly_relative = reference.target.startswith(".")
-        if explicitly_relative:
-            suffix = reference.target.lstrip(".")
-            found_kinds.update(
-                kind
-                for name, kind in index.symbols.items()
-                if name.endswith(f".{suffix}")
-            )
         if found_kinds and (not explicitly_relative or found_kinds & allowed_kinds):
             continue
 
@@ -559,8 +547,7 @@ def check_docstring_references(
         imported_external = first_component in index.external_aliases.get(
             reference.module, frozenset()
         )
-        standard_library = first_component in sys.stdlib_module_names
-        if not found_kinds and (imported_external or standard_library):
+        if not found_kinds and imported_external:
             external.append(reference)
             continue
 
@@ -706,7 +693,7 @@ def _text_report(
         f"external docstring references skipped: {len(external_references)}",
         f"broken Markdown references: {markdown_broken}",
         f"broken Python docstring references: {len(docstring_broken)}",
-        f"docstring targets not found: {len(docstring_broken) - role_mismatches}",
+        f"docstring targets unresolved: {len(docstring_broken) - role_mismatches}",
         f"docstring role mismatches: {role_mismatches}",
         f"broken local references: {len(broken)}",
     ]
@@ -752,7 +739,7 @@ def _json_report(
         "markdown_reference_count": markdown_references,
         "python_docstring_reference_count": len(index.references),
         "python_docstring_role_mismatches": role_mismatches,
-        "python_docstring_targets_not_found": len(docstring_broken) - role_mismatches,
+        "python_docstring_targets_unresolved": len(docstring_broken) - role_mismatches,
         "python_docstrings": index.docstrings,
         "python_files": index.python_files,
     }

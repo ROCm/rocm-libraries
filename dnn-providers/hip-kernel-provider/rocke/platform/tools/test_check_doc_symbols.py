@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
 import sys
@@ -198,11 +199,80 @@ class CheckDocSymbolsTest(unittest.TestCase):
             [("class", ".available", ("function",))],
         )
 
+    def test_relative_reference_does_not_resolve_unrelated_suffix(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            package = root / "pkg"
+            package.mkdir()
+            (package / "__init__.py").write_text("", encoding="utf-8")
+            (package / "a.py").write_text(
+                "def helper():\n    return None\n", encoding="utf-8"
+            )
+            (package / "b.py").write_text(
+                '"""This module uses :func:`.helper`."""\n', encoding="utf-8"
+            )
+
+            index = build_python_index([root], root)
+            broken, external = check_docstring_references(index)
+
+        self.assertEqual(external, [])
+        self.assertEqual(
+            [(item.role, item.target, item.found_kinds) for item in broken],
+            [("func", ".helper", ())],
+        )
+
+    def test_function_local_external_import_does_not_skip_module_reference(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            package = root / "pkg"
+            package.mkdir()
+            (package / "__init__.py").write_text("", encoding="utf-8")
+            (package / "mod.py").write_text(
+                '"""This module uses :class:`np.DoesNotExist`."""\n\n'
+                "def load_numpy():\n"
+                "    import numpy as np\n"
+                "    return np\n",
+                encoding="utf-8",
+            )
+
+            index = build_python_index([root], root)
+            broken, external = check_docstring_references(index)
+
+        self.assertEqual(external, [])
+        self.assertEqual(
+            [(item.role, item.target, item.found_kinds) for item in broken],
+            [("class", "np.DoesNotExist", ())],
+        )
+
+    def test_unimported_standard_library_reference_is_not_skipped(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            package = root / "pkg"
+            package.mkdir()
+            (package / "__init__.py").write_text(
+                '"""This package uses :class:`pathlib.Path`."""\n',
+                encoding="utf-8",
+            )
+
+            index = build_python_index([root], root)
+            broken, external = check_docstring_references(index)
+
+        self.assertEqual(external, [])
+        self.assertEqual(
+            [(item.role, item.target, item.found_kinds) for item in broken],
+            [("class", "pathlib.Path", ())],
+        )
+
 
 @unittest.skipUnless(shutil.which("uvx"), "uvx is required for CLI integration tests")
 class CheckDocSymbolsCliTest(unittest.TestCase):
     def _run_checker(
-        self, reference: str
+        self,
+        reference: str,
+        markdown_target: str = "pkg.available",
+        report_format: str = "text",
     ) -> tuple[subprocess.CompletedProcess[str], str]:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -214,7 +284,9 @@ class CheckDocSymbolsCliTest(unittest.TestCase):
             (docs_root / "guide.md").write_text(
                 "# Guide\n\n"
                 "{py:func}`pkg.available`\n"
-                ":func:`pkg.available`\n"
+                "\n"
+                "* A multiline item starts here and continues\n"
+                f"  with :func:`{markdown_target}` on this line.\n"
                 "``:func:`pkg.literal` ``\n"
                 "````markdown\n"
                 "```\n"
@@ -241,6 +313,8 @@ class CheckDocSymbolsCliTest(unittest.TestCase):
                     str(root / "work"),
                     "--output",
                     str(report_path),
+                    "--format",
+                    report_format,
                 ],
                 capture_output=True,
                 check=False,
@@ -275,6 +349,28 @@ class CheckDocSymbolsCliTest(unittest.TestCase):
             "target 'pkg.missing' (docstring)",
             report,
         )
+
+    def test_cli_reports_markdown_role_on_its_exact_line(self) -> None:
+        result, report = self._run_checker(
+            "pkg.available", markdown_target="pkg.missing"
+        )
+
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("Markdown symbol references: 2", report)
+        self.assertIn("broken Markdown references: 1", report)
+        self.assertIn(
+            "docs/guide.md:6: error: unresolved local py:func "
+            "target 'pkg.missing' (markdown)",
+            report,
+        )
+
+    def test_cli_json_calls_strict_failures_unresolved(self) -> None:
+        result, report = self._run_checker("pkg.missing", report_format="json")
+
+        self.assertEqual(result.returncode, 1, result.stderr)
+        payload = json.loads(report)
+        self.assertEqual(payload["python_docstring_targets_unresolved"], 1)
+        self.assertNotIn("python_docstring_targets_not_found", payload)
 
 
 if __name__ == "__main__":
