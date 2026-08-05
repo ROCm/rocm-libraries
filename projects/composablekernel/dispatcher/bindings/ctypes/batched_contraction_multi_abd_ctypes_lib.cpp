@@ -118,7 +118,7 @@ bool g_initialized = false;
 extern "C" {
 
 /**
- * Initialize the library. Registry-bypass path — just flips the ready flag.
+ * Initialize the library. Registry-bypass path -- just flips the ready flag.
  * Kept for ABI symmetry with the regular GEMM ctypes lib.
  */
 int dispatcher_initialize()

@@ -9,7 +9,7 @@
 #include <stdexcept>
 #include <numeric>
 
-// Local KernelTraits — kept here to avoid touching tile_engine/ops/common/utils.hpp
+// Local KernelTraits -- kept here to avoid touching tile_engine/ops/common/utils.hpp
 // (shared-utils changes were the root cause of the revert in PR #9759).
 struct ContractionMultiABDKernelTraits
 {
