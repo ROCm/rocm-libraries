@@ -3,6 +3,7 @@
 
 #include "TreeDataAdapter.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <fstream>
 
@@ -80,6 +81,23 @@ std::unique_ptr<TreeDataAdapter>
     const double baseScore = model->base_score();
     const double learningRate = model->learning_rate();
 
+    // Extract training arches (RFC 0019 §9.2)
+    std::vector<std::string> trainingArches;
+    if(model->training_arches() != nullptr)
+    {
+        for(const auto* arch : *model->training_arches())
+        {
+            if(arch != nullptr)
+            {
+                trainingArches.emplace_back(arch->str());
+            }
+        }
+    }
+
+    // Extract model version (RFC 0019 §13)
+    const std::string modelVersion =
+        model->model_version() != nullptr ? model->model_version()->str() : "";
+
     // Copy buffer to owned storage
     std::vector<uint8_t> ownedBuffer(buffer, buffer + size);
 
@@ -90,7 +108,9 @@ std::unique_ptr<TreeDataAdapter>
                                                                  modelHash,
                                                                  numFeatures,
                                                                  baseScore,
-                                                                 learningRate));
+                                                                 learningRate,
+                                                                 std::move(trainingArches),
+                                                                 modelVersion));
 }
 
 TreeDataAdapter::TreeDataAdapter(std::vector<uint8_t> ownedBuffer,
@@ -98,14 +118,18 @@ TreeDataAdapter::TreeDataAdapter(std::vector<uint8_t> ownedBuffer,
                                   std::string featuresHash,
                                   size_t numFeatures,
                                   double baseScore,
-                                  double learningRate)
+                                  double learningRate,
+                                  std::vector<std::string> trainingArches,
+                                  std::string modelVersion)
     : _ownedBuffer(std::move(ownedBuffer)),
       _model(model),
       _featuresHash(std::move(featuresHash)),
       _numFeatures(numFeatures),
       _treeCount(model->trees() != nullptr ? model->trees()->size() : 0),
       _baseScore(baseScore),
-      _learningRate(learningRate)
+      _learningRate(learningRate),
+      _trainingArches(std::move(trainingArches)),
+      _modelVersion(std::move(modelVersion))
 {
 }
 
@@ -204,6 +228,18 @@ double TreeDataAdapter::evaluateTree(const fb::GbdtTree* tree,
     }
 
     return 0.0;
+}
+
+bool TreeDataAdapter::isTrainedForArch(const std::string& arch) const
+{
+    // If no training arches specified, assume the model works for all arches
+    if(_trainingArches.empty())
+    {
+        return true;
+    }
+
+    // Check if the given arch is in the training set
+    return std::find(_trainingArches.begin(), _trainingArches.end(), arch) != _trainingArches.end();
 }
 
 } // namespace hipdnn_backend::heuristics::uhd

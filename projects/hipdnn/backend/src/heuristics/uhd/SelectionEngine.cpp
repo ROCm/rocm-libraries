@@ -20,17 +20,24 @@ SelectionResult SelectionEngine::select(int64_t engineId,
     if(!engineOpt.has_value())
     {
         result.fallbackReason = "engine not found in registry";
+        result.trace.fallbackReason = result.fallbackReason;
         return result;
     }
 
     const EngineEntry& engine = engineOpt->get();
     const UhdConfig& cfg = engine.uhdConfig;
 
+    // Populate trace with UHD config (RFC 0019 §13)
+    result.trace.uhdId = cfg.uhdId;
+    result.trace.adapterType = cfg.adapterType;
+    result.trace.featuresHashConfig = cfg.featuresHash;
+
     // No candidates? Nothing to select.
     if(engine.candidates.empty())
     {
         result.applied = true;
         result.fallbackReason = "no candidates";
+        result.trace.fallbackReason = result.fallbackReason;
         return result;
     }
 
@@ -41,16 +48,37 @@ SelectionResult SelectionEngine::select(int64_t engineId,
         return applyStaticOrdering(engine.candidates, "adapter creation failed");
     }
 
+    // Populate trace with adapter info (RFC 0019 §9.2, §13)
+    result.trace.featuresHashModel = adapter->getFeaturesHash();
+    result.trace.modelVersion = adapter->getModelVersion();
+    result.trace.trainingArches = adapter->getTrainingArches();
+
+    // Check if device arch was seen during training (RFC 0019 §9.2)
+    auto archIt = deviceVars.find("architecture_name");
+    if(archIt != deviceVars.end())
+    {
+        if(const auto* archStr = std::get_if<std::string>(&archIt->second))
+        {
+            result.trace.deviceArch = *archStr;
+            result.trace.archWasTrained = adapter->isTrainedForArch(*archStr);
+        }
+    }
+
     // Build feature extractor from signature
-    FeatureExtractor extractor(cfg.featuresSignature);
+    const FeatureExtractor extractor(cfg.featuresSignature);
 
     // Validate features hash if adapter provides one
     const std::string& adapterHash = adapter->getFeaturesHash();
     if(!adapterHash.empty() && !cfg.featuresHash.empty() && adapterHash != cfg.featuresHash)
     {
-        return applyStaticOrdering(engine.candidates,
-                                   "features hash mismatch: adapter=" + adapterHash +
-                                       " config=" + cfg.featuresHash);
+        result.trace.featuresHashMatch = false;
+        auto fallbackResult =
+            applyStaticOrdering(engine.candidates,
+                                "features hash mismatch: adapter=" + adapterHash +
+                                    " config=" + cfg.featuresHash);
+        fallbackResult.trace = result.trace;
+        fallbackResult.trace.fallbackReason = fallbackResult.fallbackReason;
+        return fallbackResult;
     }
 
     // Build base context with device and query vars
@@ -101,7 +129,10 @@ SelectionResult SelectionEngine::select(int64_t engineId,
 
     if(!anyValid)
     {
-        return applyStaticOrdering(engine.candidates, "all candidates failed scoring");
+        auto fallbackResult = applyStaticOrdering(engine.candidates, "all candidates failed scoring");
+        fallbackResult.trace = result.trace;
+        fallbackResult.trace.fallbackReason = fallbackResult.fallbackReason;
+        return fallbackResult;
     }
 
     // Sort by objective (max or min) with tie-breaking
@@ -125,9 +156,12 @@ SelectionResult SelectionEngine::select(int64_t engineId,
         // Apply inverse transform if configured (for cross-engine comparison)
         if(cfg.scoreCalibrated && !cfg.scoreTransform.empty())
         {
-            result.bestScore = ScoreTransform::applyInverse(*result.bestScore, cfg.scoreTransform);
+            result.bestScore = score_transform::applyInverse(*result.bestScore, cfg.scoreTransform);
         }
     }
+
+    // Mark trace as using model (RFC 0019 §13)
+    result.trace.usedModel = true;
 
     return result;
 }

@@ -72,13 +72,19 @@ std::string sha256(const std::string& input)
             w[i] = gamma1(w[i - 2]) + w[i - 7] + gamma0(w[i - 15]) + w[i - 16];
         }
 
-        auto a = h[0], b = h[1], c = h[2], d = h[3];
-        auto e = h[4], f = h[5], g = h[6], hh = h[7];
+        auto a = h[0];
+        auto b = h[1];
+        auto c = h[2];
+        auto d = h[3];
+        auto e = h[4];
+        auto f = h[5];
+        auto g = h[6];
+        auto hh = h[7];
 
         for(size_t i = 0; i < 64; ++i)
         {
-            uint32_t t1 = hh + sigma1(e) + ch(e, f, g) + K[i] + w[i];
-            uint32_t t2 = sigma0(a) + maj(a, b, c);
+            const uint32_t t1 = hh + sigma1(e) + ch(e, f, g) + K[i] + w[i];
+            const uint32_t t2 = sigma0(a) + maj(a, b, c);
             hh = g;
             g = f;
             f = e;

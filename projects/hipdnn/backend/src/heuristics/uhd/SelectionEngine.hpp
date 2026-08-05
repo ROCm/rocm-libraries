@@ -25,6 +25,31 @@ struct ScoredCandidate
     bool scoreValid = true; // false if scoring failed (fallback to priority)
 };
 
+/// @brief Selection trace for observability (RFC 0019 §13).
+///
+/// Contains model provenance, selection path details, and diagnostic information.
+struct SelectionTrace
+{
+    // Model provenance
+    std::string uhdId;
+    std::string modelVersion;
+    std::vector<std::string> trainingArches;
+
+    // Selection path
+    std::string adapterType;          // "tree_data", "static_order", etc.
+    bool usedModel = false;           // true if model scored, false if fallback
+    std::string fallbackReason;       // if usedModel==false, why
+
+    // Arch validation (RFC 0019 §9.2)
+    bool archWasTrained = true;       // false if device arch not in training set
+    std::string deviceArch;           // the device arch being checked
+
+    // Feature contract
+    std::string featuresHashModel;    // hash from model artifact
+    std::string featuresHashConfig;   // hash from UHD config
+    bool featuresHashMatch = true;
+};
+
 /// @brief Result of the UHD selection process.
 struct SelectionResult
 {
@@ -38,13 +63,16 @@ struct SelectionResult
 
     // Fallback reason (for diagnostics)
     std::string fallbackReason;
+
+    // Observability trace (RFC 0019 §13)
+    SelectionTrace trace;
 };
 
 /// @brief Score transform utilities (RFC §5, §12.3).
 ///
 /// Models may be trained on transformed targets (e.g., log1p(tflops)).
 /// These utilities recover the original scale for cross-engine comparison.
-namespace ScoreTransform
+namespace score_transform
 {
 
 /// Apply inverse transform to recover original scale.
@@ -88,7 +116,7 @@ inline double applyForward(double value, const std::string& transform)
     return value;
 }
 
-} // namespace ScoreTransform
+} // namespace score_transform
 
 /// @brief UHD selection engine.
 ///

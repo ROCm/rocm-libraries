@@ -66,6 +66,15 @@ table GbdtModel {
     training_date: string;      // ISO 8601 timestamp
     num_training_samples: int64;
     training_objective: string; // "regression", "lambdarank", etc.
+
+    /// Model provenance (RFC 0019 §9.2, §13).
+    /// GPU architectures the model was trained on (e.g., ["gfx942", "gfx1100"]).
+    /// Runtime compares $device.arch against this list; warns or degrades to
+    /// static_order if the device arch is unseen during training.
+    training_arches: [string];
+
+    /// Semantic version of the model (e.g., "1.0.0").
+    model_version: string;
 }
 
 root_type GbdtModel;

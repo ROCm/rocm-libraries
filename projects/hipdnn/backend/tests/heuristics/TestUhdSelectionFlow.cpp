@@ -25,10 +25,8 @@ using hipdnn_backend::heuristics::uhd::EngineRegistry;
 using hipdnn_backend::heuristics::uhd::FeatureExtractionContext;
 using hipdnn_backend::heuristics::uhd::KernelCandidate;
 using hipdnn_backend::heuristics::uhd::SelectionEngine;
-using hipdnn_backend::heuristics::uhd::SelectionResult;
-using hipdnn_backend::heuristics::uhd::UhdConfig;
 
-namespace ScoreXform = hipdnn_backend::heuristics::uhd::ScoreTransform;
+namespace score_xform = hipdnn_backend::heuristics::uhd::score_transform;
 
 namespace
 {
@@ -213,23 +211,23 @@ TEST_F(TestUhdSelectionFlow, ScoreTransformLog1pInverseApplied)
 {
     // log1p(x) inverse is expm1(x)
     const double rawScore = 2.0;
-    const double transformed = ScoreXform::applyInverse(rawScore, "log1p");
+    const double transformed = score_xform::applyInverse(rawScore, "log1p");
     EXPECT_NEAR(transformed, std::expm1(2.0), 1e-10);
 }
 
 TEST_F(TestUhdSelectionFlow, ScoreTransformLogInverseApplied)
 {
     const double rawScore = 2.0;
-    const double transformed = ScoreXform::applyInverse(rawScore, "log");
+    const double transformed = score_xform::applyInverse(rawScore, "log");
     EXPECT_NEAR(transformed, std::exp(2.0), 1e-10);
 }
 
 TEST_F(TestUhdSelectionFlow, ScoreTransformIdentityPassthrough)
 {
     const double rawScore = 42.0;
-    EXPECT_EQ(ScoreXform::applyInverse(rawScore, "identity"), 42.0);
-    EXPECT_EQ(ScoreXform::applyInverse(rawScore, ""), 42.0);
-    EXPECT_EQ(ScoreXform::applyInverse(rawScore, "unknown"), 42.0);
+    EXPECT_EQ(score_xform::applyInverse(rawScore, "identity"), 42.0);
+    EXPECT_EQ(score_xform::applyInverse(rawScore, ""), 42.0);
+    EXPECT_EQ(score_xform::applyInverse(rawScore, "unknown"), 42.0);
 }
 
 TEST_F(TestUhdSelectionFlow, ScoreTransformRoundTrip)
@@ -237,13 +235,13 @@ TEST_F(TestUhdSelectionFlow, ScoreTransformRoundTrip)
     const double original = 100.0;
 
     // log1p round-trip
-    const double log1pForward = ScoreXform::applyForward(original, "log1p");
-    const double log1pBack = ScoreXform::applyInverse(log1pForward, "log1p");
+    const double log1pForward = score_xform::applyForward(original, "log1p");
+    const double log1pBack = score_xform::applyInverse(log1pForward, "log1p");
     EXPECT_NEAR(log1pBack, original, 1e-10);
 
     // sqrt round-trip
-    const double sqrtForward = ScoreXform::applyForward(original, "sqrt");
-    const double sqrtBack = ScoreXform::applyInverse(sqrtForward, "sqrt");
+    const double sqrtForward = score_xform::applyForward(original, "sqrt");
+    const double sqrtBack = score_xform::applyInverse(sqrtForward, "sqrt");
     EXPECT_NEAR(sqrtBack, original, 1e-10);
 }
 
@@ -506,8 +504,8 @@ TEST_F(TestUhdSelectionFlow, CalibratedScoreAppliesTransform)
     // StaticOrderAdapter score = -weight * priority = -1e10 * 5 = -5e10
     // With log1p transform and scoreCalibrated=true, the inverse (expm1) is applied
     // expm1(-5e10) = e^(-5e10) - 1 ≈ -1 (extremely close to -1)
-    double rawScore = -5e10;
-    double expectedTransformed = std::expm1(rawScore);
+    const double rawScore = -5e10;
+    const double expectedTransformed = std::expm1(rawScore);
     EXPECT_NEAR(*result.bestScore, expectedTransformed, 1e-10);
 }
 
@@ -535,7 +533,7 @@ TEST_F(TestUhdSelectionFlow, UncalibratedScoreNoTransform)
     // StaticOrderAdapter computes: sum(-weight_i * field_i)
     // With 2 fields: weight0=1e10, weight1=1
     // Score = -1e10 * 5 (priority) + -1 * 1 (id) = -5e10 - 1
-    double expectedRawScore = -5e10 - 1;
+    const double expectedRawScore = -5e10 - 1;
     EXPECT_NEAR(*result.bestScore, expectedRawScore, 1e-5);
 }
 
@@ -564,6 +562,7 @@ TEST_F(TestUhdSelectionFlow, LargeCandidateSetPerformance)
 {
     // Test with many candidates to ensure reasonable performance
     std::vector<KernelCandidate> candidates;
+    candidates.reserve(100);
     for(int i = 0; i < 100; ++i)
     {
         candidates.push_back(makeCandidate(i, i % 10)); // priority cycles 0-9
@@ -618,7 +617,7 @@ TEST_F(TestUhdSelectionFlow, SelectionWithEmptyDeviceVars)
     EngineRegistry::instance().registerEngine(entry);
 
     // Empty device vars - should still work since static_order only uses $kernel.*
-    FeatureExtractionContext::ValueMap emptyDeviceVars;
+    const FeatureExtractionContext::ValueMap emptyDeviceVars;
     auto result = SelectionEngine::select(100, emptyDeviceVars, defaultQueryVars());
 
     EXPECT_TRUE(result.applied);
@@ -632,11 +631,226 @@ TEST_F(TestUhdSelectionFlow, SelectionWithEmptyQueryVars)
     EngineRegistry::instance().registerEngine(entry);
 
     // Empty query vars - should still work since static_order only uses $kernel.*
-    FeatureExtractionContext::ValueMap emptyQueryVars;
+    const FeatureExtractionContext::ValueMap emptyQueryVars;
     auto result = SelectionEngine::select(100, defaultDeviceVars(), emptyQueryVars);
 
     EXPECT_TRUE(result.applied);
     EXPECT_EQ(result.bestKernelId, 1);
+}
+
+// ========== RFC 0019 §13: Selection Trace (Observability) ==========
+
+TEST_F(TestUhdSelectionFlow, TraceContainsUhdId)
+{
+    auto k1 = makeCandidate(1, 5);
+    auto entry = createStaticOrderEngine(100, {k1});
+    entry.uhdConfig.uhdId = "test-uhd-id-12345";
+    EngineRegistry::instance().registerEngine(entry);
+
+    auto result = SelectionEngine::select(100, defaultDeviceVars(), defaultQueryVars());
+
+    EXPECT_TRUE(result.applied);
+    EXPECT_EQ(result.trace.uhdId, "test-uhd-id-12345");
+}
+
+TEST_F(TestUhdSelectionFlow, TraceContainsAdapterType)
+{
+    auto k1 = makeCandidate(1, 5);
+    auto entry = createStaticOrderEngine(100, {k1});
+    EngineRegistry::instance().registerEngine(entry);
+
+    auto result = SelectionEngine::select(100, defaultDeviceVars(), defaultQueryVars());
+
+    EXPECT_TRUE(result.applied);
+    EXPECT_EQ(result.trace.adapterType, "static_order");
+}
+
+TEST_F(TestUhdSelectionFlow, TraceMarksUsedModelOnSuccess)
+{
+    auto k1 = makeCandidate(1, 5);
+    auto entry = createStaticOrderEngine(100, {k1});
+    EngineRegistry::instance().registerEngine(entry);
+
+    auto result = SelectionEngine::select(100, defaultDeviceVars(), defaultQueryVars());
+
+    EXPECT_TRUE(result.applied);
+    EXPECT_TRUE(result.trace.usedModel);
+}
+
+TEST_F(TestUhdSelectionFlow, TraceContainsFeaturesHashFromConfig)
+{
+    auto k1 = makeCandidate(1, 5);
+    auto entry = createStaticOrderEngine(100, {k1});
+    entry.uhdConfig.featuresHash = "sha256:abcdef1234567890";
+    EngineRegistry::instance().registerEngine(entry);
+
+    auto result = SelectionEngine::select(100, defaultDeviceVars(), defaultQueryVars());
+
+    EXPECT_TRUE(result.applied);
+    EXPECT_EQ(result.trace.featuresHashConfig, "sha256:abcdef1234567890");
+}
+
+TEST_F(TestUhdSelectionFlow, TraceRecordsFallbackReasonOnEngineNotFound)
+{
+    // Don't register any engine
+    auto result = SelectionEngine::select(999, defaultDeviceVars(), defaultQueryVars());
+
+    EXPECT_FALSE(result.applied);
+    EXPECT_FALSE(result.trace.fallbackReason.empty());
+    EXPECT_NE(result.trace.fallbackReason.find("not found"), std::string::npos);
+}
+
+TEST_F(TestUhdSelectionFlow, TraceRecordsDeviceArchFromDeviceVars)
+{
+    auto k1 = makeCandidate(1, 5);
+    auto entry = createStaticOrderEngine(100, {k1});
+    EngineRegistry::instance().registerEngine(entry);
+
+    const FeatureExtractionContext::ValueMap deviceVars = {
+        {"architecture_name", std::string("gfx942")},
+        {"cu_count", 120.0},
+    };
+
+    auto result = SelectionEngine::select(100, deviceVars, defaultQueryVars());
+
+    EXPECT_TRUE(result.applied);
+    EXPECT_EQ(result.trace.deviceArch, "gfx942");
+}
+
+TEST_F(TestUhdSelectionFlow, TraceArchWasTrainedDefaultsToTrue)
+{
+    // Static order adapter returns true for isTrainedForArch (no restriction)
+    auto k1 = makeCandidate(1, 5);
+    auto entry = createStaticOrderEngine(100, {k1});
+    EngineRegistry::instance().registerEngine(entry);
+
+    const FeatureExtractionContext::ValueMap deviceVars = {
+        {"architecture_name", std::string("gfx942")},
+        {"cu_count", 120.0},
+    };
+
+    auto result = SelectionEngine::select(100, deviceVars, defaultQueryVars());
+
+    EXPECT_TRUE(result.applied);
+    EXPECT_TRUE(result.trace.archWasTrained);
+}
+
+// ========== KMD Field Validation Tests (RFC §7.3) ==========
+
+TEST_F(TestUhdSelectionFlow, RegisterEngineValidatesKmdFieldCoverage)
+{
+    // Create engine with features_signature referencing $kernel.tile_m
+    // but candidates have no "tile_m" metadata
+    auto k1 = makeCandidate(1, 5, {{"other_field", 128.0}});
+
+    EngineEntry entry;
+    entry.engineId = 100;
+    entry.engineName = "TestEngine";
+    entry.uhdConfig.uhdId = "test-uhd";
+    entry.uhdConfig.adapterType = "static_order";
+    entry.uhdConfig.featuresSignature = {"\"$kernel.tile_m\""};
+    entry.uhdConfig.staticOrderFields = {"priority"};
+    entry.candidates = {k1};
+
+    // Should throw because tile_m is referenced but not in candidate metadata
+    EXPECT_THROW(EngineRegistry::instance().registerEngine(entry), std::invalid_argument);
+}
+
+TEST_F(TestUhdSelectionFlow, RegisterEngineAcceptsValidKmdFields)
+{
+    // Create engine with features_signature referencing $kernel.tile_m
+    // and candidates have "tile_m" in metadata
+    auto k1 = makeCandidate(1, 5, {{"tile_m", 128.0}});
+
+    EngineEntry entry;
+    entry.engineId = 100;
+    entry.engineName = "TestEngine";
+    entry.uhdConfig.uhdId = "test-uhd";
+    entry.uhdConfig.adapterType = "static_order";
+    entry.uhdConfig.featuresSignature = {"\"$kernel.tile_m\""};
+    entry.uhdConfig.staticOrderFields = {"priority"};
+    entry.candidates = {k1};
+
+    // Should not throw
+    EXPECT_NO_THROW(EngineRegistry::instance().registerEngine(entry));
+    EXPECT_TRUE(EngineRegistry::instance().hasEngine(100));
+}
+
+TEST_F(TestUhdSelectionFlow, RegisterEngineAcceptsImplicitPriorityAndIdFields)
+{
+    // $kernel.priority and $kernel.id are implicitly added by SelectionEngine
+    auto k1 = makeCandidate(1, 5); // No explicit metadata
+
+    EngineEntry entry;
+    entry.engineId = 100;
+    entry.engineName = "TestEngine";
+    entry.uhdConfig.uhdId = "test-uhd";
+    entry.uhdConfig.adapterType = "static_order";
+    entry.uhdConfig.featuresSignature = {"\"$kernel.priority\"", "\"$kernel.id\""};
+    entry.uhdConfig.staticOrderFields = {"priority", "id"};
+    entry.candidates = {k1};
+
+    // Should not throw because priority and id are implicit
+    EXPECT_NO_THROW(EngineRegistry::instance().registerEngine(entry));
+}
+
+TEST_F(TestUhdSelectionFlow, RegisterEngineValidationErrorMessageListsMissingFields)
+{
+    auto k1 = makeCandidate(1, 5);
+
+    EngineEntry entry;
+    entry.engineId = 100;
+    entry.engineName = "TestEngine";
+    entry.uhdConfig.uhdId = "test-uhd";
+    entry.uhdConfig.adapterType = "static_order";
+    entry.uhdConfig.featuresSignature = {"\"$kernel.tile_m\"", "\"$kernel.split_k\""};
+    entry.uhdConfig.staticOrderFields = {"priority"};
+    entry.candidates = {k1};
+
+    try
+    {
+        EngineRegistry::instance().registerEngine(entry);
+        FAIL() << "Expected std::invalid_argument";
+    }
+    catch(const std::invalid_argument& e)
+    {
+        const std::string msg = e.what();
+        EXPECT_NE(msg.find("tile_m"), std::string::npos) << "Message should mention tile_m: " << msg;
+        EXPECT_NE(msg.find("split_k"), std::string::npos)
+            << "Message should mention split_k: " << msg;
+    }
+}
+
+TEST_F(TestUhdSelectionFlow, RegisterEngineSkipsValidationWithEmptySignature)
+{
+    // Empty features_signature should skip validation
+    auto k1 = makeCandidate(1, 5);
+
+    EngineEntry entry;
+    entry.engineId = 100;
+    entry.engineName = "TestEngine";
+    entry.uhdConfig.uhdId = "test-uhd";
+    entry.uhdConfig.adapterType = "static_order";
+    entry.uhdConfig.featuresSignature = {}; // Empty
+    entry.uhdConfig.staticOrderFields = {"priority"};
+    entry.candidates = {k1};
+
+    EXPECT_NO_THROW(EngineRegistry::instance().registerEngine(entry));
+}
+
+TEST_F(TestUhdSelectionFlow, RegisterEngineSkipsValidationWithNoCandidates)
+{
+    // No candidates should skip validation (nothing to validate against)
+    EngineEntry entry;
+    entry.engineId = 100;
+    entry.engineName = "TestEngine";
+    entry.uhdConfig.uhdId = "test-uhd";
+    entry.uhdConfig.adapterType = "static_order";
+    entry.uhdConfig.featuresSignature = {"\"$kernel.tile_m\""};
+    entry.uhdConfig.staticOrderFields = {"priority"};
+    entry.candidates = {}; // Empty
+
+    EXPECT_NO_THROW(EngineRegistry::instance().registerEngine(entry));
 }
 
 } // namespace

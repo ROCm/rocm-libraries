@@ -71,6 +71,18 @@ public:
         return *this;
     }
 
+    GbdtModelBuilder& setTrainingArches(const std::vector<std::string>& arches)
+    {
+        _trainingArches = arches;
+        return *this;
+    }
+
+    GbdtModelBuilder& setModelVersion(const std::string& version)
+    {
+        _modelVersion = version;
+        return *this;
+    }
+
     GbdtModelBuilder& addTree(const TreeSpec& tree)
     {
         _trees.push_back(tree);
@@ -99,22 +111,46 @@ public:
         auto treesVector = fbb.CreateVector(treeOffsets);
         auto hashOffset = fbb.CreateString(_featuresHash);
 
+        // Build training_arches vector if provided
+        flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<flatbuffers::String>>>
+            archesVectorOffset = 0;
+        if(!_trainingArches.empty())
+        {
+            std::vector<flatbuffers::Offset<flatbuffers::String>> archOffsets;
+            archOffsets.reserve(_trainingArches.size());
+            for(const auto& arch : _trainingArches)
+            {
+                archOffsets.push_back(fbb.CreateString(arch));
+            }
+            archesVectorOffset = fbb.CreateVector(archOffsets);
+        }
+
+        // Build model_version if provided
+        flatbuffers::Offset<flatbuffers::String> versionOffset = 0;
+        if(!_modelVersion.empty())
+        {
+            versionOffset = fbb.CreateString(_modelVersion);
+        }
+
         fb::GbdtModelBuilder modelBuilder(fbb);
         modelBuilder.add_trees(treesVector);
         modelBuilder.add_num_features(_numFeatures);
         modelBuilder.add_features_hash(hashOffset);
         modelBuilder.add_base_score(_baseScore);
         modelBuilder.add_learning_rate(_learningRate);
+        if(!_trainingArches.empty())
+        {
+            modelBuilder.add_training_arches(archesVectorOffset);
+        }
+        if(!_modelVersion.empty())
+        {
+            modelBuilder.add_model_version(versionOffset);
+        }
 
         auto modelOffset = modelBuilder.Finish();
-        fbb.FinishSizePrefixed(modelOffset, fb::GbdtModelIdentifier());
-
-        // Copy to vector (skip size prefix for standard buffer)
-        // Use FinishSizePrefixed but return buffer without size prefix
         fbb.Finish(modelOffset, fb::GbdtModelIdentifier());
 
-        return std::vector<uint8_t>(fbb.GetBufferPointer(),
-                                    fbb.GetBufferPointer() + fbb.GetSize());
+        return {fbb.GetBufferPointer(), fbb.GetBufferPointer() + fbb.GetSize()};
     }
 
 private:
@@ -123,6 +159,8 @@ private:
     double _baseScore = 0.0;
     double _learningRate = 1.0;
     std::vector<TreeSpec> _trees;
+    std::vector<std::string> _trainingArches;
+    std::string _modelVersion;
 };
 
 /// Create a simple single-node tree (just a leaf).
@@ -350,8 +388,8 @@ TEST_F(TestTreeDataAdapter, ScoreLeafOnlyTree)
     auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
     ASSERT_NE(adapter, nullptr);
 
-    std::vector<double> features = {1.0, 2.0};
-    double score = adapter->score(features);
+    const std::vector<double> features = {1.0, 2.0};
+    const double score = adapter->score(features);
 
     EXPECT_DOUBLE_EQ(score, leafValue);
 }
@@ -368,8 +406,8 @@ TEST_F(TestTreeDataAdapter, ScoreBinarySplitGoesLeft)
     auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
     ASSERT_NE(adapter, nullptr);
 
-    std::vector<double> features = {3.0}; // < 5.0, should go left
-    double score = adapter->score(features);
+    const std::vector<double> features = {3.0}; // < 5.0, should go left
+    const double score = adapter->score(features);
 
     EXPECT_DOUBLE_EQ(score, 10.0);
 }
@@ -386,8 +424,8 @@ TEST_F(TestTreeDataAdapter, ScoreBinarySplitGoesRight)
     auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
     ASSERT_NE(adapter, nullptr);
 
-    std::vector<double> features = {7.0}; // >= 5.0, should go right
-    double score = adapter->score(features);
+    const std::vector<double> features = {7.0}; // >= 5.0, should go right
+    const double score = adapter->score(features);
 
     EXPECT_DOUBLE_EQ(score, 20.0);
 }
@@ -405,8 +443,8 @@ TEST_F(TestTreeDataAdapter, ScoreBinarySplitAtThreshold)
     auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
     ASSERT_NE(adapter, nullptr);
 
-    std::vector<double> features = {5.0}; // == 5.0, should go left with <= comparison
-    double score = adapter->score(features);
+    const std::vector<double> features = {5.0}; // == 5.0, should go left with <= comparison
+    const double score = adapter->score(features);
 
     EXPECT_DOUBLE_EQ(score, 10.0);
 }
@@ -423,8 +461,8 @@ TEST_F(TestTreeDataAdapter, ScoreDeepTreePath1)
     auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
     ASSERT_NE(adapter, nullptr);
 
-    std::vector<double> features = {3.0, 15.0}; // feature[0] < 5.0
-    double score = adapter->score(features);
+    const std::vector<double> features = {3.0, 15.0}; // feature[0] < 5.0
+    const double score = adapter->score(features);
 
     EXPECT_DOUBLE_EQ(score, 1.0);
 }
@@ -441,8 +479,8 @@ TEST_F(TestTreeDataAdapter, ScoreDeepTreePath2)
     auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
     ASSERT_NE(adapter, nullptr);
 
-    std::vector<double> features = {7.0, 5.0}; // feature[0] >= 5.0, feature[1] < 10.0
-    double score = adapter->score(features);
+    const std::vector<double> features = {7.0, 5.0}; // feature[0] >= 5.0, feature[1] < 10.0
+    const double score = adapter->score(features);
 
     EXPECT_DOUBLE_EQ(score, 2.0);
 }
@@ -459,8 +497,8 @@ TEST_F(TestTreeDataAdapter, ScoreDeepTreePath3)
     auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
     ASSERT_NE(adapter, nullptr);
 
-    std::vector<double> features = {7.0, 15.0}; // feature[0] >= 5.0, feature[1] >= 10.0
-    double score = adapter->score(features);
+    const std::vector<double> features = {7.0, 15.0}; // feature[0] >= 5.0, feature[1] >= 10.0
+    const double score = adapter->score(features);
 
     EXPECT_DOUBLE_EQ(score, 3.0);
 }
@@ -482,8 +520,8 @@ TEST_F(TestTreeDataAdapter, ScoreMultipleTreesSumsLeaves)
     auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
     ASSERT_NE(adapter, nullptr);
 
-    std::vector<double> features = {0.0};
-    double score = adapter->score(features);
+    const std::vector<double> features = {0.0};
+    const double score = adapter->score(features);
 
     // score = base_score + learning_rate * sum(leaf_values)
     // score = 0.0 + 1.0 * (1.0 + 2.0 + 3.0) = 6.0
@@ -503,8 +541,8 @@ TEST_F(TestTreeDataAdapter, ScoreAppliesBaseScore)
     auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
     ASSERT_NE(adapter, nullptr);
 
-    std::vector<double> features = {0.0};
-    double score = adapter->score(features);
+    const std::vector<double> features = {0.0};
+    const double score = adapter->score(features);
 
     // score = base_score + learning_rate * sum(leaf_values)
     // score = 100.0 + 1.0 * 5.0 = 105.0
@@ -529,8 +567,8 @@ TEST_F(TestTreeDataAdapter, ScoreAppliesLearningRate)
     auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
     ASSERT_NE(adapter, nullptr);
 
-    std::vector<double> features = {0.0};
-    double score = adapter->score(features);
+    const std::vector<double> features = {0.0};
+    const double score = adapter->score(features);
 
     // score = base_score + sum(leaf_values)
     // score = 0.0 + (10.0 + 20.0) = 30.0
@@ -553,8 +591,8 @@ TEST_F(TestTreeDataAdapter, ScoreWithBaseScoreAndLearningRate)
     auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
     ASSERT_NE(adapter, nullptr);
 
-    std::vector<double> features = {0.0};
-    double score = adapter->score(features);
+    const std::vector<double> features = {0.0};
+    const double score = adapter->score(features);
 
     // score = base_score + sum(leaf_values)
     // score = 50.0 + (10.0 + 20.0) = 80.0
@@ -575,8 +613,8 @@ TEST_F(TestTreeDataAdapter, ScoreWithNaNUsesDefaultLeft)
     auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
     ASSERT_NE(adapter, nullptr);
 
-    std::vector<double> features = {std::numeric_limits<double>::quiet_NaN()};
-    double score = adapter->score(features);
+    const std::vector<double> features = {std::numeric_limits<double>::quiet_NaN()};
+    const double score = adapter->score(features);
 
     // NaN with default_left=true should go left -> 10.0
     EXPECT_DOUBLE_EQ(score, 10.0);
@@ -594,11 +632,11 @@ TEST_F(TestTreeDataAdapter, ScoreWithInfinity)
     ASSERT_NE(adapter, nullptr);
 
     // Positive infinity should go right (>= threshold)
-    std::vector<double> featuresPos = {std::numeric_limits<double>::infinity()};
+    const std::vector<double> featuresPos = {std::numeric_limits<double>::infinity()};
     EXPECT_DOUBLE_EQ(adapter->score(featuresPos), 20.0);
 
     // Negative infinity should go left (< threshold)
-    std::vector<double> featuresNeg = {-std::numeric_limits<double>::infinity()};
+    const std::vector<double> featuresNeg = {-std::numeric_limits<double>::infinity()};
     EXPECT_DOUBLE_EQ(adapter->score(featuresNeg), 10.0);
 }
 
@@ -612,8 +650,8 @@ TEST_F(TestTreeDataAdapter, ScoreWithNoTrees)
     auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
     ASSERT_NE(adapter, nullptr);
 
-    std::vector<double> features = {1.0, 2.0};
-    double score = adapter->score(features);
+    const std::vector<double> features = {1.0, 2.0};
+    const double score = adapter->score(features);
 
     // With no trees, should return base_score
     EXPECT_DOUBLE_EQ(score, 42.0);
@@ -630,8 +668,8 @@ TEST_F(TestTreeDataAdapter, ScoreWithEmptyFeatureVector)
     auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
     ASSERT_NE(adapter, nullptr);
 
-    std::vector<double> features;
-    double score = adapter->score(features);
+    const std::vector<double> features;
+    const double score = adapter->score(features);
 
     // Leaf-only tree should still return leaf value
     EXPECT_DOUBLE_EQ(score, 5.0);
@@ -665,14 +703,14 @@ TEST_F(TestTreeDataAdapter, BatchScoring)
     ASSERT_NE(adapter, nullptr);
 
     // With <= comparison (LightGBM default), values <= 5.0 go left (10.0)
-    std::vector<std::vector<double>> batch = {
+    const std::vector<std::vector<double>> batch = {
         {3.0},  // <= 5.0 -> 10.0
         {7.0},  // > 5.0 -> 20.0
         {5.0},  // <= 5.0 -> 10.0 (at threshold, goes left with <=)
         {-1.0}, // <= 5.0 -> 10.0
     };
 
-    auto scores = adapter->scoreBatch(batch);
+    const auto scores = adapter->scoreBatch(batch);
 
     ASSERT_EQ(scores.size(), 4u);
     EXPECT_DOUBLE_EQ(scores[0], 10.0);
@@ -719,6 +757,318 @@ TEST_F(TestTreeDataAdapter, WorksWithFeatureExtractor)
 
     // Low tile -> low score (1.0)
     EXPECT_DOUBLE_EQ(adapter->score({64.0, 1.0}), 1.0);
+}
+
+// ========== RFC 0019 §9.2: Training arches and model version ==========
+
+TEST_F(TestTreeDataAdapter, ReturnsEmptyTrainingArchesByDefault)
+{
+    auto buffer =
+        GbdtModelBuilder().setNumFeatures(1).setFeaturesHash(TEST_HASH).addTree(makeLeafTree(1.0)).build();
+    auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
+    ASSERT_NE(adapter, nullptr);
+
+    EXPECT_TRUE(adapter->getTrainingArches().empty());
+}
+
+TEST_F(TestTreeDataAdapter, ReturnsTrainingArchesWhenSet)
+{
+    auto buffer = GbdtModelBuilder()
+                      .setNumFeatures(1)
+                      .setFeaturesHash(TEST_HASH)
+                      .setTrainingArches({"gfx942", "gfx1100"})
+                      .addTree(makeLeafTree(1.0))
+                      .build();
+    auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
+    ASSERT_NE(adapter, nullptr);
+
+    auto arches = adapter->getTrainingArches();
+    ASSERT_EQ(arches.size(), 2u);
+    EXPECT_EQ(arches[0], "gfx942");
+    EXPECT_EQ(arches[1], "gfx1100");
+}
+
+TEST_F(TestTreeDataAdapter, IsTrainedForArchReturnsTrueWhenNoArches)
+{
+    auto buffer =
+        GbdtModelBuilder().setNumFeatures(1).setFeaturesHash(TEST_HASH).addTree(makeLeafTree(1.0)).build();
+    auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
+    ASSERT_NE(adapter, nullptr);
+
+    // Should return true for any arch when no restriction
+    EXPECT_TRUE(adapter->isTrainedForArch("gfx942"));
+    EXPECT_TRUE(adapter->isTrainedForArch("gfx950"));
+    EXPECT_TRUE(adapter->isTrainedForArch("anything"));
+}
+
+TEST_F(TestTreeDataAdapter, IsTrainedForArchReturnsTrueWhenArchInList)
+{
+    auto buffer = GbdtModelBuilder()
+                      .setNumFeatures(1)
+                      .setFeaturesHash(TEST_HASH)
+                      .setTrainingArches({"gfx942", "gfx1100"})
+                      .addTree(makeLeafTree(1.0))
+                      .build();
+    auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
+    ASSERT_NE(adapter, nullptr);
+
+    EXPECT_TRUE(adapter->isTrainedForArch("gfx942"));
+    EXPECT_TRUE(adapter->isTrainedForArch("gfx1100"));
+}
+
+TEST_F(TestTreeDataAdapter, IsTrainedForArchReturnsFalseWhenArchNotInList)
+{
+    auto buffer = GbdtModelBuilder()
+                      .setNumFeatures(1)
+                      .setFeaturesHash(TEST_HASH)
+                      .setTrainingArches({"gfx942", "gfx1100"})
+                      .addTree(makeLeafTree(1.0))
+                      .build();
+    auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
+    ASSERT_NE(adapter, nullptr);
+
+    EXPECT_FALSE(adapter->isTrainedForArch("gfx950"));
+    EXPECT_FALSE(adapter->isTrainedForArch("gfx900"));
+}
+
+TEST_F(TestTreeDataAdapter, ReturnsEmptyModelVersionByDefault)
+{
+    auto buffer =
+        GbdtModelBuilder().setNumFeatures(1).setFeaturesHash(TEST_HASH).addTree(makeLeafTree(1.0)).build();
+    auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
+    ASSERT_NE(adapter, nullptr);
+
+    EXPECT_TRUE(adapter->getModelVersion().empty());
+}
+
+TEST_F(TestTreeDataAdapter, ReturnsModelVersionWhenSet)
+{
+    auto buffer = GbdtModelBuilder()
+                      .setNumFeatures(1)
+                      .setFeaturesHash(TEST_HASH)
+                      .setModelVersion("1.2.3")
+                      .addTree(makeLeafTree(1.0))
+                      .build();
+    auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
+    ASSERT_NE(adapter, nullptr);
+
+    EXPECT_EQ(adapter->getModelVersion(), "1.2.3");
+}
+
+// ========== Realistic Multi-Tree Ensemble Test ==========
+// This test simulates the structure lgbm_to_flatbuffer.py would produce:
+// - Multiple trees (typical LightGBM has 100-500)
+// - Each tree uses different feature indices
+// - Leaf values represent log1p(TFLOPS) predictions
+// - Base score starts at mean of training target
+
+/// Create a tree that splits on multiple features at different depths.
+/// This mimics LightGBM's tree structure for kernel selection:
+/// Features: 0=M, 1=N, 2=K, 3=tile_m, 4=cu_count
+///
+/// Tree structure:
+///           [0] M < 512
+///          /         \
+///       [1]           [2] tile_m < 128
+///      leaf=0.3      /         \
+///                  [3]           [4] cu_count < 60
+///                 leaf=0.5      /         \
+///                            [5]          [6]
+///                          leaf=0.7     leaf=0.9
+GbdtModelBuilder::TreeSpec makeRealisticTree1()
+{
+    GbdtModelBuilder::TreeSpec spec;
+    // Node indices: 0=root, 1=left-leaf, 2=right-internal, 3=left-leaf, 4=right-internal, 5=leaf, 6=leaf
+    spec.featureIndices = {0, 0, 3, 0, 4, 0, 0}; // M(0), _, tile_m(3), _, cu_count(4)
+    spec.thresholds = {512.0, 0.0, 128.0, 0.0, 60.0, 0.0, 0.0};
+    spec.leftChildren = {1, -1, 3, -1, 5, -1, -1};
+    spec.rightChildren = {2, -1, 4, -1, 6, -1, -1};
+    spec.leafValues = {0.0, 0.3, 0.0, 0.5, 0.0, 0.7, 0.9}; // Internal nodes have 0.0
+    spec.defaultLeft = {1, 1, 1, 1, 1, 1, 1};
+    return spec;
+}
+
+/// Second tree focuses on different feature combinations:
+/// Features: 0=M, 1=N, 2=K
+///
+/// Tree structure:
+///           [0] N < 1024
+///          /         \
+///       [1] K < 256    [2]
+///      /      \       leaf=0.2
+///    [3]       [4]
+///  leaf=0.1  leaf=0.15
+GbdtModelBuilder::TreeSpec makeRealisticTree2()
+{
+    GbdtModelBuilder::TreeSpec spec;
+    spec.featureIndices = {1, 2, 0, 0, 0}; // N(1), K(2)
+    spec.thresholds = {1024.0, 256.0, 0.0, 0.0, 0.0};
+    spec.leftChildren = {1, 3, -1, -1, -1};
+    spec.rightChildren = {2, 4, -1, -1, -1};
+    spec.leafValues = {0.0, 0.0, 0.2, 0.1, 0.15};
+    spec.defaultLeft = {1, 1, 1, 1, 1};
+    return spec;
+}
+
+/// Third tree: simple split on a single feature (tile efficiency):
+/// Features: 3=tile_m
+///
+/// Tree: if tile_m < 64 then -0.05 else 0.05
+GbdtModelBuilder::TreeSpec makeRealisticTree3()
+{
+    GbdtModelBuilder::TreeSpec spec;
+    spec.featureIndices = {3, 0, 0};
+    spec.thresholds = {64.0, 0.0, 0.0};
+    spec.leftChildren = {1, -1, -1};
+    spec.rightChildren = {2, -1, -1};
+    spec.leafValues = {0.0, -0.05, 0.05};
+    spec.defaultLeft = {1, 1, 1};
+    return spec;
+}
+
+TEST_F(TestTreeDataAdapter, RealisticGbdtEnsembleScoring)
+{
+    // Build a model with 3 trees, like lgbm_to_flatbuffer.py would produce
+    // Features: M(0), N(1), K(2), tile_m(3), cu_count(4)
+    const std::string realisticHash = "sha256:realistic_gemm";
+    auto buffer = GbdtModelBuilder()
+                      .setNumFeatures(5)
+                      .setFeaturesHash(realisticHash)
+                      .setBaseScore(3.5) // Mean of log1p(TFLOPS) in training data
+                      .setLearningRate(0.1)
+                      .setModelVersion("1.0.0")
+                      .setTrainingArches({"gfx942", "gfx950"})
+                      .addTree(makeRealisticTree1())
+                      .addTree(makeRealisticTree2())
+                      .addTree(makeRealisticTree3())
+                      .build();
+
+    auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), realisticHash);
+    ASSERT_NE(adapter, nullptr);
+    EXPECT_EQ(adapter->expectedFeatureCount(), 5u);
+    EXPECT_EQ(adapter->treeCount(), 3u);
+    EXPECT_EQ(adapter->getModelVersion(), "1.0.0");
+    EXPECT_TRUE(adapter->isTrainedForArch("gfx942"));
+
+    // Test case 1: Small problem (M=256), small tile (tile_m=32), low CU count (cu_count=40)
+    // Tree1: M<512 -> leaf=0.3
+    // Tree2: N<1024 (assume N=512) -> K<256 (assume K=128) -> leaf=0.1
+    // Tree3: tile_m<64 -> leaf=-0.05
+    // Total: base_score + (0.3 + 0.1 + (-0.05)) = 3.5 + 0.35 = 3.85
+    {
+        const std::vector<double> features = {256.0, 512.0, 128.0, 32.0, 40.0};
+        const double score = adapter->score(features);
+        EXPECT_DOUBLE_EQ(score, 3.5 + 0.3 + 0.1 + (-0.05));
+    }
+
+    // Test case 2: Large problem (M=1024), large tile (tile_m=256), high CU count (cu_count=120)
+    // Tree1: M>=512 -> tile_m>=128 -> cu_count>=60 -> leaf=0.9
+    // Tree2: N>=1024 (assume N=2048) -> leaf=0.2
+    // Tree3: tile_m>=64 -> leaf=0.05
+    // Total: base_score + (0.9 + 0.2 + 0.05) = 3.5 + 1.15 = 4.65
+    {
+        const std::vector<double> features = {1024.0, 2048.0, 512.0, 256.0, 120.0};
+        const double score = adapter->score(features);
+        EXPECT_DOUBLE_EQ(score, 3.5 + 0.9 + 0.2 + 0.05);
+    }
+
+    // Test case 3: Medium problem exploring different tree paths
+    // M=800 (>512, not <=), tile_m=64 (<=128), N=512 (<=1024), K=512 (>256, not <=)
+    // Tree1: M>512 -> tile_m<=128 -> leaf=0.5
+    // Tree2: N<=1024 -> K>256 -> leaf=0.15
+    // Tree3: tile_m<=64 -> leaf=-0.05 (at threshold, goes left with <=)
+    // Total: 3.5 + 0.5 + 0.15 + (-0.05) = 4.1
+    {
+        const std::vector<double> features = {800.0, 512.0, 512.0, 64.0, 80.0};
+        const double score = adapter->score(features);
+        EXPECT_DOUBLE_EQ(score, 3.5 + 0.5 + 0.15 + (-0.05));
+    }
+}
+
+TEST_F(TestTreeDataAdapter, RealisticBatchScoringMatchesSingle)
+{
+    const std::string realisticHash = "sha256:batch_test";
+    auto buffer = GbdtModelBuilder()
+                      .setNumFeatures(5)
+                      .setFeaturesHash(realisticHash)
+                      .setBaseScore(3.5)
+                      .addTree(makeRealisticTree1())
+                      .addTree(makeRealisticTree2())
+                      .addTree(makeRealisticTree3())
+                      .build();
+
+    auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), realisticHash);
+    ASSERT_NE(adapter, nullptr);
+
+    // Multiple kernel configurations to compare
+    const std::vector<std::vector<double>> batch = {
+        {256.0, 512.0, 128.0, 32.0, 40.0},   // Small
+        {1024.0, 2048.0, 512.0, 256.0, 120.0}, // Large
+        {800.0, 512.0, 512.0, 64.0, 80.0},   // Medium
+        {512.0, 1024.0, 256.0, 128.0, 60.0}, // Edge case at thresholds
+    };
+
+    const auto batchScores = adapter->scoreBatch(batch);
+    ASSERT_EQ(batchScores.size(), batch.size());
+
+    // Verify batch scores match individual scores
+    for(size_t i = 0; i < batch.size(); ++i)
+    {
+        const double singleScore = adapter->score(batch[i]);
+        EXPECT_DOUBLE_EQ(batchScores[i], singleScore)
+            << "Batch score mismatch at index " << i;
+    }
+}
+
+TEST_F(TestTreeDataAdapter, RealisticRankingOrdersCorrectly)
+{
+    // This test verifies that the model correctly ranks kernels
+    // by predicted performance (higher score = better)
+    const std::string realisticHash = "sha256:ranking_test";
+    auto buffer = GbdtModelBuilder()
+                      .setNumFeatures(5)
+                      .setFeaturesHash(realisticHash)
+                      .setBaseScore(0.0)
+                      .addTree(makeRealisticTree1())
+                      .addTree(makeRealisticTree2())
+                      .addTree(makeRealisticTree3())
+                      .build();
+
+    auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), realisticHash);
+    ASSERT_NE(adapter, nullptr);
+
+    // Score different kernel configurations and verify ordering
+    struct KernelConfig
+    {
+        std::vector<double> features;
+        std::string name;
+    };
+
+    const std::vector<KernelConfig> configs = {
+        {{256.0, 512.0, 128.0, 32.0, 40.0}, "small_tile_low_cu"},
+        {{1024.0, 2048.0, 512.0, 256.0, 120.0}, "large_tile_high_cu"},
+        {{800.0, 512.0, 512.0, 64.0, 80.0}, "medium"},
+    };
+
+    std::vector<std::pair<double, std::string>> scored;
+    scored.reserve(configs.size());
+    for(const auto& cfg : configs)
+    {
+        scored.emplace_back(adapter->score(cfg.features), cfg.name);
+    }
+
+    // Sort by score descending (higher = better)
+    std::sort(scored.begin(), scored.end(),
+              [](const auto& a, const auto& b) { return a.first > b.first; });
+
+    // Verify: large_tile_high_cu should rank highest (uses all "good" paths)
+    EXPECT_EQ(scored[0].second, "large_tile_high_cu");
+
+    // medium should rank second
+    EXPECT_EQ(scored[1].second, "medium");
+
+    // small_tile_low_cu should rank last
+    EXPECT_EQ(scored[2].second, "small_tile_low_cu");
 }
 
 } // namespace

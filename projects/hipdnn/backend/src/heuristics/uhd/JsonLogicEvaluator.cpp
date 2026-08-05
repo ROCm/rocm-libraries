@@ -503,7 +503,7 @@ JsonLogicEvaluator::Value JsonLogicEvaluator::evaluateOp(const std::string& op,
         {
             throw JsonLogicError("in requires exactly 2 arguments");
         }
-        Value needle = evaluate(args[0], ctx);
+        const Value needle = evaluate(args[0], ctx);
         const auto& haystack = args[1];
         if(!haystack.is_array())
         {
@@ -562,7 +562,7 @@ JsonLogicEvaluator::Value JsonLogicEvaluator::evaluateOp(const std::string& op,
         }
         // Shape access requires tensor metadata binding (not yet implemented)
         // For now, attempt to resolve as $tensor.shape[dim]
-        Value tensorRef = evaluate(args[0], ctx);
+        const Value tensorRef = evaluate(args[0], ctx);
         const auto dim = static_cast<int>(toDouble(evaluate(args[1], ctx)));
 
         // Try to resolve $tensor.shape_N pattern
@@ -571,7 +571,7 @@ JsonLogicEvaluator::Value JsonLogicEvaluator::evaluateOp(const std::string& op,
             std::string tensorName = args[0].get<std::string>();
             if(!tensorName.empty() && tensorName[0] == '$')
             {
-                std::string shapeVar = tensorName + ".shape_" + std::to_string(dim);
+                const std::string shapeVar = tensorName + ".shape_" + std::to_string(dim);
                 auto val = ctx.resolveDouble(shapeVar);
                 if(val.has_value())
                 {
@@ -597,7 +597,7 @@ JsonLogicEvaluator::Value JsonLogicEvaluator::evaluateOp(const std::string& op,
             std::string tensorName = args[0].get<std::string>();
             if(!tensorName.empty() && tensorName[0] == '$')
             {
-                std::string rankVar = tensorName + ".rank";
+                const std::string rankVar = tensorName + ".rank";
                 auto val = ctx.resolveDouble(rankVar);
                 if(val.has_value())
                 {

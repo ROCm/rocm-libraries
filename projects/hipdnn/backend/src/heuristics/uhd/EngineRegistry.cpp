@@ -8,6 +8,8 @@
 #include "adapters/TreeDataAdapter.hpp"
 
 #include <algorithm>
+#include <sstream>
+#include <stdexcept>
 
 namespace hipdnn_backend::heuristics::uhd
 {
@@ -20,6 +22,45 @@ EngineRegistry& EngineRegistry::instance()
 
 void EngineRegistry::registerEngine(EngineEntry entry)
 {
+    // Validate KMD field coverage: every $kernel.* in features_signature
+    // must exist in at least one candidate's metadata (RFC 0019 §7.3).
+    if(!entry.uhdConfig.featuresSignature.empty() && !entry.candidates.empty())
+    {
+        // Collect all metadata keys across candidates (the KMD field space)
+        std::unordered_set<std::string> kmdFields;
+        for(const auto& candidate : entry.candidates)
+        {
+            for(const auto& [key, _] : candidate.metadata)
+            {
+                kmdFields.insert(key);
+            }
+        }
+        // Also include implicit kernel fields that SelectionEngine adds
+        kmdFields.insert("priority");
+        kmdFields.insert("id");
+
+        // Build extractor to parse signature and extract $kernel.* refs
+        const FeatureExtractor extractor(entry.uhdConfig.featuresSignature);
+        const auto missingFields = extractor.getMissingKmdFields(kmdFields);
+
+        if(!missingFields.empty())
+        {
+            std::ostringstream oss;
+            oss << "UHD features_signature references $kernel.* fields not present in "
+                << "candidate metadata: ";
+            for(size_t i = 0; i < missingFields.size(); ++i)
+            {
+                if(i > 0)
+                {
+                    oss << ", ";
+                }
+                oss << missingFields[i];
+            }
+            oss << ". Engine ID: " << entry.engineId;
+            throw std::invalid_argument(oss.str());
+        }
+    }
+
     const std::lock_guard<std::mutex> lock(_mutex);
     _engines[entry.engineId] = std::move(entry);
 }

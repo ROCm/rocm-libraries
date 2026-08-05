@@ -60,6 +60,20 @@ public:
 
     /// Get the features hash this adapter was trained on (for contract validation).
     virtual const std::string& getFeaturesHash() const = 0;
+
+    /// Get the model version string (RFC 0019 §13: model provenance).
+    /// Empty if not set or not supported by this adapter type.
+    virtual std::string getModelVersion() const { return {}; }
+
+    /// Get the list of GPU architectures the model was trained on.
+    /// Empty if not set or not supported by this adapter type.
+    /// RFC 0019 §9.2: used for out-of-distribution detection.
+    virtual std::vector<std::string> getTrainingArches() const { return {}; }
+
+    /// Check if the given architecture was seen during training.
+    /// Returns true if training_arches is empty (no restriction) or if arch is in the list.
+    /// Default implementation always returns true (no restriction).
+    virtual bool isTrainedForArch(const std::string& /*arch*/) const { return true; }
 };
 
 /// @brief Factory function type for creating adapters.

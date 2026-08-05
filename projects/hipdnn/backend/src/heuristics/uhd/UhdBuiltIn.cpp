@@ -364,7 +364,7 @@ hipdnnPluginStatus_t policyFinalize(hipdnnHeuristicPolicyDescriptor_t desc, int3
 
         // TODO(RFC-0017): Extract query vars from serialized graph.
         // For now, use empty query vars — the graph parsing will come with UMD.
-        FeatureExtractionContext::ValueMap queryVars;
+        const FeatureExtractionContext::ValueMap queryVars;
 
         // Check if any candidate engines are registered in the mock registry.
         // This allows the selection flow to work when engines are registered,

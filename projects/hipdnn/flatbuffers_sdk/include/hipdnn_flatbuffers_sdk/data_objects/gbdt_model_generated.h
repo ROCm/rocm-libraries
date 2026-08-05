@@ -230,6 +230,8 @@ struct GbdtModelT : public ::flatbuffers::NativeTable {
   std::string training_date{};
   int64_t num_training_samples = 0;
   std::string training_objective{};
+  std::vector<std::string> training_arches{};
+  std::string model_version{};
   GbdtModelT() = default;
   GbdtModelT(const GbdtModelT &o);
   GbdtModelT(GbdtModelT&&) FLATBUFFERS_NOEXCEPT = default;
@@ -256,7 +258,9 @@ struct GbdtModel FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
     VT_FRAMEWORK = 14,
     VT_TRAINING_DATE = 16,
     VT_NUM_TRAINING_SAMPLES = 18,
-    VT_TRAINING_OBJECTIVE = 20
+    VT_TRAINING_OBJECTIVE = 20,
+    VT_TRAINING_ARCHES = 22,
+    VT_MODEL_VERSION = 24
   };
   /// Array of decision trees in the ensemble.
   const ::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::GbdtTree>> *trees() const {
@@ -319,6 +323,23 @@ struct GbdtModel FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   ::flatbuffers::String *mutable_training_objective() {
     return GetPointer<::flatbuffers::String *>(VT_TRAINING_OBJECTIVE);
   }
+  /// Model provenance (RFC 0019 §9.2, §13).
+  /// GPU architectures the model was trained on (e.g., ["gfx942", "gfx1100"]).
+  /// Runtime compares $device.arch against this list; warns or degrades to
+  /// static_order if the device arch is unseen during training.
+  const ::flatbuffers::Vector<::flatbuffers::Offset<::flatbuffers::String>> *training_arches() const {
+    return GetPointer<const ::flatbuffers::Vector<::flatbuffers::Offset<::flatbuffers::String>> *>(VT_TRAINING_ARCHES);
+  }
+  ::flatbuffers::Vector<::flatbuffers::Offset<::flatbuffers::String>> *mutable_training_arches() {
+    return GetPointer<::flatbuffers::Vector<::flatbuffers::Offset<::flatbuffers::String>> *>(VT_TRAINING_ARCHES);
+  }
+  /// Semantic version of the model (e.g., "1.0.0").
+  const ::flatbuffers::String *model_version() const {
+    return GetPointer<const ::flatbuffers::String *>(VT_MODEL_VERSION);
+  }
+  ::flatbuffers::String *mutable_model_version() {
+    return GetPointer<::flatbuffers::String *>(VT_MODEL_VERSION);
+  }
   bool Verify(::flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
            VerifyOffset(verifier, VT_TREES) &&
@@ -336,6 +357,11 @@ struct GbdtModel FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
            VerifyField<int64_t>(verifier, VT_NUM_TRAINING_SAMPLES, 8) &&
            VerifyOffset(verifier, VT_TRAINING_OBJECTIVE) &&
            verifier.VerifyString(training_objective()) &&
+           VerifyOffset(verifier, VT_TRAINING_ARCHES) &&
+           verifier.VerifyVector(training_arches()) &&
+           verifier.VerifyVectorOfStrings(training_arches()) &&
+           VerifyOffset(verifier, VT_MODEL_VERSION) &&
+           verifier.VerifyString(model_version()) &&
            verifier.EndTable();
   }
   GbdtModelT *UnPack(const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
@@ -374,6 +400,12 @@ struct GbdtModelBuilder {
   void add_training_objective(::flatbuffers::Offset<::flatbuffers::String> training_objective) {
     fbb_.AddOffset(GbdtModel::VT_TRAINING_OBJECTIVE, training_objective);
   }
+  void add_training_arches(::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<::flatbuffers::String>>> training_arches) {
+    fbb_.AddOffset(GbdtModel::VT_TRAINING_ARCHES, training_arches);
+  }
+  void add_model_version(::flatbuffers::Offset<::flatbuffers::String> model_version) {
+    fbb_.AddOffset(GbdtModel::VT_MODEL_VERSION, model_version);
+  }
   explicit GbdtModelBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
@@ -395,11 +427,15 @@ inline ::flatbuffers::Offset<GbdtModel> CreateGbdtModel(
     ::flatbuffers::Offset<::flatbuffers::String> framework = 0,
     ::flatbuffers::Offset<::flatbuffers::String> training_date = 0,
     int64_t num_training_samples = 0,
-    ::flatbuffers::Offset<::flatbuffers::String> training_objective = 0) {
+    ::flatbuffers::Offset<::flatbuffers::String> training_objective = 0,
+    ::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<::flatbuffers::String>>> training_arches = 0,
+    ::flatbuffers::Offset<::flatbuffers::String> model_version = 0) {
   GbdtModelBuilder builder_(_fbb);
   builder_.add_num_training_samples(num_training_samples);
   builder_.add_learning_rate(learning_rate);
   builder_.add_base_score(base_score);
+  builder_.add_model_version(model_version);
+  builder_.add_training_arches(training_arches);
   builder_.add_training_objective(training_objective);
   builder_.add_training_date(training_date);
   builder_.add_framework(framework);
@@ -419,12 +455,16 @@ inline ::flatbuffers::Offset<GbdtModel> CreateGbdtModelDirect(
     const char *framework = nullptr,
     const char *training_date = nullptr,
     int64_t num_training_samples = 0,
-    const char *training_objective = nullptr) {
+    const char *training_objective = nullptr,
+    const std::vector<::flatbuffers::Offset<::flatbuffers::String>> *training_arches = nullptr,
+    const char *model_version = nullptr) {
   auto trees__ = trees ? _fbb.CreateVector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::GbdtTree>>(*trees) : 0;
   auto features_hash__ = features_hash ? _fbb.CreateString(features_hash) : 0;
   auto framework__ = framework ? _fbb.CreateString(framework) : 0;
   auto training_date__ = training_date ? _fbb.CreateString(training_date) : 0;
   auto training_objective__ = training_objective ? _fbb.CreateString(training_objective) : 0;
+  auto training_arches__ = training_arches ? _fbb.CreateVector<::flatbuffers::Offset<::flatbuffers::String>>(*training_arches) : 0;
+  auto model_version__ = model_version ? _fbb.CreateString(model_version) : 0;
   return hipdnn_flatbuffers_sdk::data_objects::CreateGbdtModel(
       _fbb,
       trees__,
@@ -435,7 +475,9 @@ inline ::flatbuffers::Offset<GbdtModel> CreateGbdtModelDirect(
       framework__,
       training_date__,
       num_training_samples,
-      training_objective__);
+      training_objective__,
+      training_arches__,
+      model_version__);
 }
 
 ::flatbuffers::Offset<GbdtModel> CreateGbdtModel(::flatbuffers::FlatBufferBuilder &_fbb, const GbdtModelT *_o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
@@ -512,7 +554,9 @@ inline bool operator==(const GbdtModelT &lhs, const GbdtModelT &rhs) {
       (lhs.framework == rhs.framework) &&
       (lhs.training_date == rhs.training_date) &&
       (lhs.num_training_samples == rhs.num_training_samples) &&
-      (lhs.training_objective == rhs.training_objective);
+      (lhs.training_objective == rhs.training_objective) &&
+      (lhs.training_arches == rhs.training_arches) &&
+      (lhs.model_version == rhs.model_version);
 }
 
 inline bool operator!=(const GbdtModelT &lhs, const GbdtModelT &rhs) {
@@ -528,7 +572,9 @@ inline GbdtModelT::GbdtModelT(const GbdtModelT &o)
         framework(o.framework),
         training_date(o.training_date),
         num_training_samples(o.num_training_samples),
-        training_objective(o.training_objective) {
+        training_objective(o.training_objective),
+        training_arches(o.training_arches),
+        model_version(o.model_version) {
   trees.reserve(o.trees.size());
   for (const auto &trees_ : o.trees) { trees.emplace_back((trees_) ? new hipdnn_flatbuffers_sdk::data_objects::GbdtTreeT(*trees_) : nullptr); }
 }
@@ -543,6 +589,8 @@ inline GbdtModelT &GbdtModelT::operator=(GbdtModelT o) FLATBUFFERS_NOEXCEPT {
   std::swap(training_date, o.training_date);
   std::swap(num_training_samples, o.num_training_samples);
   std::swap(training_objective, o.training_objective);
+  std::swap(training_arches, o.training_arches);
+  std::swap(model_version, o.model_version);
   return *this;
 }
 
@@ -564,6 +612,8 @@ inline void GbdtModel::UnPackTo(GbdtModelT *_o, const ::flatbuffers::resolver_fu
   { auto _e = training_date(); if (_e) _o->training_date = _e->str(); }
   { auto _e = num_training_samples(); _o->num_training_samples = _e; }
   { auto _e = training_objective(); if (_e) _o->training_objective = _e->str(); }
+  { auto _e = training_arches(); if (_e) { _o->training_arches.resize(_e->size()); for (::flatbuffers::uoffset_t _i = 0; _i < _e->size(); _i++) { _o->training_arches[_i] = _e->Get(_i)->str(); } } else { _o->training_arches.resize(0); } }
+  { auto _e = model_version(); if (_e) _o->model_version = _e->str(); }
 }
 
 inline ::flatbuffers::Offset<GbdtModel> GbdtModel::Pack(::flatbuffers::FlatBufferBuilder &_fbb, const GbdtModelT* _o, const ::flatbuffers::rehasher_function_t *_rehasher) {
@@ -583,6 +633,8 @@ inline ::flatbuffers::Offset<GbdtModel> CreateGbdtModel(::flatbuffers::FlatBuffe
   auto _training_date = _o->training_date.empty() ? 0 : _fbb.CreateString(_o->training_date);
   auto _num_training_samples = _o->num_training_samples;
   auto _training_objective = _o->training_objective.empty() ? 0 : _fbb.CreateString(_o->training_objective);
+  auto _training_arches = _o->training_arches.size() ? _fbb.CreateVectorOfStrings(_o->training_arches) : 0;
+  auto _model_version = _o->model_version.empty() ? 0 : _fbb.CreateString(_o->model_version);
   return hipdnn_flatbuffers_sdk::data_objects::CreateGbdtModel(
       _fbb,
       _trees,
@@ -593,7 +645,9 @@ inline ::flatbuffers::Offset<GbdtModel> CreateGbdtModel(::flatbuffers::FlatBuffe
       _framework,
       _training_date,
       _num_training_samples,
-      _training_objective);
+      _training_objective,
+      _training_arches,
+      _model_version);
 }
 
 inline const hipdnn_flatbuffers_sdk::data_objects::GbdtModel *GetGbdtModel(const void *buf) {
