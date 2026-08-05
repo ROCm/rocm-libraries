@@ -16,8 +16,16 @@ void validateTiled(const GemmProblem& problem) {
     if (problem.accumulatorType != ScalarType::Float32 &&
         problem.accumulatorType != ScalarType::Float64)
         throw std::invalid_argument("Tiled backend supports F32 and F64 accumulation.");
-    if (problem.a.blockScale || problem.b.blockScale)
-        throw std::invalid_argument("Tiled backend does not yet support block scaling.");
+    if (problem.a.blockScale) {
+        constexpr size_t tileReduction = 8;
+        const size_t k = problem.a.values.shape()[1];
+        if (problem.a.blockScale->blockSize % tileReduction != 0 ||
+            problem.b.blockScale->blockSize % tileReduction != 0)
+            throw std::invalid_argument(
+                "Tiled backend requires block sizes divisible by its K tile.");
+        if (k % problem.a.blockScale->blockSize != 0 || k % problem.b.blockScale->blockSize != 0)
+            throw std::invalid_argument("Tiled backend requires K divisible by both block sizes.");
+    }
     if (!problem.outputSelection.selectsAll())
         throw std::invalid_argument("Tiled backend currently requires all outputs.");
 }
@@ -39,10 +47,16 @@ GemmRunInfo runTiled(const GemmProblem& problem) {
     std::optional<RuntimeVectorReader<Accumulator>> scaleAlpha;
     std::optional<RuntimeVectorReader<Accumulator>> scaleA;
     std::optional<RuntimeVectorReader<Accumulator>> scaleB;
+    std::optional<RuntimeMatrixReader<Accumulator>> blockScaleA;
+    std::optional<RuntimeMatrixReader<Accumulator>> blockScaleB;
     if (problem.epilogue.bias) bias.emplace(problem.epilogue.bias->values);
     if (problem.epilogue.scaleAlpha) scaleAlpha.emplace(problem.epilogue.scaleAlpha->values);
     if (problem.epilogue.scaleA) scaleA.emplace(*problem.epilogue.scaleA);
     if (problem.epilogue.scaleB) scaleB.emplace(*problem.epilogue.scaleB);
+    if (problem.a.blockScale) {
+        blockScaleA.emplace(problem.a.blockScale->values);
+        blockScaleB.emplace(problem.b.blockScale->values);
+    }
 
     const size_t m = problem.a.values.shape()[0];
     const size_t k = problem.a.values.shape()[1];
@@ -82,12 +96,27 @@ GemmRunInfo runTiled(const GemmProblem& problem) {
                     }
                 }
 
+                std::vector<Accumulator> partial(blockScaleA ? rows * columns : 0, Accumulator(0));
+                std::vector<Accumulator>& destination = blockScaleA ? partial : accumulator;
                 for (size_t row = 0; row < rows; ++row) {
                     for (size_t reduction = 0; reduction < reductions; ++reduction) {
                         const Accumulator aValue = aTile[row * reductions + reduction];
                         for (size_t column = 0; column < columns; ++column)
-                            accumulator[row * columns + column] +=
+                            destination[row * columns + column] +=
                                 aValue * bTile[reduction * columns + column];
+                    }
+                }
+                if (blockScaleA) {
+                    const size_t blockA = reductionBase / problem.a.blockScale->blockSize;
+                    const size_t blockB = reductionBase / problem.b.blockScale->blockSize;
+                    for (size_t row = 0; row < rows; ++row) {
+                        const Accumulator aScale = (*blockScaleA)(rowBase + row, blockA);
+                        for (size_t column = 0; column < columns; ++column) {
+                            const Accumulator scale =
+                                aScale * (*blockScaleB)(columnBase + column, blockB);
+                            accumulator[row * columns + column] +=
+                                partial[row * columns + column] * scale;
+                        }
                     }
                 }
             }

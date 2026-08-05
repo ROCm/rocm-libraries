@@ -136,7 +136,7 @@ TEST(ReferenceMXFastPath, MatchesSlowPathForScaledFP8Gemm)
     inputsFast.mxsb = mxsb.data();
 
     SolveGemmCPU(problem, inputsSlow, /*elementsToValidate=*/-1, /*tryFastPath=*/false);
-    SolveGemmCPU(problem, inputsFast, /*elementsToValidate=*/-1, /*tryFastPath=*/true);
+    ASSERT_TRUE(tryRuntimeTiledGemm(problem, inputsFast, /*elementsToValidate=*/-1));
 
     EXPECT_LT(maxAbsDiff(dSlow, dFast), 1e-3f);
 }
@@ -184,7 +184,7 @@ TEST(ReferenceMXFastPath, MatchesSlowPathWithBetaAndBias)
     inputsFast.bias  = bias.data();
 
     SolveGemmCPU(problem, inputsSlow, /*elementsToValidate=*/-1, /*tryFastPath=*/false);
-    SolveGemmCPU(problem, inputsFast, /*elementsToValidate=*/-1, /*tryFastPath=*/true);
+    ASSERT_TRUE(tryRuntimeTiledGemm(problem, inputsFast, /*elementsToValidate=*/-1));
 
     EXPECT_LT(maxAbsDiff(dSlow, dFast), 1e-3f);
 }

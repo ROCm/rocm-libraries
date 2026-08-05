@@ -51,5 +51,39 @@ int main() {
     problem.outputSelection = OutputSelection::explicitIndices({0});
     require(!queryGemmSupport(problem, GemmBackend::Tiled, &backend).supported,
             "Tiled backend accepted partial output selection.");
+
+    const std::array<float, 16> ones{
+        1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    };
+    const std::array<float, 1> zero{0};
+    const std::array<float, 2> blockScaleA{2, 4};
+    const std::array<float, 2> blockScaleB{8, 16};
+    std::array<float, 1> blockOutput{};
+    GemmOperand blockA(TensorView::fromNative<float>(Layout::contiguous(Shape{1, 16}),
+                                                     std::span<const float>(ones)));
+    GemmOperand blockB(TensorView::fromNative<float>(Layout::contiguous(Shape{16, 1}),
+                                                     std::span<const float>(ones)));
+    blockA.blockScale = BlockScaleBinding{
+        TensorView::fromNative<float>(Layout::contiguous(Shape{1, 2}),
+                                      std::span<const float>(blockScaleA)),
+        8,
+    };
+    blockB.blockScale = BlockScaleBinding{
+        TensorView::fromNative<float>(Layout::contiguous(Shape{1, 2}),
+                                      std::span<const float>(blockScaleB)),
+        8,
+    };
+    GemmProblem blockProblem(std::move(blockA), std::move(blockB),
+                             TensorView::fromNative<float>(Layout::contiguous(Shape{1, 1}),
+                                                           std::span<const float>(zero)),
+                             MutableTensorView::fromNative<float>(Layout::contiguous(Shape{1, 1}),
+                                                                  std::span<float>(blockOutput)),
+                             ScalarType::Float32);
+    referenceGemm(blockProblem, {
+                                    .backend = GemmBackend::Tiled,
+                                    .requireRequestedBackend = true,
+                                    .backendImplementation = &backend,
+                                });
+    require(blockOutput[0] == 640, "Tiled backend block scaling mismatch.");
     return 0;
 }
