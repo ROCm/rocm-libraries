@@ -53,6 +53,13 @@ constexpr const char* kTailLoopMarker = "Tail Loop";
 /// Set to 0 to co-locate the signal with the wait.
 constexpr int kRule3SignalLeadCycles = 500;
 
+/// Ceiling on how far ahead of its wait the signal may end up after climbing out of a live
+/// SCC range. The climb has to clear the whole range, so its cost is the length of that
+/// range, not a constant; past this ceiling it buys correctness at more overlap than it is
+/// worth. The anchor then drops below the range instead, which lands it closer than
+/// kRule3SignalLeadCycles rather than further away.
+constexpr int kRule3SignalMaxLeadCycles = 900;
+
 std::string makeRandomHash() {
     static thread_local std::mt19937_64 engine{std::random_device{}()};
     static constexpr char kAlphabet[] =
@@ -113,36 +120,56 @@ StinkyInstruction* findPrecedingWorkgroupBarrierSignalInSegment(BasicBlock::iter
     return nullptr;
 }
 
-StinkyInstruction* findLiveRestorableSccCmpUpstream(StinkyInstruction* anchor) {
-    BasicBlock* parent = anchor->getParent();
-    if (parent == nullptr) return nullptr;
-    std::vector<StinkyRegister> clobbered;
-    auto it = BasicBlock::iterator(anchor);
-    while (it != parent->begin()) {
-        --it;
+// SCC is written and read both through the descriptor flags and, once the DAG scheduler
+// has made the dependency explicit, as an ordinary operand. Check for both.
+bool writesScc(const StinkyInstruction& inst) {
+    if (inst.is(InstFlag::IF_ImplicitWriteSCC)) return true;
+    for (const auto& dst : inst.getDestRegs()) {
+        if (dst.isRegister() && dst.reg.type == RegType::SCC) return true;
+    }
+    return false;
+}
+
+bool readsScc(const StinkyInstruction& inst) {
+    if (inst.is(InstFlag::IF_ImplicitReadSCC)) return true;
+    for (const auto& src : inst.getSrcRegs()) {
+        if (src.isRegister() && src.reg.type == RegType::SCC) return true;
+    }
+    return false;
+}
+
+/// Is an SCC value live at the program point immediately in front of \p from, i.e. does
+/// something from there on read SCC before anything rewrites it? The backward anchor scan
+/// starts at that point, so it has to know what it is already standing in.
+///
+/// A value read only by a successor block is not detected; in the loop bodies this pass
+/// runs on the consuming ``s_cbranch_scc*`` closes the block, so the forward scan sees it.
+bool isSccLiveBefore(StinkyInstruction* from) {
+    BasicBlock* parent = from->getParent();
+    if (parent == nullptr) return false;
+    for (auto it = BasicBlock::iterator(from); it != parent->end(); ++it) {
         auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
         if (inst == nullptr) continue;
-        if (isPseudoInst(inst)) continue;
-        if (isLabel(*inst)) return nullptr;
-        if (isUnconditionalBranch(*inst)) return nullptr;
-        if (isConditionalBranch(*inst) || inst->is(InstFlag::IF_ImplicitReadSCC)) {
-            return nullptr;
-        }
-        if (inst->is(InstFlag::IF_ImplicitWriteSCC)) {
-            for (const auto& dst : inst->getDestRegs()) {
-                if (dst.isRegister() && isAllocatableReg(dst.reg.type)) return nullptr;
-            }
-            for (const auto& src : inst->getSrcRegs()) {
-                if (!src.isRegister()) continue;
-                for (const auto& w : clobbered) {
-                    if (src.isOverlap(w)) return nullptr;
-                }
-            }
-            return inst;
-        }
-        for (const auto& dst : inst->getDestRegs()) {
-            if (dst.isRegister()) clobbered.push_back(dst);
-        }
+        if (readsScc(*inst)) return true;
+        if (writesScc(*inst)) return false;
+    }
+    return false;
+}
+
+/// Walk down from \p from for the first instruction with nothing live in SCC in front of
+/// it, i.e. the first spot below a live range that the handshake may clobber. Stops at
+/// \p limit (the wait anchor) and returns null when the range stays live that far, since
+/// there is then nowhere below it to go.
+StinkyInstruction* findSccDeadPointBelow(StinkyInstruction* from, const IRBase* limit) {
+    BasicBlock* parent = from->getParent();
+    if (parent == nullptr) return nullptr;
+    for (auto it = BasicBlock::iterator(from); it != parent->end(); ++it) {
+        if (it.getNodePtr() == limit) return nullptr;
+        auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+        if (inst == nullptr) continue;
+        if (isSegmentBoundary(*inst) || isClusterBarrierWait(*inst)) return nullptr;
+        if (isWorkgroupBarrierSignal(*inst) || isWorkgroupBarrierWait(*inst)) continue;
+        if (!isSccLiveBefore(inst)) return inst;
     }
     return nullptr;
 }
@@ -260,21 +287,9 @@ void insertClusterBarrierWaitBefore(IRBase* anchor, const char* comment, AsmIRBu
     waitInst->addModifier<CommentData>(CommentData{comment});
 }
 
-void insertRule3SccRestore(IRBase* anchor, AsmIRBuilder& irBuilder,
-                           StinkyInstruction* sccRestoreCmp) {
-    const HwInstDesc* restoreDesc = sccRestoreCmp->getHwInstDesc();
-    StinkyInstruction* restoreInst = irBuilder.create(restoreDesc, anchor);
-    for (const auto& src : sccRestoreCmp->getSrcRegs()) restoreInst->addSrcReg(src);
-    restoreInst->addModifier<CommentData>(
-        CommentData{"restore SCC for downstream cbranch (Rule 3)"});
-}
-
 void insertRule3HandshakeBefore(IRBase* signalAnchor, IRBase* waitAnchor, AsmIRBuilder& irBuilder,
-                                GfxArchID archId, StinkyInstruction* sccRestoreCmp) {
+                                GfxArchID archId) {
     insertClusterBarrierSignalOnlyBefore(signalAnchor, irBuilder, archId);
-    if (sccRestoreCmp != nullptr) {
-        insertRule3SccRestore(signalAnchor, irBuilder, sccRestoreCmp);
-    }
     insertClusterBarrierWaitBefore(waitAnchor, "cluster barrier wait", irBuilder, archId);
 }
 
@@ -349,7 +364,7 @@ IRBase* anchorAfterWorkgroupBarrierFollowing(StinkyInstruction* afterWait, IRBas
 IRBase* findRule3SignalAnchorByCycleLead(
     StinkyInstruction* referenceAnchor, BasicBlock::iterator segBegin, IRBase* defaultAnchor,
     const std::unordered_map<const StinkyInstruction*, uint32_t>& cycleMap, int leadCycles,
-    const std::unordered_set<StinkyInstruction*>& priorWaitAnchors) {
+    int maxLeadCycles, const std::unordered_set<StinkyInstruction*>& priorWaitAnchors) {
     if (leadCycles <= 0) return defaultAnchor;
     auto refIt = cycleMap.find(referenceAnchor);
     if (refIt == cycleMap.end()) return defaultAnchor;
@@ -358,39 +373,73 @@ IRBase* findRule3SignalAnchorByCycleLead(
     // function entry; cycle matching then fails and the barrier/segment
     // fallbacks below decide the anchor.
     const int64_t target = static_cast<int64_t>(refIt->second) - leadCycles;
+
+    // The handshake opens with `s_cmp_eq_u32 sgprWaveIdx, 0` and is planted in front of
+    // whatever this scan returns, so the anchor may only land where SCC holds nothing
+    // live. `sccLive` is maintained backwards to describe the point in front of the
+    // instruction being looked at, and once the cycle lead is met the scan keeps climbing
+    // until that point is clear -- which, for a lead that falls inside a def..reader
+    // range, means coming to rest in front of the def. The boundary returns below still
+    // win: a cluster wait, a segment edge or a prior handshake's barrier cannot be
+    // crossed just to find a better spot.
+    bool sccLive = isSccLiveBefore(referenceAnchor);
+    bool targetMet = false;
+    StinkyInstruction* leadPoint = nullptr;
+
+    // A climb that ends up further than maxLeadCycles from the wait has cleared a range too
+    // long to be worth it. Fall the other way instead: down from the lead point to the first
+    // spot below the range, which is nearer the wait than the lead asked for.
+    // A boundary-forced anchor is a lower bound -- the scan may not go above it -- so when
+    // it lands inside a live range the only legal correction is to drop below the range.
+    // Failing that the whole segment from the def down to the wait is live and there is no
+    // safe spot at all; the caller's default (co-locating with the wait) is then no worse
+    // than anything else this pass could pick.
+    auto clearScc = [&](IRBase* anchor) -> IRBase* {
+        auto* anchorInst = dyn_cast<StinkyInstruction>(anchor);
+        if (anchorInst == nullptr || !isSccLiveBefore(anchorInst)) return anchor;
+        StinkyInstruction* below = findSccDeadPointBelow(anchorInst, referenceAnchor);
+        return (below != nullptr) ? static_cast<IRBase*>(below) : defaultAnchor;
+    };
+
+    auto settle = [&](IRBase* climbed) -> IRBase* {
+        if (leadPoint == nullptr || climbed == leadPoint) return climbed;
+        int64_t climbedCycle = 0;
+        if (auto* climbedInst = dyn_cast<StinkyInstruction>(climbed)) {
+            auto climbedIt = cycleMap.find(climbedInst);
+            if (climbedIt != cycleMap.end()) climbedCycle = static_cast<int64_t>(climbedIt->second);
+        }
+        if (static_cast<int64_t>(refIt->second) - climbedCycle <= maxLeadCycles) return climbed;
+        StinkyInstruction* below = findSccDeadPointBelow(leadPoint, referenceAnchor);
+        return (below != nullptr) ? static_cast<IRBase*>(below) : defaultAnchor;
+    };
+
     auto it = BasicBlock::iterator(referenceAnchor);
     while (it != segBegin) {
         --it;
         auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
         if (inst == nullptr) continue;
         if (isClusterBarrierWait(*inst)) {
-            return anchorAfterWorkgroupBarrierFollowing(inst, defaultAnchor);
+            return clearScc(anchorAfterWorkgroupBarrierFollowing(inst, defaultAnchor));
         }
-        if (isSegmentBoundary(*inst)) return segBegin.getNodePtr();
-        if (isWorkgroupBarrierSignal(*inst)) {
-            if (priorWaitAnchors.count(inst) != 0) {
-                return anchorAfterWorkgroupBarrierPair(inst, defaultAnchor);
-            }
-            continue;
+        if (isSegmentBoundary(*inst)) return clearScc(segBegin.getNodePtr());
+        if (isWorkgroupBarrierSignal(*inst) && priorWaitAnchors.count(inst) != 0) {
+            return clearScc(anchorAfterWorkgroupBarrierPair(inst, defaultAnchor));
         }
-        if (isWorkgroupBarrierWait(*inst)) continue;
-        auto cycleIt = cycleMap.find(inst);
-        if (cycleIt == cycleMap.end()) continue;
-        if (static_cast<int64_t>(cycleIt->second) <= target) return inst;
-    }
-    return segBegin.getNodePtr();
-}
 
-bool anySccWriterInRange(StinkyInstruction* fromInclusive, const IRBase* toExclusive) {
-    BasicBlock* parent = fromInclusive->getParent();
-    if (parent == nullptr) return false;
-    for (auto it = BasicBlock::iterator(fromInclusive); it != parent->end(); ++it) {
-        if (it.getNodePtr() == toExclusive) break;
-        auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
-        if (inst == nullptr) continue;
-        if (inst->is(InstFlag::IF_ImplicitWriteSCC)) return true;
+        // live-before(inst) = reads(inst) | (live-after(inst) & !writes(inst))
+        sccLive = readsScc(*inst) || (sccLive && !writesScc(*inst));
+
+        if (isWorkgroupBarrierSignal(*inst) || isWorkgroupBarrierWait(*inst)) continue;
+
+        auto cycleIt = cycleMap.find(inst);
+        if (cycleIt != cycleMap.end() && static_cast<int64_t>(cycleIt->second) <= target) {
+            if (!targetMet) leadPoint = inst;
+            targetMet = true;
+        }
+        if (targetMet && !sccLive) return settle(inst);
     }
-    return false;
+    // Running out of segment can leave the anchor inside a range that starts above it.
+    return clearScc(settle(segBegin.getNodePtr()));
 }
 
 StinkyInstruction* findFirstTensorLoadInFunc(Function& func) {
@@ -442,8 +491,7 @@ class InsertClusterBarrierPassImpl : public Pass {
                                          : std::unordered_map<const StinkyInstruction*, uint32_t>{};
 
         for (BasicBlock& bb : func) {
-            std::vector<std::tuple<StinkyInstruction*, IRBase*, IRBase*, StinkyInstruction*>>
-                pending;
+            std::vector<std::tuple<StinkyInstruction*, IRBase*, IRBase*>> pending;
             std::unordered_set<StinkyInstruction*> seenTriggers;
             // Anchors (instruction right after each cooperative tensor_load
             // group) for the producer-side drain; see
@@ -470,25 +518,16 @@ class InsertClusterBarrierPassImpl : public Pass {
                 if (isImmediatelyPrecededByClusterBarrierWait(waitAnchorInst)) continue;
 
                 std::unordered_set<StinkyInstruction*> priorWaitAnchors;
-                for (const auto& [priorTrigger, _sig, _wait, _live] : pending) {
+                for (const auto& [priorTrigger, _sig, _wait] : pending) {
                     (void)_sig;
                     (void)_wait;
-                    (void)_live;
                     priorWaitAnchors.insert(priorTrigger);
                 }
 
                 IRBase* signalAnchor = findRule3SignalAnchorByCycleLead(
                     waitAnchorInst, segBegin, /*defaultAnchor=*/waitAnchor, cycleMap,
-                    kRule3SignalLeadCycles, priorWaitAnchors);
-                StinkyInstruction* signalAnchorInst =
-                    (signalAnchor != nullptr) ? dyn_cast<StinkyInstruction>(signalAnchor) : nullptr;
-
-                StinkyInstruction* sccRestoreCmp = nullptr;
-                if (signalAnchorInst != nullptr &&
-                    !anySccWriterInRange(signalAnchorInst, waitAnchor)) {
-                    sccRestoreCmp = findLiveRestorableSccCmpUpstream(signalAnchorInst);
-                }
-                pending.emplace_back(trigger, signalAnchor, waitAnchor, sccRestoreCmp);
+                    kRule3SignalLeadCycles, kRule3SignalMaxLeadCycles, priorWaitAnchors);
+                pending.emplace_back(trigger, signalAnchor, waitAnchor);
 
                 // Record the instruction right after this cooperative
                 // tensor_load group so a producer-side tensor drain can be
@@ -550,7 +589,7 @@ class InsertClusterBarrierPassImpl : public Pass {
                 StinkyInstruction* tailPairedSignal =
                     findPrecedingWorkgroupBarrierSignalInSegment(bb.begin(), tailWait);
                 bool conflictsWithRule3 = false;
-                for (const auto& [trigger, _sig, _wait, _live] : pending) {
+                for (const auto& [trigger, _sig, _wait] : pending) {
                     if (tailPairedSignal != nullptr && trigger == tailPairedSignal) {
                         conflictsWithRule3 = true;
                         break;
@@ -565,9 +604,8 @@ class InsertClusterBarrierPassImpl : public Pass {
                 continue;
 
             AsmIRBuilder irBuilder(bb, archId);
-            for (const auto& [trigger, signalAnchor, waitAnchor, sccRestoreCmp] : pending) {
-                insertRule3HandshakeBefore(signalAnchor, waitAnchor, irBuilder, archId,
-                                           sccRestoreCmp);
+            for (const auto& [trigger, signalAnchor, waitAnchor] : pending) {
+                insertRule3HandshakeBefore(signalAnchor, waitAnchor, irBuilder, archId);
                 (void)trigger;
             }
             // Producer-side drain right after each cooperative tensor_load
