@@ -242,6 +242,16 @@ TEST(TestTypes, ResampleAndPaddingCudnnCompatHaveNoBackendMapping)
     EXPECT_EQ(toBackendPaddingMode(PaddingMode::EDGE_VAL_PAD), std::nullopt);
 }
 
+TEST(TestTypes, PaddingNotSetRoundTrip)
+{
+    using namespace hipdnn_frontend;
+
+    EXPECT_EQ(toBackendPaddingMode(PaddingMode::NOT_SET), HIPDNN_PADDING_NOT_SET);
+    auto [paddingMode, error] = fromHipdnnPaddingMode(HIPDNN_PADDING_NOT_SET);
+    EXPECT_EQ(error.code, ErrorCode::OK);
+    EXPECT_EQ(paddingMode, PaddingMode::NOT_SET);
+}
+
 TEST(TestTypes, DataTypeStreamOperator)
 {
     using namespace hipdnn_frontend;
