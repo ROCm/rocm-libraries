@@ -159,6 +159,9 @@ jobs:
       # checked-out commit as needs.setup.outputs.ref for downstream jobs.
       ref: ${{ needs.resolve_therock_ref.outputs.therock_ref }}
       external_repo: '{"repository":"${{ github.repository }}","ref":"${{ github.sha }}"}'
+      # Pass external repo name for stage impact analysis (determines which stages are affected)
+      # Use "rocm-libraries" to indicate the whole repo changed, or use changed_projects for finer granularity
+      external_changed_files: ${{ needs.configure.outputs.changed_projects || 'rocm-libraries' }}
 
   linux_build_and_test:
     name: Linux::${{ fromJSON(needs.setup.outputs.linux_build_config || '{}').build_variant_label || 'skip' }}
