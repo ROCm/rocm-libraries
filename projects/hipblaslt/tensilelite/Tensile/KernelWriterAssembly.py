@@ -1025,6 +1025,9 @@ class KernelWriterAssembly(KernelWriter):
       module.add(self.defineSgpr("tdmLdsAddrB", 1))
       module.add(self.defineSgpr("tdmLdsSwapMaskA", 1))
       module.add(self.defineSgpr("tdmLdsSwapMaskB", 1))
+      # Scale TDM swap mask (MXSA only; MXSB is aliased and doesn't swap)
+      if kernel["ProblemType"]["MXBlockA"] and not _subtileSkipMxTdm:
+        module.add(self.defineSgpr("tdmLdsSwapMaskMXSA", 1))
 
     return module
 

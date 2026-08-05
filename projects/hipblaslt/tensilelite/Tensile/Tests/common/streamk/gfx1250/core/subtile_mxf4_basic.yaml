@@ -1,8 +1,8 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 #
-# Basic subtile MXFP4 correctness test for gfx1250 (wave32).
-# Single-wave 32x32 tile, DepthU=256, no StreamK.
+# Subtile MXFP4 correctness test for gfx1250 (wave32).
+# Covers single/multi-iteration, single/multi-wave, and PGR=1/2.
 # Validates the TDM-based MX scale load path for subtile kernels.
 TestParameters:
   marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201]
@@ -16,8 +16,8 @@ GlobalParameters:
   DataInitTypeA: 3
   DataInitTypeB: 3
   DataInitTypeD: 2
-  DataInitTypeMXSA: 1
-  DataInitTypeMXSB: 1
+  DataInitTypeMXSA: 3
+  DataInitTypeMXSB: 3
   DataInitTypeAlpha: 1
   DataInitTypeBeta: 0
   PrintLevel: 2
@@ -42,18 +42,19 @@ BenchmarkProblems:
       MXBlockA: 32
       MXBlockB: 32
 
-    - # Single-wave subtile MXFP4
+    - # Subtile MXFP4: 1-wave and 4-wave, PGR 1 and 2, SIA 0 and 3
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - MatrixInstruction:
           - [16, 16, 128, 1,  1, 2, 2,  1, 1]  # MT 32x32 WG 1x1
+          - [16, 16, 128, 1,  1, 2, 2,  2, 2]  # MT 64x64 WG 2x2
         - DepthU: [256]
         - WavefrontSize: [32]
-        - PrefetchGlobalRead: [1]
+        - PrefetchGlobalRead: [1, 2]
         - PrefetchLocalRead: [1]
-        - ScheduleIterAlg: [0]
+        - ScheduleIterAlg: [0, 3]
         - PreloadKernArgs: [True]
         - UseSubtileImpl: [True]
         - UseSgprForGRO: [0]
@@ -76,3 +77,7 @@ BenchmarkProblems:
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Exact: [32, 32, 1, 256]
+          - Exact: [32, 32, 1, 512]
+          - Exact: [64, 64, 1, 256]
+          - Exact: [64, 64, 1, 512]
+          - Exact: [128, 128, 1, 512]

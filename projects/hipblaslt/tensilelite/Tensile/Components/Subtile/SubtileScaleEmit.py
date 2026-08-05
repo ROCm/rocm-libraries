@@ -205,7 +205,8 @@ def emitScaleGRPtrUpdate(ti, writer, kernel):
 
   if useTdmForScale:
     # TDM path (gfx1250): advance Address{tc} and sync descriptor for MXSA.
-    mxBlock = kernel["ProblemType"]["MXBlockA"]
+    parentTc = tc[-1]  # 'A' from 'MXSA', 'B' from 'MXSB'
+    mxBlock = kernel["ProblemType"][f"MXBlock{parentTc}"]
     du = kernel["DepthU"]
     scaleInc = du // mxBlock  # scale elements per depthU iteration
     module.addComment0("Scale TDM addr update: %s += %u" % (tc, scaleInc))
@@ -240,9 +241,22 @@ def emitScaleGRLDSSwap(ti, writer, kernel):
   useTdmForScale = tuple(kernel["ISA"]) == (12, 5, 0)
 
   if useTdmForScale:
-    # TDM path (gfx1250): swap LDS offset in TDM descriptor.
-    module.addComment0("Scale TDM LDS swap: %s" % tc)
-    module.add(writer.tdmSwapLdsOffset(kernel, writer.tPA["MX"] if tc[-1] == "A" else writer.tPB["MX"]))
+    # TDM path (gfx1250): only swap for MXSA.  MXSB is aliased onto the
+    # same descriptor, so a second XOR would undo the MXSA swap.  The
+    # MXSB TDM load path adds ldsDelta to the already-swapped offset.
+    #
+    # Use the same per-address swap mask as the scale LR offsets: the
+    # mask is addr XOR (addr + ldsTotalSize).  Since ldsTotalSize may
+    # not be a power of 2, a plain XOR with ldsTotalSize would not
+    # toggle correctly.  Instead, store a one-time swap mask in a tmp
+    # SGPR and XOR with that.
+    if tc == "MXSA":
+      group0 = "tdmMXSAGroup0"
+      ldsAddr = f"{group0}+1"
+      module.addComment0("Scale TDM LDS swap: MXSA")
+      module.add(SXorB32(dst=sgpr(ldsAddr),
+                 src0=sgpr(ldsAddr), src1=sgpr("tdmLdsSwapMaskMXSA"),
+                 comment="toggle LDS buffer"))
     return module
 
   module.addComment0("Emit code to swap %s GR m0 offsets"%tc)
@@ -649,6 +663,17 @@ def _initTDMDescriptorMXScaleSubtile(writer, kernel, scaleTc):
     mod.add(SAddU32(sgpr(waveOff), sgpr(waveOff), ldsBase,
             f"ldsOffset = woffset + {ldsBase}"))
     mod.add(comp.setLdsAddr(group0, sgpr(waveOff)))
+
+    # Pre-compute the LDS double-buffer swap mask for MXSA.
+    # mask = ldsAddr XOR (ldsAddr + ldsTotalSize), stored persistently
+    # so emitScaleGRLDSSwap can toggle correctly on every iteration.
+    ldsTotalSize = writer.ldsTotalSize
+    mod.add(SAddU32(dst=sgpr("tdmLdsSwapMaskMXSA"), src0=sgpr(waveOff),
+            src1=ldsTotalSize,
+            comment=f"addr + ldsTotalSize({ldsTotalSize})"))
+    mod.add(SXorB32(dst=sgpr("tdmLdsSwapMaskMXSA"),
+            src0=sgpr(waveOff), src1=sgpr("tdmLdsSwapMaskMXSA"),
+            comment="swapMask = addr XOR (addr + ldsTotalSize)"))
 
   # Scale TDM descriptor layout for subtile:
   # The subtile scale LR reads from LDS linearly (laneId * 4 + base).
