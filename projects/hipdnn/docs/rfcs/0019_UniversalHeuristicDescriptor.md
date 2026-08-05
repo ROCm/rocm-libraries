@@ -1,9 +1,9 @@
 # RFC 0019: Universal Heuristic Descriptor (UHD): Data-Driven Kernel Selection
 
-- Contributors: (draft — jascampb)
+- Contributors: (draft — jascampb, cderb)
 - Status: First draft, for discussion
 - Parent: [RFC 0017 Universal Kernel Descriptor](0017_UniversalKernelDescriptor.md) (this is the "UHD + kernel selection" follow-up named in [RFC 0017 §12.2](0017_UniversalKernelDescriptor.md#122-follow-up-rfcs))
-- Sibling: **RFC 0018 Universal Match Descriptor (UMD) and the Graph Matcher** — the matcher follow-up from the same series. It pins the **JsonLogic** expression language and the `$`-token namespaces (`$q.*`, `$kernel.*`, `$device.*`) that this RFC's `features_signature` consumes ([Section 7](#7-feature-extraction)).
+- Sibling: **RFC 0018 Universal Match Descriptor (UMD) and the Graph Matcher** ([PR #10341](https://github.com/ROCm/rocm-libraries/pull/10341)) — the matcher follow-up from the same series, with a working implementation. It pins the **JsonLogic** expression language and the `$`-token namespaces (`$q.*`, `$kernel.*`, `$device.*`) that this RFC's `features_signature` consumes ([Section 7](#7-feature-extraction)). Its `JsonLogic.hpp` — a compile-once / evaluate-many implementation with the `$`-sigil convention and the operator set below — is the concrete evaluator this RFC's feature extractor reuses.
 - Related: [RFC 0007 Engine Selection and Heuristics Framework](0007_EngineSelectionHeuristicsFramework.md), [RFC 0013 Autotune](0013_Autotune.md) (the benchmarking substrate for heuristic generation, [Section 14](#14-model-generation-pipeline))
 
 > **Numbering note.** The UMD follow-up also drafted as "RFC 0018"; that number is taken by the matcher
@@ -464,6 +464,20 @@ closed on an unknown symbol, a type error, or an invalid operation, and uses che
 Anything beyond this closed set (e.g. a bespoke occupancy model) uses the `custom_library` escape hatch
 ([Section 8](#8-model-adapters)) rather than growing the interpreter unbounded.
 
+**Implementation status (from the UMD PoC, [PR #10341](https://github.com/ROCm/rocm-libraries/pull/10341)).**
+The shared `JsonLogic.hpp` already implements the arithmetic and comparison operators this RFC's features
+need (`+ - * /`, `min`, `max`, `ceil_div`, `abs`, `pow`, `log2`, `rsqrt`, `value_or_default`, `if`) as a
+compile-once / evaluate-many `Expression<DataT>` over any `getData(path) → Value` source — which is
+exactly the shape the feature extractor wants ([Section 10](#10-performance)). Two caveats carry into
+this RFC:
+
+- **`shape` is a compiler short-hand, not a JsonLogic op** — the UMD compiler lowers it at
+  compile-time. A feature spec should treat `shape`/`rank`-style helpers as lowered forms, not runtime
+  operators.
+- **The custom-operation (native-predicate) hook is deferred** in the PoC. Until it lands, a UHD that
+  needs a computation outside the closed operator set has no in-language path; that is the boundary at
+  which [Section 8](#8-model-adapters)'s `custom_library` adapter (a compiled scorer) takes over.
+
 **Answering the UMD RFC's open question on the feature source.** RFC 0018 (UMD) asks whether "the UMD's
 bindings should be the canonical feature source for kernel selection," noting the bound symbol table
 overlaps the feature vector a UHD consumes. **This RFC's answer is yes**: the `features_signature` draws
@@ -649,17 +663,45 @@ Selection runs on the plan-build path, so its cost must be small and paid at mos
 
 ### 10.2 Loading and Caching
 
-- **Lazy load.** An engine's UHD model is loaded/parsed only when a graph actually reaches kernel
-  selection for that engine, not at provider startup or descriptor discovery. A provider that never
-  hits FMHA never parses the FMHA tree table.
-- **Model cache.** After first load, the parsed model / tree table / native handle is cached for the
-  process (or per `hipdnnHandle`, matching the session-handle lifetime of
-  [RFC 0007 §8.3](0007_EngineSelectionHeuristicsFramework.md#83-plugin-handle-session-object)).
-- **Result cache.** Selection is a pure function of (feature vector, candidate set). A small plan cache
-  keyed by problem fingerprint + candidate-set fingerprint can skip re-inference for repeated graphs.
-  **OPEN:** See [Open Question 8](#operational) (caching scope).
+- **Lazy load, triggered by *ranking* not winning.** An engine's UHD model is loaded/parsed on first
+  use, not at provider startup or descriptor discovery. But per merged RFC 0017, "first use" is **any
+  request that ranks the engine's catalog — including one it goes on to lose**: answering a knob query
+  reports the UHD's top-ranked value as the default ([Section 4.2](#42-kmd-fields-and-knobs-as-a-view-onto-them)),
+  so the model must be cheap to load and cheap to rank with, not merely rare to touch. A provider that
+  never sees FMHA still never parses the FMHA model; one that *enumerates* FMHA engines does.
+- **Model cache — process-scoped, not on the handle.** After first load the parsed model / tree table /
+  native handle is cached for the **process**. RFC 0017 moved caching off the handle deliberately: a
+  handle can be swapped between calls, rebound to another device, or destroyed while a plan built
+  through it is still in use, so handle lifetime says nothing about cache validity.
+- **Result cache on the descriptor cache key.** Selection is a pure function of (feature vector,
+  candidate set). Reuse RFC 0017's applicability cache key — **`(engine id, graph id, device id)` plus
+  the inventory generation counter** — rather than a bespoke fingerprint: the engine id because the
+  catalog is per-engine, the device id because it is what `$device.*` resolved against, and the
+  generation counter so a newly dropped-in pack invalidates. **OPEN:** in-process only vs. a persistent
+  cross-run cache — see [Open Question 8](#operational).
 
-### 10.3 Latency Target
+### 10.3 Efficient evaluation (expressive spec, fast hot path)
+
+Extensibility lives in the data contract; efficiency lives in a compiled core. The seam is the adapter,
+and the extensibility cost is paid once per candidate (one indirect call), not per feature:
+
+- **Lower the `features_signature` at load, never walk JsonLogic per candidate.** The UMD PoC's
+  `JsonLogic.hpp` already compiles a rule to an `Expression<DataT>` once
+  ([Section 7](#7-feature-extraction), [PR #10341](https://github.com/ROCm/rocm-libraries/pull/10341));
+  the feature extractor reuses that so per-candidate scoring is a tight loop over a compiled expression
+  and a flat tree table — no strings, no JSON, no map lookups.
+- **Split the row into a shared prefix + per-candidate suffix.** Problem and device features
+  (`$q.*`, `$device.*`) are identical across every candidate in the engine; only `$kernel.*` differs.
+  Compute the invariant prefix **once per graph** and fill only the kernel-metadata slots per candidate,
+  turning O(N × full-featurize) into O(full-featurize + N × small) for N candidates.
+- **Reuse the matcher's bound symbols — don't re-extract.** The UMD matcher already bound `$q.*` /
+  `$device.*` deciding applicability; selection reads that table rather than re-featurizing. (This is
+  the mechanism behind the [Section 7](#7-feature-extraction) answer that the matcher bindings *are* the
+  feature source.)
+- **Single-candidate short-circuit.** If only one UKD survives matching, skip the model and return it —
+  common, and it makes the load-on-ranking case above nearly free.
+
+### 10.4 Latency Target
 
 The compiled-C path is the performance floor (near-zero inference cost). The `tree_data` walker is
 expected to be close — a flat tree table over a preallocated feature row is a few hundred comparisons
