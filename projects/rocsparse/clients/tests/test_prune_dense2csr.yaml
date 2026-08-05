@@ -97,6 +97,7 @@ Tests:
 # Stress
 - name: prune_dense2csr
   category: stress
+  hardware: [gfx942, gfx950]
   function: prune_dense2csr
   precision: *single_only_precisions
   M: [47000]
