@@ -7,7 +7,8 @@
  * StreamK kernels share one Synchronizer allocation across launches and must
  * leave it at zero on exit so the next launch starts clean. Residue is silent
  * -- it corrupts a later launch, not the one that left it -- so this listener
- * reads the buffer back, re-zeroes it, and fails the run on any nonzero byte.
+ * reads the buffer back and fails the run on any nonzero byte, clearing the
+ * residue so it is reported once rather than by every solution that follows.
  * It also fails when the buffer is declared too narrow to scan in full.
  *
  * Enabled by --check-streamk-sync (GlobalParameters CheckStreamKSync).
