@@ -269,3 +269,33 @@ TEST(TestPointwiseSignatureKey, DifferentOperationsAreDifferent)
     const size_t totalOps = unaryCount + binaryCount;
     EXPECT_EQ(uniqueKeys.size(), totalOps);
 }
+
+TEST(TestPointwiseSignatureKey, CreateFromNodeAndTensorMapTernary)
+{
+    const PointwiseSignatureKey expectedKey{PointwiseMode::BINARY_SELECT,
+                                            DataType::FLOAT,
+                                            DataType::FLOAT,
+                                            DataType::FLOAT,
+                                            DataType::FLOAT,
+                                            DataType::BOOLEAN};
+    auto [graph, tensorBundle, variantPack]
+        = buildPointwiseTernaryGraph({1, 1, 1, 1},
+                                     {1, 1, 1, 1},
+                                     {1, 1, 1, 1},
+                                     {1, 1, 1, 1},
+                                     DataType::FLOAT,
+                                     DataType::FLOAT,
+                                     DataType::BOOLEAN,
+                                     DataType::FLOAT,
+                                     DataType::FLOAT,
+                                     hipdnn_frontend::PointwiseMode::BINARY_SELECT);
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
+        serializedGraph.data(), serializedGraph.size());
+
+    const PointwiseSignatureKey keyFromNode(graphWrapper.getNode(0), graphWrapper.getTensorMap());
+
+    EXPECT_EQ(keyFromNode, expectedKey);
+    EXPECT_EQ(keyFromNode.input2DataType, DataType::BOOLEAN);
+}

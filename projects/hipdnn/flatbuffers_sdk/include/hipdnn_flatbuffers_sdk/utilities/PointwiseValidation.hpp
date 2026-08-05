@@ -48,6 +48,7 @@ inline const PointwiseModeBitset& getImplementedBinaryModesBitset()
         bitset.set(toBitPosition(data_objects::PointwiseMode::ADD));
         bitset.set(toBitPosition(data_objects::PointwiseMode::SUB));
         bitset.set(toBitPosition(data_objects::PointwiseMode::MUL));
+        bitset.set(toBitPosition(data_objects::PointwiseMode::CMP_GT));
         bitset.set(toBitPosition(data_objects::PointwiseMode::RELU_BWD));
         bitset.set(toBitPosition(data_objects::PointwiseMode::SIGMOID_BWD));
         bitset.set(toBitPosition(data_objects::PointwiseMode::TANH_BWD));
@@ -164,10 +165,10 @@ inline bool isImplementedBinaryPointwiseMode(data_objects::PointwiseMode mode)
     return position < POINTWISE_MODE_COUNT && getImplementedBinaryModesBitset().test(position);
 }
 
-inline bool isImplementedTernaryPointwiseMode(data_objects::PointwiseMode /* mode */)
+inline bool isImplementedTernaryPointwiseMode(data_objects::PointwiseMode mode)
 {
-    // Currently no ternary operations are implemented
-    return false;
+    auto position = toBitPosition(mode);
+    return position < POINTWISE_MODE_COUNT && getTernaryModesBitset().test(position);
 }
 
 } // namespace hipdnn_flatbuffers_sdk::utilities

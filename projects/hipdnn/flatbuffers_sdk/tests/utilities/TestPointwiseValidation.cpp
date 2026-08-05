@@ -169,6 +169,7 @@ TEST(TestPointwiseValidation, KnownImplementedBinaryOperations)
     const std::set<PointwiseMode> expectedImplementedBinary = {PointwiseMode::ADD,
                                                                PointwiseMode::SUB,
                                                                PointwiseMode::MUL,
+                                                               PointwiseMode::CMP_GT,
                                                                PointwiseMode::RELU_BWD,
                                                                PointwiseMode::SIGMOID_BWD,
                                                                PointwiseMode::TANH_BWD};
@@ -188,6 +189,17 @@ TEST(TestPointwiseValidation, KnownImplementedBinaryOperations)
         const bool isActuallyImplemented = isImplementedBinaryPointwiseMode(mode);
 
         EXPECT_EQ(isActuallyImplemented, isExpectedImplemented)
+            << "Mode " << static_cast<int>(mode) << " implementation status mismatch";
+    }
+}
+
+TEST(TestPointwiseValidation, KnownImplementedTernaryOperations)
+{
+    for(size_t i = 0; i < POINTWISE_MODE_COUNT; ++i)
+    {
+        const auto mode = static_cast<PointwiseMode>(i);
+        const bool isExpectedImplemented = mode == PointwiseMode::BINARY_SELECT;
+        EXPECT_EQ(isImplementedTernaryPointwiseMode(mode), isExpectedImplemented)
             << "Mode " << static_cast<int>(mode) << " implementation status mismatch";
     }
 }

@@ -59,8 +59,8 @@ The following table lists all operations currently supported in the CPU Referenc
 | Operation Type | Plan Builder | Signature Key | Supported Operations |
 |----------------|-------------|---------------|---------------------|
 | Unary Operations | `PointwisePlanBuilder` | `PointwiseSignatureKey` | RELU_FWD, SIGMOID_FWD, TANH_FWD, ABS, NEG |
-| Binary Operations | `PointwisePlanBuilder` | `PointwiseSignatureKey` | ADD, SUB, MUL, RELU_BWD, SIGMOID_BWD, TANH_BWD |
-| Ternary Operations | `PointwisePlanBuilder` | `PointwiseSignatureKey` | None Supported Yet |
+| Binary Operations | `PointwisePlanBuilder` | `PointwiseSignatureKey` | ADD, SUB, MUL, CMP_GT, RELU_BWD, SIGMOID_BWD, TANH_BWD |
+| Ternary Operations | `PointwisePlanBuilder` | `PointwiseSignatureKey` | BINARY_SELECT (BOOLEAN mask) |
 
 ## Legend
 

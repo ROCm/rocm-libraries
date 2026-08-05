@@ -15,6 +15,7 @@ static_assert(std::is_same_v<DataTypeToNative<DataType::HALF>, half>);
 static_assert(std::is_same_v<DataTypeToNative<DataType::DOUBLE>, double>);
 static_assert(std::is_same_v<DataTypeToNative<DataType::INT32>, int32_t>);
 static_assert(std::is_same_v<DataTypeToNative<DataType::BFLOAT16>, bfloat16>);
+static_assert(std::is_same_v<DataTypeToNative<DataType::BOOLEAN>, bool>);
 
 // Compile-time checks for Native type to DataType mapping
 // NativeToDataType is a type alias, but we can use nativeTypeToDataType in constexpr context
@@ -31,6 +32,7 @@ TEST(TestFlatbufferDatatypeMapping, DataTypeToNativeRuntimeSizeChecks)
     EXPECT_EQ(sizeof(DataTypeToNative<DataType::DOUBLE>), sizeof(double));
     EXPECT_EQ(sizeof(DataTypeToNative<DataType::INT32>), sizeof(int32_t));
     EXPECT_EQ(sizeof(DataTypeToNative<DataType::BFLOAT16>), sizeof(bfloat16));
+    EXPECT_EQ(sizeof(DataTypeToNative<DataType::BOOLEAN>), sizeof(bool));
 }
 
 TEST(TestFlatbufferDatatypeMapping, NativeToDataTypeConversion)

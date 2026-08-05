@@ -44,6 +44,10 @@ constexpr auto datatypeToNative()
     {
         return int32_t{};
     }
+    else if constexpr(DT == DataType::BOOLEAN)
+    {
+        return bool{};
+    }
     else if constexpr(DT == DataType::BFLOAT16)
     {
         return bfloat16{};
