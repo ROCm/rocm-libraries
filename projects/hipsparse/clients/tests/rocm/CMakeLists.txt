@@ -242,3 +242,13 @@ if(HIPSPARSE_ENABLE_SPMV_BSR)
     list(APPEND HIPSPARSE_TEST_SOURCES test_spmv_bsr.cpp)
     list(APPEND HIPSPARSE_TEST_YAMLS rocm/test_spmv_bsr.yaml)
 endif()
+
+if(BUILD_WITH_CSC_TRSV)
+    list(APPEND HIPSPARSE_TEST_SOURCES test_spsv_csc.cpp)
+    list(APPEND HIPSPARSE_TEST_YAMLS rocm/test_spsv_csc.yaml)
+endif()
+
+if(BUILD_WITH_CSC_TRSM)
+    list(APPEND HIPSPARSE_TEST_SOURCES test_spsm_csc.cpp)
+    list(APPEND HIPSPARSE_TEST_YAMLS rocm/test_spsm_csc.yaml)
+endif()

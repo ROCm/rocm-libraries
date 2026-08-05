@@ -1919,3 +1919,33 @@ TEST_F(TestCpuReferencePointwiseUnaryMixed2Fp32, UnaryMixedTypeSwishForward)
 {
     this->testSwishForwardOperation();
 }
+
+// --- Regression tests ---
+
+TEST(TestCpuReferencePointwiseRegressions, ParameterizedReluBwdBfloat16LowerClipEdgeCase)
+{
+    // In bfloat16, a value higher than lowerClip can be equal to lowerClip if lowerClip itself is cast to bfloat16. However, this value should still register as higher than lowerClip.
+
+    Tensor<bfloat16> dy({1, 1, 1, 1});
+    Tensor<bfloat16> y({1, 1, 1, 1});
+    Tensor<bfloat16> output({1, 1, 1, 1});
+
+    const float lowerClip = 0.1f;
+    const float upperClip = 0.5f;
+    const float lowerSlope = 0.2f;
+
+    // Set y to a value slightly above lowerClip. In bfloat16, this is equal to lowerClip
+    dy.setHostValue(safeTestTypeCast<bfloat16>(1.0f), 0, 0, 0, 0);
+    dy.markHostModified();
+    y.setHostValue(safeTestTypeCast<bfloat16>(0.10009765625f), 0, 0, 0, 0);
+    y.markHostModified();
+
+    EXPECT_NE(lowerClip, safeTestTypeCast<float>(y.getHostValue(0, 0, 0, 0)));
+
+    CpuReferencePointwiseImpl<bfloat16, bfloat16, bfloat16>::pointwiseCompute(
+        PointwiseMode::RELU_BWD, output, dy, y, lowerClip, upperClip, lowerSlope);
+
+    output.markDeviceModified();
+
+    EXPECT_EQ(output.getHostValue(0, 0, 0, 0), dy.getHostValue(0, 0, 0, 0));
+}

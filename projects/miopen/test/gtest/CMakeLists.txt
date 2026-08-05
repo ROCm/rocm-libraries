@@ -61,6 +61,7 @@ if(THEROCK_SANITIZER STREQUAL "ASAN")
         miopendriver_conv_immed.cpp
         miopendriver_regression_half_gfx9.cpp
         unit_conv_solver_ConvCkGroupedConvFwd.cpp
+        unit_conv_solver_ConvDepthwiseBwdData2D_test.cpp
         unit_conv_solver_ConvHipImplicitGemm3DGroupBwdXdlops.cpp
         unit_conv_solver_ConvHipImplicitGemm3DGroupFwdXdlops.cpp
         unit_conv_solver_ConvHipImplicitGemm3DGroupWrwXdlops.cpp

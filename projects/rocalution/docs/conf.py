@@ -8,8 +8,10 @@ import re
 
 from rocm_docs import ROCmDocs
 
-with open('../CMakeLists.txt', encoding='utf-8') as f:
-    match = re.search(r'.*\brocm_setup_version\(VERSION\s+\"?([0-9.]+)[^0-9.]+', f.read())
+with open("../CMakeLists.txt", encoding="utf-8") as f:
+    match = re.search(
+        r".*\brocm_setup_version\(VERSION\s+\"?([0-9.]+)[^0-9.]+", f.read()
+    )
     if not match:
         raise ValueError("VERSION not found!")
     version_number = match[1]
@@ -24,6 +26,8 @@ release = version_number
 
 external_toc_path = "./sphinx/_toc.yml"
 
+numfig = True
+
 docs_core = ROCmDocs(left_nav_title)
 docs_core.run_doxygen(doxygen_root="doxygen", doxygen_path="doxygen/xml")
 docs_core.setup()
@@ -32,3 +36,11 @@ external_projects_current_project = "rocalution"
 
 for sphinx_var in ROCmDocs.SPHINX_VARS:
     globals()[sphinx_var] = getattr(docs_core, sphinx_var)
+
+html_theme_options.update(
+    {
+        "repository_url": "https://github.com/ROCm/rocm-libraries",
+        "use_repository_button": True,
+        "use_issues_button": True,
+    }
+)

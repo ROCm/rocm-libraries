@@ -43,6 +43,9 @@ add_executable(
     $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimError.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimTensor.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimV9Tu.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimGraph.cpp>
+    # SDPA node coverage additionally needs the SDPA build.
+    $<$<AND:$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>,$<BOOL:${HIPDNN_ENABLE_SDPA}>>:TestCudnnShimGraphSDPA.cpp>
     TestDescriptorHelpers.cpp
     TestDescriptorUnpackHelpers.cpp
     TestConvolutionWgradNode.cpp
@@ -75,6 +78,9 @@ add_executable(
     TestPointwiseNode.cpp
     TestReductionAttributes.cpp
     TestReductionNode.cpp
+    TestGraphResampleBwd.cpp
+    TestResampleBwdAttributes.cpp
+    TestResampleBwdNode.cpp
     TestResampleFwdAttributes.cpp
     TestResampleFwdNode.cpp
     TestRMSNormAttributes.cpp

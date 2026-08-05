@@ -88,6 +88,19 @@ using hipdnn_data_sdk::types::half;
         }                                                                                       \
     } while(0)
 
+// Gracefully skip a sample when no GPU is present: prints a skip message and
+// returns 0 from the enclosing function.
+#define RETURN_SUCCESS_IF_NO_DEVICE()                                         \
+    do                                                                        \
+    {                                                                         \
+        int deviceCount = 0;                                                  \
+        if(hipGetDeviceCount(&deviceCount) != hipSuccess || deviceCount == 0) \
+        {                                                                     \
+            std::cout << "SKIPPED: No GPU devices available.\n";              \
+            return 0;                                                         \
+        }                                                                     \
+    } while(0)
+
 // SAMPLE TYPES
 
 enum class SampleType
