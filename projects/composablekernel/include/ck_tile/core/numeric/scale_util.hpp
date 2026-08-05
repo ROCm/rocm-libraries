@@ -33,10 +33,13 @@ struct ScaleUtils
     static constexpr storage_t exponent_mask =
         static_cast<storage_t>((storage_t{1} << ExponentBits) - 1);
     static constexpr storage_t max_exponent = exponent_mask;
-    static constexpr storage_t max_finite =
-        static_cast<storage_t>((exponent_mask << MantissaBits) | mantissa_mask - 1);
     static constexpr storage_t nan_mask =
         static_cast<storage_t>((exponent_mask << MantissaBits) | mantissa_mask);
+    // Largest encoding that is not the NaN encoding. Derived from nan_mask so the
+    // relationship cannot be broken by operator precedence: writing the mask
+    // expression out again and subtracting 1 binds as `... | (mantissa_mask - 1)`,
+    // which is only accidentally correct when MantissaBits >= 1.
+    static constexpr storage_t max_finite = static_cast<storage_t>(nan_mask - 1);
     static constexpr storage_t value_mask = storage_t{0xFF};
     static constexpr int bias             = (storage_t{1} << (ExponentBits - 1)) - 1;
 

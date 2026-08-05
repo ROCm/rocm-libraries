@@ -47,6 +47,33 @@ TEST(OCP_Scale, NumericLimits)
     EXPECT_EQ(ck_tile::numeric<e8m0_t>::min(), e8m0_t{e8m0_raw_t{0b00000000}});
     EXPECT_EQ(ck_tile::numeric<e8m0_t>::max(), e8m0_t{e8m0_raw_t{0b11111110}});
 }
+TEST(OCP_Scale, ScaleUtilsMaxFiniteIsNotNaN)
+{
+    // max_finite must be the largest encoding that is not the NaN encoding, for
+    // every (ExponentBits, MantissaBits) ScaleUtils admits, including the
+    // MantissaBits == 0 case that mantissa_mask explicitly special-cases.
+    using E8M0 = ck_tile::ScaleUtils<8, 0>;
+    using E5M2 = ck_tile::ScaleUtils<5, 2>;
+    using E4M3 = ck_tile::ScaleUtils<4, 3>;
+    using E5M3 = ck_tile::ScaleUtils<5, 3>;
+
+    static_assert(E8M0::max_finite != E8M0::nan_mask, "max_finite must not be the NaN encoding");
+    static_assert(E5M2::max_finite != E5M2::nan_mask, "max_finite must not be the NaN encoding");
+    static_assert(E4M3::max_finite != E4M3::nan_mask, "max_finite must not be the NaN encoding");
+    static_assert(E5M3::max_finite != E5M3::nan_mask, "max_finite must not be the NaN encoding");
+
+    // E8M0 encodings are fixed by the format: 0b11111110 is the largest finite
+    // scale (2^127) and 0b11111111 is NaN. Same values as OCP_Scale.NumericLimits
+    // above asserts for numeric<e8m0_t>.
+    EXPECT_EQ(static_cast<int>(E8M0::nan_mask), 0b11111111);
+    EXPECT_EQ(static_cast<int>(E8M0::max_finite), 0b11111110);
+    EXPECT_FALSE(E8M0::is_nan(E8M0::max_finite));
+
+    EXPECT_EQ(static_cast<int>(E4M3::max_finite), static_cast<int>(E4M3::nan_mask) - 1);
+    EXPECT_EQ(static_cast<int>(E5M3::max_finite), static_cast<int>(E5M3::nan_mask) - 1);
+    EXPECT_FALSE(E4M3::is_nan(E4M3::max_finite));
+    EXPECT_FALSE(E5M3::is_nan(E5M3::max_finite));
+}
 TEST(OCP_Scale, NumericBasic)
 {
     auto scale_1 = e8m0_t{1.0f};
