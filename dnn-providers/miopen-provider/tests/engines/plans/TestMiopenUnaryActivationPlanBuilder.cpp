@@ -117,8 +117,9 @@ const std::vector<ActivationCase>& getActivationCases()
 
 // Shared state for both fixtures below. A single builder handles every unary activation, so
 // there is nothing per-activation to configure here.
-struct UnaryActivationPlanBuilderFixture
+class UnaryActivationPlanBuilderFixture
 {
+protected:
     MiopenUnaryActivationPlanBuilder _planBuilder;
     std::unique_ptr<HipdnnMiopenHandle> _dummyHandle;
     MockEngineConfig _mockEngineConfig;
@@ -149,7 +150,7 @@ protected:
         _dummyHandle = std::make_unique<HipdnnMiopenHandle>();
     }
 
-    PointwiseGraphSpec validSpec() const
+    static PointwiseGraphSpec validSpec()
     {
         PointwiseGraphSpec spec;
         spec.mode = GetParam().mode;
