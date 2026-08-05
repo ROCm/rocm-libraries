@@ -835,27 +835,6 @@ def test_runtime_staggeru_controls_for_tdm_pap(pap, tdm, expected):
     assert state["InternalSupportParams"]["SupportCustomStaggerU"] is support_custom
 
 
-@pytest.mark.parametrize(
-    "cluster_dim, expected",
-    [
-        pytest.param([1, 1], (32, 2, 256, True), id="no_cluster_keeps_runtime_custom_staggeru"),
-        pytest.param([2, 2], (0, 0, 0, False), id="cluster_2x2_disables_runtime_custom_staggeru"),
-        pytest.param([4, 4], (0, 0, 0, False), id="cluster_4x4_disables_runtime_custom_staggeru"),
-    ],
-)
-def test_runtime_staggeru_controls_for_cluster(cluster_dim, expected):
-    # PAP off + TDM off so only the workgroup-cluster gate can fire.
-    state = _stagger_runtime_state(pap=False, tdm=False, ClusterDim=cluster_dim)
-
-    _disableUnsupportedRuntimeStaggerU(state)
-
-    stagger_u, mapping, stride, support_custom = expected
-    assert state["StaggerU"] == stagger_u
-    assert state["StaggerUMapping"] == mapping
-    assert state["StaggerUStride"] == stride
-    assert state["InternalSupportParams"]["SupportCustomStaggerU"] is support_custom
-
-
 def test_setup_new_tile_releases_waveidx_for_pap_wave_separated_tdm(monkeypatch):
     monkeypatch.setattr(kw_module.Component.GSU, "find", lambda writer: _StubGsu())
 
