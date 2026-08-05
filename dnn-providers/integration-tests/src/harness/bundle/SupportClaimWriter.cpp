@@ -314,7 +314,8 @@ std::vector<std::filesystem::path> ClaimObservationCollector::writeAll() const
         const auto& anchorPath = bucket.front().target.anchorPath;
         if(bucket.front().target.isSweepCase())
         {
-            auto existing = loadSweepSupportClaims(anchorPath).value_or(SweepSupportClaims{});
+            auto existingOpt = loadSweepSupportClaims(anchorPath);
+            const bool fileExisted = existingOpt.has_value();
             std::vector<SweepClaimObservation> observations;
             observations.reserve(bucket.size());
             for(const auto& record : bucket)
@@ -325,7 +326,22 @@ std::vector<std::filesystem::path> ClaimObservationCollector::writeAll() const
                                         record.platform,
                                         record.supported});
             }
-            auto merged = applySweepClaimObservations(std::move(existing), observations);
+            auto merged = applySweepClaimObservations(
+                std::move(existingOpt).value_or(SweepSupportClaims{}), observations);
+
+            // A brand-new sidecar (no prior file) that ends up with zero
+            // claims after this run's observations would still flip the
+            // sibling case(s) it covers into "claim-bearing" per the loader
+            // (a support.json's mere existence requires an explicit
+            // enforcement_level -- RFC 0015 §6.2), for zero enforcement
+            // value (there is nothing to enforce with no claims). Only
+            // write it when refreshing a file that already existed (where
+            // that requirement was already in force) or the merge produced
+            // at least one real claim.
+            if(!fileExisted && merged.claims.empty())
+            {
+                continue;
+            }
 
             const auto sidecarPath = anchorPath / "support.json";
             writeSweepSupportClaimsFile(sidecarPath, merged);
@@ -333,7 +349,8 @@ std::vector<std::filesystem::path> ClaimObservationCollector::writeAll() const
         }
         else
         {
-            auto existing = loadSupportClaims(anchorPath).value_or(SupportClaims{});
+            auto existingOpt = loadSupportClaims(anchorPath);
+            const bool fileExisted = existingOpt.has_value();
             std::vector<ClaimObservation> observations;
             observations.reserve(bucket.size());
             for(const auto& record : bucket)
@@ -341,7 +358,14 @@ std::vector<std::filesystem::path> ClaimObservationCollector::writeAll() const
                 observations.push_back(
                     {record.engine, record.arch, record.platform, record.supported});
             }
-            auto merged = applyClaimObservations(std::move(existing), observations);
+            auto merged = applyClaimObservations(std::move(existingOpt).value_or(SupportClaims{}),
+                                                 observations);
+
+            // Same rationale as the sweep branch above.
+            if(!fileExisted && merged.claims.empty())
+            {
+                continue;
+            }
 
             const auto sidecarPath = supportJsonPath(anchorPath);
             writeSupportClaimsFile(sidecarPath, merged);

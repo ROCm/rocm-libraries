@@ -142,9 +142,18 @@ public:
 
     // Groups every recorded observation by its write target and writes each
     // target's merged (existing + observed) claims to disk in canonical
-    // form. Returns every file path written, in no particular order. Throws
-    // std::runtime_error (naming the offending file) on the first file that
-    // cannot be opened for writing -- callers should treat that as fatal.
+    // form. Returns every file path actually written, in no particular
+    // order. A target with no pre-existing sidecar whose merged claims come
+    // out empty is skipped entirely rather than creating a net-new
+    // zero-claim file: the sidecar's mere existence makes its bundle
+    // claim-bearing (RFC 0015 §6.2 then requires an explicit
+    // enforcement_level), which would be a pure liability for a graph this
+    // run found nobody currently supports -- refreshing an *existing*
+    // sidecar down to empty claims is unaffected (that bundle was already
+    // claim-bearing, and an empty result is the real "coverage dropped to
+    // zero" signal). Throws std::runtime_error (naming the offending file)
+    // on the first file that cannot be opened for writing -- callers
+    // should treat that as fatal.
     std::vector<std::filesystem::path> writeAll() const;
 
 private:

@@ -367,6 +367,65 @@ TEST_F(TestClaimObservationCollector, WriteAllCreatesFreshSweepSidecarGroupedByC
     EXPECT_TRUE(loaded->isClaimed("small_fp16", "MIOPEN_ENGINE", "gfx942", "linux"));
 }
 
+TEST_F(TestClaimObservationCollector, WriteAllSkipsNetNewSingleGraphFileWhenAllDeclined)
+{
+    // Regression: a bundle nobody currently supports, with no pre-existing
+    // sidecar, must not gain one. An empty-claims support.json still makes
+    // the bundle claim-bearing (RFC 0015 §6.2 then requires an explicit
+    // enforcement_level), which would silently drop the bundle from every
+    // future test run if it never had one -- for zero enforcement benefit.
+    ScopedTempDir dir;
+    const auto graphJsonPath = dir.path() / "Foo.json";
+
+    ClaimObservationCollector::get().record(
+        ClaimWriteTarget{graphJsonPath, std::nullopt}, "MIOPEN_ENGINE", "gfx942", "linux", false);
+
+    auto written = ClaimObservationCollector::get().writeAll();
+
+    EXPECT_TRUE(written.empty());
+    EXPECT_FALSE(std::filesystem::exists(dir.path() / "Foo.support.json"));
+}
+
+TEST_F(TestClaimObservationCollector, WriteAllRefreshesExistingSingleGraphFileToEmptyWhenDeclined)
+{
+    // Contrast with the above: a bundle that WAS claim-bearing (a sidecar
+    // already exists) and loses its only claim must still be refreshed --
+    // that empty result is the real "coverage dropped to zero" signal, and
+    // the enforcement_level requirement was already in force for this
+    // bundle before this run.
+    ScopedTempDir dir;
+    const auto graphJsonPath = dir.path() / "Foo.json";
+    const auto sidecarPath = dir.path() / "Foo.support.json";
+
+    SupportClaims preexisting;
+    preexisting.version = 1;
+    preexisting.claims["MIOPEN_ENGINE"]["gfx942"] = {"linux"};
+    writeSupportClaimsFile(sidecarPath, preexisting);
+
+    ClaimObservationCollector::get().record(
+        ClaimWriteTarget{graphJsonPath, std::nullopt}, "MIOPEN_ENGINE", "gfx942", "linux", false);
+
+    auto written = ClaimObservationCollector::get().writeAll();
+
+    ASSERT_EQ(written.size(), 1u);
+    auto loaded = loadSupportClaims(graphJsonPath);
+    ASSERT_TRUE(loaded.has_value());
+    EXPECT_TRUE(loaded->claims.empty());
+}
+
+TEST_F(TestClaimObservationCollector, WriteAllSkipsNetNewSweepFileWhenAllDeclined)
+{
+    ScopedTempDir dir;
+
+    ClaimObservationCollector::get().record(
+        ClaimWriteTarget{dir.path(), "small_fp16"}, "MIOPEN_ENGINE", "gfx942", "linux", false);
+
+    auto written = ClaimObservationCollector::get().writeAll();
+
+    EXPECT_TRUE(written.empty());
+    EXPECT_FALSE(std::filesystem::exists(dir.path() / "support.json"));
+}
+
 TEST_F(TestClaimObservationCollector, ResetClearsRecordedObservations)
 {
     ClaimObservationCollector::get().record(
