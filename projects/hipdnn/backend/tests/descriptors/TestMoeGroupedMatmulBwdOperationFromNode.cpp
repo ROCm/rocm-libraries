@@ -361,6 +361,45 @@ TEST_F(TestMoeGroupedMatmulBwdOperationFromNode, FailsWithExpertCountMismatch)
                                HIPDNN_STATUS_BAD_PARAM);
 }
 
+TEST_F(TestMoeGroupedMatmulBwdOperationFromNode, FailsWithDoutputNonSingletonLeadingDimension)
+{
+    // DOUTPUT_DESC dim[0] is a singleton placeholder axis; supply dim[0]=2 instead.
+    replaceTensor(
+        K_MOE_GROUPED_MATMUL_BWD_TENSOR_DOUTPUT_UID, {2, 8, 32}, {256, 32, 1}, DataType::FLOAT);
+    auto node = createStandardNode();
+
+    ASSERT_THROW_HIPDNN_STATUS(MoeGroupedMatmulBwdOperationDescriptor::fromNode(node, _tensorMap),
+                               HIPDNN_STATUS_BAD_PARAM);
+}
+
+TEST_F(TestMoeGroupedMatmulBwdOperationFromNode, FailsWithTokenNonSingletonLeadingDimension)
+{
+    // TOKEN_DESC dim[0] is a singleton placeholder axis; supply dim[0]=2 instead.
+    replaceTensor(
+        K_MOE_GROUPED_MATMUL_BWD_TENSOR_TOKEN_UID, {2, 8, 16}, {128, 16, 1}, DataType::FLOAT);
+    auto node = createStandardNode();
+
+    ASSERT_THROW_HIPDNN_STATUS(MoeGroupedMatmulBwdOperationDescriptor::fromNode(node, _tensorMap),
+                               HIPDNN_STATUS_BAD_PARAM);
+}
+
+TEST_F(TestMoeGroupedMatmulBwdOperationFromNode, FailsWithDweightZeroExpertCount)
+{
+    // DWEIGHT_DESC dim[0] (expert count) must describe at least one expert. Zero out
+    // FIRST_TOKEN_OFFSET_DESC's expert count too, so the expert-count-match check can't
+    // also fire on 0 vs 2 and mask a deleted zero-expert check.
+    replaceTensor(
+        K_MOE_GROUPED_MATMUL_BWD_TENSOR_DWEIGHT_UID, {0, 16, 32}, {512, 32, 1}, DataType::FLOAT);
+    replaceTensor(K_MOE_GROUPED_MATMUL_BWD_TENSOR_FIRST_TOKEN_OFFSET_UID,
+                  {0, 1, 1},
+                  {1, 1, 1},
+                  DataType::INT32);
+    auto node = createStandardNode();
+
+    ASSERT_THROW_HIPDNN_STATUS(MoeGroupedMatmulBwdOperationDescriptor::fromNode(node, _tensorMap),
+                               HIPDNN_STATUS_BAD_PARAM);
+}
+
 TEST_F(TestMoeGroupedMatmulBwdOperationFromNode, GetTensorDescriptorsReturnsAllTensors)
 {
     auto node = createStandardNode();

@@ -348,9 +348,13 @@ TEST(TestMoeGroupedMatmulBwdNode, PreValidateNodeRejectsTokenNonSingletonLeading
 TEST(TestMoeGroupedMatmulBwdNode, PreValidateNodeRejectsDweightZeroExpertCount)
 {
     auto attrs = createValidAttributes();
-    // dweight dim[0] (expert count) must describe at least one expert.
+    // dweight dim[0] (expert count) must describe at least one expert. Zero out
+    // first_token_offset's expert count too, so the later expert-count-match check can't
+    // also fire on 0 vs 2 and mask a deleted zero-expert check.
     attrs.get_dweight()->set_dim({0, 16, 32});
     attrs.get_dweight()->set_stride({512, 32, 1});
+    attrs.get_first_token_offset()->set_dim({0, 1, 1});
+    attrs.get_first_token_offset()->set_stride({1, 1, 1});
 
     const GraphAttributes graphAttributes;
     const MoeGroupedMatmulBwdNode node(std::move(attrs), graphAttributes);
