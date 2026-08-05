@@ -226,6 +226,7 @@ inline bool isRuntimeGemmAccumulator(ScalarType type) {
     switch (type) {
         case ScalarType::Float32:
         case ScalarType::Float64:
+        case ScalarType::Int32:
         case ScalarType::ComplexFloat32:
         case ScalarType::ComplexFloat64:
             return true;
@@ -304,7 +305,7 @@ inline void validateRuntimeGemm(const GemmProblem& problem) {
         throw std::invalid_argument("Reference GEMM D shape mismatch.");
     if (!isRuntimeGemmAccumulator(problem.accumulatorType))
         throw std::invalid_argument(
-            "Runtime reference GEMM currently supports F32, F64, C64, and "
+            "Runtime reference GEMM currently supports F32, F64, I32, C64, and "
             "C128 accumulators.");
 
     const bool complexAccumulator = isComplexScalarType(problem.accumulatorType);
@@ -576,6 +577,9 @@ inline GemmRunInfo referenceGemm(const GemmProblem& problem, const GemmRunOption
             break;
         case ScalarType::Float64:
             result = detail::referenceRuntimeCanonical<double>(problem);
+            break;
+        case ScalarType::Int32:
+            result = detail::referenceRuntimeCanonical<int32_t>(problem);
             break;
         case ScalarType::ComplexFloat32:
             result = detail::referenceRuntimeCanonical<std::complex<float>>(problem);
