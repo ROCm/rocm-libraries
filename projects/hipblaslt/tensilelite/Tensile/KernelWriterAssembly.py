@@ -143,6 +143,11 @@ class GlobalReadGprRecord:
 ################################################################################
 class KernelWriterAssembly(KernelWriter):
 
+  # SGPRs reserved on top of the post-define pool size before the TDM stagger
+  # fast wave-parity path (which pins sgpr("WaveIdx")) is allowed. See
+  # defineVariableSgprs for the measurement this is derived from.
+  TDM_WAVEIDX_FAST_PARITY_MARGIN = 10
+
   ##############################################################################
   # Init
   ##############################################################################
@@ -354,6 +359,17 @@ class KernelWriterAssembly(KernelWriter):
   def isTdmWaveSeparated(self, kernel) -> bool:
     return kernel["enableTDMA"] and kernel["enableTDMB"] and kernel["NumWaves"] > 1
 
+  def useTdmWaveIdxFastParity(self, kernel) -> bool:
+    """Whether TDM StaggerU keeps sgpr("WaveIdx") checked out past setupNewTile so
+    wave parity can be read from it instead of recomputed from vgpr("Serial").
+
+    Single source of truth for the setupNewTile release guard, the parity
+    emitters and releaseWaveIdxAfterStagger: those three must never disagree.
+    """
+    return bool(self.states.staggerUCode) \
+        and self.states.tdmWaveIdxFastParity \
+        and self.isTdmWaveSeparated(kernel)
+
   def isTdmWaveIdxLive(self, kernel) -> bool:
     if not (kernel["enableTDMA"] or kernel["enableTDMB"]):
       return False
@@ -363,7 +379,7 @@ class KernelWriterAssembly(KernelWriter):
       return True
     if self.states.waveIdxReleasedAfterStagger:
       return False
-    return bool(self.states.staggerUCode) and self.isTdmWaveSeparated(kernel)
+    return self.useTdmWaveIdxFastParity(kernel)
 
   ########################################
   def strideRef(self, tc, dim):
@@ -912,6 +928,19 @@ class KernelWriterAssembly(KernelWriter):
     if self.sgprPool.size() > self.states.regCaps["MaxSgpr"]:
       print ("warning: Number of defined SGPRS (%d) overflowed max SGPRS (%d)." \
                % (self.sgprPool.size(), self.states.regCaps["MaxSgpr"]))
+
+    # All persistent SGPRs are defined by now, so this is the earliest point at
+    # which the fast wave-parity path can be priced. Keeping WaveIdx checked out
+    # past setupNewTile costs +2 SGPR at peak: it holds one very low index and
+    # thereby fragments the low end of the pool that checkOutAligned scans first.
+    # Peak usage is only reached much later (globalWriteElements / refineOccupancy),
+    # so the decision has to be a margin over the pool size here rather than an
+    # exact budget. Across the gfx1250 MX StreamK+PAP+TDM family the growth from
+    # this point to peak measures 8-9 SGPRs (PrefetchGL2 x StreamKForceDPOnly:
+    # 85->94, 89->98, 95->103, 99->107), so 10 bounds the worst observed growth
+    # with one register of slack.
+    self.states.tdmWaveIdxFastParity = \
+        self.sgprPool.size() + self.TDM_WAVEIDX_FAST_PARITY_MARGIN <= self.states.regCaps["MaxSgpr"]
 
     # End of define sgprs
     #------------------------
@@ -6626,7 +6655,7 @@ class KernelWriterAssembly(KernelWriter):
     # The cluster barrier handshake reads WaveIdx for the whole kernel.
     if kernel["ClusterBarrier"]:
       return module
-    if not (self.states.staggerUCode and self.isTdmWaveSeparated(kernel)):
+    if not self.useTdmWaveIdxFastParity(kernel):
       return module
     # Idempotent: removeStaggerAB has two mutually exclusive call sites.
     # Double undefineSgpr is a compiler error; double pool check-in corrupts the pool.

@@ -400,6 +400,9 @@ class StateValues:
   tailloopInNllmaxUnit: int              = 0
   staggerUCode: bool                     = 0
   waveIdxReleasedAfterStagger: bool      = False
+  # Set in defineVariableSgprs; False until then so any earlier query takes the
+  # safe recompute path.
+  tdmWaveIdxFastParity: bool             = False
   scheduleGROverBarrier: bool            = False
   numLDSBlk: int                         = 0
   IncLdsBufSwitch: bool                  = False
@@ -3013,10 +3016,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
           module.add(self.releaseGlobalReadIncsSgprsAfterTdmWaveSep(kernel))
 
       # WaveIdx already freed for subtile (before graWorkGroup above)
-      # TDM StaggerU also reads wave parity from WaveIdx
+      # TDM StaggerU also reads wave parity from WaveIdx, but only where the SGPR
+      # budget affords holding it (useTdmWaveIdxFastParity); otherwise release
+      # here and let the parity sites recompute from Serial.
       if (kernel["enableTDMA"] or kernel["enableTDMB"]) and not kernel["ClusterBarrier"] \
           and not kernel.get("UseSubtileImpl") \
-          and not (self.states.staggerUCode and self.isTdmWaveSeparated(kernel)):
+          and not self.useTdmWaveIdxFastParity(kernel):
         module.add(self.undefineSgpr("WaveIdx"))
 
       ###########################################################################

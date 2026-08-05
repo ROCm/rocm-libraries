@@ -163,6 +163,7 @@ class _SetupNewTilePapTdmWriter:
             memTokenLdsBuffer0=0,
             memTokenLdsBuffer1=1,
             staggerUCode=False,
+            tdmWaveIdxFastParity=False,
             unrollIdx=0,
         )
         self.do = {"executeToInitEnd": False}
@@ -204,6 +205,9 @@ class _SetupNewTilePapTdmWriter:
 
     def isTdmWaveSeparated(self, kernel):
         return kwa_module.KernelWriterAssembly.isTdmWaveSeparated(self, kernel)
+
+    def useTdmWaveIdxFastParity(self, kernel):
+        return kwa_module.KernelWriterAssembly.useTdmWaveIdxFastParity(self, kernel)
 
     def undefineSgpr(self, name):
         return self._module("undefineSgpr_%s" % name)
@@ -609,10 +613,13 @@ def _instruction_index(items, instruction_type, dst, src):
     )
 
 
-def _setup_new_tile_module_names(prefetch_across_persistent, stagger_u_code=False):
+def _setup_new_tile_module_names(
+    prefetch_across_persistent, stagger_u_code=False, fast_parity=True
+):
     tpa, tpb = _tensor_parameters(with_metadata=True)
     writer = _SetupNewTilePapTdmWriter()
     writer.states.staggerUCode = stagger_u_code
+    writer.states.tdmWaveIdxFastParity = fast_parity
     module = KernelWriter.setupNewTile(
         writer,
         _setup_new_tile_tdm_kernel(prefetch_across_persistent=prefetch_across_persistent),
@@ -775,12 +782,31 @@ def test_setup_new_tile_keeps_waveidx_for_wave_separated_tdm_staggeru(monkeypatc
 
     for pap in (0, 1):
         module_names = _setup_new_tile_module_names(
-            prefetch_across_persistent=pap, stagger_u_code=True
+            prefetch_across_persistent=pap, stagger_u_code=True, fast_parity=True
         )
         # Confirm we really took the stagger path before asserting on its effect.
         assert "calculateStagger_A" in module_names
         assert "calculateStagger_B" in module_names
         assert "undefineSgpr_WaveIdx" not in module_names
+
+
+def test_setup_new_tile_releases_waveidx_for_staggeru_without_sgpr_headroom(monkeypatch):
+    """Holding WaveIdx past setupNewTile is only affordable with SGPR headroom.
+
+    ``states.tdmWaveIdxFastParity`` is the single gate shared with
+    ``isTdmWaveIdxLive``; when it is off the wave-separated stagger path must
+    release WaveIdx here so the parity sites recompute from Serial instead of
+    reading a symbol that is no longer defined.
+    """
+    monkeypatch.setattr(kw_module.Component.GSU, "find", lambda writer: _StubGsu())
+
+    for pap in (0, 1):
+        module_names = _setup_new_tile_module_names(
+            prefetch_across_persistent=pap, stagger_u_code=True, fast_parity=False
+        )
+        assert "calculateStagger_A" in module_names
+        assert "calculateStagger_B" in module_names
+        assert "undefineSgpr_WaveIdx" in module_names
 
 
 def test_pap_tdm_descriptor_refresh_threads_temporary_waveidx(monkeypatch):
