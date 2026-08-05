@@ -41,6 +41,27 @@ function(hipblaslt_configure_tensilelite_python mode asan_options)
         set(_base_rocm "/opt/rocm")
     endif()
 
+    if(mode STREQUAL "SYSTEM")
+        _hipblaslt_python_command(_python_command "${Python3_EXECUTABLE}" "${_base_rocm}" "${asan_options}")
+        execute_process(
+            COMMAND ${_python_command} -c "import rocisa, tensilelite"
+            RESULT_VARIABLE _import_status
+            OUTPUT_VARIABLE _import_stdout
+            ERROR_VARIABLE _import_stderr
+        )
+        if(NOT _import_status EQUAL 0)
+            message(FATAL_ERROR
+                "SYSTEM TensileLite Python environment validation failed.\n"
+                "Python: ${Python3_EXECUTABLE}\nROCm: ${_base_rocm}\n"
+                "${_import_stdout}${_import_stderr}")
+        endif()
+        set(HIPBLASLT_PYTHON_COMMAND "${_python_command}" PARENT_SCOPE)
+        set(HIPBLASLT_PYTHON_DEPS "" PARENT_SCOPE)
+        set(HIPBLASLT_TENSILELITE_PYTHON_EXECUTABLE "${Python3_EXECUTABLE}" PARENT_SCOPE)
+        set(HIPBLASLT_TENSILELITE_STAGE "${_base_rocm}" PARENT_SCOPE)
+        return()
+    endif()
+
     if(NOT mode STREQUAL "BUILD")
         message(FATAL_ERROR
             "HIPBLASLT_TENSILELITE_PYTHON_MODE must be BUILD or SYSTEM, got: ${mode}")

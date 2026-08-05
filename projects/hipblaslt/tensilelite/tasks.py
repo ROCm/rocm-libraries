@@ -401,6 +401,7 @@ def build_client(
         if enable_tsan:
             cmake_cmd.append("-DTENSILELITE_ENABLE_HOST_TSAN=ON")
         cmake_cmd.append("-DHIPBLASLT_BUNDLE_PYTHON_DEPS=OFF")
+        cmake_cmd.append("-DHIPBLASLT_TENSILELITE_PYTHON_MODE=BUILD")
 
         c.run(shlex.join(cmake_cmd))
 

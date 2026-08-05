@@ -74,6 +74,14 @@ option(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS
        "Install TensileLite Python packages and test tools into the test artifact tree."
        OFF)
 option(TENSILELITE_ENABLE_AUTOBUILD "Generate scripts for wrapping tensile python scripts" OFF)
+set(HIPBLASLT_TENSILELITE_PYTHON_MODE "BUILD" CACHE STRING
+    "TensileLite Python environment: BUILD (staged local artifacts) or SYSTEM")
+set_property(CACHE HIPBLASLT_TENSILELITE_PYTHON_MODE PROPERTY STRINGS BUILD SYSTEM)
+if(NOT HIPBLASLT_TENSILELITE_PYTHON_MODE STREQUAL "BUILD"
+        AND NOT HIPBLASLT_TENSILELITE_PYTHON_MODE STREQUAL "SYSTEM")
+    message(FATAL_ERROR
+        "HIPBLASLT_TENSILELITE_PYTHON_MODE must be BUILD or SYSTEM")
+endif()
 
 if(HIPBLASLT_ENABLE_CLIENT)
     option(HIPBLASLT_BUILD_TESTING "Build hipblaslt client tests." ON)
@@ -351,7 +359,8 @@ if(_hipblaslt_mxdatagen_enabled)
 endif()
 
 add_subdirectory(tensilelite)
-hipblaslt_configure_tensilelite_python("BUILD" "${san_opts}")
+hipblaslt_configure_tensilelite_python(
+    "${HIPBLASLT_TENSILELITE_PYTHON_MODE}" "${san_opts}")
 
 if(HIPBLASLT_ENABLE_HOST)
     if(HIPBLASLT_BUILD_SHARED_LIBS)
