@@ -111,6 +111,21 @@ namespace TensileLite
             if(bytes == 0)
                 return true;
 
+            // The buffer is declared with the alpha type but written as int
+            // counters. A narrower alpha leaves the tail of the kernel's range
+            // outside the allocation, where residue is unreadable rather than
+            // merely unreported.
+            if(bytes < tensor.totalAllocatedElements() * sizeof(int))
+            {
+                std::ostringstream msg;
+                msg << "Synchronizer is declared with a type narrower than int ("
+                    << bytes << " bytes for " << tensor.totalAllocatedElements()
+                    << " elements), so the dirty-buffer check cannot cover the range the "
+                       "kernel uses.\n";
+                m_reporter->log(LogLevel::Error, msg.str());
+                return false;
+            }
+
             // Runs once per solution, so the copy is hot: pinned staging avoids
             // the pageable bounce buffer.
             uint8_t* host = stagingBuffer(bytes);
@@ -130,11 +145,16 @@ namespace TensileLite
             if(!dirty)
                 return true;
 
-            size_t nonzero = 0;
-            size_t first   = bytes;
-            for(size_t i = 0; i < bytes; i++)
+            // Tallied in ints, the unit the kernel writes: the head of the buffer
+            // is one work-queue counter per XCD, so the offset names the counter
+            // that was left set.
+            size_t const    ints    = bytes / sizeof(int);
+            uint32_t const* v       = reinterpret_cast<uint32_t const*>(host);
+            size_t          nonzero = 0;
+            size_t          first   = ints;
+            for(size_t i = 0; i < ints; i++)
             {
-                if(host[i] != 0)
+                if(v[i] != 0)
                 {
                     if(nonzero == 0)
                         first = i;
@@ -144,7 +164,7 @@ namespace TensileLite
 
             std::ostringstream msg;
             msg << "StreamK Synchronizer left dirty after " << stage << " (gemm " << gemmIdx
-                << "): " << nonzero << "/" << bytes << " bytes nonzero, first at byte offset "
+                << "): " << nonzero << "/" << ints << " ints nonzero, first at int offset "
                 << first << " -- the kernel did not self-clean its work-queue state.\n";
             m_reporter->log(LogLevel::Error, msg.str());
 
