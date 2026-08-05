@@ -93,7 +93,7 @@ endif()
 target_link_libraries(hipblaslt-clients-common
     PUBLIC
         roc::hipblaslt
-        roc::host-validation-adapters
+        roc::host-validation
         OpenMP::OpenMP_CXX
         ${LAPACK_LIBRARIES}
         ${HIPBLASLT_FORTRAN_RUNTIME_LIBRARIES}
