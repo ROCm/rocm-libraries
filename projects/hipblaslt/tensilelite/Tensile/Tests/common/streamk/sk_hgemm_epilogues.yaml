@@ -19,7 +19,6 @@ GlobalParameters:
   # ForceGenerateKernel: True
   # GenerateSourcesAndExit: True
   KeepBuildTmp: True
-  # DeviceLDS: 163840
   # MaxLDS: 163840
   RotatingBufferSize: 514
 

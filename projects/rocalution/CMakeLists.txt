@@ -107,7 +107,10 @@ else()
     gfx1100
     gfx1101
     gfx1102
+    gfx1150
     gfx1151
+    gfx1152
+    gfx1153
     gfx1200
     gfx1201
   )
@@ -158,7 +161,7 @@ endif()
 
 
 # Setup version
-rocm_setup_version(VERSION "4.1.0")
+rocm_setup_version(VERSION "4.1.1")
 
 if(BUILD_CLIENTS_SAMPLES OR BUILD_CLIENTS_BENCHMARKS OR BUILD_CLIENTS_TESTS)
   set( BUILD_CLIENTS ON )

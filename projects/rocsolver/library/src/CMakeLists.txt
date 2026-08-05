@@ -505,6 +505,14 @@ if(OPTIMAL)
   target_compile_definitions(rocsolver PRIVATE OPTIMAL)
 endif()
 
+# Feature flag: 64-bit eigensolver API (syev/heev/syevd/heevd). Option is declared
+# at the top-level CMakeLists.txt so the library and test client stay in sync.
+# PUBLIC so the definition propagates through the exported roc::rocsolver interface,
+# letting consumers (e.g. hipSOLVER) detect whether the _64 entry points are available.
+if(ROCSOLVER_ENABLE_EIGENSOLVERS_64)
+  target_compile_definitions(rocsolver PUBLIC ROCSOLVER_ENABLE_EIGENSOLVERS_64)
+endif()
+
 if(ROCSOLVER_USE_INTERNAL_BLAS)
   target_compile_definitions(rocsolver PRIVATE USE_INTERNAL_GEMM USE_INTERNAL_TRSM)
 endif()
