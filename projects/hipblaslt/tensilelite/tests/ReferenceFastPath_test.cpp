@@ -317,3 +317,135 @@ TEST(ReferenceRuntimeCanonical, HandlesInt32Accumulation)
     ASSERT_TRUE(tryRuntimeCanonicalGemm(problem, inputs, /*elementsToValidate=*/-1));
     EXPECT_EQ(d, (std::vector<int32_t>{23, 34}));
 }
+
+TEST(ReferenceRuntimeCanonical, RepresentsMirroredBoundIndexAsNegativeStride)
+{
+    const size_t M = 2;
+    const size_t N = 1;
+    const size_t K = 2;
+    const size_t batch = 1;
+
+    ContractionProblemGemm::FreeIndices freeIndices{
+        {true, 0, 0, 0},
+        {false, 1, 1, 1},
+    };
+    ContractionProblemGemm::BatchIndices batchIndices{{2, 2, 2, 2}};
+    ContractionProblemGemm::BoundIndices boundIndices{{1, 0, true, false}};
+    TensorOps noOperations;
+    auto problem = ContractionProblemGemm::FromIndexSizes(freeIndices,
+                                                          batchIndices,
+                                                          boundIndices,
+                                                          {M, N, batch, K},
+                                                          rocisa::DataType::Float,
+                                                          {1, M, M * K},
+                                                          noOperations,
+                                                          rocisa::DataType::Float,
+                                                          {1, K, K * N},
+                                                          noOperations,
+                                                          rocisa::DataType::Float,
+                                                          {1, M, M * N},
+                                                          noOperations,
+                                                          rocisa::DataType::Float,
+                                                          {1, M, M * N},
+                                                          noOperations,
+                                                          0.0);
+    problem.setComputeInputTypeA(rocisa::DataType::Float);
+    problem.setComputeInputTypeB(rocisa::DataType::Float);
+    problem.setAlphaType(rocisa::DataType::Float);
+    problem.setBetaType(rocisa::DataType::Float);
+
+    std::vector<float> a{1, 2, 3, 4};
+    std::vector<float> b{5, 6};
+    std::vector<float> c(M * N, 0);
+    std::vector<float> d(M * N, -99);
+    ContractionInputs inputs(a.data(), b.data(), c.data(), d.data(), 1.0f, 0.0f);
+
+    ASSERT_TRUE(tryRuntimeCanonicalGemm(problem, inputs, /*elementsToValidate=*/-1));
+    EXPECT_EQ(d, (std::vector<float>{21, 32}));
+}
+
+TEST(ReferenceRuntimeCanonical, HandlesPointerArrayBatches)
+{
+    const size_t M = 2;
+    const size_t N = 1;
+    const size_t K = 1;
+    const size_t batches = 2;
+
+    auto problem = ContractionProblemGemm::GEMM_Strides(false,
+                                                        false,
+                                                        rocisa::DataType::Float,
+                                                        rocisa::DataType::Float,
+                                                        rocisa::DataType::Float,
+                                                        rocisa::DataType::Float,
+                                                        M,
+                                                        N,
+                                                        K,
+                                                        batches,
+                                                        M,
+                                                        M * K,
+                                                        K,
+                                                        K * N,
+                                                        M,
+                                                        M * N,
+                                                        M,
+                                                        M * N,
+                                                        0.0);
+    problem.setComputeInputTypeA(rocisa::DataType::Float);
+    problem.setComputeInputTypeB(rocisa::DataType::Float);
+    problem.setAlphaType(rocisa::DataType::Float);
+    problem.setBetaType(rocisa::DataType::Float);
+
+    std::vector<float> a0{-99, 1, 2};
+    std::vector<float> a1{-99, 4, 5};
+    std::vector<float> b0{-99, 3};
+    std::vector<float> b1{-99, 2};
+    std::vector<float> c0{-99, 0, 0};
+    std::vector<float> c1{-99, 0, 0};
+    std::vector<float> d0{-99, -99, -99};
+    std::vector<float> d1{-99, -99, -99};
+    const void* batchA[] = {a0.data(), a1.data()};
+    const void* batchB[] = {b0.data(), b1.data()};
+    const void* batchC[] = {c0.data(), c1.data()};
+    void* batchD[] = {d0.data(), d1.data()};
+
+    ContractionInputs inputs(nullptr, nullptr, nullptr, nullptr, 1.0f, 0.0f);
+    inputs.batchA = batchA;
+    inputs.batchB = batchB;
+    inputs.batchC = batchC;
+    inputs.batchD = batchD;
+    inputs.batchOffsetA = sizeof(float);
+    inputs.batchOffsetB = sizeof(float);
+    inputs.batchOffsetC = sizeof(float);
+    inputs.batchOffsetD = sizeof(float);
+
+    ASSERT_TRUE(tryRuntimeCanonicalGemm(problem, inputs, /*elementsToValidate=*/-1));
+    EXPECT_EQ(d0, (std::vector<float>{-99, 3, 6}));
+    EXPECT_EQ(d1, (std::vector<float>{-99, 8, 10}));
+}
+
+TEST(ReferenceRuntimeCanonical, HandlesFloat16Accumulation)
+{
+    const size_t M = 1;
+    const size_t N = 1;
+    const size_t K = 64;
+
+    auto problem = makePackedProblem(rocisa::DataType::Half,
+                                     rocisa::DataType::Half,
+                                     rocisa::DataType::Half,
+                                     M,
+                                     N,
+                                     K);
+
+    std::vector<Half> a(K, Half(0.1f));
+    std::vector<Half> b(K, Half(0.1f));
+    std::vector<Half> c(1, Half(0));
+    std::vector<Half> d(1, Half(-99));
+    ContractionInputs inputs(
+        a.data(), b.data(), c.data(), d.data(), Half(1), Half(0));
+
+    ASSERT_TRUE(tryRuntimeCanonicalGemm(problem, inputs, /*elementsToValidate=*/-1));
+    Half expected = Half(0);
+    for(size_t reduction = 0; reduction < K; ++reduction)
+        expected = Half(expected + Half(a[reduction] * b[reduction]));
+    EXPECT_EQ(d[0], expected);
+}

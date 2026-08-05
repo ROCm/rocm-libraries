@@ -226,6 +226,8 @@ inline bool isRuntimeGemmAccumulator(ScalarType type) {
     switch (type) {
         case ScalarType::Float32:
         case ScalarType::Float64:
+        case ScalarType::Float16:
+        case ScalarType::BFloat16:
         case ScalarType::Int32:
         case ScalarType::ComplexFloat32:
         case ScalarType::ComplexFloat64:
@@ -305,7 +307,7 @@ inline void validateRuntimeGemm(const GemmProblem& problem) {
         throw std::invalid_argument("Reference GEMM D shape mismatch.");
     if (!isRuntimeGemmAccumulator(problem.accumulatorType))
         throw std::invalid_argument(
-            "Runtime reference GEMM currently supports F32, F64, I32, C64, and "
+            "Runtime reference GEMM currently supports F16, BF16, F32, F64, I32, C64, and "
             "C128 accumulators.");
 
     const bool complexAccumulator = isComplexScalarType(problem.accumulatorType);
@@ -399,8 +401,19 @@ GemmRunInfo referenceRuntimeCanonical(const GemmProblem& problem) {
     const RuntimeMatrixWriter<Accumulator> d(problem.d);
     const RuntimeQuantizer<Accumulator> quantizeA(problem.a.computeType);
     const RuntimeQuantizer<Accumulator> quantizeB(problem.b.computeType);
+    const RuntimeQuantizer<Accumulator> quantizeAccumulator(
+        problem.accumulatorType == ScalarType::Float16 ||
+                problem.accumulatorType == ScalarType::BFloat16
+            ? std::optional<ScalarType>(problem.accumulatorType)
+            : std::nullopt);
     const RuntimeMathFunction<Accumulator> operandMath =
         runtimeMathFunction<Accumulator>(problem.mathMode);
+    auto multiplyAccumulator = [&](Accumulator left, Accumulator right) {
+        return quantizeAccumulator(left * right);
+    };
+    auto addAccumulator = [&](Accumulator left, Accumulator right) {
+        return quantizeAccumulator(left + right);
+    };
 
     std::optional<RuntimeVectorReader<Accumulator>> bias;
     std::optional<RuntimeVectorReader<Accumulator>> scaleAlpha;
@@ -420,12 +433,14 @@ GemmRunInfo referenceRuntimeCanonical(const GemmProblem& problem) {
     const size_t m = problem.a.values.shape()[0];
     const size_t k = problem.a.values.shape()[1];
     const size_t n = problem.b.values.shape()[1];
-    const Accumulator alpha = runtimeScalar<Accumulator>(problem.epilogue.alpha, "alpha");
-    const Accumulator beta = runtimeScalar<Accumulator>(problem.epilogue.beta, "beta");
+    const Accumulator alpha =
+        quantizeAccumulator(runtimeScalar<Accumulator>(problem.epilogue.alpha, "alpha"));
+    const Accumulator beta =
+        quantizeAccumulator(runtimeScalar<Accumulator>(problem.epilogue.beta, "beta"));
     const Accumulator activationParameter0 =
-        static_cast<Accumulator>(problem.epilogue.activationParameter0);
+        quantizeAccumulator(static_cast<Accumulator>(problem.epilogue.activationParameter0));
     const Accumulator activationParameter1 =
-        static_cast<Accumulator>(problem.epilogue.activationParameter1);
+        quantizeAccumulator(static_cast<Accumulator>(problem.epilogue.activationParameter1));
 
     auto computeOutput = [&](size_t row, size_t column) {
         Accumulator sum = Accumulator(0);
@@ -446,12 +461,14 @@ GemmRunInfo referenceRuntimeCanonical(const GemmProblem& problem) {
                         conjugateIfNeeded(b(reduction, column), problem.b.conjugate);
                     aValue = operandMath(quantizeA(aValue));
                     bValue = operandMath(quantizeB(bValue));
-                    blockSum += aValue * bValue;
+                    blockSum =
+                        addAccumulator(blockSum, multiplyAccumulator(aValue, bValue));
                 }
 
-                const Accumulator scale = (*blockScaleA)(row, blockBase / blockSizeA) *
-                                          (*blockScaleB)(column, blockBase / blockSizeB);
-                sum += blockSum * scale;
+                const Accumulator scale = multiplyAccumulator(
+                    (*blockScaleA)(row, blockBase / blockSizeA),
+                    (*blockScaleB)(column, blockBase / blockSizeB));
+                sum = addAccumulator(sum, multiplyAccumulator(blockSum, scale));
                 blockBase = blockEnd;
             }
         } else {
@@ -460,25 +477,29 @@ GemmRunInfo referenceRuntimeCanonical(const GemmProblem& problem) {
                 Accumulator bValue = conjugateIfNeeded(b(reduction, column), problem.b.conjugate);
                 aValue = operandMath(quantizeA(aValue));
                 bValue = operandMath(quantizeB(bValue));
-                sum += aValue * bValue;
+                sum = addAccumulator(sum, multiplyAccumulator(aValue, bValue));
             }
         }
 
         Accumulator effectiveAlpha = alpha;
-        if (scaleA) effectiveAlpha *= (*scaleA)[row];
-        if (scaleB) effectiveAlpha *= (*scaleB)[column];
+        if (scaleA) effectiveAlpha = multiplyAccumulator(effectiveAlpha, (*scaleA)[row]);
+        if (scaleB) effectiveAlpha = multiplyAccumulator(effectiveAlpha, (*scaleB)[column]);
         if (scaleAlpha) {
             const MatrixAxis axis = problem.epilogue.scaleAlpha->axis;
-            effectiveAlpha *= (*scaleAlpha)[axis == MatrixAxis::Row ? row : column];
+            effectiveAlpha = multiplyAccumulator(
+                effectiveAlpha, (*scaleAlpha)[axis == MatrixAxis::Row ? row : column]);
         }
 
-        Accumulator result = effectiveAlpha * sum + beta * c(row, column);
+        Accumulator result = addAccumulator(
+            multiplyAccumulator(effectiveAlpha, sum),
+            multiplyAccumulator(beta, c(row, column)));
         if (bias) {
             const MatrixAxis axis = problem.epilogue.bias->axis;
-            result += (*bias)[axis == MatrixAxis::Row ? row : column];
+            result = addAccumulator(
+                result, (*bias)[axis == MatrixAxis::Row ? row : column]);
         }
-        result = applyActivation(problem.epilogue.activation, result, activationParameter0,
-                                 activationParameter1);
+        result = quantizeAccumulator(applyActivation(
+            problem.epilogue.activation, result, activationParameter0, activationParameter1));
         d.store(row, column, result);
     };
 
@@ -572,6 +593,8 @@ inline GemmRunInfo referenceGemm(const GemmProblem& problem, const GemmRunOption
 
     GemmRunInfo result;
     switch (problem.accumulatorType) {
+        case ScalarType::Float16:
+        case ScalarType::BFloat16:
         case ScalarType::Float32:
             result = detail::referenceRuntimeCanonical<float>(problem);
             break;
