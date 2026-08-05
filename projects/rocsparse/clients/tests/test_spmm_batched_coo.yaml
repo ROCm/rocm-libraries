@@ -495,9 +495,6 @@ Tests:
   convert_to_int: true
   filename: [mac_econ_fwd500]
 
-# Large batch count exercising the coo segmented batch grid-stride loop.
-# Covers the nn/nt kernels (segmented only supports transA == none) and both
-# the main (n >= 8) and remainder (n < 8) column tilings via N.
 - name: spmm_batched_coo_file
   category: stress
   function: spmm_batched_coo
@@ -514,7 +511,7 @@ Tests:
   transB: [rocsparse_operation_none, rocsparse_operation_transpose]
   baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_file_rocalution]
-  spmm_alg: [rocsparse_spmm_alg_coo_segmented]
+  spmm_alg: [rocsparse_spmm_alg_coo_segmented, rocsparse_spmm_alg_coo_segmented_atomic]
   orderB: [rocsparse_order_column]
   orderC: [rocsparse_order_column]
   filename: [nos4]
