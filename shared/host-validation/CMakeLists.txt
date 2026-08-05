@@ -16,6 +16,9 @@ endif()
 option(HOST_VALIDATION_BUILD_TESTING
        "Build host-validation tests."
        ${HOST_VALIDATION_STANDALONE})
+option(HOST_VALIDATION_BUILD_PYTHON
+       "Build the host-validation nanobind module."
+       OFF)
 
 add_library(host-validation-core INTERFACE)
 add_library(roc::host-validation-core ALIAS host-validation-core)
@@ -74,6 +77,13 @@ target_sources(host-validation
 
 if(HOST_VALIDATION_BUILD_TESTING)
     enable_testing()
+endif()
+
+if(HOST_VALIDATION_BUILD_PYTHON)
+    add_subdirectory(python)
+endif()
+
+if(HOST_VALIDATION_BUILD_TESTING)
     add_subdirectory(tests)
 endif()
 
