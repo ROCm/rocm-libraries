@@ -1,0 +1,85 @@
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # not supported by arch
+
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  NumElementsToValidate: -1
+  KernelTime: False
+  BoundsCheck: 0
+  PrintSolutionRejectionReason: True
+  ValidationMaxToPrint: 4      # maximum number of mismatches to print
+  ValidationPrintValids: False # print matches too
+  PruneSparseMode: 0
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  DataInitTypeD: 0
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 0
+  NumWarmups: 0
+  EnqueuesPerSync: 1
+  PrintWinnersOnly: False
+  Architecture: gfx1250
+  CpuThreads: 1
+  PrintLevel: 2
+
+BenchmarkProblems:
+  -
+    - # ProblemType, TN
+      OperationType: GEMM
+      DataType: f8
+      DestDataType: f8
+      ComputeDataType: s
+      HighPrecisionAccumulate:  True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Activation: False
+      SupportUserArgs: True
+      UseBias: 0
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1,  8, 8,  2, 2]
+        - DepthU: [256]
+        - TransposeLDS: [-1]
+        - TDMInst: [3]
+        - TDMIterateMode: [1]
+        - LDSTrInst: [False]
+        - StaggerU: [32]
+        - StaggerUMapping: [0, 1, 3]
+        - ScheduleIterAlg: [4]
+        - PrefetchLocalRead: [1]
+        - PrefetchGlobalRead: [2]
+        - HalfPLR: [2]
+        - StoreRemapVectorWidth: [0]
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - VectorWidthA: [8]
+        - VectorWidthB: [-1]
+        - 1LDSBuffer: [0]
+        - SourceSwap: [True]
+        - DirectToVgprSparseMetadata: [false]
+        - WorkGroupMapping: [1]
+        - StoreVectorWidth: [-1]
+        - DirectToVgprA: [False]
+        - DirectToVgprB: [False]
+        - WavefrontSize: [32]
+        - ExpandPointerSwap: [false]
+        - GroupLoadStore: [False]
+        - ClusterDim: [[2, 2], [3, 3]]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [768, 1280, 1, 2304]
+          - Exact: [1280, 768, 1, 2304]
+        - ActivationArgs:
+          - [Enum: none]
