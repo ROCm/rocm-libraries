@@ -46,7 +46,12 @@ TEST_F(TestHipFlash2FwdPlanBuilder, AcceptsFP16MHACausal)
         dims,
         strides,
         hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
-        /*causal=*/true);
+        /*withAttnMask=*/false,
+        /*withScale=*/false,
+        /*withStats=*/false,
+        /*alibiMask=*/false,
+        /*paddingMask=*/false,
+        /*causalMask=*/true);
 
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
@@ -72,7 +77,12 @@ TEST_F(TestHipFlash2FwdPlanBuilder, AcceptsFP16MHANonCausal)
         dims,
         strides,
         hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
-        /*causal=*/false);
+        /*withAttnMask=*/false,
+        /*withScale=*/false,
+        /*withStats=*/false,
+        /*alibiMask=*/false,
+        /*paddingMask=*/false,
+        /*causalMask=*/false);
 
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
@@ -126,7 +136,12 @@ TEST_F(TestHipFlash2FwdPlanBuilder, AcceptsFP16GQA)
         qDims,
         qStrides,
         hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
-        /*causal=*/true);
+        /*withAttnMask=*/false,
+        /*withScale=*/false,
+        /*withStats=*/false,
+        /*alibiMask=*/false,
+        /*paddingMask=*/false,
+        /*causalMask=*/true);
 
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
