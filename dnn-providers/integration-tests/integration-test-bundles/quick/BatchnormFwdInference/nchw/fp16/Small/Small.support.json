@@ -1,0 +1,10 @@
+{
+  "claims": {
+    "MIOPEN_ENGINE": {
+      "gfx1151": [
+        "windows"
+      ]
+    }
+  },
+  "version": 1
+}
