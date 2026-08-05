@@ -54,8 +54,17 @@
 
 // clang-format off
 
+// Set default values if not explictly set
+#ifndef USE_LIBCUDAXX
+    #define USE_LIBCUDACXX 1
+#endif
+#ifndef USE_LIBHIPCXX
+    #define USE_LIBHIPCXX 1
+#endif
+
 // If the '::cuda::std' namespace from 'libcudacxx' or 'libhipcxx' is available.
-#if HIPCUB_HAS_INCLUDE(<cuda/std/version>)
+#if HIPCUB_HAS_INCLUDE(<cuda/std/version>) \
+	&& (USE_LIBCUDACXX || USE_LIBHIPCXX)
     #include <cuda/std/version>
     // If version matches and '_CUDA_VSTD' is available.
     #if defined(_LIBCUDACXX_CUDA_API_VERSION) && (_LIBCUDACXX_CUDA_API_VERSION >= _HIPCUB_REQUIRED_LIBCXX_VERSION) && defined(_CUDA_VSTD)
@@ -69,7 +78,7 @@
     #endif
 #endif
 // Otherwise, if the '::hip::std' namespace from 'libhipcxx' is available.
-#if !defined(_HIPCUB_HAS_DEVICE_SYSTEM_STD) && HIPCUB_HAS_INCLUDE(<hip/std/version>)
+#if !defined(_HIPCUB_HAS_DEVICE_SYSTEM_STD) && HIPCUB_HAS_INCLUDE(<hip/std/version>) && USE_LIBHIPCXX
     #include <hip/std/version>
     // If version matches and '_CUDA_VSTD' is available.
     #if defined(_LIBCUDACXX_CUDA_API_VERSION) && (_LIBCUDACXX_CUDA_API_VERSION >= _HIPCUB_REQUIRED_LIBCXX_VERSION) && defined(_CUDA_VSTD)
@@ -87,6 +96,10 @@
 
 // If 'libcudacxx' or 'libhipcxx' is not found, use fallback.
 #ifndef _HIPCUB_HAS_DEVICE_SYSTEM_STD
+    #ifndef LIBHIPCXX_WARNING
+        #define LIBHIPCXX_WARNING
+        #pragma message("libhipcxx/libcudacxx headers not found.  Using fallback implementation.")
+    #endif  
     #define _HIPCUB_LIBCXX_INCLUDE(LIB) _HIPCUB_STRINGIFY(LIB)
     #define _HIPCUB_STD_INCLUDE(LIB) _HIPCUB_STRINGIFY(LIB)
     #define _HIPCUB_LIBCXX

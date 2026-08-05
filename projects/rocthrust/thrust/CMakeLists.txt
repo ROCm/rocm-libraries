@@ -60,18 +60,19 @@ rocm_install(
 
 include(ROCMExportTargetsHeaderOnly)
 
-if(ROCTHRUST_USE_LIBHIPCXX OR ROCTHRUST_USE_LIBCUDACXX)
+if(ROCTHRUST_USE_LIBHIPCXX)
   if(${LINK_HIP_DEVICE_LIBS})
-    set(PACKAGE_LIST "rocprim libhipcxx")
+    set(PACKAGE_LIST "PACKAGE rocprim PACKAGE libhipcxx")
   else()
-    set(PACKAGE_LIST "libhipcxx")
+    set(PACKAGE_LIST "PACKAGE libhipcxx")
   endif()
+  target_link_libraries(rocthrust INTERFACE libhipcxx::libhipcxx)
 else()
-    set(PACKAGE_LIST "rocprim")
+    set(PACKAGE_LIST "PACKAGE rocprim")
 endif()
 
 rocm_export_targets_header_only(
   TARGETS roc::rocthrust
-  DEPENDS PACKAGE ${PACKAGE_LIST}
+  DEPENDS ${PACKAGE_LIST}
   NAMESPACE roc::
 )

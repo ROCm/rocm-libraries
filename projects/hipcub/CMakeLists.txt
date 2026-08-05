@@ -76,6 +76,8 @@ option(BUILD_TEST "Build tests (requires googletest)" OFF)
 option(BUILD_CODE_COVERAGE "Enable code coverage" OFF)
 option(EXTERNAL_DEPS_FORCE_DOWNLOAD "Download non-ROCm dependencies and do not search for packages" OFF)
 option(DOWNLOAD_CUB "Download CUB and thrust. Do not search for CUB package" OFF)
+option(HIPCUB_USE_LIBHIPCXX "Build rocThrust using libhipcxx backend, if available" ON)
+option(HIPCUB_USE_LIBCUDACXX "Build rocThrust using libcudacxx backend, if available" ON)
 option(BUILD_BENCHMARK "Build benchmarks" OFF)
 option(BUILD_EXAMPLE "Build Examples" OFF)
 option(BUILD_ADDRESS_SANITIZER "Build with address sanitizer enabled" OFF)
@@ -187,6 +189,14 @@ include(VerifyCompiler)
 
 # Get dependencies (except rocm-cmake, included earlier)
 include(Dependencies)
+
+if (HIPCUB_USE_LIBHIPCXX)
+  add_compile_definitions(USE_LIBHIPCXX)
+endif()
+
+if (HIPCUB_USE_LIBCUDACXX)
+  add_compile_definitions(USE_LIBCUDACXX)
+endif()
 
 if(BUILD_ADDRESS_SANITIZER)
   add_compile_options(-fsanitize=address -shared-libasan)

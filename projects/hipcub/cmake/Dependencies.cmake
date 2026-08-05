@@ -432,6 +432,10 @@ else()
   endif()
 endif()
 
+if(HIPCUB_USE_LIBHIPCXX)
+  find_package(libhipcxx 3.0.2 REQUIRED)
+endif()
+
 foreach(SHARED_OPTION BUILD_TEST BUILD_BENCHMARK BUILD_EXAMPLE)
   set(${SHARED_OPTION} ${USER_${SHARED_OPTION}})
 endforeach()

@@ -76,17 +76,20 @@ rocm_install(
 
 include(ROCMExportTargetsHeaderOnly)
 
-# Export targets
-if(HIP_COMPILER STREQUAL "clang")
-  rocm_export_targets_header_only(
-    TARGETS hip::hipcub
-    DEPENDS PACKAGE rocprim
-    NAMESPACE hip::
-  )
+if(HIPCUB_USE_LIBHIPCXX)
+  if(HIP_COMPILER STREQUAL "clang")
+    set(PACKAGE_LIST "PACKAGE rocprim PACKAGE libhipcxx")
+  else()
+    set(PACKAGE_LIST "PACKAGE libhipcxx")
+  endif()
+  target_link_libraries(hipcub INTERFACE libhipcxx::libhipcxx)
 else()
-  rocm_export_targets_header_only(
-    TARGETS hip::hipcub
-    NAMESPACE hip::
-  )
+  if(HIP_COMPILER STREQUAL "clang")
+    set(PACKAGE_LIST "PACKAGE rocprim")
 endif()
 
+rocm_export_targets_header_only(
+  TARGETS hip::hipcub
+  DEPENDS ${PACKAGE_LIST}
+  NAMESPACE hip::
+)
