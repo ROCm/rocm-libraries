@@ -40,6 +40,9 @@ For multi-node configurations, you must also install:
 * `OpenMP <https://www.openmp.org/>`__
 * `MPI <https://www.mcs.anl.gov/research/projects/mpi/>`__
 
+Complete the `ROCm installation prerequisites <https://rocm.docs.amd.com/en/latest/install/rocm.html?fam=all&w=compute&os=ubuntu&ubuntu-ver=26.04&i=pkgman>`__ to
+install prerequisites and configure GPU access permissions.
+
 Install the build dependencies with your distribution's package manager:
 
 .. tab-set::

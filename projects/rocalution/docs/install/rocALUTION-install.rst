@@ -35,7 +35,7 @@ Install rocALUTION on Linux
 Alternatively, you can use the ``amdrocm-rocalution`` packages to install
 rocALUTION without the full ROCm HPC SDK.
 
-1. Complete the :doc:`ROCm installation prerequisites <rocm:install/rocm>` to
+1. Complete the `ROCm installation prerequisites <https://rocm.docs.amd.com/en/latest/install/rocm.html?fam=all&w=compute&os=ubuntu&ubuntu-ver=26.04&i=pkgman>`__ to
    install dependencies and configure GPU access permissions.
 
 2. Install the rocALUTION packages that match your desired ROCm version,
@@ -87,17 +87,6 @@ rocALUTION without the full ROCm HPC SDK.
 
             sudo zypper install amdrocm-rocalution amdrocm-rocalution-devel
 
-.. note::
-
-   The development package provides headers and CMake configuration only.
-   Install ``amdrocm-rocalution`` alongside it to get the runtime library.
-
-.. tip::
-
-   Installing for all GPU architectures pulls a much larger set of packages.
-   To install only what you need, add the architecture suffix, for example,
-   ``amdrocm-rocalution7.14-gfx1100``.
-
 .. _uninstall-rocalution:
 
 Uninstall rocALUTION
@@ -123,19 +112,6 @@ Uninstall rocALUTION
 
          sudo zypper remove 'amdrocm-rocalution*'
 
-.. note::
-
-   On Debian-based and RHEL-based distributions, name both the runtime and
-   development packages. Removing only the development package leaves the
-   rocALUTION runtime library installed.
-
-   On SLES, ``zypper`` does not remove packages that were installed as
-   dependencies. The pattern form above removes all rocALUTION packages. It
-   matches only rocALUTION and leaves the rest of the ROCm installation in
-   place.
-
-   To remove the full ROCm HPC SDK instead, use ``amdrocm-hpc-sdk``.
-
 .. _install-rocalution-tarball:
 
 Install from a tarball
@@ -147,12 +123,6 @@ select the tarball installation method.
 
 The standard ROCm uninstallation process removes rocALUTION. No additional
 steps are required.
-
-.. note::
-
-   The standard tarball includes the rocALUTION library, headers, and CMake
-   configuration. Test and sample binaries ship only in the tests tarball
-   variant.
 
 .. _install-rocalution-nightly:
 
