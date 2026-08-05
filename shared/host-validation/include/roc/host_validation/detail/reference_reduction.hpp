@@ -70,12 +70,13 @@ inline ReductionPlan validateReduction(const ReductionProblem& problem) {
     switch (problem.accumulatorType) {
         case ScalarType::Float32:
         case ScalarType::Float64:
+        case ScalarType::Int32:
         case ScalarType::ComplexFloat32:
         case ScalarType::ComplexFloat64:
             break;
         default:
             throw std::invalid_argument(
-                "Reference reduction supports F32, F64, C64, and C128 accumulators.");
+                "Reference reduction supports F32, F64, I32, C64, and C128 accumulators.");
     }
 
     return {
@@ -141,6 +142,8 @@ inline ReductionRunInfo referenceSum(const ReductionProblem& problem) {
             return detail::referenceSumTyped<float>(problem, plan);
         case ScalarType::Float64:
             return detail::referenceSumTyped<double>(problem, plan);
+        case ScalarType::Int32:
+            return detail::referenceSumTyped<int32_t>(problem, plan);
         case ScalarType::ComplexFloat32:
             return detail::referenceSumTyped<std::complex<float>>(problem, plan);
         case ScalarType::ComplexFloat64:

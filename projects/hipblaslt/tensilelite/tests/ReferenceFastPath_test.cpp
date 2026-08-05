@@ -135,3 +135,185 @@ TEST(ReferenceOutputSelection, ComputesPrimeStrideSubset)
         EXPECT_EQ(d[index], selected ? 2.0f : -99.0f) << "index=" << index;
     }
 }
+
+TEST(ReferenceStandaloneEpilogue, HandlesEAndAmaxScaleAndGate)
+{
+    const size_t M = 2;
+    const size_t N = 2;
+    const size_t K = 1;
+
+    auto problem = makePackedProblem(rocisa::DataType::Float,
+                                     rocisa::DataType::Float,
+                                     rocisa::DataType::Float,
+                                     M,
+                                     N,
+                                     K);
+    problem.setUseBias(1);
+    problem.setBias(rocisa::DataType::Float, M, M);
+    problem.setUseE(true);
+    problem.setE(rocisa::DataType::Float, problem.d().sizes(), problem.d().strides(), true);
+    problem.setOutputAmaxD(true);
+    problem.setAmaxD(rocisa::DataType::Float, true);
+    problem.setUseScaleCD(true);
+    problem.setScaleC(rocisa::DataType::Float);
+    problem.setScaleD(rocisa::DataType::Float);
+    problem.setUseGateResidual(true);
+    problem.setGateResidual(
+        rocisa::DataType::Float, problem.d().sizes(), problem.d().strides());
+    problem.setActivationType(ActivationType::Relu);
+
+    std::vector<float> a{1, 2};
+    std::vector<float> b{3, 4};
+    std::vector<float> c(M * N, 1);
+    std::vector<float> d(M * N, -99);
+    std::vector<float> e(M * N, -99);
+    std::vector<float> bias{1, -10};
+    std::vector<float> gate{0.5f, 2.0f, -1.0f, 0.25f};
+    float scaleC = 2;
+    float scaleD = 3;
+    float amaxD = 0;
+
+    ContractionInputs inputs(a.data(), b.data(), c.data(), d.data(), 1.0f, 0.5f);
+    inputs.e = e.data();
+    inputs.bias = bias.data();
+    inputs.scaleC = &scaleC;
+    inputs.scaleD = &scaleD;
+    inputs.gateResidual = gate.data();
+    inputs.amaxD = &amaxD;
+
+    ASSERT_TRUE(tryRuntimeCanonicalGemm(problem, inputs, /*elementsToValidate=*/-1));
+    EXPECT_EQ(e, (std::vector<float>{5, -3, 6, -1}));
+    EXPECT_EQ(d, (std::vector<float>{8, 2, -19, 0.25f}));
+    EXPECT_EQ(amaxD, 6);
+}
+
+TEST(ReferenceStandaloneEpilogue, HandlesGradientAuxiliaryInput)
+{
+    const size_t M = 2;
+    const size_t N = 1;
+    const size_t K = 1;
+
+    auto problem = makePackedProblem(rocisa::DataType::Float,
+                                     rocisa::DataType::Float,
+                                     rocisa::DataType::Float,
+                                     M,
+                                     N,
+                                     K);
+    problem.setUseE(true);
+    problem.setE(rocisa::DataType::Float, problem.d().sizes(), problem.d().strides());
+    problem.setUseGradient(true);
+    problem.setActivationType(ActivationType::Relu);
+
+    std::vector<float> a{10, 20};
+    std::vector<float> b{1};
+    std::vector<float> c(M * N, 0);
+    std::vector<float> d(M * N, -99);
+    std::vector<float> e{-1, 2};
+
+    ContractionInputs inputs(a.data(), b.data(), c.data(), d.data(), 1.0f, 0.0f);
+    inputs.e = e.data();
+
+    ASSERT_TRUE(tryRuntimeCanonicalGemm(problem, inputs, /*elementsToValidate=*/-1));
+    EXPECT_EQ(d, (std::vector<float>{0, 20}));
+    EXPECT_EQ(e, (std::vector<float>{-1, 2}));
+}
+
+TEST(ReferenceStandaloneEpilogue, HandlesGradientBiasReduction)
+{
+    const size_t M = 2;
+    const size_t N = 2;
+    const size_t K = 1;
+
+    auto problem = makePackedProblem(rocisa::DataType::Float,
+                                     rocisa::DataType::Float,
+                                     rocisa::DataType::Float,
+                                     M,
+                                     N,
+                                     K);
+    problem.setUseE(true);
+    problem.setE(rocisa::DataType::Float, problem.d().sizes(), problem.d().strides());
+    problem.setUseGradient(true);
+    problem.setActivationType(ActivationType::Relu);
+    problem.setUseBias(1);
+    problem.setBias(rocisa::DataType::Float,
+                    M,
+                    M,
+                    true,
+                    ContractionProblemGemm::D,
+                    0);
+
+    std::vector<float> a{1, 2};
+    std::vector<float> b{3, 4};
+    std::vector<float> c(M * N, 0);
+    std::vector<float> d(M * N, -99);
+    std::vector<float> e(M * N, 1);
+    std::vector<float> bias(M, 0);
+
+    ContractionInputs inputs(a.data(), b.data(), c.data(), d.data(), 1.0f, 0.0f);
+    inputs.e = e.data();
+    inputs.bias = bias.data();
+
+    ASSERT_TRUE(tryRuntimeCanonicalGemm(problem, inputs, /*elementsToValidate=*/-1));
+    EXPECT_EQ(d, (std::vector<float>{3, 6, 4, 8}));
+    EXPECT_EQ(bias, (std::vector<float>{7, 14}));
+}
+
+TEST(ReferenceStandaloneEpilogue, PreservesLegacySharedFactorAxisWhenMEqualsN)
+{
+    const size_t M = 2;
+    const size_t N = 2;
+    const size_t K = 1;
+
+    auto problem = makePackedProblem(rocisa::DataType::Float,
+                                     rocisa::DataType::Float,
+                                     rocisa::DataType::Float,
+                                     M,
+                                     N,
+                                     K);
+    problem.setUseBias(1);
+    problem.setBias(rocisa::DataType::Float,
+                    N,
+                    N,
+                    false,
+                    ContractionProblemGemm::D,
+                    1);
+    problem.setUseScaleAlphaVec(1);
+    problem.setScaleAlphaVec(rocisa::DataType::Float, N, 1);
+
+    std::vector<float> a{1, 2};
+    std::vector<float> b{3, 4};
+    std::vector<float> c(M * N, 0);
+    std::vector<float> d(M * N, -99);
+    std::vector<float> bias{1, 2};
+    std::vector<float> scaleAlpha{10, 100};
+
+    ContractionInputs inputs(a.data(), b.data(), c.data(), d.data(), 1.0f, 0.0f);
+    inputs.bias = bias.data();
+    inputs.scaleAlphaVec = scaleAlpha.data();
+
+    ASSERT_TRUE(tryRuntimeCanonicalGemm(problem, inputs, /*elementsToValidate=*/-1));
+    EXPECT_EQ(d, (std::vector<float>{31, 61, 402, 802}));
+}
+
+TEST(ReferenceRuntimeCanonical, HandlesInt32Accumulation)
+{
+    const size_t M = 2;
+    const size_t N = 1;
+    const size_t K = 2;
+
+    auto problem = makePackedProblem(rocisa::DataType::Int8,
+                                     rocisa::DataType::Int8,
+                                     rocisa::DataType::Int32,
+                                     M,
+                                     N,
+                                     K);
+
+    std::vector<int8_t> a{1, 2, 3, 4};
+    std::vector<int8_t> b{5, 6};
+    std::vector<int32_t> c(M * N, 0);
+    std::vector<int32_t> d(M * N, -99);
+
+    ContractionInputs inputs(a.data(), b.data(), c.data(), d.data(), int32_t(1), int32_t(0));
+    ASSERT_TRUE(tryRuntimeCanonicalGemm(problem, inputs, /*elementsToValidate=*/-1));
+    EXPECT_EQ(d, (std::vector<int32_t>{23, 34}));
+}

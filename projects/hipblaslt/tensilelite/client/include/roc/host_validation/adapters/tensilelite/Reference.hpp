@@ -188,6 +188,13 @@ namespace TensileLite
                           size_t                        elementsToValidate,
                           bool                          tryFastPath = true);
 
+        // Transitional product-private bridge used while the broad typed
+        // compatibility backend is being removed. Returns false without
+        // modifying outputs when the descriptor is not yet representable.
+        bool tryRuntimeCanonicalGemm(ContractionProblemGemm const& problem,
+                                     ContractionInputs const&      inputs,
+                                     size_t                        elementsToValidate);
+
         // Check whether a given contraction problem is eligible for the fast CPU GEMM path.
         // This inspects problem geometry, data types, and feature flags but does not
         // look at runtime input buffers.
