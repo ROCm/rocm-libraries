@@ -1173,7 +1173,8 @@ namespace TensileLite
             if (problem.boundIndices().size() != 1 || problem.freeIndicesA().size() != 1 ||
                 problem.freeIndicesB().size() != 1 || problem.batchIndices().size() != 1)
                 return false;
-            if (problem.boundIndices()[0].aMirror || problem.boundIndices()[0].bMirror)
+            if ((problem.boundIndices()[0].aMirror || problem.boundIndices()[0].bMirror) &&
+                (problem.mxBlockA() > 0 || problem.mxBlockB() > 0))
                 return false;
             if (problem.useGradient() && !problem.useE()) return false;
             if (problem.useGradient() && problem.useBias() &&
@@ -1198,12 +1199,11 @@ namespace TensileLite
                  (inputs.scaleC == nullptr || inputs.scaleD == nullptr)) ||
                 (problem.useGateResidual() && inputs.gateResidual == nullptr))
                 return false;
-            if (inputs.a == nullptr || inputs.b == nullptr || inputs.c == nullptr ||
-                inputs.d == nullptr || inputs.batchA != nullptr || inputs.batchB != nullptr ||
-                inputs.batchC != nullptr || inputs.batchD != nullptr ||
-                inputs.batchBias != nullptr || inputs.batchGateResidual != nullptr ||
-                inputs.batchOffsetA != 0 || inputs.batchOffsetB != 0 ||
-                inputs.batchOffsetC != 0 || inputs.batchOffsetD != 0)
+            if ((inputs.a == nullptr && inputs.batchA == nullptr) ||
+                (inputs.b == nullptr && inputs.batchB == nullptr) ||
+                (inputs.c == nullptr && inputs.batchC == nullptr) ||
+                (inputs.d == nullptr && inputs.batchD == nullptr) ||
+                inputs.batchBias != nullptr || inputs.batchGateResidual != nullptr)
                 return false;
             if (problem.a().dataType() == rocisa::DataType::Float6 ||
                 problem.a().dataType() == rocisa::DataType::BFloat6 ||
@@ -1235,14 +1235,16 @@ namespace TensileLite
             } catch (std::invalid_argument const&) {
                 return false;
             }
-            if (accumulatorType != ScalarType::Float32 && accumulatorType != ScalarType::Float64 &&
+            if (accumulatorType != ScalarType::Float16 &&
+                accumulatorType != ScalarType::BFloat16 &&
+                accumulatorType != ScalarType::Float32 && accumulatorType != ScalarType::Float64 &&
                 accumulatorType != ScalarType::Int32 &&
                 accumulatorType != ScalarType::ComplexFloat32 &&
                 accumulatorType != ScalarType::ComplexFloat64)
                 return false;
-            if (useStandaloneEpilogue &&
-                (accumulatorType == ScalarType::ComplexFloat32 ||
-                 accumulatorType == ScalarType::ComplexFloat64))
+            if (useStandaloneEpilogue && accumulatorType != ScalarType::Float32 &&
+                accumulatorType != ScalarType::Float64 &&
+                accumulatorType != ScalarType::Int32)
                 return false;
             if ((problem.useScaleAB() == "Scalar" || problem.useScaleAB() == "Vector") &&
                 (computeTypeA != typeA || computeTypeB != typeB))
@@ -1256,6 +1258,10 @@ namespace TensileLite
                         return {constVariantCast<float>(value), 0.0};
                     case rocisa::DataType::Double:
                         return {constVariantCast<double>(value), 0.0};
+                    case rocisa::DataType::Half:
+                        return {static_cast<double>(constVariantCast<Half>(value)), 0.0};
+                    case rocisa::DataType::BFloat16:
+                        return {static_cast<double>(constVariantCast<BFloat16>(value)), 0.0};
                     case rocisa::DataType::Int32:
                         return {static_cast<double>(constVariantCast<int32_t>(value)), 0.0};
                     case rocisa::DataType::ComplexFloat: {
@@ -1389,14 +1395,26 @@ namespace TensileLite
                 if (op.type == TensorOp::Type::ComplexConjugate) aConjugate = true;
             for (auto const& op : problem.bOps())
                 if (op.type == TensorOp::Type::ComplexConjugate) bConjugate = true;
-            const auto aStorage = std::span<const std::byte>(
-                static_cast<const std::byte*>(inputs.a), problem.a().totalAllocatedBytes());
-            const auto bStorage = std::span<const std::byte>(
-                static_cast<const std::byte*>(inputs.b), problem.b().totalAllocatedBytes());
-            const auto cStorage = std::span<const std::byte>(
-                static_cast<const std::byte*>(inputs.c), problem.c().totalAllocatedBytes());
-            const auto dStorage = std::span<std::byte>(static_cast<std::byte*>(inputs.d),
-                                                       problem.d().totalAllocatedBytes());
+            const auto aStorage = inputs.batchA == nullptr
+                ? std::span<const std::byte>(
+                      static_cast<const std::byte*>(inputs.a) + inputs.batchOffsetA,
+                      problem.a().totalAllocatedBytes())
+                : std::span<const std::byte>{};
+            const auto bStorage = inputs.batchB == nullptr
+                ? std::span<const std::byte>(
+                      static_cast<const std::byte*>(inputs.b) + inputs.batchOffsetB,
+                      problem.b().totalAllocatedBytes())
+                : std::span<const std::byte>{};
+            const auto cStorage = inputs.batchC == nullptr
+                ? std::span<const std::byte>(
+                      static_cast<const std::byte*>(inputs.c) + inputs.batchOffsetC,
+                      problem.c().totalAllocatedBytes())
+                : std::span<const std::byte>{};
+            const auto dStorage = inputs.batchD == nullptr
+                ? std::span<std::byte>(
+                      static_cast<std::byte*>(inputs.d) + inputs.batchOffsetD,
+                      problem.d().totalAllocatedBytes())
+                : std::span<std::byte>{};
             std::optional<ScalarType> biasType;
             std::span<const std::byte> biasStorage;
             std::span<std::byte> biasOutputStorage;
@@ -1465,28 +1483,81 @@ namespace TensileLite
             }
 
             for (size_t batch = 0; batch < batches; ++batch) {
-                const ptrdiff_t offsetA =
-                    static_cast<ptrdiff_t>(batch * problem.a().strides()[batchA]);
-                const ptrdiff_t offsetB =
-                    static_cast<ptrdiff_t>(batch * problem.b().strides()[batchB]);
-                const ptrdiff_t offsetC =
-                    static_cast<ptrdiff_t>(batch * problem.c().strides()[batchC]);
-                const ptrdiff_t offsetD =
-                    static_cast<ptrdiff_t>(batch * problem.d().strides()[batchD]);
+                if ((inputs.batchA != nullptr && inputs.batchA[batch] == nullptr) ||
+                    (inputs.batchB != nullptr && inputs.batchB[batch] == nullptr) ||
+                    (inputs.batchC != nullptr && inputs.batchC[batch] == nullptr) ||
+                    (inputs.batchD != nullptr && inputs.batchD[batch] == nullptr))
+                    return false;
+                ptrdiff_t offsetA = inputs.batchA == nullptr
+                    ? static_cast<ptrdiff_t>(batch * problem.a().strides()[batchA])
+                    : 0;
+                ptrdiff_t offsetB = inputs.batchB == nullptr
+                    ? static_cast<ptrdiff_t>(batch * problem.b().strides()[batchB])
+                    : 0;
+                const ptrdiff_t offsetC = inputs.batchC == nullptr
+                    ? static_cast<ptrdiff_t>(batch * problem.c().strides()[batchC])
+                    : 0;
+                const ptrdiff_t offsetD = inputs.batchD == nullptr
+                    ? static_cast<ptrdiff_t>(batch * problem.d().strides()[batchD])
+                    : 0;
+                ptrdiff_t strideKA =
+                    static_cast<ptrdiff_t>(problem.a().strides()[indexKA]);
+                ptrdiff_t strideKB =
+                    static_cast<ptrdiff_t>(problem.b().strides()[indexKB]);
+                if (problem.boundIndices()[0].aMirror && k != 0) {
+                    offsetA += static_cast<ptrdiff_t>(k - 1) * strideKA;
+                    strideKA = -strideKA;
+                }
+                if (problem.boundIndices()[0].bMirror && k != 0) {
+                    offsetB += static_cast<ptrdiff_t>(k - 1) * strideKB;
+                    strideKB = -strideKB;
+                }
+                const Layout layoutA(
+                    Shape{m, k},
+                    {static_cast<ptrdiff_t>(problem.a().strides()[indexMA]), strideKA},
+                    offsetA);
+                const Layout layoutB(
+                    Shape{k, n},
+                    {strideKB, static_cast<ptrdiff_t>(problem.b().strides()[indexNB])},
+                    offsetB);
+                const Layout layoutC(
+                    Shape{m, n},
+                    {static_cast<ptrdiff_t>(problem.c().strides()[indexMD]),
+                     static_cast<ptrdiff_t>(problem.c().strides()[indexND])},
+                    offsetC);
+                const Layout layoutD(
+                    Shape{m, n},
+                    {static_cast<ptrdiff_t>(problem.d().strides()[indexMD]),
+                     static_cast<ptrdiff_t>(problem.d().strides()[indexND])},
+                    offsetD);
+                const auto currentAStorage = inputs.batchA == nullptr
+                    ? aStorage
+                    : std::span<const std::byte>(
+                          static_cast<const std::byte*>(inputs.batchA[batch]) +
+                              inputs.batchOffsetA,
+                          storageBytesForLayout(typeA, layoutA));
+                const auto currentBStorage = inputs.batchB == nullptr
+                    ? bStorage
+                    : std::span<const std::byte>(
+                          static_cast<const std::byte*>(inputs.batchB[batch]) +
+                              inputs.batchOffsetB,
+                          storageBytesForLayout(typeB, layoutB));
+                const auto currentCStorage = inputs.batchC == nullptr
+                    ? cStorage
+                    : std::span<const std::byte>(
+                          static_cast<const std::byte*>(inputs.batchC[batch]) +
+                              inputs.batchOffsetC,
+                          storageBytesForLayout(typeC, layoutC));
+                const auto currentDStorage = inputs.batchD == nullptr
+                    ? dStorage
+                    : std::span<std::byte>(
+                          static_cast<std::byte*>(inputs.batchD[batch]) +
+                              inputs.batchOffsetD,
+                          storageBytesForLayout(typeD, layoutD));
                 GemmOperand operandA(
-                    TensorView(typeA,
-                               Layout(Shape{m, k},
-                                      {static_cast<ptrdiff_t>(problem.a().strides()[indexMA]),
-                                       static_cast<ptrdiff_t>(problem.a().strides()[indexKA])},
-                                      offsetA),
-                               aStorage));
+                    TensorView(typeA, layoutA, currentAStorage));
                 GemmOperand operandB(
-                    TensorView(typeB,
-                               Layout(Shape{k, n},
-                                      {static_cast<ptrdiff_t>(problem.b().strides()[indexKB]),
-                                       static_cast<ptrdiff_t>(problem.b().strides()[indexNB])},
-                                      offsetB),
-                               bStorage));
+                    TensorView(typeB, layoutB, currentBStorage));
                 if (computeTypeA != typeA) operandA.computeType = computeTypeA;
                 if (computeTypeB != typeB) operandB.computeType = computeTypeB;
                 operandA.conjugate = aConjugate;
@@ -1523,12 +1594,7 @@ namespace TensileLite
                 const TensorView logicalA = operandA.values;
                 const TensorView logicalB = operandB.values;
                 MutableTensorView productOutput(
-                    typeD,
-                    Layout(Shape{m, n},
-                           {static_cast<ptrdiff_t>(problem.d().strides()[indexMD]),
-                            static_cast<ptrdiff_t>(problem.d().strides()[indexND])},
-                           offsetD),
-                    dStorage);
+                    typeD, layoutD, currentDStorage);
                 std::optional<Tensor> intermediate;
                 MutableTensorView gemmOutput = productOutput;
                 if (useStandaloneEpilogue) {
@@ -1538,12 +1604,7 @@ namespace TensileLite
 
                 GemmProblem runtimeProblem(
                     std::move(operandA), std::move(operandB),
-                    TensorView(typeC,
-                               Layout(Shape{m, n},
-                                      {static_cast<ptrdiff_t>(problem.c().strides()[indexMD]),
-                                       static_cast<ptrdiff_t>(problem.c().strides()[indexND])},
-                                      offsetC),
-                               cStorage),
+                    TensorView(typeC, layoutC, currentCStorage),
                     gemmOutput,
                     accumulatorType);
                 runtimeProblem.epilogue.alpha = alpha;
