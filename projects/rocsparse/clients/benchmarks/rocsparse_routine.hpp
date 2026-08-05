@@ -23,6 +23,7 @@
 * ************************************************************************ */
 #pragma once
 #include "rocsparse_arguments.hpp"
+#include <rocsparse/rocsparse-config.h>
 
 // clang-format off
 #ifdef ROCSPARSE_WITH_ILDLT0

@@ -23,7 +23,7 @@
 * ************************************************************************ */
 #pragma once
 #include "hipsparse_arguments.hpp"
-#include <hipsparse/hipsparse-version.h>
+#include <hipsparse/hipsparse-config.h>
 template <std::size_t N, typename T>
 static constexpr std::size_t countof2(T (&)[N])
 {
