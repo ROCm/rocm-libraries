@@ -75,22 +75,31 @@ TEST(TestUuid, FormatsAndParsesCanonicalText)
     EXPECT_EQ(hipdnn_flatbuffers_sdk::utilities::toUuidBytes(flatbufferUuid), bytes);
 }
 
-TEST(TestUuid, RejectsMalformedOrNonV4Text)
+TEST(TestUuid, RejectsMalformedText)
 {
     const std::vector<std::string> invalidIds{
         "",
         "01234567-89ab-4def-8123-456789abcde",
         "01234567_89ab-4def-8123-456789abcdef",
         "g1234567-89ab-4def-8123-456789abcdef",
-        "01234567-89ab-3def-8123-456789abcdef",
-        "01234567-89ab-4def-4123-456789abcdef",
-        "00000000-0000-0000-0000-000000000000",
     };
 
     for(const auto& id : invalidIds)
     {
         EXPECT_THROW((void)hipdnn_flatbuffers_sdk::utilities::parseUuid(id), std::invalid_argument)
             << id;
+    }
+}
+
+TEST(TestUuid, ParsesOpaque128BitValues)
+{
+    for(const auto& id : {"01234567-89ab-3def-8123-456789abcdef",
+                          "01234567-89ab-4def-4123-456789abcdef",
+                          "00000000-0000-0000-0000-000000000000"})
+    {
+        EXPECT_EQ(hipdnn_flatbuffers_sdk::utilities::formatUuid(
+                      hipdnn_flatbuffers_sdk::utilities::parseUuid(id)),
+                  id);
     }
 }
 
@@ -137,8 +146,7 @@ TEST(TestJson, RejectsInvalidGraphUuid)
     const auto* graph = GetGraph(builder.GetBufferPointer());
     auto graphJson = nlohmann::json(*graph);
 
-    for(const auto& id :
-        nlohmann::json::array({42, "not-a-uuid", "01234567-89ab-3def-8123-456789abcdef"}))
+    for(const auto& id : nlohmann::json::array({42, "not-a-uuid"}))
     {
         graphJson["id"] = id;
         flatbuffers::FlatBufferBuilder invalidBuilder;

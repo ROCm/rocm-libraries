@@ -67,8 +67,7 @@ struct EngineApiVersion {
 	patch: uint;
 }
 
-// UUID version 4 with the RFC variant, as defined by RFC 9562:
-// https://www.rfc-editor.org/rfc/rfc9562.html#section-5.4
+// Opaque 128-bit graph identity.
 struct Uuid {
 	bytes: [ubyte:16];
 }

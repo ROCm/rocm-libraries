@@ -426,11 +426,7 @@ void GraphDescriptor::deserializeGraph(const uint8_t* serializedGraph, size_t gr
     std::optional<std::array<uint8_t, 16>> graphId;
     if(graph->id)
     {
-        const auto id = hipdnn_flatbuffers_sdk::utilities::toUuidBytes(*graph->id);
-        THROW_IF_FALSE(hipdnn_flatbuffers_sdk::utilities::isUuidV4(id),
-                       HIPDNN_STATUS_BAD_PARAM,
-                       "Serialized graph id must be a version 4 UUID with the standard variant.");
-        graphId = id;
+        graphId = hipdnn_flatbuffers_sdk::utilities::toUuidBytes(*graph->id);
     }
 
     auto tensorMap = NodeFactory::buildTensorMap(graph->tensors);

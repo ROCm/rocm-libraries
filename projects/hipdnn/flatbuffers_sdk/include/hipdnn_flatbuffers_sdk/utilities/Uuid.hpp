@@ -89,11 +89,6 @@ inline UuidBytes parseUuid(std::string_view text)
         const auto low = parseHexDigit(text[input++]);
         byte = static_cast<uint8_t>((high << 4U) | low);
     }
-
-    if(!isUuidV4(bytes))
-    {
-        throw std::invalid_argument("UUID must be version 4 with the standard variant");
-    }
     return bytes;
 }
 
