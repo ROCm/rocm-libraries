@@ -2,10 +2,11 @@
 
 Full documentation for hipCUB is available at [https://rocm.docs.amd.com/projects/hipCUB/en/latest/](https://rocm.docs.amd.com/projects/hipCUB/en/latest/).
 
-## hipCUB-5.0.0 for ROCm 10.0
+## hipCUB-5.0.0 for ROCm 10.0.0
 
 ### Added
 
+* Feature parity with CCCL/CUB 3.0.0.
 * Added `::hip::std` support.
 
 ### Changed
@@ -18,6 +19,7 @@ Full documentation for hipCUB is available at [https://rocm.docs.amd.com/project
 
 ### Removed
 
+* hipCUB compatibility with PyTorch v2.9 and v2.10 has been removed in this release.  Please use PyTorch v2.11 or later.
 * Removed `hipcub::BaseTraits::CATEGORY`, `hipcub::BaseTraits::nullptr_TYPE` and `hipcub::BaseTraits::PRIMITIVE`.
 * Removed  `ConstantInputIterator`, `CountingInputIterator`, `DiscardOutputIterator` and `TransformInputIterator` which were deprecated in hipCUB-4.1.0.
 * Removed `DeviceSpmv`, which was removed from CUB after CCCL's 2.8.0 release. Use `hipSPARSE` or `rocSPARSE` libraries instead.
@@ -62,6 +64,8 @@ Full documentation for hipCUB is available at [https://rocm.docs.amd.com/project
 ### Removed
 
 * Removed the `GenerateResourceSpec.cmake` script - it is replaced by the added `generate_resource_spec.cpp` code mentioned above.
+
+* Removed deprecated `IteratorWrapper::operator<<`, `If`, `IsPointer`, `IsVolatile`, `RemoveQualifiers`.
 
 ## hipCUB-4.2.0 for ROCm 7.2
  
