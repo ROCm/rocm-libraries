@@ -116,6 +116,7 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBu
         // strip s_wait_alu before scheduling (whole-kernel)
         pm.addPass(createRemoveWaitAluPass(module.getFunctions()));
     }
+    pm.addPass(createStinkyRemoveNopPass(/*vNopOnly=*/true));
     PB.applyExtensionPoint(PipelineExtensionPoint::BeforeRegionPasses, pm, module);
 
     // -- region: loopWithPrefetch + noLoadLoopBody --

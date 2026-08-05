@@ -266,47 +266,9 @@ class InsertCoexecHazardPass : public StinkyInstPass {
         return best;
     }
 
-    // the v_nop is the required safe-first-VALU
-    IRBase* entryPrologueVNop(Function& func) const {
-        const StinkyInstruction* first = nullptr;
-        for (BasicBlock& bb : func) {
-            for (auto& node : bb) {
-                auto* inst = dyn_cast<StinkyInstruction>(&node);
-                if (!inst || isPseudoInst(inst)) continue;
-                if (!first) {
-                    if (inst->getUnifiedOpcode() != GFX::global_prefetch_b8) return nullptr;
-                    first = inst;
-                    continue;
-                }
-                return inst->getUnifiedOpcode() == GFX::v_nop ? &node : nullptr;
-            }
-        }
-        return nullptr;
-    }
-
-    size_t stripVNops(Function& func) {
-        IRBase* keep = entryPrologueVNop(func);
-        size_t removed = 0;
-        for (BasicBlock& bb : func) {
-            for (auto it = bb.begin(); it != bb.end();) {
-                auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
-                IRBase* node = it.getNodePtr();
-                ++it;  // advance before a possible erase
-                if (inst && inst->getUnifiedOpcode() == GFX::v_nop && node != keep) {
-                    bb.removeIR(node);
-                    ++removed;
-                }
-            }
-        }
-        return removed;
-    }
-
     void processFunction(Function& func) {
-        // Strip existing v_nops, then re-emit correct counts.
-        const size_t stripped = stripVNops(func);
-        PASS_DEBUG(std::cerr << "[InsertCoexecHazard] stripped " << stripped
-                             << " pre-existing v_nop(s)\n");
-
+        // v_nops are stripped upstream by StinkyRemoveNopPass; this pass counts the
+        // remaining (deliberate, scheduler-placed) fillers and tops up the shortfall.
         for (BasicBlock& bb : func) {
             for (auto it = bb.begin(); it != bb.end();) {
                 auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());

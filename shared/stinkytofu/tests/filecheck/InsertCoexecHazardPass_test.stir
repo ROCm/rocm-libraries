@@ -4,11 +4,12 @@
 # DGEMM/SGEMM->WMMA=1. Operand order A=src0 B=src1 C=src2 D=dst.
 
 #===----------------------------------------------------------------------===#
-# Strip pre-existing v_nops and re-emit correct counts
+# Top-up: existing v_nops are counted as fillers; only the shortfall is inserted
+# (the pass no longer strips -- StinkyRemoveNopPass does that upstream).
 #===----------------------------------------------------------------------===#
 
-#--- Strip input v_nops, re-emit WMMA->WMMA at 5.
-# CHECK-LABEL: @strip_and_reinsert
+#--- 2 existing v_nops between the pair, WMMA->WMMA needs 5 -> top up 3 (total 5).
+# CHECK-LABEL: @topup_counts_existing_vnops
 # CHECK: v_wmma_f32_16x16x32_bf16
 # CHECK-NEXT: v_nop
 # CHECK-NEXT: v_nop
@@ -16,7 +17,7 @@
 # CHECK-NEXT: v_nop
 # CHECK-NEXT: v_nop
 # CHECK-NEXT: v_wmma_f32_16x16x32_bf16
-st.func @strip_and_reinsert() {
+st.func @topup_counts_existing_vnops() {
 ^entry:
   v[0:7] = "st.v_wmma_f32_16x16x32_bf16"(v[20:27], v[30:37], v[0:7]) { mod.mfma = { reuseA = false, reuseB = false } }
   "st.v_nop"() { issueCycles = 1, latencyCycles = 5 }
