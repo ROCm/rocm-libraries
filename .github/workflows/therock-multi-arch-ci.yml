@@ -111,8 +111,8 @@ jobs:
       # rocm-libraries only affects math-libs and ml-libs source sets
       # Note: compiler-runtime excluded due to hardcoded CMake paths (fftw3, etc.)
       # TODO(geomin12): Enable automatic stage reuse once dry-run mode issues resolved
-      prebuilt_stages: ${{ inputs.prebuilt_stages || 'runtime-tests,comm-libs,storage-libs,debug-tools,dctools-core,profiler-apps,media-libs' }}
-      baseline_run_id: ${{ inputs.baseline_run_id || '30355982315' }}
+      prebuilt_stages: ${{ inputs.prebuilt_stages || 'runtime-tests,comm-libs,storage-libs,debug-tools,dctools-core,profiler-apps,media-libs,wsl-rocdxg' }}
+      baseline_run_id: ${{ inputs.baseline_run_id || '30989762651' }}
       repository: ROCm/TheRock
       ref: main
       external_repo: '{"repository":"${{ github.repository }}","ref":"${{ github.sha }}"}'
