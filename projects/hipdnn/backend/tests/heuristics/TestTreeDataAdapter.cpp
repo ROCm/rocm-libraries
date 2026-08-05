@@ -394,8 +394,8 @@ TEST_F(TestTreeDataAdapter, ScoreBinarySplitGoesRight)
 
 TEST_F(TestTreeDataAdapter, ScoreBinarySplitAtThreshold)
 {
-    // Tree: if feature[0] < 5.0 then 10.0 else 20.0
-    // At exactly threshold, should go right (not strictly less than)
+    // Tree: if feature[0] <= 5.0 then 10.0 else 20.0
+    // At exactly threshold, should go LEFT (LightGBM uses <= by default)
     auto buffer = GbdtModelBuilder()
                       .setNumFeatures(1)
                       .setFeaturesHash(TEST_HASH)
@@ -405,10 +405,10 @@ TEST_F(TestTreeDataAdapter, ScoreBinarySplitAtThreshold)
     auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
     ASSERT_NE(adapter, nullptr);
 
-    std::vector<double> features = {5.0}; // == 5.0, should go right
+    std::vector<double> features = {5.0}; // == 5.0, should go left with <= comparison
     double score = adapter->score(features);
 
-    EXPECT_DOUBLE_EQ(score, 20.0);
+    EXPECT_DOUBLE_EQ(score, 10.0);
 }
 
 TEST_F(TestTreeDataAdapter, ScoreDeepTreePath1)
@@ -513,13 +513,17 @@ TEST_F(TestTreeDataAdapter, ScoreAppliesBaseScore)
 
 TEST_F(TestTreeDataAdapter, ScoreAppliesLearningRate)
 {
+    // NOTE: LightGBM's dump_model() returns leaf_values that ALREADY include
+    // learning_rate multiplication. We test with pre-scaled values here.
+    // If learning_rate=0.1 and "raw" leaves were 100.0 and 200.0,
+    // then exported leaf_values would be 10.0 and 20.0.
     auto buffer = GbdtModelBuilder()
                       .setNumFeatures(1)
                       .setFeaturesHash(TEST_HASH)
                       .setBaseScore(0.0)
-                      .setLearningRate(0.1)
-                      .addTree(makeLeafTree(10.0))
-                      .addTree(makeLeafTree(20.0))
+                      .setLearningRate(0.1) // Stored for metadata, not used in score()
+                      .addTree(makeLeafTree(10.0)) // Pre-scaled: 0.1 * 100.0
+                      .addTree(makeLeafTree(20.0)) // Pre-scaled: 0.1 * 200.0
                       .build();
 
     auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
@@ -528,20 +532,22 @@ TEST_F(TestTreeDataAdapter, ScoreAppliesLearningRate)
     std::vector<double> features = {0.0};
     double score = adapter->score(features);
 
-    // score = base_score + learning_rate * sum(leaf_values)
-    // score = 0.0 + 0.1 * (10.0 + 20.0) = 3.0
-    EXPECT_DOUBLE_EQ(score, 3.0);
+    // score = base_score + sum(leaf_values)
+    // score = 0.0 + (10.0 + 20.0) = 30.0
+    // (learning_rate is NOT applied again since leaf_values are pre-scaled)
+    EXPECT_DOUBLE_EQ(score, 30.0);
 }
 
 TEST_F(TestTreeDataAdapter, ScoreWithBaseScoreAndLearningRate)
 {
+    // Same principle: leaf_values from LightGBM are pre-scaled by learning_rate.
     auto buffer = GbdtModelBuilder()
                       .setNumFeatures(1)
                       .setFeaturesHash(TEST_HASH)
                       .setBaseScore(50.0)
-                      .setLearningRate(0.5)
-                      .addTree(makeLeafTree(10.0))
-                      .addTree(makeLeafTree(20.0))
+                      .setLearningRate(0.5) // Metadata only
+                      .addTree(makeLeafTree(10.0)) // Pre-scaled
+                      .addTree(makeLeafTree(20.0)) // Pre-scaled
                       .build();
 
     auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
@@ -550,9 +556,9 @@ TEST_F(TestTreeDataAdapter, ScoreWithBaseScoreAndLearningRate)
     std::vector<double> features = {0.0};
     double score = adapter->score(features);
 
-    // score = base_score + learning_rate * sum(leaf_values)
-    // score = 50.0 + 0.5 * (10.0 + 20.0) = 50.0 + 15.0 = 65.0
-    EXPECT_DOUBLE_EQ(score, 65.0);
+    // score = base_score + sum(leaf_values)
+    // score = 50.0 + (10.0 + 20.0) = 80.0
+    EXPECT_DOUBLE_EQ(score, 80.0);
 }
 
 // ========== Missing Value Handling Tests ==========
@@ -658,11 +664,12 @@ TEST_F(TestTreeDataAdapter, BatchScoring)
     auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
     ASSERT_NE(adapter, nullptr);
 
+    // With <= comparison (LightGBM default), values <= 5.0 go left (10.0)
     std::vector<std::vector<double>> batch = {
-        {3.0},  // < 5.0 -> 10.0
-        {7.0},  // >= 5.0 -> 20.0
-        {5.0},  // == 5.0 -> 20.0
-        {-1.0}, // < 5.0 -> 10.0
+        {3.0},  // <= 5.0 -> 10.0
+        {7.0},  // > 5.0 -> 20.0
+        {5.0},  // <= 5.0 -> 10.0 (at threshold, goes left with <=)
+        {-1.0}, // <= 5.0 -> 10.0
     };
 
     auto scores = adapter->scoreBatch(batch);
@@ -670,7 +677,7 @@ TEST_F(TestTreeDataAdapter, BatchScoring)
     ASSERT_EQ(scores.size(), 4u);
     EXPECT_DOUBLE_EQ(scores[0], 10.0);
     EXPECT_DOUBLE_EQ(scores[1], 20.0);
-    EXPECT_DOUBLE_EQ(scores[2], 20.0);
+    EXPECT_DOUBLE_EQ(scores[2], 10.0); // Now goes left with <= comparison
     EXPECT_DOUBLE_EQ(scores[3], 10.0);
 }
 

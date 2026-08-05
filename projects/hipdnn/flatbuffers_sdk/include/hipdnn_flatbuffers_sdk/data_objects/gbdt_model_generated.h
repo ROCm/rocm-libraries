@@ -37,6 +37,7 @@ struct GbdtTreeT : public ::flatbuffers::NativeTable {
   std::vector<int32_t> right_children{};
   std::vector<double> leaf_values{};
   std::vector<bool> default_left{};
+  std::vector<bool> decision_lte{};
 };
 
 /// @brief A single decision tree in the GBDT ensemble.
@@ -45,7 +46,8 @@ struct GbdtTreeT : public ::flatbuffers::NativeTable {
 /// Node i is internal if left_children[i] >= 0; leaf if left_children[i] == -1.
 ///
 /// Traversal: start at node 0, compare features[feature_indices[i]] against
-/// thresholds[i], go left (left_children[i]) if less or missing and default_left,
+/// thresholds[i], go left (left_children[i]) if less-or-equal (or less, if
+/// decision_type at i is false) or if missing and default_left,
 /// else right (right_children[i]). At a leaf, return leaf_values[i].
 struct GbdtTree FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   typedef GbdtTreeT NativeTableType;
@@ -56,7 +58,8 @@ struct GbdtTree FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
     VT_LEFT_CHILDREN = 8,
     VT_RIGHT_CHILDREN = 10,
     VT_LEAF_VALUES = 12,
-    VT_DEFAULT_LEFT = 14
+    VT_DEFAULT_LEFT = 14,
+    VT_DECISION_LTE = 16
   };
   /// Feature index to split on at each internal node.
   const ::flatbuffers::Vector<int32_t> *feature_indices() const {
@@ -100,6 +103,14 @@ struct GbdtTree FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   ::flatbuffers::Vector<uint8_t> *mutable_default_left() {
     return GetPointer<::flatbuffers::Vector<uint8_t> *>(VT_DEFAULT_LEFT);
   }
+  /// Decision type per node: true = use <= (LightGBM default), false = use <.
+  /// If absent, defaults to all true (<=) for LightGBM compatibility.
+  const ::flatbuffers::Vector<uint8_t> *decision_lte() const {
+    return GetPointer<const ::flatbuffers::Vector<uint8_t> *>(VT_DECISION_LTE);
+  }
+  ::flatbuffers::Vector<uint8_t> *mutable_decision_lte() {
+    return GetPointer<::flatbuffers::Vector<uint8_t> *>(VT_DECISION_LTE);
+  }
   bool Verify(::flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
            VerifyOffset(verifier, VT_FEATURE_INDICES) &&
@@ -114,6 +125,8 @@ struct GbdtTree FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
            verifier.VerifyVector(leaf_values()) &&
            VerifyOffset(verifier, VT_DEFAULT_LEFT) &&
            verifier.VerifyVector(default_left()) &&
+           VerifyOffset(verifier, VT_DECISION_LTE) &&
+           verifier.VerifyVector(decision_lte()) &&
            verifier.EndTable();
   }
   GbdtTreeT *UnPack(const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
@@ -143,6 +156,9 @@ struct GbdtTreeBuilder {
   void add_default_left(::flatbuffers::Offset<::flatbuffers::Vector<uint8_t>> default_left) {
     fbb_.AddOffset(GbdtTree::VT_DEFAULT_LEFT, default_left);
   }
+  void add_decision_lte(::flatbuffers::Offset<::flatbuffers::Vector<uint8_t>> decision_lte) {
+    fbb_.AddOffset(GbdtTree::VT_DECISION_LTE, decision_lte);
+  }
   explicit GbdtTreeBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
@@ -161,8 +177,10 @@ inline ::flatbuffers::Offset<GbdtTree> CreateGbdtTree(
     ::flatbuffers::Offset<::flatbuffers::Vector<int32_t>> left_children = 0,
     ::flatbuffers::Offset<::flatbuffers::Vector<int32_t>> right_children = 0,
     ::flatbuffers::Offset<::flatbuffers::Vector<double>> leaf_values = 0,
-    ::flatbuffers::Offset<::flatbuffers::Vector<uint8_t>> default_left = 0) {
+    ::flatbuffers::Offset<::flatbuffers::Vector<uint8_t>> default_left = 0,
+    ::flatbuffers::Offset<::flatbuffers::Vector<uint8_t>> decision_lte = 0) {
   GbdtTreeBuilder builder_(_fbb);
+  builder_.add_decision_lte(decision_lte);
   builder_.add_default_left(default_left);
   builder_.add_leaf_values(leaf_values);
   builder_.add_right_children(right_children);
@@ -179,13 +197,15 @@ inline ::flatbuffers::Offset<GbdtTree> CreateGbdtTreeDirect(
     const std::vector<int32_t> *left_children = nullptr,
     const std::vector<int32_t> *right_children = nullptr,
     const std::vector<double> *leaf_values = nullptr,
-    const std::vector<uint8_t> *default_left = nullptr) {
+    const std::vector<uint8_t> *default_left = nullptr,
+    const std::vector<uint8_t> *decision_lte = nullptr) {
   auto feature_indices__ = feature_indices ? _fbb.CreateVector<int32_t>(*feature_indices) : 0;
   auto thresholds__ = thresholds ? _fbb.CreateVector<double>(*thresholds) : 0;
   auto left_children__ = left_children ? _fbb.CreateVector<int32_t>(*left_children) : 0;
   auto right_children__ = right_children ? _fbb.CreateVector<int32_t>(*right_children) : 0;
   auto leaf_values__ = leaf_values ? _fbb.CreateVector<double>(*leaf_values) : 0;
   auto default_left__ = default_left ? _fbb.CreateVector<uint8_t>(*default_left) : 0;
+  auto decision_lte__ = decision_lte ? _fbb.CreateVector<uint8_t>(*decision_lte) : 0;
   return hipdnn_flatbuffers_sdk::data_objects::CreateGbdtTree(
       _fbb,
       feature_indices__,
@@ -193,7 +213,8 @@ inline ::flatbuffers::Offset<GbdtTree> CreateGbdtTreeDirect(
       left_children__,
       right_children__,
       leaf_values__,
-      default_left__);
+      default_left__,
+      decision_lte__);
 }
 
 ::flatbuffers::Offset<GbdtTree> CreateGbdtTree(::flatbuffers::FlatBufferBuilder &_fbb, const GbdtTreeT *_o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
@@ -427,7 +448,8 @@ inline bool operator==(const GbdtTreeT &lhs, const GbdtTreeT &rhs) {
       (lhs.left_children == rhs.left_children) &&
       (lhs.right_children == rhs.right_children) &&
       (lhs.leaf_values == rhs.leaf_values) &&
-      (lhs.default_left == rhs.default_left);
+      (lhs.default_left == rhs.default_left) &&
+      (lhs.decision_lte == rhs.decision_lte);
 }
 
 inline bool operator!=(const GbdtTreeT &lhs, const GbdtTreeT &rhs) {
@@ -450,6 +472,7 @@ inline void GbdtTree::UnPackTo(GbdtTreeT *_o, const ::flatbuffers::resolver_func
   { auto _e = right_children(); if (_e) { _o->right_children.resize(_e->size()); for (::flatbuffers::uoffset_t _i = 0; _i < _e->size(); _i++) { _o->right_children[_i] = _e->Get(_i); } } else { _o->right_children.resize(0); } }
   { auto _e = leaf_values(); if (_e) { _o->leaf_values.resize(_e->size()); for (::flatbuffers::uoffset_t _i = 0; _i < _e->size(); _i++) { _o->leaf_values[_i] = _e->Get(_i); } } else { _o->leaf_values.resize(0); } }
   { auto _e = default_left(); if (_e) { _o->default_left.resize(_e->size()); for (::flatbuffers::uoffset_t _i = 0; _i < _e->size(); _i++) { _o->default_left[_i] = _e->Get(_i) != 0; } } else { _o->default_left.resize(0); } }
+  { auto _e = decision_lte(); if (_e) { _o->decision_lte.resize(_e->size()); for (::flatbuffers::uoffset_t _i = 0; _i < _e->size(); _i++) { _o->decision_lte[_i] = _e->Get(_i) != 0; } } else { _o->decision_lte.resize(0); } }
 }
 
 inline ::flatbuffers::Offset<GbdtTree> GbdtTree::Pack(::flatbuffers::FlatBufferBuilder &_fbb, const GbdtTreeT* _o, const ::flatbuffers::rehasher_function_t *_rehasher) {
@@ -466,6 +489,7 @@ inline ::flatbuffers::Offset<GbdtTree> CreateGbdtTree(::flatbuffers::FlatBufferB
   auto _right_children = _o->right_children.size() ? _fbb.CreateVector(_o->right_children) : 0;
   auto _leaf_values = _o->leaf_values.size() ? _fbb.CreateVector(_o->leaf_values) : 0;
   auto _default_left = _o->default_left.size() ? _fbb.CreateVector(_o->default_left) : 0;
+  auto _decision_lte = _o->decision_lte.size() ? _fbb.CreateVector(_o->decision_lte) : 0;
   return hipdnn_flatbuffers_sdk::data_objects::CreateGbdtTree(
       _fbb,
       _feature_indices,
@@ -473,7 +497,8 @@ inline ::flatbuffers::Offset<GbdtTree> CreateGbdtTree(::flatbuffers::FlatBufferB
       _left_children,
       _right_children,
       _leaf_values,
-      _default_left);
+      _default_left,
+      _decision_lte);
 }
 
 

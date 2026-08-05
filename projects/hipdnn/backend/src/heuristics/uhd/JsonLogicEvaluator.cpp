@@ -496,6 +496,136 @@ JsonLogicEvaluator::Value JsonLogicEvaluator::evaluateOp(const std::string& op,
         }
     }
 
+    // Membership operator: {"in": [value, [array]]}
+    if(op == "in")
+    {
+        if(!args.is_array() || args.size() != 2)
+        {
+            throw JsonLogicError("in requires exactly 2 arguments");
+        }
+        Value needle = evaluate(args[0], ctx);
+        const auto& haystack = args[1];
+        if(!haystack.is_array())
+        {
+            throw JsonLogicError("in requires array as second argument");
+        }
+        const double needleVal = toDouble(needle);
+        for(const auto& item : haystack)
+        {
+            if(toDouble(evaluate(item, ctx)) == needleVal)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // Array predicate: {"all": [[array], {predicate using "$current"}]}
+    if(op == "all")
+    {
+        if(!args.is_array() || args.size() != 2)
+        {
+            throw JsonLogicError("all requires exactly 2 arguments");
+        }
+        const auto& arr = args[0];
+        const auto& predicate = args[1];
+        if(!arr.is_array())
+        {
+            throw JsonLogicError("all requires array as first argument");
+        }
+        if(arr.empty())
+        {
+            return true; // Empty array satisfies "all"
+        }
+        // Note: $current binding would require context mutation;
+        // for now, we support literal arrays only
+        for(const auto& item : arr)
+        {
+            // Create temporary context with $current bound
+            VariableContext tempCtx = ctx;
+            tempCtx.bind("$current", toDouble(evaluate(item, ctx)));
+            if(!toBool(evaluate(predicate, tempCtx)))
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    // Shape accessor: {"shape": ["$tensor", dimension_index]}
+    // Returns the size of a tensor dimension. Currently returns 0 if not bound.
+    if(op == "shape")
+    {
+        if(!args.is_array() || args.size() != 2)
+        {
+            throw JsonLogicError("shape requires exactly 2 arguments");
+        }
+        // Shape access requires tensor metadata binding (not yet implemented)
+        // For now, attempt to resolve as $tensor.shape[dim]
+        Value tensorRef = evaluate(args[0], ctx);
+        const auto dim = static_cast<int>(toDouble(evaluate(args[1], ctx)));
+
+        // Try to resolve $tensor.shape_N pattern
+        if(args[0].is_string())
+        {
+            std::string tensorName = args[0].get<std::string>();
+            if(!tensorName.empty() && tensorName[0] == '$')
+            {
+                std::string shapeVar = tensorName + ".shape_" + std::to_string(dim);
+                auto val = ctx.resolveDouble(shapeVar);
+                if(val.has_value())
+                {
+                    return val.value();
+                }
+            }
+        }
+        throw JsonLogicError("shape: tensor shape not bound for dimension " + std::to_string(dim));
+    }
+
+    // Rank accessor: {"rank": "$tensor"}
+    // Returns the number of dimensions of a tensor.
+    if(op == "rank")
+    {
+        auto vals = getArgs();
+        if(vals.size() != 1)
+        {
+            throw JsonLogicError("rank requires exactly 1 argument");
+        }
+        // Try to resolve $tensor.rank pattern
+        if(args.is_array() && args.size() == 1 && args[0].is_string())
+        {
+            std::string tensorName = args[0].get<std::string>();
+            if(!tensorName.empty() && tensorName[0] == '$')
+            {
+                std::string rankVar = tensorName + ".rank";
+                auto val = ctx.resolveDouble(rankVar);
+                if(val.has_value())
+                {
+                    return val.value();
+                }
+            }
+        }
+        throw JsonLogicError("rank: tensor rank not bound");
+    }
+
+    // Divisibility check: {"divisible": [dividend, divisor]}
+    // Returns true if dividend is evenly divisible by divisor.
+    if(op == "divisible")
+    {
+        auto vals = getArgs();
+        if(vals.size() != 2)
+        {
+            throw JsonLogicError("divisible requires exactly 2 arguments");
+        }
+        const double dividend = toDouble(vals[0]);
+        const double divisor = toDouble(vals[1]);
+        if(divisor == 0.0)
+        {
+            throw JsonLogicError("divisible: division by zero");
+        }
+        return std::fmod(dividend, divisor) == 0.0;
+    }
+
     throw JsonLogicError("Unknown operator: " + op);
 }
 

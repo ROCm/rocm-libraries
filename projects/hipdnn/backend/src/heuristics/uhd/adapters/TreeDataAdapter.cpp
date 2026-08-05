@@ -124,7 +124,12 @@ double TreeDataAdapter::score(const std::vector<double>& features) const
         sum += evaluateTree(tree, features);
     }
 
-    return _baseScore + _learningRate * sum;
+    // NOTE: LightGBM's dump_model() returns leaf_values that already include
+    // the learning_rate multiplication. The raw_score prediction is:
+    //   base_score + sum(leaf_values)
+    // We do NOT multiply by learning_rate again here.
+    // The _learningRate field is kept for metadata/documentation purposes only.
+    return _baseScore + sum;
 }
 
 double TreeDataAdapter::evaluateTree(const fb::GbdtTree* tree,
@@ -166,6 +171,12 @@ double TreeDataAdapter::evaluateTree(const fb::GbdtTree* tree,
         const int featureIdx = featureIndices[nodeIdx];
         const double threshold = thresholds[nodeIdx];
 
+        // Check decision type: if decision_lte is present and true (or absent, defaulting to true),
+        // use <= comparison (LightGBM standard). Otherwise use < (strict less-than).
+        const bool hasDecisionLte = tree->decision_lte() != nullptr && !tree->decision_lte()->empty();
+        const bool useLte = !hasDecisionLte || (node < tree->decision_lte()->size() &&
+                                                 ((*tree->decision_lte())[nodeIdx] != 0u));
+
         bool goLeft = false;
         if(featureIdx >= 0 && static_cast<size_t>(featureIdx) < features.size())
         {
@@ -179,7 +190,7 @@ double TreeDataAdapter::evaluateTree(const fb::GbdtTree* tree,
             }
             else
             {
-                goLeft = featureVal < threshold;
+                goLeft = useLte ? (featureVal <= threshold) : (featureVal < threshold);
             }
         }
         else

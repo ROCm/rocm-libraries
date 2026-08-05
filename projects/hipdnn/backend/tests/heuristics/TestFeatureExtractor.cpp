@@ -197,8 +197,10 @@ TEST_F(TestFeatureExtractor, HashLengthIsConsistent)
     const std::vector<std::string> signature = {"\"$device.cu_count\""};
     const FeatureExtractor extractor(signature);
 
-    // Hash should be 64 chars (padded to SHA-256 length)
-    EXPECT_EQ(extractor.getSignatureHash().length(), 64u);
+    // Hash format: "sha256:" (7 chars) + 16-char truncated hex = 23 chars
+    // This matches the Python uhd_gen tool's format for cross-language consistency.
+    EXPECT_EQ(extractor.getSignatureHash().length(), 23u);
+    EXPECT_TRUE(extractor.getSignatureHash().rfind("sha256:", 0) == 0);
 }
 
 // ========== KMD field validation ==========

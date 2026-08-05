@@ -73,7 +73,9 @@ private:
     size_t _numFeatures;
     size_t _treeCount;
     double _baseScore;
-    double _learningRate;
+    // NOTE: _learningRate is stored for metadata/debugging but NOT used in score().
+    // LightGBM's dump_model() returns leaf_values that already include the learning_rate.
+    [[maybe_unused]] double _learningRate;
 };
 
 } // namespace hipdnn_backend::heuristics::uhd

@@ -9,7 +9,8 @@ namespace hipdnn_flatbuffers_sdk.data_objects;
 /// Node i is internal if left_children[i] >= 0; leaf if left_children[i] == -1.
 ///
 /// Traversal: start at node 0, compare features[feature_indices[i]] against
-/// thresholds[i], go left (left_children[i]) if less or missing and default_left,
+/// thresholds[i], go left (left_children[i]) if less-or-equal (or less, if
+/// decision_type at i is false) or if missing and default_left,
 /// else right (right_children[i]). At a leaf, return leaf_values[i].
 table GbdtTree {
     /// Feature index to split on at each internal node.
@@ -29,6 +30,10 @@ table GbdtTree {
 
     /// Default direction for missing values: true = go left, false = go right.
     default_left: [bool];
+
+    /// Decision type per node: true = use <= (LightGBM default), false = use <.
+    /// If absent, defaults to all true (<=) for LightGBM compatibility.
+    decision_lte: [bool];
 }
 
 /// @brief GBDT (Gradient Boosted Decision Tree) model for the tree_data adapter.

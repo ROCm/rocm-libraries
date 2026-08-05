@@ -125,6 +125,7 @@ def _build_tree(builder: flatbuffers.Builder, root_node: dict[str, Any]) -> int:
     right_children = [n.get("right_idx", -1) for n in nodes]
     leaf_values = [n.get("leaf_value", 0.0) for n in nodes]
     default_left = [n.get("default_left", True) for n in nodes]
+    decision_lte = [n.get("decision_lte", True) for n in nodes]
 
     fi_vec = _create_int32_vector(builder, feature_indices)
     th_vec = _create_double_vector(builder, thresholds)
@@ -132,6 +133,7 @@ def _build_tree(builder: flatbuffers.Builder, root_node: dict[str, Any]) -> int:
     rc_vec = _create_int32_vector(builder, right_children)
     lv_vec = _create_double_vector(builder, leaf_values)
     dl_vec = _create_bool_vector(builder, default_left)
+    dle_vec = _create_bool_vector(builder, decision_lte)
 
     _start_gbdt_tree(builder)
     _add_gbdt_tree_feature_indices(builder, fi_vec)
@@ -140,6 +142,7 @@ def _build_tree(builder: flatbuffers.Builder, root_node: dict[str, Any]) -> int:
     _add_gbdt_tree_right_children(builder, rc_vec)
     _add_gbdt_tree_leaf_values(builder, lv_vec)
     _add_gbdt_tree_default_left(builder, dl_vec)
+    _add_gbdt_tree_decision_lte(builder, dle_vec)
     return _end_gbdt_tree(builder)
 
 
@@ -160,10 +163,15 @@ def _flatten_tree(node: dict[str, Any], nodes: list[dict[str, Any]]) -> int:
         nodes.append({})
         left_idx = _flatten_tree(node["left_child"], nodes)
         right_idx = _flatten_tree(node["right_child"], nodes)
+        # LightGBM decision_type: "<=" means go left if feature <= threshold (default)
+        # decision_type can be "==" for categorical, but we treat those as <=
+        decision_type = node.get("decision_type", "<=")
+        use_lte = decision_type in ("<=", "==")
         nodes[current_idx] = {
             "split_feature": node["split_feature"],
             "threshold": node["threshold"],
             "default_left": node.get("default_left", True),
+            "decision_lte": use_lte,
             "left_idx": left_idx,
             "right_idx": right_idx,
         }
@@ -205,7 +213,7 @@ def _create_offset_vector(builder: flatbuffers.Builder, offsets: list[int]) -> i
 
 # GbdtTree table helpers (inline since we don't have generated Python bindings)
 def _start_gbdt_tree(builder: flatbuffers.Builder) -> None:
-    builder.StartObject(6)
+    builder.StartObject(7)  # 7 fields including decision_lte
 
 
 def _add_gbdt_tree_feature_indices(builder: flatbuffers.Builder, vec: int) -> None:
@@ -230,6 +238,10 @@ def _add_gbdt_tree_leaf_values(builder: flatbuffers.Builder, vec: int) -> None:
 
 def _add_gbdt_tree_default_left(builder: flatbuffers.Builder, vec: int) -> None:
     builder.PrependUOffsetTRelativeSlot(5, vec, 0)
+
+
+def _add_gbdt_tree_decision_lte(builder: flatbuffers.Builder, vec: int) -> None:
+    builder.PrependUOffsetTRelativeSlot(6, vec, 0)
 
 
 def _end_gbdt_tree(builder: flatbuffers.Builder) -> int:
