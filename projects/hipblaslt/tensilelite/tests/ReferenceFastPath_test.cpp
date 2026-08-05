@@ -111,3 +111,27 @@ TEST(ReferenceFastPath, AppliesXFloat32OperandMathOpToBothOperands)
     ASSERT_NE(expected, fullF32);
     EXPECT_EQ(d[0], expected);
 }
+
+TEST(ReferenceOutputSelection, ComputesPrimeStrideSubset)
+{
+    const size_t M = 4;
+    const size_t N = 3;
+    const size_t K = 2;
+
+    auto problem = makePackedProblem(
+        rocisa::DataType::Float, rocisa::DataType::Float, rocisa::DataType::Float, M, N, K);
+
+    std::vector<float> a(M * K, 1.0f);
+    std::vector<float> b(K * N, 1.0f);
+    std::vector<float> c(M * N, 0.0f);
+    std::vector<float> d(M * N, -99.0f);
+
+    ContractionInputs inputs(a.data(), b.data(), c.data(), d.data(), 1.0f, 0.0f);
+    SolveGemmCPU(problem, inputs, /*elementsToValidate=*/3, /*tryFastPath=*/false);
+
+    for(size_t index = 0; index < d.size(); ++index)
+    {
+        const bool selected = index == 0 || index == 5 || index == 10;
+        EXPECT_EQ(d[index], selected ? 2.0f : -99.0f) << "index=" << index;
+    }
+}
