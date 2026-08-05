@@ -29,18 +29,21 @@ template <typename AsDataType_,
           typename BsDataType_,
           typename DsDataType_,
           typename EDataType_,
-          ck_tile::index_t NG, ck_tile::index_t NM,
-          ck_tile::index_t NN, ck_tile::index_t NK,
-          ck_tile::index_t NA, ck_tile::index_t NB, ck_tile::index_t ND>
-auto make_contraction_multi_abd_host_args(
-    const std::array<const void*, NA>& as_dev,
-    const std::array<const void*, NB>& bs_dev,
-    const std::array<const void*, ND>& ds_dev,
-    void* e_dev,
-    const std::vector<int>& g_dims,
-    const std::vector<int>& m_dims,
-    const std::vector<int>& n_dims,
-    const std::vector<int>& k_dims)
+          ck_tile::index_t NG,
+          ck_tile::index_t NM,
+          ck_tile::index_t NN,
+          ck_tile::index_t NK,
+          ck_tile::index_t NA,
+          ck_tile::index_t NB,
+          ck_tile::index_t ND>
+auto make_contraction_multi_abd_host_args(const std::array<const void*, NA>& as_dev,
+                                          const std::array<const void*, NB>& bs_dev,
+                                          const std::array<const void*, ND>& ds_dev,
+                                          void* e_dev,
+                                          const std::vector<int>& g_dims,
+                                          const std::vector<int>& m_dims,
+                                          const std::vector<int>& n_dims,
+                                          const std::vector<int>& k_dims)
 {
     using HostArgs = ck_tile::BatchedContractionMultiABDHostArgs<NG, NM, NN, NK, NA, NB, ND>;
     using ADims    = typename HostArgs::ADims;
@@ -51,25 +54,34 @@ auto make_contraction_multi_abd_host_args(
     auto make_a_dims = [&]() -> ADims {
         ADims d;
         int pos = 0;
-        for(int g : g_dims) d[pos++] = g;
-        for(int m : m_dims) d[pos++] = m;
-        for(int k : k_dims) d[pos++] = k;
+        for(int g : g_dims)
+            d[pos++] = g;
+        for(int m : m_dims)
+            d[pos++] = m;
+        for(int k : k_dims)
+            d[pos++] = k;
         return d;
     };
     auto make_b_dims = [&]() -> BDims {
         BDims d;
         int pos = 0;
-        for(int g : g_dims) d[pos++] = g;
-        for(int n : n_dims) d[pos++] = n;
-        for(int k : k_dims) d[pos++] = k;
+        for(int g : g_dims)
+            d[pos++] = g;
+        for(int n : n_dims)
+            d[pos++] = n;
+        for(int k : k_dims)
+            d[pos++] = k;
         return d;
     };
     auto make_e_dims = [&]() -> EDims {
         EDims d;
         int pos = 0;
-        for(int g : g_dims) d[pos++] = g;
-        for(int m : m_dims) d[pos++] = m;
-        for(int n : n_dims) d[pos++] = n;
+        for(int g : g_dims)
+            d[pos++] = g;
+        for(int m : m_dims)
+            d[pos++] = m;
+        for(int n : n_dims)
+            d[pos++] = n;
         return d;
     };
 
@@ -110,17 +122,20 @@ auto make_contraction_multi_abd_host_args(
 
     auto make_a_strides_arr = [&]() -> ADims {
         ADims s;
-        for(int i = 0; i < NG + NM + NK; ++i) s[i] = a_strides_vec[i];
+        for(int i = 0; i < NG + NM + NK; ++i)
+            s[i] = a_strides_vec[i];
         return s;
     };
     auto make_b_strides_arr = [&]() -> BDims {
         BDims s;
-        for(int i = 0; i < NG + NN + NK; ++i) s[i] = b_strides_vec[i];
+        for(int i = 0; i < NG + NN + NK; ++i)
+            s[i] = b_strides_vec[i];
         return s;
     };
     auto make_e_strides_arr = [&]() -> EDims {
         EDims s;
-        for(int i = 0; i < NG + NM + NN; ++i) s[i] = e_strides_vec[i];
+        for(int i = 0; i < NG + NM + NN; ++i)
+            s[i] = e_strides_vec[i];
         return s;
     };
 
@@ -147,19 +162,27 @@ auto make_contraction_multi_abd_host_args(
         ds_strides_arr[i] = make_e_strides_arr();
     }
 
-    return HostArgs{as_dev, bs_dev, ds_dev, e_dev,
-                    as_dims_arr, bs_dims_arr, ds_dims_arr, e_dims_arr,
-                    as_strides_arr, bs_strides_arr, ds_strides_arr, make_e_strides_arr()};
+    return HostArgs{as_dev,
+                    bs_dev,
+                    ds_dev,
+                    e_dev,
+                    as_dims_arr,
+                    bs_dims_arr,
+                    ds_dims_arr,
+                    e_dims_arr,
+                    as_strides_arr,
+                    bs_strides_arr,
+                    ds_strides_arr,
+                    make_e_strides_arr()};
 }
 
 // Run one benchmark with the force-included SelectedKernel.
-inline void run_contraction_multi_abd_benchmark(
-    const ContractionMultiABDProblem& problem,
-    int n_warmup  = 50,
-    int n_repeat  = 100,
-    bool verify   = false,
-    bool log      = false,
-    bool gpu_timer = true)
+inline void run_contraction_multi_abd_benchmark(const ContractionMultiABDProblem& problem,
+                                                int n_warmup   = 50,
+                                                int n_repeat   = 100,
+                                                bool verify    = false,
+                                                bool log       = false,
+                                                bool gpu_timer = true)
 {
     using AElementType = std::tuple_element_t<0, AsDataType>;
     using BElementType = std::tuple_element_t<0, BsDataType>;
@@ -175,56 +198,83 @@ inline void run_contraction_multi_abd_benchmark(
     std::vector<std::vector<DElementType>> hds(NumDTensors, std::vector<DElementType>(G * M * N));
 
     // Fill with simple values
-    for(auto& v : ha) v = static_cast<AElementType>(1.0f / K);
-    for(auto& v : hb) v = static_cast<AElementType>(1.0f / K);
-    for(auto& hd : hds) for(auto& v : hd) v = static_cast<DElementType>(0.0f);
+    for(auto& v : ha)
+        v = static_cast<AElementType>(1.0f / K);
+    for(auto& v : hb)
+        v = static_cast<AElementType>(1.0f / K);
+    for(auto& hd : hds)
+        for(auto& v : hd)
+            v = static_cast<DElementType>(0.0f);
 
     // Device buffers
     std::vector<ck_tile::DeviceMem> a_bufs(NumATensors), b_bufs(NumBTensors), d_bufs(NumDTensors);
     ck_tile::DeviceMem e_buf(G * M * N * sizeof(EDataType));
 
-    for(int i = 0; i < NumATensors; ++i) { a_bufs[i].Realloc(G * M * K * sizeof(AElementType)); }
-    for(int i = 0; i < NumBTensors; ++i) { b_bufs[i].Realloc(G * N * K * sizeof(BElementType)); }
-    for(int i = 0; i < NumDTensors; ++i) { d_bufs[i].Realloc(G * M * N * sizeof(DElementType)); }
+    for(int i = 0; i < NumATensors; ++i)
+    {
+        a_bufs[i].Realloc(G * M * K * sizeof(AElementType));
+    }
+    for(int i = 0; i < NumBTensors; ++i)
+    {
+        b_bufs[i].Realloc(G * N * K * sizeof(BElementType));
+    }
+    for(int i = 0; i < NumDTensors; ++i)
+    {
+        d_bufs[i].Realloc(G * M * N * sizeof(DElementType));
+    }
 
-    for(int i = 0; i < NumATensors; ++i) a_bufs[i].ToDevice(ha.data());
-    for(int i = 0; i < NumBTensors; ++i) b_bufs[i].ToDevice(hb.data());
-    for(int i = 0; i < NumDTensors; ++i) d_bufs[i].ToDevice(hds[i].data());
+    for(int i = 0; i < NumATensors; ++i)
+        a_bufs[i].ToDevice(ha.data());
+    for(int i = 0; i < NumBTensors; ++i)
+        b_bufs[i].ToDevice(hb.data());
+    for(int i = 0; i < NumDTensors; ++i)
+        d_bufs[i].ToDevice(hds[i].data());
     e_buf.SetZero();
 
     std::array<const void*, NumATensors> as_dev;
     std::array<const void*, NumBTensors> bs_dev;
     std::array<const void*, NumDTensors> ds_dev;
-    for(int i = 0; i < NumATensors; ++i) as_dev[i] = a_bufs[i].GetDeviceBuffer();
-    for(int i = 0; i < NumBTensors; ++i) bs_dev[i] = b_bufs[i].GetDeviceBuffer();
-    for(int i = 0; i < NumDTensors; ++i) ds_dev[i] = d_bufs[i].GetDeviceBuffer();
+    for(int i = 0; i < NumATensors; ++i)
+        as_dev[i] = a_bufs[i].GetDeviceBuffer();
+    for(int i = 0; i < NumBTensors; ++i)
+        bs_dev[i] = b_bufs[i].GetDeviceBuffer();
+    for(int i = 0; i < NumDTensors; ++i)
+        ds_dev[i] = d_bufs[i].GetDeviceBuffer();
     void* e_dev = e_buf.GetDeviceBuffer();
 
-    auto args = make_contraction_multi_abd_host_args<
-        AsDataType, BsDataType, DsDataType, EDataType,
-        NumDimsG, NumDimsM, NumDimsN, NumDimsK,
-        NumATensors, NumBTensors, NumDTensors>(
-        as_dev, bs_dev, ds_dev, e_dev,
-        problem.g_dims, problem.m_dims, problem.n_dims, problem.k_dims);
+    auto args = make_contraction_multi_abd_host_args<AsDataType,
+                                                     BsDataType,
+                                                     DsDataType,
+                                                     EDataType,
+                                                     NumDimsG,
+                                                     NumDimsM,
+                                                     NumDimsN,
+                                                     NumDimsK,
+                                                     NumATensors,
+                                                     NumBTensors,
+                                                     NumDTensors>(as_dev,
+                                                                  bs_dev,
+                                                                  ds_dev,
+                                                                  e_dev,
+                                                                  problem.g_dims,
+                                                                  problem.m_dims,
+                                                                  problem.n_dims,
+                                                                  problem.k_dims);
 
     ck_tile::stream_config stream{nullptr, gpu_timer, log ? 1 : 0, n_warmup, n_repeat};
 
     float avg_time = SelectedKernel::launch(args, stream);
 
-    size_t flop     = 2ULL * G * M * N * K;
-    size_t num_byte = static_cast<size_t>(G) * (
-        NumATensors * sizeof(AElementType) * M * K +
-        NumBTensors * sizeof(BElementType) * N * K +
-        NumDTensors * sizeof(DElementType) * M * N +
-        sizeof(EDataType) * M * N);
+    size_t flop = 2ULL * G * M * N * K;
+    size_t num_byte =
+        static_cast<size_t>(G) *
+        (NumATensors * sizeof(AElementType) * M * K + NumBTensors * sizeof(BElementType) * N * K +
+         NumDTensors * sizeof(DElementType) * M * N + sizeof(EDataType) * M * N);
 
     float tflops    = static_cast<float>(flop) / 1e9f / avg_time;
     float bandwidth = static_cast<float>(num_byte) / 1e6f / avg_time;
 
-    std::cout << std::fixed << std::setprecision(4)
-              << "kernel: " << KERNEL_NAME
-              << "  latency(ms): " << avg_time
-              << "  tflops: " << tflops
-              << "  bandwidth(GB/s): " << bandwidth
-              << "\n";
+    std::cout << std::fixed << std::setprecision(4) << "kernel: " << KERNEL_NAME
+              << "  latency(ms): " << avg_time << "  tflops: " << tflops
+              << "  bandwidth(GB/s): " << bandwidth << "\n";
 }

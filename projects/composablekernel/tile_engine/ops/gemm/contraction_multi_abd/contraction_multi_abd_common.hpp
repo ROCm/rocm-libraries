@@ -56,7 +56,8 @@ inline std::string dims_to_str(const std::vector<int>& dims)
     std::string s;
     for(size_t i = 0; i < dims.size(); ++i)
     {
-        if(i > 0) s += ',';
+        if(i > 0)
+            s += ',';
         s += std::to_string(dims[i]);
     }
     return s;
@@ -74,7 +75,7 @@ struct ContractionMultiABDProblem
     int num_d_tensors = 1;
 
     std::string dtype;
-    std::string layout;  // 3-char: a+b+e
+    std::string layout; // 3-char: a+b+e
 
     int G_total() const { return product(g_dims); }
     int M_total() const { return product(m_dims); }

@@ -91,22 +91,21 @@
 
 namespace {
 
-constexpr ck_tile::index_t kNumA   = CONTRACTION_MULTI_ABD_NUM_A;
-constexpr ck_tile::index_t kNumB   = CONTRACTION_MULTI_ABD_NUM_B;
-constexpr ck_tile::index_t kNumD   = CONTRACTION_MULTI_ABD_NUM_D;
+constexpr ck_tile::index_t kNumA    = CONTRACTION_MULTI_ABD_NUM_A;
+constexpr ck_tile::index_t kNumB    = CONTRACTION_MULTI_ABD_NUM_B;
+constexpr ck_tile::index_t kNumD    = CONTRACTION_MULTI_ABD_NUM_D;
 constexpr ck_tile::index_t kNumDimG = CONTRACTION_MULTI_ABD_DIM_G;
 constexpr ck_tile::index_t kNumDimM = CONTRACTION_MULTI_ABD_DIM_M;
 constexpr ck_tile::index_t kNumDimN = CONTRACTION_MULTI_ABD_DIM_N;
 constexpr ck_tile::index_t kNumDimK = CONTRACTION_MULTI_ABD_DIM_K;
 
 // Dimension sizes for each tensor's stride/dim arrays
-constexpr ck_tile::index_t kADimSize = kNumDimG + kNumDimM + kNumDimK;  // [G,M,K]
-constexpr ck_tile::index_t kBDimSize = kNumDimG + kNumDimN + kNumDimK;  // [G,N,K]
-constexpr ck_tile::index_t kEDimSize = kNumDimG + kNumDimM + kNumDimN;  // [G,M,N]
+constexpr ck_tile::index_t kADimSize = kNumDimG + kNumDimM + kNumDimK; // [G,M,K]
+constexpr ck_tile::index_t kBDimSize = kNumDimG + kNumDimN + kNumDimK; // [G,N,K]
+constexpr ck_tile::index_t kEDimSize = kNumDimG + kNumDimM + kNumDimN; // [G,M,N]
 
-using HostArgs = ck_tile::BatchedContractionMultiABDHostArgs<
-    kNumDimG, kNumDimM, kNumDimN, kNumDimK,
-    kNumA, kNumB, kNumD>;
+using HostArgs = ck_tile::
+    BatchedContractionMultiABDHostArgs<kNumDimG, kNumDimM, kNumDimN, kNumDimK, kNumA, kNumB, kNumD>;
 
 using ADims = typename HostArgs::ADims;
 using BDims = typename HostArgs::BDims;
@@ -134,10 +133,10 @@ int dispatcher_init() { return dispatcher_initialize(); }
 int dispatcher_get_num_a_tensors() { return static_cast<int>(kNumA); }
 int dispatcher_get_num_b_tensors() { return static_cast<int>(kNumB); }
 int dispatcher_get_num_d_tensors() { return static_cast<int>(kNumD); }
-int dispatcher_get_num_dim_g()     { return static_cast<int>(kNumDimG); }
-int dispatcher_get_num_dim_m()     { return static_cast<int>(kNumDimM); }
-int dispatcher_get_num_dim_n()     { return static_cast<int>(kNumDimN); }
-int dispatcher_get_num_dim_k()     { return static_cast<int>(kNumDimK); }
+int dispatcher_get_num_dim_g() { return static_cast<int>(kNumDimG); }
+int dispatcher_get_num_dim_m() { return static_cast<int>(kNumDimM); }
+int dispatcher_get_num_dim_n() { return static_cast<int>(kNumDimN); }
+int dispatcher_get_num_dim_k() { return static_cast<int>(kNumDimK); }
 
 /** Byte-exact kernel name baked into the force-included header. */
 const char* dispatcher_get_kernel_name() { return KERNEL_NAME; }
@@ -169,24 +168,31 @@ int dispatcher_get_kernel_count() { return 1; }
  *
  * Returns 0 on success, -1 on HIP/arg error, -2 on unsupported args, -3 on count mismatch.
  */
-int dispatcher_run_batched_contraction_multi_abd(
-    const void** as_hosts,
-    const void** bs_hosts,
-    const void** ds_hosts,
-    void*        e_host,
-    int num_a, int num_b, int num_d,
-    const int64_t* g_dims,
-    const int64_t* m_dims,
-    const int64_t* n_dims,
-    const int64_t* k_dims,
-    int num_dim_g, int num_dim_m, int num_dim_n, int num_dim_k,
-    const int64_t* a_strides_flat,
-    const int64_t* b_strides_flat,
-    const int64_t* d_strides_flat,
-    const int64_t* e_strides,
-    int elem_a, int elem_b, int elem_d, int elem_e,
-    int64_t k_batch,
-    float* time_ms)
+int dispatcher_run_batched_contraction_multi_abd(const void** as_hosts,
+                                                 const void** bs_hosts,
+                                                 const void** ds_hosts,
+                                                 void* e_host,
+                                                 int num_a,
+                                                 int num_b,
+                                                 int num_d,
+                                                 const int64_t* g_dims,
+                                                 const int64_t* m_dims,
+                                                 const int64_t* n_dims,
+                                                 const int64_t* k_dims,
+                                                 int num_dim_g,
+                                                 int num_dim_m,
+                                                 int num_dim_n,
+                                                 int num_dim_k,
+                                                 const int64_t* a_strides_flat,
+                                                 const int64_t* b_strides_flat,
+                                                 const int64_t* d_strides_flat,
+                                                 const int64_t* e_strides,
+                                                 int elem_a,
+                                                 int elem_b,
+                                                 int elem_d,
+                                                 int elem_e,
+                                                 int64_t k_batch,
+                                                 float* time_ms)
 {
     if(!g_initialized || !as_hosts || !bs_hosts || !e_host)
         return -1;
@@ -219,26 +225,26 @@ int dispatcher_run_batched_contraction_multi_abd(
 
     // Compute total element counts
     int64_t G_total = 1, M_total = 1, N_total = 1, K_total = 1;
-    for(int i = 0; i < num_dim_g; ++i) G_total *= g_dims[i];
-    for(int i = 0; i < num_dim_m; ++i) M_total *= m_dims[i];
-    for(int i = 0; i < num_dim_n; ++i) N_total *= n_dims[i];
-    for(int i = 0; i < num_dim_k; ++i) K_total *= k_dims[i];
+    for(int i = 0; i < num_dim_g; ++i)
+        G_total *= g_dims[i];
+    for(int i = 0; i < num_dim_m; ++i)
+        M_total *= m_dims[i];
+    for(int i = 0; i < num_dim_n; ++i)
+        N_total *= n_dims[i];
+    for(int i = 0; i < num_dim_k; ++i)
+        K_total *= k_dims[i];
 
     if(G_total <= 0 || M_total <= 0 || N_total <= 0 || K_total <= 0)
         return -1;
 
-    const size_t a_bytes =
-        static_cast<size_t>(G_total) * static_cast<size_t>(M_total) *
-        static_cast<size_t>(K_total) * static_cast<size_t>(elem_a);
-    const size_t b_bytes =
-        static_cast<size_t>(G_total) * static_cast<size_t>(N_total) *
-        static_cast<size_t>(K_total) * static_cast<size_t>(elem_b);
-    const size_t d_bytes =
-        static_cast<size_t>(G_total) * static_cast<size_t>(M_total) *
-        static_cast<size_t>(N_total) * static_cast<size_t>(elem_d);
-    const size_t e_bytes =
-        static_cast<size_t>(G_total) * static_cast<size_t>(M_total) *
-        static_cast<size_t>(N_total) * static_cast<size_t>(elem_e);
+    const size_t a_bytes = static_cast<size_t>(G_total) * static_cast<size_t>(M_total) *
+                           static_cast<size_t>(K_total) * static_cast<size_t>(elem_a);
+    const size_t b_bytes = static_cast<size_t>(G_total) * static_cast<size_t>(N_total) *
+                           static_cast<size_t>(K_total) * static_cast<size_t>(elem_b);
+    const size_t d_bytes = static_cast<size_t>(G_total) * static_cast<size_t>(M_total) *
+                           static_cast<size_t>(N_total) * static_cast<size_t>(elem_d);
+    const size_t e_bytes = static_cast<size_t>(G_total) * static_cast<size_t>(M_total) *
+                           static_cast<size_t>(N_total) * static_cast<size_t>(elem_e);
 
     std::vector<void*> a_dev(kNumA, nullptr);
     std::vector<void*> b_dev(kNumB, nullptr);
@@ -246,33 +252,51 @@ int dispatcher_run_batched_contraction_multi_abd(
     void* e_dev = nullptr;
 
     auto cleanup = [&]() {
-        for(auto p : a_dev) if(p) (void)hipFree(p);
-        for(auto p : b_dev) if(p) (void)hipFree(p);
-        for(auto p : d_dev) if(p) (void)hipFree(p);
-        if(e_dev) (void)hipFree(e_dev);
+        for(auto p : a_dev)
+            if(p)
+                (void)hipFree(p);
+        for(auto p : b_dev)
+            if(p)
+                (void)hipFree(p);
+        for(auto p : d_dev)
+            if(p)
+                (void)hipFree(p);
+        if(e_dev)
+            (void)hipFree(e_dev);
     };
 
     for(int i = 0; i < num_a; ++i)
     {
         if(hipMalloc(&a_dev[i], a_bytes) != hipSuccess ||
            hipMemcpy(a_dev[i], as_hosts[i], a_bytes, hipMemcpyHostToDevice) != hipSuccess)
-        { cleanup(); return -1; }
+        {
+            cleanup();
+            return -1;
+        }
     }
     for(int i = 0; i < num_b; ++i)
     {
         if(hipMalloc(&b_dev[i], b_bytes) != hipSuccess ||
            hipMemcpy(b_dev[i], bs_hosts[i], b_bytes, hipMemcpyHostToDevice) != hipSuccess)
-        { cleanup(); return -1; }
+        {
+            cleanup();
+            return -1;
+        }
     }
     for(int i = 0; i < num_d; ++i)
     {
         if(hipMalloc(&d_dev[i], d_bytes) != hipSuccess ||
            hipMemcpy(d_dev[i], ds_hosts[i], d_bytes, hipMemcpyHostToDevice) != hipSuccess)
-        { cleanup(); return -1; }
+        {
+            cleanup();
+            return -1;
+        }
     }
-    if(hipMalloc(&e_dev, e_bytes) != hipSuccess ||
-       hipMemset(e_dev, 0, e_bytes) != hipSuccess)
-    { cleanup(); return -1; }
+    if(hipMalloc(&e_dev, e_bytes) != hipSuccess || hipMemset(e_dev, 0, e_bytes) != hipSuccess)
+    {
+        cleanup();
+        return -1;
+    }
 
     // Build std::array<ADims, NumATensor> for as_ptr, As_dims, As_strides, etc.
     std::array<const void*, kNumA> as_dev{};
@@ -301,7 +325,7 @@ int dispatcher_run_batched_contraction_multi_abd(
     for(ck_tile::index_t a = 0; a < kNumA; ++a)
     {
         const int64_t* a_strides = a_strides_flat + a * kADimSize;
-        int pos = 0;
+        int pos                  = 0;
         for(int g = 0; g < num_dim_g; ++g, ++pos)
         {
             As_dims[a][pos]    = static_cast<ck_tile::index_t>(g_dims[g]);
@@ -323,7 +347,7 @@ int dispatcher_run_batched_contraction_multi_abd(
     for(ck_tile::index_t b = 0; b < kNumB; ++b)
     {
         const int64_t* b_strides = b_strides_flat + b * kBDimSize;
-        int pos = 0;
+        int pos                  = 0;
         for(int g = 0; g < num_dim_g; ++g, ++pos)
         {
             Bs_dims[b][pos]    = static_cast<ck_tile::index_t>(g_dims[g]);
@@ -364,7 +388,7 @@ int dispatcher_run_batched_contraction_multi_abd(
     for(ck_tile::index_t d = 0; d < kNumD; ++d)
     {
         const int64_t* d_strides = d_strides_flat + d * kEDimSize;
-        int pos = 0;
+        int pos                  = 0;
         for(int g = 0; g < num_dim_g; ++g, ++pos)
         {
             Ds_dims[d][pos]    = E_dims_arr[g];
@@ -382,9 +406,18 @@ int dispatcher_run_batched_contraction_multi_abd(
         }
     }
 
-    HostArgs host_args{as_dev, bs_dev, ds_dev, e_dev,
-                       As_dims, Bs_dims, Ds_dims, E_dims_arr,
-                       As_strides, Bs_strides, Ds_strides, E_strides_arr};
+    HostArgs host_args{as_dev,
+                       bs_dev,
+                       ds_dev,
+                       e_dev,
+                       As_dims,
+                       Bs_dims,
+                       Ds_dims,
+                       E_dims_arr,
+                       As_strides,
+                       Bs_strides,
+                       Ds_strides,
+                       E_strides_arr};
 
     float exec_time = -1.0f;
     try
@@ -396,7 +429,8 @@ int dispatcher_run_batched_contraction_multi_abd(
     {
         std::cerr << "batched_contraction_multi_abd launch failed: " << ex.what() << std::endl;
         cleanup();
-        if(time_ms) *time_ms = -1.0f;
+        if(time_ms)
+            *time_ms = -1.0f;
         return -2;
     }
 
@@ -404,15 +438,20 @@ int dispatcher_run_batched_contraction_multi_abd(
     {
         // IsSupportedArguments returned false inside launch
         cleanup();
-        if(time_ms) *time_ms = -1.0f;
+        if(time_ms)
+            *time_ms = -1.0f;
         return -2;
     }
 
     if(hipMemcpy(e_host, e_dev, e_bytes, hipMemcpyDeviceToHost) != hipSuccess)
-    { cleanup(); return -1; }
+    {
+        cleanup();
+        return -1;
+    }
 
     cleanup();
-    if(time_ms) *time_ms = exec_time;
+    if(time_ms)
+        *time_ms = exec_time;
     return 0;
 }
 

@@ -26,15 +26,15 @@
 inline auto create_args(int argc, char* argv[])
 {
     ck_tile::ArgParser p;
-    p.insert("g_dims",  "1,2",    "G (batch) dimensions, comma-separated")
-     .insert("m_dims",  "4,256",  "M dimensions, comma-separated")
-     .insert("n_dims",  "16,128", "N dimensions, comma-separated")
-     .insert("k_dims",  "64",     "K dimensions, comma-separated")
-     .insert("verify",  "0",      "Verify output vs CPU reference (1=yes, 0=no)")
-     .insert("warmup",  "50",     "Warmup iterations")
-     .insert("repeat",  "100",    "Benchmark iterations")
-     .insert("timer",   "true",   "Use GPU timer (true/false)")
-     .insert("log",     "false",  "Log kernel launch info (true/false)");
+    p.insert("g_dims", "1,2", "G (batch) dimensions, comma-separated")
+        .insert("m_dims", "4,256", "M dimensions, comma-separated")
+        .insert("n_dims", "16,128", "N dimensions, comma-separated")
+        .insert("k_dims", "64", "K dimensions, comma-separated")
+        .insert("verify", "0", "Verify output vs CPU reference (1=yes, 0=no)")
+        .insert("warmup", "50", "Warmup iterations")
+        .insert("repeat", "100", "Benchmark iterations")
+        .insert("timer", "true", "Use GPU timer (true/false)")
+        .insert("log", "false", "Log kernel launch info (true/false)");
     bool ok = p.parse(argc, argv);
     return std::make_pair(ok, p);
 }
@@ -44,7 +44,8 @@ int main(int argc, char* argv[])
     try
     {
         auto [ok, parser] = create_args(argc, argv);
-        if(!ok) return EXIT_FAILURE;
+        if(!ok)
+            return EXIT_FAILURE;
 
         ContractionMultiABDProblem problem;
         problem.g_dims = parse_dims(parser.get_str("g_dims"));
@@ -58,19 +59,17 @@ int main(int argc, char* argv[])
            static_cast<int>(problem.n_dims.size()) != NumDimsN ||
            static_cast<int>(problem.k_dims.size()) != NumDimsK)
         {
-            std::cerr << "Dimension count mismatch: kernel compiled with G="
-                      << NumDimsG << " M=" << NumDimsM
-                      << " N=" << NumDimsN << " K=" << NumDimsK << "\n";
+            std::cerr << "Dimension count mismatch: kernel compiled with G=" << NumDimsG
+                      << " M=" << NumDimsM << " N=" << NumDimsN << " K=" << NumDimsK << "\n";
             return EXIT_FAILURE;
         }
 
-        run_contraction_multi_abd_benchmark(
-            problem,
-            parser.get_int("warmup"),
-            parser.get_int("repeat"),
-            parser.get_bool("verify"),
-            parser.get_bool("log"),
-            parser.get_bool("timer"));
+        run_contraction_multi_abd_benchmark(problem,
+                                            parser.get_int("warmup"),
+                                            parser.get_int("repeat"),
+                                            parser.get_bool("verify"),
+                                            parser.get_bool("log"),
+                                            parser.get_bool("timer"));
 
         return EXIT_SUCCESS;
     }
