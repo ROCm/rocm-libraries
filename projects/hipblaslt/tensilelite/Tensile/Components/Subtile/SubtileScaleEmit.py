@@ -736,35 +736,11 @@ def _initTDMDescriptorMXScaleSubtile(writer, kernel, scaleTc):
 
   mod.add(comp.setTensorTile0(group1, scaleDu, writer, 0))
 
-  # Clamp tile1 for edge workgroups where the free dimension < MT.
-  # The TDM dim1 does not bound the tile walk, so without clamping
-  # the edge WG reads past the scale tensor and faults.
-  with writer.allocTmpSgpr(2, tag="_initTDMScale_clamp") as clampRes:
-    validRows = clampRes.idx
-    globalRowStart = clampRes.idx + 1
-    if numWaves > 1:
-      mod.add(VReadfirstlaneB32(sgpr(globalRowStart), vgpr("Serial"), "first tId"))
-      mod.add(SLShiftRightB32(sgpr(globalRowStart), ceil(log2(wavelen)),
-              sgpr(globalRowStart), "wId"))
-      mod.add(SMulI32(sgpr(globalRowStart), sgpr(globalRowStart), perWaveRows,
-              f"waveRowStart = wId * {perWaveRows}"))
-    else:
-      mod.add(SMovB32(dst=sgpr(globalRowStart), src=0, comment="single wave: waveRow=0"))
-    mod.add(SMulI32(dst=sgpr(validRows), src0=sgpr(f"WorkGroup{ti}"), src1=mt,
-            comment="wgRowStart = wgId * MT"))
-    mod.add(SAddU32(dst=sgpr(globalRowStart), src0=sgpr(globalRowStart),
-            src1=sgpr(validRows), comment="globalRowStart"))
-    mod.add(SSubI32(dst=sgpr(validRows), src0=sgpr(sizeRefFree),
-            src1=sgpr(globalRowStart), comment="SizeFree - globalRowStart"))
-    mod.add(SMaxI32(dst=sgpr(validRows), src0=sgpr(validRows), src1=0,
-            comment="saturate negative to 0"))
-    mod.add(SMinU32(dst=sgpr(validRows), src0=sgpr(validRows), src1=perWaveRows,
-            comment=f"clamp to {perWaveRows}"))
-    mod.add(comp.setTensorTile1(group1, perWaveRows, writer))
-    mod.add(SAndB32(sgpr(f"{group1}+4"), sgpr(f"{group1}+4"),
-            hex(0xFFFF0000), "clear tile1 field"))
-    mod.add(SOrB32(sgpr(f"{group1}+4"), sgpr(f"{group1}+4"),
-            sgpr(validRows), "set tile1 = clamped validRows"))
+  # Scale tile1: always load the full perWaveRows.  The TDM hardware
+  # zeroes OOB bytes (returning E8M0 scale = 2^-127 for out-of-bounds
+  # rows), so edge WGs get valid (tiny) scale values for OOB lanes
+  # rather than uninitialised LDS garbage.
+  mod.add(comp.setTensorTile1(group1, perWaveRows, writer))
 
   # Stride: the pre-scaled stride has been multiplied by MXBlock.
   # Right-shift by log2(MXBlock) to get the actual byte stride.
