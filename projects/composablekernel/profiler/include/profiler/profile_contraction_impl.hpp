@@ -189,7 +189,7 @@ int profile_contraction_impl(ck::index_t do_verification,
             }
             else
             {
-                static_assert("Unsupported CDElementOp in contraction profiler.");
+                static_assert(false, "Unsupported CDElementOp in contraction profiler.");
             }
         });
     }
@@ -248,7 +248,7 @@ int profile_contraction_impl(ck::index_t do_verification,
         }
         else
         {
-            static_assert("Unsupported CDElementOp in contraction profiler.");
+            static_assert(false, "Unsupported CDElementOp in contraction profiler.");
         }
 
         auto invoker_ptr = op_ptr->MakeInvokerPointer();
