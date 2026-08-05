@@ -35,11 +35,11 @@ set(CONTRACTION_MULTI_ABD_SOURCE_DIR ${CMAKE_CURRENT_LIST_DIR})
 
 # Path to the dispatcher codegen script
 set(_CMA_CODEGEN_SCRIPT
-    "${CMAKE_CURRENT_LIST_DIR}/../../../../../dispatcher/codegen/contraction_multi_abd_codegen.py")
+    "${CMAKE_CURRENT_LIST_DIR}/../../../../dispatcher/codegen/contraction_multi_abd_codegen.py")
 
 # Path to the dispatcher ctypes C++ source (force-included compile)
 set(_CMA_CTYPES_SRC
-    "${CMAKE_CURRENT_LIST_DIR}/../../../../../dispatcher/bindings/ctypes/batched_contraction_multi_abd_ctypes_lib.cpp")
+    "${CMAKE_CURRENT_LIST_DIR}/../../../../dispatcher/bindings/ctypes/batched_contraction_multi_abd_ctypes_lib.cpp")
 
 # ---------------------------------------------------------------------------
 # GPU target filter (same set as batched_contraction: gfx90a, gfx942, gfx950)
