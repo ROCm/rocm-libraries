@@ -16110,6 +16110,11 @@ class KernelWriterAssembly(KernelWriter):
     so the wait is covered by the accumulator work instead of stalling on its own
     loads."""
     module = Module("computePostLoopFusedStore")
+    # Pre-loop scheduling (Change B): reset the hoisted scale-pointer-load stash. When
+    # hoisting is active the isScalarScale block below sets this to the load sub-module so
+    # the LogicalScheduler can splice it BEFORE the first preloop global_read; reset here
+    # so a non-hoisting / non-scalar-scale call never re-uses a stale module.
+    self._plsinDeferredScalePtrLoads = None
     if not self._plsinAlphaSkipEligible(kernel):
       return module
     flag = "PostLoopFusedStore"
@@ -16199,23 +16204,42 @@ class KernelWriterAssembly(KernelWriter):
         ptrBytes  = self.states.rpga * self.states.bpr  # scaleA/scaleB are contiguous pointers
         with self.allocTmpSgpr(4, alignment=4, tag="plsinFused_scalePtr") as ptrTmp:
           ptr = ptrTmp.idx
-          module.addComment1("PLSIN guard-hoist: issue scaleA/scaleB pointer load (consumed after the accumulator seed)")
-          module.add(SMovB32(dst=sgpr(off), src=packedOff, comment="scaleA ptr kernarg byte offset (packed)"))
+          # Pre-loop scheduling (Change B): build the scale-pointer load (kernarg byte
+          # offset compute + the two SLoad* into the ptr quad) as a SEPARATE module. When
+          # hoisting is enabled, stash it on self so the LogicalScheduler splices it BEFORE
+          # the first preloop global_read: the s_waitcnt kmcnt(0) (kept below in the guard
+          # body) is then covered by the whole prefetch buffer_load window instead of the
+          # ~3-instruction emitAccSeed cover, erasing the ~92-cycle lgkmcnt stall. ptr is
+          # taken from the free pool (live SRDs / persistent state excluded) and nothing in
+          # the prefetch window writes an sgpr temp, so the quad is not clobbered across the
+          # hoist. Keeping ptr(4)+off(1) live across the shadow lifts the SGPR peak, so this
+          # is opt-outable via TENSILE_PLSIN_HOIST_SCALEPTR=0 for the tight-budget shapes
+          # (MT64x448 / MT448x64) that overflow MaxSgpr at +1.
+          hoistScalePtr = (kernel["PrefetchGlobalRead"] >= 1
+                           and plsinDebugEnv("TENSILE_PLSIN_HOIST_SCALEPTR", "1") != "0")
+          loadMod = Module("plsinFusedScalePtrLoad")
+          loadMod.addComment1("PLSIN guard-hoist: issue scaleA/scaleB pointer load (consumed after the accumulator seed)")
+          loadMod.add(SMovB32(dst=sgpr(off), src=packedOff, comment="scaleA ptr kernarg byte offset (packed)"))
           if supportUA:
-            module.add(SCmpEQU32(src0=sgpr("ArgType"), src1=2, comment="ArgType == 2 (UserArgs external struct) ?"))
-            module.add(SCMovB32(dst=sgpr(off), src=extOff, comment="use external-struct scale offset"))
+            loadMod.add(SCmpEQU32(src0=sgpr("ArgType"), src1=2, comment="ArgType == 2 (UserArgs external struct) ?"))
+            loadMod.add(SCMovB32(dst=sgpr(off), src=extOff, comment="use external-struct scale offset"))
           # One dwordx4 covers both adjacent pointers when the kernarg offset is 16B
           # aligned; otherwise two b64 loads, the second reaching scaleB through the SMEM
           # immediate offset field rather than a separate s_add_u32.
           if (packedOff % 16) == 0 and (extOff is None or (extOff % 16) == 0):
-            module.add(SLoadB128(dst=sgpr(ptr, 4), base=sgpr("KernArgAddress", 2), soffset=sgpr(off),
+            loadMod.add(SLoadB128(dst=sgpr(ptr, 4), base=sgpr("KernArgAddress", 2), soffset=sgpr(off),
                                  comment="load AddressScaleA+AddressScaleB pointers"))
           else:
-            module.add(SLoadB64(dst=sgpr(ptr, 2), base=sgpr("KernArgAddress", 2), soffset=sgpr(off),
+            loadMod.add(SLoadB64(dst=sgpr(ptr, 2), base=sgpr("KernArgAddress", 2), soffset=sgpr(off),
                                 comment="load AddressScaleA pointer"))
-            module.add(SLoadB64(dst=sgpr(ptr + 2, 2), base=sgpr("KernArgAddress", 2), soffset=sgpr(off),
+            loadMod.add(SLoadB64(dst=sgpr(ptr + 2, 2), base=sgpr("KernArgAddress", 2), soffset=sgpr(off),
                                 smem=SMEMModifiers(offset=ptrBytes),
                                 comment="load AddressScaleB pointer"))
+          if hoistScalePtr:
+            # Emitted before the first global_read by the scheduler (see emitMainAndExitLoops).
+            self._plsinDeferredScalePtrLoads = loadMod
+          else:
+            module.add(loadMod)
           module.add(emitAccSeed())
           # A null scalar-scale pointer guarantees that scale is exactly 1.0, so
           # "AddressScaleA == null && AddressScaleB == null" is simply "all four pointer
