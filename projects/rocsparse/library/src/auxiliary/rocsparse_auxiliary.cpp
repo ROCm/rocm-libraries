@@ -4828,6 +4828,50 @@ catch(...)
 // LCOV_EXCL_STOP
 
 /********************************************************************************
+ * \brief rocsparse_dnvec_descr_create_scalar creates a descriptor for a single
+ * scalar, recording whether the scalar lives in host or device memory. It is a
+ * convenience wrapper meant to feed scalar arguments (e.g. the scaling factor of
+ * rocsparse_spmat_scale) as a self-describing dense vector descriptor.
+ *******************************************************************************/
+rocsparse_status rocsparse_dnvec_descr_create_scalar(rocsparse_handle       handle,
+                                                     rocsparse_dnvec_descr* descr,
+                                                     rocsparse_pointer_mode pointer_mode,
+                                                     rocsparse_datatype     data_type,
+                                                     const void*            const_values,
+                                                     void*                  values,
+                                                     rocsparse_error*       p_error)
+try
+{
+    ROCSPARSE_ROUTINE_TRACE;
+
+    // p_error is reserved for forward compatibility and is not populated yet.
+    (void)p_error;
+
+    ROCSPARSE_CHECKARG_HANDLE(0, handle);
+    ROCSPARSE_CHECKARG_POINTER(1, descr);
+    ROCSPARSE_CHECKARG_ENUM(2, pointer_mode);
+    ROCSPARSE_CHECKARG_ENUM(3, data_type);
+    ROCSPARSE_CHECKARG_POINTER(4, const_values);
+    ROCSPARSE_CHECKARG(
+        5, values, (values != nullptr && values != const_values), rocsparse_status_invalid_pointer);
+
+    static constexpr int64_t size        = 1;
+    static constexpr int64_t batch_count = 1;
+    static constexpr int64_t inc         = 1;
+    static constexpr int64_t batch_dist  = 0;
+    descr[0]                             = new _rocsparse_dnvec_descr(
+        batch_count, size, data_type, const_values, values, inc, batch_dist);
+    descr[0]->pointer_mode = pointer_mode;
+    return rocsparse_status_success;
+    // LCOV_EXCL_START
+}
+catch(...)
+{
+    RETURN_ROCSPARSE_EXCEPTION();
+}
+// LCOV_EXCL_STOP
+
+/********************************************************************************
  * \brief rocsparse_destroy_dnvec_descr destroys a dense vector descriptor.
  *******************************************************************************/
 rocsparse_status rocsparse_destroy_dnvec_descr(rocsparse_const_dnvec_descr descr)
