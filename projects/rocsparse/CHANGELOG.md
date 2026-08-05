@@ -10,6 +10,7 @@ Documentation for rocSPARSE is available at
 * Added batched support to the SpMM algorithm `rocsparse_spmm_alg_csr_merge_path`.
 
 ### Resolved issues
+* Fixed the atomic COO algorithm in `rocsparse_spmm`, which failed with `hipErrorInvalidConfiguration` for batch counts greater than 65,535 because the kernel launch grid exceeded the maximum supported batch dimension.
 * Fixed `rocsparse_spmm` with the segmented atomic COO algorithm, which failed with `hipErrorInvalidConfiguration` for batch counts exceeding 65535 because the batch dimension of the kernel launch grid exceeded the maximum grid dimension.
 * Fixed `rocsparse_spmm` with the row-split CSR algorithm, which failed with `hipErrorInvalidConfiguration` for batch counts exceeding 65535 because the batch dimension of the kernel launch grid exceeded the maximum grid dimension.
 
