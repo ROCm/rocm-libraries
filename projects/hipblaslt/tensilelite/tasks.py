@@ -496,6 +496,7 @@ def build_coverage(
         f"-DCMAKE_CXX_COMPILER={cmake_cxx}",
         "-DTENSILELITE_ENABLE_COVERAGE=ON",
         "-DROCISA_ENABLE_COVERAGE=ON",
+        "-DHIPBLASLT_BUNDLE_PYTHON_DEPS=ON",
         "-DTENSILELITE_BUILD_TESTING=ON",
         "-DHIPBLASLT_ENABLE_YAML=OFF",  # Use msgpack, LLVM headers may not be available
     ]
