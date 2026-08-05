@@ -320,4 +320,39 @@ PYTHONPATH=$(pwd) $VENV -m rocke.examples.gfx950.fused_mega_moe.reproduce_levels
 | `reproduce_levels.py` | self-contained per-level driver (parity + numeric perf) |
 | `levels/level_NN_<name>.py` | curated kernel snapshots for the structural levels (L0-L9) |
 | `levels/_build_by_path.py` | loads a snapshot without shadowing the production kernel |
+| `bench_moe_mega_fp8.py` | torch-free (numpy + HIP runtime) tuning harness: parity oracle + config sweep |
+| `bench_triton_baseline.py` | vLLM Triton `fused_moe` baseline on the same partition, for apples-to-apples |
 | `../../../instances/common/moe_fused_mega_fp8.py` | the fp8 mega-kernel (all levers default-on = the final best) |
+
+## Tuning harness
+
+`bench_moe_mega_fp8.py` builds the kernel, checks it against a numpy f32 oracle
+that consumes exactly the operands the kernel consumes, and then times a named
+set of configs. It has no torch dependency, which is deliberate: importing torch
+alongside Comgr collides in the LLVM runtime and stalls kernel compilation.
+
+Generated fp8 expert weights are ~600 MB per shape, so the cache lives outside
+the source tree. Point `ROCKE_MOE_BENCH_CACHE` at scratch space (it defaults to
+`.cache/` next to the script, which is gitignored):
+
+```bash
+cd <repo>/dnn-providers/hip-kernel-provider/rocke/platform/python
+export ROCKE_MOE_BENCH_CACHE=/scratch/moe-bench-cache
+
+# best known config on the Qwen3-30B-A3B decode shape
+PYTHONPATH=$(pwd) python rocke/examples/gfx950/fused_mega_moe/bench_moe_mega_fp8.py \
+    --shape qwen3 --sweep --phase full --iters 200 --warmup 30 --configs gb_dn_d2_g1
+
+# the whole sweep, or any fnmatch pattern over config names
+PYTHONPATH=$(pwd) python rocke/examples/gfx950/fused_mega_moe/bench_moe_mega_fp8.py \
+    --shape qwen3 --sweep --phase full --configs 'gb_*'
+```
+
+The Triton baseline must be given the *same* routing so both kernels activate
+the same experts; pass the harness's cached routing directory:
+
+```bash
+python rocke/examples/gfx950/fused_mega_moe/bench_triton_baseline.py \
+    --shape qwen3 --iters 10 --warmup 5 \
+    --routing-from $ROCKE_MOE_BENCH_CACHE/qwen3_e128_seed11939
+```
