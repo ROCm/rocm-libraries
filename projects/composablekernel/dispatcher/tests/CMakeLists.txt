@@ -455,3 +455,16 @@ message(STATUS "  Run all:        ctest -L dispatcher")
 message(STATUS "  Run Python:     ctest -L 'dispatcher;python' or make test_dispatcher_python")
 message(STATUS "  Run C++:        ctest -L 'dispatcher;cpp' or make test_dispatcher_cpp")
 message(STATUS "  Run verbose:    ctest -R dispatcher_test_autocorrect_verbose")
+
+
+# Bridge on-device GPU correctness test (SKIPs cleanly without a GPU/built lib).
+add_test(
+    NAME dispatcher_test_rowcolquant_gpu_correctness
+    COMMAND ${Python3_EXECUTABLE} -m unittest discover -s ${CMAKE_CURRENT_SOURCE_DIR} -p test_rowcolquant_gpu_correctness.py -v
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+set_tests_properties(dispatcher_test_rowcolquant_gpu_correctness PROPERTIES
+    LABELS "dispatcher;python;bridge;gpu"
+    TIMEOUT 600
+    ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
+)
