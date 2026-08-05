@@ -16,6 +16,7 @@
 #include "HipFlash2FwdPlan.hpp"
 #include "HipFlash2FwdPlanBuilder_v2.hpp"
 #include "HipFlash2KernelUtils.hpp"
+#include "../asm_sdpa_engine/plans/SdpaPlanUtils.hpp"
 
 namespace hip_flash2_engine
 {
@@ -110,6 +111,11 @@ bool HipFlash2FwdPlanBuilder::isApplicable(const Handle& handle,
                                "num_heads_q must be divisible by num_heads_kv for GQA (q="
                                    + std::to_string(numHeadsQ) + " kv=" + std::to_string(numHeadsKv)
                                    + ")");
+
+    // K3: reject partial query tiles (divergent __syncthreads under my_valid)
+    HIP_KERNEL_RETURN_FALSE_IF(
+        seqLenQ % 64 != 0,
+        "seq_len_q must be a multiple of 64 -- partial tile causes divergent __syncthreads");
 
     // Flash2 crossover heuristic
     const int seqLenQ = static_cast<int>(qTensor->dims()->Get(2));
