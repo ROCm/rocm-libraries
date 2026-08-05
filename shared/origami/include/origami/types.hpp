@@ -529,6 +529,9 @@ struct config_t {
   std::size_t workspace_size            = 0;
   std::size_t workspace_size_per_elem_c = 0;
 
+  /// Whether this kernel is stream-K
+  int stream_k = 5;
+
   /// Reduction strategy.
   reduction_t reduction_strategy = reduction_t::none;
 
@@ -579,7 +582,7 @@ struct config_t {
   bool operator==(const config_t& o) const noexcept {
     return mt == o.mt && mi == o.mi && hand_optimized_main_loop == o.hand_optimized_main_loop &&
            subtile == o.subtile && cache_hints_a == o.cache_hints_a &&
-           cache_hints_b == o.cache_hints_b &&
+           cache_hints_b == o.cache_hints_b && stream_k == o.stream_k &&
            workgroup_mapping == o.workgroup_mapping && reduction_strategy == o.reduction_strategy &&
            prediction_mode == o.prediction_mode && target == o.target && grvw_a == o.grvw_a &&
            grvw_b == o.grvw_b && gwvw_d == o.gwvw_d && vector_width_a == o.vector_width_a &&
@@ -597,6 +600,7 @@ struct config_t {
                                           subtile,
                                           cache_hints_a,
                                           cache_hints_b,
+                                          stream_k,
                                           workgroup_mapping,
                                           static_cast<std::uint32_t>(reduction_strategy),
                                           static_cast<std::uint32_t>(prediction_mode),
