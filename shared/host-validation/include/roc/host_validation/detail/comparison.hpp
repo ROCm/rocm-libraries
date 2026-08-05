@@ -100,4 +100,31 @@ ComparisonResult compare(ConstMatrixView<Observed> observed, ConstMatrixView<Exp
 
     return result;
 }
+
+inline ComparisonResult compare(TensorView observed, TensorView expected,
+                                const ComparisonOptions& options = {}) {
+    if (observed.shape() != expected.shape())
+        throw std::invalid_argument("Host validation tensor comparison shape mismatch.");
+    if (scalarTypeInfo(observed.type()).category == ScalarCategory::Complex ||
+        scalarTypeInfo(expected.type()).category == ScalarCategory::Complex)
+        throw std::invalid_argument(
+            "Runtime tensor comparison does not yet support complex values.");
+
+    ComparisonResult result;
+    result.compared = observed.shape().elementCount();
+    result.reportedMismatches.reserve(
+        std::min(options.maxReportedMismatches, result.compared));
+
+    std::vector<size_t> indices(observed.shape().rank(), 0);
+    for (size_t linearIndex = 0; linearIndex < result.compared; ++linearIndex) {
+        detail::compareValue(result, linearIndex, observed.loadAs<double>(indices),
+                             expected.loadAs<double>(indices), options);
+        for (size_t dimension = observed.shape().rank(); dimension > 0; --dimension) {
+            const size_t index = dimension - 1;
+            if (++indices[index] < observed.shape()[index]) break;
+            indices[index] = 0;
+        }
+    }
+    return result;
+}
 }  // namespace roc::host_validation
