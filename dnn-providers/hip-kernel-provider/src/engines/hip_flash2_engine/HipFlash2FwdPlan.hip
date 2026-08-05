@@ -8,24 +8,30 @@
 // FRAGMENT LAYOUT (measured by Samuel Reeder on gfx942, rocWMMA 16x16x16):
 //   accumulator: lane l, elem e -> C[row=(l/16)*4+e][col=l%16]
 //
-// For S = Q*K^T:
-//   sf[qg][kg].x[e] = S[ qg*16+(l/16)*4+e ][ kg*16+l%16 ]
-//   => e indexes query row within group; l%16 indexes key column per kg
+// For S = Q*K^T (accumulator layout):
+//   sf[qg][kg].x[e] = S[qg*16+(l/16)*4+e][kg*16+l%16]
+//   e indexes query row; l%16 indexes key column per kg group.
 //
-// OUTPUT ACCUMULATION STRATEGY:
-//   Each lane l owns output column my_kcol=l%16. To fill this column:
-//     O[q][my_kcol+d16*16] = sum_{kg,kc} P[q][kg*16+kc] * V[kg*16+kc][my_kcol+d16*16]
-//   where P[q][kg*16+kc] is held by lane with l%16=kc in the same (l/16) group.
+// OUTPUT ACCUMULATION: each lane l owns output column my_kcol=l%16.
+//   O[q][my_kcol+d16*16] = sum_{kg,kc} P[q][kg*16+kc] * V[kg*16+kc][my_kcol+d16*16]
 //
-//   Process ONE kg at a time. For each kg:
-//   1. All lanes write sP[row_full][my_kcol] where row_full = (l/16)*16 + qg*4+e (0..63)
-//      sP is 64*16*4 = 4096 bytes, stored in reinterpret of sK (sK >= 8192 bytes always)
-//   2. __syncthreads()
-//   3. Each lane reads sP[row_full][kc=0..15] and sV[d16*16+my_kcol][kg*16+kc] to accumulate O
-//   4. __syncthreads() before next kg
+//   To allow each lane to see all key-column softmax weights, we:
+//   - Process one kg at a time
+//   - Write sP[64 rows × 16 cols] using a UNION with sV (after V is loaded to registers)
+//     Actually: use a small 64×16 float array in shared mem, separate from sK/sV.
 //
-// LDS: sK[D][64]*2 + sV[D][64]*2 + so[64][D]*4  (D=128: 65536=64KB, D=64: 32768=32KB)
-// sP uses first 4096 bytes of sK (always < sK size since D>=64).
+// LDS layout:
+//   sK[D][64]  half = D*128 bytes
+//   sV[D][64]  half = D*128 bytes
+//   so[64][D]  float = D*256 bytes
+//   sP[64][16] float = 4096 bytes  (separate, no aliasing)
+//   D=128: 16384+16384+32768+4096 = 69632 = 68KB > 64KB!
+//
+// Alternative: use a union { sK and sP } - they are NOT used simultaneously.
+// After S computation sK is done; sP writes begin. But we need sV for sP reads.
+// Use: union { __half sK[D][64]; float sP[64][16]; } -- safe, non-overlapping use.
+//
+// D=128: union is max(16384, 4096) = 16384 bytes. Plus sV(16384) + so(32768) = 65536 = 64KB.
 
 #include <hip/hip_fp16.h>
 #include <hip/hip_runtime.h>
@@ -63,18 +69,22 @@ __device__ void flash2_fwd_body(const __half* __restrict__ ptr_q,
     const int hk        = (num_heads_k == num_heads_q) ? hq : hq / (num_heads_q / num_heads_k);
     const int qi_base   = qi_blk * 64;
     const int qi_max    = qi_base + 63;
-    // Accumulator layout: lane l -> query row component (l/16)*4+e, key col l%16
-    const int my_eg     = lane / 16;    // which group of 16 lanes (0..3), same as my_e_base/4
-    const int my_e_base = my_eg * 4;    // query row offset within qg for this lane
-    const int my_kcol   = lane % 16;     // key column this lane covers per kg
+    const int my_eg     = lane / 16;
+    const int my_e_base = my_eg * 4;
+    const int my_kcol   = lane % 16;
 
-    // sP row index: fully identifies which query row this lane represents
-    // sP[my_eg*16 + qg*4 + e][kc] = P weight for query (qg*16+my_e_base+e), key (kg*16+kc)
-    // 64 rows * 16 cols * 4 bytes = 4096 bytes, fits in sK (>= 64*D*2 >= 8192 bytes)
-
-    __shared__ __half sK[D][64];
+    // Union to share sK and sP LDS (used at different times)
+    union KP {
+        __half k[D][64];   // used during S = Q*K^T
+        float  p[64][16];  // used during O accumulation (64 rows × 16 key cols)
+    };
+    __shared__ KP kp_mem;
     __shared__ __half sV[D][64];
     __shared__ float  so[64][D];
+
+    // Aliases
+    __half (*sK)[64] = kp_mem.k;
+    float  (*sP)[16] = kp_mem.p;  // row = my_eg*16+qg*4+e, col = kc
 
     // Load Q fragments
     fq q_frags[4][D16];
@@ -90,20 +100,15 @@ __device__ void flash2_fwd_body(const __half* __restrict__ ptr_q,
                 fill_fragment(q_frags[qg][d16], __half(0));
         }
 
-    // o_acc[qg][d16][e] = O[qg*16+my_e_base+e][d16*16+my_kcol]
     float o_acc[4][D16][4];
     for(int qg = 0; qg < 4; qg++)
         for(int d16 = 0; d16 < D16; d16++)
             for(int e = 0; e < 4; e++)
                 o_acc[qg][d16][e] = 0.f;
 
-    // Per-lane local softmax state
     float row_m[4][4], row_d[4][4];
     for(int qg = 0; qg < 4; qg++)
         for(int e = 0; e < 4; e++) { row_m[qg][e] = -1e38f; row_d[qg][e] = 0.f; }
-
-    // sP pointer into sK (reinterpret); valid since 4096 <= D*64*2 for D>=32
-    float* sP = reinterpret_cast<float*>(&sK[0][0]);
 
     for(int kb = 0; kb < (seq_len_kv + 63) / 64; kb++)
     {
@@ -111,15 +116,15 @@ __device__ void flash2_fwd_body(const __half* __restrict__ ptr_q,
         if(causal && ki0 > qi_max) break;
         const bool full_tile = (!causal) || (ki0 + 63 <= qi_base);
 
-        // Load K, V
+        // Load K into sK, V into sV
         const int ki_g = ki0 + lane;
         if(ki_g < seq_len_kv)
         {
-            const __half* kp = ptr_k + (size_t)b * k_stride_batch + (size_t)hk * k_stride_head
-                               + (size_t)ki_g * k_stride_seq;
-            const __half* vp = ptr_v + (size_t)b * v_stride_batch + (size_t)hk * v_stride_head
-                               + (size_t)ki_g * v_stride_seq;
-            for(int d = 0; d < D; d++) { sK[d][lane] = kp[d]; sV[d][lane] = vp[d]; }
+            const __half* kptr = ptr_k + (size_t)b * k_stride_batch + (size_t)hk * k_stride_head
+                                 + (size_t)ki_g * k_stride_seq;
+            const __half* vptr = ptr_v + (size_t)b * v_stride_batch + (size_t)hk * v_stride_head
+                                 + (size_t)ki_g * v_stride_seq;
+            for(int d = 0; d < D; d++) { sK[d][lane] = kptr[d]; sV[d][lane] = vptr[d]; }
         }
         else
         {
@@ -130,8 +135,7 @@ __device__ void flash2_fwd_body(const __half* __restrict__ ptr_q,
         // S = Q * K^T
         fs sf[4][4];
         for(int qg = 0; qg < 4; qg++)
-            for(int kg = 0; kg < 4; kg++)
-                fill_fragment(sf[qg][kg], 0.f);
+            for(int kg = 0; kg < 4; kg++) fill_fragment(sf[qg][kg], 0.f);
         for(int qg = 0; qg < 4; qg++)
             for(int kg = 0; kg < 4; kg++)
                 for(int d16 = 0; d16 < D16; d16++)
@@ -140,11 +144,11 @@ __device__ void flash2_fwd_body(const __half* __restrict__ ptr_q,
                     load_matrix_sync(kf, &sK[d16 * 16][kg * 16], 64);
                     mma_sync(sf[qg][kg], q_frags[qg][d16], kf, sf[qg][kg]);
                 }
-        // sK is now free to use as sP
+        // sK done — union transitions to sP usage
 
         // Compute masked scores and tile max
         float tile_m[4][4];
-        float score[4][4][4];  // score[qg][kg][e]
+        float score[4][4][4];
         for(int qg = 0; qg < 4; qg++)
             for(int e = 0; e < 4; e++) tile_m[qg][e] = -1e38f;
         for(int qg = 0; qg < 4; qg++)
@@ -155,8 +159,8 @@ __device__ void flash2_fwd_body(const __half* __restrict__ ptr_q,
                     if(!full_tile && (ki0 + kg * 16 + my_kcol) > (qi_base + qg * 16 + my_e_base + e))
                         s = -1e38f;
                     if(ki0 + kg * 16 + my_kcol >= seq_len_kv) s = -1e38f;
-                    score[qg][kg][e]   = s;
-                    tile_m[qg][e]      = fmaxf(tile_m[qg][e], s);
+                    score[qg][kg][e] = s;
+                    tile_m[qg][e]    = fmaxf(tile_m[qg][e], s);
                 }
 
         // Update running max and rescale
@@ -170,24 +174,21 @@ __device__ void flash2_fwd_body(const __half* __restrict__ ptr_q,
                 row_d[qg][e] *= br;
             }
 
-        // Process each key group: write sP, sync, accumulate O
-        // sP[row=my_eg*16 + qg*4+e][col=my_kcol] = pv for query (qg,e), key (kg, my_kcol)
-        // sP layout: 64 rows x 16 cols x 4 bytes = 4096 bytes
+        // Per-kg: store softmax weights, sync, accumulate O, sync
         for(int kg = 0; kg < 4; kg++)
         {
-            // Write softmax weights for this kg to sP
+            // Write: lane my_kcol writes column my_kcol of sP for all query rows
             for(int qg = 0; qg < 4; qg++)
                 for(int e = 0; e < 4; e++)
                 {
-                    float pv               = flash2_expf(score[qg][kg][e] - row_m[qg][e]);
-                    row_d[qg][e]          += pv;
-                    int sp_row             = my_eg * 16 + qg * 4 + e;  // 0..63
-                    sP[sp_row * 16 + my_kcol] = pv;
+                    float pv          = flash2_expf(score[qg][kg][e] - row_m[qg][e]);
+                    row_d[qg][e]     += pv;
+                    // Row index: my_eg*16 + qg*4 + e (unique per lane-group)
+                    sP[my_eg * 16 + qg * 4 + e][my_kcol] = pv;
                 }
             __syncthreads();
 
-            // Each lane accumulates O for its output column my_kcol from all 16 key columns of this kg
-            // O[q][d16*16+my_kcol] += sum_{kc=0..15} sP[q_row][kc] * sV[d16*16+my_kcol][kg*16+kc]
+            // Read: each lane accumulates O for its output column my_kcol
             for(int qg = 0; qg < 4; qg++)
                 for(int e = 0; e < 4; e++)
                 {
@@ -196,19 +197,16 @@ __device__ void flash2_fwd_body(const __half* __restrict__ ptr_q,
                     {
                         float acc = 0.f;
                         for(int kc = 0; kc < 16; kc++)
-                            acc += sP[sp_row * 16 + kc]
+                            acc += sP[sp_row][kc]
                                    * __half2float(sV[d16 * 16 + my_kcol][kg * 16 + kc]);
                         o_acc[qg][d16][e] += acc;
                     }
                 }
             __syncthreads();
-            // Next iteration will write new sP values to sK -- sK is safe to overwrite
         }
-        // No final syncthreads needed here (sV still valid for next tile's load)
     }
 
-    // After tile loop: reduce row_m and row_d across 16 lanes sharing each (qg,e) query row
-    // Same (lane/16) group, different lane%16 -> shfl_xor 1,2,4,8
+    // Reduce row_m and row_d across 16 lanes sharing each query row (same my_eg)
     for(int qg = 0; qg < 4; qg++)
         for(int e = 0; e < 4; e++)
         {
@@ -226,7 +224,7 @@ __device__ void flash2_fwd_body(const __half* __restrict__ ptr_q,
             row_d[qg][e] += __shfl_xor(row_d[qg][e], 8);
         }
 
-    // Normalize and write via shared memory
+    // Normalize and write
     for(int qg = 0; qg < 4; qg++)
         for(int e = 0; e < 4; e++)
         {
