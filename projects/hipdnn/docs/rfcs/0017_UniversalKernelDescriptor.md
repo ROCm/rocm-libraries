@@ -169,13 +169,13 @@ hand-written code.
 
 | Descriptor | Purpose | Exists in hipDNN today as |
 |---|---|---|
-| **UKD** (kernel) | One launchable kernel, carrying no logic of its own: a source, either a compiled kernel or the details for building it ahead of time (AOT), plus concrete values for the fields the engine's KMD declares. It inherits everything else, matchers and dispatch from its KDP, heuristic and metadata schema from that pack's engine, and it applies only when **all** of its pack's matchers pass | The compiled kernel module (code object) and its hand-tracked build config |
-| **KDP** (pack) | Bind a matcher set, one engine, and one dispatch over a kernel vector | The engine-registration table plus the per-kernel registration and launch scaffolding |
-| **UMD** (match) | One applicability check over the graph, device properties, and kernel metadata, written as a graph pattern plus a declarative criteria expression, binding the named variables the launch step references; a KDP's matcher **set** is the pack's full applicability test, and what survives it is the engine's catalog for that graph | The provider's entire applicability implementation: graph-level, device-level, and per-kernel checks a hand-written `isApplicable` performs before a kernel is a candidate |
-| **UDD** (dispatch) | How to invoke a kernel: the dispatch application binary interface (ABI), meaning argument binding and ordering, grid, block, shared memory, and workspace | The bespoke launch and argument-wiring code |
-| **UED** (engine) | One engine, carrying no logic of its own: a stable identity, the KMD fields it exposes as knobs, and its behavior and numerical notes. It **names** the engine's one heuristic (UHD) and one metadata schema (KMD) by id, because a single selector ranks all of the engine's kernels over one feature space. An engine is a named group of kernels | The provider's engine-registration table plus a `HIPDNN_REGISTER_ENGINE` id |
+| **KMD** (metadata) | One schema per engine, shared across every kernel it owns: the variant fields each kernel carries, each with a type and an optional default (tile size, block size, and the like). Each kernel supplies concrete values, and that completed tuple is the kernel's unique key in the catalog, so the field set must uniquely describe every kernel variant. The heuristic ranks the catalog on it, and matchers read the fields as `$kernel.<field>` | The compile-time template and tuning parameters that distinguish one kernel variant from another |
 | **UHD** (heuristic) | One kernel-selection model, one per engine. Given the kernels that fit a graph, the engine's **catalog** for that graph, it ranks them on kernel metadata, problem shape, and device details, and picks the best one for the problem | A ranking model living inside an engine's dispatcher |
-| **KMD** (metadata) | One schema per engine, shared across every kernel it owns: the variant fields each kernel carries, each with a type and an optional default (tile size, block size, and the like). Each UKD supplies concrete values, and that completed tuple is the kernel's unique key in the catalog, so the field set must uniquely describe every kernel variant. The heuristic ranks the catalog on it, and matchers read the fields as `$kernel.<field>` | The compile-time template and tuning parameters that distinguish one kernel variant from another |
+| **UED** (engine) | One engine, carrying no logic of its own: a stable identity, the KMD fields it exposes as knobs, and its behavior and numerical notes. It **names** the engine's one heuristic (UHD) and one metadata schema (KMD) by id, because a single selector ranks all of the engine's kernels over one feature space. An engine is a named group of kernels | The provider's engine-registration table plus a `HIPDNN_REGISTER_ENGINE` id |
+| **UMD** (match) | One applicability check over the graph, device properties, and kernel metadata, written as a graph pattern plus a declarative criteria expression, binding the named variables the launch step references; a pack's matcher **set** is its full applicability test, and what survives it is the engine's catalog for that graph | The provider's entire applicability implementation: graph-level, device-level, and per-kernel checks a hand-written `isApplicable` performs before a kernel is a candidate |
+| **UDD** (dispatch) | How to invoke a kernel: the dispatch application binary interface (ABI), meaning argument binding and ordering, grid, block, shared memory, and workspace | The bespoke launch and argument-wiring code |
+| **UKD** (kernel) | One launchable kernel, carrying no logic of its own: a source, either a compiled kernel or the details for building it ahead of time (AOT), plus concrete values for the fields the engine's KMD declares. It inherits everything else, matchers and dispatch from its pack, heuristic and metadata schema from that pack's engine, and it applies only when **all** of its pack's matchers pass | The compiled kernel module (code object) and its hand-tracked build config |
+| **KDP** (pack) | Bind a matcher set, one engine, and one dispatch over a kernel vector | The engine-registration table plus the per-kernel registration and launch scaffolding |
 
 A UED is 1:1 with a hipDNN engine, so "the engine" and "the UED" name the same unit going
 forward. An engine serves a scoped family of kernels, tight enough that one heuristic and
@@ -191,11 +191,10 @@ The knobs a caller sets through the host object are exactly the KMD fields the U
 to expose.
 
 The KDP's one UDD holds one or more **Launches**, each a dispatch step paired at runtime with
-the UKD source that fills it:
-a simple kernel is a one-Launch UDD, and a multi-launch kernel such as SDPA backward is a
-several-Launch UDD run in order. The remaining term is the **UCD (Universal Composite
-Descriptor)**, which splits a graph into child graphs, each satisfied by an engine (future
-work).
+the UKD source that fills it: a simple kernel is a one-Launch UDD, and a multi-launch kernel
+such as SDPA backward is a several-Launch UDD run in order. The remaining term is the
+**UCD (Universal Composite Descriptor)**, which splits a graph into child graphs, each
+satisfied by an engine (future work).
 
 ![How the descriptors relate: an engine owning one heuristic and one metadata schema; a KDP binding a matcher set, that engine, and one UDD over a vector of child kernels](../images/ukd_concepts.svg)
 
