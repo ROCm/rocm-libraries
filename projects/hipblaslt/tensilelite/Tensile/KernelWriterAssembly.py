@@ -14139,17 +14139,38 @@ class KernelWriterAssembly(KernelWriter):
     savedTotalMOffSgpr = self.states.subtileTotalMOffsetSgpr
     savedMBlockSize    = self.states.subtileMBlockSize
     self.states.storeAlign8 = True
-    # Use defineSgpr (not defineSgprIdx) so the checkout skips vars currently
-    # parked in freeSgprVarPool. On StreamK the workspace SRD (SrdWS) is parked
-    # here (reused as a main-loop temp) and defineSgprIdx would grab its
-    # registers, making the later post-loop removeSgprVarFromPool("SrdWS") fail
-    # ("not in Available state"). defineSgpr temporarily marks the parked vars
-    # in-use across the checkout, so the guard SGPRs land on genuinely-free
-    # registers. Also protects the just-lent LocalWriteBaseAddr/Swap SGPRs above.
-    module.add(self.defineSgpr("SubtileMGuard", 1))
-    module.add(self.defineSgpr("SubtileNGuard", 1))
-    self.states.subtileM32ValidBlocksSgpr = self.sgprs["SubtileMGuard"]
-    self.states.subtileN16ValidBlocksSgpr = self.sgprs["SubtileNGuard"]
+    # Mark the whole fused-store window as the full-tile arm BEFORE the guard SGPRs are
+    # considered: the front guard proved requireFullTile, so _plsinFusedNoGuards() below
+    # (and every bounds-check site inside globalWriteElements) can see it. Restored with
+    # the rest of the saved state after the store. StreamK also reads this flag to
+    # suppress the workspace store-branches / partials / fixup -- a full-tile owner
+    # writes D directly.
+    savedFusedFullTile = self.states.subtileFusedFullTileStore
+    self.states.subtileFusedFullTileStore = True
+    # Full-tile fused store: every wave-block is fully interior, so the M/N guard values
+    # are constant (SubtileMGuard == MIWaveTile[0], SubtileNGuard == waveGroupN) and
+    # every consumer of them -- align8 exec masks, per-store OOB skip branches, the
+    # paired-store both-blocks-valid test -- is dead. Skip the allocation entirely and
+    # leave the guard state None so those sites emit nothing; _emitSubtileGuards (~20
+    # SALU + a v_readfirstlane, per fused emission) is skipped in globalWriteElements.
+    fusedDefinedGuards = not self._plsinFusedNoGuards()
+    if fusedDefinedGuards:
+      # Use defineSgpr (not defineSgprIdx) so the checkout skips vars currently
+      # parked in freeSgprVarPool. On StreamK the workspace SRD (SrdWS) is parked
+      # here (reused as a main-loop temp) and defineSgprIdx would grab its
+      # registers, making the later post-loop removeSgprVarFromPool("SrdWS") fail
+      # ("not in Available state"). defineSgpr temporarily marks the parked vars
+      # in-use across the checkout, so the guard SGPRs land on genuinely-free
+      # registers. Also protects the just-lent LocalWriteBaseAddr/Swap SGPRs above.
+      module.add(self.defineSgpr("SubtileMGuard", 1))
+      module.add(self.defineSgpr("SubtileNGuard", 1))
+      self.states.subtileM32ValidBlocksSgpr = self.sgprs["SubtileMGuard"]
+      self.states.subtileN16ValidBlocksSgpr = self.sgprs["SubtileNGuard"]
+    else:
+      self.states.subtileM32ValidBlocksSgpr = None
+      self.states.subtileN16ValidBlocksSgpr = None
+      self.states.subtileTotalMOffsetSgpr   = None
+      self.states.subtileMBlockSize         = 0
 
     # --- external D bpe: the GSU==1 store arm normally sets bpeCexternal to the
     # external (DestDataType) bpe. Our noGSUBranch=True call skips the gsuLimit>1
@@ -14339,10 +14360,7 @@ class KernelWriterAssembly(KernelWriter):
     # Phase1/Phase2 to hide the ds_bpermute latency (see GlobalWriteBatch weave path).
     savedWeave = self.states.subtileFusedWeave
     self.states.subtileFusedWeave = True
-    # StreamK: this store is a full-tile owner (front guard guaranteed), so suppress
-    # the SK workspace store-branches / partials / fixup — write D directly.
-    savedFusedFullTile = self.states.subtileFusedFullTileStore
-    self.states.subtileFusedFullTileStore = True
+    # (subtileFusedFullTileStore was set above, before the guard-SGPR decision.)
     # applyAlpha: normally True -- apply the effective alpha (= user Alpha, with
     # scaleA*scaleB folded in for scalar UseScaleAB) to the accumulators before the
     # paired D store. globalWriteElements does the scalar-ScaleAB->Alpha fold internally
@@ -14365,7 +14383,6 @@ class KernelWriterAssembly(KernelWriter):
       kernel, tPA, tPB,
       [fullVws[0]], [fullVws_1[0]], [elements[0]], [elements_1[0]],
       noGSUBranch=True, applyAlpha=(not skipAlpha), betas=[False], edge=False)
-    self.states.subtileFusedFullTileStore = savedFusedFullTile
     self.states.subtileFusedWeave = savedWeave
     module.add(storeModule)
     self.cleanupGlobalWrite(kernel)
@@ -14405,13 +14422,15 @@ class KernelWriterAssembly(KernelWriter):
          _spool[_idx].status == RegisterPool.Status.InUse:
         module.add(self.undefineSgpr(_name))
       self.sgprs.pop(_name, None)
-    module.add(self.undefineSgpr("SubtileNGuard"))
-    module.add(self.undefineSgpr("SubtileMGuard"))
-    self.states.subtileMBlockSize         = savedMBlockSize
-    self.states.subtileTotalMOffsetSgpr   = savedTotalMOffSgpr
-    self.states.subtileN16ValidBlocksSgpr = savedN16Sgpr
-    self.states.subtileM32ValidBlocksSgpr = savedM32Sgpr
-    self.states.storeAlign8               = savedStoreAlign8
+    if fusedDefinedGuards:
+      module.add(self.undefineSgpr("SubtileNGuard"))
+      module.add(self.undefineSgpr("SubtileMGuard"))
+    self.states.subtileMBlockSize          = savedMBlockSize
+    self.states.subtileTotalMOffsetSgpr    = savedTotalMOffSgpr
+    self.states.subtileN16ValidBlocksSgpr  = savedN16Sgpr
+    self.states.subtileM32ValidBlocksSgpr  = savedM32Sgpr
+    self.states.subtileFusedFullTileStore  = savedFusedFullTile
+    self.states.storeAlign8                = savedStoreAlign8
     self.vgprPool.checkIn(fusedStartVgprValu)
     self.vgprs.coord1           = savedCoord1
     self.vgprs.coord0           = savedCoord0
@@ -15582,29 +15601,29 @@ class KernelWriterAssembly(KernelWriter):
     return self._plsinAlphaSkipEligible(kernel) and \
            plsinDebugEnv("TENSILE_PLSIN_APPLY_ALPHA", "1") != "0"
 
-  def _plsinSubtileEdge(self, kernel):
-    """PostLoopStoreInNll fused-store edge policy.
+  def _plsinFusedNoGuards(self):
+    """True inside the FULL-TILE fused NLL store, where every per-store bounds check
+    (OOB skip branches, paired-store both-blocks-valid test, align8 exec masks) is
+    provably dead and is therefore not emitted at all.
 
-    Default (True): the fused-store front guard admits subtile-aligned partial tiles --
-    an M remainder that is a multiple of the paired-store block (16//destBpe; = 8 for a
-    bf16 D) and ANY N remainder take the FUSED store, which masks the trailing partial
-    AND fully-OOB M/N blocks branch-free via the SubtileMGuard/SubtileNGuard align8 exec
-    masks (see GlobalWriteBatch._emitAlign8ExecMask). This lets thin-M / edge shapes take
-    the fused runtime branch instead of the (slightly slower) PLAIN + edge post-loop
-    store, and was validated bit-exact vs develop across partial-M / partial-N sweeps.
-    TENSILE_PLSIN_SUBTILE_EDGE=0 restores the conservative full-tile-only gate
-    (requireFullTile=True). Only meaningful for the subtile paired-store path
-    (storeAlign8)."""
-    return plsinDebugEnv("TENSILE_PLSIN_SUBTILE_EDGE", "1") != "0"
+    The fused store is only reachable through the front guard, which proves
+    requireFullTile: this workgroup covers a complete MacroTile in both M and N
+    (SizeI%MT0==0 && SizeJ%MT1==0), so EVERY wave-block inside the tile is fully
+    interior. Concretely SubtileMGuard == MIWaveTile[0] and SubtileNGuard ==
+    waveGroupN for every wave, which makes both align8 mask components all-ones in
+    every block (including the trailing one, where the "interior" early-out does not
+    fire but the computed mask still comes out -1 / 0xFFFF). So the masks, the guard
+    SGPRs that feed them, and the OOB branches are all dead weight on the fused
+    store's critical path.
 
-  def _plsinSubtileEdgeAlign(self, kernel, isSize1):
-    """Subtile-edge admissible remainder alignment for dim (M: isSize1=False, N: True).
-    M: 16//destBpe (paired dwordx4 store width / dest bpe = 8 for bf16). N: 1 (any
-    remainder -- the align8 N exec mask handles arbitrary partial columns)."""
-    if isSize1:
-      return 1
-    destBpe = int(kernel["ProblemType"]["DestDataType"].numBytes())
-    return max(1, 16 // destBpe)
+    Partial tiles never reach here -- they take the PLAIN NLL + edge-capable
+    post-loop store, which keeps the full subtile Edge/NonEdge machinery (relaxed
+    checkIsEdgeSubtile, align8 masks, OOB branches) untouched.
+
+    TENSILE_PLSIN_FULLTILE_NOGUARD=0 re-emits the guards and masks (test-only A/B;
+    correct but slower)."""
+    return (self.states.subtileFusedFullTileStore
+            and plsinDebugEnv("TENSILE_PLSIN_FULLTILE_NOGUARD", "1") != "0")
 
   def computePostLoopFusedStore(self, kernel):
     """Precompute the persistent 'this tile falls through the fused-store path' predicate
@@ -15757,13 +15776,11 @@ class KernelWriterAssembly(KernelWriter):
     # checkIsEdgeSubtile(requireFullTile=True) but folds the rem==0 predicate into the
     # flag via s_cselect instead of branching.
     #
-    # Subtile-edge relaxation (TENSILE_PLSIN_SUBTILE_EDGE): admit subtile-aligned
-    # partial tiles into the fused store too -- the align8 exec masks
-    # (_emitAlign8ExecMask) mask the trailing partial AND fully-OOB M/N blocks
-    # branch-free, so the last-WG remainder only needs to be a multiple of the
-    # paired-store block in M (16//destBpe = 8 for bf16) and is unconstrained in N.
-    # We fold (myRem & (alignSize-1)) == 0 instead of myRem == 0.
-    subtileEdge = self._plsinSubtileEdge(kernel)
+    # This is a STRICT full-tile test: admitting subtile-aligned partial tiles here
+    # would force the fused store to carry per-block bounds checks (align8 exec masks
+    # + OOB branches) on its critical path. Partial tiles instead take the PLAIN NLL,
+    # whose post-loop store is edge-capable; that keeps the fused store branch- and
+    # mask-free (see _plsinFusedNoGuards).
     for isSize1 in (False, True):
       dimName  = "N" if isSize1 else "M"
       divisor  = kernel["MacroTile1"] if isSize1 else kernel["MacroTile0"]
@@ -15773,9 +15790,8 @@ class KernelWriterAssembly(KernelWriter):
         sizeBoundary = sgpr("PackedSize1") if len(kernel["PackedC1IndicesX"]) > 1 else self.sizeRef(kernel["ProblemType"]["Index1"])
       else:
         sizeBoundary = sgpr("PackedSize0") if len(kernel["PackedC0IndicesX"]) > 1 else self.sizeRef(kernel["ProblemType"]["Index0"])
-      alignSize = self._plsinSubtileEdgeAlign(kernel, isSize1) if subtileEdge else divisor
-      module.addComment1("PLSIN guard-hoist: fold %s-tile %s (SizeX %% %d aligned on last WG) into %s" %
-                         ("subtile" if subtileEdge else "full", dimName, alignSize, flag))
+      module.addComment1("PLSIN guard-hoist: fold full-tile %s (SizeX %% %d == 0 on last WG) into %s" %
+                         (dimName, divisor, flag))
       with self.allocTmpSgpr(4, tag="plsinFused_fulltile") as eTmp:
         rem  = eTmp.idx        # SizeX % divisor
         quo  = eTmp.idx + 1    # SizeX / divisor (reused as nwg-1 after the divide)
@@ -15785,13 +15801,8 @@ class KernelWriterAssembly(KernelWriter):
         module.add(SAddU32(dst=sgpr(quo), src0=hex(-1), src1=sgpr(nwgSgpr), comment="nwg-1"))
         module.add(SCmpGeU32(src0=sgpr(wgSgpr), src1=sgpr(quo), comment="last WG in %s ?" % dimName))
         module.add(SCSelectB32(dst=sgpr(rem), src0=sgpr(rem), src1=0, comment="myRem = last WG ? rem : 0"))
-        if subtileEdge and alignSize > 1:
-          module.add(SAndB32(dst=sgpr(rem), src0=sgpr(rem), src1=alignSize - 1,
-                             comment="myRem %% %d (subtile-edge: paired-store aligned)" % alignSize))
-        elif subtileEdge:  # alignSize == 1 (N): any remainder admitted
-          module.add(SMovB32(dst=sgpr(rem), src=0, comment="N subtile-edge: any remainder admitted"))
-        module.add(SCmpEQU32(src0=sgpr(rem), src1=0, comment="%s-tile-aligned in %s ?" % ("subtile" if subtileEdge else "full", dimName)))
-        module.add(SCSelectB32(dst=sgpr(flag), src0=sgpr(flag), src1=0, comment="misaligned %s tile -> not fused" % dimName))
+        module.add(SCmpEQU32(src0=sgpr(rem), src1=0, comment="full-tile in %s ?" % dimName))
+        module.add(SCSelectB32(dst=sgpr(flag), src0=sgpr(flag), src1=0, comment="partial %s tile -> not fused" % dimName))
 
     # StreamK full-tile owner: started (LocalStart==0) AND finished (LocalEnd==ItersPerTile).
     if kernel["StreamK"] > 0 and not kernel["StreamKAtomic"] and not kernel["StreamKForceDPOnly"]:
@@ -15910,15 +15921,16 @@ class KernelWriterAssembly(KernelWriter):
     # A long branch needs 3 scratch SGPRs, so widen the temp alloc in that mode.
     with self.allocTmpSgpr(3 if longBranch else 1, tag="fusedStoreGuard_beta") as tmpSgprInfo:
       module.add(self.checkIsBetaZero(kernel, tmpSgprInfo, targetLabel, isLongBranch=longBranch, posNeg=1))
-    # full-tile (or, under TENSILE_PLSIN_SUBTILE_EDGE, subtile-aligned) in M and N: the
-    # branch-free fused store's align8 exec masks handle trailing partial + fully-OOB
-    # blocks, so requireFullTile can relax to the subtile-aligned check.
-    _requireFullTile = not self._plsinSubtileEdge(kernel)
+    # FULL tile in M and N. requireFullTile (not the relaxed subtile-aligned check the
+    # ordinary NonEdge store path uses) is what makes the fused store branch- and
+    # mask-free: it guarantees every wave-block is fully interior, so no align8 exec
+    # mask or per-store OOB branch is needed. Partial tiles fall through to the PLAIN
+    # NLL + edge-capable post-loop store.
     with self.allocTmpSgpr(4, tag="fusedStoreGuard_edge") as tmpSgprInfo:
       module.add(self.checkIsEdgeSubtile(kernel, tmpSgprInfo, targetLabel,
-                                         isSize1=False, requireFullTile=_requireFullTile, isLongBranch=longBranch))
+                                         isSize1=False, requireFullTile=True, isLongBranch=longBranch))
       module.add(self.checkIsEdgeSubtile(kernel, tmpSgprInfo, targetLabel,
-                                         isSize1=True, requireFullTile=_requireFullTile, isLongBranch=longBranch))
+                                         isSize1=True, requireFullTile=True, isLongBranch=longBranch))
     # StreamK full-tile OWNER: only a WG that both started (StreamKLocalStart==0) and
     # finished (StreamKLocalEnd==ItersPerTile) this output tile computed the whole K
     # range, so it may store D directly. Split contributors must take the target
@@ -17468,10 +17480,15 @@ class KernelWriterAssembly(KernelWriter):
     # UseSubtileImpl NonEdge guard: compute numValidMBlocks / numValidNBlocks so
     # stores can skip OOB wave groups.  Active for any NonEdge UseSubtileImpl path
     # that is not multi-buffer GSU accumulation.
+    # Skipped entirely for the full-tile fused NLL store: there the guard values are
+    # constant (every wave-block fully interior) and all their consumers are elided, so
+    # computing them would be ~20 dead SALU + a v_readfirstlane on the fused store's
+    # critical path -- once per fused emission (PLR variants x activation types).
     isSubtileNonEdge = (
       not edge
       and kernel.get("UseSubtileImpl")
       and kernel["_GlobalAccumulation"] not in ("MultipleBufferSingleKernel", "MultipleBuffer")
+      and not self._plsinFusedNoGuards()
     )
     if isSubtileNonEdge:
       self._emitSubtileGuards(kernel, edgeModule)

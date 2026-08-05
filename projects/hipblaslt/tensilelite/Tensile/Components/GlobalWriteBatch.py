@@ -54,8 +54,6 @@ from ..KernelWriterModules import hasSequentialValuC
 
 from math import ceil, log2
 
-import os
-
 
 def _scmpGtU32(writer, src, imm, comment=""):
     """ISA-aware scalar compare: s_cmpk_gt_u32 when available, else s_cmp_gt_u32 via temp SGPR."""
@@ -1912,7 +1910,7 @@ class GlobalWriteBatchWriter:
               # Under requireFullTile (fused store) both blocks are always valid, so the
               # check + scalar fallback are dead — always emit the paired store directly.
               guardMSgpr = self.parentWriter.states.subtileM32ValidBlocksSgpr
-              if guardMSgpr is not None and not self._fusedSkipOobGuard():
+              if guardMSgpr is not None and not self._fusedFullTileNoGuards():
                 afterPairedLabel = Label(self.parentWriter.labels.getNameInc("subtile_after_paired"),
                                         f"after paired/fallback store tt0={tt0}")
                 fallbackLabelName = self.parentWriter.labels.getNameInc("subtile_scalar_fallback")
@@ -1997,8 +1995,11 @@ class GlobalWriteBatchWriter:
             # Early exit: skip this store if the wave group is outside the valid M/N tile bounds.
             skipLabel = self._emitSubtileOobGuard(storeCodeModule, blockIdxM, blockIdxN,
                                                   labelPrefix="subtile_skip_store")
-          # Apply exec mask for partial M/N blocks (regular fp32 store path)
-          if self.parentWriter.states.storeAlign8 and isSubtileNonEdge:
+          # Apply exec mask for partial M/N blocks (regular fp32 store path). Elided in
+          # the full-tile fused store, where the mask is all-ones for every block.
+          useAlign8 = (self.parentWriter.states.storeAlign8 and isSubtileNonEdge
+                       and not self._fusedFullTileNoGuards())
+          if useAlign8:
             self._emitAlign8ExecMask(storeCodeModule, self.tmpS01, self.tmpS23, blockIdxM, blockIdxN,
                                      mGuardOffset=1, rowScaleShift=2)
             storeCodeModule.add(self.getEdgeMovInstType()(EXEC(), sgpr(self.tmpS01, self.laneSGPRC), "apply exec mask"))
@@ -2006,7 +2007,7 @@ class GlobalWriteBatchWriter:
           tmpStoreCode = self.parentWriter.addStore(self.kernel, self.ss, 'D', addrCalc, sumIdx, self.tmpS01, self.edge, elementIdx, self.batchIdx,
                                                    overrideAfterPrimerRows=_emitOverrideRows, comment="store D")
           storeCodeModule.add(tmpStoreCode)
-          if self.parentWriter.states.storeAlign8 and isSubtileNonEdge:
+          if useAlign8:
             storeCodeModule.add(self.getEdgeMovInstType()(EXEC(), -1, "restore exec"))
           if skipLabel is not None:
             storeCodeModule.add(skipLabel)
@@ -2152,17 +2153,13 @@ class GlobalWriteBatchWriter:
 
     return module
 
-  def _fusedSkipOobGuard(self):
-    """True when the per-store OOB quick-exit guards can be elided.
-
-    The PostLoopStoreInNll fused store runs only behind the front guard, which proves
-    requireFullTile — every wave-block is fully interior, so the per-store M/N OOB
-    branches can never fire. The load-bearing align8 exec mask (which consumes the same
-    guard SGPRs) is kept intact; only the dead skip branches are removed.
-    TENSILE_PLSIN_FULLTILE_NOGUARD=0 restores the guards (test-only).
+  def _fusedFullTileNoGuards(self):
+    """True inside the branch-free FULL-TILE fused NLL store: every per-store bounds
+    check (OOB skip branches, paired-store both-blocks-valid test, align8 exec mask)
+    is provably dead here and is not emitted. See
+    KernelWriterAssembly._plsinFusedNoGuards for the full-tile argument.
     """
-    return (self.parentWriter.states.subtileFusedFullTileStore
-            and os.environ.get("TENSILE_PLSIN_FULLTILE_NOGUARD", "1") != "0")
+    return self.parentWriter._plsinFusedNoGuards()
 
   def _emitSubtileOobGuard(self, targetModule, blockIdxM: int, blockIdxN: int, labelPrefix: str = "subtile_skip_store"):
     """Emit M/N OOB guard branches for UseSubtileImpl NonEdge stores.
@@ -2195,27 +2192,30 @@ class GlobalWriteBatchWriter:
     Returns a per-element skip Label only when there is no N guard (M-only case); the
     caller must add it after the store.  Returns None in all other cases.
     """
-    # B5 full-tile guard elision: the PostLoopStoreInNll fused store is only reached
+    # Full-tile guard elision: the PostLoopStoreInNll fused store is only reached
     # through the front guard (emitFusedStoreGuard), which already proved requireFullTile
     # (this workgroup covers a complete MacroTile: SizeI%MT0==0 && SizeJ%MT1==0 for its
     # tile). The OOB quick-exit compare+branch pairs below only ever fire when a wave-group
     # inside the MacroTile is out-of-bounds, which cannot happen under requireFullTile ->
     # they are provably dead. When skipping (skipOob), we still run all the N-group label /
     # deferred-SrdD-increment bookkeeping (so D addressing is byte-identical) and only elide
-    # the s_cmpk_gt_u32 + s_cbranch instructions. The load-bearing align8 exec mask (built
-    # elsewhere from the still-live guard SGPRs) is unaffected. Env opt-out restores guards.
-    skipOob = self._fusedSkipOobGuard()
+    # the s_cmpk_gt_u32 + s_cbranch instructions. The align8 exec masks are dead for the
+    # same reason and are elided at their own emit sites (see _fusedFullTileNoGuards).
+    skipOob = self._fusedFullTileNoGuards()
     guardMSgpr = self.parentWriter.states.subtileM32ValidBlocksSgpr
     guardNSgpr = self.parentWriter.states.subtileN16ValidBlocksSgpr
     # No guard SGPRs means the store is always in-bounds for this path; nothing to emit.
-    if guardMSgpr is None and guardNSgpr is None:
+    # Under skipOob the guard SGPRs are deliberately NOT computed (they would be dead),
+    # so they read back as None here -- but the N-group bookkeeping below must still run,
+    # hence skipOob suppresses this early-out.
+    if guardMSgpr is None and guardNSgpr is None and not skipOob:
       return None
 
     # --- N-group guard (emitted once per unique blockIdxN) ---
     # Branches to _subtileAllStoresEndLabel when N OOB, skipping all remaining stores.
     # Because N is monotone (blockIdxN increases each group), if this group is OOB
     # then every subsequent group is also OOB — no need to test them.
-    if guardNSgpr is not None and blockIdxN != self._subtilePrevBlockIdxN:
+    if (guardNSgpr is not None or skipOob) and blockIdxN != self._subtilePrevBlockIdxN:
       # Place the previous N group's end label before starting a new group.
       if self._subtileNGroupSkipLabel is not None:
         targetModule.add(self._subtileNGroupSkipLabel)
@@ -2244,11 +2244,11 @@ class GlobalWriteBatchWriter:
     # Branches to end of current N group when M OOB, skipping remaining M elements.
     # Because M is monotone (blockIdxM increases within the N group), if this element
     # is OOB then all subsequent M elements in this N group are also OOB.
-    if guardMSgpr is None:
-      return None
     # requireFullTile: the per-element M OOB branch is provably never taken (see top).
     # N-group bookkeeping above already ran, so deferred SrdD increments still land.
     if skipOob:
+      return None
+    if guardMSgpr is None:
       return None
     targetModule.add(_scmpGtU32(self.parentWriter, sgpr("SubtileMGuard"), blockIdxM,
                                  comment=f"quick-exit: numValidMBlocks > {blockIdxM}? (OOB -> skip N group)"))
@@ -2359,75 +2359,35 @@ class GlobalWriteBatchWriter:
     else:
       module.add(SLShiftRightB64(dst=sgpr(tmpS, 2), src=-1, shiftHex=sgpr(tmpS2),
                                  comment="M mask = -1 >> shiftAmt"))
-    # Fully-OOB block (validRows==0 => shiftAmt==wavelen): s_lshr masks the shift
-    # count to log2(wavelen) bits, so -1 >> wavelen wraps to -1 >> 0 == -1 (a FULL
-    # mask) instead of 0 -> the branch-free fused store (which elides the OOB skip
-    # branches, see _emitSubtileOobGuard skipOob) would then write OOB rows. Force
-    # the mask to 0 for those blocks. shiftAmt==wavelen iff validRows==0, so interior
-    # (shiftAmt==0) and partial (0<shiftAmt<wavelen) blocks are unchanged.
-    # This clamp is REQUIRED only when the per-store OOB skip branches are elided
-    # (_fusedSkipOobGuard -> branch-free fused store). The non-fused store branches
-    # over fully-OOB blocks entirely, so the mask value is dead there; emitting the
-    # clamp only under _fusedSkipOobGuard() keeps the non-fused (PLSIN0) instruction
-    # stream byte-identical to the develop baseline.
-    if self._fusedSkipOobGuard():
-      module.add(SCmpEQU32(src0=sgpr(tmpS2), src1=self.wavelen,
-                           comment="fully-OOB M block? (shiftAmt==wavelen => validRows==0)"))
-      module.add(SCSelectB32(dst=sgpr(tmpS), src0=0, src1=sgpr(tmpS),
-                             comment="mask%s = 0 if fully OOB (avoid -1>>wavelen wrap)" % ("" if isWave32 else "_lo")))
-      if not isWave32:
-        module.add(SCSelectB32(dst=sgpr(tmpS+1), src0=0, src1=sgpr(tmpS+1),
-                               comment="mask_hi = 0 if fully OOB"))
+    # NOTE on fully-OOB blocks (validRows==0 => shiftAmt==wavelen): s_lshr masks the
+    # shift count to log2(wavelen) bits, so -1 >> wavelen wraps to -1 >> 0 == -1 (a
+    # FULL mask) instead of 0. That wrap is harmless here because every caller of this
+    # helper still emits the per-store OOB skip branches, which jump over fully-OOB
+    # blocks entirely -> the mask value is dead for them. The only caller that elided
+    # those branches was the fused store, which now emits no mask at all (full-tile
+    # only, see _fusedFullTileNoGuards), so no clamp is needed.
     module.add(mMaskDone)
 
-    # --- N mask: per-column bit-mask for arbitrary partial / fully-OOB N ---
-    # validCols = clamp(SubtileNGuard - blockIdxN*16, 0): the number of valid columns
-    # this wave owns within this 16-col MMA tile. 0 => this N block is entirely OOB
-    # (mask 0, no store); 1..15 => partial; 16 => full. Using a clamped SUBTRACTION
-    # (not "clamped %% 16") makes a fully-OOB block mask to 0 rather than aliasing onto
-    # a full block whenever SubtileNGuard %% 16 == 0 -> with the branch-free fused store
-    # (OOB skip branches elided, see _emitSubtileOobGuard skipOob) that alias would
-    # otherwise write OOB columns.
+    # --- N mask: per-column bit-mask for a partial N block ---
+    # partialN = SubtileNGuard % 16: the number of valid columns this wave owns within
+    # this 16-col MMA tile. A fully-OOB N block aliases onto "full" here (partialN==0),
+    # which is safe because every caller keeps the per-store OOB skip branches and so
+    # never reaches the store for such a block -- see the M-mask note above.
     nCmpVal = (blockIdxN + 1) * 16
-    nLowVal = blockIdxN * 16
     nMaskDone = Label(self.parentWriter.labels.getNameInc("align8_n_done"), "")
     module.add(_scmpGtU32(self.parentWriter, sgpr("SubtileNGuard"), nCmpVal,
                           comment=f"clamped > {nCmpVal}? (interior: all 16 cols valid)"))
     module.add(SCBranchSCC1(labelName=nMaskDone.getLabelName(),
                             comment="interior N block -> mask unchanged"))
-    # Only the branch-free fused store (skipOob) needs the fully-OOB -> 0 handling to
-    # be branchless: it elides the per-store OOB skip branches, so a fully-OOB N block
-    # that aliased onto a full block would write OOB columns. The non-fused store keeps
-    # those skip branches, so it can use develop's exact branch-based partialN = clamped
-    # %% 16 form (SCC0 -> align8_n_full) -- keeping the PLSIN0 stream byte-identical to
-    # the develop baseline.
-    nFullLabel = None
-    if self._fusedSkipOobGuard():
-      # Branch-free: clamped SUBTRACTION (not "clamped %% 16") so a fully-OOB block
-      # masks to 0 rather than aliasing onto a full block when SubtileNGuard %% 16 == 0.
-      if nLowVal > 0:
-        module.add(SSubU32(dst=sgpr(tmpS2), src0=sgpr("SubtileNGuard"), src1=nLowVal,
-                           comment=f"validCols = clamped - {nLowVal}; SCC=1 if OOB (borrow)"))
-        module.add(SCSelectB32(dst=sgpr(tmpS2), src0=0, src1=sgpr(tmpS2),
-                               comment="fully-OOB N block -> 0 valid cols"))
-      else:
-        module.add(SMovB32(dst=sgpr(tmpS2), src=sgpr("SubtileNGuard"),
-                           comment="validCols = clamped (blockIdxN==0)"))
-      module.add(SLShiftLeftB32(dst=sgpr(tmpS2), src=1, shiftHex=sgpr(tmpS2),
-                                comment="1 << validCols"))
-      module.add(SSubU32(dst=sgpr(tmpS2), src0=sgpr(tmpS2), src1=1,
-                         comment="nMask = (1 << validCols) - 1  (0 if fully OOB)"))
-    else:
-      # Develop baseline (non-fused): partialN = clamped %% 16, branch over full block.
-      module.add(SAndB32(dst=sgpr(tmpS2), src0=sgpr("SubtileNGuard"), src1=0xF,
-                         comment="partialN = clamped %% 16, SCC=1 if non-zero"))
-      nFullLabel = Label(self.parentWriter.labels.getNameInc("align8_n_full"), "")
-      module.add(SCBranchSCC0(labelName=nFullLabel.getLabelName(),
-                              comment="partialN==0 -> full 16-col block"))
-      module.add(SLShiftLeftB32(dst=sgpr(tmpS2), src=1, shiftHex=sgpr(tmpS2),
-                                comment="1 << partialN"))
-      module.add(SSubU32(dst=sgpr(tmpS2), src0=sgpr(tmpS2), src1=1,
-                         comment="(1 << partialN) - 1"))
+    module.add(SAndB32(dst=sgpr(tmpS2), src0=sgpr("SubtileNGuard"), src1=0xF,
+                       comment="partialN = clamped %% 16, SCC=1 if non-zero"))
+    nFullLabel = Label(self.parentWriter.labels.getNameInc("align8_n_full"), "")
+    module.add(SCBranchSCC0(labelName=nFullLabel.getLabelName(),
+                            comment="partialN==0 -> full 16-col block"))
+    module.add(SLShiftLeftB32(dst=sgpr(tmpS2), src=1, shiftHex=sgpr(tmpS2),
+                              comment="1 << partialN"))
+    module.add(SSubU32(dst=sgpr(tmpS2), src0=sgpr(tmpS2), src1=1,
+                       comment="(1 << partialN) - 1"))
     if isWave32:
       # wave32: replicate lo16 to both halves without extra scratch SGPR
       module.add(SMulI32(dst=sgpr(tmpS2), src0=sgpr(tmpS2), src1=hex(0x10001),
@@ -2443,8 +2403,7 @@ class GlobalWriteBatchWriter:
                          comment="mask_lo &= N mask"))
       module.add(SAndB32(dst=sgpr(tmpS+1), src0=sgpr(tmpS+1), src1=sgpr(tmpS2),
                          comment="mask_hi &= N mask"))
-    if nFullLabel is not None:
-      module.add(nFullLabel)
+    module.add(nFullLabel)
     module.add(nMaskDone)
 
   def _popSubtileAccVgprReads(self, elementIdx: int) -> Module:
@@ -2650,11 +2609,14 @@ class GlobalWriteBatchWriter:
     bpeCurr = self.parentWriter.states.bpeCexternal
     bpeDest = self.parentWriter.states.bpeCexternalGSU1
     addrScaleShift = int(log2(bpeCurr // bpeDest)) if bpeCurr > bpeDest else 0
-    # NOTE: the align8 exec mask is load-bearing for the paired dwordx4 store's lane
-    # selection (not just edge handling) — it must stay even for full tiles. Its
-    # internal mask-compute branches are self-contained within Phase1, so they do not
-    # interfere with MFMAs interleaved between Phase1 and Phase2.
-    useAlign8 = self.parentWriter.states.storeAlign8
+    # The align8 exec mask only narrows the buffer_store_dwordx4 below (it is applied in
+    # Phase2, AFTER the permlane32_swap pair, so it plays no part in the lane assembly).
+    # In the full-tile fused store every block is fully interior -> the mask is all-ones,
+    # so both the compute here and the apply/restore in Phase2 are elided. Phase2 uses
+    # the SAME predicate, so the tmpS01 producer/consumer pair stays in sync. Elsewhere
+    # the mask-compute branches are self-contained within Phase1 and do not interfere
+    # with MFMAs interleaved between Phase1 and Phase2.
+    useAlign8 = self.parentWriter.states.storeAlign8 and not self._fusedFullTileNoGuards()
 
     module.addComment1("ds_bpermute in-place: gather packed dwords from partner lane-group")
     for k in range(4):
@@ -2711,8 +2673,9 @@ class GlobalWriteBatchWriter:
     bpeCurr = self.parentWriter.states.bpeCexternal
     bpeDest = self.parentWriter.states.bpeCexternalGSU1
     globalOffset = addrCalc.globalOffset * bpeDest // bpeCurr
-    # align8 exec mask is load-bearing for the paired store (see Phase1 note); keep it.
-    useAlign8 = self.parentWriter.states.storeAlign8
+    # Must match Phase1's predicate exactly: Phase1 produces the mask in tmpS01 and this
+    # is its only consumer (see the Phase1 note).
+    useAlign8 = self.parentWriter.states.storeAlign8 and not self._fusedFullTileNoGuards()
 
     if pending_lgkm is None:
       module.add(SWaitCnt(dscnt=0, comment="wait for ds_bpermute (lgkmcnt=0)"))
@@ -2901,7 +2864,8 @@ class GlobalWriteBatchWriter:
     module.add(VCvtPkF32to16(dst=vgpr(vPack+1), src0=vc(2), src1=vc(3), comment=f"M-row+2/+3 -> {typeStr}"))
     module.add(SNop(waitState=0, comment=f"delay after pk_{typeStr}"))
 
-    useAlign8 = self.parentWriter.states.storeAlign8
+    # Elided in the full-tile fused store: the mask is all-ones for every block there.
+    useAlign8 = self.parentWriter.states.storeAlign8 and not self._fusedFullTileNoGuards()
     if useAlign8:
       self._emitAlign8ExecMask(module, self.tmpS01, self.tmpS23, blockIdxM, blockIdxN,
                                mGuardOffset=1, rowScaleShift=2)
