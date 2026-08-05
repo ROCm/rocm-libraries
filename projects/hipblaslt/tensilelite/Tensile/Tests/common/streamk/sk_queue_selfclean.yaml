@@ -10,7 +10,7 @@
 # and the sizes give a tile count that does not block evenly over the queues.
 
 TestParameters:
-  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250] # needs MFMA + multi-XCD (gfx94x/950)
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250] # NumXCD is 8 only on gfx942/gfx950; elsewhere the single queue is trivially balanced
 
 GlobalParameters:
   CheckStreamKSync: True
