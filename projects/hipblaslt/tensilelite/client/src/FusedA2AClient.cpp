@@ -194,6 +194,34 @@ namespace TensileLite
             const size_t M = problem->freeSizeA(0); // = nFeature (A2A-scattered dim)
             const size_t N = problem->freeSizeB(0); // = nToken (all output cols)
             const size_t K = problem->boundSize(0); // GEMM contraction dim K
+
+            // The DRAIN owner is the globally last work-group, elected by counting
+            // arrivals against NumWorkGroups0*NumWorkGroups1 -- a product latched in
+            // the kernel prologue (emitFusedA2ATotalWGsLatch) that does NOT include
+            // the batch dim. A batch extent > 1 multiplies the actual work-group
+            // population, so the election would fire at 1/extent of the real arrival
+            // count and release the barrier while peers are still sending.
+            //
+            // Checked here and not at compile time: a solution only knows whether a
+            // batch index is DECLARED, and every fused config declares one while
+            // running extent 1. Rejecting on the declaration alone produced zero
+            // kernels; the extent is only knowable once there is a problem.
+            for(size_t i = 0; i < problem->batchIndices().size(); i++)
+            {
+                if(problem->batchSize(i) != 1)
+                {
+                    std::cerr << "[fused-a2a] ERROR: batch extent must be 1, but batch "
+                                 "index "
+                              << i << " has extent " << problem->batchSize(i)
+                              << ". The DRAIN owner is elected by counting work-groups "
+                                 "against NumWorkGroups0*NumWorkGroups1, which excludes "
+                                 "the batch dim, so a larger extent releases the barrier "
+                                 "before every peer has finished sending."
+                              << std::endl;
+                    return 1;
+                }
+            }
+
             const size_t nFeature = M; // semantic alias: feature = M = index-0
             const size_t nToken   = N; // semantic alias: token   = N
             // A2A column count along FEATURE (M, index-0). Was AN (feature=N) before
@@ -328,9 +356,9 @@ namespace TensileLite
             // followed by a W-entry second-level counter2[dst_rank] (target
             // tokenTiles) at word index W*tokenTiles, then a single third-level
             // u32 counter3 at word index W*tokenTiles + W. counter2 converges the
-            // DRAIN spinners to one per peer; counter3 is reserved for the
-            // grid-wide workgroup tally that will elect the single DRAIN owner
-            // (Task 4). All three ride this same allocation (and this same
+            // DRAIN spinners to one per peer; counter3 is the grid-wide workgroup
+            // tally that elects the single DRAIN owner. All three ride this
+            // same allocation (and this same
             // per-iteration memset below) so the kernarg layout stays untouched.
             //
             // Past those live slots the allocation carries a guard tail (see

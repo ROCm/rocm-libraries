@@ -21,8 +21,8 @@
 //
 // An off-by-one in a lower level never reaches the tail: it lands on a live
 // slot of the level above. At the top of counter2's range that slot is
-// counter3, so once Task 4 elects the DRAIN owner from counter3, the failure
-// mode there will be a mis-elected owner, NOT a loud error.
+// counter3, and counter3 is what elects the DRAIN owner, so the failure mode
+// there is a mis-elected owner, NOT a loud error.
 //
 // The detector appends FUSED_A2A_COUNTER_SENTINEL_BYTES past the payload,
 // fills it with a known pattern at allocation time, and re-checks it after
@@ -51,8 +51,8 @@ namespace TensileLite
         // Live counter bytes. Three levels share one allocation:
         //   W*tokenTiles  first-level  counter[dst_rank*tokenTiles + j]
         //   W             second-level counter2[dst_rank]
-        //   1             third-level  counter3, reserved for the grid-wide WG
-        //                 tally that will elect the single DRAIN owner (Task 4)
+        //   1             third-level  counter3, the grid-wide WG tally that
+        //                 elects the single DRAIN owner
         // Computed in size_t (not uint32) so a large W*tokenTiles cannot wrap
         // and under-allocate.
         constexpr size_t fusedA2ACounterPayloadBytes(uint32_t worldSize, uint32_t tokenTiles)

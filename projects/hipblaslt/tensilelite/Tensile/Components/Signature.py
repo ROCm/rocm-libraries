@@ -47,6 +47,46 @@ from dataclasses import dataclass, field
 # world size W; unused slots cost nothing here because nothing enters SGPR.
 FUSED_A2A_MAX_RANKS = 8
 
+# ...but it is not a free constant: the DRAIN barrier's EXEC mask
+# (GlobalWriteBatch.py _emitFusedA2AHandshake) is one S_BFM whose width operand
+# is the runtime W, and that operand is a TRUNCATED bit field -- 6 bits on the
+# wave64 arm (S_BFM_B64: ((1 << src0[5:0]) - 1) << src1[5:0]) and 5 on the wave32
+# arm (S_BFM_B32, the same with [4:0]). A width at the field's modulus wraps to
+# zero instead of saturating: W=64 (resp. 32) gives (1 << 0) - 1 == 0, so EXEC is
+# EMPTY. That does not hang -- the poll simply never issues, the barrier is
+# skipped, and the epilogue consumes peer tiles still in flight. A wrong answer,
+# silently, which is why the bound is enforced here rather than left to testing.
+#
+# The bound is 31, the wave32 arm's, not the wave64 arm's 63: neither this
+# constant nor its C++ twin (client/include/FusedA2AKernArg.hpp) knows the wave
+# width of the kernel that will consume it -- both are fixed long before a
+# solution's WavefrontSize is in hand -- so the only sound bound is the one that
+# holds for both arms. Every fused config today is wave64, so 31 costs nothing
+# real; raising past it means first proving no fused config is wave32.
+#
+# 31 is the mask's CEILING, not a recommendation, and the bound is necessary
+# rather than sufficient. The shipped value is 8 because no node is known to
+# carry more than 8 GPUs -- it is the world size this ABI is built for, not a
+# placeholder awaiting a raise. Moving toward 31 would satisfy the guard below
+# while growing FUSED_A2A_SEGMENT_BYTES from 176 to 544, widening the kernarg
+# slot count, and deepening the two unrolled per-rank scans in
+# GlobalWriteBatch.py to ~30 iterations each.
+#
+# `raise`, not `assert`: `python -O` strips asserts, which would collapse "the
+# bound was checked and held" and "the bound was never evaluated" into the same
+# observation. At module level this runs on every import -- every codegen run and
+# every test that touches Signature -- so it cannot be forgotten.
+if FUSED_A2A_MAX_RANKS > 31:
+    raise ValueError(
+        "FUSED_A2A_MAX_RANKS=%d exceeds the %d the DRAIN EXEC mask can encode: the "
+        "S_BFM width operand is 5 bits on the wave32 arm and 6 on the wave64 arm, so "
+        "a world size of 32 (resp. 64) wraps the width to 0, EXEC becomes empty, the "
+        "DRAIN poll never issues, and the barrier is silently skipped -- the epilogue "
+        "then reads peer tiles that have not arrived. Re-derive the mask before "
+        "raising this, and raise FUSED_A2A_MAX_RANKS in "
+        "client/include/FusedA2AKernArg.hpp to match."
+        % (FUSED_A2A_MAX_RANKS, 31))
+
 # Intra-segment byte layout, in emission order. Pointers are 8 bytes
 # (SIG_GLOBALBUFFER), scalars are 4 bytes (u32). Task 6-9 add fused_base (the
 # byte offset of recv_ptr_0 in kernarg memory, exposed as

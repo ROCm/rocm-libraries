@@ -30,6 +30,38 @@ namespace TensileLite
         // 8 of each (unused slots j>=W filled with nullptr).
         constexpr int FUSED_A2A_MAX_RANKS = 8;
 
+        // ...but it is not a free constant. The DRAIN barrier's EXEC mask
+        // (Tensile/Components/GlobalWriteBatch.py _emitFusedA2AHandshake) is one
+        // S_BFM whose width operand is the runtime W, and that operand is a
+        // TRUNCATED bit field -- 6 bits on the wave64 arm (S_BFM_B64:
+        // ((1 << src0[5:0]) - 1) << src1[5:0]) and 5 on the wave32 arm
+        // (S_BFM_B32, the same with [4:0]). A width at the field's modulus wraps
+        // to zero instead of saturating, so W=64 (resp. 32) yields an EMPTY EXEC.
+        //
+        // The bound below is 31, the wave32 arm's, not the wave64 arm's 63:
+        // neither this header nor Signature.py knows the wave width of the kernel
+        // that will consume the segment -- both constants are fixed long before a
+        // solution's WavefrontSize is in hand -- so the only sound bound is the
+        // one that holds for both arms. Every fused config today is wave64, so 31
+        // costs nothing real; raising past it means first proving no fused config
+        // is wave32. The twin check lives at Signature.py's FUSED_A2A_MAX_RANKS.
+        //
+        // 31 is the mask's CEILING, not a recommendation, and the bound is
+        // necessary rather than sufficient. The shipped value is 8 because no node
+        // is known to carry more than 8 GPUs -- it is the world size this ABI is
+        // built for, not a placeholder awaiting a raise. Moving toward 31 would
+        // satisfy the assertion below while growing this segment from 176 B to
+        // 544 B, widening the kernarg slot count, and deepening the two unrolled
+        // per-rank scans in GlobalWriteBatch.py to ~30 iterations each.
+        static_assert(FUSED_A2A_MAX_RANKS <= 31,
+                      "FUSED_A2A_MAX_RANKS exceeds the 31 the DRAIN EXEC mask can encode: "
+                      "the S_BFM width operand is 5 bits on the wave32 arm and 6 on the "
+                      "wave64 arm, so a world size of 32 (resp. 64) wraps the width to 0, "
+                      "EXEC becomes empty, the DRAIN poll never issues, and the barrier is "
+                      "silently skipped -- the epilogue then reads peer tiles that have not "
+                      "arrived. That is a wrong answer, not a hang. Re-derive the mask "
+                      "before raising this.");
+
         // Expected byte growth of args after appending the fused segment:
         //   (2*8 recv/flag + 1 counter + 1 FusedSdmaQueues) pointers * 8B
         //   + (6 legacy + 2 SDMA) scalars * 4B = 176B.

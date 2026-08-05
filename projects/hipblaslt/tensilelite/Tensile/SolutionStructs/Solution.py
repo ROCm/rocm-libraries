@@ -1728,6 +1728,31 @@ class Solution(collections.abc.Mapping):
       if mt0 not in (128, 256) or mt1 not in (128, 256):
         reject(state, printRejectionReason, "FusedGemmA2A supports MacroTile0/1 in {128, 256}")
         return
+      # The last-WG election counts arrivals against NumWorkGroups0*NumWorkGroups1,
+      # latched in the prologue; GSU!=1 multiplies the surviving-workgroup population,
+      # so the DRAIN would fire at 1/GSU of the arrivals. Full derivation, incl. why
+      # ClusterDim padding does NOT break the latch: emitFusedA2ATotalWGsLatch in
+      # Components/GlobalWriteBatch.py.
+      #
+      # The batch dim multiplies the population the same way, but is NOT rejected
+      # here: compile time can only see that a batch index is DECLARED, and every
+      # fused config declares one (Batched: True -> NumIndicesBatch == 1) while
+      # running extent 1. Rejecting on the declaration produced zero kernels. The
+      # extent is checked host-side instead, in client/src/FusedA2AClient.cpp.
+      # GSU=-1 defers the factor to calculateAutoGSU at runtime, so a compile-time
+      # latch cannot fold it in at all; only GSU=1 makes the product exact.
+      if state["GlobalSplitU"] != 1:
+        reject(state, printRejectionReason,
+               "FusedGemmA2A requires GlobalSplitU=1 (the DRAIN owner is elected "
+               "against NumWorkGroups0*NumWorkGroups1; any other GSU can multiply "
+               "the arriving work-group count -- GSU=-1 resolves at runtime -- so "
+               "the election may fire early)")
+        return
+      # Rejecting GSU!=1 above only pins the compile-time value; SupportUserGSU
+      # would still let a runtime caller raise GSU (ContractionSolution.cpp honours
+      # problem.getParams().gsu()) and re-inflate the grid under a latch that is a
+      # compile-time constant. Disable UserGSU for the last-WG election.
+      state["InternalSupportParams"]["SupportUserGSU"] = False
 
     if state["GlobalSplitU"] == 0 and state["AdaptiveGemmGSUA"] == 1:
       reject(state, printRejectionReason, "AdaptiveGemmGSUA requires GSU enablement")

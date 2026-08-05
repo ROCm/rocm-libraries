@@ -9468,6 +9468,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
     self.defineSgpr("NumWorkGroups0", 1)
     self.defineSgpr("NumWorkGroups1", 1)
 
+    # Persistent copy of the grid-wide WG count for the counter3 last-WG election;
+    # latched in graWorkGroup because NumWorkGroups0/1 can be borrowed as temps later.
+    if kernel["FusedGemmA2A"]:
+      self.defineSgpr("FusedTotalWGs", 1)
+
     # Calculate numSgpr preload
     self.states.preloadGuard = []
     self.states.numSgprPreload = 0
