@@ -85,7 +85,7 @@ def _verify_kernel(
     dump_fail: "str | None",
     extra_tensors: "dict | None" = None,
     u8,
-) -> bool:
+) -> tuple[bool, bool]:
     """Launch a kernel, compare against reference, optionally dump on failure.
 
     Parameters
