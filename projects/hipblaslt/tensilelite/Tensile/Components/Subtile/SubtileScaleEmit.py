@@ -23,7 +23,7 @@ from rocisa.container import DSModifiers, MUBUFModifiers, vgpr, sgpr, mgpr
 from rocisa.instruction import (
     BufferLoadB128,
     DSLoadB32,
-    SAddCU32, SAddU32, SLShiftLeftB32, SLShiftRightB32, SMovB32, SMovB64, SMulI32, SNop, SOrB32, SSubU32, SXorB32,
+    SAddCU32, SAddU32, SAndB32, SLShiftLeftB32, SLShiftRightB32, SMaxI32, SMinU32, SMovB32, SMovB64, SMulI32, SNop, SOrB32, SSubI32, SSubU32, SXorB32,
     VAddU32, VAndB32, VMulLOU32, VReadfirstlaneB32, VXorB32,
     VLShiftLeftB32, VLShiftRightB32,
 )
@@ -648,8 +648,51 @@ def _initTDMDescriptorMXScaleSubtile(writer, kernel, scaleTc):
   # Each wave loads its share: mt/numWaves rows * scaleDu cols * scaleBpe bytes
   bytesPerWave = mt // numWaves * scaleDu * scaleBpe
 
+  sizeShifter = int(ceil(log2(mxBlock)))
+  perWaveRows = mt // numWaves
+
   mod.add(comp.initOperands(group0, group1, None, None))
   mod.add(comp.setDataType(dtype, group1))
+
+  # Per-workgroup + per-wave global offset for scale tensor.
+  # AddressMXSA/B is rebased to the tensor base each persistent-loop
+  # iteration, so apply the WG+wave offset here.
+  tlu = tP["tlu"]
+  sizeRefFree = f"Size{INDEX_CHARS[ti]}"
+  with writer.allocTmpSgpr(3, tag="_initTDMScale_off") as offRes:
+    tmp = offRes.idx
+    waveOff = offRes.idx + 2
+    # WG offset: stride_free * MT * wgId
+    scaleStride = writer.strideRef(scaleTc, ti)
+    mod.add(SMulI32(dst=sgpr(tmp), src0=scaleStride, src1=mt,
+            comment=f"stride_free * MT({mt})"))
+    mod.add(SMulI32(dst=sgpr(tmp), src0=sgpr(tmp), src1=sgpr(f"WorkGroup{ti}"),
+            comment="*= wgId"))
+
+    if numWaves > 1:
+      mod.add(VReadfirstlaneB32(dst=sgpr(waveOff), src=vgpr("Serial"),
+              comment="first tId"))
+      mod.add(SLShiftRightB32(dst=sgpr(waveOff), src=sgpr(waveOff),
+              shiftHex=hex(int(ceil(log2(wavelen)))),
+              comment=f"wId = tId / {wavelen}"))
+      strideWaveSep = writer.strideRef(scaleTc, 3) if tlu else writer.strideRef(scaleTc, ti)
+      mod.add(SMulI32(dst=sgpr(waveOff), src0=sgpr(waveOff), src1=perWaveRows,
+              comment=f"waveOff = waveId * {perWaveRows}"))
+      mod.add(SMulI32(dst=sgpr(waveOff), src0=sgpr(waveOff), src1=strideWaveSep,
+              comment="waveOff *= stride"))
+      mod.add(SAddU32(dst=sgpr(tmp), src0=sgpr(tmp), src1=sgpr(waveOff),
+              comment="+= waveOff"))
+
+    # Undo MXBlock pre-scale to get byte offset
+    mod.add(SLShiftRightB32(dst=sgpr(tmp), src=sgpr(tmp),
+            shiftHex=hex(sizeShifter),
+            comment=f">> {sizeShifter} (undo MXBlock pre-scale)"))
+    mod.add(SAddU32(dst=sgpr(f"Address{scaleTc}"),
+            src0=sgpr(f"Address{scaleTc}"), src1=sgpr(tmp),
+            comment=f"Address{scaleTc} += globalOffset(lo)"))
+    mod.add(SAddCU32(dst=sgpr(f"Address{scaleTc}+1"),
+            src0=sgpr(f"Address{scaleTc}+1"), src1=0, comment="carry"))
+
   mod.add(comp.setGlobalAddr(group0, f"Address{scaleTc}"))
 
   # LDS offset = waveId * bytesPerWave + ldsBase
@@ -665,8 +708,6 @@ def _initTDMDescriptorMXScaleSubtile(writer, kernel, scaleTc):
     mod.add(comp.setLdsAddr(group0, sgpr(waveOff)))
 
     # Pre-compute the LDS double-buffer swap mask for MXSA.
-    # mask = ldsAddr XOR (ldsAddr + ldsTotalSize), stored persistently
-    # so emitScaleGRLDSSwap can toggle correctly on every iteration.
     ldsTotalSize = writer.ldsTotalSize
     mod.add(SAddU32(dst=sgpr("tdmLdsSwapMaskMXSA"), src0=sgpr(waveOff),
             src1=ldsTotalSize,
@@ -686,10 +727,6 @@ def _initTDMDescriptorMXScaleSubtile(writer, kernel, scaleTc):
   # Setting dim0 = K/MXBlock, dim1 = free_dim, tile0 = scaleDu, tile1 = perWaveRows
   # makes TDM write K-contiguous data into LDS, matching the subtile LR layout.
   sizeRefK = f"Size{INDEX_CHARS[3]}"
-  sizeRefFree = f"Size{INDEX_CHARS[ti]}"
-
-  sizeShifter = int(ceil(log2(mxBlock)))
-  perWaveRows = mt // numWaves
 
   mod.add(comp.setIterationEnabled(group1, False))
   mod.add(comp.setPadding(group1, 0, 0))
@@ -698,7 +735,36 @@ def _initTDMDescriptorMXScaleSubtile(writer, kernel, scaleTc):
   mod.add(comp.setTensorDim1(group1, sizeRefFree, writer))
 
   mod.add(comp.setTensorTile0(group1, scaleDu, writer, 0))
-  mod.add(comp.setTensorTile1(group1, perWaveRows, writer))
+
+  # Clamp tile1 for edge workgroups where the free dimension < MT.
+  # The TDM dim1 does not bound the tile walk, so without clamping
+  # the edge WG reads past the scale tensor and faults.
+  with writer.allocTmpSgpr(2, tag="_initTDMScale_clamp") as clampRes:
+    validRows = clampRes.idx
+    globalRowStart = clampRes.idx + 1
+    if numWaves > 1:
+      mod.add(VReadfirstlaneB32(sgpr(globalRowStart), vgpr("Serial"), "first tId"))
+      mod.add(SLShiftRightB32(sgpr(globalRowStart), ceil(log2(wavelen)),
+              sgpr(globalRowStart), "wId"))
+      mod.add(SMulI32(sgpr(globalRowStart), sgpr(globalRowStart), perWaveRows,
+              f"waveRowStart = wId * {perWaveRows}"))
+    else:
+      mod.add(SMovB32(dst=sgpr(globalRowStart), src=0, comment="single wave: waveRow=0"))
+    mod.add(SMulI32(dst=sgpr(validRows), src0=sgpr(f"WorkGroup{ti}"), src1=mt,
+            comment="wgRowStart = wgId * MT"))
+    mod.add(SAddU32(dst=sgpr(globalRowStart), src0=sgpr(globalRowStart),
+            src1=sgpr(validRows), comment="globalRowStart"))
+    mod.add(SSubI32(dst=sgpr(validRows), src0=sgpr(sizeRefFree),
+            src1=sgpr(globalRowStart), comment="SizeFree - globalRowStart"))
+    mod.add(SMaxI32(dst=sgpr(validRows), src0=sgpr(validRows), src1=0,
+            comment="saturate negative to 0"))
+    mod.add(SMinU32(dst=sgpr(validRows), src0=sgpr(validRows), src1=perWaveRows,
+            comment=f"clamp to {perWaveRows}"))
+    mod.add(comp.setTensorTile1(group1, perWaveRows, writer))
+    mod.add(SAndB32(sgpr(f"{group1}+4"), sgpr(f"{group1}+4"),
+            hex(0xFFFF0000), "clear tile1 field"))
+    mod.add(SOrB32(sgpr(f"{group1}+4"), sgpr(f"{group1}+4"),
+            sgpr(validRows), "set tile1 = clamped validRows"))
 
   # Stride: the pre-scaled stride has been multiplied by MXBlock.
   # Right-shift by log2(MXBlock) to get the actual byte stride.

@@ -5049,6 +5049,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
                          comment="snapshot tensor base A"))
       module.add(SMovB64(dst=sgpr("AddressBBase", 2), src=sgpr("AddressB", 2),
                          comment="snapshot tensor base B"))
+      if kernel["ProblemType"].get("MXBlockA", 0):
+        module.add(SMovB64(dst=sgpr("AddressMXSABase", 2), src=sgpr("AddressMXSA", 2),
+                           comment="snapshot tensor base MXSA"))
+      if kernel["ProblemType"].get("MXBlockB", 0):
+        module.add(SMovB64(dst=sgpr("AddressMXSBBase", 2), src=sgpr("AddressMXSB", 2),
+                           comment="snapshot tensor base MXSB"))
 
     module.add(loopComponent.openPersistentLoop(self, kernel))
 
@@ -5085,7 +5091,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
       # still needs explicit descriptor init):
       _needScaleInit = not (kernel["enableTDMA"] and kernel["enableTDMB"]) \
                          or (kernel.get("UseSubtileImpl") and tuple(kernel["ISA"]) == (12, 5, 0))
-      if _needScaleInit:
+      _subtileScaleDeferred = kernel.get("UseSubtileImpl") and tuple(kernel["ISA"]) == (12, 5, 0)
+      if _needScaleInit and not _subtileScaleDeferred:
         module.add(globalReadScaleSwizzledDTLInitCommonSgpr(self, kernel))
 
     # TODOBS: globalWriteWorkGroupInit can be emitted here or later on, check..
@@ -5142,11 +5149,22 @@ class KernelWriter(metaclass=abc.ABCMeta):
                          comment="re-base A to tensor base"))
       module.add(SMovB64(dst=sgpr("AddressB", 2), src=sgpr("AddressBBase", 2),
                          comment="re-base B to tensor base"))
+      if kernel["ProblemType"].get("MXBlockA", 0):
+        module.add(SMovB64(dst=sgpr("AddressMXSA", 2), src=sgpr("AddressMXSABase", 2),
+                           comment="re-base MXSA to tensor base"))
+      if kernel["ProblemType"].get("MXBlockB", 0):
+        module.add(SMovB64(dst=sgpr("AddressMXSB", 2), src=sgpr("AddressMXSBBase", 2),
+                           comment="re-base MXSB to tensor base"))
     if hasTDM:
       module.add(tdmGlobalOffsetSubtile(self, kernel, tensorParametersA))
       module.add(initTDMDescriptorSubtile(self, kernel, tensorParametersA))
       module.add(tdmGlobalOffsetSubtile(self, kernel, tensorParametersB))
       module.add(initTDMDescriptorSubtile(self, kernel, tensorParametersB))
+      # Subtile gfx1250 MX scale TDM init: deferred to here so that
+      # AddressMXSA/B have been rebased and we can apply per-WG offsets.
+      if mxsatileInfo is not None and kernel.get("UseSubtileImpl") \
+          and tuple(kernel["ISA"]) == (12, 5, 0):
+        module.add(globalReadScaleSwizzledDTLInitCommonSgpr(self, kernel))
     if not hasTDM:
       module.add(graTileAssignment(self, kernel))
     module.add(lraTileAssignment(self, kernel))
@@ -9725,6 +9743,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if kernel["UseSubtileImpl"] and kernel["enableTDMA"] and kernel["enableTDMB"]:
       self.defineSgpr("AddressABase", numSgprAddressA, 2)
       self.defineSgpr("AddressBBase", numSgprAddressB, 2)
+      if kernel["ProblemType"].get("MXBlockA", 0):
+        self.defineSgpr("AddressMXSABase", numSgprAddressMXSA, 2)
+      if kernel["ProblemType"].get("MXBlockB", 0):
+        self.defineSgpr("AddressMXSBBase", numSgprAddressMXSB, 2)
 
     # Actual allocation: prioritise 4-aligned SGPRs whenever the pool is
     # already on a 4-aligned boundary, otherwise consume unaligned ones.
