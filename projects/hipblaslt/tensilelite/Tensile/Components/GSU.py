@@ -986,7 +986,7 @@ class GSUOn(GSU):
                     # It might be possible to fix globalWriteBatch to handle this case but these
                     # are likely to be low-performing so likely not worth optimizing.
                     print("WARNING: half requires at least two elements per batch")
-                    self.overflowedResources = 3
+                    writer.states.overflowedResources = 3
             # elif kernel["ProblemType"]["MacDataTypeA"].is8bitFloat():
             #    if numElementsPerBatch > 1:
             #        numElementsPerBatch = int(numElementsPerBatch/4)*4
