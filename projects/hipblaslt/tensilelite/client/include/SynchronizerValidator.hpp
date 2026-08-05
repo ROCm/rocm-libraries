@@ -29,6 +29,17 @@ namespace TensileLite
 {
     namespace Client
     {
+        struct SynchronizerResidue
+        {
+            size_t totalInts   = 0;
+            size_t nonzeroInts = 0;
+            size_t firstInt    = 0;
+        };
+
+        /// Scans *bytes* of *host* for nonzero data. Returns false when clean,
+        /// leaving *out* untouched; otherwise fills *out* and returns true.
+        bool scanSynchronizerResidue(uint8_t const* host, size_t bytes, SynchronizerResidue& out);
+
         class SynchronizerValidator : public RunListener
         {
         public:

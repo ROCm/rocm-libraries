@@ -13,6 +13,37 @@ namespace TensileLite
 {
     namespace Client
     {
+        bool scanSynchronizerResidue(uint8_t const* host, size_t bytes, SynchronizerResidue& out)
+        {
+            // Ints are both the scan step and the reported unit: the buffer is
+            // declared with the alpha type but holds 32-bit counters, one per XCD
+            // at the head, so an offset in ints names the counter left set. The
+            // element count is a multiple of 8 and alpha is at least int-sized,
+            // so bytes always divides evenly.
+            size_t const    ints    = bytes / sizeof(uint32_t);
+            uint32_t const* v       = reinterpret_cast<uint32_t const*>(host);
+            size_t          nonzero = 0;
+            size_t          first   = ints;
+            for(size_t i = 0; i < ints; i++)
+            {
+                if(v[i] != 0)
+                {
+                    if(nonzero == 0)
+                        first = i;
+                    nonzero++;
+                }
+            }
+
+            if(nonzero == 0)
+                return false;
+
+            out.totalInts   = ints;
+            out.nonzeroInts = nonzero;
+            out.firstInt    = first;
+
+            return true;
+        }
+
         SynchronizerValidator::SynchronizerValidator(po::variables_map const& args)
             : m_enabled(args["check-streamk-sync"].as<bool>())
         {
@@ -139,41 +170,15 @@ namespace TensileLite
             // solution follows the one that left residue.
             HIP_CHECK_EXC(hipMemset(deviceSynchronizer, 0, bytes));
 
-            // Raw bytes, not the tensor type: the buffer is declared with the alpha
-            // type but holds integer counters. Word-at-a-time on the clean path;
-            // the per-byte tally below only runs once a nonzero word is found.
-            size_t const    words = bytes / sizeof(uint64_t);
-            bool            dirty = false;
-            uint64_t const* w     = reinterpret_cast<uint64_t const*>(host);
-            for(size_t i = 0; i < words && !dirty; i++)
-                dirty = (w[i] != 0);
-            for(size_t i = words * sizeof(uint64_t); i < bytes && !dirty; i++)
-                dirty = (host[i] != 0);
-
-            if(!dirty)
+            SynchronizerResidue residue;
+            if(!scanSynchronizerResidue(host, bytes, residue))
                 return true;
-
-            // Tallied in ints, the unit the kernel writes: the head of the buffer
-            // is one work-queue counter per XCD, so the offset names the counter
-            // that was left set.
-            size_t const    ints    = bytes / sizeof(int);
-            uint32_t const* v       = reinterpret_cast<uint32_t const*>(host);
-            size_t          nonzero = 0;
-            size_t          first   = ints;
-            for(size_t i = 0; i < ints; i++)
-            {
-                if(v[i] != 0)
-                {
-                    if(nonzero == 0)
-                        first = i;
-                    nonzero++;
-                }
-            }
 
             std::ostringstream msg;
             msg << "StreamK Synchronizer left dirty after " << stage << " (gemm " << gemmIdx
-                << "): " << nonzero << "/" << ints << " ints nonzero, first at int offset "
-                << first << " -- the kernel did not self-clean its work-queue state.\n";
+                << "): " << residue.nonzeroInts << "/" << residue.totalInts
+                << " ints nonzero, first at int offset " << residue.firstInt
+                << " -- the kernel did not self-clean its work-queue state.\n";
             m_reporter->log(LogLevel::Error, msg.str());
 
             return false;
