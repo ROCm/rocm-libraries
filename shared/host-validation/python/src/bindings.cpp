@@ -103,7 +103,7 @@ Tensor referenceGemmOwned(const Tensor& a, const Tensor& b, const Tensor& c, Sca
                           std::complex<double> beta, std::optional<ScalarType> computeTypeA,
                           std::optional<ScalarType> computeTypeB, MathMode mathMode,
                           Activation activation, double activationParameter0,
-                          double activationParameter1) {
+                          double activationParameter1, OutputSelection outputSelection) {
     if (a.shape().rank() != 2 || b.shape().rank() != 2)
         throw std::invalid_argument("Python reference_gemm requires rank-2 A and B tensors.");
 
@@ -120,6 +120,7 @@ Tensor referenceGemmOwned(const Tensor& a, const Tensor& b, const Tensor& c, Sca
     problem.epilogue.activation = activation;
     problem.epilogue.activationParameter0 = activationParameter0;
     problem.epilogue.activationParameter1 = activationParameter1;
+    problem.outputSelection = std::move(outputSelection);
     referenceGemm(problem);
     return d;
 }
@@ -182,6 +183,21 @@ NB_MODULE(_roc_host_validation, module) {
         .value("Sine", DataPattern::Sine)
         .value("Cosine", DataPattern::Cosine)
         .value("Constant", DataPattern::Constant);
+
+    nb::enum_<OutputSelectionKind>(module, "OutputSelectionKind")
+        .value("All", OutputSelectionKind::All)
+        .value("Strided", OutputSelectionKind::Strided)
+        .value("Explicit", OutputSelectionKind::Explicit);
+
+    nb::class_<OutputSelection>(module, "OutputSelection")
+        .def_static("all", &OutputSelection::all)
+        .def_static("strided", &OutputSelection::strided, "first"_a, "stride"_a)
+        .def_static("explicit_indices", &OutputSelection::explicitIndices)
+        .def_static("prime_stride", &OutputSelection::primeStride, "logical_elements"_a,
+                    "allocated_elements"_a, "requested_elements"_a)
+        .def_prop_ro("kind", &OutputSelection::kind)
+        .def_prop_ro("selects_all", &OutputSelection::selectsAll)
+        .def("indices", &OutputSelection::indices, "logical_elements"_a);
 
     nb::class_<ScalarTypeInfo>(module, "ScalarTypeInfo")
         .def_prop_ro("name", [](const ScalarTypeInfo& info) { return std::string(info.name); })
@@ -291,5 +307,5 @@ NB_MODULE(_roc_host_validation, module) {
                "compute_type_a"_a = std::optional<ScalarType>{},
                "compute_type_b"_a = std::optional<ScalarType>{}, "math_mode"_a = MathMode::Default,
                "activation"_a = Activation::None, "activation_parameter0"_a = 0.0,
-               "activation_parameter1"_a = 0.0);
+               "activation_parameter1"_a = 0.0, "output_selection"_a = OutputSelection::all());
 }
