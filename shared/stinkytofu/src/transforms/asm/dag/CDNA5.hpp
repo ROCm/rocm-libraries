@@ -208,6 +208,38 @@ static bool srcVGPRsOverlap(const StinkyInstruction& inst,
     return false;
 }
 
+static inline int popcount16(uint16_t v) {
+    return __builtin_popcount(static_cast<unsigned>(v));
+}
+
+// Prev WMMA's D feeds next WMMA's A/B (or SWMMAC index).
+static bool wmmaToWmmaCoexecOverlap(const StinkyInstruction& prod, const StinkyInstruction& cons) {
+    if (prod.getDestRegs().empty()) return false;
+    const StinkyRegister& d = prod.getDestRegs()[0];
+    const auto& srcs = cons.getSrcRegs();
+    if (srcs.size() > 0 && d.isOverlap(srcs[0])) return true;                   // A
+    if (srcs.size() > 1 && d.isOverlap(srcs[1])) return true;                   // B
+    if (isSWMMA(cons) && srcs.size() > 2 && d.isOverlap(srcs[2])) return true;  // index
+    return false;
+}
+
+// WMMA D vs a co-executable VALU consumer: RAW (D->src), WAW (D->dst), WAR (prod A/B or
+// SWMMAC index -> cons dst).
+static bool wmmaToValuCoexecOverlap(const StinkyInstruction& prod, const StinkyInstruction& cons) {
+    if (prod.getDestRegs().empty()) return false;
+    const StinkyRegister& d = prod.getDestRegs()[0];
+    for (const StinkyRegister& s : cons.getSrcRegs())
+        if (d.isOverlap(s)) return true;  // RAW
+    for (const StinkyRegister& cd : cons.getDestRegs())
+        if (d.isOverlap(cd)) return true;  // WAW
+    const auto& psrc = prod.getSrcRegs();
+    const size_t nWar = isSWMMA(prod) ? 3 : 2;
+    for (size_t i = 0; i < psrc.size() && i < nWar; ++i)
+        for (const StinkyRegister& cd : cons.getDestRegs())
+            if (psrc[i].isOverlap(cd)) return true;  // WAR
+    return false;
+}
+
 struct BarrierTokenEntry {
     StinkyInstruction* barrier;
     std::unordered_set<uint32_t> tokens;
@@ -349,6 +381,14 @@ class CDNA5ReadyQueue : public ReadyQueue {
     // activeWmmaLatency_). Used to detect ds_load dest / WMMA src VGPR overlap hazards.
     DAGNode* activeWmmaNode_ = nullptr;
 
+    // Non-WMMA fills since the active WMMA opened its window. A dependent next WMMA is held
+    // in Phase B until this reaches popcount(coIssueWindow)+1 (WMMA->WMMA coexec slots + 1).
+    int nonWmmaFillsSinceActiveWmma_ = 0;
+
+    // Filler v_nops to emit before the next pickOne() result (drained by scheduleInDAG).
+    // Set at a dependent WMMA's issue point when no independent VALU remained to fill the gap.
+    int pendingFillerVNops_ = 0;
+
     // VGPR-MSB bank currently in effect (mirrors InsertVgprMsbPass); updated on issue,
     // reset per region. pickFreeBest prefers a free candidate matching it. -1 = unknown.
     int currentMsb_ = -1;
@@ -481,6 +521,12 @@ class CDNA5ReadyQueue : public ReadyQueue {
     void push(DAGNode* node) override;
     bool empty() const override;
 
+    int takePendingFillerVNops() override {
+        const int n = pendingFillerVNops_;
+        pendingFillerVNops_ = 0;
+        return n;
+    }
+
     void onInit(IRList::iterator regionStart, IRList::iterator regionEnd) override;
 
     void onInitRegion(IRList::iterator regionStart, IRList::iterator regionEnd,
@@ -571,6 +617,16 @@ DAGNode* CDNA5ReadyQueue::popNonWmma(DAGNode* node, int pickKind) {
         assert(pickKind == kValu);
         valuQueue.erase(node);
     }
+    // WMMA->VALU: if this VALU depends on the active WMMA's D and fewer than slots fills
+    // landed (no independent VALU left to space it), emit the shortfall as v_nops before it.
+    if (pickKind == kValu && activeWmmaNode_ != nullptr &&
+        wmmaToValuCoexecOverlap(*activeWmmaNode_->inst, *node->inst)) {
+        const int slots = popcount16(activeWmmaNode_->inst->coIssueWindow);
+        const int shortfall = slots - nonWmmaFillsSinceActiveWmma_;
+        if (shortfall > 0) pendingFillerVNops_ = shortfall;
+    }
+    // Only VALU-pipe ops fill a coexec slot.
+    if (pickKind == kValu) nonWmmaFillsSinceActiveWmma_++;
     // (A) RAW: stamp this producer's dest data-ready latency (e.g. ds_load).
     // (B) elapse: record the timeline touch for all operands (dst + src).
     touchOperands(*node->inst);
@@ -780,6 +836,14 @@ DAGNode* CDNA5ReadyQueue::pickOneFromWMMA(DAGNode* pick) {
         wmmaQueue.pop();
     }
 
+    // Dependent b2b WMMA with too few fills: emit the shortfall as v_nops.
+    if (activeWmmaNode_ != nullptr &&
+        wmmaToWmmaCoexecOverlap(*activeWmmaNode_->inst, *node->inst)) {
+        const int slotsPlusOne = popcount16(activeWmmaNode_->inst->coIssueWindow) + 1;
+        const int shortfall = slotsPlusOne - nonWmmaFillsSinceActiveWmma_;
+        if (shortfall > 0) pendingFillerVNops_ = shortfall;
+    }
+
     // consume the time that is not used by the WMMA
     if (coIssueCyclePos_ < activeWmmaLatency_) advanceTime(activeWmmaLatency_ - coIssueCyclePos_);
 
@@ -787,6 +851,7 @@ DAGNode* CDNA5ReadyQueue::pickOneFromWMMA(DAGNode* pick) {
     coIssueCyclePos_ = 0;
     activeWmmaLatency_ = node->inst->latencyCycles;
     activeWmmaNode_ = node;
+    nonWmmaFillsSinceActiveWmma_ = 0;  // new window: restart WMMA->WMMA fill count
     // Advance by WMMA issue cycles after opening a new timeline window.
     // This keeps coIssueCyclePos_ aligned with elapsed cycles right after WMMA issue.
     advanceTime(node->inst->issueCycles);
@@ -1431,18 +1496,27 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
             blockWmmaForAtLeastOneNonWmmaInterleaving =
                 hasPickableNonWmma && isMatrixInstruction(*lastPickedNode_->inst);
         }
+        // Hold a dependent bestWMMA while non-WMMA work remains; else emit shortfall as v_nops.
+        bool blockWmmaForCoexecSpacing = false;
+        if (activeWmmaNode_ != nullptr && hasPickableNonWmma &&
+            wmmaToWmmaCoexecOverlap(*activeWmmaNode_->inst, *bestWMMA->inst)) {
+            const int slotsPlusOne = popcount16(activeWmmaNode_->inst->coIssueWindow) + 1;
+            blockWmmaForCoexecSpacing = nonWmmaFillsSinceActiveWmma_ < slotsPlusOne;
+        }
         PASS_DEBUG(std::cerr << "[CDNA5 pickOne] Phase B candidate wmmaId=" << bestWMMA->id
                              << " bestLatency=" << bestLatency
                              << " blockLoopHead=" << blockWmmaForLoopHeadBalance
                              << " blockActiveWindow=" << blockWmmaForActiveWindow
                              << " blockAtLeastOneNonWmmaInterleaving="
                              << blockWmmaForAtLeastOneNonWmmaInterleaving
+                             << " blockCoexecSpacing=" << blockWmmaForCoexecSpacing
+                             << " fills=" << nonWmmaFillsSinceActiveWmma_
                              << " localReadQ=" << localReadQueue.size() << " nonWmmaMinId="
                              << (smallestPickable ? std::to_string(smallestPickable->id)
                                                   : std::string("none"))
                              << "\n");
         if (bestLatency <= 0 && !blockWmmaForLoopHeadBalance && !blockWmmaForActiveWindow &&
-            !blockWmmaForAtLeastOneNonWmmaInterleaving) {
+            !blockWmmaForAtLeastOneNonWmmaInterleaving && !blockWmmaForCoexecSpacing) {
             DAGNode* node = pickOneFromWMMA(bestWMMA);
             PASS_DEBUG(std::cerr << "[CDNA5 pickOne] Phase B picked WMMA dagId=" << node->id
                                  << "\n");
@@ -1590,6 +1664,7 @@ void CDNA5ReadyQueue::onInit(IRList::iterator regionStart, IRList::iterator regi
     coIssueCyclePos_ = 0;
     activeWmmaLatency_ = 0;
     activeWmmaNode_ = nullptr;
+    nonWmmaFillsSinceActiveWmma_ = 0;
     globalReadInflight_ = InFlightQueue(globalReadQueueDepth());
     dsReadInflight_ = InFlightQueue(dsReadQueueDepth());
     const int dsDepth = dsReadQueueDepth();
@@ -1682,6 +1757,7 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
     currentMsb_ = -1;
     // Clear per-region node ptr; it dangles into the previous region's freed DAGNodeList.
     activeWmmaNode_ = nullptr;
+    nonWmmaFillsSinceActiveWmma_ = 0;
     // Hazard state is per-region: hazardHoistCandidates_ holds DAGNode* into the prior
     // region's freed DAGNodeList, and any in-flight gate window is already locked into
     // the prior region's fixed instruction order (region boundaries are side-effect

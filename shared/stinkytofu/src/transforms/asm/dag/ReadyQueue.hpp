@@ -154,6 +154,11 @@ class ReadyQueue {
     // Pick one node from the ready queue based on some strategy.
     virtual DAGNode* pickOne() = 0;
 
+    // Filler v_nops to emit before the node just returned by pickOne().
+    virtual int takePendingFillerVNops() {
+        return 0;
+    }
+
     // Push a node into the ready queue which is ready to be scheduled
     // (i.e. all its deps are satisfied).
     virtual void push(DAGNode* node) = 0;
