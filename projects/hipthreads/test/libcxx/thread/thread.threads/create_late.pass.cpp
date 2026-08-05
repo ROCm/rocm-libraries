@@ -9,8 +9,20 @@
 // UNSUPPORTED: no-threads
 // UNSUPPORTED: c++03
 
-// hip::threads doesn't currently support constructing threads during the destruction of global variables
-// XFAIL: *
+// FLAKY: constructing a hip::wthread during global-variable destruction is undefined behavior.
+// HIP runtime shutdown also runs via global destructors/atexit handlers, and the ordering between
+// them is unspecified, so depending on teardown order this test nondeterministically passes OR
+// crashes. That makes both a plain pass and an expected-failure unstable expectations: it was
+// previously an expected failure, but a compiler promotion in TheRock flipped it to an unexpected
+// pass and broke the suite. Marking it unsupported is the only option that tolerates a
+// nondeterministic result (the test never runs, so it can neither fail nor unexpectedly pass).
+// See https://amd-hub.atlassian.net/browse/LCOMPILER-2560.
+//
+// NOTE: keep the words XFAIL / UNSUPPORTED out of this prose except in the real directive below —
+// lit treats any comment line containing such a token followed by ':' as a directive. Also note
+// the directive value is `true`, not `*`: unlike XFAIL, the UNSUPPORTED list is parsed as a boolean
+// expression and does not accept the `*` wildcard.
+// UNSUPPORTED: true
 
 #include "make_test_thread.h"
 
