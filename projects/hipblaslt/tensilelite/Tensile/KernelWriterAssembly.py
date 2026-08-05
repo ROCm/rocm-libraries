@@ -14989,6 +14989,21 @@ class KernelWriterAssembly(KernelWriter):
       divisor   = kernel["MacroTile0"]
       destBpe   = int(kernel["ProblemType"]["DestDataType"].numBytes()) if self.states.storeAlign8 else 1
       alignSize = 16 // destBpe  # storeAlign8: dwordx4 store width (16B) / destBpe; else: 16
+      if kernel["UseSubtileImpl"] and kernel["SourceSwap"]:
+        # The NonEdge path guards a partial M tile with SubtileMGuard, which is a
+        # COUNT OF LEADING valid MI-M blocks. That only describes the valid rows
+        # under the blocked local-read map, where block j is M rows [16j, 16j+16).
+        # The SourceSwap interleaved map gives a wave rows that are strided rather
+        # than a prefix, so a leading-block count keeps the wrong rows and the
+        # missing ones are never stored -- silently, since the guard itself is
+        # still well-formed. Send any partial M tile down the scalar Edge path,
+        # which computes per-row addresses and is layout-agnostic.
+        # alignSize = divisor makes "aligned" mean "no remainder at all": the
+        # power-of-2 branch below then ANDs with divisor-1 (a no-op on a remainder
+        # already < divisor), and the enumerated branch only matches k=0.
+        # N needs no equivalent: the interleave is an M-axis remap, and a partial
+        # N tile validates cleanly across the whole N sweep.
+        alignSize = divisor
       wgSgpr    = "WorkGroup0"
       nwgSgpr   = "NumWorkGroups0"
       # tmpS0 = SizeI % MT0  (the trailing-row count for the last WG)
