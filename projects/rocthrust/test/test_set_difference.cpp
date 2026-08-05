@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -230,7 +230,7 @@ TYPED_TEST(SetDifferencePrimitiveTests, TestSetDifferenceMultiset)
 
 // FIXME: disabled on Windows, because it causes a failure on the internal CI system in one specific configuration.
 // That failure will be tracked in a new NVBug, this is disabled to unblock submitting all the other changes.
-#if THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_MSVC
+#if !THRUST_COMPILER(MSVC)
 void TestSetDifferenceWithBigIndexesHelper(int magnitude)
 {
   thrust::counting_iterator<long long> begin(0);
@@ -250,6 +250,10 @@ void TestSetDifferenceWithBigIndexesHelper(int magnitude)
 
 TEST(SetDifferenceTests, TestSetDifferenceWithBigIndexes)
 {
+#ifdef ADDRESS_SANITIZER_BUILD
+  GTEST_SKIP() << "Skipping test due to memory constraints in address sanitizer build.";
+#endif
+	
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
 #  ifndef THRUST_FORCE_32_BIT_OFFSET_TYPE

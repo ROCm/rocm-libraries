@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -46,9 +46,7 @@
 #include "origami/origami.hpp"
 #include "origami/streamk.hpp"
 
-#include <Tensile/Macros.hpp>
-
-TENSILE_HIDDEN_BEGIN
+#include <tensilelitehost/export.h>
 
 #define TENSILE_COMMON_KERNEL_ARGS_SIZE 16
 
@@ -105,7 +103,7 @@ namespace TensileLite
         int    CUs              = 0;
     };
 
-    extern PerfModel perf;
+    extern TENSILELITEHOST_EXPORT PerfModel perf;
 
     struct BufferLoadCheckPacket
     {
@@ -223,7 +221,7 @@ namespace TensileLite
      * Can generate `KernelInvocation` objects to solve a particular problem
      * given a set of `ContractionInputs`.
      */
-    class ContractionSolution : public Solution
+    class TENSILELITEHOST_EXPORT ContractionSolution : public Solution
     {
     public:
         using Problem             = ContractionProblemGemm;
@@ -384,6 +382,17 @@ namespace TensileLite
         // the launch grid and the packed args can never disagree.
         bool                 streamK5EffectiveDynamic(Problem const&  problem,
                                                       Hardware const& hardware) const;
+        // Selection-time predicate for the StreamK dynamic-queue / work-stealing
+        // path. The SK4 and dynamic sub-path of SK5 kernels hardcode a
+        // power-of-two per-XCD queue count and mask indices with (Q-1); that fast
+        // masking is only valid when the device exposes a power-of-two number of
+        // XCDs. Returns false (and warns once) when this solution would take the
+        // dynamic-queue path but the hardware's NUM_XCD is not a power of two
+        // (e.g. MI300A = 6), so the solution is EXCLUDED from selection rather
+        // than silently degraded to tree reduction. All other solutions return
+        // true. Wired into softwarePredicate() (SolutionLibrary.hpp).
+        bool                 streamKDynamicQueueSupported(Problem const&  problem,
+                                                          Hardware const& hardware) const;
         size_t               partialTileSize(size_t skGrid) const;
 
         static float computeGranularity(float x);
@@ -529,7 +538,7 @@ namespace TensileLite
                                       KA&                      args,
                                       StreamKSettings const&   sk,
                                       uint32_t                 autoGsuVal,
-                                      uint32_t                 additionalPaddingPerBatchGeneralBatch=0) const;                                      
+                                      uint32_t                 additionalPaddingPerBatchGeneralBatch=0) const;
 
         template <typename KA>
         inline void calculateConversionCallWorkGroupItems(
@@ -604,6 +613,7 @@ namespace TensileLite
             bool             useGradient               = false;
             int              useBias                   = 0;
             bool             useE                      = false;
+            bool             useGateResidual           = false;
             std::string      useScaleAB                = "";
             bool             useScaleCD                = false;
             int              useScaleAlphaVec          = 0;
@@ -618,6 +628,7 @@ namespace TensileLite
 
             std::vector<int>              biasSrcWhiteList;
             std::vector<rocisa::DataType> biasDataTypeWhiteList;
+            std::vector<rocisa::DataType> gateResidualDataTypeWhiteList;
 
             int  sparse                     = 0;
             bool stochasticRounding         = false;
@@ -708,15 +719,14 @@ namespace TensileLite
     };
 
     template <typename TAct>
-    void setDeviceUserArgs(std::vector<ContractionSolution::Problem> const& problems,
+    TENSILELITEHOST_EXPORT void setDeviceUserArgs(std::vector<ContractionSolution::Problem> const& problems,
                            ContractionSolution::GroupedInputs const&        inputs,
                            DeviceUserArguments<TAct>*                       args);
 
-    std::ostream& operator<<(std::ostream&                                      stream,
+    TENSILELITEHOST_EXPORT std::ostream& operator<<(std::ostream&                                      stream,
                              ContractionSolution::StaticPerformanceModel const& spm);
-    std::ostream& operator<<(std::ostream&                                    stream,
+    TENSILELITEHOST_EXPORT std::ostream& operator<<(std::ostream&                                    stream,
                              ContractionSolution::ProjectedPerformance const& spm);
-    std::ostream& operator<<(std::ostream& stream, BufferLoadCheckPacket const& st);
+    TENSILELITEHOST_EXPORT std::ostream& operator<<(std::ostream& stream, BufferLoadCheckPacket const& st);
 } // namespace TensileLite
 
-TENSILE_HIDDEN_END
