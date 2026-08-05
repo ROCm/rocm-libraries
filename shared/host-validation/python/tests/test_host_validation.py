@@ -450,6 +450,23 @@ class TensorAndGemmTests(unittest.TestCase):
         np.testing.assert_array_equal(hv.to_numpy(gated.raw_output), raw)
         np.testing.assert_array_equal(hv.to_numpy(gated.output), gate * raw + gate)
 
+        selected = hv.reference_epilogue(
+            hv.from_numpy(values),
+            hv.ScalarType.Float32,
+            hv.ScalarType.Float32,
+            activation=hv.Activation.Relu,
+            include_raw_output=True,
+            output_selection=hv.OutputSelection.explicit_indices([1, 2]),
+        )
+        np.testing.assert_array_equal(
+            hv.to_numpy(selected.output),
+            np.asarray([[0.0, 1.0], [3.0, 0.0]], dtype=np.float32),
+        )
+        np.testing.assert_array_equal(
+            hv.to_numpy(selected.raw_output),
+            np.asarray([[0.0, 1.0], [3.0, 0.0]], dtype=np.float32),
+        )
+
     def test_reference_gradient_epilogue_matches_numpy(self):
         gradient = np.asarray([[10.0, 20.0], [30.0, 40.0]], dtype=np.float32)
         activation_input = np.asarray(

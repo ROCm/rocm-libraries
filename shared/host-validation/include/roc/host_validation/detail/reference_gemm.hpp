@@ -33,111 +33,6 @@ enum class GemmBackend {
     Blas,
 };
 
-enum class OutputSelectionKind {
-    All,
-    Strided,
-    Explicit,
-};
-
-class OutputSelection {
-   public:
-    static OutputSelection all() {
-        return {};
-    }
-
-    static OutputSelection strided(size_t first, size_t stride) {
-        if (stride == 0) throw std::invalid_argument("Output selection stride must be nonzero.");
-        OutputSelection result;
-        result.m_kind = OutputSelectionKind::Strided;
-        result.m_first = first;
-        result.m_stride = stride;
-        return result;
-    }
-
-    static OutputSelection explicitIndices(std::vector<size_t> indices) {
-        OutputSelection result;
-        result.m_kind = OutputSelectionKind::Explicit;
-        result.m_indices = std::move(indices);
-        return result;
-    }
-
-    static OutputSelection primeStride(size_t logicalElements, size_t allocatedElements,
-                                       size_t requestedElements) {
-        if (requestedElements == 0 || requestedElements >= logicalElements) return all();
-        const size_t candidate = std::max<size_t>(1, allocatedElements / requestedElements);
-        return strided(0, nextPrime(candidate));
-    }
-
-    OutputSelectionKind kind() const {
-        return m_kind;
-    }
-
-    bool selectsAll() const {
-        return m_kind == OutputSelectionKind::All;
-    }
-
-    std::vector<size_t> indices(size_t logicalElements) const {
-        switch (m_kind) {
-            case OutputSelectionKind::All: {
-                std::vector<size_t> result(logicalElements);
-                for (size_t index = 0; index < logicalElements; ++index) result[index] = index;
-                return result;
-            }
-            case OutputSelectionKind::Strided: {
-                std::vector<size_t> result;
-                if (m_first >= logicalElements) return result;
-                const size_t count = 1 + (logicalElements - 1 - m_first) / m_stride;
-                result.reserve(count);
-                for (size_t index = m_first; index < logicalElements;) {
-                    result.push_back(index);
-                    if (index > std::numeric_limits<size_t>::max() - m_stride) break;
-                    index += m_stride;
-                }
-                return result;
-            }
-            case OutputSelectionKind::Explicit:
-                for (size_t index : m_indices) {
-                    if (index >= logicalElements)
-                        throw std::out_of_range(
-                            "Explicit output selection index exceeds output shape.");
-                }
-                return m_indices;
-        }
-        throw std::invalid_argument("Invalid output selection kind.");
-    }
-
-    size_t selectedCount(size_t logicalElements) const {
-        if (m_kind == OutputSelectionKind::All) return logicalElements;
-        return indices(logicalElements).size();
-    }
-
-   private:
-    static bool isPrime(size_t value) {
-        if (value < 2) return false;
-        if (value % 2 == 0) return value == 2;
-        for (size_t divisor = 3; divisor <= value / divisor; divisor += 2) {
-            if (value % divisor == 0) return false;
-        }
-        return true;
-    }
-
-    static size_t nextPrime(size_t value) {
-        if (value <= 2) return 2;
-        size_t candidate = value % 2 == 0 ? value + 1 : value;
-        while (!isPrime(candidate)) {
-            if (candidate > std::numeric_limits<size_t>::max() - 2)
-                throw std::overflow_error("Prime-stride output selection overflow.");
-            candidate += 2;
-        }
-        return candidate;
-    }
-
-    OutputSelectionKind m_kind = OutputSelectionKind::All;
-    size_t m_first = 0;
-    size_t m_stride = 1;
-    std::vector<size_t> m_indices;
-};
-
 struct BlockScaleBinding {
     TensorView values;
     size_t blockSize;
@@ -461,13 +356,12 @@ GemmRunInfo referenceRuntimeCanonical(const GemmProblem& problem) {
                         conjugateIfNeeded(b(reduction, column), problem.b.conjugate);
                     aValue = operandMath(quantizeA(aValue));
                     bValue = operandMath(quantizeB(bValue));
-                    blockSum =
-                        addAccumulator(blockSum, multiplyAccumulator(aValue, bValue));
+                    blockSum = addAccumulator(blockSum, multiplyAccumulator(aValue, bValue));
                 }
 
-                const Accumulator scale = multiplyAccumulator(
-                    (*blockScaleA)(row, blockBase / blockSizeA),
-                    (*blockScaleB)(column, blockBase / blockSizeB));
+                const Accumulator scale =
+                    multiplyAccumulator((*blockScaleA)(row, blockBase / blockSizeA),
+                                        (*blockScaleB)(column, blockBase / blockSizeB));
                 sum = addAccumulator(sum, multiplyAccumulator(blockSum, scale));
                 blockBase = blockEnd;
             }
@@ -490,16 +384,14 @@ GemmRunInfo referenceRuntimeCanonical(const GemmProblem& problem) {
                 effectiveAlpha, (*scaleAlpha)[axis == MatrixAxis::Row ? row : column]);
         }
 
-        Accumulator result = addAccumulator(
-            multiplyAccumulator(effectiveAlpha, sum),
-            multiplyAccumulator(beta, c(row, column)));
+        Accumulator result = addAccumulator(multiplyAccumulator(effectiveAlpha, sum),
+                                            multiplyAccumulator(beta, c(row, column)));
         if (bias) {
             const MatrixAxis axis = problem.epilogue.bias->axis;
-            result = addAccumulator(
-                result, (*bias)[axis == MatrixAxis::Row ? row : column]);
+            result = addAccumulator(result, (*bias)[axis == MatrixAxis::Row ? row : column]);
         }
-        result = quantizeAccumulator(applyActivation(
-            problem.epilogue.activation, result, activationParameter0, activationParameter1));
+        result = quantizeAccumulator(applyActivation(problem.epilogue.activation, result,
+                                                     activationParameter0, activationParameter1));
         d.store(row, column, result);
     };
 
