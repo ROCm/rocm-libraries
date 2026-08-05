@@ -1638,7 +1638,6 @@ def _emit_cshuffle_epilogue(
 
     _cshuffle_kwargs: dict = {
         "out_dtype": spec.data.dtype_d,
-        "no_alias": spec.cshuffle_no_alias,
     }
     if spec.vector_size_c is not None:
         _cshuffle_kwargs["max_store_vec"] = spec.vector_size_c

@@ -580,6 +580,7 @@ def cases():
             tile_m=64,
             tile_n=32,
             tile_k=16,
+            epilogue="cshuffle",
         ),
     )
     add(
@@ -616,6 +617,7 @@ def cases():
             tile_m=64,
             tile_n=32,
             tile_k=16,
+            epilogue="cshuffle",
         ),
     )
     add(
@@ -633,6 +635,7 @@ def cases():
             tile_m=32,
             tile_n=32,
             tile_k=16,
+            epilogue="cshuffle",
         ),
     )
     add(
@@ -650,6 +653,7 @@ def cases():
             tile_m=32,
             tile_n=32,
             tile_k=16,
+            epilogue="cshuffle",
         ),
     )
     add(
@@ -667,6 +671,7 @@ def cases():
             tile_m=32,
             tile_n=32,
             tile_k=16,
+            epilogue="cshuffle",
         ),
     )
     # gfx90a conv mirrors the gfx942 MFMA path (wave64, 16x16x16 atom). gfx1250
@@ -687,6 +692,7 @@ def cases():
             tile_m=64,
             tile_n=32,
             tile_k=16,
+            epilogue="cshuffle",
         ),
     )
 
@@ -945,6 +951,7 @@ def cases():
             k1=32,
             pool_tile_h=4,
             pool_tile_w=4,
+            epilogue="cshuffle",
         ),
     )
     add(
@@ -961,6 +968,7 @@ def cases():
             k1=32,
             pool_tile_h=4,
             pool_tile_w=4,
+            epilogue="cshuffle",
         ),
     )
     add(

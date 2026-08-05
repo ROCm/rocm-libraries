@@ -437,12 +437,50 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
     }
 
     /* ---- coordinate-transform descriptors ---- (935-936).
+     * Pointwise fast path: Y=X=1, stride=1, pad=0 -> descriptors are NULL and
+     * flat multiply+add arithmetic is used in a_descriptor/b_descriptor/epilogues.
      * A_desc decompose_m = (a_mhw_index_fn is None). */
     {
-        bool decompose_m = !(overrides != NULL && overrides->a_mhw_index_fn != NULL);
-        ctx->A_desc = rocke_conv_make_a_descriptor(b, ctx->p, decompose_m);
-        ctx->B_desc = rocke_conv_make_b_descriptor(b, ctx->p);
+        ctx->is_pointwise = rocke_conv_problem_is_pointwise(ctx->p);
+        ctx->c_wgK_pw = 0; /* forward conv: unused */
+        ctx->c_wgN_pw = 0; /* forward conv: unused */
+        ctx->b_descriptor_fn = NULL; /* forward conv: use default rocke_conv_b_descriptor */
+        if(ctx->is_pointwise)
+        {
+            ctx->c_M_pw = rocke_conv_problem_m(ctx->p);
+            ctx->c_C_pw = rocke_conv_problem_cpg(ctx->p);
+            ctx->c_K_pw = rocke_conv_problem_kpg(ctx->p);
+            ctx->A_desc = NULL;
+            ctx->B_desc = NULL;
+        }
+        else
+        {
+            ctx->c_M_pw = 0;
+            ctx->c_C_pw = 0;
+            ctx->c_K_pw = 0;
+            bool decompose_m = !(overrides != NULL && overrides->a_mhw_index_fn != NULL);
+            ctx->A_desc = rocke_conv_make_a_descriptor(b, ctx->p, decompose_m);
+            ctx->B_desc = rocke_conv_make_b_descriptor(b, ctx->p);
+        }
         ctx->D_desc = NULL; /* built lazily in the epilogue phase */
+    }
+
+    /* ---- pointwise IR constants (Python lines 987-990, before buffer resources).
+     * Python:  _c_C_ir = b.const_i32(cpg)    <- first
+     *          _c_K_ir = b.const_i32(kpg)    <- second
+     *          _c_M_ir = b.const_i32(M)      <- third
+     *          _always_valid = b.const_i32(1) <- fourth
+     * Emitted here (before buffer_rsrc) so the SSA sequence matches Python. */
+    if(ctx->is_pointwise)
+    {
+        ctx->ir_c_C_pw = rocke_b_const_i32(b, ctx->c_C_pw);
+        ctx->ir_c_K_pw = rocke_b_const_i32(b, ctx->c_K_pw);
+        ctx->ir_c_M_pw = rocke_b_const_i32(b, ctx->c_M_pw);
+        ctx->ir_always_valid = rocke_b_const_i32(b, 1);
+    }
+    else
+    {
+        ctx->ir_c_C_pw = ctx->ir_c_K_pw = ctx->ir_c_M_pw = ctx->ir_always_valid = NULL;
     }
 
     /* ---- buffer resources (CK-Tile views over A/B/D) ---- (946-951) */
