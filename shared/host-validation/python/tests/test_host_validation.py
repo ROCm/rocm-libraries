@@ -316,6 +316,27 @@ class TensorAndGemmTests(unittest.TestCase):
         expected = a.astype(np.int32) @ b.astype(np.int32)
         np.testing.assert_array_equal(hv.to_numpy(observed), expected)
 
+    def test_float16_accumulator_rounds_each_step(self):
+        a = np.full((1, 64), np.float16(0.1), dtype=np.float16)
+        b = np.full((64, 1), np.float16(0.1), dtype=np.float16)
+        c = np.zeros((1, 1), dtype=np.float16)
+        observed = hv.reference_gemm(
+            hv.from_numpy(a),
+            hv.from_numpy(b),
+            hv.from_numpy(c),
+            hv.ScalarType.Float16,
+            hv.ScalarType.Float16,
+        )
+
+        expected = np.float16(0)
+        for reduction in range(a.shape[1]):
+            product = np.float16(a[0, reduction] * b[reduction, 0])
+            expected = np.float16(expected + product)
+        np.testing.assert_array_equal(
+            hv.to_numpy(observed, np.float32),
+            np.asarray([[expected]], dtype=np.float32),
+        )
+
     def test_complex_gemm_matches_numpy(self):
         a = np.asarray(
             [[1.0 + 2.0j, 3.0 - 1.0j], [-2.0 + 0.5j, 4.0 + 3.0j]],
