@@ -174,6 +174,44 @@ New code should include the stable adapter path directly, for example:
 #include <roc/host_validation/adapters/tensilelite/Reference.hpp>
 ```
 
+## Python and NumPy oracle
+
+An optional nanobind module mirrors the runtime scalar, shape, layout, tensor,
+and reference-GEMM concepts:
+
+```bash
+source .venv/bin/activate
+cmake -S shared/host-validation \
+  -B build/host-validation-python \
+  -DHOST_VALIDATION_BUILD_TESTING=ON \
+  -DHOST_VALIDATION_BUILD_PYTHON=ON
+cmake --build build/host-validation-python
+ctest --test-dir build/host-validation-python --output-on-failure
+```
+
+The `roc_host_validation` package currently provides:
+
+- `ScalarType`, `ScalarTypeInfo`, `Shape`, `Layout`, and owning `Tensor`;
+- tensor construction from logical values or exact storage bytes;
+- `from_numpy` and `to_numpy` copying conversions;
+- deterministic tensor generation and structured comparison; and
+- `reference_gemm` with runtime storage/output/accumulator types, alpha/beta,
+  compute-input quantization, math mode, and activation.
+
+The NumPy suite independently checks:
+
+- every raw FP4, FP6, OCP/FNUZ FP8, and E5M3 encoding;
+- all 65,536 FP16 and BF16 decodings;
+- finite low-precision round trips;
+- the OCP E8M0 no-zero contract;
+- affine layout decoding;
+- deterministic generation and structured comparison;
+- F32, F64, and complex GEMM against NumPy; and
+- mixed FP8-storage/FP4-compute-input quantization.
+
+The first binding deliberately copies between NumPy and `Tensor`. A follow-up
+should expose lifetime-safe non-owning NumPy-backed `TensorView` objects.
+
 ## Standalone tests
 
 ```bash
