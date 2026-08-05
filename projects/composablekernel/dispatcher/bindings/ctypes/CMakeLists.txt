@@ -358,6 +358,51 @@ else()
     )
 endif()
 
+# Gemm TensorQuant ctypes Library
+# =============================================================================
+#
+# Registry-bypass, single-kernel-per-.so bridge for the TensorQuant GEMM path
+# (one scalar scale for A + one scalar scale for B). fp8/bf8, rcr layout only.
+
+file(GLOB TENSOR_QUANT_GEMM_KERNEL_HEADERS "${CMAKE_BINARY_DIR}/generated_kernels/gemm_tensor_quant_*.hpp")
+if(TENSOR_QUANT_GEMM_KERNEL_HEADERS)
+    list(GET TENSOR_QUANT_GEMM_KERNEL_HEADERS 0 TENSOR_QUANT_GEMM_KERNEL_HEADER)
+    message(STATUS "Found TensorQuant GEMM kernel for ctypes lib: ${TENSOR_QUANT_GEMM_KERNEL_HEADER}")
+
+    add_ctypes_library(dispatcher_gemm_tensor_quant_lib
+        gemm_tensor_quant_ctypes_lib.cpp
+        KERNEL_HEADER ${TENSOR_QUANT_GEMM_KERNEL_HEADER}
+    )
+    # Resolve a single GFX arch string from CMAKE_HIP_ARCHITECTURES if available,
+    # falling back to the cache variable CK_TILE_TENSOR_QUANT_GFX_ARCH (default gfx942).
+    # The Python build path always passes -DGFX_ARCH=... explicitly via hipcc, so
+    # this default only affects builds driven through CMake directly.
+    if(NOT DEFINED CK_TILE_TENSOR_QUANT_GFX_ARCH OR CK_TILE_TENSOR_QUANT_GFX_ARCH STREQUAL "")
+        if(CMAKE_HIP_ARCHITECTURES)
+            list(GET CMAKE_HIP_ARCHITECTURES 0 _tensor_quant_gfx_arch)
+        else()
+            set(_tensor_quant_gfx_arch "gfx942")
+        endif()
+        set(CK_TILE_TENSOR_QUANT_GFX_ARCH "${_tensor_quant_gfx_arch}" CACHE STRING
+            "GFX arch for the CMake-built TensorQuant ctypes .so (default: first CMAKE_HIP_ARCHITECTURES or gfx942)")
+    endif()
+    message(STATUS "TensorQuant ctypes lib GFX_ARCH: ${CK_TILE_TENSOR_QUANT_GFX_ARCH}")
+
+    target_compile_definitions(dispatcher_gemm_tensor_quant_lib PRIVATE
+        CK_TILE_SINGLE_KERNEL_INCLUDE
+        GFX_ARCH="${CK_TILE_TENSOR_QUANT_GFX_ARCH}"
+    )
+else()
+    # gemm_tensor_quant_ctypes_lib.cpp requires a force-included generated header
+    # (SelectedKernel/KERNEL_NAME/ADataType/...) under CK_TILE_SINGLE_KERNEL_INCLUDE,
+    # so there is no valid kernel-less build. Skip the target when no header exists
+    # (the Python bridge builds it at runtime once a kernel header is generated),
+    # matching the sibling bridge targets below.
+    message(STATUS
+        "No TensorQuant GEMM kernel found for ctypes lib - skipping dispatcher_gemm_tensor_quant_lib "
+        "(built at runtime by the Python bridge once a kernel header exists)")
+endif()
+
 # =============================================================================
 # TileEngine -> Dispatcher Bridge ctypes Libraries (append-only shared block)
 # =============================================================================
