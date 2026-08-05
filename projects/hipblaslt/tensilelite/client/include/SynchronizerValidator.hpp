@@ -77,7 +77,9 @@ namespace TensileLite
                                     hipStream_t const&  stream) override
             {
             }
-            // Runs after warmup 0: a single launch on a freshly zeroed buffer.
+            // Runs after the first warmup launch. Any further warmups other
+            // listeners ask for run past this point and are not observed, so a
+            // check covers the launches since the previous one.
             virtual void validateWarmups(std::shared_ptr<ProblemInputs> inputs,
                                          TimingEvents const&            startEvents,
                                          TimingEvents const&            stopEvents) override;
