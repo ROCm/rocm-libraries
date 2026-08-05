@@ -2372,7 +2372,7 @@ struct p2p_enabler
         HIP_EXPECT_SUCCESS(hipDeviceCanAccessPeer(&can_access, src_id, peer_id));
         if(can_access == 1)
         {
-            auto err = hipDeviceEnablePeerAccess(peer_id, 0);
+            const auto err = hipDeviceEnablePeerAccess(peer_id, 0);
             if(err == hipSuccess)
                 enabled_by_us = true;
             else if(err != hipErrorPeerAccessAlreadyEnabled)
@@ -2424,6 +2424,9 @@ try
         // no implementation yet for unbatched 1D
         if(plan->batch == 1 && plan->transform_lengths.size() == 1)
             return HIPFFT_NOT_IMPLEMENTED;
+        // P2P enablers for D2D copies between devices (enablers mustn't
+        // be destructed before final synchronizations).
+        std::map<std::pair<int, int>, p2p_enabler> p2p_enablers;
         switch(cptype)
         {
         case HIPFFT_COPY_HOST_TO_DEVICE:
@@ -2510,7 +2513,6 @@ try
             const auto  elem_sz   = hipDataType_bytes(elem_type);
             const auto& src_xt    = *src_lib_desc.descriptor;
             const auto& dst_xt    = *dst_lib_desc.descriptor;
-            std::map<std::pair<int, int>, p2p_enabler> p2p_enablers;
             for(size_t si = 0; si < src_field.brick_count(); ++si)
             {
                 auto&                cpy_stream = plan->device_contexts[si].stream;
