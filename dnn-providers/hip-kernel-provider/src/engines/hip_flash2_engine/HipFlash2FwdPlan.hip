@@ -8,18 +8,23 @@
 // FRAGMENT LAYOUT (measured by Samuel Reeder on gfx942, rocWMMA 16x16x16):
 //   accumulator: lane l, elem e -> C[row=(l/16)*4+e][col=l%16]
 //
-// For S = Q*K^T (accumulator):
+// For S = Q*K^T:
 //   sf[qg][kg].x[e] = S[ qg*16+(l/16)*4+e ][ kg*16+l%16 ]
+//   => e indexes query row within group; l%16 indexes key column per key group
 //
-// APPROACH: each lane handles one key column (my_kcol=l%16) per kg group.
-//   Softmax weights pv[qg][kg] are stored to shared memory (sP[qg][kg][my_kcol]).
-//   Each lane then reads ALL key columns to accumulate its output columns:
-//     o_acc[qg][d16][e] += sum_{kg,kc} sP[qg][kg][kc] * sV[d16*16+my_kcol][kg*16+kc]
-//   After tile loop: reduce row_m/row_d across lanes (shfl_xor 1,2,4,8),
-//   rescale o_acc per-lane, write via shared memory.
+// OUTPUT ACCUMULATION APPROACH:
+//   Each lane l owns output column (my_kcol = l%16) for all d16 blocks.
+//   For output col my_kcol, query row (qg,e):
+//     O[q][my_kcol+d16*16] = sum_{kg} sum_{kc=0..15} P[q][kg*16+kc] * V[kg*16+kc][my_kcol+d16*16]
+//   The softmax weight P[q][kg*16+kc] is held by lane l with l%16==kc in same (l/16) group.
+//   Use __shfl to broadcast pv from lane kc to current lane within the wavefront group.
+//   Then current lane reads V[kg*16+kc][my_kcol+d16*16] = sV[d16*16+my_kcol][kg*16+kc].
 //
-// sP layout: sP[qg=0..3][kg=0..3][kc=0..15] = P weight for query-group qg,
-//   key-group kg, key-column kc. Indexed as sP[qg*64 + kg*16 + kc].
+// LDS budget (D=128, occupancy=1):
+//   sK[D][64]=16384 + sV[D][64]=16384 + so[64][D]=32768 = 65536 = exactly 64KB. OK.
+//
+// Param layout: ptr_q,ptr_k,ptr_v,ptr_o, batch,num_heads_q,num_heads_k,
+//   seq_len_q,seq_len_kv,head_dim,scale,causal, q/k/v/o _stride_{batch,head,seq}
 
 #include <hip/hip_fp16.h>
 #include <hip/hip_runtime.h>
@@ -57,18 +62,14 @@ __device__ void flash2_fwd_body(const __half* __restrict__ ptr_q,
     const int hk        = (num_heads_k == num_heads_q) ? hq : hq / (num_heads_q / num_heads_k);
     const int qi_base   = qi_blk * 64;
     const int qi_max    = qi_base + 63;
-    const int my_e_base = (lane / 16) * 4;   // query row offset for this lane
-    const int my_kcol   = lane % 16;           // key column this lane owns per kg
+    const int my_e_base = (lane / 16) * 4;  // query row offset for this lane
+    const int my_kcol   = lane % 16;          // key column this lane owns per kg
 
-    // Shared memory layout:
-    // sK[D][64], sV[D][64] -- K and V tiles
-    // sP[4][4][16] -- softmax weights: sP[qg][kg][kc]
-    // so[64][D] -- output accumulator (written at end)
-    // Use union to reuse memory: sKV is used during tile loop, sP during P*V
-    // We interleave: after computing sf, write sP, syncthreads, accumulate O, syncthreads
+    // LDS: sK + sV = 2*D*64*sizeof(half), so[64][D] = 64*D*sizeof(float)
+    // D=128: 2*16384 + 32768 = 65536 = 64KB (max). D=64: 32KB. OK.
     __shared__ __half sK[D][64];
     __shared__ __half sV[D][64];
-    __shared__ float  sP[4][4][16];  // [qg][kg][kc]
+    __shared__ float  so[64][D];
 
     // Load Q fragments
     fq q_frags[4][D16];
@@ -84,14 +85,14 @@ __device__ void flash2_fwd_body(const __half* __restrict__ ptr_q,
                 fill_fragment(q_frags[qg][d16], __half(0));
         }
 
-    // Output accumulator: o_acc[qg][d16][e] for lane's output col (d16*16+my_kcol)
+    // Output: o_acc[qg][d16][e] = O[qg*16+my_e_base+e][d16*16+my_kcol]
     float o_acc[4][D16][4];
     for(int qg = 0; qg < 4; qg++)
         for(int d16 = 0; d16 < D16; d16++)
             for(int e = 0; e < 4; e++)
                 o_acc[qg][d16][e] = 0.f;
 
-    // Per-lane local softmax state
+    // Per-lane local softmax state [qg][e]
     float row_m[4][4], row_d[4][4];
     for(int qg = 0; qg < 4; qg++)
         for(int e = 0; e < 4; e++)
@@ -107,7 +108,6 @@ __device__ void flash2_fwd_body(const __half* __restrict__ ptr_q,
             break;
         const bool full_tile = (!causal) || (ki0 + 63 <= qi_base);
 
-        // Load K, V into shared memory
         const int ki_g = ki0 + lane;
         if(ki_g < seq_len_kv)
         {
@@ -131,7 +131,7 @@ __device__ void flash2_fwd_body(const __half* __restrict__ ptr_q,
         }
         __syncthreads();
 
-        // S = Q * K^T  (accumulator layout)
+        // S = Q * K^T
         fs sf[4][4];
         for(int qg = 0; qg < 4; qg++)
             for(int kg = 0; kg < 4; kg++)
@@ -145,8 +145,9 @@ __device__ void flash2_fwd_body(const __half* __restrict__ ptr_q,
                     mma_sync(sf[qg][kg], q_frags[qg][d16], kf, sf[qg][kg]);
                 }
 
-        // Apply scale, causal mask, update row_m per lane
+        // Per-lane local tile max and masked scores
         float tile_m[4][4];
+        float pval[4][4][4];  // pval[qg][kg][e] = masked score for this lane's key col
         for(int qg = 0; qg < 4; qg++)
             for(int e = 0; e < 4; e++)
                 tile_m[qg][e] = -1e38f;
@@ -160,11 +161,11 @@ __device__ void flash2_fwd_body(const __half* __restrict__ ptr_q,
                         s = -1e38f;
                     if(ki0 + kg * 16 + my_kcol >= seq_len_kv)
                         s = -1e38f;
-                    sf[qg][kg].x[e] = s;  // store masked score back
+                    pval[qg][kg][e] = s;
                     tile_m[qg][e]   = fmaxf(tile_m[qg][e], s);
                 }
 
-        // Rescale previous output and normalizer
+        // Update running max and rescale
         for(int qg = 0; qg < 4; qg++)
             for(int e = 0; e < 4; e++)
             {
@@ -176,41 +177,37 @@ __device__ void flash2_fwd_body(const __half* __restrict__ ptr_q,
                 row_d[qg][e] *= br;
             }
 
-        // Compute softmax weights and write to shared memory
-        // Each lane l computes pv for its own key column my_kcol across all qg,kg,e
-        // sP[qg][kg][my_kcol] = softmax weight for (qg, kg*16+my_kcol)
-        // Note: e indexes query row, but sP needs to be per-e too
-        // Use a 2D layout: sP[qg*4+e][kg*16+kc]
-        __shared__ float sP2[16][64];  // [qg*4+e][kg*16+kc]
+        // Compute pv for this lane's key column, accumulate row_d and O
+        // For O: use warp shuffle to get pv from other lanes in the same (l/16) group.
+        // Lanes in same group share (l/16) → have same my_e_base → same query rows.
+        // They differ in l%16 → different key columns per kg.
+        // Shuffle src lane index within wavefront: src_lane = (lane & ~0xF) | kc
+        //   i.e., same (l/16) group, key col kc.
         for(int qg = 0; qg < 4; qg++)
             for(int kg = 0; kg < 4; kg++)
                 for(int e = 0; e < 4; e++)
                 {
-                    float pv = flash2_expf(sf[qg][kg].x[e] - row_m[qg][e]);
-                    row_d[qg][e]              += pv;
-                    sP2[qg * 4 + e][kg * 16 + my_kcol] = pv;
-                }
-        __syncthreads();
+                    float pv_mine = flash2_expf(pval[qg][kg][e] - row_m[qg][e]);
+                    row_d[qg][e] += pv_mine;  // accumulate local normalizer
 
-        // Each lane accumulates O for its output column my_kcol across all query rows (qg,e)
-        // O[qg*16+my_e_base+e][d16*16+my_kcol] += sum_{kg,kc} sP2[qg*4+e][kg*16+kc] * sV[d16*16+my_kcol][kg*16+kc]
-        for(int qg = 0; qg < 4; qg++)
-            for(int e = 0; e < 4; e++)
-                for(int d16 = 0; d16 < D16; d16++)
-                {
-                    float acc = 0.f;
-                    for(int kg = 0; kg < 4; kg++)
-                        for(int kc = 0; kc < 16; kc++)
-                            acc += sP2[qg * 4 + e][kg * 16 + kc]
-                                   * __half2float(sV[d16 * 16 + my_kcol][kg * 16 + kc]);
-                    o_acc[qg][d16][e] += acc;
+                    // Accumulate O[qg*16+my_e_base+e][d16*16+my_kcol] for all d16
+                    // = sum_{kc=0..15} pv[kc] * V[ki0+kg*16+kc][d16*16+my_kcol]
+                    // pv[kc] is held by lane (lane & ~0xF | kc) = (lane/16)*16 + kc
+                    // V[ki0+kg*16+kc][d16*16+my_kcol] = sV[d16*16+my_kcol][kg*16+kc]
+                    for(int kc = 0; kc < 16; kc++)
+                    {
+                        int src_lane = (lane & ~0xF) | kc;  // same group, key col kc
+                        float pv_kc  = __shfl(pv_mine, src_lane);
+                        for(int d16 = 0; d16 < D16; d16++)
+                            o_acc[qg][d16][e] += pv_kc
+                                * __half2float(sV[d16 * 16 + my_kcol][kg * 16 + kc]);
+                    }
                 }
         __syncthreads();
     }
 
-    // After tile loop: reduce row_m and row_d across 16 lanes sharing each query row (qg,e)
-    // Lanes with same (l/16) share the same (qg,e) → different my_kcol (l%16)
-    // shfl_xor offsets 1,2,4,8 reduce across l%16 within same (l/16) group
+    // Reduce row_m and row_d across 16 lanes sharing each query row (qg,e)
+    // Same (l/16), different l%16 → shfl_xor offsets 1,2,4,8
     for(int qg = 0; qg < 4; qg++)
         for(int e = 0; e < 4; e++)
         {
@@ -231,38 +228,34 @@ __device__ void flash2_fwd_body(const __half* __restrict__ ptr_q,
             row_d[qg][e] += __shfl_xor(row_d[qg][e], 8);
         }
 
-    // Normalize and write to global memory via shared mem
-    {
-        __shared__ float so[64][D];
-        for(int qg = 0; qg < 4; qg++)
-            for(int e = 0; e < 4; e++)
-            {
-                const int row_in_so  = qg * 16 + my_e_base + e;
-                const float inv      = (row_d[qg][e] > 0.f) ? 1.f / row_d[qg][e] : 0.f;
-                for(int d16 = 0; d16 < D16; d16++)
-                    so[row_in_so][d16 * 16 + my_kcol] = o_acc[qg][d16][e] * inv;
-            }
-        __syncthreads();
+    // Normalize and store via shared memory
+    for(int qg = 0; qg < 4; qg++)
+        for(int e = 0; e < 4; e++)
+        {
+            const float inv     = (row_d[qg][e] > 0.f) ? 1.f / row_d[qg][e] : 0.f;
+            const int row_in_so = qg * 16 + my_e_base + e;
+            for(int d16 = 0; d16 < D16; d16++)
+                so[row_in_so][d16 * 16 + my_kcol] = o_acc[qg][d16][e] * inv;
+        }
+    __syncthreads();
 
-        for(int qg = 0; qg < 4; qg++)
-            for(int e = 0; e < 4; e++)
+    for(int qg = 0; qg < 4; qg++)
+        for(int e = 0; e < 4; e++)
+        {
+            const int oq = qi_base + qg * 16 + my_e_base + e;
+            if(oq < seq_len_q)
             {
-                const int oq = qi_base + qg * 16 + my_e_base + e;
-                if(oq < seq_len_q)
-                {
-                    __half* op = ptr_o + (size_t)b * o_stride_batch
-                                 + (size_t)hq * o_stride_head
-                                 + (size_t)oq * o_stride_seq;
-                    for(int k = 0; k < D16; k++)
-                        op[my_kcol + k * 16] =
-                            __float2half(so[qg * 16 + my_e_base + e][my_kcol + k * 16]);
-                }
+                __half* op = ptr_o + (size_t)b * o_stride_batch
+                             + (size_t)hq * o_stride_head
+                             + (size_t)oq * o_stride_seq;
+                for(int k = 0; k < D16; k++)
+                    op[my_kcol + k * 16] = __float2half(so[qg * 16 + my_e_base + e][my_kcol + k * 16]);
             }
-    }
+        }
 }
 
 extern "C" __global__
-    __launch_bounds__(64, 2) void flash2_v7_hipdnn_d128(
+    __launch_bounds__(64, 1) void flash2_v7_hipdnn_d128(
         const __half* __restrict__ ptr_q, const __half* __restrict__ ptr_k,
         const __half* __restrict__ ptr_v, __half* __restrict__ ptr_o,
         int batch, int num_heads_q, int num_heads_k,
@@ -282,7 +275,7 @@ extern "C" __global__
 }
 
 extern "C" __global__
-    __launch_bounds__(64, 2) void flash2_v7_hipdnn_d64(
+    __launch_bounds__(64, 1) void flash2_v7_hipdnn_d64(
         const __half* __restrict__ ptr_q, const __half* __restrict__ ptr_k,
         const __half* __restrict__ ptr_v, __half* __restrict__ ptr_o,
         int batch, int num_heads_q, int num_heads_k,
