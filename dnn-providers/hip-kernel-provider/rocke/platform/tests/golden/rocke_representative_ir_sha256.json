@@ -322,6 +322,22 @@
           "sha256": "fabf05c09130f6fffce81d8022b97a1a932c5afe06f98b80f3125e5d61313b85",
           "status": "ok"
         },
+        "conv/gfx950/n1h8c16k32r3/basic_cshuffle": {
+          "arch": "gfx950",
+          "bytes": 50395,
+          "family": "conv",
+          "kernel_name": "irhash_conv_950_basic_b_N1H8W8C16_K32Y3X3_t64x64x32_w2x2_a32x32x16_basic_cshuffle",
+          "sha256": "8bbdf4a1910e00d6eb4590098ad320bbd896ee11fbb9d7b0754d38078ce6000a",
+          "status": "ok"
+        },
+        "conv/gfx950/n1h8c16k32r3/basic_default": {
+          "arch": "gfx950",
+          "bytes": 64236,
+          "family": "conv",
+          "kernel_name": "irhash_conv_950_basic_a_N1H8W8C16_K32Y3X3_t64x64x32_w2x2_a32x32x16_basic_default",
+          "sha256": "75fca036909dd993cc811cb05c8d06ec2d9e205e875a8366687f54cd03e1c1bb",
+          "status": "ok"
+        },
         "conv/gfx950/n2h16c32k32r1": {
           "arch": "gfx950",
           "bytes": 26908,
@@ -644,20 +660,20 @@
           "gfx1250": 2,
           "gfx90a": 4,
           "gfx942": 12,
-          "gfx950": 45
+          "gfx950": 47
         },
         "expected_failures": 0,
         "families": {
           "attention": 14,
           "attention_d256": 2,
           "attention_dense": 18,
-          "conv": 7,
+          "conv": 9,
           "conv_wgrad": 7,
           "deep_fused_conv": 9,
           "gemm": 13,
           "moe": 9
         },
-        "ok_cases": 79
+        "ok_cases": 81
       }
     },
     "llvm22": {
@@ -982,6 +998,22 @@
           "sha256": "cf569d57d0fda33ca410b369f6b739752abc56790a31be24e820316c432e3909",
           "status": "ok"
         },
+        "conv/gfx950/n1h8c16k32r3/basic_cshuffle": {
+          "arch": "gfx950",
+          "bytes": 50534,
+          "family": "conv",
+          "kernel_name": "irhash_conv_950_basic_b_N1H8W8C16_K32Y3X3_t64x64x32_w2x2_a32x32x16_basic_cshuffle",
+          "sha256": "80da37bd539fa495c55f6c7bec0ebaa3a16d8a207dcf1e18d519f61a1eb1b789",
+          "status": "ok"
+        },
+        "conv/gfx950/n1h8c16k32r3/basic_default": {
+          "arch": "gfx950",
+          "bytes": 64375,
+          "family": "conv",
+          "kernel_name": "irhash_conv_950_basic_a_N1H8W8C16_K32Y3X3_t64x64x32_w2x2_a32x32x16_basic_default",
+          "sha256": "e712f2a45210cfb28be9e28bf43ef28b05042f2cfae87aa1c4d83b99ec859d31",
+          "status": "ok"
+        },
         "conv/gfx950/n2h16c32k32r1": {
           "arch": "gfx950",
           "bytes": 27047,
@@ -1304,20 +1336,20 @@
           "gfx1250": 2,
           "gfx90a": 4,
           "gfx942": 12,
-          "gfx950": 45
+          "gfx950": 47
         },
         "expected_failures": 0,
         "families": {
           "attention": 14,
           "attention_d256": 2,
           "attention_dense": 18,
-          "conv": 7,
+          "conv": 9,
           "conv_wgrad": 7,
           "deep_fused_conv": 9,
           "gemm": 13,
           "moe": 9
         },
-        "ok_cases": 79
+        "ok_cases": 81
       }
     },
     "llvm23": {
@@ -1642,6 +1674,22 @@
           "sha256": "0f53461698c0f352825462756c3d1e88f1aef3e5119c15cf575d6d944ecbd9d5",
           "status": "ok"
         },
+        "conv/gfx950/n1h8c16k32r3/basic_cshuffle": {
+          "arch": "gfx950",
+          "bytes": 50538,
+          "family": "conv",
+          "kernel_name": "irhash_conv_950_basic_b_N1H8W8C16_K32Y3X3_t64x64x32_w2x2_a32x32x16_basic_cshuffle",
+          "sha256": "b30fed8bd47d12db2a05694a4a0d02338898461bf76d9864468c04d1f902e533",
+          "status": "ok"
+        },
+        "conv/gfx950/n1h8c16k32r3/basic_default": {
+          "arch": "gfx950",
+          "bytes": 64379,
+          "family": "conv",
+          "kernel_name": "irhash_conv_950_basic_a_N1H8W8C16_K32Y3X3_t64x64x32_w2x2_a32x32x16_basic_default",
+          "sha256": "a0b6acb3748dae3ee5e3961503cb12b7a08bbf03d232f7baf24b726a0ba74bd3",
+          "status": "ok"
+        },
         "conv/gfx950/n2h16c32k32r1": {
           "arch": "gfx950",
           "bytes": 27051,
@@ -1964,20 +2012,20 @@
           "gfx1250": 2,
           "gfx90a": 4,
           "gfx942": 12,
-          "gfx950": 45
+          "gfx950": 47
         },
         "expected_failures": 0,
         "families": {
           "attention": 14,
           "attention_d256": 2,
           "attention_dense": 18,
-          "conv": 7,
+          "conv": 9,
           "conv_wgrad": 7,
           "deep_fused_conv": 9,
           "gemm": 13,
           "moe": 9
         },
-        "ok_cases": 79
+        "ok_cases": 81
       }
     }
   },
