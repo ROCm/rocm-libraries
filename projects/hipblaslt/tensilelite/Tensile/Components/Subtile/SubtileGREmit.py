@@ -37,6 +37,7 @@ from rocisa.instruction import (
 from .SubtileGeometry import (
     RegList,
     GRTag_1x1, GRTag_1x2, GRTag_2x2, GRTag_TLU1,
+    SUBTILE_LDS_BLOCK_BYTES, ldsBlockPadDelta, ldsBlockPadOffset,
 )
 from .SubtileScaleEmit import emitScaleGRLDSSwap
 
@@ -358,6 +359,42 @@ def _deallocGROffsetRegs_TLU0(tag, tile, ti, writer, kernel):
 
 # --- GR load emit (TLU=0) ---------------------------------------------------
 
+def _padM0Offset(tileInfo, m0Offset):
+  """Apply LDS block padding to a DirectToLds m0 offset.
+
+  The wave base in LocalWriteBaseAddr is padded separately, so splitting the pad
+  across the two is exact only when both are block-aligned. That same alignment
+  is what keeps each DTL load (one block wide) from straddling a pad boundary,
+  so assert it rather than assume it.
+  """
+  if not int(getattr(tileInfo, "ldsBlockPadBytes", 0)):
+    return int(m0Offset)
+  assert int(m0Offset) % SUBTILE_LDS_BLOCK_BYTES == 0, \
+    ("subtile LDS block pad: m0 offset %d is not a multiple of %d, so a DTL load would "
+     "straddle a pad boundary" % (m0Offset, SUBTILE_LDS_BLOCK_BYTES))
+  return ldsBlockPadOffset(tileInfo, m0Offset)
+
+
+def _emitPadWaveBase(module, writer, tileInfo, baseSgprName):
+  """Fold block padding into a wave's LDS base, before any region base is added.
+
+  Mirrors the non-subtile ordering (pad within the tensor region, then add the
+  region offset). Scalar because the base is wave-uniform, which also keeps it
+  off the VGPR budget.
+  """
+  padBytes = int(getattr(tileInfo, "ldsBlockPadBytes", 0))
+  if not padBytes:
+    return
+  with writer.allocTmpSgpr(1) as tmpSgprRes:
+    tmp = tmpSgprRes.idx
+    module.add(SLShiftRightB32(dst=sgpr(tmp), shiftHex=hex(SUBTILE_LDS_BLOCK_BYTES.bit_length()-1),
+               src=sgpr(baseSgprName), comment="block index = base / %d" % SUBTILE_LDS_BLOCK_BYTES))
+    module.add(SMulI32(dst=sgpr(tmp), src0=sgpr(tmp), src1=hex(padBytes),
+               comment="padding %d per block %d" % (padBytes, SUBTILE_LDS_BLOCK_BYTES)))
+    module.add(SAddU32(dst=sgpr(baseSgprName), src0=sgpr(baseSgprName), src1=sgpr(tmp),
+               comment="apply LDS block padding to wave base"))
+
+
 @_emitGlobalRead.register(GRTag_1x1)
 @_emitGlobalRead.register(GRTag_1x2)
 @_emitGlobalRead.register(GRTag_2x2)
@@ -415,6 +452,10 @@ def _emitGR_TLU0(tag, tile, ti, writer, kernel):
 
       for gr_idx in range(legacyTi.numGRPerSubtile):
         m0Offset = gr_idx * subtileOffset + (i + j * int(legacyTi.globalSubtileGrid[0])) * legacySubtileSize
+        # DTL adds the instruction offset to the LDS address too, which is why
+        # offsetK is subtracted here and added back via offset12. The pad rides on
+        # m0Offset; LocalWriteBaseAddr carries its own pad from the wave base.
+        m0Offset = _padM0Offset(legacyTi, m0Offset)
         module.add(SAddU32(dst=mgpr(0), src0=sgpr(WriteBaseAddr), src1=(m0Offset - offsetK)))
         mubuf = MUBUFModifiers(offen=True, offset12=offsetK, glc=isGlc, slc=isSlc, nt=isNT, lds=True)
 
@@ -849,8 +890,14 @@ def _graTileAssignment_legacy(writer, kernel, useSwizzling=True):
   module.add(VAndB32(dst=vgpr(laneId), src0=vgpr("Serial"), src1=wavesize-1, comment=""))
   module.add(VAndB32(dst=vgpr(colIdA), src0=vgpr("Serial"), src1=(blockSize-1), comment="get col_id in wave for %uB load"%loadWidth))
   module.add(VLShiftRightB32(dst=vgpr(rowId), shiftHex=hex(blockSize.bit_length()-1), src=vgpr(laneId), comment="row id within wave"))
-  _grSwizzleColIds_legacy(module, writer, tileInfoA, tileInfoB, blockSize, numRowsPerLDSBanks,
-                          laneId, colIdA, colIdB, waveId)
+  if writer.states.subtileLdsSwizzle:
+    _grSwizzleColIds_legacy(module, writer, tileInfoA, tileInfoB, blockSize, numRowsPerLDSBanks,
+                            laneId, colIdA, colIdB, waveId)
+  else:
+    # No swizzle: rows are written with their K columns in natural order, which is what
+    # the interleaved local read needs. Must stay in step with the read side's
+    # subtileLdsSwizzle branch in _lraTileAssignment_legacy.
+    module.add(VMovB32(dst=vgpr(colIdB), src=vgpr(colIdA), comment="no swizzle: colIdB = colIdA"))
   _grComputeRowPartition_legacy(module, kernel, writer, tileInfoA, waveId, rowOffsetA)
   _grComputeRowPartition_legacy(module, kernel, writer, tileInfoB, waveId, rowOffsetB)
   _grComputeAllOffsets_legacy(module, writer, tileInfoA, colIdA, rowId, rowOffsetA)
@@ -909,6 +956,7 @@ def emitSingleBufferLoad(tileInfo, kernel, sId0, sId1):
   WriteBaseAddr = "LocalWriteBaseAddr%s"%tc
   for i in range(tileInfo.numGRPerSubtile):
     m0Offset = int(i * subtileOffset + (sId0 + sId1 * tileInfo.globalSubtileGrid[0]) * tileInfo.subtileSize)
+    m0Offset = _padM0Offset(tileInfo, m0Offset)
     module.add(SAddU32(dst=mgpr(0), src0=sgpr(WriteBaseAddr), src1=(m0Offset - offsetK)))
     mubuf = MUBUFModifiers(offen=True, offset12=offsetK, glc=isGlc, slc=isSlc, nt=isNT, lds=True)
 
@@ -964,6 +1012,8 @@ def _globalReadDTLInitCommonSgpr_legacy(writer, kernel):
   module.add(SNop(waitState=0, comment="Wait for VGPR to be ready"))
   module.add(VReadfirstlaneB32(dst=sgpr("LocalWriteBaseAddrA"), src=vgpr(rowOffsetA), comment="Store base LDS offset, will be modified"))
   module.add(VReadfirstlaneB32(dst=sgpr("LocalWriteBaseAddrB"), src=vgpr(rowOffsetB), comment="Store base LDS offset, will be modified"))
+  _emitPadWaveBase(module, writer, tileInfoA, "LocalWriteBaseAddrA")
+  _emitPadWaveBase(module, writer, tileInfoB, "LocalWriteBaseAddrB")
   module.add(SAddU32(dst=sgpr("LocalWriteBaseAddrB"), src0=sgpr("LocalWriteBaseAddrB"), src1=hex(writer.ldsStartOffsetB), comment=""))
   module.add(SAddU32(dst=sgpr("SwapA"), src0=sgpr("LocalWriteBaseAddrA"), src1=writer.ldsTotalSize, comment=""))
   module.add(SXorB32(dst=sgpr("SwapA"), src0=sgpr("LocalWriteBaseAddrA"), src1=sgpr("SwapA"), comment=""))

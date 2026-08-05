@@ -67,6 +67,8 @@ from .SubtileGeometry import (
   LoadShape,
   MMALayout,
   MMAScaleLayout,
+  ldsBlockPadDelta,
+  subtileLdsBlockPadBytes,
   MFMA_16x16_1B_4K_4V,
   MFMA_16x16_1B_4K_8V,
   MFMA_16x16_1B_4N_4V,
@@ -471,7 +473,28 @@ class TileInfo:
       # TDM path. We apply 16 Bytes padding to each row.
       # TDM only exists on gfx1250, which is never swizzled (gfx950-only).
       isTDM = kernel.get("enableTDM%s" % tc, False)
-      self.ldsRowPadBytes = 16 if isTDM else 0
+      # Block padding de-conflicts the interleaved local-read map on the gfx950
+      # DirectToLds path. It replaces row padding rather than stacking with it,
+      # matching every non-subtile call site (`LdsPad if LdsBlockSizePerPad == 0`).
+      # TDM pads through its own descriptor fields, so that path keeps row padding.
+      self.ldsBlockPadBytes = 0 if isTDM else subtileLdsBlockPadBytes(kernel)
+      self.ldsRowPadBytes = 0 if self.ldsBlockPadBytes else (16 if isTDM else 0)
+
+      # Local-read tile->row interleave factor.
+      #   1  = blocked:     subtile row j covers M rows [instM*j, instM*j + instM)
+      #   VW = interleaved: subtile row j covers M rows congruent to j modulo VW
+      # SourceSwap gives up the intra-tile run of consecutive M values, so the store
+      # can only reassemble a run of 8 if consecutive subtile rows are adjacent M rows.
+      # That is what the interleaved map provides. See LAYOUT_MODEL.md sections 4 and 8.
+      self.lrInterleaveVW = int(kernel.get("VectorWidth%s" % tc, 1)) if kernel.get("SourceSwap", False) else 1
+      if self.lrInterleaveVW > 1:
+        # The interleave only tiles the row space exactly when the number of subtile
+        # rows equals the interleave factor. Anything else needs a mixed map that is
+        # not implemented, and would silently permute the output rather than fail.
+        miWaveTile = int(kernel["MIWaveTile"][0 if tc == 'A' else 1])
+        assert self.lrInterleaveVW == miWaveTile, (
+          "subtile SourceSwap: VectorWidth%s(%d) must equal MIWaveTile[%d](%d)"
+          % (tc, self.lrInterleaveVW, 0 if tc == 'A' else 1, miWaveTile))
 
       # Convenience counts for scheduler / diagram
       self.mmaTileLocalTotalCount = self.localMMATileGrid[0] * self.localMMATileGrid[1]
@@ -1087,6 +1110,14 @@ def emitMfmaInstruction(writer, kernel, vgprTileA, vgprTileB, vgprTileC, vgprTil
   aOperand = vgpr(vgprBStart,opBSize) if kernel["SourceSwap"] else vgpr(vgprAStart,opASize)
   bOperand = vgpr(vgprAStart,opASize) if kernel["SourceSwap"] else vgpr(vgprBStart,opBSize)
 
+  # mxsa/mxsb and their op_sel selectors address the A/B *operand positions*, so
+  # they must follow whichever operand now occupies each position. Swapping the
+  # data without the scales scales every MX block by its counterpart's exponent,
+  # which assembles and runs but is silently wrong. The generic path swaps both
+  # together (KernelWriterAssembly.py:9825).
+  aScaleVgpr, bScaleVgpr = (scaleBVgpr, scaleAVgpr) if kernel["SourceSwap"] else (scaleAVgpr, scaleBVgpr)
+  aScaleSel,  bScaleSel  = (scaleBsel,  scaleAsel)  if kernel["SourceSwap"] else (scaleAsel,  scaleBsel)
+
   miK = kernel["MatrixInstK"]
 
   if miK == 128:
@@ -1099,8 +1130,8 @@ def emitMfmaInstruction(writer, kernel, vgprTileA, vgprTileB, vgprTileC, vgprTil
                                    a=aOperand, \
                                    b=bOperand, \
                                    acc2=cAccAlias(vgprCStart,opCSize), \
-                                   mxsa=vgpr(scaleAVgpr), mxsb=vgpr(scaleBVgpr), \
-                                   vop3=VOP3PModifiers(op_sel=[scaleAsel%2, scaleBsel%2], op_sel_hi=[(scaleAsel>>1)%2, (scaleBsel>>1)%2]), \
+                                   mxsa=vgpr(aScaleVgpr), mxsb=vgpr(bScaleVgpr), \
+                                   vop3=VOP3PModifiers(op_sel=[aScaleSel%2, bScaleSel%2], op_sel_hi=[(aScaleSel>>1)%2, (bScaleSel>>1)%2]), \
                                    comment=comment))
     else:
       # Fallback: use unit scale VGPR pre-initialized to 0x7f7f7f7f (scale=1.0 E8M0).

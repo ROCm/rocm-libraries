@@ -167,6 +167,62 @@ def test_F8_real_scale_path_uses_op_sel_and_real_mxsa_mxsb(writer):
     assert after == before, "real-scale path must NOT check out a tmp VGPR"
 
 
+# (sourceSwap, expected_operands, expected_op_sel)
+# scaleAsel=2 -> op_sel bit 0, op_sel_hi bit 1;  scaleBsel=1 -> op_sel bit 1, op_sel_hi bit 0.
+# Under SourceSwap the scale in the A operand position must be B's scale, with
+# B's selector — otherwise the A-position operand is multiplied by the wrong
+# block scale and the result is silently wrong.
+MX_SWAP_CASES = [
+    (False, "v[64:67], v[0:7], v[16:23], v[32:35], v100, v101",
+            "op_sel:[0,1] op_sel_hi:[1,0]"),
+    (True,  "v[64:67], v[16:23], v[0:7], v[32:35], v101, v100",
+            "op_sel:[1,0] op_sel_hi:[0,1]"),
+]
+
+
+@pytest.mark.parametrize("swap,operands,opsel", MX_SWAP_CASES)
+def test_MX_scale_operands_follow_SourceSwap(writer, swap, operands, opsel):
+    """MX block scales must travel with the operand they scale.
+
+    emitMfmaInstruction swaps the A/B data operands under SourceSwap. The mxsa /
+    mxsb scale operands and their op_sel selectors address those same operand
+    positions, so they must swap together. If the data swaps and the scales do
+    not, every MX block is scaled by its counterpart's exponent: the kernel
+    still assembles, still runs, and produces wrong numbers with no diagnostic.
+
+    Reference for the required behaviour is the generic path, which swaps data,
+    scales, selectors and scale types together (KernelWriterAssembly.py:9825).
+    """
+    kernel = _mkKernel("F8", "F8", miK=128, sourceSwap=swap)
+    tA = _mkTile(0, 8, writer.vgprPool)
+    tB = _mkTile(16, 8, writer.vgprPool)
+    tC = _mkTile(32, 4, writer.vgprPool)
+    tD = _mkTile(64, 4, writer.vgprPool)
+    asm = str(
+        emitMfmaInstruction(
+            writer,
+            kernel,
+            tA,
+            tB,
+            tC,
+            tD,
+            scaleAVgpr=100,
+            scaleBVgpr=101,
+            scaleAsel=2,
+            scaleBsel=1,
+        )
+    )
+    _assertScaledMfmaOpcode(asm)
+    assert operands in asm, (
+        f"SourceSwap={swap}: scale operands must follow the data operands.\n"
+        f"expected: {operands}\nactual:   {asm.strip()}"
+    )
+    assert opsel in asm, (
+        f"SourceSwap={swap}: scale selectors must follow the data operands.\n"
+        f"expected: {opsel}\nactual:   {asm.strip()}"
+    )
+
+
 def test_F8_hardcoded_scale_path_allocates_tmp_with_0x7f7f7f7f(writer):
     """No real scale VGPRs -> fallback uses _subtileUnitScaleVgpr (pre-initialized
     to 0x7f7f7f7f in mainLoop) for both mxsa/mxsb. No tmp VGPR is allocated here."""

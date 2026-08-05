@@ -1582,8 +1582,13 @@ class GlobalWriteBatchWriter:
     # Must match is16bitSubtilePaired (per-element store dispatch) exactly.
     # Excluded for "MultipleBufferSingleKernel" and "MultipleBuffer" (StreamK partial-tile
     # workspace path) — both write float32 to workspace, not 16bit to D output.
+    # The paired-subtile store exists to rebuild a run of 8 M values that SourceSwap=0
+    # leaves split across lane pairs. Under SourceSwap the interleaved local-read map
+    # already gives each lane its own run of 8, so the pairing is both unnecessary and
+    # wrong — route SourceSwap kernels to the generic store instead.
     isSubtileNonEdge = (
       self.kernel.get("UseSubtileImpl") and not self.edge
+      and not self.kernel["SourceSwap"]
       and self.kernel["_GlobalAccumulation"] not in ("MultipleBufferSingleKernel", "MultipleBuffer")
     )
     is16bitSubtile = (

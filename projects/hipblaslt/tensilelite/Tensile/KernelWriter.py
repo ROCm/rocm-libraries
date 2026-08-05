@@ -5188,7 +5188,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
       module.add(RegSet("s", "sgprSubtileNGuard", self.states.subtileN16ValidBlocksSgpr))
       self.states.nonPostLoopSgpr.append("SubtileMGuard")
       self.states.nonPostLoopSgpr.append("SubtileNGuard")
-      self.states.storeAlign8 = True
+      # storeAlign8 selects the SourceSwap=0 paired-subtile store scheme: M/N guards
+      # carried in units of 8 rows, exec-masked partial blocks, and a dwordx4 rebuilt
+      # across lane pairs. Under SourceSwap the interleaved local-read map gives each
+      # lane its own run of 8, the store takes the generic path, and the guard
+      # arithmetic has to stay in generic units to match it.
+      self.states.storeAlign8 = not kernel["SourceSwap"]
 
     # Start of post-loop code
     if 1:
@@ -6901,7 +6906,14 @@ class KernelWriter(metaclass=abc.ABCMeta):
     )
     # LDS swizzling for subtile bank-conflict avoidance (gfx950 only;
     # gfx1250 TDM uses a different LDS layout without swizzling).
-    self.states.subtileLdsSwizzle = kernel.get("UseSubtileImpl", False) and isgfx950
+    # The swizzle rotates each LDS row's K columns by a function of the row index, and
+    # the local read undoes it with one rotation per lane. That is only valid while a
+    # lane sits at the same row-within-tile for every tile, which the blocked map gives
+    # (row = 16j + a) and the SourceSwap interleaved map does not (row = 8a + j). The
+    # swizzle and the interleaved read are alternative answers to the same bank problem;
+    # non-subtile SourceSwap kernels take the other one, plain rows plus LDS padding.
+    self.states.subtileLdsSwizzle = (kernel.get("UseSubtileImpl", False) and isgfx950
+                                     and not kernel.get("SourceSwap", False))
     self.vgprs  = StateVgprs()
     self.sgprs  = collections.OrderedDict()
     self.codes  = CodeModules()
@@ -6993,6 +7005,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
       mtB = kernel["MacroTile1"]
       padA = int(getattr(aTileInfo, "ldsRowPadBytes", 0)) * mtA
       padB = int(getattr(bTileInfo, "ldsRowPadBytes", 0)) * mtB
+      # Block padding grows each region by one pad per block of tile data.
+      padA += ldsBlockPadDelta(aTileInfo, numASubtiles * aTileInfo.subtileSize)
+      padB += ldsBlockPadDelta(bTileInfo, numBSubtiles * bTileInfo.subtileSize)
       sizeA = int(((numASubtiles * aTileInfo.subtileSize + padA + readSize-1) // readSize) * readSize)
       sizeB = int(((numBSubtiles * bTileInfo.subtileSize + padB + readSize-1) // readSize) * readSize)
       self.ldsStartOffsetB = sizeA

@@ -991,9 +991,21 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason, "gfx950 MX requires UseSubtileImpl")
 
     if state["UseSubtileImpl"]:
-      state["VectorWidthA"] = 1
-      state["VectorWidthB"] = 1
-      state["SourceSwap"] = False
+      # SourceSwap requires the interleaved local-read tile->row map, and VectorWidth is
+      # the name of that map rather than an independent knob: subtile row j owns M rows
+      # congruent to j modulo VectorWidth. Leaving VectorWidthA/B alone lets the generic
+      # derivation below pick them (8 for bf16), which is what the interleaved map needs.
+      #
+      # Only the 16-bit non-MX path implements that map. FP8 takes a separate local-read
+      # assignment that still emits the blocked map, and MX adds scale tiles indexed off
+      # the blocked map; enabling SourceSwap for either would pair an interleaved epilogue
+      # with a blocked main loop, which is silently wrong rather than rejected.
+      isMX = state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"]
+      ssSupported = (not isMX) and state["ProblemType"]["DataTypeA"].numBytes() == 2
+      if not (state["SourceSwap"] and ssSupported):
+        state["VectorWidthA"] = 1
+        state["VectorWidthB"] = 1
+        state["SourceSwap"] = False
       # Force BufferStore=True: UseSubtileImpl optimized storeD path is only implemented
       # for buffer stores for now.
       state["BufferStore"] = True
