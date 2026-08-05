@@ -4043,6 +4043,32 @@ class LogicalScheduler:
                 module.add(SCBranchSCC1(labelName=endLabel.getLabelName(),
                                         comment="K < DepthU: only tail loop runs"))
 
+        # ── Pre-loop scheduling (Change A): defer LDS read-address setup ──
+        # kernelBodySubtile stashed the A/B + scale LR-offset modules (lraTileAssignment,
+        # its DTL swap-vgpr init, lraTileAssignmentScaleSwizzled) on the writer instead of
+        # emitting them in the prologue. Splice them into the preloop right before the
+        # first wait_gr, so this ~750-cycle loop-invariant VALU runs while the prefetch
+        # buffer_loads are in flight (their only consumers -- the post-barrier ds_reads and
+        # main-loop LR swaps -- come after this point). Inserted BEFORE the guard fold so
+        # the address math is front-loaded into the shadow. The preloop is emitted
+        # unscheduled (schedule=False), so the sequential list splice lands them in order.
+        _lraDeferred = getattr(writer, "_deferredPreloopLraModules", None)
+        if (self.config.pgr >= 1
+                and _lraDeferred
+                and not getattr(self, "_lraDeferredIntoPreloop", False)
+                and self._preloop_emitted
+                and self._preloop_emitted[0] and self._preloop_emitted[0][0]):
+            em_list = self._preloop_emitted[0][0]
+            drain_idx = next((i for i, em in enumerate(em_list)
+                              if em.opType == 'wait_gr'), len(em_list))
+            new_id = max((em.moduleId for em in em_list), default=-1) + 1
+            em_list.insert(drain_idx,
+                           EmittedModule(moduleId=new_id,
+                                         instructions=list(_lraDeferred),
+                                         before=None,
+                                         source=None))
+            self._lraDeferredIntoPreloop = True
+
         # ── PLSIN guard-hoist: fold into the preloop global-read shadow ──
         # computePostLoopFusedStore is pure loop-invariant SALU/VALU that writes the
         # persistent PostLoopFusedStore flag (read by the NGLL/NLL front guards and the
@@ -4071,6 +4097,21 @@ class LogicalScheduler:
                                          before=None,
                                          source=None))
             self._foldInjectedIntoPreloop = True
+
+            # Pre-loop scheduling (Change B): computePostLoopFusedStore may have split the
+            # scale-pointer load off from the guard body (isScalarScale + hoist enabled).
+            # Splice it BEFORE the first global_read so its s_waitcnt kmcnt(0) (still in the
+            # guard fold above) is covered by the entire prefetch buffer_load window.
+            scalePtrLoad = getattr(writer, "_plsinDeferredScalePtrLoads", None)
+            if scalePtrLoad is not None:
+                gr_idx = next((i for i, em in enumerate(em_list)
+                               if em.opType == 'gr'), 0)
+                new_id = max((em.moduleId for em in em_list), default=-1) + 1
+                em_list.insert(gr_idx,
+                               EmittedModule(moduleId=new_id,
+                                             instructions=[scalePtrLoad],
+                                             before=None,
+                                             source=None))
 
         # ── Preloop ──
         module.add(self._emitLoop(writer, kernel, "PRELOOP",

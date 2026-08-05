@@ -5070,12 +5070,41 @@ class KernelWriter(metaclass=abc.ABCMeta):
       module.add(initTDMDescriptorSubtile(self, kernel, tensorParametersB))
     if not hasTDM:
       module.add(graTileAssignment(self, kernel))
-    module.add(lraTileAssignment(self, kernel))
-    module.add(localReadDTLInitCommonSwapVgpr(self, kernel))
+
+    # Pre-loop scheduling (Change A): the A/B and scale LDS read-address setup
+    # (lraTileAssignment -> v9/v14, the DTL swap-vgpr init that READS v9/v14, and
+    # lraTileAssignmentScaleSwizzled -> v19/v22 + scale swaps) is pure loop-invariant
+    # VALU whose only consumers are the post-barrier ds_reads and the main-loop LR
+    # swaps. For a subtile fused-store kernel that prefetches (PGR>=1) we DEFER these
+    # three modules into the pre-loop global-read shadow (LogicalScheduler splices them
+    # in just before the wait_gr drain) so ~750 cycles of address math overlaps the
+    # in-flight prefetch buffer_loads instead of sitting on the pre-main-loop critical
+    # path. The functions are still CALLED here, in the same order, so vgpr/sgpr-pool
+    # checkout/checkin bookkeeping is byte-identical -- only the emission position of the
+    # returned modules moves. localReadDTLInitCommonSwapVgpr consumes v9/v14 so it must
+    # travel WITH lraTileAssignment; graTileAssignmentScaleSwizzled computes GR offsets
+    # (feeds the prefetch) and stays inline. Any branch that skips the whole pre-loop
+    # (K<DepthU -> SkipToEnd) also skips every one of these consumers and routes to the
+    # tail loop's independent flat-tile layout, so producer and consumers stay on the
+    # same side of that branch. TDM / PGR==0 / non-eligible kernels emit inline as before.
+    _deferLra = (kernel.get("UseSubtileImpl")
+                 and kernel["PrefetchGlobalRead"] >= 1
+                 and not hasTDM
+                 and self._plsinAlphaSkipEligible(kernel))
+    self._deferredPreloopLraModules = None
+    _lraModule     = lraTileAssignment(self, kernel)
+    _lraSwapModule = localReadDTLInitCommonSwapVgpr(self, kernel)
+    if not _deferLra:
+      module.add(_lraModule)
+      module.add(_lraSwapModule)
 
     if not hasTDM:
       module.add(graTileAssignmentScaleSwizzled(self, kernel))
-    module.add(lraTileAssignmentScaleSwizzled(self, kernel))
+    _lraScaleModule = lraTileAssignmentScaleSwizzled(self, kernel)
+    if _deferLra:
+      self._deferredPreloopLraModules = [_lraModule, _lraSwapModule, _lraScaleModule]
+    else:
+      module.add(_lraScaleModule)
 
     module.add(self.calculateLoopNumIter(kernel, tensorParametersA, tensorParametersB, self.states.unrollIdx))
 
