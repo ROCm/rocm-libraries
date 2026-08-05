@@ -127,15 +127,15 @@ jobs:
       # and .github/scripts/resolve_therock_ref.py for the policy. Uses the REST
       # API only, so no deep clone of this repository is required.
       #
-      # TEST: Override to use the test branch for development
+      # Resolve TheRock ref - use main for commit-compatible stage reuse
       - name: Resolve TheRock ref
         id: resolve
         env:
           GITHUB_TOKEN: ${{ github.token }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          # TEST: Force use of test branch for testing
-          THEROCK_REF_OVERRIDE: ${{ inputs.therock_ref_override || 'users/geomin12/dynamic-determination-stage' }}
+          # Let it resolve to main naturally (no override) for commit-compatible stage reuse
+          THEROCK_REF_OVERRIDE: ${{ inputs.therock_ref_override || '' }}
         run: python .github/scripts/resolve_therock_ref.py
 
   setup:
@@ -149,9 +149,9 @@ jobs:
       # TEST: Only run rocprim tests
       linux_test_labels: ${{ inputs.linux_test_labels || 'test:rocprim' }}
       windows_test_labels: ${{ inputs.windows_test_labels || '' }}
-      # TEST: Hardcode prebuilt_stages and baseline_run_id for testing stage copy
-      prebuilt_stages: ${{ inputs.prebuilt_stages || 'all' }}
-      baseline_run_id: ${{ inputs.baseline_run_id || '30989762651' }}
+      # Manual override for prebuilt stages (empty = use automatic stage reuse)
+      prebuilt_stages: ${{ inputs.prebuilt_stages || '' }}
+      baseline_run_id: ${{ inputs.baseline_run_id || '' }}
       # Enable automatic stage reuse - TheRock will find commit-compatible baselines
       stage_reuse_mode: reuse-stage
       repository: ROCm/TheRock
