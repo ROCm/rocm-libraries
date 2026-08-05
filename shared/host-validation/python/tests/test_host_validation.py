@@ -283,6 +283,17 @@ class TensorAndGemmTests(unittest.TestCase):
         )
         expected = 2.0 * (a @ b) - c
         np.testing.assert_array_equal(hv.to_numpy(observed), expected)
+        tiled = hv.reference_gemm(
+            hv.from_numpy(a),
+            hv.from_numpy(b),
+            hv.from_numpy(c),
+            hv.ScalarType.Float32,
+            hv.ScalarType.Float32,
+            alpha=2.0,
+            beta=-1.0,
+            backend=hv.GemmBackend.Tiled,
+        )
+        np.testing.assert_array_equal(hv.to_numpy(tiled), expected)
 
     def test_float64_gemm_matches_numpy(self):
         a = np.asarray([[0.25, -1.5], [2.0, 3.25]], dtype=np.float64)
@@ -336,6 +347,27 @@ class TensorAndGemmTests(unittest.TestCase):
             hv.to_numpy(observed, np.float32),
             np.asarray([[expected]], dtype=np.float32),
         )
+
+    def test_xfloat32_truncates_operand_mantissas(self):
+        a = np.asarray([[1.234567, -2.345678]], dtype=np.float32)
+        b = np.asarray([[3.456789], [4.567891]], dtype=np.float32)
+        c = np.zeros((1, 1), dtype=np.float32)
+        observed = hv.reference_gemm(
+            hv.from_numpy(a),
+            hv.from_numpy(b),
+            hv.from_numpy(c),
+            hv.ScalarType.Float32,
+            hv.ScalarType.Float32,
+            math_mode=hv.MathMode.XFloat32,
+        )
+
+        def xfloat32(values):
+            bits = values.view(np.uint32).copy()
+            bits &= np.uint32(0xFFFFE000)
+            return bits.view(np.float32)
+
+        expected = xfloat32(a) @ xfloat32(b)
+        np.testing.assert_array_equal(hv.to_numpy(observed), expected)
 
     def test_complex_gemm_matches_numpy(self):
         a = np.asarray(

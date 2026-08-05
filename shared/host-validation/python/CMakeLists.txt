@@ -26,6 +26,7 @@ target_link_libraries(
     host-validation-python
     PRIVATE
         roc::host-validation
+        roc::host-validation-tiled
 )
 set_target_properties(
     host-validation-python

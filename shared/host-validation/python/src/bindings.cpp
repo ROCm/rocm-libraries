@@ -10,6 +10,7 @@
 #include <complex>
 #include <cstring>
 #include <optional>
+#include <roc/host_validation/backends/tiled.hpp>
 #include <roc/host_validation/validation.hpp>
 #include <span>
 #include <string>
@@ -110,7 +111,8 @@ Tensor referenceGemmOwned(const Tensor& a, const Tensor& b, const Tensor& c, Sca
                           std::complex<double> beta, std::optional<ScalarType> computeTypeA,
                           std::optional<ScalarType> computeTypeB, MathMode mathMode,
                           Activation activation, double activationParameter0,
-                          double activationParameter1, OutputSelection outputSelection) {
+                          double activationParameter1, OutputSelection outputSelection,
+                          GemmBackend backend) {
     if (a.shape().rank() != 2 || b.shape().rank() != 2)
         throw std::invalid_argument("Python reference_gemm requires rank-2 A and B tensors.");
 
@@ -128,7 +130,18 @@ Tensor referenceGemmOwned(const Tensor& a, const Tensor& b, const Tensor& c, Sca
     problem.epilogue.activationParameter0 = activationParameter0;
     problem.epilogue.activationParameter1 = activationParameter1;
     problem.outputSelection = std::move(outputSelection);
-    referenceGemm(problem);
+    if (backend == GemmBackend::Canonical) {
+        referenceGemm(problem);
+    } else if (backend == GemmBackend::Tiled) {
+        static const TiledGemmBackend tiled;
+        referenceGemm(problem, {
+                                   .backend = GemmBackend::Tiled,
+                                   .requireRequestedBackend = true,
+                                   .backendImplementation = &tiled,
+                               });
+    } else {
+        throw std::invalid_argument("Python reference_gemm exposes Canonical and Tiled backends.");
+    }
     return d;
 }
 
@@ -238,6 +251,10 @@ NB_MODULE(_roc_host_validation, module) {
     nb::enum_<MathMode>(module, "MathMode")
         .value("Default", MathMode::Default)
         .value("XFloat32", MathMode::XFloat32);
+
+    nb::enum_<GemmBackend>(module, "GemmBackend")
+        .value("Canonical", GemmBackend::Canonical)
+        .value("Tiled", GemmBackend::Tiled);
 
     nb::enum_<MatrixAxis>(module, "MatrixAxis")
         .value("Row", MatrixAxis::Row)
@@ -446,7 +463,8 @@ NB_MODULE(_roc_host_validation, module) {
                "compute_type_a"_a = std::optional<ScalarType>{},
                "compute_type_b"_a = std::optional<ScalarType>{}, "math_mode"_a = MathMode::Default,
                "activation"_a = Activation::None, "activation_parameter0"_a = 0.0,
-               "activation_parameter1"_a = 0.0, "output_selection"_a = OutputSelection::all());
+               "activation_parameter1"_a = 0.0, "output_selection"_a = OutputSelection::all(),
+               "backend"_a = GemmBackend::Canonical);
     module.def("reference_epilogue", &referenceEpilogueOwned, "input"_a, "output_type"_a,
                "compute_type"_a, "bias"_a = std::optional<Tensor>{},
                "bias_axis"_a = MatrixAxis::Row, "activation"_a = Activation::None,
