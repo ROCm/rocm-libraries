@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 //
 // HipFlash2Engine: hipDNN IEngine plugin wrapping our V7 Flash-Attention 2 kernel
-// (rocWMMA MFMA + causal tile skip) for FP16 SDPA on gfx942/gfx950.
+// (rocWMMA MFMA + causal tile skip) for FP16 SDPA on gfx942.
 //
 // Registered via HIPDNN_REGISTER_ENGINE(HIP_FLASH2_ENGINE) in EngineNames.hpp.
 // Enabled at build time with -DENABLE_HIP_FLASH2_ENGINE=OFF (default: off).

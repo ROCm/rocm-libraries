@@ -34,14 +34,13 @@ bool HipFlash2FwdPlanBuilder::isApplicable(const Handle& handle,
     // NOLINTNEXTLINE(readability-identifier-naming)
     static const char* HIP_KERNEL_LOG_PREFIX = "[HipFlash2FwdPlanBuilder::isApplicable] ";
 
-    // Device check -- Finding 7 fix: accept only gfx942 (gfx950 has inf defect in softmax)
+    // Device check: gfx942 only (gfx950 not yet supported)
     std::string archId;
     try
     {
         archId = getDeviceString(handle.getStream());
         HIP_KERNEL_RETURN_FALSE_IF(archId != "gfx942",
-                                   "Device not gfx942 (actual: " + archId
-                                       + ") -- gfx950 disabled (softmax inf defect)");
+                                   "Device not supported (actual: " + archId + "); only gfx942 is supported");
     }
     catch(const std::exception& e)
     {

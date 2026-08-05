@@ -27,7 +27,7 @@ namespace hip_flash2_engine
 /**
  * @brief Plan builder for Flash-Attention 2 V7 forward pass.
  *
- * Checks applicability (FP16, gfx942/gfx950, head_dim in {64,128},
+ * Checks applicability (FP16, gfx942, head_dim in {64,128},
  * no dropout/alibi/group-batch), extracts SDPA graph parameters,
  * loads the arch-specific precompiled .co, and stores a HipFlash2FwdPlan
  * in the execution context.

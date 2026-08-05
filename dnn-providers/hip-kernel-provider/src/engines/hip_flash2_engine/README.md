@@ -1,7 +1,7 @@
 # HipFlash2Engine -- Flash-Attention 2 FP16 SDPA Engine
 
 Flash-Attention 2 V7 implemented as a hipDNN `IEngine` plugin for FP16 SDPA on
-gfx942 (MI300X/MI325X). gfx950 (MI355X) support is in progress -- see Known Issues.
+gfx942 (MI300X/MI325X). gfx950 (MI355X) is not supported in this version.
 
 ## Performance
 
