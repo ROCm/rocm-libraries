@@ -1205,12 +1205,6 @@ namespace TensileLite
                 (inputs.d == nullptr && inputs.batchD == nullptr) ||
                 inputs.batchBias != nullptr || inputs.batchGateResidual != nullptr)
                 return false;
-            if (problem.a().dataType() == rocisa::DataType::Float6 ||
-                problem.a().dataType() == rocisa::DataType::BFloat6 ||
-                problem.b().dataType() == rocisa::DataType::Float6 ||
-                problem.b().dataType() == rocisa::DataType::BFloat6)
-                return false;
-
             ScalarType typeA;
             ScalarType typeB;
             ScalarType typeC;
