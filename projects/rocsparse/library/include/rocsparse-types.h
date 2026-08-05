@@ -29,7 +29,7 @@
 #define ROCSPARSE_TYPES_H
 
 #include "rocsparse-complex-types.h"
-#include "rocsparse-version.h"
+#include "rocsparse-config.h"
 #include "rocsparse_bfloat16.h"
 
 #include <float.h>
