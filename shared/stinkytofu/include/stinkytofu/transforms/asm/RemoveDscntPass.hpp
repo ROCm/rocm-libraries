@@ -38,5 +38,6 @@ class Pass;
  * transformation logic is not yet implemented.
  */
 STINKYTOFU_EXPORT std::unique_ptr<Pass> createRemoveDscntPass();
+STINKYTOFU_EXPORT std::unique_ptr<Pass> createRemoveDscntPass(int dsProximityThreshold);
 
 }  // namespace stinkytofu

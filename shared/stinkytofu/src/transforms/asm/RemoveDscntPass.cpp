@@ -283,6 +283,9 @@ AsmDirective* createTextCommentDirective(const std::string& comment) {
 
 class RemoveDscntPass : public StinkyInstPass {
    public:
+    explicit RemoveDscntPass(int dsProximityThreshold)
+        : dsProximityThreshold_(std::max(0, dsProximityThreshold)) {}
+
     static char ID;
 
     const char* getName() const override {
@@ -312,6 +315,8 @@ class RemoveDscntPass : public StinkyInstPass {
     }
 
    private:
+    int dsProximityThreshold_ = kDsProximityThreshold;
+
     void scanBlockHead(BasicBlock& bb, int cycles, std::deque<DsLoadEntry>& inFlightDsLoads) {
         // Second pass: handle dscnt before waitCheckActive becomes true.
         bool seenFirstDscntBeforeActivation = false;
@@ -461,9 +466,9 @@ class RemoveDscntPass : public StinkyInstPass {
                 PASS_DEBUG(std::cerr << "[RemoveDscnt]   drop recent load @cycle="
                                      << inFlightDsLoads.front().cycle
                                      << " dist=" << (cycles - inFlightDsLoads.front().cycle)
-                                     << " < " << kDsProximityThreshold << "\n");
+                                     << " < " << dsProximityThreshold_ << "\n");
                 while (!inFlightDsLoads.empty() &&
-                       (cycles - inFlightDsLoads.front().cycle) > kDsProximityThreshold) {
+                       (cycles - inFlightDsLoads.front().cycle) > dsProximityThreshold_) {
                     inFlightDsLoads.pop_front();
                 }
 
@@ -522,6 +527,10 @@ char RemoveDscntPass::ID = 0;
 
 namespace stinkytofu {
 std::unique_ptr<Pass> createRemoveDscntPass() {
-    return std::make_unique<RemoveDscntPass>();
+    return createRemoveDscntPass(kDsProximityThreshold);
+}
+
+std::unique_ptr<Pass> createRemoveDscntPass(int dsProximityThreshold) {
+    return std::make_unique<RemoveDscntPass>(dsProximityThreshold);
 }
 }  // namespace stinkytofu
