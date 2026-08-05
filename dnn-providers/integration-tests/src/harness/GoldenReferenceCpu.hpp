@@ -11,8 +11,8 @@
 #include <unordered_map>
 #include <vector>
 
+#include "harness/BundleMetadata.hpp"
 #include <hipdnn_data_sdk/logging/Logger.hpp>
-#include <hipdnn_test_sdk/utilities/BundleMetadata.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/LoadGraphAndTensors.hpp>
@@ -38,7 +38,7 @@ class TestGoldenReferenceCpu : public ::testing::TestWithParam<std::filesystem::
 {
 protected:
     hipdnn_test_sdk::utilities::GraphAndTensorMap _graphAndTensors;
-    std::optional<hipdnn_test_sdk::utilities::BundleMetadata> _bundleMetadata;
+    std::optional<hipdnn_integration_tests::BundleMetadata> _bundleMetadata;
     std::unordered_map<int64_t, std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>>
         _referenceOutputTensors;
 
@@ -57,7 +57,7 @@ protected:
         // Load bundle metadata if a .meta.json companion file exists.
         // CPU harness has no device-specific guards (no VRAM, no arch).
         // Future: add CPU-relevant checks here (e.g., minimum RAM).
-        _bundleMetadata = hipdnn_test_sdk::utilities::loadBundleMetadata(path);
+        _bundleMetadata = hipdnn_integration_tests::loadBundleMetadata(path);
 
         try
         {
@@ -90,7 +90,19 @@ protected:
     }
 };
 
-using hipdnn_test_sdk::utilities::getGoldenReferenceParams;
+inline auto getGoldenReferenceParams(const std::filesystem::path& subDirectory)
+{
+    auto dir = hipdnn_data_sdk::utilities::getCurrentExecutableDirectory()
+               / "../lib/integration-test-bundles" / subDirectory;
+
+    auto paths = hipdnn_test_sdk::utilities::scanBundleJsonFiles(dir);
+    if(paths.empty())
+    {
+        return testing::ValuesIn(std::vector<std::filesystem::path>{""});
+    }
+    return testing::ValuesIn(paths);
+}
+
 }
 
 #endif // HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB

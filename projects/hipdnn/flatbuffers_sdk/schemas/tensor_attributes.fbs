@@ -60,4 +60,6 @@ table TensorAttributes {
     virtual: bool;
     value: TensorValue;
     is_runtime_pass_by_value: bool = false;
+    ragged_offset_tensor_uid: long = null;
+    alignment: long = 16;
 }

@@ -129,6 +129,7 @@ target_sources(hipsparse-test PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/test_gtsv_interleaved_batch.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_csrcolor.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_spsv_csr.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_spsv_csr_reuse_descr.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_spsv_coo.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_spsm_csr.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_spsm_coo.cpp"
@@ -137,6 +138,18 @@ target_sources(hipsparse-test PRIVATE
 if(HIPSPARSE_ENABLE_SPMV_BSR)
     target_sources(hipsparse-test PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/test_spmv_bsr.cpp"
+    )
+endif()
+
+if(BUILD_WITH_CSC_TRSV)
+    target_sources(hipsparse-test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/test_spsv_csc.cpp"
+    )
+endif()
+
+if(BUILD_WITH_CSC_TRSM)
+    target_sources(hipsparse-test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/test_spsm_csc.cpp"
     )
 endif()
 

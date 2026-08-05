@@ -136,6 +136,14 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
             set(_stinkytofu_sibling "${CMAKE_CURRENT_SOURCE_DIR}/../../../../shared/stinkytofu")
             if(IS_DIRECTORY "${_stinkytofu_sibling}")
                 set(STINKYTOFU_ENABLE_WERROR ON)
+                # Build the StinkyTofu Python bindings only for gfx1250.
+                if("gfx1250" IN_LIST GPU_TARGETS)
+                    set(STINKYTOFU_BUILD_PYTHON ON CACHE BOOL
+                        "Build StinkyTofu Python bindings" FORCE)
+                else()
+                    set(STINKYTOFU_BUILD_PYTHON OFF CACHE BOOL
+                        "Build StinkyTofu Python bindings" FORCE)
+                endif()
                 add_subdirectory("${_stinkytofu_sibling}" stinkytofu EXCLUDE_FROM_ALL)
                 set(_stinkytofu_from_subdirectory TRUE)
             else()
@@ -233,6 +241,62 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
     )
     if(ROCISA_INCLUDE_BUILD_INFO)
         install(FILES "${CMAKE_CURRENT_BINARY_DIR}/rocisa/_build_info.py" DESTINATION rocisa)
+    endif()
+
+    # Windows: emit the resolved runtime DLL dependencies so __init__.py can
+    # register their directories via os.add_dll_directory(). Since Python 3.8 the
+    # extension loader ignores PATH, and in a source/integrated build _rocisa's
+    # deps (origami, hip, comgr, stinkytofu) live in scattered per-subproject
+    # directories. TARGET_RUNTIME_DLLS resolves the full set (direct + transitive)
+    # from the linked/imported targets. Build-tree only, like _build_info.py; not
+    # installed -- packaged builds resolve deps via the merged install layout.
+    if(WIN32)
+        file(GENERATE
+            OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/rocisa/_dll_dirs.py"
+            CONTENT "DEP_DLLS = [p for p in r'''$<TARGET_RUNTIME_DLLS:_rocisa>'''.split(';') if p]\n"
+        )
+    endif()
+
+    # Stage the standalone stinkytofu Python module next to _rocisa so it
+    # resolves from the build tree at runtime.
+    if(TARGET stinkytofu_python)
+        add_dependencies(_rocisa stinkytofu_python)
+
+        set_target_properties(stinkytofu_python PROPERTIES
+            LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/stinkytofu"
+            BUILD_RPATH "$ORIGIN"
+            INSTALL_RPATH "$ORIGIN"
+        )
+
+        configure_file(
+            "${_stinkytofu_src_dir}/python_module/stinkytofu/__init__.py"
+            "${CMAKE_CURRENT_BINARY_DIR}/stinkytofu/__init__.py"
+            COPYONLY
+        )
+        configure_file(
+            "${_stinkytofu_src_dir}/python_module/stinkytofu/_build_info.py.in"
+            "${CMAKE_CURRENT_BINARY_DIR}/stinkytofu/_build_info.py"
+            @ONLY
+        )
+
+        # Stage intrinsics.st.bc next to _stinkytofu.so for runtime loading.
+        if(TARGET intrinsics_compiled)
+            add_dependencies(_rocisa intrinsics_compiled)
+
+            set(_intrinsics_bc_src "${CMAKE_BINARY_DIR}/intrinsics.st.bc")
+            set(_intrinsics_bc_dst "${CMAKE_CURRENT_BINARY_DIR}/stinkytofu/intrinsics.st.bc")
+            add_custom_command(
+                OUTPUT "${_intrinsics_bc_dst}"
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                        "${_intrinsics_bc_src}" "${_intrinsics_bc_dst}"
+                DEPENDS intrinsics_compiled "${_intrinsics_bc_src}"
+                COMMENT "Staging intrinsics.st.bc next to _stinkytofu.so"
+                VERBATIM
+            )
+            add_custom_target(rocisa_stage_intrinsics ALL
+                DEPENDS "${_intrinsics_bc_dst}")
+            add_dependencies(_rocisa rocisa_stage_intrinsics)
+        endif()
     endif()
 
     if(ROCISA_STANDALONE)

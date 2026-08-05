@@ -13,8 +13,7 @@ namespace hipdnn_sdk_test_utils
 {
 
 template <typename InputType>
-static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
-                  std::unordered_map<int64_t, void*>>
+std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>, std::unordered_map<int64_t, void*>>
     buildConvolutionFwdGraph(ConvolutionFwdTensorBundle<InputType>& tensorBundle,
                              hipdnn_flatbuffers_sdk::data_objects::DataType inputDataType,
                              hipdnn_flatbuffers_sdk::data_objects::DataType accumulatorDataType)
@@ -69,8 +68,7 @@ static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
 }
 
 template <typename InputType>
-static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
-                  std::unordered_map<int64_t, void*>>
+std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>, std::unordered_map<int64_t, void*>>
     buildConvolutionBwdGraph(ConvolutionBwdTensorBundle<InputType>& tensorBundle,
                              hipdnn_flatbuffers_sdk::data_objects::DataType inputDataType,
                              hipdnn_flatbuffers_sdk::data_objects::DataType accumulatorDataType)
@@ -128,8 +126,7 @@ static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
 }
 
 template <typename InputType>
-static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
-                  std::unordered_map<int64_t, void*>>
+std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>, std::unordered_map<int64_t, void*>>
     buildConvolutionWrwGraph(ConvolutionWrwTensorBundle<InputType>& tensorBundle,
                              hipdnn_flatbuffers_sdk::data_objects::DataType inputDataType,
                              hipdnn_flatbuffers_sdk::data_objects::DataType accumulatorDataType)

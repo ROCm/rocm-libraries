@@ -21,6 +21,17 @@ class TheRockMatrixTest(unittest.TestCase):
             blas_entry["projects_to_test"].split(","),
         )
 
+    def test_collect_projects_to_run_hipthreads(self):
+        subtrees = ["projects/hipthreads"]
+
+        project_to_run = therock_matrix.collect_projects_to_run(subtrees)
+        self.assertEqual(len(project_to_run), 1)
+        hipthreads_entry = project_to_run[0]
+        self.assertIn(
+            "hipthreads",
+            hipthreads_entry["projects_to_test"].split(","),
+        )
+
     def test_collect_projects_to_run(self):
         subtrees = ["projects/rocsparse", "projects/hipblaslt"]
 
