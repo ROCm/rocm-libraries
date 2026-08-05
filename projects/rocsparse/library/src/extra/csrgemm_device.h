@@ -414,8 +414,7 @@ namespace rocsparse
 
     // Hash operation to insert pair into hash table
     template <uint32_t HASHVAL, uint32_t HASHSIZE, typename I, typename T>
-    ROCSPARSE_DEVICE_ILF void
-        insert_pair(I key, T val, I* table, T* __restrict__ data, I empty)
+    ROCSPARSE_DEVICE_ILF void insert_pair(I key, T val, I* table, T* __restrict__ data, I empty)
     {
         static_assert(HASHSIZE > 0 && (HASHSIZE & (HASHSIZE - 1)) == 0,
                       "HASHSIZE must be a power of two.");
@@ -704,7 +703,7 @@ namespace rocsparse
                                              const I* __restrict__ csr_row_ptr_D,
                                              const J* __restrict__ csr_col_ind_D,
                                              I* __restrict__ row_nnz,
-                                             I* workspace_B,
+                                             I*                   workspace_B,
                                              rocsparse_index_base idx_base_A,
                                              rocsparse_index_base idx_base_B,
                                              rocsparse_index_base idx_base_D,
@@ -1310,7 +1309,7 @@ namespace rocsparse
                                                     const I* __restrict__ csr_row_ptr_C,
                                                     J* __restrict__ csr_col_ind_C,
                                                     T* __restrict__ csr_val_C,
-                                                    I* workspace_B,
+                                                    I*                   workspace_B,
                                                     rocsparse_index_base idx_base_A,
                                                     rocsparse_index_base idx_base_B,
                                                     rocsparse_index_base idx_base_C,
