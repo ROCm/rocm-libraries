@@ -519,6 +519,9 @@ struct config_t {
   std::size_t workspace_size            = 0;
   std::size_t workspace_size_per_elem_c = 0;
 
+  /// Whether this kernel is stream-K
+  int stream_k = 0;
+
   /// Reduction strategy.
   reduction_t reduction_strategy = reduction_t::none;
 
