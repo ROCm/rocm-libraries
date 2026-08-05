@@ -31,7 +31,7 @@
 #include <cblas.h>
 #include <iostream>
 #include <omp.h>
-#include <roc/host_validation/reference_gemm.hpp>
+#include <roc/host_validation/validation.hpp>
 #include <stdexcept>
 
 namespace
