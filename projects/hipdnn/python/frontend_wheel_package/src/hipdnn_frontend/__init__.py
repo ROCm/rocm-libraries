@@ -119,6 +119,7 @@ __all__ = [
     "ActivationMode",
     "PoolingMode",
     "BatchnormMode",
+    "EngineInfo",
     "Handle",
     "create_handle",
     "destroy_handle",

@@ -24,7 +24,11 @@
         }
 {% for param in op.frontend.graph_method_params %}
 {% set tensor_name = param.tensor_name if param.tensor_name else param.name %}
+{% if param.optional %}
+        if({{ param.name }} && {{ param.name }}->get_name().empty())
+{% else %}
         if({{ param.name }}->get_name().empty())
+{% endif %}
         {
             {{ param.name }}->set_name(attributes.get_name() + "::{{ tensor_name | upper }}");
         }

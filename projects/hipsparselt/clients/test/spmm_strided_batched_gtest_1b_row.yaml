@@ -50,13 +50,12 @@ Tests:
   orderA: [R]
   orderB: [R]
   orderC: [R]
-  orderD: [R]  
-  gpu_arch: '942'
+  orderD: [R]
 
 - name: spmm_strided_batched_small
   category: quick
   function:
-    spmm_strided_batched: *hpa_e4m3_fp32_precision
+    spmm_strided_batched: *hpa_e4m3_fp32_precision_gate
   matrix_size: *strided_batched_small_matrix_size_range
   alpha_beta: *alpha_beta_range
   transA_transB: *transA_transB_range
@@ -70,8 +69,7 @@ Tests:
   orderA: [R]
   orderB: [R]
   orderC: [R]
-  orderD: [R]  
-  gpu_arch: '950'
+  orderD: [R]
 
 - name: spmm_strided_batched_small_stride_zero
   category: quick
