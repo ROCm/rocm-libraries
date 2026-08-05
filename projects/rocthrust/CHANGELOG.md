@@ -3,6 +3,17 @@
 Documentation for rocThrust available at
 [https://rocm.docs.amd.com/projects/rocThrust/en/latest/](https://rocm.docs.amd.com/projects/rocThrust/en/latest/).
 
+## rocThrust 4.6.0 for ROCm 10.0
+ 
+### Added
+ 
+* True global support in hipstdpar
+* Return value checks for assorted locations in the codebase that were previously missing.
+ 
+### Fixed
+ 
+* Fixed over-read and NULL deref in __hipstdpar_realloc
+
 ## rocThrust 4.5.0 for ROCm 7.14
 
 ### Added
