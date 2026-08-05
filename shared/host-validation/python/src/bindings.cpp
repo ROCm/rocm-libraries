@@ -167,6 +167,27 @@ PythonEpilogueResult referenceEpilogueOwned(
         .amax = std::move(amax),
     };
 }
+
+Tensor referenceSumOwned(const Tensor& input, ScalarType outputType, ScalarType accumulatorType,
+                         std::vector<size_t> axes) {
+    std::vector<bool> reduced(input.shape().rank(), false);
+    for (const size_t axis : axes) {
+        if (axis >= input.shape().rank())
+            throw std::out_of_range("Python reference_sum axis exceeds input rank.");
+        if (reduced[axis]) throw std::invalid_argument("Python reference_sum axes must be unique.");
+        reduced[axis] = true;
+    }
+
+    std::vector<size_t> outputDimensions;
+    for (size_t dimension = 0; dimension < input.shape().rank(); ++dimension) {
+        if (!reduced[dimension]) outputDimensions.push_back(input.shape()[dimension]);
+    }
+
+    Tensor output(outputType, Shape(std::move(outputDimensions)));
+    referenceSum(
+        ReductionProblem(input.view(), output.mutableView(), accumulatorType, std::move(axes)));
+    return output;
+}
 }  // namespace
 
 NB_MODULE(_roc_host_validation, module) {
@@ -393,4 +414,6 @@ NB_MODULE(_roc_host_validation, module) {
                "auxiliary_scale"_a = std::complex<double>(1.0, 0.0),
                "activation_parameter0"_a = 0.0, "activation_parameter1"_a = 0.0,
                "include_raw_output"_a = false, "include_amax"_a = false);
+    module.def("reference_sum", &referenceSumOwned, "input"_a, "output_type"_a,
+               "accumulator_type"_a, "axes"_a);
 }

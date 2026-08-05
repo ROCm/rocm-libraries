@@ -64,6 +64,7 @@ target_sources(host-validation
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/detail/reference_common.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/detail/reference_epilogue.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/detail/reference_gemm.hpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/detail/reference_reduction.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/detail/tensor_views.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/validation.hpp"
 )
