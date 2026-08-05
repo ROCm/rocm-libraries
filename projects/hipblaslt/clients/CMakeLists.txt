@@ -99,6 +99,7 @@ target_link_libraries(hipblaslt-clients-common
         ${HIPBLASLT_FORTRAN_RUNTIME_LIBRARIES}
     PRIVATE
         hip::device
+        roc::host-validation-blas
         roc::tensilelite-host
 )
 

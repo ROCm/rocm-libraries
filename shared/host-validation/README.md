@@ -18,6 +18,9 @@ comparison used by ROCm library clients and tests.
 - `roc::host-validation-adapters`
   - Build-tree include surface for product-specific compatibility adapters.
   - Does not add GPU code to the core target.
+- `roc::host-validation-blas`
+  - Optional compiled CBLAS implementation of `GemmBackend::Blas`.
+  - Built with `HOST_VALIDATION_BUILD_BLAS_BACKEND=ON`.
 - `roc::host-validation-tensilelite`
   - Optional compiled TensileLite reference implementation, created by the
     hipBLASLt/TensileLite client build.
@@ -145,12 +148,17 @@ the API.
 - row scale-A and column scale-B;
 - tensor-backed block scales with independent A/B block sizes;
 - ReLU, GELU, SiLU, and clamp; and
-- canonical execution, backend support queries, fallback reporting, and
-  grouped invocation.
+- canonical execution, pluggable object-oriented backend implementations,
+  backend support queries, fallback reporting, and grouped invocation.
 
 All hipBLASLt/TensileLite call sites that used the former typed
 `GemmInvocation<...>` now construct this runtime API. The typed reference GEMM
 and its function-pointer quantization bridge have been removed.
+
+The optional `BlasGemmBackend` implements the same interface for dense
+F32/F64/complex GEMM. hipBLASLt's accelerated large-problem path now selects
+this backend through `GemmRunOptions`; no `cblas_*gemm` call remains in the
+product adapter.
 
 New non-adapter consumers should need one of only two includes:
 
