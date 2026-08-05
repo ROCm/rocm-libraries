@@ -8,7 +8,7 @@
 #include <complex>
 #include <cstddef>
 #include <optional>
-#include <roc/host_validation/tensor.hpp>
+#include <roc/host_validation/detail/tensor_views.hpp>
 #include <stdexcept>
 #include <string>
 #include <type_traits>

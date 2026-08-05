@@ -7,7 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <random>
-#include <roc/host_validation/tensor.hpp>
+#include <roc/host_validation/detail/tensor_views.hpp>
 #include <span>
 #include <stdexcept>
 #include <type_traits>
