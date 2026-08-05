@@ -222,6 +222,8 @@ __device__ void flash2_fwd_body(const __half* __restrict__ ptr_q,
                 }
             __syncthreads();
         }
+        // Ensure all sP reads are complete before next tile overwrites kp_mem.k (sK)
+        __syncthreads();
     }
 
     // Reduce row_m and row_d across 16 lanes sharing each query row (same my_eg)
