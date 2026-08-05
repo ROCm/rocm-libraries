@@ -65,6 +65,24 @@ _SUPPORTED_ARCHES = ("gfx90a", "gfx942", "gfx950")
 BRIDGE_PERMUTE_N = False
 
 
+def _detect_gpu_arch_via_amd_smi():
+    """Best-effort arch via the shared amd-smi-first smi_utils wrapper.
+
+    Returns a ``gfxNNN`` string, or ``None`` if the wrapper is unavailable or
+    neither amd-smi nor rocm-smi resolves an arch (callers fall back to
+    rocminfo).
+    """
+    try:
+        import sys as _sys
+        _common = Path(__file__).resolve().parents[2] / "tile_engine" / "ops" / "common"
+        if str(_common) not in _sys.path:
+            _sys.path.insert(0, str(_common))
+        import smi_utils  # noqa: E402
+        return smi_utils.detect_gpu_arch()
+    except Exception:
+        return None
+
+
 @functools.lru_cache(maxsize=1)
 def _get_arch() -> str:
     """Detect the GPU architecture from rocminfo and validate it.
@@ -74,20 +92,21 @@ def _get_arch() -> str:
     default to a specific architecture -- and ``ValueError`` when the detected
     arch is not one this bridge supports.
     """
-    detected: Optional[str] = None
-    try:
-        out = subprocess.check_output(
-            ["rocminfo"], stderr=subprocess.DEVNULL, text=True
-        )
-        for line in out.splitlines():
-            stripped = line.strip()
-            if stripped.startswith("Name:") and "gfx" in stripped:
-                name = stripped.split(":", 1)[1].strip()
-                if name.startswith("gfx"):
-                    detected = name
-                    break
-    except Exception:  # noqa: BLE001 - rocminfo missing / no GPU / timeout
-        detected = None
+    detected: Optional[str] = _detect_gpu_arch_via_amd_smi()
+    if detected is None:
+        try:
+            out = subprocess.check_output(
+                ["rocminfo"], stderr=subprocess.DEVNULL, text=True
+            )
+            for line in out.splitlines():
+                stripped = line.strip()
+                if stripped.startswith("Name:") and "gfx" in stripped:
+                    name = stripped.split(":", 1)[1].strip()
+                    if name.startswith("gfx"):
+                        detected = name
+                        break
+        except Exception:  # noqa: BLE001 - rocminfo missing / no GPU / timeout
+            detected = None
 
     if detected is None:
         raise RuntimeError(

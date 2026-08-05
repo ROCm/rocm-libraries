@@ -106,6 +106,26 @@ def fetch_live_normalized_fields() -> dict[str, object]:
     )
 
 
+def detect_gpu_arch(fallback=None):
+    """Return the GPU gfx arch string (e.g. "gfx950"), preferring amd-smi.
+
+    Tries amd-smi ``static`` (TARGET_GRAPHICS_VERSION) first, then rocm-smi
+    ``--showproductname`` (GFX Version), matching the amd-smi-first policy used
+    throughout this module. Returns ``fallback`` if neither yields an arch.
+    """
+    for tool in _smi_order():
+        try:
+            if tool == _AMD_SMI:
+                arch = parse_amd_gfx(_run_cmd([_AMD_SMI, "static"]))
+            else:
+                arch = parse_rocm_gfx(_run_cmd([_ROCM_SMI, "--showproductname"]))
+        except Exception:
+            arch = None
+        if arch:
+            return arch
+    return fallback
+
+
 def smi_equivalence_pairs(
     fields: dict[str, object],
 ) -> list[tuple[str, object, object]]:
