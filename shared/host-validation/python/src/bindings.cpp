@@ -136,9 +136,9 @@ PythonEpilogueResult referenceEpilogueOwned(
     const Tensor& input, ScalarType outputType, ScalarType computeType, std::optional<Tensor> bias,
     MatrixAxis biasAxis, Activation activation, ActivationApplication activationApplication,
     std::optional<Tensor> auxiliaryInput, std::optional<ScalarType> auxiliaryOutputType,
-    std::complex<double> outputScale, std::complex<double> auxiliaryScale,
-    double activationParameter0, double activationParameter1, bool includeRawOutput,
-    bool includeAmax) {
+    std::optional<Tensor> gateResidual, std::complex<double> outputScale,
+    std::complex<double> auxiliaryScale, double activationParameter0, double activationParameter1,
+    bool includeRawOutput, bool includeAmax) {
     Tensor output(outputType, input.shape());
     std::optional<Tensor> rawOutput;
     std::optional<Tensor> auxiliaryOutput;
@@ -151,6 +151,7 @@ PythonEpilogueResult referenceEpilogueOwned(
     if (rawOutput) problem.rawOutput = rawOutput->mutableView();
     if (auxiliaryOutput) problem.auxiliaryOutput = auxiliaryOutput->mutableView();
     if (auxiliaryInput) problem.auxiliaryInput = auxiliaryInput->view();
+    if (gateResidual) problem.gateResidual = gateResidual->view();
     if (amax) problem.amax = amax->mutableView();
     if (bias) problem.bias = VectorBinding{bias->view(), biasAxis};
     problem.outputScale = outputScale;
@@ -451,6 +452,7 @@ NB_MODULE(_roc_host_validation, module) {
                "activation_application"_a = ActivationApplication::Forward,
                "auxiliary_input"_a = std::optional<Tensor>{},
                "auxiliary_output_type"_a = std::optional<ScalarType>{},
+               "gate_residual"_a = std::optional<Tensor>{},
                "output_scale"_a = std::complex<double>(1.0, 0.0),
                "auxiliary_scale"_a = std::complex<double>(1.0, 0.0),
                "activation_parameter0"_a = 0.0, "activation_parameter1"_a = 0.0,

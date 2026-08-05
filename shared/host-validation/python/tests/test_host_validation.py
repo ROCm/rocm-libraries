@@ -302,6 +302,20 @@ class TensorAndGemmTests(unittest.TestCase):
             hv.to_numpy(observed), expected, rtol=1e-15, atol=0.0
         )
 
+    def test_int32_accumulator_gemm_matches_numpy(self):
+        a = np.asarray([[1, 3], [2, 4]], dtype=np.int8)
+        b = np.asarray([[5], [6]], dtype=np.int8)
+        c = np.zeros((2, 1), dtype=np.int32)
+        observed = hv.reference_gemm(
+            hv.from_numpy(a),
+            hv.from_numpy(b),
+            hv.from_numpy(c),
+            hv.ScalarType.Int32,
+            hv.ScalarType.Int32,
+        )
+        expected = a.astype(np.int32) @ b.astype(np.int32)
+        np.testing.assert_array_equal(hv.to_numpy(observed), expected)
+
     def test_complex_gemm_matches_numpy(self):
         a = np.asarray(
             [[1.0 + 2.0j, 3.0 - 1.0j], [-2.0 + 0.5j, 4.0 + 3.0j]],
@@ -402,6 +416,19 @@ class TensorAndGemmTests(unittest.TestCase):
             hv.to_numpy(result.amax), np.asarray([5.0], dtype=np.float32)
         )
 
+        gate = np.asarray([[0.5, 2.0], [-1.0, 0.25]], dtype=np.float32)
+        gated = hv.reference_epilogue(
+            hv.from_numpy(values),
+            hv.ScalarType.Float32,
+            hv.ScalarType.Float32,
+            gate_residual=hv.from_numpy(gate),
+            output_scale=2.0,
+            include_raw_output=True,
+        )
+        raw = values * 2.0
+        np.testing.assert_array_equal(hv.to_numpy(gated.raw_output), raw)
+        np.testing.assert_array_equal(hv.to_numpy(gated.output), gate * raw + gate)
+
     def test_reference_gradient_epilogue_matches_numpy(self):
         gradient = np.asarray([[10.0, 20.0], [30.0, 40.0]], dtype=np.float32)
         activation_input = np.asarray(
@@ -468,6 +495,18 @@ class TensorAndGemmTests(unittest.TestCase):
         np.testing.assert_array_equal(
             hv.to_numpy(complex_observed),
             np.sum(complex_values, axis=1, dtype=np.complex64),
+        )
+
+        integer_values = np.arange(12, dtype=np.int8).reshape(3, 4)
+        integer_observed = hv.reference_sum(
+            hv.from_numpy(integer_values),
+            hv.ScalarType.Int32,
+            hv.ScalarType.Int32,
+            [1],
+        )
+        np.testing.assert_array_equal(
+            hv.to_numpy(integer_observed),
+            np.sum(integer_values, axis=1, dtype=np.int32),
         )
 
 

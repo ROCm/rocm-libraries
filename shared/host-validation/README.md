@@ -172,7 +172,7 @@ the API.
 
 `GemmProblem` currently supports:
 
-- F32, F64, complex-F32, and complex-F64 accumulation;
+- F32, F64, I32, complex-F32, and complex-F64 accumulation;
 - arbitrary runtime storage types supported by the tensor codecs;
 - distinct compute-input types for A and B;
 - default and XFloat32 operand math;
@@ -218,6 +218,10 @@ auxiliary E input/output, scale-D, scale-E, raw output, and AMax. The
 hipBLASLt pointer and `hipDataType` translation lives in its private client
 adapter and is not compiled by this component.
 
+An optional gate-residual tensor applies `gate * value + gate` after output
+scaling. `rawOutput`, when requested, captures the scaled value before the
+gate; AMax is measured before output scaling and the gate.
+
 ## Runtime tensor reduction
 
 `referenceSum` reduces arbitrary tensor axes while preserving all remaining
@@ -231,7 +235,7 @@ ReductionProblem problem(inputView,
 ReductionRunInfo run = referenceSum(problem);
 ```
 
-The current implementation supports F32, F64, complex-F32, and complex-F64
+The current implementation supports F32, F64, I32, complex-F32, and complex-F64
 accumulation, runtime input/output storage types, arbitrary affine layouts,
 rank-zero outputs, and multiple reduction axes. hipBLASLt's bias-gradient
 adapter represents its matrix as a strided tensor and reduces the K axis; no
@@ -278,7 +282,7 @@ The `roc_host_validation` package currently provides:
 - `reference_gemm` with runtime storage/output/accumulator types, alpha/beta,
   compute-input quantization, math mode, and activation;
 - `reference_epilogue` with bias, forward/gradient activation, E, scale-D/E,
-  raw output, and AMax results; and
+  gate residual, raw output, and AMax results; and
 - `reference_sum` with runtime input/output/accumulator types and explicit
   tensor axes.
 
@@ -291,7 +295,7 @@ The NumPy suite independently checks:
 - affine layout decoding;
 - deterministic generation, logical index ordering, complex component
   recipes, and structured comparison;
-- F32, F64, and complex GEMM against NumPy;
+- F32, F64, I32, and complex GEMM against NumPy;
 - mixed FP8-storage/FP4-compute-input quantization;
 - selected-output GEMM and prime-stride selection;
 - forward and ReLU/GELU-gradient epilogues against NumPy; and
