@@ -12,6 +12,7 @@
 #include "reference/concat_ref.hpp"
 #include "reference/crop_and_patch_ref.hpp"
 #include "reference/hue_ref.hpp"
+#include "reference/jpeg_compression_distortion_ref.hpp"
 #include "reference/log1p_ref.hpp"
 #include "reference/log_ref.hpp"
 #include "reference/normalize_ref.hpp"
@@ -329,6 +330,19 @@ TEST(GoldenLayoutTest, ImageCropAndPatch) {
             const RpptDesc& d, const RpptROI* roi) {
             crop_and_patch_reference<Rpp8u>(s1.data(), s2.data(), o.data(), d, roi, crop.data(),
                                             patch.data(), XYWH);
+        });
+}
+
+// Materializes a dense per-plane intermediate, resamples it (4:2:0 chroma) and scatters it back at
+// the ROI placement -- the one traversal shape that reads the descriptor on the way in and again on
+// the way out with an unstrided buffer in between, where a stride/width mix-up would cancel itself
+// in the op's own test because source and destination share a descriptor.
+TEST(GoldenLayoutTest, ImageBlockTransform) {
+    expect_image_layout_agnostic(
+        Layout::PLN3, [&](const std::vector<Rpp8u>& s1, const std::vector<Rpp8u>&,
+                          std::vector<Rpp8u>& o, const RpptDesc& d, const RpptROI* roi) {
+            jpeg_compression_distortion_reference<Rpp8u>(s1.data(), o.data(), d, DType::U8, roi,
+                                                         XYWH, 50);
         });
 }
 
