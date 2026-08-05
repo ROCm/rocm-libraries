@@ -124,13 +124,18 @@ class TestGfx950WarpTileK(unittest.TestCase):
         self.assertEqual(default_fp4_config(gfx_arch="gfx950").warp_tile_k, 32)
         self.assertEqual(default_fp4_preshuffleb_config(gfx_arch="gfx950").warp_tile_k, 32)
 
-    def test_warp_tile_k_is_32_on_gfx942(self):
+    def test_warp_tile_k_on_gfx942(self):
+        # gfx942 (no CK_GFX950_SUPPORT): the preshuffleb prefill configs are
+        # IsFlatMM, so get_k_warp_tile<PrecType,16,IsFlatMM=true>() == 64 for all
+        # their 1-byte variants (fp8/bf8/pk_fp4); every non-preshuffleb config
+        # uses IsFlatMM=false == 32. It must never be 128 (the gfx942 fp8/bf8
+        # all-zeros warp-gemm trap) and never eight_waves.
         for ctor in _ALL:
             cfg = ctor(gfx_arch="gfx942")
-            self.assertEqual(cfg.warp_tile_k, 32, ctor.__name__)
+            expected = 64 if cfg.preshuffle_b else 32
+            self.assertEqual(cfg.warp_tile_k, expected, ctor.__name__)
+            self.assertNotEqual(cfg.warp_tile_k, 128, ctor.__name__)
             self.assertFalse(cfg.eight_waves, ctor.__name__)
-
-
 class TestGfx950EightWaves(unittest.TestCase):
     """Finding #1: exactly the 6 fp8/bf8 kernels that route through the
     GemmConfig / GemmConfigPrefill aliases become EightWaves on gfx950:
@@ -269,15 +274,18 @@ class TestBqPermuteNForPermuteNKernels(unittest.TestCase):
         self.assertIn("bq_permuteN", _CTYPES_SRC)
         self.assertIn("shuffle_bq", _CTYPES_SRC)
 
-    def test_permute_n_config_has_permute_n_name_and_bgroup1(self):
-        # The fp8 preshuffleb+pq n=1 config is the permute_n kernel.
-        cfg = default_fp8_preshuffleb_preshufflequant_config(bquant_group_n=1,
-                                                             gfx_arch="gfx950")
+    def test_preshuffleb_config_is_cshuffle_not_permute_n(self):
+        # PreshuffleB (and EightWaves) use TransposeC=true, which is incompatible
+        # with the PermuteN epilogue, so abquant_effective_epilogue always emits
+        # cshuffle for preshuffleb kernels -- never permute_n -- regardless of
+        # bquant_group_n (see abquant_effective_epilogue in codegen_common.py).
+        cfg = default_fp8_preshuffleb_preshufflequant_config(
+            bquant_group_n=1, gfx_arch="gfx950"
+        )
         self.assertEqual(cfg.bquant_group_n, 1, cfg.name)
         self.assertTrue(cfg.preshuffle_b and cfg.preshuffle_bquant, cfg.name)
-        self.assertIn("permute_n", cfg.name, cfg.name)
-
-
+        self.assertIn("cshuffle", cfg.name, cfg.name)
+        self.assertNotIn("permute_n", cfg.name, cfg.name)
 class TestRunnerNoPostHocPermuteN(unittest.TestCase):
     """Round-5 FIX: now that round-4's bq_permuteN makes the kernel/ctypes
     epilogue write C in correct logical column order for permute_n kernels,

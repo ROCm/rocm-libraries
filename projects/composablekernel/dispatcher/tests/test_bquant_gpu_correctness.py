@@ -474,12 +474,35 @@ TESTS = [
 ]
 
 
+def _gpu_and_hipcc_available() -> bool:
+    """True only if both hipcc and a ROCm GPU are present.
+
+    Lets the standalone test SKIP cleanly (exit 0) on CPU-only CI runners
+    instead of failing when the kernel build/run cannot proceed.
+    """
+    import shutil
+    import subprocess as _sp
+    if shutil.which("hipcc") is None:
+        return False
+    try:
+        out = _sp.run(
+            ["rocminfo"], capture_output=True, text=True, timeout=30
+        ).stdout
+    except Exception:
+        return False
+    return "gfx" in out
+
+
 def main():
     parser = argparse.ArgumentParser(description="BQuant GPU correctness tests (C4 + H3)")
     parser.add_argument("--gfx", default="gfx950", help="GPU arch (default: gfx950)")
     parser.add_argument("-v", "--verbose", action="store_true")
     parser.add_argument("--output-dir", type=Path, default=None)
     args = parser.parse_args()
+
+    if not _gpu_and_hipcc_available():
+        print("SKIP: no GPU/hipcc detected; skipping bquant GPU correctness")
+        return 0
 
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
