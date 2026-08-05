@@ -67,7 +67,8 @@ struct EngineApiVersion {
 	patch: uint;
 }
 
-// Opaque RFC 4122 UUID stored in canonical network byte order.
+// UUID version 4 with the RFC variant, as defined by RFC 9562:
+// https://www.rfc-editor.org/rfc/rfc9562.html#section-5.4
 struct Uuid {
 	bytes: [ubyte:16];
 }

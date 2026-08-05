@@ -429,7 +429,7 @@ void GraphDescriptor::deserializeGraph(const uint8_t* serializedGraph, size_t gr
         const auto id = hipdnn_flatbuffers_sdk::utilities::toUuidBytes(*graph->id);
         THROW_IF_FALSE(hipdnn_flatbuffers_sdk::utilities::isUuidV4(id),
                        HIPDNN_STATUS_BAD_PARAM,
-                       "Serialized graph id must be an RFC 4122 version 4 UUID.");
+                       "Serialized graph id must be a version 4 UUID with the standard variant.");
         graphId = id;
     }
 

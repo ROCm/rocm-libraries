@@ -92,7 +92,7 @@ inline UuidBytes parseUuid(std::string_view text)
 
     if(!isUuidV4(bytes))
     {
-        throw std::invalid_argument("UUID must be RFC 4122 version 4 with the RFC variant");
+        throw std::invalid_argument("UUID must be version 4 with the standard variant");
     }
     return bytes;
 }
