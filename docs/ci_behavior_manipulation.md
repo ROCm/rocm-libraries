@@ -28,11 +28,7 @@ These labels are declared in
 [`LABEL_GATED_CMAKE_OPTIONS`](../.github/scripts/therock_matrix.py) — one entry per
 label, naming the target project and the options to inject. Adding an entry requires a
 code change plus a matching label in the repository's label set, since these labels are
-applied by hand and are not assigned by `labeler.yml`. Currently declared:
-
-- `ci:miopen-hipdnn-wrapper`: builds MIOpen as the public wrapper plus private
-  implementation pair (`MIOPEN_ENABLE_HIPDNN_WRAPPER=ON`) instead of the single default
-  library.
+applied by hand and are not assigned by `labeler.yml`.
 
 The gated build replaces the normal one for that project rather than running alongside
 it, so there is no second job and no duplicate artifact — but it also means the
