@@ -57,7 +57,7 @@ class Linter:
 
         diagnostics: list[Diagnostic] = []
         masked_contents = mask_code_regions(contents)
-        for line_number, text in enumerate(masked_contents.split("\n"), start=1):
+        for line_number, text in enumerate(masked_contents.splitlines(), start=1):
             for candidate in _links_in_masked_line(text):
                 self.checked_links += 1
                 message = self._check_link(file, candidate.target)
@@ -154,7 +154,7 @@ class Linter:
         anchors: set[str] = set()
         counts: dict[str, int] = {}
         contents = mask_code_regions(read_markdown(file), mask_inline=False)
-        for line in contents.split("\n"):
+        for line in contents.splitlines():
             heading = heading_text(line)
             if heading is None:
                 continue
@@ -392,7 +392,15 @@ def heading_text(line: str) -> str | None:
         level += 1
     if level == len(trimmed) or trimmed[level] not in " \t":
         return None
-    return trimmed[level:].strip().rstrip("#").strip()
+    heading = trimmed[level:].strip(" \t")
+    closing_start = len(heading)
+    while closing_start > 0 and heading[closing_start - 1] == "#":
+        closing_start -= 1
+    if closing_start == 0 or (
+        closing_start < len(heading) and heading[closing_start - 1] in " \t"
+    ):
+        heading = heading[:closing_start].rstrip(" \t")
+    return heading
 
 
 def github_anchor(heading: str) -> str:

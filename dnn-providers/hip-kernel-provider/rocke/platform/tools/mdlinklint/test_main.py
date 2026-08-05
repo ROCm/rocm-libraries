@@ -15,6 +15,7 @@ from main import (
     MAX_MARKDOWN_BYTES,
     Linter,
     github_anchor,
+    heading_text,
     links_in_line,
     markdown_files,
     run,
@@ -213,6 +214,33 @@ class MarkdownLinkLinterTest(unittest.TestCase):
         diagnostics = self.linter().lint_file(source)
         self.assertEqual(len(diagnostics), 1)
         self.assertIn("unresolved fragment #hidden", diagnostics[0].message)
+
+    def test_heading_text_requires_whitespace_before_closing_hashes(self) -> None:
+        self.assertEqual(heading_text("# C#"), "C#")
+        self.assertEqual(heading_text("# Plain###"), "Plain###")
+        self.assertEqual(heading_text("# C# ###"), "C#")
+        self.assertEqual(heading_text("# Plain ###   "), "Plain")
+        self.assertEqual(heading_text("# ###"), "")
+
+    def test_crlf_preserves_diagnostics_and_target_anchors(self) -> None:
+        self.write(
+            "guide.md",
+            "# Guide\r\n````text\r\n```\r\n# Hidden\r\n````\r\n",
+        )
+        source = self.write(
+            "index.md",
+            "[guide](guide.md#guide)\r\n"
+            "[hidden](guide.md#hidden)\r\n"
+            "[missing](missing.md)\r\n",
+        )
+
+        diagnostics = self.linter().lint_file(source)
+        self.assertEqual(
+            [(item.line, item.column) for item in diagnostics],
+            [(2, 10), (3, 11)],
+        )
+        self.assertIn("unresolved fragment #hidden", diagnostics[0].message)
+        self.assertIn("unresolved local link", diagnostics[1].message)
 
     def test_github_anchor_unicode_punctuation_and_spacing(self) -> None:
         self.assertEqual(
