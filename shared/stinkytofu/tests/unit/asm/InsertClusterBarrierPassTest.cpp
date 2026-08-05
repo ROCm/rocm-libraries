@@ -25,6 +25,9 @@
 //
 #include <gtest/gtest.h>
 
+#include <cstdlib>
+#include <sstream>
+#include <string>
 #include <vector>
 
 #include "TestHelpers.hpp"
@@ -90,6 +93,41 @@ bool isImmediatelyPrecededByClusterBarrierWait(StinkyInstruction* anchor) {
         return isClusterBarrierWithLiteral(*prev, /*wantSignal=*/false);
     }
     return false;
+}
+
+// Instructions the pass emits carry no explicit SCC destination -- like the pass itself,
+// go by the descriptor flag as well as the operand list.
+bool writesScc(const StinkyInstruction& inst) {
+    if (inst.is(InstFlag::IF_ImplicitWriteSCC)) return true;
+    for (const StinkyRegister& reg : inst.getDestRegs())
+        if (reg.isRegister() && reg.reg.type == RegType::SCC) return true;
+    return false;
+}
+
+// The compare the Rule 3 handshake emits ahead of its `s_barrier_signal -3`. It is the
+// instruction that clobbers SCC, so it is what a live SCC value has to survive.
+bool isClusterWaveCmp(const StinkyInstruction& inst) {
+    if (inst.getUnifiedOpcode() != GFX::s_cmp_eq_u32) return false;
+    const auto& srcs = inst.getSrcRegs();
+    return !srcs.empty() && srcs[0].getSymbolicName() == "sgprWaveIdx";
+}
+
+// Set STINKY_TEST_DUMP=1 to have a test print the block before and after the pass. Off by
+// default so the suite stays quiet.
+bool testDumpEnabled() {
+    static const bool enabled = std::getenv("STINKY_TEST_DUMP") != nullptr;
+    return enabled;
+}
+
+std::string blockListing(const BasicBlock& block) {
+    std::ostringstream os;
+    int idx = 0;
+    for (const IRBase& ir : block) {
+        if (ir.getType() != IRBase::IRType::StinkyTofu) continue;
+        os << "\n  " << idx++ << ": ";
+        cast<StinkyInstruction>(&ir)->dump(os);
+    }
+    return os.str();
 }
 
 StinkyInstruction* firstRealInstAfter(StinkyInstruction* anchor) {
@@ -171,6 +209,58 @@ class InsertClusterBarrierPassTest : public ::testing::Test {
         inst->addSrcReg(StinkyRegister("v", src1Start, 8));
         inst->addSrcReg(StinkyRegister("a", destStart, 8));
         return inst;
+    }
+
+    // `s_cmp_eq_u32 s<srcSgpr>, 0` -- writes SCC and nothing else.
+    StinkyInstruction* createSCmpWritingScc(int srcSgpr) {
+        AsmIRBuilder builder(*bb, arch);
+        StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::s_cmp_eq_u32, arch));
+        inst->addSrcReg(StinkyRegister("s", srcSgpr, 1));
+        inst->addSrcReg(StinkyRegister(0));
+        inst->addDestReg(StinkyRegister::getSCCRegister());
+        return inst;
+    }
+
+    // `s_sub_u32 s<sgpr>, s<sgpr>, 1` -- writes an SGPR *and* SCC (carry-out). The loop
+    // counter decrement, and an SCC def the pass cannot rematerialize: re-running it would
+    // decrement the counter a second time.
+    StinkyInstruction* createSSubWritingSgprAndScc(int sgpr) {
+        AsmIRBuilder builder(*bb, arch);
+        StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::s_sub_u32, arch));
+        inst->addDestReg(StinkyRegister("s", sgpr, 1));
+        inst->addDestReg(StinkyRegister::getSCCRegister());
+        inst->addSrcReg(StinkyRegister("s", sgpr, 1));
+        inst->addSrcReg(StinkyRegister(1));
+        return inst;
+    }
+
+    // `s_cselect_b32 s<destSgpr>, s<srcSgpr>, 0` -- consumes SCC as ordinary SALU work.
+    StinkyInstruction* createSCselectReadingScc(int destSgpr, int srcSgpr) {
+        AsmIRBuilder builder(*bb, arch);
+        StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::s_cselect_b32, arch));
+        inst->addDestReg(StinkyRegister("s", destSgpr, 1));
+        inst->addSrcReg(StinkyRegister("s", srcSgpr, 1));
+        inst->addSrcReg(StinkyRegister(0));
+        inst->addSrcReg(StinkyRegister::getSCCRegister());
+        return inst;
+    }
+
+    StinkyInstruction* createDsRead(int destReg, int addrReg) {
+        return createDSLoadInBlock(bb, arch, destReg, addrReg);
+    }
+
+    // The last instruction before \p beforeIdx that writes SCC, or null when there is none.
+    const StinkyInstruction* lastSccWriterBefore(size_t beforeIdx) const {
+        const StinkyInstruction* found = nullptr;
+        size_t idx = 0;
+        for (const IRBase& ir : *bb) {
+            if (ir.getType() != IRBase::IRType::StinkyTofu) continue;
+            if (idx >= beforeIdx) break;
+            const auto* inst = cast<StinkyInstruction>(&ir);
+            if (writesScc(*inst)) found = inst;
+            ++idx;
+        }
+        return found;
     }
 
     void appendHandshake(int loadS0, int loadS1) {
@@ -539,4 +629,190 @@ TEST_F(InsertClusterBarrierPassTest, HoistedClusterWaitStaysIdempotent) {
     const auto afterFirst = clusterBarrierCounts();
     runPass();
     EXPECT_EQ(clusterBarrierCounts(), afterFirst) << "re-running the pass must be a no-op";
+// The cycle lead alone would drop the Rule 3 signal anchor inside a live SCC range:
+//
+//     v_wmma ...              <- padding, so "in front of the def" is not the segment start
+//     s_sub_u32 s90, s90, 1   <- SCC def (carry-out)
+//     v_wmma ... / ds_read    <- where the 500-cycle lead point falls
+//     v_wmma ...
+//     s_cselect_b32           <- reads the value the def computed
+//     s_barrier_signal -1 / s_barrier_wait -1 / tensor_load_to_lds
+//
+// The handshake opens with `s_cmp_eq_u32 sgprWaveIdx, 0`, so planting it at the lead point
+// would leave the s_cselect_b32 consuming the wave-id comparison. The anchor scan has to
+// keep climbing and come to rest in front of the def instead. Nothing rewrites SCC for it
+// afterwards: this def also writes an SGPR, so replaying it would decrement the counter a
+// second time. Run with STINKY_TEST_DUMP=1 to print the block before and after the pass.
+TEST_F(InsertClusterBarrierPassTest, Rule3SignalAnchorClimbsOutOfLiveSccRange) {
+    for (int i = 0; i < 4; ++i) createWMMA(8 + (i % 8) * 8, (i % 8) * 8, ((i + 1) % 8) * 8);
+    // The WMMA counts put the 500-cycle lead point just past the ds_read, i.e. between the
+    // def and the reader, which is the placement the scan has to reject.
+    StinkyInstruction* sccDef = createSSubWritingSgprAndScc(/*sgpr=*/90);
+    for (int i = 0; i < 16; ++i) createWMMA(8 + (i % 8) * 8, (i % 8) * 8, ((i + 1) % 8) * 8);
+    createDsRead(/*destReg=*/100, /*addrReg=*/104);
+    for (int i = 0; i < 64; ++i) createWMMA(8 + (i % 8) * 8, (i % 8) * 8, ((i + 1) % 8) * 8);
+    StinkyInstruction* sccReader = createSCselectReadingScc(/*destSgpr=*/91, /*srcSgpr=*/92);
+    appendHandshake(/*loadS0=*/0, /*loadS1=*/4);
+
+    const bool dump = testDumpEnabled();
+    if (dump) std::cerr << "\n=== INPUT (before InsertClusterBarrierPass):" << blockListing(*bb)
+                        << "\n";
+    runPass();
+    if (dump) std::cerr << "\n=== OUTPUT (after InsertClusterBarrierPass):" << blockListing(*bb)
+                        << "\n";
+
+    const size_t defIdx = indexOf(sccDef);
+    const size_t readerIdx = indexOf(sccReader);
+    ASSERT_NE(defIdx, static_cast<size_t>(-1));
+    ASSERT_NE(readerIdx, static_cast<size_t>(-1));
+
+    StinkyInstruction* handshakeCmp = findClusterWaveCmpAfter(0);
+    ASSERT_NE(handshakeCmp, nullptr) << "the pass planted no Rule 3 handshake";
+    const size_t handshakeIdx = indexOf(handshakeCmp);
+
+    EXPECT_LT(handshakeIdx, defIdx)
+        << "the handshake must climb above the SCC def rather than split its live range:"
+        << blockListing(*bb);
+    EXPECT_GT(handshakeIdx, 0u) << "the scan stopped in front of the def, not by falling back "
+                                   "to the segment start:"
+                                << blockListing(*bb);
+
+    // The value the reader consumes is whatever the last SCC write before it left behind.
+    const StinkyInstruction* lastWriter = lastSccWriterBefore(readerIdx);
+    ASSERT_NE(lastWriter, nullptr);
+    EXPECT_FALSE(isClusterWaveCmp(*lastWriter))
+        << "the handshake's wave-id compare is the last SCC write before the reader, so the "
+           "reader consumes it instead of the carry-out s_sub_u32 s90, s90, 1 computed:"
+        << blockListing(*bb);
+
+    // The lead still has to buy something: the signal must sit ahead of the barrier it
+    // was derived from, not collapse onto it.
+    StinkyInstruction* wgSignal = nullptr;
+    for (IRBase& ir : *bb) {
+        if (ir.getType() != IRBase::IRType::StinkyTofu) continue;
+        auto* inst = cast<StinkyInstruction>(&ir);
+        if (isWorkgroupBarrierSignalInst(*inst)) {
+            wgSignal = inst;
+            break;
+        }
+    }
+    ASSERT_NE(wgSignal, nullptr);
+    EXPECT_LT(handshakeIdx, indexOf(wgSignal))
+        << "the cluster signal must still lead its workgroup barrier:" << blockListing(*bb);
+}
+
+// Same shape, but with the def..reader range stretched until climbing out of it would put
+// the signal more than kRule3SignalMaxLeadCycles ahead of its wait. Clearing the range then
+// costs more overlap than it buys, so the anchor drops below the reader instead and ends up
+// nearer the wait than the nominal lead would have placed it.
+TEST_F(InsertClusterBarrierPassTest, Rule3SignalAnchorSinksBelowOverlongSccRange) {
+    StinkyInstruction* sccDef = createSSubWritingSgprAndScc(/*sgpr=*/90);
+    for (int i = 0; i < 60; ++i) createWMMA(8 + (i % 8) * 8, (i % 8) * 8, ((i + 1) % 8) * 8);
+    createDsRead(/*destReg=*/100, /*addrReg=*/104);
+    for (int i = 0; i < 64; ++i) createWMMA(8 + (i % 8) * 8, (i % 8) * 8, ((i + 1) % 8) * 8);
+    StinkyInstruction* sccReader = createSCselectReadingScc(/*destSgpr=*/91, /*srcSgpr=*/92);
+    // Room below the range for the anchor to land on.
+    for (int i = 0; i < 10; ++i) createWMMA(8 + (i % 8) * 8, (i % 8) * 8, ((i + 1) % 8) * 8);
+    appendHandshake(/*loadS0=*/0, /*loadS1=*/4);
+
+    const bool dump = testDumpEnabled();
+    if (dump) std::cerr << "\n=== INPUT (before InsertClusterBarrierPass):" << blockListing(*bb)
+                        << "\n";
+    runPass();
+    if (dump) std::cerr << "\n=== OUTPUT (after InsertClusterBarrierPass):" << blockListing(*bb)
+                        << "\n";
+
+    const size_t defIdx = indexOf(sccDef);
+    const size_t readerIdx = indexOf(sccReader);
+    ASSERT_NE(defIdx, static_cast<size_t>(-1));
+    ASSERT_NE(readerIdx, static_cast<size_t>(-1));
+
+    StinkyInstruction* handshakeCmp = findClusterWaveCmpAfter(0);
+    ASSERT_NE(handshakeCmp, nullptr) << "the pass planted no Rule 3 handshake";
+    const size_t handshakeIdx = indexOf(handshakeCmp);
+
+    EXPECT_GT(handshakeIdx, readerIdx)
+        << "an overlong range must be settled below, not by climbing over the def:"
+        << blockListing(*bb);
+
+    // Sinking below the range is only worth doing if it still leaves a real lead.
+    StinkyInstruction* wgSignal = nullptr;
+    for (IRBase& ir : *bb) {
+        if (ir.getType() != IRBase::IRType::StinkyTofu) continue;
+        auto* inst = cast<StinkyInstruction>(&ir);
+        if (isWorkgroupBarrierSignalInst(*inst)) {
+            wgSignal = inst;
+            break;
+        }
+    }
+    ASSERT_NE(wgSignal, nullptr);
+    EXPECT_LT(handshakeIdx, indexOf(wgSignal))
+        << "the signal must not collapse onto its workgroup barrier:" << blockListing(*bb);
+
+    const StinkyInstruction* lastWriter = lastSccWriterBefore(readerIdx);
+    ASSERT_NE(lastWriter, nullptr);
+    EXPECT_FALSE(isClusterWaveCmp(*lastWriter))
+        << "the reader must still see the carry-out s_sub_u32 s90, s90, 1 computed:"
+        << blockListing(*bb);
+}
+
+// A boundary decides the anchor before the cycle lead ever gets a say, and the spot it
+// picks is inside a live SCC range:
+//
+//     s_barrier_wait -3       <- boundary: the scan may not climb past this
+//     s_sub_u32 s90, s90, 1   <- SCC def, stranded above the reachable region
+//     v_wmma ...
+//     s_barrier_signal -1     <- the scan resumes below this pair, which is where the
+//     s_barrier_wait -1          boundary hands back an anchor -- inside the live range
+//     v_wmma ...
+//     s_cselect_b32           <- reads the value the def computed
+//     v_wmma ...
+//     s_barrier_signal -1 / s_barrier_wait -1 / tensor_load_to_lds
+//
+// Climbing is not an option here, so the only legal correction is the other direction:
+// drop below the reader. The boundary itself still has to hold.
+TEST_F(InsertClusterBarrierPassTest, Rule3BoundaryForcedAnchorSinksOutOfLiveSccRange) {
+    StinkyInstruction* clusterWait = createBarrierWait(kClusterBarrierId);
+    StinkyInstruction* sccDef = createSSubWritingSgprAndScc(/*sgpr=*/90);
+    for (int i = 0; i < 2; ++i) createWMMA(8 + (i % 8) * 8, (i % 8) * 8, ((i + 1) % 8) * 8);
+    createBarrierSignal(kWorkgroupBarrierId);
+    createBarrierWait(kWorkgroupBarrierId);
+    for (int i = 0; i < 20; ++i) createWMMA(8 + (i % 8) * 8, (i % 8) * 8, ((i + 1) % 8) * 8);
+    StinkyInstruction* sccReader = createSCselectReadingScc(/*destSgpr=*/91, /*srcSgpr=*/92);
+    // Room below the range for the anchor to land on.
+    for (int i = 0; i < 5; ++i) createWMMA(8 + (i % 8) * 8, (i % 8) * 8, ((i + 1) % 8) * 8);
+    StinkyInstruction* trigger = createBarrierSignal(kWorkgroupBarrierId);
+    createBarrierWait(kWorkgroupBarrierId);
+    createTensorLoadInBlock(bb, arch, /*src0Reg=*/0, /*src1Reg=*/4);
+
+    const bool dump = testDumpEnabled();
+    if (dump) std::cerr << "\n=== INPUT (before InsertClusterBarrierPass):" << blockListing(*bb)
+                        << "\n";
+    runPass();
+    if (dump) std::cerr << "\n=== OUTPUT (after InsertClusterBarrierPass):" << blockListing(*bb)
+                        << "\n";
+
+    const size_t defIdx = indexOf(sccDef);
+    const size_t readerIdx = indexOf(sccReader);
+    ASSERT_NE(defIdx, static_cast<size_t>(-1));
+    ASSERT_NE(readerIdx, static_cast<size_t>(-1));
+
+    StinkyInstruction* handshakeCmp = findClusterWaveCmpAfter(0);
+    ASSERT_NE(handshakeCmp, nullptr) << "the pass planted no Rule 3 handshake";
+    const size_t handshakeIdx = indexOf(handshakeCmp);
+
+    EXPECT_GT(handshakeIdx, indexOf(clusterWait))
+        << "the cluster wait is a hard boundary and must not be crossed:" << blockListing(*bb);
+    EXPECT_GT(handshakeIdx, readerIdx)
+        << "the anchor cannot climb over the def here, so it must settle below the reader "
+           "rather than split the range:"
+        << blockListing(*bb);
+    EXPECT_LT(handshakeIdx, indexOf(trigger))
+        << "the signal must not collapse onto its workgroup barrier:" << blockListing(*bb);
+
+    const StinkyInstruction* lastWriter = lastSccWriterBefore(readerIdx);
+    ASSERT_NE(lastWriter, nullptr);
+    EXPECT_FALSE(isClusterWaveCmp(*lastWriter))
+        << "the reader must still see the carry-out s_sub_u32 s90, s90, 1 computed:"
+        << blockListing(*bb);
 }
