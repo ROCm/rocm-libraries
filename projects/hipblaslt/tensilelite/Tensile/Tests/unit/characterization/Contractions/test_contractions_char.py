@@ -87,6 +87,7 @@ def test_size_mapping(solution_state, snapshot):
     from Tensile.Common.Utilities import state
     sm = C.SizeMapping.FromOriginalState(solution_state)
     assert isinstance(state(sm), dict)
+    assert sm.PrefetchLocalRead == solution_state.get("PrefetchLocalRead", 0)
 
 
 def test_internal_args_support(solution_state):

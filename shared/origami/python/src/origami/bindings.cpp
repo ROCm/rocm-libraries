@@ -120,6 +120,31 @@ NB_MODULE(origami, m) {
       .def("total", &origami::dim4_t::total);
 
   // Tensile-specific parameters (used when prediction_mode == simulation)
+  nanobind::class_<origami::heuristic_params_t>(m, "heuristic_params_t")
+      .def(nanobind::init<>())
+      .def_rw("weight_mem_l2", &origami::heuristic_params_t::weight_mem_l2)
+      .def_rw("weight_mem_mall", &origami::heuristic_params_t::weight_mem_mall)
+      .def_rw("weight_mem_dram", &origami::heuristic_params_t::weight_mem_dram)
+      .def_rw("weight_compute", &origami::heuristic_params_t::weight_compute)
+      .def_rw("weight_memory", &origami::heuristic_params_t::weight_memory)
+      .def_rw("weight_wg_setup", &origami::heuristic_params_t::weight_wg_setup)
+      .def_rw("weight_prologue", &origami::heuristic_params_t::weight_prologue)
+      .def_rw("weight_epilogue", &origami::heuristic_params_t::weight_epilogue)
+      .def_rw("weight_loop_overhead", &origami::heuristic_params_t::weight_loop_overhead)
+      .def_rw("weight_tile_total", &origami::heuristic_params_t::weight_tile_total)
+      .def_rw("main_memory_load_latency", &origami::heuristic_params_t::main_memory_load_latency)
+      .def_rw("occupancy_decay_base", &origami::heuristic_params_t::occupancy_decay_base)
+      .def_rw("main_loop_efficiency", &origami::heuristic_params_t::main_loop_efficiency)
+      .def_rw("l2_depth_sq", &origami::heuristic_params_t::l2_depth_sq)
+      .def_rw("l2_pollution_penalty", &origami::heuristic_params_t::l2_pollution_penalty)
+      .def_rw("l2_depth_penalty", &origami::heuristic_params_t::l2_depth_penalty)
+      .def_rw("reject", &origami::heuristic_params_t::reject);
+
+  m.def("set_global_heuristic_params", &origami::set_global_heuristic_params);
+  m.def("get_global_heuristic_params", &origami::get_global_heuristic_params);
+  m.def("clear_global_heuristic_params", &origami::clear_global_heuristic_params);
+  m.def("has_global_heuristic_params", &origami::has_global_heuristic_params);
+
   nanobind::class_<origami::tensile_params_t>(m, "tensile_params_t")
       .def(nanobind::init<>())
       .def_rw("depth_u", &origami::tensile_params_t::depth_u)
@@ -136,6 +161,8 @@ NB_MODULE(origami, m) {
       .def_rw("wave_group_m", &origami::tensile_params_t::wave_group_m)
       .def_rw("wave_group_n", &origami::tensile_params_t::wave_group_n)
       .def_rw("prefetch_global_read", &origami::tensile_params_t::prefetch_global_read)
+      .def_rw("prefetch_local_read", &origami::tensile_params_t::prefetch_local_read)
+      .def_rw("stream_k", &origami::tensile_params_t::stream_k)
       .def_rw("math_clocks_unrolled_loop", &origami::tensile_params_t::math_clocks_unrolled_loop)
       .def_rw("swizzle_a", &origami::tensile_params_t::swizzle_a)
       .def_rw("swizzle_b", &origami::tensile_params_t::swizzle_b)
@@ -166,6 +193,7 @@ NB_MODULE(origami, m) {
       .def_rw("gwvw_d", &origami::config_t::gwvw_d)
       .def_rw("vector_width_a", &origami::config_t::vector_width_a)
       .def_rw("vector_width_b", &origami::config_t::vector_width_b)
+      .def_rw("index", &origami::config_t::index)
       // Tensile-specific parameters accessed via variant backend
       .def("tensile",
            static_cast<origami::tensile_params_t& (origami::config_t::*)()>(
@@ -203,12 +231,33 @@ NB_MODULE(origami, m) {
       .def_rw("splitting_factor", &origami::gemm::context_t::splitting_factor)
       .def_rw("num_wgs", &origami::gemm::context_t::num_wgs)
       .def_rw("num_timesteps", &origami::gemm::context_t::num_timesteps)
+      .def_rw("n_cu", &origami::gemm::context_t::n_cu)
       .def_rw("active_cus", &origami::gemm::context_t::active_cus)
       .def_rw("mem_bw_limited", &origami::gemm::context_t::mem_bw_limited)
       .def_rw("write_mem_bw_limited", &origami::gemm::context_t::write_mem_bw_limited)
+      .def_rw("k_per_split", &origami::gemm::context_t::k_per_split)
+      .def_rw("k_iters", &origami::gemm::context_t::k_iters)
+      .def_rw("real_occupancy", &origami::gemm::context_t::real_occupancy)
+      .def_rw("occupancy_factor", &origami::gemm::context_t::occupancy_factor)
+      .def_rw("a_bytes", &origami::gemm::context_t::a_bytes)
+      .def_rw("b_bytes", &origami::gemm::context_t::b_bytes)
+      .def_rw("d_bytes", &origami::gemm::context_t::d_bytes)
       .def_rw("tile_elements", &origami::gemm::context_t::tile_elements)
       .def_rw("output_tile_bytes", &origami::gemm::context_t::output_tile_bytes)
       .def_rw("wgm", &origami::gemm::context_t::wgm);
+
+  nanobind::class_<origami::gemm::gemm_trace_t>(m, "gemm_trace_t")
+      .def(nanobind::init<>())
+      .def_rw("accepted", &origami::gemm::gemm_trace_t::accepted)
+      .def_rw("context", &origami::gemm::gemm_trace_t::context)
+      .def_rw("cache_hit_rates", &origami::gemm::gemm_trace_t::cache_hit_rates)
+      .def_rw("compute_latency", &origami::gemm::gemm_trace_t::compute_latency)
+      .def_rw("memory_latency", &origami::gemm::gemm_trace_t::memory_latency)
+      .def_rw("epilogue_latency", &origami::gemm::gemm_trace_t::epilogue_latency)
+      .def_rw("tile_latency", &origami::gemm::gemm_trace_t::tile_latency)
+      .def_rw("timestep_latency", &origami::gemm::gemm_trace_t::timestep_latency)
+      .def_rw("parallel_reduction_latency", &origami::gemm::gemm_trace_t::parallel_reduction_latency)
+      .def_rw("total_latency", &origami::gemm::gemm_trace_t::total_latency);
 
   nanobind::class_<origami::problem_t>(m, "problem_t")
       .def(nanobind::init<>())
@@ -402,6 +451,9 @@ NB_MODULE(origami, m) {
   m.def("compute_total_latency",
         &origami::gemm::compute_total_latency,
         "Compute total latency (uses Formocast when config.prediction_mode == simulation)");
+  m.def("trace_total_latency",
+        &origami::gemm::trace_total_latency,
+        "Return calibration trace from the production analytical functions");
 
   // Attention functions
   m.def("att_compute_total_latency",

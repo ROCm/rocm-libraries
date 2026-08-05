@@ -29,6 +29,8 @@ try:
         problem_t,
         hardware_t,
         context_t,
+        gemm_trace_t,
+        heuristic_params_t,
         # Hardware functions
         get_hardware_for_device,
         get_hardware_for_arch,
@@ -45,8 +47,12 @@ try:
         # Performance functions
         compute_perf_gflops,
         compute_total_latency,
+        trace_total_latency,
         compute_number_matrix_instructions,
         compute_mt_compute_latency,
+        calculate_work_utilization,
+        compute_cvt_overhead,
+        compute_cvt_overhead_x1,
         # Memory functions
         check_lds_capacity,
         estimate_l2_hit,
@@ -66,9 +72,14 @@ try:
         select_grid_size,
         select_reduction,
         select_workgroup_mapping,
+        select_staggerU,
         compute_number_of_output_tiles,
         # Reduction functions
         int_to_reduction_t,
+        set_global_heuristic_params,
+        get_global_heuristic_params,
+        clear_global_heuristic_params,
+        has_global_heuristic_params,
         # Attention functions
         att_compute_total_latency,
         att_compute_number_matrix_instructions,
@@ -117,6 +128,8 @@ __all__ = [
     "problem_t",
     "hardware_t",
     "context_t",
+    "gemm_trace_t",
+    "heuristic_params_t",
     # Hardware functions
     "get_hardware_for_device",
     "get_hardware_for_arch",
@@ -133,8 +146,12 @@ __all__ = [
     # Performance functions
     "compute_perf_gflops",
     "compute_total_latency",
+    "trace_total_latency",
     "compute_number_matrix_instructions",
     "compute_mt_compute_latency",
+    "calculate_work_utilization",
+    "compute_cvt_overhead",
+    "compute_cvt_overhead_x1",
     # Memory functions
     "wgm_to_grid",
     "compute_l2_tiles",
@@ -153,9 +170,14 @@ __all__ = [
     "select_grid_size",
     "select_reduction",
     "select_workgroup_mapping",
+    "select_staggerU",
     "compute_number_of_output_tiles",
     # Reduction functions
     "int_to_reduction_t",
+    "set_global_heuristic_params",
+    "get_global_heuristic_params",
+    "clear_global_heuristic_params",
+    "has_global_heuristic_params",
     # Attention functions
     "att_compute_total_latency",
     "att_compute_number_matrix_instructions",

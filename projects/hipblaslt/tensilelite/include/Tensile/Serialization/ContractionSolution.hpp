@@ -129,6 +129,7 @@ namespace TensileLite
                                  s.globalSplitUWorkGroupMappingRoundRobin);
                 iot::mapRequired(io, "CUOccupancy", s.CUOccupancy);
                 iot::mapRequired(io, "PrefetchGlobalRead", s.PrefetchGlobalRead);
+                iot::mapOptional(io, "PrefetchLocalRead", s.PrefetchLocalRead);
                 iot::mapRequired(io, "MathClocksUnrolledLoop", s.MathClocksUnrolledLoop);
                 iot::mapRequired(io, "synchronizerSizePerWG", s.synchronizerSizePerWG);
                 iot::mapRequired(io, "nonTemporalA", s.nonTemporalA);

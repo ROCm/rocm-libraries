@@ -140,3 +140,68 @@ TEST_CASE("Origami streamk: select_hybrid_mode sm_count_target=0 uses N_CU",
   auto b = origami::streamk::select_hybrid_mode(problem, hardware, config, hardware.N_CU);
   REQUIRE(a == b);
 }
+
+TEST_CASE("Origami streamk: gfx1151 k-split grid uses all physical CUs",
+          "[origami][streamk][gfx1151]") {
+  auto hardware = origami::hardware_t::get_hardware_for_arch(
+      origami::hardware_t::architecture_t::gfx1151,
+      /*N_CU=*/40,
+      /*lds_capacity=*/64 * 1024,
+      /*rf_capacity=*/512 * 1024,
+      /*L2_capacity=*/2 * 1024 * 1024,
+      /*compute_clock_khz=*/2900000);
+  auto config = make_config(128, 128, 32, 16, 16, 16, false, 8, /*occupancy=*/1);
+  config.workspace_size            = 512 * 1024 * 1024;
+  config.workspace_size_per_elem_c = 4;
+
+  // 10 output tiles with 64 K iterations each can split four ways across 40 CUs.
+  auto problem = make_problem(/*m=*/128, /*n=*/1280, /*k=*/2048);
+  config.reduction_strategy = origami::reduction_t::parallel;
+  REQUIRE(origami::streamk::select_grid_size(
+              problem, hardware, config, origami::grid_selection_t::k_split_aware)
+          == 40);
+}
+
+TEST_CASE("Origami streamk: gfx1151 k-split grid honors a CU budget",
+          "[origami][streamk][gfx1151]") {
+  auto hardware = origami::hardware_t::get_hardware_for_arch(
+      origami::hardware_t::architecture_t::gfx1151,
+      /*N_CU=*/40,
+      /*lds_capacity=*/64 * 1024,
+      /*rf_capacity=*/512 * 1024,
+      /*L2_capacity=*/2 * 1024 * 1024,
+      /*compute_clock_khz=*/2900000);
+  auto config = make_config(128, 128, 32, 16, 16, 16, false, 8, /*occupancy=*/1);
+  config.workspace_size            = 512 * 1024 * 1024;
+  config.workspace_size_per_elem_c = 4;
+  config.reduction_strategy        = origami::reduction_t::parallel;
+
+  auto problem    = make_problem(/*m=*/128, /*n=*/1280, /*k=*/2048);
+  problem.num_cus = 20;
+  REQUIRE(origami::streamk::select_grid_size(
+              problem, hardware, config, origami::grid_selection_t::k_split_aware)
+          == 20);
+}
+
+TEST_CASE("Origami streamk: gfx1151 reduction selects parallel only for deep low-tile problems",
+          "[origami][streamk][gfx1151]") {
+  auto hardware = origami::hardware_t::get_hardware_for_arch(
+      origami::hardware_t::architecture_t::gfx1151,
+      /*N_CU=*/40,
+      /*lds_capacity=*/64 * 1024,
+      /*rf_capacity=*/512 * 1024,
+      /*L2_capacity=*/2 * 1024 * 1024,
+      /*compute_clock_khz=*/2900000);
+  auto config = make_config(128, 128, 32, 16, 16, 16, false, 8, /*occupancy=*/1);
+
+  auto deep = make_problem(/*m=*/128, /*n=*/1280, /*k=*/2048);
+  REQUIRE(origami::streamk::select_reduction(
+              deep, hardware, config, origami::grid_selection_t::k_split_aware)
+          == origami::reduction_t::parallel);
+
+  auto shallow = deep;
+  shallow.size.k = 1024;
+  REQUIRE(origami::streamk::select_reduction(
+              shallow, hardware, config, origami::grid_selection_t::k_split_aware)
+          == origami::reduction_t::tree);
+}

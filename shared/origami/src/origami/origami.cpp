@@ -18,6 +18,39 @@
 
 namespace origami {
 
+namespace {
+
+bool is_gfx1151_tiny_n_stagger_scope(const problem_t& problem,
+                                     const hardware_t& hardware,
+                                     const config_t& config,
+                                     size_t sk_grid) {
+  if (hardware.arch != hardware_t::architecture_t::gfx1151 || hardware.N_CU != 40 ||
+      problem.a_dtype != data_type_t::Half || problem.b_dtype != data_type_t::Half ||
+      problem.mi_dtype != data_type_t::Float || problem.a_transpose != transpose_t::T ||
+      problem.b_transpose != transpose_t::N || problem.batch != 1 || problem.size.n < 1 ||
+      problem.size.n > 128 || problem.size.k < 2048 || sk_grid == 0 ||
+      !config.has_tensile_params()) {
+    return false;
+  }
+
+  const bool measured_tile =
+      (config.mt.m == 64 && config.mt.n == 16) ||
+      (config.mt.m == 128 && config.mt.n == 32) ||
+      (config.mt.m == 128 && config.mt.n == 128);
+  const auto& tensile = config.tensile();
+  const size_t num_tiles = math::safe_ceil_div(problem.size.m, config.mt.m) *
+                           math::safe_ceil_div(problem.size.n, config.mt.n);
+  constexpr size_t kStagger = 16;
+  constexpr size_t kStrideShift = 2;
+  const size_t num_k_iterations = math::safe_ceil_div(problem.size.k, config.mt.k);
+  const bool enough_k_iterations = num_k_iterations >= (kStagger << kStrideShift);
+  return measured_tile && config.mt.k == 32 && tensile.depth_u == 32 &&
+         tensile.prefetch_global_read == 2 && tensile.prefetch_local_read == 0 &&
+         tensile.stream_k == 3 && sk_grid <= num_tiles && enough_k_iterations;
+}
+
+}  // namespace
+
 std::vector<prediction_result_t> select_topk_configs(const problem_t& problem,
                                                      const hardware_t& hardware,
                                                      const std::vector<config_t>& configs,
@@ -85,6 +118,13 @@ workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
   auto num_timesteps =
       skGrid > numMTs ? math::safe_ceil_div(skGrid, numCUs) : math::safe_ceil_div(numMTs, numCUs);
   auto split_factor = math::safe_ceil_div(skGrid, numMTs * batch);
+
+  // The validated tiny-N StaggerU policy requires row-major WGM8. Keep the
+  // mapping and stagger decisions coupled under the same narrow recipe guard.
+  if (is_gfx1151_tiny_n_stagger_scope(problem, hardware, config, skGrid)) {
+    // Match the controlled kernels exactly: WGM8, WGMXCC1, no chunking.
+    return workgroup_mapping_t{0, 1, 8};
+  }
 
   // Stream-K fixup deadlock prevention:
   // When the SK grid doesn't evenly divide tiles, some workgroups produce partial
@@ -389,6 +429,16 @@ staggerU_t select_staggerU(const problem_t& problem,
   auto num_timesteps =
       skGrid > numMTs ? math::safe_ceil_div(skGrid, numCUs) : math::safe_ceil_div(numMTs, numCUs);
   auto split_factor = math::safe_ceil_div(skGrid, numMTs);
+
+  // gfx1151 HHS/TN SK3 tiny-N policy. A controlled DEV/validation/BLIND
+  // campaign found SUM0/SU16/256-byte stride to be tail-safe for these exact
+  // recipe families. Keep this post-recipe rule narrow; all other cases use
+  // the analytical selector below.
+  if (wgm == 8 && is_gfx1151_tiny_n_stagger_scope(problem, hardware, config, skGrid)) {
+    constexpr size_t kStagger = 16;
+    constexpr size_t kStrideShift = 2;  // DU32 * fp16 * 2^2 = 256 bytes.
+    return staggerU_t{0, kStagger, kStrideShift};
+  }
 
   // Early Exit: Batch is not supported yet
   if (batch != 1) return staggerU_t{0, 0, 0};

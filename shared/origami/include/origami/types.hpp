@@ -428,6 +428,12 @@ struct tensile_params_t {
   /// Prefetch global read depth
   int prefetch_global_read = 2;
 
+  /// Prefetch local read depth
+  int prefetch_local_read = 0;
+
+  /// StreamK algorithm (0 = disabled, 3 = SK3)
+  int stream_k = 0;
+
   /// Math clocks per unrolled loop iteration (0 = auto-calculate)
   int math_clocks_unrolled_loop = 0;
 
@@ -450,6 +456,7 @@ struct tensile_params_t {
            num_loads_coalesced_b == o.num_loads_coalesced_b && wave_num == o.wave_num &&
            wave_group_m == o.wave_group_m && wave_group_n == o.wave_group_n &&
            prefetch_global_read == o.prefetch_global_read &&
+           prefetch_local_read == o.prefetch_local_read && stream_k == o.stream_k &&
            math_clocks_unrolled_loop == o.math_clocks_unrolled_loop && swizzle_a == o.swizzle_a &&
            swizzle_b == o.swizzle_b && workgroup_mapping_xcc == o.workgroup_mapping_xcc &&
            workgroup_mapping_xcc_group == o.workgroup_mapping_xcc_group &&
@@ -472,6 +479,8 @@ struct tensile_params_t {
                               wave_group_m,
                               wave_group_n,
                               prefetch_global_read,
+                              prefetch_local_read,
+                              stream_k,
                               math_clocks_unrolled_loop,
                               swizzle_a,
                               swizzle_b,

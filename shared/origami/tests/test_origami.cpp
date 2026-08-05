@@ -908,6 +908,95 @@ TEST_CASE("Origami: select_staggerU unit test", "[origami]") {
   }
 }
 
+TEST_CASE("Origami: gfx1151 tiny-N StaggerU policy is narrowly scoped", "[origami][gfx1151]") {
+  auto hardware = origami::hardware_t::get_hardware_for_arch(
+      origami::hardware_t::architecture_t::gfx1151,
+      /*N_CU=*/40,
+      /*lds_capacity=*/64 * 1024,
+      /*rf_capacity=*/512 * 1024,
+      /*L2_capacity=*/2 * 1024 * 1024,
+      /*compute_clock_khz=*/2900000);
+
+  auto make_tiny_config = [](size_t mt_m, size_t mt_n) {
+    auto config = make_config(mt_m, mt_n, 32, 16, 16, 16);
+    auto& tensile = config.tensile();
+    tensile.depth_u = 32;
+    tensile.prefetch_global_read = 2;
+    tensile.prefetch_local_read = 0;
+    tensile.stream_k = 3;
+    return config;
+  };
+  auto make_tiny_problem = [](size_t n, size_t k = 4096) {
+    auto problem = make_problem(4096, n, k, origami::transpose_t::T, origami::transpose_t::N);
+    problem.a_dtype = problem.b_dtype = origami::data_type_t::Half;
+    problem.mi_dtype = origami::data_type_t::Float;
+    return problem;
+  };
+  auto grid = [](const origami::problem_t& problem, const origami::config_t& config) {
+    return origami::math::safe_ceil_div(problem.size.m, config.mt.m) *
+           origami::math::safe_ceil_div(problem.size.n, config.mt.n);
+  };
+
+  for (const auto& tile : {std::pair<size_t, size_t>{64, 16}, {128, 32}, {128, 128}}) {
+    for (size_t n : {1, 16, 64, 128}) {
+      auto problem = make_tiny_problem(n);
+      auto config = make_tiny_config(tile.first, tile.second);
+      auto result = origami::select_staggerU(problem, hardware, config, grid(problem, config), 8);
+      REQUIRE(result.staggerUMapping == 0);
+      REQUIRE(result.staggerU == 16);
+      REQUIRE(result.staggerUStrideShift == 2);
+    }
+  }
+
+  auto problem = make_tiny_problem(16, 6144);  // non-power-of-two K is measured.
+  auto config = make_tiny_config(64, 16);
+  auto mapping = origami::select_workgroup_mapping(problem, hardware, config, grid(problem, config));
+  REQUIRE(mapping.wgm == 8);
+  REQUIRE(mapping.wgmxcc == 1);
+  REQUIRE(mapping.wgmxccchunk == 0);
+  REQUIRE(origami::select_staggerU(problem, hardware, config, grid(problem, config), mapping.wgm)
+              .staggerU == 16);
+
+  SECTION("scope boundaries fall back") {
+    auto assert_not_policy = [&](const origami::problem_t& p, const origami::config_t& c,
+                                 size_t sk_grid, int32_t wgm = 8) {
+      auto result = origami::select_staggerU(p, hardware, c, sk_grid, wgm);
+      REQUIRE_FALSE((result.staggerUMapping == 0 && result.staggerU == 16 &&
+                     result.staggerUStrideShift == 2));
+    };
+
+    auto outside_n = problem;
+    outside_n.size.n = 129;
+    assert_not_policy(outside_n, config, grid(outside_n, config));
+
+    auto wrong_layout = problem;
+    wrong_layout.a_transpose = origami::transpose_t::N;
+    assert_not_policy(wrong_layout, config, grid(wrong_layout, config));
+
+    auto wrong_dtype = problem;
+    wrong_dtype.mi_dtype = origami::data_type_t::Half;
+    assert_not_policy(wrong_dtype, config, grid(wrong_dtype, config));
+
+    auto wrong_schedule = config;
+    wrong_schedule.tensile().prefetch_local_read = 1;
+    assert_not_policy(problem, wrong_schedule, grid(problem, wrong_schedule));
+
+    auto wrong_streamk = config;
+    wrong_streamk.tensile().stream_k = 0;
+    assert_not_policy(problem, wrong_streamk, grid(problem, wrong_streamk));
+
+    auto wrong_tile = make_tiny_config(64, 32);
+    assert_not_policy(problem, wrong_tile, grid(problem, wrong_tile));
+
+    auto shallow = make_tiny_problem(16, 1024);
+    assert_not_policy(shallow, config, grid(shallow, config));
+
+    assert_not_policy(problem, config, grid(problem, config), 4);
+    assert_not_policy(problem, config, 2 * grid(problem, config));
+    assert_not_policy(problem, config, 0);
+  }
+}
+
 TEST_CASE("Origami: select_workgroup_mapping unit test", "[Origami]") {
   for (int gpu_arch : test_architectures) {
     DYNAMIC_SECTION("gfx" << gpu_arch << " - select_workgroup_mapping unit test") {

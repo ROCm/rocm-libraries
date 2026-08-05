@@ -355,6 +355,61 @@ namespace
         return device;
     }
 
+    hip::HipAMDGPU makeGfx1151DeviceWithAnalytical()
+    {
+        auto hw = origami::hardware_t::get_hardware_for_arch(
+            origami::hardware_t::architecture_t::gfx1151,
+            40,
+            64 * 1024,
+            512 * 1024,
+            2 * 1024 * 1024,
+            2900000);
+        hip::HipAMDGPU device;
+        device.processor          = AMDGPU::Processor::gfx1151;
+        device.computeUnitCount   = 40;
+        device.deviceName         = "test-gfx1151-analytical";
+        device.analyticalHardware = std::make_shared<origami::hardware_t>(hw);
+        return device;
+    }
+
+    ContractionProblemGemm makeGfx1151TinyNProblem(size_t n = 16, size_t k = 4096)
+    {
+        auto problem = ContractionProblemGemm::GEMM(
+            true, false, 4096, n, k, k, k, 4096, 1.0, false, 1);
+        problem.resetTensor(ContractionProblemGemm::TENSOR::A,
+                            rocisa::DataType::Half,
+                            {k, 4096},
+                            {1, k});
+        problem.resetTensor(ContractionProblemGemm::TENSOR::B,
+                            rocisa::DataType::Half,
+                            {k, n},
+                            {1, k});
+        problem.resetTensor(ContractionProblemGemm::TENSOR::C,
+                            rocisa::DataType::Half,
+                            {4096, n},
+                            {1, 4096});
+        problem.resetTensor(ContractionProblemGemm::TENSOR::D,
+                            rocisa::DataType::Half,
+                            {4096, n},
+                            {1, 4096});
+        problem.setComputeInputTypeA(rocisa::DataType::Half);
+        problem.setComputeInputTypeB(rocisa::DataType::Half);
+        problem.setBetaType(rocisa::DataType::Float);
+        problem.setHighPrecisionAccumulate(true);
+        return problem;
+    }
+
+    void initGfx1151TinyNSolution(ContractionSolution& solution)
+    {
+        solution.sizeMapping.streamK = 3;
+        solution.sizeMapping.macroTile = TensileLite::dim3(64, 16, 1);
+        solution.sizeMapping.depthU = 32;
+        solution.sizeMapping.workGroupMapping = 0;
+        solution.sizeMapping.workGroupMappingXCC = -1;
+        solution.sizeMapping.PrefetchGlobalRead = 2;
+        solution.sizeMapping.PrefetchLocalRead = 0;
+    }
+
     void initStreamK5Solution(ContractionSolution& solution)
     {
         solution.sizeMapping.streamK           = 5;
@@ -702,6 +757,35 @@ TEST(StreamK5WorkspaceRegressionTest, QueryAndLaunchAgreeForDynamicMode)
     // included by both query and launch so they agree.
     EXPECT_GE(ws, env.solution.partialTileSize(grid))
         << "Workspace must cover at least partialTileSize(grid)";
+}
+
+TEST(AutoStaggerUTest, Gfx1151TinyNTransportsMeasuredPolicy)
+{
+    auto device = makeGfx1151DeviceWithAnalytical();
+    auto problem = makeGfx1151TinyNProblem();
+    ContractionSolution solution;
+    initGfx1151TinyNSolution(solution);
+
+    auto mapping = solution.calculateAutoWGM(problem, &device, 64);
+    EXPECT_EQ(std::get<0>(mapping), 8);
+    EXPECT_EQ(std::get<1>(mapping), 1);
+    EXPECT_EQ(std::get<2>(mapping), 0);
+
+    auto result = solution.calculateAutoStaggerU(problem, &device, 64, std::get<0>(mapping));
+    EXPECT_EQ(std::get<0>(result), 0);
+    EXPECT_EQ(std::get<1>(result), 16);
+    EXPECT_EQ(std::get<2>(result), 2);
+}
+
+TEST(AutoStaggerUTest, Gfx1151TinyNFallsBackOutsideScope)
+{
+    auto device = makeGfx1151DeviceWithAnalytical();
+    auto problem = makeGfx1151TinyNProblem(129);
+    ContractionSolution solution;
+    initGfx1151TinyNSolution(solution);
+
+    auto result = solution.calculateAutoStaggerU(problem, &device, 64, 8);
+    EXPECT_NE(result, std::make_tuple(size_t{0}, size_t{16}, size_t{2}));
 }
 
 TEST(StreamK5WorkspaceRegressionTest, StaticModeOmitsQueueRegion)

@@ -179,6 +179,25 @@ def test_hardware_for_arch_gfx90a():
 
 
 @pytest.mark.integration
+def test_hardware_for_arch_gfx1151():
+    """Test the physical-CU gfx1151 profile used by StreamK selection."""
+    hardware = origami.get_hardware_for_arch(
+        arch=origami.architecture_t.gfx1151,
+        N_CU=40,
+        lds_capacity=64 * 1024,
+        rf_capacity=512 * 1024,
+        L2_capacity=2 * 1024 * 1024,
+        compute_clock_khz=2900000,
+    )
+
+    assert hardware.N_CU == 40
+    assert hardware.lds_capacity == 64 * 1024
+    assert hardware.L2_capacity == 2 * 1024 * 1024
+    assert hardware.NUM_XCD == 1
+    assert hardware.parallel_mi_cu == 2
+
+
+@pytest.mark.integration
 def test_hardware_for_arch_gfx1200():
     """Test creating hardware object for gfx1200 using get_hardware_for_arch."""
     hardware = origami.get_hardware_for_arch(

@@ -149,6 +149,20 @@ void register_cms_kernels(origami::heuristics_database_t& db) {
 
 namespace origami {
 
+namespace {
+bool g_heuristic_override_active = false;
+heuristic_params_t g_heuristic_override_params;
+}  // namespace
+
+void set_global_heuristic_params(const heuristic_params_t& params) {
+  g_heuristic_override_params = params;
+  g_heuristic_override_active = true;
+}
+
+heuristic_params_t get_global_heuristic_params() { return g_heuristic_override_params; }
+void clear_global_heuristic_params() { g_heuristic_override_active = false; }
+bool has_global_heuristic_params() { return g_heuristic_override_active; }
+
 // ============================================================================
 // heuristic_params_t Implementation
 // ============================================================================
@@ -342,6 +356,12 @@ heuristic_params_t heuristics_database_t::lookup(const problem_t& problem,
   // When heuristics are disabled, always return default parameters (no overrides).
   if (!origami::runtime_options::get().heuristics_enabled) { return default_params_; }
 
+  if (g_heuristic_override_active) {
+    heuristic_params_t result = g_heuristic_override_params;
+    apply_tf32_heuristics(result, problem, hardware, config);
+    return result;
+  }
+
   // Start with default parameters
   heuristic_params_t result = default_params_;
 
@@ -446,7 +466,30 @@ void heuristics_database_t::initialize_defaults() {
   register_cms_kernels(*this);
 
   // ========================================================================
-  // HEURISTIC 3: Reject gfx950 BF16 TN subtile kernels for small K
+  // HEURISTIC 3: Reject gfx1151 FP16 TN MT192x128x64 for deep-K large-M
+  // ========================================================================
+  // Dedicated SK3 measurements show this tile remains useful below M=3072,
+  // but has severe tails for K>=8192 once M reaches 3072. Keep the rule
+  // narrowly scoped so smaller-M winners are unaffected.
+  {
+    heuristic_params_t reject_params;
+    reject_params.reject = true;
+
+    heuristic_key_t key;
+    key.arch        = hardware_t::architecture_t::gfx1151;
+    key.mi_dtype    = data_type_t::Half;
+    key.a_transpose = transpose_t::T;
+    key.b_transpose = transpose_t::N;
+    key.mt_m        = 192;
+    key.mt_n        = 128;
+    key.mt_k        = 64;
+    key.min_m       = 3072;
+    key.min_k       = 8192;
+    add_entry(key, reject_params);
+  }
+
+  // ========================================================================
+  // HEURISTIC 4: Reject gfx950 BF16 TN subtile kernels for small K
   // ========================================================================
   // Subtile kernels are not competitive when the reduction dimension is small
   // (K < 512). Scoped to gfx950 BF16 TN (a_transpose=T, b_transpose=N).

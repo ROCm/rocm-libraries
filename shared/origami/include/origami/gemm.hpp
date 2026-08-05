@@ -502,5 +502,28 @@ ORIGAMI_EXPORT double compute_total_latency(const problem_t& problem,
                              const hardware_t& hardware,
                              const config_t& config);
 
+/**
+ * @brief Calibration trace assembled from the production analytical functions.
+ *
+ * This is a read-only training/parity aid. It does not participate in runtime
+ * ranking and intentionally exposes only values already computed by Origami.
+ */
+struct ORIGAMI_EXPORT gemm_trace_t {
+  bool accepted = false;
+  context_t context{};
+  cache_hit_rates_t cache_hit_rates{};
+  double compute_latency = 0.0;
+  double memory_latency = 0.0;
+  double epilogue_latency = 0.0;
+  double tile_latency = 0.0;
+  double timestep_latency = 0.0;
+  double parallel_reduction_latency = 0.0;
+  double total_latency = 0.0;
+};
+
+ORIGAMI_EXPORT gemm_trace_t trace_total_latency(const problem_t& problem,
+                                                const hardware_t& hardware,
+                                                const config_t& config);
+
 }  // namespace gemm
 }  // namespace origami

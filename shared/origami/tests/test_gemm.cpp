@@ -1612,6 +1612,33 @@ TEST_CASE("Heuristics: Problematic tile configuration (64x32x32)", "[heuristics]
   REQUIRE(params.weight_tile_total == 10.0);
 }
 
+TEST_CASE("Heuristics: gfx1151 deep-K MT192x128 reject is scoped", "[heuristics]") {
+  auto& db = origami::heuristics_database_t::get_instance();
+  auto hardware = origami::hardware_t::get_hardware_for_arch(
+      origami::hardware_t::architecture_t::gfx1151,
+      /*N_CU=*/40,
+      /*lds_capacity=*/64 * 1024,
+      /*rf_capacity=*/512 * 1024,
+      /*L2_capacity=*/2 * 1024 * 1024,
+      /*compute_clock_khz=*/2900000);
+  auto config = make_config(192, 128, 64, 16, 16, 16);
+  auto problem = make_problem(3072, 4096, 8192, origami::transpose_t::T, origami::transpose_t::N);
+  problem.a_dtype = problem.b_dtype = problem.mi_dtype = origami::data_type_t::Half;
+
+  REQUIRE(db.lookup(problem, hardware, config).reject);
+
+  problem.size.m = 1536;
+  REQUIRE_FALSE(db.lookup(problem, hardware, config).reject);
+
+  problem.size.m = 3072;
+  problem.size.k = 4096;
+  REQUIRE_FALSE(db.lookup(problem, hardware, config).reject);
+
+  problem.size.k = 8192;
+  problem.b_transpose = origami::transpose_t::T;
+  REQUIRE_FALSE(db.lookup(problem, hardware, config).reject);
+}
+
 TEST_CASE("Heuristics: TF32 emulation - memory bound", "[heuristics]") {
   auto& db = origami::heuristics_database_t::get_instance();
 

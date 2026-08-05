@@ -1310,10 +1310,17 @@ namespace TensileLite
                 if(sizes.size() >= 4)
                 {
                     origami::problem_t origami_problem = {
-                        .size  = {sizes[0], sizes[1], sizes[3]},
-                        .batch = sizes[2],
+                        .size        = {sizes[0], sizes[1], sizes[3]},
+                        .batch       = sizes[2],
                         // CU budget hint; 0 = use all CUs.
-                        .num_cus = static_cast<size_t>(problem.getParams().smCountTarget()),
+                        .num_cus     = static_cast<size_t>(problem.getParams().smCountTarget()),
+                        .a_transpose = problem.transA() ? origami::transpose_t::T
+                                                        : origami::transpose_t::N,
+                        .b_transpose = problem.transB() ? origami::transpose_t::T
+                                                        : origami::transpose_t::N,
+                        .a_dtype     = datatypeToAnalyticalDatatype(problem.a().dataType()),
+                        .b_dtype     = datatypeToAnalyticalDatatype(problem.b().dataType()),
+                        .mi_dtype    = datatypeToAnalyticalDatatype(problem.computeType()),
                     };
                     origami::config_t origami_config = {
                         .mt            = {static_cast<size_t>(sizeMapping.macroTile.x),
@@ -1322,6 +1329,11 @@ namespace TensileLite
                         .cache_hints_a = sizeMapping.nonTemporalA,
                         .cache_hints_b = sizeMapping.nonTemporalB,
                     };
+                    auto& tensile_params = origami_config.tensile();
+                    tensile_params.depth_u              = sizeMapping.depthU;
+                    tensile_params.prefetch_global_read = sizeMapping.PrefetchGlobalRead;
+                    tensile_params.prefetch_local_read  = sizeMapping.PrefetchLocalRead;
+                    tensile_params.stream_k             = sizeMapping.streamK;
 
                     origami::workgroup_mapping_t prediction_results
                         = origami::select_workgroup_mapping(origami_problem,
@@ -1419,12 +1431,17 @@ namespace TensileLite
                 if(sizes.size() >= 4)
                 {
                     origami::problem_t origami_problem = {
-                        .size    = {sizes[0], sizes[1], sizes[3]},
-                        .batch   = sizes[2],
+                        .size        = {sizes[0], sizes[1], sizes[3]},
+                        .batch       = sizes[2],
                         // CU budget hint; 0 = use all CUs.
-                        .num_cus = static_cast<size_t>(problem.getParams().smCountTarget()),
-                        .a_dtype = datatypeToAnalyticalDatatype(problem.a().dataType()),
-                        .b_dtype = datatypeToAnalyticalDatatype(problem.b().dataType()),
+                        .num_cus     = static_cast<size_t>(problem.getParams().smCountTarget()),
+                        .a_transpose = problem.transA() ? origami::transpose_t::T
+                                                        : origami::transpose_t::N,
+                        .b_transpose = problem.transB() ? origami::transpose_t::T
+                                                        : origami::transpose_t::N,
+                        .a_dtype     = datatypeToAnalyticalDatatype(problem.a().dataType()),
+                        .b_dtype     = datatypeToAnalyticalDatatype(problem.b().dataType()),
+                        .mi_dtype    = datatypeToAnalyticalDatatype(problem.computeType()),
                     };
                     origami::config_t origami_config = {
                         .mt            = {static_cast<size_t>(sizeMapping.macroTile.x),
@@ -1433,6 +1450,11 @@ namespace TensileLite
                         .cache_hints_a = sizeMapping.nonTemporalA,
                         .cache_hints_b = sizeMapping.nonTemporalB,
                     };
+                    auto& tensile_params = origami_config.tensile();
+                    tensile_params.depth_u             = sizeMapping.depthU;
+                    tensile_params.prefetch_global_read = sizeMapping.PrefetchGlobalRead;
+                    tensile_params.prefetch_local_read  = sizeMapping.PrefetchLocalRead;
+                    tensile_params.stream_k             = sizeMapping.streamK;
 
                     origami::staggerU_t prediction_results
                         = origami::select_staggerU(origami_problem,
@@ -4271,7 +4293,7 @@ namespace TensileLite
                                                         : origami::transpose_t::N,
                         .a_dtype     = datatypeToAnalyticalDatatype(problem.a().dataType()),
                         .b_dtype     = datatypeToAnalyticalDatatype(problem.b().dataType()),
-                        .mi_dtype    = datatypeToAnalyticalDatatype(problem.computeInputTypeA()),
+                        .mi_dtype    = datatypeToAnalyticalDatatype(problem.computeType()),
                     };
                     if(Debug::Instance().printPropertyEvaluation() && self.sizeMapping.CUOccupancy <= 0)
                     {

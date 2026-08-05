@@ -339,6 +339,13 @@ class ORIGAMI_EXPORT heuristics_database_t {
  *
  * This is the main entry point that replaces compute_heuristic_weights().
  */
+// Offline-tuning override. Not thread-safe with concurrent lookups; intended
+// for single-threaded calibration tools.
+ORIGAMI_EXPORT void set_global_heuristic_params(const heuristic_params_t& params);
+ORIGAMI_EXPORT heuristic_params_t get_global_heuristic_params();
+ORIGAMI_EXPORT void clear_global_heuristic_params();
+ORIGAMI_EXPORT bool has_global_heuristic_params();
+
 inline heuristic_params_t get_heuristic_params(const problem_t& problem,
                                                const hardware_t& hardware,
                                                const config_t& config) {

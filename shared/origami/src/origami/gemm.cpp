@@ -1940,6 +1940,27 @@ double compute_total_latency(const problem_t& problem,
   return total_latency;
 }
 
+gemm_trace_t trace_total_latency(const problem_t& problem,
+                                 const hardware_t& hardware,
+                                 const config_t& config) {
+  gemm_trace_t trace;
+  trace.total_latency = compute_total_latency(problem, hardware, config);
+  trace.accepted = trace.total_latency != std::numeric_limits<double>::max();
+  if (!trace.accepted || config.prediction_mode == prediction_modes_t::simulation) return trace;
+
+  trace.context = context_t(problem, hardware, config);
+  if (!trace.context.is_valid()) return trace;
+  trace.cache_hit_rates = estimate_cache_hit_rates(problem, hardware, config, trace.context);
+  trace.compute_latency = compute_mt_compute_latency(problem, hardware, config);
+  trace.memory_latency = compute_memory_latency(problem, hardware, config, trace.context);
+  trace.epilogue_latency = compute_epilogue_latency(problem, hardware, config, trace.context);
+  trace.tile_latency = compute_tile_latency(problem, hardware, config, trace.context);
+  trace.timestep_latency = compute_timestep_latency(problem, hardware, config, trace.context);
+  trace.parallel_reduction_latency =
+      compute_parallel_reduction_latency(problem, hardware, config, trace.context);
+  return trace;
+}
+
 static double compute_formocast_latency(const problem_t& problem,
                                         const hardware_t& hardware,
                                         const config_t& config) {

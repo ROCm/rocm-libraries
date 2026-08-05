@@ -165,6 +165,7 @@ namespace TensileLite
 
         int CUOccupancy            = 0;
         int PrefetchGlobalRead     = 2;
+        int PrefetchLocalRead      = 0;
         int MathClocksUnrolledLoop = 0;
 
         size_t synchronizerSizePerWG = 0;
