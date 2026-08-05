@@ -74,17 +74,15 @@ rocm_install(
   PERMISSIONS OWNER_WRITE OWNER_READ GROUP_READ WORLD_READ
 )
 
-include(ROCMExportTargetsHeaderOnly)
-
 # Export targets
 if(HIP_COMPILER STREQUAL "clang")
-  rocm_export_targets_header_only(
+  rocm_export_targets(
     TARGETS hip::hipcub
     DEPENDS PACKAGE rocprim
     NAMESPACE hip::
   )
 else()
-  rocm_export_targets_header_only(
+  rocm_export_targets(
     TARGETS hip::hipcub
     NAMESPACE hip::
   )
