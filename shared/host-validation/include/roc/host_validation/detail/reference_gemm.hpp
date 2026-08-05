@@ -157,9 +157,6 @@ class RuntimeQuantizer {
 
 inline float quantizeXFloat32(float value) {
     uint32_t bits = std::bit_cast<uint32_t>(value);
-    if ((bits & 0x7f800000U) == 0x7f800000U) return value;
-    const uint32_t retainedLeastSignificantBit = (bits >> 13) & 1U;
-    bits += 0x0fffU + retainedLeastSignificantBit;
     bits &= 0xffffe000U;
     return std::bit_cast<float>(bits);
 }

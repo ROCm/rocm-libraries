@@ -29,6 +29,11 @@ add_library(roc::host-validation-core ALIAS host-validation-core)
 add_library(host-validation INTERFACE)
 add_library(roc::host-validation ALIAS host-validation)
 
+add_library(host-validation-tiled STATIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/backends/tiled.cpp"
+)
+add_library(roc::host-validation-tiled ALIAS host-validation-tiled)
+
 target_compile_features(host-validation-core INTERFACE cxx_std_20)
 target_include_directories(host-validation-core
     INTERFACE
@@ -67,6 +72,20 @@ target_sources(host-validation
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/detail/reference_reduction.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/detail/tensor_views.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/validation.hpp"
+)
+
+target_compile_features(host-validation-tiled PUBLIC cxx_std_20)
+target_link_libraries(host-validation-tiled PUBLIC roc::host-validation)
+target_sources(host-validation-tiled
+    PUBLIC
+        FILE_SET HEADERS
+        BASE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/include"
+        FILES
+            "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/backends/tiled.hpp"
+)
+set_target_properties(host-validation-tiled
+    PROPERTIES
+        POSITION_INDEPENDENT_CODE ON
 )
 
 function(roc_host_validation_enable_blas_backend)
@@ -129,7 +148,7 @@ if(HOST_VALIDATION_BUILD_TESTING)
     add_subdirectory(tests)
 endif()
 
-install(TARGETS host-validation-core host-validation
+install(TARGETS host-validation-core host-validation host-validation-tiled
     EXPORT host-validation-targets
     FILE_SET HEADERS
         DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"

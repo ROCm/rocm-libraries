@@ -19,6 +19,11 @@ comparison used by ROCm library clients and tests.
 - `roc::host-validation-blas`
   - Optional compiled CBLAS implementation of `GemmBackend::Blas`.
   - Built with `HOST_VALIDATION_BUILD_BLAS_BACKEND=ON`.
+- `roc::host-validation-tiled`
+  - GPU-independent tiled implementation of `GemmBackend::Tiled`.
+  - Supports dense F32/F64 accumulation, runtime input/output types,
+    compute-input quantization, XFloat32, vector/scalar epilogue operands,
+    bias, and activation.
 
 ## Component dependency contract
 
@@ -194,6 +199,11 @@ F32/F64/complex GEMM and is selected through `GemmRunOptions`.
 The canonical backend computes only selected outputs. Accelerated backends may
 compute all outputs and report the actual count through `GemmRunInfo`.
 
+`TiledGemmBackend` implements the same object-oriented interface without BLAS
+or product dependencies. It reuses decoded A/B tiles across output elements
+and is the migration target for TensileLite's product-local fast CPU path.
+Block-scaled MX tiling remains a bounded compatibility fallback.
+
 F16 and BF16 accumulator modes execute with a float host register but quantize
 the product and accumulated sum after each arithmetic step. They therefore
 model low-precision accumulation rather than silently substituting F32
@@ -302,7 +312,7 @@ The NumPy suite independently checks:
 - affine layout decoding;
 - deterministic generation, logical index ordering, complex component
   recipes, and structured comparison;
-- F16 stepwise, F32, F64, I32, and complex GEMM against NumPy;
+- F16 stepwise, F32, F64, I32, complex, and tiled GEMM against NumPy;
 - mixed FP8-storage/FP4-compute-input quantization;
 - selected-output GEMM and prime-stride selection;
 - full/selected forward and ReLU/GELU-gradient epilogues against NumPy; and
