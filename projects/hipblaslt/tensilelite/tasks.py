@@ -343,7 +343,9 @@ def build_client(
 ):
     """Build the tensilelite-client C++ executable.
 
-    rocisa must already be importable in the invoking Python environment.
+    The build stages the client and installs TensileLite into a private Python
+    environment. rocisa must already be importable in the invoking Python
+    environment and is inherited as an external dependency.
     """
 
     if enable_asan and enable_tsan:
