@@ -75,8 +75,8 @@ struct ScalarTypeInfo {
     }
 };
 
-inline constexpr std::array<ScalarTypeInfo, static_cast<size_t>(ScalarType::Count)>
-    scalarTypeInfos{{
+inline constexpr std::array<ScalarTypeInfo, static_cast<size_t>(ScalarType::Count)> scalarTypeInfos{
+    {
         {"bool", ScalarCategory::Boolean, 8, 0, 0, 0, false, false},
         {"u8", ScalarCategory::UnsignedInteger, 8, 0, 0, 0, false, false},
         {"i8", ScalarCategory::SignedInteger, 8, 0, 0, 0, false, false},
@@ -107,8 +107,7 @@ inline constexpr std::array<ScalarTypeInfo, static_cast<size_t>(ScalarType::Coun
 
 inline constexpr const ScalarTypeInfo& scalarTypeInfo(ScalarType type) {
     const size_t index = static_cast<size_t>(type);
-    if (index >= scalarTypeInfos.size())
-        throw std::invalid_argument("Invalid ScalarType.");
+    if (index >= scalarTypeInfos.size()) throw std::invalid_argument("Invalid ScalarType.");
     return scalarTypeInfos[index];
 }
 
@@ -169,16 +168,14 @@ struct NativeScalarType<std::complex<double>> {
 };
 
 template <typename T>
-inline constexpr ScalarType nativeScalarType =
-    NativeScalarType<std::remove_cv_t<T>>::value;
+inline constexpr ScalarType nativeScalarType = NativeScalarType<std::remove_cv_t<T>>::value;
 
 namespace detail {
 template <ScalarType TypeValue, typename StorageType>
 struct ScalarTag {
     using Storage = StorageType;
     static constexpr ScalarType type = TypeValue;
-    static constexpr uint16_t storageBits =
-        scalarTypeInfo(TypeValue).storageBits;
+    static constexpr uint16_t storageBits = scalarTypeInfo(TypeValue).storageBits;
 };
 
 using BooleanTag = ScalarTag<ScalarType::Boolean, uint8_t>;
@@ -194,16 +191,12 @@ using Float16Tag = ScalarTag<ScalarType::Float16, uint16_t>;
 using BFloat16Tag = ScalarTag<ScalarType::BFloat16, uint16_t>;
 using Float32Tag = ScalarTag<ScalarType::Float32, float>;
 using Float64Tag = ScalarTag<ScalarType::Float64, double>;
-using ComplexFloat32Tag =
-    ScalarTag<ScalarType::ComplexFloat32, std::complex<float>>;
-using ComplexFloat64Tag =
-    ScalarTag<ScalarType::ComplexFloat64, std::complex<double>>;
+using ComplexFloat32Tag = ScalarTag<ScalarType::ComplexFloat32, std::complex<float>>;
+using ComplexFloat64Tag = ScalarTag<ScalarType::ComplexFloat64, std::complex<double>>;
 using Float8E4M3Tag = ScalarTag<ScalarType::Float8E4M3, uint8_t>;
 using Float8E5M2Tag = ScalarTag<ScalarType::Float8E5M2, uint8_t>;
-using Float8E4M3FnuzTag =
-    ScalarTag<ScalarType::Float8E4M3Fnuz, uint8_t>;
-using Float8E5M2FnuzTag =
-    ScalarTag<ScalarType::Float8E5M2Fnuz, uint8_t>;
+using Float8E4M3FnuzTag = ScalarTag<ScalarType::Float8E4M3Fnuz, uint8_t>;
+using Float8E5M2FnuzTag = ScalarTag<ScalarType::Float8E5M2Fnuz, uint8_t>;
 using Float6E2M3Tag = ScalarTag<ScalarType::Float6E2M3, void>;
 using Float6E3M2Tag = ScalarTag<ScalarType::Float6E3M2, void>;
 using Float4E2M1Tag = ScalarTag<ScalarType::Float4E2M1, void>;
@@ -214,87 +207,86 @@ using E5M3Tag = ScalarTag<ScalarType::E5M3, uint8_t>;
 }  // namespace detail
 
 template <typename Visitor, typename... Args>
-decltype(auto) visitScalarType(
-    ScalarType type, Visitor&& visitor, Args&&... args) {
+decltype(auto) visitScalarType(ScalarType type, Visitor&& visitor, Args&&... args) {
     switch (type) {
         case ScalarType::Boolean:
-            return std::forward<Visitor>(visitor).template operator()<
-                detail::BooleanTag>(std::forward<Args>(args)...);
+            return std::forward<Visitor>(visitor).template operator()<detail::BooleanTag>(
+                std::forward<Args>(args)...);
         case ScalarType::UInt8:
-            return std::forward<Visitor>(visitor).template operator()<
-                detail::UInt8Tag>(std::forward<Args>(args)...);
+            return std::forward<Visitor>(visitor).template operator()<detail::UInt8Tag>(
+                std::forward<Args>(args)...);
         case ScalarType::Int8:
-            return std::forward<Visitor>(visitor).template operator()<
-                detail::Int8Tag>(std::forward<Args>(args)...);
+            return std::forward<Visitor>(visitor).template operator()<detail::Int8Tag>(
+                std::forward<Args>(args)...);
         case ScalarType::UInt16:
-            return std::forward<Visitor>(visitor).template operator()<
-                detail::UInt16Tag>(std::forward<Args>(args)...);
+            return std::forward<Visitor>(visitor).template operator()<detail::UInt16Tag>(
+                std::forward<Args>(args)...);
         case ScalarType::Int16:
-            return std::forward<Visitor>(visitor).template operator()<
-                detail::Int16Tag>(std::forward<Args>(args)...);
+            return std::forward<Visitor>(visitor).template operator()<detail::Int16Tag>(
+                std::forward<Args>(args)...);
         case ScalarType::UInt32:
-            return std::forward<Visitor>(visitor).template operator()<
-                detail::UInt32Tag>(std::forward<Args>(args)...);
+            return std::forward<Visitor>(visitor).template operator()<detail::UInt32Tag>(
+                std::forward<Args>(args)...);
         case ScalarType::Int32:
-            return std::forward<Visitor>(visitor).template operator()<
-                detail::Int32Tag>(std::forward<Args>(args)...);
+            return std::forward<Visitor>(visitor).template operator()<detail::Int32Tag>(
+                std::forward<Args>(args)...);
         case ScalarType::UInt64:
-            return std::forward<Visitor>(visitor).template operator()<
-                detail::UInt64Tag>(std::forward<Args>(args)...);
+            return std::forward<Visitor>(visitor).template operator()<detail::UInt64Tag>(
+                std::forward<Args>(args)...);
         case ScalarType::Int64:
-            return std::forward<Visitor>(visitor).template operator()<
-                detail::Int64Tag>(std::forward<Args>(args)...);
+            return std::forward<Visitor>(visitor).template operator()<detail::Int64Tag>(
+                std::forward<Args>(args)...);
         case ScalarType::Float16:
-            return std::forward<Visitor>(visitor).template operator()<
-                detail::Float16Tag>(std::forward<Args>(args)...);
+            return std::forward<Visitor>(visitor).template operator()<detail::Float16Tag>(
+                std::forward<Args>(args)...);
         case ScalarType::BFloat16:
-            return std::forward<Visitor>(visitor).template operator()<
-                detail::BFloat16Tag>(std::forward<Args>(args)...);
+            return std::forward<Visitor>(visitor).template operator()<detail::BFloat16Tag>(
+                std::forward<Args>(args)...);
         case ScalarType::Float32:
-            return std::forward<Visitor>(visitor).template operator()<
-                detail::Float32Tag>(std::forward<Args>(args)...);
+            return std::forward<Visitor>(visitor).template operator()<detail::Float32Tag>(
+                std::forward<Args>(args)...);
         case ScalarType::Float64:
-            return std::forward<Visitor>(visitor).template operator()<
-                detail::Float64Tag>(std::forward<Args>(args)...);
+            return std::forward<Visitor>(visitor).template operator()<detail::Float64Tag>(
+                std::forward<Args>(args)...);
         case ScalarType::ComplexFloat32:
-            return std::forward<Visitor>(visitor).template operator()<
-                detail::ComplexFloat32Tag>(std::forward<Args>(args)...);
+            return std::forward<Visitor>(visitor).template operator()<detail::ComplexFloat32Tag>(
+                std::forward<Args>(args)...);
         case ScalarType::ComplexFloat64:
-            return std::forward<Visitor>(visitor).template operator()<
-                detail::ComplexFloat64Tag>(std::forward<Args>(args)...);
+            return std::forward<Visitor>(visitor).template operator()<detail::ComplexFloat64Tag>(
+                std::forward<Args>(args)...);
         case ScalarType::Float8E4M3:
-            return std::forward<Visitor>(visitor).template operator()<
-                detail::Float8E4M3Tag>(std::forward<Args>(args)...);
+            return std::forward<Visitor>(visitor).template operator()<detail::Float8E4M3Tag>(
+                std::forward<Args>(args)...);
         case ScalarType::Float8E5M2:
-            return std::forward<Visitor>(visitor).template operator()<
-                detail::Float8E5M2Tag>(std::forward<Args>(args)...);
+            return std::forward<Visitor>(visitor).template operator()<detail::Float8E5M2Tag>(
+                std::forward<Args>(args)...);
         case ScalarType::Float8E4M3Fnuz:
-            return std::forward<Visitor>(visitor).template operator()<
-                detail::Float8E4M3FnuzTag>(std::forward<Args>(args)...);
+            return std::forward<Visitor>(visitor).template operator()<detail::Float8E4M3FnuzTag>(
+                std::forward<Args>(args)...);
         case ScalarType::Float8E5M2Fnuz:
-            return std::forward<Visitor>(visitor).template operator()<
-                detail::Float8E5M2FnuzTag>(std::forward<Args>(args)...);
+            return std::forward<Visitor>(visitor).template operator()<detail::Float8E5M2FnuzTag>(
+                std::forward<Args>(args)...);
         case ScalarType::Float6E2M3:
-            return std::forward<Visitor>(visitor).template operator()<
-                detail::Float6E2M3Tag>(std::forward<Args>(args)...);
+            return std::forward<Visitor>(visitor).template operator()<detail::Float6E2M3Tag>(
+                std::forward<Args>(args)...);
         case ScalarType::Float6E3M2:
-            return std::forward<Visitor>(visitor).template operator()<
-                detail::Float6E3M2Tag>(std::forward<Args>(args)...);
+            return std::forward<Visitor>(visitor).template operator()<detail::Float6E3M2Tag>(
+                std::forward<Args>(args)...);
         case ScalarType::Float4E2M1:
-            return std::forward<Visitor>(visitor).template operator()<
-                detail::Float4E2M1Tag>(std::forward<Args>(args)...);
+            return std::forward<Visitor>(visitor).template operator()<detail::Float4E2M1Tag>(
+                std::forward<Args>(args)...);
         case ScalarType::Int4:
-            return std::forward<Visitor>(visitor).template operator()<
-                detail::Int4Tag>(std::forward<Args>(args)...);
+            return std::forward<Visitor>(visitor).template operator()<detail::Int4Tag>(
+                std::forward<Args>(args)...);
         case ScalarType::Int12:
-            return std::forward<Visitor>(visitor).template operator()<
-                detail::Int12Tag>(std::forward<Args>(args)...);
+            return std::forward<Visitor>(visitor).template operator()<detail::Int12Tag>(
+                std::forward<Args>(args)...);
         case ScalarType::E8M0:
-            return std::forward<Visitor>(visitor).template operator()<
-                detail::E8M0Tag>(std::forward<Args>(args)...);
+            return std::forward<Visitor>(visitor).template operator()<detail::E8M0Tag>(
+                std::forward<Args>(args)...);
         case ScalarType::E5M3:
-            return std::forward<Visitor>(visitor).template operator()<
-                detail::E5M3Tag>(std::forward<Args>(args)...);
+            return std::forward<Visitor>(visitor).template operator()<detail::E5M3Tag>(
+                std::forward<Args>(args)...);
         case ScalarType::Count:
             break;
     }
@@ -442,8 +434,7 @@ inline std::pair<ptrdiff_t, ptrdiff_t> elementBounds(const Layout& layout) {
 inline size_t storageBytesForLayout(ScalarType type, const Layout& layout) {
     const auto [lower, upper] = elementBounds(layout);
     if (upper < lower) return 0;
-    if (lower < 0)
-        throw std::invalid_argument("Tensor layout addresses before the storage base.");
+    if (lower < 0) throw std::invalid_argument("Tensor layout addresses before the storage base.");
 
     const uint64_t bits = scalarTypeInfo(type).storageBits;
     const uint64_t elementCount = static_cast<uint64_t>(upper) + 1;
@@ -577,76 +568,180 @@ inline uint16_t encodeBFloat16(float value) {
     return static_cast<uint16_t>(bits >> 16);
 }
 
-inline float decodeMinifloat(uint32_t raw, const ScalarTypeInfo& info) {
-    const uint32_t totalBits = 1U + info.exponentBits + info.mantissaBits;
-    const uint32_t sign = (raw >> (totalBits - 1U)) & 1U;
-    const uint32_t exponentMask = (1U << info.exponentBits) - 1U;
-    const uint32_t mantissaMask = (1U << info.mantissaBits) - 1U;
-    const uint32_t exponent = (raw >> info.mantissaBits) & exponentMask;
-    const uint32_t mantissa = raw & mantissaMask;
-    const float mantissaScale = 1.0f / static_cast<float>(1U << info.mantissaBits);
+struct BinaryFloatFormat {
+    uint8_t exponentBits;
+    uint8_t mantissaBits;
+    int16_t exponentBias;
+    uint8_t totalBits;
+    bool hasSign;
+    bool hasSignedZero;
+    bool hasInfinity;
+    uint32_t maximumPositiveFiniteRaw;
+    uint32_t positiveInfinityRaw;
+    uint32_t canonicalNaNRaw;
+};
 
-    float value;
-    if (exponent == 0) {
-        value = std::ldexp(static_cast<float>(mantissa) * mantissaScale,
-                           1 - info.exponentBias);
-    } else {
-        value = std::ldexp(1.0f + static_cast<float>(mantissa) * mantissaScale,
-                           static_cast<int>(exponent) - info.exponentBias);
+inline BinaryFloatFormat binaryFloatFormat(ScalarType type) {
+    switch (type) {
+        case ScalarType::Float4E2M1:
+            return {2, 1, 1, 4, true, true, false, 0x7, 0, 0};
+        case ScalarType::Float6E2M3:
+            return {2, 3, 1, 6, true, true, false, 0x1f, 0, 0};
+        case ScalarType::Float6E3M2:
+            return {3, 2, 3, 6, true, true, false, 0x1f, 0, 0};
+        case ScalarType::Float8E4M3:
+            return {4, 3, 7, 8, true, true, false, 0x7e, 0, 0x7f};
+        case ScalarType::Float8E5M2:
+            return {5, 2, 15, 8, true, true, true, 0x7b, 0x7c, 0x7f};
+        case ScalarType::Float8E4M3Fnuz:
+            return {4, 3, 8, 8, true, false, false, 0x7f, 0, 0x80};
+        case ScalarType::Float8E5M2Fnuz:
+            return {5, 2, 16, 8, true, false, false, 0x7f, 0, 0x80};
+        case ScalarType::E5M3:
+            return {5, 3, 15, 8, false, false, false, 0xfe, 0, 0xff};
+        default:
+            throw std::invalid_argument(
+                "ScalarType is not a supported binary floating-point format.");
     }
-    return sign ? -value : value;
 }
 
-inline uint32_t encodeMinifloat(float value, const ScalarTypeInfo& info) {
-    const uint32_t totalBits = 1U + info.exponentBits + info.mantissaBits;
-    const uint32_t exponentMask = (1U << info.exponentBits) - 1U;
-    const uint32_t mantissaMask = (1U << info.mantissaBits) - 1U;
-    const uint32_t sign = std::signbit(value) ? 1U : 0U;
-    value = std::fabs(value);
+inline bool isBinaryFloatNaN(ScalarType type, uint32_t raw) {
+    switch (type) {
+        case ScalarType::Float8E4M3:
+            return (raw & 0x7fU) == 0x7fU;
+        case ScalarType::Float8E5M2:
+            return (raw & 0x7fU) > 0x7cU;
+        case ScalarType::Float8E4M3Fnuz:
+        case ScalarType::Float8E5M2Fnuz:
+            return raw == 0x80U;
+        case ScalarType::E5M3:
+            return raw == 0xffU;
+        default:
+            return false;
+    }
+}
 
-    const float maximumMantissa =
-        1.0f + static_cast<float>(mantissaMask) / static_cast<float>(1U << info.mantissaBits);
-    const float maximumValue =
-        std::ldexp(maximumMantissa, static_cast<int>(exponentMask) - info.exponentBias);
-    const uint32_t maximumPositive =
-        (exponentMask << info.mantissaBits) | mantissaMask;
+inline bool isBinaryFloatInfinity(ScalarType type, uint32_t raw) {
+    return type == ScalarType::Float8E5M2 && (raw & 0x7fU) == 0x7cU;
+}
 
-    if (std::isnan(value) || value > maximumValue)
-        return (sign << (totalBits - 1U)) | maximumPositive;
-    if (value == 0.0f) return sign << (totalBits - 1U);
+inline float decodeFiniteBinaryFloatMagnitude(uint32_t raw, const BinaryFloatFormat& format) {
+    const uint32_t exponentMask = (1U << format.exponentBits) - 1U;
+    const uint32_t mantissaMask = (1U << format.mantissaBits) - 1U;
+    const uint32_t exponent = (raw >> format.mantissaBits) & exponentMask;
+    const uint32_t mantissa = raw & mantissaMask;
+    const float mantissaScale = 1.0f / static_cast<float>(1U << format.mantissaBits);
 
-    int exponent;
-    float fraction = std::frexp(value, &exponent) * 2.0f;
-    --exponent;
-    int biasedExponent = exponent + info.exponentBias;
-    uint32_t encodedMantissa;
+    if (exponent == 0)
+        return std::ldexp(static_cast<float>(mantissa) * mantissaScale, 1 - format.exponentBias);
+    return std::ldexp(1.0f + static_cast<float>(mantissa) * mantissaScale,
+                      static_cast<int>(exponent) - format.exponentBias);
+}
 
-    if (biasedExponent <= 0) {
-        fraction = std::ldexp(fraction, -(1 - biasedExponent));
-        biasedExponent = 0;
-        encodedMantissa = static_cast<uint32_t>(
-            std::lround(fraction * static_cast<float>(1U << info.mantissaBits)));
-        if (encodedMantissa == 0) return sign << (totalBits - 1U);
-    } else if (static_cast<uint32_t>(biasedExponent) > exponentMask) {
-        return (sign << (totalBits - 1U)) | maximumPositive;
-    } else {
-        encodedMantissa = static_cast<uint32_t>(
-            std::lround((fraction - 1.0f) * static_cast<float>(1U << info.mantissaBits)));
-        if (encodedMantissa > mantissaMask) {
-            encodedMantissa = 0;
-            ++biasedExponent;
-            if (static_cast<uint32_t>(biasedExponent) > exponentMask)
-                return (sign << (totalBits - 1U)) | maximumPositive;
-        }
+inline float decodeBinaryFloat(ScalarType type, uint32_t raw) {
+    const auto format = binaryFloatFormat(type);
+    if (isBinaryFloatNaN(type, raw)) return std::numeric_limits<float>::quiet_NaN();
+
+    const uint32_t signMask = format.hasSign ? 1U << (format.totalBits - 1U) : 0U;
+    const bool negative = format.hasSign && (raw & signMask) != 0;
+    if (isBinaryFloatInfinity(type, raw))
+        return negative ? -std::numeric_limits<float>::infinity()
+                        : std::numeric_limits<float>::infinity();
+
+    const uint32_t magnitude = format.hasSign ? raw & (signMask - 1U) : raw;
+    const float value = decodeFiniteBinaryFloatMagnitude(magnitude, format);
+    return negative ? -value : value;
+}
+
+inline uint32_t nearestPositiveBinaryFloatRaw(float value, const BinaryFloatFormat& format) {
+    uint32_t lower = 0;
+    uint32_t upper = format.maximumPositiveFiniteRaw;
+    while (lower + 1 < upper) {
+        const uint32_t middle = lower + (upper - lower) / 2;
+        if (decodeFiniteBinaryFloatMagnitude(middle, format) < value)
+            lower = middle;
+        else
+            upper = middle;
     }
 
-    return (sign << (totalBits - 1U)) |
-           (static_cast<uint32_t>(biasedExponent) << info.mantissaBits) | encodedMantissa;
+    const double lowerValue = static_cast<double>(decodeFiniteBinaryFloatMagnitude(lower, format));
+    const double upperValue = static_cast<double>(decodeFiniteBinaryFloatMagnitude(upper, format));
+    const double lowerDistance = static_cast<double>(value) - lowerValue;
+    const double upperDistance = upperValue - static_cast<double>(value);
+    if (lowerDistance < upperDistance) return lower;
+    if (upperDistance < lowerDistance) return upper;
+    return (lower & 1U) == 0 ? lower : upper;
+}
+
+inline uint32_t encodeBinaryFloat(ScalarType type, float value) {
+    const auto format = binaryFloatFormat(type);
+    if (std::isnan(value)) {
+        if (!scalarTypeInfo(type).supportsNaN) {
+            const uint32_t signMask =
+                format.hasSign ? 1U << (format.totalBits - 1U) : 0U;
+            const uint32_t sign = std::signbit(value) ? signMask : 0U;
+            return sign | format.maximumPositiveFiniteRaw;
+        }
+        const bool preserveSign = type == ScalarType::Float8E4M3 || type == ScalarType::Float8E5M2;
+        const uint32_t sign = preserveSign && std::signbit(value) ? 0x80U : 0U;
+        return sign | format.canonicalNaNRaw;
+    }
+
+    if (!format.hasSign && value != 0.0f && std::signbit(value))
+        throw std::domain_error("Unsigned scale formats cannot encode negative values.");
+
+    const uint32_t signMask = format.hasSign ? 1U << (format.totalBits - 1U) : 0U;
+    const uint32_t sign = std::signbit(value) ? signMask : 0U;
+    value = std::fabs(value);
+
+    if (std::isinf(value)) {
+        if (format.hasInfinity) return sign | format.positiveInfinityRaw;
+        return sign | format.maximumPositiveFiniteRaw;
+    }
+    if (value == 0.0f) return format.hasSignedZero ? sign : 0U;
+
+    const float maximumValue =
+        decodeFiniteBinaryFloatMagnitude(format.maximumPositiveFiniteRaw, format);
+    if (value >= maximumValue) return sign | format.maximumPositiveFiniteRaw;
+
+    const uint32_t magnitude = nearestPositiveBinaryFloatRaw(value, format);
+    if (magnitude == 0 && !format.hasSignedZero) return 0;
+    return sign | magnitude;
+}
+
+inline float decodeE8M0(uint8_t raw) {
+    if (raw == 0xffU) return std::numeric_limits<float>::quiet_NaN();
+    return std::ldexp(1.0f, static_cast<int>(raw) - 127);
+}
+
+inline uint8_t encodeE8M0(float value) {
+    if (std::isnan(value)) return 0xffU;
+    if (value != 0.0f && std::signbit(value))
+        throw std::domain_error("E8M0 cannot encode negative values.");
+    if (value <= std::ldexp(1.0f, -127)) return 0;
+    if (std::isinf(value) || value >= std::ldexp(1.0f, 127)) return 0xfeU;
+
+    uint32_t lower = 0;
+    uint32_t upper = 0xfeU;
+    while (lower + 1 < upper) {
+        const uint32_t middle = lower + (upper - lower) / 2;
+        if (decodeE8M0(static_cast<uint8_t>(middle)) < value)
+            lower = middle;
+        else
+            upper = middle;
+    }
+
+    const double lowerDistance =
+        static_cast<double>(value) - decodeE8M0(static_cast<uint8_t>(lower));
+    const double upperDistance =
+        decodeE8M0(static_cast<uint8_t>(upper)) - static_cast<double>(value);
+    if (lowerDistance < upperDistance) return static_cast<uint8_t>(lower);
+    if (upperDistance < lowerDistance) return static_cast<uint8_t>(upper);
+    return static_cast<uint8_t>((lower & 1U) == 0 ? lower : upper);
 }
 
 inline uint64_t bitOffset(ScalarType type, ptrdiff_t logicalOffset) {
-    if (logicalOffset < 0)
-        throw std::out_of_range("Tensor logical offset is negative.");
+    if (logicalOffset < 0) throw std::out_of_range("Tensor logical offset is negative.");
     const uint64_t bits = scalarTypeInfo(type).storageBits;
     const uint64_t offset = static_cast<uint64_t>(logicalOffset);
     if (offset > std::numeric_limits<uint64_t>::max() / bits)
@@ -708,32 +803,23 @@ Target decodeScalar(ScalarType type, std::span<const std::byte> storage, ptrdiff
             }
         }
         case ScalarType::Int4:
-            return static_cast<Target>(
-                signExtend(readPackedBits(storage, offsetBits, 4), 4));
+            return static_cast<Target>(signExtend(readPackedBits(storage, offsetBits, 4), 4));
         case ScalarType::Int12:
-            return static_cast<Target>(
-                signExtend(readPackedBits(storage, offsetBits, 12), 12));
+            return static_cast<Target>(signExtend(readPackedBits(storage, offsetBits, 12), 12));
         case ScalarType::Float4E2M1:
         case ScalarType::Float6E2M3:
         case ScalarType::Float6E3M2:
-            return static_cast<Target>(decodeMinifloat(
-                readPackedBits(storage, offsetBits, scalarTypeInfo(type).storageBits),
-                scalarTypeInfo(type)));
-        case ScalarType::E8M0: {
-            const uint8_t value = readNative<uint8_t>(storage, offsetBytes);
-            if (value == 0) return Target(0);
-            if (value == 0xff) return static_cast<Target>(
-                std::numeric_limits<float>::quiet_NaN());
-            return static_cast<Target>(
-                std::ldexp(1.0f, static_cast<int>(value) - 127));
-        }
         case ScalarType::Float8E4M3:
         case ScalarType::Float8E5M2:
         case ScalarType::Float8E4M3Fnuz:
         case ScalarType::Float8E5M2Fnuz:
         case ScalarType::E5M3:
-            throw std::invalid_argument(
-                "Codec is not implemented for ScalarType " + std::string(scalarTypeName(type)));
+            return static_cast<Target>(decodeBinaryFloat(
+                type, readPackedBits(storage, offsetBits, scalarTypeInfo(type).storageBits)));
+        case ScalarType::E8M0: {
+            const uint8_t value = readNative<uint8_t>(storage, offsetBytes);
+            return static_cast<Target>(decodeE8M0(value));
+        }
         case ScalarType::Count:
             break;
     }
@@ -776,12 +862,10 @@ void encodeScalar(ScalarType type, std::span<std::byte> storage, ptrdiff_t logic
             writeNative<int64_t>(storage, offsetBytes, static_cast<int64_t>(scalar));
             return;
         case ScalarType::Float16:
-            writeNative<uint16_t>(
-                storage, offsetBytes, encodeFloat16(static_cast<float>(scalar)));
+            writeNative<uint16_t>(storage, offsetBytes, encodeFloat16(static_cast<float>(scalar)));
             return;
         case ScalarType::BFloat16:
-            writeNative<uint16_t>(
-                storage, offsetBytes, encodeBFloat16(static_cast<float>(scalar)));
+            writeNative<uint16_t>(storage, offsetBytes, encodeBFloat16(static_cast<float>(scalar)));
             return;
         case ScalarType::Float32:
             writeNative<float>(storage, offsetBytes, static_cast<float>(scalar));
@@ -793,8 +877,8 @@ void encodeScalar(ScalarType type, std::span<std::byte> storage, ptrdiff_t logic
             if constexpr (RuntimeIsComplexV<Source>) {
                 writeNative<std::complex<float>>(
                     storage, offsetBytes,
-                    std::complex<float>(
-                        static_cast<float>(source.real()), static_cast<float>(source.imag())));
+                    std::complex<float>(static_cast<float>(source.real()),
+                                        static_cast<float>(source.imag())));
             } else {
                 writeNative<std::complex<float>>(
                     storage, offsetBytes, std::complex<float>(static_cast<float>(scalar), 0.0f));
@@ -805,8 +889,8 @@ void encodeScalar(ScalarType type, std::span<std::byte> storage, ptrdiff_t logic
             if constexpr (RuntimeIsComplexV<Source>) {
                 writeNative<std::complex<double>>(
                     storage, offsetBytes,
-                    std::complex<double>(
-                        static_cast<double>(source.real()), static_cast<double>(source.imag())));
+                    std::complex<double>(static_cast<double>(source.real()),
+                                         static_cast<double>(source.imag())));
             } else {
                 writeNative<std::complex<double>>(
                     storage, offsetBytes, std::complex<double>(static_cast<double>(scalar), 0.0));
@@ -820,38 +904,26 @@ void encodeScalar(ScalarType type, std::span<std::byte> storage, ptrdiff_t logic
             return;
         }
         case ScalarType::Int12: {
-            const int64_t value = std::max<int64_t>(
-                -2048, std::min<int64_t>(2047, static_cast<int64_t>(scalar)));
+            const int64_t value =
+                std::max<int64_t>(-2048, std::min<int64_t>(2047, static_cast<int64_t>(scalar)));
             writePackedBits(storage, offsetBits, 12, static_cast<uint32_t>(value) & 0xfffU);
             return;
         }
         case ScalarType::Float4E2M1:
         case ScalarType::Float6E2M3:
         case ScalarType::Float6E3M2:
-            writePackedBits(storage, offsetBits, scalarTypeInfo(type).storageBits,
-                            encodeMinifloat(static_cast<float>(scalar), scalarTypeInfo(type)));
-            return;
-        case ScalarType::E8M0: {
-            const float value = std::fabs(static_cast<float>(scalar));
-            uint8_t encoded;
-            if (std::isnan(value))
-                encoded = 0xff;
-            else if (value == 0.0f)
-                encoded = 0;
-            else {
-                const int exponent = static_cast<int>(std::lround(std::log2(value))) + 127;
-                encoded = static_cast<uint8_t>(std::max(1, std::min(254, exponent)));
-            }
-            writeNative<uint8_t>(storage, offsetBytes, encoded);
-            return;
-        }
         case ScalarType::Float8E4M3:
         case ScalarType::Float8E5M2:
         case ScalarType::Float8E4M3Fnuz:
         case ScalarType::Float8E5M2Fnuz:
         case ScalarType::E5M3:
-            throw std::invalid_argument(
-                "Codec is not implemented for ScalarType " + std::string(scalarTypeName(type)));
+            writePackedBits(storage, offsetBits, scalarTypeInfo(type).storageBits,
+                            encodeBinaryFloat(type, static_cast<float>(scalar)));
+            return;
+        case ScalarType::E8M0: {
+            writeNative<uint8_t>(storage, offsetBytes, encodeE8M0(static_cast<float>(scalar)));
+            return;
+        }
         case ScalarType::Count:
             break;
     }
@@ -873,8 +945,7 @@ class TensorView {
 
     template <typename T>
     static TensorView fromNative(Layout layout, std::span<const T> values) {
-        return TensorView(
-            nativeScalarType<T>, std::move(layout), std::as_bytes(values));
+        return TensorView(nativeScalarType<T>, std::move(layout), std::as_bytes(values));
     }
 
     ScalarType type() const {
@@ -895,14 +966,12 @@ class TensorView {
 
     template <typename Target>
     Target loadAs(std::span<const size_t> indices) const {
-        return detail::decodeScalar<Target>(
-            m_type, m_storage, m_layout.elementOffset(indices));
+        return detail::decodeScalar<Target>(m_type, m_storage, m_layout.elementOffset(indices));
     }
 
     template <typename Target>
     Target loadAs(std::initializer_list<size_t> indices) const {
-        return loadAs<Target>(
-            std::span<const size_t>(indices.begin(), indices.size()));
+        return loadAs<Target>(std::span<const size_t>(indices.begin(), indices.size()));
     }
 
    private:
@@ -916,14 +985,13 @@ class MutableTensorView {
     MutableTensorView(ScalarType type, Layout layout, std::span<std::byte> storage)
         : m_type(type), m_layout(std::move(layout)), m_storage(storage) {
         if (m_storage.size() < storageBytesForLayout(m_type, m_layout))
-            throw std::invalid_argument(
-                "MutableTensorView storage is too small for its layout.");
+            throw std::invalid_argument("MutableTensorView storage is too small for its layout.");
     }
 
     template <typename T>
     static MutableTensorView fromNative(Layout layout, std::span<T> values) {
-        return MutableTensorView(
-            nativeScalarType<T>, std::move(layout), std::as_writable_bytes(values));
+        return MutableTensorView(nativeScalarType<T>, std::move(layout),
+                                 std::as_writable_bytes(values));
     }
 
     ScalarType type() const {
@@ -944,20 +1012,17 @@ class MutableTensorView {
 
     template <typename Target>
     Target loadAs(std::span<const size_t> indices) const {
-        return detail::decodeScalar<Target>(
-            m_type, m_storage, m_layout.elementOffset(indices));
+        return detail::decodeScalar<Target>(m_type, m_storage, m_layout.elementOffset(indices));
     }
 
     template <typename Target>
     Target loadAs(std::initializer_list<size_t> indices) const {
-        return loadAs<Target>(
-            std::span<const size_t>(indices.begin(), indices.size()));
+        return loadAs<Target>(std::span<const size_t>(indices.begin(), indices.size()));
     }
 
     template <typename Source>
     void storeFrom(std::span<const size_t> indices, Source value) const {
-        detail::encodeScalar(
-            m_type, m_storage, m_layout.elementOffset(indices), value);
+        detail::encodeScalar(m_type, m_storage, m_layout.elementOffset(indices), value);
     }
 
     template <typename Source>
@@ -977,8 +1042,7 @@ class MutableTensorView {
 
 class Tensor {
    public:
-    Tensor(ScalarType type, Shape shape)
-        : Tensor(type, Layout::contiguous(shape)) {}
+    Tensor(ScalarType type, Shape shape) : Tensor(type, Layout::contiguous(shape)) {}
 
     Tensor(ScalarType type, Layout layout)
         : m_type(type),
@@ -991,14 +1055,12 @@ class Tensor {
             throw std::invalid_argument("Tensor storage is too small for its layout.");
     }
 
-    static Tensor fromStorage(
-        ScalarType type, Layout layout, std::vector<std::byte> storage) {
+    static Tensor fromStorage(ScalarType type, Layout layout, std::vector<std::byte> storage) {
         return Tensor(type, std::move(layout), std::move(storage));
     }
 
     template <typename Source>
-    static Tensor fromValues(
-        ScalarType type, Shape shape, std::span<const Source> values) {
+    static Tensor fromValues(ScalarType type, Shape shape, std::span<const Source> values) {
         if (values.size() != shape.elementCount())
             throw std::invalid_argument("Tensor value count does not match shape.");
         Tensor result(type, shape);
