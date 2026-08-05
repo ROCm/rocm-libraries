@@ -108,7 +108,7 @@ endif()
 
 find_package(Threads REQUIRED)
 
-find_package(rocrand)
+find_package(rocrand QUIET)
 if(USE_ROCRAND AND NOT TARGET roc::rocrand)
     message(WARNING "rocRAND not found, falling back to CPU random number generation")
     set(USE_ROCRAND OFF)
