@@ -367,7 +367,7 @@ std::tuple<reduction_t, size_t, size_t, size_t, size_t> compute_launch_parameter
   const size_t num_mts = streamk::compute_number_of_output_tiles(
     config.mt.m, config.mt.n, problem.size.m, problem.size.n, problem.batch);
   size_t num_wgs = num_mts;
-  reduction_t reduction_strategy = config.reduction_strategy;
+  reduction_t reduction_strategy = reduction_t::none;
 
   if (config.stream_k > 0) {
     reduction_strategy =
