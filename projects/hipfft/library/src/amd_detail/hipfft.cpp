@@ -2358,9 +2358,9 @@ catch(...)
 
 struct p2p_enabler
 {
-    p2p_enabler(int src_dev_id, int _peer_id)
-        : src_id(src_dev_id)
-        , peer_id(_peer_id)
+    p2p_enabler(std::pair<int, int> src_and_peer_id)
+        : src_id(src_and_peer_id.first)
+        , peer_id(src_and_peer_id.second)
     {
         if(peer_id < 0 || src_id < 0 || peer_id >= rocfft_scoped_device::device_count()
            || src_id >= rocfft_scoped_device::device_count())
@@ -2368,14 +2368,26 @@ struct p2p_enabler
         if(peer_id == src_id)
             return;
         rocfft_scoped_device scoped_dev(src_id);
-        HIP_EXPECT_SUCCESS(hipDeviceCanAccessPeer(&original_can_access_peer, src_id, peer_id));
-        if(original_can_access_peer == 0)
-            HIP_EXPECT_SUCCESS(hipDeviceEnablePeerAccess(peer_id, 0));
+        int                  can_access = 0;
+        HIP_EXPECT_SUCCESS(hipDeviceCanAccessPeer(&can_access, src_id, peer_id));
+        if(can_access == 1)
+        {
+            auto err = hipDeviceEnablePeerAccess(peer_id, 0);
+            if(err == hipSuccess)
+                enabled_by_us = true;
+            else if(err != hipErrorPeerAccessAlreadyEnabled)
+                HIP_EXPECT_SUCCESS(err);
+        }
+        else
+        {
+            // peer access not supported between the two devices
+            throw HIPFFT_INTERNAL_ERROR;
+        }
     }
     ~p2p_enabler()
     try
     {
-        if(original_can_access_peer == 0 && peer_id != src_id)
+        if(enabled_by_us && peer_id != src_id)
         {
             rocfft_scoped_device scoped_dev(src_id);
             (void)hipDeviceDisablePeerAccess(peer_id);
@@ -2385,10 +2397,14 @@ struct p2p_enabler
     {
     }
 
+    p2p_enabler(const p2p_enabler&)            = delete;
+    p2p_enabler& operator=(const p2p_enabler&) = delete;
+    p2p_enabler& operator=(p2p_enabler&&)      = delete;
+
 private:
-    int       original_can_access_peer = 0;
-    const int src_id                   = hipInvalidDeviceId;
-    const int peer_id                  = hipInvalidDeviceId;
+    bool      enabled_by_us = false;
+    const int src_id        = hipInvalidDeviceId;
+    const int peer_id       = hipInvalidDeviceId;
 };
 
 hipfftResult hipfftXtMemcpy(hipfftHandle plan, void* dest, void* src, hipfftXtCopyType cptype)
@@ -2514,11 +2530,7 @@ try
                             "hipfftXtMemcpy: unexpected rank of overlap in D2D copy");
                     auto dev_pair
                         = std::make_pair(src_brick.get_device_id(), dst_brick.get_device_id());
-                    if(p2p_enablers.find(dev_pair) == p2p_enablers.end())
-                    {
-                        p2p_enablers.emplace(dev_pair,
-                                             p2p_enabler(dev_pair.first, dev_pair.second));
-                    }
+                    p2p_enablers.try_emplace(dev_pair, dev_pair);
                     const auto spans       = overlap.get_spans();
                     const auto src_strides = src_brick.get_strides();
                     const auto dst_strides = dst_brick.get_strides();
