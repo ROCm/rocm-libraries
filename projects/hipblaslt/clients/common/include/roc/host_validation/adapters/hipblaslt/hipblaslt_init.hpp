@@ -34,6 +34,7 @@
 #include "hipblaslt_math.hpp"
 #include "hipblaslt_ostream.hpp"
 #include "hipblaslt_random.hpp"
+#include <roc/host_validation/adapters/hipblaslt/HipblasltDataInitialization.hpp>
 #include <cinttypes>
 #include <hipblaslt/hipblaslt.h>
 #include <iostream>
@@ -257,34 +258,12 @@ template <typename T>
 inline void hipblaslt_init_sin(
     T* A, size_t M, size_t N, size_t lda, size_t stride = 0, size_t batch_count = 1)
 {
-    for(size_t i_batch = 0; i_batch < batch_count; i_batch++)
-#pragma omp parallel for
-        for(size_t j = 0; j < N; ++j)
-        {
-            size_t offset      = j * lda + i_batch * stride;
-            size_t offsetValue = j * M + i_batch * M * N;
-            for(size_t i = 0; i < M; ++i)
-            {
-                // Real part uses sin()
-                double val = std::sin(static_cast<double>(i + offsetValue));
-
-                if constexpr(is_std_complex_v<T>)
-                {
-                    using RealT = typename T::value_type;
-
-                    // Imaginary part uses cos() to be distinct and non-zero.
-                    // This ensures (a+bi)*(c+di) computes full complex arithmetic.
-                    double val_imag = std::cos(static_cast<double>(i + offsetValue));
-
-                    A[i + offset] = T(static_cast<RealT>(val), static_cast<RealT>(val_imag));
-                }
-                else
-                {
-                    // Real/Custom Case: Direct cast of the real value
-                    A[i + offset] = static_cast<T>(val);
-                }
-            }
-        }
+    roc::host_validation::GenerationOptions options;
+    options.real.pattern = roc::host_validation::GenerationPattern::Sine;
+    if constexpr(is_std_complex_v<T>)
+        options.imaginary.pattern = roc::host_validation::GenerationPattern::Cosine;
+    roc::host_validation::hipblaslt_adapter::initializeMatrixBatches(
+        A, M, N, lda, stride, batch_count, options);
 }
 
 inline void hipblaslt_init_sin(void*       A,
@@ -558,15 +537,10 @@ template <typename T>
 inline void hipblaslt_init_cos(
     T* A, size_t M, size_t N, size_t lda, size_t stride = 0, size_t batch_count = 1)
 {
-    for(size_t i_batch = 0; i_batch < batch_count; i_batch++)
-#pragma omp parallel for
-        for(size_t j = 0; j < N; ++j)
-        {
-            size_t offset      = j * lda + i_batch * stride;
-            size_t offsetValue = j * M + i_batch * M * N;
-            for(size_t i = 0; i < M; ++i)
-                A[i + offset] = T(cos(double(i + offsetValue))); //force cast to double
-        }
+    roc::host_validation::GenerationOptions options;
+    options.real.pattern = roc::host_validation::GenerationPattern::Cosine;
+    roc::host_validation::hipblaslt_adapter::initializeMatrixBatches(
+        A, M, N, lda, stride, batch_count, options);
 }
 
 inline void hipblaslt_init_cos(void*       A,
@@ -1319,20 +1293,18 @@ template <typename T>
 inline void hipblaslt_init_zero(
     std::vector<T>& A, size_t M, size_t N, size_t lda, size_t stride = 0, size_t batch_count = 1)
 {
-    for(size_t i_batch = 0; i_batch < batch_count; i_batch++)
-        for(size_t i = 0; i < M; ++i)
-            for(size_t j = 0; j < N; ++j)
-                A[i + j * lda + i_batch * stride] = T(0);
+    roc::host_validation::GenerationOptions options;
+    roc::host_validation::hipblaslt_adapter::initializeMatrixBatches(
+        A.data(), M, N, lda, stride, batch_count, options);
 }
 
 template <typename T>
 inline void hipblaslt_init_zero(
     T* A, size_t M, size_t N, size_t lda, size_t stride = 0, size_t batch_count = 1)
 {
-    for(size_t i_batch = 0; i_batch < batch_count; i_batch++)
-        for(size_t i = 0; i < M; ++i)
-            for(size_t j = 0; j < N; ++j)
-                A[i + j * lda + i_batch * stride] = T(0);
+    roc::host_validation::GenerationOptions options;
+    roc::host_validation::hipblaslt_adapter::initializeMatrixBatches(
+        A, M, N, lda, stride, batch_count, options);
 }
 
 template <typename T>

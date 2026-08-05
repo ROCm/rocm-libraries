@@ -222,6 +222,52 @@ class TensorAndGemmTests(unittest.TestCase):
         self.assertEqual(result.mismatches, 1)
         self.assertEqual(result.reported_mismatches[0].index, 5)
 
+    def test_indexed_generation_matches_numpy(self):
+        options = hv.GenerationOptions()
+        options.real.pattern = hv.GenerationPattern.SerialIndex
+        serial = hv.generate_tensor(hv.ScalarType.Float32, [2, 3], options)
+        np.testing.assert_array_equal(
+            hv.to_numpy(serial),
+            np.arange(6, dtype=np.float32).reshape((2, 3), order="F"),
+        )
+
+        options.real.pattern = hv.GenerationPattern.Sine
+        options.imaginary.pattern = hv.GenerationPattern.Cosine
+        complex_values = hv.generate_tensor(
+            hv.ScalarType.ComplexFloat32, [2, 3], options
+        )
+        indices = np.arange(6, dtype=np.float32).reshape((2, 3), order="F")
+        np.testing.assert_allclose(
+            hv.to_numpy(complex_values),
+            np.sin(indices) + 1j * np.cos(indices),
+            rtol=1e-6,
+            atol=1e-6,
+        )
+
+        options.imaginary.pattern = hv.GenerationPattern.Zero
+        options.real.pattern = hv.GenerationPattern.Identity
+        identity = hv.generate_tensor(hv.ScalarType.Float32, [3, 4], options)
+        np.testing.assert_array_equal(hv.to_numpy(identity), np.eye(3, 4, dtype=np.float32))
+
+        options.real.pattern = hv.GenerationPattern.UniformInteger
+        options.real.parameter0 = -3
+        options.real.parameter1 = 3
+        options.seed = 19
+        options.real.stream = 0
+        random_first = hv.to_numpy(
+            hv.generate_tensor(hv.ScalarType.Float32, [4, 4], options)
+        )
+        random_repeat = hv.to_numpy(
+            hv.generate_tensor(hv.ScalarType.Float32, [4, 4], options)
+        )
+        np.testing.assert_array_equal(random_first, random_repeat)
+        options.real.stream = 1
+        random_other_stream = hv.to_numpy(
+            hv.generate_tensor(hv.ScalarType.Float32, [4, 4], options)
+        )
+        self.assertFalse(np.array_equal(random_first, random_other_stream))
+        self.assertTrue(np.all((-3 <= random_first) & (random_first <= 3)))
+
     def test_float32_gemm_matches_numpy(self):
         a = np.arange(15, dtype=np.float32).reshape(3, 5) - 4
         b = np.arange(20, dtype=np.float32).reshape(5, 4) - 7

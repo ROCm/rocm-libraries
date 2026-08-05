@@ -4,6 +4,7 @@
 #pragma once
 
 #include <cmath>
+#include <complex>
 #include <cstddef>
 #include <cstdint>
 #include <random>
@@ -43,6 +44,46 @@ enum class DataPattern {
     Constant,
 };
 
+enum class GenerationPattern {
+    Zero,
+    Constant,
+    UniformInteger,
+    UniformReal,
+    Normal,
+    Sine,
+    Cosine,
+    AbsoluteSine,
+    AbsoluteCosine,
+    SerialIndex,
+    SerialDimension,
+    Identity,
+    CheckerboardUniformInteger,
+};
+
+enum class LogicalIndexOrder {
+    FirstDimensionFastest,
+    LastDimensionFastest,
+};
+
+struct GenerationPatternSpec {
+    GenerationPattern pattern = GenerationPattern::Zero;
+    double parameter0 = 0.0;
+    double parameter1 = 1.0;
+    uint64_t stream = 0;
+    size_t dimension = 0;
+};
+
+struct GenerationOptions {
+    uint64_t seed = 0;
+    LogicalIndexOrder indexOrder = LogicalIndexOrder::FirstDimensionFastest;
+    GenerationPatternSpec real;
+    GenerationPatternSpec imaginary;
+};
+
+struct GenerationRunInfo {
+    size_t elementsGenerated = 0;
+};
+
 namespace detail {
 template <typename Function>
 void forEachIndex(const Shape& shape, Function&& function) {
@@ -57,6 +98,85 @@ void forEachIndex(const Shape& shape, Function&& function) {
         }
     }
 }
+
+inline size_t logicalLinearIndex(std::span<const size_t> indices, const Shape& shape,
+                                 LogicalIndexOrder order) {
+    size_t result = 0;
+    size_t stride = 1;
+    if (order == LogicalIndexOrder::FirstDimensionFastest) {
+        for (size_t dimension = 0; dimension < shape.rank(); ++dimension) {
+            result += indices[dimension] * stride;
+            stride *= shape[dimension];
+        }
+    } else {
+        for (size_t dimension = shape.rank(); dimension > 0; --dimension) {
+            const size_t index = dimension - 1;
+            result += indices[index] * stride;
+            stride *= shape[index];
+        }
+    }
+    return result;
+}
+
+inline double indexedUniformUnit(uint64_t seed, uint64_t stream, uint64_t index) {
+    constexpr double inverseTwoTo53 = 1.0 / 9007199254740992.0;
+    const uint64_t mantissa = counterRandom(seed, stream, index) >> 11;
+    return (static_cast<double>(mantissa) + 0.5) * inverseTwoTo53;
+}
+
+inline double generationValue(const GenerationPatternSpec& spec, uint64_t seed,
+                              std::span<const size_t> indices, const Shape& shape,
+                              size_t logicalIndex) {
+    switch (spec.pattern) {
+        case GenerationPattern::Zero:
+            return 0.0;
+        case GenerationPattern::Constant:
+            return spec.parameter0;
+        case GenerationPattern::UniformInteger:
+            return static_cast<double>(indexedUniformInteger(seed, spec.stream, logicalIndex,
+                                                             static_cast<int>(spec.parameter0),
+                                                             static_cast<int>(spec.parameter1)));
+        case GenerationPattern::UniformReal: {
+            const double unit = indexedUniformUnit(seed, spec.stream, logicalIndex);
+            return spec.parameter0 + unit * (spec.parameter1 - spec.parameter0);
+        }
+        case GenerationPattern::Normal: {
+            constexpr double twoPi = 6.28318530717958647692528676655900576;
+            const double first = indexedUniformUnit(seed, spec.stream, 2 * logicalIndex);
+            const double second = indexedUniformUnit(seed, spec.stream, 2 * logicalIndex + 1);
+            const double standardNormal =
+                std::sqrt(-2.0 * std::log(first)) * std::cos(twoPi * second);
+            return spec.parameter0 + spec.parameter1 * standardNormal;
+        }
+        case GenerationPattern::Sine:
+            return std::sin(static_cast<double>(logicalIndex));
+        case GenerationPattern::Cosine:
+            return std::cos(static_cast<double>(logicalIndex));
+        case GenerationPattern::AbsoluteSine:
+            return std::abs(std::sin(static_cast<double>(logicalIndex)));
+        case GenerationPattern::AbsoluteCosine:
+            return std::abs(std::cos(static_cast<double>(logicalIndex)));
+        case GenerationPattern::SerialIndex:
+            return static_cast<double>(logicalIndex);
+        case GenerationPattern::SerialDimension:
+            if (spec.dimension >= shape.rank())
+                throw std::out_of_range("Generation dimension exceeds tensor rank.");
+            return static_cast<double>(indices[spec.dimension]);
+        case GenerationPattern::Identity:
+            if (shape.rank() < 2)
+                throw std::invalid_argument("Identity generation requires rank at least two.");
+            return indices[0] == indices[1] ? 1.0 : 0.0;
+        case GenerationPattern::CheckerboardUniformInteger: {
+            double value = static_cast<double>(indexedUniformInteger(
+                seed, spec.stream, logicalIndex, static_cast<int>(spec.parameter0),
+                static_cast<int>(spec.parameter1)));
+            size_t parity = 0;
+            for (const size_t index : indices) parity ^= index;
+            return (parity & 1) == 0 ? -value : value;
+        }
+    }
+    throw std::invalid_argument("Unsupported GenerationPattern.");
+}
 }  // namespace detail
 
 template <typename T, typename Generator>
@@ -68,14 +188,35 @@ void generate(MatrixView<T> destination, Generator&& generator) {
 }
 
 template <typename Generator>
+    requires(std::is_invocable_v<Generator&, std::span<const size_t>, size_t> ||
+             std::is_invocable_v<Generator&, std::span<const size_t>>)
 void generate(MutableTensorView destination, Generator&& generator) {
-    detail::forEachIndex(destination.shape(), [&](std::span<const size_t> indices,
-                                                  size_t linearIndex) {
-        if constexpr (std::is_invocable_v<Generator&, std::span<const size_t>, size_t>)
-            destination.storeFrom(indices, generator(indices, linearIndex));
-        else
-            destination.storeFrom(indices, generator(indices));
+    detail::forEachIndex(
+        destination.shape(), [&](std::span<const size_t> indices, size_t linearIndex) {
+            if constexpr (std::is_invocable_v<Generator&, std::span<const size_t>, size_t>)
+                destination.storeFrom(indices, generator(indices, linearIndex));
+            else
+                destination.storeFrom(indices, generator(indices));
+        });
+}
+
+inline GenerationRunInfo generate(MutableTensorView destination, const GenerationOptions& options) {
+    const bool complexOutput =
+        scalarTypeInfo(destination.type()).category == ScalarCategory::Complex;
+    detail::forEachIndex(destination.shape(), [&](std::span<const size_t> indices, size_t) {
+        const size_t logicalIndex =
+            detail::logicalLinearIndex(indices, destination.shape(), options.indexOrder);
+        const double real = detail::generationValue(options.real, options.seed, indices,
+                                                    destination.shape(), logicalIndex);
+        if (complexOutput) {
+            const double imaginary = detail::generationValue(
+                options.imaginary, options.seed, indices, destination.shape(), logicalIndex);
+            destination.storeFrom(indices, std::complex<double>(real, imaginary));
+        } else {
+            destination.storeFrom(indices, real);
+        }
     });
+    return {.elementsGenerated = destination.shape().elementCount()};
 }
 
 /**
@@ -169,9 +310,8 @@ void fill(std::span<T> values, DataPattern pattern, RandomGenerator& generator,
     }
 }
 
-inline void fill(MutableTensorView destination, DataPattern pattern,
-                 RandomGenerator& generator, double parameter0 = 0.0,
-                 double parameter1 = 0.0) {
+inline void fill(MutableTensorView destination, DataPattern pattern, RandomGenerator& generator,
+                 double parameter0 = 0.0, double parameter1 = 0.0) {
     generate(destination, [&](std::span<const size_t>, size_t linearIndex) {
         switch (pattern) {
             case DataPattern::Zero:
