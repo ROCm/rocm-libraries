@@ -297,6 +297,34 @@ TEST(ReferenceStandaloneEpilogue, PreservesLegacySharedFactorAxisWhenMEqualsN)
     EXPECT_EQ(d, (std::vector<float>{31, 61, 402, 802}));
 }
 
+TEST(ReferenceStandaloneEpilogue, PreservesPartialOutputSelection)
+{
+    const size_t M = 2;
+    const size_t N = 2;
+    const size_t K = 1;
+
+    auto problem = makePackedProblem(rocisa::DataType::Float,
+                                     rocisa::DataType::Float,
+                                     rocisa::DataType::Float,
+                                     M,
+                                     N,
+                                     K);
+    problem.setUseE(true);
+    problem.setE(rocisa::DataType::Float, problem.d().sizes(), problem.d().strides(), true);
+
+    std::vector<float> a{1, 2};
+    std::vector<float> b{3, 4};
+    std::vector<float> c(M * N, 0);
+    std::vector<float> d(M * N, -99);
+    std::vector<float> e(M * N, -99);
+    ContractionInputs inputs(a.data(), b.data(), c.data(), d.data(), 1.0f, 0.0f);
+    inputs.e = e.data();
+
+    ASSERT_TRUE(tryRuntimeCanonicalGemm(problem, inputs, /*elementsToValidate=*/2));
+    EXPECT_EQ(d, (std::vector<float>{3, -99, 4, -99}));
+    EXPECT_EQ(e, (std::vector<float>{3, -99, 4, -99}));
+}
+
 TEST(ReferenceRuntimeCanonical, HandlesInt32Accumulation)
 {
     const size_t M = 2;
