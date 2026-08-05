@@ -186,9 +186,6 @@ add_library(
     engines/plans/MiopenUnaryActivationPlan.cpp
     engines/plans/MiopenUnaryActivationChecks.cpp
     engines/plans/MiopenUnaryActivationPlanBuilder.cpp
-    engines/plans/MiopenTanhApplicabilityChecks.cpp
-    engines/plans/MiopenSigmoidApplicabilityChecks.cpp
-    engines/plans/MiopenReluApplicabilityChecks.cpp
     engines/plans/MiopenBatchnormApplicabilityChecks.cpp
     engines/plans/MiopenBatchnormPlanBuilder.cpp
     engines/plans/MiopenBatchnormBwdPlan.cpp

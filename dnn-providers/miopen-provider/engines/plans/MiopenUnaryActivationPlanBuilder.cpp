@@ -5,6 +5,7 @@
 
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
+#include "engines/plans/MiopenUnaryActivationChecks.hpp"
 #include "engines/plans/MiopenUnaryActivationPlan.hpp"
 #include "engines/plans/MiopenUnaryActivationPlanBuilder.hpp"
 
@@ -20,11 +21,11 @@ bool MiopenUnaryActivationPlanBuilder::isApplicable(
     // descriptors it builds, so decline rather than risk a mismatch (RFC 0008 §4.6).
     if(opGraph.getGraph().is_override_shape_enabled())
     {
-        HIPDNN_PLUGIN_LOG_INFO(_opName << " plan builder does not support override shapes");
+        HIPDNN_PLUGIN_LOG_INFO("Unary activation plan builder does not support override shapes");
         return false;
     }
 
-    return _isSupportedFn(opGraph);
+    return unary_activation_applicability::isSupported(opGraph);
 }
 
 size_t MiopenUnaryActivationPlanBuilder::getMaxWorkspaceSize(
@@ -57,10 +58,13 @@ void MiopenUnaryActivationPlanBuilder::buildPlan(
     const auto& nodeWrapper = opGraph.getNodeWrapper(0);
     const auto nodeName = nodeWrapper.name();
 
-    HIPDNN_PLUGIN_LOG_INFO("Building " << _opName << " plan for node: " << nodeName);
-
     const auto& attrs
         = nodeWrapper.attributesAs<hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes>();
+
+    HIPDNN_PLUGIN_LOG_INFO("Building "
+                           << hipdnn_flatbuffers_sdk::data_objects::EnumNamePointwiseMode(
+                                  attrs.operation())
+                           << " plan for node: " << nodeName);
 
     auto plan = std::make_unique<MiopenUnaryActivationPlan>(attrs, opGraph.getTensorMap());
     executionContext.setPlan(std::move(plan));

@@ -3,13 +3,9 @@
 
 #pragma once
 
-#include <functional>
-#include <string>
-#include <utility>
 #include <vector>
 
 #include <hipdnn_flatbuffers_sdk/data_objects/knob_value_generated.h>
-#include <hipdnn_flatbuffers_sdk/data_objects/pointwise_attributes_generated.h>
 #include <hipdnn_plugin_sdk/interfaces/IPlanBuilder.hpp>
 
 #include "HipdnnMiopenContext.hpp"
@@ -19,25 +15,17 @@
 namespace miopen_plugin
 {
 
-// Shared PlanBuilder for all unary pointwise activations. None of buildPlan,
-// getMaxWorkspaceSize, initializeExecutionSettings, or getCustomKnobs differ per activation;
-// the only thing that varies is which applicability check to run and the op's display name
-// used in log messages, both supplied at construction time (e.g.
-// MiopenUnaryActivationPlanBuilder("Relu", relu_applicability::isReluSupported)).
+// Shared PlanBuilder for all unary pointwise activations (ReLU family, Sigmoid, Tanh, ...).
+// None of buildPlan, getMaxWorkspaceSize, initializeExecutionSettings, or getCustomKnobs
+// differ per activation, so a single builder handles them all: applicability dispatches on
+// the node's pointwise mode in unary_activation_applicability::isSupported, and the plan
+// itself is differentiated by MiopenActivationDescriptor.
 class MiopenUnaryActivationPlanBuilder
     : public hipdnn_plugin_sdk::
           IPlanBuilder<HipdnnMiopenHandle, HipdnnMiopenSettings, HipdnnMiopenContext>
 {
 public:
-    using IsSupportedFn
-        = std::function<bool(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph&)>;
-
-    MiopenUnaryActivationPlanBuilder(std::string opName, IsSupportedFn isSupportedFn)
-        : _opName(std::move(opName))
-        , _isSupportedFn(std::move(isSupportedFn))
-    {
-    }
-
+    MiopenUnaryActivationPlanBuilder() = default;
     ~MiopenUnaryActivationPlanBuilder() override = default;
 
     MiopenUnaryActivationPlanBuilder(const MiopenUnaryActivationPlanBuilder&) = delete;
@@ -65,10 +53,6 @@ public:
     std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT> getCustomKnobs(
         const HipdnnMiopenHandle& handle,
         const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const override;
-
-private:
-    std::string _opName;
-    IsSupportedFn _isSupportedFn;
 };
 
 } // namespace miopen_plugin
