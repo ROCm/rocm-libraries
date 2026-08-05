@@ -1,11 +1,10 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include <roc/host_validation/tensor.hpp>
-
 #include <array>
 #include <cmath>
 #include <complex>
+#include <roc/host_validation/tensor.hpp>
 #include <span>
 #include <stdexcept>
 #include <type_traits>
@@ -27,15 +26,17 @@ int main() {
     const Shape shape{2, 3};
     require(shape.rank() == 2, "Shape rank mismatch.");
     require(shape.elementCount() == 6, "Shape element count mismatch.");
-    require(visitScalarType(ScalarType::Float32, []<typename Tag>() {
-                return Tag::type == ScalarType::Float32 &&
-                       std::is_same_v<typename Tag::Storage, float>;
-            }),
+    require(visitScalarType(ScalarType::Float32,
+                            []<typename Tag>() {
+                                return Tag::type == ScalarType::Float32 &&
+                                       std::is_same_v<typename Tag::Storage, float>;
+                            }),
             "Runtime scalar tag dispatch mismatch.");
-    require(visitScalarType(ScalarType::Int4, []<typename Tag>() {
-                return Tag::type == ScalarType::Int4 &&
-                       std::is_void_v<typename Tag::Storage>;
-            }),
+    require(visitScalarType(ScalarType::Int4,
+                            []<typename Tag>() {
+                                return Tag::type == ScalarType::Int4 &&
+                                       std::is_void_v<typename Tag::Storage>;
+                            }),
             "Packed scalar tag dispatch mismatch.");
 
     Tensor tensor(ScalarType::Float32, shape);
@@ -58,25 +59,21 @@ int main() {
             "Copying an owning tensor did not deep-copy storage.");
 
     std::array<int32_t, 8> padded{};
-    MutableTensorView paddedView(
-        ScalarType::Int32,
-        Layout(Shape{2, 2}, std::vector<ptrdiff_t>{1, 3}, 1),
-        std::as_writable_bytes(std::span<int32_t>(padded)));
+    MutableTensorView paddedView(ScalarType::Int32,
+                                 Layout(Shape{2, 2}, std::vector<ptrdiff_t>{1, 3}, 1),
+                                 std::as_writable_bytes(std::span<int32_t>(padded)));
     paddedView.storeFrom({0, 0}, 4);
     paddedView.storeFrom({1, 1}, 9);
     require(padded[1] == 4 && padded[5] == 9, "Strided tensor layout mismatch.");
 
     auto nativePaddedView = MutableTensorView::fromNative<int32_t>(
-        Layout(Shape{2, 2}, std::vector<ptrdiff_t>{1, 3}, 1),
-        std::span<int32_t>(padded));
+        Layout(Shape{2, 2}, std::vector<ptrdiff_t>{1, 3}, 1), std::span<int32_t>(padded));
     nativePaddedView.storeFrom({0, 1}, 12);
     require(padded[4] == 12, "Native mutable tensor view factory mismatch.");
 
     const std::array<int32_t, 3> reversedStorage{1, 2, 3};
-    const TensorView reversed(
-        ScalarType::Int32,
-        Layout(Shape{3}, std::vector<ptrdiff_t>{-1}, 2),
-        std::as_bytes(std::span<const int32_t>(reversedStorage)));
+    const TensorView reversed(ScalarType::Int32, Layout(Shape{3}, std::vector<ptrdiff_t>{-1}, 2),
+                              std::as_bytes(std::span<const int32_t>(reversedStorage)));
     require(reversed.loadAs<int32_t>({0}) == 3 && reversed.loadAs<int32_t>({2}) == 1,
             "Negative-stride tensor layout mismatch.");
 
@@ -88,18 +85,15 @@ int main() {
     int4View.storeFrom({3}, 7);
     int4View.storeFrom({4}, 9);
     require(int4.storage().size() == 3, "Int4 packed storage size mismatch.");
-    require(int4.view().loadAs<int32_t>({0}) == -8 &&
-                int4.view().loadAs<int32_t>({1}) == -3 &&
-                int4.view().loadAs<int32_t>({3}) == 7 &&
-                int4.view().loadAs<int32_t>({4}) == 7,
+    require(int4.view().loadAs<int32_t>({0}) == -8 && int4.view().loadAs<int32_t>({1}) == -3 &&
+                int4.view().loadAs<int32_t>({3}) == 7 && int4.view().loadAs<int32_t>({4}) == 7,
             "Int4 packed codec mismatch.");
 
     Tensor int12(ScalarType::Int12, Shape{2});
     int12.mutableView().storeFrom({0}, -2048);
     int12.mutableView().storeFrom({1}, 2047);
     require(int12.storage().size() == 3, "Int12 packed storage size mismatch.");
-    require(int12.view().loadAs<int32_t>({0}) == -2048 &&
-                int12.view().loadAs<int32_t>({1}) == 2047,
+    require(int12.view().loadAs<int32_t>({0}) == -2048 && int12.view().loadAs<int32_t>({1}) == 2047,
             "Int12 cross-byte codec mismatch.");
 
     Tensor fp4(ScalarType::Float4E2M1, Shape{4});
@@ -128,23 +122,16 @@ int main() {
 
     Tensor bfloat16(ScalarType::BFloat16, Shape{1});
     bfloat16.mutableView().storeFrom({0}, 1.25f);
-    requireNear(
-        bfloat16.view().loadAs<float>({0}), 1.25f, 0.01f, "BFloat16 codec mismatch.");
+    requireNear(bfloat16.view().loadAs<float>({0}), 1.25f, 0.01f, "BFloat16 codec mismatch.");
 
     Tensor complex(ScalarType::ComplexFloat32, Shape{1});
     complex.mutableView().storeFrom({0}, std::complex<float>(2.0f, -3.0f));
-    require(complex.view().loadAs<std::complex<float>>({0}) ==
-                std::complex<float>(2.0f, -3.0f),
+    require(complex.view().loadAs<std::complex<float>>({0}) == std::complex<float>(2.0f, -3.0f),
             "Complex codec mismatch.");
 
-    bool unsupportedThrew = false;
-    try {
-        Tensor unsupported(ScalarType::Float8E4M3, Shape{1});
-        unsupported.mutableView().storeFrom({0}, 1.0f);
-    } catch (const std::invalid_argument&) {
-        unsupportedThrew = true;
-    }
-    require(unsupportedThrew, "Unsupported codec did not fail explicitly.");
+    Tensor float8(ScalarType::Float8E4M3, Shape{1});
+    float8.mutableView().storeFrom({0}, 1.25f);
+    requireNear(float8.view().loadAs<float>({0}), 1.25f, 0.0f, "Float8 codec mismatch.");
 
     return 0;
 }
