@@ -18,7 +18,7 @@ option(HOST_VALIDATION_BUILD_TESTING
        ${HOST_VALIDATION_STANDALONE})
 option(HOST_VALIDATION_BUILD_PYTHON
        "Build the host-validation nanobind module."
-       OFF)
+       ${HOST_VALIDATION_STANDALONE})
 option(HOST_VALIDATION_BUILD_BLAS_BACKEND
        "Build the optional host-validation CBLAS GEMM backend."
        OFF)
