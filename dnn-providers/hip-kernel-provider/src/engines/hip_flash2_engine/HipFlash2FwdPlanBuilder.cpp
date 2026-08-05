@@ -13,10 +13,10 @@
 // Finding 2 fix: include Utils.hpp so HIP_KERNEL_RETURN_FALSE_IF is defined
 #include "core/Utils.hpp"
 
+#include "../asm_sdpa_engine/plans/SdpaPlanUtils.hpp"
 #include "HipFlash2FwdPlan.hpp"
 #include "HipFlash2FwdPlanBuilder_v2.hpp"
 #include "HipFlash2KernelUtils.hpp"
-#include "../asm_sdpa_engine/plans/SdpaPlanUtils.hpp"
 
 namespace hip_flash2_engine
 {
@@ -72,10 +72,9 @@ bool HipFlash2FwdPlanBuilder::isApplicable(const Handle& handle,
     // K2: reject mask types the kernel does not implement
     {
         const auto maskType = plan_utils::getMaskType(attrs);
-        HIP_KERNEL_RETURN_FALSE_IF(
-            maskType != plan_utils::MaskType::NO_MASK
-                && maskType != plan_utils::MaskType::TOP_LEFT_CAUSAL,
-            "Only NO_MASK and TOP_LEFT_CAUSAL are supported");
+        HIP_KERNEL_RETURN_FALSE_IF(maskType != plan_utils::MaskType::NO_MASK
+                                       && maskType != plan_utils::MaskType::TOP_LEFT_CAUSAL,
+                                   "Only NO_MASK and TOP_LEFT_CAUSAL are supported");
     }
     HIP_KERNEL_RETURN_FALSE_IF(attrs.seq_len_q_tensor_uid().has_value()
                                    || attrs.seq_len_kv_tensor_uid().has_value(),
