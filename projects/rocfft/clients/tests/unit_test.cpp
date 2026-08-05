@@ -67,11 +67,7 @@ namespace fs = std::filesystem;
 
 TEST(rocfft_UnitTest, plan_description)
 {
-    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
-       > unittest_prob)
-    {
-        GTEST_SKIP();
-    }
+    PROB_SKIP_UNITTEST();
 
     try
     {
@@ -125,11 +121,7 @@ TEST(rocfft_UnitTest, plan_description_reuse)
     // check that a plan description can be reused between different
     // plans, with different layout parameters for each.
 
-    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
-       > unittest_prob)
-    {
-        GTEST_SKIP();
-    }
+    PROB_SKIP_UNITTEST();
 
     try
     {
@@ -224,11 +216,7 @@ TEST(rocfft_UnitTest, nonzero_offsets)
 {
     // check that plan creation does not proceed with non-zero offsets.
 
-    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
-       > unittest_prob)
-    {
-        GTEST_SKIP();
-    }
+    PROB_SKIP_UNITTEST();
 
     try
     {
@@ -286,11 +274,7 @@ struct LocalCleanup
 // run a transform with all log levels enabled
 TEST(rocfft_UnitTest, log_levels)
 {
-    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
-       > unittest_prob)
-    {
-        GTEST_SKIP();
-    }
+    PROB_SKIP_UNITTEST();
 
     try
     {
@@ -370,11 +354,7 @@ TEST(rocfft_UnitTest, log_levels)
 
 TEST(rocfft_UnitTest, setup_cleanup_counter)
 {
-    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
-       > unittest_prob)
-    {
-        GTEST_SKIP();
-    }
+    PROB_SKIP_UNITTEST();
     try
     {
         LocalCleanup cleanup([]() {
@@ -419,11 +399,7 @@ TEST(rocfft_UnitTest, setup_cleanup_counter)
 // Check whether logs can be emitted from multiple threads properly
 TEST(rocfft_UnitTest, log_multithreading)
 {
-    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
-       > unittest_prob)
-    {
-        GTEST_SKIP();
-    }
+    PROB_SKIP_UNITTEST();
 
     try
     {
@@ -555,11 +531,7 @@ void workmem_test(workmem_sizer sizer,
 // - library should allocate
 TEST(rocfft_UnitTest, workmem_missing)
 {
-    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
-       > unittest_prob)
-    {
-        GTEST_SKIP();
-    }
+    PROB_SKIP_UNITTEST();
 
     try
     {
@@ -571,11 +543,7 @@ TEST(rocfft_UnitTest, workmem_missing)
 // check what happens if work memory is required but not enough is provided
 TEST(rocfft_UnitTest, workmem_small)
 {
-    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
-       > unittest_prob)
-    {
-        GTEST_SKIP();
-    }
+    PROB_SKIP_UNITTEST();
 
     try
     {
@@ -588,11 +556,7 @@ TEST(rocfft_UnitTest, workmem_small)
 // hard to imagine this being a problem, but try giving too much as well
 TEST(rocfft_UnitTest, workmem_big)
 {
-    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
-       > unittest_prob)
-    {
-        GTEST_SKIP();
-    }
+    PROB_SKIP_UNITTEST();
 
     try
     {
@@ -606,11 +570,7 @@ TEST(rocfft_UnitTest, workmem_big)
 // allocates
 TEST(rocfft_UnitTest, workmem_null)
 {
-    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
-       > unittest_prob)
-    {
-        GTEST_SKIP();
-    }
+    PROB_SKIP_UNITTEST();
 
     try
     {
@@ -623,11 +583,7 @@ static const size_t RTC_PROBLEM_SIZE = 2304;
 // runtime compilation cache tests main loop
 void rtc_cache_main()
 {
-    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
-       > unittest_prob)
-    {
-        GTEST_SKIP();
-    }
+    PROB_SKIP_UNITTEST();
 
     // PRECONDITIONS
 
@@ -797,11 +753,7 @@ TEST(rocfft_UnitTest, rtc_cache_iter_2)
 // make sure cache API functions tolerate null pointers without crashing
 TEST(rocfft_UnitTest, rtc_cache_null)
 {
-    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
-       > unittest_prob)
-    {
-        GTEST_SKIP();
-    }
+    PROB_SKIP_UNITTEST();
 
     try
     {
@@ -818,11 +770,7 @@ TEST(rocfft_UnitTest, rtc_cache_null)
 
 TEST(rocfft_UnitTest, rtc_test_harness)
 {
-    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
-       > unittest_prob)
-    {
-        GTEST_SKIP();
-    }
+    PROB_SKIP_UNITTEST();
 
     try
     {
@@ -1037,11 +985,7 @@ static void run_plan_capacity_test(size_t M)
 // rocFFT fails around 65k plans due to vm.max_map_count exhaustion.
 TEST(rocfft_UnitTest, plan_capacity_100k)
 {
-    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
-       > unittest_prob)
-    {
-        GTEST_SKIP();
-    }
+    PROB_SKIP_UNITTEST();
     run_plan_capacity_test(100'000);
 }
 
@@ -1049,11 +993,7 @@ TEST(rocfft_UnitTest, plan_capacity_100k)
 // run manually with --gtest_also_run_disabled_tests.
 TEST(rocfft_UnitTest, DISABLED_plan_capacity_1m)
 {
-    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
-       > unittest_prob)
-    {
-        GTEST_SKIP();
-    }
+    PROB_SKIP_UNITTEST();
     run_plan_capacity_test(1'000'000);
 }
 
