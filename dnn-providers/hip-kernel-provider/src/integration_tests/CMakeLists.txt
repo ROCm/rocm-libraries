@@ -70,7 +70,9 @@ endif()
 
 if(ENABLE_HIP_FLASH2_ENGINE)
     if(NOT HIPDNN_ENABLE_SDPA)
-        message(WARNING "ENABLE_HIP_FLASH2_ENGINE=ON requires HIPDNN_ENABLE_SDPA=ON for Flash2 integration tests")
+        message(WARNING
+                "ENABLE_HIP_FLASH2_ENGINE is ON but hipDNN was built with HIPDNN_ENABLE_SDPA=OFF. "
+                "Rebuild hipDNN with -DHIPDNN_ENABLE_SDPA=ON to enable Flash2 integration tests.")
     else()
         add_subdirectory(hip_flash2_engine)
     endif()
