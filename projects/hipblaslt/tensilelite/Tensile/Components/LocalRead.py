@@ -1251,17 +1251,17 @@ class LocalReadMFMA(LocalRead):
                                     # interleaving the swap with residual/TF32_2 packing operations.
                                     if multiGroupXF32 and rIdx == numReadsPerUnroll - 1:
                                         halfGroup = 4
-                                        for i in range(halfGroup):
-                                            swapIdx1 = outerBaseValuiIdx + halfGroup + i
-                                            swapIdx2 = outerBaseValuiIdx + halfGroup * 2 + i
-                                            swapVgpr1 = vgpr("Valu%s_X%u_I%u+%u"%(tc, bufferIdx, iui, swapIdx1))
-                                            swapVgpr2 = vgpr("Valu%s_X%u_I%u+%u"%(tc, bufferIdx, iui, swapIdx2))
-                                            commentStr = "XF32 pack rearrange %s: swap [%d] <-> [%d]"%(tc, swapIdx1, swapIdx2)
-                                            # Tag the last swap with __TF32_2 so _packItemsConditional treats the swap block as a proper boundary,
-                                            # preventing _interleavePackAB from displacing swaps into the next group.
-                                            if i == halfGroup - 1:
-                                                commentStr += " __TF32_2_%s_%d_swap"%(tc, outerBaseValuiIdx // (halfGroup * 2))
-                                            packCodeT.add(VSwapB32(dst=swapVgpr1, src=swapVgpr2, comment=commentStr))
+                                        for sb in range(lrvwTile):
+                                            subBase = outerBaseValuiIdx + sb * numReadsPerUnroll
+                                            for i in range(halfGroup):
+                                                swapIdx1 = subBase + halfGroup + i
+                                                swapIdx2 = subBase + halfGroup * 2 + i
+                                                swapVgpr1 = vgpr("Valu%s_X%u_I%u+%u"%(tc, bufferIdx, iui, swapIdx1))
+                                                swapVgpr2 = vgpr("Valu%s_X%u_I%u+%u"%(tc, bufferIdx, iui, swapIdx2))
+                                                commentStr = "XF32 pack rearrange %s: swap [%d] <-> [%d]"%(tc, swapIdx1, swapIdx2)
+                                                if i == halfGroup - 1:
+                                                    commentStr += " __TF32_2_%s_%d_swap"%(tc, subBase // (halfGroup * 2))
+                                                packCodeT.add(VSwapB32(dst=swapVgpr1, src=swapVgpr2, comment=commentStr))
 
                                 if kernel["ConvertAfterDS"] and (tP["bpe"] != tP["bpeDS"]):
                                     if tP["bpe"] == 2 and tP["bpeDS"] == 4:
