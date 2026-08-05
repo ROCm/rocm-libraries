@@ -163,13 +163,6 @@ namespace TensileLite
             uint8_t* host = stagingBuffer(bytes);
             HIP_CHECK_EXC(hipMemcpy(host, deviceSynchronizer, bytes, hipMemcpyDeviceToHost));
 
-            // The client zeroes the Synchronizer only on the first
-            // prepareGPUInputs -- it is not an output tensor, so the per-solution
-            // resetOutput skips it. Restoring the baseline here scopes each check
-            // to the launches since the last one, instead of blaming whichever
-            // solution follows the one that left residue.
-            HIP_CHECK_EXC(hipMemset(deviceSynchronizer, 0, bytes));
-
             SynchronizerResidue residue;
             if(!scanSynchronizerResidue(host, bytes, residue))
                 return true;
@@ -180,6 +173,12 @@ namespace TensileLite
                 << " ints nonzero, first at int offset " << residue.firstInt
                 << " -- the kernel did not self-clean its work-queue state.\n";
             m_reporter->log(LogLevel::Error, msg.str());
+
+            // The client zeroes the Synchronizer only on the first
+            // prepareGPUInputs -- it is not an output tensor, so the per-solution
+            // resetOutput skips it. Clear the residue so it is reported once
+            // instead of again by every solution that follows.
+            HIP_CHECK_EXC(hipMemset(deviceSynchronizer, 0, bytes));
 
             return false;
         }
