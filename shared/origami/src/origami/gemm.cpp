@@ -116,8 +116,6 @@ context_t::context_t(const problem_t& problem, const hardware_t& hardware, const
     OLOG_DEBUG("CacheHintsA: " << int(config.cache_hints_a));
     OLOG_DEBUG("CacheHintsB: " << int(config.cache_hints_b));
     OLOG_DEBUG("StreamK: " << int(config.stream_k));
-    OLOG_DEBUG("GRVWA: " << int(config.grvw_a));
-    OLOG_DEBUG("GRVWB: " << int(config.grvw_b));
 
     OLOG_DEBUG("Grid: " << int(grid_m) << "x" << int(grid_n));
     OLOG_DEBUG("NumOutputTiles: " << int(num_output_tiles));
