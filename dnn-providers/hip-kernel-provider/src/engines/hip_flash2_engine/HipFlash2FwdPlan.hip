@@ -181,7 +181,10 @@ __device__ void flash2_fwd_body(const __half* __restrict__ ptr_q,
             for(int qg = 0; qg < 4; qg++)
                 for(int e = 0; e < 4; e++)
                 {
-                    float pv          = flash2_expf(score[qg][kg][e] - row_m[qg][e]);
+                    // Clamp: if score=-1e38 (masked) and row_m=-1e38, exp(0)=1 wrongly
+                    float pv          = (score[qg][kg][e] > -1e30f)
+                                            ? flash2_expf(score[qg][kg][e] - row_m[qg][e])
+                                            : 0.f;
                     row_d[qg][e]     += pv;
                     // Row index: my_eg*16 + qg*4 + e (unique per lane-group)
                     sP[my_eg * 16 + qg * 4 + e][my_kcol] = pv;
