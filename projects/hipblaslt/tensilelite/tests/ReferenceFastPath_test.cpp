@@ -4,10 +4,12 @@
 #include <gtest/gtest.h>
 
 #include <Reference.hpp>
+#include <roc/host_validation/validation.hpp>
 #include <Tensile/ContractionProblem.hpp>
 #include <Tensile/DataTypes.hpp>
 
 #include <cmath>
+#include <span>
 #include <vector>
 
 using namespace TensileLite;
@@ -449,3 +451,77 @@ TEST(ReferenceRuntimeCanonical, HandlesFloat16Accumulation)
         expected = Half(expected + Half(a[reduction] * b[reduction]));
     EXPECT_EQ(d[0], expected);
 }
+
+#if !defined(_WIN32) && defined(TENSILE_USE_FP6)
+TEST(ReferencePackedStorage, Float6MatchesComponentCodec)
+{
+    Float6x32 packed{};
+    packed.data.v0 = 0x01;
+    packed.data.v1 = 0x02;
+    packed.data.v2 = 0x07;
+    packed.data.v3 = 0x1f;
+    packed.data.v4 = 0x3f;
+
+    const roc::host_validation::TensorView component(
+        roc::host_validation::ScalarType::Float6E2M3,
+        roc::host_validation::Layout::contiguous(roc::host_validation::Shape{32}),
+        std::as_bytes(std::span<const Float6x32>(&packed, 1)));
+    for(size_t index = 0; index < 32; ++index)
+        EXPECT_EQ(component.loadAs<float>({index}), packed.getElement(index)) << "index=" << index;
+}
+
+TEST(ReferenceRuntimeCanonical, HandlesPackedFloat6Storage)
+{
+    auto problem = makePackedProblem(rocisa::DataType::Float6,
+                                     rocisa::DataType::Float6,
+                                     rocisa::DataType::Float,
+                                     1,
+                                     1,
+                                     32);
+    std::vector<Float6x32> a{Float6x32(1.0f)};
+    std::vector<Float6x32> b{Float6x32(2.0f)};
+    std::vector<float> c{0};
+    std::vector<float> d{-99};
+    ContractionInputs inputs(a.data(), b.data(), c.data(), d.data(), 1.0f, 0.0f);
+
+    ASSERT_TRUE(tryRuntimeCanonicalGemm(problem, inputs, /*elementsToValidate=*/-1));
+    EXPECT_EQ(d[0], 64);
+}
+#endif
+
+#if !defined(_WIN32) && defined(TENSILE_USE_BF6)
+TEST(ReferencePackedStorage, BFloat6MatchesComponentCodec)
+{
+    BFloat6x32 packed{};
+    packed.data.v0 = 0x01;
+    packed.data.v1 = 0x02;
+    packed.data.v2 = 0x07;
+    packed.data.v3 = 0x1f;
+    packed.data.v4 = 0x3f;
+
+    const roc::host_validation::TensorView component(
+        roc::host_validation::ScalarType::Float6E3M2,
+        roc::host_validation::Layout::contiguous(roc::host_validation::Shape{32}),
+        std::as_bytes(std::span<const BFloat6x32>(&packed, 1)));
+    for(size_t index = 0; index < 32; ++index)
+        EXPECT_EQ(component.loadAs<float>({index}), packed.getElement(index)) << "index=" << index;
+}
+
+TEST(ReferenceRuntimeCanonical, HandlesPackedBFloat6Storage)
+{
+    auto problem = makePackedProblem(rocisa::DataType::BFloat6,
+                                     rocisa::DataType::BFloat6,
+                                     rocisa::DataType::Float,
+                                     1,
+                                     1,
+                                     32);
+    std::vector<BFloat6x32> a{BFloat6x32(1.0f)};
+    std::vector<BFloat6x32> b{BFloat6x32(2.0f)};
+    std::vector<float> c{0};
+    std::vector<float> d{-99};
+    ContractionInputs inputs(a.data(), b.data(), c.data(), d.data(), 1.0f, 0.0f);
+
+    ASSERT_TRUE(tryRuntimeCanonicalGemm(problem, inputs, /*elementsToValidate=*/-1));
+    EXPECT_EQ(d[0], 64);
+}
+#endif
