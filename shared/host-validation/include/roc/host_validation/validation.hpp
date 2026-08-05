@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include <roc/host_validation/comparison.hpp>
-#include <roc/host_validation/data_generation.hpp>
-#include <roc/host_validation/reference_gemm.hpp>
+#include <roc/host_validation/detail/comparison.hpp>
+#include <roc/host_validation/detail/data_generation.hpp>
+#include <roc/host_validation/detail/reference_gemm.hpp>
 #include <roc/host_validation/tensor.hpp>

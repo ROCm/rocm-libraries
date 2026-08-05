@@ -4,3 +4,15 @@
 add_executable(host-validation-tests host_validation_test.cpp)
 target_link_libraries(host-validation-tests PRIVATE roc::host-validation)
 add_test(NAME host-validation-tests COMMAND host-validation-tests)
+
+add_executable(host-validation-core-tests tensor_core_test.cpp)
+target_link_libraries(host-validation-core-tests PRIVATE roc::host-validation-core)
+add_test(NAME host-validation-core-tests COMMAND host-validation-core-tests)
+
+add_test(
+    NAME host-validation-core-boundary
+    COMMAND
+        "${CMAKE_COMMAND}"
+        "-DCORE_HEADER=${CMAKE_CURRENT_SOURCE_DIR}/../include/roc/host_validation/tensor.hpp"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/check_core_boundary.cmake"
+)

@@ -5,7 +5,7 @@
 
 #include <cstdint>
 #include <hipblaslt_datatype2string.hpp>
-#include <roc/host_validation/data_generation.hpp>
+#include <roc/host_validation/validation.hpp>
 #include <span>
 #include <vector>
 
