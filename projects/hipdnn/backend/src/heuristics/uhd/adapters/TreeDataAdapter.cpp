@@ -43,6 +43,12 @@ std::unique_ptr<TreeDataAdapter>
                                     size_t size,
                                     const std::string& expectedFeaturesHash)
 {
+    // Guard against null/empty buffer
+    if(buffer == nullptr || size < sizeof(flatbuffers::uoffset_t) + 4)
+    {
+        return nullptr;
+    }
+
     // Verify file identifier
     if(!flatbuffers::BufferHasIdentifier(buffer, fb::GbdtModelIdentifier()))
     {
