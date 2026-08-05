@@ -42,6 +42,7 @@
 #include "generic/rocsparse_spgeam.h"
 #include "generic/rocsparse_spgemm.h"
 #include "generic/rocsparse_spic0.h"
+#include "generic/rocsparse_spmat_scale.h"
 #ifdef ROCSPARSE_WITH_ILDLT0
 #include "generic/rocsparse_spildlt0.h"
 #endif
