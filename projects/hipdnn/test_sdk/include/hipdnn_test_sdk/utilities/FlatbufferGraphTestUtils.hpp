@@ -9,7 +9,9 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_config_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_details_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/moe_grouped_matmul_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/reduction_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/resample_bwd_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/resample_fwd_attributes_generated.h>
 
 namespace hipdnn_test_sdk::utilities
@@ -2903,8 +2905,7 @@ inline flatbuffers::FlatBufferBuilder
     ::flatbuffers::Optional<bool> flatbufferGenerateIndex = ::flatbuffers::nullopt;
     if(generateIndex.has_value())
     {
-        const bool generateIndexValue = generateIndex.value_or(false);
-        flatbufferGenerateIndex = ::flatbuffers::Optional<bool>(generateIndexValue);
+        flatbufferGenerateIndex = ::flatbuffers::Optional<bool>(generateIndex.value_or(false));
     }
 
     auto resampleAttr = hipdnn_flatbuffers_sdk::data_objects::CreateResampleFwdAttributesDirect(
@@ -2927,6 +2928,187 @@ inline flatbuffers::FlatBufferBuilder
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
         hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::ResampleFwdAttributes,
         resampleAttr.Union()));
+
+    auto graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
+        builder,
+        "test",
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        &tensorAttributes,
+        &nodes);
+    builder.Finish(graphOffset);
+    return builder;
+}
+
+inline flatbuffers::FlatBufferBuilder createValidResampleBwdGraph(bool generateIndex = true)
+{
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
+        tensorAttributes;
+
+    const std::vector<int64_t> dyDims = {1, 1, 2, 2};
+    const std::vector<int64_t> dyStrides = {4, 4, 2, 1};
+    const std::vector<int64_t> dxDims = {1, 1, 4, 4};
+    const std::vector<int64_t> dxStrides = {16, 16, 4, 1};
+
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+        builder,
+        1,
+        "dy",
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        &dyStrides,
+        &dyDims));
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+        builder,
+        2,
+        "dx",
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        &dxStrides,
+        &dxDims));
+    ::flatbuffers::Optional<int64_t> indexTensorUid = ::flatbuffers::nullopt;
+    if(generateIndex)
+    {
+        indexTensorUid = 3;
+        tensorAttributes.push_back(
+            hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+                builder,
+                *indexTensorUid,
+                "index",
+                hipdnn_flatbuffers_sdk::data_objects::DataType::INT32,
+                &dyStrides,
+                &dyDims));
+    }
+
+    const std::vector<int64_t> prePadding = {0, 0};
+    const std::vector<int64_t> postPadding = {0, 0};
+    const std::vector<int64_t> stride = {2, 2};
+    const std::vector<int64_t> window = {2, 2};
+
+    auto resampleAttr = hipdnn_flatbuffers_sdk::data_objects::CreateResampleBwdAttributesDirect(
+        builder,
+        1,
+        2,
+        indexTensorUid,
+        &prePadding,
+        &postPadding,
+        &stride,
+        &window,
+        hipdnn_flatbuffers_sdk::data_objects::ResampleMode::MAXPOOL,
+        hipdnn_flatbuffers_sdk::data_objects::PaddingMode::ZERO_PAD);
+
+    std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> nodes;
+    nodes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
+        builder,
+        "resample_bwd",
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::ResampleBwdAttributes,
+        resampleAttr.Union()));
+
+    auto graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
+        builder,
+        "test",
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        &tensorAttributes,
+        &nodes);
+    builder.Finish(graphOffset);
+    return builder;
+}
+inline flatbuffers::FlatBufferBuilder createValidMoeGroupedMatmulGraph(
+    hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulMode mode
+    = hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulMode::SCATTER)
+{
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
+        tensorAttributes;
+
+    const std::vector<int64_t> tokenDims = {1, 4, 3};
+    const std::vector<int64_t> tokenStrides = {12, 3, 1};
+    const std::vector<int64_t> weightDims = {2, 3, 5};
+    const std::vector<int64_t> weightStrides = {15, 5, 1};
+    const std::vector<int64_t> routingDims = {2, 1, 1};
+    const std::vector<int64_t> routingStrides = {1, 1, 1};
+    const std::vector<int64_t> indexDims = {1, 4, 1};
+    const std::vector<int64_t> indexStrides = {4, 1, 1};
+    const std::vector<int64_t> outputDims = {1, 4, 5};
+    const std::vector<int64_t> outputStrides = {20, 5, 1};
+
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+        builder,
+        1,
+        "token",
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        &tokenStrides,
+        &tokenDims));
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+        builder,
+        2,
+        "weight",
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        &weightStrides,
+        &weightDims));
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+        builder,
+        3,
+        "first_token_offset",
+        hipdnn_flatbuffers_sdk::data_objects::DataType::INT32,
+        &routingStrides,
+        &routingDims));
+
+    const bool hasTokenIndex
+        = mode != hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulMode::NONE;
+    const bool hasTokenKs
+        = mode == hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulMode::SCATTER;
+    if(hasTokenIndex)
+    {
+        tensorAttributes.push_back(
+            hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+                builder,
+                4,
+                "token_index",
+                hipdnn_flatbuffers_sdk::data_objects::DataType::INT32,
+                &indexStrides,
+                &indexDims));
+    }
+    if(hasTokenKs)
+    {
+        tensorAttributes.push_back(
+            hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+                builder,
+                5,
+                "token_ks",
+                hipdnn_flatbuffers_sdk::data_objects::DataType::INT32,
+                &indexStrides,
+                &indexDims));
+    }
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+        builder,
+        6,
+        "output",
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        &outputStrides,
+        &outputDims));
+
+    auto moeAttributes = hipdnn_flatbuffers_sdk::data_objects::CreateMoeGroupedMatmulAttributes(
+        builder,
+        1,
+        2,
+        3,
+        hasTokenIndex ? ::flatbuffers::Optional<int64_t>(4) : ::flatbuffers::nullopt,
+        hasTokenKs ? ::flatbuffers::Optional<int64_t>(5) : ::flatbuffers::nullopt,
+        6,
+        mode,
+        hasTokenKs ? 2 : 0);
+
+    std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> nodes;
+    nodes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
+        builder,
+        "moe_grouped_matmul",
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::MoeGroupedMatmulAttributes,
+        moeAttributes.Union()));
 
     auto graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
         builder,
