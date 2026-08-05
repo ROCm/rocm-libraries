@@ -20,12 +20,12 @@ using namespace test_pointwise_common;
 namespace
 {
 
-using PointwiseForwardTestCase
+using ActivationForwardTestCase
     = std::tuple<TensorLayout, PointwiseTestCase, test_activation_common::ActivTestCase>;
 
 template <typename DataType>
-class PointwiseForward
-    : public IntegrationGraphVerificationHarness<DataType, PointwiseForwardTestCase>
+class ActivationForward
+    : public IntegrationGraphVerificationHarness<DataType, ActivationForwardTestCase>
 {
 public:
     struct GraphOutputs
@@ -34,12 +34,12 @@ public:
     };
 
     static std::pair<graph::Graph, GraphOutputs> buildGraph(hipdnnHandle_t handle,
-                                                            const PointwiseForwardTestCase& tc)
+                                                            const ActivationForwardTestCase& tc)
     {
         const auto& [layout, pwTestCase, activTestCase] = tc;
 
         graph::Graph graphObj;
-        graphObj.set_name("PointwiseForwardTest");
+        graphObj.set_name("ActivationForwardTest");
 
         auto dataType = getDataTypeEnumFromType<DataType>();
         graphObj.set_intermediate_data_type(dataType)
@@ -102,33 +102,33 @@ protected:
     }
 };
 
-using IntegrationGpuPointwiseForwardFp32 = PointwiseForward<float>;
-using IntegrationGpuPointwiseForwardFp16 = PointwiseForward<half>;
+using IntegrationGpuActivationForwardFp32 = ActivationForward<float>;
+using IntegrationGpuActivationForwardFp16 = ActivationForward<half>;
 
 } // namespace
 
-GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuPointwiseForwardFp32);
-TEST_P(IntegrationGpuPointwiseForwardFp32, Correctness)
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuActivationForwardFp32);
+TEST_P(IntegrationGpuActivationForwardFp32, Correctness)
 {
     runGraphTest();
 }
 
-GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuPointwiseForwardFp16);
-TEST_P(IntegrationGpuPointwiseForwardFp16, Correctness)
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuActivationForwardFp16);
+TEST_P(IntegrationGpuActivationForwardFp16, Correctness)
 {
     runGraphTest();
 }
 
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
-    IntegrationGpuPointwiseForwardFp32,
+    IntegrationGpuActivationForwardFp32,
     testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
                      testing::ValuesIn(getPointwiseTestCases()),
                      testing::ValuesIn(test_activation_common::createFwdUnaryActivationCases())));
 
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
-    IntegrationGpuPointwiseForwardFp16,
+    IntegrationGpuActivationForwardFp16,
     testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
                      testing::ValuesIn(getPointwiseTestCases()),
                      testing::ValuesIn(test_activation_common::createFwdUnaryActivationCases())));
