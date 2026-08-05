@@ -44,9 +44,9 @@ struct MoeTestCase
     friend std::ostream& operator<<(std::ostream& os, const MoeTestCase& tc)
     {
         return os << "experts=" << tc.experts << ",batch=" << tc.batch << ",K=" << tc.hiddenK
-                  << ",N=" << tc.weightN << ",rows=" << tc.tokenRows
-                  << ",routed=" << tc.routedRows << ",mode=" << static_cast<int>(tc.mode)
-                  << ",topK=" << tc.topK << ",seed=" << tc.seed;
+                  << ",N=" << tc.weightN << ",rows=" << tc.tokenRows << ",routed=" << tc.routedRows
+                  << ",mode=" << static_cast<int>(tc.mode) << ",topK=" << tc.topK
+                  << ",seed=" << tc.seed;
     }
 };
 
@@ -89,8 +89,8 @@ public:
             .set_io_data_type(dataType);
 
         const std::vector<int64_t> tokenDims = {1, tc.tokenRows, tc.hiddenK};
-        auto tokenAttr = std::make_shared<graph::TensorAttributes>(graph::makeTensorAttributes(
-            "token", dataType, tokenDims, generateStrides(tokenDims)));
+        auto tokenAttr = std::make_shared<graph::TensorAttributes>(
+            graph::makeTensorAttributes("token", dataType, tokenDims, generateStrides(tokenDims)));
 
         const std::vector<int64_t> weightDims = {tc.experts, tc.hiddenK, tc.weightN};
         auto weightAttr = std::make_shared<graph::TensorAttributes>(graph::makeTensorAttributes(
@@ -98,31 +98,30 @@ public:
 
         const int64_t groupCount = tc.batch * tc.experts;
         const std::vector<int64_t> offsetDims = {groupCount, 1, 1};
-        auto firstTokenOffsetAttr
-            = std::make_shared<graph::TensorAttributes>(graph::makeTensorAttributes(
-                "first_token_offset",
-                hipdnn_frontend::DataType::INT32,
-                offsetDims,
-                generateStrides(offsetDims)));
+        auto firstTokenOffsetAttr = std::make_shared<graph::TensorAttributes>(
+            graph::makeTensorAttributes("first_token_offset",
+                                        hipdnn_frontend::DataType::INT32,
+                                        offsetDims,
+                                        generateStrides(offsetDims)));
 
         const std::vector<int64_t> routingDims = {1, tc.routedRows, 1};
         std::shared_ptr<graph::TensorAttributes> tokenIndexAttr;
         if(tc.mode != MoeGroupedMatmulMode::NONE)
         {
-            tokenIndexAttr = std::make_shared<graph::TensorAttributes>(graph::makeTensorAttributes(
-                "token_index",
-                hipdnn_frontend::DataType::INT32,
-                routingDims,
-                generateStrides(routingDims)));
+            tokenIndexAttr = std::make_shared<graph::TensorAttributes>(
+                graph::makeTensorAttributes("token_index",
+                                            hipdnn_frontend::DataType::INT32,
+                                            routingDims,
+                                            generateStrides(routingDims)));
         }
         std::shared_ptr<graph::TensorAttributes> tokenKsAttr;
         if(tc.mode == MoeGroupedMatmulMode::SCATTER)
         {
-            tokenKsAttr = std::make_shared<graph::TensorAttributes>(graph::makeTensorAttributes(
-                "token_ks",
-                hipdnn_frontend::DataType::INT32,
-                routingDims,
-                generateStrides(routingDims)));
+            tokenKsAttr = std::make_shared<graph::TensorAttributes>(
+                graph::makeTensorAttributes("token_ks",
+                                            hipdnn_frontend::DataType::INT32,
+                                            routingDims,
+                                            generateStrides(routingDims)));
         }
 
         graph::MoeGroupedMatmulAttributes moeAttrs;
@@ -191,9 +190,8 @@ protected:
 
         const auto& testCase = this->GetParam();
 
-        auto& offsetTensor
-            = static_cast<hipdnn_data_sdk::utilities::TensorBase<int32_t>&>(
-                bundle.getTensor(_firstTokenOffsetUid));
+        auto& offsetTensor = static_cast<hipdnn_data_sdk::utilities::TensorBase<int32_t>&>(
+            bundle.getTensor(_firstTokenOffsetUid));
         const int64_t groupCount = offsetTensor.dims()[0];
         const int64_t rowsTotal = testCase.rowsTotal();
         for(int64_t g = 0; g < groupCount; ++g)
@@ -270,13 +268,13 @@ TEST_P(IntegrationGpuMoeGroupedMatmulBf16, Correctness)
 }
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                        IntegrationGpuMoeGroupedMatmulFp32,
-                        testing::ValuesIn(getMoeTestCases()));
+                         IntegrationGpuMoeGroupedMatmulFp32,
+                         testing::ValuesIn(getMoeTestCases()));
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                        IntegrationGpuMoeGroupedMatmulFp16,
-                        testing::ValuesIn(getMoeTestCases()));
+                         IntegrationGpuMoeGroupedMatmulFp16,
+                         testing::ValuesIn(getMoeTestCases()));
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                        IntegrationGpuMoeGroupedMatmulBf16,
-                        testing::ValuesIn(getMoeTestCases()));
+                         IntegrationGpuMoeGroupedMatmulBf16,
+                         testing::ValuesIn(getMoeTestCases()));

@@ -71,10 +71,10 @@ std::vector<RoutingCase> getRoutingCases()
         RoutingCase{"AcceptsValidNoneMode", validNone(), nullptr},
         RoutingCase{"AcceptsValidGatherMode", validGather(), nullptr},
         RoutingCase{"AcceptsValidScatterMode", validScatter(), nullptr},
-        RoutingCase{"Rule1FirstTokenOffsetMustBeInt32",
-                    with(validNone(),
-                         [](auto& r) { r.firstTokenOffsetDataType = DataType::FLOAT; }),
-                    "FIRST_TOKEN_OFFSET tensor must have INT32 data type"},
+        RoutingCase{
+            "Rule1FirstTokenOffsetMustBeInt32",
+            with(validNone(), [](auto& r) { r.firstTokenOffsetDataType = DataType::FLOAT; }),
+            "FIRST_TOKEN_OFFSET tensor must have INT32 data type"},
         RoutingCase{"Rule2NoneForbidsTokenIndex",
                     with(validNone(),
                          [](auto& r) {
@@ -142,10 +142,10 @@ std::vector<RoutingCase> getRoutingCases()
         RoutingCase{"Rule14TokenKsMustBeInt32",
                     with(validScatter(), [](auto& r) { r.tokenKsDataType = DataType::FLOAT; }),
                     "TOKEN_KS tensor must have INT32 data type"},
-        RoutingCase{"Rule15UnknownModeIsRejected",
-                    with(validNone(),
-                         [](auto& r) { r.mode = static_cast<MoeGroupedMatmulMode>(-1); }),
-                    "unknown routing mode"},
+        RoutingCase{
+            "Rule15UnknownModeIsRejected",
+            with(validNone(), [](auto& r) { r.mode = static_cast<MoeGroupedMatmulMode>(-1); }),
+            "unknown routing mode"},
     };
 }
 

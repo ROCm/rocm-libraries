@@ -16,8 +16,8 @@ namespace hipdnn_sdk_test_utils
 /// (NOT_SET=0/NONE=1/GATHER=2/SCATTER=3 vs NONE=0/GATHER=1/SCATTER=2 -- see the
 /// keep-in-sync note on MoeGroupedMatmulNode.hpp), so graph construction needs
 /// its own mapping between them.
-inline hipdnn_frontend::MoeGroupedMatmulMode toFrontendMoeMode(
-    hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulMode mode)
+inline hipdnn_frontend::MoeGroupedMatmulMode
+    toFrontendMoeMode(hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulMode mode)
 {
     using SdkMode = hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulMode;
     using FrontendMode = hipdnn_frontend::MoeGroupedMatmulMode;
@@ -67,9 +67,7 @@ static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
 
     auto firstTokenOffsetAttr = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(
         hipdnn_frontend::graph::makeTensorAttributes(
-            "FIRST_TOKEN_OFFSET",
-            hipdnn_frontend::DataType::INT32,
-            bundle.firstTokenOffsetTensor));
+            "FIRST_TOKEN_OFFSET", hipdnn_frontend::DataType::INT32, bundle.firstTokenOffsetTensor));
     firstTokenOffsetAttr->set_uid(3);
 
     std::shared_ptr<hipdnn_frontend::graph::TensorAttributes> tokenIndexAttr;

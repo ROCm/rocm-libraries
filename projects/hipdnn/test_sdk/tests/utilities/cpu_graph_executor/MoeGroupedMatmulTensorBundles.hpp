@@ -25,38 +25,36 @@ namespace hipdnn_sdk_test_utils
 template <typename InputType>
 struct MoeGroupedMatmulTensorBundle
 {
-    MoeGroupedMatmulTensorBundle(
-        int64_t experts,
-        int64_t hiddenK,
-        int64_t weightN,
-        int64_t tokenRowsIn,
-        int64_t routedRowsIn, // == tokenRows for NONE
-        hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulMode modeIn,
-        int32_t topKIn,
-        unsigned int seed = hipdnn_test_sdk::utilities::getGlobalTestSeed())
+    MoeGroupedMatmulTensorBundle(int64_t experts,
+                                 int64_t hiddenK,
+                                 int64_t weightN,
+                                 int64_t tokenRowsIn,
+                                 int64_t routedRowsIn, // == tokenRows for NONE
+                                 hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulMode modeIn,
+                                 int32_t topKIn,
+                                 unsigned int seed
+                                 = hipdnn_test_sdk::utilities::getGlobalTestSeed())
         : tokenTensor({1, tokenRowsIn, hiddenK},
                       hipdnn_data_sdk::utilities::generateStrides({1, tokenRowsIn, hiddenK}))
         , weightTensor({experts, hiddenK, weightN},
                        hipdnn_data_sdk::utilities::generateStrides({experts, hiddenK, weightN}))
-        , firstTokenOffsetTensor(
-              {experts, 1, 1},
-              hipdnn_data_sdk::utilities::generateStrides({experts, 1, 1}))
-        , tokenIndexTensor(modeIn != Mode::NONE
-                               ? std::make_optional(hipdnn_data_sdk::utilities::Tensor<int32_t>(
-                                     {1, routedRowsIn, 1},
-                                     hipdnn_data_sdk::utilities::generateStrides(
-                                         {1, routedRowsIn, 1})))
-                               : std::nullopt)
-        , tokenKsTensor(modeIn == Mode::SCATTER
-                            ? std::make_optional(hipdnn_data_sdk::utilities::Tensor<int32_t>(
-                                  {1, routedRowsIn, 1},
-                                  hipdnn_data_sdk::utilities::generateStrides(
-                                      {1, routedRowsIn, 1})))
-                            : std::nullopt)
-        , outputTensor(
-              {1, (modeIn == Mode::GATHER) ? routedRowsIn : tokenRowsIn, weightN},
-              hipdnn_data_sdk::utilities::generateStrides(
-                  {1, (modeIn == Mode::GATHER) ? routedRowsIn : tokenRowsIn, weightN}))
+        , firstTokenOffsetTensor({experts, 1, 1},
+                                 hipdnn_data_sdk::utilities::generateStrides({experts, 1, 1}))
+        , tokenIndexTensor(
+              modeIn != Mode::NONE
+                  ? std::make_optional(hipdnn_data_sdk::utilities::Tensor<int32_t>(
+                        {1, routedRowsIn, 1},
+                        hipdnn_data_sdk::utilities::generateStrides({1, routedRowsIn, 1})))
+                  : std::nullopt)
+        , tokenKsTensor(
+              modeIn == Mode::SCATTER
+                  ? std::make_optional(hipdnn_data_sdk::utilities::Tensor<int32_t>(
+                        {1, routedRowsIn, 1},
+                        hipdnn_data_sdk::utilities::generateStrides({1, routedRowsIn, 1})))
+                  : std::nullopt)
+        , outputTensor({1, (modeIn == Mode::GATHER) ? routedRowsIn : tokenRowsIn, weightN},
+                       hipdnn_data_sdk::utilities::generateStrides(
+                           {1, (modeIn == Mode::GATHER) ? routedRowsIn : tokenRowsIn, weightN}))
         , mode(modeIn)
         , topK(topKIn)
         , tokenRows(tokenRowsIn)

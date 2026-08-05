@@ -100,8 +100,8 @@ TEST(TestFlatbufferTensorAttributesUtils, BindOptionalShallowTensorPresentBinds)
     std::array<float, 3> data = {1.0f, 2.0f, 3.0f};
     const std::unordered_map<int64_t, void*> variantPack{{9, data.data()}};
 
-    auto tensor = bindOptionalShallowTensor<float>(std::optional<TensorAttributesT>(attr),
-                                                   variantPack);
+    auto tensor
+        = bindOptionalShallowTensor<float>(std::optional<TensorAttributesT>(attr), variantPack);
 
     ASSERT_NE(tensor, nullptr);
     EXPECT_EQ(tensor->dims(), attr.dims);

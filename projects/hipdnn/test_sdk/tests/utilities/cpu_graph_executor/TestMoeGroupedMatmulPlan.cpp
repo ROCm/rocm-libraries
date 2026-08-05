@@ -3,7 +3,6 @@
 
 #include <gtest/gtest.h>
 
-#include "MoeGroupedMatmulGraphUtils.hpp"
 #include "MoeGroupedMatmulTensorBundles.hpp"
 #include "PointwiseGraphUtils.hpp"
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>

@@ -281,9 +281,9 @@ public:
     template <typename InputType, typename OutputType, typename ComputeType>
     static void
         runMoeGroupedMatmulTest(hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulMode mode,
-                               hipdnn_flatbuffers_sdk::data_objects::DataType inputDataType,
-                               hipdnn_flatbuffers_sdk::data_objects::DataType outputDataType,
-                               hipdnn_flatbuffers_sdk::data_objects::DataType computeDataType)
+                                hipdnn_flatbuffers_sdk::data_objects::DataType inputDataType,
+                                hipdnn_flatbuffers_sdk::data_objects::DataType outputDataType,
+                                hipdnn_flatbuffers_sdk::data_objects::DataType computeDataType)
     {
         using MoeMode = hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulMode;
         const unsigned int seed = getGlobalTestSeed();
@@ -300,15 +300,16 @@ public:
         MoeGroupedMatmulTensorBundle<InputType> directBundle(
             EXPERTS, HIDDEN_K, WEIGHT_N, TOKEN_ROWS, routedRows, mode, topK, seed);
 
-        auto graphTuple
-            = buildMoeGroupedMatmulGraph(execBundle, inputDataType, outputDataType, computeDataType);
+        auto graphTuple = buildMoeGroupedMatmulGraph(
+            execBundle, inputDataType, outputDataType, computeDataType);
         auto& graph = std::get<0>(graphTuple);
         auto& variantPack = std::get<1>(graphTuple);
 
         // The bundle's own output buffer is always InputType; when OutputType
         // differs (HALF/FLOAT, BFLOAT16/FLOAT), wire a correctly-typed buffer in
         // its place instead.
-        Tensor<OutputType> execOutput(execBundle.outputTensor.dims(), execBundle.outputTensor.strides());
+        Tensor<OutputType> execOutput(execBundle.outputTensor.dims(),
+                                      execBundle.outputTensor.strides());
         variantPack[6] = execOutput.memory().hostData();
 
         auto result = graph->validate();

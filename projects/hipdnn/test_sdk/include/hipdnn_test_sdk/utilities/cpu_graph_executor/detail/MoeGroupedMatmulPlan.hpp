@@ -57,9 +57,9 @@ struct MoeGroupedMatmulParams
 };
 
 template <typename TokenDataType,
-         typename WeightDataType,
-         typename OutputDataType,
-         typename ComputeDataType>
+          typename WeightDataType,
+          typename OutputDataType,
+          typename ComputeDataType>
 class MoeGroupedMatmulPlan : public IGraphNodePlanExecutor
 {
 public:
@@ -100,9 +100,9 @@ private:
 };
 
 template <hipdnn_flatbuffers_sdk::data_objects::DataType TokenDataTypeEnum,
-         hipdnn_flatbuffers_sdk::data_objects::DataType WeightDataTypeEnum,
-         hipdnn_flatbuffers_sdk::data_objects::DataType OutputDataTypeEnum,
-         hipdnn_flatbuffers_sdk::data_objects::DataType ComputeDataTypeEnum>
+          hipdnn_flatbuffers_sdk::data_objects::DataType WeightDataTypeEnum,
+          hipdnn_flatbuffers_sdk::data_objects::DataType OutputDataTypeEnum,
+          hipdnn_flatbuffers_sdk::data_objects::DataType ComputeDataTypeEnum>
 class MoeGroupedMatmulPlanBuilder : public IGraphNodePlanBuilder
 {
 public:
@@ -157,7 +157,7 @@ public:
                   : hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET;
         const auto tokenKsDataTypeOrUnset
             = hasTokenKs ? tensorMap.at(nodeAttributes->token_ks_tensor_uid().value())->data_type()
-                        : hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET;
+                         : hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET;
 
         const auto* weightTensor = tensorMap.at(nodeAttributes->weight_tensor_uid());
         const hipdnn_flatbuffers_sdk::utilities::MoeGroupedMatmulRouting routing{
@@ -183,7 +183,7 @@ public:
 
     std::unique_ptr<IGraphNodePlanExecutor>
         buildNodePlan(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph,
-                     const hipdnn_flatbuffers_sdk::data_objects::Node& node) const override
+                      const hipdnn_flatbuffers_sdk::data_objects::Node& node) const override
     {
         const auto* nodeAttributes = node.attributes_as_MoeGroupedMatmulAttributes();
         if(nodeAttributes == nullptr)
