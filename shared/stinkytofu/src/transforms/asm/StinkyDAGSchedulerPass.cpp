@@ -51,6 +51,85 @@ using namespace stinkytofu::dag;
 // collapseExecMaskedRegions()/expandExecMaskedGroups(): see ExecMaskGrouping.hpp and
 // docs/developer/exec-mask-grouping.md.
 
+// A workgroup-scope barrier: a legacy `s_barrier`, or an all-wave (-1) split barrier
+// signal/wait. Split barriers with any other id are cluster/expert scope.
+static bool isWorkgroupBarrier(const StinkyInstruction& inst) {
+    if (!isBarrier(inst)) return false;
+    if (isBarrierSignal(inst) || isBarrierWait(inst)) return isSplitBarrierAllWave(inst);
+    return true;
+}
+
+// --- Special rule: cluster-barrier SCC protection (ClusterBarrier kernels only) ---
+//
+// InsertClusterBarrierPass runs at kernel scope AFTER this pass. For every
+// tensor_load it finds the nearest preceding `s_barrier_signal -1` in the same
+// segment and expands a handshake around it:
+//
+//     s_cmp_eq_u32   sgprWaveIdx, 0
+//     s_cbranch_scc0 label_skipCBPreSignal_<hash>
+//     s_barrier_signal -3
+//   label_skipCBPreSignal_<hash>:
+//
+// planted at or before that barrier's signal. The sequence clobbers SCC, so any SCC
+// value live across the barrier is destroyed. InsertClusterBarrierPass can sometimes
+// rematerialize the producer (findLiveRestorableSccCmpUpstream), but it gives up as
+// soon as another SCC reader sits in between.
+//
+// The value at risk here is the one the region terminator consumes -- the unroll
+// loop's `s_cmp_eq_i32 LoopCounterL, 0` feeding `s_cbranch_scc0`. This rule pins that
+// def below the last workgroup barrier in the region, which is past every possible
+// handshake anchor, so the clobber can never land inside its live range.
+//
+// Scope: only the region-boundary (live-out) SCC value. SCC chains that are born and
+// die inside the region can still straddle a barrier; protecting those needs the
+// barrier itself to be modeled as an SCC def+use, which is a separate change.
+static void applyClusterBarrierSccRule(DAGNodeList& dagNodes,
+                                       const std::unordered_map<StinkyInstruction*, unsigned>& instToId,
+                                       const std::map<StinkyRegister, DAGNode*>& lastWrite,
+                                       std::vector<std::unordered_set<unsigned>>& dagGraph) {
+    auto itScc = lastWrite.find(StinkyRegister::getSCCRegister());
+    if (itScc == lastWrite.end()) return;
+    DAGNode* sccDef = itScc->second;
+
+    // Live-out when some user sits outside this region -- the terminator that closed
+    // the region, a later region, or a successor block.
+    bool sccLiveOut = false;
+    for (StinkyInstruction* user : sccDef->inst->getUsers()) {
+        if (instToId.count(user) == 0) {
+            sccLiveOut = true;
+            break;
+        }
+    }
+    if (!sccLiveOut) return;
+
+    // Only bind when this region actually feeds the pass: a tensor_load preceded by a
+    // workgroup barrier is exactly what makes it plant a handshake.
+    DAGNode* lastWgBarrier = nullptr;
+    bool barrierGuardsTensorLoad = false;
+    for (DAGNode& node : dagNodes) {
+        if (isWorkgroupBarrier(*node.inst))
+            lastWgBarrier = &node;
+        else if (isTensorLoad(*node.inst) && lastWgBarrier != nullptr)
+            barrierGuardsTensorLoad = true;
+    }
+    if (!barrierGuardsTensorLoad) return;
+
+    // Forward edge only. The loop-close compare already follows every barrier in
+    // program order, so this never closes a cycle; bail out rather than risk a
+    // topological sort that cannot drain if that ever stops holding.
+    if (lastWgBarrier->id >= sccDef->id) {
+        PASS_DEBUG(std::cerr << "[DAG schedule] live-out SCC def (dagId=" << sccDef->id
+                             << ") precedes the last workgroup barrier (dagId="
+                             << lastWgBarrier->id << "); skipping cluster-barrier SCC rule\n");
+        return;
+    }
+
+    addEdgeById(lastWgBarrier, sccDef, dagGraph);
+    PASS_DEBUG(std::cerr << "[DAG schedule] cluster-barrier SCC rule: pinned live-out SCC def"
+                         << " (dagId=" << sccDef->id << ") after workgroup barrier (dagId="
+                         << lastWgBarrier->id << ")\n");
+}
+
 // --- Region scheduler (does NOT move fences) ---
 //
 // Build a DAG within a region and perform a stable topological schedule.
@@ -85,6 +164,9 @@ static void scheduleRegionWithMovableSideEffects(
     }
 
     if (regionSize == 0) return;
+
+    if (readyQueue.getPassContext().getPassFeatureConfig().dagFeatures.clusterBarrier)
+        applyClusterBarrierSccRule(dagNodes, instToId, lastWrite, dagGraph);
 
     // Pre-scan: assign dsReadPriority to each ds_read based on WMMA affinity
     // and DsReadOrder config. Lower priority = pick first.
