@@ -543,10 +543,13 @@ namespace rocsparse
                     mat_B->ld,
                     mat_B->batch_stride,
                     (const T*)beta,
+                    // COO AoS stores the row and column indices interleaved in a
+                    // single buffer (2 entries per nonzero), so the per-batch
+                    // stride for the index buffer is twice the value/nnz stride.
                     (const I*)mat_C->const_ind_data,
-                    mat_C->batch_stride,
+                    2 * mat_C->batch_stride,
                     (const J*)(((const I*)mat_C->const_ind_data) + 1),
-                    mat_C->batch_stride,
+                    2 * mat_C->batch_stride,
                     (C*)mat_C->val_data,
                     mat_C->batch_stride,
                     mat_C->batch_count,

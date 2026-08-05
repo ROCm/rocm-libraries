@@ -249,7 +249,8 @@ rocsparse_status rocsparse_sddmm_preprocess(rocsparse_handle            handle,
 *  sparse output \f$C\f$ are configured with the format-specific routine:
 *  \ref rocsparse_coo_set_strided_batch for \ref rocsparse_format_coo,
 *  \ref rocsparse_csr_set_strided_batch for \ref rocsparse_format_csr,
-*  \ref rocsparse_csc_set_strided_batch for \ref rocsparse_format_csc and
+*  \ref rocsparse_csc_set_strided_batch for \ref rocsparse_format_csc and 
+*  \ref rocsparse_format_coo_aos, and
 *  \ref rocsparse_ell_set_strided_batch for \ref rocsparse_format_ell.
 *
 *  For COO, \ref rocsparse_coo_set_strided_batch sets a single
@@ -277,6 +278,15 @@ rocsparse_status rocsparse_sddmm_preprocess(rocsparse_handle            handle,
 *  batch \f$i\f$ by adding \p i * \p rows_values_batch_stride. The offsets
 *  stride must be at least \f$n + 1\f$, and the rows/values stride must be at
 *  least the per-batch nnz of \f$C\f$; both may be larger to allow padding.
+*
+*  For COO AoS, \ref rocsparse_coo_set_strided_batch sets a single per-batch
+*  stride \p batch_stride that is interpreted as the per-batch nnz stride of the
+*  value buffer. Because the row and column indices are stored interleaved in a
+*  single buffer (two index entries per nonzero), the interleaved index buffer of
+*  batch \f$i\f$ is obtained from the base pointer by adding
+*  \p i * (2 * \p batch_stride), while the value buffer of batch \f$i\f$ is
+*  obtained by adding \p i * \p batch_stride. The stride must be at least the
+*  per-batch nnz of \f$C\f$, and can be larger to allow padding.
 *
 *  For ELL, \ref rocsparse_ell_set_strided_batch sets a single per-batch stride
 *  that applies to both ELL buffers (column indices and values); i.e. the

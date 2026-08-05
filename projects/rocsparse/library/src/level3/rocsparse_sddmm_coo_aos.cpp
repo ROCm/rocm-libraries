@@ -144,12 +144,6 @@ struct rocsparse::rocsparse_sddmm_st<rocsparse_format_coo_aos, T, I, J, A, B, C>
     {
         ROCSPARSE_ROUTINE_TRACE;
 
-        // Batched computation is currently only supported for the CSR, CSC, COO, and ELL formats.
-        if(batch_count > 1)
-        {
-            RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
-        }
-
         switch(alg)
         {
         case rocsparse_sddmm_alg_dense:
@@ -162,6 +156,12 @@ struct rocsparse::rocsparse_sddmm_st<rocsparse_format_coo_aos, T, I, J, A, B, C>
             if(buffer == nullptr)
             {
                 return rocsparse_status_invalid_pointer;
+            }
+
+            // Batched computation is not supported for the dense algorithm.
+            if(batch_count > 1)
+            {
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
             }
 
             char* ptr   = reinterpret_cast<char*>(buffer);
@@ -247,7 +247,7 @@ struct rocsparse::rocsparse_sddmm_st<rocsparse_format_coo_aos, T, I, J, A, B, C>
 
 #define LAUNCH(K_)                                                                       \
     int64_t num_blocks_x = (nnz - 1) / (NB / K_) + 1;                                    \
-    dim3    blocks(num_blocks_x);                                                        \
+    dim3    blocks(num_blocks_x, (uint32_t)std::min<int64_t>(batch_count, 65535));       \
     dim3    threads(NB);                                                                 \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::sddmm_coox_kernel<NB, K_, true, T>),  \
                                        blocks,                                           \
