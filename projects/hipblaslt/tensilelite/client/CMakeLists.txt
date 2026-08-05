@@ -70,7 +70,7 @@ target_link_libraries(tensilelite-client-common
     PUBLIC
         hip::device
         hip::host
-        roc::host-validation-adapters
+        roc::host-validation
         roc::tensilelite-host
         rocisa::rocisa-cpp
         OpenMP::OpenMP_CXX
@@ -132,18 +132,18 @@ if(HIPBLASLT_CXX_HAS_MF16C)
     target_compile_options(tensilelite-client-common PRIVATE -mf16c)
 endif()
 
-add_library(host-validation-tensilelite STATIC
-    "${ROCM_LIBRARIES_ROOT}/shared/host-validation/adapters/tensilelite/Reference.cpp"
+add_library(tensilelite-host-validation-adapter STATIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/host_validation/Reference.cpp"
 )
-add_library(roc::host-validation-tensilelite ALIAS host-validation-tensilelite)
+add_library(tensilelite::host-validation-adapter ALIAS tensilelite-host-validation-adapter)
 
-target_include_directories(host-validation-tensilelite
+target_include_directories(tensilelite-host-validation-adapter
     PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/include"
 )
-target_link_libraries(host-validation-tensilelite
+target_link_libraries(tensilelite-host-validation-adapter
     PUBLIC
-        roc::host-validation-adapters
+        roc::host-validation
     PRIVATE
         hip::device
         hip::host
@@ -151,7 +151,7 @@ target_link_libraries(host-validation-tensilelite
         rocisa::rocisa-cpp
         OpenMP::OpenMP_CXX
 )
-set_target_properties(host-validation-tensilelite
+set_target_properties(tensilelite-host-validation-adapter
     PROPERTIES
         POSITION_INDEPENDENT_CODE ON
         CXX_STANDARD 20
@@ -159,21 +159,21 @@ set_target_properties(host-validation-tensilelite
         CXX_EXTENSIONS OFF
 )
 if(HIPBLASLT_CXX_HAS_MF16C)
-    target_compile_options(host-validation-tensilelite PRIVATE -mf16c)
+    target_compile_options(tensilelite-host-validation-adapter PRIVATE -mf16c)
 endif()
 if(HIPBLASLT_ENABLE_ASAN)
-    hipblaslt_target_configure_sanitizers(host-validation-tensilelite PUBLIC)
+    hipblaslt_target_configure_sanitizers(tensilelite-host-validation-adapter PUBLIC)
 endif()
 if(TENSILELITE_ENABLE_COVERAGE)
     target_compile_options(
-        host-validation-tensilelite PRIVATE -fprofile-instr-generate -fcoverage-mapping)
+        tensilelite-host-validation-adapter PRIVATE -fprofile-instr-generate -fcoverage-mapping)
     target_link_options(
-        host-validation-tensilelite PUBLIC -fprofile-instr-generate -fcoverage-mapping)
+        tensilelite-host-validation-adapter PUBLIC -fprofile-instr-generate -fcoverage-mapping)
 endif()
 
 target_link_libraries(tensilelite-client-common
     PUBLIC
-        roc::host-validation-tensilelite
+        tensilelite::host-validation-adapter
 )
 
 option(TENSILELITE_CLIENT_ENABLE_ROCPROFSDK "Enable in-process ROCprofiler-SDK counters" OFF)
