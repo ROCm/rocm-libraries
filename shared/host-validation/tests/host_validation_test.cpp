@@ -249,6 +249,31 @@ void testReferenceEpilogue() {
             "Reference gradient epilogue mismatch.");
 }
 
+void testReferenceReduction() {
+    using namespace roc::host_validation;
+
+    std::array<float, 30> storage;
+    storage.fill(-1);
+    MutableTensorView input = MutableTensorView::fromNative<float>(
+        Layout(Shape{2, 3, 4}, {15, 5, 1}), std::span<float>(storage));
+    for (size_t batch = 0; batch < 2; ++batch) {
+        for (size_t row = 0; row < 3; ++row) {
+            for (size_t column = 0; column < 4; ++column)
+                input.storeFrom({batch, row, column}, 100 * batch + 10 * row + column);
+        }
+    }
+
+    std::array<float, 3> output{};
+    ReductionProblem problem(input.asConst(),
+                             MutableTensorView::fromNative<float>(Layout::contiguous(Shape{3}),
+                                                                  std::span<float>(output)),
+                             ScalarType::Float32, {0, 2});
+    const ReductionRunInfo run = referenceSum(problem);
+    require(run.outputElementsComputed == 3 && run.inputElementsRead == 24,
+            "Reference reduction run information mismatch.");
+    require(output == std::array<float, 3>{412, 492, 572}, "Reference reduction result mismatch.");
+}
+
 void testActivations() {
     using namespace roc::host_validation;
 
@@ -392,6 +417,7 @@ int main() {
     testRuntimeComplexAndExplicitAxisGemm();
     testOutputSelection();
     testReferenceEpilogue();
+    testReferenceReduction();
     testActivations();
     testStridedAndOffsetViews();
     testGenerationAndComparison();

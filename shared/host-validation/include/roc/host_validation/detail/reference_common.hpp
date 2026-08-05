@@ -180,6 +180,42 @@ class RuntimeVectorReader {
 };
 
 template <typename Accumulator>
+class RuntimeTensorReader {
+   public:
+    explicit RuntimeTensorReader(TensorView view)
+        : m_storage(view.storage()),
+          m_layout(view.layout()),
+          m_load(runtimeLoadFunction<Accumulator>(view.type())) {}
+
+    Accumulator operator()(std::span<const size_t> indices) const {
+        return m_load(m_storage, m_layout.elementOffset(indices));
+    }
+
+   private:
+    std::span<const std::byte> m_storage;
+    Layout m_layout;
+    RuntimeLoadFunction<Accumulator> m_load;
+};
+
+template <typename Accumulator>
+class RuntimeTensorWriter {
+   public:
+    explicit RuntimeTensorWriter(MutableTensorView view)
+        : m_storage(view.storage()),
+          m_layout(view.layout()),
+          m_store(runtimeStoreFunction<Accumulator>(view.type())) {}
+
+    void store(std::span<const size_t> indices, Accumulator value) const {
+        m_store(m_storage, m_layout.elementOffset(indices), value);
+    }
+
+   private:
+    std::span<std::byte> m_storage;
+    Layout m_layout;
+    RuntimeStoreFunction<Accumulator> m_store;
+};
+
+template <typename Accumulator>
 Accumulator runtimeScalar(std::complex<double> value, const char* name) {
     if constexpr (IsComplex<Accumulator>::value) {
         return Accumulator(static_cast<typename Accumulator::value_type>(value.real()),
