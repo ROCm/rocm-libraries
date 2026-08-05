@@ -619,3 +619,56 @@ if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/gemm_aquant_ctypes_lib.cpp)
 endif()
 
 # =============================================================================
+
+
+# Gemm ABQuant (A+B block-scale) ctypes Library
+# =============================================================================
+
+file(GLOB ABQUANT_GEMM_KERNEL_HEADERS "${CMAKE_BINARY_DIR}/generated_kernels/gemm_abquant_*.hpp")
+if(ABQUANT_GEMM_KERNEL_HEADERS)
+    list(GET ABQUANT_GEMM_KERNEL_HEADERS 0 ABQUANT_GEMM_KERNEL_HEADER)
+    message(STATUS "Found ABQuant GEMM kernel for ctypes lib: ${ABQUANT_GEMM_KERNEL_HEADER}")
+
+    add_ctypes_library(dispatcher_gemm_abquant_lib
+        gemm_abquant_ctypes_lib.cpp
+        KERNEL_HEADER ${ABQUANT_GEMM_KERNEL_HEADER}
+    )
+    # Resolve a single GFX arch string from CMAKE_HIP_ARCHITECTURES if available,
+    # falling back to the cache variable CK_TILE_ABQUANT_GFX_ARCH. The Python build
+    # path always passes -DGFX_ARCH=... explicitly via hipcc, so this default only
+    # affects builds driven through CMake directly. ABQuant supports gfx942/gfx950.
+    if(NOT DEFINED CK_TILE_ABQUANT_GFX_ARCH OR CK_TILE_ABQUANT_GFX_ARCH STREQUAL "")
+        if(CMAKE_HIP_ARCHITECTURES)
+            list(GET CMAKE_HIP_ARCHITECTURES 0 _abquant_gfx_arch)
+        else()
+            set(_abquant_gfx_arch "gfx950")
+        endif()
+        set(CK_TILE_ABQUANT_GFX_ARCH "${_abquant_gfx_arch}" CACHE STRING
+            "GFX arch for the CMake-built ABQuant ctypes .so (default: first CMAKE_HIP_ARCHITECTURES or gfx950)")
+    endif()
+    message(STATUS "ABQuant ctypes lib GFX_ARCH: ${CK_TILE_ABQUANT_GFX_ARCH}")
+
+    target_compile_definitions(dispatcher_gemm_abquant_lib PRIVATE
+        CK_TILE_SINGLE_KERNEL_INCLUDE
+        GFX_ARCH="${CK_TILE_ABQUANT_GFX_ARCH}"
+    )
+else()
+    message(STATUS "No ABQuant GEMM kernel found for ctypes lib - building without kernel")
+    add_library(dispatcher_gemm_abquant_lib SHARED gemm_abquant_ctypes_lib.cpp)
+    # main include ONLY -- deliberately do NOT add dispatcher/include here. That path
+    # pulls in generated_tile_backend.hpp, whose SelectedKernel::run(GemmHostArgs&)
+    # conflicts with the ABQuant kernel's launch(QuantGemmHostArgs&) (same rationale
+    # as the Python build path, gemm_abquant_utils.py:566-569). This stub branch
+    # won't fully link anyway (SelectedKernel/KERNEL_NAME undefined without the
+    # force-included header) and exists only so CMake configure/compile succeeds.
+    target_include_directories(dispatcher_gemm_abquant_lib PRIVATE
+        ${PROJECT_SOURCE_DIR}/include
+    )
+    target_link_libraries(dispatcher_gemm_abquant_lib PRIVATE hip::device)
+    set_target_properties(dispatcher_gemm_abquant_lib PROPERTIES
+        POSITION_INDEPENDENT_CODE ON
+        CXX_STANDARD 17
+    )
+endif()
+
+# =============================================================================
