@@ -2,7 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include "AsmSdpaConfigHelpers.hpp"
-#include "../../engines/asm_sdpa_engine/plans/SdpaPlanUtils.hpp"
+#include "../../../engines/asm_sdpa_engine/plans/SdpaPlanUtils.hpp"
 #include "hip_kernel_provider_common/SdpaConfigConstants.hpp"
 #include "hip_kernel_provider_common/SdpaConfigEnumerations.hpp"
 
@@ -58,12 +58,54 @@ std::string getConfigDescription(const fmha_v3_fwdConfig& config)
            + std::to_string(config.hdim_v) + maskStr + modeStr;
 }
 
+SdpaFwdTestCase::SdpaFwdTestCase(std::vector<int64_t> qDimsIn,
+                                 std::vector<int64_t> vDimsIn,
+                                 std::string archIn,
+                                 int64_t leftBoundIn,
+                                 int64_t rightBoundIn,
+                                 bool topLeftAlignmentIn)
+    : qDims(std::move(qDimsIn))
+    , vDims(std::move(vDimsIn))
+    , arch(std::move(archIn))
+    , leftBound(leftBoundIn)
+    , rightBound(rightBoundIn)
+    , topLeftAlignment(topLeftAlignmentIn)
+{
+    // K tensor is [B, H_kv, S_kv, D_qk]: B and D_qk from Q, H_kv and S_kv from V
+    kDims = {qDims[0], vDims[1], vDims[2], qDims[3]};
+}
+
+std::string SdpaFwdTestCase::getName(const testing::TestParamInfo<SdpaFwdTestCase>& info)
+{
+    const auto& tc = info.param;
+
+    std::string maskStr;
+    if(tc.leftBound < 0 && tc.rightBound < 0)
+    {
+        maskStr = "NoMask";
+    }
+    else if(tc.topLeftAlignment)
+    {
+        maskStr = "TopLeftCausal";
+    }
+    else
+    {
+        maskStr = "BottomRightCausal";
+    }
+
+    return tc.arch + "_B" + std::to_string(tc.qDims[0]) + "_Hq" + std::to_string(tc.qDims[1])
+           + "_Hkv" + std::to_string(tc.vDims[1]) + "_Sq" + std::to_string(tc.qDims[2]) + "_Skv"
+           + std::to_string(tc.vDims[2]) + "_Dqk" + std::to_string(tc.qDims[3]) + "_Dv"
+           + std::to_string(tc.vDims[3]) + "_" + maskStr;
+}
+
 GraphTestCase configToTestCase(const fmha_v3_fwdConfig& config)
 {
     return {config, getConfigDescription(config), config.arch};
 }
 
 std::shared_ptr<hipdnn_frontend::graph::Graph> buildSdpaFwdGraph(const GraphTestCase& testCase)
+
 {
     using namespace hipdnn_frontend;
     using namespace hipdnn_frontend::graph;
