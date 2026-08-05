@@ -400,6 +400,30 @@ class TensorAndGemmTests(unittest.TestCase):
             atol=2e-5,
         )
 
+    def test_reference_sum_matches_numpy(self):
+        values = np.arange(24, dtype=np.float32).reshape(2, 3, 4)
+        observed = hv.reference_sum(
+            hv.from_numpy(values),
+            hv.ScalarType.Float32,
+            hv.ScalarType.Float32,
+            [0, 2],
+        )
+        np.testing.assert_array_equal(
+            hv.to_numpy(observed), np.sum(values, axis=(0, 2), dtype=np.float32)
+        )
+
+        complex_values = values.astype(np.complex64) * np.complex64(1.0 + 2.0j)
+        complex_observed = hv.reference_sum(
+            hv.from_numpy(complex_values),
+            hv.ScalarType.ComplexFloat32,
+            hv.ScalarType.ComplexFloat32,
+            [1],
+        )
+        np.testing.assert_array_equal(
+            hv.to_numpy(complex_observed),
+            np.sum(complex_values, axis=1, dtype=np.complex64),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

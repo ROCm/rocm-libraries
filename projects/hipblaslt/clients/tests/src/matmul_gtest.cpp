@@ -97,6 +97,26 @@ TEST(HostValidationEpilogueBridge, RoutesGradientAuxiliaryInput)
     EXPECT_EQ(activationInput, (std::array<float, 4>{-1, 1, 2, -2}));
 }
 
+TEST(HostValidationReductionBridge, DelegatesStridedBiasSum)
+{
+    const std::array<float, 8> input{1, 2, -99, 3, 4, -99, 5, 6};
+    std::array<float, 2>       output{};
+
+    roc::host_validation::hipblaslt_adapter::ReductionArguments arguments;
+    arguments.rows            = 2;
+    arguments.columns         = 3;
+    arguments.rowStride       = 1;
+    arguments.columnStride    = 3;
+    arguments.input           = input.data();
+    arguments.inputType       = HIP_R_32F;
+    arguments.output          = output.data();
+    arguments.outputType      = HIP_R_32F;
+    arguments.accumulatorType = HIP_R_32F;
+    roc::host_validation::hipblaslt_adapter::referenceSum(arguments);
+
+    EXPECT_EQ(output, (std::array<float, 2>{9, 12}));
+}
+
 namespace
 {
 

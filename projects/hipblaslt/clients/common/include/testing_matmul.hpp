@@ -41,6 +41,7 @@
 #include "hipblaslt_vector.hpp"
 #include <roc/host_validation/adapters/hipblaslt/Epilogue.hpp>
 #include <roc/host_validation/adapters/hipblaslt/HipblasltReferenceGemm.hpp>
+#include <roc/host_validation/adapters/hipblaslt/Reduction.hpp>
 #if HIPBLASLT_ENABLE_MXDATAGENERATOR
 #include "mxDataGen.hpp"
 #endif
@@ -506,150 +507,6 @@ inline void post_gpu_time(bool         use_gpu_timer,
     else
     {
         gpu_time_used = get_time_us_sync(stream) - gpu_time_used;
-    }
-}
-
-template <typename Tout>
-Tout cast_from_type(void* in, hipDataType type, size_t index)
-{
-    constexpr bool tout_is_real = !is_std_complex_v<Tout>;
-    switch(type)
-    {
-    case HIP_R_32F:
-        return static_cast<Tout>((static_cast<float*>(in))[index]);
-    case HIP_R_64F:
-        return static_cast<Tout>((static_cast<double*>(in))[index]);
-    case HIP_C_32F:
-    {
-        auto val = (static_cast<std::complex<float>*>(in))[index];
-        if constexpr(tout_is_real)
-            return static_cast<Tout>(val.real()); // Extract real part
-        else
-            return static_cast<Tout>(val); // Cast complex-to-complex
-    }
-    case HIP_C_64F:
-    {
-        auto val = (static_cast<std::complex<double>*>(in))[index];
-        if constexpr(tout_is_real)
-            return static_cast<Tout>(val.real()); // Extract real part
-        else
-            return static_cast<Tout>(val); // Cast complex-to-complex
-    }
-    case HIP_R_16F:
-        return static_cast<Tout>((static_cast<hipblasLtHalf*>(in))[index]);
-    case HIP_R_16BF:
-        return static_cast<Tout>((static_cast<hip_bfloat16*>(in))[index]);
-    case HIP_R_8F_E4M3_FNUZ:
-        return static_cast<Tout>(
-            static_cast<hipblasLtHalf>((static_cast<hipblaslt_f8_fnuz*>(in))[index]));
-    case HIP_R_8F_E5M2_FNUZ:
-        return static_cast<Tout>(
-            static_cast<hipblasLtHalf>((static_cast<hipblaslt_bf8_fnuz*>(in))[index]));
-    case HIP_R_8F_E4M3:
-        return static_cast<Tout>(
-            static_cast<hipblasLtHalf>((static_cast<hipblaslt_f8*>(in))[index]));
-    case HIP_R_8F_E5M2:
-        return static_cast<Tout>(
-            static_cast<hipblasLtHalf>((static_cast<hipblaslt_bf8*>(in))[index]));
-    case HIP_R_32I:
-        return static_cast<Tout>((static_cast<int32_t*>(in))[index]);
-    case HIP_R_8I:
-        return static_cast<Tout>((static_cast<hipblasLtInt8*>(in))[index]);
-    case HIP_R_6F_E2M3:
-        hipblaslt_cerr << "cast_from_type() does not support FP6" << std::endl;
-        return 0;
-    case HIP_R_6F_E3M2:
-        hipblaslt_cerr << "cast_from_type() does not support BF6" << std::endl;
-        return 0;
-    case HIP_R_4F_E2M1:
-        hipblaslt_cerr << "cast_from_type() does not support FP4" << std::endl;
-        return 0;
-    default:
-        hipblaslt_cerr << "Error type in cast_from_type()" << std::endl;
-        return 0;
-    }
-}
-
-template <typename Tin>
-void saturate_cast_to_type(void* dst, Tin src, hipDataType typeD, size_t indexD)
-{
-    switch(typeD)
-    {
-    case HIP_R_32F:
-        static_cast<float*>(dst)[indexD] = saturate_cast<float>(src);
-        return;
-    case HIP_R_64F:
-        static_cast<double*>(dst)[indexD] = saturate_cast<double>(src);
-        return;
-    case HIP_R_16F:
-        static_cast<hipblasLtHalf*>(dst)[indexD] = saturate_cast<hipblasLtHalf>(src);
-        return;
-    case HIP_R_16BF:
-        static_cast<hip_bfloat16*>(dst)[indexD] = saturate_cast<hip_bfloat16>(src);
-        return;
-    case HIP_R_8F_E4M3_FNUZ:
-        static_cast<hipblaslt_f8_fnuz*>(dst)[indexD] = saturate_cast<hipblaslt_f8_fnuz>(src);
-        return;
-    case HIP_R_8F_E5M2_FNUZ:
-        static_cast<hipblaslt_bf8_fnuz*>(dst)[indexD] = saturate_cast<hipblaslt_bf8_fnuz>(src);
-        return;
-    case HIP_R_8F_E4M3:
-        static_cast<hipblaslt_f8*>(dst)[indexD] = saturate_cast<hipblaslt_f8>(src);
-        return;
-    case HIP_R_8F_E5M2:
-        static_cast<hipblaslt_bf8*>(dst)[indexD] = saturate_cast<hipblaslt_bf8>(src);
-        return;
-    case HIP_R_32I:
-        static_cast<int32_t*>(dst)[indexD] = saturate_cast<int32_t>(src);
-        return;
-    case HIP_R_8I:
-        static_cast<hipblasLtInt8*>(dst)[indexD] = saturate_cast<hipblasLtInt8>(src);
-        return;
-    case HIP_R_6F_E2M3:
-        hipblaslt_cerr << "cast_from_type() does not support FP6!" << std::endl;
-        return;
-    case HIP_R_6F_E3M2:
-        hipblaslt_cerr << "cast_from_type() does not support BF6!" << std::endl;
-        return;
-    case HIP_R_4F_E2M1:
-        hipblaslt_cerr << "cast_from_type() does not support FP4!" << std::endl;
-        return;
-    default:
-        hipblaslt_cerr << "Error type in cast_from_type()" << std::endl;
-    }
-}
-
-template <bool SumLd, typename Tc>
-void reduction_func(void*       workspace,
-                    hipDataType ti,
-                    void*       bias,
-                    hipDataType bias_type,
-                    int         length,
-                    int         k,
-                    int         s1,
-                    int         s2,
-                    int         s3,
-                    int         batch_count)
-{
-    assert(batch_count == 1);
-    for(int batch = 0; batch < batch_count; batch++)
-    {
-        for(int i1 = 0; i1 < length; i1++)
-        {
-            Tc sum = 0;
-            for(int i2 = 0; i2 < k; i2++)
-            {
-                if constexpr(SumLd)
-                {
-                    sum += cast_from_type<Tc>(workspace, ti, i1 * s2 + i2 * s1 + batch * s3);
-                }
-                else
-                {
-                    sum += cast_from_type<Tc>(workspace, ti, i1 * s1 + i2 * s2 + batch * s3);
-                }
-            }
-            saturate_cast_to_type(bias, sum, bias_type, i1);
-        }
     }
 }
 
@@ -4695,78 +4552,53 @@ void testing_matmul_with_bias(const Arguments& arg,
                             hBias_gold_buf = (char*)hBias_gold_buf
                                              + arg.bias_stride * batchIdx * realDataTypeSize(Tbias);
                         }
+
+                        auto reduceBias = [&](const void* input,
+                                              hipDataType inputType,
+                                              int64_t     rows,
+                                              int64_t     columns,
+                                              int64_t     rowStride,
+                                              int64_t     columnStride) {
+                            roc::host_validation::hipblaslt_adapter::ReductionArguments reduction;
+                            reduction.rows            = rows;
+                            reduction.columns         = columns;
+                            reduction.rowStride       = rowStride;
+                            reduction.columnStride    = columnStride;
+                            reduction.input           = input;
+                            reduction.inputType       = inputType;
+                            reduction.output          = hBias_gold_buf;
+                            reduction.outputType      = Tbias;
+                            reduction.accumulatorType = HIP_R_32F;
+                            roc::host_validation::hipblaslt_adapter::referenceSum(reduction);
+                        };
+
                         if(arg.bias_source == hipblaslt_bias_source::d)
                         {
-                            reduction_func<false, float>(hBias_gold_epl[gemmIdx].as<char>()
-                                                             + pos * realDataTypeSize(Talpha),
-                                                         Talpha,
-                                                         hBias_gold_buf,
-                                                         Tbias,
-                                                         M[gemmIdx],
-                                                         N[gemmIdx],
-                                                         1,
-                                                         ldd[gemmIdx],
-                                                         stride_d[gemmIdx],
-                                                         num_batches[gemmIdx]);
+                            reduceBias(hBias_gold_epl[gemmIdx].as<char>()
+                                           + pos * realDataTypeSize(Talpha),
+                                       Talpha,
+                                       M[gemmIdx],
+                                       N[gemmIdx],
+                                       1,
+                                       ldd[gemmIdx]);
                         }
-                        else
+                        else if(arg.bias_source == hipblaslt_bias_source::a)
                         {
-                            bool sumLd = false;
-                            int  s1 = 1, s2 = 1, s3 = 1;
-                            auto reduc = [&sumLd,
-                                          &s1,
-                                          &s2,
-                                          &s3,
-                                          &hBias_gold_buf,
-                                          &Tbias,
-                                          &size_bias,
-                                          &K,
-                                          &num_batches,
-                                          &gemmIdx,
-                                          &arg](void* ptr, hipDataType Ti) {
-                                if(sumLd)
-                                {
-                                    reduction_func<true, float>(ptr,
-                                                                Ti,
-                                                                hBias_gold_buf,
-                                                                Tbias,
-                                                                size_bias[gemmIdx],
-                                                                K[gemmIdx],
-                                                                s1,
-                                                                s2,
-                                                                s3,
-                                                                num_batches[gemmIdx]);
-                                }
-                                else
-                                {
-                                    reduction_func<false, float>(ptr,
-                                                                 Ti,
-                                                                 hBias_gold_buf,
-                                                                 Tbias,
-                                                                 size_bias[gemmIdx],
-                                                                 K[gemmIdx],
-                                                                 s1,
-                                                                 s2,
-                                                                 s3,
-                                                                 num_batches[gemmIdx]);
-                                }
-                            };
-                            if(arg.bias_source == hipblaslt_bias_source::a)
-                            {
-                                void* ptr = hA[gemmIdx].buf();
-                                s2        = lda[gemmIdx];
-                                s3        = stride_a[gemmIdx];
-                                sumLd     = transA == HIPBLAS_OP_N ? false : true;
-                                reduc(ptr, TiA);
-                            }
-                            else if(arg.bias_source == hipblaslt_bias_source::b)
-                            {
-                                void* ptr = hB[gemmIdx].buf();
-                                s2        = ldb[gemmIdx];
-                                s3        = stride_b[gemmIdx];
-                                sumLd     = transB == HIPBLAS_OP_N ? true : false;
-                                reduc(ptr, TiB);
-                            }
+                            reduceBias(hA[gemmIdx].buf(),
+                                       TiA,
+                                       size_bias[gemmIdx],
+                                       K[gemmIdx],
+                                       transA == HIPBLAS_OP_N ? 1 : lda[gemmIdx],
+                                       transA == HIPBLAS_OP_N ? lda[gemmIdx] : 1);
+                        }
+                        else if(arg.bias_source == hipblaslt_bias_source::b)
+                        {
+                            reduceBias(hB[gemmIdx].buf(),
+                                       TiB,
+                                       size_bias[gemmIdx],
+                                       K[gemmIdx],
+                                       transB == HIPBLAS_OP_N ? ldb[gemmIdx] : 1,
+                                       transB == HIPBLAS_OP_N ? 1 : ldb[gemmIdx]);
                         }
                     }
                 }

@@ -12,8 +12,8 @@ comparison used by ROCm library clients and tests.
 - `roc::host-validation`
   - Transitional validation operations layered on the tensor core.
   - Exports `roc/host_validation/validation.hpp`.
-  - Exposes runtime-typed generation, reference GEMM, reference epilogues, and
-    comparison.
+  - Exposes runtime-typed generation, reference GEMM, reference epilogues,
+    reductions, and comparison.
   - Implementation headers live under `roc/host_validation/detail/`; consumers
     include only `validation.hpp`.
 - `roc::host-validation-blas`
@@ -191,6 +191,25 @@ auxiliary E input/output, scale-D, scale-E, raw output, and AMax. The
 hipBLASLt pointer and `hipDataType` translation lives in its private client
 adapter and is not compiled by this component.
 
+## Runtime tensor reduction
+
+`referenceSum` reduces arbitrary tensor axes while preserving all remaining
+dimensions in order:
+
+```cpp
+ReductionProblem problem(inputView,
+                         outputView,
+                         ScalarType::Float32,
+                         {0, 2});
+ReductionRunInfo run = referenceSum(problem);
+```
+
+The current implementation supports F32, F64, complex-F32, and complex-F64
+accumulation, runtime input/output storage types, arbitrary affine layouts,
+rank-zero outputs, and multiple reduction axes. hipBLASLt's bias-gradient
+adapter represents its matrix as a strided tensor and reduces the K axis; no
+product type enters the component.
+
 Consumers should need one of only two includes:
 
 ```cpp
@@ -227,11 +246,13 @@ The `roc_host_validation` package currently provides:
 - `ScalarType`, `ScalarTypeInfo`, `Shape`, `Layout`, and owning `Tensor`;
 - tensor construction from logical values or exact storage bytes;
 - `from_numpy` and `to_numpy` copying conversions;
-- deterministic tensor generation and structured comparison; and
+- deterministic tensor generation and structured comparison;
 - `reference_gemm` with runtime storage/output/accumulator types, alpha/beta,
-  compute-input quantization, math mode, and activation; and
+  compute-input quantization, math mode, and activation;
 - `reference_epilogue` with bias, forward/gradient activation, E, scale-D/E,
-  raw output, and AMax results.
+  raw output, and AMax results; and
+- `reference_sum` with runtime input/output/accumulator types and explicit
+  tensor axes.
 
 The NumPy suite independently checks:
 
@@ -243,8 +264,9 @@ The NumPy suite independently checks:
 - deterministic generation and structured comparison;
 - F32, F64, and complex GEMM against NumPy;
 - mixed FP8-storage/FP4-compute-input quantization;
-- selected-output GEMM and prime-stride selection; and
-- forward and ReLU/GELU-gradient epilogues against NumPy.
+- selected-output GEMM and prime-stride selection;
+- forward and ReLU/GELU-gradient epilogues against NumPy; and
+- multi-axis tensor reduction against `numpy.sum`.
 
 The first binding deliberately copies between NumPy and `Tensor`. A follow-up
 should expose lifetime-safe non-owning NumPy-backed `TensorView` objects.
