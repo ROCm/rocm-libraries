@@ -26,6 +26,7 @@ struct EpilogueProblem {
     std::optional<MutableTensorView> rawOutput;
     std::optional<MutableTensorView> auxiliaryOutput;
     std::optional<TensorView> auxiliaryInput;
+    std::optional<TensorView> gateResidual;
     std::optional<MutableTensorView> amax;
     bool accumulateAmax = false;
     std::optional<VectorBinding> bias;
@@ -92,6 +93,7 @@ inline void validateEpilogue(const EpilogueProblem& problem) {
     if (problem.rawOutput) validateMatrix(*problem.rawOutput, "raw output");
     if (problem.auxiliaryOutput) validateMatrix(*problem.auxiliaryOutput, "auxiliary output");
     if (problem.auxiliaryInput) validateMatrix(*problem.auxiliaryInput, "auxiliary input");
+    if (problem.gateResidual) validateMatrix(*problem.gateResidual, "gate residual");
     if (problem.activationApplication == ActivationApplication::Gradient && !problem.auxiliaryInput)
         throw std::invalid_argument("Gradient epilogue requires an auxiliary input tensor.");
     if (problem.bias) {
@@ -112,10 +114,12 @@ EpilogueRunInfo referenceEpilogueTyped(const EpilogueProblem& problem) {
     std::optional<RuntimeMatrixWriter<Accumulator>> rawOutput;
     std::optional<RuntimeMatrixWriter<Accumulator>> auxiliaryOutput;
     std::optional<RuntimeMatrixReader<Accumulator>> auxiliaryInput;
+    std::optional<RuntimeMatrixReader<Accumulator>> gateResidual;
     std::optional<RuntimeVectorReader<Accumulator>> bias;
     if (problem.rawOutput) rawOutput.emplace(*problem.rawOutput);
     if (problem.auxiliaryOutput) auxiliaryOutput.emplace(*problem.auxiliaryOutput);
     if (problem.auxiliaryInput) auxiliaryInput.emplace(*problem.auxiliaryInput);
+    if (problem.gateResidual) gateResidual.emplace(*problem.gateResidual);
     if (problem.bias) bias.emplace(problem.bias->values);
 
     const Accumulator outputScale = runtimeScalar<Accumulator>(problem.outputScale, "output scale");
@@ -150,8 +154,12 @@ EpilogueRunInfo referenceEpilogueTyped(const EpilogueProblem& problem) {
                 maximum = std::max(maximum, static_cast<Accumulator>(std::abs(value)));
 
             value *= outputScale;
-            output.store(row, column, value);
             if (rawOutput) rawOutput->store(row, column, value);
+            if (gateResidual) {
+                const Accumulator gate = (*gateResidual)(row, column);
+                value = gate * value + gate;
+            }
+            output.store(row, column, value);
         }
     }
 

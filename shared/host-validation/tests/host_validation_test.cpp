@@ -247,6 +247,20 @@ void testReferenceEpilogue() {
     referenceEpilogue(gradient);
     require(gradientOutput == std::array<float, 4>{0, 20, 30, 0},
             "Reference gradient epilogue mismatch.");
+
+    const std::array<float, 4> gate{0.5f, 2.0f, -1.0f, 0.25f};
+    std::array<float, 4> gatedOutput{};
+    EpilogueProblem gated(TensorView::fromNative<float>(Layout::contiguous(Shape{2, 2}),
+                                                        std::span<const float>(input)),
+                          MutableTensorView::fromNative<float>(Layout::contiguous(Shape{2, 2}),
+                                                               std::span<float>(gatedOutput)),
+                          ScalarType::Float32);
+    gated.gateResidual = TensorView::fromNative<float>(Layout::contiguous(Shape{2, 2}),
+                                                       std::span<const float>(gate));
+    gated.outputScale = 2.0;
+    referenceEpilogue(gated);
+    require(gatedOutput == std::array<float, 4>{-1.5f, 6.0f, -7.0f, -1.75f},
+            "Reference gate-residual epilogue mismatch.");
 }
 
 void testReferenceReduction() {
