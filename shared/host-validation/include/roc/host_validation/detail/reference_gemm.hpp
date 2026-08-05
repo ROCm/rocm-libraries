@@ -12,7 +12,7 @@
 #include <cstdint>
 #include <limits>
 #include <optional>
-#include <roc/host_validation/tensor.hpp>
+#include <roc/host_validation/detail/reference_common.hpp>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -21,19 +21,6 @@
 #include <vector>
 
 namespace roc::host_validation {
-enum class Activation {
-    None,
-    Relu,
-    Gelu,
-    Silu,
-    Clamp,
-};
-
-enum class MatrixAxis {
-    Row,
-    Column,
-};
-
 enum class MathMode {
     Default,
     XFloat32,
@@ -151,11 +138,6 @@ class OutputSelection {
     std::vector<size_t> m_indices;
 };
 
-struct VectorBinding {
-    TensorView values;
-    MatrixAxis axis = MatrixAxis::Row;
-};
-
 struct BlockScaleBinding {
     TensorView values;
     size_t blockSize;
@@ -233,59 +215,11 @@ struct GemmRunOptions {
 
 namespace detail {
 template <typename T>
-struct IsComplex : std::false_type {};
-
-template <typename T>
-struct IsComplex<std::complex<T>> : std::true_type {};
-
-template <typename T>
 T conjugateIfNeeded(const T& value, bool conjugate) {
     if constexpr (IsComplex<T>::value)
         return conjugate ? std::conj(value) : value;
     else
         return value;
-}
-
-template <typename Accumulator>
-Accumulator applyActivation(Activation activation, Accumulator value, Accumulator parameter0,
-                            Accumulator parameter1) {
-    if constexpr (IsComplex<Accumulator>::value) {
-        if (activation != Activation::None)
-            throw std::invalid_argument("Complex reference GEMM does not support activation.");
-        return value;
-    } else {
-        switch (activation) {
-            case Activation::None:
-                return value;
-            case Activation::Relu:
-                return std::max(Accumulator(0), value);
-            case Activation::Gelu: {
-                constexpr float coefficient0 = 0.7978845608028654f;
-                constexpr float coefficient1 = 0.044715f;
-                const float x = static_cast<float>(value);
-                return static_cast<Accumulator>(
-                    0.5f * x *
-                    (1.0f + std::tanh(coefficient0 * x * (1.0f + coefficient1 * x * x))));
-            }
-            case Activation::Silu: {
-                const float x = static_cast<float>(value);
-                const float beta = static_cast<float>(parameter0);
-                return static_cast<Accumulator>(x / (1.0f + std::exp(-beta * x)));
-            }
-            case Activation::Clamp:
-                return std::max(parameter0, std::min(value, parameter1));
-        }
-    }
-
-    throw std::invalid_argument("Unsupported reference GEMM activation.");
-}
-
-inline bool isComplexScalarType(ScalarType type) {
-    return scalarTypeInfo(type).category == ScalarCategory::Complex;
-}
-
-inline bool isScaleScalarType(ScalarType type) {
-    return scalarTypeInfo(type).category == ScalarCategory::Scale;
 }
 
 inline bool isRuntimeGemmAccumulator(ScalarType type) {
@@ -299,102 +233,6 @@ inline bool isRuntimeGemmAccumulator(ScalarType type) {
             return false;
     }
 }
-
-template <typename Accumulator>
-using RuntimeLoadFunction = Accumulator (*)(std::span<const std::byte>, ptrdiff_t);
-
-template <typename Accumulator>
-using RuntimeStoreFunction = void (*)(std::span<std::byte>, ptrdiff_t, Accumulator);
-
-template <typename Accumulator, typename Tag>
-Accumulator runtimeLoadScalar(std::span<const std::byte> storage, ptrdiff_t logicalOffset) {
-    return decodeScalarKnown<Tag::type, Accumulator>(storage, logicalOffset);
-}
-
-template <typename Accumulator, typename Tag>
-void runtimeStoreScalar(std::span<std::byte> storage, ptrdiff_t logicalOffset, Accumulator value) {
-    encodeScalarKnown<Tag::type>(storage, logicalOffset, value);
-}
-
-template <typename Accumulator>
-RuntimeLoadFunction<Accumulator> runtimeLoadFunction(ScalarType type) {
-    return visitScalarType(type,
-                           []<typename Tag>() { return &runtimeLoadScalar<Accumulator, Tag>; });
-}
-
-template <typename Accumulator>
-RuntimeStoreFunction<Accumulator> runtimeStoreFunction(ScalarType type) {
-    return visitScalarType(type,
-                           []<typename Tag>() { return &runtimeStoreScalar<Accumulator, Tag>; });
-}
-
-template <typename Accumulator>
-class RuntimeMatrixReader {
-   public:
-    explicit RuntimeMatrixReader(TensorView view)
-        : m_storage(view.storage()),
-          m_offset(view.layout().offset()),
-          m_rowStride(view.layout().strides()[0]),
-          m_columnStride(view.layout().strides()[1]),
-          m_load(runtimeLoadFunction<Accumulator>(view.type())) {}
-
-    Accumulator operator()(size_t row, size_t column) const {
-        return m_load(m_storage, m_offset + static_cast<ptrdiff_t>(row) * m_rowStride +
-                                     static_cast<ptrdiff_t>(column) * m_columnStride);
-    }
-
-   private:
-    std::span<const std::byte> m_storage;
-    ptrdiff_t m_offset;
-    ptrdiff_t m_rowStride;
-    ptrdiff_t m_columnStride;
-    RuntimeLoadFunction<Accumulator> m_load;
-};
-
-template <typename Accumulator>
-class RuntimeMatrixWriter {
-   public:
-    explicit RuntimeMatrixWriter(MutableTensorView view)
-        : m_storage(view.storage()),
-          m_offset(view.layout().offset()),
-          m_rowStride(view.layout().strides()[0]),
-          m_columnStride(view.layout().strides()[1]),
-          m_store(runtimeStoreFunction<Accumulator>(view.type())) {}
-
-    void store(size_t row, size_t column, Accumulator value) const {
-        m_store(m_storage,
-                m_offset + static_cast<ptrdiff_t>(row) * m_rowStride +
-                    static_cast<ptrdiff_t>(column) * m_columnStride,
-                value);
-    }
-
-   private:
-    std::span<std::byte> m_storage;
-    ptrdiff_t m_offset;
-    ptrdiff_t m_rowStride;
-    ptrdiff_t m_columnStride;
-    RuntimeStoreFunction<Accumulator> m_store;
-};
-
-template <typename Accumulator>
-class RuntimeVectorReader {
-   public:
-    explicit RuntimeVectorReader(TensorView view)
-        : m_storage(view.storage()),
-          m_offset(view.layout().offset()),
-          m_stride(view.layout().strides()[0]),
-          m_load(runtimeLoadFunction<Accumulator>(view.type())) {}
-
-    Accumulator operator[](size_t index) const {
-        return m_load(m_storage, m_offset + static_cast<ptrdiff_t>(index) * m_stride);
-    }
-
-   private:
-    std::span<const std::byte> m_storage;
-    ptrdiff_t m_offset;
-    ptrdiff_t m_stride;
-    RuntimeLoadFunction<Accumulator> m_load;
-};
 
 template <typename Accumulator>
 class RuntimeQuantizer {
@@ -449,40 +287,11 @@ RuntimeMathFunction<Accumulator> runtimeMathFunction(MathMode mode) {
     throw std::invalid_argument("XFloat32 math mode requires a Float32 accumulator.");
 }
 
-template <typename Accumulator>
-Accumulator runtimeScalar(std::complex<double> value, const char* name) {
-    if constexpr (IsComplex<Accumulator>::value) {
-        return Accumulator(static_cast<typename Accumulator::value_type>(value.real()),
-                           static_cast<typename Accumulator::value_type>(value.imag()));
-    } else {
-        if (value.imag() != 0.0)
-            throw std::invalid_argument(
-                std::string("Reference GEMM real accumulator has complex ") + name + ".");
-        return static_cast<Accumulator>(value.real());
-    }
-}
-
-inline void requireRank(const Shape& shape, size_t rank, const char* name) {
-    if (shape.rank() != rank)
-        throw std::invalid_argument(std::string("Reference GEMM ") + name + " must have rank " +
-                                    std::to_string(rank) + ".");
-}
-
-inline void validateRuntimeVector(const TensorView& view, size_t expected, const char* name) {
-    requireRank(view.shape(), 1, name);
-    if (view.shape()[0] != expected)
-        throw std::invalid_argument(std::string("Reference GEMM ") + name + " length mismatch.");
-}
-
-inline size_t axisExtent(MatrixAxis axis, size_t rows, size_t columns) {
-    return axis == MatrixAxis::Row ? rows : columns;
-}
-
 inline void validateRuntimeGemm(const GemmProblem& problem) {
-    requireRank(problem.a.values.shape(), 2, "A");
-    requireRank(problem.b.values.shape(), 2, "B");
-    requireRank(problem.c.shape(), 2, "C");
-    requireRank(problem.d.shape(), 2, "D");
+    requireRank(problem.a.values.shape(), 2, "Reference GEMM", "A");
+    requireRank(problem.b.values.shape(), 2, "Reference GEMM", "B");
+    requireRank(problem.c.shape(), 2, "Reference GEMM", "C");
+    requireRank(problem.d.shape(), 2, "Reference GEMM", "D");
 
     const size_t m = problem.a.values.shape()[0];
     const size_t k = problem.a.values.shape()[1];
@@ -535,7 +344,7 @@ inline void validateRuntimeGemm(const GemmProblem& problem) {
         throw std::invalid_argument("Reference GEMM real accumulator has complex alpha or beta.");
 
     auto validateEpilogueVector = [&](const TensorView& values, size_t expected, const char* name) {
-        validateRuntimeVector(values, expected, name);
+        validateRuntimeVector(values, expected, "Reference GEMM", name);
         if (!complexAccumulator && isComplexScalarType(values.type()))
             throw std::invalid_argument(
                 std::string("Reference GEMM real accumulator cannot consume complex ") + name +
@@ -563,7 +372,7 @@ inline void validateRuntimeGemm(const GemmProblem& problem) {
         if (binding.blockSize == 0)
             throw std::invalid_argument(std::string("Reference GEMM ") + name +
                                         " block size must be nonzero.");
-        requireRank(binding.values.shape(), 2, name);
+        requireRank(binding.values.shape(), 2, "Reference GEMM", name);
         const size_t blockCount = k / binding.blockSize + (k % binding.blockSize != 0 ? 1 : 0);
         if (binding.values.shape()[0] != freeExtent || binding.values.shape()[1] < blockCount)
             throw std::invalid_argument(std::string("Reference GEMM ") + name +

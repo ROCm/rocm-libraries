@@ -21,6 +21,13 @@ using namespace nb::literals;
 using namespace roc::host_validation;
 
 namespace {
+struct PythonEpilogueResult {
+    Tensor output;
+    std::optional<Tensor> rawOutput;
+    std::optional<Tensor> auxiliaryOutput;
+    std::optional<Tensor> amax;
+};
+
 std::vector<size_t> dimensions(const Shape& shape) {
     return {shape.dimensions().begin(), shape.dimensions().end()};
 }
@@ -124,6 +131,42 @@ Tensor referenceGemmOwned(const Tensor& a, const Tensor& b, const Tensor& c, Sca
     referenceGemm(problem);
     return d;
 }
+
+PythonEpilogueResult referenceEpilogueOwned(
+    const Tensor& input, ScalarType outputType, ScalarType computeType, std::optional<Tensor> bias,
+    MatrixAxis biasAxis, Activation activation, ActivationApplication activationApplication,
+    std::optional<Tensor> auxiliaryInput, std::optional<ScalarType> auxiliaryOutputType,
+    std::complex<double> outputScale, std::complex<double> auxiliaryScale,
+    double activationParameter0, double activationParameter1, bool includeRawOutput,
+    bool includeAmax) {
+    Tensor output(outputType, input.shape());
+    std::optional<Tensor> rawOutput;
+    std::optional<Tensor> auxiliaryOutput;
+    std::optional<Tensor> amax;
+    if (includeRawOutput) rawOutput.emplace(computeType, input.shape());
+    if (auxiliaryOutputType) auxiliaryOutput.emplace(*auxiliaryOutputType, input.shape());
+    if (includeAmax) amax.emplace(computeType, Shape{1});
+
+    EpilogueProblem problem(input.view(), output.mutableView(), computeType);
+    if (rawOutput) problem.rawOutput = rawOutput->mutableView();
+    if (auxiliaryOutput) problem.auxiliaryOutput = auxiliaryOutput->mutableView();
+    if (auxiliaryInput) problem.auxiliaryInput = auxiliaryInput->view();
+    if (amax) problem.amax = amax->mutableView();
+    if (bias) problem.bias = VectorBinding{bias->view(), biasAxis};
+    problem.outputScale = outputScale;
+    problem.auxiliaryScale = auxiliaryScale;
+    problem.activation = activation;
+    problem.activationApplication = activationApplication;
+    problem.activationParameter0 = activationParameter0;
+    problem.activationParameter1 = activationParameter1;
+    referenceEpilogue(problem);
+    return {
+        .output = std::move(output),
+        .rawOutput = std::move(rawOutput),
+        .auxiliaryOutput = std::move(auxiliaryOutput),
+        .amax = std::move(amax),
+    };
+}
 }  // namespace
 
 NB_MODULE(_roc_host_validation, module) {
@@ -167,6 +210,10 @@ NB_MODULE(_roc_host_validation, module) {
         .value("Default", MathMode::Default)
         .value("XFloat32", MathMode::XFloat32);
 
+    nb::enum_<MatrixAxis>(module, "MatrixAxis")
+        .value("Row", MatrixAxis::Row)
+        .value("Column", MatrixAxis::Column);
+
     nb::enum_<Activation>(module, "Activation")
         .value("None_", Activation::None)
         .value("Relu", Activation::Relu)
@@ -183,6 +230,10 @@ NB_MODULE(_roc_host_validation, module) {
         .value("Sine", DataPattern::Sine)
         .value("Cosine", DataPattern::Cosine)
         .value("Constant", DataPattern::Constant);
+
+    nb::enum_<ActivationApplication>(module, "ActivationApplication")
+        .value("Forward", ActivationApplication::Forward)
+        .value("Gradient", ActivationApplication::Gradient);
 
     nb::enum_<OutputSelectionKind>(module, "OutputSelectionKind")
         .value("All", OutputSelectionKind::All)
@@ -285,6 +336,30 @@ NB_MODULE(_roc_host_validation, module) {
         .def_ro("reported_mismatches", &ComparisonResult::reportedMismatches)
         .def_prop_ro("passed", &ComparisonResult::passed);
 
+    nb::class_<PythonEpilogueResult>(module, "EpilogueResult")
+        .def_prop_ro(
+            "output",
+            [](const PythonEpilogueResult& result) -> const Tensor& { return result.output; },
+            nb::rv_policy::reference_internal)
+        .def_prop_ro(
+            "raw_output",
+            [](const PythonEpilogueResult& result) -> const std::optional<Tensor>& {
+                return result.rawOutput;
+            },
+            nb::rv_policy::reference_internal)
+        .def_prop_ro(
+            "auxiliary_output",
+            [](const PythonEpilogueResult& result) -> const std::optional<Tensor>& {
+                return result.auxiliaryOutput;
+            },
+            nb::rv_policy::reference_internal)
+        .def_prop_ro(
+            "amax",
+            [](const PythonEpilogueResult& result) -> const std::optional<Tensor>& {
+                return result.amax;
+            },
+            nb::rv_policy::reference_internal);
+
     module.def("scalar_type_info", [](ScalarType type) { return scalarTypeInfo(type); });
     module.def(
         "fill",
@@ -308,4 +383,14 @@ NB_MODULE(_roc_host_validation, module) {
                "compute_type_b"_a = std::optional<ScalarType>{}, "math_mode"_a = MathMode::Default,
                "activation"_a = Activation::None, "activation_parameter0"_a = 0.0,
                "activation_parameter1"_a = 0.0, "output_selection"_a = OutputSelection::all());
+    module.def("reference_epilogue", &referenceEpilogueOwned, "input"_a, "output_type"_a,
+               "compute_type"_a, "bias"_a = std::optional<Tensor>{},
+               "bias_axis"_a = MatrixAxis::Row, "activation"_a = Activation::None,
+               "activation_application"_a = ActivationApplication::Forward,
+               "auxiliary_input"_a = std::optional<Tensor>{},
+               "auxiliary_output_type"_a = std::optional<ScalarType>{},
+               "output_scale"_a = std::complex<double>(1.0, 0.0),
+               "auxiliary_scale"_a = std::complex<double>(1.0, 0.0),
+               "activation_parameter0"_a = 0.0, "activation_parameter1"_a = 0.0,
+               "include_raw_output"_a = false, "include_amax"_a = false);
 }
