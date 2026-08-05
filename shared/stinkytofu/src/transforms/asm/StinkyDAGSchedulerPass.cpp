@@ -195,10 +195,10 @@ static std::vector<char> reachableFrom(unsigned start,
 //     s_barrier_signal -3
 //   label_skipCBPreSignal_<hash>:
 //
-// The sequence clobbers SCC, so an SCC value whose live range spans that barrier is
-// destroyed. The pass can sometimes rematerialize the producer
-// (findLiveRestorableSccCmpUpstream), but it gives up as soon as a second SCC reader
-// sits in between -- exactly the shape an unrolled loop body produces.
+// The sequence clobbers SCC. InsertClusterBarrierPass will climb its anchor out of a
+// live SCC range rather than split one, but only as far as the nearest boundary it may
+// not cross (a cluster wait, a segment edge, a prior handshake's barrier). Keeping the
+// chain off the barrier here is what leaves it that room.
 //
 // So no def..last-reader range may contain a guarding barrier. Note what that does and
 // does not forbid: the chain may still schedule wholly before or wholly after the
