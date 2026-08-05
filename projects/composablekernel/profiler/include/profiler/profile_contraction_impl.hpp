@@ -189,7 +189,9 @@ int profile_contraction_impl(ck::index_t do_verification,
             }
             else
             {
-                static_assert(false, "Unsupported CDElementOp in contraction profiler.");
+                static_assert(is_same<CDElementOp, Bilinear>::value ||
+                                  is_same<CDElementOp, Scale>::value,
+                              "Unsupported CDElementOp in contraction profiler.");
             }
         });
     }
@@ -248,7 +250,9 @@ int profile_contraction_impl(ck::index_t do_verification,
         }
         else
         {
-            static_assert(false, "Unsupported CDElementOp in contraction profiler.");
+            static_assert(is_same<CDElementOp, Bilinear>::value ||
+                                  is_same<CDElementOp, Scale>::value,
+                              "Unsupported CDElementOp in contraction profiler.");
         }
 
         auto invoker_ptr = op_ptr->MakeInvokerPointer();
