@@ -97,6 +97,8 @@ void validateCommon(const GemmProblem& problem) {
             "BLAS backend requires A, B, C, D, and accumulator types to match.");
     if (problem.a.computeType || problem.b.computeType)
         throw std::invalid_argument("BLAS backend does not support compute-input quantization.");
+    if (problem.a.preQuantizationScale || problem.b.preQuantizationScale)
+        throw std::invalid_argument("BLAS backend does not support pre-quantization scaling.");
     if (problem.a.blockScale || problem.b.blockScale)
         throw std::invalid_argument("BLAS backend does not support block scaling.");
     if (problem.mathMode != MathMode::Default)

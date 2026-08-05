@@ -48,9 +48,15 @@ int main() {
     require(run.backendUsed == GemmBackend::Tiled, "Tiled backend run information mismatch.");
     require(d == std::array<float, 4>{120, 0, 132, 0}, "Tiled backend result mismatch.");
 
+    d.fill(-99);
     problem.outputSelection = OutputSelection::explicitIndices({0});
-    require(!queryGemmSupport(problem, GemmBackend::Tiled, &backend).supported,
-            "Tiled backend accepted partial output selection.");
+    referenceGemm(problem, {
+                               .backend = GemmBackend::Tiled,
+                               .requireRequestedBackend = true,
+                               .backendImplementation = &backend,
+                           });
+    require(d == std::array<float, 4>{120, -99, -99, -99},
+            "Tiled backend partial output selection mismatch.");
 
     const std::array<float, 16> ones{
         1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
